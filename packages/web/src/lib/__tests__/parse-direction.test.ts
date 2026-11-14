@@ -163,10 +163,56 @@ describe('parseDirection', () => {
     const msg1 = { origin: 'callback' as const, content: '通知co-creator\n@co-creator' };
     expect(parseDirection(msg1, getOwnerMocks)).toBeNull();
 
-    // @co-creator + @codex → only codex in targets
+    // A line that opens with the owner's handle routes no cat in the API grammar, so no badge either.
     const msg2 = { origin: 'callback' as const, content: '@co-creator @codex' };
-    const result = parseDirection(msg2, getOwnerMocks);
-    expect(result?.targets).toEqual(['codex']);
+    expect(parseDirection(msg2, getOwnerMocks)).toBeNull();
+
+    // The owner on one line, a cat on the next: only the cat routes.
+    const msg3 = { origin: 'callback' as const, content: '@co-creator\n@codex' };
+    expect(parseDirection(msg3, getOwnerMocks)?.targets).toEqual(['codex']);
+  });
+});
+
+/**
+ * F314-17: the badge must show what the API routes (analyzeA2AMentions), not every handle in the text.
+ * The first four inputs are the F314 report's reproduction with an opus/codex roster.
+ */
+describe('direction badge follows the API A2A grammar', () => {
+  const callback = (content: string, catId?: string) => ({ origin: 'callback' as const, content, catId });
+
+  it('a mention inside prose is not a routing target', () => {
+    expect(parseDirection(callback('ask @opus in prose'), getMocks)).toBeNull();
+  });
+
+  it('a mention after prose starts on the line does not route', () => {
+    expect(parseDirection(callback('@opus 请继续，如果需要再找 @codex'), getMocks)?.targets).toEqual(['opus']);
+    expect(parseContentDirectionTargets('@opus 请继续，如果需要再找 @codex', getMocks)).toEqual(['opus']);
+  });
+
+  it('a mention inside a fenced code block does not route', () => {
+    expect(parseDirection(callback('```\n@opus\n```'), getMocks)).toBeNull();
+  });
+
+  it('a CJK character right after the handle still routes', () => {
+    expect(parseDirection(callback('@opus请继续'), getMocks)?.targets).toEqual(['opus']);
+  });
+
+  it('the sender never routes to itself', () => {
+    expect(parseDirection(callback('@opus\n@codex', 'opus'), getMocks)?.targets).toEqual(['codex']);
+  });
+
+  it('keeps at most two targets, like the API', () => {
+    expect(parseDirection(callback('@opus @codex @gpt52'), getMocks)?.targets).toEqual(['opus', 'codex']);
+  });
+
+  it('matches a disabled member and then drops it, so the next handle on the line still routes (F182 KD-10)', () => {
+    const withDisabled = () => ({ ...getMocks(), unavailableToCat: { antigravity: 'antigravity' } });
+    expect(parseDirection(callback('@antigravity @codex', 'kimi'), withDisabled)?.targets).toEqual(['codex']);
+    expect(parseDirection(callback('@antigravity @opus @codex', 'kimi'), withDisabled)?.targets).toEqual([
+      'opus',
+      'codex',
+    ]);
+    expect(parseDirection(callback('@antigravity', 'kimi'), withDisabled)).toBeNull();
   });
 });
 

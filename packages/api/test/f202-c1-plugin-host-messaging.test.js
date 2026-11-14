@@ -86,6 +86,8 @@ function draft(threadId, overrides = {}) {
     ...(overrides.wake === undefined ? {} : { wake: overrides.wake }),
     ...(overrides.sender === undefined ? {} : { sender: overrides.sender }),
     ...(overrides.contentBlocks === undefined ? {} : { contentBlocks: overrides.contentBlocks }),
+    ...(overrides.replyTo === undefined ? {} : { replyTo: overrides.replyTo }),
+    ...(overrides.response === undefined ? {} : { response: overrides.response }),
     ...(overrides.identity === undefined ? {} : { identity: overrides.identity }),
     ...(overrides.url === undefined ? {} : { url: overrides.url }),
     ...(overrides.meta === undefined ? {} : { meta: overrides.meta }),
@@ -110,6 +112,7 @@ async function fixture(options = {}) {
     registry: new InvocationRegistry(),
     messageStore: messages,
     threadStore: threads,
+    addressedPlugins: options.addressedPlugins,
   });
   const queue = new InvocationQueue(undefined, { resolveTargets: (...args) => router.resolveSendTargets(...args) });
   const delivery = createPluginConversationDelivery({ messageStore: messages, queue, router });
@@ -134,6 +137,7 @@ async function fixture(options = {}) {
     socketManager: {
       broadcastToRoom(...args) {
         broadcasts.push(args);
+        options.afterPublish?.();
       },
     },
     isKnownCatId: (catId) => ['codex', 'opus', 'disabled-cat'].includes(catId),
@@ -144,6 +148,7 @@ async function fixture(options = {}) {
     ownerUserId: OWNER,
     manifest: options.manifest ?? manifest(),
     assertCurrent: options.assertCurrent,
+    assertAdmissionCurrent: options.assertAdmissionCurrent,
     threadStore: threads,
     messageStore: messages,
     bindingStore: bindings,
@@ -157,6 +162,347 @@ async function fixture(options = {}) {
 }
 
 describe('F202 C1 — plugin Host messaging.send', () => {
+  test('live plugin replies retain the persisted reply link and attachments without replaying the broadcast', async () => {
+    const { host, messages, threads, broadcasts, wakes } = await fixture();
+    const thread = await threads.create(OWNER, 'Reply delivery');
+    const source = await messages.append({
+      threadId: thread.id,
+      userId: OWNER,
+      from: { kind: 'user', userId: OWNER },
+      content: '@fixture hello',
+      mentions: [],
+      timestamp: Date.now(),
+    });
+    const contentBlocks = [{ type: 'image', url: '/uploads/fixture.png', alt: 'reply attachment' }];
+    const input = draft(thread.id, { replyTo: source.id, contentBlocks });
+    const receipt = await host.send(input);
+    const stored = await messages.getById(receipt.messageId);
+    assert.equal(stored.replyTo, source.id);
+    assert.equal(broadcasts.length, 1);
+    const [room, event, envelope] = broadcasts[0];
+    assert.equal(room, `thread:${thread.id}`);
+    assert.equal(event, 'connector_message');
+    assert.equal(envelope.message.id, stored.id);
+    assert.deepEqual(envelope.message.from, stored.from);
+    assert.equal(envelope.message.replyTo, stored.replyTo, 'live publication must preserve reply ownership');
+    assert.deepEqual(envelope.message.contentBlocks, stored.contentBlocks);
+    assert.deepEqual(await host.send(input), receipt);
+    assert.equal(broadcasts.length, 1);
+    assert.equal(wakes.length, 0);
+  });
+
+  test('explicit plugin response lifecycle survives partial content, completion and late acknowledgement', async () => {
+    const { host, messages, threads, broadcasts } = await fixture();
+    const thread = await threads.create(OWNER, 'Target response');
+    const source = await messages.append({
+      threadId: thread.id,
+      userId: OWNER,
+      from: { kind: 'user', userId: OWNER },
+      content: 'hello',
+      mentions: [],
+      timestamp: 1,
+    });
+    const deliveryId = 'ad_fixture-response';
+    const carrier = await messages.append({
+      threadId: thread.id,
+      userId: 'system',
+      from: { kind: 'system', service: 'plugin_delivery' },
+      content: 'delivery',
+      mentions: [],
+      timestamp: 2,
+      idempotencyKey: `plugin-addressed:${deliveryId}`,
+      extra: {
+        pluginAddressedReceipt: { targetId: INSTANCE_ID, inputMessageId: source.id, accepted: true, phase: 'accepted' },
+        targetResponse: {
+          v: 1,
+          revision: 1,
+          inputMessageId: source.id,
+          targetId: INSTANCE_ID,
+          execution: { kind: 'plugin', id: deliveryId },
+          status: 'waiting',
+          startedAt: 2,
+          updatedAt: 2,
+        },
+      },
+    });
+    await messages.advanceLifecycleInputDispatch(source.id, {
+      orderKey: source.id,
+      targetId: INSTANCE_ID,
+      statusMessageId: carrier.id,
+      phase: 'dispatched',
+      dispatchedAt: 2,
+    });
+    const partial = await host.send(
+      draft(thread.id, {
+        idempotencyKey: 'partial',
+        replyTo: source.id,
+        response: { deliveryId, status: 'processing' },
+        text: 'partial',
+      }),
+    );
+    assert.equal(messages.getById(carrier.id).extra.targetResponse.status, 'processing');
+    assert.equal(messages.getById(carrier.id).extra.targetResponse.resultMessageId, partial.messageId);
+    const complete = draft(thread.id, {
+      idempotencyKey: 'complete',
+      replyTo: source.id,
+      response: { deliveryId, status: 'completed' },
+      text: 'finished',
+    });
+    const result = await host.send(complete);
+    assert.equal(messages.getById(carrier.id).extra.targetResponse.status, 'completed');
+    assert.equal(messages.getById(carrier.id).extra.targetResponse.resultMessageId, result.messageId);
+    assert.equal(
+      broadcasts.filter(([, event]) => event === 'connector_message').at(-1)[2].message.extra.targetResponseResult
+        .status,
+      'completed',
+    );
+    assert.deepEqual(await host.send(complete), result);
+    const beforeRetry = broadcasts.length;
+    assert.deepEqual(
+      await host.send(
+        draft(thread.id, {
+          idempotencyKey: 'partial',
+          replyTo: source.id,
+          response: { deliveryId, status: 'processing' },
+          text: 'partial',
+        }),
+      ),
+      partial,
+    );
+    assert.equal(broadcasts.length, beforeRetry, 'accepted replay must not republish content or reopen the outcome');
+    // A broad metadata update cannot overwrite the dedicated response CAS field.
+    messages.updateExtra(carrier.id, { targetResponse: { ...carrier.extra.targetResponse, status: 'waiting' } });
+    assert.equal(messages.getById(carrier.id).extra.targetResponse.status, 'completed');
+    await assert.rejects(
+      host.send(
+        draft(thread.id, {
+          idempotencyKey: 'wrong',
+          replyTo: source.id,
+          response: { deliveryId: 'another', status: 'completed' },
+        }),
+      ),
+    );
+    await assert.rejects(
+      host.send(
+        draft(thread.id, {
+          idempotencyKey: 'reopen',
+          replyTo: source.id,
+          response: { deliveryId, status: 'processing' },
+        }),
+      ),
+    );
+  });
+
+  test('upgrades only an exact legacy delivery and rejects ambiguous source targets', async () => {
+    const { host, messages, threads } = await fixture();
+    const thread = await threads.create(OWNER, 'Legacy response');
+    const source = await messages.append({
+      threadId: thread.id,
+      userId: OWNER,
+      from: { kind: 'user', userId: OWNER },
+      content: 'legacy input',
+      mentions: [],
+      timestamp: 1,
+    });
+    const deliveryId = 'ad_legacy-response';
+    const carrier = await messages.append({
+      threadId: thread.id,
+      userId: 'system',
+      from: { kind: 'system', service: 'plugin_delivery' },
+      content: 'receipt',
+      mentions: [],
+      timestamp: 2,
+      idempotencyKey: `plugin-addressed:${deliveryId}`,
+      extra: {
+        pluginAddressedReceipt: { targetId: INSTANCE_ID, inputMessageId: source.id, accepted: true, phase: 'accepted' },
+      },
+    });
+    await messages.advanceLifecycleInputDispatch(source.id, {
+      orderKey: source.id,
+      targetId: INSTANCE_ID,
+      statusMessageId: carrier.id,
+      phase: 'dispatched',
+      dispatchedAt: 2,
+    });
+    await assert.rejects(
+      host.send(
+        draft(thread.id, {
+          idempotencyKey: 'wrong-legacy',
+          replyTo: source.id,
+          response: { deliveryId: 'unowned', status: 'completed' },
+        }),
+      ),
+    );
+    assert.equal(messages.getById(carrier.id).extra.targetResponse, undefined);
+    const result = await host.send(
+      draft(thread.id, {
+        idempotencyKey: 'legacy-complete',
+        replyTo: source.id,
+        response: { deliveryId, status: 'completed' },
+      }),
+    );
+    const migrated = messages.getById(carrier.id).extra.targetResponse;
+    assert.equal(migrated.status, 'completed');
+    assert.equal(migrated.execution.id, deliveryId);
+    assert.equal(migrated.resultMessageId, result.messageId);
+    const sourceState = messages.getById(source.id);
+    // Ambiguous target references may not grant a second delivery authority.
+    sourceState.lifecycle.dispatchRefs.push({ ...sourceState.lifecycle.dispatchRefs[0], statusMessageId: 'other' });
+    await assert.rejects(
+      host.send(
+        draft(thread.id, {
+          idempotencyKey: 'ambiguous',
+          replyTo: source.id,
+          response: { deliveryId, status: 'completed' },
+        }),
+      ),
+    );
+  });
+
+  function addressedPlugins() {
+    const targets = [
+      { id: INSTANCE_ID, alias: 'dot', kind: 'plugin' },
+      { id: 'instance-other-plugin', alias: 'helper', kind: 'plugin' },
+    ];
+    return {
+      list: async () => targets,
+      isInstanceId: async (id) => targets.some((target) => target.id === id),
+    };
+  }
+
+  for (const [text, expected] of [
+    ['@dot here — can someone review this?', ['codex']],
+    ['@dot @opus please inspect', ['opus']],
+    ['@dot @helper please inspect', ['instance-other-plugin']],
+    ['Can someone review this?', ['codex']],
+  ]) {
+    test(`plugin auto wake excludes its own instance while preserving ordinary routing: ${text}`, async () => {
+      const { host, messages, threads, queue } = await fixture({ addressedPlugins: addressedPlugins() });
+      const thread = await threads.create(OWNER, 'Plugin question');
+      threads.updateParticipantActivity(thread.id, 'codex', true);
+      const receipt = await host.send(draft(thread.id, { text, wake: 'auto' }));
+      const source = await messages.getById(receipt.messageId);
+      assert.deepEqual(source.from, { kind: 'plugin', instanceId: INSTANCE_ID });
+      assert.equal(source.content, text, 'routing must not rewrite published speech');
+      assert.deepEqual(
+        queue.list(thread.id, OWNER).flatMap((entry) => entry.targets),
+        expected,
+      );
+    });
+  }
+
+  test('external IM ingress may explicitly address another plugin through the ordinary queue', async () => {
+    const { host, threads, bindings, queue, messages } = await fixture({
+      manifest: manifest({ externalKind: 'message-subscription' }),
+      addressedPlugins: addressedPlugins(),
+    });
+    const thread = await threads.create(OWNER, 'IM explicit plugin');
+    await bindings.bind(PLUGIN_ID, 'group-addressed', thread.id, OWNER);
+    const receipt = await host.send(
+      draft(thread.id, {
+        text: '@helper please inspect',
+        origin: {
+          kind: 'external',
+          connectorId: 'fixture-im',
+          sourceAddress: { connectorId: 'fixture-im', chatId: 'group-addressed', messageId: 'external-addressed' },
+        },
+        wake: 'auto',
+        sender: { id: 'person-9', name: 'Ada' },
+      }),
+    );
+    assert.deepEqual(
+      queue.list(thread.id, OWNER).flatMap((entry) => entry.targets),
+      ['instance-other-plugin'],
+    );
+    assert.equal((await messages.getById(receipt.messageId)).extra.pluginMessage.presentation.connector, 'fixture-im');
+  });
+
+  test('a module can narrow its send admission after handle preparation without granting a new identity', async () => {
+    const { host, messages, threads, messaging, wakes } = await fixture();
+    const thread = await threads.create(OWNER, 'Bounded operator request');
+    let active = true;
+    const ensure = messaging.ensureThreadHandle.bind(messaging);
+    messaging.ensureThreadHandle = async (...args) => {
+      const value = await ensure(...args);
+      active = false;
+      return value;
+    };
+    assert.equal(typeof host.sendWithAdmission, 'function');
+    await assert.rejects(
+      host.sendWithAdmission(draft(thread.id, { wake: { catId: 'opus', exact: true } }), () => {
+        if (!active) throw new Error('operator_window_closed');
+      }),
+      /operator_window_closed/,
+    );
+    assert.equal((await messages.getByThread(thread.id)).length, 0);
+    assert.equal(wakes.length, 0);
+  });
+
+  test('a module admission expiring during publication preserves the original message but never wakes', async () => {
+    let active = true;
+    const { host, messages, threads, wakes } = await fixture({
+      afterPublish() {
+        active = false;
+      },
+    });
+    const thread = await threads.create(OWNER, 'Published bounded request');
+    assert.equal(typeof host.sendWithAdmission, 'function');
+    await assert.rejects(
+      host.sendWithAdmission(draft(thread.id, { wake: { catId: 'opus', exact: true } }), () => {
+        if (!active) throw new Error('operator_window_closed');
+      }),
+      /operator_window_closed/,
+    );
+    assert.equal((await messages.getByThread(thread.id)).length, 1);
+    assert.equal(wakes.length, 0);
+  });
+
+  test('a false module predicate is a rejection, never a successful authorization check', async () => {
+    const { host, messages, threads, wakes } = await fixture();
+    const thread = await threads.create(OWNER, 'Invalid module predicate');
+    assert.equal(typeof host.sendWithAdmission, 'function');
+    await assert.rejects(
+      host.sendWithAdmission(draft(thread.id), () => false),
+      /admission/,
+    );
+    await assert.rejects(
+      host.sendWithAdmission(draft(thread.id), async () => {}),
+      /synchronously/,
+    );
+    assert.equal((await messages.getByThread(thread.id)).length, 0);
+    assert.equal(wakes.length, 0);
+  });
+
+  test('module admission preserves the original Host execution lease and activation checks', async () => {
+    const { host, messages, threads, wakes } = await fixture({
+      assertAdmissionCurrent: async () => {
+        throw new Error('member_lease_expired');
+      },
+    });
+    const thread = await threads.create(OWNER, 'Expired original lease');
+    await assert.rejects(
+      host.sendWithAdmission(draft(thread.id), () => {}),
+      /member_lease_expired/,
+    );
+    assert.equal((await messages.getByThread(thread.id)).length, 0);
+    assert.equal(wakes.length, 0);
+  });
+
+  test('settled receipts remain read-only when the additional admission has expired', async () => {
+    const { host, messages, threads, wakes } = await fixture();
+    const thread = await threads.create(OWNER, 'Settled bounded request');
+    const input = draft(thread.id, { wake: { catId: 'opus', exact: true } });
+    const receipt = await host.sendWithAdmission(input, () => {});
+    assert.deepEqual(
+      await host.sendWithAdmission(input, () => {
+        throw new Error('operator_window_closed');
+      }),
+      receipt,
+    );
+    assert.equal(messages.messages.length, 1, 'Queue admission hides its original input from timeline reads');
+    assert.equal(wakes.length, 1);
+  });
+
   test('exact wake holds the chosen recipient and durable lookup survives temporary ledger expiry', async () => {
     const { host, messages, threads, wakes, queue, agents, router } = await fixture();
     const thread = await threads.create(OWNER, 'Exact game request');
@@ -626,6 +972,7 @@ test('stopped plugin client cannot send or read through retained messaging metho
   const thread = await h.threads.create(OWNER, 'ordinary thread');
   active = false;
   await assert.rejects(() => h.host.send(draft(thread.id)), /activation stopped/);
+  await assert.rejects(() => h.host.sendWithAdmission(draft(thread.id), () => {}), /activation stopped/);
   await assert.rejects(() => h.host.get('missing'), /activation stopped/);
   assert.equal(h.messages.getByThread(thread.id, 100, OWNER).length, 0);
 });

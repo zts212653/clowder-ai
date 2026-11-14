@@ -1,5 +1,6 @@
 import {
   CLIENT_REQUEST_DIAGNOSTIC_HEADER,
+  CLIENT_SENT_AT_DIAGNOSTIC_HEADER,
   CONNECTION_DIAGNOSTIC_UUID,
   connectionDiagnosticBatchSchema,
   connectionDiagnosticRoute,
@@ -8,6 +9,21 @@ import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { resolveSessionUserId } from '../utils/request-identity.js';
 import { authorizeOwnerBrowserAction } from './owner-memory-browser-auth.js';
 import { snapshotSessionListRead } from './session-list-read-diagnostics.js';
+
+const CLIENT_CLOCK_SKEW_MS = 5_000;
+const MAX_CLIENT_SEND_AGE_MS = 86_400_000;
+const LATE_ARRIVAL_MS = 1_000;
+
+/**
+ * Caller-clock milliseconds between the page handing the request to fetch and this server's
+ * first hook: queueing that Fastify's own timings never see. Absent or implausible stays undefined.
+ */
+function sinceClientSend(raw: unknown, now: number): number | undefined {
+  if (typeof raw !== 'string' || !/^\d{1,16}$/.test(raw)) return undefined;
+  const elapsed = now - Number(raw);
+  if (elapsed < -CLIENT_CLOCK_SKEW_MS || elapsed > MAX_CLIENT_SEND_AGE_MS) return undefined;
+  return Math.max(0, Math.round(elapsed));
+}
 
 /** Request-local timing only. These caller-supplied coordinates never become admission or idempotency identities. */
 export function registerConnectionDiagnostics(app: FastifyInstance, slowIntervalMs = 5_000): void {
@@ -49,6 +65,7 @@ export function registerConnectionDiagnostics(app: FastifyInstance, slowInterval
       return;
     }
     const route = connectionDiagnosticRoute(request.url);
+    const sinceClientSendMs = sinceClientSend(request.headers[CLIENT_SENT_AT_DIAGNOSTIC_HEADER], Date.now());
     const started = performance.now();
     const cpu = process.cpuUsage();
     const followThrough = (route === 'messages' && request.method === 'POST') || route === 'navigation_source';
@@ -68,6 +85,7 @@ export function registerConnectionDiagnostics(app: FastifyInstance, slowInterval
             route,
             method: request.method,
             durationMs: Math.round(performance.now() - started),
+            ...(sinceClientSendMs === undefined ? {} : { sinceClientSendMs }),
             statusCode,
             timerLagMs,
             processCpuUserMs: Math.round(processCpu.user / 1_000),
@@ -101,7 +119,8 @@ export function registerConnectionDiagnostics(app: FastifyInstance, slowInterval
         ticks > 0 ||
         state === 'aborted' ||
         (statusCode ?? 0) >= 400 ||
-        performance.now() - started >= 1_000
+        performance.now() - started >= 1_000 ||
+        (sinceClientSendMs ?? 0) >= LATE_ARRIVAL_MS
       )
         emit(state, statusCode);
     };

@@ -95,14 +95,16 @@ after(async () => {
 async function open({
   shell = 'v2',
   width = 720,
+  viewportWidth = Math.max(width + 40, 480),
   base = 'light',
   variant = 'default',
   color = COCOA,
   scale = 1,
   consumers = false,
+  hostLayout = false,
 } = {}) {
   const context = await browser.newContext({
-    viewport: { width: Math.max(width + 40, 480), height: 1300 },
+    viewport: { width: viewportWidth, height: 1300 },
     deviceScaleFactor: scale,
     locale: 'zh-CN',
     timezoneId: 'Asia/Shanghai',
@@ -115,7 +117,10 @@ async function open({
   page.on('console', (msg) => {
     if (msg.type() === 'error') errors.push(`console: ${msg.text()}`);
   });
-  await context.addInitScript((value) => localStorage.setItem('cat-cafe:shell-presentation', value), shell);
+  await context.addInitScript((value) => {
+    localStorage.setItem('cat-cafe:shell-presentation', value);
+    localStorage.setItem('cat-cafe:shell-language', 'zh');
+  }, shell);
   await page.route('**/*', async (handler) => {
     const request = handler.request();
     const url = new URL(request.url());
@@ -141,6 +146,20 @@ async function open({
       return handler.fulfill({ contentType: 'application/json', body: JSON.stringify({ cats }) });
     if (url.pathname === '/api/config/cat-order')
       return handler.fulfill({ contentType: 'application/json', body: JSON.stringify({ catOrder: [] }) });
+    if (
+      hostLayout &&
+      request.method() === 'GET' &&
+      url.pathname === '/api/threads/thread-human/messages/c-2/generation-messages'
+    )
+      return handler.fulfill({
+        contentType: 'application/json',
+        body: JSON.stringify({ messageIds: [], hasAppendedInputs: true, complete: true }),
+      });
+    if (request.method() === 'GET' && url.pathname === '/api/config/process-talk')
+      return handler.fulfill({
+        contentType: 'application/json',
+        body: JSON.stringify({ ownerUserId: 'owner-1', mode: 'whole' }),
+      });
     // ThemeApplier asks the server for a saved theme when this browser has none; the answer is "nothing saved".
     if (url.pathname === '/api/config/env-summary')
       return handler.fulfill({ contentType: 'application/json', body: JSON.stringify({ variables: [] }) });
@@ -154,7 +173,9 @@ async function open({
     });
   });
   const configAnswered = page.waitForResponse((response) => new URL(response.url()).pathname === '/api/config');
-  await page.goto(`${origin}/?w=${width}${consumers ? '&consumers=1' : ''}`, { waitUntil: 'networkidle' });
+  await page.goto(`${origin}/?w=${width}${consumers ? '&consumers=1' : ''}${hostLayout ? '&host-layout=1' : ''}`, {
+    waitUntil: 'networkidle',
+  });
   await configAnswered;
   if (consumers) {
     await page.waitForSelector('[data-consumer="owner-card"]');
@@ -368,8 +389,8 @@ test('v2: one right-aligned 12px block, no avatar and no name, the blank on the 
   assert.ok(code.bubble.rect.w <= code.content.w * 0.8 + 0.6, 'and the block stays within the cap');
 
   await shot(page, 'v2-light-cocoa-720.png');
-  assert.deepEqual(errors, []);
   assert.deepEqual(unexpected, []);
+  assert.deepEqual(errors, []);
   await context.close();
 });
 
@@ -400,19 +421,90 @@ test('the time sits once under the last message of a run, and not under the othe
   await context.close();
 });
 
-test('the copy-id control stays reachable: hidden at rest, revealed on hover, in the blank left of the block', async () => {
-  const { page, context } = await open({ shell: 'v2', width: 720 });
-  const button = page.locator('[data-message-id="h-short"] button[aria-label^="复制消息 ID"]');
-  assert.equal(await button.count(), 1);
-  const rest = await button.evaluate((el) => getComputedStyle(el).opacity);
-  assert.equal(rest, '0');
-  await page.locator('[data-message-id="h-short"] [data-testid="message-bubble"]').hover();
-  await page.waitForTimeout(400);
-  assert.equal(await button.evaluate((el) => getComputedStyle(el).opacity), '1');
-  const box = await button.boundingBox();
-  const bubble = await page.locator('[data-message-id="h-short"] [data-testid="message-bubble"]').boundingBox();
-  assert.ok(box.x + box.width <= bubble.x + 0.5, 'left of the block, not over it');
+test('the copy-id action stays reachable through the hover toolbar and its More menu, left of the block', async () => {
+  const { page, context, errors, unexpected } = await open({ shell: 'v2', width: 720, viewportWidth: 1000 });
+  await context.grantPermissions(['clipboard-read', 'clipboard-write'], { origin });
+  const plane = page.locator('[data-message-actions-owner="h-short"]');
+  const toolbar = plane.getByRole('toolbar');
+  await toolbar.waitFor({ state: 'attached' });
+  assert.equal(await plane.evaluate((el) => getComputedStyle(el).opacity), '0');
+  const bubble = page.locator('[data-message-id="h-short"] [data-testid="message-bubble"]');
+  const before = await bubble.boundingBox();
+  await bubble.hover();
+  await page.waitForFunction(() => {
+    const node = document.querySelector('[data-message-actions-owner="h-short"]');
+    return node && getComputedStyle(node).opacity === '1' && getComputedStyle(node).visibility === 'visible';
+  });
+  const box = await toolbar.boundingBox();
+  await shot(page, 'v2-human-action-toolbar.png');
+  await toolbar.getByRole('button', { name: '更多消息操作', exact: true }).click();
+  const copy = plane.getByRole('menuitem', { name: '复制消息 ID', exact: true });
+  await copy.waitFor();
+  await shot(page, 'v2-human-copy-id-menu.png');
+  await copy.click();
+  assert.equal(await page.evaluate(() => navigator.clipboard.readText()), 'h-short');
+  assert.deepEqual(await bubble.boundingBox(), before, 'actions do not move the message');
+  assert.deepEqual(unexpected, []);
+  assert.deepEqual(errors, []);
+  assert.ok(
+    box.x + box.width <= before.x + 0.5,
+    `left of the block, not over it: ${JSON.stringify({ toolbar: box, bubble: before })}`,
+  );
   await context.close();
+});
+
+test('human actions stay beside the bubble when the host receipt or reply label is wider', async () => {
+  for (const width of [720, 400]) {
+    const { page, context, errors, unexpected } = await open({
+      width,
+      viewportWidth: width === 720 ? 1000 : 480,
+      hostLayout: true,
+    });
+    try {
+      const receipt = page.locator('[data-message-id="h-short"] [data-testid="message-dispatch-avatars"]');
+      await receipt.getByText(/收到，并进了已结束的这一轮/).waitFor();
+      for (const id of ['h-short', 'h-run-a']) {
+        const row = page.locator(`[data-message-id="${id}"]`);
+        const bubble = row.locator('[data-testid="message-bubble"]');
+        const auxiliary = id === 'h-short' ? receipt : row.locator('[data-testid="human-message-header"]');
+        const before = await bubble.boundingBox();
+        const auxiliaryBox = await auxiliary.boundingBox();
+        assert.ok(auxiliaryBox.width > before.width + 40, `${id}: the real auxiliary content is wider than the text`);
+        await bubble.hover();
+        const plane = page.locator(`[data-message-actions-owner="${id}"]`);
+        await page.waitForFunction((messageId) => {
+          const node = document.querySelector(`[data-message-actions-owner="${messageId}"]`);
+          return node && getComputedStyle(node).opacity === '1' && getComputedStyle(node).visibility === 'visible';
+        }, id);
+        const toolbar = await plane
+          .locator('[role="toolbar"], [data-testid="message-actions-compact-trigger"]')
+          .boundingBox();
+        const gap = before.x - toolbar.x - toolbar.width;
+        measurements.push({
+          case: 'host-action-anchor',
+          width,
+          id,
+          bubble: before,
+          auxiliary: auxiliaryBox,
+          toolbar,
+          gap,
+        });
+        await shot(page, `v2-host-action-${id}-${width}.png`);
+        assert.ok(gap >= 0 && gap <= 12, `${id}/${width}: actions must stay beside the bubble; gap=${gap}`);
+        const overlapsAuxiliary =
+          toolbar.x < auxiliaryBox.x + auxiliaryBox.width &&
+          toolbar.x + toolbar.width > auxiliaryBox.x &&
+          toolbar.y < auxiliaryBox.y + auxiliaryBox.height &&
+          toolbar.y + toolbar.height > auxiliaryBox.y;
+        assert.equal(overlapsAuxiliary, false, `${id}/${width}: actions do not cover the receipt or reply label`);
+        assert.deepEqual(await bubble.boundingBox(), before, 'hovering does not move the bubble');
+      }
+      assert.deepEqual(unexpected, []);
+      assert.deepEqual(errors, []);
+    } finally {
+      await context.close();
+    }
+  }
 });
 
 test('the colour follows the config through the F056 roles, and no colour set means cocoa, never a neutral', async () => {
@@ -545,7 +637,7 @@ function measureConsumersInPage() {
     for (const layer of document.querySelectorAll('[data-layer]')) {
       const ring = layer.firstElementChild;
       out.focusRing[layer.getAttribute('data-layer')] = contrast(
-        rgba(getComputedStyle(ring).outlineColor),
+        rgba(getComputedStyle(ring, '::after').borderTopColor),
         rgba(getComputedStyle(layer).backgroundColor),
       );
     }
@@ -680,7 +772,7 @@ test('a translucent human colour keeps its existing reply tint: none is painted 
   measurements.push(...rows);
 });
 
-test('the lineage focus ring (outline in the human primary) reaches 3:1 on the page layers it can sit on, in both themes', async () => {
+test('the message jump ring reaches 3:1 on every page layer and existing surface in both themes', async () => {
   const rows = [];
   for (const base of ['light', 'dark']) {
     const { page, context } = await open({ shell: 'v2', base, color: null, consumers: true });
@@ -688,19 +780,9 @@ test('the lineage focus ring (outline in the human primary) reaches 3:1 on the p
     const m = await page.evaluate(measureConsumersInPage());
     await context.close();
     rows.push({ case: 'focus-ring', base, config: 'cocoa', ...m.focusRing });
-    // The ring sits on the message list (the page layers) and, for a receipt or absorption dock, inside the bubble of its
-    // message. Nothing that takes lineage focus is drawn on the sunken layer, so that one is recorded and not asserted. On a
-    // bubble in the light theme the ring is below 3:1 -- 2.29-2.35 now, 2.40-2.46 before this change (the classic apricot),
-    // so it is a shortfall this work did not create and made 0.1 worse; it is recorded, not hidden, and not asserted.
-    const pageLayers = ['--cafe-surface-canvas', '--cafe-surface', '--cafe-surface-elevated'];
-    const bubbles = ['--color-opus-surface', '--color-codex-surface', '--color-cocreator-surface'];
-    for (const layer of pageLayers) {
-      assert.ok(m.focusRing[layer] >= 3, `${base}: focus ring on ${layer} is ${m.focusRing[layer]}:1 (needs 3:1)`);
-    }
-    if (base === 'dark') {
-      for (const layer of bubbles) {
-        assert.ok(m.focusRing[layer] >= 3, `${base}: focus ring on ${layer} is ${m.focusRing[layer]}:1 (needs 3:1)`);
-      }
+    // The current display-time lightness covers all four page layers and the existing cat/human surfaces.
+    for (const [layer, ratio] of Object.entries(m.focusRing)) {
+      assert.ok(ratio >= 3, `${base}: focus ring on ${layer} is ${ratio}:1 (needs 3:1)`);
     }
   }
   measurements.push(...rows);
@@ -783,7 +865,7 @@ for (const [base, variant] of [
 }
 
 test('the Studio chat bar (400px): nothing leaves the column and the cap holds', async () => {
-  const { page, context, errors } = await open({ shell: 'v2', width: 400 });
+  const { page, context, errors, unexpected } = await open({ shell: 'v2', width: 400 });
   for (const id of ['h-short', 'h-run-a', 'h-run-b', 'h-code', 'h-whisper']) {
     const m = await measure(page, id);
     assert.ok(m.message.r <= m.column.r + 0.5, `${id}: stays inside the column`);
@@ -793,6 +875,7 @@ test('the Studio chat bar (400px): nothing leaves the column and the cap holds',
     assert.ok(Math.abs(m.bubble.rect.r - m.content.right) < 0.6, `${id}: right-aligned`);
   }
   await shot(page, 'v2-light-cocoa-400.png');
+  assert.deepEqual(unexpected, []);
   assert.deepEqual(errors, []);
   await context.close();
 });

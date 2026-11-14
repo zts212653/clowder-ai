@@ -1,7 +1,9 @@
+/** Classic list return contracts; V2 delivered-works behavior is covered by thread-works-panel-v2. */
 import type { GlobalArtifactDTO } from '@cat-cafe/shared';
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { SHELL_PRESENTATION_STORAGE_KEY, writeShellPresentation } from '@/components/shell/shell-presentation';
 import { useChatStore } from '@/stores/chatStore';
 import { ArtifactsPanel } from '../ArtifactsPanel';
 import type { ArtifactListView } from '../artifacts/artifact-list-state';
@@ -42,6 +44,7 @@ const view: ArtifactListView = {
 const container = document.createElement('div');
 const root = createRoot(container);
 beforeEach(() => {
+  writeShellPresentation('classic');
   rows.image = undefined;
   opened.resolve.mockImplementation(async (source: unknown) => ({
     status: 'opened',
@@ -88,6 +91,7 @@ it.each([
 });
 afterEach(() => {
   act(() => root.render(null));
+  localStorage.removeItem(SHELL_PRESENTATION_STORAGE_KEY);
   delete (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT;
 });
 

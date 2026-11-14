@@ -31,6 +31,7 @@ import { registerPluginManagerRoutes } from '../dist/routes/plugin-manager-route
 import { directMcpContract } from './helpers/direct-mcp-contract.js';
 
 const roots = [];
+const runtimes = new Set();
 const execFileAsync = promisify(execFile);
 
 test('file-based MCP projection can read an uninitialized registry without creating it', async () => {
@@ -85,8 +86,19 @@ for (const state of ['absent', 'corrupt']) {
 }
 
 afterEach(async () => {
+  for (const runtime of [...runtimes].reverse()) await shutdownRuntime(runtime);
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
 });
+
+function trackRuntime(runtime) {
+  runtimes.add(runtime);
+  return runtime;
+}
+
+async function shutdownRuntime(runtime, reason) {
+  await runtime.shutdown(reason);
+  runtimes.delete(runtime);
+}
 
 async function tempRoot(label) {
   const root = await mkdtemp(join(tmpdir(), label));
@@ -115,28 +127,30 @@ function createRuntime(
   return {
     limbRegistry,
     taskRunner,
-    runtime: createDormantPluginRuntimeComposition({
-      projectRoot,
-      messageStore: new MessageStore(),
-      contract: { manifestContractRange: '0.1.0', validateManifest },
-      limbRegistry,
-      taskRunner,
-      mcpConfigIO: mcpConfigIO ?? {
-        readConfig: () => readCapabilitiesConfig(projectRoot),
-        writeAndRegenCli: async (config) => {
-          await writeCapabilitiesConfig(projectRoot, config);
-          const path = join(projectRoot, '.test-cli', 'gemini.json');
-          await mkdir(join(path, '..'), { recursive: true });
-          const mcpServers = Object.fromEntries(
-            config.capabilities
-              .filter((capability) => capability.type === 'mcp' && capability.enabled && capability.mcpServer)
-              .map((capability) => [capability.id.replaceAll(':', '__'), capability.mcpServer]),
-          );
-          await writeFile(path, `${JSON.stringify({ mcpServers })}\n`, 'utf8');
+    runtime: trackRuntime(
+      createDormantPluginRuntimeComposition({
+        projectRoot,
+        messageStore: new MessageStore(),
+        contract: { manifestContractRange: '0.1.0', validateManifest },
+        limbRegistry,
+        taskRunner,
+        mcpConfigIO: mcpConfigIO ?? {
+          readConfig: () => readCapabilitiesConfig(projectRoot),
+          writeAndRegenCli: async (config) => {
+            await writeCapabilitiesConfig(projectRoot, config);
+            const path = join(projectRoot, '.test-cli', 'gemini.json');
+            await mkdir(join(path, '..'), { recursive: true });
+            const mcpServers = Object.fromEntries(
+              config.capabilities
+                .filter((capability) => capability.type === 'mcp' && capability.enabled && capability.mcpServer)
+                .map((capability) => [capability.id.replaceAll(':', '__'), capability.mcpServer]),
+            );
+            await writeFile(path, `${JSON.stringify({ mcpServers })}\n`, 'utf8');
+          },
+          withLock: (fn) => withCapabilityLock(projectRoot, fn),
         },
-        withLock: (fn) => withCapabilityLock(projectRoot, fn),
-      },
-    }),
+      }),
+    ),
   };
 }
 
@@ -185,12 +199,16 @@ async function writeFixturePackage({
   return packageRoot;
 }
 
-async function installAndEnable(runtime, packageRoot) {
-  const composition = createPluginManagerRuntimeComposition({
+function createManager(runtime) {
+  return createPluginManagerRuntimeComposition({
     runtime,
     catalogProvider: { snapshot: async () => ({ entries: [], status: 'fresh', checkedAt: 1 }) },
     catalogManifests: [],
   });
+}
+
+async function installAndEnable(runtime, packageRoot) {
+  const composition = createManager(runtime);
   const installed = await composition.manager.install({ source: { kind: 'local-directory', path: packageRoot } });
   const beforeEnable = (await composition.manager.get(installed.pluginId)).plugin;
   await composition.manager.setEnabled(installed.pluginId, {
@@ -347,7 +365,7 @@ for (const phase of ['package replacement', 'restart recovery']) {
           },
           io,
         );
-        await runtime.shutdown();
+        await shutdownRuntime(runtime);
         assert.ok((await readCapabilitiesConfig(consumer)).capabilities.some((entry) => entry.id === id));
         const restarted = createRuntime(projectRoot, { mcpConfigIO: io }).runtime;
         activeRuntime = restarted;
@@ -390,7 +408,7 @@ for (const phase of ['package replacement', 'restart recovery']) {
         await lease.dispose();
       }
     } finally {
-      await activeRuntime.shutdown();
+      await shutdownRuntime(activeRuntime);
     }
   });
 }
@@ -695,8 +713,8 @@ test('a package without runtime uses the standard static skill and MCP lifecycle
       'skills/guide/SKILL.md': '# Static fixture guide\n',
     },
   });
-  const { runtime } = createRuntime(projectRoot);
-  const { composition, installed } = await installAndEnable(runtime, packageRoot);
+  let { runtime } = createRuntime(projectRoot);
+  let { composition, installed } = await installAndEnable(runtime, packageRoot);
 
   const installedCapabilities = (await readCapabilitiesConfig(projectRoot))?.capabilities.filter(
     (candidate) => candidate.type === 'mcp' && candidate.pluginId === installed.pluginId,
@@ -717,13 +735,15 @@ test('a package without runtime uses the standard static skill and MCP lifecycle
     true,
   );
 
-  await runtime.shutdown('host_shutdown');
+  await shutdownRuntime(runtime, 'host_shutdown');
   assert.equal(
     (await readCapabilitiesConfig(projectRoot))?.capabilities.filter(
       (candidate) => candidate.type === 'mcp' && candidate.pluginId === installed.pluginId,
     ).length,
     2,
   );
+  ({ runtime } = createRuntime(projectRoot));
+  composition = createManager(runtime);
   await runtime.supervisor.start(installed.pluginInstanceId);
 
   await disable(composition, installed.pluginId);
@@ -812,7 +832,7 @@ test('an installed package schedules its declared action and unregisters on disa
       policy: { overlap: 'skip', timeoutMs: 5_000 },
     },
     capabilities: ['schedule.register'],
-    actions: `{ 'fixture.tick': async (params) => { globalThis['${marker}'] = params; return { ok: true }; } }`,
+    actions: `{ 'fixture.tick': async (params) => { globalThis['${marker}'] = params; return { ok: true }; }, 'fixture.readLast': async () => { const value = globalThis['${marker}']; delete globalThis['${marker}']; return value; } }`,
   });
   const taskRunner = fakeTaskRunner();
   const { runtime } = createRuntime(projectRoot, { taskRunner });
@@ -826,8 +846,9 @@ test('an installed package schedules its declared action and unregisters on disa
     signal: AbortSignal.timeout(5_000),
     assignedCatId: null,
   });
-  assert.deepEqual(globalThis[marker], { source: 'schedule' });
-  delete globalThis[marker];
+  assert.deepEqual(await runtime.supervisor.invoke(installed.pluginInstanceId, 'fixture.readLast', {}), {
+    source: 'schedule',
+  });
 
   await disable(composition, installed.pluginId);
   assert.equal(taskRunner.tasks.size, 0);
@@ -1017,8 +1038,8 @@ test('Host shutdown removes live registrations but preserves declared MCP state'
   });
   const limbRegistry = new LimbRegistry();
   const taskRunner = fakeTaskRunner();
-  const { runtime } = createRuntime(projectRoot, { limbRegistry, taskRunner });
-  const { composition, installed } = await installAndEnable(runtime, packageRoot, () => ['schedule.register']);
+  let { runtime } = createRuntime(projectRoot, { limbRegistry, taskRunner });
+  let { composition, installed } = await installAndEnable(runtime, packageRoot, () => ['schedule.register']);
   const beforeShutdown = (await readCapabilitiesConfig(projectRoot))?.capabilities.find(
     (candidate) => candidate.type === 'mcp' && candidate.pluginId === installed.pluginId,
   );
@@ -1026,7 +1047,7 @@ test('Host shutdown removes live registrations but preserves declared MCP state'
   assert.ok(entrypoint, 'the declared MCP must exist before shutdown');
   assert.equal((await runtime.supervisor.listPluginTools(installed.pluginId)).length, 1);
 
-  await runtime.shutdown('host_shutdown');
+  await shutdownRuntime(runtime, 'host_shutdown');
 
   assert.equal(limbRegistry.getNode('shutdown-node'), undefined);
   assert.equal(taskRunner.tasks.size, 0);
@@ -1037,6 +1058,8 @@ test('Host shutdown removes live registrations but preserves declared MCP state'
   assert.equal(afterShutdown?.mcpServer?.args?.[0], entrypoint);
   assert.equal((await stat(entrypoint)).isFile(), true);
 
+  ({ runtime } = createRuntime(projectRoot, { limbRegistry, taskRunner }));
+  composition = createManager(runtime);
   await runtime.supervisor.start(installed.pluginInstanceId);
   assert.ok(limbRegistry.getNode('shutdown-node'));
   assert.equal(taskRunner.tasks.size, 1);

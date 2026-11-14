@@ -20,10 +20,12 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { PassThrough } from 'node:stream';
 import { mock, test } from 'node:test';
+import { fileURLToPath } from 'node:url';
 import { assertClaudeSettingsPreserved, claudeUserSettings } from './helpers/claude-settings-contract.js';
 import { assertCurrentCallback, directMcpContract } from './helpers/direct-mcp-contract.js';
 import { ensureFakeCliOnPath } from './helpers/fake-cli-path.js';
 import { emitProcessExit, waitForMockProcessReady } from './helpers/mock-process-lifecycle.js';
+import { assertNativeAuthHookContract } from './helpers/native-auth-hook-contract.js';
 import { emitEvents as emitClaudeEvents } from './helpers/provider-archive-test-helpers.js';
 
 const { ClaudeAgentService, pickGitBashPathFromWhere, resolveDefaultClaudeMcpServerPath } = await import(
@@ -115,7 +117,11 @@ function writeCapabilitiesConfig(projectRoot, capabilities) {
 
 test('F203 AC-C5: -p carrier passes --system-prompt-file with compiled L0 path', async () => {
   const proc = createMockProcess();
-  const spawnFn = createMockSpawnFn(proc);
+  let finalSettings;
+  const spawnFn = mock.fn((_command, args) => {
+    finalSettings = readFileSync(args[args.indexOf('--settings') + 1], 'utf8');
+    return proc;
+  });
   const l0CompilerFn = buildFakeL0Compiler('L0 for opus-47');
   const service = createClaudeAgentService({
     catId: 'opus-47',
@@ -134,6 +140,7 @@ test('F203 AC-C5: -p carrier passes --system-prompt-file with compiled L0 path',
   assert.ok(l0Path && l0Path.length > 0, 'compiler called with an outPath');
 
   const args = spawnFn.mock.calls[0].arguments[1];
+  assertNativeAuthHookContract(finalSettings);
   assert.ok(args.includes('-p'), 'still uses print carrier');
   const flagIdx = args.indexOf('--system-prompt-file');
   assert.ok(flagIdx >= 0, `--system-prompt-file present in argv: ${args.join(' ')}`);
@@ -677,42 +684,60 @@ test('#883: subscription deny-list survives accountEnv merge (proxy token in acc
   );
 });
 
-test('F062: api_key profile injects ANTHROPIC_API_KEY and ANTHROPIC_BASE_URL', async () => {
-  const prevApiKey = process.env.ANTHROPIC_API_KEY;
-  const prevBaseUrl = process.env.ANTHROPIC_BASE_URL;
-  process.env.ANTHROPIC_API_KEY = 'sk-inherited';
-  process.env.ANTHROPIC_BASE_URL = 'https://inherited.example.com';
+for (const explicitAccountEnv of [false, true])
+  test(`api_key profile owns destination/auth while explicit account env stays authoritative (${explicitAccountEnv})`, async () => {
+    const prevApiKey = process.env.ANTHROPIC_API_KEY;
+    const prevBaseUrl = process.env.ANTHROPIC_BASE_URL;
+    const prevAuthToken = process.env.ANTHROPIC_AUTH_TOKEN;
+    process.env.ANTHROPIC_API_KEY = 'sk-inherited';
+    process.env.ANTHROPIC_BASE_URL = 'https://inherited.example.com';
+    process.env.ANTHROPIC_AUTH_TOKEN = 'fixture-ambient';
 
-  const proc = createMockProcess();
-  const spawnFn = createMockSpawnFn(proc);
-  const service = createClaudeAgentService({ spawnFn });
+    const proc = createMockProcess();
+    const spawnFn = createMockSpawnFn(proc);
+    const service = createClaudeAgentService({ spawnFn });
 
-  try {
-    const promise = collect(
-      service.invoke('hello', {
-        callbackEnv: {
-          CAT_CAFE_API_URL: 'http://localhost:3004',
-          CAT_CAFE_INVOCATION_ID: 'inv-2',
-          CAT_CAFE_CALLBACK_TOKEN: 'token-2',
-          CAT_CAFE_ANTHROPIC_PROFILE_MODE: 'api_key',
-          CAT_CAFE_ANTHROPIC_API_KEY: 'sk-sponsor',
-          CAT_CAFE_ANTHROPIC_BASE_URL: 'https://sponsor.example.com',
-        },
-      }),
-    );
-    await emitClaudeEvents(proc, [{ type: 'result', subtype: 'success' }]);
-    await promise;
+    try {
+      const promise = collect(
+        service.invoke('hello', {
+          ...(explicitAccountEnv
+            ? {
+                accountEnv: {
+                  ANTHROPIC_BASE_URL: 'https://selected-gateway.invalid',
+                  ANTHROPIC_AUTH_TOKEN: 'fixture-selected',
+                },
+              }
+            : {}),
+          callbackEnv: {
+            CAT_CAFE_API_URL: 'http://localhost:3004',
+            CAT_CAFE_INVOCATION_ID: 'inv-2',
+            CAT_CAFE_CALLBACK_TOKEN: 'token-2',
+            CAT_CAFE_ANTHROPIC_PROFILE_MODE: 'api_key',
+            CAT_CAFE_ANTHROPIC_API_KEY: 'sk-sponsor',
+            ANTHROPIC_BASE_URL: 'https://upstream-template.invalid/v1',
+            CAT_CAFE_ANTHROPIC_BASE_URL: 'https://sponsor.example.com',
+          },
+        }),
+      );
+      await emitClaudeEvents(proc, [{ type: 'result', subtype: 'success' }]);
+      await promise;
 
-    const spawnOpts = spawnFn.mock.calls[0].arguments[2];
-    assert.equal(spawnOpts.env.ANTHROPIC_API_KEY, 'sk-sponsor');
-    assert.equal(spawnOpts.env.ANTHROPIC_BASE_URL, 'https://sponsor.example.com');
-  } finally {
-    if (prevApiKey === undefined) delete process.env.ANTHROPIC_API_KEY;
-    else process.env.ANTHROPIC_API_KEY = prevApiKey;
-    if (prevBaseUrl === undefined) delete process.env.ANTHROPIC_BASE_URL;
-    else process.env.ANTHROPIC_BASE_URL = prevBaseUrl;
-  }
-});
+      const spawnOpts = spawnFn.mock.calls[0].arguments[2];
+      assert.equal(spawnOpts.env.ANTHROPIC_API_KEY, 'sk-sponsor');
+      assert.equal(
+        spawnOpts.env.ANTHROPIC_BASE_URL,
+        explicitAccountEnv ? 'https://selected-gateway.invalid' : 'https://sponsor.example.com',
+      );
+      assert.equal(spawnOpts.env.ANTHROPIC_AUTH_TOKEN, explicitAccountEnv ? 'fixture-selected' : undefined);
+    } finally {
+      if (prevApiKey === undefined) delete process.env.ANTHROPIC_API_KEY;
+      else process.env.ANTHROPIC_API_KEY = prevApiKey;
+      if (prevBaseUrl === undefined) delete process.env.ANTHROPIC_BASE_URL;
+      else process.env.ANTHROPIC_BASE_URL = prevBaseUrl;
+      if (prevAuthToken === undefined) delete process.env.ANTHROPIC_AUTH_TOKEN;
+      else process.env.ANTHROPIC_AUTH_TOKEN = prevAuthToken;
+    }
+  });
 
 test('pickGitBashPathFromWhere accepts nonstandard bash.exe locations returned by where', () => {
   const whereOutput = [
@@ -1212,7 +1237,7 @@ test('#712: merges user .mcp.json servers as base layer — managed entries take
 
     assert.deepEqual(
       collab.args.map((path) => realpathSync(path)),
-      [realpathSync(join(mcpDistDir, 'collab.js'))],
+      [realpathSync(fileURLToPath(import.meta.resolve('@cat-cafe/mcp-server/dist/collab.js')))],
     );
     assert.equal(collab.command, process.execPath, 'managed entry should use the runtime Node executable');
     assert.equal(
@@ -1484,7 +1509,10 @@ test('falls back to default MCP path when CAT_CAFE_MCP_SERVER_PATH is empty', as
     const { launchEnv, upstream: collab } = directMcpContract(parsed.mcpServers['cat-cafe-collab']);
 
     assert.equal(collab.command, process.execPath);
-    assert.equal(realpathSync(collab.args[0]), realpathSync(join(mcpDistDir, 'collab.js')));
+    assert.equal(
+      realpathSync(collab.args[0]),
+      realpathSync(fileURLToPath(import.meta.resolve('@cat-cafe/mcp-server/dist/collab.js'))),
+    );
     for (const env of [launchEnv, collab.env]) {
       assert.equal(env.CAT_CAFE_API_URL, 'http://localhost:3004');
       assert.equal(env.CAT_CAFE_INVOCATION_ID, 'inv-1');

@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { beforeEach, describe, it } from 'node:test';
 import { anchorApproval } from './approval-hub/helpers.js';
+import { publicTasteApprovalEvidence } from './helpers/taste-source-fixture.js';
 
 describe('approveTasteProposal checkpointed service', () => {
   let approveTasteProposal;
@@ -8,6 +9,7 @@ describe('approveTasteProposal checkpointed service', () => {
   let SessionMutex;
   let store;
   let lock;
+  let approvalEvidence;
 
   beforeEach(async () => {
     ({ approveTasteProposal } = await import('../dist/domains/taste/services/approveTasteProposal.js'));
@@ -17,8 +19,11 @@ describe('approveTasteProposal checkpointed service', () => {
     lock = new SessionMutex();
   });
 
-  const makeProposal = () =>
-    store.create({
+  const makeProposal = async () => {
+    const originRef = { kind: 'message', threadId: 'thread-1', messageId: 'taste-service-source' };
+    const proposal = store.create({
+      approvalOriginRef: originRef,
+      sourceMessageId: originRef.messageId,
       userId: 'user-1',
       catId: 'codex-sol',
       threadId: 'thread-1',
@@ -28,6 +33,19 @@ describe('approveTasteProposal checkpointed service', () => {
       dimension: 'authentic-expression',
       privacy: 'public',
     });
+    await anchorApproval(store, {
+      proposalId: proposal.id,
+      sourceFeatureId: 'F221',
+      ownerUserId: proposal.userId,
+      requesterCatId: proposal.catId,
+      threadId: proposal.threadId,
+      createdAt: proposal.createdAt,
+      originRef,
+    });
+    const anchored = store.get(proposal.id);
+    approvalEvidence = publicTasteApprovalEvidence(anchored);
+    return anchored;
+  };
 
   const writerResult = { slug: 'authentic-expression-real-123xyz', path: 'docs/taste/vignettes/real.md' };
   const deps = (writeVignette, overrides = {}) => ({
@@ -35,11 +53,12 @@ describe('approveTasteProposal checkpointed service', () => {
     lock,
     lockKey: () => '/repo/docs/taste/index.md',
     writeVignette,
+    ...approvalEvidence,
     ...overrides,
   });
 
   it('claims, checkpoints the durable writer output, and finalizes', async () => {
-    const proposal = makeProposal();
+    const proposal = await makeProposal();
     const result = await approveTasteProposal(
       proposal.id,
       'user-1',
@@ -53,7 +72,7 @@ describe('approveTasteProposal checkpointed service', () => {
   });
 
   it('rolls back to pending when the writer fails before a durable checkpoint', async () => {
-    const proposal = makeProposal();
+    const proposal = await makeProposal();
     const result = await approveTasteProposal(
       proposal.id,
       'user-1',
@@ -76,7 +95,7 @@ describe('approveTasteProposal checkpointed service', () => {
       }
     }
     store = new CheckpointFailingStore();
-    const proposal = makeProposal();
+    const proposal = await makeProposal();
     let writerCalls = 0;
     const writeVignette = async () => {
       writerCalls++;
@@ -102,7 +121,7 @@ describe('approveTasteProposal checkpointed service', () => {
       }
     }
     store = new FinalizeFailingStore();
-    const proposal = makeProposal();
+    const proposal = await makeProposal();
     let writerCalls = 0;
     const writeVignette = async () => {
       writerCalls++;
@@ -120,7 +139,7 @@ describe('approveTasteProposal checkpointed service', () => {
 
   it('exposes a persisted approving checkpoint to a fresh Hub view and resumes exactly once', async () => {
     const { F221ApprovalAdapter } = await import('../dist/domains/approval-hub/adapters/F221ApprovalAdapter.js');
-    const proposal = makeProposal();
+    const proposal = await makeProposal();
     // F246 Phase I: anchor publication so Hub can project the navigation.
     await anchorApproval(store, {
       proposalId: proposal.id,
@@ -129,6 +148,7 @@ describe('approveTasteProposal checkpointed service', () => {
       requesterCatId: proposal.catId,
       threadId: proposal.threadId,
       createdAt: proposal.createdAt,
+      originRef: proposal.approvalOriginRef,
     });
     store.claimForApproval(proposal.id, 'user-1');
     store.recordWriteCheckpoint(proposal.id, {
@@ -159,7 +179,7 @@ describe('approveTasteProposal checkpointed service', () => {
   });
 
   it('serializes concurrent approves and writes exactly once', async () => {
-    const proposal = makeProposal();
+    const proposal = await makeProposal();
     let writerCalls = 0;
     const writeVignette = async () => {
       writerCalls++;

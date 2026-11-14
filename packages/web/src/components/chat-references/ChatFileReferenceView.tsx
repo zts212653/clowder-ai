@@ -1,6 +1,6 @@
 'use client';
 import type { ChatFileReference } from '@cat-cafe/shared';
-import type { ReactNode, RefObject } from 'react';
+import type { MouseEvent, ReactNode, RefObject } from 'react';
 import { API_URL } from '@/utils/api-client';
 import { AuthenticatedMediaImage } from '../AuthenticatedMediaImage';
 import { useShellCopy } from '../shell/shell-copy';
@@ -17,8 +17,20 @@ function size(bytes: number) {
       ? `${(bytes / 1024).toFixed(1)} KB`
       : `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 }
+
+function isFilenameDrag(event: MouseEvent<HTMLButtonElement>): boolean {
+  const selection = window.getSelection();
+  return (
+    event.detail > 0 &&
+    selection !== null &&
+    !selection.isCollapsed &&
+    event.currentTarget.contains(selection.anchorNode) &&
+    event.currentTarget.contains(selection.focusNode)
+  );
+}
 export function ChatFileReferenceView({
   target,
+  sourceText,
   layout,
   anchor,
   onOpen,
@@ -26,6 +38,7 @@ export function ChatFileReferenceView({
   lightbox,
 }: {
   target: ChatFileReference;
+  sourceText?: string;
   layout: string;
   anchor: RefObject<HTMLSpanElement>;
   onOpen: () => void;
@@ -36,21 +49,24 @@ export function ChatFileReferenceView({
     language = useShellLanguage();
   const card = layout === 'card',
     image = target.mime.startsWith('image/');
-  const absolutePath = target.absolutePath.replace(/\/+$/, '') || '/';
-  const separator = absolutePath.lastIndexOf('/');
+  const posix = target.absolutePath.startsWith('/');
+  const absolutePath = target.absolutePath.replace(posix ? /\/+$/ : /[/\\]+$/, '') || '/';
+  const separator = posix
+    ? absolutePath.lastIndexOf('/')
+    : Math.max(absolutePath.lastIndexOf('/'), absolutePath.lastIndexOf('\\'));
   const filename = absolutePath.slice(separator + 1) || '/';
   const directory = absolutePath.slice(0, separator + 1);
   const raw = `${API_URL}/api/workspace/file/raw?${new URLSearchParams({ worktreeId: target.worktreeId, path: target.path })}`;
   const name = card ? (
-    <span data-chat-file-name className={styles.name}>
+    <span data-chat-file-name data-quote-source-text={sourceText} className={styles.name}>
       {filename}
       {target.line ? <span className={styles.line}>:{target.line}</span> : null}
     </span>
   ) : (
-    <>
+    <span data-chat-file-name data-quote-source-text={sourceText} className="contents">
       <span className={styles.filename}>{filename}</span>
       {target.line ? <span className={styles.line}>:{target.line}</span> : null}
-    </>
+    </span>
   );
   const picture = <AuthenticatedMediaImage url={raw} alt="" className={card ? styles.preview : styles.thumbnail} />;
   const type = target.entryType === 'directory' ? t.directory : image ? t.image : chatReferenceFileType(target);
@@ -64,9 +80,13 @@ export function ChatFileReferenceView({
     >
       <button
         type="button"
+        data-quote-source-text={sourceText}
         aria-label={`${target.absolutePath}${target.line ? `:${target.line}` : ''}`}
         className={`shell-focusable ${styles.open}`}
-        onClick={onOpen}
+        onClick={(event) => {
+          if (isFilenameDrag(event)) return;
+          onOpen();
+        }}
       >
         {card && image ? (
           <>
@@ -103,7 +123,11 @@ export function ChatFileReferenceView({
         )}
       </button>
       <ChatFileActions target={target} hideTrigger anchorRef={anchor} />
-      {error ? <span role="alert">{error}</span> : null}
+      {error ? (
+        <span role="alert" data-quote-exclude>
+          {error}
+        </span>
+      ) : null}
       {lightbox}
     </span>
   );

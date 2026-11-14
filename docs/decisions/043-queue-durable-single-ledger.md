@@ -174,6 +174,12 @@ Queue admission，不在客户端 admission 后追加第二次 Steer。Steer mod
 成员信息逐成员投影，前端不得硬编码或从本地活跃态猜测。不支持时 action 禁用，原因只在 hover/focus tooltip
 呈现，不增加常驻解释行；默认 `continue_current` 与显式 Steer 在无 active parent 时都诚实保留为 `next_work`，不自动中断，并由普通 FIFO drain 处理。
 
+已绑定仍有效父执行的 `continue_current` 属于该回合的输入，不等待更早的下一轮待办（包括内部
+`private_input`）结束；下一轮待办保持原 entry、targets 与 comparator 顺序。当前引导之间仍按同一
+comparator 排序，较早引导尚在准备、等待全文接管或 ACK 时不能被后来的引导越过；短 claim、Stop
+fence、原权限与 exact parent 校验保持有效。父执行结束或不再可用时，沿既有 durable fallback 回到
+下一轮顺序，不把引导改派到替代执行。来源：`[thread-id]#private-source-id`。
+
 普通公开输入在共同 send、原子 Message + Queue 准入前解析有效成员 mention，缺少有效可用目标时，预览、共同 send 与公开 Queue recovery 共用既有隐式会话规则（最近用户 mention、健康回话者、首选成员、默认成员，并保留 concierge / #ideate / thread policy）；未匹配的 @ 原样留在正文并忽略，不产生 warning 或特殊等待。目标与显式意图或 thread/global/product 默认策略一起持久快照；同 ID 重放复用首次接纳事实。A2A、whisper 和其他授权绑定输入保持 exact 收件人，不扩大私密可见性。历史/恢复 targetless 工作由正常 Queue recovery 处理。
 
 Steer modal 可多选，成员候选为 thread participants、路由目标与 fallback 的并集去重；fallback 直接读取 Queue admission 使用的同一 resolver 投影，Web 不另算。每位成员可以分别选择 guide 或 interrupt。
@@ -205,7 +211,13 @@ payload 写一次、起跑读一次，并由对应 store 重建；这些字段�
 
 目标一旦实际 dispatch，就从 pending `targets[]` 离开。`handled / failed / interrupted / canceled` 属于 response lifecycle，不回写 Queue。Queue 的「停止后续处理」删除尚待投递的整条 Queue Entry；只有未公开且没有实际 dispatch 的 source 才将其可见性投影置为 canceled。已公开的猫消息、原 dispatchRef、response membership 与未知送达记录保留，不因停止未来工作而撤回历史正文。
 
-原生 Append 仍在交接或等待原生内部 turn 完成时，短 claim 与 pending handoff 继续保护原 Queue。一次交接已返回但送达结果仍 unknown 时，禁止自动重发，不禁止主人停止其后续处理；迟到回执仍更新原 History，不重建已撤出的 Queue。批量 Clear 若还有在途条目，返回明确的未完成/部分完成及剩余队列，不把空操作报成全部清空。
+Append 在调用 provider 前，先把 exact source→response 交接及可核对的写入事实持久化到 History，再退役 Queue 中该 target；等待 ACK、读取或 native 内部 turn 完成均不保留 Queue 责任。交接记录不等于接纳成功。核对、失败原因与迟到回执属于原 History，核对动作不发送正文；unknown 永不自动重发。
+
+仅当 live provider 明确 `not_accepted`、原 AbortSignal 未取消且原 exact receiver 仍成立时，利用当前 admission 快照在一个 History＋Queue 事务中记失败并创建下一轮 pending target，保留原执行约束与 siblings；原失败用 `appendFailures` 留证，旧 ref 不再作为新尝试凭据。重启后才证实未送出，不从旧正文或过期权限恢复工作，而在 History 提供严格 owner 鉴权的“重新发送”。这是用一次显式点击换取 Stop 与权限代次可靠性的取舍。
+
+native 已写入／已读但未取得本输入完成证据时，History 保留完成责任；运行退出或完成失败记为 `incomplete`，显示“追加未完成”及可能重复执行提示。它不属于确定未接收，禁止自动续办。该规则明确修正此前保留原 Queue 到 native SUCCESS、失败自动恢复的实现约定（#6026），不扩大为普通失败回复的通用重试。关联 response completed 也不证明追加输入完成。
+
+批量 Clear 只处理交接前 Queue 工作；已交接执行走既有 Stop。原 History 与迟到回执保留，停止不重建 Queue。升级时先把旧 Queue 追加字段中可核实的事实迁到 exact History ref，再移除已交接 target，保留尚待投递 siblings；未完成追加索引只是 History 的派生查询入口，不签发重发权限。设计与反例见 修复计划 (internal)。
 
 用户若要重做失败事项，应发送新消息或执行明确的新动作，由生产者产生新的 source/attempt。旧 response、dispatchRef 与 wait carrier 只保留原 attempt 的终态证据，不能充当 retry token。
 
@@ -324,7 +336,7 @@ caller 成功 completed 后才确认，失败或取消后重试，同一 process
 
 - 持久 `QueueLedgerEntry` 一条 source 一行；`targets[]` 与作者意图只覆盖尚待投递成员，不保存执行／终态回执。
 - 入口不再维护平行的追加、等待或恢复编排；Message＋Queue 原子准入、exact claim、commit、restore 与必要拒收补偿仍保留。
-- 自动追加与新回合共享同目标顺序；准备中的 exact 父执行在 ready 后重新通知 drain。native ACK 只占对应 target，不阻塞无关成员。
+- 自动追加沿当前回合引导顺序，新回合沿未来工作顺序；两者复用同一 Queue comparator，不增加第二份队列。准备中的 exact 父执行在 ready 后重新通知 drain。native ACK 只占对应 target，不阻塞无关成员。
 - 读取回执与 provider presentation 不成为 Queue membership 或第二次 admission 条件。
 
 ## 迁移

@@ -17,7 +17,7 @@ test('Codex advertised effort belongs to each model; catalog default is not the 
 });
 test('Claude distinguishes unsupported and unknown effort capabilities', () => {
   const models = parseClaudeModels([
-    { value: 'opus', supportedEffortLevels: ['low', 'high'] },
+    { value: 'opus', displayName: 'Opus', resolvedModel: 'claude-opus-5-5', supportedEffortLevels: ['low', 'high'] },
     { value: 'haiku', supportsEffort: false },
     { value: 'custom' },
   ]);
@@ -26,6 +26,7 @@ test('Claude distinguishes unsupported and unknown effort capabilities', () => {
     ['low', 'high'],
   );
   assert.deepEqual(models[1].efforts, []);
+  assert.equal(models[0].resolvedModel, 'claude-opus-5-5');
   assert.equal(models[2].efforts, undefined);
 });
 test('ACP keeps opaque values and returns model-dependent efforts without replacing inherited defaults', () => {
@@ -58,10 +59,57 @@ test('ACP keeps opaque values and returns model-dependent efforts without replac
   assert.equal(result.models[1].value, '["p","b"]');
   assert.equal(result.models[1].group, 'Provider');
   assert.equal(result.defaultEffort, 'high');
+  assert.equal(result.selectedEffort, 'low');
   assert.deepEqual(
     result.effortOptions.map((e) => e.value),
     ['low'],
   );
+});
+
+test('ACP keeps effort-only selectors and names opaque provider defaults', () => {
+  const session = {
+    configOptions: [
+      {
+        id: 'thinking',
+        category: 'thought_level',
+        currentValue: '',
+        options: [
+          { value: '', name: 'Provider default' },
+          { value: 'high', name: 'High' },
+        ],
+      },
+    ],
+  };
+  const result = parseAcpCatalog(session, session);
+  assert.equal(result.defaultEffort, '');
+  assert.equal(result.defaultEffortLabel, 'Provider default');
+  assert.equal(result.selectedEffort, '');
+  assert.deepEqual(
+    result.effortOptions.map((item) => item.value),
+    ['', 'high'],
+  );
+});
+
+test('ACP reports an advertised empty model default without changing missing-value semantics', () => {
+  const descriptor = {
+    id: 'model',
+    category: 'model',
+    currentValue: '',
+    options: [
+      { value: '', name: 'Provider default' },
+      { value: 'opaque/custom', name: 'Custom' },
+    ],
+  };
+  const session = { configOptions: [descriptor] };
+  const result = parseAcpCatalog(session, session);
+  assert.equal(result.defaultModelStatus, 'reported');
+  assert.equal(result.defaultModel, '');
+  assert.equal(result.defaultModelLabel, 'Provider default');
+  assert.equal(result.selectedModel, '');
+  const undeclared = { configOptions: [{ ...descriptor, options: descriptor.options.slice(1) }] };
+  assert.equal(parseAcpCatalog(undeclared, undeclared).defaultModelStatus, 'unreported');
+  const absent = { configOptions: [{ ...descriptor, currentValue: undefined }] };
+  assert.equal(parseAcpCatalog(absent, absent).defaultModelStatus, 'unreported');
 });
 test('catalog cache deduplicates, scopes targets and retains last results on failed refresh', async () => {
   let calls = 0,
@@ -81,6 +129,31 @@ test('catalog cache deduplicates, scopes targets and retains last results on fai
   assert.equal(result.status, 'configured');
   assert.equal(result.models[0].value, 'a');
   assert.doesNotMatch(JSON.stringify(result), /private/);
+});
+
+test('failed ACP refresh clears the former model and its effort together', async () => {
+  let fail = false;
+  const cache = createCatalogCache(async () => {
+    if (fail) throw Error('offline');
+    return {
+      status: 'live',
+      models: [{ value: 'a', label: 'A' }],
+      defaultModel: 'a',
+      defaultModelStatus: 'reported',
+      defaultEffort: 'high',
+      selectedModel: 'a',
+      selectedEffort: 'high',
+    };
+  });
+  const target = { kind: 'acp', command: 'fixture', args: [], cwd: '/workspace' };
+  await cache('acp', target);
+  fail = true;
+  const result = await cache('acp', target, true);
+  assert.equal(result.message, 'refresh_failed');
+  assert.equal(result.defaultModel, undefined);
+  assert.equal(result.defaultEffort, undefined);
+  assert.equal(result.selectedEffort, undefined);
+  assert.equal(result.models[0].value, 'a');
 });
 
 test('catalog route requires identity and rejects executable input before discovery', async () => {

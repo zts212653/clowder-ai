@@ -7,7 +7,6 @@ import { useIMEGuard } from '@/hooks/useIMEGuard';
 import type { InteractiveOption, RichInteractiveBlock } from '@/stores/chat-types';
 import { useChatStore } from '@/stores/chatStore';
 import { apiFetch } from '@/utils/api-client';
-import { getUserId } from '@/utils/userId';
 import { CafeIcon } from './CafeIcons';
 import {
   dispatchGuideStartIfNeeded,
@@ -15,6 +14,7 @@ import {
   resolveSafeInteractiveCallbackEndpoint,
   shouldKeepGuideOfferInteractive,
 } from './guideClientActions';
+import { dispatchInteractiveSend, patchBlockState } from './interactive-block-client';
 
 // ── Pure function (exported for testing) ────────────────────
 
@@ -57,18 +57,6 @@ export interface InteractiveControlCopy {
 }
 
 // ── Helpers ─────────────────────────────────────────────────
-
-function patchBlockState(messageId: string, blockId: string, patch: { disabled?: boolean; selectedIds?: string[] }) {
-  return apiFetch(`/api/messages/${messageId}/block-state`, {
-    method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ userId: getUserId(), blockId, ...patch }),
-  });
-}
-
-function dispatchInteractiveSend(text: string, sendContext?: string) {
-  window.dispatchEvent(new CustomEvent('cat-cafe:interactive-send', { detail: { text, sendContext } }));
-}
 
 /** Render option icon: prefer SVG icon over emoji */
 function OptionIcon({ opt, className = 'w-5 h-5' }: { opt: InteractiveOption; className?: string }) {
@@ -553,8 +541,9 @@ export function InteractiveBlock({
   const [localDisabled, setLocalDisabled] = useState(block.disabled ?? false);
   const [localSelectedIds, setLocalSelectedIds] = useState<string[]>(block.selectedIds ?? []);
   const customTextRef = useRef('');
-  const isDisabled = controller?.disabled ?? groupDisabled ?? localDisabled;
-  const displaySelectedIds = controller?.selectedIds ?? groupSelectedIds ?? localSelectedIds;
+  const isDisabled = controller?.disabled ?? groupDisabled ?? (block.disabled === true || localDisabled);
+  const displaySelectedIds =
+    controller?.selectedIds ?? groupSelectedIds ?? (block.selectedIds?.length ? block.selectedIds : localSelectedIds);
 
   const handleCustomText = useCallback(
     (text: string) => {
@@ -639,7 +628,12 @@ export function InteractiveBlock({
           block.title,
           ct || undefined,
         );
-        dispatchInteractiveSend(text, sendContext);
+        const sent = await dispatchInteractiveSend(text, sendContext);
+        if (!sent) {
+          setLocalDisabled(false);
+          setLocalSelectedIds([]);
+          return;
+        }
       }
 
       // P2-1 fix: write back to store so re-mount/thread-switch preserves state
@@ -649,12 +643,10 @@ export function InteractiveBlock({
           selectedIds: optionIds,
         });
         // Persist to backend
-        patchBlockState(messageId, block.id, { disabled: shouldDisable, selectedIds: optionIds }).catch(() => {
-          // Persistence failure is non-critical — local + store state already updated
-        });
+        await patchBlockState(messageId, block.id, { disabled: shouldDisable, selectedIds: optionIds });
       }
     },
-    [isDisabled, block, messageId, pendingMode, onPendingChange, controller],
+    [isDisabled, block, messageId, pendingMode, onPendingChange, controller, sendContext],
   );
 
   return (

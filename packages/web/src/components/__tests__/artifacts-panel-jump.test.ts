@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 /**
  * F232 P2 (cloud review round 3): ArtifactsPanel「跳转」必须走 teleport（jump-with-load），
  * 而非裸 scrollToMessage。后端聚合全量产物后，老产物的 source message 常在已加载的 50 条
@@ -7,6 +8,7 @@
 import { act, createElement } from 'react';
 import { createRoot } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { SHELL_PRESENTATION_STORAGE_KEY, writeShellPresentation } from '@/components/shell/shell-presentation';
 import { __resetPendingTeleportForTest, peekPendingTeleport } from '@/utils/teleport';
 
 vi.mock('@/utils/api-client', () => ({
@@ -38,7 +40,7 @@ vi.mock('@/hooks/useCatData', () => ({
 import { useChatStore } from '@/stores/chatStore';
 import { ArtifactsPanel } from '../ArtifactsPanel';
 
-describe('F232 ArtifactsPanel jump (P2 cloud review round 3)', () => {
+describe('F232 classic ArtifactsPanel jump (P2 cloud review round 3)', () => {
   let container: HTMLDivElement;
   let root: ReturnType<typeof createRoot>;
 
@@ -51,6 +53,7 @@ describe('F232 ArtifactsPanel jump (P2 cloud review round 3)', () => {
   });
 
   beforeEach(() => {
+    writeShellPresentation('classic');
     __resetPendingTeleportForTest();
     useChatStore.setState({ currentThreadId: 'T' });
     container = document.createElement('div');
@@ -60,6 +63,7 @@ describe('F232 ArtifactsPanel jump (P2 cloud review round 3)', () => {
   afterEach(() => {
     act(() => root.unmount());
     container.remove();
+    localStorage.removeItem(SHELL_PRESENTATION_STORAGE_KEY);
     vi.clearAllMocks();
   });
 

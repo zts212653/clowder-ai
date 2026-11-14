@@ -1,0 +1,62 @@
+.frame {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+}
+.frame img {
+  position: absolute;
+  max-width: none;
+  max-height: none;
+  object-fit: fill;
+  pointer-events: none;
+}
+.controls {
+  flex-shrink: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 12px;
+  border-top: 1px solid var(--cafe-border);
+  color: var(--cafe-text);
+  background: var(--cafe-surface);
+  font-size: var(--console-font-xs);
+}
+.controls button,
+.controls select {
+  min-height: 32px;
+  padding: 0 8px;
+  border-radius: 8px;
+}
+.controls button:hover {
+  background: var(--cafe-surface-sunken);
+}
+.controls button:disabled {
+  opacity: 0.4;
+}
+.controls button:focus-visible,
+.controls select:focus-visible,
+.controls input:focus-visible {
+  outline: 2px solid var(--cafe-accent);
+  outline-offset: 2px;
+}
+.controls output {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+.controls > input[type="range"] {
+  flex: 1;
+  min-width: 72px;
+  accent-color: var(--cafe-accent);
+}
+.controls label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.markers {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  width: 100%;
+}

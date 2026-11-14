@@ -4,7 +4,6 @@ import { request } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { pathToFileURL } from 'node:url';
 import Fastify from 'fastify';
 import { ModulePluginRuntime } from '../dist/domains/plugin/builtin-runtime/carriers/module-plugin-runtime.js';
 import { withOwnerOperationInvocation } from '../dist/domains/plugin/carrier/plugin-owner-operation-context.js';
@@ -20,19 +19,15 @@ const manifest = {
 };
 const instanceId = 'shutdown-instance';
 const moduleSource = `
-export const events = [];
-export const entered = Promise.withResolvers();
-export let storage;
 export default {
   create() {
     return {
       async start(host) {
-        storage = host.storage;
+        const events = { push: message => host.log('info', message) };
         return {
           actions: {
             async hold(_input, _caller, owner) {
               events.push('action-entered');
-              entered.resolve();
               await new Promise(resolve => {
                 owner.signal.addEventListener('abort', resolve, {once: true});
                 if (owner.signal.aborted) resolve();
@@ -45,7 +40,8 @@ export default {
               await owner.assertCurrent();
               await host.storage.set('saved', 'original state');
               return {saved: true};
-            }
+            },
+            storageProbe: () => () => host.storage.set('after-stop', true)
           },
           async preStop() {
             events.push('preStop-entered');
@@ -66,6 +62,7 @@ async function fixture(t) {
   await writeFile(join(root, 'package.json'), '{"type":"module"}');
   await writeFile(entrypoint, moduleSource);
   const values = new Map();
+  const loaded = { events: [], entered: Promise.withResolvers() };
   let revision = 0;
   const state = {
     get: async (pluginId, key) => values.get(`${pluginId}:${key}`),
@@ -96,7 +93,10 @@ async function fixture(t) {
     configuration: { readConfig: async () => undefined, readSecret: async () => undefined },
     dataDirectoryParent: join(root, 'data'),
     storage: state,
-    log: () => {},
+    log: (_level, message) => {
+      loaded.events.push(message);
+      if (message === 'action-entered') loaded.entered.resolve();
+    },
   });
   await runtime.start(instanceId, {
     pluginId: manifest.pluginId,
@@ -109,7 +109,7 @@ async function fixture(t) {
     verifiedAt: 1,
     updatedAt: 1,
   });
-  const loaded = await import(pathToFileURL(entrypoint).href);
+  const storageProbe = await runtime.invoke(instanceId, 'storageProbe', {});
   const app = Fastify({ logger: false });
   // The real server registers its global shutdown hook after route plugins.
   app.register(async (child) => {
@@ -179,7 +179,7 @@ async function fixture(t) {
     await app.close();
     await rm(root, { recursive: true, force: true });
   });
-  return { app, loaded, state, get };
+  return { app, loaded, state, get, storageProbe };
 }
 test('shutdown aborts a held real module owner action before HTTP drain', { timeout: 8_000 }, async (t) => {
   const h = await fixture(t);
@@ -203,7 +203,7 @@ test('shutdown aborts a held real module owner action before HTTP drain', { time
   assert.equal(h.loaded.events.filter((event) => event === 'shutdown-entered').length, 1);
   assert.equal(await h.state.get(manifest.pluginId, 'late-write'), undefined, 'aborted owner cannot commit');
   assert.equal((await h.state.get(manifest.pluginId, 'armed'))?.value, false, 'preStop storage still works');
-  await assert.rejects(h.loaded.storage.set('after-stop', true), 'storage authority ends after preStop');
+  await assert.rejects(h.storageProbe(), 'storage authority ends after preStop');
 });
 test('plugin shutdown errors reject close instead of reporting a clean exit', async () => {
   const app = Fastify({ logger: false });

@@ -3,7 +3,6 @@ import type {
   EvolutionMediaLocator,
   PublicationReviewContext,
   WorkspaceContentReview,
-  WorkspaceContentReviewAction,
   WorkspaceContentReviewView,
 } from '@cat-cafe/shared';
 import {
@@ -26,7 +25,7 @@ import {
 } from './publication-review-source.js';
 import { type WorkspaceContentReviewStore, type WorkspaceReviewMutation } from './store.js';
 import { readVideoProjectReview, type VideoProjectReviewPort } from './video-project-review-source.js';
-import { applyWorkspaceReviewAction } from './workspace-review-actions.js';
+import { applyWorkspaceReviewAction, type WorkspaceReviewServerAction } from './workspace-review-actions.js';
 import {
   assertWorkspaceReviewHuman,
   validateWorkspaceReviewBody,
@@ -207,7 +206,7 @@ export class WorkspaceContentReviewService {
     readonly reviewId: string;
     readonly expectedRevision: number;
     readonly operationId: string;
-    readonly action: WorkspaceContentReviewAction;
+    readonly action: WorkspaceReviewServerAction;
   }) {
     const ownerReview = this.requireOwnerReview(input.principal, input.reviewId);
     if (ownerReview.source.kind === 'video-project') throw new WorkspaceContentReviewError('unsupported_content');

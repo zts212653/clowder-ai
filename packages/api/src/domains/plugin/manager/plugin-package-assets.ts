@@ -58,7 +58,7 @@ export class PluginManagerPackageAssetService
   }
 
   async readIcon(pluginId: string): Promise<PluginManagerPackageAsset> {
-    const snapshot = await this.options.inventory.snapshot();
+    const snapshot = await this.options.inventory.snapshot({ pluginId });
     const instance = snapshot.instances.find(
       (candidate) => candidate.pluginId === pluginId && candidate.lifecycleState === 'installed',
     );
@@ -146,7 +146,7 @@ export class PluginManagerPackageAssetService
   }
 
   async readReadme(pluginId: string): Promise<string | undefined> {
-    const snapshot = await this.options.inventory.snapshot();
+    const snapshot = await this.options.inventory.snapshot({ pluginId });
     const instance = snapshot.instances.find(
       (candidate) => candidate.pluginId === pluginId && candidate.lifecycleState === 'installed',
     );

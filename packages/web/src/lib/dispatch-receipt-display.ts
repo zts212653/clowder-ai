@@ -1,22 +1,10 @@
-import type { LifecycleDispatchRef, LifecycleMessageMetadata } from '@cat-cafe/shared';
+import { getLifecycleAppendOutcome, type LifecycleDispatchRef, type LifecycleMessageMetadata } from '@cat-cafe/shared';
 
 export function isUnconfirmedAppend(
   ref: LifecycleDispatchRef | undefined,
   metadata?: LifecycleMessageMetadata,
 ): boolean {
-  return Boolean(
-    ref &&
-      ref.inputRead?.status !== 'read' &&
-      ref.appendAcceptance !== 'accepted' &&
-      ref.appendAcceptance !== 'written' &&
-      (ref.appendAcceptance === 'pending' ||
-        metadata?.appendFailures?.some(
-          (failure) =>
-            failure.targetId === ref.targetId &&
-            failure.responseMessageId === ref.statusMessageId &&
-            failure.acceptance === 'unknown',
-        )),
-  );
+  return getLifecycleAppendOutcome(ref, metadata) === 'unknown';
 }
 
 function formatReceiptTimestamp(timestamp: number): string {
@@ -41,6 +29,9 @@ export function dispatchReceiptDisplay(
     typeof ref?.dispatchedAt === 'number' && Number.isFinite(ref.dispatchedAt)
       ? formatReceiptTimestamp(ref.dispatchedAt)
       : undefined;
+  const appendOutcome = getLifecycleAppendOutcome(ref, metadata);
+  if (appendOutcome === 'not_accepted') return { state: 'not_accepted', timestamp, pulse: false };
+  if (appendOutcome === 'incomplete') return { state: 'incomplete', timestamp, pulse: false };
   if (isUnconfirmedAppend(ref, metadata)) {
     const failure = metadata?.appendFailures?.find(
       (candidate) => candidate.targetId === ref.targetId && candidate.responseMessageId === ref.statusMessageId,
@@ -58,6 +49,10 @@ export function dispatchReceiptDisplay(
 /** Reading is independent of reply progress; only the exact dispatch can prove it. */
 export function dispatchReadText(receipt: ReturnType<typeof dispatchReceiptDisplay>, includeDelivery = false): string {
   switch (receipt.state) {
+    case 'not_accepted':
+      return '未接收';
+    case 'incomplete':
+      return '追加未完成';
     case 'checking_delivery':
       return '正在核对收到没…';
     case 'unconfirmed_delivery':
@@ -78,6 +73,8 @@ export function dispatchReadText(receipt: ReturnType<typeof dispatchReceiptDispl
 export function dispatchReadSummary(receipts: readonly ReturnType<typeof dispatchReceiptDisplay>[]): string {
   if (receipts.length > 0 && receipts.every((receipt) => receipt.state === 'read')) return '全部已读';
   return [
+    ['not_accepted', '未接收'],
+    ['incomplete', '追加未完成'],
     ['read', '已读'],
     ['pending', '等读取确认'],
     ['unconfirmed', '没确认读到'],
@@ -98,6 +95,8 @@ export function dispatchReceiptLabel(
   name: string,
   view: 'recipient' | 'appended_source',
 ): string {
+  if (receipt.state === 'not_accepted') return `${name} · 未并进上一轮（未接收）`;
+  if (receipt.state === 'incomplete') return `${name} · 追加未完成`;
   if (view === 'appended_source') return `${name} · ${dispatchReadText(receipt, true)}`;
   if (receipt.state === 'unknown') return `${name} · 状态待核对`;
   if (receipt.state === 'unconfirmed_delivery') return `${name} · 已送出，没确认收到`;

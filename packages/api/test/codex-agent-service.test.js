@@ -1,3 +1,4 @@
+import { tmpdir } from 'node:os';
 /**
  * CodexAgentService Tests (CLI mode)
  * 测试缅因猫 CLI 子进程调用
@@ -9,6 +10,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, wr
 import { basename, dirname, join } from 'node:path';
 import { PassThrough } from 'node:stream';
 import { describe, mock, test } from 'node:test';
+import { fileURLToPath } from 'node:url';
 import { catRegistry } from '@cat-cafe/shared';
 import { upstreamMcpServersFromArgs } from './helpers/direct-mcp-contract.js';
 import { assertSelectedApiAccount, installAmbientCodexAccount } from './helpers/f320-auth-environment.js';
@@ -505,7 +507,7 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
     assert.ok(!args.includes('approval_policy=\\"on-request\\"'), 'argv should not contain literal backslash escapes');
   });
 
-  test('injects cat-cafe MCP config from runtime root, not thread workingDirectory', async () => {
+  test('launches cat-cafe MCP from the API package, with the thread workspace boundary', async () => {
     const runtimeRoot = makeTempDir('.tmp-mcp-runtime-root-');
     const threadWorkspace = makeTempDir('.tmp-mcp-thread-workspace-');
     const previousAllowedWorkspaceDirs = process.env.ALLOWED_WORKSPACE_DIRS;
@@ -569,8 +571,8 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
         assert.equal(server.command, process.execPath, `${serverId} uses runtime Node`);
         assert.deepEqual(
           server.args,
-          [join(mcpDistDir, entrypoint)],
-          'upstream binary belongs to runtime, not thread cwd',
+          [fileURLToPath(import.meta.resolve(`@cat-cafe/mcp-server/dist/${entrypoint}`))],
+          'upstream binary belongs to the API-imported package, not thread cwd',
         );
         assert.equal(server.enabled, true);
         assert.equal(server.default_tools_approval_mode, 'approve');
@@ -791,11 +793,11 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
     }
   });
 
-  test('Codex MCP config resolves runtime binary + managed env for same-repo external split', async () => {
+  test('Codex MCP config resolves API package binary + managed env for same-repo external split', async () => {
     // #1072 regression test: ensureCatCafeMainServer migration can leave a
     // split entry with source='external' but binary pointing to our own repo
     // dist (isSameRepoExternalSplit). These entries must:
-    //   1. Resolve binary from current mcpDistDir (not the entry's stale args[0])
+    //   1. Resolve binary from the API-imported package (not the entry's stale args[0])
     //   2. Receive managed env injection (callback env, workspace dirs, approval mode)
     const runtimeRoot = makeTempDir('.tmp-codex-same-repo-ext-');
     const projectDir = makeTempDir('.tmp-codex-same-repo-ext-project-');
@@ -816,7 +818,7 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
       // Same-repo external shape: source='external', args[0] ends with
       // packages/mcp-server/dist/limb.js but uses a STALE worktree path
       // (different from current runtimeRoot). The code must resolve from
-      // current mcpDistDir, not trust the stale absolute path.
+      // the API-imported package, not trust the stale absolute path.
       const staleLimbPath = '/old/worktree/packages/mcp-server/dist/limb.js';
       writeCapabilitiesConfig(runtimeRoot, [
         {
@@ -828,7 +830,7 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
         },
       ]);
 
-      const currentLimbPath = join(runtimeRoot, 'packages', 'mcp-server', 'dist', 'limb.js');
+      const currentLimbPath = fileURLToPath(import.meta.resolve('@cat-cafe/mcp-server/dist/limb.js'));
       await withWorkspaceEnv({ ALLOWED_WORKSPACE_DIRS: undefined, CAT_CAFE_WORKSPACE_ROOT: undefined }, async () => {
         await withRuntimeRootEnv(runtimeRoot, async () => {
           const promise = collect(
@@ -848,11 +850,7 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
           const args = spawnFn.mock.calls[0].arguments[1];
           const server = upstreamMcpServersFromArgs(args)['cat-cafe-limb'];
           assert.equal(server.enabled, true);
-          assert.deepEqual(
-            server.args,
-            [currentLimbPath],
-            'managed upstream must resolve to the current runtime binary',
-          );
+          assert.deepEqual(server.args, [currentLimbPath], 'managed upstream must resolve to the API-imported package');
           assert.ok(!args.some((a) => a.includes('/old/worktree/')), 'stale worktree path must not appear in CLI args');
           assert.equal(server.default_tools_approval_mode, 'approve');
           assert.equal(server.env.ALLOWED_WORKSPACE_DIRS, projectDir);
@@ -2283,8 +2281,8 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
       'ordinary user-configurable Codex preferences must retain their existing precedence',
     );
     assert.ok(
-      args.includes('model_provider="custom"'),
-      'account-owned API provider must coexist with the context-capacity binding',
+      args.includes('model_provider="openai"') && args.includes('cli_auth_credentials_store="ephemeral"'),
+      'account-owned API identity must coexist with the context-capacity binding',
     );
   });
 
@@ -2455,7 +2453,7 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
     const proc = createMockProcess();
     const spawnFn = createMockSpawnFn(proc);
     const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn, model: 'gpt-5.3-codex' });
-    const nonGitDir = mkdtempSync(join('/tmp', 'codex-non-git-'));
+    const nonGitDir = mkdtempSync(join(tmpdir(), 'codex-non-git-'));
 
     try {
       const promise = collect(service.invoke('hello', { workingDirectory: nonGitDir }));
@@ -2483,7 +2481,7 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
   });
 
   test('isGitRepositoryPath walks parent directories instead of shelling out to git', () => {
-    const root = mkdtempSync(join('/tmp', 'codex-git-marker-'));
+    const root = mkdtempSync(join(tmpdir(), 'codex-git-marker-'));
     const nestedDir = join(root, 'packages', 'api');
 
     try {
@@ -2835,6 +2833,39 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
       textMsgs.map((msg) => msg.content),
       ['第一段。', '\n\n第二段。', '\n\n[砚砚/gpt-5.6-sol🐾]'],
     );
+  });
+
+  test('#1795: inherited empty model keeps one observed signature without selecting a model', async () => {
+    const proc = createMockProcess();
+    const spawnFn = createMockSpawnFn(proc);
+    const service = new CodexAgentService({
+      l0CompilerFn: fakeL0Compiler,
+      spawnFn,
+      model: '',
+      carrierMode: 'exec_json',
+    });
+
+    const promise = collect(service.invoke('Signed reply with an inherited model'));
+    emitCodexEvents(proc, [
+      { type: 'thread.started', thread_id: 'thread-1795-empty-model' },
+      {
+        type: 'item.completed',
+        item: { id: 'progress', type: 'agent_message', text: '第一段。\n\n[砚砚/GPT-6🐾]' },
+      },
+      {
+        type: 'item.completed',
+        item: { id: 'answer', type: 'agent_message', text: '第二段。\n\n[砚砚/GPT-6🐾]' },
+      },
+      { type: 'turn.completed', usage: { input_tokens: 10, output_tokens: 20 } },
+    ]);
+
+    const messages = await promise;
+    const text = messages
+      .filter((message) => message.type === 'text')
+      .map((message) => message.content)
+      .join('');
+    assert.equal(text, '第一段。\n\n第二段。\n\n[砚砚/GPT-6🐾]');
+    assert.equal(spawnFn.mock.calls[0].arguments[1].includes('--model'), false);
   });
 
   test('#1398: service treats the configured display name as a canonical signature alias', async () => {
@@ -3479,9 +3510,12 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
     const spawnOpts = spawnFn.mock.calls[0].arguments[2];
     const args = spawnFn.mock.calls[0].arguments[1];
     assert.equal(spawnOpts.env.OPENAI_API_KEY, 'sk-test-api-mode');
-    assert.ok(args.includes('model_provider="custom"'), 'explicit API mode must use its selected env_key');
-    assert.ok(args.includes('model_providers.custom.base_url="https://api.openai.com/v1"'));
-    assert.ok(args.includes('model_providers.custom.env_key="OPENAI_API_KEY"'));
+    // F320 KD-3: the official endpoint keeps OAuth's provider id so threads resume across both;
+    // the selected key outranks any stored login and is never written to disk.
+    assert.equal(spawnOpts.env.CODEX_API_KEY, 'sk-test-api-mode', 'explicit API mode must select its own key');
+    assert.ok(args.includes('model_provider="openai"'));
+    assert.ok(args.includes('cli_auth_credentials_store="ephemeral"'));
+    assert.ok(!args.some((arg) => arg.startsWith('model_providers.custom.')));
   });
 
   test('auto mode inherits the active Codex config provider instead of forcing OpenAI OAuth', async () => {
@@ -3522,7 +3556,7 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
     assert.equal(opts.env.OPENAI_API_KEY, undefined);
   });
 
-  test('explicit API Key binding retains its key without forcing the OAuth provider', async () => {
+  test('explicit API Key binding retains its key and never falls back to an OAuth login', async () => {
     const proc = createMockProcess();
     const spawnFn = createMockSpawnFn(proc);
     const service = new ProductionCodexAgentService({
@@ -3539,8 +3573,10 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
     emitCodexEvents(proc, [{ type: 'thread.started', thread_id: 'explicit-key-thread' }]);
     await promise;
     const [, args, opts] = spawnFn.mock.calls[0].arguments;
-    assert.ok(!args.includes('model_provider="openai"'));
     assert.equal(opts.env.OPENAI_API_KEY, 'fixture-key');
+    assert.equal(opts.env.CODEX_API_KEY, 'fixture-key', 'the selected key outranks any stored ChatGPT login');
+    assert.ok(args.includes('cli_auth_credentials_store="ephemeral"'), 'no login file is read or written');
+    assert.ok(!existsSync(join(opts.env.CODEX_HOME, 'auth.json')));
   });
 
   test('callbackEnv auth mode overrides process default when launching codex child env', async () => {
@@ -4121,7 +4157,11 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
     const tmpHome = makeTempDir('.tmp-f172-');
     const imgDir = join(tmpHome, '.codex', 'generated_images', sessionId);
     mkdirSync(imgDir, { recursive: true });
-    writeFileSync(join(imgDir, 'ig_test.png'), Buffer.from('fake-png'));
+    const image = await (await import('sharp'))
+      .default({ create: { width: 2, height: 2, channels: 4, background: 'red' } })
+      .png()
+      .toBuffer();
+    writeFileSync(join(imgDir, 'ig_test.png'), image);
 
     const uploadDir = makeTempDir('.tmp-f172-uploads-');
 

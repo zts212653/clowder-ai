@@ -1,4 +1,4 @@
-import type { MessageSearchInput } from '@cat-cafe/shared';
+import { DEFAULT_MESSAGE_SEARCH_SORT, type MessageSearchInput } from '@cat-cafe/shared';
 import type { FastifyReply } from 'fastify';
 import { z } from 'zod';
 import {
@@ -6,6 +6,7 @@ import {
   type MessageSearchPrincipal,
   type MessageSearchService,
 } from '../domains/memory/MessageSearchService.js';
+import { MessageSelectionError } from '../domains/memory/message-selected-quote.js';
 
 const dateOnly = z
   .string()
@@ -42,7 +43,7 @@ export function toMessageSearchInput(query: z.infer<typeof messageSearchQuerySch
   return {
     query: query.q,
     threadId: query.threadId,
-    sort: query.messageSort ?? 'time',
+    sort: query.messageSort ?? DEFAULT_MESSAGE_SEARCH_SORT,
     mode: query.mode ?? 'hybrid',
     limit: query.limit ?? 20,
     ...(query.dateFrom ? { dateFrom: query.dateFrom } : {}),
@@ -96,6 +97,8 @@ export async function executeMessageSearchOperation<T>(
       },
     });
   } catch (error) {
+    if (error instanceof MessageSelectionError)
+      return reply.status(error.statusCode).send({ error: error.message, code: 'ANSWER_SELECTION_INVALID' });
     if (
       error instanceof Error &&
       ['ANSWER_OPERATION_CONFLICT', 'ANSWER_INVOCATION_ALREADY_PREPARED'].includes(error.message)

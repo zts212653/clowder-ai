@@ -2,6 +2,7 @@ import type { ApprovalFeatureId, ApprovalHubItem } from '@cat-cafe/shared';
 import { useState, useSyncExternalStore } from 'react';
 import { ApprovalPendingPane, type ApprovalStatusFilter } from '@/components/ApprovalPendingPane';
 import { isApprovalItemBatchDecidable } from '@/lib/approval-features';
+import { isScheduleDriftBlocked } from '@/stores/approval-decision-attempts';
 import { useApprovalHubStore } from '@/stores/approvalHubStore';
 import { ShellGlyph } from '../ShellIcons';
 import { useShellCopy } from '../shell-copy';
@@ -65,7 +66,7 @@ export function MailboxApprovalTools({
       }).kind === 'matched'
     );
   };
-  const canBatchDecide = (item: ApprovalHubItem) => {
+  const canBatchDecide = (item: ApprovalHubItem, kind?: 'approve' | 'reject') => {
     const store = useApprovalHubStore.getState();
     const session = read ? sessions.get(sessionKey(read.identity.ownerUserId, item)) : undefined;
     return (
@@ -77,6 +78,8 @@ export function MailboxApprovalTools({
       !store.isLoading &&
       session !== undefined &&
       describeReconcile(session.model.state).actions === 'allowed' &&
+      (kind !== 'approve' || !describeReconcile(session.model.state).approveBlocked) &&
+      (kind !== 'approve' || !isScheduleDriftBlocked(item, store.scheduleDriftBlocked)) &&
       isApprovalItemBatchDecidable(item) &&
       matchesStore(item)
     );
@@ -91,7 +94,7 @@ export function MailboxApprovalTools({
     }
     const candidates = store.items.filter((item) => store.selectedIds.has(item.proposalId));
     // Check the entire live selection, including missing copies and held sessions, before any original writer starts.
-    if (candidates.length !== store.selectedIds.size || candidates.some((item) => !canBatchDecide(item))) {
+    if (candidates.length !== store.selectedIds.size || candidates.some((item) => !canBatchDecide(item, kind))) {
       refuseBatch();
       return;
     }
@@ -104,7 +107,11 @@ export function MailboxApprovalTools({
     store.clearSelection();
     // Start each original single-item action in this synchronous turn, before any response can invalidate the read.
     const writes = ready.map(({ item }) =>
-      kind === 'approve' ? store.approveProposal(item.proposalId) : store.rejectProposal(item.proposalId),
+      kind === 'approve'
+        ? item.sourceFeatureId === 'F221' && typeof item.detail.decisionDigest === 'string'
+          ? store.approveProposal(item.proposalId, item.detail.decisionDigest)
+          : store.approveProposal(item.proposalId)
+        : store.rejectProposal(item.proposalId),
     );
     onBack();
     void Promise.allSettled(writes);
@@ -144,6 +151,7 @@ export function MailboxApprovalTools({
             consumer={{
               items: displayedItems,
               canBatchDecide,
+              canBatchApprove: (item) => canBatchDecide(item, 'approve'),
               emptyMessage: !current ? t.toolsReadAgain : t.toolsEmptyPage,
               onBatchDecision: decideBatch,
               renderItem: (item) => {

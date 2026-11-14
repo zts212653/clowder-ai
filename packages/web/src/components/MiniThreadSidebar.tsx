@@ -2,10 +2,9 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useShallow } from 'zustand/react/shallow';
-import type { CatStatusType } from '@/stores/chat-types';
 import { type Thread, useChatStore } from '@/stores/chatStore';
+import { type SidebarSnapshotRow, useSidebarProjectionStore } from '@/stores/sidebarProjectionStore';
 import { CatAvatar } from './CatAvatar';
-import { getCatStatusType } from './ThreadCatStatus';
 
 interface MiniThreadSidebarProps {
   onAssignToPane: (threadId: string) => void;
@@ -21,16 +20,16 @@ const MAX_WIDTH = 300;
  * Click a thread to assign it to the currently selected pane.
  */
 export function MiniThreadSidebar({ onAssignToPane }: MiniThreadSidebarProps) {
-  const { threads, splitPaneThreadIds, getThreadState } = useChatStore(
+  const { threads, splitPaneThreadIds } = useChatStore(
     useShallow((s) => ({
       threads: s.threads,
       splitPaneThreadIds: s.splitPaneThreadIds,
-      getThreadState: s.getThreadState,
     })),
   );
-  // getThreadState is a stable store action. Subscribe to its backing map so
-  // per-thread status and unread changes still refresh the rendered rows.
-  useChatStore((s) => s.threadStates);
+  // PR-3a: status dots and unread badges read the F297 canonical snapshot, like the main Sidebar.
+  // Local per-thread state is fed by thread rooms, which background threads will stop joining.
+  const sidebarRows = useSidebarProjectionStore((s) => s.rows);
+  const rowById = new Map(sidebarRows.map((row) => [row.id, row]));
   const assignedSet = new Set(splitPaneThreadIds);
   const [width, setWidth] = useState(DEFAULT_WIDTH);
   const dragging = useRef(false);
@@ -87,7 +86,7 @@ export function MiniThreadSidebar({ onAssignToPane }: MiniThreadSidebarProps) {
           </div>
         )}
         {assigned.map((t) => (
-          <MiniThreadRow key={t.id} thread={t} isInPane isCollapsed={isCollapsed} getThreadState={getThreadState} />
+          <MiniThreadRow key={t.id} thread={t} isInPane isCollapsed={isCollapsed} row={rowById.get(t.id)} />
         ))}
 
         {assigned.length > 0 && available.length > 0 && <div className="mx-1 border-t border-cafe my-1.5" />}
@@ -102,7 +101,7 @@ export function MiniThreadSidebar({ onAssignToPane }: MiniThreadSidebarProps) {
             key={t.id}
             thread={t}
             isCollapsed={isCollapsed}
-            getThreadState={getThreadState}
+            row={rowById.get(t.id)}
             onClick={() => onAssignToPane(t.id)}
           />
         ))}
@@ -121,21 +120,19 @@ function MiniThreadRow({
   thread,
   isInPane,
   isCollapsed,
-  getThreadState,
+  row,
   onClick,
 }: {
   thread: Thread;
   isInPane?: boolean;
   isCollapsed: boolean;
-  getThreadState: (id: string) => {
-    catStatuses: Record<string, CatStatusType>;
-    unreadCount: number;
-    hasUserMention: boolean;
-  };
+  /** Absent until the canonical snapshot has this thread: shown idle with no badge. */
+  row: SidebarSnapshotRow | undefined;
   onClick?: () => void;
 }) {
-  const ts = getThreadState(thread.id);
-  const status = getCatStatusType(ts.catStatuses);
+  const status = row?.presence.status ?? 'idle';
+  const unreadCount = row?.unreadCount ?? 0;
+  const hasUserMention = row?.hasUserMention ?? false;
   const dotColor =
     status === 'error'
       ? 'bg-[var(--semantic-critical)]'
@@ -165,11 +162,11 @@ function MiniThreadRow({
         {dotColor && <span className={`absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full ${dotColor}`} />}
       </div>
       {!isCollapsed && <span className="text-xs text-cafe-secondary truncate flex-1 min-w-0">{title}</span>}
-      {ts.unreadCount > 0 && (
+      {unreadCount > 0 && (
         <span
-          className={`text-micro ${ts.hasUserMention ? 'bg-conn-red-text' : 'bg-[var(--semantic-warning)]'} text-[var(--cafe-surface)] rounded-full min-w-[14px] px-0.5 text-center leading-3 flex-shrink-0`}
+          className={`text-micro ${hasUserMention ? 'bg-conn-red-text' : 'bg-[var(--semantic-warning)]'} text-[var(--cafe-surface)] rounded-full min-w-[14px] px-0.5 text-center leading-3 flex-shrink-0`}
         >
-          {ts.unreadCount > 9 ? '9+' : ts.unreadCount}
+          {unreadCount > 9 ? '9+' : unreadCount}
         </span>
       )}
     </button>

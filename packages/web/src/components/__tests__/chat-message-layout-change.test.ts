@@ -1,7 +1,9 @@
+// @vitest-environment jsdom
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ChatMessage as ChatMessageType } from '@/stores/chatStore';
+import { SHELL_PRESENTATION_STORAGE_KEY, writeShellPresentation } from '../shell/shell-presentation';
 
 vi.mock('next/navigation', () => ({ useRouter: () => ({ push: vi.fn() }) }));
 
@@ -34,6 +36,8 @@ describe('ChatMessage layout-change event timing', () => {
   let root: Root;
 
   beforeEach(() => {
+    // These assertions exercise the retained classic presentation explicitly.
+    writeShellPresentation('classic');
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
@@ -42,6 +46,7 @@ describe('ChatMessage layout-change event timing', () => {
   afterEach(() => {
     act(() => root.unmount());
     container.remove();
+    window.localStorage.removeItem(SHELL_PRESENTATION_STORAGE_KEY);
     vi.restoreAllMocks();
   });
 

@@ -3,12 +3,16 @@ import Link from 'next/link';
 import { parseIndexStatus } from '../IndexStatus';
 import { MemoryBrakes } from './MemoryBrakes';
 import { MemoryLibrary } from './MemoryLibrary';
+import { MemoryMatterDetail } from './MemoryMatterDetail';
 import { MemoryNavigation } from './MemoryNavigation';
 import { MemoryProfile } from './MemoryProfile';
 import { MemoryRecall } from './MemoryRecall';
 import { MemorySearch, MemorySearchBox } from './MemorySearch';
+import { MemorySourceDetail } from './MemorySourceDetail';
 import { type MaintenanceData, MemoryStatusLine } from './MemoryStatus';
 import { MemoryTaste } from './MemoryTaste';
+import type { SearchType } from './memory-search-types';
+import type { MemorySourceTarget } from './memory-source-target';
 import type { ProfileSourceTarget } from './profile-source-target';
 import { useMemoryRead } from './use-memory-read';
 import { useMemorySearch } from './use-memory-search';
@@ -29,18 +33,26 @@ export function MemoryPagePreview({
   basePath = '/memory/preview',
   from,
   profileSource,
+  memorySource,
   initialQuery,
+  initialType,
+  initialDepth,
   findSessionId,
+  matterId,
 }: {
   tab: MemoryPageTab;
   shell?: string;
   basePath?: '/memory' | '/memory/preview';
   from?: string | null;
   profileSource?: ProfileSourceTarget;
+  memorySource?: MemorySourceTarget;
   initialQuery?: string;
+  initialType?: SearchType;
+  initialDepth?: 'summary' | 'raw';
   findSessionId?: string | null;
+  matterId?: string;
 }) {
-  const search = useMemorySearch(initialQuery);
+  const search = useMemorySearch(initialQuery, initialType, initialDepth);
   const rawIndex = useMemoryRead<Parameters<typeof parseIndexStatus>[0]>('/api/evidence/status');
   const index = { ...rawIndex, data: rawIndex.data ? parseIndexStatus(rawIndex.data) : null };
   const maintenance = useMemoryRead<MaintenanceData>('/api/memory/maintenance');
@@ -72,6 +84,15 @@ export function MemoryPagePreview({
       <main className="min-h-0 flex-1 overflow-y-auto p-4 md:p-8">
         {search.query !== null ? (
           <MemorySearch key={`${search.query}:${search.type}:${search.depth}`} search={search} />
+        ) : matterId ? (
+          <MemoryMatterDetail key={matterId} matterId={matterId} from={from} />
+        ) : memorySource?.status === 'invalid' ? (
+          <output className="block text-sm text-cafe-muted">来源链接不完整，请从记忆页重新打开。</output>
+        ) : memorySource ? (
+          <MemorySourceDetail
+            key={`${memorySource.family}:${memorySource.id}:${memorySource.revision}`}
+            target={memorySource}
+          />
         ) : profileSource?.status === 'invalid' ? (
           <output className="block text-sm text-cafe-muted">来源链接不完整，请从记忆页重新打开。</output>
         ) : profileSource ? (

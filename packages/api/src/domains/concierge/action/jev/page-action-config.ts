@@ -2,6 +2,7 @@ import { readFile, stat } from 'node:fs/promises';
 import { isAbsolute } from 'node:path';
 import { createConfiguredJevPageProfile, pageConfigSchema } from './ConfiguredJevPage.js';
 import { createJevPageSelector } from './JevPageSelector.js';
+import { readOpenAIPageSelector } from './OpenAIPageSelector.js';
 import { createOwnerCdpConnector } from './OwnerCdpConnector.js';
 import { currentPageConfigSchema } from './OwnerCurrentPageBrowser.js';
 import { createOwnerCurrentPageSource } from './OwnerCurrentPageSource.js';
@@ -19,10 +20,13 @@ export async function readConfiguredPageAction(env: NodeJS.ProcessEnv = process.
   if (!path) return undefined;
   const raw: unknown = JSON.parse(await boundedFile(path, 32_768));
   const config = currentPageConfigSchema.or(pageConfigSchema).parse(raw);
-  const apiKey =
-    env.TYPESAFE_API_KEY ??
-    (env.TYPESAFE_API_KEY_FILE ? (await boundedFile(env.TYPESAFE_API_KEY_FILE, 4096)).trim() : '');
-  const provider = createJevPageSelector({ apiKey });
+  const provider =
+    readOpenAIPageSelector(env) ??
+    createJevPageSelector({
+      apiKey:
+        env.TYPESAFE_API_KEY ??
+        (env.TYPESAFE_API_KEY_FILE ? (await boundedFile(env.TYPESAFE_API_KEY_FILE, 4096)).trim() : ''),
+    });
   if ('mode' in config) return { currentPages: createOwnerCurrentPageSource(config, provider) };
   return { profile: createConfiguredJevPageProfile(config, provider), connector: createOwnerCdpConnector(config) };
 }

@@ -1,14 +1,15 @@
 import { statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { catRegistry } from '@cat-cafe/shared';
+import { catRegistry, isDshLauncher } from '@cat-cafe/shared';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { resolveByAccountRef } from '../config/account-resolver.js';
 import { getRegisteredAcpConfig } from '../config/cat-config-loader.js';
+import { resolveMemberEnvironment } from '../config/member-environment.js';
 import { resolveActiveProjectRoot } from '../utils/active-project-root.js';
 import { resolveHeaderUserId } from '../utils/request-identity.js';
-import { dshLauncherProfileState } from './native-dsh-profile.js';
+import { dshLauncherProfileState, dshProfileState } from './native-dsh-profile.js';
 import { discoverNativeRuntimes } from './native-runtimes.js';
 import { type CatalogTarget, probeRuntimeCatalog } from './runtime-catalog-probe.js';
 import type { RuntimeModelCatalog } from './runtime-model-catalog.js';
@@ -54,6 +55,10 @@ export function createCatalogCache(probe: typeof probeRuntimeCatalog = probeRunt
                     defaultModel: undefined,
                     defaultModelLabel: undefined,
                     selectedModel: undefined,
+                    selectedEffort: undefined,
+                    selectedEffortLabel: undefined,
+                    defaultEffort: undefined,
+                    defaultEffortLabel: undefined,
                     defaultModelStatus: 'unreported' as const,
                   }),
             }
@@ -79,11 +84,14 @@ export function registerRuntimeCatalogRoute(app: FastifyInstance) {
     if (!parsed.success) return reply.code(400).send({ error: '模型查询参数无效' });
     const data = parsed.data,
       root = resolveActiveProjectRoot();
-    const runtime = discoverNativeRuntimes(root).runtimes.find((item) => item.id === data.runtimeId);
+    const runtime = (await discoverNativeRuntimes(root)).runtimes.find((item) => item.id === data.runtimeId);
     if (!runtime) return reply.code(404).send({ error: '运行工具不存在，请重新探测' });
     const fallback: RuntimeModelCatalog = {
       status: 'configured',
-      models: runtime.models.map((value) => ({ value, label: value })),
+      models:
+        'modelCatalog' in runtime && runtime.modelCatalog.length
+          ? runtime.modelCatalog
+          : runtime.models.map((value) => ({ value, label: value })),
     };
     if (data.accountRef) {
       const account = resolveByAccountRef(root, data.accountRef);
@@ -94,21 +102,36 @@ export function registerRuntimeCatalogRoute(app: FastifyInstance) {
         message: 'account_catalog',
       };
     }
+    const member = catRegistry.tryGet(data.catId ?? (runtime.id.startsWith('acp:') ? runtime.id.slice(4) : ''))?.config;
+    // Desktop needs explicit route preparation before ACP may initialize; catalog reads never select a provider.
+    if ('dshDesktop' in runtime && runtime.dshDesktop) return { ...fallback, message: 'configured_only' };
+    if (data.customStartup || member?.cliConfigArgs?.length) return { ...fallback, message: 'custom_startup' };
     // Native streams cannot use ACP discovery. AGY ACP also needs its isolated
     // profile launch contract, so this read path only returns configured models.
-    if ('agyCarrier' in runtime || runtime.id === 'kimi' || runtime.id === 'opencode')
+    if ('agyCarrier' in runtime || runtime.id === 'kimi' || runtime.id === 'opencode') {
+      const selectedModel = data.model || ('configuredModel' in runtime ? runtime.configuredModel : undefined);
+      const selected =
+        'modelCatalog' in runtime ? runtime.modelCatalog.find((model) => model.value === selectedModel) : undefined;
       return {
         ...fallback,
         defaultModel: 'configuredModel' in runtime ? runtime.configuredModel : undefined,
+        defaultEffort: 'configuredEffort' in runtime ? runtime.configuredEffort : undefined,
+        defaultModelSource: 'tool_config',
+        defaultEffortSource: 'tool_config',
+        ...('configuredThinkingEnabled' in runtime ? { thinkingEnabled: runtime.configuredThinkingEnabled } : {}),
+        ...('modelCatalog' in runtime
+          ? {
+              selectedModel,
+              selectedEffort: selected?.defaultEffort,
+              selectedEffortSource: 'tool_config' as const,
+              effortOptions: selected?.efforts,
+            }
+          : {}),
         message: 'configured_only',
       };
-    const member = data.catId ? catRegistry.tryGet(data.catId)?.config : undefined;
+    }
     // Arbitrary draft commands are never executable via this read-side API.
-    if (
-      data.customStartup ||
-      member?.cliConfigArgs?.length ||
-      (member?.cli?.command && !['codex', 'claude'].includes(member.cli.command) && !runtime.id.startsWith('acp:'))
-    )
+    if (member?.cli?.command && !['codex', 'claude'].includes(member.cli.command) && !runtime.id.startsWith('acp:'))
       return { ...fallback, message: 'custom_startup' };
     if (!runtime.installed) return { ...fallback, status: 'unavailable', message: 'not_installed' };
     const acp = runtime.id.startsWith('acp:')
@@ -117,8 +140,16 @@ export function registerRuntimeCatalogRoute(app: FastifyInstance) {
         ? runtime.acp
         : undefined;
     if (acp?.transport === 'httpstream') return { ...fallback, message: 'unsupported_transport' };
-    const dshState =
-      runtime.id === 'dsh' && 'discoveryStatus' in runtime
+    const env = member ? resolveMemberEnvironment(member.env) : undefined;
+    const privateDsh =
+      acp &&
+      env?.DSH_HOME &&
+      isDshLauncher(acp.command, acp.startupArgs) &&
+      acp.startupArgs[0] === '--profile' &&
+      acp.startupArgs[1] === 'acp';
+    const dshState = privateDsh
+      ? dshProfileState(env.DSH_HOME)
+      : runtime.id === 'dsh' && 'discoveryStatus' in runtime
         ? runtime.discoveryStatus
         : acp
           ? dshLauncherProfileState(acp.command, acp.startupArgs, root)
@@ -135,6 +166,7 @@ export function registerRuntimeCatalogRoute(app: FastifyInstance) {
       command: runtime.command,
       args: acp?.startupArgs ?? [],
       cwd: root,
+      ...(env ? { env } : {}),
       ...(data.model ? { model: data.model } : {}),
     };
     const home = homedir(),
@@ -158,6 +190,8 @@ export function registerRuntimeCatalogRoute(app: FastifyInstance) {
         ? {
             defaultModel: runtime.configuredModel,
             defaultEffort: 'configuredEffort' in runtime ? runtime.configuredEffort : undefined,
+            defaultModelSource: 'tool_config' as const,
+            defaultEffortSource: 'tool_config' as const,
           }
         : {}),
       ...result,

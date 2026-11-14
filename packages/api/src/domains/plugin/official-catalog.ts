@@ -79,7 +79,7 @@ export const OFFICIAL_BUNDLED_MANIFESTS: readonly PluginManifest[] = [CHATGPT_DO
 export const OFFICIAL_PLUGIN_POLICIES = [
   {
     catalogId: 'chatgpt-dot',
-    packageName: '@cat-cafe/chatgpt-dot',
+    packageName: '@clowder-ai/chatgpt-dot',
     pluginId: CHATGPT_DOT_PLUGIN_MANIFEST.pluginId,
     distribution: 'bundled',
     bundledFormat: 'archive',

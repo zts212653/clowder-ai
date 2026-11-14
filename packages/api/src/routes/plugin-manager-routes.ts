@@ -4,7 +4,7 @@ import type {
   PluginManagerUninstallRequest,
 } from '@cat-cafe/shared';
 import multipart from '@fastify/multipart';
-import type { FastifyInstance, FastifyPluginAsync } from 'fastify';
+import type { FastifyInstance, FastifyPluginAsync, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { type EventAuditLog, getEventAuditLog } from '../domains/cats/services/orchestration/EventAuditLog.js';
 import type { PluginRuntimeCarrierRouter } from '../domains/plugin/carrier/runtime-carrier.js';
@@ -13,12 +13,20 @@ import {
   type PluginManagerPackageAssetPort,
   type PluginManagerPackageDocumentationPort,
   type PluginManagerService,
+  PluginManagerServiceError,
 } from '../domains/plugin/index.js';
+import { PluginAddressError } from '../domains/plugin/manager/addressing/plugin-addressed-targets.js';
 import type { PluginManagerBindings } from '../domains/plugin/manager/plugin-manager-bindings.js';
 import { MAX_PLUGIN_PACKAGE_BYTES } from '../domains/plugin/official-package-archive.js';
+import { PluginSharedExtensionError } from '../domains/plugin/shared-extension/plugin-shared-extension.js';
 import { type CallbackAuthRegistry, registerCallbackAuthHook } from './callback-auth-prehandler.js';
 import type { getDeletedCallbackThreadGuard } from './callback-scope-helpers.js';
-import { pluginAccessError, requirePluginWriteAccess } from './plugin-access-guards.js';
+import {
+  pluginAccessError,
+  requirePluginOwnerLocalAccess,
+  requirePluginReadAccess,
+  requirePluginWriteAccess,
+} from './plugin-access-guards.js';
 import { captureDirectToolCaller } from './plugin-direct-tool-caller.js';
 import { registerPluginManagerConfigurationRoute } from './plugin-manager-configuration-route.js';
 import { registerPluginManagerReadRoutes } from './plugin-manager-read-routes.js';
@@ -31,8 +39,8 @@ import {
   invalidRequest,
   lifecycleRevisionSchema,
   pluginIdSchema,
+  sendManagerError as sendBaseManagerError,
   sendContributionError,
-  sendManagerError,
   setEnabledSchema,
   uninstallSchema,
 } from './plugin-manager-route-contract.js';
@@ -55,6 +63,7 @@ type PluginManagerRouteService = Pick<
 >;
 
 export interface PluginManagerRouteOptions {
+  readonly addressedTargets?: import('../domains/plugin/manager/addressing/plugin-addressed-targets.js').PluginAddressedTargets;
   readonly manager: PluginManagerRouteService &
     Partial<Pick<PluginManagerService, 'configureBootstrapRoot' | 'repair'>>;
   readonly contributions?: Pick<PluginRuntimeCarrierRouter, 'listPluginTools' | 'callPluginTool'>;
@@ -64,6 +73,115 @@ export interface PluginManagerRouteOptions {
   readonly auditLog?: Pick<EventAuditLog, 'append'>;
   readonly callbackRegistry?: CallbackAuthRegistry & { verifyLatest?: CallbackAuthRegistry['verify'] };
   readonly threadStore?: Parameters<typeof getDeletedCallbackThreadGuard>[0];
+  readonly installedMigration?: {
+    applies(pluginId: string): boolean;
+    needsMigration(pluginId: string, ownerUserId: string): Promise<boolean>;
+    ensure(input: {
+      readonly pluginId: string;
+      readonly pluginInstanceId: string;
+      readonly packageDigest: string;
+      readonly ownerUserId: string;
+      readonly requestId: string;
+      readonly signal: AbortSignal;
+      readonly assertCurrent: () => void;
+    }): Promise<unknown>;
+    afterEnable?(input: {
+      readonly pluginId: string;
+      readonly pluginInstanceId: string;
+      readonly packageDigest: string;
+      readonly ownerUserId: string;
+      readonly requestId: string;
+      readonly signal: AbortSignal;
+      readonly assertCurrent: () => void;
+    }): Promise<void>;
+  };
+}
+
+function sendManagerError(reply: FastifyReply, error: unknown) {
+  if (error instanceof PluginSharedExtensionError) {
+    return reply.status(error.statusCode).send({ error: error.message, code: error.code });
+  }
+  const migrationCode = error instanceof Error && /^dot_[a-z0-9_]{1,80}$/.test(error.message) ? error.message : null;
+  if (migrationCode) {
+    const upstream =
+      migrationCode === 'dot_migration_receipt_invalid' || migrationCode === 'dot_migration_receipt_mismatch';
+    return reply.status(upstream ? 502 : 409).send({ error: 'Dot legacy migration failed', code: migrationCode });
+  }
+  return sendBaseManagerError(reply, error);
+}
+
+async function ensureInstalledMigration(
+  options: PluginManagerRouteOptions,
+  request: FastifyRequest,
+  reply: FastifyReply,
+  ownerUserId: string,
+  installed: { readonly pluginId: string; readonly pluginInstanceId: string | null },
+  phase: 'prepare' | 'enabled' = 'prepare',
+): Promise<void> {
+  if (
+    !options.installedMigration ||
+    !options.installedMigration.applies(installed.pluginId) ||
+    installed.pluginInstanceId === null
+  )
+    return;
+  const migrate = phase === 'enabled' ? options.installedMigration.afterEnable : options.installedMigration.ensure;
+  if (!migrate) return;
+  const owner = requirePluginOwnerLocalAccess(request, 'write');
+  if ('error' in owner || owner.operator !== ownerUserId) throw new Error('dot_migration_owner_required');
+  const current = (await options.manager.get(installed.pluginId)).plugin;
+  if (current.packageDigest === null) return;
+  const lifetime = new AbortController();
+  const abort = () => lifetime.abort();
+  request.raw.once('aborted', abort);
+  reply.raw.once('close', abort);
+  if (request.raw.aborted || reply.raw.destroyed) abort();
+  try {
+    await migrate.call(options.installedMigration, {
+      pluginId: installed.pluginId,
+      pluginInstanceId: installed.pluginInstanceId,
+      packageDigest: current.packageDigest,
+      ownerUserId: owner.operator,
+      requestId: request.id,
+      signal: lifetime.signal,
+      assertCurrent: () => {
+        if (lifetime.signal.aborted) throw new Error('dot_migration_request_expired');
+        request.assertSessionCurrent?.();
+        const latest = requirePluginOwnerLocalAccess(request, 'write');
+        if ('error' in latest || latest.operator !== owner.operator) throw new Error('dot_migration_request_expired');
+      },
+    });
+  } finally {
+    abort();
+    request.raw.off('aborted', abort);
+    reply.raw.off('close', abort);
+  }
+}
+
+async function prepareDormantMigrationReplacement(
+  options: PluginManagerRouteOptions,
+  request: FastifyRequest,
+  ownerUserId: string,
+  pluginId: string,
+  expectedRevision?: number,
+): Promise<number | undefined> {
+  if (!options.installedMigration || !(await options.installedMigration.needsMigration(pluginId, ownerUserId))) {
+    return expectedRevision;
+  }
+  const owner = requirePluginOwnerLocalAccess(request, 'write');
+  if ('error' in owner || owner.operator !== ownerUserId) throw new Error('dot_migration_owner_required');
+  const current = (await options.manager.get(pluginId)).plugin;
+  if (current.artifact !== 'installed' || current.pluginInstanceId === null) return expectedRevision;
+  if (current.lifecycleRevision === null) throw new Error('dot_migration_binding_changed');
+  if (expectedRevision !== undefined && current.lifecycleRevision !== expectedRevision) {
+    throw new PluginManagerServiceError('STALE_REVISION', 'Plugin state changed; refresh before updating');
+  }
+  if (current.intent !== 'enabled') return current.lifecycleRevision;
+  await options.manager.setEnabled(pluginId, { enabled: false, expectedRevision: current.lifecycleRevision });
+  const dormant = (await options.manager.get(pluginId)).plugin;
+  if (dormant.lifecycleRevision === null || dormant.intent !== 'disabled') {
+    throw new Error('dot_migration_binding_changed');
+  }
+  return dormant.lifecycleRevision;
 }
 
 export function registerPluginManagerRoutes(app: FastifyInstance, options: PluginManagerRouteOptions): void {
@@ -76,6 +194,59 @@ export function registerPluginManagerRoutes(app: FastifyInstance, options: Plugi
   const accessOptions = { allowVerifiedCallbackPrincipal: true } as const;
 
   registerPluginManagerReadRoutes(app, options);
+
+  app.get('/api/plugin-manager/addressed-targets', async (request, reply) => {
+    const access = requirePluginReadAccess(request, accessOptions);
+    if ('error' in access) return pluginAccessError(reply, access);
+    const targets = (await options.addressedTargets?.list()) ?? [];
+    const knownTargets = (await options.addressedTargets?.known()) ?? [];
+    const listing = await options.manager.list();
+    const project = (target: (typeof knownTargets)[number]) => ({
+      kind: target.kind,
+      id: target.id,
+      pluginId: target.pluginId,
+      alias: target.alias,
+      displayName: target.displayName,
+      lifecycleRevision: target.lifecycleRevision,
+      addressRevision: target.addressRevision,
+      installed: target.installed,
+      enabled: target.enabled,
+      icon: target.icon
+        ? { type: 'png' as const, src: target.icon }
+        : (listing.plugins.find((plugin) => plugin.pluginId === target.pluginId)?.icon ?? 'blocks'),
+    });
+    return {
+      targets: targets.map((target) => project({ ...target, icon: target.icon, installed: true, enabled: true })),
+      knownTargets: knownTargets.map(project),
+    };
+  });
+
+  app.patch<{ Params: { instanceId: string } }>(
+    '/api/plugin-manager/instances/:instanceId/address',
+    async (request, reply) => {
+      const access = requirePluginWriteAccess(request, accessOptions);
+      if ('error' in access) return pluginAccessError(reply, access);
+      const input = z
+        .object({
+          alias: z.string().min(1).max(64),
+          icon: z.string().min(1).max(2048).nullable().optional(),
+          expectedRevision: lifecycleRevisionSchema,
+        })
+        .strict()
+        .safeParse(request.body);
+      if (!input.success) return invalidRequest(reply);
+      if (!options.addressedTargets) return reply.code(503).send({ error: 'Plugin addressing unavailable' });
+      try {
+        await options.addressedTargets.configure(request.params.instanceId, input.data);
+        return { ok: true };
+      } catch (error) {
+        return reply.code(409).send({
+          code: error instanceof PluginAddressError ? error.code : 'unavailable',
+          error: error instanceof Error ? error.message : 'Address update failed',
+        });
+      }
+    },
+  );
 
   app.post<{ Params: { pluginId: string } }>(
     '/api/plugin-manager/plugins/:pluginId/contributions/call',
@@ -177,7 +348,17 @@ export function registerPluginManagerRoutes(app: FastifyInstance, options: Plugi
       return reply.status(503).send({ error: 'Plugin audit log is unavailable', code: 'AUDIT_UNAVAILABLE' });
     }
     try {
+      if (installRequest.source.kind === 'catalog' && options.installedMigration) {
+        const selectedCatalogId = installRequest.source.catalogId;
+        const selected = (await options.manager.list()).plugins.find(
+          (plugin) => plugin.source.kind === 'catalog' && plugin.source.catalogId === selectedCatalogId,
+        );
+        if (selected && options.installedMigration.applies(selected.pluginId)) {
+          await prepareDormantMigrationReplacement(options, request, access.operator, selected.pluginId);
+        }
+      }
       const result = await options.manager.install(installRequest);
+      await ensureInstalledMigration(options, request, reply, access.operator, result);
       return reply.status(201).send(result);
     } catch (error) {
       warnPluginPackageFailure(
@@ -215,7 +396,19 @@ export function registerPluginManagerRoutes(app: FastifyInstance, options: Plugi
       return reply.status(503).send({ error: 'Plugin audit log is unavailable', code: 'AUDIT_UNAVAILABLE' });
     }
     try {
-      return await options.manager.update(parsedId.data, parsed.data);
+      const expectedRevision = await prepareDormantMigrationReplacement(
+        options,
+        request,
+        access.operator,
+        parsedId.data,
+        parsed.data.expectedRevision,
+      );
+      const result = await options.manager.update(parsedId.data, {
+        ...parsed.data,
+        expectedRevision: expectedRevision ?? parsed.data.expectedRevision,
+      });
+      await ensureInstalledMigration(options, request, reply, access.operator, result);
+      return result;
     } catch (error) {
       warnPluginPackageFailure(request, { operation: 'update', pluginId: parsedId.data }, error);
       return sendManagerError(reply, error);
@@ -242,7 +435,18 @@ export function registerPluginManagerRoutes(app: FastifyInstance, options: Plugi
         return reply.status(503).send({ error: 'Plugin audit log is unavailable', code: 'AUDIT_UNAVAILABLE' });
       }
       try {
-        return await options.manager.setEnabled(parsedId.data, mutation);
+        if (mutation.enabled && options.installedMigration?.applies(parsedId.data)) {
+          const current = (await options.manager.get(parsedId.data)).plugin;
+          await ensureInstalledMigration(options, request, reply, access.operator, {
+            pluginId: parsedId.data,
+            pluginInstanceId: current.pluginInstanceId,
+          });
+        }
+        const result = await options.manager.setEnabled(parsedId.data, mutation);
+        if (mutation.enabled) {
+          await ensureInstalledMigration(options, request, reply, access.operator, result, 'enabled');
+        }
+        return result;
       } catch (error) {
         return sendManagerError(reply, error);
       }
@@ -317,6 +521,7 @@ export const pluginManagerUploadRoutes: FastifyPluginAsync<PluginManagerRouteOpt
       const installed = await installPluginUpload(bytes, options.manager, () =>
         appendMutationAudit(auditLog, { operator: access.operator, operation: 'install', sourceKind: 'local-archive' }),
       );
+      await ensureInstalledMigration(options, request, reply, access.operator, installed);
       return reply.status(201).send(installed);
     } catch (error) {
       warnPluginPackageFailure(request, { operation: 'install', sourceKind: 'local-archive' }, error);

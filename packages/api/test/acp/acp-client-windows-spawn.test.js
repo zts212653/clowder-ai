@@ -184,4 +184,50 @@ describe('AcpClient Windows default spawn path', () => {
     assert.equal(captured.options?.shell, undefined);
     assert.deepEqual(captured.options?.stdio, ['pipe', 'pipe', 'pipe']);
   });
+
+  it('uses the Desktop Electron runtime and ELECTRON_RUN_AS_NODE in the actual ACP spawn', async () => {
+    const platformDescriptor = Object.getOwnPropertyDescriptor(process, 'platform');
+    Object.defineProperty(process, 'platform', { ...platformDescriptor, value: 'win32' });
+    restorePlatform = () => Object.defineProperty(process, 'platform', platformDescriptor);
+    const tempRoot = mkdtempSync(join(tmpdir(), 'acp-desktop-spawn-'));
+    const bin = join(tempRoot, 'resources/runtime/cli/bin');
+    mkdirSync(bin, { recursive: true });
+    mkdirSync(join(tempRoot, 'resources/runtime/primary-runtime'), { recursive: true });
+    writeFileSync(
+      join(tempRoot, 'resources/runtime/primary-runtime/runtime.json'),
+      JSON.stringify({ desktopVersion: '0.2.2-rc.1' }),
+    );
+    writeFileSync(join(tempRoot, 'resources/app.asar'), '');
+    const exe = join(tempRoot, 'DeepSeek Harness.exe');
+    writeFileSync(exe, '');
+    const command = join(bin, 'dsh.cmd');
+    writeFileSync(
+      command,
+      [
+        '@echo off',
+        'setlocal DisableDelayedExpansion',
+        'set "ELECTRON_RUN_AS_NODE=1"',
+        '"%~dp0..\\..\\..\\..\\DeepSeek Harness.exe" --expose-internals "%~dp0..\\..\\..\\app.asar\\dsh\\node_modules\\@deepseek-ai\\dsh-desktop-host\\lib\\cli.js" %*',
+        'exit /b %errorlevel%',
+      ].join('\r\n'),
+    );
+    const { child, clientStdin, agentStdout } = createMockChild();
+    clientStdin.on('data', (chunk) => {
+      const message = JSON.parse(chunk.toString());
+      if (message.method === 'initialize') agentRespond(agentStdout, message.id, INIT_RESULT);
+    });
+    const captured = mock.fn((_command, _args, _options) => child);
+    originalSpawn = childProcess.spawn;
+    childProcess.spawn = captured;
+    syncBuiltinESMExports();
+    const { AcpClient } = await import(`${ACP_CLIENT_MODULE}?desktop-spawn=${Date.now()}`);
+    client = new AcpClient({ command, args: ['--profile', 'acp'], cwd: tempRoot });
+    await client.initialize();
+    const [actualCommand, args, options] = captured.mock.calls[0].arguments;
+    assert.equal(actualCommand, exe);
+    assert.equal(args[0], '--expose-internals');
+    assert.deepEqual(args.slice(2), ['--profile', 'acp']);
+    assert.equal(options.env.ELECTRON_RUN_AS_NODE, '1');
+    assert.equal(options.shell, undefined);
+  });
 });

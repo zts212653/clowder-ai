@@ -1,6 +1,6 @@
 ---
 name: plain-language
-tips_exempt: "2026-10-08 初版是猫面对人的表达与载体路由；不新增 Hub 操作或独立用户功能，发现入口在沟通意图与本 skill 描述。"
+tips_exempt: "Renewed 2026-11-10: clarify standard terminology and first-use explanations within existing communication and HTML delivery guidance. This teaches cat wording, not a new human workflow; ordinary requests and existing work-version controls remain the entry."
 description: >
   把跨上下文的工作进度、提问和复杂结果讲到人能理解，并选择合适的说明形式。
   Use when: 工作中途向未跟进的人汇报或提问、用户说看不懂/黑话多，或需在文字/图解/HTML/口播/视频/原型之间选择表达。
@@ -37,7 +37,9 @@ triggers:
 已知的偏好、熟悉程度和输出要求直接用；只有缺失信息会改变交付时才澄清，不另做一轮采访。
 
 按用户看得到的对象称呼这件事，例如“猫的执行记录页面”，而不是“Task1252 item5”。
-必要术语首次出现时解释它在这里的意思，随后保持叫法稳定；编号、提交号和路径放到可回查的出处。
+必要术语用领域里的标准叫法，业内通用英文直接用英文，不硬译成中文：首次出现先说术语，再用一句话解释它在这里的意思，需要时可以打一个比喻；之后一直用这个术语，不用自造的说法或比喻顶替（You 11-05 定的“标准术语直出”）。
+家里反复踩过：把 Prefill 叫成“读题”、把 KV cache 叫成“读题笔记”、给方法自造“往旁边借”这类四字口号。
+叫法再稳定，自造的那一套对听的人也是要先学的黑话。编号、提交号和路径放到可回查的出处。
 不能为了通俗把“已合入”“已加载”“已验证”“你现在可用”说成同一件事。优先说实际结果，
 证据细节供回查，剩余缺口、影响和必要权限仍须在正文讲清。
 
@@ -70,8 +72,8 @@ triggers:
 |---|---|---|
 | 知道进度、结果或判断一个取舍 | 自足的文字；长结构化对照可用卡片 | 短汇报直接文字；结构化产物按 [rich-messaging](../rich-messaging/SKILL.md) |
 | 看懂关系、位置或过程顺序 | 图解、Mermaid、SVG；配一句解释 | 能用可编辑图表达就直接画；需新位图才用 [image-generation](../image-generation/SKILL.md) |
-| 对比多项内容，或调变量观察影响 | 自包含 HTML、时间线、带滑块的解释 | 小组件用 rich-messaging 的 html_widget；明确变量、假设和变化，标清模拟数据 |
-| 判断布局、点法或完整使用体验 | 可操作原型 | [concept-demo-design](../concept-demo-design/SKILL.md)；小型自包含体验稿用 html_widget，复杂 localhost 用 [browser-preview](../browser-preview/SKILL.md) |
+| 对比多项内容，或调变量观察影响 | 自包含 HTML、时间线、带滑块的解释 | 随聊天解释局部用 `html_widget`；受托交付图解或复用小工具按 [rich-messaging](../rich-messaging/SKILL.md#html先按用途选再交付) 用 `cat_cafe_work` 保存并附卡回 Chat；明确变量、假设和变化，标清模拟数据 |
+| 判断布局、点法或完整使用体验 | 可操作原型 | [concept-demo-design](../concept-demo-design/SKILL.md)；自包含原型交付按 rich-messaging 保存作品，已有作品沿原身份续版；复杂 localhost 用 [browser-preview](../browser-preview/SKILL.md) |
 | 不盯屏幕也要跟上 | 口播稿 | 重写可听正文；共读走 learning-companion；文件用 [workspace-navigator](../workspace-navigator/SKILL.md) 交到阅读入口 |
 | 跟随时序、动作或连续变化，或明确要可播视频 | 讲解视频 | [video-forge](../video-forge/SKILL.md)；已有产品宣传意图时按其导演入口；图解和分镜不冒充成片 |
 

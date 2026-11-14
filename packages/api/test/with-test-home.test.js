@@ -248,6 +248,62 @@ test('with-test-home strips the runtime Claude carrier from outer shell', () => 
   assert.equal(result.stdout.trim(), '');
 });
 
+test('with-test-home strips managed-command authority from test children', () => {
+  const result = spawnSync(
+    process.execPath,
+    [
+      withTestHome,
+      'node',
+      '-e',
+      `console.log(JSON.stringify({
+        managed: Object.keys(process.env).filter((key) => key.startsWith('CAT_CAFE_MANAGED_')).sort(),
+        marker: process.env.TEST_HOME_FIXTURE_MARKER,
+      }))`,
+    ],
+    {
+      cwd: resolve(__dirname, '..'),
+      env: {
+        ...process.env,
+        CAT_CAFE_MANAGED_JOB_ID: 'outer-gate',
+        CAT_CAFE_MANAGED_JOB_DESCRIPTOR: '/outer/descriptor.json',
+        CAT_CAFE_MANAGED_GATE_RECOVERY_PROTOCOL: '2',
+        TEST_HOME_FIXTURE_MARKER: 'preserved',
+      },
+      encoding: 'utf8',
+    },
+  );
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.deepEqual(JSON.parse(result.stdout), { managed: [], marker: 'preserved' });
+});
+
+test('with-test-home strips exported outer-shell functions from test children', () => {
+  const result = spawnSync(
+    process.execPath,
+    [
+      withTestHome,
+      'node',
+      '-e',
+      `console.log(JSON.stringify({
+        functions: Object.keys(process.env).filter((key) => key.startsWith('BASH_FUNC_')).sort(),
+        marker: process.env.TEST_HOME_FIXTURE_MARKER,
+      }))`,
+    ],
+    {
+      cwd: resolve(__dirname, '..'),
+      env: {
+        ...process.env,
+        'BASH_FUNC_compile_packages%%': '() {  echo inherited;\n}',
+        TEST_HOME_FIXTURE_MARKER: 'preserved',
+      },
+      encoding: 'utf8',
+    },
+  );
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.deepEqual(JSON.parse(result.stdout), { functions: [], marker: 'preserved' });
+});
+
 for (const field of ['CODEX_HOME', 'CODEX_SQLITE_HOME']) {
   test(`with-test-home strips inherited ${field} before account fixtures load`, () => {
     const result = spawnSync(process.execPath, [withTestHome, 'node', '-p', `process.env.${field} ?? ""`], {
@@ -441,3 +497,39 @@ test('terminateChild kills the direct child and its descendants', async () => {
   }
   assert.fail('grandchild process is still running');
 });
+
+for (const entrypoint of ['with-test-home.mjs', 'with-test-home.sh']) {
+  test(
+    `${entrypoint} isolates managed fixture admission and credentials while preserving cleanup ownership`,
+    { skip: entrypoint.endsWith('.sh') && process.platform === 'win32' },
+    () => {
+      const keys = [
+        'CAT_CAFE_MANAGED_JOB_ID',
+        'CAT_CAFE_MANAGED_GATE_RECOVERY_PROTOCOL',
+        'CAT_CAFE_MANAGED_GATE_RESUME_EPOCH',
+        'CAT_CAFE_GATE_EXECUTION_PARENT_JOB_ID',
+        'CAT_CAFE_FULL_GATE_RESOURCE_PERMIT_HELD',
+        'CAT_CAFE_FULL_GATE_RESOURCE_CLAIMS',
+        'ANTHROPIC_API_KEY',
+        'OPENAI_API_KEY',
+      ];
+      const script = resolve(__dirname, '../scripts', entrypoint);
+      const command = entrypoint.endsWith('.sh') ? 'bash' : process.execPath;
+      const probe = `
+      const assert = require('node:assert/strict');
+      for (const key of ${JSON.stringify(keys)}) assert.equal(process.env[key], undefined, key);
+      assert.equal(process.env.CAT_CAFE_GATE_JOB_TOKEN, 'fixture-cleanup-owner');
+    `;
+      const result = spawnSync(command, [script, process.execPath, '-e', probe], {
+        cwd: resolve(__dirname, '..'),
+        env: {
+          ...process.env,
+          ...Object.fromEntries(keys.map((key) => [key, 'outer-fixture-only'])),
+          CAT_CAFE_GATE_JOB_TOKEN: 'fixture-cleanup-owner',
+        },
+        encoding: 'utf8',
+      });
+      assert.equal(result.status, 0, result.stderr);
+    },
+  );
+}

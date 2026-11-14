@@ -1,4 +1,5 @@
-import type { CatId } from '@cat-cafe/shared';
+import { type CatId, watcherUsageSchema } from '@cat-cafe/shared';
+import { assertResponseSettlement, responseSettlementReady } from '../ports/TurnExecutionSettlement.js';
 import {
   assertCoveredMessageIds,
   assertCreateTurnExecutionInput,
@@ -12,6 +13,8 @@ import {
 } from '../ports/TurnExecutionStore.js';
 
 export interface RedisTurnExecutionHash {
+  watcherModelAttempts?: string;
+  watcherUsage?: string;
   immutableIdentity?: string;
   /** Late-bound coverage stays outside legacy causal so old readers remain valid. */
   coveredMessageIds?: string;
@@ -33,6 +36,11 @@ export interface RedisTurnExecutionHash {
   providerLifecycleTracked?: string;
   /** F117 KD-21: late-bound fence verdict, outside the immutable identity like coverage. */
   outputFence?: string;
+  responseSettlement?: string;
+  responseSettlementIdentity?: string;
+  settledSequence?: string;
+  pendingResponseSettlement?: string;
+  pendingResponseSettlementIdentity?: string;
 }
 
 type RedisTurnExecutionIdentityHash = RedisTurnExecutionHash &
@@ -96,7 +104,7 @@ function withOutputFence(record: TurnExecutionRecord, raw: string | undefined): 
 export function hydrateTurnExecution(data: RedisTurnExecutionHash): TurnExecutionRecord | null {
   if (!hasTurnExecutionIdentityFields(data)) return null;
   try {
-    if (!['ordinary', 'routing_guard'].includes(data.executionKind)) return null;
+    if (!['ordinary', 'routing_guard', 'watcher'].includes(data.executionKind)) return null;
     if (!['running', 'succeeded', 'failed', 'canceled', 'interrupted'].includes(data.status)) return null;
     if (data.queueCompletionPolicy && data.queueCompletionPolicy !== 'explicit_source') return null;
     const legacyCausal = parseCausal(data.causal);
@@ -136,6 +144,26 @@ export function hydrateTurnExecution(data: RedisTurnExecutionHash): TurnExecutio
     assertCreateTurnExecutionInput(record);
     if (!hasValidLifecycle(record)) return null;
     if (hasCoverageIdentity && data.coveredMessageIdsIdentity !== serializeTurnExecutionIdentity(record)) return null;
+    if (data.pendingResponseSettlement) {
+      const pending: unknown = JSON.parse(data.pendingResponseSettlement);
+      assertResponseSettlement(pending);
+      record.pendingResponseSettlement = pending;
+    }
+    if ((data.responseSettlement !== undefined) !== (data.settledSequence !== undefined)) return null;
+    if (data.responseSettlement !== undefined) {
+      const settlement: unknown = JSON.parse(data.responseSettlement);
+      assertResponseSettlement(settlement);
+      const sequence = Number(data.settledSequence);
+      if (!Number.isSafeInteger(sequence) || sequence <= 0 || !responseSettlementReady(record, settlement.settledAt))
+        return null;
+      record.responseSettlement = settlement;
+      record.settledSequence = sequence;
+    }
+    if (data.watcherUsage !== undefined) record.watcherUsage = watcherUsageSchema.parse(JSON.parse(data.watcherUsage));
+    if (data.watcherModelAttempts !== undefined)
+      record.watcherModelAttempts = JSON.parse(data.watcherModelAttempts) as NonNullable<
+        TurnExecutionRecord['watcherModelAttempts']
+      >;
     return withOutputFence(record, data.outputFence);
   } catch {
     return null;

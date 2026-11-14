@@ -112,3 +112,80 @@ it('renders one entity for admission and completion receipts, and shows unreadab
   expect(container.textContent).toContain('暂时读不到任务状态');
   expect(container.textContent).not.toContain('已完成');
 });
+
+it('shows both recovery dispositions on the original job card and rechecks without creating another entity', async () => {
+  vi.mocked(apiFetch)
+    .mockResolvedValueOnce(
+      response('running', {
+        recovery: {
+          disposition: 'needs_attention',
+          reasonCode: 'cleanup_unproven',
+          recheck: { kind: 'observe_original_job', jobId: 'managed-job-one' },
+        },
+      }),
+    )
+    .mockResolvedValueOnce(new Response(JSON.stringify({ outcome: 'observed' })))
+    .mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          taskId: 'hold-ball-job',
+          catId: 'gemini38',
+          cancelable: true,
+          recovery: {
+            disposition: 'parked',
+            reasonCode: 'wake_admission_failed',
+            recheck: { kind: 'observe_original_wait', taskId: 'hold-ball-job' },
+          },
+          job: {
+            jobId: 'managed-job-one',
+            originTaskId: 'hold-ball-job',
+            state: 'running',
+            command: 'pnpm test',
+            createdAt: 1000,
+          },
+        }),
+      ),
+    );
+  act(() => root.render(<ConnectorBubble message={card} threadId="thread-1" timelineMessages={[card]} />));
+  await flush();
+  expect(container.querySelectorAll('[data-testid="managed-job-card"]').length).toBe(1);
+  expect(container.textContent).toContain('cleanup_unproven');
+  const recheck = [...container.querySelectorAll('button')].find((button) => button.textContent?.includes('重新检查'));
+  expect(recheck).toBeDefined();
+  if (!recheck) throw new Error('recheck button missing');
+  await act(async () => recheck.click());
+  await flush();
+  expect(vi.mocked(apiFetch).mock.calls.some(([, options]) => options?.method === 'POST')).toBe(true);
+  expect(container.textContent).toContain('wake_admission_failed');
+  expect(container.querySelectorAll('[data-testid="managed-job-card"]').length).toBe(1);
+});
+
+it('keeps observing a terminal job until its pending owner recovery settles or parks', async () => {
+  vi.mocked(apiFetch)
+    .mockResolvedValueOnce(
+      response('succeeded', {
+        recovery: { version: 1, attempts: 0, nextAttemptAt: 2000 },
+      }),
+    )
+    .mockResolvedValueOnce(
+      response('succeeded', {
+        recovery: {
+          version: 1,
+          attempts: 5,
+          nextAttemptAt: null,
+          disposition: 'parked',
+          reasonCode: 'result_handoff_failed',
+          recheck: { kind: 'observe_original_job', jobId: 'managed-job-one' },
+        },
+      }),
+    );
+  act(() => root.render(<ConnectorBubble message={card} threadId="thread-1" timelineMessages={[card]} />));
+  await flush();
+  expect(container.textContent).not.toContain('result_handoff_failed');
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(2000);
+  });
+  await flush();
+  expect(vi.mocked(apiFetch)).toHaveBeenCalledTimes(2);
+  expect(container.textContent).toContain('result_handoff_failed');
+});

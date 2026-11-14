@@ -1334,8 +1334,11 @@ describe('main process update-schedule lifecycle', () => {
       /showVisibleRenderer\(\{\s*window: mainWindow,\s*url: createVersionedRendererUrl\(APP_URL,\s*app\.getVersion\(\)\),/,
       "desktop startup must bypass another package version's service-worker document cache",
     );
-    assert.match(mainSource, /const \{ showVisibleRenderer \} = require\('\.\/visible-renderer'\)/);
-    assert.match(visibleSource, /window\.loadURL\(url\)/);
+    assert.match(
+      mainSource,
+      /const \{ createStartupSplash, showVisibleRenderer \} = require\('\.\/visible-renderer'\)/,
+    );
+    assert.match(visibleSource, /window\.loadURL\(/);
     assert.match(source, /rendererLinkOrigins\s*=\s*createBaseRendererLinkOrigins\(\)/);
     assert.match(source, /resolveRendererLinkOrigins/);
     assert.match(source, /net\.fetch\(`\$\{API_ORIGIN\}\/api\/preview\/status`/);

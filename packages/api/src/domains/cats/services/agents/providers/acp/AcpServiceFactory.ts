@@ -1,7 +1,7 @@
 import { createHmac, randomBytes } from 'node:crypto';
 import { isAbsolute } from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
-import type { CatConfig } from '@cat-cafe/shared';
+import { type CatConfig, defaultAcpPoolMaxProcesses } from '@cat-cafe/shared';
 import type { FastifyBaseLogger } from 'fastify';
 import {
   type RuntimeProviderProfile,
@@ -21,11 +21,10 @@ import { inspectDshNativeLaunch } from '../../../../../../config/native-accounts
 import { inspectKimiNativeLaunch } from '../../../../../../config/native-accounts/kimi-installation.js';
 import { resolveEffectiveOpenCodeModel } from '../../../../../../config/opencode-model.js';
 import { invalidateCliCommand, resolveCliCommandOrBare } from '../../../../../../utils/cli-resolve.js';
-import { buildChildEnv } from '../../../../../../utils/cli-spawn.js';
 import { resolveWindowsSpawnPlan, type WindowsSpawnPlan } from '../../../../../../utils/cli-spawn-win.js';
 import { saveSpan } from '../../../../../../utils/member-save-diagnostics.js';
 import type { AgentRegistrationFailure } from '../../registry/AgentServiceUnavailableError.js';
-import { ExecutionAdmissionConflict } from '../../registry/AgentServiceUnavailableError.js';
+import { ExecutionAdmissionConflict, StaleServiceSourceConflict } from '../../registry/AgentServiceUnavailableError.js';
 import { prepareDshSecretPatch, verifyDshSecretPatch } from '../dsh-secret-patch.js';
 import { ensureKimiSecretHooks } from '../kimi-secret-hooks.js';
 import { prepareOpenCodeAcpSpawnConfig } from '../opencode-acp-spawn-config.js';
@@ -37,7 +36,7 @@ import { AcpProcessPool, DEFAULT_ACP_IDLE_TTL_MS } from './AcpProcessPool.js';
 // resolveAcpMcpServers + resolveDisabledServerIds moved to AcpAgentService.invoke()
 // for invoke-time resolution (#712 P1-1).
 import { createAcpPoolSpawnSignature } from './acp-pool-signature.js';
-import { tryPrepareAcpProcessEnv } from './acp-spawn-env.js';
+import { prepareAcpProcessEnv, tryPrepareAcpProcessEnv } from './acp-spawn-env.js';
 import { denyAgyAcpPermission } from './agy/agy-acp-permission.js';
 import { prepareAgyAcpProfile } from './agy/agy-acp-profile.js';
 import type { AgyAcpConfig } from './agy/agy-acp-session.js';
@@ -47,6 +46,13 @@ import {
   type VerifiedAcpBootstrapContext,
   verifyAcpBootstrap,
 } from './bootstrap/acp-bootstrap-context.js';
+import { captureAcpConstructionEnvironment } from './configuration/acp-construction-environment.js';
+import {
+  acpAccountConstructionSource,
+  acpConstructionJson,
+  acpLaunchConstructionSource,
+} from './configuration/acp-construction-source.js';
+import { prepareDshTurnPatch, verifyDshTurnPatch } from './dsh/dsh-turn-patch.js';
 import { skipAcpProfile } from './lifecycle/acp-registration-failure.js';
 import { pendingAcpPoolRetirement, trackAcpPoolRetirement } from './pool/acp-pool-retirement-registry.js';
 import {
@@ -83,6 +89,8 @@ interface AcpAccountContext {
 interface AcpSpawnContext {
   antigravity?: AgyAcpConfig;
   env?: Record<string, string>;
+  /** Adapter-owned outputs applied after member/account inputs. */
+  fixedEnv?: Record<string, string>;
   sessionModel?: string;
   openCodeRuntimeConfig: unknown;
   contextPolicy: AcpContextPolicy | null;
@@ -139,6 +147,7 @@ async function prepareAcpSpawnContext(
     try {
       if (
         config.clientId !== 'google' ||
+        Object.keys(config.env ?? {}).length > 0 ||
         input.acpConfig.transport === 'httpstream' ||
         (accountContext.account &&
           (accountContext.account.authType !== 'oauth' || Object.keys(accountContext.account.envVars ?? {}).length))
@@ -166,6 +175,7 @@ async function prepareAcpSpawnContext(
     provider: config.provider,
     baseModel: bootstrap.model,
     account: accountContext.account,
+    memberEnvironment: config.env,
   });
   if (!acpEnvResult.ok) {
     return skipAcpProfile(
@@ -176,6 +186,7 @@ async function prepareAcpSpawnContext(
     );
   }
   let acpSpawnEnv: Record<string, string> | undefined = acpEnvResult.env;
+  const fixedEnv: Record<string, string> = {};
   if (config.clientId === 'kimi') await ensureKimiSecretHooks(acpSpawnEnv ?? {});
 
   let openCodeAcpSpawnConfig: Awaited<ReturnType<typeof prepareOpenCodeAcpSpawnConfig>>;
@@ -189,6 +200,7 @@ async function prepareAcpSpawnContext(
       ...(acpSpawnEnv ?? {}),
       KIMI_MODEL_MAX_CONTEXT_SIZE: String(contextPolicy.windowTokens),
     };
+    fixedEnv.KIMI_MODEL_MAX_CONTEXT_SIZE = String(contextPolicy.windowTokens);
   }
   try {
     openCodeAcpSpawnConfig = await prepareOpenCodeAcpSpawnConfig({
@@ -212,6 +224,7 @@ async function prepareAcpSpawnContext(
   if (openCodeAcpSpawnConfig) {
     sessionModel = openCodeAcpSpawnConfig.runtimeConfigSummary.model ?? sessionModel;
     acpSpawnEnv = { ...(acpSpawnEnv ?? {}), ...openCodeAcpSpawnConfig.env };
+    Object.assign(fixedEnv, openCodeAcpSpawnConfig.env);
     input.log.info(
       {
         catId,
@@ -225,6 +238,7 @@ async function prepareAcpSpawnContext(
 
   return {
     env: acpSpawnEnv,
+    fixedEnv,
     sessionModel,
     openCodeRuntimeConfig: openCodeAcpSpawnConfig?.runtimeConfigSummary ?? null,
     contextPolicy,
@@ -237,8 +251,10 @@ async function ensureAcpPool(
   spawn: AcpSpawnContext,
   preparedEnv: Readonly<Record<string, string>>,
   preparedSpawn: NonNullable<AcpClientConfig['preparedSpawn']>,
+  construction: unknown,
 ): Promise<{ pool: AcpProcessPool; lease: AcpServicePoolLease }> {
   const { profileId, acpConfig, poolRegistry } = input;
+  const maxLiveProcesses = acpConfig.pool?.maxLiveProcesses ?? defaultAcpPoolMaxProcesses(input.config.clientId);
   const spawnSignature = createAcpPoolSpawnSignature({
     command: preparedSpawn.command,
     args: [...preparedSpawn.args],
@@ -246,11 +262,11 @@ async function ensureAcpPool(
     cwd: bootstrap.cwd,
     bootstrapIsolation: bootstrap.isolation,
     environmentFingerprint: createHmac('sha256', environmentFingerprintKey)
-      .update(JSON.stringify(preparedEnv))
+      .update(acpConstructionJson(construction))
       .digest('hex'),
     openCodeRuntimeConfig: spawn.openCodeRuntimeConfig,
     contextPolicy: spawn.contextPolicy,
-    maxLiveProcesses: acpConfig.pool?.maxLiveProcesses ?? 3,
+    maxLiveProcesses,
     idleTtlMs: acpConfig.pool?.idleTtlMs ?? DEFAULT_ACP_IDLE_TTL_MS,
     transport: acpConfig.transport ?? 'stdio',
     supportsMultiplexing: acpConfig.supportsMultiplexing,
@@ -271,7 +287,7 @@ async function ensureAcpPool(
 
   const pool = new AcpProcessPool(
     {
-      maxLiveProcesses: acpConfig.pool?.maxLiveProcesses ?? 3,
+      maxLiveProcesses,
       idleTtlMs: acpConfig.pool?.idleTtlMs ?? DEFAULT_ACP_IDLE_TTL_MS,
       healthCheckIntervalMs: 30_000,
     },
@@ -385,6 +401,7 @@ export async function createAcpServiceForConfig(
     }
   }
   const accountSource = structuredClone(accountContext);
+  const accountConstruction = acpAccountConstructionSource(config, bootstrap.model, accountSource);
   const spawn = await saveSpan('acp.prepare', () => prepareAcpSpawnContext(effectiveInput, bootstrap, accountContext));
   if (!spawn) return null;
   bootstrap.args = piBridgeStorageArgs(
@@ -400,7 +417,16 @@ export async function createAcpServiceForConfig(
     env: spawn.env ?? {},
     projectRoot: bootstrap.projectRoot,
   });
-  bootstrap.args = await prepareDshSecretPatch(bootstrap.command, originalArgs, bootstrap.projectRoot);
+  bootstrap.args = await prepareDshSecretPatch(
+    bootstrap.command,
+    originalArgs,
+    bootstrap.projectRoot,
+    spawn.sessionModel,
+  );
+  const secretPatch = bootstrap.args !== originalArgs ? bootstrap.args.at(-1) : undefined;
+  const secretArgs = bootstrap.args;
+  bootstrap.args = await prepareDshTurnPatch(bootstrap.command, secretArgs, bootstrap.projectRoot, spawn.sessionModel);
+  const turnPatch = bootstrap.args !== secretArgs ? bootstrap.args.at(-1) : undefined;
   const nativeKimi =
     config.clientId === 'kimi' && accountContext.account?.id && acpConfig.transport !== 'httpstream'
       ? inspectKimiNativeLaunch({
@@ -414,7 +440,7 @@ export async function createAcpServiceForConfig(
   // Audit and execution consume one fresh plan, rather than separate cache generations.
   invalidateCliCommand(bootstrap.command);
   const selectedCommand = resolveCliCommandOrBare(bootstrap.command);
-  const selected: Pick<WindowsSpawnPlan, 'command' | 'args' | 'shell'> =
+  const selected: Pick<WindowsSpawnPlan, 'command' | 'args' | 'shell' | 'env'> =
     process.platform === 'win32'
       ? resolveWindowsSpawnPlan(selectedCommand, bootstrap.args, { refresh: true })
       : { command: selectedCommand, args: [...bootstrap.args] };
@@ -438,42 +464,75 @@ export async function createAcpServiceForConfig(
     acpConfig.bootstrapRoot !== undefined,
     preparedSpawn,
   );
-  if (bootstrap.args !== originalArgs) {
-    const patch = bootstrap.args.at(-1);
-    if (!patch) throw new Error('secret_dsh_patch_unavailable');
+  if (secretPatch || turnPatch) {
     const verifyCwd = verified.verifyCwd;
     verified.verifyCwd = (...args) => {
-      if (!verifyDshSecretPatch(patch)) throw new Error('secret_dsh_patch_changed');
+      if (secretPatch && !verifyDshSecretPatch(secretPatch)) throw new Error('secret_dsh_patch_changed');
+      if (turnPatch && !verifyDshTurnPatch(turnPatch, bootstrap.command, secretArgs)) {
+        throw new Error(
+          'dsh_turn_admission_changed: DSH Desktop version, launch binding or managed bridge patch changed; refresh this member before retrying.',
+        );
+      }
       return verifyCwd(...args);
     };
   }
-  const prepareEnvironment = () =>
-    Object.fromEntries(
-      Object.entries(
-        buildChildEnv(spawn.env, {
-          workingDirectory: verified.cwd,
-          ...(spawn.antigravity ? { inheritParentEnv: false } : {}),
-        }),
-      )
-        .filter((entry): entry is [string, string] => entry[1] !== undefined)
-        .sort(([left], [right]) => left.localeCompare(right)),
-    );
-  const preparedEnv = Object.freeze(prepareEnvironment());
+  const environment = captureAcpConstructionEnvironment({
+    clientId,
+    workingDirectory: verified.cwd,
+    declaredEnv: spawn.env,
+    inheritParentEnv: !spawn.antigravity,
+    overrides: () =>
+      spawn.antigravity
+        ? spawn.env
+        : {
+            ...prepareAcpProcessEnv({
+              clientId,
+              provider: config.provider,
+              baseModel: bootstrap.model,
+              account: accountSource.account,
+              memberEnvironment: config.env,
+            }),
+            ...spawn.fixedEnv,
+            ...selected.env,
+          },
+    onChanged(changed) {
+      input.log.warn(
+        {
+          catId,
+          profileId,
+          changedEnvironmentKeys: changed.filter((key) => /^[A-Za-z_][A-Za-z0-9_]{0,127}$/.test(key)).slice(0, 16),
+          changedEnvironmentKeyCount: changed.length,
+        },
+        'ACP process environment changed before admission',
+      );
+      throw new StaleServiceSourceConflict('ACP process environment changed; refresh this member before admission.');
+    },
+  });
+  const preparedEnv = environment.preparedEnv;
+  const construction = { account: accountConstruction, environment: environment.projection };
   const assertConstructionCurrent = () => {
-    if (resolveCurrentAcpConfig && !isDeepStrictEqual(acpConfig, resolveCurrentAcpConfig()))
-      throw new ExecutionAdmissionConflict('ACP launch source changed; refresh this member before admission.');
-    if (!isDeepStrictEqual(accountSource, resolveAcpAccount(bootstrap.projectRoot, config)))
-      throw new ExecutionAdmissionConflict('ACP account source changed; refresh this member before admission.');
-    if (!isDeepStrictEqual(preparedEnv, prepareEnvironment()))
-      throw new ExecutionAdmissionConflict('ACP process environment changed; refresh this member before admission.');
+    if (
+      resolveCurrentAcpConfig &&
+      !isDeepStrictEqual(acpLaunchConstructionSource(acpConfig), acpLaunchConstructionSource(resolveCurrentAcpConfig()))
+    )
+      throw new StaleServiceSourceConflict('ACP launch source changed; refresh this member before admission.');
+    if (
+      !isDeepStrictEqual(
+        accountConstruction,
+        acpAccountConstructionSource(config, bootstrap.model, resolveAcpAccount(bootstrap.projectRoot, config)),
+      )
+    )
+      throw new StaleServiceSourceConflict('ACP account source changed; refresh this member before admission.');
+    environment.assertCurrent();
   };
   const { pool, lease } = await saveSpan('acp.pool', () =>
-    ensureAcpPool(effectiveInput, verified, spawn, preparedEnv, preparedSpawn),
+    ensureAcpPool(effectiveInput, verified, spawn, preparedEnv, preparedSpawn, construction),
   );
 
   // #712 P1-1: pass whitelist — MCP resolution happens at invoke time in
   // AcpAgentService so capability toggles take effect without registry rebuild.
   const service = new AcpAgentService({
+    ...(turnPatch ? { dshTurnInput: true } : {}),
     ...(nativeDsh ? { nativeDsh } : {}),
     ...(nativeKimi ? { nativeKimi } : {}),
     ...(spawn.antigravity ? { antigravity: spawn.antigravity, agentBusyRetryDelaysMs: [] } : {}),
@@ -508,10 +567,23 @@ export async function createAcpServiceForConfig(
   const captureOptions = service.captureInvocationOptions.bind(service);
   service.captureInvocationOptions = async (options) => {
     if ('accountRef' in options && options.accountRef !== accountSource.account?.id)
-      throw new ExecutionAdmissionConflict('ACP selected account changed; refresh this member before admission.');
+      throw new StaleServiceSourceConflict('ACP selected account changed; refresh this member before admission.');
     assertConstructionCurrent();
-    const captured = await captureOptions(options);
+    const sessionSource = resolveCurrentAcpConfig ? resolveCurrentAcpConfig() : acpConfig;
+    const sessionWhitelist = [...(sessionSource?.mcpWhitelist ?? [])];
+    const captured = await captureOptions({
+      ...options,
+      mcpWhitelist: sessionWhitelist,
+    });
     assertConstructionCurrent();
+    const latestSessionSource = resolveCurrentAcpConfig ? resolveCurrentAcpConfig() : acpConfig;
+    if (
+      (options.mcpSupport ?? config.mcpSupport) !== false &&
+      !isDeepStrictEqual(sessionWhitelist, latestSessionSource?.mcpWhitelist ?? [])
+    )
+      throw new ExecutionAdmissionConflict(
+        'ACP session configuration changed during admission; retry this invocation.',
+      );
     return captured;
   };
   return bindAcpServicePoolLease(service, lease);

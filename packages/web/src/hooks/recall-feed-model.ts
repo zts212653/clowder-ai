@@ -2,7 +2,7 @@ import type { ChatMessage } from '@/stores/chat-types';
 import { recallResultTitle, recallTypeLabel } from './recall-display';
 import type { RecallEvent } from './recall-types';
 
-export type RecallKind = 'search' | 'graph' | 'delivery';
+export type RecallKind = 'search' | 'graph' | 'delivery' | 'read';
 export interface RecallGroup {
   id: string;
   catId?: string;
@@ -18,6 +18,7 @@ export function recallReplyInvocationId(message: ChatMessage): string | undefine
   return message.extra?.stream?.turnInvocationId ?? message.extra?.stream?.invocationId;
 }
 export function recallKind(event: RecallEvent): RecallKind {
+  if (event.cueStatus && event.source === 'pull') return 'read';
   return event.source === 'push' || event.cueStatus
     ? 'delivery'
     : event.toolName === 'graph_resolve'
@@ -39,6 +40,7 @@ export function recallEventDisplayTitle(event: RecallEvent): string {
   );
 }
 export function recallEventResultLabel(event: RecallEvent): string {
+  if (event.cueStatus === 'drilled' && event.source === 'pull') return '已读取';
   if (event.cueStatus) {
     return {
       presented_unreported: '已递送·未回报',
@@ -48,7 +50,10 @@ export function recallEventResultLabel(event: RecallEvent): string {
       invalidated: '递送已失效',
     }[event.cueStatus];
   }
-  if (event.resultStatus === 'error') return '召回失败';
+  if (event.resultStatus === 'error') return '检索失败';
+  if (event.resultStatus === 'timeout') return '检索超时';
+  if (event.resultStatus === 'cancelled') return '检索已取消';
+  if (event.resultStatus === 'parser_miss') return '无法读取检索结果';
   if (event.resultCount === 0 || event.resultStatus === 'no_results') return '没有命中';
   if (event.resultCount == null) return '结果没有记录下来';
   const reads = recallReadCount(event);
@@ -104,7 +109,11 @@ export function deduplicateRecallEvents(live: RecallEvent[], history: RecallEven
       pushSurface: event.pushSurface ?? other.pushSurface,
       consumedCount: event.consumedCount ?? other.consumedCount,
       resultCount: event.resultCount ?? other.resultCount,
-      resultStatus: event.resultStatus ?? other.resultStatus,
+      query: !event.query.trim() || event.query === '(unknown)' ? other.query || event.query : event.query,
+      resultStatus:
+        other.resultStatus && other.resultStatus !== 'legacy_unknown' && other.resultStatus !== 'result_unmerged'
+          ? other.resultStatus
+          : (event.resultStatus ?? other.resultStatus),
       results,
     };
   });
@@ -151,6 +160,7 @@ export function recallCounts(events: RecallEvent[]): string {
     counts.search && `检索 ${counts.search}`,
     counts.graph && `关系查询 ${counts.graph}`,
     counts.delivery && `递送 ${counts.delivery}`,
+    counts.read && `读取 ${counts.read}`,
   ]
     .filter(Boolean)
     .join(' · ');
@@ -161,11 +171,13 @@ export function countRecallEvents(events: RecallEvent[]): {
   search: number;
   graph: number;
   delivery: number;
+  read?: number;
   total: number;
 } {
   const kinds = events.map(recallKind);
   const search = kinds.filter((kind) => kind === 'search').length;
   const graph = kinds.filter((kind) => kind === 'graph').length;
   const delivery = kinds.filter((kind) => kind === 'delivery').length;
-  return { search, graph, delivery, total: search + graph + delivery };
+  const read = kinds.filter((kind) => kind === 'read').length;
+  return { search, graph, delivery, ...(read ? { read } : {}), total: search + graph + delivery + read };
 }

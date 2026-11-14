@@ -54,3 +54,34 @@ redis.call('ZREM', KEYS[2], ARGV[2])
 redis.call('ZADD', KEYS[3], tonumber(ARGV[3]), ARGV[2])
 return 1
 `;
+
+/** Commit the proposal and durable request binding under the original reservation fence. */
+export const CREATE_RESERVED_PROFILE_UPDATE_LUA = `
+if redis.call('GET', KEYS[2]) ~= ARGV[1] then return 0 end
+redis.call('HSET', KEYS[1], unpack(ARGV, 4))
+if tonumber(ARGV[3]) > 0 then redis.call('EXPIRE', KEYS[1], tonumber(ARGV[3])) end
+redis.call('ZADD', KEYS[3], tonumber(ARGV[2]), ARGV[1])
+redis.call('ZADD', KEYS[4], tonumber(ARGV[2]), ARGV[1])
+redis.call('ZADD', KEYS[5], tonumber(ARGV[2]), ARGV[1])
+redis.call('PERSIST', KEYS[2])
+return 1
+`;
+
+/** Empty reservations have a lease; a recovered canonical request binding is durable. */
+export const RESERVE_PROFILE_UPDATE_LUA = `
+local current = redis.call('GET', KEYS[1])
+if current then
+  if current == ARGV[1] and redis.call('EXISTS', KEYS[2]) == 1 then
+    redis.call('HSETNX', KEYS[2], 'clientRequestId', ARGV[3])
+    redis.call('PERSIST', KEYS[1])
+  end
+  return current
+end
+if redis.call('EXISTS', KEYS[2]) == 1 then
+  redis.call('HSETNX', KEYS[2], 'clientRequestId', ARGV[3])
+  redis.call('SET', KEYS[1], ARGV[1])
+else
+  redis.call('SET', KEYS[1], ARGV[1], 'EX', ARGV[2])
+end
+return ARGV[1]
+`;

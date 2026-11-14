@@ -38,15 +38,14 @@ import {
   type ResolvedIngress,
   sourceForConnectorIngress,
 } from './ingress-wake.js';
-
 import type { MessagingLedger } from './ledger.js';
 import { replaceLegacyMediaReferences } from './legacy-media.js';
 import type { PendingMediaPublication } from './media-pending-publication.js';
 import type { MediaReferenceAuthority } from './media-reference-authority.js';
 import { type MediaSourceResolver, mediaStageKey, type StagedMediaSend } from './media-staging.js';
 import type { AddressHandleRecord, EventLogStore } from './stores/ports.js';
-
 import { clampRetention } from './stores/ports.js';
+import { assertTargetResponseOpen } from './target-response/state.js';
 
 export interface SendServiceDeps {
   readonly messageStore: IMessageStore;
@@ -67,6 +66,7 @@ export interface SendServiceDeps {
 
 export interface HostSendOptions {
   readonly source: ConnectorSource;
+  readonly responseResult?: import('@cat-cafe/shared').TargetResponseResult;
   readonly contentBlocks?: readonly MessageContent[];
   readonly sender?: { readonly id: string; readonly name?: string };
   readonly wake?: import('./ingress-wake.js').PluginMessageWake;
@@ -248,6 +248,7 @@ export class SendService {
         // URI-encoded so ':' inside ids cannot forge a foreign instance's key space.
         idempotencyKey: `plugmsg:${encodeURIComponent(ctx.pluginInstanceId)}:${encodeURIComponent(draft.idempotencyKey)}`,
         extra: {
+          ...(hostOptions?.responseResult ? { targetResponseResult: hostOptions.responseResult } : {}),
           pluginMessage: {
             ...(source === undefined ? {} : { presentation: source }),
             instanceId: ctx.pluginInstanceId,
@@ -261,6 +262,18 @@ export class SendService {
           },
         },
       };
+
+      // The ledger/staging and permanent Message index distinguish recovery from new work.
+      // Resolve caller/source identity in the Host as usual, but do not reject an already
+      // accepted partial merely because the target completed since it was accepted.
+      if (hostOptions?.responseResult) {
+        const existing = await this.deps.messageStore.getByIdempotencyKey(
+          handle.userId,
+          handle.threadId,
+          appendInput.idempotencyKey!,
+        );
+        if (!existing) await assertTargetResponseOpen(this.deps.messageStore, hostOptions.responseResult);
+      }
 
       const accepted = await this.acceptPendingMedia({ ctx, draft, handle, appendInput, hostOptions, wake, timestamp });
       if (accepted) return await this.settleReceipt(ctx, draft, claim.claimToken, accepted);
@@ -321,13 +334,15 @@ export class SendService {
       // this send still returned a success receipt.
       if (ingress) {
         await deliverIngressEffectsOnce(this.deps.ledger, {
+          messageStore: this.deps.messageStore,
           instanceId: ctx.pluginInstanceId,
           idempotencyKey: draft.idempotencyKey,
           threadId: handle.threadId,
           userId: handle.userId,
           messageId: stored.id,
-          content,
-          ...(hostOptions?.contentBlocks === undefined ? {} : { contentBlocks: hostOptions.contentBlocks }),
+          content: stored.content,
+          ...(stored.replyTo === undefined ? {} : { replyTo: stored.replyTo }),
+          ...(stored.contentBlocks === undefined ? {} : { contentBlocks: stored.contentBlocks }),
           ...(hostOptions?.sender === undefined ? {} : { sender: hostOptions.sender }),
           timestamp,
           ingress,

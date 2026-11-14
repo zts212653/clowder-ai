@@ -149,6 +149,8 @@ describe('runtime governance creates project-level skill links (ADR-025)', () =>
     'governance-bootstrap-plan.ts',
   );
   const SKILL_SYNC_ENGINE_SRC = join(PROJECT_ROOT, 'packages', 'api', 'src', 'skills', 'skill-sync-engine.ts');
+  // F314-12: the engine reads its mount dirs and symlink targets from the shared skill-mount utility.
+  const SKILL_MOUNT_UTIL_SRC = join(PROJECT_ROOT, 'packages', 'api', 'src', 'utils', 'skill-mount.ts');
   const MOUNT_RULES_SRC = join(PROJECT_ROOT, 'packages', 'shared', 'src', 'types', 'mount-rules.ts');
   const PREFLIGHT_SRC = join(PROJECT_ROOT, 'packages', 'api', 'src', 'config', 'governance', 'governance-preflight.ts');
 
@@ -162,19 +164,24 @@ describe('runtime governance creates project-level skill links (ADR-025)', () =>
   });
 
   it('skill-sync creates per-skill symlinks at project level', async () => {
-    const [syncContent, mountRulesContent] = await Promise.all([
+    const [syncContent, mountUtilContent, mountRulesContent] = await Promise.all([
       readFile(SKILL_SYNC_ENGINE_SRC, 'utf-8'),
+      readFile(SKILL_MOUNT_UTIL_SRC, 'utf-8'),
       readFile(MOUNT_RULES_SRC, 'utf-8'),
     ]);
     assert.ok(
-      syncContent.includes('join(projectRoot, rules.mountPoints[id].path)'),
-      'skill-sync engine must resolve standard mount dirs under projectRoot',
+      syncContent.includes('buildProjectSkillMountDirs(') && syncContent.includes('buildProjectSkillMountTargets('),
+      'skill-sync engine must take its mount dirs from the shared skill-mount utility',
+    );
+    assert.ok(
+      mountUtilContent.includes('join(projectRoot, rule.path)'),
+      'skill mount dirs must resolve standard mount points under projectRoot',
     );
     assert.ok(
       syncContent.includes('await createSkillSymlink(symlinkTargetFor(linkPath'),
       'skill-sync engine must create per-skill symlinks',
     );
-    assert.ok(syncContent.includes("process.platform === 'win32'"), 'skill-sync engine must handle Windows targets');
+    assert.ok(mountUtilContent.includes("process.platform === 'win32'"), 'skill links must handle Windows targets');
     assert.ok(mountRulesContent.includes("claude: { enabled: true, path: '.claude/skills' }"));
     assert.ok(mountRulesContent.includes("codex: { enabled: true, path: '.codex/skills' }"));
     assert.ok(mountRulesContent.includes("gemini: { enabled: true, path: '.gemini/skills' }"));

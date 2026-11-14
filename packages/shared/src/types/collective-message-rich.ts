@@ -1,7 +1,10 @@
 import { z } from 'zod';
 import { richBlockSchema } from '../schemas/rich-block.schema.js';
 
-const attachmentUrl = z.string().startsWith('collective-attachment:').max(240);
+const attachmentUrl = z
+  .string()
+  .regex(/^collective-attachment:/)
+  .max(240);
 export function isCollectiveAttachmentUrl(url: string): boolean {
   return attachmentUrl.safeParse(url).success;
 }

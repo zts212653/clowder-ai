@@ -1,9 +1,10 @@
 #!/usr/bin/env node
 import { spawn, spawnSync } from 'node:child_process';
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
-import { homedir, tmpdir } from 'node:os';
+import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { testTempRoot } from '../../../scripts/lib/test-temp-root.mjs';
 
 const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const isWindows = process.platform === 'win32';
@@ -35,6 +36,39 @@ const CLEARED_ENV_KEYS = [
   'REDIS_DATA_DIR',
   'REDIS_BACKUP_DIR',
   'REDIS_KEY_PREFIX',
+  // Test fixtures own private managed jobs and pools. The outer runner keeps
+  // its real permit; cleanup tokens still bind every descendant to that runner.
+  'CAT_CAFE_FULL_GATE_RESOURCE_PERMIT_HELD',
+  'CAT_CAFE_FULL_GATE_RESOURCE_MODE',
+  'CAT_CAFE_FULL_GATE_RESOURCE_PRIORITY',
+  'CAT_CAFE_FULL_GATE_RESOURCE_STAGE',
+  'CAT_CAFE_FULL_GATE_RESOURCE_CLASS',
+  'CAT_CAFE_FULL_GATE_RESOURCE_CLAIMS',
+  'CAT_CAFE_MANAGED_JOB_ID',
+  'CAT_CAFE_MANAGED_JOB_RECORD_PATH',
+  'CAT_CAFE_MANAGED_CANCEL_REQUEST_PATH',
+  'CAT_CAFE_MANAGED_TERMINAL_STATE',
+  'CAT_CAFE_MANAGED_GATE_RECOVERY_PROTOCOL',
+  'CAT_CAFE_MANAGED_GATE_ATTEMPT_TOKEN',
+  'CAT_CAFE_MANAGED_GATE_FROZEN_IDENTITY_JSON',
+  'CAT_CAFE_MANAGED_GATE_RECOVERY_READY_PATH',
+  'CAT_CAFE_MANAGED_GATE_RESUME_EPOCH',
+  'CAT_CAFE_MANAGED_GATE_RECONCILE_FROM',
+  'CAT_CAFE_ALPHA_RECOVERY_JOURNAL',
+  'CAT_CAFE_ALPHA_OBSERVER_UNIT_KEY',
+  'CAT_CAFE_GATE_ORIGIN_TASK_ID',
+  'CAT_CAFE_GATE_EXECUTION_OWNER_JOB_ID',
+  'CAT_CAFE_GATE_EXECUTION_PARENT_JOB_ID',
+  'CAT_CAFE_GATE_EXECUTION_ORIGIN_TASK_ID',
+  'CAT_CAFE_GATE_EXECUTION_RESUME_KIND',
+  'CAT_CAFE_GATE_EXECUTION_RESUME_KEY',
+  'CAT_CAFE_GATE_EXECUTION_RESUME_SOURCE_RUN_ID',
+  'CAT_CAFE_GATE_EXECUTION_SLA_MS',
+  'ANTHROPIC_API_KEY',
+  'OPENAI_API_KEY',
+  'GOOGLE_API_KEY',
+  'GEMINI_API_KEY',
+  'MOONSHOT_API_KEY',
 ];
 
 function usage() {
@@ -71,15 +105,19 @@ function parseArgs(argv) {
 
 function configureSandbox(env) {
   const realHome = env.CAT_CAFE_TEST_REAL_HOME ?? env.HOME ?? env.USERPROFILE ?? homedir();
-  const testHome = realpathSync(mkdtempSync(join(tmpdir(), 'cat-cafe-test-home-')));
+  const testHome = realpathSync(mkdtempSync(join(testTempRoot(), 'cat-cafe-test-home-')));
 
   env.HOME = testHome;
   if (isWindows) env.USERPROFILE = testHome;
   env.CAT_CAFE_TEST_SANDBOX = '1';
   env.CAT_CAFE_TEST_REAL_HOME = realHome;
+  env.CAT_CAFE_TEST_TEMPLATE_ROOT = join(testHome, 'templates');
   env.NODE_ENV = 'test';
 
   for (const key of CLEARED_ENV_KEYS) delete env[key];
+  for (const key of Object.keys(env)) {
+    if (key.startsWith('CAT_CAFE_MANAGED_') || key.startsWith('BASH_FUNC_')) delete env[key];
+  }
 
   try {
     if (env.CAT_CAFE_REDIS_TEST_ISOLATED === '1') {

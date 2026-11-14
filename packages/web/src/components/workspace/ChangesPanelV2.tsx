@@ -5,25 +5,15 @@ import { useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useShellCopy } from '@/components/shell/shell-copy';
 import { ThreadNativeReviewSettingsContent } from '@/components/ThreadSidebar/ThreadNativeReviewSettings';
 import { useWorkspaceSurfaceVisibility } from '@/components/workbench/WorkspaceSurfaceVisibility';
+import { isGitWorktreeRequired } from '@/utils/git-response-error';
 import type { CommitChangesTarget } from '../workbench/commit-changes-surface';
+import { ChangesDiffPlaceholder } from './ChangesDiffPlaceholder';
 import { codeToolsCopy } from './code-tools.shell-copy';
 import { DiffViewer, parseUnifiedDiff } from './DiffViewer';
 import { FileIcon } from './FileIcons';
+import { getStatusInfo } from './git-file-status';
 import { PullRequestChangesEmpty, PullRequestChangesStatus } from './PullRequestChangesStatus';
 import { useChangesDiff } from './useChangesDiff';
-
-const statusLabels: Record<string, { label: string; color: string }> = {
-  M: { label: 'M', color: 'text-amber-400' },
-  A: { label: 'A', color: 'text-green-400' },
-  D: { label: 'D', color: 'text-conn-red-text' },
-  R: { label: 'R', color: 'text-blue-400' },
-  '?': { label: 'U', color: 'text-cafe-muted' },
-  '??': { label: 'U', color: 'text-cafe-muted' },
-};
-
-function getStatusInfo(status: string) {
-  return statusLabels[status] ?? { label: status, color: 'text-cafe-muted' };
-}
 
 interface ChangesPanelV2Props {
   worktreeId: string | null;
@@ -31,7 +21,6 @@ interface ChangesPanelV2Props {
   threadId?: string | null;
   onOpenFile?: (path: string) => void;
   pullRequestTarget?: PullRequestChangesTarget;
-  chatSource?: boolean;
   commitTarget?: CommitChangesTarget;
   onBack?: () => void;
 }
@@ -48,17 +37,11 @@ export function ChangesPanelV2({
   threadId,
   onOpenFile,
   pullRequestTarget,
-  chatSource,
   commitTarget,
   onBack,
 }: ChangesPanelV2Props) {
   const copy = useShellCopy(codeToolsCopy).changes;
-  const { data, loading, error, refresh, targetKey } = useChangesDiff(
-    worktreeId,
-    pullRequestTarget,
-    chatSource,
-    commitTarget,
-  );
+  const { data, loading, error, refresh, targetKey } = useChangesDiff(worktreeId, pullRequestTarget, commitTarget);
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
   const visible = useWorkspaceSurfaceVisibility();
   const diffViewport = useRef<HTMLDivElement>(null);
@@ -96,7 +79,13 @@ export function ChangesPanelV2({
   return (
     <div className="flex flex-col min-h-0 flex-1">
       {pullRequestTarget && (
-        <PullRequestChangesStatus target={pullRequestTarget} data={data} error={error} onBack={onBack} />
+        <PullRequestChangesStatus
+          target={pullRequestTarget}
+          data={data}
+          error={error}
+          onBack={onBack}
+          onRetry={() => void refresh()}
+        />
       )}
       {threadId && !pullRequestTarget && (
         <details
@@ -130,7 +119,11 @@ export function ChangesPanelV2({
         </div>
         {error && !pullRequestTarget && (
           <div className="px-3 py-1.5 text-micro text-conn-red-text">
-            {error === 'fetch_failed' ? copy.fetchFailed : copy.networkError}
+            {isGitWorktreeRequired(error)
+              ? copy.gitWorktreeRequired
+              : error === 'fetch_failed'
+                ? copy.fetchFailed
+                : copy.networkError}
           </div>
         )}
         {data?.changedFiles.map((f) => {
@@ -162,7 +155,13 @@ export function ChangesPanelV2({
         })}
         {data && data.changedFiles.length === 0 && (
           <div className="px-3 py-4 text-center text-cafe-muted text-xs">
-            {pullRequestTarget ? <PullRequestChangesEmpty /> : copy.noChanges}
+            {data.isGitRepository === false ? (
+              copy.notGitRepository
+            ) : pullRequestTarget ? (
+              <PullRequestChangesEmpty />
+            ) : (
+              copy.noChanges
+            )}
           </div>
         )}
       </div>
@@ -192,7 +191,12 @@ export function ChangesPanelV2({
             openFileLabel={copy.openFile}
           />
         ) : (
-          <div className="p-4 text-center text-cafe-secondary text-xs">{loading ? copy.loading : copy.selectFile}</div>
+          <ChangesDiffPlaceholder
+            loading={loading}
+            failed={Boolean(pullRequestTarget && error)}
+            loadingLabel={copy.loading}
+            selectFileLabel={copy.selectFile}
+          />
         )}
       </div>
     </div>

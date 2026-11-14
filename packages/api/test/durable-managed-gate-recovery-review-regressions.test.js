@@ -5,10 +5,7 @@ import { dirname, join } from 'node:path';
 import { describe, test } from 'node:test';
 import Database from 'better-sqlite3';
 import { initializeDurableManagedGateJob } from '../dist/domains/ball-custody/durable-managed-gate-job.js';
-import {
-  parseMacPowerLog,
-  readDurableGatePowerEvidence,
-} from '../dist/domains/ball-custody/durable-managed-gate-power-evidence.js';
+import { readDurableGatePowerEvidence } from '../dist/domains/ball-custody/durable-managed-gate-power-evidence.js';
 import {
   acknowledgeDurableGateSelfRecovery,
   evaluateDurableGateMutation,
@@ -17,6 +14,7 @@ import {
   synchronizeDurableGateFrozenIdentity,
 } from '../dist/domains/ball-custody/durable-managed-gate-recovery.js';
 import { ManagedRunner } from '../dist/infrastructure/managed-runner.js';
+import { parseNativePowerLog } from './helpers/native-power-evidence.js';
 
 const OWNER = { pid: 41, ppid: 1, pgid: 41, startedAt: 'birth-41' };
 const FROZEN_IDENTITY = {
@@ -201,14 +199,14 @@ describe('durable managed gate recovery review regressions', () => {
     }
   });
 
-  test('only a full wake can authorize self recovery and Wake Requests is not a wake event', () => {
+  test('only a full wake can authorize self recovery', () => {
     const root = mkdtempSync(join(tmpdir(), 'gate-recovery-power-'));
     const job = recoveryJob(root, 'power-events');
     const start = Date.parse('2026-09-24T04:25:11-07:00');
     const dark = Date.parse('2026-09-24T04:39:42-07:00');
     try {
-      const darkOnly = parseMacPowerLog(
-        '2026-09-24 04:25:11 -0700 Sleep Entering Sleep state\n2026-09-24 04:39:42 -0700 DarkWake DarkWake from Deep Idle\n',
+      const darkOnly = parseNativePowerLog(
+        '1790249111\t0\tSleep\t9F57E25A-E878-465F-8324-A260A01592E0\n1790249982\t0\tDarkWake\t9F57E25A-E878-465F-8324-A260A01592E0\n',
       );
       assert.equal(darkOnly[0].wakeKind, 'dark');
       initializeDurableGateRecovery(job, OWNER, start - 1_000);
@@ -223,12 +221,12 @@ describe('durable managed gate recovery review regressions', () => {
       });
       assert.notEqual(decision.action, 'self_reconcile');
 
-      const requests = parseMacPowerLog(
-        '2026-09-24 04:25:11 -0700 Sleep Entering Sleep state\n2026-09-24 04:25:12 -0700 Wake Requests [process=powerd request=Maintenance]\n2026-09-24 04:55:02 -0700 Wake Wake from Deep Idle\n',
+      const fullWake = parseNativePowerLog(
+        '1790249111\t0\tSleep\t9F57E25A-E878-465F-8324-A260A01592E0\n1790250902\t0\tWake\t9F57E25A-E878-465F-8324-A260A01592E0\n',
       );
-      assert.equal(requests.length, 1);
-      assert.equal(requests[0].endedAt, Date.parse('2026-09-24T04:55:02-07:00'));
-      assert.equal(requests[0].wakeKind, 'full');
+      assert.equal(fullWake.length, 1);
+      assert.equal(fullWake[0].endedAt, Date.parse('2026-09-24T04:55:02-07:00'));
+      assert.equal(fullWake[0].wakeKind, 'full');
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
@@ -291,6 +289,8 @@ describe('durable managed gate recovery review regressions', () => {
       { from: 1, to: 2, timeoutMs: 37 },
       {
         platform: 'darwin',
+        exists: () => true,
+        now: () => 0,
         execFileSync: (_file, _args, options) => {
           observedOptions = options;
           const error = new Error('timed out');
@@ -306,6 +306,8 @@ describe('durable managed gate recovery review regressions', () => {
       { from: 1, to: 2, timeoutMs: Number.MAX_SAFE_INTEGER },
       {
         platform: 'darwin',
+        exists: () => true,
+        now: () => 0,
         execFileSync: (_file, _args, options) => {
           observedOptions = options;
           return '';

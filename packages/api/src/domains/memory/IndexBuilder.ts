@@ -8,9 +8,11 @@ import { join, relative, resolve } from 'node:path';
 import { createInterface } from 'node:readline';
 import { setImmediate as yieldToIo } from 'node:timers/promises';
 import { CatCafeScanner } from './CatCafeScanner.js';
+import { isPublicTasteVignettePath } from './CatCafeScannerParsing.js';
 import { GenericRepoScanner } from './GenericRepoScanner.js';
 import type {
   ConsistencyReport,
+  EmbedModelInfo,
   EvidenceItem,
   EvidenceKind,
   IEmbeddingService,
@@ -20,6 +22,9 @@ import type {
   RepoScanner,
   ThreadIndexRefreshOptions,
 } from './interfaces.js';
+import type { PublishedDocumentIndex } from './PublishedDocumentIndex.js';
+import type { PublishedDocumentSnapshot } from './PublishedDocumentSource.js';
+import { writeEvidenceItems } from './write-evidence-items.js';
 
 // Re-export for backward compatibility — external code imports KIND_DIRS from IndexBuilder
 export { KIND_DIRS } from './CatCafeScanner.js';
@@ -35,6 +40,7 @@ import {
   documentPathToAnchor,
   extractDocumentSourceEdges,
 } from './document-source-edges.js';
+import { embedCurrentDocuments } from './embed-current-documents.js';
 import { embedPassages, INDEX_EMBED_BATCH_SIZE } from './embed-utils.js';
 import { isMarkdownSourcePath } from './MarkdownPassageIndexer.js';
 import { runMemoryScan } from './MemoryProcess.js';
@@ -49,6 +55,12 @@ import { SIGNAL_FLAGS } from './summary-config.js';
 import { projectThreadMessageSummary } from './thread-summary-projection.js';
 import type { VectorStore } from './VectorStore.js';
 import { createVectorInvalidator } from './vector-invalidation.js';
+import {
+  captureVectorSource,
+  commitVectorSource,
+  pruneDeletedDocumentProofs,
+  type VectorSourceSnapshot,
+} from './vector-source-binding.js';
 
 /**
  * Bump when scanner extraction logic changes (e.g., new fields derived from
@@ -185,6 +197,7 @@ class ThreadIndexSourceUnavailableError extends Error {
 
 export class IndexBuilder implements IIndexBuilder {
   private readonly pendingMentionDocAnchors = new Set<string>();
+  private publishedSnapshot?: PublishedDocumentSnapshot;
   private indexMutationTail: Promise<unknown> = Promise.resolve();
   private readonly pendingDocumentVectorAnchors = new Set<string>();
   /** E-2: Set of threadIds that have been modified since last flush */
@@ -216,6 +229,7 @@ export class IndexBuilder implements IIndexBuilder {
     private readonly excludeThreadIdsFn?: ExcludeThreadIdsFn,
     scanner?: RepoScanner,
     exclude?: string[],
+    readonly publishedDocuments?: PublishedDocumentIndex,
   ) {
     this.store.invalidateVectorProjection();
     if (scanner) {
@@ -226,7 +240,7 @@ export class IndexBuilder implements IIndexBuilder {
       this.scanner = detected.scanner;
       this.scanRoot = detected.scanRoot;
     }
-    this.store.setSourceRoot(this.scanRoot);
+    this.store.setSourceRoot(this.scanRoot, publishedDocuments ? 'published:project' : undefined);
   }
 
   setEmbedDeps(
@@ -249,6 +263,7 @@ export class IndexBuilder implements IIndexBuilder {
   }
 
   addExcludePatterns(patterns: string[]): void {
+    this.publishedDocuments?.source.addExcludePatterns(patterns);
     if (this.scanner instanceof CatCafeScanner) {
       this.scanner.addExcludePatterns(patterns);
     }
@@ -292,7 +307,38 @@ export class IndexBuilder implements IIndexBuilder {
   }
 
   rebuild(options?: Parameters<IndexBuilder['rebuildOnce']>[0]): Promise<RebuildResult> {
-    return this.serializeIndexMutation(() => this.rebuildOnce(options));
+    return this.serializeIndexMutation(() =>
+      this.withPublishedSnapshot(async () => {
+        const result = await this.rebuildOnce(options);
+        await this.flushPendingMentions();
+        if (this.publishedSnapshot) await this.publishedDocuments!.commit(this.publishedSnapshot);
+        return result;
+      }),
+    );
+  }
+
+  private async withPublishedSnapshot<T>(operation: () => Promise<T>, fetchRemote = false): Promise<T> {
+    try {
+      this.publishedSnapshot = await this.publishedDocuments?.open(fetchRemote);
+      return await operation();
+    } catch (error) {
+      this.publishedDocuments?.failure(error);
+      throw error;
+    } finally {
+      this.publishedSnapshot = undefined;
+    }
+  }
+
+  refreshPublishedDocuments(fetchRemote = false): Promise<void> {
+    return this.serializeIndexMutation(() =>
+      this.withPublishedSnapshot(async () => {
+        if (!this.publishedSnapshot || !this.publishedDocuments) return;
+        const paths = this.publishedDocuments.changes(this.publishedSnapshot);
+        if (paths.length) await this.incrementalUpdateOnce(paths.map((path) => resolve(this.scanRoot, path)));
+        await this.flushPendingMentions();
+        await this.publishedDocuments.commit(this.publishedSnapshot);
+      }, fetchRemote),
+    );
   }
 
   private serializeIndexMutation<T>(operation: () => Promise<T>): Promise<T> {
@@ -314,6 +360,7 @@ export class IndexBuilder implements IIndexBuilder {
   }
 
   private async discover(): Promise<import('./interfaces.js').ScannedEvidence[]> {
+    if (this.publishedSnapshot) return this.publishedSnapshot.scan();
     await access(this.scanRoot);
     if (this.scanner instanceof CatCafeScanner || this.scanner instanceof GenericRepoScanner) {
       return runMemoryScan({
@@ -384,7 +431,11 @@ export class IndexBuilder implements IIndexBuilder {
       if (existing && existing.sourcePath !== item.sourcePath) {
         const existingPriority = KIND_PRIORITY[existing.kind] ?? 0;
         const newPriority = KIND_PRIORITY[item.kind] ?? 0;
-        const existingFileExists = existing.sourcePath ? existsSync(join(this.docsRoot, existing.sourcePath)) : false;
+        const existingFileExists = existing.sourcePath
+          ? this.publishedSnapshot
+            ? this.publishedSnapshot.files.has(existing.sourcePath)
+            : existsSync(join(this.docsRoot, existing.sourcePath))
+          : false;
         if (existingFileExists) {
           // Anchor collision warning — two distinct files claim the same anchor
           console.warn(
@@ -402,22 +453,26 @@ export class IndexBuilder implements IIndexBuilder {
       this.pendingMentionDocAnchors.add(item.anchor);
       // A matching hash means passages completed, not merely metadata written.
       // Persist an incomplete stamp until the replacement transaction commits.
-      await this.store.upsertForDocumentIndex(
-        isMarkdownSourcePath(item.sourcePath) ? { ...item, sourceHash: undefined } : item,
-      );
+      if (!isPublicTasteVignettePath(item.sourcePath ?? ''))
+        await this.store.upsertForDocumentIndex(
+          isMarkdownSourcePath(item.sourcePath) ? { ...item, sourceHash: undefined } : item,
+        );
       this.pendingDocumentVectorAnchors.add(item.anchor);
       if (isMarkdownSourcePath(item.sourcePath)) {
-        documentPassageSources.push({ item, passages: scanned.passages });
+        documentPassageSources.push({
+          item,
+          passages: scanned.passages,
+          ...(isPublicTasteVignettePath(item.sourcePath ?? '') ? { document: item } : {}),
+        });
       }
       indexed++;
     }
 
     report('indexing', 30);
 
-    await this.refreshRebuiltDocumentEdges(scannedItems);
-
-    report('indexing', 40);
     await this.indexDocumentPassages(documentPassageSources);
+    await this.refreshRebuiltDocumentEdges(scannedItems);
+    report('indexing', 40);
 
     // Phase D-6: Index session digests (kind=session)
     if (this.transcriptDataDir) {
@@ -465,9 +520,7 @@ export class IndexBuilder implements IIndexBuilder {
       }
     }
     if (removedAnchors.length > 0) {
-      await this.store.runExclusive(() =>
-        db.prepare('DELETE FROM document_vector_sources WHERE anchor NOT IN (SELECT anchor FROM evidence_docs)').run(),
-      );
+      await this.store.runExclusive(() => pruneDeletedDocumentProofs(db));
     }
 
     // F260 Phase A: mirror doc titles → doc_aliases (after stale removal, before embeddings)
@@ -588,12 +641,7 @@ export class IndexBuilder implements IIndexBuilder {
       removed = true;
     }
     if (removed) {
-      await this.store.runExclusive(() =>
-        this.store
-          .getDb()
-          .prepare('DELETE FROM document_vector_sources WHERE anchor NOT IN (SELECT anchor FROM evidence_docs)')
-          .run(),
-      );
+      await this.store.runExclusive(() => pruneDeletedDocumentProofs(this.store.getDb()));
     }
     if (indexed > 0 || removed) {
       await this.store.runExclusive(() => mirrorDocAliases(this.store.getDb()));
@@ -602,55 +650,47 @@ export class IndexBuilder implements IIndexBuilder {
   }
 
   private async storeDocumentVectorIfCurrent(
-    row: { anchor: string; sourceHash: string | null },
+    source: VectorSourceSnapshot,
     vector: Float32Array,
     vectorStore: VectorStore,
+    model: EmbedModelInfo,
   ): Promise<boolean> {
     return this.store.runExclusive(() => {
       const db = this.store.getDb();
-      const current = db
-        .prepare('SELECT source_hash AS sourceHash FROM evidence_docs WHERE anchor = ?')
-        .get(row.anchor) as { sourceHash: string | null } | undefined;
-      if (!current || current.sourceHash !== row.sourceHash || this.embedDeps?.vectorStore !== vectorStore) {
-        if (current) this.pendingDocumentVectorAnchors.add(row.anchor);
+      if (
+        this.embedDeps?.vectorStore !== vectorStore ||
+        JSON.stringify(this.embedDeps.embedding.getModelInfo()) !== JSON.stringify(model)
+      )
         return false;
-      }
-      vectorStore.upsert(row.anchor, vector);
-      db.prepare('INSERT OR REPLACE INTO document_vector_sources (anchor, source_hash) VALUES (?, ?)').run(
-        row.anchor,
-        row.sourceHash ?? '',
-      );
-      this.pendingDocumentVectorAnchors.delete(row.anchor);
-      return true;
+      const stored = commitVectorSource(db, vectorStore, source, vector, model);
+      if (stored) this.pendingDocumentVectorAnchors.delete(source.key);
+      else if (captureVectorSource(db, 'documents', source.key)) this.pendingDocumentVectorAnchors.add(source.key);
+      else this.pendingDocumentVectorAnchors.delete(source.key);
+      return stored;
     });
+  }
+
+  private async embedCurrentDocument(anchor: string): Promise<boolean> {
+    const deps = this.embedDeps;
+    if (!deps?.embedding.isReady()) return false;
+    const source = captureVectorSource(this.store.getDb(), 'documents', anchor);
+    if (!source) return false;
+    const model = structuredClone(deps.embedding.getModelInfo());
+    const [vector] = await deps.embedding.embed([source.text]);
+    return this.storeDocumentVectorIfCurrent(source, vector, deps.vectorStore, model);
   }
 
   async embedMissingDocumentVectors(force = false): Promise<{ docsEmbedded: number; durationMs: number }> {
     const start = Date.now();
     const deps = this.embedDeps;
     if (!deps) return { docsEmbedded: 0, durationMs: Date.now() - start };
-    const { embedding, vectorStore } = deps;
-    const isCurrent = () => this.embedDeps?.embedding === embedding && this.embedDeps.vectorStore === vectorStore;
-    await embedding.reprobeIfNeeded();
-    if (!embedding.isReady() || !isCurrent()) return { docsEmbedded: 0, durationMs: Date.now() - start };
-
-    const db = this.store.getDb();
-    const pending = await prepareDocumentVectors(this.store, deps, this.pendingDocumentVectorAnchors, isCurrent, force);
-    let docsEmbedded = 0;
-    for (let offset = 0; offset < pending.length; offset += INDEX_EMBED_BATCH_SIZE) {
-      if (!isCurrent()) break;
-      const anchors = pending.slice(offset, offset + INDEX_EMBED_BATCH_SIZE);
-      const batch = db
-        .prepare(`SELECT anchor, title, summary, source_hash AS sourceHash FROM evidence_docs
-          WHERE anchor IN (${anchors.map(() => '?').join(',')}) ORDER BY anchor`)
-        .all(...anchors) as Array<{ anchor: string; title: string; summary: string | null; sourceHash: string | null }>;
-      if (batch.length === 0) continue;
-      const vectors = await embedding.embed(batch.map((row) => `${row.title} ${row.summary ?? ''}`));
-      for (let i = 0; i < batch.length; i++) {
-        if (!isCurrent()) break;
-        if (await this.storeDocumentVectorIfCurrent(batch[i], vectors[i], vectorStore)) docsEmbedded++;
-      }
-    }
+    const docsEmbedded = await embedCurrentDocuments(
+      this.store,
+      deps,
+      this.pendingDocumentVectorAnchors,
+      () => this.embedDeps?.embedding === deps.embedding && this.embedDeps.vectorStore === deps.vectorStore,
+      force,
+    );
     return { docsEmbedded, durationMs: Date.now() - start };
   }
 
@@ -686,7 +726,9 @@ export class IndexBuilder implements IIndexBuilder {
   }
 
   incrementalUpdate(changedPaths: string[]): Promise<void> {
-    return this.serializeIndexMutation(() => this.incrementalUpdateOnce(changedPaths));
+    return this.serializeIndexMutation(() =>
+      this.withPublishedSnapshot(() => this.incrementalUpdateOnce(changedPaths)),
+    );
   }
 
   private async incrementalUpdateOnce(changedPaths: string[]): Promise<void> {
@@ -698,28 +740,41 @@ export class IndexBuilder implements IIndexBuilder {
     const claims = await this.loadDocumentSourceClaims();
     const affectedAnchors = new Set<string>();
     const documentPassageSources: DocumentPassageSource[] = [];
+    const documentEmbeddingAnchors: string[] = [];
 
+    const published = this.publishedSnapshot
+      ? await this.publishedSnapshot.scan(changedPaths.map((path) => relative(this.scanRoot, path)))
+      : undefined;
     for (const filePath of changedPaths) {
-      const parsed = await this.parseSingleFile(filePath);
       const path = relative(this.scanRoot, filePath);
+      const singles = published
+        ? published
+            .filter((row) => row.item.sourcePath === path)
+            .map((row) => ({
+              parsed: {
+                ...row.item,
+                sourceHash: createHash('sha256').update(row.rawContent).digest('hex').slice(0, 16),
+                provenance: row.provenance,
+              },
+              passages: row.passages,
+              rawContent: row.rawContent,
+            }))
+        : [await this.parseSingleFile(filePath)].filter((item): item is NonNullable<typeof item> => item !== null);
       const oldClaim = claims.get(path);
       if (oldClaim) affectedAnchors.add(oldClaim);
-      if (parsed) {
+      claims.delete(path);
+      for (const parsed of singles) {
         claims.set(path, parsed.parsed.anchor);
         affectedAnchors.add(parsed.parsed.anchor);
-      } else claims.delete(path);
-      // A changed explicit anchor transfers this source to a new identity. Release
-      // its old identity through the same deletion/backfill path as a removed file.
+      }
       const previous = this.store
         .getDb()
         .prepare('SELECT anchor FROM evidence_docs WHERE source_path = ?')
-        .all(relative(this.scanRoot, filePath)) as Array<{ anchor: string }>;
+        .all(path) as Array<{ anchor: string }>;
       for (const row of previous) {
-        if (!parsed || row.anchor !== parsed.parsed.anchor) anchorsToDelete.add(row.anchor);
+        if (!singles.some((item) => item.parsed.anchor === row.anchor)) anchorsToDelete.add(row.anchor);
       }
-      if (parsed) {
-        toUpsert.push(parsed);
-      }
+      toUpsert.push(...singles);
     }
 
     // Pass 1: deletions (P1: sync vector deletion) + backfill from candidate docs
@@ -738,9 +793,7 @@ export class IndexBuilder implements IIndexBuilder {
     for (const anchor of anchorsToDelete) {
       await this.store.deleteByAnchor(anchor);
       this.pendingDocumentVectorAnchors.delete(anchor);
-      await this.store.runExclusive(() =>
-        db.prepare('DELETE FROM document_vector_sources WHERE anchor = ?').run(anchor),
-      );
+      await this.store.runExclusive(() => pruneDeletedDocumentProofs(db, anchor));
       await this.refreshDocumentSourceEdges(anchor);
       deletedAnchors.push(anchor);
     }
@@ -769,34 +822,32 @@ export class IndexBuilder implements IIndexBuilder {
         }
       }
       this.pendingMentionDocAnchors.add(parsed.anchor);
-      await this.store.upsertForDocumentIndex(
-        isMarkdownSourcePath(parsed.sourcePath) ? { ...parsed, sourceHash: undefined } : parsed,
-      );
+      if (!isPublicTasteVignettePath(parsed.sourcePath ?? ''))
+        await this.store.upsertForDocumentIndex(
+          isMarkdownSourcePath(parsed.sourcePath) ? { ...parsed, sourceHash: undefined } : parsed,
+        );
       this.pendingDocumentVectorAnchors.add(parsed.anchor);
       if (isMarkdownSourcePath(parsed.sourcePath)) {
-        documentPassageSources.push({ item: parsed, passages });
+        documentPassageSources.push({
+          item: parsed,
+          passages,
+          ...(isPublicTasteVignettePath(parsed.sourcePath ?? '') ? { document: parsed } : {}),
+        });
       }
-      // Embed the new/changed doc
-      if (this.embedDeps?.embedding.isReady()) {
-        try {
-          const [vec] = await this.embedDeps.embedding.embed([`${parsed.title} ${parsed.summary ?? ''}`]);
-          this.embedDeps.vectorStore.upsert(parsed.anchor, vec);
-          await this.store.runExclusive(() =>
-            this.store
-              .getDb()
-              .prepare('INSERT OR REPLACE INTO document_vector_sources (anchor, source_hash) VALUES (?, ?)')
-              .run(parsed.anchor, parsed.sourceHash ?? ''),
-          );
-          this.pendingDocumentVectorAnchors.delete(parsed.anchor);
-        } catch {
-          // fail-open: skip embedding on error
-        }
-      }
+      if (!isPublicTasteVignettePath(parsed.sourcePath ?? '')) documentEmbeddingAnchors.push(parsed.anchor);
     }
 
-    await this.refreshIncrementalDocumentEdges(toUpsert, pathLinkDependents, claims);
-
     await this.indexDocumentPassages(documentPassageSources);
+    // Passage publication finalizes the document source and invalidates prior vectors.
+    // Taste still waits for embedMissingDocumentVectors after its lifecycle fence.
+    for (const anchor of documentEmbeddingAnchors) {
+      try {
+        await this.embedCurrentDocument(anchor);
+      } catch {
+        // fail-open: skip embedding on error
+      }
+    }
+    await this.refreshIncrementalDocumentEdges(toUpsert, pathLinkDependents, claims);
 
     await publishDocumentSourceClaims(this.store, claims);
 
@@ -830,6 +881,20 @@ export class IndexBuilder implements IIndexBuilder {
     passages: string[];
     rawContent: string;
   } | null> {
+    if (this.publishedSnapshot) {
+      const scanned = (await this.publishedSnapshot.scan([relative(this.scanRoot, filePath)]))[0];
+      return scanned
+        ? {
+            parsed: {
+              ...scanned.item,
+              sourceHash: createHash('sha256').update(scanned.rawContent).digest('hex').slice(0, 16),
+              provenance: scanned.provenance,
+            },
+            passages: scanned.passages,
+            rawContent: scanned.rawContent,
+          }
+        : null;
+    }
     if ('parseSingle' in this.scanner && typeof this.scanner.parseSingle === 'function') {
       const scanned =
         this.scanner instanceof CatCafeScanner || this.scanner instanceof GenericRepoScanner
@@ -1315,23 +1380,10 @@ export class IndexBuilder implements IIndexBuilder {
   }
 
   private async restoreSuppressionEmbeddings(docAnchor: string): Promise<void> {
-    if (this.embedDeps?.embedding.isReady()) {
-      const doc = this.store
-        .getDb()
-        .prepare('SELECT title, summary, source_hash AS sourceHash FROM evidence_docs WHERE anchor = ?')
-        .get(docAnchor) as { title: string; summary: string | null; sourceHash: string | null } | undefined;
-      if (doc) {
-        try {
-          const [vector] = await this.embedDeps.embedding.embed([`${doc.title} ${doc.summary ?? ''}`]);
-          await this.storeDocumentVectorIfCurrent(
-            { anchor: docAnchor, sourceHash: doc.sourceHash },
-            vector,
-            this.embedDeps.vectorStore,
-          );
-        } catch {
-          // Lexical restoration is authoritative; vector repair retries during warmup.
-        }
-      }
+    try {
+      await this.embedCurrentDocument(docAnchor);
+    } catch {
+      /* Canonical restoration is authoritative; warmup retries derived vectors. */
     }
     await this.embedMissingPassages([docAnchor]);
   }
@@ -1496,12 +1548,7 @@ export class IndexBuilder implements IIndexBuilder {
     if (!deps?.embedding.isReady()) return;
     for (const item of items) {
       try {
-        const [vec] = await deps.embedding.embed([`${item.title} ${item.summary ?? ''}`]);
-        const stored = await this.storeDocumentVectorIfCurrent(
-          { anchor: item.anchor, sourceHash: item.sourceHash ?? null },
-          vec,
-          deps.vectorStore,
-        );
+        const stored = await this.embedCurrentDocument(item.anchor);
         if (!stored) this.markThreadDirty(item.anchor.slice('thread-'.length));
       } catch {
         // Keep the pending source stamp for a later vector retry.
@@ -1525,6 +1572,8 @@ export class IndexBuilder implements IIndexBuilder {
       return; // Optional vector work cannot fail a canonical dirty-thread flush.
     }
     const db = this.store.getDb();
+    const model = structuredClone(deps.embedding.getModelInfo());
+    const modelSignature = JSON.stringify(model);
     let lastId = 0;
     let consecutiveErrors = 0;
 
@@ -1564,21 +1613,23 @@ export class IndexBuilder implements IIndexBuilder {
             // Provider work has returned even if writer admission or its dependency fence retires the commit.
             if (observation) observation.returnedBatches++;
             return this.store.runExclusive(() => {
-              if (this.embedDeps !== deps) {
+              if (
+                this.embedDeps !== deps ||
+                !deps.embedding.isReady() ||
+                JSON.stringify(deps.embedding.getModelInfo()) !== modelSignature
+              ) {
                 observation?.stop('retired', 'dependencies-changed');
                 return;
               }
-              const current = db.prepare(
-                'SELECT content FROM evidence_passages WHERE doc_anchor = ? AND passage_id = ?',
-              );
               for (let i = 0; i < batch.length; i++) {
                 const row = batch[i];
-                const live = current.get(row.docAnchor, row.passageId) as { content: string } | undefined;
-                if (live?.content !== row.content) {
+                if (
+                  !row.sourceSnapshot ||
+                  !commitVectorSource(db, passageVectors, row.sourceSnapshot, vectors[i], model)
+                ) {
                   if (observation) observation.sourceChanged++;
                   continue;
                 }
-                passageVectors.upsert(passageVectorKey(row.docAnchor, row.passageId), vectors[i]);
                 if (observation) observation.committedVectors++;
               }
             });
@@ -1612,6 +1663,15 @@ export class IndexBuilder implements IIndexBuilder {
         for (const source of docs.slice(offset, offset + 16)) {
           await yieldToIo();
           db.transaction(() => {
+            // The lifecycle fence requires the approved hash at INSERT time. Publish
+            // Taste metadata and complete passages atomically, never an empty hash.
+            if (source.document) {
+              writeEvidenceItems(db, [source.document]);
+              const row = db
+                .prepare('SELECT source_hash AS hash FROM evidence_docs WHERE anchor = ?')
+                .get(source.item.anchor) as { hash: string } | undefined;
+              if (row?.hash !== source.item.sourceHash) return;
+            }
             replaceDocumentPassages(db, [source], createVectorInvalidator(db, 'passage_vectors'));
             complete.run(source.item.sourceHash ?? null, source.item.anchor);
           })();

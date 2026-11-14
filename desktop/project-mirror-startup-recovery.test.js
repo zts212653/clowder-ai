@@ -10,12 +10,13 @@ const previous = Object.fromEntries(keys.map((key) => [key, process.env[key]]));
 delete process.env.CAT_CAFE_DESKTOP_INSTANCE_ROOT;
 for (const key of keys.slice(1)) process.env[key] = fixtureRoot;
 const ServiceManager = require('./service-manager');
-after(() => {
+after(async () => {
   for (const [key, value] of Object.entries(previous)) {
     if (value === undefined) delete process.env[key];
     else process.env[key] = value;
   }
-  fs.rmSync(fixtureRoot, { recursive: true, force: true });
+  // Retry brief Windows executable locks; each directory has its own retry budget.
+  await fs.promises.rm(fixtureRoot, { recursive: true, force: true, maxRetries: 2, retryDelay: 100 });
 });
 
 test('one startup recovers unreadable docs mirrors when the actual Node consumer can read them', async () => {
@@ -60,6 +61,7 @@ test('one startup recovers unreadable docs mirrors when the actual Node consumer
   };
   manager._startNextJs = () => starts.push('web');
   manager._waitForHttpReady = async () => {};
+  manager.assertStartupProcessesRunning = () => {};
   const originalRead = fs.readFileSync;
   const docsProbe = path.join(userRoot, 'project/docs/harness-feedback/eval-domains/eval-design-gate.yaml');
   let failedParentReads = 0;

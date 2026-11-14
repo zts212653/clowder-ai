@@ -86,6 +86,7 @@ function assertMain(root) {
     'scripts/lib/alpha-redis-process.mjs',
     'scripts/lib/alpha-redis-leases.mjs',
     'scripts/lib/alpha-identity-diagnostics.mjs',
+    'scripts/lib/alpha-git-trace.mjs',
   ];
   try {
     git(root, ['ls-files', '--error-unmatch', '--', ...controls], 'main.controls-tracked');

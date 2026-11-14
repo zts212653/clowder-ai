@@ -76,7 +76,16 @@ describe('F321 callback Event correction proposal', () => {
               : null,
         },
       },
-      approvalIngress: { publish: async (draft) => published.push(draft) },
+      approvalIngress: {
+        validateOrigin: async (draft) => {
+          assert.deepEqual(draft.originRef, {
+            kind: 'message',
+            threadId: 'thread-where-used',
+            messageId: 'message-where-used',
+          });
+        },
+        publish: async (draft) => published.push(draft),
+      },
     });
     await app.ready();
   });

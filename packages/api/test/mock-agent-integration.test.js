@@ -1,3 +1,4 @@
+import { useCapabilityWriterFixture } from './helpers/capability-writer-fixture.js';
 /**
  * F32-a Mock Agent Integration Test
  *
@@ -281,6 +282,7 @@ describe('F32-a Mock Agent Integration', () => {
 
   describe('/api/capabilities includes mock-cat', () => {
     test('GET /api/capabilities returns board items with mock-cat in cats map', async (t) => {
+      useCapabilityWriterFixture(t);
       const Fastify = (await import('fastify')).default;
       const { capabilitiesRoutes } = await import('../dist/routes/capabilities.js');
 

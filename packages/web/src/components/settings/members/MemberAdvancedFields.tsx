@@ -1,4 +1,5 @@
 'use client';
+import { defaultAcpPoolMaxProcesses } from '@cat-cafe/shared';
 import type { ReactNode } from 'react';
 import { usesAgyAcp, usesAgyNative } from '../../hub-cat-editor.agy';
 import type { HubCatEditorFormState } from '../../hub-cat-editor.model';
@@ -99,10 +100,14 @@ export function MemberAdvancedFields({
             ]}
             onChange={(value) => patch({ acpTransport: value as 'stdio' | 'httpstream' })}
           />
-          {fields([
-            ['acpMaxLiveProcesses', '最大进程数', 'Maximum processes'],
-            ['acpIdleTtlMinutes', '空闲分钟数', 'Idle timeout (minutes)'],
-          ])}
+          <TextField
+            label={t('最大进程数', 'Maximum processes')}
+            value={form.acpMaxLiveProcesses}
+            onChange={(acpMaxLiveProcesses) => patch({ acpMaxLiveProcesses })}
+            inputMode="numeric"
+            placeholder={String(defaultAcpPoolMaxProcesses(form.clientId))}
+          />
+          {fields([['acpIdleTtlMinutes', '空闲分钟数', 'Idle timeout (minutes)']])}
         </>
       )}
       {form.carrier !== 'acp' && !agy && (

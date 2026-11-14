@@ -51,7 +51,7 @@ describe('ExpeditionBootstrapService', () => {
   describe('bootstrap orchestration', () => {
     it('completes full flow: scan → index → summary → ready', async () => {
       const svc = createService();
-      const result = await svc.bootstrap(tmpRoot);
+      const result = await svc.bootstrap(tmpRoot, { ownerUserId: 'owner-a' });
       assert.equal(result.status, 'ready');
       assert.ok(result.summary);
       assert.equal(result.summary.projectName, basename(tmpRoot));
@@ -63,12 +63,15 @@ describe('ExpeditionBootstrapService', () => {
       assert.equal(state.status, 'ready');
     });
 
+    it('rejects bootstrap without a trusted owner identity', async () => {
+      const svc = createService();
+      await assert.rejects(() => svc.bootstrap(tmpRoot), /project_bootstrap_identity_required/);
+    });
+
     it('emits progress callbacks for all 4 phases', async () => {
       const phases = [];
       const svc = createService();
-      await svc.bootstrap(tmpRoot, {
-        onProgress: (p) => phases.push(p.phase),
-      });
+      await svc.bootstrap(tmpRoot, { ownerUserId: 'owner-a', onProgress: (p) => phases.push(p.phase) });
       assert.deepEqual(phases, ['scanning', 'extracting', 'indexing', 'summarizing']);
     });
 
@@ -76,14 +79,14 @@ describe('ExpeditionBootstrapService', () => {
       stateManager.startBuilding(tmpRoot, 'abc123:1.0:full');
       stateManager.markReady(tmpRoot, 5, '{}');
       const svc = createService();
-      const result = await svc.bootstrap(tmpRoot);
+      const result = await svc.bootstrap(tmpRoot, { ownerUserId: 'owner-a' });
       assert.equal(result.status, 'skipped');
     });
 
     it('skips if snoozed', async () => {
       stateManager.snooze(tmpRoot);
       const svc = createService();
-      const result = await svc.bootstrap(tmpRoot);
+      const result = await svc.bootstrap(tmpRoot, { ownerUserId: 'owner-a' });
       assert.equal(result.status, 'skipped');
     });
 
@@ -91,7 +94,7 @@ describe('ExpeditionBootstrapService', () => {
       stateManager.startBuilding(tmpRoot, 'old:1.0:full');
       stateManager.markReady(tmpRoot, 3, '{}');
       const svc = createService({ getFingerprint: () => 'new:2.0:full' });
-      const result = await svc.bootstrap(tmpRoot);
+      const result = await svc.bootstrap(tmpRoot, { ownerUserId: 'owner-a' });
       assert.equal(result.status, 'ready');
     });
 
@@ -101,7 +104,7 @@ describe('ExpeditionBootstrapService', () => {
           throw new Error('disk full');
         },
       });
-      const result = await svc.bootstrap(tmpRoot);
+      const result = await svc.bootstrap(tmpRoot, { ownerUserId: 'owner-a' });
       assert.equal(result.status, 'failed');
       assert.equal(result.error, 'disk full');
       assert.equal(stateManager.getState(tmpRoot).status, 'failed');
@@ -115,7 +118,7 @@ describe('ExpeditionBootstrapService', () => {
       symlinkSync(outsideDir, join(tmpRoot, 'escape-link'));
 
       const svc = createService();
-      const result = await svc.bootstrap(tmpRoot);
+      const result = await svc.bootstrap(tmpRoot, { ownerUserId: 'owner-a' });
       assert.equal(result.status, 'ready');
       const summary = result.summary;
       const escapedPaths = summary.docsList.filter((d) => d.path.includes('escape-link'));
@@ -132,7 +135,7 @@ describe('ExpeditionBootstrapService', () => {
       writeFileSync(join(tmpRoot, 'cert.pem'), 'cert');
 
       const svc = createService();
-      const result = await svc.bootstrap(tmpRoot);
+      const result = await svc.bootstrap(tmpRoot, { ownerUserId: 'owner-a' });
       const paths = result.summary.docsList.map((d) => d.path);
       for (const secret of ['.env', '.env.local', 'credentials.json', 'server.key', 'cert.pem']) {
         assert.ok(!paths.some((p) => p.endsWith(secret)), `${secret} must be excluded`);
@@ -144,7 +147,7 @@ describe('ExpeditionBootstrapService', () => {
         writeFileSync(join(tmpRoot, 'docs', `file${i}.md`), `# File ${i}`);
       }
       const svc = createService();
-      const result = await svc.bootstrap(tmpRoot, { maxFiles: 5 });
+      const result = await svc.bootstrap(tmpRoot, { ownerUserId: 'owner-a', maxFiles: 5 });
       assert.ok(result.summary.docsList.length <= 5);
     });
   });
@@ -243,7 +246,7 @@ describe('buildStructuralSummary', () => {
       getFingerprint: () => 'test:1.0:full',
       getTierCoverage: async (_projectPath) => storeTierCoverage,
     });
-    const result = await svc.bootstrap(tmpRoot);
+    const result = await svc.bootstrap(tmpRoot, { ownerUserId: 'owner-a' });
     assert.equal(result.status, 'ready');
     assert.deepEqual(result.summary.tierCoverage, storeTierCoverage);
     // P1-1 fix: docsIndexed must equal sum of tier counts
@@ -258,7 +261,7 @@ describe('buildStructuralSummary', () => {
       rebuildIndex: async () => ({ docsIndexed: 5, durationMs: 100 }),
       getFingerprint: () => 'test:2.0:full',
     });
-    const result = await svc.bootstrap(tmpRoot);
+    const result = await svc.bootstrap(tmpRoot, { ownerUserId: 'owner-a' });
     assert.equal(result.status, 'ready');
     assert.ok(Object.keys(result.summary.tierCoverage).length > 0, 'should have fallback tierCoverage');
   });
@@ -273,7 +276,7 @@ describe('buildStructuralSummary', () => {
       getFingerprint: () => 'test:3.0:full',
       getKindCoverage: async (_projectPath) => storeKindCoverage,
     });
-    const result = await svc.bootstrap(tmpRoot);
+    const result = await svc.bootstrap(tmpRoot, { ownerUserId: 'owner-a' });
     assert.equal(result.status, 'ready');
     assert.deepEqual(result.summary.kindCoverage, storeKindCoverage);
   });
@@ -286,7 +289,7 @@ describe('buildStructuralSummary', () => {
       rebuildIndex: async () => ({ docsIndexed: 5, durationMs: 100 }),
       getFingerprint: () => 'test:4.0:full',
     });
-    const result = await svc.bootstrap(tmpRoot);
+    const result = await svc.bootstrap(tmpRoot, { ownerUserId: 'owner-a' });
     assert.equal(result.status, 'ready');
     assert.deepEqual(result.summary.kindCoverage, {});
   });
@@ -300,7 +303,7 @@ describe('buildStructuralSummary', () => {
       getFingerprint: () => 'test:5.0:full',
       getKindCoverage: async () => ({ feature: 100, lesson: 200 }),
     });
-    const result = await svc.bootstrap(tmpRoot);
+    const result = await svc.bootstrap(tmpRoot, { ownerUserId: 'owner-a' });
     assert.equal(result.docsIndexed, 50, 'docsIndexed comes from rebuildIndex, not kindCoverage');
   });
 

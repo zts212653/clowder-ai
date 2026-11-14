@@ -35,6 +35,7 @@ import { z } from 'zod';
 import { createModuleLogger } from '../infrastructure/logger.js';
 import { isUserSelectedCatalog } from './cat-catalog-initialization.js';
 import { bootstrapCatCatalog, type CatCatalogReadOptions, readCatCatalogRaw } from './cat-catalog-store.js';
+import { memberEnvironmentSchema } from './member-environment.js';
 import { captureMemberIdentitySources, projectMemberIdentitySources } from './member-identity-sources.js';
 import { resolveProjectTemplatePath } from './project-template-path.js';
 import {
@@ -135,6 +136,7 @@ const catVariantSchema = z
     defaultModel: z.string(), // OAuth/subscription CLIs have built-in defaults; api_key validated at route level
     executionApproval: z.enum(['auto', 'ask_user']).optional(),
     mcpSupport: z.boolean(),
+    env: memberEnvironmentSchema.optional(),
     cli: cliConfigSchema.optional(),
     agyProfile: agyProfileSchema,
     commandArgs: z.array(z.string().min(1)).optional(), // F127: explicit bridge args (e.g. Antigravity)
@@ -235,6 +237,7 @@ export const sessionStrategySchema = z
     handoff: z
       .object({
         preSealMemoryDump: z.boolean(),
+        // Legacy generative values only select historical digest files when bootstrapping.
         bootstrapDepth: z.enum(['extractive', 'generative']),
       })
       .optional(),
@@ -792,6 +795,7 @@ export function toAllCatConfigs(config: CatCafeConfig): Record<string, CatConfig
         defaultModel: variant.defaultModel,
         ...(variant.executionApproval ? { executionApproval: variant.executionApproval } : {}),
         mcpSupport: variant.mcpSupport,
+        ...(variant.env ? { env: { ...variant.env } } : {}),
         ...(variant.agyProfile != null ? { agyProfile: variant.agyProfile } : {}),
         ...(projectedCommandArgs != null ? { commandArgs: projectedCommandArgs } : {}),
         ...(variant.cliConfigArgs != null && variant.cliConfigArgs.length > 0
@@ -833,7 +837,7 @@ export function toFlatConfigs(config: CatCafeConfig): Record<string, CatConfig> 
 
 /**
  * F032 P2 cleanup: Get all cat IDs from config (replaces hardcoded fallbacks).
- * Used by cat-voices.ts, cat-budgets.ts, TaskExtractor.ts.
+ * Used by cat-voices.ts and cat-budgets.ts.
  */
 export function getAllCatIdsFromConfig(): readonly string[] {
   try {

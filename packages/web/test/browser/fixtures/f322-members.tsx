@@ -3,6 +3,7 @@ import { INIT_LIGHT } from '@/components/dev/oklch-tuner-engine';
 import { SettingsShell } from '@/components/settings/SettingsShell';
 import { writeShellLanguage } from '@/components/shell/shell-language';
 import { writeShellPresentation } from '@/components/shell/shell-presentation';
+import { ToastContainer } from '@/components/ToastContainer';
 import { ConfirmProvider } from '@/components/useConfirm';
 import { applyThemeCSS } from '@/stores/themeStore';
 import '@/app/globals.css';
@@ -35,5 +36,6 @@ root.style.height = '100vh';
 createRoot(root).render(
   <ConfirmProvider>
     <SettingsShell />
+    <ToastContainer />
   </ConfirmProvider>,
 );

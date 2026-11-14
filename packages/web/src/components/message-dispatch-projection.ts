@@ -1,5 +1,6 @@
 import {
   hasExactLifecycleProcessingDispatch,
+  isTargetResponseTerminal,
   type LifecycleActiveRun,
   type LifecycleDispatchRef,
   type LifecycleStoredMessageMetadata,
@@ -32,7 +33,7 @@ function deliveredProjection(ref: LifecycleDispatchRef): MessageDispatchAvatarPr
 
 function linkedProjection(
   ref: LifecycleDispatchRef,
-  phase: 'processing' | 'settled',
+  phase: 'delivered' | 'processing' | 'settled',
   linkedAt: number,
 ): MessageDispatchAvatarProjection {
   return {
@@ -82,6 +83,25 @@ function projectDispatchRef(
     : null;
 }
 
+/** The Host alone writes this system carrier; its exact source/ref is the receipt. */
+export function pluginDeliveryReceipt(message: ChatMessage | undefined) {
+  if (message?.from?.kind !== 'system' || message.from.service !== 'plugin_delivery') return undefined;
+  const receipt = message.extra?.pluginAddressedReceipt as
+    | { targetId?: unknown; inputMessageId?: unknown; accepted?: unknown; phase?: unknown }
+    | undefined;
+  return receipt &&
+    typeof receipt.targetId === 'string' &&
+    typeof receipt.inputMessageId === 'string' &&
+    typeof receipt.accepted === 'boolean'
+    ? (receipt as {
+        targetId: string;
+        inputMessageId: string;
+        accepted: boolean;
+        phase?: 'sending' | 'accepted' | 'unconfirmed';
+      })
+    : undefined;
+}
+
 /**
  * The only live dispatch projection. It consumes exact source/ref/response/run
  * identities and fails closed whenever those records disagree or are ambiguous.
@@ -98,6 +118,19 @@ export function projectMessageDispatchAvatars(
   return refs.flatMap((ref): MessageDispatchAvatarProjection[] => {
     if (targetCounts.get(ref.targetId) !== 1) return [];
     const statusMessage = exactMessageById(timelineMessages, ref.statusMessageId);
+    const receipt = pluginDeliveryReceipt(statusMessage);
+    if (receipt?.inputMessageId === message.id && receipt.targetId === ref.targetId)
+      return [
+        linkedProjection(
+          ref,
+          statusMessage?.extra?.targetResponse && isTargetResponseTerminal(statusMessage.extra.targetResponse.status)
+            ? 'settled'
+            : statusMessage?.extra?.targetResponse?.status === 'processing'
+              ? 'processing'
+              : 'delivered',
+          statusMessage!.timestamp,
+        ),
+      ];
     const statusLifecycle = statusMessage?.lifecycle;
     if (!statusLifecycle) return [deliveredProjection(ref)];
     const linked = projectDispatchRef(message.id, refs, ref, statusLifecycle, activeRuns);
@@ -110,6 +143,13 @@ export function isLinkedDeliveryFailureCarrier(
   message: ChatMessage,
   timelineMessages: readonly ChatMessage[],
 ): boolean {
+  const receipt = pluginDeliveryReceipt(message);
+  if (receipt)
+    return (
+      exactMessageById(timelineMessages, receipt.inputMessageId)?.lifecycle?.dispatchRefs?.some(
+        (ref) => ref.targetId === receipt.targetId && ref.statusMessageId === message.id,
+      ) ?? false
+    );
   const lifecycle = message.lifecycle;
   if (lifecycle?.kind !== 'delivery_failure') return false;
   // A targetless origin failure has no source/member settlement to absorb it.
@@ -127,4 +167,62 @@ export function isLinkedDeliveryFailureCarrier(
         (ref) => ref.targetId === targetId && ref.phase === 'settled' && ref.statusMessageId === message.id,
       ).length === 1,
   );
+}
+
+export function resolveUnloadedDispatchReply(input: {
+  message: ChatMessage;
+  targetId: string;
+  ref: LifecycleDispatchRef | undefined;
+  linkedMessage: ChatMessage | undefined;
+  timelineMessages: readonly ChatMessage[];
+  activeRuns: readonly LifecycleActiveRun[];
+  disqualified: boolean;
+}) {
+  const { message, targetId, ref, linkedMessage, timelineMessages, activeRuns, disqualified } = input;
+  const selfIndex = timelineMessages.findIndex((candidate) => candidate.id === message.id);
+  const statusId = ref?.statusMessageId;
+  const matchingRuns =
+    !linkedMessage && !disqualified && ref?.phase === 'dispatched' && statusId
+      ? activeRuns.filter(
+          (run) =>
+            run.targetId === targetId && run.responseMessageId === statusId && run.inputMessageIds.includes(message.id),
+        )
+      : [];
+  const exactActiveRun = matchingRuns.length === 1 ? matchingRuns[0] : undefined;
+  const unloadedActiveAppended =
+    exactActiveRun !== undefined &&
+    exactActiveRun.inputMessageIds.indexOf(message.id) > 0 &&
+    message.timestamp > exactActiveRun.startedAt;
+  const unloadedSettledAppended =
+    !linkedMessage &&
+    !disqualified &&
+    ref?.phase === 'settled' &&
+    Boolean(statusId) &&
+    Boolean(ref.appendDelivery || ref.appendAcceptance);
+  return {
+    selfIndex,
+    exactActiveRun,
+    unloadedSettledAppended,
+    unloadedLinkedReply: unloadedActiveAppended || unloadedSettledAppended,
+  };
+}
+
+export function resolveDispatchReplyArrow(input: {
+  message: ChatMessage;
+  replyMessageId: string | undefined;
+  linkedMessage: ChatMessage | undefined;
+  timelineMessages: readonly ChatMessage[];
+  selfIndex: number;
+  appended: boolean;
+  unloadedLinkedReply: boolean;
+}): '↑' | '↓' {
+  const { message, replyMessageId, linkedMessage, timelineMessages, selfIndex, appended, unloadedLinkedReply } = input;
+  const replyIndex = replyMessageId ? timelineMessages.findIndex((candidate) => candidate.id === replyMessageId) : -1;
+  return (
+    selfIndex >= 0 && replyIndex >= 0
+      ? replyIndex < selfIndex
+      : unloadedLinkedReply || appended || (linkedMessage !== undefined && linkedMessage.timestamp < message.timestamp)
+  )
+    ? '↑'
+    : '↓';
 }

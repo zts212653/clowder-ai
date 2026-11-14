@@ -21,6 +21,7 @@ export interface ContextEpochScope {
   readonly userId: string;
   readonly catId: CatId | string;
   readonly threadId: string;
+  readonly sessionPurpose?: 'watcher';
 }
 
 /**
@@ -102,7 +103,8 @@ export const CONTEXT_EPOCH_SCOPE_SEPARATOR = '::';
  * contains `::`.
  */
 export function contextEpochScopeKey(scope: ContextEpochScope): string {
-  return [scope.userId, scope.catId as string, scope.threadId].join(CONTEXT_EPOCH_SCOPE_SEPARATOR);
+  const ordinary = [scope.userId, scope.catId as string, scope.threadId].join(CONTEXT_EPOCH_SCOPE_SEPARATOR);
+  return scope.sessionPurpose === 'watcher' ? `${ordinary}${CONTEXT_EPOCH_SCOPE_SEPARATOR}watcher` : ordinary;
 }
 
 function bindingOf(disposition: ContinuityDisposition): string | undefined {

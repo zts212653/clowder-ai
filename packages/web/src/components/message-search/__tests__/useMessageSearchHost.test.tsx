@@ -451,4 +451,39 @@ describe('search Host drives the original reader', () => {
     });
     expect(reader.releaseReadingRef).not.toHaveBeenCalled();
   });
+
+  // You 2026-11-11: a jump bar kept hanging as "定位已中断，返回点仍保留" with no way to say "I don't need to go back".
+  it('lets the reader dismiss an in-thread jump return without moving, and it does not come back after reload', async () => {
+    const reader = port();
+    act(() => current.registerReadingPort(reader));
+    await act(async () => {
+      current.jumpInThread('reply-1');
+    });
+    expect(current.session).toMatchObject({ source: 'jump', trip: { status: 'ready' } });
+
+    act(() => current.dismissReturn());
+
+    expect(current.session?.trip.status).toBe('completed');
+    expect(reader.restoreReadingRef).not.toHaveBeenCalled();
+    expect(reader.navigateToMessage).toHaveBeenCalledOnce();
+    expect(readActiveMessageReadingSession()?.trip.status).toBe('completed');
+  });
+  it('dismisses a jump return that was left "interrupted" by a remount mid-jump', async () => {
+    const reader = port();
+    vi.mocked(reader.navigateToMessage).mockImplementationOnce(() => new Promise(() => {}));
+    act(() => current.registerReadingPort(reader));
+    await act(async () => {
+      current.jumpInThread('reply-1');
+    });
+    expect(current.session?.trip.status).toBe('moving');
+    act(() => root.unmount());
+    root = createRoot(host);
+    render();
+    expect(current.session).toMatchObject({ source: 'jump', trip: { status: 'interrupted' } });
+
+    act(() => current.dismissReturn());
+
+    expect(current.session?.trip.status).toBe('completed');
+    expect(readActiveMessageReadingSession()?.trip.status).toBe('completed');
+  });
 });

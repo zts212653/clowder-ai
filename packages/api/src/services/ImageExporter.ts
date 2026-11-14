@@ -14,6 +14,7 @@ import {
   refreshHtmlWidgetExportLayoutProof,
 } from './html-widget-export-readiness.js';
 import { ImageExportBrowserSession } from './image-export-browser-session.js';
+import { prepareImageExportImages } from './image-export-image-readiness.js';
 
 export { resolveExportCaptureHeight } from './html-widget-export-readiness.js';
 
@@ -243,8 +244,9 @@ export class ImageExporter {
 
     while (true) {
       assertBeforeHtmlWidgetExportDeadline(operation, 'height stability');
+      const imagesReady = await prepareImageExportImages(page, operation);
       const { height } = await refreshHtmlWidgetExportLayoutProof(page, operation);
-      if (height === lastHeight && height > 0) {
+      if (imagesReady && height === lastHeight && height > 0) {
         stableChecks++;
         if (stableChecks >= requiredStableChecks) {
           assertBeforeHtmlWidgetExportDeadline(operation, 'height stability');

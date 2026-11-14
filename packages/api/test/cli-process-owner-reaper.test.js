@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import { existsSync, realpathSync } from 'node:fs';
 import { mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -42,6 +43,13 @@ test(
     const readyPath = join(dataDir, 'ready.json');
     const descendantReadyPath = join(dataDir, 'descendant-ready');
     const supervisorPath = fileURLToPath(new URL('../dist/utils/cli-supervisor.js', import.meta.url));
+    const execution = {
+      executionId: randomUUID(),
+      invocationId: randomUUID(),
+      threadId: 'restart-native-fixture',
+      catId: 'opus55',
+      userId: 'fixture-owner',
+    };
     const descendantScript = [
       'const fs = require("node:fs");',
       'process.on("SIGTERM",()=>{});',
@@ -72,6 +80,12 @@ test(
           CAT_CAFE_SUPERVISOR_PARENT_PID: String(process.pid),
           CAT_CAFE_SUPERVISOR_KILL_GRACE_MS: '100',
           CAT_CAFE_SUPERVISOR_SOCKET_DIR: socketDirectory,
+          CAT_CAFE_PROCESS_EXECUTION_OWNER: '1',
+          CAT_CAFE_EXECUTION_ID: execution.executionId,
+          CAT_CAFE_INVOCATION_ID: execution.invocationId,
+          CAT_CAFE_THREAD_ID: execution.threadId,
+          CAT_CAFE_CAT_ID: execution.catId,
+          CAT_CAFE_USER_ID: execution.userId,
         },
         stdio: ['ignore', 'ignore', 'pipe'],
       });
@@ -110,6 +124,23 @@ test(
       assert.equal(await waitUntil(() => !isProcessAlive(leaderPid) && !isProcessAlive(descendantPid)), true);
       assert.equal(existsSync(socketDirectory), false);
       assert.deepEqual(await readdir(ownerDir), []);
+
+      // A second process has neither the original event Map nor its controller.
+      // It must still read the exact stop observed after both real descendants exited.
+      const observer = new URL('../dist/utils/CliExecutionObservation.js', import.meta.url).href;
+      const proof = JSON.parse(
+        execFileSync(
+          process.execPath,
+          [
+            '--input-type=module',
+            '--eval',
+            `import {getPersistedCliExecutionExit} from ${JSON.stringify(observer)};` +
+              `console.log(JSON.stringify(getPersistedCliExecutionExit(${JSON.stringify(execution)}, {dataDir:${JSON.stringify(dataDir)}})));`,
+          ],
+          { encoding: 'utf8', timeout: 10_000 },
+        ),
+      );
+      assert.ok(proof.exitedAt >= 1);
 
       const repeated = await reapStaleCliProcessOwners({ dataDir, killGraceMs: 100, log: silentLog });
       assert.equal(repeated.reapedOwners, 0);

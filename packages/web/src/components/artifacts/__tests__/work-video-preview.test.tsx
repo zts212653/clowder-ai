@@ -75,7 +75,7 @@ it('shows the exact registered poster and duration without requesting video', as
     );
     expect(create.mock.calls.filter(([tag]) => tag === 'video')).toHaveLength(0);
     expect(host.textContent).toContain('0:48');
-    expect(host.querySelector('.work-cover-poster')?.getAttribute('src')).toBe(demo.poster);
+    expect(host.querySelector('.work-cover-picture-main')?.getAttribute('src')).toBe(demo.poster);
   } finally {
     await act(async () => root.unmount());
   }

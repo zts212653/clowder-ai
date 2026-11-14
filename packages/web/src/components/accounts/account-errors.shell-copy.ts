@@ -59,9 +59,18 @@ export const accountErrorsCopy = defineShellCopy({
     请先处理此账号的官方登录: '请先处理此账号的官方登录',
     '共享状态目录已改变，请恢复原目录配置后重试': '共享状态目录已改变，请恢复原目录配置后重试',
     '未能唤起终端，请允许打开终端后重试': '未能唤起终端，请允许打开终端后重试',
+    '无法读取 Codex 组织托管策略，请核对权限后重试': '无法读取 Codex 组织托管策略，请核对权限后重试',
+    '当前组织托管策略尚不支持新增 Codex 账号，请联系管理员核对':
+      '当前组织托管策略尚不支持新增 Codex 账号，请联系管理员核对',
+    '当前 Codex 版本的账号隔离检查未通过，请查看兼容性检查结果后重试':
+      '当前 Codex 版本的账号隔离检查未通过，请查看兼容性检查结果后重试',
+    '未找到官方 Codex 命令，请安装后重试': '未找到官方 Codex 命令，请安装后重试',
+    '当前平台尚未支持新增 Codex 账号，请继续使用本机默认账号':
+      '当前平台尚未支持新增 Codex 账号，请继续使用本机默认账号',
     '当前原生版本或组织托管策略尚未支持，请核对账号类型与配置':
       '当前原生版本或组织托管策略尚未支持，请核对账号类型与配置',
     '官方登录未完成，请查看终端输出后在此重试': '官方登录未完成，请查看终端输出后在此重试',
+    '官方登录未完成，请重试；若浏览器未打开，可打开登录终端': '官方登录未完成，请重试；若浏览器未打开，可打开登录终端',
     '未能开始官方登录，请在此重试': '未能开始官方登录，请在此重试',
     '此前复用的账号已不可用，请重新登录或选择其他账号。': '此前复用的账号已不可用，请重新登录或选择其他账号。',
     '这个号是工具正在用的账号，请先换成另一个号再删除登记': '这个号是工具正在用的账号，请先换成另一个号再删除登记',
@@ -150,10 +159,21 @@ export const accountErrorsCopy = defineShellCopy({
     '共享状态目录已改变，请恢复原目录配置后重试':
       'The shared state directory changed. Restore its original configuration and retry.',
     '未能唤起终端，请允许打开终端后重试': 'Could not open the terminal. Allow the terminal to open and retry.',
+    '无法读取 Codex 组织托管策略，请核对权限后重试':
+      'Could not read the Codex managed policy. Check permissions and retry.',
+    '当前组织托管策略尚不支持新增 Codex 账号，请联系管理员核对':
+      'The current managed policy does not support adding Codex accounts. Contact your administrator.',
+    '当前 Codex 版本的账号隔离检查未通过，请查看兼容性检查结果后重试':
+      'Account isolation checks failed for this Codex version. Check the compatibility report and retry.',
+    '未找到官方 Codex 命令，请安装后重试': 'The official Codex command was not found. Install it and retry.',
+    '当前平台尚未支持新增 Codex 账号，请继续使用本机默认账号':
+      'Adding Codex accounts is not supported on this platform yet. Continue using the local default account.',
     '当前原生版本或组织托管策略尚未支持，请核对账号类型与配置':
       'The native version or organization policy does not support this configuration. Check the account type and settings.',
     '官方登录未完成，请查看终端输出后在此重试':
       'Official login is incomplete. Check the terminal output and retry here.',
+    '官方登录未完成，请重试；若浏览器未打开，可打开登录终端':
+      'Official login is incomplete. Retry here; if the browser did not open, use Open login terminal.',
     '未能开始官方登录，请在此重试': 'Could not start the official login. Retry here.',
     '此前复用的账号已不可用，请重新登录或选择其他账号。':
       'The previously reused account is unavailable. Sign in again or choose another account.',

@@ -1,8 +1,10 @@
+// @vitest-environment jsdom
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ChatContainer } from '@/components/ChatContainer';
 import { ThreadChatRuntimeProvider } from '@/components/thread-chat';
+import { SHELL_PRESENTATION_STORAGE_KEY, writeShellPresentation } from '../shell/shell-presentation';
 
 function renderChatContainer(threadId: string) {
   return React.createElement(
@@ -79,6 +81,7 @@ const baseStore = () => ({
   threads: [],
 });
 
+vi.mock('@/components/thread-chat/hub-socket-context', () => import('@/test-utils/hub-socket-context-mock'));
 vi.mock('@/stores/chatStore', () => {
   const hook = (selector?: (s: ReturnType<typeof baseStore>) => unknown) => {
     const state = baseStore();
@@ -152,12 +155,15 @@ vi.mock('../SplitPaneView', () => ({
   SplitPaneView: () => null,
   SplitPaneChatView: () => null,
 }));
-vi.mock('../QueuePanel', () => ({ QueuePanel: () => null }));
+vi.mock('../QueuePanel', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../QueuePanel')>()),
+  QueuePanel: () => null,
+}));
 vi.mock('@/components/ScrollToBottomButton', () => ({ ScrollToBottomButton: () => null }));
 vi.mock('@/components/WorkspacePanel', () => ({ WorkspacePanel: () => null }));
 vi.mock('@/components/icons/PawIcon', () => ({ PawIcon: () => null }));
 
-describe('F069-R5: read ack via POST /read/latest', () => {
+describe.each(['classic', 'v2'] as const)('F069-R5: read ack via POST /read/latest (%s)', (presentation) => {
   let container: HTMLDivElement;
   let root: Root;
 
@@ -172,6 +178,7 @@ describe('F069-R5: read ack via POST /read/latest', () => {
   });
 
   beforeEach(() => {
+    writeShellPresentation(presentation);
     Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' });
     container = document.createElement('div');
     document.body.appendChild(container);
@@ -200,6 +207,7 @@ describe('F069-R5: read ack via POST /read/latest', () => {
       root.unmount();
     });
     container.remove();
+    window.localStorage.removeItem(SHELL_PRESENTATION_STORAGE_KEY);
   });
 
   it('sends POST /read/latest on mount (no message ID needed)', async () => {

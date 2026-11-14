@@ -4,8 +4,9 @@ import {
   ignoredItemKey,
   type UnifiedAttentionItemV1,
 } from '@cat-cafe/shared';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useSyncExternalStore } from 'react';
 import { ProposalChoice } from '@/components/rich/ProposalChoice';
+import { apiSessionIdentity } from '@/utils/api-session-identity';
 import { useShellCopy } from '../shell-copy';
 import { useShellLanguage } from '../shell-language';
 import type { UnifiedAttentionView } from '../use-unified-attention';
@@ -18,6 +19,8 @@ import { historyReadState } from './history-read-state';
 import { MailboxMentionUndo } from './MailboxMentionUndo';
 import type { MailboxSection } from './mailbox-navigation';
 import type { OriginalPlace } from './original-place';
+import { PersonProposalForgetRecovery } from './PersonProposalForgetRecovery';
+import { personProposalForgetCopy } from './person-proposal-forget.shell-copy';
 import { settledResultKey } from './settled-results-source';
 import type { useMailboxPersonalPreferences } from './use-mailbox-personal-preferences';
 
@@ -42,6 +45,13 @@ export function MailboxHandledHistory({
 }) {
   const t = useShellCopy(handledHistoryCopy),
     language = useShellLanguage();
+  const forgetCopy = useShellCopy(personProposalForgetCopy);
+  const recoveryOwner = useSyncExternalStore(
+    apiSessionIdentity.subscribe,
+    apiSessionIdentity.getSnapshot,
+    apiSessionIdentity.getSnapshot,
+  ).ownerUserId;
+  const [forgottenCount, setForgottenCount] = useState<number | null>(null);
   const [tab, setTab] = useState('all');
   const [outcome, setOutcome] = useState('all');
   const [kind, setKind] = useState('all');
@@ -53,6 +63,18 @@ export function MailboxHandledHistory({
   const [selected, setSelected] = useState<Set<string>>(() => new Set());
   const ownerRead = view.result.kind === 'ok' ? view.result.read : view.staleRead;
   const owner = ownerRead?.identity.ownerUserId;
+  useEffect(() => setForgottenCount(null), [recoveryOwner]);
+  const onForgotten = (ids: string[], count: number) => {
+    if (
+      !recoveryOwner ||
+      apiSessionIdentity.getSnapshot().ownerUserId !== recoveryOwner ||
+      read.getSnapshot().owner !== recoveryOwner
+    )
+      return;
+    read.removePurgedProposals(ids);
+    setForgottenCount(count);
+    void read.refresh();
+  };
   const preferenceRevision = ownerRead?.personalView?.preferenceRevision;
   // biome-ignore lint/correctness/useExhaustiveDependencies: selection is scoped to this owner, preference revision and tab.
   useEffect(() => {
@@ -69,12 +91,27 @@ export function MailboxHandledHistory({
             : item.resolution === outcome)) &&
         (kind === 'all' || item.sourceFeatureId === kind),
     ) ?? [];
+  const ignoredSnapshot = personal.ignoredSnapshot;
+  const ignoredKeys = new Set(ignoredSnapshot?.entries.map((entry) => ignoredItemKey(entry.coordinate)));
   const attentionWindow = [
     ...new Map(
       [...(view.pages?.length ? view.pages : ownerRead ? [ownerRead] : [])]
         .reverse()
         .filter((page) => page.identity.ownerUserId === owner)
-        .flatMap((page) => page.items)
+        .flatMap((page) => {
+          // Retain old display pages, but a newer owner-private snapshot supersedes their ignored membership.
+          const reconcileIgnored =
+            currentTab === 'ignored' &&
+            ignoredSnapshot?.ownerUserId === page.identity.ownerUserId &&
+            page.personalView?.mode === 'ignored' &&
+            typeof page.personalView.preferenceRevision === 'number' &&
+            ignoredSnapshot.revision >= page.personalView.preferenceRevision;
+          return reconcileIgnored
+            ? page.items.filter(
+                (item) => item.preferenceCoordinate && ignoredKeys.has(ignoredItemKey(item.preferenceCoordinate)),
+              )
+            : page.items;
+        })
         .map((item) => [item.decisionRef, item]),
     ).values(),
   ];
@@ -249,6 +286,12 @@ export function MailboxHandledHistory({
         </div>
       ) : null}
       {currentTab === 'mentions' ? <MailboxMentionUndo owner={owner} disabled={!verifyCurrent()} /> : null}
+      <PersonProposalForgetRecovery owner={recoveryOwner} onForgotten={onForgotten} />
+      {forgottenCount !== null ? (
+        <p role="status" className="py-2 text-compact">
+          {forgottenCount > 0 ? forgetCopy.forgotten(forgottenCount) : forgetCopy.alreadyAbsent}
+        </p>
+      ) : null}
       <div
         className="min-h-0 flex-1 overflow-y-auto"
         data-testid="mailbox-history-content"
@@ -270,7 +313,7 @@ export function MailboxHandledHistory({
               {rows.map((row) =>
                 row.type === 'approval' ? (
                   <HandledApprovalRow
-                    key={row.key}
+                    key={`${row.item.ownerUserId}:${row.key}`}
                     item={row.item}
                     reread={() => void read.refresh()}
                     authorizeOpen={() =>
@@ -279,6 +322,7 @@ export function MailboxHandledHistory({
                       verifyCurrent()
                     }
                     onOpenPlace={onOpenPlace}
+                    onForgotten={onForgotten}
                   />
                 ) : (
                   <HandledAttentionRow

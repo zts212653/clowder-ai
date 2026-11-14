@@ -118,6 +118,15 @@ function packageProvenance(value: unknown, label: string): PluginPackageRecord['
       ...(raw.ownerAuthRequired === undefined
         ? {}
         : { ownerAuthRequired: boolean(raw.ownerAuthRequired, `${label}.ownerAuthRequired`) }),
+      ...(raw.dependencyClosure === undefined
+        ? {}
+        : {
+            dependencyClosure: enumValue(
+              raw.dependencyClosure,
+              new Set(['shipped', 'materialized'] as const),
+              `${label}.dependencyClosure`,
+            ),
+          }),
     };
   }
   if (kind === 'git') {
@@ -188,7 +197,11 @@ export function isCanonicalPackageDigest(value: string): boolean {
   return bytes.length === 64 && bytes.toString('base64') === encoded;
 }
 
-function parsePackage(value: unknown, index: number, contract: PackageAdmissionContractRuntime): PluginPackageRecord {
+export function parsePackage(
+  value: unknown,
+  index: number,
+  contract: PackageAdmissionContractRuntime,
+): PluginPackageRecord {
   const raw = object(value, `packages[${index}]`);
   const persistedManifest = raw.manifest === null ? raw.incompatibleManifest : raw.manifest;
   const stored = storedManifest(persistedManifest, `packages[${index}].manifest`);
@@ -231,7 +244,7 @@ function parsePackage(value: unknown, index: number, contract: PackageAdmissionC
   return record;
 }
 
-function parseInstance(value: unknown, index: number): PluginInstanceRecord {
+export function parseInstance(value: unknown, index: number): PluginInstanceRecord {
   const raw = object(value, `instances[${index}]`);
   const record: PluginInstanceRecord = {
     pluginInstanceId: string(raw.pluginInstanceId, `instances[${index}].pluginInstanceId`),
@@ -245,6 +258,22 @@ function parseInstance(value: unknown, index: number): PluginInstanceRecord {
     lifecycleRevision: positiveInteger(raw.lifecycleRevision ?? 1, `instances[${index}].lifecycleRevision`),
     installedAt: timestamp(raw.installedAt, `instances[${index}].installedAt`),
     updatedAt: timestamp(raw.updatedAt, `instances[${index}].updatedAt`),
+    ...(raw.address === undefined
+      ? {}
+      : {
+          address: {
+            alias: string(object(raw.address, 'instance.address').alias, 'instance.address.alias'),
+            revision: positiveInteger(
+              object(raw.address, 'instance.address').revision ?? 1,
+              'instance.address.revision',
+            ),
+            ...(object(raw.address, 'instance.address').icon === undefined
+              ? {}
+              : {
+                  icon: string(object(raw.address, 'instance.address').icon, 'instance.address.icon'),
+                }),
+          },
+        }),
     ...(raw.retiredAt === undefined ? {} : { retiredAt: timestamp(raw.retiredAt, `instances[${index}].retiredAt`) }),
     ...(raw.lastRuntimeError === undefined
       ? {}

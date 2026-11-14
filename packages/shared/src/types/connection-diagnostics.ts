@@ -1,6 +1,22 @@
 import { z } from 'zod';
 
 export const CLIENT_REQUEST_DIAGNOSTIC_HEADER = 'x-clowder-client-request';
+/** Browser wall-clock ms when the request was handed to fetch; caller-supplied, timing only. */
+export const CLIENT_SENT_AT_DIAGNOSTIC_HEADER = 'x-clowder-client-sent-at';
+/** Every diagnostic request header the Hub adds; hand-written CORS allow-lists must accept all of them. */
+export const CLIENT_DIAGNOSTIC_REQUEST_HEADERS: readonly string[] = [
+  CLIENT_REQUEST_DIAGNOSTIC_HEADER,
+  CLIENT_SENT_AT_DIAGNOSTIC_HEADER,
+];
+/**
+ * F294: the same runtime revision /api/health publishes, on every Fastify API response (raw or
+ * hijacked replies bypass it). While that revision
+ * is unknown the value is DEPLOYMENT_REVISION_UNKNOWN, never absence: a 304 only replaces headers it
+ * carries, so absence would let a revalidated cached copy keep an older revision.
+ */
+export const DEPLOYMENT_REVISION_HEADER = 'x-clowder-deployment-revision';
+/** Not a revision; browsers treat it as no observation at all. */
+export const DEPLOYMENT_REVISION_UNKNOWN = 'unknown';
 export const CONNECTION_DIAGNOSTIC_UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
 const id = z.string().regex(CONNECTION_DIAGNOSTIC_UUID);
 const duration = z.number().finite().min(0).max(86_400_000);
@@ -50,6 +66,7 @@ export const connectionDiagnosticEventSchema = z.discriminatedUnion('kind', [
       ...base,
       kind: z.literal('settings_return'),
       bridgeId: id,
+      operationId: id.optional(),
       phase: z.enum(['created', 'capture', 'return', 'cancel', 'notice', 'consumed', 'presented', 'disposed']),
       cause: z
         .enum([
@@ -73,6 +90,50 @@ export const connectionDiagnosticEventSchema = z.discriminatedUnion('kind', [
       admitted: z.boolean(),
     })
     .strict(),
+  z
+    .object({
+      ...base,
+      kind: z.literal('reading_restore'),
+      bridgeId: id,
+      operationId: id,
+      readerId: id,
+      phase: z.enum(['start', 'cancel', 'complete']),
+      readerMounted: z.boolean(),
+      refreshPending: z.boolean(),
+      restorePending: z.boolean(),
+      settlementPending: z.boolean(),
+      cancelSource: z
+        .enum([
+          'bootstrap_cleanup',
+          'native_input',
+          'jump_latest',
+          'restore_schedule',
+          'restore_thread_change',
+          'restore_request',
+          'restore_signal_abort',
+          'correction_thread_change',
+          'message_navigation',
+          'navigation_thread_change',
+          'inactive_jump',
+          'navigation_request',
+          'navigation_signal_abort',
+          'refresh_request',
+          'refresh_signal_abort',
+          'history_no_progress',
+          'history_failed',
+          'reading_capture',
+          'viewport_anchor',
+          'reading_disclosure',
+          'rail_input',
+          'rail_owner_change',
+        ])
+        .optional(),
+      inputKind: z.enum(['wheel', 'pointer', 'touch', 'key', 'click']).optional(),
+      inputTrusted: z.boolean().optional(),
+      status: z.enum(['settled', 'interrupted', 'unavailable', 'threw']).optional(),
+      exact: z.boolean().optional(),
+    })
+    .strict(),
 ]);
 export const connectionDiagnosticBatchSchema = z
   .object({
@@ -82,6 +143,7 @@ export const connectionDiagnosticBatchSchema = z
   .strict();
 export type ConnectionDiagnosticEvent = z.infer<typeof connectionDiagnosticEventSchema>;
 export type ConnectionDiagnosticRoute = z.infer<typeof route>;
+export type ReadingRestoreDiagnostic = Extract<ConnectionDiagnosticEvent, { kind: 'reading_restore' }>;
 export type SettingsReturnDiagnostic = Extract<ConnectionDiagnosticEvent, { kind: 'settings_return' }>;
 
 /** Classify before recording; raw identifiers and query strings never enter the diagnostic. */

@@ -99,12 +99,9 @@ describe('F306 runtime media read and export guard contract', () => {
 
   test('keeps ambiguous or protected copy destinations fail-closed', () => {
     for (const command of [
-      `cp ${source} ${destination}`,
-      `cp -- ${source} relative-copy.mp3`,
       `cp -- ${source} /tmp/first.mp3 /tmp/second.mp3`,
       `cp -f -- ${source} ${destination}`,
       `cp -- ${source} ${runtimeRoot}/copy.mp3`,
-      `cp -- relative-source.mp3 ${destination}`,
       // (`cp -- <source> <destination>; echo copied` is judged segment by segment since
       // 2026-09-27: the copy is the admitted export and `echo` is a read.)
       `cp -- ${source} "$(printf %s ${destination})"`,

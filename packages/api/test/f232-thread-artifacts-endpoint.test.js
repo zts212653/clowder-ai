@@ -157,7 +157,7 @@ describe('GET /api/threads/:threadId/artifacts (F232)', () => {
     assert.equal(works.statusCode, 200, works.body);
     assert.deepEqual(
       works.json().artifacts.map((a) => a.name),
-      ['Delivered PR', 'published.md'],
+      ['org/repo#9', 'published.md'],
     );
     assert.equal(works.json().view, 'works');
     assert.equal(works.json().complete, true);

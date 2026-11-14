@@ -5,28 +5,13 @@ import type { NavigateEvent } from '@/hooks/useWorkspaceNavigate';
 import { useWorkspaceNavigate } from '@/hooks/useWorkspaceNavigate';
 import { getPendingWorkspaceNavigation, type WorkspaceNavigationReceipt } from '@/hooks/workspace-navigation-pending';
 import { useChatStore } from '@/stores/chatStore';
+import { createFakeHubSocket, type FakeHubSocket, withHubSocket } from '@/test-utils/fake-hub-socket';
 
 Object.assign(globalThis as Record<string, unknown>, { React, IS_REACT_ACT_ENVIRONMENT: true });
 
-const socketState = vi.hoisted(() => {
-  const handlers = new Map<string, (...args: unknown[]) => void>();
-  const socket = {
-    connected: true,
-    emit: vi.fn(),
-    on: vi.fn((event: string, handler: (...args: unknown[]) => void) => handlers.set(event, handler)),
-    off: vi.fn((event: string) => handlers.delete(event)),
-    disconnect: vi.fn(),
-  };
-  return {
-    handlers,
-    socket,
-    connect: vi.fn(() => socket),
-  };
-});
-
-vi.mock('socket.io-client', () => ({
-  io: () => socketState.connect(),
-}));
+// The page connection is owned by ThreadChatRuntimeProvider; the hook holds the ack room and
+// one listener on it.
+let fake: FakeHubSocket;
 
 function Probe(props: { threadId: string | null; isChatRoute: boolean; isWorkspaceVisible?: boolean }) {
   useWorkspaceNavigate(props.threadId, {
@@ -41,12 +26,8 @@ describe('useWorkspaceNavigate delivery lifecycle', () => {
   let root: Root;
 
   beforeEach(() => {
-    socketState.handlers.clear();
-    socketState.socket.emit.mockClear();
-    socketState.socket.on.mockClear();
-    socketState.socket.off.mockClear();
-    socketState.socket.disconnect.mockClear();
-    socketState.connect.mockClear();
+    fake = createFakeHubSocket();
+    fake.connect();
     window.sessionStorage.clear();
     useChatStore.setState({
       currentProjectPath: '/work/cat-cafe',
@@ -62,7 +43,7 @@ describe('useWorkspaceNavigate delivery lifecycle', () => {
     });
     container = document.createElement('div');
     document.body.appendChild(container);
-    root = createRoot(container);
+    root = withHubSocket(createRoot(container), fake.hub);
   });
 
   afterEach(() => {
@@ -75,8 +56,8 @@ describe('useWorkspaceNavigate delivery lifecycle', () => {
     act(() => {
       root.render(<Probe threadId={null} isChatRoute={false} />);
     });
-    await vi.waitFor(() => expect(socketState.handlers.has('workspace:navigate')).toBe(true));
-    expect(socketState.socket.emit).toHaveBeenCalledWith('join_room', 'workspace:navigate:ack');
+    expect(fake.listenerCount('workspace:navigate')).toBe(1);
+    expect(fake.heldRooms()).toEqual(['workspace:navigate:ack']);
 
     const data: NavigateEvent = {
       action: 'open',
@@ -88,7 +69,7 @@ describe('useWorkspaceNavigate delivery lifecycle', () => {
     };
     const acknowledge = vi.fn<(receipt: WorkspaceNavigationReceipt) => void>();
     act(() => {
-      socketState.handlers.get('workspace:navigate')?.(data, acknowledge);
+      fake.deliver('workspace:navigate', data, acknowledge);
     });
 
     expect(acknowledge).toHaveBeenCalledWith({
@@ -116,11 +97,12 @@ describe('useWorkspaceNavigate delivery lifecycle', () => {
     act(() => {
       root.render(<Probe threadId="thread-target" isChatRoute />);
     });
-    await vi.waitFor(() => expect(socketState.handlers.has('workspace:navigate')).toBe(true));
+    expect(fake.listenerCount('workspace:navigate')).toBe(1);
 
     const acknowledge = vi.fn<(receipt: WorkspaceNavigationReceipt) => void>();
     act(() => {
-      socketState.handlers.get('workspace:navigate')?.(
+      fake.deliver(
+        'workspace:navigate',
         {
           action: 'open',
           path: 'docs/applied.md',
@@ -141,11 +123,12 @@ describe('useWorkspaceNavigate delivery lifecycle', () => {
     act(() => {
       root.render(<Probe threadId="thread-target" isChatRoute isWorkspaceVisible={false} />);
     });
-    await vi.waitFor(() => expect(socketState.handlers.has('workspace:navigate')).toBe(true));
+    expect(fake.listenerCount('workspace:navigate')).toBe(1);
 
     const acknowledge = vi.fn<(receipt: WorkspaceNavigationReceipt) => void>();
     act(() => {
-      socketState.handlers.get('workspace:navigate')?.(
+      fake.deliver(
+        'workspace:navigate',
         {
           action: 'open',
           path: 'docs/narrow.md',
@@ -170,7 +153,7 @@ describe('useWorkspaceNavigate delivery lifecycle', () => {
     act(() => {
       root.render(<Probe threadId="thread-target" isChatRoute />);
     });
-    await vi.waitFor(() => expect(socketState.handlers.has('workspace:navigate')).toBe(true));
+    expect(fake.listenerCount('workspace:navigate')).toBe(1);
 
     const unlockedState = useChatStore.getState();
     const lockedState = {
@@ -197,7 +180,8 @@ describe('useWorkspaceNavigate delivery lifecycle', () => {
     const acknowledge = vi.fn<(receipt: WorkspaceNavigationReceipt) => void>();
 
     act(() => {
-      socketState.handlers.get('workspace:navigate')?.(
+      fake.deliver(
+        'workspace:navigate',
         {
           action: 'open',
           path: 'docs/locked-race.md',
@@ -219,12 +203,12 @@ describe('useWorkspaceNavigate delivery lifecycle', () => {
     expect(getPendingWorkspaceNavigation(window.sessionStorage, 'thread-target')?.eventId).toBe('event-lock-race');
   });
 
-  it('keeps one app-scoped socket while live delivery state changes', async () => {
+  it('keeps one listener and its room on the page connection while live delivery state changes', async () => {
     act(() => {
       root.render(<Probe threadId="thread-a" isChatRoute />);
     });
-    await vi.waitFor(() => expect(socketState.handlers.has('workspace:navigate')).toBe(true));
-    expect(socketState.connect).toHaveBeenCalledTimes(1);
+    expect(fake.listenerCount('workspace:navigate')).toBe(1);
+    expect(fake.heldRooms()).toEqual(['workspace:navigate:ack']);
 
     act(() => {
       root.render(<Probe threadId={null} isChatRoute={false} />);
@@ -242,12 +226,13 @@ describe('useWorkspaceNavigate delivery lifecycle', () => {
       root.render(<Probe threadId="thread-b" isChatRoute />);
     });
 
-    expect(socketState.connect).toHaveBeenCalledTimes(1);
-    expect(socketState.socket.disconnect).not.toHaveBeenCalled();
+    expect(fake.listenerCount('workspace:navigate')).toBe(1);
+    expect(fake.heldRooms()).toEqual(['workspace:navigate:ack']);
 
     const acknowledge = vi.fn<(receipt: WorkspaceNavigationReceipt) => void>();
     act(() => {
-      socketState.handlers.get('workspace:navigate')?.(
+      fake.deliver(
+        'workspace:navigate',
         {
           action: 'open',
           path: 'docs/live-state.md',
@@ -274,7 +259,7 @@ describe('useWorkspaceNavigate delivery lifecycle', () => {
       useChatStore.getState().enablePresentationLock();
       root.render(<Probe threadId="thread-target" isChatRoute />);
     });
-    await vi.waitFor(() => expect(socketState.handlers.has('workspace:navigate')).toBe(true));
+    expect(fake.listenerCount('workspace:navigate')).toBe(1);
     const data: NavigateEvent = {
       action: 'open',
       path: 'docs/requested.md',
@@ -284,7 +269,7 @@ describe('useWorkspaceNavigate delivery lifecycle', () => {
       eventId: 'event-locked-request',
     };
     const acknowledge = vi.fn<(receipt: WorkspaceNavigationReceipt) => void>();
-    act(() => socketState.handlers.get('workspace:navigate')?.(data, acknowledge));
+    act(() => fake.deliver('workspace:navigate', data, acknowledge));
 
     expect(acknowledge).toHaveBeenCalledWith({
       status: 'blocked',

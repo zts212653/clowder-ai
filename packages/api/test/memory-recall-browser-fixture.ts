@@ -17,7 +17,8 @@ function sourceAnchor(family: RecallResolverFamily) {
 }
 function seedDeliveries(f: Fixture) {
   f.invocation('cue-parent');
-  for (const family of RECALL_RESOLVER_FAMILIES) {
+  // Matter records explicit catalog/page reads, not the named cue delivery sampled here.
+  for (const family of RECALL_RESOLVER_FAMILIES.filter((candidate) => candidate !== 'matter')) {
     const event = {
       eventId: `cue-${family}`,
       idempotencyKey: `present-${family}`,

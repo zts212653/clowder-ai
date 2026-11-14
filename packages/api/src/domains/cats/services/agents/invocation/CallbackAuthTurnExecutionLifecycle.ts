@@ -31,6 +31,16 @@ export interface CallbackAuthStartupReconcileResult {
  * startup reconciliation repair the deliberately tolerated crash window.
  */
 export class CallbackAuthTurnExecutionLifecycle implements ITurnExecutionStore {
+  recordWatcherModelAttempt(...args: Parameters<ITurnExecutionStore['recordWatcherModelAttempt']>) {
+    return this.store.recordWatcherModelAttempt(...args);
+  }
+  settledHead(userId: string, threadId?: string) {
+    return this.store.settledHead(userId, threadId);
+  }
+  recordWatcherUsage(invocationId: string, usage: import('@cat-cafe/shared').WatcherUsage) {
+    return this.store.recordWatcherUsage(invocationId, usage);
+  }
+
   constructor(
     private readonly store: ITurnExecutionStore,
     private readonly registry: InvocationRegistry,
@@ -98,6 +108,14 @@ export class CallbackAuthTurnExecutionLifecycle implements ITurnExecutionStore {
 
   clearResponsePending(invocationId: string): void | Promise<void> {
     return this.store.clearResponsePending(invocationId);
+  }
+
+  markResponseSettled(...args: Parameters<ITurnExecutionStore['markResponseSettled']>) {
+    return this.store.markResponseSettled(...args);
+  }
+
+  listSettled(...args: Parameters<ITurnExecutionStore['listSettled']>) {
+    return this.store.listSettled(...args);
   }
 
   settleOutputFence(

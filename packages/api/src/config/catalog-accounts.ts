@@ -8,7 +8,7 @@
  *   1. Legacy provider-profiles.json → accounts.json
  *   2. Project cat-catalog.json.accounts → accounts.json
  */
-import { copyFileSync, existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { resolve } from 'node:path';
 import { type AccountConfig, builtinAccountFamilyForRef } from '@cat-cafe/shared';
@@ -22,6 +22,7 @@ import { assertAccountWritable, readAccountCatalogSnapshot } from './account-sto
 import { resolveAccountStoreTopology, resolveAccountWriteRoot } from './account-store-topology.js';
 import { assertCodexSharedStateRoots, codexStateMutationChangesRoots } from './codex-shared-state.js';
 import { assertSafeTestConfigRoot } from './test-config-write-guard.js';
+import { writeFileAtomic } from './write-file-atomic.js';
 
 const CONFIG_SUBDIR = '.cat-cafe';
 const ACCOUNTS_FILENAME = 'accounts.json';
@@ -44,21 +45,6 @@ function assertSafeCatalogWrite(projectRoot: string | undefined, source: string)
 
 export function resolveAccountsPath(projectRoot?: string): string {
   return resolve(resolveGlobalRoot(projectRoot), CONFIG_SUBDIR, ACCOUNTS_FILENAME);
-}
-
-function writeFileAtomic(filePath: string, content: string, mode?: number): void {
-  const tempPath = `${filePath}.tmp-${process.pid}-${Date.now()}`;
-  writeFileSync(tempPath, content, { encoding: 'utf-8', mode: mode ?? 0o644 });
-  try {
-    renameSync(tempPath, filePath);
-  } catch (error) {
-    try {
-      unlinkSync(tempPath);
-    } catch {
-      /* ignore cleanup failure */
-    }
-    throw error;
-  }
 }
 
 function readAllGlobal(projectRoot?: string): Record<string, AccountConfig> {
@@ -87,7 +73,7 @@ function writeAllGlobal(accounts: Record<string, AccountConfig>, projectRoot?: s
   assertSafeCatalogWrite(projectRoot, 'catalog-accounts.writeAllGlobal');
   const accountsPath = resolveAccountsPath(projectRoot);
   mkdirSync(resolve(resolveGlobalRoot(projectRoot), CONFIG_SUBDIR), { recursive: true });
-  writeFileAtomic(accountsPath, `${JSON.stringify(accounts, null, 2)}\n`);
+  writeFileAtomic(accountsPath, `${JSON.stringify(accounts, null, 2)}\n`, { mode: 0o644 });
 }
 
 function describeAccountConflict(existing: AccountConfig, incoming: AccountConfig): string {
@@ -99,6 +85,7 @@ function describeAccountConflict(existing: AccountConfig, incoming: AccountConfi
   if (current.clientId !== next.clientId) diffs.push('clientId differs');
   if (canonicalJson(current.envVars) !== canonicalJson(next.envVars)) diffs.push('envVars differ');
   if (canonicalJson(current.codex) !== canonicalJson(next.codex)) diffs.push('Codex account metadata differs');
+  if (canonicalJson(current.agy) !== canonicalJson(next.agy)) diffs.push('AGY account metadata differs');
   if ((current.baseUrl ?? '(none)') !== (next.baseUrl ?? '(none)')) {
     diffs.push(`baseUrl ${current.baseUrl ?? '(none)'} vs ${next.baseUrl ?? '(none)'}`);
   }
@@ -259,7 +246,7 @@ function migrateLegacyFrom(
   if (credCount > 0) {
     assertSafeCatalogWrite(projectRoot, 'catalog-accounts.migrateLegacyFrom.credentials');
     mkdirSync(resolve(globalRoot, CONFIG_SUBDIR), { recursive: true });
-    writeFileAtomic(credPath, `${JSON.stringify(existing, null, 2)}\n`, 0o600);
+    writeFileAtomic(credPath, `${JSON.stringify(existing, null, 2)}\n`, { mode: 0o600 });
   }
 }
 
@@ -416,7 +403,7 @@ function migrateHomedirCredentials(projectRoot?: string): void {
     if (imported > 0) {
       assertSafeCatalogWrite(projectRoot, 'catalog-accounts.migrateHomedirCredentials');
       mkdirSync(resolve(globalRoot, CONFIG_SUBDIR), { recursive: true });
-      writeFileAtomic(targetCredPath, `${JSON.stringify(targetCreds, null, 2)}\n`, 0o600);
+      writeFileAtomic(targetCredPath, `${JSON.stringify(targetCreds, null, 2)}\n`, { mode: 0o600 });
       console.error(
         `[catalog-accounts] homedir credentials.json: ${imported} credential(s) merged into ${resolvedTarget}`,
       );

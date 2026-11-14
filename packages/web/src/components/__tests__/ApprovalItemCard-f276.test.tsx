@@ -2,6 +2,7 @@ import type { ApprovalHubItem } from '@cat-cafe/shared';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { primeCoCreatorConfigCache, resetCoCreatorConfigCacheForTest } from '@/hooks/useCoCreatorConfig';
 import { anchoredApprovalNavigation } from '@/test-support/approval-navigation';
 
 const storeMocks = vi.hoisted(() => ({
@@ -145,6 +146,7 @@ describe('ApprovalItemCard F276', () => {
     document.body.appendChild(container);
     root = createRoot(container);
     vi.clearAllMocks();
+    primeCoCreatorConfigCache({ name: 'Ada', aliases: [], mentionPatterns: ['@ada'] });
     canonicalItem = ITEM;
     storeMocks.rejectProposal.mockResolvedValue(true);
   });
@@ -152,13 +154,14 @@ describe('ApprovalItemCard F276', () => {
   afterEach(() => {
     act(() => root.unmount());
     container.remove();
+    resetCoCreatorConfigCacheForTest();
   });
 
   it('renders claim-level source and excerpt, then submits only checked IDs', async () => {
     await act(async () => root.render(<ApprovalItemCard item={ITEM} />));
     expect(container.querySelectorAll('input[type="checkbox"]')).toHaveLength(2);
-    expect(container.textContent).toContain('You 明确陈述');
-    expect(container.textContent).toContain('事实 · You 明确陈述');
+    expect(container.textContent).toContain('Ada 明确陈述');
+    expect(container.textContent).toContain('事实 · Ada 明确陈述');
     expect(container.textContent).toContain('7 月 23 日（周三）');
     expect(container.textContent).toContain('这是纠正版；旧卡会被撤回');
 

@@ -121,7 +121,11 @@ test('launch preserves resume, account isolation, native identity and managed F2
   assert.equal(prepared.sdkOptions.env?.ANTHROPIC_API_KEY, undefined);
   assert.equal(prepared.sdkOptions.env?.ANTHROPIC_BASE_URL, undefined);
   assert.equal(prepared.sdkOptions.env?.SOME_ACCOUNT_SETTING, 'kept');
-  assert.equal(prepared.sdkOptions.systemPrompt, 'native identity\n\nroute append');
+  assert.deepEqual(prepared.sdkOptions.systemPrompt, {
+    type: 'custom',
+    prompt: 'native identity\n\nroute append',
+    snapshot: false,
+  });
   const settings = JSON.parse(prepared.sdkOptions.settings as string);
   assert.equal(settings.disableAllHooks, false, 'host security hooks remain enabled');
   assert.ok(

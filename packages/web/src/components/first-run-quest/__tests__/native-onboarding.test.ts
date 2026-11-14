@@ -84,7 +84,12 @@ describe('native onboarding recommendations', () => {
     expect(partners[3].form.acpStartupArgs).toContain('other.js');
   });
   it('reserves aliases case-insensitively across existing and newly recommended partners', () => {
-    const existing = { id: 'legacy', configurationSource: 'managed_account', mentionPatterns: ['@Codex'] } as CatData;
+    const existing = {
+      id: 'legacy',
+      displayName: 'Existing Codex',
+      configurationSource: 'managed_account',
+      mentionPatterns: ['@Codex'],
+    } as CatData;
     const partners = recommendNativePartners(
       [...runtimes, { ...runtimes[2], id: 'dsh-other', acp: { command: 'node', startupArgs: ['other-dsh.js'] } }],
       templates,
@@ -166,5 +171,30 @@ describe('native onboarding recommendations', () => {
     )[0];
     expect(restored.id).toBe(first.id);
     expect(restored.form.catId).toBe(first.form.catId);
+  });
+  it.each([false, true])('does not preselect a new identity already used by an ACP member (reverse=%s)', (reverse) => {
+    const existing = {
+      id: 'manual-ragdoll',
+      displayName: '布偶猫',
+      nickname: '宪宪',
+      carrier: 'acp',
+      clientId: 'acp',
+      configurationSource: 'native_tool',
+      defaultModel: 'keep-my-model',
+      acp: runtimes[2].acp,
+      avatar: '/custom-ragdoll.png',
+      color: { primary: '#123456', secondary: '#abcdef' },
+      roleDescription: '用户设定的职责',
+      personality: '用户设定的性格',
+      mentionPatterns: ['@manual-ragdoll'],
+    } satisfies CatData;
+    const peers = [runtimes[0], runtimes[2]];
+    const partners = recommendNativePartners(reverse ? peers.toReversed() : peers, templates, [existing], 'journey');
+    expect(partners.find((partner) => partner.runtime.id === 'claude')?.selected).toBe(false);
+    expect(partners.find((partner) => partner.runtime.id === 'dsh')).toMatchObject({
+      selected: true,
+      existingId: existing.id,
+      form: { nickname: '宪宪', defaultModel: 'keep-my-model', avatar: '/custom-ragdoll.png' },
+    });
   });
 });

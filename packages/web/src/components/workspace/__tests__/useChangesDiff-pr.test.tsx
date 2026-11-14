@@ -55,9 +55,17 @@ async function render(target?: PullRequestChangesTarget) {
   await act(async () => root.render(<Probe target={target} />));
 }
 
-it('reads the encoded precise PR target instead of requesting current local diff', async () => {
+it('reads a session-scoped PR target through the owner-validated chat endpoint, not the local repository endpoint', async () => {
   fetchMock.mockResolvedValue(response(first, 'PR 7'));
   await render(first);
+  expect(fetchMock.mock.calls[0]?.[0]).toMatch(/^\/api\/workspace\/chat-pull-request-changes\?target=/);
+  expect(view.data?.diff).toBe('PR 7');
+});
+
+it('keeps a coordinate-free legacy PR target on the strict local repository endpoint', async () => {
+  const legacy: PullRequestChangesTarget = { ...first, threadId: null };
+  fetchMock.mockResolvedValue(response(legacy, 'PR 7'));
+  await render(legacy);
   expect(fetchMock.mock.calls[0]?.[0]).toMatch(/^\/api\/workspace\/pull-request-changes\?target=/);
   expect(view.data?.diff).toBe('PR 7');
 });
@@ -83,7 +91,7 @@ it('rejects an identity-mismatched response and reports a classified failure wit
   await render(first);
   expect(view.data).toBeNull();
   expect(view.error).toBe('unavailable');
-  fetchMock.mockResolvedValueOnce({ ok: false, json: async () => ({ error: { code: 'rate_limited' } }) });
+  fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ error: { code: 'rate_limited' } }), { status: 429 }));
   await act(async () => view.refresh());
   expect(view.data).toBeNull();
   expect(view.error).toBe('rate_limited');
@@ -98,7 +106,7 @@ it('keeps the classic local Changes endpoint for a non-PR target', async () => {
 });
 
 it('never presents A failure with B identity even before the new target passive effect runs', async () => {
-  fetchMock.mockResolvedValueOnce({ ok: false, json: async () => ({ error: { code: 'rate_limited' } }) });
+  fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ error: { code: 'rate_limited' } }), { status: 429 }));
   await render(first);
   expect(view.error).toBe('rate_limited');
   committedErrors = [];

@@ -96,6 +96,7 @@ beforeEach(async () => {
   mocked.fetch.mockReset();
   mocked.back.mockReset();
   generation = 1;
+  view.result = okRead(items.map((item) => approvalRow(item)));
   view.resultGeneration = 1;
   useApprovalHubStore.setState({
     items,
@@ -106,6 +107,7 @@ beforeEach(async () => {
     selectedIds: new Set(),
     deciding: {},
     decisionAttempts: {},
+    scheduleDriftBlocked: {},
     batchResults: [],
   });
   mocked.fetch.mockImplementation(async (path: string, init?: RequestInit) =>
@@ -201,4 +203,49 @@ it('finishes every original session authorization before starting any selected p
   expect([...useApprovalHubStore.getState().selectedIds]).toEqual(['first', 'second']);
   expect(mocked.back).not.toHaveBeenCalled();
   expect(container.querySelector('[data-testid="mailbox-batch-notice"]')?.textContent).toContain('本次没有提交');
+});
+it('blocks batch approval of a known task drift while leaving batch rejection available', async () => {
+  const schedule = { ...first, sourceFeatureId: 'F139' as const, detail: { mutationKind: 'delete' } };
+  mocked.fetch.mockImplementation(async (path: string) =>
+    path === '/api/approval-hub/pending'
+      ? Response.json({ items: [schedule, second, form], count: 3 })
+      : Response.json({}),
+  );
+  await act(async () => {
+    view.result = okRead([schedule, second, form].map((item) => approvalRow(item)));
+    useApprovalHubStore.setState({ items: [schedule, second, form] });
+    root.render(<Wrapper />);
+  });
+  const key = sessions.list().find((session) => session.address.sourceFeatureId === 'F139')?.key;
+  expect(key).toBeDefined();
+  if (!key) throw new Error('Schedule session was not opened');
+  await act(async () => {
+    sessions.hostReport(key, { phase: 'start', kind: 'producer-card' });
+    sessions.hostReport(key, {
+      phase: 'end',
+      kind: 'producer-card',
+      outcome: 'http-error',
+      status: 409,
+      errorCode: 'SCHEDULE_TASK_DRIFT',
+    });
+    view.resultGeneration = generation;
+    sessions.readSettled();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    root.render(<Wrapper />);
+  });
+  const approve = vi.spyOn(useApprovalHubStore.getState(), 'approveProposal');
+  const reject = vi.spyOn(useApprovalHubStore.getState(), 'rejectProposal').mockResolvedValue(true);
+  await click('approval-batch-select-toggle');
+  expect(sessions.get(key)?.model.state).toMatchObject({
+    kind: 'still_open',
+    write: { errorCode: 'SCHEDULE_TASK_DRIFT' },
+  });
+  expect([...useApprovalHubStore.getState().selectedIds]).toEqual(['first', 'second']);
+  expect(container.querySelector<HTMLButtonElement>('[data-testid="approval-batch-approve"]')?.disabled).toBe(true);
+  expect(container.querySelector<HTMLButtonElement>('[data-testid="approval-batch-reject"]')?.disabled).toBe(false);
+  await click('approval-batch-approve');
+  expect(approve).not.toHaveBeenCalled();
+  await click('approval-batch-reject');
+  expect(reject).toHaveBeenCalledWith('first');
+  expect(reject).toHaveBeenCalledWith('second');
 });

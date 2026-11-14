@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 /**
  * F154 Phase B — ThreadCatPill: shows preferred cat in header, opens CatSelector popover.
  */

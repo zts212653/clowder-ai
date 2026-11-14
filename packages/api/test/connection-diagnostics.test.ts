@@ -2,34 +2,7 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { request as httpRequest } from 'node:http';
 import { test } from 'node:test';
-import cookie from '@fastify/cookie';
-import cors from '@fastify/cors';
-import Fastify from 'fastify';
-import { sessionAuthPlugin, sessionRoute } from '../src/infrastructure/session-auth.js';
-import { registerConnectionDiagnostics } from '../src/routes/connection-diagnostics.js';
-
-async function fixture(onRecord?: (record: Record<string, unknown>) => void) {
-  const records: Record<string, unknown>[] = [];
-  const app = Fastify({
-    forceCloseConnections: true,
-    logger: {
-      level: 'info',
-      stream: {
-        write(line: string) {
-          const record = JSON.parse(line) as Record<string, unknown>;
-          records.push(record);
-          onRecord?.(record);
-        },
-      },
-    },
-  });
-  await app.register(cors, { origin: /^http:\/\/127\.0\.0\.1(?::\d+)?$/, credentials: true, maxAge: 600 });
-  await app.register(cookie);
-  await app.register(sessionAuthPlugin);
-  await app.register(sessionRoute);
-  registerConnectionDiagnostics(app, 10);
-  return { app, records };
-}
+import { connectionDiagnosticsFixture as fixture } from './helpers/connection-diagnostics-fixture.js';
 
 async function observedWithin<T>(signal: Promise<T>, stage: string, records: Record<string, unknown>[]): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -324,3 +297,62 @@ test(
     }
   },
 );
+
+test('a request that waited before the server clock started is recorded even when its handler is fast', async () => {
+  // 2026-11-05: browser waits of 23–80s happened before Fastify's own clock started,
+  // so fast handlers (health 0ms) hid them and every server timing looked healthy.
+  const { app, records } = await fixture();
+  app.get('/api/health-fixture', async () => ({ ok: true }));
+  try {
+    const clientRequestId = randomUUID();
+    const response = await app.inject({
+      url: '/api/health-fixture',
+      headers: {
+        'x-clowder-client-request': clientRequestId,
+        'x-clowder-client-sent-at': String(Date.now() - 30_000),
+      },
+    });
+    assert.equal(response.statusCode, 200);
+    const finish = records.find(
+      (record) =>
+        record.event === 'connection_diagnostic' &&
+        record.clientRequestId === clientRequestId &&
+        record.state === 'finish',
+    );
+    assert.ok(finish, 'a fast handler still leaves a record when the request arrived late');
+    assert.ok(Number(finish.sinceClientSendMs) >= 30_000, JSON.stringify(finish));
+    assert.ok(Number(finish.durationMs) < 1_000, JSON.stringify(finish));
+  } finally {
+    await app.close();
+  }
+});
+
+test('an absent, malformed or implausible client send time adds no measurement and forces no record', async () => {
+  const { app, records } = await fixture();
+  app.get('/api/fast-fixture', async () => ({ ok: true }));
+  try {
+    for (const sentAt of [
+      undefined,
+      'not-a-number',
+      String(Date.now() + 10 * 60_000),
+      '-5',
+      String(Date.now() - 3 * 86_400_000),
+    ]) {
+      const clientRequestId = randomUUID();
+      const response = await app.inject({
+        url: '/api/fast-fixture',
+        headers: {
+          'x-clowder-client-request': clientRequestId,
+          ...(sentAt === undefined ? {} : { 'x-clowder-client-sent-at': sentAt }),
+        },
+      });
+      assert.equal(response.statusCode, 200);
+      const diagnostics = records.filter(
+        (record) => record.event === 'connection_diagnostic' && record.clientRequestId === clientRequestId,
+      );
+      assert.deepEqual(diagnostics, [], `sentAt=${sentAt}`);
+    }
+  } finally {
+    await app.close();
+  }
+});

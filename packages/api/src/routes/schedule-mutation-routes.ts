@@ -1,9 +1,10 @@
 import type { FastifyPluginAsync } from 'fastify';
 import { fingerprintDynamicTaskDef } from '../infrastructure/scheduler/ScheduleMutationProposalStore.js';
-import { notifyTaskDeleted, notifyTaskPaused, notifyTaskResumed } from '../infrastructure/scheduler/schedule-notify.js';
+import { notifyTaskPaused, notifyTaskResumed } from '../infrastructure/scheduler/schedule-notify.js';
 import type { TaskSpec_P1 } from '../infrastructure/scheduler/types.js';
 import { requireScheduleMutationPrincipal } from './schedule-mutation-principal.js';
 import { createScheduleMutationAuditEntry, publishScheduleMutationProposal } from './schedule-mutation-proposal.js';
+import { removeOwnerDynamicTask } from './schedule-owner-commit.js';
 import {
   f255ManagedTask,
   isF255ManagedTask,
@@ -11,6 +12,7 @@ import {
   resolveAgentKeyDeliveryThreadScope,
 } from './schedule-route-support.js';
 import { registerScheduleTaskCreateRoute, type ScheduleMutationRoutesOptions } from './schedule-task-create-route.js';
+import { registerScheduleTaskParameterRoute } from './schedule-task-parameter-routes.js';
 
 export const scheduleMutationRoutes: FastifyPluginAsync<ScheduleMutationRoutesOptions> = async (app, opts) => {
   const {
@@ -25,6 +27,7 @@ export const scheduleMutationRoutes: FastifyPluginAsync<ScheduleMutationRoutesOp
   } = opts;
 
   registerScheduleTaskCreateRoute(app, opts);
+  registerScheduleTaskParameterRoute(app, opts);
 
   app.delete('/api/schedule/tasks/:id', async (request, reply) => {
     if (!ownerUserId) {
@@ -83,13 +86,14 @@ export const scheduleMutationRoutes: FastifyPluginAsync<ScheduleMutationRoutesOp
       return { success: true, proposed: true, proposalId: proposal.proposalId, taskId: id };
     }
 
-    const audit = createScheduleMutationAuditEntry(ownerUserId, mutationPrincipal, 'delete', id);
-    if (!scheduleMutationProposalStore.deleteTaskWithAudit(id, audit)) {
+    const removed = removeOwnerDynamicTask(
+      { taskRunner, scheduleMutationProposalStore, notifyLifecycle },
+      { ownerUserId, principal: mutationPrincipal, def: defForNotify },
+    );
+    if (!removed) {
       reply.status(404);
       return { error: 'Dynamic task not found' };
     }
-    taskRunner.unregister(id);
-    notifyTaskDeleted(notifyLifecycle, defForNotify);
     return { success: true, proposed: false };
   });
 

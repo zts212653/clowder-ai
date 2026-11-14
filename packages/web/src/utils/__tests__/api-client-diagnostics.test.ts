@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 describe('request and notification diagnostic correlation', () => {
@@ -68,6 +69,21 @@ describe('request and notification diagnostic correlation', () => {
     const ids = physical.map(([, init]) => new Headers(init?.headers).get('x-clowder-client-request'));
     expect(ids.every((id) => typeof id === 'string' && /^[a-f0-9-]{36}$/i.test(id))).toBe(true);
     expect(new Set(ids).size).toBe(2);
+  });
+
+  it('stamps each physical request with the browser time it was handed to fetch', async () => {
+    // The server compares this with its own arrival time; under load the gap was 23-80s
+    // and nothing in the server timings showed it.
+    const sentAt = Date.parse('2026-11-05T10:08:25.000Z');
+    vi.setSystemTime(sentAt);
+    const fetchMock = vi.fn<typeof fetch>(async (url) =>
+      String(url).endsWith('/api/session') ? Response.json({ csrfToken: 'fixture-csrf' }) : Response.json({}),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    const { apiFetch } = await import('../api-client');
+    await apiFetch('/api/threads/private-thread/artifacts?view=works');
+    const request = fetchMock.mock.calls.find(([url]) => String(url).includes('/artifacts'));
+    expect(new Headers(request?.[1]?.headers).get('x-clowder-client-sent-at')).toBe(String(sentAt));
   });
 
   it('retains an outage report across reload and never recursively reports a failed delivery', async () => {

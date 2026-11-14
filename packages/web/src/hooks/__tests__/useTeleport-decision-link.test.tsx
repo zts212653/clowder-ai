@@ -2,13 +2,14 @@ import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { afterEach, beforeAll, expect, it, vi } from 'vitest';
 import { useChatStore } from '@/stores/chatStore';
+import { withHubSocket } from '@/test-utils/fake-hub-socket';
 import { __resetPendingTeleportForTest, peekPendingTeleport } from '@/utils/teleport';
 import { useTeleport } from '../useTeleport';
 import { useWorkspaceNavigate } from '../useWorkspaceNavigate';
 
-vi.mock('socket.io-client', () => ({
-  io: () => ({ emit: vi.fn(), on: vi.fn(), off: vi.fn(), disconnect: vi.fn() }),
-}));
+// The connection-recovery browser host mounts these transport consumers without a Next app router.
+vi.unmock('next/navigation');
+
 beforeAll(() => {
   Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
 });
@@ -39,7 +40,7 @@ it.each([
   useChatStore.setState({ currentThreadId: rememberedThread });
   const container = document.createElement('div');
   document.body.append(container);
-  const root = createRoot(container);
+  const root = withHubSocket(createRoot(container));
   try {
     await act(async () => root.render(<CompanionShell />));
     expect(peekPendingTeleport('thread-owner')).toEqual({ threadId: 'thread-owner', messageId: 'message-source' });
@@ -70,7 +71,7 @@ it.each([
   window.history.replaceState({}, '', href);
   useChatStore.setState({ currentThreadId: 'thread-owner' });
   const container = document.createElement('div');
-  const root = createRoot(container);
+  const root = withHubSocket(createRoot(container));
   function Probe() {
     useTeleport();
     return null;

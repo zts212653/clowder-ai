@@ -8,6 +8,7 @@ import {
 } from '@cat-cafe/shared';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiFetch } from '@/utils/api-client';
+import { readGitErrorCode } from '@/utils/git-response-error';
 import type { CommitChangesTarget } from '../workbench/commit-changes-surface';
 
 export interface ChangedFile {
@@ -16,6 +17,7 @@ export interface ChangedFile {
 }
 
 export interface ChangesDiffData {
+  isGitRepository?: boolean;
   changedFiles: ChangedFile[];
   diff: string;
   target?: PullRequestChangesTarget;
@@ -37,7 +39,8 @@ export type ChangesDiffError =
   | 'unavailable'
   | 'root_unavailable'
   | 'repository_mismatch'
-  | 'invalid_target';
+  | 'invalid_target'
+  | 'git_worktree_required';
 
 function matchesPullRequestResponse(value: unknown, key: string): value is PullRequestChangesData {
   if (!value || typeof value !== 'object') return false;
@@ -93,6 +96,8 @@ async function readChangesResponse(
   prKey: string | null,
 ): Promise<{ data: ChangesDiffData | null; error: ChangesDiffError | null }> {
   if (!response.ok) {
+    const gitError = await readGitErrorCode(response);
+    if (gitError === 'git_worktree_required') return { data: null, error: 'git_worktree_required' };
     const body: unknown = prKey ? await response.json().catch(() => null) : null;
     return { data: null, error: prKey ? responseError(body) : 'fetch_failed' };
   }
@@ -104,10 +109,12 @@ async function readChangesResponse(
 export function useChangesDiff(
   worktreeId: string | null,
   pullRequestTarget?: PullRequestChangesTarget,
-  chatSource = false,
   commitTarget?: CommitChangesTarget,
 ) {
   const prKey = pullRequestTarget ? encodePullRequestChangesTarget(pullRequestTarget) : null;
+  // #1809: read permission follows the target's own session coordinate. The entry that opened the
+  // PR (chat link, artifact list, workspace home) only decides where "back" returns to.
+  const prUsesChatEndpoint = Boolean(pullRequestTarget?.threadId);
   const commitKey = commitTarget ? JSON.stringify(commitTarget) : null;
   const targetKey = commitKey ? `commit:${commitKey}` : prKey ? `pr:${prKey}` : `local:${worktreeId ?? ''}`;
   const currentKey = useRef(targetKey);
@@ -131,7 +138,7 @@ export function useChangesDiff(
         commitKey
           ? `/api/workspace/chat-commit-changes?${new URLSearchParams(JSON.parse(commitKey))}`
           : prKey
-            ? `/api/workspace/${chatSource ? 'chat-pull-request-changes' : 'pull-request-changes'}?target=${encodeURIComponent(prKey)}`
+            ? `/api/workspace/${prUsesChatEndpoint ? 'chat-pull-request-changes' : 'pull-request-changes'}?target=${encodeURIComponent(prKey)}`
             : `/api/workspace/diff?worktreeId=${encodeURIComponent(worktreeId)}`,
       );
       if (!isCurrent()) return;
@@ -155,7 +162,7 @@ export function useChangesDiff(
     } catch {
       if (isCurrent()) setStatus({ key: targetKey, loading: false, error: 'network' });
     }
-  }, [worktreeId, prKey, targetKey, chatSource, commitKey]);
+  }, [worktreeId, prKey, targetKey, prUsesChatEndpoint, commitKey]);
 
   useEffect(() => {
     void refresh();

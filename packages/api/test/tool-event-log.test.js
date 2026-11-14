@@ -318,6 +318,41 @@ describe('ToolEventLog (AC-F10)', () => {
     assert.equal(call2.summary._resultMerged, true);
   });
 
+  test('round-end reads see pending writes and merge only the matching invocation', async () => {
+    const { default: Database } = await import('better-sqlite3');
+    const { ToolEventLog } = await import('../dist/domains/cats/services/tool-usage/ToolEventLog.js');
+    const eventLog = new ToolEventLog(fakeRedis);
+    const { SCHEMA_V1, applyMigrations } = await import('../dist/domains/memory/schema.js');
+    const { triggerRecallCorrelation } = await import('../dist/domains/memory/recall-correlation-hook.js');
+    const evidence = new Database(':memory:');
+    evidence.exec(SCHEMA_V1);
+    evidence.prepare('INSERT INTO schema_version (version, applied_at) VALUES (1, ?)').run(new Date().toISOString());
+    applyMigrations(evidence);
+    const base = makeBaseEvent({ summary: { _toolUseId: 'same-native-id' } });
+    const first = eventLog.append({ ...base, invocationId: 'previous' });
+    const second = eventLog.append(base);
+    const settle = eventLog.updateSummary(
+      base.threadId,
+      { invocationId: base.invocationId, catId: base.catId, toolUseId: 'same-native-id' },
+      { query: 'final query', resultStatus: 'timeout', resultCount: null },
+    );
+    const events = await eventLog.readRecentByThread(base.threadId, 10);
+    await Promise.all([first, second, settle]);
+    for (const invocationId of ['previous', base.invocationId]) {
+      await triggerRecallCorrelation(evidence, events, invocationId, base.catId);
+    }
+    assert.deepEqual(
+      evidence
+        .prepare('SELECT invocation_id, query, result_status, result_count FROM recall_events ORDER BY invocation_id')
+        .all(),
+      [
+        { invocation_id: 'inv-1', query: 'final query', result_status: 'timeout', result_count: null },
+        { invocation_id: 'previous', query: '', result_status: 'result_unmerged', result_count: null },
+      ],
+    );
+    evidence.close();
+  });
+
   test('F282 merges only a recognized abstention result into its provisional tool event', async () => {
     const [{ ToolEventLog }, { deriveResultSummary }] = await Promise.all([
       import('../dist/domains/cats/services/tool-usage/ToolEventLog.js'),

@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 /**
  * F097: Integration — ChatMessage renders CliOutputBlock instead of ToolEventsPanel + 💭心里话
  */
@@ -5,6 +6,7 @@ import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useChatStore } from '@/stores/chatStore';
+import { SHELL_PRESENTATION_STORAGE_KEY, writeShellPresentation } from '../shell/shell-presentation';
 
 vi.mock('next/navigation', () => ({ useRouter: () => ({ push: vi.fn() }) }));
 vi.mock('@/hooks/useTts', () => ({
@@ -28,6 +30,8 @@ afterAll(() => {
   delete (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT;
 });
 beforeEach(() => {
+  // These assertions exercise the retained classic presentation explicitly.
+  writeShellPresentation('classic');
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
@@ -36,6 +40,7 @@ beforeEach(() => {
 afterEach(() => {
   act(() => root.unmount());
   container.remove();
+  window.localStorage.removeItem(SHELL_PRESENTATION_STORAGE_KEY);
 });
 
 const getCatById = () => undefined;

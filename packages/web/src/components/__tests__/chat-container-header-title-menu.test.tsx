@@ -2,9 +2,11 @@
  * F322 original-B, header side: the new shell's header carries the thread title's ⌄ menu (the normal force-reset lives
  * there and only appears while something runs). The classic header is frozen and never renders it.
  */
+import { WATCHER_CONFIG_DEFAULTS } from '@cat-cafe/shared';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { WatcherSnapshot } from '@/hooks/useWatcher';
 import { useActiveExecutionStore } from '@/stores/activeExecutionStore';
 import { SHELL_PRESENTATION_STORAGE_KEY, writeShellPresentation } from '../shell/shell-presentation';
 
@@ -26,6 +28,17 @@ import { ThreadSettingsProvider } from '../ThreadSidebar/ThreadSettingsProvider'
 
 const THREAD = 'thread-title-menu';
 const toggle = (container: HTMLElement) => container.querySelector('[data-testid="thread-title-menu-toggle"]');
+const WATCHER_STATE: WatcherSnapshot = {
+  control: { revision: 0 },
+  config: { ...WATCHER_CONFIG_DEFAULTS, enabled: false },
+  enabled: false,
+  maySpeak: false,
+  labelMuted: false,
+  rolloutEnabled: false,
+  reviewing: false,
+  memberName: '小太阳',
+  capability: { supported: true, mechanism: 'native_revert', maxWorkingContextTokens: 30000, toolPolicy: 'watcher' },
+};
 
 function seedRunning(running: boolean) {
   const store = useActiveExecutionStore.getState();
@@ -64,11 +77,14 @@ describe('ChatContainerHeader: the title ⌄ menu', () => {
   beforeEach(() => {
     window.localStorage.removeItem(SHELL_PRESENTATION_STORAGE_KEY);
     mocks.apiFetch.mockReset();
-    mocks.apiFetch.mockResolvedValue({
+    mocks.apiFetch.mockImplementation(async (url: string) => ({
       ok: true,
       status: 200,
-      json: async () => ({ queue: [], paused: false, activeInvocations: [] }),
-    });
+      json: async () =>
+        /^\/api\/threads\/[^/]+\/watcher$/.test(url)
+          ? WATCHER_STATE
+          : { queue: [], paused: false, activeInvocations: [] },
+    }));
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
@@ -99,6 +115,7 @@ describe('ChatContainerHeader: the title ⌄ menu', () => {
   }
 
   it('classic header, something running: no ⌄ menu — the classic header is unchanged', () => {
+    writeShellPresentation('classic');
     seedRunning(true);
     renderHeader();
     expect(container.querySelector('[data-shell-header="v2"]')).toBeNull();

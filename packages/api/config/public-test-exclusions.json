@@ -2,6 +2,23 @@
   "version": 2,
   "entries": [
     {
+      "id": "issue1973-redis-correlation",
+      "match": "^test/send-attempt-correlation-redis\\.test\\.js$",
+      "category": "source_only",
+      "reason": "Requires a real, explicitly isolated Redis to verify atomic admission and reopening an actual legacy ledger row; run with test:redis. Public shards deliberately deny Redis access. Portable receipt and admission tests remain in public CI.",
+      "owner": "@whutzefengxie-ops",
+      "introducedBy": "b6c06d3fb1cdb670dbc7fa7afcf65897e6e4c6cd",
+      "expiresOn": "2027-01-31",
+      "audit": {
+        "reviewedOn": "2026-11-14",
+        "sourceHead": "3aafd28639187f539bdb82094699d418632bfa40",
+        "publicHead": "3aafd28639187f539bdb82094699d418632bfa40",
+        "status": "resource_contract",
+        "matchedFileCount": 1,
+        "matchedFilesHash": "6e12f5559681b1b5875910cfa911a6fbc1b413f08ab7ca76256271fe007e86d7"
+      }
+    },
+    {
       "id": "redis",
       "match": "^(?:test/approval\\-hub/approval\\-publication\\-redis\\-contract\\.test\\.js|test/approval\\-hub/redis\\-dispatch\\-proposal\\-store\\.test\\.js|test/approval\\-hub/redis\\-entity\\-proposal\\-dedup\\.test\\.js|test/dossier\\-distillation\\-redis\\-store\\.test\\.js|test/dossier\\-observation\\-redis\\-store\\.test\\.js|test/f254\\-freshness\\-closure\\-redis\\-store\\.test\\.js|test/f254\\-freshness\\-supplement\\-redis\\-store\\.test\\.js|test/f254\\-output\\-commit\\-redis\\-race\\.test\\.js|test/issue1371\\-redis\\-convergence\\.test\\.js|test/person\\-memory\\-redis\\-store\\.test\\.js|test/plugin\\-messaging\\-redis\\-event\\-fencing\\.test\\.js|test/plugin\\-messaging\\-redis\\-snapshot\\.test\\.js|test/plugin\\-messaging\\-redis\\-stores\\.test\\.js|test/redis\\-action\\-successor\\-lease\\-store\\.test\\.js|test/redis\\-action\\-successor\\-task\\-lifecycle\\.test\\.js|test/redis\\-backlog\\-store\\.test\\.js|test/redis\\-concierge\\-config\\-store\\.test\\.js|test/redis\\-connector\\-binding\\-store\\.test\\.js|test/redis\\-grounding\\-sample\\-store\\.test\\.js|test/redis\\-invocation\\-record\\-store\\.test\\.js|test/redis\\-label\\-store\\.test\\.js|test/redis\\-limb\\-pairing\\-persistence\\.test\\.js|test/redis\\-message\\-delivery\\-atomicity\\.test\\.js|test/redis\\-message\\-delivery\\-contracts\\.test\\.js|test/redis\\-message\\-store\\.test\\.js|test/redis\\-profile\\-update\\-proposal\\-store\\.test\\.js|test/redis\\-proposal\\-store\\-finalize\\.test\\.js|test/redis\\-proposal\\-withdraw\\.test\\.js|test/redis\\-read\\-state\\-store\\.test\\.js|test/redis\\-runtime\\-interaction\\-store\\.test\\.js|test/redis\\-runtime\\-session\\-store\\.test\\.js|test/redis\\-session\\-chain\\-store\\.test\\.js|test/redis\\-session\\-handoff\\-disposition\\.test\\.js|test/redis\\-session\\-handoff\\-proposal\\-store\\.test\\.js|test/redis\\-summary\\-store\\.test\\.js|test/redis\\-task\\-progress\\-store\\.test\\.js|test/redis\\-task\\-store\\.test\\.js|test/redis\\-taste\\-proposal\\-recovery\\.test\\.js|test/redis\\-test\\-db\\-namespace\\.test\\.js|test/redis\\-thread\\-store\\.test\\.js|test/redis\\-tip\\-telemetry\\-sink\\.test\\.js|test/redis\\-turn\\-execution\\-store\\.test\\.js|test/redis\\-unread\\-summary\\-visibility\\-cursor\\.test\\.js|test/stores/redis\\-frustration\\-issue\\-store\\-window\\.test\\.js)$",
       "category": "source_only",
@@ -347,6 +364,74 @@
         "status": "source_dependency_failure",
         "matchedFileCount": 4,
         "matchedFilesHash": "da6493a123d4a298eda738be855df78dabbead0fb79e40ca9ef67d885846c14b"
+      }
+    },
+    {
+      "id": "schedule-parameter-alpha-home-journey",
+      "match": "^test/scheduler/schedule-parameter-callback-journey\\.test\\.js$",
+      "category": "source_only",
+      "reason": "This exact MCP-to-owner-approval journey uses the private Alpha subscription/execution runtime from scripts/lib/alpha-browser-subscription.mjs. The public export deliberately omits that home testing runtime. Keep the unchanged journey running at home; portable schedule parameter, principal, proposal, migration and decision contracts remain selected. This classification addresses an observed missing private dependency, not a product behavior failure.",
+      "owner": "@codex-astra",
+      "introducedBy": "Public export closure audit for the schedule parameter Alpha journey",
+      "expiresOn": "2026-12-31",
+      "audit": {
+        "reviewedOn": "2026-11-06",
+        "sourceHead": "4c9ae6e4002ba723475d940e1dac2bc93bee7ab5",
+        "publicHead": "3569a9b6422723faf3a586b68232c140f84b44a1",
+        "status": "source_dependency_failure",
+        "matchedFileCount": 1,
+        "matchedFilesHash": "ff997e5e38eed9f077e8bde1e004ff418fae9839a9cdb7bcb9020b0a588480a4"
+      }
+    },
+    {
+      "id": "alpha-managed-preparation-home-sleep",
+      "match": "^test/alpha-managed-preparation-sleep\\.test\\.js$",
+      "category": "source_only",
+      "reason": "This exact preparation-sleep integration uses the private Alpha subscription and execution APIs. The public runtime deliberately omits those home-only harness modules. Keep the unchanged home integration suite; public command-clock and process-supervision contracts remain selected and exported.",
+      "owner": "@codex-astra",
+      "introducedBy": "Current-main export closure audit for the home Alpha preparation lifecycle",
+      "expiresOn": "2026-12-31",
+      "audit": {
+        "reviewedOn": "2026-11-07",
+        "sourceHead": "5af4b6a87043400a5a4921e7d886b7a20c6e4f4e",
+        "publicHead": "3569a9b6422723faf3a586b68232c140f84b44a1",
+        "status": "source_dependency_failure",
+        "matchedFileCount": 1,
+        "matchedFilesHash": "e4dfe4fe9b658304a322453f3faf8e4a6c61c054ebcf3abdc0daa351cd4bbb49"
+      }
+    },
+    {
+      "id": "f332-private-w2-source-replay",
+      "match": "^test/memory/matter-memory-w2-pilot\\.test\\.js$",
+      "category": "source_only",
+      "reason": "This exact offline W2 pilot replays private author-observed messages and unpublished draft evidence from docs/evidence/2026-11-07-f332-w2-pilot. Those source-local research inputs are deliberately excluded from public export. Keep the home replay unchanged; portable Matter owner, ACL/revision/withdrawal, discovery and preparation contracts remain selected. This records an observed missing private fixture, not a product behavior failure exemption.",
+      "owner": "@codex-astra",
+      "introducedBy": "Public CI 42439220261 at 99c1356f1266990c6f59179d428f9825aec2c917",
+      "expiresOn": "2026-12-31",
+      "audit": {
+        "reviewedOn": "2026-11-08",
+        "sourceHead": "7981fda3ce702892ab21eb39038b75aaa0cb1968",
+        "publicHead": "99c1356f1266990c6f59179d428f9825aec2c917",
+        "status": "source_dependency_failure",
+        "matchedFileCount": 1,
+        "matchedFilesHash": "15e33bedfb5cb7afaa190c7b296ed2b99496bf0af2263805f91452dcf2abe071"
+      }
+    },
+    {
+      "id": "owner-memory-redis-resource-contracts",
+      "match": "^test/(?:person-memory-owner-(?:deferred-invalidation|maintenance)|remember-(?:group-retry|original-entrypoints))\\.test\\.js$",
+      "category": "resource_contract",
+      "reason": "These exact four owner-maintenance and remember persistence consumers require the native isolated Redis runner. Public shard children deliberately deny Redis on port 0 and no Redis service is provisioned. Keep their actual isolated-Redis execution as separate evidence; portable owner-read, remember delegation and revision contracts remain selected.",
+      "owner": "@codex61-sol",
+      "introducedBy": "Task743 native Node and Redis resource audit of public candidate 652fd2f9",
+      "expiresOn": "2026-12-31",
+      "audit": {
+        "reviewedOn": "2026-11-12",
+        "sourceHead": "c5e46e3db77468f693a104cb697f7431242ec52b",
+        "publicHead": "652fd2f9547f4d739ee504d27d6c1fb6cb2b3328",
+        "status": "resource_contract",
+        "matchedFileCount": 4,
+        "matchedFilesHash": "da1ba0352fdb1c07470f3f1d55f977d9f8455d42e8a1ee531873a0f39ac0882b"
       }
     }
   ]

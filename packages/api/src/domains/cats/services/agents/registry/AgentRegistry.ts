@@ -23,6 +23,7 @@ export class AgentRegistry {
   private services = new Map<string, AgentService>();
   private unavailable = new Map<string, AgentRegistrationFailure>();
   private refreshTail: Promise<void> = Promise.resolve();
+  private admissionRefresh: Promise<void> | undefined;
 
   /** Register an {@link AgentService} for a cat. Throws if already registered. */
   register(catId: string, service: AgentService): void {
@@ -106,5 +107,15 @@ export class AgentRegistry {
     const result = this.refreshTail.then(run, run);
     this.refreshTail = result;
     return result;
+  }
+
+  /** Stale preflight requests share one rebuild through the existing registry writer. */
+  refreshForAdmission(rebuild: () => Promise<void>): Promise<void> {
+    this.admissionRefresh ??= Promise.resolve()
+      .then(rebuild)
+      .finally(() => {
+        this.admissionRefresh = undefined;
+      });
+    return this.admissionRefresh;
   }
 }

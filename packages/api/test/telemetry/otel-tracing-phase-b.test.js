@@ -1,10 +1,15 @@
 /**
- * F153 Phase B: OTel end-to-end tracing structural tests.
+ * F153 Phase B: OTel wiring that the runtime tests cannot reach.
  *
- * Verifies that span creation logic is correctly wired in:
- * - cli-spawn.ts (cat_cafe.cli_session child span)
- * - invoke-single-cat.ts (cat_cafe.llm_call + cat_cafe.tool_use spans)
- * - types.ts / ClaudeAgentService.ts (parentSpan threading)
+ * otel-tracing-runtime.test.js and otel-tracing-llm-runtime.test.js assert the span
+ * behaviour itself (cli_session parent, attributes, OK / ERROR on exit, the llm_call
+ * and tool_use helpers), but they call spawnCli and the span helpers directly.
+ * What they never exercise stays here as source-level checks:
+ * - every CLI provider forwards parentSpan into cliOpts, and invoke-single-cat passes
+ *   its invocationSpan down (the chain that links CLI spans to the invocation)
+ * - invoke-single-cat calls recordLlmCallSpan / recordToolUseSpan, and records
+ *   llm_call only when durationApiMs is present
+ * - cli-spawn.ts marks a timeout as ERROR and emits the timeout / error OTel logs
  *
  * Uses source-level inspection (same pattern as cli-spawn-redaction.test.js)
  * since these tests don't require a compiled dist/ build.
@@ -22,43 +27,9 @@ const CLI_TYPES_SRC = resolve(__dirname, '../../src/utils/cli-types.ts');
 const TYPES_SRC = resolve(__dirname, '../../src/domains/cats/services/types.ts');
 const CLAUDE_SERVICE_SRC = resolve(__dirname, '../../src/domains/cats/services/agents/providers/ClaudeAgentService.ts');
 const INVOKE_SRC = resolve(__dirname, '../../src/domains/cats/services/agents/invocation/invoke-single-cat.ts');
-const SPAN_HELPERS_SRC = resolve(__dirname, '../../src/infrastructure/telemetry/span-helpers.ts');
 
 test('F153 Phase B: cli_session span creation in cli-spawn.ts', async (t) => {
   const src = readFileSync(CLI_SPAWN_SRC, 'utf8');
-
-  await t.test('creates cat_cafe.cli_session span when parentSpan is provided', () => {
-    assert.ok(
-      src.includes("startSpan('cat_cafe.cli_session'") || src.includes('startSpan(\n'),
-      'Should create cat_cafe.cli_session span',
-    );
-    assert.ok(src.includes('options.parentSpan'), 'Should check for parentSpan option');
-    assert.ok(
-      src.includes('trace.setSpan(context.active(), options.parentSpan)'),
-      'Should derive parent context from parentSpan',
-    );
-  });
-
-  await t.test('sets span attributes for CLI process metadata', () => {
-    assert.ok(src.includes("'cli.command'"), 'Should set cli.command attribute');
-    assert.ok(src.includes("'cli.arg_count'"), 'Should set cli.arg_count attribute');
-    assert.ok(src.includes("'cli.pid'"), 'Should set cli.pid attribute');
-  });
-
-  await t.test('uses redactor-safe keys for system identifiers', () => {
-    // Must use camelCase keys that TelemetryRedactor CLASS_C handles,
-    // not dotted snake_case which would bypass redaction.
-    assert.ok(
-      !src.includes("'cat_cafe.invocation_id'"),
-      'Must not use dotted cat_cafe.invocation_id — bypasses redactor',
-    );
-    assert.ok(
-      !src.includes("'cat_cafe.cli_session_id'"),
-      'Must not use dotted cat_cafe.cli_session_id — bypasses redactor',
-    );
-    assert.ok(src.includes('invocationId: options.invocationId'), 'Should use camelCase invocationId');
-    assert.ok(src.includes('sessionId: options.cliSessionId'), 'Should use camelCase sessionId');
-  });
 
   await t.test('sets ERROR status on timeout', () => {
     assert.ok(
@@ -70,14 +41,6 @@ test('F153 Phase B: cli_session span creation in cli-spawn.ts', async (t) => {
 
   await t.test('sets ERROR status on non-zero exit', () => {
     assert.ok(src.includes('cli_session_error'), 'Should emit OTel log on CLI error exit');
-  });
-
-  await t.test('sets OK status on clean exit', () => {
-    assert.ok(src.includes('SpanStatusCode.OK'), 'Should set OK status on clean exit');
-  });
-
-  await t.test('ends span in finally block', () => {
-    assert.ok(src.includes('cliSpan.end()'), 'Should call cliSpan.end() in finally block');
   });
 });
 
@@ -125,21 +88,9 @@ test('F153 Phase B: parentSpan threading through call chain', async (t) => {
 
 test('F153 Phase B: llm_call retrospective span via span-helpers.ts', async (t) => {
   const invokeSrc = readFileSync(INVOKE_SRC, 'utf8');
-  const helperSrc = readFileSync(SPAN_HELPERS_SRC, 'utf8');
 
   await t.test('invoke-single-cat delegates to recordLlmCallSpan', () => {
     assert.ok(invokeSrc.includes('recordLlmCallSpan'), 'Should call recordLlmCallSpan helper');
-  });
-
-  await t.test('creates cat_cafe.llm_call span in helper', () => {
-    assert.ok(helperSrc.includes("'cat_cafe.llm_call'"), 'Helper should create cat_cafe.llm_call span');
-  });
-
-  await t.test('uses retrospective startTime from durationApiMs', () => {
-    assert.ok(
-      helperSrc.includes('durationApiMs') && helperSrc.includes('startTime'),
-      'Helper should compute span startTime from durationApiMs',
-    );
   });
 
   await t.test('only creates llm_call span when durationApiMs is available', () => {
@@ -148,37 +99,12 @@ test('F153 Phase B: llm_call retrospective span via span-helpers.ts', async (t) 
       'Guard must check durationApiMs before calling recordLlmCallSpan',
     );
   });
-
-  await t.test('records token usage attributes on llm_call span', () => {
-    assert.ok(helperSrc.includes("'gen_ai.usage.input_tokens'"), 'Should set input token count');
-    assert.ok(helperSrc.includes("'gen_ai.usage.output_tokens'"), 'Should set output token count');
-    assert.ok(helperSrc.includes("'gen_ai.usage.cache_read_tokens'"), 'Should set cache read token count');
-  });
 });
 
 test('F153 Phase B: tool_use spans via span-helpers.ts', async (t) => {
   const invokeSrc = readFileSync(INVOKE_SRC, 'utf8');
-  const helperSrc = readFileSync(SPAN_HELPERS_SRC, 'utf8');
 
   await t.test('invoke-single-cat delegates to recordToolUseSpan', () => {
     assert.ok(invokeSrc.includes('recordToolUseSpan'), 'Should call recordToolUseSpan helper');
-  });
-
-  await t.test('creates cat_cafe.tool_use child span for MCP tools', () => {
-    assert.ok(
-      helperSrc.includes('cat_cafe.tool_use') || helperSrc.includes("'cat_cafe.tool_use"),
-      'Helper should create cat_cafe.tool_use span for MCP tools',
-    );
-  });
-
-  await t.test('sets tool.name attribute on span', () => {
-    assert.ok(
-      helperSrc.includes('TOOL_NAME') || helperSrc.includes("'tool.name'"),
-      'Helper should set tool.name on span',
-    );
-  });
-
-  await t.test('increments basic_call_count for non-MCP tools', () => {
-    assert.ok(helperSrc.includes("'tool.basic_call_count'"), 'Helper should increment counter for basic tools');
   });
 });

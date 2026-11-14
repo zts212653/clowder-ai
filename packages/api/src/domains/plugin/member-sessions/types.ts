@@ -107,6 +107,10 @@ export interface MemberSessionExecution {
   readonly semanticCursor: number;
   readonly content: string;
   readonly phase: 'admitting' | 'queued' | 'running' | 'succeeded' | 'failed' | 'canceled' | 'interrupted';
+  /** Durable admission fence. Legacy missing values leave dispatch uncertain. */
+  readonly dispatchStarted?: boolean;
+  /** Read-only Host proof for an archived generation; never a child outcome. */
+  readonly admissionState?: 'not_dispatched';
   readonly messageId?: string;
   readonly invocationId?: string;
   readonly responseMessageId?: string;

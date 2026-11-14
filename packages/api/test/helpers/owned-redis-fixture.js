@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { mkdtemp, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before } from 'node:test';
 import { Redis } from 'ioredis';
@@ -26,7 +27,8 @@ export function ownedRedisFixture(label) {
     return client;
   }
   before(async () => {
-    directory = await mkdtemp(`/tmp/${label}-`);
+    // macOS's per-user temp path can exceed the Unix socket path limit.
+    directory = await mkdtemp(join(process.platform === 'darwin' ? '/tmp' : tmpdir(), `${label}-`));
     child = spawn(
       'redis-server',
       [

@@ -29,7 +29,8 @@ it('indexes the unedited F236 prose, then blocks and purges real credentials bef
   assert.equal(clean.blocked, false);
   assert.equal(clean.indexed, 2);
   assert.ok(await store.getByAnchor('probe:doc/doc'));
-  writeFileSync(join(root, 'leaked.md'), 'password = "CorrectHorse/BatteryStaple/PurpleCloud/Sunshine"');
+  const syntheticPassword = ['CorrectHorse', 'BatteryStaple', 'PurpleCloud', 'Sunshine'].join('/');
+  writeFileSync(join(root, 'leaked.md'), `password = "${syntheticPassword}"`);
   const blocked = await builder.rebuild();
   assert.equal(blocked.blocked, true);
   assert.equal(blocked.secretFindings[0].file, 'leaked.md');

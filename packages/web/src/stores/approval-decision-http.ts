@@ -16,6 +16,13 @@ import { DecisionNotSent } from './approval-decision-attempts';
 /** Default endpoint for features without a dedicated decision route. */
 const DEFAULT_ENDPOINT_BASE = '/api/dispatch-proposals';
 
+/** The rendered card (or captured batch row) supplies its digest; never replace it after a refresh. */
+export function tasteApprovalRequest(feature: string | undefined, displayedDigest: unknown): RequestInit {
+  return feature === 'F221' && typeof displayedDigest === 'string'
+    ? { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ decisionDigest: displayedDigest }) }
+    : {};
+}
+
 export function resolveEndpoint(
   featureId: ApprovalHubItem['sourceFeatureId'] | undefined,
   proposalId: string,
@@ -30,6 +37,7 @@ export function resolveEndpoint(
 }
 
 export interface DecisionErrorBody {
+  code?: string;
   error?: string;
   detail?: string;
   message?: string;

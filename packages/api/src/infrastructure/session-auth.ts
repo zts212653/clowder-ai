@@ -17,6 +17,8 @@ const UNPAIRED_USER_ID = 'unpaired-user';
 declare module 'fastify' {
   interface FastifyRequest {
     sessionUserId?: string;
+    /** Server-issued proof that this cookie was minted for the configured local owner. */
+    sessionIsLocalOwner?: boolean;
     /** Browser-session-only CSRF secret. Never accepted from a caller-controlled identity header. */
     sessionCsrfToken?: string;
     /** Opaque issuance binding used to prove which browser session authorized an owner action. */
@@ -30,6 +32,7 @@ const DEFAULT_MAX_SESSIONS = 10_000;
 
 export interface BrowserSessionRecord {
   userId: string;
+  isLocalOwner?: boolean;
   csrfToken: string;
   bindingId: string;
 }
@@ -42,7 +45,7 @@ export class SessionStore {
     this.maxSessions = opts?.maxSessions ?? DEFAULT_MAX_SESSIONS;
   }
 
-  create(userId: string): string {
+  create(userId: string, options?: { localOwner?: boolean }): string {
     if (this.sessions.size >= this.maxSessions) {
       const oldest = this.sessions.keys().next().value;
       if (oldest !== undefined) this.sessions.delete(oldest);
@@ -50,6 +53,7 @@ export class SessionStore {
     const token = randomBytes(TOKEN_BYTES).toString('hex');
     this.sessions.set(token, {
       userId,
+      ...(options?.localOwner ? { isLocalOwner: true } : {}),
       csrfToken: randomBytes(TOKEN_BYTES).toString('base64url'),
       bindingId: randomBytes(TOKEN_BYTES).toString('base64url'),
     });
@@ -83,6 +87,7 @@ export function browserSessionForCookies(cookies: Record<string, string | undefi
 
 function sessionAuth(app: FastifyInstance, _opts: Record<string, never>, done: () => void) {
   app.decorateRequest('sessionUserId', undefined);
+  app.decorateRequest('sessionIsLocalOwner', undefined);
   app.decorateRequest('sessionCsrfToken', undefined);
   app.decorateRequest('sessionBindingId', undefined);
   app.decorateRequest('assertSessionCurrent', undefined);
@@ -91,6 +96,7 @@ function sessionAuth(app: FastifyInstance, _opts: Record<string, never>, done: (
     const session = browserSessionForCookies(request.cookies ?? {});
     if (session) {
       request.sessionUserId = session.userId;
+      request.sessionIsLocalOwner = session.isLocalOwner === true;
       request.sessionCsrfToken = session.csrfToken;
       request.sessionBindingId = session.bindingId;
       const cookies = { ...request.cookies };
@@ -130,13 +136,14 @@ function sessionRoutePlugin(app: FastifyInstance, opts: SessionRouteOptions, don
 
     const fwdProto = (request.headers['x-forwarded-proto'] as string | undefined)?.split(',')[0]?.trim().toLowerCase();
     const isSecure = request.protocol === 'https' || fwdProto === 'https';
-    const bootstrapUserId = isDirectLoopbackRequest(request)
+    const localOwner = isDirectLoopbackRequest(request);
+    const bootstrapUserId = localOwner
       ? ownerUserId
       : ownerUserId === DEFAULT_USER_ID
         ? UNPAIRED_USER_ID
         : DEFAULT_USER_ID;
 
-    const token = globalStore.create(bootstrapUserId);
+    const token = globalStore.create(bootstrapUserId, { localOwner });
     const session = globalStore.resolve(token);
     if (!session) throw new Error('[session-auth] issued browser session disappeared');
     reply.setCookie(COOKIE_NAME, token, {

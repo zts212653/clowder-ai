@@ -3,6 +3,7 @@ import { execFile, spawnSync } from 'node:child_process';
 import { once } from 'node:events';
 import { readFile, unlink, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
+import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
@@ -12,7 +13,7 @@ const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
 
 test('F296 B3b-3 hook injects only the API-selected cold packet, never the raw digest', async () => {
   const sessionId = `f296-b3b3-${process.pid}-${Date.now()}`;
-  const statePath = `/tmp/cat-cafe-opus-compact-state-${sessionId}.json`;
+  const statePath = join(tmpdir(), `cat-cafe-opus-compact-state-${sessionId}.json`);
   const requests = [];
   const api = createServer((request, response) => {
     requests.push({ path: request.url, method: request.method, headers: request.headers });
@@ -105,7 +106,7 @@ test('F296 B3b-3 hook injects only the API-selected cold packet, never the raw d
 for (const condition of ['missing', 'expired']) {
   test(`F324 recovery remains silent for ${condition} snapshots`, async () => {
     const sessionId = `f324-${condition}-${process.pid}-${Date.now()}`;
-    const statePath = `/tmp/cat-cafe-opus-compact-state-${sessionId}.json`;
+    const statePath = join(tmpdir(), `cat-cafe-opus-compact-state-${sessionId}.json`);
     if (condition === 'expired') {
       await writeFile(
         statePath,

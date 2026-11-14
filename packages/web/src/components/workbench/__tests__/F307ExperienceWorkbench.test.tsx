@@ -289,6 +289,8 @@ describe('F307 zero-surface canonical Home invariant', () => {
     });
     container = document.createElement('div');
     document.body.appendChild(container);
+    // Legacy owner-surface contracts explicitly retain classic; v2 cases select v2 below.
+    writeShellPresentation('classic');
     root = createRoot(container);
   });
 
@@ -464,7 +466,9 @@ describe('F307 zero-surface canonical Home invariant', () => {
     }
     try {
       // The mailbox can open Workspace before its automatic foreground binding mounts.
-      await act(async () => openExactPlace(`workspace:content-review:thread-a:${reviewId}`, '/thread/thread-a'));
+      await act(async () =>
+        openExactPlace(`workspace:content-review:thread-a:${reviewId}`, '/thread/thread-a', mocks.openAppRoute),
+      );
       await act(async () => root.render(<ForegroundHost />));
       expect(container.querySelector('[data-workbench-focus="surface"]')).not.toBeNull();
       expect(

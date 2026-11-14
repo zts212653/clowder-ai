@@ -2,6 +2,7 @@
 
 import { lstatSync, readdirSync, readFileSync } from 'node:fs';
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { matchGlob } from './CatCafeScanner.js';
 import type { RepoScanner, ScannedEvidence } from './interfaces.js';
 
 const SKIP_DIRS = new Set([
@@ -175,16 +176,4 @@ function extractSectionKeywords(content: string): string[] {
     if (heading && heading.length <= 80) keywords.push(heading);
   }
   return keywords;
-}
-
-function matchGlob(pattern: string, path: string): boolean {
-  const regex = pattern
-    .replace(/\*\*\//g, '§GLOBSTAR_SLASH§')
-    .replace(/\*\*/g, '§GLOBSTAR§')
-    .replace(/\*/g, '§STAR§')
-    .replace(/[.+^${}()|[\]\\]/g, '\\$&')
-    .replace(/§GLOBSTAR_SLASH§/g, '(.+/)?')
-    .replace(/§GLOBSTAR§/g, '.*')
-    .replace(/§STAR§/g, '[^/]*');
-  return new RegExp(`^${regex}$`).test(path);
 }

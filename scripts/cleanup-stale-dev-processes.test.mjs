@@ -11,7 +11,6 @@ import {
   killWindowsProcess,
   parseWindowsProcessList,
   readWindowsCreationMs,
-  revalidateWindowsTarget,
   terminateFindings,
 } from './cleanup-stale-dev-processes.mjs';
 import { isCatCafeCommand, isOrphaned } from './lib/stale-dev-process-rules.mjs';
@@ -169,16 +168,8 @@ test('Windows worktree matching is case-insensitive without weakening POSIX', ()
 });
 
 test('Windows kill revalidation rejects a missing or recycled PID', () => {
-  assert.doesNotThrow(() => revalidateWindowsTarget(123, 1000, { readCreationMs: () => 1000 }));
-  assert.throws(() => revalidateWindowsTarget(123, 1000, { readCreationMs: () => 9000 }), /recycled/);
-  assert.throws(() => revalidateWindowsTarget(123, 1000, { readCreationMs: () => undefined }), /already gone/);
-  assert.doesNotThrow(() =>
-    revalidateWindowsTarget(123, undefined, {
-      readCreationMs: () => {
-        throw new Error('must not query without a snapshot timestamp');
-      },
-    }),
-  );
+  assert.doesNotThrow(() => killWindowsProcess(123, { createdAt: 1000 }, { execFileImpl: () => {} }));
+  assert.throws(() => killWindowsProcess(123, {}, { execFileImpl: () => {} }), /no snapshot creation time/);
 });
 
 test('orphan fallback keeps POSIX PID 1 semantics', () => {

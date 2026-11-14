@@ -1,19 +1,32 @@
 'use client';
 import Link from 'next/link';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useAgentClientLibraries } from '@/hooks/useAgentClientLibraries';
+import {
+  isDshMember,
+  memberModelCatalogKey,
+  memberModelValueLabel,
+  useMemberModelCatalogs,
+} from '@/lib/member-model-display';
 import { apiFetch } from '@/utils/api-client';
 import type { ProfileItem } from '../../hub-accounts.types';
 import { usesAgyAcp, usesAgyNative } from '../../hub-cat-editor.agy';
-import { builtinAccountIdForClient, filterAccounts, type HubCatEditorFormState } from '../../hub-cat-editor.model';
+import {
+  builtinAccountIdForClient,
+  filterAccounts,
+  type HubCatEditorFormState,
+  splitCommandArgs,
+} from '../../hub-cat-editor.model';
 import { SelectField } from '../../hub-cat-editor-fields';
+import { MemberCatalogStatus } from './MemberCatalogStatus';
 import { MemberChoicePicker } from './MemberChoicePicker';
 import { MemberConfigurationDetails } from './MemberConfigurationDetails';
 import { MemberDshProviderSetup } from './MemberDshProviderSetup';
+import { MemberModelSummary } from './MemberModelSummary';
 import { matchesRuntime, type RuntimeChoice, type RuntimeDrafts, runtimeDefaults } from './member-runtime-draft';
 import { memberRuntimeOptions, memberRuntimeTools } from './member-runtime-tools';
-import { nativeAcpProfileMessage } from './native-acp-profile-status';
 import { usesDefaultNativeIdentity } from './native-login-state';
+import { usesDshDesktopSetup } from './prepare-native-member';
 import { useRuntimeCatalog } from './useRuntimeCatalog';
 export type MemberText = (zh: string, en: string) => string;
 export function MemberRuntimeFields({
@@ -27,6 +40,7 @@ export function MemberRuntimeFields({
   editing,
   onValidityChange,
   nativeSetup = false,
+  preparedRuntime: draftPreparedRuntime,
 }: {
   form: HubCatEditorFormState;
   accounts: ProfileItem[];
@@ -39,14 +53,27 @@ export function MemberRuntimeFields({
   onValidityChange?: (valid: boolean) => void;
   /** First-run keeps the detected tool and its existing connection, exposing only model preferences. */
   nativeSetup?: boolean;
+  preparedRuntime?: RuntimeChoice;
 }) {
-  const [runtimes, setRuntimes] = useState<RuntimeChoice[]>([]),
-    [error, setError] = useState(false),
+  const runtimes = useMemberModelCatalogs((state) => state.runtimes);
+  const [error, setError] = useState(false),
     [loading, setLoading] = useState(true),
     [refresh, setRefresh] = useState(0);
+  const preparedRuntime = draftPreparedRuntime;
+  const preparedSelected = preparedRuntime !== undefined && matchesRuntime(form, preparedRuntime);
+  const runtimeEvidence = useMemo(
+    () => (preparedSelected && preparedRuntime ? [...runtimes, preparedRuntime] : runtimes),
+    [runtimes, preparedRuntime, preparedSelected],
+  );
+  useEffect(() => {
+    useMemberModelCatalogs.setState({ preparedRuntime: preparedSelected ? preparedRuntime : undefined });
+    return () => useMemberModelCatalogs.setState({ preparedRuntime: undefined });
+  }, [preparedRuntime, preparedSelected]);
   const { libraries: clientLibraries, error: libraryError } = useAgentClientLibraries(String(refresh), !nativeSetup);
   useEffect(() => {
     const controller = new AbortController();
+    const runtimeRevision = useMemberModelCatalogs.getState().runtimeRevision + 1;
+    useMemberModelCatalogs.setState({ runtimeRevision });
     setLoading(true);
     setError(false);
     apiFetch(`/api/cats/native-runtimes${refresh ? '?refresh=1' : ''}`, { signal: controller.signal })
@@ -55,7 +82,13 @@ export function MemberRuntimeFields({
         return (await response.json()) as { runtimes: RuntimeChoice[] };
       })
       .then((data) => {
-        if (!controller.signal.aborted) setRuntimes(data.runtimes);
+        if (!controller.signal.aborted) {
+          useMemberModelCatalogs.setState((state) =>
+            state.runtimeConfirmedRevision <= runtimeRevision
+              ? { runtimes: data.runtimes, runtimeConfirmedRevision: runtimeRevision }
+              : state,
+          );
+        }
       })
       .catch(() => {
         if (!controller.signal.aborted) setError(true);
@@ -65,7 +98,14 @@ export function MemberRuntimeFields({
       });
     return () => controller.abort();
   }, [refresh]);
-  const tools = memberRuntimeTools(runtimes, clientLibraries, runtimeDrafts);
+  const tools = memberRuntimeTools(
+    preparedSelected && preparedRuntime
+      ? runtimes.map((runtime) => (runtime.id === preparedRuntime.id ? preparedRuntime : runtime))
+      : [...runtimes],
+    clientLibraries,
+    runtimeDrafts,
+    form,
+  );
   const selected = tools.find((item) => matchesRuntime(form, item));
   const agy = usesAgyNative(form) || usesAgyAcp(form);
   const tool =
@@ -78,22 +118,52 @@ export function MemberRuntimeFields({
           ? 'ACP'
           : form.clientId);
   const native = form.configurationSource === 'native_tool';
+  const displayMember = {
+    id: form.catId,
+    clientId: form.clientId,
+    agentProvider: form.acpAgentProvider,
+    acp: { command: form.acpCommand, startupArgs: splitCommandArgs(form.acpStartupArgs), transport: form.acpTransport },
+    accountRef: form.accountRef,
+    cliConfigArgs: form.cliConfigArgs,
+    env: form.env,
+  };
+  const dsh = isDshMember(displayMember, runtimeEvidence);
+  const automaticDsh =
+    usesDshDesktopSetup(form, editing, runtimes) &&
+    runtimes.some((runtime) => runtime.installed && runtime.dshDesktop && runtime.acp);
+  const english = t('zh', 'en') === 'en';
   const availableAccounts = filterAccounts(form.clientId, accounts),
     identity = availableAccounts.find((item) => item.id === form.accountRef);
   const defaultIdentity = usesDefaultNativeIdentity(form);
   const needsLogin = defaultIdentity && selected?.readiness?.status === 'login_required';
+  const catalogNotImplemented = !!(selected?.id.startsWith('draft:') || selected?.id.startsWith('manual:'));
   const { catalog, loading: catalogLoading } = useRuntimeCatalog(
-    needsLogin || selected?.id.startsWith('draft:') || selected?.id.startsWith('manual:') ? undefined : selected?.id,
-    editing ? form.catId : undefined,
+    needsLogin || catalogNotImplemented || automaticDsh ? undefined : selected?.id,
+    editing && !automaticDsh ? form.catId : undefined,
     form.accountRef,
     form.defaultModel,
     refresh,
     form.cliConfigArgs.length > 0,
   );
+  const displayKey = memberModelCatalogKey(displayMember);
+  useEffect(() => {
+    if (dsh && catalog)
+      useMemberModelCatalogs.setState((state) => ({ catalogs: { ...state.catalogs, [displayKey]: catalog } }));
+  }, [dsh, catalog, displayKey]);
   const defaultModel = catalog?.defaultModel ?? (!form.accountRef ? selected?.configuredModel : undefined);
-  const defaultModelLabel =
+  const configuredModelLabel =
     catalog?.defaultModelLabel ?? catalog?.models.find((item) => item.value === defaultModel)?.label ?? defaultModel;
-  const defaultEffort = catalog?.defaultEffort ?? (!form.accountRef ? selected?.configuredEffort : undefined);
+  const modelLabel = (value: string) => (dsh ? memberModelValueLabel(value, true, catalog?.models, english) : value);
+  const defaultModelLabel =
+    defaultModel !== undefined
+      ? dsh
+        ? memberModelValueLabel(defaultModel, true, catalog?.models, english, catalog?.defaultModelLabel)
+        : configuredModelLabel
+      : undefined;
+  const defaultModelSource =
+    catalog?.defaultModelSource === 'client_report'
+      ? t('客户端回报', 'Client report')
+      : t('本地配置', 'Local configuration');
   const models = catalog?.models.length
     ? catalog.models
     : (form.accountRef ? (identity?.models ?? []) : (selected?.models ?? [])).map((value) => ({ value, label: value }));
@@ -101,15 +171,26 @@ export function MemberRuntimeFields({
   const capabilityModel = form.clientId === 'anthropic' ? (model || 'default').replace(/\[1m\]$/, '') : model;
   const activeModel =
     catalog?.models.find((item) => item.value === model) ??
-    catalog?.models.find((item) => item.value === capabilityModel);
+    catalog?.models.find((item) => item.value === capabilityModel || item.resolvedModel === capabilityModel);
+  const usesSelectedEffort = catalog?.selectedEffort !== undefined && catalog.selectedModel === model;
+  const defaultEffort = usesSelectedEffort
+    ? catalog.selectedEffort
+    : !form.defaultModel || form.defaultModel === defaultModel
+      ? (catalog?.defaultEffort ?? (!form.accountRef ? selected?.configuredEffort : undefined))
+      : undefined;
+  const defaultEffortLabel =
+    (usesSelectedEffort ? catalog.selectedEffortLabel : catalog?.defaultEffortLabel) ?? defaultEffort;
   const efforts = catalog?.effortOptions ?? activeModel?.efforts;
+  const tierlessKimi = form.clientId === 'kimi' && efforts?.length === 0;
   const invalidEffort =
-    catalog?.status === 'live' &&
+    !tierlessKimi &&
+    catalog?.status !== 'unavailable' &&
+    catalog?.message !== 'refresh_failed' &&
     efforts !== undefined &&
     !!form.cliEffort &&
     !efforts.some((item) => item.value === form.cliEffort);
-  const invalidRuntime = selected?.discoveryStatus === 'acp_profile_invalid';
-  const invalidDefaultModel = native && !form.defaultModel && catalog?.defaultModelStatus === 'unavailable';
+  const invalidRuntime = !dsh && selected?.discoveryStatus === 'acp_profile_invalid';
+  const invalidDefaultModel = !dsh && native && !form.defaultModel && catalog?.defaultModelStatus === 'unavailable';
   useEffect(
     () => onValidityChange?.(!invalidEffort && !invalidRuntime && !invalidDefaultModel),
     [invalidEffort, invalidRuntime, invalidDefaultModel, onValidityChange],
@@ -215,29 +296,25 @@ export function MemberRuntimeFields({
           {t('已检测登录 · 实际连接待验证', 'Sign-in detected · Connection not yet verified')}
         </p>
       )}
-      {native &&
-        !form.accountRef &&
-        form.clientId === 'acp' &&
-        /dsh|deepseek/i.test(form.acpCommand + form.acpStartupArgs) && (
-          <MemberDshProviderSetup
-            form={form}
-            runtimeId={selected?.id ?? (editing ? `acp:${form.catId}` : 'dsh')}
-            t={t}
-            patch={patch}
+      <div className="grid gap-4 sm:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)]">
+        {automaticDsh ? (
+          <MemberDshProviderSetup form={form} t={t} patch={patch} />
+        ) : (
+          <MemberChoicePicker
+            label={t('模型', 'Model')}
+            value={form.defaultModel}
+            formatValue={modelLabel}
+            options={dsh ? models.map((item) => ({ ...item, label: modelLabel(item.value) })) : models}
+            onChange={(defaultModel) => patch({ defaultModel })}
+            inheritLabel={follow}
+            inheritValueLabel={dsh && defaultModelLabel ? `${defaultModelLabel} · ${follow}` : undefined}
+            inheritedValue={dsh ? defaultModel : undefined}
+            inheritDetail={defaultModel !== undefined ? `${defaultModelSource}：${defaultModelLabel}` : undefined}
+            searchable
+            allowCustom
+            english={t('zh', 'en') === 'en'}
           />
         )}
-      <div className="grid gap-4 sm:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)]">
-        <MemberChoicePicker
-          label={t('模型', 'Model')}
-          value={form.defaultModel}
-          options={models}
-          onChange={(defaultModel) => patch({ defaultModel })}
-          inheritLabel={follow}
-          inheritDetail={defaultModel ? t(`配置：${defaultModelLabel}`, `Configured: ${defaultModelLabel}`) : undefined}
-          searchable
-          allowCustom
-          english={t('zh', 'en') === 'en'}
-        />
         <MemberChoicePicker
           label={t('思考强度', 'Reasoning effort')}
           allowCustom={efforts === undefined}
@@ -245,81 +322,88 @@ export function MemberRuntimeFields({
           options={efforts ?? []}
           onChange={(cliEffort) => patch({ cliEffort })}
           inheritLabel={follow}
-          inheritDetail={defaultEffort ? t(`配置：${defaultEffort}`, `Configured: ${defaultEffort}`) : undefined}
+          inheritDetail={
+            defaultEffort !== undefined
+              ? t(
+                  `配置：${defaultEffortLabel || '客户端默认'}`,
+                  `Configured: ${defaultEffortLabel || 'Client default'}`,
+                )
+              : undefined
+          }
           english={t('zh', 'en') === 'en'}
         />
       </div>
-      <div className="space-y-1 text-sm text-cafe-secondary" role="status">
-        {needsLogin ? (
-          <p>
-            {t(
-              '登录后可读取模型目录；当前可以保留跟随工具设置。',
-              'Sign in to read the model catalog; inherited settings can be kept for now.',
-            )}
-          </p>
-        ) : catalogLoading ? (
-          <p>{t(`正在读取 ${tool} 的模型…`, `Reading ${tool} models…`)}</p>
-        ) : invalidDefaultModel ? (
-          <p role="alert">
-            {t(
-              '客户端报告的默认模型不在可用清单中，请选择有效模型或修正客户端配置后刷新。',
-              'The reported default model is unavailable. Select a valid model or fix the client configuration and refresh.',
-            )}
-          </p>
-        ) : native && !form.defaultModel && catalog?.defaultModelStatus === 'unreported' ? (
-          <p>
-            {t(
-              '已读取模型信息，但默认模型尚未确认。“跟随”会保留客户端选择，不代表已验证可调用。',
-              'Model information was read, but the native default is unconfirmed. Following keeps the client choice; it does not verify an invocation.',
-            )}
-          </p>
-        ) : catalog?.message === 'custom_model' ? (
-          <p>
-            {t(
-              '当前模型尚未由客户端探测确认，已保留你的选择；实际执行时仍需校验。',
-              'The probe has not confirmed this model. Your choice is preserved and still needs validation at invocation.',
-            )}
-          </p>
-        ) : catalog?.status === 'live' ? (
-          <p>
-            {t(`已读取 ${models.length} 个模型`, `Read ${models.length} models`)}
-            {!form.defaultModel && defaultModel
-              ? ` · ${t('配置', 'Configured')}：${defaultModelLabel}${defaultEffort ? ` · ${defaultEffort}` : ''}`
-              : ''}
-          </p>
-        ) : (
-          <p>
-            {nativeAcpProfileMessage(catalog?.message, t) ||
-              (catalog?.message === 'account_unavailable'
-                ? t(
-                    '此连接暂不可读取。已保留当前选择，请在“管理连接”中检查。',
-                    'This connection is unavailable. Your selection is preserved; check Manage connections.',
-                  )
-                : catalog?.message === 'account_catalog'
-                  ? t('使用此连接保存的模型清单。', 'Using the model list saved with this connection.')
-                  : catalog?.message === 'custom_startup'
-                    ? t(
-                        '此成员使用自定义启动配置，请按工具支持的模型选择或手动指定。',
-                        'This teammate uses a custom launch configuration; select or specify a supported model.',
-                      )
-                    : t(
-                        '模型目录暂不可读取。可以继续跟随工具，或保留已有模型；稍后刷新重试。',
-                        'Model catalog unavailable. Keep inherited or saved settings, or retry with Refresh.',
-                      ))}
-          </p>
-        )}
-        {!catalogLoading && efforts?.length === 0 && !form.cliEffort && (
-          <p>{t('此模型未提供单独的思考强度选项。', 'This model does not expose a separate effort setting.')}</p>
-        )}
-        {invalidEffort && (
-          <p role="alert" className="text-conn-red-text">
-            {t(
-              `当前模型不支持已选强度 ${form.cliEffort}，请选择其他强度或跟随工具。`,
-              `This model does not support ${form.cliEffort}. Choose another level or follow the tool.`,
-            )}
-          </p>
-        )}
-      </div>
+      {!automaticDsh && (
+        <div className="space-y-1 text-sm text-cafe-secondary" role="status">
+          <MemberModelSummary
+            model={
+              form.defaultModel
+                ? dsh
+                  ? modelLabel(form.defaultModel)
+                  : (activeModel?.label ?? form.defaultModel)
+                : defaultModelLabel
+            }
+            effort={
+              tierlessKimi
+                ? undefined
+                : form.cliEffort ||
+                  (catalog?.thinkingEnabled === false ? t('思考已关闭', 'Thinking off') : defaultEffortLabel)
+            }
+            modelSource={form.defaultModel ? t('成员设置', 'Member preference') : defaultModelSource}
+            effortSource={
+              form.cliEffort
+                ? t('成员设置', 'Member preference')
+                : (usesSelectedEffort ? catalog?.selectedEffortSource : catalog?.defaultEffortSource) ===
+                    'client_report'
+                  ? t('客户端回报', 'Client report')
+                  : t('本地配置', 'Local configuration')
+            }
+            unavailable={catalog?.status === 'unavailable'}
+            notImplemented={catalogNotImplemented}
+            noEffortOptions={efforts?.length === 0}
+            stale={catalog?.message === 'refresh_failed'}
+            t={t}
+          />
+          <MemberCatalogStatus
+            catalog={catalog}
+            notImplemented={catalogNotImplemented}
+            loading={catalogLoading}
+            needsLogin={needsLogin}
+            invalidDefault={invalidDefaultModel}
+            inheritsModel={native && !form.defaultModel}
+            tool={tool}
+            modelCount={models.length}
+            t={t}
+          />
+          {catalog?.thinkingEnabled === false && (
+            <p>
+              {t(
+                '工具配置已关闭思考；强度偏好不会开启思考。',
+                'Thinking is off in the tool configuration; an effort preference does not enable it.',
+              )}
+            </p>
+          )}
+          {!catalogLoading && efforts?.length === 0 && !form.cliEffort && (
+            <p>{t('此模型未提供单独的思考强度选项。', 'This model does not expose a separate effort setting.')}</p>
+          )}
+          {tierlessKimi && form.cliEffort && (
+            <p>
+              {t(
+                `已保留强度偏好 ${form.cliEffort}；此模型不采用独立强度覆盖。`,
+                `Saved effort ${form.cliEffort} is retained; this model does not apply separate effort overrides.`,
+              )}
+            </p>
+          )}
+          {invalidEffort && (
+            <p role="alert" className="text-conn-red-text">
+              {t(
+                `当前模型不支持已选强度 ${form.cliEffort}，请选择其他强度或跟随工具。`,
+                `This model does not support ${form.cliEffort}. Choose another level or follow the tool.`,
+              )}
+            </p>
+          )}
+        </div>
+      )}
       {!nativeSetup && agy && (
         <p className="text-sm text-cafe-secondary">
           {t(

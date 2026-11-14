@@ -3,13 +3,16 @@ import { type WorkVersionRecord, workVersionRecordSchema } from '@cat-cafe/share
 import type Database from 'better-sqlite3';
 import { AssetCanonStore } from '../asset-canon/store.js';
 import { WorkContextStore } from './context-store.js';
+import { WorkCoverStore } from './cover/cover-store.js';
 
 /** Version annotations in the existing F309 database; only F138 owns identity, head and receipts. */
 export class WorkVersionStore {
   readonly contexts: WorkContextStore;
+  readonly covers: WorkCoverStore;
   readonly assets: AssetCanonStore;
   constructor(private readonly db: Database.Database) {
     this.contexts = new WorkContextStore(db);
+    this.covers = new WorkCoverStore(db);
     this.assets = new AssetCanonStore(db);
     db.exec(`CREATE TABLE IF NOT EXISTS work_version_annotations (
       owner_user_id TEXT NOT NULL, content_ref TEXT NOT NULL, owner_revision INTEGER NOT NULL,

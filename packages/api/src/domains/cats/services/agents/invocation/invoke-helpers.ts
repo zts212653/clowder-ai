@@ -127,6 +127,35 @@ export function isTransientAcpPromptFailure(message: string | undefined): boolea
   return /Premature close|ECONNRESET|socket hang up/i.test(message);
 }
 
+/**
+ * AGY Native pre-init startup failure (`errorCode === 'AGY_NATIVE_PREFLIGHT'`).
+ * Before `init` is verified, `AgyNativeAgentService` has neither settled a prompt
+ * generation nor written user bytes to stdin, so retrying once on a transient
+ * network/overload or unclassified exit-1 is side-effect-free while preserving
+ * `missingAgyNativeInitError`'s humanized `cliDiagnostics` if retry #2 also fails.
+ */
+export function isTransientAgyNativePreInitFailure(msg: {
+  errorCode?: string;
+  metadata?: {
+    cliDiagnostics?: {
+      reasonCode?: string;
+      debugRef?: {
+        exitCode?: number | null;
+        signal?: string | null;
+      };
+    };
+  };
+}): boolean {
+  if (msg.errorCode !== 'AGY_NATIVE_PREFLIGHT') return false;
+  const diagnostics = msg.metadata?.cliDiagnostics;
+  if (!diagnostics) return false;
+  const { reasonCode, debugRef } = diagnostics;
+  if ((debugRef?.signal ?? null) !== null) return false;
+  if (reasonCode === 'network_error' || reasonCode === 'server_overloaded') return true;
+  if (reasonCode !== undefined) return false;
+  return debugRef?.exitCode === 1;
+}
+
 export function isPromptTokenLimitExceededError(message: string | undefined): boolean {
   if (!message) return false;
   return /(prompt token count|input tokens?).*exceeds the limit of \d+/i.test(message);

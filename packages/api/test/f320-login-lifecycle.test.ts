@@ -7,7 +7,7 @@ import { test } from 'node:test';
 import type { CodexAccountIdentity } from '@cat-cafe/shared';
 import { deleteCatalogAccount, writeCatalogAccount } from '../src/config/catalog-accounts.js';
 import type { CodexLoginDriver } from '../src/config/codex-login-driver.js';
-import { CodexLoginManager } from '../src/config/codex-login-manager.js';
+import { CodexLoginManager, codexLoginOwnerAlive } from '../src/config/codex-login-manager.js';
 import { describeCodexManagedLayout, prepareCodexManagedLayout } from '../src/config/codex-managed-layout.js';
 
 const identity: CodexAccountIdentity = { userId: 'user-b', workspaceId: 'workspace-b', email: 'b@example.test' };
@@ -58,6 +58,58 @@ function fixture(driverOverride?: CodexLoginDriver) {
   };
 }
 const settled = () => new Promise((resolve) => setImmediate(resolve));
+for (const [code, expected] of [
+  ['codex_managed_policy_unavailable', /无法读取.*策略/],
+  ['codex_managed_policy_unsupported', /当前组织托管策略/],
+  ['codex_managed_version_unverified:9.9.9:layout.x', /账号隔离检查未通过/],
+] as const) {
+  test(`login failure reports its actual boundary (${code})`, async () => {
+    const f = fixture({
+      async run() {
+        throw new Error(code);
+      },
+    });
+    try {
+      f.manager.start(f.root, f.ref);
+      await settled();
+      assert.match(f.manager.read(f.root, f.ref).codex.attempt?.error ?? '', expected);
+    } finally {
+      f.close();
+    }
+  });
+}
+test(
+  'Windows owner liveness rejects a reused PID with a different recorded birth',
+  { skip: process.platform !== 'win32' },
+  () => {
+    const f = fixture();
+    try {
+      const attempt = f.manager.start(f.root, f.ref);
+      assert.notEqual(attempt.ownerStartedAt, 'unavailable');
+      assert.equal(codexLoginOwnerAlive(attempt), true);
+      assert.equal(codexLoginOwnerAlive({ ...attempt, ownerStartedAt: 'different-process-birth' }), false);
+    } finally {
+      f.close();
+    }
+  },
+);
+test('unsupported platform is reported as a platform limit, not a version or policy problem', async () => {
+  const f = fixture({
+    async run() {
+      throw new Error('codex_managed_platform_unsupported');
+    },
+  });
+  try {
+    f.manager.start(f.root, f.ref);
+    await settled();
+    const attempt = f.manager.read(f.root, f.ref).codex.attempt;
+    assert.equal(attempt?.state, 'failed');
+    assert.match(attempt?.error ?? '', /平台/);
+    assert.doesNotMatch(attempt?.error ?? '', /原生版本|组织托管策略/);
+  } finally {
+    f.close();
+  }
+});
 for (const code of ['codex_cli_unavailable', 'EACCES']) {
   test(`failure before terminal opens gives a usable recovery hint (${code})`, async () => {
     const f = fixture({
@@ -88,11 +140,36 @@ test('terminal-output guidance depends on readiness of this attempt, including r
   try {
     f.manager.start(f.root, f.ref);
     await settled();
-    assert.match(f.manager.read(f.root, f.ref).codex.attempt?.error ?? '', /终端输出/);
+    assert.match(
+      f.manager.read(f.root, f.ref).codex.attempt?.error ?? '',
+      process.platform === 'win32' ? /打开登录终端/ : /终端输出/,
+    );
     f.manager.start(f.root, f.ref);
     await settled();
     assert.equal(f.manager.read(f.root, f.ref).codex.attempt?.state, 'failed');
     assert.doesNotMatch(f.manager.read(f.root, f.ref).codex.attempt?.error ?? '', /终端输出/);
+  } finally {
+    f.close();
+  }
+});
+
+test('an explicit terminal retry carries its mode without making later retries visible', async () => {
+  const modes: boolean[] = [];
+  const f = fixture({
+    async run(input) {
+      modes.push(input.terminal === true);
+      input.onReady();
+      throw new Error('codex_login_failed');
+    },
+  });
+  try {
+    f.manager.start(f.root, f.ref, true);
+    await settled();
+    assert.deepEqual(modes, [true]);
+    assert.match(f.manager.read(f.root, f.ref).codex.attempt?.error ?? '', /终端输出/);
+    f.manager.start(f.root, f.ref);
+    await settled();
+    assert.deepEqual(modes, [true, false]);
   } finally {
     f.close();
   }

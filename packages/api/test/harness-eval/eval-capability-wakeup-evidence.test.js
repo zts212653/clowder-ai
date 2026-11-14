@@ -320,17 +320,18 @@ describe('Capability Wakeup Evidence', () => {
   });
 
   it('treats explicit denied preview responses as misses even when HTTP status looks successful', () => {
+    const fileChange = transcriptEvent(0, 'inv-web', {
+      type: 'tool_use',
+      toolName: 'Edit',
+      toolInput: { file_path: 'packages/web/src/App.tsx' },
+    });
     const trace = buildCapabilityTrace({
       sessionId: 'session-cap',
       threadId: 'thread-cap',
       catId: 'gpt52',
       worktreeId: 'test-wt',
       transcriptEvents: [
-        transcriptEvent(0, 'inv-web', {
-          type: 'tool_use',
-          toolName: 'Edit',
-          toolInput: { file_path: 'packages/web/src/App.tsx' },
-        }),
+        fileChange,
         transcriptEvent(1, 'inv-preview', {
           type: 'text',
           content: '我试着开 preview 了，但被拒绝了。',
@@ -349,7 +350,7 @@ describe('Capability Wakeup Evidence', () => {
           },
         }),
       ],
-      previewAvailability: [{ worktreeId: 'test-wt', hasLivePort: true, observedAt: Date.now() }],
+      previewAvailability: [{ worktreeId: 'test-wt', hasLivePort: true, observedAt: fileChange.t }],
     });
 
     const trials = evaluateCapabilityWakeupTrace(trace, [

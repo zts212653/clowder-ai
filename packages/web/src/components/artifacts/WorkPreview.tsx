@@ -1,6 +1,7 @@
 'use client';
 import { projectFileContent, type ThreadArtifactDTO } from '@cat-cafe/shared';
 import { useState } from 'react';
+import { gifThumbnailSource, useReducedMediaMotion } from '@/components/content-review/gif-thumbnail';
 import { ShellGlyph } from '@/components/shell/ShellIcons';
 import { useShellCopy } from '@/components/shell/shell-copy';
 import { API_URL } from '@/utils/api-client';
@@ -35,20 +36,29 @@ export function WorkPreview({
   pending,
   title,
   compact = false,
+  previewCover,
 }: {
   artifact: ThreadArtifactDTO;
   description?: WorkCardDescription | null;
   pending?: boolean;
   title?: string;
   compact?: boolean;
+  previewCover?: string;
 }) {
   const t = useShellCopy(worksPanelCopy);
+  const reducedMotion = useReducedMediaMotion();
   const { kind: contentKind } = projectFileContent(artifact);
   const [failedUrl, setFailedUrl] = useState<string | null>(null);
   const url = artifact.url ? resolveAssetUrl(artifact.url, API_URL) : null;
   if (contentKind === 'image' && !compact && url && failedUrl !== url)
     // biome-ignore lint/performance/noImgElement: preserve the original authenticated publication URL.
-    return <img src={url} alt={title ?? artifact.name} onError={() => setFailedUrl(url)} />;
+    return (
+      <img
+        src={gifThumbnailSource(url, reducedMotion, artifact.mime ?? description?.asset.mediaType)}
+        alt={title ?? artifact.name}
+        onError={() => setFailedUrl(url)}
+      />
+    );
   if (contentKind === 'image')
     return (
       <span className="work-gallery-kind">
@@ -57,7 +67,9 @@ export function WorkPreview({
       </span>
     );
   if (contentKind === 'video')
-    return <WorkVideoPreview artifact={artifact} description={description} pending={pending} />;
+    return (
+      <WorkVideoPreview artifact={artifact} description={description} pending={pending} previewCover={previewCover} />
+    );
   if (contentKind === 'audio') return <WorkAudioPreview artifact={artifact} />;
   return <TypedCover artifact={artifact} />;
 }
