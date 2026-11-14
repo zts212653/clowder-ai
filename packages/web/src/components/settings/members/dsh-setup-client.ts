@@ -41,6 +41,13 @@ export async function dshSetupRequest<T>(action: 'inspect' | 'prepare', body: Re
 export function dshSetupError(reason: unknown) {
   const code = reason instanceof Error ? reason.message : '';
   const messages: Record<string, string> = {
+    dsh_config_complex_patch:
+      '无法安全读取 Desktop 配置补丁。请在 DSH Desktop 中检查补丁目标和结构后重试，当前配置已保留。',
+    dsh_config_expression:
+      'Desktop 模型或认证配置包含暂不支持的表达式。请在 DSH Desktop 中检查配置后重试，当前配置已保留。',
+    dsh_config_ambiguous: 'Desktop 模型或认证配置存在重复定义。请在 DSH Desktop 中检查配置冲突后重试，当前配置已保留。',
+    dsh_config_manual:
+      'Desktop 使用了暂不支持的自定义插件配置。请在 DSH Desktop 中检查插件配置后重试，当前配置已保留。',
     dsh_setup_changed: 'Desktop 配置已变化。请刷新配置后重新保存，当前草稿已保留。',
     dsh_setup_desktop_ambiguous: '发现多套 DSH Desktop。请在模型设置中选择安装位置后再保存。',
     dsh_setup_custom_startup: '未找到可用的 DSH Desktop。请完成安装后刷新，当前配置已保留。',

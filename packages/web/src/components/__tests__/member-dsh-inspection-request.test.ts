@@ -1,8 +1,25 @@
 import { afterEach, expect, it, vi } from 'vitest';
-import { dshSetupRequest } from '../settings/members/dsh-setup-client';
+import { dshSetupError, dshSetupRequest } from '../settings/members/dsh-setup-client';
 
 vi.mock('@/utils/api-client', () => ({ apiFetch: (...args: Parameters<typeof fetch>) => fetch(...args) }));
 afterEach(() => vi.unstubAllGlobals());
+
+it.each([
+  ['dsh_config_complex_patch', /补丁/],
+  ['dsh_config_expression', /表达式/],
+  ['dsh_config_ambiguous', /重复|冲突/],
+  ['dsh_config_manual', /自定义|插件/],
+] as const)('explains %s as a configuration issue without suggesting credential changes', (code, reason) => {
+  const message = dshSetupError(new Error(code));
+  expect(message).toMatch(reason);
+  expect(message).not.toContain('模型和认证设置');
+});
+
+it('keeps private native diagnostic text out of configuration error feedback', () => {
+  expect(dshSetupError(new Error('PRIVATE_VALUE https://private.invalid'))).not.toMatch(
+    /PRIVATE_VALUE|private.invalid/,
+  );
+});
 
 it('shares an unfinished metadata read between the panel and save without a busy rejection', async () => {
   const reading = Promise.withResolvers<Response>();
