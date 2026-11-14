@@ -1086,6 +1086,11 @@ export interface AgentServiceOptions {
   /** Admission-owned MCP descriptors; callback credentials are materialized for the current turn. */
   frozenAcpMcpServers?: import('./agents/providers/acp/types.js').AcpMcpServer[];
   frozenAcpMcpIssues?: import('@cat-cafe/shared').PluginMcpToolIssue[];
+  /** Host-only activation fences; execution-local and never persisted or sent to ACP. */
+  frozenAcpMcpCurrentness?: readonly Pick<
+    import('../../../config/capabilities/invocation-plugin-mcp-view.js').InvocationPluginMcpEntry,
+    'capabilityId' | 'pluginId' | 'isCurrent'
+  >[];
   frozenNativeMcpConfig?: import('./agents/providers/provider-mcp-config.js').ProviderMcpConfigPlan;
   frozenKimiMcpConfig?: import('./agents/providers/kimi-mcp-surface.js').KimiMcpConfigPlan;
   frozenCodexMcpInput?: import('./agents/providers/codex-mcp-input.js').CodexMcpInputPlan;
@@ -1315,6 +1320,7 @@ export interface AgentService {
       AgentServiceOptions,
       | 'frozenAcpMcpServers'
       | 'frozenAcpMcpIssues'
+      | 'frozenAcpMcpCurrentness'
       | 'frozenNativeMcpConfig'
       | 'frozenKimiMcpConfig'
       | 'frozenCodexMcpInput'

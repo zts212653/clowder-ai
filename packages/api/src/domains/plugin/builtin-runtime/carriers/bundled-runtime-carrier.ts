@@ -69,6 +69,7 @@ interface RuntimeAuthority {
 }
 
 interface ActiveBundled {
+  readonly onRuntimeExit?: () => Promise<void> | void;
   readonly runtime: BundledPluginRuntime;
   readonly admission: RuntimeAuthority;
   readonly closed: Promise<void>;
@@ -105,7 +106,11 @@ export class BundledPluginRuntimeCarrier implements PluginRuntimeCarrier {
     return (runtime === undefined || runtime.transport === 'builtin') && this.#runtimeFor(packageRecord) !== undefined;
   }
 
-  async start(pluginInstanceId: string, admitContributions?: () => Promise<void>): Promise<unknown> {
+  async start(
+    pluginInstanceId: string,
+    admitContributions?: () => Promise<void>,
+    onRuntimeExit?: () => Promise<void> | void,
+  ): Promise<unknown> {
     const epoch = this.#startEpoch.get(pluginInstanceId) ?? 0;
     const authority = await this.authority(pluginInstanceId);
     if (epoch !== (this.#startEpoch.get(pluginInstanceId) ?? 0)) {
@@ -133,6 +138,7 @@ export class BundledPluginRuntimeCarrier implements PluginRuntimeCarrier {
       settleStart = resolve;
     });
     const active: ActiveBundled = {
+      ...(onRuntimeExit ? { onRuntimeExit } : {}),
       runtime,
       admission: structuredClone(authority),
       closed,
@@ -220,7 +226,13 @@ export class BundledPluginRuntimeCarrier implements PluginRuntimeCarrier {
   private async runtimeExited(pluginInstanceId: string, active: ActiveBundled): Promise<void> {
     if (this.#active.get(pluginInstanceId) !== active || active.stopping) return;
     active.valid = false;
-    await active.startSettled;
+    // Revoke Host publications before joining startup or package cleanup.
+    const invalidated = active.onRuntimeExit?.();
+    await Promise.all([
+      invalidated,
+      active.startSettled,
+      this.setBundledRuntimeState(active.admission, 'crashed', this.#startFailure()),
+    ]);
     if (this.#active.get(pluginInstanceId) !== active || active.stopping) return;
     active.stopping = true;
     this.#startEpoch.set(pluginInstanceId, (this.#startEpoch.get(pluginInstanceId) ?? 0) + 1);

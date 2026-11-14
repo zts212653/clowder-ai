@@ -56,6 +56,32 @@ test('stop refuses new calls while closed still waits for cleanup', async () => 
   assert.equal(closed, true);
 });
 
+test('unexpected runtime completion revokes publication before waiting for cleanup', async () => {
+  const exit = deferred();
+  const cleanup = deferred();
+  const cleanupEntered = deferred();
+  const carrier = fixture({
+    completion: () => exit.promise,
+    stop: () => {
+      cleanupEntered.resolve();
+      return cleanup.promise;
+    },
+  });
+  let revoked = false;
+  const started = await carrier.start('pi_lifecycle', undefined, () => {
+    revoked = true;
+  });
+  exit.resolve(new Error('private plugin failure must not enter owner diagnostics'));
+  await cleanupEntered.promise;
+  try {
+    assert.equal(revoked, true, 'cleanup must not hold failed optional capabilities current');
+    await assert.rejects(carrier.invoke('pi_lifecycle', 'fixture.call', {}));
+  } finally {
+    cleanup.resolve();
+    await started.closed;
+  }
+});
+
 test('cleanup failure retains closed handle until successful stop retry', async () => {
   let fail = true;
   const carrier = fixture({
