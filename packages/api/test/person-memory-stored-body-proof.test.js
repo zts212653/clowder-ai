@@ -1,13 +1,13 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { hasHistoricalBodyApproval } from '../src/domains/memory/people/historical-body-source-proof.ts';
-import { OwnerMemoryActionService } from '../src/domains/memory/people/OwnerMemoryActionService.ts';
-import { PersonMemoryOwnerReadService } from '../src/domains/memory/people/PersonMemoryOwnerReadService.ts';
+import { hasHistoricalBodyApproval } from '../dist/domains/memory/people/historical-body-source-proof.js';
+import { OwnerMemoryActionService } from '../dist/domains/memory/people/OwnerMemoryActionService.js';
+import { PersonMemoryOwnerReadService } from '../dist/domains/memory/people/PersonMemoryOwnerReadService.js';
 import {
   digestPersonMemorySourceMaterial,
   PersonMemorySourceBundleResolver,
-} from '../src/domains/memory/people/PersonMemorySourceBundleResolver.ts';
-import { personClaimOwnerRevision } from '../src/domains/memory/people/person-memory-owner-revision.ts';
+} from '../dist/domains/memory/people/PersonMemorySourceBundleResolver.js';
+import { personClaimOwnerRevision } from '../dist/domains/memory/people/person-memory-owner-revision.js';
 import {
   binding,
   body,

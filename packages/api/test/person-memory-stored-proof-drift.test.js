@@ -1,12 +1,12 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { OwnerMemoryActionService } from '../src/domains/memory/people/OwnerMemoryActionService.ts';
-import { PersonMemoryOwnerSourceReader } from '../src/domains/memory/people/PersonMemoryOwnerSourceReader.ts';
+import { OwnerMemoryActionService } from '../dist/domains/memory/people/OwnerMemoryActionService.js';
+import { PersonMemoryOwnerSourceReader } from '../dist/domains/memory/people/PersonMemoryOwnerSourceReader.js';
 import {
   digestPersonMemorySourceMaterial,
   PersonMemorySourceBundleResolver,
-} from '../src/domains/memory/people/PersonMemorySourceBundleResolver.ts';
-import { personClaimOwnerRevision } from '../src/domains/memory/people/person-memory-owner-revision.ts';
+} from '../dist/domains/memory/people/PersonMemorySourceBundleResolver.js';
+import { personClaimOwnerRevision } from '../dist/domains/memory/people/person-memory-owner-revision.js';
 
 const owner = 'owner-drift';
 const now = Date.UTC(2026, 10, 13);

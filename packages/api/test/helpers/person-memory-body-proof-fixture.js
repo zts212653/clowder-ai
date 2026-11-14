@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { PersonMemoryOwnerSourceReader } from '../../src/domains/memory/people/PersonMemoryOwnerSourceReader.ts';
+import { PersonMemoryOwnerSourceReader } from '../../dist/domains/memory/people/PersonMemoryOwnerSourceReader.js';
 
 export const owner = 'owner-1';
 export const body = 'Owner recorded that Mira owns the blue notebook.';
