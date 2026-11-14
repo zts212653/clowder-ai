@@ -208,6 +208,7 @@ function bindProject() {
   // path / v: set one state before opening (the find's query into the works search), as open does
   A.wsTool = function (d) {
     if (d.path) pathSet(d.path, d.v, d);
+    if (d.view != null) A.wsView({ k: d.k, v: d.view });
     return ENGINE_PARTS.openTab('panel', d.k, {
       from: null,
       preview: false,
