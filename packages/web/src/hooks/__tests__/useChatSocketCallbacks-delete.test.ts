@@ -10,6 +10,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 
 const removeMessageMock = vi.fn();
 const removeThreadMessageMock = vi.fn();
+const clearThreadMessageDeletionMock = vi.fn();
 const requestStreamCatchUpMock = vi.fn();
 
 vi.mock('@/stores/chatStore', () => ({
@@ -22,6 +23,7 @@ vi.mock('@/stores/chatStore', () => ({
     addMessage: vi.fn(),
     removeMessage: removeMessageMock,
     removeThreadMessage: removeThreadMessageMock,
+    clearThreadMessageDeletion: clearThreadMessageDeletionMock,
     requestStreamCatchUp: requestStreamCatchUpMock,
   }),
 }));
@@ -111,6 +113,7 @@ describe('F109: onMessageRestored calls requestStreamCatchUp', () => {
   });
 
   beforeEach(() => {
+    clearThreadMessageDeletionMock.mockClear();
     requestStreamCatchUpMock.mockClear();
     container = document.createElement('div');
     document.body.appendChild(container);
@@ -137,7 +140,11 @@ describe('F109: onMessageRestored calls requestStreamCatchUp', () => {
       threadId: 'thread-1',
     });
 
+    expect(clearThreadMessageDeletionMock).toHaveBeenCalledWith('thread-1', 'msg-50');
     expect(requestStreamCatchUpMock).toHaveBeenCalledWith('thread-1');
+    expect(clearThreadMessageDeletionMock.mock.invocationCallOrder[0]).toBeLessThan(
+      requestStreamCatchUpMock.mock.invocationCallOrder[0],
+    );
   });
 
   it('triggers catch-up for a background thread restore', () => {
@@ -150,6 +157,7 @@ describe('F109: onMessageRestored calls requestStreamCatchUp', () => {
       threadId: 'thread-bg-3',
     });
 
+    expect(clearThreadMessageDeletionMock).toHaveBeenCalledWith('thread-bg-3', 'msg-51');
     expect(requestStreamCatchUpMock).toHaveBeenCalledWith('thread-bg-3');
   });
 });

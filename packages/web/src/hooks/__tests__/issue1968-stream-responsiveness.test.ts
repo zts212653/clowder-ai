@@ -83,7 +83,7 @@ beforeEach(() => {
   clock = 0;
   tasks.length = 0;
   vi.spyOn(performance, 'now').mockImplementation(() => clock);
-  useChatStore.setState({ currentThreadId: threadId, messages: [response()], threadStates: {} });
+  useChatStore.setState({ currentThreadId: threadId, messages: [response()], threadStates: {}, deletedMessageIds: {} });
 });
 
 afterEach(() => {
@@ -250,27 +250,74 @@ describe('issue #1968: bounded work without dropping or reordering messages', ()
     expect(useChatStore.getState().getThreadState(threadId).messages).toEqual([]);
   });
 
-  it.each(['unseen', 'hydrated-then-deleted', 'existing-with-live-tail'] as const)(
-    'keeps deletion authoritative during yielded replay: %s',
-    async (scenario) => {
-      useChatStore.setState({ messages: scenario === 'existing-with-live-tail' ? [response()] : [] });
-      const originalWrite = writer.writeToolEvent;
-      vi.spyOn(writer, 'writeToolEvent').mockImplementation((...args) => {
-        clock += 2;
-        originalWrite(...args);
-      });
-      const subject = queue((item) =>
-        dispatchAgentQueueItem(item, () => writer.writeStreamText(target, { content: 'LIVE' })),
-      );
-      subject.push(new StreamReplayItem(replay()));
-      await drain();
-      expect(tasks.length).toBeGreaterThan(0);
-      if (scenario === 'hydrated-then-deleted') writer.writeStoredSnapshot(threadId, response('HISTORY'));
-      if (scenario === 'existing-with-live-tail') subject.push('LIVE');
-      useChatStore.getState().removeThreadMessage(threadId, target.messageId);
-      expect(useChatStore.getState().getThreadState(threadId).messages).toEqual([]);
-      await finish();
-      expect(useChatStore.getState().getThreadState(threadId).messages).toEqual([]);
-    },
-  );
+  it.each([
+    'unseen',
+    'hydrated-then-deleted',
+    'existing-with-live-tail',
+  ] as const)('keeps deletion authoritative during yielded replay: %s', async (scenario) => {
+    useChatStore.setState({ messages: scenario === 'existing-with-live-tail' ? [response()] : [] });
+    const originalWrite = writer.writeToolEvent;
+    vi.spyOn(writer, 'writeToolEvent').mockImplementation((...args) => {
+      clock += 2;
+      originalWrite(...args);
+    });
+    const subject = queue((item) =>
+      dispatchAgentQueueItem(item, () => writer.writeStreamText(target, { content: 'LIVE' })),
+    );
+    subject.push(new StreamReplayItem(replay()));
+    await drain();
+    expect(tasks.length).toBeGreaterThan(0);
+    if (scenario === 'hydrated-then-deleted') writer.writeStoredSnapshot(threadId, response('HISTORY'));
+    if (scenario === 'existing-with-live-tail') subject.push('LIVE');
+    useChatStore.getState().removeThreadMessage(threadId, target.messageId);
+    expect(
+      useChatStore
+        .getState()
+        .getThreadState(threadId)
+        .messages.map((message) => message.id),
+    ).toEqual([]);
+    await finish();
+    expect(
+      useChatStore
+        .getState()
+        .getThreadState(threadId)
+        .messages.map((message) => message.id),
+    ).toEqual([]);
+  });
+
+  it.each(['active', 'background'])('keeps stale writes deleted and permits explicit restore: %s', (view) => {
+    if (view === 'background') useChatStore.getState().setCurrentThread('elsewhere');
+    useChatStore.getState().removeThreadMessage(threadId, target.messageId);
+    const terminal = response('FINAL');
+    if (terminal.lifecycle?.kind === 'response')
+      terminal.lifecycle = { ...terminal.lifecycle, status: 'completed', completedAt: 10 };
+    writer.writeStoredSnapshot(threadId, terminal);
+    expect(useChatStore.getState().getThreadState(threadId).messages).toEqual([]);
+    useChatStore.getState().hydrateThread(threadId, [terminal], false);
+    expect(useChatStore.getState().getThreadState(threadId).messages).toEqual([]);
+    useChatStore.getState().replaceThreadMessages(threadId, [terminal]);
+    expect(useChatStore.getState().getThreadState(threadId).messages).toEqual([]);
+    writer.writeStreamText(target, { content: 'LATE' });
+    expect(useChatStore.getState().getThreadState(threadId).messages).toEqual([]);
+    expect(useChatStore.getState().getThreadState(threadId).unreadCount).toBe(0);
+
+    writer.writeStreamText({ ...target, messageId: 'fresh' }, { content: 'NEW' });
+    expect(
+      useChatStore
+        .getState()
+        .getThreadState(threadId)
+        .messages.map((message) => message.id),
+    ).toEqual(['fresh']);
+    expect(useChatStore.getState().getThreadState(threadId).unreadCount).toBe(view === 'background' ? 1 : 0);
+
+    useChatStore.getState().clearThreadMessageDeletion(threadId, target.messageId);
+    writer.writeStoredSnapshot(threadId, terminal);
+    expect(
+      useChatStore
+        .getState()
+        .getThreadState(threadId)
+        .messages.map((message) => message.id),
+    ).toEqual(['fresh', 'r']);
+    expect(useChatStore.getState().getThreadState(threadId).messages[1].content).toBe('FINAL');
+  });
 });
