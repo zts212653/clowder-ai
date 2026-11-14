@@ -123,6 +123,14 @@ describe('Wave 2 stale keyed recovery', () => {
     const threadStore = new ThreadStore();
     const thread = await threadStore.create('user-1', 'Taste');
     const store = new InMemoryTasteProposalStore();
+    const origin = await messageStore.append({
+      userId: 'user-1',
+      threadId: thread.id,
+      from: { kind: 'user', userId: 'user-1' },
+      content: 'Taste source',
+      mentions: [],
+      timestamp: Date.now(),
+    });
     let commitCount = 0;
     const originalCommit = store.commitEnvelope.bind(store);
     store.commitEnvelope = (...args) => {
@@ -135,6 +143,7 @@ describe('Wave 2 stale keyed recovery', () => {
     await app.register(callbackProposeTasteRoutes, {
       registry,
       tasteProposalStore: store,
+      messageStore,
       socketManager: { emitToUser() {}, broadcastToRoom() {} },
       approvalIngress: new ApprovalIngress({
         messageStore,
@@ -143,7 +152,7 @@ describe('Wave 2 stale keyed recovery', () => {
     });
     await app.ready();
 
-    const staleAuth = await registry.create('user-1', 'opus', thread.id);
+    const staleAuth = await registry.create('user-1', 'opus', thread.id, undefined, undefined, undefined, origin.id);
     const payload = {
       scene: 'Stale keyed retry',
       quote: 'Outbox replay must recover the retained staged proposal',
@@ -166,7 +175,15 @@ describe('Wave 2 stale keyed recovery', () => {
       assert.ok(stagedProposal, 'first attempt must leave a recoverable staged proposal');
       assert.equal((await store.getPublication(stagedProposal.id))?.state, 'staged');
 
-      const replacementAuth = await registry.create('user-1', 'opus', thread.id);
+      const replacementAuth = await registry.create(
+        'user-1',
+        'opus',
+        thread.id,
+        undefined,
+        undefined,
+        undefined,
+        origin.id,
+      );
 
       const replacedRetry = await app.inject({
         method: 'POST',

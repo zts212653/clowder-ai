@@ -66,6 +66,7 @@ export * from './explicit-stop-intent.js';
 export * from './feature-demos.js';
 export * from './html-inline-event-handlers.js';
 export * from './ignored-item-preference.js';
+export * from './interactive-block-state.js';
 export * from './markdown-link-safety.js';
 // Export shared text helpers
 export * from './markdown-readable-text.js';

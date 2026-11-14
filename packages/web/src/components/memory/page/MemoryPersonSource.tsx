@@ -27,7 +27,7 @@ export function MemoryPersonSource({
     onReadState?.(state);
   }, [state, onReadState]);
   if (source.loading) return <p className="text-xs text-cafe-muted">正在读取来源…</p>;
-  if (source.error || source.data?.status !== 'ready')
+  if (source.error)
     return (
       <p className="text-xs text-cafe-muted">
         来源暂时读不到{' '}
@@ -36,6 +36,7 @@ export function MemoryPersonSource({
         </button>
       </p>
     );
+  if (source.data?.status !== 'ready') return <p className="text-xs text-cafe-muted">来源已不可用</p>;
   return (
     <div className="space-y-1 text-xs text-cafe-muted">
       {source.data.sources.map((item) =>

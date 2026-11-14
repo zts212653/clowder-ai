@@ -74,7 +74,9 @@ operator experience：
 
 PR [#6899](https://github.com/zts212653/clowder-ai/pull/6899)（`0f473c7f36`）已合入：普通 `cp` 从 runtime 向外导出、Git fetch 的引用方向、环境变量与程序路径、受管 `gh`、SQLite/HTTP/日志输出及 help/status 的目标归属得到修正；拒绝账本补充脱敏 cwd、触发子句与截断标记。保护目标、敏感程序环境、未知执行和 owner 依赖的停机边界继续拒绝。
 
-**加载与续办**：`main=landed`，生产实际加载及原消费者恢复尚待核验。原 Task3168 已登记 runtime 部署等待 g11，条件为包含上述合入提交且 API ready；匹配后由原线程核对实际两 provider hook、打包字节与正负例。旧 executionRef 保留，不以记账 blocked 停止已授权工作。D/PR6263/OpenCode 继续暂停；本 PR 不关闭 F306、Task3168 或独立的 Git 保护 Task559。
+### 非 D 自然查询续修（2026-11-11）
+
+**本次加载与续办**：`main=landed:d270a8529e`，`live=dormant:boot84`；当前 boot84 仍为旧版 `605bd477d3`。原 Task3168 已登记 runtime 等待 **g12**，要求包含本次合入提交且 API ready，再由新 invocation 核实际 Codex 配置、stage、私有 hook 与原输入纯策略判定；未执行原 SQL/HTTP/SSH 载荷，不主动重启。上述 boot81 为 #6899 的历史验收，不能代签 #6988 已加载或自然使用已恢复。旧 executionRef 与 blocked 记账保留；D/6263/OpenCode 继续暂停，Feature 与原 Task 不关闭。
 
 ### Codex root/subexecution isolation（2026-09-14）
 

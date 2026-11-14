@@ -22,6 +22,9 @@ describe('cat_cafe_propose_profile_update MCP tool', () => {
 
   beforeEach(() => {
     originalEnv = { ...process.env };
+    // This transport fixture owns its credentials; never inherit the launching Host's refresh files.
+    delete process.env.CAT_CAFE_CREDENTIAL_FILE;
+    delete process.env.CAT_CAFE_NATIVE_TURN_CREDENTIAL_FILE;
     // shared-rules §19 (LL-054): closed loopback — if a test forgets to override
     // fetch, ECONNREFUSED keeps requests off the runtime callback endpoint.
     process.env.CAT_CAFE_API_URL = 'http://127.0.0.1:1';
@@ -62,6 +65,7 @@ describe('cat_cafe_propose_profile_update MCP tool', () => {
       rationale: '更新沟通偏好',
       signalKind: 'cvo-instructed',
       sourceMessageId: 'msg-source-1',
+      expectedRevision: `sha256:${'a'.repeat(64)}`,
     });
 
     assert.equal(result.isError, undefined);
@@ -71,6 +75,7 @@ describe('cat_cafe_propose_profile_update MCP tool', () => {
     assert.equal(body.rationale, '更新沟通偏好');
     assert.equal(body.signalKind, 'cvo-instructed');
     assert.equal(body.sourceMessageId, 'msg-source-1');
+    assert.equal(body.expectedRevision, `sha256:${'a'.repeat(64)}`);
   });
 
   test('sends creds via headers only, never dual-written to body (F174 AC-F2)', async () => {

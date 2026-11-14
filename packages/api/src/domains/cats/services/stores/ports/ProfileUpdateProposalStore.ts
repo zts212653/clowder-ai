@@ -41,6 +41,15 @@ export interface CreateProfileUpdateProposalInput {
   createdBy: string;
   /** Optional explicit proposalId (propose route reserves a dedup key before create). */
   proposalId?: string;
+  /** Bind this reserved request atomically with its durable proposal. Never expires after create. */
+  clientRequestId?: string;
+}
+
+export class ProfileUpdateReservationLostError extends Error {
+  constructor() {
+    super('Profile update request reservation changed before create');
+    this.name = 'ProfileUpdateReservationLostError';
+  }
 }
 
 /** P1-1 partial-commit checkpoint — BOTH paths recorded before finalize. */
@@ -135,9 +144,13 @@ export class InMemoryProfileUpdateProposalStore implements IProfileUpdateProposa
   private readonly dedupCache = new Map<string, string>();
 
   create(input: CreateProfileUpdateProposalInput): ProfileUpdateProposal {
+    if (input.clientRequestId && this.getDedupProposalId(input.createdBy, input.clientRequestId) !== input.proposalId) {
+      throw new ProfileUpdateReservationLostError();
+    }
     const now = Date.now();
     const proposal: ProfileUpdateProposal = {
       proposalId: input.proposalId ?? generateProposalId(),
+      ...(input.clientRequestId ? { clientRequestId: input.clientRequestId } : {}),
       status: 'pending',
       sourceThreadId: input.sourceThreadId,
       sourceInvocationId: input.sourceInvocationId,
@@ -235,7 +248,9 @@ export class InMemoryProfileUpdateProposalStore implements IProfileUpdateProposa
   reserveDedup(userId: string, clientRequestId: string, proposalId: string): string {
     const key = dedupKey(userId, clientRequestId);
     const existing = this.dedupCache.get(key);
-    if (existing !== undefined) return existing;
+    if (existing !== undefined && existing !== proposalId) return existing;
+    const proposal = this.proposals.get(proposalId);
+    if (proposal && !proposal.clientRequestId) proposal.clientRequestId = clientRequestId;
     this.dedupCache.set(key, proposalId);
     return proposalId;
   }
@@ -275,7 +290,9 @@ export class InMemoryProfileUpdateProposalStore implements IProfileUpdateProposa
 
   abortStaged(proposalId: string, _reason: string): void {
     const proposal = this.proposals.get(proposalId);
-    if (proposal?.publication?.state === 'staged') this.delete(proposalId);
+    if (proposal?.publication?.state !== 'staged') return;
+    if (proposal.clientRequestId) this.releaseDedup(proposal.createdBy, proposal.clientRequestId, proposalId);
+    this.delete(proposalId);
   }
 
   private collect(

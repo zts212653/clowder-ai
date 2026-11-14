@@ -140,11 +140,36 @@ test('terminal-output guidance depends on readiness of this attempt, including r
   try {
     f.manager.start(f.root, f.ref);
     await settled();
-    assert.match(f.manager.read(f.root, f.ref).codex.attempt?.error ?? '', /终端输出/);
+    assert.match(
+      f.manager.read(f.root, f.ref).codex.attempt?.error ?? '',
+      process.platform === 'win32' ? /打开登录终端/ : /终端输出/,
+    );
     f.manager.start(f.root, f.ref);
     await settled();
     assert.equal(f.manager.read(f.root, f.ref).codex.attempt?.state, 'failed');
     assert.doesNotMatch(f.manager.read(f.root, f.ref).codex.attempt?.error ?? '', /终端输出/);
+  } finally {
+    f.close();
+  }
+});
+
+test('an explicit terminal retry carries its mode without making later retries visible', async () => {
+  const modes: boolean[] = [];
+  const f = fixture({
+    async run(input) {
+      modes.push(input.terminal === true);
+      input.onReady();
+      throw new Error('codex_login_failed');
+    },
+  });
+  try {
+    f.manager.start(f.root, f.ref, true);
+    await settled();
+    assert.deepEqual(modes, [true]);
+    assert.match(f.manager.read(f.root, f.ref).codex.attempt?.error ?? '', /终端输出/);
+    f.manager.start(f.root, f.ref);
+    await settled();
+    assert.deepEqual(modes, [true, false]);
   } finally {
     f.close();
   }

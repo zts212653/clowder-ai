@@ -542,6 +542,283 @@ describe('intake-from-opensource.sh --mode=plan high-risk guard', () => {
     assert.match(output, /post-merge waiting cannot/i);
   });
 
+  it('rejects 0001-01-01 completedAt placeholder on an in-progress CheckRun while preserving its real startedAt witness', () => {
+    const statefulFiles = [
+      'packages/api/src/domains/cats/services/stores/cursor.ts',
+      'packages/api/src/domains/cats/services/stores/redis/RedisMessageStore.ts',
+      'packages/api/src/domains/cats/services/stores/redis/redis-visibility-lua-scripts.ts',
+      'packages/shared/src/utils/redis.ts',
+      'packages/api/src/domains/cats/services/freshness/FreshnessGateService.ts',
+      'packages/api/src/routes/threads.ts',
+      'packages/api/src/config/env-registry.ts',
+    ];
+    const fixture = makePlanFixture(statefulFiles, {
+      state: 'OPEN',
+      mergedAt: null,
+      reviews: [],
+      statusCheckRollup: [
+        {
+          __typename: 'CheckRun',
+          name: 'gate',
+          status: 'IN_PROGRESS',
+          conclusion: '',
+          startedAt: new Date(Date.now() - 3_600_000).toISOString(),
+          completedAt: '0001-01-01T00:00:00Z',
+        },
+      ],
+    });
+    fixtures.push(fixture.sandboxRoot);
+
+    const output = captureRiskCheckFailure(fixture.repoRoot, {
+      PATH: `${fixture.mockBin}:${process.env.PATH}`,
+    });
+
+    assert.doesNotMatch(output, /Source\/fork pre-merge soak: PASS/i);
+    assert.doesNotMatch(output, /739929/);
+    assert.match(output, /Source\/fork pre-merge soak: INCOMPLETE .* 0-day durable GitHub witness/i);
+    assert.match(output, /STATEFUL MIGRATION QUARANTINE/);
+  });
+
+  it('preserves a legitimate >=7-day startedAt witness on an in-progress CheckRun despite 0001-01-01 completedAt', () => {
+    const statefulFiles = [
+      'packages/api/src/domains/cats/services/stores/cursor.ts',
+      'packages/api/src/domains/cats/services/stores/redis/RedisMessageStore.ts',
+      'packages/api/src/domains/cats/services/stores/redis/redis-visibility-lua-scripts.ts',
+      'packages/shared/src/utils/redis.ts',
+      'packages/api/src/domains/cats/services/freshness/FreshnessGateService.ts',
+      'packages/api/src/routes/threads.ts',
+      'packages/api/src/config/env-registry.ts',
+    ];
+    const fixture = makePlanFixture(statefulFiles, {
+      state: 'OPEN',
+      mergedAt: null,
+      reviews: [],
+      statusCheckRollup: [
+        {
+          __typename: 'CheckRun',
+          name: 'soak-watch',
+          status: 'IN_PROGRESS',
+          conclusion: '',
+          startedAt: new Date(Date.now() - 8 * 86_400_000).toISOString(),
+          completedAt: '0001-01-01T00:00:00Z',
+        },
+      ],
+    });
+    fixtures.push(fixture.sandboxRoot);
+
+    const output = captureRiskCheckFailure(fixture.repoRoot, {
+      PATH: `${fixture.mockBin}:${process.env.PATH}`,
+    });
+
+    assert.match(output, /Source\/fork pre-merge soak: PASS .* 8-day durable GitHub witness/i);
+    assert.doesNotMatch(output, /739929/);
+    assert.match(output, /1224-class risk-check failed closed/i);
+  });
+
+  it('preserves real gh StatusContext startedAt witnesses (solo 40d PASS and 40d StatusContext + 2d CheckRun PASS in risk-check and --record)', () => {
+    const statefulFiles = [
+      'packages/api/src/domains/cats/services/stores/cursor.ts',
+      'packages/api/src/domains/cats/services/stores/redis/RedisMessageStore.ts',
+      'packages/api/src/domains/cats/services/stores/redis/redis-visibility-lua-scripts.ts',
+      'packages/shared/src/utils/redis.ts',
+      'packages/api/src/domains/cats/services/freshness/FreshnessGateService.ts',
+      'packages/api/src/routes/threads.ts',
+      'packages/api/src/config/env-registry.ts',
+    ];
+    const fortyDaysAgo = new Date(Date.now() - 40 * 86_400_000 - 60_000).toISOString();
+    const twoDaysAgo = new Date(Date.now() - 2 * 86_400_000).toISOString();
+
+    // Case A: real `gh pr view --json statusCheckRollup` StatusContext emits `startedAt` (never `createdAt`).
+    const soloStatusContext = makePlanFixture(statefulFiles, {
+      state: 'OPEN',
+      mergedAt: null,
+      reviews: [],
+      statusCheckRollup: [
+        {
+          __typename: 'StatusContext',
+          context: 'ci/external-soak',
+          startedAt: fortyDaysAgo,
+          state: 'SUCCESS',
+          targetUrl: 'https://example.com/status/1',
+        },
+      ],
+    });
+    fixtures.push(soloStatusContext.sandboxRoot);
+    const soloOut = captureRiskCheckFailure(soloStatusContext.repoRoot, {
+      PATH: `${soloStatusContext.mockBin}:${process.env.PATH}`,
+    });
+    assert.match(soloOut, /Source\/fork pre-merge soak: PASS .* 40-day durable GitHub witness/i);
+    assert.doesNotMatch(soloOut, /UNVERIFIABLE/i);
+
+    // Case E: 40-day StatusContext + 2-day COMPLETED CheckRun must stay 40-day PASS (not flip to 2-day INCOMPLETE/MISSED).
+    const mixedRollup = [
+      {
+        __typename: 'StatusContext',
+        context: 'ci/external-soak',
+        startedAt: fortyDaysAgo,
+        state: 'SUCCESS',
+        targetUrl: 'https://example.com/status/1',
+      },
+      {
+        __typename: 'CheckRun',
+        completedAt: twoDaysAgo,
+        conclusion: 'SUCCESS',
+        detailsUrl: 'https://example.com/checks/2',
+        name: 'unit-tests',
+        startedAt: twoDaysAgo,
+        status: 'COMPLETED',
+        workflowName: 'CI',
+      },
+    ];
+    const mixedOpen = makePlanFixture(statefulFiles, {
+      state: 'OPEN',
+      mergedAt: null,
+      reviews: [],
+      statusCheckRollup: mixedRollup,
+    });
+    fixtures.push(mixedOpen.sandboxRoot);
+    const mixedOut = captureRiskCheckFailure(mixedOpen.repoRoot, {
+      PATH: `${mixedOpen.mockBin}:${process.env.PATH}`,
+    });
+    assert.match(mixedOut, /Source\/fork pre-merge soak: PASS .* 40-day durable GitHub witness/i);
+    assert.doesNotMatch(mixedOut, /INCOMPLETE/i);
+  });
+
+  it('ignores incompatible status/timestamp fields, queued checks, epoch/invalid/future dates, wrong-OID reviews, and PENDING reviews', () => {
+    const headRefOid = '2222222222222222222222222222222222222222';
+    const statefulFiles = [
+      'packages/api/src/domains/cats/services/stores/cursor.ts',
+      'packages/api/src/domains/cats/services/stores/redis/RedisMessageStore.ts',
+      'packages/api/src/domains/cats/services/stores/redis/redis-visibility-lua-scripts.ts',
+      'packages/shared/src/utils/redis.ts',
+      'packages/api/src/domains/cats/services/freshness/FreshnessGateService.ts',
+      'packages/api/src/routes/threads.ts',
+      'packages/api/src/config/env-registry.ts',
+    ];
+
+    // Sub-case A: non-zero completedAt on an IN_PROGRESS CheckRun is status-incompatible and ignored;
+    // valid startedAt (1 day ago) still counts.
+    const incompatible = makePlanFixture(statefulFiles, {
+      state: 'OPEN',
+      mergedAt: null,
+      headRefOid,
+      reviews: [],
+      statusCheckRollup: [
+        {
+          __typename: 'CheckRun',
+          status: 'IN_PROGRESS',
+          startedAt: new Date(Date.now() - 1 * 86_400_000 - 60_000).toISOString(),
+          completedAt: new Date(Date.now() - 10 * 86_400_000).toISOString(),
+        },
+      ],
+    });
+    fixtures.push(incompatible.sandboxRoot);
+    const incompatibleOut = captureRiskCheckFailure(incompatible.repoRoot, {
+      PATH: `${incompatible.mockBin}:${process.env.PATH}`,
+    });
+    assert.doesNotMatch(incompatibleOut, /Source\/fork pre-merge soak: PASS/i);
+    assert.match(incompatibleOut, /Source\/fork pre-merge soak: INCOMPLETE .* 1-day durable GitHub witness/i);
+
+    // Sub-case B: queued/unstarted checks, epoch/pre-GitHub/invalid/future dates, wrong-OID reviews,
+    // and unsubmitted PENDING reviews produce UNVERIFIABLE when no valid witness exists.
+    const unverifiable = makePlanFixture(statefulFiles, {
+      state: 'OPEN',
+      mergedAt: null,
+      headRefOid,
+      statusCheckRollup: [
+        {
+          __typename: 'CheckRun',
+          status: 'QUEUED',
+          startedAt: new Date(Date.now() - 10 * 86_400_000).toISOString(),
+          completedAt: '0001-01-01T00:00:00Z',
+        },
+        {
+          __typename: 'CheckRun',
+          status: 'COMPLETED',
+          startedAt: '1970-01-01T00:00:00Z',
+          completedAt: '1970-01-01T00:00:00Z',
+        },
+        {
+          __typename: 'StatusContext',
+          context: 'ci/placeholder',
+          state: 'PENDING',
+          startedAt: '0001-01-01T00:00:00Z',
+          targetUrl: '',
+        },
+        {
+          __typename: 'StatusContext',
+          context: 'ci/malformed',
+          state: 'PENDING',
+          startedAt: 'not-a-valid-date',
+          targetUrl: '',
+        },
+        {
+          __typename: 'CheckRun',
+          status: 'COMPLETED',
+          startedAt: new Date(Date.now() + 86_400_000).toISOString(),
+          completedAt: new Date(Date.now() + 86_400_000).toISOString(),
+        },
+      ],
+      reviews: [
+        {
+          commit: { oid: '3333333333333333333333333333333333333333' },
+          state: 'COMMENTED',
+          submittedAt: new Date(Date.now() - 12 * 86_400_000).toISOString(),
+        },
+        {
+          commit: { oid: headRefOid },
+          state: 'PENDING',
+          submittedAt: new Date(Date.now() - 12 * 86_400_000).toISOString(),
+        },
+        {
+          commit: { oid: headRefOid },
+          state: 'APPROVED',
+          submittedAt: '0001-01-01T00:00:00Z',
+        },
+      ],
+    });
+    fixtures.push(unverifiable.sandboxRoot);
+    const unverifiableOut = captureRiskCheckFailure(unverifiable.repoRoot, {
+      PATH: `${unverifiable.mockBin}:${process.env.PATH}`,
+    });
+    assert.match(unverifiableOut, /Source\/fork pre-merge soak: UNVERIFIABLE/i);
+    assert.doesNotMatch(unverifiableOut, /Source\/fork pre-merge soak: PASS/i);
+
+    // Sub-case C: valid StatusContext.startedAt and submitted exact-HEAD review remain intact alongside placeholders.
+    const preserved = makePlanFixture(statefulFiles, {
+      state: 'OPEN',
+      mergedAt: null,
+      headRefOid,
+      statusCheckRollup: [
+        {
+          __typename: 'CheckRun',
+          status: 'QUEUED',
+          startedAt: '0001-01-01T00:00:00Z',
+          completedAt: '0001-01-01T00:00:00Z',
+        },
+        {
+          __typename: 'StatusContext',
+          context: 'ci/status',
+          state: 'PENDING',
+          startedAt: new Date(Date.now() - 3 * 86_400_000 - 60_000).toISOString(),
+          targetUrl: 'https://example.com/status/2',
+        },
+      ],
+      reviews: [
+        {
+          commit: { oid: headRefOid },
+          state: 'COMMENTED',
+          submittedAt: new Date(Date.now() - 2 * 86_400_000).toISOString(),
+        },
+      ],
+    });
+    fixtures.push(preserved.sandboxRoot);
+    const preservedOut = captureRiskCheckFailure(preserved.repoRoot, {
+      PATH: `${preserved.mockBin}:${process.env.PATH}`,
+    });
+    assert.match(preservedOut, /Source\/fork pre-merge soak: INCOMPLETE .* 3-day durable GitHub witness/i);
+  });
+
   it('does not quarantine an isolated store change without downstream consumer migration', () => {
     const fixture = makePlanFixture(
       ['packages/api/src/domains/example/stores/RedisExampleStore.ts', 'packages/api/test/example-store.test.js'],
@@ -2054,6 +2331,108 @@ describe('intake-from-opensource.sh --record strict guard (absorbed)', () => {
     assert.match(output, /explicit disposition marker/i);
   });
 
+  it('does not let 0001-01-01 check placeholders bypass MISSED or UNVERIFIABLE dispositions during --record', () => {
+    const missedFixture = makeRecordFixture({
+      targetMergedAt: '2026-04-24T20:00:00Z',
+      targetPrFiles: statefulMigrationFiles,
+      targetReviews: [],
+      targetStatusCheckRollup: [
+        {
+          __typename: 'CheckRun',
+          name: 'gate',
+          status: 'IN_PROGRESS',
+          conclusion: '',
+          startedAt: '2026-04-24T19:00:00Z',
+          completedAt: '0001-01-01T00:00:00Z',
+        },
+      ],
+      reviewBody: 'APPROVE',
+      absorbPrBody: [
+        'Closes #1234',
+        'Source: clowder-ai#495',
+        'Historical-state replay: PASS',
+        'Mixed-version consumer matrix: PASS',
+        'Rollback/off-mode semantics: PASS',
+      ].join('\n'),
+    });
+    fixtures.push(missedFixture.sandboxRoot);
+
+    const missedErr = captureRecordFailure(
+      missedFixture.repoRoot,
+      [
+        '--pr',
+        '495',
+        '--decision',
+        'absorbed',
+        '--intent-issue',
+        '1234',
+        '--absorb-pr',
+        '1236',
+        '--review-proof',
+        'https://github.com/zts212653/clowder-ai/pull/1236#pullrequestreview-789',
+      ],
+      { PATH: `${missedFixture.mockBin}:${process.env.PATH}` },
+    );
+    const missedOut = stripAnsi(String(missedErr.stdout || ''));
+    assert.doesNotMatch(missedOut, /Source\/fork pre-merge soak: PASS/i);
+    assert.match(missedOut, /Source\/fork pre-merge soak: MISSED/i);
+    assert.match(missedOut, /explicit disposition marker/i);
+    assert.equal(JSON.parse(readFileSync(missedFixture.ledgerPath, 'utf8')).entries.length, 0);
+
+    const unverifiableFixture = makeRecordFixture({
+      targetMergedAt: '2026-04-24T20:00:00Z',
+      targetPrFiles: statefulMigrationFiles,
+      targetReviews: [
+        {
+          commit: { oid: '2222222222222222222222222222222222222222' },
+          state: 'PENDING',
+          submittedAt: '0001-01-01T00:00:00Z',
+        },
+      ],
+      targetStatusCheckRollup: [
+        {
+          __typename: 'CheckRun',
+          name: 'gate',
+          status: 'QUEUED',
+          conclusion: '',
+          startedAt: '0001-01-01T00:00:00Z',
+          completedAt: '0001-01-01T00:00:00Z',
+        },
+      ],
+      reviewBody: 'APPROVE',
+      absorbPrBody: [
+        'Closes #1234',
+        'Source: clowder-ai#495',
+        'Historical-state replay: PASS',
+        'Mixed-version consumer matrix: PASS',
+        'Rollback/off-mode semantics: PASS',
+      ].join('\n'),
+    });
+    fixtures.push(unverifiableFixture.sandboxRoot);
+
+    const unverifiableErr = captureRecordFailure(
+      unverifiableFixture.repoRoot,
+      [
+        '--pr',
+        '495',
+        '--decision',
+        'absorbed',
+        '--intent-issue',
+        '1234',
+        '--absorb-pr',
+        '1236',
+        '--review-proof',
+        'https://github.com/zts212653/clowder-ai/pull/1236#pullrequestreview-789',
+      ],
+      { PATH: `${unverifiableFixture.mockBin}:${process.env.PATH}` },
+    );
+    const unverifiableOut = stripAnsi(String(unverifiableErr.stdout || ''));
+    assert.doesNotMatch(unverifiableOut, /Source\/fork pre-merge soak: PASS/i);
+    assert.match(unverifiableOut, /Source\/fork pre-merge soak: UNVERIFIABLE/i);
+    assert.match(unverifiableOut, /explicit disposition marker/i);
+    assert.equal(JSON.parse(readFileSync(unverifiableFixture.ledgerPath, 'utf8')).entries.length, 0);
+  });
+
   it('does not allow the historical backfill escape hatch to bypass 1224-class quarantine', () => {
     const f = makeRecordFixture({ targetPrFiles: statefulMigrationFiles });
     fixtures.push(f.sandboxRoot);
@@ -2121,6 +2500,62 @@ describe('intake-from-opensource.sh --record strict guard (absorbed)', () => {
     );
 
     assert.match(stripAnsi(output), /Source\/fork pre-merge soak: PASS/i);
+    assert.match(stripAnsi(output), /Absorbed intake strict guard passed/);
+  });
+
+  it('accepts --record without MISSED disposition when a real gh StatusContext startedAt satisfies 7-day soak alongside a 2-day CheckRun', () => {
+    const f = makeRecordFixture({
+      targetMergedAt: '2026-04-24T20:00:00Z',
+      targetPrFiles: statefulMigrationFiles,
+      targetReviews: [],
+      targetStatusCheckRollup: [
+        {
+          __typename: 'StatusContext',
+          context: 'ci/external-soak',
+          startedAt: '2026-03-15T20:00:00Z',
+          state: 'SUCCESS',
+          targetUrl: 'https://example.com/status/1',
+        },
+        {
+          __typename: 'CheckRun',
+          completedAt: '2026-04-22T20:00:00Z',
+          conclusion: 'SUCCESS',
+          detailsUrl: 'https://example.com/checks/2',
+          name: 'unit-tests',
+          startedAt: '2026-04-22T19:55:00Z',
+          status: 'COMPLETED',
+          workflowName: 'CI',
+        },
+      ],
+      reviewBody: 'APPROVE',
+      absorbPrBody: [
+        'Closes #1234',
+        'Source: clowder-ai#495',
+        'Historical-state replay: PASS',
+        'Mixed-version consumer matrix: PASS',
+        'Rollback/off-mode semantics: PASS',
+      ].join('\n'),
+    });
+    fixtures.push(f.sandboxRoot);
+
+    const output = runRecord(
+      f.repoRoot,
+      [
+        '--pr',
+        '495',
+        '--decision',
+        'absorbed',
+        '--intent-issue',
+        '1234',
+        '--absorb-pr',
+        '1236',
+        '--review-proof',
+        'https://github.com/zts212653/clowder-ai/pull/1236#pullrequestreview-789',
+      ],
+      { PATH: `${f.mockBin}:${process.env.PATH}` },
+    );
+
+    assert.match(stripAnsi(output), /Source\/fork pre-merge soak: PASS .* witnessed for 40 full day\(s\)/i);
     assert.match(stripAnsi(output), /Absorbed intake strict guard passed/);
   });
 

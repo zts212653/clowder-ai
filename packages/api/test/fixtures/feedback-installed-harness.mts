@@ -18,6 +18,7 @@ import { pluginUiRoutes } from '../../src/routes/plugin/plugin-ui-routes.js';
 import { pluginWebhookForwardingRoutes } from '../../src/routes/plugin/plugin-webhook-forwarding-routes.js';
 import { configuredFeedbackMember } from './feedback-member.mts';
 import { feedbackStorageFixture } from './feedback-storage.mts';
+import { buildPluginPanelBrowser } from './plugin-panel-browser.mts';
 
 export async function startInstalledFeedbackFixture() {
   const archive = resolve(process.env.FEEDBACK_ARTIFACT ?? 'missing-feedback-artifact');
@@ -55,25 +56,8 @@ export async function startInstalledFeedbackFixture() {
   const manifest = parse(await readFile(join(packageRoot, 'plugin.yaml'), 'utf8'));
   assert.equal(validateManifest(manifest).valid, true);
   const module = await import(pathToFileURL(join(packageRoot, 'dist/index.js')).href);
-  const esbuild = createRequire(import.meta.url)(
-    createRequire(import.meta.url).resolve('esbuild', { paths: [createRequire(import.meta.url).resolve('tsx')] }),
-  );
   const playwright = createRequire(import.meta.url)(process.env.FEEDBACK_PLAYWRIGHT_MODULE ?? 'playwright');
-  const webRoot = resolve('../web');
-  const bundle = await esbuild.build({
-    absWorkingDir: webRoot,
-    stdin: {
-      resolveDir: webRoot,
-      loader: 'tsx',
-      contents: `import React from 'react';import{createRoot}from'react-dom/client';import{PluginUiEntries}from'./src/components/plugins/PluginUiEntries';createRoot(document.getElementById('rail')).render(<PluginUiEntries/>);`,
-    },
-    jsx: 'automatic',
-    bundle: true,
-    write: false,
-    format: 'iife',
-    define: { 'process.env': JSON.stringify({ NODE_ENV: 'test' }) },
-    alias: { '@': join(webRoot, 'src') },
-  });
+  const { script, css, cssSha256, cssSources } = await buildPluginPanelBrowser();
 
   let uploadedPng = Buffer.alloc(0);
   let failRead = false;
@@ -220,7 +204,7 @@ export async function startInstalledFeedbackFixture() {
     reply
       .type('text/html')
       .send(
-        `<!doctype html><html><style>dialog{margin:auto;width:min(820px,96vw);height:min(900px,94dvh);max-width:none;overflow:hidden;padding:0;border:1px solid #e9e5e1;border-radius:16px}dialog iframe{width:100%;height:100%;border:0}dialog::backdrop{background:#0006}dialog>div{position:absolute;right:12px;top:8px}</style><body style="margin:0;background:#f8f7f5"><aside id="rail" style="position:fixed;inset:0 auto 0 0;width:56px;display:flex;flex-direction:column;justify-content:flex-end;padding-bottom:20px"></aside><main id="workspace"></main><script>document.documentElement.setAttribute('data-cat-cafe-api-origin',location.origin);${bundle.outputFiles[0].text}</script></body></html>`,
+        `<!doctype html><html data-theme="light"><style>${css}</style><body style="margin:0;background:#f8f7f5"><aside id="rail" style="position:fixed;inset:0 auto 0 0;width:56px;display:flex;flex-direction:column;justify-content:flex-end;padding-bottom:20px"></aside><main id="workspace"></main><script>document.documentElement.setAttribute('data-cat-cafe-api-origin',location.origin);${script}</script></body></html>`,
       ),
   );
   await app.listen({ host: '127.0.0.1', port: 0 });
@@ -229,6 +213,8 @@ export async function startInstalledFeedbackFixture() {
   const url = `http://127.0.0.1:${address.port}`;
   const ledger = {
     task: 'feedback-implementation',
+    cssSha256,
+    cssSources,
     owner: 'codex',
     purpose: 'packed plugin / actual Host UI bridge deterministic journey',
     pid: process.pid,

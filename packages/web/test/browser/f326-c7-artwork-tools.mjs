@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { copyFile, mkdir, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
 import { createNativeArtworkFixture, digest } from './f309-artwork-lightbox-native-fixture.mjs';
@@ -14,7 +15,7 @@ import { checkF326MediaPreviews } from './f326-c-media-previews.mjs';
 import { decodedSeek } from './f326-screening-journey.harness.mjs';
 
 export function registerF326C7ArtworkToolsJourney() {
-  const evidence = process.env.F326_C7_EVIDENCE_DIR ?? '/tmp/f326-c7-artwork-tools';
+  const evidence = process.env.F326_C7_EVIDENCE_DIR ?? path.join(tmpdir(), 'f326-c7-artwork-tools');
   test(
     'same image/video toolbar and exact draft/sent frame deletion without refresh',
     { timeout: 300000 },

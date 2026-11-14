@@ -8,6 +8,14 @@ type Score = { coverage: number; specificity: number };
 // Match SQLite LOWER, which folds ASCII rather than locale-dependent Unicode.
 const fold = (value: string): string => value.replace(/[A-Z]/g, (letter) => letter.toLowerCase());
 
+function chineseNecessarySubstring(word: string): string {
+  let longest = '';
+  for (const [run] of word.matchAll(/[一-鿿㐀-䶿]+/g)) {
+    if (run.length > longest.length) longest = run;
+  }
+  return longest.slice(0, 8);
+}
+
 function chineseLiteralMatch(words: string[]): (content: string) => number {
   // Preserve the existing small-query native substring path, with early exit.
   if (words.length <= 4) return (content) => Number(words.some((word) => content.includes(word)));
@@ -29,7 +37,14 @@ export function messageLiteralRelevance(query: string) {
   const words = [...new Set(query.trim().split(/\s+/).filter(Boolean).map(fold))];
   if (!words.some((word) => /[一-鿿㐀-䶿]/.test(word))) return undefined;
   const coverage = literalTermCoverage(words);
-  const chinese = chineseLiteralMatch(splitLexicalBackfillWords(query).filter((word) => /[一-鿿㐀-䶿]/.test(word)));
+  const chineseWords = splitLexicalBackfillWords(query).filter((word) => /[一-鿿㐀-䶿]/.test(word));
+  const chinese = chineseLiteralMatch(chineseWords);
+  // A full term hit must contain every unchanged Han run in that term. This
+  // bounded necessary condition can reject bodies in SQLite before copying
+  // them to JavaScript. The complete terms still decide membership below.
+  // Bound needle width too: long shared prefixes must not turn native instr
+  // into an unbounded per-character comparison. Neither bound truncates terms.
+  const chinesePrefilter = chineseWords.length <= 4 ? [...new Set(chineseWords.map(chineseNecessarySubstring))] : [];
   const phrase = fold(query.trim());
   // Spaces between CJK terms are query separators, not stronger evidence in
   // quoted query/diagnostic messages than the same adjacent words in an original.
@@ -63,6 +78,7 @@ export function messageLiteralRelevance(query: string) {
     selectSql: `message_literal_coverage(LOWER(p.content)) AS literalCoverage,
       CASE WHEN ${phrases.map(() => 'instr(LOWER(p.content), ?) > 0').join(' OR ')} THEN 1.0 / MAX(1, length(p.content)) ELSE 0 END AS literalSpecificity`,
     params: phrases,
+    chinesePrefilter,
     // SQL LOWER does the same ASCII fold once in native code per callback.
     coverageFolded: coverage,
     matchesChineseFolded(content: string): number {

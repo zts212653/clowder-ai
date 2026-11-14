@@ -30,6 +30,7 @@ async function createLifecycleHarness(options) {
   return {
     lifecycle,
     store,
+    builder,
     cleanup() {
       store.close();
       rmSync(root, { recursive: true, force: true });
@@ -55,37 +56,29 @@ function makeEmbeddingService(load) {
 
 describe('MemoryEmbeddingLifecycle', () => {
   it('fills missing vectors without rescanning the evidence corpus when embedding becomes ready', async () => {
-    const { MemoryEmbeddingLifecycle } = await import('../../dist/domains/memory/MemoryEmbeddingLifecycle.js');
     const rebuildCalls = [];
     let warmupCalls = 0;
-    const indexBuilder = {
-      rebuild: async (...args) => {
+    const harness = await createLifecycleHarness({
+      createEmbeddingService: () => makeEmbeddingService(async () => true),
+    });
+    try {
+      assert.equal((await harness.lifecycle.activate('hybrid')).ok, true);
+      harness.builder.rebuild = async (...args) => {
         rebuildCalls.push(args);
         return { docsIndexed: 0, docsSkipped: 7, durationMs: 1 };
-      },
-      embedMissingDocumentVectors: async () => ({ docsEmbedded: 2, durationMs: 1 }),
-      startPassageEmbeddingWarmup: () => {
+      };
+      harness.builder.embedMissingDocumentVectors = async () => ({ docsEmbedded: 2, durationMs: 1 });
+      harness.builder.startPassageEmbeddingWarmup = () => {
         warmupCalls += 1;
-      },
-    };
-    const lifecycle = new MemoryEmbeddingLifecycle(
-      {},
-      indexBuilder,
-      {
-        embedMode: 'off',
-        embedModel: 'test-model',
-        embedDim: 4,
-        embedTimeoutMs: 100,
-        maxModelMemMb: 32,
-      },
-      {},
-    );
-
-    const result = await lifecycle.catchUpAfterReady();
-
-    assert.deepEqual(rebuildCalls, [], 'embedding activation must not rescan docs and threads');
-    assert.equal(warmupCalls, 1, 'missing passage vectors should still be backfilled');
-    assert.deepEqual(result, { docsEmbedded: 2, durationMs: 1 });
+      };
+      const result = await harness.lifecycle.catchUpAfterReady();
+      assert.deepEqual(rebuildCalls, [], 'embedding activation must not rescan docs and threads');
+      assert.equal(warmupCalls, 1, 'missing passage vectors should still be backfilled');
+      assert.deepEqual(result, { docsEmbedded: 2, durationMs: 1 });
+    } finally {
+      harness.lifecycle.deactivate();
+      harness.cleanup();
+    }
   });
 
   it('activates vector indexing after the API starts with embedding off', async () => {

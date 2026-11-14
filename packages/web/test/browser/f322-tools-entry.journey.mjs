@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
 import { mkdir, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { test } from 'node:test';
 import { ensureWorkspaceOpen } from './f307-workspace-open.mjs';
 import { createWorkspaceV3Fixture, WORKSPACE_SAMPLE_THREAD } from './f322-b-workspace-v3-fixture.mjs';
@@ -38,7 +40,7 @@ export function registerToolsEntryJourneys(getSuite) {
   for (const language of ['zh', 'en']) {
     test(`F322 tools direct owners ${language}`, async () => {
       const suite = getSuite();
-      const output = process.env.F322_TOOLS_EVIDENCE_DIR ?? '/tmp/f322-tools-entry';
+      const output = process.env.F322_TOOLS_EVIDENCE_DIR ?? join(tmpdir(), 'f322-tools-entry');
       await mkdir(output, { recursive: true });
       const context = await suite.browser.newContext({ viewport: { width: 1440, height: 1000 } });
       await context.addInitScript((language) => {

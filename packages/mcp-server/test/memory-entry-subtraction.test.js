@@ -101,3 +101,24 @@ test('library creation and its dry run are no longer advertised as cat tools', (
     assert.equal(exportName in tools, false, `${exportName} should be gone`);
   }
 });
+
+test('single-item redaction and deferred owner cleanup have complete page replacements', () => {
+  for (const name of [
+    'cat_cafe_redact_person_memory_item', // mcp-cutover-negative-reference: absence
+    'cat_cafe_withdraw_deferred_person_memory', // mcp-cutover-negative-reference: absence
+    'cat_cafe_forget_deferred_person_memory', // mcp-cutover-negative-reference: absence
+  ])
+    assert.equal(
+      CANONICAL_TOOL_REGISTRY.some((tool) => tool.name === name),
+      false,
+      `${name} should be retired`,
+    );
+  for (const name of [
+    'handleRedactPersonMemoryItem',
+    'redactPersonMemoryItemInputSchema',
+    'handleWithdrawDeferredPersonMemory',
+    'handleForgetDeferredPersonMemory',
+  ])
+    assert.equal(name in tools, false, `${name} should not remain as a callable barrel export`);
+  assert.ok(CANONICAL_TOOL_REGISTRY.some((tool) => tool.name === 'cat_cafe_dispose_deferred_person_memory'));
+});

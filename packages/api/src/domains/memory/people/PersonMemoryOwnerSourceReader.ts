@@ -11,6 +11,7 @@ import { memorySourceSpeaker } from '../memory-source-speaker.js';
 import { verifyOwnerMemoryActionEvidence } from './OwnerMemoryActionEvidenceIssuer.js';
 import type { OwnerPrivateArtifactResolver } from './PersonMemorySourceBundleResolver.js';
 import { eligibleOwnerMessage, PersonMemorySourceBundleResolver } from './PersonMemorySourceBundleResolver.js';
+import { canonicalSourceRejectionReason, ownerMessageRejectionReason } from './person-memory-source-diagnostics.js';
 
 export type PersonMemoryOwnerSourceItem = Pick<PersonIdentity, 'ownerUserId' | 'sourceRefs' | 'typedProvenance'> & {
   materializedBy?: MaterializationAuthority;
@@ -40,27 +41,32 @@ function uniqueSourceRefs(refs: readonly PersonMemorySourceRef[]): PersonMemoryS
 }
 
 export class PersonMemoryOwnerSourceReader {
-  private readonly resolver: PersonMemorySourceBundleResolver;
+  constructor(private readonly deps: PersonMemoryOwnerSourceReaderDeps) {}
 
-  constructor(private readonly deps: PersonMemoryOwnerSourceReaderDeps) {
-    this.resolver = new PersonMemorySourceBundleResolver({
-      messageStore: deps.messageStore,
-      ...(deps.ownerPrivateArtifactResolver ? { ownerPrivateArtifactResolver: deps.ownerPrivateArtifactResolver } : {}),
-    });
-  }
-
-  async read(ownerUserId: string, item: PersonMemoryOwnerSourceItem) {
+  async read(ownerUserId: string, item: PersonMemoryOwnerSourceItem, onUnavailable?: (reason: string) => void) {
     const ownerAction = this.ownerActionSource(ownerUserId, item);
-    if (ownerAction) return ownerAction;
-    const refs = await this.revalidateSourceRefs(ownerUserId, item);
+    if (ownerAction) {
+      if (ownerAction.status === 'unavailable') onUnavailable?.('owner_action_unverified');
+      return ownerAction;
+    }
+    const refs = await this.revalidateSourceRefs(ownerUserId, item, onUnavailable);
     if (!refs) return { status: 'unavailable' as const };
     const sources = [];
     for (const ref of refs) {
       const thread = await this.visibleThread(ownerUserId, ref.threadId);
-      if (!thread) return { status: 'unavailable' as const };
-      const message = await this.deps.messageStore.getById(ref.messageId);
-      if (!eligibleOwnerMessage(message, { ownerUserId }) || message.threadId !== ref.threadId)
+      if (!thread) {
+        onUnavailable?.('thread_unavailable');
         return { status: 'unavailable' as const };
+      }
+      const message = await this.deps.messageStore.getById(ref.messageId);
+      if (!eligibleOwnerMessage(message, { ownerUserId }) || message.threadId !== ref.threadId) {
+        onUnavailable?.(
+          eligibleOwnerMessage(message, { ownerUserId })
+            ? 'message_thread_changed'
+            : ownerMessageRejectionReason(message, ownerUserId),
+        );
+        return { status: 'unavailable' as const };
+      }
       sources.push({
         kind: 'message' as const,
         threadId: ref.threadId,
@@ -101,20 +107,39 @@ export class PersonMemoryOwnerSourceReader {
   private async revalidateSourceRefs(
     ownerUserId: string,
     item: PersonMemoryOwnerSourceItem,
+    onUnavailable?: (reason: string) => void,
   ): Promise<PersonMemorySourceRef[] | null> {
-    if (item.ownerUserId !== ownerUserId) return null;
+    const reject = (reason: string) => {
+      onUnavailable?.(reason);
+      return null;
+    };
+    if (item.ownerUserId !== ownerUserId) {
+      return reject('item_owner_mismatch');
+    }
     if (item.typedProvenance) {
-      const current = await this.resolver.revalidateResolvedBundle(item.typedProvenance, { ownerUserId });
-      if (current.status === 'invalid') return null;
+      // The observer belongs to one read, including when requests overlap on this reader.
+      let messageReason: string | undefined;
+      const resolver = new PersonMemorySourceBundleResolver({
+        ...this.deps,
+        onMessageRejected: (reason) => {
+          messageReason = reason;
+        },
+      });
+      const current = await resolver.revalidateResolvedBundle(item.typedProvenance, { ownerUserId });
+      if (current.status === 'invalid') {
+        return reject(messageReason ?? canonicalSourceRejectionReason(current.error));
+      }
       const refs = uniqueSourceRefs(current.bundle.sources.map(sourceRefOf));
-      return refs.length > 0 ? refs : null;
+      return refs.length > 0 ? refs : reject('source_refs_missing');
     }
     const refs = uniqueSourceRefs(item.sourceRefs);
     for (const ref of refs) {
       const message = await this.deps.messageStore.getById(ref.messageId);
-      if (!eligibleOwnerMessage(message, { ownerUserId }) || message.threadId !== ref.threadId) return null;
+      if (!eligibleOwnerMessage(message, { ownerUserId }))
+        return reject(ownerMessageRejectionReason(message, ownerUserId));
+      if (message.threadId !== ref.threadId) return reject('message_thread_changed');
     }
-    return refs.length > 0 ? refs : null;
+    return refs.length > 0 ? refs : reject('source_refs_missing');
   }
 
   private async visibleThread(ownerUserId: string, threadId: string) {

@@ -5,6 +5,7 @@ import { RichCardContent } from '@cat-cafe/ui';
 import type { PublishedMessageCoordinate } from '@/components/content-review/usePublishedContent';
 import { MarkdownContent } from '@/components/MarkdownContent';
 import { isCorrectionPublication } from '@/components/memory/page/read-correction-approval';
+import { MemoryGroupCard } from '@/components/memory-groups/MemoryGroupCard';
 import { MessageSearchAnswerCard } from '@/components/message-search/MessageSearchAnswerCard';
 import { useShellCopy } from '@/components/shell/shell-copy';
 import type { RichBlock } from '@/stores/chat-types';
@@ -51,6 +52,22 @@ function RichCardRenderer({
   publication?: PublishedMessageCoordinate;
   catId?: string;
 }) {
+  if (block.meta?.kind === 'memory_group')
+    return (
+      <MemoryGroupCard
+        block={block}
+        coordinate={publication}
+        renderOriginal={(original, ref) => (
+          <RichCardRenderer
+            block={original}
+            publication={ref}
+            messageId={ref.messageId}
+            catId={catId}
+            messageSource={messageSource}
+          />
+        )}
+      />
+    );
   if (block.meta?.domain === 'message-search-answer')
     return <MessageSearchAnswerCard messageId={messageId} blockId={block.id} />;
   if (block.meta?.kind === 'work_reference')

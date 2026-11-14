@@ -109,11 +109,14 @@ export function installGenerationVectorTriggers(
   const source = kind === 'documents' ? 'evidence_docs' : 'evidence_passages';
   const key = kind === 'documents' ? 'anchor' : 'passage_key';
   db.transaction(() => {
+    // vec0 plans only `key = value` as a primary-key point lookup; a multi-value IN list or an
+    // IN subquery scans every stored vector, once per changed canonical row on the writer thread.
     for (const operation of ['INSERT', 'UPDATE', 'DELETE'] as const) {
       const rows = operation === 'UPDATE' ? ['old', 'new'] : [operation === 'DELETE' ? 'old' : 'new'];
-      const values = rows.map((row) =>
-        kind === 'documents' ? `${row}.anchor` : `json_array(${row}.doc_anchor,${row}.passage_id)`,
-      );
+      const deletes = rows
+        .map((row) => (kind === 'documents' ? `${row}.anchor` : `json_array(${row}.doc_anchor,${row}.passage_id)`))
+        .map((value) => `DELETE FROM ${table} WHERE ${key}=${value};`)
+        .join(' ');
       const name = `vector_${tables.generationId}_${kind}_physical_${operation}`;
       db.exec(`DROP TRIGGER IF EXISTS main.${name}`);
       const changed =
@@ -121,9 +124,15 @@ export function installGenerationVectorTriggers(
           ? 'WHEN old.doc_anchor IS NOT new.doc_anchor OR old.passage_id IS NOT new.passage_id OR old.content IS NOT new.content'
           : '';
       db.exec(`CREATE TEMP TRIGGER IF NOT EXISTS ${name} AFTER ${operation} ON main.${source} ${changed}
-        BEGIN DELETE FROM ${table} WHERE ${key} IN (${values.join(',')}); END`);
+        BEGIN ${deletes} END`);
     }
     if (kind === 'passages') {
+      // A parent change names a set of passages. Each key passes through a connection-local queue
+      // whose own trigger deletes it by point lookup; the queue is emptied in the same statement.
+      const queue = `vector_${tables.generationId}_parent_invalidation_queue`;
+      db.exec(`CREATE TEMP TABLE IF NOT EXISTS ${queue}(passage_key TEXT NOT NULL)`);
+      db.exec(`CREATE TEMP TRIGGER IF NOT EXISTS ${queue}_drain AFTER INSERT ON temp.${queue}
+        BEGIN DELETE FROM ${table} WHERE passage_key=new.passage_key; END`);
       const changed = PASSAGE_PARENT_POLICY_FIELDS.map((field) => `old.${field} IS NOT new.${field}`).join(' OR ');
       for (const operation of ['DELETE', 'UPDATE'] as const) {
         const predicate = operation === 'UPDATE' ? `WHEN ${changed}` : '';
@@ -131,7 +140,7 @@ export function installGenerationVectorTriggers(
         const name = `vector_${tables.generationId}_parent_physical_${operation}`;
         db.exec(`DROP TRIGGER IF EXISTS main.${name}`);
         db.exec(`CREATE TEMP TRIGGER IF NOT EXISTS ${name} AFTER ${operation} ON main.evidence_docs ${predicate}
-          BEGIN DELETE FROM ${table} WHERE passage_key IN (SELECT json_array(doc_anchor,passage_id) FROM evidence_passages WHERE doc_anchor IN (${anchors})); END`);
+          BEGIN INSERT INTO ${queue}(passage_key) SELECT json_array(doc_anchor,passage_id) FROM evidence_passages WHERE doc_anchor IN (${anchors}); DELETE FROM ${queue}; END`);
       }
       for (const operation of ['INSERT', 'UPDATE'] as const) {
         const name = `vector_${tables.generationId}_suppression_physical_${operation}`;

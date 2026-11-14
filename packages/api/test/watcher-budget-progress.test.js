@@ -320,15 +320,17 @@ for (const failure of ['watcher_context_budget_exceeded:31000', 'watcher_context
 
 test('an original whose header cannot fit the minimum window is audibly skipped without launching a provider', async () => {
   const w = await watcherWorld();
-  const original = {
-    id: '龘'.repeat(180),
-    userId: 'watcher-owner',
-    threadId: w.thread.id,
-    catId: 'codex',
-    content: 'unread original',
-    timestamp: 1000,
-  };
-  w.messages.getById = async (id) => (id === original.id ? original : null);
+  const original = w.messages.appendWithReservedId(
+    {
+      userId: 'watcher-owner',
+      threadId: w.thread.id,
+      from: { kind: 'agent', catId: 'codex' },
+      content: 'unread original',
+      timestamp: 1000,
+      mentions: [],
+    },
+    '龘'.repeat(180),
+  );
   w.executions.createRunning({
     invocationId: 'unfit-source',
     parentInvocationId: 'ordinary',

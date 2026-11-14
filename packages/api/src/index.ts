@@ -1258,10 +1258,6 @@ async function main(): Promise<void> {
   let actionSuccessorCompletionService:
     | import('./domains/ball-custody/ActionSuccessorCompletionService.js').ActionSuccessorCompletionService
     | undefined;
-  const { createActionRecoveryNotification } = await import(
-    './domains/ball-custody/action-successor-recovery-notification.js'
-  );
-  const notifyActionRecovery = createActionRecoveryNotification({ messages: messageStore, threads: threadStore });
   let taskActionSuccessorLifecycle:
     | import('./domains/ball-custody/TaskActionSuccessorLifecycle.js').TaskActionSuccessorLifecycle
     | undefined;
@@ -1338,7 +1334,6 @@ async function main(): Promise<void> {
     actionSuccessorCompletionService = completionService;
     taskActionSuccessorLifecycle = new taskActionLifecycleMod.TaskActionSuccessorLifecycle({
       leaseStore: actionSuccessorLeaseStore,
-      notifyRecovery: notifyActionRecovery,
       completionService: actionSuccessorCompletionService,
     });
     taskActionSuccessorOrphanRecovery = new orphanRecoveryMod.TaskActionSuccessorOrphanRecovery({
@@ -1392,6 +1387,11 @@ async function main(): Promise<void> {
       taskActionSuccessorLifecycle,
     );
   }
+  const { TaskRecoveryReadModel } = await import('./domains/ball-custody/TaskRecoveryReadModel.js');
+  const taskRecoveryReadModel = new TaskRecoveryReadModel({
+    ...(taskActionSuccessorLifecycle ? { action: taskActionSuccessorLifecycle } : {}),
+    ...(ballCustodyProjectionStore ? { ball: ballCustodyProjectionStore } : {}),
+  });
 
   // F153 Phase F AC-F4: Hydrate trace store from Redis messages on cold start
   if (telemetryHandle.traceStore && redis) {
@@ -3253,7 +3253,6 @@ async function main(): Promise<void> {
     const { ActionSuccessorRecoverySweep } = await import('./domains/ball-custody/ActionSuccessorRecoverySweep.js');
     await actionSuccessorLeaseStore.initializeRecovery();
     actionSuccessorRecovery = new ActionSuccessorRecoverySweep({
-      notifyRecovery: notifyActionRecovery,
       tasks: taskStore,
       leaseStore: actionSuccessorLeaseStore,
       deliverReturnCarrier: async (carrier) => {
@@ -3303,7 +3302,6 @@ async function main(): Promise<void> {
         return recoveryStatus === 'terminal' ? { outcome: 'unavailable' as const } : { outcome: 'enqueued' as const };
       },
       dispatch: {
-        notifyRecovery: notifyActionRecovery,
         tasks: taskStore,
         leaseStore: actionSuccessorLeaseStore,
         truthResolver: actionSubjectTruthResolver,
@@ -3549,6 +3547,8 @@ async function main(): Promise<void> {
     dynamicTaskStore, // F295: canonical managed-command execution read projection
     activeExecutionService, // F297 AC-D3: shared composition; project scan uses its live-candidate view
     cliExecutionOwnerService,
+    // F048 Phase C: prior-process executions belong to startup recovery until it finishes.
+    isStartupRecoveryComplete: () => registry.isStartupRecoveryComplete(),
     // #1838: Stop proves a dead API's provider gone only through the kernel job it was linked to.
     ...(process.platform === 'win32'
       ? {
@@ -3732,9 +3732,13 @@ async function main(): Promise<void> {
   });
   await app.register(personMemoryOwnerReadRoutes, {
     ownerUserId: privateUserId,
+    readEvidenceDb: memoryServices.store.getDb(),
     store: personMemoryStore,
     messageStore,
     threadStore,
+    ...(deferredPersonMemoryReceiptStore ? { deferredReceiptStore: deferredPersonMemoryReceiptStore } : {}),
+    ...(writeOpportunityTerminalLedger ? { writeOpportunityTerminalLedger } : {}),
+    ...(writeOpportunityDeliveryStore ? { writeOpportunityDeliveryStore } : {}),
   });
   await app.register(entityMemoryOwnerRoutes, {
     ownerUserId: privateUserId,
@@ -5013,6 +5017,7 @@ async function main(): Promise<void> {
 
   const callbackOpts = {
     ordinaryTaskHandoffs,
+    taskRecovery: taskRecoveryReadModel,
     ...(routingContextRuntime ? { routingSelection: routingContextRuntime.selectionService } : {}),
     proposalProjectRoot: resolveActiveProjectRoot(),
     companionCollectiveAccountability: readCollectiveAttention,
@@ -6776,6 +6781,7 @@ async function main(): Promise<void> {
   // F221 Phase B: taste proposal approve/reject (user-auth; two-phase CAS approve)
   registerTasteProposalDecisionRoutes(app, {
     tasteProposalStore,
+    messageStore,
     socketManager,
     writeVignette: tasteProposalWriter,
     getIndexProjection: () => memoryServices.publishedDocuments?.getStatus(),
@@ -6923,6 +6929,7 @@ async function main(): Promise<void> {
     socketManager,
     deploymentWaitLifecycleHolder,
     humanTerminal: entrustedWorkHumanTerminal,
+    taskRecovery: taskRecoveryReadModel,
   });
   registerDeploymentWaitProjectionRoutes(app, {
     threadStore,
@@ -7518,6 +7525,7 @@ async function main(): Promise<void> {
   // F227: Event Memory query route (GET /api/memory/events)
   await app.register(eventsRoutes, {
     eventMemoryStore: memoryServices.eventMemoryStore,
+    readEvidenceDb: memoryServices.store.getDb(),
     lifecycleService: eventMemoryLifecycleService,
     correctionProposalStore: eventMemoryCorrectionProposalStore,
     socketEmit: (event, data, room) => {
@@ -8705,7 +8713,7 @@ async function main(): Promise<void> {
   // F233 PR4: realtime blocked-task probe. Side effects live here, not in projector/rebuild.
   if (ballCustodyIngest && ballCustodyProjectionStore) {
     const [
-      { BallCustodyProbeScheduler, createBallProbeRecoveryNotification },
+      { BallCustodyProbeScheduler },
       { DefaultBallCustodyProbeEvaluator },
       { SchedulerBallCustodyWakeSender },
       { createBallCustodyProbeTaskSpec },
@@ -8720,7 +8728,6 @@ async function main(): Promise<void> {
       projectionStore: ballCustodyProjectionStore,
       taskStore,
       ballCustody: ballCustodyIngest,
-      notifyRecovery: createBallProbeRecoveryNotification({ messages: messageStore, threads: threadStore }),
       probeEvaluator: new DefaultBallCustodyProbeEvaluator({ redis }),
       wakeSender: new SchedulerBallCustodyWakeSender({
         deliver: schedulerDeliver,

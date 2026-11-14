@@ -1,22 +1,29 @@
 import type { EmbedModelInfo } from './interfaces.js';
 import { openVectorGeneration } from './open-vector-generation.js';
 import type { SqliteEvidenceStore } from './SqliteEvidenceStore.js';
-import { canInitializeVectorIdentity, vectorIdentityMatches } from './vector-generation-identity.js';
 import {
-  prepareGenerationInvalidationConnection,
-  reconcileGenerationInvalidations,
-} from './vector-generation-invalidation.js';
-import { inspectVectorGeneration } from './vector-generation-readiness.js';
+  canInitializeVectorIdentity,
+  generationIdentity,
+  vectorIdentityMatches,
+} from './vector-generation-identity.js';
+import {
+  type GenerationReadOptions,
+  inspectStoreVectorGeneration,
+  reconcileStoreVectorGeneration,
+} from './vector-generation-inspection.js';
+import { prepareGenerationInvalidationConnection } from './vector-generation-invalidation.js';
 import { vectorGenerationTables } from './vector-generation-tables.js';
 
-/** Installing this code does not turn a legacy incremental index into a full startup build. */
+/** Unregistered legacy G0 stays incremental; an adopted cohort keeps its coverage contract after a pause/restart. */
 export function requiresCohortCoverage(stores: SqliteEvidenceStore[], model: EmbedModelInfo): boolean {
   return (
     (model.generationId ?? 'g0') === 'g1' ||
     stores.some(
       (store) =>
         !canInitializeVectorIdentity(store.getDb(), model) ||
-        Boolean(store.getDb().prepare("SELECT 1 FROM vector_generations WHERE id='g1' AND state='ready'").get()),
+        Boolean(
+          store.getDb().prepare("SELECT 1 FROM vector_generations WHERE id='g0' OR (id='g1' AND state='ready')").get(),
+        ),
     )
   );
 }
@@ -28,20 +35,42 @@ export async function inspectCohortRecovery(
   rebuildLegacy: boolean,
   isCurrent: () => boolean,
   coverageRequired = true,
+  lifetime: GenerationReadOptions = {},
 ): Promise<'ready' | 'repair' | 'blocked'> {
   const tables = vectorGenerationTables(model.generationId ?? 'g0');
   let repair = false;
-  for (const store of stores) {
+  for (const [storeIndex, store] of stores.entries()) {
     if (!isCurrent()) return 'blocked';
-    const state = await store.runExclusive(() => {
+    const state = await store.runExclusive(async () => {
       if (!isCurrent()) return 'blocked';
       const db = store.getDb();
       prepareGenerationInvalidationConnection(db);
-      if (db.prepare('SELECT 1 FROM sqlite_master WHERE name=?').get(tables.documents))
-        reconcileGenerationInvalidations(db, tables);
+      await reconcileStoreVectorGeneration(store, model, lifetime);
+      if (!isCurrent()) return 'blocked';
       if (!coverageRequired && tables.generationId === 'g0')
         return canInitializeVectorIdentity(db, model) ? 'ready' : 'blocked';
-      if (inspectVectorGeneration(db, model).ready) return 'ready';
+      const proof = await inspectStoreVectorGeneration(store, model, lifetime);
+      if (!isCurrent()) return 'blocked';
+      if (proof.coverage.ready && proof.isCurrent()) return 'ready';
+      try {
+        const reason = proof.isCurrent() ? (proof.coverage.reason ?? 'unknown') : 'concurrent_mutation';
+        const coverage = proof.coverage;
+        console.warn('[memory] vector cohort admission incomplete', {
+          generationId: tables.generationId,
+          storeIndex,
+          reason,
+          ...(reason === 'coverage_incomplete'
+            ? {
+                missingDocuments: coverage.missingDocuments,
+                missingPassages: coverage.missingPassages,
+                orphanDocuments: coverage.orphanDocuments,
+                orphanPassages: coverage.orphanPassages,
+              }
+            : {}),
+        });
+      } catch {
+        // An optional log sink has no admission authority.
+      }
       if (tables.generationId === 'g0')
         return canInitializeVectorIdentity(db, model) || rebuildLegacy ? 'repair' : 'blocked';
       const registry = db.prepare('SELECT fingerprint,state FROM vector_generations WHERE id=?').get('g1') as
@@ -83,6 +112,12 @@ export async function resetLegacyCohort(
         // dropped physical table, including a same-dimensional reconfiguration.
         const backend = openVectorGeneration(db, model, { create: true });
         backend.vectorStore.initMeta(model);
+        // Persist the cohort contract in the same transaction that replaces
+        // identity. A crash before the first encode cannot adopt empty G0 as
+        // an ordinary legacy index; later windows retain full-cohort admission.
+        db.prepare("INSERT INTO vector_generations(id,fingerprint,state) VALUES('g0',?,'building')").run(
+          generationIdentity(model),
+        );
       })();
     });
 }

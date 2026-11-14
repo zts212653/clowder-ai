@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { mkdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
+import { TTS_ENDPOINT } from '../../packages/api/runtime/services/service-config-core.mjs';
 import {
   assertNamedAlphaCheckout,
   deriveNamedAlphaCoordinates,
@@ -59,10 +60,14 @@ test('named coordinates protect actual Host sidecar defaults in every tuple role
     new URL('../../packages/api/src/domains/services/service-manifest.ts', import.meta.url),
     'utf8',
   );
-  const servicePorts = [...manifest.matchAll(/^\s+port: (\d+),$/gm)].map((match) => Number(match[1]));
+  const servicePorts = [
+    ...new Set(
+      [...manifest.matchAll(/^\s+port: (\d+),$/gm)].map((match) => Number(match[1])).concat(TTS_ENDPOINT.port),
+    ),
+  ];
   const launcher = readFileSync(new URL('../start-dev.sh', import.meta.url), 'utf8');
   const proxyPort = Number(launcher.match(/PROXY_PORT=\$\{ANTHROPIC_PROXY_PORT:-(\d+)\}/)[1]);
-  assert.equal(servicePorts.length, 5, 'actual service manifest supplies the five sidecar defaults');
+  assert.equal(servicePorts.length, 5, 'actual service manifest and canonical TTS owner supply five sidecar defaults');
   for (const port of [...servicePorts, proxyPort]) {
     for (let index = 0; index < 4; index += 1) {
       const tuple = NAMED_ALPHA_PORTS.split(',');
@@ -133,8 +138,10 @@ test('uploads, transcripts and story annotation destinations cannot escape throu
   }
 });
 
-test('uncommitted Alpha identity diagnostics cannot supply launcher authority', (t) => {
-  const f = namedAlphaFixture(t);
-  writeFileSync(join(f.mainRoot, 'scripts/lib/alpha-identity-diagnostics.mjs'), '// uncommitted capture substitution');
-  assert.throws(() => coordinates(f), /committed unchanged launcher controls/);
-});
+for (const name of ['alpha-identity-diagnostics.mjs', 'alpha-git-trace.mjs']) {
+  test(`uncommitted ${name} cannot supply launcher authority`, (t) => {
+    const f = namedAlphaFixture(t);
+    writeFileSync(join(f.mainRoot, 'scripts/lib', name), '// uncommitted capture substitution');
+    assert.throws(() => coordinates(f), /committed unchanged launcher controls/);
+  });
+}

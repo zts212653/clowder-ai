@@ -300,3 +300,95 @@ for (const pattern of ['^collective\\-attachment\\:', '^collective-attachment:']
     }
   });
 }
+
+for (const [label, brokenTool] of [
+  ['non-object root inputSchema', { name: 'broken', inputSchema: { type: 'string' } }],
+  ['malformed required list on inputSchema', { name: 'broken', inputSchema: { type: 'object', required: 'bad' } }],
+  [
+    'invalid regex pattern in outputSchema',
+    {
+      name: 'broken',
+      inputSchema: { type: 'object' },
+      outputSchema: { type: 'object', properties: { value: { type: 'string', pattern: '[' } } },
+    },
+  ],
+]) {
+  test(`protocol-level tools/list and outputSchema violations isolate both transports: ${label}`, async (t) => {
+    const f = await fixture(t, {
+      factory: () => {
+        const server = new Server({ name: 'protocol-invalid-fixture', version: '1' }, { capabilities: { tools: {} } });
+        server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: [brokenTool] }));
+        return server;
+      },
+    });
+    await f.router.start('instance-a');
+    const view = await f.router.resolveMemberMcpView();
+    assert.equal(view.entries[0]?.isCurrent(), true);
+    assert.equal(view.entries[0]?.sharedHttpUnavailableReason, 'tool_schema_invalid');
+    await assert.rejects(f.router.resolveNativeMcpLaunch(policy()), /schema/i);
+
+    const baseConfig = f.config();
+    const memoryCap = {
+      id: 'cat-cafe-memory',
+      type: 'mcp',
+      source: 'cat-cafe',
+      enabled: true,
+      mcpServer: { command: process.execPath, args: ['memory.js'] },
+    };
+    const config = { ...baseConfig, capabilities: [memoryCap, ...baseConfig.capabilities] };
+    const root = view.localCapabilityRoot;
+    const servers = await withInvocationPluginMcpView(
+      async () => {
+        const resolved = await resolveAcpMcpServers(root, [], undefined, {
+          mcpSupport: true,
+          disabledServerIds: resolveDisabledServerIds(root, 'member', config),
+          catId: 'member',
+          capabilitiesConfig: config,
+          configSourceRoot: root,
+        });
+        assert.deepEqual(invocationPluginMcpIssues(), [
+          {
+            pluginId: 'dev.clowder.native-launch-fixture',
+            capabilityId: 'plugin:dev.clowder.native-launch-fixture:native',
+            reasonCode: 'tool_schema_invalid',
+          },
+        ]);
+        return resolved;
+      },
+      view,
+      { kind: 'member', projectRoot: root, memberCatId: 'member' },
+    );
+    assert.ok(servers.some(({ name }) => name === 'cat-cafe-memory'));
+    assert.ok(!servers.some(({ name }) => name === 'plugin__dev.clowder.native-launch-fixture__native'));
+  });
+}
+
+for (const [label, brokenFactory] of [
+  [
+    'factory construction throw',
+    () => {
+      throw new Error('shared factory module failed');
+    },
+  ],
+  [
+    'tools/list handler runtime throw',
+    () => {
+      const server = new Server({ name: 'runtime-throw-fixture', version: '1' }, { capabilities: { tools: {} } });
+      server.setRequestHandler(ListToolsRequestSchema, async () => {
+        throw new Error('unexpected runtime failure during listTools');
+      });
+      return server;
+    },
+  ],
+]) {
+  test(`genuine sharedFactory runtime failure keeps shared_factory_load_failed and stdio fallback: ${label}`, async (t) => {
+    const f = await fixture(t, { factory: brokenFactory });
+    await f.router.start('instance-a');
+    const view = await f.router.resolveMemberMcpView();
+    assert.equal(view.entries[0]?.sharedHttpUnavailableReason, 'shared_factory_load_failed');
+    assert.equal(
+      (await f.router.resolveNativeMcpLaunch(policy())).name,
+      'plugin__dev.clowder.native-launch-fixture__native',
+    );
+  });
+}

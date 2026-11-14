@@ -9,10 +9,12 @@ export function AgyNativeFields({
   form,
   onChange,
   language,
+  managedAccount = false,
 }: {
   form: HubCatEditorFormState;
   onChange: (patch: Partial<HubCatEditorFormState>) => void;
   language?: 'zh' | 'en';
+  managedAccount?: boolean;
 }) {
   const t = useEditorText();
   const translated = useShellCopy(agyNativeCopy);
@@ -62,9 +64,11 @@ export function AgyNativeFields({
       <p className="text-xs leading-5 text-cafe-secondary">
         {form.agyAcpEnabled
           ? copy.acpLogin
-          : t(
-              '使用此隔离 Profile 中已登录的个人 OAuth。Model 填实际 ID（如 gemini-3.8-flash-high）。首次使用前需完成该 Profile 的登录；保存设置不会启动模型。',
-            )}
+          : managedAccount
+            ? copy.managedLogin
+            : t(
+                '使用此隔离 Profile 中已登录的个人 OAuth。Model 填实际 ID（如 gemini-3.8-flash-high）。首次使用前需完成该 Profile 的登录；保存设置不会启动模型。',
+              )}
       </p>
       <p className="text-xs leading-5 text-cafe-muted">
         {form.agyAutoApprove

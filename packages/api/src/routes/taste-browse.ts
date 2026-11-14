@@ -15,6 +15,7 @@ import { resolveDirectLocalAuthorizationUserId, resolveSessionUserId } from '../
 import { authorizeOwnerBrowserAction, ownerMemoryActionHttpStatus } from './owner-memory-browser-auth.js';
 import { projectTasteContext, readTasteApproval } from './taste-browse-context.js';
 import { projectTasteMemory, projectTasteRecall, tasteMemoryId, visibleTasteMemories } from './taste-browse-model.js';
+import { readTasteMemoryById } from './taste-browse-reader.js';
 import { readTasteSource, type TasteSourceReaders } from './taste-browse-source.js';
 
 export interface TasteBrowseOptions extends TasteSourceReaders {
@@ -149,13 +150,13 @@ async function resolveBoundTasteMemory(
     reply.code(400).send({ error: 'Revision required' });
     return null;
   }
-  const memories = await visibleTasteMemories(
+  const memory = await readTasteMemoryById(
     opts.tasteRepository,
     opts.ownerUserId,
     resolveDirectLocalAuthorizationUserId(request) === opts.ownerUserId,
+    request.params.memoryId,
     opts.lifecycleStore,
   );
-  const memory = memories.find((item) => tasteMemoryId(item.sourcePath) === request.params.memoryId);
   if (!memory) {
     reply.code(404).send({ error: 'Unavailable' });
     return null;

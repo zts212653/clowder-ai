@@ -187,7 +187,11 @@ export function MemoryEventDetail({
             <h4 className="text-compact text-cafe-muted">什么时候会想起</h4>
             <p className="text-sm">同一条对话里最近 15 分钟内、把握高的事件，可能递送。</p>
           </section>
-          <MemoryDeliveryUsage family="event" anchor={`event-memory:${data.eventId}`} />
+          <MemoryDeliveryUsage
+            family="event"
+            anchor={`event-memory:${data.eventId}`}
+            usageEndpoint={`${path}/usage?revision=${encodeURIComponent(data.revision)}`}
+          />
         </>
       )}
     </aside>

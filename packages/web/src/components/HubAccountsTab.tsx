@@ -4,6 +4,7 @@ import { useCatData } from '@/hooks/useCatData';
 import { AccountAddMenu } from './accounts/AccountAddMenu';
 import { AccountDirectoryRow } from './accounts/AccountDirectoryRow';
 import { AccountSwitchConfirm } from './accounts/AccountSwitchConfirm';
+import { AgyAccountModal } from './accounts/AgyAccountModal';
 import {
   accountDisplayName,
   accountIsSelected,
@@ -35,6 +36,7 @@ export function HubAccountsTab({
   const directory = useAccountDirectory();
   const { cats } = useCatData();
   const [claudeModal, setClaudeModal] = useState<{ account?: ProfileItem }>();
+  const [agyModal, setAgyModal] = useState<{ account?: ProfileItem }>();
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState('all');
   const [showAuthModal, setShowAuthModal] = useState(false);
@@ -50,12 +52,20 @@ export function HubAccountsTab({
     members: accountMembers(
       account,
       cats,
-      account.clientId === 'anthropic' ? directory.claudeSelection : directory.selection,
+      account.clientId === 'anthropic'
+        ? directory.claudeSelection
+        : account.clientId === 'google'
+          ? directory.agySelection
+          : directory.selection,
     ),
     used: accountIsSelected(
       account,
       cats,
-      account.clientId === 'anthropic' ? directory.claudeSelection : directory.selection,
+      account.clientId === 'anthropic'
+        ? directory.claudeSelection
+        : account.clientId === 'google'
+          ? directory.agySelection
+          : directory.selection,
     ),
   }));
   const counts = {
@@ -95,6 +105,10 @@ export function HubAccountsTab({
       setActionError(undefined);
   };
   function edit(profile: ProfileItem) {
+    if (profile.agy) {
+      setAgyModal({ account: profile });
+      return;
+    }
     if (profile.claude) {
       setClaudeModal({ account: profile });
       return;
@@ -142,6 +156,7 @@ export function HubAccountsTab({
           ))}
         </div>
         <AccountAddMenu
+          onAddAgy={() => setAgyModal({})}
           onAddClaude={() => setClaudeModal({})}
           onAdd={(type) => {
             setEditTarget(undefined);
@@ -256,6 +271,16 @@ export function HubAccountsTab({
         <ClaudeTokenModal
           account={claudeModal.account}
           onClose={() => setClaudeModal(undefined)}
+          onSaved={(profile) => {
+            update([profile]);
+            void directory.refresh();
+          }}
+        />
+      )}
+      {agyModal && (
+        <AgyAccountModal
+          account={agyModal.account}
+          onClose={() => setAgyModal(undefined)}
           onSaved={(profile) => {
             update([profile]);
             void directory.refresh();

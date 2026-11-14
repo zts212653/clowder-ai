@@ -203,13 +203,32 @@ describe('F276 deferred person-memory receipt contract', () => {
       sourceBundleDigest,
       ...terminal
     } = base;
+    const withdrawn = { ...terminal, state: 'withdrawn', updatedAt: 200 };
+    const proposed = { ...terminal, state: 'proposed', proposalId: 'person_candidate_1', updatedAt: 200 };
+    const notActionable = { ...terminal, state: 'not_actionable', resolution: 'insufficient_evidence', updatedAt: 200 };
+    for (const legacy of [{ ...base, state: 'awaiting_confirmation' }, withdrawn, proposed, notActionable]) {
+      expect(deferredPersonMemoryReceiptSchema.parse(legacy)).toEqual(legacy);
+    }
+
+    const ownerForget = { requestId: `owner_forget_${'1'.repeat(32)}`, expectedRevision: `sha256:${'e'.repeat(64)}` };
+    const pending = { ...withdrawn, ownerForget };
+    expect(deferredPersonMemoryReceiptSchema.parse(pending)).toEqual(pending);
+    for (const otherState of [base, { ...base, state: 'awaiting_confirmation' }, claimed, proposed, notActionable]) {
+      expect(deferredPersonMemoryReceiptSchema.safeParse({ ...otherState, ownerForget }).success).toBe(false);
+    }
+    for (const [key, value] of Object.entries({
+      invocationId,
+      originMessageRef,
+      subject,
+      normalizedSubject,
+      registryBinding,
+      sourceCoordinates,
+      sourceBundleDigest,
+    })) {
+      expect(deferredPersonMemoryReceiptSchema.safeParse({ ...pending, [key]: value }).success).toBe(false);
+    }
     expect(
-      deferredPersonMemoryReceiptSchema.parse({
-        ...terminal,
-        state: 'proposed',
-        proposalId: 'person_candidate_1',
-        updatedAt: 200,
-      }),
-    ).toMatchObject({ state: 'proposed', proposalId: 'person_candidate_1' });
+      deferredPersonMemoryReceiptSchema.safeParse({ ...pending, ownerForget: { ...ownerForget, subject } }).success,
+    ).toBe(false);
   });
 });

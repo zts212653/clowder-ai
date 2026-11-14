@@ -8,6 +8,7 @@ import { validateAgyNativeConfigReceipt, writeAgyNativeConfigReceipt } from './a
 export function materializeAgyNativeEffectGuard(input: {
   profileHome: string;
   accountHome?: string;
+  credentialHome?: string;
   runtimeRoot: string;
   readOnly: boolean;
   /** Host-admitted command directory; legacy hook callers can omit it. */
@@ -26,6 +27,7 @@ export function materializeAgyNativeEffectGuard(input: {
     input.accountHome ?? input.profileHome,
     ...(input.workspaceRoot !== undefined ? [realpathSync(input.workspaceRoot)] : []),
     ...(input.pluginServerName !== undefined ? [input.pluginServerName] : []),
+    ...(input.credentialHome !== undefined ? [`--credential-home=${input.credentialHome}`] : []),
   ]
     .map(quote)
     .join(' ');

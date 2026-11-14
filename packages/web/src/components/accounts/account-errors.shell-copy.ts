@@ -70,6 +70,7 @@ export const accountErrorsCopy = defineShellCopy({
     '当前原生版本或组织托管策略尚未支持，请核对账号类型与配置':
       '当前原生版本或组织托管策略尚未支持，请核对账号类型与配置',
     '官方登录未完成，请查看终端输出后在此重试': '官方登录未完成，请查看终端输出后在此重试',
+    '官方登录未完成，请重试；若浏览器未打开，可打开登录终端': '官方登录未完成，请重试；若浏览器未打开，可打开登录终端',
     '未能开始官方登录，请在此重试': '未能开始官方登录，请在此重试',
     '此前复用的账号已不可用，请重新登录或选择其他账号。': '此前复用的账号已不可用，请重新登录或选择其他账号。',
     '这个号是工具正在用的账号，请先换成另一个号再删除登记': '这个号是工具正在用的账号，请先换成另一个号再删除登记',
@@ -171,6 +172,8 @@ export const accountErrorsCopy = defineShellCopy({
       'The native version or organization policy does not support this configuration. Check the account type and settings.',
     '官方登录未完成，请查看终端输出后在此重试':
       'Official login is incomplete. Check the terminal output and retry here.',
+    '官方登录未完成，请重试；若浏览器未打开，可打开登录终端':
+      'Official login is incomplete. Retry here; if the browser did not open, use Open login terminal.',
     '未能开始官方登录，请在此重试': 'Could not start the official login. Retry here.',
     '此前复用的账号已不可用，请重新登录或选择其他账号。':
       'The previously reused account is unavailable. Sign in again or choose another account.',

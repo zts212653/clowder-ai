@@ -72,7 +72,7 @@ import { CrossThreadLetter } from './message-v2/CrossThreadLetter';
 import { isLastOfOwnRun } from './own-message-run';
 import { PawFeelDispositionDock } from './paw-feel/PawFeelDispositionDock';
 import { ReplyPill } from './ReplyPill';
-import { RoutingWarningNotice } from './RoutingWarningNotice';
+import { FailedHandoffNotice, RoutingWarningNotice } from './RoutingWarningNotice';
 import { MatterRecallLine } from './reply-layers/MatterRecallLine';
 import { ReplyLayers } from './reply-layers/ReplyLayers';
 import { ReplyOutputBody } from './reply-layers/ReplyOutputBody';
@@ -87,6 +87,7 @@ import { RichBlocks } from './rich/RichBlocks';
 import { projectRuntimeInteractionHeading } from './rich/runtime-interaction-heading';
 import { runtimeInteractionHeadingCopy } from './rich/runtime-interaction-heading.shell-copy';
 import { RoutingPreflightActions } from './routing-context/RoutingPreflightActions';
+import { SendAttemptStatus } from './SendAttemptStatus';
 import { SenderAvatar } from './SenderAvatar';
 import { SubexecutionActivity } from './SubexecutionActivity';
 import { SummaryCard } from './SummaryCard';
@@ -251,9 +252,10 @@ function ChatMessageContent({
     canRenderReplyLayers(message, replyLayersPresentation),
   );
 
-  const messageSource = renderThreadId ? { threadId: renderThreadId, messageId: message.id } : undefined;
+  const messageSource =
+    renderThreadId && !message.sendAttempt ? { threadId: renderThreadId, messageId: message.id } : undefined;
   const publication =
-    renderThreadId && !message.isStreaming && !message.queuedEntryId
+    renderThreadId && !message.sendAttempt && !message.isStreaming && !message.queuedEntryId
       ? {
           threadId: renderThreadId,
           messageId: message.id,
@@ -286,20 +288,23 @@ function ChatMessageContent({
   const cloudReply = useCloudReply(cloudCarrier?.identity, renderThreadId, threadMessages, {
     readDotEvent: shellPresentation === 'v2',
   });
-  const dispatchLine = (
-    <MessageDispatchAvatars
-      threadId={renderThreadId}
-      message={message}
-      timelineMessages={threadMessages}
-      activeRuns={activeRuns ?? []}
-      queue={queue}
-      inline
-      getCatLabel={(catId) => {
-        const cat = getCatById(catId);
-        return cat ? formatCatName(cat) : catId;
-      }}
-    />
-  );
+  const dispatchLine =
+    message.sendAttempt && !message.queuedEntryId ? (
+      <SendAttemptStatus attempt={message.sendAttempt} threadId={renderThreadId} />
+    ) : (
+      <MessageDispatchAvatars
+        threadId={renderThreadId}
+        message={message}
+        timelineMessages={threadMessages}
+        activeRuns={activeRuns ?? []}
+        queue={queue}
+        inline
+        getCatLabel={(catId) => {
+          const cat = getCatById(catId);
+          return cat ? formatCatName(cat) : catId;
+        }}
+      />
+    );
   const globalBubbleDefaults = useChatStore((s) => s.globalBubbleDefaults);
   const candidateSourceThreadId = message.extra?.crossPost?.sourceThreadId;
   const crossThreadSourceThreadId = isCrossThreadProvenance(candidateSourceThreadId, renderThreadId)
@@ -722,7 +727,7 @@ function ChatMessageContent({
         data-testid="human-message-header"
         className={`relative flex w-full justify-end items-center gap-2 [&>[data-message-action-slot]]:absolute [&>[data-message-action-slot]]:-left-2 [&>[data-message-action-slot]]:top-1/2${humanHasMarks ? ' mb-1' : ''}`}
       >
-        {!humanBubblePresentation && <MessageActionSlot />}
+        {!humanBubblePresentation && !message.sendAttempt && <MessageActionSlot />}
         {isWhisper && (
           <span
             className={`text-xs px-1.5 py-0.5 rounded ${isRevealed ? 'bg-cafe-surface-elevated text-cafe-secondary' : 'bg-semantic-warning-surface text-semantic-warning'}`}
@@ -743,7 +748,8 @@ function ChatMessageContent({
     /* A run of your own messages shows its time once, under the last one. */
     const humanTime =
       humanPresentation &&
-      isLastOfOwnRun(message, timelineMessages ?? EMPTY_TIMELINE_MESSAGES, { currentThreadId: renderThreadId }) ? (
+      (message.sendAttempt ||
+        isLastOfOwnRun(message, timelineMessages ?? EMPTY_TIMELINE_MESSAGES, { currentThreadId: renderThreadId })) ? (
         <div
           data-testid="human-message-time"
           className="mt-1 flex flex-wrap items-baseline justify-end gap-x-1.5 gap-y-1 text-xs"
@@ -758,7 +764,7 @@ function ChatMessageContent({
       humanHeader
     ) : (
       <div className={`flex ${shellPresentation === 'classic' ? 'flex-wrap ' : ''}justify-end items-center gap-2 mb-1`}>
-        <MessageActionSlot />
+        {!message.sendAttempt && <MessageActionSlot />}
         {isWhisper && (
           <span
             className={`text-xs px-1.5 py-0.5 rounded ${isRevealed ? 'bg-cafe-surface-elevated text-cafe-secondary' : 'bg-semantic-warning-surface text-semantic-warning'}`}
@@ -785,7 +791,7 @@ function ChatMessageContent({
 
     return (
       <MessageBubble
-        messageId={message.id}
+        messageId={message.sendAttempt ? undefined : message.id}
         align="right"
         presentation={
           humanPresentation
@@ -799,10 +805,12 @@ function ChatMessageContent({
         }
         avatar={userAvatar}
         header={userHeader}
-        bodyActionSlot={humanBubblePresentation ? <MessageActionSlot /> : undefined}
+        bodyActionSlot={humanBubblePresentation && !message.sendAttempt ? <MessageActionSlot /> : undefined}
         footer={
           <>
-            {renderThreadId ? <SuggestionRow threadId={renderThreadId} messageId={message.id} align="end" /> : null}
+            {renderThreadId && !message.sendAttempt ? (
+              <SuggestionRow threadId={renderThreadId} messageId={message.id} align="end" />
+            ) : null}
             {humanTime}
             {!humanTime ? dispatchLine : null}
             <RoutingWarningNotice warnings={message.extra?.routingWarnings} />
@@ -1188,6 +1196,7 @@ function ChatMessageContent({
           <AppendedInputReceipts response={message} timelineMessages={threadMessages} getCatById={getCatById} />
           <GenerationMessagesNotice response={message} threadId={renderThreadId} timelineMessages={threadMessages} />
           {dispatchLine}
+          <RoutingWarningNotice warnings={message.extra?.routingWarnings} replyV2={shellPresentation === 'v2'} />
           {shellPresentation === 'v2' ? cloudBindingCard : null}
         </>
       }
@@ -1308,6 +1317,9 @@ function ChatMessageContent({
           nativeOutput={nativeReplyOutput}
         />
       ) : null}
+      {shellPresentation === 'v2' && message.extra?.routingWarnings && (
+        <FailedHandoffNotice warnings={message.extra.routingWarnings} />
+      )}
     </MessageBubble>
   );
 }

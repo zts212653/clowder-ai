@@ -272,7 +272,11 @@ async function openProof({
       }
       if (
         request.method() === 'GET' &&
-        ['/api/threads/thread-return/artifacts', '/api/threads/thread-other/artifacts'].includes(url.pathname) &&
+        [
+          '/api/threads/thread-return/artifacts',
+          '/api/threads/thread-other/artifacts',
+          '/api/threads/thread-created/artifacts',
+        ].includes(url.pathname) &&
         url.search === '?view=works'
       ) {
         return handler.fulfill({
@@ -288,6 +292,17 @@ async function openProof({
           body: JSON.stringify({ proposalId: 'p1', status: 'pending' }),
         });
       }
+      if (request.method() === 'GET' && url.pathname === '/api/config/thread-attention' && !url.search)
+        return handler.fulfill({ json: { aliases: {}, open: {} } });
+      if (request.method() === 'GET' && url.pathname === '/api/threads' && url.search === '?view=sidebar')
+        return handler.fulfill({
+          json: {
+            threads: [
+              { id: 'thread-return', title: '返回原处的对话', projectPath: '/work/fixture' },
+              { id: 'thread-other', title: '另一个对话', projectPath: '/work/fixture' },
+            ],
+          },
+        });
       const bodies = {
         '/api/session': session,
         '/api/plugin-ui': { entries: [] },
@@ -1167,7 +1182,7 @@ test('theme presentation choice can override a shell query that was already cons
   }
 });
 
-test('the v2 conversation header is the real one: sidebar restore, 作品, 任务 and the Workspace toggle are named and work', async () => {
+test('the v2 conversation header is the real one: sidebar restore, 作品, 毛线球 and the Workspace toggle are named and work', async () => {
   const proof = await openProof();
   const { page } = proof;
   try {
@@ -1193,7 +1208,7 @@ test('the v2 conversation header is the real one: sidebar restore, 作品, 任�
 
     const tasks = page.getByTestId('header-tasks');
     // No tasks are loaded: zero stays unnumbered, because "not loaded yet" and "none" are indistinguishable there.
-    assert.equal(await tasks.getAttribute('aria-label'), '任务，这条对话的任务');
+    assert.equal(await tasks.getAttribute('aria-label'), '毛线球，这条对话的毛线球');
     await tasks.click();
     assert.equal(await page.getByTestId('workspace-mode').textContent(), 'tasks');
 
@@ -1540,7 +1555,7 @@ test('an approval is approved on its original card inside 待办; 已同意 is c
     assert.equal(await page.getByTestId('reject-btn').count(), 1);
     assert.equal(await page.getByTestId('mailbox-open-original').count(), 1);
     await page.getByTestId('approve-btn').click();
-    await page.getByTestId('mailbox-retained-result').waitFor();
+    await page.getByTestId('mailbox-retained-result').filter({ hasText: '已同意' }).waitFor();
     assert.match(await page.getByTestId('mailbox-retained-line').textContent(), /已同意/);
     // One write, sent by the original store to the producer's own endpoint; the panel never repeated it.
     assert.equal(server.state.posts.length, 1);
@@ -1551,6 +1566,7 @@ test('an approval is approved on its original card inside 待办; 已同意 is c
     assert.ok(after.some((entry) => entry.includes('/api/approval-hub/settled')));
     // The decided card is gone; the result stands alone and is dismissable. It is not a number: the rail says what was read.
     assert.equal(await page.getByTestId('approve-btn').count(), 0);
+    await page.getByTestId('proposal-result-label').click();
     await page.getByTestId('mailbox-retained-dismiss').click();
     assert.equal(await page.getByTestId('mailbox-retained-result').count(), 0);
   } finally {
@@ -1572,7 +1588,7 @@ test('a lost connection is unknown, never "not approved": the user re-reads, and
     // Meanwhile the decision did land on the server (the response was lost). A re-read the user asks for finds the row.
     server.decide();
     await reread(page);
-    await page.getByTestId('mailbox-retained-result').waitFor();
+    await page.getByTestId('mailbox-retained-result').filter({ hasText: '已同意' }).waitFor();
     assert.match(await page.getByTestId('mailbox-retained-line').textContent(), /已同意/);
     assert.equal(server.state.posts.length, 1);
   } finally {
@@ -1669,7 +1685,7 @@ test('while the re-read is slow nothing is claimed: no card to press, no result,
     assert.equal(await page.getByTestId('approve-btn').isDisabled(), true);
     assert.equal(await page.getByTestId('mailbox-row-reread').count(), 0);
     release();
-    await page.getByTestId('mailbox-retained-result').waitFor();
+    await page.getByTestId('mailbox-retained-result').filter({ hasText: '已同意' }).waitFor();
     assert.match(await page.getByTestId('mailbox-retained-line').textContent(), /已同意/);
     assert.equal(server.state.posts.length, 1);
   } finally {
@@ -1722,7 +1738,7 @@ test('accepted chat real page: sidebar, composer and control ownership', async (
   await runChatRealPageJourney(t, browser);
 });
 
-test('v2 F128 retains the native contract and confirmed result group with the original record entrance', async () => {
+test('v2 F128 retains the native contract, confirmed result and on-demand history', async () => {
   const proposal = {
     proposalId: 'direct-approval',
     status: 'pending',
@@ -1811,11 +1827,47 @@ test('v2 F128 retains the native contract and confirmed result group with the or
             proposal: decided ? { ...proposal, status: 'approved', createdThreadId: 'thread-created' } : proposal,
           },
         };
+      if (
+        request.method() === 'GET' &&
+        url.pathname === '/api/approval-hub/settled/page' &&
+        url.search === '?limit=30'
+      ) {
+        const items = decided ? [{ ...item, resolution: 'accepted', decidedAt: Date.now(), decidedBy: 'owner-1' }] : [];
+        return {
+          body: {
+            items,
+            count: items.length,
+            identity: { ownerUserId: 'owner-1' },
+            manifest: [{ id: 'F128' }],
+            page: { limit: 30, nextCursor: null, hasMore: false },
+            coverage: { state: 'complete', orderVersion: 1, sources: ['F128'] },
+          },
+        };
+      }
       if (url.pathname === '/api/approval-hub/settled')
         return {
           body: {
             items: decided ? [{ ...item, resolution: 'accepted', decidedAt: Date.now(), decidedBy: 'owner-1' }] : [],
             count: decided ? 1 : 0,
+          },
+        };
+      if (request.method() === 'GET' && url.pathname === '/api/threads' && url.search === '?view=sidebar')
+        return {
+          body: {
+            threads: [
+              { id: 'thread-return', title: '返回原处的对话', projectPath: '/work/fixture' },
+              ...(decided
+                ? [
+                    {
+                      id: 'thread-created',
+                      title: proposal.title,
+                      projectPath: proposal.projectPath,
+                      createdBy: 'owner-1',
+                      createdFromProposalId: proposal.proposalId,
+                    },
+                  ]
+                : []),
+            ],
           },
         };
       if (url.pathname === '/api/threads/thread-created')
@@ -1829,38 +1881,31 @@ test('v2 F128 retains the native contract and confirmed result group with the or
     await page.getByTestId('mailbox-button').click();
     const native = page.getByTestId('approval-item-direct-approval');
     await native.getByTestId('approve-btn').waitFor();
-    const reason = native.getByTestId('proposal-reason');
-    await reason.locator('summary').click();
-    await page
-      .getByTestId('approve-btn')
-      .isEnabled()
-      .then((enabled) => assert.equal(enabled, true));
-    assert.equal(await reason.getByRole('region').innerText(), proposal.reason);
-    let contractText = await native.innerText();
-    assert.match(contractText, /谁来做:.*狸花猫/s);
-    assert.match(contractText, /放在:.*返回原处的对话/s);
-    assert.match(contractText, /并行 · 不回报/);
-    assert.equal(contractText.includes(proposal.subjectTaskId), false, 'technical addresses stay folded');
-    await native.getByText('技术详情', { exact: true }).click();
-    contractText = await native.innerText();
-    assert.ok(contractText.includes('隔离审批验证'));
-    assert.ok(contractText.includes(proposal.subjectTaskId));
-    assert.ok(contractText.includes(proposal.approvedDevelopmentScope.acceptedSourceRef));
-    assert.ok(contractText.includes(proposal.approvedDevelopmentScope.acceptedRevision));
+    assert.equal(await native.getByTestId('approve-btn').isEnabled(), true);
+    await native.getByText(/从「返回原处的对话」发起/).waitFor();
+    const contractText = await native.innerText();
+    assert.ok((await native.textContent()).includes(proposal.reason), 'v2 shows the original reason inline');
+    assert.match(contractText, /派给.*狸花猫/s);
+    assert.match(contractText, /从「返回原处的对话」发起/);
+    assert.match(contractText, /回报.*不回报/s);
+    assert.equal(contractText.includes(proposal.subjectTaskId), false, 'internal addresses are not the v2 summary');
     assert.equal(await page.getByTestId('mailbox-open-original').textContent(), '在原处打开');
     const evidenceDir = process.env.F322_MAILBOX_EVIDENCE_DIR;
     if (evidenceDir) {
       mkdirSync(evidenceDir, { recursive: true });
-      await page.screenshot({ path: path.join(evidenceDir, 'pending-light.png') });
+      await page.screenshot({ path: path.join(evidenceDir, 'v2-pending-light.png') });
     }
     await page.getByTestId('approve-btn').click();
     await page.getByTestId('mailbox-approval-result').filter({ hasText: '正在确认' }).waitFor();
-    // The native card folds its actions after its own successful POST. The
+    // The native card locks its actions after its own successful POST. The
     // mailbox still withholds the confirmed result until both canonical reads
     // land, and exposes no action that could repeat this decision meanwhile.
-    assert.equal(await page.getByTestId('approve-btn').count(), 0);
-    assert.equal(await page.getByTestId('reject-btn').count(), 0);
-    assert.equal(await page.getByTestId('mailbox-result-open').count(), 0);
+    for (const action of ['approve-btn', 'reject-btn'])
+      assert.ok(
+        await page.getByTestId(action).evaluateAll((buttons) => buttons.every((button) => button.disabled)),
+        'confirmation exposes no enabled producer write',
+      );
+    assert.equal(await page.getByTestId('proposal-result-open').count(), 0);
     assert.equal(
       proof.requests.filter((request) => request === 'POST /api/proposals/direct-approval/approve').length,
       1,
@@ -1868,7 +1913,7 @@ test('v2 F128 retains the native contract and confirmed result group with the or
     releaseConfirmation();
     await page.getByTestId('mailbox-retained-line').filter({ hasText: '对话已开' }).waitFor();
     assert.match(await page.getByTestId('mailbox-retained-line').textContent(), /已同意 · 对话已开/);
-    assert.equal(await page.getByTestId('mailbox-group-results').getByTestId('mailbox-retained-result').count(), 1);
+    assert.equal(await page.getByTestId('mailbox-group-decisions').getByTestId('mailbox-retained-result').count(), 1);
     assert.equal(await page.getByTestId('mailbox-group-decisions').getByTestId('mailbox-item').count(), 0);
     const remainingWork = page.getByTestId('mailbox-group-other').getByTestId('mailbox-item-toggle');
     assert.equal(await remainingWork.count(), 2);
@@ -1876,22 +1921,22 @@ test('v2 F128 retains the native contract and confirmed result group with the or
       await remainingWork.nth(index).getByText(title, { exact: true }).waitFor();
     }
     assert.equal(await page.getByTestId('mailbox-tab-count').textContent(), '0');
-    await page.getByTestId('mailbox-records').click();
-    await page.getByTestId('approval-tab-history').waitFor();
-    assert.equal(await page.getByTestId('approval-tab-history').getAttribute('aria-pressed'), 'true');
-    await page.getByTestId('mailbox-records-back').click();
-    await page.getByTestId('mailbox-records').click();
-    await page.getByTestId('approval-tab-pending').click();
+    await page.getByTestId('mailbox-history').click();
+    await page.getByTestId('mailbox-history-row').filter({ hasText: proposal.title }).waitFor();
+    assert.ok(proof.requests.includes('GET /api/approval-hub/settled/page?limit=30'));
+    assert.equal(await page.getByTestId('approval-panel').count(), 0);
+    await page.getByTestId('mailbox-handled-back').click();
+    await page.getByTestId('mailbox-tools').click();
     await page.getByTestId('approval-filter-bar').waitFor();
     await page.getByTestId('mailbox-records-back').click();
     await page.evaluate(() => document.documentElement.setAttribute('data-theme', 'dark'));
-    if (evidenceDir) await page.screenshot({ path: path.join(evidenceDir, 'result-dark.png') });
+    if (evidenceDir) await page.screenshot({ path: path.join(evidenceDir, 'v2-result-dark.png') });
     await page.setViewportSize({ width: 390, height: 844 });
     assert.ok(
       await page.getByTestId('mailbox-panel').evaluate((node) => node.getBoundingClientRect().right <= innerWidth),
     );
-    if (evidenceDir) await page.screenshot({ path: path.join(evidenceDir, 'result-mobile.png') });
-    await page.getByTestId('mailbox-result-open').click();
+    if (evidenceDir) await page.screenshot({ path: path.join(evidenceDir, 'v2-result-mobile.png') });
+    await page.getByTestId('proposal-result-open').click();
     assert.equal(new URL(page.url()).pathname, '/thread/thread-created');
   } finally {
     releaseConfirmation();
@@ -1953,8 +1998,7 @@ test('v2 second-layer 已过期 finds the canonical item without permitting a pr
   });
   try {
     await proof.page.getByTestId('mailbox-button').click();
-    await proof.page.getByTestId('mailbox-records').click();
-    await proof.page.getByTestId('approval-tab-pending').click();
+    await proof.page.getByTestId('mailbox-tools').click();
     await proof.page.getByTestId('approval-filter-stale').click();
     await proof.page.getByText(item.summary, { exact: true }).waitFor();
     assert.equal(await proof.page.getByTestId('approval-empty-state').count(), 0);
@@ -2005,8 +2049,7 @@ test('v2 safe batch excludes the unknown-result approval and submits only the id
     await page.getByTestId('mailbox-item').first().getByTestId('approve-btn').click();
     await waitForSessionText(page, '没能确认提交结果，重新读取后仍待决定');
     assert.deepEqual(posts, ['/api/proposals/unknown-first/approve']);
-    await page.getByTestId('mailbox-records').click();
-    await page.getByTestId('approval-tab-pending').click();
+    await page.getByTestId('mailbox-tools').click();
     const held = page.getByTestId('mailbox-tools-item-unknown-first');
     const idle = page.getByTestId('mailbox-tools-item-idle-second');
     await held.getByTestId('mailbox-approval-reread').waitFor();

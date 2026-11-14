@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
 import { chromium } from 'playwright';
@@ -20,7 +21,7 @@ test(
       'Only owned candidate or named Alpha; never runtime',
     );
     const library = JSON.parse(await readFile(process.env.F326_DESIGN_LIBRARY, 'utf8'));
-    const evidence = await mkdtemp('/tmp/f326-c-design-browser-');
+    const evidence = await mkdtemp(path.join(tmpdir(), 'f326-c-design-browser-'));
     const browser = await chromium.launch({ headless: true });
     const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
     const page = await context.newPage();

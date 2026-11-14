@@ -34,8 +34,12 @@ jobs:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - name: Windows temporary roots and test cleanup (#1912)
+        run: node --test packages/api/test/windows-temp-lifecycle.test.mjs packages/api/test/isolated-template-root.test.js
       - run: pnpm --filter @cat-cafe/shared build
       - run: pnpm --filter @cat-cafe/api build
+      - name: Anchor mode writer, hook and eval bridge temporary paths (#1912)
+        run: node --test packages/api/test/f236-temp-protocol.test.js packages/api/test/f236-set-read-mode.test.js
       - name: Git marketplace pnpm isolation and diagnostic sanitization
         run: >-
           pnpm --filter @cat-cafe/api exec node ./scripts/with-test-home.mjs
@@ -52,6 +56,8 @@ jobs:
           test/f320-windows-login.test.ts
           test/f320-windows-policy.test.ts
           test/f320-login-lifecycle.test.ts
+          test/issue1962-login-window.test.ts
+          test/issue1963-native-quota.test.ts
           test/codex-native-compat.test.ts
       - name: Windows multi-plugin ACP catalog and cancelled editor requests
         run: |

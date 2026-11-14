@@ -3,6 +3,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
+import { resetLegacyCohort } from '../../dist/domains/memory/embedding-cohort-recovery.js';
 import {
   embeddingRecipeFingerprint,
   readEmbeddingDeployment,
@@ -326,4 +327,66 @@ test('ordinary known G0 cold startup retains incremental compatibility before an
     assert.equal(store.searchEmbedding().getModelInfo().modelId, 'fixture-old');
     assert.equal(openVectorGeneration(store.getDb(), f.models[0]).vectorStore.count(), 2);
   }
+});
+
+for (const completedG1 of [true, false])
+  test(`an early lexical catch-up preserves paused cohort activation (completed G1=${completedG1})`, async (t) => {
+    const f = await fixture(t);
+    if (!completedG1)
+      for (const store of f.stores) store.getDb().prepare("DELETE FROM vector_generations WHERE id='g1'").run();
+    assert.equal((await f.lifecycle.activate('on')).ok, true);
+    // Exceed the live G0 window (512 sources) so this still exercises a real paused cohort.
+    for (const store of f.stores) await store.upsert(Array.from({ length: 260 }, (_, i) => doc(`new-${i}`)));
+    f.config.embedModel = 'fixture-reconfigured';
+    let encoded = 0;
+    f.onEncode((texts) => {
+      encoded += texts.length;
+      for (const store of f.stores) assert.equal(store.searchEmbedding(), undefined);
+    });
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    assert.equal((await f.lifecycle.activate('on', { rebuildLegacyModel: f.config.embedModel })).ok, false);
+    assert.equal(encoded, 512);
+    const providers = f.created.length;
+    // This is the real callback used by thread-index and published-document
+    // completion. No geometry has been published yet; it owns no activation.
+    await f.lifecycle.catchUpAfterReady();
+    t.mock.timers.tick(30_000);
+    for (let i = 0; i < 20; i++) await new Promise((resolve) => setImmediate(resolve));
+    assert.ok(f.created.length > providers, 'the existing 30s retry must still reach its provider');
+    assert.equal((await f.lifecycle.activate('on', { rebuildLegacyModel: f.config.embedModel })).ok, true);
+    assert.equal(encoded, 524, 'retry only encodes the unfinished sources');
+    for (const store of f.stores) {
+      assert.equal(store.searchEmbedding().getModelInfo().modelId, f.config.embedModel);
+      assert.equal(
+        openVectorGeneration(store.getDb(), { ...f.models[0], modelId: f.config.embedModel }).vectorStore.count(),
+        262,
+      );
+    }
+  });
+
+test('a G0 identity reset persists full-cohort admission before the first encoder window', async (t) => {
+  const f = await fixture(t);
+  for (const store of f.stores) {
+    store.getDb().prepare("DELETE FROM vector_generations WHERE id='g1'").run();
+    await store.upsert(Array.from({ length: 260 }, (_, i) => doc(`new-${i}`)));
+  }
+  f.lifecycle.deactivate();
+  f.config.embedModel = 'fixture-reset-before-encode';
+  const model = { ...f.models[0], modelId: f.config.embedModel };
+  await resetLegacyCohort(f.stores, model, () => true);
+  for (const store of f.stores) {
+    assert.equal(store.getDb().prepare("SELECT state FROM vector_generations WHERE id='g0'").get().state, 'building');
+    assert.equal(openVectorGeneration(store.getDb(), model).vectorStore.count(), 0);
+  }
+  let encoded = 0;
+  f.onEncode((texts) => {
+    encoded += texts.length;
+    for (const store of f.stores) assert.equal(store.searchEmbedding(), undefined);
+  });
+  assert.equal((await f.lifecycle.activate('on')).ok, false);
+  assert.equal(encoded, 512);
+  assert.equal(f.lifecycle.getService(), undefined);
+  assert.equal((await f.lifecycle.activate('on')).ok, true);
+  assert.equal(encoded, 524);
+  for (const store of f.stores) assert.equal(openVectorGeneration(store.getDb(), model).vectorStore.count(), 262);
 });

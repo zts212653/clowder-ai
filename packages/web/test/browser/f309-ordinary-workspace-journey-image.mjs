@@ -1,16 +1,21 @@
 import assert from 'node:assert/strict';
 import { mkdir, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
 import { ensureWorkspaceOpen } from './f307-workspace-open.mjs';
 import { fulfillFixtureApi } from './f309-ordinary-workspace-journey-actions.mjs';
 import { createReviewState } from './f309-ordinary-workspace-journey-fixture.mjs';
 
+const evidence =
+  process.env.F309_ARTWORK_EVIDENCE_DIR ?? path.join(tmpdir(), 'cat-cafe-evidence/f309-artwork-integration');
+
 export function registerOrdinaryImageJourney(suite) {
   test(
     'ordinary Workspace image enters collaboration from Home, preserves visible markup, and keeps a locatable discussion',
     { timeout: 90_000 },
     async () => {
+      await mkdir(evidence, { recursive: true });
       const state = createReviewState();
       // A persisted discussion remains reachable after the new Chat-primary canvas replaces its old comment form.
       state.annotations.push({
@@ -62,7 +67,7 @@ export function registerOrdinaryImageJourney(suite) {
         await page.getByTestId('review-local-mark').waitFor();
         await page
           .getByTestId('workspace-content-review-surface')
-          .screenshot({ path: '/tmp/cat-cafe-evidence/f309-artwork-integration/desktop-markup.png' });
+          .screenshot({ path: path.join(evidence, 'desktop-markup.png') });
         await page.getByRole('button', { name: '完成并保存', exact: true }).click();
         await page.getByTestId('review-saved-markup-layer').waitFor();
 
@@ -83,7 +88,7 @@ export function registerOrdinaryImageJourney(suite) {
         await page.getByTestId('review-pending-chat-mark').waitFor();
         await page
           .getByTestId('workspace-content-review-surface')
-          .screenshot({ path: '/tmp/cat-cafe-evidence/f309-artwork-integration/desktop-comment.png' });
+          .screenshot({ path: path.join(evidence, 'desktop-comment.png') });
         await page.getByLabel('图片更多操作', { exact: true }).click();
         await page.getByRole('button', { name: '打开作品讨论', exact: true }).click();
         await page.getByRole('complementary', { name: '作品讨论', exact: true }).waitFor();
@@ -151,7 +156,6 @@ export async function assertArtworkLayout(page, name) {
   assert.equal(await surface.locator('textarea').count(), 0, 'viewing artwork must not require a comment form');
   assert.doesNotMatch(await surface.innerText(), /F309|owner-native|Workspace owner/);
   const geometry = await settledArtworkGeometry(surface, page.viewportSize());
-  const evidence = process.env.F309_ARTWORK_EVIDENCE_DIR ?? '/tmp/cat-cafe-evidence/f309-artwork-integration';
   await mkdir(evidence, { recursive: true });
   await writeFile(path.join(evidence, `${name}-geometry.json`), `${JSON.stringify(geometry, null, 2)}\n`);
   const detail = `${name}: ${JSON.stringify(geometry)}`;

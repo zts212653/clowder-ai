@@ -19,8 +19,7 @@ test(
       await seed(good);
       await store.initializeRecovery();
       let now = Date.now();
-      const reads = [],
-        notices = new Set();
+      const reads = [];
       const recovery = new ActionSuccessorDispatchRecovery({
         leaseStore: store,
         now: () => now,
@@ -35,10 +34,6 @@ test(
         loadOwnerAuthProvenance: async () => assert.fail('no auth reads before truth'),
         recordProposalDelivery: async () => assert.fail('no delivery'),
         deliver: async () => assert.fail('no execution'),
-        notifyRecovery: async (input) => {
-          notices.add(input.key);
-          return 'delivered';
-        },
       });
       for (let n = 0; n < 8; n++) {
         await recovery.runOnce();
@@ -48,7 +43,6 @@ test(
       assert.equal(reads.filter((x) => x === good.subjectRef).length, 8);
       assert.equal((await store.recovery.read(bad.leaseId, 'dispatch')).fact.disposition, 'parked');
       assert.equal((await store.recovery.read(good.leaseId, 'dispatch')).fact.attempts, 0);
-      assert.equal(notices.size, 1);
     });
   },
 );

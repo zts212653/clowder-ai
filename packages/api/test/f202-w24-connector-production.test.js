@@ -1,3 +1,4 @@
+import { tmpdir } from 'node:os';
 /**
  * Current pinned archives through Manager, materializer and module carrier.
  * Only external provider I/O is replaced. This proves installed-package lifecycle,
@@ -74,7 +75,7 @@ for (const release of RELEASES) {
           .digest('hex'),
         release.sha,
       );
-      const root = await mkdtemp('/tmp/f202-w24-production-');
+      const root = await mkdtemp(join(tmpdir(), 'f202-w24-production-'));
       const redis = createRedisClient({ url: process.env.REDIS_URL, keyPrefix: `w24-${root.split('/').at(-1)}:` });
       const threads = new ThreadStore();
       const bindings = new MemoryConnectorThreadBindingStore();

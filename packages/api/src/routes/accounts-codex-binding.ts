@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
+import { planAgyAccountBinding } from '../config/agy-account-binding.js';
 import { toAllCatConfigs } from '../config/cat-config-loader.js';
 import { reconcileCatRegistry } from '../config/cat-registry-reconciliation.js';
 import { planClaudeAccountBinding } from '../config/claude-account-binding.js';
@@ -7,6 +8,7 @@ import { planCodexAccountBinding } from '../config/codex-account-binding.js';
 import { configEventBus, createChangeSetId } from '../config/config-event-bus.js';
 import { readLocalAccountSelection } from '../config/local-account-selection.js';
 import {
+  bindRuntimeAgyAccounts,
   bindRuntimeClaudeAccounts,
   bindRuntimeCodexAccounts,
   readRuntimeAccountMembers,
@@ -28,8 +30,8 @@ const schema = z
   })
   .strict();
 export function registerCodexBindingRoutes(app: FastifyInstance): void {
-  for (const tool of ['codex', 'claude'] as const) {
-    const client = tool === 'codex' ? 'openai' : 'anthropic';
+  for (const tool of ['codex', 'claude', 'agy'] as const) {
+    const client = tool === 'codex' ? 'openai' : tool === 'agy' ? 'google' : 'anthropic';
     app.get(`/api/accounts/${tool}/members`, async (request, reply) => {
       if (!resolveUserId(request)) return reply.code(401).send({ error: 'Identity required' });
       const query = z.object({ projectPath: z.string().optional() }).safeParse(request.query);
@@ -63,10 +65,17 @@ export function registerCodexBindingRoutes(app: FastifyInstance): void {
           const preview =
             tool === 'codex'
               ? planCodexAccountBinding(root, catalog, selection)
-              : planClaudeAccountBinding(root, catalog, selection);
+              : tool === 'agy'
+                ? planAgyAccountBinding(root, catalog, selection)
+                : planClaudeAccountBinding(root, catalog, selection);
           if (action === 'commit') {
             if (!parsed.data.previewToken) return reply.code(400).send({ error: 'Binding preview required' });
-            const bind = tool === 'codex' ? bindRuntimeCodexAccounts : bindRuntimeClaudeAccounts;
+            const bind =
+              tool === 'codex'
+                ? bindRuntimeCodexAccounts
+                : tool === 'agy'
+                  ? bindRuntimeAgyAccounts
+                  : bindRuntimeClaudeAccounts;
             bind(memberRoot, selection, parsed.data.previewToken, root);
             reconcileCatRegistry(memberRoot, new Set(Object.keys(toAllCatConfigs(catalog))));
             await configEventBus.emitChangeAsync({

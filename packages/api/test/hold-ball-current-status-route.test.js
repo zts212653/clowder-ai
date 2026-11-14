@@ -384,6 +384,13 @@ describe('F167 #1449 Slice 1: GET /api/callbacks/hold-ball/current', () => {
         },
       });
       const deps = makeStubDeps([task], { [thread.id]: 'test-user' });
+      const waitRechecks = [];
+      deps.managedCommandWakeRecovery = {
+        async recoverTask(taskId, force) {
+          waitRechecks.push({ taskId, force });
+          return 'pending';
+        },
+      };
       const app = await createApp(deps);
       const root = await mkdtemp(join(tmpdir(), 'managed-internal-access-'));
       const priorRoot = process.env.CAT_CAFE_DATA_DIR;
@@ -426,6 +433,7 @@ describe('F167 #1449 Slice 1: GET /api/callbacks/hold-ball/current', () => {
       const recheck = await app.inject({ method: 'POST', url: `/api/callbacks/hold-ball/${task.id}/recheck`, headers });
       assert.equal(recheck.statusCode, 200, recheck.body);
       assert.equal(recheck.json().outcome, 'observed');
+      assert.deepEqual(waitRechecks, [{ taskId: task.id, force: true }]);
       assert.equal(recheck.json().job.jobId, job.jobId);
       assert.equal(
         recheck.json().job.ownerIdentity,

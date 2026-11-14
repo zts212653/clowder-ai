@@ -13,6 +13,30 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_TEMPLATE_PATH = resolve(__dirname, '..', '..', '..', 'cat-template.json');
 
 describe('parseA2AMentions', () => {
+  it('routes a stable ID from a nickname-only catalog and protects the configured owner', async (t) => {
+    const { _resetCachedConfig, getCoCreatorConfig, loadResolvedCatConfig } = await import(
+      '../dist/config/cat-config-loader.js'
+    );
+    const { analyzeA2AMentions } = await import('../dist/domains/cats/services/agents/routing/a2a-mentions.js');
+    const original = catRegistry.getAllConfigs();
+    t.after(() => {
+      _resetCachedConfig();
+      catRegistry.reset();
+      for (const [id, config] of Object.entries(original)) catRegistry.register(id, config);
+    });
+    const config = loadResolvedCatConfig(REPO_TEMPLATE_PATH);
+    getCoCreatorConfig({
+      ...config,
+      coCreator: { name: 'Operator', nickname: 'Boss', aliases: [], mentionPatterns: ['@co-creator'] },
+    });
+    catRegistry.reset();
+    catRegistry.register('opus', { ...original.opus, mentionPatterns: ['@宪宪'] });
+    catRegistry.register('boss', { ...original.opus, id: 'boss', mentionPatterns: ['@reviewer'] });
+    assert.deepEqual(analyzeA2AMentions('设计已完成\n@OPUS\n请接棒。', 'codex').mentions, ['opus']);
+    assert.deepEqual(analyzeA2AMentions('@opus/docs\n@Boss 请拍板', 'codex'), { mentions: [], routing_warnings: [] });
+    assert.deepEqual(analyzeA2AMentions('@opus', 'opus'), { mentions: [], routing_warnings: [] });
+  });
+
   it('detects line-start @mention (Chinese name)', async () => {
     const { parseA2AMentions } = await import('../dist/domains/cats/services/agents/routing/a2a-mentions.js');
     const result = parseA2AMentions('@缅因猫 请 review 这段代码', 'opus');

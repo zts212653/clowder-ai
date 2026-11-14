@@ -86,6 +86,7 @@ cited_by:
   - {feature: F322, date: 2026-10-14, delta: "J3 boundary — conversation_decision records share the F306 TTL=0 lifecycle/index but never become Approval Hub items; F310 may derive a verified Needs Me presentation without copying decision truth or granting approval authority."}
   - {feature: F313, date: 2026-09-02, delta: "Phase C — canonical Resolution × Materialization projection, durable per-producer writer epoch, and F266 ref-only Approval/dispatch extension with production cutover fail-closed."}
   - {feature: F246, date: 2026-09-17, delta: "PROPOSED ONLY — M3 batch issuer/finalized manifest and TTL=0 command custody with CAS/lease recovery; feature-owner implementation custody still required; no child resolution or memory authority transfer."}
+  - {feature: F246, date: 2026-11-10, delta: "M3 implementation custody admitted — Task608 owner codex61-sol/revision1 via native handoff610; batch/command coordination and card shell only. Astra retains original lanes, effects and Task58 integration. In progress, not deployed."}
 ---
 
 # Approval Index
@@ -246,7 +247,7 @@ ActivityBar (bell icon + badge count)
 
 ## Evolution Path
 
-### Proposed M3 batch command/recovery delta — not implemented
+### M3 batch command/recovery delta — implementation owned, not delivered
 
 The current read-through aggregation/publication ingress described above does **not** own a durable batch executor.
 The M3 candidate §4.1/B1 proposes a new F246-owned boundary:
@@ -272,9 +273,14 @@ against actual append inputs and are never authorization. Complete-four and firs
 begin manifest, and neither the first nor the last append automatically publishes. The remember tool remains a
 hard-capped complete 1–4 item wrapper; larger producer batches use the explicit ingress protocol in M3 §4.1.
 
-This is an explicit **map delta**, not a description of existing production behavior. F246 owner implementation custody
-is required before B1 implementation/activation; no current writer epoch, routing, code anchor, or producer authority
-is changed by this documentation. See the [F246 proposed-delta record](../../../features/F246-approval-hub.md).
+This explicit **map delta** moved from proposed to implementation-owned on 2026-11-10. Native handoff
+`[thread-id]#private-source-id` assigned Task `private-source-id`
+to `codex61-sol` (ownerRevision 1, with its exact source-bound execution). Sol owns batch manifest/command persistence,
+publication coordination, owner HTTP surfaces, the shared lane port/wire types and the existing-host card shell.
+Astra retains Task58, each original lane's payload/admission/decision/effect fencing and production integration.
+The frozen contract is `405c51ea82:feature-specs/2026-11-10-m3-batch-and-lane-contract.md`; the September 1–32 item
+and six-Entity recovery contracts remain. This records current implementation responsibility, not production behavior
+or passed B1 acceptance, and changes no existing producer epoch/authority. See the [F246 scope record](../../../features/F246-approval-hub.md).
 
 - ~~Phase B: add F193 E3 adapter~~ ✅ merged PR #2454
 - ~~Phase C: workspace integration~~ ✅ merged PR #2463

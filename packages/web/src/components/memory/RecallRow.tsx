@@ -38,6 +38,25 @@ export function RecallIcon({ kind }: { kind: RecallKind }) {
     </svg>
   );
 }
+function recallEmptyDetail(event: RecallEvent): string {
+  switch (event.resultStatus) {
+    case 'error':
+      return '工具调用失败';
+    case 'timeout':
+      return '工具调用超时';
+    case 'cancelled':
+      return '检索在返回结果前取消';
+    case 'parser_miss':
+      return '工具已返回，结果未能解析';
+    case 'result_unmerged':
+      return '这次检索的结果尚未记录';
+    case 'no_results':
+      return '没有命中';
+    default:
+      return event.resultCount === 0 ? '没有命中' : '命中详情没有记录下来';
+  }
+}
+
 export function RecallCard({
   event,
   allowDeliveryExpansion = true,
@@ -85,9 +104,7 @@ export function RecallCard({
       )}
       {expandable && expanded && (
         <div className="ml-8 mt-1 rounded-lg border border-cafe-border-subtle bg-cafe-surface-canvas px-3 py-1 text-compact">
-          {!results.length && (
-            <p className="py-3 text-cafe-secondary">{event.resultCount === 0 ? '没有命中' : '命中详情没有记录下来'}</p>
-          )}
+          {!results.length && <p className="py-3 text-cafe-secondary">{recallEmptyDetail(event)}</p>}
           {results.map((item, index) => (
             <div
               key={`${item.anchor ?? item.title}:${index}`}

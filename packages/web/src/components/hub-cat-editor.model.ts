@@ -327,7 +327,7 @@ export function builtinAccountIdForClient(client: ClientId): string | null {
 export function filterAccounts(client: ClientId, profiles: ProfileItem[]): ProfileItem[] {
   // F161: Generic ACP is a transport, not tied to any provider family.
   // Any account (oauth or api_key, any client family) can supply credentials to the ACP carrier.
-  if (client === 'acp') return profiles;
+  if (client === 'acp') return profiles.filter((profile) => !profile.agy);
   const effective = resolveBuiltinClientFamily(client);
   if (!effective || !isBuiltinClient(effective)) return [];
   const builtinProfiles = profiles.filter(

@@ -2088,14 +2088,31 @@ async function assembleIncrementalContextInternal(
   });
 
   if (contextMode === 'cold' || deltaSize === 'large') {
+    const replacementWindow =
+      cursor && isEmptyRuntimeReplacementTransition(options?.contextProjection?.transition)
+        ? await buildReplacementWindowMessages({
+            deps,
+            threadId,
+            userId,
+            catId,
+            cursor,
+            unseen,
+            relevant,
+            filteredReasons,
+            viewer,
+          })
+        : { messages: relevant, hasBackfill: false };
+    const effectiveHcConfig = replacementWindow.hasBackfill
+      ? { ...hcConfig, minBurstMessages: hcConfig.maxBurstMessages }
+      : hcConfig;
     const shaped = await assembleSmartWindowContext(
       deps,
-      relevant,
+      replacementWindow.messages,
       catId,
       threadId,
       currentUserMessageId,
       currentMessageFilteredOut,
-      hcConfig,
+      effectiveHcConfig,
       cursor,
       options,
       effectiveTokenBudget,
@@ -2109,6 +2126,7 @@ async function assembleIncrementalContextInternal(
       incrementalBoundaryCap,
       contextMode ?? 'cold',
       deltaSize,
+      replacementWindow.hasBackfill ? relevant : undefined,
     );
     return shaped;
   }
@@ -2321,6 +2339,104 @@ async function assembleIncrementalContextInternal(
  * F148: Smart window path for cold-mention context assembly.
  * Burst detection → tombstone → evidence recall → tool scrub → compact context.
  */
+function isEmptyRuntimeReplacementTransition(transition: string | undefined): boolean {
+  if (transition === 'fresh') return true;
+  return transition === 'replaced';
+}
+
+function isEligibleReplacementBaseMessage(m: StoredMessage): boolean {
+  if (m.deletedAt) return false;
+  if (m._tombstone) return false;
+  if (!isTimelinePublished(m)) return false;
+  if (m.lifecycle?.kind === 'response' && m.lifecycle.status === 'processing') return false;
+  return true;
+}
+
+function isEligibleUnseenSelfBackfill(
+  m: StoredMessage,
+  filteredReasons: ReadonlyMap<string, ProjectionAuditCandidate['filteredReason']>,
+): boolean {
+  if (filteredReasons.get(m.id) !== 'self_output') return false;
+  if (!isEligibleReplacementBaseMessage(m)) return false;
+  if (m.content?.startsWith('[错误]')) return false;
+  return Boolean(m.content?.trim());
+}
+
+function isEligiblePriorReplacementMessage(
+  m: StoredMessage,
+  catId: CatId,
+  viewer: { type: 'cat'; catId: CatId } | { type: 'user' },
+): boolean {
+  if (!isEligibleReplacementBaseMessage(m)) return false;
+  const from = messageFrom(m);
+  if (from.kind === 'system' && isDisplayOnlySystemMessage(m) && !isAgentReadableManagedHoldMessage(m)) {
+    return false;
+  }
+  if (m.origin === 'briefing') return false;
+  if (!canViewMessage(m, viewer)) return false;
+  if (from.kind === 'agent' && m.content?.startsWith('[错误]')) return false;
+  const isActualCrossPost = isCrossThreadProvenance(m.extra?.crossPost?.sourceThreadId, m.threadId);
+  const authorCatId = from.kind === 'agent' ? from.catId : null;
+  if (!isActualCrossPost && authorCatId === catId) {
+    return m.content?.trim() ? true : isEmptyTerminalLifecycleResponse(m);
+  }
+  return true;
+}
+
+function isMessageAfterReplacementCursor(
+  m: StoredMessage,
+  idx: number,
+  cursor: string,
+  firstUnseenIdx: number,
+): boolean {
+  if (m.visibilitySeq !== undefined) return compareCursors(cursorFor(m), cursor) > 0;
+  return firstUnseenIdx >= 0 && idx >= firstUnseenIdx;
+}
+
+async function buildReplacementWindowMessages(input: {
+  deps: RouteStrategyDeps;
+  threadId: string;
+  userId: string;
+  catId: CatId;
+  cursor: string;
+  unseen: readonly StoredMessage[];
+  relevant: readonly StoredMessage[];
+  filteredReasons: ReadonlyMap<string, ProjectionAuditCandidate['filteredReason']>;
+  viewer: { type: 'cat'; catId: CatId } | { type: 'user' };
+}): Promise<{ messages: StoredMessage[]; hasBackfill: boolean }> {
+  const { deps, threadId, userId, catId, cursor, unseen, relevant, filteredReasons, viewer } = input;
+  if (typeof deps.messageStore.getByThreadAfter !== 'function') {
+    return { messages: [...relevant], hasBackfill: false };
+  }
+  const allMessages = await fetchAfterCursor(deps.messageStore, threadId, undefined, userId);
+  const unseenIds = new Set(unseen.map((m) => m.id));
+  const relevantIds = new Set(relevant.map((m) => m.id));
+  const firstUnseenIdx = unseen.length > 0 ? allMessages.findIndex((m) => unseenIds.has(m.id)) : -1;
+  let hasBackfill = false;
+  const seenRelevantIds = new Set<string>();
+  const combined: StoredMessage[] = [];
+  for (const [idx, m] of allMessages.entries()) {
+    if (relevantIds.has(m.id)) {
+      seenRelevantIds.add(m.id);
+      combined.push(m);
+      continue;
+    }
+    const eligibleBackfill = unseenIds.has(m.id)
+      ? isEligibleUnseenSelfBackfill(m, filteredReasons)
+      : !isMessageAfterReplacementCursor(m, idx, cursor, firstUnseenIdx) &&
+        isEligiblePriorReplacementMessage(m, catId, viewer);
+    if (eligibleBackfill) {
+      hasBackfill = true;
+      combined.push(m);
+    }
+  }
+  if (!hasBackfill) return { messages: [...relevant], hasBackfill: false };
+  for (const m of relevant) {
+    if (!seenRelevantIds.has(m.id)) combined.push(m);
+  }
+  return { messages: combined, hasBackfill: true };
+}
+
 async function assembleSmartWindowContext(
   deps: RouteStrategyDeps,
   relevant: StoredMessage[],
@@ -2342,6 +2458,7 @@ async function assembleSmartWindowContext(
   incrementalBoundaryCap: IncrementalBoundaryCap,
   contextMode: 'cold' | 'hot',
   deltaSize: 'small' | 'large',
+  unreadOverride?: readonly StoredMessage[],
 ): Promise<IncrementalContextResult> {
   const truncateLimit = PROMPT_MESSAGE_SAFETY_CHAR_LIMIT;
   const hasEpochProjection = options?.contextProjection !== undefined;
@@ -2560,9 +2677,15 @@ async function assembleSmartWindowContext(
   // 7. Respect effectiveMaxContextTokens (same as warm path)
   // #1200/#3444: cursorFor remains graded for general consumers; this producer
   // admits only the canonical branch into deferred delivery state.
-  const lastRelevantMsg = relevant[relevant.length - 1];
+  const boundaryCandidates = unreadOverride ? unreadOverride : relevant;
+  const lastRelevantMsg = boundaryCandidates[boundaryCandidates.length - 1];
+  const rawBoundarySource = lastRelevantMsg
+    ? cursorFor(lastRelevantMsg)
+    : unreadOverride && _cursor
+      ? _cursor
+      : undefined;
   const boundaryId = clampToIncrementalBoundaryCap(
-    canonicalDeferredBoundary(lastRelevantMsg ? cursorFor(lastRelevantMsg) : undefined, 'cold-visible-tail'),
+    canonicalDeferredBoundary(rawBoundarySource, 'cold-visible-tail'),
     incrementalBoundaryCap,
   );
   const directiveSource = activeTasks.length > 0 ? selectDirectiveSources(rankedSources)[0] : undefined;
@@ -2730,15 +2853,25 @@ async function assembleSmartWindowContext(
     ]),
     contextText,
     boundaryId,
-    projectedMessageIds: [
-      ...new Set([...finalAnchors.map(({ message }) => message.id), ...finalBurstMsgs.map((message) => message.id)]),
-    ],
-    exposedMessageIds: [
-      ...new Set([
-        ...exactAnchorBodyMessageIds(omitted, finalAnchors, truncateLimit),
-        ...exactBodyMessageIdsAfterToolScrub(burst, finalBurstMsgs, truncateLimit),
-      ]),
-    ],
+    projectedMessageIds: (() => {
+      const rawProjected = [
+        ...new Set([...finalAnchors.map(({ message }) => message.id), ...finalBurstMsgs.map((message) => message.id)]),
+      ];
+      if (!unreadOverride) return rawProjected;
+      const unreadIds = new Set(unreadOverride.map((message) => message.id));
+      return rawProjected.filter((id) => unreadIds.has(id));
+    })(),
+    exposedMessageIds: (() => {
+      const rawExposed = [
+        ...new Set([
+          ...exactAnchorBodyMessageIds(omitted, finalAnchors, truncateLimit),
+          ...exactBodyMessageIdsAfterToolScrub(burst, finalBurstMsgs, truncateLimit),
+        ]),
+      ];
+      if (!unreadOverride) return rawExposed;
+      const unreadIds = new Set(unreadOverride.map((message) => message.id));
+      return rawExposed.filter((id) => unreadIds.has(id));
+    })(),
     includesCurrentUserMessage,
     currentMessageFilteredOut,
     degradation: tokenDegradation,

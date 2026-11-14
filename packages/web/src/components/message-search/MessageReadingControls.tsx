@@ -97,6 +97,19 @@ export function MessageReadingControls({ host }: { host: MessageSearchHost }) {
                 : `‹ 回到「${originTitle || '刚才那条对话'}」`}
           </button>
         )}
+        {jumpReturn && (
+          // The bar stays until used; without this the reader cannot say "I don't need to go back", and a bar whose
+          // return point is gone (unavailable / interrupted by a remount mid-jump) could never be dismissed.
+          <button
+            type="button"
+            className={controlClass}
+            aria-label="关闭返回条"
+            title="不用回去了"
+            onClick={host.dismissReturn}
+          >
+            ×
+          </button>
+        )}
       </div>
       {((!findReturn && !jumpReturn) || trip.status === 'unavailable' || trip.status === 'interrupted') && (
         <p className="mt-1 px-2 text-micro text-cafe-secondary">{statusText[trip.status]}</p>

@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { ExpandableProse } from '@/components/content-overflow';
 import { useShellCopy } from '@/components/shell/shell-copy';
+import { isGitWorktreeRequired } from '@/utils/git-response-error';
 import { isRowPrimaryActionTarget } from '@/utils/row-primary-action';
 import type { GitHealthResult } from '../../hooks/useGitHealth';
 import { useGitHealth } from '../../hooks/useGitHealth';
@@ -112,7 +113,13 @@ function HealthSectionBody({
   if (!health) {
     return (
       <div className="text-micro text-cafe-interactive/40">
-        {healthError ? copy.healthFailed : healthLoading ? copy.healthLoading : copy.healthUnavailable}
+        {healthError
+          ? isGitWorktreeRequired(healthError)
+            ? copy.gitWorktreeRequired
+            : copy.healthFailed
+          : healthLoading
+            ? copy.healthLoading
+            : copy.healthUnavailable}
       </div>
     );
   }
@@ -289,7 +296,7 @@ export function GitPanelV2() {
 
       {error && (
         <div className="px-3 py-2 text-xs text-conn-red-text bg-conn-red-bg/80 border-b border-[var(--semantic-critical-surface)]">
-          {error}
+          {isGitWorktreeRequired(error) ? copy.gitWorktreeRequired : error}
         </div>
       )}
 
@@ -303,7 +310,11 @@ export function GitPanelV2() {
             <div className="text-xs text-cafe-interactive/50">{copy.notGitRepository}</div>
           ) : status === null ? (
             <div className="text-micro text-cafe-interactive/40">
-              {statusError ? copy.statusFailed : copy.statusLoading}
+              {statusError
+                ? isGitWorktreeRequired(statusError)
+                  ? copy.gitWorktreeRequired
+                  : copy.statusFailed
+                : copy.statusLoading}
             </div>
           ) : totalChanges === 0 ? (
             <div className="text-xs text-conn-green-text">{copy.workingTreeClean}</div>

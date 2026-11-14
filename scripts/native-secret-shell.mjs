@@ -2,6 +2,7 @@ import { realpathSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { ghOperation } from './lib/secret-gh-options.mjs';
 import { executedInvocations } from './lib/shell-invocation.mjs';
+import { leadingShellControl, nativeBuiltinContext } from './lib/shell-program-tokens.mjs';
 import { constrainedGhApiOperation, managedGhOperation } from './native-effect-github-classifier.mjs';
 import { hereDocumentView } from './native-effect-heredoc.mjs';
 import { provedManagedGhInvocation } from './native-effect-program-selection.mjs';
@@ -14,16 +15,31 @@ export function secretShellDenial(command, cwd) {
   // Non-shell interpreter input is source, not another shell command stream.
   const host = hereDocumentView(command).judged;
   const parts = splitShellExecutionSegmentsWithSeparators(host);
-  const contexts = segmentContexts(parts, cwd);
-  for (const invocation of contextualInvocations(parts, contexts)) {
+  const builtinContexts = namespaceContexts(parts);
+  const contexts = segmentContexts(parts, cwd, process.env, builtinContexts);
+  for (const invocation of contextualInvocations(parts, contexts, builtinContexts)) {
     const reason = invocationDenial(invocation);
     if (reason) return reason;
   }
   return null;
 }
 
-function contextualInvocations(parts, contexts) {
-  let stable = !parts.some((part) => part.separator === '&' || /^\s*(?:for|while|until|function)\b/.test(part.text));
+function namespaceContexts(parts) {
+  let stable = nativeBuiltinContext(
+    !parts.some(
+      (part) =>
+        part.separator === '&' || ['for', 'while', 'until', 'function'].includes(leadingShellControl(part.text)),
+    ),
+  );
+  return parts.map((part) => {
+    const before = stable;
+    stable &&=
+      classifyShellSegment(part.text, { builtinContext: stable }) === 'read' || isLocalProgramBinding(part.text);
+    return before;
+  });
+}
+
+function contextualInvocations(parts, contexts, builtinContexts) {
   return parts.flatMap((part, index) => {
     if (['|', '|&'].includes(part.separator)) return [];
     let end = index;
@@ -35,10 +51,14 @@ function contextualInvocations(parts, contexts) {
       .join(' ');
     const calls = contexts[index]
       .flatMap(({ directory, bindings, parameters }) =>
-        executedInvocations(pipeline, { cwd: directory, bindings, parameters }).pipelines.flat(),
+        executedInvocations(pipeline, {
+          cwd: directory,
+          bindings,
+          parameters,
+          builtinContext: builtinContexts[index] && index === end,
+        }).pipelines.flat(),
       )
-      .map((call) => ({ ...call, namespaceStable: stable && index === end }));
-    stable &&= classifyShellSegment(part.text) === 'read' || isLocalProgramBinding(part.text);
+      .map((call) => ({ ...call, namespaceStable: builtinContexts[index] && index === end }));
     return calls;
   });
 }

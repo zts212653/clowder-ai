@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, describe, it } from 'node:test';
 import Fastify from 'fastify';
@@ -22,7 +23,7 @@ describe('POST /api/workspace/search', () => {
   let previousLinkedRoots;
 
   before(async () => {
-    testDir = mkdtempSync('/tmp/cat-cafe-workspace-search-');
+    testDir = mkdtempSync(join(tmpdir(), 'cat-cafe-workspace-search-'));
     mkdirSync(join(testDir, 'docs'), { recursive: true });
     writeFileSync(join(testDir, 'docs', 'exact-match.md'), '# README-A2A-SEARCH\n', 'utf8');
     writeFileSync(join(testDir, 'docs', 'notes.txt'), '猫在 txt 文档里\n', 'utf8');

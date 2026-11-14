@@ -4,6 +4,7 @@ import { useRef, useState } from 'react';
 import { AppTooltip } from '../AppTooltip';
 import { ComposerPopover } from '../ComposerPopover';
 import { useShellCopy } from '../shell/shell-copy';
+import { requestPluginHttp } from './plugin-panel-http';
 import { QuickPhraseConfirmation } from './QuickPhraseConfirmation';
 import { QuickPhrasesList } from './QuickPhrasesList';
 import { quickPhrasesCopy } from './quick-phrases.shell-copy';
@@ -77,9 +78,16 @@ function QuickPhrasesButton({ draft, disabled, presentation, onSelect, entry }: 
           ) : (
             <QuickPhrasesList
               entry={entry}
-              onSelect={(text) => {
+              onSelect={(phrase) => {
                 setSnapshot(undefined);
-                if (!draft.trim()) onSelect(text);
+                if (draft.trim()) return;
+                onSelect(phrase.text);
+                if (phrase.onInserted) {
+                  const { request, notifyFailure } = phrase.onInserted;
+                  void requestPluginHttp(entry, request, undefined, { notifyFailure }).catch(() => {
+                    // A receipt failure cannot undo the already inserted text.
+                  });
+                }
               }}
             />
           )}

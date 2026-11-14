@@ -1,6 +1,16 @@
 import assert from 'node:assert/strict';
+import { tmpdir } from 'node:os';
 import { test } from 'node:test';
 import { isolatedOAuthEnv } from '../dist/domains/cats/services/agents/providers/agy-native/launch/agy-native-launch-env.js';
+
+test('isolated OAuth uses the native temporary directory for TMPDIR', () => {
+  withEnv({ TMPDIR: process.platform === 'win32' ? '/tmp' : undefined }, () => {
+    const env = isolatedOAuthEnv('/isolated/profile');
+    assert.equal(env.TMPDIR, tmpdir());
+    assert.equal(env.TEMP, process.env.TEMP);
+    assert.equal(env.TMP, process.env.TMP);
+  });
+});
 
 const proxies = {
   HTTP_PROXY: 'http://proxy.example:8080',

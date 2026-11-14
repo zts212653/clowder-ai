@@ -5,47 +5,13 @@ import { schedulerError } from '../../infrastructure/scheduler/logging/adapter.j
 const log = createModuleLogger('ball-custody/action-due-recovery');
 
 import {
+  type ActionRecoveryFact,
   type ActionRecoveryLane,
-  type ActionRecoveryNotification,
   type ActionRecoveryOutcome,
   type ActionRecoveryPort,
-  type ActionRecoverySnapshot,
   planActionRecovery,
 } from './action-successor-recovery-state.js';
 import type { ActionSuccessorLease } from './action-successor-state-machine.js';
-
-async function notify(
-  port: ActionRecoveryPort,
-  snapshot: ActionRecoverySnapshot,
-  lane: ActionRecoveryLane,
-  now: number,
-  send?: ActionRecoveryNotification,
-): Promise<void> {
-  const notice = snapshot.fact.notification;
-  if (!notice || notice.deliveredAt !== undefined || notice.attempts >= 5) return;
-  let delivered = false;
-  let unavailable = !send;
-  try {
-    const result = await send?.({ lease: snapshot.lease, lane, key: notice.key, reasonCode: notice.reasonCode });
-    delivered = result === 'delivered';
-    unavailable ||= result === 'owner_unavailable';
-  } catch {
-    /* The committed intent survives a failed append or a crash after append. */
-  }
-  const current = await port.read(snapshot.lease.leaseId, lane);
-  if (
-    !current ||
-    current.lease.generation !== snapshot.lease.generation ||
-    current.fact.notification?.key !== notice.key
-  )
-    return;
-  const attempts = notice.attempts + (delivered || unavailable ? 0 : 1);
-  await port.update(current, lane, {
-    ...current.fact,
-    nextAttemptAt: delivered || unavailable || attempts >= 5 ? null : now + 30_000,
-    notification: { ...notice, attempts, ...(delivered ? { deliveredAt: now } : {}) },
-  });
-}
 
 /** Owner policy: only this lease's original lane handler may run; metadata never asserts business success. */
 interface ActionDueInput {
@@ -53,7 +19,6 @@ interface ActionDueInput {
   lease: ActionSuccessorLease;
   lane: ActionRecoveryLane;
   now: number;
-  notify?: ActionRecoveryNotification;
   recover: (lease: ActionSuccessorLease) => Promise<ActionRecoveryOutcome>;
 }
 export async function runActionDueRecovery(input: ActionDueInput): Promise<ActionRecoveryOutcome> {
@@ -77,22 +42,16 @@ async function recoverOriginalLane(input: ActionDueInput): Promise<ActionRecover
   }
   if (snapshot.fact.nextAttemptAt === null || snapshot.fact.nextAttemptAt > now) return { kind: 'stale' };
   if (snapshot.fact.disposition) {
-    await notify(port, snapshot, lane, now, input.notify);
+    const { notification: _legacyNotification, ...fact } = snapshot.fact as ActionRecoveryFact & {
+      notification?: unknown;
+    };
+    await port.update(snapshot, lane, { ...fact, nextAttemptAt: null });
     return { kind: 'settled' };
   }
   if (snapshot.fact.claim) {
     if (snapshot.fact.claim.expiresAt > now) return { kind: 'stale' };
-    const fact = planActionRecovery(
-      snapshot.fact,
-      { kind: 'retryable_error', reason: 'interrupted_recovery' },
-      snapshot.lease,
-      lane,
-      now,
-    );
-    if (await port.update(snapshot, lane, fact)) {
-      const current = await port.read(lease.leaseId, lane);
-      if (current?.fact.disposition) await notify(port, current, lane, now, input.notify);
-    }
+    const fact = planActionRecovery(snapshot.fact, { kind: 'retryable_error', reason: 'interrupted_recovery' }, now);
+    await port.update(snapshot, lane, fact);
     return { kind: 'retryable_error', reason: 'interrupted_recovery' };
   }
   if (snapshot.lease.revision !== lease.revision) return { kind: 'stale' };
@@ -115,7 +74,7 @@ async function recoverOriginalLane(input: ActionDueInput): Promise<ActionRecover
   const current = await port.read(lease.leaseId, lane);
   if (!current || current.lease.generation !== lease.generation || current.fact.claim?.token !== token)
     return { kind: 'stale' };
-  const fact = planActionRecovery(current.fact, outcome, current.lease, lane, now);
+  const fact = planActionRecovery(current.fact, outcome, now);
   if (await port.update(current, lane, fact, false, token)) {
     if (fact.disposition && !current.fact.disposition)
       log.warn(
@@ -128,8 +87,6 @@ async function recoverOriginalLane(input: ActionDueInput): Promise<ActionRecover
         },
         'Action recovery paused; original custody retained',
       );
-    const settled = await port.read(lease.leaseId, lane);
-    if (settled?.fact.disposition) await notify(port, settled, lane, now, input.notify);
   }
   return outcome;
 }

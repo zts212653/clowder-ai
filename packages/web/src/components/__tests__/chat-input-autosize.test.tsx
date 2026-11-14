@@ -1,7 +1,7 @@
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { ChatInput } from '@/components/ChatInput';
+import { ChatInput, syncDraftToStorage } from '@/components/ChatInput';
 
 vi.mock('@/utils/api-client', () => ({ apiFetch: vi.fn(async () => new Response('{}')) }));
 vi.mock('@/hooks/useCatData', () => ({
@@ -39,6 +39,8 @@ beforeEach(() => {
 
 afterEach(() => {
   act(() => root.unmount());
+  syncDraftToStorage('mirror-restored', undefined);
+  syncDraftToStorage('mirror-other', undefined);
   container.remove();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
@@ -103,23 +105,29 @@ describe('ChatInput border-box autosizing', () => {
   });
 
   it('remeasures pane width changes without reacting to height-only notifications', () => {
-    let notify: ResizeObserverCallback = () => {};
+    const callbacks = new Map<Element, ResizeObserverCallback>();
     const observe = vi.fn();
     const disconnect = vi.fn();
     vi.stubGlobal(
       'ResizeObserver',
       class {
-        constructor(callback: ResizeObserverCallback) {
-          notify = callback;
-        }
-        observe = observe;
+        constructor(private callback: ResizeObserverCallback) {}
+        observe = (element: Element) => {
+          observe(element);
+          callbacks.set(element, this.callback);
+        };
         disconnect = disconnect;
       },
     );
     const textarea = render();
     expect(observe).toHaveBeenCalledWith(textarea.parentElement);
     const changeWidth = (width: number) =>
-      act(() => notify([{ contentRect: { width } } as ResizeObserverEntry], {} as ResizeObserver));
+      act(() =>
+        callbacks.get(textarea.parentElement!)!(
+          [{ contentRect: { width } } as ResizeObserverEntry],
+          {} as ResizeObserver,
+        ),
+      );
     vi.spyOn(HTMLTextAreaElement.prototype, 'scrollHeight', 'get').mockReturnValue(64);
     changeWidth(240);
     expect(textarea.style.height).toBe('66px');
@@ -144,5 +152,49 @@ describe('ChatInput border-box autosizing', () => {
     type(textarea, Array.from({ length: 20 }, (_, index) => `第 ${index + 1} 行`).join('\n'));
     expect(textarea.style.height).toBe(`${maxHeight}px`);
     expect(textarea.scrollHeight).toBeGreaterThan(textarea.clientHeight);
+  });
+
+  it.each(
+    [false, true].flatMap((mobile) =>
+      ['短草稿', 'https://example.com/short', '长草稿\n'.repeat(26), 'https://example.com/long\n'.repeat(26)].map(
+        (input) => ({ mobile, input }),
+      ),
+    ),
+  )('synchronizes a stable draft after keyed remount (mobile=$mobile, input=$input)', ({ mobile, input }) => {
+    vi.stubGlobal(
+      'matchMedia',
+      vi.fn(() => ({ matches: mobile })),
+    );
+    vi.spyOn(HTMLTextAreaElement.prototype, 'clientWidth', 'get').mockReturnValue(640);
+    const observe = vi.spyOn(ResizeObserver.prototype, 'observe');
+    syncDraftToStorage('mirror-restored', input);
+    const visit = (threadId: string) =>
+      act(() => root.render(<ChatInput key={threadId} threadId={threadId} presentation="v2" onSend={vi.fn()} />));
+    visit('mirror-restored');
+    visit('mirror-other');
+    visit('mirror-restored');
+
+    const textarea = container.querySelector('textarea')!;
+    const mirror = container.querySelector<HTMLElement>('[data-testid="composer-link-mirror"]')!;
+    expect(textarea.value).toBe(input);
+    expect(mirror.style.height).toBe(`${textarea.clientHeight}px`);
+    expect(mirror.style.width).toBe(`${textarea.clientWidth}px`);
+    expect(observe).toHaveBeenCalledWith(textarea);
+    expect(mirror.textContent).toBe(input.endsWith('\n') ? `${input}\u200b` : input);
+    const hasLink = input.includes('https://');
+    expect(mirror.dataset.active).toBe(String(hasLink));
+    expect(mirror.querySelector('mark') !== null).toBe(hasLink);
+
+    act(() => {
+      textarea.scrollTop = 75;
+      textarea.dispatchEvent(new Event('scroll'));
+    });
+    expect(mirror.scrollTop).toBe(75);
+    if (hasLink) {
+      act(() => textarea.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true })));
+      expect(mirror.dataset.active).toBe('false');
+      act(() => textarea.dispatchEvent(new CompositionEvent('compositionend', { bubbles: true })));
+      expect(mirror.dataset.active).toBe('true');
+    }
   });
 });

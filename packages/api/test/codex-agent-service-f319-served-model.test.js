@@ -227,17 +227,17 @@ describe('F319 served model provenance', () => {
 
   test('official API with its selected key retains served-model observation', async () => {
     await withEnv(OBSERVATION_DEFAULT, async () => {
-      // Explicit API mode now uses an env_key provider. It still reaches OpenAI's
-      // official API, so observation must retain the actual response model.
+      // F320 KD-3: explicit API mode at the official endpoint uses the builtin provider with an
+      // in-memory key, so observation must retain the actual response model.
       const { args, env, events } = await runInvocation({
         model: 'gpt-5.4',
         stderrLines: [SSE_CREATED('gpt-5.3-codex', 'resp_label')],
         invokeOptions: { callbackEnv: { OPENAI_API_KEY: 'sk-test', CODEX_AUTH_MODE: 'api_key' } },
       });
       assert.ok(!args.includes('model_provider="openai_https"'), 'observation must not force the HTTPS transport');
-      assert.ok(args.includes('model_provider="custom"'));
-      assert.ok(args.includes('model_providers.custom.env_key="OPENAI_API_KEY"'));
-      assert.ok(args.includes('model_providers.custom.base_url="https://api.openai.com/v1"'));
+      assert.ok(args.includes('model_provider="openai"'));
+      assert.ok(args.includes('cli_auth_credentials_store="ephemeral"'));
+      assert.equal(env.CODEX_API_KEY, 'sk-test');
       assert.match(env.RUST_LOG ?? '', /codex_api::sse::responses=trace/);
       assert.match(env.RUST_LOG ?? '', /tungstenite::protocol=trace/);
       const done = events.find((e) => e.type === 'done');
@@ -247,14 +247,15 @@ describe('F319 served model provenance', () => {
     });
   });
 
-  test('off + official API: only tracing changes, selected env_key provider remains', async () => {
+  test('off + official API: only tracing changes, selected key provider remains', async () => {
     await withEnv({ ...OBSERVATION_DEFAULT, CAT_CAFE_CODEX_SERVED_MODEL_OBSERVATION: 'off' }, async () => {
       const { args, env } = await runInvocation({
         invokeOptions: { callbackEnv: { OPENAI_API_KEY: 'sk-test', CODEX_AUTH_MODE: 'api_key' } },
       });
       assert.ok(!args.includes('model_provider="openai_https"'), 'off must not force HTTPS on api_key sessions');
-      assert.ok(!args.includes('model_provider="openai"'), 'the OAuth-only builtin pin stays OAuth-only');
-      assert.ok(args.includes('model_provider="custom"'));
+      // The provider follows the OAuth transport (F320 KD-3), never the observation switch.
+      assert.ok(args.includes('model_provider="openai"'));
+      assert.equal(env.CODEX_API_KEY, 'sk-test');
       assert.equal(env.RUST_LOG, undefined);
     });
   });

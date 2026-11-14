@@ -169,9 +169,7 @@ it('shows the reported ACP route on the inherited model choice without changing 
     expect(host.querySelector('[role=option]')?.textContent).toContain('Custom Gateway / Model');
     expect(host.querySelector('[role=option]')?.textContent).toContain('客户端回报');
     expect(host.textContent).toContain('客户端回报');
-    const inspect = [...host.querySelectorAll('button')].find((button) => button.textContent === '读取 Desktop 配置');
-    await act(async () => inspect?.click());
-    expect(host.textContent).toContain('未找到受支持的 DSH Desktop 安装');
+    expect(host.textContent).not.toContain('读取 Desktop 配置');
     const summary = host.querySelector('[data-testid=member-model-summary]');
     expect(summary?.textContent).toContain('Custom Gateway / Model');
     expect(summary?.textContent).toContain('客户端回报');

@@ -3,6 +3,7 @@
 import {
   type CliDiagnostics,
   mergeCodexStartupRecovery,
+  preserveInteractiveBlockStates,
   type ReplyPreview,
   timelineMessageKind,
 } from '@cat-cafe/shared';
@@ -29,6 +30,7 @@ import {
   isBeforeHistoryPageCursor,
 } from '@/stores/message-timeline';
 import { withQueuedInputPreviews } from '@/stores/queued-input-preview';
+import { withSendAttempts } from '@/stores/send-attempt-projection';
 import { ownsStreamedBody, withStreamedBodyOf } from '@/stores/streamed-body';
 import type { TaskItem } from '@/stores/taskStore';
 import { useTaskStore } from '@/stores/taskStore';
@@ -56,6 +58,7 @@ import {
   type SavedScrollState,
   saveChatScrollState,
 } from '@/utils/chat-scroll-memory';
+import { type ChatUserScrollGesture, registerChatScrollOwner } from '@/utils/chat-scroll-owner';
 import {
   findCrossPostTargetMessageId,
   peekPendingCrossPostScroll,
@@ -104,6 +107,7 @@ import {
 } from '@/utils/teleport';
 import { hydrateQueueActiveInvocationSlots, type QueueActiveInvocationSlot } from './queue-active-invocation-hydration';
 import { acknowledgeThreadHistoryWatermark, readThreadHistoryWatermark } from './thread-history-watermark';
+import { useSendAttempts } from './useSendAttempts';
 import { useViewportMessageTimeline } from './useViewportMessageTimeline';
 
 type RestoreFrameKind = 'restore' | 'navigation' | 'correction';
@@ -149,10 +153,7 @@ function bindReadingAbort<T>(receipt: Promise<T>, signal: AbortSignal | undefine
   return receipt.finally(() => signal.removeEventListener('abort', cancel));
 }
 
-export interface ChatUserScrollGesture {
-  scrollTo(top: number): boolean;
-  end(): void;
-}
+export type { ChatUserScrollGesture } from '@/utils/chat-scroll-owner';
 
 const taskCacheByThread = new Map<string, TaskItem[]>();
 // Sparse publication recovery must not move the ordinary older-page boundary.
@@ -423,7 +424,7 @@ function mergeRichPayload(
     seen.add(block.id);
     blocks.push(block);
   }
-  return { v: 1 as const, blocks };
+  return { v: 1 as const, blocks: preserveInteractiveBlockStates(blocks, fallback?.blocks ?? []) };
 }
 
 type RequiredMessageExtraFields = {
@@ -842,9 +843,16 @@ export function useChatHistory(threadId: string) {
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const sendAttempts = useSendAttempts(threadId, rawMessages, pendingQueue ?? []);
   const presentedMessages = useMemo(
-    () => withQueuedInputPreviews(rawMessages, pendingQueue, threadId),
-    [rawMessages, pendingQueue, threadId],
+    () =>
+      withSendAttempts(
+        withQueuedInputPreviews(rawMessages, pendingQueue, threadId),
+        sendAttempts,
+        threadId,
+        pendingQueue,
+      ),
+    [rawMessages, pendingQueue, threadId, sendAttempts],
   );
   const messages = useViewportMessageTimeline(threadId, presentedMessages);
 
@@ -1567,6 +1575,7 @@ export function useChatHistory(threadId: string) {
           .map(
             (m: {
               id: string;
+              clientMessageId?: string;
               type: string;
               from?: import('@cat-cafe/shared').MessageFrom;
               catId?: string;
@@ -1623,6 +1632,7 @@ export function useChatHistory(threadId: string) {
                           ? 'assistant'
                           : 'user')) as 'user' | 'assistant' | 'system' | 'summary' | 'connector',
                 ...(m.from ? { from: m.from } : {}),
+                ...(m.clientMessageId ? { clientMessageId: m.clientMessageId } : {}),
                 catId: m.catId,
                 content: (() => {
                   if (!m.extra?.semanticEvent) return m.content;
@@ -1835,6 +1845,7 @@ export function useChatHistory(threadId: string) {
         // wait immediately without cancelling that shared fetch or its hydration.
         void fetchHistory(undefined, {
           replace: true,
+          afterCurrentGet: true,
           retryTimeoutWhile: () =>
             readingRefreshRef.current === operation &&
             generation === restoreGenerationRef.current &&
@@ -3019,6 +3030,11 @@ export function useChatHistory(threadId: string) {
       },
     };
   }, [threadId, markScrollIntent, cancelPendingRestore, clearUserScrollIntent]);
+
+  useLayoutEffect(() => {
+    const viewport = scrollContainerRef.current;
+    return viewport ? registerChatScrollOwner(viewport, beginUserScroll) : undefined;
+  }, [beginUserScroll]);
 
   return {
     captureReadingPosition,

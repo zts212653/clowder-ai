@@ -1,5 +1,6 @@
 import type { ApprovalHubItem, RichCardBlock, UnifiedAttentionItemV1 } from '@cat-cafe/shared';
 import { matchHostedApproval } from '@/components/shell/mailbox/approval-match';
+import { mailboxSourcesReadable } from '@/components/shell/mailbox/source-read-eligibility';
 import { parseUnifiedAttentionRead } from '@/components/shell/parse-unified-attention';
 import { readFreshApprovalResultOwner } from '@/lib/approval-result-owner';
 import { useApprovalHubStore } from '@/stores/approvalHubStore';
@@ -75,8 +76,7 @@ export async function readDomainApprovalSource(
       if (
         !read ||
         read.identity.ownerUserId !== identity.userId ||
-        read.status !== 'available' ||
-        read.consistency.state !== 'verified' ||
+        !mailboxSourcesReadable(read, 'approvals') ||
         read.page.offset !== offset ||
         read.page.limit !== 20 ||
         read.personalView

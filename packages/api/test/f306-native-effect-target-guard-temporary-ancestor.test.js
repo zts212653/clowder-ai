@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { decideNativeHookPayload } from '../../../scripts/native-effect-target-guard.mjs';
@@ -12,8 +13,8 @@ test(
     skip: process.platform === 'win32' ? 'POSIX temporary-worktree policy' : false,
   },
   () => {
-    const base = realpathSync(mkdtempSync('/tmp/f306-ancestor-'));
-    const sibling = realpathSync(mkdtempSync('/tmp/f306-sibling-'));
+    const base = realpathSync(mkdtempSync(join(tmpdir(), 'f306-ancestor-')));
+    const sibling = realpathSync(mkdtempSync(join(tmpdir(), 'f306-sibling-')));
     const alias = `${sibling}-alias`;
     const childAlias = `${sibling}-child`;
     try {

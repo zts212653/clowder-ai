@@ -1,27 +1,10 @@
+import { tasteSourceStore } from '../helpers/taste-source-fixture.js';
 import '../helpers/setup-cat-registry.js';
 import assert from 'node:assert/strict';
 import { afterEach, beforeEach, describe, it } from 'node:test';
 import Fastify from 'fastify';
 import { canonicalTestMessageInput } from '../helpers/message-from-fixtures.js';
-import { proposedTaskAction } from './helpers.js';
-
-function createSucceedingIngress() {
-  return {
-    async publish(draft, store) {
-      const envelope = {
-        canonicalProposalId: draft.canonicalProposalId,
-        sourceFeatureId: draft.producerId,
-        ownerUserId: draft.ownerUserId,
-        requesterCatId: draft.requesterCatId,
-        originRef: draft.originRef,
-        approvalCardRef: { threadId: draft.cardThreadId, messageId: 'msg-card-ok' },
-        createdAt: draft.createdAt,
-      };
-      await store.commitEnvelope(draft.canonicalProposalId, envelope);
-      return envelope;
-    },
-  };
-}
+import { createTestApprovalIngress, proposedTaskAction } from './helpers.js';
 
 describe('staged recovery origin preservation', () => {
   let ApprovalCardCommittedError;
@@ -62,12 +45,13 @@ describe('staged recovery origin preservation', () => {
 
   function buildCapturingIngress(drafts) {
     return {
+      ...createTestApprovalIngress(),
       async publish(draft, store) {
         drafts.push(draft);
         if (drafts.length === 1) {
           throw new ApprovalCardCommittedError(new Error('commit unavailable'), 'msg-card-original');
         }
-        return createSucceedingIngress().publish(draft, store);
+        return createTestApprovalIngress().publish(draft, store);
       },
     };
   }
@@ -242,12 +226,12 @@ describe('staged recovery origin preservation', () => {
     assert.deepEqual(drafts[1].originRef, drafts[0].originRef);
   });
 
-  it('F221 keeps the original event origin when sourceMessageId was omitted', async () => {
+  it('F221 keeps the original message origin when sourceMessageId was omitted', async () => {
     const store = new InMemoryTasteProposalStore();
     const drafts = [];
     let currentAuth = {
       invocationId: 'inv-taste-original',
-      originTriggerMessageId: undefined,
+      originTriggerMessageId: 'msg-origin-a',
       a2aTriggerMessageId: undefined,
     };
     const app = Fastify();
@@ -270,6 +254,7 @@ describe('staged recovery origin preservation', () => {
     await app.register(callbackProposeTasteRoutes, {
       registry: { isLatest: async () => true },
       tasteProposalStore: store,
+      messageStore: tasteSourceStore({ ids: ['msg-origin-a', 'msg-origin-b'], threadId: 'thread-original' }),
       socketManager: { emitToUser() {} },
       approvalIngress: buildCapturingIngress(drafts),
     });
@@ -304,9 +289,8 @@ describe('staged recovery origin preservation', () => {
     assert.equal(retry.statusCode, 200);
     assert.equal(store.listPending('user-1')[0]?.takeaway, '我们以为 You 喜欢可追溯的来源。');
     assert.deepEqual(drafts[0].originRef, {
-      kind: 'event',
-      anchor: 'invocation:inv-taste-original',
-      summary: 'Taste proposal from opus',
+      kind: 'message',
+      messageId: 'msg-origin-a',
       threadId: 'thread-original',
     });
     assert.deepEqual(drafts[1].originRef, drafts[0].originRef);

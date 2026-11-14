@@ -13,12 +13,21 @@ export function ArtworkOpeningPreview({ work, children }: { work: FloatingArtwor
   return work.ownerContentOnly ? children : <MediaOpeningPreview work={work}>{children}</MediaOpeningPreview>;
 }
 
+function readPreviewFallback(root: HTMLElement): { message: string; hasRetry: boolean } | null {
+  const node = root.querySelector<HTMLElement>('[data-content-opening-state="preview-fallback"]');
+  if (!node) return null;
+  const message = node.querySelector('[role="alert"]')?.textContent?.trim() ?? node.textContent?.trim() ?? '';
+  return { message, hasRetry: Boolean(node.querySelector('button')) };
+}
+
 function MediaOpeningPreview({ work, children }: { work: FloatingArtwork; children?: ReactNode }) {
   const owner = useRef<HTMLDivElement>(null);
   const preview = useRef<HTMLDivElement>(null);
   const [phase, setPhase] = useState<'version' | 'media' | 'ready' | 'unavailable'>('version');
+  const [fallback, setFallback] = useState<{ message: string; hasRetry: boolean } | null>(null);
+  const [previewFailedUrl, setPreviewFailedUrl] = useState<string | null>(null);
   const t = useShellCopy(artworkActionsCopy);
-  const showOwner = phase === 'ready' || phase === 'unavailable';
+  const showOwner = phase === 'ready' || phase === 'unavailable' || (!!fallback && previewFailedUrl === work.url);
   useLayoutEffect(() => {
     const root = owner.current;
     if (!root || showOwner) return;
@@ -36,9 +45,24 @@ function MediaOpeningPreview({ work, children }: { work: FloatingArtwork; childr
       // Only the owner declares that opening is blocked. An alert can be an
       // ancillary draft/storage warning while its media is still decoding.
       if (root.querySelector('[data-content-opening-state="blocked"]')) {
+        setFallback(null);
         setPhase('unavailable');
         return;
       }
+      const nextFallback = readPreviewFallback(root);
+      if (nextFallback) {
+        stop?.();
+        media = null;
+        src = '';
+        setFallback((current) =>
+          current?.message === nextFallback.message && current.hasRetry === nextFallback.hasRetry
+            ? current
+            : nextFallback,
+        );
+        setPhase('version');
+        return;
+      }
+      setFallback((current) => (current ? null : current));
       const node = root.querySelector<HTMLImageElement | HTMLVideoElement>(
         '[data-testid="workspace-content-review-media"], [data-testid="workspace-file-viewer"] video, [data-testid="workspace-file-viewer"] img',
       );
@@ -77,6 +101,7 @@ function MediaOpeningPreview({ work, children }: { work: FloatingArtwork; childr
     mutation.observe(root, {
       subtree: true,
       childList: true,
+      characterData: true,
       attributes: true,
       attributeFilter: ['src', 'data-content-opening-state', 'data-testid'],
     });
@@ -103,8 +128,20 @@ function MediaOpeningPreview({ work, children }: { work: FloatingArtwork; childr
             title={work.alt}
             video={work.mediaType === 'video'}
             gallery={work.gallery}
+            onError={() => setPreviewFailedUrl(work.url)}
           />
-          {loading ? (
+          {fallback ? (
+            <ArtworkPreviewFallbackBanner
+              fallback={fallback}
+              prefix={t.previewOnlyPrefix}
+              retryLabel={t.retry}
+              onRetry={() =>
+                owner.current
+                  ?.querySelector<HTMLButtonElement>('[data-content-opening-state="preview-fallback"] button')
+                  ?.click()
+              }
+            />
+          ) : loading ? (
             <p role="status" className="shrink-0 px-3 py-1 text-xs text-cafe-muted">
               {work.pending ? t.checkingPreview : phase === 'media' ? t.loadingOriginal : t.loadingVersion}
             </p>
@@ -112,5 +149,38 @@ function MediaOpeningPreview({ work, children }: { work: FloatingArtwork; childr
         </div>
       ) : null}
     </div>
+  );
+}
+
+function ArtworkPreviewFallbackBanner({
+  fallback,
+  prefix,
+  retryLabel,
+  onRetry,
+}: {
+  fallback: { message: string; hasRetry: boolean };
+  prefix: string;
+  retryLabel: string;
+  onRetry: () => void;
+}) {
+  return (
+    <output
+      data-testid="artwork-preview-fallback"
+      className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-t border-cafe-subtle bg-[var(--semantic-warning-surface)] px-3 py-2 text-xs text-cafe"
+    >
+      <span className="min-w-0 flex-1">
+        <span className="font-medium">{prefix}</span>
+        <span>{fallback.message}</span>
+      </span>
+      {fallback.hasRetry ? (
+        <button
+          type="button"
+          className="shrink-0 rounded border border-cafe bg-cafe-surface px-2.5 py-1 text-xs font-medium text-cafe hover:bg-cafe-surface-elevated"
+          onClick={onRetry}
+        >
+          {retryLabel}
+        </button>
+      ) : null}
+    </output>
   );
 }

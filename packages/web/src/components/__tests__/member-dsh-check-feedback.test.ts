@@ -54,3 +54,15 @@ it('keeps a connected model separate from unavailable optional plugin tools', ()
   expect(stale).not.toContain('fixture');
   expect(stale).not.toContain('插件工具暂不可用');
 });
+
+it('reports an unavailable runtime without misdiagnosing its tool definitions', () => {
+  const message = dshConnectionCheckMessage({
+    state: 'unchecked',
+    toolIssues: [
+      { pluginId: 'fixture', capabilityId: 'plugin:fixture:broken', reasonCode: 'plugin_activation_unavailable' },
+    ],
+  });
+  expect(message).toContain('插件运行不可用');
+  expect(message).not.toContain('工具定义无效');
+  expect(message).toContain('可以直接聊天');
+});

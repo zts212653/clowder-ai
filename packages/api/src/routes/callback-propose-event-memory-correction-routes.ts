@@ -1,3 +1,4 @@
+import { isDeepStrictEqual } from 'node:util';
 import {
   type ApprovalOriginRef,
   type EventMemoryCorrectionProposal,
@@ -17,6 +18,7 @@ import type { EventMemoryCorrectionProposalStore } from '../domains/memory/event
 import { registerCallbackAuthHook, requireCallbackAuth } from './callback-auth-prehandler.js';
 import type { EventMemorySourceReaders } from './event-memory-source.js';
 import { readEventMemorySource } from './event-memory-source.js';
+import { readMemoryProposalRetryOrigin } from './memory-proposal-retry-origin.js';
 import { publishEventMemoryCorrectionProposal } from './wave2-proposal-publication.js';
 
 export interface ProposeEventMemoryCorrectionDeps {
@@ -41,7 +43,7 @@ export const callbackProposeEventMemoryCorrectionRoutes: FastifyPluginAsync<Prop
       return reply.status(400).send({ error: 'Invalid request body', details: parsed.error.issues });
     }
     const input = parsed.data;
-    const deduped = await recoverDeduplicated(actor, input.clientRequestId, opts, reply);
+    const deduped = await recoverDeduplicated(actor, input, opts, reply);
     if (deduped) return deduped;
     if (!(await opts.registry.isLatest(actor.invocationId))) return { status: 'stale_ignored' };
 
@@ -51,7 +53,7 @@ export const callbackProposeEventMemoryCorrectionRoutes: FastifyPluginAsync<Prop
     const proposalId = generateProposalId();
     const winner = await opts.proposalStore.reserveDedup(actor.userId, input.clientRequestId, proposalId);
     if (winner !== proposalId) {
-      return recoverReservationWinner(winner, actor, opts, reply);
+      return recoverReservationWinner(winner, actor, input, opts, reply);
     }
     return createAndPublishProposal(proposalId, actor, input, event, opts);
   });
@@ -61,14 +63,14 @@ type CallbackActor = NonNullable<ReturnType<typeof requireCallbackAuth>>;
 
 async function recoverDeduplicated(
   actor: CallbackActor,
-  clientRequestId: string,
+  input: EventMemoryCorrectionProposalInput,
   opts: ProposeEventMemoryCorrectionDeps,
   reply: FastifyReply,
 ) {
-  const existingId = await opts.proposalStore.getDedupProposalId(actor.userId, clientRequestId);
+  const existingId = await opts.proposalStore.getDedupProposalId(actor.userId, input.clientRequestId);
   if (!existingId) return null;
   const existing = await opts.proposalStore.get(existingId);
-  return existing ? recoverExisting(existing, actor, opts, reply) : null;
+  return existing ? recoverExisting(existing, actor, input, opts, reply) : null;
 }
 
 async function resolveProposalTarget(
@@ -96,11 +98,12 @@ async function resolveProposalTarget(
 async function recoverReservationWinner(
   proposalId: string,
   actor: CallbackActor,
+  input: EventMemoryCorrectionProposalInput,
   opts: ProposeEventMemoryCorrectionDeps,
   reply: FastifyReply,
 ) {
   const existing = await opts.proposalStore.get(proposalId);
-  if (existing) return recoverExisting(existing, actor, opts, reply);
+  if (existing) return recoverExisting(existing, actor, input, opts, reply);
   reply.header('retry-after', '1');
   return reply.status(503).send({ error: 'Proposal reservation in-flight', status: 'retryable' });
 }
@@ -139,14 +142,32 @@ async function createAndPublishProposal(
 async function recoverExisting(
   proposal: EventMemoryCorrectionProposal,
   actor: { userId: string; threadId: string; invocationId: string; catId: string },
+  input: EventMemoryCorrectionProposalInput,
   opts: ProposeEventMemoryCorrectionDeps,
   reply: FastifyReply,
 ) {
   if (proposal.ownerUserId !== actor.userId) return reply.status(404).send({ error: 'Proposal not found' });
+  if (proposal.publication?.state === 'staged' && proposal.sourceThreadId !== actor.threadId) {
+    return reply.status(409).send({
+      error: 'Staged proposal recovery must run in its original thread',
+      status: 'origin_thread_required',
+      sourceThreadId: proposal.sourceThreadId,
+    });
+  }
+  if (
+    proposal.sourceCatId !== actor.catId ||
+    proposal.sourceThreadId !== actor.threadId ||
+    proposal.eventId !== input.eventId ||
+    proposal.expectedRevision !== input.expectedRevision ||
+    proposal.reason !== input.reason ||
+    !isDeepStrictEqual(proposal.suggestedPatch, input.suggestedPatch)
+  ) {
+    return reply.status(409).send({ error: 'client_request_conflict' });
+  }
+  if (!(await readMemoryProposalRetryOrigin(opts.approvalIngress, 'F321', proposal))) {
+    return reply.status(409).send({ error: 'origin_not_eligible' });
+  }
   if (proposal.publication?.state === 'staged') {
-    if (proposal.sourceThreadId !== actor.threadId) {
-      return reply.status(409).send({ error: 'Staged recovery requires its original thread' });
-    }
     await publishEventMemoryCorrectionProposal(
       opts.approvalIngress,
       opts.proposalStore,

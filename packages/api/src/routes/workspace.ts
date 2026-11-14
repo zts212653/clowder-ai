@@ -32,7 +32,7 @@ import {
   type SkillConsumptionVerificationFailure,
   WORKSPACE_NAVIGATOR_CONSUMER_ID,
 } from '../domains/cats/services/tool-usage/SkillConsumptionReceiptService.js';
-import { probeGitRepository } from '../domains/workspace/git-worktree-probe.js';
+import { probeGitWorkTree } from '../domains/workspace/git-worktree-probe.js';
 import type { PullRequestChangesDependencies } from '../domains/workspace/pull-request-changes.js';
 import { canonicalLinkedRootId, readLinkedRootState } from '../domains/workspace/roots/workspace-linked-root-store.js';
 import { readWorkspaceFileMetadata } from '../domains/workspace/workspace-file-metadata.js';
@@ -341,7 +341,7 @@ export const workspaceRoutes: FastifyPluginAsync<WorkspaceRouteOpts> = async (ap
         };
       }),
     );
-    registerWorktrees(all);
+    registerWorktrees(entries);
     return { worktrees: all };
   });
 
@@ -556,11 +556,28 @@ export const workspaceRoutes: FastifyPluginAsync<WorkspaceRouteOpts> = async (ap
     }
 
     try {
-      const root = await getWorktreeRoot(worktreeId);
-      const probe = await probeGitRepository(root);
+      let root: string;
+      try {
+        root = await getWorktreeRoot(worktreeId);
+      } catch (error) {
+        const code =
+          typeof error === 'object' && error !== null && 'code' in error
+            ? String((error as { code?: unknown }).code)
+            : '';
+        if (code === 'ENOENT' || code === '128') {
+          reply.status(503);
+          return { error: 'Git is unavailable', code: 'git_unavailable' };
+        }
+        throw error;
+      }
+      const probe = await probeGitWorkTree(root);
       if (probe === 'unavailable') {
         reply.status(503);
         return { error: 'Git is unavailable', code: 'git_unavailable' };
+      }
+      if (probe === 'bare') {
+        reply.status(409);
+        return { error: 'Git worktree required', code: 'git_worktree_required' };
       }
       if (probe === 'not-git') {
         return { worktreeId, isGitRepository: false, changedFiles: [], diff: '' };

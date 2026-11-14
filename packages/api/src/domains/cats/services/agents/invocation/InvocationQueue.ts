@@ -100,6 +100,7 @@ export interface QueueEnqueueInput {
   ownerAuthProvenance: OwnerAuthProvenance;
   executionScope?: QueueLedgerEntry['execution']['executionScope'];
   idempotencyKey?: string;
+  clientMessageId?: string;
   content: string;
   messageId?: string | null;
   from: MessageFrom;
@@ -505,6 +506,7 @@ export class InvocationQueue {
           };
     return createQueueLedgerAdmission({
       sourceId,
+      ...(input.clientMessageId ? { clientMessageId: input.clientMessageId } : {}),
       threadId: input.threadId,
       owner: queueOwner(input),
       kind: input.kind,
@@ -989,7 +991,12 @@ export class InvocationQueue {
         const admissionInput =
           committed || replaySource ? input : this.resolveAdmissionInput({ ...input, exactTargets: true }, targetKinds);
         return this.createLedgerRows(
-          replay ? { ...admissionInput, intent: replay.execution.intent } : admissionInput,
+          {
+            ...(replay ? { ...admissionInput, intent: replay.execution.intent } : admissionInput),
+            ...(message.from.kind === 'user' && message.idempotencyKey
+              ? { clientMessageId: message.idempotencyKey }
+              : {}),
+          },
           messageId,
           enqueuedAt,
           messageId,

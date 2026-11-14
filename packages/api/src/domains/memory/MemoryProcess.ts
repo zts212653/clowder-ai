@@ -18,6 +18,7 @@ import {
 import { MemoryReadExecution, type MemoryReadSnapshot } from './memory-read-execution.js';
 import { ReadStopError } from './read-stop-diagnostics.js';
 import type { VectorRepackResult } from './repack-passage-vectors.js';
+import type { TastePullRecallRow } from './taste/taste-pull-recall-rows.js';
 
 function decodeError(error: ProcessError): Error {
   const details = error.details;
@@ -56,7 +57,8 @@ class MemoryProcess {
     if (this.pending >= 64) return Promise.reject(new Error('Memory process queue is full'));
     this.pending++;
     const execution = job.kind === 'message-search' ? new MemoryReadExecution(job.kind) : undefined;
-    const ownsNativeWrite = job.kind === 'checkpoint' || job.kind === 'vector-repack';
+    const ownsNativeWrite =
+      job.kind === 'checkpoint' || job.kind === 'vector-repack' || job.kind === 'vector-generation-reconcile';
     return new Promise<T>((resolve, reject) => {
       const controller = new AbortController();
       let settled = false;
@@ -277,4 +279,25 @@ export function runMemoryVectorRepack(
 }
 export function runMemoryScan<T>(job: Extract<MemoryProcessJob, { kind: 'scan' }>): Promise<T> {
   return scans.run<T>(job);
+}
+
+/** Observatory scans share the existing scan child, without occupying foreground readers or the vector writer. */
+export function runMemoryTasteRecallRead(dbPath: string): Promise<readonly TastePullRecallRow[]> {
+  return scans.run({ kind: 'taste-recall-read', dbPath }, { deadlineAt: Date.now() + 5_000 });
+}
+
+/** Maintenance reads share the existing serial child, keeping both foreground read slots available. */
+export function runMemoryVectorGenerationRead<T>(
+  job: Extract<MemoryProcessJob, { kind: 'vector-generation-read' }>,
+  options: { signal?: AbortSignal; deadlineAt: number },
+): Promise<T> {
+  return projections.run<T>(job, options);
+}
+
+export function runMemoryVectorGenerationReconcile(
+  dbPath: string,
+  generationId: import('./vector-generation-tables.js').VectorGenerationId,
+  options: { signal?: AbortSignal; deadlineAt: number },
+): Promise<void> {
+  return projections.run<void>({ kind: 'vector-generation-reconcile', dbPath, generationId }, options);
 }

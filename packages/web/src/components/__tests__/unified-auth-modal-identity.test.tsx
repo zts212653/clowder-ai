@@ -46,7 +46,7 @@ it.each([
     client: 'google',
     label: 'Google API',
     placeholder: 'AIza...',
-    endpoint: 'https://generativelanguage.googleapis.com',
+    endpoint: 'https://aiplatform.googleapis.com',
   },
 ])('$label saves a named key without models/endpoint or any login/binding request', async ({
   client,
@@ -81,7 +81,7 @@ it.each([
 
 it.each([
   { client: 'openai' as const, endpoint: 'https://api.openai.com/v1' },
-  { client: 'google' as const, endpoint: 'https://generativelanguage.googleapis.com' },
+  { client: 'google' as const, endpoint: 'https://aiplatform.googleapis.com' },
   { client: 'anthropic' as const, endpoint: 'https://api.anthropic.com' },
 ])('editing a model-free $client account preserves the key and can clear an endpoint override', async ({
   client,

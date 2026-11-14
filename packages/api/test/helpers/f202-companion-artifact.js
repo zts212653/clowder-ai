@@ -2,6 +2,7 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { BundledPluginRuntimeCarrier } from '../../dist/domains/plugin/builtin-runtime/carriers/bundled-runtime-carrier.js';
 import { ModulePluginRuntime } from '../../dist/domains/plugin/builtin-runtime/carriers/module-plugin-runtime.js';
@@ -29,7 +30,7 @@ export async function companionHarness(t) {
     SHA256,
   );
   // A short socket path on macOS, never the running Host's data directory.
-  const root = await mkdtemp('/tmp/f202-h3c3-');
+  const root = await mkdtemp(join(process.platform === 'darwin' ? '/tmp' : tmpdir(), 'f202-h3c3-'));
   const packagesRoot = join(root, 'packages');
   const dataDirectoryParent = join(root, 'plugin-host');
   const dataDirectory = join(dataDirectoryParent, 'personal-chrome-host');

@@ -93,9 +93,12 @@ test(
       await page.getByRole('textbox', { name: '账号名称', exact: true }).fill('共用 Google');
       await page.getByLabel('API Key', { exact: true }).fill('FAKE_GOOGLE_KEY');
       await page
-        .getByText('留空使用 https://generativelanguage.googleapis.com。此账号可供多个 Google API 能力共用。', {
-          exact: true,
-        })
+        .getByText(
+          '留空使用 Vertex AI（https://aiplatform.googleapis.com，按 Google Cloud 结算账号计费）。请填 Vertex 可用的 key，AI Studio 的 key 不能用。',
+          {
+            exact: true,
+          },
+        )
         .waitFor();
       assert.equal(await page.getByRole('button', { name: '保存', exact: true }).isEnabled(), true);
       await screenshot('google-platform-create-desktop.png');

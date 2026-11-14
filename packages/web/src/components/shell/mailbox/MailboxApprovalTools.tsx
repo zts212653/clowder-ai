@@ -107,7 +107,11 @@ export function MailboxApprovalTools({
     store.clearSelection();
     // Start each original single-item action in this synchronous turn, before any response can invalidate the read.
     const writes = ready.map(({ item }) =>
-      kind === 'approve' ? store.approveProposal(item.proposalId) : store.rejectProposal(item.proposalId),
+      kind === 'approve'
+        ? item.sourceFeatureId === 'F221' && typeof item.detail.decisionDigest === 'string'
+          ? store.approveProposal(item.proposalId, item.detail.decisionDigest)
+          : store.approveProposal(item.proposalId)
+        : store.rejectProposal(item.proposalId),
     );
     onBack();
     void Promise.allSettled(writes);

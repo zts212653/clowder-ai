@@ -29,19 +29,22 @@ const FLAGS = new Set(['-T', '-t', '-n', '-q', '-v', '-vv', '-vvv', '-4', '-C'])
 
 // Detection must precede the narrow remote proof: an unmodelled SSH carrier is
 // not a non-SSH command. Reuse execution roles, never search quoted data for ssh.
-function containsSshExecution(raw, cwd, depth = 0) {
+function containsSshExecution(raw, cwd, depth = 0, builtinContext = true) {
   if (depth > 8) return false;
-  const graph = executedInvocations(raw, { cwd });
+  const graph = executedInvocations(raw, { cwd, builtinContext });
   const calls = graph.pipelines.flat();
   if (calls.some((call) => call.wrappers?.some((wrapper) => commandName(wrapper.program) === 'ssh'))) return true;
-  for (const source of [raw, ...graph.unresolvedEvidence])
+  for (const source of graph.unresolvedEvidence)
     for (const line of splitCommandLines(source, { groups: true }))
       for (const stage of splitPipelineStages(line)) {
         const tokens = shellInvocation(stage).words.map((word) => word.value);
         const program = programTokens(tokens, cwd);
         if (program.wrappers.some((wrapper) => commandName(wrapper.program) === 'ssh')) return true;
       }
-  return shellSubstitutions(raw, SUBSTITUTION).inner.some((source) => containsSshExecution(source, cwd, depth + 1));
+  return (
+    !graph.complete &&
+    shellSubstitutions(raw, SUBSTITUTION).inner.some((source) => containsSshExecution(source, cwd, depth + 1, false))
+  );
 }
 
 function systemSsh(program, cwd) {

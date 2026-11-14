@@ -1,16 +1,17 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 
 export const PROTECTED_REDIS_TEST_PORTS = new Set([6397, 6398, 6399, 6401]);
 export const PROTECTED_REDIS_DEV_PORTS = new Set([6099, 6397, 6398, 6399, 6401]);
 
 export function redisTestRegistryDir(env = process.env) {
-  return env.CAT_CAFE_REDIS_TEST_REGISTRY_DIR || path.join(env.TMPDIR || '/tmp', 'cat-cafe-redis-tests');
+  return env.CAT_CAFE_REDIS_TEST_REGISTRY_DIR || path.join(tmpdir(), 'cat-cafe-redis-tests');
 }
 
 export function redisDevRegistryDir(env = process.env) {
-  return env.CAT_CAFE_REDIS_DEV_REGISTRY_DIR || path.join(env.TMPDIR || '/tmp', 'cat-cafe-redis-dev');
+  return env.CAT_CAFE_REDIS_DEV_REGISTRY_DIR || path.join(tmpdir(), 'cat-cafe-redis-dev');
 }
 
 export function readProcessIdentity(pid, { execFileSyncFn = execFileSync, killFn = process.kill.bind(process) } = {}) {

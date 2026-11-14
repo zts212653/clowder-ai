@@ -1654,7 +1654,9 @@ export function resolveServersForCat(
   /** Track cap.id → encoded name for collision detection. */
   const nameOrigin = new Map<string, string>();
 
-  for (const storedCapability of invocationPluginMcpConfig(config, catId).capabilities) {
+  for (const storedCapability of invocationPluginMcpConfig(config, catId, (cap) =>
+    isMcpEnabledForCat(cap, catId, options),
+  ).capabilities) {
     const enabledFromConfig = isMcpEnabledForCat(storedCapability, catId, options);
     const { capability: cap, available: localActivationAvailable } = projectInvocationPluginMcp(
       storedCapability,

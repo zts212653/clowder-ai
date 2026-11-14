@@ -41,6 +41,8 @@ export function isLocalProgramBinding(text, env = process.env) {
   const words = parsed.words;
   if (!parsed.complete || parsed.redirections.length || !words.length || !words.every((word) => word.literal))
     return false;
+  // Positional values are local data; setting them does not change program lookup.
+  if (words[0].value === 'set' && words[1]?.value === '--') return true;
   return words.every(({ value }) => {
     const name = value.match(/^([A-Za-z_]\w*)=/)?.[1];
     return Boolean(name && !Object.hasOwn(env, name) && !PROGRAM_ENVIRONMENT.test(name));

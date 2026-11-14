@@ -4,7 +4,7 @@ related_features: [F167, F153, F086, F188, F200, F245, F266, F267, F275, F299]
 topics: [harness-engineering, eval, socio-technical, observability, cat-user-feedback]
 doc_kind: spec
 created: 2026-05-07
-tips_exempt: Dual-trigger dispatch, F299 bounded transcript repair and handoff truth, and generic-permission sunset are harness-internal control-plane changes with no new user-visible capability
+tips_exempt: "2026-11-12 每日文档守护补记 #6770 publish-verdict worktree 稀疏检出优化；Dual-trigger dispatch、F299 bounded transcript repair、generic-permission sunset 与 publish-verdict 内部检出均为 harness 控制面实现，无新增终端用户操作入口。"
 user_journey_exempt: "Internal harness eval infrastructure — all surfaces are developer/cat-facing, no end-user journey"
 ---
 

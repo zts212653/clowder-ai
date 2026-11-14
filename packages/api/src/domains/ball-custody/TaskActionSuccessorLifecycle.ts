@@ -1,4 +1,4 @@
-import type { TaskItem, UpdateTaskInput } from '@cat-cafe/shared';
+import type { TaskItem, TaskRecoveryIncident, UpdateTaskInput } from '@cat-cafe/shared';
 import { recoveryGuarded } from '../../infrastructure/recovery/recovery-deadline.js';
 import { runDueBatch } from '../../infrastructure/recovery/run-due-batch.js';
 import type { ITaskStore } from '../cats/services/stores/ports/TaskStore.js';
@@ -9,7 +9,6 @@ import type {
 } from './ActionSuccessorCompletionService.js';
 import type { ActionSuccessorLeaseStore } from './ActionSuccessorLeaseStore.js';
 import { recordActionRecoveryBatchFailure, runActionDueRecovery } from './action-successor-due-recovery.js';
-import type { ActionRecoveryNotification } from './action-successor-recovery-state.js';
 import type { ActionSuccessorLease } from './action-successor-state-machine.js';
 
 export interface TaskActionRecoveryStats {
@@ -32,7 +31,6 @@ export class TaskActionSuccessorLifecycle {
   constructor(
     private readonly deps: {
       leaseStore: Pick<ActionSuccessorLeaseStore, 'getByIdentity' | 'listActiveTaskLeases' | 'recovery'>;
-      notifyRecovery?: ActionRecoveryNotification;
       now?: () => number;
       completionService: Pick<ActionSuccessorCompletionService, 'complete'>;
     },
@@ -89,7 +87,6 @@ export class TaskActionSuccessorLifecycle {
           lease,
           lane: 'task',
           now: (this.deps.now ?? Date.now)(),
-          notify: this.deps.notifyRecovery,
           recover: async (current) => {
             const taskId = current.subjectRef.slice('subject:task:'.length);
             const task = await taskStore.get(taskId);
@@ -132,8 +129,60 @@ export class TaskActionSuccessorLifecycle {
     return stats;
   }
 
+  async readRecoveryIncidents(task: TaskItem): Promise<TaskRecoveryIncident[]> {
+    const recovery = this.deps.leaseStore.recovery;
+    if (!recovery) return [];
+    const lanes = ['return', 'dispatch', 'task'] as const;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const lease = await this.getReadableLease(task);
+      if (!lease) return [];
+      const snapshots = await Promise.allSettled(lanes.map((lane) => recovery.read(lease.leaseId, lane)));
+      const changedOwner = snapshots.some(
+        (result) =>
+          result.status === 'fulfilled' &&
+          result.value !== null &&
+          (result.value.lease.leaseId !== lease.leaseId ||
+            result.value.lease.generation !== lease.generation ||
+            result.value.fact.generation !== lease.generation),
+      );
+      if (changedOwner) continue;
+      return snapshots.flatMap((result, index) => {
+        const lane = lanes[index];
+        if (lane === undefined) return [];
+        if (result.status === 'rejected')
+          return [
+            {
+              source: 'action_successor' as const,
+              lane,
+              disposition: 'needs_attention' as const,
+              reasonCode: 'action_recovery_lane_read_failed',
+              executionRef: `action-successor:${lease.leaseId}:g${lease.generation}:${lane}`,
+            },
+          ];
+        const fact = result.value?.fact;
+        return fact?.disposition && fact.reasonCode
+          ? [
+              {
+                source: 'action_successor' as const,
+                lane,
+                disposition: fact.disposition,
+                reasonCode: fact.reasonCode,
+                executionRef: `action-successor:${lease.leaseId}:g${lease.generation}:${lane}`,
+              },
+            ]
+          : [];
+      });
+    }
+    return [];
+  }
+
   private async getActiveLease(task: TaskItem): Promise<ActionSuccessorLease | null> {
     if (isOrdinaryImplementTask(task)) return null;
+    return this.getReadableLease(task);
+  }
+
+  /** Historical recovery evidence remains readable after an ordinary-task cutover, without restoring write authority. */
+  private async getReadableLease(task: TaskItem): Promise<ActionSuccessorLease | null> {
     if (!task.userId) return null;
     const lease = await this.deps.leaseStore.getByIdentity({
       tenantScope: task.userId,

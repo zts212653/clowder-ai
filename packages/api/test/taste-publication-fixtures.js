@@ -121,6 +121,8 @@ export function remoteHead(fixture) {
 export async function createStoredProposal(store) {
   const proposal = store.create({
     userId: 'user-1',
+    sourceMessageId: 'taste-publication-source',
+    approvalOriginRef: { kind: 'message', threadId: 'thread-1', messageId: 'taste-publication-source' },
     catId: 'codex-sol',
     threadId: 'thread-1',
     scene: 'operator approved a reusable editing judgment',
@@ -136,6 +138,7 @@ export async function createStoredProposal(store) {
     requesterCatId: proposal.catId,
     threadId: proposal.threadId,
     createdAt: proposal.createdAt,
+    originRef: proposal.approvalOriginRef,
   });
-  return proposal;
+  return store.get(proposal.id);
 }
