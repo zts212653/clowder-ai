@@ -38,13 +38,14 @@ export class LimbOutboundDeliveryHook {
 
   async deliver(threadId: string, content: string, catId?: CatId, triggerMessageId?: string): Promise<void> {
     if (!catId || content.length === 0) return;
+    const bindings = (await this.options.bindingStore.getByThread(threadId)).filter(
+      (binding) => binding.catId === catId,
+    );
+    if (bindings.length === 0) return;
     if (Array.from(content).length > MAX_SPEECH_CODE_POINTS) {
       throw new Error('physical-limb speech exceeds the 4096 code-point contract bound');
     }
 
-    const bindings = (await this.options.bindingStore.getByThread(threadId)).filter(
-      (binding) => binding.catId === catId,
-    );
     for (const binding of bindings) {
       if (!triggerMessageId) {
         await this.deliverToBinding(binding, threadId, content, catId);

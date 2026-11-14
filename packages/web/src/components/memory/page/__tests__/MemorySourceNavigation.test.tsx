@@ -74,7 +74,7 @@ it('opens the source profile detail through the actual memory route and its owne
 
 it('does not present a current replacement as the historical delivery when revisions differ', async () => {
   await open(`sha256:${'b'.repeat(64)}`);
-  expect(host.textContent).toContain('来源版本已变化');
+  expect(host.textContent).toContain('这条记忆在递来之后改过');
   expect(host.textContent).not.toContain(entry.content);
   expect(host.querySelector('aside[aria-label="画像详情"]')).toBeNull();
   expect(fetchMock.mock.calls.some(([path]) => path.startsWith('/api/memory/profile/'))).toBe(false);

@@ -1,4 +1,5 @@
 import type { FastifyReply, FastifyRequest } from 'fastify';
+import { readEmbeddingDeployment, resolveRetainedG0Endpoint } from '../domains/memory/embedding-generation-config.js';
 import { clearEnvironmentCache } from '../domains/services/environment-detector.js';
 import type { ServiceLifecycleRunner, ServiceLifecycleRunResult } from '../domains/services/service-lifecycle.js';
 import { isValidModelId } from '../domains/services/service-lifecycle.js';
@@ -64,6 +65,14 @@ export function buildLifecycleEnv(
   port?: unknown,
 ): { ok: true; env: NodeJS.ProcessEnv } | { ok: false; error: string } {
   const env: NodeJS.ProcessEnv = { ...baseEnv };
+  if (serviceId === 'embedding-model') {
+    try {
+      const retained = resolveRetainedG0Endpoint(readEmbeddingDeployment(), env);
+      if (retained) env.EMBED_G0_URL = retained;
+    } catch {
+      return { ok: false, error: 'Invalid retained G0 loopback endpoint' };
+    }
+  }
   if (serviceId === 'mlx-tts' && model == null && !env.TTS_MODEL?.trim()) {
     const service = getServiceManifest(serviceId);
     if (service) model = getDefaultServiceModel(service);

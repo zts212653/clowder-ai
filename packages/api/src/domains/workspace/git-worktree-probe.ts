@@ -74,10 +74,14 @@ async function hasBareGitRepositoryMarkers(cwd: string, mode: MarkerMode = 'disc
 
   // A partial bare layout is recognizable from its repository-local config.
   // Ask Git to parse it; ordinary HEAD/objects names alone prove nothing.
-  const config = await execGit(root, ['config', '--file', join(root, 'config'), '--type=bool', '--get', 'core.bare'], {
-    ...process.env,
-    LC_ALL: 'C',
-  });
+  const config = await execGit(
+    root,
+    ['config', '--includes', '--file', join(root, 'config'), '--type=bool', '--get', 'core.bare'],
+    {
+      ...process.env,
+      LC_ALL: 'C',
+    },
+  );
   return config.ok && config.stdout.trim() === 'true';
 }
 
@@ -128,6 +132,21 @@ export async function probeGitRepository(cwd: string): Promise<GitRepositoryProb
   )
     return 'not-git';
   return 'unavailable';
+}
+
+export type GitWorkTreeProbe = 'git' | 'bare' | 'not-git' | 'unavailable';
+
+/**
+ * Classify the registered root for user-visible Git reads: a normal worktree,
+ * a readable bare repository (log works, worktree-only reads need a tree), a
+ * confirmed non-Git directory, or a failed probe.
+ */
+export async function probeGitWorkTree(cwd: string): Promise<GitWorkTreeProbe> {
+  const repository = await probeGitRepository(cwd);
+  if (repository !== 'git') return repository;
+  const inside = await execGit(cwd, ['rev-parse', '--is-inside-work-tree'], { ...process.env, LC_ALL: 'C' });
+  if (!inside.ok) return 'unavailable';
+  return inside.stdout.trim() === 'true' ? 'git' : 'bare';
 }
 
 export async function isGitWorkTree(cwd: string): Promise<boolean> {

@@ -30,6 +30,7 @@ import type { OwnerMemoryActionCoordinator } from '../domains/memory/owner/Owner
 import { resolveSessionUserId } from '../utils/request-identity.js';
 import type { AgentKeyAuthRegistry, CallbackAuthRegistry } from './callback-auth-prehandler.js';
 import { registerCallbackAuthHook } from './callback-auth-prehandler.js';
+import { finishEventRead, registerEventMemoryUsage } from './event-memory-read-usage.js';
 import { type EventMemorySourceReaders, readEventMemorySource } from './event-memory-source.js';
 import { authorizeOwnerBrowserAction, ownerMemoryActionHttpStatus } from './owner-memory-browser-auth.js';
 
@@ -85,6 +86,7 @@ const listSchema = z.object({
 });
 
 export interface EventsRoutesOptions {
+  readEvidenceDb?: import('better-sqlite3').Database;
   eventMemoryStore: IEventMemoryStore;
   lifecycleService?: EventMemoryLifecycleService;
   ownerActionCoordinator?: OwnerMemoryActionCoordinator;
@@ -139,6 +141,7 @@ function fitEventListPage(
   limit: number,
   offset: number,
   pendingCorrectionCounts: ReadonlyMap<string, number>,
+  maxChars = EVENT_RESPONSE_MAX_CHARS,
 ): EventsListResponse {
   const events: EventsListResponse['events'] = [];
   const responseFor = (items: EventsListResponse['events']): EventsListResponse => {
@@ -150,7 +153,7 @@ function fitEventListPage(
   };
   for (const event of window.slice(0, limit)) {
     const projected = projectOwnerEvent(event, pendingCorrectionCounts.get(event.eventId) ?? 0);
-    if (JSON.stringify(responseFor([...events, projected])).length <= EVENT_RESPONSE_MAX_CHARS) {
+    if (JSON.stringify(responseFor([...events, projected])).length <= maxChars) {
       events.push(projected);
       continue;
     }
@@ -163,7 +166,7 @@ function fitEventListPage(
       originalSummaryChars: event.summary.length,
       drillDown: eventDrillDown(event.eventId, 0, projected.revision),
     };
-    if (JSON.stringify(responseFor([placeholder])).length > EVENT_RESPONSE_MAX_CHARS) {
+    if (JSON.stringify(responseFor([placeholder])).length > maxChars) {
       throw new Error('Event source reference exceeds the bounded response budget');
     }
     events.push(placeholder);
@@ -180,6 +183,7 @@ export const eventsRoutes: FastifyPluginAsync<EventsRoutesOptions> = async (app,
   if (opts.callbackRegistry) {
     registerCallbackAuthHook(app, opts.callbackRegistry, { agentKeyRegistry: opts.agentKeyRegistry });
   }
+  registerEventMemoryUsage(app, opts);
   const sourceReaders =
     opts.threadStore && opts.messageStore ? { threadStore: opts.threadStore, messageStore: opts.messageStore } : null;
   const lifecycleService =
@@ -221,43 +225,54 @@ export const eventsRoutes: FastifyPluginAsync<EventsRoutesOptions> = async (app,
           window.slice(0, limit).map((event) => event.eventId),
         )
       : new Map<string, number>();
-    return fitEventListPage(window, limit, offset, counts);
+    const page = fitEventListPage(
+      window,
+      limit,
+      offset,
+      counts,
+      request.callbackPrincipal ? EVENT_RESPONSE_MAX_CHARS - 400 : EVENT_RESPONSE_MAX_CHARS,
+    );
+    return finishEventRead(request, reply, opts.readEvidenceDb, page, page.events);
   });
 
-  app.get<{ Params: { eventId: string }; Querystring: { charOffset?: string; revision?: string } }>(
-    '/api/memory/events/:eventId',
-    async (request, reply) => {
-      if (!isAuthenticated(request)) return reply.status(401).send({ error: 'auth required' });
-      const owner = ownerUserIdOf(request);
-      if (!owner) return reply.status(403).send({ error: 'owner scope required' });
-      const event = opts.eventMemoryStore.getEvent(request.params.eventId);
-      if (!event || event.ownerUserId !== owner) return reply.status(404).send({ error: 'Event not found' });
-      const correctionProposals = await listEventCorrections(opts.correctionProposalStore, owner, event.eventId);
-      const snapshot = projectEventSnapshot(event);
-      const detailProjection = {
-        ...snapshot,
-        pendingCorrectionCount: correctionProposals.length,
-        correctionProposals: correctionProposals.map(toEventMemoryCorrectionProposalView),
-      };
-      if (request.query.revision !== undefined && request.query.revision !== snapshot.revision) {
-        return reply.status(409).send({ error: 'Revision changed' });
-      }
-      const serialized = JSON.stringify(snapshot);
-      const slice = buildEventSlice(serialized, snapshot.revision, request.query);
-      if (slice) return reply.status(slice.statusCode).send(slice.body);
-      if (serialized.length <= EVENT_RESPONSE_MAX_CHARS) return reply.send(detailProjection);
-      return reply.send({
-        eventId: event.eventId,
-        revision: snapshot.revision,
-        status: snapshot.status,
-        pendingCorrectionCount: detailProjection.pendingCorrectionCount,
-        correctionProposals: detailProjection.correctionProposals,
-        oversized: true,
-        eventChars: serialized.length,
-        drillDown: eventDrillDown(event.eventId, 0, snapshot.revision),
-      });
-    },
-  );
+  app.get<{
+    Params: { eventId: string };
+    Querystring: { charOffset?: string; revision?: string; readRequestId?: string };
+  }>('/api/memory/events/:eventId', async (request, reply) => {
+    if (!isAuthenticated(request)) return reply.status(401).send({ error: 'auth required' });
+    const owner = ownerUserIdOf(request);
+    if (!owner) return reply.status(403).send({ error: 'owner scope required' });
+    const event = opts.eventMemoryStore.getEvent(request.params.eventId);
+    if (!event || event.ownerUserId !== owner) return reply.status(404).send({ error: 'Event not found' });
+    const correctionProposals = await listEventCorrections(opts.correctionProposalStore, owner, event.eventId);
+    const snapshot = projectEventSnapshot(event);
+    const detailProjection = {
+      ...snapshot,
+      pendingCorrectionCount: correctionProposals.length,
+      correctionProposals: correctionProposals.map(toEventMemoryCorrectionProposalView),
+    };
+    if (request.query.revision !== undefined && request.query.revision !== snapshot.revision) {
+      return reply.status(409).send({ error: 'Revision changed' });
+    }
+    const serialized = JSON.stringify(snapshot);
+    const slice = buildEventSlice(serialized, snapshot.revision, request.query);
+    if (slice)
+      return slice.statusCode === 200
+        ? finishEventRead(request, reply, opts.readEvidenceDb, slice.body, [snapshot])
+        : reply.status(slice.statusCode).send(slice.body);
+    if (serialized.length <= EVENT_RESPONSE_MAX_CHARS)
+      return finishEventRead(request, reply, opts.readEvidenceDb, detailProjection, [snapshot]);
+    return reply.send({
+      eventId: event.eventId,
+      revision: snapshot.revision,
+      status: snapshot.status,
+      pendingCorrectionCount: detailProjection.pendingCorrectionCount,
+      correctionProposals: detailProjection.correctionProposals,
+      oversized: true,
+      eventChars: serialized.length,
+      drillDown: eventDrillDown(event.eventId, 0, snapshot.revision),
+    });
+  });
 
   app.get<{ Params: { eventId: string }; Querystring: { revision?: string } }>(
     '/api/memory/events/:eventId/source',

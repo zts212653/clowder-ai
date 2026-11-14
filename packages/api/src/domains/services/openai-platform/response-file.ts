@@ -61,6 +61,7 @@ export async function savePlatformResponse(
 function extractUsage(value: unknown): unknown {
   if (!value || typeof value !== 'object') return null;
   if ('usage' in value) return value.usage ?? null;
+  if ('usageMetadata' in value) return value.usageMetadata ?? null;
   if ('response' in value) return extractUsage(value.response);
   return null;
 }

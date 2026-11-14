@@ -183,12 +183,8 @@ export {
   workspaceNavigateInputSchema,
 } from './hub-action-tools.js';
 export {
-  handleLibraryCreate,
-  handleLibraryDryRun,
   handleLibraryList,
   handleLibraryRebuild,
-  libraryCreateInputSchema,
-  libraryDryRunInputSchema,
   libraryLifecycleTools,
   libraryListInputSchema,
   libraryRebuildInputSchema,

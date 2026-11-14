@@ -27,7 +27,12 @@ import type {
   SessionStatus,
   SessionUsageSnapshot,
 } from '@cat-cafe/shared';
-import { parseWatcherSessionState, type WatcherSessionState } from '@cat-cafe/shared';
+import {
+  parseWatcherSessionState,
+  type WatcherSessionState,
+  type WatcherSurfaceRetirement,
+  watcherSurfaceRetirementSchema,
+} from '@cat-cafe/shared';
 import type { RedisClient } from '@cat-cafe/shared/utils';
 import { isHomeSession } from '../../session/session-scope.js';
 import {
@@ -47,8 +52,8 @@ import type {
 import { assertScopedSessionCreation } from '../ports/SessionChainStore.js';
 import type { StoreReadOptions } from '../ports/StoreReadOptions.js';
 import { awaitStoreRead, throwIfStoreReadAborted } from '../ports/StoreReadOptions.js';
+import type { WatcherRolloverInput } from '../ports/watcher-session-rollover.js';
 import { SessionChainKeys } from '../redis-keys/session-chain-keys.js';
-
 import {
   initializeSessionSealing,
   listSessionSealing,
@@ -57,6 +62,7 @@ import {
   recordSessionSealingFailure,
   SEALING_INDEX_PREFLIGHT,
 } from './session-sealing-index.js';
+import { rolloverRedisWatcher } from './watcher-session-rollover.js';
 
 const DEFAULT_TTL_SECONDS = 0; // persistent — set >0 via env to enable expiry
 
@@ -368,22 +374,40 @@ export class RedisSessionChainStore implements ISessionChainStore {
     id: string,
     expectedRevision: number,
     next: WatcherSessionState,
+    retirement?: WatcherSurfaceRetirement,
   ): Promise<WatcherSessionState | null> {
     if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 0)
       throw new Error('invalid watcher session revision');
     const validated = parseWatcherSessionState(next);
     if (validated.revision !== expectedRevision + 1) throw new Error('invalid watcher session transition');
+    const operation = retirement ? watcherSurfaceRetirementSchema.parse(retirement) : undefined;
     const userId = await this.redis.hget(SessionChainKeys.detail(id), 'userId');
     if (!userId) return null;
     const result = await this.redis.eval(
       `
-      if redis.call('HGET', KEYS[1], 'sessionPurpose') ~= 'watcher' then return 0 end
+      if redis.call('HGET', KEYS[1], 'sessionPurpose') ~= 'watcher' or redis.call('HGET', KEYS[1], 'status') ~= 'active' then return 0 end
       local current = cjson.decode(redis.call('HGET', KEYS[1], 'watcherState') or '{"revision":0,"afterSequence":0,"notes":""}')
       local next = cjson.decode(ARGV[2])
       if current.revision ~= tonumber(ARGV[1]) then return 0 end
       if next.afterSequence < current.afterSequence then return redis.error_reply('watcher cursor cannot regress') end
+      local retirement = redis.call('HGET', KEYS[1], 'watcherRetirement')
+      if ARGV[5] ~= '' then
+        local proposed = cjson.decode(ARGV[5])
+        if proposed.phase == 'retired' then return redis.error_reply('watcher retirement requires rollover') end
+        if retirement then
+          local prior = cjson.decode(retirement)
+          for _, field in ipairs({'id','wakeInvocationId','sourceInvocationId','sourceSequence','oldSchemaHash','nativeCliSessionId'}) do
+            if prior[field] ~= proposed[field] then return redis.error_reply('watcher retirement identity changed') end
+          end
+          if proposed.probes < prior.probes then return redis.error_reply('watcher retirement probes cannot reset') end
+        end
+        retirement = ARGV[5]
+      end
+      local pendingKind = redis.call('TYPE', KEYS[2]).ok
+      if pendingKind ~= 'none' and pendingKind ~= 'set' then return redis.error_reply('invalid_watcher_pending_index') end
       redis.call('HSET', KEYS[1], 'watcherState', ARGV[2], 'updatedAt', ARGV[3])
-      if next.attempt or next.wakeInvocationId then
+      if retirement then redis.call('HSET', KEYS[1], 'watcherRetirement', retirement) end
+      if next.attempt or next.wakeInvocationId or (retirement and cjson.decode(retirement).phase ~= 'retired') then
         redis.call('SADD', KEYS[2], ARGV[4])
       else
         redis.call('SREM', KEYS[2], ARGV[4])
@@ -397,6 +421,7 @@ export class RedisSessionChainStore implements ISessionChainStore {
       JSON.stringify(validated),
       String(Date.now()),
       id,
+      operation ? JSON.stringify(operation) : '',
     );
     return Number(result) === 1 ? validated : null;
   }
@@ -406,8 +431,18 @@ export class RedisSessionChainStore implements ISessionChainStore {
     return sessions.filter((record): record is SessionRecord => {
       if (!record || record.userId !== userId || record.sessionPurpose !== 'watcher') return false;
       const state = parseWatcherSessionState(record.watcherState);
-      return Boolean(state.attempt || state.wakeInvocationId);
+      return Boolean(
+        state.attempt ||
+          state.wakeInvocationId ||
+          (record.watcherRetirement && record.watcherRetirement.phase !== 'retired'),
+      );
     });
+  }
+  async rolloverWatcherSession(input: WatcherRolloverInput): Promise<SessionRecord | null> {
+    const old = await this.get(input.sessionId);
+    if (!old) return null;
+    const id = await rolloverRedisWatcher(this.redis, old, input);
+    return id ? this.get(id) : null;
   }
   private readonly redis: RedisClient;
   private threadIndexReady = false;
@@ -1208,6 +1243,9 @@ export class RedisSessionChainStore implements ISessionChainStore {
       ...(data.sessionPurpose === 'watcher' ? { sessionPurpose: 'watcher' as const } : {}),
       ...(data.watcherState !== undefined
         ? { watcherState: parseWatcherSessionState(JSON.parse(data.watcherState)) }
+        : {}),
+      ...(data.watcherRetirement
+        ? { watcherRetirement: watcherSurfaceRetirementSchema.parse(JSON.parse(data.watcherRetirement)) }
         : {}),
       ...(scopedInvocation ? { scopedInvocation: Object.freeze(scopedInvocation) } : {}),
       ...(data.cliSessionId ? { cliSessionId: data.cliSessionId } : {}),

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import {
   copyFileSync,
   existsSync,
@@ -578,15 +578,131 @@ describe('outbound sync runtime closure', { skip: !isHomeRepo && 'sync manifest 
     assert.match(restoreFunction, /cp -p /, 'target-owned files must retain timestamps during restore');
   });
 
+  it('checks the real public closure despite unrelated Git output exceeding 16 MiB', () => {
+    // Run the actual consumer in a tiny Git repo. Keeping this fixture below ROOT
+    // lets its copied checker resolve this worktree's TypeScript/YAML dependencies.
+    const fixtureParent = resolve(ROOT, '.cat-cafe/tmp');
+    mkdirSync(fixtureParent, { recursive: true });
+    const fixture = mkdtempSync(join(fixtureParent, 'public-closure-git-'));
+    const write = (path, source) => {
+      mkdirSync(dirname(resolve(fixture, path)), { recursive: true });
+      writeFileSync(resolve(fixture, path), source);
+    };
+    const checker = 'scripts/check-sync-manifest-runtime-closure.test.mjs';
+    const childEnv = { ...process.env };
+    delete childEnv.NODE_TEST_CONTEXT;
+    const run = () => {
+      const result = spawnSync(
+        process.execPath,
+        ['--test', '--test-reporter=tap', '--test-name-pattern=exports static relative dependencies', checker],
+        { cwd: fixture, env: childEnv, encoding: 'utf8', timeout: 30_000 },
+      );
+      assert.ifError(result.error);
+      return { status: result.status, output: result.stdout + result.stderr };
+    };
+    try {
+      execFileSync('git', ['init', '--quiet'], { cwd: fixture });
+      for (const path of [
+        checker,
+        'scripts/lib/root-check-chain.mjs',
+        'scripts/lib/sync-public-export-coverage.mjs',
+        'packages/api/scripts/resolve-public-test-files.mjs',
+      ]) {
+        write(path, readFileSync(resolve(ROOT, path), 'utf8'));
+      }
+      write('packages/api/config/public-test-exclusions.json', '{"version":2,"entries":[]}');
+      write(
+        'sync-manifest.yaml',
+        [
+          'managed_roots:',
+          '  - public runtime',
+          '  - packages/api',
+          '  - packages/web',
+          'managed_files:',
+          '  - config [本地]*.mjs',
+          '  - not-a-node-carrier',
+          'managed_scripts:',
+          '  - scripts/guarded-bin/gh',
+          'excluded:',
+          '  - private/',
+          '  - packages/api/source-tests/',
+          'transforms:',
+          '  - type: copy',
+          '    source: private/template.mjs',
+          '    target: generated.mjs',
+          '',
+        ].join('\n'),
+      );
+      write('scripts/sync-to-opensource.sh', 'cp "$STAGING_DIR/private/template.mjs" "$FILTERED_DIR/generated.mjs"\n');
+      write('private/dependency.mjs', 'export {};\n');
+      const importers = [
+        ['public runtime/tracked ignored.mjs', "import '../private/dependency.mjs';\n"],
+        ['public runtime/中文 空格\n入口.mjs', "import '../private/dependency.mjs';\n"],
+        ['packages/api/test/选中 未跟踪.test.js', "import '../../../private/dependency.mjs';\n"],
+        ['config [本地]*.mjs', "import './private/dependency.mjs';\n"],
+        ['generated.mjs', "import './private/dependency.mjs';\n"],
+        ['scripts/guarded-bin/gh', "#!/usr/bin/env node\nimport '../../private/dependency.mjs';\n"],
+      ];
+      for (const [path] of importers) write(path, 'export {};\n');
+      execFileSync('git', ['add', '--', importers[0][0]], { cwd: fixture });
+      write('.gitignore', 'public runtime/tracked ignored.mjs\npublic runtime/ignored.mjs\n');
+      write('public runtime/ignored.mjs', "import '../private/dependency.mjs';\n");
+      write('packages/api/source-tests/home.js', "import '../../../private/dependency.mjs';\n");
+      write('packages/web/test/home.test.js', "import '../../../private/dependency.mjs';\n");
+      write('not-a-node-carrier', "import './private/dependency.mjs';\n");
+
+      // Empty real, untracked cache files produce >16 MiB of NUL-delimited Git
+      // paths without allocating that much file content or touching home caches.
+      const cache = join('unrelated-cache', ...Array(3).fill('c'.repeat(180)));
+      const leaf = (index) => `cache-${String(index).padStart(5, '0')}-${'x'.repeat(200)}`;
+      const cacheFileCount = 24_000;
+      assert.ok(Buffer.byteLength(`${join(cache, leaf(0))}\0`) * cacheFileCount > 16 * 1024 * 1024);
+      mkdirSync(resolve(fixture, cache), { recursive: true });
+      for (let index = 0; index < cacheFileCount; index += 1) {
+        writeFileSync(resolve(fixture, cache, leaf(index)), '');
+      }
+
+      const baseline = run();
+      assert.equal(baseline.status, 0, baseline.output);
+      assert.match(baseline.output, /exports static relative dependencies/, baseline.output);
+      assert.match(baseline.output, /# pass 1\b/, baseline.output);
+      for (const [path, source] of importers) {
+        write(path, source);
+        const missing = run();
+        assert.notEqual(missing.status, 0, `${path} must be checked even before git add:\n${missing.output}`);
+        assert.match(missing.output, /sync-manifest omits direct runtime dependencies/);
+        assert.match(missing.output, /-> private\/dependency\.mjs/);
+        write(path, 'export {};\n');
+      }
+      write('sync-manifest.yaml', '{}\n');
+      const emptyExport = run();
+      assert.equal(emptyExport.status, 0, emptyExport.output);
+    } finally {
+      rmSync(fixture, { recursive: true, force: true });
+    }
+  });
+
   it('exports static relative dependencies of public runtime, build configuration and selected tests', async () => {
     const coverage = loadPublicExportCoverage(ROOT);
     const { selectedFiles } = await resolvePublicTestFiles();
     const selectedPublicTests = new Set(selectedFiles.map((path) => `packages/api/${path}`));
-    const files = execFileSync('git', ['ls-files', '--cached', '--others', '--exclude-standard', '-z'], {
-      cwd: ROOT,
-      encoding: 'utf8',
-      maxBuffer: 16 * 1024 * 1024,
-    }).split('\0');
+    // Apply the export domain before buffering Git output. Literal pathspecs
+    // preserve filenames containing spaces, Unicode or Git wildcard characters.
+    const exportPathspecs = [
+      ...new Set([...coverage.prefixes, ...coverage.exact, ...coverage.materializedTransformExact]),
+    ].map((path) => `:(top,literal)${path}`);
+    const files =
+      exportPathspecs.length === 0
+        ? []
+        : execFileSync(
+            'git',
+            ['ls-files', '--cached', '--others', '--exclude-standard', '-z', '--', ...exportPathspecs],
+            {
+              cwd: ROOT,
+              encoding: 'utf8',
+              maxBuffer: 16 * 1024 * 1024,
+            },
+          ).split('\0');
     const missing = [];
 
     for (const importer of new Set(files)) {

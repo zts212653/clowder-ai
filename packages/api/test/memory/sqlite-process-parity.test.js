@@ -143,6 +143,7 @@ test('semantic and hybrid embedding bridge preserves query vectors and passage r
     ensureVectorTable(store.getDb(), 2);
     ensurePassageVectorTable(store.getDb(), 2);
     const vectorStore = new VectorStore(store.getDb(), 2);
+    vectorStore.initMeta({ modelId: 'fixture', modelRev: '1', dim: 2 });
     const passageVectorStore = new PassageVectorStore(store.getDb(), 2);
     vectorStore.upsert('F001', new Float32Array([1, 0]));
     vectorStore.upsert('ADR-001', new Float32Array([0, 1]));

@@ -1381,7 +1381,7 @@ function launchInWindowsHost(
     command: plan.command,
     args: plan.args,
     ...(options.cwd ? { cwd: options.cwd } : {}),
-    ...(options.env ? { env: options.env } : {}),
+    ...(options.env || plan.env ? { env: { ...(options.env ?? process.env), ...plan.env } } : {}),
     ...(plan.shell !== undefined ? { shell: plan.shell } : {}),
     stdin: options.stdin,
   });
@@ -1434,7 +1434,7 @@ function defaultSpawn(
     }
     return nodeSpawn(spawnPlan.command, spawnPlan.args, {
       cwd: options.cwd,
-      env: options.env,
+      env: spawnPlan.env ? { ...(options.env ?? process.env), ...spawnPlan.env } : options.env,
       stdio: options.stdio,
       ...(spawnPlan.shell !== undefined ? { shell: spawnPlan.shell } : {}),
     });

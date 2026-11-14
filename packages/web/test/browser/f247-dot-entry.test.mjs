@@ -2,33 +2,61 @@ import assert from 'node:assert/strict';
 import { mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { managerDot, personalProState } from './f247-dot-entry.fixtures.mjs';
+import {
+  configFields,
+  managerDot,
+  personalProState,
+  projectDotJourney,
+  setupSteps,
+} from './f247-dot-entry.fixtures.mjs';
 import { openProof } from './f247-dot-entry.harness.mjs';
+import { disabledWatcherRead } from './fixtures/f322-watcher-read.mjs';
 
 for (const width of [1440, 390])
-  test(`default avatar → plugin installation and retained dot setup at ${width}px`, async () => {
+  test(`default settings installs Dot and retains package setup at ${width}px`, async () => {
     let installed = false,
-      paired = false,
       enabled = false,
-      tested = false;
+      subscribed = false,
+      connection = null;
     const catalog = { status: 'fresh', refreshedAt: 1 };
-    const status = () => ({
-      installed,
-      paired,
-      subscription: paired ? 'active' : 'absent',
-      endpointUrl: 'https://dot-fixture.test/mcp',
-      replyAt: tested ? 100 : null,
-      imageAt: null,
-      revoked: false,
-      ownerUserId: 'owner-1',
-      allowedCatIds: [],
-    });
+    const status = () =>
+      projectDotJourney({
+        runtimeRunning: enabled,
+        now: Date.now(),
+        connection: connection && {
+          ...connection,
+          ...(subscribed ? { pairedAt: Date.now(), subscription: { expiresAt: null } } : {}),
+        },
+        dispatches: subscribed
+          ? [
+              {
+                eventId: 'verified',
+                attemptId: 'fixture',
+                occurredAt: Date.now(),
+                sourceReadAt: Date.now(),
+                replyMessageId: 'reply',
+                threadId: 'test-source',
+              },
+            ]
+          : [],
+        external: {
+          v: 1,
+          revision: 1,
+          pending: null,
+          current: { kind: 'legacy', recordRef: 'host.external' },
+          endpoint: { mode: 'long-lived', serverUrl: 'https://dot-fixture.test/mcp', reachableAt: Date.now() },
+        },
+      });
+    const instructions = '请在 Work 对话订阅 dot.summoned，pairing_code=fixture-only';
     const proof = await openProof({
       viewport: { width, height: 1000 },
       api: ({ request, url }) => {
-        const dot = managerDot(installed, enabled, tested, paired);
+        const watcher = disabledWatcherRead(request, url, ['thread-return']);
+        if (watcher) return { raw: watcher.body };
+        if (url.pathname === '/api/agent-providers' && request.method() === 'GET') return { body: { libraries: [] } };
+        const dot = managerDot(installed, enabled);
         if (url.pathname === '/api/plugin-manager/plugins/_local')
-          return { body: { plugins: installed ? [dot] : [], catalog: { status: 'unavailable', refreshedAt: null } } };
+          return { body: { plugins: installed ? [dot] : [], catalog } };
         if (url.pathname === '/api/plugin-manager/marketplaces/refresh')
           return { body: { sources: [{ status: 'ready' }] } };
         if (url.pathname === '/api/plugin-manager/plugins/install') {
@@ -45,36 +73,26 @@ for (const width of [1440, 390])
           url.pathname === '/api/plugin-manager/plugins/official.chatgpt-dot' ||
           url.pathname === '/api/plugin-manager/plugins/_local/official.chatgpt-dot'
         )
-          return { body: { plugin: { ...dot, configFields: [], capabilities: [], contributions: [] }, catalog } };
+          return {
+            body: { plugin: { ...dot, configFields, steps: setupSteps, capabilities: [], contributions: [] }, catalog },
+          };
         if (url.pathname.endsWith('/documentation')) return { body: {} };
         if (url.pathname.endsWith('/contributions/tools')) return { body: { pluginId: dot.pluginId, tools: [] } };
-        if (url.pathname === '/api/plugins') return { body: { plugins: [] } };
-        if (url.pathname === '/api/plugins/official') return { body: { plugins: [] } };
+        if (url.pathname === '/api/plugins' || url.pathname === '/api/plugins/official')
+          return { body: { plugins: [] } };
         if (url.pathname === '/api/plugins/personal-chrome') return { body: personalProState };
-        if (url.pathname === '/api/plugins/chatgpt-dot/connection') return { body: status() };
-        if (url.pathname === '/api/plugins/chatgpt-dot/prepare')
-          return {
-            body: {
-              ...status(),
-              endpointUrl: 'https://dot-fixture.test/mcp',
-              instructions: '订阅猫咖召唤，配对码 fixture-only。',
-            },
+        if (url.pathname === '/api/plugins/official.chatgpt-dot/actions/connection/status')
+          return { body: { ok: true, render: 'rows', data: status() } };
+        if (url.pathname === '/api/plugins/official.chatgpt-dot/actions/subscription/show-instructions') {
+          connection = {
+            attemptId: 'fixture',
+            pairingExpiresAt: Date.now() + 30 * 60_000,
+            pairedAt: null,
+            revokedAt: null,
+            subscription: null,
+            testEventIds: ['verified'],
           };
-        if (url.pathname === '/api/plugins/chatgpt-dot/test') {
-          if (request.method() === 'POST') tested = true;
-          return {
-            body: {
-              tests: tested
-                ? ['A', 'B'].map((id) => ({
-                    eventId: id,
-                    threadId: `test-${id}`,
-                    receivedAt: 1,
-                    readAt: 2,
-                    replyMessageId: `reply-${id}`,
-                  }))
-                : [],
-            },
-          };
+          return { body: { ok: true, render: 'text', data: instructions } };
         }
         return null;
       },
@@ -85,58 +103,30 @@ for (const width of [1440, 390])
       if (width === 390) await page.locator('button[aria-controls="settings-mobile-navigation"]').click();
       await page.getByTestId('settings-entry-connect').click();
       await page.getByTestId('settings-tab-plugins').click();
-      assert.equal(new URL(page.url()).searchParams.has('pluginManagerLive'), false);
       const row = page.locator('[data-plugin-id="official.chatgpt-dot"]');
       await row.waitFor();
       assert.equal(await row.count(), 1);
-      assert.equal(
-        await page.locator('[data-plugin-id="personal-chrome-host"]').count(),
-        0,
-        'retired Host row stays absent',
-      );
+      assert.equal(await page.locator('[data-plugin-id="personal-chrome-host"]').count(), 0);
       await row.getByRole('button', { name: '安装', exact: true }).click();
-      assert.equal(installed, true, 'the current catalog install action must run before the intent toggle');
-      await row.getByRole('button', { name: '启用dot协作', exact: true }).click();
+      assert.equal(installed, true);
+      await row.getByRole('button', { name: /^启用/ }).click();
+      assert.equal(enabled, true, 'Host enables the configured package before its own pairing workflow');
+      await row.getByRole('button').filter({ hasText: 'ChatGPT Dot' }).click();
+      await page.getByRole('button', { name: '生成订阅消息', exact: true }).click();
+      await page.getByText(instructions, { exact: true }).waitFor();
+      await page.getByText('等待订阅', { exact: true }).waitFor();
       assert.equal(
-        proof.requests.some((request) => request.endsWith('/set-enabled')),
+        proof.requests.some((request) => request.includes('/api/plugins/chatgpt-dot/')),
         false,
-        'blocked toggle opens setup without changing Host intent',
+        'setup uses generic package actions',
       );
-      // Mobile opens the detail only after a row action; verify its retained Pro recovery entry there.
-      await page.locator('a[href*="plugin=official.companion.personal-chrome"]').waitFor();
-      await page.getByRole('button', { name: '准备订阅说明', exact: true }).waitFor();
-      await page.getByRole('button', { name: '准备订阅说明', exact: true }).click();
-      await page.getByRole('button', { name: '复制订阅说明', exact: true }).waitFor();
-      assert.equal(await page.getByRole('button', { name: '复制插件地址', exact: true }).count(), 0);
-      await page.getByText('沿用 ChatGPT 已连接的猫咖插件', { exact: false }).waitFor();
-      if (process.env.F247_DOT_BROWSER_EVIDENCE_DIR) {
-        await mkdir(process.env.F247_DOT_BROWSER_EVIDENCE_DIR, { recursive: true });
-        await page.screenshot({
-          path: join(process.env.F247_DOT_BROWSER_EVIDENCE_DIR, `shared-setup-${width}.png`),
-          fullPage: true,
-        });
-      }
-      assert.equal(await page.getByText('收到过原图', { exact: true }).count(), 0);
-      // Simulate the separately verified provider callback in the contract fixture.
-      paired = true;
-      await page.reload();
-      if (width === 390)
-        await page
-          .locator('[data-plugin-id="official.chatgpt-dot"]')
-          .getByRole('button')
-          .filter({ hasText: 'ChatGPT 云端' })
-          .click();
-      else
-        await page
-          .locator('[data-plugin-id="official.chatgpt-dot"]')
-          .getByRole('button')
-          .filter({ hasText: 'ChatGPT 云端' })
-          .click();
-      await page.getByRole('button', { name: '测试两处往返', exact: true }).click();
-      await page.getByRole('link', { name: '测试 A', exact: true }).waitFor();
+      // A separately tested provider callback changes the UI fixture; this is not live OAuth/dogfood.
+      subscribed = true;
+      await page.getByText('Dot 已可用', { exact: true }).waitFor();
       assert.equal(
-        await page.getByRole('link', { name: '测试 B', exact: true }).getAttribute('href'),
-        '/thread/test-B',
+        await page.getByText(instructions, { exact: true }).count(),
+        1,
+        'subscription instructions stay copyable after automatic verification',
       );
       assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
       if (process.env.F247_DOT_BROWSER_EVIDENCE_DIR) {
@@ -146,25 +136,15 @@ for (const width of [1440, 390])
           fullPage: true,
         });
       }
-      if (width === 390) {
-        await page.getByRole('button', { name: '返回插件列表', exact: true }).click();
-        await row.waitFor();
-      }
-      await row.getByRole('button', { name: '启用dot协作', exact: true }).click();
-      await row.getByRole('button', { name: '禁用dot协作', exact: true }).waitFor();
-      assert.equal(new URL(page.url()).searchParams.get('from'), 'thread-return');
-      // The original receipt's recovery entry must select dot even after a cold
-      // catalog load, and must open its detail on mobile without another tap.
       await page.goto(new URL('/settings?s=plugins&from=thread-return#chatgpt-dot', page.url()).href);
-      await page.getByText('ChatGPT 云端 · dot 会话', { exact: true }).waitFor();
+      await page.getByRole('button', { name: '生成订阅消息', exact: true }).waitFor();
       assert.equal(await page.locator('[data-mobile-panel="detail"]').isVisible(), true);
       await page.reload();
-      await page.getByText('ChatGPT 云端 · dot 会话', { exact: true }).waitFor();
-      assert.equal(await page.locator('[data-mobile-panel="detail"]').isVisible(), true);
-      if (width === 390) {
-        await page.getByRole('button', { name: '返回插件列表', exact: true }).click();
-        assert.equal(await page.locator('[data-mobile-panel="list"]').isVisible(), true);
-      }
+      await page.getByText('Dot 已可用', { exact: true }).waitFor();
+      assert.equal(new URL(page.url()).searchParams.get('from'), 'thread-return');
+      if (width === 390) await page.getByRole('button', { name: '返回插件列表', exact: true }).click();
+      await row.getByRole('button', { name: /^禁用/ }).click();
+      assert.equal(enabled, false);
       assert.deepEqual(proof.errors, []);
       assert.deepEqual(proof.unexpected, []);
     } catch (error) {

@@ -11,7 +11,7 @@ import type { SourceFamily, UnmetDemandBucket } from './f263-lifecycle-types.js'
 import type { LifecycleTraceStore } from './LifecycleTraceStore.js';
 
 /** Operational outcome statuses that must NOT enter unmet demand bucketing. */
-const OPERATIONAL_STATUSES: ReadonlySet<string> = new Set(['error', 'overflow']);
+const OPERATIONAL_STATUSES: ReadonlySet<string> = new Set(['error', 'timeout', 'cancelled', 'overflow']);
 
 /**
  * Classify a RecallEvent's zero-hit status into the correct unmet demand bucket.

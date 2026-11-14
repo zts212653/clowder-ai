@@ -1552,6 +1552,18 @@ describe('F167 Phase E: cat-config restrictions', () => {
     const all = toAllCatConfigs(config);
     assert.ok(all.gemini?.restrictions?.includes('禁止写代码'), 'live gemini.restrictions must include 禁止写代码');
   });
+
+  it('live template: siamese breed scopes "禁止写代码" to legacy gemini-default, not breed inheritance', () => {
+    const templatePath = new URL('../../../cat-template.json', import.meta.url).pathname;
+    const template = loadCatConfig(templatePath);
+    const siamese = template.breeds.find((breed) => breed.id === 'siamese');
+    assert.ok(siamese, 'siamese breed must exist in cat-template.json');
+    assert.equal(siamese.restrictions, undefined, 'siamese breed must not carry breed-level restrictions');
+    assert.equal(siamese.caution, null, 'siamese breed must not carry 3.1-era breed-level caution');
+    const geminiDefault = siamese.variants.find((variant) => variant.id === 'gemini-default');
+    assert.deepStrictEqual(geminiDefault?.restrictions, ['禁止写代码']);
+    assert.match(geminiDefault?.caution ?? '', /禁止写代码/);
+  });
 });
 
 describe('#772: template breeds must not leak into runtime', () => {

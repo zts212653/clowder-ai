@@ -17,8 +17,8 @@ mcp_admission_claims:
     boundaryKind: side-effect-boundary
     decision: accepted
 created: 2026-10-23
-updated: 2026-11-10
-tips_exempt: "Renewed 2026-11-10 for public/source partitioning: preserve prior public guidance and accepted person-revision/document-verification contracts; move operational evidence into Internal Notes. No new human control, enabled watcher or shipped follow-up is introduced."
+updated: 2026-11-11
+tips_exempt: "Renewed 2026-11-10: existing owner-memory wrappers were retired after the owner journeys were verified. The existing exact-proposal tip now points to Handled and its guide; retained memory-page, capsule and watcher controls keep their current tips. This is delivery truth, not a new capability entry."
 description: 让共同经历在未见情境中帮助猫自主联想、核证与修正判断，并让人看见和纠正记忆。
 description_source: human
 description_author: codex-astra
@@ -34,6 +34,8 @@ Map delta: none
 Map delta why: 聚合用户结果与既有责任，不在本轮另建 store、planner、后台服务或统一审批权威；实现选型在对应 Phase 明确。
 
 ## Current tool contract
+
+`cat_cafe_remember`每次提交1–4项，逐条使用现有提交入口并返回原提案、直接结果或拒绝原因及groupId。现有Chat卡按组重读原提案、逐行沿原决议处理；修改建议进入原对话草稿。原八个写工具保留到W4与完整替代核收均通过。
 
 Person-memory corrections use `cat_cafe_revise_person_memory` with one of
 `correct_claim`, `retire_claim` or `amend_event`. Each action retains its original

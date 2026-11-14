@@ -22,25 +22,30 @@ test('real MCP lifecycle writers reach owner-configured library routes without b
     process.env.CAT_CAFE_API_URL = app.listeningOrigin;
     process.env.CAT_CAFE_USER_ID = 'owner';
     const tools = await import('../../mcp-server/dist/tools/library-lifecycle-tools.js');
-    const dry = await tools.handleLibraryDryRun({ root: content });
-    assert.notEqual(dry.isError, true, JSON.stringify(dry));
-    const created = await tools.handleLibraryCreate({
-      kind: 'domain',
-      name: 'mcp-test',
-      displayName: 'MCP test',
-      root: content,
-      sensitivity: 'private',
+    // Creating a collection moved to the owner library page (2026-11-10); register it through the same route here.
+    const registered = await fetch(`${app.listeningOrigin}/api/library/register`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-cat-cafe-user': 'owner' },
+      body: JSON.stringify({
+        id: 'domain:mcp-test',
+        kind: 'domain',
+        name: 'mcp-test',
+        displayName: 'MCP test',
+        root: content,
+        sensitivity: 'private',
+      }),
     });
-    assert.notEqual(created.isError, true, JSON.stringify(created));
-    assert.doesNotMatch(created.content[0].text, /rebuild failed/);
+    assert.equal(registered.status, 200, await registered.text());
     assert.equal(catalog.get('domain:mcp-test').ownerUserId, 'owner');
-    assert.equal(catalog.get('domain:mcp-test').status, 'active');
     const listed = await tools.handleLibraryList({});
     assert.match(listed.content[0].text, /domain:mcp-test/);
     const rebuilt = await tools.handleLibraryRebuild({ collectionId: 'domain:mcp-test' });
     assert.notEqual(rebuilt.isError, true, JSON.stringify(rebuilt));
-    // Archiving moved to the owner library page (2026-11-09); the route itself is covered by library-lifecycle-routes.
-    assert.equal('handleLibraryArchive' in tools, false);
+    assert.equal(catalog.get('domain:mcp-test').status, 'active');
+    // Archive (2026-11-09) and create/dry-run (2026-11-10) live on the owner page; their routes are covered by library-lifecycle-routes.
+    for (const retired of ['handleLibraryArchive', 'handleLibraryCreate', 'handleLibraryDryRun']) {
+      assert.equal(retired in tools, false);
+    }
   } finally {
     for (const [key, value] of [
       ['CAT_CAFE_API_URL', previous.api],

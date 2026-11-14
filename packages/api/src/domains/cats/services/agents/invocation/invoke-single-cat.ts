@@ -647,6 +647,7 @@ import {
   type TurnExecutionKind,
   type TurnExecutionTerminalInput,
 } from '../../stores/ports/TurnExecutionStore.js';
+import type { ToolEventLog } from '../../tool-usage/ToolEventLog.js';
 import type {
   AgentMessage,
   AgentRouteIntent,
@@ -679,6 +680,7 @@ import {
   isPromptTokenLimitExceededError,
   isSessionNotFoundDiagnostic,
   isTransientAcpPromptFailure,
+  isTransientAgyNativePreInitFailure,
   isTransientCliExitCode1,
   preflightRace,
 } from './invoke-helpers.js';
@@ -1271,6 +1273,7 @@ export interface InvocationDeps {
  * Per-invocation parameters
  */
 export interface InvocationParams {
+  readonly toolEventLog?: ToolEventLog;
   /** Owner-admitted member context; only its declared native MCP and approved prompt are projected. */
   readonly scopedMemberLaunch?: AgentServiceOptions['pluginNativeLaunch'];
   readonly routingAdmission?: import('@cat-cafe/shared').RoutingAdmissionProvenanceV1;
@@ -4196,6 +4199,7 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
       ...(requestedServiceTier ? { requestedServiceTier } : {}),
       ...(accountEnv ? { accountEnv } : {}),
       ...(resolvedAccount?.claude ? { claudeTokenAccount: true } : {}),
+      ...(resolvedAccount?.agy ? { agyAccount: resolvedAccount.agy } : {}),
       ...(codexAccountLaunch ? { codexAccountLaunch } : {}),
       auditContext: {
         invocationId,
@@ -5646,6 +5650,7 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
     let allowSessionRetry = !isScopedMember && Boolean(sessionId) && !requiresImportedHistory && !isAgyAcp;
     let allowTransientRetry = !isScopedMember && !isAgyAcp;
     let nextRequestGenerationReason: RequestGenerationRetryReason | undefined;
+    let retryFreshReason: 'resume_rejected' | 'resume_failed' | undefined;
     let consumedClaudeCompactionObservation: string | undefined;
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
       await scopedMemberLaunch?.assertCurrent();
@@ -5681,10 +5686,26 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
         yield continuityInfoMessage();
       }
       const generationRecorder = requestGenerationRecorder;
+      const toolEventLog = params.toolEventLog;
+      const onRecallInputUpdate = toolEventLog
+        ? async (message: AgentMessage): Promise<void> => {
+            const safe = await protectNativeProviderResult(message, options);
+            if (!safe.toolUseId || !safe.toolName) return;
+            // The ledger serializes this update with the original append and later result.
+            toolEventLog
+              .updateRecallInput(
+                threadId,
+                { catId, invocationId, toolUseId: safe.toolUseId, toolName: safe.toolName },
+                safe.toolInput,
+              )
+              .catch(() => {});
+          }
+        : undefined;
       const options: AgentServiceOptions = {
         hostSessionId: activeSessionRecordForResume?.id,
         ...(sessionId ? { sessionId } : {}),
         ...baseOptions,
+        onRecallInputUpdate,
         ...(params.liveCompanion
           ? {
               onLiveInputOutcome: async (receipt: import('../../types.js').LiveProviderInputOutcome) => {
@@ -5873,6 +5894,7 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
               evidence,
               coordinate: contextContinuityHandshake.coordinate,
               invocationId,
+              ...(retryFreshReason ? { freshReason: retryFreshReason } : {}),
             }),
           };
           await applyProviderCompactions(compactions);
@@ -5984,6 +6006,10 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
           activeServiceIterator = null;
           unclosedServiceIterators.delete(serviceIter);
           break;
+        }
+        if (iterResult.value.type === 'recall_input_update') {
+          await onRecallInputUpdate?.(iterResult.value);
+          continue;
         }
         let msg = await protectNativeProviderResult(iterResult.value, options);
         if (msg.providerTeardown === 'unconfirmed') {
@@ -6145,7 +6171,9 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
           allowTransientRetry &&
           !attemptHasContentOutput &&
           msg.type === 'error' &&
-          (isTransientCliExitCode1(msg.error) || isTransientAcpPromptFailure(msg.error))
+          (isAgyNative
+            ? isTransientAgyNativePreInitFailure(msg)
+            : isTransientCliExitCode1(msg.error) || isTransientAcpPromptFailure(msg.error))
         ) {
           suppressedTransientCliError = msg;
           continue;
@@ -6477,6 +6505,10 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
       if (shouldRetryWithoutSession && !requiresImportedHistory && attempt + 1 < maxAttempts) {
         await presentationDelivery?.release('provider_generation_replaced');
         const nativeBindingChanged = suppressedMissingSessionError?.errorCode === 'AGY_NATIVE_RESUME_MISMATCH';
+        const currentRetryFreshReason: 'resume_rejected' | 'resume_failed' = nativeBindingChanged
+          ? 'resume_rejected'
+          : 'resume_failed';
+        retryFreshReason = currentRetryFreshReason;
         const retryReason = nativeBindingChanged
           ? 'native_binding_changed'
           : suppressedPromptLimitError
@@ -6607,7 +6639,7 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
             ? resolveContextContinuity({
                 capability: contextCapability,
                 invocationId,
-                freshReason: 'resume_failed',
+                freshReason: currentRetryFreshReason,
                 invocationOrigin: params.invocationOrigin ?? 'unknown',
                 routeTopology: params.routeTopology ?? 'independent',
                 // F296 B4 (kimi review): without this the retry silently

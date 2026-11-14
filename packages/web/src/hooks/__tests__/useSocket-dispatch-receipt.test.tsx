@@ -6,6 +6,7 @@ import { pluginReplyFor } from '@/components/plugin-reply-state';
 import { QueuePanel } from '@/components/QueuePanel';
 import type { QueueEntry } from '@/stores/chat-types';
 import { useChatStore } from '@/stores/chatStore';
+import { MEMORY_CHANGED, MEMORY_CHANGED_STORAGE_KEY } from '../memory-changed';
 import { reconcileThreadWithServer, type SocketCallbacks, useSocket } from '../useSocket';
 
 const mockSocket = new EventEmitter() as EventEmitter & {
@@ -368,5 +369,23 @@ describe('dispatch receipt Queue publication', () => {
       }),
     );
     expect(useChatStore.getState().messages[0]?.extra?.targetResponse?.status).toBe('completed');
+  });
+});
+
+describe('memory socket refresh carrier', () => {
+  it('dispatches the shared event from the real callback without rebroadcasting to storage', async () => {
+    const host = document.createElement('div');
+    const root = createRoot(host);
+    mockSocket.removeAllListeners();
+    const changed = vi.fn();
+    const storage = vi.spyOn(Storage.prototype, 'setItem');
+    window.addEventListener(MEMORY_CHANGED, changed);
+    await act(async () => root.render(<Host />));
+    await act(async () => emitServerEvent('memory_matter_changed'));
+    expect(changed).toHaveBeenCalledTimes(1);
+    expect(storage.mock.calls.some(([key]) => key === MEMORY_CHANGED_STORAGE_KEY)).toBe(false);
+    await act(async () => root.unmount());
+    window.removeEventListener(MEMORY_CHANGED, changed);
+    storage.mockRestore();
   });
 });

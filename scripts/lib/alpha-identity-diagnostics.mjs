@@ -1,4 +1,5 @@
 import { execFileSync } from 'node:child_process';
+import { createAlphaGitTrace } from './alpha-git-trace.mjs';
 
 const IDENTITY_FIELDS = ['cwd', 'ucomm', 'startedAt', 'startedAtEpochMs', 'startedAtFormat'];
 
@@ -7,13 +8,15 @@ export function observeAlphaGit(root, args, stage) {
   const timeoutMs = 5_000;
   const startedAt = new Date().toISOString();
   const startedMs = performance.now();
+  const trace = createAlphaGitTrace();
   try {
     return execFileSync('git', args, {
       cwd: root,
       encoding: 'utf8',
       timeout: timeoutMs,
       maxBuffer: 4 * 1024 * 1024,
-      stdio: ['ignore', 'pipe', 'pipe'],
+      stdio: trace?.stdio ?? ['ignore', 'pipe', 'pipe'],
+      ...(trace ? { env: trace.environment } : {}),
     }).trim();
   } catch (cause) {
     const observation = {
@@ -26,6 +29,7 @@ export function observeAlphaGit(root, args, stage) {
       code: /^[A-Z][A-Z0-9_]{0,63}$/u.test(cause?.code ?? '') ? cause.code : null,
       exitCode: Number.isSafeInteger(cause?.status) ? cause.status : null,
       signal: /^SIG[A-Z0-9]{1,16}$/u.test(cause?.signal ?? '') ? cause.signal : null,
+      trace: trace?.read() ?? { status: 'unavailable' },
     };
     // execFileSync's error message/cause contains command output. Preserve only
     // bounded observation metadata so nested refusal logs cannot expose it.
@@ -35,6 +39,12 @@ export function observeAlphaGit(root, args, stage) {
         alphaGitObservation: observation,
       },
     );
+  } finally {
+    try {
+      trace?.close();
+    } catch {
+      /* Observation must not override the original Git result. */
+    }
   }
 }
 

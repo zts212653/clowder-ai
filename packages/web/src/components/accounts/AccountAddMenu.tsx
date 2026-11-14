@@ -7,9 +7,11 @@ import { accountsCopy } from './accounts.shell-copy';
 export function AccountAddMenu({
   onAdd,
   onAddClaude,
+  onAddAgy,
 }: {
   onAdd: (type: ProfileAuthType) => void;
   onAddClaude?: () => void;
+  onAddAgy?: () => void;
 }) {
   const t = useShellCopy(accountsCopy);
   const [open, setOpen] = useState(false);
@@ -61,6 +63,17 @@ export function AccountAddMenu({
             </button>
           )}
           <small>{t.addNotice}</small>
+          {onAddAgy && (
+            <button
+              type="button"
+              onClick={() => {
+                setOpen(false);
+                onAddAgy();
+              }}
+            >
+              AGY · Google OAuth
+            </button>
+          )}
           <hr />
           <button type="button" onClick={() => choose('api_key')}>
             {t.addKey}

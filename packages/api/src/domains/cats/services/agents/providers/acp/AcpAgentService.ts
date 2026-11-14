@@ -1,7 +1,7 @@
 import { deploymentDefaults } from '@cat-cafe/shared';
 import { buildCliDiagnosticContext } from '../../../../../../utils/cli-diagnostics.js';
-import { excerptSanitizedStderr } from '../../../../../../utils/sanitize-cli-stderr.js';
 import { isInvocationBoundMcpLaunch } from '../session-credential-file.js';
+import { extractMissingCredential } from './dsh/credential-error.js';
 import { createAcpPermissionHandler } from './permissions/acp-permission-interaction.js';
 /**
  * AcpAgentService — Generic AgentService implementation backed by ACP protocol.
@@ -23,12 +23,7 @@ import { createAcpPermissionHandler } from './permissions/acp-permission-interac
  */
 
 import { type CatId, type ClientId, catRegistry } from '@cat-cafe/shared';
-import { resolveBinaryRoot } from '../../../../../../config/capabilities/capability-orchestrator.js';
-import {
-  assertMappedCapabilitySource,
-  resolveInvokeCapabilityRoot,
-} from '../../../../../../config/capabilities/invoke-capability-root.js';
-import { readInvocationMcpConfig } from '../../../../../../config/capabilities/invoke-mcp-config.js';
+import { invocationPluginMcpIssues } from '../../../../../../config/capabilities/invocation-plugin-mcp-view.js';
 import { getCatEffort } from '../../../../../../config/cat-config-loader.js';
 import { getCatModel } from '../../../../../../config/cat-models.js';
 import { readDshNativeAccount } from '../../../../../../config/native-accounts/dsh-account.js';
@@ -47,8 +42,10 @@ import type {
 import { agentServiceGeneration } from '../../registry/AgentRegistry.js';
 import {
   type AcpCapacitySignal,
+  type AcpClient,
   type AcpPermissionHandler,
   AcpProtocolError,
+  AcpSessionCancelledError,
   AcpStreamIdleError,
   AcpTimeoutError,
 } from './AcpClient.js';
@@ -62,18 +59,19 @@ import {
 } from './acp-credential-file.js';
 import { createAcpSessionState, flushAcpThinking, transformAcpEvent } from './acp-event-transformer.js';
 import { readAcpImageBlocks, withAcpImages } from './acp-image-input.js';
-import { resolveAcpMcpServers, resolveDisabledServerIds, resolveUserProjectMcpServers } from './acp-mcp-resolver.js';
 import { AcpImageInputError, type AcpPromptInput } from './acp-prompt-content.js';
 import {
   callbackEnvDiagnostic,
-  captureSessionMcpServers,
   materializeIcodeSessionMcpServers,
   materializeSessionMcpServers,
 } from './acp-session-env.js';
+import { settlePendingAcpRecalls } from './acp-tool-events.js';
 import { AcpSessionBindingError } from './active-session-cache.js';
 import { createAgyAcpPermissionHandler } from './agy/agy-acp-permission.js';
 import { type AgyAcpConfig, prepareAgyAcpSession, selectAgyAcpModel } from './agy/agy-acp-session.js';
+import { captureAcpMcpSources } from './configuration/acp-mcp-source.js';
 import { invokeDshMember } from './dsh/dsh-member-invocation.js';
+import { DshTurnInput } from './dsh/dsh-turn-input.js';
 import { type AcpRequestInputBridge, createAcpRequestInputBridge } from './icode/runtime-interaction-adapter.js';
 import { invokeKimiMember } from './kimi/kimi-member-invocation.js';
 import {
@@ -126,34 +124,6 @@ function isAgentBusyError(err: unknown): boolean {
   return /turn\.agent_busy|another turn.*is active/i.test(err.message);
 }
 
-/** Issue #1798. DSH reports a missing credential reference as -32603 whose only
- *  payload is prose. Source evidence for "no structured payload": fixed DSH
- *  `packages/acp/acp/src/session.ts` calls `RequestError.internalError(undefined, detail)`,
- *  which is only valid under the SDK 1.4.0 signature `(data?, additionalMessage?)`.
- *  Match the two wordings DSH actually emits, and nothing wider. Both are anchored
- *  to their plugin prefix so unrelated MCP/other errors cannot be captured:
- *    llm-pi-ai: no credential for provider route "<route>"; its profile resolves <REF>, which is not set
- *    llm-deepseek: no API key for provider route "<route>"; store <REF> through the credentials service
- *  Deliberately NOT matched: 401/403/429, timeouts, MCP server errors, or any
- *  generic mention of "key" — those keep their existing classification. */
-const CREDENTIAL_MISSING_RE =
-  /llm-pi-ai:\s*no credential for provider route\s+"([^"]+)"[\s\S]*?resolves\s+([A-Za-z_][A-Za-z0-9_]*)\s*,\s*which is not set/i;
-const MISSING_API_KEY_RE =
-  /llm-deepseek:\s*no API key for provider route\s+"([^"]+)"[\s\S]*?store\s+([A-Za-z_][A-Za-z0-9_]*)\s+through the credentials service/i;
-
-/** Bounded extraction of the route and credential reference from DSH's message.
- *  Values are echoed into a user-facing string, so they pass through the
- *  repository secret sanitizer BEFORE any length bound — truncating first would
- *  strip a token's identifying prefix and defeat redaction (F212 KD-2). */
-function extractMissingCredential(fullMsg: string): { route: string; reference?: string } | null {
-  const scrub = (value: string) => excerptSanitizedStderr(value, { edge: 'head', maxLength: 120 }).replace(/\s+$/, '');
-  const detailed = CREDENTIAL_MISSING_RE.exec(fullMsg);
-  if (detailed) return { route: scrub(detailed[1]), reference: scrub(detailed[2]) };
-  const official = MISSING_API_KEY_RE.exec(fullMsg);
-  if (official) return { route: scrub(official[1]), reference: scrub(official[2]) };
-  return null;
-}
-
 function sleepWithAbort(ms: number, signal?: AbortSignal): Promise<void> {
   return new Promise((resolve, reject) => {
     if (signal?.aborted) {
@@ -188,6 +158,8 @@ type PromptPhase =
   | 'busy_backoff';
 
 export interface AcpAgentServiceConfig {
+  /** Factory admitted the reviewed Desktop turn bridge for this pooled carrier. */
+  dshTurnInput?: boolean;
   executionApproval?: 'auto' | 'ask_user';
   defaultPermissionDecision?: 'allow' | 'reject';
   /** Factory-verified installed native DSH, separate from ordinary pooled sessions. */
@@ -255,6 +227,7 @@ export class AcpAgentService implements AgentService {
    */
   readonly windowsProviderHosts = false;
   private readonly nativeDsh?: DshNativeLaunch;
+  private readonly dshTurnInput: boolean;
   private readonly nativeKimi?: KimiNativeLaunch;
   private readonly antigravity?: AgyAcpConfig;
   readonly catId: CatId;
@@ -296,6 +269,7 @@ export class AcpAgentService implements AgentService {
   }
 
   constructor(config: AcpAgentServiceConfig) {
+    this.dshTurnInput = config.dshTurnInput === true;
     this.nativeDsh = config.nativeDsh;
     this.nativeKimi = config.nativeKimi;
     this.antigravity = config.antigravity;
@@ -328,40 +302,20 @@ export class AcpAgentService implements AgentService {
 
   /** Resolve the same existing MCP sources before admission can wait for a process. */
   async captureInvocationOptions(input: Parameters<NonNullable<AgentService['captureInvocationOptions']>>[0]) {
-    const userProjectRoot = input.workingDirectory;
     const mcpSupport = input.mcpSupport ?? this.mcpSupportEnabled;
-    const mcpWhitelist = input.mcpWhitelist ?? this.mcpWhitelist;
-    let baseMcpServers: AcpMcpServer[];
-    if (!mcpSupport) {
-      baseMcpServers = [];
-    } else if (mcpWhitelist !== null) {
-      const binaryRoot = resolveBinaryRoot(this.projectRoot);
-      const capabilitiesRoot = await resolveInvokeCapabilityRoot(binaryRoot);
-      const {
-        config: capConfig,
-        configSourceRoot,
-        accessScope,
-      } = readInvocationMcpConfig(capabilitiesRoot, userProjectRoot);
-      assertMappedCapabilitySource(capConfig !== null, binaryRoot, capabilitiesRoot);
-      const disabled = resolveDisabledServerIds(this.projectRoot, this.catId as string, capConfig, { accessScope });
-      baseMcpServers = await resolveAcpMcpServers(this.projectRoot, [...mcpWhitelist], undefined, {
-        mcpSupport,
-        disabledServerIds: disabled,
-        catId: this.catId as string,
-        capabilitiesConfig: capConfig,
-        configSourceRoot,
-        accessScope,
-      });
-    } else {
-      baseMcpServers = this.mcpServers;
-    }
-    let invokeServers = baseMcpServers;
-    if (mcpSupport && userProjectRoot && userProjectRoot !== this.projectRoot) {
-      const baseNames = new Set(baseMcpServers.map((s) => s.name));
-      const userServers = resolveUserProjectMcpServers(userProjectRoot, baseNames);
-      if (userServers.length > 0) invokeServers = [...baseMcpServers, ...userServers];
-    }
-    return { frozenAcpMcpServers: captureSessionMcpServers(invokeServers) };
+    const frozenAcpMcpServers = await captureAcpMcpSources({
+      projectRoot: this.projectRoot,
+      catId: this.catId as string,
+      mcpSupport,
+      mcpWhitelist: input.mcpWhitelist ?? this.mcpWhitelist,
+      userProjectRoot: input.workingDirectory,
+      legacyServers: this.mcpServers,
+    });
+    const toolIssues = mcpSupport ? invocationPluginMcpIssues(input.mcpWhitelist ?? this.mcpWhitelist) : [];
+    return {
+      frozenAcpMcpServers,
+      ...(toolIssues.length ? { frozenAcpMcpIssues: toolIssues } : {}),
+    };
   }
 
   /**
@@ -408,11 +362,12 @@ export class AcpAgentService implements AgentService {
   }
 
   freshnessCarrierCapability(): import('../../../types.js').AgentFreshnessCarrierCapability {
+    // Factory admission verifies the bridge; each invocation still requires a successful wire handshake.
     return {
       provider: this.antigravity ? 'google' : 'other',
       carrier: this.antigravity ? 'agy_acp' : 'other',
-      deliverySemantics: 'unsupported',
-      activeInvocationGuidance: 'unsupported',
+      deliverySemantics: this.dshTurnInput ? 'exact_active_turn' : 'unsupported',
+      activeInvocationGuidance: this.dshTurnInput ? 'supported' : 'unsupported',
     };
   }
 
@@ -483,6 +438,7 @@ export class AcpAgentService implements AgentService {
           while (true) {
             const next = await stream.next();
             if (next.done) {
+              if (next.value === 'cancelled' && !signal?.aborted) throw new AcpPromptCancelledError();
               if (this.antigravity && next.value !== 'end_turn')
                 throw new Error(`AGY ACP prompt stopped: ${String(next.value)}`);
               if (!signal?.aborted && typeof next.value === 'string' && next.value !== 'end_turn')
@@ -603,7 +559,7 @@ export class AcpAgentService implements AgentService {
     const ctx = { catId: this.catId, threadId, invocationId };
     // F197 KD-5: per-invocation transformer state for toolCallId dedup + lifecycle tracking.
     // Lifecycle = ACP session/invocation (this generator) — GC'd when invoke() returns.
-    const acpState = createAcpSessionState();
+    let acpState = createAcpSessionState();
 
     // Window 1: pre-aborted signal short-circuits immediately
     if (options?.signal?.aborted) {
@@ -634,9 +590,16 @@ export class AcpAgentService implements AgentService {
     let invokeServers: AcpMcpServer[];
     let preparingMcp = true;
     try {
-      invokeServers =
-        options?.frozenAcpMcpServers ??
-        (await this.captureInvocationOptions({ workingDirectory: options?.workingDirectory })).frozenAcpMcpServers;
+      const captured = options?.frozenAcpMcpServers
+        ? { frozenAcpMcpServers: options.frozenAcpMcpServers, frozenAcpMcpIssues: options.frozenAcpMcpIssues }
+        : await this.captureInvocationOptions({ workingDirectory: options?.workingDirectory });
+      invokeServers = captured.frozenAcpMcpServers;
+      if (captured.frozenAcpMcpIssues?.length) {
+        const unavailable = captured.frozenAcpMcpIssues.map(({ capabilityId }) => capabilityId).join(', ');
+        const content = `可选插件工具定义无效，以下能力暂不可用：${unavailable}。其他工具不受本次限制；任务需要这些能力时请明确说明不可用，不得声称已执行。`;
+        yield { type: 'system_info', catId: this.catId, content, timestamp: Date.now() };
+        prompt = `${prompt}\n\n[Host 工具状态]\n${content}`;
+      }
       options?.signal?.throwIfAborted();
       preparingMcp = false;
       lease = await this.pool.acquire(this.poolKey, { sessionId: options?.sessionId });
@@ -708,6 +671,7 @@ export class AcpAgentService implements AgentService {
     let deferredTerminal: { metadata: MessageMetadata; unconfirmed: boolean } | undefined;
     /** F306 Phase C: iCode ask-user bridge active for this turn. */
     let requestInputBridge: AcpRequestInputBridge | null = null;
+    let dshTurn: DshTurnInput | undefined;
     let agyActive = true;
     let permissionLifetime: AbortController | undefined;
     let permissionHandler: AcpPermissionHandler | undefined;
@@ -1149,6 +1113,17 @@ export class AcpAgentService implements AgentService {
       log.info({ ...ctx, sessionId, promptDigest, idleTtlMs: this.idleTtlMs }, 'ACP promptStream starting');
       eventCount = 0;
       let hasResponseOutput = false;
+      if (this.dshTurnInput) {
+        const dshClient = lease.client as unknown as AcpClient;
+        const capability = await dshClient.probeTurnBridge();
+        if (options?.signal?.aborted) {
+          yield { type: 'done', catId: this.catId, metadata, timestamp: Date.now() };
+          return;
+        }
+        const bridgeSteerAvailable = capability?.steer === true && capability.nativeTurns === true;
+        if (bridgeSteerAvailable && options?.activeRunDispatch)
+          dshTurn = new DshTurnInput(dshClient, sessionId, options);
+      }
       promptPhase = 'active_unacknowledged';
       for await (const event of this.promptStreamWithBusyRetry(
         client,
@@ -1282,6 +1257,10 @@ export class AcpAgentService implements AgentService {
           // Repoint the outer sessionId so the abort handler cancels the fresh
           // session, not the dead resumed one.
           sessionId = freshSessionId;
+          if (dshTurn && options) {
+            await dshTurn.dispose();
+            dshTurn = new DshTurnInput(lease.client as unknown as AcpClient, freshSessionId, options);
+          }
 
           // The replacement session must serve ask_user too. Rebind the
           // request_input bridge to the fresh session, clear the replaced
@@ -1367,7 +1346,8 @@ export class AcpAgentService implements AgentService {
               ? `${options.resumeFallbackSystemPrompt}\n\n${prompt}`
               : prompt;
 
-          const retryState = createAcpSessionState();
+          acpState = createAcpSessionState();
+          const retryState = acpState;
           let retryEventCount = 0;
           let retryHasResponseOutput = false;
           log.info({ ...ctx, sessionId: freshSessionId }, '#1091: retry promptStream on fresh session');
@@ -1437,6 +1417,11 @@ export class AcpAgentService implements AgentService {
           if (sessionId && (retryErr instanceof AcpTimeoutError || retryErr instanceof AcpStreamIdleError)) {
             sealActivePromptSession(sessionId);
           }
+          if (retryErr instanceof AcpTimeoutError || retryErr instanceof AcpStreamIdleError) {
+            yield* settlePendingAcpRecalls(acpState, this.catId, metadata, 'timeout');
+          } else if (retryErr instanceof AcpSessionCancelledError || retryErr instanceof AcpPromptCancelledError) {
+            yield* settlePendingAcpRecalls(acpState, this.catId, metadata, 'cancelled');
+          }
           const retryErrMsg = retryErr instanceof Error ? retryErr.message : String(retryErr);
           log.error({ ...ctx, sessionId, err: retryErrMsg }, '#1091: retry with fresh session also failed');
           const terminalFailure = retryErr instanceof AcpTerminalFailureError;
@@ -1481,6 +1466,11 @@ export class AcpAgentService implements AgentService {
       if (sessionId && (err instanceof AcpTimeoutError || err instanceof AcpStreamIdleError)) {
         sealActivePromptSession(sessionId);
       }
+      if (err instanceof AcpTimeoutError || err instanceof AcpStreamIdleError) {
+        yield* settlePendingAcpRecalls(acpState, this.catId, metadata, 'timeout');
+      } else if (err instanceof AcpSessionCancelledError || err instanceof AcpPromptCancelledError) {
+        yield* settlePendingAcpRecalls(acpState, this.catId, metadata, 'cancelled');
+      }
       const waitedMs = promptStreamStartedAt ? Date.now() - promptStreamStartedAt : 0;
       // P1: stderr may arrive after timeout — give a grace window for late capacity signals
       if (!capacitySignal && err instanceof AcpTimeoutError) {
@@ -1515,6 +1505,7 @@ export class AcpAgentService implements AgentService {
       if (sessionId && client.hasPromptFinalResponse?.(sessionId) === true) markPromptAcknowledged();
       deferredTerminal = { metadata, unconfirmed: promptStopUnconfirmed() };
     } finally {
+      const [dshSettlement] = await Promise.allSettled([dshTurn?.dispose()]);
       if (sessionId) cancelActivePromptSession(sessionId);
       agyActive = false;
       permissionLifetime?.abort('provider_cancelled');
@@ -1605,6 +1596,7 @@ export class AcpAgentService implements AgentService {
           }
           throw releaseError;
         }
+        if (dshSettlement.status === 'rejected') throw dshSettlement.reason;
         if (deferredTerminal) {
           yield {
             type: 'done',
@@ -1683,6 +1675,12 @@ function hasAcpResponseOutput(message: AgentMessage): boolean {
 }
 
 /** Some providers resolve failed turns as end_turn without forwarding a cause. */
+class AcpPromptCancelledError extends Error {
+  constructor() {
+    super('ACP prompt stopped: cancelled');
+  }
+}
+
 class AcpEmptyResponseError extends Error {
   constructor(providerName: string) {
     super(

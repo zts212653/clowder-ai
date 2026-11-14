@@ -72,7 +72,7 @@ import { CrossThreadLetter } from './message-v2/CrossThreadLetter';
 import { isLastOfOwnRun } from './own-message-run';
 import { PawFeelDispositionDock } from './paw-feel/PawFeelDispositionDock';
 import { ReplyPill } from './ReplyPill';
-import { RoutingWarningNotice } from './RoutingWarningNotice';
+import { FailedHandoffNotice, RoutingWarningNotice } from './RoutingWarningNotice';
 import { MatterRecallLine } from './reply-layers/MatterRecallLine';
 import { ReplyLayers } from './reply-layers/ReplyLayers';
 import { ReplyOutputBody } from './reply-layers/ReplyOutputBody';
@@ -1188,6 +1188,7 @@ function ChatMessageContent({
           <AppendedInputReceipts response={message} timelineMessages={threadMessages} getCatById={getCatById} />
           <GenerationMessagesNotice response={message} threadId={renderThreadId} timelineMessages={threadMessages} />
           {dispatchLine}
+          <RoutingWarningNotice warnings={message.extra?.routingWarnings} replyV2={shellPresentation === 'v2'} />
           {shellPresentation === 'v2' ? cloudBindingCard : null}
         </>
       }
@@ -1308,6 +1309,9 @@ function ChatMessageContent({
           nativeOutput={nativeReplyOutput}
         />
       ) : null}
+      {shellPresentation === 'v2' && message.extra?.routingWarnings && (
+        <FailedHandoffNotice warnings={message.extra.routingWarnings} />
+      )}
     </MessageBubble>
   );
 }

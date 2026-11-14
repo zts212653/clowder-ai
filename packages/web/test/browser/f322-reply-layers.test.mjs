@@ -156,6 +156,10 @@ function fixtureApiResponse(pathname) {
       return { variables: [] };
     case '/api/config/cat-order':
       return { catOrder: [] };
+    case '/api/config/process-talk':
+      return { ownerUserId: 'owner-1', mode: 'whole' };
+    case '/api/plugin-manager/addressed-targets':
+      return { targets: [], knownTargets: [] };
     default:
       return null;
   }
@@ -222,6 +226,48 @@ async function open({
 }
 
 const measure = (page, id) => page.evaluate(measureReply(), id);
+
+test('v2 failed handoff stays a muted reply note on desktop and narrow screens', async () => {
+  for (const [width, viewportWidth, base] of [
+    [720, 1440, 'light'],
+    [360, 390, 'light'],
+    [360, 390, 'dark'],
+  ]) {
+    const { page, errors, unexpected } = await open({ width, viewportWidth, base });
+    try {
+      const row = page.locator('[data-message-id="r-failed"]');
+      const notice = row.getByTestId('failed-handoff-notice');
+      await notice.waitFor();
+      assert.match(await notice.innerText(), /正文未交接给 @opus.*引用回复/);
+      assert.equal(await row.getByTestId('reply-status').count(), 1);
+      assert.equal(await row.getByTestId('routing-warning').count(), 0);
+      const styles = await notice.evaluate((element) => {
+        const style = getComputedStyle(element);
+        return {
+          background: style.backgroundColor,
+          border: style.borderTopWidth,
+          overflow: element.scrollWidth > element.clientWidth + 1,
+        };
+      });
+      assert.deepEqual(styles, { background: 'rgba(0, 0, 0, 0)', border: '0px', overflow: false });
+      if (evidenceDir) {
+        await row.screenshot({ path: path.join(evidenceDir, `failed-handoff-${base}-${viewportWidth}.png`) });
+      }
+      await page.evaluate(() => window.__replies.setLanguage('en'));
+      assert.match(await notice.innerText(), /didn’t hand off to @opus.*quote it/);
+      if (viewportWidth === 1440) {
+        await row.hover();
+        const actions = page.locator('[data-message-actions-owner="r-failed"]');
+        await actions.getByRole('button', { name: 'Reply', exact: true }).click();
+        assert.equal(await page.getByTestId('quoted-message').innerText(), 'r-failed');
+      }
+      assert.deepEqual(unexpected, []);
+      assert.deepEqual(errors, []);
+    } finally {
+      await page.close();
+    }
+  }
+});
 
 test('Activity hover and focus preserve containment, geometry and record disclosure', async () => {
   const { page, errors, unexpected } = await open({ width: 720, viewportWidth: 1440 });

@@ -426,7 +426,9 @@ export const postMessageInputSchema = {
         .max(128)
         .regex(/^[A-Za-z0-9._:-]+$/)
         .optional()
-        .describe('Existing coordination id to continue explicitly. Usually omit: the server mints/inherits it.'),
+        .describe(
+          'Coordination id to continue or close explicitly (e.g., an outbound active id returned in this invocation). Usually omit: the server mints/inherits it.',
+        ),
       subjectRef: z
         .string()
         .trim()
@@ -918,7 +920,9 @@ export const crossPostMessageInputSchema = {
         .max(128)
         .regex(/^[A-Za-z0-9._:-]+$/)
         .optional()
-        .describe('Existing coordination id to continue explicitly. Usually omit: the server mints/inherits it.'),
+        .describe(
+          'Coordination id to continue or close explicitly (e.g., an outbound active id returned in this invocation). Usually omit: the server mints/inherits it.',
+        ),
       subjectRef: z
         .string()
         .trim()
@@ -2884,14 +2888,23 @@ export const proposeProfileUpdateInputSchema = {
     .min(1)
     .optional()
     .describe(
-      'Optional exact message ID assertion. When omitted, the API derives the unambiguous origin from authenticated callback provenance; when supplied, it must match that origin.',
+      'Optional exact source assertion. A new request must match the authenticated invocation origin. On a retry, keep the original sourceMessageId or omit it; a supplied ID must match the saved proposal source, not replace it with a later trigger.',
+    ),
+  expectedRevision: z
+    .string()
+    .regex(/^sha256:[a-f0-9]{64}$/)
+    .optional()
+    .describe(
+      'Revision returned by reading the same profile layer (or emptyRevision from its no_primer/no_corpus/no_capsule response). Rejects a stale whole-file draft before submission. Keep it unchanged when retrying the same request.',
     ),
   clientRequestId: z
     .string()
     .min(1)
     .max(200)
     .optional()
-    .describe('Optional idempotency key. Resending with the same value returns the same proposalId.'),
+    .describe(
+      'Optional stable retry key. The same request recovers its original proposal; changed content, target, or revision returns a conflict. Use a new key for a revised draft.',
+    ),
 };
 
 export async function handleProposeProfileUpdate(input: {
@@ -2900,6 +2913,7 @@ export async function handleProposeProfileUpdate(input: {
   signalKind: 'cat-declared' | 'cvo-instructed';
   targetLayer?: ProfileUpdateTargetLayer | undefined;
   sourceMessageId?: string | undefined;
+  expectedRevision?: string | undefined;
   clientRequestId?: string | undefined;
   agentKeyCatId?: string | undefined;
 }): Promise<ToolResult> {
@@ -2909,6 +2923,7 @@ export async function handleProposeProfileUpdate(input: {
     afterContent: input.afterContent,
     rationale: input.rationale,
     signalKind: input.signalKind,
+    ...(input.expectedRevision ? { expectedRevision: input.expectedRevision } : {}),
     ...(input.targetLayer ? { targetLayer: input.targetLayer } : {}),
     ...(input.sourceMessageId ? { sourceMessageId: input.sourceMessageId } : {}),
     clientRequestId: input.clientRequestId ?? randomUUID(),
@@ -2939,20 +2954,12 @@ const proactiveMemoryAbstentionToolset = createProactiveMemoryAbstentionTool(cal
 const deferredPersonMemoryToolset = createDeferredPersonMemoryTool(callbackPost);
 export const { handleProposePersonMemory } = personMemoryProposalToolset;
 export const { handleRecordProactiveMemoryAbstention } = proactiveMemoryAbstentionToolset;
-export const {
-  handleDeferPersonMemoryDelta,
-  handleDisposeDeferredPersonMemory,
-  handleWithdrawDeferredPersonMemory,
-  handleForgetDeferredPersonMemory,
-} = deferredPersonMemoryToolset;
+export const { handleDeferPersonMemoryDelta, handleDisposeDeferredPersonMemory } = deferredPersonMemoryToolset;
 export const {
   handleGetPersonMemoryProposalStatus,
   handleRecallPersonRelationship,
   handleDrillPersonMemory,
   handleRevisePersonMemory,
-  handleRedactPersonMemoryItem,
-  handleForgetPerson,
-  handleForgetPersonMemoryProposal,
 } = personMemoryLifecycleToolset;
 export const { handlePrepareMemoryContext, handleDrillMemoryCue, handleRecordMemoryCueOutcome } = memoryCueToolset;
 
@@ -3150,11 +3157,17 @@ export const proposeTasteInputSchema = {
   privacy: z
     .enum(['public', 'sensitive'])
     .describe(
-      'public: vignette goes to docs/taste/vignettes/ (visible in repo). ' +
+      'public: owner approval shares the vignette in the private home repository, never on the public internet. ' +
         'sensitive: vignette goes to private/taste/ (gitignored, local only)',
     )
     .optional(),
-  sourceMessageId: z.string().min(1).optional().describe('Message ID where the taste signal was observed'),
+  sourceMessageId: z
+    .string()
+    .min(1)
+    .optional()
+    .describe(
+      'Optional exact source assertion. A new request must match the authenticated invocation origin. On a retry, keep the original sourceMessageId or omit it; a supplied ID must match the saved proposal source, not replace it with a later trigger.',
+    ),
   target: tasteCorrectionTargetInputSchema
     .optional()
     .describe(
@@ -3657,7 +3670,7 @@ export const callbackTools = [
       'Scarce dossier engagementPolicy seats receive effectClass=fyi or coordination.phase=terminal unread without waking; deliveredWithoutWake confirms delivery, not reading. Active coordination, actions and localReviewVerdict retain their wake. ' +
       'GOTCHA: action is Task-backed implement work: subjectRef=subject:task:<taskId>, terminalPredicate={kind:"task_done"}, explicit clientMessageId and exactly one targetCats entry. For ordinary work (work Task, no namespaced subject or entrusted contract), send expectedOwnerRevision from list_tasks and optionally stopPreviousExecution; the server reuses Task/Message/Queue, reports queueing separately from execution, and never requires lease replacement or another approval for the same authorized work. Ordinary existing-owner notifications need no action; removing action does not authorize new work. ' +
       'For a direct Claim/Release chain, pass coordination.phase=active on work hops and terminal on the final delivery; terminal recipients may clean-stop without another @. ' +
-      'An unaddressed terminal transition whose id or bound subject conflicts with the incoming coordination fails with HTTP 409 before persistence. After an incoming terminal, any authored target is genuinely new active work even if the caller repeats a stale terminal label. ' +
+      'A terminal transition may close the incoming coordination or an active coordination started by this invocation; unproven or conflicting ids/subjects fail with HTTP 409 before persistence. After an incoming terminal, repeating that incoming lineage with an authored target starts new active work. ' +
       'A reply after terminal is a quiet courtesy ACK only when it has no explicit routing credential; line-start @mentions and structured targetCats always start a new active routing generation and remain subject to the normal loop-streak guard. ' +
       'For a local review result, route an ordinary @author message with localReviewVerdict + exact reviewedHeadSha + reviewSubjectRef + acceptedSourceRef + acceptedRevision + clientMessageId. This durable fact needs no action lease, coordination generation, replacement, or issuer route. Public prose is never parsed. ' +
       'Governed lease work alone uses existing_standing + groundingEvidenceRef or returnToPredecessor. Ordinary Task handoff uses the current assignment revision; its original home, source, approvals and WIP remain canonical. ' +
@@ -3907,7 +3920,7 @@ export const callbackTools = [
       'GOTCHA: Requires threadId — use feat_index/list_threads plus thread truth to verify the exact owning thread; never guess a nearby thread. ' +
       'PAW-FEEL: The original [爪感差: ...] message is already collected. Cross-post only a marker-free sourceMessageId reference to a verified owner; if none exists, use cat_cafe_propose_thread (F128). A genuinely new authorization uses effectClass=assign_work plus proposedAction for Approval Hub review; the same already-authorized ordinary Task uses its native handoff and creates no second card. ' +
       'GOTCHA: For Claim/Release coordination, pass coordination.phase=active on Claim/work hops and terminal on Release. ' +
-      'An unaddressed terminal transition whose id or bound subject conflicts with the incoming coordination fails with HTTP 409 before persistence. Cross-thread routing credentials after an incoming terminal always name genuinely new active work. ' +
+      'A terminal transition may close the incoming coordination or an active coordination started by this invocation; unproven or conflicting ids/subjects fail with HTTP 409 before persistence. Repeating an incoming terminal lineage with cross-thread routing credentials starts new active work. ' +
       'For a local review result, route one ordinary @author cross-post with localReviewVerdict + exact reviewedHeadSha + reviewSubjectRef + acceptedSourceRef + acceptedRevision + clientMessageId. This durable fact needs no action lease, coordination generation, replacement, or issuer route; prose is never parsed. ' +
       'The server carries a stable id across active hops. Every cross-thread post supplies an explicit routing credential, so a line-start @mention or structured targetCats after terminal always starts a new active routing generation and remains subject to the normal loop-streak guard. ' +
       'If terminal reveals genuinely new work, start a new coordination with phase=active instead of ACKing the closed chain. ' +
@@ -3989,6 +4002,9 @@ export const callbackTools = [
     description:
       'Read a bounded list of durable tasks with optional threadId/catId/status/kind filters, or exact featureId matching canonical TaskItem.relatedFeatureId. ' +
       'Use when: resuming existing work and checking its current scope, status, authorization source or execution artifacts before asking the owner again; also for finding tasks, owners, blockers and feature work. ' +
+      'When resuming, reconcile Task status, saved why and closure evidence with the current request; done records an ended Task, not proof that every artifact is complete. ' +
+      'If the intended work or its authority remains unclear, clarify before writing: name the candidate works, or state the recorded result and the specific conflict and ask the one missing question. ' +
+      'Otherwise carry out the clearly authorized request through the existing Task lifecycle without asking again or silently reopening an ended Task. ' +
       'NOT for: creating or changing tasks (use cat_cafe_create_task or cat_cafe_update_task). ' +
       'Output: up to 50 tasks plus totalMatched/truncated; feature-filtered reads also return a content-free queryRef for owner verification. ' +
       'GOTCHA: overview why fields can be anchored; pass taskId to retrieve one task with its full untruncated why. Drill the original authorization and receipts when needed; discovery grants no new authority, and search summaries do not replace current Task truth.',
@@ -4540,7 +4556,10 @@ export const callbackTools = [
       'The 7 taste dimensions cover relationship-stance, cognitive-honesty, architecture-aesthetics, ' +
       'visual-quality, authentic-expression, system-philosophy, and creative-craft. ' +
       'GOTCHA: relationship-stance stores a reusable stance such as partner-not-tool, not a personal fact about the current operator. Preserve original language in quote — taste signals lose meaning when paraphrased.' +
-      ' Use optional takeaway for a one-sentence hypothesis of what {{coCreator.name}} prefers; approval covers that hypothesis with the quote and scene.',
+      ' Use optional takeaway for a one-sentence hypothesis of what {{coCreator.name}} prefers; approval covers that hypothesis with the quote and scene. ' +
+      'New proposals bind to the authenticated origin message owned by the same user in this thread. On retries, both the current origin and saved original source must remain eligible. ' +
+      'Retry with the same clientRequestId, unchanged content and original explicit sourceMessageId (or omit it), including from a later invocation or after approval; a changed payload needs a new key. ' +
+      'Public means sharing within the private home repository after the owner approves the complete fields, not publishing on the internet.',
     inputSchema: proposeTasteInputSchema,
     handler: handleProposeTaste,
     governance: {

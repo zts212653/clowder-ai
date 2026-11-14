@@ -70,6 +70,21 @@ describe('GitPanel shell presentations', () => {
     });
   }
 
+  it('shows the bare-worktree explanation in v2 while keeping the readable commit log', async () => {
+    apiFetchMock.mockImplementation(async (url: string) => {
+      if (url.includes('git-log')) return Response.json(LOG);
+      if (url.includes('git-show')) return Response.json(SHOW);
+      if (url.includes('git-status') || url.includes('git-health')) {
+        return Response.json({ error: 'Git worktree required', code: 'git_worktree_required' }, { status: 409 });
+      }
+      return new Response('not found', { status: 404 });
+    });
+    await render();
+    expect(container.textContent).toContain(LOG.commits[0].subject);
+    expect(container.textContent).toContain('这是裸 Git 仓库；此视图需要工作树');
+    expect(container.textContent).not.toContain('"code":"git_worktree_required"');
+  });
+
   it.each(['commit', 'behind-main'] as const)('keeps classic %s subjects in the recovery primitive', async (kind) => {
     writeShellPresentation('classic');
     await render();

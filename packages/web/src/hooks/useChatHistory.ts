@@ -3,6 +3,7 @@
 import {
   type CliDiagnostics,
   mergeCodexStartupRecovery,
+  preserveInteractiveBlockStates,
   type ReplyPreview,
   timelineMessageKind,
 } from '@cat-cafe/shared';
@@ -26,6 +27,7 @@ import {
   findEarliestMessageByCursor,
   getMessageTimelineCursorTime,
   getMessageTimelineOrderTime,
+  isBeforeHistoryPageCursor,
 } from '@/stores/message-timeline';
 import { withQueuedInputPreviews } from '@/stores/queued-input-preview';
 import { ownsStreamedBody, withStreamedBodyOf } from '@/stores/streamed-body';
@@ -55,6 +57,7 @@ import {
   type SavedScrollState,
   saveChatScrollState,
 } from '@/utils/chat-scroll-memory';
+import { type ChatUserScrollGesture, registerChatScrollOwner } from '@/utils/chat-scroll-owner';
 import {
   findCrossPostTargetMessageId,
   peekPendingCrossPostScroll,
@@ -148,10 +151,7 @@ function bindReadingAbort<T>(receipt: Promise<T>, signal: AbortSignal | undefine
   return receipt.finally(() => signal.removeEventListener('abort', cancel));
 }
 
-export interface ChatUserScrollGesture {
-  scrollTo(top: number): boolean;
-  end(): void;
-}
+export type { ChatUserScrollGesture } from '@/utils/chat-scroll-owner';
 
 const taskCacheByThread = new Map<string, TaskItem[]>();
 // Sparse publication recovery must not move the ordinary older-page boundary.
@@ -422,7 +422,7 @@ function mergeRichPayload(
     seen.add(block.id);
     blocks.push(block);
   }
-  return { v: 1 as const, blocks };
+  return { v: 1 as const, blocks: preserveInteractiveBlockStates(blocks, fallback?.blocks ?? []) };
 }
 
 type RequiredMessageExtraFields = {
@@ -776,6 +776,23 @@ export function mergeReplaceHydrationMessages(
   }
 
   return { messages: mergedMsgs.map(withoutUnprovenOutputLayout), stats: { preservedLocalCount, mergedByIdCount } };
+}
+
+/**
+ * Whether a replace read left older pages loaded below the page's own boundary. Only local records
+ * count: what the page returned itself, sparse recovered rows older than its window included, is
+ * not a page the reader paged down to.
+ */
+function keepsOlderPagesLoaded(
+  merged: readonly ChatMessageData[],
+  pageMessages: readonly ChatMessageData[],
+  pageCursor: string,
+): boolean {
+  const pageIds = new Set(pageMessages.map((message) => message.id));
+  return merged.some(
+    (message) =>
+      !pageIds.has(message.id) && !message.id.startsWith('draft-') && isBeforeHistoryPageCursor(message, pageCursor),
+  );
 }
 
 /**
@@ -1682,9 +1699,14 @@ export function useChatHistory(threadId: string) {
           // 响应覆盖而不是合并。
           hydrateThread(fetchForThread, mergedMsgs, data.hasMore ?? false);
           restoreActiveFromDrafts(fetchForThread, data.messages ?? []);
+          // The page boundary follows what stays loaded: a read that unloaded the older pages (a
+          // recovery round, an IndexedDB copy) restarts it at this page, while older pages the merge
+          // kept still own the deeper boundary the reader already paged down to.
           if (
             typeof data.historyPageCursor === 'string' &&
-            (cursor || !targetProjection?.messages.length || !historyPageCursorByThread.has(fetchForThread))
+            (cursor ||
+              !historyPageCursorByThread.has(fetchForThread) ||
+              !keepsOlderPagesLoaded(mergedMsgs, historyMsgs, data.historyPageCursor))
           ) {
             historyPageCursorByThread.set(fetchForThread, data.historyPageCursor);
           }
@@ -1812,6 +1834,7 @@ export function useChatHistory(threadId: string) {
         // wait immediately without cancelling that shared fetch or its hydration.
         void fetchHistory(undefined, {
           replace: true,
+          afterCurrentGet: true,
           retryTimeoutWhile: () =>
             readingRefreshRef.current === operation &&
             generation === restoreGenerationRef.current &&
@@ -2996,6 +3019,11 @@ export function useChatHistory(threadId: string) {
       },
     };
   }, [threadId, markScrollIntent, cancelPendingRestore, clearUserScrollIntent]);
+
+  useLayoutEffect(() => {
+    const viewport = scrollContainerRef.current;
+    return viewport ? registerChatScrollOwner(viewport, beginUserScroll) : undefined;
+  }, [beginUserScroll]);
 
   return {
     captureReadingPosition,

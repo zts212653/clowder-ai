@@ -246,6 +246,7 @@ export type {
   McpSyncState,
   McpToolInfo,
   McpTransport,
+  PluginMcpToolIssue,
   ProbeState,
   SkillHealthSummary,
 } from './capability.js';
@@ -1029,6 +1030,7 @@ export {
 export { type ContextSourceEvidenceV1, contextSourceEvidenceV1Schema } from './memory-cue-context.js';
 export * from './memory-owner-lifecycle.js';
 export * from './memory-owner-views.js';
+export * from './memory-read-usage.js';
 export {
   ASR_PERSON_MEMORY_REFLEX_ENTRY_V1,
   type AsrPersonMemoryDynamicSceneEntryV1,
@@ -1518,6 +1520,15 @@ export type {
   RefluxCategory,
   RefluxPattern,
 } from './reflux.js';
+export type {
+  RememberGroup,
+  RememberGroupRow,
+  RememberInput,
+  RememberItem,
+  RememberResult,
+  RememberRowResult,
+} from './remember.js';
+export { REMEMBER_TARGETS, rememberInputSchema, rememberItemSchema } from './remember.js';
 // F299 Phase D: transcript-owned provider request generations.
 export * from './request-generation-envelope.js';
 // Resolution types (F076 Phase 2 — 风险消解)
@@ -1717,6 +1728,8 @@ export type {
   TaskItem,
   TaskKind,
   TaskProbeSpec,
+  TaskRecoveryIncident,
+  TaskRecoveryProjection,
   TaskStatus,
   UpdateTaskInput,
 } from './task.js';

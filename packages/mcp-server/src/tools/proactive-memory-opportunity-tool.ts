@@ -3,7 +3,6 @@ import {
   type DeferredPersonMemoryInput,
   deferredPersonMemoryClerkDispositionInputSchema,
   deferredPersonMemoryInputSchema,
-  deferredPersonMemoryReceiptIdSchema,
   type ProactiveMemoryAbstentionInput,
   proactiveMemoryAbstentionInputSchema,
 } from '@cat-cafe/shared';
@@ -87,12 +86,6 @@ export function createDeferredPersonMemoryTool(callbackPost: CallbackPost) {
     }
   }
 
-  const handleWithdrawDeferredPersonMemory = (input: { receiptId: string }) =>
-    callbackPost('/api/callbacks/person-memory/deferred/withdraw', { receiptId: input.receiptId });
-
-  const handleForgetDeferredPersonMemory = (input: { receiptId: string }) =>
-    callbackPost('/api/callbacks/person-memory/deferred/forget', { receiptId: input.receiptId });
-
   async function handleDisposeDeferredPersonMemory(
     input: DeferredPersonMemoryClerkDispositionInput,
   ): Promise<ToolResult> {
@@ -111,16 +104,8 @@ export function createDeferredPersonMemoryTool(callbackPost: CallbackPost) {
     }
   }
 
-  const receiptInputSchema = {
-    receiptId: deferredPersonMemoryReceiptIdSchema.describe(
-      'Exact deferred receipt ID returned by cat_cafe_defer_person_memory_delta.',
-    ),
-  };
-
   return {
     handleDeferPersonMemoryDelta,
-    handleWithdrawDeferredPersonMemory,
-    handleForgetDeferredPersonMemory,
     handleDisposeDeferredPersonMemory,
     tool: defineCanonicalTool({
       name: 'cat_cafe_defer_person_memory_delta',
@@ -164,46 +149,6 @@ export function createDeferredPersonMemoryTool(callbackPost: CallbackPost) {
           standaloneReason: {
             disposition: 'accepted-boundary',
             kind: 'side-effect-boundary',
-            admissionRef: 'file:docs/features/F276-people-relationship-memory.md',
-          },
-        },
-      }),
-      defineCanonicalTool({
-        name: 'cat_cafe_withdraw_deferred_person_memory',
-        description:
-          'Withdraw one exact owner-private deferred person-memory receipt before it becomes a proposal. ' +
-          'This removes it from the daily queue, purges its subject/source payload, and allows a later fresh capture of the same delta. ' +
-          'NOT for an already-created F276 proposal; use the proposal card lifecycle for that.',
-        inputSchema: receiptInputSchema,
-        handler: handleWithdrawDeferredPersonMemory,
-        governance: {
-          implementationExport: 'handleWithdrawDeferredPersonMemory',
-          action: 'close',
-          risk: { level: 'write', openWorld: false },
-          runtimeProfiles: ['full'],
-          standaloneReason: {
-            disposition: 'accepted-boundary',
-            kind: 'side-effect-boundary',
-            admissionRef: 'file:docs/features/F276-people-relationship-memory.md',
-          },
-        },
-      }),
-      defineCanonicalTool({
-        name: 'cat_cafe_forget_deferred_person_memory',
-        description:
-          'Permanently purge one exact owner-private deferred person-memory receipt and every queue/dedupe locator. ' +
-          'Destructive; use only on the owner’s explicit request. Names and aliases are never accepted as purge coordinates. ' +
-          'If the receipt already created a proposal, this refuses the partial purge; use the exact F276 proposal hard-forget lifecycle instead.',
-        inputSchema: receiptInputSchema,
-        handler: handleForgetDeferredPersonMemory,
-        governance: {
-          implementationExport: 'handleForgetDeferredPersonMemory',
-          action: 'close',
-          risk: { level: 'destructive', openWorld: false },
-          runtimeProfiles: ['full'],
-          standaloneReason: {
-            disposition: 'accepted-boundary',
-            kind: 'destructive-boundary',
             admissionRef: 'file:docs/features/F276-people-relationship-memory.md',
           },
         },

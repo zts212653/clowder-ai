@@ -30,6 +30,24 @@ beforeEach(() => {
   vi.mocked(apiFetch).mockImplementation(async (path, init) => {
     if (path === '/api/session') return json({ userId: 'first-team-owner' });
     if (path === '/api/config/onboarding/entry') return json({ status: 'pending' });
+    if (path === '/api/cats/dsh-setup/inspect')
+      return json({
+        revision: 'a'.repeat(64),
+        provider: 'custom',
+        model: 'fixture',
+        providers: [{ id: 'custom', credential: 'configured', models: [{ id: 'fixture', label: 'Fixture' }] }],
+      });
+    if (path === '/api/cats/dsh-setup/prepare')
+      return json({
+        id: 'receipt',
+        command: 'dsh',
+        startupArgs: ['--profile', 'acp', '--patch', '/host/member.yml'],
+        env: { DSH_HOME: '/host/private' },
+        provider: 'custom',
+        model: 'fixture',
+      });
+    if (path.endsWith('/connection-check')) return json({ state: 'passed' });
+    if (path === '/api/cats/runtime-models') return json({ status: 'live', models: [], effortOptions: [] });
     if (path === '/api/cat-templates')
       return json({
         templates: [
@@ -63,6 +81,7 @@ beforeEach(() => {
               {
                 id: 'dsh',
                 label: 'DSH',
+                dshDesktop: true,
                 clientId: 'acp',
                 installed,
                 models: [],
@@ -115,18 +134,33 @@ it('blocks the default logged-out partner while keeping connection adjustment an
   expect(writes.map(([, init]) => JSON.parse(String(init?.body)).clientId)).toEqual(['openai', 'acp']);
 });
 
-it('detects and preselects a complete team, and creates it in one click with inherited defaults', async () => {
+it('preselects native clients, automatically prepares DSH and creates the complete team with inherited defaults', async () => {
   await mount();
   expect(host.querySelectorAll('input:checked')).toHaveLength(3);
   expect(host.textContent).toContain('负责方案和审查');
   expect(vi.mocked(apiFetch).mock.calls.some(([, init]) => init?.method)).toBe(false);
+  const dsh = host.querySelector<HTMLInputElement>('input[aria-label="加入 DSH 伙伴"]')!;
+  expect(dsh.disabled).toBe(false);
+  expect(dsh.checked).toBe(true);
+  expect(host.textContent).not.toContain('验证并使用此模型');
   await act(async () => button('一键创建 3 位伙伴').click());
-  const posts = vi.mocked(apiFetch).mock.calls.filter(([, init]) => init?.method === 'POST');
+  const posts = vi
+    .mocked(apiFetch)
+    .mock.calls.filter(([path, init]) => path === '/api/cats' && init?.method === 'POST');
   expect(posts).toHaveLength(3);
   expect(posts.every(([path]) => path === '/api/cats')).toBe(true);
-  for (const [, init] of posts)
-    expect(JSON.parse(String(init?.body))).toMatchObject({ configurationSource: 'native_tool', defaultModel: '' });
+  for (const [, init] of posts) {
+    const payload = JSON.parse(String(init?.body));
+    expect(payload).toMatchObject({
+      configurationSource: 'native_tool',
+      defaultModel: payload.clientId === 'acp' ? '["custom","fixture"]' : '',
+    });
+    if (payload.clientId === 'acp') expect(payload.env).toEqual({ DSH_HOME: '/host/private' });
+  }
   expect(created).toHaveBeenCalledOnce();
+  expect(vi.mocked(apiFetch).mock.calls.some(([path]) => path.endsWith('/test'))).toBe(false);
+  expect(vi.mocked(apiFetch).mock.calls.filter(([path]) => path.endsWith('/prepare'))).toHaveLength(1);
+  expect(vi.mocked(apiFetch).mock.calls.some(([path]) => path.endsWith('/connection-check'))).toBe(false);
 });
 
 it('shows installation help and blocks creation when no supported tools are found', async () => {
@@ -197,7 +231,9 @@ it('reads the real roster before recommending and does not overwrite an existing
   await mount();
   expect(host.textContent).toContain('我的架构师');
   await act(async () => button('一键创建 2 位伙伴').click());
-  const posts = vi.mocked(apiFetch).mock.calls.filter(([, init]) => init?.method === 'POST');
+  const posts = vi
+    .mocked(apiFetch)
+    .mock.calls.filter(([path, init]) => path === '/api/cats' && init?.method === 'POST');
   expect(posts).toHaveLength(2);
   expect(posts.some(([, init]) => String(init?.body).includes('owned-claude'))).toBe(false);
   expect(vi.mocked(apiFetch).mock.calls.some(([path]) => path === '/api/config/onboarding/entry')).toBe(false);

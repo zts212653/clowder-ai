@@ -2526,6 +2526,34 @@
     "owner": "codex-sol"
   },
   {
+    "id": "feature-f332-owner-person-maintenance",
+    "kind": "feature",
+    "sourceRef": {
+      "path": "docs/guides/person-memory-maintenance.md",
+      "anchor": "# 管理一条人物记忆或暂存线索"
+    },
+    "structureSource": {
+      "path": "packages/web/src/components/memory/page/MemoryPersonMaintenance.tsx",
+      "anchor": "MemoryPersonMaintenanceConfirm"
+    },
+    "bodySource": {
+      "path": "docs/guides/person-memory-maintenance.md",
+      "anchor": "# 管理一条人物记忆或暂存线索"
+    },
+    "contexts": ["concierge_open"],
+    "audience": ["cvo"],
+    "body": "想清理一条人物记忆，打开记忆→全部记忆→人物，在准确判断或经历旁选「忘掉这条内容」。页面下方还可撤回或永久遗忘暂存线索。结果未确认时，刷新后用「重试这次操作」继续原请求；原聊天会保留。",
+    "action": {
+      "type": "open_source",
+      "label": "查看操作步骤",
+      "sourceRef": {
+        "path": "docs/guides/person-memory-maintenance.md",
+        "anchor": "# 管理一条人物记忆或暂存线索"
+      }
+    },
+    "owner": "codex61-sol"
+  },
+  {
     "id": "feature-f281-exact-proposal-forget",
     "kind": "feature",
     "sourceRef": {
@@ -2533,22 +2561,22 @@
       "anchor": "AC-C1"
     },
     "structureSource": {
-      "path": "packages/mcp-server/src/tools/person-memory-lifecycle-tools.ts",
-      "anchor": "cat_cafe_forget_person_memory_proposal"
+      "path": "packages/web/src/components/shell/mailbox/PersonProposalForget.tsx",
+      "anchor": "PersonProposalForget"
     },
     "bodySource": {
-      "path": "docs/features/F281-feedback-channel-first-class.md",
-      "anchor": "owner-authenticated exact"
+      "path": "docs/guides/person-proposal-forget.md",
+      "anchor": "# 忘掉已处理的人物提议"
     },
     "contexts": ["thinking", "concierge_open"],
     "audience": ["cvo"],
-    "body": "拒绝一张尚未绑定人物的人物记忆提案后，如果还想连同拒因记录一起彻底删除，可以让猫按这张卡的 exact proposal ID 忘却；已绑定人物的记忆仍走整个人物关系忘却。",
+    "body": "想把已拒绝或撤回、尚未记成人物的提议连处理记录一起忘掉，可以打开小信箱→已处理的→记人的记忆，展开准确提议、核对关联范围，再勾选确认。原聊天会保留；已存人物请到记忆页的「人物」中处理。",
     "action": {
       "type": "open_source",
-      "label": "查看删除边界",
+      "label": "查看操作步骤",
       "sourceRef": {
-        "path": "docs/features/F281-feedback-channel-first-class.md",
-        "anchor": "AC-C1"
+        "path": "docs/guides/person-proposal-forget.md",
+        "anchor": "# 忘掉已处理的人物提议"
       }
     },
     "owner": "codex-sol"
@@ -3446,6 +3474,31 @@
     "owner": "codex61-sol"
   },
   {
+    "id": "feature-f321-person-event-read-counts",
+    "kind": "feature",
+    "sourceRef": {
+      "path": "docs/features/F321-memory-sky-experience-loop.md",
+      "anchor": "AC-A2"
+    },
+    "structureSource": {
+      "path": "packages/web/src/components/memory/page/MemoryReadUsage.tsx",
+      "anchor": "MemoryReadUsage"
+    },
+    "bodySource": {
+      "path": "packages/web/src/components/memory/page/MemoryReadUsage.tsx",
+      "anchor": "MemoryReadUsage"
+    },
+    "contexts": ["feature_dev", "concierge_open"],
+    "audience": ["cvo"],
+    "body": "想核对哪只猫读过某个人物或事件？在记忆页打开该条详情，查看“被猫翻到”和“统计范围与原使用记录”。当前版与旧版分开计数；历史未计入的次数仍是未知，读到也不代表采用。",
+    "action": {
+      "type": "open_concierge_draft",
+      "label": "查看人物或事件的读取记录",
+      "draftPrompt": "请打开 /memory?tab=all&shell=v2，带我从一条人物或事件详情查看已核实的读取次数、渠道与历史范围。先浏览，不替我更正或遗忘。"
+    },
+    "owner": "codex61-sol"
+  },
+  {
     "id": "feature-f321-owner-memory-actions",
     "kind": "feature",
     "sourceRef": {
@@ -3462,7 +3515,7 @@
     },
     "contexts": ["feature_dev", "concierge_open"],
     "audience": ["cvo"],
-    "body": "想核对或改掉已记住的内容，从侧栏“记忆”选品味、画像、人物、实体或事件，再打开条目看来源。概括候选可以先改再确认；“忘掉”会要求永久确认，记录引用的原始对话仍保留。",
+    "body": "想核对猫带上的记忆，在回复的召回标记或记忆页“召回记录”展开一行，分别打开原消息和记忆详情。保存修改后，两处旧行会标明已更正；之后读取这条记忆时用新版。“忘掉”会要求永久确认，原始对话仍保留。",
     "action": {
       "type": "open_concierge_draft",
       "label": "查看已记住的内容",

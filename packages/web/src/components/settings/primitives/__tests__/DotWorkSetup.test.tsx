@@ -16,7 +16,7 @@ import { ActionRenderer } from '../ActionRenderer';
 
 const archive =
   process.env.F202_DOT_UI_ARCHIVE ??
-  resolve('../api/src/domains/plugin/bundled-packages/chatgpt-dot/0.2.0-alpha.22/package.tgz');
+  resolve('../api/src/domains/plugin/bundled-packages/chatgpt-dot/0.2.0-alpha.52/package.tgz');
 const member = (path: string) => execFileSync('tar', ['-xOf', archive, `package/${path}`], { encoding: 'utf8' });
 const manifest = parse(member('plugin.yaml'));
 const mockApiFetch = vi.mocked(apiFetch);
@@ -68,13 +68,9 @@ describe('packed Dot Work setup through the real Host action renderer', () => {
   });
 
   it.each([
-    ['fresh', 'connection'],
-    ['expired', 'connection'],
-    ['fresh', 'temporaryEndpoint'],
-    ['expired', 'temporaryEndpoint'],
-    ['fresh', 'longLivedEndpoint'],
-    ['expired', 'longLivedEndpoint'],
-  ])('%s pairing: %s message stays copyable while subscription advances to roundtrip', async (initial, source) => {
+    'fresh',
+    'expired',
+  ])('%s pairing: subscription message stays copyable while connection advances', async (initial) => {
     const now = Date.now();
     const old = {
       attemptId: 'old',
@@ -117,11 +113,9 @@ describe('packed Dot Work setup through the real Host action renderer', () => {
     act(() =>
       root.render(
         <>
-          {source !== 'connection' && (
-            <section data-testid="entry">
-              <ActionRenderer target={target} operation={operation(source)} />
-            </section>
-          )}
+          <section data-testid="entry">
+            <ActionRenderer target={target} operation={operation('subscription')} />
+          </section>
           <section data-testid="connection">
             <ActionRenderer target={target} operation={operation('connection')} />
           </section>
@@ -131,29 +125,30 @@ describe('packed Dot Work setup through the real Host action renderer', () => {
     await act(async () => {
       await vi.advanceTimersByTimeAsync(0);
     });
-    const scope = container.querySelector(`[data-testid="${source === 'connection' ? 'connection' : 'entry'}"]`)!;
-    const button = [...scope.querySelectorAll('button')].find((item) => item.textContent === '获取连接消息');
+    const scope = container.querySelector('[data-testid="entry"]')!;
+    const button = [...scope.querySelectorAll('button')].find((item) => item.textContent === '生成订阅消息');
     expect(button).toBeDefined();
     await act(async () => {
       button!.click();
     });
-    if (source !== 'connection')
-      await act(async () => {
-        await vi.advanceTimersByTimeAsync(2500);
-      });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2500);
+    });
     const connectionSection = container.querySelector('[data-testid="connection"]')!;
-    expect(connectionSection.textContent).toContain('等待 ChatGPT 连接');
+    expect(connectionSection.textContent).toContain('等待订阅');
     expect(container.textContent).toContain(instructions);
     expect([...container.querySelectorAll('button')].some((item) => item.textContent === '复制')).toBe(true);
     subscribed = true;
     await act(async () => {
       await vi.advanceTimersByTimeAsync(2500);
     });
+    const verifying = connectionSection.querySelector(`[data-testid="${manifest.pluginId}-row-verification-required"]`);
+    expect(verifying?.textContent).toContain('正在自动验证新的连接');
     expect(
       connectionSection.querySelector(
         `[data-testid="${manifest.pluginId}-row-verification-required-action-roundtrip"]`,
       ),
-    ).not.toBeNull();
+    ).toBeNull();
     expect(container.textContent).toContain(instructions);
   });
 });

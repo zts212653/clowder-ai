@@ -294,7 +294,6 @@ export function useMemberEditor(
   };
   return {
     draft,
-    setPreparedRuntime: (runtime: RuntimeChoice) => setDraft((previous) => ({ ...previous, preparedRuntime: runtime })),
     accounts,
     templates,
     ready,

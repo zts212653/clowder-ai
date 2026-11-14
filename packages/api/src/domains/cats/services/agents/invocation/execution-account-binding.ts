@@ -206,6 +206,8 @@ export function freezeExecutionAccountBinding(input: {
       `account "${account.id}" is configured as api_key but has no API key set — add the key in Hub > account settings`,
     );
   const resolvedAccount = account ? deepFreeze(structuredClone(account)) : null;
+  if (resolvedAccount?.agy && (catConfig?.agyProfile?.carrier !== 'native' || catConfig.carrier === 'acp'))
+    throw new Error('F320 AGY 文件登录目前用于 Native；ACP 请继续使用其独立官方登录');
   const accountEnv = captureExecutionEnvironment(catConfig, resolvedAccount, input.model);
   const codexAccountLaunch =
     provider === 'openai' && resolvedAccount

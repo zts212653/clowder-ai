@@ -53,7 +53,9 @@ test('DSH discovery, creation and both model catalog paths never initialize an a
     spawns++;
     throw Error('Unexpected process launch');
   });
-  mock.method(childProcess, 'execFile', () => {
+  mock.method(childProcess, 'execFile', (_file, args, _options, callback) => {
+    const script = Buffer.from(args.at(-1), 'base64').toString('utf16le');
+    if (script.includes('Get-ItemProperty')) return callback(null, '[]', '');
     spawns++;
     throw Error('Unexpected process launch');
   });
@@ -67,7 +69,7 @@ test('DSH discovery, creation and both model catalog paths never initialize an a
   try {
     const pending = await query('dsh');
     assert.equal(pending.statusCode, 200, pending.body);
-    assert.equal(pending.json().message, 'acp_profile_missing');
+    assert.equal(pending.json().message, 'configured_only');
     assert.equal(spawns, 0);
     assert.equal(existsSync(home), false);
     const badHome = join(root, 'bad-profile');
@@ -75,7 +77,7 @@ test('DSH discovery, creation and both model catalog paths never initialize an a
     writeFileSync(join(badHome, 'profiles/acp/package.json'), '{broken');
     process.env.DSH_HOME = badHome;
     const nativeInvalid = await query('dsh');
-    assert.equal(nativeInvalid.json().message, 'acp_profile_invalid', nativeInvalid.body);
+    assert.equal(nativeInvalid.json().message, 'configured_only', nativeInvalid.body);
     assert.equal(spawns, 0);
     process.env.DSH_HOME = home;
     const creation = {
