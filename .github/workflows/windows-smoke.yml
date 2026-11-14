@@ -56,6 +56,8 @@ jobs:
           test/f320-windows-login.test.ts
           test/f320-windows-policy.test.ts
           test/f320-login-lifecycle.test.ts
+          test/issue1962-login-window.test.ts
+          test/issue1963-native-quota.test.ts
           test/codex-native-compat.test.ts
       - name: Windows multi-plugin ACP catalog and cancelled editor requests
         run: |
