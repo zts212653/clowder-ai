@@ -3063,7 +3063,10 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
           thread.titleSource === 'temporary'
         ) {
           firstReplyNamingInstruction =
-            '这条对话尚未起名。首次回话时，请调用 cat_cafe_set_thread_metadata 的 title，起一个概括这次任务的短名（不照抄用户原话）。用户自己填过或改过的名字会受保护；猫只起一次名。';
+            '这条对话尚未起名。如果只是寒暄，或还看不出用户要做什么，保留临时标题，直接回复，无需为了起名查找或调用工具。' +
+            '等到任务明确的那一轮，再调用 cat_cafe_set_thread_metadata 的 title，起一个概括这次任务的短名（不照抄用户原话）。' +
+            '本轮还有必要的工具调用时，把起名和它们放在同一批发出。若要先查找命名工具，把查找和本来就要发出的调用一起做。' +
+            '用户自己填过或改过的名字会受保护；猫只起一次名。';
         }
         if (thread.createdAt) threadCreatedAt = thread.createdAt;
         // #836: Reborn session strategy — force new session every invocation.
