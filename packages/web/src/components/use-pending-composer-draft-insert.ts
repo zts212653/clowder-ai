@@ -46,6 +46,7 @@ function applyPendingServerRevision(insert: ComposerDraftInsert, refs: PendingCo
   refs.imageUrlsRef.current = [...imageUrls];
   refs.revisionRef.current = insert.serverRevision;
   refs.hydratedRef.current = true;
+  if (insert.preservedBlocks) refs.preservedBlocksRef.current = [...insert.preservedBlocks];
   const signature = composerDraftSignature(
     insert.text,
     imageUrls,

@@ -792,9 +792,9 @@ skills:
     category: "调研与知识"
     description: >
       E0 资格门（GT 域/裁判射程/付薪方/自治上限）+ 指标出生证契约 + 纵向运行拓扑（进入/唤醒/成熟/可行动）+ 七公理设计自检 + 存量 eval 体检尺（五病：划水/污染/归因停滞/干预失证/摸鱼）。
-      Use when: 要判断 Agent 是否专业、省心或真正改善，需要设计判断依据与校准；按 ADR-031 判定 eval 资格、新增/修改指标、设计纵向触发或审计现有 eval。
-      Not for: 单次交付自检（用 quality-gate）、审外部 claim（用 source-audit）、摩擦诊断（用 code-as-harness）。
-      Output: 测量与校准草案或带出生证的指标定义（纵向 eval 含触发契约），或带病名+处置建议的体检报告（不输出总分排行榜）。
+      Use when: 要判断 Agent 是否专业、省心或真正改善，需要设计判断依据与校准；按 ADR-031 判定 eval 资格、新增/修改指标、在原任务设计比较、校准、干预或审计现有 eval。
+      Not for: 确定性 bug（用 debugging/tdd）、单次交付自检（用 quality-gate）、审外部 claim（用 source-audit）、摩擦诊断（用 code-as-harness）。
+      Output: 测量与校准草案或带出生证的指标定义（仅明确需要多轮时设计接续），或带病名+处置建议的体检报告（不输出总分排行榜）。
     triggers:
       - "设计 eval"
       - "定指标"
@@ -808,10 +808,11 @@ skills:
       - "摸鱼指标"
       - "metric design"
     not_for:
+      - "确定性 bug"
       - "单次交付自检"
       - "外部 claim 审计"
       - "摩擦诊断"
-    output: "Measurement/calibration draft or metric birth certificate（纵向 eval 含触发契约），或 eval 体检报告（病名 + 处置）"
+    output: "Measurement/calibration draft or metric birth certificate（仅明确需要多轮时设计接续），或 eval 体检报告（病名 + 处置）"
     next: ["capability-evolution", "quality-gate", "self-evolution"]
     sop_step: null
     merged_from: null

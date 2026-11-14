@@ -18,7 +18,6 @@ created: 2026-02-26
 |----|------|--------|-------|--------|------|
 | F038 | Skills 梳理 + 按需发现机制 | parked | 三猫 | internal | [F038](features/F038-skills-discovery.md) |
 | F044 | Channel & Activity System — 战队频道 + 游戏活动 | spec | Ragdoll | internal | [F044](features/F044-channel-activity-system.md) |
-| F048 | Restart Recovery — 重启自愈（Phase B: 队列持久化） | phase-a-done | Ragdoll | internal | [F048](features/F048-restart-recovery.md) |
 | F051 | 猫粮看板 v2 — Quota Board (glanceable + scheduling) | in-progress | Ragdoll | internal | [F051](features/F051-real-quota-dashboard.md) |
 | F054 | HCI 预热基础设施 — Social Media MCP + 内容管线 | spec | Ragdoll (Opus 4.6, Leader) | internal | [F054](features/F054-hci-preheat-infra.md) |
 | F055 | A2A MCP Structured Routing — targetCats 结构化路由 | spec | Ragdoll | internal | [F055](features/F055-a2a-mcp-structured-routing.md) |
@@ -127,3 +126,4 @@ created: 2026-02-26
 | F333 | 多猫共用 MCP 运行资源｜减少并行会话的重复进程与内存，保持调用身份、权限、工作区与故障隔离 | in-progress / Phase A已验收：五载体Alpha、boot58真实迁移及普通工具续聊通过，保护代理153→0；前后负载不同，不外推整机净省。25%已撤，OpenCode暂缓未验，Phase B未开始 | Astra（整体验收）· Sol6.1（实现）· Sonnet（审核） | internal（operator 2026-10-25 `private-source-id`；完整交付1202；开工分工 `private-source-id`；OpenCode处置 `private-source-id`） | [F333](features/F333-shared-mcp-process-lifecycle.md) · 线上验收 (internal) · 原提案 (internal) |
 | F334 | 分身不分家｜猫在 Mac mini、云主机等另一台机器上干活，对人和其他猫仍是家里那只：同一个 @、同一份记忆、同一个对话 | spec / 2026-10-27 立项；KD-1 一只猫、KD-2 记忆归家已定；下一步 Design Gate（Ragdoll出方案、小星星推敲、You 拍板），排在 F333 之后 | Ragdoll (@opus55) | community（You 转述 2026-10-27 `private-source-id`；立项 `private-source-id`） | [F334](features/F334-multi-machine-cat-hosting.md) |
 | F335 | 守望猫｜一只猫值岗，每条被守望的线每轮结束后替大家想到没想到的事：一句给猫、一键提议给人、可逆小事先做好由桌面猫带来；不拦主工作、不设每天上限、默认全开 | spec / 2026-11-02 立项（You 653）；判断稿 v4.4 + 架构稿 v1.1 + 30 天负荷实测已出；下一步 Design Gate：Ragdoll Opus 北极星稿（旅程 + 调节器 UI）、小星星架构稿、You 拍 GT 两句；Blocked by F332「按事情回看」 | Ragdoll (@fable-5) 判断席 · 架构 小星星 (@codex-astra) · 北极星 Ragdoll (@opus55) | internal（You 2026-11-02 `private-source-id`） | [F335](features/F335-watcher-cat.md) · 判断稿 (internal) · 架构稿 (internal) |
+| F337 | 停止原因感知：根据电源日志识别睡眠中断，保持人工取消边界与受限接续 | in-progress | Maintainers | internal | [F337](features/F337-stop-reason-awareness.md) |

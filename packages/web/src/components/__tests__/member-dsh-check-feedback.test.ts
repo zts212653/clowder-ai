@@ -66,3 +66,43 @@ it('reports an unavailable runtime without misdiagnosing its tool definitions', 
   expect(message).not.toContain('工具定义无效');
   expect(message).toContain('可以直接聊天');
 });
+
+it.each([
+  'checking',
+  'unchecked',
+  'passed',
+] as const)('keeps mixed failure causes attached to the right plugin (%s)', (state) => {
+  const message = dshConnectionCheckMessage({
+    state,
+    toolIssues: [
+      {
+        pluginId: 'crashed-plugin',
+        capabilityId: 'plugin:crashed-plugin:main',
+        reasonCode: 'plugin_activation_unavailable',
+      },
+      {
+        pluginId: 'bad-schema-plugin',
+        capabilityId: 'plugin:bad-schema-plugin:main',
+        reasonCode: 'tool_schema_invalid',
+      },
+    ],
+  });
+  expect(message).toContain('crashed-plugin（插件运行不可用）');
+  expect(message).toContain('bad-schema-plugin（工具定义无效）');
+  expect(message).not.toContain('暂时无法回复');
+  expect(message).not.toContain('bad-schema-plugin（插件运行不可用）');
+});
+
+it('retains both causes when different capabilities of one plugin fail', () => {
+  const message = dshConnectionCheckMessage({
+    state: 'unchecked',
+    toolIssues: [
+      { pluginId: 'mixed', capabilityId: 'plugin:mixed:offline', reasonCode: 'plugin_activation_unavailable' },
+      { pluginId: 'mixed', capabilityId: 'plugin:mixed:bad-schema', reasonCode: 'tool_schema_invalid' },
+      { pluginId: 'mixed', capabilityId: 'plugin:mixed:another-offline', reasonCode: 'plugin_activation_unavailable' },
+    ],
+  });
+  expect(message).toContain('mixed（插件运行不可用、工具定义无效）');
+  expect(message.match(/mixed/g)).toHaveLength(1);
+  expect(message).toContain('可以直接聊天');
+});

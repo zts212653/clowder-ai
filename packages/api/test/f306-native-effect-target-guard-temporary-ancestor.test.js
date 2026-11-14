@@ -13,8 +13,8 @@ test(
     skip: process.platform === 'win32' ? 'POSIX temporary-worktree policy' : false,
   },
   () => {
-    const base = realpathSync(mkdtempSync(join(tmpdir(), 'f306-ancestor-')));
-    const sibling = realpathSync(mkdtempSync(join(tmpdir(), 'f306-sibling-')));
+    const base = realpathSync(mkdtempSync(join(process.platform === 'win32' ? tmpdir() : '/tmp', 'f306-ancestor-')));
+    const sibling = realpathSync(mkdtempSync(join(process.platform === 'win32' ? tmpdir() : '/tmp', 'f306-sibling-')));
     const alias = `${sibling}-alias`;
     const childAlias = `${sibling}-child`;
     try {

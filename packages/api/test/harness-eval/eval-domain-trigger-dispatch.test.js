@@ -110,7 +110,7 @@ describe('eval domain shared trigger dispatcher', () => {
     );
   });
 
-  it('accepts at most one invocation when event and cron race in the same window', async () => {
+  it('accepts at most one requested round when requests race in the same window', async () => {
     const store = new MemoryTriggerStore();
     const nowMs = Date.parse('2026-08-24T08:00:00Z');
     const shared = deps(store, nowMs);
@@ -119,7 +119,7 @@ describe('eval domain shared trigger dispatcher', () => {
       dispatchEvalDomainTrigger({
         domain: thresholdDomain,
         invocation,
-        channel: 'threshold_event',
+        channel: 'time',
         event: event(),
         triggerReason: 'Threshold eval: eval:design-gate',
         ...shared,
@@ -153,7 +153,7 @@ describe('eval domain shared trigger dispatcher', () => {
     const input = {
       domain: thresholdDomain,
       invocation,
-      channel: 'threshold_event',
+      channel: 'time',
       event: event(),
       triggerReason: 'Threshold eval: eval:design-gate',
       ...shared,
@@ -183,7 +183,7 @@ describe('eval domain shared trigger dispatcher', () => {
         await dispatchEvalDomainTrigger({
           domain: thresholdDomain,
           invocation,
-          channel: 'threshold_event',
+          channel: 'time',
           event: event(),
           triggerReason: 'Threshold eval',
           ...first,
@@ -220,7 +220,7 @@ describe('eval domain shared trigger dispatcher', () => {
     );
   });
 
-  it('dedupes stale event replay and records non-crossing observations without invoking', async () => {
+  it('retains window dedupe for requested rounds independently of old event payloads', async () => {
     const store = new MemoryTriggerStore();
     const nowMs = Date.parse('2026-08-24T08:00:00Z');
     const shared = deps(store, nowMs);
@@ -231,7 +231,7 @@ describe('eval domain shared trigger dispatcher', () => {
     const first = await dispatchEvalDomainTrigger({
       domain: thresholdDomain,
       invocation,
-      channel: 'threshold_event',
+      channel: 'time',
       event: nonCrossing,
       triggerReason: 'Threshold eval',
       ...shared,
@@ -239,15 +239,15 @@ describe('eval domain shared trigger dispatcher', () => {
     const replay = await dispatchEvalDomainTrigger({
       domain: thresholdDomain,
       invocation,
-      channel: 'threshold_event',
+      channel: 'time',
       event: nonCrossing,
       triggerReason: 'Threshold eval',
       ...shared,
     });
 
-    assert.equal(first.outcome, 'not_crossing');
+    assert.equal(first.outcome, 'dispatched');
     assert.equal(replay.outcome, 'deduped');
-    assert.equal(shared.deliver.mock.callCount(), 0);
+    assert.equal(shared.deliver.mock.callCount(), 1);
   });
 
   it('rejects threshold events for time_only domains', async () => {
@@ -260,11 +260,11 @@ describe('eval domain shared trigger dispatcher', () => {
       triggerReason: 'Threshold eval',
       ...shared,
     });
-    assert.equal(result.outcome, 'rejected_policy');
+    assert.equal(result.outcome, 'automation_retired');
     assert.equal(shared.deliver.mock.callCount(), 0);
   });
 
-  it('fails the event lane closed when receipts are unavailable while keeping time fallback live', async () => {
+  it('retires the event lane while keeping the requested round lane live', async () => {
     const unavailableStore = { claim: async () => Promise.reject(new Error('redis unavailable')) };
     const eventDeps = deps(unavailableStore, Date.parse('2026-08-24T08:00:00Z'));
     const eventResult = await dispatchEvalDomainTrigger({
@@ -275,7 +275,7 @@ describe('eval domain shared trigger dispatcher', () => {
       triggerReason: 'Threshold eval',
       ...eventDeps,
     });
-    assert.equal(eventResult.outcome, 'unavailable');
+    assert.equal(eventResult.outcome, 'automation_retired');
     assert.equal(eventDeps.deliver.mock.callCount(), 0);
 
     const timeDeps = deps(unavailableStore, Date.parse('2026-08-24T08:00:00Z'));

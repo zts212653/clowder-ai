@@ -15,7 +15,7 @@ const normalize = (text) => text.trim().replace(/\s+/gu, ' ');
 const prefix = '前面的过程记录。\n\n';
 // Original failure's path paragraph, followed by the other presentation substitutions.
 const content =
-  '我看到 `cat_cafe_propose_taste` 提到品味卡片保存在 `docs/taste/vignettes/` 或 `private/taste/`。我现在检查这两个目录下的品味文件，并查找 `packages/api/src/`。\n\n请 @codex61-sol 核对 [**品味**原文](docs/taste/notes.md) 和 https://example.com/details 。';
+  '我看到 `cat_cafe_remember` 提到品味卡片保存在 `docs/taste/vignettes/` 或 `private/taste/`。我现在检查这两个目录下的品味文件，并查找 `packages/api/src/`。\n\n请 @codex61-sol 核对 [**品味**原文](docs/taste/notes.md) 和 https://example.com/details 。';
 const answer = '请 @codex61-sol 检查 `docs/taste/vignettes/` 后回复。';
 const scenarios = [
   { content, expected: content },

@@ -1,24 +1,19 @@
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
-import type { GateCtx, TaskSpec_P1 } from '../scheduler/types.js';
+import type { TaskSpec_P1 } from '../scheduler/types.js';
+import { createRetiredAutomaticEvalSpec } from './automatic-eval-retirement.js';
 import {
   buildCapabilityWakeupClosureImport,
   CAPABILITY_WAKEUP_HISTORICAL_VERDICT_ID,
 } from './capability-wakeup-closure-import.js';
 import { loadDomains } from './hub/eval-hub-read-model.js';
 import { loadLifecycleRootsWithLegacyCases, migrationForCase } from './legacy-reeval-case-migration.js';
-import { projectReevalCase } from './reeval-case.js';
 import { compareReevalCycles } from './reeval-case-cycle-order.js';
 import type { ReevalCaseReevaluationService } from './reeval-case-reevaluation.js';
 import type { ReevalCaseResponsibilityService } from './reeval-case-responsibility.js';
 import { lifecycleRootRefs } from './reeval-closure-bootstrap.js';
 import type { IReevalClosureEventLog } from './reeval-closure-event-log.js';
-import {
-  type PlannedReevalClosureAppend,
-  planReevalClosureEvents,
-  type ReevalCaseReconcileSubject,
-  type ReevalLifecycleReconcileSubject,
-} from './reeval-closure-reconciler.js';
+import { type ReevalCaseReconcileSubject, type ReevalLifecycleReconcileSubject } from './reeval-closure-reconciler.js';
 
 export interface ReevalClosureSubjectsLoaderOptions {
   harnessFeedbackRoot: string;
@@ -158,27 +153,6 @@ function reconcileSubjectId(subject: ReevalLifecycleReconcileSubject): string {
   return 'caseRoot' in subject ? subject.caseRoot.caseId : subject.root.verdictId;
 }
 
-interface ReevalClosureBatchSignal {
-  planned: PlannedReevalClosureAppend[];
-  bindResponsibility: boolean;
-  bindReevaluation: boolean;
-}
-
-function caseNeedsResponsibility(
-  subject: ReevalCaseReconcileSubject,
-  planned: readonly PlannedReevalClosureAppend[],
-): boolean {
-  const events = [...subject.events, ...planned.map((item) => item.event)];
-  if (events.length === 0) return false;
-  const projection = projectReevalCase(subject.caseRoot, events);
-  const activeRoot = subject.roots.find((root) => root.verdictId === projection.activeVerdictId);
-  if (activeRoot?.schemaVersion === 3) return false;
-  return (
-    projection.status === 'open' ||
-    (projection.status === 'escalated' && projection.escalation?.stage === 'acknowledgement')
-  );
-}
-
 export interface ReevalClosureTaskSpecOptions {
   eventLog: IReevalClosureEventLog;
   loadSubjects: () => Promise<ReevalLifecycleReconcileSubject[]>;
@@ -189,99 +163,11 @@ export interface ReevalClosureTaskSpecOptions {
   log: { info(...args: unknown[]): void; warn(...args: unknown[]): void };
 }
 
-export function createReevalClosureTaskSpec(
-  options: ReevalClosureTaskSpecOptions,
-): TaskSpec_P1<ReevalClosureBatchSignal> {
-  const now = options.now ?? (() => new Date().toISOString());
-  return {
+export function createReevalClosureTaskSpec(options?: ReevalClosureTaskSpecOptions): TaskSpec_P1<unknown> {
+  return createRetiredAutomaticEvalSpec({
     id: 'eval-verdict-closure-reconciler',
     profile: 'poller',
-    trigger: { type: 'interval', ms: options.pollIntervalMs ?? 600_000 },
-    admission: {
-      async gate(_ctx: GateCtx) {
-        const workItems = (
-          await Promise.all(
-            (
-              await options.loadSubjects()
-            ).map(async (subject) => {
-              const planned = planReevalClosureEvents(subject, now());
-              const bindResponsibility =
-                Boolean(options.responsibilityService) &&
-                'caseRoot' in subject &&
-                caseNeedsResponsibility(subject, planned);
-              const bindReevaluation =
-                Boolean(options.reevaluationService) &&
-                'caseRoot' in subject &&
-                (await options.reevaluationService?.needsReconcile(subject, now())) === true;
-              return { subject, planned, bindResponsibility, bindReevaluation };
-            }),
-          )
-        )
-          .filter(
-            (candidate) => candidate.planned.length > 0 || candidate.bindResponsibility || candidate.bindReevaluation,
-          )
-          .map(({ subject, planned, bindResponsibility, bindReevaluation }) => {
-            const subjectId = reconcileSubjectId(subject);
-            const serviceDedupe = bindReevaluation
-              ? `f266:${subjectId}:reevaluation:${subject.events.length}`
-              : `f266:${subjectId}:responsibility`;
-            return {
-              subjectKey: subjectId,
-              dedupeKey: planned.map((item) => item.event.eventId).join('|') || serviceDedupe,
-              signal: { planned, bindResponsibility, bindReevaluation },
-            };
-          });
-        if (workItems.length === 0) return { run: false, reason: 'no lifecycle events due' };
-        return { run: true, workItems };
-      },
-    },
-    run: {
-      overlap: 'skip',
-      timeoutMs: 60_000,
-      async execute(signal, subjectKey, ctx) {
-        for (const item of signal.planned) {
-          ctx.signal?.throwIfAborted();
-          const result = await options.eventLog.append(item.event, item.expectedSequence);
-          if (result.outcome === 'conflict') {
-            options.log.warn(
-              `[eval-verdict-closure] CAS conflict for ${item.event.verdictId}: expected ${item.expectedSequence}, actual ${result.actualSequence}`,
-            );
-            return;
-          }
-          if (result.outcome === 'appended') {
-            options.log.info(
-              `[eval-verdict-closure] appended ${item.event.type} for ${item.event.verdictId} at ${result.sequence}`,
-            );
-          }
-        }
-        if (signal.bindResponsibility && options.responsibilityService) {
-          ctx.signal?.throwIfAborted();
-          const refreshed = (await options.loadSubjects()).find(
-            (subject) => reconcileSubjectId(subject) === subjectKey && 'caseRoot' in subject,
-          );
-          if (refreshed && 'caseRoot' in refreshed) {
-            await options.responsibilityService.reconcile(refreshed, refreshed.responsibilityContext);
-          }
-        }
-        if (signal.bindReevaluation && options.reevaluationService) {
-          ctx.signal?.throwIfAborted();
-          const refreshed = (await options.loadSubjects()).find(
-            (subject) => reconcileSubjectId(subject) === subjectKey && 'caseRoot' in subject,
-          );
-          if (refreshed && 'caseRoot' in refreshed) {
-            await options.reevaluationService.reconcile(refreshed, refreshed.responsibilityContext);
-          }
-        }
-      },
-    },
-    state: { runLedger: 'sqlite' },
-    outcome: { whenNoSignal: 'drop' },
-    enabled: () => true,
-    display: {
-      label: 'Eval Verdict Closure Reconciler',
-      category: 'system',
-      description: 'Opens actionable verdict lifecycles and resurfaces overdue acknowledgement or re-evaluation',
-      subjectKind: 'none',
-    },
-  };
+    trigger: { type: 'interval', ms: options?.pollIntervalMs ?? 600_000 },
+    label: 'Eval Verdict Closure Reconciler（自动运行已退役）',
+  });
 }

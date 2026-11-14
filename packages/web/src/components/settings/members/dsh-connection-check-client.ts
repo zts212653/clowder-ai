@@ -39,11 +39,16 @@ export async function checkSavedDshMember(
 
 export function dshConnectionCheckMessage(view: DshConnectionCheckView) {
   const toolIssues = view.toolIssues ?? (view.state === 'passed' ? view.fact?.toolIssues : undefined) ?? [];
-  const plugins = [...new Set(toolIssues.map(({ pluginId }) => pluginId))].join('、');
-  const reason = toolIssues.some(({ reasonCode }) => reasonCode === 'plugin_activation_unavailable')
-    ? '插件运行不可用'
-    : '工具定义无效';
-  const toolNotice = plugins ? `插件工具暂不可用：${plugins}（${reason}）。需要这些工具的任务请先修复相应插件。` : '';
+  const pluginReasons = new Map<string, Set<string>>();
+  for (const { pluginId, reasonCode } of toolIssues) {
+    const reasons = pluginReasons.get(pluginId) ?? new Set<string>();
+    reasons.add(reasonCode === 'plugin_activation_unavailable' ? '插件运行不可用' : '工具定义无效');
+    pluginReasons.set(pluginId, reasons);
+  }
+  const plugins = [...pluginReasons]
+    .map(([pluginId, reasons]) => `${pluginId}（${[...reasons].join('、')}）`)
+    .join('、');
+  const toolNotice = plugins ? `插件工具暂不可用：${plugins}。需要这些工具的任务请先修复相应插件。` : '';
   if (view.state === 'passed' && toolNotice) return `模型已连接，基本聊天可用。${toolNotice}`;
   if (view.state === 'passed') return '已收到所选模型的回复，工具定义已被接受。此检查不执行工具。';
   if (view.state === 'checking') return `正在检查连接，可以继续聊天，无需等待检查完成。${toolNotice}`;

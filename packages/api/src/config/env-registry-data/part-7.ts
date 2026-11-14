@@ -147,20 +147,6 @@ export const ENV_DEFINITIONS_7: readonly EnvDefinition[] = [
     sensitive: false,
   },
   {
-    name: 'F102_DURABLE_CANDIDATES',
-    defaultValue: 'off',
-    description: 'Phase G candidate 提取 (off/on)，on = 摘要时提取 durable knowledge 候选到 MarkerQueue',
-    category: 'evidence',
-    sensitive: false,
-  },
-  {
-    name: 'F102_TOPIC_SEGMENTS',
-    defaultValue: 'off',
-    description: 'Phase G topic 分段 (off/on)，on = 摘要按话题切分多个 segment',
-    category: 'evidence',
-    sensitive: false,
-  },
-  {
     name: 'F200_CONSUMPTION_RERANK',
     defaultValue: 'off',
     description: 'F200 consumption-weighted rerank (off/shadow/on)',

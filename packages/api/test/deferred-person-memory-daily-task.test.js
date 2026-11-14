@@ -49,6 +49,7 @@ describe('F276 deferred person-memory daily clerk task', () => {
       dedupeHash: 'f'.repeat(64),
     };
     const spec = createDeferredPersonMemoryDailyTaskSpec({
+      isActorEligible: () => true,
       receiptStore: {
         async listReady(ownerUserId, limit) {
           calls.listed.push([ownerUserId, limit]);
@@ -146,6 +147,51 @@ describe('F276 deferred person-memory daily clerk task', () => {
     assert.deepEqual(calls.released, []);
   });
 
+  it('does not claim or deliver when the selected carrier becomes incompatible', async () => {
+    const { createDeferredPersonMemoryDailyTaskSpec } = await import(
+      '../dist/domains/memory/DeferredPersonMemoryDailyTaskSpec.js'
+    );
+    let claims = 0;
+    let deliveries = 0;
+    const spec = createDeferredPersonMemoryDailyTaskSpec({
+      receiptStore: {
+        async get() {
+          return { state: 'deferred' };
+        },
+        async claim() {
+          claims++;
+          return { outcome: 'not_available' };
+        },
+      },
+      ownerUserId: 'owner-1',
+      isActorEligible: () => false,
+      ensureSystemThread: async () => 'memory-ops',
+      routingDispatchPreflight: {
+        async preflight(input) {
+          return {
+            v: 1,
+            ownerId: input.ownerId,
+            resolverState: 'fresh',
+            observedAt: 1,
+            targets: [{ targetCatId: input.targetCatIds[0], disposition: 'allowed', reasons: [], alternatives: [] }],
+          };
+        },
+      },
+    });
+    await assert.rejects(
+      spec.run.execute({ ownerUserId: 'owner-1', receiptIds: ['receipt'] }, 'memory-operations', {
+        assignedCatId: 'agy-opus55',
+        deliver: async () => {
+          deliveries++;
+          return 'message';
+        },
+      }),
+      /carrier.*unavailable/,
+    );
+    assert.equal(claims, 0);
+    assert.equal(deliveries, 0);
+  });
+
   it('releases the exact claim when durable delivery or invocation fails', async () => {
     const { createDeferredPersonMemoryDailyTaskSpec } = await import(
       '../dist/domains/memory/DeferredPersonMemoryDailyTaskSpec.js'
@@ -169,6 +215,7 @@ describe('F276 deferred person-memory daily clerk task', () => {
       state: 'deferred',
     };
     const spec = createDeferredPersonMemoryDailyTaskSpec({
+      isActorEligible: () => true,
       receiptStore: {
         async listReady() {
           return [receipt];
@@ -239,6 +286,7 @@ describe('F276 deferred person-memory daily clerk task', () => {
     };
     const expired = [];
     const spec = createDeferredPersonMemoryDailyTaskSpec({
+      isActorEligible: () => true,
       receiptStore: {
         async listReady() {
           return [receipt];
@@ -277,6 +325,7 @@ describe('F276 deferred person-memory daily clerk task', () => {
     };
     let touched = false;
     const spec = createDeferredPersonMemoryDailyTaskSpec({
+      isActorEligible: () => true,
       receiptStore: {
         async listReady() {
           return [receipt];

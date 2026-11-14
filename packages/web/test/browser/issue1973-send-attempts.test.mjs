@@ -50,6 +50,311 @@ async function scene(options = {}) {
 }
 const json = (body, status = 200) => ({ status, contentType: 'application/json', body: JSON.stringify(body) });
 
+for (const mixed of [false, true]) {
+  test(`recall hands off visible and resendable ${mixed ? 'mixed attachments after a partial download failure' : 'ordinary file bytes'}`, async () => {
+    const proof = await scene();
+    const { page } = proof;
+    const text = '撤回后重新编辑有文件的消息';
+    const note = Buffer.from('the non-image attachment must survive recall');
+    const png = Buffer.from(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO7Zq5sAAAAASUVORK5CYII=',
+      'base64',
+    );
+    const newer = Buffer.from('new attachment typed during recovery');
+    const posts = [];
+    let unavailable = mixed;
+    try {
+      await page.route('**/message-attempts/*', (route) => {
+        const key = decodeURIComponent(route.request().url().split('/').pop());
+        const index = posts.findIndex((post) => post.key === key);
+        return route.fulfill(
+          json(
+            index < 0
+              ? { status: 'unknown' }
+              : {
+                  status: 'accepted',
+                  userMessage: { id: `recall-file-${index + 1}`, timestamp: 100 },
+                },
+          ),
+        );
+      });
+      await page.route('**/api/messages', async (route) => {
+        if (route.request().method() !== 'POST') return route.fallback();
+        const request = route.request();
+        const type = request.headers()['content-type'];
+        if (type.startsWith('multipart/')) {
+          const form = await new Response(request.postDataBuffer(), { headers: { 'content-type': type } }).formData();
+          const files = await Promise.all(
+            form.getAll('images').map(async (file) => ({
+              name: file.name,
+              bytes: Buffer.from(await file.arrayBuffer()).toString('base64'),
+            })),
+          );
+          posts.push({
+            content: form.get('content'),
+            key: form.get('idempotencyKey'),
+            files,
+          });
+        } else posts.push({ ...request.postDataJSON(), files: [] });
+        return route.fulfill(json({ status: 'queued', userMessageId: `recall-file-${posts.length}` }, 202));
+      });
+      const uploads = [{ name: 'recall-note.txt', mimeType: 'text/plain', buffer: note }];
+      if (mixed) uploads.push({ name: 'recall-local.png', mimeType: 'image/png', buffer: png });
+      await page.locator('input[type="file"]').setInputFiles(uploads);
+      await page.locator('textarea').fill(text);
+      await page.locator('textarea').press('Enter');
+      await page.locator('[data-send-status="accepted"]').waitFor();
+      const before = await localAttemptFiles(page);
+      assert.deepEqual(
+        before[0].bytes.sort((a, b) => a - b),
+        mixed ? [note.length, png.length] : [note.length],
+      );
+      await page.route('**/uploads/recalled-note.txt', (route) =>
+        route.fulfill(unavailable ? json({}, 503) : { status: 200, contentType: 'text/plain', body: note }),
+      );
+      await page.route('**/uploads/recalled-local.png', (route) =>
+        route.fulfill({ status: 200, contentType: 'image/png', body: png }),
+      );
+      const blocks = [
+        {
+          type: 'file',
+          url: '/uploads/recalled-note.txt',
+          fileName: 'recall-note.txt',
+          mimeType: 'text/plain',
+          fileSize: note.length,
+        },
+      ];
+      if (mixed) blocks.push({ type: 'image', url: '/uploads/recalled-local.png' });
+      let revision = 100;
+      let draft = {
+        version: 1,
+        ownerUserId: 'owner-proof',
+        threadId: CURRENT_THREAD,
+        revision,
+        text,
+        contentBlocks: blocks,
+        updatedAt: Date.now(),
+      };
+      await page.route('**/composer-draft', (route) => {
+        const request = route.request();
+        if (request.method() === 'GET') return route.fulfill(json({ draft, revision }));
+        revision++;
+        draft = request.method() === 'DELETE' ? null : { ...draft, ...request.postDataJSON(), revision };
+        return route.fulfill(json({ draft, revision }));
+      });
+      await page.evaluate((thread) => window.__f322Chat.recall(thread, 'recall-file-1'), CURRENT_THREAD);
+      if (mixed) {
+        await page.getByTestId('composer-recovered-attachments-blocked').waitFor();
+        assert.deepEqual(await localAttemptFiles(page), before, 'partial file recovery must retain every local byte');
+        await page.locator('textarea').fill(`${text}\n\n恢复期间新增正文`);
+        await page
+          .locator('input[type="file"]')
+          .setInputFiles({ name: 'new-during-recall.md', mimeType: 'text/markdown', buffer: newer });
+        unavailable = false;
+        await page.getByRole('button', { name: '恢复草稿', exact: true }).click();
+      }
+      await page.getByRole('button', { name: 'Remove recall-note.txt', exact: true }).waitFor();
+      await page.locator('[data-send-status="recalled"]').waitFor({ state: 'detached' });
+      assert.equal((await localAttemptFiles(page)).length, 0, 'retire only after real file handoff');
+      if (mixed) {
+        assert.ok((await page.locator('textarea').inputValue()).includes('恢复期间新增正文'));
+        await page.getByRole('button', { name: 'Remove new-during-recall.md', exact: true }).waitFor();
+      }
+      await page.locator('textarea').press('Enter');
+      await page.waitForFunction(() => document.querySelector('textarea')?.value === '');
+      assert.equal(posts.length, 2);
+      assert.equal(posts[1].files.find((file) => file.name === 'recall-note.txt')?.bytes, note.toString('base64'));
+      assert.equal(posts[1].files.length, mixed ? 3 : 1);
+      if (mixed) {
+        assert.ok(posts[1].files.some((file) => file.bytes === png.toString('base64')));
+        assert.equal(
+          posts[1].files.find((file) => file.name === 'new-during-recall.md')?.bytes,
+          newer.toString('base64'),
+        );
+      }
+    } finally {
+      await proof.finish();
+    }
+  });
+}
+
+async function localAttemptFiles(page) {
+  return page.evaluate(
+    () =>
+      new Promise((resolve, reject) => {
+        const open = indexedDB.open('cat-cafe-send-attempts', 1);
+        open.onerror = () => reject(open.error);
+        open.onsuccess = () => {
+          const db = open.result;
+          const read = db.transaction('attempts').objectStore('attempts').getAll();
+          read.onsuccess = () => {
+            resolve(read.result.map((row) => ({ id: row.id, bytes: row.files.map((file) => file.bytes.byteLength) })));
+            db.close();
+          };
+          read.onerror = () => {
+            db.close();
+            reject(read.error);
+          };
+        };
+      }),
+  );
+}
+
+for (const addedText of ['', '保存失败期间新增的输入']) {
+  test(`a local persistence retry transfers only its original composer snapshot ${addedText ? 'with new typing' : 'without another POST'}`, async () => {
+    const proof = await scene();
+    const { page } = proof;
+    const text = '本地配额恢复后只发送这条一次';
+    const posts = [];
+    try {
+      await page.route('**/message-attempts/*', (route) => {
+        const key = decodeURIComponent(route.request().url().split('/').pop());
+        const index = posts.findIndex((post) => post.idempotencyKey === key);
+        return route.fulfill(
+          json(
+            index < 0
+              ? { status: 'unknown' }
+              : { status: 'accepted', userMessage: { id: `quota-retried-${index + 1}`, timestamp: 100 } },
+          ),
+        );
+      });
+      await page.route('**/api/messages', async (route) => {
+        if (route.request().method() !== 'POST') return route.fallback();
+        const request = route.request();
+        const type = request.headers()['content-type'];
+        if (type.startsWith('multipart/')) {
+          const form = await new Response(request.postDataBuffer(), { headers: { 'content-type': type } }).formData();
+          posts.push({
+            content: form.get('content'),
+            idempotencyKey: form.get('idempotencyKey'),
+            imageName: form.get('images')?.name,
+            imageBytes: form.get('images')?.size,
+          });
+        } else posts.push(request.postDataJSON());
+        return route.fulfill(json({ status: 'queued', userMessageId: `quota-retried-${posts.length}` }, 202));
+      });
+      await page.evaluate(() => {
+        const original = IDBObjectStore.prototype.put;
+        let failOnce = true;
+        IDBObjectStore.prototype.put = function (...args) {
+          if (this.name === 'attempts' && failOnce) {
+            failOnce = false;
+            throw new DOMException('simulated quota exceeded', 'QuotaExceededError');
+          }
+          return original.apply(this, args);
+        };
+      });
+      await page.locator('textarea').fill(text);
+      await page.locator('textarea').press('Enter');
+      await page.locator('[data-send-status="failed"]').waitFor();
+      assert.equal(await page.locator('textarea').inputValue(), text);
+      assert.equal(posts.length, 0);
+      if (addedText) {
+        await page.locator('textarea').fill(`${text}\n\n${addedText}`);
+        await page.locator('input[type="file"]').setInputFiles({
+          name: 'retry-new.png',
+          mimeType: 'image/png',
+          buffer: Buffer.from(
+            'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO7Zq5sAAAAASUVORK5CYII=',
+            'base64',
+          ),
+        });
+        await page.getByRole('button', { name: 'Remove retry-new.png', exact: true }).waitFor();
+      }
+      await page.getByRole('button', { name: '重试发送这条消息' }).click();
+      await page.locator('[data-send-status="accepted"]').waitFor();
+      assert.equal(posts.length, 1);
+      assert.equal(await page.locator('textarea').inputValue(), addedText ? `\n\n${addedText}` : '');
+      await page.locator('textarea').press('Enter');
+      if (addedText) {
+        await page.waitForFunction(() => document.querySelector('textarea')?.value === '');
+        assert.equal(posts.length, 2);
+        assert.equal(posts[1].content, addedText);
+        assert.equal(posts[1].imageName, 'retry-new.png');
+        assert.equal(posts[1].imageBytes, 68);
+      } else {
+        await page.evaluate(
+          () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
+        );
+        assert.equal(posts.length, 1);
+      }
+      assert.equal(posts.filter((post) => post.content === text).length, 1);
+    } finally {
+      await proof.finish();
+    }
+  });
+}
+
+test('a recalled attachment keeps its local bytes until the mounted draft restores the image', async () => {
+  const proof = await scene();
+  const { page } = proof;
+  const text = '撤回带图内容应保留离线副本';
+  const png = Buffer.from(
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO7Zq5sAAAAASUVORK5CYII=',
+    'base64',
+  );
+  let unavailable = true;
+  try {
+    await page.route('**/message-attempts/*', (route) =>
+      route.fulfill(json({ status: 'accepted', userMessage: { id: 'recall-image-local', timestamp: 100 } })),
+    );
+    await page.route('**/api/messages', (route) =>
+      route.request().method() === 'POST'
+        ? route.fulfill(json({ status: 'queued', userMessageId: 'recall-image-local' }, 202))
+        : route.fallback(),
+    );
+    await page
+      .locator('input[type="file"]')
+      .setInputFiles({ name: 'recall-local.png', mimeType: 'image/png', buffer: png });
+    await page.locator('textarea').fill(text);
+    await page.locator('textarea').press('Enter');
+    await page.locator('[data-send-status="accepted"]').waitFor();
+    const before = await localAttemptFiles(page);
+    assert.deepEqual(
+      before.map((row) => row.bytes),
+      [[png.length]],
+    );
+    await page.route('**/uploads/recalled-local.png', (route) =>
+      route.fulfill(unavailable ? json({}, 503) : { status: 200, contentType: 'image/png', body: png }),
+    );
+    await page.route('**/composer-draft', (route) =>
+      route.request().method() === 'GET'
+        ? route.fulfill(
+            json({
+              draft: {
+                version: 1,
+                ownerUserId: 'owner-proof',
+                threadId: CURRENT_THREAD,
+                revision: 100,
+                text,
+                contentBlocks: [{ type: 'image', url: '/uploads/recalled-local.png' }],
+                updatedAt: Date.now(),
+              },
+              revision: 100,
+            }),
+          )
+        : route.fallback(),
+    );
+    await page.evaluate((thread) => window.__f322Chat.recall(thread, 'recall-image-local'), CURRENT_THREAD);
+    await page.getByTestId('composer-recovered-attachments-blocked').waitFor();
+    assert.deepEqual(
+      await localAttemptFiles(page),
+      before,
+      'failed image restoration must keep the original durable bytes',
+    );
+    await page.locator('[data-send-status="recalled"]').waitFor();
+    await page.locator('textarea').fill(`${text}\n\n恢复期间新增输入`);
+    unavailable = false;
+    await page.getByRole('button', { name: '恢复草稿', exact: true }).click();
+    await page.locator('[data-send-status="recalled"]').waitFor({ state: 'detached' });
+    assert.equal((await localAttemptFiles(page)).length, 0);
+    assert.ok((await page.locator('textarea').inputValue()).includes('恢复期间新增输入'));
+    assert.equal(await page.getByTestId('composer-recovered-attachments-blocked').count(), 0);
+  } finally {
+    await proof.finish();
+  }
+});
+
 for (const state of ['sending', 'failed', 'unknown']) {
   test(`single-cat view retains a ${state} attempt outside member execution evidence`, async () => {
     const proof = await scene();

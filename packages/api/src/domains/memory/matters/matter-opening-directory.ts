@@ -15,7 +15,7 @@ function render(items: OpeningItem[], nextCursor?: string): string {
     '以下是当前有权读取的事情线索，不是原话、决定或执行授权；目录和语境线索均不表示已读。',
     '“含本线程来源”只表示原话出处，不证明适用本线程。语境线索是该页版本的整段猫的归纳，保留其适用/不适用范围；装不下则只给读入口，不截断。来源已变的归纳未经复核，不作现行结论。',
     '本轮相关页仍须调用 cat_cafe_read_memory_matter 读完整归纳与原话，核范围和当前版本；即使上轮读过也要重读。当前用户新指令按其范围优先，历史解释不新增授权。',
-    '找更多页用 cat_cafe_list_memory_matters(query 或 cursor)。新原话/更正用 cat_cafe_write_memory_matter；人物/画像/品味仍走各自提案。',
+    '找更多页用 cat_cafe_list_memory_matters(query 或 cursor)。新原话/更正用 cat_cafe_remember（target matter）；人物/画像/品味也走 cat_cafe_remember 的对应 target，仍各自审批。',
     JSON.stringify({ budget, items, ...(nextCursor ? { nextCursor } : {}) }),
     '[/事情目录]',
   ].join('\n');

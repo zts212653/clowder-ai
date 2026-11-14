@@ -72,15 +72,30 @@ export function preservedBlocksFromDraft(draft: OwnerComposerDraft | null): Mess
   return (draft?.contentBlocks ?? []).filter((block) => block.type !== 'image' && block.type !== 'context_attachment');
 }
 
-async function downloadDraftImage(url: string, index: number): Promise<File | null> {
+/** Material attachments share the same native File[] owner and completion proof. */
+export function draftAttachmentUrls(imageUrls: readonly string[], blocks: readonly MessageContent[]): string[] {
+  return [...new Set([...imageUrls, ...blocks.flatMap((block) => (block.type === 'file' ? [block.url] : []))])];
+}
+
+async function downloadDraftAttachment(
+  url: string,
+  index: number,
+  blocks: readonly MessageContent[],
+): Promise<File | null> {
   try {
     const response = await apiFetch(url);
     if (!response.ok) return null;
     const blob = await response.blob();
+    const descriptor = blocks.find((block) => block.type === 'file' && block.url === url);
+    if (descriptor?.type === 'file' && blob.size !== descriptor.fileSize) return null;
     const ext = url.split('.').pop() ?? 'png';
-    const file = new File([blob], `recalled-${Date.now()}-${index}.${ext}`, {
-      type: blob.type || `image/${ext}`,
-    });
+    const file = new File(
+      [blob],
+      descriptor?.type === 'file' ? descriptor.fileName : `recalled-${Date.now()}-${index}.${ext}`,
+      {
+        type: descriptor?.type === 'file' ? descriptor.mimeType : blob.type || `image/${ext}`,
+      },
+    );
     recoveredDraftImageUrl.set(file, url);
     return file;
   } catch {
@@ -88,12 +103,16 @@ async function downloadDraftImage(url: string, index: number): Promise<File | nu
   }
 }
 
-export async function downloadDraftImages(urls: readonly string[]): Promise<File[]> {
-  const restored = await Promise.all(urls.slice(0, 5).map(downloadDraftImage));
+export async function downloadDraftAttachments(
+  urls: readonly string[],
+  blocks: readonly MessageContent[],
+): Promise<File[]> {
+  const restored = await Promise.all(urls.slice(0, 5).map((url, index) => downloadDraftAttachment(url, index, blocks)));
   return restored.filter((file): file is File => file !== null);
 }
 
 export function getRecoveredDraftImageUrl(file: File | undefined): string | undefined {
+  // Legacy name shared by native composer consumers; both images and ordinary files use this identity.
   return file ? recoveredDraftImageUrl.get(file) : undefined;
 }
 

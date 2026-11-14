@@ -6,6 +6,11 @@ import type { ChatMessage as ChatMessageData } from '@/stores/chat-types';
 import { useChatStore } from '@/stores/chatStore';
 import { ChatMessage } from '../ChatMessage';
 
+// Keep request-read assertions independent of the shared plugin directory.
+vi.mock('@/hooks/usePluginMentionTargets', () => ({
+  usePluginTargets: () => ({ targets: [], knownTargets: [] }),
+}));
+
 const mocks = vi.hoisted(() => ({ fetch: vi.fn() }));
 vi.mock('@/utils/api-client', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/utils/api-client')>()),

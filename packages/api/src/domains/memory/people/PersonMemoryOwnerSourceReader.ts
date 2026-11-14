@@ -20,6 +20,7 @@ export type PersonMemoryOwnerSourceItem = Pick<PersonIdentity, 'ownerUserId' | '
   eventId?: string;
   supersedesClaimId?: string;
   amendsEventId?: string;
+  recordedAt?: number;
 };
 
 export interface PersonMemoryOwnerSourceReaderDeps {
@@ -125,7 +126,7 @@ export class PersonMemoryOwnerSourceReader {
           messageReason = reason;
         },
       });
-      const current = await resolver.revalidateResolvedBundle(item.typedProvenance, { ownerUserId });
+      const current = await resolver.revalidateResolvedBundle(item.typedProvenance, { ownerUserId }, item);
       if (current.status === 'invalid') {
         return reject(messageReason ?? canonicalSourceRejectionReason(current.error));
       }

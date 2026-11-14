@@ -51,6 +51,64 @@ const click = async (name: string) => {
   if (!b) throw Error(`Missing ${name}`);
   await act(async () => b.click());
 };
+const nativeIdentity = (userId: string) => ({ userId, workspaceId: `workspace-${userId}` });
+const nativeQuota = (userId: string, usedPercent: number): AccountQuotaObservation => ({
+  ...good,
+  observedAt: good.observedAt + usedPercent,
+  owner: { accountRef: 'codex', ...nativeIdentity(userId) },
+  items: [{ label: '每周使用限额', usedPercent }],
+});
+const refresh = async () => {
+  const button = host.querySelector<HTMLButtonElement>('button[aria-label="Refresh quota"]');
+  expect(button).not.toBeNull();
+  await act(async () => button?.click());
+};
+it('clears the old native reading and reloads identity when a same-page query returns another owner', async () => {
+  const reload = vi.fn(async () => {});
+  const next = nativeQuota('B', 80);
+  request.mockResolvedValueOnce({ quota: next });
+  await render(nativeQuota('A', 30), { accountRef: 'codex', identity: nativeIdentity('A'), reload });
+  expect(host.textContent).toContain('70% left');
+  await refresh();
+  expect(reload).toHaveBeenCalledTimes(1);
+  expect(request).toHaveBeenCalledTimes(1);
+  expect(host.textContent).not.toContain('70% left');
+  expect(host.textContent).not.toContain('20% left');
+  expect(host.textContent).toContain('The account sign-in changed. Check again.');
+  await render(next, { accountRef: 'codex', identity: nativeIdentity('B'), reload });
+  expect(host.textContent).toContain('20% left');
+  expect(host.textContent).not.toContain('The account sign-in changed. Check again.');
+  expect(request).toHaveBeenCalledTimes(1);
+});
+it.each([
+  'success',
+  'conflict',
+] as const)('ignores a late %s from the previous identity after a newer query', async (outcome) => {
+  let finish: (value: { quota: AccountQuotaObservation }) => void = () => {};
+  let fail: (error: Error) => void = () => {};
+  request.mockReturnValueOnce(
+    new Promise<{ quota: AccountQuotaObservation }>((resolve, reject) => {
+      finish = resolve;
+      fail = reject;
+    }),
+  );
+  const reload = vi.fn(async () => {});
+  await render(nativeQuota('A', 30), { accountRef: 'codex', identity: nativeIdentity('A'), reload });
+  await refresh();
+  const next = nativeQuota('B', 80);
+  request.mockResolvedValueOnce({ quota: next });
+  await render(next, { accountRef: 'codex', identity: nativeIdentity('B'), reload });
+  await refresh();
+  await act(async () => {
+    if (outcome === 'success') finish({ quota: nativeQuota('A', 90) });
+    else fail(Object.assign(new Error('old account changed'), { status: 409 }));
+  });
+  expect(request).toHaveBeenCalledTimes(2);
+  expect(reload).toHaveBeenCalledTimes(1);
+  expect(host.textContent).toContain('20% left');
+  expect(host.textContent).not.toContain('70% left');
+  expect(host.textContent).not.toContain('The account sign-in changed. Check again.');
+});
 it('shows a quota conflict, reloads once, and clears the message after an explicit successful retry', async () => {
   const reload = vi.fn(async () => {});
   request.mockRejectedValueOnce(Object.assign(new Error('account changed'), { status: 409 }));
@@ -59,10 +117,11 @@ it('shows a quota conflict, reloads once, and clears the message after an explic
   expect(refresh).not.toBeNull();
   await act(async () => refresh.click());
   expect(host.textContent).toContain('The account sign-in changed. Check again.');
+  expect(host.textContent).not.toContain('0% left');
   expect(reload).toHaveBeenCalledTimes(1);
   expect(request).toHaveBeenCalledTimes(1);
   request.mockResolvedValueOnce({ quota: good });
-  await act(async () => refresh.click());
+  await click('Check quota');
   expect(host.textContent).not.toContain('The account sign-in changed. Check again.');
   expect(request).toHaveBeenCalledTimes(2);
 });

@@ -32,3 +32,26 @@ export async function memoryProposalNativeClient(apiUrl, auth, dataDir) {
     throw error;
   }
 }
+
+/**
+ * Cats reach the original memory routes only through cat_cafe_remember since 2026-11-13.
+ * Returns the single item's original route result in the shape the old per-kind tool returned.
+ */
+export async function callRememberItem(client, target, payload) {
+  const response = await client.callTool({
+    name: 'cat_cafe_remember',
+    arguments: {
+      clientRequestId: `remember:${payload.clientRequestId ?? target}`,
+      items: [{ itemId: 'one', target, payload }],
+    },
+  });
+  if (response.isError) return response;
+  const body = JSON.parse(response.content.find((part) => part.type === 'text').text);
+  if (body.status === 'stale_ignored') return { isError: true, content: [{ type: 'text', text: 'stale_ignored' }] };
+  const [row] = body.results;
+  return {
+    isError: row.statusCode >= 400,
+    content: [{ type: 'text', text: JSON.stringify(row.result) }],
+    rememberGroup: body,
+  };
+}

@@ -238,6 +238,8 @@ describe('F247 R8 P1-1: EXPLICIT_TOOL_ANNOTATIONS regression guard', () => {
       ...buildLimbTools().map((t) => t.name),
       ...buildAudioTools().map((t) => t.name),
       ...buildFinanceTools().map((t) => t.name),
+      // The watcher's ticketed surface draws these from the registry without a cat mount.
+      ...CANONICAL_TOOL_REGISTRY.filter((t) => t.policy.runtimeProfiles.includes('watcher')).map((t) => t.name),
     ]);
 
     it('every registered tool has an explicit annotation entry', () => {

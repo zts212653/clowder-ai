@@ -15,7 +15,7 @@
     "audit:codex-protocol": "node ./scripts/audit-codex-app-server-protocol.mjs",
     "verify:codex-build-independence": "node ./scripts/verify-codex-build-independence.mjs",
     "start": "node dist/index.js",
-    "test": "pnpm run build && node ./scripts/with-test-home.mjs --env CAT_CAFE_DISABLE_SHARED_STATE_PREFLIGHT=1 node --import ./test/helpers/setup-cat-registry.js --test --test-concurrency=4 --test-timeout=60000 \"test/**/*.test.js\" && pnpm run test:companion && pnpm run test:runtime-interaction && pnpm run test:artifact-review && pnpm run test:development-work && pnpm run test:cli && pnpm run test:claude-sdk && pnpm run test:f322-message-output",
+    "test": "pnpm run build && node ./scripts/with-test-home.mjs --env CAT_CAFE_DISABLE_SHARED_STATE_PREFLIGHT=1 node --import ./test/helpers/setup-cat-registry.js --test --test-concurrency=4 --test-timeout=60000 \"test/**/*.test.js\" && pnpm run test:companion && pnpm run test:runtime-interaction && pnpm run test:artifact-review && pnpm run test:development-work && pnpm run test:cli && pnpm run test:claude-sdk && pnpm run test:f322-message-output && pnpm run test:f321",
     "test:public": "pnpm --dir ../shared build && pnpm --dir ../mcp-server build && pnpm run build && pnpm run test:public:prepared",
     "test:public:prepared": "node ./scripts/with-test-home.mjs --env CAT_CAFE_DISABLE_SHARED_STATE_PREFLIGHT=1 node ./scripts/run-public-tests.mjs",
     "test:public:plan": "node ./scripts/plan-public-test-shards.mjs",
@@ -54,10 +54,13 @@
     "test:f320-managed-layout": "node ./scripts/with-test-home.mjs node --import \"./node_modules/tsx/dist/loader.mjs\" --test test/f320-managed-layout.native.mts test/f320-managed-identity.native.mts",
     "test:f320-runtime-owner": "node ./scripts/with-test-home.mjs node --import tsx --test --test-concurrency=1 test/f320-runtime-owner.test.ts",
     "test:f322-message-output": "node ./scripts/with-test-home.mjs --env CAT_CAFE_DISABLE_SHARED_STATE_PREFLIGHT=1 node --import tsx --test --test-concurrency=1 test/f322-message-output-accumulator.test.ts test/f322-output-stream-provenance.test.ts test/f322-reply-output-draft.test.ts test/f322-reply-output-store-wire.test.ts test/f322-tool-event-instance.test.ts test/f322-host-signature-layout.test.ts",
+    "test:f321": "node ./scripts/with-test-home.mjs --env CAT_CAFE_DISABLE_SHARED_STATE_PREFLIGHT=1 node --import tsx --import ./test/helpers/setup-cat-registry.js --test --test-concurrency=2 --test-timeout=60000 \"test/memory/f321-*.test.ts\"",
     "test:f322-message-output-readback": "node ./scripts/with-test-home.mjs --env CAT_CAFE_DISABLE_SHARED_STATE_PREFLIGHT=1 node --import ./test/helpers/setup-cat-registry.js --test --test-concurrency=1 test/f322-reply-output-readback.journey.mjs",
     "test:collective-artifact": "node scripts/f202-collective-artifact-gate.mjs",
     "test:native-tracking-artifact": "node ./scripts/with-test-home.mjs --env CAT_CAFE_DISABLE_SHARED_STATE_PREFLIGHT=1 node --import ./test/helpers/setup-cat-registry.js --test --test-timeout=60000 test/plugin-native-tracking-source.test.mjs",
     "test:redis:task-native": "node ./scripts/with-test-home.mjs --env CAT_CAFE_DISABLE_SHARED_STATE_PREFLIGHT=1 node ./scripts/run-isolated-redis-tests.mjs -- node --import tsx --import ./test/helpers/setup-cat-registry.js --test --test-concurrency=1 test/redis-task-native.test.ts test/redis-task-native-compat.test.ts",
+    "test:memory-warmup": "node ./scripts/with-test-home.mjs --env CAT_CAFE_DISABLE_SHARED_STATE_PREFLIGHT=1 node --import tsx --test --test-concurrency=1 --test-timeout=60000 test/memory/passage-warmup-progress.test.ts",
+    "test:memory-query-input": "node ./scripts/with-test-home.mjs --env CAT_CAFE_DISABLE_SHARED_STATE_PREFLIGHT=1 node ./scripts/run-isolated-redis-tests.mjs -- node --import tsx --import ./test/helpers/setup-cat-registry.js --test --test-concurrency=1 --test-timeout=60000 test/memory/query-embedding-input.test.ts",
     "test:plugin-shared-mcp": "node ./scripts/with-test-home.mjs --env CAT_CAFE_DISABLE_SHARED_STATE_PREFLIGHT=1 node --import tsx --test --test-timeout=60000 test/plugin-shared-mcp-activation.test.js test/plugin-shared-mcp-http.test.js && node ./scripts/with-test-home.mjs --env F333_MUSIC_SHARED=1 --env CAT_CAFE_DISABLE_SHARED_STATE_PREFLIGHT=1 node --import tsx --test --test-timeout=150000 test/f327-plugin-package-journey.test.ts"
   },
   "dependencies": {

@@ -1,7 +1,7 @@
 /**
  * F231 Phase C: Profile update proposal types.
  *
- * Cats propose a capsule/primer update via `cat_cafe_propose_profile_update`;
+ * Cats propose a capsule/primer update via `cat_cafe_remember` (target `profile`);
  * the operator sees a card and approves/rejects. Only on approve does the backend
  * write the authenticated relationship-persona primer + provenance (KD-12/KD-18:
  * low-cost persona-primer writes go here; high-cost shared-capsule promotion is C2 / KD-15).

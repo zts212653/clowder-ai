@@ -245,6 +245,8 @@ export interface TaskSpec_P1<Signal = unknown> {
   enabled: () => boolean;
   /** Phase 1b: actor resolution — which cat capability this task needs */
   actor?: ActorSpec;
+  /** Code-owned execution eligibility, checked before actor ranking; never a public actor override. */
+  actorEligibility?: (catId: string) => boolean;
   /** Phase 2: context dimension — session × materialization */
   context?: ContextSpec;
   /** Phase 2.5: display metadata — label, category, description, subjectKind (AC-E1) */

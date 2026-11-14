@@ -38,7 +38,6 @@ describe('CapabilityWakeupRulesRegistry (砚砚 R1 P2)', () => {
         'propose-thread',
         'external-runtime-sessions',
         'cli-diagnostics',
-        'eval-verdict',
         'memory-drilldown',
         'update-workflow',
       ];
@@ -46,6 +45,13 @@ describe('CapabilityWakeupRulesRegistry (砚砚 R1 P2)', () => {
       for (const capability of expected) {
         assert.ok(capabilities.has(capability), `missing ${capability}`);
       }
+    });
+
+    it('does not demand old-platform verdicts for ordinary harness work', () => {
+      assert.equal(
+        DEFAULT_CAPABILITY_WAKEUP_RULES.some((rule) => rule.capability === 'eval-verdict'),
+        false,
+      );
     });
 
     it('covers all 3 capabilities the normalizer classifies', () => {

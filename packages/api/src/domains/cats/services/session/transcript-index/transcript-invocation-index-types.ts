@@ -49,6 +49,7 @@ export interface InvocationIndexRequest {
     | { kind: 'list'; limit: number }
     | { kind: 'invocation'; invocationId: string; cursor?: number; limit?: number; generationEvidenceOnly?: boolean }
     | { kind: 'events'; cursor?: number; limit: number }
+    | { kind: 'transcriptEvents'; cursor?: number; limit?: number }
     | { kind: 'files' };
 }
 

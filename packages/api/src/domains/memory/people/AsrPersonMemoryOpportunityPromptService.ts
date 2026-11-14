@@ -111,7 +111,7 @@ function renderOpportunity(
     // line no cat can construct a valid writeOpportunityRef and every disposition silently falls
     // back to the unattributed path. IDs only, so this stays content-free.
     `writeOpportunityRef: opportunityId=${opportunity.opportunityId} dedupeLineage=${opportunity.dedupeLineage} generation=${opportunity.generation}`,
-    'load proactive-memory-judgment; propose | defer | abstain; pass the writeOpportunityRef triple above verbatim to propose, defer, or abstain.',
+    'load proactive-memory-judgment; propose | defer | abstain via cat_cafe_remember target person | person_defer | person_abstain; pass the writeOpportunityRef triple above verbatim in that payload.',
     '</person-memory-write-opportunity>',
   ].join('\n');
 }

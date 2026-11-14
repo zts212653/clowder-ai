@@ -81,11 +81,7 @@ import {
 } from './invocation-auth.js';
 import { createMemoryCueTools } from './memory-cue-tools.js';
 import { createPersonMemoryLifecycleTools } from './person-memory-lifecycle-tools.js';
-import { createPersonMemoryProposalTool } from './person-memory-proposal-tool.js';
-import {
-  createDeferredPersonMemoryTool,
-  createProactiveMemoryAbstentionTool,
-} from './proactive-memory-opportunity-tool.js';
+import { createDeferredPersonMemoryTool } from './proactive-memory-opportunity-tool.js';
 import { withProfileReadRecovery } from './profile-read-recovery.js';
 import { projectRoutingCallbackResponse } from './routing-preflight-response.js';
 
@@ -2909,54 +2905,12 @@ export const proposeProfileUpdateInputSchema = {
     ),
 };
 
-export async function handleProposeProfileUpdate(input: {
-  afterContent: string;
-  rationale: string;
-  signalKind: 'cat-declared' | 'cvo-instructed';
-  targetLayer?: ProfileUpdateTargetLayer | undefined;
-  sourceMessageId?: string | undefined;
-  expectedRevision?: string | undefined;
-  clientRequestId?: string | undefined;
-  agentKeyCatId?: string | undefined;
-}): Promise<ToolResult> {
-  // Always send an idempotency key — auto-generate when the caller didn't supply one, so transient
-  // callbackPost retries never produce duplicate proposals (mirrors F128 handleProposeThread).
-  const body: Record<string, unknown> = {
-    afterContent: input.afterContent,
-    rationale: input.rationale,
-    signalKind: input.signalKind,
-    ...(input.expectedRevision ? { expectedRevision: input.expectedRevision } : {}),
-    ...(input.targetLayer ? { targetLayer: input.targetLayer } : {}),
-    ...(input.sourceMessageId ? { sourceMessageId: input.sourceMessageId } : {}),
-    clientRequestId: input.clientRequestId ?? randomUUID(),
-  };
-
-  const result = await callbackPost('/api/callbacks/propose-profile-update', body, agentKeyOptions(input));
-  if (!result.isError) {
-    try {
-      const data = JSON.parse((result.content[0] as { text: string }).text);
-      if (data?.status === 'stale_ignored') {
-        return errorResult(
-          'Profile-update proposal was NOT created: this invocation has been superseded by a newer one (stale_ignored).',
-        );
-      }
-    } catch {
-      // parse failure is fine
-    }
-  }
-  return result;
-}
-
 // ============ F276: People & Relationship Memory ============
 
-const personMemoryProposalToolset = createPersonMemoryProposalTool(callbackPost);
 const personMemoryLifecycleToolset = createPersonMemoryLifecycleTools(callbackPost, callbackGet);
 const memoryCueToolset = createMemoryCueTools(callbackPost);
-const proactiveMemoryAbstentionToolset = createProactiveMemoryAbstentionTool(callbackPost);
 const deferredPersonMemoryToolset = createDeferredPersonMemoryTool(callbackPost);
-export const { handleProposePersonMemory } = personMemoryProposalToolset;
-export const { handleRecordProactiveMemoryAbstention } = proactiveMemoryAbstentionToolset;
-export const { handleDeferPersonMemoryDelta, handleDisposeDeferredPersonMemory } = deferredPersonMemoryToolset;
+export const { handleDisposeDeferredPersonMemory } = deferredPersonMemoryToolset;
 export const {
   handleGetPersonMemoryProposalStatus,
   handleRecallPersonRelationship,
@@ -3017,30 +2971,6 @@ export const proposeEntityInputSchema = {
     .optional()
     .describe('Optional idempotency key. Resending with the same value returns the same proposalId.'),
 };
-
-export async function handleProposeEntity(input: {
-  entityId: string;
-  entityType: 'person' | 'cat' | 'feature' | 'concept' | 'external';
-  canonicalName: string;
-  aliases: string[];
-  stance: 'endorsed' | 'rejected' | 'critique_target' | 'deliverable_only' | 'unknown';
-  visibilityScope: string;
-  provenance: Array<{ source: string; anchor?: string; note?: string; date?: string }>;
-  rationale: string;
-  clientRequestId?: string | undefined;
-}): Promise<ToolResult> {
-  return callbackPost('/api/callbacks/propose-entity', {
-    entityId: input.entityId,
-    entityType: input.entityType,
-    canonicalName: input.canonicalName,
-    aliases: input.aliases,
-    stance: input.stance,
-    visibilityScope: input.visibilityScope,
-    provenance: input.provenance,
-    rationale: input.rationale,
-    clientRequestId: input.clientRequestId ?? randomUUID(),
-  });
-}
 
 // ============ F221: Taste Capture Loop ============
 
@@ -3184,81 +3114,6 @@ export const proposeTasteInputSchema = {
     .describe('Idempotency key — same clientRequestId returns cached proposal'),
 };
 
-export async function handleProposeTaste(input: {
-  scene?: string;
-  quote?: string;
-  takeaway?: string;
-  tags?: string[];
-  dimension?: string;
-  privacy?: 'public' | 'sensitive';
-  sourceMessageId?: string;
-  target?: z.infer<typeof tasteCorrectionTargetInputSchema>;
-  clientRequestId?: string;
-}): Promise<ToolResult> {
-  const createSchema = z
-    .object({
-      scene: z.string().min(1).max(2000),
-      quote: z.string().min(1).max(2000),
-      takeaway: z.string().trim().min(1).max(500).optional(),
-      tags: z.array(z.string().min(1).max(50)).min(1).max(10),
-      dimension: proposeTasteInputSchema.dimension.unwrap(),
-      privacy: z.enum(['public', 'sensitive']),
-      sourceMessageId: z.string().min(1).optional(),
-      clientRequestId: z.string().min(1).max(200).optional(),
-      target: z.undefined().optional(),
-    })
-    .strict();
-  const correctionSchema = z
-    .object({
-      target: tasteCorrectionTargetInputSchema,
-      clientRequestId: z
-        .string()
-        .trim()
-        .min(32)
-        .max(200)
-        .regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/)
-        .optional(),
-      scene: z.undefined().optional(),
-      quote: z.undefined().optional(),
-      takeaway: z.undefined().optional(),
-      tags: z.undefined().optional(),
-      dimension: z.undefined().optional(),
-      privacy: z.undefined().optional(),
-      sourceMessageId: z.undefined().optional(),
-    })
-    .strict();
-  const parsed = z.union([createSchema, correctionSchema]).safeParse(input);
-  if (!parsed.success) {
-    return errorResult(
-      'Invalid Taste proposal input. Expected either create fields ' +
-        '{scene, quote, tags, dimension, privacy} or correction fields ' +
-        '{target:{sourceAnchor, expectedRevision, reason, suggestedPatch}}, without mixing them. ' +
-        'Example correction: target.sourceAnchor="taste-vignette:docs/taste/vignettes/example.md", ' +
-        'target.expectedRevision="sha256:<64 lowercase hex>". ' +
-        `Details: ${parsed.error.issues.map((issue) => issue.message).join('; ')}`,
-    );
-  }
-  const request = parsed.data.target
-    ? { target: parsed.data.target, clientRequestId: parsed.data.clientRequestId ?? randomUUID() }
-    : { ...parsed.data, clientRequestId: parsed.data.clientRequestId ?? randomUUID() };
-  const result = await callbackPost('/api/callbacks/propose-taste', request);
-  // Detect stale_ignored: match thread/profile/handoff pattern — a stale invocation
-  // gets HTTP 200 with status='stale_ignored' but no proposal was actually created.
-  if (!result.isError) {
-    try {
-      const data = JSON.parse((result.content[0] as { text: string }).text);
-      if (data?.status === 'stale_ignored') {
-        return errorResult(
-          'Taste proposal NOT created: this invocation was superseded by a newer one (stale_ignored).',
-        );
-      }
-    } catch {
-      // parse failure is fine — means result is not a stale_ignored response
-    }
-  }
-  return result;
-}
-
 // ============ F321: source-bound Event memory correction ============
 
 const eventCorrectionPatchInputSchema = z
@@ -3292,24 +3147,6 @@ export const proposeEventMemoryCorrectionInputSchema = {
     .optional()
     .describe('Idempotency key; retries with the same request return the same proposal.'),
 };
-
-export async function handleProposeEventMemoryCorrection(input: {
-  eventId: string;
-  expectedRevision: string;
-  reason: 'unsupported_by_source' | 'outdated' | 'not_applicable_here';
-  suggestedPatch: {
-    summary?: string;
-    cognitiveTransition?: (typeof COGNITIVE_TRANSITIONS)[number] | null;
-    relatedHarness?: string[] | null;
-    confidence?: (typeof EVENT_CONFIDENCES)[number];
-  };
-  clientRequestId?: string;
-}): Promise<ToolResult> {
-  return callbackPost('/api/callbacks/propose-event-memory-correction', {
-    ...input,
-    clientRequestId: input.clientRequestId ?? randomUUID(),
-  });
-}
 
 // ============ Thread Cats Discovery ============
 
@@ -4489,115 +4326,12 @@ export const callbackTools = [
       ],
     },
   }),
-  defineCanonicalTool({
-    name: 'cat_cafe_propose_profile_update',
-    description:
-      'Propose an update to a profile layer — the "养熟循环" digest entry point (F231 KD-12/KD-18). ' +
-      'Supports primer (default, per-persona relationship), corpus (owner-wide shared facts), and capsule (a 1–300 character opening portrait). ' +
-      'Output: returns a proposalId, NOT a written file; the content is only written after operator approval (reject/expire = nothing changes). ' +
-      'Use when: the content is a durable fact about the authenticated person or this persona-operator relationship — personal context, preferred address, or a relationship-specific communication boundary. ' +
-      'Use targetLayer:corpus for owner-wide personal facts independent of persona relationship (birthday, background, preferences that all cats should know). ' +
-      'Use targetLayer:capsule to draft the short portrait visible in Memory → Profile; read layer:capsule first, keep supporting source coordinates in the rationale, and wait for the owner to confirm. Capsule content belongs only in private owner data, never repository defaults. ' +
-      'NOT for reusable judgments about what makes output, design, expression, architecture, or systems good (use cat_cafe_propose_taste), repeated operational/tool/process rules (use code-as-harness), or one-off context. ' +
-      'A correction, praise, or Magic Word does not choose the lane; semantic content does. ' +
-      'afterContent is the COMPLETE new content (whole-file replacement, not a diff) — include everything you want kept. ' +
-      'Use cat_cafe_read_profile first when preserving existing content matters. For names/roles, state the subject cat, current agreement and original proposal/response message coordinates separately; the registration source is not the original event. GOTCHA: shared-persona primers retain family continuity, but an old cat role is not a new cat identity. signalKind records proposal provenance; current profile takes effect only after owner approval.',
-    inputSchema: proposeProfileUpdateInputSchema,
-    handler: handleProposeProfileUpdate,
-    governance: {
-      implementationExport: 'handleProposeProfileUpdate',
-      resourceFamily: 'identity-proposal',
-      action: 'create',
-      authority: 'callback-owner',
-      risk: { level: 'write', openWorld: false },
-      runtimeProfiles: ['full'],
-    },
-  }),
-  personMemoryProposalToolset.tool,
-  proactiveMemoryAbstentionToolset.tool,
-  deferredPersonMemoryToolset.tool,
+
   ...deferredPersonMemoryToolset.lifecycleTools,
   ...personMemoryLifecycleToolset.tools,
   ...memoryCueToolset.tools,
-  // F260 Phase A: Entity registration proposal (operator approves via Hub, then entity enters registry)
-  defineTool({
-    name: 'cat_cafe_propose_entity',
-    description:
-      'Propose a workspace entity for the registry. Returns a proposalId — the entity is only registered ' +
-      'after the operator approves in the Approval Hub. ' +
-      'Use when: (1) responding to a registration nudge with pre-filled params; ' +
-      '(2) the operator explicitly requests entity registration; or ' +
-      '(3) the current turn verified a durable workspace name/handle/alias mapping and provenance identifies its source. ' +
-      'NOT for an unverified or bare proper name, bulk proper-noun extraction, or owner-private facts, relationships, or interactions ' +
-      '(use cat_cafe_propose_person_memory). Do not infer identity from spelling or silently write either lane. ' +
-      'GOTCHA: correcting a pending/private F276 card is not an Entity mutation; use cat_cafe_propose_person_memory with replacesProposalId, or withdraw the F276 proposal. ' +
-      'stance includes negative values: "rejected" marks terms the registry should explicitly NOT match, ' +
-      '"critique_target" marks entities under critique (e.g. architectural patterns being evaluated). ' +
-      'visibilityScope: only "workspace" accepted (KD-7 gate — private scope deferred until resolver supports visibility filtering).',
-    inputSchema: proposeEntityInputSchema,
-    handler: handleProposeEntity,
-    governance: {
-      implementationExport: 'handleProposeEntity',
-      resourceFamily: 'identity-proposal',
-      action: 'create',
-      authority: 'callback-owner',
-      risk: { level: 'write', openWorld: false },
-      runtimeProfiles: ['full'],
-    },
-  }),
   // F221 Phase B: Taste Capture Loop — cat proposes a taste vignette for operator approval
-  defineCanonicalTool({
-    name: 'cat_cafe_propose_taste',
-    description:
-      'Propose a taste vignette capturing a operator preference/aesthetic signal (F221 Taste Capture Loop). ' +
-      'Output: returns a proposalId; the vignette is only written after operator approval in the Approval Hub. ' +
-      'Use when: the content is a reusable judgment about what makes output, design, expression, architecture, or system behavior good or bad — including positive and negative taste signals. ' +
-      'NOT for durable personal facts or relationship-specific context (use cat_cafe_propose_profile_update), repeated operational/tool/process rules (use code-as-harness), or transient reactions. ' +
-      'A correction or praise does not choose the lane; semantic content does. ' +
-      'To challenge an existing Taste memory as unsupported, outdated, or not applicable here, pass target with the exact sourceAnchor, expectedRevision, reason, and suggestedPatch; that creates an attached owner approval instead of mutating canonical memory directly. ' +
-      'The 7 taste dimensions cover relationship-stance, cognitive-honesty, architecture-aesthetics, ' +
-      'visual-quality, authentic-expression, system-philosophy, and creative-craft. ' +
-      'GOTCHA: relationship-stance stores a reusable stance such as partner-not-tool, not a personal fact about the current operator. Preserve original language in quote — taste signals lose meaning when paraphrased.' +
-      ' Use optional takeaway for a one-sentence hypothesis of what {{coCreator.name}} prefers; approval covers that hypothesis with the quote and scene. ' +
-      'New proposals bind to the authenticated origin message owned by the same user in this thread. On retries, both the current origin and saved original source must remain eligible. ' +
-      'Retry with the same clientRequestId, unchanged content and original explicit sourceMessageId (or omit it), including from a later invocation or after approval; a changed payload needs a new key. ' +
-      'Public means sharing within the private home repository after the owner approves the complete fields, not publishing on the internet.',
-    inputSchema: proposeTasteInputSchema,
-    handler: handleProposeTaste,
-    governance: {
-      implementationExport: 'handleProposeTaste',
-      resourceFamily: 'identity-proposal',
-      action: 'create',
-      authority: 'callback-owner',
-      risk: { level: 'write', openWorld: false },
-      runtimeProfiles: ['full'],
-    },
-  }),
-  defineCanonicalTool({
-    name: 'cat_cafe_propose_event_memory_correction',
-    description:
-      'Propose a source-bound correction to an existing Event memory after using or inspecting it. ' +
-      'Returns a pending proposal for the owner; it never mutates the Event directly. ' +
-      'Use when the current Event summary is unsupported by its original source, outdated, or not applicable in the present context. ' +
-      'Pass the exact eventId and revision you read plus a bounded patch to interpretive fields. ' +
-      'NOT for creating a new Event, changing source coordinates/identity, or bypassing owner approval. ' +
-      'GOTCHA: a stale revision or unavailable original source is rejected; reread the Event instead of guessing.',
-    inputSchema: proposeEventMemoryCorrectionInputSchema,
-    handler: handleProposeEventMemoryCorrection,
-    governance: {
-      implementationExport: 'handleProposeEventMemoryCorrection',
-      resourceFamily: 'identity-proposal',
-      action: 'create',
-      authority: 'callback-owner',
-      risk: { level: 'write', openWorld: false },
-      runtimeProfiles: ['full'],
-      standaloneReason: {
-        disposition: 'accepted-boundary',
-        kind: 'resource-entry',
-        admissionRef: 'architecture-cell:memory',
-      },
-    },
-  }),
+
   // ============ F155: Guide Engine ============
   defineTool({
     name: 'cat_cafe_update_guide_state',

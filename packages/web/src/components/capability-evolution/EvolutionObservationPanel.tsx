@@ -27,6 +27,7 @@ export interface EvolutionObservationView {
   trigger?: {
     registrationRef: OwnerRef;
     channels: readonly string[];
+    automaticStatus?: 'retired';
   };
   nextEvaluationAt?: string;
   gaps: Array<{
@@ -102,7 +103,9 @@ export function EvolutionObservationPanel({ observation }: { observation: Evolut
         <div className="rounded-lg border border-cafe-subtle p-3">
           <p className="text-xs font-medium text-cafe">下次评估</p>
           <time className="mt-1 block font-mono text-xs text-cafe-muted" dateTime={observation.nextEvaluationAt}>
-            {observation.nextEvaluationAt ?? 'F192 registration unavailable'}
+            {observation.trigger?.automaticStatus === 'retired'
+              ? '自动评估已停用；可按需发起'
+              : (observation.nextEvaluationAt ?? 'F192 registration unavailable')}
           </time>
           {observation.trigger && (
             <p className="mt-1 text-xs text-cafe-muted">{observation.trigger.channels.join(' · ')}</p>

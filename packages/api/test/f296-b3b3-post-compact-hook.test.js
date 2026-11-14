@@ -13,7 +13,10 @@ const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
 
 test('F296 B3b-3 hook injects only the API-selected cold packet, never the raw digest', async () => {
   const sessionId = `f296-b3b3-${process.pid}-${Date.now()}`;
-  const statePath = join(tmpdir(), `cat-cafe-opus-compact-state-${sessionId}.json`);
+  const statePath = join(
+    process.platform === 'win32' ? tmpdir() : '/tmp',
+    `cat-cafe-opus-compact-state-${sessionId}.json`,
+  );
   const requests = [];
   const api = createServer((request, response) => {
     requests.push({ path: request.url, method: request.method, headers: request.headers });
@@ -92,7 +95,7 @@ test('F296 B3b-3 hook injects only the API-selected cold packet, never the raw d
     assert.match(additionalContext, /repeated tool\/workflow friction/);
     assert.match(additionalContext, /proactive-memory-judgment/);
     assert.match(additionalContext, /profile, taste, harness, or no action/);
-    assert.doesNotMatch(additionalContext, /cat_cafe_propose_profile_update/);
+    assert.doesNotMatch(additionalContext, /cat_cafe_propose_profile_update/); // mcp-cutover-negative-reference: absence
     assert.match(additionalContext, /Pre-Compact State Snapshot/);
     assert.match(additionalContext, /F073 SOP STAGE RECOVERY/);
     await assert.rejects(readFile(statePath), { code: 'ENOENT' });
@@ -106,7 +109,10 @@ test('F296 B3b-3 hook injects only the API-selected cold packet, never the raw d
 for (const condition of ['missing', 'expired']) {
   test(`F324 recovery remains silent for ${condition} snapshots`, async () => {
     const sessionId = `f324-${condition}-${process.pid}-${Date.now()}`;
-    const statePath = join(tmpdir(), `cat-cafe-opus-compact-state-${sessionId}.json`);
+    const statePath = join(
+      process.platform === 'win32' ? tmpdir() : '/tmp',
+      `cat-cafe-opus-compact-state-${sessionId}.json`,
+    );
     if (condition === 'expired') {
       await writeFile(
         statePath,

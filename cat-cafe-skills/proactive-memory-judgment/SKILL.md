@@ -1,6 +1,6 @@
 ---
 name: proactive-memory-judgment
-tips_exempt: internal cat judgment policy; owner-facing behavior remains the existing F276 approval card
+tips_exempt: "Re-audited 2026-11-14: existing person proposal, content-free defer and enum-only abstention now use cat_cafe_remember targets. The five judgment gates, original approval card and no-silent-write boundary remain; no separate owner operation is introduced."
 description: "Use when 人物线索需在 F276 即时提案、known-person defer、abstention 间判断。Not for 裸人名、taste、后台扫描或 workspace alias。Output: 可拒绝 proposal、无正文 receipt 或 abstention；永不静默物化。"
 triggers:
   - "continuity-valued 人物线索"
@@ -49,15 +49,15 @@ Entity 与 F276，分别审批。
 - 时间、headline、duration 等 interaction fields 必须有对应 typed evidence。
 
 证据不足时不猜、不补写 owner 没说过的话；若本轮已形成 opportunity exposure，记录
-`cat_cafe_record_proactive_memory_abstention({ reasonCode: "insufficient_owner_evidence" })`。
+`cat_cafe_remember` 的一条 target `person_abstain`，payload `{ reasonCode: "insufficient_owner_evidence" }`。
 
 ### 3. 时机
 
 只在自然回复边界行动；同一轮至多一张 person-memory card。已有 pending 时不要制造重复卡；
 需要纠正 pending 时按 F276 immutable replacement 契约提交完整新快照。人物已登记不等于没有
 新关系/互动：若当前任务适合，立即提完整 delta 卡；若提卡会打断主任务且 exact owner sources
-已经明确，调用 `cat_cafe_defer_person_memory_delta`，只传 subject、source coordinates 与稳定
-clientRequestId。defer 不存正文，daily clerk 也不会扫描对话，只会把 exact refs 转回普通审批卡。
+已经明确，用 `cat_cafe_remember` 的一条 target `person_defer`，payload 只传 subject、source coordinates
+与稳定 clientRequestId。defer 不存正文、不出卡，daily clerk 也不会扫描对话，只会把 exact refs 转回普通审批卡。
 
 ### 4. 授权
 
@@ -82,20 +82,20 @@ clientRequestId。defer 不存正文，daily clerk 也不会扫描对话，只�
 调用形式：
 
 ```text
-cat_cafe_record_proactive_memory_abstention({ reasonCode })
+cat_cafe_remember({ items: [{ itemId: "abstain", target: "person_abstain", payload: { reasonCode } }] })
 ```
 
-工具不接受 `opportunityRef`、owner、person、message 或 thread 坐标。若 proposal 工具失败，
+这条 payload 不接受 `opportunityRef`、owner、person、message 或 thread 坐标；它不出卡。若 proposal 工具失败，
 只在重新判断后确实应该降档时记录准确的 abstention；不能把失败回执冒充成功提案。
 
 defer 调用只接受路由坐标，不接受私密正文：
 
 ```text
-cat_cafe_defer_person_memory_delta({
+cat_cafe_remember({ items: [{ itemId: "defer", target: "person_defer", payload: {
   subject,
   sources: [{ kind: "message", messageId }],
   clientRequestId
-})
+} }] })
 ```
 
 附件/ASR 未绑定 owner 的明确准确性确认时，不得产生 interaction fact。可以得到
@@ -110,9 +110,9 @@ cat_cafe_defer_person_memory_delta({
 
 ## 出口
 
-- 五门通过且时机自然 → 用 `cat_cafe_propose_person_memory`，保留 typed evidence 与 approval-first 边界。
-- 已登记人物 + exact sources + 当前不宜打断 → 用一次 `cat_cafe_defer_person_memory_delta`。
-- opportunity exposure 已发生但不应 proposal/defer → 用一次 enum-only abstention。
+- 五门通过且时机自然 → 用 `cat_cafe_remember` 的一条 target `person` 提案，保留 typed evidence 与 approval-first 边界；同一轮还要记画像、品味或实体时放进同一次 `remember`。
+- 已登记人物 + exact sources + 当前不宜打断 → 用 `cat_cafe_remember` 的一条 target `person_defer`（不出卡）。
+- opportunity exposure 已发生但不应 proposal/defer → 用 `cat_cafe_remember` 的一条 target `person_abstain`，只带 enum（不出卡）。
 - 没有 exposure、只是普通裸人名 → 正常回答，不制造 opportunity receipt。
 
 禁止用 proposal 接受率、猫排名或“出现三次所以重要”作为判断依据。

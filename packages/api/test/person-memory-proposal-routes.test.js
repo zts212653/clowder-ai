@@ -172,7 +172,7 @@ describe('F276 person-memory proposal routes', { skip: redisIsolationSkipReason(
   async function propose(body, originContent = '黄挺是终端用户计算开发部 21 级') {
     const origin = await messageStore.append({
       userId: 'owner-1',
-      catId: null,
+      from: { kind: 'user', userId: 'owner-1' },
       content: originContent,
       mentions: [],
       timestamp: Date.now(),
@@ -262,7 +262,7 @@ describe('F276 person-memory proposal routes', { skip: redisIsolationSkipReason(
   it('binds an ASR proposal to delivered evidence and closes that generation', async () => {
     const origin = await messageStore.append({
       userId: 'owner-1',
-      catId: null,
+      from: { kind: 'user', userId: 'owner-1' },
       content: '黄挺是终端用户计算开发部 21 级',
       mentions: [],
       timestamp: Date.now(),
@@ -295,7 +295,7 @@ describe('F276 person-memory proposal routes', { skip: redisIsolationSkipReason(
   it('rejects an unattributed proposal when this invocation received an opportunity', async () => {
     const origin = await messageStore.append({
       userId: 'owner-1',
-      catId: null,
+      from: { kind: 'user', userId: 'owner-1' },
       content: '黄挺是终端用户计算开发部 21 级',
       mentions: [],
       timestamp: Date.now(),
@@ -341,7 +341,7 @@ describe('F276 person-memory proposal routes', { skip: redisIsolationSkipReason(
   it('atomically binds an exact claimed deferred receipt and rejects a withdraw race', async () => {
     const history = await messageStore.append({
       userId: 'owner-1',
-      catId: null,
+      from: { kind: 'user', userId: 'owner-1' },
       content: '黄挺和我聊了三小时团队管理',
       mentions: [],
       timestamp: Date.now(),
@@ -349,7 +349,7 @@ describe('F276 person-memory proposal routes', { skip: redisIsolationSkipReason(
     });
     const origin = await messageStore.append({
       userId: 'owner-1',
-      catId: null,
+      from: { kind: 'user', userId: 'owner-1' },
       content: 'daily deferred memory clerk',
       mentions: [],
       timestamp: Date.now(),
@@ -357,7 +357,7 @@ describe('F276 person-memory proposal routes', { skip: redisIsolationSkipReason(
     });
     const unrelated = await messageStore.append({
       userId: 'owner-1',
-      catId: null,
+      from: { kind: 'user', userId: 'owner-1' },
       content: '这是一条未进入 deferred receipt 的其他人物证据',
       mentions: [],
       timestamp: Date.now(),
@@ -531,7 +531,7 @@ describe('F276 person-memory proposal routes', { skip: redisIsolationSkipReason(
     await createAuthForOrigin(origin);
     const successorOrigin = await messageStore.append({
       userId: 'owner-1',
-      catId: null,
+      from: { kind: 'user', userId: 'owner-1' },
       content: 'unrelated successor turn in the same Memory Operations thread',
       mentions: [],
       timestamp: Date.now(),
@@ -587,7 +587,7 @@ describe('F276 person-memory proposal routes', { skip: redisIsolationSkipReason(
   it('renews a reclaimed deferred receipt after its first approval card outlives claim expiry', async () => {
     const history = await messageStore.append({
       userId: 'owner-1',
-      catId: null,
+      from: { kind: 'user', userId: 'owner-1' },
       content: '黄挺和我聊了三小时团队管理',
       mentions: [],
       timestamp: Date.now(),
@@ -595,7 +595,7 @@ describe('F276 person-memory proposal routes', { skip: redisIsolationSkipReason(
     });
     const origin = await messageStore.append({
       userId: 'owner-1',
-      catId: null,
+      from: { kind: 'user', userId: 'owner-1' },
       content: 'daily deferred memory clerk',
       mentions: [],
       timestamp: Date.now(),
@@ -779,7 +779,7 @@ describe('F276 person-memory proposal routes', { skip: redisIsolationSkipReason(
     const clientRequestId = 'direct-duplicate-coordinate';
     const origin = await messageStore.append({
       userId: 'owner-1',
-      catId: null,
+      from: { kind: 'user', userId: 'owner-1' },
       content: originContent,
       mentions: [],
       timestamp: Date.now(),
@@ -838,7 +838,7 @@ describe('F276 person-memory proposal routes', { skip: redisIsolationSkipReason(
     });
     const evidence = await messageStore.append({
       userId: 'owner-1',
-      catId: null,
+      from: { kind: 'user', userId: 'owner-1' },
       content: originContent,
       mentions: [],
       timestamp: Date.now(),
@@ -846,7 +846,7 @@ describe('F276 person-memory proposal routes', { skip: redisIsolationSkipReason(
     });
     const confirmation = await messageStore.append({
       userId: 'owner-1',
-      catId: null,
+      from: { kind: 'user', userId: 'owner-1' },
       content: '对，这份记录内容准确。',
       mentions: [],
       timestamp: Date.now(),
@@ -1037,7 +1037,7 @@ describe('F276 person-memory proposal routes', { skip: redisIsolationSkipReason(
     };
     const origin = await messageStore.append({
       userId: 'owner-1',
-      catId: null,
+      from: { kind: 'user', userId: 'owner-1' },
       content: '周玉晶的职责见附件截图。',
       contentBlocks: [imageBlock],
       mentions: [],
@@ -1101,7 +1101,7 @@ describe('F276 person-memory proposal routes', { skip: redisIsolationSkipReason(
     const transcript = '周玉晶说她负责 proactive memory pipeline';
     const confirmation = await messageStore.append({
       userId: 'owner-1',
-      catId: null,
+      from: { kind: 'user', userId: 'owner-1' },
       content: '对，这份转写准确。',
       mentions: [],
       timestamp: Date.now(),
@@ -1163,7 +1163,7 @@ describe('F276 person-memory proposal routes', { skip: redisIsolationSkipReason(
     const sourceText = '我和周玉晶开会，这事很重要';
     const origin = await messageStore.append({
       userId: 'owner-1',
-      catId: null,
+      from: { kind: 'user', userId: 'owner-1' },
       content: sourceText,
       mentions: [],
       timestamp: Date.now(),
@@ -1237,7 +1237,7 @@ describe('F276 person-memory proposal routes', { skip: redisIsolationSkipReason(
     artifactResolutions.set(`owner-1:${locator}`, { digest, boundedText });
     const confirmation = await messageStore.append({
       userId: 'owner-1',
-      catId: null,
+      from: { kind: 'user', userId: 'owner-1' },
       content: '对，这份记录内容准确。',
       mentions: [],
       timestamp: Date.now(),
@@ -1293,7 +1293,7 @@ describe('F276 person-memory proposal routes', { skip: redisIsolationSkipReason(
     const transcript = '周玉晶说她负责 proactive memory pipeline';
     const origin = await messageStore.append({
       userId: 'owner-1',
-      catId: null,
+      from: { kind: 'user', userId: 'owner-1' },
       content: '请处理这份转写。',
       mentions: [],
       timestamp: Date.now(),
@@ -1302,7 +1302,7 @@ describe('F276 person-memory proposal routes', { skip: redisIsolationSkipReason(
     const invalidConfirmations = [
       await messageStore.append({
         userId: 'owner-2',
-        catId: null,
+        from: { kind: 'user', userId: 'owner-2' },
         content: '对，这份转写准确。',
         mentions: [],
         timestamp: Date.now(),
@@ -1310,7 +1310,7 @@ describe('F276 person-memory proposal routes', { skip: redisIsolationSkipReason(
       }),
       await messageStore.append({
         userId: 'owner-1',
-        catId: null,
+        from: { kind: 'user', userId: 'owner-1' },
         content: '我先看看这份转写。',
         mentions: [],
         timestamp: Date.now(),
@@ -1445,7 +1445,7 @@ describe('F276 person-memory proposal routes', { skip: redisIsolationSkipReason(
       const content = `Alden 负责 ${projectName}；我们聊过主动记忆，这次讨论很重要。`;
       const origin = await messageStore.append({
         userId: 'owner-1',
-        catId: null,
+        from: { kind: 'user', userId: 'owner-1' },
         content,
         mentions: [],
         timestamp: Date.now(),
@@ -1550,7 +1550,7 @@ describe('F276 person-memory proposal routes', { skip: redisIsolationSkipReason(
     const targetId = JSON.parse(target.response.body).candidateId;
     const sharedOrigin = await messageStore.append({
       userId: 'owner-1',
-      catId: null,
+      from: { kind: 'user', userId: 'owner-1' },
       content: '黄挺是终端用户计算开发部 21 级',
       mentions: [],
       timestamp: Date.now(),
@@ -1627,7 +1627,7 @@ describe('F276 person-memory proposal routes', { skip: redisIsolationSkipReason(
   it('binds an event to ordered historical owner evidence instead of the anaphoric origin', async () => {
     const firstSource = await messageStore.append({
       userId: 'owner-1',
-      catId: null,
+      from: { kind: 'user', userId: 'owner-1' },
       content: '7 月 23 日周三，我和黄挺线下见了大约两个小时。',
       mentions: [],
       timestamp: Date.now() - 2,
@@ -1635,7 +1635,7 @@ describe('F276 person-memory proposal routes', { skip: redisIsolationSkipReason(
     });
     const secondSource = await messageStore.append({
       userId: 'owner-1',
-      catId: null,
+      from: { kind: 'user', userId: 'owner-1' },
       content: '我们聊了终端用户计算，这次见面对我挺重要，但日期和星期冲突。',
       mentions: [],
       timestamp: Date.now() - 1,
@@ -1717,7 +1717,7 @@ describe('F276 person-memory proposal routes', { skip: redisIsolationSkipReason(
   it('blocks relayed-quote laundering into interaction fact fields', async () => {
     const origin = await messageStore.append({
       userId: 'owner-1',
-      catId: null,
+      from: { kind: 'user', userId: 'owner-1' },
       content: '张三告诉我他昨天去了北京。',
       mentions: [],
       timestamp: Date.now(),
@@ -1793,7 +1793,7 @@ describe('F276 person-memory proposal routes', { skip: redisIsolationSkipReason(
     for (const [index, content] of relayedStatements.entries()) {
       const origin = await messageStore.append({
         userId: 'owner-1',
-        catId: null,
+        from: { kind: 'user', userId: 'owner-1' },
         content,
         mentions: [],
         timestamp: Date.now() + index,
@@ -1864,7 +1864,7 @@ describe('F276 person-memory proposal routes', { skip: redisIsolationSkipReason(
     };
     const origin = await messageStore.append({
       userId: 'owner-1',
-      catId: null,
+      from: { kind: 'user', userId: 'owner-1' },
       content: '职责见截图。',
       contentBlocks: [imageBlock],
       mentions: [],
@@ -1939,7 +1939,7 @@ describe('F276 person-memory proposal routes', { skip: redisIsolationSkipReason(
   it('binds claims to an exact historical owner source instead of a cat-triggered follow-up', async () => {
     const historicalSource = await messageStore.append({
       userId: 'owner-1',
-      catId: null,
+      from: { kind: 'user', userId: 'owner-1' },
       content: '黄挺是终端用户计算开发部 21 级',
       mentions: [],
       timestamp: Date.now() - 1,
@@ -1947,7 +1947,7 @@ describe('F276 person-memory proposal routes', { skip: redisIsolationSkipReason(
     });
     const catTrigger = await messageStore.append({
       userId: 'owner-1',
-      catId: 'codex-sol',
+      from: { kind: 'agent', catId: 'codex-sol' },
       content: '根据旧原话重建完整纠错卡。',
       mentions: [],
       timestamp: Date.now(),
@@ -2006,7 +2006,7 @@ describe('F276 person-memory proposal routes', { skip: redisIsolationSkipReason(
     workspaceResolution = { status: 'not_found' };
     const identitySource = await messageStore.append({
       userId: 'owner-1',
-      catId: null,
+      from: { kind: 'user', userId: 'owner-1' },
       content: 'Alden 是我讨论 agent 自进化和评估的技术交流对象。',
       mentions: [],
       timestamp: Date.now() - 2,
@@ -2014,7 +2014,7 @@ describe('F276 person-memory proposal routes', { skip: redisIsolationSkipReason(
     });
     const interactionSource = await messageStore.append({
       userId: 'owner-1',
-      catId: null,
+      from: { kind: 'user', userId: 'owner-1' },
       content: '我和 Alden 讨论过可信 loss 和 proactive 度量；我认为他第一性原理视角很强。',
       mentions: [],
       timestamp: Date.now() - 1,
@@ -2022,7 +2022,7 @@ describe('F276 person-memory proposal routes', { skip: redisIsolationSkipReason(
     });
     const origin = await messageStore.append({
       userId: 'owner-1',
-      catId: null,
+      from: { kind: 'user', userId: 'owner-1' },
       content: '给 Alden 建一张有信息量的人物卡，用我之前讲过的原话。',
       mentions: [],
       timestamp: Date.now(),
@@ -2128,7 +2128,7 @@ describe('F276 person-memory proposal routes', { skip: redisIsolationSkipReason(
   it('rejects historical claim sources that are not exact eligible owner messages', async () => {
     const deletedSource = await messageStore.append({
       userId: 'owner-1',
-      catId: null,
+      from: { kind: 'user', userId: 'owner-1' },
       content: proposalBody.claims[0].evidenceExcerpt,
       mentions: [],
       timestamp: Date.now(),
@@ -2138,7 +2138,7 @@ describe('F276 person-memory proposal routes', { skip: redisIsolationSkipReason(
     const invalidSources = [
       await messageStore.append({
         userId: 'owner-2',
-        catId: null,
+        from: { kind: 'user', userId: 'owner-2' },
         content: proposalBody.claims[0].evidenceExcerpt,
         mentions: [],
         timestamp: Date.now(),
@@ -2146,7 +2146,7 @@ describe('F276 person-memory proposal routes', { skip: redisIsolationSkipReason(
       }),
       await messageStore.append({
         userId: 'owner-1',
-        catId: null,
+        from: { kind: 'external', connectorId: 'test' },
         content: proposalBody.claims[0].evidenceExcerpt,
         mentions: [],
         timestamp: Date.now(),
@@ -2155,7 +2155,7 @@ describe('F276 person-memory proposal routes', { skip: redisIsolationSkipReason(
       }),
       await messageStore.append({
         userId: 'owner-1',
-        catId: 'codex-sol',
+        from: { kind: 'agent', catId: 'codex-sol' },
         content: proposalBody.claims[0].evidenceExcerpt,
         mentions: [],
         timestamp: Date.now(),
@@ -2163,7 +2163,7 @@ describe('F276 person-memory proposal routes', { skip: redisIsolationSkipReason(
       }),
       await messageStore.append({
         userId: 'owner-1',
-        catId: null,
+        from: { kind: 'user', userId: 'owner-1' },
         content: proposalBody.claims[0].evidenceExcerpt,
         mentions: [],
         timestamp: Date.now(),
@@ -2173,7 +2173,7 @@ describe('F276 person-memory proposal routes', { skip: redisIsolationSkipReason(
       deletedSource,
       await messageStore.append({
         userId: 'owner-1',
-        catId: null,
+        from: { kind: 'user', userId: 'owner-1' },
         content: '同一 owner 的另一条消息，但没有精确证据子串。',
         mentions: [],
         timestamp: Date.now(),
@@ -2196,7 +2196,7 @@ describe('F276 person-memory proposal routes', { skip: redisIsolationSkipReason(
   it('rejects the whole event when any evidence source is not an exact eligible owner message', async () => {
     const deletedSource = await messageStore.append({
       userId: 'owner-1',
-      catId: null,
+      from: { kind: 'user', userId: 'owner-1' },
       content: '已经删除的事实来源',
       mentions: [],
       timestamp: Date.now(),
@@ -2205,7 +2205,7 @@ describe('F276 person-memory proposal routes', { skip: redisIsolationSkipReason(
     await messageStore.softDelete(deletedSource.id, 'owner-1');
     const excerptMismatch = await messageStore.append({
       userId: 'owner-1',
-      catId: null,
+      from: { kind: 'user', userId: 'owner-1' },
       content: '实际原文没有提到虚构时长',
       mentions: [],
       timestamp: Date.now(),
@@ -2214,7 +2214,7 @@ describe('F276 person-memory proposal routes', { skip: redisIsolationSkipReason(
     const invalidSources = [
       await messageStore.append({
         userId: 'owner-2',
-        catId: null,
+        from: { kind: 'user', userId: 'owner-2' },
         content: '跨 thread 的事实来源',
         mentions: [],
         timestamp: Date.now(),
@@ -2222,7 +2222,7 @@ describe('F276 person-memory proposal routes', { skip: redisIsolationSkipReason(
       }),
       await messageStore.append({
         userId: 'owner-1',
-        catId: null,
+        from: { kind: 'external', connectorId: 'test' },
         content: 'connector 洗白的事实来源',
         mentions: [],
         timestamp: Date.now(),
@@ -2231,7 +2231,7 @@ describe('F276 person-memory proposal routes', { skip: redisIsolationSkipReason(
       }),
       await messageStore.append({
         userId: 'owner-2',
-        catId: null,
+        from: { kind: 'user', userId: 'owner-2' },
         content: '另一个 owner 的事实来源',
         mentions: [],
         timestamp: Date.now(),
@@ -2239,7 +2239,7 @@ describe('F276 person-memory proposal routes', { skip: redisIsolationSkipReason(
       }),
       await messageStore.append({
         userId: 'owner-1',
-        catId: 'codex-sol',
+        from: { kind: 'agent', catId: 'codex-sol' },
         content: '猫写的推断不是 owner 来源',
         mentions: [],
         timestamp: Date.now(),
@@ -2297,7 +2297,7 @@ describe('F276 person-memory proposal routes', { skip: redisIsolationSkipReason(
     const quotedText = '我的立场是先在 Alpha 里完成双人协作验证';
     const origin = await messageStore.append({
       userId: 'owner-1',
-      catId: null,
+      from: { kind: 'user', userId: 'owner-1' },
       content: '',
       contentBlocks: [
         {
@@ -2362,7 +2362,7 @@ describe('F276 person-memory proposal routes', { skip: redisIsolationSkipReason(
     workspaceResolution = { status: 'not_found' };
     const firstOrigin = await messageStore.append({
       userId: 'owner-1',
-      catId: null,
+      from: { kind: 'user', userId: 'owner-1' },
       content: '周玉晶负责 proactive memory pipeline',
       mentions: [],
       timestamp: Date.now(),
@@ -2370,7 +2370,7 @@ describe('F276 person-memory proposal routes', { skip: redisIsolationSkipReason(
     });
     const secondOrigin = await messageStore.append({
       userId: 'owner-1',
-      catId: null,
+      from: { kind: 'user', userId: 'owner-1' },
       content: '周玉晶不负责 proactive memory pipeline',
       mentions: [],
       timestamp: Date.now() + 1,

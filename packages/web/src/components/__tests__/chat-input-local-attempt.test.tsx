@@ -6,8 +6,15 @@ import { apiFetch } from '@/utils/api-client';
 import { observeApiSessionOwner } from '@/utils/api-session-identity';
 import { deleteSendAttempt, type SendAttempt, saveSendAttempt } from '@/utils/send-attempt-db';
 import { ChatInput } from '../ChatInput';
+import { consumePreparedComposerDraft } from '../composer-draft-consumption';
 import { observeComposerDraft } from '../composer-draft-flush-registry';
-import { getThreadDraft, syncDraftToStorage } from '../thread-drafts';
+import {
+  getThreadDraft,
+  syncContextAttachmentDraftToStorage,
+  syncDraftToStorage,
+  threadContextAttachmentDrafts,
+} from '../thread-drafts';
+import { workspaceFileQuoteAttachment } from '../workspace/workspace-file-quote';
 
 vi.mock('@/hooks/useVoiceInput', () => ({ useVoiceInput: () => ({ state: 'idle', transcript: '', error: null }) }));
 vi.mock('@/hooks/useCatData', () => ({
@@ -26,7 +33,132 @@ afterEach(() => {
   act(() => root?.unmount());
   host?.remove();
   syncDraftToStorage('draft-prepare', undefined);
+  syncContextAttachmentDraftToStorage('draft-prepare', []);
   delete (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT;
+});
+
+it('never restores an abandoned local preparation into a different account draft', async () => {
+  (globalThis as { React?: typeof React }).React = React;
+  (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+  observeApiSessionOwner('old-account');
+  const threadId = 'draft-prepare';
+  syncDraftToStorage(threadId, 'old account input');
+  useChatStore.setState({
+    currentThreadId: threadId,
+    hasActiveInvocation: false,
+    activeInvocations: {},
+    catInvocations: {},
+    targetCats: [],
+    pendingChatInsert: null,
+    replyToMessage: null,
+  });
+  let finish!: (accepted: boolean) => void;
+  const onSend = vi.fn(
+    () =>
+      new Promise<boolean>((resolve) => {
+        finish = resolve;
+      }),
+  );
+  host = document.createElement('div');
+  document.body.append(host);
+  root = createRoot(host);
+  await act(async () => root.render(<ChatInput threadId={threadId} localSendFeedback onSend={onSend} />));
+  await act(async () =>
+    host
+      .querySelector('textarea')!
+      .dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })),
+  );
+  await act(async () => {
+    observeApiSessionOwner('new-account');
+    syncDraftToStorage(threadId, 'new account input');
+  });
+  await act(async () => finish(false));
+  expect(getThreadDraft(threadId)).toBe('new account input');
+});
+
+it('keeps one preparation pending when the initial session identity becomes known', async () => {
+  (globalThis as { React?: typeof React }).React = React;
+  (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+  const threadId = 'draft-prepare';
+  syncDraftToStorage(threadId, 'first send before session confirmation');
+  useChatStore.setState({
+    currentThreadId: threadId,
+    hasActiveInvocation: false,
+    activeInvocations: {},
+    catInvocations: {},
+    targetCats: [],
+    pendingChatInsert: null,
+    replyToMessage: null,
+  });
+  const onSend = vi.fn(() => new Promise<boolean>(() => {}));
+  host = document.createElement('div');
+  document.body.append(host);
+  root = createRoot(host);
+  await act(async () => root.render(<ChatInput threadId={threadId} localSendFeedback onSend={onSend} />));
+  const enter = () =>
+    host
+      .querySelector('textarea')!
+      .dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+  await act(async () => enter());
+  await act(async () => observeApiSessionOwner('confirmed-owner'));
+  await act(async () => enter());
+  expect(onSend).toHaveBeenCalledOnce();
+});
+
+it.each([
+  { input: 'original input plus new input', expected: ' plus new input' },
+  { input: '  original input  ', expected: '' },
+])('a prepared retry keeps newer quotes and replies while consuming $input', async ({ input, expected }) => {
+  (globalThis as { React?: typeof React }).React = React;
+  (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+  observeApiSessionOwner('retry-owner');
+  const threadId = 'draft-prepare';
+  const oldQuote = workspaceFileQuoteAttachment({
+    text: 'old quote',
+    comment: 'old note',
+    path: 'docs/a.md',
+    revision: 'a'.repeat(64),
+  });
+  const newQuote = workspaceFileQuoteAttachment({
+    text: 'new quote',
+    comment: 'new note',
+    path: 'docs/b.md',
+    revision: 'b'.repeat(64),
+  });
+  const newReply = { id: 'new-reply', content: 'new reference', senderCatId: null, threadId };
+  syncDraftToStorage(threadId, input);
+  syncContextAttachmentDraftToStorage(threadId, [oldQuote, newQuote]);
+  useChatStore.setState({
+    currentThreadId: threadId,
+    hasActiveInvocation: false,
+    activeInvocations: {},
+    catInvocations: {},
+    targetCats: [],
+    pendingChatInsert: null,
+    replyToMessage: newReply,
+  });
+  host = document.createElement('div');
+  document.body.append(host);
+  root = createRoot(host);
+  await act(async () => root.render(<ChatInput threadId={threadId} localSendFeedback onSend={() => false} />));
+  const attempt: SendAttempt = {
+    id: 'pending-retry',
+    ownerUserId: 'retry-owner',
+    threadId,
+    timestamp: 1,
+    status: 'preparing',
+    content: 'original input',
+    composerDraftText: 'original input',
+    files: [],
+    contextAttachments: [oldQuote],
+    replyTo: 'old-reply',
+  };
+  await act(async () => expect(consumePreparedComposerDraft({ ...attempt, ownerUserId: 'another-owner' })).toBe(false));
+  expect(getThreadDraft(threadId)).toBe(input);
+  await act(async () => expect(consumePreparedComposerDraft(attempt)).toBe(true));
+  expect(getThreadDraft(threadId)).toBe(expected);
+  expect(threadContextAttachmentDrafts.get(threadId)).toEqual([newQuote]);
+  expect(useChatStore.getState().replyToMessage).toBe(newReply);
 });
 
 it.each([

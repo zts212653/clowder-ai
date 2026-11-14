@@ -480,6 +480,8 @@ export interface AgentRouterOptions {
   routingDispatchPreflight?: import('../../../../routing-context/RoutingDispatchPreflightPort.js').RoutingDispatchPreflightPort;
   /** F293: durable dispatch terminal observer over the same routing signal graph. */
   routingDispatchSignalObserver?: import('../../../../routing-context/RoutingDispatchSignalContract.js').RoutingDispatchTerminalObserver;
+  /** F337: machine-sleep interruption evidence and the after-wake continuation. */
+  hostSleep?: import('../invocation/invoke-single-cat.js').InvocationDeps['hostSleep'];
   /** F276: terminal disposition authority for person-memory write opportunities. */
   writeOpportunityTerminalLedger?: import('../invocation/invoke-single-cat.js').InvocationDeps['writeOpportunityTerminalLedger'];
   /** F276: reservation and delivery authority for person-memory write opportunities. */
@@ -598,6 +600,7 @@ export class AgentRouter {
   private routingContextPromptProjection?: import('../../../../routing-context/RoutingContextPromptProjector.js').RoutingContextPromptProjectionPort;
   private routingDispatchPreflight?: import('../../../../routing-context/RoutingDispatchPreflightPort.js').RoutingDispatchPreflightPort;
   private routingDispatchSignalObserver?: import('../../../../routing-context/RoutingDispatchSignalContract.js').RoutingDispatchTerminalObserver;
+  private hostSleep?: import('../invocation/invoke-single-cat.js').InvocationDeps['hostSleep'];
   private writeOpportunityTerminalLedger?: import('../invocation/invoke-single-cat.js').InvocationDeps['writeOpportunityTerminalLedger'];
   private writeOpportunityDeliveryStore?: import('../invocation/invoke-single-cat.js').InvocationDeps['writeOpportunityDeliveryStore'];
   private runtimeSessionStore: IRuntimeSessionStore | undefined;
@@ -715,6 +718,7 @@ export class AgentRouter {
     this.routingContextPromptProjection = options.routingContextPromptProjection;
     this.routingDispatchPreflight = options.routingDispatchPreflight;
     this.routingDispatchSignalObserver = options.routingDispatchSignalObserver;
+    this.hostSleep = options.hostSleep;
     this.writeOpportunityTerminalLedger = options.writeOpportunityTerminalLedger;
     this.writeOpportunityDeliveryStore = options.writeOpportunityDeliveryStore;
     this.runtimeSessionStore = options.runtimeSessionStore;
@@ -1470,6 +1474,7 @@ export class AgentRouter {
         ...(this.routingDispatchSignalObserver
           ? { routingDispatchSignalObserver: this.routingDispatchSignalObserver }
           : {}),
+        ...(this.hostSleep ? { hostSleep: this.hostSleep } : {}),
         ...(this.writeOpportunityTerminalLedger
           ? { writeOpportunityTerminalLedger: this.writeOpportunityTerminalLedger }
           : {}),

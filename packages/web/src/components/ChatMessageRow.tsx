@@ -97,6 +97,9 @@ export const ChatMessageRow = memo(function ChatMessageRow({
             message={message}
             threadId={threadId}
             cat={message.catId ? getCatById(message.catId) : undefined}
+            getCatById={getCatById}
+            timelineMessages={timelineMessages}
+            activeRuns={activeRuns}
           />
         ) : (
           <ChatMessage

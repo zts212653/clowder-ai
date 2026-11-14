@@ -27,6 +27,9 @@ async function fixture(t) {
     taste: 'propose-taste',
     person: 'propose-person-memory',
     matter: 'memory-matters/write',
+    person_defer: 'defer-person-memory',
+    person_abstain: 'record-proactive-memory-abstention',
+    person_revision: 'person-memory/amend-event',
   })) {
     app.post(`/api/callbacks/${path}`, async (request, reply) => {
       const caller = requireCallbackAuth(request, reply);
@@ -34,6 +37,10 @@ async function fixture(t) {
       calls.push({ target, body: request.body, owner: caller.userId, source: caller.originTriggerMessageId });
       if (target === 'person') return reply.code(422).send({ error: 'source_not_eligible' });
       if (target === 'matter') return { matterId: 'matter-1', revision: 2, outcome: 'applied' };
+      if (target === 'person_defer') return { receiptId: 'receipt-1', status: 'deferred' };
+      if (target === 'person_abstain') return { status: 'recorded' };
+      if (target === 'person_revision')
+        return { outcome: 'applied', event: { eventId: 'event-1', relationshipId: 'relationship-1' } };
       return { proposalId: `${target}-1`, status: 'pending', messageId: `${target}-card` };
     });
   }
@@ -86,6 +93,26 @@ test('five rows and duplicate item ids are rejected before any original submit',
   }
   assert.equal(f.calls.length, 0);
 });
+
+test('a person event revision publishes the original subject and result references needed by its owner UI', async (t) => {
+  const f = await fixture(t);
+  const response = await f.submit({
+    clientRequestId: 'event-revision',
+    items: [
+      { itemId: 'revision', target: 'person_revision', payload: { action: 'amend_event', personId: 'person_1' } },
+    ],
+  });
+  assert.equal(response.statusCode, 200, response.body);
+  const group = await f.messages.getById(response.json().messageId);
+  assert.deepEqual(group.extra.rich.blocks[0].meta.memoryGroup.rows[0], {
+    itemId: 'revision',
+    target: 'person_revision',
+    statusCode: 200,
+    status: 'applied',
+    personId: 'person_1',
+    resultRef: 'event-1',
+  });
+});
 test('the thin route does not create another authority or accept an unauthenticated caller', async (t) => {
   const f = await fixture(t);
   const response = await f.app.inject({
@@ -118,4 +145,46 @@ test('permission to call remember does not bypass the original route allowlist',
   assert.equal(response.json().results[0].statusCode, 403);
   assert.equal(response.json().results[0].result.error, 'tool_policy_violation');
   assert.equal(f.calls.length, 0);
+});
+
+// 11-13 You：旧写工具撤掉、全走 remember。暂缓与放弃原本不出卡，走 remember 也不能多一张卡。
+test('quiet person outcomes are recorded without posting a group card', async (t) => {
+  const f = await fixture(t);
+  const before = f.messages.getByThread('thread').length;
+  const response = await f.submit({
+    clientRequestId: 'quiet-only',
+    items: [
+      { itemId: 'later', target: 'person_defer', payload: { marker: 'defer' } },
+      { itemId: 'skip', target: 'person_abstain', payload: { marker: 'abstain' } },
+    ],
+  });
+  assert.equal(response.statusCode, 200, response.body);
+  const result = response.json();
+  assert.deepEqual(
+    f.calls.map((c) => c.target),
+    ['person_defer', 'person_abstain'],
+  );
+  assert.deepEqual(
+    result.results.map((r) => r.statusCode),
+    [200, 200],
+  );
+  assert.equal(result.messageId, undefined);
+  assert.equal(f.messages.getByThread('thread').length, before);
+});
+
+test('a mixed request shows only the visible rows on its group card', async (t) => {
+  const f = await fixture(t);
+  const response = await f.submit({
+    clientRequestId: 'mixed',
+    items: [items[0], { itemId: 'skip', target: 'person_abstain', payload: { marker: 'abstain' } }],
+  });
+  assert.equal(response.statusCode, 200, response.body);
+  const result = response.json();
+  assert.equal(result.results.length, 2);
+  const group = await f.messages.getById(result.messageId);
+  assert.deepEqual(
+    group.extra.rich.blocks[0].meta.memoryGroup.rows.map((row) => row.target),
+    ['profile'],
+  );
+  assert.equal(group.content, '这次提交的 1 项记忆');
 });

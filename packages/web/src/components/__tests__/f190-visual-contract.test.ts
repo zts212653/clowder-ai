@@ -534,8 +534,11 @@ describe('#723 IM connector — typography and card guard', () => {
 
   it('ActionRenderer QR card uses shadow, not border', () => {
     const src = readSrc('settings/primitives/ActionRendererParts.tsx');
-    expect(src).toContain('shadow-[var(--console-shadow-soft)]');
-    expect(src).not.toContain('border border-cafe');
+    // Text results have their own surface; this contract protects the QR image card.
+    const imagePanel = src.split('export function ActionImagePanel(')[1]?.split('export function ActionPanelBody(')[0];
+    expect(imagePanel).toBeTruthy();
+    expect(imagePanel).toContain('shadow-[var(--console-shadow-soft)]');
+    expect(imagePanel).not.toContain('border border-cafe');
   });
 });
 

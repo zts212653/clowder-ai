@@ -11,7 +11,6 @@ import {
 } from '../harness-eval/domain/eval-domain-trigger-dispatch.js';
 import type { IEvalDomainTriggerStore } from '../harness-eval/domain/eval-domain-trigger-store.js';
 import { buildEvalCatInvocation } from '../harness-eval/eval-cat-invocation.js';
-import { computeNextCronFire } from '../harness-eval/hub/eval-hub-read-model-helpers.js';
 import type { ExecuteContext } from '../scheduler/types.js';
 
 const DOMAIN_ID = 'eval:capability-evolution';
@@ -41,14 +40,11 @@ export function createEvolutionProgramTriggerRegistrationProvider(input: {
       status: 'registered' as const,
       registrationRef: { ownerFeatureId: 'F192', ownerStateRef: `eval-domain:${domain.domainId}` },
       domainId: domain.domainId,
-      channels: ['event', 'quota', 'time'] as const,
+      channels: ['on_demand'] as const,
+      automaticStatus: 'retired' as const,
       policy,
     };
-    const now = input.now ?? (() => new Date());
-    return () => ({
-      ...registration,
-      nextEvaluationAt: computeNextCronFire(domain.frequency, now()).toISOString(),
-    });
+    return () => registration;
   } catch {
     return () => undefined;
   }

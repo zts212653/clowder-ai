@@ -100,8 +100,13 @@ export class TranscriptReader {
     // Check if transcript exists
     try {
       await stat(jsonlPath);
-    } catch {
-      return { events: [], total: 0 };
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+      if (!(await this.hasRecoverableTranscript(sessionDir))) return { events: [], total: 0 };
+      return new TranscriptInvocationReader(this).readTranscriptEvents(
+        { id: sessionId, threadId, catId, seq: 0, status: 'sealed' },
+        { cursor: cursor?.eventNo, limit },
+      );
     }
 
     // Try to read index for optimized pagination
@@ -453,8 +458,13 @@ export class TranscriptReader {
 
     try {
       await stat(jsonlPath);
-    } catch {
-      return [];
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+      if (!(await this.hasRecoverableTranscript(this.sessionDir(threadId, catId, sessionId)))) return [];
+      return new TranscriptInvocationReader(this).readAllEvents(
+        { id: sessionId, threadId, catId, seq: 0, status: 'sealed' },
+        signal,
+      );
     }
 
     const events: TranscriptEvent[] = [];
@@ -475,6 +485,19 @@ export class TranscriptReader {
     }
 
     return events;
+  }
+
+  private async hasRecoverableTranscript(sessionDir: string): Promise<boolean> {
+    // A concurrent publisher may remove live only after publishing the complete archive.
+    for (const name of ['events.live.jsonl', 'events.jsonl']) {
+      try {
+        await stat(join(sessionDir, name));
+        return true;
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+      }
+    }
+    return false;
   }
 
   /** Public accessor for session directory path. */

@@ -4,8 +4,8 @@ import { createRequire } from 'node:module';
 import { type TestContext, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { CONCIERGE_CONFIG_DEFAULTS, catRegistry } from '@cat-cafe/shared';
-import { validateCompanionReply } from '@clowder-ai/plugin-contract';
 import { validateCompanionReply as validateBeta20Reply } from '@clowder-ai/plugin-contract-beta20';
+import { validateCompanionReply as validateBeta21Reply } from '@clowder-ai/plugin-contract-beta21';
 import cookie from '@fastify/cookie';
 import Fastify from 'fastify';
 import { getRoster, loadCatConfig, toAllCatConfigs } from '../src/config/cat-config-loader.js';
@@ -102,7 +102,7 @@ test('actual Host state drives persisted native movement while the alpha.13 rend
   assert.equal(validateHostCompanionReply({ ...privateState, unexpectedPolicy: true }), false);
   const publicState = await f.f.request({ kind: 'state' });
   assert.ok(f.managed.motionLease(), 'production Bridge output, rather than fixture-invented flags, admits movement');
-  assert.equal(validateCompanionReply(publicState), true);
+  assert.equal(validateBeta21Reply(publicState), true);
   assert.equal(validateBeta20Reply(publicState), true);
   assert.equal('behaviorEnabled' in publicState, false, 'Host-only policy must not change the old renderer schema');
   assert.equal(

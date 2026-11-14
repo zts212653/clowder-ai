@@ -21,6 +21,7 @@ export interface EvalDomainSummary {
   evalCatId: string;
   evalCatHandle: string;
   enabled: boolean;
+  automaticStatus?: 'retired';
   hasVerdict: boolean;
   latestVerdictId?: string;
   latestVerdict?: EvalHubItem['verdict'];

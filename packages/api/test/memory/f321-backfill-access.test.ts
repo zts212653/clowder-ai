@@ -18,11 +18,17 @@ for (const kind of ['delete', 'systemKind', 'access'] as const) {
     const first = messages.append({
       threadId: thread.id,
       userId: 'owner',
-      catId: null,
+      from: { kind: 'user', userId: 'owner' },
       content: 'first',
       timestamp: 1,
     });
-    const last = messages.append({ threadId: thread.id, userId: 'owner', catId: null, content: 'last', timestamp: 2 });
+    const last = messages.append({
+      threadId: thread.id,
+      userId: 'owner',
+      from: { kind: 'user', userId: 'owner' },
+      content: 'last',
+      timestamp: 2,
+    });
     let calls = 0;
     const repository = new ThreadOverviewRepository({
       db,
@@ -72,12 +78,24 @@ test('historical completion settles the same pending debt without claiming ignor
   const threads = new ThreadStore();
   const messages = new MessageStore();
   const thread = threads.create('owner', 'old');
-  const owner = messages.append({ threadId: thread.id, userId: 'owner', catId: null, content: 'idea', timestamp: 1 });
-  messages.append({ threadId: thread.id, userId: 'system', catId: 'system', content: 'system log', timestamp: 2 });
+  const owner = messages.append({
+    threadId: thread.id,
+    userId: 'owner',
+    from: { kind: 'user', userId: 'owner' },
+    content: 'idea',
+    timestamp: 1,
+  });
+  messages.append({
+    threadId: thread.id,
+    userId: 'system',
+    from: { kind: 'system', service: 'test-log' },
+    content: 'system log',
+    timestamp: 2,
+  });
   const tail = messages.append({
     threadId: thread.id,
     userId: 'owner',
-    catId: null,
+    from: { kind: 'user', userId: 'owner' },
     content: 'private',
     visibility: 'whisper',
     timestamp: 3,

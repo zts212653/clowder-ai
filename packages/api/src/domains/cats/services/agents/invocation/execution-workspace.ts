@@ -3,8 +3,15 @@ import { findMonorepoRoot } from '../../../../../utils/monorepo-root.js';
 import { resolvePersistentProjectPathDetailed } from '../../../../../utils/persistent-project-path.js';
 import { resolveBootcampWorkspaceRoot } from '../../bootcamp/workspace-root.js';
 import type { IThreadStore, Thread } from '../../stores/ports/ThreadStore.js';
+import type { AgentService } from '../../types.js';
+import { AgyNativeAgentService } from '../providers/agy-native/AgyNativeAgentService.js';
 import { canUseDefaultThreadWorkspace, resolveDefaultThreadWorkspace } from './default-thread-workspace.js';
 import { preflightRace } from './invoke-helpers.js';
+
+export function requiresAgyThreadWorkspace(service: AgentService): boolean {
+  const carrier = service.freshnessCarrierCapability?.().carrier;
+  return service instanceof AgyNativeAgentService || carrier === 'agy_acp' || carrier === 'agy_stream_json';
+}
 
 export interface FrozenExecutionWorkspace {
   readonly thread?: Thread | null;

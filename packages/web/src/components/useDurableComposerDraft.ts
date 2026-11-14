@@ -100,6 +100,7 @@ export function useDurableComposerDraft({
   } = useDurableComposerDraftImageState({
     threadId,
     ownerIdRef,
+    preservedBlocksRef,
     setImages,
     setIsPreparingImages,
     saveCurrentDraftRef: saveCurrentDraftForImagesRef,
@@ -254,7 +255,7 @@ export function useDurableComposerDraft({
         draft.draft?.replyTo,
       );
       lastSavedSignatureRef.current = conflictSignature;
-      void restoreDraftImages(currentImages, threadId ?? '', false);
+      const imageRestoration = restoreDraftImages(currentImages, threadId ?? '', false);
       if (!shouldClear) {
         // Mark as pending recovery - not yet displayed
         if (canonicalDraftRef.current) {
@@ -264,7 +265,7 @@ export function useDurableComposerDraft({
             source: 'conflict',
           };
         }
-        return;
+        return imageRestoration;
       }
       setInput((localText) => mergeHydratedDraft(draft.draft?.text ?? '', localText));
       setContextAttachments((local) => mergeContextAttachments(currentContextAttachments, local));
@@ -287,6 +288,7 @@ export function useDurableComposerDraft({
         };
       }
       clearFallbackRef.current = null;
+      return imageRestoration;
     },
     [restoreDraftImages, setContextAttachments, setInput, setReplyTo, threadId],
   );
@@ -322,18 +324,26 @@ export function useDurableComposerDraft({
         admissionsPendingRef.current > 0
       )
         return false;
-      if (hydratedRef.current && revisionRef.current >= draft.revision) return true;
+      const imageUrls = imageUrlsFromDraft(draft);
+      const stillOwned = () =>
+        active && ownerGeneration === ownerIdRef.current && apiSessionIdentity.getSnapshot().ownerUserId === owner;
+      if (hydratedRef.current && revisionRef.current >= draft.revision) {
+        if (admissionImagesReady([], imageUrls)) return true;
+        const restored = await restoreDraftImages(imageUrls, threadId, false);
+        return stillOwned() && restored.complete && admissionImagesReady([], imageUrls);
+      }
       const pending = useChatStore.getState().pendingChatInsert;
-      if (pending?.threadId === threadId && (pending.serverRevision ?? -1) >= draft.revision) return true;
-      reconcileConflict({ draft, revision: draft.revision }, true);
+      if (pending?.threadId === threadId && (pending.serverRevision ?? -1) > draft.revision) return false;
+      const restoration = reconcileConflict({ draft, revision: draft.revision }, true);
       hydratedRef.current = true;
-      return true;
+      const restored = await restoration;
+      return stillOwned() && restored?.complete === true && admissionImagesReady([], imageUrls);
     });
     return () => {
       active = false;
       unregister();
     };
-  }, [reconcileConflict, threadId]);
+  }, [admissionImagesReady, reconcileConflict, restoreDraftImages, threadId]);
 
   const persistDraftSnapshot = useCallback(
     async (
@@ -540,6 +550,10 @@ export function useDurableComposerDraft({
   );
 
   const markOptimisticallyCleared = useCallback(() => {
+    const sentBlocks = pendingAdmissionDraftRef.current?.snapshot.preservedBlocks ?? [];
+    preservedBlocksRef.current = preservedBlocksRef.current.filter(
+      (block) => block.type !== 'file' || !sentBlocks.some((sent) => JSON.stringify(sent) === JSON.stringify(block)),
+    );
     inputRef.current = '';
     imageUrlsRef.current = [];
     contextAttachmentsRef.current = [];

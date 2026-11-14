@@ -116,10 +116,11 @@ test('all six shared families execute under their original owner; live policy an
         assert.ok(observed.has(`${owner}:${endpoint}`));
       assert.ok(observed.has(`finance:FIXTURE_${owner}`));
     }
-    const first = JSON.stringify(await rpc('A', 'collab', 'tools/list', {}));
+    // The co-creator name is templated into cat_cafe_remember's taste payload (memory family).
+    const first = JSON.stringify(await rpc('A', 'memory', 'tools/list', {}));
     assert.ok(first.includes(display));
     display = 'Second Fixture';
-    const second = JSON.stringify(await rpc('B', 'collab', 'tools/list', {}));
+    const second = JSON.stringify(await rpc('B', 'memory', 'tools/list', {}));
     assert.ok(second.includes(display));
     assert.ok(!second.includes('First Fixture'));
     restricted = true;

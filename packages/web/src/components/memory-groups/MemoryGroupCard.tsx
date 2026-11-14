@@ -3,6 +3,8 @@ import type { RememberGroupRow, RichCardBlock } from '@cat-cafe/shared';
 import { type ReactNode, useEffect, useMemo, useState } from 'react';
 import type { PublishedMessageCoordinate } from '@/components/content-review/usePublishedContent';
 import { useShellCopy } from '../shell/shell-copy';
+import { MemoryGroupMatter } from './MemoryGroupMatter';
+import { MemoryGroupPersonRevision } from './MemoryGroupPersonRevision';
 import { MemoryGroupRequestChanges } from './MemoryGroupRequestChanges';
 import { memoryGroupCopy } from './memory-group.shell-copy';
 import {
@@ -61,7 +63,13 @@ export function MemoryGroupCard({
       <div className="space-y-3">
         {group.rows.map((row) => (
           <div key={row.itemId} data-memory-group-row={row.itemId}>
-            <MemoryGroupRow row={row} original={cards[row.itemId]} loading={loading} renderOriginal={renderOriginal} />
+            <MemoryGroupRow
+              row={row}
+              original={cards[row.itemId]}
+              loading={loading}
+              renderOriginal={renderOriginal}
+              threadId={threadId}
+            />
           </div>
         ))}
       </div>
@@ -82,13 +90,26 @@ function MemoryGroupRow({
   original,
   loading,
   renderOriginal,
+  threadId,
 }: {
   row: RememberGroupRow;
   original?: OriginalMemoryGroupCard;
   loading: boolean;
   renderOriginal: RenderOriginal;
+  threadId?: string;
 }) {
   const t = useShellCopy(memoryGroupCopy);
+  if (row.target === 'matter' && row.statusCode < 400 && !row.error && row.resultRef)
+    return <MemoryGroupMatter key={row.resultRef} matterId={row.resultRef} threadId={threadId} />;
+  if (row.target === 'person_revision' && row.statusCode < 400 && !row.error && row.resultRef && row.personId)
+    return (
+      <MemoryGroupPersonRevision
+        key={`${row.personId}:${row.resultRef}`}
+        personId={row.personId}
+        resultRef={row.resultRef}
+        threadId={threadId}
+      />
+    );
   if (original && original.proposalId === row.proposalId)
     return (
       <>

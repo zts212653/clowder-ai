@@ -12,6 +12,7 @@ test(
   'real film chapters, exact chapter alignment, grouped sequences, covers and source dates survive the original Works path',
   { timeout: 300000 },
   async (t) => {
+    if (!process.env.F326_DESIGN_LIBRARY) return t.skip('dedicated F326 design library required');
     const web = process.env.F326_DESIGN_WEB,
       api = process.env.F326_DESIGN_API;
     assert.ok(
