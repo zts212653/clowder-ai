@@ -1,8 +1,6 @@
 'use client';
 import type { ProfileItem } from '../hub-accounts.types';
-import { useShellCopy } from '../shell/shell-copy';
 import { AccountRowMenu } from './AccountRowMenu';
-import { accountsCopy } from './accounts.shell-copy';
 
 export function AccountRowActions({
   account,
@@ -15,7 +13,6 @@ export function AccountRowActions({
   onAction,
   onRename,
   onRelogin,
-  onOpenTerminal,
   onEdit,
   onDelete,
   onExpand,
@@ -31,20 +28,13 @@ export function AccountRowActions({
   onAction: () => void;
   onRename: () => void;
   onRelogin: () => void;
-  onOpenTerminal?: () => void;
   onEdit: () => void;
   onDelete: () => void;
   onExpand: () => void;
   expandLabel: string;
 }) {
-  const t = useShellCopy(accountsCopy);
   return (
     <div className="account-row-actions">
-      {onOpenTerminal && (
-        <button type="button" className="account-button" disabled={busy} onClick={onOpenTerminal}>
-          {t.openLoginTerminal}
-        </button>
-      )}
       {label && (
         <button type="button" className="account-button" disabled={busy} onClick={onAction}>
           {label}

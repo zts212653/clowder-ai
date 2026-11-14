@@ -31,6 +31,95 @@ async function readCodexAccount(page, accountRef) {
   return account.codex;
 }
 test(
+  'terminal recovery stays beside status with one primary action in both languages and narrow layouts',
+  { timeout: 240000 },
+  async () => {
+    for (const language of ['zh', 'en']) {
+      for (const width of [1440, 390]) {
+        const page = await browser.newPage({ viewport: { width, height: 1050 } });
+        const errors = [];
+        page.on('pageerror', (error) => errors.push(error.message));
+        try {
+          await page.goto(`${preview.url}/settings?s=accounts&shell=v2`, { waitUntil: 'domcontentloaded' });
+          const note = `recovery-${language}-${width}`;
+          await addCodexAccount(page, note);
+          await page.evaluate((value) => localStorage.setItem('cat-cafe:shell-language', value), language);
+          await page.reload();
+          const row = page
+            .locator('[data-account-id]')
+            .filter({ has: page.getByRole('button', { name: note, exact: true }) });
+          for (const state of ['waiting', 'failed']) {
+            const primary =
+              language === 'zh' ? (state === 'waiting' ? '取消' : '重试') : state === 'waiting' ? 'Cancel' : 'Retry';
+            await row.getByRole('button', { name: primary, exact: true }).waitFor();
+            if (state === 'failed') {
+              assert.equal(
+                (await readCodexAccount(page, await row.getAttribute('data-account-id'))).attempt.state,
+                'failed',
+              );
+            }
+            const recovery = row
+              .locator('td')
+              .nth(2)
+              .getByRole('button', {
+                name: language === 'zh' ? '打开登录终端' : 'Open login terminal',
+                exact: true,
+              });
+            await recovery.scrollIntoViewIfNeeded();
+            assert.equal(await recovery.isVisible(), true);
+            assert.deepEqual(await row.locator('.account-row-actions > .account-button').allTextContents(), [primary]);
+            assert.equal(await recovery.evaluate((button) => getComputedStyle(button).borderTopWidth), '0px');
+            assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
+            const bounds = await recovery.boundingBox();
+            assert.ok(bounds && bounds.x >= 0 && bounds.x + bounds.width <= width && bounds.height >= 24);
+            if (process.env.F320_EVIDENCE_DIR) {
+              await mkdir(process.env.F320_EVIDENCE_DIR, { recursive: true });
+              await page.screenshot({
+                path: join(process.env.F320_EVIDENCE_DIR, `terminal-recovery-${language}-${state}-${width}.png`),
+                fullPage: true,
+              });
+            }
+            const previous = preview.captureLoginAttempt();
+            await recovery.focus();
+            await Promise.all([
+              page.waitForResponse(
+                (response) => response.url().endsWith('/codex/login/start') && response.request().method() === 'POST',
+              ),
+              recovery.press('Enter'),
+            ]);
+            assert.equal(preview.captureLoginAttempt().terminal, true);
+            if (state === 'waiting') {
+              assert.equal(previous.wasAborted(), true);
+              preview.captureLoginAttempt().fail('fixture browser did not open');
+            }
+          }
+          await row.getByRole('button', { name: language === 'zh' ? '取消' : 'Cancel', exact: true }).click();
+          assert.deepEqual(errors, []);
+        } catch (error) {
+          if (process.env.F320_EVIDENCE_DIR) {
+            await mkdir(process.env.F320_EVIDENCE_DIR, { recursive: true });
+            await page.screenshot({
+              path: join(process.env.F320_EVIDENCE_DIR, `terminal-recovery-failure-${language}-${width}.png`),
+              fullPage: true,
+            });
+          }
+          console.log('terminal recovery fixture failure:', {
+            language,
+            width,
+            errors,
+            body: (await page.locator('body').innerText()).slice(-2200),
+            server: preview.output.slice(-8),
+          });
+          throw error;
+        } finally {
+          await page.close();
+        }
+      }
+    }
+  },
+);
+
+test(
   'accepted v2 entry keeps native default, adds an independent row, confirms full-local swap, and updates members',
   { timeout: 120000 },
   async () => {

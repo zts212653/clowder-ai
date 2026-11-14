@@ -36,6 +36,9 @@ export function createFixtureLoginDriver() {
         wasAborted() {
           return item.input.signal.aborted;
         },
+        fail(message) {
+          item.reject(new Error(message));
+        },
         async complete(override) {
           const identity = override ?? {
             userId: `user-${index}`,

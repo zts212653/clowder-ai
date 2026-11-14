@@ -164,6 +164,16 @@ export function AccountDirectoryRow({
           <small className="account-cell-text" title={status.detail}>
             {status.detail}
           </small>
+          {account.codex && (waiting || failed) && (
+            <button
+              type="button"
+              className="account-login-recovery"
+              disabled={busy}
+              onClick={() => void login('start', { terminal: true })}
+            >
+              {t.openLoginTerminal}
+            </button>
+          )}
         </td>
         <td className="account-quota-cell">
           {account.clientId === 'openai' && account.authType === 'oauth' ? (
@@ -243,9 +253,6 @@ export function AccountDirectoryRow({
               setOpen(true);
             }}
             onRelogin={() => void login('start')}
-            onOpenTerminal={
-              account.codex && (waiting || failed) ? () => void login('start', { terminal: true }) : undefined
-            }
             onEdit={() => onEdit(account)}
             onDelete={() => void remove()}
             onExpand={() => setOpen(!open)}
