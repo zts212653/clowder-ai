@@ -272,7 +272,7 @@ export function ThreadChatSurface({
       (!selection.selectionMode || selected || selection.selectedMessageIds.size < MAX_SELECTED_MESSAGES);
     return (
       <ChatMessageRow
-        key={message.id}
+        key={message.clientMessageId ? `send-attempt:${message.clientMessageId}` : message.id}
         message={message}
         compact={compact}
         threadId={threadId}
@@ -453,6 +453,7 @@ export function ThreadChatSurface({
           ) : (
             <div className={composerClassName}>
               <ChatInput
+                localSendFeedback
                 key={threadId}
                 presentation={composerPresentation}
                 composerContext={
@@ -467,6 +468,7 @@ export function ThreadChatSurface({
                   contextAttachments,
                   explicitTargetCats,
                   messageDisposition,
+                  onPrepared,
                 ) => {
                   const sent = await handleSend(
                     content,
@@ -478,6 +480,8 @@ export function ThreadChatSurface({
                     explicitTargetCats,
                     {
                       consumeComposerDraft: true,
+                      localAttempt: true,
+                      ...(onPrepared ? { onPrepared } : {}),
                       ...(messageDisposition ? { messageDisposition } : {}),
                     },
                   );

@@ -3016,6 +3016,9 @@ export class QueueProcessor {
         const projectedExtra = result.extra ?? {};
         deliveredMessages.push({
           id: result.id,
+          ...(result.from?.kind === 'user' && result.clientMessageId
+            ? { clientMessageId: result.clientMessageId }
+            : {}),
           ...(result.from ? { from: result.from } : {}),
           content: result.content,
           ...(result.lifecycle ? { lifecycle: result.lifecycle } : {}),

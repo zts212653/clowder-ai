@@ -28,6 +28,8 @@ export interface QueuePrestartRetirementIntent {
 }
 
 export interface QueueLedgerPayload {
+  /** Optional owner-private browser correlation, separate from the durable source record identity. */
+  clientMessageId?: string;
   /** Stable identity of the one source record represented by this Queue Entry. */
   sourceRecordId: string;
   content: string;
