@@ -8,7 +8,7 @@
  */
 
 import assert from 'node:assert/strict';
-import { mkdtempSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
@@ -74,8 +74,11 @@ test('AGY missing binary uses AgyNativeStartupError with the same diagnostic', (
   assertNoProcessEvidence(error.cliDiagnostics);
 });
 
-test('Kimi missing CLI yields cliDiagnostics without spawning', async () => {
+test('Kimi missing CLI yields cliDiagnostics without spawning', async (t) => {
   const home = mkdtempSync(join(tmpdir(), 'issue1463-kimi-'));
+  // with-test-home only owns its own HOME; this fixture lives outside it and must be
+  // removed by the exact path, never by scanning the shared temp root.
+  t.after(() => rmSync(home, { recursive: true, force: true }));
   const originalPath = process.env.PATH;
   const originalWinPath = process.env.Path;
   const originalAppData = process.env.APPDATA;
