@@ -238,6 +238,14 @@ export const ENV_DEFINITIONS_6: readonly EnvDefinition[] = [
     sensitive: false,
   },
   {
+    name: 'TTS_MODEL',
+    defaultValue: '未设置（使用本地服务配置）',
+    description: '旧环境模型选择；仅在本地服务未设置 selectedModel 时使用，已选模型优先；模型切换请使用本地服务设置',
+    category: 'tts',
+    sensitive: false,
+    runtimeEditable: false,
+  },
+  {
     name: 'TTS_CACHE_DIR',
     defaultValue: `\${CAT_CAFE_DATA_DIR:-~/.cat-cafe}/assets/tts`,
     description: 'TTS 音频缓存目录；设置后覆盖 CAT_CAFE_DATA_DIR 下的稳定默认位置',

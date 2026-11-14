@@ -3,6 +3,7 @@ import type { MemberText } from './MemberRuntimeFields';
 import type { MemberDraft } from './member-editor-state';
 
 const labels: Record<keyof HubCatEditorFormState, [string, string]> = {
+  env: ['Desktop 接入配置', 'Desktop connection settings'],
   banner: ['横幅', 'Banner'],
   accountBindingMode: ['账号跟随方式', 'Account binding mode'],
   agyNativeEnabled: ['Antigravity 原生运行', 'Native Antigravity'],
@@ -16,15 +17,15 @@ const labels: Record<keyof HubCatEditorFormState, [string, string]> = {
   name: ['名字', 'Name'],
   displayName: ['显示名称', 'Display name'],
   nickname: ['昵称', 'Nickname'],
-  variantLabel: ['版本名称', 'Variant'],
+  variantLabel: ['版本备注', 'Version label'],
   avatar: ['头像', 'Avatar'],
   colorPrimary: ['主色', 'Primary color'],
   colorSecondary: ['辅助色', 'Secondary color'],
-  mentionPatterns: ['呼叫别名', 'Aliases'],
+  mentionPatterns: ['@ 名字', '@ names'],
   roleDescription: ['职责', 'Role'],
-  personality: ['性格', 'Personality'],
-  teamStrengths: ['团队特长', 'Team strengths'],
-  caution: ['注意事项', 'Caution'],
+  personality: ['个性', 'Personality'],
+  teamStrengths: ['团队分工', 'Team contribution'],
+  caution: ['限制与注意事项', 'Limitations'],
   strengths: ['能力标签', 'Strengths'],
   clientId: ['使用工具', 'Tool'],
   configurationSource: ['默认值来源', 'Default source'],
@@ -67,6 +68,7 @@ function display(key: keyof HubCatEditorFormState, value: unknown, t: MemberText
     return t('未指定 / 跟随默认', 'Default');
   // Arguments may contain credentials; the summary describes their change without echoing them.
   if (/Args$/.test(key)) return t('已设置（高级接入中查看）', 'Configured (see Advanced connection)');
+  if (key === 'env') return t('Desktop 连接配置', 'Desktop connection settings');
   return String(value);
 }
 

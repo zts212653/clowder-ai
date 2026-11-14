@@ -202,12 +202,6 @@ describe('shouldCollapseBeforeInit', () => {
 // ── Cloud review: search overrides pre-init default (resolveCollapse) ──
 
 describe('resolveCollapse (hook-equivalent logic)', () => {
-  it('returns true (collapsed) before init even when search is active', () => {
-    for (const key of ALL_KEYS) {
-      expect(resolveCollapse(key, new Set(), false)).toBe(true);
-    }
-  });
-
   it('returns true (collapsed) before init when no search', () => {
     for (const key of ALL_KEYS) {
       expect(resolveCollapse(key, new Set(), false)).toBe(true);

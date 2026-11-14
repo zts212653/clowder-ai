@@ -56,7 +56,7 @@ export async function readPublishedMessageItem(
     throw new MediaOwnerError('publication_changed');
   const privateImage = /^\/api\/plugins\/chatgpt-dot\/images\/(dot_img_[a-f0-9]{64})\.png$/.exec(url);
   const file =
-    /^\/uploads\/([a-zA-Z0-9][a-zA-Z0-9._-]*\.(png|jpe?g|webp|mp4))$/i.exec(url) ??
+    /^\/uploads\/([a-zA-Z0-9][a-zA-Z0-9._-]*\.(png|jpe?g|webp|gif|svg|mp4))$/i.exec(url) ??
     (privateImage ? [url, `${privateImage[1]}.png`, 'png'] : null);
   if (!file?.[1] || !file[2]) throw new MediaOwnerError('invalid_media');
   const mediaType = publishedUploadMediaType(file[2]);
@@ -88,6 +88,10 @@ export function publishedUploadMediaType(extension: string): ReviewedMediaType {
       return 'image/jpeg';
     case 'webp':
       return 'image/webp';
+    case 'gif':
+      return 'image/gif';
+    case 'svg':
+      return 'image/svg+xml';
     case 'mp4':
       return 'video/mp4';
     default:

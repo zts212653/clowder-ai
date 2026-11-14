@@ -1,3 +1,4 @@
+import { createCatId } from '@cat-cafe/shared';
 import { createRoot } from 'react-dom/client';
 import { CapabilityTipStrip } from '@/components/CapabilityTipStrip';
 import { CatHueInjector } from '@/components/CatHueInjector';
@@ -110,6 +111,7 @@ const messages: ChatMessageData[] = [
     content: '构建没过。',
     extra: {
       ...run('turn-failed'),
+      routingWarnings: [{ kind: 'handoff_blocked_by_failed_turn', targetCats: [createCatId('opus')] }],
       cliDiagnostics: {
         publicSummary: '等待回复超时',
         publicHint: '',
@@ -404,6 +406,7 @@ window.__replies = {
 function Thread() {
   const { getCatById } = useCatData();
   const activeMessages = useChatStore((state) => state.messages);
+  const quote = useChatStore((state) => state.replyToMessage);
   const shown = activityProof ? activeMessages : messages;
   const width = Number(new URLSearchParams(window.location.search).get('w') ?? '720');
   return (
@@ -436,6 +439,7 @@ function Thread() {
         </div>
       )}
       {probeReplyCopy && <textarea aria-label="Copy probe draft" defaultValue="Unsent draft 未发送" />}
+      {quote && <output data-testid="quoted-message">{quote.id}</output>}
       {failureVisibility && (
         <div data-testid="failed-group" style={{ width: 240 }}>
           <AttentionClusterHeader

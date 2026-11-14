@@ -202,7 +202,7 @@ export class PublishedMediaService {
     await this.assertVisible(asset, scope, principal);
   }
 
-  async openAsset(asset: ReviewedMediaAsset, principal: MediaReviewPrincipal, localFile = false) {
+  async openAsset(asset: ReviewedMediaAsset, principal: MediaReviewPrincipal, localFile: boolean | 'snapshot' = false) {
     const actual = await this.deps.owner.describe(asset.contentRef, asset.ownerRevision);
     if (!actual.publicationScope) throw new MediaOwnerError('access_denied');
     return this.open(asset, actual.publicationScope, principal, localFile);
@@ -231,7 +231,7 @@ export class PublishedMediaService {
     asset: ReviewedMediaAsset,
     scope: ContentPublicationScopeV1,
     principal: MediaReviewPrincipal,
-    localFile = false,
+    localFile: boolean | 'snapshot' = false,
   ) {
     await this.assertVisible(asset, scope, principal);
     const content = await this.deps.owner.open(asset.contentRef, asset.ownerRevision);
@@ -242,12 +242,15 @@ export class PublishedMediaService {
       await this.assertVisible(asset, scope, principal);
       let path = content.path;
       if (localFile) {
-        const original = await this.deps.sources.localOriginalFile(
-          content.sourcePublication,
-          content.blobDigest,
-          principal,
-          content.mediaType,
-        );
+        const original =
+          localFile === 'snapshot'
+            ? null
+            : await this.deps.sources.localOriginalFile(
+                content.sourcePublication,
+                content.blobDigest,
+                principal,
+                content.mediaType,
+              );
         if (original) path = original;
         else {
           const origin = await this.deps.sources.originDetails(scope, principal);

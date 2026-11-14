@@ -1,5 +1,6 @@
 import type {
   SuggestionByline,
+  SuggestionDeskView,
   SuggestionEventType,
   SuggestionReceiptView,
   SuggestionState,
@@ -18,6 +19,7 @@ import type {
  * - `suggestion:user-kinds:<user>`         set of kinds this user has seen
  * - `suggestion:counts:<user>:<kind>`      hash event type → count, bumped atomically with each transition
  * - `suggestion:open:<user>:<kind>`        zset of still-open offers by expiresAt (exact 「还开着」 and due 「不理」)
+ * - `suggestion:desk:<user>`               zset of rows still on their way to / on the desk, by createdAt (F335 交付三)
  * - `suggestion:hidden:<user>`             hash `<catId>\u001f<kind>` → JSON { hiddenAt, byline }
  */
 export interface SuggestionEvent {
@@ -39,8 +41,11 @@ export interface SuggestionRecord {
   state: SuggestionState;
   appliedRef?: Record<string, unknown>;
   receipt?: SuggestionReceiptView;
+  watcherSupplement?: { catId: string; text: string };
   undo: SuggestionUndoLabel | null;
   receiptOnly: boolean;
+  /** F335 交付三：its delivery on the desk. */
+  desk?: SuggestionDeskView;
   events: SuggestionEvent[];
   revision: number;
   createdAt: number;
@@ -61,7 +66,11 @@ export type SwapSuggestionResult = { kind: 'swapped' } | { kind: 'conflict' } | 
 
 export interface ISuggestionStore {
   /** `countEvent` is added to the per-kind counts in the same atomic step (offers only; receipts pass none). */
-  create(record: SuggestionRecord, countEvent?: SuggestionEventType): Promise<CreateSuggestionResult>;
+  create(
+    record: SuggestionRecord,
+    countEvent?: SuggestionEventType,
+    fence?: import('../concierge/watcher/watcher-output-fence.js').WatcherOutputFence,
+  ): Promise<CreateSuggestionResult>;
   get(id: string): Promise<SuggestionRecord | null>;
   /**
    * Replace the record iff its stored revision is `expectedRevision`; `next.revision` must be `expectedRevision + 1`.
@@ -80,6 +89,10 @@ export interface ISuggestionStore {
   /** Offers still open (or mid-click) whose expiry has passed, oldest first. */
   listOpenDue(userId: string, kind: string, now: number, limit: number): Promise<SuggestionRecord[]>;
   countOpen(userId: string, kind: string): Promise<number>;
+  /** Offers still open, latest expiry first. */
+  listOpen(userId: string, kind: string, limit: number): Promise<SuggestionRecord[]>;
+  /** Rows still on their way to the desk or on it (desk status pending / shown), oldest first. */
+  listDesk(userId: string, limit: number): Promise<SuggestionRecord[]>;
   hide(userId: string, entry: HiddenKindEntry): Promise<void>;
   unhide(userId: string, catId: string, kind: string): Promise<boolean>;
   listHidden(userId: string): Promise<HiddenKindEntry[]>;
@@ -98,6 +111,7 @@ export const SuggestionKeys = {
   userKinds: (userId: string) => `suggestion:user-kinds:${part(userId)}`,
   counts: (userId: string, kind: string) => `suggestion:counts:${part(userId)}:${kind}`,
   open: (userId: string, kind: string) => `suggestion:open:${part(userId)}:${kind}`,
+  desk: (userId: string) => `suggestion:desk:${part(userId)}`,
   hidden: (userId: string) => `suggestion:hidden:${part(userId)}`,
 };
 
@@ -107,6 +121,11 @@ export const hiddenField = (catId: string, kind: string) => `${catId}${HIDDEN_FI
 /** An offer counts as open (for 「还开着」 and expiry) while its pill is up or a click on it is in flight. */
 export function tracksAsOpen(record: SuggestionRecord): boolean {
   return !record.receiptOnly && (record.state === 'open' || record.state === 'applying');
+}
+
+/** On the desk's list until the person (or the countdown) settles it, or it stops being open anywhere else. */
+export function tracksOnDesk(record: SuggestionRecord): boolean {
+  return record.desk !== undefined && record.desk.status !== 'settled' && tracksAsOpen(record);
 }
 
 export function parseRecord(raw: string | null | undefined): SuggestionRecord | null {

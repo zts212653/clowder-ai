@@ -10,12 +10,14 @@ import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
 import { openFirstRunEntryApi } from '../fixtures/first-run-entry-api.mjs';
 import { cats, createChatProofApi } from './fixtures/f322-chat-real-page-data.mjs';
+import { disabledWatcherRead } from './fixtures/f322-watcher-read.mjs';
 
 // Actual production UI and entry/guide/draft handlers with atomic preference files.
 // Other HTTP reads, the Socket.IO wire and authenticated session identity remain explicit fixtures;
 // in-memory guide threads are NOT installed/Redis/authentication acceptance.
 const webRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const repo = path.resolve(webRoot, '../..');
+const buildDirectory = process.env.CAT_CAFE_WEB_TEST_DIST_DIR ?? '.next';
 const revision = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repo, encoding: 'utf8' }).trim();
 const evidence = process.env.CAT_CAFE_ENTRY_EVIDENCE_DIR ?? path.join(repo, '.tmp', `first-entry-${Date.now()}`);
 const output = [],
@@ -33,7 +35,7 @@ async function freePort() {
 
 before(async () => {
   assert.equal(
-    (await readFile(path.join(webRoot, '.next/.build-commit'), 'utf8')).trim(),
+    (await readFile(path.join(webRoot, buildDirectory, '.build-commit'), 'utf8')).trim(),
     revision,
     'rebuild production UI from current HEAD first',
   );
@@ -234,6 +236,8 @@ async function fixture(shell, scenario) {
       return reply(response.json(), response.statusCode);
     }
     if (Object.hasOwn(bodies, url.pathname)) return reply(bodies[url.pathname]);
+    const watcher = disabledWatcherRead(req, url, ['default']);
+    if (watcher) return route.fulfill(watcher);
     const response = common.respond(req, url);
     if (response) return route.fulfill(response);
     state.unexpected.push(`${method} ${url.pathname}`);

@@ -61,7 +61,7 @@ import {
 import { UPDATE_CANDIDATE_STATE_LUA, WITHDRAW_CANDIDATE_LUA } from './person-memory-lua.js';
 import { executeOwnerMemoryAction, resolveOwnerActionReplay } from './person-memory-owner-action.js';
 import type { ExecuteOwnerMemoryActionInput, OwnerMemoryActionCommand } from './person-memory-owner-action-contract.js';
-import { hardForgetPersonMemoryProposal } from './person-memory-proposal-forget.js';
+import { hardForgetPersonMemoryProposal, inspectPersonMemoryProposalForget } from './person-memory-proposal-forget.js';
 import {
   parseClaim,
   parseEvent,
@@ -392,6 +392,10 @@ export class RedisPersonMemoryStore implements PersonMemoryStore {
 
   async hardForgetProposal(input: HardForgetPersonMemoryProposalInput) {
     return hardForgetPersonMemoryProposal(this.redis, input);
+  }
+
+  inspectProposalForget(ownerUserId: string, proposalId: HardForgetPersonMemoryProposalInput['proposalId']) {
+    return inspectPersonMemoryProposalForget(this.redis, ownerUserId, proposalId);
   }
 
   private async readSorted<T>(sortedSetKey: string, read: (id: string) => Promise<T | null>): Promise<T[]> {

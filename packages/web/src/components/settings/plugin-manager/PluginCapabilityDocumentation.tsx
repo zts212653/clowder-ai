@@ -27,6 +27,7 @@ const contributionKindLabel: Record<string, string> = {
   service: 'Service',
   ui: 'UI',
   'content-editor-provider': 'Content Editor',
+  'external-request': 'External Request',
   'desktop-window': 'Desktop Window',
 };
 
@@ -39,6 +40,7 @@ const userCapabilityKinds = new Set([
   'limb',
   'ui',
   'content-editor-provider',
+  'external-request',
   'desktop-window',
 ]);
 

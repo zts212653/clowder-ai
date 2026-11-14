@@ -8,25 +8,28 @@ const WINDOW_MS = 2000;
 const INTERVAL_US = 10000;
 const COOLDOWN_MS = 15 * 60 * 1000;
 const MAX_PROFILES = 4;
+// The budget rolls: a long-lived runtime that spent its four attempts in the
+// morning can still sample an evening stall (11-08: all four were gone by 03:27).
+const BUDGET_WINDOW_MS = 6 * 60 * 60 * 1000;
 type Logger = Pick<FastifyBaseLogger, 'info'>;
 
 /** Process-level evidence, not attribution of CPU to the request that triggered it. */
 export function createSlowReadCpuObserver() {
   let active = false;
-  let lastStarted = -Infinity;
-  let profiles = 0;
+  let admitted: number[] = [];
   return (logger: Logger) => {
     const entered = performance.now();
     let settled = false;
     let stopCapture: (() => void) | undefined;
     const arm = setTimeout(() => {
       const now = performance.now();
-      if (settled || active || profiles >= MAX_PROFILES || now - lastStarted < COOLDOWN_MS) return;
+      admitted = admitted.filter((at) => now - at < BUDGET_WINDOW_MS);
+      const lastStarted = admitted.at(-1) ?? -Infinity;
+      if (settled || active || admitted.length >= MAX_PROFILES || now - lastStarted < COOLDOWN_MS) return;
       const release = tryAcquireCpuProfiler();
       if (!release) return;
       active = true;
-      profiles++;
-      lastStarted = now;
+      admitted.push(now);
       void capture(
         logger,
         now - entered,

@@ -13,6 +13,7 @@ const connection = vi.hoisted(() => ({
   updateRequired: false,
   checkedAt: 0,
 }));
+vi.mock('@/components/thread-chat/hub-socket-context', () => import('@/test-utils/hub-socket-context-mock'));
 vi.mock('@/hooks/useConnectionStatus', () => ({ useConnectionStatus: () => connection }));
 
 let host: HTMLDivElement;

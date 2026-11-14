@@ -30,11 +30,11 @@ import { type CodexLaunchPolicy, captureCodexLaunchPolicy } from '../../../../..
 import { codexExecutionAccountSnapshot } from '../../../../../config/codex-execution-account.js';
 import { resolveActiveProjectRoot } from '../../../../../utils/active-project-root.js';
 import type { AgentService, AgentServiceOptions } from '../../types.js';
-import { hasSupportedEnvTemplate } from '../providers/env-map.js';
 import {
   captureMemberExecutionPreferences,
   type MemberExecutionPreferences,
 } from '../providers/member-execution-preferences.js';
+import { captureExecutionEnvironment } from './execution-environment.js';
 import type { FrozenExecutionWorkspace } from './execution-workspace.js';
 
 /** A Host-admitted, execution-local choice. It never writes the member catalog. */
@@ -56,6 +56,8 @@ export interface FrozenExecutionBinding {
     Pick<
       AgentServiceOptions,
       | 'frozenAcpMcpServers'
+      | 'frozenAcpMcpIssues'
+      | 'frozenAcpMcpCurrentness'
       | 'frozenNativeMcpConfig'
       | 'frozenKimiMcpConfig'
       | 'frozenCodexMcpInput'
@@ -206,14 +208,9 @@ export function freezeExecutionAccountBinding(input: {
       `account "${account.id}" is configured as api_key but has no API key set — add the key in Hub > account settings`,
     );
   const resolvedAccount = account ? deepFreeze(structuredClone(account)) : null;
-  // Preserve F171 filtering. The same selected HOME/environment is used by
-  // provider discovery and later invocation; template values remain resolveEnvMap's responsibility.
-  const accountEnv = Object.fromEntries(
-    Object.entries(resolvedAccount?.envVars ?? {}).filter(
-      ([key, value]) =>
-        /^[A-Z_][A-Za-z0-9_]*$/.test(key) && !key.startsWith('CAT_CAFE_') && !hasSupportedEnvTemplate(value),
-    ),
-  );
+  if (resolvedAccount?.agy && (catConfig?.agyProfile?.carrier !== 'native' || catConfig.carrier === 'acp'))
+    throw new Error('F320 AGY 文件登录目前用于 Native；ACP 请继续使用其独立官方登录');
+  const accountEnv = captureExecutionEnvironment(catConfig, resolvedAccount, input.model);
   const codexAccountLaunch =
     provider === 'openai' && resolvedAccount
       ? resolveCodexAccountLaunch(resolvedAccount, { cwd: input.workspace.workingProjectRoot })

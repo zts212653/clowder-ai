@@ -30,7 +30,8 @@ const portProbe = net.createServer();
 await new Promise((resolve) => portProbe.listen(0, '127.0.0.1', resolve));
 const frontendPort = portProbe.address().port;
 await new Promise((resolve) => portProbe.close(resolve));
-assert.ok(![3003, 3004, 6399].includes(api.port) && ![3003, 3004, 6399].includes(frontendPort));
+const reservedPorts = [3001, 3002, 3003, 3004, 6399];
+assert.ok(!reservedPorts.includes(api.port) && !reservedPorts.includes(frontendPort));
 const origin = `http://127.0.0.1:${frontendPort}`;
 const apiOrigin = `http://127.0.0.1:${api.port}`;
 const runtime = spawn(

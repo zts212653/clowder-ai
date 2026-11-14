@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -28,6 +29,14 @@ function HookProbe({ threadId }: { threadId: string }) {
 
 function HookHost({ threadId }: { threadId: string }) {
   return React.createElement(ThreadChatHistoryAdmissionProvider, null, React.createElement(HookProbe, { threadId }));
+}
+
+/** Mirrors ChatContainer: the store follows the route in a parent layout effect, after the history owner's own. */
+function RouteSyncedHookHost({ threadId }: { threadId: string }) {
+  React.useLayoutEffect(() => {
+    useChatStore.getState().setCurrentThread(threadId);
+  }, [threadId]);
+  return React.createElement(HookHost, { threadId });
 }
 
 function makeMsg(id: string, timestamp: number): ChatMessage {
@@ -225,6 +234,80 @@ describe('useChatHistory scroll memory (#27)', () => {
     // The outgoing offset points into the new timeline's deferred placeholders.
     // Waiting for RAF would expose them for the first paint of the new thread.
     expect(top.get()).toBe(1200);
+  });
+
+  it('keeps a still-pending incoming restore on the bottom before paint when its content grows', async () => {
+    const connected = new Set<{ callback: ResizeObserverCallback; instance: ResizeObserver }>();
+    const originalObserver = window.ResizeObserver;
+    Object.assign(window, {
+      ResizeObserver: class implements ResizeObserver {
+        private readonly entry: { callback: ResizeObserverCallback; instance: ResizeObserver };
+        constructor(callback: ResizeObserverCallback) {
+          this.entry = { callback, instance: this };
+        }
+        observe() {
+          connected.add(this.entry);
+        }
+        unobserve() {}
+        disconnect() {
+          connected.delete(this.entry);
+        }
+      },
+    });
+    try {
+      const threadA = 'thread-pending-restore-resize-a';
+      const threadB = 'thread-pending-restore-resize-b';
+      const aMessages = [makeMsg('pending-resize-a', 1)];
+      const bMessages = [makeMsg('pending-resize-b1', 2), makeMsg('pending-resize-b2', 3)];
+      useChatStore.setState({
+        currentThreadId: threadA,
+        messages: aMessages,
+        hasMore: false,
+        isLoadingHistory: false,
+        isOfflineSnapshot: false,
+        threadStates: {
+          [threadA]: makeThreadState(aMessages),
+          // Unread cached history is revalidated against the server on switch.
+          [threadB]: { ...makeThreadState(bMessages), unreadCount: 1 },
+        },
+      });
+      await act(async () => root.render(React.createElement(RouteSyncedHookHost, { threadId: threadA })));
+      const el = capturedHook?.scrollContainerRef.current;
+      if (!el) throw new Error('Missing chat scroll container');
+      const top = defineMutableNumberProp(el, 'scrollTop', 300);
+      defineMutableNumberProp(el, 'clientHeight', 600);
+      const height = defineMutableNumberProp(el, 'scrollHeight', 1800);
+      cancelInitialRestoreWithWheel(el, -1);
+
+      // The authoritative page never arrives here, so B's revalidation stays in flight.
+      apiFetchMock.mockClear();
+      apiFetchMock.mockReturnValue(new Promise<Response>(() => {}));
+      await act(async () => root.render(React.createElement(RouteSyncedHookHost, { threadId: threadB })));
+      act(() => flushAnimationFrames());
+
+      // The cached timeline is on the bottom of the layout known so far, and its
+      // restore keeps ownership until the fresh history page revalidates it.
+      expect(top.get()).toBe(1200);
+      expect(useChatStore.getState().isLoadingHistory).toBe(true);
+      expect(
+        apiFetchMock.mock.calls.some(([url]) => String(url).includes(`threadId=${encodeURIComponent(threadB)}`)),
+      ).toBe(true);
+
+      // Rows entering the viewport lay out at their real height in the same frame,
+      // and the browser reports it through ResizeObserver right before painting.
+      height.set(3337);
+      act(() => {
+        for (const observer of connected) observer.callback([], observer.instance);
+      });
+
+      // Deferring this to the next animation frame paints one frame 1537px above the bottom.
+      expect(top.get()).toBe(2737);
+      act(() => flushAnimationFrames());
+      expect(top.get()).toBe(2737);
+      expect(readChatScrollState(threadB)).toMatchObject({ anchor: 'bottom' });
+    } finally {
+      Object.assign(window, { ResizeObserver: originalObserver });
+    }
   });
 
   it('retries saved offset restore until the remounted thread becomes scrollable again', async () => {

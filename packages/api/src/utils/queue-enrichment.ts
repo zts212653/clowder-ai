@@ -16,16 +16,12 @@ import type {
   QueueAuthorIntentReceipt,
   QueueRecoveryAction,
 } from '@cat-cafe/shared';
-import { appendRepeatKey } from '../domains/cats/services/agents/invocation/append-delivery-identity.js';
 import {
   type QueueEntry,
   queueEntryOwnerId,
   queueEntryTargetCats,
 } from '../domains/cats/services/agents/invocation/InvocationQueue.js';
-import {
-  isOwnerRecoverableRoutingTarget,
-  isOwnerRepeatableAppendTarget,
-} from '../domains/cats/services/agents/invocation/queue-routing-recovery-policy.js';
+import { isOwnerRecoverableRoutingTarget } from '../domains/cats/services/agents/invocation/queue-routing-recovery-policy.js';
 import { storedMessageSource } from '../domains/cats/services/stores/message-source.js';
 import type { IMessageStore } from '../domains/cats/services/stores/ports/MessageStore.js';
 import type { SocketManager } from '../infrastructure/websocket/index.js';
@@ -45,6 +41,8 @@ export interface QueueEntryMessagePreview {
 /** Stable browser DTO. The durable ledger remains nested and is never leaked to clients. */
 export interface EnrichedQueueEntry {
   id: string;
+  /** Owner-private correlation with a browser send; the ledger already persists this producer key. */
+  clientMessageId?: string;
   threadId: string;
   userId: string;
   content: string;
@@ -90,6 +88,9 @@ export function projectPublicQueueEntry(entry: QueueEntry): EnrichedQueueEntry {
   const authorIntentByTarget = projectAuthorIntents(entry);
   return {
     id: entry.id,
+    ...(entry.from.kind === 'user' && entry.payload.clientMessageId
+      ? { clientMessageId: entry.payload.clientMessageId }
+      : {}),
     threadId: entry.threadId,
     userId: queueEntryOwnerId(entry),
     content: entry.payload.content,
@@ -135,29 +136,15 @@ async function buildMessageEnrichment(
     if (!msg) continue;
     if (entry?.status === 'queued') {
       for (const targetCatId of entry.delivery.routingHeldTargetIds ?? []) {
-        const native = entry.delivery.appendPendingByTarget?.[targetCatId];
-        const response = native?.requiresCompletion ? await messageStore.getById(native.responseMessageId) : undefined;
-        const repeat = isOwnerRepeatableAppendTarget(entry, msg, targetCatId, response);
-        if (!repeat && !isOwnerRecoverableRoutingTarget(entry, msg, targetCatId)) continue;
-        const failure = entry.delivery.appendRecoveryByTarget?.[targetCatId];
-        if (
-          repeat &&
-          failure &&
-          (await messageStore.getByIdempotencyKey(
-            msg.userId,
-            msg.threadId,
-            appendRepeatKey(msg.id, targetCatId, failure.invocationId),
-          ))
-        )
-          continue;
+        if (!isOwnerRecoverableRoutingTarget(entry, msg, targetCatId)) continue;
         recoveryActions.push({
-          id: `${repeat ? 'repeat' : 'retry'}:${entry.id}:${targetCatId}`,
+          id: `retry:${entry.id}:${targetCatId}`,
           entryId: entry.id,
-          kind: repeat ? 'repeat_target' : 'retry_target',
+          kind: 'retry_target',
           targetCatId,
           request: {
             method: 'POST',
-            path: `/api/threads/${encodeURIComponent(entry.threadId)}/messages/${encodeURIComponent(msg.id)}/routing-targets/${encodeURIComponent(targetCatId)}/${repeat ? 'repeat' : 'retry'}`,
+            path: `/api/threads/${encodeURIComponent(entry.threadId)}/messages/${encodeURIComponent(msg.id)}/routing-targets/${encodeURIComponent(targetCatId)}/retry`,
           },
         });
       }

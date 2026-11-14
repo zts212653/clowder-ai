@@ -1,13 +1,15 @@
 import { createHash } from 'node:crypto';
 import { type BigIntStats, constants } from 'node:fs';
-import { type FileHandle, link, mkdir, open, readFile, rename, unlink } from 'node:fs/promises';
+import { type FileHandle, link, mkdir, open, readFile, rename, stat, unlink } from 'node:fs/promises';
 import { join } from 'node:path';
 import { CollectiveContentCustodyFence } from './collective-custody-fence.js';
 import { contentKey, readOwnerManifests } from './manifest-reader.js';
 import { commitInitialOwnerState } from './state/initial-commit.js';
 import { type ProjectContentStateV1, parseProjectContentState } from './state/manifest.js';
+import { ContentPublicationIndex } from './state/publication-index.js';
 import { type ContentStream, writeOwnerPayload } from './stream-content.js';
 import type { ContentActorV1, ContentPublicationScopeV1, VideoProjectScopeV1 } from './types.js';
+import { isWorkPublicationScope } from './types.js';
 
 export type { ProjectContentStateV1 } from './state/manifest.js';
 
@@ -36,11 +38,13 @@ export interface RetainedMediaHead {
 export class ProjectContentOwnerStore {
   readonly collectiveFence: CollectiveContentCustodyFence;
   private readonly rootDir: string;
+  private readonly publicationIndex: ContentPublicationIndex;
   private readonly locks = new Map<string, Promise<void>>();
   private readonly verifiedBlobs = new Map<string, { identity: string; ready: Promise<void> }>();
 
   constructor(dataDir: string) {
     this.rootDir = join(dataDir, 'projects', 'content-owner-v1');
+    this.publicationIndex = new ContentPublicationIndex(this.rootDir);
     this.collectiveFence = new CollectiveContentCustodyFence(this.rootDir, this);
   }
 
@@ -71,7 +75,7 @@ export class ProjectContentOwnerStore {
     }
   }
 
-  /** Enumerate primary manifests, including owner commits not yet projected into an application ledger.
+  /** Locate canonical source publications, including commits not projected into an application ledger.
    * No URL/byte index is an authority, and an incomplete read must never become "no prior publication".
    */
   async findSourcePublications(input: {
@@ -88,7 +92,7 @@ export class ProjectContentOwnerStore {
   }
 
   /**
-   * Resolve many immutable source coordinates with one complete manifest walk.
+   * Resolve immutable source coordinates through candidate membership and fresh canonical manifests.
    * Any non-ENOENT read/parse failure rejects the whole batch so callers cannot
    * mistake an incomplete owner catalogue for an authoritative negative.
    */
@@ -98,7 +102,8 @@ export class ProjectContentOwnerStore {
     const { matches, lookupIdsByPublication } = indexSourcePublicationLookups(inputs);
     if (inputs.length === 0) return matches;
 
-    for await (const state of readOwnerManifests(this.rootDir)) {
+    for (const ref of await this.publicationIndex.sourceReferences(inputs)) {
+      const state = await this.readIndexedState(ref);
       if (state) appendSourcePublicationMatches(state, lookupIdsByPublication, matches);
     }
     sortSourcePublicationMatches(matches);
@@ -136,7 +141,9 @@ export class ProjectContentOwnerStore {
     for await (const state of readOwnerManifests(this.rootDir)) {
       if (
         state?.publicationScope?.ownerUserId !== ownerUserId ||
-        (!['image/png', 'video/mp4'].includes(state.mediaType) &&
+        (!['image/png', 'image/jpeg', 'image/webp', 'image/gif', 'image/svg+xml', 'video/mp4'].includes(
+          state.mediaType,
+        ) &&
           !(
             includeHtmlWorks &&
             state.mediaType === 'text/html' &&
@@ -155,6 +162,45 @@ export class ProjectContentOwnerStore {
         committedBy: { ...revision.committedBy },
       };
     }
+  }
+
+  prepareWorkIndex(state: ProjectContentStateV1) {
+    return this.publicationIndex.prepare(state);
+  }
+
+  async *retainedThreadMediaHeads(ownerUserId: string, threadId: string): AsyncGenerator<RetainedMediaHead> {
+    for (const ref of await this.publicationIndex.references(ownerUserId, threadId)) {
+      const state = await this.readIndexedState(ref);
+      if (!state) continue;
+      const scope = state.publicationScope;
+      if (!isWorkPublicationScope(scope) || scope.ownerUserId !== ownerUserId || scope.threadId !== threadId)
+        throw new Error('Invalid thread Work index scope');
+      const revision = state.revisions[state.currentOwnerRevision - 1];
+      if (!revision) throw new Error('Canonical current revision unavailable');
+      yield {
+        contentRef: ref,
+        ownerRevision: state.currentOwnerRevision,
+        publicationScope: { ...scope },
+        committedAt: revision.committedAt,
+        committedBy: { ...revision.committedBy },
+      };
+    }
+  }
+
+  private async readIndexedState(ref: string) {
+    const state = await this.readState(ref);
+    if (state) return state;
+    // An unpublished candidate has no canonical directory. A damaged committed manifest remains an error.
+    const directory = await stat(this.contentRoot(ref)).catch((error: unknown) => {
+      if (isErrno(error, 'ENOENT')) return null;
+      throw error;
+    });
+    if (directory) {
+      const committed = await this.readState(ref);
+      if (committed) return committed;
+      throw new Error(`Incomplete content owner manifest: ${contentKey(ref)}`);
+    }
+    return undefined;
   }
 
   async commitInitialState(

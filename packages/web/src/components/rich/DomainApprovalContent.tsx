@@ -24,9 +24,9 @@ function ThreadName({ id }: { id: string }) {
   const t = useShellCopy(domainApprovalCopy);
   return <>{currentThread?.title || t.unknownThread}</>;
 }
-function OriginalText({ label, children }: { label: string; children: ReactNode }) {
+function OriginalText({ label, children, open = false }: { label: string; children: ReactNode; open?: boolean }) {
   return (
-    <details className="rounded-lg border border-[var(--shell-hairline)] px-3 py-2">
+    <details open={open} className="rounded-lg border border-[var(--shell-hairline)] px-3 py-2">
       <summary className="shell-focusable cursor-pointer font-medium">{label}</summary>
       {/* biome-ignore lint/a11y/noNoninteractiveTabindex: bounded original text supports keyboard scrolling */}
       <section aria-label={label} className="mt-2 max-h-64 overflow-y-auto break-words" tabIndex={0}>
@@ -74,10 +74,12 @@ export function TasteApprovalContent({ item }: { item: ApprovalHubItem }) {
   return (
     <>
       {text(item.detail.takeaway) ? (
-        <MarkdownContent content={text(item.detail.takeaway)} disableCommandPrefix />
+        <p className="whitespace-pre-wrap break-words">{text(item.detail.takeaway)}</p>
       ) : null}
       <dl className="m-0 space-y-2">
-        <Fact label={t.scene}>{text(item.detail.scene)}</Fact>
+        <Fact label={t.scene}>
+          <span className="whitespace-pre-wrap">{text(item.detail.scene)}</span>
+        </Fact>
         <Fact label={t.dimension}>
           {Object.hasOwn(t.dimensions, dimension) ? t.dimensions[dimension as keyof typeof t.dimensions] : t.unknown}
         </Fact>
@@ -90,9 +92,15 @@ export function TasteApprovalContent({ item }: { item: ApprovalHubItem }) {
               : t.privacyUnknown}
         </Fact>
       </dl>
-      <OriginalText label={t.original}>
+      <OriginalText label={t.original} open={item.detail.privacy === 'public'}>
         <blockquote className="m-0 border-l-2 border-[var(--shell-hairline)] pl-3">
-          <MarkdownContent content={text(item.detail.quote)} disableCommandPrefix />
+          {(Array.isArray(item.detail.quotes) ? strings(item.detail.quotes) : [text(item.detail.quote)]).map(
+            (quote, index) => (
+              <p key={`${index}:${quote}`} className="whitespace-pre-wrap">
+                {quote}
+              </p>
+            ),
+          )}
         </blockquote>
         {correction && typeof correction === 'object' && 'reason' in correction ? (
           <p>
@@ -104,18 +112,13 @@ export function TasteApprovalContent({ item }: { item: ApprovalHubItem }) {
         {patch && typeof patch === 'object'
           ? ['takeaway', 'scene', 'quotes', 'tags', 'dimension'].map((key) =>
               key in patch ? (
-                <MarkdownContent
-                  key={key}
-                  content={
-                    Array.isArray((patch as Record<string, unknown>)[key])
-                      ? strings((patch as Record<string, unknown>)[key]).join('\n\n')
-                      : key === 'dimension' &&
-                          Object.hasOwn(t.dimensions, text((patch as Record<string, unknown>)[key]))
-                        ? t.dimensions[text((patch as Record<string, unknown>)[key]) as keyof typeof t.dimensions]
-                        : text((patch as Record<string, unknown>)[key])
-                  }
-                  disableCommandPrefix
-                />
+                <p key={key} className="whitespace-pre-wrap break-words">
+                  {Array.isArray((patch as Record<string, unknown>)[key])
+                    ? strings((patch as Record<string, unknown>)[key]).join('\n\n')
+                    : key === 'dimension' && Object.hasOwn(t.dimensions, text((patch as Record<string, unknown>)[key]))
+                      ? t.dimensions[text((patch as Record<string, unknown>)[key]) as keyof typeof t.dimensions]
+                      : text((patch as Record<string, unknown>)[key])}
+                </p>
               ) : null,
             )
           : null}

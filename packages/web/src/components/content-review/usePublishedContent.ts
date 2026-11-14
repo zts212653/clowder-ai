@@ -36,7 +36,7 @@ export function messagePublicationSource(
   item: MessageMediaItemSelector,
   url: string,
 ): MessageMediaPublicationSource | null {
-  const uploaded = /^\/uploads\/[a-zA-Z0-9][a-zA-Z0-9._-]*\.(png|jpe?g|webp|mp4)$/i.test(url);
+  const uploaded = /^\/uploads\/[a-zA-Z0-9][a-zA-Z0-9._-]*\.(png|jpe?g|webp|gif|svg|mp4)$/i.test(url);
   const dotImage = /^\/api\/plugins\/chatgpt-dot\/images\/dot_img_[a-f0-9]{64}\.png$/.test(url);
   if (!coordinate || (!uploaded && !dotImage)) return null;
   const original = coordinate.origins?.[messageMediaItemKey(item)] ?? {

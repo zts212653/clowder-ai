@@ -10,7 +10,6 @@ export function useNewConversationImport({
   persistIntent,
   createThread,
   onNavigate,
-  enqueue,
   setPhase,
   resetIntent,
 }: {
@@ -19,7 +18,6 @@ export function useNewConversationImport({
   persistIntent: (intent: PendingNewConversationIntent) => Promise<void>;
   createThread: (intent: PendingNewConversationIntent) => Promise<{ id: string }>;
   onNavigate: (id: string) => void;
-  enqueue: (operation: () => Promise<void>) => Promise<void>;
   setPhase: (phase: FirstMessageAdmissionPhase) => void;
   resetIntent: () => Promise<void>;
 }) {
@@ -46,11 +44,11 @@ export function useNewConversationImport({
         complete: async () => {
           const owner = ownerRef.current;
           if (!owner) throw new Error('owner unavailable');
-          await enqueue(() => clearNewConversationIntent(owner));
+          await clearNewConversationIntent(owner);
           await invalidateSidebarProjection();
         },
       }),
-    [persistIntent, createThread, onNavigate, enqueue, intentRef, ownerRef, setPhase, resetIntent],
+    [persistIntent, createThread, onNavigate, intentRef, ownerRef, setPhase, resetIntent],
   );
 
   return importController;

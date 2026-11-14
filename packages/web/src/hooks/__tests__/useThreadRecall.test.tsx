@@ -3,9 +3,11 @@ import { createRoot } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useChatStore } from '@/stores/chatStore';
 import { apiFetch } from '@/utils/api-client';
+import { MEMORY_CHANGED } from '../memory-changed';
 import { recallResultHref, recallResultTitle } from '../recall-display';
 import { recallEventDisplayTitle } from '../recall-feed-model';
 import { useThreadRecall } from '../useRecallEvents';
+import { requestedCueIds, withCueBatchFixture } from './recall-cue-batch-fixture';
 
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
 
@@ -48,28 +50,30 @@ describe('F321 scoped recall reads', () => {
       ],
     });
     api.mockImplementation(
-      async (path) =>
-        new Response(
-          JSON.stringify(
-            path.includes('memory-cues')
-              ? {
-                  cues: [
-                    {
-                      cueId: 'matter-read',
-                      consumerCatId: 'sonnet',
-                      sourceAnchor: 'matter:one',
-                      sourceRevision: 'revision:1',
-                      resolverFamily: 'matter',
-                      status: 'drilled',
-                      presentedAt: 2,
-                      source: 'pull',
-                      matterRead: { status: 'current', matterId: 'one', title: 'Settings', messageCount: 2 },
-                    },
-                  ],
-                }
-              : { events: [], sourceViews: [] },
+      withCueBatchFixture(
+        async (path) =>
+          new Response(
+            JSON.stringify(
+              path.includes('memory-cues')
+                ? {
+                    cues: [
+                      {
+                        cueId: 'matter-read',
+                        consumerCatId: 'sonnet',
+                        sourceAnchor: 'matter:one',
+                        sourceRevision: 'revision:1',
+                        resolverFamily: 'matter',
+                        status: 'drilled',
+                        presentedAt: 2,
+                        source: 'pull',
+                        matterRead: { status: 'current', matterId: 'one', title: 'Settings', messageCount: 2 },
+                      },
+                    ],
+                  }
+                : { events: [], sourceViews: [] },
+            ),
           ),
-        ),
+      ),
     );
     function MatterProbe() {
       return <pre>{JSON.stringify(useThreadRecall().events)}</pre>;
@@ -109,12 +113,14 @@ describe('F321 scoped recall reads', () => {
   });
   it('never reuses a late response from another thread', async () => {
     let finish: (value: Response) => void = () => {};
-    api.mockImplementation((path) =>
-      path.includes('thread-one')
-        ? new Promise((resolve) => {
-            finish = resolve;
-          })
-        : Promise.resolve(new Response('{"events":[]}')),
+    api.mockImplementation(
+      withCueBatchFixture((path) =>
+        path.includes('thread-one')
+          ? new Promise((resolve) => {
+              finish = resolve;
+            })
+          : Promise.resolve(new Response('{"events":[]}')),
+      ),
     );
     await act(async () => root.render(<Probe />));
     await act(async () => useChatStore.setState({ currentThreadId: 'thread-two', messages: [] }));
@@ -148,15 +154,17 @@ describe('F321 scoped recall reads', () => {
         },
       ],
     });
-    api.mockImplementation(async (path) => {
-      if (path.includes('foreign-turn'))
-        return new Response('{"error":"Invocation not found in thread"}', { status: 404 });
-      if (path.includes('memory-cues')) return new Response('{"cues":[]}', { status });
-      return new Response('{"events":[],"cueInvocationIds":[]}');
-    });
+    api.mockImplementation(
+      withCueBatchFixture(async (path) => {
+        if (path.includes('foreign-turn'))
+          return new Response('{"error":"Invocation not found in thread"}', { status: 404 });
+        if (path.includes('memory-cues')) return new Response('{"cues":[]}', { status });
+        return new Response('{"events":[],"cueInvocationIds":[]}');
+      }),
+    );
     await act(async () => root.render(<Probe />));
     expect(api.mock.calls.some(([path]) => path.includes('foreign-turn'))).toBe(false);
-    expect(api.mock.calls.some(([path]) => path.includes('/local-turn/memory-cues'))).toBe(true);
+    expect(requestedCueIds(api.mock.calls)).toContain('local-turn');
     expect(container.textContent).toBe(`ready||${status === 200 ? 'cue-ok' : 'cue-error'}`);
   });
   it('excludes legacy cross-posts and canonical inputs without dropping a local historical cue', async () => {
@@ -182,14 +190,16 @@ describe('F321 scoped recall reads', () => {
       ],
     });
     api.mockImplementation(
-      async (path) =>
-        new Response(
-          path.includes('memory-cues') ? '{"cues":[]}' : '{"events":[],"cueInvocationIds":["historical-local"]}',
-        ),
+      withCueBatchFixture(
+        async (path) =>
+          new Response(
+            path.includes('memory-cues') ? '{"cues":[]}' : '{"events":[],"cueInvocationIds":["historical-local"]}',
+          ),
+      ),
     );
     await act(async () => root.render(<Probe />));
-    const cueReads = api.mock.calls.map(([path]) => path).filter((path) => path.includes('memory-cues'));
-    expect(cueReads).toEqual(['/api/threads/thread-one/invocations/historical-local/memory-cues']);
+    const cueReads = requestedCueIds(api.mock.calls);
+    expect(cueReads).toEqual(['historical-local']);
     expect(container.textContent).toBe('ready||cue-ok');
   });
   it('reads a new streaming cue title once without waiting for the reply to finish', async () => {
@@ -208,30 +218,32 @@ describe('F321 scoped recall reads', () => {
     });
     let historyReads = 0;
     let finishView: (response: Response) => void = () => {};
-    api.mockImplementation(async (path) => {
-      if (path.includes('memory-cues'))
-        return new Response(
-          JSON.stringify({
-            cues: [
-              {
-                cueId: 'live-cue',
-                consumerCatId: 'sonnet',
-                sourceAnchor: 'F321',
-                sourceRevision: 'r1',
-                resolverFamily: 'project_knowledge',
-                status: 'presented_unreported',
-                presentedAt: 1,
-              },
-            ],
-          }),
-        );
-      historyReads++;
-      if (historyReads === 1)
-        return new Response(JSON.stringify({ events: [], cueInvocationIds: [], sourceViews: [] }));
-      return new Promise((resolve) => {
-        finishView = resolve;
-      });
-    });
+    api.mockImplementation(
+      withCueBatchFixture(async (path) => {
+        if (path.includes('memory-cues'))
+          return new Response(
+            JSON.stringify({
+              cues: [
+                {
+                  cueId: 'live-cue',
+                  consumerCatId: 'sonnet',
+                  sourceAnchor: 'F321',
+                  sourceRevision: 'r1',
+                  resolverFamily: 'project_knowledge',
+                  status: 'presented_unreported',
+                  presentedAt: 1,
+                },
+              ],
+            }),
+          );
+        historyReads++;
+        if (historyReads === 1)
+          return new Response(JSON.stringify({ events: [], cueInvocationIds: [], sourceViews: [] }));
+        return new Promise((resolve) => {
+          finishView = resolve;
+        });
+      }),
+    );
     await act(async () => root.render(<Probe />));
     expect(container.textContent).not.toContain('标题没有记录下来');
     expect(container.textContent).toContain('正在读取标题');
@@ -262,6 +274,14 @@ describe('F321 scoped recall reads', () => {
     await act(async () => root.render(<Probe />));
     expect(historyReads).toBe(2);
     expect(useChatStore.getState().messages[0]?.isStreaming).toBe(true);
+    await act(async () => window.dispatchEvent(new Event('focus')));
+    expect(container.textContent).toContain('F321 记忆界面');
+    expect(container.textContent).not.toContain('正在读取标题');
+    await act(async () => finishView(new Response('{}', { status: 503 })));
+    expect(container.textContent).toContain('F321 记忆界面');
+    await act(async () => window.dispatchEvent(new Event(MEMORY_CHANGED)));
+    expect(container.textContent).not.toContain('F321 记忆界面');
+    expect(container.textContent).toContain('正在读取标题');
   });
 
   it.each([200, 503])('does not loop on a missing streaming cue view (response %s)', async (status) => {
@@ -279,27 +299,29 @@ describe('F321 scoped recall reads', () => {
       ],
     });
     let historyReads = 0;
-    api.mockImplementation(async (path) => {
-      if (path.includes('memory-cues'))
-        return new Response(
-          JSON.stringify({
-            cues: [
-              {
-                cueId: 'cue',
-                consumerCatId: 'sonnet',
-                sourceAnchor: 'F321',
-                sourceRevision: 'r1',
-                resolverFamily: 'project_knowledge',
-                status: 'presented_unreported',
-                presentedAt: 1,
-              },
-            ],
-          }),
-        );
-      historyReads++;
-      if (historyReads > 1 && status !== 200) return new Response('{}', { status });
-      return new Response(JSON.stringify({ events: [], cueInvocationIds: [], sourceViews: [] }));
-    });
+    api.mockImplementation(
+      withCueBatchFixture(async (path) => {
+        if (path.includes('memory-cues'))
+          return new Response(
+            JSON.stringify({
+              cues: [
+                {
+                  cueId: 'cue',
+                  consumerCatId: 'sonnet',
+                  sourceAnchor: 'F321',
+                  sourceRevision: 'r1',
+                  resolverFamily: 'project_knowledge',
+                  status: 'presented_unreported',
+                  presentedAt: 1,
+                },
+              ],
+            }),
+          );
+        historyReads++;
+        if (historyReads > 1 && status !== 200) return new Response('{}', { status });
+        return new Response(JSON.stringify({ events: [], cueInvocationIds: [], sourceViews: [] }));
+      }),
+    );
     await act(async () => root.render(<Probe />));
     expect(container.textContent).toContain('暂时读不到标题');
     expect(container.textContent).not.toContain('标题没有记录下来');
@@ -323,29 +345,31 @@ describe('F321 scoped recall reads', () => {
     });
     let historyReads = 0;
     let finishView: (response: Response) => void = () => {};
-    api.mockImplementation(async (path) => {
-      if (path.includes('memory-cues'))
-        return new Response(
-          JSON.stringify({
-            cues: [
-              {
-                cueId: 'cue',
-                consumerCatId: 'sonnet',
-                sourceAnchor: 'F321',
-                sourceRevision: 'r1',
-                resolverFamily: 'project_knowledge',
-                status: 'presented_unreported',
-                presentedAt: 1,
-              },
-            ],
-          }),
-        );
-      if (path.includes('thread-one') && ++historyReads > 1)
-        return new Promise((resolve) => {
-          finishView = resolve;
-        });
-      return new Response(JSON.stringify({ events: [], sourceViews: [], cueInvocationIds: [] }));
-    });
+    api.mockImplementation(
+      withCueBatchFixture(async (path) => {
+        if (path.includes('memory-cues'))
+          return new Response(
+            JSON.stringify({
+              cues: [
+                {
+                  cueId: 'cue',
+                  consumerCatId: 'sonnet',
+                  sourceAnchor: 'F321',
+                  sourceRevision: 'r1',
+                  resolverFamily: 'project_knowledge',
+                  status: 'presented_unreported',
+                  presentedAt: 1,
+                },
+              ],
+            }),
+          );
+        if (path.includes('thread-one') && ++historyReads > 1)
+          return new Promise((resolve) => {
+            finishView = resolve;
+          });
+        return new Response(JSON.stringify({ events: [], sourceViews: [], cueInvocationIds: [] }));
+      }),
+    );
     await act(async () => root.render(<Probe />));
     expect(container.textContent).toContain('正在读取标题');
     await act(async () => useChatStore.setState({ currentThreadId: 'thread-two', messages: [] }));
@@ -373,26 +397,28 @@ describe('F321 scoped recall reads', () => {
   });
   it('retains cue-only history when the supplemental read fails', async () => {
     let reads = 0;
-    api.mockImplementation(async (path) => {
-      if (path.includes('memory-cues'))
-        return new Response(
-          JSON.stringify({
-            cues: [
-              {
-                cueId: 'cue',
-                consumerCatId: 'sonnet',
-                sourceAnchor: 'F321',
-                sourceRevision: 'r1',
-                resolverFamily: 'project_knowledge',
-                status: 'presented_unreported',
-                presentedAt: 1,
-              },
-            ],
-          }),
-        );
-      if (++reads > 1) return new Response('{}', { status: 503 });
-      return new Response(JSON.stringify({ events: [], cueInvocationIds: ['inv-old'], sourceViews: [] }));
-    });
+    api.mockImplementation(
+      withCueBatchFixture(async (path) => {
+        if (path.includes('memory-cues'))
+          return new Response(
+            JSON.stringify({
+              cues: [
+                {
+                  cueId: 'cue',
+                  consumerCatId: 'sonnet',
+                  sourceAnchor: 'F321',
+                  sourceRevision: 'r1',
+                  resolverFamily: 'project_knowledge',
+                  status: 'presented_unreported',
+                  presentedAt: 1,
+                },
+              ],
+            }),
+          );
+        if (++reads > 1) return new Response('{}', { status: 503 });
+        return new Response(JSON.stringify({ events: [], cueInvocationIds: ['inv-old'], sourceViews: [] }));
+      }),
+    );
     await act(async () => root.render(<Probe />));
     expect(container.textContent).toContain('暂时读不到标题');
     expect(container.firstElementChild?.getAttribute('data-retained-history')).toBe('true');
@@ -400,106 +426,110 @@ describe('F321 scoped recall reads', () => {
   });
   it('uses the A1 invocation cue producer and keeps presented-only status', async () => {
     api.mockImplementation(
-      async (path) =>
-        new Response(
-          JSON.stringify(
-            path.includes('memory-cues')
-              ? {
-                  cues: [
-                    {
-                      cueId: 'cue',
-                      consumerCatId: 'sonnet',
-                      sourceAnchor: 'taste-one',
-                      sourceRevision: 'r1',
-                      resolverFamily: 'taste',
-                      status: 'presented_unreported',
-                      presentedAt: 3,
-                    },
-                  ],
-                }
-              : {
-                  cueInvocationIds: ['inv'],
-                  sourceViews: [
-                    {
-                      anchor: 'taste-one',
-                      invocationId: 'inv',
-                      cueId: 'cue',
-                      sourceRevision: 'r1',
-                      title: '提到 ELI5 时先讲直觉',
-                      kind: 'taste',
-                      href: null,
-                    },
-                  ],
-                  events: [{ id: 'search', invocationId: 'inv', catId: 'sonnet', query: 'F321', timestamp: 1 }],
-                },
+      withCueBatchFixture(
+        async (path) =>
+          new Response(
+            JSON.stringify(
+              path.includes('memory-cues')
+                ? {
+                    cues: [
+                      {
+                        cueId: 'cue',
+                        consumerCatId: 'sonnet',
+                        sourceAnchor: 'taste-one',
+                        sourceRevision: 'r1',
+                        resolverFamily: 'taste',
+                        status: 'presented_unreported',
+                        presentedAt: 3,
+                      },
+                    ],
+                  }
+                : {
+                    cueInvocationIds: ['inv'],
+                    sourceViews: [
+                      {
+                        anchor: 'taste-one',
+                        invocationId: 'inv',
+                        cueId: 'cue',
+                        sourceRevision: 'r1',
+                        title: '提到 ELI5 时先讲直觉',
+                        kind: 'taste',
+                        href: null,
+                      },
+                    ],
+                    events: [{ id: 'search', invocationId: 'inv', catId: 'sonnet', query: 'F321', timestamp: 1 }],
+                  },
+            ),
           ),
-        ),
+      ),
     );
     await act(async () => root.render(<Probe />));
     expect(container.textContent).toContain('ready|F321,提到 ELI5 时先讲直觉|cue-ok');
-    expect(api.mock.calls.some(([path]) => path === '/api/threads/thread-one/invocations/inv/memory-cues')).toBe(true);
+    expect(requestedCueIds(api.mock.calls)).toContain('inv');
   });
   it('does not substitute a different cue revision or invocation with the same anchor', async () => {
     api.mockImplementation(
-      async (path) =>
-        new Response(
-          JSON.stringify(
-            path.includes('memory-cues')
-              ? {
-                  cues: [
-                    {
-                      cueId: 'first',
-                      consumerCatId: 'sonnet',
-                      sourceAnchor: 'same',
-                      sourceRevision: 'r1',
-                      resolverFamily: 'taste',
-                      status: 'presented_unreported',
-                      presentedAt: 1,
-                    },
-                    {
-                      cueId: 'second',
-                      consumerCatId: 'sonnet',
-                      sourceAnchor: 'same',
-                      sourceRevision: 'r2',
-                      resolverFamily: 'taste',
-                      status: 'presented_unreported',
-                      presentedAt: 2,
-                    },
-                  ],
-                }
-              : {
-                  events: [],
-                  cueInvocationIds: ['inv'],
-                  sourceViews: [
-                    {
-                      anchor: 'same',
-                      invocationId: 'inv',
-                      cueId: 'first',
-                      sourceRevision: 'r1',
-                      title: '递送时的品味',
-                      href: null,
-                    },
-                    {
-                      anchor: 'same',
-                      invocationId: 'inv',
-                      cueId: 'second',
-                      sourceRevision: 'r2',
-                      titleStatus: 'unavailable',
-                      href: null,
-                    },
-                    {
-                      anchor: 'same',
-                      invocationId: 'other',
-                      cueId: 'second',
-                      sourceRevision: 'r2',
-                      title: '其他调用的标题',
-                      href: null,
-                    },
-                    { anchor: 'same', title: '当前索引的标题', href: '/wrong' },
-                  ],
-                },
+      withCueBatchFixture(
+        async (path) =>
+          new Response(
+            JSON.stringify(
+              path.includes('memory-cues')
+                ? {
+                    cues: [
+                      {
+                        cueId: 'first',
+                        consumerCatId: 'sonnet',
+                        sourceAnchor: 'same',
+                        sourceRevision: 'r1',
+                        resolverFamily: 'taste',
+                        status: 'presented_unreported',
+                        presentedAt: 1,
+                      },
+                      {
+                        cueId: 'second',
+                        consumerCatId: 'sonnet',
+                        sourceAnchor: 'same',
+                        sourceRevision: 'r2',
+                        resolverFamily: 'taste',
+                        status: 'presented_unreported',
+                        presentedAt: 2,
+                      },
+                    ],
+                  }
+                : {
+                    events: [],
+                    cueInvocationIds: ['inv'],
+                    sourceViews: [
+                      {
+                        anchor: 'same',
+                        invocationId: 'inv',
+                        cueId: 'first',
+                        sourceRevision: 'r1',
+                        title: '递送时的品味',
+                        href: null,
+                      },
+                      {
+                        anchor: 'same',
+                        invocationId: 'inv',
+                        cueId: 'second',
+                        sourceRevision: 'r2',
+                        titleStatus: 'unavailable',
+                        href: null,
+                      },
+                      {
+                        anchor: 'same',
+                        invocationId: 'other',
+                        cueId: 'second',
+                        sourceRevision: 'r2',
+                        title: '其他调用的标题',
+                        href: null,
+                      },
+                      { anchor: 'same', title: '当前索引的标题', href: '/wrong' },
+                    ],
+                  },
+            ),
           ),
-        ),
+      ),
     );
     await act(async () => root.render(<Probe />));
     expect(container.textContent).toBe('ready|递送时的品味,品味 · 暂时读不到标题|cue-ok');
@@ -509,41 +539,43 @@ describe('F321 scoped recall reads', () => {
     'source_forgotten',
   ] as const)('keeps owner source invalidation visible through cue hydration (%s)', async (sourceUnavailableReason) => {
     api.mockImplementation(
-      async (path) =>
-        new Response(
-          JSON.stringify(
-            path.includes('memory-cues')
-              ? {
-                  cues: [
-                    {
-                      cueId: 'profile',
-                      consumerCatId: 'sonnet',
-                      sourceAnchor: 'profile:primer:ragdoll:sonnet',
-                      sourceRevision: 'original-revision',
-                      resolverFamily: 'profile',
-                      status: 'presented_unreported',
-                      presentedAt: 1,
-                    },
-                  ],
-                }
-              : {
-                  events: [],
-                  cueInvocationIds: ['inv'],
-                  sourceViews: [
-                    {
-                      anchor: 'profile:primer:ragdoll:sonnet',
-                      invocationId: 'inv',
-                      cueId: 'profile',
-                      sourceRevision: 'original-revision',
-                      kind: 'profile',
-                      titleStatus: 'unavailable',
-                      href: null,
-                      sourceUnavailableReason,
-                    },
-                  ],
-                },
+      withCueBatchFixture(
+        async (path) =>
+          new Response(
+            JSON.stringify(
+              path.includes('memory-cues')
+                ? {
+                    cues: [
+                      {
+                        cueId: 'profile',
+                        consumerCatId: 'sonnet',
+                        sourceAnchor: 'profile:primer:ragdoll:sonnet',
+                        sourceRevision: 'original-revision',
+                        resolverFamily: 'profile',
+                        status: 'presented_unreported',
+                        presentedAt: 1,
+                      },
+                    ],
+                  }
+                : {
+                    events: [],
+                    cueInvocationIds: ['inv'],
+                    sourceViews: [
+                      {
+                        anchor: 'profile:primer:ragdoll:sonnet',
+                        invocationId: 'inv',
+                        cueId: 'profile',
+                        sourceRevision: 'original-revision',
+                        kind: 'profile',
+                        titleStatus: 'unavailable',
+                        href: null,
+                        sourceUnavailableReason,
+                      },
+                    ],
+                  },
+            ),
           ),
-        ),
+      ),
     );
     function ProfileSourceProbe() {
       const event = useThreadRecall().events[0];
@@ -556,7 +588,7 @@ describe('F321 scoped recall reads', () => {
     }
     await act(async () => root.render(<ProfileSourceProbe />));
     expect(container.textContent).toBe(
-      sourceUnavailableReason === 'source_corrected' ? '画像 · 来源已更正' : '画像 · 来源已遗忘',
+      sourceUnavailableReason === 'source_corrected' ? '画像 · 已更正' : '画像 · 已忘掉',
     );
     expect(container.querySelector('span')?.getAttribute('data-revision')).toBe('original-revision');
     expect(container.querySelector('span')?.getAttribute('data-href')).toBe('');

@@ -1,150 +1,91 @@
-/**
- * F232: Fetch the aggregated artifacts of a thread (images / files / code·PR / audio).
- * Backs the ArtifactsPanel right-drawer. Mirrors useGovernanceStatus's
- * AbortController + apiFetch + refetch shape.
- */
+'use client';
 
-import { projectThreadWorks, type ThreadArtifactDTO, type ThreadArtifactsResponse } from '@cat-cafe/shared';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useSyncExternalStore } from 'react';
 import { useChatStore } from '../stores/chatStore';
-import { apiFetch } from '../utils/api-client';
+import { apiSessionIdentity } from '../utils/api-session-identity';
+import { threadArtifactsEntry } from './thread-artifacts-store';
 import { selectThreadMessagesRaw, useThreadLiveness } from './useThreadScopedSelectors';
 
-const EMPTY_ARTIFACTS: ThreadArtifactDTO[] = [];
+export type WorksSourceChange = { reason: 'material' | 'activity' | 'access' };
 
-async function fetchArtifacts(tid: string, signal: AbortSignal, view?: 'works'): Promise<ThreadArtifactsResponse> {
-  const res = await apiFetch(`/api/threads/${encodeURIComponent(tid)}/artifacts${view ? '?view=works' : ''}`, {
-    signal,
-  });
-  if (!res.ok) throw new Error(`artifacts fetch failed: ${res.status}`);
-  const body = await res.json();
-  if (view && (body.view !== 'works' || !Array.isArray(body.artifacts))) throw new Error('Works view unavailable');
-  return { ...body, artifacts: Array.isArray(body.artifacts) ? body.artifacts : [] };
+/** Validate the socket-event boundary once; coordinates are optional even for explicit revocation. */
+export function worksSourceInvalidation(event: Event) {
+  const raw: unknown = (event as CustomEvent<unknown>).detail;
+  const detail = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {};
+  const ownerUserId = typeof detail.ownerUserId === 'string' ? detail.ownerUserId : undefined;
+  const currentOwner = apiSessionIdentity.getSnapshot().ownerUserId;
+  if (ownerUserId && currentOwner && ownerUserId !== currentOwner) return null;
+  const reason: WorksSourceChange['reason'] =
+    detail.reason === 'access_revoked' ? 'access' : detail.reason === 'works_changed' ? 'material' : 'activity';
+  return { reason, threadId: typeof detail.threadId === 'string' ? detail.threadId : undefined };
 }
 
-interface UseThreadArtifactsResult {
-  artifacts: ThreadArtifactDTO[];
-  loading: boolean;
-  error: boolean;
-  refetch: () => void;
-  works: ThreadArtifactDTO[];
-  total: number | null;
-  complete: boolean;
-}
-
-function sourceCoverage(result: ThreadArtifactsResponse, view?: 'works') {
-  const validTotal = Number.isSafeInteger(result.total) && (result.total ?? -1) >= 0;
-  return {
-    total: validTotal ? (result.total ?? null) : view ? null : result.artifacts.length,
-    complete: view ? result.complete === true && result.workLineage === 'resolved' && validTotal : true,
-    lineageResolved: result.workLineage === 'resolved',
-  };
-}
-
-/** Refresh original source projections on material/completion and owner changes, never streamed text tokens. */
-export function useWorksSourceRefresh(threadId: string | undefined, enabled: boolean, refetch: () => void) {
-  // Display ordering can also change with the activity clock before lifecycle hydration.
+/** Thread readers may revalidate on completion; global catalogues distinguish material from ordinary activity. */
+export function useWorksSourceRefresh(
+  threadId: string | undefined,
+  enabled: boolean,
+  refetch: (change: WorksSourceChange) => void,
+  scopeToThread = true,
+) {
   const messages = useChatStore((state) => selectThreadMessagesRaw(state, enabled ? (threadId ?? null) : null));
   const { hasActive } = useThreadLiveness(enabled ? (threadId ?? null) : null);
   const materialKey = useMemo(
     () =>
-      JSON.stringify([
-        hasActive,
-        messages.map((message) => [
-          message.id,
-          // Stream activity advances timestamp on every token; it does not change works.
-          message.isStreaming,
-          message.extra?.rich,
-          message.contentBlocks?.filter((block) => block.type !== 'text'),
-        ]),
-      ]),
-    [messages, hasActive],
+      JSON.stringify(
+        messages
+          .flatMap((message) => {
+            const blocks = message.extra?.rich?.blocks?.filter(
+              (block) =>
+                ['media_gallery', 'file', 'diff', 'audio', 'html_widget'].includes(block.kind) ||
+                (block.kind === 'card' && block.meta?.kind === 'work_reference'),
+            );
+            const content = message.contentBlocks?.filter((block) => block.type === 'image' || block.type === 'file');
+            return blocks?.length || content?.length ? [[message.id, blocks, content]] : [];
+          })
+          .sort((left, right) => String(left[0]).localeCompare(String(right[0]))),
+      ),
+    [messages],
   );
-  const previous = useRef({ threadId, materialKey, enabled });
+  const previous = useRef({ threadId, materialKey, enabled, hasActive });
   useEffect(() => {
-    const changed =
-      previous.current.enabled &&
-      previous.current.threadId === threadId &&
-      previous.current.materialKey !== materialKey;
-    previous.current = { threadId, materialKey, enabled };
-    if (enabled && changed) refetch();
-  }, [enabled, materialKey, threadId, refetch]);
+    const before = previous.current;
+    previous.current = { threadId, materialKey, enabled, hasActive };
+    if (
+      enabled &&
+      before.enabled &&
+      before.threadId === threadId &&
+      (before.materialKey !== materialKey || (before.hasActive && !hasActive))
+    )
+      refetch({ reason: before.materialKey !== materialKey ? 'material' : 'activity' });
+  }, [enabled, materialKey, threadId, refetch, hasActive]);
   useEffect(() => {
     if (!enabled) return;
-    window.addEventListener('cat-cafe:entrusted-work-projection-invalidated', refetch);
-    return () => window.removeEventListener('cat-cafe:entrusted-work-projection-invalidated', refetch);
-  }, [enabled, refetch]);
+    const changed = (event: Event) => {
+      const change = worksSourceInvalidation(event);
+      if (!change || (scopeToThread && threadId && change.threadId && change.threadId !== threadId)) return;
+      refetch(change);
+    };
+    window.addEventListener('cat-cafe:entrusted-work-projection-invalidated', changed);
+    return () => {
+      window.removeEventListener('cat-cafe:entrusted-work-projection-invalidated', changed);
+    };
+  }, [enabled, threadId, refetch, scopeToThread]);
 }
 
-export function useThreadArtifacts(threadId: string | undefined, view?: 'works'): UseThreadArtifactsResult {
-  const scope = JSON.stringify([threadId, view]);
-  const [resolvedScope, setResolvedScope] = useState<string | null>(null);
-  const [artifacts, setArtifacts] = useState<ThreadArtifactDTO[]>([]);
-  const [loading, setLoading] = useState(Boolean(threadId));
-  const [error, setError] = useState(false);
-  const [coverage, setCoverage] = useState<{ total: number | null; complete: boolean; lineageResolved: boolean }>({
-    total: null,
-    complete: false,
-    lineageResolved: false,
-  });
-  const viewRef = useRef(view);
-  viewRef.current = view;
-  const threadIdRef = useRef(threadId);
-  threadIdRef.current = threadId;
-  const abortRef = useRef<AbortController | null>(null);
-
-  const refetch = useCallback(async () => {
-    abortRef.current?.abort();
-    const ac = new AbortController();
-    abortRef.current = ac;
-
-    const tid = threadIdRef.current;
-    if (!tid) {
-      setResolvedScope(null);
-      setArtifacts([]);
-      setLoading(false);
-      return;
-    }
-    setLoading(true);
-    setError(false);
-    const requestedView = viewRef.current;
-    try {
-      const result = await fetchArtifacts(tid, ac.signal, requestedView);
-      if (!ac.signal.aborted) {
-        setArtifacts(result.artifacts);
-        setCoverage(sourceCoverage(result, requestedView));
-        setResolvedScope(JSON.stringify([tid, requestedView]));
-      }
-    } catch (err: unknown) {
-      if (ac.signal.aborted || (err instanceof DOMException && err.name === 'AbortError')) return;
-      setError(true);
-      setResolvedScope(null);
-      setArtifacts([]);
-    } finally {
-      if (!ac.signal.aborted) setLoading(false);
-    }
-  }, []); // stable — reads threadId from ref
-
-  // biome-ignore lint/correctness/useExhaustiveDependencies: threadId triggers refetch
-  useEffect(() => {
-    refetch();
-    return () => abortRef.current?.abort();
-  }, [threadId, view, refetch]);
-
-  useWorksSourceRefresh(threadId, view === 'works', refetch);
-
-  const works = useMemo(
-    () => projectThreadWorks(artifacts, coverage.lineageResolved),
-    [artifacts, coverage.lineageResolved],
+export function useThreadArtifacts(threadId: string | undefined, view?: 'works', active = true) {
+  const scopeThreadId = view === 'works' && threadId === 'default' ? undefined : threadId;
+  const identity = useSyncExternalStore(
+    apiSessionIdentity.subscribe,
+    apiSessionIdentity.getSnapshot,
+    apiSessionIdentity.getSnapshot,
   );
-  const sameScope = resolvedScope === scope;
-  return {
-    artifacts: sameScope ? artifacts : EMPTY_ARTIFACTS,
-    loading: loading || (Boolean(threadId) && !sameScope && !error),
-    error,
-    refetch,
-    works: sameScope ? works : EMPTY_ARTIFACTS,
-    total: sameScope ? coverage.total : null,
-    complete: sameScope && coverage.complete,
-  };
+  const key = JSON.stringify([identity.ownerUserId, identity.generation, scopeThreadId, view]);
+  const entry = useMemo(() => threadArtifactsEntry(key, scopeThreadId, view), [key, scopeThreadId, view]);
+  const subscribe = useCallback((listener: () => void) => entry.subscribe(listener, active), [entry, active]);
+  const snapshot = useSyncExternalStore(subscribe, entry.getSnapshot, entry.getSnapshot);
+  const refetch = useCallback(() => {
+    if (active) entry.refetch();
+  }, [active, entry]);
+  useWorksSourceRefresh(scopeThreadId, active && view === 'works', refetch);
+  return { ...snapshot, loading: active && snapshot.loading, refetch };
 }

@@ -19,6 +19,10 @@ import { settleExpiredNamedAlphaLease } from './preview-expired-lease-settlement
 import { ordinaryRetirementCandidate, retireUnclaimedOrdinaryRegistration } from './preview-ordinary-retirement.mjs';
 import { withPreviewMutationLock } from './preview-process-mutex.mjs';
 import { processGroupExists, waitForPort, waitForProcessGroupExit } from './preview-process-runtime.mjs';
+import {
+  retireStandardAlphaRegistration,
+  standardAlphaRetirementCandidate,
+} from './preview-standard-alpha-retirement.mjs';
 import { retireUnclaimedAlphaRegistration } from './preview-unclaimed-registration.mjs';
 
 // The runner owns a 30-second drain and a one-second force window. Its caller
@@ -91,14 +95,19 @@ async function stopWithCompletion(config, record) {
   const completion = readPreviewCompletion(record);
   const explicitCleanup =
     completion?.version === 2 && completion.cleanupOwnerStatus === 'complete' && completion.cleanupExitCode === 0;
-  const unclaimed = ordinaryRetirementCandidate(config, record, completion);
+  const retireable =
+    ordinaryRetirementCandidate(config, record, completion) ||
+    standardAlphaRetirementCandidate(config, record, completion);
   if (
     runnerIsActive(config, record) ||
     !completion ||
     (completion.version !== undefined && completion.version !== 2) ||
-    (completion.cleanupOwnerStatus === 'unclaimed' && !unclaimed) ||
-    (completion.exitCode !== 0 && !explicitCleanup && !unclaimed) ||
-    (completion.version === 2 && completion.cleanupExitCode !== null && !explicitCleanup) ||
+    (completion.cleanupOwnerStatus === 'unclaimed' && !retireable) ||
+    (completion.exitCode !== 0 && !explicitCleanup && !retireable) ||
+    (completion.version === 2 &&
+      completion.cleanupExitCode !== null &&
+      !explicitCleanup &&
+      !standardAlphaRetirementCandidate(config, record, completion)) ||
     completion.forced
   ) {
     throw new Error(`preview cleanup incomplete or failed; state retained at ${config.recordPath}`);
@@ -173,7 +182,12 @@ async function stopLocked(config, result, { recovery } = {}) {
     const retired = await retireUnclaimedOrdinaryRegistration(config, record, recovery);
     return releaseRegistration(config, record, retired.record, retired.summary, retired.assertReadyToRelease);
   };
+  const finishStandardAlpha = async () => {
+    const retired = await retireStandardAlphaRegistration(config, record, recovery);
+    return releaseRegistration(config, record, retired.record, retired.summary, retired.assertReadyToRelease);
+  };
   if (ordinaryRetirementCandidate(config, record, completion)) return finishOrdinary();
+  if (standardAlphaRetirementCandidate(config, record, completion)) return finishStandardAlpha();
   if (completion?.cleanupOwnerStatus === 'unclaimed' && record.command?.includes('--instance'))
     return retireUnclaimedAlphaRegistration(config, record, recovery ?? {}, (retired) =>
       releaseRegistration(config, record, retired.record, retired.summary, retired.assertReadyToRelease),
@@ -187,6 +201,7 @@ async function stopLocked(config, result, { recovery } = {}) {
   } else if (record.completionPath) {
     const completed = await stopWithCompletion(config, record);
     if (ordinaryRetirementCandidate(config, record, completed)) return finishOrdinary();
+    if (standardAlphaRetirementCandidate(config, record, completed)) return finishStandardAlpha();
     if (completed.exitCode !== 0) {
       if (record.command?.includes('--instance')) await finishFailed();
       else {

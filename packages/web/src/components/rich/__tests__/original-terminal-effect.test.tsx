@@ -8,12 +8,14 @@ import { createApprovalSessions } from '@/components/shell/mailbox/approval-sess
 import { RetainedResult } from '@/components/shell/mailbox/RetainedResults';
 import { writeShellLanguage } from '@/components/shell/shell-language';
 import { apiFetch } from '@/utils/api-client';
+import { observeApiSessionOwner } from '@/utils/api-session-identity';
 import { HandoffResultRow } from '../HandoffResultRow';
 import { ProfileUpdateResult } from '../ProfileUpdateCardContent';
 
 vi.mock('@/utils/api-client', () => ({ apiFetch: vi.fn() }));
 let root: Root, container: HTMLDivElement;
 beforeEach(() => {
+  observeApiSessionOwner('owner-1');
   vi.stubGlobal('React', React);
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
   container = document.createElement('div');

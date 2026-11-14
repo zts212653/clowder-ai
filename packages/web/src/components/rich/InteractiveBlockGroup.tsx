@@ -3,24 +3,11 @@
 import { useCallback, useState } from 'react';
 import type { RichInteractiveBlock } from '@/stores/chat-types';
 import { useChatStore } from '@/stores/chatStore';
-import { apiFetch } from '@/utils/api-client';
-import { getUserId } from '@/utils/userId';
 import { buildSelectionMessage, InteractiveBlock } from './InteractiveBlock';
+import { dispatchInteractiveSend, patchBlockState } from './interactive-block-client';
 import { RichBlockSelectionFrame } from './RichBlockSelectionFrame';
 
 // ── Helpers ─────────────────────────────────────────────────
-
-function patchBlockState(messageId: string, blockId: string, patch: { disabled?: boolean; selectedIds?: string[] }) {
-  return apiFetch(`/api/messages/${messageId}/block-state`, {
-    method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ userId: getUserId(), blockId, ...patch }),
-  });
-}
-
-function dispatchInteractiveSend(text: string, sendContext?: string) {
-  window.dispatchEvent(new CustomEvent('cat-cafe:interactive-send', { detail: { text, sendContext } }));
-}
 
 // ── Pure function (exported for testing) ────────────────────
 
@@ -64,8 +51,12 @@ export function InteractiveBlockGroup({
   messageId?: string;
   sendContext?: string;
 }) {
-  const allDisabled = blocks.every((b) => b.disabled);
-  const [submitted, setSubmitted] = useState(allDisabled);
+  // Codex groups send one combined answer: any saved sibling proves that send was accepted.
+  const savedSubmission = blocks[0]?.groupId?.startsWith('codex-async-question-')
+    ? blocks.some((block) => block.disabled)
+    : blocks.every((block) => block.disabled);
+  const [locallySubmitted, setSubmitted] = useState(savedSubmission);
+  const submitted = locallySubmitted || savedSubmission;
   const [selections, setSelections] = useState<Map<string, string[]>>(() => {
     const init = new Map<string, string[]>();
     for (const b of blocks) {
@@ -107,20 +98,24 @@ export function InteractiveBlockGroup({
     return true;
   });
 
-  const handleGroupSubmit = useCallback(() => {
+  const handleGroupSubmit = useCallback(async () => {
     if (!allSelected || submitted) return;
     setSubmitted(true);
 
     // Build and send combined message
     const text = buildGroupMessage(blocks, selections, customTexts);
-    dispatchInteractiveSend(text, sendContext);
+    if (!(await dispatchInteractiveSend(text, sendContext))) {
+      setSubmitted(false);
+      return;
+    }
 
     // Persist each block
     if (messageId) {
+      // Each PATCH writes the whole message extra; serialize siblings to retain earlier answers.
       for (const block of blocks) {
         const optionIds = selections.get(block.id) ?? [];
         useChatStore.getState().updateRichBlock(messageId, block.id, { disabled: true, selectedIds: optionIds });
-        patchBlockState(messageId, block.id, { disabled: true, selectedIds: optionIds }).catch(() => {});
+        await patchBlockState(messageId, block.id, { disabled: true, selectedIds: optionIds });
       }
     }
   }, [allSelected, submitted, blocks, selections, customTexts, messageId, sendContext]);
@@ -136,7 +131,9 @@ export function InteractiveBlockGroup({
             onPendingChange={(ids) => handlePendingChange(block.id, ids)}
             onCustomTextChange={(text) => handleCustomTextChange(block.id, text)}
             groupDisabled={submitted}
-            groupSelectedIds={submitted ? selections.get(block.id) : undefined}
+            groupSelectedIds={
+              submitted ? (block.selectedIds?.length ? block.selectedIds : selections.get(block.id)) : undefined
+            }
             sendContext={sendContext}
           />
         </RichBlockSelectionFrame>

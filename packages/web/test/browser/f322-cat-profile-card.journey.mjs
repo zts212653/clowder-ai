@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
 import { mkdir, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { loadReadbackCapture } from '../fixtures/f322-readback-public-projection.mjs';
 import { THREAD_ID } from './f307-real-surface-fixtures.mjs';
@@ -113,7 +114,10 @@ export async function runCatProfileCardJourney(browser, out) {
         });
         await page.route('**/card-avatars/*.png', async (route) => {
           const name = new URL(route.request().url()).pathname.split('/').pop();
-          const source = path.join(process.env.CAT_CARD_AVATAR_DIR ?? '/tmp/cat-profile-card-proof', name);
+          const source = path.join(
+            process.env.CAT_CARD_AVATAR_DIR ?? path.join(tmpdir(), 'cat-profile-card-proof'),
+            name,
+          );
           const fallback = path.resolve('public/avatars/default.png');
           await route.fulfill({ contentType: 'image/png', body: readFileSync(existsSync(source) ? source : fallback) });
         });

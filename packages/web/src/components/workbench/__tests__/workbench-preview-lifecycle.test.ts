@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import { afterEach, expect, it } from 'vitest';
 import { createMessagePublicationSurface } from '../message-publication-surface';
 import { createPublicationSurface } from '../publication-surface';

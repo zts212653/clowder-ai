@@ -21,15 +21,15 @@
 | `guide-authoring` | 编排场景引导 YAML / registry / 标签契约 | — |
 | `guide-interaction` | 判断是否需要交互引导，并按 Guide Matched/Pending/Active 等状态驱动回复 | — |
 | `custody-recognition` | 普通对话中的明确托付/隐式未来义务/原消息澄清重试分流 | — |
-| `collaborative-thinking` | brainstorm/多猫讨论/收敛 | — |
+| `collaborative-thinking` | brainstorm/多猫讨论（含「专家辩论」）/收敛 | — |
 | `plain-language` | 向未跟进的人讲清工作、取舍与结果；按用途选文字、图、HTML、口播、视频或原型 | — |
 | `learning-companion` | 围绕材料共读/听读、观点挑战、共同发散与按需同步学习稿 | — |
-| `expert-panel` | 专家辩论团/竞品分析/技术趋势/showcase | — |
 | `writing-plans` | 写实施计划 | ① impl |
 | `co-creation-docs` | 共创型 docs-only 落盘：按冲突/治理/可逆性选择 direct push 或 PR | — |
 | `worktree` | 创建隔离开发环境 | ① impl |
 | `tdd` | 写测试+实现（红绿重构） | ① impl |
 | `code-as-harness` | 重复摩擦/陌生任务→搜证据→诊断→代码修/建 harness | — |
+| `paw-feel-daily` | 每天把昨天的爪感差按该谁修分类、合并成问题，挑 0–3 个派修 | — |
 | `debugging` | 遇到 bug（系统化定位） | — |
 | `quality-gate` | 开发完了自检（愿景+spec+验证） | ② |
 | `fresh-context-review` | *（可选）* Author-triggered pre-review scan（finding generator, not approval） | ②½ |

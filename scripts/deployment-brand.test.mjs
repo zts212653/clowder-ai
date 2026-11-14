@@ -156,6 +156,10 @@ test(
       'scripts/lib/intake-mechanical.mjs',
       'scripts/lib/daily-public-sync-pr.mjs',
       'scripts/lib/daily-public-sync-git.mjs',
+      'scripts/lib/daily-publisher-identity.mjs',
+      'scripts/lib/sync-git-remote-read.mjs',
+      'scripts/lib/sync-git-remote-read.sh',
+      'scripts/test-bash-runtime.mjs',
     ]);
     const intake = await import(pathToFileURL(join(root, 'scripts/lib/intake-github.mjs')));
     assert.equal(intake.HOME_REPO, 'synthetic-owner/home');

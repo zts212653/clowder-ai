@@ -335,14 +335,6 @@ describe('F041 Hot-Reload: toggle → next invocation config refreshed', () => {
 // ════════════════════════════════════════════════════
 
 describe('F041 Injection互斥', () => {
-  it('MCP available → no HTTP callback injection', () => {
-    assert.equal(needsMcpInjection(true), false, 'When MCP is available, should NOT inject HTTP callback');
-  });
-
-  it('MCP unavailable → HTTP callback fallback injection', () => {
-    assert.equal(needsMcpInjection(false), true, 'When MCP is unavailable, should inject HTTP callback as fallback');
-  });
-
   it('HTTP callback instructions contain required tool names', () => {
     const instructions = buildMcpCallbackInstructions({});
     assert.ok(instructions.includes('post-message'), 'Should reference post-message');

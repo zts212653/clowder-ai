@@ -26,6 +26,15 @@ export type PersistentProjectPathResult =
   | { ok: true; path: string; remappedFrom?: string }
   | { ok: false; reason: PersistentProjectPathFailureReason; message?: string };
 
+const projectSelectionErrors = {
+  runtime_read_only:
+    'The runtime directory is read-only here. Choose another directory to bind a project or create a folder.',
+  configuration_unknown:
+    'Project operations are unavailable because the runtime or workspace directory configuration is invalid.',
+} as const;
+
+type ProjectSelectionRestriction = keyof typeof projectSelectionErrors;
+
 export type ExternalProjectPathResult =
   | { ok: true; path: string }
   | {
@@ -67,6 +76,31 @@ async function resolveInternalDirectoryPath(
     const message = err instanceof Error ? err.message : undefined;
     return { ok: false, reason: ['ENOENT', 'ENOTDIR'].includes(code ?? '') ? 'not_found' : 'io_error', message };
   }
+}
+
+/** Classify an already validated real directory for a new selection, without migrating it. */
+export async function classifyProjectSelection(path: string): Promise<ProjectSelectionRestriction | undefined> {
+  const runtimeRoot = process.env.CAT_CAFE_RUNTIME_ROOT;
+  if (!runtimeRoot) return undefined;
+  const runtime = await resolveInternalDirectoryPath(runtimeRoot, {});
+  if (!runtime.ok) return 'configuration_unknown';
+  if (!isPathUnderRoots(path, [runtime.path])) return undefined;
+
+  const workspaceRoot = process.env.CAT_CAFE_WORKSPACE_ROOT;
+  if (!workspaceRoot) return 'configuration_unknown';
+  const workspace = await resolveInternalDirectoryPath(workspaceRoot, {});
+  if (!workspace.ok) return 'configuration_unknown';
+  return runtime.path === workspace.path ? undefined : 'runtime_read_only';
+}
+
+export async function validateNewProjectPath(
+  rawPath: string,
+  invalidPathMessage = 'Invalid projectPath: must be an existing directory under allowed roots',
+): Promise<{ ok: true; path: string } | { ok: false; error: string; restriction?: ProjectSelectionRestriction }> {
+  const target = await validateProjectPathDetailed(rawPath);
+  if (!target.ok) return { ok: false, error: invalidPathMessage };
+  const restriction = await classifyProjectSelection(target.path);
+  return restriction ? { ok: false, error: projectSelectionErrors[restriction], restriction } : target;
 }
 
 /** Map a runtime-root path to the same relative path in the workspace. */

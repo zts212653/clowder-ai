@@ -1,7 +1,20 @@
 import type { ContextAttachment, MessageContent } from '@cat-cafe/shared';
 import type { OwnerComposerDraft } from '@/stores/chat-types';
 import { apiFetch } from '@/utils/api-client';
+import type { SendAttempt } from '@/utils/send-attempt-db';
 import { loadOwnerComposerDraft } from '@/utils/true-recall';
+
+/** The same saved composer revision and payload, not text similarity between messages. */
+export function composerDraftIsTransferred(draft: OwnerComposerDraft, revision: number, attempt: SendAttempt) {
+  return (
+    attempt.status !== 'recalled' &&
+    attempt.composerDraftRevision === revision &&
+    draft.text.trim() === attempt.content &&
+    JSON.stringify(contextAttachmentsFromDraft(draft)) === JSON.stringify(attempt.contextAttachments ?? []) &&
+    draft.replyTo === attempt.replyTo &&
+    preservedBlocksFromDraft(draft).length === 0
+  );
+}
 
 export interface DurableDraftSnapshot {
   text: string;

@@ -5,7 +5,7 @@ topics: [development-process, intent-alignment, review, merge-gate, process-cost
 tips_exempt: "Renewed 2026-10-15: this delta records the internal F314-to-F311 coordination and evidence handoff. It adds no shipped user entry or runtime capability and establishes no efficacy verdict; future user-facing F311 delivery retains its own discovery requirement."
 doc_kind: spec
 created: 2026-09-02
-updated: 2026-11-02
+updated: 2026-11-05
 description: "让一项托付跨阶段持续做对，尽早交付真实可用结果，以充分且相称的验证减少等待，并让猫自主续办、少占用人的协调注意力。现有 anchor 实验是其中一个有界机制。"
 description_source: human
 description_author: codex-astra
@@ -14,7 +14,7 @@ description_updated_at: 2026-10-03T06:16:00-07:00
 
 # F314: Development Episode Alignment Experiment｜开发交付对齐自进化实验
 
-> **Status**: in-progress / Phase B accepted with recorded exceptions; operator B accepts insufficient anchor evidence; method #5788 and published history v10 delivered, content/map design accepted; overall acceptance open; cloud refactor brief ready, execution unconfirmed | **Owner**: 小星星·Maine Coon（@codex-astra, GPT-6 Astra；方向与整体结果） | **Execution**: 小太阳·Maine Coon（@codex-sol, GPT-5.6 Sol；原实验Task197；Task143 已完成）；18簇执行安排为云端Ragdoll（任务稿已备，接手待核） | **Priority**: P0
+> **Status**: in-progress / Phase B accepted with recorded exceptions; operator B accepts insufficient anchor evidence; method #5788 and published history v10 delivered, content/map design accepted; overall acceptance open; cloud rule-convergence batch (16 PRs) and related test cleanup/speed batch (6 PRs) merged | **Owner**: 小星星·Maine Coon（@codex-astra, GPT-6 Astra；方向与整体结果） | **Execution**: 小太阳·Maine Coon（@codex-sol, GPT-5.6 Sol；原实验Task197；Task143 已完成）；18簇由云端Ragdoll实现，家内Sol6.1独立核对后合入 | **Priority**: P0
 >
 > **operator kickoff**: `[thread-id]#private-source-id`——“这个项目可能可以特殊点实验项目；这个出生是我们建立的，但是后续优化迭代我们接入 F311 的自进化。”
 >
@@ -47,7 +47,7 @@ You 认定的痛点（本轮 449 引 1483；速度与结果原话见 1352）：
 
 ## Current State / 现状基线
 
-- **当前只到任务稿已备**：稿件已交You，尚无本轮已核到的云端接手、私有跟踪issue、基线或PR回执；公开#1729仅作社区问题入口，不冒充本批执行载体。本地不派工、不开始18簇实现；原Task613继续持结果整合，Task197的历史执行责任不被改名或转移。
+- **11-02当时只到任务稿已备**：稿件已交You，当时尚无已核到的云端接手、私有跟踪issue、基线或PR回执；11-03的实际执行与审合见上文。公开#1729仍只作社区入口；原Task613继续持结果整合，Task197的历史执行责任不被改名或转移。
 - **本批验收要求**：云端干净Linux上实做main安装/构建/测试及README新人启动基线；每个机制给修前修后和完整消费者证据；合入前原本通过的项目及从零启动不得退化。真实登录条件不足时说明停点，不把服务启动写成成员已回话。
 - **原边界保持**：云端只在私有仓交issue/分支/PR，不推main、不合PR、不写公开仓；隐私只用隔离合成数据，真实存量操作另授权；历史JSON/指纹字节不擅改，必要迁移只交方案。F330本轮next/main/v0.14.1交付与物理转组织分开，组织迁移仍暂缓；不据今天的状态纠正声称GitHub已迁移。方法采用/效用、operator B、原Program与F314整体验收边界均保持。
 
@@ -379,7 +379,7 @@ F100 reader与owner-loop接口分别由#4435/#4517合入并完成当时接口验
 | KD-7 | Phase B 由Maine Coon实现；PR-1 Terra review、PR-2 Opus 5 review | 把高成本架构猫用于边界判断，不用于常规编码；两张 PR 均由同一实现 owner 保持收敛 | 2026-09-02 |
 | KD-8 | PR-2 同时完成 soft-surface convergence，不另开 cleanup PR | operator 确认它属于原始 F314 scope；拆出 follow-up 会再次制造 scope 漂移与无人欠账 | 2026-09-03 |
 | KD-9 | operator B 接受本期 anchor 效果证据不足，解除成熟效用结论关闭前置 | 具体决策卡与原话见 Phase C 逐项 cvo_signoff；不把未达勾成已实现，不关闭其余原交付或 Program | 2026-10-05 |
-| KD-10 | 方法已发布；18簇改由云端Ragdoll执行安排，旧迁移等待解除 | 10-20 CVO1149的代码暂缓是历史决定；11-02 CVO979选择真重构并保干净机器/新人启动，1001纠正旧F330阻挡。稿件1002已交You，接手/开工未核；真实数据、历史字节及main/公开写入边界保持 | 2026-10-20 → 2026-11-02 |
+| KD-10 | 方法已发布；云端本轮规则处置已审合，保留未验边界 | 10-20暂缓已由11-02直接人类安排解除；11-03云端16规则PR及相关6测试PR经家内Sol6.1核对合入，见#6456。第2/7簇、真实隐私存量与方法效用按各自证据保留，不代签部署或Feature关闭 | 2026-10-20 → 2026-11-03 |
 
 ## Review Gate
 

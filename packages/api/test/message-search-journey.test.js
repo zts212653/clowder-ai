@@ -19,7 +19,6 @@ import {
 } from '../dist/domains/concierge/concierge-search-context.js';
 import { IndexBuilder } from '../dist/domains/memory/IndexBuilder.js';
 import { MessageSearchService } from '../dist/domains/memory/MessageSearchService.js';
-import { MessageQueryQualifier } from '../dist/domains/memory/message-query-qualifier.js';
 import { SqliteEvidenceStore } from '../dist/domains/memory/SqliteEvidenceStore.js';
 import { callbacksRoutes } from '../dist/routes/callbacks.js';
 import { evidenceRoutes } from '../dist/routes/evidence.js';
@@ -84,15 +83,18 @@ async function runMessageSearchJourney() {
     );
     for (const thread of threads) builder.markThreadDirty(thread.id);
     await builder.flushDirtyThreads();
+    let judgeCalls = 0;
     const service = new MessageSearchService({
       evidenceStore,
       messageStore,
       threadStore,
-      // Redis/index/reader continuity uses a deterministic qualified source;
-      // native judgment has its own real bounded validation window.
-      qualifier: new MessageQueryQualifier(async (batch) =>
-        JSON.stringify({ requestId: batch.requestId, rows: batch.rows.map((row) => [row.id, 'supported', row.body]) }),
-      ),
+      // A spy protects the ordinary no-judge contract; no provider is reachable.
+      qualifier: {
+        qualify() {
+          judgeCalls++;
+          throw new Error('Generative qualification is retired');
+        },
+      },
     });
     await app.register(evidenceRoutes, { evidenceStore, messageSearchService: service });
     await app.register(callbacksRoutes, {
@@ -139,12 +141,31 @@ async function runMessageSearchJourney() {
     assert.equal(cat.meta.scope, 'global');
     assert.equal(cat.meta.effectiveMode, 'lexical');
     assert.equal(cat.meta.freshness, 'unknown');
+    assert.equal(cat.meta.resultKind, 'sources');
+    assert.equal(cat.meta.qualification, undefined);
+    assert.equal(cat.meta.sort, 'relevance');
+    assert.equal(cat.meta.timeWindow, undefined);
+    assert.deepEqual(cat.results[0].matchEvidence, { kind: 'literal', terms: [query] });
     const humanResponse = await fetch(`${address}/api/evidence/search?q=${query}&resultUnit=message`, {
       headers: { 'x-cat-cafe-user': 'owner' },
     });
     assert.equal(humanResponse.status, 200);
     const human = await humanResponse.json();
+    assert.equal(human.meta.sort, 'relevance');
     assert.deepEqual(human.results, cat.results, 'same readable candidates for the shared query contract');
+    const explicitRelevance = JSON.parse(
+      (await handleSearchEvidence({ query, resultUnit: 'message', messageSort: 'relevance' })).content[0].text,
+    );
+    assert.deepEqual(explicitRelevance.results, cat.results, 'omission keeps the existing relevance ranking');
+    const explicitTime = JSON.parse(
+      (await handleSearchEvidence({ query, resultUnit: 'message', messageSort: 'time' })).content[0].text,
+    );
+    assert.equal(explicitTime.meta.sort, 'time');
+    assert.equal(explicitTime.meta.timeWindow.limit, 32);
+    assert.deepEqual(
+      explicitTime.results.map((hit) => hit.messageId),
+      ids,
+    );
     const boundedCatResult = await handleSearchEvidence({
       query,
       resultUnit: 'message',
@@ -162,6 +183,7 @@ async function runMessageSearchJourney() {
     const boundedHuman = await boundedHumanResponse.json();
     assert.equal(boundedCat.results.length, 1);
     assert.equal(boundedCat.meta.hasMore, true);
+    assert.equal(boundedCat.meta.sort, 'relevance');
     assert.deepEqual(boundedHuman.results, boundedCat.results);
     assert.equal(boundedHuman.meta.hasMore, true);
     const current = JSON.parse(
@@ -206,6 +228,8 @@ async function runMessageSearchJourney() {
       ids,
     );
     assert.deepEqual(concierge.messageSearch.results, cat.results);
+    assert.equal(concierge.messageSearch.meta.sort, 'relevance');
+    assert.match(concierge.contextString, /排序：按相关/);
     const marker = formatConciergeHandleBinding(concierge.handles[0].label, concierge.handles[0].anchor);
     const actions = extractConciergeActions(`[跳过去 ${marker}]`, concierge.handles);
     assert.equal(actions.length, 1, 'the real query projection reaches the existing navigation action consumer');
@@ -224,7 +248,7 @@ async function runMessageSearchJourney() {
         exactOriginalRead: true,
         sourceExcluded: !cat.results.some((hit) => hit.messageId === question.id),
         privateThreadExcluded: !cat.results.some((hit) => hit.threadId === privateThread.id),
-        providerLatency: 'unknown; no native provider, deterministic qualification control',
+        providerLatency: 'unknown; no generative judge or real embedding provider',
         liveUserHistory: false,
       }),
     );
@@ -279,6 +303,7 @@ async function runMessageSearchJourney() {
     await agentKeyRegistry.revoke(key.agentKeyId, 'isolated fixture cleanup');
     const revoked = await handleSearchEvidence({ query, resultUnit: 'message' });
     assert.equal(revoked.isError, true, 'revoked persistent key cannot query');
+    assert.equal(judgeCalls, 0, 'ordinary HTTP/MCP searches never start a generative qualifier');
   } finally {
     await app.close();
     evidenceStore.close();

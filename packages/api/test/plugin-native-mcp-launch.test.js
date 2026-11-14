@@ -54,6 +54,12 @@ test('native launch rejects inventory lifecycle and package drift from its activ
   };
   for (const mutate of [
     () => {
+      f.instance.runtimeState = 'crashed';
+    },
+    () => {
+      f.instance.runtimeState = 'stopped';
+    },
+    () => {
       f.instance.activationState = 'disabled';
     },
     () => {
@@ -79,6 +85,37 @@ test('native launch rejects inventory lifecycle and package drift from its activ
     mutate();
     await assert.rejects(f.router.resolveNativeMcpLaunch(policy()));
   }
+});
+
+test('runtime state gate preserves admitted non-terminal carrier readiness states', async (t) => {
+  const f = await fixture(t);
+  const launch = await f.ready();
+  for (const state of ['starting', 'handshaking', 'healthy', 'degraded']) {
+    f.instance.runtimeState = state;
+    assert.deepEqual(await f.router.resolveNativeMcpLaunch(policy()), launch);
+  }
+});
+
+test('unexpected exit invalidates captured MCP views before cleanup and an old exit cannot revoke a repair', async (t) => {
+  const exits = [];
+  const f = await fixture(t, {
+    carrier: {
+      start: async (_id, _admit, onExit) => {
+        exits.push(onExit);
+      },
+    },
+  });
+  await f.ready();
+  const view = await f.router.resolveMemberMcpView();
+  assert.equal(view.entries[0].isCurrent(), true);
+  assert.equal(typeof exits[0], 'function', 'the carrier needs a Host publication invalidator');
+  await exits[0]();
+  assert.equal(view.entries[0].isCurrent(), false);
+  await assert.rejects(f.router.resolveNativeMcpLaunch(policy()));
+  await f.router.start('instance-a');
+  const repaired = await f.router.resolveMemberMcpView();
+  await exits[0]();
+  assert.equal(repaired.entries[0].isCurrent(), true, 'late exit belongs only to its original generation');
 });
 
 test('native launch binds same-plugin instances to distinct Host tokens and never revives stopped descriptors', async (t) => {

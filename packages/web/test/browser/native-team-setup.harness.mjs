@@ -121,14 +121,14 @@ export async function setup(options = {}) {
       return respondFault(route, fault, () => {
         const cat = {
           ...payload,
-          id: payload.id ?? `fixture-${created.length}`,
+          id: payload.catId,
           mentionPatterns: payload.mentionPatterns ?? [],
         };
         created.push(cat);
         receipts.set(key, cat);
       });
     }
-    const cat = { ...payload, id: `fixture-${created.length}`, mentionPatterns: payload.mentionPatterns ?? [] };
+    const cat = { ...payload, id: payload.catId, mentionPatterns: payload.mentionPatterns ?? [] };
     created.push(cat);
     receipts.set(key, cat);
     return route.fulfill({ status: 201, json: { cat } });

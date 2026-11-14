@@ -37,8 +37,8 @@ export interface SidebarTerminalExecution {
 
 export interface SidebarPresenceSourceDeps<TSnapshot extends SidebarActiveExecutionSnapshot> {
   /**
-   * **每请求一次**：四源候选 union（tracker slot / running record / running managed command /
-   * running child）+ owner-truth 物化。`complete=false` 表示至少一源不可用，union 可能漏报。
+   * **每请求一次**：tracker / record / managed command / child / CLI owner 候选并集与当前证据物化。
+   * `complete=false` 表示至少一源不可用，union 可能漏报；裸 child 只能提名，不能自证 working。
    *
    * R4 P1-1：owner-truth 两张脸是 user-scoped 全局枚举，成本与 candidate 数无关，
    * 所以只能读一次。逐 candidate 去重读会让 A 个候选形成 1+A 次全局枚举（最坏 O(A²)）。

@@ -92,6 +92,36 @@ test('one capture per fifteen minutes and at most four admitted attempts per obs
   assert.equal(h.disconnected, 4);
 });
 
+test('the four-attempt budget rolls over six hours instead of lasting the whole process', async (t) => {
+  const h = harness(t);
+  async function attempt() {
+    const done = h.arm(h.logger);
+    await h.advance(2000);
+    done();
+    await setImmediate();
+  }
+  // Admitted at 2s, 15m+4s, 30m+6s, 45m+8s; the fifth try at 60m+10s is over budget.
+  await attempt();
+  for (let i = 0; i < 4; i++) {
+    await h.advance(15 * 60 * 1000);
+    await attempt();
+  }
+  assert.equal(h.entries.length, 4);
+  // Still inside six hours of the first admitted attempt: refused.
+  await h.advance(4 * 60 * 60 * 1000);
+  await attempt();
+  assert.equal(h.entries.length, 4);
+  // Past six hours of the first admitted attempt: one slot is free again.
+  await h.advance(60 * 60 * 1000);
+  await attempt();
+  assert.equal(h.entries.length, 5);
+  // Fifteen minutes later the second admitted attempt has aged out too.
+  await h.advance(15 * 60 * 1000);
+  await attempt();
+  assert.equal(h.entries.length, 6);
+  assert.equal(h.disconnected, 6);
+});
+
 test('profiler preparation/stop failures release their slots and never publish private errors', async (t) => {
   const h = harness(t);
   h.failConnect(true);

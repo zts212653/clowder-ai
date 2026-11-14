@@ -1274,7 +1274,7 @@ describe('F167 S.1-c ManagedCommandWakeRecoverySweep', () => {
       logPath: path.join(tempDir, 'managed-gate-jobs', `${jobId}.log`),
       executionSlaMs: 3_600_000,
       wallSlaMs: 10_800_000,
-      wakeTarget: { threadId: 'thread-1', catId: 'codex', userId: 'user-1' },
+      wakeTarget: { threadId: 'thread-1', catId: 'codex-sol', userId: 'user-1' },
     };
     writeFileSync(
       recordPath,
@@ -1404,6 +1404,46 @@ describe('F167 S.1-c ManagedCommandWakeRecoverySweep', () => {
     assert.equal(firstObservedAt, 10_000);
     assert.equal(h.tasks.get(task.id).params.holdLifecycle.managedCommand.slaBreachObservedAt, firstObservedAt);
   });
+
+  for (const jobLookup of ['nonterminal', 'unavailable']) {
+    test(`startup sweep preserves a persistent job reference when lookup is ${jobLookup} and its local runner is gone`, async (t) => {
+      const { ManagedCommandWakeRecoverySweep } = await loadSweep();
+      const { ManagedJobService } = await import('../dist/domains/managed-job/ManagedJobService.js');
+      const service = new ManagedJobService();
+      const task = makeTask({ id: `hold-ball-restart-${jobLookup}` });
+      const principal = { userId: 'user-1', threadId: 'thread-1', catId: 'codex-sol' };
+      const job =
+        jobLookup === 'nonterminal'
+          ? await service.submit(principal, {
+              command: 'printf persistent-job',
+              originTaskId: task.id,
+              originInvocationId: 'restart-regression',
+              idempotencyKey: task.id,
+              executionSlaMs: 60_000,
+              wakeTarget: principal,
+            })
+          : { jobId: `managed-job-${'0'.repeat(40)}` };
+      if (jobLookup === 'nonterminal') {
+        t.after(() => service.cancel(principal, job.jobId));
+        assert.equal(service.get(principal, job.jobId).state, 'queued');
+      } else {
+        assert.equal(service.resolve(job.jobId), null, 'the owner cannot currently resolve this persisted reference');
+      }
+      task.params.holdLifecycle.managedCommand.jobId = job.jobId;
+      const h = makeHarness({ task, isCommandRunnerActive: () => false });
+      const sweep = new ManagedCommandWakeRecoverySweep(h.deps);
+
+      await sweep.runOnce();
+      await sweep.runOnce();
+
+      const retained = h.tasks.get(task.id);
+      assert.equal(retained.params.holdLifecycle.managedCommand.state, 'command_running');
+      assert.equal(retained.params.holdLifecycle.status, 'active');
+      assert.equal(retained.enabled, true);
+      assert.equal(h.appended.length, 0, 'a missing local runner cannot emit a lost-job receipt');
+      assert.equal(h.triggerCalls.length, 0);
+    });
+  }
 
   test('startup sweep terminalizes a non-durable command whose process-local runner was lost', async () => {
     const { ManagedCommandWakeRecoverySweep } = await loadSweep();

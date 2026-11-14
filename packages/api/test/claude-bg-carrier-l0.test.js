@@ -81,6 +81,23 @@ test('Task 3: bg carrier passes --system-prompt-file with compiled L0 path', asy
   assert.equal(claudeCall.args[flagIdx + 1], l0Path);
 });
 
+test('bg carrier opts out of system-prompt recording so a resumed daemon reads the current L0', async () => {
+  // claude-system-prompt-snapshot-off.test.js has the why; this is the bg twin.
+  const spawnFn = buildArgCapturingSpawn();
+  const service = new ClaudeBgCarrierService({
+    catId: createCatId('opus-47'),
+    spawnFn,
+    model: 'claude-test-model',
+    l0CompilerFn: buildFakeL0Compiler(),
+  });
+  await service.startJob('hi');
+  const claudeCall = spawnFn.calls.find((c) => c.args.includes('--bg'));
+  assert.ok(claudeCall, 'claude --bg was spawned');
+  const flagIdx = claudeCall.args.indexOf('--system-prompt-snapshot');
+  assert.ok(flagIdx >= 0, `--system-prompt-snapshot present in argv: ${claudeCall.args.join(' ')}`);
+  assert.equal(claudeCall.args[flagIdx + 1], 'off');
+});
+
 test('Task 3 parity: bg carrier appends pack-only systemPrompt via file (#840)', async () => {
   const spawnFn = buildArgCapturingSpawn();
   const l0CompilerFn = buildFakeL0Compiler('COMPILED-L0-FOR-OPUS');

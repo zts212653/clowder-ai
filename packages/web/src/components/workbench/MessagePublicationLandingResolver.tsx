@@ -129,14 +129,20 @@ export function MessagePublicationLandingResolver({
       <h2 className="text-sm font-semibold">{surface.title}</h2>
       {error ? (
         <div data-content-opening-state="blocked" role="alert" className="my-2 text-sm text-cafe-error">
-          {error}
-          <button type="button" disabled={busy} onClick={() => setRetry((n) => n + 1)}>
+          <span className="block">{error}</span>
+          <button
+            type="button"
+            disabled={busy}
+            className="mt-2 mr-2 rounded-md border border-cafe bg-cafe-surface-elevated px-3 py-1.5 text-xs font-medium text-cafe hover:bg-cafe-surface-sunken disabled:opacity-50"
+            onClick={() => setRetry((n) => n + 1)}
+          >
             重新读取
           </button>
           {missingSelection ? (
             <button
               type="button"
               disabled={busy}
+              className="mt-2 rounded-md border border-cafe bg-cafe-surface-elevated px-3 py-1.5 text-xs font-medium text-cafe hover:bg-cafe-surface-sunken disabled:opacity-50"
               onClick={() => {
                 try {
                   localStorage.removeItem(missingSelection);
@@ -159,6 +165,7 @@ export function MessagePublicationLandingResolver({
           <button
             type="button"
             disabled={busy}
+            className="rounded-md bg-cafe-accent px-3 py-1.5 text-xs font-medium text-[var(--cafe-accent-foreground)] disabled:opacity-50"
             onClick={() =>
               setSelection({ contentRef: current.asset.contentRef, ownerRevision: current.asset.ownerRevision })
             }

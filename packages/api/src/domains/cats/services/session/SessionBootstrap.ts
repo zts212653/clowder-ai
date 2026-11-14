@@ -111,6 +111,7 @@ export interface SessionBootstrapOptions {
   /** F065 Phase B: Thread store for ThreadMemory injection */
   threadStore?: IThreadStore;
   /** F065 Phase C: 'generative' prefers handoff digest, 'extractive' uses extractive only */
+  /** Legacy read preference for existing handoff digests; never starts generation. */
   bootstrapDepth?: 'extractive' | 'generative';
   /**
    * F296 B3b-4: provider/epoch-owned verdict. When present, bootstrap is no
@@ -153,7 +154,7 @@ export async function buildSessionBootstrap(
 
   // Only the home chain determines the human-facing ordinal and count.
   const active = await sessionChainStore.getActive(catId, threadId, opts.ownerUserId);
-  const currentSeq = active ? active.seq : fullChain.length;
+  const currentSeq = active ? active.seq : chain.length;
   const activeHome = chain.find((session) => session.id === active?.id);
   const { ordinal: displaySeq, count: homeCount } = getHomeSessionPosition(fullChain, activeHome?.id);
   const { ordinal: previousDisplaySeq } = getHomeSessionPosition(fullChain, prevSession.id);
@@ -308,7 +309,7 @@ export async function buildSessionBootstrap(
   }
 
   let digestSection = '';
-  // 2. Previous Session Digest — F065 Phase C: branch on bootstrapDepth
+  // 2. Previous Session Digest — legacy generative selects an existing historical file.
   let hasDigest = false;
   try {
     if (opts.bootstrapDepth === 'generative') {

@@ -114,7 +114,7 @@ describe('validateProjectPath', () => {
   let subDir;
 
   before(() => {
-    testDir = mkdtempSync('/tmp/cat-cafe-test-path-validation-');
+    testDir = mkdtempSync(join(tmpdir(), 'cat-cafe-test-path-validation-'));
     subDir = join(testDir, 'project-a');
     mkdirSync(subDir, { recursive: true });
   });
@@ -169,7 +169,7 @@ describe('validateProjectPath', () => {
   it('resolves symlinks and checks real path', async () => {
     const linkPath = join(testDir, 'link-to-tmp');
     if (existsSync(linkPath)) rmSync(linkPath);
-    symlinkSync('/tmp', linkPath);
+    symlinkSync(tmpdir(), linkPath);
     const result = await validateProjectPath(linkPath);
     assert.ok(result);
   });
@@ -196,7 +196,7 @@ describe('resolvePersistentProjectPathDetailed', () => {
   let externalProject;
 
   before(() => {
-    testDir = mkdtempSync('/tmp/cat-cafe-persistent-project-path-');
+    testDir = mkdtempSync(join(tmpdir(), 'cat-cafe-persistent-project-path-'));
     runtimeRoot = join(testDir, 'cat-cafe-runtime');
     workspaceRoot = join(testDir, 'cat-cafe');
     runtimePackage = join(runtimeRoot, 'packages', 'api');

@@ -32,7 +32,7 @@ test('concierge uses the common message projection with multiple per-thread hand
     results,
     meta: {
       scope: 'global',
-      sort: 'time',
+      sort: 'relevance',
       partial: true,
       freshness: 'unknown',
       sourceCoverage: 'unknown',
@@ -51,7 +51,7 @@ test('concierge uses the common message projection with multiple per-thread hand
       return response;
     },
   });
-  assert.deepEqual(input, { query: 'piano', sort: 'time', mode: 'hybrid', limit: 5 });
+  assert.deepEqual(input, { query: 'piano', sort: 'relevance', mode: 'hybrid', limit: 5 });
   assert.deepEqual(
     context.handles.map((h) => h.anchor.messageId),
     ['early', 'later'],
@@ -64,6 +64,7 @@ test('concierge uses the common message projection with multiple per-thread hand
   assert.equal(actions[0].payload.threadId, 'original');
   assert.equal(actions[0].payload.messageId, 'early');
   assert.match(context.contextString, /全局/);
+  assert.match(context.contextString, /排序：按相关/);
   assert.match(context.contextString, /Alpha Connector · Acceptance source/);
   assert.match(context.contextString, /延迟暂无法确认/);
   assert.match(context.contextString, /词法/);
@@ -82,6 +83,42 @@ test('unavailable message search stays distinguishable from an exhaustive empty 
   assert.equal(context.handles.length, 0);
   assert.match(context.contextString, /暂不可用/);
   assert.doesNotMatch(context.contextString, /(?:^|[；。])(?:未找到|没有找到|没有相关消息)/);
+});
+
+test('ordinary concierge sources preserve match evidence and actual time-window coverage without qualification claims', async () => {
+  const context = await buildConciergeSearchContext({
+    userMessage: 'Cedar 取名',
+    threadId: 'carrier',
+    messageSearch: async () => ({
+      searchId: 'ordinary',
+      query: 'Cedar 取名',
+      results: [
+        {
+          threadId: 'visible',
+          messageId: 'original',
+          threadTitle: 'Names',
+          speaker: 'user',
+          timestamp: 1,
+          snippet: { text: '给 Cedar 取名的讨论。' },
+          publiclyQuotable: true,
+          matchEvidence: { kind: 'literal', terms: ['Cedar', '取名'] },
+        },
+      ],
+      meta: {
+        scope: 'global',
+        sort: 'time',
+        resultKind: 'sources',
+        timeWindow: { limit: 32, admitted: 12, complete: false },
+        partial: true,
+        response: responseBudget(),
+      },
+    }),
+  });
+  assert.match(context.contextString, /供你阅读判断的原文/);
+  assert.match(context.contextString, /命中词：Cedar、取名/);
+  assert.match(context.contextString, /只核完 12 条来源，未读满 32 条/);
+  assert.match(context.contextString, /排序：按时间/);
+  assert.doesNotMatch(context.contextString, /候选尚未核对出结论/);
 });
 
 test('a shared public concierge context does not publish private whisper snippets or handles', async () => {

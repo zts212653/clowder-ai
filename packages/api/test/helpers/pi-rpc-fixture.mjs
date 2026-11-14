@@ -101,7 +101,9 @@ process.stdin.on('data', (chunk) => {
             command: 'prompt',
             id: command.id,
             success: false,
-            error: 'model is unavailable; api_key=secret-fixture-token',
+            error: existsSync(path.join(root, 'primary-error-text'))
+              ? readFileSync(path.join(root, 'primary-error-text'), 'utf8')
+              : 'model is unavailable; api_key=secret-fixture-token',
           });
           break;
         }
@@ -128,7 +130,24 @@ process.stdin.on('data', (chunk) => {
           break;
         }
         // Adapted from whutzefengxie-ops/clowder-ai#14 (ecafa76d9), with Host empty_response semantics.
-        if (['empty', 'empty-string', 'empty-delta-final', 'thinking-only', 'tool-only'].includes(command.message)) {
+        if (
+          ['empty', 'empty-string', 'empty-delta-final', 'empty-diagnostic', 'thinking-only', 'tool-only'].includes(
+            command.message,
+          )
+        ) {
+          if (command.message === 'empty-diagnostic') {
+            const diagnosticFile = path.join(root, 'diagnostic-text');
+            process.stderr.write(
+              `${existsSync(diagnosticFile) ? readFileSync(diagnosticFile, 'utf8') : 'provider quota exhausted; api_key=secret-empty-response-token'}\n`,
+            );
+            // Allow the independent stderr pipe to be consumed before the terminal wire event.
+            setTimeout(() => {
+              if (!existsSync(path.join(root, 'incomplete-diagnostic')))
+                send({ type: 'message_end', message: { role: 'assistant', content: [], stopReason: 'stop' } });
+              send({ type: 'agent_settled', aborted: false });
+            }, 80);
+            break;
+          }
           if (command.message === 'empty-string' || command.message === 'empty-delta-final')
             send({ type: 'message_update', assistantMessageEvent: { type: 'text_delta', delta: '' } });
           if (command.message === 'thinking-only')

@@ -197,6 +197,21 @@ export interface TaskExecutionRef {
   readonly sourceMessageId: string | null;
 }
 
+/** Read-only projection of recovery exhaustion on the original Task owner. Never persisted as a second owner. */
+export interface TaskRecoveryIncident {
+  readonly source: 'action_successor' | 'ball_probe';
+  readonly lane: 'return' | 'dispatch' | 'task' | 'probe' | 'idle';
+  readonly disposition: 'parked' | 'interrupted' | 'needs_attention';
+  readonly reasonCode: string;
+  readonly executionRef: string;
+}
+
+export interface TaskRecoveryProjection {
+  readonly v: 1;
+  readonly ownerRef: string;
+  readonly incidents: readonly TaskRecoveryIncident[];
+}
+
 export interface TaskItem {
   readonly pluginWait?: PluginWaitState;
   readonly id: string;
@@ -218,6 +233,8 @@ export interface TaskItem {
   readonly ownerChangedAt?: number;
   readonly lastAppliedHandoffMessageRef?: string;
   readonly executionRef?: TaskExecutionRef | null;
+  /** Derived at read time from the existing action/ball owner facts; stores must not persist this field. */
+  readonly recovery?: TaskRecoveryProjection;
   readonly status: TaskStatus;
   readonly why: string;
   readonly createdBy: CatId | 'user' | 'system';

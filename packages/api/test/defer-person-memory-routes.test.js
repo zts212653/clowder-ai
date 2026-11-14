@@ -12,6 +12,7 @@ describe('F276 defer-person-memory callback', () => {
   let forgotten;
   let forgetResult;
   let registryMatch;
+  let actionReceipts;
 
   before(async () => {
     const [routeMod, registryMod, messageMod, authMod] = await Promise.all([
@@ -28,8 +29,21 @@ describe('F276 defer-person-memory callback', () => {
       registry,
       messageStore,
       receiptStore: {
-        async get() {
-          return null;
+        async get(_owner, receiptId) {
+          return actionReceipts.find((receipt) => receipt.receiptId === receiptId) ?? null;
+        },
+        async prepareOwnerForget(input) {
+          if (forgetResult.outcome === 'proposal_bound') return forgetResult;
+          const receipt = actionReceipts.find((entry) => entry.receiptId === input.receiptId);
+          if (!receipt) return { outcome: 'already_absent' };
+          return {
+            outcome: 'prepared',
+            receipt: {
+              ...receipt,
+              state: 'withdrawn',
+              ownerForget: { requestId: input.requestId, expectedRevision: input.expectedRevision },
+            },
+          };
         },
         async bindProcessorInvocation() {
           return { outcome: 'not_available' };
@@ -54,7 +68,7 @@ describe('F276 defer-person-memory callback', () => {
           withdrawn.push({ ownerUserId, receiptId });
           return {
             outcome: 'withdrawn',
-            receipt: { receiptId },
+            receipt: { receiptId, ownerUserId, state: 'withdrawn' },
           };
         },
       },
@@ -67,6 +81,7 @@ describe('F276 defer-person-memory callback', () => {
     staged = [];
     withdrawn = [];
     forgotten = [];
+    actionReceipts = [];
     forgetResult = { outcome: 'purged' };
     registryMatch = { kind: 'registered_person', ref: 'person_huang_ting' };
   });
@@ -302,6 +317,8 @@ describe('F276 defer-person-memory callback', () => {
     };
     const receiptId = `deferred_person_${'a'.repeat(32)}`;
 
+    actionReceipts.push({ receiptId, ownerUserId: 'owner-1', state: 'deferred' });
+
     const withdrawal = await app.inject({
       method: 'POST',
       url: '/api/callbacks/person-memory/deferred/withdraw',
@@ -320,7 +337,8 @@ describe('F276 defer-person-memory callback', () => {
     });
     assert.equal(forgetting.statusCode, 200);
     assert.deepEqual(JSON.parse(forgetting.body), { receiptId, status: 'purged' });
-    assert.deepEqual(forgotten.at(-1), ['owner-1', receiptId]);
+    assert.deepEqual(forgotten.at(-1).slice(0, 2), ['owner-1', receiptId]);
+    assert.match(forgotten.at(-1)[3], /^deferred_callback_[a-f0-9]{64}$/);
 
     const forged = await app.inject({
       method: 'POST',

@@ -185,6 +185,7 @@ export class VoiceBlockSynthesizer {
     } catch {
       throw new Error('No TTS provider available');
     }
+    provider = (await provider.snapshot?.({ cacheDir: this.cacheDir })) ?? provider;
 
     // Resolve per-cat voice
     const catVoice = getCatVoice(catId);
@@ -201,7 +202,15 @@ export class VoiceBlockSynthesizer {
     const textChunks = chunkStaticTtsText(text);
 
     // Cache hash — includes clone params for distinct cache entries per voice config
-    const hashParts = [provider.id, provider.model, voice, langCode, String(speed), format, text];
+    const hashParts = [
+      provider.id,
+      provider.cacheIdentity ?? provider.model,
+      voice,
+      langCode,
+      String(speed),
+      format,
+      text,
+    ];
     // Invalidate truncated pre-chunking cache entries without evicting valid short audio.
     if (textChunks.length > 1) hashParts.push(LONG_FORM_CACHE_VERSION);
     if (refAudio) hashParts.push(refAudio);

@@ -9,6 +9,7 @@ import {
   type AuthorizeOptions,
 } from '@/components/ApprovalHost';
 import { ApprovalItemCard } from '@/components/ApprovalItemCard';
+import { isScheduleDriftBlocked } from '@/stores/approval-decision-attempts';
 import { useApprovalHubStore } from '@/stores/approvalHubStore';
 import { useShellCopy } from '../shell-copy';
 import { useShellLanguage } from '../shell-language';
@@ -161,7 +162,21 @@ function Hosted({
   const match = matchHostedApproval({ read: approval, readOwnerUserId: ownerUserId, storeItems, now: Date.now() });
   const state = session?.model.state ?? { kind: 'idle' as const };
   const language = useShellLanguage();
-  const reconcile = describeReconcile(state, { language, ownerUserId, sourceFeatureId: approval.sourceFeatureId });
+  const blockedDrifts = useApprovalHubStore((store) => store.scheduleDriftBlocked);
+  const observedDrift = isScheduleDriftBlocked({ ...approval, ownerUserId }, blockedDrifts);
+  const displayedState =
+    state.kind === 'idle' && observedDrift
+      ? {
+          kind: 'still_open' as const,
+          write: { outcome: 'errored' as const, status: 409, errorCode: 'SCHEDULE_TASK_DRIFT' as const },
+        }
+      : state;
+  const reconcile = describeReconcile(displayedState, {
+    language,
+    ownerUserId,
+    sourceFeatureId: approval.sourceFeatureId,
+    scheduleMutationKind: approval.detail.mutationKind,
+  });
 
   const lastMatched = useRef<ApprovalHubItem | null>(null);
   if (match.kind === 'matched') lastMatched.current = match.item;
@@ -198,11 +213,12 @@ function Hosted({
       decisionWords: { approve: t.approve, reject: t.reject, clear: t.clear },
       originalPlaceAction,
       writesLocked,
+      ...(reconcile.approveBlocked ? { blockedDecisions: new Set(['approve'] as const) } : {}),
       authorizeWrite,
       reportEditing,
       reportRequest,
     }),
-    [originalPlaceAction, writesLocked, authorizeWrite, reportEditing, reportRequest, t],
+    [originalPlaceAction, writesLocked, reconcile.approveBlocked, authorizeWrite, reportEditing, reportRequest, t],
   );
 
   if (state.kind === 'decided') {

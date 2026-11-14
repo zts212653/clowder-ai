@@ -18,7 +18,7 @@
 
 .header h1 {
   margin: 0;
-  font-size: 24px;
+  font-size: var(--console-font-2xl);
   font-weight: 600;
   color: #211b18;
 }
@@ -28,7 +28,7 @@
   color: #855e16;
   padding: 6px 12px;
   border-radius: 6px;
-  font-size: 12px;
+  font-size: var(--console-font-xs);
 }
 
 .scene {
@@ -41,7 +41,7 @@
 
 .scene h2 {
   margin: 0 0 8px;
-  font-size: 21px;
+  font-size: var(--console-font-display-sm);
 }
 
 .lead {
@@ -75,7 +75,7 @@
   border-radius: 50%;
   display: grid;
   place-items: center;
-  font-size: 28px;
+  font-size: var(--console-font-display-md);
   font-weight: 800;
   border: 4px solid #fff;
   box-shadow: 0 3px 12px rgba(0, 0, 0, 0.1);
@@ -92,7 +92,7 @@
 
 .handoffText b {
   display: block;
-  font-size: 16px;
+  font-size: var(--console-font-base);
   margin-bottom: 12px;
   line-height: 1.4;
 }
@@ -136,7 +136,7 @@
   border: none;
   border-radius: 8px;
   padding: 12px 24px;
-  font-size: 14px;
+  font-size: var(--console-font-sm);
   font-weight: 500;
   cursor: pointer;
 }

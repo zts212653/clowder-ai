@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { mkdir } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
 import { ensureWorkspaceOpen } from './f307-workspace-open.mjs';
@@ -7,7 +8,7 @@ import { routeFocusExitFixtures } from './fixtures/f307-v2-focus-exit.mjs';
 
 // Registered in the existing canonical F307 journey; shares its actual Next server and browser.
 // Domain/preview content alone is fixture HTTP, with the real F307 focus/full-window owners.
-const evidence = process.env.F322_FOCUS_EVIDENCE_DIR ?? '/tmp/cat-cafe-evidence/f322-focus-exit';
+const evidence = process.env.F322_FOCUS_EVIDENCE_DIR ?? path.join(tmpdir(), 'cat-cafe-evidence/f322-focus-exit');
 const copies = {
   zh: {
     theme: 'light',

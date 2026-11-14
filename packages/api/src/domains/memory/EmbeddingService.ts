@@ -7,18 +7,26 @@
 import { normalizeLoopbackUrl } from '../services/loopback-url.js';
 import { getServiceConfig } from '../services/service-config.js';
 import { getServiceManifest, resolveServiceEndpoint } from '../services/service-manifest.js';
-import type { EmbedModelInfo, IEmbeddingService } from './interfaces.js';
+import type { EmbedConfig, EmbedModelInfo, IEmbeddingService } from './interfaces.js';
 
 interface EmbeddingServiceConfig {
   embedModel: string;
   embedDim: number;
   embedTimeoutMs: number;
   maxModelMemMb: number;
+  generationId?: EmbedConfig['generationId'];
+  representationFingerprint?: string;
+  embedModelRev?: string;
+  embedUrl?: string;
+  queryInstruction?: string;
 }
 
 interface EmbedApiResponse {
   data: Array<{ embedding: number[]; index: number }>;
   model: string;
+  dim?: number;
+  generation_id?: string;
+  representation_fingerprint?: string;
 }
 
 interface HealthResponse {
@@ -27,6 +35,8 @@ interface HealthResponse {
   backend: string;
   device: string;
   dim: number;
+  generation_id?: string;
+  representation_fingerprint?: string;
 }
 
 // Mirror of embed-api.py's MAX_BATCH_SIZE (scripts/services/embed-api.py).
@@ -40,6 +50,8 @@ export class EmbeddingService implements IEmbeddingService {
   private modelRev = 'http-client';
   private loader: (() => Promise<void>) | null = null; // test hook
   private lastProbeAt = 0;
+  private lastHealthyBaseUrl?: string;
+  private observedIdentity?: Pick<HealthResponse, 'model' | 'dim' | 'generation_id' | 'representation_fingerprint'>;
   private static readonly REPROBE_COOLDOWN_MS = 30_000;
 
   constructor(config: EmbeddingServiceConfig) {
@@ -52,6 +64,7 @@ export class EmbeddingService implements IEmbeddingService {
   // outdated thread). EMBED_URL / EMBED_PORT env still win because
   // resolveServiceEndpoint reads endpointEnvVars and portFallback first.
   private resolveBaseUrl(): string {
+    if (this.config.embedUrl) return normalizeLoopbackUrl(this.config.embedUrl);
     const service = getServiceManifest('embedding-model');
     if (!service) {
       const port = process.env.EMBED_PORT ?? '9880';
@@ -70,14 +83,25 @@ export class EmbeddingService implements IEmbeddingService {
     // Probe the external embed-api server via /health
     try {
       const timeoutSignal = AbortSignal.timeout(5000);
-      const res = await fetch(`${this.resolveBaseUrl()}/health`, {
+      const baseUrl = this.resolveBaseUrl();
+      const res = await fetch(`${baseUrl}/health`, {
         signal: parentSignal ? AbortSignal.any([parentSignal, timeoutSignal]) : timeoutSignal,
       });
       if (!res.ok) throw new Error(`Health check failed: ${res.status}`);
       const health = (await res.json()) as HealthResponse;
       if (health.status === 'ok') {
+        this.assertIdentity(health);
+        this.observedIdentity = {
+          model: health.model,
+          dim: health.dim,
+          generation_id: health.generation_id,
+          representation_fingerprint: health.representation_fingerprint,
+        };
+        this.lastHealthyBaseUrl = baseUrl;
         this.ready = true;
         this.modelId = health.model || this.config.embedModel;
+      } else {
+        this.ready = false;
       }
     } catch (error) {
       // fail-open: server not running → isReady()=false → lexical-only degradation
@@ -106,8 +130,13 @@ export class EmbeddingService implements IEmbeddingService {
   getModelInfo(): EmbedModelInfo {
     return {
       modelId: this.modelId || this.config.embedModel,
-      modelRev: this.modelRev,
+      modelRev: this.config.embedModelRev ?? this.modelRev,
       dim: this.config.embedDim,
+      ...(this.config.generationId ? { generationId: this.config.generationId } : {}),
+      ...(this.config.representationFingerprint
+        ? { representationFingerprint: this.config.representationFingerprint }
+        : {}),
+      ...(this.config.queryInstruction !== undefined ? { queryInstruction: this.config.queryInstruction } : {}),
     };
   }
 
@@ -141,6 +170,9 @@ export class EmbeddingService implements IEmbeddingService {
         input: texts,
         deadline_ms: deadlineMs,
         max_model_mem_mb: this.config.maxModelMemMb,
+        ...(this.config.representationFingerprint
+          ? { representation_fingerprint: this.config.representationFingerprint }
+          : {}),
       }),
       signal,
     });
@@ -151,11 +183,23 @@ export class EmbeddingService implements IEmbeddingService {
     }
 
     const body = (await res.json()) as EmbedApiResponse;
+    try {
+      this.assertIdentity(body);
+    } catch (error) {
+      this.ready = false;
+      throw error;
+    }
     const targetDim = this.config.embedDim;
+    if (!Array.isArray(body.data) || body.data.length !== texts.length)
+      throw new Error('Embedding response shape mismatch');
     return body.data
       .sort((a, b) => a.index - b.index)
-      .map((d) => {
+      .map((d, index) => {
         const emb = d.embedding;
+        if (d.index !== index || !Array.isArray(emb) || !emb.every(Number.isFinite))
+          throw new Error('Invalid embedding response vector');
+        if (this.config.representationFingerprint && emb.length !== targetDim)
+          throw new Error('Embedding representation dimension mismatch');
         const arr = new Float32Array(targetDim);
         for (let i = 0; i < Math.min(emb.length, targetDim); i++) {
           const value = emb[i];
@@ -163,6 +207,34 @@ export class EmbeddingService implements IEmbeddingService {
         }
         return arr;
       });
+  }
+
+  private assertIdentity(body: HealthResponse | EmbedApiResponse): void {
+    const observed = this.observedIdentity;
+    if (
+      observed &&
+      (body.model !== observed.model ||
+        (body.dim !== undefined && observed.dim !== undefined && body.dim !== observed.dim) ||
+        (observed.representation_fingerprint &&
+          body.representation_fingerprint !== observed.representation_fingerprint))
+    )
+      throw new Error('Embedding loaded identity changed');
+    const expectedGeneration = this.config.generationId ?? 'g0';
+    if (body.generation_id && body.generation_id !== expectedGeneration)
+      throw new Error('Embedding generation identity mismatch');
+    const expected = this.config.representationFingerprint;
+    if (expectedGeneration !== 'g0' && !expected) throw new Error('Embedding representation identity is required');
+    if (
+      expected &&
+      (body.representation_fingerprint !== expected ||
+        body.model !== this.config.embedModel ||
+        (body.dim !== undefined && body.dim !== this.config.embedDim))
+    )
+      throw new Error('Embedding representation identity mismatch');
+  }
+
+  pinLoadedEndpoint(): void {
+    if (this.lastHealthyBaseUrl) this.config = { ...this.config, embedUrl: this.lastHealthyBaseUrl };
   }
 
   dispose(): void {

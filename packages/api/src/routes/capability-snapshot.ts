@@ -14,9 +14,9 @@
 import type { CapabilityReadScope, CapabilitySnapshotResponse } from '@cat-cafe/shared';
 import type { FastifyPluginAsync, FastifyReply, FastifyRequest } from 'fastify';
 import { readCapabilitiesConfigState } from '../config/capabilities/capability-orchestrator.js';
-import { findMonorepoRoot } from '../domains/capabilities/capability-board-parts.js';
 import { readCapabilitySnapshot } from '../domains/capabilities/capability-read-service.js';
 import { isDirectLoopbackRequest } from '../utils/loopback-request.js';
+import { findMonorepoRoot } from '../utils/monorepo-root.js';
 import { redirectRuntimeProjectPath, resolvePersistentProjectPath } from '../utils/persistent-project-path.js';
 import {
   type AgentKeyAuthRegistry,

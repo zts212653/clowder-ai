@@ -6,10 +6,13 @@ import { LongFormReader } from '@/components/content-overflow';
 import { HOST_CONTENT_REVIEW_CONNECTOR, hostReturnHeadline } from '@/components/content-review/host-return-headline';
 import { useCatData } from '@/hooks/useCatData';
 import { useCoCreatorConfig } from '@/hooks/useCoCreatorConfig';
+import { usePluginTargets } from '@/hooks/usePluginMentionTargets';
 import { resolveMessageSender } from '@/lib/resolve-sender';
 import type { ChatMessage } from '@/stores/chat-types';
 import type { QueueEntry } from '@/stores/chatStore';
 import { AvatarImageWithFallback } from './AvatarImageWithFallback';
+import { pluginDeliveryReceipt } from './message-dispatch-projection';
+import { PluginTargetIcon } from './PluginTargetIcon';
 import { QueueEntryActions } from './QueueEntryActions';
 import { RoutingWarningNotice } from './RoutingWarningNotice';
 import { SenderAvatar } from './SenderAvatar';
@@ -39,7 +42,16 @@ export function queueTargetLabelsFromHistory(
   const refs = source?.lifecycle?.dispatchRefs ?? [];
   return Object.fromEntries(
     refs.flatMap((ref) => {
-      const status = exactMessageById(messages, ref.statusMessageId)?.lifecycle;
+      const linked = exactMessageById(messages, ref.statusMessageId);
+      const pluginReceipt = pluginDeliveryReceipt(linked);
+      if (
+        pluginReceipt?.accepted &&
+        pluginReceipt.inputMessageId === sourceMessageId &&
+        pluginReceipt.targetId === ref.targetId
+      ) {
+        return [[ref.targetId, '已投递']];
+      }
+      const status = linked?.lifecycle;
       const targetDeliveredSource =
         status?.kind === 'response' &&
         status.targetId === ref.targetId &&
@@ -81,10 +93,16 @@ function QueueTarget({
   avatar?: string;
   receipt?: string;
 }) {
+  const { knownTargets } = usePluginTargets();
+  const plugin = knownTargets.find((target) => target.id === catId);
   return (
     <span className="inline-flex flex-wrap items-center gap-1" data-queue-target-row={catId}>
-      <AvatarImageWithFallback src={avatar} alt="" className="h-5 w-5 rounded-full object-cover" />
-      <span className="text-xs font-medium text-cafe-secondary">{label}</span>
+      {plugin ? (
+        <PluginTargetIcon icon={plugin.icon} size={20} />
+      ) : (
+        <AvatarImageWithFallback src={avatar} alt="" className="h-5 w-5 rounded-full object-cover" />
+      )}
+      <span className="text-xs font-medium text-cafe-secondary">{plugin?.alias ?? label}</span>
       {receipt && <span className="text-micro text-cafe-muted">（{receipt}）</span>}
     </span>
   );
@@ -135,7 +153,6 @@ function QueueEntryRow({
   const isUrgent = entry.priority === 'urgent';
   const categoryLabel = entry.sourceCategory ? SOURCE_CATEGORY_LABEL[entry.sourceCategory] : null;
   const rowToneClass = isAgent ? 'bg-[var(--color-cocreator-surface)]' : '';
-  const hasRepeat = entry.recoveryActions?.some((action) => action.kind === 'repeat_target');
 
   const targetIds = [...new Set([...entry.targetCats, ...Object.keys(deliveryLabels)])];
   const coCreator = useCoCreatorConfig();
@@ -168,7 +185,7 @@ function QueueEntryRow({
         {index + 1}
       </span>
 
-      <div className={`flex-1 min-w-0 ${hasRepeat ? 'basis-[calc(100%-4rem)]' : ''}`}>
+      <div className="flex-1 min-w-0">
         <LongFormReader
           title={`排队消息 · ${sourceLabel}`}
           summary={summary}
@@ -236,7 +253,7 @@ function QueueEntryRow({
         </div>
       </div>
 
-      <div className={`flex items-center gap-1 mt-1 ${hasRepeat ? 'ml-12 min-w-0 flex-wrap' : 'shrink-0'}`}>
+      <div className="flex items-center gap-1 mt-1 shrink-0">
         <QueueEntryActions entry={entry} onSteer={onSteer} />
         {canRecallEdit && (
           <button

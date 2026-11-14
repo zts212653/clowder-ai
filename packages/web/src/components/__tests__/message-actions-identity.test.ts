@@ -1,6 +1,8 @@
+// @vitest-environment jsdom
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { SHELL_PRESENTATION_STORAGE_KEY, writeShellPresentation } from '../shell/shell-presentation';
 
 const apiFetchMock = vi.hoisted(() => vi.fn());
 const getUserIdMock = vi.hoisted(() => vi.fn(() => 'alice'));
@@ -38,7 +40,7 @@ vi.mock('@/components/ConfirmDialog', () => ({
   },
 }));
 
-describe('MessageActions identity source', () => {
+describe.each(['classic', 'v2'] as const)('MessageActions identity source (%s)', (presentation) => {
   let container: HTMLDivElement;
   let root: Root;
 
@@ -48,6 +50,7 @@ describe('MessageActions identity source', () => {
   });
 
   beforeEach(() => {
+    writeShellPresentation(presentation);
     pushMock.mockReset();
     removeThreadMessageMock.mockReset();
     window.history.pushState({}, '', '/?userId=alice');
@@ -74,6 +77,7 @@ describe('MessageActions identity source', () => {
     }
     if (container) {
       container.remove();
+      window.localStorage.removeItem(SHELL_PRESENTATION_STORAGE_KEY);
     }
   });
 
@@ -103,10 +107,13 @@ describe('MessageActions identity source', () => {
       );
     });
 
-    const branchButton = container.querySelector(
-      'button[aria-label="创建分支"], button[aria-label="从这里分支"]',
-    ) as HTMLButtonElement | null;
-    expect(branchButton).not.toBeNull();
+    if (presentation === 'v2') {
+      await act(async () => container.querySelector<HTMLButtonElement>('button[aria-haspopup="menu"]')!.click());
+    }
+    const branchButton = Array.from(document.querySelectorAll<HTMLButtonElement>('button')).find(
+      (button) => button.getAttribute('aria-label') === '创建分支' || button.textContent === '从这里分支',
+    );
+    expect(branchButton).toBeTruthy();
     await act(async () => {
       branchButton?.click();
     });

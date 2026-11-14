@@ -7,7 +7,7 @@ import { probeManagedAccounts } from './probe-managed.js';
 import { probeReadonlySandbox } from './probe-readonly.js';
 
 /** Bump when the checks change, so verdicts recorded by an older probe are measured again. */
-export const CODEX_COMPAT_PROBE_REVISION = 1;
+export const CODEX_COMPAT_PROBE_REVISION = 2;
 export type CodexNativeCapability = 'managed_accounts' | 'readonly_sandbox';
 export interface CodexCompatCheck {
   readonly id: string;
@@ -35,7 +35,7 @@ export async function probeCodexNativeCapability(
   const hosts: ProbeHost[] = [];
   const root = await realpath(await mkdtemp(join(tmpdir(), 'cat-cafe-codex-compat-')));
   // Unix socket paths are capped at 104 bytes on macOS; the per-user TMPDIR is too deep for them.
-  const sockets = await mkdtemp('/tmp/cc-compat-');
+  const sockets = process.platform === 'win32' ? root : await mkdtemp('/tmp/cc-compat-');
   let socketCount = 0;
   const socket: Socket = () => join(sockets, `${++socketCount}.sock`);
   const check: Check = async (id, assertion) => {
@@ -71,7 +71,7 @@ export async function probeCodexNativeCapability(
     if (deadline) clearTimeout(deadline);
     await Promise.allSettled(hosts.map((host) => host.stop()));
     await rm(root, { recursive: true, force: true }).catch(() => {});
-    await rm(sockets, { recursive: true, force: true }).catch(() => {});
+    if (sockets !== root) await rm(sockets, { recursive: true, force: true }).catch(() => {});
   }
   return {
     capability,

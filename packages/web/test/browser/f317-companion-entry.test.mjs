@@ -169,14 +169,27 @@ test('stored settings and the existing guide engine remain reachable through the
     await f.page.locator('input[value="合成保存人设"]').waitFor();
     assert.equal(
       await f.page
-        .locator('select')
-        .filter({ has: f.page.locator('option[value="codex61-sol"]') })
+        .locator('section')
+        .filter({ has: f.page.getByRole('heading', { name: '陪伴者', exact: true }) })
+        .getByRole('combobox')
         .inputValue(),
       'codex61-sol',
     );
     assert.deepEqual(f.fixture.config.ballPosition, { x: 83, y: 127 });
     assert.equal(f.fixture.config.muted, true);
     assert.equal(f.fixture.calls.filter((x) => x.path === '/api/concierge/config' && x.method === 'PUT').length, 0);
+    assert.deepEqual(f.errors, []);
+  } catch (error) {
+    throw new Error(
+      JSON.stringify({
+        cause: String(error),
+        url: f.page.url(),
+        body: await f.page.locator('body').innerText(),
+        errors: f.errors,
+        requests: f.fixture.calls.filter((x) => /concierge|watcher/.test(x.path)),
+      }),
+      { cause: error },
+    );
   } finally {
     await f.close();
   }

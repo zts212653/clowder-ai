@@ -34,7 +34,7 @@ export async function createCallbackContextFixture(t, options = {}) {
     userId,
     threadId,
     catId,
-    executionKind: 'ordinary',
+    executionKind: options.executionKind ?? 'ordinary',
     ...(options.live ? { queueCompletionPolicy: 'explicit_source' } : {}),
     startedAt: Date.now(),
   });

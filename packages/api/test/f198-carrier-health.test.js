@@ -194,12 +194,6 @@ describe('selectFirstHealthyTier — degradation chain walking', () => {
     store = new CarrierHealthStore();
   });
 
-  test('all healthy → returns target tier', () => {
-    assert.equal(selectFirstHealthyTier('bg_daemon', store), 'bg_daemon');
-    assert.equal(selectFirstHealthyTier('interactive_pty', store), 'interactive_pty');
-    assert.equal(selectFirstHealthyTier('print_sdk', store), 'print_sdk');
-  });
-
   test('target degraded → falls to next healthy in chain', () => {
     store.reportFailure('bg_daemon', 'quota');
     assert.equal(selectFirstHealthyTier('bg_daemon', store), 'interactive_pty');

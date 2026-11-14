@@ -36,6 +36,7 @@ import {
   isRetiredGithubMcpConfigEntry,
 } from '../../../../../../config/capabilities/retired-github-mcp.js';
 import { createModuleLogger } from '../../../../../../infrastructure/logger.js';
+import { SHARED_BROWSER_RESOLVER, sharedBrowserStdioServer } from '../../../../../browser/shared-browser-descriptor.js';
 import type { AcpMcpServer, AcpMcpServerStdio } from './types.js';
 
 const log = createModuleLogger('acp-mcp-resolver');
@@ -276,7 +277,11 @@ export async function resolveAcpMcpServers(
   const configSourceRoot = opts?.configSourceRoot ?? resolveDeclaredCapabilityRoot() ?? projectRoot;
   const loadedConfig =
     opts?.capabilitiesConfig !== undefined ? opts.capabilitiesConfig : readCapabilitiesConfigSync(configSourceRoot);
-  const capConfig = loadedConfig && opts?.catId ? invocationPluginMcpConfig(loadedConfig, opts.catId) : loadedConfig;
+  const memberCatId = opts?.catId;
+  const capConfig =
+    loadedConfig && memberCatId
+      ? invocationPluginMcpConfig(loadedConfig, memberCatId, (cap) => isMcpEnabledForCat(cap, memberCatId, opts))
+      : loadedConfig;
   assertMappedCapabilitySource(capConfig !== null, resolveBinaryRoot(projectRoot), configSourceRoot);
   const retiredCapabilityIds = new Set(
     capConfig?.capabilities.filter(isRetiredGithubMcpCapability).map((capability) => capability.id) ?? [],
@@ -349,6 +354,13 @@ export async function resolveAcpMcpServers(
           missing.push(name);
           continue;
         }
+        const isEnabled = opts?.catId
+          ? isMcpEnabledForCat(storedCapability, opts.catId, { accessScope: opts.accessScope })
+          : (storedCapability.globalEnabled ?? storedCapability.enabled ?? true);
+        if (!isEnabled) {
+          log.info({ name }, 'Skipping globally disabled external server');
+          continue;
+        }
         const { capability: cap, available } = projectInvocationPluginMcp(storedCapability);
         if (!available) {
           unavailableLocal.add(name);
@@ -358,11 +370,10 @@ export async function resolveAcpMcpServers(
           missing.push(name);
           continue;
         }
-        const isEnabled = opts?.catId
-          ? isMcpEnabledForCat(cap, opts.catId, { accessScope: opts.accessScope })
-          : (cap.globalEnabled ?? cap.enabled ?? true);
-        if (!isEnabled) {
-          log.info({ name }, 'Skipping globally disabled external server');
+        if (cap.mcpServer.resolver === SHARED_BROWSER_RESOLVER) {
+          // F333: pinned stdio; the ACP session env nominates it to the shared HTTP route.
+          const pinned = sharedBrowserStdioServer();
+          servers.push({ name, command: pinned.command, args: pinned.args, env: [] });
           continue;
         }
         if (cap.mcpServer.resolver === 'pencil') {
@@ -458,9 +469,9 @@ export function resolveDisabledServerIds(
   const capConfig = preloadedConfig !== undefined ? preloadedConfig : readCapabilitiesConfigSync(projectRoot);
   if (!capConfig) return new Set();
   const disabled = new Set(
-    invocationPluginMcpConfig(capConfig, catId)
+    invocationPluginMcpConfig(capConfig, catId, (cap) => isMcpEnabledForCat(cap, catId, options))
       .capabilities.filter((cap) => cap.type === 'mcp')
-      .filter((cap) => !projectInvocationPluginMcp(cap).available || !isMcpEnabledForCat(cap, catId, options))
+      .filter((cap) => !isMcpEnabledForCat(cap, catId, options) || !projectInvocationPluginMcp(cap).available)
       .map((cap) => cap.id),
   );
   if (disabled.has('cat-cafe')) {

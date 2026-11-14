@@ -1,0 +1,61 @@
+import type { CollectionEmbedDeps } from './CollectionIndexBuilder.js';
+import { requiresCohortCoverage, resetLegacyCohort } from './embedding-cohort-recovery.js';
+import type { IEmbeddingService } from './interfaces.js';
+import { openVectorGeneration } from './open-vector-generation.js';
+import type { SqliteEvidenceStore } from './SqliteEvidenceStore.js';
+import { generationIdentity } from './vector-generation-identity.js';
+import { inspectVectorGeneration } from './vector-generation-readiness.js';
+
+/** A newly indexed collection borrows the current recipe; it cannot choose another active generation. */
+export async function prepareCollectionVectorBinding(
+  store: SqliteEvidenceStore,
+  resolveService: () => IEmbeddingService | undefined,
+  resolveMode: () => 'on' | 'shadow' | undefined = () => 'shadow',
+): Promise<{ deps: CollectionEmbedDeps; publish: () => boolean } | undefined> {
+  const service = resolveService();
+  if (!service?.isReady() || !resolveMode()) return;
+  const model = structuredClone(service.getModelInfo());
+  const signature = JSON.stringify(model);
+  const currentService = (): IEmbeddingService | undefined => {
+    try {
+      return resolveService() === service &&
+        service.isReady() &&
+        resolveMode() &&
+        JSON.stringify(service.getModelInfo()) === signature
+        ? service
+        : undefined;
+    } catch {
+      return;
+    }
+  };
+  // This is an explicit canonical/secret-admitted collection rebuild, borrowing
+  // only the lifecycle's current provider; it cannot select another geometry.
+  if ((model.generationId ?? 'g0') === 'g0') await resetLegacyCohort([store], model, () => Boolean(currentService()));
+  const backend = await store.runExclusive(() => {
+    if (!currentService()) return;
+    return openVectorGeneration(store.getDb(), model, { create: true });
+  });
+  if (!backend || !currentService()) return;
+  return {
+    deps: { getEmbeddingService: currentService, vectorStore: backend.vectorStore },
+    publish: () => {
+      const db = store.getDb();
+      return db.transaction(() => {
+        const mode = resolveMode();
+        const coverageRequired = requiresCohortCoverage([store], model);
+        if (!currentService() || !mode || (coverageRequired && !inspectVectorGeneration(db, model).ready)) {
+          store.setEmbedDeps(undefined);
+          return false;
+        }
+        // An optional encode failure keeps lexical sources usable, but cannot
+        // publish a registered replacement until every current source is covered.
+        if ((model.generationId ?? 'g0') === 'g0' && coverageRequired)
+          db.prepare("UPDATE vector_generations SET state='ready' WHERE id='g0' AND fingerprint=?").run(
+            generationIdentity(model),
+          );
+        store.setEmbedDeps({ embedding: service, ...backend, mode });
+        return true;
+      })();
+    },
+  };
+}

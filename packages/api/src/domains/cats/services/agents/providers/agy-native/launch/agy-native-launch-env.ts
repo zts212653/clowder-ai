@@ -1,4 +1,4 @@
-import { homedir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { AgentServiceOptions } from '../../../../types.js';
 
@@ -26,7 +26,7 @@ export function isolatedOAuthEnv(home: string): Record<string, string | null> {
     ...inherited,
     PATH: process.env.PATH ?? '/usr/bin:/bin',
     LANG: process.env.LANG ?? 'en_US.UTF-8',
-    TMPDIR: process.env.TMPDIR ?? '/tmp',
+    TMPDIR: tmpdir(),
     TERM: 'dumb',
     // Managed invocations must not mutate the installed carrier in the background.
     AGY_CLI_DISABLE_AUTO_UPDATE: 'true',

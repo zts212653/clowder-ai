@@ -4,13 +4,11 @@
     "resourceFamily": "artifact-surface"
   },
   "retiredNames": [],
-  "canonicalNames": ["cat_cafe_offer_suggestion", "cat_cafe_post_action_receipt", "cat_cafe_suggestion_facts"],
+  "canonicalNames": ["cat_cafe_bring_to_desk"],
   "expectedProfiles": {
-    "cat_cafe_offer_suggestion": ["full"],
-    "cat_cafe_post_action_receipt": ["full"],
-    "cat_cafe_suggestion_facts": ["full"]
+    "cat_cafe_bring_to_desk": ["full"]
   },
-  "rollbackRevision": "3e77fe0b5564e8eedcf364a8234b44daa79d8692",
+  "rollbackRevision": "9b3c73184bc32a6d7841693a0b3c5d8234110085",
   "layers": {
     "mcp-definition": {
       "status": "covered",
@@ -41,7 +39,7 @@
     },
     "eval": {
       "status": "not-applicable",
-      "rationale": "F335 交付二 adds three callback tools for the one-tap suggestion row (offer, receipt, per-kind facts). Deterministic registration, profile and API route tests cover them; whether cats offer well is judged by the per-kind facts the tools return and F335's own GT, not by an MCP eval.",
+      "rationale": "F335 交付三 adds one callback tool: a cat hands a saved work to the desktop cat (「桌面猫带来」). Deterministic registration, profile and API route tests cover it; whether cats bring well is judged by the per-kind facts (brought-work) and F335's own GT, not by an MCP eval.",
       "absenceEvidence": []
     },
     "observability": {

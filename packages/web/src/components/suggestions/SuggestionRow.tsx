@@ -78,7 +78,7 @@ export function SuggestionRow({
   align?: 'start' | 'end';
 }) {
   const row = useSuggestionStore((state) => rowForMessage(state.byThread[threadId], messageId));
-  if (!row || row.state === 'ignored') return null;
+  if (!row || (row.state === 'ignored' && !row.watcherSupplement)) return null;
   return <SuggestionRowBody row={row} align={align} />;
 }
 
@@ -99,6 +99,12 @@ function SuggestionRowBody({ row, align }: { row: SuggestionView; align: 'start'
     if (!result.ok) setError(result.error);
   };
   const avatar = <SuggestionAvatar catId={row.catId} watcher={row.byline === 'watcher'} />;
+  const supplement = row.watcherSupplement ? (
+    <>
+      <SuggestionAvatar catId={row.watcherSupplement.catId} watcher />
+      <span>{row.watcherSupplement.text}</span>
+    </>
+  ) : null;
   const place = align === 'end' ? ' w-row-end' : '';
   const failure = error ? (
     <span className="w-row-error" role="alert">
@@ -106,6 +112,12 @@ function SuggestionRowBody({ row, align }: { row: SuggestionView; align: 'start'
     </span>
   ) : null;
 
+  if (row.state === 'ignored')
+    return (
+      <div className={`w-rcpt${place}`} data-testid="suggestion-row">
+        {supplement}
+      </div>
+    );
   if (row.state === 'open' || row.state === 'applying') {
     return (
       <div className={`w-sugg${place}`} data-testid="suggestion-row" data-state={row.state} aria-busy={inert}>
@@ -124,6 +136,7 @@ function SuggestionRowBody({ row, align }: { row: SuggestionView; align: 'start'
             <CloseIcon />
           </button>
         </AppTooltip>
+        {supplement}
         {failure}
       </div>
     );
@@ -137,6 +150,7 @@ function SuggestionRowBody({ row, align }: { row: SuggestionView; align: 'start'
       open={open}
       inert={inert}
       failure={failure}
+      supplement={supplement}
       onUndo={() => void decide('undo')}
     />
   );
@@ -156,6 +170,7 @@ function ReceiptRow({
   open,
   inert,
   failure,
+  supplement,
   onUndo,
 }: {
   row: SuggestionView;
@@ -164,6 +179,7 @@ function ReceiptRow({
   open: (() => void) | undefined;
   inert: boolean;
   failure: ReactNode;
+  supplement: ReactNode;
   onUndo: () => void;
 }) {
   const copy = useShellCopy(suggestionCopy);
@@ -189,6 +205,7 @@ function ReceiptRow({
           {resume && row.state !== 'dismissed' ? copy.resume : copy.undo}
         </button>
       ) : null}
+      {supplement}
       {failure}
     </div>
   );

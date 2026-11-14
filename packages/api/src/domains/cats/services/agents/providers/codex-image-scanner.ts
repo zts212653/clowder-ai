@@ -22,6 +22,7 @@ export const CODEX_IMAGE_MIME_BY_EXTENSION: Record<string, SupportedImageMime> =
   '.jpeg': 'image/jpeg',
   '.gif': 'image/gif',
   '.webp': 'image/webp',
+  '.svg': 'image/svg+xml',
 };
 
 export interface CodexImageScanOptions {

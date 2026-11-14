@@ -19,7 +19,18 @@ export interface CodexAccountLaunchDescriptor {
   readonly managed?: true;
   readonly identity?: CodexAccountIdentity;
 }
-/** Private API execution state is stable across probes, calls and reconnects, without OAuth files. */
+export const CODEX_API_DEFAULT_BASE_URL = 'https://api.openai.com/v1';
+
+/**
+ * F320 KD-3: credentials are isolated per account, conversations are shared. Codex resumes a thread
+ * only on the provider id that wrote it, so only the official endpoint can continue OAuth threads
+ * (builtin provider + in-memory key). A gateway keeps its own provider and private state.
+ */
+export function codexApiSharesConversationState(authMode: string | undefined, baseUrl: string | undefined): boolean {
+  return authMode === 'api_key' && baseUrl?.trim().replace(/\/+$/, '') === CODEX_API_DEFAULT_BASE_URL;
+}
+
+/** API execution state is stable across probes, calls and reconnects, without OAuth files. */
 export function resolveCodexApiExecutionHome(
   descriptor: CodexAccountLaunchDescriptor,
   baseUrl: string,
@@ -30,7 +41,9 @@ export function resolveCodexApiExecutionHome(
     accountRevision: descriptor.accountRevision,
     baseUrl,
     cwd: codexCanonicalPath(cwd, cwd),
-    scope: 'private',
+    // A shared-conversation home starts fresh: earlier private homes hold real directories
+    // where the shared links belong, and their custom-provider threads cannot be resumed anyway.
+    scope: codexApiSharesConversationState(descriptor.authMode, baseUrl) ? 'shared-conversations' : 'private',
   };
   const key = createHash('sha256').update(JSON.stringify(scope)).digest('hex');
   return codexCanonicalPath(

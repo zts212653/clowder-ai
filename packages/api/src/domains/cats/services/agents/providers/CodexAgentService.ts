@@ -2,11 +2,21 @@ import type { RuntimeProviderProfile } from '../../../../../config/account-resol
 import { findCodexProjectMcpConflict } from '../../../../../config/capabilities/codex-project-mcp-compatibility.js';
 import { usesNativeToolConfiguration } from '../../../../../config/cat-account-binding.js';
 import { finalizeCodexAccountEnvironment } from '../../../../../config/codex-account-environment.js';
-import { resolveCodexAccountLaunch, resolveCodexApiExecutionHome } from '../../../../../config/codex-account-launch.js';
+import {
+  CODEX_API_DEFAULT_BASE_URL,
+  codexApiSharesConversationState,
+  resolveCodexAccountLaunch,
+  resolveCodexApiExecutionHome,
+} from '../../../../../config/codex-account-launch.js';
 import { codexCliConfig } from '../../../../../config/codex-launch-config.js';
 import { codexManagedLaunchArgs } from '../../../../../config/codex-managed-launch.js';
+import { prepareCodexApiSharedConversationState } from '../../../../../config/codex-managed-layout.js';
 import { assertCodexManagedPlatformSupport } from '../../../../../config/codex-managed-support.js';
-import { assertCodexSharedStateRoots } from '../../../../../config/codex-shared-state.js';
+import {
+  assertCodexSharedStateRoots,
+  codexUsesSharedState,
+  resolveCodexSharedStateRoots,
+} from '../../../../../config/codex-shared-state.js';
 import { prepareCodexEnvironment } from '../../../../../utils/codex-network-environment.js';
 import { agentServiceGeneration } from '../registry/AgentRegistry.js';
 import { inspectCodexImportSession, listCodexImportSessions } from './CodexLocalSessionSource.js';
@@ -18,6 +28,7 @@ import {
 import { bindCodexAccountConfiguration } from './codex-app-server-account-configuration.js';
 import {
   codexConfigObjectFromArgs,
+  codexDeclaredServerNames,
   codexMcpConfigArgs,
   codexNativeMcpThreadConfig,
   isCodexConfigObject,
@@ -179,7 +190,7 @@ import {
 } from './codex-app-server-control-options.js';
 import { buildCodexCapacityRecoveryCardMessage } from './codex-capacity-recovery-card.js';
 import { CodexErrorEvidence } from './codex-error-evidence.js';
-import { CODEX_LIVE_POLICY_ARGS } from './codex-live-policy.js';
+import { CODEX_LIVE_DISABLED_FEATURES, CODEX_LIVE_POLICY_ARGS } from './codex-live-policy.js';
 import { codexLoopbackProxyEnvironment } from './codex-loopback-proxy-env.js';
 import { type PreparedCodexNativeLaunch, prepareCodexNativeLaunch } from './codex-plugin-native-launch.js';
 import {
@@ -556,7 +567,6 @@ function toTomlString(value: string): string {
   return `"${escaped}"`;
 }
 
-const CODEX_API_DEFAULT_BASE_URL = 'https://api.openai.com/v1';
 function buildCodexCustomProviderArgs(baseUrl: string, authMode: CodexAuthMode): string[] {
   return [
     '--config',
@@ -578,6 +588,33 @@ function buildCodexCustomProviderArgs(baseUrl: string, authMode: CodexAuthMode):
         ]
       : []),
   ];
+}
+
+/**
+ * F320 KD-3: an official key logs in to memory only and pins the official endpoint on the command line,
+ * which outranks user and trusted-project config exactly as the former custom provider's base_url did.
+ */
+function codexApiSharedConversationArgs(oauthTransport: string): string[] {
+  const endpoint = toTomlString(CODEX_API_DEFAULT_BASE_URL);
+  return [
+    '--config',
+    'cli_auth_credentials_store="ephemeral"',
+    '--config',
+    `openai_base_url=${endpoint}`,
+    ...(oauthTransport === 'https' ? ['--config', `model_providers.openai_https.base_url=${endpoint}`] : []),
+  ];
+}
+
+/** Create the selected API home; an official key links its conversation state to the shared root. */
+function prepareCodexApiHome(home: string | null | undefined, sharedStateRoot?: string): void {
+  if (!home) throw new Error('Codex account home is unavailable');
+  if (sharedStateRoot) prepareCodexApiSharedConversationState(home, sharedStateRoot);
+  else mkdirSync(home, { recursive: true, mode: 0o700 });
+}
+
+/** A configured sqlite_home outranks CODEX_SQLITE_HOME; only the command line outranks config files. */
+function codexSqliteHomeArgs(sqliteHome: string): string[] {
+  return ['--config', `sqlite_home=${toTomlString(sqliteHome)}`];
 }
 
 const CODEX_SIGNATURE_BOUNDARY_INSTRUCTION =
@@ -1044,6 +1081,15 @@ function readInitializedProviderVersion(value: unknown): string {
 export class CodexAgentService implements AgentService {
   readonly catId: CatId;
   private readonly spawnFn: SpawnFn | undefined;
+
+  /**
+   * #1838: on Windows a turn's provider starts either through the exec_json CLI path or a direct
+   * app_server session, both with the turn's invocationId; the unix-socket pool never runs there.
+   * An injected spawnFn owns its own process.
+   */
+  get windowsProviderHosts(): boolean {
+    return this.spawnFn === undefined;
+  }
   private readonly model: string;
   private readonly auditLog: AuditLogSink;
   private readonly rawArchive: RawArchiveSink;
@@ -1113,11 +1159,21 @@ export class CodexAgentService implements AgentService {
   }
 
   supportsToolExecutionPolicy(policy: ToolExecutionPolicy): boolean {
+    if (policy.mode === 'watcher') return this.carrierMode === 'app_server';
     // exec_json has the proven --ignore-user-config + empty MCP hard fence.
     // app-server 0.144.4 exposes no equivalent ignore-user-config flag, so a
     // read-only supplement must fail before model launch instead of trusting
     // sandbox alone while user-configured MCP tools may still load.
     return (policy.mode === 'read_only' || policy.mode === 'plugin_native') && this.carrierMode === 'exec_json';
+  }
+
+  boundedWatcherSessionCapability(): import('@cat-cafe/shared').WatcherCapability {
+    const [major, minor] = process.versions.node.split('.').map(Number);
+    if (major! < 24 || (major === 24 && minor! < 5))
+      return { supported: false, reason: '守望请求限额需要 Node 24.5 或更新版本' };
+    return this.carrierMode === 'app_server'
+      ? { supported: true, mechanism: 'native_revert', maxWorkingContextTokens: 30000, toolPolicy: 'watcher' }
+      : { supported: false, reason: '此运行方式尚不支持有界续用会话' };
   }
 
   freshnessCarrierCapability(
@@ -1251,7 +1307,13 @@ export class CodexAgentService implements AgentService {
     input: LocalSessionReadInput,
     read: (client: CodexAppServerNativeRpcClient) => Promise<T>,
   ): Promise<T> {
-    const launch = await this.prepareCapabilityLaunch(input.cwd, input.account, input.cliConfigArgs, true);
+    const { apiSharedStateRoot, ...launch } = await this.prepareCapabilityLaunch(
+      input.cwd,
+      input.account,
+      input.cliConfigArgs,
+      true,
+    );
+    if (launch.env?.CODEX_AUTH_MODE === 'api_key') prepareCodexApiHome(launch.env.CODEX_HOME, apiSharedStateRoot);
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(new Error('Session check timed out')), input.timeoutMs);
     const options = { ...launch, invocationId: input.invocationId, signal: controller.signal };
@@ -1284,12 +1346,14 @@ export class CodexAgentService implements AgentService {
     if (this.carrierMode !== 'app_server' || !this.appServerHostPool) {
       throw new Error('codex_native_capability_source_unsupported');
     }
-    const launchConfiguration = await this.prepareCapabilityLaunch(input.cwd, input.account, input.cliConfigArgs);
+    const { apiSharedStateRoot, ...launchConfiguration } = await this.prepareCapabilityLaunch(
+      input.cwd,
+      input.account,
+      input.cliConfigArgs,
+    );
     // The native CLI creates an implicit home, but refuses a missing explicit one.
-    if (launchConfiguration.env?.CODEX_AUTH_MODE === 'api_key' && launchConfiguration.env.CODEX_HOME) {
-      const { mkdir } = await import('node:fs/promises');
-      await mkdir(launchConfiguration.env.CODEX_HOME, { recursive: true, mode: 0o700 });
-    }
+    if (launchConfiguration.env?.CODEX_AUTH_MODE === 'api_key')
+      prepareCodexApiHome(launchConfiguration.env.CODEX_HOME, apiSharedStateRoot);
     const controller = new AbortController();
     const timeout = setTimeout(
       () => controller.abort(new Error('authoritative_native_capability_source_timeout')),
@@ -1335,7 +1399,11 @@ export class CodexAgentService implements AgentService {
     account?: RuntimeProviderProfile,
     cliConfigArgs: readonly string[] = [],
     localInspection = false,
-  ): Promise<Pick<AgentCarrierSessionOptions, 'command' | 'args' | 'cwd' | 'env' | 'inheritParentEnv'>> {
+  ): Promise<
+    Pick<AgentCarrierSessionOptions, 'command' | 'args' | 'cwd' | 'env' | 'inheritParentEnv'> & {
+      readonly apiSharedStateRoot?: string;
+    }
+  > {
     if (!localInspection && (this.carrierMode !== 'app_server' || !this.appServerHostPool))
       throw new Error('codex_native_capability_source_unsupported');
     const nativeTool = usesNativeToolConfiguration(catRegistry.tryGet(this.catId)?.config);
@@ -1372,11 +1440,23 @@ export class CodexAgentService implements AgentService {
       ),
     );
     const descriptor = resolveCodexAccountLaunch(selected, { cwd, env });
-    if (descriptor.managed || (descriptor.accountRef === 'codex' && descriptor.authMode === 'oauth'))
+    if (codexUsesSharedState(descriptor))
       assertCodexSharedStateRoots(descriptor.accountOwnerRoot, { launch: descriptor });
     if (descriptor.managed) await assertCodexManagedPlatformSupport(descriptor.credentialHome, this.cliCommand);
+    const apiSharedConversations =
+      explicitApiAccount && codexApiSharesConversationState(descriptor.authMode, customBaseUrl);
+    const apiSharedRoots = apiSharedConversations
+      ? resolveCodexSharedStateRoots(descriptor.accountOwnerRoot)
+      : undefined;
     const args = ['app-server', '--stdio'];
-    if (descriptor.authMode === 'api_key') {
+    if (apiSharedRoots)
+      args.push(
+        '--config',
+        'model_provider="openai"',
+        ...codexApiSharedConversationArgs('builtin'),
+        ...codexSqliteHomeArgs(apiSharedRoots.sqliteHome),
+      );
+    else if (descriptor.authMode === 'api_key') {
       if (customBaseUrl) args.push(...buildCodexCustomProviderArgs(customBaseUrl, 'api_key'));
     } else if (descriptor.authMode === 'oauth') args.push('--config', 'model_provider="openai"');
     const memberConfigArgs = stripReservedCodexSystemConfigs(
@@ -1416,10 +1496,12 @@ export class CodexAgentService implements AgentService {
             args,
             cwd,
             ...(executionHome ? { executionHome } : {}),
+            ...(apiSharedRoots ? { sharedConversationRoots: apiSharedRoots } : {}),
           }),
           { workingDirectory: cwd },
         ),
       ),
+      ...(apiSharedRoots ? { apiSharedStateRoot: apiSharedRoots.stateRoot } : {}),
     };
   }
 
@@ -1595,9 +1677,13 @@ export class CodexAgentService implements AgentService {
       throw new Error('codex_continuity_preflight_requires_app_server');
     }
     const readOnly = options?.toolExecutionPolicy?.mode === 'read_only';
+    const watcher = options?.boundedWatcher;
+    if (options?.toolExecutionPolicy?.mode === 'watcher' && !watcher) throw new Error('watcher_host_port_required');
+    if (watcher && (options?.toolExecutionPolicy?.mode !== 'watcher' || carrierMode !== 'app_server'))
+      throw new Error('watcher_carrier_unsupported');
     const live = options?.liveCompanion;
     if (live && (!live.configure || !options?.callbackEnv)) throw new Error('Live Host credentials unavailable');
-    const liveConfig = live ? await live.configure?.(options?.callbackEnv!) : undefined;
+    const liveConfig = watcher?.config ?? (live ? await live.configure?.(options?.callbackEnv!) : undefined);
     // Codex CLI has no system prompt flag; prepend identity to prompt text.
     // In preflight mode the identity prepend has to ride along inside `settle`,
     // because the bytes do not exist until the verdict is in.
@@ -1628,8 +1714,8 @@ export class CodexAgentService implements AgentService {
       : await extractTrustedImagePaths(options?.contentBlocks, options?.uploadDir, options?.resolveTrustedImagePath);
     const imageArgs = imagePaths.flatMap((path) => ['--image', path]);
 
-    const sandboxMode = readOnly || live || native ? 'read-only' : launchPolicy.sandboxMode;
-    const approvalPolicy = readOnly || live || native ? 'never' : launchPolicy.approvalPolicy;
+    const sandboxMode = readOnly || live || native || watcher ? 'read-only' : launchPolicy.sandboxMode;
+    const approvalPolicy = readOnly || live || native || watcher ? 'never' : launchPolicy.approvalPolicy;
     const inheritedEffort =
       options?.executionPreferences?.effort ?? getCatEffort(this.catId as string, undefined, 'openai', effectiveModel);
     const effortLevel =
@@ -1671,6 +1757,7 @@ export class CodexAgentService implements AgentService {
       process.platform !== 'win32' &&
       !readOnly &&
       !live &&
+      !watcher &&
       !isInvocationBoundMcpLaunch(options?.callbackEnv) &&
       !options?.agentCarrierSessionFactory &&
       !!appServerHostPool;
@@ -1706,7 +1793,7 @@ export class CodexAgentService implements AgentService {
     const {
       args: catCafeMcpArgs,
       bearerEnv: mcpBearerEnv,
-      declaredServerNames: declaredMcpServerNames,
+      declaredServerNames: requestedMcpServerNames,
       privateServers: privateMcpServers,
     } = native
       ? { args: [], bearerEnv: {}, declaredServerNames: [native.serverName], privateServers: undefined }
@@ -1724,14 +1811,16 @@ export class CodexAgentService implements AgentService {
           : await buildCatCafeMcpArgs(mcpCallbackEnv, options?.workingDirectory, options?.frozenCodexMcpInput);
     // Non-Git projects also need this startup flag for read-only turns.
     // The sandbox, approval policy, and capability restrictions remain separate.
-    const gitRepoArgs = live || native ? [] : buildGitRepoArgs(options?.workingDirectory);
+    const gitRepoArgs = live || native || watcher ? [] : buildGitRepoArgs(options?.workingDirectory);
     // User-defined CLI args from the member editor (#567) — passed as-is, no implicit wrapping.
     // Each entry is split by whitespace (e.g. "--config model_reasoning_effort=\"low\"").
     // F203 Phase C / 砚砚 P1: strip reserved system config keys (developer_instructions,
     // carries L0) before dedup — otherwise dedup() would skip the system push and the
     // L0 would be silently overridden by any cliConfigArgs entry with the same key.
     const userConfigArgs = stripReservedCodexSystemConfigs(
-      (readOnly || live || native ? [] : (options?.cliConfigArgs ?? [])).flatMap((arg) => arg.trim().split(/\s+/)),
+      (readOnly || live || native || watcher ? [] : (options?.cliConfigArgs ?? [])).flatMap((arg) =>
+        arg.trim().split(/\s+/),
+      ),
       this.catId as string,
     );
     // Collect user config keys across every accepted spelling so ordinary,
@@ -1787,7 +1876,12 @@ export class CodexAgentService implements AgentService {
         options?.accountEnv?.OPENAI_BASE_URL ??
         options?.accountEnv?.OPENAI_API_BASE) ||
       (authMode === 'api_key' ? CODEX_API_DEFAULT_BASE_URL : undefined);
-    const customProviderArgs: string[] = customBaseUrl ? buildCodexCustomProviderArgs(customBaseUrl, authMode) : [];
+    // F320 KD-3: an official key uses the same provider id as OAuth so either can resume the other's threads.
+    const apiSharedConversations =
+      !native && !nativeAuthentication && codexApiSharesConversationState(authMode, customBaseUrl);
+    const customProvider = !!customBaseUrl && !apiSharedConversations;
+    const customProviderArgs: string[] =
+      customBaseUrl && customProvider ? buildCodexCustomProviderArgs(customBaseUrl, authMode) : [];
     // Default OAuth sessions to Codex's built-in OpenAI provider so upstream
     // transport selection and recovery behavior stay intact. Incident
     // 2026-07-01 required an HTTPS-only workaround for repeated websocket TLS
@@ -1811,13 +1905,18 @@ export class CodexAgentService implements AgentService {
     const observeServedModel =
       (!customBaseUrl || (authMode === 'api_key' && customBaseUrl === CODEX_API_DEFAULT_BASE_URL)) &&
       servedModelObservation === 'on';
-    const oauthTransport = launchPolicy.oauthTransport;
+    // The watcher always uses its HTTPS request boundary. Select the existing owned
+    // provider before CLI startup: builtin IDs cannot be overridden, and Codex
+    // validates each thread against the process-wide provider at turn/start.
+    const oauthTransport = watcher ? 'https' : launchPolicy.oauthTransport;
     const builtinOpenaiProviderArgs: string[] =
-      !nativeAuthentication && !customBaseUrl && authMode === 'oauth' && oauthTransport === 'builtin'
+      ((!nativeAuthentication && !customBaseUrl && authMode === 'oauth') || apiSharedConversations) &&
+      oauthTransport === 'builtin'
         ? ['--config', 'model_provider="openai"']
         : [];
     const openaiHttpsProviderArgs: string[] =
-      !nativeAuthentication && !customBaseUrl && authMode === 'oauth' && oauthTransport === 'https'
+      (((!nativeAuthentication || watcher) && !customBaseUrl && authMode === 'oauth') || apiSharedConversations) &&
+      oauthTransport === 'https'
         ? [
             '--config',
             'model_provider="openai_https"',
@@ -1831,9 +1930,13 @@ export class CodexAgentService implements AgentService {
             'model_providers.openai_https.supports_websockets=false',
           ]
         : [];
-    const providerArgs = customBaseUrl
+    const providerArgs = customProvider
       ? customProviderArgs
-      : [...builtinOpenaiProviderArgs, ...openaiHttpsProviderArgs];
+      : [
+          ...builtinOpenaiProviderArgs,
+          ...openaiHttpsProviderArgs,
+          ...(apiSharedConversations ? codexApiSharedConversationArgs(oauthTransport) : []),
+        ];
 
     // Codex CLI sends the model name verbatim to the API (model_info.slug).
     // model_provider="custom" only controls which provider entry (base_url, env_key) to use.
@@ -1843,18 +1946,21 @@ export class CodexAgentService implements AgentService {
     const cliModel = effectiveModel;
     const modelArgs: string[] = !cliModel
       ? []
-      : customBaseUrl
+      : customProvider
         ? ['--config', `model=${toTomlString(cliModel)}`]
         : ['--model', cliModel];
 
     // F203 Phase C: compile per-cat L0 → OpenAI `developer` role args.
     // fail-closed (generator contract, mirrors the CLI-not-found path below).
-    const l0Result = await this.compileDeveloperInstructions(
-      cliModel,
-      native ? undefined : options?.callbackEnv?.CAT_CAFE_USER_ID,
-      native ? native.kind : 'owner',
-      options?.frozenL0Input,
-    );
+    // The bounded observer owns a frozen role prompt and never consumes the work L0.
+    const l0Result = watcher
+      ? { value: watcher.instructions }
+      : await this.compileDeveloperInstructions(
+          cliModel,
+          native ? undefined : options?.callbackEnv?.CAT_CAFE_USER_ID,
+          native ? native.kind : 'owner',
+          options?.frozenL0Input,
+        );
     if (native) await native.assertCurrent();
     if ('error' in l0Result) {
       yield {
@@ -1898,7 +2004,8 @@ export class CodexAgentService implements AgentService {
     const invocationApprovalSurface: CodexApprovalSurface = hasRuntimeInteractionSurface
       ? 'interactive'
       : this.approvalSurface;
-    const developerInstructions = appendCatCafeGithubWriteRouting(l0Result.value, invocationApprovalSurface);
+    const developerInstructions =
+      watcher?.instructions ?? appendCatCafeGithubWriteRouting(l0Result.value, invocationApprovalSurface);
     const explicitIdeate = options?.routeIntent?.intent === 'ideate' && options.routeIntent.explicit;
     const collaborationModeKind: 'plan' | 'default' | null = explicitIdeate
       ? 'plan'
@@ -2012,6 +2119,31 @@ export class CodexAgentService implements AgentService {
         ? buildCodexAppServerArgs([
             ...readOnlyArgs,
             ...(live ? CODEX_LIVE_POLICY_ARGS : []),
+            ...(watcher
+              ? [
+                  ...CODEX_LIVE_DISABLED_FEATURES.flatMap((feature) => ['--disable', feature]),
+                  '--disable',
+                  'multi_agent',
+                  '--enable',
+                  'code_mode_host',
+                  '--config',
+                  'agents.enabled=false',
+                  '--config',
+                  'features.multi_agent_v2={enabled=false,disable_native_tools=true}',
+                  '--config',
+                  'web_search="disabled"',
+                  '--config',
+                  'project_doc_max_bytes=0',
+                  '--config',
+                  'skills.include_instructions=false',
+                  '--config',
+                  'orchestrator.skills.enabled=false',
+                  '--config',
+                  'orchestrator.mcp.enabled=false',
+                  '--config',
+                  'features.enable_request_compression=false',
+                ]
+              : []),
             ...dedup(modelArgs),
             ...dedup(reasoningArgs),
             ...dedup(contextWindowArgs),
@@ -2037,6 +2169,11 @@ export class CodexAgentService implements AgentService {
             codexConfigObjectFromArgs(desktopIsolationArgs),
           )
         : undefined;
+    // What the carrier actually registers: a shared browser renamed in the thread config, not its stub.
+    const declaredMcpServerNames =
+      requestedMcpServerNames && appServerThreadConfig
+        ? codexDeclaredServerNames(requestedMcpServerNames, appServerThreadConfig)
+        : requestedMcpServerNames;
 
     const metadata: MessageMetadata = {
       provider: 'openai',
@@ -2062,10 +2199,16 @@ export class CodexAgentService implements AgentService {
           { id: 'codex', authType: authMode === 'api_key' ? 'api_key' : 'oauth', envVars: options?.accountEnv },
           { cwd: options?.workingDirectory, authMode },
         );
-      if (accountLaunch.managed || (accountLaunch.accountRef === 'codex' && accountLaunch.authMode === 'oauth'))
+      if (codexUsesSharedState(accountLaunch))
         assertCodexSharedStateRoots(accountLaunch.accountOwnerRoot, { launch: accountLaunch });
+      const apiSharedRoots = apiSharedConversations
+        ? resolveCodexSharedStateRoots(accountLaunch.accountOwnerRoot)
+        : undefined;
       if (!native) {
-        const managedArgs = codexManagedLaunchArgs(accountLaunch, userConfigArgs);
+        const managedArgs = [
+          ...codexManagedLaunchArgs(accountLaunch, userConfigArgs),
+          ...(apiSharedRoots ? codexSqliteHomeArgs(apiSharedRoots.sqliteHome) : []),
+        ];
         const promptSeparator = args.indexOf('--');
         args.splice(promptSeparator < 0 ? args.length : promptSeparator, 0, ...managedArgs);
         appServerArgs.push(...managedArgs);
@@ -2173,15 +2316,15 @@ export class CodexAgentService implements AgentService {
             ...(homeIsolated
               ? { executionHome: apiExecutionHome ?? rawEnv.CODEX_HOME ?? `${rawEnv.HOME}/.codex` }
               : {}),
+            ...(apiSharedRoots ? { sharedConversationRoots: apiSharedRoots } : {}),
           });
       codexEnv = { ...finalAccountEnv };
       if (!native && !readOnly && !live && privateMcpRpc) {
         Object.assign(codexEnv, codexLoopbackProxyEnvironment(codexEnv));
       }
-      if (!native && authMode === 'api_key') {
-        if (!finalAccountEnv.CODEX_HOME) throw new Error('Codex account home is unavailable');
-        mkdirSync(finalAccountEnv.CODEX_HOME, { recursive: true, mode: 0o700 });
-      }
+      // The watcher has its own local model request boundary; its upstream retains the same proxy policy.
+      if (watcher) Object.assign(codexEnv, codexLoopbackProxyEnvironment(codexEnv));
+      if (!native && authMode === 'api_key') prepareCodexApiHome(finalAccountEnv.CODEX_HOME, apiSharedRoots?.stateRoot);
 
       // Freeze only after account and local-connection policy. All carriers consume
       // this snapshot without inheriting keys that the finalizer removed.
@@ -2298,7 +2441,9 @@ export class CodexAgentService implements AgentService {
           nativeInstructions: Object.freeze([
             Object.freeze({
               body: developerInstructions,
-              injectionDecision: 'native_l0_compiled_with_signature_boundary',
+              injectionDecision: watcher
+                ? 'watcher_native_base_instructions'
+                : 'native_l0_compiled_with_signature_boundary',
             }),
           ]),
           runtime: Object.freeze({
@@ -2431,13 +2576,14 @@ export class CodexAgentService implements AgentService {
               ...(options?.sessionId ? { sessionId: options.sessionId } : {}),
             },
             runInput: {
+              ...(watcher ? { boundedWatcher: watcher, outputSchema: watcher.outputSchema } : {}),
               ...(options?.requireExactResume ? { requireExactResume: true } : {}),
               ...(options?.liveCompanion ? { live: options.liveCompanion } : {}),
               prompt: effectivePromptSource,
               thread: options?.sessionId
                 ? { kind: 'resume' as const, threadId: options.sessionId }
                 : { kind: 'start' as const },
-              ...(!customBaseUrl && cliModel ? { model: cliModel } : {}),
+              ...(!customProvider && cliModel ? { model: cliModel } : {}),
               ...(options?.workingDirectory ? { cwd: options.workingDirectory } : {}),
               sandbox: sandboxMode,
               approvalPolicy,
@@ -2531,8 +2677,8 @@ export class CodexAgentService implements AgentService {
               // invocation's, and it stops the turn through the signal above.
               interruptGraceMs: KILL_GRACE_MS,
             },
-            retryBudget: options?.liveCompanion ? 0 : 1,
-            ...(options?.liveCompanion ? { modelCapacityRetryDelaysMs: [] } : {}),
+            retryBudget: options?.liveCompanion || watcher ? 0 : 1,
+            ...(options?.liveCompanion || watcher ? { modelCapacityRetryDelaysMs: [] } : {}),
             ...(options?.recoveryAnchor ? { recoveryAnchor: options.recoveryAnchor } : {}),
             clientDeps: {
               onUnsupportedNotification: ({ method }) => {

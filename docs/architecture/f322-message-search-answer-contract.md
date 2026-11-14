@@ -15,17 +15,21 @@ mcp_admission_claims:
     decision: accepted
 ---
 
-# 同一查找结果，随实际回答发布
+# 猫选原句，随实际回答发布
 
-接受来源：人类 `[thread-id]#private-source-id`、Opus `[thread-id]#private-source-id`，以及 Astra 单次契约裁决 `[thread-id]#private-source-id`。本文件只把该裁决投影到工具、存储和原消息提交边界；不接受正式页面、自然 consumer 或整 Task168/J5。
+接受来源：人类 `[thread-id]#private-source-id`、Opus `[thread-id]#private-source-id`，以及 Astra 单次契约裁决 `[thread-id]#private-source-id`。原裁决定义的发布与绑定边界保留。2026-11-06 依 `final-plan.md` §2.1/2.4 与 `[thread-id]#private-source-id` 续办两阶段方案：新卡消费猫选来源，专属生成式判官整层退役；不代签正式页面或整 Task168/J5 验收。
 
 ## 入口与预算
 
-`search_evidence(resultUnit=message)` 原 GET 和 readonly 挂载保持只读。显式写工具 `cat_cafe_prepare_message_search_answer` 复用原 message query 参数和 `MessageSearchService`，POST `/api/callbacks/search-evidence/answer`。独立工具的必要性是使持久写副作用可以被工具策略与 readonly 挂载准确拒绝，不能暗藏在原 GET 中。`retrievalMode` 映射到原 HTTP `mode`，其 lexical/semantic/hybrid 只选择原检索策略，不选择不同写操作。原 15s、两 call、pool、publicReply 和取消边界不变。
+`search_evidence(resultUnit=message)` 原 GET 和 readonly 挂载保持只读；普通搜索保留 embedding/hybrid，以相关队列准入后作 relevance 或 K32 time 投影，不起生成式判官。显式写工具 `cat_cafe_prepare_message_search_answer` POST `/api/callbacks/search-evidence/answer`，新操作必须提交猫已读过的来源、当前 contentRevision、原句与选用理由。宿主核当前权限、版本、UTF-16 锚点及正文/引文/批注归属，不再搜索或判断原句是否支持结论。选择理由始终归认证猫，不能冒充系统 supported。
+
+原 query/filter/sort 参数保留为操作摘要和历史重试兼容；新卡以猫的选材顺序为准。独立工具仍使持久写副作用可被工具策略与 readonly 挂载准确拒绝，不暗藏于 GET。原 15s、publicReply、最终准入、取消及 24k 响应边界不变；检索候选池与向量参数不因判官退役改变。
 
 Host 从认证取得 owner、producer；agent-key 明确提供目的 thread，搜索范围 threadId 不充当发布目的地。cloud-conversation 必须使用既有 exact-source return grant，准备时核验并释放该 grant，实际 post 仍走原 grant 提交。没有新授权、预算或重试。
 
-同 owner/producer/operationId 在 memory 单 writer 内先领取，再执行一次原搜索。重复调用只读 searching/prepared/failed 或已绑定的实际消息；不自动重查。normal R 每个 invocation 只有一个已接受回答用途。记录在现有 memory SQLite，schema v72，TTL=0，完整 response 只存一份，含原 source contentRevision 和 decision documentRevision。原 24k 响应预算中预留固定回执空间，既不扩大输入池也不扩大结果。
+同 owner/producer/operationId 仍只拥有一份持久结果。新操作缺少 selections 在 claim 前明确拒绝，猫可修正同一 operationId；选材核验通过后沿原单 writer claim/complete。重试只读 searching/prepared/failed 或已绑定消息，不重新搜索或推理。省略 selections 仅能续读已存在、摘要相同的 query-only 历史操作；新选材操作重试仍带同一 selections。省略选材不会生成新卡。历史 supported 快照与摘要不重写，损坏或缺失如实不可用。
+
+normal R 每个 invocation 只有一个已接受回答用途。记录仍在 memory SQLite、schema v72、TTL=0；完整 response 只存一份，含 source contentRevision、结构归属及 decision documentRevision。24k 预算中为固定回执预留空间，不扩大结果。
 
 ## 唯一快照与消息绑定
 

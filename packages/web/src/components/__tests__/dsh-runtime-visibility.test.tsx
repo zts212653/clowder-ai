@@ -160,14 +160,16 @@ it('shows the reported ACP route on the inherited model choice without changing 
       ),
     );
     const model = host.querySelectorAll('[role=combobox]')[0];
-    expect(model?.textContent).toContain('跟随 DSH 设置');
+    expect(model?.textContent).toContain('Custom Gateway / Model · 跟随 DSH 设置');
     await act(async () => (model as HTMLButtonElement).click());
+    expect(host.querySelector('[role=option][aria-selected=true]')?.textContent).toContain('跟随 DSH 设置');
+    expect(host.querySelectorAll('[role=option][aria-selected=true]')).toHaveLength(1);
+    expect(host.querySelectorAll('[role=option]')[1]?.getAttribute('aria-selected')).toBe('false');
+    expect(host.querySelectorAll('[role=option]')[1]?.textContent).toContain('当前继承模型');
     expect(host.querySelector('[role=option]')?.textContent).toContain('Custom Gateway / Model');
     expect(host.querySelector('[role=option]')?.textContent).toContain('客户端回报');
     expect(host.textContent).toContain('客户端回报');
-    const inspect = [...host.querySelectorAll('button')].find((button) => button.textContent === '读取 DSH 配置');
-    await act(async () => inspect?.click());
-    expect(host.textContent).toContain('不支持自动复制配置');
+    expect(host.textContent).not.toContain('读取 Desktop 配置');
     const summary = host.querySelector('[data-testid=member-model-summary]');
     expect(summary?.textContent).toContain('Custom Gateway / Model');
     expect(summary?.textContent).toContain('客户端回报');
@@ -176,6 +178,11 @@ it('shows the reported ACP route on the inherited model choice without changing 
     await act(async () => refresh?.click());
     expect(host.textContent).toContain('模型目录暂不可读取');
     expect(host.textContent).not.toContain('已读取模型信息，但默认模型尚未确认');
+    expect(model?.textContent).toContain('跟随 DSH 设置');
+    expect(model?.textContent).not.toContain('Custom Gateway / Model');
+    failCatalog = false;
+    await act(async () => refresh?.click());
+    expect(model?.textContent).toContain('Custom Gateway / Model · 跟随 DSH 设置');
     expect(patch).not.toHaveBeenCalled();
   } finally {
     await act(async () => root.unmount());

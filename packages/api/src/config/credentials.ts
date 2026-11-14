@@ -4,11 +4,12 @@
  * Pure read/write layer for {projectRoot}/.cat-cafe/credentials.json.
  * Override: CAT_CAFE_GLOBAL_CONFIG_ROOT env → uses that root instead.
  */
-import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import type { CredentialEntry } from '@cat-cafe/shared';
 import { resolveAccountWriteRoot } from './account-store-topology.js';
 import { assertSafeTestConfigRoot } from './test-config-write-guard.js';
+import { writeFileAtomic } from './write-file-atomic.js';
 
 const CONFIG_SUBDIR = '.cat-cafe';
 const CREDENTIALS_FILENAME = 'credentials.json';
@@ -19,21 +20,6 @@ function resolveGlobalRoot(projectRoot?: string): string {
 
 export function resolveCredentialsPath(projectRoot?: string): string {
   return resolve(resolveGlobalRoot(projectRoot), CONFIG_SUBDIR, CREDENTIALS_FILENAME);
-}
-
-function writeFileAtomic(filePath: string, content: string): void {
-  const tempPath = `${filePath}.tmp-${process.pid}-${Date.now()}`;
-  writeFileSync(tempPath, content, { encoding: 'utf-8', mode: 0o600 });
-  try {
-    renameSync(tempPath, filePath);
-  } catch (error) {
-    try {
-      unlinkSync(tempPath);
-    } catch {
-      /* ignore cleanup failure */
-    }
-    throw error;
-  }
 }
 
 function readAll(projectRoot?: string): Record<string, CredentialEntry> {
@@ -63,7 +49,7 @@ export function assertCredentialsReadable(projectRoot?: string): void {
 function writeAll(creds: Record<string, CredentialEntry>, projectRoot?: string): void {
   const credPath = resolveCredentialsPath(projectRoot);
   mkdirSync(resolve(resolveGlobalRoot(projectRoot), CONFIG_SUBDIR), { recursive: true });
-  writeFileAtomic(credPath, `${JSON.stringify(creds, null, 2)}\n`);
+  writeFileAtomic(credPath, `${JSON.stringify(creds, null, 2)}\n`, { mode: 0o600 });
   chmodSync(credPath, 0o600);
 }
 

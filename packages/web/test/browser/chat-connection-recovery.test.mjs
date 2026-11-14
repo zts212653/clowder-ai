@@ -8,6 +8,7 @@ import { registerEndGrowthJourney } from './chat-end-growth.journey.mjs';
 import { registerNavigationOwnerJourneys } from './chat-navigation-owner.journey.mjs';
 import { registerReadingLandingJourneys } from './chat-reading-landing.journey.mjs';
 import { registerReadingWheelJourneys } from './chat-reading-wheel.journey.mjs';
+import { registerStreamRecoveryJourneys } from './chat-stream-recovery.journey.mjs';
 import { registerStreamingWheelJourney } from './chat-streaming-wheel.journey.mjs';
 
 const webRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
@@ -54,6 +55,7 @@ registerReadingWheelJourneys({
   launchNativeScrollbarBrowser: () => chromium.launch({ headless: true, ignoreDefaultArgs: ['--hide-scrollbars'] }),
 });
 registerEndGrowthJourney({ origin, threadId, browser: () => browser, bundle: () => bundle.code });
+registerStreamRecoveryJourneys({ origin, threadId, browser: () => browser, bundle: () => bundle.code });
 
 function fixtureApiBody(pathname, state) {
   if (pathname === '/api/messages') {
@@ -68,11 +70,21 @@ function fixtureApiBody(pathname, state) {
   return { userId: 'fixture-owner', tasks: [], threads: [], cats: [] };
 }
 
-async function openConversation() {
+async function openConversation({ holdJoinAcks = false, savedRooms = null } = {}) {
   const page = await browser.newPage();
   const errors = [],
     writes = [],
-    sockets = [];
+    sockets = [],
+    heldJoinAcks = [],
+    joinedRooms = [];
+  if (savedRooms) {
+    // What an older build left in this tab's sessionStorage before the page loads.
+    await page.addInitScript((rooms) => {
+      for (const key of ['cat-cafe:ws:joined-rooms:v1:default-user']) {
+        window.sessionStorage.setItem(key, JSON.stringify(rooms));
+      }
+    }, savedRooms);
+  }
   const state = {
     historyReads: 0,
     documentLoads: 0,
@@ -93,8 +105,11 @@ async function openConversation() {
       const bracket = text.indexOf('[');
       const acknowledgement = text.slice(2, bracket);
       const [event, room] = JSON.parse(text.slice(bracket));
+      if (event === 'join_room') joinedRooms.push(room);
       if (event === 'join_room' && acknowledgement) {
-        socket.send(`43${acknowledgement}${JSON.stringify([{ ok: true, room }])}`);
+        const acknowledge = () => socket.send(`43${acknowledgement}${JSON.stringify([{ ok: true, room }])}`);
+        if (holdJoinAcks) heldJoinAcks.push(acknowledge);
+        else acknowledge();
       }
     });
   });
@@ -119,7 +134,10 @@ async function openConversation() {
   await page.goto(origin, { waitUntil: 'domcontentloaded' });
   await page.locator('[data-message-id="before"]').waitFor();
   await page.locator('main[data-connected="true"]').waitFor();
-  return { page, state, sockets, errors, writes };
+  const releaseJoinAcks = () => {
+    for (const acknowledge of heldJoinAcks.splice(0)) acknowledge();
+  };
+  return { page, state, sockets, errors, writes, releaseJoinAcks, heldJoinAcks, joinedRooms };
 }
 
 function saveMissedReply(state) {
@@ -167,8 +185,11 @@ test('dormant automatic retry recovers the saved reply while execution polling c
     await page.clock.runFor(6000);
     await page.locator('[data-message-id="missed-reply"]').waitFor({ timeout: 3000 });
     assert.equal(await page.locator('[data-executions]').innerText(), 'codex-sol');
+    // History polling can finish before the new socket's connected state commits.
+    await page.locator('main[data-connected="true"]').waitFor({ timeout: 3000 });
     assert.equal(await page.locator('main').getAttribute('data-connected'), 'true');
-    assert.equal(sockets.length, 2);
+    // Teleport, workspace navigation and file watching are mounted too; they share the page connection.
+    assert.equal(sockets.length, 2, 'one connection per page, plus its one reconnect');
     assert(state.historyReads > previousReads);
     assert.equal(state.documentLoads, 1, 'no F5 or route remount');
     assert.deepEqual(errors, ['injected disconnect observer failure']);
@@ -186,11 +207,50 @@ test('returning to a connected quiet page fetches the missed reply without a soc
     await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
     await page.clock.runFor(1000);
     await page.locator('[data-message-id="missed-reply"]').waitFor({ timeout: 3000 });
-    assert.equal(sockets.length, 1);
+    assert.equal(sockets.length, 1, 'one Socket.IO connection per page, shared-connection consumers included');
     assert(state.historyReads > previousReads);
     assert.equal(state.documentLoads, 1);
     assert.deepEqual(errors, []);
     assert.deepEqual(writes, []);
+  } finally {
+    await page.close();
+  }
+});
+
+// PR-3a (contract 3.2, Astra R1 P1-A): the first History read can return a snapshot taken before a
+// message lands; if the room join is confirmed only after that, nothing in the room will ever say so.
+test('a message saved between the first History read and the room join appears once the join is confirmed', async () => {
+  const { page, state, errors, writes, releaseJoinAcks, heldJoinAcks } = await openConversation({
+    holdJoinAcks: true,
+  });
+  try {
+    assert(heldJoinAcks.length > 0, 'the thread room join is still waiting for its acknowledgement');
+    saveMissedReply(state);
+    const readsBeforeJoin = state.historyReads;
+
+    releaseJoinAcks();
+    await page.clock.runFor(1000);
+    await page.locator('[data-message-id="missed-reply"]').waitFor({ timeout: 3000 });
+
+    assert(state.historyReads > readsBeforeJoin, 'the confirmed join was followed by a History read');
+    assert.deepEqual(errors, []);
+    assert.deepEqual(writes, []);
+  } finally {
+    await page.close();
+  }
+});
+
+// PR-3b (contract 3.1): a page subscribes to its foreground thread only; rooms an earlier page saved
+// are not restored, so a background thread's stream no longer reaches this page piece by piece.
+test('a loaded page joins only its foreground thread room, not rooms an earlier page saved', async () => {
+  const { page, errors, joinedRooms } = await openConversation({
+    savedRooms: ['thread:old-background-a', 'thread:old-background-b', `thread:${threadId}`],
+  });
+  try {
+    await page.clock.runFor(1000);
+    const threadRooms = joinedRooms.filter((room) => room.startsWith('thread:'));
+    assert.deepEqual([...new Set(threadRooms)], [`thread:${threadId}`]);
+    assert.deepEqual(errors, []);
   } finally {
     await page.close();
   }

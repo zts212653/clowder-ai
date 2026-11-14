@@ -10,40 +10,23 @@ import {
   useState,
 } from 'react';
 import type { AttentionListRow } from './attention-clusters';
+import {
+  FALLBACK_VIEWPORT_HEIGHT_PX,
+  offsetTopWithin,
+  viewportHeight,
+  visibleTopInset,
+} from './sidebar-scroll-geometry';
 import { useMeasuredSidebarRows } from './use-measured-sidebar-rows';
 import type { VirtualThreadListHandle } from './VirtualThreadList';
 
 const ROW_HEIGHT_PX = 80;
 const OVERSCAN_ROWS = 5;
-const FALLBACK_VIEWPORT_HEIGHT_PX = 640;
 
 interface VirtualAttentionListProps {
   rows: AttentionListRow[];
   scrollContainerRef: RefObject<HTMLDivElement>;
   renderItem: (row: AttentionListRow) => ReactNode;
   getRowHeight?: (row: AttentionListRow) => number;
-}
-
-function offsetTopWithin(element: HTMLElement, container: HTMLElement): number {
-  let top = 0;
-  let current: HTMLElement | null = element;
-  while (current && current !== container) {
-    top += current.offsetTop;
-    current = current.offsetParent as HTMLElement | null;
-  }
-  return top;
-}
-
-function visibleTopInset(container: HTMLElement): number {
-  const containerTop = container.getBoundingClientRect().top;
-  const occluder = container.querySelector<HTMLElement>('[data-scroll-occluder="true"]');
-  if (!occluder) return 0;
-  const rect = occluder.getBoundingClientRect();
-  return rect.top <= containerTop + 2 && rect.bottom > containerTop ? rect.bottom - containerTop : 0;
-}
-
-function viewportHeight(container: HTMLElement): number {
-  return container.clientHeight || FALLBACK_VIEWPORT_HEIGHT_PX;
 }
 
 export const VirtualAttentionList = forwardRef<VirtualThreadListHandle, VirtualAttentionListProps>(
@@ -110,7 +93,7 @@ export const VirtualAttentionList = forwardRef<VirtualThreadListHandle, VirtualA
       if (!container || !list) return;
       const listTop = offsetTopWithin(list, container);
       const relativeScrollTop = Math.max(0, container.scrollTop - listTop);
-      const viewportHeight = container.clientHeight || FALLBACK_VIEWPORT_HEIGHT_PX;
+      const visibleHeight = viewportHeight(container);
       const start = Math.max(
         0,
         (getRowHeight ? indexAt(relativeScrollTop) : Math.floor(relativeScrollTop / ROW_HEIGHT_PX)) - OVERSCAN_ROWS,
@@ -118,8 +101,8 @@ export const VirtualAttentionList = forwardRef<VirtualThreadListHandle, VirtualA
       const end = Math.min(
         rows.length,
         (getRowHeight
-          ? indexAt(relativeScrollTop + viewportHeight - 1) + 1
-          : Math.ceil((relativeScrollTop + viewportHeight) / ROW_HEIGHT_PX)) + OVERSCAN_ROWS,
+          ? indexAt(relativeScrollTop + visibleHeight - 1) + 1
+          : Math.ceil((relativeScrollTop + visibleHeight) / ROW_HEIGHT_PX)) + OVERSCAN_ROWS,
       );
       setRange((current) => (current.start === start && current.end === end ? current : { start, end }));
     }, [rows.length, scrollContainerRef, indexAt, getRowHeight]);

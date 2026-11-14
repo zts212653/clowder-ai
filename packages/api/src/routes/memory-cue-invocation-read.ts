@@ -1,4 +1,4 @@
-import type { CatId, MatterReadSummary } from '@cat-cafe/shared';
+import type { CatId } from '@cat-cafe/shared';
 import type Database from 'better-sqlite3';
 import type { FastifyPluginAsync } from 'fastify';
 import type { IInvocationRecordStore } from '../domains/cats/services/stores/ports/InvocationRecordStore.js';
@@ -9,7 +9,10 @@ import { MemoryCueEpisodeStore } from '../domains/memory/cue/MemoryCueEpisodeSto
 import { projectInvocationCues } from '../domains/memory/cue/project-invocation-cues.js';
 import type { MatterMemoryService } from '../domains/memory/matters/MatterMemoryService.js';
 import { resolveHeaderUserId, resolveSessionUserId } from '../utils/request-identity.js';
+import { parseCueInvocationBatch, readOwnerCueBatch } from './memory-cue-batch-read.js';
+import { cueThreadAccess, readOwnerCueInvocation } from './memory-cue-read-projection.js';
 import { memoryInvocationAccess } from './memory-invocation-access.js';
+import { withRecallMetricsSignal } from './recall-metrics-request.js';
 
 export interface MemoryCueInvocationReadOptions {
   matterMemoryService?: MatterMemoryService;
@@ -32,56 +35,53 @@ export const memoryCueInvocationReadRoutes: FastifyPluginAsync<MemoryCueInvocati
     if (!threadId || !invocationId) {
       return reply.status(400).send({ error: 'threadId and invocationId are required' });
     }
-    if (!opts.threadStore) return reply.status(503).send({ error: 'Thread store unavailable' });
-    const thread = await opts.threadStore.get(threadId);
-    if (!thread || thread.deletedAt) return reply.status(404).send({ error: 'Thread not found' });
-    const isIndexedSystemThread =
-      thread.createdBy === 'system' &&
-      (await opts.threadStore.list(userId)).some((visibleThread) => visibleThread.id === threadId);
-    if (!canAccessThread(thread, userId) && !isIndexedSystemThread) {
-      return reply.status(403).send({ error: 'Forbidden' });
-    }
-
-    const access = await memoryInvocationAccess(opts, userId, threadId, invocationId);
-    if (access.status !== 200) return reply.status(access.status).send({ error: access.error });
-
-    const events = episodeStore.listByInvocation(userId, threadId, invocationId);
-    const parent = await opts.invocationRecordStore?.get(invocationId);
-    const child = parent ? null : await opts.turnExecutionStore?.get(invocationId);
-    const cats = parent?.targetCats ?? (child ? [child.catId] : []);
-    const cues = [];
-    for (const cue of projectInvocationCues(events)) {
-      if (cue.resolverFamily !== 'matter') {
-        cues.push(cue);
-        continue;
-      }
-      // Legacy content-free cue reads retain their operator contract. Matter
-      // metadata can reveal original discussion content and requires a session.
-      if (!resolveSessionUserId(request) || !cats.includes(cue.consumerCatId as CatId) || !cue.readDetails) continue;
-      const read = await opts.matterMemoryService?.readReceipt(
-        userId,
-        cue.consumerCatId as CatId,
-        cue.readDetails,
-        true,
-      );
-      const matterRead: MatterReadSummary =
-        read?.status === 'current'
-          ? {
-              status: 'current',
-              matterId: read.page.matter.matterId,
-              title: read.page.matter.title,
-              messageCount: new Set(
-                read.page.entries.map((entry) => `${entry.source.threadId}:${entry.source.messageId}`),
-              ).size,
-            }
-          : read?.status === 'changed'
-            ? { status: 'changed', matterId: cue.readDetails.matterId }
-            : { status: 'not_available' };
-      const { readDetails: _details, ...projection } = cue;
-      cues.push({ ...projection, ...(matterRead.status === 'not_available' ? { sourceAnchor: '' } : {}), matterRead });
-    }
-    return { threadId, invocationId, cues };
+    const threadAccess = await cueThreadAccess(opts, userId, threadId);
+    if (threadAccess) return reply.status(threadAccess.status).send({ error: threadAccess.error });
+    const result = await readOwnerCueInvocation(
+      opts,
+      episodeStore,
+      userId,
+      threadId,
+      invocationId,
+      resolveSessionUserId(request) !== null,
+    );
+    if (result.status !== 200) return reply.status(result.status).send({ error: result.error });
+    const finalAccess = await cueThreadAccess(opts, userId, threadId);
+    if (finalAccess) return reply.status(finalAccess.status).send({ error: finalAccess.error });
+    return { threadId, invocationId, cues: result.cues };
   });
+
+  app.get<{ Params: { threadId: string }; Querystring: { invocationIds?: string } }>(
+    '/api/threads/:threadId/memory-cues',
+    async (request, reply) => {
+      const userId = resolveHeaderUserId(request);
+      if (!userId) return reply.status(401).send({ error: 'Missing X-Cat-Cafe-User header' });
+      const ids = parseCueInvocationBatch(request.query.invocationIds);
+      if (!ids) return reply.status(400).send({ error: 'Expected 1–100 invocation IDs within the query budget' });
+      const { threadId } = request.params;
+      const access = await cueThreadAccess(opts, userId, threadId);
+      if (access) return reply.status(access.status).send({ error: access.error });
+      try {
+        return await withRecallMetricsSignal(request, reply, async (signal) => {
+          const invocations = await readOwnerCueBatch(
+            opts,
+            episodeStore,
+            userId,
+            threadId,
+            ids,
+            resolveSessionUserId(request) !== null,
+            signal,
+          );
+          const finalAccess = await cueThreadAccess(opts, userId, threadId);
+          if (finalAccess) return reply.status(finalAccess.status).send({ error: finalAccess.error });
+          signal.throwIfAborted();
+          return { threadId, invocations };
+        });
+      } catch {
+        return reply.status(503).send({ error: 'Cue batch unavailable' });
+      }
+    },
+  );
 
   app.get<{ Params: { threadId: string; invocationId: string; cueId: string }; Querystring: { catId?: string } }>(
     '/api/threads/:threadId/invocations/:invocationId/memory-cues/:cueId/matter',

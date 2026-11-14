@@ -1,5 +1,6 @@
 import { lstatSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync } from 'node:fs';
 import { join, relative } from 'node:path';
+import { prepareAgyAccountDataView } from './run/agy-account-data-view.js';
 
 export const AGY_NATIVE_RUNS = '.cat-cafe-native-runs';
 
@@ -16,7 +17,10 @@ function directory(path: string): void {
  * Keep one normalized data pathname and a stable logical app identity across
  * disposable config roots. Launch also fences native database initialization.
  */
-export function createAgyNativeRunProfile(profileHome: string): {
+export function createAgyNativeRunProfile(
+  profileHome: string,
+  credentialHome?: string,
+): {
   readonly home: string;
   readonly geminiDir: string;
   readonly appDataDir: string;
@@ -43,7 +47,7 @@ export function createAgyNativeRunProfile(profileHome: string): {
   return {
     home,
     geminiDir,
-    appDataDir: relative(geminiDir, data),
+    appDataDir: relative(geminiDir, credentialHome ? prepareAgyAccountDataView(account, credentialHome) : data),
     dispose: () => rmSync(home, { recursive: true, force: true }),
   };
 }

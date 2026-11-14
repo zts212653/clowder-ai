@@ -1,0 +1,34 @@
+.viewport {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+  pointer-events: none;
+  user-select: none;
+  color: var(--shell-ink);
+  --composer-link-color: #2563eb;
+}
+
+.viewport[data-active="true"] + textarea {
+  color: transparent;
+  caret-color: var(--shell-ink);
+}
+
+.viewport[data-active="true"] + textarea::selection {
+  color: HighlightText;
+  background: Highlight;
+}
+
+.content {
+  box-sizing: border-box;
+  min-height: 100%;
+}
+
+.range {
+  color: var(--composer-link-color);
+  background: transparent;
+}
+
+:global([data-theme="dark"]) .viewport {
+  --composer-link-color: #93c5fd;
+}

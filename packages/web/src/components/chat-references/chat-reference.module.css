@@ -25,7 +25,7 @@
   padding: 0 7px 0 5px;
   margin: 0 1px;
   border-radius: 6px;
-  font-size: 13px;
+  font-size: var(--console-font-compact);
   line-height: 1;
   vertical-align: -4px;
   white-space: nowrap;
@@ -44,16 +44,16 @@
   background: var(--shell-ink);
   color: var(--shell-paper);
   box-shadow: 0 4px 14px rgb(0 0 0 / 18%);
-  font-size: 12.5px;
+  font-size: var(--console-font-xs);
   line-height: 1.5;
 }
 .fileTooltip code {
   display: block;
   width: 100%;
-  font-size: 12px;
+  font-size: var(--console-font-xs);
 }
 .fileTooltip button {
-  font-size: 12.5px;
+  font-size: var(--console-font-xs);
 }
 .interactive:hover {
   border-color: var(--shell-hairline-strong);
@@ -80,6 +80,9 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
+.reference [data-chat-file-name] {
+  user-select: text;
+}
 .line {
   color: var(--shell-muted);
 }
@@ -96,6 +99,7 @@
   color: var(--shell-muted);
 }
 .officeIcon {
+  user-select: none;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -108,6 +112,9 @@
   line-height: 1;
   letter-spacing: -0.2px;
   flex: none;
+}
+.officeIcon::before {
+  content: attr(data-file-symbol);
 }
 .pdfIcon {
   font-size: 5.5px;
@@ -131,7 +138,7 @@
   font-family: ui-monospace, "SF Mono", Menlo, monospace;
 }
 .reference .commit {
-  font-size: 12.5px;
+  font-size: var(--console-font-xs);
 }
 .card {
   display: inline-flex;
@@ -141,7 +148,7 @@
   border-radius: 10px;
   padding: 10px 12px;
   margin: 2px 0 10px;
-  font-size: 12px;
+  font-size: var(--console-font-xs);
   line-height: 1.6;
   vertical-align: top;
 }
@@ -166,7 +173,7 @@
 .big .officeIcon {
   width: 34px;
   height: 40px;
-  font-size: 12px;
+  font-size: var(--console-font-xs);
   border-radius: 5px;
 }
 .big .pdfIcon {
@@ -179,7 +186,7 @@
 }
 .name {
   display: block;
-  font-size: 13.5px;
+  font-size: var(--console-font-sm);
   font-weight: 600;
   line-height: 1.35;
   overflow: hidden;
@@ -193,12 +200,12 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   color: var(--shell-muted);
-  font-size: 12px;
+  font-size: var(--console-font-xs);
 }
 .meta {
   display: block;
   color: var(--shell-muted);
-  font-size: 12px;
+  font-size: var(--console-font-xs);
 }
 .fileMeta {
   overflow: hidden;
@@ -231,7 +238,7 @@
   padding: 7px 11px;
 }
 .caption .name {
-  font-size: 13px;
+  font-size: var(--console-font-compact);
 }
 .pill {
   display: inline-flex;
@@ -240,7 +247,7 @@
   padding: 1px 6px;
   margin-left: 2px;
   border-radius: 8px;
-  font-size: 11.5px;
+  font-size: var(--console-font-label);
   line-height: 1;
   color: #fff;
   white-space: nowrap;
@@ -352,7 +359,7 @@
 .prStatus .pill {
   margin: 0 2px 0 0;
   padding: 1px 8px;
-  font-size: 12px;
+  font-size: var(--console-font-xs);
   border-radius: 10px;
   line-height: 1.6;
 }
@@ -368,7 +375,7 @@
   display: inline;
   width: auto;
   color: var(--shell-primary);
-  font-size: 12.5px;
+  font-size: var(--console-font-xs);
   text-decoration: none;
 }
 .prActions a {
@@ -434,6 +441,6 @@
   .grid .big .officeIcon {
     width: 34px;
     height: 40px;
-    font-size: 12px;
+    font-size: var(--console-font-xs);
   }
 }

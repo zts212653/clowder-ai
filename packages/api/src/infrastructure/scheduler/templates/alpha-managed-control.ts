@@ -1,10 +1,14 @@
 import { createHash } from 'node:crypto';
-import { join } from 'node:path';
-import { readDurableGateRecovery } from '../../../domains/ball-custody/durable-managed-gate-recovery.js';
+import { dirname, join } from 'node:path';
 import { ManagedJobService } from '../../../domains/managed-job/ManagedJobService.js';
 import { validAlphaRevisionConsumer } from '../../../domains/managed-job/managed-job-admission.js';
+import { isManagedJobStoreBusy } from '../../../domains/managed-job/managed-job-database.js';
 import { managedJobPrincipalKey } from '../../../domains/managed-job/managed-job-ledger.js';
-import type { ManagedJobPrincipal } from '../../../domains/managed-job/managed-job-types.js';
+import type {
+  AlphaRevisionConsumer,
+  DurableManagedGateJob,
+  ManagedJobPrincipal,
+} from '../../../domains/managed-job/managed-job-types.js';
 import { resolveCatCafeDataRoot } from '../../../utils/cli-process-ownership.js';
 import { ManagedRunner } from '../../managed-runner.js';
 
@@ -23,11 +27,47 @@ export function createAlphaManagedControl(options: {
   const service = new ManagedJobService(dataRoot);
   const runner = new ManagedRunner();
   const reconciledAt = new Map<string, number>();
+  const preparedPrincipals = new Map<string, ManagedJobPrincipal>();
+  // The approved subscription may change guardians while its immutable job
+  // still belongs to the previous cat. Only this internal bridge can reconnect
+  // that exact user/thread/subscription; ordinary managed-job access is unchanged.
+  const authorizeAlphaJob = (job: DurableManagedGateJob | null | undefined, expected?: AlphaRevisionConsumer) => {
+    const principal = job?.definition?.principal;
+    const consumer = job?.consumer;
+    if (
+      !job ||
+      job.kind !== 'alpha_revision_v1' ||
+      !principal ||
+      !validAlphaRevisionConsumer(consumer) ||
+      principal.userId !== options.principal.userId ||
+      principal.threadId !== options.principal.threadId ||
+      consumer.subscriptionId !== options.subscriptionId ||
+      job.originTaskId !== options.subscriptionId ||
+      job.definition?.originScheduleId !== options.subscriptionId ||
+      (expected &&
+        (consumer.s3JobId !== expected.s3JobId ||
+          consumer.headSha !== expected.headSha ||
+          consumer.baseSha !== expected.baseSha))
+    )
+      throw new Error('managed_job_not_found');
+    return { job, principal };
+  };
   return async (request: Record<string, unknown>) => {
     if (request.action === 'prepare') {
       const consumer = request.consumer;
       if (!validAlphaRevisionConsumer(consumer) || consumer.subscriptionId !== options.subscriptionId) {
         throw new Error('Alpha managed consumer does not match its approved subscription');
+      }
+      if (request.jobId !== undefined) {
+        if (typeof request.jobId !== 'string') throw new Error('Alpha managed control requires a job identity');
+        const { job, principal } = authorizeAlphaJob(service.resolve(request.jobId), consumer);
+        preparedPrincipals.set(job.jobId, principal);
+        return {
+          jobId: job.jobId,
+          inputPath: join(dirname(job.recordPath), `${job.jobId}.alpha-input.json`),
+          gateReceiptPath: job.gateReceiptPath,
+          consumer: job.consumer,
+        };
       }
       const idempotencyKey = `alpha:${consumer.subscriptionId}:${consumer.s3JobId}`;
       const digest = createHash('sha256')
@@ -52,40 +92,49 @@ export function createAlphaManagedControl(options: {
         executionSlaMs: 60 * 60_000,
         wakeTarget: options.principal,
       });
+      preparedPrincipals.set(job.jobId, options.principal);
       return { jobId: job.jobId, inputPath, gateReceiptPath: job.gateReceiptPath, consumer: job.consumer };
     }
     if (typeof request.jobId !== 'string') throw new Error('Alpha managed control requires a job identity');
-    // A valid principal may own other jobs; this adapter is restricted to this subscription.
-    service.get(options.principal, request.jobId);
-    const job = service.resolve(request.jobId);
-    if (job?.kind !== 'alpha_revision_v1' || job.consumer?.subscriptionId !== options.subscriptionId) {
-      throw new Error('Alpha managed control cannot access an unrelated job');
-    }
+    // Status polling remains off the API event loop. A cross-guardian access
+    // first needs prepare's exact consumer proof; a cold same-owner inspect
+    // still uses the ordinary authorization path.
+    let snapshot = await service.readStatus(preparedPrincipals.get(request.jobId) ?? options.principal, request.jobId, {
+      gateRecovery: true,
+    });
+    const { job, principal } = authorizeAlphaJob(snapshot.job);
     if (request.action === 'start') {
-      const record = service.get(options.principal, job.jobId);
+      const record = snapshot.status;
       if (record.state === 'queued') {
-        service.admitSchedule(options.principal, job.jobId, options.subscriptionId);
-        const started = service.start(options.principal, job.jobId, runner);
+        service.admitSchedule(principal, job.jobId, options.subscriptionId);
+        const started = service.start(principal, job.jobId, runner);
         // The durable job owns completion. The Alpha worker only polls its record.
         void started.completion.catch(() => undefined);
         await started.admission;
       }
     } else if (request.action === 'cancel') {
-      service.cancel(options.principal, job.jobId);
+      service.cancel(principal, job.jobId);
     } else if (request.action === 'inspect') {
       if (Date.now() - (reconciledAt.get(job.jobId) ?? 0) >= 5000) {
-        await service.reconcileJob(options.principal, job.jobId);
-        reconciledAt.set(job.jobId, Date.now());
+        try {
+          await service.reconcileJob(principal, job.jobId);
+          reconciledAt.set(job.jobId, Date.now());
+        } catch (error) {
+          if (!isManagedJobStoreBusy(error)) throw error;
+          // Keep reconciliation due. Observation may continue only if the fresh,
+          // bounded status read below succeeds; no stale snapshot is returned.
+        }
       }
     } else throw new Error('Unsupported Alpha managed action');
-    const record = service.get(options.principal, job.jobId);
+    snapshot = await service.readStatus(principal, job.jobId, { gateRecovery: true });
+    const record = snapshot.status;
     return {
       jobId: job.jobId,
       state: record.state,
       cleanupProven: record.cleanupProven,
       result: record.result,
       attemptToken: record.attemptToken,
-      recoveryBlockedReason: readDurableGateRecovery(job)?.blockReason,
+      recoveryBlockedReason: snapshot.recoveryBlockedReason,
     };
   };
 }

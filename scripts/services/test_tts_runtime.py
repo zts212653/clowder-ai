@@ -66,7 +66,8 @@ def service_dependency_stubs():
             self.headers = headers or {}
 
     class StreamingResponse:
-        def __init__(self, body_iterator, media_type=None):
+        def __init__(self, body_iterator, media_type=None, headers=None):
+            self.headers = headers or {}
             async def iterate_sync_body():
                 for part in body_iterator:
                     yield part
@@ -100,6 +101,16 @@ def service_dependency_stubs():
         "fastapi.responses": responses,
         "pydantic": pydantic,
         "uvicorn": uvicorn,
+    }
+
+
+def mlx_memory_stubs():
+    return {
+        "mlx": types.ModuleType("mlx"),
+        "mlx.core": SimpleNamespace(
+            set_cache_limit=lambda _limit: 0, clear_cache=lambda: None,
+            get_active_memory=lambda: 0, get_cache_memory=lambda: 0, get_peak_memory=lambda: 0,
+        ),
     }
 
 
@@ -171,6 +182,7 @@ class QwenCloneRuntimeTest(unittest.IsolatedAsyncioTestCase):
             Path(output_path, f"audio_000.{audio_format}").write_bytes(wav_bytes([0.0] * 8))
 
         modules = {
+            **mlx_memory_stubs(),
             "mlx_audio": types.ModuleType("mlx_audio"),
             "mlx_audio.tts": types.ModuleType("mlx_audio.tts"),
             "mlx_audio.tts.generate": types.SimpleNamespace(generate_audio=generate_audio),
@@ -201,6 +213,7 @@ class QwenCloneRuntimeTest(unittest.IsolatedAsyncioTestCase):
         api = load_tts_api()
         model = FakeCloneModel()
         modules = {
+            **mlx_memory_stubs(),
             "mlx_audio": types.ModuleType("mlx_audio"),
             "mlx_audio.tts": types.ModuleType("mlx_audio.tts"),
             "mlx_audio.tts.utils": types.SimpleNamespace(load_model=lambda _name: model),
@@ -240,6 +253,7 @@ class QwenCloneRuntimeTest(unittest.IsolatedAsyncioTestCase):
         api = load_tts_api()
         model = FakeCloneModel()
         modules = {
+            **mlx_memory_stubs(),
             "mlx_audio": types.ModuleType("mlx_audio"),
             "mlx_audio.tts": types.ModuleType("mlx_audio.tts"),
             "mlx_audio.tts.utils": types.SimpleNamespace(load_model=lambda _name: model),
@@ -256,6 +270,7 @@ class QwenCloneRuntimeTest(unittest.IsolatedAsyncioTestCase):
                     FakeRequest(),
                     api.SpeechRequest(
                         input="端点流式听读。",
+                        instruct="用开心语气说话",
                         lang_code="zh",
                         ref_audio=str(reference_path),
                         ref_text="参考文本",
@@ -271,6 +286,7 @@ class QwenCloneRuntimeTest(unittest.IsolatedAsyncioTestCase):
         events = [__import__("json").loads(line) for line in body.decode().splitlines()]
         self.assertEqual(response.media_type, "application/x-ndjson")
         self.assertEqual([event["type"] for event in events], ["chunk", "final"])
+        self.assertEqual(model.generate_calls[0].get("instruct"), "用开心语气说话")
 
     async def test_keeps_warmup_and_native_stream_on_one_mlx_thread(self) -> None:
         api = load_tts_api()
@@ -290,9 +306,12 @@ class QwenCloneRuntimeTest(unittest.IsolatedAsyncioTestCase):
             return model
 
         def generate_audio(*, output_path: str, audio_format: str, **_kwargs) -> None:
+            if _kwargs.get("voice") is not None:
+                raise ValueError("Base models have no preset voices")
             Path(output_path, f"audio_000.{audio_format}").write_bytes(wav_bytes([0.0] * 8))
 
         modules = {
+            **mlx_memory_stubs(),
             "mlx_audio": types.ModuleType("mlx_audio"),
             "mlx_audio.tts": types.ModuleType("mlx_audio.tts"),
             "mlx_audio.tts.generate": types.SimpleNamespace(generate_audio=generate_audio),
@@ -329,6 +348,7 @@ class QwenCloneRuntimeTest(unittest.IsolatedAsyncioTestCase):
         api = load_tts_api()
         model = FakeCloneModel()
         modules = {
+            **mlx_memory_stubs(),
             "mlx_audio": types.ModuleType("mlx_audio"),
             "mlx_audio.tts": types.ModuleType("mlx_audio.tts"),
             "mlx_audio.tts.utils": types.SimpleNamespace(load_model=lambda _name: model),
@@ -379,6 +399,7 @@ class QwenCloneRuntimeTest(unittest.IsolatedAsyncioTestCase):
         api = load_tts_api()
         model = FakeCloneModel()
         modules = {
+            **mlx_memory_stubs(),
             "mlx_audio": types.ModuleType("mlx_audio"),
             "mlx_audio.tts": types.ModuleType("mlx_audio.tts"),
             "mlx_audio.tts.utils": types.SimpleNamespace(load_model=lambda _name: model),
@@ -403,11 +424,11 @@ class QwenCloneRuntimeTest(unittest.IsolatedAsyncioTestCase):
                     ),
                 )
                 iterator = response.body_iterator.__aiter__()
-                first = await anext(iterator)
+                first = await iterator.__anext__()
                 self.assertEqual(__import__("json").loads(first)["type"], "chunk")
                 request.disconnected = True
                 with self.assertRaises(StopAsyncIteration):
-                    await anext(iterator)
+                    await iterator.__anext__()
                 self.assertTrue(adapter._lock.acquire(blocking=False), "disconnect must release the model lock")
                 adapter._lock.release()
         finally:
@@ -424,6 +445,7 @@ class QwenCloneRuntimeTest(unittest.IsolatedAsyncioTestCase):
 
         model = FailingCloneModel()
         modules = {
+            **mlx_memory_stubs(),
             "mlx_audio": types.ModuleType("mlx_audio"),
             "mlx_audio.tts": types.ModuleType("mlx_audio.tts"),
             "mlx_audio.tts.utils": types.SimpleNamespace(load_model=lambda _name: model),

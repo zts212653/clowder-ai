@@ -4,6 +4,7 @@ import { useRouter } from 'next/navigation';
 import { type CSSProperties, useState } from 'react';
 import type { CatData } from '@/hooks/useCatData';
 import type { ConversationViewPreferenceController } from '@/hooks/useConversationViewPreference';
+import { useIsDshMember, useMemberModelLabel } from '@/lib/member-model-display';
 import { formatModelName } from '@/lib/model-display-name';
 import { AvatarImageWithFallback } from '../AvatarImageWithFallback';
 import { Lightbox } from '../Lightbox';
@@ -31,6 +32,8 @@ export function CatProfileCard({
 }) {
   const router = useRouter();
   const copy = useShellCopy(catProfileCardCopy);
+  const modelLabel = useMemberModelLabel();
+  const dshMember = useIsDshMember();
   const [imageOpen, setImageOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(false);
@@ -84,7 +87,18 @@ export function CatProfileCard({
             <CatProfileStatus cat={cat} threadId={threadId} onClose={onClose} />
           </MemberCopyProvider>
           <p className={styles.model}>
-            {copy.model} <span>{formatModelName(cat.variantLabel?.trim() || cat.defaultModel)}</span>
+            {copy.model}{' '}
+            <span>
+              {formatModelName(
+                dshMember(cat)
+                  ? modelLabel(
+                      cat,
+                      copy.model === 'Model' ? 'Follow DSH settings' : '跟随 DSH 设置',
+                      copy.model === 'Model',
+                    )
+                  : cat.variantLabel?.trim() || cat.defaultModel,
+              )}
+            </span>
           </p>
           {cat.personality && <p className={styles.personality}>「{cat.personality}」</p>}
           {error && (

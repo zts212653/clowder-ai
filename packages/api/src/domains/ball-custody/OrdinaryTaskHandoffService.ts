@@ -119,7 +119,7 @@ export class OrdinaryTaskHandoffService {
         (task.ownerRevision ?? 0) !== revision
       )
         return { kind: 'refused', reason: 'task_assignment_changed' };
-      await this.assertCurrentSource(sourceMessageId, task, request);
+      await this.assertCurrentSource(sourceMessageId, request);
       return { kind: 'replayed', task };
     }
     if (
@@ -129,7 +129,7 @@ export class OrdinaryTaskHandoffService {
       (task.lastAppliedHandoffMessageRef ?? null) !== request.expected.lastAppliedHandoffMessageRef
     )
       return { kind: 'refused', reason: 'task_assignment_changed' };
-    await this.assertCurrentSource(sourceMessageId, task, request);
+    await this.assertCurrentSource(sourceMessageId, request);
     task = await this.adoptLegacyExecution(task);
     if (task.executionRef) {
       if (!(await this.releaseStoppedExecution(task))) {
@@ -159,31 +159,44 @@ export class OrdinaryTaskHandoffService {
         ownerCatId: createCatId(request.ownerCatId),
         messageRef: `message:${sourceMessageId}`,
       },
-      {
-        watchKeys: this.authorityKeys(sourceMessageId, current, request),
-        assertCurrent: () => this.assertCurrentSource(sourceMessageId, current, request),
-      },
+      await this.authorityFence(sourceMessageId, current, request),
     );
     return result.kind === 'updated' || result.kind === 'replayed'
       ? { kind: result.kind === 'updated' ? 'applied' : 'replayed', task: result.task }
       : { kind: 'refused', reason: result.kind === 'refused' ? result.reason : 'ordinary_task_unavailable' };
   }
 
-  private authorityKeys(source: string, task: TaskItem, request: OrdinaryTaskHandoffRequest): string[] {
-    const proposal = /^proposal:([^:]+):/.exec(request.approvedAnchor?.evidenceRef ?? '')?.[1];
-    return [
+  private async authorityFence(source: string, task: TaskItem, request: OrdinaryTaskHandoffRequest) {
+    const previousId = request.expected.lastAppliedHandoffMessageRef?.slice('message:'.length);
+    const previous = previousId ? await this.deps.messages.getById(previousId) : null;
+    const predecessor = previous?.extra?.taskHandoff;
+    const predecessorSnapshot = JSON.stringify(predecessor);
+    const proposals = [request.approvedAnchor, predecessor?.approvedAnchor].flatMap((anchor) => {
+      const id = /^proposal:([^:]+):/.exec(anchor?.evidenceRef ?? '')?.[1];
+      return id ? [ProposalKeys.detail(id)] : [];
+    });
+    const watchKeys = [
       ...(this.deps.dispatchAuthority?.keys(request) ?? []),
       MessageKeys.detail(source),
       ThreadKeys.detail(task.threadId),
       ThreadKeys.detail(request.issuer.threadId),
       ThreadKeys.detail(request.targetThreadId),
       ...(task.sourceMessageId ? [MessageKeys.detail(task.sourceMessageId)] : []),
-      ...(task.lastAppliedHandoffMessageRef ? [MessageKeys.detail(task.lastAppliedHandoffMessageRef.slice(8))] : []),
-      ...(proposal ? [ProposalKeys.detail(proposal)] : []),
+      ...(previousId ? [MessageKeys.detail(previousId)] : []),
+      ...proposals,
     ];
+    return {
+      watchKeys,
+      assertCurrent: async () => {
+        const currentPrevious = previousId ? await this.deps.messages.getById(previousId) : null;
+        if (JSON.stringify(currentPrevious?.extra?.taskHandoff) !== predecessorSnapshot)
+          throw new OrdinaryTaskHandoffError('task_handoff_predecessor_changed');
+        await this.assertCurrentSource(source, request);
+      },
+    };
   }
 
-  private async assertCurrentSource(id: string, task: TaskItem, request: OrdinaryTaskHandoffRequest) {
+  private async assertCurrentSource(id: string, request: OrdinaryTaskHandoffRequest) {
     const source = await this.deps.messages.getById(id);
     if (!source?.extra?.taskHandoff || JSON.stringify(source.extra.taskHandoff) !== JSON.stringify(request))
       throw new OrdinaryTaskHandoffError('task_handoff_source_changed');
@@ -290,10 +303,7 @@ export class OrdinaryTaskHandoffService {
           sourceMessageId,
         },
       },
-      {
-        watchKeys: this.authorityKeys(sourceMessageId, task, request),
-        assertCurrent: () => this.assertCurrentSource(sourceMessageId, task, request),
-      },
+      await this.authorityFence(sourceMessageId, task, request),
     );
     if (result.kind !== 'updated' && result.kind !== 'replayed')
       throw new OrdinaryTaskHandoffError(result.kind === 'refused' ? result.reason : 'ordinary_task_unavailable');

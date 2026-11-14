@@ -13,11 +13,12 @@
 
 import { lstat, mkdir, rm } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
-import { type MountRules, STANDARD_MOUNT_POINT_IDS } from '@cat-cafe/shared';
+import { dirname, isAbsolute, join, resolve } from 'node:path';
+import type { MountRules } from '@cat-cafe/shared';
 import type { FastifyPluginAsync, FastifyReply, FastifyRequest } from 'fastify';
 import { readCapabilitiesConfig, withCapabilityLock } from '../config/capabilities/capability-orchestrator.js';
 import { requireLocalCapabilityWriteRequest } from '../config/capabilities/capability-write-guards.js';
+import { isValidSkillName } from '../config/governance/skill-sync.js';
 import {
   clearProjectMountRulesOverride,
   readDefaultMountRules,
@@ -29,11 +30,17 @@ import {
 } from '../config/mount/mount-rules-store.js';
 import { syncAll } from '../skills/skill-sync-all.js';
 import { classifyMountPath, syncProject } from '../skills/skill-sync-engine.js';
+import { resolveMountBoundaryEscape } from '../utils/mount-path-boundary.js';
 import { resolveOwnerGate } from '../utils/owner-gate.js';
 import { redirectRuntimeProjectPath, resolvePersistentProjectPath } from '../utils/persistent-project-path.js';
 import { resolvePluginSkillSourcesForProject } from '../utils/plugin-skill-source.js';
 import { resolveSessionUserId, resolveUserId } from '../utils/request-identity.js';
-import { buildSkillMountTargets, createSkillSymlink, type MountTarget } from '../utils/skill-mount.js';
+import {
+  buildProjectSkillMountDirs,
+  buildSkillMountTargets,
+  createSkillSymlink,
+  symlinkTargetFor,
+} from '../utils/skill-mount.js';
 import { resolveStartupProjectRoot } from '../utils/startup-root.js';
 import { resolveSkillsSourceDir } from './skills.js';
 
@@ -109,22 +116,35 @@ export const mountRulesRoutes: FastifyPluginAsync<MountRulesRouteOptions> = asyn
       return withCapabilityLock(globalRoot, async () => {
         const previousDefaultRules = await readDefaultMountRules(globalRoot);
         await writeDefaultMountRules(globalRoot, validated);
-        await syncProject(globalRoot, skillsSrc, {
+        const mainResult = await syncProject(globalRoot, skillsSrc, {
           mountRules: validated,
           previousMountRules: previousDefaultRules,
           pruneMountPaths: true,
         });
-        await reconcilePluginMounts(globalRoot, skillsSrc, validated, previousDefaultRules);
+        const skipped = new Set([
+          ...mainResult.conflicts.map((item) => item.skillName).filter(isValidSkillName),
+          ...(await reconcilePluginMounts(globalRoot, skillsSrc, validated, previousDefaultRules)),
+        ]);
         const syncResult = await syncAll(globalRoot, skillsSrc, {
           mountRules: validated,
           previousMountRules: previousDefaultRules,
         });
         // Reconcile plugin mounts for registered projects that inherit default rules
-        for (const projectPath of syncResult.perProject.keys()) {
+        for (const [projectPath, projectResult] of syncResult.perProject) {
+          projectResult.conflicts
+            .map((item) => item.skillName)
+            .filter(isValidSkillName)
+            .forEach((skill) => skipped.add(skill));
           try {
             await withCapabilityLock(projectPath, async () => {
               const projectRules = await readMountRules(projectPath, globalRoot);
-              await reconcilePluginMounts(projectPath, skillsSrc, projectRules, previousDefaultRules);
+              for (const skill of await reconcilePluginMounts(
+                projectPath,
+                skillsSrc,
+                projectRules,
+                previousDefaultRules,
+              ))
+                skipped.add(skill);
             });
           } catch (err) {
             syncResult.warnings.push(`${projectPath}: plugin reconciliation failed: ${(err as Error).message}`);
@@ -139,9 +159,16 @@ export const mountRulesRoutes: FastifyPluginAsync<MountRulesRouteOptions> = asyn
             rules: validated,
             projectRoot: globalRoot,
             scope: 'default',
+            ...(skipped.size > 0 ? { skipped: [...skipped] } : {}),
           };
         }
-        return { ok: true, rules: validated, projectRoot: globalRoot, scope: 'default' };
+        return {
+          ok: true,
+          rules: validated,
+          projectRoot: globalRoot,
+          scope: 'default',
+          ...(skipped.size > 0 ? { skipped: [...skipped] } : {}),
+        };
       });
     }
 
@@ -184,8 +211,9 @@ export const mountRulesRoutes: FastifyPluginAsync<MountRulesRouteOptions> = asyn
       }
 
       await writeMountRules(projectRoot, validated);
+      const skipped: string[] = [];
       try {
-        await syncProject(projectRoot, skillsSrc, {
+        const syncResult = await syncProject(projectRoot, skillsSrc, {
           mountRules: validated,
           previousMountRules: previousRules,
           pruneMountPaths: true,
@@ -194,7 +222,10 @@ export const mountRulesRoutes: FastifyPluginAsync<MountRulesRouteOptions> = asyn
           globalCustomSourceSkills,
           mainProjectRoot: globalRoot,
         });
-        await reconcilePluginMounts(projectRoot, skillsSrc, validated, previousRules);
+        skipped.push(
+          ...syncResult.conflicts.map((item) => item.skillName).filter(isValidSkillName),
+          ...(await reconcilePluginMounts(projectRoot, skillsSrc, validated, previousRules)),
+        );
       } catch (err) {
         if (previousProjectRules) {
           await writeMountRules(projectRoot, previousProjectRules).catch(() => {});
@@ -215,7 +246,12 @@ export const mountRulesRoutes: FastifyPluginAsync<MountRulesRouteOptions> = asyn
         await reconcilePluginMounts(projectRoot, skillsSrc, previousRules, validated).catch(() => {});
         throw err;
       }
-      return { ok: true, rules: validated, projectRoot };
+      return {
+        ok: true,
+        rules: validated,
+        projectRoot,
+        ...(skipped.length > 0 ? { skipped: [...new Set(skipped)] } : {}),
+      };
     });
   });
 };
@@ -226,24 +262,22 @@ async function reconcilePluginMounts(
   skillsSrc: string,
   mountRules: MountRules,
   previousRules?: MountRules,
-): Promise<void> {
+): Promise<string[]> {
   const pluginsDir = join(dirname(skillsSrc), 'packages', 'api', 'src', 'plugins');
   const config = await readCapabilitiesConfig(projectRoot);
   const pluginSkills = resolvePluginSkillSourcesForProject(config, pluginsDir, projectRoot);
-  if (pluginSkills.length === 0) return;
+  if (pluginSkills.length === 0) return [];
+  const skipped: string[] = [];
 
   const enabledTargets = buildSkillMountTargets(projectRoot, homedir(), mountRules);
 
-  // Collect project-local provider dirs only (skip HOME fallback — plugin skills are project-scoped)
-  const projectDirs = (targets: MountTarget[]) =>
-    targets.flatMap((t) => (t.kind === 'standard' ? t.candidates.slice(0, 1) : t.candidates));
-  const allDirs = new Set<string>();
-  for (const id of STANDARD_MOUNT_POINT_IDS) allDirs.add(join(projectRoot, mountRules.mountPoints[id].path));
-  for (const d of projectDirs(enabledTargets)) allDirs.add(d);
-  if (previousRules) {
-    for (const id of STANDARD_MOUNT_POINT_IDS) allDirs.add(join(projectRoot, previousRules.mountPoints[id].path));
-    for (const d of projectDirs(buildSkillMountTargets(projectRoot, homedir(), previousRules))) allDirs.add(d);
-  }
+  // Project-local provider dirs only (skip HOME fallback — plugin skills are project-scoped); disabled
+  // standard mount points and the previous rules' dirs are visited so stale links get removed.
+  const allStandard = { includeDisabledStandardMountPoints: true };
+  const allDirs = new Set([
+    ...buildProjectSkillMountDirs(projectRoot, homedir(), mountRules, allStandard),
+    ...(previousRules ? buildProjectSkillMountDirs(projectRoot, homedir(), previousRules, allStandard) : []),
+  ]);
 
   for (const ps of pluginSkills) {
     const allowed = ps.mountPaths ? new Set(ps.mountPaths) : null;
@@ -253,6 +287,11 @@ async function reconcilePluginMounts(
       const shouldMount = ps.enabled && !!target && (!allowed || allowed.has(target.id));
       const status = await classifyMountPath(linkPath, ps.skillsSource, ps.skillName);
       if (shouldMount && status === 'missing') {
+        if (await resolveMountBoundaryEscape(projectRoot, dir)) {
+          skipped.push(ps.skillName);
+          console.warn(`[mount-rules] Skipping plugin skill ${ps.skillName} outside project root: ${dir}`);
+          continue;
+        }
         // Guard: reject symlinked provider dirs to prevent writing outside project
         try {
           const dirStat = await lstat(dir);
@@ -261,11 +300,7 @@ async function reconcilePluginMounts(
           if ((err as NodeJS.ErrnoException).code !== 'ENOENT') continue;
         }
         await mkdir(dir, { recursive: true });
-        const rel =
-          process.platform === 'win32'
-            ? join(ps.skillsSource, ps.skillName)
-            : relative(dirname(linkPath), join(ps.skillsSource, ps.skillName));
-        await createSkillSymlink(rel, linkPath);
+        await createSkillSymlink(symlinkTargetFor(linkPath, join(ps.skillsSource, ps.skillName)), linkPath);
       } else if (!shouldMount && status === 'managed') {
         // Guard: skip symlinked provider dirs (mirror the mount branch above)
         try {
@@ -278,4 +313,5 @@ async function reconcilePluginMounts(
       }
     }
   }
+  return skipped;
 }

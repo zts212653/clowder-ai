@@ -80,6 +80,7 @@ test('works titles use the installed declared HTTP route after visibility and ow
   assert.equal(response.json().artifacts[0].name, 'Title from the installed package');
   assert.equal(calls.length, 1);
   assert.equal(calls[0].query.ref, 'org/repo#12');
+  assert.equal(calls[0].query.mode, 'local', 'Works readers may consume only the local title projection');
   assert.deepEqual(calls[0].principal, { kind: 'owner', id: 'alice' });
   assert.equal(calls[0].headers['x-cat-cafe-user'], undefined);
   webhooks.deactivate('pi_title');

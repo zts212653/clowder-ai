@@ -73,7 +73,11 @@ import {
 } from '../../stores/ports/TurnExecutionStore.js';
 import { canViewMessage } from '../../stores/visibility.js';
 import { classifyTool } from '../../tool-usage/classify.js';
-import { deriveResultSummary } from '../../tool-usage/derive-result-summary.js';
+import {
+  deriveToolEventResultSummary,
+  isRecallLookupTool,
+  recallToolInputSummary,
+} from '../../tool-usage/derive-result-summary.js';
 import { normalizeMcpToolName } from '../../tool-usage/normalize-mcp-tool-name.js';
 import { RECALL_CORRELATION_EVENT_WINDOW } from '../../tool-usage/ToolEventLog.js';
 import { getVoiceBlockSynthesizer } from '../../tts/VoiceBlockSynthesizer.js';
@@ -104,20 +108,26 @@ import {
 } from '../invocation/member-output-timeout.js';
 import { getRichBlockBuffer } from '../invocation/RichBlockBuffer.js';
 import { recordTurnOutputVerdict, requireTurnOutputAllowed } from '../invocation/response-draft-settlement.js';
+import { type RouteResponseProducers, responseProducers } from '../invocation/response-producer-registry.js';
 import { resolveManagedSessionPolicySnapshot } from '../invocation/session-policy-snapshot.js';
+import { settleChildResponse } from '../invocation/settle-child-response.js';
 import { mergeStreams } from '../invocation/stream-merge.js';
 import { resolveDefaultClaudeMcpServerPath } from '../providers/ClaudeAgentService.js';
-import { AgentServiceUnavailableError, ExecutionAdmissionConflict } from '../registry/AgentServiceUnavailableError.js';
+import {
+  AgentServiceUnavailableError,
+  ExecutionAdmissionConflict,
+  terminalExecutionBindingFailure,
+} from '../registry/AgentServiceUnavailableError.js';
 import { parseA2AMentions } from '../routing/a2a-mentions.js';
 import { accumulateTextAggregate } from '../text-aggregation.js';
-import { commitCompletedRouteResponse, isCollectiveBoundResponse } from './commit-completed-response.js';
+import { commitCompletedRouteResponse } from './commit-completed-response.js';
 import { type ContextEvalInput, extractContextEvalSignals } from './context-eval.js';
 import { buildBriefingMessage } from './format-briefing.js';
 import { isDirectOwnerDispositionOrigin } from './human-disposition-invocation-origin.js';
 import { outputLayoutExtra, RoutingMessageOutputProjection } from './message-output-projection.js';
 import { persistUserFacingSystemInfoNotices } from './persist-system-info-warnings.js';
 import { appendRemoteCancellationNotice, createRemoteCancellationObserver } from './remote-cancellation.js';
-import { resolveResponseTerminal, stoppedByMemberTimeout } from './response-terminal.js';
+import { recordStoppedRecallCalls, resolveResponseTerminal, stoppedByMemberTimeout } from './response-terminal.js';
 import { extractRichFromText, isValidRichBlock } from './rich-block-extract.js';
 import type { RouteOptions, RouteStrategyDeps } from './route-helpers.js';
 import {
@@ -193,9 +203,23 @@ export async function* routeParallel(
   options: RouteOptions = {},
 ): AsyncIterable<AgentMessage> {
   const invocationServices = new InvocationServiceScope();
+  // PR-3a: the R of every turn this route admits is the route's to commit until its own terminal
+  // commit has run, so no stop or repair path writes it meanwhile (ResponseProducerRegistry).
+  const routeResponseProducers = responseProducers.openRouteScope();
   try {
-    yield* routeParallelPrepared(deps, targetCats, message, userId, threadId, options, invocationServices);
+    yield* routeParallelPrepared(
+      deps,
+      targetCats,
+      message,
+      userId,
+      threadId,
+      options,
+      invocationServices,
+      routeResponseProducers,
+    );
   } finally {
+    // However the route exits, it commits no R after this.
+    routeResponseProducers.leaveAll();
     await invocationServices.dispose();
   }
 }
@@ -208,6 +232,7 @@ async function* routeParallelPrepared(
   threadId: string,
   options: RouteOptions,
   invocationServices: InvocationServiceScope,
+  routeResponseProducers: RouteResponseProducers,
 ): AsyncIterable<AgentMessage> {
   const {
     contentBlocks,
@@ -256,12 +281,16 @@ async function* routeParallelPrepared(
           signal: catSignal,
         });
       const current = pinnedServices.get(catId);
+      const preparationError = servicePreparationErrors.get(catId);
+      if (!current && terminalExecutionBindingFailure(preparationError) && options.onExecutionBindingRejected)
+        throw preparationError;
       if (!current) return capture();
       const admitted = await invocationServices.admit(
         current,
         () => getService(deps.services, catId, deps.unavailableServices),
         capture,
         catSignal,
+        deps.refreshServices,
       );
       pinnedServices.set(catId, admitted.service);
       return admitted.executionBinding;
@@ -272,17 +301,23 @@ async function* routeParallelPrepared(
     const catId = targetCats[index];
     if (!catId) continue;
     if (result.status === 'fulfilled') executionBindings.set(catId, result.value);
-    else
+    else {
+      const error = result.reason;
+      const terminalReason = terminalExecutionBindingFailure(error);
+      if (
+        executionControls.get(catId)?.signal.aborted ||
+        (terminalReason && (await options.onExecutionBindingRejected?.(catId, terminalReason)))
+      )
+        continue;
       yield {
         type: 'error',
         catId,
         errorCode:
-          result.reason instanceof ExecutionAdmissionConflict
-            ? 'execution_binding_conflict'
-            : 'execution_binding_unavailable',
-        error: result.reason instanceof Error ? result.reason.message : 'Execution binding is unavailable',
+          error instanceof ExecutionAdmissionConflict ? 'execution_binding_conflict' : 'execution_binding_unavailable',
+        error: error instanceof Error ? error.message : 'Execution binding is unavailable',
         timestamp: Date.now(),
       };
+    }
   }
   targetCats = targetCats.filter((catId) => executionBindings.has(catId));
   if (targetCats.length === 0) {
@@ -345,13 +380,6 @@ async function* routeParallelPrepared(
     return;
   }
   const ownerAuthProvenance = options.ownerAuthProvenance ?? 'unknown';
-  const triggerMessageId = currentUserMessageId ?? options.a2aTriggerMessageId;
-  const collectiveBoundTurn =
-    Boolean(deps.dotReplyTarget) &&
-    isCollectiveBoundResponse(
-      options.executionScope,
-      triggerMessageId ? await deps.messageStore.getById(triggerMessageId) : null,
-    );
   const thinkingMode = options.thinkingMode ?? 'play';
   const turnExecutionKind = 'ordinary';
   const exactA2ACallerCatId = options.a2aTriggerMessageId ? options.a2aCallerCatId : undefined;
@@ -371,15 +399,6 @@ async function* routeParallelPrepared(
   const degradationMsgs: AgentMessage[] = [];
   const boundaryByCat = new Map<CatId, string | undefined>();
 
-  // F042 Wave 3: Fetch thread participant activity once (shared across all cats).
-  let activeParticipants: { catId: CatId; lastMessageAt: number; messageCount: number }[] = [];
-  if (deps.invocationDeps.threadStore) {
-    try {
-      activeParticipants = await deps.invocationDeps.threadStore.getParticipantsWithActivity(threadId);
-    } catch {
-      /* best-effort */
-    }
-  }
   // F042: Fetch thread routingPolicy once (shared across all cats).
   let routingPolicy: ThreadRoutingPolicyV1 | undefined;
   // F073 P4: SOP stage hint from workflow-sop (告示牌 — info only, cats decide actions)
@@ -730,7 +749,6 @@ async function* routeParallelPrepared(
           mcpAvailable,
           nativeL0Injected: hasNativeL0,
           ...(promptTags && promptTags.length > 0 ? { promptTags } : {}),
-          ...(activeParticipants.length > 0 ? { activeParticipants } : {}),
           ...(routingPolicy ? { routingPolicy } : {}),
           ...(sopStageHint ? { sopStageHint } : {}),
           ...(voiceMode ? { voiceMode } : {}),
@@ -931,6 +949,9 @@ async function* routeParallelPrepared(
               canonicalFeatureId: sopStageHint?.featureId,
               threadTitle: routeThread?.title ?? undefined,
               projectPath: routeThread?.projectPath,
+              exactA2ATriggerMessageId: options.a2aTriggerMessageId,
+              invocationInputMessageIds: options.persistedPromptMessageIds,
+              nowMs: Date.now(),
               cursorOverlay: options.cursorBoundaries?.get(catId as string),
               ...(options.resolvePendingWakeMessageIds
                 ? {
@@ -982,6 +1003,8 @@ async function* routeParallelPrepared(
               : undefined;
             pendingBriefingInput = buildBriefingMessage(inc.coverageMap, threadId, {
               ...inc.briefingContext,
+              receiverCatId: catId,
+              receiverDisplayName: catConfig?.displayName,
               ...(contextSurfaceProjection ? { contextSurfaceProjection } : {}),
             });
           } else {
@@ -1123,6 +1146,7 @@ async function* routeParallelPrepared(
       const remoteCancellation = createRemoteCancellationObserver();
       catRemoteCancellation.set(catId, remoteCancellation);
       const invocationStream = invokeSingleCat(deps.invocationDeps, {
+        toolEventLog: deps.toolEventLog,
         executionBinding: executionBindings.get(catId),
         ...(options.routingAdmission ? { routingAdmission: options.routingAdmission } : {}),
         ...(options.routeIntent ? { routeIntent: options.routeIntent } : {}),
@@ -1182,7 +1206,12 @@ async function* routeParallelPrepared(
         promptMessageIds: exactPromptMessageIds,
         ...(options.onPromptMessagesExposed ? { onPromptMessagesExposed: options.onPromptMessagesExposed } : {}),
         ...(options.onLifecycleInvocationStarted
-          ? { onLifecycleInvocationStarted: options.onLifecycleInvocationStarted }
+          ? {
+              // Claimed before R exists, so no stop can find it admitted and unclaimed.
+              onLifecycleInvocationStarted: routeResponseProducers.claimingAdmission(
+                options.onLifecycleInvocationStarted,
+              ),
+            }
           : {}),
         ...(options.onAgentClientActiveRunReady
           ? { onAgentClientActiveRunReady: options.onAgentClientActiveRunReady }
@@ -1528,7 +1557,9 @@ async function* routeParallelPrepared(
         // 砚砚 cloud-3 P1: propagate toolUseId into summary (as _toolUseId) so
         // updateSummary can do exact match when provider emits it on tool_result.
         // Falls back to FIFO toolName+catId match when toolUseId absent.
-        const baseSummary = (msg.toolInput ?? {}) as Record<string, unknown>;
+        const baseSummary = isRecallLookupTool(normalizedToolName)
+          ? recallToolInputSummary(normalizedToolName, msg.toolInput)
+          : (msg.toolInput ?? {});
         const summary: Record<string, unknown> = msg.toolUseId
           ? { ...baseSummary, _toolUseId: msg.toolUseId }
           : baseSummary;
@@ -1604,47 +1635,32 @@ async function* routeParallelPrepared(
             }
           }
         }
-        // F200 HW-4 根因①: per-cat pending FIFO. Nameless result-side
-        // (Claude/Opus parallel) → FIFO fallback (mirrors route-serial.ts:197-227
-        // pure-FIFO branch). Resolved name → splice its FIFO entry so a later
-        // nameless result can't mis-pair (砚砚 R1 review: queue-drift guard).
-        {
-          const resultMsg2 = effectiveMsg as { catId?: string; toolUseId?: string };
-          const cq = resultMsg2.catId ? pendingToolResultsByCat.get(resultMsg2.catId) : undefined;
-          if (toolNameCandidate) {
-            if (cq) {
-              // 砚砚 HW-4 R1-2: exact result → splice its OWN entry by
-              // toolUseId when present (precise); else first same-name.
-              // Prevents same-name drift (search→graph→search).
-              let si = -1;
-              if (resultMsg2.toolUseId) {
-                si = cq.findIndex((e) => e.toolUseId === resultMsg2.toolUseId);
-              }
-              if (si < 0) {
-                const nn = normalizeMcpToolName(toolNameCandidate);
-                si = cq.findIndex((e) => e.toolName === nn);
-              }
-              if (si >= 0) cq.splice(si, 1);
-            }
-          } else if (cq && cq.length > 0) {
-            toolNameCandidate = cq.shift()!.toolName;
-          }
+        const pending = pendingToolResultsByCat.get(effectiveMsg.catId);
+        if (pending?.length) {
+          // Native IDs take precedence, including on nameless out-of-order results.
+          const index = effectiveMsg.toolUseId
+            ? pending.findIndex((call) => call.toolUseId === effectiveMsg.toolUseId)
+            : toolNameCandidate
+              ? pending.findIndex((call) => call.toolName === normalizeMcpToolName(toolNameCandidate))
+              : 0;
+          if (index >= 0) toolNameCandidate ??= pending[index]!.toolName;
+          if (index >= 0) pending.splice(index, 1);
         }
         if (toolNameCandidate) {
           const normalizedName = normalizeMcpToolName(toolNameCandidate);
-          const resultSummary = deriveResultSummary(normalizedName, msg.content);
+          const resultSummary = deriveToolEventResultSummary(normalizedName, effectiveMsg);
           if (Object.keys(resultSummary).length > 0) {
-            // 砚砚 六审 P1-B: scope updateSummary match to specific cat (parallel
-            // route runs multiple cats concurrently; same tool name can collide).
-            // 砚砚 cloud-3 P1: also pass toolUseId for exact match when available;
-            // otherwise FIFO toolName+catId match handles same-name parallel calls.
-            const resultMsg = effectiveMsg as { catId?: string; toolUseId?: string };
-            const matcher: { toolUseId?: string; toolName?: string; catId?: string } = resultMsg.toolUseId
-              ? { toolUseId: resultMsg.toolUseId }
-              : resultMsg.catId
-                ? { toolName: normalizedName, catId: resultMsg.catId }
-                : { toolName: normalizedName };
-            deps.toolEventLog.updateSummary(threadId, matcher, resultSummary).catch(() => {});
+            deps.toolEventLog
+              .updateSummary(
+                threadId,
+                {
+                  catId: effectiveMsg.catId,
+                  invocationId: effectiveMsg.invocationId ?? catInvocationId.get(effectiveMsg.catId),
+                  ...(effectiveMsg.toolUseId ? { toolUseId: effectiveMsg.toolUseId } : { toolName: normalizedName }),
+                },
+                resultSummary,
+              )
+              .catch(() => {});
           }
         }
       }
@@ -1768,11 +1784,21 @@ async function* routeParallelPrepared(
       // blocks must be persisted even when the cat emits no text (cloud Codex P1).
       const ownInvId = catInvocationId.get(msg.catId);
       let turnStoredMessageId: string | undefined;
-      if (ownInvId) completedCatInvocationIds.push([msg.catId, ownInvId]);
+      if (ownInvId) {
+        recordStoppedRecallCalls(
+          deps.toolEventLog,
+          threadId,
+          ownInvId,
+          msg.catId,
+          pendingToolResultsByCat.get(msg.catId) ?? [],
+          executionControls.get(msg.catId)?.signal,
+        );
+        completedCatInvocationIds.push([msg.catId, ownInvId]);
+      }
       // Forget the completed cat's turn: a late event for it must not upsert its draft again after R's
       // commit deleted it. Drafts no longer expire (F117 KD-23), so a recreated one would leak.
       catInvocationId.delete(msg.catId);
-      const bufferedBlocks = getRichBlockBuffer().consume(threadId, msg.catId, ownInvId);
+      const bufferedBlocks = await getRichBlockBuffer().consume(threadId, msg.catId, ownInvId);
       // #573 parallel variant: socket broadcasts in messages.ts use the OUTER
       // parentInvocationId for live bubble identity. Persist formal messages with
       // the same id; otherwise IDB/live bubbles use parent id while hydration uses
@@ -1866,25 +1892,6 @@ async function* routeParallelPrepared(
         ? appendRemoteCancellationNotice(providerFailureText ?? '')
         : lifecycleResponse && providerFailureText
           ? providerFailureText
-          : undefined;
-      const completedDotReturnCommit =
-        lifecycleResponse?.status === 'completed' && ownInvId && !collectiveBoundTurn && deps.dotReplyTarget
-          ? (message: AppendMessageInput) =>
-              commitCompletedRouteResponse(deps, {
-                responseMessageId: lifecycleResponse.messageId,
-                invocationId: ownInvId,
-                terminal: { status: 'completed', completedAt: lifecycleResponse.completedAt },
-                message,
-                targetCats: [],
-                allowDotReturn: true,
-                triggerMessageId,
-                admitWake: options.commitCompletedA2AWake,
-                userId,
-                ownerAuthProvenance,
-                threadId,
-                callerCatId: msg.catId as CatId,
-                ...(options.parentInvocationId ? { parentInvocationId: options.parentInvocationId } : {}),
-              })
           : undefined;
       const failedA2AReportCommit =
         lifecycleResponse?.status === 'failed' &&
@@ -2163,7 +2170,7 @@ async function* routeParallelPrepared(
               ...(msg.tracing ? { tracing: msg.tracing } : {}),
             },
           };
-          const terminalCommit = completedDotReturnCommit ?? failedA2AReportCommit;
+          const terminalCommit = failedA2AReportCommit;
           let storedMsg = null;
           if (deps.freshnessOutputCommitCoordinator && ownInvId) {
             outputCommitDecision = await deps.freshnessOutputCommitCoordinator.commit({
@@ -2328,8 +2335,7 @@ async function* routeParallelPrepared(
             };
             const answerBearingNoText =
               hasRichBlocks || Boolean(thinking && renderThinkingChunks(thinking).trim().length > 0);
-            const terminalCommit =
-              (answerBearingNoText ? completedDotReturnCommit : undefined) ?? failedA2AReportCommit;
+            const terminalCommit = failedA2AReportCommit;
             let storedNoText = null;
             let noTextOutputCommitDecision: OutputCommitDecision | undefined;
             if (answerBearingNoText && deps.freshnessOutputCommitCoordinator && ownInvId) {
@@ -2645,7 +2651,7 @@ async function* routeParallelPrepared(
             'conciergeConfig' in conciergeCtx && conciergeContextForCat(conciergeCtx, cid as string)?.conciergeConfig
               ? stripTriagePlanMarkers(text)
               : text;
-          const ms = parseA2AMentions(visibleText, cid as CatId);
+          const ms = parseA2AMentions(visibleText, cid as CatId, await deps.addressedPlugins?.list());
           if (ms.length > 0) {
             log.info(
               { threadId, cat: cid, suppressedMentions: ms, suppressedInParallel: true },
@@ -2660,6 +2666,25 @@ async function* routeParallelPrepared(
       // Re-querying the map here returns undefined → done event yielded without
       // invocationId → downstream broadcaster falls back to parent → bubble
       // identity / liveness wrongly attached to parent (instead of own turn).
+      if (ownInvId) {
+        await settleChildResponse(
+          { messageStore: deps.messageStore, turnStore: deps.invocationDeps.turnExecutionStore },
+          {
+            invocationId: ownInvId,
+            ...((turnStoredMessageId ?? lifecycleAdmission?.messageId)
+              ? { responseMessageId: turnStoredMessageId ?? lifecycleAdmission?.messageId }
+              : {}),
+            ...(!catProducedOutput && !turnStoredMessageId && !lifecycleAdmission
+              ? {
+                  noResponseReason: 'empty_turn' as const,
+                  noResponseProof: 'route_completed_without_response_admission' as const,
+                }
+              : {}),
+          },
+        ).catch((err) => log.warn({ err, invocationId: ownInvId }, 'Child response settlement retained for recovery'));
+      }
+      // This turn's R has had its one terminal commit from this route; a stop may end it from here on.
+      if (ownInvId) routeResponseProducers.leave(ownInvId);
       const stampedDone = ownInvId && !msg.invocationId ? { ...msg, invocationId: ownInvId } : msg;
       // F117 KD-22: the response is committed; report the timeout before the done, so the Queue
       // counts this member failed (not cancelled) and releases its slot. The done names the
@@ -2729,6 +2754,21 @@ async function* routeParallelPrepared(
   if (options.routeSpan) {
     options.routeSpan.setAttribute(ROUTE_TOTAL_CATS_INVOKED, completedCount);
     options.routeSpan.setAttribute(ROUTE_TOTAL_TOKENS, routeTotalTokens);
+  }
+
+  // An aborted stream may have no done event for the merge loop to consume.
+  for (const [catId, invocationId] of catInvocationId) {
+    const signal = executionControls.get(catId as CatId)?.signal;
+    if (!signal?.aborted) continue;
+    recordStoppedRecallCalls(
+      deps.toolEventLog,
+      threadId,
+      invocationId,
+      catId,
+      pendingToolResultsByCat.get(catId) ?? [],
+      signal,
+    );
+    completedCatInvocationIds.push([catId, invocationId]);
   }
 
   // F200 AC-A1: fire-and-forget recall correlation after all cats complete.

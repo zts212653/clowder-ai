@@ -186,6 +186,12 @@ for (const topology of ['serial', 'parallel'])
           }
           const response = messages.getById(firstResponseId);
           assert.deepEqual(new Set(response.lifecycle.inputMessageIds), new Set(inputIds));
+          const navigation = prompts[0].match(/\[导航\]([\s\S]*?)\[\/导航\]/)?.[1] ?? '';
+          assert.match(navigation, /本轮输入来源/);
+          for (const inputId of inputIds)
+            assert.ok(navigation.includes(inputId), 'every actual merged input has provenance');
+          if (hidden?.message)
+            assert.ok(!navigation.includes(hidden.message.id), 'unadmitted queued input has no provenance');
           const active = tracker.getActiveSlots(thread.id).find((slot) => slot.catId === 'opus').activeRun;
           assert.deepEqual(new Set(active.inputMessageIds), new Set(response.lifecycle.inputMessageIds));
           assert.ok(!prompts[0].includes(hiddenBody), 'unpublished input cannot enter the first public projection');

@@ -60,14 +60,15 @@ export function moveCoordinate(value, base) {
  * The loop matters twice over: `env FOO=1 kill ...` puts assignments *after*
  * the wrapper, and a wrapper can hand off to another wrapper.
  */
-export function programTokens(tokens, outerCwd) {
+export function programTokens(tokens, outerCwd, inquiryContext = false) {
   let rest = tokens;
   let cwd = outerCwd;
   const directoryOperands = [];
   const environment = [];
   const wrappers = [];
   let coordinateKnown = true;
-  const finish = (rest, complete) => ({
+  let builtinContext = inquiryContext;
+  const finish = (rest, complete, lookupOnly = false) => ({
     rest,
     complete,
     cwd,
@@ -75,6 +76,7 @@ export function programTokens(tokens, outerCwd) {
     environment,
     wrappers,
     coordinateKnown,
+    lookupOnly,
   });
   for (let guard = 0; guard <= MAX_RECURSION; guard++) {
     const clean = skipNoise(rest);
@@ -83,15 +85,25 @@ export function programTokens(tokens, outerCwd) {
       .slice(0, rest.length - clean.length)
       .some((word) => /^GIT_(?:DIR|WORK_TREE|COMMON_DIR)=/.test(word));
     rest = clean;
-    if (rest.length === 0) return finish([], true);
+    if (rest.length === 0) {
+      const leaf = wrappers.at(-1);
+      return finish(leaf ? [leaf.program, ...leaf.options] : [], true);
+    }
+    // A shell builtin inquiry reads program names; it never delegates to them.
+    // After an external launcher (env/exec/sudo/...), `command` is no longer
+    // proven to be the shell builtin. A basename match cannot grant this role.
     const spec = WRAPPERS.get(commandName(rest[0]) ?? '');
     if (!spec) return finish(rest, true);
     const consumed = afterWrapper(spec, rest.slice(1));
+    if (builtinContext && !environment.length && rest[0] === 'command' && consumed.complete && consumed.inquiry)
+      return finish(rest, true, true);
+    builtinContext &&= ['command', 'builtin'].includes(rest[0]);
     wrappers.push({
       program: rest[0],
       cwd,
       environment: [...environment],
       options: rest.slice(1, rest.length - consumed.rest.length),
+      ...(consumed.inquiry ? { inquiry: true } : {}),
     });
     if (consumed.cwd !== undefined) directoryOperands.push(consumed.cwd);
     if (spec.stdinCommands && consumed.complete && consumed.rest.length === 0) return finish([rest[0]], true);
@@ -132,6 +144,35 @@ export function annotateCoordinate(result, program, argvComplete) {
       programOperands: program.rest.slice(1),
       coordinateKnown: program.coordinateKnown,
       argvComplete,
+      lookupOnly: program.lookupOnly,
     });
   return result;
+}
+
+/** Leading group/negation grammar does not hide the control word it precedes. */
+export function leadingShellControl(raw) {
+  const text = raw.replace(/^(?:\s*[{}!])*\s*/, '');
+  return text.match(/^(if|then|else|elif|for|while|until|case|function)\b/)?.[1];
+}
+
+/** The caller's native namespace is not known after shell startup imports. */
+export function nativeBuiltinContext(known, env = process.env) {
+  return Boolean(known && !env.BASH_ENV && !env.ENV && !Object.keys(env).some((name) => name.startsWith('BASH_FUNC_')));
+}
+
+/** External argv launchers select executable children, never parent-shell builtins. */
+export function delegatedProgramTokens(tokens, cwd, parent) {
+  const child = programTokens(tokens, cwd, false);
+  child.environment = [...parent.environment, ...child.environment];
+  child.wrappers = [
+    ...parent.wrappers,
+    {
+      program: parent.rest[0],
+      cwd: parent.cwd,
+      environment: parent.environment,
+      options: [],
+    },
+    ...child.wrappers,
+  ];
+  return child;
 }

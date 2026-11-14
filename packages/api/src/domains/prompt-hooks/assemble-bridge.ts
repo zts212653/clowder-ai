@@ -31,7 +31,6 @@ import {
   formatAlwaysOnDocs,
   formatHandleFreeLabel,
   PROVIDER_LABELS,
-  resolveActiveParticipants,
   resolveDirectMessage,
   resolveModel,
   resolveTeammates,
@@ -133,7 +132,6 @@ export function assembleForSession(catId: CatId, options?: StaticIdentityOptions
     teammates: [],
     mentionRoutingItems: [],
     promptTags: [],
-    activeParticipants: [],
     routingPolicyParts: null,
     sopStageHint: null,
     voiceMode: false,
@@ -159,7 +157,7 @@ export function assembleForTurn(context: InvocationContext): AssemblerInput {
   const shouldA2A = context.mode !== 'parallel' && context.a2aEnabled === true && !context.nativeL0Injected;
   const routingItems: string[] =
     context.mentionRoutingFeedback?.items
-      ?.filter((item) => item.reason !== 'void_hold')
+      ?.filter((item) => item.reason !== 'void_hold' && item.reason !== 'owner_ask_unaddressed')
       .slice(0, 2)
       .map((it) => `@${it.targetCatId}`) ?? [];
 
@@ -193,8 +191,9 @@ export function assembleForTurn(context: InvocationContext): AssemblerInput {
     teammates: resolveTeammates(context.teammates),
     mentionRoutingItems: routingItems,
     voidHoldFeedback: context.mentionRoutingFeedback?.items.some((item) => item.reason === 'void_hold') ?? false,
+    ownerAskFeedback:
+      context.mentionRoutingFeedback?.items.some((item) => item.reason === 'owner_ask_unaddressed') ?? false,
     promptTags: context.promptTags ? [...context.promptTags] : [],
-    activeParticipants: resolveActiveParticipants(context.activeParticipants),
     routingPolicyParts: formatRoutingPolicy(context.routingPolicy),
     sopStageHint: context.sopStageHint
       ? {

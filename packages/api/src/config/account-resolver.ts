@@ -40,6 +40,7 @@ export interface RuntimeProviderProfile {
   displayName?: string;
   codex?: CodexManagedAccount;
   claude?: AccountConfig['claude'];
+  agy?: AccountConfig['agy'];
   authType: 'oauth' | 'api_key';
   kind?: ProviderProfileKind;
   /** Fresh-install CLI-owned identity; its active provider is selected by the CLI config. */
@@ -197,6 +198,7 @@ export function resolveByAccountRef(projectRoot: string, accountRef: string): Ru
         kind: 'api_key',
         syntheticNative: true,
         client: builtinClient,
+        ...(builtinClient === 'openai' ? { accountOwnerRoot: resolve(projectRoot) } : {}),
         ...(builtinProtocol ? { protocol: builtinProtocol } : {}),
         ...(baseUrl ? { baseUrl } : {}),
         apiKey,
@@ -282,6 +284,74 @@ export function resolveForClient(
   return null;
 }
 
+const PLATFORM_ACCOUNT_LABELS = {
+  anthropic: 'Anthropic Platform',
+  openai: 'OpenAI Platform',
+  google: 'Google Platform',
+} as const;
+export type PlatformApiKeyClient = keyof typeof PLATFORM_ACCOUNT_LABELS;
+
+function automaticPlatformDestination(account: AccountConfig, client: PlatformApiKeyClient): boolean {
+  if (!account.baseUrl) return true;
+  try {
+    const url = new URL(account.baseUrl);
+    return url.protocol === 'https:' && officialProviderFamily(url.hostname) === client;
+  } catch {
+    return false;
+  }
+}
+
+/** Shared platform credentials are discovered independently of CLI/OAuth bindings. */
+export function resolvePlatformApiKeyAccount(
+  projectRoot: string,
+  client: PlatformApiKeyClient,
+  accountRef?: string,
+): RuntimeProviderProfile | undefined {
+  const label = PLATFORM_ACCOUNT_LABELS[client];
+  const store = readAccountStoreSnapshot(projectRoot);
+  const eligible = (
+    account: AccountConfig | undefined,
+    credential: CredentialEntry | undefined,
+  ): account is AccountConfig =>
+    account?.clientId === client && account.authType === 'api_key' && Boolean(credential?.apiKey?.trim());
+  if (accountRef !== undefined) {
+    const entry = store.resolve(accountRef);
+    if (!eligible(entry.account, entry.credential)) throw new Error(`${label} API key account unavailable`);
+    return accountToRuntimeProfile(accountRef, entry.account, entry.credential, projectRoot);
+  }
+  const candidates: RuntimeProviderProfile[] = [];
+  for (const ref of store.refs) {
+    const verdict = store.inspect(ref);
+    if (verdict.state !== 'resolved') continue;
+    const { account, credential } = verdict.entry;
+    if (eligible(account, credential) && automaticPlatformDestination(account, client))
+      candidates.push(accountToRuntimeProfile(ref, account, credential, projectRoot));
+  }
+  if (candidates.length > 1) throw new Error(`Multiple ${label} accounts; specify accountRef`);
+  return candidates[0];
+}
+
+export function resolveAnthropicPlatformAccount(
+  projectRoot: string,
+  accountRef?: string,
+): RuntimeProviderProfile | undefined {
+  return resolvePlatformApiKeyAccount(projectRoot, 'anthropic', accountRef);
+}
+
+export function resolveOpenAIPlatformAccount(
+  projectRoot: string,
+  accountRef?: string,
+): RuntimeProviderProfile | undefined {
+  return resolvePlatformApiKeyAccount(projectRoot, 'openai', accountRef);
+}
+
+export function resolveGooglePlatformAccount(
+  projectRoot: string,
+  accountRef?: string,
+): RuntimeProviderProfile | undefined {
+  return resolvePlatformApiKeyAccount(projectRoot, 'google', accountRef);
+}
+
 /** Map a client ID or protocol string to its BuiltinAccountClient equivalent. */
 function normalizeToClient(clientOrProtocol: string): BuiltinAccountClient | null {
   if (clientOrProtocol === 'openai-responses') return 'openai';
@@ -321,6 +391,7 @@ export function accountToRuntimeProfile(
         }
       : {}),
     ...(account.claude ? { claude: account.claude, envVars: claudeTokenEnvironment(credential) } : {}),
+    ...(account.agy ? { agy: account.agy } : {}),
     ...(builtinClient ? { client: builtinClient } : {}),
     ...(builtinClient === 'openai' && accountOwnerRoot ? { accountOwnerRoot: resolve(accountOwnerRoot) } : {}),
     ...(account.clientId !== undefined ? { persistedClientId: account.clientId } : {}),

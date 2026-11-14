@@ -1,7 +1,7 @@
 'use client';
 
 import type { BuiltinCloudIdentityProtectedField, BuiltinCloudIdentityProtection } from '@cat-cafe/shared';
-import { deploymentDefaults } from '@cat-cafe/shared';
+import { defaultAcpPoolMaxProcesses, deploymentDefaults } from '@cat-cafe/shared';
 import { useMemo, useRef } from 'react';
 import type { CatData } from '@/hooks/useCatData';
 import { useCoCreatorDisplay } from '@/hooks/useCoCreatorConfig';
@@ -615,9 +615,10 @@ export function AccountSection({
                   .map((profile) => ({
                     value: profile.id,
                     disabled:
-                      profile.clientId === 'openai' &&
-                      profile.authType === 'oauth' &&
-                      (profile.codex ? profile.codex.status !== 'ready' : profile.codexLoginStatus !== 'ready'),
+                      (profile.agy && (!native || !['ready', 'refreshable'].includes(profile.agyLoginStatus ?? ''))) ||
+                      (profile.clientId === 'openai' &&
+                        profile.authType === 'oauth' &&
+                        (profile.codex ? profile.codex.status !== 'ready' : profile.codexLoginStatus !== 'ready')),
                     label: page
                       ? copy.accountLabel(profile.displayName, profile.builtin ? 'builtin' : profile.authType)
                       : profile.builtin
@@ -630,9 +631,8 @@ export function AccountSection({
               onChange={(value) =>
                 onChange({
                   accountRef: value,
-                  accountBindingMode: form.clientId === 'openai' ? 'override' : undefined,
-                  defaultModel: '',
-                  provider: '',
+                  accountBindingMode: ['openai', 'google'].includes(form.clientId) ? 'override' : undefined,
+                  ...(!native ? { defaultModel: '', provider: '' } : {}),
                 })
               }
               disabled={loadingProfiles}
@@ -662,7 +662,9 @@ export function AccountSection({
                     : '模型标识符，如 claude-sonnet-4-5'
               }
             />
-            {native || officialAcp ? <AgyNativeFields form={form} onChange={onChange} /> : null}
+            {native || officialAcp ? (
+              <AgyNativeFields form={form} onChange={onChange} managedAccount={Boolean(selectedProfile?.agy)} />
+            ) : null}
             {modelNotListed ? (
               <div className="rounded-[10px] bg-[var(--console-field-bg,var(--console-card-bg))] px-3 py-2">
                 <p className="text-xs leading-4 text-conn-amber-text">
@@ -758,7 +760,7 @@ export function AccountSection({
                       value={form.acpMaxLiveProcesses}
                       onChange={(value) => onChange({ acpMaxLiveProcesses: value })}
                       inputMode="numeric"
-                      placeholder="3"
+                      placeholder={String(defaultAcpPoolMaxProcesses(form.clientId))}
                     />
                     <TextField
                       label="ACP Idle TTL (min)"
