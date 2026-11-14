@@ -308,15 +308,20 @@ it('drift restores an earlier blocker when a later boundary lookup fails', async
     syncBuiltinESMExports();
   });
   await assert.rejects(
-    syncDrift(project, source, rulesFor({ alias: 'first', path: 'first/skills' }, { alias: 'second', path: 'second/skills' }), {
-      newSkills: [],
-      conflicts: [
-        { skill: 'probe-skill', kind: 'directory', mountPointId: 'first' },
-        { skill: 'probe-skill', kind: 'directory', mountPointId: 'second' },
-      ],
-      stale: [],
-      issues: [],
-    }),
+    syncDrift(
+      project,
+      source,
+      rulesFor({ alias: 'first', path: 'first/skills' }, { alias: 'second', path: 'second/skills' }),
+      {
+        newSkills: [],
+        conflicts: [
+          { skill: 'probe-skill', kind: 'directory', mountPointId: 'first' },
+          { skill: 'probe-skill', kind: 'directory', mountPointId: 'second' },
+        ],
+        stale: [],
+        issues: [],
+      },
+    ),
     { code: 'ELOOP' },
   );
   assert.equal(await readFile(join(blocker, 'keep.txt'), 'utf8'), 'keep');
@@ -352,12 +357,16 @@ it('drift reports a missing mount rejected at the project boundary as skipped', 
     const rules = rulesFor({ alias: 'blocked', path: 'bridge/skills' }, { alias: 'safe', path: '.test-skills' });
     await writeCapabilitiesConfig(project, {
       version: 2,
-      capabilities: [{ id: 'debugging', type: 'skill', source: 'cat-cafe', enabled: true, mountPaths: ['blocked', 'safe'] }],
+      capabilities: [
+        { id: 'debugging', type: 'skill', source: 'cat-cafe', enabled: true, mountPaths: ['blocked', 'safe'] },
+      ],
     });
     if (scope === 'cascade') {
       await writeCapabilitiesConfig(target, {
         version: 2,
-        capabilities: [{ id: 'debugging', type: 'skill', source: 'cat-cafe', enabled: true, mountPaths: ['blocked', 'safe'] }],
+        capabilities: [
+          { id: 'debugging', type: 'skill', source: 'cat-cafe', enabled: true, mountPaths: ['blocked', 'safe'] },
+        ],
       });
     }
     const app = await appFor(t, mountRulesRoutes, { mainProjectRoot: project });

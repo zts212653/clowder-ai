@@ -25,7 +25,7 @@ export interface DriftSyncReport {
   mounted: string[];
   unmounted: string[];
   overridden: string[];
-  /** Conflicts skipped due to keep-project policy (user content preserved). */
+  /** Skills skipped due to keep-project policy or mount conflicts, including boundary rejections. */
   skipped: string[];
   resolvedFrom: DriftResult;
 }
@@ -86,54 +86,54 @@ async function syncDriftUnlocked(
   const backups: BlockerBackup[] = [];
   const backupDir = join(projectRoot, '.cat-cafe', '.drift-backup');
 
-  for (const conflict of drift.conflicts ?? []) {
-    if (!isValidSkillName(conflict.skill)) continue;
+  try {
+    for (const conflict of drift.conflicts ?? []) {
+      if (!isValidSkillName(conflict.skill)) continue;
 
-    // keep-project: preserve user's custom skill content, skip the conflict
-    if (conflictPolicy === 'keep-project') {
-      skippedSkills.add(conflict.skill);
-      continue;
-    }
-
-    const target = targets.find((t) => t.id === conflict.mountPointId);
-    if (!target) continue;
-    // Standard mount points: only use project path (candidates[0]), skip HOME fallback.
-    const dirs = target.kind === 'standard' ? target.candidates.slice(0, 1) : target.candidates;
-    for (const dir of dirs) {
-      if (await resolveMountBoundaryEscape(projectRoot, dir)) {
+      // keep-project: preserve user's custom skill content, skip the conflict
+      if (conflictPolicy === 'keep-project') {
         skippedSkills.add(conflict.skill);
         continue;
       }
-      overriddenSkills.add(conflict.skill);
-      // If the mount point dir path is not a directory (symlink or file blocking it),
-      // back up the blocker itself — don't follow symlinks into the source.
-      try {
-        const stat = await lstat(dir);
-        if (!stat.isDirectory()) {
-          await mkdir(backupDir, { recursive: true });
-          const backupPath = join(backupDir, `dir-${target.id}`);
-          await rename(dir, backupPath);
-          backups.push({ original: dir, backup: backupPath });
+
+      const target = targets.find((t) => t.id === conflict.mountPointId);
+      if (!target) continue;
+      // Standard mount points: only use project path (candidates[0]), skip HOME fallback.
+      const dirs = target.kind === 'standard' ? target.candidates.slice(0, 1) : target.candidates;
+      for (const dir of dirs) {
+        if (await resolveMountBoundaryEscape(projectRoot, dir)) {
+          skippedSkills.add(conflict.skill);
           continue;
         }
-      } catch {
-        /* ENOENT — dir doesn't exist, nothing to clean */
-        continue;
+        overriddenSkills.add(conflict.skill);
+        // If the mount point dir path is not a directory (symlink or file blocking it),
+        // back up the blocker itself — don't follow symlinks into the source.
+        try {
+          const stat = await lstat(dir);
+          if (!stat.isDirectory()) {
+            await mkdir(backupDir, { recursive: true });
+            const backupPath = join(backupDir, `dir-${target.id}`);
+            await rename(dir, backupPath);
+            backups.push({ original: dir, backup: backupPath });
+            continue;
+          }
+        } catch {
+          /* ENOENT — dir doesn't exist, nothing to clean */
+          continue;
+        }
+        const conflictPath = join(dir, conflict.skill);
+        try {
+          await lstat(conflictPath);
+        } catch {
+          continue; // ENOENT — nothing at this path
+        }
+        await mkdir(backupDir, { recursive: true });
+        const backupPath = join(backupDir, `${target.id}-${conflict.skill}`);
+        await rename(conflictPath, backupPath);
+        backups.push({ original: conflictPath, backup: backupPath });
       }
-      const conflictPath = join(dir, conflict.skill);
-      try {
-        await lstat(conflictPath);
-      } catch {
-        continue; // ENOENT — nothing at this path
-      }
-      await mkdir(backupDir, { recursive: true });
-      const backupPath = join(backupDir, `${target.id}-${conflict.skill}`);
-      await rename(conflictPath, backupPath);
-      backups.push({ original: conflictPath, backup: backupPath });
     }
-  }
 
-  try {
     const syncResult = await syncProject(projectRoot, skillsSource, {
       mountRules,
       disabledSkills: new Set(opts?.disabledSkills ?? []),
@@ -153,7 +153,9 @@ async function syncDriftUnlocked(
       mounted: [...new Set(syncResult.mounted.map((m) => m.skillName))].sort(),
       unmounted: [...new Set(syncResult.unmounted.map((u) => u.skillName))].sort(),
       overridden: [...overriddenSkills].sort(),
-      skipped: [...skippedSkills].sort(),
+      skipped: [
+        ...new Set([...skippedSkills, ...syncResult.conflicts.map((item) => item.skillName).filter(isValidSkillName)]),
+      ].sort(),
       resolvedFrom: drift,
     };
   } catch (syncErr) {

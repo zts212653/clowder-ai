@@ -24,7 +24,7 @@ it('uses the physical project root, including aliases and absent tail directorie
   assert.equal(await resolveMountBoundaryEscape(project, join(project, 'inside', 'new', 'skills')), null);
   assert.equal(
     await resolveMountBoundaryEscape(alias, join(alias, 'bridge', 'new', 'skills')),
-    join(outside, 'new', 'skills'),
+    join(await fs.realpath(outside), 'new', 'skills'),
   );
 });
 
@@ -36,7 +36,7 @@ it('treats explicitly configured directories inside a home project like any othe
   }
 });
 
-it('lets the existing mount conflict logic handle a file blocker without changing unrelated targets', async (t) => {
+it('resolves absent descendants behind a file within the boundary helper', async (t) => {
   const root = await mkdtemp(join(tmpdir(), 'mount-file-blocker-'));
   t.after(() => rm(root, { recursive: true, force: true }));
   await writeFile(join(root, '.config'), 'existing user file');

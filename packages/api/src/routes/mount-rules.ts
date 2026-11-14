@@ -18,6 +18,7 @@ import type { MountRules } from '@cat-cafe/shared';
 import type { FastifyPluginAsync, FastifyReply, FastifyRequest } from 'fastify';
 import { readCapabilitiesConfig, withCapabilityLock } from '../config/capabilities/capability-orchestrator.js';
 import { requireLocalCapabilityWriteRequest } from '../config/capabilities/capability-write-guards.js';
+import { isValidSkillName } from '../config/governance/skill-sync.js';
 import {
   clearProjectMountRulesOverride,
   readDefaultMountRules,
@@ -115,18 +116,25 @@ export const mountRulesRoutes: FastifyPluginAsync<MountRulesRouteOptions> = asyn
       return withCapabilityLock(globalRoot, async () => {
         const previousDefaultRules = await readDefaultMountRules(globalRoot);
         await writeDefaultMountRules(globalRoot, validated);
-        await syncProject(globalRoot, skillsSrc, {
+        const mainResult = await syncProject(globalRoot, skillsSrc, {
           mountRules: validated,
           previousMountRules: previousDefaultRules,
           pruneMountPaths: true,
         });
-        const skipped = new Set(await reconcilePluginMounts(globalRoot, skillsSrc, validated, previousDefaultRules));
+        const skipped = new Set([
+          ...mainResult.conflicts.map((item) => item.skillName).filter(isValidSkillName),
+          ...(await reconcilePluginMounts(globalRoot, skillsSrc, validated, previousDefaultRules)),
+        ]);
         const syncResult = await syncAll(globalRoot, skillsSrc, {
           mountRules: validated,
           previousMountRules: previousDefaultRules,
         });
         // Reconcile plugin mounts for registered projects that inherit default rules
-        for (const projectPath of syncResult.perProject.keys()) {
+        for (const [projectPath, projectResult] of syncResult.perProject) {
+          projectResult.conflicts
+            .map((item) => item.skillName)
+            .filter(isValidSkillName)
+            .forEach((skill) => skipped.add(skill));
           try {
             await withCapabilityLock(projectPath, async () => {
               const projectRules = await readMountRules(projectPath, globalRoot);
@@ -205,7 +213,7 @@ export const mountRulesRoutes: FastifyPluginAsync<MountRulesRouteOptions> = asyn
       await writeMountRules(projectRoot, validated);
       const skipped: string[] = [];
       try {
-        await syncProject(projectRoot, skillsSrc, {
+        const syncResult = await syncProject(projectRoot, skillsSrc, {
           mountRules: validated,
           previousMountRules: previousRules,
           pruneMountPaths: true,
@@ -214,7 +222,10 @@ export const mountRulesRoutes: FastifyPluginAsync<MountRulesRouteOptions> = asyn
           globalCustomSourceSkills,
           mainProjectRoot: globalRoot,
         });
-        skipped.push(...(await reconcilePluginMounts(projectRoot, skillsSrc, validated, previousRules)));
+        skipped.push(
+          ...syncResult.conflicts.map((item) => item.skillName).filter(isValidSkillName),
+          ...(await reconcilePluginMounts(projectRoot, skillsSrc, validated, previousRules)),
+        );
       } catch (err) {
         if (previousProjectRules) {
           await writeMountRules(projectRoot, previousProjectRules).catch(() => {});
