@@ -2972,6 +2972,8 @@ export class QueueProcessor {
     const failedIds: string[] = [];
     const deliveredMessages: Array<{
       id: string;
+      visibility?: StoredMessage['visibility'];
+      whisperTo?: readonly string[];
       content: string;
       lifecycle?: import('@cat-cafe/shared').LifecycleStoredMessageMetadata;
       catId: string | null;
@@ -3016,6 +3018,9 @@ export class QueueProcessor {
         const projectedExtra = result.extra ?? {};
         deliveredMessages.push({
           id: result.id,
+          ...(result.from?.kind === 'user' && result.clientMessageId
+            ? { clientMessageId: result.clientMessageId }
+            : {}),
           ...(result.from ? { from: result.from } : {}),
           content: result.content,
           ...(result.lifecycle ? { lifecycle: result.lifecycle } : {}),
@@ -3025,6 +3030,8 @@ export class QueueProcessor {
           mentions: result.mentions,
           userId: result.userId,
           contentBlocks: result.contentBlocks,
+          ...(result.visibility ? { visibility: result.visibility } : {}),
+          ...(result.whisperTo ? { whisperTo: result.whisperTo } : {}),
           ...(Object.keys(projectedExtra).length > 0 ? { extra: projectedExtra as Record<string, unknown> } : {}),
           ...(result.origin ? { origin: result.origin } : {}),
           ...(result.replyTo ? { replyTo: result.replyTo } : {}),

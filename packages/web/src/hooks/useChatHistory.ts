@@ -30,6 +30,7 @@ import {
   isBeforeHistoryPageCursor,
 } from '@/stores/message-timeline';
 import { withQueuedInputPreviews } from '@/stores/queued-input-preview';
+import { withSendAttempts } from '@/stores/send-attempt-projection';
 import { ownsStreamedBody, withStreamedBodyOf } from '@/stores/streamed-body';
 import type { TaskItem } from '@/stores/taskStore';
 import { useTaskStore } from '@/stores/taskStore';
@@ -106,6 +107,7 @@ import {
 } from '@/utils/teleport';
 import { hydrateQueueActiveInvocationSlots, type QueueActiveInvocationSlot } from './queue-active-invocation-hydration';
 import { acknowledgeThreadHistoryWatermark, readThreadHistoryWatermark } from './thread-history-watermark';
+import { useSendAttempts } from './useSendAttempts';
 import { useViewportMessageTimeline } from './useViewportMessageTimeline';
 
 type RestoreFrameKind = 'restore' | 'navigation' | 'correction';
@@ -841,9 +843,16 @@ export function useChatHistory(threadId: string) {
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const sendAttempts = useSendAttempts(threadId, rawMessages, pendingQueue ?? []);
   const presentedMessages = useMemo(
-    () => withQueuedInputPreviews(rawMessages, pendingQueue, threadId),
-    [rawMessages, pendingQueue, threadId],
+    () =>
+      withSendAttempts(
+        withQueuedInputPreviews(rawMessages, pendingQueue, threadId),
+        sendAttempts,
+        threadId,
+        pendingQueue,
+      ),
+    [rawMessages, pendingQueue, threadId, sendAttempts],
   );
   const messages = useViewportMessageTimeline(threadId, presentedMessages);
 
@@ -1566,6 +1575,7 @@ export function useChatHistory(threadId: string) {
           .map(
             (m: {
               id: string;
+              clientMessageId?: string;
               type: string;
               from?: import('@cat-cafe/shared').MessageFrom;
               catId?: string;
@@ -1622,6 +1632,7 @@ export function useChatHistory(threadId: string) {
                           ? 'assistant'
                           : 'user')) as 'user' | 'assistant' | 'system' | 'summary' | 'connector',
                 ...(m.from ? { from: m.from } : {}),
+                ...(m.clientMessageId ? { clientMessageId: m.clientMessageId } : {}),
                 catId: m.catId,
                 content: (() => {
                   if (!m.extra?.semanticEvent) return m.content;

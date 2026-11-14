@@ -10,6 +10,7 @@ const registryPath = resolve(packageRoot, 'config/public-test-exclusions.json');
 const resolverModuleUrl = pathToFileURL(resolve(packageRoot, 'scripts/resolve-public-test-files.mjs')).href;
 
 const RECONCILED_EXCLUSIONS = [
+  '^test/send-attempt-correlation-redis\\.test\\.js$',
   '^test/(?:person-memory-owner-(?:deferred-invalidation|maintenance)|remember-(?:group-retry|original-entrypoints))\\.test\\.js$',
   '^test/alpha-managed-(?:lifecycle|materialization|scheduler|sleep)-integration\\.test\\.js$',
   '^test/alpha-browser-template-source\\.test\\.js$',

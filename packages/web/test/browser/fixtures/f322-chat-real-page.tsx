@@ -27,6 +27,7 @@ import { useThreadMessages } from '@/hooks/useThreadScopedSelectors';
 import type { ChatMessage as ChatMessageData } from '@/stores/chat-types';
 import { useChatStore } from '@/stores/chatStore';
 import { withQueuedInputPreviews } from '@/stores/queued-input-preview';
+import { observeCanceledSendAttempts } from '@/stores/send-attempt-store';
 import { useSidebarProjectionStore } from '@/stores/sidebarProjectionStore';
 import { useSidebarStore } from '@/stores/sidebarStore';
 import { useThemeStore } from '@/stores/themeStore';
@@ -226,6 +227,8 @@ declare global {
       selectedThread: () => string;
       currentProject: () => string;
       incoming: (threadId: string, message: ChatMessageData) => void;
+      queue: (threadId: string, entries: import('../../../src/stores/chat-types').QueueEntry[]) => void;
+      recall: (threadId: string, messageId: string) => Promise<void>;
     };
   }
 }
@@ -237,6 +240,11 @@ window.__f322Chat = {
   selectedThread: () => useChatStore.getState().currentThreadId,
   currentProject: () => useChatStore.getState().currentProjectPath,
   incoming: (threadId, message) => useChatStore.getState().addMessageToThread(threadId, message),
+  queue: (threadId, entries) => useChatStore.getState().setQueue(threadId, entries),
+  recall: async (threadId, messageId) => {
+    await observeCanceledSendAttempts(threadId, [messageId], 'recalled');
+    useChatStore.getState().removeThreadMessage(threadId, messageId);
+  },
 };
 const root = document.getElementById('root');
 if (!root) throw new Error('Missing chat proof root');

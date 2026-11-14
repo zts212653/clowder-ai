@@ -7,6 +7,7 @@ import type { OwnerAuthProvenance } from '../owner-auth-provenance.js';
 import { type QueueLedgerEntry, type QueueOwner, queueEntryId } from './QueueLedger.js';
 
 export interface QueueLedgerAdmissionInput {
+  clientMessageId?: string;
   sourceId: string;
   threadId: string;
   owner: QueueOwner;
@@ -56,6 +57,7 @@ export function createQueueLedgerAdmission(input: QueueLedgerAdmissionInput): Qu
       targets: [...input.targetCatIds],
       payload: {
         sourceRecordId: input.sourceId,
+        ...(input.clientMessageId ? { clientMessageId: input.clientMessageId } : {}),
         ...(input.requestedTargetCats ? { requestedTargetCats: [...input.requestedTargetCats] } : {}),
         content: input.content,
         ...(input.messageId ? { messageId: input.messageId } : {}),

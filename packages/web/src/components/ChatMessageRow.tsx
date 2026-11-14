@@ -74,7 +74,7 @@ export const ChatMessageRow = memo(function ChatMessageRow({
 }: ChatMessageRowProps) {
   return (
     <MessageViewportBoundary
-      messageId={message.id}
+      messageId={message.sendAttempt ? undefined : message.id}
       eager={eager}
       backgroundMountDelayMs={backgroundMountDelayMs}
       navigationError={message.variant === 'error'}

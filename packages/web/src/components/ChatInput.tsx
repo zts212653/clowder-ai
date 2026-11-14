@@ -20,6 +20,7 @@ import {
   useState,
   useSyncExternalStore,
 } from 'react';
+import { flushSync } from 'react-dom';
 import { GalleryDraftSummary } from '@/components/content-review/GalleryDraftSummary';
 import { useCatData } from '@/hooks/useCatData';
 import { type ProspectiveThreadRouting, useChatComposerRouting } from '@/hooks/useChatComposerRouting';
@@ -33,6 +34,7 @@ import { useThreadLiveness } from '@/hooks/useThreadScopedSelectors';
 import { formatCatDisplayName } from '@/lib/cat-display-name';
 import { useChatStore } from '@/stores/chatStore';
 import { useInputHistoryStore } from '@/stores/inputHistoryStore';
+import { isPreparedComposerDraft } from '@/stores/send-attempt-store';
 import { useToastStore } from '@/stores/toastStore';
 import { compressImage } from '@/utils/compressImage';
 import { AppTooltip } from './AppTooltip';
@@ -111,6 +113,8 @@ export interface ChatInputDraftSnapshot {
 }
 
 interface ChatInputProps {
+  /** This host has a durable sending bubble; clear only after its local snapshot commits. */
+  localSendFeedback?: boolean;
   /** The v2 host keeps the stop as the last control for an empty draft; classic retains a side stop. */
   presentation?: 'classic' | 'v2';
   /** Host-owned project control; only shown by the v2 composer. */
@@ -129,6 +133,7 @@ interface ChatInputProps {
     contextAttachments?: ContextAttachment[],
     explicitTargetCats?: string[],
     messageDisposition?: MessageWorkDisposition,
+    onPrepared?: (localDurableAttempt: boolean) => void,
   ) => void | boolean | Promise<void | boolean>;
   disabled?: boolean;
   sendBlocked?: boolean;
@@ -199,6 +204,7 @@ function RecoveredAttachmentsNotice({
 }
 
 export function ChatInput({
+  localSendFeedback = false,
   presentation = 'classic',
   composerContext,
   composerHeader,
@@ -321,6 +327,8 @@ export function ChatInput({
   const hydrated = useHydrated();
   const shownContextAttachments = hydrated ? contextAttachments : NO_CONTEXT_ATTACHMENTS;
   const [isPreparingImages, setIsPreparingImages] = useState(false);
+  const [isPreparingSend, setIsPreparingSend] = useState(false);
+  const preparingSendRef = useRef(false);
   const [whisperMode, setWhisperMode] = useState(false);
   const [whisperTargets, setWhisperTargets] = useState<Set<string>>(new Set());
 
@@ -400,6 +408,7 @@ export function ChatInput({
     retryUnrestoredImages,
     unrestoredImageCount,
   } = useDurableComposerDraft({
+    isDraftHandedOff: localSendFeedback ? isPreparedComposerDraft : undefined,
     threadId,
     input,
     setInput,
@@ -412,7 +421,8 @@ export function ChatInput({
     setIsPreparingImages,
   });
   const v2UnrestoredImageCount = shellV2 ? unrestoredImageCount : 0;
-  const sendTemporarilyDisabled = sendBlocked || isComposerSendBlocked(imageLifecycleStatus, v2UnrestoredImageCount);
+  const sendTemporarilyDisabled =
+    sendBlocked || isPreparingSend || isComposerSendBlocked(imageLifecycleStatus, v2UnrestoredImageCount);
 
   const handleTranscript = useCallback(
     (text: string) => {
@@ -444,7 +454,7 @@ export function ChatInput({
   const answerCopy = useShellCopy(conversationDecisionCopy);
   const boundAnswerSubmitting = useRef(false);
   const doSend = useCallback(() => {
-    if (sendTemporarilyDisabled) return;
+    if (sendTemporarilyDisabled || preparingSendRef.current) return;
     const answer = replyToMessage?.runtimeAnswerContext;
     if (answer) {
       if (disabled || boundAnswerSubmitting.current || !input.trim()) return;
@@ -516,34 +526,87 @@ export function ChatInput({
           ? { visibility: 'whisper' as const, whisperTo: [...whisperTargets] }
           : undefined;
       const settleAdmission = beginComposerDraftAdmission(draftSnapshot);
+      let prepared = false;
+      const clearSentSnapshot = () => {
+        markComposerDraftOptimisticallyCleared();
+        setInput((current) =>
+          localSendFeedback && current !== draftSnapshot.text
+            ? current.startsWith(draftSnapshot.text)
+              ? current.slice(draftSnapshot.text.length)
+              : current.endsWith(draftSnapshot.text)
+                ? current.slice(0, current.length - draftSnapshot.text.length)
+                : current
+            : '',
+        );
+        ghostRef.current = null;
+        setGhostSuggestion(null);
+        setImages((current) =>
+          localSendFeedback ? current.filter((file) => !draftSnapshot.images.includes(file)) : [],
+        );
+        setContextAttachments((current) =>
+          localSendFeedback
+            ? current.filter((item) => !draftSnapshot.contextAttachments.some((sent) => sent.id === item.id))
+            : [],
+        );
+        setShowMentions(false);
+        if (replyToMessage && useChatStore.getState().replyToMessage?.id === replyToMessage.id) clearReplyTo();
+      };
+      const onPrepared = (localDurableAttempt: boolean) => {
+        if (prepared) return;
+        prepared = true;
+        preparingSendRef.current = false;
+        setIsPreparingSend(false);
+        flushSync(clearSentSnapshot);
+        settleAdmission(true, { localDurableAttempt });
+      };
+      if (localSendFeedback) {
+        preparingSendRef.current = true;
+        setIsPreparingSend(true);
+      }
       let admission: ReturnType<ChatInputProps['onSend']>;
       try {
-        admission =
-          sendContexts.length > 0
+        admission = localSendFeedback
+          ? onSend(
+              trimmed,
+              images.length > 0 ? images : undefined,
+              whisper,
+              replyToMessage?.id,
+              sendContexts.length ? sendContexts : undefined,
+              undefined,
+              messageDisposition.effective,
+              onPrepared,
+            )
+          : sendContexts.length > 0
             ? onSend(trimmed, images.length > 0 ? images : undefined, whisper, replyToMessage?.id, sendContexts)
             : onSend(trimmed, images.length > 0 ? images : undefined, whisper, replyToMessage?.id);
       } catch {
+        preparingSendRef.current = false;
+        setIsPreparingSend(false);
         settleAdmission(false);
         return;
       }
       void Promise.resolve(admission).then(
         (accepted) => {
-          settleAdmission(accepted === false ? false : undefined);
+          if (!prepared) {
+            settleAdmission(accepted === false ? false : undefined);
+            preparingSendRef.current = false;
+            setIsPreparingSend(false);
+          }
         },
-        () => settleAdmission(false),
+        () => {
+          if (!prepared) {
+            settleAdmission(false);
+            preparingSendRef.current = false;
+            setIsPreparingSend(false);
+          }
+        },
       );
-      markComposerDraftOptimisticallyCleared();
-      setInput('');
-      ghostRef.current = null;
-      setGhostSuggestion(null);
-      setImages([]);
-      setContextAttachments([]);
-      setShowMentions(false);
-      // Only clear the reply snapshot that was actually sent.
-      if (replyToMessage && useChatStore.getState().replyToMessage?.id === replyToMessage.id) clearReplyTo();
+      if (!localSendFeedback) clearSentSnapshot();
     }
   }, [
     input,
+    localSendFeedback,
+    messageDisposition.effective,
     answerCopy,
     disabled,
     onSend,
