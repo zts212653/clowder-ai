@@ -262,6 +262,68 @@ test('sets a missing PATH key without an empty leading directory', () => {
   assert.deepEqual(env, { OTHER: 'kept', Path: 'C:\\System;C:\\User' });
 });
 
+test('matches repeated machine anchors by occurrence when inserting a user directory', () => {
+  const env = { Path: 'C:\\MachineTools;C:\\MachineTools' };
+  mergeWindowsPath(env, 'C:\\MachineTools;C:\\UserTools;C:\\MachineTools');
+  assert.equal(env.Path, 'C:\\MachineTools;C:\\UserTools;C:\\MachineTools');
+});
+
+test('does not use an explicitly promoted registered directory as a later anchor', () => {
+  const env = { Path: 'C:\\Custom;C:\\MachineTools;C:\\WindowsApps' };
+  mergeWindowsPath(env, 'C:\\MachineTools;C:\\UserTools;C:\\Custom;C:\\WindowsApps');
+  assert.equal(env.Path, 'C:\\Custom;C:\\MachineTools;C:\\UserTools;C:\\WindowsApps');
+});
+
+[false, true].forEach((isolated) => {
+  ['repeated machine', 'promoted registered custom'].forEach((scenario) => {
+    test(`real Windows command priority with ${scenario} anchors (isolated=${isolated})`, windowsOnly, async () => {
+      const value = manager({ stdout: '' });
+      const [machine, user, custom, alias] = ['machine', '用户工具', 'custom', 'WindowsApps'].map((name) =>
+        path.join(root, `anchors-${isolated}-${scenario}`, name),
+      );
+      [machine, user, custom, alias].forEach((dir) => fs.mkdirSync(dir, { recursive: true }));
+      [
+        [machine, 'priority', 'machine'],
+        [user, 'priority', 'user-shadow'],
+        [custom, 'priority', 'custom'],
+        [user, 'tool', 'user'],
+        [alias, 'tool', 'store-alias'],
+      ].forEach(([dir, name, output]) => {
+        fs.writeFileSync(path.join(dir, `issue1986-${name}.cmd`), `@echo ${output}\r\n`);
+      });
+      const repeated = scenario === 'repeated machine';
+      process.env.PATH = (repeated ? [machine, machine, alias] : [custom, machine, alias]).join(';');
+      const inherited = process.env.PATH;
+      value.windowsPath = (repeated ? [machine, user, machine, alias] : [machine, user, custom, alias]).join(';');
+      if (isolated) {
+        process.env.CAT_CAFE_DESKTOP_INSTANCE_ROOT = path.join(root, 'isolated-anchors');
+        process.env.FRONTEND_PORT = '5186';
+        process.env.API_SERVER_PORT = '3186';
+        process.env.REDIS_PORT = '6386';
+      }
+      const outputFile = path.join(root, `anchors-${isolated}-${scenario}.json`);
+      const shell = path.join(process.env.SystemRoot, 'System32', 'cmd.exe');
+      realChildren = true;
+      try {
+        value._startProcess('probe', process.execPath, [
+          '-e',
+          `const cp=require('node:child_process');const commands=['priority','tool'].map(name=>cp.spawnSync(${JSON.stringify(shell)},['/d','/c','issue1986-'+name+'.cmd'],{encoding:'utf8',windowsHide:true}).stdout.trim());require('node:fs').writeFileSync(${JSON.stringify(outputFile)},JSON.stringify({commands,keys:Object.keys(process.env).filter(k=>k.toUpperCase()==='PATH'),home:process.env.HOME}));`,
+        ]);
+        const [code] = await once(value.procs.probe, 'exit');
+        assert.equal(code, 0);
+        const captured = JSON.parse(fs.readFileSync(outputFile, 'utf8'));
+        assert.deepEqual(captured.commands, [repeated ? 'machine' : 'custom', 'user']);
+        assert.equal(captured.keys.length, 1);
+        assert.equal(captured.home, isolated ? path.join(root, 'isolated-anchors', 'home') : root);
+        assert.equal(process.env.PATH, inherited);
+      } finally {
+        realChildren = false;
+        delete process.env.CAT_CAFE_DESKTOP_INSTANCE_ROOT;
+      }
+    });
+  });
+});
+
 [false, true].forEach((isolated) => {
   test(
     `real Windows children resolve user and machine commands in order (isolated=${isolated})`,

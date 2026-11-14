@@ -69,9 +69,10 @@ function mergeWindowsPath(env, normalPath) {
       .replace(/\\+$/, '')
       .toLowerCase();
   const inherited = inheritedPath ? inheritedPath.split(';') : [];
-  const present = new Set(inherited.map(normalize));
-  const seen = new Set(present);
-  const merged = [...inherited];
+  const inheritedKeys = inherited.map(normalize);
+  const seen = new Set(inheritedKeys);
+  const merged = [];
+  let cursor = 0;
   let missing = [];
   normalPath
     .split(';')
@@ -79,18 +80,19 @@ function mergeWindowsPath(env, normalPath) {
     .filter(Boolean)
     .forEach((entry) => {
       const key = normalize(entry);
-      if (present.has(key) && missing.length) {
-        // Put missing segments before their next existing Windows PATH anchor
-        // (e.g. Python before WindowsApps), preserving every inherited entry.
-        const anchor = merged.findIndex((value) => normalize(value) === key);
-        merged.splice(anchor, 0, ...missing);
+      // Match occurrences only after the last anchor. A directory explicitly
+      // moved earlier by the parent cannot anchor a later missing segment.
+      const anchor = inheritedKeys.indexOf(key, cursor);
+      if (anchor !== -1) {
+        merged.push(...inherited.slice(cursor, anchor), ...missing, inherited[anchor]);
+        cursor = anchor + 1;
         missing = [];
       } else if (!seen.has(key)) {
         missing.push(entry);
         seen.add(key);
       }
     });
-  merged.push(...missing);
+  merged.push(...inherited.slice(cursor), ...missing);
   if (merged.length !== inherited.length) env[pathKey] = merged.join(';');
   // Node forwards the first case-insensitive key in lexical order on Windows.
   pathKeys.slice(1).forEach((key) => {
