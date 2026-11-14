@@ -1,0 +1,97 @@
+{
+  "sourceSha": "5bed18bd650ff3dde6fbc5eef2122c60540e2041",
+  "baseSha": "2a653d3e6a026f290286d804b2a1335f2a74bdb0",
+  "version": "1.14.0",
+  "diagnosticOnly": false,
+  "installer": {
+    "sizeBytes": 578319070,
+    "sha256": "7b8e17db80c705b5c21e0209bba2b6817cc543920b527b2dc3c503c08d6e9ba7",
+    "integrity": "High"
+  },
+  "control": {
+    "sizeBytes": 631530196,
+    "sha256": "594ce1465165f98be927e963de470748950873020c9a5dfdef7b4c7caf4db50b"
+  },
+  "controlMethod": "Same compiled inputs; restore only known foreign node-pty prebuilds and two build caches; upstream gzip1 helper. Measurement control, not a parent full rebuild or accepted rollback installer.",
+  "savedInstallerBytes": 53211126,
+  "savingPercent": 8.425745330473477,
+  "archiveComparison": {
+    "ok": true,
+    "retainedRegularFiles": 68864,
+    "removedRegularFiles": 14,
+    "removedRegularBytes": 16636101,
+    "unexpectedAddedChangedOrRemoved": 0
+  },
+  "archives": [
+    {
+      "name": "deploy-api.tar.gz",
+      "sizeBytes": 33322914,
+      "sha256": "fb257ee2179c1e56d53a43086ba0aaaa7fb7830b06e86eade0461e304259676d"
+    },
+    {
+      "name": "deploy-dependencies.tar.gz",
+      "sizeBytes": 142989777,
+      "sha256": "d2c324c865c4b85e0d3c352c0f6fefcbdd4a44641f98c50c7d91b7e9df8ba6e7"
+    },
+    {
+      "name": "deploy-mcp-server.tar.gz",
+      "sizeBytes": 2000890,
+      "sha256": "e47a8afc543e424ae78a3f6fb027e9a3752a76e6c556b6a3dd9233612e7199a6"
+    },
+    {
+      "name": "deploy-web.tar.gz",
+      "sizeBytes": 159610750,
+      "sha256": "cc0472f02349be4598d4f58e32488fe7f60ceee27b6edc9fe63c2676a33ed255"
+    },
+    {
+      "name": "electron.tar.gz",
+      "sizeBytes": 127921214,
+      "sha256": "0e72337e88e76fc2e85de9fa5aa3f9573372b02e4106267312cf2e9f3e978b9e"
+    },
+    {
+      "name": "node.tar.gz",
+      "sizeBytes": 37544941,
+      "sha256": "7f9533a911cec36aece95bed1f589763409d3212ec0e478f616ec81b6a7d0904"
+    }
+  ],
+  "componentChecks": {
+    "targetedTestsPassed": 58,
+    "runtimeChecksPassed": 40,
+    "memoryFallback": false,
+    "modelRequest": false
+  },
+  "ownedResources": {
+    "remainingOwnedProcesses": 0,
+    "remainingListeners": 0,
+    "stateDirectoryRetained": true
+  },
+  "independentReview": {
+    "reviewer": "dsh",
+    "reviewedHead": "5bed18bd650ff3dde6fbc5eef2122c60540e2041",
+    "verdict": "commented",
+    "scope": "Build, payload preservation, installer byte delta and component evidence only; no install or release acceptance."
+  },
+  "notAdopted": [
+    "PNG recompression experiment; C2PA/iDOT preserved; only 604205 logical bytes, no measured installer saving, PWA revision unresolved"
+  ],
+  "unverified": [
+    "Strict offline clean install",
+    "Supported earlier-version upgrade",
+    "Partial payload failure and recovery",
+    "Complete offline media and microphone",
+    "Real model/A2A/native session continuation",
+    "Other platforms",
+    "Portable ZIP",
+    "Installed disk-space saving"
+  ],
+  "rawEvidenceDelivery": "Local original evidence retained. This source-controlled summary is not a download of the installer or full logs.",
+  "rawEvidenceSha256": {
+    "build-manifest.json": "2bb81e2799d78cffcf81764e42f2773f5b32c08a074903dacf82dd68a1d8ecd0",
+    "comparison/comparison.json": "a8dbca1ff9aadf33361bf434e56b4db5ecd463811fef9a900abaa27e70cd6407",
+    "comparison/same-input-payload-diff.json": "c8afe518069afa6288ddcaf0b17504e9d77bfe17ad5e956c9ea39354aee53051",
+    "native-smoke.json": "8e0921ad06e45443999edc1f0e50f7c1b05fdecb25de53b6f0f69503d0cb9b36",
+    "runtime-smoke.json": "bb7f2810610fd0180b79bbbcb147d87bfb2d876f5364a0831a0a481532c5a0f5",
+    "owned-resources-closed.json": "a4affaf9ed96cd77548a2363591ba33154010afa31b946e5ed12965efbc6b8be",
+    "whale-delivery-review.md": "462364411470668ab1c9e0aef7f75f2770dc649084107124b015269e33c778ad"
+  }
+}

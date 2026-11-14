@@ -1,0 +1,9 @@
+{
+  "status": "historical-not-current-next-evidence",
+  "sourceSha": "c482cbef6dcb82eae032bbb6fd5ad1b8e96ecc69",
+  "documentHead": "224da1e1d81afaa43ad0b09a1f6900f9a4533c40",
+  "fullHistoricalReceipt": "https://github.com/whutzefengxie-ops/clowder-ai/blob/224da1e1d81afaa43ad0b09a1f6900f9a4533c40/docs/plans/evidence/2026-10-26-desktop-package-footprint.json",
+  "currentPlan": "../2026-11-03-issue-1703-next-package-slimming.md",
+  "currentSavings": null,
+  "note": "Old measurements remain recoverable at the immutable source; they are not results for current next."
+}
