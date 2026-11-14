@@ -86,9 +86,11 @@ function mergeWindowsPath(env, normalPath) {
       .replace(/^["']|["']$/g, '')
       .replaceAll('/', '\\')
       .toLowerCase();
-    // Never trim below a lexical root: C:\ is distinct from drive-relative C:.
+    // Preserve drive/device roots, but UNC share roots allow an optional separator.
     const root = path.win32.parse(value).root;
-    return value.slice(0, Math.max(root.length, value.replace(/\\+$/, '').length));
+    const minimum =
+      root.startsWith('\\\\') && !/^\\\\[?.]\\/.test(root) ? root.replace(/\\+$/, '').length : root.length;
+    return value.slice(0, Math.max(minimum, value.replace(/\\+$/, '').length));
   };
   const inherited = inheritedPath ? splitPath(inheritedPath) : [];
   const inheritedKeys = inherited.map(normalize);

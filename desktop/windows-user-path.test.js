@@ -316,6 +316,87 @@ test('distinguishes drive roots and current-drive roots from relative or empty e
   });
 });
 
+[false, true].forEach((trailing) => {
+  test(`keeps UNC share-root variants from overriding a promoted directory (trailing=${trailing})`, () => {
+    ['\\\\server\\share', '\\\\?\\UNC\\server\\share', '\\\\.\\UNC\\server\\share'].forEach((share) => {
+      const inherited = `C:\\Custom;${share}${trailing ? '\\' : ''};C:\\WindowsApps`;
+      const env = { Path: inherited };
+      mergeWindowsPath(env, `${share}${trailing ? '' : '\\'};C:\\Custom;C:\\WindowsApps`);
+      assert.equal(env.Path, inherited);
+      mergeWindowsPath(env, `${share}${trailing ? '' : '\\'};C:\\Custom;C:\\User;C:\\WindowsApps`);
+      assert.equal(env.Path, inherited.replace('C:\\WindowsApps', 'C:\\User;C:\\WindowsApps'));
+    });
+    const inherited = 'C:\\Custom;"\\\\SERVER\\share\\\\";C:\\WindowsApps';
+    const env = { Path: inherited };
+    mergeWindowsPath(env, '//server/share;C:\\Custom;C:\\WindowsApps');
+    assert.equal(env.Path, inherited);
+  });
+});
+
+test('does not equate UNC subdirectories or device roots with different meanings', () => {
+  [
+    ['\\\\server\\share', '\\\\server\\share\\tools'],
+    ['\\\\.\\C:', '\\\\.\\C:\\'],
+    ['\\\\?\\Volume{fixture}', '\\\\?\\Volume{fixture}\\'],
+  ].forEach(([existing, missing]) => {
+    const env = { Path: `${existing};C:\\WindowsApps` };
+    mergeWindowsPath(env, `${missing};C:\\WindowsApps`);
+    assert.equal(env.Path, `${existing};${missing};C:\\WindowsApps`);
+  });
+});
+
+[false, true].forEach((isolated) => {
+  test(`real Windows children keep UNC fixture command priority (isolated=${isolated})`, windowsOnly, async () => {
+    const value = manager({ stdout: '' });
+    const fixture = path.join(root, `unc-${isolated}`);
+    const [custom, share, alias] = ['custom', 'share', 'WindowsApps'].map((name) => path.join(fixture, name));
+    [custom, share, alias].forEach((dir) => fs.mkdirSync(dir, { recursive: true }));
+    const executable = path.join(custom, 'issue1986-unc.exe');
+    fs.copyFileSync(process.execPath, executable);
+    fs.linkSync(executable, path.join(share, 'issue1986-unc.exe'));
+    const unc = '\\\\issue1986-fixture\\share';
+    // Substitute only at the consumer boundary; no SMB server or credentials.
+    const aliases = { [unc]: share, [unc + '\\']: share };
+    if (isolated) {
+      process.env.CAT_CAFE_DESKTOP_INSTANCE_ROOT = path.join(root, 'isolated-unc');
+      process.env.FRONTEND_PORT = '5186';
+      process.env.API_SERVER_PORT = '3186';
+      process.env.REDIS_PORT = '6386';
+    }
+    realChildren = true;
+    try {
+      for (const trailing of [false, true]) {
+        const inherited = `${custom};${unc}${trailing ? '\\' : ''};${alias}`;
+        process.env.PATH = inherited;
+        value.windowsPath = `${unc}${trailing ? '' : '\\'};${custom};${alias}`;
+        const outputFile = path.join(fixture, `lookup-${trailing}.json`);
+        value._startProcess(
+          'probe',
+          process.execPath,
+          [
+            '-e',
+            `const aliases=${JSON.stringify(aliases)};const env={...process.env,PATH:process.env.PATH.split(';').map(entry=>aliases[entry]??entry).join(';')};const result=require('node:child_process').spawnSync('issue1986-unc.exe',['-p','process.execPath'],{env,encoding:'utf8',windowsHide:true});require('node:fs').writeFileSync(${JSON.stringify(outputFile)},JSON.stringify({status:result.status,error:result.error?.code,executable:result.stdout?.trim(),path:process.env.PATH,keys:Object.keys(process.env).filter(k=>k.toUpperCase()==='PATH'),home:process.env.HOME}));`,
+          ],
+          { cwd: fixture },
+        );
+        const [code] = await once(value.procs.probe, 'exit');
+        assert.equal(code, 0);
+        const captured = JSON.parse(fs.readFileSync(outputFile, 'utf8'));
+        assert.equal(captured.error, undefined);
+        assert.equal(captured.status, 0);
+        assert.equal(fs.realpathSync.native(captured.executable), fs.realpathSync.native(executable));
+        assert.equal(captured.path, inherited);
+        assert.equal(captured.keys.length, 1);
+        assert.equal(captured.home, isolated ? path.join(root, 'isolated-unc', 'home') : root);
+        assert.equal(process.env.PATH, inherited);
+      }
+    } finally {
+      realChildren = false;
+      delete process.env.CAT_CAFE_DESKTOP_INSTANCE_ROOT;
+    }
+  });
+});
+
 [false, true].forEach((isolated) => {
   test(
     `real Windows Node lookup preserves quoted semicolons and root PATH forms (isolated=${isolated})`,
