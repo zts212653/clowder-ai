@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
 import { Redis } from 'ioredis';
@@ -97,7 +98,8 @@ async function stop() {
 }
 
 before(async () => {
-  directory = await mkdtemp('/tmp/a2a-turn-');
+  // Keep the Redis Unix socket short on macOS.
+  directory = await mkdtemp(join(process.platform === 'darwin' ? '/tmp' : tmpdir(), 'a2a-turn-'));
   await start();
 });
 after(async () => {

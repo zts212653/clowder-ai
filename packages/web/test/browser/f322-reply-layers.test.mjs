@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { after, before, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
@@ -310,7 +311,7 @@ test('failed primary executions disclose their reason, survive reload and identi
       const summary = page.locator('[data-testid="failed-group"] [data-testid="thread-status-text"]');
       await summary.focus();
       assert.match(await page.getByRole('tooltip').innerText(), /F317 C · 前台收件与长对话续接/);
-      await diagnostic.screenshot({ path: path.join(evidenceDir ?? '/tmp', `failure-visible-${language}.png`) });
+      await diagnostic.screenshot({ path: path.join(evidenceDir ?? tmpdir(), `failure-visible-${language}.png`) });
       await page.reload({ waitUntil: 'networkidle' });
       assert.match(await diagnostic.innerText(), /网络连接失败/);
     }

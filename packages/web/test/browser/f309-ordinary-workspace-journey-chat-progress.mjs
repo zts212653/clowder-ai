@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
 import { mkdir, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { test } from 'node:test';
 import { fulfillFixtureApi } from './f309-ordinary-workspace-journey-actions.mjs';
 import { createReviewState, json } from './f309-ordinary-workspace-journey-fixture.mjs';
@@ -8,7 +10,7 @@ import { createReviewState, json } from './f309-ordinary-workspace-journey-fixtu
 // is therefore a fixture: this proves how the line looks and behaves, not that a real cat is working.
 const REQUEST_ID = `f309-modification-${'c'.repeat(64)}`;
 export const EVIDENCE =
-  process.env.F309_CHAT_PROGRESS_EVIDENCE ?? '/tmp/cat-cafe-evidence/f309-chat-modification-progress';
+  process.env.F309_CHAT_PROGRESS_EVIDENCE ?? join(tmpdir(), 'cat-cafe-evidence/f309-chat-modification-progress');
 const SOURCE_MESSAGE = {
   from: { kind: 'user', userId: 'operator' },
   id: 'human-source',

@@ -9,27 +9,27 @@
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { afterEach, beforeEach, describe, it } from 'node:test';
+import { resolveModeFilePath } from '../../../.claude/hooks/f236-anchor-posttool.mjs';
 import { handleSetReadMode } from '../../mcp-server/dist/tools/callback-tools.js';
 
 const TEST_INVOCATION_ID = `test-read-mode-${process.pid}`;
-const MODE_PATH = `/tmp/cat-cafe-anchor-mode-${TEST_INVOCATION_ID}`;
+const MODE_PATH = resolveModeFilePath({ CAT_CAFE_INVOCATION_ID: TEST_INVOCATION_ID });
 
 describe('handleSetReadMode', () => {
-  let originalInvocationId;
+  let originalEnv;
 
   beforeEach(() => {
-    originalInvocationId = process.env.CAT_CAFE_INVOCATION_ID;
+    originalEnv = { ...process.env };
     process.env.CAT_CAFE_INVOCATION_ID = TEST_INVOCATION_ID;
+    process.env.CAT_CAFE_CREDENTIAL_FILE = `${MODE_PATH}.missing-credential`;
+    process.env.CAT_CAFE_CALLBACK_TOKEN = 'fixture-only';
     // Clean slate
     rmSync(MODE_PATH, { force: true });
   });
 
   afterEach(() => {
-    if (originalInvocationId !== undefined) {
-      process.env.CAT_CAFE_INVOCATION_ID = originalInvocationId;
-    } else {
-      delete process.env.CAT_CAFE_INVOCATION_ID;
-    }
+    for (const key of Object.keys(process.env)) if (!(key in originalEnv)) delete process.env[key];
+    Object.assign(process.env, originalEnv);
     rmSync(MODE_PATH, { force: true });
   });
 

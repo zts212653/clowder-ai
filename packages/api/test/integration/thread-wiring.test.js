@@ -296,11 +296,17 @@ describe('contentBlocks round-trip: store and retrieve', () => {
 describe('Project-scoped threads: create and list by project', () => {
   let app;
   let threadStore;
+  let projectRoot;
+  let catCafeProject;
+  let relayProject;
 
   beforeEach(async () => {
     // Create temp dirs for project path validation
-    mkdirSync('/tmp/test-cat-cafe', { recursive: true });
-    mkdirSync('/tmp/test-relay', { recursive: true });
+    projectRoot = mkdtempSync(join(tmpdir(), 'thread-wiring-projects-'));
+    catCafeProject = join(projectRoot, 'cat-cafe');
+    relayProject = join(projectRoot, 'relay');
+    mkdirSync(catCafeProject);
+    mkdirSync(relayProject);
     threadStore = new ThreadStore();
     app = Fastify();
     await app.register(threadsRoutes, { threadStore });
@@ -309,8 +315,7 @@ describe('Project-scoped threads: create and list by project', () => {
 
   afterEach(async () => {
     if (app) await app.close();
-    rmSync('/tmp/test-cat-cafe', { recursive: true, force: true });
-    rmSync('/tmp/test-relay', { recursive: true, force: true });
+    rmSync(projectRoot, { recursive: true, force: true });
   });
 
   it('threads created with projectPath are only returned for that project', async () => {
@@ -318,12 +323,12 @@ describe('Project-scoped threads: create and list by project', () => {
     await app.inject({
       method: 'POST',
       url: '/api/threads',
-      payload: { userId: 'alice', title: 'In cat-cafe', projectPath: '/tmp/test-cat-cafe' },
+      payload: { userId: 'alice', title: 'In cat-cafe', projectPath: catCafeProject },
     });
     await app.inject({
       method: 'POST',
       url: '/api/threads',
-      payload: { userId: 'alice', title: 'In relay', projectPath: '/tmp/test-relay' },
+      payload: { userId: 'alice', title: 'In relay', projectPath: relayProject },
     });
     await app.inject({
       method: 'POST',
