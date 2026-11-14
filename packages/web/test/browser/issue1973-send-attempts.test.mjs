@@ -32,9 +32,9 @@ after(async () => {
 });
 async function scene(options = {}) {
   const context = await browser.newContext({ reducedMotion: 'reduce' });
-  context.on('page', page => {
+  context.on('page', (page) => {
     page.setDefaultNavigationTimeout(30_000);
-    page.on('pageerror', error => process.stderr.write(`Browser page error: ${error.stack}\n`));
+    page.on('pageerror', (error) => process.stderr.write(`Browser page error: ${error.stack}\n`));
   });
   const harness = createChatProofHarness(context, built, evidence, measurements);
   const proof = await harness.openProof({ surface: true, ...options });
