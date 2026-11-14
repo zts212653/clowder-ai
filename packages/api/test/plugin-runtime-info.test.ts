@@ -151,15 +151,26 @@ test('pinnedOnly paginates owner pins and excludes default/system/hub/foreign/de
     false,
   );
 
-  const normal = await host.list({ limit: 50 });
-  assert.equal(normal.some((thread) => thread.id === system.id), true);
-  assert.equal(normal.some((thread) => thread.id === evalDomain.id), true);
-  assert.equal(normal.some((thread) => thread.id === hub.id), true);
-  assert.equal(normal.some((thread) => thread.id === defaultThread.id), true);
-  assert.equal(normal.some((thread) => thread.id === foreign.id), false);
-  assert.equal(normal.some((thread) => thread.id === deleted.id), false);
+  const normalAll: Array<{ id: string }> = [];
+  let cursor: { lastActiveAt: number; id: string } | undefined;
+  for (;;) {
+    const page = await host.list({ limit: 50, ...(cursor ? { before: cursor } : {}) });
+    normalAll.push(...page);
+    if (page.length < 50) break;
+    const last = page[page.length - 1]!;
+    cursor = { lastActiveAt: last.lastActiveAt, id: last.id };
+  }
+  for (const id of [system.id, evalDomain.id, hub.id, defaultThread.id]) {
+    assert.equal(normalAll.some((thread) => thread.id === id), true);
+  }
+  for (const id of [foreign.id, deleted.id]) {
+    assert.equal(normalAll.some((thread) => thread.id === id), false);
+  }
   assert.equal((await host.list({ threadIds: [system.id] })).length, 1);
+  assert.equal((await host.list({ threadIds: [hub.id] })).length, 1);
+  assert.equal((await host.list({ threadIds: [evalDomain.id] })).length, 1);
   assert.equal((await host.get(system.id))?.id, system.id);
+  assert.equal((await host.get(DEFAULT_THREAD_ID))?.id, DEFAULT_THREAD_ID);
 
   store.updatePin(pinnedIds[0]!, false);
   const afterUnpin = await host.list({ pinnedOnly: true, limit: 50 });
