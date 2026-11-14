@@ -170,13 +170,16 @@ export class PluginRuntimeCarrierRouter implements PluginRuntimeLifecyclePort {
         this.#nativeMcpLaunches.activate(admission, generation, launches, shared.factories, shared.unavailable);
       })());
     try {
-      const result = await carrier.start(pluginInstanceId, admitContributions, () => {
+      const result = await carrier.start(pluginInstanceId, admitContributions, async () => {
         if (this.nativeActions.generation(pluginInstanceId) !== generation) return;
-        this.ui.deactivate(pluginInstanceId);
         // The generation fence invalidates captured views immediately. Keep the MCP
         // slot so a failed same-plugin instance cannot silently elect another source.
         this.nativeActions.deactivate(pluginInstanceId);
-        return this.#runtimeContributions.deactivate(pluginInstanceId);
+        try {
+          this.ui.deactivate(pluginInstanceId);
+        } finally {
+          await this.#runtimeContributions.deactivate(pluginInstanceId);
+        }
       });
       // External and legacy carriers may not publish a separate Host-ready state.
       // Joining the same promise preserves one admission and its original rollback boundary.

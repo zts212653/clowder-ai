@@ -95,7 +95,7 @@ async function fixture(t, moduleSource = source) {
 }
 
 test(
-  'real shared Worker exit revokes every affected publication and records a safe failure',
+  'real shared Worker exit revokes publications despite UI failure and records a safe failure',
   { timeout: 20000 },
   async (t) => {
     const { runtime, record, records, rootDir } = await fixture(
@@ -139,7 +139,7 @@ test(
         }),
     });
     let config = { version: 2, capabilities: [] };
-    const router = new PluginRuntimeCarrierRouter(inventory, {
+    const resources = {
       projectRoot: hostRoot,
       packages: {
         resolveInstalledPackage: async (digest) => ({
@@ -158,24 +158,55 @@ test(
         },
       },
       persistCapabilities: false,
+    };
+    const released = [];
+    const router = new PluginRuntimeCarrierRouter(inventory, resources, {
+      packages: resources.packages,
+      configuration: resources.configuration,
+      agentSessionProviders: {
+        activate:
+          async ({ instance }) =>
+          async () => {
+            released.push(instance.pluginInstanceId);
+          },
+      },
     });
+    const deactivateUi = router.ui.deactivate.bind(router.ui);
+    let failUi = false;
+    router.ui.deactivate = (id) => {
+      if (id === 'instance' && failUi) {
+        failUi = false;
+        throw new Error('fixture UI revocation failure');
+      }
+      deactivateUi(id);
+    };
     router.register(new BundledPluginRuntimeCarrier({ inventory, runtimes: [runtime], now: () => 1978 }));
     t.after(() => router.stopAll('test_cleanup'));
     const handles = await Promise.all(instances.map(({ pluginInstanceId }) => router.start(pluginInstanceId)));
+    failUi = true;
     const view = await router.resolveMemberMcpView();
     assert.equal(view.entries.length, 2);
     assert.ok(view.entries.every((entry) => entry.isCurrent()));
+    const token = router.nativeActions.environment('instance', 'ordinary').CLOWDER_PLUGIN_ACTION_TOKEN;
+    assert.ok(router.nativeActions.target(token));
     const completions = instances.map(({ pluginInstanceId }) => runtime.completion(pluginInstanceId));
     assert.equal((await router.invoke('instance', 'inspect', {})).isMainThread, false);
     const crashedAction = await router.attemptInvoke('instance', 'crash', {});
     assert.equal(crashedAction.status, 'failed');
     assert.equal(crashedAction.effect, 'unknown', 'an entered action is never safe to replay after Worker exit');
     assert.ok((await Promise.all(completions)).every((error) => error instanceof Error));
-    assert.ok(
-      view.entries.every((entry) => !entry.isCurrent()),
-      'all leases lose publication before cleanup finishes',
-    );
+    const currentAtExit = view.entries.some((entry) => entry.isCurrent());
     await Promise.all(handles.map(({ closed }) => closed));
+    assert.deepEqual(
+      {
+        currentAtExit,
+        current: view.entries.some((entry) => entry.isCurrent()),
+        tokenActive: Boolean(router.nativeActions.target(token)),
+        declaredReleased: released.includes('instance'),
+      },
+      { currentAtExit: false, current: false, tokenActive: false, declaredReleased: true },
+      'UI failure must not leave the crashed generation or declared publications active',
+    );
     assert.ok(instances.every((instance) => instance.runtimeState === 'crashed'));
     assert.ok(instances.every((instance) => instance.activationState === 'enabled'));
     assert.ok(instances.every((instance) => instance.lastRuntimeError.code === 'UNEXPECTED_RUNTIME_FAILURE'));
@@ -198,8 +229,19 @@ test(
     assert.equal(refused.effect, 'not_started');
     const repaired = await router.start('instance');
     assert.equal((await router.invoke('instance', 'inspect', {})).isMainThread, false);
-    assert.equal(view.entries[0].isCurrent(), false, 'repair must not revive the old captured activation');
-    assert.equal((await router.resolveMemberMcpView()).entries[0].isCurrent(), true);
+    assert.ok(
+      view.entries.every((entry) => !entry.isCurrent()),
+      'repair must not revive captured activations',
+    );
+    const repairedView = await router.resolveMemberMcpView();
+    assert.equal(
+      repairedView.entries.find((entry) => entry.capabilityId === `plugin:${record.pluginId}:ordinary`)?.isCurrent(),
+      true,
+    );
+    assert.equal(
+      repairedView.entries.find((entry) => entry.capabilityId === `plugin:${second.pluginId}:ordinary`)?.isCurrent(),
+      false,
+    );
     await router.stop('instance', 'test_cleanup');
     await repaired.closed;
   },
