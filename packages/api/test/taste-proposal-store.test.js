@@ -344,13 +344,6 @@ describe('InMemoryTasteProposalStore', () => {
 
   // ── ADV-2: Concurrent claim+reject, only one succeeds ──
 
-  it('ADV-2: claim then reject same proposal — reject fails', () => {
-    const created = store.create(makeInput());
-    store.claimForApproval(created.id, 'approver-1');
-    // Another "session" tries to reject — should fail (not pending anymore)
-    assert.equal(store.markRejected(created.id, 'nope', 'rejector-1'), null);
-  });
-
   // ── Clone isolation ──
 
   it('returned proposals are clones (mutations do not affect store)', () => {

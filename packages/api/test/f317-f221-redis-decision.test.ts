@@ -4,6 +4,7 @@ import { rmSync } from 'node:fs';
 import { test } from 'node:test';
 import { createRedisClient } from '@cat-cafe/shared/utils';
 import { SessionMutex } from '../src/domains/cats/services/agents/invocation/SessionMutex.js';
+import { MessageStore } from '../src/domains/cats/services/stores/ports/MessageStore.js';
 import { CompanionF221SyntheticDecision } from '../src/domains/concierge/live/CompanionF221SyntheticDecision.js';
 import { CompanionF221Trial } from '../src/domains/concierge/live/CompanionF221Trial.js';
 import type { CompanionOwnerClient } from '../src/domains/concierge/live/companion-owner-client.js';
@@ -30,11 +31,21 @@ test(
     const redis = createRedisClient({ url: redisUrl, keyPrefix: `f317-host-decision:${randomUUID()}:` });
     try {
       const store = new FencedRedisTasteProposalStore(redis);
+      const messages = new MessageStore();
+      const origin = messages.append({
+        userId: 'owner',
+        threadId: 'home',
+        from: { kind: 'user', userId: 'owner' },
+        content: 'Original owner source',
+        timestamp: Date.now(),
+      });
+      const originRef = { kind: 'message' as const, threadId: 'home', messageId: origin.id };
       const proposal = await store.create({
         userId: 'owner',
         catId: 'codex',
         threadId: 'home',
-        sourceMessageId: 'source-1',
+        sourceMessageId: origin.id,
+        approvalOriginRef: originRef,
         scene: '讨论留白',
         quote: '不要塞满',
         tags: ['留白'],
@@ -47,7 +58,7 @@ test(
         sourceFeatureId: 'F221',
         ownerUserId: 'owner',
         requesterCatId: 'codex',
-        originRef: { kind: 'message', threadId: 'home', messageId: 'source-1' },
+        originRef,
         approvalCardRef: { threadId: 'home', messageId: 'card-1' },
         createdAt: proposal.createdAt,
       });
@@ -71,6 +82,7 @@ test(
         () => context,
         () => authorized,
         store,
+        messages,
         approvalCoordinator,
         async () => {
           writes++;
@@ -130,6 +142,7 @@ test(
         () => context,
         () => delayedAuthorized,
         store,
+        messages,
         approvalCoordinator,
         async () => {
           writes++;
@@ -178,11 +191,21 @@ test(
     const redis = createRedisClient({ url: redisUrl, keyPrefix: `f317-git-decision:${randomUUID()}:` });
     try {
       const store = new FencedRedisTasteProposalStore(redis);
+      const messages = new MessageStore();
+      const origin = messages.append({
+        userId: 'owner',
+        threadId: 'home',
+        from: { kind: 'user', userId: 'owner' },
+        content: 'Original owner source',
+        timestamp: Date.now(),
+      });
+      const originRef = { kind: 'message' as const, threadId: 'home', messageId: origin.id };
       const proposal = await store.create({
         userId: 'owner',
         catId: 'codex',
         threadId: 'home',
-        sourceMessageId: 'source-1',
+        sourceMessageId: origin.id,
+        approvalOriginRef: originRef,
         scene: '一起看设计稿',
         quote: '保留一点呼吸感',
         tags: ['留白'],
@@ -194,7 +217,7 @@ test(
         sourceFeatureId: 'F221',
         ownerUserId: 'owner',
         requesterCatId: 'codex',
-        originRef: { kind: 'message', threadId: 'home', messageId: 'source-1' },
+        originRef,
         approvalCardRef: { threadId: 'home', messageId: 'card-1' },
         createdAt: proposal.createdAt,
       });
@@ -215,6 +238,7 @@ test(
         () => context,
         () => true,
         store,
+        messages,
         approvalCoordinator,
         createVignetteWriter(fixture.runtime),
         Date.now,

@@ -246,27 +246,7 @@ test('F153 P1: tokenAttrs does NOT include THREAD_ID (cardinality + redactor byp
 
 // ── P1: HubTraceTree parallel rendering ──────────────────────────
 
-test('F153 P1: HubTraceTree buildForest supports multiple children per parent (fan-out)', () => {
-  const src = readFileSync(resolve(__dirname, '../../../web/src/components/trace-tree-utils.ts'), 'utf8');
-  assert.ok(
-    src.includes('childMap') && src.includes('children'),
-    'buildForest should accumulate children per parent via childMap',
-  );
-});
-
 // ── Cross-route A2A trace propagation ─────────────────────────────
-
-test('F153: InvocationRecord declares traceContext field with CallerTraceContext', () => {
-  const src = readFileSync(
-    resolve(__dirname, '../../src/domains/cats/services/agents/invocation/InvocationRegistry.ts'),
-    'utf8',
-  );
-  assert.ok(
-    src.includes('traceContext?: CallerTraceContext'),
-    'InvocationRecord should declare traceContext field with CallerTraceContext type',
-  );
-  assert.ok(src.includes('setTraceContext'), 'Registry should have setTraceContext method');
-});
 
 test('F153: invoke-single-cat stores traceContext in InvocationRecord after span creation', () => {
   const src = readFileSync(

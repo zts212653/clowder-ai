@@ -108,6 +108,8 @@ export class ReplyLayersHarness {
   constructor() {
     registry.cats = [OPUS, ASTRA];
     window.localStorage.clear();
+    // These suites compare classic against explicitly enabled V2, independently of the product default.
+    window.localStorage.setItem(SHELL_PRESENTATION_STORAGE_KEY, 'classic');
     resetMessageDisclosureStateForTest();
     document.body.appendChild(this.container);
     this.root = createRoot(this.container);

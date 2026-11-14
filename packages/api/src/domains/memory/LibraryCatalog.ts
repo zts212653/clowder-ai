@@ -78,7 +78,7 @@ export class LibraryCatalog {
 
   private static readonly VALID_TRANSITIONS: Record<CollectionStatus, CollectionStatus[]> = {
     registered: ['indexing', 'archived'],
-    indexing: ['active', 'blocked'],
+    indexing: ['active', 'blocked', 'stale'],
     active: ['stale', 'archived', 'indexing'],
     stale: ['indexing', 'archived'],
     blocked: ['registered', 'archived', 'indexing'],

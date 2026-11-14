@@ -91,11 +91,18 @@ for (const storage of ['memory', 'redis']) {
     const readSource = await f.messageStore.getById(f.admission.message.id);
     assert.equal(readSource.lifecycle.dispatchRefs[0].inputRead.status, 'read');
     assert.equal(readSource.lifecycle.dispatchRefs[0].appendAcceptance, 'written');
-    assert.ok(await f.queue.getDurableEntry('thread', f.admission.entry.id), 'full read is not completion');
+    assert.equal(await f.queue.getDurableEntry('thread', f.admission.entry.id), null, 'handoff already left Queue');
+    assert.equal(
+      readSource.lifecycle.dispatchRefs[0].appendDelivery.requiresCompletion,
+      true,
+      'full read is not completion',
+    );
     await f.input().onInputCompleted(false);
-    const pending = await f.queue.getDurableEntry('thread', f.admission.entry.id);
-    assert.equal(pending.delivery.appendRecoveryByTarget.opus.acceptance, 'unknown');
-    assert.deepEqual(pending.delivery.routingHeldTargetIds, ['opus']);
+    assert.equal(await f.queue.getDurableEntry('thread', f.admission.entry.id), null);
+    assert.equal(
+      (await f.messageStore.getById(f.admission.message.id)).lifecycle.appendFailures[0].acceptance,
+      'incomplete',
+    );
     assert.ok((await f.messageStore.getById(f.response.id)).lifecycle.inputMessageIds.includes(f.admission.message.id));
     const reopened = new InvocationQueue(f.ledgerStore);
     await reopened.hydrateFromLedger(f.messageStore);
@@ -111,14 +118,14 @@ for (const storage of ['memory', 'redis']) {
     await restarted.requestDrain('thread');
     assert.equal(calls, 0, 'unknown effects must not be repeated automatically after restart');
     assert.equal(
-      (await reopened.getDurableEntry('thread', f.admission.entry.id)).delivery.appendRecoveryByTarget.opus.acceptance,
-      'unknown',
+      (await f.messageStore.getById(f.admission.message.id)).lifecycle.appendFailures[0].acceptance,
+      'incomplete',
     );
     await f.input().onInputCompleted(true);
     assert.equal(
       await f.queue.getDurableEntry('thread', f.admission.entry.id),
       null,
-      'a genuine late exact-turn completion may retire it',
+      'a genuine late exact-turn completion cannot resurrect Queue',
     );
   });
 
@@ -128,7 +135,7 @@ for (const storage of ['memory', 'redis']) {
     await f.input().onInputCompleted(false);
     const source = await f.messageStore.getById(f.admission.message.id);
     assert.equal(source.lifecycle.dispatchRefs[0]?.inputRead.status, 'read');
-    assert.equal(source.lifecycle.appendFailures[0].acceptance, 'unknown');
+    assert.equal(source.lifecycle.appendFailures[0].acceptance, 'incomplete');
   });
 }
 
@@ -170,14 +177,14 @@ test('the owner can explicitly repeat a read A2A after failure, without imperson
     headers: { 'x-cat-cafe-user': 'owner' },
   });
   assert.equal(queueView.statusCode, 200, queueView.body);
-  const action = queueView.json().queue[0].recoveryActions?.find((candidate) => candidate.kind === 'repeat_target');
-  assert.ok(action, 'the uncertain A2A must have a usable owner recovery action');
-  const anonymous = await f.app.inject({ method: 'POST', url: action.request.path });
+  assert.deepEqual(queueView.json().queue, []);
+  const path = `/api/threads/thread/messages/${f.admission.message.id}/routing-targets/opus/repeat`;
+  const payload = { expectedResponseMessageId: f.response.id, expectedInvocationId: f.auth.invocationId };
+  const anonymous = await f.app.inject({ method: 'POST', url: path });
   assert.equal(anonymous.statusCode, 401);
   // Keep the newly admitted message queued so this test can inspect its exact sender and idempotency.
   f.processor.suppressAutoResume('thread', 'opus');
-  const repeat = () =>
-    f.app.inject({ method: 'POST', url: action.request.path, headers: { 'x-cat-cafe-user': 'owner' } });
+  const repeat = () => f.app.inject({ method: 'POST', url: path, payload, headers: { 'x-cat-cafe-user': 'owner' } });
   const first = await repeat();
   assert.equal(first.statusCode, 202, first.body);
   const again = await repeat();

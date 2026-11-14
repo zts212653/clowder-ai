@@ -4,9 +4,14 @@ import {
   replyOutputSelectionOffsets,
 } from '@/components/reply-layers/reply-output-selection';
 
-export function projectedSelectionOffsets(source: SelectionOffsetSource, selection: Selection, container: HTMLElement) {
+export function projectedSelectionOffsets(
+  source: SelectionOffsetSource,
+  selection: Selection,
+  container: HTMLElement,
+  selectedText = selection.toString(),
+) {
   if (source.coordinateRoot && hasReplyOutputSelectionSource(source.coordinateRoot)) {
-    return replyOutputSelectionOffsets(source.coordinateRoot, selection.toString());
+    return replyOutputSelectionOffsets(source.coordinateRoot, selectedText);
   }
   return projectDomSelectionOffsets(source, selection, container);
 }

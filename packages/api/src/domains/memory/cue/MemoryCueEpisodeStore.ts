@@ -77,7 +77,10 @@ export const memoryCueEventInputSchema = z
           message: 'Matter events require explicit read details and cannot claim application',
         });
       }
-    } else if (event.readDetails || (event.readOrigin !== undefined && event.readOrigin !== 'push')) {
+    } else if (
+      event.readDetails ||
+      (event.readOrigin === 'explicit_read' && !event.opportunityId.startsWith('preparation-'))
+    ) {
       ctx.addIssue({ code: 'custom', message: 'Read details belong only to the matter family' });
     }
   });
@@ -165,7 +168,10 @@ function fromRow(row: MemoryCueEventRow): MemoryCueEvent {
     row.read_details_json === null ? undefined : matterReadDetailsSchema.parse(JSON.parse(row.read_details_json));
   if (
     (row.resolver_family === 'matter') !== Boolean(readDetails) ||
-    (row.resolver_family === 'matter' ? row.read_origin !== 'explicit_read' : row.read_origin !== 'push')
+    (row.resolver_family === 'matter'
+      ? row.read_origin !== 'explicit_read'
+      : row.read_origin !== 'push' &&
+        !(row.read_origin === 'explicit_read' && row.opportunity_id.startsWith('preparation-')))
   ) {
     throw new Error('Invalid memory cue read origin');
   }
@@ -277,6 +283,49 @@ export class MemoryCueEpisodeStore {
             }),
           ),
         ),
+      )
+      .immediate();
+  }
+
+  /** A handle returned by preparation proves receipt only at this successful owner read. */
+  appendPreparationRead(input: {
+    coordinate: MemoryCueDrillCoordinate;
+    requestId: string;
+    occurredAt: number;
+    details?: MatterReadDetails;
+  }): MemoryCueEvent[] {
+    const c = input.coordinate;
+    if (!c.opportunityId.startsWith('preparation-')) throw new Error('Not a preparation opportunity');
+    return this.db
+      .transaction(() =>
+        (['presented', 'drilled'] as const).map((outcome) => {
+          const key =
+            outcome === 'presented'
+              ? `preparation-presented-${c.cueId}`
+              : memoryCueConsumptionIdempotencyKey(c.cueId, outcome, input.requestId);
+          const existing = this.getByEventId(key);
+          if (existing) return existing;
+          return this.appendLocked(
+            memoryCueEventInputSchema.parse({
+              eventId: key,
+              idempotencyKey: key,
+              cueId: c.cueId,
+              opportunityId: c.opportunityId,
+              scope: c.scope,
+              consumerCatId: c.consumerCatId,
+              resolverFamily: c.resolverFamily,
+              sourceAnchor: c.anchor,
+              sourceRevision: c.revision,
+              catalogVersion: c.catalogVersion,
+              resolverVersion: c.resolverVersion,
+              axis: 'consumption',
+              consumptionOutcome: outcome,
+              occurredAt: input.occurredAt,
+              readOrigin: 'explicit_read',
+              ...(input.details ? { readDetails: input.details } : {}),
+            }),
+          );
+        }),
       )
       .immediate();
   }

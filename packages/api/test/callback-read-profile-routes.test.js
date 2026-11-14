@@ -11,11 +11,11 @@ describe('callback read-profile route', () => {
   let registry;
   let repository;
 
-  async function getProfile(userId, catId) {
+  async function getProfile(userId, catId, layer = 'primer') {
     const { invocationId, callbackToken } = await registry.create(userId, catId, 'thread_1');
     return app.inject({
       method: 'GET',
-      url: '/api/callbacks/profile',
+      url: `/api/callbacks/profile?layer=${layer}`,
       headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
     });
   }
@@ -62,6 +62,16 @@ describe('callback read-profile route', () => {
   });
 
   for (const layer of ['capsule', 'corpus', 'primer']) {
+    it(`${layer}: exposes the absent-layer revision for an optimistic first proposal`, async () => {
+      const response = await getProfile('alice', 'codex-sol', layer);
+      assert.equal(response.statusCode, 404);
+      assert.equal(
+        response.json().emptyRevision,
+        'sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855',
+      );
+      assert.equal(response.json().content, undefined);
+    });
+
     it(`${layer}: a requested receipt fails without the evidence database, while an old client still reads`, async () => {
       const path =
         layer === 'capsule'

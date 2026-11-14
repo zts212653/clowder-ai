@@ -2,6 +2,7 @@ import { constants } from 'node:fs';
 import { type FileHandle, open, realpath } from 'node:fs/promises';
 import { join } from 'node:path';
 import { Readable } from 'node:stream';
+import { detectImageMime } from '../../utils/image-mime.js';
 import { probeImmutableMedia } from '../video-studio/content-owner/published-media-probe.js';
 import { type RenderedQuoteBatchInput, resolveAuthorizedRenderedQuotes } from './workspace-content-rendered-quote.js';
 import {
@@ -168,7 +169,12 @@ export class WorkspaceContentSourceService {
     }
     const read = await this.readStable(input, true);
     const description = this.describeRead(read);
-    const mime = supportedWorkspaceMediaMime(description);
+    const mime = supportedWorkspaceMediaMime({
+      ...description,
+      mime: description.mime.startsWith('image/')
+        ? (detectImageMime(read.bytes) ?? description.mime)
+        : description.mime,
+    });
     const media = await probeImmutableMedia(read.bytes, mime).catch(() => {
       throw new WorkspaceContentSourceError('unsupported_media');
     });
@@ -250,8 +256,13 @@ export class WorkspaceContentSourceService {
         digest: checked.digest,
       });
       if (description.revision !== input.expectedRevision) throw new WorkspaceContentSourceError('revision_changed');
-      const mime = supportedWorkspaceMediaMime(description);
       const snapshot = requireWorkspaceContentBytes(checked.bytes);
+      const mime = supportedWorkspaceMediaMime({
+        ...description,
+        mime: description.mime.startsWith('image/')
+          ? (detectImageMime(snapshot) ?? description.mime)
+          : description.mime,
+      });
       const media = await probeImmutableMedia(snapshot, mime).catch(() => {
         throw new WorkspaceContentSourceError('unsupported_media');
       });

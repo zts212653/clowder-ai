@@ -60,6 +60,29 @@ export function normalizeToolExecutionName(rawName: string): string {
 }
 
 export function normalizeToolExecutionPolicy(policy: ToolExecutionPolicy): ToolExecutionPolicy {
+  if (policy.mode === 'watcher') {
+    if (
+      policy.maxToolCalls !== 6 ||
+      !Array.isArray(policy.allowedToolNames) ||
+      policy.allowedToolNames.length === 0 ||
+      policy.allowedToolNames.length > 32 ||
+      !policy.allowedToolNames.every((name) => /^cat_cafe_[a-z0-9_]+$/.test(name)) ||
+      !Array.isArray(policy.allowedCallbackRoutes) ||
+      policy.allowedCallbackRoutes.length > 32 ||
+      !policy.allowedCallbackRoutes.every((route) =>
+        /^(GET|POST) \/api\/callbacks\/(?:[a-z][a-z0-9-]*|:[a-zA-Z][a-zA-Z0-9]*)(?:\/(?:[a-z][a-z0-9-]*|:[a-zA-Z][a-zA-Z0-9]*))*$/.test(
+          route,
+        ),
+      )
+    )
+      throw new Error('invalid watcher tool policy');
+    return {
+      mode: 'watcher',
+      maxToolCalls: 6,
+      allowedToolNames: [...new Set(policy.allowedToolNames)].sort(),
+      allowedCallbackRoutes: [...new Set(policy.allowedCallbackRoutes)].sort(),
+    };
+  }
   if (policy.mode === 'plugin_native') {
     if (!nativeCoordinate(policy.pluginInstanceId) || !nativeCoordinate(policy.contributionId))
       throw new Error('invalid plugin native policy');
@@ -93,7 +116,7 @@ export function normalizeToolExecutionPolicy(policy: ToolExecutionPolicy): ToolE
 
 export function parseToolExecutionPolicy(raw: string): ToolExecutionPolicy {
   const parsed = JSON.parse(raw) as Partial<ToolExecutionPolicy>;
-  if (parsed.mode === 'callback_allowlist' || parsed.mode === 'plugin_native')
+  if (parsed.mode === 'watcher' || parsed.mode === 'callback_allowlist' || parsed.mode === 'plugin_native')
     return normalizeToolExecutionPolicy(parsed as ToolExecutionPolicy);
   if (parsed.mode !== 'read_only' || !Array.isArray(parsed.replayDeniedToolNames)) {
     throw new Error('invalid persisted tool execution policy');
@@ -124,6 +147,15 @@ export function toolExecutionPolicyDenial(
   toolName: string;
 } | null {
   if (!policy) return null;
+  if (policy.mode === 'watcher') {
+    const normalized = normalizeToolExecutionPolicy(policy);
+    if (normalized.mode !== 'watcher') throw new Error('invalid watcher tool policy');
+    const toolName = normalizeToolExecutionName(rawToolName);
+    const allowed = /^(GET|POST) /.test(rawToolName)
+      ? normalized.allowedCallbackRoutes.includes(rawToolName)
+      : normalized.allowedToolNames.includes(toolName);
+    return allowed ? null : { reason: 'callback_allowlist_tool_policy', toolName };
+  }
   if (policy.mode === 'plugin_native') {
     const normalized = normalizeToolExecutionPolicy(policy);
     if (normalized.mode !== 'plugin_native') throw new Error('invalid plugin native policy');
@@ -165,6 +197,8 @@ export function toolExecutionPolicyAllowedToolNames(
   if (!policy) return undefined;
   const normalized = normalizeToolExecutionPolicy(policy);
   switch (normalized.mode) {
+    case 'watcher':
+      return normalized.allowedToolNames;
     case 'read_only':
     case 'callback_allowlist':
     case 'plugin_native':

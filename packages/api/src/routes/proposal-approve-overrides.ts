@@ -18,7 +18,7 @@ import type {
 } from '@cat-cafe/shared';
 import { suggestedReportingModeForWorkMode } from '@cat-cafe/shared';
 import type { IThreadStore } from '../domains/cats/services/stores/ports/ThreadStore.js';
-import { migrateStoredProjectPath, resolvePersistentProjectPath } from '../utils/persistent-project-path.js';
+import { migrateStoredProjectPath, validateNewProjectPath } from '../utils/persistent-project-path.js';
 
 /** Parsed approve-body overrides (preferredCats arrives as plain strings from zod). */
 export interface ApproveOverridesInput {
@@ -98,19 +98,19 @@ export async function resolveApproveOverrides(
   // `approving`, and a cat/user who thinks they pinned a repo never silently lands in `default`.
   let finalProjectPath = proposal.projectPath;
   if (overrides.projectPath !== undefined) {
-    const validatedProjectPath = await resolvePersistentProjectPath(overrides.projectPath);
-    if (!validatedProjectPath) {
+    const validatedProjectPath = await validateNewProjectPath(overrides.projectPath);
+    if (!validatedProjectPath.ok) {
       return {
         ok: false,
         status: 400,
-        error: 'Invalid projectPath: must be an existing directory under allowed roots',
+        error: validatedProjectPath.error,
       };
     }
-    finalProjectPath = validatedProjectPath;
+    finalProjectPath = validatedProjectPath.path;
   } else if (reparentedThread) {
     finalProjectPath = reparentedThread.projectPath;
   }
-  if (finalProjectPath && finalProjectPath !== 'default') {
+  if (overrides.projectPath === undefined && finalProjectPath && finalProjectPath !== 'default') {
     const persistentProjectPath = await migrateStoredProjectPath(finalProjectPath);
     if (!persistentProjectPath) {
       return {

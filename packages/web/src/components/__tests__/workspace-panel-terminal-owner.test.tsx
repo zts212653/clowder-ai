@@ -8,6 +8,7 @@ import { useChatStore } from '@/stores/chatStore';
 import { apiFetch } from '@/utils/api-client';
 import { WorkspacePanel } from '../WorkspacePanel';
 
+vi.mock('@/components/thread-chat/hub-socket-context', () => import('@/test-utils/hub-socket-context-mock'));
 vi.mock('@/utils/api-client', () => ({ apiFetch: vi.fn() }));
 // Keep discovery, the real Panel/Home/descriptor/renderer chain and its selection.
 // The endpoint consumer reports its received identity without starting a terminal.

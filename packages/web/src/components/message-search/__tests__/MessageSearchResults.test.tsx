@@ -253,6 +253,18 @@ describe('shared message results', () => {
     expect(host.textContent).toContain('部分候选尚未核对完');
     expect(host.textContent).not.toContain('本次检索未找到相关消息');
   });
+  it('renders ordinary sources and a partial time window without legacy judgment counts, retaining navigation', async () => {
+    const response = answer();
+    response.meta.resultKind = 'sources';
+    response.meta.timeWindow = { limit: 32, admitted: 12, complete: false };
+    const navigate = await open({ response });
+    expect(host.textContent).toContain('找到 2 处可打开的原文');
+    expect(host.textContent).toContain('核完 12 条来源');
+    expect(host.textContent).toContain('未读满 32 条');
+    expect(host.textContent).not.toMatch(/资格核对情况未知|尚未评估|可支持/);
+    act(() => host.querySelector<HTMLButtonElement>('button[aria-label*="第1处"]')!.click());
+    expect(navigate).toHaveBeenCalledWith(response.results[0], response);
+  });
   it('reports unassessed candidates even when some qualified results are visible', async () => {
     const response = answer();
     response.meta.qualification = {

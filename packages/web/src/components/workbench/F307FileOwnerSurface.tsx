@@ -21,6 +21,7 @@ import { useF307ExperienceWorkbenchStore } from './experience-workbench-store';
 import { createFilesSurface, resolveFileTarget } from './real-surface-adapters';
 import { useWorkspaceFileViewport } from './useWorkspaceFileViewport';
 import { promoteWorkspacePreview } from './WorkspacePreviewIntent';
+import { useWorkspaceSurfaceVisibility } from './WorkspaceSurfaceVisibility';
 
 interface FileOwnerTarget {
   worktreeId: string;
@@ -134,7 +135,11 @@ function ResolvedFileOwnerSurface({
     file,
     fetchFile: refreshFile,
   });
+  // A hidden retained surface keeps its file and draft but holds no server watch; on return it
+  // watches again with the loaded sha, so a change made meanwhile is reported at once.
+  const surfaceVisible = useWorkspaceSurfaceVisibility();
   const { pendingExternalSha, onDirtyChange, applyExternalChange, dismissExternalChange } = useWorkspaceFileChange({
+    enabled: surfaceVisible,
     worktreeId: target.worktreeId,
     path: target.path,
     currentSha: file?.sha256 ?? null,

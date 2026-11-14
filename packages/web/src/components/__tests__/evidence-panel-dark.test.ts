@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 /**
  * F098-B1: Evidence Panel dark slate theme for readability
  */
@@ -54,8 +55,23 @@ describe('Evidence Panel dark theme (F098-B1)', () => {
     // Should NOT use old light-mode CSS vars
     expect(html).not.toContain('--color-base-white');
     expect(html).not.toContain('--color-gemini-bg');
-    expect(html).toContain('match:high · authority:validated · updated:');
+    expect(html).toContain('rank:high · relevance:unknown · authority:validated · updated:');
     expect(html).toContain('2026-07-12T00:00:00Z');
+  });
+
+  it('a first-ranked unverified candidate is not labelled a high match', () => {
+    const result = {
+      title: 'Unrelated template',
+      anchor: 'doc:template',
+      snippet: 'Background',
+      matchRank: 'high',
+      sourceType: 'decision',
+    } as EvidenceResult;
+    act(() => {
+      root.render(React.createElement(EvidenceCard, { result }));
+    });
+    expect(container.textContent).not.toContain('高匹配');
+    expect(container.textContent).toContain('relevance:unknown');
   });
 
   it('EvidenceCard renders legacy persisted confidence without crashing', () => {
@@ -72,9 +88,9 @@ describe('Evidence Panel dark theme (F098-B1)', () => {
     });
 
     const html = container.innerHTML;
-    expect(html).toContain('match:high · authority:unknown · updated:');
-    expect(html).toContain('bg-semantic-success-surface');
-    expect(html).toContain('高匹配');
+    expect(html).toContain('rank:high · relevance:unknown · authority:unknown · updated:');
+    expect(html).toContain('bg-conn-slate-bg');
+    expect(html).toContain('排序靠前');
   });
 
   it('EvidenceCard renders architecture source type without falling through', () => {

@@ -255,7 +255,8 @@ describe('F221 taste proposal publication guard', () => {
       quote: 'Quote text',
       tags: ['real'],
       dimension: 'authentic-expression',
-      privacy: 'public',
+      // This suite isolates publication anchoring; public browser-owner authorization has its own tests.
+      privacy: 'sensitive',
     });
 
   it('approve rejects staged proposal with 409', async () => {

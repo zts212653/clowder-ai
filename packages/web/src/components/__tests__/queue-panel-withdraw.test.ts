@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 /**
  * F264 UX: true recall and Queue custody withdrawal are different actions.
  */
@@ -430,7 +431,7 @@ describe('QueuePanel withdraw UX (F39)', () => {
       root.render(React.createElement(QueuePanel, { threadId: 'thread-1' }));
     });
     const clearBtn = [...container.querySelectorAll('button')].find((button) =>
-      button.textContent?.includes('全部停止'),
+      button.textContent?.includes('停止回复并清空排队'),
     );
     expect(clearBtn).toBeDefined();
 
@@ -448,7 +449,26 @@ describe('QueuePanel withdraw UX (F39)', () => {
     vi.mocked(apiFetch).mockImplementation(async (url) => {
       requests.push(String(url));
       if (String(url).endsWith('/executions/active')) {
-        return response({ projectPath: null, executions: [] }) as Response;
+        return response({
+          projectPath: null,
+          executions: [
+            {
+              executionId: 'inv-active',
+              threadId: 'thread-1',
+              catId: 'opus',
+              kind: 'live_invocation',
+              cancelability: {
+                state: 'cancelable',
+                target: {
+                  kind: 'live_invocation',
+                  threadId: 'thread-1',
+                  catId: 'opus',
+                  executionId: 'inv-active',
+                },
+              },
+            },
+          ],
+        }) as Response;
       }
       return response({ cleared: [QUEUED_ENTRY] }) as Response;
     });
@@ -458,7 +478,7 @@ describe('QueuePanel withdraw UX (F39)', () => {
       root.render(React.createElement(QueuePanel, { threadId: 'thread-1' }));
     });
     const clearBtn = [...container.querySelectorAll('button')].find((button) =>
-      button.textContent?.includes('全部停止'),
+      button.textContent?.includes('停止回复并清空排队'),
     );
 
     await act(async () => {
@@ -467,6 +487,7 @@ describe('QueuePanel withdraw UX (F39)', () => {
 
     expect(requests.filter((url) => url.startsWith('/api/threads/'))).toEqual([
       '/api/threads/thread-1/executions/active',
+      '/api/threads/thread-1/executions/live/inv-active/cancel',
       '/api/threads/thread-1/queue',
     ]);
     expect(useChatStore.getState().queue).toEqual([]);

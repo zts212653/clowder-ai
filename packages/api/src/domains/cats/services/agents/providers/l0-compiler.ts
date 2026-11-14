@@ -133,7 +133,7 @@ export interface CompileL0Options {
   catId: string;
   /** User whose private profile is compiled. Defaults to CAT_CAFE_USER_ID/default-user. */
   userId?: string;
-  /** Private Work retains home L0 without USER_CAPSULE; public uses its separate bounded projection. */
+  /** Live native projections. Home Work is supported only by diagnostics and captured frozen input. */
   projection?: L0Projection;
   /** Frozen provider model for a bounded member invocation. */
   runtimeModel?: string;
@@ -210,7 +210,7 @@ export async function compileL0ViaSubprocess(options: CompileL0Options): Promise
   const dependencySignature = frozenKey ?? (scriptPath ? refreshL0DependencySignature(cwd, scriptPath) : null);
   const projectionContext: L0ProjectionContext = frozen
     ? { projection: 'frozen', profileSignature: frozenKey! }
-    : resolveProjectionContext(options, userId, key, projection);
+    : resolveProjectionContext(options, userId, key, resolveProjection(options));
   const { profileSignature } = projectionContext;
 
   // Cache hit — skip subprocess entirely

@@ -5,6 +5,7 @@ import { type ReactNode, type RefObject, useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useShellCopy } from '@/components/shell/shell-copy';
 import { ArtworkAnnotationToolbar } from './ArtworkAnnotationToolbar';
+import { useArtworkActionsVisible } from './ArtworkChrome';
 import { useArtworkLightboxScope, useFloatingArtworkPresentation } from './ArtworkLightboxScope';
 import { ArtworkVideoPlayback } from './ArtworkVideoPlayback';
 import toolbarStyles from './artwork-annotation-toolbar.module.css';
@@ -59,6 +60,7 @@ export function VideoArtworkControls({
     [end, setEnd] = useState('0');
   const floating = useFloatingArtworkPresentation();
   const toolsSlot = useArtworkLightboxScope()?.toolsSlot;
+  const actionsVisible = useArtworkActionsVisible();
   const duration = tickToBrowserTime(media.startTick + media.durationTicks, media);
   const pendingRanges = pendingMarks.flatMap((mark) =>
     mark.anchor.kind === 'video-range' &&
@@ -236,7 +238,7 @@ export function VideoArtworkControls({
           </div>
         ) : null}
       </div>
-      {!fullscreen.active ? (floating && toolsSlot ? createPortal(tools, toolsSlot) : tools) : null}
+      {actionsVisible && !fullscreen.active ? (floating && toolsSlot ? createPortal(tools, toolsSlot) : tools) : null}
     </>
   );
 }

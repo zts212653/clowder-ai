@@ -3,14 +3,13 @@
  * POST /api/commands/extract-tasks - Extract tasks from conversation
  */
 
-import { type CommandSurface, catRegistry } from '@cat-cafe/shared';
+import type { CommandSurface } from '@cat-cafe/shared';
 import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
 import { extractTasks, toCreateTaskInputs } from '../domains/cats/services/orchestration/TaskExtractor.js';
 import type { IMessageStore } from '../domains/cats/services/stores/ports/MessageStore.js';
 import type { ITaskStore } from '../domains/cats/services/stores/ports/TaskStore.js';
 import type { IThreadStore } from '../domains/cats/services/stores/ports/ThreadStore.js';
-import type { AgentService } from '../domains/cats/services/types.js';
 import type { CommandRegistry } from '../infrastructure/commands/CommandRegistry.js';
 import type { SocketManager } from '../infrastructure/websocket/index.js';
 import { resolveUserId } from '../utils/request-identity.js';
@@ -19,8 +18,6 @@ export interface CommandsRoutesOptions {
   messageStore: IMessageStore;
   taskStore: ITaskStore;
   socketManager: SocketManager;
-  /** Opus service for LLM-powered extraction */
-  opusService: AgentService;
   /** Optional thread ownership guard (enabled in production wiring). */
   threadStore?: IThreadStore;
   /** F142 Phase B: unified command registry for listing */
@@ -82,15 +79,12 @@ export const commandsRoutes: FastifyPluginAsync<CommandsRoutesOptions> = async (
     // Get thread history
     const messages = await opts.messageStore.getByThread(threadId, messageCount ?? 50, userId);
 
-    if (messages.length === 0 || catRegistry.getAllIds().length === 0) {
+    if (messages.length === 0) {
       return { tasks: [], degraded: false, count: 0 };
     }
 
-    // Extract tasks using LLM
-    const result = await extractTasks(messages, opts.opusService, {
-      catId: 'opus',
-      threadId,
-      userId,
+    // Explicit task markers are extracted locally; no member service is needed.
+    const result = extractTasks(messages, {
       maxMessages: messageCount ?? 50,
     });
 
@@ -109,7 +103,6 @@ export const commandsRoutes: FastifyPluginAsync<CommandsRoutesOptions> = async (
     return {
       tasks: createdTasks,
       degraded: result.degraded,
-      ...(result.reason ? { reason: result.reason } : {}),
       count: createdTasks.length,
     };
   });

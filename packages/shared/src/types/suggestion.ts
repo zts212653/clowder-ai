@@ -108,6 +108,10 @@ export const suggestionViewSchema = z
     label: z.string().min(1).max(40),
     state: suggestionStateSchema,
     receipt: suggestionReceiptViewSchema.optional(),
+    watcherSupplement: z
+      .object({ catId: z.string().min(1), text: z.string().min(1).max(80) })
+      .strict()
+      .optional(),
     /** null when this row cannot be undone. */
     undo: suggestionUndoLabelSchema.nullable(),
     /** True when the row came straight in as a receipt (no pill before it). */

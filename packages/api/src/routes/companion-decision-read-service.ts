@@ -11,7 +11,7 @@ import { readVerifiedRuntimeInteractionPresentation } from '../domains/runtime-i
 import { normalizeRuntimeInteractionRecord } from '../domains/runtime-interaction/RuntimeInteractionRecordModel.js';
 import {
   type CollectiveAccountabilitySource,
-  readCollectiveAccountabilityAttentionSource,
+  readOptionalCollectiveAccountabilityAttentionSource,
 } from './companion-collective-accountability-source.js';
 import { projectCompanionDecisions } from './companion-decision-projection.js';
 import {
@@ -99,7 +99,7 @@ export async function readCompanionDecisionProjection(
     messageStore ? readUserMentionTodos(messageStore, userId, mentionOptions) : undefined,
     runtimeInteractionStore ? readStructuredChoices(runtimeInteractionStore, userId, sourceMessageStore) : undefined,
     personalPreferences ? readDecisionPersonalPreferences(personalPreferences, userId) : undefined,
-    readCollectiveAccountabilityAttentionSource(readCollectiveAccountability, userId),
+    readOptionalCollectiveAccountabilityAttentionSource(readCollectiveAccountability, userId),
   ]);
   const approvalBody = approvals.body ? approvalsSourceSchema.parse(approvals.body) : undefined;
   const originalApprovalCards = approvalBody

@@ -5,6 +5,7 @@ import { useChatStore } from '@/stores/chatStore';
 import { apiFetch } from '@/utils/api-client';
 import { useWorkspace } from '../useWorkspace';
 
+vi.mock('@/components/thread-chat/hub-socket-context', () => import('@/test-utils/hub-socket-context-mock'));
 vi.mock('@/utils/api-client', () => ({
   API_URL: 'http://localhost:3004',
   apiFetch: vi.fn(),

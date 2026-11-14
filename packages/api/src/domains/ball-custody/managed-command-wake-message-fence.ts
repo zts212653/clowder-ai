@@ -2,6 +2,7 @@ import { parseWaitOwnerFence } from '@cat-cafe/shared';
 import { createModuleLogger } from '../../infrastructure/logger.js';
 import type { DynamicTaskOwnerAuthorization } from '../../infrastructure/scheduler/DynamicTaskStore.js';
 import { normalizeOwnerAuthProvenance } from '../cats/services/owner-auth-provenance.js';
+import type { StoredMessage } from '../cats/services/stores/ports/MessageStore.js';
 import {
   type ManagedCommandWakeActionLeaseAdmission,
   resolveManagedCommandWakeActionLeaseAdmission,
@@ -130,7 +131,30 @@ function releaseManagedCommandWakeMessageContentClaim(
  * checked before the write: a stale generation leaves nothing to cancel, so the task has to be
  * retired on this signal rather than by reconciling a message that was never created.
  */
-export type ManagedCommandWakePublishResult = 'published' | 'retry' | 'lease_rejected';
+export type ManagedCommandWakePublishResult = 'published' | 'retry' | 'lease_rejected' | 'waiting' | 'stale';
+
+/** A committed source is never sent again, even when the producer lost its admission receipt. */
+async function findCommittedWake(
+  deps: Pick<ManagedCommandWakeRecoveryDeps, 'messageStore'>,
+  claimed: ParsedManagedCommandWakeTask,
+  key: string,
+): Promise<StoredMessage | null> {
+  const keys = new Set([key, `${COMPLETION_MESSAGE_KEY_PREFIX}${claimed.task.id}`]);
+  for (const candidate of keys) {
+    const message = await deps.messageStore.getByIdempotencyKey(claimed.userId, claimed.threadId, candidate);
+    if (!message) continue;
+    if (
+      message.threadId !== claimed.threadId ||
+      message.userId !== claimed.userId ||
+      message.source?.connector !== 'hold-ball' ||
+      message.source.meta?.taskId !== claimed.task.id ||
+      message.source.meta?.catId !== claimed.catId
+    )
+      throw new Error('managed_command_committed_source_mismatch');
+    return message;
+  }
+  return null;
+}
 
 export async function publishManagedCommandWakeMessage(
   deps: Pick<
@@ -142,9 +166,9 @@ export async function publishManagedCommandWakeMessage(
 ): Promise<ManagedCommandWakePublishResult> {
   if (!parsed.command.wakeContent) return 'retry';
   const claimed = claimManagedCommandWakeMessageContent(deps.dynamicTaskStore, parsed, now());
-  if (!claimed?.command.wakeContent) return 'retry';
+  if (!claimed?.command.wakeContent) return 'stale';
   const triggerContent = `[定时任务] ${claimed.command.wakeContent}`;
-  const idempotencyKey = `${COMPLETION_MESSAGE_KEY_PREFIX}${claimed.task.id}`;
+  const idempotencyKey = claimed.command.productionIntentKey ?? `${COMPLETION_MESSAGE_KEY_PREFIX}${claimed.task.id}`;
   const actionLeaseRef = readManagedCommandWakeActionLeaseRef(claimed);
   const source = {
     connector: 'hold-ball',
@@ -162,6 +186,24 @@ export async function publishManagedCommandWakeMessage(
       ...(actionLeaseRef ? { actionLeaseRef } : {}),
     },
   } as const;
+
+  // Reusing an already-admitted fact needs no new lease admission, including when that lease moved meanwhile.
+  try {
+    const committed = await findCommittedWake(deps, claimed, idempotencyKey);
+    if (committed)
+      return commitManagedCommandWakeMessageVisibility(
+        deps.dynamicTaskStore,
+        claimed.task.id,
+        claimed.command.messageClaimGeneration,
+        committed.id,
+        now(),
+      )
+        ? 'published'
+        : 'stale';
+  } catch (err) {
+    log.warn({ err, taskId: claimed.task.id }, 'Managed wake source lookup failed; admission remains unchanged');
+    return 'retry';
+  }
 
   // The lease is verified against the envelope BEFORE anything is written. It used to be checked
   // inside the trigger, i.e. after the message was already durable, which is the only reason a
@@ -224,7 +266,7 @@ export async function publishManagedCommandWakeMessage(
         claimed.task.id,
         claimed.command.messageClaimGeneration,
       );
-      return 'retry';
+      return 'waiting';
     }
     return commitManagedCommandWakeMessageVisibility(
       deps.dynamicTaskStore,
@@ -234,10 +276,26 @@ export async function publishManagedCommandWakeMessage(
       now(),
     )
       ? 'published'
-      : 'retry';
+      : 'stale';
   } catch (err) {
-    // One transaction: it either committed both halves or neither. There is no appended message to
-    // reconcile afterwards, so the claim is simply released and the next sweep retries.
+    // Post-commit drain/broadcast failures are not evidence of a failed admission.
+    // Recover that exact source/target before deciding whether a pre-commit retry is possible.
+    try {
+      const committed = await findCommittedWake(deps, claimed, idempotencyKey);
+      if (committed)
+        return commitManagedCommandWakeMessageVisibility(
+          deps.dynamicTaskStore,
+          claimed.task.id,
+          claimed.command.messageClaimGeneration,
+          committed.id,
+          now(),
+        )
+          ? 'published'
+          : 'stale';
+    } catch (lookupError) {
+      log.warn({ err, lookupError, taskId: claimed.task.id }, 'Managed wake admission outcome remains unknown');
+      return 'retry';
+    }
     releaseManagedCommandWakeMessageContentClaim(
       deps.dynamicTaskStore,
       claimed.task.id,
@@ -245,7 +303,7 @@ export async function publishManagedCommandWakeMessage(
     );
     log.warn(
       { err, taskId: claimed.task.id, threadId: claimed.threadId },
-      'managed-command wake admission failed; nothing was written and the wake stays retryable',
+      'Managed wake admission failed before commit; original production intent remains pending',
     );
     return 'retry';
   }

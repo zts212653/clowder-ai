@@ -1,4 +1,5 @@
 import type { MemoryReadSnapshot } from './memory-read-execution.js';
+import { MessageSearchCandidateDiagnostics } from './message-search-candidate-diagnostics.js';
 import { privateMessageSearchTrace } from './message-search-trace.js';
 
 type Operation = 'source' | 'thread' | 'access' | 'state' | 'projection';
@@ -20,7 +21,14 @@ export class MessageSearchDiagnostics {
   private inputCandidates: number | null = null;
   private traceEvents = 0;
 
-  constructor(private readonly sink?: (trace: Record<string, unknown>) => void) {}
+  readonly candidateEvidence?: MessageSearchCandidateDiagnostics;
+
+  constructor(
+    private readonly sink?: (trace: Record<string, unknown>) => void,
+    scope?: { searchId: string; ownerId: string },
+  ) {
+    if (scope) this.candidateEvidence = new MessageSearchCandidateDiagnostics(scope.searchId, scope.ownerId, sink);
+  }
 
   readonly trace = (trace: Record<string, unknown>) => {
     if (!this.active || this.traceEvents >= 32) return;
@@ -37,9 +45,12 @@ export class MessageSearchDiagnostics {
 
   readonly worker = (snapshot: MemoryReadSnapshot) => {
     if (!this.active) return;
+    this.candidateEvidence?.worker(snapshot);
+    // Full evidence is published once after host admission; ordinary traces/errors remain small.
+    const { candidateAudit: _candidateAudit, ...summary } = snapshot;
     const index = this.workers.findIndex((row) => row.executionId === snapshot.executionId);
-    if (index >= 0) this.workers[index] = snapshot;
-    else if (this.workers.length < 2) this.workers.push(snapshot); // Initial read plus existing retirement fallback.
+    if (index >= 0) this.workers[index] = summary;
+    else if (this.workers.length < 2) this.workers.push(summary); // Initial read plus existing retirement fallback.
   };
 
   async measure<T>(name: Operation, run: () => T | Promise<T>): Promise<T> {
@@ -114,6 +125,7 @@ export class MessageSearchDiagnostics {
 
   close() {
     this.active = false;
+    this.candidateEvidence?.close();
     this.workers.length = 0;
   }
 }

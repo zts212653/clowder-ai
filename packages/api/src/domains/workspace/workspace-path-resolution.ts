@@ -23,6 +23,16 @@ export interface WorkspaceAbsolutePathTarget {
 const MARKDOWN_DOCUMENT_HREF_RE = /^(.*\.mdx?)(?::([1-9]\d*))?$/i;
 const WORKSPACE_PATH_LINE_SUFFIX_RE = /^(.*):([1-9]\d*)$/;
 const WORKSPACE_PATH_LINE_COLUMN_SUFFIX_RE = /^(.*):([1-9]\d*):([1-9]\d*)$/;
+const WINDOWS_ROOTED_DRIVE_LINK_RE = /^\/([A-Za-z]:[\\/])/;
+
+/** Markdown links to Windows files often carry a leading slash (`/D:/...`).
+ * node:path on Windows resolves that as a path on the current drive plus a
+ * literal `D:` segment, so remove the extra separator before path resolution.
+ * POSIX keeps `/D:/...` unchanged because it is a valid absolute path there. */
+export function normalizeWindowsDriveLinkPath(input: string, platform: NodeJS.Platform = process.platform): string {
+  if (platform !== 'win32') return input;
+  return input.replace(WINDOWS_ROOTED_DRIVE_LINK_RE, '$1');
+}
 
 export class WorkspacePathNotRegisteredError extends WorkspaceSecurityError {
   constructor() {
@@ -91,11 +101,12 @@ export async function resolveWorkspaceAbsolutePath(
   repoRoot?: string,
   entries?: WorktreeEntry[],
 ): Promise<WorkspaceAbsolutePathTarget> {
-  if (!isAbsolute(absolutePath)) {
+  const normalizedPath = normalizeWindowsDriveLinkPath(absolutePath);
+  if (!isAbsolute(normalizedPath)) {
     throw new WorkspaceSecurityError('Workspace path must be absolute', 'NOT_FOUND');
   }
   const selected = await selectWorkspaceRoot(
-    resolve(absolutePath),
+    resolve(normalizedPath),
     entries ?? (await listWorkspaceRootEntries(repoRoot)),
   );
   const resolvedPath = await resolveWorkspaceFilesystemPath(selected.entry.root, selected.relativePath);

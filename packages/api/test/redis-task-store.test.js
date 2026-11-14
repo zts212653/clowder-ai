@@ -62,6 +62,17 @@ class FakeRedisForTaskStore {
   }
 
   async eval(script, _numKeys, ...keysAndArgs) {
+    if (script.includes('TASK_PUBLISH_WITH_RECOVERY')) {
+      const [key, rawFields, rawDeleted] = keysAndArgs;
+      const pairs = JSON.parse(rawFields),
+        fields = {};
+      for (let i = 0; i < pairs.length; i += 2) fields[pairs[i]] = pairs[i + 1];
+      // This fixture covers ordinary Task/TTL behavior only. Recovery contracts use real Redis suites.
+      assert.equal(fields.deploymentWait, undefined);
+      await this.hset(key, fields);
+      for (const field of JSON.parse(rawDeleted)) delete this.hashes.get(key)[field];
+      return 1;
+    }
     if (script.includes('F275_APPLY_TASK_BINDING_TTL')) {
       this.pairTtlTransitionCalls += 1;
       if (this.failPairTtlTransition) throw new Error('simulated atomic pair TTL failure');
@@ -231,6 +242,10 @@ class FakeRedisForTaskStore {
   multi() {
     const ops = [];
     const pipeline = {
+      eval: (...args) => {
+        ops.push(() => this.eval(...args));
+        return pipeline;
+      },
       hset: (key, value) => {
         ops.push(() => this.hset(key, value));
         return pipeline;

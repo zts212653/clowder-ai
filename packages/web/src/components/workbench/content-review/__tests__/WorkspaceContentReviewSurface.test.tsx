@@ -1,6 +1,8 @@
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { SHELL_PRESENTATION_STORAGE_KEY, writeShellPresentation } from '@/components/shell/shell-presentation';
+import { openFileMenu } from '@/test-utils/open-file-menu';
 import { WorkspaceContentReviewSurface } from '../WorkspaceContentReviewSurface';
 import { mediaView, reviewId, revision, videoDiscussionView, view } from './WorkspaceContentReviewSurface.fixture';
 
@@ -17,6 +19,7 @@ let container: HTMLDivElement;
 let root: Root;
 
 beforeEach(() => {
+  writeShellPresentation('v2');
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   mocks.apiFetch.mockReset().mockImplementation(async (url: string, init?: RequestInit) => {
     if (url === '/api/workspace/content-reviews/prepare') return new Response(JSON.stringify(view()));
@@ -33,6 +36,7 @@ beforeEach(() => {
 afterEach(() => {
   act(() => root.unmount());
   container.remove();
+  localStorage.removeItem(SHELL_PRESENTATION_STORAGE_KEY);
   vi.restoreAllMocks();
 });
 
@@ -186,7 +190,10 @@ it('seeks an ordinary MP4 discussion to its attached frame before projecting the
       currentTime = value;
     },
   });
-  await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="打开作品讨论"]')?.click());
+  await openFileMenu(container);
+  const discussionButton = container.querySelector<HTMLButtonElement>('[aria-label="打开作品讨论"]');
+  expect(discussionButton).not.toBeNull();
+  await act(async () => discussionButton?.click());
   const locate = [...container.querySelectorAll<HTMLButtonElement>('button')].find(
     (button) => button.textContent === '已定位',
   );

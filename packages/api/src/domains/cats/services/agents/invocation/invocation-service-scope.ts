@@ -1,6 +1,6 @@
 import type { AgentService } from '../../types.js';
 import { agentServiceGeneration } from '../registry/AgentRegistry.js';
-import { ExecutionAdmissionConflict } from '../registry/AgentServiceUnavailableError.js';
+import { ExecutionAdmissionConflict, StaleServiceSourceConflict } from '../registry/AgentServiceUnavailableError.js';
 import type { FrozenExecutionBinding } from './execution-account-binding.js';
 
 /** Own preflight pins independently of whether a provider stream is ever started. */
@@ -22,6 +22,7 @@ export class InvocationServiceScope {
     resolve: () => AgentService,
     capture: (service: AgentService) => Promise<FrozenExecutionBinding>,
     signal?: AbortSignal,
+    refresh?: () => Promise<void>,
   ) {
     const attempt = async (service: AgentService) => {
       const [captured] = await Promise.allSettled([
@@ -38,7 +39,16 @@ export class InvocationServiceScope {
     if (first.status === 'fulfilled') return first.value;
     if (!(first.reason instanceof ExecutionAdmissionConflict)) throw first.reason;
     signal?.throwIfAborted();
-    return attempt(this.pin(resolve()));
+    let next = resolve();
+    if (
+      first.reason instanceof StaleServiceSourceConflict &&
+      refresh &&
+      agentServiceGeneration(next) === agentServiceGeneration(view)
+    ) {
+      await refresh();
+      next = resolve();
+    }
+    return attempt(this.pin(next));
   }
 
   async dispose(): Promise<void> {

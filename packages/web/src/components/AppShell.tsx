@@ -6,7 +6,7 @@ import './suggestions/suggestions.css';
 import { usePathname, useSearchParams } from 'next/navigation';
 import { Suspense, useCallback, useEffect, useLayoutEffect, useState, useSyncExternalStore } from 'react';
 import { useIsDesktop } from '@/hooks/useIsDesktop';
-import { useWorkspaceNavigate } from '@/hooks/useWorkspaceNavigate';
+import { WorkspaceNavigateHost } from '@/hooks/useWorkspaceNavigate';
 import { destroyPlaybackRuntime, getPlaybackManager } from '@/services/playbackRuntime';
 import { CallbackAuthSnapshotMount } from '@/stores/callbackAuthStore';
 import { useChatStore } from '@/stores/chatStore';
@@ -41,6 +41,7 @@ import {
   subscribeBrowserThreadRoute,
 } from './ThreadSidebar/thread-navigation';
 import { ThreadChatRuntimeProvider } from './thread-chat';
+import { StandaloneHubSocketProvider } from './thread-chat/StandaloneHubSocketProvider';
 import { useF307ExperienceWorkbenchStore } from './workbench/experience-workbench-store';
 import { projectWorkspaceWorkHost } from './workbench/workspace-work-host-projection';
 import { FloatingPresentationSurfaceHost } from './workspace/FloatingPresentationSurfaceHost';
@@ -88,17 +89,23 @@ const worldRail = (
  * A navigation that arrives with the same value on a different route is a fresh intent; re-rendering the current URL is not.
  * Storage stays the truth; the location is only read, not remembered.
  */
-function useShellPresentationFromUrl(pathname: string, shellParam: string | null): ShellPresentation {
+function useShellPresentationFromUrl(
+  pathname: string,
+  shellParam: string | null,
+  isExport: boolean,
+): ShellPresentation {
   const stored = useShellPresentation();
   const requested = parseShellPresentation(shellParam);
   const intent = JSON.stringify([pathname, shellParam]);
   const [appliedIntent, setAppliedIntent] = useState<string | null>(null);
   // Resolve navigation intent in render; do not paint the old shell before writing its preference.
-  const presentation = appliedIntent !== intent && requested ? requested : stored;
+  // An exported document always uses v2, independently of the browser's saved interface.
+  const presentation = isExport ? 'v2' : appliedIntent !== intent && requested ? requested : stored;
   useLayoutEffect(() => {
+    if (isExport) return;
     if (requested && requested !== readShellPresentation()) writeShellPresentation(requested);
     setAppliedIntent(intent);
-  }, [intent, requested]);
+  }, [intent, requested, isExport]);
   // Tokens are scoped to [data-shell="v2"] on <html> so portalled tips/menus get them too.
   useLayoutEffect(() => {
     if (presentation !== 'v2') return;
@@ -142,6 +149,19 @@ export function AppShell({ children }: AppShellProps) {
   );
 }
 
+/** Chromeless pages (story, showcase) render without the chat runtime. */
+function ChromelessShell({ children, isExport, isDesktop }: AppShellProps & { isExport: boolean; isDesktop: boolean }) {
+  // An exported page renders its content only; it never takes part in workspace navigation.
+  if (isExport) return <>{children}</>;
+  return (
+    // Workspace navigation still queues here (#3276), on this page's one connection.
+    <StandaloneHubSocketProvider>
+      <WorkspaceNavigateHost threadId={null} isChatRoute={false} isWorkspaceVisible={isDesktop} enabled />
+      {children}
+    </StandaloneHubSocketProvider>
+  );
+}
+
 function AppShellContent({ children, pathname }: AppShellProps & { pathname: string }) {
   useEffect(reportOnboardingPageLoad, []);
   // Next can commit the address after this render without emitting either browser route event.
@@ -153,7 +173,7 @@ function AppShellContent({ children, pathname }: AppShellProps & { pathname: str
   const isExport = searchParams.get('export') === 'true';
   const { isOpen, initialized: sidebarInitialized, open, width, close, handleResize, resetWidth } = useSidebarStore();
   const isDesktop = useIsDesktop();
-  const presentation = useShellPresentationFromUrl(pathname, searchParams.get('shell'));
+  const presentation = useShellPresentationFromUrl(pathname, searchParams.get('shell'), isExport);
   const isV2 = presentation === 'v2';
   // F322 v2: 记忆 is a Café destination, so its route family keeps the sidebar (and the 记忆 row is the current page).
   // Every other hidden route, classic, and the user's own collapse preference are untouched.
@@ -188,11 +208,6 @@ function AppShellContent({ children, pathname }: AppShellProps & { pathname: str
     { surfaceId: attentionSurfaceId, presentation: attentionPresentation },
   );
   const isChromeless = CHROMELESS_ROUTES.some((route) => pathname.startsWith(route));
-  useWorkspaceNavigate(isChatRoute ? routeThreadId : null, {
-    isChatRoute,
-    isWorkspaceVisible: isDesktop,
-    enabled: !isExport,
-  });
 
   useLayoutEffect(() => {
     initSidebarWidth();
@@ -205,9 +220,19 @@ function AppShellContent({ children, pathname }: AppShellProps & { pathname: str
     if (activeDestination !== null && isDesktop && !sidebarInitialized) open();
   }, [activeDestination, isDesktop, sidebarInitialized, open]);
 
-  if (isExport || isChromeless) {
-    if (isChromeless) return <>{children}</>;
-    return <ThreadChatRuntimeProvider routeThreadId={routeThreadId}>{children}</ThreadChatRuntimeProvider>;
+  if (isChromeless) {
+    return (
+      <ChromelessShell isExport={isExport} isDesktop={isDesktop}>
+        {children}
+      </ChromelessShell>
+    );
+  }
+  if (isExport) {
+    return (
+      <ShellPresentationContext.Provider value={presentation}>
+        <ThreadChatRuntimeProvider routeThreadId={routeThreadId}>{children}</ThreadChatRuntimeProvider>
+      </ShellPresentationContext.Provider>
+    );
   }
 
   const routeHidesSidebar = SIDEBAR_HIDDEN_ROUTES.some((r) => pathname.startsWith(r)) && activeDestination === null;
@@ -275,6 +300,12 @@ function AppShellContent({ children, pathname }: AppShellProps & { pathname: str
                 <ConciergeHost />
                 <FeatureDemoHost />
                 <HomeActionHost enabled={!isExport} />
+                <WorkspaceNavigateHost
+                  threadId={isChatRoute ? routeThreadId : null}
+                  isChatRoute={isChatRoute}
+                  isWorkspaceVisible={isDesktop}
+                  enabled={!isExport}
+                />
                 {/* F246 Phase C: Approval Hub moved to workspace panel tab — drawer removed */}
               </div>
             </ThreadSettingsProvider>

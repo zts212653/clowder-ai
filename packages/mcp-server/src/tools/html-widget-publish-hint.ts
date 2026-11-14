@@ -17,6 +17,31 @@ export function htmlWidgetInlineHandlerHint(block: { kind: string; html?: unknow
   );
 }
 
+/** Syntax-only preflight: valid base64 can still contain damaged image bytes. */
+export function htmlWidgetPublishHint(block: { kind: string; html?: unknown }): string | undefined {
+  const hints = [htmlWidgetInlineHandlerHint(block)];
+  if (block.kind === 'html_widget' && typeof block.html === 'string') {
+    let malformed = 0;
+    for (const match of block.html.matchAll(/(["'`])data:image\/[a-z0-9.+-]+;base64,([^"'`<>)]*)\1/gi)) {
+      const payload = match[2]?.trim();
+      if (!payload || payload.includes('\\') || (match[1] === '`' && payload.includes('${'))) continue; // Dynamic/escaped script sources are not statically decidable.
+      try {
+        atob(payload);
+      } catch {
+        malformed++;
+      }
+    }
+    if (malformed > 0) {
+      hints.push(
+        `\n\n⚠️ HTML_WIDGET IMAGE DATA: ${malformed} malformed base64 image(s) detected. ` +
+          'The browser cannot decode these sources. Read image bytes from the original file programmatically; ' +
+          'do not transcribe base64. Correct the payload and republish.',
+      );
+    }
+  }
+  return hints.filter(Boolean).join('') || undefined;
+}
+
 export function appendHintToSuccess(result: ToolResult, hint: string | undefined): ToolResult {
   if (!hint || result.isError) return result;
   const existingText = result.content[0]?.text ?? '';

@@ -20,6 +20,7 @@ import { WorkspacePanel } from '../WorkspacePanel';
 vi.hoisted(() => vi.stubEnv('NEXT_PUBLIC_PROJECT_ROOT', '/tmp/listed'));
 afterAll(() => vi.unstubAllEnvs());
 
+vi.mock('@/components/thread-chat/hub-socket-context', () => import('@/test-utils/hub-socket-context-mock'));
 vi.mock('@/utils/api-client', () => ({ apiFetch: vi.fn() }));
 // Keep the real stamp consumer, foreground binding, dispatch and persisted topology; only the leaf does no file I/O.
 vi.mock('@/components/workbench/F307OwnerSurfaceRenderer', () => ({

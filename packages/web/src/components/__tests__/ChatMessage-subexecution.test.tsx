@@ -69,6 +69,8 @@ describe('F307 root and child agent presentation', () => {
   beforeEach(() => {
     container = document.createElement('div');
     document.body.appendChild(container);
+    // Retained classic contract; newer presentation cases select their mode explicitly.
+    window.localStorage.setItem('cat-cafe:shell-presentation', 'classic');
     root = createRoot(container);
     useChatStore.setState({
       currentThreadId: 'thread-subexecution',
@@ -81,6 +83,7 @@ describe('F307 root and child agent presentation', () => {
   afterEach(() => {
     act(() => root.unmount());
     container.remove();
+    window.localStorage.removeItem('cat-cafe:shell-presentation');
   });
 
   it('keeps the root final primary and labels a concrete child final as child-authored', () => {

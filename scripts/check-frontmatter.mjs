@@ -12,6 +12,8 @@ Scan markdown files and report frontmatter coverage.
 --strict-delta validates only changed markdown documents. New documents must
 have doc_kind and created. Existing legacy debt is allowed, but a change may
 not corrupt frontmatter or remove a required field that was already present.
+The selected --docs-root must belong to a Git worktree; changes and --base
+are read from that worktree, even when this script runs from another checkout.
 `;
 
 const REQUIRED_FIELDS = ['doc_kind', 'created'];
@@ -100,23 +102,27 @@ function inspectFrontmatter(content) {
   };
 }
 
-function gitOutput(args) {
+function gitOutput(args, cwd = process.cwd()) {
   return execFileSync('git', args, {
-    cwd: process.cwd(),
+    cwd,
     encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'pipe'],
   });
 }
 
-function collectChangedMarkdownFiles({ base, docsRoot }) {
-  const committed = gitOutput(['diff', '--name-only', `${base}...HEAD`]);
-  const unstaged = gitOutput(['diff', '--name-only']);
-  const staged = gitOutput(['diff', '--name-only', '--cached']);
-  const untracked = gitOutput(['ls-files', '--others', '--exclude-standard']);
-  const paths = new Set(`${committed}\n${unstaged}\n${staged}\n${untracked}`.split(/\r?\n/).filter(Boolean));
+function collectChangedMarkdownFiles({ base, docsRoot, repoRoot }) {
+  const relativeRoot = path.relative(repoRoot, docsRoot).split(path.sep).join('/');
+  const scope = ['--', `:(top,literal)${relativeRoot}`];
+  const committed = gitOutput(['diff', '--name-only', '-z', `${base}...HEAD`, ...scope], repoRoot);
+  const unstaged = gitOutput(['diff', '--name-only', '-z', ...scope], repoRoot);
+  const staged = gitOutput(['diff', '--name-only', '-z', '--cached', ...scope], repoRoot);
+  const untracked = gitOutput(['ls-files', '-z', '--others', '--exclude-standard', ...scope], repoRoot);
+  const paths = new Set(
+    [committed, unstaged, staged, untracked].flatMap((output) => output.split('\0').filter(Boolean)),
+  );
 
   return [...paths]
-    .map((relativePath) => path.resolve(process.cwd(), relativePath))
+    .map((relativePath) => path.resolve(repoRoot, relativePath))
     .filter((absolutePath) => {
       const relativeToDocs = path.relative(docsRoot, absolutePath);
       return (
@@ -131,10 +137,10 @@ function collectChangedMarkdownFiles({ base, docsRoot }) {
     .sort();
 }
 
-function readBaseFile(base, filePath) {
-  const relativePath = path.relative(process.cwd(), filePath).split(path.sep).join('/');
+function readBaseFile(base, filePath, repoRoot) {
+  const relativePath = path.relative(repoRoot, filePath).split(path.sep).join('/');
   try {
-    return gitOutput(['show', `${base}:${relativePath}`]);
+    return gitOutput(['cat-file', 'blob', `${base}:${relativePath}`], repoRoot);
   } catch {
     return null;
   }
@@ -160,18 +166,20 @@ function validateExistingFrontmatter(relative, before, current) {
   ).map((field) => `${relative}: removed required field ${field}`);
 }
 
-function validateChangedFile({ base, docsRoot, filePath }) {
+function validateChangedFile({ base, docsRoot, filePath, repoRoot }) {
   const relative = path.relative(docsRoot, filePath).split(path.sep).join('/');
   const current = inspectFrontmatter(fs.readFileSync(filePath, 'utf8'));
-  const baseContent = readBaseFile(base, filePath);
+  const baseContent = readBaseFile(base, filePath, repoRoot);
   if (baseContent === null) return validateNewFrontmatter(relative, current);
   return validateExistingFrontmatter(relative, inspectFrontmatter(baseContent), current);
 }
 
 function validateStrictDelta({ base, docsRoot }) {
   const canonicalDocsRoot = fs.realpathSync(docsRoot);
-  const files = collectChangedMarkdownFiles({ base, docsRoot: canonicalDocsRoot });
-  const errors = files.flatMap((filePath) => validateChangedFile({ base, docsRoot: canonicalDocsRoot, filePath }));
+  const repoRoot = gitOutput(['rev-parse', '--show-toplevel'], canonicalDocsRoot).trim();
+  const context = { base, docsRoot: canonicalDocsRoot, repoRoot };
+  const files = collectChangedMarkdownFiles(context);
+  const errors = files.flatMap((filePath) => validateChangedFile({ ...context, filePath }));
 
   if (errors.length > 0) {
     for (const error of errors) console.error(`FAIL check-frontmatter-delta: ${error}`);

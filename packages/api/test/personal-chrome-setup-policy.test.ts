@@ -80,3 +80,17 @@ test('the exact alpha.8 health fix receives setup actions while other alpha.8 by
   );
   assert.equal(chromeSetupPolicy({ ...candidate, packageDigest: 'sha512-unreviewed-alpha8' }), undefined);
 });
+
+test('only the exact reviewed alpha.10 long-thinking archive receives fixed Host setup actions', () => {
+  const candidate = record();
+  candidate.version = '0.1.0-alpha.10';
+  candidate.manifest.version = candidate.version;
+  candidate.packageDigest =
+    'sha512-N6mohK+qmgNW08yRGa2g1N4Ja6hMbpfLOGg6IPqHB/HgzlUvqwm9/6AQqt56umDqeoe19OtgqlegMz2p0eeVMA==';
+  assert.deepEqual(
+    chromeSetupPolicy(candidate)?.actions.map(({ id }) => id),
+    ['inspect', 'install', 'uninstall'],
+  );
+  assert.equal(chromeSetupPolicy({ ...candidate, packageDigest: 'sha512-unreviewed-alpha10' }), undefined);
+  assert.equal(chromeSetupPolicy({ ...candidate, packageState: 'quarantined' }), undefined);
+});

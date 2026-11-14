@@ -14,7 +14,7 @@ const worker = `
   const {createDshDumpSnapshot} = await import(${JSON.stringify(`${routes}dsh-setup-snapshot.js`)});
   const {resolveDshSetupLaunch} = await import(${JSON.stringify(`${routes}dsh-setup-launch.js`)});
   const {dshProfileState} = await import(${JSON.stringify(`${routes}native-dsh-profile.js`)});
-  const {discoverDshRuntime} = await import(${JSON.stringify(`${routes}native-dsh-discovery.js`)});
+  const {discoverDshRuntimes} = await import(${JSON.stringify(`${routes}native-dsh-discovery.js`)});
   const root=process.env.DSH_TEST_ROOT;
   const args=[join(root,'package/lib/bin.js'),'--profile','acp'];
   if(process.env.DSH_TEST_RELATIVE==='1') {
@@ -22,7 +22,7 @@ const worker = `
   } else {
     assert.deepEqual(dshSourceProfiles(),['acp','desktop']);
     assert.equal(dshProfileState(),'configured');
-    assert.equal(discoverDshRuntime({npmCaches:[],resolveCommand:()=>process.execPath}).discoveryStatus,'configured');
+    assert.equal((await discoverDshRuntimes({desktopRoots:[]}))[0].discoveryStatus,'not_installed');
     const snapshot=createDshDumpSnapshot(root,'acp');
     try {
       assert.equal(readFileSync(join(snapshot.directory,'profiles/acp/cordis.yml'),'utf8'),readFileSync(join(root,'expected.yml'),'utf8'));
@@ -91,6 +91,8 @@ for (const value of ['', '   ', 'absolute', 'relative', '~/relative'])
       env: {
         NODE_ENV: 'test',
         PATH: process.env.PATH,
+        ProgramData: process.env.ProgramData,
+        ALLUSERSPROFILE: process.env.ALLUSERSPROFILE,
         HOME: home,
         USERPROFILE: home,
         DSH_HOME: value === 'absolute' ? join(root, ' home with spaces ') : value,

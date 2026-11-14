@@ -15,6 +15,11 @@ VENV_NAME="tts-venv"
 DISK_REQUIRED_GB=2
 MODEL_ENV_VAR="TTS_MODEL"
 PIP_DEPS_ARM64="mlx-audio>=0.4.7 misaki[zh] fastapi uvicorn httpx[socks] num2words spacy phonemizer huggingface_hub[hf_xet]"
+# Breeze uses the runtime version verified by the expression/reference spike.
+# Keep existing models' dependency floor unchanged.
+case "${TTS_MODEL:-}" in
+  */Breeze-TTS-2*) PIP_DEPS_ARM64="${PIP_DEPS_ARM64/mlx-audio>=0.4.7/mlx-audio>=0.6.4}" ;;
+esac
 PIP_DEPS_OTHER="edge-tts fastapi uvicorn httpx[socks] huggingface_hub[hf_xet]"
 MODEL_LOADER_OTHER="skip"
 POST_INSTALL_HOOK_ARM64="tts_install_arm64_warmup"
@@ -51,19 +56,29 @@ tts_install_arm64_warmup() {
   "${hf_proxy_env[@]+"${hf_proxy_env[@]}"}" python - "$TTS_MODEL" "$warmup_voice" "$warmup_dir" <<'PY' || status=$?
 import os
 import sys
+import wave
+from pathlib import Path
 
 os.environ.setdefault("HF_HUB_DOWNLOAD_TIMEOUT", "60")
 
 from mlx_audio.tts.generate import generate_audio
+from mlx_audio.tts.utils import load_model
 
-model, voice, output_dir = sys.argv[1:4]
-generate_audio(
-    text="\u4f60\u597d",
-    model=model,
-    voice=voice,
-    lang_code="z",
-    output_path=output_dir,
-)
+model_id, voice, output_dir = sys.argv[1:4]
+model = load_model(model_id)
+kwargs = dict(text="\u4f60\u597d", model=model, lang_code="z", output_path=output_dir)
+config = getattr(model, "config", None)
+if getattr(config, "model_type", None) == "breeze_tts":
+    kwargs["voice"] = "S0"
+elif getattr(config, "tts_model_type", None) != "base":
+    kwargs["voice"] = voice
+generate_audio(**kwargs)
+audio_files = list(Path(output_dir).glob("*.wav"))
+if not audio_files:
+    raise RuntimeError("TTS warmup generated no audio file")
+with wave.open(str(audio_files[0])) as audio:
+    if audio.getnframes() == 0:
+        raise RuntimeError("TTS warmup generated empty audio")
 print("TTS runtime warmup complete.")
 PY
   rm -rf "$warmup_dir"

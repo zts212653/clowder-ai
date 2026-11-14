@@ -6,7 +6,7 @@ const WAIT_SOURCE = {
   kind: 'managed_command',
   value: 'owner-authority-test',
   expectedSignal: 'managed_command_complete',
-  slaUntilMs: 3_600_000,
+  slaUntilMs: Date.now() + 3_600_000,
 };
 
 describe('managed hold owner authority', () => {

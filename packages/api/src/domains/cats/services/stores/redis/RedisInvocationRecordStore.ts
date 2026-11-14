@@ -1,3 +1,9 @@
+import {
+  initializeInvocationOwnerRecovery,
+  listRunningForOwnerRecovery,
+  observeInvocationOwner,
+} from './invocation-owner-recovery.js';
+import { INVOCATION_OWNER_RECOVERY_LUA } from './invocation-owner-recovery-lua.js';
 /**
  * Redis InvocationRecord Store
  * Redis-backed invocation record storage with Lua atomic create.
@@ -97,7 +103,8 @@ return {'created', ARGV[1]}
  *  -3  = (threadId, userId) drift — KEYS[2] is stale (e.g. reassignUserId race);
  *        caller must retry with fresh snapshot
  */
-const ATOMIC_UPDATE_LUA = `
+const ATOMIC_UPDATE_LUA = `${INVOCATION_OWNER_RECOVERY_LUA}
+preflightOwnerRecovery(KEYS[5])
 local current = redis.call('HGET', KEYS[1], 'status')
 if not current then
   return -2
@@ -190,6 +197,7 @@ if newStatus ~= '' and newStatus ~= current then
   end
 end
 
+projectOwnerRecovery(KEYS[1], KEYS[5], redis.call('HGET', KEYS[1], 'id'), newStatus == 'running' and current ~= 'running')
 return 1
 `;
 
@@ -218,7 +226,8 @@ return 1
  *   1  = success (migration applied or skipped per current status)
  *  -1  = record not found
  */
-const REASSIGN_USERID_LUA = `
+const REASSIGN_USERID_LUA = `${INVOCATION_OWNER_RECOVERY_LUA}
+preflightOwnerRecovery(KEYS[7])
 local exists = redis.call('EXISTS', KEYS[1])
 if exists == 0 then
   return -1
@@ -246,6 +255,7 @@ if redis.call('GET', KEYS[6]) == ARGV[3] then
   redis.call('DEL', KEYS[6])
 end
 
+projectOwnerRecovery(KEYS[1], KEYS[7], ARGV[3], false)
 return 1
 `;
 
@@ -336,11 +346,12 @@ export class RedisInvocationRecordStore implements IInvocationRecordStore {
 
       const result = (await this.redis.eval(
         ATOMIC_UPDATE_LUA,
-        4,
+        5,
         key,
         setKey,
         userThreadsKey,
         latestTerminalKey,
+        InvocationKeys.ownerRecoveryDue(),
         input.expectedStatus ?? '',
         input.status ?? '',
         before.threadId,
@@ -398,6 +409,29 @@ export class RedisInvocationRecordStore implements IInvocationRecordStore {
    * IMPORTANT: ioredis SCAN does NOT auto-apply keyPrefix.
    * We must manually prepend the prefix for matching, then strip it from results.
    */
+  async getOwnerRecoveryFacts(
+    id: string,
+  ): Promise<import('../ports/invocation-owner-health.js').InvocationOwnerHealthFacts | null> {
+    const [raw, status] = await this.redis.hmget(InvocationKeys.detail(id), '_ownerRecovery', 'status');
+    return raw
+      ? {
+          ...(JSON.parse(raw) as import('../ports/invocation-owner-health.js').InvocationOwnerHealthFacts),
+          recordStatus: status as import('../ports/InvocationRecordStore.js').InvocationStatus,
+        }
+      : null;
+  }
+
+  observeOwnerRecovery(id: string, input: import('../ports/invocation-owner-health.js').InvocationOwnerHealthInput) {
+    return observeInvocationOwner(this.redis, id, input);
+  }
+
+  initializeOwnerRecovery(rebuild = false): Promise<void> {
+    return initializeInvocationOwnerRecovery(this.redis, rebuild);
+  }
+  listRunningForRecovery(limit = 100, now = Date.now(), nextAt = now + 5 * 60_000): Promise<InvocationRecord[]> {
+    return listRunningForOwnerRecovery(this.redis, limit, now, nextAt);
+  }
+
   async scanByStatus(status: InvocationStatus): Promise<string[]> {
     const matchPattern = `${this.keyPrefix}${InvocationKeys.detail('*')}`;
     const ids: string[] = [];
@@ -711,13 +745,14 @@ export class RedisInvocationRecordStore implements IInvocationRecordStore {
     const oldLatestTerminalKey = InvocationKeys.latestTerminalByThread(record.threadId, record.userId);
     await this.redis.eval(
       REASSIGN_USERID_LUA,
-      6,
+      7,
       recordKey,
       oldSetKey,
       newSetKey,
       oldUserThreadsKey,
       newUserThreadsKey,
       oldLatestTerminalKey,
+      InvocationKeys.ownerRecoveryDue(),
       nextUserId,
       String(Date.now()),
       id,

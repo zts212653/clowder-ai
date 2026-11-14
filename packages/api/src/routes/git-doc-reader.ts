@@ -8,23 +8,13 @@
  * regardless of whether `cat-cafe-runtime` has been pulled.
  */
 import { execFile } from 'node:child_process';
-import { existsSync } from 'node:fs';
 import { readdir, readFile } from 'node:fs/promises';
-import { dirname, join, resolve } from 'node:path';
+import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { deploymentDefaults } from '@cat-cafe/shared';
+import { findMonorepoRoot } from '../utils/monorepo-root.js';
 
 const execFileAsync = promisify(execFile);
-
-function findMonorepoRoot(start = process.cwd()): string {
-  let current = resolve(start);
-  while (true) {
-    if (existsSync(join(current, 'pnpm-workspace.yaml'))) return current;
-    const parent = dirname(current);
-    if (parent === current) return start;
-    current = parent;
-  }
-}
 
 const GIT_FETCH_INTERVAL_MS = 60_000;
 let lastFetchAttemptTime = 0;

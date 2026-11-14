@@ -6,6 +6,7 @@ import { withCodexStartupCancellation } from './codex-startup-recovery.js';
 export type CodexAppServerApprovalsReviewer = 'user' | 'auto_review' | 'guardian_subagent';
 
 interface ThreadParamsInput {
+  boundedWatcher?: import('./BoundedWatcherRunPort.js').BoundedWatcherRunPort;
   model?: string;
   cwd?: string;
   sandbox?: 'read-only' | 'workspace-write' | 'danger-full-access';
@@ -31,6 +32,22 @@ export function buildCodexAppServerThreadParams(
     ...(input.config ? { config: input.config } : {}),
     ...(Object.hasOwn(input, 'serviceTier') ? { serviceTier: input.serviceTier ?? null } : {}),
     ...(input.approvalsReviewer ? { approvalsReviewer: input.approvalsReviewer } : {}),
+    ...(input.boundedWatcher
+      ? {
+          baseInstructions: input.boundedWatcher.instructions,
+          developerInstructions: '',
+          ...(!extra?.threadId
+            ? {
+                dynamicTools: input.boundedWatcher.tools.map((tool) => ({
+                  type: 'function',
+                  name: tool.name,
+                  description: tool.description ?? '',
+                  inputSchema: tool.inputSchema,
+                })),
+              }
+            : {}),
+        }
+      : {}),
   };
 }
 

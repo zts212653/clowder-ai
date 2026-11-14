@@ -173,7 +173,7 @@ for (const ownership of ['owner', 'guardian']) {
     assert.equal(f.delivered[0].targetCatId, 'fixture-cat');
     assert.equal(f.delivered[0].idempotencyKey, `alpha-triage:exact-job:1:${taskId}`);
     assert.equal(f.triggered.length, 0, 'atomic admission never creates a second trigger');
-    assert.equal([...f.tasks.values()][0].ownerCatId, ownership === 'owner' ? 'fixture-cat' : null);
+    assert.equal([...f.tasks.values()][0].ownerCatId, 'fixture-cat', 'explicit guardian owns unresolved repair');
   });
 }
 
@@ -229,6 +229,90 @@ test('incomplete execution is a failed scheduler run, not a delivered verificati
   assert.equal(f.tasks.size, 0);
 });
 
+for (const [outcome, stderrLength] of [
+  ['incomplete', 0],
+  ['rejected', 0],
+  ['incomplete', 2048],
+  ['rejected', 2048],
+]) {
+  test(`discovery error survives when enrolled execution is ${outcome} with ${stderrLength} stderr characters`, async () => {
+    const f = fixture();
+    const original = new Error(`original execution problem ${'x'.repeat(stderrLength)}`);
+    const discoveryError = stderrLength
+      ? `git ls-remote: ${'remote detail '.repeat(80)}\nfatal: SSL_ERROR_SYSCALL`
+      : 'git ls-remote: SSL_ERROR_SYSCALL';
+    f.options.inspectMain = async () => ({
+      databasePath: '/gate.sqlite',
+      legacyLockPath: '/legacy',
+      discoveryError,
+    });
+    f.runtime.runAlphaBrowserRevision = async () => {
+      if (outcome === 'rejected') throw original;
+      return { status: 'incomplete', headSha: 'b'.repeat(40), reason: original.message };
+    };
+    const task = createAlphaBrowserTemplate(f.options).createSpec('alpha-subscription', f.params);
+    const rows = [];
+    const loggedErrors = [];
+    await executeTaskPipeline({
+      task,
+      ledger: { record: (row) => rows.push(row) },
+      logger: {
+        info() {},
+        error(_message, error) {
+          loggedErrors.push(error);
+        },
+      },
+      running: new Map(),
+      tickCounts: new Map(),
+      lastRunAt: new Map(),
+    });
+    assert.equal(rows.at(-1).outcome, 'RUN_FAILED');
+    assert.match(rows.at(-1).error_summary, /original execution problem/);
+    assert.match(rows.at(-1).error_summary, /SSL_ERROR_SYSCALL/);
+    assert.ok(rows.at(-1).error_summary.length <= 500);
+    assert.ok(loggedErrors.at(-1).message.includes(original.message), 'full log retains the entire execution failure');
+    assert.ok(loggedErrors.at(-1).message.includes(discoveryError), 'full log retains the entire discovery failure');
+    assert.equal(f.tasks.size, 0, 'error context must not invent a completed verification or a new failure Task');
+  });
+}
+
+for (const discoveryError of [undefined, 'git ls-remote: SSL_ERROR_SYSCALL']) {
+  test(`execution rejection preserves ${discoveryError === undefined ? 'error identity' : 'the original cause'}`, async () => {
+    const f = fixture();
+    const original = new Error('original execution problem');
+    if (discoveryError !== undefined) {
+      f.options.inspectMain = async () => ({ databasePath: '/gate.sqlite', legacyLockPath: '/legacy', discoveryError });
+    }
+    f.runtime.runAlphaBrowserRevision = async () => {
+      throw original;
+    };
+    const spec = createAlphaBrowserTemplate(f.options).createSpec('alpha-subscription', f.params);
+    await assert.rejects(spec.run.execute('alpha', 'alpha', f.context), (error) =>
+      discoveryError === undefined ? error === original : error.cause === original,
+    );
+  });
+}
+
+test('discovery cancellation keeps the original abort error while enrolled execution rejects', async () => {
+  const f = fixture();
+  const controller = new AbortController();
+  const cancelled = new Error('owner cancelled');
+  f.options.inspectMain = async () => ({
+    databasePath: '/gate.sqlite',
+    legacyLockPath: '/legacy',
+    discoveryError: 'git ls-remote: SSL_ERROR_SYSCALL',
+  });
+  f.runtime.runAlphaBrowserRevision = async () => {
+    controller.abort(cancelled);
+    throw cancelled;
+  };
+  const spec = createAlphaBrowserTemplate(f.options).createSpec('alpha-subscription', f.params);
+  await assert.rejects(
+    spec.run.execute('alpha', 'alpha', { ...f.context, signal: controller.signal }),
+    (error) => error === cancelled,
+  );
+});
+
 test('Alpha browser verification is unavailable without the complete installed home runtime', async (t) => {
   const { mkdtempSync, mkdirSync, rmSync, writeFileSync } = await import('node:fs');
   const { tmpdir } = await import('node:os');
@@ -243,6 +327,7 @@ test('Alpha browser verification is unavailable without the complete installed h
     'alpha-browser-worker.mjs',
     'alpha-browser-checkout.mjs',
     'alpha-browser-failures.mjs',
+    'alpha-browser-failure-signature.mjs',
     'gate-execution-api.mjs',
   ];
   assert.equal(supportsAlphaBrowserVerification(root), false);

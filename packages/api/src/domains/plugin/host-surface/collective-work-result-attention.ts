@@ -55,14 +55,14 @@ export function createCollectiveWorkResultAttentionSource(
   };
 }
 
-/** A genuinely absent plugin contributes no source. Installed older or unhealthy sources fail closed instead of becoming empty. */
+/** A genuinely absent or owner-disabled plugin contributes no source. Installed older or unhealthy sources fail closed instead of becoming empty. */
 export async function readCollectiveWorkResultAttention(
   source: CollectiveWorkResultAttentionSource | undefined,
   ownerUserId: string,
 ): Promise<ProducerAttentionReceiptV1[]> {
   if (!source) return [];
   const response = await source(ownerUserId);
-  if (!response.matched) return [];
+  if (!response.matched || response.disabled) return [];
   if (response.status !== 200) throw new Error('Collective result attention source is unavailable');
   const parsed = sourceSchema.parse(response.body.data);
   if (parsed.state.status !== 'available' || parsed.state.exhaustiveness !== 'complete' || parsed.reasons.length > 0)

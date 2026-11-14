@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 /**
  * F108 Scene 2 v2: WhisperCatSelector + WhisperTargetChips unit tests.
  * Verifies mention-like popup: avatar, unique identity, status, selection, chips.

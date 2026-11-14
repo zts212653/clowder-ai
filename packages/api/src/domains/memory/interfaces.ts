@@ -306,6 +306,8 @@ export interface SearchOptions {
   explain?: boolean;
   /** F200 HW-1: search intent — topk (default) or coverage (exhaustive multi-scope) */
   intent?: 'topk' | 'coverage';
+  /** Request bounded related directions from the common discovery core. */
+  includeExpansion?: boolean;
   /** Internal cooperative cancellation for latency-bounded orchestrators. */
   signal?: AbortSignal;
   /** Internal absolute wall-clock deadline paired with signal. */
@@ -374,6 +376,10 @@ export interface KnowledgeResult {
   meta?: SearchExecutionMeta;
   collectionGroups?: CollectionGroup[];
   deprecationWarnings?: string[];
+  /** Implementation provenance for captures/replay; not a relevance or authority score. */
+  resolverVersion?: string;
+  expansionHints?: import('./knowledge-associations.js').ExpansionHint[];
+  expansionMeta?: import('@cat-cafe/shared').ExpansionFunnelMeta;
 }
 
 export interface ReflectionContext {
@@ -491,12 +497,20 @@ export interface EmbedConfig {
   embedDim: number;
   maxModelMemMb: number;
   embedTimeoutMs: number;
+  generationId?: import('./vector-generation-tables.js').VectorGenerationId;
+  representationFingerprint?: string;
+  embedModelRev?: string;
+  embedUrl?: string;
+  queryInstruction?: string;
 }
 
 export interface EmbedModelInfo {
   modelId: string;
   modelRev: string;
   dim: number;
+  generationId?: import('./vector-generation-tables.js').VectorGenerationId;
+  representationFingerprint?: string;
+  queryInstruction?: string;
 }
 
 export interface IEmbeddingService {
@@ -506,6 +520,8 @@ export interface IEmbeddingService {
   reprobeIfNeeded(signal?: AbortSignal): Promise<void>;
   getModelInfo(): EmbedModelInfo;
   dispose(): void;
+  /** Lifecycle may retain the loaded G0 endpoint for non-index consumers. */
+  pinLoadedEndpoint?(): void;
 }
 
 const VALID_EMBED_MODES = new Set(['off', 'shadow', 'on']);

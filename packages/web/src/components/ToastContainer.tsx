@@ -112,7 +112,8 @@ export function ToastCard({ toast, onDismiss, stackPosition, stackSize }: ToastC
     <div
       className={`
         bg-cafe-surface rounded-lg shadow-lg border border-cafe-subtle border-l-4 ${borderColor}
-        px-3 py-2.5 max-h-[70vh] max-w-xs overflow-y-auto pointer-events-auto
+        px-3 py-2.5 max-h-[70vh] max-w-xs overflow-y-auto
+        ${toast.passThrough ? 'pointer-events-none [&_button]:pointer-events-auto' : 'pointer-events-auto'}
         ${toast.exiting ? 'animate-toast-out' : 'animate-toast-in'}
       `}
       role="alert"

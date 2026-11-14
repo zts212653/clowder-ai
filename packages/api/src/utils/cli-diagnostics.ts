@@ -351,6 +351,22 @@ export function extractUpstreamRequestId(text: string): string | undefined {
   return /\brequest ID\s+([a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})\b/i.exec(text)?.[1];
 }
 
+/** Recent context has no causal classification and must never trigger recovery. */
+export function buildCliDiagnosticContext(args: {
+  rawText: string;
+  debugRef: CliDiagnostics['debugRef'];
+}): CliDiagnostics | undefined {
+  const safeExcerpt = redactNonHomePaths(sanitizeCliStderr(args.rawText)).trim().slice(0, 1000);
+  if (!safeExcerpt) return undefined;
+  return {
+    publicSummary: '近期 CLI 诊断（仅供排查）',
+    publicHint: '这些日志可能来自先前回合，不代表本轮故障原因。',
+    safeExcerpt,
+    excerptSource: 'unknown_raw',
+    debugRef: args.debugRef,
+  };
+}
+
 export function buildCliDiagnostics(args: {
   rawText: string;
   debugRef: CliDiagnostics['debugRef'];

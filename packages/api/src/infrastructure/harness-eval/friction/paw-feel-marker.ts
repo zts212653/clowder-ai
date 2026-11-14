@@ -21,23 +21,80 @@ export interface PawFeelMarker {
  * marker 匹配：`[爪感差: …]`（半/全角冒号）。symptom 段支持一层嵌套方括号
  * （如 `[爪感差: rg 输出 [WARN] 多]`，cloud review P2-2 避免截断 recall），非贪婪正确分离多条。
  */
-const MARKER_RE = /\[爪感差[:：]\s*((?:[^[\]]|\[[^\]]*\])*?)\]/g;
+const MARKER_START_RE = /\[爪感差[:：]/g;
+
+/** Historical content grammar: ordinary characters or a bracket group ending
+ * at its first `]`, followed by the outer `]`. Resolve every continuation once
+ * from right to left, including failed/unclosed starts; never retry a suffix. */
+function markerEnds(text: string): Uint32Array {
+  const ends = new Uint32Array(text.length + 1);
+  let nextClose = 0;
+  for (let index = text.length - 1; index >= 0; index--) {
+    if (text[index] === ']') {
+      ends[index] = index + 1;
+      nextClose = index + 1;
+    } else if (text[index] === '[') {
+      ends[index] = nextClose ? ends[nextClose] : 0;
+    } else {
+      ends[index] = ends[index + 1];
+    }
+  }
+  return ends;
+}
 
 /** 「像工具名」判定：ASCII 标识符（字母开头 + 字母数字下划线连字符点冒号），不含中文/空格。 */
 const TOOL_LIKE_RE = /^[A-Za-z][\w.\-:]*$/;
 
 export function extractPawFeelMarkers(text: string): PawFeelMarker[] {
   const markers: PawFeelMarker[] = [];
-  if (!text) return markers;
-  for (const match of text.matchAll(MARKER_RE)) {
-    const index = match.index ?? 0;
+  if (!text.includes('[爪感差:') && !text.includes('[爪感差：')) return markers;
+  const ends = markerEnds(text);
+  let consumedUntil = 0;
+  for (const match of text.matchAll(MARKER_START_RE)) {
+    const index = match.index;
+    if (index < consumedUntil) continue;
+    const bodyStart = index + match[0].length;
+    const end = ends[bodyStart];
+    if (!end) continue;
+    // A successful global match is consumed even if capture later rejects it.
+    consumedUntil = end;
     if (isEscaped(text, index)) continue;
-    const raw = match[0];
-    const content = match[1].trim();
+    const raw = text.slice(index, end);
+    const content = text.slice(bodyStart, end - 1).trim();
     if (content === '工具+现象') continue;
     markers.push({ ...parseToolSymptom(content), raw, sourceIndex: index });
   }
   return markers;
+}
+
+/** Bulk form of the standalone grammar. Line bounds and fence state are read
+ * once, never by rescanning the prefix separately for each marker. */
+export function extractStandalonePawFeelMarkers(text: string): PawFeelMarker[] {
+  const markers = extractPawFeelMarkers(text);
+  if (!markers.length) return markers;
+  const lines: Array<{ start: number; first: number; last: number; fenced: boolean }> = [];
+  let fence: MarkdownFence | undefined;
+  for (let start = 0; start <= text.length; ) {
+    const next = text.indexOf('\n', start);
+    const line = text.slice(start, next < 0 ? text.length : next);
+    lines.push({
+      start,
+      first: start + line.length - line.trimStart().length,
+      last: start + line.trimEnd().length,
+      fenced: fence !== undefined,
+    });
+    fence = advanceMarkdownFence(line, fence);
+    if (next < 0) break;
+    start = next + 1;
+  }
+  let firstLine = 0;
+  let lastLine = 0;
+  return markers.filter((marker) => {
+    const end = marker.sourceIndex + marker.raw.length;
+    while (firstLine + 1 < lines.length && lines[firstLine + 1].start <= marker.sourceIndex) firstLine++;
+    while (lastLine + 1 < lines.length && lines[lastLine + 1].start < end) lastLine++;
+    return !lines[firstLine].fenced && lines[firstLine].first === marker.sourceIndex && lines[lastLine].last === end;
+  });
 }
 
 /**
@@ -52,21 +109,19 @@ export function isStandalonePawFeelMarker(text: string, marker: PawFeelMarker): 
   return text.slice(lineStart, lineEnd).trim() === marker.raw && !isInsideMarkdownFence(text, lineStart);
 }
 
+type MarkdownFence = { character: '`' | '~'; length: number };
+
+function advanceMarkdownFence(line: string, fence: MarkdownFence | undefined): MarkdownFence | undefined {
+  const match = line.match(/^\s*(`{3,}|~{3,})(.*)$/);
+  if (!match) return fence;
+  const character = match[1][0] as '`' | '~';
+  if (!fence) return { character, length: match[1].length };
+  return character === fence.character && match[1].length >= fence.length && match[2].trim() === '' ? undefined : fence;
+}
+
 function isInsideMarkdownFence(text: string, lineStart: number): boolean {
-  let fence: { character: '`' | '~'; length: number } | undefined;
-  for (const line of text.slice(0, lineStart).split('\n')) {
-    const match = line.match(/^\s*(`{3,}|~{3,})(.*)$/);
-    if (!match) continue;
-    const run = match[1];
-    const character = run[0] as '`' | '~';
-    if (!fence) {
-      fence = { character, length: run.length };
-      continue;
-    }
-    if (character === fence.character && run.length >= fence.length && match[2].trim() === '') {
-      fence = undefined;
-    }
-  }
+  let fence: MarkdownFence | undefined;
+  for (const line of text.slice(0, lineStart).split('\n')) fence = advanceMarkdownFence(line, fence);
   return fence !== undefined;
 }
 

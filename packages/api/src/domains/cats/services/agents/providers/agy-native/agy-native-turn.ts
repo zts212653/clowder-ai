@@ -4,7 +4,7 @@ import type { AgentMessage, MessageMetadata } from '../../../types.js';
 import type { AgyStreamJsonTurn } from '../agy-stream-json-parser.js';
 import { asRecord } from './agy-native-stream-validation.js';
 import { agyNativeToolIdentity, agyNativeToolResultContent } from './agy-native-tool-result.js';
-import { AGY_NATIVE_MCP_TOOLS, AGY_NATIVE_TOOLS } from './agy-native-tools.js';
+import { AGY_NATIVE_MCP_TOOLS, AGY_NATIVE_TOOLS, canonicalAgyNativeFileToolName } from './agy-native-tools.js';
 import type { AgyNativeObservedTurn } from './run/agy-native-stream.js';
 
 export { type AgyNativeObservedTurn, observeAgyNativeTurn, readAgyNativeTurn } from './run/agy-native-stream.js';
@@ -48,13 +48,16 @@ function projectToolMessages(catId: CatId, metadata: MessageMetadata, turn: AgyS
 
 /** A missing file is a read observation, not evidence that another tool repaired a failure. */
 function isMissingFileObservation(call: AgyStreamJsonTurn['toolCalls'][number]): boolean {
-  if (call.toolName !== 'view_file' || call.errorMessage === null || call.output) return false;
-  const path = call.parameters.AbsolutePath ?? call.parameters.TargetFile;
+  if (canonicalAgyNativeFileToolName(call.toolName) !== 'read_file' || call.errorMessage === null || call.output)
+    return false;
+  const path =
+    call.toolName === 'read_file' ? call.parameters.Path : (call.parameters.AbsolutePath ?? call.parameters.TargetFile);
   if (typeof path !== 'string' || !path.trim()) return false;
-  // Keep the legacy file-not-found result and the observed 1.2.14 stat failure exact.
+  // Match the observed 1.5.2 message and legacy file-not-found results exactly.
   // This diagnostic label never changes tool or carrier success.
   return (
     call.errorMessage === 'File not found' ||
+    (call.toolName === 'read_file' && call.errorMessage === 'file does not exist') ||
     call.errorMessage === `${MISSING_FILE_ERROR_PREFIX}${path}: no such file or directory`
   );
 }
@@ -169,7 +172,7 @@ export function projectAgyNativeTurn(
       },
     });
   }
-  const tools = new Set(declaredNativeTools);
+  const tools = new Set(declaredNativeTools.map(canonicalAgyNativeFileToolName));
   if (turn.unconfirmedStepIndices?.length) {
     messages.push({
       type: 'system_info',
@@ -187,7 +190,7 @@ export function projectAgyNativeTurn(
       },
     });
   }
-  const unexpectedTool = turn.toolCalls.find((call) => !tools.has(call.toolName));
+  const unexpectedTool = turn.toolCalls.find((call) => !tools.has(canonicalAgyNativeFileToolName(call.toolName)));
   if (turn.finalText) {
     messages.push({ type: 'text', catId, content: turn.finalText, metadata, timestamp: Date.now() });
   }

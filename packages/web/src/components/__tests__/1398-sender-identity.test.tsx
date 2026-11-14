@@ -16,6 +16,12 @@ import { ReplyPill } from '../ReplyPill';
 import { ReplyPreviewBar } from '../ReplyPreviewBar';
 
 Object.assign(globalThis, { React });
+// These contracts describe the classic full-size avatars and server-rendered navigator.
+// V2 has separate compact-human and client-mounted piano contracts.
+vi.mock('../shell/shell-presentation', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../shell/shell-presentation')>()),
+  useShellPresentation: () => 'classic',
+}));
 vi.mock('@/hooks/useCoCreatorConfig', () => ({
   useCoCreatorConfig: () => ({
     name: 'lang',
@@ -44,7 +50,7 @@ const identity = {
 };
 afterEach(() => useChatStore.setState({ currentThreadId: '', messages: [], replyToMessage: null }));
 
-describe('1398 canonical sender identity across Queue and reply surfaces', () => {
+describe('1398 classic canonical sender identity across Queue and reply surfaces', () => {
   it.each([
     { from: { kind: 'user', userId: 'owner' }, type: 'user', image: '/human.png', color: '#123456' },
     { from: { kind: 'agent', catId: 'cat-1' }, type: 'assistant', image: '/member.png', color: '#123789' },

@@ -85,8 +85,13 @@ export function isLifecycleInputReadReceipt(value: unknown): value is LifecycleI
 
 export type LifecycleDispatchRef = {
   readonly inputRead?: LifecycleInputReadReceipt;
-  /** pending = unknown write; written = native stdin ACK awaiting its own turn result; accepted = custody can retire. */
+  /** pending = unknown write; written = native stdin ACK awaiting its own turn result; accepted = exact delivery or required own-turn completion is confirmed. */
   readonly appendAcceptance?: 'pending' | 'written' | 'accepted';
+  /** Facts about this exact Append handoff. Queue ownership ends before the native call. */
+  readonly appendDelivery?: {
+    readonly dispatchStarted: boolean;
+    readonly requiresCompletion?: boolean;
+  };
 } & (
   | {
       readonly targetId: string;
@@ -124,6 +129,35 @@ export interface LifecycleAppendFailure {
   readonly checkedAt?: number;
 }
 
+/** Project this exact Append's outcome; a parent response terminal cannot prove receipt or own completion. */
+export function getLifecycleAppendOutcome(
+  ref: LifecycleDispatchRef | undefined,
+  metadata: LifecycleMessageMetadata | undefined,
+): 'not_accepted' | 'incomplete' | 'unknown' | 'awaiting_completion' | undefined {
+  if (!ref || ref.appendAcceptance === 'accepted') return undefined;
+  const failure = metadata?.appendFailures?.find(
+    (item) => item.targetId === ref.targetId && item.responseMessageId === ref.statusMessageId,
+  );
+  if (failure?.acceptance === 'incomplete') return 'incomplete';
+  const received = ref.inputRead?.status === 'read' || ref.appendAcceptance === 'written';
+  if (failure?.acceptance === 'not_accepted' && !received) return 'not_accepted';
+  if (ref.appendDelivery?.requiresCompletion && received) return 'awaiting_completion';
+  if (!received && (ref.appendAcceptance === 'pending' || failure?.acceptance === 'unknown')) return 'unknown';
+  return undefined;
+}
+
+/** Source eligibility for an explicit owner repeat; authorization still belongs to the caller. */
+export function isAppendRepeatSource(
+  from: MessageFrom | undefined,
+  ref: LifecycleDispatchRef | undefined,
+  failure: LifecycleAppendFailure | undefined,
+): boolean {
+  return (
+    from?.kind === 'user' ||
+    (from?.kind === 'agent' && ref?.appendDelivery?.requiresCompletion === true && failure?.acceptance === 'incomplete')
+  );
+}
+
 export function isLifecycleAppendFailure(value: unknown): value is LifecycleAppendFailure {
   if (!value || typeof value !== 'object') return false;
   const candidate = value as Record<string, unknown>;
@@ -148,6 +182,8 @@ export function isLifecycleAppendFailure(value: unknown): value is LifecycleAppe
 export type LifecycleDeliveryFailureReason =
   | 'no_available_target'
   | 'invalid_explicit_target'
+  | 'execution_binding_conflict'
+  | 'execution_binding_unavailable'
   | 'control_carrier_missing'
   | 'control_carrier_replaced'
   | 'control_plane_unavailable'
@@ -278,6 +314,12 @@ function isDispatchRef(value: unknown): value is LifecycleDispatchRef {
     (candidate.dispatchedAt === undefined || isFiniteTimestamp(candidate.dispatchedAt)) &&
     (candidate.appendAcceptance === undefined ||
       isOneOf(candidate.appendAcceptance, ['pending', 'written', 'accepted'])) &&
+    (candidate.appendDelivery === undefined ||
+      (typeof candidate.appendDelivery === 'object' &&
+        candidate.appendDelivery !== null &&
+        typeof (candidate.appendDelivery as Record<string, unknown>).dispatchStarted === 'boolean' &&
+        ((candidate.appendDelivery as Record<string, unknown>).requiresCompletion === undefined ||
+          typeof (candidate.appendDelivery as Record<string, unknown>).requiresCompletion === 'boolean'))) &&
     (candidate.inputRead === undefined ||
       (isLifecycleInputReadReceipt(candidate.inputRead) &&
         (candidate.inputRead.status !== 'read' ||
@@ -315,6 +357,8 @@ export function isLifecycleStoredMessageMetadata(value: unknown): value is Lifec
       isOneOf(candidate.reason, [
         'no_available_target',
         'invalid_explicit_target',
+        'execution_binding_conflict',
+        'execution_binding_unavailable',
         'control_carrier_missing',
         'control_carrier_replaced',
         'control_plane_unavailable',

@@ -5,6 +5,8 @@ export const RECALL_RESULT_STATUSES = [
   'no_results',
   'overflow',
   'error',
+  'timeout',
+  'cancelled',
   'parser_miss',
   'result_unmerged',
   'legacy_unknown',
@@ -29,12 +31,14 @@ export interface RecallPreviewItem {
   anchor?: string;
   snippet?: string;
   matchRank?: RecallMatchRank;
+  rank?: number;
+  relevance?: { state: 'exact_anchor' | 'exact_title' | 'phrase' | 'unknown' };
   matchType?: RecallMatchType;
   authority?: string;
   updatedAt?: string;
 }
 
-export const EXPANSION_HEALTH_SOURCE_REVISION = 'f256-health-v2' as const;
+export const EXPANSION_HEALTH_SOURCE_REVISION = 'f332-discovery-v1' as const;
 export const EXPANSION_HEALTH_GATE_REASONS = [
   'eligible',
   'opt_out',
@@ -105,8 +109,17 @@ export function isRecallMatchType(value: unknown): value is RecallMatchType {
   return typeof value === 'string' && MATCH_TYPE_SET.has(value);
 }
 
-function readPersistedPreviewAxes(item: Record<string, unknown>): Pick<RecallPreviewItem, 'matchRank' | 'matchType'> {
-  const axes: Pick<RecallPreviewItem, 'matchRank' | 'matchType'> = {};
+function readPersistedPreviewAxes(
+  item: Record<string, unknown>,
+): Pick<RecallPreviewItem, 'matchRank' | 'matchType' | 'rank' | 'relevance'> {
+  const axes: Pick<RecallPreviewItem, 'matchRank' | 'matchType' | 'rank' | 'relevance'> = {};
+  if (typeof item.rank === 'number' && Number.isInteger(item.rank) && item.rank > 0) axes.rank = item.rank;
+  const state =
+    item.relevance && typeof item.relevance === 'object'
+      ? (item.relevance as Record<string, unknown>).state
+      : undefined;
+  if (state === 'exact_anchor' || state === 'exact_title' || state === 'phrase' || state === 'unknown')
+    axes.relevance = { state };
   if (isRecallMatchRank(item.matchRank)) axes.matchRank = item.matchRank;
   if (isRecallMatchType(item.matchType)) axes.matchType = item.matchType;
 
@@ -230,6 +243,8 @@ function isValidRecallMeta(meta: RecallResultMeta): boolean {
     case 'overflow':
       return Boolean(meta.artifactRef || (meta.previewItems && meta.previewItems.length > 0));
     case 'error':
+    case 'timeout':
+    case 'cancelled':
     case 'parser_miss':
     case 'result_unmerged':
     case 'legacy_unknown':

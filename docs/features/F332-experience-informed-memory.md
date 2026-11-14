@@ -3,9 +3,22 @@ feature_ids: [F332]
 related_features: [F152, F200, F221, F227, F231, F243, F256, F260, F263, F271, F276, F278, F281, F282, F287, F296, F312, F316, F321, F324, F335]
 topics: [memory, experience, generalization, continuity]
 doc_kind: spec
+mcp_admission_status: accepted
+mcp_admission_ref: "file:docs/features/F332-experience-informed-memory.md"
+mcp_admission_claims:
+  - ref: "file:docs/features/F332-experience-informed-memory.md"
+    toolName: cat_cafe_revise_person_memory
+    resourceFamily: person-memory
+    boundaryKind: side-effect-boundary
+    decision: accepted
+  - ref: "file:docs/features/F332-experience-informed-memory.md"
+    toolName: cat_cafe_library_verify
+    resourceFamily: library
+    boundaryKind: side-effect-boundary
+    decision: accepted
 created: 2026-10-23
-updated: 2026-11-03
-tips_exempt: "Renewed 2026-10-25 for KD-4 through KD-8, OQ-3, delivery roadmap v1 and status records: this documentation records capsule approval before opening delivery, a pluggable per-user capsule that every owner can see and edit through one shared entry, stable-persona relationships versus model-specific capabilities, owner-controlled per-thread watcher design and trials, and delivery sequencing. These decisions extend the architecture discussion without delivering or enabling a new user entry, memory injection or watcher configuration; the existing F321/Luna obligations remain."
+updated: 2026-11-11
+tips_exempt: "Renewed 2026-11-10: existing owner-memory wrappers were retired after the owner journeys were verified. The existing exact-proposal tip now points to Handled and its guide; retained memory-page, capsule and watcher controls keep their current tips. This is delivery truth, not a new capability entry."
 description: 让共同经历在未见情境中帮助猫自主联想、核证与修正判断，并让人看见和纠正记忆。
 description_source: human
 description_author: codex-astra
@@ -19,6 +32,24 @@ description_updated_at: 2026-10-24T00:01:00Z
 Architecture cell: `memory`
 Map delta: none
 Map delta why: 聚合用户结果与既有责任，不在本轮另建 store、planner、后台服务或统一审批权威；实现选型在对应 Phase 明确。
+
+## Current tool contract
+
+`cat_cafe_remember`每次提交1–4项，逐条使用现有提交入口并返回原提案、直接结果或拒绝原因及groupId。现有Chat卡按组重读原提案、逐行沿原决议处理；修改建议进入原对话草稿。原八个写工具保留到W4与完整替代核收均通过。
+
+Person-memory corrections use `cat_cafe_revise_person_memory` with one of
+`correct_claim`, `retire_claim` or `amend_event`. Each action retains its original
+owner-private authorization, source qualification, version checks and request-key
+semantics. Retiring a claim preserves its history; it does not permanently erase it.
+The former three separate correction tool names leave the exposed registry together.
+
+`cat_cafe_library_verify` keeps its existing four actions and HTTP endpoints.
+It changes document review state and audit records, so its governance and MCP
+annotations identify a non-destructive write. It does not archive a collection,
+rebuild an index or change access to stored content.
+
+These are accepted interface boundaries. They do not declare the broader memory
+project complete, enable a watcher, or certify a running deployment.
 
 ## Why
 
@@ -38,7 +69,6 @@ You 要的，是共同经历能帮助猫理解新的处境、接住关系、减�
 开场/恢复能按需回看；人物、品味与授权仍沿原权威。2a/2b已完成的Task1569不重开。
 
 **11-03 00:03 UTC施工验收完成**：PR #6486已合入main `da4ada6baf2d7d1a9a703f45ddec0645f40ae000`，非作者审查、定向验证和标准Alpha跨线更正/出处/历史界面通过。F333 #6491修复由标准Alpha正常加载后，Codex新会话与同一会话恢复均经原生MCP读到六条原消息和设置页revision2，并在回答中使用、区分适用性及修正过度推断。原失败保留；实际成员为原样本codex6-sol、模型gpt-6.1-sol，选定codex61-sol的Alpha账号不一致单列。
-原Task `private-source-id`由原指挥按完整回报收口，施工线程不越权代关；施工现场`[thread-id]`与原生1455承接不变。
 原Alpha目标11-05周四18:00 America/Los_Angeles保留；正式环境未因本轮重启或宣称加载，整项F332/F335不关闭。
 F335的跨线使用依赖2c实物验收，不等整个F332关闭；两周粒度观察从能力可用和实际试用起算。
 当天检索问题沿原Task528/原F322 Task168责任；本轮窄查询已找到当日原消息，但coverage/freshness仍unknown，

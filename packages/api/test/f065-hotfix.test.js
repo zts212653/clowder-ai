@@ -1,7 +1,6 @@
 /**
  * F065 Hotfix tests:
  * P1: Handoff digest injection protection (sanitize + data-marker)
- * P2-2: Input token cap for handoff generator
  */
 
 import assert from 'node:assert/strict';
@@ -160,41 +159,6 @@ describe('P1: Handoff digest sanitize', () => {
     assert.ok(
       result.text.includes('hotfix-sentinel.ts'),
       'Should fall back to extractive digest content (hotfix-sentinel.ts from mock filesTouched)',
-    );
-  });
-});
-
-describe('P2-2: Input token cap', () => {
-  test('buildPromptContent truncates when input exceeds cap', async () => {
-    const { buildPromptContent } = await import('../dist/domains/cats/services/session/HandoffDigestGenerator.js');
-    // Create large inputs
-    const largeSummaries = Array.from({ length: 50 }, (_, i) => ({
-      invocationId: `inv-${i}`,
-      eventCount: 100,
-      toolCalls: ['read', 'write', 'bash'],
-      keyMessages: [`Did something in inv-${i}`],
-      errors: 0,
-      durationMs: 5000,
-    }));
-    const largeDigest = Object.fromEntries(
-      Array.from({ length: 100 }, (_, i) => [`key-${i}`, `value-${'x'.repeat(200)}`]),
-    );
-    const messages = Array.from({ length: 8 }, (_, i) => ({
-      role: 'user',
-      content: 'A'.repeat(500),
-      timestamp: Date.now() + i,
-    }));
-
-    const content = buildPromptContent(largeSummaries, largeDigest, messages);
-    // Should be under a reasonable character limit (say 16k chars ~ 4k tokens)
-    assert.ok(content.length < 20000, `Content should be capped but was ${content.length} chars`);
-  });
-
-  test('generator system prompt includes no-directives constraint', async () => {
-    const { SYSTEM_PROMPT } = await import('../dist/domains/cats/services/session/HandoffDigestGenerator.js');
-    assert.ok(
-      SYSTEM_PROMPT.toLowerCase().includes('do not include directives'),
-      'System prompt should forbid directives',
     );
   });
 });

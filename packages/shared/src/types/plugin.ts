@@ -193,6 +193,7 @@ export type PluginManagerCapabilityKind =
   | 'content-editor-provider'
   | 'media-source'
   | 'cloud-conversation-host'
+  | 'external-request'
   | 'desktop-window';
 
 export interface PluginManagerCapability {
@@ -344,6 +345,10 @@ export interface PluginOperationRows {
   rows: PluginOperationRow[];
   /** Plain text shown when there are no rows. */
   empty?: string;
+  /** Absolute Unix epoch milliseconds after which this exact response must not be acted on. */
+  validUntil?: number;
+  /** Absolute Unix epoch milliseconds bounding read-only observation of an external transition. */
+  pollUntil?: number;
 }
 
 export interface PluginOperationRow {
@@ -366,6 +371,8 @@ export interface PluginOperationRowAction {
 
 /** Compact list/search projection. All lifecycle axes remain independent. */
 export interface PluginManagerListItem {
+  /** Editable Host instance presentation; never package configuration. */
+  address?: { alias: string; revision: number; icon?: string };
   pluginId: string;
   pluginInstanceId: string | null;
   displayName: string;
@@ -388,6 +395,20 @@ export interface PluginManagerListItem {
   capabilitySummary: Array<Pick<PluginManagerCapability, 'id' | 'kind' | 'name' | 'active'>>;
   actions: PluginManagerActions;
   diagnostic?: PluginManagerDiagnostic;
+}
+
+/** A mention recipient that has no member model/client configuration. */
+export interface PluginMentionTarget {
+  installed?: boolean;
+  enabled?: boolean;
+  addressRevision: number;
+  kind: 'plugin';
+  id: string;
+  pluginId: string;
+  alias: string;
+  icon?: PluginIconSpec;
+  displayName: string;
+  lifecycleRevision: number;
 }
 
 export interface PluginManagerDetail extends PluginManagerListItem {

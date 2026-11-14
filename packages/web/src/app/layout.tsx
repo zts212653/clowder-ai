@@ -19,6 +19,7 @@ import { META_THEME_COLOR } from '@/lib/color-defaults';
 import { buildPwaRetirementScript } from '@/lib/pwa-retirement-script';
 import { runtimeApiOriginFromPort } from '@/lib/runtime-api-origin';
 import './globals.css';
+import './watcher.css';
 
 // The document must carry this process's API port, never a statically baked build port.
 export const dynamic = 'force-dynamic';

@@ -158,9 +158,15 @@ export function canLaunchLocalFile(name: string): boolean {
   return READABLE_TEXT_FILE_EXTENSIONS.has(extension);
 }
 
+export const MAX_CONTENT_FILE_BASENAME_LENGTH = 255;
+
 /** A URL/route parameter names one upload, including Unicode; it is never an OS locator. */
 export function isContentFileBasename(name: string): boolean {
   return (
-    name.length > 0 && name.length <= 255 && name !== '.' && name !== '..' && !/[/\\\u0000-\u001f\u007f]/u.test(name)
+    name.length > 0 &&
+    name.length <= MAX_CONTENT_FILE_BASENAME_LENGTH &&
+    name !== '.' &&
+    name !== '..' &&
+    !/[/\\\u0000-\u001f\u007f]/u.test(name)
   );
 }

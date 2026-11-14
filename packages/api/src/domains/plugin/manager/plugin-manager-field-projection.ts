@@ -105,6 +105,7 @@ export function operationFieldProjection(
   state: OperationState | undefined,
   fields: readonly ContractConfigurationField[],
   stored: Readonly<Record<string, string>>,
+  configurationVariants?: PluginManagerConfigField['configurationVariants'],
 ): PluginManagerConfigField {
   const byKey = new Map(fields.map((candidate) => [candidate.key, candidate]));
   return {
@@ -112,6 +113,7 @@ export function operationFieldProjection(
     label: field.label,
     kind: 'operation',
     required: field.required,
+    ...(configurationVariants === undefined ? {} : { configurationVariants }),
     ...(field.description === undefined ? {} : { description: field.description }),
     currentValue: null,
     sensitive: false,

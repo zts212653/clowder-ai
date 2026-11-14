@@ -2,35 +2,14 @@ import type { CollectionSensitivity } from './collection-types.js';
 import { GraphResolver, type GraphResult, type GraphStore } from './GraphResolver.js';
 import { computeEdgeWeight } from './graph-edge-weight.js';
 import type { EvidenceItem, IEvidenceStore } from './interfaces.js';
-import {
-  collectGenericRecallEligible,
-  isGenericRecallEligible,
-  isGenericRecallEligibleAnchor,
-} from './recall-delivery-eligibility.js';
+import { KnowledgeResolver } from './KnowledgeResolver.js';
+import { documentDiscoverySource } from './knowledge-document-source.js';
+import { classifyIndexedMatch, TEXT_MATCH_SCORES } from './knowledge-match-evidence.js';
+import { isGenericRecallEligible, isGenericRecallEligibleAnchor } from './recall-delivery-eligibility.js';
 
 const CANDIDATE_LIMIT = 8;
 const NO_MATCH_EXAMPLES = ['F186', 'f186', 'harness', 'doc:plans/example.md'];
-const SEARCH_STOPWORDS = new Set([
-  'anchor',
-  'anchors',
-  'and',
-  'doc',
-  'docs',
-  'document',
-  'documents',
-  'feature',
-  'features',
-  'graph',
-  'graphs',
-  'node',
-  'nodes',
-  'query',
-  'search',
-  'such',
-  'the',
-]);
-
-type MatchReason = 'anchor' | 'title' | 'source' | 'summary' | 'keyword' | 'content';
+type MatchReason = ReturnType<typeof classifyIndexedMatch>['matchReason'];
 
 export interface GraphQueryCandidate {
   anchor: string;
@@ -125,93 +104,6 @@ function canCountRelationEdge(catalog: CatalogLike, rel: RelatedEdge, callerColl
   if (!edgeSensitivity || !isRestrictedSensitivity(edgeSensitivity)) return true;
   if (!rel.fromCollectionId || !rel.toCollectionId) return false;
   return callerCollections.has(rel.fromCollectionId) && callerCollections.has(rel.toCollectionId);
-}
-
-function includesIgnoreCase(value: string | undefined, query: string): boolean {
-  return value?.toLowerCase().includes(query) ?? false;
-}
-
-function queryTokens(query: string): string[] {
-  const tokens = new Set<string>();
-  for (const token of query.toLowerCase().match(/[a-z0-9]+/g) ?? []) {
-    if (token.length < 3 || /^\d+$/.test(token) || SEARCH_STOPWORDS.has(token)) continue;
-    tokens.add(token);
-  }
-  for (const run of query.match(/\p{Script=Han}+/gu) ?? []) {
-    if (run.length < 2) continue;
-    tokens.add(run);
-    for (let index = 0; index < run.length - 1; index += 1) tokens.add(run.slice(index, index + 2));
-    for (let index = 0; index < run.length - 2; index += 1) tokens.add(run.slice(index, index + 3));
-  }
-  return [...tokens];
-}
-
-function candidateSearchText(item: EvidenceItem): string {
-  return [
-    item.anchor,
-    item.title,
-    item.sourcePath,
-    item.summary,
-    ...(item.keywords ?? []),
-    ...(item.passages ?? []).flatMap((passage) => [
-      passage.content,
-      ...(passage.context ?? []).map((contextPassage) => contextPassage.content),
-    ]),
-  ]
-    .filter((value): value is string => Boolean(value))
-    .join('\n')
-    .toLowerCase();
-}
-
-function hasExplainableFieldMatch(item: EvidenceItem, query: string): boolean {
-  const q = query.toLowerCase();
-  if (
-    includesIgnoreCase(item.anchor, q) ||
-    includesIgnoreCase(item.title, q) ||
-    includesIgnoreCase(item.sourcePath, q) ||
-    includesIgnoreCase(item.summary, q) ||
-    item.passages?.some(
-      (passage) =>
-        includesIgnoreCase(passage.content, q) ||
-        passage.context?.some((contextPassage) => includesIgnoreCase(contextPassage.content, q)),
-    ) ||
-    item.keywords?.some((keyword) => includesIgnoreCase(keyword, q))
-  )
-    return true;
-  const searchText = candidateSearchText(item);
-  return queryTokens(query).some((token) => searchText.includes(token));
-}
-
-const TEXT_MATCH_SCORES: Record<MatchReason, number> = {
-  anchor: 10,
-  title: 6,
-  source: 3,
-  summary: 3,
-  keyword: 3,
-  content: 1,
-};
-
-function truncateSnippet(value: string | undefined): string | undefined {
-  if (!value) return undefined;
-  const text = value.replace(/\s+/g, ' ').trim();
-  if (text.length <= 160) return text;
-  return `${text.slice(0, 157)}...`;
-}
-
-function classifyMatch(item: EvidenceItem, query: string): { matchReason: MatchReason; snippet?: string } {
-  const q = query.toLowerCase();
-  if (includesIgnoreCase(item.anchor, q)) return { matchReason: 'anchor', snippet: item.anchor };
-  if (item.anchor) {
-    const anchorLower = item.anchor.toLowerCase();
-    const queryWords = q.match(/[a-z0-9]+/g) ?? [];
-    if (queryWords.some((w) => w === anchorLower)) return { matchReason: 'anchor', snippet: item.anchor };
-  }
-  if (includesIgnoreCase(item.title, q)) return { matchReason: 'title', snippet: item.title };
-  if (includesIgnoreCase(item.sourcePath, q)) return { matchReason: 'source', snippet: item.sourcePath };
-  if (includesIgnoreCase(item.summary, q)) return { matchReason: 'summary', snippet: truncateSnippet(item.summary) };
-  const keyword = item.keywords?.find((k) => includesIgnoreCase(k, q));
-  if (keyword) return { matchReason: 'keyword', snippet: keyword };
-  return { matchReason: 'content', snippet: truncateSnippet(item.summary) ?? item.title };
 }
 
 export class GraphQueryResolver {
@@ -320,23 +212,28 @@ export class GraphQueryResolver {
   }
 
   private async searchCandidates(query: string, callerCollections: Set<string>): Promise<GraphQueryCandidate[]> {
-    const pool: GraphQueryCandidate[] = [];
-    const seen = new Set<string>();
-    for (const [collectionId, store] of this.stores) {
-      const manifest = this.catalog.get(collectionId);
-      if (!canShowCandidate(manifest, collectionId, callerCollections)) continue;
-      const results = await collectGenericRecallEligible(
-        (candidateLimit) => store.search(query, { mode: 'hybrid', scope: 'all', limit: candidateLimit }),
-        CANDIDATE_LIMIT * 2,
-      );
-      for (const item of results) {
-        if (!hasExplainableFieldMatch(item, query)) continue;
-        const key = `${collectionId}:${item.anchor}`;
-        if (seen.has(key)) continue;
-        seen.add(key);
-        pool.push(await this.toCandidate(query, collectionId, item, store, callerCollections));
-      }
-    }
+    const discovery = await KnowledgeResolver.discover(query, {
+      limit: CANDIDATE_LIMIT * 2,
+      sources: [...this.stores]
+        .filter(([collectionId]) => canShowCandidate(this.catalog.get(collectionId), collectionId, callerCollections))
+        .map(([collectionId, store]) => {
+          const source = documentDiscoverySource({
+            id: collectionId,
+            store,
+            options: { mode: 'hybrid', scope: 'all' },
+            generic: true,
+            requireMatchEvidence: query,
+          });
+          return {
+            id: source.id,
+            read: source.read,
+            eligible: source.eligible,
+            project: (item: EvidenceItem) => this.toCandidate(query, collectionId, item, store, callerCollections),
+            key: (item: GraphQueryCandidate) => `${item.collectionId}:${item.anchor}`,
+          };
+        }),
+    });
+    const pool = discovery.sources.flatMap((source) => source.items);
     const primaryCollectionId = this.inferPrimaryCollection(query);
     pool.sort((a, b) => {
       const textDiff = (b.textMatchScore ?? 0) - (a.textMatchScore ?? 0);
@@ -365,7 +262,7 @@ export class GraphQueryResolver {
     store: QueryStore,
     callerCollections: Set<string>,
   ): Promise<GraphQueryCandidate> {
-    const { matchReason, snippet } = classifyMatch(item, query);
+    const { matchReason, snippet } = classifyIndexedMatch(item, query);
     const textMatchScore = TEXT_MATCH_SCORES[matchReason];
     let edgeCount: number | undefined;
     let weightedEdgeScore: number | undefined;

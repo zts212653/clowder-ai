@@ -11,6 +11,7 @@ import {
 } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
+import { parse } from 'yaml';
 import { publishTasteProjection } from '../dist/domains/taste/services/GitTastePublisher.js';
 import { createVignetteWriter } from '../dist/domains/taste/services/writeVignette.js';
 import { git, makeProposal, remoteFile, remoteHead } from './taste-publication-fixtures.js';
@@ -23,6 +24,7 @@ import {
   createRealHookLifecycle,
   forgetCommand,
   ownerUserId,
+  revision,
   sourcePath,
   tombstonePath,
 } from './taste-real-hook-fixture.js';
@@ -152,6 +154,72 @@ test('verified tooling still runs the actual Biome guard and rejects an invalid 
     assertFailedForget(fixture, lifecycle, before, sourceBefore);
   } finally {
     lifecycle.db.close();
+    rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test('approve, correct and retire publish whitespace-heavy Taste text through the real whitespace guard', async () => {
+  const fixture = createRealHookFixture();
+  try {
+    // Like the real index, new entries land mid-file; at the very end the whole-file trim hid the bug.
+    writeFileSync(
+      join(fixture.primary, 'docs/taste/index.md'),
+      '# Taste Index\n\n### 创作手法\n\n- [**isolated**](vignettes/isolated-hook-forget.md)\n  - 场景：Real hook forget regression\n\n## 如何新增\n\nOne line per scene preview.\n',
+    );
+    git(fixture.primary, ['commit', '-m', 'seed an index with a following section', '--', 'docs/taste/index.md']);
+    git(fixture.primary, ['push', 'origin', 'main']);
+    git(fixture.runtime, ['merge', '--ff-only', 'main']);
+    const writer = createVignetteWriter(fixture.runtime);
+    // The index keeps an 80-character scene preview. This cut lands right after a space, as a real approval did.
+    const preview = '用截图指向作品卡'.repeat(10).slice(0, 79);
+    const cutAtSpace = await writer(
+      makeProposal({ id: 'proposal_hooks_ws_abc458', tags: ['ordinary '], scene: `${preview} 后面的内容不进索引` }),
+    );
+    const multiline = await writer(
+      makeProposal({ id: 'proposal_hooks_ws_abc459', tags: [' two  words '], scene: '\n第一行  \n\n  第二行  ' }),
+    );
+    const lifecycle = createRealHookLifecycle(fixture);
+    const corrected = await lifecycle.writer.apply({
+      ownerUserId,
+      sourcePath,
+      command: {
+        action: 'correct',
+        requestId: 'f221-correct:018f2d5e-9f45-7d8c-a829-88f6440a4f15',
+        expectedRevision: revision,
+        patch: { scene: 'first  \n\nsecond  ', quotes: ['quoted  \nline'], tags: ['spaced ', 'tags'] },
+      },
+      recordTargetRevision: () => {},
+    });
+    await lifecycle.writer.apply({
+      ownerUserId,
+      sourcePath,
+      command: {
+        action: 'retire',
+        requestId: 'f221-retire:018f2d5e-9f45-7d8c-a829-88f6440a4f15',
+        expectedRevision: corrected.revision,
+      },
+      recordTargetRevision: () => {},
+    });
+
+    for (const path of [cutAtSpace.path, multiline.path, sourcePath, 'docs/taste/index.md']) {
+      const lines = remoteFile(fixture, path).split('\n');
+      assert.deepEqual(
+        lines.filter((line) => /\s$/.test(line)),
+        [],
+        path,
+      );
+    }
+    const retired = parse(/^---\n([\s\S]*?)\n---/.exec(remoteFile(fixture, sourcePath))[1]);
+    assert.equal(retired.status, 'retired');
+    assert.deepEqual(
+      [retired.scene, retired.quotes, retired.tags],
+      ['first\n\nsecond', ['quoted\nline'], ['spaced', 'tags']],
+    );
+    const index = remoteFile(fixture, 'docs/taste/index.md').split('\n');
+    assert.ok(index.includes(`  - 场景：${preview}`));
+    assert.ok(index.includes('  - 场景：第一行 第二行'));
+    assert.ok(index.includes('  - 搜索词：two words'));
+  } finally {
     rmSync(fixture.root, { recursive: true, force: true });
   }
 });

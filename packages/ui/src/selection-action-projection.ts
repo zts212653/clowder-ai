@@ -4,6 +4,7 @@ import {
   type RectLike,
 } from './selection-action-position';
 import { projectDomSelectionOffsets, type SelectionOffsetSource } from './text-selection-offsets';
+import { clippedRangeWithin, readableSelectionText } from './text-selection-readable';
 
 export interface TextSelectionAction {
   text: string;
@@ -42,25 +43,6 @@ function selectionAnchorRects(selection: Selection): RectLike[] {
   return rect.width || rect.height ? [rectLike(rect)] : [];
 }
 
-function clippedRangeWithin(range: Range, candidate: Element): Range | null {
-  try {
-    if (typeof range.intersectsNode !== 'function' || !range.intersectsNode(candidate)) return null;
-
-    const candidateRange = document.createRange();
-    candidateRange.selectNodeContents(candidate);
-    const overlap = range.cloneRange();
-    if (overlap.compareBoundaryPoints(Range.START_TO_START, candidateRange) < 0) {
-      overlap.setStart(candidateRange.startContainer, candidateRange.startOffset);
-    }
-    if (overlap.compareBoundaryPoints(Range.END_TO_END, candidateRange) > 0) {
-      overlap.setEnd(candidateRange.endContainer, candidateRange.endOffset);
-    }
-    return overlap.collapsed ? null : overlap;
-  } catch {
-    return null;
-  }
-}
-
 function rangeSelectsTextWithin(range: Range, candidate: Element): boolean {
   return Boolean(clippedRangeWithin(range, candidate)?.toString().trim());
 }
@@ -82,13 +64,13 @@ function crossesExcludedChrome(range: Range, root: Element): boolean {
 
 function countRenderedOccurrences(root: Element, text: string): number {
   if (!text) return 0;
-  // Selection.toString() follows the rendered layout: block boundaries contribute newlines.
-  // textContent flattens those boundaries (for example <p>foo</p><p>foo</p> → "foofoo"),
-  // so it cannot attest uniqueness for the exact characters the human selected. innerText is
-  // the matching browser plane; textContent remains only for non-layout DOMs such as jsdom.
+  // Keep block separators. Chromium can insert extra newlines at inline-flex chips in a
+  // Selection compared with innerText; collapse whitespace in both, as quote admission does.
+  // textContent remains only for non-layout DOMs such as jsdom.
   const rendered =
     root instanceof HTMLElement && typeof root.innerText === 'string' ? root.innerText : (root.textContent ?? '');
-  return rendered.split(text).length - 1;
+  const normalize = (value: string) => value.trim().replace(/\s+/gu, ' ');
+  return normalize(rendered).split(normalize(text)).length - 1;
 }
 
 type CliProjectionVersion = NonNullable<TextSelectionAction['sourceProjectionVersion']>;
@@ -99,6 +81,7 @@ export interface SelectionProjectionAdapter {
     source: SelectionOffsetSource,
     selection: Selection,
     container: HTMLElement,
+    selectedText: string,
   ): { start: number; end: number } | null;
   isUnmapped(root: Element | null, offsets: { start: number; end: number } | null): boolean;
 }
@@ -254,24 +237,26 @@ export function projectSelectionAction(
 ): TextSelectionAction | null {
   if (!selectionBelongsToContainer(selection, container)) return null;
   const rawText = selection.toString();
-  const text = rawText.trim();
-  if (!text) return null;
+  if (!rawText.trim()) return null;
 
   const viewport = selectionViewport(container, coordinateSpace);
   const position = positionSelectionActionForAnchors(selectionAnchorRects(selection), viewport);
   const source = selectionSource(selection, container, projection);
   if (crossesExcludedChrome(selection.getRangeAt(0), container)) return null;
-  const trimmedOffsets = projection
-    ? projection.offsets(source, selection, container)
-    : projectDomSelectionOffsets(source, selection, container);
   if (!position || source.mixed) return null;
-  if (projection?.isUnmapped(source.coordinateRoot, trimmedOffsets)) return null;
   const renderedRoot = source.coordinateRoot ?? container;
+  const text = readableSelectionText(selection, renderedRoot);
+  if (!text) return null;
+  const trimmedOffsets = projection
+    ? projection.offsets(source, selection, container, text)
+    : projectDomSelectionOffsets(source, selection, container);
+  if (projection?.isUnmapped(source.coordinateRoot, trimmedOffsets)) return null;
   return {
     text,
     position,
     sourceKind: source.kind,
-    renderedOccurrences: countRenderedOccurrences(renderedRoot, text),
+    // Uniqueness still attests what the human saw, before restoring source spellings.
+    renderedOccurrences: countRenderedOccurrences(renderedRoot, rawText.trim()),
     sourceProjectionVersion: source.projectionVersion ?? undefined,
     ...(trimmedOffsets && source.segmentId ? { sourceSegmentId: source.segmentId } : {}),
     ...(trimmedOffsets ? { selectionStart: trimmedOffsets.start, selectionEnd: trimmedOffsets.end } : {}),

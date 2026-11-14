@@ -60,6 +60,7 @@ export const RECALL_RESOLVER_ADMISSION_V5 = Object.freeze({
   cat_owned_seed: 'catalog' as const,
   thread_overview: 'catalog' as const,
   matter: 'explicit_read' as const,
+  message_evidence: 'explicit_preparation' as const,
 });
 
 export function buildCueEnvelope(input: {

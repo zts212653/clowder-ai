@@ -64,10 +64,80 @@ const block = {
   meta: { domain: 'message-search-answer', publicationRef: 'copied-ref', verified: true, response },
 };
 let host: HTMLDivElement, root: Root;
+
+it('keeps quoted material, publisher comment and the selecting cat judgment visibly distinct', async () => {
+  const text = '建议只在测试全部通过后，才下线判官。';
+  const selected: MessageSearchResponse = {
+    ...response,
+    results: [
+      {
+        ...response.results[0],
+        match: 'selected',
+        selection: {
+          v: 1,
+          reason: 'co-creator已拍板立即下线判官',
+          quote: '下线判官',
+          part: { kind: 'quote', blockIndex: 0 },
+          range: { start: text.indexOf('下线判官'), end: text.indexOf('下线判官') + 4 },
+          sourceDigest: 'a'.repeat(64),
+          headingPath: ['历史备选（未采用）'],
+          context: {
+            text,
+            start: 0,
+            end: text.length,
+            quoteStart: text.indexOf('下线判官'),
+            quoteEnd: text.indexOf('下线判官') + 4,
+            truncatedBefore: false,
+            truncatedAfter: false,
+          },
+          quotation: { text, truncated: false },
+          comment: { text: '这版还不直接当合同。', truncated: false },
+        },
+      },
+    ],
+    meta: {
+      ...response.meta,
+      sort: 'selected',
+      requestedMode: 'selected',
+      effectiveMode: 'selected',
+      resultKind: 'selected-answer',
+      answerSelection: { v: 1, catId: 'codex61-sol', requested: 1 },
+    },
+  };
+  vi.mocked(apiFetch).mockImplementation(async () =>
+    Response.json({
+      status: 'available',
+      publicationRef: `message-search-answer:${'a'.repeat(64)}`,
+      response: selected,
+    }),
+  );
+  await act(async () => root.render(<RichBlockRenderer block={block} messageId="actual-message" />));
+  expect(host.textContent).toContain('由 codex61-sol 选出 1 处来源');
+  expect(host.textContent).toContain('co-creator引用了材料');
+  expect(host.textContent).toContain('未核实原出处作者');
+  expect(host.textContent).toContain('历史备选（未采用）');
+  expect(host.textContent).toContain('建议只在测试全部通过后，才下线判官。');
+  expect(host.textContent).toContain('co-creator 当条批注：「这版还不直接当合同。」');
+  expect(host.textContent).toContain('codex61-sol 选用理由：co-creator已拍板立即下线判官');
+  expect(host.querySelector('mark')?.textContent).toBe('下线判官');
+  expect(host.querySelector('[aria-label="定下来的"]')).toBeNull();
+  expect(host.textContent).not.toContain('本次结果中最早');
+  const quote = [...host.querySelectorAll('button')].find((button) => button.textContent === '引用到聊天');
+  await act(async () => quote?.click());
+  const attachment = useChatStore.getState().pendingChatInsert?.contextAttachments?.[0];
+  expect(attachment?.kind).toBe('quote');
+  if (attachment?.kind !== 'quote' || attachment.source.kind !== 'message') throw new Error('missing composer quote');
+  expect(attachment.text).toContain('未核实原出处作者');
+  expect(attachment.text).toContain('建议只在测试全部通过后，才下线判官。');
+  expect(attachment.text).toContain('co-creator 当条批注：「这版还不直接当合同。」');
+  expect(attachment.source.displayLabel).toContain('结构化摘录');
+  expect(attachment.comment).toBeUndefined();
+  expect(vi.mocked(apiFetch).mock.calls.every(([url]) => url.startsWith('/api/evidence/answer?'))).toBe(true);
+});
 beforeEach(() => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
   writeShellPresentation('v2');
-  useChatStore.setState({ currentThreadId: 'origin', threads: [], messages: [] });
+  useChatStore.setState({ currentThreadId: 'origin', threads: [], messages: [], pendingChatInsert: null });
   vi.mocked(apiFetch)
     .mockReset()
     .mockResolvedValue(Response.json({ status: 'unavailable' }));

@@ -13,6 +13,7 @@ export const RESOLVER_LABELS: Record<RecallResolverFamily, string> = {
   cat_owned_seed: '猫自己的种子',
   thread_overview: '线程概况',
   matter: '事情',
+  message_evidence: '原消息',
 };
 const TYPE_LABELS: Record<string, string> = {
   ...RESOLVER_LABELS,
@@ -35,9 +36,9 @@ const TYPE_LABELS: Record<string, string> = {
 };
 export const recallTypeLabel = (sourceType?: string) => TYPE_LABELS[sourceType ?? ''] ?? '记忆';
 const UNAVAILABLE_LABELS = {
-  source_corrected: '来源已更正',
-  source_forgotten: '来源已遗忘',
-  scope_revoked: '来源已不可访问',
+  source_corrected: '已更正',
+  source_forgotten: '已忘掉',
+  scope_revoked: '已不可访问',
 };
 function hasReadableTitle(item: RecallResultItem): boolean {
   const title = item.title.trim();
@@ -64,7 +65,7 @@ export function recallResultHref(item: RecallResultItem): string | null {
 }
 export function recallDeliveryLabel(event: RecallEvent): string | undefined {
   return event.cueStatus
-    ? `${event.source === 'pull' ? '主动读取' : '点名递送'} · ${recallTypeLabel(event.resolverFamily)}`
+    ? `${event.source === 'pull' ? '主动读取' : event.pushSurface === 'profile_opening' ? '新对话带上' : '点名递送'} · ${recallTypeLabel(event.resolverFamily)}`
     : undefined;
 }
 export function recallReplyTimeLabel(group: RecallGroup, earlierRepliesPending: boolean, now = new Date()): string {

@@ -4,6 +4,7 @@ export type { DesktopWindowFailureReason } from './failure-reason.js';
 
 import type { DesktopWindowContribution } from '@clowder-ai/plugin-contract';
 import type { DesktopAppAssistOwner } from '../../concierge/live/host/companion-app-assist-owner.js';
+import type { DesktopDeskOwner } from '../../concierge/live/host/companion-desk-owner.js';
 import type { ObservationWorkSummary } from '../diagnostics/observation-work.js';
 import type { StaticSurfaceServer } from '../external-runtime/static-surface-server.js';
 import type { VerifiedPluginPackage, VerifiedPluginPackageLocator } from '../external-runtime/types.js';
@@ -22,6 +23,8 @@ import type { CompanionArchiveContract } from './published-companion-v2.js';
 
 export interface DesktopCompanionBridge {
   readonly appAssist?: DesktopAppAssistOwner;
+  /** F335 交付三：the desk delivery owner, for the archive whose contract carries `state.desk`. */
+  readonly desk?: DesktopDeskOwner;
   request(input: unknown): Promise<CompanionReply>;
   close(): Promise<void>;
   observeVoice?(observation: HostVoiceObservation): Promise<void>;
@@ -54,6 +57,7 @@ export interface DesktopWindowFailure {
 }
 export interface DesktopWindowLaunch {
   readonly appAssist?: DesktopAppAssistOwner;
+  readonly desk?: DesktopDeskOwner;
   readonly url: string;
   readonly presentation: DesktopWindowContribution['presentation'];
   /** Present only for the exact verified public archive that carries the new contract. */

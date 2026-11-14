@@ -57,6 +57,61 @@ test('an execution chooses an existing API account without changing the member o
   assert.ok(!JSON.stringify(game.executionAccount).includes('fixture-key'));
 });
 
+test('member env is frozen per execution while the selected account keeps final precedence', (t) => {
+  const f = fixture(t);
+  const previous = process.env.ROLE_EXECUTION_ENDPOINT;
+  process.env.ROLE_EXECUTION_ENDPOINT = 'before';
+  t.after(() => {
+    if (previous === undefined) delete process.env.ROLE_EXECUTION_ENDPOINT;
+    else process.env.ROLE_EXECUTION_ENDPOINT = previous;
+  });
+  Object.assign(f.accounts.paid, { envVars: { ACCOUNT_ROUTE: 'account-owned' } });
+  f.save();
+  const input = {
+    ...f.input,
+    catConfig: { ...f.cat, env: { CUSTOM_ENDPOINT: '${ROLE_EXECUTION_ENDPOINT}', ACCOUNT_ROUTE: 'member' } },
+    accountSelection: { accountRef: 'paid', authType: 'api_key' as const },
+  };
+  const first = freezeExecutionAccountBinding(input);
+  assert.equal(first.accountEnv?.CUSTOM_ENDPOINT, 'before');
+  assert.equal(first.accountEnv?.ACCOUNT_ROUTE, 'account-owned');
+  assert.ok(Object.isFrozen(first.accountEnv));
+  process.env.ROLE_EXECUTION_ENDPOINT = 'after';
+  const next = freezeExecutionAccountBinding(input);
+  assert.equal(first.accountEnv?.CUSTOM_ENDPOINT, 'before');
+  assert.equal(next.accountEnv?.CUSTOM_ENDPOINT, 'after');
+  assert.equal(
+    freezeExecutionAccountBinding({ ...input, catConfig: { ...input.catConfig, agyProfile: { enabled: false } } })
+      .accountEnv?.CUSTOM_ENDPOINT,
+    'after',
+  );
+  assert.throws(
+    () => freezeExecutionAccountBinding({ ...input, catConfig: { ...input.catConfig, agyProfile: { enabled: true } } }),
+    /isolated AGY/,
+  );
+  assert.equal(f.cat.accountRef, 'subscription');
+});
+
+test('remote and API-loop carriers do not pretend to apply a process environment', (t) => {
+  const f = fixture(t);
+  for (const clientId of ['a2a', 'catagent'] as const) {
+    assert.throws(
+      () =>
+        freezeExecutionAccountBinding({
+          ...f.input,
+          catConfig: {
+            ...f.cat,
+            clientId,
+            configurationSource: 'native_tool',
+            accountRef: undefined,
+            env: { CUSTOM_ENDPOINT: 'configured' },
+          },
+        }),
+      /local process carrier/,
+    );
+  }
+});
+
 test('an explicit choice never falls back on deletion, missing credentials, a changed auth type or a foreign provider', (t) => {
   const f = fixture(t);
   const choose = (accountRef: string, authType: 'oauth' | 'api_key') =>

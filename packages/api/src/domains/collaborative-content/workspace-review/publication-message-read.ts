@@ -12,13 +12,15 @@ import type { PublishedMediaService } from '../../video-studio/content-owner/pub
 import { publicationLedgerId } from '../artifact-review/canonical-ledger.js';
 import { ArtifactReviewError } from '../artifact-review/errors.js';
 import type { ArtifactReviewInspection } from '../artifact-review/inspection.js';
+import { readReviewMediaEvidence } from '../artifact-review/media-evidence.js';
 import { leafRecords, pageRecords } from '../inspection-records.js';
 import { publicationLedgerSource } from './publication-review-source.js';
 import type { WorkspaceContentReviewStore } from './store.js';
 import { resolveWorkspaceReviewVisualMarks } from './workspace-review-annotation-resolution.js';
 
 export interface PublicationReviewReadDeps {
-  readonly media: Pick<PublishedMediaService, 'read' | 'currentRevision'>;
+  readonly media: Pick<PublishedMediaService, 'read' | 'currentRevision'> &
+    Partial<Pick<PublishedMediaService, 'openAsset'>>;
   readonly ledgers: Pick<WorkspaceContentReviewStore, 'get'>;
   readonly messages: Pick<IMessageStore, 'getById'>;
 }
@@ -30,6 +32,8 @@ export async function inspectPublicationMessageReview(
   principal: MediaReviewPrincipal,
 ) {
   if (!input.sourceMessageId || input.round || input.view === 'history' || input.afterHistoryRevision)
+    throw new ArtifactReviewError('invalid_action');
+  if ((input.annotationId && input.view !== 'media') || (input.view === 'media' && input.cursor))
     throw new ArtifactReviewError('invalid_action');
   const original = await readQuestion(deps, input, principal);
   const source = original.attachment.source;
@@ -58,6 +62,26 @@ export async function inspectPublicationMessageReview(
   const current = await readQuestion(deps, input, principal);
   if (current.snapshot !== original.snapshot || deps.ledgers.get(review.reviewId)?.revision !== review.revision)
     throw new ArtifactReviewError('revision_conflict');
+  if (input.view === 'media') {
+    if (!deps.media.openAsset) throw new ArtifactReviewError('not_found');
+    const annotation = input.annotationId
+      ? review.annotations.find((item) => item.id === input.annotationId)
+      : undefined;
+    if (input.annotationId && !annotation) throw new ArtifactReviewError('not_found');
+    if (annotation && (!('anchor' in annotation.anchor) || annotation.anchor.baseRevision !== review.source.revision))
+      throw new ArtifactReviewError('asset_changed');
+    const anchor = annotation && 'anchor' in annotation.anchor ? annotation.anchor.anchor : undefined;
+    const evidence = await readReviewMediaEvidence(
+      { openAsset: deps.media.openAsset.bind(deps.media) },
+      asset,
+      principal,
+      anchor,
+    );
+    const latest = await readQuestion(deps, input, principal);
+    if (latest.snapshot !== original.snapshot || deps.ledgers.get(review.reviewId)?.revision !== review.revision)
+      throw new ArtifactReviewError('revision_conflict');
+    return evidence;
+  }
   const value =
     input.view === 'marks'
       ? (review.visualMarks ?? [])

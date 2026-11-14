@@ -60,6 +60,62 @@ const INIT_RESULT = {
 };
 
 describe('AcpClient', () => {
+  for (const capability of ['load', 'resume', 'live-only']) {
+    it(`${capability} applies a changed MCP view only at its supported session boundary`, async () => {
+      const { child, clientStdin, agentStdout } = createMockChild();
+      const requests = [];
+      const capabilities =
+        capability === 'load'
+          ? { loadSession: true }
+          : capability === 'resume'
+            ? { sessionCapabilities: { resume: {} } }
+            : {};
+      clientStdin.on('data', (chunk) => {
+        for (const line of chunk.toString().trim().split('\n')) {
+          const message = JSON.parse(line);
+          requests.push(message);
+          agentRespond(
+            agentStdout,
+            message.id,
+            message.method === 'initialize'
+              ? { ...INIT_RESULT, agentCapabilities: capabilities }
+              : { sessionId: message.params?.sessionId ?? 'bound' },
+          );
+        }
+      });
+      const nativeClient = new AcpClient({ command: 'fake', args: [], cwd: '/tmp', spawnFn: () => child });
+      const servers = (value) => [{ name: 'vendor', command: 'fixture', args: [], env: [{ name: 'VALUE', value }] }];
+      try {
+        await nativeClient.initialize();
+        await nativeClient.newSession('/tmp', servers('old'));
+        if (capability === 'load') {
+          await nativeClient.loadSession('bound', '/tmp', servers('new'));
+          const sent = requests.findLast((request) => request.method === 'session/load');
+          assert.equal(sent.params.mcpServers[0].env[0].value, 'new');
+        } else {
+          await assert.rejects(nativeClient.loadSession('bound', '/tmp', servers('new')), /新会话/);
+          assert.equal((await nativeClient.loadSession('bound', '/tmp', servers('old'))).sessionId, 'bound');
+          if (capability === 'resume') {
+            await nativeClient.loadSession('inactive-history', '/tmp', servers('new'));
+            const sent = requests.findLast((request) => request.method === 'session/resume');
+            assert.equal(sent.params.sessionId, 'inactive-history');
+            assert.equal(sent.params.mcpServers[0].env[0].value, 'new');
+          } else
+            await assert.rejects(
+              nativeClient.loadSession('inactive-history', '/tmp', servers('new')),
+              /未声明会话恢复能力/,
+            );
+        }
+        assert.equal(
+          requests.filter((request) => request.method === 'session/new').length,
+          1,
+          'a failed resume must not manufacture a replacement session',
+        );
+      } finally {
+        await nativeClient.close();
+      }
+    });
+  }
   // Upstream regression from whutzefengxie-ops/clowder-ai@c7a67cc55f915dc225f587ae0ed4b35e91120395.
   it('closes an initialized carrier without agentInfo and awaits its exit once', async () => {
     const { child, clientStdin, agentStdout } = createMockChild();

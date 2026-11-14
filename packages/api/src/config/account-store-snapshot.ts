@@ -109,9 +109,10 @@ function selectEntry(primary: StoreSnapshot, legacy: StoreSnapshot | undefined, 
         `account "${ref}" is torn across workspace/runtime stores; reconcile before use`,
       );
     }
+    // Quota is an observation, not account authority. Preserve it on the selected primary row.
     if (
-      canonicalJson(a.account && canonicalizeAccount(a.account)) !==
-        canonicalJson(b.account && canonicalizeAccount(b.account)) ||
+      canonicalJson(a.account && canonicalizeAccount({ ...a.account, quota: undefined })) !==
+        canonicalJson(b.account && canonicalizeAccount({ ...b.account, quota: undefined })) ||
       canonicalJson(a.credential) !== canonicalJson(b.credential)
     ) {
       throw new AccountStoreVerdictError(

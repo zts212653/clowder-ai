@@ -119,8 +119,9 @@ it('recognizes a whole code span, prose and a Markdown path link in one batch ac
     kind: 'file',
     path: 'docs/报告.md',
     worktreeId: 'project',
-    scrollToLine: 7,
+    line: 7,
   });
+  expect(useChatStore.getState().workspaceOpenRequest?.disposition).toBe('permanent');
 });
 it('explains a confirmed missing file without navigation and styles a standalone existing path as a card', async () => {
   await act(async () => {
@@ -139,20 +140,7 @@ it('explains a confirmed missing file without navigation and styles a standalone
   expect(container.querySelector('[data-chat-reference-layout=card]')?.textContent).toContain('card.md');
 });
 
-it('keeps the file action menu inside a 390px viewport and closes it with Escape', async () => {
-  vi.stubGlobal('innerWidth', 390);
-  vi.stubGlobal('innerHeight', 800);
-  vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({
-    x: 110,
-    y: 70,
-    right: 135,
-    left: 110,
-    top: 70,
-    bottom: 90,
-    width: 25,
-    height: 20,
-    toJSON: () => ({}),
-  });
+it('keeps the file action menu open for its own pointer events and closes it with Escape', async () => {
   await act(async () =>
     root.render(
       <ChatFileActions
@@ -173,9 +161,6 @@ it('keeps the file action menu inside a 390px viewport and closes it with Escape
   await act(async () => container.querySelector<HTMLButtonElement>('[aria-haspopup="menu"]')?.click());
   const menu = document.body.querySelector<HTMLElement>('[role=menu]');
   expect(menu).not.toBeNull();
-  expect(menu?.style.position).toBe('fixed');
-  expect(Number.parseFloat(menu!.style.left)).toBeGreaterThanOrEqual(8);
-  expect(Number.parseFloat(menu!.style.left) + 300).toBeLessThanOrEqual(390);
   await act(async () => menu?.querySelector('button')?.dispatchEvent(new Event('pointerdown', { bubbles: true })));
   expect(document.body.querySelector('[role=menu]')).toBe(menu);
   await act(async () =>

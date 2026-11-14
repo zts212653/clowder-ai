@@ -143,11 +143,18 @@ describe('F332 shared matter memory through the authenticated callback', () => {
         operation: 'create',
         requestId: 'create-matter',
         title: 'Settings entry',
+        description: '背景：复用已有导航。仅适用于设置入口，不改变工程权限。',
         sources: [source(original)],
       },
     });
     assert.equal(created.statusCode, 201, `A must create one durable matter from a real source: ${created.body}`);
     const page = created.json().matter;
+
+    const directoryA = await app.inject({ url: '/api/callbacks/memory-matters', headers: headers('call-a') });
+    const directoryB = await app.inject({ url: '/api/callbacks/memory-matters', headers: headers('call-b') });
+    assert.equal(directoryA.json().items[0].hasThreadSource, true);
+    assert.equal(directoryB.json().items[0].hasThreadSource, false);
+    assert.equal(evidenceStore.getDb().prepare('SELECT COUNT(*) AS n FROM memory_cue_events').get().n, 0);
 
     const first = await app.inject({
       method: 'GET',
@@ -155,6 +162,7 @@ describe('F332 shared matter memory through the authenticated callback', () => {
       headers: headers('call-b'),
     });
     assert.equal(first.statusCode, 200);
+    assert.equal(first.json().matter.description, '背景：复用已有导航。仅适用于设置入口，不改变工程权限。');
     assert.deepEqual(
       first.json().entries.map((entry) => entry.quote),
       [original.content],
@@ -175,6 +183,8 @@ describe('F332 shared matter memory through the authenticated callback', () => {
       headers: { 'x-test-owner-session': 'owner-a' },
     });
     assert.equal(receipt.statusCode, 200);
+    assert.equal(receipt.json().page.matter.description, first.json().matter.description);
+    assert.equal(receipt.json().page.matter.revision, first.json().matter.revision);
     assert.equal(receipt.json().page.entries[0].quote, original.content);
     assert.equal(
       (await app.inject({ url: `${receiptUrl}?catId=codex-astra`, headers: { 'x-test-owner-session': 'owner-a' } }))

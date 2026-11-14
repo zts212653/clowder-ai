@@ -1,6 +1,6 @@
 import type { RecallScopeV1 } from '@cat-cafe/shared';
-import type { MemoryCueSourceReader } from '../domains/memory/cue/MemoryCueSourceReader.js';
 import { eventMemoryRevision, type IEventMemoryStore } from '../domains/memory/EventMemoryStore.js';
+import type { PersonMemoryOwnerReadService } from '../domains/memory/people/PersonMemoryOwnerReadService.js';
 import type { TasteMemoryLifecycleStore } from '../domains/memory/taste/TasteMemoryLifecycleStore.js';
 import { TasteMemoryReader } from '../domains/memory/taste/TasteMemoryReader.js';
 import { sourcePathFromTasteAnchor } from '../domains/memory/taste/taste-memory-identity.js';
@@ -8,22 +8,23 @@ import type { TasteRepository } from '../domains/taste/services/TasteRepository.
 import { type EventMemorySourceReaders, readEventMemorySource } from './event-memory-source.js';
 import type { RecallCandidateView } from './recall-candidate-view.js';
 import type { RecallCueCoordinate } from './recall-cue-view.js';
+import { recallMemoryHref } from './recall-memory-href.js';
+import { tasteMemoryId } from './taste-browse-model.js';
 import { readTasteSource, type TasteSourceReaders } from './taste-browse-source.js';
 
 export interface RecallOwnerMessageSources {
+  personDeliveryReader?: PersonMemoryOwnerReadService['readDelivery'];
   tasteSources?: {
     ownerUserId: string;
     repository: TasteRepository;
-    lifecycle?: Pick<TasteMemoryLifecycleStore, 'isReadable'>;
+    lifecycle?: Pick<TasteMemoryLifecycleStore, 'isReadable'> &
+      Partial<Pick<TasteMemoryLifecycleStore, 'sourceDisposition'>>;
     sourceReaders: TasteSourceReaders;
   };
   eventSources?: {
     store: Pick<IEventMemoryStore, 'getEvent'>;
     sourceReaders: EventMemorySourceReaders;
   };
-}
-function record(value: unknown): Record<string, unknown> {
-  return value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
 }
 function name(value: unknown): string | undefined {
   return typeof value === 'string' && value.trim() ? value.trim().slice(0, 240) : undefined;
@@ -44,42 +45,24 @@ function unavailable(
 }
 
 type Scope = Omit<RecallScopeV1, 'invocationId'>;
-type CandidateReader = (anchor: string) => Promise<RecallCandidateView>;
-
-async function personMessageHref(payload: Record<string, unknown>, readCandidate: CandidateReader) {
-  const refs = Array.isArray(payload.provenanceRefs) ? payload.provenanceRefs : [];
-  for (const item of refs) {
-    const ref = record(item);
-    if (typeof ref.threadId !== 'string' || typeof ref.messageId !== 'string' || !ref.messageId) continue;
-    // The canonical person reader checked the message; the browser reader also fences its thread.
-    if ((await readCandidate(`thread-${ref.threadId}`)).href) return messageHref(ref.threadId, ref.messageId);
-  }
-  return null;
-}
 async function readPersonView(
   cue: RecallCueCoordinate,
   scope: Scope,
-  readCandidate: CandidateReader,
-  sourceReader: MemoryCueSourceReader | undefined,
+  readDelivery: RecallOwnerMessageSources['personDeliveryReader'],
 ): Promise<RecallCandidateView> {
-  if (!sourceReader) return unavailable(cue);
-  const read = await sourceReader.read({
-    family: 'person_memory',
-    anchor: cue.source_anchor,
-    expectedRevision: cue.source_revision,
-    scope: { ...scope, invocationId: cue.invocation_id },
-    consumerCatId: cue.consumer_cat_id,
-  });
-  if (read.status !== 'ok') {
-    const reason = read.invalidationReason;
-    return unavailable(
-      cue,
-      reason === 'source_corrected' || reason === 'source_forgotten' || reason === 'scope_revoked' ? reason : undefined,
-    );
-  }
-  const payload = record(read.payload);
-  const title = name(payload.displayName);
-  return { kind: 'person_entity', href: await personMessageHref(payload, readCandidate), ...(title ? { title } : {}) };
+  if (!readDelivery || !cue.source_anchor.startsWith('person-memory:')) return unavailable(cue);
+  const personId = cue.source_anchor.slice('person-memory:'.length);
+  const read = await readDelivery(scope.ownerUserId, personId, cue.source_revision);
+  if (read.status !== 'ready')
+    return unavailable(cue, read.status === 'version_changed' ? 'source_corrected' : undefined);
+  const href = read.message ? messageHref(read.message.threadId, read.message.messageId) : null;
+  return {
+    kind: 'person_entity',
+    title: name(read.displayName),
+    href,
+    messageHref: href,
+    memoryHref: recallMemoryHref('person', personId, cue.source_revision, scope.threadId),
+  };
 }
 async function readTasteView(
   cue: RecallCueCoordinate,
@@ -92,13 +75,21 @@ async function readTasteView(
   if (scope.ownerUserId !== ownerUserId) return unavailable(cue, 'scope_revoked');
   const reader = new TasteMemoryReader(repository, ownerUserId, { lifecycle });
   const memory = await reader.read({ ownerUserId: scope.ownerUserId, sourcePath });
-  if (!memory) return unavailable(cue);
+  if (!memory) {
+    const status = lifecycle?.sourceDisposition?.(scope.ownerUserId, sourcePath);
+    return unavailable(
+      cue,
+      status === 'forgotten' ? 'source_forgotten' : status === 'retired' ? 'source_corrected' : undefined,
+    );
+  }
   if (memory.revision !== cue.source_revision) return unavailable(cue, 'source_corrected');
   const source = await readTasteSource(memory, scope.ownerUserId, sourceReaders);
   return {
     kind: 'taste',
-    title: memory.payload.when,
+    title: name(memory.payload.takeaway) ?? name(memory.payload.quotes?.[0]) ?? name(memory.payload.when),
     href: source.canOpen && 'threadId' in source ? messageHref(source.threadId, source.messageId) : null,
+    messageHref: source.canOpen && 'threadId' in source ? messageHref(source.threadId, source.messageId) : null,
+    memoryHref: recallMemoryHref('taste', tasteMemoryId(sourcePath), cue.source_revision, scope.threadId),
   };
 }
 async function readEventView(
@@ -116,20 +107,24 @@ async function readEventView(
     return unavailable(cue, 'source_corrected');
   const source = await readEventMemorySource(event, scope.ownerUserId, sourceReaders);
   const first = source.status === 'ready' ? source.sources.find((item) => item.canOpen) : undefined;
-  if (!first?.threadId || !first.messageId) return unavailable(cue);
-  return { kind: 'event', title: name(event.summary), href: messageHref(first.threadId, first.messageId) };
+  const href = first?.threadId && first.messageId ? messageHref(first.threadId, first.messageId) : null;
+  return {
+    kind: 'event',
+    title: name(event.summary),
+    href,
+    messageHref: href,
+    memoryHref: recallMemoryHref('event', event.eventId, cue.source_revision, scope.threadId),
+  };
 }
 
 /** Read native owner provenance, never consume a cue or renew a model's short-lived grant. */
 export async function readOwnerMessageView(
   cue: RecallCueCoordinate,
   scope: Scope,
-  readCandidate: CandidateReader,
-  sourceReader: MemoryCueSourceReader | undefined,
   sources: RecallOwnerMessageSources,
 ): Promise<RecallCandidateView | null> {
   try {
-    if (cue.resolver_family === 'person_entity') return await readPersonView(cue, scope, readCandidate, sourceReader);
+    if (cue.resolver_family === 'person_entity') return await readPersonView(cue, scope, sources.personDeliveryReader);
     if (cue.resolver_family === 'taste' && sources.tasteSources)
       return await readTasteView(cue, scope, sources.tasteSources);
     if (cue.resolver_family === 'event' && sources.eventSources)

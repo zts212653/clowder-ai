@@ -14,7 +14,7 @@ function message(id: string, timestamp: number, overrides: Partial<ChatMessage> 
 /**
  * Runtime messages are intentionally tolerant of lifecycle extensions. Model a
  * future non-response kind with completedAt so streaming-flag writers stay in
- * the order-changing writer inventory if the shared union later admits it.
+ * the writer inventory without letting completion metadata move its start/send position.
  */
 function extensibleLifecycleMessage(id: string): ChatMessage {
   return {
@@ -141,20 +141,20 @@ const clockAndTieBreakWriters: WriterCase[] = [
     name: 'patchMessage',
     arrange: () => reset([message('moving', 4_000), message('middle', 2_000)]),
     write: () => useChatStore.getState().patchMessage('moving', { timelineOrderAt: 1_000 }),
-    expectedIds: ['moving', 'middle'],
+    expectedIds: ['middle', 'moving'],
   },
   {
     name: 'patchThreadMessage(active)',
     arrange: () => reset([message('moving', 4_000), message('middle', 2_000)]),
     write: () => useChatStore.getState().patchThreadMessage(ACTIVE_THREAD, 'moving', { timelineOrderAt: 1_000 }),
-    expectedIds: ['moving', 'middle'],
+    expectedIds: ['middle', 'moving'],
   },
   {
     name: 'patchThreadMessage(background)',
     threadId: BACKGROUND_THREAD,
     arrange: () => reset([], [message('moving', 4_000), message('middle', 2_000)]),
     write: () => useChatStore.getState().patchThreadMessage(BACKGROUND_THREAD, 'moving', { timelineOrderAt: 1_000 }),
-    expectedIds: ['moving', 'middle'],
+    expectedIds: ['middle', 'moving'],
   },
   {
     name: 'batchStreamChunkUpdate(active)',
@@ -197,14 +197,14 @@ const clockAndTieBreakWriters: WriterCase[] = [
     name: 'setStreaming',
     arrange: () => reset([extensibleLifecycleMessage('streaming'), message('middle', 2_000)]),
     write: () => useChatStore.getState().setStreaming('streaming', false),
-    expectedIds: ['middle', 'streaming'],
+    expectedIds: ['streaming', 'middle'],
   },
   {
     name: 'setThreadMessageStreaming(background)',
     threadId: BACKGROUND_THREAD,
     arrange: () => reset([], [extensibleLifecycleMessage('streaming'), message('middle', 2_000)]),
     write: () => useChatStore.getState().setThreadMessageStreaming(BACKGROUND_THREAD, 'streaming', false),
-    expectedIds: ['middle', 'streaming'],
+    expectedIds: ['streaming', 'middle'],
   },
   {
     name: 'markMessagesDelivered(active)',

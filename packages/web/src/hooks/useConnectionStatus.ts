@@ -11,6 +11,7 @@ import {
   useSyncExternalStore,
 } from 'react';
 import { API_URL, apiFetch } from '@/utils/api-client';
+import { type DeploymentRevisionState, pageDeploymentRevision } from '@/utils/deployment-revision';
 
 export type ConnectionLevel = 'online' | 'degraded' | 'offline';
 
@@ -27,63 +28,11 @@ interface ConnectionProbeState {
   checkedAt: number | null;
 }
 
-export interface DeploymentRevisionState {
-  client: string | null;
-  observed: string | null;
-  verified: boolean;
-  updateRequired: boolean;
-}
-
-const FULL_GIT_COMMIT = /^[0-9a-f]{40}$/;
-
-function normalizeDeploymentRevision(value: string | undefined): string | null {
-  const revision = value?.trim().toLowerCase();
-  return revision && FULL_GIT_COMMIT.test(revision) ? revision : null;
-}
-
-const CLIENT_DEPLOYMENT_REVISION = normalizeDeploymentRevision(process.env.NEXT_PUBLIC_CAT_CAFE_BUILD_REVISION);
-const DEPLOYMENT_REVISION_REQUIRED = process.env.NEXT_PUBLIC_CAT_CAFE_DEPLOYMENT_REVISION_REQUIRED === '1';
-
-export function reduceDeploymentRevision(
-  state: DeploymentRevisionState,
-  observed: string | null,
-  verificationRequired: boolean,
-  responseSucceeded: boolean,
-): DeploymentRevisionState {
-  if (state.updateRequired || !responseSucceeded) return state;
-  // Unknown is not unequal. Only two *known* revisions that differ are a
-  // mismatch; anything else stays unverified, which closes forwarding without
-  // latching a reload gate the page could never clear on its own.
-  if (!observed) {
-    return verificationRequired ? { ...state, verified: false } : state;
-  }
-  if (!state.client) {
-    return verificationRequired ? { ...state, observed, verified: false } : { ...state, observed, verified: true };
-  }
-  if (state.client === observed) {
-    return { ...state, observed, verified: true };
-  }
-  return { ...state, observed, verified: false, updateRequired: true };
-}
-
-export function createDeploymentRevisionTracker(
-  client: string | null = CLIENT_DEPLOYMENT_REVISION,
-  verificationRequired = DEPLOYMENT_REVISION_REQUIRED,
-) {
-  let state: DeploymentRevisionState = {
-    client,
-    observed: null,
-    verified: !verificationRequired,
-    updateRequired: false,
-  };
-  return {
-    read: () => state,
-    observe: (observed: string | null, responseSucceeded: boolean) => {
-      state = reduceDeploymentRevision(state, observed, verificationRequired, responseSucceeded);
-      return state;
-    },
-  };
-}
+export {
+  createDeploymentRevisionTracker,
+  type DeploymentRevisionState,
+  reduceDeploymentRevision,
+} from '@/utils/deployment-revision';
 
 export interface DeploymentAdmission {
   /** Composer and other non-forwarding writes. */
@@ -108,11 +57,6 @@ export function deriveDeploymentAdmission(
     forwardingBlocked: !revision.verified || revision.updateRequired || connectivityDown,
   };
 }
-
-// Module lifetime equals the current browser document. Client-side route changes
-// may remount ChatContainer, but must not teach an old bundle a new baseline.
-// A real page reload evaluates the module again and intentionally resets it.
-const pageDeploymentRevision = createDeploymentRevisionTracker();
 
 const POLL_INTERVAL_MS = 15_000;
 const REQUEST_TIMEOUT_MS = 2_500;
@@ -215,8 +159,11 @@ export function useConnectionStatus(socketConnected?: boolean | null): Connectio
   const [api, setApi] = useState<ConnectionLevel>(initialLevel);
   const [upstream, setUpstream] = useState<ConnectionLevel>(initialLevel);
   const [checkedAt, setCheckedAt] = useState<number | null>(null);
-  const [deploymentRevision, setDeploymentRevision] = useState<DeploymentRevisionState>(() =>
-    pageDeploymentRevision.read(),
+  // Health probes and every API response (api-client) report into the same page-lifetime tracker.
+  const deploymentRevision = useSyncExternalStore(
+    pageDeploymentRevision.subscribe,
+    pageDeploymentRevision.read,
+    pageDeploymentRevision.readInitial,
   );
   const mountedRef = useRef(true);
   const apiFailureCountRef = useRef(0);
@@ -261,7 +208,7 @@ export function useConnectionStatus(socketConnected?: boolean | null): Connectio
 
     applyWithFailureThreshold(apiProbe.level, apiFailureCountRef, setApi);
     applyWithFailureThreshold(mergeUpstreamSignal(readyProbe.level, catsLevel), upstreamFailureCountRef, setUpstream);
-    setDeploymentRevision(pageDeploymentRevision.observe(apiProbe.deploymentRevision, apiProbe.level === 'online'));
+    pageDeploymentRevision.observe(apiProbe.deploymentRevision, apiProbe.level === 'online');
     setCheckedAt(Date.now());
   }, [applyWithFailureThreshold, browserOfflineForcesDown, probesEnabled]);
 

@@ -4,7 +4,7 @@ import { test } from 'node:test';
 import Database from 'better-sqlite3';
 import { MessageSearchAnswerPublicationStore } from '../../dist/domains/memory/MessageSearchAnswerPublicationStore.js';
 import { applyMigrations, CURRENT_SCHEMA_VERSION } from '../../dist/domains/memory/schema.js';
-import { fixture } from '../helpers/message-search-answer-fixture.js';
+import { fixture, seedHistoricalAnswer } from '../helpers/message-search-answer-fixture.js';
 
 test('answer publication upgrades the existing memory database idempotently, retaining earlier user records', () => {
   const db = new Database(':memory:');
@@ -35,7 +35,7 @@ test('V71 prepared response and reserved coordinates survive the V72 recovery-on
   const f = fixture();
   const db = new Database(':memory:');
   try {
-    const saved = await f.service.prepare(f.request);
+    const saved = await seedHistoricalAnswer(f);
     const { recovery_order: _recovery, ...before } = f.store.get(saved.publicationRef);
     before.bound_message_id = 'reserved-original-message';
     before.block_id = 'reserved-original-block';

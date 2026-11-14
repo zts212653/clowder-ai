@@ -14,7 +14,7 @@ interface WorkspaceNavigationReceipt {
 }
 
 export interface WorkspaceNavigationEmitter {
-  socketEmit?: (event: string, data: unknown, room: string) => void;
+  socketEmit?: (event: string, data: unknown, room: string, options?: { exceptRoom?: string }) => void;
   socketEmitWithAck?: (event: string, data: unknown, room: string) => Promise<unknown[]>;
 }
 
@@ -75,8 +75,11 @@ export async function emitWorkspaceNavigate(
   eventData: { eventId: string },
   legacyRooms: readonly string[],
 ): Promise<ReturnType<typeof aggregateWorkspaceNavigationReceipts>> {
+  // Fire-and-forget copy for Hubs that predate acknowledged delivery (F223). A connection that
+  // is also in the ack room gets only the acknowledged copy below; otherwise its dedup would
+  // keep the unacknowledged first copy and the receipt would be lost.
   for (const room of legacyRooms) {
-    emitter.socketEmit?.('workspace:navigate', eventData, room);
+    emitter.socketEmit?.('workspace:navigate', eventData, room, { exceptRoom: WORKSPACE_NAVIGATION_ACK_ROOM });
   }
   if (emitter.socketEmitWithAck) {
     const receipts = await emitter

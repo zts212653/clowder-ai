@@ -134,7 +134,7 @@ function destructiveSelfPaths(raw, cwd, self) {
   const roots = uniq([self.installation?.projectRoot, self.runtime?.worktree]);
   if (roots.length === 0) return [];
   const hits = [];
-  for (const invocation of executedInvocations(raw, { cwd }).pipelines.flat()) {
+  for (const invocation of executedInvocations(raw, { cwd, builtinContext: true }).pipelines.flat()) {
     // The canonical module's argv answer, not its text answer. Stage text reads
     // `env -C dir rm -rf x` as `unknown` (the wrapper hides the delete) and
     // `echo git reset --hard` as a rewrite (the words are simply there); the

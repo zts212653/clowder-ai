@@ -15,6 +15,8 @@ import {
 } from '../../plugin/desktop-window-runtime/companion-private-wire.js';
 import {
   type CompanionArchiveContract,
+  companionContractHas,
+  companionSupportsDesk,
   isModernCompanionContract,
 } from '../../plugin/desktop-window-runtime/published-companion-v2.js';
 import { CompanionF221Trial } from './CompanionF221Trial.js';
@@ -23,6 +25,7 @@ import { CompanionBridgeError, CompanionOwnerClient } from './companion-owner-cl
 import type { DesktopAppAssistOwner } from './host/companion-app-assist-owner.js';
 import { CompanionConversationHistory } from './host/companion-conversation-history.js';
 import { readCompanionConversation } from './host/companion-conversation-read.js';
+import type { DesktopDeskOwner } from './host/companion-desk-owner.js';
 import { readModernCompanionTranscript, sendCompanionText } from './host/companion-modern-live.js';
 import { readModernCompanionSettings, updateModernCompanionSettings } from './host/companion-modern-settings.js';
 import { CompanionSubmissionDelivery } from './host/companion-submission-delivery.js';
@@ -47,6 +50,7 @@ type Options = ConstructorParameters<typeof CompanionOwnerClient>[0] & {
   readonly work?: CompanionWorkPort;
   readonly disableCompanion?: () => Promise<void>;
   readonly appAssist?: DesktopAppAssistOwner;
+  readonly desk?: DesktopDeskOwner;
   readonly openConversation: (threadId: string) => Promise<boolean>;
   readonly canOpenDecision?: (destination: CompanionDecisionDestination) => Promise<boolean>;
   readonly openDecision?: (destination: CompanionDecisionDestination) => Promise<boolean>;
@@ -59,6 +63,7 @@ type Options = ConstructorParameters<typeof CompanionOwnerClient>[0] & {
 };
 export class CompanionHostBridge {
   readonly appAssist?: DesktopAppAssistOwner;
+  readonly desk?: DesktopDeskOwner;
   private readonly client: CompanionOwnerClient;
   private readonly f221: CompanionF221Trial;
   private readonly unified: CompanionUnifiedDecisions;
@@ -70,7 +75,8 @@ export class CompanionHostBridge {
   private generation = 0;
   private closed = false;
   constructor(private readonly options: Options) {
-    this.appAssist = options.companionContract === '0.1.0-beta.29' ? options.appAssist : undefined;
+    this.appAssist = companionContractHas(options.companionContract, 'appAssist') ? options.appAssist : undefined;
+    this.desk = companionSupportsDesk(options.companionContract) ? options.desk : undefined;
     this.client = new CompanionOwnerClient({
       ...options,
       assertCurrent: () => this.assertCurrent(),
@@ -197,9 +203,7 @@ export class CompanionHostBridge {
         return { kind: 'navigation', delivery: opened ? 'requested' : 'unconfirmed' };
       }
       case 'decisions.read':
-        return ['0.1.0-beta.24', '0.1.0-beta.25', '0.1.0-beta.27', '0.1.0-beta.28', '0.1.0-beta.29'].includes(
-          this.options.companionContract ?? '',
-        )
+        return companionContractHas(this.options.companionContract, 'unifiedDecisions')
           ? this.unified.read(command.offset, command.limit)
           : readCompanionDecisions(this.client, command.offset, command.limit);
       case 'decision.open':
@@ -302,6 +306,9 @@ export class CompanionHostBridge {
       // These belong to the trusted window executor, never a Host effect endpoint.
       case 'screen.pick':
       case 'app-assist.settle':
+      case 'desk.settle':
+      case 'desk.thumbnail.read':
+      case 'desk.avatar.read':
       case 'view.resize':
       case 'view.layout':
       case 'view.drag':
@@ -376,7 +383,7 @@ export class CompanionHostBridge {
       nativeActivity,
       nativeWork,
       liveTransport: { kind: 'gpt_live_v3', verifiedModel: null },
-      ...(['0.1.0-beta.27', '0.1.0-beta.28', '0.1.0-beta.29'].includes(this.options.companionContract ?? '')
+      ...(companionContractHas(this.options.companionContract, 'presentation')
         ? { meeting: { kind: 'unconfirmed', sharing: false, paused: false, sourceLabel: null } as const }
         : {}),
     };

@@ -1,12 +1,12 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { readPrTruth } from './lib/worktree-pr.mjs';
+import { readPrTruth, worktreePrBinding } from './lib/worktree-pr.mjs';
 
 const source = 'pr:fixture/repo#42';
 const head = 'a'.repeat(40);
 const old = 'b'.repeat(40);
 const metadata = {
-  base: { repo: { full_name: 'fixture/repo' } },
+  base: { ref: 'main', repo: { full_name: 'fixture/repo' } },
   state: 'closed',
   merged: true,
   head: { sha: head },
@@ -14,6 +14,38 @@ const metadata = {
   commits: 2,
   html_url: 'https://github.com/fixture/repo/pull/42',
 };
+test('PR responsibility uses explicit local provenance, rejecting stale or corrupt owner intent', () => {
+  const origin = { threadId: 'thread_original', sourceRef: source, role: 'author', userId: 'user' };
+  const lifecycle = { owner: 'codex61-sol', origin };
+  assert.equal(worktreePrBinding(lifecycle, head).sourceRef, source);
+  assert.equal(
+    worktreePrBinding({ ...lifecycle, prSource: 'pr:fixture/repo#99' }, head).sourceRef,
+    'pr:fixture/repo#99',
+    'an explicit bind preserves but supersedes the original birth source',
+  );
+  const retention = {
+    owner: lifecycle.owner,
+    sourceRef: source,
+    head,
+    reason: 'original review',
+    recordedAt: '2026-11-01T00:00:00Z',
+    until: '2026-11-02T00:00:00Z',
+  };
+  const retained = { ...lifecycle, origin: { ...origin, sourceRef: 'task:work:original' }, retention };
+  assert.equal(worktreePrBinding(retained, head).sourceRef, source, 'expired exact intent remains discoverable');
+  for (const broken of [
+    { ...retained, retention: { ...retention, owner: 'sonnet' } },
+    { ...retained, retention: { ...retention, head: old } },
+    { ...retained, retention: { ...retention, sourceRef: 42 } },
+    { ...lifecycle, origin: { ...origin, role: 'invalid' } },
+    { ...lifecycle, prSource: '' },
+  ]) {
+    const result = worktreePrBinding(broken, head);
+    assert.equal(result.sourceRef, undefined);
+    assert.match(result.reason, /provenance/);
+  }
+});
+
 test('PR truth requires complete paginated commit membership and exact repository', () => {
   const calls = [];
   const run = (args) => {

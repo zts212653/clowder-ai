@@ -3,6 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, it } from 'node:test';
+import { initializeVectorBackend } from '../../dist/domains/memory/embedding-lifecycle-backend.js';
 
 async function createLifecycleHarness(options) {
   const { IndexBuilder } = await import('../../dist/domains/memory/IndexBuilder.js');
@@ -29,6 +30,7 @@ async function createLifecycleHarness(options) {
   return {
     lifecycle,
     store,
+    builder,
     cleanup() {
       store.close();
       rmSync(root, { recursive: true, force: true });
@@ -54,37 +56,29 @@ function makeEmbeddingService(load) {
 
 describe('MemoryEmbeddingLifecycle', () => {
   it('fills missing vectors without rescanning the evidence corpus when embedding becomes ready', async () => {
-    const { MemoryEmbeddingLifecycle } = await import('../../dist/domains/memory/MemoryEmbeddingLifecycle.js');
     const rebuildCalls = [];
     let warmupCalls = 0;
-    const indexBuilder = {
-      rebuild: async (...args) => {
+    const harness = await createLifecycleHarness({
+      createEmbeddingService: () => makeEmbeddingService(async () => true),
+    });
+    try {
+      assert.equal((await harness.lifecycle.activate('hybrid')).ok, true);
+      harness.builder.rebuild = async (...args) => {
         rebuildCalls.push(args);
         return { docsIndexed: 0, docsSkipped: 7, durationMs: 1 };
-      },
-      embedMissingDocumentVectors: async () => ({ docsEmbedded: 2, durationMs: 1 }),
-      startPassageEmbeddingWarmup: () => {
+      };
+      harness.builder.embedMissingDocumentVectors = async () => ({ docsEmbedded: 2, durationMs: 1 });
+      harness.builder.startPassageEmbeddingWarmup = () => {
         warmupCalls += 1;
-      },
-    };
-    const lifecycle = new MemoryEmbeddingLifecycle(
-      {},
-      indexBuilder,
-      {
-        embedMode: 'off',
-        embedModel: 'test-model',
-        embedDim: 4,
-        embedTimeoutMs: 100,
-        maxModelMemMb: 32,
-      },
-      {},
-    );
-
-    const result = await lifecycle.catchUpAfterReady();
-
-    assert.deepEqual(rebuildCalls, [], 'embedding activation must not rescan docs and threads');
-    assert.equal(warmupCalls, 1, 'missing passage vectors should still be backfilled');
-    assert.deepEqual(result, { docsEmbedded: 2, durationMs: 1 });
+      };
+      const result = await harness.lifecycle.catchUpAfterReady();
+      assert.deepEqual(rebuildCalls, [], 'embedding activation must not rescan docs and threads');
+      assert.equal(warmupCalls, 1, 'missing passage vectors should still be backfilled');
+      assert.deepEqual(result, { docsEmbedded: 2, durationMs: 1 });
+    } finally {
+      harness.lifecycle.deactivate();
+      harness.cleanup();
+    }
   });
 
   it('activates vector indexing after the API starts with embedding off', async () => {
@@ -183,7 +177,7 @@ The local embedding service can become ready after API startup.
     };
     const harness = await createLifecycleHarness({
       createEmbeddingService: () => makeEmbeddingService(async () => true),
-      initializeVectorBackend: async () => ({ vectorStore: {}, passageVectorStore: {} }),
+
       getDependentStores: () => [dependentStore],
     });
     try {
@@ -203,12 +197,11 @@ The local embedding service can become ready after API startup.
       await new Promise((resolve) => setTimeout(resolve, 10));
       return true;
     });
-    const backend = { vectorStore: {}, passageVectorStore: {} };
     const harness = await createLifecycleHarness({
       createEmbeddingService: () => service,
-      initializeVectorBackend: async () => {
+      initializeVectorBackend: async (...args) => {
         backendCount += 1;
-        return backend;
+        return initializeVectorBackend(...args);
       },
     });
     try {
@@ -269,7 +262,6 @@ The local embedding service can become ready after API startup.
     });
     const harness = await createLifecycleHarness({
       createEmbeddingService: () => service,
-      initializeVectorBackend: async () => ({ vectorStore: {}, passageVectorStore: {} }),
     });
     try {
       assert.deepEqual(await harness.lifecycle.activate('on'), {
@@ -320,7 +312,6 @@ The local embedding service can become ready after API startup.
           return true;
         });
       },
-      initializeVectorBackend: async () => ({ vectorStore: {}, passageVectorStore: {} }),
     });
     try {
       const obsolete = harness.lifecycle.activate('on');

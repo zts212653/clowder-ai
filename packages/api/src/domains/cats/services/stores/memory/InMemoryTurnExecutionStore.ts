@@ -1,3 +1,14 @@
+import { watcherUsageSchema } from '@cat-cafe/shared';
+import {
+  assertResponseSettlement,
+  responseSettlementIdentity,
+  responseSettlementReady,
+  type SettledTurnPage,
+  type SettledTurnQuery,
+  type SettleTurnResponseResult,
+  settledTurnPageLimit,
+  type TurnResponseSettlement,
+} from '../ports/TurnExecutionSettlement.js';
 import {
   advanceTurnOutputFence,
   assertCoveredMessageIds,
@@ -28,10 +39,44 @@ function sortRecords(records: TurnExecutionRecord[]): TurnExecutionRecord[] {
 }
 
 export class InMemoryTurnExecutionStore implements ITurnExecutionStore {
+  settledHead(userId: string, threadId?: string): number {
+    let head = 0;
+    for (const record of this.records.values())
+      if (record.userId === userId && (!threadId || record.threadId === threadId))
+        head = Math.max(head, record.settledSequence ?? 0);
+    return head;
+  }
+  recordWatcherModelAttempt(
+    invocationId: string,
+    turnId: string,
+    startedAt: number,
+    usage?: import('@cat-cafe/shared').WatcherUsage,
+  ): boolean {
+    const record = this.records.get(invocationId);
+    if (!record || record.executionKind !== 'watcher' || !turnId || !Number.isSafeInteger(startedAt)) return false;
+    record.watcherModelAttempts ??= {};
+    const previous = record.watcherModelAttempts[turnId];
+    if (previous?.usage) return !usage || JSON.stringify(previous.usage) === JSON.stringify(usage);
+    record.watcherModelAttempts[turnId] = {
+      startedAt: previous?.startedAt ?? startedAt,
+      ...(usage ? { usage: watcherUsageSchema.parse(usage) } : {}),
+    };
+    return true;
+  }
+  recordWatcherUsage(invocationId: string, usage: import('@cat-cafe/shared').WatcherUsage): boolean {
+    usage = watcherUsageSchema.parse(usage);
+    const record = this.records.get(invocationId);
+    if (!record || record.executionKind !== 'watcher') return false;
+    if (record.watcherUsage) return JSON.stringify(record.watcherUsage) === JSON.stringify(usage);
+    record.watcherUsage = structuredClone(usage);
+    return true;
+  }
+
   private readonly records = new Map<string, TurnExecutionRecord>();
   private readonly immutableIdentities = new Map<string, string>();
   private readonly parentIndex = new Map<string, Set<string>>();
   private readonly responsePending = new Set<string>();
+  private settledSequence = 0;
 
   createRunning(input: CreateTurnExecutionInput): CreateTurnExecutionResult {
     assertCreateTurnExecutionInput(input);
@@ -47,7 +92,12 @@ export class InMemoryTurnExecutionStore implements ITurnExecutionStore {
       };
     }
 
-    const record = cloneTurnExecutionRecord({ ...input, outputFence: createdOutputFence(input), status: 'running' });
+    const record = cloneTurnExecutionRecord({
+      ...input,
+      ...(input.executionKind === 'watcher' ? { watcherModelAttempts: {} } : {}),
+      outputFence: createdOutputFence(input),
+      status: 'running',
+    });
     this.records.set(input.invocationId, record);
     this.immutableIdentities.set(input.invocationId, serializeTurnExecutionIdentity(input));
     const childIds = this.parentIndex.get(input.parentInvocationId) ?? new Set<string>();
@@ -121,6 +171,7 @@ export class InMemoryTurnExecutionStore implements ITurnExecutionStore {
     const record = this.records.get(invocationId);
     if (!record || !Number.isFinite(at) || at < record.startedAt) throw new Error('invalid exact provider teardown');
     record.providerTeardownAt ??= at;
+    this.publishPending(record);
   }
 
   transitionTerminal(invocationId: string, input: TurnExecutionTerminalInput): TransitionTurnExecutionResult {
@@ -130,13 +181,18 @@ export class InMemoryTurnExecutionStore implements ITurnExecutionStore {
     if (record.status !== 'running') {
       return { outcome: 'already_terminal', record: cloneTurnExecutionRecord(record) };
     }
-    if (hasUnconfirmedProviderTeardown(record) && input.providerTeardownAt === undefined)
+    if (
+      input.status === 'succeeded' &&
+      hasUnconfirmedProviderTeardown(record) &&
+      input.providerTeardownAt === undefined
+    )
       throw new Error('provider_teardown_unconfirmed');
     record.status = input.status;
     record.endedAt = input.endedAt;
     if (input.terminalReason !== undefined) record.terminalReason = input.terminalReason;
     if (input.providerTeardownAt !== undefined) record.providerTeardownAt = input.providerTeardownAt;
     this.responsePending.add(invocationId);
+    this.publishPending(record);
     return { outcome: 'transitioned', record: cloneTurnExecutionRecord(record) };
   }
 
@@ -150,7 +206,70 @@ export class InMemoryTurnExecutionStore implements ITurnExecutionStore {
   }
 
   clearResponsePending(invocationId: string): void {
+    if (!this.records.has(invocationId) || this.records.get(invocationId)?.responseSettlement)
+      this.responsePending.delete(invocationId);
+  }
+
+  markResponseSettled(invocationId: string, settlement: TurnResponseSettlement): SettleTurnResponseResult {
+    assertResponseSettlement(settlement);
+    const record = this.records.get(invocationId);
+    if (!record) return { outcome: 'not_found', record: null };
+    if (record.responseSettlement)
+      return {
+        outcome:
+          responseSettlementIdentity(record.responseSettlement) === responseSettlementIdentity(settlement)
+            ? 'replayed'
+            : 'conflict',
+        record: cloneTurnExecutionRecord(record),
+      };
+    if (
+      record.pendingResponseSettlement &&
+      responseSettlementIdentity(record.pendingResponseSettlement) !== responseSettlementIdentity(settlement)
+    )
+      return { outcome: 'conflict', record: cloneTurnExecutionRecord(record) };
+    record.pendingResponseSettlement ??= { ...settlement };
+    const candidate = {
+      ...record.pendingResponseSettlement,
+      settledAt: Math.max(settlement.settledAt, record.endedAt ?? 0, record.providerTeardownAt ?? 0),
+    };
+    if (!responseSettlementReady(record, candidate.settledAt))
+      return { outcome: 'not_ready', record: cloneTurnExecutionRecord(record) };
+    record.responseSettlement = candidate;
+    delete record.pendingResponseSettlement;
+    record.settledSequence = ++this.settledSequence;
     this.responsePending.delete(invocationId);
+    return { outcome: 'settled', record: cloneTurnExecutionRecord(record) };
+  }
+
+  private publishPending(record: TurnExecutionRecord): void {
+    if (record.pendingResponseSettlement && record.status !== 'running')
+      this.markResponseSettled(record.invocationId, record.pendingResponseSettlement);
+  }
+
+  listSettled(query: SettledTurnQuery): SettledTurnPage {
+    const limit = settledTurnPageLimit(query);
+    const candidates = [...this.records.values()]
+      .filter(
+        (record) =>
+          record.userId === query.userId &&
+          (!query.threadId || record.threadId === query.threadId) &&
+          (!query.watcherDays ||
+            (record.executionKind === 'watcher' &&
+              query.watcherDays.some((day) => watcherRecordOnUtcDay(record, day)))) &&
+          (query.watcherDay === undefined ||
+            (record.executionKind === 'watcher' &&
+              record.responseSettlement &&
+              watcherRecordOnUtcDay(record, query.watcherDay))) &&
+          record.responseSettlement &&
+          (record.settledSequence ?? 0) > (query.afterSequence ?? 0),
+      )
+      .sort((a, b) => a.settledSequence! - b.settledSequence!);
+    const records = candidates.slice(0, limit).map(cloneTurnExecutionRecord);
+    return {
+      records,
+      nextCursor: records.at(-1)?.settledSequence ?? query.afterSequence ?? 0,
+      hasMore: candidates.length > limit,
+    };
   }
 
   settleOutputFence(invocationId: string, verdict: TurnOutputFenceVerdict): TurnExecutionRecord | null {
@@ -172,8 +291,8 @@ export class InMemoryTurnExecutionStore implements ITurnExecutionStore {
       if (
         record.status !== 'running' ||
         record.startedAt >= cutoffStartedAt ||
-        excluded.has(record.invocationId) ||
-        hasUnconfirmedProviderTeardown(record)
+        input.excludedExecutionKinds?.includes(record.executionKind) ||
+        excluded.has(record.invocationId)
       ) {
         continue;
       }
@@ -186,4 +305,11 @@ export class InMemoryTurnExecutionStore implements ITurnExecutionStore {
     }
     return sortRecords(interrupted);
   }
+}
+
+function watcherRecordOnUtcDay(record: TurnExecutionRecord, day: number): boolean {
+  return (
+    Math.floor(record.startedAt / 86400000) === day ||
+    Object.values(record.watcherModelAttempts ?? {}).some((attempt) => Math.floor(attempt.startedAt / 86400000) === day)
+  );
 }

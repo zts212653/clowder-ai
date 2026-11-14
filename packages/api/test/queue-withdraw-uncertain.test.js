@@ -70,7 +70,7 @@ for (const from of [
       const app = await queueApi(t, f);
       const url = `/api/threads/thread/queue${action === 'single' ? `/${f.admission.entry.id}` : ''}`;
       const stopped = await app.inject({ method: 'DELETE', url, headers });
-      assert.equal(stopped.statusCode, 200, stopped.body);
+      assert.equal(stopped.statusCode, action === 'single' ? 404 : 200, stopped.body);
       assert.equal(await f.queue.getDurableEntry('thread', f.admission.entry.id), null);
       assert.deepEqual((await f.messageStore.getById(original.id)).lifecycle, original.lifecycle);
       assert.deepEqual((await f.messageStore.getById(reply.id)).lifecycle, reply.lifecycle);
@@ -90,7 +90,7 @@ for (const from of [
   }
 }
 
-test('Clear reports the retained in-flight input, and partial success does not claim an empty queue', async (t) => {
+test('Clear withdraws only pending work while in-flight History stays intact', async (t) => {
   let release;
   let reached;
   const handoff = new Promise((resolve) => {
@@ -114,12 +114,11 @@ test('Clear reports the retained in-flight input, and partial success does not c
   const original = structuredClone(await f.messageStore.getById(f.admission.message.id));
   const url = '/api/threads/thread/queue';
   const refused = await app.inject({ method: 'DELETE', url, headers });
-  assert.equal(refused.statusCode, 409, refused.body);
-  assert.equal(refused.json().code, 'QUEUE_WITHDRAWAL_FAILED');
+  assert.equal(refused.statusCode, 200, refused.body);
   assert.deepEqual(refused.json().cleared, []);
   assert.deepEqual(
     refused.json().queue.map((entry) => entry.id),
-    [f.admission.entry.id],
+    [],
   );
   assert.deepEqual((await f.messageStore.getById(original.id)).lifecycle, original.lifecycle);
 
@@ -135,15 +134,14 @@ test('Clear reports the retained in-flight input, and partial success does not c
     intent: 'execute',
   });
   const partial = await app.inject({ method: 'DELETE', url, headers });
-  assert.equal(partial.statusCode, 409, partial.body);
-  assert.equal(partial.json().code, 'QUEUE_WITHDRAWAL_PARTIAL');
+  assert.equal(partial.statusCode, 200, partial.body);
   assert.deepEqual(
     partial.json().cleared.map((entry) => entry.id),
     [ordinary.entry.id],
   );
   assert.deepEqual(
     partial.json().queue.map((entry) => entry.id),
-    [f.admission.entry.id],
+    [],
   );
 });
 
@@ -151,8 +149,14 @@ test('a completed uncertain handoff still cannot be recalled into the composer a
   const f = await appendRecoveryFixture(async () => ({ accepted: false, reason: 'exception', acceptance: 'unknown' }));
   await f.append();
   await f.processor.reconcileAppendDeliveries('thread');
-  assert.equal(
-    (await f.queue.claimMessageEntriesForWithdrawal('thread', 'owner', f.admission.message.id)).outcome,
-    'processing',
-  );
+  const original = await f.messageStore.getById(f.admission.message.id);
+  const result = await f.messageStore.recallMessageToComposerDraft(original.id, {
+    ownerUserId: 'owner',
+    threadId: 'thread',
+    expectedDraftRevision: 0,
+    merge: 'replace',
+    recalledAt: Date.now(),
+  });
+  assert.equal(result.kind, 'not_recallable');
+  assert.deepEqual(await f.messageStore.getById(original.id), original);
 });

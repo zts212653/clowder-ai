@@ -30,12 +30,12 @@ function LatestRecall({ latest }: { latest: TasteLatest | null | undefined }) {
 
 export function MemoryTasteRecall({ entry }: { entry: TasteMemory }) {
   const recall = entry.recall;
-  if (!recall) return <p className="text-compact text-cafe-muted">暂时读不到被想起记录</p>;
+  if (!recall) return <p className="text-compact text-cafe-muted">使用次数还没接进来</p>;
   const named = recall.namedDelivery?.counts;
   const search = recall.search;
   return (
     <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-3 text-compact">
-      <dt className="text-cafe-muted">系统点名递送</dt>
+      <dt className="text-cafe-muted">点名递送</dt>
       <dd className="flex flex-wrap gap-x-2 gap-y-1">
         {named && Object.values(named).some((count) => count > 0) ? (
           <>
@@ -47,14 +47,16 @@ export function MemoryTasteRecall({ entry }: { entry: TasteMemory }) {
               {Math.max(0, named.presented - named.applied - named.dismissed)} 次未回报
             </span>
           </>
-        ) : (
+        ) : named ? (
           '这条渠道没有记录'
+        ) : (
+          '还没接进来'
         )}
         <LatestRecall latest={recall.namedDelivery?.latest} />
       </dd>
       <dt className="text-cafe-muted">维度提示</dt>
       <dd>只记录在维度上，没有算成这条品味被想起</dd>
-      <dt className="text-cafe-muted">猫主动检索</dt>
+      <dt className="text-cafe-muted">被猫翻到</dt>
       <dd>
         {search && (search.hits > 0 || search.opened > 0 || search.unverified > 0) ? (
           <>
@@ -69,8 +71,10 @@ export function MemoryTasteRecall({ entry }: { entry: TasteMemory }) {
               <p className="mt-1 text-xs text-cafe-muted">另有 {search.unverified} 次归属没核实，没有算进次数</p>
             )}
           </>
-        ) : (
+        ) : search ? (
           '这条渠道没有记录'
+        ) : (
+          '还没接进来'
         )}
         <LatestRecall latest={search?.latest} />
       </dd>

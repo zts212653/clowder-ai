@@ -4,14 +4,18 @@
  * Verifies that PipelinePromptBuilder produces the same structural output
  * as the legacy SystemPromptBuilder by asserting on:
  * - Specific segment content from known hooks (identity, mentions, governance)
- * - Correct hook event counts matching the 45-hook manifest catalog
+ * - Complete per-turn trace matching the committed hook manifest catalog
  * - S-prefix scope filtering (L/B/C hooks executed but not in output)
  * - D-prefix scope filtering (R/N hooks executed but not in output)
  * - Trace capture drains correctly (no stale buffer)
  */
 
 import assert from 'node:assert/strict';
+import { readdirSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { after, before, describe, it } from 'node:test';
+import { fileURLToPath } from 'node:url';
+import { parse } from 'yaml';
 
 describe('Pipeline equivalence regression (AC-P2-14)', () => {
   /** @type {typeof import('../dist/domains/prompt-hooks/PipelinePromptBuilder.js')} */
@@ -142,7 +146,7 @@ describe('Pipeline equivalence regression (AC-P2-14)', () => {
     }
   });
 
-  it('per-turn trace retains all 23 active hooks after retiring Signal article injection', () => {
+  it('per-turn trace covers every committed per-turn manifest exactly once', () => {
     const { trace } = ppb.buildInvocationContextViaHookPipelineWithTrace({
       catId: 'opus',
       mode: 'serial',
@@ -152,12 +156,17 @@ describe('Pipeline equivalence regression (AC-P2-14)', () => {
       mcpAvailable: true,
       a2aEnabled: true,
     });
-    assert.equal(trace.events.length, 23, `Expected 23 per-turn events, got ${trace.events.length}`);
-    const expectedIds = [...Array.from({ length: 19 }, (_, i) => `D${i + 1}`), 'D21', 'R1', 'R2', 'N1'];
+    const hooksDir = fileURLToPath(new URL('../../../assets/prompt-hooks/', import.meta.url));
+    const expectedIds = readdirSync(hooksDir, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => parse(readFileSync(join(hooksDir, entry.name, 'hook.yaml'), 'utf8')))
+      .filter((manifest) => manifest.stage === 'per-turn')
+      .map((manifest) => manifest.id);
+    assert.ok(expectedIds.length > 0, 'The committed per-turn catalog must not be empty');
     assert.deepEqual(
       trace.events.map((event) => event.hookId).sort(),
       expectedIds.sort(),
-      'Retiring D20 must preserve every other per-turn hook',
+      'Every declared per-turn hook must execute once, without undeclared or duplicate events',
     );
     assert.ok(!trace.patches.some((patch) => patch.hookId === 'D20'), 'Retired article injection produces no patch');
   });

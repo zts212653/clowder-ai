@@ -7,6 +7,7 @@ import {
   mediaPublicationSourceSchema,
   type ReviewedMediaType,
 } from '@cat-cafe/shared';
+import { detectImageMime } from '../../../utils/image-mime.js';
 import { aggregateThreadArtifacts } from '../../cats/services/agents/routing/thread-artifacts-aggregator.js';
 import type { IMessageStore } from '../../cats/services/stores/ports/MessageStore.js';
 import { isDurableOwnerReadEvidence, resolveVisibleReplyParent } from '../../cats/services/stores/visibility.js';
@@ -128,7 +129,11 @@ export class PublishedMediaSource {
               resolved.mediaType === 'video/mp4' ? 256 * 1024 * 1024 : 10 * 1024 * 1024,
             );
         await this.assertVisible(scope, resolved.publication, principal);
-        return { bytes, mediaType: resolved.mediaType };
+        return {
+          bytes,
+          mediaType:
+            resolved.mediaType === 'video/mp4' ? resolved.mediaType : (detectImageMime(bytes) ?? resolved.mediaType),
+        };
       },
     };
   }
@@ -247,7 +252,7 @@ export class PublishedMediaSource {
     expectedArtifactRevision: string;
     publicationSource?: import('@cat-cafe/shared').MessageMediaPublicationSource;
   }): Promise<{ bytes: Buffer; mediaType: ReviewedMediaType; publication: ContentSourcePublicationV1 }> {
-    const file = /^\/uploads\/([a-zA-Z0-9][a-zA-Z0-9._-]*\.(png|jpe?g|webp|mp4))$/i.exec(input.artifactRef);
+    const file = /^\/uploads\/([a-zA-Z0-9][a-zA-Z0-9._-]*\.(png|jpe?g|webp|gif|svg|mp4))$/i.exec(input.artifactRef);
     if (!file?.[1] || !file[2]) throw new MediaOwnerError('invalid_media');
     const exact = input.publicationSource;
     const selected = exact ? await readPublishedMessageItem(this.deps.messages, exact, input.principal) : undefined;
@@ -285,7 +290,11 @@ export class PublishedMediaSource {
     );
     await this.assertVisible(input.scope, publication, input.principal);
     if (exact) await readPublishedMessageItem(this.deps.messages, exact, input.principal);
-    return { bytes, mediaType, publication };
+    return {
+      bytes,
+      mediaType: mediaType === 'video/mp4' ? mediaType : (detectImageMime(bytes) ?? mediaType),
+      publication,
+    };
   }
 }
 

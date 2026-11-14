@@ -1,6 +1,6 @@
 ---
 name: memory-navigation
-tips_exempt: "Renewed 2026-10-20: internal agent source routing, current-Task authority checks and original-owner experience placement; no new end-user Hub control or action."
+tips_exempt: "Renewed 2026-11-05: internal recall routing uses the existing work-line directory for explicit prior-work topic clues and follows candidate sources to original discussion. The human entry remains an ordinary Chat question; this skill change adds no end-user control, configuration or approval action."
 description: >
   记忆系统三入口路由（search_evidence / graph_resolve / list_recent）决策树 + 噪音控制 + 加载时机。F188 Phase F (AC-F6) 配套 skill。
   Use when: 没先验、压缩后回顾、"我记得最近讨论过 X"、search_evidence 反复 low-hit。
@@ -43,6 +43,17 @@ Not for:
 - 全文匹配 → `Grep`
 
 ## 三入口决策树
+
+用户明确回问本线程外的旧事、还没有原文坐标时，先沿现有工作线入口认线：
+`cat_cafe_list_threads(includeWork=true, topic="从当前标题和原问题选出的短线索")`。
+这是有界的标题、Task 与产物入口目录，不是消息全文搜索；没有对应 Matter 页也能使用。
+按原参与者、时间和讨论内容核候选，再用返回的 `readNext` 或原 Thread/Work 入口读当前来源。
+
+**同题提问不等于制作原线。** 当前线程、以前的回问或失败记录可能因同名且较新排在前面，
+真实工作线也可能用另一个标题。读到的只有问题、某个候选读空，或文档内单个消息坐标返回 404，
+都只说明这次读取的断点；仍有能补原话缺口的候选时，回到它们的 Thread/Work 入口核读。
+不必通读所有命中，也不反复重搜同一空入口。文档转述与原聊天读取分开报告；
+原话确实读回后再用于回答，剩余权限、版本或范围缺口如实保留。
 
 先识别坐标的类型：`threadId#messageId` 或裸消息 ID 直接走
 `cat_cafe_get_message(messageId="裸消息ID", mode="full")`，不要把 thread 前缀传进 messageId；

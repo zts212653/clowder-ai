@@ -14,6 +14,7 @@ import type { TaskTemplate } from '../infrastructure/scheduler/templates/types.j
 import type { ScheduleLifecycleNotifier } from '../infrastructure/scheduler/types.js';
 import type { SocketManager } from '../infrastructure/websocket/index.js';
 import { requirePrivilegedRouteOwner } from '../utils/privileged-route-guard.js';
+import { buildUpdatedScheduleSpec } from './schedule-parameter-update-support.js';
 
 export interface ScheduleProposalDecisionOptions {
   ownerUserId: string;
@@ -41,6 +42,19 @@ export const scheduleProposalDecisionRoutes: FastifyPluginAsync<ScheduleProposal
     if (!anchored) return;
 
     let proposal = access.proposal;
+    let updatedSpec: ReturnType<typeof buildUpdatedScheduleSpec> | undefined;
+    if (proposal.mutation.kind === 'update' && !proposal.effectCheckpoint) {
+      try {
+        updatedSpec = buildUpdatedScheduleSpec(
+          proposal.mutation.taskSnapshot,
+          proposal.mutation.params,
+          opts.templateRegistry,
+        );
+      } catch (error) {
+        if (error instanceof TypeError) return reply.code(409).send({ error: error.message });
+        throw error;
+      }
+    }
     if (proposal.status === 'pending') {
       const claimed = opts.store.claimForApproval(proposal.proposalId, Date.now());
       if (!claimed) return conflict(reply, proposal.status);
@@ -52,28 +66,38 @@ export const scheduleProposalDecisionRoutes: FastifyPluginAsync<ScheduleProposal
     try {
       if (proposal.mutation.kind === 'create') {
         const effect = opts.store.applyCreateEffect(proposal.proposalId, Date.now());
-        const template = opts.templateRegistry.get(effect.task.templateId);
-        if (!template) {
-          reply.status(500);
-          return { error: `Template ${effect.task.templateId} not found — approval remains recoverable` };
+        if (!effect.superseded) {
+          const template = opts.templateRegistry.get(effect.task.templateId);
+          if (!template) {
+            reply.status(500);
+            return { error: `Template ${effect.task.templateId} not found — approval remains recoverable` };
+          }
+          if (effect.task.enabled && !opts.taskRunner.getTaskSummaries().some((task) => task.id === effect.task.id)) {
+            const spec = template.createSpec(effect.task.id, {
+              trigger: effect.task.trigger,
+              params: effect.task.params,
+              ...(effect.task.entrustedWorkReevaluation
+                ? { entrustedWorkReevaluation: effect.task.entrustedWorkReevaluation }
+                : {}),
+              deliveryThreadId: effect.task.deliveryThreadId,
+            });
+            spec.display = effect.task.display;
+            opts.taskRunner.registerDynamic(spec, effect.task.id);
+          }
+          if (effect.applied) notifyTaskRegistered(opts.notifyLifecycle, effect.task);
         }
-        if (!opts.taskRunner.getTaskSummaries().some((task) => task.id === effect.task.id)) {
-          const spec = template.createSpec(effect.task.id, {
-            trigger: effect.task.trigger,
-            params: effect.task.params,
-            ...(effect.task.entrustedWorkReevaluation
-              ? { entrustedWorkReevaluation: effect.task.entrustedWorkReevaluation }
-              : {}),
-            deliveryThreadId: effect.task.deliveryThreadId,
-          });
-          spec.display = effect.task.display;
-          opts.taskRunner.registerDynamic(spec, effect.task.id);
+      } else if (proposal.mutation.kind === 'update') {
+        const effect = opts.store.applyUpdateEffect(proposal.proposalId, Date.now());
+        if (!effect.superseded && effect.task.enabled) {
+          const spec = updatedSpec ?? buildUpdatedScheduleSpec(effect.task, effect.task.params, opts.templateRegistry);
+          opts.taskRunner.refreshDynamic(spec, effect.task.id);
         }
-        if (effect.applied) notifyTaskRegistered(opts.notifyLifecycle, effect.task);
       } else {
         const effect = opts.store.applyDeleteEffect(proposal.proposalId, Date.now());
-        opts.taskRunner.unregister(effect.task.id);
-        if (effect.applied) notifyTaskDeleted(opts.notifyLifecycle, effect.task);
+        if (!effect.superseded) {
+          opts.taskRunner.unregister(effect.task.id);
+          if (effect.applied) notifyTaskDeleted(opts.notifyLifecycle, effect.task);
+        }
       }
     } catch (error) {
       if (error instanceof ScheduleMutationProposalStoreError) {

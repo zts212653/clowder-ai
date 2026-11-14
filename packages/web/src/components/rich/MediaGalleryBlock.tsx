@@ -2,6 +2,7 @@
 
 import { MediaThumbnail, RichGallery } from '@cat-cafe/ui';
 import { useCallback, useState } from 'react';
+import { gifThumbnailSource, useReducedMediaMotion } from '@/components/content-review/gif-thumbnail';
 import { useChatArtworkLightbox } from '@/components/content-review/useChatArtworkLightbox';
 import type { PublishedMessageCoordinate } from '@/components/content-review/usePublishedContent';
 import { CopyButton } from '@/components/Lightbox';
@@ -26,6 +27,7 @@ export function MediaGalleryBlock({
   const mediaUrls = useGalleryMediaUrls(items);
   const language = useShellLanguage();
   const published = useChatArtworkLightbox(publication);
+  const reducedMotion = useReducedMediaMotion();
 
   const handleImgError = useCallback((url: string) => {
     setFailedUrls((prev) => {
@@ -90,7 +92,7 @@ export function MediaGalleryBlock({
                 </div>
               ) : (
                 <MediaThumbnail
-                  src={src}
+                  src={gifThumbnailSource(src, reducedMotion)}
                   alt={item.alt ?? ''}
                   disabled={published.busy}
                   onOpen={() =>

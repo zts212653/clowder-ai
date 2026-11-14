@@ -12,6 +12,9 @@ import type Database from 'better-sqlite3';
 import { z } from 'zod';
 import { MemoryCueEpisodeStore } from '../cue/MemoryCueEpisodeStore.js';
 import { MatterMemoryStore, type StoredMatter } from './MatterMemoryStore.js';
+import type { MatterCatalogContext } from './matter-catalog-cursor.js';
+import { MatterDiscoveryIndex } from './matter-discovery-index.js';
+import { bindMatterDiscoverySource, discoverMatterCatalog } from './matter-discovery-source.js';
 import {
   captureMatterSource,
   findMatterSourceSelection,
@@ -51,8 +54,10 @@ function actorKey(actor: MatterActor): string {
 /** Owner UI, callback tools and opening directories share this current permission projection. */
 export class MatterMemoryService {
   readonly store: MatterMemoryStore;
+  private readonly discoveryIndex: MatterDiscoveryIndex;
   constructor(private readonly deps: MatterMemoryDeps) {
     this.store = new MatterMemoryStore(deps.db);
+    this.discoveryIndex = new MatterDiscoveryIndex(deps.db);
   }
 
   selectSource(actor: MatterActor, input: { threadId: string; messageId: string; quote: string }) {
@@ -73,40 +78,24 @@ export class MatterMemoryService {
         attribution: entry.source.segment === 'quote_text' ? 'quoted_in_message' : 'author',
       });
     }
-    return { matter: publicMatter(matter), entries };
+    const sourcesChanged = entries.some((entry) => entry.status === 'active' && entry.sourceStatus !== 'current');
+    return {
+      matter: publicMatter(matter),
+      entries,
+      ...(sourcesChanged ? { summaryStatus: 'sources_changed' as const } : {}),
+    };
+  }
+
+  discoverySource(actor: MatterActor, options: MatterCatalogContext & { signal?: AbortSignal } = {}) {
+    return bindMatterDiscoverySource(this.discoveryIndex, (reader, id) => this.project(reader, id), actor, options)
+      .source;
   }
 
   async catalog(
     actor: MatterActor,
-    options: { query?: string; cursor?: string; limit?: number; management?: boolean; signal?: AbortSignal } = {},
+    options: MatterCatalogContext & { cursor?: string; limit?: number; signal?: AbortSignal } = {},
   ): Promise<MatterCatalog> {
-    const management = options.management === true && actor.viewer.type === 'user';
-    const scope = matterDigest([
-      actor.userId,
-      actorKey(actor),
-      actor.publicReply === true,
-      options.query ?? '',
-      management,
-      'catalog',
-    ]);
-    const after = readCursor(options.cursor, scope);
-    const limit = Math.max(1, Math.min(options.limit ?? 12, 30));
-    const items: MatterCatalog['items'] = [];
-    const query = options.query?.toLocaleLowerCase();
-    for (const matter of this.store.list(actor.userId, after, management)) {
-      options.signal?.throwIfAborted();
-      const page = await this.project({ ...actor, signal: options.signal }, matter.matterId);
-      if (!page) {
-        if (!management || query) continue;
-        items.push({ matterId: matter.matterId, revision: matter.revision, status: matter.status, unavailable: true });
-      } else {
-        if (query && !`${page.matter.title}\n${page.matter.description}`.toLocaleLowerCase().includes(query)) continue;
-        items.push({ ...page.matter, entryCount: page.entries.filter((entry) => entry.status === 'active').length });
-      }
-      if (items.length > limit)
-        return { items: items.slice(0, limit), nextCursor: nextCursor(scope, items[limit - 1]!.matterId) };
-    }
-    return { items };
+    return discoverMatterCatalog(this.discoveryIndex, (reader, id) => this.project(reader, id), actor, options);
   }
 
   async read(
@@ -132,6 +121,7 @@ export class MatterMemoryService {
     );
     return {
       matter: page.matter,
+      ...(page.summaryStatus ? { summaryStatus: page.summaryStatus } : {}),
       entries: entries.slice(0, limit),
       ...(entries.length > limit ? { nextCursor: nextCursor(scope, entries[limit - 1]!.entryId) } : {}),
     };
@@ -172,7 +162,8 @@ export class MatterMemoryService {
       details.matterId,
     );
     if (!page) return { status: 'not_available' };
-    if (page.matter.revision !== details.pageRevision || page.matter.status !== 'active') return { status: 'changed' };
+    if (page.matter.revision !== details.pageRevision || page.matter.status !== 'active' || page.summaryStatus)
+      return { status: 'changed' };
     const selected: MatterEntryView[] = [];
     for (const expected of details.entries) {
       const entry = page.entries.find((candidate) => candidate.entryId === expected.entryId);

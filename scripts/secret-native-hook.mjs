@@ -29,6 +29,9 @@ export async function secretNativeHook(payload, options = {}) {
   if (!payload || (typeof payload.tool_name !== 'string' && payload.hook_event_name !== 'PostToolUse'))
     return denied('secret_hook_payload_invalid');
   if (payload?.hook_event_name !== 'PostToolUse') {
+    const { nativeAuthenticationDenial } = await import('./native-auth-effect.mjs');
+    const authentication = nativeAuthenticationDenial(payload.tool_input);
+    if (authentication) return denied(authentication);
     const { nativeSecretDenial } = await import('./native-secret-policy.mjs');
     const reason = nativeSecretDenial(payload);
     return reason ? denied(reason) : null;

@@ -22,9 +22,13 @@ function createDesktopNextApp(next, options) {
 // desktop gateway owns these routes at runtime instead of reaching another instance.
 function createDesktopWebGateway(handler, apiPort, timeline) {
   const proxy = (url) => /^\/(?:api|socket\.io|uploads)(?:\/|\?|$)/.test(url || '');
+  const startupId = process.env.CAT_CAFE_DESKTOP_STARTUP_ID;
   let observedFirstRequest = false;
   const server = http.createServer((request, response) => {
     if (!proxy(request.url)) {
+      if (startupId && request.headers['x-clowder-desktop-probe'] === '1') {
+        response.setHeader('x-clowder-desktop-startup-id', startupId);
+      }
       if (!observedFirstRequest && (request.url === '/' || request.url?.startsWith('/?'))) {
         observedFirstRequest = true;
         const began = performance.now();

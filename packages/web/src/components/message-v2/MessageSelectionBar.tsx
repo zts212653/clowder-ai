@@ -39,10 +39,10 @@ export function MessageSelectionBar({
           </p>
         )}
         <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2 text-compact">
-          <span className="mr-auto flex flex-wrap items-baseline gap-x-1.5 text-[13.5px] font-semibold tabular-nums text-cafe-primary">
+          <span className="mr-auto flex flex-wrap items-baseline gap-x-1.5 text-[length:var(--console-font-sm)] font-semibold tabular-nums text-cafe-primary">
             {t.selected(count)}
             {unselectedCardCount > 0 && (
-              <span className="text-[12.5px] font-normal text-cafe-muted">
+              <span className="text-[length:var(--console-font-xs)] font-normal text-cafe-muted">
                 {t.cardsNotSelected(unselectedCardCount)}
               </span>
             )}

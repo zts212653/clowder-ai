@@ -28,6 +28,8 @@ export interface QueuePrestartRetirementIntent {
 }
 
 export interface QueueLedgerPayload {
+  /** Optional owner-private browser correlation, separate from the durable source record identity. */
+  clientMessageId?: string;
   /** Stable identity of the one source record represented by this Queue Entry. */
   sourceRecordId: string;
   content: string;
@@ -59,7 +61,7 @@ export interface QueueLedgerExecution {
 export interface QueueLedgerDelivery {
   /** Optional B observation, never execution/recovery authority. No quota/account payload is retained. */
   routingAdmission?: RoutingAdmissionProvenanceV1;
-  /** Original Queue owns each Append until provider acceptance or durable recovery. */
+  /** Legacy upgrade input only. New Append writers keep these facts in History. */
   appendPendingByTarget?: Record<
     string,
     Pick<LifecycleAppendFailure, 'targetId' | 'invocationId' | 'responseMessageId' | 'at'> & {
@@ -68,7 +70,7 @@ export interface QueueLedgerDelivery {
       requiresCompletion?: boolean;
     }
   >;
-  /** Definite refusals await a new run; uncertain inputs remain held while their original handoff is checked. */
+  /** Legacy upgrade input only; not a recovery owner for new work. */
   appendRecoveryByTarget?: Record<string, LifecycleAppendFailure>;
   /** F293 policy refusals wait for an explicit owner attempt, including after restart. */
   routingHeldTargetIds?: string[];
@@ -237,7 +239,10 @@ export function queueLedgerAdmissionsMatch(existing: QueueLedgerEntry, incoming:
 /** Private targets are derived; the producer envelope survives target retirement and config changes. */
 function admissionIdentity(entry: QueueLedgerEntry) {
   const { callerTraceContext: _trace, ...execution } = entry.execution;
-  const { requestedTargetCats, ...privatePayload } = entry.payload;
+  const payload = { ...entry.payload };
+  // Browser correlation is not producer identity; old admissions have no such metadata.
+  delete payload.clientMessageId;
+  const { requestedTargetCats, ...privatePayload } = payload;
   const privateInput = entry.kind === 'private_input';
   return {
     version: entry.version,
@@ -248,7 +253,7 @@ function admissionIdentity(entry: QueueLedgerEntry) {
     from: entry.from,
     targets: privateInput ? (requestedTargetCats ?? entry.targets) : entry.targets,
     // Omitting this derived projection preserves receipts written before successor admission.
-    payload: privateInput ? privatePayload : entry.payload,
+    payload: privateInput ? privatePayload : payload,
     execution,
     authorIntentByTarget: entry.delivery.authorIntentByTarget,
     priority: entry.priority,

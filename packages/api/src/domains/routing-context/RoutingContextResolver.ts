@@ -101,7 +101,32 @@ export class RoutingContextResolver {
   constructor(private readonly dependencies: RoutingContextResolverDependencies) {}
 
   async resolve(input: ResolveRoutingContextInput): Promise<RoutingContextResolution> {
-    const [signalProjection, preferenceRevisions, profileResult] = await Promise.all([
+    const [signalProjection, preferenceRevisions, profileResult] = await this.loadDecisionInputs(input);
+    return this.composeResolution(input, signalProjection, preferenceRevisions, profileResult);
+  }
+
+  /** Same revision-fenced decision as preflight, with only the sources its candidates reference. */
+  async resolveWithDecisionSources(input: ResolveRoutingContextInput): Promise<RoutingContextResolutionWithSources> {
+    const [signalProjection, heads, profileResult] = await this.loadDecisionInputs(input);
+    const preferences = sortPreferences(heads);
+    const resolution = this.composeResolution(input, signalProjection, preferences, profileResult);
+    if (resolution.status === 'degraded') return { resolution, signalEvents: [], preferenceRevisions: [] };
+    const candidates = resolution.snapshot.candidates;
+    const signalRefs = new Set(
+      candidates.flatMap((candidate) => candidate.reasons.flatMap((reason) => reason.sourceRefs)),
+    );
+    const preferenceRefs = new Set(
+      candidates.flatMap((candidate) => candidate.matchedPreferences.map((preference) => preference.revisionId)),
+    );
+    return {
+      resolution,
+      signalEvents: signalProjection.assertions.filter((assertion) => signalRefs.has(assertion.eventId)),
+      preferenceRevisions: preferences.filter((preference) => preferenceRefs.has(preference.revisionId)),
+    };
+  }
+
+  private loadDecisionInputs(input: ResolveRoutingContextInput) {
+    return Promise.all([
       this.loadSignalProjection(input.ownerId),
       this.loadPreferenceHeads(input.ownerId),
       this.dependencies.profileRevisionSource.load({
@@ -110,7 +135,6 @@ export class RoutingContextResolver {
         intent: input.intent,
       }),
     ]);
-    return this.composeResolution(input, signalProjection, preferenceRevisions, profileResult);
   }
 
   async resolveWithSources(input: ResolveRoutingContextInput): Promise<RoutingContextResolutionWithSources> {

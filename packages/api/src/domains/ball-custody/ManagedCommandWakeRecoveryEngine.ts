@@ -1,6 +1,7 @@
 import { createModuleLogger } from '../../infrastructure/logger.js';
 import type { InvocationRecord } from '../cats/services/stores/ports/InvocationRecordStore.js';
 import { classifyInvocationRecoveryStatus } from '../cats/services/stores/ports/invocation-state-machine.js';
+import type { ManagedCommandWaitRecoveryOutcome } from './managed-command-wait-recovery-state.js';
 import {
   type ManagedCommandWakeCarrierTerminalReason,
   type ManagedCommandWakeProjection,
@@ -16,6 +17,19 @@ import {
 } from './managed-command-wake-recovery-policy.js';
 
 const log = createModuleLogger('ball-custody/managed-command-wake-recovery-engine');
+
+export interface ManagedCommandWaitProcessResult {
+  readonly result: ManagedCommandWakeRecoveryResult;
+  readonly outcome: ManagedCommandWaitRecoveryOutcome;
+}
+
+function processResult(result: ManagedCommandWakeRecoveryResult): ManagedCommandWaitProcessResult {
+  return { result, outcome: { kind: result === 'recovered' ? 'settled' : result === 'missing' ? 'stale' : 'waiting' } };
+}
+
+function waiting(parkReason?: string): ManagedCommandWaitProcessResult {
+  return { result: 'pending', outcome: { kind: 'waiting', ...(parkReason ? { parkReason } : {}) } };
+}
 
 /** Reconciles one managed wake after its command has produced durable evidence. */
 export class ManagedCommandWakeRecoveryEngine {
@@ -67,8 +81,12 @@ export class ManagedCommandWakeRecoveryEngine {
   }
 
   async recoverTask(taskId: string): Promise<ManagedCommandWakeRecoveryResult> {
+    return (await this.processTask(taskId)).result;
+  }
+
+  async processTask(taskId: string): Promise<ManagedCommandWaitProcessResult> {
     let parsed = parseWakeTask(this.deps.dynamicTaskStore.getById(taskId));
-    if (!parsed) return 'missing';
+    if (!parsed) return processResult('missing');
     parsed = recordManagedCommandWakeSlaBreach(this.deps, parsed, this.now, this.wakeSlaMs);
     if (parsed.command.state === 'lost') return this.persistLostCommandStatus(parsed);
     if (parsed.command.state === 'condition_met') {
@@ -78,23 +96,26 @@ export class ManagedCommandWakeRecoveryEngine {
         // no message to cancel — the task is simply retired instead of retried forever.
         if (this.retireTask(parsed.task.id, 'canceled')) {
           log.info({ taskId: parsed.task.id }, 'stale managed-command wake retired before any write');
-          return 'recovered';
+          return processResult('recovered');
         }
-        return 'pending';
+        return { result: 'pending', outcome: { kind: 'stale' } };
       }
-      if (published !== 'published') return 'pending';
+      if (published === 'retry')
+        return { result: 'pending', outcome: { kind: 'retryable_error', reason: 'wake_admission_failed' } };
+      if (published === 'stale') return { result: 'pending', outcome: { kind: 'stale' } };
+      if (published === 'waiting') return waiting();
       parsed = parseWakeTask(this.deps.dynamicTaskStore.getById(taskId));
-      if (!parsed) return 'missing';
+      if (!parsed) return processResult('missing');
     }
     if (isDispatchableManagedCommandWakeState(parsed.command.state)) {
       return this.recoverDispatchableTask(parsed);
     }
-    return parsed.command.state === 'consumed' ? 'recovered' : 'pending';
+    return processResult(parsed.command.state === 'consumed' ? 'recovered' : 'pending');
   }
 
   private async recoverDispatchableTask(
     parsed: ParsedManagedCommandWakeTask,
-  ): Promise<ManagedCommandWakeRecoveryResult> {
+  ): Promise<ManagedCommandWaitProcessResult> {
     const eventCarrier = parsed.command.messageId
       ? await this.deps.getEventCarrier?.({
           threadId: parsed.threadId,
@@ -103,37 +124,43 @@ export class ManagedCommandWakeRecoveryEngine {
           messageId: parsed.command.messageId,
         })
       : undefined;
-    if (eventCarrier?.state === 'handled') return this.consume(parsed, eventCarrier.invocationId);
-    if (eventCarrier?.state === 'terminal') return this.consume(parsed, undefined, eventCarrier.reason);
-    if (eventCarrier?.state === 'failed') return this.consume(parsed, eventCarrier.invocationId, 'failed');
-    if (eventCarrier?.state === 'pending') return 'pending';
+    if (eventCarrier?.state === 'handled') return processResult(this.consume(parsed, eventCarrier.invocationId));
+    if (eventCarrier?.state === 'terminal') return processResult(this.consume(parsed, undefined, eventCarrier.reason));
+    if (eventCarrier?.state === 'failed')
+      return processResult(this.consume(parsed, eventCarrier.invocationId, 'failed'));
+    const overdue = this.now() - (parsed.command.conditionMetAt ?? this.now()) >= this.wakeSlaMs;
+    if (eventCarrier?.state === 'pending')
+      return waiting(eventCarrier.unresolved && overdue ? 'append_input_unresolved' : undefined);
+    if (eventCarrier) return waiting(overdue ? 'carrier_unresolved' : undefined);
 
     const carrier = await this.findInvocationCarrier(parsed);
     if (carrier) {
       const recoveryStatus = classifyInvocationRecoveryStatus(carrier.status);
-      if (recoveryStatus === 'completed') return this.consume(parsed, carrier.id);
-      if (recoveryStatus === 'in_flight' || recoveryStatus === 'terminal') return 'pending';
+      if (recoveryStatus === 'completed') return processResult(this.consume(parsed, carrier.id));
+      if (recoveryStatus === 'in_flight' || recoveryStatus === 'terminal') return waiting();
     }
     // Recovery observes canonical delivery only; a Message reference cannot
     // mint another Queue admission or an execution after a restart.
-    return 'pending';
+    return waiting();
   }
 
   private async persistLostCommandStatus(
     parsed: ParsedManagedCommandWakeTask,
-  ): Promise<ManagedCommandWakeRecoveryResult> {
+  ): Promise<ManagedCommandWaitProcessResult> {
     const idempotencyKey = `hold-ball-lost:${parsed.task.id}`;
     try {
       const existing = await this.deps.messageStore.getByIdempotencyKey(parsed.userId, parsed.threadId, idempotencyKey);
       if (!existing) await this.appendLostStatus(parsed, idempotencyKey);
       const latest = parseWakeTask(this.deps.dynamicTaskStore.getById(parsed.task.id));
-      return latest?.command.state === 'lost' ? this.consume(latest, undefined, 'failed') : 'pending';
+      return latest?.command.state === 'lost'
+        ? processResult(this.consume(latest, undefined, 'failed'))
+        : processResult('pending');
     } catch (err) {
       log.warn(
         { err, taskId: parsed.task.id, threadId: parsed.threadId },
         'lost managed-command terminal status persistence failed — will retry',
       );
-      return 'pending';
+      return { result: 'pending', outcome: { kind: 'retryable_error', reason: 'lost_status_delivery_failed' } };
     }
   }
 

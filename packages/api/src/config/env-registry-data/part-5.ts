@@ -228,6 +228,14 @@ export const ENV_DEFINITIONS_5: readonly EnvDefinition[] = [
     hubVisible: false,
   },
   {
+    name: 'NO_PROXY',
+    defaultValue: '(未设置)',
+    description: '无需代理的目标地址列表；兼容小写 no_proxy（Codex 官方额度查询用）',
+    category: 'proxy',
+    sensitive: false,
+    hubVisible: false,
+  },
+  {
     name: 'CAT_CODEX_SANDBOX_MODE',
     defaultValue: 'danger-full-access',
     description: '缅因猫沙箱模式',

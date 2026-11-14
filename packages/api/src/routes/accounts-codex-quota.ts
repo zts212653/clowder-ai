@@ -4,11 +4,12 @@ import { renewCodexQuotaLogin } from '../config/codex-quota-renewal.js';
 import { resolveUserId } from '../utils/request-identity.js';
 import { resolveAccountProjectRoot } from './accounts-project-root.js';
 import { QuotaCredentialChanged, queryAccountQuota } from './accounts-quota-query.js';
+import { fetchCodexQuota } from './codex-quota-fetch.js';
 
 /** Explicit per-account queries; coalesce automatic renewal checks across clients. */
 export function registerCodexQuotaRoutes(
   app: FastifyInstance,
-  fetcher: typeof fetch = globalThis.fetch,
+  fetcher: typeof fetch = fetchCodexQuota,
   renewer: typeof renewCodexQuotaLogin = renewCodexQuotaLogin,
 ): void {
   const automatic = new Map<string, ReturnType<typeof queryAccountQuota>>();
@@ -49,7 +50,7 @@ export function registerCodexQuotaRoutes(
       if (error instanceof QuotaCredentialChanged)
         return reply.code(409).send({ error: '账号登录已变化，请刷新账号列表后重新查询' });
       return reply
-        .code(error instanceof Error && error.message === 'Codex account not found' ? 404 : 409)
+        .code(error instanceof Error && error.message === 'Codex account not found' ? 404 : 500)
         .send({ error: '无法读取账号，请核对账号配置' });
     }
   });

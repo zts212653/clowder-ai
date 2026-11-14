@@ -14,7 +14,7 @@ function makeMessage(overrides: Partial<ChatMessage>): ChatMessage {
 }
 
 describe('mergeReplaceHydrationMessages — presentation timeline order', () => {
-  it('reorders a history-only hydration by terminal completion time instead of storage order', () => {
+  it('keeps a history-only response at its start time despite a later completion', () => {
     const completedResponse = makeMessage({
       id: 'response-started-first-completed-last',
       catId: 'cat-sol',
@@ -52,9 +52,9 @@ describe('mergeReplaceHydrationMessages — presentation timeline order', () => 
     const result = mergeReplaceHydrationMessages([completedResponse, userSupplement, callbackInput], []);
 
     expect(getOrderedMessageTimeline(result.messages).map((message) => message.id)).toEqual([
+      'response-started-first-completed-last',
       'user-supplement',
       'callback-input',
-      'response-started-first-completed-last',
     ]);
   });
 });

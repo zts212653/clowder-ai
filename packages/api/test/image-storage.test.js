@@ -3,6 +3,11 @@ import { mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'node:test';
+import sharp from 'sharp';
+
+const png = await sharp({ create: { width: 2, height: 2, channels: 4, background: 'red' } })
+  .png()
+  .toBuffer();
 
 describe('image-storage', () => {
   let uploadDir;
@@ -22,7 +27,7 @@ describe('image-storage', () => {
     const { saveImageBufferToUploadDir } = await import('../dist/utils/image-storage.js');
 
     const result = await saveImageBufferToUploadDir({
-      buffer: Buffer.from('fake-png'),
+      buffer: png,
       mimeType: 'image/png',
       uploadDir,
       filenameStem: 'published-image',
@@ -34,14 +39,14 @@ describe('image-storage', () => {
     assert.equal(result.content.url, '/uploads/published-image.png');
 
     const content = await readFile(result.absPath);
-    assert.equal(content.toString(), 'fake-png');
+    assert.deepEqual(content, png);
   });
 
   it('copies a local image file into uploadDir and returns canonical /uploads metadata', async () => {
     const { copyImageFileToUploadDir } = await import('../dist/utils/image-storage.js');
 
     const sourcePath = join(sourceDir, 'source.png');
-    await writeFile(sourcePath, Buffer.from('source-png'));
+    await writeFile(sourcePath, png);
 
     const result = await copyImageFileToUploadDir({
       sourcePath,
@@ -55,7 +60,7 @@ describe('image-storage', () => {
     assert.equal(result.content.url, '/uploads/copied-image.png');
 
     const content = await readFile(result.absPath);
-    assert.equal(content.toString(), 'source-png');
+    assert.deepEqual(content, png);
   });
 
   it('rejects copied image files exceeding 10MB', async () => {
@@ -82,7 +87,7 @@ describe('image-storage', () => {
     );
 
     const sourcePath = join(sourceDir, 'source.png');
-    await writeFile(sourcePath, Buffer.from('source-png'));
+    await writeFile(sourcePath, png);
 
     await copyImageFileToUploadDir({
       sourcePath,
@@ -105,7 +110,7 @@ describe('image-storage', () => {
     );
 
     await saveImageBufferToUploadDir({
-      buffer: Buffer.from('source-png'),
+      buffer: png,
       mimeType: 'image/png',
       uploadDir,
       filenameStem: 'duplicate-buffer',
@@ -114,7 +119,7 @@ describe('image-storage', () => {
     await assert.rejects(
       () =>
         saveImageBufferToUploadDir({
-          buffer: Buffer.from('source-png'),
+          buffer: png,
           mimeType: 'image/png',
           uploadDir,
           filenameStem: 'duplicate-buffer',
@@ -128,7 +133,7 @@ describe('image-storage', () => {
     const { copyImageFileToUploadDir } = await import('../dist/utils/image-storage.js');
 
     const sourcePath = join(sourceDir, 'source.png');
-    await writeFile(sourcePath, Buffer.from('source-png'));
+    await writeFile(sourcePath, png);
 
     const first = await copyImageFileToUploadDir({
       sourcePath,
@@ -154,7 +159,7 @@ describe('image-storage', () => {
     const { copyImageFileToUploadDir, ImageUploadError } = await import('../dist/utils/image-storage.js');
 
     const sourcePath = join(uploadDir, 'same-path.png');
-    await writeFile(sourcePath, Buffer.from('already-published'));
+    await writeFile(sourcePath, png);
 
     await assert.rejects(
       () =>
@@ -203,7 +208,7 @@ describe('image-storage', () => {
 
     const existingTargetPath = join(uploadDir, 'recovered-image.png');
     const missingSourcePath = join(sourceDir, 'already-cleaned-up.png');
-    await writeFile(existingTargetPath, Buffer.from('published-before-replay'));
+    await writeFile(existingTargetPath, png);
 
     const recovered = await copyImageFileToUploadDir({
       sourcePath: missingSourcePath,

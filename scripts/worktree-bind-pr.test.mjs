@@ -19,8 +19,14 @@ test('binding keeps original provenance; post-merge receipt includes arbitrary d
     bindWorktreePr({ repo: f.repo, path: p, owner: 'codex61-sol', sourceRef, readPr });
     assert.deepEqual(lifecycleConfig(p, '--worktree'), { ...before, prSource: sourceRef });
     const result = inventoryCommand(['--repo', f.repo, '--pr', sourceRef], readPr);
-    assert.equal(result.worktrees.length, 2);
-    assert.equal(result.unresolved, 2);
+    assert.equal(result.worktrees.length, 1);
+    assert.equal(result.worktrees[0].path, p);
+    assert.equal(result.unresolved, 1);
+    assert.equal(result.associationComplete, false);
+    assert.deepEqual(
+      result.unknownWorktrees.map((row) => row.path),
+      [raw],
+    );
     assert.throws(
       () => bindWorktreePr({ repo: f.repo, path: p, owner: 'foreign', sourceRef, readPr }),
       /owner mismatch/,

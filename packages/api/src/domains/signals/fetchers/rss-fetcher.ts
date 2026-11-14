@@ -17,8 +17,30 @@ interface RssFeed {
 }
 
 interface RssParserLike {
-  parseURL(url: string): Promise<RssFeed>;
+  parseString(xml: string): Promise<RssFeed>;
 }
+
+interface TextResponseLike {
+  readonly ok: boolean;
+  readonly status: number;
+  readonly statusText: string;
+  text(): Promise<string>;
+}
+
+export interface RssFetchOptions {
+  readonly headers?: Record<string, string> | undefined;
+  readonly signal?: AbortSignal | undefined;
+}
+
+type FetchLike = (url: string, options?: RssFetchOptions) => Promise<TextResponseLike>;
+
+const DEFAULT_TIMEOUT_MS = 15_000;
+
+/** The headers rss-parser sent when it requested feeds itself, so servers see the same client. */
+const DEFAULT_HEADERS: Readonly<Record<string, string>> = {
+  'User-Agent': 'rss-parser',
+  Accept: 'application/rss+xml',
+};
 
 function nowIso(): string {
   return new Date().toISOString();
@@ -61,9 +83,11 @@ function unsupportedSourceError(source: SignalSource): FetchError {
 }
 
 export class RssFetcher implements Fetcher {
+  private readonly fetchImpl: FetchLike;
   private readonly parser: RssParserLike;
 
-  constructor(parser?: RssParserLike) {
+  constructor(fetchImpl?: FetchLike, parser?: RssParserLike) {
+    this.fetchImpl = fetchImpl ?? (globalThis.fetch as unknown as FetchLike);
     this.parser = parser ?? new Parser();
   }
 
@@ -87,8 +111,25 @@ export class RssFetcher implements Fetcher {
       };
     }
 
+    // The request is made here instead of rss-parser's parseURL: parseURL never reads
+    // redirect responses and does not abort on its timeout, so the leftover keep-alive
+    // sockets held one-shot fetch runs open for minutes. rss-parser only parses now.
+    const timeoutMs = source.fetch.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+    const controller = new AbortController();
+    const timeoutHandle = setTimeout(() => {
+      controller.abort();
+    }, timeoutMs);
+
     try {
-      const feed = await this.parser.parseURL(source.url);
+      const response = await this.fetchImpl(source.url, {
+        headers: { ...DEFAULT_HEADERS, ...source.fetch.headers },
+        signal: controller.signal,
+      });
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status} ${response.statusText}`);
+      }
+
+      const feed = await this.parser.parseString(await response.text());
       const articles = (feed.items ?? []).map(toRawArticle).filter((item): item is RawArticle => item !== null);
 
       return {
@@ -101,7 +142,11 @@ export class RssFetcher implements Fetcher {
         },
       };
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
+      const message = controller.signal.aborted
+        ? `request timed out after ${timeoutMs}ms`
+        : error instanceof Error
+          ? error.message
+          : String(error);
       return {
         articles: [],
         errors: [
@@ -117,6 +162,11 @@ export class RssFetcher implements Fetcher {
           source: source.id,
         },
       };
+    } finally {
+      clearTimeout(timeoutHandle);
+      // Release the connection on every exit path: a body left unread (error status, parse
+      // failure) otherwise keeps its socket open. After a fully read body this is a no-op.
+      controller.abort();
     }
   }
 }

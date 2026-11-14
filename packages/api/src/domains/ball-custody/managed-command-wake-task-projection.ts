@@ -66,6 +66,8 @@ export interface ManagedCommandWakeProjection {
   /** F167 Phase P: true once the admission-fact visibility message was durably appended. */
   readonly admissionFactAppended?: boolean;
   readonly conditionMetAt?: number;
+  /** Job-owner production identity; it never represents Queue or response state. */
+  readonly productionIntentKey?: string;
   readonly lostAt?: number;
   readonly lostReason?: ManagedCommandWakeLostReason;
   readonly lostDetail?: string;

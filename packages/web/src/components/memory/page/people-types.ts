@@ -6,6 +6,8 @@ import {
 } from '@cat-cafe/shared';
 import { hasValidOriginalProposals, isPersonProposal } from './original-proposal-read';
 
+export { personClaimText } from './person-claim-presentation';
+
 interface PersonIdentityRead {
   personId: string;
   displayName: string;
@@ -25,6 +27,7 @@ export interface PersonClaim {
   status: string;
   recordedAt: number;
   sourceCount: number;
+  approvedText?: string;
 }
 export interface PersonInteraction {
   eventId: string;
@@ -54,7 +57,15 @@ export interface PeoplePage {
   meta: { count: number; limit: number; offset: number; hasMore: boolean; nextOffset?: number };
 }
 export type PersonSource =
-  | { kind: 'message'; title: string | null; threadId: string; messageId: string; canOpen: true }
+  | {
+      kind: 'message';
+      title: string | null;
+      threadId: string;
+      messageId: string;
+      canOpen: true;
+      occurredAt?: number;
+      speaker?: string;
+    }
   | { kind: 'owner_action'; label: string; occurredAt: number; canOpen: false };
 export interface PersonSources {
   status: 'ready' | 'unavailable';
@@ -110,6 +121,7 @@ function isClaim(value: unknown): value is PersonClaim {
     !['claimId', 'revision', 'status'].every((key) => text(value[key])) ||
     !time(value.recordedAt) ||
     !count(value.sourceCount) ||
+    (value.approvedText !== undefined && !text(value.approvedText)) ||
     !record(value.payload)
   )
     return false;
@@ -176,9 +188,4 @@ export function isPersonSources(value: unknown): value is PersonSources {
             (source.title === null || text(source.title)))),
     )
   );
-}
-export function personClaimText(payload: PersonClaim['payload']): string {
-  if (payload.kind === 'redacted') return '这条内容已遗忘';
-  if (payload.kind === 'user_assessment') return payload.statement;
-  return `${payload.predicate}：${typeof payload.value === 'string' ? payload.value : JSON.stringify(payload.value)}`;
 }

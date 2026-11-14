@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 /** F268 offline pause and reconnect-drain state-machine tests. */
 
 import { TIP_QUEUE_FLUSH_COUNT } from '@cat-cafe/shared';

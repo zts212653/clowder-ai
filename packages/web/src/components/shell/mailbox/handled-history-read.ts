@@ -148,6 +148,21 @@ export function createHandledHistoryRead(load: Loader = readApprovalHistoryPage)
       else stopTimer();
     },
     refresh: () => request(false, true),
+    removePurgedProposals(proposalIds: string[]) {
+      const ids = new Set(proposalIds);
+      const items =
+        snapshot.items?.filter((item) => item.sourceFeatureId !== 'F276' || !ids.has(item.proposalId)) ?? null;
+      publish({
+        ...snapshot,
+        items,
+        currentKeys: new Set(
+          [...snapshot.currentKeys].filter(
+            (key) =>
+              !proposalIds.some((proposalId) => key === settledResultKey({ sourceFeatureId: 'F276', proposalId })),
+          ),
+        ),
+      });
+    },
     loadMore: () => request(true),
     invalidate() {
       invalidated = true;

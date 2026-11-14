@@ -1,4 +1,7 @@
 import assert from 'node:assert/strict';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, it } from 'node:test';
 
 const VALID_PODCAST_JSON = JSON.stringify({
@@ -132,11 +135,13 @@ describe('F091 / RFC #1356: podcast Queue admission', () => {
 });
 
 describe('F091 Phase 6: study thread metadata', () => {
-  it('reuses an existing thread link', async () => {
+  it('reuses an existing thread link', async (t) => {
     const { StudyMetaService } = await import('../dist/domains/signals/services/study-meta-service.js');
     const svc = new StudyMetaService();
     const testId = `test-resolve-${Date.now()}`;
-    const testPath = '/tmp/test-resolve.md';
+    const root = await mkdtemp(join(tmpdir(), 'podcast-thread-meta-'));
+    t.after(() => rm(root, { recursive: true, force: true }));
+    const testPath = join(root, 'test-resolve.md');
     await svc.linkThread(testId, testPath, { threadId: 'thread-existing', linkedBy: 'test-user' });
     const meta = await svc.readMeta(testId, testPath);
     assert.equal(meta.threads[0].threadId, 'thread-existing');

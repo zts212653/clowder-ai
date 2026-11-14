@@ -11,9 +11,11 @@ export function isNativeCloudTarget(target: string): boolean {
 export function cloudReceiptOf(message: ChatMessage): CloudBridgeOutboundReceiptV1 | undefined {
   const payload = message.extra?.systemInfo?.payload;
   const receipt =
+    message.type === 'connector' &&
+    message.from?.kind === 'system' &&
     message.source?.connector === 'cloud-bridge-status'
       ? message.source.meta?.cloudBridgeOutboundReceipt
-      : payload?.type === 'cloud_bridge_status'
+      : message.type === 'system' && payload?.type === 'cloud_bridge_status'
         ? payload.outboundReceipt
         : undefined;
   if (!isCloudBridgeOutboundReceiptV1(receipt) || !isNativeCloudTarget(receipt.targetCatId)) return undefined;
@@ -25,6 +27,23 @@ export function cloudReceiptOf(message: ChatMessage): CloudBridgeOutboundReceipt
 export interface CloudDispatchReceipt {
   identity: CloudReplyIdentity;
   receipt?: CloudBridgeOutboundReceiptV1;
+}
+
+/** The native source already owns these facts, even before a cloud answer arrives. */
+export function hasNativeCloudDeliveryReceipt(dispatch: CloudDispatchReceipt): boolean {
+  const receipt = dispatch.receipt;
+  return Boolean(
+    receipt &&
+      (receipt.status === 'unknown' || receipt.status === 'sent') &&
+      (receipt.transport === 'host' || receipt.transport === 'events'),
+  );
+}
+
+export function pendingCloudDeliveryLabel(dispatch: CloudDispatchReceipt): string | undefined {
+  const receipt = dispatch.receipt;
+  if (receipt?.status === 'sent') return '已送达，等待回复';
+  if (receipt?.status !== 'unknown') return undefined;
+  return receipt.failure?.fingerprint.phase === 'submitted_waiting_receipt' ? '已尝试提交，回执待确认' : '投递待确认';
 }
 
 /** Follow the native dispatch ref, never timeline order, to identify the current attempt. */
@@ -98,6 +117,7 @@ export function cloudDispatchAudit(dispatch: CloudDispatchReceipt, historical: b
           `传输 ${receipt.transport} · ${receipt.idempotency.disposition} · 来源 ${receipt.sourceSender.id}`,
           ...(receipt.sourceSender.invocationId ? [`来源调用 ${receipt.sourceSender.invocationId}`] : []),
           ...(receipt.hostMessageId ? [`Host ${receipt.hostMessageId}`] : []),
+          ...(receipt.failure ? [`诊断 ${receipt.failure.errorCode} · 阶段 ${receipt.failure.fingerprint.phase}`] : []),
         ]
       : []),
     `发送调用 ${identity.dispatchInvocationId}`,

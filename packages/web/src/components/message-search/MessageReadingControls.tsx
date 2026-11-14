@@ -25,6 +25,7 @@ export function MessageReadingControls({ host }: { host: MessageSearchHost }) {
   const trip = host.session?.trip;
   const journey6 = useShellPresentation() === 'v2';
   const findReturn = !!host.session?.find;
+  const jumpReturn = host.session?.source === 'jump';
   const originTitle = useChatStore(
     (state) => state.threads.find((thread) => thread.id === trip?.origin.threadId)?.title,
   );
@@ -46,10 +47,10 @@ export function MessageReadingControls({ host }: { host: MessageSearchHost }) {
   const index = trip.pending?.kind === 'target' ? trip.pending.index : (trip.settledIndex ?? -1);
   return (
     <nav
-      aria-label="浏览本次检索结果"
+      aria-label={jumpReturn ? '阅读返回' : '浏览本次检索结果'}
       className="ml-auto w-fit rounded-xl border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] p-2 shadow-[var(--console-shadow-soft)]"
       onKeyDown={(event) => {
-        if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') return;
+        if (jumpReturn || (event.key !== 'ArrowUp' && event.key !== 'ArrowDown')) return;
         const next = index + (event.key === 'ArrowUp' ? -1 : 1);
         if (next < 0 || next >= trip.targets.length) return;
         event.preventDefault();
@@ -57,7 +58,7 @@ export function MessageReadingControls({ host }: { host: MessageSearchHost }) {
       }}
     >
       <div className="flex items-center gap-1">
-        {!findReturn && (
+        {!findReturn && !jumpReturn && (
           <>
             <output className="px-2 text-xs text-cafe-secondary" aria-live="polite">
               {progressLabel(trip)}
@@ -82,13 +83,35 @@ export function MessageReadingControls({ host }: { host: MessageSearchHost }) {
             </button>
           </>
         )}
+        {jumpReturn && trip.status === 'moving' && (
+          <output className="px-2 text-xs text-cafe-secondary" aria-live="polite">
+            定位中…
+          </output>
+        )}
         {!worksOwnsReturn && (
           <button type="button" className={`${controlClass} max-w-52 truncate`} onClick={host.returnToOrigin}>
-            {findReturn ? '‹ 回到查找' : journey6 ? `‹ 回到「${originTitle || '刚才那条对话'}」` : '回到刚才'}
+            {findReturn
+              ? '‹ 回到查找'
+              : jumpReturn || !journey6
+                ? '回到刚才'
+                : `‹ 回到「${originTitle || '刚才那条对话'}」`}
+          </button>
+        )}
+        {jumpReturn && (
+          // The bar stays until used; without this the reader cannot say "I don't need to go back", and a bar whose
+          // return point is gone (unavailable / interrupted by a remount mid-jump) could never be dismissed.
+          <button
+            type="button"
+            className={controlClass}
+            aria-label="关闭返回条"
+            title="不用回去了"
+            onClick={host.dismissReturn}
+          >
+            ×
           </button>
         )}
       </div>
-      {(!findReturn || trip.status === 'unavailable' || trip.status === 'interrupted') && (
+      {((!findReturn && !jumpReturn) || trip.status === 'unavailable' || trip.status === 'interrupted') && (
         <p className="mt-1 px-2 text-micro text-cafe-secondary">{statusText[trip.status]}</p>
       )}
       {!host.persisted && (

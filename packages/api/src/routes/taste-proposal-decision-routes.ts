@@ -17,6 +17,7 @@ import {
   requireAnchoredPublication,
 } from '../domains/approval-hub/requireAnchoredPublication.js';
 import { SessionMutex } from '../domains/cats/services/agents/invocation/SessionMutex.js';
+import type { IMessageStore } from '../domains/cats/services/stores/ports/MessageStore.js';
 import {
   approveTasteProposal as defaultApproveTasteProposal,
   type TasteApprovalCoordinator,
@@ -30,9 +31,19 @@ import { authorizeOwnerBrowserAction } from './owner-memory-browser-auth.js';
 
 const paramsSchema = z.object({ id: z.string().min(1).max(200) });
 const rejectBodySchema = z.object({ rejectionReason: z.string().trim().min(1).max(500).optional() }).strict();
+const approveBodySchema = z
+  .object({
+    decisionDigest: z
+      .string()
+      .regex(/^[0-9a-f]{64}$/)
+      .optional(),
+  })
+  .strict();
 
 export interface TasteDecisionDeps {
+  getIndexProjection?: () => import('../domains/memory/PublishedDocumentIndex.js').PublishedIndexStatus | undefined;
   tasteProposalStore: ITasteProposalStore;
+  messageStore?: Pick<IMessageStore, 'getById'>;
   socketManager: Pick<SocketManager, 'emitToUser'>;
   writeVignette: VignetteWriterFn;
   approvalCoordinator?: TasteApprovalCoordinator;
@@ -73,6 +84,8 @@ export function registerTasteProposalDecisionRoutes(app: FastifyInstance, deps: 
 
   // POST /api/taste-proposals/:id/approve
   app.post('/api/taste-proposals/:id/approve', async (request, reply) => {
+    const body = approveBodySchema.safeParse(request.body ?? {});
+    if (!body.success) return reply.status(400).send({ error: 'Invalid request body', details: body.error.issues });
     const resolved = await resolveOwnedTasteProposal(request, reply, tasteProposalStore, true);
     if (!resolved) return;
     if (!(await requireAnchored(tasteProposalStore, resolved.proposal.id, reply))) return;
@@ -81,6 +94,8 @@ export function registerTasteProposalDecisionRoutes(app: FastifyInstance, deps: 
       lock: approvalCoordinator.lock,
       lockKey: approvalCoordinator.lockKey,
       writeVignette,
+      ...(body.data.decisionDigest ? { expectedDecisionDigest: body.data.decisionDigest } : {}),
+      ...(deps.messageStore ? { messageStore: deps.messageStore } : {}),
     });
     if (result.ok) {
       socketManager.emitToUser(resolved.userId, 'proposal_updated', result.proposal);
@@ -89,8 +104,16 @@ export function registerTasteProposalDecisionRoutes(app: FastifyInstance, deps: 
         status: result.proposal.status,
         vignettePath: result.proposal.vignettePath,
         recovered: result.recovered,
+        ...(result.proposal.privacy === 'public' && deps.getIndexProjection
+          ? { indexProjection: deps.getIndexProjection() }
+          : {}),
       };
     }
+    // The response body reaches only the browser; keep the writer's reason where it can be diagnosed.
+    request.log[result.reason === 'write_failed' ? 'error' : 'warn'](
+      { proposalId: resolved.proposal.id, reason: result.reason, detail: result.error },
+      '[F221] Taste approval did not complete',
+    );
     return projectFailedApproval(result, reply);
   });
 
@@ -138,12 +161,13 @@ async function resolveOwnedTasteProposal(
     reply.status(404).send({ error: 'Proposal not found' });
     return null;
   }
-  const userId = proposal.correctionTarget ? resolveSessionUserId(request) : resolveStrictUserId(request);
+  const browserRequired = Boolean(proposal.correctionTarget) || (requireBrowserAction && proposal.privacy === 'public');
+  const userId = browserRequired ? resolveSessionUserId(request) : resolveStrictUserId(request);
   if (!userId) {
     reply.status(401).send({ error: proposal.correctionTarget ? 'Session required' : 'Identity required' });
     return null;
   }
-  if (proposal.correctionTarget && requireBrowserAction && !authorizeOwnerBrowserAction(request)) {
+  if (browserRequired && requireBrowserAction && !authorizeOwnerBrowserAction(request)) {
     reply.status(403).send({ error: 'Browser owner action required' });
     return null;
   }
@@ -169,6 +193,16 @@ function projectFailedApproval(
   result: Exclude<Awaited<ReturnType<typeof defaultApproveTasteProposal>>, { ok: true }>,
   reply: FastifyReply,
 ) {
+  if (result.reason === 'decision_changed')
+    return reply.status(409).send({
+      error: '品味提议内容已变化或尚未确认，请重读完整提议后再批准。',
+      code: result.reason,
+    });
+  if (result.reason === 'origin_not_eligible')
+    return reply.status(409).send({
+      error: '原来源已不可用或不属于审批人，不能发布这条品味。',
+      code: result.reason,
+    });
   if (result.reason === 'not_found') return reply.status(404).send({ error: 'Proposal not found' });
   if (result.reason === 'rejected') {
     return reply.status(409).send({ error: 'Proposal already rejected', status: 'rejected' });

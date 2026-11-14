@@ -157,7 +157,9 @@ export function mediaChatTarget(input: {
 }
 
 /** The label a person reads for a place: what they did, never its coordinates. */
-export function mediaSelectionLabel(item: MediaSelectionItem): '圈选' | '点选' | '时间段' | '圈这一帧' | '段落' {
+export function mediaSelectionLabel(item: MediaSelectionItem): string {
+  if (item.selection.kind !== 'video-range' && item.selection.frameIndex !== undefined)
+    return `第 ${item.selection.frameIndex + 1}${item.selection.endFrameIndex !== undefined ? `–${item.selection.endFrameIndex + 1}` : ''} 帧 · ${item.selection.kind === 'image-point' ? '点选' : '圈选'}`;
   if (item.selection.kind === 'video-range' && item.selection.storyEvidence) return '段落';
   if (item.selection.kind === 'video-range')
     return item.selection.frameRegion || item.selection.framePoint ? '圈这一帧' : '时间段';

@@ -4,10 +4,13 @@ import {
   PersonMemoryRecallService,
 } from '../domains/memory/people/PersonMemoryRecallService.js';
 import type { PersonMemoryStore } from '../domains/memory/people/PersonMemoryStore.js';
+import { personMemoryCardRevision } from '../domains/memory/people/person-memory-card-revision.js';
 import { projectPersonMemoryProposalStatus } from '../domains/memory/people/person-memory-proposal-status.js';
 import { observePersonMemoryStage } from '../domains/memory/people/person-memory-telemetry.js';
 import type { WorkspacePersonResolver } from '../domains/memory/people/WorkspacePersonResolver.js';
+import { memoryReadConsumerScope } from '../domains/memory/read-usage/MemoryDirectReadEvidence.js';
 import { requireCallbackAuth, requireCallbackPrincipal } from './callback-auth-prehandler.js';
+import { deliverMemoryDirectRead, finishMemoryDirectRead } from './memory-direct-read-response.js';
 import {
   amendSchema,
   correctSchema,
@@ -28,6 +31,7 @@ import {
 } from './person-memory-write-opportunity-route-invalidation.js';
 
 export interface CallbackPersonMemoryDeps {
+  readEvidenceDb?: import('better-sqlite3').Database;
   store: Pick<
     PersonMemoryStore,
     | 'getCandidateForOwner'
@@ -75,10 +79,28 @@ export function registerCallbackPersonMemoryRoutes(app: FastifyInstance, deps: C
     if (!principal) return;
     const body = recallSchema.safeParse(request.body);
     if (!body.success) return invalid(reply, body.error);
-    return observePersonMemoryStage(
+    const result = await observePersonMemoryStage(
       'recall',
       () => recallService.recallByAlias(principal.userId, body.data.alias),
       resultOutcome,
+    );
+    return finishMemoryDirectRead(
+      request,
+      reply,
+      deps.readEvidenceDb,
+      principal,
+      body.data.readRequestId,
+      result,
+      result.status === 'resolved'
+        ? [
+            {
+              family: 'person_entity',
+              anchor: `person-memory:${result.card.personId}`,
+              sourceRevision: personMemoryCardRevision(result.card),
+              memoryRevision: result.personRevision,
+            },
+          ]
+        : [],
     );
   });
 
@@ -89,12 +111,29 @@ export function registerCallbackPersonMemoryRoutes(app: FastifyInstance, deps: C
     if (!body.success) return invalid(reply, body.error);
     const input: PersonMemoryDrillInput = {
       ownerUserId: principal.userId,
-      turnId: principal.kind === 'invocation' ? principal.invocationId : `agent-key:${principal.agentKeyId}`,
+      turnId: memoryReadConsumerScope(principal),
       personId: body.data.personId,
+      ...(body.data.readRequestId ? { readRequestId: body.data.readRequestId } : {}),
       item: body.data.item,
       timeWindow: body.data.timeWindow,
     };
-    return observePersonMemoryStage('drill', () => recallService.drill(input), resultOutcome);
+    return deliverMemoryDirectRead(request, reply, deps.readEvidenceDb, principal, body.data.readRequestId, (record) =>
+      observePersonMemoryStage(
+        'drill',
+        () =>
+          recallService.drill(input, (result) =>
+            record([
+              {
+                family: 'person_entity',
+                anchor: `person-memory:${input.personId}`,
+                sourceRevision: result.sourceRevision,
+                memoryRevision: result.personRevision,
+              },
+            ]),
+          ),
+        resultOutcome,
+      ),
+    );
   });
 
   app.post('/api/callbacks/person-memory/correct-claim', async (request, reply) => {

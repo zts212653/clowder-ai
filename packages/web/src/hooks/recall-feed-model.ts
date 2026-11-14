@@ -50,7 +50,10 @@ export function recallEventResultLabel(event: RecallEvent): string {
       invalidated: '递送已失效',
     }[event.cueStatus];
   }
-  if (event.resultStatus === 'error') return '召回失败';
+  if (event.resultStatus === 'error') return '检索失败';
+  if (event.resultStatus === 'timeout') return '检索超时';
+  if (event.resultStatus === 'cancelled') return '检索已取消';
+  if (event.resultStatus === 'parser_miss') return '无法读取检索结果';
   if (event.resultCount === 0 || event.resultStatus === 'no_results') return '没有命中';
   if (event.resultCount == null) return '结果没有记录下来';
   const reads = recallReadCount(event);
@@ -106,7 +109,11 @@ export function deduplicateRecallEvents(live: RecallEvent[], history: RecallEven
       pushSurface: event.pushSurface ?? other.pushSurface,
       consumedCount: event.consumedCount ?? other.consumedCount,
       resultCount: event.resultCount ?? other.resultCount,
-      resultStatus: event.resultStatus ?? other.resultStatus,
+      query: !event.query.trim() || event.query === '(unknown)' ? other.query || event.query : event.query,
+      resultStatus:
+        other.resultStatus && other.resultStatus !== 'legacy_unknown' && other.resultStatus !== 'result_unmerged'
+          ? other.resultStatus
+          : (event.resultStatus ?? other.resultStatus),
       results,
     };
   });

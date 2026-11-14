@@ -7,6 +7,7 @@ import { useChatStore } from '@/stores/chatStore';
 import { apiFetch } from '@/utils/api-client';
 import { useWorkspace } from '../useWorkspace';
 
+vi.mock('@/components/thread-chat/hub-socket-context', () => import('@/test-utils/hub-socket-context-mock'));
 vi.mock('@/utils/api-client', () => ({ apiFetch: vi.fn() }));
 
 const MAIN_ROOT = '/tmp/cafe-main';

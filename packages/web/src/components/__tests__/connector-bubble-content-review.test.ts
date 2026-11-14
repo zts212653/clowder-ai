@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 /**
  * Host content-review returns are addressed to the cat: they carry a JSON
  * coordinate block and tool instructions. The human who triggered them should

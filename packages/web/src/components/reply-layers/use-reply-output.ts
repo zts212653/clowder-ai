@@ -1,35 +1,21 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useMemo } from 'react';
 import { useProcessTalkPreference } from '@/hooks/useProcessTalkPreference';
 import type { ChatMessage } from '@/stores/chat-types';
-import { projectReplyOutput } from './reply-output';
+import { sha256Hex } from '@/utils/sha256-hex';
+import { projectReplyOutput, replyLayoutAwaitsDigest } from './reply-output';
 
-/** A changed snapshot remains whole until its actual UTF-8 body hash is verified. */
+/**
+ * A changed snapshot remains whole until its actual UTF-8 body hash is verified. The digest is
+ * synchronous: an async one painted the whole body first and changed the row's height after mount.
+ * It is computed only for a layout that every other condition already admits.
+ */
 export function useReplyOutput(message: ChatMessage, threadId: string | undefined, enabled: boolean) {
   const preference = useProcessTalkPreference(enabled);
-  const [verified, setVerified] = useState<{ content: string; hash: string }>();
   const content = message.content;
-  const hasLayout = enabled && Boolean(threadId && message.extra?.outputLayout);
-  useEffect(() => {
-    if (!hasLayout || !globalThis.crypto?.subtle) return;
-    let current = true;
-    void globalThis.crypto.subtle
-      .digest('SHA-256', new TextEncoder().encode(content))
-      .then((buffer) => {
-        if (current)
-          setVerified({
-            content,
-            hash: Array.from(new Uint8Array(buffer), (byte) => byte.toString(16).padStart(2, '0')).join(''),
-          });
-      })
-      .catch(() => {
-        /* Unverifiable text retains the original whole-body presentation. */
-      });
-    return () => {
-      current = false;
-    };
-  }, [content, hasLayout]);
-  if (!hasLayout || !threadId || verified?.content !== content) return undefined;
-  return projectReplyOutput(message, threadId, verified.hash, preference.mode);
+  const eligible = enabled && Boolean(threadId) && replyLayoutAwaitsDigest(message, threadId ?? '', preference.mode);
+  const hash = useMemo(() => (eligible ? sha256Hex(content) : undefined), [content, eligible]);
+  if (!eligible || !threadId || !hash) return undefined;
+  return projectReplyOutput(message, threadId, hash, preference.mode);
 }

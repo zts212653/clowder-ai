@@ -1,13 +1,18 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { Readable } from 'node:stream';
+import { Readable, Transform } from 'node:stream';
 import type { FastifyInstance, FastifyPluginAsync, FastifyReply, FastifyRequest } from 'fastify';
 import { withoutPluginCallContext } from '../../domains/plugin/carrier/plugin-call-context.js';
 import { withPluginOwnerRequest } from '../../domains/plugin/carrier/plugin-owner-request-context.js';
 import type { DeclaredPluginUi } from '../../domains/plugin/declared/declared-plugin-ui.js';
 import type { DeclaredPluginWebhook } from '../../domains/plugin/declared/declared-runtime-contributions.js';
+import {
+  DEFAULT_PLUGIN_WEBHOOK_REQUEST_BODY_LIMIT_BYTES,
+  MAX_PLUGIN_WEBHOOK_REQUEST_BODY_LIMIT_BYTES,
+} from '../../domains/plugin/declared/declared-webhooks.js';
 import { pluginAccessError, requirePluginOwnerLocalAccess } from '../plugin-access-guards.js';
 
 const DEFAULT_TIMEOUT_MS = 30_000;
+const PANEL_TIMEOUT_MS = 180_000;
 const MAX_RESPONSE_BODY_BYTES = 1024 * 1024;
 const MAX_RESPONSE_HEADERS = 32;
 const MAX_RESPONSE_HEADER_VALUE_BYTES = 8 * 1024;
@@ -66,10 +71,56 @@ export const pluginWebhookForwardingRoutes: FastifyPluginAsync<PluginWebhookForw
 ) => {
   installRawBodyParsers(app);
 
-  app.all<{ Params: ForwardingParams }>('/api/plugins/:pluginId/*', { bodyLimit: 24_000_000 }, (request, reply) =>
-    forwardPluginWebhook(request, reply, options),
+  app.all<{ Params: ForwardingParams }>(
+    '/api/plugins/:pluginId/*',
+    {
+      bodyLimit: MAX_PLUGIN_WEBHOOK_REQUEST_BODY_LIMIT_BYTES,
+      preParsing: (request, _reply, payload, done) => {
+        const target = resolveTarget(request, options.webhooks);
+        const limit = target.ok
+          ? target.declared.requestBodyLimitBytes
+          : DEFAULT_PLUGIN_WEBHOOK_REQUEST_BODY_LIMIT_BYTES;
+        const contentLength = Number(request.headers['content-length']);
+        if (Number.isFinite(contentLength) && contentLength > limit) {
+          done(new PluginWebhookRequestBodyTooLargeError());
+          return;
+        }
+        const limited = requestBodyLimitStream(limit);
+        payload.pipe(limited);
+        done(null, limited);
+      },
+    },
+    (request, reply) => forwardPluginWebhook(request, reply, options),
   );
 };
+
+class PluginWebhookRequestBodyTooLargeError extends Error {
+  readonly code = 'FST_ERR_CTP_BODY_TOO_LARGE';
+  readonly statusCode = 413;
+
+  constructor() {
+    super('Request body is too large');
+  }
+}
+
+function requestBodyLimitStream(limit: number): Transform & { receivedEncodedLength: number } {
+  let receivedEncodedLength = 0;
+  const stream = new Transform({
+    transform(chunk: Buffer, _encoding, callback) {
+      receivedEncodedLength += chunk.length;
+      if (receivedEncodedLength > limit) {
+        callback(new PluginWebhookRequestBodyTooLargeError());
+        return;
+      }
+      callback(null, chunk);
+    },
+  }) as Transform & { receivedEncodedLength: number };
+  Object.defineProperty(stream, 'receivedEncodedLength', {
+    enumerable: true,
+    get: () => receivedEncodedLength,
+  });
+  return stream;
+}
 
 async function forwardPluginWebhook(
   request: FastifyRequest<{ Params: ForwardingParams }>,
@@ -103,7 +154,7 @@ async function forwardPluginWebhook(
   let returnedBody: Readable | undefined;
   let failurePhase: 'invocation' | 'validation' = 'invocation';
   try {
-    const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+    const timeoutMs = options.timeoutMs ?? (activation ? PANEL_TIMEOUT_MS : DEFAULT_TIMEOUT_MS);
     if (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0) throw new TypeError('timeoutMs must be positive');
     const invoke = () =>
       withTimeout(
@@ -137,7 +188,7 @@ async function forwardPluginWebhook(
     if (value && typeof value === 'object' && 'body' in value && value.body instanceof Readable)
       returnedBody = value.body;
     failurePhase = 'validation';
-    return await sendPluginResponse(reply, validatePluginResponse(value));
+    return await sendPluginWebhookResponse(reply, validatePluginWebhookResponse(value));
   } catch (error) {
     returnedBody?.destroy();
     if (error instanceof PluginWebhookTimeoutError) {
@@ -261,7 +312,7 @@ function authorizeRequest(
   return { kind: 'owner', id: access.operator };
 }
 
-function sendPluginResponse(reply: FastifyReply, response: PluginWebhookResponse): unknown {
+export function sendPluginWebhookResponse(reply: FastifyReply, response: PluginWebhookResponse): unknown {
   reply.status(response.status);
   for (const [name, value] of Object.entries(response.headers)) reply.header(name, value);
   // Any directly navigated package document must not execute with the Host's origin,
@@ -311,13 +362,13 @@ function forwardedHeaders(request: FastifyRequest): Record<string, string | read
   return result;
 }
 
-interface PluginWebhookResponse {
+export interface PluginWebhookResponse {
   readonly status: number;
   readonly headers: Readonly<Record<string, string>>;
   readonly body: unknown;
 }
 
-function validatePluginResponse(value: unknown): PluginWebhookResponse {
+export function validatePluginWebhookResponse(value: unknown): PluginWebhookResponse {
   if (!isPlainRecord(value)) throw new TypeError('response must be an object');
   const keys = Object.keys(value);
   if (keys.some((key) => key !== 'status' && key !== 'headers' && key !== 'body')) {

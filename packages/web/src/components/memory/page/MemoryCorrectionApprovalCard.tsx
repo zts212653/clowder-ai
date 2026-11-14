@@ -26,7 +26,16 @@ export function MemoryCorrectionApprovalCard({ item }: { item: ApprovalHubItem }
   const original = useOriginalApprovalRead(
     'F321',
     item.proposalId,
-    { ...coordinate },
+    {
+      ...coordinate,
+      // A failed open-phase read is not the read of this same proposal's later recovery phase.
+      sourceVersion: JSON.stringify([
+        item.resolution,
+        item.materialization.state,
+        item.inlineApprovable,
+        item.decisionMode,
+      ]),
+    },
     async (signal, fresh) => {
       const next = await readCorrectionMemory(item, signal);
       const outcome =

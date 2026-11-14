@@ -74,7 +74,7 @@ for (const [name, route] of [
           },
         }))
           events.push(event);
-        assert.equal(f.searches(), 1, JSON.stringify(events.filter((event) => event.type === 'error')));
+        assert.equal(f.searches(), 0, JSON.stringify(events.filter((event) => event.type === 'error')));
         assert.equal(f.calls(), 0);
         const messages = (await f.messages.getByThread('origin')).filter((message) => message.from?.kind === 'agent');
         const bound = messages.filter((message) => message.extra?.messageSearchAnswer);

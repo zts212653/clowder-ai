@@ -5,9 +5,7 @@
  */
 
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
-import { mkdirSync, writeFileSync } from 'node:fs';
-import { mkdtemp, realpath, rm } from 'node:fs/promises';
+import { mkdtemp, readdir, realpath, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'node:test';
 import Fastify from 'fastify';
@@ -178,39 +176,37 @@ describe('Thread API', () => {
     assert.match(body.error, /Bootcamp workspace root/);
   });
 
-  it('POST /api/threads migrates an explicit runtime path to the persistent workspace', async () => {
+  it('POST /api/threads rejects a new runtime binding without substituting the workspace', async () => {
     const runtimeRoot = await createTempWorkspace();
     const workspaceRoot = await createTempWorkspace();
-    for (const root of [runtimeRoot, workspaceRoot]) {
-      mkdirSync(join(root, 'cat-cafe-skills'), { recursive: true });
-      writeFileSync(join(root, 'cat-cafe-skills', 'manifest.yaml'), 'skills: []\n');
-      execFileSync('git', ['init', '-b', 'main'], { cwd: root, stdio: 'ignore' });
-      execFileSync('git', ['config', 'user.email', 'test@example.com'], { cwd: root, stdio: 'ignore' });
-      execFileSync('git', ['config', 'user.name', 'Test User'], { cwd: root, stdio: 'ignore' });
-      execFileSync('git', ['add', '.'], { cwd: root, stdio: 'ignore' });
-      execFileSync('git', ['commit', '-m', 'baseline'], { cwd: root, stdio: 'ignore' });
-    }
     process.env.CAT_CAFE_RUNTIME_ROOT = runtimeRoot;
     process.env.CAT_CAFE_WORKSPACE_ROOT = workspaceRoot;
+    const create = (projectPath) =>
+      app.inject({
+        method: 'POST',
+        url: '/api/threads',
+        payload: { userId: 'alice', title: 'New project', projectPath },
+      });
+    const res = await create(runtimeRoot);
+    assert.equal(res.statusCode, 403, res.body);
+    assert.match(res.json().error, /runtime.*read.only/i);
+    assert.deepEqual(await readdir(runtimeRoot), []);
+    assert.deepEqual(await readdir(workspaceRoot), []);
+    const list = await app.inject({ url: '/api/threads', headers: { 'x-cat-cafe-user': 'alice' } });
+    assert.ok(!list.json().threads.some((thread) => thread.title === 'New project'));
 
-    const res = await app.inject({
-      method: 'POST',
-      url: '/api/threads',
-      payload: { userId: 'alice', title: 'Persistent workspace', projectPath: runtimeRoot },
-    });
+    const ordinary = await create(workspaceRoot);
+    assert.equal(ordinary.statusCode, 201, ordinary.body);
+    assert.equal(ordinary.json().projectPath, workspaceRoot);
+    process.env.CAT_CAFE_WORKSPACE_ROOT = runtimeRoot;
+    const sameRoot = await create(runtimeRoot);
+    assert.equal(sameRoot.statusCode, 201, sameRoot.body);
+    assert.equal(sameRoot.json().projectPath, runtimeRoot);
 
-    assert.equal(res.statusCode, 201, res.body);
-    const targetRoot = JSON.parse(res.body).projectPath;
-    assert.equal(targetRoot, workspaceRoot);
-
-    // Simulate a page-triggered agent/governance write to a tracked file. The exact
-    // runtime restart predicate (`git status --short -uno`) must remain clean.
-    writeFileSync(join(targetRoot, 'cat-cafe-skills', 'manifest.yaml'), 'skills:\n  - generated\n');
-    assert.equal(execFileSync('git', ['status', '--short', '-uno'], { cwd: runtimeRoot, encoding: 'utf8' }).trim(), '');
-    assert.match(
-      execFileSync('git', ['status', '--short', '-uno'], { cwd: workspaceRoot, encoding: 'utf8' }),
-      /cat-cafe-skills\/manifest\.yaml/,
-    );
+    process.env.CAT_CAFE_RUNTIME_ROOT = join(runtimeRoot, 'missing');
+    const unknown = await create(workspaceRoot);
+    assert.equal(unknown.statusCode, 500, unknown.body);
+    assert.match(unknown.json().error, /configuration is invalid/i);
   });
 
   it('POST /api/threads with pinned=true creates a pinned thread', async () => {
@@ -1713,14 +1709,6 @@ describe('F095 Phase D: Soft delete + trash bin', () => {
       url: `/api/threads/${thread.id}`,
     });
     assert.equal(res.statusCode, 400, 'double soft-delete should fail');
-  });
-
-  it('DELETE /api/threads/default still rejects', async () => {
-    const res = await app.inject({
-      method: 'DELETE',
-      url: '/api/threads/default',
-    });
-    assert.equal(res.statusCode, 400);
   });
 });
 

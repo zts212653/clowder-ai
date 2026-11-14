@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 /**
  * F173 Phase E (KD-1 handler unification) — single dispatch fixture
  *

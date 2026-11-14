@@ -88,27 +88,43 @@ function sha512OfFile(file) {
 }
 
 const PUBLISH_LOCK = '.prewarm-publish.lock';
+const PUBLISH_LOCK_OWNER = 'owner.json';
 
-async function acquirePublishLock(cacheDir, { timeoutMs = 30_000, staleMs = 120_000 } = {}) {
+function readLockOwner(lockDir) {
+  try {
+    return JSON.parse(readFileSync(join(lockDir, PUBLISH_LOCK_OWNER), 'utf8'));
+  } catch {
+    return null;
+  }
+}
+
+async function acquirePublishLock(cacheDir, { timeoutMs = 30_000 } = {}) {
   const lockDir = join(cacheDir, PUBLISH_LOCK);
   const startedAt = Date.now();
   for (;;) {
     try {
       mkdirSync(lockDir);
-      return () => rmSync(lockDir, { recursive: true, force: true });
+      const token = `${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+      try {
+        writeFileSync(join(lockDir, PUBLISH_LOCK_OWNER), JSON.stringify({ pid: process.pid, token }));
+      } catch (error) {
+        rmSync(lockDir, { recursive: true, force: true });
+        throw error;
+      }
+      return () => {
+        const owner = readLockOwner(lockDir);
+        // Do not remove a lock that another process has replaced.
+        if (owner?.token === token) rmSync(lockDir, { recursive: true, force: true });
+      };
     } catch (error) {
       if (error?.code !== 'EEXIST') throw error;
-      try {
-        if (Date.now() - statSync(lockDir).mtimeMs > staleMs) {
-          rmSync(lockDir, { recursive: true, force: true });
-          continue;
-        }
-      } catch {
-        // The lock disappeared between EEXIST and stat; retry immediately.
-        continue;
-      }
+      // Deliberately do not steal a lock by age or probe its owner between the
+      // observation and rmSync. A stale lock is a manual-recovery condition;
+      // bounded waiting fails safely without deleting another writer's lock.
       if (Date.now() - startedAt > timeoutMs) {
-        throw new Error(`timed out waiting for winCodeSign publish lock: ${lockDir}`);
+        throw new Error(
+          `timed out waiting for winCodeSign publish lock: ${lockDir}; remove it if no prewarm process is running`,
+        );
       }
       await new Promise((resolveSleep) => setTimeout(resolveSleep, 25));
     }
@@ -171,6 +187,7 @@ export async function ensurePrewarmedWinCodeSign({
   platform = process.platform,
   expectedSha512 = WIN_CODE_SIGN_SHA512,
   extract = extractWith7za,
+  lockTimeoutMs = 10 * 60_000,
 } = {}) {
   if (platform !== 'win32') {
     log('winCodeSign prewarm skipped (not Windows)');
@@ -195,18 +212,25 @@ export async function ensurePrewarmedWinCodeSign({
 
   const cacheDir = join(cacheRoot, 'winCodeSign');
   mkdirSync(cacheDir, { recursive: true });
-  let archivePath = selectTrustedArchive(cacheRoot, expectedSha512);
-  if (archivePath) {
-    log(`using verified winCodeSign archive: ${archivePath}`);
-  } else {
-    archivePath = join(cacheDir, `${RELEASE}.7z`);
-    const url = winCodeSignArchiveUrl();
-    log(`downloading winCodeSign: ${url}`);
-    await downloadVerified(url, archivePath, { fetchImpl, expectedSha512 });
-  }
-
-  const temp = join(cacheDir, `.extract-${process.pid}-${Date.now()}`);
+  const releaseLock = await acquirePublishLock(cacheDir, { timeoutMs: lockTimeoutMs });
+  let temp;
   try {
+    if (isPrewarmed(target, expectedSha512) || hasWindowsTools(target)) {
+      log(`winCodeSign already published by another process: ${target}`);
+      return { skipped: true, target };
+    }
+
+    let archivePath = selectTrustedArchive(cacheRoot, expectedSha512);
+    if (archivePath) {
+      log(`using verified winCodeSign archive: ${archivePath}`);
+    } else {
+      archivePath = join(cacheDir, `${RELEASE}.7z`);
+      const url = winCodeSignArchiveUrl();
+      log(`downloading winCodeSign: ${url}`);
+      await downloadVerified(url, archivePath, { fetchImpl, expectedSha512 });
+    }
+
+    temp = join(cacheDir, `.extract-${process.pid}-${Date.now()}`);
     mkdirSync(temp, { recursive: true });
     await extract({ sevenZipPath, archivePath, outputDir: temp });
     if (!hasWindowsTools(temp)) {
@@ -216,21 +240,17 @@ export async function ensurePrewarmedWinCodeSign({
       join(temp, PREWARM_MARKER),
       `${JSON.stringify({ release: RELEASE, sha512: expectedSha512 }, null, 2)}\n`,
     );
-    const releaseLock = await acquirePublishLock(cacheDir);
-    try {
-      if (isPrewarmed(target, expectedSha512) || hasWindowsTools(target)) {
-        log(`winCodeSign already published by another process: ${target}`);
-        return { skipped: true, target };
-      }
-      if (existsSync(target)) rmSync(target, { recursive: true, force: true });
-      renameSync(temp, target);
-    } finally {
-      releaseLock();
+    if (isPrewarmed(target, expectedSha512) || hasWindowsTools(target)) {
+      log(`winCodeSign already published by another process: ${target}`);
+      return { skipped: true, target };
     }
+    if (existsSync(target)) rmSync(target, { recursive: true, force: true });
+    renameSync(temp, target);
     log(`winCodeSign prewarmed: ${target}`);
     return { skipped: false, target };
   } finally {
-    rmSync(temp, { recursive: true, force: true });
+    if (temp) rmSync(temp, { recursive: true, force: true });
+    releaseLock();
   }
 }
 

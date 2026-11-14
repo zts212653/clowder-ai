@@ -113,6 +113,20 @@ const SENSITIVE_FIELDS = [
   'experimental_realtime_ws_base_url',
   'sqlite_home',
 ];
+/** Native system locations; Windows legacy managed defaults follow the selected CODEX_HOME. */
+export function codexNativeConfigPaths(home: string) {
+  let systemDir = '/etc/codex';
+  if (process.platform === 'win32') {
+    const programData = process.env.ProgramData;
+    if (!programData) throw new Error('codex_managed_policy_unavailable');
+    systemDir = join(programData, 'OpenAI', 'Codex');
+  }
+  return {
+    systemPath: join(systemDir, 'config.toml'),
+    managedPath: join(process.platform === 'win32' ? home : systemDir, 'managed_config.toml'),
+    requirementsPath: join(systemDir, 'requirements.toml'),
+  };
+}
 export function codexSensitiveProjection(config: Record<string, unknown>): Record<string, unknown> {
   return Object.fromEntries(
     SENSITIVE_FIELDS.filter((key) => Object.hasOwn(config, key)).map((key) => [key, config[key]]),
@@ -151,13 +165,12 @@ export function readCodexLaunchProjection(
     else continue;
     if (!nativeProfile || !/^[A-Za-z0-9_-]+$/.test(nativeProfile)) throw new Error('codex_account_config_invalid');
   }
-  const systemPath = '/etc/codex/config.toml',
-    userPath = join(home, 'config.toml');
+  const { systemPath, managedPath, requirementsPath } = codexNativeConfigPaths(home);
+  const userPath = join(home, 'config.toml');
   const system = readConfig(systemPath),
     user = readConfig(userPath),
     cli = codexCliConfig(args);
-  const managedPath = '/etc/codex/managed_config.toml',
-    managed = readConfig(managedPath);
+  const managed = readConfig(managedPath);
   const nativeProfileConfig = nativeProfile ? readConfig(join(home, `${nativeProfile}.config.toml`)) : {};
   const selection = [system, user, nativeProfileConfig, cli, managed].reduce(
     (base, layer) =>
@@ -229,15 +242,19 @@ export function readCodexLaunchProjection(
       dirname(managedPath),
       codexConfigRecord(codexConfigRecord(managed.profiles)[legacyProfile]),
     );
-  const rawRequirements = readConfig('/etc/codex/requirements.toml');
-  const requirements = normalizeSqliteLayer(codexSensitiveProjection(rawRequirements), '/etc/codex', nativeHome);
+  const rawRequirements = readConfig(requirementsPath);
+  const requirements = normalizeSqliteLayer(
+    codexSensitiveProjection(rawRequirements),
+    dirname(requirementsPath),
+    nativeHome,
+  );
   if (Object.hasOwn(rawRequirements, 'allowed_login_methods'))
     requirements.allowed_login_methods = rawRequirements.allowed_login_methods;
   const config = layers.reduce((config, layer) => merge(config, layer.config), {});
   layers.push({
     kind: 'requirements',
-    source: '/etc/codex/requirements.toml',
-    baseDir: '/etc/codex',
+    source: requirementsPath,
+    baseDir: dirname(requirementsPath),
     config: requirements,
   });
   return { config, layers, requirements };

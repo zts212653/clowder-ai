@@ -1,11 +1,13 @@
 'use client';
 
+import { gifAtlasLayout } from '@cat-cafe/shared';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { ArtworkActions } from '@/components/content-review/ArtworkActions';
 import { ArtworkGalleryArrows } from '@/components/content-review/ArtworkGalleryNavigation';
 import { useArtworkGallery } from '@/components/content-review/ArtworkGalleryScope';
 import { ArtworkMediaFooter } from '@/components/content-review/ArtworkMediaFooter';
 import videoStyles from '@/components/content-review/artwork-video-fullscreen.module.css';
+import { GifFrameControls } from '@/components/content-review/GifFrameMedia';
 import { ImageArtworkControls } from '@/components/content-review/ImageArtworkControls';
 import { ReviewCanvasPopover } from '@/components/content-review/ReviewCanvasPopover';
 import { type ReviewCanvasMode } from '@/components/content-review/ReviewCanvasToolbar';
@@ -20,6 +22,7 @@ import {
 import styles from '@/components/content-review/review-workspace.module.css';
 import { useArtworkSave } from '@/components/content-review/useArtworkSave';
 import { useArtworkViewport } from '@/components/content-review/useArtworkViewport';
+import { useGifPlayback } from '@/components/content-review/useGifPlayback';
 import { usePresentedVideoFrame } from '@/components/content-review/usePresentedVideoFrame';
 import { useReviewMediaSelection } from '@/components/content-review/useReviewMediaSelection';
 import { VideoArtworkControls } from '@/components/content-review/VideoArtworkControls';
@@ -78,6 +81,18 @@ export function WorkspaceContentReviewMedia({
 }: WorkspaceReviewMediaProps) {
   const draftStarted = useWorkspacePreviewIntent();
   const visible = useWorkspaceSurfaceVisibility();
+  const gif = useGifPlayback(src, media, visible && !playbackHidden);
+  const gifColumns =
+    gif.active && gif.clock ? gifAtlasLayout(media.width, media.height, gif.clock.frameCount).columns : null;
+  const pixelRegion = gifColumns
+    ? {
+        x: (gif.frameIndex % gifColumns) * media.width,
+        y: Math.floor(gif.frameIndex / gifColumns) * media.height,
+        width: media.width,
+        height: media.height,
+      }
+    : undefined;
+  const [svgBackground, setSvgBackground] = useState('transparent');
   const isV2 = useShellPresentation() === 'v2';
   const gallery = useArtworkGallery();
   const chatSelection = imageChatPrimary && (isV2 || media.kind === 'video');
@@ -103,9 +118,15 @@ export function WorkspaceContentReviewMedia({
     setMode('comment');
   }, [restoreComment]);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const error = sourceError ?? loadError;
-  const writable = canWrite && Boolean(src) && !error;
-  const selectable = chatSelection ? Boolean(src) && !error : writable;
+  const error =
+    sourceError ??
+    loadError ??
+    (mime === 'image/gif' && (media.kind !== 'image' || !media.animation)
+      ? '无法核对 GIF 帧信息，请重新读取作品。'
+      : null);
+  const decoded = !gif.active || gif.ready;
+  const writable = canWrite && Boolean(src) && !error && decoded;
+  const selectable = chatSelection ? Boolean(src) && !error && decoded : writable;
   useEffect(() => {
     setLoadError(null);
   }, [src]);
@@ -207,10 +228,14 @@ export function WorkspaceContentReviewMedia({
     stage,
     frame: frame ?? null,
     identity: `${drawingKey}:${src ?? 'pending'}`,
+    imageFrame: gif.frame,
   });
   const onModeChange = (next: ReviewCanvasMode) => {
     if (next === 'markup' && !canMarkup) return;
-    if (next !== 'view') video.current?.pause();
+    if (next !== 'view') {
+      video.current?.pause();
+      gif.pause();
+    }
     setMode(next);
     setMarkupNotice(null);
   };
@@ -238,19 +263,36 @@ export function WorkspaceContentReviewMedia({
     }
     void onDeleteVisualMark(markId);
   };
+  const gifVisible = (anchor: Parameters<typeof onAnchorSelected>[0]) =>
+    anchor.kind === 'video-range' ||
+    anchor.frameIndex === undefined ||
+    !gif.active ||
+    (gif.frameIndex >= anchor.frameIndex && gif.frameIndex <= (anchor.endFrameIndex ?? anchor.frameIndex));
+  const seekGif = (index: number) => {
+    setMode('view');
+    gif.seek(index);
+  };
+  useEffect(() => {
+    if (!gif.active) return;
+    const anchor =
+      pendingChatMarks?.find((item) => item.active)?.anchor ??
+      attachedAnnotations.find((item) => item.id === activeAnnotationId)?.anchor;
+    if (anchor && anchor.kind !== 'video-range' && anchor.frameIndex !== undefined) gif.seek(anchor.frameIndex);
+  }, [activeAnnotationId, discussionFocusRequest, focusedPlace, src]);
   const overlay = (
     <ReviewMediaOverlay
       media={media}
       frame={frame}
       marks={attachedMarks}
-      annotations={attachedAnnotations}
+      annotations={attachedAnnotations.filter((item) => gifVisible(item.anchor))}
       activeAnnotationId={activeAnnotationId}
       seconds={seconds}
       mode={mode}
-      selected={selected}
+      selected={selected && gifVisible(selected) ? selected : null}
       selection={selection}
       onAnnotationActive={onAnnotationActive}
-      pendingChatMarks={pendingChatMarks}
+      pendingChatMarks={pendingChatMarks?.filter((item) => gifVisible(item.anchor))}
+      imageFrame={gif.frame}
       markup={
         mode === 'markup' && markup.canEdit
           ? {
@@ -258,7 +300,7 @@ export function WorkspaceContentReviewMedia({
               marks: [
                 ...attachedMarks.map((mark) => mark.drawing),
                 ...markup.marks.filter((mark) => !attachedMarks.some((saved) => saved.drawing.id === mark.id)),
-              ],
+              ].filter((mark) => !gif.active || mark.animationFrame?.frameIndex === gif.frameIndex),
               drawingKey,
               selectedId: markup.selectedId,
               frame,
@@ -268,8 +310,8 @@ export function WorkspaceContentReviewMedia({
               color,
               strokeWidth,
               screenScale: viewport.renderedScale,
-              onAdd: markup.add,
-              onUpdate: markup.replace,
+              onAdd: (mark) => markup.add(gif.frame ? { ...mark, animationFrame: gif.frame } : mark),
+              onUpdate: (mark) => markup.replace(gif.frame ? { ...mark, animationFrame: gif.frame } : mark),
               onSelect: markup.select,
               onRemove: removeMark,
               onTextComplete: () => setTool('select'),
@@ -345,6 +387,7 @@ export function WorkspaceContentReviewMedia({
       {originalUrl || download?.src || src ? (
         <ArtworkActions
           src={src}
+          pixelRegion={pixelRegion}
           originalUrl={originalUrl ?? download?.src ?? src!}
           filename={filename ?? download?.filename ?? '作品'}
           mime={mime}
@@ -379,7 +422,16 @@ export function WorkspaceContentReviewMedia({
           data-testid="review-media-stage"
           data-artwork-video-stage={media.kind === 'video' ? '' : undefined}
           className={styles.stage}
-          style={viewport.stageStyle}
+          style={{
+            ...viewport.stageStyle,
+            backgroundColor:
+              mime === 'image/svg+xml'
+                ? svgBackground === 'contrast'
+                  ? 'var(--cafe-text)'
+                  : 'var(--cafe-surface-canvas)'
+                : undefined,
+          }}
+          onPointerDownCapture={gif.active ? gif.pause : undefined}
         >
           <WorkspaceReviewMediaElement
             src={src}
@@ -395,11 +447,39 @@ export function WorkspaceContentReviewMedia({
               onPlaybackTime?.(next);
             }}
             onError={setLoadError}
+            gifFrame={gif.frameIndex}
+            onGifLoad={gif.loaded}
           />
           {src && !error ? overlay : null}
         </div>
         {gallery ? <ArtworkGalleryArrows gallery={gallery} /> : null}
       </section>
+      <GifFrameControls
+        playback={gif}
+        locked={textEditing}
+        onSeek={seekGif}
+        markers={[
+          ...attachedAnnotations.map((item, index) => ({ ...item, label: `#${index + 1}` })),
+          ...(pendingChatMarks ?? []).map((item) => ({ ...item, label: `#${item.label ?? item.id}` })),
+        ].flatMap((item) =>
+          item.anchor.kind !== 'video-range' && item.anchor.frameIndex !== undefined
+            ? [{ id: item.id, frameIndex: item.anchor.frameIndex, label: item.label }]
+            : [],
+        )}
+      />
+      {mime === 'image/svg+xml' ? (
+        <label className="flex h-8 shrink-0 items-center gap-2 px-3 text-xs text-cafe-muted">
+          SVG · 矢量
+          <select
+            aria-label="SVG 透明背景"
+            value={svgBackground}
+            onChange={(event) => setSvgBackground(event.target.value)}
+          >
+            <option value="transparent">画布背景</option>
+            <option value="contrast">对比背景</option>
+          </select>
+        </label>
+      ) : null}
       {imageChatPrimary && media.kind === 'video' ? (
         <VideoArtworkControls
           media={media}

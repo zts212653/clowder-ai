@@ -85,7 +85,7 @@ function useNativeHomeFocus(threadId: string | undefined, originFocus: RefObject
   useEffect(() => {
     const previous = previousFloatingWork.current;
     previousFloatingWork.current = floatingWork;
-    const from = previous?.surface?.navigationOrigin;
+    const from = previous?.surface?.navigationOrigin ?? previous?.navigationOrigin;
     const entry = originFocus.current;
     if (
       floatingWork ||
@@ -170,7 +170,6 @@ function ThreadWorksSummary({
       </header>
       {!loading && !error && !complete && <output className="text-xs text-cafe-muted">{t.worksIncomplete}</output>}
       <WorksCatalogue loading={loading} error={error} empty={complete && artifacts.length === 0}>
-        {floating.error && <p role="alert">{floating.error}</p>}
         <div className="home-works">
           {visible.map((artifact, index) => (
             <WorkCard

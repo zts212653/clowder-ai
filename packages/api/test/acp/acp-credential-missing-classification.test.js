@@ -36,6 +36,7 @@ const WIRE_MISSING_API_KEY =
  */
 async function invokeWithProtocolError({ code, message, data, providerName = 'ACP agent' }) {
   const root = mkdtempSync(join(tmpdir(), 'acp-cred-classify-'));
+  const calls = { acquire: 0, newSession: 0, prompt: 0, release: 0 };
   try {
     const { AcpAgentService } = await import(
       '../../dist/domains/cats/services/agents/providers/acp/AcpAgentService.js'
@@ -48,9 +49,11 @@ async function invokeWithProtocolError({ code, message, data, providerName = 'AC
       clearRecentCapacitySignal() {},
       cancelSession() {},
       async newSession() {
+        calls.newSession++;
         return { sessionId: 'session-cred' };
       },
       async *promptStream() {
+        calls.prompt++;
         throw new AcpProtocolError(code, message, data);
       },
     };
@@ -58,7 +61,13 @@ async function invokeWithProtocolError({ code, message, data, providerName = 'AC
       catId: 'acp-cred-fixture',
       pool: {
         async acquire() {
-          return { client, release() {} };
+          calls.acquire++;
+          return {
+            client,
+            release() {
+              calls.release++;
+            },
+          };
         },
       },
       poolKey: {},
@@ -68,6 +77,10 @@ async function invokeWithProtocolError({ code, message, data, providerName = 'AC
     });
     const messages = [];
     for await (const message of service.invoke('task', { workingDirectory: root })) messages.push(message);
+    assert.deepEqual(calls, { acquire: 1, newSession: 1, prompt: 1, release: 1 }, 'ordinary failures must not retry');
+    assert.equal(messages.filter((item) => item.type === 'error').length, 1);
+    assert.equal(messages.filter((item) => item.type === 'done').length, 1);
+    assert.equal(messages.at(-1).type, 'done');
     const error = messages.find((m) => m.type === 'error');
     assert.ok(error, 'expected an error message from invoke()');
     return error;
@@ -75,6 +88,25 @@ async function invokeWithProtocolError({ code, message, data, providerName = 'AC
     rmSync(root, { recursive: true, force: true });
   }
 }
+
+test('display-only ACP diagnostics cannot replace genuine credential, capacity or MCP failure causes', async () => {
+  for (const [message, expected] of [
+    [WIRE_MISSING_API_KEY, 'credential_missing'],
+    ['Provider capacity exhausted', 'model_capacity'],
+    ['MCP server request failed', 'mcp_pollution'],
+  ]) {
+    const error = await invokeWithProtocolError({
+      code: -32603,
+      message,
+      data: { diagnostics: 'recent Pi CLI diagnostics: benign mcp capacity status; api_key=secret-diagnostic-token' },
+    });
+    assert.equal(error.errorCode, expected);
+    assert.doesNotMatch(error.error, /recent Pi CLI diagnostics|secret-diagnostic-token/);
+    assert.match(error.metadata.cliDiagnostics.safeExcerpt, /recent Pi CLI diagnostics/);
+    assert.doesNotMatch(error.metadata.cliDiagnostics.safeExcerpt, /secret-diagnostic-token/);
+    assert.equal(error.metadata.cliDiagnostics.reasonCode, undefined);
+  }
+});
 
 test('DSH 缺凭据引用被识别为 credential_missing 并给出可操作说明', async () => {
   const error = await invokeWithProtocolError({ code: -32603, message: WIRE_MISSING_CREDENTIAL_REF });
@@ -229,4 +261,35 @@ test('P2-3b: 先脱敏再截断，长 token 不得因截断而绕过识别', asy
 
   assert.equal(error.errorCode, 'credential_missing');
   assert.doesNotMatch(error.error, /sk-ant-api03-/);
+});
+
+test('新旧 ACP 错误码在真实消费者中均保持普通 error/failed，不成为路由恢复信号', async () => {
+  const { projectInvocationTerminalEvidence } = await import(
+    '../../dist/domains/cats/services/session/InvocationTrajectoryProjector.js'
+  );
+  const { resolveResponseTerminal } = await import(
+    '../../dist/domains/cats/services/agents/routing/response-terminal.js'
+  );
+  const { classifyRoutingDispatchFailure } = await import(
+    '../../dist/domains/routing-context/RoutingDispatchSignalContract.js'
+  );
+  const { projectSessionEvent } = await import(
+    '../../dist/domains/cats/services/agents/session-contract/event-projection.js'
+  );
+
+  for (const code of ['prompt_failure', 'mcp_pollution', 'model_capacity', 'credential_missing']) {
+    const event = { type: 'error', errorCode: code };
+    assert.deepEqual(projectInvocationTerminalEvidence(event), { status: 'error', reason: code });
+    assert.deepEqual(resolveResponseTerminal({ aborted: false, failed: true, errorCode: code }), {
+      status: 'failed',
+      reason: code,
+    });
+    assert.equal(classifyRoutingDispatchFailure({ providerErrorCode: code }), undefined);
+    const [projected] = projectSessionEvent(
+      { type: 'error', code, message: 'isolated ACP failure' },
+      { catId: 'acp-cred-fixture', metadata: { provider: 'acp' } },
+    );
+    assert.equal(projected.type, 'error');
+    assert.equal(projected.errorCode, code);
+  }
 });

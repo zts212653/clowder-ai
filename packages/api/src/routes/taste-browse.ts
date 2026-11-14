@@ -15,6 +15,7 @@ import { resolveDirectLocalAuthorizationUserId, resolveSessionUserId } from '../
 import { authorizeOwnerBrowserAction, ownerMemoryActionHttpStatus } from './owner-memory-browser-auth.js';
 import { projectTasteContext, readTasteApproval } from './taste-browse-context.js';
 import { projectTasteMemory, projectTasteRecall, tasteMemoryId, visibleTasteMemories } from './taste-browse-model.js';
+import { readTasteMemoryById } from './taste-browse-reader.js';
 import { readTasteSource, type TasteSourceReaders } from './taste-browse-source.js';
 
 export interface TasteBrowseOptions extends TasteSourceReaders {
@@ -96,7 +97,7 @@ async function serveBoundTasteMemory(
   source: boolean,
 ) {
   try {
-    const memory = await resolveBoundTasteMemory(request, reply, opts);
+    const memory = await resolveBoundTasteMemory(request, reply, opts, source);
     if (!memory) return;
     if (source) return await readTasteSource(memory, opts.ownerUserId, opts);
     const corrections = await readTasteCorrections(memory.sourcePath, opts.ownerUserId, opts);
@@ -108,9 +109,27 @@ async function serveBoundTasteMemory(
         correctionProposals: corrections,
       }),
       approval: await readTasteApproval(memory, opts.ownerUserId, opts),
+      recall: await boundTasteRecall(memory, opts, request),
     };
   } catch {
     return reply.code(503).send({ error: 'Taste source unavailable' });
+  }
+}
+
+async function boundTasteRecall(memory: TasteMemoryReadResult, opts: TasteBrowseOptions, request: FastifyRequest) {
+  try {
+    const stats = await opts.readObservatory(
+      opts.ownerUserId,
+      resolveDirectLocalAuthorizationUserId(request) === opts.ownerUserId,
+    );
+    return await projectTasteContext(
+      projectTasteRecall(stats.entries.find((entry) => entry.sourcePath === memory.sourcePath)),
+      opts.ownerUserId,
+      opts,
+      new Map(),
+    );
+  } catch {
+    return null;
   }
 }
 
@@ -118,27 +137,31 @@ async function resolveBoundTasteMemory(
   request: FastifyRequest<BoundMemory>,
   reply: FastifyReply,
   opts: TasteBrowseOptions,
+  source: boolean,
 ): Promise<TasteMemoryReadResult | null> {
   if (!/^taste-[0-9a-f]{24}$/.test(request.params.memoryId)) {
     reply.code(404).send({ error: 'Unavailable' });
     return null;
   }
-  if (!/^sha256:[0-9a-f]{64}$/.test(request.query.revision ?? '')) {
+  if (
+    (source && request.query.revision === undefined) ||
+    (request.query.revision !== undefined && !/^sha256:[0-9a-f]{64}$/.test(request.query.revision))
+  ) {
     reply.code(400).send({ error: 'Revision required' });
     return null;
   }
-  const memories = await visibleTasteMemories(
+  const memory = await readTasteMemoryById(
     opts.tasteRepository,
     opts.ownerUserId,
     resolveDirectLocalAuthorizationUserId(request) === opts.ownerUserId,
+    request.params.memoryId,
     opts.lifecycleStore,
   );
-  const memory = memories.find((item) => tasteMemoryId(item.sourcePath) === request.params.memoryId);
   if (!memory) {
     reply.code(404).send({ error: 'Unavailable' });
     return null;
   }
-  if (memory.revision !== request.query.revision) {
+  if (request.query.revision !== undefined && memory.revision !== request.query.revision) {
     reply.code(409).send({ error: 'Revision changed' });
     return null;
   }

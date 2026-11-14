@@ -47,6 +47,12 @@ code_anchors:
   - packages/api/src/domains/cats/services/agents/providers/opencode-config-writer.ts
   - packages/api/src/domains/cats/services/agents/providers/codex-mcp-input.ts
   - packages/api/src/config/capabilities/plugin-mcp-exposure.ts
+  - packages/api/src/domains/browser/shared-browser-descriptor.ts
+  - packages/api/src/domains/browser/BrowserProcess.ts
+  - packages/api/src/domains/browser/browser-session-host.ts
+  - packages/api/src/domains/browser/browser-loopback-transport.ts
+  - packages/api/src/routes/browser-mcp.ts
+  - packages/api/src/config/capabilities/shared-browser-migration.ts
 doc_anchors:
   - docs/decisions/044-mcp-resource-lifecycle-and-surface-budget.md
   - docs/features/F286-mcp-surface-lifecycle-governance.md
@@ -55,6 +61,7 @@ doc_anchors:
   - feature-specs/2026-08-04-f286-phase-b-admission-contract.md
 static_scan_hints: [resourceFamily, cutoverState, exposureTier, standaloneReason, allowedNextActions, registerFullToolset, EXPECTED_TOOLS, MCP_TOOLS_SECTION, compatibility alias, atomic cutover]
 cited_by:
+  - {feature: F333, date: 2026-11-09, delta: "The playwright capability becomes Host-resolved shared-browser: carriers resolve one pinned stdio launch, the Host nominates it to /api/browser-mcp/mcp under the shared transport, and one API-owned browser process serves thread-scoped tabs; no per-session Playwright process and no second exposed browser surface"}
   - {feature: F327, date: 2026-10-27, delta: "Projects verified Host installation policy for new local plugin MCP contributions only into the Host-owned project; ordinary discovery and diagnostics share one nonpersistent view"}
   - {feature: F325, date: 2026-10-14, delta: "Atomically retires cat_cafe_run_task_test; normal Native uses canonical MCP discovery and the existing managed hold/status/cancel lifecycle"}
   - {feature: F325, date: 2026-09-29, delta: "P1 admits cat_cafe_run_task_test as one Task-scoped side-effect boundary with host-selected target and no model command/path parameters"}
@@ -178,3 +185,36 @@ credential values and does not trigger unrelated environment-key subscribers. Re
 writes do not publish commits. This adds no cache, revision service or new configuration authority.
 
 During admission, the existing invocation MCP reader records private versions of the formal global/project files it actually reads. The Host validates those versions after its last asynchronous capture and rejects a changed source before sending. Reads still resolve through the original owners; this introduces no cross-invocation configuration cache. Client-native files and plugin activation currentness keep their separate ownership boundaries.
+
+## F333 shared browser (2026-11-09)
+
+The `playwright` capability is Host-resolved (`resolver: "shared-browser"`), like Pencil. Every
+carrier resolves it to one pinned stdio launch (`@playwright/mcp` 0.0.84, `--headless --isolated`);
+under the shared transport `config/capabilities/managed-mcp-config.ts` nominates only that exact
+launch to `/api/browser-mcp/mcp`, using the same "stdio first, Host-nominated to HTTP" rule as
+plugins. The tool names and schemas are upstream Playwright's and unchanged; there is no second
+exposed browser surface, and carriers outside the shared transport keep the pinned launch as an
+isolated fallback that never races the service for a workspace profile.
+
+`routes/browser-mcp.ts` first applies the member gateway's own local-only boundary
+(`sharedRequestBoundaryRejection`: no forwarded headers, no Origin, loopback peers only), then
+re-verifies every request (current invocation, deployment, tool policy and the cat's shared-browser
+capability) and forwards only allowlisted headers plus registry-derived thread/workspace and an opaque
+invocation+connection binding. Callback tokens stay in the API: `browser_run_code_unsafe` is code
+execution inside the browser process, whose blast radius is every thread's pages, the shared logins,
+and the process itself. `domains/browser/BrowserProcess.ts` forks that process on first use
+(single-flight), never replays a failed request, re-forks a dead child on the next one, and kills a
+child whose IPC heartbeats stop (a blocked event loop).
+
+The child's HTTP edge is stateless (no `Mcp-Session-Id`), so idle release or a restart never strands a
+client. Each binding keeps one upstream Playwright server behind an in-process transport whose MCP
+client is the Host: it performs `initialize` and answers `roots/list` with the verified workspace, so a
+client-declared root never becomes Playwright's file boundary. State, pages and listeners are bounded:
+128 bindings (least recently used idle one released), 20 tabs per thread, 100 per browser, and a
+released binding removes the listeners upstream attached to the shared context and browser. Thread
+scoping in `shared-browser-pool.ts` prevents accidental cross-thread navigation; it is not a security
+boundary.
+
+Do not move per-session browser state into the member gateway (it closes its server per request)
+or into the API event loop. A stdio-to-HTTP bridge for non-HTTP carriers is not built: those
+carriers had no browser users at cutover; add it with that carrier when one appears.

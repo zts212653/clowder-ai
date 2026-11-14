@@ -10,6 +10,7 @@ import { useChatStore } from '@/stores/chatStore';
 import { useConciergeStore } from '@/stores/conciergeStore';
 import { useSidebarProjectionStore } from '@/stores/sidebarProjectionStore';
 import { useSidebarStore } from '@/stores/sidebarStore';
+import { ReviewThreadState, reviewNavigationState } from './f309-review-thread-state';
 import { usePathname, useRouter } from './f322-shell-navigation';
 import '@/app/globals.css';
 import '@/app/theme-tokens.css';
@@ -22,7 +23,7 @@ primeCoCreatorConfigCache({
   mentionPatterns: ['@fixture-owner'],
   color: { primary: '#555555', secondary: '#eeeeee' },
 });
-useChatStore.setState({ currentThreadId: 'thread-return' });
+if (!reviewNavigationState) useChatStore.setState({ currentThreadId: 'thread-return' });
 useConciergeStore.setState({ configLoaded: true, enabled: true, muted: false, surfaceState: 'collapsed' });
 const participantCount = (window as Window & { __F322_PARTICIPANT_COUNT__?: number }).__F322_PARTICIPANT_COUNT__ ?? 2;
 const fixtureParticipants = Array.from({ length: participantCount }, (_, index) => {
@@ -130,6 +131,7 @@ function ShellJourney() {
           </>
         )}
         <output data-testid="workspace-mode">{mode}</output>
+        {reviewNavigationState ? <ReviewThreadState pathname={pathname} /> : null}
         {(window as Window & { __F322_RETAINED_APPROVAL__?: boolean }).__F322_RETAINED_APPROVAL__ ? (
           <RetainedApprovalProof pathname={pathname} />
         ) : null}

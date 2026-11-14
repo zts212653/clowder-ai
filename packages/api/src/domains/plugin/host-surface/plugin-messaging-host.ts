@@ -1,5 +1,6 @@
-import { type MessageContent, MessageContentsSchema } from '@cat-cafe/shared';
+import { type MessageContent, MessageContentsSchema, type MessageFrom } from '@cat-cafe/shared';
 import type { MessageDraft, PluginManifest, SendReceipt } from '@clowder-ai/plugin-contract';
+import { messageFrom } from '../../cats/services/stores/message-from.js';
 import { storedMessageSource } from '../../cats/services/stores/message-source.js';
 import {
   deriveGrowingSourceMessageRevision,
@@ -11,6 +12,7 @@ import { isSystemUserMessage, resolveThreadMessageVisibility } from '../../cats/
 import { MessagingError } from '../../messaging/contract/host-types.js';
 import { validateDraft } from '../../messaging/contract/validate.js';
 import type { MessagingService } from '../../messaging/messaging-service.js';
+import { resolveTargetResponse } from '../../messaging/target-response/state.js';
 import { pluginMessageSourceOf } from './plugin-messaging-source.js';
 import {
   createUnavailablePluginMessagingSubscriptionHost,
@@ -29,6 +31,7 @@ const SEND_KEYS = new Set([
   'idempotencyKey',
   'sourceEventId',
   'replyTo',
+  'response',
   'payload',
   'wake',
   'sender',
@@ -43,6 +46,10 @@ export type PluginMessagingSendInput = Omit<MessageDraft, 'address'> & {
   readonly contentBlocks?: readonly MessageContent[];
   readonly identity?: string;
   readonly meta?: Readonly<Record<string, unknown>>;
+  readonly response?: {
+    readonly deliveryId: string;
+    readonly status: import('@cat-cafe/shared').TargetResponseResult['status'];
+  };
 };
 
 /** Public message facts; private execution/custody records are never projected. */
@@ -61,6 +68,10 @@ export type PluginMessage = Pick<
   | 'replyTo'
   | 'deliveryStatus'
 > & {
+  /** Canonical sender proof, independent of presentation. No connector addresses or private service IDs. */
+  readonly from:
+    | Extract<MessageFrom, { kind: 'user' | 'agent' }>
+    | { readonly kind: Exclude<MessageFrom['kind'], 'user' | 'agent'> };
   readonly sourceRevision: string;
   readonly extra?: {
     readonly rich?: NonNullable<StoredMessage['extra']>['rich'];
@@ -245,6 +256,16 @@ export function createPluginMessagingHost(input: PluginMessagingHostDeps): Plugi
       if (parsedContentBlocks !== undefined && !parsedContentBlocks.success) {
         throw new MessagingError('VALIDATION', 'contentBlocks failed Host validation');
       }
+      const responseResult =
+        record.response === undefined
+          ? undefined
+          : await resolveTargetResponse(
+              input.messageStore as IMessageStore,
+              input.pluginInstanceId,
+              threadId,
+              record.replyTo,
+              record.response,
+            );
       const { source, sender } = pluginMessageSourceOf(input.manifest, origin, {
         sender: record.sender,
         identity: record.identity,
@@ -281,6 +302,7 @@ export function createPluginMessagingHost(input: PluginMessagingHostDeps): Plugi
       const draft = { ...validated, address };
       const receipt = await input.messaging.sendFromHost({ pluginInstanceId: input.pluginInstanceId }, draft, {
         source,
+        ...(responseResult ? { responseResult } : {}),
         ...(input.assertAdmissionCurrent ? { assertAdmissionCurrent: input.assertAdmissionCurrent } : {}),
         ...(parsedContentBlocks === undefined
           ? {}
@@ -294,6 +316,7 @@ export function createPluginMessagingHost(input: PluginMessagingHostDeps): Plugi
 }
 
 function projectMessage(message: StoredMessage): PluginMessage {
+  const from = messageFrom(message);
   const stream = message.extra?.stream;
   const extra: NonNullable<PluginMessage['extra']> = {
     ...(message.extra?.rich ? { rich: message.extra.rich } : {}),
@@ -312,6 +335,12 @@ function projectMessage(message: StoredMessage): PluginMessage {
     threadId: message.threadId,
     userId: message.userId,
     catId: message.catId,
+    from:
+      from.kind === 'user'
+        ? { kind: from.kind, userId: from.userId }
+        : from.kind === 'agent'
+          ? { kind: from.kind, catId: from.catId }
+          : { kind: from.kind },
     content: message.content,
     mentions: message.mentions,
     timestamp: message.timestamp,

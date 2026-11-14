@@ -57,6 +57,45 @@ describe('RedisTurnExecutionStore', { skip: redisIsolationSkipReason(REDIS_URL) 
     store = new RedisTurnExecutionStore(redis);
   });
 
+  test('response commit sequence survives restart and concurrent retries do not duplicate a wake', async () => {
+    await store.createRunning(runningInput());
+    await store.transitionTerminal('redis-child-1', { status: 'succeeded', endedAt: 200 });
+    const settlement = { kind: 'message', messageId: 'reply', settledAt: 250 };
+    const results = await Promise.all(
+      Array.from({ length: 8 }, () => store.markResponseSettled('redis-child-1', settlement)),
+    );
+    assert.equal(results.filter((result) => result.outcome === 'settled').length, 1);
+    assert.equal(results.filter((result) => result.outcome === 'replayed').length, 7);
+    const restarted = new RedisTurnExecutionStore(redis);
+    const page = await restarted.listSettled({ userId: 'redis-user-1', threadId: 'redis-thread-1' });
+    assert.equal(page.records.length, 1);
+    assert.equal(page.records[0].responseSettlement.messageId, 'reply');
+    assert.deepEqual(await restarted.listResponsePending(), []);
+    assert.equal(await redis.ttl('turnexec:settled:user:redis-user-1'), -1);
+    assert.equal((await restarted.listSettled({ userId: 'other' })).records.length, 0);
+  });
+
+  test('output committed before provider teardown remains durable and publishes after terminalization', async () => {
+    await store.createRunning(runningInput({ providerLifecycleTracked: true }));
+    await store.markProviderStarted('redis-child-1', 120);
+    assert.equal(
+      (
+        await store.markResponseSettled('redis-child-1', {
+          kind: 'message',
+          messageId: 'reply',
+          settledAt: 150,
+        })
+      ).outcome,
+      'not_ready',
+    );
+    const restarted = new RedisTurnExecutionStore(redis);
+    await restarted.recordProviderTeardown('redis-child-1', 210);
+    await restarted.transitionTerminal('redis-child-1', { status: 'succeeded', endedAt: 220 });
+    const page = await restarted.listSettled({ userId: 'redis-user-1' });
+    assert.equal(page.records.length, 1);
+    assert.equal(page.records[0].responseSettlement.settledAt, 220);
+  });
+
   test('persists running child and parent index across store instances', async () => {
     await store.createRunning(runningInput({ invocationId: 'later', startedAt: 200 }));
     await store.createRunning(runningInput({ invocationId: 'earlier', startedAt: 100 }));
@@ -451,6 +490,7 @@ describe('RedisTurnExecutionStore', { skip: redisIsolationSkipReason(REDIS_URL) 
     );
     assert.equal(await redis.ttl('turnexec:response-pending'), -1, 'the ledger is TTL=0 persistent truth');
 
+    await restarted.markResponseSettled('ended', { kind: 'no_response', reason: 'empty_turn', settledAt: 250 });
     await restarted.clearResponsePending('ended');
     await restarted.clearResponsePending('never-pending');
     const replay = await restarted.transitionTerminal('ended', {

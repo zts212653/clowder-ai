@@ -150,10 +150,10 @@ describe('F173 Phase C — selectThreadMessages', () => {
     });
 
     expect(selectThreadMessages(state, 'thread-a').map((message) => message.id)).toEqual([
-      'user-active',
       'response-active',
+      'user-active',
     ]);
-    expect(selectThreadMessages(state, 'thread-b').map((message) => message.id)).toEqual(['user-bg', 'response-bg']);
+    expect(selectThreadMessages(state, 'thread-b').map((message) => message.id)).toEqual(['response-bg', 'user-bg']);
     expect(state.messages).toBe(activeMessages);
     expect(state.threadStates['thread-b']?.messages).toBe(backgroundMessages);
   });

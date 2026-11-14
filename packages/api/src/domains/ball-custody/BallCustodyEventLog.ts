@@ -1,3 +1,5 @@
+import { assertRecoveryCurrent } from '../../infrastructure/recovery/recovery-deadline.js';
+import { ballEventFingerprint } from './ball-event-fingerprint.js';
 /**
  * BallCustodyEventLog — append-only Redis-backed event log（F233 Phase B）
  *
@@ -12,6 +14,7 @@ import type { RedisClient } from '@cat-cafe/shared/utils';
 import { BallCustodyKeys } from './ball-custody-keys.js';
 
 export interface IBallCustodyEventLog {
+  appendExact?(event: BallCustodyEvent): Promise<{ appended: boolean; sequence: number; confirmed: boolean }>;
   /**
    * 幂等 append。若 `sourceEventId` 已存在 → `{ appended: false, sequence: -1 }`；
    * 否则 append 到 per-subject list，返回新长度对应的 0-based sequence。
@@ -44,32 +47,38 @@ export type BallCustodyFencedAppendResult =
  * ARGV[1] = sourceEventId  ARGV[2] = JSON 事件  ARGV[3] = subjectKey
  * Returns: 0（已 seen）或 RPUSH 后的 list 长度（>= 1）
  */
-const APPEND_LUA = `
-local already = redis.call('SISMEMBER', KEYS[2], ARGV[1])
-if already == 1 then
+const EVENT_PREFLIGHT = `
+for i, expected in ipairs({'list', 'set', 'set', 'hash'}) do
+  local kind = redis.call('TYPE', KEYS[i]).ok
+  if kind ~= 'none' and kind ~= expected then return redis.error_reply('invalid_ball_event_index') end
+end`;
+const APPEND_LUA = `${EVENT_PREFLIGHT}
+if redis.call('SISMEMBER', KEYS[2], ARGV[1]) == 1 then
+  local proof = redis.call('HGET', KEYS[4], 'eventProof:' .. ARGV[1])
+  if not proof then return -2 end
+  if proof ~= ARGV[4] then return -3 end
   return 0
 end
+local projectionIntent = redis.call('HGET', KEYS[4], 'projectionIntent:' .. ARGV[1])
+if ARGV[5] == '1' and projectionIntent then
+  local ok, intent = pcall(cjson.decode, projectionIntent)
+  if not ok or intent.fingerprint ~= ARGV[4] then return redis.error_reply('projection_event_identity_conflict') end
+end
+local length = redis.call('RPUSH', KEYS[1], ARGV[2])
 redis.call('SADD', KEYS[2], ARGV[1])
 redis.call('SADD', KEYS[3], ARGV[3])
-return redis.call('RPUSH', KEYS[1], ARGV[2])
-`;
-
-const APPEND_FENCED_LUA = `
-local already = redis.call('SISMEMBER', KEYS[2], ARGV[1])
-if already == 1 then
-  return {0, -1}
-end
-
+redis.call('HSET', KEYS[4], 'eventProof:' .. ARGV[1], ARGV[4])
+if ARGV[5] == '1' and projectionIntent then redis.call('HSET', KEYS[4], 'projectionNative:' .. ARGV[1], ARGV[4]) end
+return length`;
+const APPEND_FENCED_LUA = `${EVENT_PREFLIGHT}
+if redis.call('SISMEMBER', KEYS[2], ARGV[1]) == 1 then return {0, -1} end
 local current = redis.call('LLEN', KEYS[1])
-if current ~= tonumber(ARGV[2]) then
-  return {-1, current}
-end
-
+if current ~= tonumber(ARGV[2]) then return {-1, current} end
+redis.call('RPUSH', KEYS[1], ARGV[3])
 redis.call('SADD', KEYS[2], ARGV[1])
 redis.call('SADD', KEYS[3], ARGV[4])
-redis.call('RPUSH', KEYS[1], ARGV[3])
-return {1, current}
-`;
+redis.call('HSET', KEYS[4], 'eventProof:' .. ARGV[1], ARGV[5])
+return {1, current}`;
 
 function requireSequence(value: number, name: string): void {
   if (!Number.isSafeInteger(value) || value < 0) {
@@ -80,36 +89,80 @@ function requireSequence(value: number, name: string): void {
 export class RedisBallCustodyEventLog implements IBallCustodyEventLog {
   constructor(private readonly redis: RedisClient) {}
 
+  private async appendNative(event: BallCustodyEvent, confirmedProjection = false): Promise<number> {
+    assertRecoveryCurrent();
+    return Number(
+      await this.redis.eval(
+        APPEND_LUA,
+        4,
+        BallCustodyKeys.eventLog(event.subjectKey),
+        BallCustodyKeys.eventsSeen,
+        BallCustodyKeys.eventsSubjects,
+        `ballcustody:events:meta:${event.subjectKey}`,
+        event.sourceEventId,
+        JSON.stringify(event),
+        event.subjectKey,
+        ballEventFingerprint(event),
+        confirmedProjection ? '1' : '0',
+      ),
+    );
+  }
   async append(event: BallCustodyEvent): Promise<{ appended: boolean; sequence: number }> {
-    const result = (await this.redis.eval(
-      APPEND_LUA,
-      3,
-      BallCustodyKeys.eventLog(event.subjectKey),
-      BallCustodyKeys.eventsSeen,
-      BallCustodyKeys.eventsSubjects,
-      event.sourceEventId,
-      JSON.stringify(event),
-      event.subjectKey,
-    )) as number;
+    const result = await this.appendNative(event);
+    return result <= 0 ? { appended: false, sequence: -1 } : { appended: true, sequence: result - 1 };
+  }
+  async appendExact(event: BallCustodyEvent): Promise<{ appended: boolean; sequence: number; confirmed: boolean }> {
+    const result = await this.appendNative(event, true);
+    if (result === -3) throw new Error('ball_event_identity_conflict');
+    return { appended: result > 0, sequence: result > 0 ? result - 1 : -1, confirmed: result >= 0 };
+  }
 
-    if (result === 0) {
-      return { appended: false, sequence: -1 };
+  /** Explicit legacy evidence census; never called by periodic recovery. */
+  async initializeExactIndex(subject: string): Promise<void> {
+    const metadata = `ballcustody:events:meta:${subject}`;
+    let from = Number((await this.redis.hget(metadata, 'eventProofCursor')) ?? '0');
+    const length = await this.redis.llen(BallCustodyKeys.eventLog(subject));
+    while (from < length) {
+      const batch = (
+        await this.redis.lrange(BallCustodyKeys.eventLog(subject), from, Math.min(length - 1, from + 99))
+      ).map((raw) => JSON.parse(raw) as BallCustodyEvent);
+      if (!batch.length) throw new Error('ball_event_census_incomplete');
+      const fields = batch.flatMap((event) => {
+        if (event.subjectKey !== subject) throw new Error('ball_event_subject_mismatch');
+        return [`eventProof:${event.sourceEventId}`, ballEventFingerprint(event)];
+      });
+      from += batch.length;
+      await this.redis.eval(
+        `
+for i=2,#ARGV,2 do
+  local old = redis.call('HGET', KEYS[1], ARGV[i])
+  if old and old ~= ARGV[i+1] then return redis.error_reply('ball_event_identity_conflict') end
+end
+for i=2,#ARGV,2 do redis.call('HSET', KEYS[1], ARGV[i], ARGV[i+1]) end
+if tonumber(ARGV[1]) > tonumber(redis.call('HGET', KEYS[1], 'eventProofCursor') or '0') then redis.call('HSET', KEYS[1], 'eventProofCursor', ARGV[1]) end
+return 1`,
+        1,
+        metadata,
+        from,
+        ...fields,
+      );
     }
-    return { appended: true, sequence: result - 1 };
   }
 
   async appendFenced(event: BallCustodyEvent, expectedSequence: number): Promise<BallCustodyFencedAppendResult> {
     requireSequence(expectedSequence, 'expectedSequence');
     const result = (await this.redis.eval(
       APPEND_FENCED_LUA,
-      3,
+      4,
       BallCustodyKeys.eventLog(event.subjectKey),
       BallCustodyKeys.eventsSeen,
       BallCustodyKeys.eventsSubjects,
+      `ballcustody:events:meta:${event.subjectKey}`,
       event.sourceEventId,
       expectedSequence.toString(),
       JSON.stringify(event),
       event.subjectKey,
+      ballEventFingerprint(event),
     )) as [number, number];
 
     if (result[0] === 0) return { outcome: 'duplicate' };

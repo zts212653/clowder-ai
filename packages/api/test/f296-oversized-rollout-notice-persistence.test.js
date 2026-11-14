@@ -162,4 +162,43 @@ describe('F296 oversized native rollover response-owned diagnostics', () => {
       );
     });
   }
+
+  it('persists native_binding_changed session seal notices idempotently with TTL=0 while keeping internal seals quiet', async () => {
+    const store = new MessageStore();
+    const nativeSeal = JSON.stringify({
+      type: 'session_seal_requested',
+      catId: 'gemini38',
+      sessionId: 'sess-native-1',
+      sessionSeq: 1,
+      reason: 'native_binding_changed',
+    });
+    const runtimeReplacement = JSON.stringify({
+      type: 'session_seal_requested',
+      catId: 'gemini38',
+      sessionId: 'sess-runtime-2',
+      sessionSeq: 2,
+      reason: 'runtime_replacement',
+    });
+    const contextThreshold = JSON.stringify({
+      type: 'session_seal_requested',
+      catId: 'gemini38',
+      sessionId: 'sess-threshold-3',
+      sessionSeq: 3,
+      reason: 'context_threshold',
+    });
+
+    assert.equal(isUserFacingSystemInfoContent(nativeSeal), true);
+    await persistUserFacingSystemInfoNotices({
+      messageStore: store,
+      threadId: 'thread-owner',
+      catId: 'gemini38',
+      contents: [nativeSeal, nativeSeal, runtimeReplacement, contextThreshold],
+    });
+
+    const rows = await store.getByThread('thread-owner');
+    assert.equal(rows.length, 1, 'only native_binding_changed is persisted and duplicate sessionId is deduplicated');
+    assert.equal(rows[0].source?.connector, 'native-session-seal');
+    assert.equal(rows[0].ttlSeconds, undefined, 'persisted user-visible notice must have TTL=0');
+    assert.match(rows[0].content, /原生配置已更新，会话 #1 已封存；正在带上历史继续/);
+  });
 });

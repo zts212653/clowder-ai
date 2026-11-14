@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import { createHash } from 'node:crypto';
 import type { MessageOutputLayoutV1 } from '@cat-cafe/shared';
 import { describe, expect, it } from 'vitest';

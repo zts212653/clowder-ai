@@ -32,7 +32,7 @@ export async function captureChatPathDesign({ page, base, fixture, language, evi
         thumbnail: measure(document.querySelector('.fc .thumb')),
       };
     });
-    await reference.locator('.split').screenshot({ path: path.join(evidence, 'accepted-chat-and-workspace.png') });
+    await reference.locator('.split').screenshot({ path: path.join(evidence, 'controlled-chat-and-workspace.png') });
   } finally {
     await reference.close();
   }
@@ -85,34 +85,37 @@ export async function captureChatPathDesign({ page, base, fixture, language, evi
       };
     });
     for (const key of ['width', 'height', 'fontSize', 'radius'])
-      assert.ok(Math.abs(actual.chip[key] - expected.chip[key]) <= 2, `Chip ${key} matches accepted CSS within 2px`);
+      assert.ok(
+        Math.abs(actual.chip[key] - expected.chip[key]) <= 2,
+        `Chip ${key} matches the independent controlled reference within 2px`,
+      );
     for (const key of ['width', 'height'])
       assert.ok(
         Math.abs(actual.thumbnail[key] - expected.thumbnail[key]) <= 2,
-        `Thumbnail ${key} matches accepted CSS within 2px`,
+        `Thumbnail ${key} matches the independent controlled reference within 2px`,
       );
     assert.ok(
       Math.abs(actual.file.width - Math.min(expected.file.width, actual.readingWidth)) <= 2,
-      'File card uses accepted width within the reading column',
+      'File card uses the reference width within the reading column',
     );
     assert.ok(
       Math.abs(actual.file.height - expected.file.height) <= 2,
-      'File card height matches the literal accepted CSS',
+      'File card height matches the reference geometry',
     );
     assert.ok(
       Math.abs(actual.pr.width - Math.min(expected.pr.width, actual.readingWidth)) <= 2,
-      'PR card uses accepted width within the reading column',
+      'PR card uses the reference width within the reading column',
     );
     if (language === 'zh' && width === 1440)
       assert.ok(
         Math.abs(actual.pr.height - expected.pr.height) <= 2,
-        'The original sample PR height matches the accepted HTML',
+        'The controlled sample PR height matches the independent reference HTML',
       );
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
     await verifyReferenceTypography({ message, evidence, width });
-    await message.screenshot({ path: path.join(evidence, `accepted-example-${language}-${width}-message.png`) });
+    await message.screenshot({ path: path.join(evidence, `controlled-example-${language}-${width}-message.png`) });
     await page.screenshot({
-      path: path.join(evidence, `accepted-example-${language}-${width}-chat.png`),
+      path: path.join(evidence, `controlled-example-${language}-${width}-chat.png`),
       fullPage: true,
     });
     if (width === 1440) {
@@ -127,25 +130,26 @@ export async function captureChatPathDesign({ page, base, fixture, language, evi
       await page.mouse.up();
       await message.scrollIntoViewIfNeeded();
       await page.screenshot({
-        path: path.join(evidence, `accepted-example-${language}-${width}-workspace.png`),
+        path: path.join(evidence, `controlled-example-${language}-${width}-workspace.png`),
         fullPage: true,
         animations: 'disabled',
       });
     }
     sizes.push({ width, expected, actual });
     await writeFile(
-      path.join(evidence, 'accepted-example-proof.json'),
+      path.join(evidence, 'controlled-example-proof.json'),
       JSON.stringify(
         {
           source: {
             thread: source.thread.id,
             message: source.message.id,
             commit: source.commit,
-            filesCopiedFrom: source.sourceHead,
+            createdAtCommit: source.sourceHead,
+            sampleKind: source.sampleKind,
           },
           sizes,
           boundary:
-            'Original cat message host and original Workspace; mobile returns through the original Chat control after the desktop file entry. No injected markup or substituted view. Reference geometry is measured from the unchanged accepted HTML.',
+            'Original cat message host and original Workspace; mobile returns through the original Chat control after the desktop file entry. No injected markup or substituted view. Reference geometry is measured from the independent checked-in reference HTML with controlled content.',
         },
         null,
         2,

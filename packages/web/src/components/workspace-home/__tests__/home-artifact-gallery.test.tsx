@@ -1,5 +1,5 @@
 import { act } from 'react';
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { data, homeContentFixture, imageArtifact } from './home-content-fixture';
 
 const second = { ...imageArtifact, name: '第二张', sourceMessageId: 'second-source', url: '/uploads/second.png' };
@@ -28,6 +28,11 @@ function prependNewWorks() {
 
 describe('Home uses the common artwork gallery', () => {
   const scene = homeContentFixture();
+  beforeEach(() => {
+    // JSDOM has no layout; visibility itself is checked with production CSS in Chromium.
+    vi.spyOn(HTMLElement.prototype, 'getClientRects').mockReturnValue([new DOMRect()] as unknown as DOMRectList);
+  });
+  afterEach(() => vi.restoreAllMocks());
 
   it('keeps the opened group and focus when newer publications change the Home summary', async () => {
     data.artifacts = [imageArtifact, second];
@@ -44,6 +49,10 @@ describe('Home uses the common artwork gallery', () => {
     await act(async () => next.click());
     expect(document.querySelector('[role="dialog"] img')?.getAttribute('src')).toBe(second.url);
     expect(arrow('下一件作品').disabled).toBe(true);
+    expect(document.querySelector('[role="dialog"]')?.contains(document.activeElement)).toBe(true);
+    expect((document.activeElement as HTMLButtonElement).disabled).toBe(false);
+    expect(document.activeElement?.closest('[data-testid="artwork-gallery-thumbnails"]')).not.toBeNull();
+    expect(document.activeElement?.getAttribute('aria-current')).toBe('true');
   });
 
   it('bounds both directions while keyboard focus stays on an enabled gallery item', async () => {

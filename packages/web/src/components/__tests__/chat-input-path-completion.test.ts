@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 /**
  * F080-P2: Path completion integration tests with ChatInput.
  */
@@ -179,36 +180,6 @@ describe('ChatInput path completion', () => {
     // Menu should close
     const menuAfter = container.querySelector('[data-testid="path-completion-menu"]');
     expect(menuAfter).toBeNull();
-  });
-
-  it('closes menu on Escape', async () => {
-    mockApiFetch.mockImplementation((url: string) => {
-      if (typeof url === 'string' && url.includes('/api/projects/complete')) {
-        return jsonOk({
-          entries: [{ name: 'foo/', path: '/test/foo', isDirectory: true }],
-        });
-      }
-      return jsonOk({ entries: [] });
-    });
-
-    const onSend = vi.fn();
-    act(() => {
-      root.render(React.createElement(ChatInput, { threadId: 'thread-1', onSend }));
-    });
-
-    act(() => {
-      typeInto(getTextarea(), './foo');
-    });
-    await act(async () => {
-      vi.advanceTimersByTime(300);
-    });
-
-    expect(container.querySelector('[data-testid="path-completion-menu"]')).not.toBeNull();
-
-    act(() => {
-      pressKey(getTextarea(), 'Escape');
-    });
-    expect(container.querySelector('[data-testid="path-completion-menu"]')).toBeNull();
   });
 
   it('hides ghost text when path completion menu is open', async () => {

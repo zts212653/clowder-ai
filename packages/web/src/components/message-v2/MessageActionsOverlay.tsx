@@ -2,6 +2,8 @@
 
 import { type ReactNode, type RefObject, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { beginChatScroll } from '@/utils/chat-scroll-owner';
+import { wheelDeltaPx } from '../ClassicMessageNavigator';
 import type { MessageActionOwnership } from './message-action-ownership';
 import { boundedMenuPosition } from './message-actions-menu-geometry';
 import {
@@ -55,6 +57,23 @@ export function MessageActionsOverlay({
   const fullHeight = useRef(0);
   const columnRef = useRef<HTMLElement | null>(null);
   useLayoutEffect(() => setHost(document.body), []);
+  useEffect(() => {
+    const node = plane.current;
+    const viewport = owner.current?.closest<HTMLElement>('[data-chat-container]');
+    if (!node || !viewport) return;
+    const wheel = (event: WheelEvent) => {
+      // Menus and browser zoom retain their own native input. The floating
+      // toolbar has no native scroll chain into its source viewport.
+      if (event.defaultPrevented || event.ctrlKey || event.deltaY === 0) return;
+      if (event.target instanceof Element && event.target.closest('[role="menu"], [role="dialog"]')) return;
+      const gesture = beginChatScroll(viewport);
+      if (!gesture) return;
+      if (gesture.scrollTo(viewport.scrollTop + wheelDeltaPx(event, viewport))) event.preventDefault();
+      gesture.end();
+    };
+    node.addEventListener('wheel', wheel, { passive: false });
+    return () => node.removeEventListener('wheel', wheel);
+  }, [host, owner]);
   useEffect(() => () => ownership.settle(false, false), [ownership]);
 
   useLayoutEffect(() => {

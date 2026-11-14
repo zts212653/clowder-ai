@@ -10,7 +10,7 @@ const VALID_WAIT_SOURCE_REF = {
   kind: 'github_issue',
   value: 'AgeOfLearning/cat-cafe#2690',
   expectedSignal: 'review_posted',
-  slaUntilMs: 3_600_000,
+  slaUntilMs: Date.now() + 3_600_000,
 };
 
 describe('F167 Phase Q: retired hold tombstones', () => {

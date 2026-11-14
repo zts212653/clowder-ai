@@ -14,6 +14,9 @@ import type {
 } from '../../runtime-session/RuntimeSessionMetadata.js';
 
 export const RuntimeSessionKeys = {
+  /** Disposable pending seal-recovery membership; disposition remains on the original metadata row. */
+  sealRecovery: () => 'runtime-session-index:seal-recovery:pending',
+  sealRecoveryComplete: () => 'runtime-session-index:seal-recovery:v1',
   /** String JSON: RuntimeSessionMetadata sidecar by SessionRecord.id */
   detail: (sessionId: string) => `runtime-session:${sessionId}`,
   /** String: runtime + runtimeSessionId -> SessionRecord.id */

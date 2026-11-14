@@ -199,8 +199,17 @@ it.each([
   const fileName = `材料.${ext}`;
   const filePath = `art/${fileName}`;
   const url = `/api/workspace/file/raw?${new URLSearchParams({ worktreeId: 'wt-a', path: filePath })}`;
-  mocks.apiFetch.mockResolvedValue(new Response(JSON.stringify({ path: filePath, mime: mimeType })));
+  mocks.apiFetch.mockImplementation(async () =>
+    Response.json({
+      path: filePath,
+      mime: mimeType,
+      content: '# 原文件的正文\n保留同一读取来源',
+    }),
+  );
   for (const kind of ['content', 'rich', 'rich-without-mime'] as const) {
+    // Each original card gets one mount; menu/open actions must not add a second body reader.
+    await act(async () => root.render(null));
+    mocks.apiFetch.mockClear();
     await act(async () => {
       root.render(
         kind === 'content' ? (
@@ -224,12 +233,14 @@ it.each([
       `http://api.test${mimeType.startsWith('audio/') ? url : url.replace('/raw?', '/download?')}`,
     );
     expect(download?.getAttribute('download')).toBe(fileName);
-    expect(
-      mocks.apiFetch.mock.calls.filter(
-        ([url]) =>
-          String(url).startsWith('/api/workspace/file?') || String(url) === '/api/content-publications/resolve',
-      ),
-    ).toEqual([]);
+    const bodyReads = mocks.apiFetch.mock.calls
+      .map(([url]) => String(url))
+      .filter((url) => url.startsWith('/api/workspace/file?'));
+    expect(bodyReads).toEqual(
+      ext === 'md' ? [`/api/workspace/file?worktreeId=wt-a&path=${encodeURIComponent(filePath)}`] : [],
+    );
+    expect(mocks.apiFetch.mock.calls.some(([url]) => url === '/api/content-publications/resolve')).toBe(false);
+    if (ext === 'md') expect(container.textContent).toContain('原文件的正文');
     expect(useChatStore.getState().workspaceOpenRequest?.target).toMatchObject({
       kind: 'file',
       path: filePath,
@@ -238,8 +249,8 @@ it.each([
   }
 });
 
-it('an unsupported GIF previews without promising annotations', async () => {
-  mocks.apiFetch.mockResolvedValue(new Response(JSON.stringify({ path, mime: 'image/gif' })));
+it('an unsupported AVIF previews without promising annotations', async () => {
+  mocks.apiFetch.mockResolvedValue(new Response(JSON.stringify({ path, mime: 'image/avif' })));
   await render('gallery');
   await act(async () => container.querySelector<HTMLButtonElement>('button')!.click());
   expect(useChatStore.getState().workspaceOpenRequest).toBeNull();

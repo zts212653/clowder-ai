@@ -65,7 +65,7 @@ export async function verifyReferenceTypography({ message, evidence, width }) {
       };
     }),
   );
-  assert.ok(metadata.length >= 4, 'Repository, number and real PR statistics are measured');
+  assert.ok(metadata.length >= 4, 'Repository, number and controlled PR statistics are measured');
   for (const item of metadata) {
     assert.equal(item.text, `${item.indexInGroup === 0 ? '' : ' · '}${item.title}`);
     assert.equal(item.whiteSpace, 'nowrap', 'The preceding separator and its following item share one reading unit');
@@ -85,7 +85,7 @@ export async function verifyReferenceTypography({ message, evidence, width }) {
   );
 }
 
-/** A separate persisted message adds the missing standalone-image case without changing the accepted prose. */
+/** A separate persisted message adds the missing standalone-image case beside the controlled reference prose. */
 export async function captureStandaloneImage({ page, base, source, evidence }) {
   const sizes = [];
   await page.setViewportSize({ width: 1440, height: 1100 });

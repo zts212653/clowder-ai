@@ -20,13 +20,12 @@ const DIMENSION_LABELS: Record<string, string> = {
 
 type TasteCardInput = Pick<
   TasteProposal,
-  'id' | 'scene' | 'quote' | 'takeaway' | 'dimension' | 'tags' | 'privacy' | 'catId'
+  'id' | 'scene' | 'quote' | 'resolvedQuotes' | 'takeaway' | 'dimension' | 'tags' | 'privacy' | 'catId'
 > & {
   correctionTarget?: Pick<NonNullable<TasteProposal['correctionTarget']>, 'reason' | 'suggestedPatch'>;
 };
 
 export function buildTasteProposalCardBlock(proposal: TasteCardInput): RichCardBlock {
-  const scenePreview = proposal.scene.length > 200 ? `${proposal.scene.slice(0, 197)}…` : proposal.scene;
   const correction = proposal.correctionTarget;
 
   return {
@@ -39,22 +38,29 @@ export function buildTasteProposalCardBlock(proposal: TasteCardInput): RichCardB
         ? [
             `**更正原因：** ${correction.reason}`,
             '',
-            `**建议改动：** \`${JSON.stringify(correction.suggestedPatch)}\``,
+            `**建议改动：**\n${literalText(JSON.stringify(correction.suggestedPatch))}`,
             '',
           ]
         : []),
-      ...(proposal.takeaway ? [`**猫的判断（假设）：** ${proposal.takeaway}`, ''] : []),
-      `**场景：** ${scenePreview}`,
+      ...(proposal.takeaway ? [`**猫的判断（假设）：**\n${literalText(proposal.takeaway)}`, ''] : []),
+      `**场景：**\n${literalText(proposal.scene)}`,
       '',
-      `> ${proposal.quote}`,
+      '**原话：**',
+      ...(proposal.resolvedQuotes ?? [proposal.quote]).map(literalText),
     ].join('\n'),
     tone: 'info',
     fields: [
       { label: '维度', value: DIMENSION_LABELS[proposal.dimension] ?? proposal.dimension },
       { label: '标签', value: proposal.tags.join(', ') },
-      { label: '隐私', value: proposal.privacy === 'sensitive' ? '敏感' : '公开' },
+      { label: '隐私', value: proposal.privacy === 'sensitive' ? '敏感' : '私有家仓内共享（不对互联网公开）' },
       { label: '捕捉猫', value: proposal.catId },
       ...(correction ? [{ label: '动作', value: '更正已有记忆' }] : []),
     ],
   };
+}
+
+/** Candidate text must not hide Markdown/HTML or fetch remote images before an owner decision. */
+function literalText(value: string): string {
+  const fence = '`'.repeat(Math.max(3, ...Array.from(value.matchAll(/`+/g), (match) => match[0].length + 1)));
+  return `${fence}text\n${value}\n${fence}`;
 }

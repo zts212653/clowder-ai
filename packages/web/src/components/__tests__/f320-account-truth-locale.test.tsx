@@ -238,6 +238,16 @@ it('binding commit displays a changed-preview error without changing selection',
 });
 it.each([
   [
+    '当前平台尚未支持新增 Codex 账号，请继续使用本机默认账号',
+    '当前平台尚未支持新增 Codex 账号，请继续使用本机默认账号',
+    'Adding Codex accounts is not supported on this platform yet. Continue using the local default account.',
+  ],
+  [
+    '无法读取 Codex 组织托管策略，请核对权限后重试',
+    '无法读取 Codex 组织托管策略，请核对权限后重试',
+    'Could not read the Codex managed policy. Check permissions and retry.',
+  ],
+  [
     'codex_managed_layout_changed',
     '托管账号目录已改变，请核对账号配置',
     'Managed account directories changed. Check the account configuration.',

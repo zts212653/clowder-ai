@@ -223,7 +223,8 @@ it('refuses an unadmitted GIF without putting a misleading image into Chat', asy
   const image = mediaView();
   (image.review.source as { mime: string }).mime = 'image/gif';
   await mount(image);
-  await selectWholeImage();
+  expect(container.querySelector('[aria-label="图片或视频上的批注"]')).toBeNull();
+  expect(container.textContent).toContain('无法核对 GIF 帧信息');
   await act(async () => addToChat()?.click());
   expect(queued()).toBeNull();
 });

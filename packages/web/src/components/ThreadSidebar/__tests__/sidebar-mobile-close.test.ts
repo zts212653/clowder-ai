@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 /**
  * Regression test: mobile sidebar auto-closes after creating a new conversation.
  * Verifies that createInProject success path calls onClose on narrow viewports.
@@ -5,11 +6,15 @@
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { SHELL_PRESENTATION_STORAGE_KEY, writeShellPresentation } from '../../shell/shell-presentation';
 import { ThreadSidebar } from '../ThreadSidebar';
 
 // ── Mocks ─────────────────────────────────────────────────────
 const mockPush = vi.fn();
-vi.mock('next/navigation', () => ({ useRouter: () => ({ push: mockPush }) }));
+vi.mock('next/navigation', () => ({
+  useRouter: () => ({ push: mockPush }),
+  usePathname: () => window.location.pathname,
+}));
 
 const mockApiFetch = vi.fn();
 vi.mock('@/utils/api-client', () => ({
@@ -56,6 +61,8 @@ describe('ThreadSidebar mobile auto-close', () => {
   beforeEach(() => {
     container = document.createElement('div');
     document.body.appendChild(container);
+    // Exercise the retained classic picker/project-list controls.
+    writeShellPresentation('classic');
     root = createRoot(container);
     mockApiFetch.mockReset();
     mockPush.mockReset();
@@ -77,6 +84,7 @@ describe('ThreadSidebar mobile auto-close', () => {
   afterEach(() => {
     act(() => root.unmount());
     container.remove();
+    window.localStorage.removeItem(SHELL_PRESENTATION_STORAGE_KEY);
     vi.restoreAllMocks();
     Object.defineProperty(window, 'innerWidth', { value: originalInnerWidth, writable: true });
   });

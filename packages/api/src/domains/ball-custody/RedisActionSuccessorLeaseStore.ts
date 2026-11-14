@@ -1,5 +1,5 @@
 import type { RedisClient } from '@cat-cafe/shared/utils';
-import { createModuleLogger } from '../../infrastructure/logger.js';
+import { recoveryRedis } from '../../infrastructure/recovery/recovery-redis.js';
 import { hydrateTask } from '../cats/services/stores/redis/RedisTaskCodec.js';
 import { TaskKeys } from '../cats/services/stores/redis-keys/task-keys.js';
 import type {
@@ -9,8 +9,10 @@ import type {
   ActionSuccessorLeaseStore,
   ActionSuccessorOutputPreflightResult,
 } from './ActionSuccessorLeaseStore.js';
+import { ActionSuccessorRecoveryIndex } from './ActionSuccessorRecoveryIndex.js';
 import { ActionSuccessorKeys } from './action-successor-keys.js';
 import { preflightActionSuccessorOutputInRedis } from './action-successor-output-preflight.js';
+import type { ActionRecoveryLane } from './action-successor-recovery-state.js';
 import { parseActionSubjectTerminal, parseActionSuccessorLease } from './action-successor-redis-codecs.js';
 import {
   CAS_ACTION_SUCCESSOR_LUA,
@@ -46,64 +48,6 @@ import { runTaskContinuationFencedCommand } from './approved-task-continuation-f
 import { isRetiredTaskAction } from './retired-task-action.js';
 
 const MAX_CAS_ATTEMPTS = 20;
-const MAX_MALFORMED_CENSUS_SAMPLES = 5;
-const MALFORMED_CENSUS_REPORT_DEDUP_MS = 10_000;
-const log = createModuleLogger('ball-custody/action-successor-lease-store');
-
-interface MalformedCensusSample {
-  detailKey: string;
-  reason: string;
-}
-
-function parseCensusBatch(
-  keys: readonly string[],
-  raws: readonly (string | null)[],
-  predicate: (lease: ActionSuccessorLease | null) => lease is ActionSuccessorLease,
-): { matches: ActionSuccessorLease[]; malformedCount: number; malformedSamples: MalformedCensusSample[] } {
-  const matches: ActionSuccessorLease[] = [];
-  const malformedSamples: MalformedCensusSample[] = [];
-  let malformedCount = 0;
-  for (const [index, raw] of raws.entries()) {
-    const detailKey = keys[index];
-    if (!detailKey) throw new Error('ActionSuccessor recovery census received an unkeyed Redis value');
-    try {
-      const lease = parseActionSuccessorLease(raw);
-      if (predicate(lease)) matches.push(lease);
-    } catch (error) {
-      malformedCount += 1;
-      if (malformedSamples.length < MAX_MALFORMED_CENSUS_SAMPLES) {
-        malformedSamples.push({
-          detailKey,
-          reason: error instanceof Error ? error.message : String(error),
-        });
-      }
-    }
-  }
-  return { matches, malformedCount, malformedSamples };
-}
-
-function isPendingReturn(lease: ActionSuccessorLease | null): lease is ActionSuccessorLease {
-  return Boolean(
-    lease &&
-      isRecoverableActionSuccessorReturn(lease) &&
-      (lease.returnDeliveryState === 'pending' || lease.returnDeliveryState === 'overdue'),
-  );
-}
-
-function isPendingDispatch(lease: ActionSuccessorLease | null): lease is ActionSuccessorLease {
-  return lease?.dispatchDeliveryState === 'pending';
-}
-
-function isActiveTaskLease(lease: ActionSuccessorLease | null): lease is ActionSuccessorLease {
-  return (
-    lease?.status === 'active' &&
-    lease.actionFamily === 'implement' &&
-    lease.successorSlot === 'implementer' &&
-    lease.subjectRef.startsWith('subject:task:') &&
-    lease.terminalPredicate?.kind === 'task_done'
-  );
-}
-
 function validateFreshRevisionReplay(lease: ActionSuccessorLease, expected: ActionSuccessorLease, now: number): void {
   const terminalPredicate = expected.terminalPredicate;
   if (!terminalPredicate) throw new Error('fresh action successor lease requires a terminal predicate');
@@ -132,9 +76,16 @@ function validateFreshRevisionReplay(lease: ActionSuccessorLease, expected: Acti
 }
 
 export class RedisActionSuccessorLeaseStore implements ActionSuccessorLeaseStore {
-  private lastMalformedCensusReport?: { signature: string; at: number };
+  readonly recovery: ActionSuccessorRecoveryIndex;
 
-  constructor(private readonly redis: RedisClient) {}
+  constructor(private readonly redis: RedisClient) {
+    this.redis = recoveryRedis(redis);
+    this.recovery = new ActionSuccessorRecoveryIndex(this.redis);
+  }
+
+  initializeRecovery(rebuild = false): Promise<void> {
+    return this.recovery.initialize(rebuild);
+  }
 
   async get(leaseId: string): Promise<ActionSuccessorLease | null> {
     return parseActionSuccessorLease(await this.redis.get(ActionSuccessorKeys.detail(leaseId)));
@@ -149,38 +100,34 @@ export class RedisActionSuccessorLeaseStore implements ActionSuccessorLeaseStore
     return parseActionSuccessorLease(await this.redis.get(detailKey));
   }
 
-  async listPendingReturns(limit = 100): Promise<ActionSuccessorLease[]> {
-    return this.listMatching(limit, 'pending return', isPendingReturn);
+  async listPendingReturns(limit = 100, now = Date.now()): Promise<ActionSuccessorLease[]> {
+    return this.listMatching(limit, 'return', now);
   }
-
-  async listActiveTaskLeases(limit = 100): Promise<ActionSuccessorLease[]> {
-    return this.listMatching(limit, 'active task lease', isActiveTaskLease);
+  async listActiveTaskLeases(limit = 100, now = Date.now()): Promise<ActionSuccessorLease[]> {
+    return this.listMatching(limit, 'task', now);
   }
-
-  async listPendingDispatches(limit = 100): Promise<ActionSuccessorLease[]> {
-    return this.listMatching(limit, 'pending dispatch', isPendingDispatch);
+  async listPendingDispatches(limit = 100, now = Date.now()): Promise<ActionSuccessorLease[]> {
+    return this.listMatching(limit, 'dispatch', now);
   }
-
-  private async listMatching(
-    limit: number,
-    label: string,
-    predicate: (lease: ActionSuccessorLease | null) => lease is ActionSuccessorLease,
-  ): Promise<ActionSuccessorLease[]> {
-    if (!Number.isInteger(limit) || limit <= 0) throw new Error(`${label} limit must be a positive integer`);
-    const keyPrefix = this.redis.options.keyPrefix ?? '';
-    const keys = (await this.redis.smembers(ActionSuccessorKeys.ALL))
-      .map((key) => (keyPrefix && key.startsWith(keyPrefix) ? key.slice(keyPrefix.length) : key))
-      .sort();
-    const matches: ActionSuccessorLease[] = [];
-    const malformedSamples: MalformedCensusSample[] = [];
-    let malformedCount = 0;
-    const batchSize = 100;
-    for (let offset = 0; offset < keys.length && matches.length < limit; offset += batchSize) {
-      const batch = keys.slice(offset, offset + batchSize);
-      const raws = await this.redis.mget(...batch);
-      const parsed = parseCensusBatch(batch, raws, predicate);
-      for (const lease of parsed.matches) {
-        const retired = await isRetiredTaskAction(
+  private async listMatching(limit: number, lane: ActionRecoveryLane, now: number): Promise<ActionSuccessorLease[]> {
+    const leases = await this.recovery.list(lane, limit, now);
+    const result: ActionSuccessorLease[] = [];
+    for (const lease of leases) {
+      if (lane === 'return' && !isRecoverableActionSuccessorReturn(lease)) {
+        const snapshot = await this.recovery.read(lease.leaseId, lane);
+        if (snapshot)
+          await this.recovery.update(snapshot, lane, {
+            v: 1,
+            generation: lease.generation,
+            attempts: 0,
+            nextAttemptAt: null,
+            reasonCode: 'historical_local_review_not_applicable',
+          });
+        continue;
+      }
+      let retired: boolean;
+      try {
+        retired = await isRetiredTaskAction(
           {
             get: async (id) => {
               const raw = await this.redis.hgetall(TaskKeys.detail(id));
@@ -189,37 +136,23 @@ export class RedisActionSuccessorLeaseStore implements ActionSuccessorLeaseStore
           },
           lease,
         );
-        if (!retired) matches.push(lease);
+      } catch {
+        // Per-item task read failures belong to the lane's persisted budget, not the whole census.
+        result.push(lease);
+        continue;
       }
-      malformedCount += parsed.malformedCount;
-      malformedSamples.push(
-        ...parsed.malformedSamples.slice(0, MAX_MALFORMED_CENSUS_SAMPLES - malformedSamples.length),
-      );
+      if (retired) {
+        const snapshot = await this.recovery.read(lease.leaseId, lane);
+        if (snapshot)
+          await this.recovery.update(
+            snapshot,
+            lane,
+            { ...snapshot.fact, nextAttemptAt: null, reasonCode: 'ordinary_task_retired' },
+            true,
+          );
+      } else result.push(lease);
     }
-    if (malformedCount > 0) {
-      this.reportMalformedCensus(label, malformedCount, malformedSamples);
-    }
-    return matches.slice(0, limit);
-  }
-
-  private reportMalformedCensus(
-    label: string,
-    malformedCount: number,
-    malformedSamples: MalformedCensusSample[],
-  ): void {
-    const signature = JSON.stringify({ malformedCount, malformedSamples });
-    const now = Date.now();
-    if (
-      this.lastMalformedCensusReport?.signature === signature &&
-      now - this.lastMalformedCensusReport.at < MALFORMED_CENSUS_REPORT_DEDUP_MS
-    ) {
-      return;
-    }
-    this.lastMalformedCensusReport = { signature, at: now };
-    log.warn(
-      { label, malformedCount, malformedSamples },
-      'ActionSuccessor recovery census skipped malformed persisted leases',
-    );
+    return result;
   }
 
   async claim(input: ClaimActionSuccessorInput): Promise<ActionSuccessorClaimStoreResult> {
@@ -231,6 +164,7 @@ export class RedisActionSuccessorLeaseStore implements ActionSuccessorLeaseStore
         ActionSuccessorKeys.identity(candidate),
         ActionSuccessorKeys.subjectTerminal(candidate.subjectRef),
         ActionSuccessorKeys.ALL,
+        ...ActionSuccessorKeys.recoveryIndexes(),
       ],
       args: [candidate.dispatchId, JSON.stringify(candidate)],
     });
@@ -338,6 +272,7 @@ export class RedisActionSuccessorLeaseStore implements ActionSuccessorLeaseStore
         ActionSuccessorKeys.identity(current),
         ActionSuccessorKeys.subjectTerminal(current.subjectRef),
         ActionSuccessorKeys.ALL,
+        ...ActionSuccessorKeys.recoveryIndexes(),
       ],
       args: [String(current.revision), result.lease.dispatchId, JSON.stringify(result.lease)],
     });
@@ -711,9 +646,10 @@ export class RedisActionSuccessorLeaseStore implements ActionSuccessorLeaseStore
     const result = Number(
       await this.redis.eval(
         CAS_ACTION_SUCCESSOR_LUA,
-        2,
+        5,
         ActionSuccessorKeys.detail(current.leaseId),
         ActionSuccessorKeys.identity(current),
+        ...ActionSuccessorKeys.recoveryIndexes(),
         String(current.revision),
         JSON.stringify(next),
       ),
@@ -735,6 +671,7 @@ export class RedisActionSuccessorLeaseStore implements ActionSuccessorLeaseStore
         ActionSuccessorKeys.detail(current.leaseId),
         ActionSuccessorKeys.identity(current),
         ActionSuccessorKeys.subjectTerminal(current.subjectRef),
+        ...ActionSuccessorKeys.recoveryIndexes(),
       ],
       args: [String(current.revision), JSON.stringify(next)],
     };

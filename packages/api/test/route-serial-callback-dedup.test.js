@@ -697,12 +697,13 @@ describe('#573/#1332: explicit callback/final persistence semantics', () => {
     );
   });
 
-  it('persists blocks created after an interim callback when the serial route appends its final', async () => {
+  it('persists the corrected revision after an interim callback when the serial route appends its final', async () => {
     const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
     const { getRichBlockBuffer } = await import('../dist/domains/cats/services/agents/invocation/RichBlockBuffer.js');
     const buffer = getRichBlockBuffer();
     const first = { id: 'interim-card', kind: 'card', v: 1, title: 'Interim' };
-    const later = { id: 'final-card', kind: 'card', v: 1, title: 'Final' };
+    const draft = { id: 'final-widget', kind: 'html_widget', v: 1, html: '<p>Draft</p>' };
+    const later = { ...draft, html: '<p>Corrected</p>' };
     const service = {
       async *invoke() {
         yield {
@@ -712,8 +713,9 @@ describe('#573/#1332: explicit callback/final persistence semantics', () => {
           timestamp: Date.now(),
         };
         assert.equal(buffer.add('thread1', 'opus', first, 'inv-1'), 'added');
-        assert.deepEqual(buffer.consume('thread1', 'opus', 'inv-1', { final: false }), [first]);
-        assert.equal(buffer.add('thread1', 'opus', later, 'inv-1'), 'added');
+        assert.deepEqual(await buffer.consume('thread1', 'opus', 'inv-1', { final: false }), [first]);
+        assert.equal(buffer.add('thread1', 'opus', draft, 'inv-1'), 'added');
+        assert.equal(buffer.add('thread1', 'opus', later, 'inv-1'), 'updated');
         yield { type: 'text', catId: 'opus', content: 'Final answer', timestamp: Date.now() };
         yield { type: 'done', catId: 'opus', timestamp: Date.now() };
       },

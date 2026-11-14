@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { ensureWorkspaceOpen } from './f307-workspace-open.mjs';
 
 /** Real /thread and Home UI; controlled execution truth, with no live cancellation. */
@@ -158,7 +160,7 @@ export async function runHappeningProjectsJourney({ browser, baseUrl, threadId, 
       '/project/cat-cafe',
     );
     await home.getByText(language === 'en' ? 'Uncategorized' : '未分类', { exact: true }).waitFor();
-    await page.screenshot({ path: `/tmp/happening-projects-expanded-${viewport.width}-${language}.png` });
+    await page.screenshot({ path: join(tmpdir(), `happening-projects-expanded-${viewport.width}-${language}.png`) });
     await page.waitForFunction(
       () => !document.querySelector('[data-project-path="/project/cat-planet"] button')?.disabled,
     );
@@ -172,7 +174,7 @@ export async function runHappeningProjectsJourney({ browser, baseUrl, threadId, 
       document.querySelector('[data-project-path="/project/cat-planet"] button')?.textContent.includes('5'),
     );
     assert.equal(await heading.getAttribute('aria-expanded'), 'false', 'new work must not reopen a collapsed group');
-    await page.screenshot({ path: `/tmp/happening-projects-collapsed-${viewport.width}-${language}.png` });
+    await page.screenshot({ path: join(tmpdir(), `happening-projects-collapsed-${viewport.width}-${language}.png`) });
     await page.reload({ waitUntil: 'domcontentloaded' });
     await ensureWorkspaceOpen(page);
     await planet.waitFor();
@@ -199,7 +201,7 @@ export async function runHappeningProjectsJourney({ browser, baseUrl, threadId, 
       await heading.locator('.home-project-name').evaluate((name) => name.scrollWidth <= name.clientWidth + 1),
       'the ordinary project name stays complete before the optional current-project tag',
     );
-    await page.screenshot({ path: `/tmp/happening-current-project-fold-${viewport.width}-${language}.png` });
+    await page.screenshot({ path: join(tmpdir(), `happening-current-project-fold-${viewport.width}-${language}.png`) });
     await heading.click();
     const tripo = planet.locator('[data-execution-id="tripo"]');
     await tripo.getByRole('button', { name: /停止|Stop/ }).click();
@@ -241,7 +243,7 @@ export async function runHappeningProjectsJourney({ browser, baseUrl, threadId, 
     assert.equal(await waiting.getByTestId('workspace-deployment-wait-item').filter({ visible: true }).count(), 0);
     await deploymentFold.scrollIntoViewIfNeeded();
     await page.mouse.move(0, 0);
-    await page.screenshot({ path: `/tmp/happening-home-updates-${viewport.width}-${language}.png` });
+    await page.screenshot({ path: join(tmpdir(), `happening-home-updates-${viewport.width}-${language}.png`) });
     await deploymentFold.focus();
     await deploymentFold.press('Enter');
     assert.equal(await waiting.getByTestId('workspace-deployment-wait-item').filter({ visible: true }).count(), 2);
@@ -284,7 +286,7 @@ export async function runHappeningProjectsJourney({ browser, baseUrl, threadId, 
     else await cafeWaits.locator('.home-project-head').click();
     await unknown.scrollIntoViewIfNeeded();
     await page.mouse.move(0, 0);
-    await page.screenshot({ path: `/tmp/happening-home-mixed-${viewport.width}-${language}.png` });
+    await page.screenshot({ path: join(tmpdir(), `happening-home-mixed-${viewport.width}-${language}.png`) });
     const waitFits = await waiting
       .locator('.home-project-head')
       .evaluateAll((buttons) => buttons.every((button) => button.scrollWidth <= button.clientWidth + 1));
@@ -322,7 +324,7 @@ export async function runHappeningProjectsJourney({ browser, baseUrl, threadId, 
     );
     assert.deepEqual(errors, []);
   } catch (error) {
-    await page.screenshot({ path: `/tmp/happening-projects-failure-${viewport.width}-${language}.png` });
+    await page.screenshot({ path: join(tmpdir(), `happening-projects-failure-${viewport.width}-${language}.png`) });
     console.error((await page.locator('body').innerText()).slice(-5000));
     throw error;
   } finally {

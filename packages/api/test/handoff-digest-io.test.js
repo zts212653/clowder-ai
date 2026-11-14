@@ -1,10 +1,9 @@
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, test } from 'node:test';
 import { TranscriptReader } from '../dist/domains/cats/services/session/TranscriptReader.js';
-import { TranscriptWriter } from '../dist/domains/cats/services/session/TranscriptWriter.js';
 
 describe('handoff digest IO', () => {
   let tempDir;
@@ -57,31 +56,6 @@ describe('handoff digest IO', () => {
 
     const result = await reader.readHandoffDigest('sess-bad', 'thread1', 'cat1');
     assert.equal(result, null);
-  });
-
-  // --- writeHandoffDigest ---
-
-  test('writeHandoffDigest writes YAML frontmatter + markdown body', async () => {
-    const sessionDir = join(tempDir, 'threads', 'thread1', 'cat1', 'sessions', 'sess-write');
-    await mkdir(sessionDir, { recursive: true });
-
-    await TranscriptWriter.writeHandoffDigest(
-      sessionDir,
-      {
-        v: 1,
-        model: 'claude-haiku-4-5-20251001',
-        generatedAt: 1709700000000,
-      },
-      '## Summary\nDid things.',
-    );
-
-    const content = await readFile(join(sessionDir, 'digest.handoff.md'), 'utf-8');
-    assert.ok(content.startsWith('---\n'));
-    assert.ok(content.includes('v: 1'));
-    assert.ok(content.includes('model: claude-haiku-4-5-20251001'));
-    assert.ok(content.includes('generatedAt: 1709700000000'));
-    assert.ok(content.includes('## Summary'));
-    assert.ok(content.includes('Did things.'));
   });
 
   // --- readAllEvents ---

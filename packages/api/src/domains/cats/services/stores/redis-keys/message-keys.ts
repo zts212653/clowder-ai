@@ -9,6 +9,9 @@ export const MessageKeys = {
 
   /** Short-lived owner-token mutex around lifecycle dispatchRef writes. */
   lifecycleDispatchLock: (id: string) => `msg:${id}:lifecycle-dispatch-lock`,
+  /** Derived candidate indexes. Exact recovery facts live only in each message lifecycle. */
+  appendPending: (threadId: string) => `msg:append-pending:${threadId}`,
+  APPEND_PENDING_THREADS: 'msg:append-pending-threads',
 
   /** Global timeline sorted set */
   TIMELINE: 'msg:timeline',

@@ -5,7 +5,7 @@ type SearchPhase =
   | 'source-admission'
   | 'retrieval'
   | 'canonical-projection'
-  | 'qualification'
+  | 'decision-sources'
   | 'final-revalidation';
 
 /** Error-only operational evidence. Query, principal and canonical bodies are never captured. */
@@ -15,6 +15,7 @@ export function observeMessageSearchExecution(
 ) {
   const started = performance.now();
   const completedPhases: Partial<Record<SearchPhase, number>> = {};
+  const annotated = new WeakSet<Error>();
   return async <T>(phase: SearchPhase, run: () => T | Promise<T>, check?: () => void): Promise<T> => {
     const entered = performance.now();
     try {
@@ -33,7 +34,8 @@ export function observeMessageSearchExecution(
       }
       return result;
     } catch (error) {
-      if (error instanceof Error) {
+      if (error instanceof Error && !annotated.has(error)) {
+        annotated.add(error);
         try {
           Object.assign(error, {
             messageSearchExecution: {

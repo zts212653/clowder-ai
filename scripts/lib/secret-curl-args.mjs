@@ -29,7 +29,8 @@ function checkFlag(name) {
 async function curlValue(name, value, freeze) {
   if (['--url', '--write-out', '-w', '--cacert', '--capath', '--cert', '--key'].includes(name)) return value;
   if (CURL_FILE_VALUES.has(name) && name !== '--cookie-jar') return freeze(value);
-  if (CURL_REFERENCES.has(name) && value.startsWith('@')) return `@${await freeze(value.slice(1))}`;
+  if (CURL_REFERENCES.has(name) && value.startsWith('@'))
+    return `@${await freeze(value.slice(1), { headers: ['-H', '--header', '--proxy-header'].includes(name) })}`;
   if ((name === '--cookie' || name === '-b') && !value.includes('=')) return freeze(value);
   if (CURL_FORMS.has(name)) return freezeForm(value, freeze);
   if (name === '--data-urlencode' || name === '--url-query') {

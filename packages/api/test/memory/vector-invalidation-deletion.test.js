@@ -46,7 +46,10 @@ for (const route of ['anchor', 'prefix']) {
     store.close();
     store = new SqliteEvidenceStore(path);
     await store.initialize();
-    assert.equal(store.getDb().prepare("SELECT 1 FROM pragma_module_list WHERE name='vec0'").get(), undefined);
+    assert.ok(
+      store.getDb().prepare("SELECT 1 FROM pragma_module_list WHERE name='vec0'").get(),
+      'existing vector invalidation is prepared even when embedding is off',
+    );
     if (route === 'anchor') await store.deleteByAnchor('F001');
     else assert.equal(store.removeBySourcePrefix('F001/'), 1);
     assert.equal(new VectorStore(store.getDb(), 4).count(), 1);

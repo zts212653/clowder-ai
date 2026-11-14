@@ -7,7 +7,7 @@ import { chromium } from 'playwright';
 import { build } from 'vite';
 
 /**
- * F322 B probe - the lineage ring (`[data-lineage-focus]`, the ~3 second ring that lands on a message a receipt or an
+ * F322 B probe - the lineage ring (`[data-message-jump-focus]::after`, the ~3 second ring that lands on a message a receipt or an
  * absorption dock points back to) over every layer it can sit on, in a real browser.
  *
  * The ring is a non-text mark: 3:1 against what it is drawn on. It keeps the human's hue and chroma and only has its
@@ -43,6 +43,7 @@ const cats = [
 }));
 before(async () => {
   process.chdir(webRoot);
+  if (evidenceDir) mkdirSync(evidenceDir, { recursive: true });
   const result = await build({
     root: webRoot,
     configFile: false,
@@ -182,12 +183,18 @@ function measureInPage() {
       lineageL: root.getPropertyValue('--cat-lineage-l').trim(),
       ring: {},
       unclaimed: {},
-      outline: null,
+      border: null,
     };
     const ringOver = (strip) => {
-      const style = getComputedStyle(strip.firstElementChild);
-      out.outline ??= { width: style.outlineWidth, style: style.outlineStyle, colour: style.outlineColor };
-      return contrast(rgba(style.outlineColor), rgba(getComputedStyle(strip).backgroundColor));
+      const style = getComputedStyle(strip.firstElementChild, '::after');
+      out.border ??= {
+        widths: [style.borderTopWidth, style.borderRightWidth, style.borderBottomWidth, style.borderLeftWidth],
+        styles: [style.borderTopStyle, style.borderRightStyle, style.borderBottomStyle, style.borderLeftStyle],
+        colour: style.borderTopColor,
+        radius: style.borderRadius,
+        pointerEvents: style.pointerEvents,
+      };
+      return contrast(rgba(style.borderTopColor), rgba(getComputedStyle(strip).backgroundColor));
     };
     // What the ring is promised to read on: the page layers and the surfaces of the cats and the human that exist.
     for (const strip of document.querySelectorAll('[data-layer]'))
@@ -202,6 +209,41 @@ function measureInPage() {
 const MIN = 3;
 const worst = (ring) => Math.min(...Object.values(ring));
 const weakest = (ring) => Object.entries(ring).sort((a, b) => a[1] - b[1])[0];
+
+test('real message navigation paints the human ring and removes it after the temporary focus expires', async () => {
+  for (const base of ['light', 'dark']) {
+    const { page, context, errors } = await open({ base, color: CONFIGS.stored });
+    try {
+      const target = page.locator('[data-message-id="jump-proof"]');
+      assert.equal(await target.getAttribute('data-message-jump-focus'), null);
+      await page.getByRole('button', { name: '跳到回复', exact: true }).click();
+      await page.waitForFunction(() => {
+        const target = document.querySelector('[data-message-id="jump-proof"]');
+        const box = target?.getBoundingClientRect();
+        return target?.getAttribute('data-message-jump-focus') === 'true' && box.top >= 0 && box.bottom <= innerHeight;
+      });
+      const drawn = await target.evaluate((node) => {
+        const border = getComputedStyle(node, '::after');
+        const reference = getComputedStyle(document.querySelector('[data-layer] > div'), '::after');
+        return {
+          width: border.borderLeftWidth,
+          colour: border.borderLeftColor,
+          expectedColour: reference.borderTopColor,
+        };
+      });
+      assert.equal(drawn.width, '2px');
+      assert.equal(drawn.colour, drawn.expectedColour);
+      if (evidenceDir) await page.screenshot({ path: path.join(evidenceDir, `jump-${base}.png`) });
+      await page.waitForFunction(
+        () => !document.querySelector('[data-message-id="jump-proof"]')?.hasAttribute('data-message-jump-focus'),
+      );
+      assert.equal(await target.evaluate((node) => getComputedStyle(node, '::after').content), 'none');
+      assert.deepEqual(errors, []);
+    } finally {
+      await context.close();
+    }
+  }
+});
 
 const readHuman = (page) =>
   page.evaluate(() => {
@@ -234,10 +276,14 @@ for (const base of ['light', 'dark']) {
         const { page, context, errors } = await open({ base, variant, color });
         const human = await assertChain(page, `${base}/${variant}/${name}`, color);
         const m = await page.evaluate(measureInPage());
+        if (evidenceDir && variant === 'default' && name === 'stored')
+          await page.screenshot({ path: path.join(evidenceDir, `ring-${base}.png`), fullPage: true });
         await context.close();
         assert.deepEqual(errors, []);
-        assert.equal(m.outline.width, '2px');
-        assert.equal(m.outline.style, 'solid');
+        assert.deepEqual(m.border.widths, ['2px', '2px', '2px', '2px']);
+        assert.deepEqual(m.border.styles, ['solid', 'solid', 'solid', 'solid']);
+        assert.equal(m.border.radius, '12px');
+        assert.equal(m.border.pointerEvents, 'none');
         if (EDGE[name]) {
           assert.ok(Math.abs(human.hue - EDGE[name][0]) < 0.11, `${name}: hue ${human.hue} vs ${EDGE[name][0]}`);
           assert.ok(
@@ -267,14 +313,14 @@ for (const base of ['light', 'dark']) {
       }
       // And the human colour really arrives. The repo's shipped config colour IS the cocoa that shell-v2.css bakes in
       // (DESIGN: no colour set -> cocoa), so those two draw the same ring on purpose; every other colour draws its own.
-      const outline = Object.fromEntries(Object.entries(rows).map(([name, m]) => [name, m.outline.colour]));
-      assert.equal(outline.shipped, outline.unconfigured, 'the shipped config colour is the cocoa default');
+      const colours = Object.fromEntries(Object.entries(rows).map(([name, m]) => [name, m.border.colour]));
+      assert.equal(colours.shipped, colours.unconfigured, 'the shipped config colour is the cocoa default');
       assert.equal(rows.shipped.lineageL, rows.unconfigured.lineageL, 'and it is resolved to the same lightness');
-      const others = Object.entries(outline).filter(([name]) => name !== 'shipped');
+      const others = Object.entries(colours).filter(([name]) => name !== 'shipped');
       assert.equal(
         new Set(others.map(([, colour]) => colour)).size,
         others.length,
-        `the ring follows the colour: ${JSON.stringify(outline)}`,
+        `the ring follows the colour: ${JSON.stringify(colours)}`,
       );
     });
   }
@@ -296,8 +342,8 @@ test('the config changes while the page is open: the injector rewrites the varia
     const m = await page.evaluate(measureInPage());
     const [where, ratio] = weakest(m.ring);
     assert.ok(ratio >= MIN, `after the config became ${name}: ${ratio}:1 on ${where}`);
-    assert.notEqual(m.outline.colour, start.outline.colour);
-    seen.push(m.outline.colour);
+    assert.notEqual(m.border.colour, start.border.colour);
+    seen.push(m.border.colour);
     lightness.push(m.lineageL);
   }
   assert.equal(new Set(seen).size, seen.length, 'each colour draws its own ring');
@@ -310,7 +356,7 @@ test('the config changes while the page is open: the injector rewrites the varia
   await assertChain(page, 'colour removed', null);
   const back = await page.evaluate(measureInPage());
   assert.ok(weakest(back.ring)[1] >= MIN, `the cocoa ring after the colour was removed: ${weakest(back.ring)}`);
-  assert.equal(back.outline.colour, start.outline.colour, 'back to the cocoa ring');
+  assert.equal(back.border.colour, start.border.colour, 'back to the cocoa ring');
   assert.equal(back.lineageL, start.lineageL);
   measurements.push({ case: 'config-change', lightness });
   await context.close();

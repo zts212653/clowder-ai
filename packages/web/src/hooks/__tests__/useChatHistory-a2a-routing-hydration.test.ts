@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 /**
  * F322 S3: the v2 reply-side handoff is a read projection of the durable
  * `a2a_routing` message. Cold hydration must therefore retain its coordinates;

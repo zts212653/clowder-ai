@@ -8,15 +8,24 @@ const navState = vi.hoisted(() => ({
   search: '',
 }));
 
+vi.mock('@/components/thread-chat/hub-socket-context', () => import('@/test-utils/hub-socket-context-mock'));
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: vi.fn() }),
   usePathname: () => navState.pathname,
   useSearchParams: () => new URLSearchParams(navState.search),
 }));
 
-vi.mock('@/hooks/useWorkspaceNavigate', () => ({
-  useWorkspaceNavigate: vi.fn(),
-}));
+vi.mock('@/hooks/useWorkspaceNavigate', () => {
+  // AppShell mounts the hook through WorkspaceNavigateHost; the host forwards to the mocked hook.
+  const useWorkspaceNavigate = vi.fn();
+  return {
+    useWorkspaceNavigate,
+    WorkspaceNavigateHost: ({ threadId, ...options }: { threadId: string | null }) => {
+      useWorkspaceNavigate(threadId, options);
+      return null;
+    },
+  };
+});
 
 vi.mock('@/stores/sidebarStore', () => ({
   initSidebarWidth: vi.fn(),
@@ -75,6 +84,7 @@ import { useF307ExperienceWorkbenchStore } from '@/components/workbench/experien
 import { createBrowserSurface } from '@/components/workbench/real-surface-adapters';
 import { createInitialWorkbenchState } from '@/components/workbench/workbench-model';
 import { useChatStore } from '@/stores/chatStore';
+import * as apiClient from '@/utils/api-client';
 
 describe('AppShell sidebar route ownership', () => {
   let container: HTMLDivElement;
@@ -113,6 +123,7 @@ describe('AppShell sidebar route ownership', () => {
     window.history.replaceState(null, '', '/');
     delete (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT;
     vi.unstubAllGlobals();
+    vi.restoreAllMocks();
   });
 
   function renderShell(content: string) {
@@ -210,7 +221,12 @@ describe('AppShell sidebar route ownership', () => {
     expect(container.querySelector('[data-testid="thread-sidebar"]')).toBeNull();
   });
 
-  it('hydrates a desktop shell without replacing its existing thread content', async () => {
+  it.each([
+    'classic',
+    'v2',
+  ] as const)('hydrates a desktop %s shell without replacing its existing thread content', async (presentation) => {
+    navState.search = presentation === 'v2' ? 'shell=v2' : '';
+    vi.spyOn(apiClient, 'apiFetch').mockImplementation(async () => Response.json({ threads: {} }));
     React.act(() => root.unmount());
     const content = (
       <AppShell>

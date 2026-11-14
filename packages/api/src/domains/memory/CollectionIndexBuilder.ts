@@ -46,7 +46,9 @@ export class CollectionIndexBuilder {
     private readonly store: SqliteEvidenceStore,
     private readonly manifest: CollectionManifest,
     private readonly scanner: RepoScanner,
-    private readonly embedDeps?: CollectionEmbedDeps,
+    private readonly embedDeps?:
+      | CollectionEmbedDeps
+      | (() => CollectionEmbedDeps | undefined | Promise<CollectionEmbedDeps | undefined>),
   ) {
     this.store.setSourceRoot(this.manifest.root, this.manifest.id);
   }
@@ -67,13 +69,16 @@ export class CollectionIndexBuilder {
     const { indexed, skipped, indexedItems } = await this.indexResults(results, force);
     await this.replaceFrontmatterSupersedesEdges(results);
 
-    if (this.embedDeps && indexedItems.length > 0) {
-      const { getEmbeddingService, vectorStore } = this.embedDeps;
-      const embedding = createLiveEmbeddingCapability(getEmbeddingService);
-      const store = this.store;
+    if (this.embedDeps) {
       try {
+        const deps = typeof this.embedDeps === 'function' ? await this.embedDeps() : this.embedDeps;
+        if (!deps) return { indexed, skipped, blocked: false, secretFindings: [] };
+        const { getEmbeddingService, vectorStore } = deps;
+        const embedding = createLiveEmbeddingCapability(getEmbeddingService);
+        const store = this.store;
         await embedIndexedItems({
           items: indexedItems,
+          sourceStore: this.store,
           embedding,
           vectorStore,
           allDocsProvider: () => {

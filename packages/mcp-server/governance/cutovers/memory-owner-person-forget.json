@@ -1,0 +1,55 @@
+{
+  "resource": {
+    "kind": "family",
+    "resourceFamily": "person-memory"
+  },
+  "retiredNames": ["cat_cafe_forget_person", "cat_cafe_forget_person_memory_proposal"],
+  "canonicalNames": [],
+  "expectedProfiles": {},
+  "rollbackRevision": "a2cc7a5f1300305bd624b1f355d50c3ecc22509d",
+  "layers": {
+    "mcp-definition": {
+      "status": "covered",
+      "consumers": [
+        "packages/mcp-server/src/tools/person-memory-lifecycle-tools.ts",
+        "packages/mcp-server/src/tools/callback-tools.ts",
+        "packages/mcp-server/src/canonical-server-tools.ts"
+      ]
+    },
+    "runtime-catalog-profile": {
+      "status": "covered",
+      "consumers": [
+        "packages/mcp-server/governance/mcp-surface-baseline.json",
+        "packages/web/src/lib/capability-tips.seed.json"
+      ]
+    },
+    "prompt-l0": {
+      "status": "not-applicable",
+      "rationale": "No active prompt names the retired whole-person wrapper. The owner memory page is the whole-person entry; Handled covers ended, unbound proposals. No active prompt names the retired proposal wrapper. The existing Handled history is the verified owner entry.",
+      "absenceEvidence": ["cat_cafe_forget_person", "cat_cafe_forget_person_memory_proposal"]
+    },
+    "skill-convention": {
+      "status": "not-applicable",
+      "rationale": "No current skill calls the retired wrapper. The owner memory page is the replacement and its actual journey is verified before merge. No active skill names the wrapper. The owner uses Handled to inspect, confirm, purge and recover the same request; actual author journeys precede retirement.",
+      "absenceEvidence": ["cat_cafe_forget_person", "cat_cafe_forget_person_memory_proposal"]
+    },
+    "fixture-test": {
+      "status": "covered",
+      "consumers": [
+        "packages/mcp-server/test/memory-entry-subtraction.test.js",
+        "packages/mcp-server/test/person-memory-lifecycle-tools.test.js",
+        "packages/mcp-server/test/person-memory-cutover-manifest.test.ts"
+      ]
+    },
+    "eval": {
+      "status": "not-applicable",
+      "rationale": "No eval invokes the wrapper; original owner API and lifecycle tests continue covering the unchanged deletion semantics. No eval invokes the wrapper. Existing Redis/API and owner-page journey checks cover qualification, purge and durable replay.",
+      "absenceEvidence": ["cat_cafe_forget_person", "cat_cafe_forget_person_memory_proposal"]
+    },
+    "observability": {
+      "status": "not-applicable",
+      "rationale": "No telemetry consumer names this MCP wrapper. Original API routes and persisted data remain in place. No telemetry consumer names the wrapper. The original callback API stays compatible; owner browser writes use the same purge service.",
+      "absenceEvidence": ["cat_cafe_forget_person", "cat_cafe_forget_person_memory_proposal"]
+    }
+  }
+}

@@ -16,7 +16,13 @@ function buildRegistrationContract(tool: FamilyToolDefinition, principal: PostMe
     typeof schema.type === 'string' && typeof schema.properties === 'object' && schema.properties !== null
       ? jsonSchemaToZod(schema)
       : z.object(schema as z.ZodRawShape);
-  if ((isPostMessage && principal === 'invocation') || agentContract || tool.name === 'cat_cafe_get_recall_metrics')
+  if (
+    (isPostMessage && principal === 'invocation') ||
+    agentContract ||
+    tool.name === 'cat_cafe_get_recall_metrics' ||
+    tool.name === 'cat_cafe_revise_person_memory' ||
+    tool.name === 'cat_cafe_library_verify'
+  )
     inputSchema = (inputSchema as z.ZodObject<z.ZodRawShape>).strict();
   return { description: agentContract?.description ?? tool.description, inputSchema };
 }

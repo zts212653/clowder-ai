@@ -30,6 +30,12 @@ export const TRUSTED_CHROME_SETUP_DELIVERIES = Object.freeze([
     version: '0.1.0-alpha.8',
     digest: 'sha512-ePdPiPWIyzscHHi9IDi0WGAZK4a9nvDgW6eGkzHA+4gMRqxusmmqMQf8f+ktoGjGFcHUgG4eeJVTlpwm2bj8lg==',
   }),
+  // Exact reviewed alpha.10 long-thinking fix: SHA256 afd50eec9ad231c727daaaaafaab0df01c89b19bd918c459734c2e8f42559877.
+  // The fixed setup runner and HOME permission boundaries are unchanged.
+  Object.freeze({
+    version: '0.1.0-alpha.10',
+    digest: 'sha512-N6mohK+qmgNW08yRGa2g1N4Ja6hMbpfLOGg6IPqHB/HgzlUvqwm9/6AQqt56umDqeoe19OtgqlegMz2p0eeVMA==',
+  }),
 ]);
 
 /** Routing is not authorization: both projection and execution resolve the policy below. */

@@ -1,0 +1,403 @@
+{
+  "baseline": "3569a9b6422723faf3a586b68232c140f84b44a1",
+  "scenarios": {
+    "works": {
+      "steps": [
+        {
+          "label": "initial single page",
+          "pages": 1,
+          "recent": 0,
+          "cards": 48,
+          "preview": 0,
+          "counter": "已加载 128 件",
+          "routeCounts": {
+            "started": 1,
+            "completed": 1,
+            "cancelled": 0
+          }
+        },
+        {
+          "label": "scroll admits no GET",
+          "pages": 1,
+          "recent": 0,
+          "cards": 128,
+          "preview": 0,
+          "counter": "已加载 128 件",
+          "routeCounts": {
+            "started": 1,
+            "completed": 1,
+            "cancelled": 0
+          }
+        },
+        {
+          "label": "scroll expands all loaded cards before server continuation",
+          "pages": 1,
+          "recent": 0,
+          "cards": 128,
+          "preview": 0,
+          "counter": "已加载 128 件",
+          "routeCounts": {
+            "started": 1,
+            "completed": 1,
+            "cancelled": 0
+          }
+        },
+        {
+          "label": "first explicit batch",
+          "pages": 3,
+          "recent": 0,
+          "cards": 0,
+          "preview": 0,
+          "counter": "已加载 256 件",
+          "routeCounts": {
+            "started": 3,
+            "completed": 3,
+            "cancelled": 0
+          }
+        },
+        {
+          "label": "newly read cards expand locally before the next server batch",
+          "pages": 3,
+          "recent": 0,
+          "cards": 256,
+          "preview": 0,
+          "counter": "已加载 256 件",
+          "routeCounts": {
+            "started": 3,
+            "completed": 3,
+            "cancelled": 0
+          }
+        },
+        {
+          "label": "second explicit batch reaches end",
+          "pages": 4,
+          "recent": 0,
+          "cards": 272,
+          "preview": 0,
+          "counter": "共 272 件 · 最新在前",
+          "routeCounts": {
+            "started": 4,
+            "completed": 4,
+            "cancelled": 0
+          }
+        },
+        {
+          "label": "material marks stale; explicit refresh replaces first page",
+          "pages": 5,
+          "recent": 0,
+          "cards": 128,
+          "preview": 0,
+          "counter": "已加载 128 件",
+          "routeCounts": {
+            "started": 5,
+            "completed": 5,
+            "cancelled": 0
+          }
+        },
+        {
+          "label": "temporary continuation failure retains rows",
+          "pages": 6,
+          "recent": 0,
+          "cards": 128,
+          "preview": 0,
+          "counter": "已加载 128 件",
+          "routeCounts": {
+            "started": 6,
+            "completed": 6,
+            "cancelled": 0
+          }
+        },
+        {
+          "label": "hide cancels client; restore retains rows and cursor without GET",
+          "pages": 7,
+          "recent": 0,
+          "cards": 10,
+          "preview": 0,
+          "counter": "已加载 128 件",
+          "routeCounts": {
+            "started": 7,
+            "completed": 7,
+            "cancelled": 1
+          }
+        },
+        {
+          "label": "403 clears untrusted snapshot",
+          "pages": 8,
+          "recent": 0,
+          "cards": 0,
+          "preview": 0,
+          "counter": "作品暂不可读",
+          "routeCounts": {
+            "started": 8,
+            "completed": 8,
+            "cancelled": 1
+          }
+        },
+        {
+          "label": "unscoped explicit revocation clears snapshot",
+          "pages": 9,
+          "recent": 0,
+          "cards": 0,
+          "preview": 0,
+          "counter": "作品暂不可读",
+          "routeCounts": {
+            "started": 9,
+            "completed": 9,
+            "cancelled": 1
+          }
+        }
+      ],
+      "browserGETs": 9,
+      "browserCancelled": 2,
+      "routeStarted": 9,
+      "routeCompleted": 9,
+      "routeCancellationObserved": 1,
+      "errors": []
+    },
+    "sparse": {
+      "steps": [
+        {
+          "label": "initial single page",
+          "pages": 1,
+          "recent": 0,
+          "cards": 0,
+          "preview": 0,
+          "counter": "已加载 0 件",
+          "routeCounts": {
+            "started": 1,
+            "completed": 1,
+            "cancelled": 0
+          }
+        },
+        {
+          "label": "scroll admits no GET",
+          "pages": 1,
+          "recent": 0,
+          "cards": 0,
+          "preview": 0,
+          "counter": "已加载 0 件",
+          "routeCounts": {
+            "started": 1,
+            "completed": 1,
+            "cancelled": 0
+          }
+        },
+        {
+          "label": "first explicit batch",
+          "pages": 5,
+          "recent": 0,
+          "cards": 0,
+          "preview": 0,
+          "counter": "已加载 0 件",
+          "routeCounts": {
+            "started": 5,
+            "completed": 5,
+            "cancelled": 0
+          }
+        },
+        {
+          "label": "second explicit batch reaches end",
+          "pages": 9,
+          "recent": 0,
+          "cards": 16,
+          "preview": 0,
+          "counter": "共 16 件 · 最新在前",
+          "routeCounts": {
+            "started": 9,
+            "completed": 9,
+            "cancelled": 0
+          }
+        }
+      ],
+      "browserGETs": 9,
+      "browserCancelled": 0,
+      "routeStarted": 9,
+      "routeCompleted": 9,
+      "routeCancellationObserved": 0,
+      "errors": []
+    },
+    "home": {
+      "steps": [
+        {
+          "label": "bottom opens existing global catalogue",
+          "pages": 1,
+          "recent": 1,
+          "cards": 48,
+          "preview": 12,
+          "counter": "已加载 128 件",
+          "routeCounts": {
+            "started": 2,
+            "completed": 2,
+            "cancelled": 0
+          }
+        },
+        {
+          "label": "top reopens same catalogue without another reader",
+          "pages": 1,
+          "recent": 1,
+          "cards": 128,
+          "preview": 12,
+          "counter": "已加载 128 件",
+          "routeCounts": {
+            "started": 2,
+            "completed": 2,
+            "cancelled": 0
+          }
+        },
+        {
+          "label": "one publication coalesces recent refresh; global cursor is retained",
+          "pages": 1,
+          "recent": 2,
+          "cards": 128,
+          "preview": 12,
+          "counter": "已加载 128 件",
+          "routeCounts": {
+            "started": 3,
+            "completed": 3,
+            "cancelled": 0
+          }
+        }
+      ],
+      "browserGETs": 3,
+      "browserCancelled": 0,
+      "routeStarted": 3,
+      "routeCompleted": 3,
+      "routeCancellationObserved": 0,
+      "errors": []
+    },
+    "home-empty": {
+      "steps": [
+        {
+          "label": "bottom opens existing global catalogue",
+          "pages": 1,
+          "recent": 1,
+          "cards": 0,
+          "preview": 0,
+          "counter": "共 0 件 · 最新在前",
+          "routeCounts": {
+            "started": 2,
+            "completed": 2,
+            "cancelled": 0
+          }
+        },
+        {
+          "label": "top reopens same catalogue without another reader",
+          "pages": 1,
+          "recent": 1,
+          "cards": 0,
+          "preview": 0,
+          "counter": "共 0 件 · 最新在前",
+          "routeCounts": {
+            "started": 2,
+            "completed": 2,
+            "cancelled": 0
+          }
+        }
+      ],
+      "browserGETs": 2,
+      "browserCancelled": 0,
+      "routeStarted": 2,
+      "routeCompleted": 2,
+      "routeCancellationObserved": 0,
+      "errors": []
+    },
+    "home-error": {
+      "steps": [
+        {
+          "label": "bottom opens existing global catalogue",
+          "pages": 1,
+          "recent": 1,
+          "cards": 96,
+          "preview": 0,
+          "counter": "已加载 128 件",
+          "routeCounts": {
+            "started": 2,
+            "completed": 2,
+            "cancelled": 0
+          }
+        },
+        {
+          "label": "top reopens same catalogue without another reader",
+          "pages": 1,
+          "recent": 1,
+          "cards": 128,
+          "preview": 0,
+          "counter": "已加载 128 件",
+          "routeCounts": {
+            "started": 2,
+            "completed": 2,
+            "cancelled": 0
+          }
+        }
+      ],
+      "browserGETs": 2,
+      "browserCancelled": 0,
+      "routeStarted": 2,
+      "routeCompleted": 2,
+      "routeCancellationObserved": 0,
+      "errors": []
+    },
+    "task-pr": {
+      "steps": [
+        {
+          "label": "complete empty catalogue before real Task mutation",
+          "pages": 1,
+          "recent": 0,
+          "cards": 0,
+          "preview": 0,
+          "counter": "共 0 件 · 最新在前",
+          "routeCounts": {
+            "started": 1,
+            "completed": 1,
+            "cancelled": 0
+          }
+        },
+        {
+          "label": "real Task artifact producer marks the complete catalogue stale",
+          "pages": 1,
+          "recent": 0,
+          "cards": 0,
+          "preview": 0,
+          "counter": "共 0 件 · 最新在前",
+          "routeCounts": {
+            "started": 1,
+            "completed": 1,
+            "cancelled": 0
+          }
+        },
+        {
+          "label": "explicit refresh reads the real Task PR work",
+          "pages": 2,
+          "recent": 0,
+          "cards": 1,
+          "preview": 0,
+          "counter": "共 1 件 · 最新在前",
+          "routeCounts": {
+            "started": 2,
+            "completed": 2,
+            "cancelled": 0
+          }
+        }
+      ],
+      "browserGETs": 2,
+      "browserCancelled": 0,
+      "routeStarted": 2,
+      "routeCompleted": 2,
+      "routeCancellationObserved": 0,
+      "errors": []
+    }
+  },
+  "taskPublication": {
+    "activity": [
+      {
+        "ownerUserId": "issue1864-owner"
+      }
+    ],
+    "publication": [
+      {
+        "ownerUserId": "issue1864-owner",
+        "reason": "works_changed"
+      }
+    ]
+  }
+}

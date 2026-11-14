@@ -9,6 +9,7 @@ import { SHELL_PRESENTATION_STORAGE_KEY, writeShellPresentation } from '../../sh
 const { apiFetch } = await import('@/utils/api-client');
 
 const observed = vi.hoisted(() => ({ controller: null as ConversationViewPreferenceController | null }));
+vi.mock('@/components/thread-chat/hub-socket-context', () => import('@/test-utils/hub-socket-context-mock'));
 vi.mock('@/utils/api-client', () => ({ apiFetch: vi.fn() }));
 vi.mock('@/components/execution-row/ExecutionRow', () => ({ ExecutionRow: () => null }));
 vi.mock('@/hooks/useConversationViewPreference', async (importOriginal) => {

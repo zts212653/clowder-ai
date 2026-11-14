@@ -22,7 +22,12 @@ export interface TasteMemory {
   dimension: string | null;
   catId: string | null;
   whenRemembered?: string;
-  approval?: { status: 'approved' | 'not_recorded' | 'unavailable'; proposedAt?: number; approvedAt?: number | null };
+  approval?: {
+    status: 'approved' | 'not_recorded' | 'unavailable';
+    proposedAt?: number;
+    approvedAt?: number | null;
+    href?: string;
+  };
   recall: {
     namedDelivery: {
       counts: { presented: number; drilled: number; applied: number; dismissed: number };
@@ -46,6 +51,8 @@ export interface TasteBrowse {
 export interface TasteSource {
   status: 'ready' | 'not_recorded' | 'unavailable';
   title: string | null;
+  occurredAt?: number;
+  speaker?: string;
   canOpen: boolean;
   threadId?: string;
   messageId?: string;

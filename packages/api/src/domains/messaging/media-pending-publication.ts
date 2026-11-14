@@ -233,12 +233,14 @@ export class PendingMediaPublication {
     const source = readPluginMessageExtra(stored)?.presentation;
     if (!source || !this.deps.ingressWake || stored.visibility === 'whisper') return;
     await deliverIngressEffectsOnce(this.deps.ledger, {
+      messageStore: this.deps.messageStore,
       instanceId: row.instanceId,
       idempotencyKey: row.idempotencyKey,
       threadId: stored.threadId,
       userId: stored.userId,
       messageId: stored.id,
       content: stored.content,
+      ...(stored.replyTo === undefined ? {} : { replyTo: stored.replyTo }),
       ...(stored.contentBlocks === undefined ? {} : { contentBlocks: stored.contentBlocks }),
       ...(row.sender === undefined ? {} : { sender: row.sender }),
       timestamp: stored.timestamp,

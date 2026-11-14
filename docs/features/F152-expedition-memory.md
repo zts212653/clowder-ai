@@ -5,8 +5,8 @@ related_decisions: [ADR-020, ADR-032]
 topics: [memory, cross-project, bootstrap, knowledge-engineering, onboarding]
 doc_kind: spec
 created: 2026-04-08
-updated: 2026-08-29
-tips_exempt: "Renewed 2026-10-23 for F332 consolidation: this documentation change carries forward the existing project bootstrap and memory-read paths, unfinished outcomes and original owners. The global-distillation consumer remains sunset; consolidation adds no user action or discovery surface. Reassess when a new expedition entry ships."
+updated: 2026-11-09
+tips_exempt: "Renewed 2026-11-09 for memory entry subtraction: the three cat-facing distillation MCP tools are removed and nothing new is taught; expedition/bootstrap paths, producer code and retained artifacts are unchanged. Reassess when a new expedition entry ships."
 ---
 
 # F152: Expedition Memory — 外部项目记忆冷启动 + 经验回流
@@ -249,6 +249,7 @@ interface ScannedEvidence {
 - **AC-C1/C3 已修复**：project rebuild 通过 conflict-update 保留 `generalizable`；candidate queue 落 SQLite；批准结果物化为 `dataDir/distilled-truths` 下的 durable Markdown，再由 `GlobalIndexBuilder` 编译。拒绝候选允许在修正来源后重新提名。
 - **producer 能写，不等于 consumer 有价值**：live 本地层存在 36 份 materialized artifacts 与 36 条 `distilled:*` index row，但只有 3 个重复测试标题；它们证明 nominate→approve→materialize→index 的机械路径，不证明被召回、采用或产生结果。
 - **consumer surface 已退出**：`search_evidence` 的 global/all/N-collection、`graph_resolve` 的 exact/fuzzy/traversal 与 `list_recent` 都会在候选截断前过滤 `distilled:` anchors；typed cue、allowed-use、receipt、outcome 与 source-revision invalidation 不再建设。durable 文件、SQLite 行和 producer code 保留作 forensic evidence，显式 forensic/admin browse 仍可查看，不删除 owner data。
+- **猫面前的生产入口已撤（2026-11-09）**：`mark_generalizable` / `nominate_for_global` / `review_distillation` 三个 MCP 工具从猫的工具面删除（本机会话从未见调用）。服务端 producer 路由、DistillationService、36 份 retained artifacts 与 SQLite 行照 08-29 决定保留，只是不再有猫的写入口。
 - **AC-C5 不再阻塞**：它随 global-distillation consumer surface sunset，不再作为未来 close gate，也不能被补写成“已通过”。
 - **因此本 feature 现在的真实状态是**：Phase 0/A/B 的 expedition/bootstrap 能力继续保留；Phase C producer history 保留、consumer surface sunset。整个 F152 是否关闭由 retained scope 的 owner/operator 另行裁决，本次不得越界宣布 feature done。
 

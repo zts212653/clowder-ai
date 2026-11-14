@@ -6,6 +6,7 @@ import {
   EntrustedWorkLifecycleError,
   EntrustedWorkLifecycleService,
   entrustedWorkAdmissionCommandV1Schema,
+  entrustedWorkArtifactRefsChanged,
 } from '../../../growing/EntrustedWorkLifecycleService.js';
 import { currentPluginCallContext, currentPluginOwnerRequestContext } from '../../carrier/plugin-call-context.js';
 import { currentOwnerOperation } from '../../carrier/plugin-owner-operation-context.js';
@@ -221,7 +222,13 @@ export async function createPluginTaskWorkData(
     result.task.ownerCatId !== task.ownerCatId
   )
     refuse('Task data replay owner changed');
-  if (result.kind === 'admitted' || !isDeepStrictEqual(existing, result.task)) deps.onTaskDataChanged?.(result.task);
+  if (result.kind === 'admitted' || !isDeepStrictEqual(existing, result.task)) {
+    const material =
+      result.kind === 'admitted'
+        ? Boolean(result.task.entrustedWork?.artifactRefs.length)
+        : entrustedWorkArtifactRefsChanged(existing, result.task);
+    deps.onTaskDataChanged?.(result.task, material ? 'works_changed' : undefined);
+  }
   await c.current();
   return snapshotTask(result.task);
 }
@@ -264,7 +271,7 @@ export async function updatePluginTaskWorkData(
     throw error;
   }
   if (!result) return null;
-  deps.onTaskDataChanged?.(result);
+  deps.onTaskDataChanged?.(result, entrustedWorkArtifactRefsChanged(task, result) ? 'works_changed' : undefined);
   await c.current();
   return snapshotTask(result);
 }

@@ -4,15 +4,15 @@ import { mkdir, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'node:test';
-
+import cookie from '@fastify/cookie';
 import Fastify from 'fastify';
 import { projectSetupRoute } from '../../dist/routes/projects-setup.js';
 
 const HEADERS = { 'x-cat-cafe-user': 'test-user', 'content-type': 'application/json' };
 
-function buildApp(catCafeRoot) {
+function buildApp(catCafeRoot, options = {}) {
   const app = Fastify();
-  app.register(projectSetupRoute, { catCafeRoot });
+  app.register(projectSetupRoute, { catCafeRoot, ...options });
   return app;
 }
 
@@ -34,6 +34,88 @@ describe('POST /api/projects/setup', () => {
     await app.close();
     await rm(testRoot, { recursive: true, force: true });
     await rm(fakeCatCafeRoot, { recursive: true, force: true });
+  });
+
+  it('persists the owner through the real setup bootstrap bridge', async () => {
+    const { mkdtempSync, rmSync } = await import('node:fs');
+    const { ExpeditionBootstrapService } = await import('../../dist/domains/memory/ExpeditionBootstrapService.js');
+    const { ensureProjectCollection } = await import('../../dist/domains/memory/bootstrap-collection-bridge.js');
+    const { LibraryCatalog } = await import('../../dist/domains/memory/LibraryCatalog.js');
+    const dataDir = mkdtempSync(join(tmpdir(), 'setup-bridge-data-'));
+    const catalog = new LibraryCatalog();
+    const stores = new Map();
+    const stateManager = {
+      shouldBootstrap: () => true,
+      startBuilding: () => {},
+      markReady: () => {},
+      getState: () => ({}),
+    };
+    const service = new ExpeditionBootstrapService(stateManager, {
+      rebuildIndex: (projectPath, ownerUserId) =>
+        ensureProjectCollection(projectPath, catalog, stores, dataDir, ownerUserId),
+      getFingerprint: () => 'setup-real-bridge',
+    });
+    const ownerApp = buildApp(fakeCatCafeRoot, {
+      memoryBootstrapService: service,
+      socketManager: { emitToUser: () => {} },
+    });
+    try {
+      const res = await ownerApp.inject({
+        method: 'POST',
+        url: '/api/projects/setup',
+        headers: HEADERS,
+        payload: { projectPath: testRoot, mode: 'skip' },
+      });
+      assert.equal(res.statusCode, 200);
+      for (let i = 0; i < 60 && catalog.list().length === 0; i++) {
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+      const manifests = catalog.list();
+      assert.equal(manifests.length, 1);
+      assert.equal(manifests[0].ownerUserId, 'test-user');
+      assert.equal(manifests[0].sensitivity, 'private');
+      for (const store of stores.values()) store.close();
+    } finally {
+      await ownerApp.close();
+      rmSync(dataDir, { recursive: true, force: true });
+    }
+  });
+
+  it('passes the authenticated identity into the setup-triggered memory bootstrap', async () => {
+    const { ExpeditionBootstrapService } = await import('../../dist/domains/memory/ExpeditionBootstrapService.js');
+    const seenOwners = [];
+    const stateManager = {
+      shouldBootstrap: () => true,
+      startBuilding: () => {},
+      markReady: () => {},
+      getState: () => ({}),
+    };
+    const service = new ExpeditionBootstrapService(stateManager, {
+      rebuildIndex: async (_projectPath, ownerUserId) => {
+        seenOwners.push(ownerUserId);
+        return { docsIndexed: 1, durationMs: 1 };
+      },
+      getFingerprint: () => 'setup-owner-test',
+    });
+    const ownerApp = buildApp(fakeCatCafeRoot, {
+      memoryBootstrapService: service,
+      socketManager: { emitToUser: () => {} },
+    });
+    try {
+      const res = await ownerApp.inject({
+        method: 'POST',
+        url: '/api/projects/setup',
+        headers: HEADERS,
+        payload: { projectPath: testRoot, mode: 'skip' },
+      });
+      assert.equal(res.statusCode, 200);
+      for (let i = 0; i < 30 && seenOwners.length === 0; i++) {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      assert.deepEqual(seenOwners, ['test-user']);
+    } finally {
+      await ownerApp.close();
+    }
   });
 
   it('mode=skip is a zero-write acknowledgement', async () => {
@@ -188,6 +270,81 @@ describe('POST /api/projects/setup', () => {
     assert.equal(res.statusCode, 400);
     assert.match(JSON.parse(res.payload).error, /external project/i);
     assert.deepEqual(await readdir(internalPackage), [], 'rejected self-bootstrap must leave the directory untouched');
+  });
+
+  it('rejects remote/proxy unpaired session cookies but accepts a local session', async () => {
+    const { sessionAuthPlugin, sessionRoute } = await import('../../dist/infrastructure/session-auth.js');
+    const bootstrapCalls = [];
+    const service = {
+      bootstrap: async (_projectPath, options) => {
+        bootstrapCalls.push(options);
+        return { status: 'ready' };
+      },
+    };
+    const sessionApp = Fastify();
+    await sessionApp.register(cookie);
+    await sessionApp.register(sessionAuthPlugin);
+    await sessionApp.register(sessionRoute);
+    await sessionApp.register(projectSetupRoute, {
+      catCafeRoot: fakeCatCafeRoot,
+      memoryBootstrapService: service,
+      socketManager: { emitToUser: () => {} },
+    });
+    await sessionApp.ready();
+    try {
+      const remoteSession = await sessionApp.inject({
+        method: 'GET',
+        url: '/api/session',
+        remoteAddress: '192.0.2.10',
+      });
+      const remoteCookie = remoteSession.headers['set-cookie']?.split(';')[0];
+      assert.ok(remoteCookie, 'remote session route mints a cookie');
+      for (const extraHeaders of [{}, { 'x-forwarded-for': '192.0.2.10' }]) {
+        const res = await sessionApp.inject({
+          method: 'POST',
+          url: '/api/projects/setup',
+          remoteAddress: '192.0.2.10',
+          headers: { cookie: remoteCookie, 'content-type': 'application/json', ...extraHeaders },
+          payload: { projectPath: testRoot, mode: 'skip' },
+        });
+        assert.equal(res.statusCode, 401, JSON.stringify(extraHeaders));
+      }
+      assert.equal(bootstrapCalls.length, 0);
+
+      const localSession = await sessionApp.inject({ method: 'GET', url: '/api/session' });
+      const localCookie = localSession.headers['set-cookie']?.split(';')[0];
+      assert.ok(localCookie, 'local session route mints a cookie');
+      const localSetup = await sessionApp.inject({
+        method: 'POST',
+        url: '/api/projects/setup',
+        headers: { cookie: localCookie, 'content-type': 'application/json' },
+        payload: { projectPath: testRoot, mode: 'skip' },
+      });
+      assert.equal(localSetup.statusCode, 200);
+      for (let i = 0; i < 30 && bootstrapCalls.length === 0; i++) {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      assert.equal(bootstrapCalls.length, 1);
+      assert.equal(bootstrapCalls[0].ownerUserId, 'default-user');
+    } finally {
+      await sessionApp.close();
+    }
+  });
+
+  it('rejects remote and proxy-forwarded setup before any owner binding', async () => {
+    for (const request of [
+      { remoteAddress: '192.0.2.10' },
+      { headers: { ...HEADERS, 'x-forwarded-for': '192.0.2.10' } },
+    ]) {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/api/projects/setup',
+        headers: HEADERS,
+        ...request,
+        payload: { projectPath: testRoot, mode: 'skip' },
+      });
+      assert.equal(res.statusCode, 401, JSON.stringify(request));
+    }
   });
 
   it('rejects requests without identity header', async () => {

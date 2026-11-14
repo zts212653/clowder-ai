@@ -4,7 +4,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { writeShellLanguage } from '@/components/shell/shell-language';
 import { artifactObjectId } from '@/components/workbench/real-surface-adapters';
-import { useChatStore } from '@/stores/chatStore';
+import { type ChatMessage, useChatStore } from '@/stores/chatStore';
 import { HomeWorksSummary } from '../HomeWorksSummary';
 
 const read = vi.hoisted(() => ({ apiFetch: vi.fn() }));
@@ -95,9 +95,9 @@ describe('Home consumes the original thread owner-version read', () => {
     expect(read.apiFetch.mock.calls.map(([path]) => path)).toEqual([
       '/api/threads/thread-owner-read/artifacts?view=works',
     ]);
-    expect(host.querySelector('.home-work-meta')?.textContent).toContain('小太阳·砚砚 · 第 4 版');
+    expect(host.querySelector('.work-gallery-footer small')?.textContent).toContain('小太阳·砚砚 · 第 4 版');
     expect(host.textContent).not.toContain('第 9 版');
-    expect(host.querySelector('.home-work-meta')?.textContent).toContain('旧版');
+    expect(host.querySelector('.work-gallery-footer small')?.textContent).toContain('旧版');
     const card = host.querySelector<HTMLButtonElement>('[data-testid="workspace-home-artifact-card"]');
     if (!card) throw new Error('The original Home card must be readable');
     vi.spyOn(card, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 12, 288, 100));
@@ -127,8 +127,8 @@ describe('Home consumes the original thread owner-version read', () => {
     const unprepared = { ...artifact };
     delete unprepared.work;
     await render([unprepared], lineage);
-    expect(host.querySelector('.home-work-meta')?.textContent).not.toContain('版本未知');
-    expect(host.querySelector('.home-work-meta')?.textContent).toMatch(/^小太阳·砚砚 · \d+\/\d+ \d+:\d+$/);
+    expect(host.querySelector('.work-gallery-footer small')?.textContent).not.toContain('版本未知');
+    expect(host.querySelector('.work-gallery-footer small')?.textContent).toMatch(/^小太阳·砚砚 · \d+\/\d+ \d+:\d+$/);
     expect(host.querySelector('img')?.getAttribute('src')).toBe(artifact.url);
     expect(host.textContent).not.toMatch(/第 [49] 版/);
   });
@@ -164,14 +164,20 @@ describe('Home consumes the original thread owner-version read', () => {
     read.apiFetch.mockImplementation(async () =>
       Response.json({ artifacts: [artifact], workLineage: 'resolved', view: 'works', complete: true, total: 1 }),
     );
-    const message = {
+    const message: ChatMessage = {
       id: 'controlled-publication-exact',
-      type: 'assistant' as const,
+      type: 'assistant',
       content: 'stream chunk',
       timestamp: artifact.createdAt,
       isStreaming: true,
+      contentBlocks: [
+        { type: 'text', text: 'Preparing the controlled publication' },
+        { type: 'text', text: 'The image is the third published content block' },
+        { type: 'image', url: '/uploads/controlled-owner-revision.png' },
+      ],
     };
     await act(async () => useChatStore.setState({ messages: [message], hasActiveInvocation: true }));
+    expect(read.apiFetch).toHaveBeenCalledTimes(2);
     expect(host.querySelector('[data-testid="workspace-home-artifact-card"]')).not.toBeNull();
     const materialReads = read.apiFetch.mock.calls.length;
     await act(async () => useChatStore.setState({ messages: [{ ...message, content: 'another stream chunk' }] }));
@@ -194,16 +200,23 @@ describe('Home consumes the original thread owner-version read', () => {
     await act(async () => window.dispatchEvent(new Event('cat-cafe:entrusted-work-projection-invalidated')));
     expect(read.apiFetch).toHaveBeenCalledTimes(deletedReads + 1);
   });
-  it('observes the original current-thread liveness signal even when no message material changes', async () => {
+  it('rereads once at invocation completion without reading at a text-only invocation start', async () => {
     await render([], 'resolved');
     const initialReads = read.apiFetch.mock.calls.length;
-    await act(async () => useChatStore.setState({ hasActiveInvocation: true }));
-    expect(read.apiFetch).toHaveBeenCalledTimes(initialReads + 1);
+    const message: ChatMessage = {
+      id: 'text-only-invocation',
+      type: 'assistant',
+      content: 'stream chunk without a publication',
+      timestamp: artifact.createdAt,
+      isStreaming: true,
+    };
+    await act(async () => useChatStore.setState({ messages: [message], hasActiveInvocation: true }));
+    expect(read.apiFetch).toHaveBeenCalledTimes(initialReads);
     read.apiFetch.mockImplementation(async () =>
       Response.json({ artifacts: [artifact], workLineage: 'resolved', view: 'works', complete: true, total: 1 }),
     );
     await act(async () => useChatStore.setState({ hasActiveInvocation: false }));
-    expect(read.apiFetch).toHaveBeenCalledTimes(initialReads + 2);
+    expect(read.apiFetch).toHaveBeenCalledTimes(initialReads + 1);
     expect(host.querySelector('[data-testid="workspace-home-artifact-card"]')).not.toBeNull();
   });
 });

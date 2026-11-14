@@ -22,6 +22,7 @@ export async function realDeps() {
     draftStore: new DraftStore(),
     turnExecutionStore: new InMemoryTurnExecutionStore(),
     tasks: [],
+    cliOwners: [],
   };
 }
 
@@ -38,6 +39,8 @@ export async function realPresenceSource(deps, overrides = {}) {
     recordStore: deps.recordStore,
     turnExecutionStore: deps.turnExecutionStore,
     dynamicTaskStore: { getAll: () => deps.tasks },
+    // OS ownership is the external boundary; classification still runs the real service.
+    cliExecutionOwnerService: { listLive: async () => ({ complete: true, owners: deps.cliOwners }) },
     log: { info() {}, warn() {} },
     ...overrides.serviceDeps,
   });

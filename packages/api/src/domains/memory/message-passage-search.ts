@@ -1,4 +1,5 @@
 import type Database from 'better-sqlite3';
+import { MessageCandidateAudit } from './message-candidate-audit.js';
 import { messageLiteralRelevance } from './message-literal-relevance.js';
 import { lexicalMessagePassages } from './message-passage-lexical.js';
 import type { MessagePassageSearchExecution, MessagePassageSearchOptions } from './message-passage-search-types.js';
@@ -8,12 +9,13 @@ import type { PassageResult } from './SqliteEvidenceStore.js';
 interface MessagePassageSearchDeps {
   db: Database.Database;
   isEmbeddingAvailable(): Promise<boolean>;
-  semanticSearch(limit: number): Promise<PassageResult[]>;
+  semanticSearch(limit: number, audit?: MessageCandidateAudit): Promise<PassageResult[]>;
   hybridSearch(
     lexical: PassageResult[],
     limit: number,
     accept: (passage: PassageResult) => boolean,
     compare?: (a: PassageResult, b: PassageResult) => number,
+    audit?: MessageCandidateAudit,
   ): Promise<PassageResult[]>;
 }
 
@@ -28,16 +30,21 @@ function messageAdmission(
   db: Database.Database,
   anchors: Set<string>,
   options: MessagePassageSearchOptions,
+  audit?: MessageCandidateAudit,
 ): (passage: PassageResult) => boolean {
   return (passage) => {
-    if (!anchors.has(passage.docAnchor) || !passage.passageId.startsWith('msg-')) return false;
-    if (!readMessagePassageState(db, passage).current) return false;
+    const reject = () => {
+      audit?.deniedIndex(passage);
+      return false;
+    };
+    if (!anchors.has(passage.docAnchor) || !passage.passageId.startsWith('msg-')) return reject();
+    if (!readMessagePassageState(db, passage).current) return reject();
     if (
       options.excludeSource &&
       passage.docAnchor === `thread-${options.excludeSource.threadId}` &&
       passage.passageId === `msg-${options.excludeSource.messageId}`
     )
-      return false;
+      return reject();
     return true;
   };
 }
@@ -49,9 +56,11 @@ async function retrieveVectors(
   deps: MessagePassageSearchDeps,
   meta: MessagePassageSearchExecution['meta'],
   accept: (passage: PassageResult) => boolean,
+  audit?: MessageCandidateAudit,
 ): Promise<PassageResult[]> {
   if (options.mode === 'lexical') return lexical;
   if (!(await deps.isEmbeddingAvailable())) {
+    audit?.nativeUnavailable();
     meta.degraded = true;
     meta.degradeReason = 'passage_embedding_unavailable';
     meta.effectiveMode = 'lexical';
@@ -60,16 +69,20 @@ async function retrieveVectors(
   try {
     const passages =
       options.mode === 'semantic'
-        ? await deps.semanticSearch(meta.candidateLimit)
+        ? await deps.semanticSearch(meta.candidateLimit, audit)
         : await deps.hybridSearch(
             lexical,
             meta.candidateLimit,
             accept,
-            options.sort === 'relevance' ? messageLiteralRelevance(query)?.compareHybrid : undefined,
+            options.candidateOrder !== 'relevance' && options.sort === 'relevance'
+              ? messageLiteralRelevance(query)?.compareHybrid
+              : undefined,
+            audit,
           );
     meta.semanticCandidatesLimited = true;
     return passages;
   } catch (error) {
+    audit?.nativeUnavailable(true);
     options.signal?.throwIfAborted();
     if (options.deadlineAt !== undefined && Date.now() >= options.deadlineAt) throw error;
     meta.degraded = true;
@@ -87,8 +100,12 @@ export async function searchMessagePassages(
   const pool = options.candidateLimit ?? 2000;
   if (!Number.isInteger(pool) || pool < 1 || pool > 2000) throw new Error('Invalid message candidate limit');
   options.signal?.throwIfAborted();
+  const audit = MessageCandidateAudit.create(options.candidateAudit, pool);
   const anchors = eligibleAnchors(options);
-  const sort = options.sort ?? 'time';
+  // Ordinary-search consumers own canonical display sorting. Both display
+  // choices use the same relevance-ranked lexical input and RRF queue here.
+  const sort = options.candidateOrder === 'relevance' ? 'relevance' : (options.sort ?? 'time');
+  const retrievalOptions = options.candidateOrder === 'relevance' ? { ...options, sort } : options;
   const mode = options.mode ?? 'hybrid';
   const meta: MessagePassageSearchExecution['meta'] = {
     sort,
@@ -101,10 +118,11 @@ export async function searchMessagePassages(
     effectiveMode: mode,
   };
   if (!query.trim() || anchors.size === 0) return { passages: [], meta };
-  const lexical = lexicalMessagePassages(deps.db, query, options, anchors, pool);
+  const lexical = lexicalMessagePassages(deps.db, query, retrievalOptions, anchors, pool);
+  audit?.order(1, lexical.slice(0, pool));
   meta.truncated = lexical.length > pool;
-  const accept = messageAdmission(deps.db, anchors, options);
-  const passages = await retrieveVectors(query, lexical.slice(0, pool), options, deps, meta, accept);
+  const accept = messageAdmission(deps.db, anchors, options, audit);
+  const passages = await retrieveVectors(query, lexical.slice(0, pool), retrievalOptions, deps, meta, accept, audit);
   options.signal?.throwIfAborted();
   const seen = new Set<string>();
   const eligible = passages.filter((passage) => {
@@ -121,7 +139,8 @@ export async function searchMessagePassages(
         a.docAnchor.localeCompare(b.docAnchor) ||
         a.passageId.localeCompare(b.passageId),
     );
-  return {
+  audit?.order(5, eligible);
+  const result: MessagePassageSearchExecution = {
     passages: eligible.map((passage) => ({
       docAnchor: passage.docAnchor,
       passageId: passage.passageId,
@@ -134,4 +153,13 @@ export async function searchMessagePassages(
     })),
     meta,
   };
+  if (audit) {
+    try {
+      const snapshot = audit.snapshot();
+      if (snapshot) options.onCandidateAudit?.(snapshot);
+    } catch {
+      /* Optional evidence never owns the existing result or cancellation. */
+    }
+  }
+  return result;
 }

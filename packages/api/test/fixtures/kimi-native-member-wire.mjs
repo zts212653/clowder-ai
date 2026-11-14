@@ -23,19 +23,22 @@ const revoke = process.argv.includes('--revoke-during-compile'),
   liveRotate = process.argv.includes('--rotate-during-provider');
 const templateUnsafe = process.argv.includes('--identity-template');
 const dynamic = process.argv.includes('--dynamic-tools');
-const scenario = templateUnsafe
-  ? 'identity-template'
-  : liveRotate
-    ? 'live-rotate'
-    : rotate
-      ? 'rotate'
-      : revoke
-        ? 'revoke'
-        : negative
-          ? 'negative'
-          : dynamic
-            ? 'dynamic'
-            : 'positive';
+const foreignHostHooks = process.argv.includes('--foreign-host-hooks');
+const scenario = foreignHostHooks
+  ? 'foreign-host-hooks'
+  : templateUnsafe
+    ? 'identity-template'
+    : liveRotate
+      ? 'live-rotate'
+      : rotate
+        ? 'rotate'
+        : revoke
+          ? 'revoke'
+          : negative
+            ? 'negative'
+            : dynamic
+              ? 'dynamic'
+              : 'positive';
 const root = await realpath(await mkdtemp(join(tmpdir(), 'kimi-member-wire-')));
 const home = join(root, 'native-source'),
   workspace = join(root, 'host-workspace');
@@ -203,6 +206,15 @@ try {
     accountRef: 'existing',
   });
   assert.ok(native);
+  if (foreignHostHooks) {
+    const config = await readFile(configPath, 'utf8');
+    const relocated = config.replaceAll(
+      '/dist/runtime/scripts/secret-kimi-hook.mjs',
+      '/another-host/dist/runtime/scripts/secret-kimi-hook.mjs',
+    );
+    assert.notEqual(relocated, config);
+    await writeFile(configPath, relocated);
+  }
   const account = await readKimiNativeAccount(native, modelAlias),
     snapshot = providerProfileAccountSnapshot('kimi', account.profile);
   const beforeConfig = await readFile(configPath, 'utf8');
@@ -339,6 +351,8 @@ try {
   const proof = {
     claim: 'production-kimi-member-installed-wire',
     scenario,
+    nativeHooksRelocated: foreignHostHooks,
+    forbiddenToolAttempts: negative ? 3 : 0,
     realModelRequests: 0,
     localProviderRequests: requests.length,
     actions: actions.map((action) => action.name),

@@ -28,6 +28,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import base64
+import gc
 import io
 import json
 import logging
@@ -37,6 +38,8 @@ import signal
 import sys
 import tempfile
 import threading
+import time
+import traceback
 import wave
 from abc import ABC, abstractmethod
 from array import array
@@ -400,6 +403,7 @@ class Qwen3CloneAdapter(TtsAdapter):
         self._model = model or self.DEFAULT_MODEL
         self._lock = threading.Lock()
         self._loaded_model = None
+        self._mlx = None
         self._inference_executor = ThreadPoolExecutor(
             max_workers=1,
             thread_name_prefix="cat-cafe-qwen-tts",
@@ -427,7 +431,7 @@ class Qwen3CloneAdapter(TtsAdapter):
         temperature: float = 0.3,
     ) -> tuple[bytes, str]:
         if ref_audio and not Path(ref_audio).exists():
-            log.warning("Reference audio not found: %s — falling back to voice ID mode", ref_audio)
+            log.warning("Reference audio not found: %s — using Base generation without a reference", ref_audio)
             ref_audio = None
             ref_text = None
             instruct = None
@@ -436,7 +440,6 @@ class Qwen3CloneAdapter(TtsAdapter):
             self._inference_executor.submit(
                 self._synthesize_sync,
                 text,
-                voice,
                 lang_code,
                 speed,
                 audio_format,
@@ -452,16 +455,58 @@ class Qwen3CloneAdapter(TtsAdapter):
         return self._inference_executor.submit(operation)
 
     def _ensure_model(self):
+        if self._mlx is None:
+            import mlx.core as mx
+
+            # This bounds unused allocator buffers, not active tensors or RSS.
+            mx.set_cache_limit(512 * 1024**2)
+            self._mlx = mx
         if self._loaded_model is None:
             from mlx_audio.tts.utils import load_model
 
             self._loaded_model = load_model(self._model)
         return self._loaded_model
 
+    def _release_memory(self) -> None:
+        """Run with the inference lock on its owner thread, including failures."""
+        if self._mlx is None:
+            return
+        try:
+            started = time.monotonic()
+            active_before = self._mlx.get_active_memory()
+            cache_before = self._mlx.get_cache_memory()
+            error = sys.exc_info()[1]
+            if error is not None:
+                # Keep traceback locations and the original error, but release
+                # completed vendor frames' tensor locals before queuing it.
+                traceback.clear_frames(error.__traceback__)
+            gc.collect()
+            self._mlx.clear_cache()
+            log.info(
+                "Clone memory cleanup: active_before=%d cache_before=%d active_after=%d cache_after=%d "
+                "process_peak=%d cleanup_ms=%.1f",
+                active_before, cache_before, self._mlx.get_active_memory(), self._mlx.get_cache_memory(),
+                self._mlx.get_peak_memory(), (time.monotonic() - started) * 1000,
+            )
+        except Exception:
+            # Cleanup must not replace the original generation error, nor keep
+            # the lock held. The request/stream's existing terminal is retained.
+            log.warning("Clone memory cleanup failed", exc_info=True)
+
+    @property
+    def generation_profile(self) -> str | None:
+        config = getattr(self._loaded_model, "config", None)
+        if getattr(config, "model_type", None) == "breeze_tts":
+            return "breeze-repetition-1.06-v1"
+        return None
+
+    def _generation_options(self) -> dict:
+        # Preserve caller temperature and other models' defaults.
+        return {"repetition_penalty": 1.06} if self.generation_profile else {}
+
     def _synthesize_sync(
         self,
         text: str,
-        voice: str,
         lang_code: str,
         speed: float,
         audio_format: str,
@@ -475,30 +520,34 @@ class Qwen3CloneAdapter(TtsAdapter):
         output_dir = Path(tempfile.mkdtemp(prefix="cat-cafe-tts-clone-"))
         try:
             with self._lock:
-                model = self._ensure_model()
-                kwargs: dict = {
-                    "text": text,
-                    "model": model,
-                    "lang_code": lang_code,
-                    "speed": speed,
-                    "audio_format": audio_format,
-                    "output_path": str(output_dir),
-                    "temperature": temperature,
-                }
-                if ref_audio:
-                    kwargs["ref_audio"] = ref_audio
-                    if ref_text:
-                        kwargs["ref_text"] = ref_text
-                    if instruct:
-                        kwargs["instruct"] = instruct
-                else:
-                    kwargs["voice"] = voice
-                tts_generate(**kwargs)
+                try:
+                    model = self._ensure_model()
+                    kwargs: dict = {
+                        "text": text,
+                        "model": model,
+                        "lang_code": lang_code,
+                        "speed": speed,
+                        "audio_format": audio_format,
+                        "output_path": str(output_dir),
+                        "temperature": temperature,
+                        **self._generation_options(),
+                    }
+                    if ref_audio:
+                        kwargs["ref_audio"] = ref_audio
+                        if ref_text:
+                            kwargs["ref_text"] = ref_text
+                        if instruct:
+                            kwargs["instruct"] = instruct
+                    # Base models have no preset speakers. Without a reference,
+                    # omit voice and use the model's reference-free generation.
+                    tts_generate(**kwargs)
 
-            audio_files = list(output_dir.glob(f"*.{audio_format}"))
-            if not audio_files:
-                raise RuntimeError("No audio file generated")
-            return audio_files[0].read_bytes(), audio_format
+                    audio_files = list(output_dir.glob(f"*.{audio_format}"))
+                    if not audio_files:
+                        raise RuntimeError("No audio file generated")
+                    return audio_files[0].read_bytes(), audio_format
+                finally:
+                    self._release_memory()
         finally:
             shutil.rmtree(output_dir, ignore_errors=True)
 
@@ -509,6 +558,7 @@ class Qwen3CloneAdapter(TtsAdapter):
         lang_code: str,
         ref_audio: str,
         ref_text: str,
+        instruct: str | None = None,
         temperature: float = 0.3,
         streaming_interval: float = 0.5,
     ):
@@ -517,20 +567,26 @@ class Qwen3CloneAdapter(TtsAdapter):
             raise RuntimeError(f"Reference audio not found: {ref_audio}")
 
         self._lock.acquire()
+        generation = None
+        result = None
+        model = None
         try:
             model = self._ensure_model()
             pcm_chunks: list[bytes] = []
             sample_rate: int | None = None
-            for result in model.generate(
+            generation = model.generate(
                 text=text,
                 lang_code=lang_code,
                 ref_audio=ref_audio,
                 ref_text=ref_text,
+                instruct=instruct,
                 temperature=temperature,
                 stream=True,
                 streaming_interval=streaming_interval,
                 verbose=False,
-            ):
+                **self._generation_options(),
+            )
+            for result in generation:
                 sample_rate = int(result.sample_rate)
                 pcm = _pcm16_bytes(result.audio)
                 pcm_chunks.append(pcm)
@@ -550,14 +606,31 @@ class Qwen3CloneAdapter(TtsAdapter):
                 "duration_sec": len(complete_pcm) / 2 / sample_rate,
             }
         finally:
-            self._lock.release()
+            try:
+                # Closing the inner generator releases its frame/KV arrays.
+                # The last yielded result also owns audio until dereferenced.
+                try:
+                    if generation is not None:
+                        generation.close()
+                except Exception:
+                    log.warning("Clone inner stream close failed", exc_info=True)
+                generation = result = None
+                try:
+                    tokenizer = getattr(model, "audio_tokenizer", None) or getattr(model, "speech_tokenizer", None)
+                    reset = getattr(getattr(tokenizer, "decoder", None), "reset_streaming_state", None)
+                    if callable(reset):
+                        reset()
+                except Exception:
+                    log.warning("Clone stream state reset failed", exc_info=True)
+                self._release_memory()
+            finally:
+                self._lock.release()
 
     def warmup(self) -> None:
         self._inference_executor.submit(
             self._synthesize_sync,
             "你好",
-            "zm_yunjian",
-            "z",
+            "zh",
             1.0,
             "wav",
             None,
@@ -602,7 +675,7 @@ adapter_ready: bool = False
 class SpeechRequest(BaseModel):
     input: str = Field(..., min_length=1, max_length=MAX_INPUT_CHARS)
     voice: str = Field(default="zm_yunjian")
-    model: str = Field(default="mlx-community/Qwen3-TTS-12Hz-1.7B-Base-bf16")
+    model: str | None = Field(default=None)
     response_format: str = Field(default="wav")
     speed: float = Field(default=1.0, ge=0.5, le=2.0)
     lang_code: str = Field(default="z")
@@ -611,6 +684,28 @@ class SpeechRequest(BaseModel):
     ref_text: str | None = Field(default=None)
     instruct: str | None = Field(default=None)
     temperature: float = Field(default=0.3, ge=0.0, le=2.0)
+    generation_profile: str | None = Field(default=None, max_length=64)
+
+
+def verify_requested_model(model: str | None, generation_profile: str | None = None) -> None:
+    """Fence a configured client snapshot if the listener changes before its request."""
+    if generation_profile is not None and generation_profile != (getattr(adapter, "generation_profile", None) or ""):
+        raise HTTPException(409, detail="TTS generation profile changed; prepare synthesis again")
+    aliases = {
+        "qwen3-clone": Qwen3CloneAdapter.DEFAULT_MODEL,
+        "mlx-audio": "mlx-community/Kokoro-82M-bf16",
+        "piper": "zh_CN-huayan-medium",
+    }
+    # Generic OpenAI tokens (e.g. tts-1) still mean the configured service.
+    if not model:
+        return
+    concrete_model = ("/" in model or model in aliases or model in {"edge-tts", "sapi"}
+                      or model.startswith(("zh_CN-", "en_US-", "en_GB-")))
+    if not concrete_model:
+        return
+    actual = adapter.model_name if adapter.model_name != "none" else adapter.name
+    if aliases.get(model, model) != actual:
+        raise HTTPException(409, detail="Requested TTS model differs from the running service; restart the selected service")
 
 
 @app.post("/v1/audio/speech")
@@ -618,6 +713,7 @@ async def synthesize_endpoint(req: SpeechRequest):
     """OpenAI-compatible TTS endpoint."""
     if not adapter_ready or adapter is None:
         raise HTTPException(503, detail="TTS adapter not ready yet")
+    verify_requested_model(req.model, req.generation_profile)
 
     try:
         # Build base kwargs for all adapters
@@ -652,6 +748,7 @@ async def synthesize_endpoint(req: SpeechRequest):
             headers={
                 "Content-Disposition": f'inline; filename="speech.{actual_format}"',
                 "X-Audio-Format": actual_format,
+                **({"X-TTS-Generation-Profile": adapter.generation_profile} if getattr(adapter, "generation_profile", None) else {}),
             },
         )
     except HTTPException:
@@ -666,6 +763,7 @@ async def synthesize_stream_endpoint(request: Request, req: SpeechRequest):
     """Stream native Qwen clone chunks as NDJSON and finish with one cacheable WAV."""
     if not adapter_ready or adapter is None:
         raise HTTPException(503, detail="TTS adapter not ready yet")
+    verify_requested_model(req.model, req.generation_profile)
     if not isinstance(adapter, Qwen3CloneAdapter):
         raise HTTPException(409, detail="Native clone streaming requires the qwen3-clone provider")
     if not req.ref_audio or not req.ref_text:
@@ -676,6 +774,7 @@ async def synthesize_stream_endpoint(request: Request, req: SpeechRequest):
         lang_code=req.lang_code,
         ref_audio=req.ref_audio,
         ref_text=req.ref_text,
+        instruct=req.instruct,
         temperature=req.temperature,
     )
 
@@ -721,7 +820,10 @@ async def synthesize_stream_endpoint(request: Request, req: SpeechRequest):
             except BaseException:
                 pass
 
-    return StreamingResponse(generate_events(), media_type="application/x-ndjson")
+    return StreamingResponse(
+        generate_events(), media_type="application/x-ndjson",
+        headers={"X-TTS-Generation-Profile": adapter.generation_profile} if adapter.generation_profile else {},
+    )
 
 
 @app.get("/health")
@@ -730,6 +832,7 @@ async def health():
         "status": "ok" if adapter_ready else "loading",
         "model": adapter.model_name if adapter else "none",
         "backend": adapter.name if adapter else "none",
+        **({"generation_profile": adapter.generation_profile} if getattr(adapter, "generation_profile", None) else {}),
         "capabilities": TTS_API_CAPABILITIES,
     }
 
@@ -740,16 +843,19 @@ async def health_deep():
 
     Used by lifecycle reconciler to detect zombie processes -- HTTP alive
     but inference pipeline broken (e.g. Broken pipe after prolonged uptime).
-    Synthesizes a single character to verify the full pipeline works.
+    Synthesizes a short phrase to verify the full pipeline works.
     """
     if not adapter_ready or not adapter:
         raise HTTPException(503, detail="adapter not ready")
+    # Reference-capable MLX models already warm up with this Chinese phrase.
+    # A lone English 'a' can make Breeze continue generating until the probe times out.
+    clone_adapter = isinstance(adapter, Qwen3CloneAdapter)
     try:
         _audio_bytes, _fmt = await asyncio.wait_for(
             adapter.synthesize(
-                text="a",
+                text="你好" if clone_adapter else "a",
                 voice="zm_yunjian",
-                lang_code="en",
+                lang_code="zh" if clone_adapter else "en",
                 speed=1.0,
                 audio_format="wav",
             ),
@@ -759,6 +865,8 @@ async def health_deep():
             "status": "ok",
             "probe": "synthesis",
             "model": adapter.model_name,
+            "backend": adapter.name,
+            **({"generation_profile": adapter.generation_profile} if getattr(adapter, "generation_profile", None) else {}),
             "capabilities": TTS_API_CAPABILITIES,
         }
     except Exception as exc:

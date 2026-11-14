@@ -4,8 +4,6 @@ title: Callback Auth
 summary: Invocation credential、persistent agent-key、callback principal 验证、refresh、telemetry 与现场 auth failure 可见性。
 canonical_features: [F174, F178]
 code_anchors:
-  - packages/api/src/domains/cats/services/cloud-bridge/dot/DotReturnService.ts
-  - packages/api/src/routes/chatgpt-dot-mcp-routes.ts
   - packages/mcp-server/src/dot-remote-proxy.ts
   - packages/api/src/domains/cats/services/agents/invocation/InvocationRegistry.ts
   - packages/api/src/domains/cats/services/agents/invocation/RedisAuthInvocationBackend.ts

@@ -6,6 +6,12 @@ import {
   type RuntimeSessionRuntime,
   type RuntimeSessionSurface,
 } from './RuntimeSessionMetadata.js';
+import {
+  needsRuntimeSealRecovery,
+  planRuntimeSealRecoveryFailure,
+  preserveRuntimeSealRecovery,
+  sameRuntimeSealExecution,
+} from './runtime-seal-recovery-state.js';
 
 export interface RuntimeSessionRecentFilter {
   runtime?: RuntimeSessionRuntime;
@@ -16,6 +22,14 @@ export interface RuntimeSessionRecentFilter {
 }
 
 export interface IRuntimeSessionStore {
+  listSealRecoveryCandidates(limit?: number): RuntimeSessionMetadata[] | Promise<RuntimeSessionMetadata[]>;
+  parkSealRecovery(record: RuntimeSessionMetadata, now: number): boolean | Promise<boolean>;
+  failSealRecovery(
+    record: RuntimeSessionMetadata,
+    now: number,
+    maxRetries: number,
+    reason: string,
+  ): boolean | Promise<boolean>;
   upsert(metadata: RuntimeSessionMetadata): RuntimeSessionMetadata | Promise<RuntimeSessionMetadata>;
   getBySessionId(sessionId: string): RuntimeSessionMetadata | null | Promise<RuntimeSessionMetadata | null>;
   getByRuntimeSession(
@@ -39,18 +53,22 @@ export interface IRuntimeSessionStore {
 
 export class RuntimeSessionStore implements IRuntimeSessionStore {
   private records = new Map<string, RuntimeSessionMetadata>();
+  private sealPending = new Set<string>();
   private runtimeIndex = new Map<string, string>();
   private stateIndex = new Map<RuntimeSessionLifecycleState, Set<string>>();
 
   upsert(metadata: RuntimeSessionMetadata): RuntimeSessionMetadata {
-    const normalized = normalizeRuntimeSessionMetadata(metadata);
-    const existing = this.records.get(normalized.sessionId);
+    const incoming = normalizeRuntimeSessionMetadata(metadata);
+    const existing = this.records.get(incoming.sessionId);
+    const normalized = preserveRuntimeSealRecovery(existing ?? null, incoming);
 
     if (existing) {
       this.runtimeIndex.delete(runtimeKey(existing.runtime, existing.runtimeSessionId));
       this.removeFromStateIndex(existing.lifecycle.state, existing.sessionId);
     }
 
+    this.sealPending.delete(normalized.sessionId);
+    if (needsRuntimeSealRecovery(normalized)) this.sealPending.add(normalized.sessionId);
     this.records.set(normalized.sessionId, cloneMetadata(normalized));
     this.runtimeIndex.set(runtimeKey(normalized.runtime, normalized.runtimeSessionId), normalized.sessionId);
     this.addToStateIndex(normalized.lifecycle.state, normalized.sessionId);
@@ -82,6 +100,44 @@ export class RuntimeSessionStore implements IRuntimeSessionStore {
         return a.sessionId.localeCompare(b.sessionId);
       });
     return active[0] ? cloneMetadata(active[0]) : null;
+  }
+
+  listSealRecoveryCandidates(limit = 100): RuntimeSessionMetadata[] {
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > 1000) throw new Error('invalid_runtime_seal_batch_limit');
+    const records: RuntimeSessionMetadata[] = [];
+    for (const id of this.sealPending) {
+      if (records.length >= limit) break;
+      const record = this.records.get(id);
+      if (record && needsRuntimeSealRecovery(record)) records.push(cloneMetadata(record));
+    }
+    return records;
+  }
+  parkSealRecovery(selected: RuntimeSessionMetadata, now: number): boolean {
+    const current = this.records.get(selected.sessionId);
+    if (
+      !current ||
+      !needsRuntimeSealRecovery(current) ||
+      !sameRuntimeSealExecution(current, selected) ||
+      (current.lifecycle.retryCount ?? 0) !== (selected.lifecycle.retryCount ?? 0)
+    )
+      return false;
+    this.upsert({
+      ...current,
+      lifecycle: {
+        ...current.lifecycle,
+        recoveryDisposition: 'needs_attention',
+        recoveryReasonCode: 'seal_retry_exhausted',
+        recoveryDisposedAt: now,
+      },
+    });
+    return true;
+  }
+  failSealRecovery(selected: RuntimeSessionMetadata, now: number, maxRetries: number, reason: string): boolean {
+    const current = this.records.get(selected.sessionId);
+    const next = current && planRuntimeSealRecoveryFailure(current, selected, now, maxRetries, reason);
+    if (!next) return false;
+    this.upsert(next);
+    return true;
   }
 
   listByLifecycleState(state: RuntimeSessionLifecycleState): RuntimeSessionMetadata[] {

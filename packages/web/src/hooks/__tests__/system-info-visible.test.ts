@@ -1,11 +1,60 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+import { consumeSystemInfo } from '../agent-messages/system-info';
+import type { SystemInfoPort } from '../agent-messages/system-info-port';
 import { formatVisibleSystemInfo } from '../system-info-visible';
 
-describe('internal session continuity has no visible notice formatter', () => {
+describe('session_seal_requested visibility and invocation sealing', () => {
   it.each(['runtime_replacement', 'context_threshold'])('keeps %s outside chat', (reason) => {
     expect(
       formatVisibleSystemInfo({ type: 'session_seal_requested', catId: 'codex-sol', sessionSeq: 3, reason }),
     ).toBeNull();
+  });
+
+  it('surfaces native_binding_changed in chat AND marks the invocation sealed', () => {
+    const payload = {
+      type: 'session_seal_requested',
+      catId: 'gemini-carbon',
+      sessionId: 'sess-1',
+      sessionSeq: 1,
+      reason: 'native_binding_changed',
+    };
+    const visible = formatVisibleSystemInfo(payload, (catId) => (catId === 'gemini-carbon' ? '烁烁' : catId));
+    expect(visible).toEqual({
+      content: '烁烁 的原生配置已更新，会话 #1 已封存；正在带上历史继续',
+      variant: 'info',
+    });
+
+    const setCatInvocation = vi.fn();
+    const port: SystemInfoPort = {
+      path: 'active',
+      threadId: 'thread-1',
+      store: () => ({ messages: [] }) as never,
+      resolveCatName: (catId) => (catId === 'gemini-carbon' ? '烁烁' : catId),
+      createdAt: 1_794_360_000_000,
+      newId: (kind) => `${kind}-1`,
+      catInvocation: () => undefined,
+      setCatStatus: vi.fn(),
+      setCatInvocation,
+      removeRow: vi.fn(),
+      rows: () => [],
+      addRow: vi.fn(),
+      patchRow: vi.fn(),
+    };
+    const result = consumeSystemInfo(
+      {
+        type: 'system_info',
+        catId: 'gemini-carbon',
+        content: JSON.stringify(payload),
+      },
+      port,
+    );
+    expect(setCatInvocation).toHaveBeenCalledWith('gemini-carbon', {
+      sessionSeq: 1,
+      sessionSealed: true,
+    });
+    expect(result.consumed).toBe(false);
+    expect(result.content).toBe('烁烁 的原生配置已更新，会话 #1 已封存；正在带上历史继续');
+    expect(result.systemInfo?.payload).toMatchObject(payload);
   });
 });
 

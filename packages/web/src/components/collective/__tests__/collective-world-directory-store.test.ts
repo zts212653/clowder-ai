@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import type { CollectiveClientWorldDirectory } from '@cat-cafe/shared';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { projectWorldRailDirectory } from '../../shell/use-world-rail-entries';

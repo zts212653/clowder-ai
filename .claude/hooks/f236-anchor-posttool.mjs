@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+
 /**
  * F236 Phase C — PostToolUse anchor hook for cc native Read/Grep/Glob.
  *
@@ -8,7 +9,7 @@
  *   to replace, or nothing for pass-through
  * - exit 0 always (non-zero = cc logs error)
  *
- * Cat-controlled mode: checks mode file at /tmp/cat-cafe-anchor-mode-{invocationId}.
+ * Cat-controlled mode: checks mode file in the platform temporary directory, keyed by invocationId.
  * Fail-open: no mode file = pass-through (full text).
  * Bounded drill: offset/limit present = always pass-through (escape hatch).
  *
@@ -18,18 +19,20 @@
  */
 
 import { appendFileSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 // ─── Exported for testing ───────────────────────────────────────────────────
 
 /**
  * Resolve mode file path.
- * - Clowder AI managed: /tmp/cat-cafe-anchor-mode-{invocationId}
+ * - Clowder AI managed: platform temporary directory, keyed by invocationId
  * - Interactive fallback: {projectDir}/.f236-anchor-mode
  */
 export function resolveModeFilePath(env = process.env) {
   const invocationId = env.CAT_CAFE_INVOCATION_ID;
   if (invocationId) {
-    return `/tmp/cat-cafe-anchor-mode-${invocationId}`;
+    return join(process.platform === 'win32' ? tmpdir() : '/tmp', `cat-cafe-anchor-mode-${invocationId}`);
   }
   const projectDir = env.CLAUDE_PROJECT_DIR;
   if (projectDir) {
@@ -226,7 +229,8 @@ export function buildGlobReplacement(toolResponse, anchorContent) {
  */
 export function resolveEvalFilePath(env = process.env) {
   const invocationId = env.CAT_CAFE_INVOCATION_ID;
-  if (invocationId) return `/tmp/cat-cafe-anchor-eval-${invocationId}.jsonl`;
+  if (invocationId)
+    return join(process.platform === 'win32' ? tmpdir() : '/tmp', `cat-cafe-anchor-eval-${invocationId}.jsonl`);
   // Interactive fallback: project-dir-keyed
   const projectDir = env.CLAUDE_PROJECT_DIR;
   if (projectDir) return `${projectDir}/.f236-anchor-eval.jsonl`;
@@ -241,7 +245,8 @@ export function resolveEvalFilePath(env = process.env) {
  */
 export function resolveStateFilePath(env = process.env) {
   const invocationId = env.CAT_CAFE_INVOCATION_ID;
-  if (invocationId) return `/tmp/cat-cafe-anchor-filestate-${invocationId}.json`;
+  if (invocationId)
+    return join(process.platform === 'win32' ? tmpdir() : '/tmp', `cat-cafe-anchor-filestate-${invocationId}.json`);
   const projectDir = env.CLAUDE_PROJECT_DIR;
   if (projectDir) return `${projectDir}/.f236-anchor-filestate.json`;
   return null;

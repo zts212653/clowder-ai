@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import { test } from 'node:test';
 import { createCatId } from '@cat-cafe/shared';
 import { publicationMarksFixture } from './helpers/publication-marks-read-fixture.js';
@@ -10,6 +12,21 @@ interface Page {
   authority: { canWrite: boolean };
   records: { path: string; value: unknown }[];
 }
+
+test('an ordinary publication media read exports exact original bytes without a Task and rejects recalled source access', async (t) => {
+  const f = await publicationMarksFixture();
+  t.after(f.close);
+  const response = await f.read({ view: 'media' });
+  assert.equal(response.statusCode, 200, response.body);
+  const evidence = response.json();
+  assert.equal(evidence.asset.ownerRevision, f.asset.ownerRevision);
+  assert.deepEqual(await readFile(evidence.originalPath), await readFile(join(f.root, 'uploads', 'cover.png')));
+  assert.notEqual(evidence.originalPath, join(f.root, 'uploads', 'cover.png'), 'cat receives an immutable snapshot');
+  assert.equal(evidence.images[0].purpose, 'frame');
+  assert.equal(f.task.current, null);
+  f.question.recall = { version: 1, exposure: 'none', recalledAt: 3000 };
+  assert.equal((await f.read({ view: 'media' })).statusCode, 403);
+});
 
 for (const kind of ['image', 'video'] as const)
   test(`${kind}: the addressed cat reads three complete saved strokes without a Task`, async (t) => {

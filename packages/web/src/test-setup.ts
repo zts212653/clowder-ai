@@ -9,8 +9,11 @@ beforeEach(() => {
   observeApiSessionOwner(null);
 });
 
+// The two window polyfills below are for tests that run in jsdom; tests in plain Node never get a fake DOM.
+const hasWindow = typeof window !== 'undefined';
+
 // React Flow requires ResizeObserver
-if (typeof globalThis.ResizeObserver === 'undefined') {
+if (hasWindow && typeof globalThis.ResizeObserver === 'undefined') {
   globalThis.ResizeObserver = class ResizeObserver {
     observe() {}
     unobserve() {}
@@ -19,7 +22,10 @@ if (typeof globalThis.ResizeObserver === 'undefined') {
 }
 
 // jsdom does not provide localStorage by default in all vitest contexts
-if (typeof globalThis.localStorage === 'undefined' || typeof globalThis.localStorage?.getItem !== 'function') {
+if (
+  hasWindow &&
+  (typeof globalThis.localStorage === 'undefined' || typeof globalThis.localStorage?.getItem !== 'function')
+) {
   const store: Record<string, string> = {};
   globalThis.localStorage = {
     getItem: (key: string) => store[key] ?? null,

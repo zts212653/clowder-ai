@@ -17,7 +17,7 @@ const VALID_WAIT_SOURCE_REF = {
   kind: 'github_issue',
   value: 'https://github.com/owner/repo/issues/42',
   expectedSignal: 'issue closed',
-  slaUntilMs: 1781972000000,
+  slaUntilMs: Date.now() + 3_600_000,
 };
 
 describe('F167 gate-keeping guard: POST /api/callbacks/hold-ball', () => {
@@ -221,7 +221,7 @@ describe('F167 gate-keeping guard: POST /api/callbacks/hold-ball', () => {
           kind: 'github_comment',
           value: 'https://github.com/owner/repo/issues/42#issuecomment-123',
           expectedSignal: 'cloud review reaction',
-          slaUntilMs: 1781972000000,
+          slaUntilMs: Date.now() + 3_600_000,
         },
       },
     });
@@ -274,7 +274,7 @@ describe('F167 gate-keeping guard: POST /api/callbacks/hold-ball', () => {
           kind: 'github_issue',
           value: 'https://github.com/owner/repo/issues/99',
           expectedSignal: 'issue label change',
-          slaUntilMs: 1781972000000,
+          slaUntilMs: Date.now() + 3_600_000,
         },
       },
     });
@@ -344,7 +344,7 @@ describe('F167 gate-keeping guard: POST /api/callbacks/hold-ball', () => {
           kind: 'github_issue',
           value: 'https://github.com/org/repo/issues/42',
           expectedSignal: 'reaction check',
-          slaUntilMs: 1781972000000,
+          slaUntilMs: Date.now() + 3_600_000,
         },
       },
     });
@@ -387,7 +387,7 @@ describe('F167 gate-keeping guard: POST /api/callbacks/hold-ball', () => {
           kind: 'github_issue',
           value: 'https://github.com/owner/repo/issues/42',
           expectedSignal: 'PR merged',
-          slaUntilMs: 1781972000000,
+          slaUntilMs: Date.now() + 3_600_000,
         },
       },
     });
@@ -416,7 +416,7 @@ describe('F167 gate-keeping guard: POST /api/callbacks/hold-ball', () => {
           kind: 'github_issue',
           value: 'https://github.com/owner/repo/issues/7',
           expectedSignal: 'status update',
-          slaUntilMs: 1781972000000,
+          slaUntilMs: Date.now() + 3_600_000,
         },
       },
     });
@@ -457,7 +457,7 @@ describe('F167 gate-keeping guard: POST /api/callbacks/hold-ball', () => {
           kind: 'github_issue',
           value: 'https://github.com/owner/repo/issues/99',
           expectedSignal: 'issue closure',
-          slaUntilMs: 1781972000000,
+          slaUntilMs: Date.now() + 3_600_000,
         },
       },
     });

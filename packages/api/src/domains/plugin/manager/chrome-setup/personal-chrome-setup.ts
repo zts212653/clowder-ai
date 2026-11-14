@@ -116,6 +116,9 @@ export class PersonalChromeSetup {
             packageDigest: initial.packageDigest,
             ...(record.provenance?.packageName ? { packageName: record.provenance.packageName } : {}),
             sourceKind: record.provenance?.kind ?? 'local-archive',
+            ...(record.provenance?.dependencyClosure === undefined
+              ? {}
+              : { dependencyClosure: record.provenance.dependencyClosure }),
           })
         : await this.options.packages.resolveInstalledPackage(initial.packageDigest);
       try {

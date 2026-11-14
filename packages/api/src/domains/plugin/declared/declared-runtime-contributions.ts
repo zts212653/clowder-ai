@@ -65,9 +65,15 @@ interface ActiveRuntimeContributions {
   readonly webhooks: readonly WebhookContribution[];
   readonly cloudHostLeases: readonly CloudConversationHostLease[];
   readonly invoke: InvokePluginAction;
+  readonly webhook: DeliverPluginWebhook;
 }
 
 type InvokePluginAction = (pluginInstanceId: string, method: string, params: unknown) => Promise<unknown>;
+type DeliverPluginWebhook = (
+  pluginInstanceId: string,
+  contributionId: string,
+  request: Readonly<Record<string, unknown>>,
+) => Promise<unknown>;
 
 /**
  * Runtime-only declarations live exactly as long as the package activation. Static resources
@@ -85,6 +91,9 @@ export class DeclaredRuntimeContributions {
     admission: PluginRuntimeAdmission,
     invoke: InvokePluginAction,
     actions?: DeclaredActionSurface,
+    webhook: DeliverPluginWebhook = async () => {
+      throw new ExternalPluginRuntimeError('DELIVERY_REJECTED', 'Host fixed webhook surface is unavailable');
+    },
   ): Promise<void> {
     const pluginInstanceId = admission.instance.pluginInstanceId;
     if (this.#active.has(pluginInstanceId)) {
@@ -138,6 +147,7 @@ export class DeclaredRuntimeContributions {
         webhooks,
         cloudHostLeases,
         invoke,
+        webhook,
       });
     } catch (error) {
       await releaseAgentProvider?.();
@@ -221,6 +231,14 @@ export class DeclaredRuntimeContributions {
     contributionId: string,
     request: Readonly<Record<string, unknown>>,
   ): Promise<unknown> {
+    return this.#callPluginWebhook(pluginId, contributionId, request);
+  }
+
+  async #callPluginWebhook(
+    pluginId: string,
+    contributionId: string,
+    request: Readonly<Record<string, unknown>>,
+  ): Promise<unknown> {
     const active = this.#activeForPlugin(pluginId);
     const contribution = active?.webhooks.find((candidate) => candidate.id === contributionId);
     if (!active || !contribution) {
@@ -243,10 +261,12 @@ export class DeclaredRuntimeContributions {
         }
       },
       () =>
-        active.invoke(active.pluginInstanceId, contribution.action.method, {
-          ...(contribution.action.params ?? {}),
-          request,
-        }),
+        contribution.action === undefined
+          ? active.webhook(active.pluginInstanceId, contribution.id, request)
+          : active.invoke(active.pluginInstanceId, contribution.action.method, {
+              ...(contribution.action.params ?? {}),
+              request,
+            }),
       active.lifetime.signal,
     );
   }

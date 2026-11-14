@@ -1,6 +1,8 @@
+// @vitest-environment jsdom
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { SHELL_PRESENTATION_STORAGE_KEY, writeShellPresentation } from '../shell/shell-presentation';
 import {
   mockAgentHookRefresh,
   mockGovRefetch,
@@ -12,7 +14,9 @@ import {
   storeState,
 } from './chat-container-test-helpers';
 
-describe('ChatContainer governance refetch', () => {
+vi.mock('@/components/thread-chat/hub-socket-context', () => import('@/test-utils/hub-socket-context-mock'));
+
+describe.each(['classic', 'v2'] as const)('ChatContainer governance refetch (%s)', (presentation) => {
   let container: HTMLDivElement;
   let root: Root;
 
@@ -27,6 +31,7 @@ describe('ChatContainer governance refetch', () => {
   });
 
   beforeEach(() => {
+    writeShellPresentation(presentation);
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
@@ -38,6 +43,7 @@ describe('ChatContainer governance refetch', () => {
       root.unmount();
     });
     container.remove();
+    window.localStorage.removeItem(SHELL_PRESENTATION_STORAGE_KEY);
   });
 
   it('does not refetch governance status when switching threads within the same project', async () => {

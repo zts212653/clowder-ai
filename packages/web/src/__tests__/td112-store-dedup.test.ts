@@ -55,6 +55,14 @@ const DISTINCT_IDS: Array<[string, ChatMessage[]]> = [
 
 type Target = { name: string; add: (msg: ChatMessage) => void; read: () => ChatMessage[] | undefined };
 
+/** A record as added: without the page's write counts (PR-3a2 `local-write-clock`, never persisted). */
+function asAdded(message: ChatMessage): ChatMessage {
+  const record = { ...message };
+  delete record.localBodyWriteSeq;
+  delete record.localMetadataWriteSeq;
+  return record;
+}
+
 const TARGETS: Target[] = [
   {
     name: 'active thread (addMessage)',
@@ -77,7 +85,7 @@ describe('chat store: message identity is the server id', () => {
     it.each(DISTINCT_IDS)('keeps %s as separate records', (_label, msgs) => {
       for (const msg of msgs) add(msg);
       // Same count and order; each record keeps its own id, origin and content.
-      expect(read()).toEqual(msgs);
+      expect(read()?.map(asAdded)).toEqual(msgs);
     });
 
     it('adds nothing for an exact-id replay', () => {
@@ -89,7 +97,7 @@ describe('chat store: message identity is the server id', () => {
       add({ ...first });
       // No write at all: no extra record, nothing overwritten, no unread bump.
       expect(useChatStore.getState()).toBe(before);
-      expect(read()).toEqual([first, second]);
+      expect(read()?.map(asAdded)).toEqual([first, second]);
     });
   });
 

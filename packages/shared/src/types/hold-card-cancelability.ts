@@ -22,6 +22,8 @@
  * A card stating `false` is a durable *local* terminal fact: it remains true
  * with no network, which is why it outranks the probe. The probe stays
  * authoritative only where no card has stated a terminal.
+ * Recovery disposition notices state `unchanged`: pausing automatic recovery
+ * neither ends the original execution nor transfers its cancel entry.
  */
 
 /** What one hold-ball card says about cancelability. */
@@ -30,15 +32,22 @@ export type HoldCardCancelability =
   | 'cancelable'
   /** The producer stated this hold had reached terminal. A durable local fact. */
   | 'terminal'
+  /** A notice changes neither the hold's cancelability nor its action owner. */
+  | 'informational'
   /** Written before this contract existed. Carries no fact; the probe decides. */
   | 'unstated';
 
 /** Reads the producer-stated fact off one card's `source.meta`. */
 export function readHoldCardCancelability(meta: unknown): HoldCardCancelability {
   if (!meta || typeof meta !== 'object' || Array.isArray(meta)) return 'unstated';
-  const stated = (meta as Record<string, unknown>).cancelable;
+  const facts = meta as Record<string, unknown>;
+  const stated = facts.cancelable;
   if (stated === true) return 'cancelable';
   if (stated === false) return 'terminal';
+  if (stated === 'unchanged') return 'informational';
+  // Persisted recovery notices predate the explicit declaration. Their existing
+  // owner-stated disposition marker carries the same informational meaning.
+  if (stated === undefined && facts.recoveryDisposition === true) return 'informational';
   return 'unstated';
 }
 
@@ -62,14 +71,16 @@ export type HoldCancelEntry = 'revoked' | 'owner' | 'not_owner';
 /**
  * Every card of one hold, in any order, decides one cancel entry between them.
  *
- * Ownership is the newest card by (timestamp, id). Ties break on the sortable
+ * Ownership is the newest non-informational card by (timestamp, id). Ties break on the sortable
  * id, so the set always elects exactly one owner: a hold that is still active
  * can never render zero cancel entries, and a hold with several cards can never
  * render two.
  */
 export function decideHoldCancelEntry(cardId: string, holdCards: readonly HoldCardRef[]): HoldCancelEntry {
+  if (holdCards.some((card) => card.id === cardId && card.cancelability === 'informational')) return 'not_owner';
   if (holdCards.some((card) => card.cancelability === 'terminal')) return 'revoked';
   const owner = holdCards.reduce<HoldCardRef | null>((best, card) => {
+    if (card.cancelability === 'informational') return best;
     if (!best) return card;
     if (card.timestamp !== best.timestamp) return card.timestamp > best.timestamp ? card : best;
     return card.id > best.id ? card : best;

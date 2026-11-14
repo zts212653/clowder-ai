@@ -98,6 +98,7 @@ describe('ChatMessage: your own message', () => {
 
   describe('classic presentation is untouched', () => {
     it('keeps the avatar, the name and the time in the header, and the corner tail', () => {
+      window.localStorage.setItem(SHELL_PRESENTATION_STORAGE_KEY, 'classic');
       configure({ primary: '#6B5443', secondary: '#E9DCCF' });
       render(own('a'));
 
@@ -170,7 +171,7 @@ describe('ChatMessage: your own message', () => {
       expect(time('b')?.className.split(/\s+/)).toContain('text-xs');
       expect(time('b')?.style.color).toBe('var(--shell-muted)');
       // Under the bubble, not in the header above it.
-      expect(time('b')?.previousElementSibling).toBe(bubble('b'));
+      expect(bubble('b').compareDocumentPosition(time('b')!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     });
 
     it('shows the time when a cat reply ends the run, and when it is the only message', () => {
@@ -221,6 +222,7 @@ describe('ChatMessage: your own message', () => {
   });
 
   it('switches with the shell presentation without a reload', () => {
+    window.localStorage.setItem(SHELL_PRESENTATION_STORAGE_KEY, 'classic');
     configure({ primary: '#6B5443', secondary: '#E9DCCF' });
     render(own('a'));
     expect(container.querySelector('button[aria-label="编辑 You"]')).not.toBeNull();

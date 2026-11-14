@@ -1,4 +1,5 @@
 import { isDeepStrictEqual } from 'node:util';
+import { isTaskHandoffSource } from '../../../ball-custody/task-handoff-source.js';
 import type { QueueLedgerEntry } from '../agents/invocation/queue-ledger/QueueLedger.js';
 import { prepareLifecycleAppendAdmission, type StoredMessage } from './ports/MessageStore.js';
 import { isTimelinePublished, resolveDeliveryTimelineScore } from './visibility.js';
@@ -33,9 +34,7 @@ export function ordinaryWakeCoverageEligible(entry: QueueLedgerEntry, targetId: 
     !entry.execution.executionScope &&
     !entry.execution.cloudDispatchProvenance &&
     !entry.execution.requiresExactCloudDispatchProvenance &&
-    !entry.delivery.routingHeldTargetIds?.includes(targetId) &&
-    !entry.delivery.appendPendingByTarget?.[targetId] &&
-    !entry.delivery.appendRecoveryByTarget?.[targetId]
+    !entry.delivery.routingHeldTargetIds?.includes(targetId)
   );
 }
 
@@ -88,6 +87,8 @@ export function prepareLifecycleWakeCoverage(
       source.deletedAt
     )
       return { kind: 'conflict', reason: 'source_changed' };
+    // Reading a Task request cannot replace its exact independent start/bind_execution.
+    if (isTaskHandoffSource(source)) return { kind: 'conflict', reason: 'owner_not_bindable' };
     const existing = source.lifecycle?.dispatchRefs?.find((ref) => ref.targetId === input.targetId);
     if (!entry?.targets.includes(input.targetId)) {
       if (

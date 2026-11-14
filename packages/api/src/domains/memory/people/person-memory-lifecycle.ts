@@ -10,17 +10,10 @@ import type {
   CorrectPersonClaimInput,
   PersonMemoryAmendmentResult,
   PersonMemoryCorrectionResult,
-  PersonMemoryRedactionResult,
-  RedactPersonMemoryItemInput,
   RetirePersonClaimInput,
 } from './PersonMemoryStore.js';
 import { PersonMemoryKeys } from './person-memory-keys.js';
-import {
-  AMEND_EVENT_LUA,
-  CORRECT_CLAIM_LUA,
-  REDACT_ITEM_LUA,
-  RETIRE_CLAIM_LUA,
-} from './person-memory-lifecycle-lua.js';
+import { AMEND_EVENT_LUA, CORRECT_CLAIM_LUA, RETIRE_CLAIM_LUA } from './person-memory-lifecycle-lua.js';
 import {
   amendmentEventId,
   correctionClaimId,
@@ -238,83 +231,4 @@ export async function amendPersonInteraction(
   return parseAmendmentResult(raw);
 }
 
-function redactionResult(raw: unknown): PersonMemoryRedactionResult {
-  const value = String(raw);
-  if (value === 'CONFLICT') return { outcome: 'conflict' };
-  if (value === 'NOT_AVAILABLE') return { outcome: 'not_available' };
-  if (value.startsWith('APPLIED:')) {
-    return { outcome: 'applied', item: JSON.parse(value.slice(8)) as RedactPersonMemoryItemInput['item'] };
-  }
-  if (value.startsWith('REPLAYED:')) {
-    return { outcome: 'replayed', item: JSON.parse(value.slice(9)) as RedactPersonMemoryItemInput['item'] };
-  }
-  throw new Error(`unexpected F276 redaction result: ${value}`);
-}
-
-export async function redactPersonMemoryItem(
-  redis: RedisClient,
-  input: RedactPersonMemoryItemInput,
-): Promise<PersonMemoryRedactionResult> {
-  const artifactSet = PersonMemoryKeys.personArtifacts(input.ownerUserId, input.personId);
-  const resultJson = JSON.stringify(input.item);
-  if (input.item.kind === 'claim') {
-    const claimKey = PersonMemoryKeys.claim(input.ownerUserId, input.item.id);
-    const claim = parseClaim(await redis.get(claimKey));
-    if (!claim || claim.personId !== input.personId) return { outcome: 'not_available' };
-    const predicate = claim.payload.kind === 'reported_fact' ? claim.payload.predicate : `assessment:${claim.claimId}`;
-    const { typedProvenance: _typedProvenance, ...claimWithoutTypedProvenance } = claim;
-    const redacted: PersonClaimVersion = {
-      ...claimWithoutTypedProvenance,
-      payload: { kind: 'redacted' },
-      status: 'redacted',
-      validTo: input.redactedAt,
-      sourceRefs: [],
-    };
-    return redactionResult(
-      await redis.eval(
-        REDACT_ITEM_LUA,
-        5,
-        claimKey,
-        PersonMemoryKeys.redaction(input.ownerUserId, input.requestId),
-        artifactSet,
-        PersonMemoryKeys.forgetFence(input.ownerUserId, input.personId),
-        PersonMemoryKeys.currentClaim(input.ownerUserId, input.personId, predicate),
-        JSON.stringify(redacted),
-        resultJson,
-        'clear_current',
-        claim.claimId,
-      ),
-    );
-  }
-
-  const eventKey = PersonMemoryKeys.event(input.ownerUserId, input.item.id);
-  const event = parseEvent(await redis.get(eventKey));
-  if (!event) return { outcome: 'not_available' };
-  const redacted: InteractionEvent = {
-    eventId: event.eventId,
-    relationshipId: event.relationshipId,
-    ownerUserId: event.ownerUserId,
-    recordedAt: event.recordedAt,
-    eventKind: event.eventKind,
-    headline: '[redacted]',
-    sourceRefs: [],
-    materializedBy: event.materializedBy,
-    ...(event.amendsEventId ? { amendsEventId: event.amendsEventId } : {}),
-    status: 'redacted',
-  };
-  return redactionResult(
-    await redis.eval(
-      REDACT_ITEM_LUA,
-      5,
-      eventKey,
-      PersonMemoryKeys.redaction(input.ownerUserId, input.requestId),
-      artifactSet,
-      PersonMemoryKeys.forgetFence(input.ownerUserId, input.personId),
-      eventKey,
-      JSON.stringify(redacted),
-      resultJson,
-      'keep_current',
-      event.eventId,
-    ),
-  );
-}
+export { redactPersonMemoryItem } from './person-memory-redaction.js';

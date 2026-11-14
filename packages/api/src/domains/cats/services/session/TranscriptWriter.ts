@@ -152,12 +152,6 @@ export interface TranscriptWriterOptions {
   indexStride?: number;
 }
 
-export interface HandoffDigestMeta {
-  v: number;
-  model: string;
-  generatedAt: number;
-}
-
 export class TranscriptWriter {
   private filesReadDiagnostics?: ReturnType<typeof createTranscriptReadDiagnostics>;
   private readonly readProjections = new WeakMap<BufferedEvent, CompactTranscriptEvent>();
@@ -640,17 +634,6 @@ export class TranscriptWriter {
     };
   }
 
-  /**
-   * Write handoff digest to a session directory.
-   * F065 Phase C: static so it can be called from SessionSealer without instance state.
-   */
-  static async writeHandoffDigest(sessionDir: string, meta: HandoffDigestMeta, body: string): Promise<void> {
-    const frontmatter = ['---', `v: ${meta.v}`, `model: ${meta.model}`, `generatedAt: ${meta.generatedAt}`, '---'].join(
-      '\n',
-    );
-
-    await writeFile(join(sessionDir, 'digest.handoff.md'), `${frontmatter}\n\n${body}\n`, 'utf-8');
-  }
   /** Compute session directory path. */
   private sessionDir(session: TranscriptSessionInfo): string {
     return join(this.dataDir, 'threads', session.threadId, session.catId, 'sessions', session.sessionId);

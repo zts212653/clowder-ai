@@ -1,4 +1,4 @@
-; Clowder AI — Inno Setup Installer Script
+﻿; Clowder AI — Inno Setup Installer Script
 ; Builds an offline Windows .exe installer that bundles source + deps + Electron shell.
 ;
 ; Prerequisites: Inno Setup 6.x (https://jrsoftware.org/isinfo.php)
@@ -38,6 +38,7 @@ AppVerName={#MyAppName}
 AppPublisher={#MyAppPublisher}
 AppPublisherURL={#MyAppURL}
 DefaultDirName={autopf}\ClowderAI
+DisableDirPage=no
 DefaultGroupName={#MyAppName}
 AllowNoIcons=yes
 OutputDir=..\..\dist
@@ -58,6 +59,32 @@ LicenseFile=..\..\LICENSE
 Name: "english"; MessagesFile: "compiler:Default.isl"
 Name: "chinese_simplified"; MessagesFile: "compiler:Languages\ChineseSimplified.isl"
 
+[CustomMessages]
+SetupExistingInstallation=This upgrade updates the existing directory in place: %1. To choose another location, uninstall Clowder AI in Windows Settings, then reinstall. Configuration and history in your personal folder are retained.
+SetupBeforePreparing=Running initial installation checks…
+SetupPreparingHint=When the checks pass, Setup will show file installation progress.
+SetupLoadIdentity=Loading the installation identity check…
+SetupCheckIdentity=Checking the installation identity…
+SetupLoadShutdown=Loading the shutdown helper…
+SetupWaitForExit=Waiting for the previous installation to exit…
+SetupCheckFilesInUse=Checking for files in use…
+SetupReplacePayload=Checking and removing previous program files…
+SetupHelperFailed=Unable to load an installation helper. See the Setup log.
+SetupIdentityFailed=Unable to preserve the target installation identity. See setup log.
+SetupShutdownFailed=Unable to stop the target installation safely.
+chinese_simplified.SetupExistingInstallation=本次升级将原位更新现有程序目录：%1。如需更换安装位置，请先在 Windows 设置中卸载 Clowder AI，再重新安装。个人目录中的配置与历史数据会保留。
+chinese_simplified.SetupBeforePreparing=正在执行安装前检查…
+chinese_simplified.SetupPreparingHint=检查通过后将进入安装，并显示文件安装进度。
+chinese_simplified.SetupLoadIdentity=正在加载安装实例身份检查…
+chinese_simplified.SetupCheckIdentity=正在检查安装实例身份…
+chinese_simplified.SetupLoadShutdown=正在加载退出辅助脚本…
+chinese_simplified.SetupWaitForExit=正在等待旧版程序退出…
+chinese_simplified.SetupCheckFilesInUse=正在检查文件占用…
+chinese_simplified.SetupReplacePayload=正在检查并移除旧版程序文件…
+chinese_simplified.SetupHelperFailed=无法加载安装辅助脚本。请查看安装日志。
+chinese_simplified.SetupIdentityFailed=无法保留目标安装实例的身份信息。请查看安装日志。
+chinese_simplified.SetupShutdownFailed=无法安全退出目标安装实例。
+
 [Dirs]
 ; Target directories for tar.exe archive extraction ([Run] section).
 ; Must exist before tar -C writes into them.
@@ -68,6 +95,10 @@ Name: "{app}\desktop-dist"
 Name: "{app}\node"
 
 [Files]
+; PrepareToInstall extracts these before any bulk payload is needed.
+Source: "..\scripts\configure-desktop-instance.ps1"; Flags: dontcopy
+Source: "..\scripts\stop-installed-desktop.ps1"; Flags: dontcopy
+
 ; ── Bulk archives ─────────────────────────────────────────────────────
 ; Shipped as tar.gz and extracted post-install by Windows' built-in tar.exe.
 ; This replaces per-file Inno Setup extraction of 30K+ node_modules files,
@@ -132,7 +163,6 @@ Source: "..\..\guides\*";                          DestDir: "{app}\guides"; \
 ; Desktop scripts (post-install config generation)
 Source: "..\scripts\post-install-offline.ps1";   DestDir: "{app}\scripts"
 Source: "..\scripts\configure-desktop-instance.ps1"; DestDir: "{app}\scripts"
-Source: "..\scripts\configure-desktop-instance.ps1"; Flags: dontcopy
 Source: "..\scripts\stop-installed-desktop.ps1"; DestDir: "{app}\scripts"
 Source: "..\scripts\generate-desktop-config.ps1"; DestDir: "{app}\scripts"
 Source: "..\scripts\sync-agent-hooks-offline.mjs"; DestDir: "{app}\scripts"
@@ -223,14 +253,14 @@ Filename: "{app}\desktop-dist\{#MyAppExeName}"; \
 ; The junction must be removed first (rmdir only deletes the link, not target).
 ; Recovery: if install fails after delete, rerunning the installer restores everything.
 [InstallDelete]
-Type: filesandordirs; Name: "{app}\scripts\node_modules"
+Type: filesandordirs; Name: "{app}\scripts\node_modules"; BeforeInstall: BeginPayloadReplacement
 Type: filesandordirs; Name: "{app}\node_modules"
 Type: filesandordirs; Name: "{app}\packages"
 Type: filesandordirs; Name: "{app}\desktop-dist"
 Type: filesandordirs; Name: "{app}\node"
 ; Replace the Windows materialized shared-ref alias deterministically.  This
 ; is package-owned content under {app}; it is not user HOME or history data.
-Type: filesandordirs; Name: "{app}\cat-cafe-skills\.cat-cafe-shared-refs"
+Type: filesandordirs; Name: "{app}\cat-cafe-skills\.cat-cafe-shared-refs"; AfterInstall: EndPayloadReplacement
 
 [UninstallRun]
 Filename: "powershell.exe"; \
@@ -255,6 +285,7 @@ Type: filesandordirs; Name: "{app}\scripts\node_modules"
 ; PrepareToInstall kills ONLY processes whose executable path is under {app} —
 ; no risk of killing the user's own node/redis instances running elsewhere.
 [Code]
+#include "install-directory.iss"
 #include "runtime-failure.iss"
 procedure ExtractionOutput(const S: String; const Error, FirstLine: Boolean);
 var
@@ -275,6 +306,8 @@ begin
   WizardForm.FilenameLabel.Caption := Fields[4] + ' / ' + Fields[5] + ' entries - ' + IntToStr(StrToIntDef(Fields[6], 0) div 1000) + 's (' + Fields[1] + ')';
 end;
 
+#include "install-preparation.iss"
+
 function ShouldAutoLaunch(): Boolean;
 begin
   Result := RuntimeExtractionSucceeded and WizardSilent and (ExpandConstant('{param:NoAutoStart|0}') <> '1');
@@ -285,6 +318,7 @@ var
   ProgramPath, Arguments, AppDir: String;
   ExitCode: Integer;
   Started, CancelWasEnabled: Boolean;
+  StartedAt: Cardinal;
 begin
   if not RuntimeExtractionSucceeded then exit;
   AppDir := ExpandConstant('{app}');
@@ -297,6 +331,7 @@ begin
     Arguments := '"' + AppDir + '\scripts\extract-runtime-archive.cjs" "' + AppDir + '" "' + ArchiveName + '"';
   end;
   Log('Runtime extraction starting: ' + ArchiveName);
+  StartedAt := GetTickCount;
   RuntimeExtractionBusy := True;
   RuntimeExtractionWindowRestored := False;
   CancelWasEnabled := WizardForm.CancelButton.Enabled;
@@ -310,68 +345,10 @@ begin
     RuntimeExtractionBusy := False;
     WizardForm.CancelButton.Enabled := CancelWasEnabled;
   end;
-  Log('Runtime extraction ' + ArchiveName + ': exit=' + IntToStr(ExitCode));
+  Log('Runtime extraction ' + ArchiveName + ': exit=' + IntToStr(ExitCode) +
+    ', started=' + IntToStr(Ord(Started)) + ', elapsedMs=' + IntToStr(GetTickCount - StartedAt));
   if (not Started) or (ExitCode <> 0) then
     FailRuntimeExtraction('Runtime extraction failed: ' + ArchiveName + '. See setup log and ' + AppDir + '\.installer-logs\extract-runtime.log');
   if (ArchiveName = 'node.tar.gz') and (not FileExists(AppDir + '\node\node.exe')) then
     FailRuntimeExtraction('Bundled Node.js is incomplete. Installation cannot continue.');
-end;
-
-function PrepareToInstall(var NeedsRestart: Boolean): String;
-var
-  ExitCode: Integer;
-  Cmd, AppDir, InstanceRoot, FrontendPort, ApiPort, RedisPort: String;
-  Started: Boolean;
-begin
-  Result := '';
-  NeedsRestart := False;
-  AppDir := ExpandConstant('{app}');
-  InstanceRoot := ExpandConstant('{param:DesktopInstanceRoot|}');
-  FrontendPort := ExpandConstant('{param:FrontendPort|}');
-  ApiPort := ExpandConstant('{param:ApiPort|}');
-  RedisPort := ExpandConstant('{param:RedisPort|}');
-  // Isolated ports are meaningless without an explicit instance root: blindly
-  // ignoring them would install over the default instance. Fail closed before
-  // touching the target, matching configure-desktop-instance.ps1's last check.
-  if (InstanceRoot = '') and
-     ((FrontendPort <> '') or (ApiPort <> '') or (RedisPort <> '')) then begin
-    Log('Identity helper rejected: isolated port parameters require DesktopInstanceRoot');
-    Result := 'Isolated ports require an explicit DesktopInstanceRoot.';
-    exit;
-  end;
-  // Save/validate identity before InstallDelete replaces desktop-dist.
-  ExtractTemporaryFile('configure-desktop-instance.ps1');
-  Cmd := '-NoProfile -ExecutionPolicy Bypass -File "' + ExpandConstant('{tmp}') +
-         '\configure-desktop-instance.ps1" -AppDir "' + AppDir + '"';
-  // Do not pass empty named arguments. Windows PowerShell's command-line
-  // parser can bind a following switch as the value of an empty argument;
-  // that makes a clean install fail before the helper reaches its no-op path.
-  // InstanceRoot is not a master switch: each isolated parameter is optional
-  // on its own, so only forward the ones that actually carry a value.
-  if InstanceRoot <> '' then begin
-    Cmd := Cmd + ' -InstanceRoot "' + InstanceRoot + '"';
-    if FrontendPort <> '' then Cmd := Cmd + ' -FrontendPort "' + FrontendPort + '"';
-    if ApiPort <> '' then Cmd := Cmd + ' -ApiPort "' + ApiPort + '"';
-    if RedisPort <> '' then Cmd := Cmd + ' -RedisPort "' + RedisPort + '"';
-  end;
-  Log('Identity helper command: ' + Cmd);
-  // Preserve the original diagnostics contract: the identity helper's output,
-  // including stderr, must reach Setup's log so a refused install records the
-  // real cause instead of only a generic message.
-  Started := ExecAndLogOutput(
-    'powershell.exe', Cmd, '', SW_HIDE, ewWaitUntilTerminated, ExitCode,
-    @ExtractionOutput);
-  Log('Identity helper started=' + IntToStr(Ord(Started)) + ', exit=' + IntToStr(ExitCode));
-  if (not Started) or (ExitCode <> 0) then begin
-    Result := 'Unable to preserve the target installation identity. See setup log.';
-    exit;
-  end;
-  ExtractTemporaryFile('stop-installed-desktop.ps1');
-  // Upgrade and uninstall share identity-bound coordinated shutdown and cleanup.
-  Cmd := '-NoProfile -ExecutionPolicy Bypass -File "' + ExpandConstant('{tmp}') +
-         '\stop-installed-desktop.ps1" -AppDir "' + AppDir + '"';
-  if InstanceRoot <> '' then Cmd := Cmd + ' -InstanceRoot "' + InstanceRoot + '"';
-  ExecAsOriginalUser(
-    'powershell.exe', Cmd, '', SW_HIDE, ewWaitUntilTerminated, ExitCode);
-  if ExitCode <> 0 then Result := 'Unable to stop the target installation safely.';
 end;

@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 /**
  * F051 v2 — HubQuotaBoardTab tests (glanceable quota board)
  *

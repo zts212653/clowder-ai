@@ -1,7 +1,10 @@
 ---
 name: rich-messaging
-tips_exempt: "2026-10-10 renewal: gives members the governed publish_image call for local PNG delivery and artifact review; users still ask for an image in Chat, with no new Hub operation or manual upload step. Existing rich-messaging discovery remains applicable."
-description: 在当前 Chat 直接交付可看、可听或可操作产物（语音、图片、截图、HTML/demo、卡片、清单、diff、交互选择），无需用户说“富文本”；纯文字与讨论/修改 HTML 源码不使用，复杂 localhost 应用用 browser-preview。
+tips_exempt: "2026-11-07 renewal: member-side purpose routing now reuses the existing HTML Works capability and fixed-version cards; users request the result in ordinary Chat, with no new operation or carrier approval. The existing HTML Works guide/tip covers the human entry."
+description: >
+  Use when: 在当前 Chat 交付可看、可听或可操作产物（语音、图片、截图、HTML/demo、卡片、清单、diff、交互选择），或保存、继续修改 HTML 图解/小工具，无需用户说“富文本”。
+  Not for: 纯文字、仅讨论 HTML 原理或修改仓库源码；复杂 localhost 应用用 browser-preview。
+  Output: 消息内富块，或按用途保存 HTML 作品并把固定版本卡发回当前 Chat；续改保留同一作品的历史。
 triggers:
   - "发语音"
   - "说一句"
@@ -16,6 +19,8 @@ triggers:
   - "screenshot"
   - "画个 HTML 展示"
   - "做个 demo 给我看"
+  - "保存 HTML 作品"
+  - "继续改这份图解"
   - "在 Chat 里展示"
   - "发个卡片"
   - "rich block"
@@ -50,16 +55,34 @@ triggers:
 
 ## 默认触发：Chat 内可见交付
 
-统一判断不是用户有没有说“富文本”，而是：**用户是否要在当前 Clowder AI Chat 里直接看到、听到或操作结果。** 命中时，生成一个本地文件或贴源码路径都不算完成；产物必须进入 rich block 或 Browser panel。不要求用户说出“富文本”这个实现词。
+统一判断不是用户有没有说“富文本”，而是：**用户是否要在当前 Clowder AI Chat 里直接看到、听到或操作结果。** 命中时，生成一个本地文件或贴源码路径都不算完成；产物必须通过富块、作品卡或 Browser panel 进入当前消费面。不要求用户说出“富文本”这个实现词。
 
 | 用户真正要的交付 | 默认执行面 |
 |---|---|
-| 自包含 HTML、demo、图表、计算器、小交互 | `html_widget` |
+| 随当前聊天解释局部的小图、图表或控件 | `html_widget` |
+| 受托交付的自包含 HTML 图解/原型，或要反复使用、持续改版的小工具 | `cat_cafe_work` 保存作品，再 `publish-reference` 回当前 Chat |
 | 已有截图、图片、设计稿或多图对比 | `media_gallery` |
 | 复杂 localhost 页面、多组件或多页面应用 | `browser-preview` |
 | 需要新生成一张图片 | `image-generation`，生成后仍要发布回 Chat |
 
-反例：讨论 HTML 渲染原理、修改 `index.html`、review 一段前端源码，不等于要求可视交付，不应自动发 rich block。灰例“做完整页面让我看”默认走 `browser-preview`，不是把完整应用硬塞进 `html_widget`。
+反例：讨论 HTML 渲染原理、修改仓库里的 `index.html`、review 一段前端源码，不等于要求可视交付。多文件或需要服务的完整应用走 `browser-preview`；自包含单文件原型按上表保存作品，不单凭“完整页面”几个字判定。
+
+### HTML：先按用途选，再交付
+
+准备制作 HTML、且需要当前上下文尚未读过的旧经验或规则时，可调 `cat_cafe_prepare_memory_context(activity="html", query="本次 HTML 需要的场景与规则")`，再用返回句柄 drill 原文核适用条件。已有精确规则坐标直接读，已读内容不重复取；空结果或不可用时继续原任务。`get_rich_block_rules` 仍只提供通用字段规格，不代表 Host 观察到 HTML 准备。
+
+篇幅只是提示，不设像素或长度阈值。小型长期计算器也可以是作品；一次修字不必把聊天 widget 机械升级。用途清楚时由猫直接选，不增加每次选载体的审批卡，只有真实用途或权限缺口才问。
+
+普通 `html_widget` 也保存在聊天历史中，并有目录预览。作品额外提供稳定身份和版本链；保存作品后仍在原 Chat 交流。
+
+使用现有 `cat_cafe_work`，完整约定见 [HTML 作品指南](../../docs/guides/html-works.md)：
+
+1. **新作品**：`command` 用 `{action:"create", operationId:"本次保存的稳定标识", title:"作品名", changeSummary:"首版说明", source:{kind:"html", html:"完整源码"}}`。保留返回的 `reference`（`contentRef` + `ownerRevision`）。
+2. **交付**：保存成功后，`command` 用 `{action:"publish-reference", reference:保存返回的reference}` 附固定版本卡。保存和附卡是两件事；附卡失败重试同一引用，不再 create/submit 一个版本。保存结果不明时先 read/list 核实，必要时重试完全相同的 command/operationId。
+3. **已有作品续改**：先 `read` 核当前版本，再用 `read-body` 读取要修改的固定 `reference`。沿原 `contentRef`，带当前 `expectedOwnerRevision`、新的 `operationId`、`title`、`changeSummary` 和完整 `source` 做 `submit`，然后附新版卡；不按同名重建。分页时保持 command/snapshot 不变，按 `nextCursor` 拼齐全部 json 后解析。
+4. **widget 开始持续迭代**：先取回可读的原始 HTML，确认现有权限，把原内容作为作品首版保存，并在 `changeSummary` 记录原聊天消息坐标；再沿同一作品提交修改版。缺源码或来源先取原件，不能把重写稿冒充原版。单次修字仍可留在 widget；已有作品的小修继续沿原作品。
+
+“请修改”不授予别人的作品写权；使用当前工具核验的授权，不从标题、消息或文件名推导权限。作品能力只承接已有单文件 HTML，不新增作品库或绕开 HTML 沙盒。
 
 ## 默认触发：长结构化汇报
 
@@ -76,7 +99,7 @@ triggers:
 | **file** | 发送已有文件、文档、音视频成片；`video/*` 可内联播放 | `url` + `fileName` |
 | **media_gallery** | 发送已有图片（头像、照片）、截图、设计稿、多图对比 | `items` (url) |
 | **interactive** | 让用户选方案、勾选项、确认操作 | `interactiveType` + `options` (id+label) |
-| **html_widget** | 你写的 HTML 直接挂上去：图表、计算器、CSS 动画、数据面板 | `html`（完整 HTML/JS/CSS 代码字符串） |
+| **html_widget** | 随聊天解释局部的 HTML 小图、控件或数据面板；作品按上面的用途路由 | `html`（完整 HTML/JS/CSS 代码字符串） |
 
 ## 最小工作示例
 
@@ -131,9 +154,9 @@ triggers:
 {"id": "hw1", "kind": "html_widget", "v": 1, "html": "<div style='padding:20px'><canvas id='c'></canvas><script>const c=document.getElementById('c').getContext('2d');c.fillStyle='#E29578';c.fillRect(0,0,100,50);</script></div>"}
 ```
 
-operator拍板："简单的用富文本，复杂的用猫主动打开浏览器。"
+交付面先按上面的用途路由；以下是内嵌 widget 的渲染约束，保存为作品也不意味着能运行任意网站。
 - 用 sandboxed iframe `srcdoc` 渲染，**禁止** `allow-same-origin`（比 browser panel 更严格）
-- 适合：Chart.js 图表、CSS 动画、计算器等纯前端组件
+- 适合：随聊天解释局部的图表、CSS 动画等纯前端组件；反复使用的计算器默认保存作品
 - 不适合：需要网络请求、需要访问外部资源的复杂应用（那些用 `browser-preview` skill）
 
 #### 内联 `on*` 会被剥掉
@@ -191,6 +214,8 @@ DOMPurify 静默剥掉所有 `on*` 属性——widget 照常渲染，点击不�
 
 | 错误 | 后果 | 正确做法 |
 |------|------|----------|
+| 所有自包含 HTML 都发 widget | 受托成果缺少稳定作品身份，后续难沿原版继续 | 按用途选择；图解/原型交付、复用小工具默认保存作品并附卡 |
+| 附卡失败就重交一版，或按标题重建 | 重复作品/版本，断开历史 | 重试原 reference；续改先读原版，沿同一 contentRef 提交 |
 | 不知道自己能发语音 | operator说"发语音"你说"我是文字猫" | 你可以！用 audio block |
 | "发图"只想到 image-generation | 走 Chrome MCP 现场生成，慢且不稳定 | 先看家里有没有已有图片（`/avatars/`、`/uploads/`），有就 media_gallery 直接发 |
 | 本地成片视频只贴文件路径 | 前端拿不到，线程里也没有内联播放器 | 视频放主仓 `.cat-cafe/evidence/<主题>/`，用 `/api/workspace/file/raw?worktreeId=cat-cafe&path=...` 发 `file` rich block；`mimeType:"video/mp4"` 时会内联播放（runtime `/uploads` 猫写不进） |

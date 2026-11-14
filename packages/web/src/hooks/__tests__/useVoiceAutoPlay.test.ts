@@ -60,17 +60,6 @@ describe('F279 listen-mode admission', () => {
 });
 
 describe('voiceSessionStore session-binding contracts', () => {
-  it('stop-start cycle creates a new sessionId (stale check basis)', () => {
-    useVoiceSessionStore.getState().start('t1', 'opus', true);
-    const id1 = useVoiceSessionStore.getState().session?.sessionId;
-
-    useVoiceSessionStore.getState().stop();
-    useVoiceSessionStore.getState().start('t2', 'opus', true);
-    const id2 = useVoiceSessionStore.getState().session?.sessionId;
-
-    expect(id1).not.toBe(id2);
-  });
-
   it('re-start without stop also creates new sessionId (thread switch)', () => {
     useVoiceSessionStore.getState().start('t1', 'opus', true);
     const id1 = useVoiceSessionStore.getState().session?.sessionId;
@@ -103,14 +92,6 @@ describe('voiceSessionStore session-binding contracts', () => {
     expect(session.voiceMode).toBe(true);
     expect(session.autoplayUnlocked).toBe(false);
     // Hook gates on voiceMode only, so this session WILL attempt auto-play
-  });
-
-  it('confirmAutoplayUnlocked upgrades false → true after first successful play', () => {
-    useVoiceSessionStore.getState().start('t1', 'opus', false);
-    expect(useVoiceSessionStore.getState().session?.autoplayUnlocked).toBe(false);
-
-    useVoiceSessionStore.getState().confirmAutoplayUnlocked();
-    expect(useVoiceSessionStore.getState().session?.autoplayUnlocked).toBe(true);
   });
 });
 

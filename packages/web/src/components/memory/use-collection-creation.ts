@@ -7,21 +7,36 @@ export interface CollectionDraft {
   displayName: string;
   root: string;
   sensitivity: string;
+  /** One exclude glob per line, relative to the root. */
+  exclude: string;
 }
-interface DryRunResult {
+export interface DryRunResult {
   totalFiles: number;
   markdownFiles: number;
+  excludedDirs?: number;
+  excludedFiles?: number;
   secretFindings: number;
   safe: boolean;
 }
+const isCount = (value: unknown) => typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
 function isDryRun(value: unknown): value is DryRunResult {
   if (!value || typeof value !== 'object') return false;
   const row = value as Record<string, unknown>;
   return (
-    ['totalFiles', 'markdownFiles', 'secretFindings'].every(
-      (key) => typeof row[key] === 'number' && Number.isSafeInteger(row[key]) && row[key] >= 0,
-    ) && typeof row.safe === 'boolean'
+    ['totalFiles', 'markdownFiles', 'secretFindings'].every((key) => isCount(row[key])) &&
+    ['excludedDirs', 'excludedFiles'].every((key) => row[key] === undefined || isCount(row[key])) &&
+    typeof row.safe === 'boolean'
   );
+}
+function excludeList(text: string): string[] {
+  return text
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean);
+}
+function withExclude(text: string) {
+  const exclude = excludeList(text);
+  return exclude.length ? { exclude } : {};
 }
 async function registerDraft(draft: CollectionDraft, id: string): Promise<string | null> {
   const res = await apiFetch('/api/library/register', {
@@ -34,6 +49,7 @@ async function registerDraft(draft: CollectionDraft, id: string): Promise<string
       displayName: draft.displayName.trim(),
       sensitivity: draft.sensitivity,
       ...(draft.root.trim() && { root: draft.root.trim() }),
+      ...withExclude(draft.exclude),
     }),
   });
   if (!res.ok) {
@@ -62,6 +78,7 @@ export function useCollectionCreation(onCreated: () => void) {
     displayName: '',
     root: '',
     sensitivity: 'private',
+    exclude: '',
   });
   const [dryRun, setDryRun] = useState<DryRunResult | null>(null);
   const [scanning, setScanning] = useState(false);
@@ -73,7 +90,7 @@ export function useCollectionCreation(onCreated: () => void) {
     if (inFlight.current || registered) return;
     setDraft((current) => ({ ...current, [key]: value }));
     setError(null);
-    if (key === 'root') setDryRun(null);
+    if (key === 'root' || key === 'exclude') setDryRun(null);
   }
   async function scan() {
     if (inFlight.current || !draft.root.trim()) return;
@@ -85,7 +102,7 @@ export function useCollectionCreation(onCreated: () => void) {
       const res = await apiFetch('/api/library/bind-dry-run', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ root: draft.root.trim() }),
+        body: JSON.stringify({ root: draft.root.trim(), ...withExclude(draft.exclude) }),
       });
       const result: unknown = await res.json();
       if (!res.ok || !isDryRun(result)) throw new Error('Scan unavailable');

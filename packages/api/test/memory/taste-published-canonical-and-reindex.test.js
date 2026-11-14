@@ -1,5 +1,4 @@
 import assert from 'node:assert/strict';
-import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import test from 'node:test';
@@ -12,52 +11,17 @@ import { fileURLToPath } from 'node:url';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
 const mod = (path) => import(`${root}/dist/${path}.js`);
-const { createRemoteFixture, git, remoteFile, divergeAndStagePrimary } = await import(
-  `${root}/test/taste-publication-fixtures.js`
-);
+const { git, remoteFile, divergeAndStagePrimary } = await import(`${root}/test/taste-publication-fixtures.js`);
 const { FileTasteRepository } = await mod('domains/taste/services/TasteRepository');
 const { TasteMemoryReader } = await mod('domains/memory/taste/TasteMemoryReader');
-const { TasteMemoryLifecycleService } = await mod('domains/memory/taste/TasteMemoryLifecycleService');
 const { TasteMemoryLifecycleStore } = await mod('domains/memory/taste/TasteMemoryLifecycleStore');
-const { TasteMemoryProjectionWriter } = await mod('domains/memory/taste/TasteMemoryProjectionWriter');
 const { tasteMemoryId, tasteDocumentAnchor } = await mod('domains/memory/taste/taste-memory-identity');
-const { OwnerMemoryActionCoordinator, InMemoryOwnerMemoryActionReceiptStore } = await mod(
-  'domains/memory/owner/OwnerMemoryActionCoordinator',
-);
-const { SessionMutex } = await mod('domains/cats/services/agents/invocation/SessionMutex');
 const { SqliteEvidenceStore } = await mod('domains/memory/SqliteEvidenceStore');
 const { CatCafeScanner } = await mod('domains/memory/CatCafeScanner');
 const { IndexBuilder } = await mod('domains/memory/IndexBuilder');
-const sourcePath = 'docs/taste/vignettes/astra-public.md';
-const owner = 'astra-review-owner';
-const original =
-  '---\nwhen: 2026-10-06\nquotes: ["Zebramemoria"]\nscene: "Zebramemoria Old scene"\ntags: ["public"]\ndimension: visual-quality\nprivacy: public\n---\n';
-const revision = (content) => `sha256:${createHash('sha256').update(content).digest('hex')}`;
-async function fixture({ durable = false } = {}) {
-  const f = createRemoteFixture();
-  mkdirSync(join(f.primary, 'docs/taste/vignettes'), { recursive: true });
-  writeFileSync(join(f.primary, sourcePath), original);
-  git(f.primary, ['add', sourcePath]);
-  git(f.primary, ['commit', '-m', 'seed existing public memory']);
-  git(f.primary, ['push', 'origin', 'main']);
-  const evidence = new SqliteEvidenceStore(durable ? join(f.root, 'evidence.sqlite') : ':memory:');
-  await evidence.initialize();
-  const store = new TasteMemoryLifecycleStore(evidence.getDb());
-  const repository = new FileTasteRepository(f.runtime);
-  const reader = new TasteMemoryReader(repository, owner, { lifecycle: store });
-  const service = new TasteMemoryLifecycleService({
-    store,
-    writer: new TasteMemoryProjectionWriter(repository),
-    coordinator: new OwnerMemoryActionCoordinator({
-      store: new InMemoryOwnerMemoryActionReceiptStore(),
-      lock: new SessionMutex(),
-    }),
-    targetLock: new SessionMutex(),
-    lockKey: () => repository.approvalLockKey(),
-    invalidateDerived: ({ sourcePath }) => evidence.deleteByAnchor(tasteDocumentAnchor(sourcePath)),
-  });
-  return { ...f, evidence, store, reader, service, repository };
-}
+
+import { fixture, original, owner, revision, sourcePath } from '../helpers/published-taste-fixture.js';
+
 test('public correction success immediately exposes its new canonical revision', async () => {
   const f = await fixture();
   try {
@@ -214,6 +178,107 @@ test('legacy SQL writers and reopening cannot resurrect forgotten Taste document
     legacy.close();
     await reopened?.close();
     await f.evidence.close();
+    rmSync(f.root, { recursive: true, force: true });
+  }
+});
+
+test('published recall follows correction and forget without restart or changing dirty main', async () => {
+  const f = await fixture({ durable: true });
+  const { PublishedDocumentSource } = await mod('domains/memory/PublishedDocumentSource');
+  const { PublishedDocumentIndex } = await mod('domains/memory/PublishedDocumentIndex');
+  const source = new PublishedDocumentSource(f.primary, {
+    ownerUserId: owner,
+    lifecycle: f.store,
+    lifecycleRevision: () =>
+      JSON.stringify(
+        f.evidence
+          .getDb()
+          .prepare('SELECT status, projected_revision FROM taste_memory_lifecycle ORDER BY source_path')
+          .all(),
+      ),
+  });
+  const projection = new PublishedDocumentIndex(source, f.evidence);
+  const builder = new IndexBuilder(
+    f.evidence,
+    join(f.primary, 'docs'),
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    new CatCafeScanner(),
+    undefined,
+    projection,
+  );
+  try {
+    await builder.rebuild({ deferThreadIndexing: true });
+    const beforeHit = (await f.evidence.search('Zebramemoria'))[0];
+    assert.ok(beforeHit);
+    assert.match(beforeHit.drillDown.params.path, /^cat-cafe:\/\/published\//);
+    assert.equal((await projection.read(beforeHit.anchor, beforeHit.sourceHash)).status, 'ready');
+    const snapshot = source.snapshot.bind(source);
+    const interruptedCommand = {
+      action: 'correct',
+      requestId: 'f332-rolled-back',
+      expectedRevision: revision(original),
+      patch: { scene: 'not committed' },
+    };
+    source.snapshot = async (...args) => {
+      const pinned = await snapshot(...args);
+      source.snapshot = snapshot;
+      f.store.prepareAction({
+        ownerUserId: owner,
+        sourcePath,
+        memoryId: tasteMemoryId(sourcePath),
+        command: interruptedCommand,
+        currentStatus: 'active',
+        currentRevision: revision(original),
+      });
+      return pinned;
+    };
+    await builder.refreshPublishedDocuments();
+    assert.equal((await f.evidence.search('Zebramemoria')).length, 0, 'a prepared correction suppresses recall');
+    f.store.rollbackPrepared(
+      owner,
+      sourcePath,
+      interruptedCommand.requestId,
+      f.store.commandDigest(interruptedCommand),
+    );
+    await builder.refreshPublishedDocuments();
+    assert.ok(
+      (await f.evidence.search('Zebramemoria')).length,
+      'a rolled-back action is repaired even when its source revision equals the old checkpoint',
+    );
+    divergeAndStagePrimary(f);
+    const dirty = git(f.primary, ['status', '--porcelain']);
+    const corrected = await f.service.executeOwnerAction(owner, tasteMemoryId(sourcePath), sourcePath, {
+      action: 'correct',
+      requestId: 'f332-correction',
+      expectedRevision: revision(original),
+      patch: { scene: 'CorrectedQuasar published scene' },
+    });
+    assert.equal(corrected.outcome, 'applied');
+    assert.notEqual((await projection.read(beforeHit.anchor, beforeHit.sourceHash)).status, 'ready');
+    await builder.refreshPublishedDocuments();
+    const updated = (await f.evidence.search('CorrectedQuasar', { depth: 'raw' }))[0];
+    assert.ok(updated, 'the newly approved revision must survive the existing lifecycle write fence');
+    assert.match((await projection.read(updated.anchor, updated.sourceHash)).content, /CorrectedQuasar/);
+    assert.equal(projection.getStatus().state, 'up_to_date');
+    const forgotten = await f.service.executeOwnerAction(owner, tasteMemoryId(sourcePath), sourcePath, {
+      action: 'hard_forget',
+      requestId: 'f332-forget',
+      expectedRevision: corrected.revision,
+      confirmed: true,
+    });
+    assert.equal(forgotten.outcome, 'applied');
+    await builder.refreshPublishedDocuments();
+    await builder.rebuild({ force: true, deferThreadIndexing: true });
+    assert.equal((await f.evidence.search('CorrectedQuasar')).length, 0);
+    assert.equal((await projection.read(updated.anchor, updated.sourceHash)).status, 'unavailable');
+    assert.equal(git(f.primary, ['status', '--porcelain']), dirty);
+  } finally {
+    await projection.stop();
+    f.evidence.close();
     rmSync(f.root, { recursive: true, force: true });
   }
 });

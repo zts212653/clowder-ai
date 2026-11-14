@@ -4,10 +4,10 @@
  * Uses parentPath + name (not full path) to prevent path-traversal attacks.
  */
 
-import { mkdir, stat } from 'node:fs/promises';
+import { lstat, mkdir } from 'node:fs/promises';
 import { basename, join, resolve } from 'node:path';
 import type { FastifyPluginAsync } from 'fastify';
-import { resolvePersistentProjectPath } from '../utils/persistent-project-path.js';
+import { validateNewProjectPath } from '../utils/persistent-project-path.js';
 import { isUnderAllowedRoot } from '../utils/project-path.js';
 import { resolveHeaderUserId } from '../utils/request-identity.js';
 
@@ -26,7 +26,7 @@ export const mkdirRoute: FastifyPluginAsync = async (app) => {
     const parentPath = body?.parentPath;
     const name = body?.name;
 
-    if (!parentPath || !name) {
+    if (typeof parentPath !== 'string' || !parentPath || typeof name !== 'string' || !name) {
       reply.status(400);
       return { error: 'parentPath and name are required' };
     }
@@ -38,26 +38,34 @@ export const mkdirRoute: FastifyPluginAsync = async (app) => {
     }
 
     // Validate parentPath exists and is under allowed roots
-    const validatedParent = await resolvePersistentProjectPath(parentPath);
-    if (!validatedParent) {
+    const parent = await validateNewProjectPath(parentPath, 'Parent path not allowed');
+    if (!parent.ok) {
       reply.status(403);
-      return { error: 'Parent path not allowed' };
+      return { error: parent.error };
     }
 
     // Resolve target and double-check it stays within allowed boundaries
-    const targetPath = resolve(join(validatedParent, name));
+    const targetPath = resolve(join(parent.path, name));
     if (!isUnderAllowedRoot(targetPath)) {
       reply.status(403);
       return { error: 'Target path not allowed' };
     }
 
-    // Check if target already exists
-    try {
-      await stat(targetPath);
+    // A new child inherits the canonical parent's location. An existing link can resolve elsewhere.
+    const existing = await lstat(targetPath).catch((err: NodeJS.ErrnoException) => {
+      if (err.code !== 'ENOENT') throw err;
+      return undefined;
+    });
+    if (existing) {
+      if (existing.isDirectory() || existing.isSymbolicLink()) {
+        const target = await validateNewProjectPath(targetPath, 'Target path not allowed');
+        if (!target.ok) {
+          reply.status(403);
+          return { error: target.error };
+        }
+      }
       reply.status(409);
       return { error: 'Directory already exists' };
-    } catch {
-      // Expected — target should not exist
     }
 
     await mkdir(targetPath);

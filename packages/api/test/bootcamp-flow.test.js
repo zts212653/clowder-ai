@@ -150,8 +150,8 @@ describe('Bootcamp Flow Integration', () => {
       payload,
     };
     const [first, retry] = await Promise.all([app.inject(request), app.inject(request)]);
-    assert.equal(first.statusCode, 201);
-    assert.equal(retry.statusCode, 200);
+    // Either concurrent request can create the thread; the other must reuse it.
+    assert.deepEqual([first.statusCode, retry.statusCode].sort(), [200, 201]);
     const firstThread = JSON.parse(first.body);
     const retryThread = JSON.parse(retry.body);
     assert.equal(firstThread.id, retryThread.id);

@@ -6,8 +6,8 @@ import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { RecallEvent } from '@/hooks/recall-types';
 import { apiFetch } from '@/utils/api-client';
-import { formatMemoryDate } from '../memory/page/use-memory-read';
 import { RecallIcon } from '../memory/RecallRow';
+import { MatterReadContent } from './MatterReadContent';
 
 type Receipt = { status: 'current'; page: MatterPage } | { status: 'changed' | 'not_available' };
 
@@ -135,23 +135,7 @@ export function MatterRecallLine({ event, threadId }: { event: RecallEvent; thre
                 </button>
               </p>
             )}
-            {read?.status === 'current' && (
-              <div className="divide-y divide-cafe-subtle">
-                {read.page.entries.map((entry) => (
-                  <div key={entry.entryId} className="flex flex-wrap items-start justify-between gap-3 py-3 first:pt-0">
-                    <blockquote className="min-w-0 flex-1 whitespace-pre-wrap text-sm leading-relaxed">
-                      {entry.quote}
-                    </blockquote>
-                    <Link
-                      className="shell-focusable text-xs text-cafe-muted hover:underline"
-                      href={`/thread/${encodeURIComponent(entry.source.threadId)}?message=${encodeURIComponent(entry.source.messageId)}`}
-                    >
-                      {formatMemoryDate(entry.source.timestamp)} · 出处 ›
-                    </Link>
-                  </div>
-                ))}
-              </div>
-            )}
+            {read?.status === 'current' && <MatterReadContent page={read.page} />}
             {read?.status === 'changed' && <p className="text-sm text-cafe-muted">来源已更正</p>}
             {read?.status === 'not_available' && <p className="text-sm text-cafe-muted">来源已不可用</p>}
             {matterId && read?.status !== 'not_available' && (

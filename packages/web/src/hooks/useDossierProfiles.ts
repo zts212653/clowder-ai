@@ -28,6 +28,7 @@ export interface DossierProfileData {
   entityId: string;
   oneLiner?: string;
   l0RosterSummary?: string;
+  l0RoutingNote?: string;
   routingSignals?: DossierRoutingSignals;
   provenance?: DossierProvenance;
 }

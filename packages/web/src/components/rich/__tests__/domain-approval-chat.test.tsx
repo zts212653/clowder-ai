@@ -2,6 +2,7 @@ import type { ApprovalHubItem, RichCardBlock } from '@cat-cafe/shared';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { collectiveFailure } from '@/components/shell/mailbox/__tests__/collective-failure.fixture';
 import { approvalRow, okRead, storeItem } from '@/components/shell/mailbox/__tests__/mailbox-fixtures';
 import { createApprovalSessions } from '@/components/shell/mailbox/approval-sessions';
 import { MailboxRow } from '@/components/shell/mailbox/MailboxRow';
@@ -323,4 +324,89 @@ it.each(['F193', 'F260'] as const)('cold %s keeps absent or mismatched durable p
   await act(async () => root.render(<RichBlocks blocks={[block]} publication={publication} />));
   expect(container.querySelector('[data-testid="domain-approval-result"]')?.textContent).toContain('效果暂未确认');
   expect(container.querySelector('[data-testid="approve-btn"]')).toBeNull();
+});
+
+it.each([
+  'Chat',
+  'Inbox',
+] as const)('keeps %s original F193/F221/F260 approval buttons interactive during Collective outages', async (entrance) => {
+  for (const feature of ['F193', 'F221', 'F260'] as const) {
+    seed(feature);
+    const row = {
+      ...approvalRow(item),
+      originalApprovalCard: {
+        cardRef: { threadId: publication.threadId, messageId: publication.messageId, blockId: block.id },
+        block,
+      },
+    };
+    const outage = collectiveFailure(okRead([row]), true);
+    if (outage.kind !== 'ok') throw new Error('Expected ok read');
+    outage.read.sources.collectiveProjectAttention = {
+      status: 'available',
+      coverage: 'pending_f290_project_materials_and_dates',
+      exhaustiveness: 'partial',
+      startedAt: 1,
+      observedAt: 2,
+    };
+    outage.read.consistency.reasons.push('collective_project_attention_source_unavailable');
+
+    vi.mocked(apiFetch).mockImplementation(async (path, options) => {
+      if (options?.method === 'POST') {
+        return Response.json({ proposalId: item.proposalId, status: 'approved' });
+      }
+      return {
+        ok: true,
+        status: 200,
+        json: async () =>
+          String(path) === '/api/session'
+            ? { userId: 'owner-1' }
+            : String(path).includes('/approval-hub/settled')
+              ? { items: [] }
+              : String(path).includes('/approval-hub/pending')
+                ? { items: [item], count: 1 }
+                : String(path).includes('/concierge/')
+                  ? outage.read
+                  : String(path).includes('/taste-proposals/')
+                    ? { proposalId: item.proposalId, status: tasteStatus }
+                    : { title: 'Original conversation' },
+      } as Response;
+    });
+    useApprovalHubStore.setState({ items: [], pendingReadAvailable: false, isLoading: false, deciding: {} });
+    const sessions = createApprovalSessions({
+      readsStarted: () => 1,
+      refetch: () => {},
+      refreshStore: async () => {},
+      storeItems: () => [item],
+      attempts: () => ({}),
+      latestRead: () => ({ result: outage, generation: 1 }),
+      now: Date.now,
+    });
+    if (entrance === 'Inbox') await useApprovalHubStore.getState().fetchPending();
+    await act(async () =>
+      root.render(
+        entrance === 'Chat' ? (
+          <RichBlocks blocks={[block]} publication={publication} />
+        ) : (
+          <MailboxRow
+            item={row}
+            rowKey={`outage-${feature}`}
+            stale={false}
+            expanded={false}
+            onToggle={() => {}}
+            onOpen={() => {}}
+            hosted={{ sessions, ownerUserId: 'owner-1' }}
+            readCurrent
+            personal={{ mode: 'visible', refusal: () => null, change: async () => true }}
+          />
+        ),
+      ),
+    );
+    const approveBtn = container.querySelector<HTMLButtonElement>('[data-testid="approve-btn"]');
+    const rejectBtn = container.querySelector<HTMLButtonElement>('[data-testid="reject-btn"]');
+    expect(approveBtn).not.toBeNull();
+    expect(approveBtn?.disabled).toBe(false);
+    expect(rejectBtn).not.toBeNull();
+    expect(rejectBtn?.disabled).toBe(false);
+    expect(container.querySelector('[data-testid="domain-approval-unverified"]')).toBeNull();
+  }
 });

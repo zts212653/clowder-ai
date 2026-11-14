@@ -28,12 +28,7 @@ import { recordToolUseSpan } from './span-helpers.js';
 
 const tracer = trace.getTracer('cat-cafe-api', '0.1.0');
 
-const MEMORY_TOOL_PREFIXES = [
-  'cat_cafe_search_evidence',
-  'cat_cafe_read_session',
-  'cat_cafe_read_invocation',
-  'cat_cafe_review_distillation',
-];
+const MEMORY_TOOL_PREFIXES = ['cat_cafe_search_evidence', 'cat_cafe_read_session', 'cat_cafe_read_invocation'];
 
 function classifyToolCategory(toolName: string): string | undefined {
   if (MEMORY_TOOL_PREFIXES.some((p) => toolName.startsWith(p))) return 'memory';

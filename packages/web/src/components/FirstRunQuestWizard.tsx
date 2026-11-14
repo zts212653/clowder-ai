@@ -170,7 +170,7 @@ export function FirstRunQuestWizard({ open, onClose, onCreated }: FirstRunQuestW
             />
           )}
         </div>
-        <footer className="flex shrink-0 items-center justify-between gap-3 border-t border-[var(--console-border-soft)] px-6 py-4">
+        <footer className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-t border-[var(--console-border-soft)] px-6 py-4">
           <button
             type="button"
             disabled={Boolean(busy)}

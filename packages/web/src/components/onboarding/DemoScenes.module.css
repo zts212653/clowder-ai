@@ -18,7 +18,7 @@
 
 .header h1 {
   margin: 0;
-  font-size: 24px;
+  font-size: var(--console-font-2xl);
   font-weight: 600;
   color: #211b18;
 }
@@ -26,7 +26,7 @@
 .header p {
   margin: 4px 0 0;
   color: #776d66;
-  font-size: 14px;
+  font-size: var(--console-font-sm);
 }
 
 .mockBadge {
@@ -34,7 +34,7 @@
   color: #855e16;
   padding: 6px 12px;
   border-radius: 6px;
-  font-size: 12px;
+  font-size: var(--console-font-xs);
   white-space: nowrap;
 }
 
@@ -52,7 +52,7 @@
   border: 1px solid #d7c9bf;
   border-radius: 6px;
   padding: 6px 12px;
-  font-size: 14px;
+  font-size: var(--console-font-sm);
   cursor: pointer;
 }
 
@@ -70,7 +70,7 @@
 
 .scene h2 {
   margin: 0 0 8px;
-  font-size: 21px;
+  font-size: var(--console-font-display-sm);
   color: #211b18;
 }
 
@@ -91,7 +91,7 @@
 
 .mockLabel {
   display: inline-block;
-  font-size: 12px;
+  font-size: var(--console-font-xs);
   color: #8a4b2e;
   background: #fff8f3;
   border: 1px dashed #e2a886;
@@ -120,7 +120,7 @@
   border-radius: 50%;
   display: grid;
   place-items: center;
-  font-size: 28px;
+  font-size: var(--console-font-display-md);
   font-weight: 800;
   margin: 0 auto 8px;
   border: 4px solid #fff;
@@ -141,7 +141,7 @@
 
 .cat b {
   display: block;
-  font-size: 14px;
+  font-size: var(--console-font-sm);
   color: #211b18;
 }
 
@@ -156,7 +156,7 @@
   border: 1px solid #d7c9bf;
   border-radius: 8px;
   font-family: inherit;
-  font-size: 14px;
+  font-size: var(--console-font-sm);
   line-height: 1.5;
   resize: none;
   background: #fff;
@@ -168,7 +168,7 @@
   padding: 8px 12px;
   background: #f5f0eb;
   color: #776d66;
-  font-size: 12px;
+  font-size: var(--console-font-xs);
   border-radius: 6px;
 }
 
@@ -268,7 +268,7 @@
 
 .handoff b {
   display: block;
-  font-size: 16px;
+  font-size: var(--console-font-base);
   margin-bottom: 8px;
 }
 
@@ -292,7 +292,7 @@
   border: none;
   border-radius: 8px;
   padding: 12px 24px;
-  font-size: 14px;
+  font-size: var(--console-font-sm);
   font-weight: 500;
   cursor: pointer;
   transition: background 0.2s;

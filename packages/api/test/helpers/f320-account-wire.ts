@@ -4,6 +4,8 @@ import type { AgentCarrierSession } from '../../src/domains/cats/services/types.
 export class F320AccountWire implements AgentCarrierSession {
   readonly writes: Record<string, unknown>[] = [];
   closed = false;
+  /** F320 KD-3: an official API key logs in to the native in-memory store before business. */
+  private apiKeyLogin = false;
   private values: unknown[] = [];
   private wake?: () => void;
   constructor(
@@ -29,7 +31,14 @@ export class F320AccountWire implements AgentCarrierSession {
     const method = String(message.method);
     if (
       this.stopControls &&
-      !['initialize', 'config/read', 'configRequirements/read', 'account/read', 'thread/resume'].includes(method)
+      ![
+        'initialize',
+        'config/read',
+        'configRequirements/read',
+        'account/login/start',
+        'account/read',
+        'thread/resume',
+      ].includes(method)
     ) {
       this.push({ id: message.id, error: { code: -32000, message: 'fixture_business_reached' } });
       return;
@@ -37,7 +46,12 @@ export class F320AccountWire implements AgentCarrierSession {
     let result: unknown = {};
     if (method === 'config/read') result = { config: this.config };
     if (method === 'configRequirements/read') result = { requirements: null };
-    if (method === 'account/read') result = { account: { type: 'chatgpt' } };
+    if (method === 'account/login/start') {
+      const params = message.params as { type?: string } | undefined;
+      this.apiKeyLogin = params?.type === 'apiKey';
+      result = { type: params?.type };
+    }
+    if (method === 'account/read') result = { account: { type: this.apiKeyLogin ? 'apiKey' : 'chatgpt' } };
     if (method === 'thread/turns/list') result = { data: [], nextCursor: null };
     if (method === 'thread/start' || method === 'thread/resume')
       result = { thread: { id: 'fixture-thread', turns: [] } };

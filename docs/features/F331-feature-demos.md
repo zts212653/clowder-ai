@@ -3,7 +3,7 @@ feature_ids: [F331]
 related_features: [F128, F244, F268, F309, F326, F138, F059]
 topics: [feature-demos, demo-video, capability-discovery, community, site, readme, capability-tips]
 doc_kind: spec
-tips_exempt: "2026-10-26 续核（7 支片登记进 Works，不涉及小贴士）：片子挂进已有小贴士由 packages/shared/src/feature-demos.json 决定（#6116 起小贴士不再写 demoId）。片1 capability-propose-thread、片2 capability-import-native-session、片3 feature-author-message-disposition、片4 capability-expert-panel 与 feature-voting，都是已有小贴士；片5 只上官网和 README，没有能在等待条显示的定时任务或 GitHub 跟踪小贴士可挂（F139 那条打开开发文档，GitHub 跟踪按 F280 的 tips_exempt 不设小贴士）；片6 是总览片（接《一根线》），只上官网和 README，不对应单个功能；片8 多选打包挂在已有小贴士 feature-f294-selective-message-bundles。本 feat 不新增文字小贴士、触发语或默认流程。第一批其余几支（片 7、9–12）还只是片单计划，没挂小贴士。"
+tips_exempt: "2026-11-03 续核（expert-panel 删除，片4 的「专家辩论」改由 collaborative-thinking 接住；小贴士 capability-expert-panel 文案不变，只改来源锚点）。2026-10-26 续核（7 支片登记进 Works，不涉及小贴士）：片子挂进已有小贴士由 packages/shared/src/feature-demos.json 决定（#6116 起小贴士不再写 demoId）。片1 capability-propose-thread、片2 capability-import-native-session、片3 feature-author-message-disposition、片4 capability-expert-panel 与 feature-voting，都是已有小贴士；片5 只上官网和 README，没有能在等待条显示的定时任务或 GitHub 跟踪小贴士可挂（F139 那条打开开发文档，GitHub 跟踪按 F280 的 tips_exempt 不设小贴士）；片6 是总览片（接《一根线》），只上官网和 README，不对应单个功能；片8 多选打包挂在已有小贴士 feature-f294-selective-message-bundles。本 feat 不新增文字小贴士、触发语或默认流程。第一批其余几支（片 7、9–12）还只是片单计划，没挂小贴士。"
 created: 2026-10-22
 description: "家里的每个功能配一支照真实界面重建的短演示片，放进官网、README 和产品小贴士，让没用过的人看完就知道它做什么、去哪试。"
 description_source: human
@@ -187,6 +187,7 @@ You 10-22：「我感觉30s这个得讲一些不太容易发现的功能」。�
   - **照实演的**：投票面板、投票条、投票请求消息、`[VOTE:…]` 回复和结果卡都照源码写；「你的主意」小标签是片子加的注释。片尾的「专家辩论」是 skill 写明的触发词，没在 Alpha 跑过整场。
   - **10-22 核到的产品事实**（子代理核源码，开源 `clowder/main` 也有）：
     - 专家辩论是 skill `cat-cafe-skills/expert-panel/SKILL.md`，只在用户点名时启用（`disable-model-invocation: true`；触发词有「专家辩论」「多猫分析」「三猫讨论」，没有「专家讨论」）。节奏是分发 → 各自独立 → 收拢 → 原作者复核 → 交付。
+      - 2026-11-03 起 expert-panel 已删（You：「这个skills可以删了」，[thread-id]… `private-source-id`）。「专家辩论」「多猫分析」「三猫讨论」改由 `collaborative-thinking` 的多猫独立思考接住；片里演的各自独立 → 收拢出共识区和分歧区 → 四象限仍然成立，片里没演的正式报告不再有。
     - 「各自独立、不互看」是猫按 skill 守的做法，产品没有技术上藏起别的猫的回复；分发用 `multi_mention` 并行。
     - 收拢卡必须有共识区和分歧区（「不抹平」），交付是洞察卡片 + 约 50 秒语音总结 + 正式报告（优先 DOCX）。
     - 专家辩论**不以投票收尾**；投票（F079）是另一个功能，人只能打 `/vote` 发起，猫在回复里写 `[VOTE:选项]` 投（回复照常可见，不是密封票），人不在投票人名单里。10-22 一度拆成候选 #13，10-23 You 定合回 #4。

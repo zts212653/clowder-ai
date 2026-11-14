@@ -11,7 +11,8 @@ export const inspectArtifactReviewSchema = z
     reviewId: z.string().min(1).max(128),
     sourceMessageId: z.string().min(1).max(256).optional(),
     attachmentId: z.string().min(1).max(128).optional(),
-    view: z.enum(['overview', 'annotations', 'marks', 'history']).default('overview'),
+    view: z.enum(['overview', 'annotations', 'marks', 'history', 'media']).default('overview'),
+    annotationId: z.string().min(1).max(128).optional(),
     round: z.number().int().positive().optional(),
     expectedRevision: z.number().int().positive().optional(),
     expectedSourceSnapshot: z
@@ -34,6 +35,12 @@ export async function inspectArtifactReview(
   sourceDiscussions?: Pick<ModificationSourceDiscussions, 'forReview'>,
 ) {
   const input = inspectArtifactReviewSchema.parse(raw);
+  if (input.view === 'media') {
+    if (input.cursor || input.afterHistoryRevision || input.expectedSourceSnapshot)
+      throw new ArtifactReviewError('invalid_action');
+    return service.readMedia(input.reviewId, principal, input);
+  }
+  if (input.annotationId) throw new ArtifactReviewError('invalid_action');
   const view = await service.read(input.reviewId, principal);
   if (
     (input.cursor > 0 && !input.expectedRevision) ||

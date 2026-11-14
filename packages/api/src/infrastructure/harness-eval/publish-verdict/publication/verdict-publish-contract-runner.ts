@@ -38,7 +38,11 @@ function rethrowWithStderr(err: unknown): never {
 }
 
 export async function runVerdictPublishContract(input: VerdictPublishContractInput): Promise<void> {
-  const transportScript = resolve(input.repoRoot, 'scripts/check-verdict-publish-contract.mjs');
+  // Resolve from implementationRoot (the full repo), not repoRoot (the sparse
+  // worktree). The sparse checkout only materializes docs/harness-feedback/ and
+  // generated/ — scripts/ is not present. The evidence script (line 66) already
+  // uses implementationRoot; this must match.
+  const transportScript = resolve(input.implementationRoot, 'scripts/check-verdict-publish-contract.mjs');
   try {
     await exec(
       process.execPath,

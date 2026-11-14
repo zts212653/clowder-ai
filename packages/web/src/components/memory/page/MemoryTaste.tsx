@@ -9,14 +9,14 @@ import { MEMORY_FAMILIES, type MemoryFamily } from './memory-family';
 import { isTasteBrowse, type TasteBrowse } from './taste-types';
 import { useMemoryRead } from './use-memory-read';
 
-export function MemoryTaste() {
+export function MemoryTaste({ initialFamily = 'taste' }: { initialFamily?: MemoryFamily } = {}) {
   const list = useMemoryRead<TasteBrowse>('/api/memory/taste', isTasteBrowse);
   const host = useRef<HTMLDivElement>(null);
   const previousScroll = useRef(0);
   const [selectedId, selectId] = useState<string | null>(null);
   const [expanded, setExpanded] = useState(true);
   const [sort, setSort] = useState('recent');
-  const [family, setFamily] = useState<MemoryFamily>('taste');
+  const [family, setFamily] = useState<MemoryFamily>(initialFamily);
   const [peopleSummary, setPeopleSummary] = useState('可查看');
   const [profileSummary, setProfileSummary] = useState('可查看');
   const [entitiesSummary, setEntitiesSummary] = useState('可查看');
@@ -111,7 +111,7 @@ export function MemoryTaste() {
         />
         {list.data?.readStatus === 'partial' && (
           <output className="mb-4 block text-compact text-cafe-muted">
-            部分读到：品味已读到，暂时读不到被想起记录。
+            部分读到：品味已读到，暂时读不到使用记录。
             <button type="button" onClick={reload} className="ml-2 text-cafe-accent underline">
               重读
             </button>

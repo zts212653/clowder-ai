@@ -25,7 +25,11 @@ const inflight = new Map<string, Promise<CodexCompatReport>>();
 const recentFailures = new Map<string, { report: CodexCompatReport; at: number }>();
 
 export function codexCompatVerdictPath(capability: CodexNativeCapability, version: string, dataRoot: string): string {
-  return join(dataRoot, DIRECTORY, `${capability}--${version.replace(/[^0-9A-Za-z.-]/g, '_')}.json`);
+  return join(
+    dataRoot,
+    DIRECTORY,
+    `${capability}--${process.platform}-${process.arch}--${version.replace(/[^0-9A-Za-z.-]/g, '_')}.json`,
+  );
 }
 
 async function readPassingVerdict(path: string, capability: CodexNativeCapability, version: string) {

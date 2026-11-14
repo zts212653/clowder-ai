@@ -24,7 +24,7 @@ test('an unchanged moved ledger row retains its label and opens its current loca
     const after = f.store.get(prepared.publicationRef);
     assert.equal(after.response_json, before.body);
     assert.equal(after.response_digest, before.digest);
-    assert.equal(f.searches(), 1);
+    assert.equal(f.searches(), 0);
     assert.equal(f.calls(), 0);
   } finally {
     f.db.close();
@@ -49,7 +49,7 @@ for (const patch of [
       assert.equal(read.status, 'available');
       assert.equal(read.decisionUpdated, true);
       assert.equal(read.response.results[0].decisionSources, undefined);
-      assert.equal(f.searches(), 1);
+      assert.equal(f.searches(), 0);
     } finally {
       f.db.close();
     }

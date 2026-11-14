@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const api = fileURLToPath(new URL('../../', import.meta.url));
@@ -85,7 +87,7 @@ try {
       { cwd: api, env: childEnv, encoding: 'utf8', timeout: 30000 },
     );
     const output = `${result.stdout ?? ''}\n${result.stderr ?? ''}`;
-    writeFileSync(`/tmp/f212-astra-mutant-${specimen.name}.log`, output, { mode: 0o600 });
+    writeFileSync(join(tmpdir(), `f212-astra-mutant-${specimen.name}.log`), output, { mode: 0o600 });
     assert.notEqual(result.status, 0, `${specimen.name}: regression must turn RED`);
     assert.match(output, specimen.expected, `${specimen.name}: RED must be the intended assertion`);
     writeFileSync(specimen.path, originals.get(specimen.path));

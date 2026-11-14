@@ -9,6 +9,15 @@ import { readAheadApi } from './api-startup-read-ahead.mjs';
 import { profileDesktopStartup } from './scripts/profile-desktop-startup.mjs';
 import { createProfileSource } from './test-helpers/profile-source-fixture.mjs';
 
+const fixtureHttpServer = `
+  import { createServer } from 'node:http';
+  const server = createServer((request, response) => {
+    if (request.url === '/health' && request.headers['x-clowder-desktop-probe'] === '1')
+      response.setHeader('x-clowder-desktop-startup-id', process.env.CAT_CAFE_DESKTOP_STARTUP_ID);
+    response.end('ok');
+  });
+`;
+
 test(
   'the installed profile project cannot inherit the source checkout Git repository',
   { timeout: 30000 },
@@ -24,9 +33,10 @@ test(
       await fs.writeFile(
         path.join(frozen, 'api/dist/index.desktop.js'),
         `
-      import fs from 'node:fs'; import {createServer} from 'node:http';
+      import fs from 'node:fs';
+      ${fixtureHttpServer}
       fs.writeFileSync('git-boundary.json',JSON.stringify({cwd:process.cwd(),gitEnvKeys:Object.keys(process.env).filter(key=>key.startsWith('GIT_'))}));
-      createServer((q,r)=>r.end('ok')).listen(Number(process.env.API_SERVER_PORT),'127.0.0.1',()=>globalThis.__clowderStartupMilestone('http-listening'));
+      server.listen(Number(process.env.API_SERVER_PORT),'127.0.0.1',()=>globalThis.__clowderStartupMilestone('http-listening'));
     `,
       );
       const receipt = await profileDesktopStartup(await createProfileSource(root), frozen);
@@ -66,8 +76,7 @@ test(
       await fs.mkdir(path.dirname(entry), { recursive: true });
       await fs.mkdir(path.join(frozen, 'dependencies'));
       await fs.writeFile(path.join(frozen, 'api/package.json'), '{"type":"module"}');
-      const code =
-        'import "../scripts/startup-helper.mjs"; import {createServer} from "node:http"; createServer((q,r)=>r.end("ok")).listen(Number(process.env.API_SERVER_PORT),"127.0.0.1",()=>globalThis.__clowderStartupMilestone("http-listening"));';
+      const code = `import "../scripts/startup-helper.mjs"; ${fixtureHttpServer} server.listen(Number(process.env.API_SERVER_PORT),"127.0.0.1",()=>globalThis.__clowderStartupMilestone("http-listening"));`;
       await fs.mkdir(path.join(frozen, 'api/scripts'));
       await fs.writeFile(path.join(frozen, 'api/scripts/startup-helper.mjs'), 'export const value = 1;');
       await fs.writeFile(entry, code);
@@ -162,7 +171,7 @@ test('an open API port cannot substitute for its completed startup trace', { tim
     await fs.writeFile(path.join(frozen, 'api/package.json'), '{"type":"module"}');
     await fs.writeFile(
       entry,
-      'import {createServer} from "node:http"; createServer((q,r)=>r.end("ok")).listen(Number(process.env.API_SERVER_PORT),"127.0.0.1",()=>setTimeout(()=>globalThis.__clowderStartupMilestone("http-listening"),1200));',
+      `${fixtureHttpServer} server.listen(Number(process.env.API_SERVER_PORT),"127.0.0.1",()=>setTimeout(()=>globalThis.__clowderStartupMilestone("http-listening"),1200));`,
     );
     const receipt = await profileDesktopStartup(await createProfileSource(root), frozen, { profileRoot: trace });
     assert.ok((await fs.stat(receipt.manifest)).size > 0);
@@ -182,7 +191,7 @@ test('a listening API without a completion milestone still times out and exits',
     await fs.writeFile(path.join(frozen, 'api/package.json'), '{"type":"module"}');
     await fs.writeFile(
       entry,
-      'import fs from "node:fs"; import {createServer} from "node:http"; createServer((q,r)=>r.end("ok")).listen(Number(process.env.API_SERVER_PORT),"127.0.0.1",()=>fs.writeFileSync("fixture-pid",String(process.pid)));',
+      `import fs from "node:fs"; ${fixtureHttpServer} server.listen(Number(process.env.API_SERVER_PORT),"127.0.0.1",()=>fs.writeFileSync("fixture-pid",String(process.pid)));`,
     );
     await assert.rejects(
       profileDesktopStartup(await createProfileSource(root), frozen, { profileRoot: trace, timeoutMs: 3000 }),

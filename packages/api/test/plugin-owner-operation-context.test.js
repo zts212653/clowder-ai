@@ -257,7 +257,6 @@ test('a declared confirmation reaches the module only after the authenticated ow
   assert.equal(f.records[0].context.operationKey, 'recovery');
   assert.equal(f.records[0].context.actionId, 'reconcile');
 });
-
 test('completed Manager action invalidates its saved owner authority', async (t) => {
   const f = await fixture(t, validResult);
   assert.equal((await f.call()).statusCode, 200);

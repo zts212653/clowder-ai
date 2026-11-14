@@ -1,8 +1,10 @@
+// @vitest-environment jsdom
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ChatContainer } from '@/components/ChatContainer';
 import { ThreadChatRuntimeProvider } from '@/components/thread-chat';
+import { SHELL_PRESENTATION_STORAGE_KEY, writeShellPresentation } from '../shell/shell-presentation';
 
 function renderChatContainer(threadId: string) {
   return React.createElement(
@@ -106,6 +108,7 @@ class MockResizeObserver {
   }
 }
 
+vi.mock('@/components/thread-chat/hub-socket-context', () => import('@/test-utils/hub-socket-context-mock'));
 vi.mock('@/stores/chatStore', () => {
   const hook = (selector?: (s: StoreState) => unknown) => {
     const state = storeState;
@@ -197,7 +200,8 @@ vi.mock('../MessageNavigator', () => ({ MessageNavigator: () => null }));
 vi.mock('../MessageActions', () => ({
   MessageActions: ({ children }: { children: React.ReactNode }) => children,
 }));
-vi.mock('../QueuePanel', () => ({
+vi.mock('../QueuePanel', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../QueuePanel')>()),
   QueuePanel: () => React.createElement('div', { 'data-testid': 'queue-panel' }),
 }));
 vi.mock('../ThreadExecutionBar', () => ({
@@ -220,7 +224,7 @@ vi.mock('@/components/icons/PawIcon', () => ({ PawIcon: () => null }));
 vi.mock('@/components/icons/BootcampIcon', () => ({ BootcampIcon: () => null }));
 vi.mock('@/components/workspace/ResizeHandle', () => ({ ResizeHandle: () => null }));
 
-describe('ChatContainer bottom chrome observer', () => {
+describe.each(['classic', 'v2'] as const)('ChatContainer bottom chrome observer (%s)', (presentation) => {
   let container: HTMLDivElement;
   let root: Root;
   let originalResizeObserver: typeof globalThis.ResizeObserver;
@@ -236,6 +240,7 @@ describe('ChatContainer bottom chrome observer', () => {
   });
 
   beforeEach(() => {
+    writeShellPresentation(presentation);
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
@@ -260,6 +265,7 @@ describe('ChatContainer bottom chrome observer', () => {
       root.unmount();
     });
     container.remove();
+    window.localStorage.removeItem(SHELL_PRESENTATION_STORAGE_KEY);
     globalThis.ResizeObserver = originalResizeObserver;
   });
 

@@ -6,7 +6,7 @@ import {
   decodeChatBackgroundPreferences,
   serializeChatBackgroundState,
 } from '@cat-cafe/shared';
-import { createContext, type ReactNode, useCallback, useContext, useEffect, useRef, useState } from 'react';
+import { createContext, type ReactNode, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { apiFetch } from '@/utils/api-client';
 
 type Change = { scope: 'global' | 'thread'; threadId?: string; background: ChatBackground | null };
@@ -43,7 +43,7 @@ function applyChange(current: ChatBackgroundPreferences, change: Change): ChatBa
 /** One owner-private preference stream for the shell and both editors. No chat-store writes. */
 export function ChatBackgroundProvider({ children, enabled }: { children: ReactNode; enabled: boolean }) {
   const [preferences, setPreferences] = useState(EMPTY);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(enabled);
   const [loadError, setLoadError] = useState(false);
   const [pending, setPending] = useState(0);
   const confirmed = useRef(EMPTY);
@@ -124,11 +124,14 @@ export function ChatBackgroundProvider({ children, enabled }: { children: ReactN
     [loading, loadError],
   );
 
-  return (
-    <BackgroundContext.Provider value={{ enabled, preferences, loading, loadError, saving: pending > 0, reload, save }}>
-      {children}
-    </BackgroundContext.Provider>
+  // Unrelated shell/viewport renders must not broadcast a new context while a
+  // nested Suspense rail is still hydrating with the same preference snapshot.
+  const saving = pending > 0;
+  const value = useMemo(
+    () => ({ enabled, preferences, loading, loadError, saving, reload, save }),
+    [enabled, preferences, loading, loadError, saving, reload, save],
   );
+  return <BackgroundContext.Provider value={value}>{children}</BackgroundContext.Provider>;
 }
 
 export function useChatBackgroundPreferences() {

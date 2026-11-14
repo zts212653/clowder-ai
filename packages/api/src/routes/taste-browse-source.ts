@@ -2,6 +2,7 @@ import type { IMessageStore } from '../domains/cats/services/stores/ports/Messag
 import type { IThreadStore } from '../domains/cats/services/stores/ports/ThreadStore.js';
 import { resolveThreadMessageVisibility } from '../domains/cats/services/stores/visibility.js';
 import { canAccessThread } from '../domains/guides/guide-state-access.js';
+import { memorySourceSpeaker } from '../domains/memory/memory-source-speaker.js';
 import type { TasteMemoryReadResult } from '../domains/memory/taste/TasteMemoryReader.js';
 import type { ITasteProposalStore } from '../domains/taste/stores/ports/TasteProposalStore.js';
 
@@ -40,5 +41,7 @@ export async function readTasteSource(memory: TasteMemoryReadResult, owner: stri
     canOpen: true,
     threadId: thread.id,
     messageId: message.id,
+    occurredAt: message.timestamp,
+    speaker: memorySourceSpeaker(message),
   };
 }

@@ -68,20 +68,25 @@ it('keeps the header work read settled while text and activity cursors advance',
   expect(host.textContent).toContain('3');
 });
 
-it('still refreshes for rich material, completion, new messages and explicit invalidation', async () => {
+it('still refreshes for published material, completion and explicit invalidation', async () => {
   await act(async () => root.render(<ThreadWorksButton threadId={target.threadId} />));
   await act(async () => {
     useChatStore.getState().appendRichBlockToThread(target.threadId, target.messageId, {
       id: 'work-card',
-      kind: 'card',
+      kind: 'file',
       v: 1,
-      title: 'Published work',
+      fileName: 'Published-work.md',
+      url: '/uploads/Published-work.md',
     });
   });
   expect(apiFetch).toHaveBeenCalledTimes(2);
   await act(async () => {
     useChatStore.getState().setThreadMessageStreaming(target.threadId, target.messageId, false);
   });
+  expect(apiFetch).toHaveBeenCalledTimes(2);
+  await act(async () => useChatStore.getState().setThreadHasActiveInvocation(target.threadId, true));
+  expect(apiFetch).toHaveBeenCalledTimes(2);
+  await act(async () => useChatStore.getState().setThreadHasActiveInvocation(target.threadId, false));
   expect(apiFetch).toHaveBeenCalledTimes(3);
   await act(async () => {
     useChatStore.getState().addMessageToThread(target.threadId, {
@@ -92,9 +97,9 @@ it('still refreshes for rich material, completion, new messages and explicit inv
       timestamp: 2000,
     });
   });
-  expect(apiFetch).toHaveBeenCalledTimes(4);
+  expect(apiFetch).toHaveBeenCalledTimes(3);
   await act(async () => window.dispatchEvent(new Event('cat-cafe:entrusted-work-projection-invalidated')));
-  expect(apiFetch).toHaveBeenCalledTimes(5);
+  expect(apiFetch).toHaveBeenCalledTimes(4);
 });
 
 it('re-reads the new thread and ignores streamed activity from the previous thread', async () => {
@@ -109,7 +114,7 @@ it('re-reads the new thread and ignores streamed activity from the previous thre
   expect(apiFetch).toHaveBeenCalledTimes(2);
 });
 
-it('still refreshes for non-text material and invocation activation changes', async () => {
+it('refreshes for non-text material and invocation completion, without reading on activation', async () => {
   await act(async () => root.render(<ThreadWorksButton threadId={target.threadId} />));
   await act(async () => {
     useChatStore.getState().patchThreadMessage(target.threadId, target.messageId, {
@@ -118,9 +123,9 @@ it('still refreshes for non-text material and invocation activation changes', as
   });
   expect(apiFetch).toHaveBeenCalledTimes(2);
   await act(async () => useChatStore.getState().setThreadHasActiveInvocation(target.threadId, true));
-  expect(apiFetch).toHaveBeenCalledTimes(3);
+  expect(apiFetch).toHaveBeenCalledTimes(2);
   await act(async () => useChatStore.getState().setThreadHasActiveInvocation(target.threadId, false));
-  expect(apiFetch).toHaveBeenCalledTimes(4);
+  expect(apiFetch).toHaveBeenCalledTimes(3);
 });
 
 it('ignores activity-driven display reordering of concurrent replies without lifecycle snapshots', async () => {

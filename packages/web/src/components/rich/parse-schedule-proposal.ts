@@ -59,13 +59,20 @@ export function parseScheduleProposal(body: unknown): ScheduleMutationProposal |
         (!scheduleTime(mutation.relativeOnceDelayMs) || mutation.task.trigger.type !== 'once'))
     )
       return null;
-  } else if (
-    mutation.kind !== 'delete' ||
-    !taskReadable(mutation.taskSnapshot) ||
-    mutation.taskId !== mutation.taskSnapshot.id ||
-    !scheduleText(mutation.expectedFingerprint)
-  )
-    return null;
+  } else {
+    if (
+      (mutation.kind !== 'delete' && mutation.kind !== 'update') ||
+      !taskReadable(mutation.taskSnapshot) ||
+      mutation.taskId !== mutation.taskSnapshot.id ||
+      !scheduleText(mutation.expectedFingerprint)
+    )
+      return null;
+    if (
+      mutation.kind === 'update' &&
+      (!scheduleObject(mutation.params) || mutation.taskSnapshot.trigger.type === 'once')
+    )
+      return null;
+  }
   if (
     envelope.canonicalProposalId !== p.proposalId ||
     envelope.sourceFeatureId !== 'F139' ||

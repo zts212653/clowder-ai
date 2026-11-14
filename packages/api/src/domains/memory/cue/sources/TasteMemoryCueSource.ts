@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { readdir } from 'node:fs/promises';
 import { join } from 'node:path';
+import type { PublishedTasteSnapshot } from '../../../taste/services/PublishedTasteSnapshot.js';
 import { resolveCanonicalTasteRoot, type TasteRepository } from '../../../taste/services/TasteRepository.js';
 import type { TasteMemoryLifecycleStore } from '../../taste/TasteMemoryLifecycleStore.js';
 import { TasteMemoryReader, type TasteMemoryReadResult } from '../../taste/TasteMemoryReader.js';
@@ -57,9 +58,9 @@ export type TasteMemoryCueReadResult =
   | { status: 'ok'; payload: unknown }
   | { status: 'not_available'; invalidationReason: 'source_corrected' | 'source_forgotten' };
 
-async function listSourcePaths(root: string): Promise<string[]> {
-  const paths: string[] = [];
-  for (const directory of [PUBLIC_DIRECTORY, PRIVATE_DIRECTORY]) {
+async function listSourcePaths(root: string, published: PublishedTasteSnapshot | null): Promise<string[]> {
+  const paths: string[] = published ? await published.list() : [];
+  for (const directory of published ? [PRIVATE_DIRECTORY] : [PUBLIC_DIRECTORY, PRIVATE_DIRECTORY]) {
     try {
       const entries = await readdir(join(root, directory), { withFileTypes: true });
       paths.push(
@@ -120,10 +121,7 @@ export class CanonicalTasteMemoryCueSource implements TasteDimensionMapSource {
     if (input.ownerUserId !== this.ownerUserId) return null;
     const definition = findTasteTaskBundle(input);
     if (!definition) return null;
-    const root = await resolveCanonicalTasteRoot(this.repository);
-    const reader = new TasteMemoryReader({ canonicalRoot: () => root, approvalLockKey: () => root }, this.ownerUserId, {
-      lifecycle: this.lifecycle,
-    });
+    const { reader } = await this.openSnapshot();
     const sources: TasteTaskBundleProjection['sources'] = [];
     for (const sourcePath of definition.sourcePaths) {
       const result = await reader.read({ ownerUserId: input.ownerUserId, sourcePath });
@@ -252,12 +250,9 @@ export class CanonicalTasteMemoryCueSource implements TasteDimensionMapSource {
 
   private async snapshot(ownerUserId: string, requestedDimensions: readonly string[]): Promise<TasteSnapshot | null> {
     const dimensions = [...new Set(requestedDimensions)].sort();
-    const root = await resolveCanonicalTasteRoot(this.repository);
-    const reader = new TasteMemoryReader({ canonicalRoot: () => root, approvalLockKey: () => root }, this.ownerUserId, {
-      lifecycle: this.lifecycle,
-    });
+    const { root, published, reader } = await this.openSnapshot();
     const all: TasteMemoryReadResult[] = [];
-    for (const sourcePath of (await listSourcePaths(root)).sort()) {
+    for (const sourcePath of (await listSourcePaths(root, published)).sort()) {
       const result = await reader.read({ ownerUserId, sourcePath });
       if (result?.payload.dimension && dimensions.includes(result.payload.dimension)) all.push(result);
     }
@@ -281,5 +276,21 @@ export class CanonicalTasteMemoryCueSource implements TasteDimensionMapSource {
       results: boundedResults(all, availableDimensions),
       totalCount: all.length,
     };
+  }
+
+  /** One publication per map/bundle; private sources retain the canonical local root. */
+  private async openSnapshot() {
+    const root = await resolveCanonicalTasteRoot(this.repository);
+    const published = (await this.repository.publishedSnapshot?.()) ?? null;
+    const reader = new TasteMemoryReader(
+      {
+        canonicalRoot: () => root,
+        approvalLockKey: () => root,
+        ...(published ? { publishedSnapshot: async () => published } : {}),
+      },
+      this.ownerUserId,
+      { lifecycle: this.lifecycle },
+    );
+    return { root, published, reader };
   }
 }

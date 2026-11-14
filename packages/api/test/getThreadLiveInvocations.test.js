@@ -263,6 +263,88 @@ describe('F117 KD-23 getThreadLiveInvocations — a running child is not an owne
     assert.deepEqual(result.active, []);
   });
 
+  it('#1838 with a complete snapshot, a child whose provider started without confirmed teardown stays listed, degraded', async () => {
+    // A killed API leaves no owner, but its provider may still run: the child still blocks the
+    // thread/role, so it must stay visible and stoppable instead of vanishing from the list.
+    const started = { providerLifecycleTracked: true, providerStartedAt: 1_600 };
+    const result = await getThreadLiveInvocations(
+      THREAD_ID,
+      USER_ID,
+      makeDeps({
+        records: [makeRecord()],
+        children: {
+          'inv-1': [
+            makeChild(started),
+            makeChild({ invocationId: 'child-torn-down', catId: 'codex', ...started, providerTeardownAt: 1_700 }),
+          ],
+        },
+        ownerSnapshot: { complete: true, owners: [] },
+      }),
+    );
+    assert.deepEqual(summary(result), [
+      {
+        catId: 'opus',
+        executionId: 'inv-1',
+        invocationId: 'child-1',
+        source: 'parent+child-execution',
+        degraded: true,
+        reason: 'child_running_owner_unverified',
+      },
+    ]);
+  });
+
+  it('#1838 an unconfirmed child whose parent already ended stays listed under its exact parent, once', async () => {
+    // An older cancel/reset could end the parent and leave the started child running. Admission still
+    // finds that child (it reads children by user), so the list must show the same object to stop.
+    const started = { providerLifecycleTracked: true, providerStartedAt: 1_600 };
+    const runningChildren = [
+      makeChild({ invocationId: 'old-child', parentInvocationId: 'ended-parent', ...started }),
+      makeChild({
+        invocationId: 'stopped-child',
+        parentInvocationId: 'ended-parent',
+        catId: 'codex',
+        ...started,
+        providerTeardownAt: 1_700,
+      }),
+      makeChild({
+        invocationId: 'other-thread',
+        parentInvocationId: 'ended-parent',
+        threadId: 'thread-other',
+        ...started,
+      }),
+      makeChild({ invocationId: 'other-user', parentInvocationId: 'ended-parent', userId: 'user-other', ...started }),
+    ];
+    const ended = await getThreadLiveInvocations(THREAD_ID, USER_ID, {
+      ...makeDeps({ records: [], ownerSnapshot: { complete: true, owners: [] } }),
+      listRunningChildrenByUser: () => runningChildren,
+    });
+    assert.deepEqual(summary(ended), [
+      {
+        catId: 'opus',
+        executionId: 'ended-parent',
+        invocationId: 'old-child',
+        source: 'parent+child-execution',
+        degraded: true,
+        reason: 'child_running_owner_unverified',
+      },
+    ]);
+
+    // Control: while the parent still runs, the same child is listed once through its parent.
+    const child = makeChild(started);
+    const running = await getThreadLiveInvocations(THREAD_ID, USER_ID, {
+      ...makeDeps({
+        records: [makeRecord()],
+        children: { 'inv-1': [child] },
+        ownerSnapshot: { complete: true, owners: [] },
+      }),
+      listRunningChildrenByUser: () => [child],
+    });
+    assert.deepEqual(
+      summary(running).map(({ executionId, invocationId }) => ({ executionId, invocationId })),
+      [{ executionId: 'inv-1', invocationId: 'child-1' }],
+    );
+  });
+
   it('with an incomplete snapshot, a running child stands in for its unverified owner, degraded', async () => {
     const result = await getThreadLiveInvocations(
       THREAD_ID,

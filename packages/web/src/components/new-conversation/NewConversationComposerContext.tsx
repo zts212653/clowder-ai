@@ -20,6 +20,8 @@ interface NewConversationComposerContextProps {
   locked: boolean;
   pinned: boolean;
   onProjectChange: (projectPath: string | undefined) => void;
+  onProjectRestricted?: () => void;
+  projectSelectionBlocked?: boolean;
   onPinnedChange: (pinned: boolean) => void;
 }
 
@@ -49,11 +51,17 @@ function ProjectControl({
   existingProjects,
   locked,
   onChange,
-}: Pick<NewConversationComposerContextProps, 'projectPath' | 'existingProjects' | 'locked'> & {
+  onProjectRestricted,
+  projectSelectionBlocked,
+}: Pick<
+  NewConversationComposerContextProps,
+  'projectPath' | 'existingProjects' | 'locked' | 'onProjectRestricted' | 'projectSelectionBlocked'
+> & {
   onChange: (path: string | undefined) => void;
 }) {
   const copy = useShellCopy(newConversationCopy);
   const trigger = useRef<HTMLButtonElement>(null);
+  const browserInitialPath = useRef<string | undefined>(undefined);
   const [open, setOpen] = useState(false);
   const [browsing, setBrowsing] = useState(false);
   const choices = useMemo(() => {
@@ -61,7 +69,11 @@ function ProjectControl({
     if (projectPath) unique.add(projectPath);
     return [...unique];
   }, [existingProjects, projectPath]);
-  const label = projectPath ? projectDisplayName(projectPath) : copy.lobby;
+  const label = projectPath
+    ? projectDisplayName(projectPath)
+    : projectSelectionBlocked
+      ? copy.noProjectSelected
+      : copy.lobby;
 
   const select = (path: string | undefined) => {
     onChange(path);
@@ -72,11 +84,7 @@ function ProjectControl({
 
   return (
     <>
-      <AppTooltip
-        label={locked ? copy.optionsLocked : `${copy.project}: ${projectPath ?? copy.lobby}`}
-        side="top"
-        multiline
-      >
+      <AppTooltip label={locked ? copy.optionsLocked : `${copy.project}: ${projectPath ?? label}`} side="top" multiline>
         <button
           ref={trigger}
           type="button"
@@ -112,17 +120,20 @@ function ProjectControl({
           {browsing ? (
             <div className="h-[min(60vh,440px)] min-h-[280px]">
               <DirectoryBrowser
-                initialPath={projectPath}
+                initialPath={browserInitialPath.current}
                 activeProjectPath={projectPath}
                 onCancel={() => setBrowsing(false)}
                 onSelectCurrent={select}
+                onNavigationStart={onProjectRestricted}
+                onVirtualLocationChange={onProjectRestricted}
+                onProjectRestricted={onProjectRestricted}
                 selectCurrentLabel={copy.useFolder}
                 copy={copy.directoryBrowser}
               />
             </div>
           ) : (
             <div className="space-y-1 p-1">
-              <LobbyOption selected={!projectPath} onSelect={() => select(undefined)} />
+              <LobbyOption selected={!projectPath && !projectSelectionBlocked} onSelect={() => select(undefined)} />
               {choices.map((path) => (
                 <ProjectOption
                   key={path}
@@ -137,7 +148,10 @@ function ProjectControl({
               <button
                 type="button"
                 className="shell-focusable mt-1 flex w-full items-center gap-2 rounded-lg border-t border-[var(--shell-hairline)] px-3 py-2.5 text-left text-sm text-cafe-secondary hover:bg-cafe-surface"
-                onClick={() => setBrowsing(true)}
+                onClick={() => {
+                  browserInitialPath.current = projectPath;
+                  setBrowsing(true);
+                }}
               >
                 <ShellGlyph name="folder" className="h-4 w-4" />
                 {copy.browse}
@@ -159,6 +173,8 @@ export function NewConversationComposerContext(props: NewConversationComposerCon
         existingProjects={props.existingProjects}
         locked={props.locked}
         onChange={props.onProjectChange}
+        onProjectRestricted={props.onProjectRestricted}
+        projectSelectionBlocked={props.projectSelectionBlocked}
       />
       <label
         className={`shell-focusable flex h-8 flex-none items-center gap-1.5 rounded-lg px-1.5 text-xs text-[var(--shell-muted)] max-sm:absolute max-sm:right-3 max-sm:top-1.5 max-sm:z-10 max-sm:px-0.5 ${

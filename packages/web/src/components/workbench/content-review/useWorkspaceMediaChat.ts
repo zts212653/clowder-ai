@@ -66,7 +66,9 @@ export function useWorkspaceMediaChat({
   const mime =
     source.kind === 'text' || source.kind === 'video-project' || source.kind === 'collective-artifact'
       ? null
-      : source.mime;
+      : source.mime === 'image/gif' && (source.media.kind !== 'image' || !source.media.animation)
+        ? null
+        : source.mime;
   const baseChatMedia =
     workflow && 'chatMedia' in workflow
       ? (workflow.chatMedia ?? null)

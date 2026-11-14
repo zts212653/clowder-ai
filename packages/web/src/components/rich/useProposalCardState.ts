@@ -140,7 +140,9 @@ export function useProposalCardState({ block, proposal }: ProposalCardInput) {
     const handler = (ev: Event) => {
       const detail = (ev as CustomEvent<ProposalSnapshot>).detail;
       if (!detail || detail.proposalId !== proposalId) return;
-      setStatus(detail.status);
+      // An identity-only invalidation is not a new outcome. Keep the response we just received
+      // while the shared producer reader refreshes it.
+      if (detail.status) setStatus(detail.status);
       if (detail.createdThreadId) setResultThreadId(detail.createdThreadId);
       if (detail.reportingMode) {
         setEffectiveReportingMode(detail.reportingMode);

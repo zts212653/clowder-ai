@@ -1,7 +1,9 @@
+import { useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { useF307ExperienceWorkbenchStore } from '@/components/workbench/experience-workbench-store';
 import { F307WorkbenchTabs } from '@/components/workbench/F307WorkbenchTabs';
 import { createFilePreviewSurface } from '@/components/workbench/real-surface-adapters';
+import { WorkspaceSurfaceVisibilityProvider } from '@/components/workbench/WorkspaceSurfaceVisibility';
 import { createInitialWorkbenchState } from '@/components/workbench/workbench-model';
 import { V2WorkspaceFileChrome } from '@/components/workspace/V2WorkspaceFileChrome';
 import type { WorkspaceFileViewerProps } from '@/components/workspace/WorkspaceFileViewer.types';
@@ -55,12 +57,19 @@ const fileProps: WorkspaceFileViewerProps = {
 };
 
 function MenuPage() {
+  const [visible, setVisible] = useState(true);
   const state = useF307ExperienceWorkbenchStore((value) => value.layout);
   return (
     <div
       data-testid="menu-scroll-host"
       className={`${params.get('scroll') ? 'overflow-auto' : 'overflow-hidden'} h-screen bg-cafe-canvas`}
     >
+      <button type="button" data-testid="fixture-surface-hide" onClick={() => setVisible(false)}>
+        Hide surface
+      </button>
+      <button type="button" data-testid="fixture-surface-show" onClick={() => setVisible(true)}>
+        Show surface
+      </button>
       <div className="relative" style={{ height: params.get('scroll') ? 1600 : '100%' }}>
         <div
           data-testid="workspace-menu-host"
@@ -71,6 +80,7 @@ function MenuPage() {
             left: Number(params.get('left')) || 0,
             top: Number(params.get('top')) || 16,
             height: 420,
+            display: visible ? undefined : 'none',
           }}
         >
           <F307WorkbenchTabs
@@ -86,16 +96,18 @@ function MenuPage() {
             onExitMainAreaAttention={() => record('exit')}
           />
           {params.get('shell') !== 'classic' && (
-            <V2WorkspaceFileChrome
-              props={fileProps}
-              listen={
-                <button type="button" onClick={() => record('listen')}>
-                  收听
-                </button>
-              }
-              cache={null}
-              onAsk={() => record('ask')}
-            />
+            <WorkspaceSurfaceVisibilityProvider visible={visible}>
+              <V2WorkspaceFileChrome
+                props={fileProps}
+                listen={
+                  <button type="button" onClick={() => record('listen')}>
+                    收听
+                  </button>
+                }
+                cache={null}
+                onAsk={() => record('ask')}
+              />
+            </WorkspaceSurfaceVisibilityProvider>
           )}
           <div
             data-testid="action-result"

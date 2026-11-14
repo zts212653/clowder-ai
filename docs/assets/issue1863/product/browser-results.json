@@ -1,0 +1,990 @@
+{
+  "head": "a5cf4d3a126ff1dde383d5bdf03b86d5af75fc80",
+  "baseUrl": "http://127.0.0.1:4218",
+  "startedAt": "2026-11-06T11:33:16.977Z",
+  "finishedAt": "2026-11-06T11:35:07.390Z",
+  "checks": [
+    {
+      "name": "preflight: new-conversation v2/zh and empty-target state",
+      "status": "pass",
+      "detail": {
+        "url": "http://127.0.0.1:4218/",
+        "routing": "正在确认",
+        "composer": "消息输入框"
+      }
+    },
+    {
+      "name": "new conversation: blue source range, edit/undo, send, refresh",
+      "status": "pass",
+      "detail": {
+        "threadUrl": "http://127.0.0.1:4218/thread/thread_owned_18d7ed705d84133ddff7601dd7927e7b8eb62154",
+        "post": "http://127.0.0.1:4219/api/messages",
+        "href": "https://github.com/meow-club/cat-cafe-map%E8%BF%99%E6%98%AF%E9%93%BE%E6%8E%A5",
+        "afterReloadHref": "https://github.com/meow-club/cat-cafe-map%E8%BF%99%E6%98%AF%E9%93%BE%E6%8E%A5",
+        "saved": {
+          "id": "0001793964803769-000010-9d82f2a9",
+          "content": "https://github.com/meow-club/cat-cafe-map这是链接",
+          "dispatchRefs": []
+        }
+      }
+    },
+    {
+      "name": "existing conversation: second send and refresh",
+      "status": "pass",
+      "detail": {
+        "threadUrl": "http://127.0.0.1:4218/thread/thread_owned_18d7ed705d84133ddff7601dd7927e7b8eb62154",
+        "post": "http://127.0.0.1:4219/api/messages",
+        "links": 2,
+        "saved": {
+          "id": "0001793964814858-000012-2a4443b0",
+          "content": "https://github.com/meow-club/cat-cafe-map这是链接 第二次",
+          "dispatchRefs": []
+        }
+      }
+    },
+    {
+      "name": "existing conversation: draft restore after reload",
+      "status": "pass",
+      "detail": {
+        "draft": "draft-1793964828736 https://example.com/草稿",
+        "restored": "draft-1793964828736 https://example.com/草稿"
+      }
+    },
+    {
+      "name": "gap notice: target update and disappearance",
+      "status": "pass",
+      "detail": {
+        "initial": {
+          "count": 1,
+          "output": "有链接未能标出",
+          "summary": "查看这份草稿的链接目标",
+          "codes": ["https://example.com/"]
+        },
+        "updated": {
+          "count": 1,
+          "output": "有链接未能标出",
+          "summary": "查看这份草稿的链接目标",
+          "codes": ["https://a.example/"]
+        },
+        "normal": [
+          {
+            "text": "https://example.com",
+            "start": 3,
+            "end": 22,
+            "href": "https://example.com/",
+            "color": "rgb(37, 99, 235)"
+          }
+        ],
+        "standalone": [
+          {
+            "text": "https\\://example.com",
+            "start": 0,
+            "end": 20,
+            "href": "https://example.com/",
+            "color": "rgb(37, 99, 235)"
+          }
+        ],
+        "saved": {
+          "id": "0001793964848185-000014-866c505d",
+          "content": "说明 https\\://example.com 后",
+          "dispatchRefs": []
+        }
+      }
+    },
+    {
+      "name": "CDP composition: native color, cancellation and confirmation (not physical IME)",
+      "status": "pass",
+      "detail": {
+        "source": "https://github.com/meow-club/cat-cafe-map中文",
+        "physicalImeVerified": false
+      }
+    },
+    {
+      "name": "image paste: preview and send with empty target",
+      "status": "pass",
+      "detail": {
+        "threadUrl": "http://127.0.0.1:4218/thread/thread_owned_18d7ed705d84133ddff7601dd7927e7b8eb62154",
+        "post": "http://127.0.0.1:4219/api/messages",
+        "previews": 1,
+        "bubbleImages": 1
+      }
+    },
+    {
+      "name": "ghost suggestion: history completion and Tab acceptance",
+      "status": "pass",
+      "detail": {
+        "ghostText": "alpha beta gamma",
+        "accepted": "alpha beta gamma"
+      }
+    },
+    {
+      "name": "mention completion opens and Escape preserves the draft",
+      "status": "pass",
+      "detail": {
+        "count": 2
+      }
+    },
+    {
+      "name": "Enter semantics: Shift+Enter newline, Enter send",
+      "status": "pass",
+      "detail": {
+        "value": "line1\nline2",
+        "post": "http://127.0.0.1:4219/api/messages"
+      }
+    },
+    {
+      "name": "long draft: actual typing latency and blue range",
+      "status": "pass",
+      "detail": {
+        "chars": 14349,
+        "paintDelaysMs": [
+          69.59999999403954, 70.10000002384186, 64.80000001192093, 66, 65.2999999821186, 65.09999999403954,
+          65.2999999821186, 64.59999999403954, 63.599999994039536, 64.19999998807907, 65, 63.900000005960464,
+          59.099999994039536, 62.30000001192093, 63.29999998211861, 62.79999998211861, 63.599999994039536,
+          62.70000001788139, 62, 63, 62.400000005960464, 64.09999999403954, 63.099999994039536, 63.79999998211861,
+          62.60000002384186, 63.20000001788139, 62.400000005960464, 63.10000002384186, 63.80000001192093,
+          62.900000005960464, 62.80000001192093, 63.099999994039536, 61.80000001192093, 64, 64.19999998807907, 64,
+          64.10000002384186, 64, 64.2999999821186, 61.900000005960464, 62.400000005960464, 60.900000005960464, 58.5,
+          59.79999998211861, 58.69999998807907, 59.400000005960464, 60.79999998211861, 62.900000005960464, 63,
+          59.10000002384186, 62.29999998211861, 61.400000005960464, 62.400000005960464, 61.099999994039536,
+          62.599999994039536, 63, 120.59999999403954, 66.90000000596046, 64.19999998807907, 66.19999998807907
+        ],
+        "typedChars": 60,
+        "boundary": "Native keys on a long dev-mode draft; paint delays span the input event to two animation frames, wall time also includes Playwright overhead. Not a hardware latency benchmark.",
+        "ms": 4810,
+        "msPerTypedChar": 80.17,
+        "ranges": 200
+      }
+    },
+    {
+      "name": "empty-target and no-model audit",
+      "status": "pass",
+      "detail": {
+        "posts": 149,
+        "targets": [],
+        "pageErrors": 0
+      }
+    }
+  ],
+  "failures": [],
+  "blocked": [],
+  "metrics": {
+    "newConversation": {
+      "url": "http://127.0.0.1:4218/",
+      "routing": "正在确认"
+    },
+    "longDraft": {
+      "chars": 14349,
+      "paintDelaysMs": [
+        69.59999999403954, 70.10000002384186, 64.80000001192093, 66, 65.2999999821186, 65.09999999403954,
+        65.2999999821186, 64.59999999403954, 63.599999994039536, 64.19999998807907, 65, 63.900000005960464,
+        59.099999994039536, 62.30000001192093, 63.29999998211861, 62.79999998211861, 63.599999994039536,
+        62.70000001788139, 62, 63, 62.400000005960464, 64.09999999403954, 63.099999994039536, 63.79999998211861,
+        62.60000002384186, 63.20000001788139, 62.400000005960464, 63.10000002384186, 63.80000001192093,
+        62.900000005960464, 62.80000001192093, 63.099999994039536, 61.80000001192093, 64, 64.19999998807907, 64,
+        64.10000002384186, 64, 64.2999999821186, 61.900000005960464, 62.400000005960464, 60.900000005960464, 58.5,
+        59.79999998211861, 58.69999998807907, 59.400000005960464, 60.79999998211861, 62.900000005960464, 63,
+        59.10000002384186, 62.29999998211861, 61.400000005960464, 62.400000005960464, 61.099999994039536,
+        62.599999994039536, 63, 120.59999999403954, 66.90000000596046, 64.19999998807907, 66.19999998807907
+      ],
+      "typedChars": 60,
+      "boundary": "Native keys on a long dev-mode draft; paint delays span the input event to two animation frames, wall time also includes Playwright overhead. Not a hardware latency benchmark.",
+      "ms": 4810,
+      "msPerTypedChar": 80.17,
+      "ranges": 200
+    }
+  },
+  "notes": [
+    "No route interception and no fake persistence; all API calls are real.",
+    "No model call is intentionally triggered: sends are refused unless the routing preview has no named recipient, and POST bodies are checked for target arrays.",
+    "New conversation entry: / -> NewConversationPage (data-testid=new-conversation-page). Existing: /thread/<threadId> -> ThreadChatSurface (data-thread-chat-footer).",
+    "The v2 shell is the default; this script pins cat-cafe:shell-presentation=v2 and cat-cafe:shell-language=zh via localStorage before navigation.",
+    "The dev server must serve this feature checkout. Its embedded startup revision can precede HMR changes; report.head identifies the source checkout.",
+    "With no configured accounts/recipients, message admission is real and durable, followed by an expected separate no_available_target system message; model-response behavior is outside this test.",
+    "Image coverage is paste plus caption, submit, and reload. Baseline ChatInput.doSend does not admit an image-only draft; that unchanged limitation is not counted as passed."
+  ],
+  "linkFrames": [
+    {
+      "at": 2891.4000000059605,
+      "path": "/",
+      "hrefs": []
+    },
+    {
+      "at": 6762.0999999940395,
+      "path": "/thread/thread_owned_18d7ed705d84133ddff7601dd7927e7b8eb62154",
+      "hrefs": ["https://github.com/meow-club/cat-cafe-map%E8%BF%99%E6%98%AF%E9%93%BE%E6%8E%A5"]
+    },
+    {
+      "at": 2836.199999988079,
+      "path": "/thread/thread_owned_18d7ed705d84133ddff7601dd7927e7b8eb62154",
+      "hrefs": []
+    },
+    {
+      "at": 4391.4000000059605,
+      "path": "/thread/thread_owned_18d7ed705d84133ddff7601dd7927e7b8eb62154",
+      "hrefs": ["https://github.com/meow-club/cat-cafe-map%E8%BF%99%E6%98%AF%E9%93%BE%E6%8E%A5"]
+    },
+    {
+      "at": 3366.5999999940395,
+      "path": "/thread/thread_owned_18d7ed705d84133ddff7601dd7927e7b8eb62154",
+      "hrefs": []
+    },
+    {
+      "at": 4417.9000000059605,
+      "path": "/thread/thread_owned_18d7ed705d84133ddff7601dd7927e7b8eb62154",
+      "hrefs": ["https://github.com/meow-club/cat-cafe-map%E8%BF%99%E6%98%AF%E9%93%BE%E6%8E%A5"]
+    },
+    {
+      "at": 5966.9000000059605,
+      "path": "/thread/thread_owned_18d7ed705d84133ddff7601dd7927e7b8eb62154",
+      "hrefs": [
+        "https://github.com/meow-club/cat-cafe-map%E8%BF%99%E6%98%AF%E9%93%BE%E6%8E%A5",
+        "https://github.com/meow-club/cat-cafe-map%E8%BF%99%E6%98%AF%E9%93%BE%E6%8E%A5"
+      ]
+    },
+    {
+      "at": 3775,
+      "path": "/thread/thread_owned_18d7ed705d84133ddff7601dd7927e7b8eb62154",
+      "hrefs": []
+    },
+    {
+      "at": 5351.199999988079,
+      "path": "/thread/thread_owned_18d7ed705d84133ddff7601dd7927e7b8eb62154",
+      "hrefs": ["https://github.com/meow-club/cat-cafe-map%E8%BF%99%E6%98%AF%E9%93%BE%E6%8E%A5"]
+    },
+    {
+      "at": 5617.299999982119,
+      "path": "/thread/thread_owned_18d7ed705d84133ddff7601dd7927e7b8eb62154",
+      "hrefs": [
+        "https://github.com/meow-club/cat-cafe-map%E8%BF%99%E6%98%AF%E9%93%BE%E6%8E%A5",
+        "https://github.com/meow-club/cat-cafe-map%E8%BF%99%E6%98%AF%E9%93%BE%E6%8E%A5"
+      ]
+    },
+    {
+      "at": 4318.800000011921,
+      "path": "/thread/thread_owned_18d7ed705d84133ddff7601dd7927e7b8eb62154",
+      "hrefs": []
+    },
+    {
+      "at": 6090.0999999940395,
+      "path": "/thread/thread_owned_18d7ed705d84133ddff7601dd7927e7b8eb62154",
+      "hrefs": [
+        "https://github.com/meow-club/cat-cafe-map%E8%BF%99%E6%98%AF%E9%93%BE%E6%8E%A5",
+        "https://github.com/meow-club/cat-cafe-map%E8%BF%99%E6%98%AF%E9%93%BE%E6%8E%A5"
+      ]
+    },
+    {
+      "at": 4545.5999999940395,
+      "path": "/thread/thread_owned_18d7ed705d84133ddff7601dd7927e7b8eb62154",
+      "hrefs": []
+    },
+    {
+      "at": 6833.199999988079,
+      "path": "/thread/thread_owned_18d7ed705d84133ddff7601dd7927e7b8eb62154",
+      "hrefs": [
+        "https://github.com/meow-club/cat-cafe-map%E8%BF%99%E6%98%AF%E9%93%BE%E6%8E%A5",
+        "https://github.com/meow-club/cat-cafe-map%E8%BF%99%E6%98%AF%E9%93%BE%E6%8E%A5"
+      ]
+    },
+    {
+      "at": 4460.299999982119,
+      "path": "/thread/thread_owned_18d7ed705d84133ddff7601dd7927e7b8eb62154",
+      "hrefs": []
+    },
+    {
+      "at": 7050.299999982119,
+      "path": "/thread/thread_owned_18d7ed705d84133ddff7601dd7927e7b8eb62154",
+      "hrefs": [
+        "https://github.com/meow-club/cat-cafe-map%E8%BF%99%E6%98%AF%E9%93%BE%E6%8E%A5",
+        "https://github.com/meow-club/cat-cafe-map%E8%BF%99%E6%98%AF%E9%93%BE%E6%8E%A5"
+      ]
+    },
+    {
+      "at": 4364.9000000059605,
+      "path": "/thread/thread_owned_18d7ed705d84133ddff7601dd7927e7b8eb62154",
+      "hrefs": []
+    },
+    {
+      "at": 6664.299999982119,
+      "path": "/thread/thread_owned_18d7ed705d84133ddff7601dd7927e7b8eb62154",
+      "hrefs": [
+        "https://github.com/meow-club/cat-cafe-map%E8%BF%99%E6%98%AF%E9%93%BE%E6%8E%A5",
+        "https://github.com/meow-club/cat-cafe-map%E8%BF%99%E6%98%AF%E9%93%BE%E6%8E%A5"
+      ]
+    },
+    {
+      "at": 5221,
+      "path": "/thread/thread_owned_18d7ed705d84133ddff7601dd7927e7b8eb62154",
+      "hrefs": []
+    },
+    {
+      "at": 7824.9000000059605,
+      "path": "/thread/thread_owned_18d7ed705d84133ddff7601dd7927e7b8eb62154",
+      "hrefs": [
+        "https://github.com/meow-club/cat-cafe-map%E8%BF%99%E6%98%AF%E9%93%BE%E6%8E%A5",
+        "https://github.com/meow-club/cat-cafe-map%E8%BF%99%E6%98%AF%E9%93%BE%E6%8E%A5"
+      ]
+    },
+    {
+      "at": 4162.800000011921,
+      "path": "/thread/thread_owned_18d7ed705d84133ddff7601dd7927e7b8eb62154",
+      "hrefs": []
+    },
+    {
+      "at": 6392,
+      "path": "/thread/thread_owned_18d7ed705d84133ddff7601dd7927e7b8eb62154",
+      "hrefs": [
+        "https://github.com/meow-club/cat-cafe-map%E8%BF%99%E6%98%AF%E9%93%BE%E6%8E%A5",
+        "https://github.com/meow-club/cat-cafe-map%E8%BF%99%E6%98%AF%E9%93%BE%E6%8E%A5"
+      ]
+    },
+    {
+      "at": 4325.700000017881,
+      "path": "/thread/thread_owned_18d7ed705d84133ddff7601dd7927e7b8eb62154",
+      "hrefs": []
+    },
+    {
+      "at": 6645.600000023842,
+      "path": "/thread/thread_owned_18d7ed705d84133ddff7601dd7927e7b8eb62154",
+      "hrefs": [
+        "https://github.com/meow-club/cat-cafe-map%E8%BF%99%E6%98%AF%E9%93%BE%E6%8E%A5",
+        "https://github.com/meow-club/cat-cafe-map%E8%BF%99%E6%98%AF%E9%93%BE%E6%8E%A5"
+      ]
+    },
+    {
+      "at": 4687.600000023842,
+      "path": "/thread/thread_owned_18d7ed705d84133ddff7601dd7927e7b8eb62154",
+      "hrefs": []
+    },
+    {
+      "at": 8191.800000011921,
+      "path": "/thread/thread_owned_18d7ed705d84133ddff7601dd7927e7b8eb62154",
+      "hrefs": [
+        "https://github.com/meow-club/cat-cafe-map%E8%BF%99%E6%98%AF%E9%93%BE%E6%8E%A5",
+        "https://github.com/meow-club/cat-cafe-map%E8%BF%99%E6%98%AF%E9%93%BE%E6%8E%A5"
+      ]
+    },
+    {
+      "at": 3306.4000000059605,
+      "path": "/thread/thread_owned_18d7ed705d84133ddff7601dd7927e7b8eb62154",
+      "hrefs": []
+    },
+    {
+      "at": 5133,
+      "path": "/thread/thread_owned_18d7ed705d84133ddff7601dd7927e7b8eb62154",
+      "hrefs": ["https://github.com/meow-club/cat-cafe-map%E8%BF%99%E6%98%AF%E9%93%BE%E6%8E%A5"]
+    },
+    {
+      "at": 5301.5999999940395,
+      "path": "/thread/thread_owned_18d7ed705d84133ddff7601dd7927e7b8eb62154",
+      "hrefs": [
+        "https://github.com/meow-club/cat-cafe-map%E8%BF%99%E6%98%AF%E9%93%BE%E6%8E%A5",
+        "https://github.com/meow-club/cat-cafe-map%E8%BF%99%E6%98%AF%E9%93%BE%E6%8E%A5"
+      ]
+    }
+  ],
+  "pageErrors": [],
+  "network": {
+    "posts": [
+      {
+        "url": "http://127.0.0.1:4219/api/threads/default/read/latest",
+        "targetArrays": []
+      },
+      {
+        "url": "http://127.0.0.1:4219/api/threads/default/read/latest",
+        "targetArrays": []
+      },
+      {
+        "url": "http://127.0.0.1:4219/api/concierge/home/clients",
+        "targetArrays": []
+      },
+      {
+        "url": "http://127.0.0.1:4219/api/routing/preview",
+        "targetArrays": []
+      },
+      {
+        "url": "http://127.0.0.1:4219/api/routing/preview",
+        "targetArrays": []
+      },
+      {
+        "url": "http://127.0.0.1:4219/api/routing/preview",
+        "targetArrays": []
+      },
+      {
+        "url": "http://127.0.0.1:4219/api/routing/preview",
+        "targetArrays": []
+      },
+      {
+        "url": "http://127.0.0.1:4219/api/routing/preview",
+        "targetArrays": []
+      },
+      {
+        "url": "http://127.0.0.1:4219/api/routing/preview",
+        "targetArrays": []
+      },
+      {
+        "url": "http://127.0.0.1:4219/api/threads",
+        "targetArrays": []
+      },
+      {
+        "url": "http://127.0.0.1:4219/api/messages",
+        "targetArrays": []
+      },
+      {
+        "url": "http://127.0.0.1:4219/api/threads/thread_owned_18d7ed705d84133ddff7601dd7927e7b8eb62154/read/latest",
+        "targetArrays": []
+      },
+      {
+        "url": "http://127.0.0.1:4219/api/workspace/chat-references",
+        "targetArrays": []
+      },
+      {
+        "url": "http://127.0.0.1:4219/api/routing/preview",
+        "targetArrays": []
+      },
+      {
+        "url": "http://127.0.0.1:4219/api/threads/thread_owned_18d7ed705d84133ddff7601dd7927e7b8eb62154/read/latest",
+        "targetArrays": []
+      },
+      {
+        "url": "http://127.0.0.1:4219/api/threads/thread_owned_18d7ed705d84133ddff7601dd7927e7b8eb62154/read/latest",
+        "targetArrays": []
+      },
+      {
+        "url": "http://127.0.0.1:4219/api/concierge/home/clients",
+        "targetArrays": []
+      },
+      {
+        "url": "http://127.0.0.1:4219/api/routing/preview",
+        "targetArrays": []
+      },
+      {
+        "url": "http://127.0.0.1:4219/api/threads/thread_owned_18d7ed705d84133ddff7601dd7927e7b8eb62154/read/latest",
+        "targetArrays": []
+      },
+      {
+        "url": "http://127.0.0.1:4219/api/workspace/chat-references",
+        "targetArrays": []
+      },
+      {
+        "url": "http://127.0.0.1:4219/api/routing/preview",
+        "targetArrays": []
+      },
+      {
+        "url": "http://127.0.0.1:4219/api/threads/thread_owned_18d7ed705d84133ddff7601dd7927e7b8eb62154/read/latest",
+        "targetArrays": []
+      },
+      {
+        "url": "http://127.0.0.1:4219/api/threads/thread_owned_18d7ed705d84133ddff7601dd7927e7b8eb62154/read/latest",
+        "targetArrays": []
+      },
+      {
+        "url": "http://127.0.0.1:4219/api/routing/preview",
+        "targetArrays": []
+      },
+      {
+        "url": "http://127.0.0.1:4219/api/threads/thread_owned_18d7ed705d84133ddff7601dd7927e7b8eb62154/read/latest",
+        "targetArrays": []
+      },
+      {
+        "url": "http://127.0.0.1:4219/api/concierge/home/clients",
+        "targetArrays": []
+      },
+      {
+        "url": "http://127.0.0.1:4219/api/workspace/chat-references",
+        "targetArrays": []
+      },
+      {
+        "url": "http://127.0.0.1:4219/api/routing/preview",
+        "targetArrays": []
+      },
+      {
+        "url": "http://127.0.0.1:4219/api/routing/preview",
+        "targetArrays": []
+      },
+      {
+        "url": "http://127.0.0.1:4219/api/messages",
+        "targetArrays": []
+      },
+      {
+        "url": "http://127.0.0.1:4219/api/threads/thread_owned_18d7ed705d84133ddff7601dd7927e7b8eb62154/read/latest",
+        "targetArrays": []
+      },
+      {
+        "url": "http://127.0.0.1:4219/api/threads/thread_owned_18d7ed705d84133ddff7601dd7927e7b8eb62154/read/latest",
+        "targetArrays": []
+      },
+      {
+        "url": "http://127.0.0.1:4219/api/routing/preview",
+        "targetArrays": []
+      },
+      {
+        "url": "http://127.0.0.1:4219/api/threads/thread_owned_18d7ed705d84133ddff7601dd7927e7b8eb62154/read/latest",
+        "targetArrays": []
+      },
+      {
+        "url": "http://127.0.0.1:4219/api/threads/thread_owned_18d7ed705d84133ddff7601dd7927e7b8eb62154/read/latest",
+        "targetArrays": []
+      },
+      {
+        "url": "http://127.0.0.1:4219/api/routing/preview",
+        "targetArrays": []
+      },
+      {
+        "url": "http://127.0.0.1:4219/api/threads/thread_owned_18d7ed705d84133ddff7601dd7927e7b8eb62154/read/latest",
+        "targetArrays": []
+      },
+      {
+        "url": "http://127.0.0.1:4219/api/workspace/chat-references",
+        "targetArrays": []
+      },
+      {
+        "url": "http://127.0.0.1:4219/api/concierge/home/clients",
+        "targetArrays": []
+      },
+      {
+        "url": "http://127.0.0.1:4219/api/threads/thread_owned_18d7ed705d84133ddff7601dd7927e7b8eb62154/read/latest",
+        "targetArrays": []
+      },
+      {
+        "url": "http://127.0.0.1:4219/api/routing/preview",
+        "targetArrays": []
+      },
+      {
+        "url": "http://127.0.0.1:4219/api/threads/thread_owned_18d7ed705d84133ddff7601dd7927e7b8eb62154/read/latest",
+        "targetArrays": []
+      },
+      {
+        "url": "http://127.0.0.1:4219/api/threads/thread_owned_18d7ed705d84133ddff7601dd7927e7b8eb62154/read/latest",
+        "targetArrays": []
+      },
+      {
+        "url": "http://127.0.0.1:4219/api/threads/thread_owned_18d7ed705d84133ddff7601dd7927e7b8eb62154/read/latest",
+        "targetArrays": []
+      },
+      {
+        "url": "http://127.0.0.1:4219/api/workspace/chat-references",
+        "targetArrays": []
+      },
+      {
+        "url": "http://127.0.0.1:4219/api/concierge/home/clients",
+        "targetArrays": []
+      },
+      {
+        "url": "http://127.0.0.1:4219/api/routing/preview",
+        "targetArrays": []
+      },
+      {
+        "url": "http://127.0.0.1:4219/api/routing/preview",
+        "targetArrays": []
+      },
+      {
+        "url": "http://127.0.0.1:4219/api/diagnostics/connection",
+        "targetArrays": []
+      },
+      {
+        "url": "http://127.0.0.1:4219/api/threads/thread_owned_18d7ed705d84133ddff7601dd7927e7b8eb62154/read/latest",
+        "targetArrays": []
+      },
+      {
+        "url": "http://127.0.0.1:4219/api/threads/thread_owned_18d7ed705d84133ddff7601dd7927e7b8eb62154/read/latest",
+        "targetArrays": []
+      },
+      {
+        "url": "http://127.0.0.1:4219/api/threads/thread_owned_18d7ed705d84133ddff7601dd7927e7b8eb62154/read/latest",
+        "targetArrays": []
+      },
+      {
+        "url": "http://127.0.0.1:4219/api/concierge/home/clients",
+        "targetArrays": []
+      },
+      {
+        "url": "http://127.0.0.1:4219/api/workspace/chat-references",
+        "targetArrays": []
+      },
+      {
+        "url": "http://127.0.0.1:4219/api/routing/preview",
+        "targetArrays": []
+      },
+      {
+        "url": "http://127.0.0.1:4219/api/threads/thread_owned_18d7ed705d84133ddff7601dd7927e7b8eb62154/read/latest",
+        "targetArrays": []
+      },
+      {
+        "url": "http://127.0.0.1:4219/api/threads/thread_owned_18d7ed705d84133ddff7601dd7927e7b8eb62154/read/latest",
+        "targetArrays": []
+      },
+      {
+        "url": "http://127.0.0.1:4219/api/routing/preview",
+        "targetArrays": []
+      },
+      {
+        "url": "http://127.0.0.1:4219/api/threads/thread_owned_18d7ed705d84133ddff7601dd7927e7b8eb62154/read/latest",
+        "targetArrays": []
+      },
+      {
+        "url": "http://127.0.0.1:4219/api/workspace/chat-references",
+        "targetArrays": []
+      },
+      {
+        "url": "http://127.0.0.1:4219/api/concierge/home/clients",
+        "targetArrays": []
+      },
+      {
+        "url": "http://127.0.0.1:4219/api/routing/preview",
+        "targetArrays": []
+      },
+      {
+        "url": "http://127.0.0.1:4219/api/routing/preview",
+        "targetArrays": []
+      },
+      {
+        "url": "http://127.0.0.1:4219/api/routing/preview",
+        "targetArrays": []
+      },
+      {
+        "url": "http://127.0.0.1:4219/api/routing/preview",
+        "targetArrays": []
+      },
+      {
+        "url": "http://127.0.0.1:4219/api/diagnostics/connection",
+        "targetArrays": []
+      },
+      {
+        "url": "http://127.0.0.1:4219/api/routing/preview",
+        "targetArrays": []
+      },
+      {
+        "url": "http://127.0.0.1:4219/api/routing/preview",
+        "targetArrays": []
+      },
+      {
+        "url": "http://127.0.0.1:4219/api/routing/preview",
+        "targetArrays": []
+      },
+      {
+        "url": "http://127.0.0.1:4219/api/routing/preview",
+        "targetArrays": []
+      },
+      {
+        "url": "http://127.0.0.1:4219/api/messages",
+        "targetArrays": []
+      },
+      {
+        "url": "http://127.0.0.1:4219/api/threads/thread_owned_18d7ed705d84133ddff7601dd7927e7b8eb62154/read/latest",
+        "targetArrays": []
+      },
+      {
+        "url": "http://127.0.0.1:4219/api/threads/thread_owned_18d7ed705d84133ddff7601dd7927e7b8eb62154/read/latest",
+        "targetArrays": []
+      },
+      {
+        "url": "http://127.0.0.1:4219/api/routing/preview",
+        "targetArrays": []
+      },
+      {
+        "url": "http://127.0.0.1:4219/api/threads/thread_owned_18d7ed705d84133ddff7601dd7927e7b8eb62154/read/latest",
+        "targetArrays": []
+      },
+      {
+        "url": "http://127.0.0.1:4219/api/threads/thread_owned_18d7ed705d84133ddff7601dd7927e7b8eb62154/read/latest",
+        "targetArrays": []
+      },
+      {
+        "url": "http://127.0.0.1:4219/api/routing/preview",
+        "targetArrays": []
+      },
+      {
+        "url": "http://127.0.0.1:4219/api/threads/thread_owned_18d7ed705d84133ddff7601dd7927e7b8eb62154/read/latest",
+        "targetArrays": []
+      },
+      {
+        "url": "http://127.0.0.1:4219/api/concierge/home/clients",
+        "targetArrays": []
+      },
+      {
+        "url": "http://127.0.0.1:4219/api/workspace/chat-references",
+        "targetArrays": []
+      },
+      {
+        "url": "http://127.0.0.1:4219/api/threads/thread_owned_18d7ed705d84133ddff7601dd7927e7b8eb62154/read/latest",
+        "targetArrays": []
+      },
+      {
+        "url": "http://127.0.0.1:4219/api/routing/preview",
+        "targetArrays": []
+      },
+      {
+        "url": "http://127.0.0.1:4219/api/routing/preview",
+        "targetArrays": []
+      },
+      {
+        "url": "http://127.0.0.1:4219/api/routing/preview",
+        "targetArrays": []
+      },
+      {
+        "url": "http://127.0.0.1:4219/api/threads/thread_owned_18d7ed705d84133ddff7601dd7927e7b8eb62154/read/latest",
+        "targetArrays": []
+      },
+      {
+        "url": "http://127.0.0.1:4219/api/threads/thread_owned_18d7ed705d84133ddff7601dd7927e7b8eb62154/read/latest",
+        "targetArrays": []
+      },
+      {
+        "url": "http://127.0.0.1:4219/api/routing/preview",
+        "targetArrays": []
+      },
+      {
+        "url": "http://127.0.0.1:4219/api/threads/thread_owned_18d7ed705d84133ddff7601dd7927e7b8eb62154/read/latest",
+        "targetArrays": []
+      },
+      {
+        "url": "http://127.0.0.1:4219/api/workspace/chat-references",
+        "targetArrays": []
+      },
+      {
+        "url": "http://127.0.0.1:4219/api/concierge/home/clients",
+        "targetArrays": []
+      },
+      {
+        "url": "http://127.0.0.1:4219/api/routing/preview",
+        "targetArrays": []
+      },
+      {
+        "url": "http://127.0.0.1:4219/api/routing/preview",
+        "targetArrays": []
+      },
+      {
+        "url": "http://127.0.0.1:4219/api/diagnostics/connection",
+        "targetArrays": []
+      },
+      {
+        "url": "http://127.0.0.1:4219/api/routing/preview",
+        "targetArrays": []
+      },
+      {
+        "url": "http://127.0.0.1:4219/api/messages",
+        "targetArrays": []
+      },
+      {
+        "url": "http://127.0.0.1:4219/api/threads/thread_owned_18d7ed705d84133ddff7601dd7927e7b8eb62154/read/latest",
+        "targetArrays": []
+      },
+      {
+        "url": "http://127.0.0.1:4219/api/threads/thread_owned_18d7ed705d84133ddff7601dd7927e7b8eb62154/read/latest",
+        "targetArrays": []
+      },
+      {
+        "url": "http://127.0.0.1:4219/api/routing/preview",
+        "targetArrays": []
+      },
+      {
+        "url": "http://127.0.0.1:4219/api/threads/thread_owned_18d7ed705d84133ddff7601dd7927e7b8eb62154/read/latest",
+        "targetArrays": []
+      },
+      {
+        "url": "http://127.0.0.1:4219/api/threads/thread_owned_18d7ed705d84133ddff7601dd7927e7b8eb62154/read/latest",
+        "targetArrays": []
+      },
+      {
+        "url": "http://127.0.0.1:4219/api/routing/preview",
+        "targetArrays": []
+      },
+      {
+        "url": "http://127.0.0.1:4219/api/threads/thread_owned_18d7ed705d84133ddff7601dd7927e7b8eb62154/read/latest",
+        "targetArrays": []
+      },
+      {
+        "url": "http://127.0.0.1:4219/api/workspace/chat-references",
+        "targetArrays": []
+      },
+      {
+        "url": "http://127.0.0.1:4219/api/concierge/home/clients",
+        "targetArrays": []
+      },
+      {
+        "url": "http://127.0.0.1:4219/api/routing/preview",
+        "targetArrays": []
+      },
+      {
+        "url": "http://127.0.0.1:4219/api/threads/thread_owned_18d7ed705d84133ddff7601dd7927e7b8eb62154/read/latest",
+        "targetArrays": []
+      },
+      {
+        "url": "http://127.0.0.1:4219/api/routing/preview",
+        "targetArrays": []
+      },
+      {
+        "url": "http://127.0.0.1:4219/api/threads/thread_owned_18d7ed705d84133ddff7601dd7927e7b8eb62154/read/latest",
+        "targetArrays": []
+      },
+      {
+        "url": "http://127.0.0.1:4219/api/threads/thread_owned_18d7ed705d84133ddff7601dd7927e7b8eb62154/read/latest",
+        "targetArrays": []
+      },
+      {
+        "url": "http://127.0.0.1:4219/api/routing/preview",
+        "targetArrays": []
+      },
+      {
+        "url": "http://127.0.0.1:4219/api/threads/thread_owned_18d7ed705d84133ddff7601dd7927e7b8eb62154/read/latest",
+        "targetArrays": []
+      },
+      {
+        "url": "http://127.0.0.1:4219/api/workspace/chat-references",
+        "targetArrays": []
+      },
+      {
+        "url": "http://127.0.0.1:4219/api/concierge/home/clients",
+        "targetArrays": []
+      },
+      {
+        "url": "http://127.0.0.1:4219/api/routing/preview",
+        "targetArrays": []
+      },
+      {
+        "url": "http://127.0.0.1:4219/api/routing/preview",
+        "targetArrays": []
+      },
+      {
+        "url": "http://127.0.0.1:4219/api/routing/preview",
+        "targetArrays": []
+      },
+      {
+        "url": "http://127.0.0.1:4219/api/messages",
+        "targetArrays": []
+      },
+      {
+        "url": "http://127.0.0.1:4219/api/threads/thread_owned_18d7ed705d84133ddff7601dd7927e7b8eb62154/read/latest",
+        "targetArrays": []
+      },
+      {
+        "url": "http://127.0.0.1:4219/api/threads/thread_owned_18d7ed705d84133ddff7601dd7927e7b8eb62154/read/latest",
+        "targetArrays": []
+      },
+      {
+        "url": "http://127.0.0.1:4219/api/routing/preview",
+        "targetArrays": []
+      },
+      {
+        "url": "http://127.0.0.1:4219/api/diagnostics/connection",
+        "targetArrays": []
+      },
+      {
+        "url": "http://127.0.0.1:4219/api/routing/preview",
+        "targetArrays": []
+      },
+      {
+        "url": "http://127.0.0.1:4219/api/routing/preview",
+        "targetArrays": []
+      },
+      {
+        "url": "http://127.0.0.1:4219/api/routing/preview",
+        "targetArrays": []
+      },
+      {
+        "url": "http://127.0.0.1:4219/api/threads/thread_owned_18d7ed705d84133ddff7601dd7927e7b8eb62154/read/latest",
+        "targetArrays": []
+      },
+      {
+        "url": "http://127.0.0.1:4219/api/threads/thread_owned_18d7ed705d84133ddff7601dd7927e7b8eb62154/read/latest",
+        "targetArrays": []
+      },
+      {
+        "url": "http://127.0.0.1:4219/api/routing/preview",
+        "targetArrays": []
+      },
+      {
+        "url": "http://127.0.0.1:4219/api/threads/thread_owned_18d7ed705d84133ddff7601dd7927e7b8eb62154/read/latest",
+        "targetArrays": []
+      },
+      {
+        "url": "http://127.0.0.1:4219/api/concierge/home/clients",
+        "targetArrays": []
+      },
+      {
+        "url": "http://127.0.0.1:4219/api/workspace/chat-references",
+        "targetArrays": []
+      },
+      {
+        "url": "http://127.0.0.1:4219/api/routing/preview",
+        "targetArrays": []
+      },
+      {
+        "url": "http://127.0.0.1:4219/api/threads/thread_owned_18d7ed705d84133ddff7601dd7927e7b8eb62154/read/latest",
+        "targetArrays": []
+      },
+      {
+        "url": "http://127.0.0.1:4219/api/routing/preview",
+        "targetArrays": []
+      },
+      {
+        "url": "http://127.0.0.1:4219/api/routing/preview",
+        "targetArrays": []
+      },
+      {
+        "url": "http://127.0.0.1:4219/api/messages",
+        "targetArrays": []
+      },
+      {
+        "url": "http://127.0.0.1:4219/api/threads/thread_owned_18d7ed705d84133ddff7601dd7927e7b8eb62154/read/latest",
+        "targetArrays": []
+      },
+      {
+        "url": "http://127.0.0.1:4219/api/threads/thread_owned_18d7ed705d84133ddff7601dd7927e7b8eb62154/read/latest",
+        "targetArrays": []
+      },
+      {
+        "url": "http://127.0.0.1:4219/api/diagnostics/connection",
+        "targetArrays": []
+      },
+      {
+        "url": "http://127.0.0.1:4219/api/routing/preview",
+        "targetArrays": []
+      },
+      {
+        "url": "http://127.0.0.1:4219/api/threads/thread_owned_18d7ed705d84133ddff7601dd7927e7b8eb62154/read/latest",
+        "targetArrays": []
+      },
+      {
+        "url": "http://127.0.0.1:4219/api/threads/thread_owned_18d7ed705d84133ddff7601dd7927e7b8eb62154/read/latest",
+        "targetArrays": []
+      },
+      {
+        "url": "http://127.0.0.1:4219/api/routing/preview",
+        "targetArrays": []
+      },
+      {
+        "url": "http://127.0.0.1:4219/api/threads/thread_owned_18d7ed705d84133ddff7601dd7927e7b8eb62154/read/latest",
+        "targetArrays": []
+      },
+      {
+        "url": "http://127.0.0.1:4219/api/concierge/home/clients",
+        "targetArrays": []
+      },
+      {
+        "url": "http://127.0.0.1:4219/api/workspace/chat-references",
+        "targetArrays": []
+      },
+      {
+        "url": "http://127.0.0.1:4219/api/routing/preview",
+        "targetArrays": []
+      },
+      {
+        "url": "http://127.0.0.1:4219/api/threads/thread_owned_18d7ed705d84133ddff7601dd7927e7b8eb62154/read/latest",
+        "targetArrays": []
+      },
+      {
+        "url": "http://127.0.0.1:4219/api/routing/preview",
+        "targetArrays": []
+      },
+      {
+        "url": "http://127.0.0.1:4219/api/diagnostics/connection",
+        "targetArrays": []
+      }
+    ]
+  },
+  "threadUrl": "http://127.0.0.1:4218/thread/thread_owned_18d7ed705d84133ddff7601dd7927e7b8eb62154",
+  "ok": true,
+  "exitCode": 0
+}

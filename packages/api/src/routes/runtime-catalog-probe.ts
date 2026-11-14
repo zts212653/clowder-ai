@@ -23,11 +23,12 @@ export interface CatalogTarget {
   args: string[];
   cwd: string;
   model?: string;
+  env?: Record<string, string>;
 }
 export async function probeRuntimeCatalog(target: CatalogTarget): Promise<RuntimeModelCatalog> {
   if (target.kind === 'claude') return probeClaude(target);
   if (target.kind === 'codex') return probeCodexCatalog(target.command, target.args, target.cwd);
-  const rpc = catalogRpc(target.command, target.args, target.cwd);
+  const rpc = catalogRpc(target.command, target.args, target.cwd, undefined, target.env);
   try {
     await rpc.request('initialize', {
       protocolVersion: 1,

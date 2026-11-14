@@ -159,7 +159,7 @@ async function terminalIntentOutcome(
 function recoveryFenceOutcome(
   owner: UnixProcessIdentity,
   allowCurrentReconciliation = false,
-): RecoveryAttemptOutcome | null {
+): Extract<RecoveryAttemptOutcome, { kind: 'final' }> | null {
   const fence = evaluateDurableManagedGateWorkerFence({
     job: durableJob,
     owner,

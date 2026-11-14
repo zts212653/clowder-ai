@@ -1,10 +1,17 @@
 import { afterEach, expect, it, vi } from 'vitest';
-import { contentFileInfo } from '../file-action-client';
+import { contentFileInfo, originalMediaDownloadName } from '../file-action-client';
 
 const transport = vi.hoisted(() => ({ fetch: vi.fn() }));
 vi.mock('@/utils/api-client', () => ({ API_URL: 'http://file.test', apiFetch: transport.fetch }));
 const source = { kind: 'workspace' as const, worktreeId: 'tree', path: 'docs/report.md' };
 afterEach(() => vi.resetAllMocks());
+
+it('downloads native GIF/SVG with their actual suffix while keeping the original display name elsewhere', () => {
+  expect(originalMediaDownloadName('mislabeled.png', 'image/gif')).toBe('mislabeled.gif');
+  expect(originalMediaDownloadName('图标', 'image/svg+xml; charset=utf-8')).toBe('图标.svg');
+  expect(originalMediaDownloadName('原图.SVG', 'image/svg+xml')).toBe('原图.SVG');
+  expect(originalMediaDownloadName('报告.md', 'text/plain')).toBe('报告.md');
+});
 
 it.each([
   '/home/user/project/report.md',

@@ -5,6 +5,7 @@ import {
   createTypedWaitRegistration,
   isLiveTypedWaitRegistration,
 } from '../dist/domains/ball-custody/TypedWaitRegistration.js';
+import { MemoryWaitLifecycleEventLog } from '../dist/domains/ball-custody/WaitLifecycleEventLog.js';
 import { InvocationRegistry } from '../dist/domains/cats/services/agents/invocation/InvocationRegistry.js';
 import { InMemoryTurnExecutionStore } from '../dist/domains/cats/services/stores/memory/InMemoryTurnExecutionStore.js';
 import { InvocationRecordStore } from '../dist/domains/cats/services/stores/ports/InvocationRecordStore.js';
@@ -79,6 +80,7 @@ async function harness(options = {}) {
   });
   assert.ok(installed);
   const lifecycle = new DeploymentWaitLifecycleService({
+    eventLog: new MemoryWaitLifecycleEventLog(),
     taskStore,
     messageStore,
     deliveryDeps: connector.deliveryDeps,
@@ -295,10 +297,12 @@ describe('F323 Task-owned deployment wait lifecycle', () => {
     const h = await harness({ currentObservation: async () => current });
     await h.lifecycle.observe({ taskId: h.task.id, observation: observation() });
     const provider = { observe: async () => current };
-    const sweep = new DeploymentWaitRecoverySweep(h.taskStore, provider, h.lifecycle);
+    let clock = Date.now();
+    const sweep = new DeploymentWaitRecoverySweep(h.taskStore, provider, h.lifecycle, undefined, () => clock);
 
     assert.deepEqual(await sweep.run(), { checked: 0, recovered: 0 });
     current = observation();
+    clock += 60_001; // The persisted owner due time defers normal waiting, without counting a failure.
     assert.deepEqual(await sweep.run(), { checked: 0, recovered: 1 });
   });
 

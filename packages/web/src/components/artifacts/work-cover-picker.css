@@ -27,14 +27,14 @@
 }
 .work-cover-dialog-head h2 {
   margin: 0;
-  font-size: 16px;
+  font-size: var(--console-font-base);
   font-weight: 600;
   overflow-wrap: anywhere;
 }
 .work-cover-dialog-head p {
   margin: 4px 0 0;
   color: var(--cafe-text-secondary);
-  font-size: 13px;
+  font-size: var(--console-font-compact);
 }
 .work-cover-dialog-body {
   display: grid;
@@ -54,7 +54,7 @@
   padding: 6px 12px;
   border-radius: 8px;
   color: var(--cafe-text-secondary);
-  font-size: 13px;
+  font-size: var(--console-font-compact);
 }
 .work-cover-tabs button[aria-selected="true"] {
   background: var(--shell-selected);
@@ -94,7 +94,7 @@
   border-radius: 5px;
   background: color-mix(in oklch, var(--shell-paper) 92%, transparent);
   color: var(--shell-ink);
-  font-size: 11px;
+  font-size: var(--console-font-label);
   white-space: nowrap;
   text-overflow: ellipsis;
 }
@@ -108,7 +108,7 @@
 .work-cover-note {
   margin: 8px 0 0;
   color: var(--cafe-text-secondary);
-  font-size: 12.5px;
+  font-size: var(--console-font-xs);
   line-height: 1.5;
 }
 .work-cover-upload {
@@ -118,7 +118,7 @@
   border: 1px solid var(--cafe-border);
   border-radius: 8px;
   cursor: pointer;
-  font-size: 13px;
+  font-size: var(--console-font-compact);
 }
 .work-cover-upload input {
   position: absolute;
@@ -134,7 +134,7 @@
 }
 .work-cover-preview-label {
   color: var(--cafe-text-secondary);
-  font-size: 12.5px;
+  font-size: var(--console-font-xs);
 }
 .work-cover-preview-card .work-gallery-card {
   width: 100%;
@@ -152,14 +152,14 @@
   flex: 1 1 100%;
   margin: 0;
   color: var(--semantic-danger, #b42318);
-  font-size: 13px;
+  font-size: var(--console-font-compact);
 }
 .work-cover-button {
   min-height: 34px;
   padding: 0 14px;
   border: 1px solid var(--cafe-border);
   border-radius: 8px;
-  font-size: 13px;
+  font-size: var(--console-font-compact);
 }
 .work-cover-button-primary {
   border-color: var(--cafe-accent);
@@ -189,7 +189,7 @@
   border-radius: 10px;
   background: var(--shell-ink, #222);
   color: var(--shell-paper, #fff);
-  font-size: 13px;
+  font-size: var(--console-font-compact);
   transform: translateX(-50%);
   box-shadow: 0 4px 10px rgba(20, 20, 19, 0.18);
 }

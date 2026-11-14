@@ -102,6 +102,7 @@ class UpdatePromptController {
   constructor({
     ipcMain,
     getMainWindow,
+    getPresentableMainWindow,
     openExternal,
     dbg,
     trustedOrigin,
@@ -113,6 +114,7 @@ class UpdatePromptController {
   }) {
     this._ipcMain = ipcMain;
     this._getMainWindow = getMainWindow;
+    this._getPresentableMainWindow = getPresentableMainWindow;
     this._openExternal = openExternal;
     this._dbg = dbg;
     this._trustedOrigin = trustedOrigin;
@@ -174,7 +176,7 @@ class UpdatePromptController {
   }
 
   _presentMainWindow() {
-    const window = this._getMainWindow();
+    const window = this._getPresentableMainWindow();
     if (!isTrustedWindow(window, this._trustedOrigin)) return false;
     if (window.isMinimized?.()) window.restore();
     window.show?.();

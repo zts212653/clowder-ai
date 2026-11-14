@@ -41,7 +41,7 @@ export function MemoryProfile({
       <section aria-label="画像来源" className="space-y-3">
         <h1 className="text-display-sm">画像</h1>
         <output className="block text-sm text-cafe-muted">
-          {current ? '来源版本已变化，不能把当前正文当作当时递送的内容。' : '这条来源暂时读不到，可能已被遗忘。'}
+          {current ? '这条记忆在递来之后改过，现在的内容不是当时递来的那一版。' : '这条来源暂时读不到，可能已被遗忘。'}
         </output>
         <button
           type="button"

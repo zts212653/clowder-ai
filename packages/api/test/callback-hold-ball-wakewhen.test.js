@@ -25,6 +25,7 @@ import {
   readDurableTerminalReceipt,
   settleDurableManagedGateJobFromRunner,
 } from '../dist/domains/managed-job/durable-managed-gate-job-store.js';
+import { readManagedJobRecovery } from '../dist/domains/managed-job/managed-job-recovery-ledger.js';
 import { tryAutoCancelPendingHolds } from '../dist/routes/messages.js';
 import { isolateManagedJobData } from './helpers/isolated-managed-job-data.js';
 
@@ -39,6 +40,16 @@ isolateManagedJobData();
  */
 function assertStatesTerminal(message, label) {
   assert.equal(message?.source?.meta?.cancelable, false, `${label} must state cancelable: false on its card`);
+}
+
+function productionWakeKey(task) {
+  const job = resolveManagedCommandJob(task);
+  assert.ok(job, 'the original hold must retain its durable job reference');
+  assert.equal(job.originTaskId, task.id);
+  const intent = readManagedJobRecovery(job)?.recovery.wakeIntent;
+  assert.equal(typeof intent?.key, 'string', 'the terminal job owns the production wake identity');
+  assert.equal(task.params.holdLifecycle.managedCommand.productionIntentKey, intent.key);
+  return intent.key;
 }
 
 describe('F167 Phase P: wakeWhen cancel/replace/delivery tests', () => {
@@ -299,11 +310,8 @@ describe('F167 Phase P: wakeWhen cancel/replace/delivery tests', () => {
         assert.equal(record.result.exitCode, 0);
         assert.equal(record.result.tailOutput, actorUserId);
         assert.deepEqual(deliveries, [{ threadId: thread.id, catId: 'codex', userId: thread.createdBy }]);
-        assert.equal(
-          deps._appendedMessages.filter((message) => message.idempotencyKey === `hold-ball-completion:${body.taskId}`)
-            .length,
-          1,
-        );
+        const wakeKey = productionWakeKey(deps.dynamicTaskStore.getById(body.taskId));
+        assert.equal(deps._appendedMessages.filter((message) => message.idempotencyKey === wakeKey).length, 1);
       } finally {
         cancelWakeWhenRunner(thread.id, 'codex');
         await app.close();
@@ -1223,7 +1231,7 @@ describe('F167 Phase P: wakeWhen cancel/replace/delivery tests', () => {
       'queued',
       'the wake remains under Queue custody until its canonical response terminal',
     );
-    assert.equal(wakeReceipts[0].idempotencyKey, `hold-ball-completion:${taskId}`);
+    assert.equal(wakeReceipts[0].idempotencyKey, productionWakeKey(managedHold));
     assert.equal(wakeReceipts[0].source?.meta?.taskId, taskId);
     assert.match(wakeReceipts[0].content, /completed-after-user-message/);
   });

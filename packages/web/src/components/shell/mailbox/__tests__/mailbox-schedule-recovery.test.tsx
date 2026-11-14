@@ -4,7 +4,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { ok, scheduleItem, scheduleProposal } from '@/components/rich/__tests__/schedule-approval.fixture';
 import { useApprovalHubStore } from '@/stores/approvalHubStore';
 import { apiFetch } from '@/utils/api-client';
-import { createApprovalSessions } from '../approval-sessions';
+import { createApprovalSessions, sessionKey } from '../approval-sessions';
 import { MailboxRow } from '../MailboxRow';
 import { collectiveFailure } from './collective-failure.fixture';
 import { approvalRow, okRead } from './mailbox-fixtures';
@@ -12,6 +12,7 @@ import { approvalRow, okRead } from './mailbox-fixtures';
 vi.mock('@/utils/api-client', () => ({ apiFetch: vi.fn() }));
 let root: ReturnType<typeof createRoot>, container: HTMLDivElement;
 beforeEach(() => {
+  useApprovalHubStore.setState({ scheduleDriftBlocked: {} });
   vi.stubGlobal('React', React);
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
   container = document.createElement('div');
@@ -24,6 +25,82 @@ afterEach(() => {
   useApprovalHubStore.setState({ items: [], pendingReadAvailable: false, deciding: {}, decisionAttempts: {} });
   vi.mocked(apiFetch).mockReset();
   vi.unstubAllGlobals();
+});
+it('keeps a known delete conflict after remount and authorizes rejection instead of another approval', async () => {
+  let proposal = scheduleProposal();
+  if (proposal.mutation.kind !== 'create') throw new Error('Expected create fixture');
+  const task = proposal.mutation.task;
+  proposal.mutation = { kind: 'delete', taskId: task.id, taskSnapshot: task, expectedFingerprint: 'original' };
+  const item = scheduleItem(proposal),
+    row = approvalRow(item);
+  let generation = 1;
+  const sessions = createApprovalSessions({
+    readsStarted: () => generation,
+    refetch: () => {
+      generation += 1;
+    },
+    refreshStore: async () => {},
+    storeItems: () => [item],
+    attempts: () => ({}),
+    latestRead: () => ({ result: okRead([row]), generation }),
+    now: Date.now,
+  });
+  useApprovalHubStore.setState({ items: [item], pendingReadAvailable: true, isLoading: false, deciding: {} });
+  vi.mocked(apiFetch).mockImplementation(async (path, options) => {
+    if (options?.method === 'POST') {
+      if (String(path).endsWith('/approve'))
+        return { ok: false, status: 409, json: async () => ({ code: 'SCHEDULE_TASK_DRIFT' }) } as Response;
+      proposal = { ...proposal, status: 'rejected', rejectedBy: 'owner-1', rejectedAt: 2000 };
+      return ok({ proposalId: proposal.proposalId, status: 'rejected' });
+    }
+    return String(path) === '/api/session'
+      ? ok({ userId: 'owner-1' })
+      : String(path) === '/api/approval-hub/pending'
+        ? ok({ items: [item] })
+        : String(path).startsWith('/api/schedule-proposals/')
+          ? ok({ proposal })
+          : ok({ id: 'destination', title: 'Original discussion', projectPath: 'default' });
+  });
+  const render = () =>
+    root.render(
+      <MailboxRow
+        item={row}
+        rowKey="drift"
+        stale={false}
+        expanded={false}
+        onToggle={() => {}}
+        onOpen={() => {}}
+        readCurrent
+        hosted={{ sessions, ownerUserId: 'owner-1' }}
+      />,
+    );
+  await act(async () => render());
+  const button = (id: string) => container.querySelector<HTMLButtonElement>(`[data-testid="${id}"]`);
+  await act(async () => button('schedule-approve')?.click());
+  await act(async () => {
+    sessions.readSettled();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+  expect(container.querySelector('[data-testid="mailbox-approval-result"]')?.textContent).toContain(
+    '当前删除请求不能执行',
+  );
+  expect(container.textContent?.match(/任务已变化/g)).toHaveLength(1);
+  await act(async () => root.render(null));
+  await act(async () => render());
+  expect(button('schedule-approve')?.disabled).toBe(true);
+  expect(button('schedule-reject')?.disabled).toBe(false);
+  const key = sessionKey('owner-1', item);
+  expect(sessions.authorize(key, { decision: 'approve' })).toBe(false);
+  expect(sessions.authorize(key, { decision: 'reject' })).toBe(true);
+  await act(async () => button('schedule-approve')?.click());
+  expect(vi.mocked(apiFetch).mock.calls.filter(([, o]) => o?.method === 'POST')).toHaveLength(1);
+  await act(async () => button('schedule-reject')?.click());
+  expect(
+    vi
+      .mocked(apiFetch)
+      .mock.calls.filter(([, o]) => o?.method === 'POST')
+      .at(-1)?.[0],
+  ).toBe('/api/schedule-proposals/schedule-1/reject');
 });
 it.each([
   false,

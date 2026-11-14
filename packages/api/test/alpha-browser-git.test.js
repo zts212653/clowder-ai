@@ -34,18 +34,23 @@ function repositories(t) {
   const target = commit();
   git(remote, 'tag', 'unrelated-tag');
   const f = fixture(),
-    calls = [];
+    calls = [],
+    failedDiscoveries = [];
   delete f.options.inspectMain;
   f.options.repoRoot = client;
   f.runtime.runAlphaBrowserRevision = async (input) => {
-    calls.push(input.targetSha);
+    if (input.targetSha !== undefined) calls.push(input.targetSha);
+    else {
+      assert.match(input.discoveryError, /Command failed/);
+      failedDiscoveries.push(input);
+    }
     return { status: 'idle' };
   };
   const execute = (repoRoot = client, signal = f.context.signal) =>
     createAlphaBrowserTemplate({ ...f.options, repoRoot })
       .createSpec('alpha-subscription', f.params)
       .run.execute('alpha', 'alpha', { ...f.context, signal });
-  return { root, remote, client, baseline, target, git, calls, execute };
+  return { root, remote, client, baseline, target, git, calls, failedDiscoveries, execute };
 }
 
 for (const peerHoldsRefLock of [false, true]) {
@@ -77,10 +82,12 @@ test('remote failure, missing main and cancellation never execute a stale local 
   const controller = new AbortController();
   controller.abort();
   await assert.rejects(f.execute(f.client, controller.signal), { name: 'AbortError' });
+  assert.deepEqual(f.failedDiscoveries, [], 'cancellation must not enter enrolled work');
   f.git(f.remote, 'branch', '-m', 'other');
   await assert.rejects(f.execute(), /Command failed/);
   f.git(f.client, 'remote', 'set-url', 'origin', join(f.root, 'absent'));
   await assert.rejects(f.execute(), /Command failed/);
   assert.deepEqual(f.calls, []);
+  assert.equal(f.failedDiscoveries.length, 2, 'failed discovery may inspect only the existing durable queue');
   assert.equal(f.git(f.client, 'rev-parse', 'origin/main'), f.baseline);
 });

@@ -33,6 +33,19 @@ function pcmWav(durationSec, sampleRate = 24_000) {
   return wav;
 }
 
+function withHealth(handler) {
+  return (url, init) =>
+    String(url).endsWith('/health')
+      ? Promise.resolve(
+          Response.json({
+            model: 'mlx-community/Qwen3-TTS-12Hz-1.7B-Base-bf16',
+            backend: 'qwen3-clone',
+            capabilities: ['speech-stream-route-v1'],
+          }),
+        )
+      : handler(url, init);
+}
+
 describe('MlxAudioTtsProvider', () => {
   const originalFetch = globalThis.fetch;
   const originalServicesConfig = process.env.CAT_CAFE_SERVICES_CONFIG;
@@ -47,7 +60,10 @@ describe('MlxAudioTtsProvider', () => {
   });
 
   it('has correct id and model', () => {
-    const p = new MlxAudioTtsProvider({ baseUrl: 'http://localhost:9999' });
+    const p = new MlxAudioTtsProvider({
+      baseUrl: 'http://localhost:9999',
+      model: 'mlx-community/Qwen3-TTS-12Hz-1.7B-Base-bf16',
+    });
     assert.strictEqual(p.id, 'mlx-audio');
     assert.strictEqual(p.model, 'mlx-community/Qwen3-TTS-12Hz-1.7B-Base-bf16');
   });
@@ -55,11 +71,11 @@ describe('MlxAudioTtsProvider', () => {
   it('sends correct request body to TTS server', async () => {
     let capturedUrl;
     let capturedBody;
-    globalThis.fetch = async (url, init) => {
+    globalThis.fetch = withHealth(async (url, init) => {
       capturedUrl = url;
       capturedBody = JSON.parse(init.body);
       return new Response(new Uint8Array([1, 2, 3]), { status: 200 });
-    };
+    });
 
     const p = new MlxAudioTtsProvider({ baseUrl: 'http://test:9877' });
     await p.synthesize({ text: 'hello', voice: 'vm_test', langCode: 'en', speed: 1.5, format: 'wav' });
@@ -74,10 +90,10 @@ describe('MlxAudioTtsProvider', () => {
 
   it('canonicalizes localhost baseUrl to IPv4 loopback before requesting TTS', async () => {
     let capturedUrl;
-    globalThis.fetch = async (url) => {
+    globalThis.fetch = withHealth(async (url) => {
       capturedUrl = url;
       return new Response(new Uint8Array([1]), { status: 200 });
-    };
+    });
 
     const p = new MlxAudioTtsProvider({ baseUrl: 'http://localhost:9879' });
     await p.synthesize({ text: 'hello', voice: 'vm_test' });
@@ -89,12 +105,12 @@ describe('MlxAudioTtsProvider', () => {
     const configDir = mkdtempSync(join(tmpdir(), 'tts-provider-config-'));
     process.env.CAT_CAFE_SERVICES_CONFIG = join(configDir, 'services.json');
     delete process.env.TTS_URL;
-    setServiceConfig('mlx-tts', { enabled: true, installed: true, port: 19982 });
+    setServiceConfig('mlx-tts', { enabled: true, installed: true, selectedModel: 'qwen3-clone', port: 19982 });
     let capturedUrl;
-    globalThis.fetch = async (url) => {
+    globalThis.fetch = withHealth(async (url) => {
       capturedUrl = url;
       return new Response(new Uint8Array([1]), { status: 200 });
-    };
+    });
     try {
       const p = new MlxAudioTtsProvider();
       await p.synthesize({ text: 'hello', voice: 'vm_test' });
@@ -114,19 +130,19 @@ describe('MlxAudioTtsProvider', () => {
     const configDir = mkdtempSync(join(tmpdir(), 'tts-provider-reconfig-'));
     process.env.CAT_CAFE_SERVICES_CONFIG = join(configDir, 'services.json');
     delete process.env.TTS_URL;
-    setServiceConfig('mlx-tts', { enabled: false, installed: true, port: 19982 });
+    setServiceConfig('mlx-tts', { enabled: false, installed: true, selectedModel: 'qwen3-clone', port: 19982 });
     const capturedUrls = [];
-    globalThis.fetch = async (url) => {
+    globalThis.fetch = withHealth(async (url) => {
       capturedUrls.push(String(url));
       return new Response(new Uint8Array([1]), { status: 200 });
-    };
+    });
     try {
       const p = new MlxAudioTtsProvider();
       await p.synthesize({ text: 'hello', voice: 'vm_test' });
 
       // Simulate /reconfigure persisting a new port while the provider
       // instance is still alive.
-      setServiceConfig('mlx-tts', { enabled: false, installed: true, port: 19983 });
+      setServiceConfig('mlx-tts', { enabled: false, installed: true, selectedModel: 'qwen3-clone', port: 19983 });
       await p.synthesize({ text: 'hello again', voice: 'vm_test' });
 
       assert.strictEqual(capturedUrls[0], 'http://127.0.0.1:19982/v1/audio/speech');
@@ -144,10 +160,10 @@ describe('MlxAudioTtsProvider', () => {
   // injected URL is what every request hits.
   it('keeps an explicit baseUrl override stable across requests', async () => {
     const capturedUrls = [];
-    globalThis.fetch = async (url) => {
+    globalThis.fetch = withHealth(async (url) => {
       capturedUrls.push(String(url));
       return new Response(new Uint8Array([1]), { status: 200 });
-    };
+    });
 
     const p = new MlxAudioTtsProvider({ baseUrl: 'http://test:9877' });
     await p.synthesize({ text: 'hello', voice: 'vm_test' });
@@ -158,7 +174,7 @@ describe('MlxAudioTtsProvider', () => {
 
   it('returns Uint8Array audio with correct metadata', async () => {
     const audioBytes = new Uint8Array([0, 1, 2, 3, 4]);
-    globalThis.fetch = async () => new Response(audioBytes, { status: 200 });
+    globalThis.fetch = withHealth(async () => new Response(audioBytes, { status: 200 }));
 
     const p = new MlxAudioTtsProvider({ baseUrl: 'http://test:9877' });
     const result = await p.synthesize({ text: 'test', voice: 'v1' });
@@ -171,7 +187,9 @@ describe('MlxAudioTtsProvider', () => {
   });
 
   it('reports WAV duration so listen-mode synthesis can emit real-time factor', async () => {
-    globalThis.fetch = async () => new Response(pcmWav(1.5), { status: 200, headers: { 'x-audio-format': 'wav' } });
+    globalThis.fetch = withHealth(
+      async () => new Response(pcmWav(1.5), { status: 200, headers: { 'x-audio-format': 'wav' } }),
+    );
 
     const p = new MlxAudioTtsProvider({ baseUrl: 'http://test:9877' });
     const result = await p.synthesize({ text: '听读性能探针', voice: 'v1', format: 'wav' });
@@ -184,7 +202,7 @@ describe('MlxAudioTtsProvider', () => {
     let capturedBody;
     const chunkAudio = pcmWav(0.5);
     const finalAudio = pcmWav(1.0);
-    globalThis.fetch = async (url, init) => {
+    globalThis.fetch = withHealth(async (url, init) => {
       capturedUrl = url;
       capturedBody = JSON.parse(init.body);
       const lines = [
@@ -204,7 +222,7 @@ describe('MlxAudioTtsProvider', () => {
         status: 200,
         headers: { 'content-type': 'application/x-ndjson' },
       });
-    };
+    });
 
     const provider = new MlxAudioTtsProvider({ baseUrl: 'http://test:9877' });
     const events = [];
@@ -236,7 +254,7 @@ describe('MlxAudioTtsProvider', () => {
     const firstChunk = pcmWav(0.5);
     const lastChunk = pcmWav(0.4);
     const finalAudio = pcmWav(0.9);
-    globalThis.fetch = async () => {
+    globalThis.fetch = withHealth(async () => {
       const lines = [
         JSON.stringify({
           type: 'chunk',
@@ -260,7 +278,7 @@ describe('MlxAudioTtsProvider', () => {
         status: 200,
         headers: { 'content-type': 'application/x-ndjson' },
       });
-    };
+    });
 
     const provider = new MlxAudioTtsProvider({ baseUrl: 'http://test:9877' });
     const events = [];
@@ -279,7 +297,7 @@ describe('MlxAudioTtsProvider', () => {
   it('propagates caller cancellation into the sidecar request', async () => {
     let requestSignal;
     let responseController;
-    globalThis.fetch = async (_url, init) => {
+    globalThis.fetch = withHealth(async (_url, init) => {
       requestSignal = init.signal;
       const body = new ReadableStream({
         start(controller) {
@@ -292,7 +310,7 @@ describe('MlxAudioTtsProvider', () => {
         { once: true },
       );
       return new Response(body, { status: 200, headers: { 'content-type': 'application/x-ndjson' } });
-    };
+    });
 
     const provider = new MlxAudioTtsProvider({ baseUrl: 'http://test:9877' });
     const caller = new AbortController();
@@ -313,7 +331,7 @@ describe('MlxAudioTtsProvider', () => {
   });
 
   it('throws on non-200 response', async () => {
-    globalThis.fetch = async () => new Response('Internal Server Error', { status: 500 });
+    globalThis.fetch = withHealth(async () => new Response('Internal Server Error', { status: 500 }));
 
     const p = new MlxAudioTtsProvider({ baseUrl: 'http://test:9877' });
     await assert.rejects(
@@ -324,10 +342,10 @@ describe('MlxAudioTtsProvider', () => {
 
   it('uses default langCode and speed when not provided', async () => {
     let capturedBody;
-    globalThis.fetch = async (_url, init) => {
+    globalThis.fetch = withHealth(async (_url, init) => {
       capturedBody = JSON.parse(init.body);
       return new Response(new Uint8Array(0), { status: 200 });
-    };
+    });
 
     const p = new MlxAudioTtsProvider({ baseUrl: 'http://test:9877' });
     await p.synthesize({ text: 'test', voice: 'v1' });
@@ -340,11 +358,13 @@ describe('MlxAudioTtsProvider', () => {
   // F066: Format contract tests — edge-tts returns mp3 when wav was requested
   it('respects x-audio-format header from server (edge-tts mp3 case)', async () => {
     const mp3Bytes = new Uint8Array([0xff, 0xfb, 0x90, 0x00]); // fake mp3 header
-    globalThis.fetch = async () =>
-      new Response(mp3Bytes, {
-        status: 200,
-        headers: { 'x-audio-format': 'mp3' },
-      });
+    globalThis.fetch = withHealth(
+      async () =>
+        new Response(mp3Bytes, {
+          status: 200,
+          headers: { 'x-audio-format': 'mp3' },
+        }),
+    );
 
     const p = new MlxAudioTtsProvider({ baseUrl: 'http://test:9877' });
     const result = await p.synthesize({ text: 'test', voice: 'v1', format: 'wav' });
@@ -356,7 +376,7 @@ describe('MlxAudioTtsProvider', () => {
   });
 
   it('falls back to requested format when x-audio-format header is absent', async () => {
-    globalThis.fetch = async () => new Response(new Uint8Array([1, 2]), { status: 200 });
+    globalThis.fetch = withHealth(async () => new Response(new Uint8Array([1, 2]), { status: 200 }));
 
     const p = new MlxAudioTtsProvider({ baseUrl: 'http://test:9877' });
     const result = await p.synthesize({ text: 'test', voice: 'v1', format: 'wav' });
@@ -366,11 +386,13 @@ describe('MlxAudioTtsProvider', () => {
 
   // F066-R2: Security — malicious x-audio-format header must be rejected
   it('rejects malicious x-audio-format header (path traversal prevention)', async () => {
-    globalThis.fetch = async () =>
-      new Response(new Uint8Array([1]), {
-        status: 200,
-        headers: { 'x-audio-format': '../../../../etc/passwd' },
-      });
+    globalThis.fetch = withHealth(
+      async () =>
+        new Response(new Uint8Array([1]), {
+          status: 200,
+          headers: { 'x-audio-format': '../../../../etc/passwd' },
+        }),
+    );
 
     const p = new MlxAudioTtsProvider({ baseUrl: 'http://test:9877' });
     const result = await p.synthesize({ text: 'test', voice: 'v1', format: 'wav' });
@@ -380,11 +402,13 @@ describe('MlxAudioTtsProvider', () => {
   });
 
   it('rejects unknown x-audio-format values', async () => {
-    globalThis.fetch = async () =>
-      new Response(new Uint8Array([1]), {
-        status: 200,
-        headers: { 'x-audio-format': 'ogg' },
-      });
+    globalThis.fetch = withHealth(
+      async () =>
+        new Response(new Uint8Array([1]), {
+          status: 200,
+          headers: { 'x-audio-format': 'ogg' },
+        }),
+    );
 
     const p = new MlxAudioTtsProvider({ baseUrl: 'http://test:9877' });
     const result = await p.synthesize({ text: 'test', voice: 'v1', format: 'wav' });
@@ -395,10 +419,10 @@ describe('MlxAudioTtsProvider', () => {
   // F066: Clone param passthrough tests
   it('sends clone params (refAudio, refText, instruct, temperature) to TTS server', async () => {
     let capturedBody;
-    globalThis.fetch = async (_url, init) => {
+    globalThis.fetch = withHealth(async (_url, init) => {
       capturedBody = JSON.parse(init.body);
       return new Response(new Uint8Array([1]), { status: 200 });
-    };
+    });
 
     const p = new MlxAudioTtsProvider({ baseUrl: 'http://test:9877' });
     await p.synthesize({
@@ -419,10 +443,10 @@ describe('MlxAudioTtsProvider', () => {
 
   it('omits clone params from body when not provided', async () => {
     let capturedBody;
-    globalThis.fetch = async (_url, init) => {
+    globalThis.fetch = withHealth(async (_url, init) => {
       capturedBody = JSON.parse(init.body);
       return new Response(new Uint8Array([1]), { status: 200 });
-    };
+    });
 
     const p = new MlxAudioTtsProvider({ baseUrl: 'http://test:9877' });
     await p.synthesize({ text: 'test', voice: 'v1' });

@@ -106,4 +106,34 @@ describe('create_rich_block html_widget inline handler hint', () => {
     assert.equal(result.isError, true);
     assert.ok(!result.content[0].text.includes('INLINE EVENT HANDLERS'));
   });
+  test('warns about malformed image data in script without echoing image payloads', async () => {
+    const { handleCreateRichBlock } = await import('../dist/tools/callback-tools.js');
+    const damaged = 'AAAAA==';
+    const result = await handleCreateRichBlock({
+      block: widget(`<img id="cat"><script>cat.src='data:image/webp;base64,${damaged}';</script>`),
+    });
+    assert.equal(result.isError, undefined);
+    assert.match(result.content[0].text, /HTML_WIDGET IMAGE DATA/);
+    assert.match(result.content[0].text, /1 malformed base64 image/);
+    assert.ok(!result.content[0].text.includes(damaged));
+  });
+
+  test('accepts unpadded and whitespace-containing base64 and script-assigned image sources', async () => {
+    const { handleCreateRichBlock } = await import('../dist/tools/callback-tools.js');
+    for (const data of ['YQ', 'Y Q==', 'YQ==']) {
+      const result = await handleCreateRichBlock({
+        block: widget(`<img id="cat"><script>cat.src='data:image/png;base64,${data}';</script>`),
+      });
+      assert.equal(result.content[0].text, '{"status":"ok"}');
+    }
+  });
+  test('does not diagnose interpolated image templates as broken static payloads', async () => {
+    const { handleCreateRichBlock } = await import('../dist/tools/callback-tools.js');
+    const html =
+      '<img id="cat"><script>const encoded=btoa("<svg></svg>"); cat.src=`data:image/svg+xml;base64,${encoded}`;</script>';
+    const dynamic = await handleCreateRichBlock({ block: widget(html) });
+    assert.equal(dynamic.content[0].text, '{"status":"ok"}');
+    const literal = await handleCreateRichBlock({ block: widget('<img src="data:image/webp;base64,${encoded}">') });
+    assert.match(literal.content[0].text, /HTML_WIDGET IMAGE DATA/);
+  });
 });

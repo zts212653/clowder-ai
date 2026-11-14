@@ -1,0 +1,53 @@
+{
+  "resource": {
+    "kind": "family",
+    "resourceFamily": "library"
+  },
+  "retiredNames": ["cat_cafe_library_archive"],
+  "canonicalNames": [],
+  "expectedProfiles": {},
+  "rollbackRevision": "57b32fbdc51fca26699fc6398fdf96f6fc4e32f1",
+  "layers": {
+    "mcp-definition": {
+      "status": "covered",
+      "consumers": [
+        "packages/mcp-server/src/tools/library-lifecycle-tools.ts",
+        "packages/mcp-server/src/tools/index.ts"
+      ]
+    },
+    "runtime-catalog-profile": {
+      "status": "covered",
+      "consumers": ["packages/mcp-server/governance/mcp-surface-baseline.json"]
+    },
+    "prompt-l0": {
+      "status": "not-applicable",
+      "rationale": "L0 and prompt templates never named this tool; the owner library page calls the same POST /api/library/:id/archive route.",
+      "absenceEvidence": ["cat_cafe_library_archive"]
+    },
+    "skill-convention": {
+      "status": "not-applicable",
+      "rationale": "No skill or ref named this tool.",
+      "absenceEvidence": ["cat_cafe_library_archive"]
+    },
+    "fixture-test": {
+      "status": "covered",
+      "consumers": [
+        "packages/mcp-server/test/memory-entry-subtraction.test.js",
+        "packages/mcp-server/test/library-lifecycle-tools.test.js",
+        "packages/mcp-server/test/library-lifecycle-owner.test.js",
+        "packages/mcp-server/test/server-toolsets-annotations.test.ts",
+        "packages/api/test/memory-library-mcp-writes.test.js"
+      ]
+    },
+    "eval": {
+      "status": "not-applicable",
+      "rationale": "No eval consumes this tool; the archive route is unchanged.",
+      "absenceEvidence": ["cat_cafe_library_archive"]
+    },
+    "observability": {
+      "status": "not-applicable",
+      "rationale": "No telemetry classifies this tool name.",
+      "absenceEvidence": ["cat_cafe_library_archive"]
+    }
+  }
+}

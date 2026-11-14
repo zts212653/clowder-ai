@@ -107,7 +107,7 @@ describe('CallerDispatchObservationRegistry', () => {
     }
   });
 
-  it('keeps an unreturned terminal response as a coordinate-only pending observation', async () => {
+  it('keeps an unreturned terminal response pending without disclosing its coordinate', async () => {
     const registry = new CallerDispatchObservationRegistry();
     const source = inputMessage({
       refs: [{ targetId: 'b', phase: 'settled', statusMessageId: 'response-b', dispatchedAt: 2 }],
@@ -124,10 +124,39 @@ describe('CallerDispatchObservationRegistry', () => {
 
     const projection = await registry.project({ getById: async (id) => messages.get(id) ?? null }, scope);
 
-    assert.match(projection.prompt, /unknown.*response=response-b/);
-    assert.doesNotMatch(projection.prompt, /unreturned body|body=/);
+    assert.match(projection.prompt, /unknown/);
+    assert.doesNotMatch(projection.prompt, /unreturned body|body=|response-b/);
     assert.equal(projection.included[0]?.terminal, false);
     assert.equal(registry.list(scope).length, 1);
+  });
+
+  it('does not disclose a private, missing or unreadable response id in unknown observations', async () => {
+    for (const mode of ['whisper', 'missing', 'read_failure']) {
+      const registry = new CallerDispatchObservationRegistry();
+      const source = inputMessage({
+        refs: [{ targetId: 'b', phase: 'settled', statusMessageId: 'private-response-b', dispatchedAt: 2 }],
+      });
+      registry.registerPersistedSource(source, ['b']);
+      const projection = await registry.project(
+        {
+          getById: async (id) => {
+            if (id === source.id) return source;
+            if (mode === 'read_failure') throw new Error('unavailable');
+            if (mode === 'missing') return null;
+            return {
+              ...responseMessage(id, 'b', 'completed', 'private body'),
+              visibility: 'whisper',
+              whisperTo: ['b'],
+            };
+          },
+        },
+        scope,
+      );
+      assert.match(projection.prompt, /unknown/, mode);
+      assert.doesNotMatch(projection.prompt, /private-response-b|private body/, mode);
+      assert.equal(projection.included[0].terminal, false, mode);
+      assert.equal(registry.list(scope).length, 1, mode);
+    }
   });
 
   it('projects exact terminal/open targets and clears only terminal keys included in the prompt', async () => {

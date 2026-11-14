@@ -2,7 +2,16 @@ import { executedInvocations } from './lib/shell-invocation.mjs';
 import { shellInvocation, stripHarmlessRedirections } from './native-effect-shell-tokenizer.mjs';
 
 const FORCE = new Set(['--force', '-f', '--update-head-ok', '-u']);
-const VALUES = new Set(['--depth', '--deepen', '--jobs', '-j', '--shallow-since', '--shallow-exclude', '--filter']);
+const VALUES = new Set([
+  '--depth',
+  '--deepen',
+  '--jobs',
+  '-j',
+  '--shallow-since',
+  '--shallow-exclude',
+  '--filter',
+  '--refmap',
+]);
 const FLAGS = new Set([
   '--quiet',
   '-q',
@@ -27,6 +36,7 @@ const FLAGS = new Set([
   '--progress',
   '--no-progress',
   '--no-auto-gc',
+  '--no-auto-maintenance',
   '--auto-gc',
   '--refetch',
   '-4',
@@ -39,6 +49,7 @@ const FLAGS = new Set([
 export function fetchRefRoles(args) {
   if (args?.[0] !== 'fetch') return null;
   const positional = [];
+  const mappings = [];
   let forced = false,
     options = true;
   for (let index = 1; index < args.length; index += 1) {
@@ -51,14 +62,19 @@ export function fetchRefRoles(args) {
       const flag = token.split('=', 1)[0];
       if (FORCE.has(flag)) forced = true;
       else if (VALUES.has(flag)) {
-        if (!token.includes('=') && args[++index] === undefined) return null;
+        const value = token.includes('=') ? token.slice(token.indexOf('=') + 1) : args[++index];
+        if (value === undefined) return null;
+        if (flag === '--refmap' && value) {
+          if (!value.includes(':')) return null;
+          mappings.push(value);
+        }
       } else if (!FLAGS.has(flag)) return null;
       continue;
     }
     positional.push(token);
   }
   const destinations = [];
-  for (const refspec of positional.slice(1)) {
+  for (const refspec of [...positional.slice(1), ...mappings]) {
     if (refspec.startsWith('+')) forced = true;
     const colon = refspec.indexOf(':');
     if (colon >= 0) destinations.push(refspec.slice(colon + 1));

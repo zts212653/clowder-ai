@@ -29,6 +29,7 @@ for (const committed of [false, true]) {
         await state.panel.getByRole('alert').waitFor();
         assert.equal(state.created.length, committed ? 3 : 2);
         const failed = state.writes[2];
+        if (committed) assert.equal(state.created[2].id, failed.payload.catId);
         await state.page.reload();
         await state.panel.waitFor();
         await state.page.getByText('正在检测本机工具并匹配角色…', { exact: true }).waitFor({ state: 'hidden' });

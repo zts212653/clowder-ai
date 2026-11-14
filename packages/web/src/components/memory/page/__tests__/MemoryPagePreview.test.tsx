@@ -78,6 +78,7 @@ beforeEach(() => {
 afterEach(async () => {
   await act(() => root.unmount());
   container.remove();
+  window.history.replaceState(null, '', '/');
   vi.clearAllMocks();
 });
 const render = async (tab: 'library' | 'brakes' | 'all') => {
@@ -103,6 +104,7 @@ describe('memory page read-only preview', () => {
           })
         : original?.(path),
     );
+    window.history.replaceState(null, '', '/memory?matter=matter-source&q=%E8%AE%BE%E7%BD%AE%E5%85%A5%E5%8F%A3');
     await act(async () =>
       root.render(
         <MemoryPagePreview tab="all" shell="v2" matterId="matter-source" initialQuery="设置入口" from="thread-owner" />,

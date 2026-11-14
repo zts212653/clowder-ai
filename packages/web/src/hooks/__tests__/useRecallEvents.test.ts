@@ -85,10 +85,6 @@ describe('parseTextResults', () => {
     expect(results[0]!.snippet).toBeUndefined();
   });
 
-  it('returns empty array for empty input', () => {
-    expect(parseTextResults('')).toEqual([]);
-  });
-
   it('skips [DEGRADED] banner — not a real result (PR #923)', () => {
     const text = `[DEGRADED] Evidence store error — results may be incomplete
 

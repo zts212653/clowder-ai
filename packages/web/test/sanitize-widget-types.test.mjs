@@ -13,7 +13,9 @@ const require = createRequire(import.meta.url);
 test('widget sanitizer typechecks with distinct nominal Trusted Types declarations', () => {
   const fixture = mkdtempSync(path.join(tmpdir(), 'widget-trusted-types-'));
   try {
-    const purifierRequire = createRequire(require.resolve('dompurify'));
+    const dompurifyEntry = require.resolve('dompurify');
+    const purifierRequire = createRequire(dompurifyEntry);
+    const dompurifyTypes = path.join(path.dirname(dompurifyEntry), 'purify.es.d.mts');
     copyFileSync(
       purifierRequire.resolve('@types/trusted-types/lib/index.d.ts'),
       path.join(fixture, 'trusted-types-copy.d.ts'),
@@ -37,6 +39,7 @@ test('widget sanitizer typechecks with distinct nominal Trusted Types declaratio
       module: ts.ModuleKind.ESNext,
       moduleResolution: ts.ModuleResolutionKind.Bundler,
       esModuleInterop: true,
+      paths: { dompurify: [dompurifyTypes] },
     });
     const diagnostics = ts.getPreEmitDiagnostics(program);
     assert.equal(

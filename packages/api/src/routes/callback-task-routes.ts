@@ -205,14 +205,23 @@ export function registerCallbackTaskRoutes(
     developmentDocuments?: DevelopmentScopeDocuments;
     liveTaskAuthority?: LiveTaskAuthority;
     ordinaryTaskHandoffs?: OrdinaryTaskHandoffService;
+    taskRecovery?: Pick<
+      import('../domains/ball-custody/TaskRecoveryReadModel.js').TaskRecoveryReadModel,
+      'project' | 'projectMany'
+    >;
   },
 ): void {
   const { taskStore, messageStore, socketManager, threadStore } = deps;
+  const projectTask = (task: TaskItem): Promise<TaskItem> =>
+    deps.taskRecovery ? deps.taskRecovery.project(task) : Promise.resolve(task);
   registerCallbackDevelopmentWorkRoutes(app, deps);
   const entrustedWorkLifecycle = new EntrustedWorkLifecycleService(taskStore, {
     artifactReader: new F232PreparedArtifactReader({ messages: messageStore }),
-    onChanged: (ownerUserId) =>
-      socketManager.emitToUser(ownerUserId, 'entrusted_work_projection_invalidated', { ownerUserId }),
+    onChanged: (ownerUserId, reason) =>
+      socketManager.emitToUser(ownerUserId, 'entrusted_work_projection_invalidated', {
+        ownerUserId,
+        ...(reason ? { reason } : {}),
+      }),
   });
 
   app.post(
@@ -321,10 +330,11 @@ export function registerCallbackTaskRoutes(
         return { error: 'Failed to update task' };
       }
 
-      socketManager.broadcastToRoom(`thread:${updated.threadId}`, 'task_updated', updated);
+      const projected = await projectTask(updated);
+      socketManager.broadcastToRoom(`thread:${projected.threadId}`, 'task_updated', projected);
       return {
         status: 'ok',
-        task: updated,
+        task: projected,
         ...(await reconcileOwnedTaskWaits(taskStore, deps.ownedWaitStatusReader, actor)),
       };
     }),
@@ -415,10 +425,11 @@ export function registerCallbackTaskRoutes(
       try {
         await assertCurrent();
         const task = await entrustedWorkLifecycle.close(parsed.data, assertCurrent);
-        socketManager.broadcastToRoom(`thread:${task.threadId}`, 'task_updated', task);
+        const projected = await projectTask(task);
+        socketManager.broadcastToRoom(`thread:${projected.threadId}`, 'task_updated', projected);
         return {
           status: 'closed',
-          task,
+          task: projected,
           ...(await reconcileOwnedTaskWaits(taskStore, deps.ownedWaitStatusReader, actor)),
         };
       } catch (error) {
@@ -464,11 +475,12 @@ export function registerCallbackTaskRoutes(
       }
       try {
         await assertCurrent();
-        const task = await entrustedWorkLifecycle.update(parsed.data);
-        socketManager.broadcastToRoom(`thread:${task.threadId}`, 'task_updated', task);
+        const task = await entrustedWorkLifecycle.update(parsed.data, existing);
+        const projected = await projectTask(task);
+        socketManager.broadcastToRoom(`thread:${projected.threadId}`, 'task_updated', projected);
         return {
           status: 'updated',
-          task,
+          task: projected,
           ...(await reconcileOwnedTaskWaits(taskStore, deps.ownedWaitStatusReader, actor)),
         };
       } catch (error) {
@@ -602,7 +614,7 @@ export function registerCallbackTaskRoutes(
       ...(taskId ? { taskId } : {}),
       ...(featureId ? { featureId } : {}),
     });
-    const tasks = [...result.tasks];
+    const tasks = deps.taskRecovery ? await deps.taskRecovery.projectMany(result.tasks) : [...result.tasks];
 
     // F236 AC-A4: anchor the why field (head preview + whyLength + whyTruncated + drillDown).
     // A taskId drill returns that task's why in full.

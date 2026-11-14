@@ -335,3 +335,171 @@ describe('ThreadChatHistoryAdmission', () => {
     ).resolves.toEqual({ status: 'completed', value: 'retry result' });
   });
 });
+
+describe('ThreadChatHistoryAdmission startWhenIdle', () => {
+  function deferred<T>() {
+    let resolve: (value: T) => void = () => {};
+    const promise = new Promise<T>((settle) => {
+      resolve = settle;
+    });
+    return { promise, resolve };
+  }
+
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+  function twoSurfaces() {
+    const admission = createThreadChatHistoryAdmission();
+    const firstId = Symbol('first');
+    const secondId = Symbol('second');
+    const cleanupFirst = admission.register({
+      threadId: 'thread-a',
+      consumerId: firstId,
+      startBootstrap: async () => {},
+    });
+    admission.register({ threadId: 'thread-a', consumerId: secondId, startBootstrap: async () => {} });
+    return { admission, firstId, secondId, cleanupFirst };
+  }
+
+  it('starts at once on an idle thread', () => {
+    const { admission, firstId } = twoSurfaces();
+    const task = vi.fn(async () => 'fresh');
+
+    void admission.runRequest({
+      threadId: 'thread-a',
+      consumerId: firstId,
+      requestKey: 'messages:latest:replace:fresh:1',
+      task,
+      startWhenIdle: true,
+    });
+
+    expect(task).toHaveBeenCalledOnce();
+  });
+
+  it("starts only after every surface's running request of the thread has settled", async () => {
+    const { admission, firstId, secondId } = twoSurfaces();
+    admission.register({ threadId: 'thread-b', consumerId: Symbol('other'), startBootstrap: async () => {} });
+    const bootstrap = deferred<string>();
+    const olderPage = deferred<string>();
+    void admission.runRequest({
+      threadId: 'thread-a',
+      consumerId: firstId,
+      requestKey: 'messages:latest:replace',
+      task: () => bootstrap.promise,
+    });
+    void admission.runRequest({
+      threadId: 'thread-a',
+      consumerId: secondId,
+      requestKey: 'messages:cursor-1:prepend',
+      task: () => olderPage.promise,
+    });
+    const task = vi.fn(async () => 'fresh');
+
+    const catchUp = admission.runRequest({
+      threadId: 'thread-a',
+      consumerId: secondId,
+      requestKey: 'messages:latest:replace:fresh:1',
+      task,
+      startWhenIdle: true,
+    });
+    await settle();
+    expect(task).not.toHaveBeenCalled();
+
+    bootstrap.resolve('old');
+    await settle();
+    expect(task).not.toHaveBeenCalled();
+
+    olderPage.resolve('page');
+    await expect(catchUp).resolves.toEqual({ status: 'completed', value: 'fresh' });
+    expect(task).toHaveBeenCalledOnce();
+  });
+
+  it('coalesces surfaces onto one waiting request and runs it once', async () => {
+    const { admission, firstId, secondId } = twoSurfaces();
+    const bootstrap = deferred<string>();
+    void admission.runRequest({
+      threadId: 'thread-a',
+      consumerId: firstId,
+      requestKey: 'messages:latest:replace',
+      task: () => bootstrap.promise,
+    });
+    const task = vi.fn(async () => 'fresh');
+    const request = (consumerId: symbol) =>
+      admission.runRequest({
+        threadId: 'thread-a',
+        consumerId,
+        requestKey: 'messages:latest:replace:fresh:1',
+        task,
+        startWhenIdle: true,
+      });
+
+    const first = request(firstId);
+    const second = request(secondId);
+    bootstrap.resolve('old');
+
+    expect(second).toBe(first);
+    await expect(first).resolves.toEqual({ status: 'completed', value: 'fresh' });
+    expect(task).toHaveBeenCalledOnce();
+  });
+
+  it('runs two waiting requests one after the other instead of waiting on each other', async () => {
+    const { admission, firstId } = twoSurfaces();
+    const bootstrap = deferred<string>();
+    void admission.runRequest({
+      threadId: 'thread-a',
+      consumerId: firstId,
+      requestKey: 'messages:latest:replace',
+      task: () => bootstrap.promise,
+    });
+    const firstRead = deferred<string>();
+    const firstTask = vi.fn(() => firstRead.promise);
+    const secondTask = vi.fn(async () => 'second');
+    const first = admission.runRequest({
+      threadId: 'thread-a',
+      consumerId: firstId,
+      requestKey: 'messages:latest:replace:fresh:1',
+      task: firstTask,
+      startWhenIdle: true,
+    });
+    const second = admission.runRequest({
+      threadId: 'thread-a',
+      consumerId: firstId,
+      requestKey: 'messages:latest:replace:fresh:2',
+      task: secondTask,
+      startWhenIdle: true,
+    });
+
+    bootstrap.resolve('old');
+    await settle();
+    expect(firstTask).toHaveBeenCalledOnce();
+    expect(secondTask).not.toHaveBeenCalled();
+
+    firstRead.resolve('first');
+    await expect(first).resolves.toEqual({ status: 'completed', value: 'first' });
+    await expect(second).resolves.toEqual({ status: 'completed', value: 'second' });
+  });
+
+  it('never starts the task of a waiter whose origin surface left', async () => {
+    const { admission, firstId, secondId, cleanupFirst } = twoSurfaces();
+    const olderPage = deferred<string>();
+    void admission.runRequest({
+      threadId: 'thread-a',
+      consumerId: secondId,
+      requestKey: 'messages:cursor-1:prepend',
+      task: () => olderPage.promise,
+    });
+    const task = vi.fn(async () => 'must-not-run');
+    const waiting = admission.runRequest({
+      threadId: 'thread-a',
+      consumerId: firstId,
+      requestKey: 'messages:latest:replace:fresh:1',
+      task,
+      startWhenIdle: true,
+    });
+
+    cleanupFirst();
+    olderPage.resolve('page');
+
+    await expect(waiting).resolves.toEqual({ status: 'abandoned' });
+    expect(task).not.toHaveBeenCalled();
+  });
+});

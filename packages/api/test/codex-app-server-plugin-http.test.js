@@ -84,13 +84,15 @@ function configuredCapability(entry, mode) {
 
 function fixture(t, mode = 'shared') {
   const root = mkdtempSync(join(tmpdir(), 'codex-plugin-http-'));
-  for (const name of ['.cat-cafe', 'credentials', 'data', 'tmp']) mkdirSync(join(root, name));
+  for (const name of ['.cat-cafe', 'credentials', 'data', 'tmp', 'program-data']) mkdirSync(join(root, name));
   const env = {
     CAT_CAFE_CONFIG_ROOT: root,
+    CAT_CAFE_GLOBAL_CONFIG_ROOT: root,
     CAT_CAFE_WORKSPACE_ROOT: root,
     CAT_CAFE_RUNTIME_ROOT: resolve('../..'),
     CAT_CAFE_DATA_DIR: join(root, 'data'),
     CAT_CAFE_MCP_CREDS_DIR: join(root, 'credentials'),
+    ProgramData: join(root, 'program-data'),
     TMPDIR: join(root, 'tmp'),
   };
   const saved = Object.fromEntries(Object.keys(env).map((key) => [key, process.env[key]]));

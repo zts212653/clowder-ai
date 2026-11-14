@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { readFile, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
 import {
@@ -208,7 +209,7 @@ test(
           assert.equal(receiver?.defaultModel, 'gpt-6.1-sol', 'Never silently reroute a test opinion');
           assert.equal(receiver?.accountRef, 'codex', 'Use the verified existing account binding');
           await writeFile(
-            '/tmp/f326-b-human-send-attempt.json',
+            path.join(tmpdir(), 'f326-b-human-send-attempt.json'),
             JSON.stringify(
               {
                 threadId: manifest.threadId,
@@ -235,7 +236,7 @@ test(
           const receipt = await response.json();
           assert.ok(receipt.userMessageId, 'Actual server-backed Human send receipt must name the stored message');
           await writeFile(
-            '/tmp/f326-b-human-send-receipt.json',
+            path.join(tmpdir(), 'f326-b-human-send-receipt.json'),
             JSON.stringify({ ...receipt, threadId: manifest.threadId, contentRef: manifest.contentRef }, null, 2),
           );
           const messages = await journey.request(

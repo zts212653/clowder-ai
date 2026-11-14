@@ -1,6 +1,7 @@
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
+import { ShellPresentationContext } from '@/components/shell/shell-presentation';
 
 let mockSearchParams = new URLSearchParams();
 
@@ -23,11 +24,18 @@ import { SettingsShell } from '../SettingsShell';
 
 Object.assign(globalThis as Record<string, unknown>, { React });
 
+// These cases protect the explicitly selected classic interface, independently of the new-visit default.
+function renderClassic(element: React.ReactNode) {
+  return renderToStaticMarkup(
+    <ShellPresentationContext.Provider value="classic">{element}</ShellPresentationContext.Provider>,
+  );
+}
+
 describe('SettingsShell deep-link routing', () => {
   it('opens the ops section when an ops deep-link omits s=ops', () => {
     mockSearchParams = new URLSearchParams('ops=observability&obs=eval');
 
-    const html = renderToStaticMarkup(<SettingsShell />);
+    const html = renderClassic(<SettingsShell />);
 
     expect(html).toContain('data-section="ops"');
     expect(html).toContain('data-active="ops"');
@@ -36,7 +44,7 @@ describe('SettingsShell deep-link routing', () => {
   it('keeps an explicit settings section when s is present', () => {
     mockSearchParams = new URLSearchParams('s=members&ops=observability&obs=eval');
 
-    const html = renderToStaticMarkup(<SettingsShell />);
+    const html = renderClassic(<SettingsShell />);
 
     expect(html).toContain('data-section="members"');
     expect(html).toContain('data-active="members"');
@@ -45,7 +53,7 @@ describe('SettingsShell deep-link routing', () => {
   it('delegates scrolling to the two Plugin Manager panes', () => {
     mockSearchParams = new URLSearchParams('s=plugins&pluginManagerLive=1');
 
-    const html = renderToStaticMarkup(<SettingsShell />);
+    const html = renderClassic(<SettingsShell />);
 
     expect(html).toContain('min-w-0 flex-1 overflow-hidden');
     expect(html).toContain('flex h-full min-h-0 flex-col gap-5');
@@ -54,7 +62,7 @@ describe('SettingsShell deep-link routing', () => {
   it('keeps standalone Manager scrolling inside its list and detail panes', () => {
     mockSearchParams = new URLSearchParams('s=plugins&standalone=1');
 
-    const html = renderToStaticMarkup(<SettingsShell />);
+    const html = renderClassic(<SettingsShell />);
 
     expect(html).toContain('overflow-hidden');
     expect(html).not.toContain('overflow-y-auto');
@@ -62,7 +70,7 @@ describe('SettingsShell deep-link routing', () => {
 
   it('opens the unified plugin page from an existing IM bookmark', () => {
     mockSearchParams = new URLSearchParams('s=im');
-    const html = renderToStaticMarkup(<SettingsShell />);
+    const html = renderClassic(<SettingsShell />);
     expect(html).toContain('data-section="plugins"');
     expect(html).toContain('data-active="plugins"');
     expect(html).not.toContain('data-section="im"');

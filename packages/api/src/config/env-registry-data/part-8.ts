@@ -14,6 +14,16 @@ export const ENV_DEFINITIONS_8: readonly EnvDefinition[] = [
     allowedValues: ['0', '1'],
   },
   {
+    name: 'EMBED_G0_URL',
+    defaultValue: '(未设置；可由同版 embedding-generations.json 的 G0 retainedEndpoint 配置)',
+    description: 'G1 冷启动时保留的 G0 编码服务固定本机地址；仅回环，独立于主 embedding 端口，重启后绑定。',
+    category: 'evidence',
+    sensitive: true,
+    maskMode: 'url',
+    runtimeEditable: true,
+    restartRequired: true,
+  },
+  {
     name: 'EMBED_URL',
     defaultValue: 'http://127.0.0.1:9880',
     description: 'Embedding 服务地址（独立 Python GPU 进程 scripts/embed-api.py）',

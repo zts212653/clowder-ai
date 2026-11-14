@@ -304,6 +304,12 @@ export class ProjectContentOwnerService {
     return this.store.retainedMediaHeads(ownerUserId, includeHtmlWorks);
   }
 
+  retainedThreadMediaHeads(ownerUserId: string, threadId: string) {
+    validateIdentity(ownerUserId, 'ownerUserId');
+    validateIdentity(threadId, 'threadId');
+    return this.store.retainedThreadMediaHeads(ownerUserId, threadId);
+  }
+
   /** Internal batch lookup; read projections must freshly authorize each resulting coordinate. */
   findSourcePublicationsBatch(input: Parameters<ProjectContentOwnerStore['findSourcePublicationsBatch']>[0]) {
     return this.store.findSourcePublicationsBatch(input);

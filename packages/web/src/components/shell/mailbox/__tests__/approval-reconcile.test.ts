@@ -157,6 +157,29 @@ describe('only a re-read that started after the write counts', () => {
 });
 
 describe('what the canonical re-read proved', () => {
+  it.each(['delete', 'update'] as const)('explains typed %s drift without locking rejection', (kind) => {
+    const model = reduceReconcile(
+      afterWrite({
+        attemptId: 1,
+        state: { phase: 'response_received', status: 409, ok: false, errorCode: 'SCHEDULE_TASK_DRIFT' },
+      }),
+      readEvent(read(6)),
+    );
+    const view = describeReconcile(model.state, { scheduleMutationKind: kind });
+    expect(view).toMatchObject({ actions: 'allowed', approveBlocked: true, canReread: false });
+    expect(view.line).toContain(kind === 'delete' ? '当前删除请求不能执行' : '当前修改请求不能执行');
+    expect(view.line).toContain('新提案仍需你单独批准');
+  });
+  it.each([200, 401, 403, 500])('does not override HTTP %i with a stray task drift code', (status) => {
+    const model = reduceReconcile(
+      afterWrite({
+        attemptId: 1,
+        state: { phase: 'response_received', status, ok: status === 200, errorCode: 'SCHEDULE_TASK_DRIFT' },
+      }),
+      readEvent(read(6)),
+    );
+    expect(describeReconcile(model.state).approveBlocked).toBeUndefined();
+  });
   const confirmingAfter = (a: TrackedAttempt) => afterWrite(a);
 
   it('still open and aligned with the store: the actions come back, and the line says only what was proved', () => {

@@ -6,6 +6,7 @@ export type MemberChange = { key: string; label: string; fieldLabels: readonly s
 type FormKey = Exclude<keyof HubCatEditorFormState, 'catId' | 'displayName'>;
 type MemberFieldLabels = readonly [string, string, ...string[]];
 const fields: Record<FormKey, MemberFieldLabels> = {
+  env: ['Desktop 接入配置', 'Desktop connection settings'],
   name: ['名称', 'Name'],
   nickname: ['昵称', 'Nickname'],
   variantLabel: ['显示后缀', 'Variant Label'],

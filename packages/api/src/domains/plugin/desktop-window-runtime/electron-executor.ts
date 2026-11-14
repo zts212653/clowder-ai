@@ -9,6 +9,7 @@ import {
   validateHostCompanionCommand as validateCompanionCommand,
   validateHostCompanionReply as validateCompanionReply,
 } from './companion-private-wire.js';
+import { createDeskPipe } from './desk-pipe.js';
 import type {
   DesktopWindowExecutor,
   DesktopWindowFailure,
@@ -111,6 +112,14 @@ export class ElectronDesktopWindowExecutor implements DesktopWindowExecutor {
           if (error) fail(new Error('desktop connection ended'));
         });
     });
+    // F335 交付三：the kernel asks for what to bring and reports what the person did; API says when there may be more.
+    let stopDeskWatch: (() => Promise<void>) | undefined;
+    const desk = createDeskPipe(launch.desk, (line) => {
+      if (!ended)
+        child.stdin.write(line, (error) => {
+          if (error) fail(new Error('desktop connection ended'));
+        });
+    });
     const bridgeRequests = new Set<string>();
     const pending = new Map<
       number,
@@ -126,6 +135,8 @@ export class ElectronDesktopWindowExecutor implements DesktopWindowExecutor {
       ended = error;
       appAssist.close();
       void stopAppAssistPolicy?.();
+      desk.close();
+      void stopDeskWatch?.();
       launch.signal.removeEventListener('abort', onAbort);
       for (const call of pending.values()) {
         clearTimeout(call.timer);
@@ -209,6 +220,7 @@ export class ElectronDesktopWindowExecutor implements DesktopWindowExecutor {
         try {
           const value: unknown = JSON.parse(line.toString('utf8'));
           if (appAssist.accept(value)) continue;
+          if (desk.accept(value)) continue;
           const submission = z
             .object({ v: z.literal(1), type: z.literal('text_submission'), value: hostTextSubmission })
             .strict()
@@ -299,9 +311,20 @@ export class ElectronDesktopWindowExecutor implements DesktopWindowExecutor {
         ...(launch.publicCompanionV2 ? { publicCompanionV2: true } : {}),
         ...(launch.companionContract ? { companionContract: launch.companionContract } : {}),
         ...(launch.appAssist ? { appAssist: true } : {}),
+        ...(launch.desk ? { desk: true } : {}),
       });
       appAssistOpened = true;
       if (appAssistPolicy !== undefined) await request('app-assist-policy', { allowed: appAssistPolicy });
+      if (launch.desk) {
+        // A nudge only: the kernel asks again with its own presence; a lost nudge just waits for the next one.
+        stopDeskWatch = await launch.desk.watch(() => {
+          if (!ended) void request('desk-changed').catch(() => {});
+        });
+        if (ended) {
+          await stopDeskWatch();
+          throw ended;
+        }
+      }
       return {
         poll: async () => {
           const state = await request('poll');

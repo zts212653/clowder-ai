@@ -51,6 +51,32 @@ const click = async (name: string) => {
   if (!b) throw Error(`Missing ${name}`);
   await act(async () => b.click());
 };
+it('shows a quota conflict, reloads once, and clears the message after an explicit successful retry', async () => {
+  const reload = vi.fn(async () => {});
+  request.mockRejectedValueOnce(Object.assign(new Error('account changed'), { status: 409 }));
+  await render(good, { reload });
+  const refresh = host.querySelector<HTMLButtonElement>('button[aria-label="Refresh quota"]')!;
+  expect(refresh).not.toBeNull();
+  await act(async () => refresh.click());
+  expect(host.textContent).toContain('The account sign-in changed. Check again.');
+  expect(reload).toHaveBeenCalledTimes(1);
+  expect(request).toHaveBeenCalledTimes(1);
+  request.mockResolvedValueOnce({ quota: good });
+  await act(async () => refresh.click());
+  expect(host.textContent).not.toContain('The account sign-in changed. Check again.');
+  expect(request).toHaveBeenCalledTimes(2);
+});
+it('shows a storage failure as unavailable instead of saying the account changed', async () => {
+  const reload = vi.fn(async () => {});
+  request.mockRejectedValueOnce(Object.assign(new Error('无法读取账号，请核对账号配置'), { status: 500 }));
+  await render(good, { reload });
+  const refresh = host.querySelector<HTMLButtonElement>('button[aria-label="Refresh quota"]')!;
+  await act(async () => refresh.click());
+  expect(host.querySelector('.account-quota-failure')?.getAttribute('data-kind')).toBe('service_unreachable');
+  expect(host.textContent).not.toContain('The account sign-in changed. Check again.');
+  expect(request).toHaveBeenCalledTimes(1);
+  expect(reload).not.toHaveBeenCalled();
+});
 it('shows historical renewal and the next step visibly, with official details available by click', async () => {
   await render();
   expect(host.textContent).toContain('Sign-in needs renewal');

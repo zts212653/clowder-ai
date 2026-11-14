@@ -2,6 +2,7 @@ import type { ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { useShellCopy } from '@/components/shell/shell-copy';
 import { ArtworkAnnotationToolbar } from './ArtworkAnnotationToolbar';
+import { useArtworkActionsVisible } from './ArtworkChrome';
 import { useArtworkLightboxScope, useFloatingArtworkPresentation } from './ArtworkLightboxScope';
 import toolbarStyles from './artwork-annotation-toolbar.module.css';
 import styles from './image-artwork.module.css';
@@ -38,6 +39,7 @@ export function ImageArtworkControls({
   const t = useShellCopy(imageArtworkCopy);
   const floating = useFloatingArtworkPresentation();
   const toolsSlot = useArtworkLightboxScope()?.toolsSlot;
+  const actionsVisible = useArtworkActionsVisible();
   const tools = (
     <div
       className={floating ? toolbarStyles.placement : styles.tools}
@@ -116,7 +118,7 @@ export function ImageArtworkControls({
           </button>
         </div>
       ) : null}
-      {floating && toolsSlot ? createPortal(tools, toolsSlot) : tools}
+      {actionsVisible ? (floating && toolsSlot ? createPortal(tools, toolsSlot) : tools) : null}
     </>
   );
 }

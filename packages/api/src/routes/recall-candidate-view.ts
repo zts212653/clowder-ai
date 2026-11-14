@@ -31,6 +31,8 @@ export interface RecallSourceReaders extends RecallOwnerMessageSources {
   };
 }
 export interface RecallCandidateView {
+  messageHref?: string | null;
+  memoryHref?: string | null;
   profileMemoryId?: string;
   sourceUnavailableReason?: 'source_corrected' | 'source_forgotten' | 'scope_revoked';
   title?: string;

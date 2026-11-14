@@ -8,7 +8,10 @@ import type { IMessageStore } from '../../cats/services/stores/ports/MessageStor
 import type { ITaskStore } from '../../cats/services/stores/ports/TaskStore.js';
 import type { TurnExecutionSourceReadPort } from '../../cats/services/stores/ports/TurnExecutionStore.js';
 import type { createArtifactReviewIntegration } from '../../growing/artifact-review-composition.js';
-import { EntrustedWorkLifecycleService } from '../../growing/EntrustedWorkLifecycleService.js';
+import {
+  type EntrustedWorkChangeReason,
+  EntrustedWorkLifecycleService,
+} from '../../growing/EntrustedWorkLifecycleService.js';
 import { MediaOwnerError } from '../../video-studio/content-owner/media-errors.js';
 import type { MediaReviewPrincipal } from '../../video-studio/content-owner/published-media-access.js';
 import type { VideoProjectReadPort } from '../../video-studio/project/types.js';
@@ -51,7 +54,7 @@ export function createContentModificationIntegration(deps: {
   queue?: Pick<InvocationQueue, 'getEntrySnapshot' | 'getDurableEntriesForMessages'>;
   project?: { projects: VideoProjectReadPort; authority: VideoProjectMessageAuthority };
   delivery?: PersistedQueueDeliveryPort;
-  changed: (userId: string) => void;
+  changed: (userId: string, reason?: EntrustedWorkChangeReason) => void;
   sourceChanged?: (ownerUserId: string, threadId: string, messageId: string) => void;
   receiptChanged?: (ownerUserId: string, threadId: string, messageId: string) => void;
   onError: (error: unknown) => void;

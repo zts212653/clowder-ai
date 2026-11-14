@@ -144,6 +144,88 @@ function seedCatalogFromTemplate(projectRoot, templateObj) {
 }
 
 describe('cats routes read runtime catalog', { concurrency: false }, () => {
+  it('DSH launch updates reject a known invalid profile while preserving metadata edits', async () => {
+    const catalog = makeCatalog('dsh-save-guard', 'Whale', 'acp', '');
+    const projectRoot = createRuntimeCatalogProject(catalog);
+    const invalidHome = join(projectRoot, 'native-invalid');
+    const validHome = join(projectRoot, 'native-valid');
+    for (const home of [invalidHome, validHome]) {
+      mkdirSync(join(home, 'profiles/acp'), { recursive: true });
+      writeFileSync(
+        join(home, 'profiles/acp/package.json'),
+        JSON.stringify({
+          dsh: { profile: { bundles: ['@deepseek-ai/dsh-acp-app'] } },
+        }),
+      );
+      writeFileSync(join(home, 'profiles/acp/cordis.patch.yml'), home === invalidHome ? '# no array\n' : '[]\n');
+    }
+    const original = { command: join(projectRoot, 'old/dsh.cmd'), startupArgs: ['--profile', 'acp'] };
+    Object.assign(catalog.breeds[0].variants[0], {
+      carrier: 'acp',
+      configurationSource: 'native_tool',
+      acp: original,
+      env: { DSH_HOME: invalidHome, HTTPS_PROXY: 'http://proxy.fixture' },
+    });
+    const catalogPath = join(projectRoot, '.cat-cafe/cat-catalog.json');
+    writeFileSync(catalogPath, JSON.stringify(catalog));
+    process.env.CAT_TEMPLATE_PATH = join(projectRoot, 'cat-template.json');
+    const Fastify = (await import('fastify')).default;
+    const { catsRoutes } = await import('../dist/routes/cats.js');
+    const app = Fastify();
+    await app.register(catsRoutes);
+    const previousDshHome = process.env.DSH_HOME;
+    const patch = async (payload) => {
+      const headers = { 'x-cat-cafe-user': 'fixture-owner' };
+      const response = await app.inject({ method: 'GET', url: '/api/cats', headers });
+      const cat = response.json().cats.find((cat) => cat.id === 'dsh-save-guard');
+      return app.inject({
+        method: 'PATCH',
+        url: '/api/cats/dsh-save-guard',
+        headers,
+        payload: { ...payload, expectedRevision: cat.configurationRevision },
+      });
+    };
+    try {
+      const metadata = await patch({ displayName: 'Renamed Whale', acp: original });
+      assert.equal(metadata.statusCode, 200, metadata.body);
+      const replacement = { ...original, command: join(projectRoot, 'desktop/dsh.cmd') };
+      const rejected = await patch({ acp: replacement });
+      assert.equal(rejected.statusCode, 400, rejected.body);
+      assert.equal(rejected.json().code, 'acp_profile_invalid');
+      const accepted = await patch({ acp: replacement, env: { DSH_HOME: validHome } });
+      assert.equal(accepted.statusCode, 200, accepted.body);
+      const rejectedHome = await patch({ env: { DSH_HOME: invalidHome } });
+      assert.equal(rejectedHome.statusCode, 400, rejectedHome.body);
+      assert.equal(rejectedHome.json().code, 'acp_profile_invalid');
+      const persisted = JSON.parse(readFileSync(catalogPath, 'utf8')).breeds[0].variants[0];
+      assert.equal(persisted.env.DSH_HOME, validHome);
+      assert.equal(
+        persisted.env.HTTPS_PROXY,
+        'http://proxy.fixture',
+        'preparing a new HOME preserves overrides hidden from the UI',
+      );
+      process.env.DSH_HOME = invalidHome;
+      assert.equal(
+        (await patch({ env: null })).statusCode,
+        400,
+        'clearing HOME validates the actual fallback rather than the old HOME',
+      );
+      process.env.DSH_HOME = validHome;
+      const cleared = await patch({ env: null });
+      assert.equal(cleared.statusCode, 200, cleared.body);
+      assert.equal(
+        JSON.parse(readFileSync(catalogPath, 'utf8')).breeds[0].variants[0].env,
+        undefined,
+        'explicit null still clears owner overrides',
+      );
+      assert.equal(readFileSync(join(invalidHome, 'profiles/acp/cordis.patch.yml'), 'utf8'), '# no array\n');
+    } finally {
+      if (previousDshHome === undefined) delete process.env.DSH_HOME;
+      else process.env.DSH_HOME = previousDshHome;
+      await app.close();
+    }
+  });
+
   it('CLI login checks require a session before starting any credential-reading process', async (t) => {
     const projectRoot = createRuntimeCatalogProject(makeCatalog('auth-probe-cat', '登录检测猫'));
     process.env.CAT_TEMPLATE_PATH = join(projectRoot, 'cat-template.json');
@@ -189,7 +271,9 @@ describe('cats routes read runtime catalog', { concurrency: false }, () => {
   });
 
   it('GET /api/cats returns cats from runtime catalog even when not in catRegistry', async () => {
-    const projectRoot = createRuntimeCatalogProject(makeCatalog('runtime-cat', '运行时猫'));
+    const catalog = makeCatalog('runtime-cat', '运行时猫');
+    catalog.breeds[0].variants[0].env = { PRIVATE_INPUT: 'synthetic-private-env' };
+    const projectRoot = createRuntimeCatalogProject(catalog);
     process.env.CAT_TEMPLATE_PATH = join(projectRoot, 'cat-template.json');
 
     const Fastify = (await import('fastify')).default;
@@ -205,6 +289,8 @@ describe('cats routes read runtime catalog', { concurrency: false }, () => {
     assert.ok(runtimeCat, 'runtime-cat should come from runtime catalog');
     assert.equal(runtimeCat.displayName, '运行时猫');
     assert.deepEqual(runtimeCat.mentionPatterns, ['@runtime-cat']);
+    assert.equal(runtimeCat.env, undefined, 'the public member projection must not publish environment values');
+    assert.ok(!res.body.includes('synthetic-private-env'));
   });
 
   // clowder-ai#1796: an empty defaultModel in the runtime catalog is legal

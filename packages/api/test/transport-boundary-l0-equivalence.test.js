@@ -71,11 +71,6 @@ describe('Transport boundary + L0 equivalence', () => {
         assert.ok(validPrefixes.includes(prefix), `${hook.manifest.id} has valid prefix '${prefix}'`);
       }
     });
-
-    it('exactly 45 hooks in the pipeline (no transport leakage)', () => {
-      const allHooks = registry.getAllHooks();
-      assert.equal(allHooks.length, 45, `Expected 45 hooks, got ${allHooks.length}`);
-    });
   });
 
   // -- AC-P2-14a: L0 compiled output equivalence ------------------------------

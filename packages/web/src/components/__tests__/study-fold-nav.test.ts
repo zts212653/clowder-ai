@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import type { StudyMeta } from '@cat-cafe/shared';
 import React from 'react';
 import { createRoot, type Root } from 'react-dom/client';

@@ -1,11 +1,14 @@
 import type { CatData } from '@/hooks/useCatData';
+import { useIsDshMember, useMemberModelLabel } from '@/lib/member-model-display';
 import { AppTooltip } from '../AppTooltip';
 import { useMemberText } from './editor-presentation';
 import { memberClientName } from './member-projection';
 
 export function useMemberRuntimeLabel(cat: CatData) {
   const t = useMemberText();
-  return `${memberClientName(cat)} · ${cat.defaultModel || t(cat.configurationSource === 'native_tool' ? '跟随工具设置' : '未设置')}`;
+  const modelLabel = useMemberModelLabel();
+  const dshMember = useIsDshMember();
+  return `${memberClientName(cat, dshMember(cat))} · ${modelLabel(cat, t(cat.configurationSource === 'native_tool' ? '跟随工具设置' : '未设置'), t('未设置') === 'Not set')}`;
 }
 
 export function MemberRuntimeSummary({ cat }: { cat: CatData }) {

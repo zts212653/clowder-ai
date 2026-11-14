@@ -65,13 +65,23 @@ if ($LASTEXITCODE -ne 0) {
 if (-not $env:HF_HUB_OFFLINE) { $env:HF_HUB_OFFLINE = "1" }
 
 $Model = $env:EMBED_MODEL
+$Generation = $env:EMBED_GENERATION
+if (-not $Generation) {
+    $Generation = & $VenvPython (Join-Path $PSScriptRoot 'embedding_generation.py') --field generation
+    if ($LASTEXITCODE -ne 0) { throw 'Embedding deployment is invalid' }
+}
+$RecipeModel = & $VenvPython (Join-Path $PSScriptRoot 'embedding_generation.py') --generation $Generation --field model
+if ($LASTEXITCODE -ne 0) { throw 'Embedding generation is invalid' }
+if ($RecipeModel) { $Model = $RecipeModel }
 if (-not $Model) {
     Write-Error "EMBED_MODEL env var required - backend specifies model, no fallback default."
     exit 1
 }
 Write-Output "Starting Embedding server: model=$Model, port=$Port"
 Write-Output "[start] launching python: $VenvPython $ApiScript --model $Model --port $Port"
-& $VenvPython $ApiScript --model $Model --port $Port
+$LimitArgs = @()
+if ($env:EMBED_MAX_MODEL_MEM_MB) { $LimitArgs = @('--max-model-mem-mb', $env:EMBED_MAX_MODEL_MEM_MB) }
+& $VenvPython $ApiScript --model $Model --port $Port --generation $Generation @LimitArgs
 $ExitCode = $LASTEXITCODE
 Write-Output "[start] python exited with code $ExitCode"
 exit $ExitCode

@@ -12,9 +12,12 @@ import { protectToolResponse } from './tool-response-budget.js';
 import type { PostMessageRegistrationPrincipal } from './tools/callback-tools.js';
 import {
   authorizeInvocationTool,
+  currentWatcherAdmission,
   getInvocationAuthSignal,
   resolveInvocationRequestSignal,
+  withWatcherToolCall,
 } from './tools/invocation-auth.js';
+import { admitWatcherTool, boundWatcherToolResponse } from './watcher-tool-guard.js';
 
 export { CANONICAL_TOOL_REGISTRY } from './canonical-server-tools.js';
 
@@ -32,6 +35,7 @@ export const DESKTOP_CLOUD_PRO_PHASE0_ALLOWED_TOOLS = derivedProfileSet(
 const KNOWN_DESKTOP_MODES = new Set(['fable-phase0', 'cloud-pro-phase0', 'live-companion']);
 
 export interface ToolsetEnv {
+  watcher?: boolean;
   readonly?: boolean;
   hasAgentKey?: boolean;
   desktopMode?: string;
@@ -63,7 +67,19 @@ export function parseToolsetEnv(env: NodeJS.ProcessEnv = process.env): ToolsetEn
     (!env.CAT_CAFE_NATIVE_TURN_CREDENTIAL_FILE || !env.CAT_CAFE_NATIVE_CONNECTION_ID)
   )
     throw new Error('Live companion requires native invocation binding');
+  let allowedToolNames: string[] | undefined;
+  if (env.CAT_CAFE_WATCHER_TOOL_NAMES !== undefined) {
+    const names: unknown = JSON.parse(env.CAT_CAFE_WATCHER_TOOL_NAMES);
+    if (
+      !Array.isArray(names) ||
+      !names.every((name) => typeof name === 'string' && CANONICAL_TOOL_REGISTRY.some((tool) => tool.name === name))
+    )
+      throw new Error('Invalid watcher tool surface');
+    allowedToolNames = [...new Set(names as string[])];
+  }
   return {
+    watcher: allowedToolNames !== undefined,
+    ...(allowedToolNames ? { allowedToolNames } : {}),
     readonly: env.CAT_CAFE_READONLY === 'true',
     // Credential USABILITY, not env presence (#1494): a '{}' variant map, bad
     // JSON, a blank secret, or a path to a missing sidecar resolve zero keys
@@ -215,19 +231,26 @@ function registerTools(server: McpServer, tools: readonly ToolDef[], env: Toolse
         const scopedSignal = resolveInvocationRequestSignal();
         const signal = scopedSignal ? AbortSignal.any([extra.signal, scopedSignal]) : extra.signal;
         return runWithNativeTurnAuth(extra._meta, signal, async () => {
+          const admission = currentWatcherAdmission();
+          if (admission && admission.toolName !== tool.name)
+            throw new Error('Watcher tool admission identity mismatch');
+          const watcherCallId = admission?.callId ?? `${tool.name}:${String(extra.requestId ?? crypto.randomUUID())}`;
+          if (env.watcher && !admission) await admitWatcherTool(tool.name, watcherCallId);
           await authorizeInvocationTool(tool.name);
-          const result = await guardSecretToolCall(
-            tool.name,
-            args,
-            async (safeArgs) => {
-              await authorizeInvocationTool(tool.name);
-              signal.throwIfAborted();
-              return tool.implementation.runWithExtra
-                ? tool.implementation.runWithExtra(safeArgs as never, { signal })
-                : tool.handler(safeArgs as never);
-            },
-            extra.requestId === undefined ? undefined : String(extra.requestId),
-          );
+          const run = () =>
+            guardSecretToolCall(
+              tool.name,
+              args,
+              async (safeArgs) => {
+                await authorizeInvocationTool(tool.name);
+                signal.throwIfAborted();
+                return tool.implementation.runWithExtra
+                  ? tool.implementation.runWithExtra(safeArgs as never, { signal })
+                  : tool.handler(safeArgs as never);
+              },
+              extra.requestId === undefined ? undefined : String(extra.requestId),
+            );
+          const result = await (env.watcher ? withWatcherToolCall(watcherCallId, run) : run());
           const typed = {
             ...(result as Record<string, unknown>),
           } as {
@@ -236,7 +259,11 @@ function registerTools(server: McpServer, tools: readonly ToolDef[], env: Toolse
             [key: string]: unknown;
           };
 
-          return protectToolResponse(tool.name, typed, annotations.readOnlyHint);
+          return env.watcher
+            ? admission
+              ? typed
+              : boundWatcherToolResponse(typed, watcherCallId)
+            : protectToolResponse(tool.name, typed, annotations.readOnlyHint);
         });
       },
     );

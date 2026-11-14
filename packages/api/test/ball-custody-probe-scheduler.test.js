@@ -1,3 +1,4 @@
+import { MemoryBallCustodyProjectionStore } from '../dist/domains/ball-custody/MemoryBallCustodyProjectionStore.js';
 /**
  * F233 PR4 — ProbeScheduler / WakeSender behavior.
  *
@@ -30,21 +31,7 @@ function makeProjection(overrides = {}) {
 }
 
 function memoryProjectionStore() {
-  const entries = new Map();
-  return {
-    async get(subjectKey) {
-      return entries.has(subjectKey) ? structuredClone(entries.get(subjectKey)) : null;
-    },
-    async save(projection) {
-      entries.set(projection.subjectKey, structuredClone(projection));
-    },
-    async listSubjectKeys() {
-      return [...entries.keys()];
-    },
-    async delete(subjectKey) {
-      entries.delete(subjectKey);
-    },
-  };
+  return new MemoryBallCustodyProjectionStore();
 }
 
 async function setupTask({ resolveMode = 'bounces_back' } = {}) {
@@ -72,6 +59,10 @@ function schedulerDeps({ taskStore, projectionStore, now = 5_000, satisfied = tr
       taskStore,
       projectionStore,
       ballCustody: {
+        async recordConfirmed(event) {
+          await this.record(event);
+          return true;
+        },
         async record(event) {
           if (record) return record(event);
           events.push(event);
@@ -164,7 +155,7 @@ describe('BallCustodyProbeScheduler', () => {
     assert.equal(events.length, 0);
   });
 
-  it('bounces_back: respects lastWakeAt cooldown so rebuild/replay cannot re-deliver', async () => {
+  it('bounces_back: original wake event proof retires producer polling without completing the Task', async () => {
     const { BallCustodyProbeScheduler } = await import('../dist/domains/ball-custody/BallCustodyProbeScheduler.js');
     const { taskStore, taskId } = await setupTask({ resolveMode: 'bounces_back' });
     const projectionStore = memoryProjectionStore();
@@ -173,12 +164,14 @@ describe('BallCustodyProbeScheduler', () => {
 
     const result = await new BallCustodyProbeScheduler(deps).tick();
 
-    assert.equal(result.cooldownSkipped, 1);
+    assert.equal(result.checked, 0);
+    assert.equal((await projectionStore.getRecoveryFacts(`ball:task:${taskId}`)).probe.disposition, 'settled');
+    assert.equal(taskStore.get(taskId).status, 'blocked');
     assert.equal(wakeCalls.length, 0);
     assert.equal(events.length, 0);
   });
 
-  it('bounces_back: send success plus wake_sent record failure still suppresses repeat wakes in-process', async () => {
+  it('bounces_back: admitted wake receipt survives index rebuild and defers event repair without resending', async () => {
     const { BallCustodyProbeScheduler } = await import('../dist/domains/ball-custody/BallCustodyProbeScheduler.js');
     const { taskStore, taskId } = await setupTask({ resolveMode: 'bounces_back' });
     const projectionStore = memoryProjectionStore();
@@ -198,11 +191,13 @@ describe('BallCustodyProbeScheduler', () => {
 
     const first = await scheduler.tick();
     now = 6_000;
+    await projectionStore.initializeRecovery(true);
     const second = await scheduler.tick();
 
     assert.equal(first.woken, 1, 'first tick delivered the real wake');
     assert.equal(first.failed, 1, 'record failure remains visible');
-    assert.equal(second.cooldownSkipped, 1, 'second tick suppresses repeat delivery during cooldown');
+    assert.equal(second.checked, 0, 'repair is deferred until its original due time');
+    assert.equal((await projectionStore.getRecoveryFacts(`ball:task:${taskId}`)).wakeReceipt.messageId, 'msg-wake-1');
     assert.equal(wakeCalls.length, 1, 'owner is not repeatedly woken while wake_sent recording is down');
     assert.equal(recordErrors.length, 1, 'cooldown skip avoids another doomed wake_sent write');
   });
@@ -212,7 +207,9 @@ describe('BallCustodyProbeScheduler', () => {
     const { taskStore, taskId } = await setupTask({ resolveMode: 'bounces_back' });
     const projectionStore = memoryProjectionStore();
     await projectionStore.save(makeProjection({ subjectKey: `ball:task:${taskId}` }));
-    const { deps, events, wakeCalls } = schedulerDeps({ taskStore, projectionStore });
+    let clock = 5_000;
+    const { deps, events, wakeCalls } = schedulerDeps({ taskStore, projectionStore, now: () => clock });
+    deps.idleLongMs = 1_000_000;
     deps.wakeSender.send = async (input) => {
       wakeCalls.push(input);
       return { kind: 'not_admitted', messageId: 'msg-wake-1', reason: 'invoke_failed' };
@@ -220,6 +217,7 @@ describe('BallCustodyProbeScheduler', () => {
     const scheduler = new BallCustodyProbeScheduler(deps);
 
     const first = await scheduler.tick();
+    clock += 60_001;
     const second = await scheduler.tick();
 
     assert.equal(first.woken, 0);
@@ -230,6 +228,23 @@ describe('BallCustodyProbeScheduler', () => {
     assert.equal(wakeCalls.length, 2, 'same blocked episode remains eligible for retry');
     assert.equal(events.length, 0, 'rejected admission must not write ball.wake_sent');
   });
+
+  for (const resolveMode of ['completes', 'bounces_back']) {
+    it(`does not apply a ${resolveMode} result after the original Task probe source changed`, async () => {
+      const { BallCustodyProbeScheduler } = await import('../dist/domains/ball-custody/BallCustodyProbeScheduler.js');
+      const { taskStore, taskId } = await setupTask({ resolveMode });
+      const projectionStore = memoryProjectionStore();
+      await projectionStore.save(makeProjection({ subjectKey: `ball:task:${taskId}` }));
+      const { deps, wakeCalls } = schedulerDeps({ taskStore, projectionStore });
+      deps.probeEvaluator.evaluate = async () => {
+        taskStore.update(taskId, { probe: { kind: 'redis_exists', key: 'new-condition' } });
+        return { satisfied: true };
+      };
+      await new BallCustodyProbeScheduler(deps).tick();
+      assert.equal(taskStore.get(taskId).status, 'blocked');
+      assert.equal(wakeCalls.length, 0);
+    });
+  }
 
   it('marks long-idle task projections as task.idle_long', async () => {
     const { BallCustodyProbeScheduler } = await import('../dist/domains/ball-custody/BallCustodyProbeScheduler.js');

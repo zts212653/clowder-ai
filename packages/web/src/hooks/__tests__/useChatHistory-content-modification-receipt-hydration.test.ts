@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 /**
  * F309: the Host receipt a content modification leaves in the conversation travels as a typed `extra` carrier.
  * Cold history hydration and live/history reconciliation must both keep it, or the receipt card cannot be drawn

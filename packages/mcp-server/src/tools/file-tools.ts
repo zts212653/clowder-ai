@@ -13,6 +13,7 @@ import { z } from 'zod';
 import { resolveAbsolutePath } from '../utils/path-utils.js';
 import { ensureDir, isPathAllowed } from '../utils/path-validator.js';
 import { authorizeInvocationTool, resolveInvocationEnv } from './invocation-auth.js';
+import { handlePublishedFileSlice } from './published-file-slice.js';
 
 const defineTool = defineMcpCanonicalFactory('file-tools.ts', undefined, {
   resourceFamily: 'evidence-navigation',
@@ -174,6 +175,7 @@ export async function handleReadFileSlice(input: {
   endLine?: number;
   charOffset?: number;
 }): Promise<ToolResult> {
+  if (input.path.startsWith('cat-cafe://published/')) return handlePublishedFileSlice(input);
   const resolvedPath = resolveFileSlicePath(input.path);
   if ('error' in resolvedPath) {
     return errorResult(resolvedPath.error);
@@ -401,7 +403,7 @@ export const fileSliceTools = [
     name: 'cat_cafe_read_file_slice',
     description:
       'Read a bounded line range from a file within allowed directories. ' +
-      'Use after search_evidence returns a sourcePath. Returns numbered text within a 24k character budget; follow the returned startLine/charOffset for a long-line continuation. Read-only; rejects paths outside allowed directories.',
+      'Use when: reading a known file or a search result drillDown path. NOT for: finding unknown documents (use search_evidence). Output: numbered text within a 24k character budget; follow startLine/charOffset for continuation. Published references verify the indexed content hash against the current lawful source; changed or forgotten content requires a fresh search. Read-only; the same allowed-directory checks apply to published and ordinary files.',
     inputSchema: readFileSliceInputSchema,
     handler: handleReadFileSlice,
     governance: {

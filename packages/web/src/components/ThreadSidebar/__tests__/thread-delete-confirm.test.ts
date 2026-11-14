@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 /**
  * I-1: Thread deletion must show a confirmation dialog before proceeding.
  * Verifies that clicking delete shows a dialog, cancel dismisses it,
@@ -99,7 +100,7 @@ describe('Thread delete confirmation (I-1)', () => {
       return jsonOk({});
     });
     // Provide localStorage stub for collapse-state persistence
-    const store: Record<string, string> = {};
+    const store: Record<string, string> = { 'cat-cafe:shell-presentation': 'classic' };
     Object.defineProperty(window, 'localStorage', {
       value: {
         getItem: (k: string) => store[k] ?? null,

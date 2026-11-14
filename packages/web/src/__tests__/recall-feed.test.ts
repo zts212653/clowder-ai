@@ -12,6 +12,23 @@ import { filterRecallEvents, parseTextResults } from '@/hooks/useRecallEvents';
 import type { ToolEvent } from '@/stores/chat-types';
 import { extractRecallMetaDetail, toolResultDetail } from '@/utils/toolPreview';
 
+it('preserves the new independent rank and relevance axes from the actual MCP line format', () => {
+  const results = parseTextResults(
+    '[rank:1 · relevance:unknown · authority:validated · updated:2026-11-05] Candidate\n  anchor: doc:template\n  > candidate text',
+  );
+  expect(results).toEqual([
+    {
+      title: 'Candidate',
+      rank: 1,
+      relevance: { state: 'unknown' },
+      authority: 'validated',
+      updatedAt: '2026-11-05',
+      anchor: 'doc:template',
+      snippet: 'candidate text',
+    },
+  ]);
+});
+
 const makeToolEvent = (
   label: string,
   type: 'tool_use' | 'tool_result',

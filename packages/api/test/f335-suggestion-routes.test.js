@@ -52,6 +52,7 @@ describe('F335 suggestion routes', () => {
     await app.register(async (scope) => {
       registerSuggestionRoutes(scope, {
         service: suggestions.service,
+        desk: suggestions.desk,
         callbackRegistry: registry,
         resolveByline: (actor) => (actor.catId === 'codex61-sol' ? 'watcher' : 'cat'),
       });
@@ -189,5 +190,29 @@ describe('F335 suggestion routes', () => {
       payload: { catId: 'codex61-sol', kind: 'video-comments' },
     });
     assert.equal(restored.json().restored, true);
+  });
+  it('lets a cat bring a work to the desk; the page gets no row for it', async () => {
+    const bring = (payload, headers = cat()) =>
+      app.inject({ method: 'POST', url: '/api/callbacks/desk-deliveries', headers, payload });
+    const queued = await bring({
+      sentence: '照他的头像画就行。',
+      work: { contentRef: 'work:sheet', ownerRevision: 1 },
+    });
+    assert.equal(queued.statusCode, 200);
+    assert.equal(queued.json().status, 'waiting_for_card');
+    assert.deepEqual(broadcasts, []);
+    const noCard = await bring({
+      messageId: 'msg-282',
+      sentence: '照他的头像画就行。',
+      work: { contentRef: 'work:sheet', ownerRevision: 1 },
+    });
+    assert.equal(noCard.statusCode, 400, 'that saved message carries no card for this version');
+    const control = await bring({ sentence: '\u202e反过来', work: { contentRef: 'work:sheet', ownerRevision: 1 } });
+    assert.equal(control.statusCode, 400);
+    const anonymous = await bring(
+      { sentence: '照他的头像画就行。', work: { contentRef: 'work:sheet', ownerRevision: 1 } },
+      person,
+    );
+    assert.equal(anonymous.statusCode, 401);
   });
 });

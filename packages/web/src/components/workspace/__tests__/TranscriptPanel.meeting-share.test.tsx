@@ -58,6 +58,7 @@ it('keeps the private share action beside an active capture and revokes before S
   });
   const container = document.createElement('div');
   document.body.appendChild(container);
+  window.localStorage.setItem('cat-cafe:shell-presentation', 'classic');
   const root = createRoot(container);
   try {
     const { TranscriptPanel } = await import('../TranscriptPanel');
@@ -77,6 +78,7 @@ it('keeps the private share action beside an active capture and revokes before S
   } finally {
     act(() => root.unmount());
     container.remove();
+    window.localStorage.removeItem('cat-cafe:shell-presentation');
     delete (globalThis as Record<string, unknown>).React;
     delete (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT;
   }
@@ -114,6 +116,7 @@ for (const [control, audioPath] of [
     });
     const container = document.createElement('div');
     document.body.appendChild(container);
+    window.localStorage.setItem('cat-cafe:shell-presentation', 'classic');
     const root = createRoot(container);
     try {
       const { TranscriptPanel } = await import('../TranscriptPanel');
@@ -132,6 +135,7 @@ for (const [control, audioPath] of [
     } finally {
       act(() => root.unmount());
       container.remove();
+      window.localStorage.removeItem('cat-cafe:shell-presentation');
       delete (globalThis as Record<string, unknown>).React;
       delete (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT;
     }

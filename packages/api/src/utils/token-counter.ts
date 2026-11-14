@@ -4,6 +4,12 @@
  * Uses o200k_base (the existing gpt-4o encoding) as universal estimator.
  * ~85-90% accurate for Claude/Gemini, exact for GPT.
  * Actual token counts come from CLI usage data (see F8 Phase 2).
+ *
+ * Prompt-assembly and memory-recall budgets count with this. Some other places
+ * estimate from character length on purpose, and their numbers are not
+ * interchangeable with this count: hook trace events (length / 4), the debug
+ * prompt capture (length / 3.5), memory summary scheduling (length / 4; its
+ * thresholds are in that unit) and harness-eval report sizes.
  */
 
 import { countOrdinaryTokens } from './ordinary-token-counter.js';

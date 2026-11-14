@@ -1,6 +1,15 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  utimesSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { test } from 'node:test';
@@ -304,6 +313,107 @@ test('does not delete a builder-owned valid target without a prewarm marker', as
   assert.equal(result.skipped, true);
   assert.equal(readFileSync(join(target, 'rcedit-x64.exe'), 'utf8'), 'builder-rcedit');
   assert.equal(readFileSync(join(target, 'windows-10', 'x64', 'signtool.exe'), 'utf8'), 'builder-signtool');
+});
+
+test('an active lock older than the timeout is not stolen', async (t) => {
+  const root = tempRoot(t);
+  const cacheDir = join(root, 'winCodeSign');
+  const lockDir = join(cacheDir, '.prewarm-publish.lock');
+  mkdirSync(lockDir, { recursive: true });
+  writeFileSync(join(lockDir, 'owner.json'), JSON.stringify({ pid: process.pid, token: 'active-owner' }));
+  const old = new Date(Date.now() - 60 * 60 * 1000);
+  utimesSync(lockDir, old, old);
+
+  await assert.rejects(
+    ensurePrewarmedWinCodeSign({
+      cacheRoot: root,
+      sevenZipPath: stubSevenZip(root),
+      expectedSha512: WIN_CODE_SIGN_SHA512,
+      platform: 'win32',
+      lockTimeoutMs: 80,
+      extract: () => {
+        throw new Error('must not extract while another live owner holds the lock');
+      },
+      log: () => {},
+    }),
+    /timed out waiting for winCodeSign publish lock/,
+  );
+
+  assert.equal(existsSync(lockDir), true);
+  assert.equal(readFileSync(join(lockDir, 'owner.json'), 'utf8').includes('active-owner'), true);
+});
+
+test('a dead owner lock is not auto-recovered and is preserved for manual cleanup', async (t) => {
+  const root = tempRoot(t);
+  const cacheDir = join(root, 'winCodeSign');
+  const lockDir = join(cacheDir, '.prewarm-publish.lock');
+  mkdirSync(lockDir, { recursive: true });
+  writeFileSync(join(lockDir, 'owner.json'), JSON.stringify({ pid: 999999, token: 'dead-owner' }));
+  const bytes = Buffer.from('verified archive bytes');
+  seedArchive(root, `${RELEASE}.7z`, bytes);
+
+  await assert.rejects(
+    ensurePrewarmedWinCodeSign({
+      cacheRoot: root,
+      sevenZipPath: stubSevenZip(root),
+      expectedSha512: sha512(bytes),
+      platform: 'win32',
+      lockTimeoutMs: 80,
+      extract: () => {
+        throw new Error('must not extract while the stale lock is present');
+      },
+      log: () => {},
+    }),
+    /timed out waiting for winCodeSign publish lock.*remove it/,
+  );
+
+  assert.equal(existsSync(lockDir), true);
+  assert.equal(readFileSync(join(lockDir, 'owner.json'), 'utf8').includes('dead-owner'), true);
+  assert.equal(existsSync(expectedWinCodeSignDir(root)), false);
+});
+
+test('two cold-cache callers share one stable archive and publish once', async (t) => {
+  const root = tempRoot(t);
+  const bytes = Buffer.from('verified archive bytes');
+  let fetchCalls = 0;
+  let onFetchStarted;
+  let releaseFetch;
+  const fetchStarted = new Promise((resolve) => {
+    onFetchStarted = resolve;
+  });
+  const fetchGate = new Promise((resolve) => {
+    releaseFetch = resolve;
+  });
+  const fetchImpl = async () => {
+    fetchCalls++;
+    onFetchStarted();
+    await fetchGate;
+    return {
+      ok: true,
+      status: 200,
+      arrayBuffer: async () => bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength),
+    };
+  };
+  const options = {
+    cacheRoot: root,
+    sevenZipPath: stubSevenZip(root),
+    expectedSha512: sha512(bytes),
+    platform: 'win32',
+    fetchImpl,
+    extract: fakeExtract(),
+    log: () => {},
+  };
+
+  const first = ensurePrewarmedWinCodeSign(options);
+  await fetchStarted;
+  const second = ensurePrewarmedWinCodeSign(options);
+  releaseFetch();
+  const [firstResult, secondResult] = await Promise.all([first, second]);
+
+  assert.equal(firstResult.skipped, false);
+  assert.equal(secondResult.skipped, true);
+  assert.equal(fetchCalls, 1);
+  assert.equal(isPrewarmed(expectedWinCodeSignDir(root), sha512(bytes)), true);
 });
 
 test('concurrent prewarm keeps the first published target instead of deleting it', async (t) => {

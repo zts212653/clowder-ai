@@ -3,7 +3,11 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'node:test';
+import sharp from 'sharp';
 import './helpers/setup-cat-registry.js';
+const png = await sharp({ create: { width: 2, height: 2, channels: 4, background: 'red' } })
+  .png()
+  .toBuffer();
 
 describe('parseMultipart with mixed image + file attachments', () => {
   let uploadDir;
@@ -27,7 +31,7 @@ describe('parseMultipart with mixed image + file attachments', () => {
         fieldname: 'images',
         filename: 'photo.png',
         mimetype: 'image/png',
-        toBuffer: async () => Buffer.from('fake-png'),
+        toBuffer: async () => png,
       },
       {
         type: 'file',
@@ -83,7 +87,7 @@ describe('parseMultipart with mixed image + file attachments', () => {
         fieldname: 'images',
         filename: 'photo.png',
         mimetype: 'image/png',
-        toBuffer: async () => Buffer.from('fake-png'),
+        toBuffer: async () => png,
       },
     ];
 

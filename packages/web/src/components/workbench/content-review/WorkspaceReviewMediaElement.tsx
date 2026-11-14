@@ -1,6 +1,7 @@
 import type { ImmutableMedia } from '@cat-cafe/shared';
 import { type RefObject, useCallback } from 'react';
 import { ContentMediaElement } from '@/components/content-review/ContentMediaElement';
+import { GifFrameMedia } from '@/components/content-review/GifFrameMedia';
 import { videoArtworkCopy } from '@/components/content-review/video-artwork.shell-copy';
 import { useShellCopy } from '@/components/shell/shell-copy';
 
@@ -15,6 +16,8 @@ export function WorkspaceReviewMediaElement({
   onSeeked,
   onSeconds,
   onError,
+  gifFrame,
+  onGifLoad,
 }: {
   src: string | null;
   error: string | null;
@@ -26,11 +29,23 @@ export function WorkspaceReviewMediaElement({
   onSeeked: () => void;
   onSeconds: (seconds: number) => void;
   onError: (error: string) => void;
+  gifFrame?: number;
+  onGifLoad?: () => void;
 }) {
   const t = useShellCopy(videoArtworkCopy);
   // Next/Image reassigns src when its error callback changes; keep ordinary canvas renders from restarting pixels.
   const imageError = useCallback(() => onError(t.imageError), [onError, t.imageError]);
   if (!src) return <p className="p-4 text-sm text-cafe-muted">{error ?? t.loading}</p>;
+  if (media.kind === 'image' && media.animation && media.animation.frameCount > 1)
+    return (
+      <GifFrameMedia
+        src={src}
+        media={media}
+        index={gifFrame ?? 0}
+        onLoad={onGifLoad ?? (() => undefined)}
+        onError={imageError}
+      />
+    );
   if (media.kind === 'image')
     return (
       <ContentMediaElement

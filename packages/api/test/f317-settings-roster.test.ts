@@ -8,10 +8,7 @@ import { readCompanionSettingsSource } from '../src/domains/concierge/live/host/
 import { createIsolatedTemplateRoot } from './helpers/isolated-template-root.js';
 
 test('settings availability uses the real registry, roster and native selection rules', async (t) => {
-  const isolated = createIsolatedTemplateRoot(
-    process.env.TMPDIR ?? '/tmp',
-    fileURLToPath(new URL('../../../cat-template.json', import.meta.url)),
-  );
+  const isolated = createIsolatedTemplateRoot(fileURLToPath(new URL('../../../cat-template.json', import.meta.url)));
   t.after(isolated.cleanup);
   const template = loadCatConfig(isolated.templatePath);
   const cats = Object.values(toAllCatConfigs(template));

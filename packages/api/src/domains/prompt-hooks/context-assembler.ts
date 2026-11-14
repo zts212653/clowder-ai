@@ -14,7 +14,6 @@
  */
 
 import type {
-  ActiveParticipantInput,
   CatConfig,
   CatConfigSnapshot,
   CatId,
@@ -168,24 +167,6 @@ function resolveTeammates(teammateIds: readonly CatId[]): TeammateSnapshot[] {
 }
 
 // ---------------------------------------------------------------------------
-// Active participants resolution
-// ---------------------------------------------------------------------------
-
-function resolveActiveParticipants(
-  participants: readonly { catId: CatId; lastMessageAt: number }[] | undefined,
-): ActiveParticipantInput[] {
-  if (!participants || participants.length === 0) return [];
-  return participants.map((p) => {
-    const config = catRegistry.tryGet(p.catId as string)?.config;
-    return {
-      catId: p.catId as string,
-      label: formatHandleFreeLabel(p.catId as string, config),
-      lastMessageAt: p.lastMessageAt,
-    };
-  });
-}
-
-// ---------------------------------------------------------------------------
 // Always-on docs formatting
 // ---------------------------------------------------------------------------
 
@@ -212,7 +193,6 @@ export {
   flattenWorldContext,
   formatAlwaysOnDocs,
   formatHandleFreeLabel,
-  resolveActiveParticipants,
   resolveDirectMessage,
   resolveModel,
   resolveTeammates,

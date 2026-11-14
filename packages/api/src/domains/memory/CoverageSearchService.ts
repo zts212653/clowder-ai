@@ -34,6 +34,8 @@ import type {
 } from './coverage-search-types.js';
 import { COVERAGE_MAX_TOTAL, COVERAGE_QUOTA } from './coverage-search-types.js';
 import type { EvidenceItem, IEvidenceStore, SearchOptions } from './interfaces.js';
+import { KnowledgeResolver } from './KnowledgeResolver.js';
+import { documentDiscoverySource } from './knowledge-document-source.js';
 
 export { COVERAGE_RESPONSE_CHAR_BUDGET } from './coverage-search-contract.js';
 export type { ConventionGraphAdapter } from './coverage-search-expansion.js';
@@ -247,9 +249,15 @@ export class CoverageSearchService {
     mode: NormalizedCoverageRequest['mode'],
     latency: CoverageLatencyContext,
   ): Promise<EvidenceItem[]> {
-    const outcome = await runWithinCoverageLatency(latency, scope, (signal, deadlineAt) => {
+    const outcome = await runWithinCoverageLatency(latency, scope, async (signal, deadlineAt) => {
       const opts: SearchOptions = { scope, mode, limit, includePullOnly: true, signal, deadlineAt };
-      return this.store.searchWithMeta(query, opts);
+      const found = await KnowledgeResolver.discover(query, {
+        sources: [documentDiscoverySource({ id: scope, store: this.store, options: opts })],
+        limit,
+        signal,
+        deadlineAt,
+      });
+      return { items: found.items };
     });
     return outcome.timedOut ? [] : outcome.value.items;
   }

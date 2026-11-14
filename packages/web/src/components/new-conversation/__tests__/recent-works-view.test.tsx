@@ -14,21 +14,12 @@ const mocks = vi.hoisted(() => ({
     refetch: vi.fn(),
   },
   useGlobalArtifacts: vi.fn(),
-  all: null as null | {
-    artifacts: GlobalArtifactDTO[];
-    workLineage: 'resolved' | 'unavailable';
-    complete: boolean;
-    loading: boolean;
-    loadingMore?: boolean;
-    error: boolean;
-    refetch: () => void;
-  },
 }));
 
 vi.mock('@/hooks/useGlobalArtifacts', () => ({
   useGlobalArtifacts: (...args: unknown[]) => {
     mocks.useGlobalArtifacts(...args);
-    return (args[1] as { view?: string })?.view === 'works' && mocks.all ? mocks.all : mocks.result;
+    return mocks.result;
   },
 }));
 vi.mock('@/hooks/useCatData', () => ({
@@ -63,7 +54,6 @@ describe('RecentWorks bounded read states', () => {
     writeShellLanguage('zh');
     vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
     mocks.useGlobalArtifacts.mockClear();
-    mocks.all = null;
     mocks.result = {
       artifacts: [],
       workLineage: 'unavailable',
@@ -165,118 +155,45 @@ describe('RecentWorks bounded read states', () => {
   });
 
   it.each([
-    true,
-    false,
-  ])('scrolls past the first bounded read without treating incomplete sources as exhausted: %s', (complete) => {
-    let visible: IntersectionObserverCallback = () => {};
-    vi.stubGlobal(
-      'IntersectionObserver',
-      class {
-        constructor(callback: IntersectionObserverCallback) {
-          visible = callback;
-        }
-        observe() {}
-        disconnect() {}
-      },
-    );
-    const all = Array.from({ length: 60 }, (_, i) => artifact(`work-${i}`, 1000 - i));
-    mocks.result = { ...mocks.result, artifacts: all.slice(0, 12) };
-    mocks.all = { ...mocks.result, artifacts: all, workLineage: 'resolved', complete };
-    render();
-    expect(host.querySelectorAll('[data-testid="recent-work-card"]')).toHaveLength(12);
-    const scroll = () =>
-      act(() => visible([{ isIntersecting: true } as IntersectionObserverEntry], {} as IntersectionObserver));
-    expect(mocks.useGlobalArtifacts).not.toHaveBeenCalledWith(true, { view: 'works' }, undefined);
-    act(() => host.querySelector<HTMLButtonElement>('.work-gallery-more')?.click());
-    expect(mocks.useGlobalArtifacts).toHaveBeenCalledWith(true, { view: 'works' }, undefined);
-    if (!complete) {
-      expect(host.querySelectorAll('[data-testid="recent-work-card"]')).toHaveLength(12);
-      expect(host.textContent).not.toContain('这就是全部了');
-      mocks.all = { ...mocks.all!, complete: true };
-      render();
-    }
-    expect(host.querySelectorAll('[data-testid="recent-work-card"]')).toHaveLength(24);
-    scroll();
-    expect(host.querySelectorAll('[data-testid="recent-work-card"]')).toHaveLength(48);
-    scroll();
-    expect(host.querySelectorAll('[data-testid="recent-work-card"]')).toHaveLength(60);
-    expect(host.textContent).toContain('这就是全部了');
-  });
-  it('does not automatically drain the catalogue when the homepage initial read becomes ready', () => {
-    const observe = vi.fn();
-    vi.stubGlobal(
-      'IntersectionObserver',
-      class {
-        observe = observe;
-        disconnect() {}
-      },
-    );
-    mocks.all = { ...mocks.result, workLineage: 'resolved' };
-    mocks.result = { ...mocks.result, loading: true };
-    render();
-    expect(observe).not.toHaveBeenCalled();
-    mocks.result = { ...mocks.result, loading: false, artifacts: [artifact('loaded', 2)] };
-    render();
-    expect(observe).not.toHaveBeenCalled();
-    expect(mocks.useGlobalArtifacts).not.toHaveBeenCalledWith(true, { view: 'works' }, undefined);
-  });
-
-  it.each([
+    'empty',
     'error',
     'loading',
-  ] as const)('keeps the selected complete catalogue visible when the initial read is %s', (state) => {
-    mocks.result = { ...mocks.result, artifacts: [artifact('initial', 3)] };
-    mocks.all = {
+    'partial',
+  ] as const)('keeps both catalogue entrances usable with a %s preview', (state) => {
+    const openAll = vi.fn();
+    mocks.result = {
       ...mocks.result,
-      artifacts: [artifact('complete-one', 2), artifact('complete-two', 1)],
-      workLineage: 'resolved',
+      loading: state === 'loading',
+      error: state === 'error',
+      complete: state !== 'partial',
     };
-    render();
-    act(() => host.querySelector<HTMLButtonElement>('.work-gallery-more')?.click());
-    mocks.result = { ...mocks.result, [state]: true };
-    render();
-    expect(host.querySelectorAll('[data-testid="recent-work-card"]')).toHaveLength(2);
-    expect(host.querySelector('[role="alert"]')).toBeNull();
-    expect(host.textContent).toContain('这就是全部了');
+    act(() => root.render(<RecentWorks onOpen={vi.fn()} onOpenAll={openAll} />));
+    const top = [...host.querySelectorAll('button')].find((button) => button.textContent?.includes('全部作品'));
+    const bottom = host.querySelector<HTMLButtonElement>('.work-gallery-more');
+    expect(top).toBeDefined();
+    expect(bottom?.textContent).toContain('打开作品目录');
+    act(() => {
+      top?.click();
+      bottom?.click();
+    });
+    expect(openAll).toHaveBeenCalledTimes(2);
+    expect(mocks.useGlobalArtifacts).not.toHaveBeenCalledWith(true, { view: 'works' }, undefined);
   });
 
-  it('keeps the known recent prefix while an older partial batch arrives, including after a continuation failure', () => {
-    mocks.result = { ...mocks.result, artifacts: [artifact('newest', 100)] };
-    mocks.all = {
+  it('caps the preview at 12 without admitting an inline full reader on click or scroll', () => {
+    const openAll = vi.fn();
+    mocks.result = {
       ...mocks.result,
-      artifacts: [artifact('older', 1)],
-      workLineage: 'resolved',
-      complete: false,
-      loadingMore: false,
+      artifacts: Array.from({ length: 60 }, (_, i) => artifact('work-' + i, 1000 - i)),
     };
-    render();
-    act(() => host.querySelector<HTMLButtonElement>('.work-gallery-more')?.click());
-    expect(host.querySelectorAll('[data-testid="recent-work-card"]')).toHaveLength(1);
-    expect(host.querySelector('[data-testid="recent-work-card"] .work-gallery-title')?.getAttribute('title')).toBe(
-      'newest',
-    );
-    mocks.all = { ...mocks.all, loadingMore: false, error: true };
-    render();
-    expect(host.querySelectorAll('[data-testid="recent-work-card"]')).toHaveLength(1);
-    expect(host.querySelector('[role="alert"]')).toBeNull();
-    expect(host.textContent).not.toContain('这就是全部了');
-  });
-
-  it('keeps reading rather than declaring failure when a partial batch contains only a PR and later image pages are pending', () => {
-    mocks.result = { ...mocks.result, artifacts: [artifact('initial', 3)] };
-    mocks.all = {
-      ...mocks.result,
-      artifacts: [{ ...artifact('PR', 1), type: 'pr' }],
-      workLineage: 'resolved',
-      complete: false,
-      loadingMore: false,
-    };
-    render();
-    act(() => host.querySelector<HTMLButtonElement>('.work-gallery-more')?.click());
-    mocks.result = { ...mocks.result, artifacts: [], error: true };
-    mocks.all = { ...mocks.all, loadingMore: true };
-    render();
-    expect(host.querySelector('[aria-busy="true"]')).not.toBeNull();
-    expect(host.querySelector('[role="alert"]')).toBeNull();
+    act(() => root.render(<RecentWorks onOpen={vi.fn()} onOpenAll={openAll} />));
+    expect(host.querySelectorAll('[data-testid="recent-work-card"]')).toHaveLength(12);
+    act(() => {
+      host.dispatchEvent(new Event('scroll'));
+      host.querySelector<HTMLButtonElement>('.work-gallery-more')?.click();
+    });
+    expect(openAll).toHaveBeenCalledTimes(1);
+    expect(host.querySelectorAll('[data-testid="recent-work-card"]')).toHaveLength(12);
+    expect(mocks.useGlobalArtifacts).not.toHaveBeenCalledWith(true, { view: 'works' }, undefined);
   });
 });

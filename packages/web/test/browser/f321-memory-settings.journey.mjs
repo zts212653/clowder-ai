@@ -31,7 +31,12 @@ export async function checkLibraryManagement(page, width) {
   );
   const writes = [];
   const recordWrite = (request) => {
-    if (request.url().includes('/api/') && !['GET', 'HEAD', 'OPTIONS'].includes(request.method()))
+    const pathname = new URL(request.url()).pathname;
+    // Shell client-presence registration is unrelated to changing memory or library state.
+    if (
+      /^\/api\/(library|memory|evidence)(\/|$)/.test(pathname) &&
+      !['GET', 'HEAD', 'OPTIONS'].includes(request.method())
+    )
       writes.push(request.url());
   };
   page.on('request', recordWrite);

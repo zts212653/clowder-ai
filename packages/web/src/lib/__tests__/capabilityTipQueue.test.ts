@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 /**
  * F268 AC-A2 — Client queue contract tests.
  *

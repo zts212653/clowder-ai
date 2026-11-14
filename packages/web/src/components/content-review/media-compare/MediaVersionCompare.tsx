@@ -1,6 +1,8 @@
 'use client';
 import Image from 'next/image';
 import { type ReactNode, useEffect, useRef, useState } from 'react';
+import { GifFrameControls, GifFrameMedia } from '../GifFrameMedia';
+import { gifDisplayClock, gifFrameAtTime, useGifPlayback } from '../useGifPlayback';
 import styles from './media-compare.module.css';
 import { type CompareMediaVersion, compareMediaKey, useCompareMediaSources } from './useCompareMediaSources';
 import { useComparePlayback } from './useComparePlayback';
@@ -28,6 +30,33 @@ function CompareSession({ original, candidate, onUnavailable, decision, fallback
   const source = useCompareMediaSources(versions, onUnavailable);
   const playback = useComparePlayback(versions.map((version) => version.asset.media));
   const video = versions.every((version) => version.asset.media.kind === 'video');
+  const master =
+    [...versions]
+      .reverse()
+      .find(
+        (version) => version.asset.media.kind === 'image' && (version.asset.media.animation?.frameCount ?? 0) > 1,
+      ) ?? candidate;
+  const gif = useGifPlayback(source.sources.length ? source.key : null, master.asset.media, true);
+  const [decoded, setDecoded] = useState<{ key: string; indexes: number[] }>({ key: '', indexes: [] });
+  const gifLoaded = (index: number) =>
+    setDecoded((current) => ({
+      key: source.key,
+      indexes: [...new Set([...(current.key === source.key ? current.indexes : []), index])],
+    }));
+  useEffect(() => {
+    if (decoded.key === source.key && decoded.indexes.length === 2) gif.loaded();
+  }, [decoded, source.key, gif.loaded]);
+  const gifIndex = (version: CompareMediaVersion) => {
+    if (
+      version.asset.media.kind !== 'image' ||
+      !version.asset.media.animation ||
+      master.asset.media.kind !== 'image' ||
+      !master.asset.media.animation
+    )
+      return 0;
+    const time = gifDisplayClock(master.asset.media.animation).starts[gif.frameIndex];
+    return gifFrameAtTime(gifDisplayClock(version.asset.media.animation).starts, time);
+  };
   const compatible = versions.every((version) => version.asset.mediaType === original.asset.mediaType);
   const comparisonError = !compatible ? '两版媒体类型不同，无法对比。' : (source.error ?? decodeError);
   const fitsSide = width >= 640 && versions.every((version) => version.asset.media.width <= (width - 16) / 2);
@@ -97,6 +126,11 @@ function CompareSession({ original, candidate, onUnavailable, decision, fallback
                 <div
                   className={styles.media}
                   style={{
+                    position: 'relative',
+                    aspectRatio:
+                      version.asset.media.kind === 'image' && version.asset.media.animation
+                        ? `${version.asset.media.width} / ${version.asset.media.height}`
+                        : undefined,
                     width:
                       zoom === 'native'
                         ? version.asset.media.width
@@ -112,7 +146,15 @@ function CompareSession({ original, candidate, onUnavailable, decision, fallback
                     maxWidth: version.asset.media.width,
                   }}
                 >
-                  {version.asset.media.kind === 'image' ? (
+                  {version.asset.media.kind === 'image' && version.asset.media.animation ? (
+                    <GifFrameMedia
+                      src={source.sources[index]}
+                      media={version.asset.media}
+                      index={gifIndex(version)}
+                      onLoad={() => gifLoaded(index)}
+                      onError={() => setDecodeError('GIF 帧当前无法显示。')}
+                    />
+                  ) : version.asset.media.kind === 'image' ? (
                     <Image
                       unoptimized
                       src={source.sources[index]}
@@ -139,6 +181,11 @@ function CompareSession({ original, candidate, onUnavailable, decision, fallback
                     />
                   )}
                 </div>
+                {version.asset.media.kind === 'image' && version.asset.media.animation ? (
+                  <p className="text-center text-xs text-cafe-muted">
+                    第 {gifIndex(version) + 1} / {version.asset.media.animation.frameCount} 帧
+                  </p>
+                ) : null}
                 <details className={styles.details}>
                   <summary>版本详情</summary>
                   <dl>
@@ -157,6 +204,7 @@ function CompareSession({ original, candidate, onUnavailable, decision, fallback
           </div>
         )}
       </div>
+      {!comparisonError ? <GifFrameControls playback={gif} onSeek={gif.seek} /> : null}
       {video && source.sources.length && !comparisonError ? (
         <div className={styles.playback}>
           <button type="button" disabled={!playback.ready} onClick={() => void playback.play()}>

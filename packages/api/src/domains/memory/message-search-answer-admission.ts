@@ -13,6 +13,7 @@ import {
   type MessageSearchPrincipal,
   type MessageSearchService,
 } from './MessageSearchService.js';
+import { boundMessageSearchResponse } from './message-search-budget.js';
 
 interface AnswerReadOwner {
   store: MessageSearchAnswerPublicationStore;
@@ -71,7 +72,8 @@ export async function readMessageSearchAnswer(
   const unavailable: MessageSearchAnswerView = { status: 'unavailable' };
   const message = await owner.messages.getById(messageId);
   if (!message || !isAnswerMessageReadable(message, principal.userId, principal.viewer)) return unavailable;
-  const binding = message.extra?.messageSearchAnswer;
+  const storedBinding = message.extra?.messageSearchAnswer;
+  const binding = storedBinding ? structuredClone(storedBinding) : undefined;
   if (!binding || binding.blockId !== blockId || !matchesMessageSearchAnswer(message, binding)) return unavailable;
   const record = owner.store.get(binding.publicationRef);
   if (!record || record.owner_user_id !== principal.userId || record.response_digest !== binding.responseDigest)
@@ -92,28 +94,54 @@ export async function readMessageSearchAnswer(
   await assertAnswerDestination(owner.threads, principal.userId, message.threadId);
   const response = owner.store.response(record);
   if (!response) return unavailable;
-  const view = await owner.search.readAnswerSnapshot(response, { ...principal, publicReply: true }, signal);
-  signal?.throwIfAborted();
-  const current = await owner.messages.getById(messageId);
-  await assertAnswerDestination(owner.threads, principal.userId, message.threadId);
-  if (
-    !current ||
-    !isAnswerMessageReadable(current, principal.userId, principal.viewer) ||
-    !matchesMessageSearchAnswer(current, binding)
-  )
-    return unavailable;
-  if (binding.forwardedFromMessageId) {
-    const original = await owner.messages.getById(binding.forwardedFromMessageId);
-    const originalBinding = answerBinding(record);
+  const validate = async () => {
+    const current = await owner.messages.getById(messageId);
+    await assertAnswerDestination(owner.threads, principal.userId, message.threadId);
     if (
-      !original ||
-      !originalBinding ||
-      !isAnswerMessageReadable(original, principal.userId, principal.viewer) ||
-      !matchesMessageSearchAnswer(original, originalBinding)
+      !current ||
+      !isAnswerMessageReadable(current, principal.userId, principal.viewer) ||
+      !matchesMessageSearchAnswer(current, binding)
     )
-      return unavailable;
-    await assertAnswerDestination(owner.threads, principal.userId, original.threadId);
-  }
+      return false;
+    if (binding.forwardedFromMessageId) {
+      const original = await owner.messages.getById(binding.forwardedFromMessageId);
+      const originalBinding = answerBinding(record);
+      if (
+        !original ||
+        original.threadId !== record.target_thread_id ||
+        !originalBinding ||
+        !isAnswerMessageReadable(original, principal.userId, principal.viewer) ||
+        !matchesMessageSearchAnswer(original, originalBinding)
+      )
+        return false;
+      await assertAnswerDestination(owner.threads, principal.userId, original.threadId);
+    }
+    return true;
+  };
+  const references = [
+    { threadId: message.threadId, messageId },
+    ...(binding.forwardedFromMessageId
+      ? [{ threadId: record.target_thread_id, messageId: binding.forwardedFromMessageId }]
+      : []),
+  ];
+  const selected = response.results.some((row) => row.selection);
+  const view = await owner.search.readAnswerSnapshot(
+    response,
+    { ...principal, publicReply: true },
+    signal,
+    undefined,
+    selected ? { references, validate } : undefined,
+  );
+  signal?.throwIfAborted();
+  if (!selected && !(await validate())) return unavailable;
   if (response.results.length && !view.response.results.length) return unavailable;
+  if (view.response.meta.answerSelection)
+    view.response = boundMessageSearchResponse(
+      {
+        ...view.response,
+        meta: { ...view.response.meta, answerBinding: { messageId, blockId } },
+      },
+      view.response.meta.response.budgetChars,
+    );
   return { status: 'available', publicationRef: record.publication_ref, createdAt: record.created_at, ...view };
 }

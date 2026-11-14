@@ -7,7 +7,10 @@ import {
 } from '@cat-cafe/shared';
 import type { MultipartValue } from '@fastify/multipart';
 import type { FastifyRequest } from 'fastify';
-import type { PluginManagerService } from '../domains/plugin/manager/plugin-manager-service.js';
+import type {
+  PluginManagerMutationResult,
+  PluginManagerService,
+} from '../domains/plugin/manager/plugin-manager-service.js';
 
 function parseReplacementField(part: MultipartValue): PluginArchiveReplacementConfirmation {
   if (part.valueTruncated || typeof part.value !== 'string') {
@@ -68,7 +71,7 @@ export async function installPluginUpload(
   upload: { bytes: Buffer; replacement?: PluginArchiveReplacementConfirmation },
   manager: Pick<PluginManagerService, 'install'>,
   auditBeforeInstall: () => Promise<void>,
-): Promise<unknown> {
+): Promise<PluginManagerMutationResult> {
   const temporaryRoot = await mkdtemp(join(tmpdir(), 'cat-cafe-plugin-upload-'));
   const archivePath = join(temporaryRoot, 'package.tgz');
   try {

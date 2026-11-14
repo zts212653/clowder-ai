@@ -23,7 +23,9 @@ import {
   materializeNativeMcpHttp,
   resolveManagedMcpEntrypoint,
 } from '../../../../../config/capabilities/managed-mcp-config.js';
+import { resolveWorkspaceRoot } from '../../../../../config/capabilities/mcp-config-adapters.js';
 import { isManagedCatCafeSplit } from '../../../../../config/capabilities/mcp-constants.js';
+import { captureMcpEnvironment } from '../../../../../config/capabilities/mcp-environment-capture.js';
 import {
   resolveMcpArgs,
   resolveMcpCommand,
@@ -35,17 +37,9 @@ import {
 } from '../../../../../config/capabilities/plugin-mcp-environment.js';
 import { isRetiredGithubMcpConfigEntry } from '../../../../../config/capabilities/retired-github-mcp.js';
 import { createModuleLogger } from '../../../../../infrastructure/logger.js';
+import { SHARED_BROWSER_RESOLVER, sharedBrowserStdioServer } from '../../../../browser/shared-browser-descriptor.js';
 
 const log = createModuleLogger('provider-mcp-config');
-function resolveMcpWorkspaceRoot(workingDirectory?: string): string {
-  const explicitAllowed = process.env.ALLOWED_WORKSPACE_DIRS?.trim();
-  if (explicitAllowed) return explicitAllowed;
-  const threadWorkspace = workingDirectory?.trim();
-  if (threadWorkspace) return resolve(threadWorkspace);
-  const explicitWorkspace = process.env.CAT_CAFE_WORKSPACE_ROOT?.trim();
-  if (explicitWorkspace) return explicitWorkspace;
-  return process.cwd();
-}
 
 export interface ProviderMcpConfigPlan {
   readonly servers: Record<string, Record<string, unknown>>;
@@ -87,7 +81,7 @@ export async function captureProviderMcpConfig(input: {
   const catId = input.callbackEnv.CAT_CAFE_CAT_ID;
 
   const catCafeEnvEntries = catCafeEnvironment(input, {
-    ALLOWED_WORKSPACE_DIRS: resolveMcpWorkspaceRoot(input.workingDirectory),
+    ALLOWED_WORKSPACE_DIRS: resolveWorkspaceRoot(input.workingDirectory),
   });
 
   const mcpServers: Record<string, Record<string, unknown>> = {};
@@ -128,9 +122,13 @@ export async function captureProviderMcpConfig(input: {
         } else if (s.resolver === 'pencil') {
           const pencil = await resolvePencilCommand({ projectRoot: configSourceRoot });
           if (pencil) mcpServers[s.name] = { command: pencil.command, args: pencil.args };
+        } else if (s.resolver === SHARED_BROWSER_RESOLVER) {
+          // F333: pinned stdio; materializeNativeMcpHttp below nominates it to the shared HTTP route.
+          mcpServers[s.name] = sharedBrowserStdioServer();
         } else if (s.transport === 'streamableHttp' && s.url) {
           const entry: Record<string, unknown> = { type: 'http', url: s.url };
-          if (s.headers && Object.keys(s.headers).length > 0) entry.headers = s.headers;
+          if (s.headers && Object.keys(s.headers).length > 0)
+            entry.headers = captureMcpEnvironment({ headers: s.headers }).headers;
           mcpServers[s.name] = entry;
         } else if (s.command) {
           const workingDir = resolveMcpWorkingDir(s.workingDir, configSourceRoot);
@@ -186,7 +184,7 @@ export async function captureProviderMcpConfig(input: {
             for (const [name, entry] of Object.entries(userMcp.mcpServers)) {
               if (isRetiredGithubMcpConfigEntry(name, entry)) continue;
               if (!excludedMcpServerNames.has(name) && entry && typeof entry === 'object') {
-                const server = { ...(entry as Record<string, unknown>) };
+                const server = captureMcpEnvironment(entry as Record<string, unknown>);
                 if (input.projectMcpRoot && typeof server.command === 'string') {
                   server.cwd = resolve(userMcpRoot, typeof server.cwd === 'string' ? server.cwd : '.');
                 }

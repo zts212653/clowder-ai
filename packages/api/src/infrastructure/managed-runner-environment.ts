@@ -40,3 +40,33 @@ export function buildManagedRunnerEnvironment(inheritedEnv: NodeJS.ProcessEnv): 
 
   return { ...environment, PATH: [...new Set(entries)].join(delimiter) };
 }
+
+/**
+ * How the managed runner starts a cat's shell command.
+ *
+ * Long cat commands (renders, engine builds, whole-repo sync) used to share the
+ * API's CPU and disk at equal priority. On macOS they start one step lower for
+ * CPU (nice 10) and disk (utility I/O tier, inherited by every child). An idle
+ * machine still runs them at full speed on all cores; they only yield while the
+ * Hub API competes for the same CPU or disk.
+ *
+ * Used for ordinary durable wakeWhen commands; gates keep standard priority.
+ * taskpolicy and nice exec in place, so the pid, process group, start time and
+ * environment (including the attempt token) belong to the `/bin/sh -c` that runs
+ * the command, exactly as with `shell: true`.
+ */
+export const MANAGED_COMMAND_NICE = 10;
+
+export function managedShellInvocation(
+  command: string,
+  platform: NodeJS.Platform = process.platform,
+): { file: string; args: string[]; shell: boolean } {
+  if (platform === 'darwin') {
+    return {
+      file: '/usr/sbin/taskpolicy',
+      args: ['-d', 'utility', '/usr/bin/nice', '-n', String(MANAGED_COMMAND_NICE), '/bin/sh', '-c', command],
+      shell: false,
+    };
+  }
+  return { file: command, args: [], shell: true };
+}

@@ -9,6 +9,7 @@ import {
   type SuggestionRecord,
   type SwapSuggestionResult,
   tracksAsOpen,
+  tracksOnDesk,
 } from './SuggestionStore.js';
 
 /** Same contract as `RedisSuggestionStore` without Redis (no-Redis startup and unit tests). */
@@ -100,6 +101,19 @@ export class InMemorySuggestionStore implements ISuggestionStore {
 
   async countOpen(userId: string, kind: string): Promise<number> {
     return this.open(userId, kind).length;
+  }
+
+  async listOpen(userId: string, kind: string, limit: number): Promise<SuggestionRecord[]> {
+    return this.open(userId, kind)
+      .sort((a, b) => b.expiresAt - a.expiresAt)
+      .slice(0, limit);
+  }
+
+  async listDesk(userId: string, limit: number): Promise<SuggestionRecord[]> {
+    return this.all()
+      .filter((record) => record.userId === userId && tracksOnDesk(record))
+      .sort((a, b) => a.createdAt - b.createdAt)
+      .slice(0, limit);
   }
 
   async hide(userId: string, entry: HiddenKindEntry): Promise<void> {

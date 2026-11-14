@@ -5,18 +5,23 @@ import { apiFetch } from '@/utils/api-client';
 import { MessageSearchPanel } from '../MessageSearchPanel';
 
 vi.mock('@/utils/api-client', () => ({ apiFetch: vi.fn() }));
-const emptyAnswer = {
+const emptyAnswer: MessageSearchResponse = {
   searchId: 'current-query',
   query: '琴键',
   results: [],
   meta: {
     scope: 'thread',
     sort: 'time',
+    requestedMode: 'hybrid',
     effectiveMode: 'hybrid',
     degraded: false,
+    partial: true,
+    hasMore: false,
+    candidateLimit: 2000,
+    semanticCandidatesLimited: false,
     freshness: 'unknown',
     sourceCoverage: 'unknown',
-    response: { truncated: false },
+    response: { budgetChars: 24000, serializedChars: 0, truncated: false, continuation: 'unavailable' },
   },
 };
 describe('message lookup panel interaction', () => {
@@ -59,8 +64,34 @@ describe('message lookup panel interaction', () => {
     expect(apiFetch).toHaveBeenCalledOnce();
     const url = new URL(vi.mocked(apiFetch).mock.calls[0][0], 'https://example.test');
     expect(url.searchParams.get('threadId')).toBe('current');
+    expect(url.searchParams.get('messageSort')).toBe('relevance');
     expect(navigate).not.toHaveBeenCalled();
     expect(host.textContent).toContain('本次资格核对情况未知');
+  });
+  it('restores an explicit time choice and snapshot without searching or relabelling it', async () => {
+    const initialState = {
+      query: '琴键',
+      scope: 'thread' as const,
+      sort: 'time' as const,
+      scrollTop: 0,
+      status: 'ready' as const,
+      response: emptyAnswer,
+    };
+    await act(async () =>
+      root.render(
+        <MessageSearchPanel threadId="current" onClose={vi.fn()} onNavigate={vi.fn()} initialState={initialState} />,
+      ),
+    );
+    expect(apiFetch).not.toHaveBeenCalled();
+    expect(
+      [...host.querySelectorAll('button')].find((b) => b.textContent === '按时间')?.getAttribute('aria-pressed'),
+    ).toBe('true');
+    await submit();
+    const url = new URL(vi.mocked(apiFetch).mock.calls[0][0], 'https://example.test');
+    expect(url.searchParams.get('messageSort')).toBe('time');
+    await act(async () => [...host.querySelectorAll('button')].find((b) => b.textContent === '按相关')!.click());
+    const next = new URL(vi.mocked(apiFetch).mock.calls[1][0], 'https://example.test');
+    expect(next.searchParams.get('messageSort')).toBe('relevance');
   });
   it('scope change reuses the entered query with the canonical service', async () => {
     const { input } = await mount();
@@ -87,3 +118,5 @@ describe('message lookup panel interaction', () => {
     expect(close).toHaveBeenCalledOnce();
   });
 });
+
+import type { MessageSearchResponse } from '@cat-cafe/shared';

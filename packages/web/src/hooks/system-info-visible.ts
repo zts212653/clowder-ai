@@ -219,6 +219,9 @@ export function formatVisibleSystemInfo(
   parsed: Record<string, unknown>,
   resolveCatName: ResolveCatName = identityCatName,
 ): VisibleSystemInfoResult | null {
+  if (parsed?.type === 'session_seal_requested' && parsed.reason === 'native_binding_changed') {
+    return formatSessionSealRequested(parsed, resolveCatName);
+  }
   return (
     formatA2AFollowupAvailable(parsed, resolveCatName) ??
     formatCloudBridgeStatus(parsed) ??

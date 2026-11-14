@@ -342,7 +342,7 @@ export function WorkspaceContentReviewProjection({
           src={workflow?.mediaSource ? workflow.mediaSource.src : reviewMediaDisplayPath(originalMediaSrc, source.mime)}
           download={{
             src: originalMediaSrc,
-            filename: `作品.${source.mime === 'image/jpeg' ? 'jpg' : source.mime.split('/')[1]}`,
+            filename: `作品.${source.mime === 'image/jpeg' ? 'jpg' : source.mime === 'image/svg+xml' ? 'svg' : source.mime.split('/')[1]}`,
           }}
           media={source.media}
           sourceError={workflow?.mediaSource?.error}

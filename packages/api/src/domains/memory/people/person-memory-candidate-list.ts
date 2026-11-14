@@ -3,6 +3,7 @@ import { readRedisSettledPage } from '../../../utils/redis-settled-page.js';
 import type { SettledHistoryPageOptions } from '../../../utils/settled-history-page.js';
 import type { StoredPersonMemoryCandidate, StoredPersonMemorySettledCandidate } from './PersonMemoryStore.js';
 import { PersonMemoryKeys } from './person-memory-keys.js';
+import { isPublishedProposal } from './person-memory-proposal-forget-scope.js';
 import { parseStoredCandidate } from './person-memory-records.js';
 
 async function readCandidates(redis: RedisClient, ownerUserId: string, ids: string[]) {
@@ -46,7 +47,7 @@ export async function listSettledPersonMemoryCandidates(
       if (
         !candidate ||
         candidate.ownerUserId !== ownerUserId ||
-        candidate.publication.state !== 'anchored' ||
+        !isPublishedProposal(candidate) ||
         (candidate.state !== 'materialized' && candidate.state !== 'rejected' && candidate.state !== 'withdrawn')
       )
         return null;
@@ -60,17 +61,14 @@ import { advanceSettledIndex, SettledIndexPreparingError } from '../../../utils/
 
 async function preparePersonHistory(redis: RedisClient) {
   const ready = await advanceSettledIndex(redis, {
-    progressKey: 'person-memory:history-index:v2',
+    progressKey: 'person-memory:history-index:v3',
     prefix: 'person-memory:candidate:',
     type: 'string',
     entry: async (raw, key) => {
       const candidate = parseStoredCandidate(typeof raw === 'string' ? raw : null);
       if (!candidate || key !== PersonMemoryKeys.candidate(candidate.ownerUserId, candidate.candidateId))
         throw new Error('person memory history identity mismatch');
-      if (
-        candidate.publication.state !== 'anchored' ||
-        !['materialized', 'rejected', 'withdrawn'].includes(candidate.state)
-      )
+      if (!isPublishedProposal(candidate) || !['materialized', 'rejected', 'withdrawn'].includes(candidate.state))
         return null;
       let score =
         candidate.state === 'withdrawn'
@@ -107,11 +105,10 @@ export async function pageSettledPersonMemoryCandidates(
   await preparePersonHistory(redis);
   return readRedisSettledPage(redis, PersonMemoryKeys.settled(owner), options, async (id, decidedAt) => {
     const [candidate] = await readCandidates(redis, owner, [id]);
-    if (!candidate) return null;
+    if (!candidate || !isPublishedProposal(candidate)) return null;
     if (
       candidate.candidateId !== id ||
       candidate.ownerUserId !== owner ||
-      candidate.publication.state !== 'anchored' ||
       !['materialized', 'rejected', 'withdrawn'].includes(candidate.state)
     )
       throw new Error('Settled index canonical identity/owner/status mismatch');

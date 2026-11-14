@@ -45,7 +45,7 @@ export const matterMemoryTools = [
   defineTool({
     name: 'cat_cafe_list_memory_matters',
     description:
-      'Find shared memory pages about a matter (事情/跨线原话). Use when opening or resuming work, finding what was already discussed or decided, or continuing a paged directory. NOT for reading source messages or proving that a cat has read them; use read_memory_matter. Output: currently readable page titles, IDs, revisions, entry counts and nextCursor; no read receipt. The optional query matches page titles/descriptions; empty does not prove no relevant past conversation exists.',
+      'Find shared memory pages about a matter (事情/跨线原话). Use when opening/resuming work, finding prior discussion or continuing an opening directory. NOT for proving a real read; use read_memory_matter. Output: currently readable titles, IDs, revisions, entry counts, source/summary status and nextCursor; no read receipt. Pages with active unchanged sources from this authenticated invocation thread come first, then updatedAt and stable ID. hasThreadSource means source location, not applicability or authorization. Reuse a cursor with the same reader, thread and query. The optional query matches titles/descriptions; empty does not prove no relevant history exists.',
     inputSchema: {
       query: z.string().max(200).optional().describe('Literal title/description clue, e.g. 守望猫; omit to browse.'),
       cursor,
@@ -67,7 +67,7 @@ export const matterMemoryTools = [
   defineTool({
     name: 'cat_cafe_read_memory_matter',
     description:
-      'Read current original messages linked to one shared matter page. Use when a matter is relevant to this turn, including after resume or a correction; reread even if an older version is in context. NOT for granting execution authority or reporting adoption. Output: raw quotes, separate authors/quoted speakers, source coordinates, page/source revisions and pagination; changed sources are marked without substituting new text. A successful nonempty read records a durable explicit-read receipt for this authenticated invocation/cat. Directory, empty and failed reads do not count.',
+      'Read one shared matter page: description is the cat-written contextual interpretation; entries provide exact raw quotes and sources. Use when a matter is relevant to this turn, including after resume or correction; reread its current version. NOT for granting execution authority or proving adoption. Output: interpretation, raw quotes, separate authors/quoted speakers, source coordinates, page/source revisions and pagination. Changed active sources mark the interpretation unverified (summaryStatus=sources_changed); do not treat it as a current conclusion or silently substitute new speech. A successful nonempty read records a durable explicit-read receipt for this invocation/cat. Directory, context hints, empty and failed reads do not count. Verify applicability from the full page; current user instructions take precedence within their scope.',
     inputSchema: {
       matterId: z.string().min(1).max(200).describe('Stable matterId from the directory or an earlier page.'),
       cursor,
@@ -93,10 +93,10 @@ export const matterMemoryTools = [
   defineTool({
     name: 'cat_cafe_write_memory_matter',
     description:
-      'Create, append to, correct or retire a shared matter page using exact original message selections. Use when related statements/decisions in different threads should remain findable together, or when a new sourced correction replaces an entry. NOT for personal profiles, people or tastes (use their proposal tools), editing source messages, or authorizing work. Output: durable matterId/revision receipt. Reuse requestId only for the exact same change; updates require expectedRevision from a fresh read. Source selections use raw UTF-16 start/end (end exclusive), segment body/quote_comment/quote_text, and quote attachments require contentBlockIndex and attachmentId. Titles/descriptions are cat-written interpretation, not original speech; owner forgetting is in the memory UI.',
+      'Create, append to, correct or retire a shared matter page using exact original message selections. Use when related statements/decisions across threads should remain findable together, or a sourced correction replaces an entry. NOT for personal profiles, people or tastes (use their proposal tools), editing source messages, or authorizing work. Output: durable matterId/revision receipt. description is cat-written contextual interpretation: background, the core issue, subsequent action, and applicable/inapplicable scope; it is optional for simple facts, not a mandatory four-part template. When useful, include one brief, source-grounded way this matter might be asked about in the interpretation; it is only a retrieval clue, not a new fact, applicability rule or instruction. sources retain exact original speech coordinates, never reconstructed speech or hidden reasoning. Reuse requestId only for the exact change; updates need expectedRevision from a fresh read. Selections use raw UTF-16 start/end (end exclusive), body/quote_comment/quote_text; quote attachments need contentBlockIndex and attachmentId. Recheck the interpretation after source correction; current user instructions take precedence within their scope. Owner forgetting is in the memory UI.',
     inputSchema: {
       change: agentChange.describe(
-        'One exact change. Sources include threadId/messageId, segment, raw start/end and the exact selected quote.',
+        'One exact change. description is optional cat-written context and applicability; sources preserve exact original threadId/messageId, segment, raw start/end and selected quote.',
       ),
     },
     handler: handleWriteMemoryMatter,

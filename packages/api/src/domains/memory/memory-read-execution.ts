@@ -1,11 +1,13 @@
 import { randomUUID } from 'node:crypto';
 import type { SqliteReadDiagnostic } from '../../infrastructure/sqlite-read-diagnostics.js';
 import type { ChildMessage } from './memory-process-protocol.js';
+import { type MessageCandidateAuditSnapshot, safeCandidateAudit } from './message-candidate-audit-wire.js';
 import type { CjkReadSnapshot } from './message-cjk-read-diagnostics.js';
 
 export type MemoryReadDiagnostic =
   | { phase: 'database-initialization' }
   | { phase: 'cjk-read'; cjk: CjkReadSnapshot }
+  | { phase: 'candidate-audit'; candidateAudit: MessageCandidateAuditSnapshot }
   | { phase: 'sql-start'; sql: Omit<SqliteReadDiagnostic, 'elapsedMs' | 'rows'> }
   | { phase: 'sql-finish'; sql: SqliteReadDiagnostic };
 
@@ -13,6 +15,7 @@ export type MemoryReadDiagnostic =
 export class MemoryReadExecution {
   private readonly executionId = randomUUID();
   private cjk?: CjkReadSnapshot;
+  private candidateAudit?: MessageCandidateAuditSnapshot;
   private readonly submitted = performance.now();
   private phase = 'queue';
   private pid?: number;
@@ -60,6 +63,10 @@ export class MemoryReadExecution {
   }
 
   observe(event: MemoryReadDiagnostic) {
+    if (event.phase === 'candidate-audit') {
+      this.candidateAudit = safeCandidateAudit(event.candidateAudit);
+      return;
+    }
     if (event.phase === 'cjk-read') {
       this.cjk = { ...event.cjk };
       return;
@@ -107,6 +114,7 @@ export class MemoryReadExecution {
       lastObservedSql: this.lastObservedSql,
       nativeVectorRead: this.nativeVectorRead ?? null,
       cjk: this.cjk ? { ...this.cjk } : null,
+      ...(outcome === 'fulfilled' && this.candidateAudit ? { candidateAudit: this.candidateAudit } : {}),
     };
   }
 

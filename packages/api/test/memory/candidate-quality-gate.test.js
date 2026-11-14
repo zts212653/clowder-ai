@@ -6,7 +6,7 @@ describe('Candidate quality gate', () => {
   let MAX_CANDIDATES_PER_SEGMENT;
 
   it('loads exports', async () => {
-    const mod = await import('../../dist/domains/memory/AbstractiveSummaryClient.js');
+    const mod = await import('../../dist/domains/memory/abstractive-summary-output.js');
     isImplementationNoise = mod.isImplementationNoise;
     MAX_CANDIDATES_PER_SEGMENT = mod.MAX_CANDIDATES_PER_SEGMENT;
     assert.equal(typeof isImplementationNoise, 'function');
@@ -16,7 +16,7 @@ describe('Candidate quality gate', () => {
   // ── Reject: implementation noise ──────────────────────────────
 
   it('rejects code action titles (Chinese)', async () => {
-    const mod = await import('../../dist/domains/memory/AbstractiveSummaryClient.js');
+    const mod = await import('../../dist/domains/memory/abstractive-summary-output.js');
     assert.ok(mod.isImplementationNoise('加了 mkdirSync 到 writeYaml 前面', '修复 ENOENT'));
     assert.ok(mod.isImplementationNoise('改了 regex 支持 !? 后缀', 'regex fix'));
     assert.ok(mod.isImplementationNoise('重写 JSON parser', '改为自然语言解析'));
@@ -24,7 +24,7 @@ describe('Candidate quality gate', () => {
   });
 
   it('rejects code action titles (English)', async () => {
-    const mod = await import('../../dist/domains/memory/AbstractiveSummaryClient.js');
+    const mod = await import('../../dist/domains/memory/abstractive-summary-output.js');
     assert.ok(mod.isImplementationNoise('Added mkdirSync before writeFileSync', 'fix ENOENT'));
     assert.ok(mod.isImplementationNoise('Replaced JSON schema with natural language parser', ''));
     assert.ok(mod.isImplementationNoise('Fixed regex to handle optional exclamation', ''));
@@ -32,14 +32,14 @@ describe('Candidate quality gate', () => {
   });
 
   it('rejects titles that are too short', async () => {
-    const mod = await import('../../dist/domains/memory/AbstractiveSummaryClient.js');
+    const mod = await import('../../dist/domains/memory/abstractive-summary-output.js');
     assert.ok(mod.isImplementationNoise('fix', 'fix'));
     assert.ok(mod.isImplementationNoise('update', 'done'));
     assert.ok(mod.isImplementationNoise('小修', '小修'));
   });
 
   it('rejects candidates saturated with code artifacts', async () => {
-    const mod = await import('../../dist/domains/memory/AbstractiveSummaryClient.js');
+    const mod = await import('../../dist/domains/memory/abstractive-summary-output.js');
     assert.ok(
       mod.isImplementationNoise(
         'submitCandidate pipeline with parser refactor',
@@ -49,7 +49,7 @@ describe('Candidate quality gate', () => {
   });
 
   it('rejects real production garbage candidates (co-creator reported)', async () => {
-    const mod = await import('../../dist/domains/memory/AbstractiveSummaryClient.js');
+    const mod = await import('../../dist/domains/memory/abstractive-summary-output.js');
     // These are the exact candidates from the screenshot that triggered the bug report
     assert.ok(mod.isImplementationNoise('submitCandidate 管道自动提取并推送到 Feed', '这是 Feed 自己的实现描述'));
     assert.ok(mod.isImplementationNoise('SummaryCompactionTask.ts JSON schema 验证改写', '代码重构细节'));
@@ -57,7 +57,7 @@ describe('Candidate quality gate', () => {
   });
 
   it('rejects titles containing file paths or class identifiers', async () => {
-    const mod = await import('../../dist/domains/memory/AbstractiveSummaryClient.js');
+    const mod = await import('../../dist/domains/memory/abstractive-summary-output.js');
     assert.ok(mod.isImplementationNoise('MarkerQueue.ts 增加了 ensureDir 方法', '确保目录存在'));
     assert.ok(mod.isImplementationNoise('parseNaturalLanguageOutput 改成单段输出', '简化解析逻辑'));
   });
@@ -65,7 +65,7 @@ describe('Candidate quality gate', () => {
   // ── Accept: durable knowledge ─────────────────────────────────
 
   it('accepts genuine decisions', async () => {
-    const mod = await import('../../dist/domains/memory/AbstractiveSummaryClient.js');
+    const mod = await import('../../dist/domains/memory/abstractive-summary-output.js');
     assert.ok(
       !mod.isImplementationNoise(
         'Knowledge Feed uses YAML files as truth source, not SQLite',
@@ -81,7 +81,7 @@ describe('Candidate quality gate', () => {
   });
 
   it('accepts genuine lessons', async () => {
-    const mod = await import('../../dist/domains/memory/AbstractiveSummaryClient.js');
+    const mod = await import('../../dist/domains/memory/abstractive-summary-output.js');
     assert.ok(
       !mod.isImplementationNoise(
         'Fail-open catch blocks must log errors, not silently swallow',
@@ -97,7 +97,7 @@ describe('Candidate quality gate', () => {
   });
 
   it('accepts genuine methods', async () => {
-    const mod = await import('../../dist/domains/memory/AbstractiveSummaryClient.js');
+    const mod = await import('../../dist/domains/memory/abstractive-summary-output.js');
     assert.ok(
       !mod.isImplementationNoise(
         'Let the model output natural language; program adds structural fields afterward',
@@ -107,7 +107,7 @@ describe('Candidate quality gate', () => {
   });
 
   it('accepts PascalCase product/brand names as real knowledge (regression)', async () => {
-    const mod = await import('../../dist/domains/memory/AbstractiveSummaryClient.js');
+    const mod = await import('../../dist/domains/memory/abstractive-summary-output.js');
     assert.ok(
       !mod.isImplementationNoise(
         'OpenClaw inspired our gateway architecture',

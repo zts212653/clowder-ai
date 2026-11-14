@@ -62,6 +62,31 @@ describe('Hub member actions and effective transport', () => {
     expect(host.textContent).not.toContain('APP SERVER');
   });
 
+  it('preserves another ACP tool ID and shares the DSH model display rule', () => {
+    const acp = {
+      ...cat,
+      clientId: 'acp',
+      carrier: 'acp',
+      configurationSource: 'native_tool',
+      defaultModel: '["gateway","model"]',
+    } as CatData;
+    act(() =>
+      root.render(
+        <HubMemberOverviewCard
+          cat={{ ...acp, acp: { command: 'custom-acp', startupArgs: ['--provider', 'deepseek'] } }}
+        />,
+      ),
+    );
+    expect(host.textContent).toContain('ACP 工具 · ["gateway","model"]');
+    expect(host.textContent).not.toContain('DSH');
+    act(() =>
+      root.render(
+        <HubMemberOverviewCard cat={{ ...acp, acp: { command: 'dsh.cmd', startupArgs: ['--profile', 'acp'] } }} />,
+      ),
+    );
+    expect(host.textContent).toContain('DSH · gateway / model · 模型 ID');
+  });
+
   it.each(['kimi', 'opencode'] as const)('identifies native %s by its actual tool', (clientId) => {
     act(() =>
       root.render(

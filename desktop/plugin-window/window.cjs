@@ -10,6 +10,7 @@ const { createWindowPreferences } = require('./window-preferences.cjs');
 const { createCompanionDisable } = require('./companion-disable.cjs');
 
 const { validateLaunch, toPublishedWindowReply } = require('./window-launch.cjs');
+const { companionContractHas } = require('./companion-contracts.cjs');
 
 /** Host-owned window implementation. A package supplies HTML, never main/preload code.
  * Conversation/media bridge admission is separate from opening this window.
@@ -24,7 +25,9 @@ async function createManagedWindow(
 ) {
   const { url, presentation, publicCompanionV2, companionContract } = validateLaunch(input);
   const { app, BrowserWindow, session, screen, ipcMain, powerMonitor, systemPreferences, shell, dialog } = electron;
-  const appAssist = companionContract === '0.1.0-beta.29' ? options.appAssist : undefined;
+  const appAssist = companionContractHas(companionContract, 'appAssist') ? options.appAssist : undefined;
+  // F335 交付三：present only when the Host admitted a desk-capable archive and the API granted it.
+  const desk = companionContractHas(companionContract, 'desk') ? options.desk : undefined;
   const runAppAssist = (method) => {
     if (!appAssist) return Promise.resolve();
     try {
@@ -134,14 +137,7 @@ async function createManagedWindow(
     if (!win.isDestroyed()) win.webContents.send('companion:event', event);
   };
   const voice = createVoiceHost(electron, {
-    callScoped: [
-      '0.1.0-beta.23',
-      '0.1.0-beta.24',
-      '0.1.0-beta.25',
-      '0.1.0-beta.27',
-      '0.1.0-beta.28',
-      '0.1.0-beta.29',
-    ].includes(companionContract),
+    callScoped: companionContractHas(companionContract, 'modern'),
     resources: options.voiceResources,
     isArmed: () => controller.armed,
     requestOffer: (sdp) => controller.request({ kind: 'offer', sdp }, false),
@@ -207,6 +203,7 @@ async function createManagedWindow(
         preferences.accept(ticket, result);
         result = toPublishedWindowReply(result, companionContract);
         if (appAssist && result.kind === 'state') result = { ...result, appAssist: appAssist.snapshot() };
+        if (desk && result.kind === 'state') result = { ...result, desk: desk.snapshot() };
         return receiveOnlyAdmitted && result.kind === 'state'
           ? { ...result, audio: { supportedModes: ['duplex', 'receive_only'], activeMode: voice.mode() } }
           : result;
@@ -285,6 +282,8 @@ async function createManagedWindow(
       return presentationReply;
     }
     if (command.kind.startsWith('audio.')) return voice.request(command, activated === true);
+    if (desk && ['desk.settle', 'desk.thumbnail.read', 'desk.avatar.read'].includes(command.kind))
+      return desk.request(command);
     return appAssist
       ? appAssist.request(command, (forwarded) => requestController(forwarded, activated))
       : requestController(command, activated);
@@ -315,6 +314,9 @@ async function createManagedWindow(
   };
   if (appAssist)
     for (const [event, listener] of Object.entries(appAssistPowerListeners)) powerMonitor.on(event, listener);
+  // The desk brings things only while the cat is actually on screen; hidden keeps them for later.
+  const syncDesk = () => desk?.setVisible(!win.isDestroyed() && win.isVisible() && app?.isHidden?.() !== true);
+  if (desk) for (const event of ['show', 'hide', 'blur', 'focus']) win.on(event, syncDesk);
   win.on('hide', () => {
     preferences.suspend('hidden');
     petWindow.dismiss();
@@ -405,6 +407,7 @@ async function createManagedWindow(
     },
     poll() {
       if (win.isDestroyed()) throw new Error('Window closed');
+      syncDesk();
       return win.isVisible() ? 'visible' : 'hidden';
     },
     show() {

@@ -5,6 +5,7 @@ import { type SidebarSnapshotRow, useSidebarProjectionStore } from '@/stores/sid
 import { renderChatContainer, resetChatContainerMocks, storeState } from './chat-container-test-helpers';
 
 const brandDisplayName = vi.hoisted(() => 'Synthetic Welcome Écran');
+vi.mock('@/components/thread-chat/hub-socket-context', () => import('@/test-utils/hub-socket-context-mock'));
 vi.mock('@cat-cafe/shared', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@cat-cafe/shared')>();
   return {

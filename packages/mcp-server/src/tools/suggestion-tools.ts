@@ -1,4 +1,9 @@
-import { suggestionFactsQuerySchema, suggestionOfferInputSchema, suggestionReceiptInputSchema } from '@cat-cafe/shared';
+import {
+  bringToDeskInputSchema,
+  suggestionFactsQuerySchema,
+  suggestionOfferInputSchema,
+  suggestionReceiptInputSchema,
+} from '@cat-cafe/shared';
 import { z } from 'zod';
 import { defineMcpCanonicalFactory } from '../tool-governance-migration.js';
 import { callbackPost } from './callback-tools.js';
@@ -74,6 +79,28 @@ export const suggestionFactsInputSchema = {
     .describe('A kind you decide not to offer again. The person can restore it in 设置 › 你 › 已隐藏的建议.'),
 };
 
+export const bringToDeskInputShape = {
+  messageId: z
+    .string()
+    .min(1)
+    .max(200)
+    .optional()
+    .describe('The message carrying the work card, in this conversation. Omit for your own reply in this turn.'),
+  sentence: z
+    .string()
+    .min(1)
+    .max(120)
+    .describe('The one line on the desk bubble, said to the person: 「鲸鲸那三格，照他的头像画就行。」'),
+  work: z
+    .object({ contentRef: z.string().min(1), ownerRevision: z.number().int().positive() })
+    .strict()
+    .describe('The fixed work version whose card you attached with cat_cafe_work publish-reference.'),
+};
+
+export async function handleBringToDesk(input: unknown): Promise<ToolResult> {
+  return callbackPost('/api/callbacks/desk-deliveries', bringToDeskInputSchema.parse(input));
+}
+
 export async function handleOfferSuggestion(input: unknown): Promise<ToolResult> {
   return callbackPost('/api/callbacks/suggestions', suggestionOfferInputSchema.parse(input));
 }
@@ -116,6 +143,24 @@ export const suggestionTools = [
     handler: handlePostActionReceipt,
     governance: {
       implementationExport: 'handlePostActionReceipt',
+      action: 'create',
+      risk: { level: 'write', openWorld: false },
+      runtimeProfiles: ['full'],
+      standaloneReason: admission,
+    },
+  }),
+  defineTool({
+    name: 'cat_cafe_bring_to_desk',
+    description:
+      'Have the desktop cat bring a work you already made to the person (「桌面猫带来」): who brought it, one sentence, the work, 忽略 / 打开. ' +
+      'Use when: you finished something for them nobody asked for yet, saved it with cat_cafe_work and attached its card to your reply with publish-reference. ' +
+      'Not for: anything unsaved, decisions or approvals, progress reports, or things that need them right now. ' +
+      'Output: ready (the reply with the card is saved) or waiting_for_card (it reaches the desk once this reply is saved). At the desk it shows at once; while they are away it waits and comes in one list when they return; unanswered, it stays in this conversation. It never enters Needs Me. ' +
+      'GOTCHA: one row per message, so do not also offer a suggestion on that reply. Read cat_cafe_suggestion_facts kind=brought-work for how they treated earlier ones.',
+    inputSchema: bringToDeskInputShape,
+    handler: handleBringToDesk,
+    governance: {
+      implementationExport: 'handleBringToDesk',
       action: 'create',
       risk: { level: 'write', openWorld: false },
       runtimeProfiles: ['full'],

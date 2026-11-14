@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 /**
  * F109 Phase A — Toast error tests for MessageActions UI paths.
  *
@@ -10,6 +11,7 @@
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { SHELL_PRESENTATION_STORAGE_KEY, writeShellPresentation } from '../shell/shell-presentation';
 
 const apiFetchMock = vi.hoisted(() => vi.fn());
 const getUserIdMock = vi.hoisted(() => vi.fn(() => 'user-1'));
@@ -89,8 +91,8 @@ function findOpenDialog(title: string): DialogProps | undefined {
 
 /** Click a toolbar button by its `title` attribute, then find + invoke the dialog */
 async function triggerAction(container: HTMLDivElement, buttonTitle: string, dialogTitle: string) {
-  const btn = container.querySelector(`button[title="${buttonTitle}"]`) as HTMLButtonElement | null;
-  expect(btn, `button[title="${buttonTitle}"] should exist`).not.toBeNull();
+  const btn = container.querySelector(`button[aria-label="${buttonTitle}"]`) as HTMLButtonElement | null;
+  expect(btn, `button[aria-label="${buttonTitle}"] should exist`).not.toBeNull();
 
   await act(async () => {
     btn!.click();
@@ -106,7 +108,7 @@ async function triggerAction(container: HTMLDivElement, buttonTitle: string, dia
 
 // ---------- suite ----------
 
-describe('F109: MessageActions toast on errors', () => {
+describe.each(['classic', 'v2'] as const)('F109: MessageActions toast on errors (%s)', (presentation) => {
   let container: HTMLDivElement;
   let root: Root;
 
@@ -115,6 +117,7 @@ describe('F109: MessageActions toast on errors', () => {
   });
 
   beforeEach(() => {
+    writeShellPresentation(presentation);
     pushMock.mockReset();
     removeThreadMessageMock.mockReset();
     apiFetchMock.mockReset();
@@ -131,6 +134,7 @@ describe('F109: MessageActions toast on errors', () => {
   afterEach(() => {
     act(() => root.unmount());
     container.remove();
+    window.localStorage.removeItem(SHELL_PRESENTATION_STORAGE_KEY);
   });
 
   afterAll(() => {
@@ -168,7 +172,12 @@ describe('F109: MessageActions toast on errors', () => {
 
   describe('confirmBranch', () => {
     async function triggerBranch(container: HTMLDivElement) {
-      const branchButtons = container.querySelectorAll('button[aria-label="创建分支"]');
+      if (presentation === 'v2') {
+        await act(async () => container.querySelector<HTMLButtonElement>('button[aria-haspopup="menu"]')!.click());
+      }
+      const branchButtons = Array.from(document.querySelectorAll<HTMLButtonElement>('button')).filter(
+        (button) => button.getAttribute('aria-label') === '创建分支' || button.textContent === '从这里分支',
+      );
       expect(branchButtons).toHaveLength(1);
       expect(container.querySelector('button[aria-label="编辑并创建分支"]')).toBeNull();
       expect(container.querySelector('button[aria-label="撤回并重新编辑"]')).toBeNull();

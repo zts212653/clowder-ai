@@ -22,6 +22,7 @@ describe('operator can ask the initiating cat to advance the existing Program', 
   beforeEach(() => {
     (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
     localStorage.clear();
+    localStorage.setItem('cat-cafe:shell-presentation', 'classic');
     useEvolutionProgressRequests.setState({ records: {}, pending: {}, errors: {} });
     useEvolutionReading.setState({ programs: {} });
     catData.cats = [{ id: 'codex-sol', displayName: 'Sol' }];
@@ -42,6 +43,7 @@ describe('operator can ask the initiating cat to advance the existing Program', 
   afterEach(() => {
     act(() => root.unmount());
     host.remove();
+    localStorage.removeItem('cat-cafe:shell-presentation');
     delete (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT;
   });
   async function render() {

@@ -321,6 +321,7 @@ describe('F287 RecallOpportunity catalog', () => {
       [
         { kind: 'fresh_context_sources', producer: 'context_epoch' },
         { kind: 'authorized_task_sources', producer: 'task_action_custody' },
+        { kind: 'work_preparation', producer: 'explicit_preparation' },
         { kind: 'subject_seen', producer: 'entity_nudge' },
         { kind: 'delivery_decision', producer: 'github_ci' },
         { kind: 'judgment_surface_entered', producer: 'workflow_sop' },

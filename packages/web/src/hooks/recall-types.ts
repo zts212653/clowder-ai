@@ -9,12 +9,16 @@ import type {
 export type MemoryCueStatus = 'presented_unreported' | 'drilled' | 'applied' | 'dismissed' | 'invalidated';
 
 export interface RecallResultItem {
+  memoryHref?: string | null;
+  messageHref?: string | null;
   sourceUnavailableReason?: 'source_corrected' | 'source_forgotten' | 'scope_revoked';
   title: string;
   titleStatus?: 'loading' | 'unavailable';
   /** Null explicitly means this source has no verified owner-readable destination. */
   href?: string | null;
   matchRank?: RecallMatchRank;
+  rank?: number;
+  relevance?: { state: string };
   matchType?: RecallMatchType;
   authority?: string;
   updatedAt?: string;
@@ -57,6 +61,8 @@ export interface RecallEvent {
 }
 
 export interface RecallSourceView {
+  memoryHref?: string | null;
+  messageHref?: string | null;
   sourceUnavailableReason?: RecallResultItem['sourceUnavailableReason'];
   anchor: string;
   invocationId?: string;

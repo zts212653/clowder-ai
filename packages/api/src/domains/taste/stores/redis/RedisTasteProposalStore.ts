@@ -28,6 +28,7 @@ import {
   serializeApprovalPublication,
 } from '../../../cats/services/stores/redis/RedisApprovalPublication.js';
 import {
+  matchesTasteContentSnapshot,
   matchesTasteDecisionSnapshot,
   TASTE_DECISION_FIELDS,
   type TasteDecisionSnapshot,
@@ -44,12 +45,30 @@ const CAS_CLAIM_LUA = `
   local key = KEYS[1]
   local status = redis.call('HGET', key, 'status')
   if status ~= 'pending' then return 0 end
-  if ARGV[1] == '1' then
-    for i = 2, #ARGV, 2 do
+  if ARGV[3] == '1' then
+    for i = 4, #ARGV, 2 do
       if (redis.call('HGET', key, ARGV[i]) or '') ~= ARGV[i + 1] then return 0 end
     end
   end
-  redis.call('HSET', key, 'status', 'approving')
+  redis.call('HSET', key, 'status', 'approving', 'approvedBy', ARGV[1])
+  redis.call('HDEL', key, 'legacyPublicationRecovery')
+  if ARGV[2] ~= '' then redis.call('HSET', key, 'decisionDigest', ARGV[2]) end
+  return 1
+`;
+
+/** An explicit owner retry may bind a legacy approving claim without restarting its effect. */
+const RECORD_APPROVAL_PROOF_LUA = `
+  if redis.call('HGET', KEYS[1], 'status') ~= 'approving' then return 0 end
+  local previous = redis.call('HGET', KEYS[1], 'decisionDigest') or ''
+  local owner = redis.call('HGET', KEYS[1], 'approvedBy') or ''
+  if previous ~= '' and previous ~= ARGV[2] then return 0 end
+  if owner ~= '' and owner ~= ARGV[1] then return 0 end
+  for i = 3, #ARGV, 2 do
+    if (redis.call('HGET', KEYS[1], ARGV[i]) or '') ~= ARGV[i + 1] then return 0 end
+  end
+  if previous == '' then redis.call('HSET', KEYS[1], 'legacyPublicationRecovery', '1') end
+  redis.call('HSET', KEYS[1], 'approvedBy', ARGV[1], 'decisionDigest', ARGV[2])
+  if redis.call('HGET', KEYS[1], 'legacyPublicationRecovery') == '1' then return 2 end
   return 1
 `;
 
@@ -88,7 +107,7 @@ const CAS_ROLLBACK_LUA = `
   local status = redis.call('HGET', key, 'status')
   if status ~= 'approving' then return 0 end
   redis.call('HSET', key, 'status', 'pending')
-  redis.call('HDEL', key, 'approvedBy', 'vignetteSlug', 'vignettePath')
+  redis.call('HDEL', key, 'approvedBy', 'decisionDigest', 'legacyPublicationRecovery', 'vignetteSlug', 'vignettePath')
   return 1
 `;
 
@@ -146,6 +165,7 @@ export class RedisTasteProposalStore implements ITasteProposalStore, ApprovalPub
       sourceMessageId: input.sourceMessageId,
       scene: input.scene,
       quote: input.quote,
+      ...(input.resolvedQuotes ? { resolvedQuotes: [...input.resolvedQuotes] } : {}),
       ...(input.takeaway ? { takeaway: input.takeaway } : {}),
       tags: [...input.tags],
       dimension: input.dimension as TasteDimension,
@@ -262,10 +282,53 @@ export class RedisTasteProposalStore implements ITasteProposalStore, ApprovalPub
     if (expected && (userId !== expected.ownerUserId || !matchesTasteDecisionSnapshot(proposal, expected))) return null;
 
     const key = TasteProposalKeys.detail(id);
-    const result = await this.redis.eval(CAS_CLAIM_LUA, 1, key, ...snapshotArgs(expected));
+    const result = await this.redis.eval(
+      CAS_CLAIM_LUA,
+      1,
+      key,
+      userId,
+      expected?.digest ?? '',
+      ...snapshotArgs(expected),
+    );
     if (result === 0) return null;
 
-    return { ...proposal, status: 'approving' };
+    const claimed: TasteProposal = {
+      ...proposal,
+      status: 'approving',
+      approvedBy: userId,
+      ...(expected ? { decisionDigest: expected.digest } : {}),
+    };
+    delete claimed.legacyPublicationRecovery;
+    return claimed;
+  }
+
+  async recordApprovalProof(
+    id: string,
+    approvedBy: string,
+    expected: TasteDecisionSnapshot,
+  ): Promise<TasteProposal | null> {
+    const proposal = await this.get(id);
+    if (
+      !proposal ||
+      proposal.status !== 'approving' ||
+      expected.ownerUserId !== approvedBy ||
+      !matchesTasteContentSnapshot(proposal, expected)
+    )
+      return null;
+    const result = await this.redis.eval(
+      RECORD_APPROVAL_PROOF_LUA,
+      1,
+      TasteProposalKeys.detail(id),
+      approvedBy,
+      expected.digest,
+      ...TASTE_DECISION_FIELDS.flatMap((field) => [field, expected.fields[field]]),
+    );
+    if (result !== 1 && result !== 2) return null;
+    const bound = { ...proposal, approvedBy, decisionDigest: expected.digest };
+    // The Lua result carries the current classification; a stale pre-CAS read cannot grant legacy recovery.
+    if (result === 2) bound.legacyPublicationRecovery = true;
+    else delete bound.legacyPublicationRecovery;
+    return bound;
   }
 
   async recordWriteCheckpoint(id: string, checkpoint: TasteWriteCheckpoint): Promise<TasteProposal | null> {
@@ -484,10 +547,13 @@ function serializeProposal(p: TasteProposal): string[] {
   ];
   if (p.sourceMessageId) fields.push('sourceMessageId', p.sourceMessageId);
   if (p.takeaway) fields.push('takeaway', p.takeaway);
+  if (p.resolvedQuotes) fields.push('resolvedQuotes', JSON.stringify(p.resolvedQuotes));
   if (p.clientRequestId) fields.push('clientRequestId', p.clientRequestId);
   if (p.approvalOriginRef) fields.push('approvalOriginRef', JSON.stringify(p.approvalOriginRef));
   if (p.correctionTarget) fields.push('correctionTarget', JSON.stringify(p.correctionTarget));
   if (p.approvedBy) fields.push('approvedBy', p.approvedBy);
+  if (p.decisionDigest) fields.push('decisionDigest', p.decisionDigest);
+  if (p.legacyPublicationRecovery) fields.push('legacyPublicationRecovery', '1');
   if (p.approvedAt) fields.push('approvedAt', String(p.approvedAt));
   if (p.rejectedBy) fields.push('rejectedBy', p.rejectedBy);
   if (p.rejectedAt) fields.push('rejectedAt', String(p.rejectedAt));
@@ -507,6 +573,7 @@ function hydrateProposal(raw: Record<string, string>): TasteProposal {
     scene: raw.scene,
     quote: raw.quote,
     ...(raw.takeaway ? { takeaway: raw.takeaway } : {}),
+    ...(raw.resolvedQuotes ? { resolvedQuotes: JSON.parse(raw.resolvedQuotes) } : {}),
     tags: JSON.parse(raw.tags || '[]'),
     dimension: raw.dimension as TasteDimension,
     privacy: raw.privacy as 'public' | 'sensitive',
@@ -517,6 +584,8 @@ function hydrateProposal(raw: Record<string, string>): TasteProposal {
     ...(raw.approvalOriginRef ? { approvalOriginRef: JSON.parse(raw.approvalOriginRef) } : {}),
     ...(raw.correctionTarget ? { correctionTarget: JSON.parse(raw.correctionTarget) } : {}),
     ...(raw.approvedBy ? { approvedBy: raw.approvedBy } : {}),
+    ...(raw.decisionDigest ? { decisionDigest: raw.decisionDigest } : {}),
+    ...(raw.legacyPublicationRecovery === '1' ? { legacyPublicationRecovery: true as const } : {}),
     ...(raw.approvedAt ? { approvedAt: Number(raw.approvedAt) } : {}),
     ...(raw.rejectedBy ? { rejectedBy: raw.rejectedBy } : {}),
     ...(raw.rejectedAt ? { rejectedAt: Number(raw.rejectedAt) } : {}),

@@ -114,7 +114,12 @@ export function ConnectorBubble({
   const unknownFeedback = visibility.some((entry) => entry.visibility === 'unknown');
   const withdrawnFeedback = visibility.some((entry) => entry.visibility !== 'allowed');
   if (isHiddenChatRow(message)) return null;
-  const jobId = source.connector === 'hold-ball' && typeof source.meta?.jobId === 'string' ? source.meta.jobId : null;
+  const informationalHold =
+    source.connector === 'hold-ball' && readHoldCardCancelability(source.meta) === 'informational';
+  const jobId =
+    !informationalHold && source.connector === 'hold-ball' && typeof source.meta?.jobId === 'string'
+      ? source.meta.jobId
+      : null;
   const taskId = typeof source.meta?.taskId === 'string' ? source.meta.taskId : null;
   if (isAbsorbedManagedJobMessage(message, timelineMessages ?? [])) {
     return <div data-message-id={message.id} aria-hidden="true" className="h-0" />;
@@ -266,7 +271,7 @@ export function ConnectorBubble({
       {richBlocks && richBlocks.length > 0 && (
         <RichBlocks blocks={richBlocks} messageSource={message.source} publication={publication} />
       )}
-      {!jobId && source.connector === 'hold-ball' && typeof source.meta?.taskId === 'string' && (
+      {!informationalHold && !jobId && source.connector === 'hold-ball' && typeof source.meta?.taskId === 'string' && (
         <HoldBallCancelButton
           key={holdStatusRefreshKey}
           taskId={source.meta.taskId}

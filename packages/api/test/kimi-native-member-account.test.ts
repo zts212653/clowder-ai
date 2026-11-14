@@ -128,6 +128,29 @@ test('owner discovery and runtime share the original native OAuth source revisio
   assert.equal(f.spawns(), 0);
 });
 
+test('scoped native discovery preserves hooks installed by another Host checkout', async (t) => {
+  const f = await fixture(t),
+    base = memberSessionFixture();
+  const config = readFileSync(f.configPath, 'utf8').replaceAll(
+    '/dist/runtime/scripts/secret-kimi-hook.mjs',
+    '/another-host/dist/runtime/scripts/secret-kimi-hook.mjs',
+  );
+  assert.notEqual(config, readFileSync(f.configPath, 'utf8'));
+  writeFileSync(f.configPath, config);
+  const description = await f.describe(f.config.id, base.scope());
+  assert.equal(description.available, true);
+  const existing = description.accounts.find((account) => account.accountRef === 'existing');
+  assert.ok(existing?.selection);
+  const runtime = await f.runtime.snapshot(
+    { ...base.prepareInput, catId: f.config.id, accountSelection: existing.selection },
+    base.scope(),
+  );
+  assert.equal(runtime.account.authType, 'oauth');
+  assert.equal(readFileSync(f.configPath, 'utf8'), config);
+  assert.equal(f.spawns(), 0);
+  assert.equal(base.sends(), 0);
+});
+
 test('native config changes invalidate the saved choice while the ordinary account is preserved', async (t) => {
   const f = await fixture(t),
     options = { catId: f.config.id, catConfig: f.config, workspace: f.workspace };

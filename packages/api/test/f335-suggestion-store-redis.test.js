@@ -140,4 +140,61 @@ describe('F335 RedisSuggestionStore', { skip: redisIsolationSkipReason(REDIS_URL
     await store.swap({ ...record('a', { expiresAt: 10 }), state: 'open', revision: 2 }, 1, 'restored');
     assert.equal(await store.countOpen('user-operator', 'video-comments'), 2, 'a restored pill is open again');
   });
+  it('keeps the desk set in step with the record: on while pending or shown and open, off once settled', async () => {
+    const work = { contentRef: 'work:sheet', ownerRevision: 1 };
+    const brought = record('w', {
+      kind: 'brought-work',
+      kindLabel: '带来的作品',
+      desk: { sentence: '照他的头像画就行。', work, status: 'pending' },
+      createdAt: 5,
+    });
+    await store.create(brought, 'offered');
+    await store.create(record('o', { createdAt: 6, expiresAt: 100 }), 'offered');
+    assert.deepEqual(
+      (await store.listDesk('user-operator', 10)).map((row) => row.id),
+      ['w'],
+      'an offer is not on the desk until the desk carries it',
+    );
+    assert.deepEqual(
+      (await store.listOpen('user-operator', 'video-comments', 10)).map((row) => row.id),
+      ['o'],
+    );
+    await store.swap(
+      { ...record('o', { createdAt: 6, expiresAt: 100 }), desk: { status: 'shown', shownAt: 7 }, revision: 1 },
+      0,
+    );
+    assert.deepEqual(
+      (await store.listDesk('user-operator', 10)).map((row) => row.id),
+      ['w', 'o'],
+    );
+    await store.swap(
+      {
+        ...record('o', { createdAt: 6, expiresAt: 100 }),
+        state: 'applied',
+        desk: { status: 'shown', shownAt: 7 },
+        revision: 2,
+      },
+      1,
+      'applied',
+    );
+    assert.deepEqual(
+      (await store.listDesk('user-operator', 10)).map((row) => row.id),
+      ['w'],
+      'applied in the page: off the desk in the same step',
+    );
+    const lost = await store.swap(
+      { ...brought, state: 'ignored', desk: { ...brought.desk, status: 'settled', outcome: 'saved' }, revision: 5 },
+      4,
+      'ignored',
+    );
+    assert.equal(lost.kind, 'conflict');
+    assert.equal((await store.listDesk('user-operator', 10)).length, 1, 'a lost race leaves it on the desk');
+    await store.swap(
+      { ...brought, state: 'ignored', desk: { ...brought.desk, status: 'settled', outcome: 'saved' }, revision: 1 },
+      0,
+      'ignored',
+    );
+    assert.deepEqual(await store.listDesk('user-operator', 10), []);
+    assert.deepEqual(await store.kindCounts('user-operator', 'brought-work'), { offered: 1, ignored: 1 });
+  });
 });

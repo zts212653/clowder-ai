@@ -254,25 +254,6 @@ describe('Turn resolvers D11-D21, R1-R2, N1', () => {
     assert.equal(result.vars.SKILL_NAME, 'tdd');
   });
 
-  it('D12 fires with a qualifying recent speaker', () => {
-    const input = makeInput({
-      activeParticipants: [
-        { catId: 'codex', label: '缅因猫(codex)', lastMessageAt: 1000 },
-        { catId: 'opus', label: '布偶猫(opus)', lastMessageAt: 2000 },
-      ],
-    });
-    const result = new mod.D12Resolver().resolve(input);
-    assert.equal(result.status, 'fired');
-    assert.equal(result.vars.RECENT_SPEAKER_LABEL, '缅因猫(codex)');
-  });
-
-  it('D12 skips when only self is active', () => {
-    const input = makeInput({
-      activeParticipants: [{ catId: 'opus', label: '布偶猫(opus)', lastMessageAt: 1000 }],
-    });
-    assert.equal(new mod.D12Resolver().resolve(input).status, 'skipped');
-  });
-
   it('D13 fires with routing policy', () => {
     const input = makeInput({ routingPolicyParts: 'review avoid @codex (recent conflict)' });
     const result = new mod.D13Resolver().resolve(input);

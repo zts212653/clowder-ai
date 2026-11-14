@@ -24,6 +24,7 @@ import {
   readInvocationMcpFile,
 } from '../../../../../config/capabilities/invoke-mcp-config.js';
 import { toOpenCodeMcpEntry } from '../../../../../config/capabilities/mcp-config-adapters.js';
+import { captureMcpEnvironment } from '../../../../../config/capabilities/mcp-environment-capture.js';
 import { isRetiredGithubMcpConfigEntry } from '../../../../../config/capabilities/retired-github-mcp.js';
 import {
   buildExternalDirectoryPermissions,
@@ -175,6 +176,8 @@ export async function captureOpenCodeMcpConfig(
           const userMcp = { ...userConfig.mcp };
           for (const [name, entry] of Object.entries(userMcp)) {
             if (isRetiredGithubMcpConfigEntry(name, entry)) delete userMcp[name];
+            else if (entry && typeof entry === 'object' && !Array.isArray(entry))
+              userMcp[name] = captureMcpEnvironment(entry as Record<string, unknown>);
           }
           const managedMcpNames = expandManagedMcpNamesForUserMerge([
             ...resolveCapabilityMcpNamesSync(capabilitiesProjectRoot, options.catId ?? catId),

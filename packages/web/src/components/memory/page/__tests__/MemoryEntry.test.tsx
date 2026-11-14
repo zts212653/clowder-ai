@@ -21,6 +21,8 @@ beforeEach(() => {
   localStorage.removeItem(SHELL_PRESENTATION_STORAGE_KEY);
   host = document.createElement('div');
   document.body.append(host);
+  // Retained classic contract; newer presentation cases select their mode explicitly.
+  window.localStorage.setItem('cat-cafe:shell-presentation', 'classic');
   root = createRoot(host);
 });
 afterEach(async () => {

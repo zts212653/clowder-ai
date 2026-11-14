@@ -1,9 +1,10 @@
 /**
  * F163 Phase C (AC-C1): Write-time contradiction detector.
- * Reuses TF-IDF cosine similarity from DuplicateScanner's tokenizer.
+ * Compares raw term-frequency vectors with the shared F163 tokenizer and cosine similarity.
  * On upsert, searches existing docs for lexical overlap and flags potential contradictions.
  */
 
+import { cosineSimilarity, termFrequency, tokenize } from './f163-text-similarity.js';
 import { freezeFlags } from './f163-types.js';
 import type { EvidenceItem, SearchOptions } from './interfaces.js';
 
@@ -19,35 +20,6 @@ interface Searchable {
 }
 
 const SIMILARITY_THRESHOLD = 0.3;
-
-// ── TF-IDF helpers (shared pattern with DuplicateScanner) ────────────
-
-function tokenize(text: string): string[] {
-  return text
-    .toLowerCase()
-    .split(/[^a-z0-9\u4e00-\u9fff]+/)
-    .filter((t) => t.length > 1);
-}
-
-function termFrequency(tokens: string[]): Map<string, number> {
-  const tf = new Map<string, number>();
-  for (const t of tokens) tf.set(t, (tf.get(t) ?? 0) + 1);
-  return tf;
-}
-
-function cosineSimilarity(a: Map<string, number>, b: Map<string, number>): number {
-  let dot = 0;
-  let normA = 0;
-  let normB = 0;
-  for (const [term, val] of a) {
-    normA += val * val;
-    const bVal = b.get(term);
-    if (bVal !== undefined) dot += val * bVal;
-  }
-  for (const val of b.values()) normB += val * val;
-  if (normA === 0 || normB === 0) return 0;
-  return dot / (Math.sqrt(normA) * Math.sqrt(normB));
-}
 
 export class ContradictionDetector {
   constructor(private store: Searchable) {}

@@ -7,6 +7,11 @@
 import { existsSync } from 'node:fs';
 import { readdir, readFile, stat } from 'node:fs/promises';
 import { join } from 'node:path';
+import {
+  type FrontmatterPair,
+  readFrontmatterPairs,
+  readMarkdownFrontmatter,
+} from '@cat-cafe/shared/markdown-frontmatter';
 import type { EvidenceItem, EvidenceKind, RebuildResult } from './interfaces.js';
 import type { SqliteEvidenceStore } from './SqliteEvidenceStore.js';
 
@@ -123,13 +128,13 @@ export class GlobalIndexBuilder {
       if (!existsSync(skillPath)) continue;
 
       const content = await readFile(skillPath, 'utf-8');
-      const fm = parseFrontmatter(content);
+      const fm = readFrontmatter(content)?.data;
       items.push({
         anchor: `global:skill/${entry.name}`,
         kind: 'plan',
         status: 'active',
-        title: fm?.name ?? entry.name,
-        summary: fm?.description ?? content.slice(0, 300),
+        title: text(fm?.name) ?? entry.name,
+        summary: text(fm?.description) ?? content.slice(0, 300),
         updatedAt: (await stat(skillPath)).mtime.toISOString(),
       });
     }
@@ -157,21 +162,22 @@ export class GlobalIndexBuilder {
         if (!file.endsWith('.md') || file === 'MEMORY.md') continue;
         const filePath = join(memDir, file);
         const content = await readFile(filePath, 'utf-8');
-        const fm = parseFrontmatter(content);
+        const header = readFrontmatter(content);
+        const fm = header?.data;
         const stem = file.replace(/\.md$/, '');
-        const memType = fm?.type ?? 'reference';
+        const memType = text(fm?.type) ?? 'reference';
         const kind = MEMORY_KIND_MAP[memType] ?? 'lesson';
 
         const globalAnchor = `global:memory/${slug}/${stem}`;
         const baseItem: Omit<EvidenceItem, 'anchor'> = {
           kind,
           status: 'active',
-          title: fm?.name ?? extractTitle(content) ?? stem,
-          summary: fm?.description ?? content.slice(0, 300),
+          title: text(fm?.name) ?? extractTitle(content) ?? stem,
+          summary: text(fm?.description) ?? content.slice(0, 300),
           updatedAt: (await stat(filePath)).mtime.toISOString(),
         };
 
-        if (isPersonalMemorySource(stem, fm)) {
+        if (isPersonalMemorySource(stem, header)) {
           personal.push({
             globalAnchor,
             item: { anchor: `domain:personal-memory/${slug}/${stem}`, ...baseItem },
@@ -194,37 +200,29 @@ export class GlobalIndexBuilder {
       if (!file.endsWith('.md')) continue;
       const filePath = join(this.distilledRoot, file);
       const content = await readFile(filePath, 'utf-8');
-      const fm = parseFrontmatter(content);
+      const frontmatter = readFrontmatter(content);
 
       // Only include files with type: distilled frontmatter
-      if (fm?.type !== 'distilled') continue;
+      if (!frontmatter || text(frontmatter.data.type) !== 'distilled') continue;
+      const fm = frontmatter.data;
 
-      const distilledId = fm.candidate_id ?? file.replace(/\.md$/, '');
+      const distilledId = text(fm.candidate_id) ?? file.replace(/\.md$/, '');
       const title = extractTitle(content) ?? distilledId;
-      const kind = (MEMORY_KIND_MAP[fm.kind ?? ''] ?? fm.kind ?? 'lesson') as EvidenceKind;
+      const kind = (MEMORY_KIND_MAP[text(fm.kind) ?? ''] ?? text(fm.kind) ?? 'lesson') as EvidenceKind;
 
       // Extract summary: everything after frontmatter + title
-      const bodyStart = content.indexOf('---', 4);
-      let summary = '';
-      if (bodyStart >= 0) {
-        const afterFm = content.slice(content.indexOf('\n', bodyStart) + 1).trim();
-        const lines = afterFm.split('\n');
-        const titleIdx = lines.findIndex((l) => l.startsWith('# '));
-        summary =
-          titleIdx >= 0
-            ? lines
-                .slice(titleIdx + 1)
-                .join('\n')
-                .trim()
-            : afterFm;
-      }
+      const afterFm = frontmatter.body.trim();
+      const lines = afterFm.split('\n');
+      const titleIdx = lines.findIndex((l) => l.startsWith('# '));
+      const summary =
+        titleIdx >= 0
+          ? lines
+              .slice(titleIdx + 1)
+              .join('\n')
+              .trim()
+          : afterFm;
 
-      // Parse keywords from frontmatter
-      let keywords: string[] | undefined;
-      if (fm.keywords) {
-        const kwMatch = fm.keywords.match(/\[(.+)]/);
-        if (kwMatch) keywords = kwMatch[1].split(',').map((s) => s.trim());
-      }
+      const keywords = keywordList(fm.keywords);
 
       items.push({
         anchor: `distilled:${distilledId}`,
@@ -249,15 +247,15 @@ export class GlobalIndexBuilder {
       if (!file.endsWith('.md')) continue;
       const filePath = join(dirPath, file);
       const content = await readFile(filePath, 'utf-8');
-      const fm = parseFrontmatter(content);
+      const fm = readFrontmatter(content)?.data;
       const stem = file.replace(/\.md$/, '');
 
       items.push({
         anchor: `${anchorPrefix}/${stem}`,
         kind,
         status: 'active',
-        title: fm?.name ?? extractTitle(content) ?? stem,
-        summary: fm?.description ?? content.slice(0, 300),
+        title: text(fm?.name) ?? extractTitle(content) ?? stem,
+        summary: text(fm?.description) ?? content.slice(0, 300),
         updatedAt: (await stat(filePath)).mtime.toISOString(),
       });
     }
@@ -274,30 +272,90 @@ async function replaceStoreProjection(store: SqliteEvidenceStore, items: Evidenc
   if (items.length > 0) await store.upsert(items);
 }
 
-function isPersonalMemorySource(stem: string, frontmatter: Record<string, string> | null): boolean {
-  return (
-    frontmatter?.type?.toLowerCase() === 'user' ||
-    frontmatter?.scope?.toLowerCase() === 'personal' ||
-    frontmatter?.sensitivity?.toLowerCase() === 'private' ||
-    /^user_/i.test(stem) ||
-    stem.toLowerCase() === 's8_hourly_log'
-  );
+/**
+ * Header fields that make a memory personal. A field counts when it declares the marker — as its
+ * value, or as an item of a flat list — and also when its value has any other shape (a map, a
+ * nested or self-referencing list): an uninterpretable privacy declaration stays personal. The
+ * shape is read before any comparison and nothing recurses, so no value can stop the rebuild.
+ */
+const PERSONAL_MARKERS = [
+  ['type', 'user'],
+  ['scope', 'personal'],
+  ['sensitivity', 'private'],
+] as const;
+const PERSONAL_MARKER_BY_FIELD = new Map<string, string>(PERSONAL_MARKERS);
+
+function isPersonalMemorySource(stem: string, header: FrontmatterReading | null): boolean {
+  return header?.declaresPersonal === true || /^user_/i.test(stem) || stem.toLowerCase() === 's8_hourly_log';
+}
+
+/** One privacy field's value against its marker; an empty value declares nothing. */
+function declaresPrivacy(value: unknown, marker: string): boolean {
+  if (value === null || value === undefined || value === '') return false;
+  const items = (Array.isArray(value) ? value : [value]).map(text);
+  return items.some((item) => item === undefined || item.toLowerCase() === marker);
+}
+
+/**
+ * In a header YAML rejects as a whole, a privacy field anywhere in what the parser recovered
+ * counts like a parsed one, and an unresolved value (e.g. an alias without its anchor) counts
+ * too. A broken header without such a field stays shared.
+ */
+function declaresPersonalPair({ key, value, resolved }: FrontmatterPair): boolean {
+  const marker = PERSONAL_MARKER_BY_FIELD.get(key);
+  if (marker === undefined) return false;
+  return !resolved || declaresPrivacy(value, marker);
 }
 
 // ── Pure utility functions ──────────────────────────────────────────
 
-/** Simple YAML frontmatter parser for key: value pairs */
-function parseFrontmatter(content: string): Record<string, string> | null {
-  const match = content.match(/^---\n([\s\S]*?)\n---/);
-  if (!match?.[1]) return null;
+type Frontmatter = Record<string, unknown>;
 
-  const result: Record<string, string> = {};
-  for (const line of match[1].split('\n')) {
-    // Match key: value (including multi-word description after >)
-    const kv = line.match(/^(\w[\w_]*):\s*(.+)$/);
-    if (kv) result[kv[1]!] = kv[2]!.trim();
+interface FrontmatterReading {
+  data: Frontmatter;
+  body: string;
+  declaresPersonal: boolean;
+}
+
+/**
+ * The header read as standard YAML (LF/CRLF, quotes, lists, comments). When YAML rejects it as a
+ * whole — e.g. an unquoted `note: a: b` — the same parser still reads every pair in the whole
+ * document's context (readFrontmatterPairs): fields written at the start of a line feed the
+ * title and summary, and any privacy field counts (declaresPersonalPair). No header: null.
+ */
+function readFrontmatter(content: string): FrontmatterReading | null {
+  const header = readMarkdownFrontmatter(content);
+  if (header.status === 'missing') return null;
+  if (header.status === 'parsed') {
+    const data = header.data;
+    const declaresPersonal = PERSONAL_MARKERS.some(([field, marker]) => declaresPrivacy(data[field], marker));
+    return { data, body: header.body, declaresPersonal };
   }
-  return Object.keys(result).length > 0 ? result : null;
+  const pairs = readFrontmatterPairs(header.yaml);
+  return { data: lineStartFields(pairs), body: header.body, declaresPersonal: pairs.some(declaresPersonalPair) };
+}
+
+/** The first readable value of each field written at the start of a line. */
+function lineStartFields(pairs: readonly FrontmatterPair[]): Frontmatter {
+  const seen = new Set<string>();
+  const fields = pairs.filter((pair) => pair.atLineStart && pair.resolved && !seen.has(pair.key) && seen.add(pair.key));
+  return Object.fromEntries(fields.map((pair) => [pair.key, pair.value]));
+}
+
+/** A scalar header value as text; lists, maps and empty values are not. */
+function text(value: unknown): string | undefined {
+  if (typeof value === 'string') return value.trim() || undefined;
+  return typeof value === 'number' || typeof value === 'boolean' ? String(value) : undefined;
+}
+
+/** `keywords: [a, b]` as a YAML list; a quoted `"[a, b]"` string is split the same way. */
+function keywordList(value: unknown): string[] | undefined {
+  if (Array.isArray(value)) {
+    const keywords = value.map(text).filter((keyword): keyword is string => keyword !== undefined);
+    return keywords.length > 0 ? keywords : undefined;
+  }
+  const listed = typeof value === 'string' ? value.match(/\[(.+)]/)?.[1] : undefined;
+  return listed?.split(',').map((s) => s.trim());
 }
 
 /** Extract first markdown heading as title */

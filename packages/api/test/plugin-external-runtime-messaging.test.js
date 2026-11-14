@@ -24,6 +24,7 @@ import {
 const DELIVER_INPUT = {
   deliveryId: 'delivery-stdio-1',
   kind: 'message',
+  reason: 'addressed',
   threadId: 'thread-1',
   envelope: {
     messageId: 'message-1',

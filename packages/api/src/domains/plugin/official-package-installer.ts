@@ -430,6 +430,7 @@ export class OfficialPluginPackageInstaller {
           kind: 'catalog',
           catalogId: entry.catalogId,
           packageName: entry.packageName,
+          ...(entry.distribution === 'bundled' ? { dependencyClosure: 'shipped' as const } : {}),
         },
       });
     } finally {

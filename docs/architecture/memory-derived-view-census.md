@@ -5,7 +5,7 @@ description_source: human
 description_author: fable-5
 description_updated_at: 2026-08-15T13:04:00Z
 feature_ids: []
-related_features: [F148, F276, F287, F200, F231, F296]
+related_features: [F148, F276, F287, F200, F231, F296, F332, F335]
 related_docs:
   - docs/architecture/memory-derived-view-contract.md
   - feature-specs/2026-08-15-memory-system-research-first-roadmap.md
@@ -14,6 +14,7 @@ related_docs:
   - feature-discussions/2026-08-10-memory-write-trigger-rethink.md
 topics: [memory, derived-view, lineage, invalidation, census, cache]
 created: 2026-08-15
+updated: 2026-11-07
 status: v0.2
 ---
 
@@ -23,6 +24,71 @@ status: v0.2
 > card / index / view / 手册 / 文档现状节。逐个问两问：**lineage**（能回源吗）、
 > **invalidation**（会过期吗、谁刷新、过期可见吗）。对照契约 = rethink §4.3 六字段
 > （sourceRefs / revisions / valid-time / ACL / constructor version / stale state）。
+
+## F332计划内增量（2026-11-07，未实施）
+
+来源：You `[thread-id]#private-source-id` 要求归一与迁退，
+Opus845指出首版路线未接本census。下面是联合路线 (internal)
+W0/W1/W2的计划登记，**不是新增已运行view**。下文11类矩阵及其健康结论保留2026-08-15的观察时态。
+
+唯一生命周期合同为[Derived View Contract v1](memory-derived-view-contract.md) §2–7；
+本表记录每类怎样对上原合同，不复制一份状态机。W0须给出现有字段映射、缺口和真实负例，
+W1/W2接入时补具体constructor版本、测试/发布证据；目前全部为`planned / contract-alignment-open`。
+
+| 计划内view | canonical来源与lineage | 构造/派生owner及消费者 | v1字段映射与失效接线 | 交付与退役 |
+| --- | --- | --- | --- | --- |
+| 按事整理的归纳view | 已批准读取的原消息片段/revision；落Matter时同时绑定matter/page revision及全部支持来源；文档导航仍读文档原owner | memory cell；W2构造，Opus5.5核整理语义；原Matter owner持canonical写入/更正；搜索、cue、守望和人阅读 | `sourceRefs/revisions`保留各原说话者与片段；`asOf/validTime`分开历史观察与所称现实区间；constructor/model版本记录实际运行。依赖谓词逐结论映射，ACL取全部支持源交集，按v1做失效/重验；不把重写等同批准新人物/Taste事实 | W2先隔离试点。聊天页沿[原Matter合同](f332-matter-memory-contract.md)写新revision；移除构造器不删除canonical原话/用户页。源owner遗忘清除相关派生正文；剩余结论须重核后才能重建 |
+| 有证据的推断关联view | 两端稳定对象/revision及真正支持关联的片段；MD引用chat仍属同一证据链，不能增为独立证人 | memory cell；W2仅在确定性关联/整理仍留下缺口时构造；共同发现消费，原端点owner保权威 | `sourceRefs/revisions`覆盖双端与支持证据；constructor版本区分推断与确定性抽取；`asOf/validTime`及依赖谓词绑定实际条件。按v1传播端点更正/撤权/遗忘，不把模型关联升级成声明或执行权 | W2推断组单独验效用；W1已有索引/边体系承载可重建投影，不另建关系真相库。方法撤除只退该投影；原件与直接发现路径保持 |
+| Matter的搜索索引view | `MatterMemoryService`权威页revision＋支撑标题/描述的原source revisions；不由index row替代原页 | memory cell；W1索引构造，原Matter service持权限投影；共同发现供搜索/目录/cue/守望消费 | ownerScope从原页来；source delta经v1依赖接线失效/重建，ACL交集由原`project()`终检。构造时间/证据截止/validTime和索引constructor版本不得混同；缺映射时不能把旧摘要交进模型上下文 | W1迁掉目录的重复发现分支，同包验证更正/遗忘对索引与向量残留的处理；索引可重建，删除索引不删除无TTL的原页、原消息或重试抑制 |
+
+上述派生与canonical用户状态分层：v1的ephemeral-first决定可重建view是否值得物化，
+不改变Matter/消息等用户状态的持久化合同。某viewer无权或一次读取失败只影响该消费，
+不是原owner遗忘命令；原owner的forget/redact必须按v1清除能恢复被忘内容的派生，不能只隐藏搜索结果。
+整理页落入Matter后，生命周期仍只有`MatterMemoryService.project()`及原写/忘合同；
+W0把现有revision、`sources_changed`、不可读原因和原source delta映射到v1字段，不再挂第二份envelope/状态owner。
+该映射不得把已确认的correct/forget弱化成可用的旧正文，也不能把一次读取失败升级成全局遗忘。
+推断关联只物化为导航投影；W2试点不批量发人物/画像/Taste提案，相关线索只在合法整理页标候选。
+共同发现的迁移/删除完成点由路线迁退表 (internal)持有，
+模块之间的目标连接由[总图](memory-system-overview.md#f332共同发现目标拓扑2026-11-07)持有。
+
+### W1字段映射与反例（2026-11-07施工）
+
+本节只补原v1的映射，不给Matter页新增envelope或状态owner。实现版本以W1合入证据为准，
+正式加载与效用仍未声明。共同编排版本为`knowledge-discovery-v1`，Matter索引构造器为
+`matter-discovery-v1`；审计capture记录resolverVersion，旧capture缺值明确为unknown。扩展漏斗sourceRevision升为`f332-discovery-v1`，历史`f256-health-v2`仍可读、不能混成同版效用。
+
+| v1字段组 | 本包实际映射与缺口 |
+| --- | --- |
+| identity/owner | 文档以collection+anchor、聊天以threadId+messageId、Matter以matterId标识；原reader持权限/内容真相。共同sourceId只标发现来路，不是新authority |
+| lineage/revision | 文档沿sourcePath/sourceHash与published版本；聊天沿canonical contentRevision和当前索引；Matter沿page.revision及全部entry.source.sourceRevision。引用同一原消息不是第二独立证人 |
+| constructor/time | `KnowledgeResolver.discover().version`标共同编排；SQLite V79创建Matter外部内容FTS/排序索引。page.updatedAt是原页更新时间，不冒充来源现实有效期；查询/回验时刻是本次asOf。未有显式valid-time的历史材料只作历史线索 |
+| scope/ACL | collection server grants、MessageSearchService原权限与发布前终检、MatterMemoryService.project全部支持源交集；来源适配器不得把索引正文当权限凭据 |
+| state/invalidators | Matter页revision或索引坐标不一致则omit；源变化由原sources_changed表示、开场不注入旧归纳；源不可读整页不返回。viewer拒绝只影响本次消费，不代替owner forget。页更正/编辑/忘记在原SQLite事务内同步FTS |
+| miss/forget | 不持第二份Matter正文或向量；FTS从原页外部内容view重建。forget删除原页与索引token，保原消息和exact-retry fence。直接读原件仍可用，不运行旧全量发现作为fallback |
+| outcome | 目录/索引命中不写read/applied；原显式read写F287 presented/drilled。新共同入口保来路/版本及预算停止原因；效用unknown留给W4原记录裁决 |
+
+反例使用开发夹具，不进入未见成绩：
+
+- 45页中只查一页，不得先投影其余44页；分页只读有界候选和实际返回前的原源。
+- 当前线程候选藏在旧前12之外仍须找到；更正后的旧来源不能继续取得线程优先权。
+- 一页含多只猫不同可见性的来源，任一支持源不可读即不泄露title/description；owner管理只保无正文占位。
+- 页更新/forget后，旧查询不能凭FTS残留返回正文；重开数据库、重建evidence不丢用户页与重试抑制。
+- 聊天在最后回验时撤权/改版即被去掉；时间排序仍只覆盖首32个准入来源，不能冒称全部历史。
+- 相同坐标来自两个adapter只占一个候选；source来路不变成两个独立证人，rank/流行度也不变成truth。
+
+### W2/W3实际登记（2026-11-07）
+
+原计划表保留其观察时态；W1已由#6793落地共同入口与原Matter索引映射。
+W2 #6788采用**简化**：两页隔离开发草稿和人工原件指针，无生产Matter物化、在线归纳或推断关联。
+W3工程候选只消费W1原生发现，不新增记忆事实view或第二个生命周期owner。
+
+| 实际对象 | 原owner与lineage | 构造/失效与读取 | 消费及判断边界 |
+| --- | --- | --- | --- |
+| 准备机会/不透明指针元数据（非记忆正文view） | F287 callback的严格owner/thread/cat/invocation、原触发消息、原context epoch及项目；原源ref/revision | `work_preparation` catalog v9、resolver版本和`knowledge-discovery-v1`随记录保留；原owner每次读源核ACL/revision，epoch/项目变化关闭旧scope。API重启关闭旧process-key句柄，持久化元数据仍可审计 | `cat_cafe_prepare_memory_context`的明确HTML/video准备；共20候选/2指针。`delivery=unknown`与真实显式read分列，不保存源正文，不新增有效性判官 |
+| 准备读取的消费回执（原ledger分支） | `memory_cue_events`；每条实际来源坐标/版本、原opportunity和consumer scope | 成功owner read后一个事务写presented/drilled，`read_origin=explicit_read`；更正/忘记/撤权由原reader关闭，append-only guards与旧Matter行保留 | 采用/忽略仍走原后果合同；Matter只保读证据。W4按原consumer/来源记unknown，缺provider commit不能写制作前曝光 |
+
+工程验证与独审/合入/Alpha状态以W3证据 (internal)为准。
+本登记没有把旧11类快照升格为当前全仓健康，也没有宣布W4效用或正式runtime加载完成。
 
 ## 1. 现存 view 盘点矩阵（11 类）
 

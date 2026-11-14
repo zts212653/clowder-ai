@@ -13,10 +13,11 @@ import { RedisTasteProposalStore } from './RedisTasteProposalStore.js';
 const CLAIM_FENCED_LUA = `
   if redis.call('HGET', KEYS[1], 'status') ~= 'pending' then return 0 end
   if redis.call('GET', KEYS[2]) ~= ARGV[1] or redis.call('PTTL', KEYS[2]) <= 0 then return 0 end
-  for i = 2, #ARGV, 2 do
+  for i = 4, #ARGV, 2 do
     if (redis.call('HGET', KEYS[1], ARGV[i]) or '') ~= ARGV[i + 1] then return 0 end
   end
-  redis.call('HSET', KEYS[1], 'status', 'approving')
+  redis.call('HSET', KEYS[1], 'status', 'approving', 'approvedBy', ARGV[2], 'decisionDigest', ARGV[3])
+  redis.call('HDEL', KEYS[1], 'legacyPublicationRecovery')
   redis.call('DEL', KEYS[2])
   return 1
 `;
@@ -59,9 +60,19 @@ export class FencedRedisTasteProposalStore extends RedisTasteProposalStore {
       TasteProposalKeys.detail(id),
       TasteProposalKeys.decisionAuthority(userId, id),
       fence.token,
+      userId,
+      expected.digest,
       ...snapshotFields(expected),
     );
-    return result === 1 ? { ...proposal, status: 'approving' } : null;
+    if (result !== 1) return null;
+    const claimed: TasteProposal = {
+      ...proposal,
+      status: 'approving',
+      approvedBy: userId,
+      decisionDigest: expected.digest,
+    };
+    delete claimed.legacyPublicationRecovery;
+    return claimed;
   }
 
   async markRejectedFenced(

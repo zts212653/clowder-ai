@@ -1,12 +1,8 @@
-import { readdir } from 'node:fs/promises';
-import { join } from 'node:path';
 import { getExplicitApprovedTasteTriggerBySourcePath } from '../domains/memory/cue/ExplicitApprovedTasteTriggerCatalog.js';
 import { F315_WORKSPACE_READABILITY_TASTE_BUNDLE_V1 } from '../domains/memory/cue/TasteTaskBundleCatalog.js';
-import type { TasteMemoryLifecycleStore } from '../domains/memory/taste/TasteMemoryLifecycleStore.js';
-import { TasteMemoryReader, type TasteMemoryReadResult } from '../domains/memory/taste/TasteMemoryReader.js';
+import type { TasteMemoryReadResult } from '../domains/memory/taste/TasteMemoryReader.js';
 import type { TasteObservatorySnapshot } from '../domains/memory/taste/TasteObservatoryReader.js';
 import { tasteMemoryId } from '../domains/memory/taste/taste-memory-identity.js';
-import { resolveCanonicalTasteRoot, type TasteRepository } from '../domains/taste/services/TasteRepository.js';
 
 type ObservatoryEntry = TasteObservatorySnapshot['entries'][number];
 export type TasteRecallView = {
@@ -22,53 +18,7 @@ export type TasteRecallView = {
 };
 
 export { tasteMemoryId };
-
-/** Pin canonical main once per request. Existing/new awaitable reader contracts both work. */
-export async function visibleTasteMemories(
-  repository: TasteRepository,
-  owner: string,
-  privateAccess: boolean,
-  lifecycle?: Pick<TasteMemoryLifecycleStore, 'isReadable'>,
-) {
-  const root = await resolveCanonicalTasteRoot(repository);
-  const snapshot = (await repository.publishedSnapshot?.()) ?? null;
-  const reader = new TasteMemoryReader(
-    { canonicalRoot: () => root, approvalLockKey: () => 'read-only', publishedSnapshot: async () => snapshot },
-    owner,
-    {
-      lifecycle,
-    },
-  );
-  const directories = privateAccess ? ['docs/taste/vignettes', 'private/taste'] : ['docs/taste/vignettes'];
-  const memories: TasteMemoryReadResult[] = [];
-  for (const directory of directories) {
-    const names =
-      directory === 'docs/taste/vignettes' && snapshot
-        ? (await snapshot.list()).map((sourcePath) => sourcePath.slice(directory.length + 1))
-        : await listTasteNames(root, directory);
-    for (const name of names.sort()) {
-      if (!name.endsWith('.md')) continue;
-      const memory = await reader.read({
-        ownerUserId: owner,
-        sourcePath: `${directory}/${name}`,
-        includeRetired: true,
-      });
-      if (memory) memories.push(memory);
-    }
-  }
-  return memories.sort(
-    (a, b) => b.payload.when.localeCompare(a.payload.when) || a.sourcePath.localeCompare(b.sourcePath),
-  );
-}
-
-async function listTasteNames(root: string, directory: string): Promise<string[]> {
-  try {
-    return await readdir(join(root, directory));
-  } catch (error) {
-    if (directory === 'private/taste' && (error as NodeJS.ErrnoException).code === 'ENOENT') return [];
-    throw error;
-  }
-}
+export { visibleTasteMemories } from './taste-browse-reader.js';
 
 export function projectTasteMemory(
   memory: TasteMemoryReadResult,

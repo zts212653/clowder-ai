@@ -11,9 +11,9 @@
  *   返回完整 projection（entries + counts + meta），前端按 schema 直接渲染时间轴。
  *
  * 数据 source：`IFeatTrajectoryStore`（C2a 落地的 Redis-backed projection store）。
- * 写路径：C2b 的 `GitRefSnapshotCollector` + `FeatTrajectoryProjector` 通过 cron
- * scheduler（`FeatTrajectoryCollectorScheduler`，C2b 后续 step）持续写入；初次填充
- * 由 C2c 一次性历史回填脚本（`scripts/f233-backfill-feat-trajectory.mjs`）完成。
+ * 写路径：原先由 C2b 的 `GitRefSnapshotCollector` + `FeatTrajectoryProjector` 经 cron
+ * 持续写入；F304 已永久退役这条 cron 和启动接线，store 只保留历史数据供这里读取。
+ * 初次填充由 C2c 一次性历史回填脚本（`scripts/f233-backfill-feat-trajectory.mjs`）完成。
  *
  * 鉴权（照 events.ts 模式）：session（Hub 用户）或 callback principal（MCP 工具）二选一通过。
  * 内部观测数据，不对未鉴权暴露。

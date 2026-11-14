@@ -46,6 +46,7 @@ describe('preparation reads remain inside their mounted owner scope', () => {
   let root: Root;
   beforeEach(() => {
     (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+    localStorage.setItem('cat-cafe:shell-presentation', 'classic');
     api.fetch.mockReset();
     host = document.createElement('div');
     document.body.append(host);
@@ -54,6 +55,7 @@ describe('preparation reads remain inside their mounted owner scope', () => {
   afterEach(() => {
     act(() => root.unmount());
     host.remove();
+    localStorage.removeItem('cat-cafe:shell-presentation');
     vi.useRealTimers();
     delete (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT;
   });

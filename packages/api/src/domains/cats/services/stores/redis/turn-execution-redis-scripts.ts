@@ -23,6 +23,7 @@ redis.call('HSET', KEYS[1],
   'endedAt', '',
   'terminalReason', '',
   'outputFence', ARGV[10])
+if ARGV[7] == 'watcher' then redis.call('HSET', KEYS[1], 'watcherModelAttempts', '{}') end
 redis.call('SADD', KEYS[2], ARGV[2])
 redis.call('SADD', KEYS[3], ARGV[2])
 return 1
@@ -36,7 +37,7 @@ if current ~= 'running' then return 0 end
 local tracked = redis.call('HGET', KEYS[1], 'providerLifecycleTracked')
 local dispatched = redis.call('HGET', KEYS[1], 'providerStartedAt')
 local teardown = redis.call('HGET', KEYS[1], 'providerTeardownAt')
-if tracked == '1' and dispatched and dispatched ~= '' and
+if ARGV[1] == 'succeeded' and tracked == '1' and dispatched and dispatched ~= '' and
   (not teardown or teardown == '') and (not ARGV[5] or ARGV[5] == '') then return -2 end
 
 redis.call('HSET', KEYS[1],

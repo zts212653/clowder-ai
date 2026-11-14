@@ -4,6 +4,8 @@
  */
 
 export const InvocationKeys = {
+  ownerRecoveryDue: () => 'invoc-recovery:due',
+  ownerRecoveryComplete: () => 'invoc-recovery:census:v1',
   /** Hash with invocation record details: invoc:{id} */
   detail: (id: string) => `invoc:${id}`,
 

@@ -22,6 +22,9 @@ export interface TaskTemplate {
   description: string;
   subjectKind: SubjectKind;
   defaultTrigger: TriggerSpec;
-  paramSchema: Record<string, { type: 'string' | 'number'; required: boolean; description: string }>;
+  paramSchema: Record<
+    string,
+    { type: 'string' | 'number'; required: boolean; description: string; enum?: readonly (string | number)[] }
+  >;
   createSpec: (instanceId: string, params: DynamicTaskParams) => TaskSpec_P1;
 }

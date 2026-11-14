@@ -36,31 +36,63 @@ async function presentFrame(page, seconds) {
   );
 }
 async function open(page, host) {
+  // Retained-review controls belong to classic; f309-image-chat-primary covers the v2 Chat journey.
+  await page.addInitScript(() => localStorage.setItem('cat-cafe:shell-presentation', 'classic'));
   await page.goto(host.origin);
   await page.getByTestId('open-artifact-review').click();
   await page.locator('[data-testid="review-media-stage"] img, [data-testid="review-media-stage"] video').waitFor();
 }
-async function at(page, x, y) {
-  // Target an actual media point. The stage can contain letterboxing after zoom/resize.
+async function mediaPoints(page, points) {
+  // SVG supplies the target independently of the production stage-rect conversion.
   return page
     .getByTestId('review-media-stage')
     .locator('svg[aria-label="图片或视频上的批注"]')
-    .evaluate(
-      (svg, point) => {
-        const matrix = svg.getScreenCTM();
-        if (!matrix) throw new Error('The media coordinate space is not rendered.');
-        const position = new DOMPoint(
-          point.x * svg.viewBox.baseVal.width,
-          point.y * svg.viewBox.baseVal.height,
-        ).matrixTransform(matrix);
-        return { x: position.x, y: position.y };
-      },
-      { x, y },
-    );
+    .evaluate(async (svg, targets) => {
+      const stage = svg.closest('[data-testid="review-media-stage"]');
+      const deadline = performance.now() + 5000;
+      let previous,
+        stableFrames = 0;
+      while (performance.now() < deadline) {
+        await new Promise(requestAnimationFrame);
+        // One frame observes both spaces. ResizeObserver/React can update them after CSS zoom.
+        const matrix = svg.getScreenCTM(),
+          bounds = stage.getBoundingClientRect(),
+          box = svg.viewBox.baseVal;
+        if (!matrix || bounds.width <= 0 || bounds.height <= 0 || box.width <= 0 || box.height <= 0) {
+          previous = undefined;
+          stableFrames = 0;
+          continue;
+        }
+        const sample = [
+          matrix.a,
+          matrix.b,
+          matrix.c,
+          matrix.d,
+          matrix.e,
+          matrix.f,
+          bounds.x,
+          bounds.y,
+          bounds.width,
+          bounds.height,
+          box.x,
+          box.y,
+          box.width,
+          box.height,
+        ];
+        stableFrames = previous && sample.every((value, index) => value === previous[index]) ? stableFrames + 1 : 0;
+        previous = sample;
+        // Three matching frames leave a complete observer/layout cycle between observations.
+        if (stableFrames < 2) continue;
+        return targets.map(([x, y]) => {
+          const point = new DOMPoint(box.x + x * box.width, box.y + y * box.height).matrixTransform(matrix);
+          return { x: point.x, y: point.y };
+        });
+      }
+      throw new Error(`Media geometry did not stabilize after zoom/resize: ${JSON.stringify(previous)}`);
+    }, points);
 }
 async function drag(page, from, to) {
-  const a = await at(page, ...from),
-    b = await at(page, ...to);
+  const [a, b] = await mediaPoints(page, [from, to]);
   await page.mouse.move(a.x, a.y);
   await page.mouse.down();
   await page.mouse.move(b.x, b.y, { steps: 5 });
@@ -144,7 +176,7 @@ test(
     const media = view.review.rounds[0].asset.media;
     assert.equal(drawing.frame.tick, Math.round((0.4 * media.timebase.denominator) / media.timebase.numerator));
     await selectReviewMode(page, 'comment');
-    const point = await at(page, 0.65, 0.5);
+    const [point] = await mediaPoints(page, [[0.65, 0.5]]);
     await page.mouse.click(point.x, point.y);
     await page.getByLabel('片段终点').fill('1.8');
     await page.getByLabel('评论内容').fill('这一帧的动作 sentinel-video-point');
@@ -193,7 +225,7 @@ test(
       document.body.style.zoom = '1.25';
     });
     await selectReviewMode(page, 'comment');
-    const point = await at(page, 0.6, 0.4);
+    const [point] = await mediaPoints(page, [[0.6, 0.4]]);
     await page.mouse.click(point.x, point.y);
     await page.getByTestId('review-pending-chat-mark').waitFor();
     await page.getByLabel('消息输入框').fill('灯光只调整这一处 sentinel-point');

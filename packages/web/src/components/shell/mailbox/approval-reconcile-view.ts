@@ -10,6 +10,7 @@ type Context = {
   language?: ShellLanguage;
   ownerUserId?: string;
   sourceFeatureId?: string;
+  scheduleMutationKind?: unknown;
   originalEffect?: OriginalApprovalEffect | null;
   compactResult?: boolean;
   materialization?: ApprovalMaterialization;
@@ -77,6 +78,18 @@ export function describeReconcile(state: ReconcileState, context: Context = {}):
     case 'confirming':
       return { line: t.confirming[writeOutcome(state.write)], actions: 'held', canReread: false };
     case 'still_open':
+      if (state.write.outcome === 'errored' && state.write.errorCode === 'SCHEDULE_TASK_DRIFT')
+        return {
+          line:
+            context.scheduleMutationKind === 'update'
+              ? t.scheduleUpdateDrift
+              : context.scheduleMutationKind === 'delete'
+                ? t.scheduleDeleteDrift
+                : t.scheduleDrift,
+          actions: 'allowed',
+          approveBlocked: true,
+          canReread: false,
+        };
       return {
         line: t.stillOpen[writeOutcome(state.write)],
         actions:

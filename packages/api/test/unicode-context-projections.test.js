@@ -4,7 +4,6 @@ import { test } from 'node:test';
 import { CodexCapacityRecoveryCheckpoint } from '../dist/domains/cats/services/agents/providers/CodexCapacityRecoveryCheckpoint.js';
 import { formatAnchors } from '../dist/domains/cats/services/agents/routing/context-transport.js';
 import { extractDecisionSignals } from '../dist/domains/cats/services/session/extractDecisionSignals.js';
-import { buildPromptContent } from '../dist/domains/cats/services/session/HandoffDigestGenerator.js';
 import { projectInvocationTrajectories } from '../dist/domains/cats/services/session/InvocationTrajectoryProjector.js';
 import { formatEventsHandoff } from '../dist/domains/cats/services/session/TranscriptFormatter.js';
 import { compactTranscriptEvent } from '../dist/domains/cats/services/session/transcript-index/transcript-invocation-compact-event.js';
@@ -21,20 +20,6 @@ test('historical anchors keep complete emoji within their preview budget', () =>
   const [line] = formatAnchors([{ message, isPrimacy: true }], 60);
   assertValidText(line);
   assert.ok(line.endsWith(`${'a'.repeat(59)}...`));
-});
-
-test('handoff summary message previews do not split an emoji at unit 200', () => {
-  const prompt = buildPromptContent([], {}, [{ role: 'user', timestamp: 0, content: `${'a'.repeat(199)}😼tail` }]);
-  assertValidText(prompt);
-  assert.ok(prompt.endsWith('a'.repeat(199)));
-});
-
-test('handoff summary total input cap does not split an emoji at unit 16000', () => {
-  const prefix = buildPromptContent([], { note: '' }, []);
-  const note = `${'a'.repeat(15999 - prefix.indexOf('""') - 1)}😼tail`;
-  const prompt = buildPromptContent([], { note }, []);
-  assertValidText(prompt);
-  assert.match(prompt, /truncated due to input size limit/);
 });
 
 test('transcript handoff key messages preserve Unicode at unit 80', () => {

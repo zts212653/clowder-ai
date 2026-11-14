@@ -56,7 +56,7 @@ test('relevance search hydrates only the requested valid results and one hasMore
     ['message-0', 'message-1', 'message-2'],
   );
   assert.equal(result.meta.hasMore, true);
-  assert.equal(f.reads.length, 4, 'limit=3 must not hydrate the whole 2,000-candidate pool');
+  assert.equal(f.reads.length, 8, 'only four admitted sources plus their mandatory final reads, not the 2,000 pool');
 });
 
 test('out-of-window, unauthorized, duplicate and stale candidates do not consume the page budget', async () => {
@@ -74,17 +74,27 @@ test('out-of-window, unauthorized, duplicate and stale candidates do not consume
     ['message-3'],
   );
   assert.equal(result.meta.hasMore, true);
-  assert.deepEqual(f.reads, ['message-0', 'message-1', 'message-2', 'message-3', 'message-4']);
+  assert.deepEqual(f.reads, [
+    'message-0',
+    'message-1',
+    'message-2',
+    'message-3',
+    'message-4',
+    'message-3',
+    'message-4',
+  ]);
 });
 
-test('time search still orders by canonical timestamps before applying the visible limit', async () => {
-  const f = fixture(20);
-  f.messages.get('message-19').timestamp = Date.UTC(2026, 9, 8);
+test('time orders the first 32 admitted relevance sources and honestly omits older sources beyond that window', async () => {
+  const f = fixture(80);
+  f.messages.get('message-31').timestamp = Date.UTC(2026, 9, 8);
+  f.messages.get('message-40').timestamp = Date.UTC(2026, 9, 7);
   const result = await f.service.search({ ...input, sort: 'time', limit: 1 }, principal);
   assert.deepEqual(
     result.results.map((hit) => hit.messageId),
-    ['message-19'],
+    ['message-31'],
   );
   assert.equal(result.meta.hasMore, true);
-  assert.equal(f.reads.length, 20);
+  assert.equal(f.reads.length, 34, '32 in-window admissions plus the final page/witness reads');
+  assert.deepEqual(result.meta.timeWindow, { limit: 32, admitted: 32, complete: true });
 });

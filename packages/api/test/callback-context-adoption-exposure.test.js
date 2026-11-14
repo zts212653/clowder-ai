@@ -2,6 +2,35 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { createCallbackContextFixture } from './helpers/callback-context-fixture.js';
 
+test('a watcher reads published originals without adopting work input or advancing its member seen cursor', async (t) => {
+  const f = await createCallbackContextFixture(t, { executionKind: 'watcher' });
+  const visible = f.publish('published original for the observer');
+  const admitted = await f.enqueue('pending body belongs to the working member');
+  const publicWake = await publishWake(f, 'codex', 'published request belongs to the working member');
+  const before = await f.cursors.getSeenCursor(f.userId, 'opus', f.threadId);
+  const response = await f.read();
+  assert.equal(response.statusCode, 200, response.body);
+  assert.ok(response.json().messages.some((message) => message.id === visible.id));
+  assert.equal(response.body.includes(admitted.message.content), false);
+  assert.deepEqual((await f.queue.getDurableEntry(f.threadId, admitted.entry.id)).targets, ['opus', 'codex']);
+  assert.equal(await f.cursors.getSeenCursor(f.userId, 'opus', f.threadId), before);
+  assert.deepEqual((await f.queue.getDurableEntry(f.threadId, publicWake.entry.id)).targets, ['opus', 'codex']);
+  const drill = await f.app.inject({
+    method: 'GET',
+    url: `/api/callbacks/get-message?messageId=${admitted.message.id}&mode=full`,
+    headers: { 'x-invocation-id': f.auth.invocationId, 'x-callback-token': f.auth.callbackToken },
+  });
+  assert.equal(drill.statusCode, 404, drill.body);
+  assert.deepEqual((await f.queue.getDurableEntry(f.threadId, admitted.entry.id)).targets, ['opus', 'codex']);
+  const publishedDrill = await f.app.inject({
+    method: 'GET',
+    url: `/api/callbacks/get-message?messageId=${publicWake.message.id}&mode=full`,
+    headers: { 'x-invocation-id': f.auth.invocationId, 'x-callback-token': f.auth.callbackToken },
+  });
+  assert.equal(publishedDrill.statusCode, 200, publishedDrill.body);
+  assert.deepEqual((await f.queue.getDurableEntry(f.threadId, publicWake.entry.id)).targets, ['opus', 'codex']);
+});
+
 for (const [name, change] of Object.entries({
   'wrong invocation': { invocationId: 'foreign-child' },
   'wrong parent': { parentInvocationId: 'foreign-parent' },

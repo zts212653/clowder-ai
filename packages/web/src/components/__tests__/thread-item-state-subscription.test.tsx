@@ -39,12 +39,15 @@ describe('ThreadItem snapshot authority', () => {
     });
     container = document.createElement('div');
     document.body.appendChild(container);
+    // The original cases below exercise the retained classic interface.
+    window.localStorage.setItem('cat-cafe:shell-presentation', 'classic');
     root = createRoot(container);
   });
 
   afterEach(() => {
     act(() => root.unmount());
     container.remove();
+    window.localStorage.removeItem('cat-cafe:shell-presentation');
   });
 
   it('ignores legacy unread, liveness, and lastActivity changes for a fixed snapshot row', () => {

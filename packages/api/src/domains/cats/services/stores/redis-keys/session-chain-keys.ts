@@ -7,6 +7,11 @@
  */
 
 export const SessionChainKeys = {
+  /** Derived unfinished sealing work; score is the original record timestamp. */
+  sealing: () => 'session-recovery:sealing',
+  sealingComplete: () => 'session-recovery:sealing:census:v1',
+  /** Set: unfinished watcher Session IDs; changed atomically with their owner state, TTL=0. */
+  watcherPending: (userId: string) => `session-watcher-pending:${encodeURIComponent(userId)}`,
   /** Hash: session record fields */
   detail: (id: string) => `session:${id}`,
   /** Sorted Set: cat+thread session chain (score = seq) */

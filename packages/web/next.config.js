@@ -1,5 +1,5 @@
 const { deploymentDefaults, resolveDirectApiPort } = require('../shared/src/deployment-defaults.ts');
-const withPWA = require('@ducanh2912/next-pwa').default;
+const { default: withPWA, runtimeCaching: defaultRuntimeCaching } = require('@ducanh2912/next-pwa');
 const { resolveWebBuildRevision } = require('./scripts/build-revision.cjs');
 const currentVendorStylesheets = new Set(require('./src/generated/vendor-stylesheets.json'));
 
@@ -68,7 +68,8 @@ const nextConfig = {
   transpilePackages: ['@cat-cafe/ui'],
   ...(testDistDir ? { distDir: testDistDir } : {}),
   ...(testTsconfigPath ? { typescript: { tsconfigPath: testTsconfigPath } } : {}),
-  experimental: { proxyTimeout: 120_000 },
+  // Keep same-origin API rewrites alive beyond the panel's 180s server / 185s client deadlines.
+  experimental: { proxyTimeout: 190_000 },
   env: {
     NEXT_PUBLIC_CAT_CAFE_BUILD_REVISION: webBuildRevision ?? '',
     NEXT_PUBLIC_CAT_CAFE_DEPLOYMENT_REVISION_REQUIRED: deploymentRevisionRequired ? '1' : '0',
@@ -116,6 +117,47 @@ const nextConfig = {
   },
 };
 
+// The service worker owns the offline shell and static assets, never API or Socket.IO traffic.
+// A request the worker fetches on the page's behalf ignores the page's abort, still leaves the
+// connection queue after the page gave up, and is sent again when the browser stops the worker
+// mid-flight (docs/bug-report/hub-backend-connection-toast-recurrence, P6). The library defaults
+// are kept except the two routes that exist to serve API responses, and every kept matcher declines
+// API traffic first. Workbox writes matchers into sw.js with toString(), so each rebuilt matcher
+// carries its own source instead of a closure.
+const API_TRAFFIC_PATH = /^\/(?:api|socket\.io)(?:\/|$)/;
+const API_RESPONSE_CACHES = new Set(['apis', 'cross-origin']);
+function declineApiTraffic(urlPattern) {
+  if (urlPattern instanceof RegExp) {
+    // Same contract as Workbox's RegExpRoute: a cross-origin URL only matches from index 0.
+    return new Function(
+      '{ url, sameOrigin }',
+      `if (${API_TRAFFIC_PATH}.test(url.pathname)) return false;
+      const match = ${urlPattern}.exec(url.href);
+      return match !== null && (sameOrigin || match.index === 0);`,
+    );
+  }
+  if (typeof urlPattern === 'function') {
+    return new Function(
+      'context',
+      `if (${API_TRAFFIC_PATH}.test(context.url.pathname)) return false;
+      return Boolean((${urlPattern})(context));`,
+    );
+  }
+  throw new TypeError(`runtime caching pattern must be a RegExp or function: ${urlPattern}`);
+}
+const runtimeCaching = [
+  {
+    // Static assets: cache for performance
+    urlPattern: /\.(png|jpg|jpeg|svg|gif|ico|woff2?)$/,
+    handler: 'CacheFirst',
+    options: {
+      cacheName: 'static-assets',
+      expiration: { maxEntries: 60, maxAgeSeconds: 30 * 24 * 60 * 60 },
+    },
+  },
+  ...defaultRuntimeCaching.filter((entry) => !API_RESPONSE_CACHES.has(entry.options?.cacheName)),
+].map((entry) => ({ ...entry, urlPattern: declineApiTraffic(entry.urlPattern) }));
+
 module.exports = withPWA({
   dest: 'public',
   disable: pwaDisabled,
@@ -124,8 +166,9 @@ module.exports = withPWA({
   // NetworkFirst so an online navigation cannot be trapped on an older build,
   // while the runtime cache still supplies the last coherent shell offline.
   dynamicStartUrl: true,
-  // Keep default page/document runtime caching and only override what we need.
-  extendDefaultRuntimeCaching: true,
+  // runtimeCaching below is the complete list; merging the library defaults would bring back
+  // the API-serving routes.
+  extendDefaultRuntimeCaching: false,
   workboxOptions: {
     disableDevLogs: true,
     // Older documents can still request their immutable files, but installing
@@ -143,26 +186,6 @@ module.exports = withPWA({
     // starts at /?__clowder_desktop_version=<version> so an older worker may
     // serve static assets, but can never substitute its precached root shell.
     ignoreURLParametersMatching: [/^utm_/, /^fbclid$/],
-    runtimeCaching: [
-      {
-        // API calls: never cache — always fresh chat data
-        urlPattern: /^https?:\/\/.*\/api\//,
-        handler: 'NetworkOnly',
-      },
-      {
-        // WebSocket upgrade requests: skip caching
-        urlPattern: /^https?:\/\/.*\/socket\.io/,
-        handler: 'NetworkOnly',
-      },
-      {
-        // Static assets: cache for performance
-        urlPattern: /\.(png|jpg|jpeg|svg|gif|ico|woff2?)$/,
-        handler: 'CacheFirst',
-        options: {
-          cacheName: 'static-assets',
-          expiration: { maxEntries: 60, maxAgeSeconds: 30 * 24 * 60 * 60 },
-        },
-      },
-    ],
+    runtimeCaching,
   },
 })(nextConfig);

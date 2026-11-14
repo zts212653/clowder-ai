@@ -321,7 +321,7 @@ describe('v2 two-level composer', () => {
     expect(voice.stopRecording).toHaveBeenCalledOnce();
     voice.state = 'transcribing';
     renderComposer();
-    expect(button('转写中')?.disabled).toBe(true);
+    expect(button('正在转成文字…')?.disabled).toBe(true);
     expect(button('发送消息')?.disabled).toBe(true);
   });
 
@@ -377,7 +377,7 @@ describe('v2 two-level composer', () => {
       ['Voice input', 'Checking which work can be stopped'],
     ],
     ['recording', false, true, 'hidden', ['停止录音', '发送消息'], ['Stop recording', 'Send message']],
-    ['transcribing', false, true, 'hidden', ['转写中', '发送消息'], ['Transcribing', 'Send message']],
+    ['transcribing', false, true, 'hidden', ['正在转成文字…', '发送消息'], ['Transcribing…', 'Send message']],
     ['idle', true, true, 'available', ['语音输入', '发送消息'], ['Voice input', 'Send message']],
   ] as const)('updates action names in place: voice=%s, active=%s, draft=%s, stop=%s', (state, active, text, stopState, zh, en) => {
     voice.state = state;
