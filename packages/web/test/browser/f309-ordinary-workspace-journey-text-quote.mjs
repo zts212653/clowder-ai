@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
 import { ensureWorkspaceOpen, openWorkspaceTools } from './f307-workspace-open.mjs';
@@ -68,7 +69,7 @@ async function selectRendered(page, from, to) {
 // chat annotation chip → explicit send — never a second F309 text annotation.
 export function registerOrdinaryTextQuoteJourney(suite) {
   async function openFromHome({ viewport, prefix, run, draft, dark = false, shell }) {
-    const evidence = await mkdtemp(`/tmp/${prefix}-`);
+    const evidence = await mkdtemp(path.join(tmpdir(), `${prefix}-`));
     const owner = await startComposerWorkspaceOwner(path.join(evidence, 'data'), {
       configure: async ({ content, draftStore }) => {
         const { ThreadStore } = await import('../../../api/dist/domains/cats/services/stores/ports/ThreadStore.js');

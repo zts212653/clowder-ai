@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'node:test';
 
@@ -10,7 +11,7 @@ describe('signal notifications loader', () => {
   let prevSignalsRoot;
 
   beforeEach(() => {
-    tempRoot = mkdtempSync('/tmp/cat-cafe-signal-notifications-');
+    tempRoot = mkdtempSync(join(tmpdir(), 'cat-cafe-signal-notifications-'));
     prevSignalsRoot = process.env.SIGNALS_ROOT_DIR;
     process.env.SIGNALS_ROOT_DIR = tempRoot;
   });

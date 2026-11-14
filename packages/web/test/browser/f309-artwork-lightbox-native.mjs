@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { readFile, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
 import {
@@ -198,7 +199,7 @@ export function registerNativeArtworkLightboxJourneys() {
       { timeout: 240_000 },
       async () => {
         const evidence = path.join(
-          process.env.F309_BROWSER_EVIDENCE_DIR ?? '/tmp/f309-artwork-lightbox-native',
+          process.env.F309_BROWSER_EVIDENCE_DIR ?? path.join(tmpdir(), 'f309-artwork-lightbox-native'),
           `${kind}-${width}`,
         );
         const f = await createNativeArtworkFixture(kind, evidence, sourceKind);

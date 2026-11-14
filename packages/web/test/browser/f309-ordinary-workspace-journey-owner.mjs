@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { mkdtemp, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
 import { ensureWorkspaceOpen } from './f307-workspace-open.mjs';
@@ -10,7 +11,7 @@ export function registerOrdinaryOwnerJourney(suite) {
     'ordinary PNG saves native markup and reopens retained discussion in an independent narrow browser',
     { timeout: 90_000 },
     async () => {
-      const evidence = await mkdtemp('/tmp/f309-artwork-owner-');
+      const evidence = await mkdtemp(path.join(tmpdir(), 'f309-artwork-owner-'));
       // Only the session issuer and unrelated chat shell are synthetic. F063 reads,
       // F309 writes and SQLite persistence use the shipped handlers, with private data.
       const owner = await startRealWorkspaceOwner(path.join(evidence, 'data'));

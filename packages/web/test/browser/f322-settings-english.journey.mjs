@@ -1,9 +1,11 @@
 import assert from 'node:assert/strict';
 import { mkdirSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { scene } from './f322-members-fixture.mjs';
 
-const out = process.env.SETTINGS_EVIDENCE_DIR ?? '/tmp/f322-settings-english';
+const out = process.env.SETTINGS_EVIDENCE_DIR ?? join(tmpdir(), 'f322-settings-english');
 mkdirSync(out, { recursive: true });
 const results = [];
 after(() => writeFileSync(`${out}/result.json`, `${JSON.stringify(results, null, 2)}\n`));

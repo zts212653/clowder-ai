@@ -15,23 +15,19 @@
  *   community-issues guardian routes flaked candidates=0 under the concurrent suite
  *   (passing in isolation because a fresh pid had no leftover). mkdtempSync appends a
  *   random suffix → a genuinely unique root per invocation, immune to pid reuse; the
- *   cleanup keeps /tmp from accumulating hundreds of stale roots.
+ *   cleanup keeps the temporary directory from accumulating stale roots.
  */
 
 import { cpSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { testTempRoot } from '../../../../scripts/lib/test-temp-root.mjs';
 
-export function createIsolatedTemplateRoot(tmpBase, templateSrc) {
-  mkdirSync(tmpBase, { recursive: true });
-  const root = mkdtempSync(resolve(tmpBase, 'cat-cafe-test-template-'));
+export function createIsolatedTemplateRoot(templateSrc, tmpBase = process.env.CAT_CAFE_TEST_TEMPLATE_ROOT) {
+  const base = testTempRoot(tmpBase);
+  mkdirSync(base, { recursive: true });
+  const root = mkdtempSync(resolve(base, 'cat-cafe-test-template-'));
   const templatePath = resolve(root, 'cat-template.json');
   cpSync(templateSrc, templatePath);
-  const cleanup = () => {
-    try {
-      rmSync(root, { recursive: true, force: true });
-    } catch {
-      // best-effort cleanup; a missing dir (already removed) is fine.
-    }
-  };
+  const cleanup = () => rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   return { templatePath, root, cleanup };
 }

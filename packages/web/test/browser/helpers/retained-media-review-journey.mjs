@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 export async function checkRetainedMediaDiscussion(page, surface, mime, index) {
   if (index === 0) {
@@ -61,7 +63,7 @@ export async function checkRetainedMediaDiscussion(page, surface, mime, index) {
         .waitFor({ timeout: 5000 });
     } catch (error) {
       console.log('Reply surface:', await surface.innerText());
-      await page.screenshot({ path: '/tmp/f290-w4-reply-failure.png' });
+      await page.screenshot({ path: join(tmpdir(), 'f290-w4-reply-failure.png') });
       throw error;
     }
     await surface.getByLabel('编辑我的回复').click();

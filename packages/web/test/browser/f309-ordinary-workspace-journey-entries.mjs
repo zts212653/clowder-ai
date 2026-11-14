@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { mkdtemp } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
 import { ensureWorkspaceOpen } from './f307-workspace-open.mjs';
@@ -8,7 +9,7 @@ import { routeThroughRealOwner, startRealWorkspaceOwner } from './f309-ordinary-
 // Parent Alpha 2026-09-24 (docs/evidence/2026-09-24-f309-parent-alpha): entries that failed on the real page.
 export function registerOrdinaryEntryJourneys(suite) {
   async function withRealOwner(prefix, run) {
-    const evidence = await mkdtemp(`/tmp/${prefix}-`);
+    const evidence = await mkdtemp(path.join(tmpdir(), `${prefix}-`));
     const owner = await startRealWorkspaceOwner(path.join(evidence, 'data'));
     const context = await suite().browser.newContext({ viewport: { width: 1280, height: 900 } });
     const errors = [];
