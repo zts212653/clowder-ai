@@ -227,6 +227,8 @@ export function useSendMessage(activeThreadId?: string) {
           }
         };
         let response = await submit(existing?.confirmedTargetCats);
+        if (attempt && apiSessionIdentity.getSnapshot().ownerUserId !== attempt.ownerUserId)
+          throw new Error('Send attempt owner changed');
         if (response.status === 409) {
           const payload: unknown = await response
             .clone()
@@ -260,6 +262,8 @@ export function useSendMessage(activeThreadId?: string) {
           }
         }
 
+        if (attempt && apiSessionIdentity.getSnapshot().ownerUserId !== attempt.ownerUserId)
+          throw new Error('Send attempt owner changed');
         if (!response.ok) {
           rejected = response.status >= 400 && response.status < 500 && response.status !== 408;
           retryable = response.status === 429;
@@ -268,6 +272,8 @@ export function useSendMessage(activeThreadId?: string) {
         }
 
         const admission = (await response.json().catch(() => null)) as MessageAdmissionResponse | null;
+        if (attempt && apiSessionIdentity.getSnapshot().ownerUserId !== attempt.ownerUserId)
+          throw new Error('Send attempt owner changed');
         if (admission?.status !== 'game_started' && admission?.status !== 'queued') {
           throw new Error('Server did not return a canonical Queue admission');
         }
@@ -292,9 +298,16 @@ export function useSendMessage(activeThreadId?: string) {
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : 'Unknown error';
         if (attempt) {
+          const abandoned = submitted && apiSessionIdentity.getSnapshot().ownerUserId !== attempt.ownerUserId;
           await patchSendAttempt(attempt, {
-            status: !submitted || rejected ? 'failed' : 'unknown',
-            error: !submitted ? '未能安全保存，内容仍在输入框' : rejected ? errorMessage : undefined,
+            status: abandoned ? 'unknown' : !submitted || rejected ? 'failed' : 'unknown',
+            error: abandoned
+              ? undefined
+              : !submitted
+                ? '未能安全保存，内容仍在输入框'
+                : rejected
+                  ? errorMessage
+                  : undefined,
             retryable,
           });
           setUploadStatus('idle');

@@ -211,6 +211,8 @@ export async function checkSendAttempt(attempt: SendAttempt, afterDeletion = fal
         error: '未能核对，请稍后重试',
       });
   } finally {
+    const latest = findSendAttempt(current.ownerUserId, current.threadId, current.id);
+    if (latest?.status === 'checking') await patchSendAttempt(latest, { status: priorStatus });
     const changedWhileChecking = checkingAttempts.get(key);
     checkingAttempts.delete(key);
     if (changedWhileChecking) void checkSendAttempt(current, true);

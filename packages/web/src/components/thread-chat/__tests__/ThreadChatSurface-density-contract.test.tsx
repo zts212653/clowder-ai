@@ -216,6 +216,42 @@ function manifest(scope: Element): string[] {
 }
 
 describe('ThreadChatSurface density contract', () => {
+  it.each([
+    'sending',
+    'failed',
+    'unknown',
+    'canceled',
+  ] as const)('keeps a local %s bubble visible in a proven single-cat view without inventing a receipt', async (status) => {
+    fixture.extraMessages = [
+      {
+        id: 'local-attempt',
+        type: 'user',
+        content: 'my visible attempt',
+        timestamp: 6,
+        sendAttempt: { id: 'local-key', status },
+      },
+    ];
+    const view = { mode: 'cat' as const, catId: 'opus55' };
+    const controller: ConversationViewPreferenceController = {
+      snapshot: { stored: view, effective: view, source: 'thread' },
+      loading: false,
+      saving: false,
+      error: null,
+      save: async () => true,
+      subscribeBeforeCommit: () => () => {},
+    };
+    writeShellPresentation('v2');
+    await act(async () =>
+      root.render(
+        <ThreadChatSurface threadId="thread-parity" density="full" conversationViewController={controller} />,
+      ),
+    );
+    const local = container.querySelectorAll('[data-thread-chat-message-id="local-attempt"]');
+    expect(local).toHaveLength(1);
+    expect(local[0]?.closest('[data-conversation-input-evidence]')).toBeNull();
+    expect(local[0]?.closest('[data-conversation-execution]')).toBeNull();
+    expect(container.querySelector('[data-single-cat-conversation-timeline]')).not.toBeNull();
+  });
   it('opens the same member settings page from a chat nameplate', async () => {
     await act(async () => root.render(<ThreadChatSurface threadId="thread-parity" density="full" />));
     const button = container.querySelector<HTMLButtonElement>('button[aria-label="编辑伙伴"]')!;

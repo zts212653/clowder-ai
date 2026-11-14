@@ -89,6 +89,24 @@ it('does not read another account receipt after the browser owner changes', asyn
   expect(apiFetch).not.toHaveBeenCalled();
 });
 
+it('releases an abandoned checking state without consuming a different account receipt', async () => {
+  putSendAttempt(attempt);
+  let resolve!: (value: Response) => void;
+  apiFetch.mockImplementationOnce(
+    () =>
+      new Promise<Response>((finish) => {
+        resolve = finish;
+      }),
+  );
+  const checking = checkSendAttempt(attempt);
+  observeApiSessionOwner('other-owner');
+  resolve(new Response(JSON.stringify({ status: 'accepted', userMessage: { id: 'not-consumed', timestamp: 10 } })));
+  await checking;
+  observeApiSessionOwner(attempt.ownerUserId);
+  expect(findSendAttempt(attempt.ownerUserId, attempt.threadId, attempt.id)).toMatchObject({ status: 'unknown' });
+  expect(findSendAttempt(attempt.ownerUserId, attempt.threadId, attempt.id)?.serverMessageId).toBeUndefined();
+});
+
 it('keeps a canceled Queue input and its body across reload and late acknowledgement', async () => {
   const accepted = { ...attempt, status: 'accepted' as const, serverMessageId: 'canceled-id' };
   await attemptDb.saveSendAttempt(accepted);

@@ -13,7 +13,7 @@ let browser, built;
 before(async () => {
   await mkdir(evidence, { recursive: true });
   built = await buildChatProof();
-  browser = await chromium.launch({ headless: true, ...(process.platform === 'win32' ? { channel: 'chrome' } : {}) });
+  browser = await chromium.launch({ headless: true });
 });
 after(async () => {
   await browser?.close();
@@ -49,6 +49,45 @@ async function scene(options = {}) {
   return { ...proof, harness, finish };
 }
 const json = (body, status = 200) => ({ status, contentType: 'application/json', body: JSON.stringify(body) });
+
+for (const state of ['sending', 'failed', 'unknown']) {
+  test(`single-cat view retains a ${state} attempt outside member execution evidence`, async () => {
+    const proof = await scene();
+    const { page } = proof;
+    let held;
+    try {
+      await page.route('**/api/messages', (route) => {
+        if (route.request().method() !== 'POST') return route.fallback();
+        if (state === 'sending') {
+          held = route;
+          return;
+        }
+        return route.fulfill(
+          json({ error: state === 'failed' ? '队列已满' : 'response lost' }, state === 'failed' ? 429 : 500),
+        );
+      });
+      await page.getByTestId('conversation-view-menu-toggle').click();
+      await page.locator('[data-conversation-cat="codex-astra"]').click();
+      await page.locator('[data-single-cat-conversation-timeline]').waitFor();
+      await page.locator('textarea').fill('@codex-astra 单猫视图也应保留这条补充');
+      await page.locator('textarea').press('Enter');
+      const status = page.locator(`[data-send-status="${state}"]`);
+      await status.waitFor();
+      assert.equal(await status.count(), 1);
+      assert.equal(await page.locator('textarea').inputValue(), '');
+      assert.equal(
+        await status.evaluate(
+          (node) => node.closest('[data-conversation-input-evidence], [data-conversation-execution]') === null,
+        ),
+        true,
+      );
+      await proof.harness.capture(page, `single-cat-${state}`);
+    } finally {
+      await held?.abort();
+      await proof.finish();
+    }
+  });
+}
 
 test('real composer paints a bubble before POST returns and hands off in place to the canonical message', async () => {
   const proof = await scene();

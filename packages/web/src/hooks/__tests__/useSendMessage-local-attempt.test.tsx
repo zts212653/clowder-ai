@@ -137,6 +137,40 @@ it('commands retain their existing composer owner and canceled attempts cannot b
   expect(apiFetch.mock.calls.length).toBe(priorPosts);
 });
 
+it('releases sending after an acknowledgement is discarded at the account boundary', async () => {
+  (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+  observeApiSessionOwner('send-proof-owner');
+  let resolve!: (value: Response) => void;
+  apiFetch.mockImplementationOnce(
+    () =>
+      new Promise<Response>((finish) => {
+        resolve = finish;
+      }),
+  );
+  function Sender() {
+    send = useSendMessage(threadId).handleSend;
+    return null;
+  }
+  host = document.createElement('div');
+  root = createRoot(host);
+  await act(async () => root.render(<Sender />));
+  let submitting!: ReturnType<typeof send>;
+  await act(async () => {
+    submitting = send('private attempt', undefined, undefined, undefined, undefined, undefined, undefined, {
+      localAttempt: true,
+    });
+    await vi.waitFor(() => expect(useSendAttemptStore.getState().attempts[0]?.status).toBe('sending'));
+  });
+  observeApiSessionOwner('other-owner');
+  await act(async () => {
+    resolve(new Response(JSON.stringify({ status: 'queued', userMessageId: 'not-consumed' }), { status: 202 }));
+    await submitting;
+  });
+  observeApiSessionOwner('send-proof-owner');
+  expect(useSendAttemptStore.getState().attempts[0]).toMatchObject({ status: 'unknown' });
+  expect(useSendAttemptStore.getState().attempts[0]?.serverMessageId).toBeUndefined();
+});
+
 it('shows a recoverable user bubble before HTTP completes, without publishing it into History', async () => {
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   observeApiSessionOwner('send-proof-owner');

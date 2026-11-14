@@ -233,9 +233,17 @@ export function ThreadChatSurface({
     conversationViewQueue,
     messages,
   ]);
+  const singleCatLocalAttempts = useMemo(() => {
+    if (!singleCatProjection) return [];
+    const projectedIds = new Set(flattenConversationProjection(singleCatProjection).map((message) => message.id));
+    return messages.filter((message) => message.sendAttempt && !projectedIds.has(message.id));
+  }, [messages, singleCatProjection]);
   const visibleMessages = useMemo(
-    () => (singleCatProjection ? flattenConversationProjection(singleCatProjection) : messages),
-    [messages, singleCatProjection],
+    () =>
+      singleCatProjection
+        ? [...flattenConversationProjection(singleCatProjection), ...singleCatLocalAttempts]
+        : messages,
+    [messages, singleCatProjection, singleCatLocalAttempts],
   );
   // Read the history owner's existing anchor. Its row must exist on the first
   // paint of a returning thread, before an observer can mount deferred content.
@@ -394,7 +402,19 @@ export function ThreadChatSurface({
               {visibleMessages.length === 0 && !isLoadingHistory ? (
                 projectedEmptyState
               ) : singleCatProjection ? (
-                <SingleCatConversationTimeline projection={singleCatProjection} renderMessage={renderTimelineMessage} />
+                <>
+                  <SingleCatConversationTimeline
+                    projection={singleCatProjection}
+                    renderMessage={renderTimelineMessage}
+                  />
+                  {singleCatLocalAttempts.map((message, index) =>
+                    renderTimelineMessage(
+                      message,
+                      visibleMessages.length - singleCatLocalAttempts.length + index,
+                      visibleMessages.length,
+                    ),
+                  )}
+                </>
               ) : (
                 messages.map((message, index) => renderTimelineMessage(message, index, messages.length))
               )}
