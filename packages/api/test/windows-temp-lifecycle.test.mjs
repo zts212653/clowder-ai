@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
 import { once } from 'node:events';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, relative, resolve } from 'node:path';
 import { test } from 'node:test';
@@ -144,7 +144,7 @@ for (const status of [0, 7]) {
     });
     assert.equal(result.status, status, result.stderr);
     const observed = JSON.parse(result.stdout);
-    assert.equal(observed.cwd, cwd);
+    assert.equal(observed.cwd, realpathSync(cwd));
     assert.equal(existsSync(observed.home), false, 'normal child exit must execute wrapper cleanup');
   });
 }
