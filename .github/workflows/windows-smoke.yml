@@ -186,6 +186,7 @@ jobs:
           desktop/configure-client-homes.test.js
           desktop/build-release-policy.test.js
           desktop/service-manager.test.js
+          desktop/windows-user-path.test.js
           desktop/post-install-profile.test.js
           desktop/frozen-runtime-export.test.mjs
           desktop/workspace-runtime-modules.test.mjs
