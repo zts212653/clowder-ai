@@ -943,7 +943,7 @@ export function ChatInput({
     return () => document.removeEventListener('mousedown', handler);
   }, [activeMenu, closeMenus]);
 
-  const attachmentFeedbackClassName = `pt-2 text-xs ${shellV2 ? '' : 'px-4'}`;
+  const attachmentFeedbackClassName = 'px-4 pt-2 text-xs';
   const composerDraftExtras = (
     <>
       {imageLifecycleStatus === 'preparing' && (
@@ -1112,7 +1112,7 @@ export function ChatInput({
         ) : null}
         {shellV2 && hasComposerDraftExtras ? (
           <div
-            className={`col-span-3 col-start-1 ${draftExtrasRow} -mx-2 ${hasComposerHeader ? '' : '-mt-2 rounded-t-2xl'} border-b border-[var(--shell-hairline)] pb-1`}
+            className={`col-span-3 col-start-1 ${draftExtrasRow} -mx-2 ${hasComposerHeader ? '' : '-mt-2 rounded-t-2xl'} border-b border-[var(--shell-hairline)] pb-1 [&_.cafe-attachment-previews]:px-4`}
             data-testid="chat-composer-draft-extras"
           >
             {composerDraftExtras}
