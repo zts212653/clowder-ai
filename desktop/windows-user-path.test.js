@@ -82,8 +82,8 @@ function manager(result) {
 
 const windowsOnly = { skip: process.platform !== 'win32' };
 
-test('reads registered PATH once alongside Redis preparation and before API/Web start', windowsOnly, async () => {
-  const paths = { machinePath: 'C:\\Windows\\System32', userPath: 'C:\\用户工具' };
+test('reads normal PATH once alongside Redis preparation and before API/Web start', windowsOnly, async () => {
+  const paths = { normalPath: 'C:\\Windows\\System32;C:\\用户工具' };
   const value = manager({ defer: true, stdout: Buffer.from(JSON.stringify(paths)).toString('base64') });
   let redisStarted = false;
   value._startRedis = async () => {
@@ -96,7 +96,7 @@ test('reads registered PATH once alongside Redis preparation and before API/Web 
     assert.equal(redisStarted, true, 'the registry read must not delay Redis preparation');
     assert.equal(children.length, 0, 'API and Web must wait for the recovered PATH');
     assert.equal(queries[0].options.windowsHide, true);
-    assert.equal(queries[0].options.timeout, 5000);
+    assert.equal(queries[0].options.timeout, 8000);
     assert.equal(path.isAbsolute(queries[0].executable), true);
     assert.ok(queries[0].args.includes('-NoProfile'));
     assert.ok(queries[0].args.includes('-NonInteractive'));
@@ -108,7 +108,7 @@ test('reads registered PATH once alongside Redis preparation and before API/Web 
   assert.equal(queries.length, 1);
   children.forEach((env) => {
     const key = Object.keys(env).find((entry) => entry.toUpperCase() === 'PATH');
-    assert.equal(env[key], `${paths.machinePath};${paths.userPath}`);
+    assert.equal(env[key], paths.normalPath);
   });
 });
 
@@ -138,20 +138,20 @@ test('continues startup if the PATH reader rejects, including failed preflight',
   }
 });
 
-test('restores machine then user PATH order when a user CLI is missing', windowsOnly, async () => {
+test('inserts a missing user CLI before WindowsApps without moving parent directories', windowsOnly, async () => {
   const value = manager({ stdout: '' });
   const machinePath = 'C:\\Windows\\System32;C:\\MachineTools';
   const userPath = 'C:\\用户工具;C:\\WindowsApps';
-  const inherited = `${machinePath};C:\\WindowsApps;C:\\ParentTools`;
+  const inherited = `C:\\Custom;${machinePath};C:\\WindowsApps;C:\\ParentTools`;
   process.env.PATH = inherited;
   // The merge must run through the real spawn boundary for both services.
-  value.windowsPath = { machinePath, userPath };
+  value.windowsPath = `${machinePath};${userPath}`;
   value._startProcess('api', process.execPath, []);
   value._startProcess('web', process.execPath, []);
   children.forEach((env) => {
     const keys = Object.keys(env).filter((key) => key.toUpperCase() === 'PATH');
     assert.equal(keys.length, 1);
-    assert.equal(env[keys[0]], `${machinePath};${userPath};C:\\ParentTools`);
+    assert.equal(env[keys[0]], `C:\\Custom;${machinePath};${userPath};C:\\ParentTools`);
   });
   assert.equal(process.env.PATH, inherited, 'the launcher environment must not be changed');
 });
@@ -159,14 +159,14 @@ test('restores machine then user PATH order when a user CLI is missing', windows
 [
   { error: Object.assign(new Error('missing PowerShell'), { code: 'ENOENT' }), stdout: '' },
   { error: Object.assign(new Error('registry read timed out'), { killed: true }), stdout: '' },
-  { error: null, stdout: '' },
-  { error: null, stdout: 'not-json' },
-  { error: null, stdout: Buffer.from('{"machinePath":5,"userPath":[]}').toString('base64') },
-  { error: null, stdout: Buffer.from('{"machinePath":"","userPath":"C:\\\\User"}').toString('base64') },
-  { error: null, stdout: Buffer.from('{"machinePath":"  ","userPath":"C:\\\\User"}').toString('base64') },
+  { label: 'empty output', error: null, stdout: '' },
+  { label: 'invalid JSON', error: null, stdout: 'not-json' },
+  { label: 'invalid schema', error: null, stdout: Buffer.from('{"normalPath":5}').toString('base64') },
+  { label: 'empty PATH', error: null, stdout: Buffer.from('{"normalPath":""}').toString('base64') },
+  { label: 'blank PATH', error: null, stdout: Buffer.from('{"normalPath":"  "}').toString('base64') },
 ].forEach((failure) => {
   test(
-    `starts with the inherited PATH when the registry read returns ${failure.error?.message || 'empty'}`,
+    `starts with the inherited PATH when the environment read returns ${failure.label || failure.error.message}`,
     windowsOnly,
     async () => {
       const value = manager(failure);
@@ -182,49 +182,84 @@ test('restores machine then user PATH order when a user CLI is missing', windows
   );
 });
 
-test('the real PowerShell reader returns machine and user PATH strings', windowsOnly, async () => {
-  const outputFile = path.join(root, 'registered-paths.json');
+test('the real user environment PATH ignores missing and stale inherited variables', windowsOnly, async () => {
   const executable = require.resolve('./windows-user-path');
-  const child = originalSpawn(
-    process.execPath,
-    [
-      '-e',
-      `require(${JSON.stringify(executable)}).readWindowsPath().then(paths=>require('node:fs').writeFileSync(${JSON.stringify(outputFile)},JSON.stringify(paths)));`,
-    ],
-    { windowsHide: true, stdio: 'ignore' },
-  );
-  const [code] = await once(child, 'exit');
-  assert.equal(code, 0);
-  const paths = JSON.parse(fs.readFileSync(outputFile, 'utf8'));
-  assert.equal(typeof paths.machinePath, 'string');
-  assert.equal(typeof paths.userPath, 'string');
+  const results = [];
+  for (const state of ['clean', 'missing', 'stale']) {
+    const env = { ...process.env };
+    ['USERPROFILE', 'LOCALAPPDATA', 'APPDATA', 'TOOL_HOME'].forEach((key) => {
+      if (state === 'missing') delete env[key];
+      if (state === 'stale') env[key] = path.join(root, 'stale', key);
+    });
+    const outputFile = path.join(root, `normal-path-${state}.json`);
+    const child = originalSpawn(
+      process.execPath,
+      [
+        '-e',
+        `require(${JSON.stringify(executable)}).readWindowsPath().then(paths=>require('node:fs').writeFileSync(${JSON.stringify(outputFile)},JSON.stringify(paths)));`,
+      ],
+      { env, windowsHide: true, stdio: 'ignore' },
+    );
+    const [code] = await once(child, 'exit');
+    assert.equal(code, 0);
+    const normalPath = JSON.parse(fs.readFileSync(outputFile, 'utf8'));
+    assert.equal(typeof normalPath, 'string', `${state}: native user environment read must succeed`);
+    assert.ok(normalPath.trim());
+    results.push(normalPath);
+  }
+  assert.equal(results[1], results[0]);
+  assert.equal(results[2], results[0]);
 });
 
 test('keeps a complete parent PATH byte-for-byte, including its own priority', () => {
   const env = { Path: 'C:\\Parent;C:\\User;C:\\System', OTHER: 'kept' };
   const original = { ...env };
-  mergeWindowsPath(env, { machinePath: 'C:\\System', userPath: 'C:\\User' });
+  mergeWindowsPath(env, 'C:\\System;C:\\User');
   assert.deepEqual(env, original);
 });
 
 test('uses the effective PATH key and removes duplicate casing without importing ignored values', () => {
   const env = { Path: 'C:\\Ignored', PATH: 'C:\\System;C:\\WindowsApps', OTHER: 'kept' };
-  mergeWindowsPath(env, { machinePath: 'C:\\System', userPath: 'C:\\User;C:\\WindowsApps' });
+  mergeWindowsPath(env, 'C:\\System;C:\\User;C:\\WindowsApps');
   assert.deepEqual(env, { PATH: 'C:\\System;C:\\User;C:\\WindowsApps', OTHER: 'kept' });
 });
 
 test('deduplicates quoted, slash and case variants when repairing a missing directory', () => {
   const env = { Path: 'C:\\SYSTEM;"c:/user/";C:\\WindowsApps\\;C:\\Parent' };
-  mergeWindowsPath(env, { machinePath: 'C:\\System', userPath: 'C:\\User;C:\\New;C:\\WindowsApps;C:\\New' });
-  assert.equal(env.Path, 'C:\\System;C:\\User;C:\\New;C:\\WindowsApps;C:\\Parent');
+  mergeWindowsPath(env, 'C:\\System;C:\\User;C:\\New;C:\\WindowsApps;C:\\New');
+  assert.equal(env.Path, 'C:\\SYSTEM;"c:/user/";C:\\New;C:\\WindowsApps\\;C:\\Parent');
 });
 
-test('does not rewrite PATH when no user directories are registered or the read failed', () => {
-  [null, { machinePath: 'C:\\System', userPath: '' }].forEach((paths) => {
+test('does not rewrite PATH when the snapshot is already present or the read failed', () => {
+  [null, 'C:\\Parent'].forEach((paths) => {
     const env = { Path: 'C:\\Parent' };
     mergeWindowsPath(env, paths);
     assert.deepEqual(env, { Path: 'C:\\Parent' });
   });
+});
+
+test('preserves custom command priority while appending missing unanchored directories', () => {
+  const env = { Path: 'C:\\Custom;C:\\System' };
+  mergeWindowsPath(env, 'C:\\System;C:\\User');
+  assert.equal(env.Path, 'C:\\Custom;C:\\System;C:\\User');
+});
+
+test('inserts missing segments before their next inherited anchor and deduplicates additions', () => {
+  const env = { Path: 'C:\\Custom;C:\\System;C:\\WindowsApps;C:\\Parent' };
+  mergeWindowsPath(env, 'C:\\Machine;C:\\System;C:\\User;C:\\WindowsApps;C:\\Last;C:\\Last');
+  assert.equal(env.Path, 'C:\\Custom;C:\\Machine;C:\\System;C:\\User;C:\\WindowsApps;C:\\Parent;C:\\Last');
+});
+
+test('uses the first duplicate anchor without deleting inherited entries or literal percent paths', () => {
+  const env = { Path: 'C:\\Custom;C:\\Anchor;C:\\Anchor' };
+  mergeWindowsPath(env, 'C:\\100%tools;C:\\Anchor');
+  assert.equal(env.Path, 'C:\\Custom;C:\\100%tools;C:\\Anchor;C:\\Anchor');
+});
+
+test('sets a missing PATH key without an empty leading directory', () => {
+  const env = { OTHER: 'kept' };
+  mergeWindowsPath(env, 'C:\\System;C:\\User');
+  assert.deepEqual(env, { OTHER: 'kept', Path: 'C:\\System;C:\\User' });
 });
 
 [false, true].forEach((isolated) => {
@@ -233,40 +268,44 @@ test('does not rewrite PATH when no user directories are registered or the read 
     windowsOnly,
     async () => {
       const value = manager({ stdout: '' });
-      const dirs = ['machine', '用户工具', 'WindowsApps', 'parent'].map((name) => path.join(root, name));
+      const dirs = ['machine', '用户工具', 'WindowsApps', 'parent', 'custom'].map((name) => path.join(root, name));
       dirs.forEach((dir) => fs.mkdirSync(dir, { recursive: true }));
-      const [machine, user, alias, parent] = dirs;
+      const [machine, user, alias, parent, custom] = dirs;
       [
         [user, 'user', 'user'],
         [alias, 'user', 'store-alias'],
         [machine, 'system', 'machine'],
         [user, 'system', 'user-shadow'],
         [parent, 'parent', 'parent'],
+        [custom, 'custom', 'custom'],
+        [machine, 'custom', 'machine-shadow'],
       ].forEach(([dir, name, output]) => {
         fs.writeFileSync(path.join(dir, `issue1986-${name}.cmd`), `@echo ${output}\r\n`);
       });
-      process.env.PATH = [machine, alias, parent].join(';');
+      process.env.PATH = [custom, machine, alias, parent].join(';');
+      const inheritedPath = process.env.PATH;
       if (isolated) {
         process.env.CAT_CAFE_DESKTOP_INSTANCE_ROOT = path.join(root, 'isolated');
         process.env.FRONTEND_PORT = '5186';
         process.env.API_SERVER_PORT = '3186';
         process.env.REDIS_PORT = '6386';
       }
-      value.windowsPath = { machinePath: machine, userPath: [user, alias].join(';') };
+      value.windowsPath = [machine, user, alias].join(';');
       const outputFile = path.join(root, `commands-${isolated}.json`);
       const shell = path.join(process.env.SystemRoot, 'System32', 'cmd.exe');
       realChildren = true;
       try {
         value._startProcess('probe', process.execPath, [
           '-e',
-          `const cp=require('node:child_process'); const commands=['user','system','parent'].map(name=>cp.spawnSync(${JSON.stringify(shell)},['/d','/c','issue1986-'+name+'.cmd'],{encoding:'utf8',windowsHide:true}).stdout.trim()); require('node:fs').writeFileSync(${JSON.stringify(outputFile)},JSON.stringify({commands,keys:Object.keys(process.env).filter(k=>k.toUpperCase()==='PATH'),home:process.env.HOME}));`,
+          `const cp=require('node:child_process'); const commands=['user','system','parent','custom'].map(name=>cp.spawnSync(${JSON.stringify(shell)},['/d','/c','issue1986-'+name+'.cmd'],{encoding:'utf8',windowsHide:true}).stdout.trim()); require('node:fs').writeFileSync(${JSON.stringify(outputFile)},JSON.stringify({commands,keys:Object.keys(process.env).filter(k=>k.toUpperCase()==='PATH'),home:process.env.HOME}));`,
         ]);
         const [code] = await once(value.procs.probe, 'exit');
         assert.equal(code, 0);
         const captured = JSON.parse(fs.readFileSync(outputFile, 'utf8'));
-        assert.deepEqual(captured.commands, ['user', 'machine', 'parent']);
+        assert.deepEqual(captured.commands, ['user', 'machine', 'parent', 'custom']);
         assert.equal(captured.keys.length, 1);
         assert.equal(captured.home, isolated ? path.join(root, 'isolated', 'home') : root);
+        assert.equal(process.env.PATH, inheritedPath);
       } finally {
         realChildren = false;
         delete process.env.CAT_CAFE_DESKTOP_INSTANCE_ROOT;
