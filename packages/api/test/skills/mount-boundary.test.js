@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
-import { lstat, mkdir, mkdtemp, readdir, readFile, rm, symlink, writeFile } from 'node:fs/promises';
+import fs, { lstat, mkdir, mkdtemp, readdir, readFile, rm, symlink, writeFile } from 'node:fs/promises';
+import { syncBuiltinESMExports } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join, relative, resolve } from 'node:path';
 import { it } from 'node:test';
@@ -18,6 +19,7 @@ const { readMountRules, validateMountRules, writeMountRules } = await import(
 const { mountRulesRoutes } = await import('../../dist/routes/mount-rules.js');
 const { skillsWriteRoutes } = await import('../../dist/routes/skills-write.js');
 const { syncDrift } = await import('../../dist/skills/drift-resolver.js');
+const { checkProject } = await import('../../dist/skills/drift-detector.js');
 const { mountSkillSymlinks } = await import('../../dist/skills/skill-mount-ops.js');
 const { syncProject } = await import('../../dist/skills/skill-sync-engine.js');
 
@@ -287,6 +289,89 @@ it('drift override preserves an external blocker instead of deleting its backup 
   assert.equal(await readFile(join(blocker, 'keep.txt'), 'utf8'), 'keep');
   assert.ok(report.skipped.includes('probe-skill'));
   assert.equal(report.overridden.includes('probe-skill'), false);
+});
+
+it('drift restores an earlier blocker when a later boundary lookup fails', async (t) => {
+  const { project, source } = await fixture(t);
+  const blocker = join(project, 'first', 'skills', 'probe-skill');
+  await mkdir(blocker, { recursive: true });
+  await writeFile(join(blocker, 'keep.txt'), 'keep');
+  const brokenDir = join(project, 'second', 'skills');
+  const nativeRealpath = fs.realpath;
+  t.mock.method(fs, 'realpath', (path) => {
+    if (path === brokenDir) return Promise.reject(Object.assign(new Error('symlink loop'), { code: 'ELOOP' }));
+    return nativeRealpath(path);
+  });
+  syncBuiltinESMExports();
+  t.after(() => {
+    t.mock.restoreAll();
+    syncBuiltinESMExports();
+  });
+  await assert.rejects(
+    syncDrift(project, source, rulesFor({ alias: 'first', path: 'first/skills' }, { alias: 'second', path: 'second/skills' }), {
+      newSkills: [],
+      conflicts: [
+        { skill: 'probe-skill', kind: 'directory', mountPointId: 'first' },
+        { skill: 'probe-skill', kind: 'directory', mountPointId: 'second' },
+      ],
+      stale: [],
+      issues: [],
+    }),
+    { code: 'ELOOP' },
+  );
+  assert.equal(await readFile(join(blocker, 'keep.txt'), 'utf8'), 'keep');
+});
+
+it('drift reports a missing mount rejected at the project boundary as skipped', async (t) => {
+  const { home, project, source } = await fixture(t);
+  const outside = join(home, 'unlisted-tool');
+  await mkdir(outside);
+  await symlink(outside, join(project, 'bridge'), LINK_TYPE);
+  const rules = rulesFor({ alias: 'blocked', path: 'bridge/skills' });
+  const drift = await checkProject(project, source, rules, {
+    globalConfigSkills: new Set(['probe-skill']),
+    projectConfigSkills: new Set(['probe-skill']),
+    disabledSkills: [],
+    skillMountPaths: { 'probe-skill': ['blocked'] },
+  });
+  assert.deepEqual(drift.conflicts, []);
+  assert.ok(drift.issues.some((item) => item.skill === 'probe-skill' && item.type === 'mount-missing'));
+  const report = await syncDrift(project, source, rules, drift, { skillMountPaths: { 'probe-skill': ['blocked'] } });
+  assert.ok(report.skipped.includes('probe-skill'));
+  assert.deepEqual(report.mounted, []);
+  assert.deepEqual(await readdir(outside), []);
+});
+
+['project', 'default', 'cascade'].forEach((scope) => {
+  it(`PUT ${scope} reports first-party boundary conflicts without plugin metadata`, async (t) => {
+    const { home, project } = await fixture(t);
+    const target = scope === 'cascade' ? join(project, 'child') : project;
+    const outside = join(home, 'unlisted-tool');
+    await Promise.all([target, outside].map((dir) => mkdir(dir, { recursive: true })));
+    await symlink(outside, join(target, 'bridge'), LINK_TYPE);
+    const rules = rulesFor({ alias: 'blocked', path: 'bridge/skills' }, { alias: 'safe', path: '.test-skills' });
+    await writeCapabilitiesConfig(project, {
+      version: 2,
+      capabilities: [{ id: 'debugging', type: 'skill', source: 'cat-cafe', enabled: true, mountPaths: ['blocked', 'safe'] }],
+    });
+    if (scope === 'cascade') {
+      await writeCapabilitiesConfig(target, {
+        version: 2,
+        capabilities: [{ id: 'debugging', type: 'skill', source: 'cat-cafe', enabled: true, mountPaths: ['blocked', 'safe'] }],
+      });
+    }
+    const app = await appFor(t, mountRulesRoutes, { mainProjectRoot: project });
+    const response = await app.inject({
+      method: 'PUT',
+      url: '/api/mount-rules',
+      headers: WRITE_HEADERS,
+      payload: { rules, ...(scope === 'project' ? {} : { scope: 'default' }) },
+    });
+    assert.equal(response.statusCode, 200, response.body);
+    assert.ok(response.json().skipped?.includes('debugging'), response.body);
+    assert.equal((await lstat(join(target, '.test-skills', 'debugging'))).isSymbolicLink(), true);
+    assert.deepEqual(await readdir(outside), []);
+  });
 });
 
 it('PUT accepts project-local explicit tool directories and reads the same configuration back', async (t) => {
