@@ -130,7 +130,13 @@ function attemptFor(
   if (!raw || !Number.isInteger(raw.attemptId)) return null;
   if (raw.sourceFeatureId !== session.address.sourceFeatureId) return null;
   if (raw.createdAt === undefined || raw.createdAt !== session.approval.createdAt) return null;
-  return { attemptId: raw.attemptId, state: raw.state };
+  const state = raw.state;
+  if (state.phase === 'response_received' && session.address.sourceFeatureId !== 'F139') {
+    const response = { ...state };
+    delete response.errorCode;
+    return { attemptId: raw.attemptId, state: response };
+  }
+  return { attemptId: raw.attemptId, state };
 }
 
 export function createApprovalSessions(deps: SessionsDeps): ApprovalSessions {
@@ -348,7 +354,16 @@ export function createApprovalSessions(deps: SessionsDeps): ApprovalSessions {
         event.outcome === 'network-error'
           ? { phase: 'transport_unknown' }
           : event.outcome === 'http-error' && isHttpStatus(event.status)
-            ? { phase: 'response_received', status: event.status, ok: false }
+            ? {
+                phase: 'response_received',
+                status: event.status,
+                ok: false,
+                ...(session.address.sourceFeatureId === 'F139' &&
+                event.status === 409 &&
+                event.errorCode === 'SCHEDULE_TASK_DRIFT'
+                  ? { errorCode: event.errorCode }
+                  : {}),
+              }
             : event.outcome === 'settled' && isHttpStatus(event.status) && event.status >= 200 && event.status < 300
               ? { phase: 'response_received', status: event.status, ok: true }
               : { phase: 'ended' };
@@ -404,6 +419,7 @@ export function createApprovalSessions(deps: SessionsDeps): ApprovalSessions {
     authorize(key, options) {
       const session = sessions.get(key);
       if (!session) return false;
+      if (options?.decision === 'approve' && describeReconcile(session.model.state).approveBlocked) return false;
       if (options?.continuation === true) return mayContinue(session);
       // Locked states are being handled (a write in flight, a result being confirmed, a result the user must re-read).
       if (describeReconcile(session.model.state).actions !== 'allowed') return false;

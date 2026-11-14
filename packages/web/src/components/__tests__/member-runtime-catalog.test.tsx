@@ -9,6 +9,86 @@ import { useRuntimeCatalog } from '../settings/members/useRuntimeCatalog';
 
 vi.mock('@/utils/api-client', () => ({ apiFetch: vi.fn() }));
 
+it.each([
+  { selected: '', effort: 'high', label: 'Kimi K3.1 Pro', selectedEffort: undefined, selectedEffortLabel: undefined },
+  {
+    selected: 'alternate',
+    effort: 'low',
+    label: 'Other provider / Kimi K3.1 Pro',
+    selectedEffort: 'low',
+    selectedEffortLabel: undefined,
+  },
+  {
+    selected: 'alternate',
+    effort: 'Provider default',
+    label: 'Other provider / Kimi K3.1 Pro',
+    selectedEffort: '',
+    selectedEffortLabel: 'Provider default',
+  },
+])('shows known model and matching effort independently of catalog liveness ($effort)', async ({
+  selected,
+  effort,
+  label,
+  selectedEffort,
+  selectedEffortLabel,
+}) => {
+  (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+  vi.mocked(apiFetch).mockImplementation(
+    async (path) =>
+      new Response(
+        JSON.stringify(
+          path === '/api/agent-providers'
+            ? { libraries: [] }
+            : path === '/api/cats/native-runtimes'
+              ? {
+                  runtimes: [
+                    { id: 'kimi', label: 'Kimi', clientId: 'kimi', installed: true, models: ['kimi-code/k3.1-pro'] },
+                  ],
+                }
+              : {
+                  status: 'configured',
+                  message: 'configured_only',
+                  defaultModel: 'kimi-code/k3.1-pro',
+                  defaultEffort: 'high',
+                  selectedModel: selected || 'kimi-code/k3.1-pro',
+                  selectedEffort,
+                  selectedEffortLabel,
+                  models: [
+                    { value: 'kimi-code/k3.1-pro', label: 'Kimi K3.1 Pro' },
+                    { value: 'alternate', label },
+                  ],
+                },
+        ),
+      ),
+  );
+  const host = document.createElement('div');
+  document.body.append(host);
+  const root = createRoot(host);
+  try {
+    await act(async () =>
+      root.render(
+        <MemberRuntimeFields
+          form={{ ...initialState(), clientId: 'kimi', configurationSource: 'native_tool', defaultModel: selected }}
+          accounts={[]}
+          patch={() => {}}
+          t={(zh) => zh}
+          accountHref="/settings?s=accounts"
+          editing={false}
+        />,
+      ),
+    );
+    const summary = host.querySelector('[data-testid=member-model-summary]')?.textContent;
+    expect(summary).toContain(label);
+    expect(summary).toContain(effort);
+    if (selected) expect(summary).not.toContain('high');
+    expect(host.textContent).not.toContain('模型目录暂不可读取');
+  } finally {
+    await act(async () => root.unmount());
+    host.remove();
+    vi.resetAllMocks();
+  }
+});
+
 it.each([false, true])('never borrows native models for an explicit connection (present=%s)', async (present) => {
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   const account: ProfileItem = {
@@ -86,6 +166,8 @@ it.each([
       JSON.stringify({
         status: 'live',
         models: [{ value: 'opaque', label }],
+        selectedModel: 'opaque',
+        selectedEffort: 'high',
         effortOptions: [{ value: 'high', label: 'High' }],
       }),
     );
@@ -95,6 +177,7 @@ it.each([
     await act(async () => root.render(<Catalog model="opaque" />));
     expect(snapshot().catalog.models[0].label).toBe('Model A');
     expect(snapshot().catalog.effortOptions).toBeUndefined();
+    expect(snapshot().catalog.selectedEffort).toBeUndefined();
     expect(snapshot().loading).toBe(true);
     await act(async () => root.render(<Catalog account="other-connection" />));
     expect(snapshot().catalog).toBeNull();

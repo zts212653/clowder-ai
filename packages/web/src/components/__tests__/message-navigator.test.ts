@@ -2,6 +2,7 @@ import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
 import { MessageNavigator, messageNavigatorPreviewText } from '@/components/MessageNavigator';
+import { ShellPresentationContext } from '@/components/shell/shell-presentation';
 import { UNKNOWN_CAT_COLOR } from '@/lib/color-defaults';
 import type { ChatMessage as ChatMessageData } from '@/stores/chatStore';
 
@@ -31,7 +32,7 @@ function makeMsg(id: string, type: 'user' | 'assistant' | 'system', catId?: stri
 const nullRef = { current: null };
 
 function render(messages: ChatMessageData[]): string {
-  return renderToStaticMarkup(
+  return renderClassic(
     React.createElement(MessageNavigator, {
       messages,
       scrollContainerRef: nullRef,
@@ -39,6 +40,11 @@ function render(messages: ChatMessageData[]): string {
       beginUserScroll: () => null,
     }),
   );
+}
+
+// These cases protect the explicitly selected classic interface, independently of the new-visit default.
+function renderClassic(element: React.ReactNode) {
+  return renderToStaticMarkup(React.createElement(ShellPresentationContext.Provider, { value: 'classic' }, element));
 }
 
 describe('MessageNavigator', () => {

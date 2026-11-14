@@ -3,7 +3,10 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, it } from 'node:test';
-import { resolveRuntimeDeploymentRevision } from '../dist/config/runtime-deployment-revision.js';
+import {
+  resolveInitialBuildRevision,
+  resolveRuntimeDeploymentRevision,
+} from '../dist/config/runtime-deployment-revision.js';
 
 const roots = [];
 
@@ -37,5 +40,38 @@ describe('runtime deployment revision', () => {
     assert.equal(resolveRuntimeDeploymentRevision(await makeRuntimeRoot(revision, null)), null);
     assert.equal(resolveRuntimeDeploymentRevision(await makeRuntimeRoot(revision, 'not-a-commit')), null);
     assert.equal(resolveRuntimeDeploymentRevision(await makeRuntimeRoot(revision, 'c'.repeat(40))), null);
+  });
+});
+
+describe('initial process build revision', () => {
+  it('identifies a direct build without deployment coordinates', async () => {
+    const revision = 'd'.repeat(40);
+    const entrypointRoot = await makeRuntimeRoot(revision, revision);
+    assert.equal(resolveInitialBuildRevision({ entrypointRoot }), revision);
+  });
+
+  it('uses the loaded entrypoint, not an inherited runtime root without deployment ownership', async () => {
+    const revision = 'd'.repeat(40);
+    const entrypointRoot = await makeRuntimeRoot(revision, revision);
+    const inheritedRoot = await makeRuntimeRoot('e'.repeat(40), 'e'.repeat(40));
+    assert.equal(resolveInitialBuildRevision({ entrypointRoot, declaredRuntimeRoot: inheritedRoot }), revision);
+  });
+
+  it('keeps managed launches unverified until the owned boot context is available', async () => {
+    const revision = 'e'.repeat(40);
+    const entrypointRoot = await makeRuntimeRoot(revision, revision);
+    for (const declaredRuntimeRoot of [entrypointRoot, await makeRuntimeRoot(revision, revision)]) {
+      assert.equal(
+        resolveInitialBuildRevision({ entrypointRoot, declaredRuntimeRoot, declaredDeploymentId: 'runtime' }),
+        null,
+      );
+    }
+  });
+
+  it('does not bless missing or mismatched direct build stamps', async () => {
+    const revision = 'f'.repeat(40);
+    for (const webRevision of [null, 'a'.repeat(40)]) {
+      assert.equal(resolveInitialBuildRevision({ entrypointRoot: await makeRuntimeRoot(revision, webRevision) }), null);
+    }
   });
 });

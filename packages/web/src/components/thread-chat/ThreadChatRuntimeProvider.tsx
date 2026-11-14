@@ -15,6 +15,7 @@ import { useAgentMessages } from '@/hooks/useAgentMessages';
 import { useChatSocketCallbacks } from '@/hooks/useChatSocketCallbacks';
 import { type SocketCallbacks, useSocket } from '@/hooks/useSocket';
 import { useChatStore } from '@/stores/chatStore';
+import { HubSocketContext } from './hub-socket-context';
 import { createThreadChatHistoryAdmission, type ThreadChatHistoryAdmission } from './thread-chat-history-admission';
 import { createThreadChatRuntimeRegistry, normalizeThreadIds } from './thread-chat-runtime-registry';
 
@@ -74,7 +75,7 @@ export function ThreadChatRuntimeProvider({ children, routeThreadId }: ThreadCha
     onIndexEvent: dispatchIndexEvent,
   });
   const foregroundThreadIds = registryRef.current.snapshot();
-  const { socketConnected } = useSocket(socketCallbacks, activeThreadId, foregroundThreadIds);
+  const { socketConnected, hub } = useSocket(socketCallbacks, activeThreadId, foregroundThreadIds);
 
   const scheduleRoomRevision = useCallback(() => {
     if (roomRevisionQueuedRef.current) return;
@@ -116,7 +117,9 @@ export function ThreadChatRuntimeProvider({ children, routeThreadId }: ThreadCha
 
   return (
     <ThreadChatHistoryAdmissionProvider>
-      <ThreadChatRuntimeContext.Provider value={contextValue}>{children}</ThreadChatRuntimeContext.Provider>
+      <ThreadChatRuntimeContext.Provider value={contextValue}>
+        <HubSocketContext.Provider value={hub}>{children}</HubSocketContext.Provider>
+      </ThreadChatRuntimeContext.Provider>
     </ThreadChatHistoryAdmissionProvider>
   );
 }

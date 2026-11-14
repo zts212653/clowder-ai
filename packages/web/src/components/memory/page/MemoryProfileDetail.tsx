@@ -38,7 +38,16 @@ export function ProfileDetail({
   );
   const [editing, setEditing] = useState(false);
   const [content, setContent] = useState(entry.content);
-  const action = useMemoryOwnerAction(`${path}/actions`, entry.id, () => {
+  const [invalidatedRevision, setInvalidatedRevision] = useState<string>();
+  const readRevision = detail.data?.revision;
+  const awaitingOwner = !!invalidatedRevision && readRevision === invalidatedRevision;
+  useEffect(() => {
+    if (readRevision !== invalidatedRevision) setInvalidatedRevision(undefined);
+  }, [readRevision, invalidatedRevision]);
+  const action = useMemoryOwnerAction(`${path}/actions`, entry.id, (receipt) => {
+    if (detail.data && (receipt.action === 'hard_forget' || receipt.revision !== detail.data.revision)) {
+      setInvalidatedRevision(detail.data.revision);
+    }
     setEditing(false);
     reload();
   });
@@ -64,14 +73,14 @@ export function ProfileDetail({
         </button>
       </div>
       <MemoryReadState
-        loading={detail.loading}
+        loading={detail.loading || awaitingOwner}
         error={detail.error}
         empty={false}
         noun="画像详情"
         retry={detail.retry}
       />
       <MemoryOwnerFeedback action={action} reread={reload} />
-      {data && (
+      {data && !awaitingOwner && (
         <>
           <div className="flex flex-wrap items-center gap-2">
             {identity.members.map((cat) => (

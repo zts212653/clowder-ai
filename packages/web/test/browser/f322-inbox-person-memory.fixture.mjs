@@ -11,12 +11,12 @@ import { cleanupClientKeyspace } from '../../../api/test/helpers/redis-test-help
 import { createPersonMemoryReplacement } from './f322-inbox-person-memory-replacement.fixture.mjs';
 import { createInboxProposalFixture } from './f322-inbox-proposal.fixture.mjs';
 
-/** Real F276 Lua persistence on development6398/db15, unique owned namespace, no production data/provider. */
+/** Real F276 Lua persistence on isolated test Redis or development6398/db15, with an owned namespace. */
 export async function createInboxPersonMemoryFixture(language) {
   return createInboxProposalFixture({
     configureApprovals: async ({ app, owner, messages, threads, socketManager }) => {
       const prefix = `f322-person-native:${randomUUID()}:`;
-      const redis = createRedisClient({ url: 'redis://127.0.0.1:6398/15', keyPrefix: prefix });
+      const redis = createRedisClient({ url: process.env.REDIS_URL ?? 'redis://127.0.0.1:6398/15', keyPrefix: prefix });
       const store = new RedisPersonMemoryStore(redis),
         records = [];
       const close = async () => {

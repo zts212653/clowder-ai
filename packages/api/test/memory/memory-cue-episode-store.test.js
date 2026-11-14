@@ -193,7 +193,7 @@ describe('MemoryCueEpisodeStore', () => {
         .prepare("SELECT * FROM memory_cue_events WHERE event_id LIKE 'v41-%' ORDER BY occurred_at")
         .all()
         .map(({ consumer_cat_id: _consumerCatId, ...row }) => row),
-      rowsBefore,
+      rowsBefore.map((row) => ({ ...row, read_origin: 'push', read_details_json: null })),
     );
     assert.equal(
       db.prepare("SELECT consumer_cat_id FROM memory_cue_events WHERE event_id = 'v41-person-event'").get()
@@ -225,6 +225,8 @@ describe('MemoryCueEpisodeStore', () => {
         'resolver_version',
         'occurred_at',
         'created_at',
+        'read_origin',
+        'read_details_json',
       ],
     );
     assert.deepEqual(

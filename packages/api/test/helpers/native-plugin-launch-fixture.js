@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { validateManifest } from '@clowder-ai/plugin-contract';
 import { PluginRuntimeCarrierRouter } from '../../dist/domains/plugin/carrier/runtime-carrier.js';
+import { snapshotInventoryFixture } from './snapshot-inventory-fixture.js';
 
 export const policy = (overrides = {}) => ({
   mode: 'plugin_native',
@@ -21,8 +22,9 @@ export async function fixture(t, options = {}) {
   const manifest = {
     pluginId: 'dev.clowder.native-launch-fixture',
     version: '1.0.0',
-    contractVersion: '0.1.0',
+    contractVersion: options.factory ? '0.3.2' : '0.1.0',
     name: 'Native launch fixture',
+    ...(options.factory ? { runtime: { transport: 'builtin', entrypoint: 'dist/mcp.js' } } : {}),
     features: [
       {
         id: 'main',
@@ -36,6 +38,7 @@ export async function fixture(t, options = {}) {
         type: 'mcp',
         id: 'native',
         runtime: { transport: 'stdio', entrypoint: 'dist/mcp.js', args: ['--fixture'] },
+        ...(options.factory ? { sharedFactory: { module: 'dist/mcp.js', export: 'create' } } : {}),
       },
     ],
   };
@@ -57,12 +60,12 @@ export async function fixture(t, options = {}) {
   let beforeSnapshot = async () => {};
   let beforeConfigWrite = async () => {};
   const router = new PluginRuntimeCarrierRouter(
-    {
+    snapshotInventoryFixture({
       snapshot: async () => {
         await beforeSnapshot();
         return structuredClone(snapshot);
       },
-    },
+    }),
     {
       projectRoot: root,
       persistCapabilities: options.persistCapabilities ?? true,
@@ -91,6 +94,8 @@ export async function fixture(t, options = {}) {
     stop: async () => {},
     stopAll: async () => {},
     invoke: async () => ({}),
+    ...(options.factory ? { resolveMcpFactory: async () => options.factory } : {}),
+    ...options.carrier,
   });
   t.after(() => router.stopAll('test_cleanup'));
   return {

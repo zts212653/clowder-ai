@@ -31,6 +31,7 @@ import type { InvocationRegistry } from '../domains/cats/services/agents/invocat
 import type { IMessageStore } from '../domains/cats/services/stores/ports/MessageStore.js';
 import type { SocketManager } from '../infrastructure/websocket/index.js';
 import { registerCallbackAuthHook, requireCallbackAuth } from './callback-auth-prehandler.js';
+import { recoverEntityProposal } from './entity-proposal-retry.js';
 import { publishEntityProposal } from './wave2-proposal-publication.js';
 
 const ENTITY_TYPES = ['person', 'cat', 'feature', 'concept', 'external'] as const;
@@ -77,6 +78,8 @@ const proposeEntitySchema = z.object({
     .describe('Required transport retry key — same clientRequestId = idempotent publication recovery'),
 });
 
+export type ProposeEntityInput = z.infer<typeof proposeEntitySchema>;
+
 export interface ProposeEntityDeps {
   registry: InvocationRegistry;
   entityProposalStore: IEntityProposalStore;
@@ -113,35 +116,7 @@ export const callbackProposeEntityRoutes: FastifyPluginAsync<ProposeEntityDeps> 
     if (cached) {
       const existing = await entityProposalStore.get(cached);
       if (existing) {
-        // Staged = commitEnvelope failed on prior attempt; retry publish().
-        if (existing.publication?.state === 'staged') {
-          if (existing.sourceThreadId !== record.threadId) {
-            reply.status(409);
-            return {
-              error: 'Staged proposal recovery must run in its original thread',
-              status: 'origin_thread_required',
-              sourceThreadId: existing.sourceThreadId,
-            };
-          }
-          const originRef = existing.approvalOriginRef ?? deriveEntityOriginRef(record, existing.sourceThreadId);
-          await publishEntityProposal(opts.approvalIngress, entityProposalStore, existing, originRef);
-          return {
-            proposalId: existing.proposalId,
-            status: 'pending',
-            entityId: existing.entityId,
-            recovered: true,
-          };
-        }
-        if (existing.publication?.state === 'anchored') {
-          const originRef = existing.approvalOriginRef ?? deriveEntityOriginRef(record, existing.sourceThreadId);
-          await publishEntityProposal(opts.approvalIngress, entityProposalStore, existing, originRef);
-        }
-        return {
-          proposalId: existing.proposalId,
-          status: existing.status,
-          entityId: existing.entityId,
-          deduped: true,
-        };
+        return recoverEntityProposal(existing, parsed.data, record, opts, reply, true);
       }
     }
 
@@ -151,22 +126,7 @@ export const callbackProposeEntityRoutes: FastifyPluginAsync<ProposeEntityDeps> 
     if (winningId !== proposalId) {
       const existing = await entityProposalStore.get(winningId);
       if (existing) {
-        if (existing.publication?.state !== 'anchored') {
-          reply.status(503);
-          reply.header('retry-after', '1');
-          return {
-            error: 'Proposal publication is still in-flight; retry shortly',
-            status: 'retryable',
-          };
-        }
-        const originRef = existing.approvalOriginRef ?? deriveEntityOriginRef(record, existing.sourceThreadId);
-        await publishEntityProposal(opts.approvalIngress, entityProposalStore, existing, originRef);
-        return {
-          proposalId: existing.proposalId,
-          status: existing.status,
-          entityId: existing.entityId,
-          deduped: true,
-        };
+        return recoverEntityProposal(existing, parsed.data, record, opts, reply, false);
       }
       reply.status(503);
       reply.header('retry-after', '1');

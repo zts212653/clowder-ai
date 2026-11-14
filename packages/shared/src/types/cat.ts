@@ -83,6 +83,8 @@ export interface CatConfig {
   /** Host-owned ACP confirmation mode. Omitted retains automatic approval. */
   readonly executionApproval?: 'auto' | 'ask_user';
   readonly mcpSupport: boolean;
+  /** Explicit process inputs; ordinary ${HOST_KEY} references are resolved before admission. */
+  readonly env?: Readonly<Record<string, string>>;
   readonly cli?: CliConfig;
   readonly agyProfile?: AgyProfileConfig;
   readonly commandArgs?: readonly string[];

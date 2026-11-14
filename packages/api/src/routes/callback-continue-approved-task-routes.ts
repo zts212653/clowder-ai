@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
+import { continuationKeyDigest } from '../domains/ball-custody/approved-task-continuation-diagnostics.js';
 import type { InvocationRegistry } from '../domains/cats/services/agents/invocation/InvocationRegistry.js';
 import type { IProposalStore } from '../domains/cats/services/stores/ports/ProposalStore.js';
 import { requireCallbackAuth } from './callback-auth-prehandler.js';
@@ -33,7 +34,20 @@ export function registerCallbackContinueApprovedTaskRoutes(
       ...parsed.data,
       actor: { userId: record.userId, catId: record.catId, threadId: record.threadId },
     });
-    if (result.outcome === 'rejected') return reply.code(result.reason === 'unavailable' ? 503 : 409).send(result);
+    if (result.outcome === 'rejected') {
+      if (result.diagnostic)
+        request.log.warn(
+          {
+            continuation: result.diagnostic,
+            proposalDigest: continuationKeyDigest(parsed.data.proposalId),
+            taskDigest: continuationKeyDigest(parsed.data.taskId),
+          },
+          'Approved Task continuation unavailable',
+        );
+      return reply
+        .code(result.reason === 'unavailable' ? 503 : 409)
+        .send({ outcome: result.outcome, reason: result.reason });
+    }
     return result;
   });
 }

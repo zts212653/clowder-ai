@@ -1,6 +1,6 @@
-import { join } from 'node:path';
+import { realpathSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
-import { findMonorepoRoot } from '../../../../../../../utils/monorepo-root.js';
+import { secretRuntimeScript } from '@cat-cafe/mcp-server/dist/secret-runtime.js';
 import type { AcpPermissionHandler } from '../AcpClient.js';
 import type { AcpAgentRequest } from '../types.js';
 
@@ -80,7 +80,7 @@ export function createAgyAcpPermissionHandler(input: {
           ...(FILE_OPERATIONS.has(name) ? { TargetFile: oneString(args, FILE_TARGET_KEYS) } : {}),
         };
         const guard = (await import(
-          pathToFileURL(join(findMonorepoRoot(), 'scripts/agy-native-effect-guard.mjs')).href
+          pathToFileURL(realpathSync(secretRuntimeScript('agy-native-effect-guard.mjs'))).href
         )) as {
           decideAgyNativeHookPayload(
             payload: unknown,

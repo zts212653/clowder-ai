@@ -16,7 +16,14 @@ export function projectInvocationSettlement(
   );
   const active = owned.find((child) => child.invocationId === scope.turnInvocationId);
   if (!active || active.status !== 'running' || active.executionKind !== 'routing_guard') return undefined;
-  const nativeOwner = { ...scope, invocationId: scope.turnInvocationId };
+  // Read projection uses current-process events only; disk stop evidence belongs to the reaper.
+  const nativeOwner = {
+    executionId: scope.executionId,
+    invocationId: scope.turnInvocationId,
+    threadId: scope.threadId,
+    userId: scope.userId,
+    catId: scope.catId,
+  };
   if (getCliExecutionExit(nativeOwner)) return undefined;
   const protocol = getCodexChildLifecycle(scope.threadId, scope.catId, scope.executionId, scope.turnInvocationId);
   const protocolActive =

@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { readPullRequestFiles } from '../../../../../api/src/domains/workspace/pull-request-changes-files';
+import { readPullRequestFiles } from '../../../../../api/dist/domains/workspace/pull-request-changes-files';
 import { parseUnifiedDiff } from '../DiffViewer';
 
 it('presents a normal F22 hunk without requiring a synthetic git command header', () => {

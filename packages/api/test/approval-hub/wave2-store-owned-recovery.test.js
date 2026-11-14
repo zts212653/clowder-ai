@@ -1,31 +1,15 @@
+import { tasteSourceStore } from '../helpers/taste-source-fixture.js';
 import '../helpers/setup-cat-registry.js';
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import Fastify from 'fastify';
-import { proposedTaskAction } from './helpers.js';
-
-function succeedingIngress() {
-  return {
-    async publish(draft, store) {
-      const envelope = {
-        canonicalProposalId: draft.canonicalProposalId,
-        sourceFeatureId: draft.producerId,
-        ownerUserId: draft.ownerUserId,
-        requesterCatId: draft.requesterCatId,
-        originRef: draft.originRef,
-        approvalCardRef: { threadId: draft.cardThreadId, messageId: `card-${draft.canonicalProposalId}` },
-        createdAt: draft.createdAt,
-      };
-      await store.commitEnvelope(draft.canonicalProposalId, envelope);
-      return envelope;
-    },
-  };
-}
+import { createTestApprovalIngress, proposedTaskAction } from './helpers.js';
 
 function installCallbackAuth(app, threadId = 'thread-source') {
   app.addHook('preHandler', (request, _reply, done) => {
     request.callbackAuth = {
       invocationId: 'inv-store-owned-recovery',
+      originTriggerMessageId: 'store-owned-source',
       callbackToken: 'tok',
       catId: 'opus',
       threadId,
@@ -67,13 +51,14 @@ describe('Wave 2 store-owned recovery boundaries', () => {
     });
     let publishCount = 0;
     const ingress = {
+      ...createTestApprovalIngress(),
       async publish(draft, publicationStore) {
         publishCount++;
         if (publishCount === 1) {
           markPublishStarted();
           await firstPublishReleased;
         }
-        return succeedingIngress().publish(draft, publicationStore);
+        return createTestApprovalIngress().publish(draft, publicationStore);
       },
     };
 
@@ -154,7 +139,7 @@ describe('Wave 2 store-owned recovery boundaries', () => {
       registry: { isLatest: async () => true },
       entityProposalStore: store,
       socketManager: { emitToUser() {} },
-      approvalIngress: succeedingIngress(),
+      approvalIngress: createTestApprovalIngress(),
     });
     await app.ready();
     const payload = {
@@ -202,8 +187,9 @@ describe('Wave 2 store-owned recovery boundaries', () => {
     await app.register(callbackProposeTasteRoutes, {
       registry: { isLatest: async () => true },
       tasteProposalStore: store,
+      messageStore: tasteSourceStore({ ids: ['store-owned-source'], threadId: 'thread-source' }),
       socketManager: { emitToUser() {} },
-      approvalIngress: succeedingIngress(),
+      approvalIngress: createTestApprovalIngress(),
     });
     await app.ready();
     const payload = {

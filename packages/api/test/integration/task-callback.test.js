@@ -50,7 +50,7 @@ describe('Task Callback Integration', () => {
     otherHome = threadStore.create('user-1', 'Other callback home');
   });
 
-  async function createApp() {
+  async function createApp(overrides = {}) {
     const app = Fastify();
     await app.register(callbacksRoutes, {
       registry,
@@ -58,6 +58,7 @@ describe('Task Callback Integration', () => {
       socketManager,
       taskStore,
       threadStore,
+      ...overrides,
     });
     return app;
   }
@@ -97,6 +98,47 @@ describe('Task Callback Integration', () => {
     const taskEvent = events.find((e) => e.event === 'task_updated');
     assert.ok(taskEvent, 'task_updated event should be broadcast');
     assert.equal(taskEvent.room, `thread:${home.id}`);
+  });
+
+  test('MCP update-task preserves recovery on the response and task_updated broadcast', async () => {
+    const taskRecovery = {
+      project: async (item) => ({
+        ...item,
+        recovery: {
+          v: 1,
+          ownerRef: `task:${item.id}`,
+          incidents: [
+            {
+              source: 'action_successor',
+              lane: 'task',
+              disposition: 'parked',
+              reasonCode: 'task_recovery_read_failed',
+              executionRef: 'action-successor:lease:g1:task',
+            },
+          ],
+        },
+      }),
+      projectMany: async (items) => Promise.all(items.map((item) => taskRecovery.project(item))),
+    };
+    const app = await createApp({ taskRecovery });
+    const auth = await registry.create('user-1', 'opus', home.id);
+    const task = taskStore.create({
+      threadId: home.id,
+      title: 'Recovery survives mutation',
+      why: '',
+      createdBy: 'user',
+      ownerCatId: 'opus',
+    });
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/update-task',
+      headers: { 'x-invocation-id': auth.invocationId, 'x-callback-token': auth.callbackToken },
+      payload: { taskId: task.id, why: 'updated' },
+    });
+    assert.equal(response.statusCode, 200, response.body);
+    assert.equal(response.json().task.recovery.incidents[0].reasonCode, 'task_recovery_read_failed');
+    const event = socketManager.getEvents().findLast((entry) => entry.event === 'task_updated');
+    assert.equal(event.data.recovery.incidents[0].reasonCode, 'task_recovery_read_failed');
   });
 
   test('MCP update-task rejects invalid credentials', async () => {

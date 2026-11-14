@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 /**
  * F098 Phase D: Dual timestamp display for queued messages
  *
@@ -10,6 +11,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { CatData } from '@/hooks/useCatData';
 import type { ChatMessage as ChatMessageType } from '@/stores/chatStore';
+import { SHELL_PRESENTATION_STORAGE_KEY } from '../shell/shell-presentation';
 
 vi.mock('next/navigation', () => ({ useRouter: () => ({ push: vi.fn() }) }));
 
@@ -38,6 +40,7 @@ vi.mock('@/components/SummaryCard', () => ({ SummaryCard: () => null }));
 vi.mock('@/components/rich/RichBlocks', () => ({ RichBlocks: () => null }));
 
 describe('ChatMessage dual timestamp (deliveredAt)', () => {
+  const initialTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
   let container: HTMLDivElement;
   let root: Root;
   let ChatMessage: React.FC<{ message: ChatMessageType; getCatById: (id: string) => CatData | undefined }>;
@@ -55,6 +58,7 @@ describe('ChatMessage dual timestamp (deliveredAt)', () => {
   });
 
   beforeEach(() => {
+    vi.stubEnv('TZ', initialTimeZone);
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
@@ -64,35 +68,97 @@ describe('ChatMessage dual timestamp (deliveredAt)', () => {
     act(() => root.unmount());
     container.remove();
     vi.restoreAllMocks();
+    vi.unstubAllEnvs();
   });
 
-  it('shows dual timestamp when deliveredAt gap > 5s on user message', () => {
-    // 2026-03-12 19:05:00 → 19:12:00 (7 minutes gap)
-    const sendTime = new Date('2026-03-12T19:05:00').getTime();
-    const deliverTime = new Date('2026-03-12T19:12:00').getTime();
-
-    act(() => {
-      root.render(
-        React.createElement(ChatMessage, {
-          getCatById: (() => undefined) as never,
-          message: {
-            id: 'msg-1',
-            type: 'user',
-            from: { kind: 'user', userId: 'test-user' },
-            content: 'Hello from queue',
-            timestamp: sendTime,
-            deliveredAt: deliverTime,
-          },
-        }),
-      );
+  describe('current timezone in both presentations', () => {
+    let previousShell: string | null;
+    beforeEach(() => {
+      previousShell = window.localStorage.getItem(SHELL_PRESENTATION_STORAGE_KEY);
+    });
+    afterEach(() => {
+      if (previousShell === null) window.localStorage.removeItem(SHELL_PRESENTATION_STORAGE_KEY);
+      else window.localStorage.setItem(SHELL_PRESENTATION_STORAGE_KEY, previousShell);
     });
 
-    const text = container.textContent || '';
-    // Should show dual format: "发送 19:05 · 收到 19:12"
-    expect(text).toContain('发送');
-    expect(text).toContain('收到');
-    expect(text).toContain('19:05');
-    expect(text).toContain('19:12');
+    it.each([
+      'classic',
+      'v2',
+    ] as const)('uses the current local timezone after a timezone change in %s', (presentation) => {
+      window.localStorage.setItem(SHELL_PRESENTATION_STORAGE_KEY, presentation);
+      const timestamp = Date.UTC(2026, 10, 3, 20, 0);
+      const deliveredAt = timestamp + 7 * 60_000;
+      const options = { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' } as const;
+      const before = new Date(timestamp).toLocaleString('zh-CN', options);
+      const getCatById = () => undefined;
+      const message: ChatMessageType = {
+        id: 'timezone-message',
+        type: 'user',
+        from: { kind: 'user', userId: 'test-user' },
+        content: 'Before timezone change',
+        timestamp,
+        deliveredAt,
+      };
+      act(() => root.render(React.createElement(ChatMessage, { getCatById, message })));
+      expect(container.textContent).toContain(before);
+
+      vi.stubEnv('TZ', new Date(timestamp).getTimezoneOffset() === 0 ? 'Asia/Shanghai' : 'UTC');
+      const after = new Date(timestamp).toLocaleString('zh-CN', options);
+      expect(after).not.toBe(before);
+      act(() =>
+        root.render(
+          React.createElement(ChatMessage, {
+            getCatById,
+            message: { ...message, content: 'After timezone change' },
+          }),
+        ),
+      );
+      expect(container.textContent).toContain(after);
+      if (presentation === 'classic')
+        expect(container.textContent).toContain(new Date(deliveredAt).toLocaleString('zh-CN', options));
+      else expect(container.querySelector('[data-testid="human-message-time"]')?.textContent).toContain(after);
+    });
+  });
+
+  describe('classic dual timestamp', () => {
+    let previousShell: string | null;
+    beforeEach(() => {
+      previousShell = window.localStorage.getItem(SHELL_PRESENTATION_STORAGE_KEY);
+      window.localStorage.setItem(SHELL_PRESENTATION_STORAGE_KEY, 'classic');
+    });
+    afterEach(() => {
+      if (previousShell === null) window.localStorage.removeItem(SHELL_PRESENTATION_STORAGE_KEY);
+      else window.localStorage.setItem(SHELL_PRESENTATION_STORAGE_KEY, previousShell);
+    });
+
+    it('shows dual timestamp when deliveredAt gap > 5s on user message', () => {
+      // 2026-03-12 19:05:00 → 19:12:00 (7 minutes gap)
+      const sendTime = new Date('2026-03-12T19:05:00').getTime();
+      const deliverTime = new Date('2026-03-12T19:12:00').getTime();
+
+      act(() => {
+        root.render(
+          React.createElement(ChatMessage, {
+            getCatById: (() => undefined) as never,
+            message: {
+              id: 'msg-1',
+              type: 'user',
+              from: { kind: 'user', userId: 'test-user' },
+              content: 'Hello from queue',
+              timestamp: sendTime,
+              deliveredAt: deliverTime,
+            },
+          }),
+        );
+      });
+
+      const text = container.textContent || '';
+      // Should show dual format: "发送 19:05 · 收到 19:12"
+      expect(text).toContain('发送');
+      expect(text).toContain('收到');
+      expect(text).toContain('19:05');
+      expect(text).toContain('19:12');
+    });
   });
 
   it('shows single timestamp when gap <= 5s', () => {

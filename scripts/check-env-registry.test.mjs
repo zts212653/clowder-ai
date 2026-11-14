@@ -57,6 +57,7 @@ const ALLOWLIST = new Map([
   ['https_proxy', 'Standard proxy convention (lowercase variant of HTTPS_PROXY)'],
   ['http_proxy', 'Standard proxy convention (lowercase variant of HTTP_PROXY)'],
   ['all_proxy', 'Standard proxy convention (lowercase variant of ALL_PROXY)'],
+  ['no_proxy', 'Standard proxy convention (lowercase variant of registered NO_PROXY)'],
   ['npm_execpath', 'Package-manager metadata injected by npm/pnpm; not user-configurable'],
   ['npm_config_user_agent', 'Package-manager metadata injected by npm/pnpm; not user-configurable'],
   ['npm_config_cache', 'Inherited npm cache location used for read-only discovery of an installed DSH entry'],

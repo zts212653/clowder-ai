@@ -1,0 +1,60 @@
+{
+  "platform": "win32",
+  "browser": "149.0.7827.55",
+  "cases": [
+    "blue link text / native selected text and visible caret",
+    "adjacent Chinese / native insert / undo / redo",
+    "replace boundary with native newline",
+    "long URL / internal scrollbar / trailing newline / three widths",
+    "Chromium native composition via CDP (not physical Windows IME candidate UI)",
+    "actual component submission/render: https://example.com/中文?q=甲，乙",
+    "actual component submission/render: [说明](https://example.com/中文)",
+    "actual component submission/render: [说明][ref]\n\n[ref]: https://example.com/中文",
+    "actual component submission/render: `https://example.com/中文`",
+    "actual component submission/render: www.example.com",
+    "actual component submission/render: 公式 \\(https://example.com\\) 后",
+    "actual component submission/render: ```\nhttps://example.com\n```",
+    "persisted demo messages / dark theme / classic has no new marker"
+  ],
+  "geometry": [
+    {
+      "width": 687,
+      "scrollbarWidth": 15,
+      "textHeight": 1232,
+      "mirrorHeight": 1232,
+      "scrollTop": 1032,
+      "mirrorScrollTop": 1032,
+      "windowWidth": 1180,
+      "overflow": false
+    },
+    {
+      "width": 663,
+      "scrollbarWidth": 15,
+      "textHeight": 1232,
+      "mirrorHeight": 1232,
+      "scrollTop": 1112,
+      "mirrorScrollTop": 1112,
+      "windowWidth": 760,
+      "overflow": false
+    },
+    {
+      "width": 293,
+      "scrollbarWidth": 15,
+      "textHeight": 3032,
+      "mirrorHeight": 3032,
+      "scrollTop": 2912,
+      "mirrorScrollTop": 2912,
+      "windowWidth": 390,
+      "overflow": false
+    }
+  ],
+  "dark": {
+    "theme": "dark",
+    "color": "rgb(147, 197, 253)"
+  },
+  "unverified": [
+    "physical Windows IME candidate selection",
+    "macOS",
+    "full product API/thread creation and backend persistence"
+  ]
+}

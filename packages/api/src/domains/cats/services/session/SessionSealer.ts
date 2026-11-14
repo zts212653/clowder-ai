@@ -1,3 +1,4 @@
+import { recoveryGuarded } from '../../../../infrastructure/recovery/recovery-deadline.js';
 /**
  * SessionSealer — F24 Phase B+C
  * Manages session lifecycle transitions: active → sealing → sealed.
@@ -12,6 +13,7 @@
 
 import type { CatId, SealResult, SessionRecord } from '@cat-cafe/shared';
 import { createModuleLogger } from '../../../../infrastructure/logger.js';
+import { runDueBatch } from '../../../../infrastructure/recovery/run-due-batch.js';
 import { extractRecentArtifacts } from '../agents/routing/artifact-tracking.js';
 import { AuditEventTypes, getEventAuditLog } from '../orchestration/EventAuditLog.js';
 import type { ISessionChainStore } from '../stores/ports/SessionChainStore.js';
@@ -19,9 +21,8 @@ import type { ISummaryStore } from '../stores/ports/SummaryStore.js';
 import type { IThreadStore } from '../stores/ports/ThreadStore.js';
 import { buildThreadMemory } from './buildThreadMemory.js';
 import { extractDecisionSignals } from './extractDecisionSignals.js';
-import { generateHandoffDigest } from './HandoffDigestGenerator.js';
 import { getHomeSessionPosition } from './session-scope.js';
-import { formatEventsChat, formatEventsHandoff } from './TranscriptFormatter.js';
+import { formatEventsChat } from './TranscriptFormatter.js';
 import type { TranscriptReader } from './TranscriptReader.js';
 import type { ExtractiveDigestV1, TranscriptWriter } from './TranscriptWriter.js';
 
@@ -34,16 +35,6 @@ export type SealReason = 'threshold' | 'manual' | 'error' | (string & {});
 export interface SealFinalizeResult {
   sealed: boolean;
   clean: boolean;
-}
-
-/**
- * F065 Phase C: Handoff digest configuration.
- * Injectable functions for testability and per-thread resolution.
- */
-export interface HandoffConfig {
-  getBootstrapDepth: (catId: string) => 'extractive' | 'generative';
-  resolveProfile: (threadId: string, catId: string) => Promise<{ apiKey: string; baseUrl: string } | null>;
-  fetchFn?: typeof fetch;
 }
 
 export interface SessionSealerOptions {
@@ -86,7 +77,6 @@ export interface ISessionSealer {
  * Uses ISessionChainStore for all state mutations.
  * Optionally uses TranscriptWriter for Phase C transcript flush.
  * F065 Phase B: Optionally updates ThreadMemory on seal.
- * F065 Phase C: Optionally generates handoff digest via Haiku.
  */
 /**
  * Post-seal hook signature.
@@ -110,10 +100,11 @@ export class SessionSealer implements ISessionSealer {
     private readonly transcriptWriter?: TranscriptWriter,
     private readonly threadStore?: IThreadStore,
     private readonly transcriptReader?: TranscriptReader,
-    private readonly handoffConfig?: HandoffConfig,
     private readonly summaryStore?: ISummaryStore,
     private readonly options: SessionSealerOptions = {},
-  ) {}
+  ) {
+    this.store = recoveryGuarded(store);
+  }
 
   /**
    * F231 AC-C3 / KD-10: Register a hook to fire after session seal finalize.
@@ -328,46 +319,63 @@ export class SessionSealer implements ISessionSealer {
   }
 
   async reconcileAllStuck(maxAgeMs = 5 * 60_000): Promise<number> {
-    const sealingIds = await this.store.listSealingSessions();
-    if (sealingIds.length === 0) return 0;
-
     const now = Date.now();
     let count = 0;
-    for (const id of sealingIds) {
-      const s = await this.store.get(id);
-      if (!s || s.status !== 'sealing') continue;
-      if (now - (s.updatedAt ?? s.createdAt) > maxAgeMs) {
-        await this.store.update(s.id, {
-          status: 'sealed',
-          sealReason: 'global_reaper',
-          sealedAt: now,
-          updatedAt: now,
-        });
-        log.info(
-          {
-            sessionId: s.id,
-            catId: s.catId,
-            threadId: s.threadId,
-            reason: 'global_reaper',
-            stuckDurationMs: now - (s.updatedAt ?? s.createdAt),
-          },
-          'session force-sealed by global reaper',
-        );
-        getEventAuditLog()
-          .append({
-            type: AuditEventTypes.SEAL_FINALIZE_FAILED,
-            threadId: s.threadId,
-            data: {
+    const batch = await runDueBatch({
+      limit: 100,
+      budgetMs: 5_000,
+      selectDue: (limit) => this.store.listSealingRecoveryCandidates(limit, now - maxAgeMs),
+      process: async ({ id, expectedAt }) => {
+        const s = await this.store.get(id);
+        if (!s || s.status !== 'sealing' || (s.updatedAt ?? s.createdAt) !== expectedAt) return;
+        if (now - (s.updatedAt ?? s.createdAt) > maxAgeMs) {
+          await this.store.update(s.id, {
+            status: 'sealed',
+            sealReason: 'global_reaper',
+            sealedAt: now,
+            updatedAt: now,
+          });
+          log.info(
+            {
               sessionId: s.id,
               catId: s.catId,
-              phase: 'global_reaper',
+              threadId: s.threadId,
+              reason: 'global_reaper',
               stuckDurationMs: now - (s.updatedAt ?? s.createdAt),
             },
-          })
-          .catch(() => {});
-        count++;
-      }
-    }
+            'session force-sealed by global reaper',
+          );
+          getEventAuditLog()
+            .append({
+              type: AuditEventTypes.SEAL_FINALIZE_FAILED,
+              threadId: s.threadId,
+              data: {
+                sessionId: s.id,
+                catId: s.catId,
+                phase: 'global_reaper',
+                stuckDurationMs: now - (s.updatedAt ?? s.createdAt),
+              },
+            })
+            .catch(() => {});
+          count++;
+        }
+      },
+      onItemError: async ({ id, expectedAt }, error) => {
+        await this.store.recordSealingRecoveryFailure(id, expectedAt);
+        log.warn({ err: error, sessionId: id }, 'session sealing recovery deferred');
+      },
+    });
+    log.info(
+      {
+        loopId: 'session-sealing',
+        elapsedMs: batch.elapsedMs,
+        selected: batch.selected,
+        failed: batch.failed,
+        deferred: batch.deferred,
+        reconciled: count,
+      },
+      'session sealing recovery summary',
+    );
     return count;
   }
 
@@ -443,52 +451,6 @@ export class SessionSealer implements ISessionSealer {
       } catch {
         clean = false;
         // best-effort: thread memory update failure doesn't prevent sealing
-      }
-    }
-
-    // F065 Phase C: Generate handoff digest (best-effort, after ThreadMemory)
-    if (this.handoffConfig && this.transcriptReader) {
-      try {
-        const depth = this.handoffConfig.getBootstrapDepth(record.catId);
-        if (depth === 'generative') {
-          const profile = await this.handoffConfig.resolveProfile(record.threadId, record.catId);
-          if (profile?.apiKey) {
-            const allEvents = await this.transcriptReader.readAllEvents(record.id, record.threadId, record.catId);
-            if (allEvents.length > 0) {
-              const handoffSummaries = formatEventsHandoff(allEvents);
-              const chatMessages = formatEventsChat(allEvents);
-              const extractive = await this.transcriptReader.readDigest(record.id, record.threadId, record.catId);
-
-              const result = await generateHandoffDigest({
-                handoffSummaries,
-                extractiveDigest: extractive ?? {},
-                recentMessages: chatMessages.slice(-8),
-                apiKey: profile.apiKey,
-                baseUrl: profile.baseUrl,
-                ...(this.handoffConfig.fetchFn ? { fetchFn: this.handoffConfig.fetchFn } : {}),
-              });
-
-              if (!result) {
-                clean = false;
-              } else {
-                const sessionDir = this.transcriptReader.getSessionDir(record.threadId, record.catId, record.id);
-                const { TranscriptWriter: TW } = await import('./TranscriptWriter.js');
-                await TW.writeHandoffDigest(
-                  sessionDir,
-                  {
-                    v: result.v,
-                    model: result.model,
-                    generatedAt: result.generatedAt,
-                  },
-                  result.body,
-                );
-              }
-            }
-          }
-        }
-      } catch {
-        clean = false;
-        // best-effort: handoff digest failure doesn't prevent sealing
       }
     }
 

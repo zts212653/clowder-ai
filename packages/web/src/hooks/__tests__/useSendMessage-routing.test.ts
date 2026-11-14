@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 /**
  * P1-1 regression test: split-pane input routing.
  *

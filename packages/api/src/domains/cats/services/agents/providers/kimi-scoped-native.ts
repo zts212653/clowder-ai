@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { ExecutionAccountSnapshot } from '@cat-cafe/shared';
 import { stringify } from 'yaml';
+import { pluginMcpEnvironment } from '../../../../../config/capabilities/plugin-mcp-environment.js';
 import type { AgentServiceOptions } from '../../types.js';
 import { captureScopedMemberLaunch } from '../invocation/scoped-member-launch.js';
 import { normalizeToolExecutionPolicy } from '../invocation/tool-execution-policy.js';
@@ -84,7 +85,12 @@ export async function prepareKimiMemberProfile(input: {
       join(home, 'mcp.json'),
       JSON.stringify({
         mcpServers: {
-          [server.name]: { command: server.command, args: server.args, cwd: server.workingDirectory, env: server.env },
+          [server.name]: {
+            command: server.command,
+            args: server.args,
+            cwd: server.workingDirectory,
+            env: pluginMcpEnvironment({ source: 'plugin', env: { ...server.env } }, input.options.callbackEnv ?? {}),
+          },
         },
       }),
       { mode: 0o600 },

@@ -4,6 +4,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { anchoredApprovalNavigation } from '@/test-support/approval-navigation';
 import { apiFetch } from '@/utils/api-client';
+import { observeApiSessionOwner } from '@/utils/api-session-identity';
 import { ApprovalHostContext, PERMISSIVE_APPROVAL_HOST } from '../ApprovalHost';
 import { ApprovalItemCard } from '../ApprovalItemCard';
 import { writeShellLanguage } from '../shell/shell-language';
@@ -29,6 +30,7 @@ vi.mock('@/hooks/useThreadDisplayInfo', () => ({
 }));
 let root: Root, container: HTMLDivElement;
 beforeEach(() => {
+  observeApiSessionOwner('owner-1');
   vi.stubGlobal('React', React);
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
   writeShellLanguage('en');

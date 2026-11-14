@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { type ApprovalHost, ApprovalHostContext } from '@/components/ApprovalHost';
 import { approvalMemberCopy } from '@/components/rich/approval-member.shell-copy';
 import { proposalCardCopy } from '@/components/rich/proposal-card.shell-copy';
+import { SHELL_PRESENTATION_STORAGE_KEY, writeShellPresentation } from '@/components/shell/shell-presentation';
 import { useSidebarProjectionStore } from '@/stores/sidebarProjectionStore';
 import { apiFetch } from '@/utils/api-client';
 import { observeApiSessionOwner } from '@/utils/api-session-identity';
@@ -92,6 +93,7 @@ const host: ApprovalHost = {
   originalPlaceAction: <button type="button">在原处打开</button>,
 };
 beforeEach(() => {
+  writeShellPresentation('classic');
   observeApiSessionOwner('owner');
   useSidebarProjectionStore.setState({ rows: [], pendingThreadCommands: {}, hasCanonicalSnapshot: false });
   registry.known = true;
@@ -104,6 +106,7 @@ beforeEach(() => {
 afterEach(() => {
   act(() => root.unmount());
   container.remove();
+  window.localStorage.removeItem(SHELL_PRESENTATION_STORAGE_KEY);
   vi.unstubAllGlobals();
 });
 async function render() {
@@ -115,7 +118,7 @@ async function render() {
     ),
   );
 }
-describe('the inbox uses the original new-conversation card capabilities', () => {
+describe('Classic inbox uses the original new-conversation card capabilities', () => {
   it.each([
     'checked',
     'default',

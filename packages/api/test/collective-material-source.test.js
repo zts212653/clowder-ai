@@ -6,6 +6,7 @@ import {
   createInstalledCollectiveMaterialSource,
 } from '../dist/domains/plugin/host-surface/collective-material-source.js';
 import { InstalledPluginOperations } from '../dist/domains/plugin/operations/plugin-operation-routes.js';
+import { snapshotInventoryFixture } from './helpers/snapshot-inventory-fixture.js';
 
 const operation = {
   relayRef: 'relay-test',
@@ -99,7 +100,7 @@ test('actual installed owner operation carries a source read with config/state m
     },
   };
   const operations = new InstalledPluginOperations({
-    inventory: {
+    inventory: snapshotInventoryFixture({
       snapshot: async () => ({
         schemaVersion: 1,
         packages: [packageRecord],
@@ -111,7 +112,7 @@ test('actual installed owner operation carries a source read with config/state m
           },
         ],
       }),
-    },
+    }),
     configuration: {
       readActionInput: async () => ({ configured: 'provider-owned' }),
       readOperationState: async () => states.at(-1),

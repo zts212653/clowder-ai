@@ -8,6 +8,8 @@
 
 /** ConciergeConfig: 前台猫配置（per-user 持久化，用户可见可追溯可恢复） */
 export interface ConciergeConfig {
+  /** A separate household role; the front-desk enabled flag does not turn it off. */
+  watcher?: import('./watcher.js').WatcherConfig;
   /** 是否启用前台猫 (default true) */
   enabled: boolean;
   /** 皮肤 — E1: xianxian-codex 默认；yanyan-codex / ragdoll-v1 / yarn-ball 可选 */

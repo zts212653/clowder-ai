@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { mergeSubtree } from '@/components/workbench/files-tree';
 import { useChatStore } from '@/stores/chatStore';
 import { apiFetch } from '@/utils/api-client';
 import { hasPendingWorkspaceFileLink } from '@/utils/pending-workspace-file-link';
@@ -29,19 +30,6 @@ export interface TreeNode {
   path: string;
   type: 'file' | 'directory';
   children?: TreeNode[];
-}
-
-/** Recursively merge lazy-loaded subtree children into the existing tree */
-function mergeSubtree(nodes: TreeNode[], targetPath: string, children: TreeNode[]): TreeNode[] {
-  return nodes.map((node) => {
-    if (node.path === targetPath && node.type === 'directory') {
-      return { ...node, children };
-    }
-    if (node.children && targetPath.startsWith(`${node.path}/`)) {
-      return { ...node, children: mergeSubtree(node.children, targetPath, children) };
-    }
-    return node;
-  });
 }
 
 export interface FileData {

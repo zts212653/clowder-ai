@@ -135,6 +135,29 @@ describe('boot20 full nickname or avatars', () => {
     resize(0);
     expect(row.dataset.signalSplit).toBe('false');
   });
+  it('commits whole-word visibility before returning from the resize observer', () => {
+    statusAvailable = 100;
+    renderCrowded();
+    const name = host.querySelector<HTMLElement>('[data-testid="thread-cat-name"]')!;
+    const status = host.querySelector<HTMLElement>('[data-testid="thread-status-label-content"]')!;
+    expect(name.style.visibility).toBe('visible');
+    expect(status.style.visibility).toBe('visible');
+    available = 0;
+    statusAvailable = 5;
+    act(() => {
+      for (const callback of callbacks) callback([], {} as ResizeObserver);
+      // ResizeObserver runs before paint; the previous visible words must not survive its callback.
+      expect(name.style.visibility).toBe('hidden');
+      expect(status.style.visibility).toBe('hidden');
+    });
+    available = 80;
+    statusAvailable = 100;
+    act(() => {
+      for (const callback of callbacks) callback([], {} as ResizeObserver);
+      expect(name.style.visibility).toBe('visible');
+      expect(status.style.visibility).toBe('visible');
+    });
+  });
   it.each([
     'zh',
     'en',

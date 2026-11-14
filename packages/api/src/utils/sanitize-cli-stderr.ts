@@ -65,7 +65,8 @@ export function sanitizeCliStderr(input: string, options: CliStderrSanitizerOpti
   // 4. Cookie headers (before URL query — `Set-Cookie: foo=bar; ...` could contain `=` mistaken as KV)
   out = out.replace(SANITIZER_PATTERNS.cookieHeader, (_match, name: string) => `${name}: [COOKIE_REDACTED]`);
 
-  // 5. URL query / fragment strings
+  // 5. URL userinfo / query / fragment strings
+  out = out.replace(SANITIZER_PATTERNS.urlUserinfo, '$1$2[CREDENTIALS_REDACTED]@');
   out = out.replace(SANITIZER_PATTERNS.urlQuery, '$1[QUERY_REDACTED]');
   out = out.replace(SANITIZER_PATTERNS.urlFragment, '$1[FRAGMENT_REDACTED]');
 

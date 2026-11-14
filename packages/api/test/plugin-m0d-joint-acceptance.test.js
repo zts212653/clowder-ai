@@ -30,7 +30,11 @@ function packageRoot(specifier, levels) {
 before(async () => {
   isolatedRoot = await mkdtemp(join(tmpdir(), 'm0d-host-checkout-'));
   isolatedCheckout = join(isolatedRoot, 'checkout');
-  git(['worktree', 'add', '--quiet', '--detach', isolatedCheckout, 'HEAD'], repositoryRoot);
+  git(['worktree', 'add', '--quiet', '--no-checkout', '--detach', isolatedCheckout, 'HEAD'], repositoryRoot);
+  // Provenance binds the complete Git tree. Historical docs attachments are not
+  // execution inputs and need not be materialized in this short-lived fixture.
+  git(['sparse-checkout', 'set', '--no-cone', '/*', '!/docs/'], isolatedCheckout);
+  git(['read-tree', '-mu', 'HEAD'], isolatedCheckout);
   for (const path of [
     'packages/api/scripts/m0d-joint-acceptance.mjs',
     'packages/api/scripts/m0d-acceptance-provenance.mjs',

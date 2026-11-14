@@ -175,7 +175,8 @@ test('message append and enqueue faults retry one exact fenced carrier without f
     now: () => 2_000,
   });
 
-  assert.deepEqual(await sweep.runDispatchesOnce(), { scanned: 1, delivered: 0, pending: 1, failed: 0 });
+  // A real transport exception reports recovery failure while the original carrier stays pending.
+  assert.deepEqual(await sweep.runDispatchesOnce(), { scanned: 1, delivered: 0, pending: 1, failed: 1 });
   assert.equal(current.dispatchDeliveryState, 'pending');
   assert.equal(recordedMessages.length, 0);
 
@@ -291,7 +292,11 @@ test('persisted proposal receipt is revalidated idempotently after lease deliver
     now: () => 2_000,
   });
 
-  await assert.rejects(() => sweep.recoverDispatch(current), /fault: lease delivery mark/);
+  // The owner reports a retryable read/write failure without losing the persisted receipt.
+  assert.deepEqual(await sweep.recoverDispatch(current), {
+    outcome: 'pending',
+    recoveryFailure: 'dispatch_recovery_read_failed',
+  });
   assert.equal(currentProposal.deliveredMessageId, 'msg-1');
   assert.equal(current.dispatchDeliveryState, 'pending');
   assert.ok(current.dispatchDeliveryReservation);

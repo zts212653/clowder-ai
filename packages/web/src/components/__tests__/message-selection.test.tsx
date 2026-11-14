@@ -5,6 +5,7 @@ import { MessageActions } from '@/components/MessageActions';
 import { MessageSelectionToolbar } from '@/components/MessageSelectionToolbar';
 import { isMessageSelectableForBundle, normalizeSelectedMessageIds } from '@/components/message-selection';
 import type { ChatMessage } from '@/stores/chatStore';
+import { SHELL_PRESENTATION_STORAGE_KEY } from '../shell/shell-presentation';
 
 const { apiFetchMock } = vi.hoisted(() => ({ apiFetchMock: vi.fn() }));
 
@@ -132,61 +133,110 @@ describe('MessageActions selection entry', () => {
     container.remove();
   });
 
-  it('keeps message actions out of the resting layout and off the native context menu', () => {
-    const onEnterSelection = vi.fn();
-    React.act(() => {
-      root.render(
-        <MessageActions message={message()} threadId="thread-1" selectionEligible onEnterSelection={onEnterSelection}>
-          <p>message body</p>
-        </MessageActions>,
-      );
+  describe('classic hover action contract', () => {
+    let previousShell: string | null;
+    beforeEach(() => {
+      previousShell = window.localStorage.getItem(SHELL_PRESENTATION_STORAGE_KEY);
+      window.localStorage.setItem(SHELL_PRESENTATION_STORAGE_KEY, 'classic');
+    });
+    afterEach(() => {
+      if (previousShell === null) window.localStorage.removeItem(SHELL_PRESENTATION_STORAGE_KEY);
+      else window.localStorage.setItem(SHELL_PRESENTATION_STORAGE_KEY, previousShell);
     });
 
-    const select = container.querySelector('button[aria-label="多选：转发或导出"]') as HTMLButtonElement | null;
-    expect(select).toBeTruthy();
-    const toolbar = select?.closest('div.absolute');
-    // At rest the toolbar is neither painted nor clickable, and reserves no row of its own.
-    expect(toolbar?.className).toContain('opacity-0');
-    expect(toolbar?.className).toContain('pointer-events-none');
-    expect(toolbar?.className).toContain('group-hover:opacity-100');
-    expect(toolbar?.className).not.toContain('group-focus-within:opacity-100');
-    expect(toolbar?.className).toContain('focus-within:opacity-100');
-    expect(toolbar?.className).toContain('top-0');
-    expect(toolbar?.className).not.toContain('-translate-y-full');
-    // Display state must never create a vertical action row. Pointer layouts keep the complete
-    // dock in a header-owned horizontal slot; narrow/touch layouts use a compact entry there.
-    const hostTokens = classTokens(container.querySelector('[data-context-quote-source="message"]'));
-    expect(hostTokens).not.toContain('pt-8');
-    expect(hostTokens).not.toContain('hover:pt-8');
-    expect(hostTokens).not.toContain('focus-within:pt-8');
-    expect(hostTokens).not.toContain('[@media(hover:none)_and_(pointer:coarse)]:!pt-8');
-    const secondaryActions = toolbar?.querySelector('[data-testid="message-secondary-actions"]');
-    // Selection joins the existing message actions: the whole group is revealed together,
-    // with no second collapse animation and no displaced id/reply/branch/delete controls.
-    expect(secondaryActions?.className).not.toContain('max-w-0');
-    const copyId = toolbar?.querySelector<HTMLButtonElement>('button[aria-label^="复制消息 ID:"]');
-    expect(copyId).not.toBeNull();
-    expect(copyId?.tabIndex).toBe(0);
-    expect(toolbar?.querySelector('button[title="引用回复"]')).not.toBeNull();
-    expect(toolbar?.querySelector('button[title="创建分支"]')).not.toBeNull();
-    expect(toolbar?.querySelector('button[title="删除"]')).not.toBeNull();
-    expect(toolbar?.querySelector('button[aria-label="更多消息操作"]')).toBeNull();
-    expect(
-      Array.from(toolbar?.querySelectorAll('button') ?? []).map(
-        (button) => button.getAttribute('title') ?? button.getAttribute('aria-label'),
-      ),
-    ).toEqual(['message-1', '引用回复', '多选：转发或导出', '创建分支', '删除']);
-    React.act(() => select?.click());
-    expect(onEnterSelection).toHaveBeenCalledWith('message-1');
+    it('keeps message actions out of the resting layout and off the native context menu', () => {
+      const onEnterSelection = vi.fn();
+      React.act(() => {
+        root.render(
+          <MessageActions message={message()} threadId="thread-1" selectionEligible onEnterSelection={onEnterSelection}>
+            <p>message body</p>
+          </MessageActions>,
+        );
+      });
 
-    onEnterSelection.mockClear();
-    const source = container.querySelector('[data-context-quote-source="message"]');
-    expect(source).toBeTruthy();
-    const contextMenu = new MouseEvent('contextmenu', { bubbles: true, cancelable: true });
-    React.act(() => source?.dispatchEvent(contextMenu));
-    expect(contextMenu.defaultPrevented).toBe(false);
-    expect(onEnterSelection).not.toHaveBeenCalled();
-    expect(document.querySelector('[role="menu"]')).toBeNull();
+      const select = container.querySelector('button[aria-label="多选：转发或导出"]') as HTMLButtonElement | null;
+      expect(select).toBeTruthy();
+      const toolbar = select?.closest('div.absolute');
+      // At rest the toolbar is neither painted nor clickable, and reserves no row of its own.
+      expect(toolbar?.className).toContain('opacity-0');
+      expect(toolbar?.className).toContain('pointer-events-none');
+      expect(toolbar?.className).toContain('group-hover:opacity-100');
+      expect(toolbar?.className).not.toContain('group-focus-within:opacity-100');
+      expect(toolbar?.className).toContain('focus-within:opacity-100');
+      expect(toolbar?.className).toContain('top-0');
+      expect(toolbar?.className).not.toContain('-translate-y-full');
+      // Display state must never create a vertical action row. Pointer layouts keep the complete
+      // dock in a header-owned horizontal slot; narrow/touch layouts use a compact entry there.
+      const hostTokens = classTokens(container.querySelector('[data-context-quote-source="message"]'));
+      expect(hostTokens).not.toContain('pt-8');
+      expect(hostTokens).not.toContain('hover:pt-8');
+      expect(hostTokens).not.toContain('focus-within:pt-8');
+      expect(hostTokens).not.toContain('[@media(hover:none)_and_(pointer:coarse)]:!pt-8');
+      const secondaryActions = toolbar?.querySelector('[data-testid="message-secondary-actions"]');
+      // Selection joins the existing message actions: the whole group is revealed together,
+      // with no second collapse animation and no displaced id/reply/branch/delete controls.
+      expect(secondaryActions?.className).not.toContain('max-w-0');
+      const copyId = toolbar?.querySelector<HTMLButtonElement>('button[aria-label^="复制消息 ID:"]');
+      expect(copyId).not.toBeNull();
+      expect(copyId?.tabIndex).toBe(0);
+      expect(toolbar?.querySelector('button[title="引用回复"]')).not.toBeNull();
+      expect(toolbar?.querySelector('button[title="创建分支"]')).not.toBeNull();
+      expect(toolbar?.querySelector('button[title="删除"]')).not.toBeNull();
+      expect(toolbar?.querySelector('button[aria-label="更多消息操作"]')).toBeNull();
+      expect(
+        Array.from(toolbar?.querySelectorAll('button') ?? []).map(
+          (button) => button.getAttribute('title') ?? button.getAttribute('aria-label'),
+        ),
+      ).toEqual(['message-1', '引用回复', '多选：转发或导出', '创建分支', '删除']);
+      React.act(() => select?.click());
+      expect(onEnterSelection).toHaveBeenCalledWith('message-1');
+
+      onEnterSelection.mockClear();
+      const source = container.querySelector('[data-context-quote-source="message"]');
+      expect(source).toBeTruthy();
+      const contextMenu = new MouseEvent('contextmenu', { bubbles: true, cancelable: true });
+      React.act(() => source?.dispatchEvent(contextMenu));
+      expect(contextMenu.defaultPrevented).toBe(false);
+      expect(onEnterSelection).not.toHaveBeenCalled();
+      expect(document.querySelector('[role="menu"]')).toBeNull();
+    });
+
+    it('puts assistant playback and message id in the same hover dock as the remaining actions', () => {
+      React.act(() => {
+        root.render(
+          <MessageActions
+            message={message({ type: 'assistant', catId: 'opus' })}
+            threadId="thread-1"
+            selectionEligible
+            onEnterSelection={vi.fn()}
+          >
+            <p>assistant message body</p>
+          </MessageActions>,
+        );
+      });
+
+      const toolbar = container.querySelector('[data-testid="message-actions-toolbar"]');
+      expect(toolbar?.querySelector('button[title="播放语音"]')).not.toBeNull();
+      expect(toolbar?.querySelector('button[aria-label^="复制消息 ID:"]')).not.toBeNull();
+      expect(toolbar?.querySelector('button[title="引用回复"]')).not.toBeNull();
+      expect(toolbar?.querySelector('button[title="创建分支"]')).not.toBeNull();
+      expect(toolbar?.querySelector('button[title="删除"]')).not.toBeNull();
+    });
+
+    it('keeps one branch action and one delete action in the unified hover dock', () => {
+      React.act(() => {
+        root.render(
+          <MessageActions message={message()} threadId="thread-1" selectionEligible onEnterSelection={vi.fn()}>
+            <p>message body</p>
+          </MessageActions>,
+        );
+      });
+
+      expect(container.querySelectorAll('button[title="创建分支"]')).toHaveLength(1);
+      expect(container.querySelectorAll('button[title="删除"]')).toHaveLength(1);
+      expect(container.querySelector('button[aria-label="更多消息操作"]')).toBeNull();
+      expect(document.querySelector('[role="menu"]')).toBeNull();
+    });
   });
 
   it('keeps the assistant-side toolbar clear of the avatar without resting layout', () => {
@@ -217,28 +267,6 @@ describe('MessageActions selection entry', () => {
     expect(hostTokens).not.toContain('hover:pt-8');
     expect(hostTokens).not.toContain('focus-within:pt-8');
     expect(hostTokens).not.toContain('sm:hover:pt-0');
-  });
-
-  it('puts assistant playback and message id in the same hover dock as the remaining actions', () => {
-    React.act(() => {
-      root.render(
-        <MessageActions
-          message={message({ type: 'assistant', catId: 'opus' })}
-          threadId="thread-1"
-          selectionEligible
-          onEnterSelection={vi.fn()}
-        >
-          <p>assistant message body</p>
-        </MessageActions>,
-      );
-    });
-
-    const toolbar = container.querySelector('[data-testid="message-actions-toolbar"]');
-    expect(toolbar?.querySelector('button[title="播放语音"]')).not.toBeNull();
-    expect(toolbar?.querySelector('button[aria-label^="复制消息 ID:"]')).not.toBeNull();
-    expect(toolbar?.querySelector('button[title="引用回复"]')).not.toBeNull();
-    expect(toolbar?.querySelector('button[title="创建分支"]')).not.toBeNull();
-    expect(toolbar?.querySelector('button[title="删除"]')).not.toBeNull();
   });
 
   it('does not duplicate the message-header trajectory anchor in the floating action dock', () => {
@@ -358,21 +386,6 @@ describe('MessageActions selection entry', () => {
     expect(assistantCheckbox?.className).toContain('left-2');
     expect(assistantCheckbox?.className).not.toContain('right-1');
   });
-
-  it('keeps one branch action and one delete action in the unified hover dock', () => {
-    React.act(() => {
-      root.render(
-        <MessageActions message={message()} threadId="thread-1" selectionEligible onEnterSelection={vi.fn()}>
-          <p>message body</p>
-        </MessageActions>,
-      );
-    });
-
-    expect(container.querySelectorAll('button[title="创建分支"]')).toHaveLength(1);
-    expect(container.querySelectorAll('button[title="删除"]')).toHaveLength(1);
-    expect(container.querySelector('button[aria-label="更多消息操作"]')).toBeNull();
-    expect(document.querySelector('[role="menu"]')).toBeNull();
-  });
 });
 
 describe('MessageSelectionToolbar', () => {
@@ -422,20 +435,32 @@ describe('MessageSelectionToolbar', () => {
     return match;
   }
 
-  it('uses a compact icon dock instead of a row of developer-facing text pills', () => {
-    renderToolbar();
+  describe('classic compact selection dock', () => {
+    let previousShell: string | null;
+    beforeEach(() => {
+      previousShell = window.localStorage.getItem(SHELL_PRESENTATION_STORAGE_KEY);
+      window.localStorage.setItem(SHELL_PRESENTATION_STORAGE_KEY, 'classic');
+    });
+    afterEach(() => {
+      if (previousShell === null) window.localStorage.removeItem(SHELL_PRESENTATION_STORAGE_KEY);
+      else window.localStorage.setItem(SHELL_PRESENTATION_STORAGE_KEY, previousShell);
+    });
 
-    const toolbar = container.querySelector('[data-testid="message-selection-toolbar"]');
-    expect(toolbar?.getAttribute('data-selection-layout')).toBe('action-dock');
-    for (const label of ['文档', '文本', '长图', '转发', '取消']) {
-      const action = button(label);
-      expect(action.className).toContain('flex-col');
-      expect(action.querySelector('svg')).toBeTruthy();
-    }
-    expect(container.textContent).not.toContain('退出多选');
-    expect(container.textContent).not.toContain('Markdown');
-    expect(container.textContent).not.toContain('TXT');
-    expect(container.textContent).not.toContain('PNG');
+    it('uses a compact icon dock instead of a row of developer-facing text pills', () => {
+      renderToolbar();
+
+      const toolbar = container.querySelector('[data-testid="message-selection-toolbar"]');
+      expect(toolbar?.getAttribute('data-selection-layout')).toBe('action-dock');
+      for (const label of ['文档', '文本', '长图', '转发', '取消']) {
+        const action = button(label);
+        expect(action.className).toContain('flex-col');
+        expect(action.querySelector('svg')).toBeTruthy();
+      }
+      expect(container.textContent).not.toContain('退出多选');
+      expect(container.textContent).not.toContain('Markdown');
+      expect(container.textContent).not.toContain('TXT');
+      expect(container.textContent).not.toContain('PNG');
+    });
   });
 
   it('exports Markdown with exact ordered refs and clears only after success', async () => {

@@ -48,7 +48,8 @@ export async function createNativeArtworkFixture(kind, evidence, sourceKind = 'w
   const locator = { worktreeId: root.id, path: relative };
   const workspace =
     sourceKind === 'workspace' ? await owner.workspaceSource.describeMedia({ principal: owner.human, locator }) : null;
-  const mime = workspace?.mime ?? (kind === 'jpg' ? 'image/jpeg' : 'image/webp');
+  const mime =
+    workspace?.mime ?? { jpg: 'image/jpeg', webp: 'image/webp', gif: 'image/gif', svg: 'image/svg+xml' }[kind];
   const url = workspace
     ? `/api/workspace/file/raw?${new URLSearchParams(locator)}`
     : `/uploads/${path.basename(absolute)}`;
@@ -116,7 +117,7 @@ export async function createNativeArtworkFixture(kind, evidence, sourceKind = 'w
     assert.ok(round?.ledgerRevision);
     const name = `native-candidate-${Date.now()}.${kind}`;
     const output = path.join(dataDir, name);
-    if (kind === 'png') await copyFile(path.join(owner.root, 'assets/avatars/codex.png'), output);
+    if (kind === 'png') await copyFile(path.join(owner.root, 'packages/web/public/avatars/codex.png'), output);
     else if (kind === 'mp4')
       execFileSync('ffmpeg', ['-v', 'error', '-i', absolute, '-t', '1', '-an', '-c:v', 'copy', output], {
         timeout: 15_000,

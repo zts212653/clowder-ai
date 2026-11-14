@@ -11,6 +11,8 @@ import {
 } from './durable-managed-gate-supervisor.js';
 import { isManagedJobAdmitted, parseScheduleAdmission } from './managed-job-admission.js';
 import { readManagedJobLedger } from './managed-job-ledger.js';
+import { readImportedLegacyManagedJob } from './managed-job-legacy-read.js';
+import { registerLegacyManagedJobReference } from './managed-job-legacy-reference-store.js';
 import {
   parseCancellation,
   parseIdentity,
@@ -67,6 +69,8 @@ export function writeDurableGateRecord(
 
 export function rawDurableGateRecord(job: DurableManagedGateJob): Record<string, unknown> | null {
   if (job.recordStorage === 'sqlite_v1') return readManagedJobLedger(job);
+  const imported = readImportedLegacyManagedJob(job);
+  if (imported) return imported;
   if (!existsSync(job.recordPath)) return null;
   try {
     const value: unknown = JSON.parse(readFileSync(job.recordPath, 'utf8'));
@@ -77,6 +81,7 @@ export function rawDurableGateRecord(job: DurableManagedGateJob): Record<string,
 }
 
 export function initializeDurableManagedGateJob(job: DurableManagedGateJob, now = Date.now()): void {
+  if (job.recordStorage !== 'sqlite_v1') registerLegacyManagedJobReference(job, now);
   const initialized = writeDurableGateRecord(
     job,
     {

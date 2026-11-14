@@ -183,12 +183,32 @@ vi.mock('@/hooks/useAgentMessages', () => ({
   }),
 }));
 
+export const chatHistoryReadingMocks = {
+  captureReadingRef: vi.fn(() => ({ ref: 'chat-reading:thread-a:origin-ref', persisted: true })),
+  navigateToMessage: vi.fn(async (messageId: string) => ({
+    status: 'settled' as const,
+    threadId: 'thread-a',
+    messageId,
+    position: { anchor: 'offset' as const, top: 40, messageAnchor: { messageId, viewportOffsetPx: 0 } },
+  })),
+  restoreReadingRef: vi.fn(async () => ({
+    status: 'settled' as const,
+    exact: true,
+    position: { anchor: 'bottom' as const, top: 2400 },
+  })),
+  releaseReadingRef: vi.fn(() => true),
+};
+
 vi.mock('@/hooks/useChatHistory', () => ({
   useChatHistory: () => ({
     messages: storeState.messages,
     handleReadingIntent: vi.fn(),
     jumpToLatest: vi.fn(),
-    jumpToMessage: vi.fn(),
+    jumpToMessage: vi.fn(() => true),
+    captureReadingRef: chatHistoryReadingMocks.captureReadingRef,
+    navigateToMessage: chatHistoryReadingMocks.navigateToMessage,
+    restoreReadingRef: chatHistoryReadingMocks.restoreReadingRef,
+    releaseReadingRef: chatHistoryReadingMocks.releaseReadingRef,
     beginUserScroll: vi.fn(),
     handleScroll: vi.fn(),
     scrollContainerRef: { current: null },
@@ -251,7 +271,10 @@ vi.mock('../MessageNavigator', () => ({ MessageNavigator: () => null }));
 vi.mock('../MessageActions', () => ({
   MessageActions: ({ children }: { children: React.ReactNode }) => children,
 }));
-vi.mock('../QueuePanel', () => ({ QueuePanel: () => null }));
+vi.mock('../QueuePanel', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../QueuePanel')>()),
+  QueuePanel: () => null,
+}));
 vi.mock('../ThreadExecutionBar', () => ({ ThreadExecutionBar: () => null }));
 vi.mock('../VoteActiveBar', () => ({ VoteActiveBar: () => null }));
 vi.mock('../ScrollToBottomButton', () => ({ ScrollToBottomButton: () => null }));
@@ -280,6 +303,10 @@ export function resetChatContainerMocks() {
   useSidebarProjectionStore.setState({ rows: [], pendingThreadCommands: {} });
   mockGovRefetch.mockReset();
   mockAgentHookRefresh.mockReset();
+  chatHistoryReadingMocks.captureReadingRef.mockClear();
+  chatHistoryReadingMocks.navigateToMessage.mockClear();
+  chatHistoryReadingMocks.restoreReadingRef.mockClear();
+  chatHistoryReadingMocks.releaseReadingRef.mockClear();
   mockGovernanceStatus = { isEmptyDir: false, isGitRepo: true, gitAvailable: true };
   mockUseAgentHookHealth.mockReset();
   mockUseAgentHookHealth.mockReturnValue({

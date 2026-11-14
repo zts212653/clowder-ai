@@ -122,8 +122,19 @@ describe('isolated Redis projection liveness', { skip: redisIsolationSkipReason(
         });
       const first = await create();
       const unrelated = await create();
+      const active = {
+        v: 1,
+        generation: 1,
+        subjectRef: 'deployment:test:runtime',
+        ownerFence: { kind: 'containing_task', generation: 1 },
+        baseline: { bootSequence: 1, bootId: 'boot', capturedAt: 1 },
+        // biome-ignore lint/suspicious/noThenProperty: F280 continuation contract field.
+        continuation: { when: [{ kind: 'new_ready_boot', services: ['api'] }], then: 'continue' },
+        autoRenew: false,
+        createdAt: 1,
+      };
       // Canonical legacy payload is intentionally installed before index initialization.
-      await redis.hset(`task:${first.id}`, 'deploymentWait', JSON.stringify({ await: { generation: 1 } }));
+      await redis.hset(`task:${first.id}`, 'deploymentWait', JSON.stringify({ await: active }));
       assert.equal((await store.listDeploymentWaitProjectionCandidates()).length, 1);
       let historicalRead = false;
       const original = redis.pipeline.bind(redis);
@@ -138,20 +149,9 @@ describe('isolated Redis projection liveness', { skip: redisIsolationSkipReason(
       };
       assert.equal((await new RedisTaskStore(redis).listDeploymentWaitProjectionCandidates()).length, 1);
       assert.equal(historicalRead, false);
-      await redis.hset(`task:${first.id}`, 'status', 'done');
+      assert.equal((await store.update(first.id, { status: 'done' }))?.status, 'done');
       assert.equal((await store.listDeploymentWaitProjectionCandidates()).length, 0);
       assert.equal(await redis.sismember('tasks:deployment-wait:projection', first.id), 0);
-      const active = {
-        v: 1,
-        generation: 1,
-        subjectRef: 'deployment:test:runtime',
-        ownerFence: { kind: 'containing_task', generation: 1 },
-        baseline: { bootSequence: 1, bootId: 'boot', capturedAt: 1 },
-        // biome-ignore lint/suspicious/noThenProperty: F280 continuation contract field.
-        continuation: { when: [{ kind: 'new_ready_boot', services: ['api'] }], then: 'continue' },
-        autoRenew: false,
-        createdAt: 1,
-      };
       await store.replaceDeploymentWaitIfGeneration(unrelated.id, {
         expectedGeneration: null,
         deploymentWait: { await: active },

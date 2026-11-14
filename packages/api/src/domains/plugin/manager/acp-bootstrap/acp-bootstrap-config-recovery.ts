@@ -72,7 +72,7 @@ function changedBootstrapRoots(
 
 export interface AcpBootstrapConfigRecovery {
   verify(): Promise<void>;
-  assertCurrent(transaction: PluginInventoryTransaction): void;
+  assertCurrent(transaction: PluginInventoryTransaction): Promise<void>;
   release(): Promise<void>;
 }
 
@@ -88,9 +88,9 @@ export async function prepareAcpBootstrapConfigRecovery(input: {
   request: PluginManagerConfigureRequest;
 }): Promise<AcpBootstrapConfigRecovery> {
   if (!allowsAcpBootstrapConfigAuditWarning() || !input.packages) return refused();
-  const captured = await input.inventory.transaction((tx) => {
-    const instance = tx.instances.getCurrent(input.pluginId);
-    const record = instance && tx.packages.get(instance.packageDigest);
+  const captured = await input.inventory.transaction(async (tx) => {
+    const instance = await tx.instances.getCurrent(input.pluginId);
+    const record = instance && (await tx.packages.get(instance.packageDigest));
     if (
       instance?.pluginInstanceId === input.pluginInstanceId &&
       instance.lifecycleRevision !== input.request.expectedRevision
@@ -159,8 +159,8 @@ export async function prepareAcpBootstrapConfigRecovery(input: {
           identities.set(root, current);
         }
       },
-      assertCurrent(tx) {
-        const instance = tx.instances.getCurrent(input.pluginId);
+      async assertCurrent(tx) {
+        const instance = await tx.instances.getCurrent(input.pluginId);
         // The lifecycle service alone supplies any internal suspend revision. The normal
         // configuration fence independently checks it immediately before this assertion.
         if (
@@ -169,7 +169,7 @@ export async function prepareAcpBootstrapConfigRecovery(input: {
           instance.lifecycleState !== 'installed' ||
           instance.packageDigest !== captured.instance.packageDigest ||
           instance.activationState !== captured.instance.activationState ||
-          !isDeepStrictEqual(tx.packages.get(instance.packageDigest), captured.record) ||
+          !isDeepStrictEqual(await tx.packages.get(instance.packageDigest), captured.record) ||
           readPluginConfigText(input.projectRoot, input.pluginId) !== captured.text ||
           !isDeepStrictEqual(readPluginConfig(input.projectRoot, input.pluginId), captured.stored)
         )

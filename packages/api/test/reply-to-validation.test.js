@@ -57,6 +57,7 @@ describe('POST /api/messages — replyTo validation', () => {
         emitToUser: mock.fn(),
       },
       router: {
+        resolveAdmissionTargets: (targets) => targets,
         resolveExplicitTargets: async (targets) => targets,
         previewTargets: async () => ({ targetCats: [], reason: { kind: 'default_cat' } }),
         resolveTargetsAndIntent: mock.fn(async () => ({

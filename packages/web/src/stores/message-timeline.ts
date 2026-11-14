@@ -48,6 +48,13 @@ export function compareMessageTimelineCursor(left: MessageTimelinePoint, right: 
   return (left.id ?? '').localeCompare(right.id ?? '');
 }
 
+/** Whether a message sorts before a `<score>:<id>` history page cursor, by the rule the history API pages with. */
+export function isBeforeHistoryPageCursor(message: MessageTimelinePoint, pageCursor: string): boolean {
+  const split = pageCursor.indexOf(':');
+  const delta = getMessageTimelineCursorTime(message) - Number(pageCursor.slice(0, split));
+  return delta < 0 || (delta === 0 && (message.id ?? '').localeCompare(pageCursor.slice(split + 1)) < 0);
+}
+
 const orderedTimelineCache = new WeakMap<readonly MessageTimelinePoint[], readonly MessageTimelinePoint[]>();
 
 export function isMessageTimelineOrdered(messages: readonly MessageTimelinePoint[]): boolean {

@@ -239,6 +239,7 @@ describe('InMemoryTurnExecutionStore', () => {
       ],
     );
 
+    await store.markResponseSettled('ended', { kind: 'no_response', reason: 'empty_turn', settledAt: 250 });
     await store.clearResponsePending('ended');
     await store.clearResponsePending('never-pending');
     // A replayed terminal transition must not re-enter a turn whose R was already confirmed.

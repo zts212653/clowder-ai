@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 /**
  * Red tests: Cancel invariant for invocation stall scenarios.
  *

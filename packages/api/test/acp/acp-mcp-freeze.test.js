@@ -18,6 +18,9 @@ for (const source of [
   'member-off',
   'member-on',
   'member-implicit-on',
+  'environment-reference',
+  'headers-reference',
+  'member-reference',
 ]) {
   test(`actual ACP session uses admitted ${source} settings after a lease wait`, async (t) => {
     const artifacts = join(process.cwd(), 'artifacts', 'role-agent-refactor', 'acp-mcp-freeze');
@@ -40,8 +43,9 @@ for (const source of [
       accountRef: undefined,
       defaultModel: 'fixture-model',
       mcpSupport: source === 'member-implicit-on' ? undefined : source !== 'member-off',
+      ...(source === 'member-reference' ? { env: { MEMBER_MCP_VALUE: '${ROLE_MCP_FREEZE_REFERENCE}' } } : {}),
     });
-    const keys = ['CAT_CAFE_CONFIG_ROOT', 'CAT_CAFE_PROJECT_ALLOWED_ROOTS'];
+    const keys = ['CAT_CAFE_CONFIG_ROOT', 'CAT_CAFE_PROJECT_ALLOWED_ROOTS', 'ROLE_MCP_FREEZE_REFERENCE'];
     const old = new Map(keys.map((key) => [key, process.env[key]]));
     process.env.CAT_CAFE_CONFIG_ROOT = host;
     process.env.CAT_CAFE_PROJECT_ALLOWED_ROOTS = root;
@@ -56,7 +60,26 @@ for (const source of [
     let viewMarker = 'before';
     const writeConfig = (marker) => {
       viewMarker = marker;
-      const server = { command: process.execPath, args: [`--fixture=${marker}`], env: { FIXTURE_SCOPE: marker } };
+      process.env.ROLE_MCP_FREEZE_REFERENCE = marker;
+      const server =
+        source === 'headers-reference'
+          ? {
+              transport: 'streamableHttp',
+              url: 'http://127.0.0.1:13005/mcp',
+              headers: { Authorization: 'Bearer ${ROLE_MCP_FREEZE_REFERENCE}' },
+            }
+          : {
+              command: process.execPath,
+              args: [`--fixture=${marker}`],
+              env: {
+                FIXTURE_SCOPE:
+                  source === 'environment-reference'
+                    ? '${ROLE_MCP_FREEZE_REFERENCE}'
+                    : source === 'member-reference'
+                      ? '${MEMBER_MCP_VALUE}'
+                      : marker,
+              },
+            };
       writeFileSync(
         join(host, '.cat-cafe', 'capabilities.json'),
         JSON.stringify({
@@ -195,6 +218,10 @@ for (const source of [
     );
     assert.equal(sentServers.length, source === 'member-off' ? 0 : 1);
     if (source === 'member-off') return;
+    if (source === 'headers-reference') {
+      assert.equal(sentServers[0].headers.find(({ name }) => name === 'Authorization')?.value, 'Bearer before');
+      return;
+    }
     assert.deepEqual(sentServers[0].args, ['--fixture=before']);
     assert.equal(sentServers[0].env.find(({ name }) => name === 'FIXTURE_SCOPE')?.value, 'before');
   });

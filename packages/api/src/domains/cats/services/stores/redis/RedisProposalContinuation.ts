@@ -7,6 +7,10 @@ import {
   implementationUsedProposal,
 } from '../../../../ball-custody/approved-task-continuation.js';
 import {
+  ApprovedTaskContinuationUnavailable,
+  readContinuationValue,
+} from '../../../../ball-custody/approved-task-continuation-diagnostics.js';
+import {
   type ApprovedTaskImplementationHistory,
   parseApprovedTaskImplementationHistory,
 } from '../../../../ball-custody/approved-task-implementation-history.js';
@@ -24,22 +28,22 @@ async function readWatchedImplementationHistory(
 ) {
   // Current identity is not history: completed/fresh-revision leases remain in the canonical ALL index.
   const prefix = session.options.keyPrefix ?? '';
-  const indexed = await session.smembers(ActionSuccessorKeys.ALL);
+  const indexed = await readContinuationValue('history_index', ActionSuccessorKeys.ALL, () =>
+    session.smembers(ActionSuccessorKeys.ALL),
+  );
   if (currentDetailKey) indexed.push(currentDetailKey);
   const detailKeys = [...new Set(indexed)].map((key) =>
     prefix && key.startsWith(prefix) ? key.slice(prefix.length) : key,
   );
   if (!detailKeys.length) return [];
   await session.watch(...detailKeys);
-  const records = await session.mget(...detailKeys);
-  try {
-    const target = { tenantScope: input.actor.userId, subjectRef: `subject:task:${input.taskId}` };
-    const leases = records.map((raw) => parseApprovedTaskImplementationHistory(raw, target));
-    // Only a decoded, unrelated identity is skipped. Missing or unreadable history throws below.
-    return leases.filter((lease): lease is ApprovedTaskImplementationHistory => lease !== null);
-  } catch {
-    return null;
-  }
+  const records = await readContinuationValue('implementation_history', ActionSuccessorKeys.ALL, () =>
+    session.mget(...detailKeys),
+  );
+  const target = { tenantScope: input.actor.userId, subjectRef: `subject:task:${input.taskId}` };
+  const leases = records.map((raw, index) => parseApprovedTaskImplementationHistory(raw, target, detailKeys[index]));
+  // Only a decoded, unrelated identity is skipped, including original bytes retained by recovery.
+  return leases.filter((lease): lease is ApprovedTaskImplementationHistory => lease !== null);
 }
 
 /** WATCH covers every authority input. A losing CAS never adds a receipt or dispatches work. */
@@ -48,7 +52,7 @@ export async function continueRedisApprovedTask(
   input: ApprovedTaskContinuationInput,
 ): Promise<ApprovedTaskContinuationResult> {
   const proposalKey = ProposalKeys.detail(input.proposalId);
-  return runWithExclusiveRedisWatchSession(redis, proposalKey, async (session) => {
+  return runWithExclusiveRedisWatchSession<ApprovedTaskContinuationResult>(redis, proposalKey, async (session) => {
     const taskKey = TaskKeys.detail(input.taskId);
     const identityKey = ActionSuccessorKeys.identity({
       tenantScope: input.actor.userId,
@@ -57,33 +61,33 @@ export async function continueRedisApprovedTask(
       successorSlot: 'implementer',
     });
     await session.watch(taskKey, identityKey, ActionSuccessorKeys.ALL);
-    const rawProposal = await session.hgetall(proposalKey);
-    if (!rawProposal.proposalId || !rawProposal.createdThreadId) return { outcome: 'rejected', reason: 'unavailable' };
+    const rawProposal = await readContinuationValue('proposal', proposalKey, () => session.hgetall(proposalKey));
+    if (!rawProposal.proposalId || !rawProposal.createdThreadId)
+      throw new ApprovedTaskContinuationUnavailable('missing', 'proposal', proposalKey);
     const childKey = ThreadKeys.detail(rawProposal.createdThreadId);
     await session.watch(childKey);
     const [rawTask, rawChild, leaseDetailKey] = await Promise.all([
-      session.hgetall(taskKey),
-      session.hgetall(childKey),
-      session.get(identityKey),
+      readContinuationValue('task', taskKey, () => session.hgetall(taskKey)),
+      readContinuationValue('child', childKey, () => session.hgetall(childKey)),
+      readContinuationValue('implementation_history', identityKey, () => session.get(identityKey)),
     ]);
+    if (!rawTask.id) throw new ApprovedTaskContinuationUnavailable('missing', 'task', taskKey);
+    if (!rawChild.id) throw new ApprovedTaskContinuationUnavailable('missing', 'child', childKey);
     const implementations = await readWatchedImplementationHistory(session, leaseDetailKey, input);
-    if (!implementations) return { outcome: 'rejected', reason: 'unavailable' };
     const proposal = hydrateProposal(rawProposal);
     const priorImplementation = implementations.find((lease) => implementationUsedProposal(lease, proposal)) ?? null;
     const decision = decideApprovedTaskContinuation(
       input,
       proposal,
-      rawTask.id ? hydrateTask(rawTask) : null,
-      rawChild.id
-        ? {
-            id: rawChild.id,
-            createdBy: rawChild.createdBy ?? '',
-            parentThreadId: rawChild.parentThreadId,
-            createdFromProposalId: rawChild.createdFromProposalId,
-            projectPath: rawChild.projectPath ?? '',
-            deletedAt: rawChild.deletedAt && rawChild.deletedAt !== '0' ? Number(rawChild.deletedAt) : null,
-          }
-        : null,
+      hydrateTask(rawTask),
+      {
+        id: rawChild.id,
+        createdBy: rawChild.createdBy ?? '',
+        parentThreadId: rawChild.parentThreadId,
+        createdFromProposalId: rawChild.createdFromProposalId,
+        projectPath: rawChild.projectPath ?? '',
+        deletedAt: rawChild.deletedAt && rawChild.deletedAt !== '0' ? Number(rawChild.deletedAt) : null,
+      },
       priorImplementation,
     );
     if (decision.outcome === 'rejected') return decision;
@@ -98,5 +102,8 @@ export async function continueRedisApprovedTask(
     const error = committed.find(([err]) => err)?.[0];
     if (error) throw error;
     return decision;
+  }).catch((error: unknown): ApprovedTaskContinuationResult => {
+    if (!(error instanceof ApprovedTaskContinuationUnavailable)) throw error;
+    return { outcome: 'rejected', reason: 'unavailable', diagnostic: error.diagnostic };
   });
 }

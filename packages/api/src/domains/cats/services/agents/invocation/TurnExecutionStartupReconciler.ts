@@ -75,6 +75,7 @@ export class TurnExecutionStartupReconciler {
     const interrupted = await this.store.interruptRunningBefore(exclusiveCutoffStartedAt, {
       endedAt: reconciledAt,
       terminalReason: 'process_restart',
+      excludedExecutionKinds: ['watcher'],
       ...(protectedIds.size > 0 ? { excludedInvocationIds: [...protectedIds] } : {}),
     });
     const settlement = await this.settleEndedTurnResponses(input);

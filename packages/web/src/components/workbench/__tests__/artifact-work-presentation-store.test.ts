@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import { beforeEach, describe, expect, it } from 'vitest';
 import { type ArtifactWorkReturnHandle, createArtifactWorkPresentationState } from '../artifact-work-presentation';
 import { useF307ExperienceWorkbenchStore } from '../experience-workbench-store';

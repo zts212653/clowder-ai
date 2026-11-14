@@ -979,6 +979,18 @@ describe('MCP Callback Tools', () => {
     assert.ok(capturedUrl.includes('cursor=opaque-next'));
   });
 
+  test('handleListThreads forwards an explicit topic without converting it to a title filter', async () => {
+    const { handleListThreads } = await import('../dist/tools/callback-tools.js');
+    let capturedUrl;
+    globalThis.fetch = async (url) => {
+      capturedUrl = new URL(url);
+      return { ok: true, json: async () => ({ threads: [] }) };
+    };
+    await handleListThreads({ includeWork: true, topic: '机器人 讲解' });
+    assert.equal(capturedUrl.searchParams.get('topic'), '机器人 讲解');
+    assert.equal(capturedUrl.searchParams.has('keyword'), false);
+  });
+
   test('handleCrossPostMessage calls post-message with threadId', async () => {
     const { handleCrossPostMessage } = await import('../dist/tools/callback-tools.js');
 
@@ -1471,36 +1483,6 @@ describe('MCP Callback Tools', () => {
     assert.equal(body.query, 'How to reduce context drift?');
     assert.equal(capturedOptions.headers['x-invocation-id'], 'test-invocation');
     assert.equal(capturedOptions.headers['x-callback-token'], 'test-token');
-  });
-
-  test('handleRetainMemory posts content/tags/metadata to callback retain endpoint', async () => {
-    const { handleCallbackRetainMemory } = await import('../dist/tools/callback-memory-tools.js');
-
-    let capturedUrl, capturedOptions;
-    globalThis.fetch = async (url, options) => {
-      capturedUrl = url;
-      capturedOptions = options;
-      return {
-        ok: true,
-        json: async () => ({ status: 'ok' }),
-      };
-    };
-
-    const result = await handleCallbackRetainMemory({
-      content: 'Prefer explicit invocation lifecycle state transitions.',
-      tags: ['kind:decision', 'author:codex'],
-      metadata: {
-        anchor: 'docs/decisions/008-conversation-mutability-and-invocation-lifecycle.md#L1',
-        confidence: 'high',
-      },
-    });
-
-    assert.equal(result.isError, undefined);
-    assert.ok(capturedUrl.includes('/api/callbacks/retain-memory'));
-    const body = JSON.parse(capturedOptions.body);
-    assert.equal(body.content, 'Prefer explicit invocation lifecycle state transitions.');
-    assert.deepEqual(body.tags, ['kind:decision', 'author:codex']);
-    assert.equal(body.metadata.anchor, 'docs/decisions/008-conversation-mutability-and-invocation-lifecycle.md#L1');
   });
 
   test('retries transient post failure and keeps same clientMessageId', async () => {

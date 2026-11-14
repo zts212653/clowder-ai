@@ -145,7 +145,8 @@ test('Pi rejects competing writers, allows concurrent same-bridge load and relea
     const second = make();
     const params = { sessionId: id, cwd: root, mcpServers: [] };
     const busy = await second.request('session/load', params);
-    assert.match(busy.error.message, /writer|写者|占用/i);
+    assert.match(busy.error.message, /Pi CLI exited/);
+    assert.match(busy.error.data.diagnostics, /writer|写者|占用/i);
     assert.equal((await prompt(first, id, 'still alive')).result.stopReason, 'end_turn');
     await first.bridge.close();
     const results = await Promise.all([second.request('session/load', params), second.request('session/load', params)]);

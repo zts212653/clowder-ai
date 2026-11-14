@@ -29,6 +29,10 @@ export function useFileMenuHover(
       if (event.pointerType === 'touch') return;
       pointerInside = true;
       cancel();
+      if (event.buttons !== 0 || window.getSelection()?.isCollapsed === false) {
+        actions.current.close();
+        return;
+      }
       // Pointer exploration must not open a second menu over a keyboard-owned one.
       if (!menu.current && !document.activeElement?.closest('[role="menu"]')) actions.current.open(owner);
     };

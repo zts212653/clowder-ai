@@ -48,12 +48,33 @@ function validTools(message: ChatMessage, refs: readonly { toolEventId: string; 
   });
 }
 
-function verifiedLayout(
+/**
+ * Every condition except the content digest. Checked before hashing, so a layout that cannot apply
+ * (an incomplete stream's unavailable layout, a changed length, another owner, a missing tool, runs
+ * that do not fit the body) never costs a digest.
+ */
+export function replyLayoutAwaitsDigest(
   message: ChatMessage,
   threadId: string,
-  verifiedHash: string | undefined,
-  processTalk: ProcessTalkMode,
-) {
+  processTalk: ProcessTalkMode = 'whole',
+): boolean {
+  return unverifiedProjection(message, threadId, processTalk) !== undefined;
+}
+
+/** The complete projection, before the body digest is compared. */
+function unverifiedProjection(message: ChatMessage, threadId: string, processTalk: ProcessTalkMode) {
+  const layout = eligibleLayout(message, threadId, processTalk);
+  if (!layout) return undefined;
+  const tools = layout.order.filter((ref) => ref.kind === 'tool');
+  if (!validTools(message, tools)) return undefined;
+  const runs = projectedRuns(message.content, layout.runs);
+  if (!runs) return undefined;
+  const projection = composeOutputOrder(layout, runs);
+  const output = projection ? appendHostTail(message.content, layout, projection) : undefined;
+  return output ? { sha256: layout.contentRevision.sha256, output } : undefined;
+}
+
+function eligibleLayout(message: ChatMessage, threadId: string, processTalk: ProcessTalkMode) {
   const layout = readMessageOutputLayout(message.extra?.outputLayout);
   if (
     message.type !== 'assistant' ||
@@ -77,8 +98,7 @@ function verifiedLayout(
       (message.lifecycle?.kind === 'response'
         ? message.lifecycle.invocationId
         : (message.extra?.stream?.turnInvocationId ?? message.extra?.stream?.invocationId)) ||
-    layout.contentRevision.length !== message.content.length ||
-    layout.contentRevision.sha256 !== verifiedHash
+    layout.contentRevision.length !== message.content.length
   )
     return undefined;
   return layout;
@@ -142,12 +162,7 @@ export function projectReplyOutput(
   verifiedHash?: string,
   processTalk: ProcessTalkMode = 'whole',
 ): ReplyOutputProjection | undefined {
-  const layout = verifiedLayout(message, threadId, verifiedHash, processTalk);
-  if (!layout) return undefined;
-  const tools = layout.order.filter((ref) => ref.kind === 'tool');
-  if (!validTools(message, tools)) return undefined;
-  const runs = projectedRuns(message.content, layout.runs);
-  if (!runs) return undefined;
-  const projection = composeOutputOrder(layout, runs);
-  return projection ? appendHostTail(message.content, layout, projection) : undefined;
+  const candidate = unverifiedProjection(message, threadId, processTalk);
+  if (!candidate || verifiedHash === undefined || candidate.sha256 !== verifiedHash) return undefined;
+  return candidate.output;
 }

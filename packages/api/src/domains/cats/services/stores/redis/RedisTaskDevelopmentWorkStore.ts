@@ -14,6 +14,7 @@ import {
   prepareDevelopmentWorkTransition,
 } from '../ports/DevelopmentWorkTransition.js';
 import { TaskKeys } from '../redis-keys/task-keys.js';
+import { commitTaskTransaction, publishTaskRecovery } from './publish-task-recovery.js';
 import { hydrateTask, serializeTask } from './RedisTaskCodec.js';
 import { runWithExclusiveRedisWatchSession } from './RedisWatchSession.js';
 
@@ -80,7 +81,7 @@ export class RedisTaskDevelopmentWorkStore {
         const tx = session.multi();
         if (open) tx.set(key, open.id);
         else tx.del(key);
-        return (await tx.exec()) ? matches : null;
+        return (await commitTaskTransaction(tx)) ? matches : null;
       });
       if (result) return result;
     }
@@ -125,7 +126,7 @@ export class RedisTaskDevelopmentWorkStore {
     if (subjectOwner && subjectOwner !== task.id) return { result: 'scope_conflict' } as const;
     if (!existing && (await session.exists(key))) return null;
     const tx = session.multi();
-    tx.hset(key, serializeTask(task));
+    publishTaskRecovery(tx, key, serializeTask(task));
     tx.hset(key, receiptField(input), JSON.stringify(prepared.receipt));
     tx.persist(key);
     tx.set(subjectKey, task.id);
@@ -133,7 +134,7 @@ export class RedisTaskDevelopmentWorkStore {
     tx.zadd(TaskKeys.thread(task.threadId), task.createdAt, task.id);
     tx.persist(TaskKeys.thread(task.threadId));
     tx.zadd(TaskKeys.kind(task.kind), task.createdAt, task.id);
-    if (!(await tx.exec())) return null;
+    if (!(await commitTaskTransaction(tx))) return null;
     return { result: prepared.receipt.result, task, receiptRef: prepared.receipt.receiptRef };
   }
 

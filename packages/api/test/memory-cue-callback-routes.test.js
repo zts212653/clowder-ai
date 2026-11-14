@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { afterEach, beforeEach, describe, it } from 'node:test';
+import { RECALL_OPPORTUNITY_CATALOG_VERSION } from '@cat-cafe/shared';
 import Database from 'better-sqlite3';
 import Fastify from 'fastify';
 
@@ -134,7 +135,7 @@ describe('F287 owner-authenticated memory cue callbacks', () => {
     return {
       cueId: 'cue-1',
       opportunityId: 'opportunity-1',
-      catalogVersion: 7,
+      catalogVersion: RECALL_OPPORTUNITY_CATALOG_VERSION,
       resolverFamily: 'person_entity',
       resolverVersion: 1,
       family: 'person_memory',

@@ -1,7 +1,7 @@
 /**
  * Resolves MCP server configs for ACP sessions.
  *
- * Built-in cat-cafe* servers: auto-generated from projectRoot (zero config).
+ * Built-in cat-cafe* servers: resolved from the API's installed MCP package (zero config).
  * External servers (pencil, etc.): read from capabilities.json (#712).
  * User project servers: merged from userProjectRoot/.mcp.json (F145 Phase E).
  *
@@ -30,18 +30,19 @@ import {
   resolveDeclaredCapabilityRoot,
 } from '../../../../../../config/capabilities/invoke-capability-root.js';
 import { readInvocationMcpFile } from '../../../../../../config/capabilities/invoke-mcp-config.js';
+import { resolveManagedMcpEntrypoint } from '../../../../../../config/capabilities/managed-mcp-config.js';
 import {
   isRetiredGithubMcpCapability,
   isRetiredGithubMcpConfigEntry,
 } from '../../../../../../config/capabilities/retired-github-mcp.js';
 import { createModuleLogger } from '../../../../../../infrastructure/logger.js';
+import { SHARED_BROWSER_RESOLVER, sharedBrowserStdioServer } from '../../../../../browser/shared-browser-descriptor.js';
 import type { AcpMcpServer, AcpMcpServerStdio } from './types.js';
 
 const log = createModuleLogger('acp-mcp-resolver');
 
 // ─── Built-in Clowder AI MCP auto-provision ────────────────────────
 
-const MCP_SERVER_DIST = 'packages/mcp-server/dist';
 const WINDOWS_ABSOLUTE_PATH_PATTERN = /^(?:[A-Za-z]:[\\/]|\\\\)/;
 
 function isAbsoluteMcpPath(value: string): boolean {
@@ -91,13 +92,13 @@ function builtinEntrypoint(name: string): string | null {
  * Auto-generate an AcpMcpServerStdio for a built-in cat-cafe server.
  * Returns null for non-builtin names.
  */
-export function resolveBuiltinCatCafeServer(projectRoot: string, name: string): AcpMcpServerStdio | null {
+export function resolveBuiltinCatCafeServer(_projectRoot: string, name: string): AcpMcpServerStdio | null {
   const entry = builtinEntrypoint(name);
   if (!entry) return null;
   return {
     name,
     command: resolveCatCafeNodeCommand(),
-    args: [resolve(resolveBinaryRoot(projectRoot), MCP_SERVER_DIST, entry)],
+    args: [resolveManagedMcpEntrypoint(entry)],
     env: [],
   };
 }
@@ -233,7 +234,7 @@ export function resolveAcpUserProjectExcludeNames(
  * Resolve MCP servers for an ACP session.
  *
  * Three-layer priority (F145 Phase E):
- *   1. Built-in cat-cafe* — auto-generated from projectRoot (highest)
+ *   1. Built-in cat-cafe* — the API's installed MCP package (highest)
  *   2. Whitelist externals — from projectRoot/.cat-cafe/capabilities.json (#712)
  *   3. User project servers — from userProjectRoot/.mcp.json (lowest, additive)
  *
@@ -256,8 +257,7 @@ export async function resolveAcpMcpServers(
     /**
      * Root directory of the capabilities.json that supplied the config.
      * Used to resolve relative paths (workingDir/command/args) in external MCP entries.
-     * Falls back to projectRoot when not provided. Builtins always use projectRoot
-     * (MCP dist is under the runtime root).
+     * Falls back to projectRoot when not provided. Builtins use the API's installed MCP package.
      */
     configSourceRoot?: string;
     accessScope?: 'global' | 'project';
@@ -277,7 +277,11 @@ export async function resolveAcpMcpServers(
   const configSourceRoot = opts?.configSourceRoot ?? resolveDeclaredCapabilityRoot() ?? projectRoot;
   const loadedConfig =
     opts?.capabilitiesConfig !== undefined ? opts.capabilitiesConfig : readCapabilitiesConfigSync(configSourceRoot);
-  const capConfig = loadedConfig && opts?.catId ? invocationPluginMcpConfig(loadedConfig, opts.catId) : loadedConfig;
+  const memberCatId = opts?.catId;
+  const capConfig =
+    loadedConfig && memberCatId
+      ? invocationPluginMcpConfig(loadedConfig, memberCatId, (cap) => isMcpEnabledForCat(cap, memberCatId, opts))
+      : loadedConfig;
   assertMappedCapabilitySource(capConfig !== null, resolveBinaryRoot(projectRoot), configSourceRoot);
   const retiredCapabilityIds = new Set(
     capConfig?.capabilities.filter(isRetiredGithubMcpCapability).map((capability) => capability.id) ?? [],
@@ -314,7 +318,7 @@ export async function resolveAcpMcpServers(
   const servers: AcpMcpServer[] = [];
   const externalNames: string[] = [];
 
-  // Phase 1: resolve builtins from projectRoot (no .mcp.json needed)
+  // Phase 1: resolve builtins from the installed package (no .mcp.json needed)
   for (const name of expanded) {
     if (retiredCapabilityIds.has(name)) {
       log.info({ name }, 'Skipping retired GitHub MCP server (capabilities.json)');
@@ -350,6 +354,13 @@ export async function resolveAcpMcpServers(
           missing.push(name);
           continue;
         }
+        const isEnabled = opts?.catId
+          ? isMcpEnabledForCat(storedCapability, opts.catId, { accessScope: opts.accessScope })
+          : (storedCapability.globalEnabled ?? storedCapability.enabled ?? true);
+        if (!isEnabled) {
+          log.info({ name }, 'Skipping globally disabled external server');
+          continue;
+        }
         const { capability: cap, available } = projectInvocationPluginMcp(storedCapability);
         if (!available) {
           unavailableLocal.add(name);
@@ -359,11 +370,10 @@ export async function resolveAcpMcpServers(
           missing.push(name);
           continue;
         }
-        const isEnabled = opts?.catId
-          ? isMcpEnabledForCat(cap, opts.catId, { accessScope: opts.accessScope })
-          : (cap.globalEnabled ?? cap.enabled ?? true);
-        if (!isEnabled) {
-          log.info({ name }, 'Skipping globally disabled external server');
+        if (cap.mcpServer.resolver === SHARED_BROWSER_RESOLVER) {
+          // F333: pinned stdio; the ACP session env nominates it to the shared HTTP route.
+          const pinned = sharedBrowserStdioServer();
+          servers.push({ name, command: pinned.command, args: pinned.args, env: [] });
           continue;
         }
         if (cap.mcpServer.resolver === 'pencil') {
@@ -459,9 +469,9 @@ export function resolveDisabledServerIds(
   const capConfig = preloadedConfig !== undefined ? preloadedConfig : readCapabilitiesConfigSync(projectRoot);
   if (!capConfig) return new Set();
   const disabled = new Set(
-    invocationPluginMcpConfig(capConfig, catId)
+    invocationPluginMcpConfig(capConfig, catId, (cap) => isMcpEnabledForCat(cap, catId, options))
       .capabilities.filter((cap) => cap.type === 'mcp')
-      .filter((cap) => !projectInvocationPluginMcp(cap).available || !isMcpEnabledForCat(cap, catId, options))
+      .filter((cap) => !isMcpEnabledForCat(cap, catId, options) || !projectInvocationPluginMcp(cap).available)
       .map((cap) => cap.id),
   );
   if (disabled.has('cat-cafe')) {

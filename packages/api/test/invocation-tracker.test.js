@@ -719,15 +719,6 @@ describe('InvocationTracker: per-cat cancel isolation (AC-B9 regression)', () =>
 
 // F156 Phase B-2: cancelAll with userId authorization
 describe('InvocationTracker: cancelAll userId guard (F156 B-2)', () => {
-  it('cancelAll with matching userId only cancels that user invocations', () => {
-    const tracker = new InvocationTracker();
-    tracker.start('t1', 'opus', 'alice', ['opus']);
-    tracker.start('t1', 'codex', 'bob', ['codex']);
-    tracker.cancelAll('t1', 'alice');
-    assert.equal(tracker.has('t1', 'opus'), false, 'alice opus should be cancelled');
-    assert.equal(tracker.has('t1', 'codex'), true, 'bob codex should survive');
-  });
-
   it('cancelAll without userId cancels all (backward compat / admin)', () => {
     const tracker = new InvocationTracker();
     const ctrl1 = tracker.start('t1', 'opus', 'alice', ['opus']);

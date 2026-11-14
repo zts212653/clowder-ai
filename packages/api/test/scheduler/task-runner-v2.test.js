@@ -21,6 +21,44 @@ describe('TaskRunnerV2', () => {
     if (runner) runner.stop();
   });
 
+  it('owns recovery cadence through stop and rejects a duplicate loop without starting another writer', async (t) => {
+    t.mock.timers.enable({ apis: ['setInterval'] });
+    let calls = 0;
+    const observations = [];
+    runner.registerRecoveryLoop({
+      id: 'test-recovery',
+      intervalMs: 30_000,
+      runOnce: async () => {
+        calls++;
+        return { processed: 1 };
+      },
+      observe: (result) => observations.push(result),
+    });
+    assert.throws(
+      () =>
+        runner.registerRecoveryLoop({
+          id: 'test-recovery',
+          intervalMs: 30_000,
+          runOnce: async () => {
+            calls++;
+            return {};
+          },
+          observe() {},
+        }),
+      /already registered/,
+    );
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(calls, 1);
+    t.mock.timers.tick(30_000);
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(calls, 2);
+    assert.equal(observations.length, 2);
+    runner.stop();
+    t.mock.timers.tick(90_000);
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(calls, 2, 'stopped owner cannot continue polling');
+  });
+
   it('registers and lists tasks', () => {
     runner.register({
       id: 'test-task',

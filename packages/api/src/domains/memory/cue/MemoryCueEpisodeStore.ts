@@ -1,5 +1,7 @@
 import { createHash } from 'node:crypto';
 import {
+  type MatterReadDetails,
+  matterReadDetailsSchema,
   memoryCueDrillFamilyForResolver,
   RECALL_OPPORTUNITY_CATALOG_VERSION,
   RECALL_RESOLVER_FAMILIES,
@@ -41,6 +43,8 @@ const eventBaseShape = {
   catalogVersion: z.number().int().positive(),
   resolverVersion: z.number().int().positive(),
   occurredAt: z.number().int().nonnegative().finite(),
+  readOrigin: z.enum(['push', 'explicit_read']).optional(),
+  readDetails: matterReadDetailsSchema.optional(),
 };
 
 const consumptionEventInputSchema = z
@@ -59,10 +63,27 @@ const invalidationEventInputSchema = z
   })
   .strict();
 
-export const memoryCueEventInputSchema = z.discriminatedUnion('axis', [
-  consumptionEventInputSchema,
-  invalidationEventInputSchema,
-]);
+export const memoryCueEventInputSchema = z
+  .discriminatedUnion('axis', [consumptionEventInputSchema, invalidationEventInputSchema])
+  .superRefine((event, ctx) => {
+    if (event.resolverFamily === 'matter') {
+      if (
+        event.readOrigin !== 'explicit_read' ||
+        !event.readDetails ||
+        (event.axis === 'consumption' && !['presented', 'drilled'].includes(event.consumptionOutcome))
+      ) {
+        ctx.addIssue({
+          code: 'custom',
+          message: 'Matter events require explicit read details and cannot claim application',
+        });
+      }
+    } else if (
+      event.readDetails ||
+      (event.readOrigin === 'explicit_read' && !event.opportunityId.startsWith('preparation-'))
+    ) {
+      ctx.addIssue({ code: 'custom', message: 'Read details belong only to the matter family' });
+    }
+  });
 
 export type MemoryCueEventInput = z.infer<typeof memoryCueEventInputSchema>;
 export type MemoryCueConsumptionOutcome = (typeof MEMORY_CUE_CONSUMPTION_OUTCOMES)[number];
@@ -94,6 +115,8 @@ export interface MemoryCueEvent {
   resolverVersion: number;
   occurredAt: number;
   createdAt: string;
+  readOrigin?: 'explicit_read';
+  readDetails?: MatterReadDetails;
 }
 
 interface MemoryCueEventRow {
@@ -115,6 +138,8 @@ interface MemoryCueEventRow {
   resolver_version: number;
   occurred_at: number;
   created_at: string;
+  read_origin: 'push' | 'explicit_read';
+  read_details_json: string | null;
 }
 
 export class MemoryCueEventConflictError extends Error {
@@ -139,6 +164,17 @@ export class MemoryCueInvalidatedError extends Error {
 }
 
 function fromRow(row: MemoryCueEventRow): MemoryCueEvent {
+  const readDetails =
+    row.read_details_json === null ? undefined : matterReadDetailsSchema.parse(JSON.parse(row.read_details_json));
+  if (
+    (row.resolver_family === 'matter') !== Boolean(readDetails) ||
+    (row.resolver_family === 'matter'
+      ? row.read_origin !== 'explicit_read'
+      : row.read_origin !== 'push' &&
+        !(row.read_origin === 'explicit_read' && row.opportunity_id.startsWith('preparation-')))
+  ) {
+    throw new Error('Invalid memory cue read origin');
+  }
   return {
     eventId: row.event_id,
     idempotencyKey: row.idempotency_key,
@@ -160,6 +196,8 @@ function fromRow(row: MemoryCueEventRow): MemoryCueEvent {
     resolverVersion: row.resolver_version,
     occurredAt: row.occurred_at,
     createdAt: row.created_at,
+    ...(row.read_origin === 'explicit_read' ? { readOrigin: 'explicit_read' as const } : {}),
+    ...(readDetails ? { readDetails } : {}),
   };
 }
 
@@ -186,6 +224,8 @@ function expectedEvent(input: MemoryCueEventInput, createdAt: string): MemoryCue
     resolverVersion: input.resolverVersion,
     occurredAt: input.occurredAt,
     createdAt,
+    ...(input.readOrigin === 'explicit_read' ? { readOrigin: 'explicit_read' as const } : {}),
+    ...(input.readDetails ? { readDetails: input.readDetails } : {}),
   };
 }
 
@@ -202,6 +242,92 @@ export class MemoryCueEpisodeStore {
   append(candidate: unknown): MemoryCueEvent {
     const input = memoryCueEventInputSchema.parse(candidate);
     return this.db.transaction((event: MemoryCueEventInput) => this.appendLocked(event)).immediate(input);
+  }
+
+  /** A successful tool read is one atomic fact, with two immutable outcome events. */
+  appendMatterRead(input: {
+    scope: RecallScopeV1;
+    consumerCatId: string;
+    details: MatterReadDetails;
+  }): MemoryCueEvent[] {
+    const details = matterReadDetailsSchema.parse({
+      ...input.details,
+      entries: [...new Map(input.details.entries.map((entry) => [JSON.stringify(entry), entry])).values()].sort(
+        (a, b) => a.entryId.localeCompare(b.entryId) || a.sourceRevision.localeCompare(b.sourceRevision),
+      ),
+    });
+    const hash = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
+    const cueId = `matter-read-${hash([input.scope, input.consumerCatId, details.matterId, details.pageRevision])}`;
+    const readKey = hash([cueId, details.entries]);
+    return this.db
+      .transaction(() =>
+        (['presented', 'drilled'] as const).map((outcome) =>
+          this.appendLocked(
+            memoryCueEventInputSchema.parse({
+              eventId: `${readKey}-${outcome}`,
+              idempotencyKey: `matter-${readKey}-${outcome}`,
+              cueId,
+              opportunityId: `explicit-${cueId}`,
+              scope: input.scope,
+              consumerCatId: input.consumerCatId,
+              resolverFamily: 'matter',
+              sourceAnchor: `matter:${details.matterId}`,
+              sourceRevision: `revision:${details.pageRevision}`,
+              axis: 'consumption',
+              consumptionOutcome: outcome,
+              catalogVersion: RECALL_OPPORTUNITY_CATALOG_VERSION,
+              resolverVersion: 1,
+              occurredAt: Date.now(),
+              readOrigin: 'explicit_read',
+              readDetails: details,
+            }),
+          ),
+        ),
+      )
+      .immediate();
+  }
+
+  /** A handle returned by preparation proves receipt only at this successful owner read. */
+  appendPreparationRead(input: {
+    coordinate: MemoryCueDrillCoordinate;
+    requestId: string;
+    occurredAt: number;
+    details?: MatterReadDetails;
+  }): MemoryCueEvent[] {
+    const c = input.coordinate;
+    if (!c.opportunityId.startsWith('preparation-')) throw new Error('Not a preparation opportunity');
+    return this.db
+      .transaction(() =>
+        (['presented', 'drilled'] as const).map((outcome) => {
+          const key =
+            outcome === 'presented'
+              ? `preparation-presented-${c.cueId}`
+              : memoryCueConsumptionIdempotencyKey(c.cueId, outcome, input.requestId);
+          const existing = this.getByEventId(key);
+          if (existing) return existing;
+          return this.appendLocked(
+            memoryCueEventInputSchema.parse({
+              eventId: key,
+              idempotencyKey: key,
+              cueId: c.cueId,
+              opportunityId: c.opportunityId,
+              scope: c.scope,
+              consumerCatId: c.consumerCatId,
+              resolverFamily: c.resolverFamily,
+              sourceAnchor: c.anchor,
+              sourceRevision: c.revision,
+              catalogVersion: c.catalogVersion,
+              resolverVersion: c.resolverVersion,
+              axis: 'consumption',
+              consumptionOutcome: outcome,
+              occurredAt: input.occurredAt,
+              readOrigin: 'explicit_read',
+              ...(input.details ? { readDetails: input.details } : {}),
+            }),
+          );
+        }),
+      )
+      .immediate();
   }
 
   listByCue(ownerUserId: string, cueId: string): MemoryCueEvent[] {
@@ -354,13 +480,13 @@ export class MemoryCueEpisodeStore {
           owner_user_id, thread_id, invocation_id, consumer_cat_id, resolver_family,
           source_anchor, source_revision, axis, consumption_outcome,
           invalidation_reason, catalog_version, resolver_version,
-          occurred_at, created_at
+          occurred_at, created_at, read_origin, read_details_json
         ) VALUES (
           @eventId, @idempotencyKey, @cueId, @opportunityId,
           @ownerUserId, @threadId, @invocationId, @consumerCatId, @resolverFamily,
           @sourceAnchor, @sourceRevision, @axis, @consumptionOutcome,
           @invalidationReason, @catalogVersion, @resolverVersion,
-          @occurredAt, @createdAt
+          @occurredAt, @createdAt, @readOrigin, @readDetailsJson
         )`,
       )
       .run({
@@ -382,6 +508,8 @@ export class MemoryCueEpisodeStore {
         resolverVersion: input.resolverVersion,
         occurredAt: input.occurredAt,
         createdAt,
+        readOrigin: input.readOrigin ?? 'push',
+        readDetailsJson: input.readDetails ? JSON.stringify(input.readDetails) : null,
       });
 
     const actual = this.findByIdempotencyKey(input.idempotencyKey);

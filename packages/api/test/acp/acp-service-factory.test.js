@@ -10,6 +10,71 @@ const { createAcpServiceForConfig } = await import(
   '../../dist/domains/cats/services/agents/providers/acp/AcpServiceFactory.js'
 );
 
+describe('ACP pool capacity defaults', () => {
+  for (const { clientId, maximum, expected } of [
+    { clientId: 'acp', expected: 20 },
+    { clientId: 'pi', expected: 20 },
+    { clientId: 'opencode', expected: 20 },
+    { clientId: 'google', expected: 3 },
+    { clientId: 'acp', maximum: 10, expected: 10 },
+    { clientId: 'google', maximum: 8, expected: 8 },
+  ]) {
+    it(`admits ${expected} processes for ${clientId} with ${maximum ?? 'default'} capacity`, async () => {
+      const projectRoot = mkdtempSync(join(tmpdir(), 'acp-pool-capacity-'));
+      const profileId = `${clientId}-pool-capacity`;
+      const poolRegistry = new Map();
+      const leases = [];
+      try {
+        const service = await createAcpServiceForConfig({
+          projectRoot,
+          bootstrapRoot: join(projectRoot, 'bootstrap'),
+          profileId,
+          effectiveModel: 'gemini-test-model',
+          config: {
+            id: profileId,
+            name: 'Pool capacity',
+            displayName: 'Pool capacity',
+            clientId,
+            defaultModel: 'gemini-test-model',
+            color: { primary: '#111827', secondary: '#eeeeee' },
+            avatar: '/avatars/default.png',
+            mentionPatterns: [`@${profileId}`],
+            roleDescription: 'Isolated pool capacity test',
+            mcpSupport: false,
+          },
+          acpConfig: {
+            command: 'mock-acp',
+            startupArgs: ['--acp'],
+            ...(maximum === undefined ? {} : { pool: { maxLiveProcesses: maximum } }),
+          },
+          poolRegistry,
+          log: { info() {}, warn() {} },
+        });
+        assert.ok(service);
+        const pool = poolRegistry.get(profileId);
+        pool.clientFactory = () => ({
+          isAlive: true,
+          isCwdIntact: true,
+          async initialize() {},
+          async close() {},
+        });
+        const key = { projectPath: projectRoot, providerProfile: profileId };
+        await Promise.all(
+          Array.from({ length: expected }, async () => {
+            leases.push(await pool.acquire(key));
+          }),
+        );
+        assert.equal(pool.getMetrics().liveProcessCount, expected);
+        await assert.rejects(pool.acquire(key), /Pool at capacity/);
+      } finally {
+        await Promise.all(leases.map((lease) => lease.release()));
+        await Promise.all([...poolRegistry.values()].map((pool) => pool.closeAll()));
+        rmSync(projectRoot, { recursive: true, force: true });
+      }
+    });
+  }
+});
+
 describe('AcpServiceFactory', () => {
   it('uses one effective model for ACP bootstrap, context policy, and the concrete service binding', async () => {
     const projectRoot = mkdtempSync(join(tmpdir(), 'acp-effective-model-'));

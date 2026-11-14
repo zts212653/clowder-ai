@@ -37,10 +37,10 @@ export function getCatModel(catName: string, configuredFallback?: string): strin
     return entry.config.defaultModel;
   }
 
-  // Read models may project a resolved runtime-catalog member before that
-  // member has been reconciled into the process registry. Keep the same env
-  // precedence while accepting the caller's concrete catalog value.
-  if (configuredFallback) return configuredFallback;
+  // clowder-ai#1796: test `undefined`, not truthiness. An empty `defaultModel` is
+  // legal (CLI-decided), so a caller that passes '' has supplied a value; only an
+  // omitted argument has none. Truthiness threw here and 500'd GET /api/cats.
+  if (configuredFallback !== undefined) return configuredFallback;
 
   throw new Error(`No model configured for cat "${catName}"`);
 }

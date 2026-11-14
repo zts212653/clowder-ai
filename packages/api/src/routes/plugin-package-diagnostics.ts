@@ -28,5 +28,6 @@ export function warnPluginPackageFailure(
     error instanceof PluginManagerUploadError
       ? error.code
       : 'PLUGIN_MANAGER_FAILED';
-  request.log.warn({ reqId: request.id, ...context, code }, 'Plugin package operation failed');
+  const diagnostic = error instanceof PluginManagerServiceError ? error.diagnostic : undefined;
+  request.log.warn({ reqId: request.id, ...context, code, ...diagnostic }, 'Plugin package operation failed');
 }

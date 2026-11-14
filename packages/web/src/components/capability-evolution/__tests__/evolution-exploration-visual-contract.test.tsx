@@ -30,6 +30,7 @@ describe('accepted exploration reading experience', () => {
   beforeEach(() => {
     (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
     localStorage.clear();
+    localStorage.setItem('cat-cafe:shell-presentation', 'classic');
     useEvolutionReading.setState({ programs: {} });
     host = document.createElement('div');
     document.body.append(host);
@@ -50,6 +51,7 @@ describe('accepted exploration reading experience', () => {
   afterEach(() => {
     act(() => root.unmount());
     host.remove();
+    localStorage.removeItem('cat-cafe:shell-presentation');
     vi.restoreAllMocks();
     delete (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT;
   });

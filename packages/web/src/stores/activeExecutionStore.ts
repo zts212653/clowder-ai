@@ -1,4 +1,8 @@
-import type { ActiveExecutionListResponse, ActiveExecutionProjection } from '@cat-cafe/shared';
+import type {
+  ActiveExecutionListResponse,
+  ActiveExecutionProjection,
+  ActiveHoldWaitProjection,
+} from '@cat-cafe/shared';
 import { create } from 'zustand';
 
 export function activeExecutionKey(
@@ -17,6 +21,8 @@ interface ActiveExecutionState {
   scope: 'project' | 'all';
   unavailableProjectPaths: readonly string[];
   executionsByKey: Record<string, ActiveExecutionProjection>;
+  /** Held balls: waiting, never running; kept apart so nothing treats them as stoppable work. */
+  waits: readonly ActiveHoldWaitProjection[];
   cancelPendingByKey: Record<string, true>;
   hydration: 'idle' | 'loading' | 'ready' | 'error';
   hydrationError: string | null;
@@ -27,6 +33,8 @@ interface ActiveExecutionState {
   beginCancellation(execution: ActiveExecutionProjection): boolean;
   settleCancellation(execution: ActiveExecutionProjection): void;
   releaseCancellation(execution: ActiveExecutionProjection): void;
+  /** A confirmed hold cancel removes its row before the next read. */
+  settleWaitCancellation(waitId: string): void;
   reset(): void;
 }
 
@@ -36,6 +44,7 @@ const INITIAL_STATE = {
   scope: 'project' as const,
   unavailableProjectPaths: [] as readonly string[],
   executionsByKey: {},
+  waits: [] as readonly ActiveHoldWaitProjection[],
   cancelPendingByKey: {},
   hydration: 'idle' as const,
   hydrationError: null,
@@ -54,7 +63,7 @@ export const useActiveExecutionStore = create<ActiveExecutionState>((set, get) =
       requestVersion,
       hydration: projectChanged || current.hydration === 'idle' ? 'loading' : current.hydration,
       ...(projectChanged || (projectPath === null && current.scope !== 'all')
-        ? { executionsByKey: {}, cancelPendingByKey: {}, hydrationError: null }
+        ? { executionsByKey: {}, waits: [], cancelPendingByKey: {}, hydrationError: null }
         : {}),
     });
     return requestVersion;
@@ -70,6 +79,7 @@ export const useActiveExecutionStore = create<ActiveExecutionState>((set, get) =
       scope: response.scope ?? 'project',
       unavailableProjectPaths: response.scope === 'all' ? (response.unavailableProjectPaths ?? []) : [],
       executionsByKey,
+      waits: response.waits ?? [],
       cancelPendingByKey: Object.fromEntries(
         Object.keys(current.cancelPendingByKey)
           .filter((key) => executionsByKey[key] !== undefined)
@@ -114,6 +124,15 @@ export const useActiveExecutionStore = create<ActiveExecutionState>((set, get) =
       cancelPendingByKey: Object.fromEntries(
         Object.entries(current.cancelPendingByKey).filter(([entryKey]) => entryKey !== key),
       ),
+    });
+  },
+  settleWaitCancellation(waitId) {
+    const current = get();
+    if (!current.waits.some((wait) => wait.waitId === waitId)) return;
+    set({
+      // A response started before this confirmed cancellation cannot restore its row.
+      requestVersion: current.requestVersion + 1,
+      waits: current.waits.filter((wait) => wait.waitId !== waitId),
     });
   },
   reset() {

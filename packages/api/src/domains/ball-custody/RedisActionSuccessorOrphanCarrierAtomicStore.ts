@@ -10,9 +10,11 @@ import type {
   ActionSuccessorOrphanCarrierAtomicStore,
 } from './ActionSuccessorOrphanCarrierAtomicStore.js';
 import { ActionSuccessorKeys } from './action-successor-keys.js';
+import { ACTION_SUCCESSOR_RECOVERY_LUA } from './action-successor-recovery-lua.js';
 import { parseActionSuccessorLease } from './action-successor-redis-codecs.js';
 
-const COMMIT_ORPHAN_TASK_CARRIER_LUA = `
+const COMMIT_ORPHAN_TASK_CARRIER_LUA = `${ACTION_SUCCESSOR_RECOVERY_LUA}
+assertRecoveryIndexTypes({KEYS[12],KEYS[13],KEYS[14]})
 local function keyType(key)
   local value = redis.call('TYPE', key)
   if type(value) == 'table' then return value.ok end
@@ -206,14 +208,14 @@ if tonumber(nextLease.generation) ~= tonumber(current.generation) + 1 or
 end
 
 -- All owner reads and execution/Queue absence checks passed. These writes are the one linearization point.
-redis.call('SET', KEYS[1], ARGV[4])
+local encoded = saveActionRecoveryOwner(KEYS[1],nextLease,current,{KEYS[12],KEYS[13],KEYS[14]},true,ARGV[4])
 -- Make the uniquely resolved pre-cutover Message replayable through the current durable identity.
 if sourceIdentityKind == 'legacy_callback' then redis.call('SET', KEYS[11], ARGV[10]) end
 redis.call('HSET', KEYS[5], 'lifecycle', ARGV[17])
 redis.call('HSET', KEYS[6], ARGV[19], ARGV[18])
 redis.call('RPUSH', KEYS[7], ARGV[19])
 redis.call('HSET', KEYS[8], ARGV[10], cjson.encode({ARGV[19]}))
-return {1, ARGV[4]}
+return {1, encoded}
 `;
 
 const REJECTION_BY_CODE: Record<
@@ -243,7 +245,7 @@ export class RedisActionSuccessorOrphanCarrierAtomicStore implements ActionSucce
     if (!sourceFrom || !task.entrustedWork) return { outcome: 'rejected', reason: 'store_corrupt' };
     const raw = (await this.redis.eval(
       COMMIT_ORPHAN_TASK_CARRIER_LUA,
-      11,
+      14,
       ...orphanRecoveryRedisKeys(input),
       ...orphanRecoveryRedisArgs(input, sourceFrom),
     )) as unknown;
@@ -265,6 +267,7 @@ function orphanRecoveryRedisKeys(input: ActionSuccessorOrphanCarrierAtomicCommit
     InvocationKeys.idempotency(source.threadId, source.userId, input.canonicalInvocationKey),
     InvocationKeys.idempotency(source.threadId, source.userId, input.legacyInvocationKey),
     MessageKeys.idempotency(source.userId, source.threadId, input.sourceIdentity.idempotencyKey),
+    ...ActionSuccessorKeys.recoveryIndexes(),
   ];
 }
 

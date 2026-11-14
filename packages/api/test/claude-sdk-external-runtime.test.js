@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { chmodSync, cpSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, cpSync, mkdtempSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { rm } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
@@ -68,7 +68,7 @@ test(
     cpSync(fileURLToPath(new URL('./fixtures/fake-claude-sdk-external.cjs', import.meta.url)), executable);
     chmodSync(executable, 0o755);
     const runtime = await captureClaudeSdkRuntime(executable);
-    assert.equal(runtime.path, executable);
+    assert.equal(runtime.path, realpathSync(executable));
     assert.equal(runtime.version, '2.1.312');
     const service = new ClaudeSdkAgentService({
       model: 'fixture',

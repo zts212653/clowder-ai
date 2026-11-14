@@ -18,7 +18,7 @@ import { readTerminal } from './approval-reconcile-terminal';
 /** What one write attempt saw: the part of the Approval Hub store's attempt record the reconciler needs. */
 export type AttemptEvidence =
   | { phase: 'submitting' }
-  | { phase: 'response_received'; status: number; ok: boolean }
+  | { phase: 'response_received'; status: number; ok: boolean; errorCode?: string }
   | { phase: 'transport_unknown' }
   /**
    * The card that reports its own request finished and cannot say what it saw: it may have had a 2xx, or it may have stopped
@@ -39,7 +39,7 @@ export interface TrackedAttempt {
  */
 export type WriteSeen =
   | { outcome: 'accepted'; status: number }
-  | { outcome: 'errored'; status: number }
+  | { outcome: 'errored'; status: number; errorCode?: 'SCHEDULE_TASK_DRIFT' }
   | { outcome: 'unknown' }
   | { outcome: 'ended' };
 
@@ -133,7 +133,13 @@ function answeredModel(seenAttemptId: number, state: Record<string, unknown>, re
   if (!isHttpStatus(state.status)) return confirmingModel(seenAttemptId, { outcome: 'unknown' }, readGeneration);
   const { status } = state;
   const ok = state.ok === true;
-  const errored: WriteSeen = { outcome: 'errored', status };
+  const errored: WriteSeen = {
+    outcome: 'errored',
+    status,
+    ...(!ok && status === 409 && state.errorCode === 'SCHEDULE_TASK_DRIFT'
+      ? { errorCode: 'SCHEDULE_TASK_DRIFT' as const }
+      : {}),
+  };
   if (!ok && status === 401) return { seenAttemptId, lastWrite: errored, state: { kind: 'needs_login' } };
   if (!ok && status === 403) return { seenAttemptId, lastWrite: errored, state: { kind: 'no_permission' } };
   return confirmingModel(seenAttemptId, ok ? { outcome: 'accepted', status } : errored, readGeneration);
@@ -242,6 +248,8 @@ export interface ReconcileView {
   actions: 'allowed' | 'held' | 'gone';
   /** Whether "重新读取" is offered. */
   canReread: boolean;
+  /** A known task-definition conflict blocks approval while leaving rejection available. */
+  approveBlocked?: true;
 }
 
 export { describeReconcile } from './approval-reconcile-view';

@@ -165,6 +165,104 @@ test('a terminal importer failure publishes text with a typed unavailable elemen
   assert.equal((await h.events.readAfter('thread-media', 0, 10)).length, 1);
 });
 
+test('deferred media reply publishes its persisted reply link and finalized blocks on the live ingress', async () => {
+  const gate = deferred();
+  const broadcasts = [];
+  const blocks = [{ type: 'image', url: '/uploads/imported.png' }];
+  const h = await harness({
+    importer: { import: () => gate.promise },
+    postProcess: async () => ({ contentBlocks: blocks }),
+    ingressWake: {
+      invokeTrigger: { trigger: async () => assert.fail('reply must not wake a member') },
+      socketManager: { broadcastToRoom: (...args) => broadcasts.push(args) },
+    },
+  });
+  const parent = await h.messageStore.append({
+    threadId: 'thread-media',
+    userId: 'owner',
+    from: { kind: 'user', userId: 'owner' },
+    content: 'please send an image',
+    mentions: [],
+    timestamp: Date.now(),
+  });
+  const draft = { ...h.draft, replyTo: parent.id };
+  const receipt = await h.service.send(ctx, draft, { source });
+  assert.equal(receipt.pendingPublication, true);
+  assert.equal(broadcasts.length, 0);
+  gate.resolve({ kind: 'imported', hmrId: `hmr_${'d'.repeat(32)}` });
+  await until(() => broadcasts.length === 1);
+  const stored = h.messageStore.getById(receipt.messageId);
+  const [, event, envelope] = broadcasts[0];
+  assert.equal(event, 'connector_message');
+  assert.equal(envelope.message.replyTo, parent.id);
+  assert.deepEqual(envelope.message.contentBlocks, blocks);
+  assert.deepEqual(envelope.message.contentBlocks, stored.contentBlocks);
+  assert.equal(envelope.message.content, stored.content);
+});
+
+test('deferred terminal reply settles the durable target only when its result is published', async () => {
+  const gate = deferred();
+  const broadcasts = [];
+  const h = await harness({
+    importer: { import: () => gate.promise },
+    ingressWake: {
+      invokeTrigger: { trigger: async () => assert.fail('terminal reply must not wake a member') },
+      socketManager: { broadcastToRoom: (...args) => broadcasts.push(args) },
+    },
+  });
+  const parent = await h.messageStore.append({
+    threadId: 'thread-media',
+    userId: 'owner',
+    from: { kind: 'user', userId: 'owner' },
+    content: 'send image',
+    mentions: [],
+    timestamp: 1,
+  });
+  const deliveryId = 'ad_staged-result';
+  const carrier = await h.messageStore.append({
+    threadId: 'thread-media',
+    userId: 'system',
+    from: { kind: 'system', service: 'plugin_delivery' },
+    content: 'receipt',
+    mentions: [],
+    timestamp: 2,
+    extra: {
+      targetResponse: {
+        v: 1,
+        revision: 1,
+        inputMessageId: parent.id,
+        targetId: ctx.pluginInstanceId,
+        execution: { kind: 'plugin', id: deliveryId },
+        status: 'waiting',
+        startedAt: 2,
+        updatedAt: 2,
+      },
+    },
+  });
+  const receipt = await h.service.send(
+    ctx,
+    { ...h.draft, replyTo: parent.id },
+    {
+      source,
+      responseResult: { carrierMessageId: carrier.id, deliveryId, status: 'completed' },
+    },
+  );
+  assert.equal(receipt.pendingPublication, true);
+  assert.equal(h.messageStore.getById(carrier.id).extra.targetResponse.status, 'waiting');
+  gate.resolve({ kind: 'imported', hmrId: `hmr_${'e'.repeat(32)}` });
+  await until(() => broadcasts.some(([, event]) => event === 'connector_message'));
+  const result = h.messageStore.getById(receipt.messageId);
+  assert.equal(h.messageStore.getById(carrier.id).extra.targetResponse.status, 'completed');
+  assert.equal(h.messageStore.getById(carrier.id).extra.targetResponse.resultMessageId, result.id);
+  const live = broadcasts.find(([, event]) => event === 'connector_message')[2].message;
+  assert.equal(live.replyTo, parent.id);
+  assert.deepEqual(live.extra.targetResponseResult, result.extra.targetResponseResult);
+  const revision = h.messageStore.getById(carrier.id).extra.targetResponse.revision;
+  await h.pending.recover();
+  assert.equal(h.messageStore.getById(carrier.id).extra.targetResponse.revision, revision);
+  assert.equal(broadcasts.filter(([, event]) => event === 'connector_message').length, 1);
+});
+
 test('post-processing enriches the one durable publication before wake without losing the HMR', async () => {
   const processed = [];
   const hmrId = `hmr_${'a'.repeat(32)}`;
@@ -542,3 +640,73 @@ for (const wake of ['auto', { catId: 'removed-member' }]) {
     }
   });
 }
+
+test('regression: accepted delayed partial publishes after final completion', async () => {
+  const gate = deferred();
+  const broadcasts = [];
+  const h = await harness({
+    importer: { import: () => gate.promise },
+    ingressWake: {
+      invokeTrigger: { trigger: async () => assert.fail('terminal reply must not wake a member') },
+      socketManager: { broadcastToRoom: (...args) => broadcasts.push(args) },
+    },
+  });
+  const parent = await h.messageStore.append({
+    threadId: 'thread-media',
+    userId: 'owner',
+    from: { kind: 'user', userId: 'owner' },
+    content: 'send image',
+    mentions: [],
+    timestamp: 1,
+  });
+  const deliveryId = 'ad_staged-result';
+  const carrier = await h.messageStore.append({
+    threadId: 'thread-media',
+    userId: 'system',
+    from: { kind: 'system', service: 'plugin_delivery' },
+    content: 'receipt',
+    mentions: [],
+    timestamp: 2,
+    extra: {
+      targetResponse: {
+        v: 1,
+        revision: 1,
+        inputMessageId: parent.id,
+        targetId: ctx.pluginInstanceId,
+        execution: { kind: 'plugin', id: deliveryId },
+        status: 'waiting',
+        startedAt: 2,
+        updatedAt: 2,
+      },
+    },
+  });
+  const receipt = await h.service.send(
+    ctx,
+    { ...h.draft, replyTo: parent.id },
+    {
+      source,
+      responseResult: { carrierMessageId: carrier.id, deliveryId, status: 'processing' },
+    },
+  );
+  assert.equal(receipt.pendingPublication, true);
+  assert.equal(h.messageStore.getById(carrier.id).extra.targetResponse.status, 'waiting');
+  const final = await h.service.send(
+    ctx,
+    {
+      ...h.draft,
+      idempotencyKey: 'final',
+      replyTo: parent.id,
+      payload: { ...h.draft.payload, elements: [{ elementId: 'final', kind: 'text', payload: { text: 'done' } }] },
+    },
+    { source, responseResult: { carrierMessageId: carrier.id, deliveryId, status: 'completed' } },
+  );
+  assert.equal(h.messageStore.getById(carrier.id).extra.targetResponse.status, 'completed');
+  gate.resolve({ kind: 'imported', hmrId: `hmr_${'e'.repeat(32)}` });
+  await new Promise((r) => setTimeout(r, 100));
+  await h.pending.recover();
+  assert.ok(
+    broadcasts.some(([, event, data]) => event === 'connector_message' && data.message.id === receipt.messageId),
+    'accepted partial must still publish without reopening terminal',
+  );
+  assert.equal(h.messageStore.getById(carrier.id).extra.targetResponse.status, 'completed');
+});

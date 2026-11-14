@@ -18,6 +18,13 @@ const style = z
     color: z.enum(REVIEW_MARK_COLORS),
     // The tool's 2/4/8 px choices are converted to stable media pixels at creation time.
     strokeWidth: z.number().int().min(1).max(1024),
+    animationFrame: z
+      .object({
+        frameIndex: z.number().int().min(0).max(599),
+        timestampMs: z.number().int().safe().min(0),
+      })
+      .strict()
+      .optional(),
     frame: z
       .object({ streamId: z.string().trim().min(1).max(128), tick: z.number().int().safe() })
       .strict()
@@ -62,7 +69,18 @@ export function reviewDrawingFitsMedia(mark: ArtifactReviewDrawing, media: Immut
     }
   })();
   if (!fitsBounds) return false;
-  if (media.kind === 'image') return mark.frame === undefined;
+  if (media.kind === 'image') {
+    if (mark.frame !== undefined) return false;
+    const animation = media.animation;
+    if (!animation || animation.frameCount === 1) return mark.animationFrame === undefined;
+    const at = mark.animationFrame;
+    return (
+      at !== undefined &&
+      at.frameIndex < animation.frameCount &&
+      at.timestampMs === animation.frameDelaysMs.slice(0, at.frameIndex).reduce((sum, delay) => sum + delay, 0)
+    );
+  }
+  if (mark.animationFrame !== undefined) return false;
   return (
     mark.frame?.streamId === media.streamId &&
     mark.frame.tick >= media.startTick &&

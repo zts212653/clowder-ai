@@ -1,5 +1,8 @@
 import { evidenceDisplayType } from '../domains/memory/evidence-display-type.js';
-import type { CollectionManifest, EvidenceItem, IEvidenceStore } from '../domains/memory/interfaces.js';
+import type { CollectionManifest, EvidenceItem } from '../domains/memory/interfaces.js';
+import { KnowledgeResolver } from '../domains/memory/KnowledgeResolver.js';
+import type { KnowledgeDiscoverySource } from '../domains/memory/knowledge-discovery.js';
+import { documentDiscoverySource } from '../domains/memory/knowledge-document-source.js';
 import { readWorkspaceFilePreview } from '../domains/workspace/workspace-file-read.js';
 import { visibleMemoryCollections } from './memory-library-read.js';
 import { memoryDocumentPath } from './memory-search-document-source.js';
@@ -11,21 +14,6 @@ import {
   type MemorySearchQuery,
   type SearchExecution,
 } from './memory-search-types.js';
-
-type CollectionResult = {
-  rows: MemorySearchGroup['results'];
-  available: boolean;
-  partial: boolean;
-  hasMore: boolean;
-  degraded: boolean;
-};
-const unavailable = (): CollectionResult => ({
-  rows: [],
-  available: false,
-  partial: true,
-  hasMore: false,
-  degraded: false,
-});
 
 async function sourceSnippet(item: EvidenceItem, path: string | null, query: MemorySearchQuery) {
   if (query.depth !== 'raw' || !path) return item.summary ?? '';
@@ -61,63 +49,7 @@ async function projectDocument(
         : null,
   };
 }
-async function projectItems(
-  store: IEvidenceStore,
-  items: EvidenceItem[],
-  manifest: CollectionManifest,
-  manifests: CollectionManifest[],
-  query: MemorySearchQuery,
-  execution: SearchExecution,
-) {
-  const rows: MemorySearchGroup['results'] = [];
-  let partial = false;
-  for (const item of items) {
-    checkMemorySearchExecution(execution);
-    if (!item || isMemoryIndexPath(item.sourcePath ?? '') || /^(thread|session)$/.test(item.kind)) continue;
-    const canonical = await store.getByAnchor(item.anchor);
-    if (!canonical || canonical.kind !== item.kind || canonical.sourcePath !== item.sourcePath) {
-      partial = true;
-      continue;
-    }
-    const row = await projectDocument(manifest, canonical, manifests, query);
-    if (row) rows.push(row);
-  }
-  return { rows, partial };
-}
-async function searchCollection(
-  manifest: CollectionManifest,
-  manifests: CollectionManifest[],
-  opts: MemorySearchOptions,
-  query: MemorySearchQuery,
-  execution: SearchExecution,
-): Promise<CollectionResult> {
-  try {
-    const store = opts.stores.get(manifest.id);
-    if (!store) return unavailable();
-    const options = {
-      ...execution,
-      scope: 'docs' as const,
-      mode: 'hybrid' as const,
-      depth: query.depth,
-      limit: query.limit + 1,
-    };
-    const search = store.searchWithMeta
-      ? await store.searchWithMeta(query.q, options)
-      : { items: await store.search(query.q, options), meta: { degraded: false } };
-    if (!Array.isArray(search.items)) return unavailable();
-    const projected = await projectItems(store, search.items, manifest, manifests, query, execution);
-    return {
-      ...projected,
-      available: true,
-      partial: projected.partial || search.meta.degraded,
-      hasMore: search.items.length > query.limit,
-      degraded: search.meta.degraded,
-    };
-  } catch {
-    return unavailable();
-  }
-}
-/** Bounded fan-out; native per-collection relevance is preserved in catalog order. */
+/** Owner projection and presentation stay here; all candidate work uses the common resolver. */
 export async function searchMemoryDocuments(
   opts: MemorySearchOptions,
   privateUserId: string | null,
@@ -128,25 +60,85 @@ export async function searchMemoryDocuments(
   const visible = visibleMemoryCollections(manifests, privateUserId).filter(
     (m) => m.status !== 'archived' && m.status !== 'blocked',
   );
-  const collections: CollectionResult[] = [];
-  for (let offset = 0; offset < visible.length; offset += 4) {
-    checkMemorySearchExecution(execution);
-    collections.push(
-      ...(await Promise.all(
-        visible
-          .slice(offset, offset + 4)
-          .map((manifest) => searchCollection(manifest, manifests, opts, query, execution)),
-      )),
-    );
+  let partial = false;
+  let degraded = false;
+  const sources: KnowledgeDiscoverySource<EvidenceItem, MemorySearchGroup['results'][number]>[] = [];
+  for (const manifest of visible) {
+    const store = opts.stores.get(manifest.id);
+    if (!store) {
+      partial = true;
+      continue;
+    }
+    const adapter = documentDiscoverySource({
+      id: manifest.id,
+      store,
+      options: { ...execution, scope: 'docs', mode: 'hybrid', depth: query.depth, limit: query.limit + 1 },
+      onMeta: (meta) => {
+        if (meta.degraded) {
+          partial = true;
+          degraded = true;
+        }
+      },
+    });
+    const observed = new Map<string, EvidenceItem>();
+    const project = async (item: EvidenceItem) => {
+      checkMemorySearchExecution(execution);
+      if (isMemoryIndexPath(item.sourcePath ?? '') || /^(thread|session)$/.test(item.kind)) return null;
+      const canonical = await store.getByAnchor(item.anchor);
+      if (!canonical || canonical.kind !== item.kind || canonical.sourcePath !== item.sourcePath) {
+        partial = true;
+        return null;
+      }
+      const row = await projectDocument(manifest, canonical, manifests, query);
+      if (row) observed.set(row.id, { ...canonical });
+      return row;
+    };
+    sources.push({
+      id: adapter.id,
+      read: adapter.read,
+      project,
+      key: (row) => row.id,
+      tolerateError: true,
+      revalidate: async (row) => {
+        const currentManifest = visibleMemoryCollections(opts.catalog.list(), privateUserId).find(
+          (item) => item.id === manifest.id,
+        );
+        if (
+          !currentManifest ||
+          currentManifest.status === 'archived' ||
+          currentManifest.status === 'blocked' ||
+          currentManifest.root !== manifest.root
+        )
+          return null;
+        const original = observed.get(row.id);
+        if (!original) return null;
+        const current = await store.getByAnchor(original.anchor);
+        if (!current || current.sourceHash !== original.sourceHash || current.updatedAt !== original.updatedAt) {
+          partial = true;
+          return null;
+        }
+        return project(current);
+      },
+    });
   }
-  const rows = collections.flatMap((c) => c.rows);
-  const unique = [...new Map(rows.map((row) => [row.id, row])).values()];
-  const available = !visible.length || collections.some((c) => c.available);
+  const found = await KnowledgeResolver.discover(query.q, {
+    sources,
+    limit: query.limit + 1,
+    merge: 'source_order',
+    ...execution,
+  });
+  const available = !visible.length || found.sources.some((source) => source.stopReason !== 'error');
   return {
     type: 'documents',
-    status: !available ? 'unavailable' : collections.some((c) => c.partial) ? 'partial' : 'ready',
-    results: unique.slice(0, query.limit),
-    hasMore: collections.some((c) => c.hasMore) || unique.length > query.limit,
-    degraded: collections.some((c) => c.degraded),
+    status: !available
+      ? 'unavailable'
+      : partial || found.sources.some((source) => source.stopReason === 'error')
+        ? 'partial'
+        : 'ready',
+    results: found.items.slice(0, query.limit),
+    hasMore:
+      found.items.length > query.limit ||
+      found.sources.some((source) => ['limit', 'candidate_budget', 'source_budget'].includes(source.stopReason)),
+    degraded,
   };
 }

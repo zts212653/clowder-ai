@@ -23,8 +23,12 @@ export async function installHomeActions(
     work?: HomeWorkActionPort;
   },
 ) {
-  const selector = await readHomeJevSelector().catch(() => {
-    app.log.warn('Home Jev credential unavailable; home operations remain unavailable');
+  const selector = await readHomeJevSelector(process.env, () => {
+    app.log.warn(
+      'Home OpenAI Platform account unavailable; configured accounts will be resolved again on the next request',
+    );
+  }).catch(() => {
+    app.log.warn('Home page decision configuration unavailable; home operations remain unavailable');
     return undefined;
   });
   const homeSockets = createHomeSocketEmitter(deps.socketManager);

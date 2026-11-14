@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { BundledPluginRuntimeCarrier } from '../dist/domains/plugin/builtin-runtime/carriers/bundled-runtime-carrier.js';
 import { PluginRuntimeCarrierRouter } from '../dist/domains/plugin/carrier/runtime-carrier.js';
+import { snapshotInventoryFixture } from './helpers/snapshot-inventory-fixture.js';
 
 function fixture() {
   const manifest = {
@@ -40,7 +41,7 @@ function fixture() {
     installedAt: 0,
     updatedAt: 0,
   };
-  const inventory = {
+  const inventory = snapshotInventoryFixture({
     snapshot: async () => ({ packages: [packageRecord], instances: [instance] }),
     transaction: async (apply) =>
       apply({
@@ -51,7 +52,7 @@ function fixture() {
           },
         },
       }),
-  };
+  });
   const carrier = new BundledPluginRuntimeCarrier({
     inventory,
     runtimes: [{ claims: () => true, start: async () => {}, stop: async () => {} }],

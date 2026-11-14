@@ -10,7 +10,6 @@ import { fileURLToPath } from 'node:url';
 import { catRegistry } from '@cat-cafe/shared';
 import { compileL0ViaSubprocess } from '../dist/domains/cats/services/agents/providers/l0-compiler.js';
 import { captureInvocationL0Input } from '../dist/domains/cats/services/agents/providers/l0-input-capture.js';
-import { extractTasks } from '../dist/domains/cats/services/orchestration/TaskExtractor.js';
 import { runLunaNative } from '../dist/domains/memory/curation/LunaNativeRun.js';
 import { resolveCurationProvider } from '../dist/domains/memory/curation-provider.js';
 
@@ -45,89 +44,75 @@ function isolate(t) {
   });
   return root;
 }
-for (const operation of ['curation', 'task-extraction'])
-  test(`the actual ${operation} owner reaches the native carrier with frozen L0`, async (t) => {
-    const root = isolate(t);
-    const all = catRegistry.getAllConfigs();
-    const id = 'review-l0-curator';
-    catRegistry.register(id, {
-      ...all.codex,
-      id,
-      configurationSource: 'native_tool',
-      accountRef: undefined,
-      relationshipKey: 'review-l0',
-      defaultModel: 'fixture-model',
-    });
-    t.after(() => {
-      catRegistry.reset();
-      Object.entries(all).forEach(([id, config]) => catRegistry.register(id, config));
-    });
-    const provider = resolveCurationProvider(root, id);
-    provider.service.cliCommand = process.execPath;
-    let spawned = 0;
-    const errors = [];
-    provider.service.spawnFn = () => {
-      spawned++;
-      const child = new EventEmitter();
-      child.stdin = new PassThrough();
-      child.stdout = new PassThrough();
-      child.stderr = new PassThrough();
-      child.pid = 12345;
-      child.exitCode = null;
-      child.kill = () => true;
-      setImmediate(() => {
-        child.stdout.end(
-          [
-            { type: 'thread.started', thread_id: 'review-l0-native' },
-            {
-              type: 'item.completed',
-              item: {
-                id: 'm1',
-                type: 'agent_message',
-                text:
-                  operation === 'curation'
-                    ? 'isolated summary'
-                    : '[{"title":"Captured task","why":"Native extraction","sourceIndex":0}]',
-              },
-            },
-            { type: 'turn.completed', usage: { input_tokens: 1, output_tokens: 1 } },
-          ]
-            .map((value) => JSON.stringify(value))
-            .join('\n') + '\n',
-        );
-        child.exitCode = 0;
-        child.emit('exit', 0, null);
-        child.emit('close', 0, null);
-      });
-      return child;
-    };
-    const invoke = provider.service.invoke.bind(provider.service);
-    provider.service.invoke = async function* (prompt, options) {
-      for await (const message of invoke(prompt, options)) {
-        if (message.type === 'error') errors.push(message.error);
-        yield message;
-      }
-    };
-    if (operation === 'curation') {
-      const result = await runLunaNative({
-        userId: 'native-task-owner',
-        provider,
-        prompt: 'isolated summary fixture',
-        instructions: 'summarize',
-        workingDirectory: root,
-      });
-      assert.equal(result.success, true, JSON.stringify({ result, spawned, errors }));
-    } else {
-      const result = await extractTasks(
-        [{ id: 'source-1', content: 'Extract this task', catId: null }],
-        provider.service,
-        { catId: id, userId: 'native-task-owner', threadId: 'extraction-thread' },
-      );
-      assert.equal(result.degraded, false, JSON.stringify({ result, spawned, errors }));
-      assert.equal(result.tasks[0].title, 'Captured task');
-    }
-    assert.equal(spawned, 1);
+test('the actual curation owner reaches the native carrier with frozen L0', async (t) => {
+  const root = isolate(t);
+  const all = catRegistry.getAllConfigs();
+  const id = 'review-l0-curator';
+  catRegistry.register(id, {
+    ...all.codex,
+    id,
+    configurationSource: 'native_tool',
+    accountRef: undefined,
+    relationshipKey: 'review-l0',
+    defaultModel: 'fixture-model',
   });
+  t.after(() => {
+    catRegistry.reset();
+    Object.entries(all).forEach(([id, config]) => catRegistry.register(id, config));
+  });
+  const provider = resolveCurationProvider(root, id);
+  provider.service.cliCommand = process.execPath;
+  let spawned = 0;
+  const errors = [];
+  provider.service.spawnFn = () => {
+    spawned++;
+    const child = new EventEmitter();
+    child.stdin = new PassThrough();
+    child.stdout = new PassThrough();
+    child.stderr = new PassThrough();
+    child.pid = 12345;
+    child.exitCode = null;
+    child.kill = () => true;
+    setImmediate(() => {
+      child.stdout.end(
+        [
+          { type: 'thread.started', thread_id: 'review-l0-native' },
+          {
+            type: 'item.completed',
+            item: {
+              id: 'm1',
+              type: 'agent_message',
+              text: 'isolated summary',
+            },
+          },
+          { type: 'turn.completed', usage: { input_tokens: 1, output_tokens: 1 } },
+        ]
+          .map((value) => JSON.stringify(value))
+          .join('\n') + '\n',
+      );
+      child.exitCode = 0;
+      child.emit('exit', 0, null);
+      child.emit('close', 0, null);
+    });
+    return child;
+  };
+  const invoke = provider.service.invoke.bind(provider.service);
+  provider.service.invoke = async function* (prompt, options) {
+    for await (const message of invoke(prompt, options)) {
+      if (message.type === 'error') errors.push(message.error);
+      yield message;
+    }
+  };
+  const result = await runLunaNative({
+    userId: 'native-task-owner',
+    provider,
+    prompt: 'isolated summary fixture',
+    instructions: 'summarize',
+    workingDirectory: root,
+  });
+  assert.equal(result.success, true, JSON.stringify({ result, spawned, errors }));
+  assert.equal(spawned, 1);
+});
 test('freezing an external task retains the existing Host workflow overlay source', async (t) => {
   const root = isolate(t);
   const project = join(root, 'work');

@@ -35,10 +35,6 @@ const READ_FILE_SCHEMA = {
 
 // ── B3: Schema validation ──
 
-test('B3: validateToolInput accepts valid input', () => {
-  assert.doesNotThrow(() => validateToolInput(READ_FILE_SCHEMA, { path: 'src/index.ts' }));
-});
-
 test('B3: validateToolInput accepts valid input with optional fields', () => {
   assert.doesNotThrow(() => validateToolInput(READ_FILE_SCHEMA, { path: 'src/index.ts', offset: 10 }));
 });

@@ -83,6 +83,8 @@ export interface AgentEventFields {
   seq?: number;
   /** F183 Phase C: server sequencer epoch; a change means the server restarted. */
   seqEpoch?: string;
+  /** PR-3a2: the event's position in its response's stream record (0 = first broadcast since admission). */
+  streamIndex?: number;
 }
 
 /** Open-thread entry: threadId may be absent on malformed/legacy events (then the open thread). */

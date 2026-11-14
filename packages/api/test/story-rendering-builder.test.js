@@ -290,29 +290,6 @@ describe('buildFeatureStoryRendering', () => {
     assert.ok(t1Lane.participants.includes('codex'));
   });
 
-  test('route-layer thread extraction uses title field (not name)', async () => {
-    // P2 fix: threadStore.get() returns { id, title }, not { id, name }.
-    // The route must read thread.title, not thread.name.
-    // This test simulates the route's thread metadata extraction logic.
-    const threadStoreResult = { id: 'thread_main', title: 'Main Discussion' };
-
-    // Route extraction logic (mirrors story-rendering.ts line 97-101):
-    const tid = 'thread_main';
-    const threadMeta = new Map();
-    threadMeta.set(tid, {
-      threadId: tid,
-      name: threadStoreResult.title ?? tid, // must use .title, not .name
-      participants: [],
-    });
-
-    // Verify the extracted name is the title, not the threadId fallback
-    assert.equal(threadMeta.get(tid).name, 'Main Discussion');
-
-    // Counter-case: if we had used .name (which doesn't exist on Thread), we'd get threadId
-    const wrongExtraction = threadStoreResult.name ?? tid;
-    assert.equal(wrongExtraction, tid); // .name is undefined → falls back to tid
-  });
-
   // ── AC-E6 Guest Lane (Cloud R2 P1 fix) ──
 
   test('thread_merge target-only lane is marked guest', async () => {

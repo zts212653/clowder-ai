@@ -4,6 +4,7 @@ import { alphaRecoveryJournalPath } from './durable-managed-gate-recovery-child-
 
 export type AlphaRecoveryObservation =
   | { readonly kind: 'clean' | 'clock_interruption' }
+  | { readonly kind: 'live_preparation'; readonly pid: number; readonly startedAt: string }
   | { readonly kind: 'failed'; readonly firstFailureAt: number; readonly unitKey: string }
   | { readonly kind: 'unknown'; readonly reason: string };
 
@@ -11,6 +12,7 @@ type CleanupSignal = { processIdentity: { pid: number; startedAt: string }; sign
 type ObservationEntry = Record<string, unknown> & { unitKey: string; observedAt: number };
 interface ObservedCommand {
   protocol: string;
+  stage: string;
   started: boolean;
   ended: boolean;
   clock: boolean;
@@ -66,6 +68,7 @@ function observeEntry(units: Map<string, ObservedCommand>, entry: ObservationEnt
     if (units.has(entry.unitKey)) return unknown('duplicate command observation');
     units.set(entry.unitKey, {
       protocol: String(entry.observerProtocol),
+      stage: String(entry.stage),
       started: false,
       ended: false,
       clock: false,
@@ -113,6 +116,21 @@ function summarizeObservations(units: readonly ObservedCommand[]): AlphaRecovery
     )
   ) {
     return unknown('test observer did not prove a complete or owned interruption');
+  }
+  const active = units.filter((unit) => !unit.ended);
+  const preparation = active.length === 1 ? active[0] : undefined;
+  if (
+    preparation?.stage === 'build' &&
+    preparation.protocol === 'confirmed-sleep-v1' &&
+    typeof preparation.pid === 'number' &&
+    Number.isSafeInteger(preparation.pid) &&
+    preparation.pid > 1 &&
+    typeof preparation.startedAt === 'string' &&
+    preparation.startedAt.length > 0
+  ) {
+    // This only identifies the existing command. It grants neither replay nor
+    // green evidence; its eventual exit remains authoritative.
+    return { kind: 'live_preparation', pid: preparation.pid, startedAt: preparation.startedAt };
   }
   if (!units.length || units.some((unit) => !unit.ended && (!unit.started || unit.protocol !== 'node-test-v1'))) {
     return unknown('active command has no acknowledged test observer');

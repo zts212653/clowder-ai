@@ -1,3 +1,5 @@
+import { DEFAULT_MESSAGE_SEARCH_SORT } from '@cat-cafe/shared';
+
 export interface MessageSearchToolQuery {
   query: string;
   messageSort?: 'time' | 'relevance';
@@ -16,7 +18,7 @@ export function messageSearchParams(input: MessageSearchToolQuery): Record<strin
     q: input.query,
     resultUnit: 'message',
     scope: input.scope ?? 'threads',
-    messageSort: input.messageSort ?? 'time',
+    messageSort: input.messageSort ?? DEFAULT_MESSAGE_SEARCH_SORT,
     mode: input.mode ?? 'hybrid',
   };
   if (input.threadId) params.threadId = input.threadId;

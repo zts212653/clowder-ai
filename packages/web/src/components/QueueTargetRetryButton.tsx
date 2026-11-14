@@ -12,15 +12,14 @@ export function QueueTargetRetryButton({
   label = '重试',
 }: {
   entry: QueueEntry;
-  action: Extract<QueueRecoveryAction, { kind: 'retry_target' | 'repeat_target' }>;
+  action: Extract<QueueRecoveryAction, { kind: 'retry_target' }>;
   label?: string;
 }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [submittedAction, setSubmittedAction] = useState<typeof action | null>(null);
   const submitted = submittedAction === action;
-  const repeat = action.kind === 'repeat_target';
-  const path = `/api/threads/${encodeURIComponent(entry.threadId)}/messages/${encodeURIComponent(entry.messageId ?? '')}/routing-targets/${encodeURIComponent(action.targetCatId)}/${repeat ? 'repeat' : 'retry'}`;
+  const path = `/api/threads/${encodeURIComponent(entry.threadId)}/messages/${encodeURIComponent(entry.messageId ?? '')}/routing-targets/${encodeURIComponent(action.targetCatId)}/retry`;
   if (
     !entry.messageId ||
     action.entryId !== entry.id ||
@@ -36,8 +35,7 @@ export function QueueTargetRetryButton({
     try {
       const result = await apiFetch(path, { method: 'POST' });
       const body = await result.json().catch(() => ({}));
-      if (!result.ok || body.status !== (repeat ? 'repeated' : 'retrying'))
-        throw new Error(body.error ?? '重试未能开始，请重新读取状态');
+      if (!result.ok || body.status !== 'retrying') throw new Error(body.error ?? '重试未能开始，请重新读取状态');
       setSubmittedAction(action);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : '重试未能开始');
@@ -55,9 +53,8 @@ export function QueueTargetRetryButton({
         className="rounded text-xs text-cafe-secondary hover:underline disabled:opacity-60"
         onClick={() => void retry()}
       >
-        {submitted ? (repeat ? '已再次发送' : '已提交重试') : busy ? '发送中…' : repeat ? '再发一次' : label}
+        {submitted ? '已提交重试' : busy ? '发送中…' : label}
       </button>
-      {repeat ? <span className="text-xs text-cafe-muted">会作为新消息再次发送，可能重复执行</span> : null}
       {error ? (
         <span role="alert" className="text-xs text-conn-red-text">
           {error}

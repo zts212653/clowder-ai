@@ -18,12 +18,39 @@ writeFileSync(join(stubBinDir, 'kimi'), '#!/bin/sh\nexit 1\n', { mode: 0o755 });
 writeFileSync(join(stubBinDir, 'kimi-cli'), '#!/bin/sh\nexit 1\n', { mode: 0o755 });
 process.env.PATH = `${stubBinDir}${delimiter}${process.env.PATH}`;
 
-const { KimiAgentService } = await import('../dist/domains/cats/services/agents/providers/KimiAgentService.js');
+const { KimiAgentService, resolveKimiEffortLevel } = await import(
+  '../dist/domains/cats/services/agents/providers/KimiAgentService.js'
+);
 const { invalidateCliCommand } = await import('../dist/utils/cli-resolve.js');
+const { captureMemberExecutionPreferences } = await import(
+  '../dist/domains/cats/services/agents/providers/member-execution-preferences.js'
+);
 
 function createKimiAgentService(options = {}) {
   return new KimiAgentService({ l0CompilerFn: async () => 'OWNED-TEST-IDENTITY', ...options });
 }
+
+test('declared Kimi tiers reject an invalid saved preference and leave an inherited native default alone', () => {
+  const preferences = captureMemberExecutionPreferences(
+    'fixture',
+    { clientId: 'kimi', cli: { effort: 'xhigh' } },
+    'native/k3.1',
+  );
+  assert.throws(
+    () => resolveKimiEffortLevel('fixture', 'native/k3.1', undefined, preferences, ['low', 'high', 'max']),
+    /kimi_effort_unsupported:xhigh/,
+  );
+  assert.equal(
+    resolveKimiEffortLevel('fixture', 'native/k3.1', undefined, { configurationSource: 'native_tool' }, [
+      'low',
+      'high',
+      'max',
+    ]),
+    undefined,
+  );
+  assert.equal(resolveKimiEffortLevel('fixture', 'native/k3.1', undefined, preferences, null), null);
+  assert.equal(resolveKimiEffortLevel('fixture', 'native/k3.1', undefined, undefined, ['low', 'medium']), undefined);
+});
 
 function writeCapabilitiesConfig(projectRoot, capabilities) {
   mkdirSync(join(projectRoot, '.cat-cafe'), { recursive: true });
@@ -323,6 +350,75 @@ test('injects resolved kimi thinking effort into spawn env', async () => {
   const env = spawnFn.mock.calls[0].arguments[2]?.env ?? {};
   const expected = getCatEffort('kimi', undefined, 'kimi', 'kimi-code/k3');
   assert.equal(env.KIMI_MODEL_THINKING_EFFORT, expected);
+});
+
+test('uses declared Kimi effort tiers for a new model alias instead of silently discarding the member preference', async () => {
+  const home = mkdtempSync(join(tmpdir(), 'kimi-declared-effort-'));
+  writeFileSync(
+    join(home, 'config.toml'),
+    [
+      'default_model="kimi-code/k3.1-pro"',
+      '[thinking]',
+      'enabled=true',
+      'effort="high"',
+      '[models."kimi-code/k3.1-pro"]',
+      'support_efforts=["low","high","max"]',
+      'default_effort="high"',
+    ].join('\n'),
+  );
+  const proc = createMockProcess();
+  const spawnFn = createMockSpawnFn(proc);
+  const service = createKimiAgentService({ spawnFn, model: 'kimi-code/k3.1-pro' });
+  try {
+    const promise = collect(
+      service.invoke('Hello', {
+        callbackEnv: { KIMI_CODE_HOME: home },
+        executionPreferences: {
+          configurationSource: 'native_tool',
+          model: 'kimi-code/k3.1-pro',
+          effort: 'max',
+          nativeAuthentication: true,
+        },
+      }),
+    );
+    emitKimiEvents(proc, [{ role: 'assistant', content: 'ok' }]);
+    await promise;
+    assert.equal(spawnFn.mock.calls[0].arguments[2].env.KIMI_MODEL_THINKING_EFFORT, 'max');
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test('a member without a saved effort runs with native defaults when declared tiers exclude platform high', async () => {
+  const home = mkdtempSync(join(tmpdir(), 'kimi-inherited-effort-'));
+  const model = 'native/new-model';
+  writeFileSync(
+    join(home, 'config.toml'),
+    `default_model="${model}"\n[models."${model}"]\nsupport_efforts=["low","medium"]\ndefault_effort="medium"\n`,
+  );
+  const preferences = captureMemberExecutionPreferences('fixture', { clientId: 'kimi' }, model);
+  assert.equal(preferences.effort, 'high', 'the frozen legacy default is not a saved member choice');
+  const proc = createMockProcess();
+  let emitted;
+  const spawnFn = mock.fn(() => {
+    emitted = emitKimiEvents(proc, [{ role: 'assistant', content: 'native default' }]);
+    return proc;
+  });
+  const service = createKimiAgentService({ catId: 'fixture', spawnFn, model });
+  try {
+    const messages = await collect(
+      service.invoke('Hello', {
+        accountEnv: { KIMI_CODE_HOME: home },
+        executionPreferences: preferences,
+      }),
+    );
+    await emitted;
+    assert.equal(spawnFn.mock.callCount(), 1);
+    assert.ok(messages.some((message) => message.type === 'text' && message.content === 'native default'));
+    assert.ok(!('KIMI_MODEL_THINKING_EFFORT' in spawnFn.mock.calls[0].arguments[2].env));
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
 });
 
 test('boolean-thinking kimi models keep CLI thinking config without effort env', async () => {

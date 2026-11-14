@@ -20,8 +20,8 @@ export function createMemberOwnerDelegation(deps: {
       caller.toolExecutionPolicy !== undefined
     )
       throw new Error('member_session_owner_delegation_required');
-    const message = await deps.messages.getById(origin);
     const thread = await deps.threads.get(caller.threadId);
+    const message = await deps.messages.getById(origin);
     const from = message && messageFrom(message);
     if (
       !message ||

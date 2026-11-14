@@ -43,7 +43,7 @@ export function AccountRowMenu({
                 {t.loginAgain}
               </button>
             )}
-            {(account.authType === 'api_key' || account.claude) && (
+            {(account.authType === 'api_key' || account.claude || account.agy) && (
               <button type="button" disabled={busy} onClick={onEdit}>
                 {account.claude ? t.replaceToken : t.edit}
               </button>

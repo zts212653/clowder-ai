@@ -83,6 +83,7 @@ export const replyLayersCopy = defineShellCopy(
         handoff: '交给',
         queued: '排队交给',
         parallel: '同时交给',
+        unsent: (targets: string) => `正文未交接给 ${targets}。需要时可引用回复并点名。`,
       },
       // 合同四: the two switches that only decide whether a reply's record starts open. Default = the personal setting; the
       // other is this conversation's, in Workspace 状态与会话.
@@ -168,6 +169,8 @@ export const replyLayersCopy = defineShellCopy(
         handoff: 'Handed to',
         queued: 'Queued for',
         parallel: 'Handed to',
+        unsent: (targets: string) =>
+          `This reply didn’t hand off to ${targets}. If still needed, quote it and @mention them.`,
       },
       settings: {
         activity: 'Activity',
@@ -197,6 +200,7 @@ export const replyLayersCopy = defineShellCopy(
       'record.runningDuration': [[HOUR + 2 * MINUTE + 13 * SECOND], [6 * MINUTE + 42 * SECOND], [11 * SECOND]],
       'record.duration': [[HOUR + 2 * MINUTE], [6 * MINUTE + 42 * SECOND], [11 * SECOND], [90 * MINUTE]],
       'record.toggle': [[true], [false]],
+      'handoff.unsent': [['@opus'], ['@opus, @codex']],
     },
     // An open/closed flag only picks the verb; the English and the Chinese both print neither value.
     grammar: { 'record.toggle': ['0'] },

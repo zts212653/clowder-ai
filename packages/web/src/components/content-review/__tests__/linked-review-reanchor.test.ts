@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import type { ArtifactReviewRound } from '@cat-cafe/shared';
 import { beforeEach, expect, it, vi } from 'vitest';
 import { mediaView } from '@/components/workbench/content-review/__tests__/WorkspaceContentReviewSurface.fixture';

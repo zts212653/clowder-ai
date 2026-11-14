@@ -72,6 +72,7 @@ describe('workspace-file-watcher', () => {
   let io;
   let port;
   let tmpDir;
+  let watcher;
 
   before(async () => {
     tmpDir = await mkdtemp(join(tmpdir(), 'watcher-test-'));
@@ -79,7 +80,7 @@ describe('workspace-file-watcher', () => {
 
     httpServer = new HttpServer();
     io = new Server(httpServer, { cors: { origin: '*' } });
-    setupWorkspaceFileWatcher(io);
+    watcher = setupWorkspaceFileWatcher(io);
 
     await new Promise((resolve) => {
       httpServer.listen(0, () => {
@@ -214,6 +215,215 @@ describe('workspace-file-watcher', () => {
       await wait(400);
       // If we get here without crash, cleanup worked
       assert.ok(true);
+    } finally {
+      await disconnectClient(client);
+    }
+  });
+  // One socket can carry several watches, each keyed by its watchId (plan B,
+  // docs/plans/2026-11-05-hub-one-socket-per-page.md).
+  it('keeps two watches on one socket and tags each change with its watchId', async () => {
+    await writeFile(join(tmpDir, 'multi-a.txt'), 'a-1');
+    await writeFile(join(tmpDir, 'multi-b.txt'), 'b-1');
+    const client = await connectClient(port);
+    const events = [];
+    client.on('workspace:file-changed', (event) => events.push(event));
+
+    try {
+      client.emit('workspace:watch-file', {
+        watchId: 'w-a',
+        worktreeId: 'test-wt',
+        path: 'multi-a.txt',
+        sha256: sha256('a-1'),
+      });
+      client.emit('workspace:watch-file', {
+        watchId: 'w-b',
+        worktreeId: 'test-wt',
+        path: 'multi-b.txt',
+        sha256: sha256('b-1'),
+      });
+      await wait(200);
+
+      await writeFile(join(tmpDir, 'multi-a.txt'), 'a-2');
+      await writeFile(join(tmpDir, 'multi-b.txt'), 'b-2');
+      await wait(1600);
+      assert.deepEqual(events.map((e) => [e.watchId, e.path, e.sha256]).sort(), [
+        ['w-a', 'multi-a.txt', sha256('a-2')],
+        ['w-b', 'multi-b.txt', sha256('b-2')],
+      ]);
+      assert.equal(watcher.inspect().watches, 2);
+    } finally {
+      await disconnectClient(client);
+    }
+  });
+
+  it('unwatch with a watchId releases only that watch', async () => {
+    await writeFile(join(tmpDir, 'keep.txt'), 'keep-1');
+    await writeFile(join(tmpDir, 'drop.txt'), 'drop-1');
+    const client = await connectClient(port);
+    const events = [];
+    client.on('workspace:file-changed', (event) => events.push(event));
+
+    try {
+      client.emit('workspace:watch-file', {
+        watchId: 'keep',
+        worktreeId: 'test-wt',
+        path: 'keep.txt',
+        sha256: sha256('keep-1'),
+      });
+      client.emit('workspace:watch-file', {
+        watchId: 'drop',
+        worktreeId: 'test-wt',
+        path: 'drop.txt',
+        sha256: sha256('drop-1'),
+      });
+      await wait(200);
+      client.emit('workspace:unwatch-file', { watchId: 'drop' });
+      await wait(100);
+
+      await writeFile(join(tmpDir, 'keep.txt'), 'keep-2');
+      await writeFile(join(tmpDir, 'drop.txt'), 'drop-2');
+      await wait(1600);
+      assert.deepEqual(
+        events.map((e) => e.watchId),
+        ['keep'],
+      );
+      assert.equal(watcher.inspect().watches, 1);
+    } finally {
+      await disconnectClient(client);
+    }
+  });
+
+  it('a payload-less unwatch from an old page releases only the legacy watch', async () => {
+    await writeFile(join(tmpDir, 'legacy.txt'), 'legacy-1');
+    await writeFile(join(tmpDir, 'modern.txt'), 'modern-1');
+    const client = await connectClient(port);
+    const events = [];
+    client.on('workspace:file-changed', (event) => events.push(event));
+
+    try {
+      client.emit('workspace:watch-file', { worktreeId: 'test-wt', path: 'legacy.txt', sha256: sha256('legacy-1') });
+      client.emit('workspace:watch-file', {
+        watchId: 'modern',
+        worktreeId: 'test-wt',
+        path: 'modern.txt',
+        sha256: sha256('modern-1'),
+      });
+      await wait(200);
+
+      client.emit('workspace:unwatch-file');
+      await wait(100);
+
+      await writeFile(join(tmpDir, 'legacy.txt'), 'legacy-2');
+      await writeFile(join(tmpDir, 'modern.txt'), 'modern-2');
+      await wait(1600);
+      assert.deepEqual(
+        events.map((e) => e.watchId),
+        ['modern'],
+      );
+      assert.equal(watcher.inspect().watches, 1);
+    } finally {
+      await disconnectClient(client);
+    }
+  });
+
+  it('an unwatch that lands while the watch is still being established leaves nothing behind', async () => {
+    await writeFile(join(tmpDir, 'pending-unwatch.txt'), 'pending');
+    const client = await connectClient(port);
+    const events = [];
+    client.on('workspace:file-changed', (event) => events.push(event));
+
+    try {
+      // sha256: null would trigger an immediate notification once the watch is established.
+      client.emit('workspace:watch-file', {
+        watchId: 'p',
+        worktreeId: 'test-wt',
+        path: 'pending-unwatch.txt',
+        sha256: null,
+      });
+      client.emit('workspace:unwatch-file', { watchId: 'p' });
+      await wait(500);
+      assert.deepEqual(events, []);
+      assert.equal(watcher.inspect().watches, 0);
+    } finally {
+      await disconnectClient(client);
+    }
+  });
+
+  it('a disconnect while the watch is still being established leaves nothing behind', async () => {
+    await writeFile(join(tmpDir, 'pending-disconnect.txt'), 'pending');
+    const before = watcher.inspect().watches;
+    const client = await connectClient(port);
+    client.emit('workspace:watch-file', {
+      watchId: 'd',
+      worktreeId: 'test-wt',
+      path: 'pending-disconnect.txt',
+      sha256: null,
+    });
+    await disconnectClient(client);
+    await wait(500);
+    assert.equal(watcher.inspect().watches, before);
+  });
+
+  it('a stale establishment cannot replace the watch that superseded it', async () => {
+    await writeFile(join(tmpDir, 'stale-old.txt'), 'old');
+    await writeFile(join(tmpDir, 'stale-new.txt'), 'new-1');
+    const client = await connectClient(port);
+    const events = [];
+    client.on('workspace:file-changed', (event) => events.push(event));
+
+    try {
+      client.emit('workspace:watch-file', { watchId: 's', worktreeId: 'test-wt', path: 'stale-old.txt', sha256: null });
+      client.emit('workspace:unwatch-file', { watchId: 's' });
+      client.emit('workspace:watch-file', {
+        watchId: 's',
+        worktreeId: 'test-wt',
+        path: 'stale-new.txt',
+        sha256: sha256('new-1'),
+      });
+      await wait(500);
+      assert.deepEqual(events, [], 'the cancelled establishment must not announce itself');
+
+      await writeFile(join(tmpDir, 'stale-new.txt'), 'new-2');
+      await wait(1600);
+      assert.deepEqual(
+        events.map((e) => [e.watchId, e.path]),
+        [['s', 'stale-new.txt']],
+      );
+      assert.equal(watcher.inspect().watches, 1);
+    } finally {
+      await disconnectClient(client);
+    }
+  });
+  it('a watchId that spells the internal legacy key is still an ordinary watch', async () => {
+    await writeFile(join(tmpDir, 'spoof-legacy.txt'), 'spoof-1');
+    await writeFile(join(tmpDir, 'real-legacy.txt'), 'real-1');
+    const spoofId = '\u0000legacy';
+    const client = await connectClient(port);
+    const events = [];
+    client.on('workspace:file-changed', (event) => events.push(event));
+
+    try {
+      client.emit('workspace:watch-file', {
+        watchId: spoofId,
+        worktreeId: 'test-wt',
+        path: 'spoof-legacy.txt',
+        sha256: sha256('spoof-1'),
+      });
+      client.emit('workspace:watch-file', { worktreeId: 'test-wt', path: 'real-legacy.txt', sha256: sha256('real-1') });
+      await wait(200);
+
+      // An old page's payload-less unwatch releases only the real legacy watch.
+      client.emit('workspace:unwatch-file');
+      await wait(100);
+
+      await writeFile(join(tmpDir, 'spoof-legacy.txt'), 'spoof-2');
+      await writeFile(join(tmpDir, 'real-legacy.txt'), 'real-2');
+      await wait(1600);
+      assert.deepEqual(
+        events.map((e) => [e.watchId, e.path]),
+        [[spoofId, 'spoof-legacy.txt']],
+      );
+      assert.equal(watcher.inspect().watches, 1);
     } finally {
       await disconnectClient(client);
     }

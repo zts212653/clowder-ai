@@ -48,10 +48,15 @@ export function installAmbientCodexAccount(t) {
   });
 }
 
-export function assertSelectedApiAccount(childEnv, selectedKey, selectedRouting = {}) {
+export function assertSelectedApiAccount(childEnv, selectedKey, selectedRouting = {}, { official = false } = {}) {
   assert.ok(childEnv.CODEX_HOME.startsWith(`${join(process.env.CAT_CAFE_DATA_DIR, 'codex-api-execution')}${sep}`));
   for (const key of ALTERNATIVE_CODEX_AUTH_INPUTS)
-    assert.equal(childEnv[key], undefined, `${key} must not select ambient account A`);
+    assert.equal(
+      childEnv[key],
+      // F320 KD-3: the official endpoint selects B through the native key input, never ambient A.
+      official && key === 'CODEX_API_KEY' ? selectedKey : undefined,
+      `${key} must not select ambient account A`,
+    );
   assert.equal(childEnv.OPENAI_API_KEY, selectedKey);
   for (const key of ['OPENAI_ORGANIZATION', 'OPENAI_PROJECT', 'OPENAI_ORG_ID', 'OPENAI_BASE_URL', 'OPENAI_API_BASE'])
     assert.equal(childEnv[key], selectedRouting[key], `${key} must come from the selected account only`);
@@ -70,6 +75,15 @@ export function assertSelectedApiProvider(launch, baseUrl) {
     const expression = launch.args[++i];
     const equal = expression.indexOf('=');
     config.set(expression.slice(0, equal), parse(`value=${expression.slice(equal + 1)}`).value);
+  }
+  if (baseUrl === 'https://api.openai.com/v1') {
+    // F320 KD-3: same provider id as OAuth so threads resume across both; the key stays in memory and
+    // the endpoint is pinned on the command line, ahead of user and trusted-project config.
+    assert.equal(config.get('model_provider'), 'openai');
+    assert.equal(config.get('cli_auth_credentials_store'), 'ephemeral');
+    assert.equal(config.get('openai_base_url'), baseUrl);
+    assert.ok(![...config.keys()].some((key) => key.startsWith('model_providers.custom')));
+    return;
   }
   assert.equal(config.get('model_provider'), 'custom', 'API identity must use its explicit env_key provider');
   assert.equal(config.get('model_providers.custom.env_key'), 'OPENAI_API_KEY');

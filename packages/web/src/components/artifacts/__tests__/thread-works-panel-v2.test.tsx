@@ -11,6 +11,7 @@ import { startMessageReadingSession } from '@/components/message-search/message-
 import type { MessageSearchHost } from '@/components/message-search/useMessageSearchHost';
 import { writeShellLanguage } from '@/components/shell/shell-language';
 import { writeShellPresentation } from '@/components/shell/shell-presentation';
+import { WorkspaceSurfaceVisibilityProvider } from '@/components/workbench/WorkspaceSurfaceVisibility';
 import { useChatStore } from '@/stores/chatStore';
 import { ThreadWorksPanelV2 } from '../ThreadWorksPanelV2';
 
@@ -35,6 +36,83 @@ const items: ThreadArtifactDTO[] = [
 let host: HTMLDivElement;
 let root: Root;
 const open = vi.fn();
+
+it('expands loaded cards before offering a global server continuation', async () => {
+  const loaded = Array.from({ length: 50 }, (_, index) => ({
+    ...items[0],
+    name: `Loaded-${index}.md`,
+    url: `/uploads/loaded-${index}.md`,
+    sourceMessageId: `loaded-${index}`,
+    threadId: 'T',
+  }));
+  data.fetch.mockResolvedValue(
+    Response.json({ artifacts: loaded, view: 'works', workLineage: 'resolved', complete: false, nextCursor: 'more' }),
+  );
+  await act(async () => root.render(<ThreadWorksPanelV2 threadId="default" />));
+  const button = (label: string) => [...host.querySelectorAll('button')].find((item) => item.textContent === label);
+  expect(host.querySelectorAll('[data-work-anchor]')).toHaveLength(24);
+  expect(button('Read more works')).toBeUndefined();
+  await act(async () => button('Expand more loaded works')?.click());
+  expect(host.querySelectorAll('[data-work-anchor]')).toHaveLength(48);
+  expect(button('Read more works')).toBeUndefined();
+  await act(async () => button('Expand more loaded works')?.click());
+  expect(host.querySelectorAll('[data-work-anchor]')).toHaveLength(50);
+  expect(button('Expand more loaded works')).toBeUndefined();
+  expect(button('Read more works')).toBeDefined();
+  expect(data.fetch.mock.calls.filter(([url]) => String(url).includes('/api/artifacts'))).toHaveLength(1);
+});
+
+it('keeps a zero-match selected filter and continuation in a partial global catalogue', async () => {
+  data.fetch.mockResolvedValue(
+    Response.json({
+      artifacts: [{ ...items[0], threadId: 'T', threadTitle: 'Thread' }],
+      view: 'works',
+      workLineage: 'resolved',
+      complete: false,
+      nextCursor: 'more',
+    }),
+  );
+  await act(async () =>
+    root.render(
+      <ThreadWorksPanelV2
+        threadId="default"
+        initialView={{
+          scope: 'global',
+          filter: 'image',
+          query: '',
+          catFilter: null,
+          grouping: 'time',
+          collapsed: [],
+        }}
+      />,
+    ),
+  );
+  const select = host.querySelector<HTMLSelectElement>('select');
+  expect(select?.value).toBe('image');
+  expect(select?.querySelector('option[value="image"]')?.textContent).toContain('0');
+  expect(host.textContent).toContain('1 works loaded');
+  expect(host.textContent).toContain('0 matches in loaded works');
+  expect(host.textContent).toContain('Read more works');
+  expect(host.textContent).not.toContain('No works match');
+  expect(data.fetch).toHaveBeenCalledTimes(1);
+});
+
+it('keeps lineage-unavailable rows and a retry after the last global page', async () => {
+  data.fetch.mockResolvedValue(
+    Response.json({
+      artifacts: [{ ...items[0], threadId: 'T', threadTitle: 'Thread' }],
+      view: 'works',
+      workLineage: 'unavailable',
+      complete: true,
+    }),
+  );
+  await act(async () => root.render(<ThreadWorksPanelV2 threadId="default" />));
+  expect(host.textContent).toContain('Delivered.md');
+  expect(host.textContent).toContain('1 works loaded');
+  expect([...host.querySelectorAll('button')].some((button) => button.textContent === 'Retry')).toBe(true);
+  expect(host.textContent).not.toContain('Newest first');
+});
+
 beforeEach(() => {
   localStorage.clear();
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
@@ -88,8 +166,10 @@ it('keeps the existing name filter and carries the same find return through a wo
     closeSearch: vi.fn(),
     registerReadingPort: vi.fn(() => () => {}),
     navigateResult: vi.fn(),
+    jumpInThread: vi.fn(() => false),
     moveTo: vi.fn(),
     returnToOrigin: vi.fn(),
+    dismissReturn: vi.fn(),
   };
   const returning = vi.fn();
   window.addEventListener(MESSAGE_FIND_RETURN_EVENT, returning);
@@ -411,7 +491,7 @@ it('a mounted Works list rereads delivered materials and owner versions without 
   expect(host.textContent).toContain('3 works');
 });
 
-it('keeps the pending return when a source refresh replaces previews before they settle', async () => {
+it('keeps the pending return and its cards mounted while the source refreshes', async () => {
   const image = {
     ...items[0],
     type: 'image',
@@ -439,6 +519,8 @@ it('keeps the pending return when a source refresh replaces previews before they
   await act(async () =>
     root.render(<ThreadWorksPanelV2 key="returned" threadId="work-source" initialView={initialView} />),
   );
+  const firstCard = host.querySelector('[data-work-anchor]');
+  expect(firstCard).not.toBeNull();
   let finish: (response: Response) => void = () => {};
   data.fetch.mockImplementation(
     () =>
@@ -447,11 +529,47 @@ it('keeps the pending return when a source refresh replaces previews before they
       }),
   );
   await act(async () => window.dispatchEvent(new Event('cat-cafe:entrusted-work-projection-invalidated')));
-  expect(host.querySelector('[data-work-anchor]')).toBeNull();
+  expect(host.querySelector('[data-work-anchor]')).toBe(firstCard);
   await act(async () => finish(Response.json(body)));
   top = 60;
   await act(async () => host.querySelector('img')!.dispatchEvent(new Event('load')));
   await vi.waitFor(() => expect(host.querySelector<HTMLElement>('.v2-works-scroll')?.scrollTop).toBe(250));
+});
+
+it('waits for the restored Works owner to be visible and loaded before applying its saved viewport', async () => {
+  const initialView = {
+    scope: 'thread' as const,
+    filter: 'all' as const,
+    query: '',
+    grouping: 'time' as const,
+    catFilter: null,
+    collapsed: [],
+    viewport: { scrollTop: 200 },
+  };
+  const render = (visible: boolean) =>
+    act(async () =>
+      root.render(
+        <WorkspaceSurfaceVisibilityProvider visible={visible}>
+          <ThreadWorksPanelV2 threadId="work-source" initialView={initialView} />
+        </WorkspaceSurfaceVisibilityProvider>,
+      ),
+    );
+  await render(false);
+  const list = host.querySelector<HTMLElement>('.v2-works-scroll');
+  expect(list?.scrollTop).toBe(0);
+  let finish: (response: Response) => void = () => {};
+  data.fetch.mockImplementationOnce(
+    () =>
+      new Promise<Response>((resolve) => {
+        finish = resolve;
+      }),
+  );
+  await render(true);
+  expect(list?.scrollTop).toBe(0);
+  await act(async () => {
+    finish(Response.json({ artifacts: items, workLineage: 'resolved', view: 'works', complete: true, total: 2 }));
+  });
+  expect(list?.scrollTop).toBe(200);
 });
 
 it('standalone global Works opens another conversation artifact through the current host owner', async () => {

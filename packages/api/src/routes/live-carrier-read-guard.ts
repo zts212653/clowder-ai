@@ -5,6 +5,13 @@ import type {
 } from '../domains/cats/services/stores/ports/TurnExecutionStore.js';
 import { LiveCarrierUnavailableError } from '../domains/concierge/live/LiveCarrierOperationGate.js';
 
+const watcherReads = new WeakSet<object>();
+
+/** Only a verified canonical child can mark a request as an observer read. */
+export function isWatcherRead(request: FastifyRequest): boolean {
+  return watcherReads.has(request);
+}
+
 interface LiveReadGuardDeps {
   turnExecutionStore?: Pick<ITurnExecutionStore, 'get'>;
   withLiveCarrierOperation?: <T>(
@@ -20,12 +27,27 @@ export function guardLiveCarrierRead(
 ): (request: FastifyRequest, reply: FastifyReply) => Promise<unknown> {
   return async (request, reply) => {
     const auth = request.callbackAuth;
+    if (auth?.toolExecutionPolicy?.mode === 'watcher' && !deps.turnExecutionStore)
+      return reply.code(503).send({ error: 'Watcher execution evidence unavailable' });
     if (auth && deps.turnExecutionStore) {
       let execution: TurnExecutionRecord | null;
       try {
         execution = await deps.turnExecutionStore.get(auth.invocationId);
       } catch {
         return reply.code(503).send({ error: 'Execution evidence unavailable' });
+      }
+      if (auth.toolExecutionPolicy?.mode === 'watcher' && execution?.executionKind !== 'watcher')
+        return reply.code(409).send({ error: 'Watcher execution evidence missing' });
+      if (execution?.executionKind === 'watcher') {
+        if (
+          execution.status !== 'running' ||
+          execution.userId !== auth.userId ||
+          execution.catId !== auth.catId ||
+          execution.threadId !== auth.threadId ||
+          execution.parentInvocationId !== (auth.parentInvocationId ?? auth.invocationId)
+        )
+          return reply.code(409).send({ error: 'Watcher execution scope mismatch' });
+        watcherReads.add(request);
       }
       if (execution?.queueCompletionPolicy === 'explicit_source') {
         if (

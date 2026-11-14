@@ -4,6 +4,8 @@ related_features: [F138, F232, F063, F307]
 topics: [living-artifacts, works, versions, production-authority]
 doc_kind: contract
 created: 2026-10-20
+updated: 2026-11-08
+tips_exempt: "Corrects existing Work read/continuation authorization; no new user operation."
 mcp_admission_status: accepted
 mcp_admission_ref: "file:docs/architecture/f309-living-work-entry-contract.md"
 mcp_admission_claims:
@@ -30,6 +32,8 @@ mcp_admission_claims:
 | list | 从当前 owner manifests 投影可访问作品；分页带 catalogue snapshot，头变化拒绝拼页，未发布到聊天的已保存作品也能找回 |
 | set-context / read-context | 对精确作品版保存／读取格式注释；视频上下文使用 Phase A asset schema、原文段落和实际媒体 PTS，独立 metadataRevision CAS 与 operationId。更新索引不产生新影片版本，指定旧 metadataRevision 仍可读 |
 | import-context | 同一视频 metadata owner，消费受权 F063 JSON locator＋expectedSourceRevision，完整 UTF-8 视频索引最多 2 MiB。先核作品写权，再核源根、稳定读与 digest；媒体／来源验证后重核源及作品授权。命令体仍为 32 KiB，重放从保留回执恢复，不因源文件已移除而重复写入。这是视频索引格式入口，不是 HTML 正文准入 |
+| set-cover / read-cover | 精确视频作品版的已采用封面，F309 原库 `work_version_covers` 只追加保存，独立 coverRevision CAS 与 operationId 幂等，TTL=0。choice 为 image（pick：同作品某固定版上下文里的素材 / 本对话已持久消息的媒体项 / 本人上传）、frame（清除，回到真实画面）或 restore（按本版旧修订原文件撤销）。pick 在 owner 端解析成精确文件版本（规范 locator + sha256）与出处，不信 URL、文件名或目录；人沿本人入口（`/api/works/cover`，作品线程由 owner 推出），猫沿 callback 与作品写权一致的授权。read-cover 返回 none/frame/image/unavailable，源丢失或撤权为 unavailable，保留选择、不换别的图；新采用、restore 与重放在写入前复核来源权限，读不到即拒绝。封面字节按 `private, no-store` 返回，打开快照后交付前再核一次来源。换封面不改影片字节或 ownerRevision；set-context/import-context 不会擦掉它 |
+| submit.cover | 可选 inherit（默认）/ frame / image。决定在 owner 写影片之前冻结在 `work_cover_submissions`，新版注释投影时写第一条封面修订；显式 frame 与继承已清除的选择都持久为 frame，旧版从未选择时新版仍为 none。同 operationId 重试只用冻结结果，不读之后才改的旧版封面；重试中显式指定的图片仍按当前来源权限复核 |
 
 可选来源 binding 在保存、重放和读取时经过原 video-project owner 核权限及精确 revision/digest；若带 screening，必须同属该输入且冻结成片 digest 等于作品版。原 reviewId 通过原项目意见服务及其受众投影核验，不直接读原账、不复制批注，也不把来源绑定当成新读写授权。旧意见在视频工位的呈现仍需消费这条已核关联，不能仅凭注释落盘声明已接通。
 
@@ -45,9 +49,9 @@ Map delta: none。章节、段落归属与来源时间仍是 F309 原固定版�
 
 素材仍复用 Phase A 原资产版本与 locator。帧序列的浏览分组不会丢掉逐帧原件；封面只登记来源已说明采用的版本，候选和历史记录不能冒充当前采用素材。
 
-服务端身份来自直接认证的本人请求，或 callback 的当前 invocationId/token、真实 cat、ownerUserId 和执行 thread。猫创建作品须仍是严格认证的 active owner invocation，受当前工具策略限制；只读、终态、兼容身份降级与跨线程自报写入被拒绝。续版默认沿原真实生产者；其他猫须复用现有 F309 exact publication Task grant，不能通过提交导演角色、旧 messageId、召回材料或路径自授写权。公开 DTO 不接受 actor/owner/权限字段。F063 根、realpath、descriptor、冻结 digest 和最终权限检查仍在源读取与 owner commit 两端执行。
+服务端身份来自直接认证的本人请求，或 callback 的当前 invocationId/token、真实 cat、ownerUserId 和执行 thread。所有操作保留 active 身份、当前工具策略及作品／源权限检查；读取与 inspect-source 不要求本轮启动来源为 strict，inspect-source 在读取前后均核 read 权限。独立创建，以及未选择修改托付的原作者续版，仍须 strict production invocation。显式选择原 F309 exact publication Task grant 的续版，按仍有效的原 Task／作品／消息授权执行，不再重复要求本轮 strict；原作者也不能跳过这份 grant，失败后不能退回独立生产。创建没有既有作品授权，携带 Task 上下文也不能替代独立创建权。终态、策略拒绝、身份错配及跨线程自报写入仍拒绝；导演角色、旧 messageId、召回材料或路径不授予写权。公开 DTO 不接受 actor/owner/权限字段。F063 根、realpath、descriptor、冻结 digest 和最终权限检查仍在源读取与 owner commit 两端执行。
 
-共同 MCP 与 callback envelope 可传 `contentTaskId`，选择原 F309 修改托付的 Task 上下文；它不在提交语义中，也不是授权令牌。当前 invocation 身份不变，原 owner 逐次重读 Task 的负责猫、线程、状态及 exact content grant，并复核最初 Human 消息的当前 custody。不存在的 Task、别件作品的 Task 或已撤回消息都不能读写；重放也先复核授权。跨 thread 读取仍须在当前执行 thread 拥有这份原精确授权，并复核作品来源 thread；指定固定版本本身不授予访问。普通本人 HTTP 入口不接受此 callback 上下文，猫自己的独立交片仍不要求先建 Task。
+共同 MCP 与 callback envelope 可传 `contentTaskId`，选择原 F309 修改托付的 Task 上下文；它不在提交语义中，也不是授权令牌。当前 invocation 身份不变，原 owner 逐次重读 Task 的负责猫、线程、状态及 exact content grant，并复核最初 Human 消息的当前 custody。不存在的 Task、别件作品的 Task 或已撤回消息不能据此取得额外读写权限；原件读取后、实际提交和重放均重新核同一授权。跨 thread 读取仍须在当前执行 thread 拥有这份原精确授权，并复核作品来源 thread；指定固定版本本身不授予访问。普通本人 HTTP 入口不接受此 callback 上下文，猫自己的独立交片仍不要求先建 Task。素材库复用该 authorizer 的独立生产准入仍按 write 检查，不因作品读取减负放宽其原有边界。
 
 作品的 owning-thread scope 与不可变来源说明保存在 F138 原 manifest。F309 原 canonical SQLite 只新增逐 ownerRevision 的标题、说明、源引用等注释，不拥有 head。目录按 owner 发现；源文件日后移动或删除不改写已保留版本，作品 thread 的删除或访问撤回仍阻止读取。保存不发消息；显式 publish-reference 才附卡，`reference_attached` 仅说明已进入当前消息富块管道，不冒充消息已送达。卡片的「看这版」始终重新授权并打开原固定版，「查看最新」是另一个显式读取动作。来源块或卡片自身不能授予权限，原意见回报也不能代 Human 接受意见。
 
@@ -81,7 +85,7 @@ F309 原 `pending_versions` 封存完整接受命令、原 actor 和服务端验
 - 正文只在 F138 原 content owner 的 `text/html` blob 中保留；work scope/receipt 绑定真实 owner、thread、具名 actor。来源注释仅存 `{kind:"html"}`，原 sourcePublication 标明 `inline-html` 和字节 digest；它们不复制正文，也不是第二作品身份。
 - `read` 仍只返回固定版元数据；新增 `read-body` 接相同 `reference`，返回 `{reference,mediaType:"text/html",html}`。它只读取已授权的固定 HTML blob，有界校验长度、digest、UTF-8，返回前重新授权。callback 沿现有 snapshot-fenced JSON 文本分页，续页必须复制 snapshot、nextCursor。缺失或无权固定版均为内容无关 `access_denied`；不存在的 handle 不授予读取权。
 - 原文始终是不可信数据；存储/读取不执行脚本、不解析依赖、不抓取外部 URL。读取是 JSON、private/no-store，没有同源可执行 HTML/raw URL。提交不做 DOMPurify 转换，避免丢失续改源；后续预览必须复用 `sanitizeWidgetHtml` 与 `HtmlWidgetBlock` 的 iframe sandbox，不能据存储成功声称任意应用或外部资源可运行。内联事件策略不在此切片更改。
-- 权限继续由 `createWorkAuthorizer` / PublishedMediaAccess、strict active invocation、当前工具策略及原 exact publication Task grant 决定。作品来源 thread 隐藏、删除或撤权后，列表、读回、重放和提交都不能绕过；换会话不是跨 thread 授权。
+- 权限继续由 `createWorkAuthorizer` / PublishedMediaAccess、当前 active invocation、工具策略及资源权限决定；独立生产另核 strict，显式托付续版另核原 exact publication Task grant。作品来源 thread 隐藏、删除或撤权后，列表、读回、重放和提交都不能绕过；换会话不是跨 thread 授权。
 - 原 owner manifest 发现可显式纳入 work HTML，媒体选择器默认仍仅 PNG/MP4。同一 F232 WorkCatalogue 为未发聊天的 HTML 投影 `widget + work` 坐标，无正文、虚构消息或 raw URL。Works 的原查看区通过原 publication surface 打开目录给出的固定版；HTML 复用 HtmlWidgetBlock 的 workspace 展示模式、sanitizeWidgetHtml 与 allow-scripts iframe。版本下拉只调用 read/read-body；刷新版本目录保留当前固定版和 iframe 状态，不自动切换最新。换版、换 thread 或错误时卸载旧画面，响应坐标错配、损坏或无权不能退回另一版。
 - 沿原 owner lock/CAS/幂等回执与初版 staging；owner 成功、注释失败仍返回 `version_saved`，原完整请求恢复相同回执和注释，不提交第二版。追加版在 manifest 发布前失败可留下未引用的内容寻址 blob，沿既有 owner 行为，不暴露半版；不引入新的 GC。
 

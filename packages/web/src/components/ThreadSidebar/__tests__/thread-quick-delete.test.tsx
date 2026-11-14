@@ -1,7 +1,6 @@
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { YouSettingsPage } from '@/components/settings/YouSettingsPage';
 import { observeApiSessionOwner } from '@/utils/api-session-identity';
 import {
   addToastMock,
@@ -31,7 +30,7 @@ const threads = ['first', 'second', 'system'].map((id, index) => ({
   ...(id === 'system' ? { systemKind: 'eval_domain' as const } : {}),
 }));
 
-describe('thread quick deletion and confirmation preference', () => {
+describe('menu-only thread deletion with mandatory confirmation', () => {
   let harness: ThreadSidebarHarness;
   let settingsRoot: Root | undefined;
   let settingsContainer: HTMLDivElement;
@@ -45,27 +44,20 @@ describe('thread quick deletion and confirmation preference', () => {
     expect(found, `button ${label}`).toBeTruthy();
     return found!;
   };
-  const quickDelete = (id: string) => {
-    const found = row(id)?.querySelector<HTMLButtonElement>('[data-testid="thread-quick-delete"]');
-    expect(found, `quick delete ${id}`).toBeTruthy();
-    return found!;
+  const menuDelete = (id: string) => {
+    act(() => row(id)!.querySelector<HTMLButtonElement>('[aria-label="更多操作"]')!.click());
+    act(() => button('删除对话').click());
   };
-  const remember = () => {
-    const found = Array.from(harness.container.querySelectorAll('label'))
-      .find((label) => label.textContent?.includes('后续不再提醒'))
-      ?.querySelector<HTMLInputElement>('input');
-    expect(found, 'remember confirmation checkbox').toBeTruthy();
-    return found!;
-  };
-  const preferenceSwitch = () => {
-    const found = settingsContainer.querySelector<HTMLInputElement>('[role="switch"][aria-label="删除普通会话前确认"]');
-    expect(found, 'confirmation setting in You').toBeTruthy();
-    return found!;
-  };
+  const deleteRequests = () => mockApiFetch.mock.calls.filter(([, init]) => init?.method === 'DELETE');
 
   beforeEach(() => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() => Promise.reject(new Error('Unexpected network from isolated test'))),
+    );
     installThreadSidebarGlobals();
     resetThreadSidebarMocks();
+    localStorage.setItem('cat-cafe:shell-presentation', 'classic');
     observeApiSessionOwner('owner');
     deleted = new Set();
     failureStatus = undefined;
@@ -98,130 +90,90 @@ describe('thread quick deletion and confirmation preference', () => {
     settingsRoot = undefined;
     settingsContainer.remove();
     resetThreadSidebarGlobals();
+    const networkCalls = vi.mocked(fetch).mock.calls;
+    vi.unstubAllGlobals();
     vi.restoreAllMocks();
+    expect(networkCalls, 'isolated component tests cannot call a live API').toEqual([]);
   });
 
   async function renderSettings() {
+    // Load after the shared sidebar helper installs its API mock; an earlier static
+    // import leaves the settings background read holding the real session client.
+    const { YouSettingsPage } = await import('@/components/settings/YouSettingsPage');
     settingsRoot = createRoot(settingsContainer);
     await act(async () => {
       settingsRoot?.render(<YouSettingsPage coCreator={null} loadError={false} reload={async () => {}} />);
     });
   }
 
-  it('places quick deletion after More and keeps confirmation when a checked dialog is cancelled', async () => {
+  it('keeps deletion inside More and cancellation never sends DELETE', async () => {
     await harness.render();
-    const actions = Array.from(row('first')!.querySelectorAll<HTMLButtonElement>('button'));
-    expect(actions.indexOf(quickDelete('first'))).toBeGreaterThan(
-      actions.findIndex((action) => action.getAttribute('aria-label') === '更多操作'),
-    );
-    act(() => quickDelete('first').click());
+    expect(row('first')!.querySelector('[data-testid="thread-quick-delete"]')).toBeNull();
+    menuDelete('first');
     expect(harness.container.textContent).toContain('确认删除对话');
-    expect(remember().checked).toBe(false);
-    act(() => remember().click());
+    expect(harness.container.querySelector('[role="dialog"] input[type="checkbox"]')).toBeNull();
     act(() => button('取消').click());
-    act(() => quickDelete('first').click());
-    expect(remember().checked).toBe(false);
+    expect(deleteRequests()).toHaveLength(0);
+    menuDelete('first');
+    expect(harness.container.textContent).toContain('确认删除对话');
     expect(deleted.size).toBe(0);
     expect(mockPush).not.toHaveBeenCalled();
   });
 
-  it('remembers only successful confirmation, survives remount and restores the exact trashed thread', async () => {
+  it('ignores an old off preference and confirms every deletion after remount', async () => {
+    localStorage.setItem('clowder:thread-delete-confirm:v1:http%3A%2F%2Flocalhost%3A3102:owner', 'off');
     await harness.render();
-    act(() => quickDelete('first').click());
-    act(() => remember().click());
+    menuDelete('first');
+    expect(harness.container.querySelector('[role="dialog"]')).not.toBeNull();
+    expect(deleteRequests()).toHaveLength(0);
     await act(async () => button('移入回收站').click());
     await harness.flush();
     expect(row('first')).toBeNull();
+    expect(deleteRequests()).toHaveLength(1);
     harness.cleanup();
     harness = createThreadSidebarHarness();
     await harness.render();
-    await act(async () => quickDelete('second').click());
-    await harness.flush();
-    expect(harness.container.textContent).not.toContain('确认删除对话');
-    expect(deleted).toEqual(new Set(['first', 'second']));
-    expect(mockPush).not.toHaveBeenCalled();
+    menuDelete('second');
+    expect(harness.container.querySelector('[role="dialog"]')).not.toBeNull();
+    expect(deleteRequests()).toHaveLength(1);
+    act(() => button('取消').click());
     act(() => harness.container.querySelector<HTMLButtonElement>('[data-testid="trash-bin-toggle"]')!.click());
     await harness.flush();
-    const restore = Array.from(harness.container.querySelectorAll('button')).find(
-      (candidate) =>
-        candidate.textContent?.trim() === '恢复' && candidate.parentElement?.textContent?.includes('清理对话 first'),
+    await act(async () =>
+      harness.container.querySelector<HTMLButtonElement>('[data-testid="restore-btn-first"]')!.click(),
     );
-    expect(restore).toBeTruthy();
-    await act(async () => restore!.click());
     await harness.flush();
-    expect(deleted).toEqual(new Set(['second']));
+    expect(deleted.size).toBe(0);
     expect(row('first')).not.toBeNull();
   });
 
-  it.each([409, 500])('retains the thread and confirmation preference after HTTP %i', async (status) => {
+  it.each([409, 500])('retains the thread and requires confirmation again after HTTP %i', async (status) => {
     failureStatus = status;
     await harness.render();
-    act(() => quickDelete('first').click());
-    act(() => remember().click());
+    menuDelete('first');
     await act(async () => button('移入回收站').click());
     await harness.flush();
     expect(row('first')).not.toBeNull();
     expect(deleted.size).toBe(0);
     expect(addToastMock).toHaveBeenCalledWith(expect.objectContaining({ type: 'error' }));
-    act(() => quickDelete('first').click());
-    expect(harness.container.textContent).toContain('确认删除对话');
-    expect(remember().checked).toBe(false);
-  });
-
-  it('shares the setting with the sidebar and keeps another user on the default confirmation', async () => {
-    await harness.render();
-    await renderSettings();
-    expect(preferenceSwitch().checked).toBe(true);
-    act(() => preferenceSwitch().click());
-    await act(async () => quickDelete('first').click());
-    await harness.flush();
-    expect(deleted.has('first')).toBe(true);
-    act(() => observeApiSessionOwner('another-user'));
-    expect(preferenceSwitch().checked).toBe(true);
-    act(() => quickDelete('second').click());
-    expect(harness.container.textContent).toContain('确认删除对话');
-    act(() => button('取消').click());
-    act(() => observeApiSessionOwner('owner'));
-    expect(preferenceSwitch().checked).toBe(false);
-    act(() => preferenceSwitch().click());
-    act(() => quickDelete('second').click());
+    menuDelete('first');
     expect(harness.container.textContent).toContain('确认删除对话');
   });
 
-  it('uses the same saved preference for the existing menu delete action', async () => {
+  it('removes the confirmation preference from personal settings', async () => {
     await harness.render();
     await renderSettings();
-    act(() => preferenceSwitch().click());
-    act(() => row('first')!.querySelector<HTMLButtonElement>('[aria-label="更多操作"]')!.click());
-    await act(async () => button('删除对话').click());
-    await harness.flush();
-    expect(deleted.has('first')).toBe(true);
-    expect(harness.container.textContent).not.toContain('确认删除对话');
-  });
-
-  it('does not silently disable confirmation when preference storage is unavailable', async () => {
-    await harness.render();
-    await renderSettings();
-    vi.spyOn(window.localStorage, 'setItem').mockImplementation(() => {
-      throw new Error('storage unavailable');
-    });
-    act(() => preferenceSwitch().click());
-    expect(preferenceSwitch().checked).toBe(true);
-    expect(settingsContainer.querySelector('[role="alert"]')).not.toBeNull();
-    act(() => quickDelete('first').click());
+    expect(settingsContainer.querySelector('[role="switch"][aria-label="删除普通会话前确认"]')).toBeNull();
+    expect(settingsContainer.textContent).not.toContain('会话操作');
+    menuDelete('first');
     expect(harness.container.textContent).toContain('确认删除对话');
   });
 
-  it('still requires the system name when ordinary confirmation is disabled', async () => {
+  it('still requires the system name before calling the protected delete route', async () => {
     await harness.render();
-    await renderSettings();
-    act(() => preferenceSwitch().click());
     act(() => harness.container.querySelector<HTMLButtonElement>('[data-testid="sidebar-tab-system"]')!.click());
-    expect(row('system')?.querySelector('[data-testid="thread-quick-delete"]')).toBeNull();
-    act(() => row('system')!.querySelector<HTMLButtonElement>('[aria-label="更多操作"]')!.click());
-    act(() => button('删除对话').click());
+    menuDelete('system');
     expect(harness.container.textContent).toContain('删除系统对话');
-    expect(harness.container.textContent).not.toContain('后续不再提醒');
     expect(button('确认删除').disabled).toBe(true);
     const input = harness.container.querySelector<HTMLInputElement>('[role="dialog"] input')!;
     act(() => {
@@ -235,22 +187,5 @@ describe('thread quick deletion and confirmation preference', () => {
       method: 'DELETE',
       signal: expect.any(AbortSignal),
     });
-  });
-
-  it('reports a successful deletion separately from a failed remember write', async () => {
-    await harness.render();
-    act(() => quickDelete('first').click());
-    act(() => remember().click());
-    vi.spyOn(window.localStorage, 'setItem').mockImplementation(() => {
-      throw new Error('storage unavailable');
-    });
-    await act(async () => button('移入回收站').click());
-    await harness.flush();
-    expect(row('first')).toBeNull();
-    expect(addToastMock).toHaveBeenCalledWith(
-      expect.objectContaining({ type: 'info', message: expect.stringContaining('未能保存') }),
-    );
-    act(() => quickDelete('second').click());
-    expect(harness.container.textContent).toContain('确认删除对话');
   });
 });

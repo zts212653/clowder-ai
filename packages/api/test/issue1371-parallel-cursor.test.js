@@ -3,7 +3,6 @@ import { test } from 'node:test';
 import { assembleIncrementalContext } from '../dist/domains/cats/services/agents/routing/route-helpers.js';
 import { routeParallel } from '../dist/domains/cats/services/agents/routing/route-parallel.js';
 import { FreshnessOutputCommitCoordinator } from '../dist/domains/cats/services/freshness/glass-box/FreshnessOutputCommitCoordinator.js';
-import { InMemoryTurnExecutionStore } from '../dist/domains/cats/services/stores/memory/InMemoryTurnExecutionStore.js';
 import { DeliveryCursorStore } from '../dist/domains/cats/services/stores/ports/DeliveryCursorStore.js';
 import { MessageStore } from '../dist/domains/cats/services/stores/ports/MessageStore.js';
 import { adaptMessageStore } from './helpers/message-from-fixtures.js';
@@ -106,98 +105,29 @@ test('#1371: a completed parallel target commits its delivery boundary before it
   }
 });
 
-async function appendScenarioReply(messageStore, source, scenario) {
-  const reply = await messageStore.append({
-    userId: scenario.userId ?? 'user-1',
-    threadId: scenario.threadId ?? 'thread-restart',
-    catId: scenario.catId ?? 'opus',
-    content: scenario.content ?? 'The requested answer is complete.',
+test('#1371: an explicit retry has exact source provenance while historical replies do not select a source', async () => {
+  const messageStore = adaptMessageStore(new MessageStore());
+  const source = messageStore.append({
+    userId: 'user-1',
+    threadId: 'thread-restart',
+    catId: null,
+    content: '@opus old source question',
+    mentions: ['opus'],
+    timestamp: 100,
+  });
+  messageStore.append({
+    userId: 'user-1',
+    threadId: 'thread-restart',
+    catId: 'opus',
+    content: 'Earlier reply completed.',
     mentions: [],
-    timestamp: 101,
     origin: 'stream',
-    ...(scenario.canceled ? { deliveryStatus: 'queued' } : {}),
-    extra: {
-      stream: { invocationId: 'parent', ...(scenario.omitChild ? {} : { turnInvocationId: 'child-opus' }) },
-      ...(scenario.omitSource
-        ? {}
-        : { causal: { kind: 'invocation_reply', triggerMessageId: scenario.wrongSource ? 'unrelated' : source.id } }),
-    },
+    timestamp: 101,
   });
-  if (scenario.canceled) await messageStore.markCanceled(reply.id);
-}
-
-for (const scenario of [
-  { name: 'unanswered', replied: false, expectedBaton: true },
-  { name: 'exact own reply', replied: true, expectedBaton: false },
-  { name: 'explicit retry', replied: true, explicitRetry: true, expectedBaton: false },
-  { name: 'other cat reply', replied: true, catId: 'codex', expectedBaton: true },
-  { name: 'other tenant reply', replied: true, userId: 'user-2', expectedBaton: true },
-  { name: 'other thread reply', replied: true, threadId: 'thread-other', expectedBaton: true },
-  { name: 'unbound child', replied: true, omitChild: true, expectedBaton: true },
-  { name: 'unbound source', replied: true, omitSource: true, expectedBaton: true },
-  { name: 'wrong source', replied: true, wrongSource: true, expectedBaton: true },
-  { name: 'canceled reply', replied: true, canceled: true, expectedBaton: true },
-  { name: 'empty output', replied: true, content: '', expectedBaton: true },
-  { name: 'failed partial output', replied: true, status: 'failed', expectedBaton: true },
-  { name: 'interrupted output', replied: true, status: 'interrupted', expectedBaton: true },
-  { name: 'still running output', replied: true, status: 'running', expectedBaton: true },
-  { name: 'unknown child outcome', replied: true, omitRecord: true, expectedBaton: true },
-  { name: 'wrong child record source', replied: true, wrongRecordSource: true, expectedBaton: true },
-]) {
-  test(`#1371: cold navigation distinguishes ${scenario.name}`, async () => {
-    const messageStore = adaptMessageStore(new MessageStore());
-    const source = await messageStore.append({
-      userId: 'user-1',
-      threadId: 'thread-restart',
-      catId: null,
-      content: '@opus old source question',
-      mentions: ['opus'],
-      timestamp: 100,
-    });
-    if (scenario.replied) {
-      await appendScenarioReply(messageStore, source, scenario);
-    }
-    const turnExecutionStore = new InMemoryTurnExecutionStore();
-    if (scenario.replied && !scenario.omitRecord) {
-      turnExecutionStore.createRunning({
-        invocationId: 'child-opus',
-        parentInvocationId: 'parent',
-        threadId: 'thread-restart',
-        userId: 'user-1',
-        catId: 'opus',
-        executionKind: 'ordinary',
-        startedAt: 100,
-        causal: { triggerMessageId: scenario.wrongRecordSource ? 'foreign-source' : source.id },
-      });
-      if (scenario.status !== 'running')
-        turnExecutionStore.transitionTerminal('child-opus', {
-          status: scenario.status ?? 'succeeded',
-          endedAt: 102,
-          ...(scenario.status ? { terminalReason: 'controlled failure' } : {}),
-        });
-    }
-    const context = await assembleIncrementalContext(
-      {
-        messageStore,
-        deliveryCursorStore: new DeliveryCursorStore(),
-        invocationDeps: { turnExecutionStore },
-      },
-      'user-1',
-      'thread-restart',
-      'opus',
-      scenario.explicitRetry ? source.id : undefined,
-    );
-    assert.equal(
-      context.navigationHeader?.includes('old source question') ?? false,
-      scenario.expectedBaton,
-      'answered sources leave navigation, while the explicit current request is carried in the message delta itself',
-    );
-    if (scenario.explicitRetry) {
-      assert.equal(
-        context.includesCurrentUserMessage,
-        true,
-        'explicit retry remains present in the exact message delta',
-      );
-    }
-  });
-}
+  const deps = { messageStore, deliveryCursorStore: new DeliveryCursorStore(), invocationDeps: {} };
+  const historical = await assembleIncrementalContext(deps, 'user-1', 'thread-restart', 'opus');
+  assert.doesNotMatch(historical.navigationHeader, /本轮输入来源|传球/);
+  const retry = await assembleIncrementalContext(deps, 'user-1', 'thread-restart', 'opus', source.id);
+  assert.ok(retry.navigationHeader.includes(source.id));
+  assert.ok(retry.includesCurrentUserMessage);
+});

@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -68,7 +69,13 @@ describe('PluginsContent — Manager plugin config', () => {
   }
 
   it('does not invent a builtin GitHub row or fetch services when the Manager is empty', async () => {
-    mockFetch.mockResolvedValue(jsonResponse({ plugins: [], catalog }));
+    mockFetch.mockImplementation(async (path: string) => {
+      if (path === '/api/plugin-manager/plugins') return jsonResponse({ plugins: [], catalog });
+      if (path === '/api/plugin-manager/marketplaces' || path === '/api/plugin-manager/marketplaces/refresh') {
+        return jsonResponse({ sources: [] });
+      }
+      return jsonResponse({}, 404);
+    });
     await renderPluginsContent();
     expect(container.textContent).not.toContain('GitHub');
     expect(mockFetch.mock.calls.some(([path]) => path === '/api/services' || path === '/api/plugins')).toBe(false);

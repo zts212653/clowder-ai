@@ -41,7 +41,7 @@ test('over 1000 actually bound R publications cannot starve a later completed re
       (await f.service.read(actual.id, actual.extra.messageSearchAnswer.blockId, human)).status,
       'available',
     );
-    assert.equal(f.searches(), 1);
+    assert.equal(f.searches(), 0);
     assert.equal(f.calls(), 0);
   } finally {
     f.db.close();
@@ -64,7 +64,7 @@ test('an unreconciled prefix rotates durably instead of starving a later R on ev
       f.messages.getById(target.message.id).extra?.messageSearchAnswer,
       'persisted scan progress survives service recreation',
     );
-    assert.equal(f.searches(), 1);
+    assert.equal(f.searches(), 0);
     assert.equal(f.calls(), 0);
   } finally {
     f.db.close();
@@ -82,7 +82,7 @@ test('a reserved message coordinate remains recoverable until its actual Host bi
     await f.recreate().recoverPreparedResponses();
     assert.equal(f.messages.getById(message.id).extra.rich.blocks.length, 1);
     assert.equal((await f.service.read(message.id, blockId, human)).status, 'available');
-    assert.equal(f.searches(), 1);
+    assert.equal(f.searches(), 0);
   } finally {
     f.db.close();
   }
@@ -103,7 +103,7 @@ test('new preparations between restarts cannot repeatedly jump ahead of an older
       f.messages.getById(message.id).extra?.messageSearchAnswer,
       'new arrivals join the current scan round instead of resetting to the front',
     );
-    assert.equal(f.searches(), 1);
+    assert.equal(f.searches(), 0);
     assert.equal(f.calls(), 0);
   } finally {
     f.db.close();
@@ -124,7 +124,7 @@ test('loss after the Host commit but before recovery acknowledgement repairs met
     assert.equal(f.messages.getById(message.id).extra.rich.blocks.length, 1);
     assert.equal((await f.recreate().recoverPreparedResponses()).scanned, 0);
     assert.equal((await f.recreate().prepare(f.request)).publicationRef, prepared.publicationRef);
-    assert.equal(f.searches(), 1);
+    assert.equal(f.searches(), 0);
     assert.equal(f.calls(), 0);
   } finally {
     f.db.close();

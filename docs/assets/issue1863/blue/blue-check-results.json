@@ -1,0 +1,96 @@
+{
+  "head": "d5d1b9d34870f84d2c3666a013cfc3e1883421f3",
+  "checks": [
+    {
+      "name": "light link blue + transparent textarea + visible caret",
+      "pass": true
+    },
+    {
+      "name": "selection keeps system highlight and selected text visible",
+      "pass": true
+    },
+    {
+      "name": "dark link blue and body color",
+      "pass": true
+    },
+    {
+      "name": "no-link restores native text and hides mirror",
+      "pass": true
+    },
+    {
+      "name": "composition restores native text and hides mirror",
+      "pass": true
+    },
+    {
+      "name": "composition end restores blue text and transparency",
+      "pass": true
+    }
+  ],
+  "light": {
+    "textareaColor": "rgba(0, 0, 0, 0)",
+    "caretColor": "oklch(0.2 0.005 30)",
+    "mirrorVisibility": "visible",
+    "dataActive": "true",
+    "markColor": "rgb(37, 99, 235)",
+    "markBackground": "rgba(0, 0, 0, 0)",
+    "bodyColor": "oklch(0.2 0.005 30)",
+    "selectionColor": "rgb(255, 255, 255)",
+    "selectionBackground": "rgb(0, 120, 215)"
+  },
+  "selection": {
+    "textareaColor": "rgba(0, 0, 0, 0)",
+    "caretColor": "oklch(0.2 0.005 30)",
+    "mirrorVisibility": "visible",
+    "dataActive": "true",
+    "markColor": "rgb(37, 99, 235)",
+    "markBackground": "rgba(0, 0, 0, 0)",
+    "bodyColor": "oklch(0.2 0.005 30)",
+    "selectionColor": "rgb(255, 255, 255)",
+    "selectionBackground": "rgb(0, 120, 215)"
+  },
+  "dark": {
+    "textareaColor": "rgba(0, 0, 0, 0)",
+    "caretColor": "oklch(0.95 0.005 30)",
+    "mirrorVisibility": "visible",
+    "dataActive": "true",
+    "markColor": "rgb(147, 197, 253)",
+    "markBackground": "rgba(0, 0, 0, 0)",
+    "bodyColor": "oklch(0.95 0.005 30)",
+    "selectionColor": "rgb(255, 255, 255)",
+    "selectionBackground": "rgb(25, 103, 210)"
+  },
+  "noLink": {
+    "textareaColor": "oklch(0.2 0.005 30)",
+    "caretColor": "oklch(0.2 0.005 30)",
+    "mirrorVisibility": "hidden",
+    "dataActive": "false",
+    "markColor": null,
+    "markBackground": null,
+    "bodyColor": "oklch(0.2 0.005 30)",
+    "selectionColor": "oklch(0.2 0.005 30)",
+    "selectionBackground": "rgba(0, 0, 0, 0)"
+  },
+  "composing": {
+    "textareaColor": "oklch(0.2 0.005 30)",
+    "caretColor": "oklch(0.2 0.005 30)",
+    "mirrorVisibility": "hidden",
+    "dataActive": "false",
+    "markColor": "rgb(37, 99, 235)",
+    "markBackground": "rgba(0, 0, 0, 0)",
+    "bodyColor": "oklch(0.2 0.005 30)",
+    "selectionColor": "oklch(0.2 0.005 30)",
+    "selectionBackground": "rgba(0, 0, 0, 0)"
+  },
+  "committed": {
+    "textareaColor": "rgba(0, 0, 0, 0)",
+    "caretColor": "oklch(0.2 0.005 30)",
+    "mirrorVisibility": "visible",
+    "dataActive": "true",
+    "markColor": "rgb(37, 99, 235)",
+    "markBackground": "rgba(0, 0, 0, 0)",
+    "bodyColor": "oklch(0.2 0.005 30)",
+    "selectionColor": "rgb(255, 255, 255)",
+    "selectionBackground": "rgb(0, 120, 215)"
+  },
+  "pass": true
+}

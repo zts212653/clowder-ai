@@ -1,0 +1,946 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Issue #1821 · 上下文交接卡设计提案</title>
+<style>
+  :root {
+    --col: 600px;
+
+    --canvas: #fffbf6;
+    --surface-1: #fcf7f0;
+    --surface-2: #f7f2ea;
+    --surface-3: #efe9e3;
+    --hairline: #e5dfd5;
+    --hairline-strong: #d8d1c6;
+    --ink: #141413;
+    --muted: #5f5d57;
+    --info: #4d7fa3;
+    --warning: #a8721c;
+    --focus: #b05f45;
+
+    --card-bg: color-mix(in oklab, var(--info) 5%, var(--canvas));
+    --card-border: color-mix(in oklab, var(--info) 22%, var(--hairline));
+    --rule: color-mix(in oklab, var(--info) 18%, var(--hairline));
+    --raw-bg: color-mix(in oklab, var(--ink) 3.5%, transparent);
+    --code-bg: color-mix(in oklab, var(--ink) 3%, var(--canvas));
+
+    --sans: "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans CJK SC", system-ui, sans-serif;
+    --serif: "Source Serif 4", "Songti SC", "Noto Serif CJK SC", Georgia, serif;
+    --mono: "JetBrains Mono", "Cascadia Mono", Consolas, "SF Mono", Menlo, monospace;
+  }
+
+  html[data-theme="dark"] {
+    --canvas: #181715;
+    --surface-1: #1f1e1b;
+    --surface-2: #252320;
+    --surface-3: #2d2b27;
+    --hairline: #34322d;
+    --hairline-strong: #45423c;
+    --ink: #faf9f5;
+    --muted: #a09d96;
+    --info: #7fb0d0;
+    --warning: #d9a441;
+    --focus: #cc785c;
+
+    --card-bg: color-mix(in oklab, var(--info) 9%, var(--surface-1));
+    --card-border: color-mix(in oklab, var(--info) 26%, var(--hairline));
+    --rule: color-mix(in oklab, var(--info) 22%, var(--hairline));
+    --raw-bg: color-mix(in oklab, #ffffff 4%, transparent);
+    --code-bg: color-mix(in oklab, #ffffff 3%, var(--surface-1));
+  }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body {
+    background: var(--canvas);
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 14px;
+    line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+  }
+  button { font: inherit; }
+  :focus-visible { outline: 2px solid var(--focus); outline-offset: 3px; }
+
+  /* ---------- review chrome (outside the component) ---------- */
+  .review-bar {
+    max-width: 900px;
+    margin: 0 auto;
+    padding: 32px 24px 18px;
+    display: flex;
+    gap: 20px;
+    align-items: flex-start;
+    justify-content: space-between;
+    flex-wrap: wrap;
+  }
+  .kicker {
+    margin: 0;
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: .6px;
+    color: var(--muted);
+  }
+  .review-bar h1 {
+    margin: 5px 0 0;
+    font-family: var(--serif);
+    font-size: 28px;
+    font-weight: 400;
+    line-height: 1.2;
+    letter-spacing: -.4px;
+  }
+  .sub {
+    max-width: 60ch;
+    margin: 7px 0 0;
+    font-size: 13px;
+    line-height: 1.65;
+    color: var(--muted);
+  }
+  .badges { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 9px;
+    border: 1px solid var(--hairline-strong);
+    border-radius: 999px;
+    background: var(--canvas);
+    color: var(--ink);
+    font-size: 11px;
+    white-space: nowrap;
+  }
+  .badge .dot {
+    width: 7px; height: 7px; border-radius: 50%;
+    background: var(--warning);
+    flex: 0 0 7px;
+  }
+  .badge.ghost { color: var(--muted); }
+
+  .controls {
+    max-width: 900px;
+    margin: 0 auto;
+    padding: 0 24px 20px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 14px 22px;
+    align-items: flex-end;
+  }
+  .group { display: flex; flex-direction: column; gap: 6px; }
+  .group-label {
+    font-size: 11px;
+    letter-spacing: .4px;
+    color: var(--muted);
+  }
+  .seg {
+    display: flex;
+    border: 1px solid var(--hairline-strong);
+    border-radius: 7px;
+    overflow: hidden;
+    background: var(--canvas);
+  }
+  .seg button {
+    appearance: none;
+    border: 0;
+    border-right: 1px solid var(--hairline);
+    background: transparent;
+    color: var(--muted);
+    height: 32px;
+    padding: 0 10px;
+    font-size: 12px;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  .seg button:last-child { border-right: 0; }
+  .seg button:hover { background: var(--surface-1); color: var(--ink); }
+  .seg button[aria-pressed="true"] {
+    background: var(--surface-3);
+    color: var(--ink);
+    font-weight: 500;
+  }
+
+  /* ---------- chat context ---------- */
+  .stage {
+    background: var(--surface-2);
+    border-top: 1px solid var(--hairline);
+    border-bottom: 1px solid var(--hairline);
+    padding: 24px 0;
+  }
+  .thread {
+    width: min(var(--col), 100%);
+    max-width: 100%;
+    min-width: 0;
+    margin: 0 auto;
+    background: var(--surface-1);
+    border: 1px solid var(--hairline);
+    border-radius: 12px;
+    padding: 16px;
+  }
+  .thread-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 8px;
+    margin-bottom: 12px;
+    font-size: 11px;
+    letter-spacing: .3px;
+    color: var(--muted);
+  }
+  .thread-head .synth { color: var(--muted); white-space: nowrap; }
+  .msg {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    margin-bottom: 12px;
+  }
+  .msg .bubble {
+    max-width: 86%;
+    padding: 9px 13px;
+    border-radius: 12px;
+    background: var(--surface-3);
+    color: var(--ink);
+    font-size: 13px;
+    line-height: 1.55;
+    overflow-wrap: anywhere;
+  }
+  .msg .time {
+    margin-top: 4px;
+    padding-right: 2px;
+    font-size: 11px;
+    color: var(--muted);
+  }
+
+  /* ---------- the component ---------- */
+  .briefing {
+    min-width: 0;
+    max-width: 100%;
+    background: var(--card-bg);
+    border: 1px solid var(--card-border);
+    border-left: 3px solid var(--info);
+    border-radius: 12px;
+    padding: 12px 16px;
+    transition: background-color .15s ease;
+  }
+  .briefing:hover { background: color-mix(in oklab, var(--info) 7%, var(--canvas)); }
+  html[data-theme="dark"] .briefing:hover { background: color-mix(in oklab, var(--info) 12%, var(--surface-1)); }
+
+  .briefing-head { min-width: 0; }
+  .briefing-toggle {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    min-height: 24px;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    background: none;
+    color: inherit;
+    text-align: left;
+    cursor: pointer;
+    border-radius: 4px;
+  }
+  .briefing-icon {
+    flex: 0 0 16px;
+    width: 16px;
+    height: 16px;
+    color: var(--info);
+  }
+  .head-main {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+    flex-wrap: wrap;
+    min-width: 0;
+  }
+  .kind {
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: .5px;
+    color: var(--muted);
+    white-space: nowrap;
+  }
+  .sep { color: var(--hairline-strong); font-size: 11px; }
+  .to {
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--ink);
+    white-space: nowrap;
+  }
+  .to .label {
+    margin-right: 3px;
+    font-size: 12px;
+    font-weight: 400;
+    color: var(--muted);
+  }
+  .to .unknown { color: var(--muted); font-weight: 400; }
+  .action {
+    margin-left: auto;
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    font-size: 12px;
+    color: var(--muted);
+    white-space: nowrap;
+  }
+  .briefing:hover .action { color: var(--ink); }
+  .chev {
+    width: 12px;
+    height: 12px;
+    transition: transform .15s ease;
+  }
+  .briefing[data-expanded="true"] .chev { transform: rotate(180deg); }
+
+  .summary {
+    margin: 7px 0 0;
+    font-size: 13px;
+    line-height: 1.6;
+    color: var(--ink);
+    overflow-wrap: anywhere;
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    overflow: hidden;
+  }
+  .summary-full { display: none; }
+  .briefing[data-expanded="true"] .summary {
+    display: block;
+    overflow: visible;
+    -webkit-line-clamp: unset;
+  }
+  .briefing[data-expanded="true"] .summary-short { display: none; }
+  .briefing[data-expanded="true"] .summary-full { display: inline; }
+  .nowrap { white-space: nowrap; }
+  .counts {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 2px 0;
+  }
+  .counts .item { white-space: nowrap; }
+  .counts .item + .item {
+    margin-left: 10px;
+    padding-left: 10px;
+    border-left: 1px solid var(--hairline);
+  }
+  .briefing-meta {
+    margin: 5px 0 0;
+    font-size: 12px;
+    line-height: 1.45;
+    color: var(--muted);
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+  }
+  .briefing-meta .dot { color: var(--hairline-strong); }
+
+  .details {
+    margin-top: 10px;
+    padding-top: 11px;
+    border-top: 1px solid var(--rule);
+    min-width: 0;
+  }
+  .section { min-width: 0; }
+  .section + .section { margin-top: 0; }
+  .section-label {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    margin: 0 0 6px;
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: .5px;
+    color: var(--muted);
+  }
+  .section-label .aside {
+    margin-left: auto;
+    font-size: 11px;
+    font-weight: 400;
+    letter-spacing: 0;
+  }
+  .facts {
+    display: grid;
+    gap: 3px;
+    margin: 0;
+  }
+  .fact {
+    display: grid;
+    grid-template-columns: 42px minmax(0, 1fr);
+    gap: 8px;
+    align-items: start;
+    min-width: 0;
+  }
+  .fact dt {
+    font-size: 12px;
+    line-height: 1.6;
+    color: var(--muted);
+    white-space: nowrap;
+  }
+  .fact dd {
+    min-width: 0;
+    margin: 0;
+    font-size: 13px;
+    line-height: 1.6;
+    color: var(--ink);
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+  .fact .time { margin-left: 6px; color: var(--muted); }
+  .source-label { display: block; }
+  .path {
+    display: block;
+    margin-top: 1px;
+    font-family: var(--mono);
+    font-size: 12px;
+    line-height: 1.6;
+    color: var(--muted);
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+  .gloss {
+    margin: 7px 0 0;
+    font-size: 12px;
+    line-height: 1.55;
+    color: var(--muted);
+    overflow-wrap: anywhere;
+  }
+  .rule {
+    height: 1px;
+    margin: 13px 0;
+    border: 0;
+    background: var(--hairline);
+  }
+  .diag .gloss { margin-top: 6px; }
+  .mono {
+    font-family: var(--mono);
+    font-size: 12px;
+    line-height: 1.6;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+  .raw {
+    margin-top: 10px;
+    padding: 9px 10px 10px;
+    border: 1px solid var(--hairline);
+    border-radius: 8px;
+    background: var(--raw-bg);
+    min-width: 0;
+  }
+  .raw-label {
+    margin: 0 0 5px;
+    font-size: 11px;
+    letter-spacing: .4px;
+    color: var(--muted);
+  }
+  .raw-facts { gap: 2px; }
+  .raw-facts .fact { grid-template-columns: 52px minmax(0, 1fr); gap: 6px; }
+  .raw-facts .fact dt { font-size: 12px; }
+  .raw-facts .fact dd { font-family: var(--mono); font-size: 12px; }
+  .command {
+    margin: 8px 0 0;
+    padding: 8px 9px;
+    border: 1px solid var(--hairline);
+    border-radius: 6px;
+    background: var(--code-bg);
+    color: var(--ink);
+    font-family: var(--mono);
+    font-size: 12px;
+    line-height: 1.6;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+    max-width: 100%;
+  }
+  .raw-note {
+    margin: 7px 0 0;
+    font-size: 12px;
+    line-height: 1.5;
+    color: var(--muted);
+    overflow-wrap: anywhere;
+  }
+
+  /* ---------- annotations, outside the component ---------- */
+  .annotations {
+    max-width: 720px;
+    margin: 0 auto;
+    padding: 22px 24px 40px;
+  }
+  .annotations h2 {
+    margin: 0 0 12px;
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: .6px;
+    color: var(--muted);
+  }
+  .annotations ol {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    gap: 10px;
+  }
+  .annotations li {
+    display: grid;
+    grid-template-columns: 22px minmax(0, 1fr);
+    gap: 10px;
+    align-items: start;
+    font-size: 13px;
+    line-height: 1.6;
+    color: var(--muted);
+  }
+  .annotations li b { color: var(--ink); font-weight: 500; }
+  .num {
+    width: 22px;
+    height: 22px;
+    border: 1px solid var(--hairline-strong);
+    border-radius: 50%;
+    background: var(--canvas);
+    color: var(--ink);
+    font-size: 11px;
+    line-height: 20px;
+    text-align: center;
+    font-variant-numeric: tabular-nums;
+  }
+  .params {
+    max-width: 900px;
+    margin: 0 auto;
+    padding: 0 24px 40px;
+    font-size: 11px;
+    line-height: 1.8;
+    color: var(--muted);
+  }
+  .params code {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--ink);
+  }
+
+  /* ---------- URL-driven variants ---------- */
+  body[data-chrome="0"] .review-bar,
+  body[data-chrome="0"] .controls,
+  body[data-chrome="0"] .annotations,
+  body[data-chrome="0"] .params { display: none; }
+  body[data-chrome="0"] .stage {
+    padding: 16px 0;
+    border: 0;
+    background: var(--canvas);
+  }
+  body[data-chrome="0"] .thread {
+    border: 0;
+    background: transparent;
+    padding: 0 16px;
+  }
+  body[data-frame="0"] .thread-head,
+  body[data-frame="0"] .msg { display: none; }
+  body[data-frame="0"] .thread { padding-top: 14px; }
+
+  @media (max-width: 440px) {
+    .summary { -webkit-line-clamp: 3; }
+    .review-bar { padding: 22px 16px 14px; }
+    .review-bar h1 { font-size: 22px; }
+    .controls { padding: 0 16px 16px; gap: 12px 16px; }
+    .stage { padding: 16px 0; }
+    .thread {
+      width: min(var(--col), 100%);
+      padding: 14px 12px 18px;
+    }
+    .briefing { padding: 12px; }
+    .annotations { padding: 20px 16px 32px; }
+    .params { padding: 0 16px 32px; }
+  }
+
+  @media (max-width: 360px) {
+    .counts {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 2px 10px;
+    }
+    .counts .item + .item {
+      margin-left: 0;
+      padding-left: 0;
+      border-left: 0;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .chev, .briefing { transition: none; }
+  }
+</style>
+</head>
+<body data-chrome="1" data-frame="1">
+
+<header class="review-bar">
+  <div>
+    <p class="kicker">ISSUE #1821 · 设计提案 V1</p>
+    <h1>上下文交接卡：默认态与展开态</h1>
+    <p class="sub">默认态先回答“给谁、交接了什么”；只留一个详情入口。计数、上下文码、完整 ID 与命令收进详情最底部。沿用消息流、颜色、字号与间距，不做独立 dashboard。</p>
+  </div>
+  <div class="badges">
+    <span class="badge"><span class="dot" aria-hidden="true"></span>合成内容 · 待 zts 审核</span>
+    <span class="badge ghost">未改实现</span>
+  </div>
+</header>
+
+<nav class="controls" aria-label="样张参数">
+  <div class="group">
+    <span class="group-label">聊天列宽</span>
+    <div class="seg">
+      <button type="button" data-key="width" data-value="600" aria-pressed="true">600</button>
+      <button type="button" data-key="width" data-value="375" aria-pressed="false">375</button>
+      <button type="button" data-key="width" data-value="320" aria-pressed="false">320</button>
+    </div>
+  </div>
+  <div class="group">
+    <span class="group-label">主题</span>
+    <div class="seg">
+      <button type="button" data-key="theme" data-value="light" aria-pressed="true">浅色</button>
+      <button type="button" data-key="theme" data-value="dark" aria-pressed="false">深色</button>
+    </div>
+  </div>
+  <div class="group">
+    <span class="group-label">状态</span>
+    <div class="seg">
+      <button type="button" data-key="state" data-value="collapsed" aria-pressed="true">收起</button>
+      <button type="button" data-key="state" data-value="expanded" aria-pressed="false">展开</button>
+    </div>
+  </div>
+  <div class="group">
+    <span class="group-label">用例</span>
+    <div class="seg">
+      <button type="button" data-key="case" data-value="modern" aria-pressed="true">新版</button>
+      <button type="button" data-key="case" data-value="legacy" aria-pressed="false">旧卡</button>
+      <button type="button" data-key="case" data-value="missing" aria-pressed="false">缺字段</button>
+    </div>
+  </div>
+  <div class="group">
+    <span class="group-label">截图</span>
+    <div class="seg">
+      <button type="button" data-key="chrome" data-value="1" aria-pressed="true">审阅</button>
+      <button type="button" data-key="chrome" data-value="0" aria-pressed="false">干净</button>
+    </div>
+  </div>
+  <div class="group">
+    <span class="group-label">消息流</span>
+    <div class="seg">
+      <button type="button" data-key="frame" data-value="1" aria-pressed="true">显示</button>
+      <button type="button" data-key="frame" data-value="0" aria-pressed="false">隐藏</button>
+    </div>
+  </div>
+</nav>
+
+<main class="stage">
+  <div class="thread">
+    <div class="thread-head">
+      <span>Issue #1821 · 设计稿</span>
+      <span class="synth">合成内容 · 待审</span>
+    </div>
+    <div class="msg">
+      <div class="bubble">先出默认态和展开态设计稿，给 zts 看，别急着改实现。</div>
+      <div class="time">08:01</div>
+    </div>
+    <div id="cardMount"></div>
+  </div>
+</main>
+
+<section class="annotations" aria-labelledby="annotations-title">
+  <h2 id="annotations-title">标注 · 全部在组件外</h2>
+  <ol id="annotationList"></ol>
+</section>
+
+<footer class="params">
+   参数：<code>width=600|375|320</code> · <code>theme=light|dark</code> · <code>state=collapsed|expanded</code> · <code>case=modern|legacy|missing</code> · <code>chrome=1|0</code> · <code>frame=1|0</code>。
+    <br>建议视口不小于 width；<code>chrome=0&amp;frame=0</code> 只留卡面。样张内所有数字与对话均为合成内容。
+</footer>
+
+<script>
+  const CASES = {
+    modern: {
+      receiver: '鲸鲸',
+      from: '缅因猫',
+      time: '08:02',
+      handoffTime: '11-06 08:02',
+      summary: '请核对侧栏菜单在窄屏下是否完整可见。',
+      quoteFull: '请核对侧栏菜单在窄屏下是否完整可见。先复现长标题和窗口缩窄的情况，记录操作步骤，再对照菜单样式说明。',
+      sourceLabel: '侧栏菜单样式说明',
+      sourceRef: 'docs/design/sidebar-menu-visibility.md',
+      coverage: '近期消息 5 条 · 历史略过 42 条',
+      context: 'cold · carrier_unsupported · epoch 1 · large',
+      presentation: 'T0 7 · T1 0 · T2 1 · invalid 0',
+      coordinate: 'acp/desktop · direct · serial',
+      threadId: 'thread_owned_0123456789abcdef0123456789abcdef01234567',
+      command: 'cat_cafe_search_evidence({ query: "侧栏菜单样式", threadId: "thread_owned_0123456789abcdef0123456789abcdef01234567", scope: "threads", mode: "hybrid" })',
+      detailNote: '',
+      diagGloss: 'cold 是上下文模式原码，不等于没有历史；T0/T1/T2 是证据来源等级，不表示任务完成。',
+      rawNote: '完整会话 ID 与检索命令按原样保留；不做截断，可复制核对。',
+      annotations: [
+        ['抬头', '类型、接收猫、唯一入口在同一行，先回答“给谁”。'],
+        ['摘要', '已记录交接摘录的首句，不生成任务主题；展开时原位显示完整摘录，不声称保存了整条原消息。'],
+        ['回执', '交接人和时间留在明面；没有记录就写“未记录”，不猜。'],
+        ['唯一入口', '一个“详情”，不再有“查看详情 → 诊断详情”两层。'],
+        ['交接与依据', '交接、真相源、覆盖计数按阅读顺序排；计数不回默认态。'],
+        ['诊断 / 原始记录', '状态码、完整 ID、命令只在这里，等宽折行；不重复交接与真相源。']
+      ]
+    },
+    legacy: {
+      receiver: null,
+      from: '砚砚',
+      time: '11-03 07:20',
+      handoffTime: '11-03 07:20',
+      recordedHandoff: '砚砚 → 你（11-03 07:20）',
+      summary: '依据：侧栏菜单样式说明（旧卡未记录摘要）。',
+      quoteFull: '',
+      sourceLabel: '侧栏菜单样式说明',
+      sourceRef: 'docs/design/sidebar-menu-visibility.md',
+      coverage: '',
+      context: '',
+      presentation: '',
+      coordinate: null,
+      threadId: 'thread_owned_abcdef0123456789abcdef0123456789abcdef01',
+      command: 'cat_cafe_search_evidence({ query: "侧栏菜单样式", threadId: "thread_owned_abcdef0123456789abcdef0123456789abcdef01", scope: "threads", mode: "hybrid" })',
+      detailNote: '旧卡只保留标题、字段与正文；缺失项不补造，也不写 0。',
+      diagGloss: '旧卡没有上下文模式与证据等级计数。',
+      rawNote: '完整会话 ID 与检索命令按原样保留；旧卡没有接收猫，不补记录。',
+      annotations: [
+        ['接收者', '旧卡没有 receiver 元数据，写“接收猫 未记录”，不猜。'],
+        ['摘要', '没有交接原文就不补造；用旧卡已记录的真相源作为默认摘要。'],
+        ['回执', '旧卡交接字段原样放详情；不从旧文本拆出新的接收者。'],
+        ['唯一入口', '同一个详情；展开仍分“交接与依据 / 诊断”。'],
+        ['计数', '覆盖显示“未记录”，不写 0。'],
+        ['原始记录', '只补会话 ID 与原命令，长值折行；不重复交接与真相源。']
+      ]
+    },
+    missing: {
+      receiver: null,
+      from: null,
+      time: null,
+      summary: '未记录交接摘要；真相源尚未关联。',
+      quoteFull: '',
+      sourceLabel: '',
+      sourceRef: '',
+      coverage: '',
+      context: 'cold · carrier_unsupported · epoch 1 · large',
+      presentation: 'T0 3 · T1 0 · T2 0 · invalid 0',
+      coordinate: 'acp/desktop · direct · serial',
+      threadId: 'thread_owned_0123456789abcdef0123456789abcdef01234567',
+      command: 'cat_cafe_search_evidence({ query: "侧栏菜单样式", threadId: "thread_owned_0123456789abcdef0123456789abcdef01234567", scope: "threads", mode: "hybrid" })',
+      detailNote: '没有可核对的摘要或来源时，直接说没有；不用通用用途句填空。',
+      diagGloss: 'cold 是上下文模式原码，不等于没有历史；T0/T1/T2 是证据来源等级，不表示任务完成。',
+      rawNote: '只保留真实存在的会话 ID 与检索命令；不补来源。',
+      annotations: [
+        ['接收者', '无接收者就写“未记录”，不猜。'],
+        ['摘要', '无摘要、无依据就直说，不用通用用途句填空。'],
+        ['回执', '无交接来源，写“交接来源未记录”。'],
+        ['唯一入口', '同一详情；没有依据就不编依据。'],
+        ['诊断', '只保留真实存在的会话 ID 与检索命令，并解释 cold / T 级不表示完成。']
+      ]
+    }
+  };
+
+  const cfg = {
+    width: '600',
+    theme: 'light',
+    state: 'collapsed',
+    case: 'modern',
+    chrome: '1',
+    frame: '1'
+  };
+
+  function esc(value) {
+    return String(value == null ? '' : value)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
+
+  function fact(label, value) {
+    return '<div class="fact"><dt>' + esc(label) + '</dt><dd>' + value + '</dd></div>';
+  }
+
+  function receiverMarkup(c) {
+    if (c.receiver) {
+      return '<span class="to"><span class="label">给</span>' + esc(c.receiver) + '</span>';
+    }
+    return '<span class="to"><span class="label">接收猫</span><span class="unknown">未记录</span></span>';
+  }
+
+  function metaMarkup(c) {
+    if (cfg.case === 'legacy') return '<span>旧卡交接记录见详情</span>';
+    if (c.from && c.time) {
+      return '<span>' + esc(c.from) + '</span><span class="dot">·</span><span>' + esc(c.time) + '</span><span>交接</span>';
+    }
+    return '<span>交接来源未记录</span>';
+  }
+
+  function handoffFacts(c) {
+    if (cfg.case === 'modern') {
+      return [
+        fact('交接', esc(c.from) + ' → ' + esc(c.receiver) + '<span class="time">· ' + esc(c.handoffTime) + '</span>'),
+        fact('真相源', '<span class="source-label">' + esc(c.sourceLabel) + '</span><span class="path">' + esc(c.sourceRef) + '</span>'),
+        fact('覆盖', esc(c.coverage))
+      ].join('');
+    }
+    if (cfg.case === 'legacy') {
+      return [
+        fact('交接', esc(c.recordedHandoff)),
+        fact('原文', '旧卡没有保存交接原文。'),
+        fact('真相源', '<span class="source-label">' + esc(c.sourceLabel) + '</span><span class="path">' + esc(c.sourceRef) + '</span>'),
+        fact('覆盖', '未记录（旧卡没有覆盖计数）')
+      ].join('');
+    }
+    return [
+      fact('交接', '未记录交接来源'),
+      fact('原文', '未记录'),
+      fact('真相源', '尚未关联到明确依据'),
+      fact('覆盖', '未记录')
+    ].join('');
+  }
+
+  function diagFacts(c) {
+    if (cfg.case === 'legacy') {
+      return fact('上下文', '<span class="mono">未记录</span>') +
+        fact('呈现', '<span class="mono">未记录</span>') +
+        fact('坐标', '<span class="mono">未记录</span>');
+    }
+    return fact('上下文', '<span class="mono">' + partsMarkup(c.context) + '</span>') +
+      fact('呈现', '<span class="mono">' + presentationMarkup(c.presentation) + '</span>') +
+      fact('坐标', '<span class="mono">' + partsMarkup(c.coordinate) + '</span>');
+  }
+
+  function presentationMarkup(value) {
+    return '<span class="counts">' + String(value).split(' · ').map(function (part) {
+      return '<span class="item">' + esc(part) + '</span>';
+    }).join('') + '</span>';
+  }
+
+  function partsMarkup(value) {
+    return String(value).split(' · ').map(function (part) {
+      return '<span class="nowrap">' + esc(part) + '</span>';
+    }).join(' · ');
+  }
+
+  function rawFacts(c) {
+    return fact('会话', esc(c.threadId));
+  }
+
+  function cardMarkup(c) {
+    const expanded = cfg.state === 'expanded';
+    const actionLabel = expanded ? '收起' : '详情';
+    return [
+      '<article class="briefing" data-proposal-card data-expanded="' + (expanded ? 'true' : 'false') + '">',
+      '  <div class="briefing-head">',
+      '    <button type="button" class="briefing-toggle" aria-expanded="' + (expanded ? 'true' : 'false') + '" aria-controls="briefing-details">',
+      '      <svg class="briefing-icon" viewBox="0 0 20 20" fill="none" aria-hidden="true">',
+      '        <path d="M8.2 11.8l3.6-3.6M7.1 6.6l1.3-1.3a3 3 0 014.3 4.3l-1.3 1.3M12.9 13.4l-1.3 1.3a3 3 0 01-4.3-4.3l1.3-1.3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>',
+      '      </svg>',
+      '      <span class="head-main"><span class="kind">上下文交接</span><span class="sep">·</span>' + receiverMarkup(c) + '</span>',
+      '      <span class="action"><span class="action-label">' + actionLabel + '</span>',
+      '        <svg class="chev" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+      '      </span>',
+      '    </button>',
+      '  </div>',
+      '  <p class="summary"><span class="summary-short">' + esc(c.summary) + '</span><span class="summary-full">' + esc(c.quoteFull || c.summary) + '</span></p>',
+      '  <p class="briefing-meta">' + metaMarkup(c) + '</p>',
+      '  <div class="details" id="briefing-details"' + (expanded ? '' : ' hidden') + '>',
+      '    <section class="section">',
+      '      <p class="section-label">交接与依据</p>',
+      '      <dl class="facts">' + handoffFacts(c) + '</dl>',
+      c.detailNote ? '      <p class="gloss">' + esc(c.detailNote) + '</p>' : '',
+      '    </section>',
+      '    <hr class="rule">',
+      '    <section class="section diag">',
+      '      <p class="section-label">诊断<span class="aside">仅供核对</span></p>',
+      '      <dl class="facts">' + diagFacts(c) + '</dl>',
+      '      <p class="gloss">' + esc(c.diagGloss) + '</p>',
+      '      <div class="raw">',
+      '        <p class="raw-label">原始记录（原样）</p>',
+      '        <dl class="facts raw-facts">' + rawFacts(c) + '</dl>',
+      '        <pre class="command">' + esc(c.command) + '</pre>',
+      '        <p class="raw-note">' + esc(c.rawNote) + '</p>',
+      '      </div>',
+      '    </section>',
+      '  </div>',
+      '</article>'
+    ].join('\n');
+  }
+
+  function renderAnnotations(c) {
+    const list = document.getElementById('annotationList');
+    list.innerHTML = c.annotations.map(function (item, index) {
+      return '<li><span class="num">' + (index + 1) + '</span><p><b>' + esc(item[0]) + '</b>：' + esc(item[1]) + '</p></li>';
+    }).join('');
+  }
+
+  function syncControls() {
+    document.querySelectorAll('[data-key]').forEach(function (button) {
+      const active = String(cfg[button.dataset.key]) === button.dataset.value;
+      button.setAttribute('aria-pressed', active ? 'true' : 'false');
+    });
+  }
+
+  function syncUrl() {
+    const query = new URLSearchParams();
+    query.set('width', cfg.width);
+    query.set('theme', cfg.theme);
+    query.set('state', cfg.state);
+    query.set('case', cfg.case);
+    query.set('chrome', cfg.chrome);
+    query.set('frame', cfg.frame);
+    history.replaceState(null, '', location.pathname + '?' + query.toString());
+  }
+
+  function apply() {
+    const c = CASES[cfg.case] || CASES.modern;
+    document.documentElement.dataset.theme = cfg.theme;
+    document.documentElement.style.setProperty('--col', cfg.width + 'px');
+    document.body.dataset.chrome = cfg.chrome;
+    document.body.dataset.frame = cfg.frame;
+    document.getElementById('cardMount').innerHTML = cardMarkup(c);
+    renderAnnotations(c);
+    syncControls();
+    syncUrl();
+  }
+
+  function readUrl() {
+    const query = new URLSearchParams(location.search);
+    const width = query.get('width');
+    const theme = query.get('theme');
+    const state = query.get('state');
+    const useCase = query.get('case');
+    cfg.width = width === '375' || width === '320' ? width : '600';
+    cfg.theme = theme === 'dark' ? 'dark' : 'light';
+    cfg.state = state === 'expanded' ? 'expanded' : 'collapsed';
+    cfg.case = useCase === 'legacy' || useCase === 'missing' ? useCase : 'modern';
+    cfg.chrome = query.get('chrome') === '0' ? '0' : '1';
+    cfg.frame = query.get('frame') === '0' ? '0' : '1';
+  }
+
+  document.addEventListener('click', function (event) {
+    const control = event.target.closest('[data-key]');
+    if (control) {
+      cfg[control.dataset.key] = control.dataset.value;
+      apply();
+      return;
+    }
+
+    const toggle = event.target.closest('.briefing-toggle');
+    if (!toggle) return;
+    const card = toggle.closest('.briefing');
+    const next = card.getAttribute('data-expanded') !== 'true';
+    card.setAttribute('data-expanded', next ? 'true' : 'false');
+    toggle.setAttribute('aria-expanded', next ? 'true' : 'false');
+    const details = card.querySelector('.details');
+    if (details) details.hidden = !next;
+    const label = toggle.querySelector('.action-label');
+    if (label) label.textContent = next ? '收起' : '详情';
+    cfg.state = next ? 'expanded' : 'collapsed';
+    syncControls();
+    syncUrl();
+  });
+
+  readUrl();
+  apply();
+</script>
+</body>
+</html>

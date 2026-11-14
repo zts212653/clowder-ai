@@ -13,6 +13,9 @@ const { custodyOpportunitySample } = await import('../../dist/domains/growing/Cu
 const { projectCustodyOpportunity } = await import('../../dist/domains/growing/CustodyOpportunitySourceProjection.js');
 const { callbacksRoutes } = await import('../../dist/routes/callbacks.js');
 
+const HISTORICAL_RECOLLECTION_SOURCE =
+  '我把移动硬盘接上了，你看把不要的llm 丢过去？  \n\n我这里考虑几个事情，一个是我们得选一个之后的主力tts其他的丢过去，然后把管线默认的都换成主力的tts的，不过好像这里有需要注意的 就是比如我记得吴浪之前设计的tts是可安装 按照什么自己本地有还是啥的？探测啥的？ 我们自己改管线的话不能那种定制化修改？得考虑我们自己切了别人可能还是qwen？？ 所以不能是写死代码的那种得对接吴浪原本的设计？改个配置改过去的？';
+
 test('source time separates deadlines, historical references, and unresolved relative attachment', () => {
   for (const source of [
     '那你把要改要修复的整理一下，有什么继续推动之前的那个thread来做',
@@ -39,6 +42,15 @@ test('source time separates deadlines, historical references, and unresolved rel
     'return to the state before launch and keep working',
     'return to the previous state before launch and keep working',
     'go back to just before launch and continue the repair',
+    '我记得吴浪之前设计的tts是可安装的',
+    HISTORICAL_RECOLLECTION_SOURCE,
+    '发布之前我们已经完成了需要的材料整理，现在继续处理',
+    '发布之前我们讨论过必须兼容旧格式的方案，现在继续配置',
+    '发布之前已经验收过需要安装的组件，现在继续修复',
+    '发布之前我们得到了批准并完成了测试，现在继续处理',
+    '发布之前我们得知材料已经齐全，现在继续配置',
+    '我们按约定在发布之前交付了版本，现在继续修复',
+    '上次我们按约定在发布之前完成了测试，现在继续处理',
   ]) {
     assert.equal(classifyEntrustedWorkSourceTime(source), 'historical_reference', source);
   }
@@ -78,6 +90,38 @@ test('source time separates deadlines, historical references, and unresolved rel
     '回到发布之前，客户到来之前完成修复',
     '回到发布之前继续处理并在客户到来之前完成修复',
     'go back to before launch and then finish before lunch',
+    '记得发布之前提交方案',
+    '我记得客户到来之前要提交方案',
+    '我记得我们要在发布之前提交方案',
+    '我还记得你需要在客户到来之前完成修复',
+    '我记得约定是发布之前提交方案',
+    '我记得我们约定在发布之前提交方案',
+    '我还记得你答应在客户到来之前完成修复',
+    '我记得团队承诺在发布之前交付结果',
+    '我记得吴浪需要在发布之前提交方案',
+    '发布之前提交的方案必须包含回滚计划',
+    '客户到来之前交付的材料务必齐全',
+    '发布之前完成的版本要包含回归测试',
+    '发布之前设计的tts必须是可安装的',
+    '客户到来之前实现的接口务必是可调用的',
+    '发布之前开发的功能需要是可回滚的',
+    '发布之前开发的功能要保证是可回滚的',
+    '客户到来之前实现的接口得是可调用的',
+    '发布之前配置的服务请保持是可恢复的',
+    '发布之前安装的组件尽量是可卸载的',
+    '发布之前开发的功能麻烦你保证是可回滚的',
+    '我们承诺在发布之前开发的功能是可回滚的',
+    '我们约定在客户到来之前实现的接口是可调用的',
+    '发布之前开发的功能得保证是可回滚的',
+    '吴浪之前设计的tts是可安装的',
+    '下次发布之前开发的功能是可回滚的',
+    '即将演示之前安装的组件是可卸载的',
+    '下一轮验收之前实现的接口是可调用的',
+    '我记得下次发布之前开发的功能是可回滚的',
+    '我记得我们要在发布之前开发的功能是可回滚的',
+    '我记得你需要在客户到来之前实现的接口是可调用的',
+    '我还记得我们必须在演示之前安装的组件是可卸载的',
+    '我记得吴浪需要在发布之前开发的功能是可回滚的',
   ]) {
     assert.equal(classifyEntrustedWorkSourceTime(source), 'deadline', source);
   }
@@ -165,6 +209,22 @@ test('untimed explicit return to a previous thread admits once without invented 
   }
 });
 
+test('untimed recollection of an earlier design admits without inventing a deadline', async () => {
+  const { app, admit, taskStore } = await ownerHarness(HISTORICAL_RECOLLECTION_SOURCE);
+  try {
+    const admitted = await admit();
+    const resumed = await admit();
+    assert.equal(admitted.statusCode, 200);
+    assert.equal(admitted.json().status, 'admitted');
+    assert.equal(resumed.json().status, 'resumed');
+    assert.equal(resumed.json().task.id, admitted.json().task.id);
+    assert.deepEqual(admitted.json().task.entrustedWork.time, {});
+    assert.equal(taskStore.listByThread('thread-f310').length, 1);
+  } finally {
+    await app.close();
+  }
+});
+
 test('deadline or ambiguous relative time never admits without a source-backed time decision', async () => {
   for (const source of [
     '发布之前提交方案',
@@ -202,6 +262,38 @@ test('deadline or ambiguous relative time never admits without a source-backed t
     '他说，发布之前提交方案，现在客户到来之前完成修复',
     'the design document says, before launch finish the demo, now before lunch finish the report',
     '回到发布之前继续处理',
+    '记得发布之前提交方案',
+    '我记得客户到来之前要提交方案',
+    '我记得我们要在发布之前提交方案',
+    '我还记得你需要在客户到来之前完成修复',
+    '我记得约定是发布之前提交方案',
+    '我记得我们约定在发布之前提交方案',
+    '我还记得你答应在客户到来之前完成修复',
+    '我记得团队承诺在发布之前交付结果',
+    '我记得吴浪需要在发布之前提交方案',
+    '发布之前提交的方案必须包含回滚计划',
+    '客户到来之前交付的材料务必齐全',
+    '发布之前完成的版本要包含回归测试',
+    '发布之前设计的tts必须是可安装的',
+    '客户到来之前实现的接口务必是可调用的',
+    '发布之前开发的功能需要是可回滚的',
+    '发布之前开发的功能要保证是可回滚的',
+    '客户到来之前实现的接口得是可调用的',
+    '发布之前配置的服务请保持是可恢复的',
+    '发布之前安装的组件尽量是可卸载的',
+    '发布之前开发的功能麻烦你保证是可回滚的',
+    '我们承诺在发布之前开发的功能是可回滚的',
+    '我们约定在客户到来之前实现的接口是可调用的',
+    '发布之前开发的功能得保证是可回滚的',
+    '吴浪之前设计的tts是可安装的',
+    '下次发布之前开发的功能是可回滚的',
+    '即将演示之前安装的组件是可卸载的',
+    '下一轮验收之前实现的接口是可调用的',
+    '我记得下次发布之前开发的功能是可回滚的',
+    '我记得我们要在发布之前开发的功能是可回滚的',
+    '我记得你需要在客户到来之前实现的接口是可调用的',
+    '我还记得我们必须在演示之前安装的组件是可卸载的',
+    '我记得吴浪需要在发布之前开发的功能是可回滚的',
   ]) {
     const { app, admit, taskStore } = await ownerHarness(source);
     try {
@@ -246,6 +338,13 @@ test('historical event narration admits and replays without an invented deadline
     'go back to just before launch and continue the repair',
     '需求文档里写着，发布之前提交方案，现在继续处理',
     'the design document says, before launch finish the demo, now continue',
+    '发布之前我们已经完成了需要的材料整理，现在继续处理',
+    '发布之前我们讨论过必须兼容旧格式的方案，现在继续配置',
+    '发布之前已经验收过需要安装的组件，现在继续修复',
+    '发布之前我们得到了批准并完成了测试，现在继续处理',
+    '发布之前我们得知材料已经齐全，现在继续配置',
+    '我们按约定在发布之前交付了版本，现在继续修复',
+    '上次我们按约定在发布之前完成了测试，现在继续处理',
   ]) {
     const { app, admit, taskStore } = await ownerHarness(source);
     try {

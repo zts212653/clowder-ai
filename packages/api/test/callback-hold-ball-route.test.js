@@ -269,7 +269,7 @@ describe('F167 C1: /api/callbacks/hold-ball auth + body validation', () => {
           kind: 'github_issue',
           value: 'AgeOfLearning/cat-cafe#999',
           expectedSignal: 'issue closed',
-          slaUntilMs: 3_600_000,
+          slaUntilMs: Date.now() + 3_600_000,
         },
       },
     });

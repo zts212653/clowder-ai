@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { type ReactNode, useEffect, useState } from 'react';
 import { isCanonicalAvatarUrl, resolveAvatarUrl } from '@/lib/avatar-url';
 
 const AVATAR_FALLBACK_DATA_URL =
@@ -10,15 +10,22 @@ interface AvatarImageWithFallbackProps {
   src: string | null | undefined;
   alt: string;
   className?: string;
+  /**
+   * What this surface shows when there is no src or the image fails, in place of
+   * the built-in placeholder (for example the initial a surface already shows
+   * when no avatar is set). It comes back to the image when src changes.
+   */
+  fallback?: ReactNode;
 }
 
-export function AvatarImageWithFallback({ src, alt, className }: AvatarImageWithFallbackProps) {
+export function AvatarImageWithFallback({ src, alt, className, fallback }: AvatarImageWithFallbackProps) {
   const [errored, setErrored] = useState(false);
 
   useEffect(() => {
     setErrored(false);
   }, [src]);
 
+  if (fallback !== undefined && (errored || !src)) return <>{fallback}</>;
   const canonical = isCanonicalAvatarUrl(src);
   if (canonical && errored)
     return (

@@ -260,13 +260,6 @@ if (-not $reuseBundled) {
         }
         Remove-Item $extractDir -Recurse -Force
         Remove-Item $zipPath -Force
-        # Verify critical executables actually landed (guards against empty/corrupt archives)
-        $nodeExe = Join-Path $bundledNode "node.exe"
-        $npmCmd = Join-Path $bundledNode "npm.cmd"
-        if (-not (Test-Path $nodeExe) -or -not (Test-Path $npmCmd)) {
-            Write-Err "Node extraction succeeded but node.exe or npm.cmd missing in $bundledNode"
-            exit 1
-        }
         Write-Ok "Node.js portable bundled ($nodeArchive)"
     } catch {
         Write-Err "Node.js download failed: $_"
@@ -274,6 +267,29 @@ if (-not $reuseBundled) {
         exit 1
     }
 }
+
+# The marketplace preparation path deliberately resolves Corepack beside the
+# API process executable. Validate that exact installed-layout contract before
+# archiving the portable Node tree; a system/global Corepack cannot satisfy it.
+$nodeExe = Join-Path $bundledNode "node.exe"
+$npmCmd = Join-Path $bundledNode "npm.cmd"
+$corepackCmd = Join-Path $bundledNode "corepack.cmd"
+if (-not (Test-Path $nodeExe) -or -not (Test-Path $npmCmd)) {
+    Write-Err "Node extraction succeeded but node.exe or npm.cmd missing in $bundledNode"
+    exit 1
+}
+if (-not (Test-Path $corepackCmd)) {
+    Write-Err "Corepack executable missing beside bundled Node: $corepackCmd"
+    exit 1
+}
+$corepackOutput = & $corepackCmd --version 2>$null
+$corepackExit = $LASTEXITCODE
+$corepackVersion = "$corepackOutput".Trim()
+if ($corepackExit -ne 0 -or -not $corepackVersion) {
+    Write-Err "Corepack beside bundled Node could not execute: $corepackCmd"
+    exit 1
+}
+Write-Ok "Bundled Node toolchain ready (Node $(& $nodeExe --version), Corepack $corepackVersion; adjacent corepack.cmd)"
 
 $bundledRedis = Join-Path (Join-Path $ProjectRoot "bundled") "redis"
 $redisBin = Join-Path $bundledRedis "redis-server.exe"

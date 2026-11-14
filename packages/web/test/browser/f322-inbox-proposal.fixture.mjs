@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { CLIENT_REQUEST_DIAGNOSTIC_HEADER, catRegistry } from '@cat-cafe/shared';
+import { CLIENT_DIAGNOSTIC_REQUEST_HEADERS, catRegistry } from '@cat-cafe/shared';
 import cookie from '@fastify/cookie';
 import Fastify from 'fastify';
 import '../../../api/test/helpers/setup-cat-registry.js';
@@ -110,7 +110,7 @@ export async function createInboxProposalFixture({
         .header('Access-Control-Allow-Credentials', 'true')
         .header(
           'Access-Control-Allow-Headers',
-          `Content-Type,x-cat-cafe-user,x-csrf-token,${CLIENT_REQUEST_DIAGNOSTIC_HEADER}`,
+          `Content-Type,x-cat-cafe-user,x-csrf-token,${CLIENT_DIAGNOSTIC_REQUEST_HEADERS.join(',')}`,
         )
         .header('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
       if (request.method === 'OPTIONS') return reply.send();

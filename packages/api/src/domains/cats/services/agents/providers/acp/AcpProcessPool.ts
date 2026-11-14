@@ -47,8 +47,12 @@ export interface AcpLease {
   readonly canResumeRequestedSession?: boolean;
   /** End only this turn's MCP instances; retire an exclusive carrier without session/close. */
   closeTurn(sessionId: string): Promise<void>;
-  /** Resolve only after any retirement caused by this lease has actually completed. */
-  release(): Promise<void>;
+  /**
+   * Resolve only after any retirement caused by this lease has actually completed. True means this
+   * release verifiably stopped the carrier (its close completed); false means the process stays in
+   * the pool, so this release is not stop proof for the turn.
+   */
+  release(): Promise<boolean>;
 }
 
 export interface AcpAcquireOptions {
@@ -59,6 +63,8 @@ export interface AcpAcquireOptions {
 /** Minimal AcpClient interface needed by the pool. */
 export interface AcpPoolClient {
   readonly isAlive: boolean;
+  /** True only after the child emitted a real exit; closed/killed/error alone is not proof. */
+  readonly hasExited?: boolean;
   /**
    * #1203: False when the process's bootstrap cwd was deleted after spawn (e.g.
    * by an external cleaner). The child stays alive but any prompt dies with
@@ -68,6 +74,12 @@ export interface AcpPoolClient {
    * silently escape retirement.
    */
   readonly isCwdIntact: boolean;
+  /**
+   * Exact spawn coordinates, exposed only for bounded host-side provider
+   * diagnostics (e.g. Kimi's own turn ledger). Optional: test doubles and
+   * transports without a local native home omit it.
+   */
+  readonly spawnContext?: { readonly cwd: string; readonly env: Readonly<Record<string, string | undefined>> };
   /**
    * False after a cancelled prompt may still be running upstream. The pool only
    * acts on this for non-multiplexed carriers; multiplexed clients can keep
@@ -486,11 +498,12 @@ export class AcpProcessPool {
         }
       },
       release: () => {
-        if (released) return this.retirements.wait(serializeKey(poolKey));
+        if (released) return this.retirements.wait(serializeKey(poolKey)).then(() => false);
         released = true;
         // Stale lease guard: generation mismatch means this lease was force-released
         // and a new lease has been issued on the same entry. The old release is a no-op.
-        if (entry.leaseGeneration !== creationGeneration) return this.retirements.wait(serializeKey(poolKey));
+        if (entry.leaseGeneration !== creationGeneration)
+          return this.retirements.wait(serializeKey(poolKey)).then(() => false);
         // Persist session-scoped poison before either returning a multiplexed
         // carrier to the pool or retiring a single-flight carrier.
         this.sealUnsafeSessionsForEntry(entry, poolKey);
@@ -500,7 +513,7 @@ export class AcpProcessPool {
         // while the lease is still counted active, then let the next acquire spawn.
         if (!this.supportsMultiplexing && entry.client.isSafeForSingleFlightReuse === false) {
           this.retireEntry(entry, poolKey, 'cancelled prompt still unquiesced');
-          return this.retirements.wait(serializeKey(poolKey));
+          return this.retirements.wait(serializeKey(poolKey)).then(() => true);
         }
         entry.leaseCount--;
         this._metrics.activeLeaseCount--;
@@ -508,12 +521,12 @@ export class AcpProcessPool {
           entry.leaseCount = 0;
           if (this.retiring || entry.turnCloseFailed) {
             this.closeRetiredEntry(entry, poolKey, false);
-          } else {
-            this._metrics.idleProcessCount++;
-            this.startIdleTimer(entry, poolKey);
+            return this.retirements.wait(serializeKey(poolKey)).then(() => true);
           }
+          this._metrics.idleProcessCount++;
+          this.startIdleTimer(entry, poolKey);
         }
-        return this.retirements.wait(serializeKey(poolKey));
+        return this.retirements.wait(serializeKey(poolKey)).then(() => false);
       },
     };
   }

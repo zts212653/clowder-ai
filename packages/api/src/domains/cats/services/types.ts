@@ -279,6 +279,7 @@ export type AgentMessageType =
   | 'session_init'
   | 'text'
   | 'tool_use'
+  | 'recall_input_update' // internal input observation for an existing recall tool call
   | 'tool_result'
   | 'error'
   | 'done'
@@ -479,6 +480,12 @@ export interface AgentMessage {
    * until server catches back up to client's high-water lastSeq.
    */
   seqEpoch?: string;
+  /**
+   * PR-3a2: set by `SocketManager.broadcastAgentMessage` when the event is also in its response's
+   * stream record — its position in that stream (0 = the response's first broadcast since admission).
+   * A page holding positions 0..n-1 holds the prefix; absent means no record vouches for the event.
+   */
+  streamIndex?: number;
   /** When this message was created */
   timestamp: number;
 }
@@ -997,6 +1004,12 @@ export interface MemberSessionExecutionScope {
 
 export type ToolExecutionPolicy =
   | {
+      readonly mode: 'watcher';
+      readonly allowedToolNames: readonly string[];
+      readonly allowedCallbackRoutes: readonly string[];
+      readonly maxToolCalls: 6;
+    }
+  | {
       readonly mode: 'read_only';
       readonly replayDeniedToolNames: readonly string[];
     }
@@ -1064,10 +1077,20 @@ export interface LocalSessionReadInput {
 }
 
 export interface AgentServiceOptions {
+  /** Host-only observer for recall arguments received before the tool result. */
+  onRecallInputUpdate?: (message: AgentMessage) => Promise<void>;
+  /** Host-only bounded observer lifecycle, distinct from the ordinary work and Live roles. */
+  boundedWatcher?: import('./agents/providers/BoundedWatcherRunPort.js').BoundedWatcherRunPort;
   /** Host-selected external Claude program; never fall back to the SDK's bundled engine. */
   claudeSdkRuntime?: import('./agents/providers/claude-sdk-runtime.js').ClaudeSdkRuntime;
   /** Admission-owned MCP descriptors; callback credentials are materialized for the current turn. */
   frozenAcpMcpServers?: import('./agents/providers/acp/types.js').AcpMcpServer[];
+  frozenAcpMcpIssues?: import('@cat-cafe/shared').PluginMcpToolIssue[];
+  /** Host-only activation fences; execution-local and never persisted or sent to ACP. */
+  frozenAcpMcpCurrentness?: readonly Pick<
+    import('../../../config/capabilities/invocation-plugin-mcp-view.js').InvocationPluginMcpEntry,
+    'capabilityId' | 'pluginId' | 'isCurrent'
+  >[];
   frozenNativeMcpConfig?: import('./agents/providers/provider-mcp-config.js').ProviderMcpConfigPlan;
   frozenKimiMcpConfig?: import('./agents/providers/kimi-mcp-surface.js').KimiMcpConfigPlan;
   frozenCodexMcpInput?: import('./agents/providers/codex-mcp-input.js').CodexMcpInputPlan;
@@ -1138,6 +1161,8 @@ export interface AgentServiceOptions {
   accountEnv?: Record<string, string>;
   /** Selected token must win after alternate auth and user env merging. */
   claudeTokenAccount?: boolean;
+  /** F320: frozen AGY personal OAuth selection; credentials remain CLI-owned. */
+  agyAccount?: { readonly credentialHome: string; readonly storage: 'cli_file' };
   /** F320: immutable selected account launch snapshot; independent of displayName/token refresh. */
   codexAccountLaunch?: CodexAccountLaunchDescriptor;
   /** Rich content blocks (e.g. images) to pass to the CLI agent */
@@ -1258,8 +1283,17 @@ export interface ProviderRequestGenerationCommitV1 {
  * Interface that all agent services must implement
  */
 export interface AgentService {
+  prepareWatcherSession?(): Promise<void>;
+  boundedWatcherSessionCapability?(): import('@cat-cafe/shared').WatcherCapability;
   /** The adapter handles AbortSignal and owns teardown; Host must drain it before terminalizing. */
   readonly cancellationMode?: 'drain';
+  /**
+   * #1838: every Windows provider this service starts for a turn goes through a host-aware spawn
+   * seam with the turn's own invocationId, so the turn's host jobs own its whole provider tree.
+   * Only then may the Host link the turn to those jobs; a provider started any other way would make
+   * that link claim a stop it cannot prove.
+   */
+  readonly windowsProviderHosts?: boolean;
   /** Host-owned implementation identity; a pinned registered view rejects a replaced generation. */
   implementationSnapshot?(): Readonly<{
     key: string;
@@ -1278,11 +1312,15 @@ export interface AgentService {
     /** Resolved runtime account identity, including implicit defaults; present undefined means native/unbound. */
     accountRef?: string;
     mcpSupport?: boolean;
+    /** ACP session-scoped selection, captured from the current canonical launch source. */
+    mcpWhitelist?: readonly string[];
     liveCompanion?: AgentServiceOptions['liveCompanion'];
   }): Promise<
     Pick<
       AgentServiceOptions,
       | 'frozenAcpMcpServers'
+      | 'frozenAcpMcpIssues'
+      | 'frozenAcpMcpCurrentness'
       | 'frozenNativeMcpConfig'
       | 'frozenKimiMcpConfig'
       | 'frozenCodexMcpInput'

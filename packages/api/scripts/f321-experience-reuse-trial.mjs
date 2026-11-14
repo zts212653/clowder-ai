@@ -183,7 +183,6 @@ try {
       const navigation = formatNavigationHeader({
         threadId: env.consumerThreadId,
         currentCatId: 'codex61-sol',
-        baton: null,
         tasks: summarizeActiveTasks(env.tasks.listByThread(env.consumerThreadId)),
       });
       assert.ok(navigation.includes(release.task.title), 'trial must carry the normal active-Task navigation');

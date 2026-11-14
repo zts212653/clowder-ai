@@ -16,6 +16,7 @@ import { HostInventoryControlPlane } from '../src/domains/plugin/host-inventory/
 import { MemoryPluginInventoryStore } from '../src/domains/plugin/host-inventory/stores.js';
 import { HostMediaSourceImporter } from '../src/domains/plugin/media-source-importer.js';
 import { PluginProjectOutputs } from '../src/domains/plugin/outputs/project-output-actions.js';
+import { readPluginNativeToken } from './helpers/plugin-native-credential.js';
 
 const manifest: PluginManifest = {
   pluginId: 'fixture.music-output',
@@ -148,10 +149,10 @@ async function harness(t: test.TestContext) {
     instance: snapshot.instances[0]!,
     packageRecord: snapshot.packages[0]!,
   } as PluginRuntimeAdmission;
-  router.nativeActions.activate(admission, 0, (method, input) =>
+  await router.nativeActions.activate(admission, 0, (method, input) =>
     router.invoke(installed.pluginInstanceId, method, input),
   );
-  const token = router.nativeActions.environment(installed.pluginInstanceId, 'native').CLOWDER_PLUGIN_ACTION_TOKEN!;
+  const token = await readPluginNativeToken(router.nativeActions.environment(installed.pluginInstanceId, 'native'));
   const call = (input: unknown, identity = caller()) =>
     router.nativeActions.call(token, 'music.output', input, identity);
   return {

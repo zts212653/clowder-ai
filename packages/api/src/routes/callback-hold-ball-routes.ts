@@ -375,7 +375,10 @@ export interface HoldBallRouteDeps extends CustodyEventRouteDeps, EventWaitDispo
    */
   taskStore?: CrossStoreTaskStore;
   invocationRecordStore: IInvocationRecordStore;
-  managedCommandWakeRecovery?: Pick<ManagedCommandWakeRecoverySweep, 'recordCompletion' | 'recordLost'> &
+  managedCommandWakeRecovery?: Pick<
+    ManagedCommandWakeRecoverySweep,
+    'recordCompletion' | 'recordLost' | 'recoverTask'
+  > &
     Partial<Pick<ManagedCommandWakeRecoverySweep, 'recordCancelledCompletion' | 'recordRetiredCompletion'>>;
   /**
    * F117 Phase I: atomic Message + Queue admission for a wakeWhen completion.
@@ -812,8 +815,8 @@ export function registerCallbackHoldBallRoutes(app: FastifyInstance, deps: HoldB
             ...(wakeWhen.retryOfJobId ? { retryOfJobId: wakeWhen.retryOfJobId } : {}),
           }
         : null;
-    const reuseManagedSubmission = (job: DurableManagedGateJob) => {
-      const current = managedJobs.get(managedPrincipal, job.jobId);
+    const reuseManagedSubmission = async (job: DurableManagedGateJob) => {
+      const current = (await managedJobs.readStatus(managedPrincipal, job.jobId)).status;
       if (!current.admissionMessageId || !deps.dynamicTaskStore.getById(job.originTaskId)) {
         reply.status(409);
         return {
@@ -887,6 +890,21 @@ export function registerCallbackHoldBallRoutes(app: FastifyInstance, deps: HoldB
     if (guardResult.outcome === 'blocked' && guardResult.blockedResponse) {
       reply.status(400);
       return guardResult.blockedResponse;
+    }
+
+    const createdAt = Date.now();
+    // Managed commands keep their fallback after the command timeout and kill grace.
+    const fallbackBuffer = wakeWhen ? KILL_GRACE_MS + 10_000 : 0;
+    const fireAt = createdAt + wakeAfterMs + fallbackBuffer;
+    if (!wakeWhen && parsed.data.waitSourceRef!.slaUntilMs <= fireAt) {
+      reply.status(400);
+      return {
+        error: 'The hold deadline must be later than its scheduled wake',
+        code: 'HOLD_SLA_NOT_AFTER_WAKE',
+        wakeAt: fireAt,
+        slaUntilMs: parsed.data.waitSourceRef!.slaUntilMs,
+        action: 'Set slaUntilMs later than wakeAt, leaving time to execute the wake, then retry.',
+      };
     }
 
     // Atomic admission: check+reserve in a single operation.
@@ -967,15 +985,9 @@ export function registerCallbackHoldBallRoutes(app: FastifyInstance, deps: HoldB
       (t) => isPendingHoldBallTask(t) && t.createdBy === pendingHoldCreatedBy && t.deliveryThreadId === threadId,
     );
 
-    const createdAt = Date.now();
     const taskId = `hold-ball-${createdAt}-${Math.random().toString(36).slice(2, 8)}`;
     const wakeTarget = managedPrincipal;
     let durableJob: DurableManagedGateJob | undefined;
-    // P2-2 cloud review fix: for wakeWhen, the fallback reminder must fire AFTER the
-    // runner's timeout + grace period, not at the same time. Otherwise both the runner
-    // timeout wake and the fallback reminder can fire simultaneously (race → double wake).
-    const fallbackBuffer = wakeWhen ? KILL_GRACE_MS + 10_000 : 0;
-    const fireAt = createdAt + wakeAfterMs + fallbackBuffer;
     // F167 Phase M (M-2): de-frozen wake copy — guide re-evaluation instead of
     // commanding execution of a possibly-stale reason. The wake fires later (or after
     // defer), by which time the awaited condition may have changed; so prompt the cat

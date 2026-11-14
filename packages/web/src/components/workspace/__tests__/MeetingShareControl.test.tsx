@@ -26,6 +26,8 @@ describe('MeetingShareControl', () => {
     sharing = false;
     container = document.createElement('div');
     document.body.appendChild(container);
+    // Retained classic contract; newer presentation cases select their mode explicitly.
+    window.localStorage.setItem('cat-cafe:shell-presentation', 'classic');
     root = createRoot(container);
     mockApiFetch.mockReset();
     mockApiFetch.mockImplementation(async (path: string, options?: RequestInit) => {
@@ -48,6 +50,7 @@ describe('MeetingShareControl', () => {
   afterEach(() => {
     act(() => root.unmount());
     container.remove();
+    window.localStorage.removeItem('cat-cafe:shell-presentation');
     vi.restoreAllMocks();
     delete (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT;
   });
@@ -176,6 +179,8 @@ describe('MeetingShareControl v2 language seam', () => {
     sharing = false;
     container = document.createElement('div');
     document.body.appendChild(container);
+    // Retained classic contract; newer presentation cases select their mode explicitly.
+    window.localStorage.setItem('cat-cafe:shell-presentation', 'classic');
     root = createRoot(container);
     writeShellPresentation('v2');
     writeShellLanguage('zh');
@@ -200,6 +205,7 @@ describe('MeetingShareControl v2 language seam', () => {
   afterEach(() => {
     act(() => root.unmount());
     container.remove();
+    window.localStorage.removeItem('cat-cafe:shell-presentation');
     writeShellPresentation('classic');
     writeShellLanguage('zh');
     vi.restoreAllMocks();

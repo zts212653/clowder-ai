@@ -1,7 +1,7 @@
 import type { WorkspaceFileQuoteReference } from '@cat-cafe/shared';
 import Image from 'next/image';
 import { type RefObject, useEffect, useRef, useState } from 'react';
-import { openExactPlace } from '@/components/shell/mailbox/open-exact-place';
+import { openSourcePlace } from '@/components/shell/mailbox/open-exact-place';
 import { useShellCopy } from '@/components/shell/shell-copy';
 import { useShellPresentation } from '@/components/shell/shell-presentation';
 import { useCatData } from '@/hooks/useCatData';
@@ -93,7 +93,7 @@ export function WorkspaceFileQuoteMarks({
   const open = (quote: WorkspaceFileQuoteReference) => {
     useF307ExperienceWorkbenchStore.getState().exitMainAreaAttention();
     useChatStore.getState().closeRightPanel();
-    openExactPlace(`message:${quote.threadId}:${quote.messageId}`, window.location.pathname);
+    openSourcePlace(`message:${quote.threadId}:${quote.messageId}`, window.location.pathname);
   };
   if (!visible) return null;
   const error =

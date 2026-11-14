@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 /** F268 queue persistence, retention, hydration, and health-counter tests. */
 
 import { TIP_QUEUE_FLUSH_COUNT, TIP_QUEUE_MAX_EVENTS } from '@cat-cafe/shared';

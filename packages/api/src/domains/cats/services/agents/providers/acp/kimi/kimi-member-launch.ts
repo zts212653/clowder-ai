@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pluginMcpEnvironment } from '../../../../../../../config/capabilities/plugin-mcp-environment.js';
 import type { KimiNativeAccount } from '../../../../../../../config/native-accounts/kimi-account.js';
 import type { KimiNativeLaunch } from '../../../../../../../config/native-accounts/kimi-installation.js';
 import type { AgentServiceOptions } from '../../../../types.js';
@@ -15,6 +16,7 @@ export async function prepareKimiMemberLaunch(input: {
   readonly account: KimiNativeAccount;
   readonly identity: string;
   readonly member: NonNullable<AgentServiceOptions['pluginNativeLaunch']>;
+  readonly callbackEnv: Readonly<Record<string, string>>;
 }) {
   if (TEMPLATE_VARIABLE.test(input.identity)) throw new Error('kimi_member_identity_template_unsafe');
   if (input.member.server.transport !== 'stdio') throw new Error('kimi_member_stdio_required');
@@ -48,7 +50,7 @@ export async function prepareKimiMemberLaunch(input: {
             transport: 'stdio',
             command: server.command,
             args: server.args,
-            env: server.env,
+            env: pluginMcpEnvironment({ source: 'plugin', env: { ...server.env } }, input.callbackEnv),
             cwd: server.workingDirectory,
             runtime_id: 'local',
             deferred: false,

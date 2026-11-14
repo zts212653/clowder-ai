@@ -87,12 +87,14 @@ import {
   selectAnchors,
   stripStructuralEnvelope,
 } from './context-transport.js';
-import { legacyBatonHasSucceededReply, recoverableDeliveryBoundary } from './delivery-boundary-recovery.js';
+import { recoverableDeliveryBoundary } from './delivery-boundary-recovery.js';
 import type { HumanDispositionInvocationOrigin } from './human-disposition-invocation-origin.js';
-import { extractBatonContext, formatNavigationHeader, summarizeActiveTasks } from './navigation-context.js';
+import { formatNavigationHeader, type NavigationContext, summarizeActiveTasks } from './navigation-context.js';
+import { type InvocationSource, resolveInvocationSources } from './navigation-sources.js';
 import { isSameUserWaveSiblingReply } from './same-user-wave-sibling.js';
 import { projectRankedSource, rankArtifactSources, selectDirectiveSources } from './source-ranking.js';
 import { resolveReachableArtifactRefs } from './source-reachability.js';
+import { formatMessageContextDrill } from './thread-drill-pointer.js';
 
 /**
  * P1 R7 fix: Shared pure helper for context budget calculation.
@@ -129,13 +131,13 @@ export interface RouteBroadcaster {
 /** Dependencies shared across route strategies */
 export interface RouteStrategyDeps {
   messageSearchAnswerService?: import('../../../../memory/MessageSearchAnswerPublicationService.js').MessageSearchAnswerPublicationService;
+  addressedPlugins?: import('../../../../plugin/manager/addressing/plugin-addressed-targets.js').PluginAddressedTargets;
   routingDispatchPreflight?: import('../../../../routing-context/RoutingDispatchPreflightPort.js').RoutingDispatchPreflightPort;
   services: Record<string, AgentService>;
+  /** Rebuild stale configuration before retrying preflight; never invokes a provider. */
+  refreshServices?: () => Promise<void>;
   unavailableServices?: ReadonlyMap<string, AgentRegistrationFailure>;
   invocationDeps: InvocationDeps;
-  dotReplyTarget?: (
-    source: import('../../cloud-bridge/dot/dot-reply-authority.js').DotReplyCandidate,
-  ) => Promise<boolean>;
   messageStore: IMessageStore;
   deliveryCursorStore?: DeliveryCursorStore;
   /** #80: Streaming draft persistence store */
@@ -425,6 +427,11 @@ export interface RouteOptions {
         seenAt: number;
       }) => Promise<void>)
     | undefined;
+  /** Give the Queue owner the final binding rejection before any child is admitted. */
+  onExecutionBindingRejected?: (
+    catId: CatId,
+    reason: 'execution_binding_conflict' | 'execution_binding_unavailable',
+  ) => Promise<boolean>;
   /** Create the exact child's durable processing response before provider startup. */
   onLifecycleInvocationStarted?:
     | ((input: {
@@ -658,7 +665,7 @@ export interface IncrementalContextResult {
   briefingContext?: {
     threadMemorySummary?: string;
     anchorSummaries?: string[];
-    baton?: import('./navigation-context.js').BatonContext;
+    sources?: readonly InvocationSource[];
     activeTasks?: import('./navigation-context.js').TaskSummary[];
     recentArtifacts?: import('./artifact-tracking.js').RecentArtifact[];
     rankedSources?: import('./source-ranking.js').RankedSource[];
@@ -1408,6 +1415,8 @@ export interface IncrementalContextOptions {
   sameUserWaveTriggerMessageId?: string;
   /** A directly addressed same-route A2A trigger remains visible despite that isolation. */
   exactA2ATriggerMessageId?: string;
+  /** Actual Queue/dispatch inputs for this invocation, including merged members. */
+  invocationInputMessageIds?: readonly string[];
   /**
    * F296 B3b-1: provider/epoch-owned continuity decision. Production routes
    * pass this only from InvocationParams.contextPromptFactory, after preflight.
@@ -1672,6 +1681,11 @@ interface ProjectionAuditCandidate {
 
 interface ProjectionAuditCapture {
   candidates: ProjectionAuditCandidate[];
+  navigation?: {
+    context: NavigationContext;
+    header: string;
+    explicitInputIds: ReadonlySet<string>;
+  };
 }
 
 const PROJECTION_AUDIT_SAMPLE_LIMIT = 16;
@@ -1710,7 +1724,7 @@ export async function assembleIncrementalContext(
   options?: IncrementalContextOptions,
 ): Promise<IncrementalContextResult> {
   const auditCapture: ProjectionAuditCapture = { candidates: [] };
-  const result = await assembleIncrementalContextInternal(
+  let result = await assembleIncrementalContextInternal(
     deps,
     userId,
     threadId,
@@ -1720,6 +1734,35 @@ export async function assembleIncrementalContext(
     options,
     auditCapture,
   );
+  if (auditCapture.navigation) {
+    const { context, header, explicitInputIds } = auditCapture.navigation;
+    const exposed = new Set(result.exposedMessageIds);
+    // Pending public wakes become this invocation's inputs only when their
+    // complete bodies survived selection. Queue adoption runs before provider
+    // delivery; a merely pending or truncated candidate is never provenance.
+    const sources =
+      context.sources?.filter(
+        (source) => explicitInputIds.has(source.fromMessageId) || exposed.has(source.fromMessageId),
+      ) ?? [];
+    const navigationHeader = formatNavigationHeader({ ...context, sources }, { nowMs: options?.nowMs });
+    result = {
+      ...result,
+      contextText: result.contextText.replace(header, navigationHeader),
+      navigationHeader,
+      ...(result.briefingContext ? { briefingContext: { ...result.briefingContext, sources } } : {}),
+      ...(result.surfaceProjection
+        ? {
+            surfaceProjection: {
+              ...result.surfaceProjection,
+              presentationCounts: {
+                ...result.surfaceProjection.presentationCounts,
+                T0: result.surfaceProjection.presentationCounts.T0 + sources.length,
+              },
+            },
+          }
+        : {}),
+    };
+  }
   const projectionAudit = buildIncrementalProjectionAudit(auditCapture.candidates, result);
   log.info(
     {
@@ -1786,7 +1829,6 @@ async function assembleIncrementalContextInternal(
   const fetchedUnseen = await fetchAfterCursor(deps.messageStore, threadId, cursor, userId);
   // Public speech stays in the unread projection. Queue coverage is committed
   // for the exact fully projected IDs before the provider sees this prompt.
-  const loadedUnseen = fetchedUnseen;
   const pendingWakes = new Set(
     await options?.resolvePendingWakeMessageIds?.(fetchedUnseen.map((message) => message.id)),
   );
@@ -1894,33 +1936,19 @@ async function assembleIncrementalContextInternal(
       unseen.some((m) => m.id === currentUserMessageId),
   );
 
-  // F148 Phase F (KD-7): Navigation context — injected on ALL paths (cold + warm)
-  // P1 fix: extract baton from unseen (pre-stream-filter) so cat→cat @ mentions via stream are visible
-  const unseenIds = new Set(unseen.map((message) => message.id));
-  const batonCandidates = loadedUnseen.filter(
-    (m) =>
-      (m.id === currentUserMessageId || (unseenIds.has(m.id) && !deliveryRecovery.answeredSourceIds.has(m.id))) &&
-      messageFrom(m).kind !== 'system' &&
-      m.origin !== 'briefing' &&
-      canViewMessage(m, viewer),
+  // Navigation describes exact route inputs, independently of history recency,
+  // delivery recovery, Task custody or hold state. No text/mention inference.
+  const explicitInputIds = new Set(
+    collectExactPromptMessageIds(options?.invocationInputMessageIds ?? [], [
+      options?.exactA2ATriggerMessageId ?? currentUserMessageId,
+    ]),
   );
-  let baton = extractBatonContext(batonCandidates, catId);
-  if (
-    baton &&
-    (await legacyBatonHasSucceededReply({
-      messages: loadedUnseen,
-      sourceMessageId: baton.fromMessageId,
-      explicitSourceMessageId: currentUserMessageId,
-      target: { userId, threadId, catId },
-      turnExecutionStore: deps.invocationDeps.turnExecutionStore,
-    }))
-  ) {
-    baton = null;
-  }
-  // The current direct request is already rendered verbatim in the delta. It
-  // is not a prior handoff and repeating it as co-creator→cat navigation adds
-  // duplicate instructions. Keep genuine cat handoffs and older provenance.
-  if (baton?.fromSpeaker === 'user' && baton.fromMessageId === currentUserMessageId) baton = null;
+  const sources = await resolveInvocationSources(deps.messageStore, [...explicitInputIds, ...pendingWakes], {
+    userId,
+    threadId,
+    catId,
+    ...(thinkingMode ? { thinkingMode } : {}),
+  });
   let activeTasks: import('./navigation-context.js').TaskSummary[] = [];
   let allThreadTasks: import('./artifact-tracking.js').ArtifactExtractionInput['prTasks'] = [];
   if (deps.taskStore) {
@@ -1988,7 +2016,6 @@ async function assembleIncrementalContextInternal(
     },
   );
   const topSource = selectDirectiveSources(rankedSources)[0] ?? null;
-  const bestNextSource = topSource ? `先看 ${topSource.label}: ${topSource.ref}` : undefined;
   let executionSituation: import('../invocation/thread-execution-situation.js').ThreadExecutionSituation | undefined;
   if (deps.threadExecutionSituationSource) {
     try {
@@ -2005,32 +2032,34 @@ async function assembleIncrementalContextInternal(
     threadStore && options?.contextProjection?.contextMode !== 'hot'
       ? await readNavigationRoadmap(threadStore, userId, threadId)
       : undefined;
-  const navigationHeader = formatNavigationHeader({
+  const navigationContext: NavigationContext = {
     threadId,
     currentCatId: catId,
-    recentWorkDirectory: Boolean(threadStore) && options?.contextProjection?.contextMode !== 'hot',
     ...(roadmap ? { roadmapPointer: formatRoadmapPointer(roadmap) } : {}),
-    baton,
+    sources,
     tasks: activeTasks,
     ...(executionSituation ? { executionSituation } : {}),
-    // Epoch-owned packets admit only a validated truth source. A recency-only
-    // artifact list is not canonical state and must wait for the B3b mapper.
-    artifacts: options?.contextProjection ? [] : recentArtifacts,
-    truthSource: topSource ? { label: topSource.label, ref: topSource.ref, provenance: topSource.provenance } : null,
-    bestNextSource,
-  });
+    // Work materials describe existing work; their absence is not a recovery gap.
+    artifacts: options?.contextProjection || activeTasks.length === 0 ? [] : recentArtifacts,
+    truthSource:
+      activeTasks.length > 0 && topSource
+        ? { label: topSource.label, ref: topSource.ref, provenance: topSource.provenance }
+        : null,
+  };
+  // Reserve the candidate envelope before token checks. Finalization can only
+  // shrink it after the exact public projection is known.
+  const navigationHeader = formatNavigationHeader(navigationContext, { nowMs: options?.nowMs });
+  auditCapture.navigation = { context: navigationContext, header: navigationHeader, explicitInputIds };
 
   log.info({
     f148: 'navigation-header',
     threadId,
     catId,
-    hasBaton: baton !== null,
-    batonFrom: baton?.fromSpeakerDisplay ?? null,
+    candidateInputSourceCount: sources.length,
     taskCount: activeTasks.length,
     artifactCount: recentArtifacts.length,
     headerLength: navigationHeader.length,
     unseenCount: unseen.length,
-    batonCandidateCount: batonCandidates.length,
   });
 
   // F296: unread volume owns only delta shaping. It cannot prove whether the
@@ -2059,19 +2088,36 @@ async function assembleIncrementalContextInternal(
   });
 
   if (contextMode === 'cold' || deltaSize === 'large') {
+    const replacementWindow =
+      cursor && isEmptyRuntimeReplacementTransition(options?.contextProjection?.transition)
+        ? await buildReplacementWindowMessages({
+            deps,
+            threadId,
+            userId,
+            catId,
+            cursor,
+            unseen,
+            relevant,
+            filteredReasons,
+            viewer,
+          })
+        : { messages: relevant, hasBackfill: false };
+    const effectiveHcConfig = replacementWindow.hasBackfill
+      ? { ...hcConfig, minBurstMessages: hcConfig.maxBurstMessages }
+      : hcConfig;
     const shaped = await assembleSmartWindowContext(
       deps,
-      relevant,
+      replacementWindow.messages,
       catId,
       threadId,
       currentUserMessageId,
       currentMessageFilteredOut,
-      hcConfig,
+      effectiveHcConfig,
       cursor,
       options,
       effectiveTokenBudget,
       navigationHeader,
-      baton,
+      sources,
       activeTasks,
       recentArtifacts,
       rankedSources,
@@ -2080,6 +2126,7 @@ async function assembleIncrementalContextInternal(
       incrementalBoundaryCap,
       contextMode ?? 'cold',
       deltaSize,
+      replacementWindow.hasBackfill ? relevant : undefined,
     );
     return shaped;
   }
@@ -2165,7 +2212,11 @@ async function assembleIncrementalContextInternal(
       sanitizeContent: sanitizeInjectedContent,
       ...(staleFormatTime ? { formatTime: staleFormatTime } : {}),
     });
-    return `[${m.id}] ${rendered}`;
+    const recovery =
+      normalized.content.length > truncateLimit
+        ? `\n原文未完整展示，需要时读取: ${formatMessageContextDrill(threadId, m.id)}`
+        : '';
+    return `[${m.id}] ${rendered}${recovery}`;
   });
 
   // 第二刀: Aggregate token budget — trim oldest lines until within effective token limit.
@@ -2288,6 +2339,104 @@ async function assembleIncrementalContextInternal(
  * F148: Smart window path for cold-mention context assembly.
  * Burst detection → tombstone → evidence recall → tool scrub → compact context.
  */
+function isEmptyRuntimeReplacementTransition(transition: string | undefined): boolean {
+  if (transition === 'fresh') return true;
+  return transition === 'replaced';
+}
+
+function isEligibleReplacementBaseMessage(m: StoredMessage): boolean {
+  if (m.deletedAt) return false;
+  if (m._tombstone) return false;
+  if (!isTimelinePublished(m)) return false;
+  if (m.lifecycle?.kind === 'response' && m.lifecycle.status === 'processing') return false;
+  return true;
+}
+
+function isEligibleUnseenSelfBackfill(
+  m: StoredMessage,
+  filteredReasons: ReadonlyMap<string, ProjectionAuditCandidate['filteredReason']>,
+): boolean {
+  if (filteredReasons.get(m.id) !== 'self_output') return false;
+  if (!isEligibleReplacementBaseMessage(m)) return false;
+  if (m.content?.startsWith('[错误]')) return false;
+  return Boolean(m.content?.trim());
+}
+
+function isEligiblePriorReplacementMessage(
+  m: StoredMessage,
+  catId: CatId,
+  viewer: { type: 'cat'; catId: CatId } | { type: 'user' },
+): boolean {
+  if (!isEligibleReplacementBaseMessage(m)) return false;
+  const from = messageFrom(m);
+  if (from.kind === 'system' && isDisplayOnlySystemMessage(m) && !isAgentReadableManagedHoldMessage(m)) {
+    return false;
+  }
+  if (m.origin === 'briefing') return false;
+  if (!canViewMessage(m, viewer)) return false;
+  if (from.kind === 'agent' && m.content?.startsWith('[错误]')) return false;
+  const isActualCrossPost = isCrossThreadProvenance(m.extra?.crossPost?.sourceThreadId, m.threadId);
+  const authorCatId = from.kind === 'agent' ? from.catId : null;
+  if (!isActualCrossPost && authorCatId === catId) {
+    return m.content?.trim() ? true : isEmptyTerminalLifecycleResponse(m);
+  }
+  return true;
+}
+
+function isMessageAfterReplacementCursor(
+  m: StoredMessage,
+  idx: number,
+  cursor: string,
+  firstUnseenIdx: number,
+): boolean {
+  if (m.visibilitySeq !== undefined) return compareCursors(cursorFor(m), cursor) > 0;
+  return firstUnseenIdx >= 0 && idx >= firstUnseenIdx;
+}
+
+async function buildReplacementWindowMessages(input: {
+  deps: RouteStrategyDeps;
+  threadId: string;
+  userId: string;
+  catId: CatId;
+  cursor: string;
+  unseen: readonly StoredMessage[];
+  relevant: readonly StoredMessage[];
+  filteredReasons: ReadonlyMap<string, ProjectionAuditCandidate['filteredReason']>;
+  viewer: { type: 'cat'; catId: CatId } | { type: 'user' };
+}): Promise<{ messages: StoredMessage[]; hasBackfill: boolean }> {
+  const { deps, threadId, userId, catId, cursor, unseen, relevant, filteredReasons, viewer } = input;
+  if (typeof deps.messageStore.getByThreadAfter !== 'function') {
+    return { messages: [...relevant], hasBackfill: false };
+  }
+  const allMessages = await fetchAfterCursor(deps.messageStore, threadId, undefined, userId);
+  const unseenIds = new Set(unseen.map((m) => m.id));
+  const relevantIds = new Set(relevant.map((m) => m.id));
+  const firstUnseenIdx = unseen.length > 0 ? allMessages.findIndex((m) => unseenIds.has(m.id)) : -1;
+  let hasBackfill = false;
+  const seenRelevantIds = new Set<string>();
+  const combined: StoredMessage[] = [];
+  for (const [idx, m] of allMessages.entries()) {
+    if (relevantIds.has(m.id)) {
+      seenRelevantIds.add(m.id);
+      combined.push(m);
+      continue;
+    }
+    const eligibleBackfill = unseenIds.has(m.id)
+      ? isEligibleUnseenSelfBackfill(m, filteredReasons)
+      : !isMessageAfterReplacementCursor(m, idx, cursor, firstUnseenIdx) &&
+        isEligiblePriorReplacementMessage(m, catId, viewer);
+    if (eligibleBackfill) {
+      hasBackfill = true;
+      combined.push(m);
+    }
+  }
+  if (!hasBackfill) return { messages: [...relevant], hasBackfill: false };
+  for (const m of relevant) {
+    if (!seenRelevantIds.has(m.id)) combined.push(m);
+  }
+  return { messages: combined, hasBackfill: true };
+}
+
 async function assembleSmartWindowContext(
   deps: RouteStrategyDeps,
   relevant: StoredMessage[],
@@ -2300,7 +2449,7 @@ async function assembleSmartWindowContext(
   options: IncrementalContextOptions | undefined,
   effectiveTokenBudget: number,
   navigationHeader: string,
-  baton: import('./navigation-context.js').BatonContext | null,
+  sources: readonly InvocationSource[],
   activeTasks: import('./navigation-context.js').TaskSummary[],
   recentArtifacts: import('./artifact-tracking.js').RecentArtifact[],
   rankedSources: import('./source-ranking.js').RankedSource[],
@@ -2309,6 +2458,7 @@ async function assembleSmartWindowContext(
   incrementalBoundaryCap: IncrementalBoundaryCap,
   contextMode: 'cold' | 'hot',
   deltaSize: 'small' | 'large',
+  unreadOverride?: readonly StoredMessage[],
 ): Promise<IncrementalContextResult> {
   const truncateLimit = PROMPT_MESSAGE_SAFETY_CHAR_LIMIT;
   const hasEpochProjection = options?.contextProjection !== undefined;
@@ -2517,38 +2667,29 @@ async function assembleSmartWindowContext(
       sanitizeContent: sanitizeInjectedContent,
       ...(coldStaleFormatTime ? { formatTime: coldStaleFormatTime } : {}),
     });
-    return `[${m.id}] ${rendered}`;
+    const recovery =
+      normalized.content.length > truncateLimit
+        ? `\n原文未完整展示，需要时读取: ${formatMessageContextDrill(threadId, m.id)}`
+        : '';
+    return `[${m.id}] ${rendered}${recovery}`;
   });
 
   // 7. Respect effectiveMaxContextTokens (same as warm path)
   // #1200/#3444: cursorFor remains graded for general consumers; this producer
   // admits only the canonical branch into deferred delivery state.
-  const lastRelevantMsg = relevant[relevant.length - 1];
+  const boundaryCandidates = unreadOverride ? unreadOverride : relevant;
+  const lastRelevantMsg = boundaryCandidates[boundaryCandidates.length - 1];
+  const rawBoundarySource = lastRelevantMsg
+    ? cursorFor(lastRelevantMsg)
+    : unreadOverride && _cursor
+      ? _cursor
+      : undefined;
   const boundaryId = clampToIncrementalBoundaryCap(
-    canonicalDeferredBoundary(lastRelevantMsg ? cursorFor(lastRelevantMsg) : undefined, 'cold-visible-tail'),
+    canonicalDeferredBoundary(rawBoundarySource, 'cold-visible-tail'),
     incrementalBoundaryCap,
   );
-  const directiveSource = selectDirectiveSources(rankedSources)[0];
-  const navigationPresentations = [
-    ...(baton
-      ? [
-          mapToPresentation({
-            subjectKey: `baton:${baton.fromSpeakerDisplay}:${baton.timestamp}`,
-            asOf: { kind: 'as_of' as const, value: baton.timestamp },
-            sourceTier: 'T0' as const,
-            requested: 'directive' as const,
-          }),
-        ]
-      : []),
-    directiveSource
-      ? projectRankedSource(directiveSource)
-      : mapToPresentation({
-          subjectKey: `thread-drill:${threadId}`,
-          asOf: { kind: 'as_of' as const, value: Date.now() },
-          sourceTier: 'T2' as const,
-          requested: 'pointer' as const,
-        }),
-  ];
+  const directiveSource = activeTasks.length > 0 ? selectDirectiveSources(rankedSources)[0] : undefined;
+  const navigationPresentations = [...(directiveSource ? [projectRankedSource(directiveSource)] : [])];
 
   if (effectiveTokenBudget <= 0) {
     return {
@@ -2712,15 +2853,25 @@ async function assembleSmartWindowContext(
     ]),
     contextText,
     boundaryId,
-    projectedMessageIds: [
-      ...new Set([...finalAnchors.map(({ message }) => message.id), ...finalBurstMsgs.map((message) => message.id)]),
-    ],
-    exposedMessageIds: [
-      ...new Set([
-        ...exactAnchorBodyMessageIds(omitted, finalAnchors, truncateLimit),
-        ...exactBodyMessageIdsAfterToolScrub(burst, finalBurstMsgs, truncateLimit),
-      ]),
-    ],
+    projectedMessageIds: (() => {
+      const rawProjected = [
+        ...new Set([...finalAnchors.map(({ message }) => message.id), ...finalBurstMsgs.map((message) => message.id)]),
+      ];
+      if (!unreadOverride) return rawProjected;
+      const unreadIds = new Set(unreadOverride.map((message) => message.id));
+      return rawProjected.filter((id) => unreadIds.has(id));
+    })(),
+    exposedMessageIds: (() => {
+      const rawExposed = [
+        ...new Set([
+          ...exactAnchorBodyMessageIds(omitted, finalAnchors, truncateLimit),
+          ...exactBodyMessageIdsAfterToolScrub(burst, finalBurstMsgs, truncateLimit),
+        ]),
+      ];
+      if (!unreadOverride) return rawExposed;
+      const unreadIds = new Set(unreadOverride.map((message) => message.id));
+      return rawExposed.filter((id) => unreadIds.has(id));
+    })(),
     includesCurrentUserMessage,
     currentMessageFilteredOut,
     degradation: tokenDegradation,
@@ -2728,7 +2879,7 @@ async function assembleSmartWindowContext(
     briefingContext: {
       ...(usesLegacyRecall && threadMemorySummary ? { threadMemorySummary } : {}),
       ...(finalAnchorLines.length > 0 ? { anchorSummaries: finalAnchorLines } : {}),
-      ...(baton ? { baton } : {}),
+      ...(sources.length > 0 ? { sources } : {}),
       ...(activeTasks.length > 0 ? { activeTasks } : {}),
       ...(() => {
         if (hasEpochProjection) return {};

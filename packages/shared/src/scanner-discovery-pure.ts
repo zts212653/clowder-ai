@@ -1,5 +1,5 @@
 import { lstatSync, readdirSync, type Stats, statSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, relative } from 'node:path';
 
 export type ScannerEvidenceKind =
   | 'feature'
@@ -37,6 +37,28 @@ export const KIND_DIRS: Record<string, ScannerEvidenceKind> = {
 
 export const GENERATED_DOC_DIRS: ReadonlySet<string> = new Set(['exported-threads']);
 const MAX_SCAN_DEPTH = 10;
+const FALLBACK_EXCLUDE = new Set(['node_modules', '.git', 'archive', 'mailbox', ...Object.keys(KIND_DIRS)]);
+
+/** The same discovery boundary for filesystem walks and immutable published trees. */
+export function isDiscoverableSourcePath(relativePath: string): boolean {
+  const parts = relativePath.split(/[\\/]/u);
+  const filename = parts.at(-1);
+  if (!filename || !isIndexableSourceFile(filename) || parts.some((part) => !part || part === '.' || part === '..'))
+    return false;
+  if (Object.hasOwn(KIND_DIRS, parts[0])) return withinKindDirectory(parts.slice(1));
+  if (parts[0] === 'archive')
+    return parts.length >= 4 && Object.hasOwn(KIND_DIRS, parts[2]) && withinKindDirectory(parts.slice(3));
+  const directories = parts.slice(0, -1);
+  return (
+    directories.length <= MAX_SCAN_DEPTH &&
+    !directories.some((part) => FALLBACK_EXCLUDE.has(part) || GENERATED_DOC_DIRS.has(part))
+  );
+}
+
+function withinKindDirectory(parts: string[]): boolean {
+  const directories = parts.slice(0, -1);
+  return directories.length <= MAX_SCAN_DEPTH && !directories.some((part) => GENERATED_DOC_DIRS.has(part));
+}
 
 export function discoverFiles(docsRoot: string): DiscoveredScannerFile[] {
   const results: DiscoveredScannerFile[] = [];
@@ -50,7 +72,7 @@ export function discoverFiles(docsRoot: string): DiscoveredScannerFile[] {
   scanTopLevelMarkdownFiles(docsRoot, results, discoveredPaths);
   scanFallbackDir(docsRoot, results, discoveredPaths);
 
-  return results;
+  return results.filter((file) => isDiscoverableSourcePath(relative(docsRoot, file.path)));
 }
 
 function scanKindDir(
@@ -113,9 +135,8 @@ function scanFallbackDir(
 ): void {
   if (depth > MAX_SCAN_DEPTH) return;
 
-  const fallbackExclude = new Set(['node_modules', '.git', 'archive', 'mailbox', ...Object.keys(KIND_DIRS)]);
   for (const entry of safeReadDir(dirPath)) {
-    if (fallbackExclude.has(entry) || GENERATED_DOC_DIRS.has(entry)) continue;
+    if (FALLBACK_EXCLUDE.has(entry) || GENERATED_DOC_DIRS.has(entry)) continue;
     const fullPath = join(dirPath, entry);
     const lst = safeLstat(fullPath);
     if (!lst) continue;

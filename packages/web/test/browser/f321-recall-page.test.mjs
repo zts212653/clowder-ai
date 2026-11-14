@@ -88,9 +88,16 @@ for (const width of [1440, 390])
       const layout = await checkLayout(page, width);
       await screenshot(page, `recall-ready-${width}.png`);
       const row = flow(page).locator('[data-recall-event-id]').filter({ hasText: '点名递送 · 品味' });
-      assert.equal(await row.getByRole('button').count(), 0, 'delivery summary does not offer duplicate expansion');
+      const disclosure = row.getByRole('button');
+      assert.equal(await disclosure.count(), 1, 'delivery details use the existing disclosure');
+      assert.equal(await disclosure.getAttribute('aria-expanded'), 'false');
       assert.equal(await row.getByText('先看真实页面，再讨论布局', { exact: true }).count(), 1);
       assert.equal(await row.getByRole('link').count(), 0, 'cue metadata does not invent a source destination');
+      await disclosure.click();
+      assert.equal(await disclosure.getAttribute('aria-expanded'), 'true');
+      assert.equal(await row.getByRole('link').count(), 0, 'opening details cannot invent a missing source');
+      await disclosure.click();
+      assert.equal(await disclosure.getAttribute('aria-expanded'), 'false');
       assert.match(await stats(page).innerText(), /只算同一次回复里、检索后不久读到结果的情况，可能漏算/);
       assert.match(await stats(page).innerText(), /点开 4 · 采用 1 · 明确不用 1 · 其余 4 次未回报/);
       assert.match(await stats(page).innerText(), /品味维度提示 · 全部时间：没有记录/);

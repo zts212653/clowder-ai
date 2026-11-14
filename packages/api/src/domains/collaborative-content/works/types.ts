@@ -15,6 +15,8 @@ export interface WorkAuthorizationInput {
   readonly principal: WorkPrincipal;
   readonly permission: 'read' | 'write';
   readonly scope?: WorkPublicationScopeV1;
+  /** Internal parsed operation: create retains independent production authority even with Task context. */
+  readonly operation?: 'create' | 'submit';
 }
 
 export interface WorkReadResult {

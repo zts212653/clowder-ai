@@ -1,6 +1,7 @@
 /** Explicit non-durable callback-auth backend for unit/local use. */
 
 import type { CallerTraceContext } from '../../../../../infrastructure/telemetry/genai-semconv.js';
+import { AuthInvocationKeys, authInvocationPurpose } from './auth-invocation-keys.js';
 import type {
   AuthInvocationInput,
   AuthInvocationMigrationResult,
@@ -16,6 +17,7 @@ import {
 } from './InvocationRegistry.js';
 import { normalizeOwnerAuthProvenance } from './owner-auth-provenance.js';
 import { assertCurrentAuthPrincipal } from './retired-auth-authorization.js';
+import { claimWatcherTicket, WATCHER_TOOL_ROUTES, type WatcherToolTicket } from './WatcherToolTicket.js';
 
 const DEFAULT_MAX_RECORDS = 500;
 const DEFAULT_TOMBSTONE_GC_TTL_MS = 30 * 24 * 60 * 60 * 1000;
@@ -26,6 +28,39 @@ function isTerminal(record: InvocationRecord): record is InvocationRecord & { st
 }
 
 export class MemoryAuthInvocationBackend implements IAuthInvocationBackend {
+  async isWatcherToolCallAdmitted(invocationId: string, callId: string): Promise<boolean> {
+    return this.watcherToolCalls.get(invocationId)?.has(callId) ?? false;
+  }
+  private readonly watcherToolCalls = new Map<string, Map<string, WatcherToolTicket>>();
+  async watcherToolCallCount(invocationId: string): Promise<number> {
+    return this.watcherToolCalls.get(invocationId)?.size ?? 0;
+  }
+  async claimWatcherToolCallback(invocationId: string, callId: string, route: string, requestHash: string) {
+    return claimWatcherTicket(this.watcherToolCalls.get(invocationId)?.get(callId), route, requestHash);
+  }
+  async completeWatcherToolCallback(
+    invocationId: string,
+    callId: string,
+    response: NonNullable<WatcherToolTicket['response']>,
+  ): Promise<void> {
+    const ticket = this.watcherToolCalls.get(invocationId)?.get(callId);
+    if (ticket?.requestHash && !ticket.response) ticket.response = response;
+  }
+  async consumeWatcherToolCall(
+    invocationId: string,
+    callId: string,
+    toolName: string,
+  ): Promise<'accepted' | 'replayed' | 'exhausted'> {
+    const record = this.records.get(invocationId);
+    if (record?.state !== 'active' || record.toolExecutionPolicy?.mode !== 'watcher') return 'exhausted';
+    const calls = this.watcherToolCalls.get(invocationId) ?? new Map<string, WatcherToolTicket>();
+    if (calls.has(callId)) return 'replayed';
+    if (calls.size >= 6) return 'exhausted';
+    const route = WATCHER_TOOL_ROUTES[toolName]?.[0];
+    calls.set(callId, { toolName, route: route ?? '' });
+    this.watcherToolCalls.set(invocationId, calls);
+    return 'accepted';
+  }
   private readonly records = new Map<string, InvocationRecord>();
   private readonly latestByThreadCat = new Map<string, string>();
   private readonly refreshCooldown = new Map<string, number>();
@@ -42,7 +77,7 @@ export class MemoryAuthInvocationBackend implements IAuthInvocationBackend {
     this.cleanupTerminalTombstones();
     if (this.records.size >= this.maxRecords) throw new AuthInvocationAdmissionError();
 
-    const slot = `${input.threadId}:${input.catId as string}`;
+    const slot = AuthInvocationKeys.latest(input.threadId, input.catId as string, authInvocationPurpose(input));
     const previousId = this.latestByThreadCat.get(slot);
     if (previousId && previousId !== input.invocationId) {
       const previous = this.records.get(previousId);
@@ -107,11 +142,15 @@ export class MemoryAuthInvocationBackend implements IAuthInvocationBackend {
   async isLatest(invocationId: string): Promise<boolean> {
     const record = await this.getRecord(invocationId);
     if (!record || record.state !== 'active') return false;
-    return this.latestByThreadCat.get(`${record.threadId}:${record.catId as string}`) === invocationId;
+    return (
+      this.latestByThreadCat.get(
+        AuthInvocationKeys.latest(record.threadId, record.catId as string, authInvocationPurpose(record)),
+      ) === invocationId
+    );
   }
 
   async getLatestId(threadId: string, catId: string): Promise<string | undefined> {
-    return this.latestByThreadCat.get(`${threadId}:${catId}`);
+    return this.latestByThreadCat.get(AuthInvocationKeys.latest(threadId, catId));
   }
 
   async claimClientMessageId(invocationId: string, clientMessageId: string): Promise<boolean> {
@@ -159,7 +198,12 @@ export class MemoryAuthInvocationBackend implements IAuthInvocationBackend {
     if (!record) return { ok: false, reason: 'unknown_invocation' };
     if (record.callbackToken !== callbackToken) return { ok: false, reason: 'invalid_token' };
     if (isTerminal(record)) return { ok: false, reason: record.state };
-    if (requireLatest && this.latestByThreadCat.get(`${record.threadId}:${record.catId as string}`) !== invocationId) {
+    if (
+      requireLatest &&
+      this.latestByThreadCat.get(
+        AuthInvocationKeys.latest(record.threadId, record.catId as string, authInvocationPurpose(record)),
+      ) !== invocationId
+    ) {
       return { ok: false, reason: 'stale_invocation' };
     }
     return { ok: true, record };
@@ -183,8 +227,9 @@ export class MemoryAuthInvocationBackend implements IAuthInvocationBackend {
     for (const [invocationId, record] of this.records) {
       if (!isTerminal(record) || record.expiresAt === null || now < record.expiresAt) continue;
       this.records.delete(invocationId);
+      this.watcherToolCalls.delete(invocationId);
       this.refreshCooldown.delete(invocationId);
-      const slot = `${record.threadId}:${record.catId as string}`;
+      const slot = AuthInvocationKeys.latest(record.threadId, record.catId as string, authInvocationPurpose(record));
       if (this.latestByThreadCat.get(slot) === invocationId) this.latestByThreadCat.delete(slot);
     }
   }

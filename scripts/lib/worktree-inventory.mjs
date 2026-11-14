@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { basename, dirname } from 'node:path';
 import { validateOrigin } from './worktree-origin.mjs';
+import { worktreePrBinding } from './worktree-pr.mjs';
 import { quarantineRoot } from './worktree-quarantine.mjs';
 import { isProtected, parseWorktreePorcelain } from './worktree-reaper-core.mjs';
 import { git, lifecycleConfig, safeRealpath } from './worktree-reaper-probes.mjs';
@@ -79,14 +80,26 @@ export function worktreeInventory(repo, { now = Date.now() } = {}) {
     });
 }
 
-/** A PR's full commit list catches intermediate review heads, including squash merges. */
-export function associatedWorktrees({ repo, sourceRef, commits = [], now }) {
+/** Unverified lifecycle text is a discovery hint, never removal authority. */
+const namesPr = (lifecycle, sourceRef) =>
+  lifecycle?.origin?.sourceRef === sourceRef || lifecycle?.retention?.sourceRef === sourceRef;
+
+/** Keep intermediate/legacy commit candidates visible without inventing PR responsibility. */
+export function prWorktreeInventory({ repo, sourceRef, commits = [], now }) {
   const exactCommits = new Set(commits);
-  return worktreeInventory(repo, { now }).filter(
-    (row) =>
-      row.lifecycle?.origin?.sourceRef === sourceRef ||
-      row.lifecycle?.prSource === sourceRef ||
-      row.lifecycle?.retention?.sourceRef === sourceRef ||
-      exactCommits.has(row.head),
-  );
+  const worktrees = [];
+  const unknownWorktrees = [];
+  for (const row of worktreeInventory(repo, { now })) {
+    const binding = worktreePrBinding(row.lifecycle, row.head);
+    if (binding.sourceRef === sourceRef) {
+      worktrees.push({ ...row, association: { status: 'associated', evidence: binding.evidence } });
+    } else if (!binding.sourceRef && (exactCommits.has(row.head) || namesPr(row.lifecycle, sourceRef))) {
+      unknownWorktrees.push({ ...row, association: { status: 'unknown', reason: binding.reason } });
+    }
+  }
+  return { worktrees, unknownWorktrees };
+}
+
+export function associatedWorktrees(options) {
+  return prWorktreeInventory(options).worktrees;
 }

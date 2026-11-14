@@ -1,6 +1,7 @@
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { SHELL_PRESENTATION_STORAGE_KEY, writeShellPresentation } from '@/components/shell/shell-presentation';
 import { apiFetch } from '@/utils/api-client';
 import { observeApiSessionOwner } from '@/utils/api-session-identity';
 import { RichBlocks } from '../RichBlocks';
@@ -9,13 +10,14 @@ import { approvalRequest, block, errorJson, messageId, okJson, record } from './
 vi.mock('@/utils/api-client', () => ({ apiFetch: vi.fn() }));
 Object.assign(globalThis as Record<string, unknown>, { React });
 
-describe('RuntimeInteractionCard concurrency', () => {
+describe.each(['classic', 'v2'] as const)('RuntimeInteractionCard concurrency (%s)', (presentation) => {
   let container: HTMLDivElement;
   let root: Root;
 
   beforeAll(() => ((globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true));
   afterAll(() => delete (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT);
   beforeEach(() => {
+    writeShellPresentation(presentation);
     observeApiSessionOwner('user-1');
     vi.mocked(apiFetch).mockReset();
     container = document.createElement('div');
@@ -25,6 +27,7 @@ describe('RuntimeInteractionCard concurrency', () => {
   afterEach(() => {
     act(() => root.unmount());
     container.remove();
+    window.localStorage.removeItem(SHELL_PRESENTATION_STORAGE_KEY);
   });
 
   it('does not let an in-flight pending hydration overwrite a terminal submit response', async () => {
@@ -53,13 +56,13 @@ describe('RuntimeInteractionCard concurrency', () => {
       );
     });
     await clickDecline(container);
-    expect(container.textContent).toContain('你已拒绝这次请求');
+    expect(container.textContent).toContain(presentation === 'classic' ? '你已拒绝这次请求' : '已拒绝 · Run tests?');
     await act(async () => {
       resolveRefresh?.(okJson({ interaction: record(approvalRequest()) }));
       await Promise.resolve();
     });
-    expect(container.textContent).toContain('你已拒绝这次请求');
-    expect(container.querySelectorAll('button')).toHaveLength(0);
+    expect(container.textContent).toContain(presentation === 'classic' ? '你已拒绝这次请求' : '已拒绝 · Run tests?');
+    expect(container.querySelectorAll('button:not([aria-expanded])')).toHaveLength(0);
   });
 
   it('rehydrates canonical terminal truth after a 409 stale response', async () => {

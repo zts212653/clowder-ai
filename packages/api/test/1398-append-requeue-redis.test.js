@@ -77,9 +77,11 @@ test('Redis first handoff remains recoverable after failed compensation and a ho
     throw new Error('recovery write unavailable');
   };
   await f.append();
-  const pending = await ledger.get('thread', f.admission.entry.id);
-  assert.equal(pending.delivery.appendPendingByTarget.opus.dispatchStarted, true);
-  assert.deepEqual(pending.delivery.routingHeldTargetIds, ['opus']);
+  assert.equal(await ledger.get('thread', f.admission.entry.id), null);
+  assert.equal(
+    (await store.getById(f.admission.message.id)).lifecycle.dispatchRefs[0].appendDelivery.dispatchStarted,
+    true,
+  );
   store.commitLifecycleAppendRecovery = commit;
   const reopened = new RedisMessageStore(client, { ttlSeconds: 0 });
   const queue = new InvocationQueue(new RedisQueueLedgerStore(client));
@@ -87,10 +89,8 @@ test('Redis first handoff remains recoverable after failed compensation and a ho
   const resumed = recoveryProcessor({ queue, messageStore: reopened });
   await resumed.requestDrain('thread');
   await resumed.reconcileAppendDeliveries('thread');
-  const reconciled = await ledger.get('thread', pending.id);
-  assert.deepEqual(reconciled.payload, pending.payload);
-  assert.ok(reconciled.delivery.appendRecoveryByTarget.opus.checkedAt);
-  assert.equal(reconciled.delivery.appendPendingByTarget, undefined);
+  assert.equal(await ledger.get('thread', f.admission.entry.id), null);
+  assert.ok((await reopened.getById(f.admission.message.id)).lifecycle.appendFailures[0].checkedAt);
   assert.equal(dispatches, 1);
   assert.equal((await reopened.getById(f.admission.message.id)).lifecycle.appendFailures[0].acceptance, 'unknown');
 });
@@ -124,9 +124,7 @@ test('Redis concurrent deliberate repeats create one new private input and prese
   );
   assert.deepEqual((await f.queue.getDurableEntry('thread', first.entryId)).targets, ['opus']);
   assert.deepEqual((await store.getById(source.id)).lifecycle, source.lifecycle);
-  assert.deepEqual((await f.queue.getDurableEntry('thread', f.admission.entry.id)).delivery.routingHeldTargetIds, [
-    'opus',
-  ]);
+  assert.equal(await f.queue.getDurableEntry('thread', f.admission.entry.id), null);
 });
 
 test('late native read retires uncertainty while another recipient owns a live claim', async () => {
@@ -183,12 +181,15 @@ for (const visibility of ['public', 'whisper']) {
       await f.append();
       const reopened = new RedisMessageStore(client, { ttlSeconds: 0 });
       const queue = new InvocationQueue(new RedisQueueLedgerStore(client));
-      assert.equal(await queue.hydrateFromLedger(reopened), 1);
+      assert.equal(await queue.hydrateFromLedger(reopened), acceptance === 'not_accepted' ? 1 : 0);
       const entry = await queue.getDurableEntry('thread', f.admission.entry.id);
-      assert.equal(entry.status, 'queued');
-      assert.deepEqual(entry.payload, f.admission.entry.payload);
-      assert.deepEqual(entry.execution, f.admission.entry.execution);
-      assert.deepEqual(entry.targets, ['opus']);
+      if (acceptance === 'not_accepted') {
+        assert.equal(entry.status, 'queued');
+        assert.deepEqual(entry.payload, f.admission.entry.payload);
+        assert.deepEqual(entry.execution, f.admission.entry.execution);
+        assert.deepEqual(entry.targets, ['opus']);
+        assert.equal(entry.delivery.authorIntentByTarget.opus.requested, 'next_work');
+      } else assert.equal(entry, null);
       const source = await reopened.getById(f.admission.message.id);
       assert.equal(source.content, f.admission.message.content);
       assert.equal(source.visibility ?? 'public', visibility);
@@ -203,15 +204,15 @@ for (const visibility of ['public', 'whisper']) {
       }
       assert.equal(source.lifecycle.appendFailures[0].acceptance, acceptance);
       assert.equal(source.lifecycle.appendFailures[0].reason, 'active_run_closed');
-      const failure = entry.delivery.appendRecoveryByTarget.opus;
+      const failure = source.lifecycle.appendFailures[0];
       assert.equal(
         (await queue.recoverLifecycleAppend(reopened, { entry: f.admission.entry, failure })).kind,
-        'replayed',
+        acceptance === 'not_accepted' ? 'replayed' : 'applied',
       );
+      assert.equal((await reopened.getById(source.id)).lifecycle.appendFailures.length, 1);
       if (acceptance === 'unknown') {
-        assert.deepEqual(entry.delivery.routingHeldTargetIds, ['opus']);
         await inputRead();
-        assert.equal(await queue.getDurableEntry('thread', entry.id), null);
+        assert.equal(await queue.getDurableEntry('thread', f.admission.entry.id), null);
         assert.equal((await reopened.getById(source.id)).lifecycle.dispatchRefs[0].inputRead.status, 'read');
       } else {
         assert.deepEqual(source.lifecycle.dispatchRefs, []);
@@ -248,13 +249,17 @@ test('Redis lost compensation reply replays its transaction and keeps unrelated 
   await f.append();
   const entry = await ledger.get('thread', f.admission.entry.id);
   assert.deepEqual(new Set(entry.targets), new Set(['opus', 'codex']));
-  assert.deepEqual(entry.delivery.authorIntentByTarget.opus, f.admission.entry.delivery.authorIntentByTarget.opus);
+  assert.equal(entry.delivery.authorIntentByTarget.opus.requested, 'next_work');
+  assert.deepEqual(
+    entry.delivery.authorIntentByTarget.opus.carrierCapability,
+    f.admission.entry.delivery.authorIntentByTarget.opus.carrierCapability,
+  );
   assert.deepEqual(
     new Set(f.queue.getEntrySnapshot('thread', 'owner', entry.id).targets),
     new Set(['opus', 'codex']),
     'lost commit reply must recover the live Queue projection as well as restart truth',
   );
-  const failure = entry.delivery.appendRecoveryByTarget.opus;
+  const failure = (await store.getById(f.admission.message.id)).lifecycle.appendFailures[0];
   const again = await store.commitLifecycleAppendRecovery({ entry: f.admission.entry, failure }, ledger);
   assert.equal(again.kind, 'replayed');
   assert.equal((await ledger.list('thread')).length, 1);
@@ -292,7 +297,7 @@ test('Redis native read racing the recovery CAS prevents requeue and preserves t
 });
 
 for (const completed of [true, false]) {
-  test(`Redis internal-turn completion (${completed}) retains Queue after read and survives reload`, async () => {
+  test(`Redis internal-turn completion (${completed}) stays in History after read and survives reload`, async () => {
     const client = owned.client(`case:${randomUUID()}:`);
     const store = new RedisMessageStore(client, { ttlSeconds: 0 });
     const ledger = new RedisQueueLedgerStore(client);
@@ -311,9 +316,12 @@ for (const completed of [true, false]) {
     await input.onInputRead();
     const reloaded = new RedisMessageStore(client, { ttlSeconds: 0 });
     const queue = new InvocationQueue(new RedisQueueLedgerStore(client));
-    assert.equal(await queue.hydrateFromLedger(reloaded), 1);
-    const pending = await queue.getDurableEntry('thread', f.admission.entry.id);
-    assert.equal(pending.delivery.appendPendingByTarget.opus.requiresCompletion, true);
+    assert.equal(await queue.hydrateFromLedger(reloaded), 0);
+    assert.equal(await queue.getDurableEntry('thread', f.admission.entry.id), null);
+    assert.equal(
+      (await reloaded.getById(f.admission.message.id)).lifecycle.dispatchRefs[0].appendDelivery.requiresCompletion,
+      true,
+    );
     assert.equal((await reloaded.getById(f.admission.message.id)).lifecycle.dispatchRefs[0].inputRead.status, 'read');
     await input.onInputCompleted(completed);
     const row = await ledger.get('thread', f.admission.entry.id);
@@ -322,10 +330,9 @@ for (const completed of [true, false]) {
       assert.equal(row, null);
       assert.equal(source.lifecycle.dispatchRefs[0].appendAcceptance, 'accepted');
     } else {
-      assert.deepEqual(row.payload, f.admission.entry.payload);
-      assert.equal(row.delivery.appendRecoveryByTarget.opus.acceptance, 'unknown');
+      assert.equal(row, null);
+      assert.equal(source.lifecycle.appendFailures[0].acceptance, 'incomplete');
       assert.equal(source.lifecycle.dispatchRefs[0].inputRead.status, 'read');
-      assert.deepEqual(row.delivery.routingHeldTargetIds, ['opus']);
     }
     assert.equal(await client.ttl('msg:' + source.id), -1);
   });

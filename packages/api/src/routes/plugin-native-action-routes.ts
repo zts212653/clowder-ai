@@ -94,6 +94,7 @@ export const pluginNativeActionRoutes: FastifyPluginAsync<PluginNativeActionRout
         ...(source ? { source: Object.freeze(source) } : {}),
         assertCurrent: fence.assertCurrent,
         assertInvocationCurrent: fence.assertInvocationCurrent,
+        assertWriteCurrent: fence.assertWriteCurrent,
       });
       request.log.info({ event: 'plugin_native_auth', stage: 'completed' }, 'Native plugin action completed');
       return { result };

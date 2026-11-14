@@ -50,11 +50,13 @@ function MetadataParts({ items, leading }: { items: string[]; leading?: ReactNod
 
 export function ChatGitHubReferenceView({
   target,
+  sourceText,
   layout,
   anchor,
   onOpen,
 }: {
   target: ChatGitHubReference;
+  sourceText?: string;
   layout: string;
   anchor: RefObject<HTMLSpanElement>;
   onOpen: () => void;
@@ -96,7 +98,7 @@ export function ChatGitHubReferenceView({
   const inline = (
     <>
       <GitHubIcon issue={target.objectType === 'issue'} />
-      <span className={styles.inlineTitle}>
+      <span data-quote-source-text={sourceText} className={styles.inlineTitle}>
         #{target.number}
         {title ? ` ${title}` : ''}
       </span>
@@ -109,6 +111,7 @@ export function ChatGitHubReferenceView({
       <span
         ref={anchor}
         data-chat-reference-kind="github"
+        data-quote-source-text={sourceText}
         data-chat-reference-layout={layout}
         className={`${styles.reference} ${state} ${card ? `${styles.card} ${styles.prCard}` : styles.chip}`}
       >
@@ -121,7 +124,18 @@ export function ChatGitHubReferenceView({
               <span className={`${styles.meta} ${styles.prRepository}`}>
                 <MetadataParts items={[target.repo, `#${target.number}`]} />
               </span>
-              {target.title ? <span className={styles.name}>{target.title}</span> : null}
+              {target.title ? (
+                <a
+                  data-quote-source-text={sourceText}
+                  aria-label={fullLabel}
+                  className={`shell-focusable ${styles.name} ${styles.prTitle}`}
+                  href={target.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  {target.title}
+                </a>
+              ) : null}
               <span className={`${styles.meta} ${styles.prStatus}`}>
                 <MetadataParts items={metadata} leading={pill} />
               </span>
@@ -137,14 +151,28 @@ export function ChatGitHubReferenceView({
               </span>
             </span>
           </>
-        ) : local ? (
-          <button type="button" aria-label={fullLabel} className={`shell-focusable ${styles.open}`} onClick={onOpen}>
-            {inline}
-          </button>
         ) : (
-          <a aria-label={fullLabel} className={styles.open} href={target.url} target="_blank" rel="noopener noreferrer">
-            {inline}
-          </a>
+          <>
+            <a
+              aria-label={fullLabel}
+              className={`shell-focusable ${styles.open}`}
+              href={target.url}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              {inline}
+            </a>
+            {local ? (
+              <button
+                type="button"
+                aria-label={`${t.changes} · #${target.number}`}
+                className={`shell-focusable ${styles.inlineChanges}`}
+                onClick={onOpen}
+              >
+                {t.changes}
+              </button>
+            ) : null}
+          </>
         )}
       </span>
     </AppTooltip>

@@ -1,4 +1,9 @@
-import type { CliExecutionOwnerRef } from './cli-process-ownership.js';
+import { type CliStopProofOrigin, readCliExecutionStopEvidence } from './cli-execution-stop-evidence.js';
+import {
+  type CliExecutionOwnerRef,
+  readCliProcessOwnerRecords,
+  resolveCatCafeDataRoot,
+} from './cli-process-ownership.js';
 import type { ChildProcessLike } from './cli-types.js';
 
 interface Observation {
@@ -27,7 +32,8 @@ export function observeCliExecutionProcess(child: ChildProcessLike, owner: CliEx
 
 export function getCliExecutionExit(owner: CliExecutionOwnerRef): { exitedAt: number } | undefined {
   const record = observations.get(owner.invocationId);
-  if (!record || record.exitedAt === undefined) return undefined;
+  if (!record) return undefined;
+  if (record.exitedAt === undefined) return undefined;
   if (
     record.owner.executionId !== owner.executionId ||
     record.owner.threadId !== owner.threadId ||
@@ -36,6 +42,28 @@ export function getCliExecutionExit(owner: CliExecutionOwnerRef): { exitedAt: nu
   )
     return undefined;
   return { exitedAt: record.exitedAt };
+}
+
+export function getPersistedCliExecutionExit(
+  owner: CliExecutionOwnerRef,
+  options: { dataDir?: string } = {},
+): { exitedAt: number; hostPids: number[]; origins: CliStopProofOrigin[] } | undefined {
+  try {
+    const active = readCliProcessOwnerRecords(options.dataDir);
+    if (
+      active.invalidPaths.length ||
+      active.records.some(
+        ({ manifest }) =>
+          manifest.execution?.executionId === owner.executionId &&
+          manifest.execution.threadId === owner.threadId &&
+          manifest.execution.userId === owner.userId,
+      )
+    )
+      return undefined;
+    return readCliExecutionStopEvidence(owner, resolveCatCafeDataRoot(options.dataDir));
+  } catch {
+    return undefined;
+  }
 }
 
 export function isCliExecutionRunning(owner: CliExecutionOwnerRef): boolean {

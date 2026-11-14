@@ -63,6 +63,10 @@ async function fixture(t, hooks = {}) {
       : { ok: false, reason: 'invalid_token' };
   const router = new PluginRuntimeCarrierRouter({
     snapshot: async () => ({ instances: [instance], packages: [packageRecord] }),
+    readAuthority: async (id) =>
+      id === instance.pluginInstanceId ? { instance, current: instance, packageRecord } : undefined,
+    readCurrentAuthority: async (pluginId) =>
+      pluginId === instance.pluginId ? { instance, current: instance, packageRecord } : undefined,
   });
   const controls = {
     record,

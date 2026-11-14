@@ -50,29 +50,16 @@ function Proof() {
       autoExecute: true,
       intent: 'execute',
       priority: 'normal',
-      ...(mode.startsWith('unknown') && mode !== 'unknown-checking'
-        ? {
-            recoveryActions: [
-              {
-                id: 'repeat:q1:opus',
-                entryId: 'q1',
-                kind: 'repeat_target',
-                targetCatId: 'opus',
-                request: { method: 'POST', path: '/api/threads/thread/messages/supported/routing-targets/opus/repeat' },
-              },
-            ],
-          }
-        : {}),
     };
     useChatStore.setState({
       currentThreadId: 'thread',
-      queue: mode.startsWith('unknown') || mode.startsWith('queued') ? [entry] : [],
+      queue: mode.startsWith('queued') ? [entry] : [],
     });
     if (mode.startsWith('unknown')) void reconcileThreadWithServer('thread', () => false, 'AppendProofReload');
   }, [mode]);
   const additional = mode === 'many' ? [1, 2, 3].map((index) => source(`extra-${index}`, false)) : [];
   const pending = source('supported', true);
-  if (mode.startsWith('unknown') && pending.lifecycle)
+  if ((mode.startsWith('unknown') || mode === 'not-accepted' || mode === 'incomplete') && pending.lifecycle)
     pending.lifecycle = {
       ...pending.lifecycle,
       appendFailures: [
@@ -80,12 +67,23 @@ function Proof() {
           targetId: 'opus',
           invocationId: 'inv',
           responseMessageId: 'r',
-          acceptance: 'unknown',
+          acceptance: mode === 'not-accepted' ? 'not_accepted' : mode === 'incomplete' ? 'incomplete' : 'unknown',
           reason: 'exception',
           at: 22,
           ...(mode !== 'unknown-checking' ? { checkedAt: 23 } : {}),
         },
       ],
+    };
+  if (mode === 'unknown-external') pending.from = { kind: 'external', connectorId: 'collective' };
+  if ((mode === 'incomplete' || mode === 'awaiting-completion') && pending.lifecycle)
+    pending.lifecycle = {
+      ...pending.lifecycle,
+      dispatchRefs: pending.lifecycle.dispatchRefs?.map((ref) => ({
+        ...ref,
+        appendAcceptance: 'written',
+        appendDelivery: { dispatchStarted: true, requiresCompletion: true },
+        inputRead: { status: 'read', at: 22 },
+      })),
     };
   if (mode.startsWith('queued') && pending.lifecycle) pending.lifecycle = { ...pending.lifecycle, dispatchRefs: [] };
   if ((mode === 'read' || mode === 'unknown-read') && pending.lifecycle?.dispatchRefs)
@@ -125,7 +123,7 @@ function Proof() {
         'unsupported',
         ...additional.map((message) => message.id),
       ],
-      status: mode === 'terminal' ? 'interrupted' : 'processing',
+      status: mode === 'terminal' ? 'interrupted' : mode === 'awaiting-completion' ? 'completed' : 'processing',
       startedAt: 10,
     },
   };
@@ -140,10 +138,15 @@ function Proof() {
           getCatById={() => undefined}
         />
       </article>
-      {mode.startsWith('unknown') || mode.startsWith('queued') ? (
+      {mode.startsWith('unknown') ||
+      mode.startsWith('queued') ||
+      mode === 'not-accepted' ||
+      mode === 'incomplete' ||
+      mode === 'awaiting-completion' ? (
         <article className="mt-4 max-w-xl rounded-lg border border-cafe p-3" aria-label="原消息收件进度">
           <p>{pending.content}</p>
           <MessageDispatchAvatars
+            threadId="thread"
             message={pending}
             timelineMessages={[response]}
             activeRuns={mode === 'queued-idle' ? [] : [activeRun]}
@@ -167,6 +170,7 @@ function Proof() {
             >
               <p>{repeated.content}</p>
               <MessageDispatchAvatars
+                threadId="thread"
                 message={repeated}
                 timelineMessages={[pending, response]}
                 activeRuns={mode === 'queued-idle' ? [] : [activeRun]}
@@ -186,6 +190,10 @@ function Proof() {
           'unknown-checking',
           'unknown',
           'unknown-read',
+          'unknown-external',
+          'not-accepted',
+          'incomplete',
+          'awaiting-completion',
           'queued',
           'queued-idle',
         ].map((value) => (

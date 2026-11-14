@@ -11,6 +11,7 @@ import { FloatingTranscriptWindow } from '../FloatingTranscriptWindow';
 import { SavedPathsV2 } from '../SavedPathsV2';
 import { TranscriptCaptureHeader } from '../TranscriptCaptureHeader';
 
+vi.mock('@/components/thread-chat/hub-socket-context', () => import('@/test-utils/hub-socket-context-mock'));
 vi.mock('@/utils/api-client', () => ({
   apiFetch: vi.fn(),
 }));

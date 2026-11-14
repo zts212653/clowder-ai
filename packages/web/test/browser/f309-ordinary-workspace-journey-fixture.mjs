@@ -16,7 +16,7 @@ const FILE_PATH = 'art/cover.png';
 const REVIEW_ID = `workspace-review-${'b'.repeat(64)}`;
 const SOURCE_REVISION = `sha256:${'a'.repeat(64)}`;
 // The reported ordinary PNG, with honest intrinsic geometry rather than a 1px stand-in.
-const IMAGE_BYTES = readFileSync(path.resolve(WEB_ROOT, '../../assets/avatars/antig-opus.png'));
+const IMAGE_BYTES = readFileSync(path.resolve(WEB_ROOT, 'public/avatars/antig-opus.png'));
 const IMAGE_FIXTURE = {
   filePath: FILE_PATH,
   fileName: 'cover.png',

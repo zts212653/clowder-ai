@@ -4,6 +4,7 @@ import type { IThreadStore } from '../domains/cats/services/stores/ports/ThreadS
 import { resolveThreadMessageVisibility } from '../domains/cats/services/stores/visibility.js';
 import { canAccessThread } from '../domains/guides/guide-state-access.js';
 import type { StoredEventMemoryLifecycle } from '../domains/memory/EventMemoryStore.js';
+import { memorySourceSpeaker } from '../domains/memory/memory-source-speaker.js';
 
 export interface EventMemorySourceReaders {
   threadStore: Pick<IThreadStore, 'get' | 'list'>;
@@ -37,6 +38,7 @@ export async function readEventMemorySource(
       {
         label: thread.title?.trim() || '对话 · 标题没有记录下来',
         occurredAt: message.timestamp,
+        speaker: memorySourceSpeaker(message),
         canOpen: true,
         threadId: thread.id,
         messageId: message.id,

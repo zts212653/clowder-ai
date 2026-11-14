@@ -28,11 +28,8 @@ export {
 } from './auto-dream-tools.js';
 export {
   callbackEvidenceSearchInputSchema,
-  callbackMemoryTools,
   callbackReflectInputSchema,
-  callbackRetainMemoryInputSchema,
   handleCallbackReflect,
-  handleCallbackRetainMemory,
   handleCallbackSearchEvidence,
 } from './callback-memory-tools.js';
 export {
@@ -118,15 +115,6 @@ export {
 } from './development-return-tools.js';
 export { developmentWorkInputSchema, developmentWorkTools, handleDevelopmentWork } from './development-work-tools.js';
 export {
-  distillationTools,
-  handleMarkGeneralizable,
-  handleNominateForGlobal,
-  handleReviewDistillation,
-  markGeneralizableInputSchema,
-  nominateForGlobalInputSchema,
-  reviewDistillationInputSchema,
-} from './distillation-tools.js';
-export {
   entrustedWorkReadTools,
   handleReadEntrustedWork,
   readEntrustedWorkInputSchema,
@@ -195,20 +183,13 @@ export {
   workspaceNavigateInputSchema,
 } from './hub-action-tools.js';
 export {
-  handleLibraryArchive,
-  handleLibraryCreate,
-  handleLibraryDryRun,
   handleLibraryList,
   handleLibraryRebuild,
-  handleLibraryVerify,
-  libraryArchiveInputSchema,
-  libraryCreateInputSchema,
-  libraryDryRunInputSchema,
   libraryLifecycleTools,
   libraryListInputSchema,
   libraryRebuildInputSchema,
-  libraryVerifyInputSchema,
 } from './library-lifecycle-tools.js';
+export { handleLibraryVerify, libraryVerifyInputSchema } from './library-verification-tool.js';
 export {
   handleLimbInvokeTool,
   handleLimbListAvailable,
@@ -219,8 +200,15 @@ export {
   limbTools,
 } from './limb-tools.js';
 export {
+  handleListMemoryMatters,
+  handleReadMemoryMatter,
+  handleWriteMemoryMatter,
+  matterMemoryTools,
+} from './matter-memory-tools.js';
+export {
   createMemoryCueTools,
   drillMemoryCueInputSchema,
+  prepareMemoryContextInputSchema,
   recordMemoryCueOutcomeInputSchema,
 } from './memory-cue-tools.js';
 export {
@@ -359,4 +347,15 @@ export {
   recordRequestReviewOwnerFactInputSchema,
   skillConsumptionTools,
 } from './skill-consumption-tools.js';
+export {
+  bringToDeskInputShape,
+  handleBringToDesk,
+  handleOfferSuggestion,
+  handlePostActionReceipt,
+  handleSuggestionFacts,
+  offerSuggestionInputSchema,
+  postActionReceiptInputSchema,
+  suggestionFactsInputSchema,
+  suggestionTools,
+} from './suggestion-tools.js';
 export { workTools } from './work-tools.js';

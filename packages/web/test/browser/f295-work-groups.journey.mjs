@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { ensureWorkspaceOpen } from './f307-workspace-open.mjs';
 
 export async function runWorkGroupsJourney({ browser, baseUrl, viewport, threadId, liveExecutions, fixtureForApi }) {
@@ -60,7 +62,7 @@ export async function runWorkGroupsJourney({ browser, baseUrl, viewport, threadI
     assert.equal(await astra.getByTestId('workspace-running-activity').count(), 2);
     await astra.getByText('回复中', { exact: true }).waitFor();
     await astra.getByText('托管命令 · 全量门禁', { exact: true }).waitFor();
-    await page.screenshot({ path: `/tmp/f295-work-groups-${viewport.width}.png` });
+    await page.screenshot({ path: join(tmpdir(), `f295-work-groups-${viewport.width}.png`) });
 
     await astra.getByRole('button', { name: 'Stop codex-astra live_invocation shared-parent', exact: true }).click();
     await astra.getByText('等待后台完成 · 全量门禁', { exact: true }).waitFor();
@@ -97,7 +99,7 @@ export async function runWorkGroupsJourney({ browser, baseUrl, viewport, threadI
       errors,
       body: (await page.locator('body').innerText()).slice(0, 6000),
     });
-    await page.screenshot({ path: `/tmp/f295-work-groups-failure-${viewport.width}.png` });
+    await page.screenshot({ path: join(tmpdir(), `f295-work-groups-failure-${viewport.width}.png`) });
     throw error;
   } finally {
     await context.close();

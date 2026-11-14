@@ -7,14 +7,16 @@ try {
   }
   const payload = JSON.parse(raw);
   if (!payload || typeof payload.tool_name !== 'string') throw new Error('secret_hook_payload_invalid');
+  const { secretNativeHook } = await import('./secret-native-hook.mjs');
   if (payload.hook_event_name === 'PostToolUse') {
-    const { secretNativeHook } = await import('./secret-native-hook.mjs');
     const result = await secretNativeHook({ ...payload, tool_response: payload.tool_output });
     if (result) process.stdout.write(`${JSON.stringify(result)}\n`);
   } else {
-    const { nativeSecretDenial } = await import('./native-secret-policy.mjs');
-    const reason = nativeSecretDenial(payload);
-    if (reason) throw new Error(reason);
+    const result = await secretNativeHook(payload);
+    if (result?.hookSpecificOutput.permissionDecision === 'deny') {
+      process.stderr.write(`${result.hookSpecificOutput.permissionDecisionReason}\n`);
+      process.exitCode = 2;
+    }
   }
 } catch {
   process.stderr.write('secret_hook_blocked: credential inspection denied this operation or was unavailable.\n');

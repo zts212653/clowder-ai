@@ -2,14 +2,15 @@
 
 import type { MemberVisualAssets } from '@cat-cafe/shared';
 import { useEffect, useState } from 'react';
+import type { CatData } from '@/hooks/useCatData';
 import { resolveAvatarUrl } from '@/lib/avatar-url';
 import { uploadAvatarAsset, uploadRefAudioAsset } from '../../hub-cat-editor.client';
-import { autoSlug, type HubCatEditorFormState, type StrategyFormState } from '../../hub-cat-editor.model';
+import type { HubCatEditorFormState, StrategyFormState } from '../../hub-cat-editor.model';
 import { SelectField, TextAreaField, TextField } from '../../hub-cat-editor-fields';
-import { TagEditor } from '../../hub-tag-editor';
 import { MemberAdvancedFields } from './MemberAdvancedFields';
 import { MemberBannerFields } from './MemberBannerFields';
 import { MemberCanonAvatar } from './MemberCanonAvatar';
+import { MemberIdentityFields } from './MemberIdentityFields';
 import type { MemberText } from './MemberRuntimeFields';
 import { MemberSessionFields } from './MemberSessionFields';
 
@@ -17,16 +18,6 @@ type StringField = {
   [K in keyof HubCatEditorFormState]: HubCatEditorFormState[K] extends string ? K : never;
 }[keyof HubCatEditorFormState];
 export type MemberField = [NonNullable<StringField>, string, string];
-const identityFields: MemberField[] = [
-  ['nickname', '昵称', 'Nickname'],
-  ['mentionPatterns', '呼叫别名', 'Mention aliases'],
-  ['roleDescription', '职责', 'Role'],
-  ['personality', '个性', 'Personality'],
-  ['teamStrengths', '团队分工', 'Team contribution'],
-  ['strengths', '擅长', 'Strengths'],
-  ['caution', '限制与注意事项', 'Limitations'],
-  ['variantLabel', '版本备注', 'Version label'],
-];
 const voiceFields: MemberField[] = [
   ['voiceVoice', '音色', 'Voice'],
   ['voiceLangCode', '语言代码', 'Language code'],
@@ -39,6 +30,7 @@ const voiceFields: MemberField[] = [
 
 export function MemberAdditionalFields({
   section,
+  cat,
   form,
   patch,
   t,
@@ -50,6 +42,7 @@ export function MemberAdditionalFields({
   onUploadingChange,
 }: {
   section: string;
+  cat?: CatData | null;
   visualAssets?: MemberVisualAssets;
   onAvatarCommitted?: (value: { avatar?: string; visualAssets: MemberVisualAssets }) => void;
   form: HubCatEditorFormState;
@@ -70,22 +63,6 @@ export function MemberAdditionalFields({
   }, [uploading, bannerUploading, onUploadingChange]);
   const fields = (items: MemberField[]) =>
     items.map(([key, zh, en]) => {
-      if (key === 'mentionPatterns' || key === 'strengths')
-        return (
-          <div key={key} className="space-y-2">
-            <p className="text-sm font-medium">{t(zh, en)}</p>
-            <TagEditor
-              tags={String(form[key])
-                .split(',')
-                .map((v) => v.trim())
-                .filter(Boolean)}
-              onChange={(values) => patch({ [key]: values.join(', ') })}
-              addLabel={t('添加', 'Add')}
-              placeholder={key === 'mentionPatterns' ? '@名字' : t('例如：代码审查', 'e.g. Code review')}
-              emptyLabel={t('尚未添加', 'None added')}
-            />
-          </div>
-        );
       const Field = [
         'roleDescription',
         'personality',
@@ -125,32 +102,7 @@ export function MemberAdditionalFields({
       <div className="space-y-4">
         <h2 className="text-lg font-semibold">{t('身份与职责', 'Identity & role')}</h2>
         {editing && <p className="text-sm text-cafe-secondary">ID · {form.catId}</p>}
-        <TextField
-          label={t('名字', 'Name')}
-          value={form.displayName}
-          onChange={(name) => {
-            const id = autoSlug(name, form.catId);
-            patch({
-              name,
-              displayName: name,
-              ...(!editing
-                ? {
-                    catId: id,
-                    ...(!form.mentionPatterns || form.mentionPatterns === `@${form.catId}`
-                      ? { mentionPatterns: `@${id}` }
-                      : {}),
-                  }
-                : {}),
-            });
-          }}
-        />
-        {fields(identityFields.filter(([key]) => !['teamStrengths', 'caution', 'variantLabel'].includes(key)))}
-        <details className="rounded-xl border border-[var(--console-border-soft)] p-4">
-          <summary className="cursor-pointer text-sm">{t('更多角色设置', 'More role settings')}</summary>
-          <div className="mt-4 space-y-4">
-            {fields(identityFields.filter(([key]) => ['teamStrengths', 'caution', 'variantLabel'].includes(key)))}
-          </div>
-        </details>
+        <MemberIdentityFields cat={cat} form={form} patch={patch} t={t} editing={editing} />
         <details className="rounded-xl border border-[var(--console-border-soft)] p-4" open>
           <summary className="mb-4 cursor-pointer text-sm">
             {t('外观', 'Appearance')} · {form.colorPrimary}

@@ -46,8 +46,9 @@ export async function* invokeKimiMember(input: {
     );
     if (!member || !options.workingDirectory) throw new Error('kimi_member_launch_required');
     const executionAccount = Object.freeze(structuredClone(options.executionAccount));
+    const callbackEnv = Object.freeze({ ...options.callbackEnv });
     const beforeProviderLaunch = options.beforeProviderLaunch,
-      userId = options.callbackEnv?.CAT_CAFE_USER_ID;
+      userId = callbackEnv.CAT_CAFE_USER_ID;
     const account = await readKimiNativeAccount(input.native, input.modelSelection, executionAccount.accountRef);
     const assertSource = async () => {
       signal.throwIfAborted();
@@ -85,7 +86,7 @@ export async function* invokeKimiMember(input: {
       requireFrozenInput: true,
     });
     await assertSource();
-    const launch = await prepareKimiMemberLaunch({ native: input.native, account, identity, member });
+    const launch = await prepareKimiMemberLaunch({ native: input.native, account, identity, member, callbackEnv });
     dispose = launch.dispose;
     await assertSource();
     client = new AcpClient({

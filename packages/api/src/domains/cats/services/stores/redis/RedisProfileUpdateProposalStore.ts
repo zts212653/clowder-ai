@@ -5,11 +5,12 @@ import type { SettledHistoryPageOptions, SettledHistorySourcePage } from '../../
  * Redis-backed F231 Phase C ProfileUpdateProposal store.
  *
  * Mirrors RedisProposalStore (F128): Hash profile-update:{id} + SortedSet pending/thread
- * + CAS Lua transitions + dedup String (short TTL). Reuses the generic Lua from
+ * + CAS Lua transitions + durable request bindings. Reuses the generic Lua from
  * RedisProposalStoreHelpers (CAS_TRANSITION / RECORD_CREATED_THREAD / RELEASE_DEDUP).
  *
  * Iron law #5 (LL-048): proposal hashes carry approval-card UI state + audit lineage →
- * persistent (TTL=0) unless the caller explicitly opts in. Only the dedup key has a TTL.
+ * persistent (TTL=0) unless the caller explicitly opts in. Empty reservations expire;
+ * create commits the proposal and removes the reservation TTL in one fenced operation.
  *
  * P1-1 crash recovery: recordCheckpoint persists writtenPath/provenancePath via a
  * conditional HSET (only while status='approving'); the route checkpoints each path
@@ -29,11 +30,17 @@ import type {
   IProfileUpdateProposalStore,
   ProfileUpdateCheckpoint,
 } from '../ports/ProfileUpdateProposalStore.js';
+import { ProfileUpdateReservationLostError } from '../ports/ProfileUpdateProposalStore.js';
 import { ProfileUpdateProposalKeys } from '../redis-keys/proposals/profile-update-proposal-keys.js';
 import { abortRedisStaged, commitRedisApprovalEnvelope } from './RedisApprovalPublication.js';
 import { hydrateProfileUpdateProposal, serializeProfileUpdateProposal } from './RedisProfileUpdateProposalCodec.js';
 import { CAS_TRANSITION_LUA, RECORD_CREATED_THREAD_LUA, RELEASE_DEDUP_LUA } from './RedisProposalStoreHelpers.js';
-import { CAS_FINALIZE_AND_SETTLE_LUA, CAS_REJECT_AND_SETTLE_LUA } from './redis-profile-update-lua-scripts.js';
+import {
+  CAS_FINALIZE_AND_SETTLE_LUA,
+  CAS_REJECT_AND_SETTLE_LUA,
+  CREATE_RESERVED_PROFILE_UPDATE_LUA,
+  RESERVE_PROFILE_UPDATE_LUA,
+} from './redis-profile-update-lua-scripts.js';
 
 const DEFAULT_DEDUP_TTL_SECONDS = 10 * 60;
 const DEFAULT_LIST_LIMIT = 100;
@@ -54,6 +61,7 @@ export class RedisProfileUpdateProposalStore implements IProfileUpdateProposalSt
     const now = Date.now();
     const proposal: ProfileUpdateProposal = {
       proposalId: input.proposalId ?? generateProposalId(),
+      ...(input.clientRequestId ? { clientRequestId: input.clientRequestId } : {}),
       status: 'pending',
       sourceThreadId: input.sourceThreadId,
       sourceInvocationId: input.sourceInvocationId,
@@ -70,6 +78,23 @@ export class RedisProfileUpdateProposalStore implements IProfileUpdateProposalSt
       publication: { state: 'staged', stagedAt: now },
     };
     const key = ProfileUpdateProposalKeys.detail(proposal.proposalId);
+    if (input.clientRequestId) {
+      const committed = await this.redis.eval(
+        CREATE_RESERVED_PROFILE_UPDATE_LUA,
+        5,
+        key,
+        ProfileUpdateProposalKeys.dedup(proposal.createdBy, input.clientRequestId),
+        ProfileUpdateProposalKeys.userPending(proposal.createdBy),
+        ProfileUpdateProposalKeys.userAll(proposal.createdBy),
+        ProfileUpdateProposalKeys.threadList(proposal.sourceThreadId),
+        proposal.proposalId,
+        now,
+        this.ttlSeconds ?? 0,
+        ...serializeProfileUpdateProposal(proposal),
+      );
+      if (committed !== 1) throw new ProfileUpdateReservationLostError();
+      return proposal;
+    }
     const pipeline = this.redis.multi();
     pipeline.hset(key, ...serializeProfileUpdateProposal(proposal));
     if (this.ttlSeconds) pipeline.expire(key, this.ttlSeconds);
@@ -244,10 +269,15 @@ export class RedisProfileUpdateProposalStore implements IProfileUpdateProposalSt
   }
 
   async reserveDedup(userId: string, clientRequestId: string, proposalId: string): Promise<string> {
-    const key = ProfileUpdateProposalKeys.dedup(userId, clientRequestId);
-    const ok = await this.redis.set(key, proposalId, 'EX', this.dedupTtlSeconds, 'NX');
-    if (ok === 'OK') return proposalId;
-    return (await this.redis.get(key)) ?? proposalId;
+    return (await this.redis.eval(
+      RESERVE_PROFILE_UPDATE_LUA,
+      2,
+      ProfileUpdateProposalKeys.dedup(userId, clientRequestId),
+      ProfileUpdateProposalKeys.detail(proposalId),
+      proposalId,
+      this.dedupTtlSeconds,
+      clientRequestId,
+    )) as string;
   }
 
   async releaseDedup(userId: string, clientRequestId: string, expectedProposalId: string): Promise<void> {
@@ -293,6 +323,9 @@ export class RedisProfileUpdateProposalStore implements IProfileUpdateProposalSt
         ProfileUpdateProposalKeys.threadList(proposal.sourceThreadId),
       ],
       proposalId,
+      proposal.clientRequestId
+        ? ProfileUpdateProposalKeys.dedup(proposal.createdBy, proposal.clientRequestId)
+        : undefined,
     );
   }
 

@@ -16,6 +16,7 @@ import { pluginManagerUploadRoutes, registerPluginManagerRoutes } from '../dist/
 import { catalogEntry, manifest, packageArchive } from './plugin-official-package-installer.fixture.js';
 
 const roots = [];
+const runtimes = new Set();
 
 it('real Manager JSON and upload routes confirm replacement of the same legacy instance', async () => {
   const { composition, entry, projectRoot, runtime } = await harness();
@@ -24,9 +25,9 @@ it('real Manager JSON and upload routes confirm replacement of the same legacy i
     expectedVersion: entry.version,
     expectedDigest: entry.packageDigest,
   });
-  await runtime.inventoryStore.transaction((tx) => {
-    const { provenance: _oldSource, ...legacy } = tx.packages.get(entry.packageDigest);
-    tx.packages.put(legacy);
+  await runtime.inventoryStore.transaction(async (tx) => {
+    const { provenance: _oldSource, ...legacy } = await tx.packages.get(entry.packageDigest);
+    await tx.packages.put(legacy);
   });
   const before = await runtime.inventoryStore.snapshot();
   const next = await packageArchive({ packageManifest: manifest({ version: '0.2.0' }) });
@@ -93,6 +94,7 @@ it('real Manager JSON and upload routes confirm replacement of the same legacy i
 });
 
 afterEach(async () => {
+  for (const runtime of [...runtimes]) await runtime.shutdown('manager_fixture_cleanup');
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
 });
 
@@ -146,6 +148,12 @@ async function harness({
     },
     ...(contract === undefined ? {} : { contract }),
   });
+  const shutdown = runtime.shutdown.bind(runtime);
+  runtime.shutdown = (reason) => {
+    runtimes.delete(runtime);
+    return shutdown(reason);
+  };
+  runtimes.add(runtime);
   const composition = createPluginManagerRuntimeComposition({
     runtime,
     catalogProvider: provider,
@@ -861,11 +869,11 @@ export default { create() { return { async start() {
       expectedVersion: entry.version,
       expectedDigest: entry.packageDigest,
     });
-    await runtime.inventoryStore.transaction((transaction) => {
-      const current = transaction.packages.get(entry.packageDigest);
+    await runtime.inventoryStore.transaction(async (transaction) => {
+      const current = await transaction.packages.get(entry.packageDigest);
       assert.ok(current);
       const { provenance: _legacyMissingField, ...legacy } = current;
-      transaction.packages.put(legacy);
+      await transaction.packages.put(legacy);
     });
     offline = true;
 

@@ -8,7 +8,7 @@ export const youSettingsCopy = defineShellCopy({
     remove: '移除',
     name: '名称',
     nickname: '称呼（可选）',
-    nicknameHint: '留空使用 co-creator',
+    nicknameHint: '留空使用co-creator',
     nicknameUsage: '名称用于个人资料；称呼用于猫收到的对话署名和回复。',
     nicknameUnconfirmed: '历史称呼尚未启用，需要时可在此重新选择。',
     mentions: '@ 名字',

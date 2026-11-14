@@ -1,0 +1,161 @@
+{
+  "capturedFrom": "pre-retirement implementation; controlled in-memory piano sources; no provider calls",
+  "capturedBeforeRetirement": true,
+  "response": {
+    "notice": {
+      "summary": "本次已核对 3 条候选，显示 3 处可读匹配。",
+      "counts": {
+        "candidates": 3,
+        "assessed": 3,
+        "supported": 3,
+        "rejected": 0,
+        "indeterminate": 0,
+        "unassessed": 0
+      },
+      "coverage": "索引覆盖范围尚未确认。最近消息可能尚未入索引，延迟暂无法确认。仅列出本次可得的部分命中。",
+      "nextStep": "可先打开已显示的原文，取其中的日期、对话或正文原词，再缩小查找范围。"
+    },
+    "searchId": "historical-before-judge-retirement",
+    "query": "piano",
+    "results": [
+      {
+        "threadId": "sources",
+        "messageId": "$source_0",
+        "threadTitle": "sources",
+        "speaker": "user",
+        "timestamp": 1000,
+        "timelineOrderAt": 1000,
+        "snippet": {
+          "text": "piano original source 0",
+          "start": 0,
+          "end": 23,
+          "source": "body"
+        },
+        "highlights": [
+          {
+            "start": 0,
+            "end": 5
+          }
+        ],
+        "match": "lexical",
+        "matchEvidence": {
+          "kind": "literal",
+          "terms": ["piano"]
+        },
+        "contentRevision": "21778d776f093ca6384269c379c6c1280d628ca5673b4e41e47ffc77bae1330b",
+        "publiclyQuotable": true,
+        "decisionSources": [
+          {
+            "status": "decided",
+            "conclusion": "piano 的结论",
+            "featureId": "F322",
+            "documentPath": "docs/features/F322.md",
+            "documentRevision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "line": 1
+          }
+        ]
+      },
+      {
+        "threadId": "sources",
+        "messageId": "$source_1",
+        "threadTitle": "sources",
+        "speaker": "user",
+        "timestamp": 1001,
+        "timelineOrderAt": 1001,
+        "snippet": {
+          "text": "piano original source 1",
+          "start": 0,
+          "end": 23,
+          "source": "body"
+        },
+        "highlights": [
+          {
+            "start": 0,
+            "end": 5
+          }
+        ],
+        "match": "lexical",
+        "matchEvidence": {
+          "kind": "literal",
+          "terms": ["piano"]
+        },
+        "contentRevision": "2963000aa328cc8d0f8a91d4c580c9df39a32a84ff7936af8978b1f2f3bae1dd",
+        "publiclyQuotable": true,
+        "decisionSources": [
+          {
+            "status": "not-adopted",
+            "conclusion": "piano 的结论",
+            "featureId": "F322",
+            "documentPath": "docs/features/F322.md",
+            "documentRevision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "line": 1
+          }
+        ]
+      },
+      {
+        "threadId": "sources",
+        "messageId": "$source_2",
+        "threadTitle": "sources",
+        "speaker": "user",
+        "timestamp": 1002,
+        "timelineOrderAt": 1002,
+        "snippet": {
+          "text": "piano original source 2",
+          "start": 0,
+          "end": 23,
+          "source": "body"
+        },
+        "highlights": [
+          {
+            "start": 0,
+            "end": 5
+          }
+        ],
+        "match": "lexical",
+        "matchEvidence": {
+          "kind": "literal",
+          "terms": ["piano"]
+        },
+        "contentRevision": "6054a8e3bb47bfe05f0cae87e590a5e7d100ebf1882f5c9f4c516090db7e019a",
+        "publiclyQuotable": true
+      }
+    ],
+    "meta": {
+      "scope": "global",
+      "sort": "time",
+      "requestedMode": "lexical",
+      "effectiveMode": "lexical",
+      "degraded": false,
+      "partial": true,
+      "hasMore": false,
+      "candidateLimit": 2000,
+      "semanticCandidatesLimited": false,
+      "sourceCoverage": "unknown",
+      "freshness": "unknown",
+      "decisionIndex": {
+        "status": "ready",
+        "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "qualification": {
+        "status": "complete",
+        "examined": 3,
+        "supported": 3,
+        "rejected": 0,
+        "indeterminate": 0,
+        "unassessed": 0,
+        "batches": {
+          "started": 0,
+          "completed": 0,
+          "cancelled": 0,
+          "failed": 0
+        }
+      },
+      "response": {
+        "budgetChars": 23000,
+        "serializedChars": 2674,
+        "truncated": false,
+        "continuation": "unavailable"
+      }
+    }
+  }
+}

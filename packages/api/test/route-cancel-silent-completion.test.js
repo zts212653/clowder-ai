@@ -116,6 +116,53 @@ for (const [name, route] of [
   ['parallel', routeParallel],
 ]) {
   describe(`${name}: cancellation is not silent successful completion`, () => {
+    test('Stop records only the still-pending recall on the stopped turn', async () => {
+      const tracker = new InvocationTracker();
+      const threadId = `cancel-recall-${name}`;
+      const deps = depsFor({
+        opus: {
+          async *invoke() {
+            for (const toolUseId of ['finished', 'waiting']) {
+              yield {
+                type: 'tool_use',
+                catId: 'opus',
+                toolName: 'search_evidence',
+                toolUseId,
+                toolInput: { query: toolUseId },
+                timestamp: Date.now(),
+              };
+              if (toolUseId === 'finished') {
+                yield {
+                  type: 'tool_result',
+                  catId: 'opus',
+                  toolName: 'search_evidence',
+                  toolUseId,
+                  toolResultStatus: 'ok',
+                  content: 'No results found',
+                  timestamp: Date.now(),
+                };
+              }
+            }
+            await new Promise(setImmediate);
+            tracker.cancel(threadId, 'opus', 'user1', 'user_cancel');
+            yield { type: 'done', catId: 'opus', timestamp: Date.now() };
+          },
+        },
+      });
+      const results = [];
+      deps.toolEventLog.updateSummary = async (_threadId, matcher, summary) => {
+        results.push({ matcher, status: summary.resultStatus });
+      };
+      await collect(route, deps, ['opus'], threadId, tracker);
+      assert.deepEqual(
+        results.map(({ matcher, status }) => [matcher.invocationId, matcher.toolUseId, status]),
+        [
+          ['cancel-notice-1', 'finished', 'no_results'],
+          ['cancel-notice-1', 'waiting', 'cancelled'],
+        ],
+      );
+    });
+
     for (const hadTools of [false, true]) {
       test(`Stop after ${hadTools ? 'a completed tool' : 'a buffered start'} emits no completion notice and preserves siblings`, async () => {
         const tracker = new InvocationTracker();

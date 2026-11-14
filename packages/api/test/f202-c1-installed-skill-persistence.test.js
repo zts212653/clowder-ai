@@ -17,10 +17,17 @@ import {
 } from '../dist/domains/plugin/index.js';
 
 const roots = [];
+const runtimes = new Set();
 
 afterEach(async () => {
+  for (const runtime of [...runtimes].reverse()) await shutdownRuntime(runtime);
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
 });
+
+async function shutdownRuntime(runtime, reason) {
+  await runtime.shutdown(reason);
+  runtimes.delete(runtime);
+}
 
 async function tempRoot(label) {
   const root = await mkdtemp(join(tmpdir(), label));
@@ -29,12 +36,14 @@ async function tempRoot(label) {
 }
 
 function createRuntime(projectRoot, options = {}) {
-  return createDormantPluginRuntimeComposition({
+  const runtime = createDormantPluginRuntimeComposition({
     projectRoot,
     ...options,
     messageStore: new MessageStore(),
     contract: { manifestContractRange: '0.1.0', validateManifest },
   });
+  runtimes.add(runtime);
+  return runtime;
 }
 
 async function installAndEnableFixture(options) {
@@ -99,6 +108,7 @@ test('declared skill survives an abnormal Host exit and activates from the same 
 
   // Deliberately do not stop the first composition: this models a killed Host whose
   // in-memory runtime and staging leases disappear without lifecycle cleanup.
+  // afterEach closes both compositions only after the recovery assertions finish.
   const restarted = createRuntime(projectRoot);
   await restarted.supervisor.start(installed.pluginInstanceId);
 
@@ -109,7 +119,7 @@ test('declared skill survives an abnormal Host exit and activates from the same 
     join(realSourceBeforeRestart, 'persistent-skill'),
   );
   await access(join(sourceBeforeRestart, 'persistent-skill/SKILL.md'));
-  await restarted.shutdown();
+  await shutdownRuntime(restarted);
 });
 
 test('Host shutdown and restart preserve the user-selected skill mount policy', async () => {
@@ -124,13 +134,13 @@ test('Host shutdown and restart preserve the user-selected skill mount policy', 
     ),
   });
 
-  await runtime.shutdown('host_shutdown');
+  await shutdownRuntime(runtime, 'host_shutdown');
   const restarted = createRuntime(projectRoot);
   await restarted.supervisor.start(installed.pluginInstanceId);
 
   const afterRestart = installedSkill(await readCapabilitiesConfig(projectRoot), installed.pluginId);
   assert.deepEqual(afterRestart?.mountPaths, ['claude']);
-  await restarted.shutdown();
+  await shutdownRuntime(restarted);
 });
 
 test('uninstall removes the declared skill and its Host-owned source directory', async () => {
@@ -194,7 +204,7 @@ for (const selectedMounts of [['claude'], ['claude', 'codex']]) {
       '# Persistent Skill\n',
     );
     assert.deepEqual(restored.mountPaths, selectedMounts);
-    await runtime.shutdown();
+    await shutdownRuntime(runtime);
   });
 }
 for (const foreignKind of ['symlink', 'directory']) {
@@ -217,7 +227,7 @@ for (const foreignKind of ['symlink', 'directory']) {
     assert.ok(result.conflicts.some((conflict) => conflict.path === link));
     assert.equal(await realpath(link), await realpath(foreignKind === 'symlink' ? foreign : link));
     assert.equal(await readFile(join(link, 'SKILL.md'), 'utf8'), '# User owned\n');
-    await runtime.shutdown();
+    await shutdownRuntime(runtime);
   });
 }
 test('failure after replacement skill activation restores previous package, links and mount policy', async () => {
@@ -278,5 +288,5 @@ test('failure after replacement skill activation restores previous package, link
   assert.equal(detail.pluginInstanceId, oldDetail.pluginInstanceId);
   assert.equal(detail.live, 'running');
   await assert.rejects(access(join(projectRoot, '.codex/skills/persistent-skill')), /ENOENT/);
-  await runtime.shutdown();
+  await shutdownRuntime(runtime);
 });

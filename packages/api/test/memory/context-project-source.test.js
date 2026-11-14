@@ -28,6 +28,7 @@ function fixture(t, external = false) {
   const thread = { createdBy: 'owner', projectPath };
   const item = {
     anchor: 'runbook:lesson',
+    matchReason: 'semantic',
     status: 'active',
     sourcePath: 'lesson.md',
     sourceHash: createHash('sha256').update(body).digest('hex'),
@@ -39,39 +40,44 @@ function fixture(t, external = false) {
     collectionGroups: [{ collectionId: id, status: 'ok' }],
     results: [item],
   };
-  const resolver = {
-    resolve: async (query, options) => {
+  const store = {
+    searchWithMeta: async (query, options) => {
       calls.push({ query, options });
-      return result;
+      return { items: result.results, meta: result.meta };
+    },
+    getByAnchor: async (key) => items.get(key) ?? null,
+    getIndexedSourceRevision: async (key) => {
+      const current = items.get(key);
+      return current
+        ? { sourceHash: current.sourceHash, vectorSourceHash: current.vectorSourceHash ?? current.sourceHash }
+        : null;
     },
   };
   const source = new ContextProjectCueSource({
     threads: { get: async () => thread },
     catalog: { get: (key) => (key === id ? manifest : null) },
-    stores: new Map([
-      [
-        id,
-        {
-          getByAnchor: async (key) => items.get(key) ?? null,
-          getIndexedSourceRevision: async (key) => {
-            const current = items.get(key);
-            return current
-              ? {
-                  sourceHash: current.sourceHash,
-                  vectorSourceHash: current.vectorSourceHash ?? current.sourceHash,
-                }
-              : null;
-          },
-        },
-      ],
-    ]),
-    resolver,
+    stores: new Map([[id, store]]),
     homeProjectPath: root,
     homeDocsRoot: join(root, 'docs'),
   });
   const scope = { ownerUserId: 'owner', threadId: 'thread', invocationId: 'invocation' };
-  return { source, manifest, thread, item, items, docs, scope, calls, result, resolver };
+  return { source, manifest, thread, item, items, docs, scope, calls, result, store };
 }
+
+test('generic discovery uses native indexed candidates and revalidates after shared discovery', async (t) => {
+  const f = fixture(t);
+  const reads = [];
+  f.store.searchWithMeta = async (query, options) => {
+    reads.push({ query, options });
+    return { items: [f.item], meta: { degraded: false, effectiveMode: 'hybrid' } };
+  };
+  const found = await f.source.discover({ scope: f.scope, query: 'approved sequence' });
+  assert.equal(found.sources.length, 1);
+  assert.equal(reads.length, 1);
+  assert.equal(reads[0].query, 'approved sequence');
+  assert.ok(reads[0].options.limit <= 20);
+  assert.ok(reads[0].options.deadlineAt > Date.now() - 15_000);
+});
 
 for (const [badPosition, mutate, reason] of [
   [
@@ -111,7 +117,7 @@ for (const [badPosition, mutate, reason] of [
     f.result.results = hits;
     const found = await f.source.discover({ scope: f.scope, query: 'Continue.' });
     assert.equal(found.sources.length, 2);
-    assert.deepEqual(found.omissions, [reason]);
+    assert.deepEqual(found.omissions, badPosition < 2 ? [reason] : []);
     for (const cue of found.sources) {
       assert.equal(
         (await f.source.read({ scope: f.scope, anchor: cue.anchor, expectedRevision: cue.revision })).status,
@@ -151,23 +157,25 @@ test('all invalid candidates retain omission diagnostics and the resolver record
   delete f.item.sourceHash;
   const allBad = await f.source.discover({ scope: f.scope, query: 'Continue.' });
   assert.deepEqual(allBad.sources, []);
-  assert.deepEqual(allBad.omissions, ['index_revision_unverified', 'source_unavailable']);
-  assert.equal(allBad.omission, 'index_revision_unverified');
+  // Diagnostics have no priority order; the singular fallback is one of the observed reasons.
+  assert.deepEqual(allBad.omissions.toSorted(), ['index_revision_unverified', 'source_unavailable']);
+  assert.ok(allBad.omissions.includes(allBad.omission));
 });
 
 test('an overall retrieval failure is not reported as empty knowledge, and rebinding revokes the batch', async (t) => {
   const f = fixture(t);
   const failure = new Error('retrieval unavailable');
-  f.resolver.resolve = async () => {
+  f.store.searchWithMeta = async () => {
     throw failure;
   };
   await assert.rejects(f.source.discover({ scope: f.scope, query: 'Continue.' }), failure);
-  f.resolver.resolve = async () => {
+  f.store.searchWithMeta = async () => {
     f.manifest.ownerUserId = 'other';
-    return f.result;
+    return { items: f.result.results, meta: f.result.meta };
   };
   const revoked = await f.source.discover({ scope: f.scope, query: 'Continue.' });
-  assert.deepEqual(revoked, { sources: [], omission: 'scope_unavailable' });
+  assert.deepEqual(revoked.sources, []);
+  assert.equal(revoked.omission, 'scope_unavailable');
 });
 
 test('continued context reads reject path escape and revoked thread ownership', async (t) => {
@@ -258,8 +266,9 @@ for (const external of [false, true])
     const discovered = await f.source.discover({ scope: f.scope, query });
     assert.equal(discovered.sources.length, 1);
     assert.equal(f.calls[0].query, query);
-    assert.deepEqual(f.calls[0].options.collections, [f.manifest.id]);
-    assert.deepEqual(f.calls[0].options.authorizedCollections, [f.manifest.id]);
+    assert.equal(f.calls[0].options.mode, 'hybrid');
+    assert.equal(f.calls[0].options.scope, 'docs');
+    assert.ok(f.calls[0].options.limit <= 20);
     const coordinate = discovered.sources[0];
     assert.equal(
       (await f.source.read({ scope: f.scope, anchor: coordinate.anchor, expectedRevision: coordinate.revision }))
@@ -296,13 +305,6 @@ for (const [name, mutate, reason] of [
       f.result.meta.degraded = true;
     },
     'degraded',
-  ],
-  [
-    'partial collection result',
-    (f) => {
-      f.result.collectionGroups[0].status = 'error';
-    },
-    'scope_unavailable',
   ],
   [
     'wrong owner',

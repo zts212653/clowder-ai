@@ -115,9 +115,8 @@ async function begin(options: InitialPluginInstallationOptions): Promise<Initial
   options.signal?.throwIfAborted();
   const existing = await loadJournal(options.statePath);
   if (existing) return { journal: existing };
-  const inventory = await options.inventory.snapshot();
-  // Includes uninstall tombstones: existing users are never treated as a fresh Host.
-  if (inventory.instances.length || inventory.packages.length) {
+  // Includes uninstall tombstones and unreferenced packages without loading them.
+  if (await options.inventory.hasRecords()) {
     options.signal?.throwIfAborted();
     const journal: Journal = { schemaVersion: 1, plugins: [] };
     await saveJournal(options.statePath, journal);
@@ -151,7 +150,7 @@ async function prepareInstance(
 ): Promise<void> {
   options.signal?.throwIfAborted();
   if (!p.instanceId) {
-    const history = (await options.inventory.snapshot()).instances.filter((i) => i.pluginId === p.pluginId);
+    const history = await options.inventory.read.instances.list(p.pluginId);
     // A user install/uninstall (or admission interrupted before its receipt was saved) wins.
     if (history.length) {
       options.signal?.throwIfAborted();
@@ -161,22 +160,20 @@ async function prepareInstance(
     }
     options.signal?.throwIfAborted();
     const installed = await installInitialRelease(options, p, catalogSnapshot);
-    const instance = (await options.inventory.snapshot()).instances.find(
-      (i) => i.pluginInstanceId === installed.pluginInstanceId,
-    );
+    const instance = await options.inventory.read.instances.get(installed.pluginInstanceId);
     if (!instance) throw new Error('Initial installed instance disappeared');
     p.instanceId = instance.pluginInstanceId;
     p.revision = instance.lifecycleRevision;
     // Keep the receipt even if configuration fails; retry setup without a second admission.
     await saveJournal(options.statePath, journal);
   }
-  const before = (await options.inventory.snapshot()).instances.find((i) => i.pluginInstanceId === p.instanceId);
+  const before = await options.inventory.read.instances.get(p.instanceId);
   options.signal?.throwIfAborted();
   if (before?.lifecycleState !== 'installed' || before.lifecycleRevision !== p.revision) {
     p.done = true;
   } else {
     await options.reconcile?.(p.pluginId, p.instanceId);
-    const after = (await options.inventory.snapshot()).instances.find((i) => i.pluginInstanceId === p.instanceId);
+    const after = await options.inventory.read.instances.get(p.instanceId);
     // Reconciliation may change only readiness/revision. A concurrent owner change wins.
     if (
       !after ||
@@ -237,7 +234,7 @@ async function activateInstalled(options: InitialPluginInstallationOptions, plan
   for (const p of journal.plugins) {
     if (p.done || !p.prepared || !p.instanceId || p.revision === undefined) continue;
     try {
-      const instance = (await options.inventory.snapshot()).instances.find((i) => i.pluginInstanceId === p.instanceId);
+      const instance = await options.inventory.read.instances.get(p.instanceId);
       options.signal?.throwIfAborted();
       // Any user/lifecycle change wins over the initial default, including uninstall.
       if (instance?.lifecycleState === 'installed' && instance.lifecycleRevision === p.revision)
@@ -285,9 +282,7 @@ export async function prepareHostInitialPlugins(options: {
       (() => loadMachinePluginCatalog(new URL('initial-plugins.json', OFFICIAL_PLUGIN_CATALOG_URL).href)),
     reconcile: (pluginId, instanceId) => managerRuntime.configuration.reconcile(pluginId, instanceId),
     activate: async (pluginId, instanceId, expectedRevision, catalogSnapshot) => {
-      const instance = (await runtime.inventoryStore.snapshot()).instances.find(
-        (i) => i.pluginInstanceId === instanceId,
-      );
+      const instance = await runtime.inventoryStore.read.instances.get(instanceId);
       // Configuration requiring user input remains visible and disabled in Settings.
       if (instance?.configReadiness !== 'ready') return;
       managerCatalogSnapshot ??= managerRuntime.officialCatalog.projectSnapshot(catalogSnapshot);

@@ -1,5 +1,6 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
+import { KnowledgeResolver } from '../domains/memory/KnowledgeResolver.js';
 import { readWorkspaceFilePreview } from '../domains/workspace/workspace-file-read.js';
 import { resolveDirectLocalAuthorizationUserId } from '../utils/request-identity.js';
 import { visibleMemoryCollections } from './memory-library-read.js';
@@ -40,34 +41,49 @@ async function searchTaste(
 ): Promise<MemorySearchGroup> {
   if (!opts.tasteRepository) throw new Error('Taste reader unavailable');
   const terms = query.q.toLocaleLowerCase().split(/\s+/).filter(Boolean);
-  const memories = await visibleTasteMemories(opts.tasteRepository, opts.ownerUserId, privateAccess);
-  checkMemorySearchExecution(execution);
-  const matches = memories.filter(({ payload }) =>
-    terms.every((term) =>
-      [payload.takeaway, payload.scene, ...payload.quotes, ...payload.tags]
-        .filter(Boolean)
-        .join('\n')
-        .toLocaleLowerCase()
-        .includes(term),
-    ),
-  );
+  const found = await KnowledgeResolver.discover(query.q, {
+    limit: query.limit + 1,
+    ...execution,
+    sources: [
+      {
+        id: 'taste',
+        read: async () => {
+          const memories = await visibleTasteMemories(opts.tasteRepository!, opts.ownerUserId, privateAccess);
+          checkMemorySearchExecution(execution);
+          return {
+            candidates: memories.filter(({ payload }) =>
+              terms.every((term) =>
+                [payload.takeaway, payload.scene, ...payload.quotes, ...payload.tags]
+                  .filter(Boolean)
+                  .join('\n')
+                  .toLocaleLowerCase()
+                  .includes(term),
+              ),
+            ),
+          };
+        },
+        project: async (memory) => {
+          const entry = projectTasteMemory(memory, null);
+          return {
+            id: entry.id,
+            title: entry.title,
+            snippet: (query.depth === 'raw' ? entry.quotes.join('\n') : entry.scene).slice(0, 480),
+            displayType: '品味',
+            authority: null,
+            updatedAt: entry.when,
+            destination: { kind: 'taste' as const, id: entry.id, revision: entry.revision },
+            graph: null,
+          };
+        },
+        key: (row) => row.id,
+      },
+    ],
+  });
   return {
     type: 'memory',
     status: 'ready',
-    hasMore: matches.length > query.limit,
-    results: matches.slice(0, query.limit).map((memory) => {
-      const entry = projectTasteMemory(memory, null);
-      return {
-        id: entry.id,
-        title: entry.title,
-        snippet: (query.depth === 'raw' ? entry.quotes.join('\n') : entry.scene).slice(0, 480),
-        displayType: '品味',
-        authority: null,
-        updatedAt: entry.when,
-        destination: { kind: 'taste' as const, id: entry.id, revision: entry.revision },
-        graph: null,
-      };
-    }),
+    hasMore: found.items.length > query.limit,
+    results: found.items.slice(0, query.limit),
   };
 }
 

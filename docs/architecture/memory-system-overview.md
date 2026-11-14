@@ -8,13 +8,13 @@ as_of: 2026-08-15
 freshness_owner: memory-architecture
 view_state: fresh
 feature_ids: [F102, F152, F163, F186, F188, F200, F209, F221, F227, F231, F255, F256, F260, F263, F271, F272, F276, F281, F282, F287, F296]
-related_features: [F139, F148, F153, F169, F192, F229, F236, F242, F243, F246, F258, F267]
+related_features: [F139, F148, F153, F169, F192, F229, F236, F242, F243, F246, F258, F267, F332, F335]
 topics: [memory, recall, write-side, write-opportunity, standing-reflex, cue-plane, derived-view, context-presentation, relationship-memory, lifecycle, evidence, profile, taste, event-memory, proactive, architecture]
 created: 2026-06-28
-revised: 2026-08-25
+revised: 2026-11-07
 status: active
 author: "Maine Coon/GPT-5.5"
-revised_by: "小太阳·Maine Coon/GPT-5.6 Sol"
+revised_by: "小星星·Maine Coon/GPT-6 Astra（11-07目标拓扑；原历史快照保留）"
 description: "Clowder AI 记忆系统的 current truth + target-state 全景：证据、写入与召回机会、canonical truth、派生视图、上下文呈现、纠错遗忘、反馈裁决与猫自主行动。"
 description_source: human
 description_author: codex-sol
@@ -33,6 +33,10 @@ description_updated_at: 2026-08-25T16:10:49Z
 > **时间语义**：拓扑与权力边界是 current/target 混合视图；运行数字和闭环账本是
 > `as_of: 2026-08-15` 的快照。phase、AC、`landed/live/UAT/verdict` 的现在时始终回对应
 > feature doc 与 roadmap，不能从本文的旧快照推断。
+>
+> **11-07目标增量**：You843要求共同发现归一并迁退旧路；下方
+> [F332目标拓扑](#f332共同发现目标拓扑2026-11-07)取代此前发现分路的目标画法。
+> 这是已规划、尚未实现的重构，未把8月运行快照整体更新成今天，也不复活旧Feature施工。
 >
 > 面向 You、新猫与工程实现者。本文同时回答“家里现在有什么”和“终态应怎样连成一个
 > 系统”：一段经历如何成为 canonical truth；写入机会与召回机会为何是两张并列的 plane；
@@ -75,8 +79,9 @@ opportunity plane、一个回源闭环：
 4. **Projection / Derived View** 提供索引、graph、摘要、card 与拉式物化 cache；全部带 lineage，
    永不获得 truth 权力。[Derived View Contract v1](./memory-derived-view-contract.md) 已冻结逻辑合同；
    通用 runtime propagation 尚未落地。
-5. **Pull Recall + Recall Opportunity Plane** 分别负责“猫主动搜”和“明确判断点主动浮现”；F287
-   已完成后一张 plane 的 closed typed catalog。
+5. **Pull Recall + Recall Opportunity Plane** 分别负责“猫主动搜”和“明确判断点主动浮现”；F332目标把
+   候选发现/关联展开收进演进后的`KnowledgeResolver`，搜索、准入后的F287和F335共用；
+   F287仍持closed typed catalog，源owner仍持读取/更正权。该发现重构尚未实施。
 6. **Context Presentation** 由 F296 按 cold/hot、证据 tier、version/epoch 决定如何呈现与去重；
    v1 合同已冻结，provider-start handshake/epoch/mapper/ledger runtime 尚未实现。
 7. **Outcome + Invalidation** 把消费、纠错、遗忘和结果回源；F276→F287 已有 typed 样板，
@@ -178,62 +183,77 @@ opportunity plane、一个回源闭环：
 
 ---
 
-## 端到端架构
+## F332共同发现目标拓扑（2026-11-07）
 
-```text
-┌──────────────────────────── Evidence substrate ────────────────────────────┐
-│ thread/message · confirmed transcript/ASR · docs · external source · diary │
-│ 原文/原件 + owner/scope + source coordinate；F102/F186/F188/F209          │
-└───────────────┬──────────────────────────────────────────┬─────────────────┘
-                │ 新材料/场景事实                           │ query / source lookup
-                ▼                                           │
-┌──────────── Write Opportunity Plane（目标合同） ───────────┐│
-│ mechanical observation → admitted Standing Reflex entries  ││
-│ → typed WriteOpportunity → propose | defer | abstain        ││
-│ 局部骨架：F282 + F276；Standing Reflex v1 已冻结，runtime 未迁移││
-└───────────────┬────────────────────────────────────────────┘│
-                │ proposal / deferred source receipt           │
-                ▼                                              │
-┌──────────────── Governance + Canonical Truth ───────────────┐│
-│ F152 durable · F221 taste · F227 event · F231 profile       ││
-│ F260 entity/revision · F276 person/relationship · F255 seed ││
-│ approve/reject/not-now · ACL · replace/retire · correct/forget│
-└───────────────┬──────────────────────────────────────────────┘│
-                │ authorized projection                         │
-                ▼                                               │
-┌──────────── Projection / Derived View（v1 冻结，runtime 开放）┐│
-│ FTS/vector/graph/card/summary + demand-driven materialization││
-│ sourceRefs/revisions · valid-time · ACL∩ · constructor ver.  ││
-│ fresh | suspect | invalidated；stale/miss → 回源重建         ││
-└───────────────┬───────────────────────────────┬──────────────┘│
-                │ pull recall                   │ typed now-why │
-                │                               ▼               │
-                │              ┌──────── Recall Opportunity Plane ───────┐
-                │              │ F287 closed catalog → resolver → budget │
-                │              │ → CueEnvelope → drill/source revalidate │
-                │              └────────────────┬─────────────────────────┘
-                └───────────────────────────────┼─────────────────────────┘
-                                                │ dynamic candidate/state
-                                                ▼
-                          ┌──── F296 Context Presentation（v1 contract）──┐
-                          │ cold/hot × deltaSize × contextEpoch            │
-                          │ T0 directive / T1 state / T2 pointer / omit    │
-                          │ 同版本去重；compaction 后重发状态、不重放消息 │
-                          └────────────────┬───────────────────────────────┘
-                                           │ presented / drilled / applied
-                                           ▼
-┌────────────────────── Outcome + Invalidation ────────────────────────────┐
-│ F281 disposition · F200 consumption/trajectory · F263 lifecycle/health  │
-│ F192/F267 utility verdict（有 consumer 才生）                            │
-│ correction/forget/pollution → canonical owner → index/view/cue invalidation│
-└───────────────────────┬───────────────────────────────┬─────────────────┘
-                        │ source remediation             │ useful cue/echo
-                        │                                ▼
-                        │              ┌──────── Cat-owned continuity ─────┐
-                        └─────────────▶│ F255 cue→owned seed/diary          │
-                                       │ F272 intent→first action→echo      │
-                                       └───────────────────────────────────┘
+Architecture cell: memory；Map delta: **W1/W3 landed，W2 offline-only**。来源为You843
+`[thread-id]#private-source-id`。
+共同发现演进自现有`KnowledgeResolver`，是原读取/导航模块的重构，不增设新的truth owner、数据库或常驻服务。
+实施顺序、每条旧路的删除完成点由联合路线 (internal)持有。
+
+**施工前快照**（当时核`90245ad815`，保留历史，不是当前production状态）：文档与聊天各自编排候选；
+`TopkExpansionService`由evidence route专门构造；Matter目录先逐页核源再子串筛选；
+Cue装配是八个原family加线程概况，其中部分是精确读源而非搜索。下图保留原目标拓扑；当前已实现范围见下文，B1/B2尚未接生产。
+
+**W1工程接线（#6793，正式加载待原链）**：`KnowledgeResolver.discover`统一原始候选读取、
+有界准入/补位、去重与合并；文档、消息和Matter暴露原owner source adapter。`resolve()`继续原文档API，
+图的非精确发现、Hub文档/品味/聊天搜索及coverage读口消费同一编排。关键词/来源线程/约定边算法归入
+`knowledge-associations`，evidence route只取共同结果及做最终响应边界；精确`GraphResolver`遍历仍是原语。
+Matter目录从SQLite排序/trigram索引取候选，原`project()`核全部支持源、版本及发布边界；不再先逐页投影全目录。
+旧`resolveLegacy`、`TopkExpansionService` facade、`collectMessageSearchCandidates`及Hub独立候选循环退出。
+**W3工程接线（#6800）**：明确的HTML/video准备事件经Host绑定原身份、scope与epoch，复用共同发现；
+ContextProject重复发现与旧配置已退，其他family必要的准入/精确reader保留。准备返回仍为delivery unknown，
+真实显式读源才按F287原账本写presented/drilled，Matter不写applied。完整合同仍在原[source map](memory-cue-source-map.md#f332-w3工作准备的生产者与呈现合同)。
+W2 #6788本批简化为人工导航及离线草稿，图中B1/B2不代表已投入生产。W1/W3官方Alpha受控旅程已验，
+正式runtime及W4实际效用未代签，证据与后续责任见联合路线 (internal)。
+
+```mermaid
+flowchart TB
+    E["原始证据：消息、文档、外部原件"] --> W["写入机会：原Standing Reflex合同"]
+    W --> G["各lane的治理与canonical数据"]
+    B1["W2 整理页"] -->|Matter原写口| G
+    B2["W2 推断关联候选"] --> P
+    E --> P["原FTS / vector / graph与派生view"]
+    G --> P
+    P --> D["共同发现：演进既有KnowledgeResolver<br/>源适配、候选编排、关联展开"]
+    Q["主动搜索请求"] --> D
+    R["F287 已准入的召回机会"] --> D
+    WT["F335 工具票与原作用域"] --> D
+    D --> PS["原搜索API：结果呈现"]
+    D --> CE["F287：cue封装、预算、handle"]
+    D --> WC["F335：读材料与自主判断"]
+    CE --> CP["F296：连续性与实际递送"]
+    CP --> C["当前猫：选择读源和使用"]
+    PS --> C
+    WC --> C
+    C --> SR["各source owner的精确读口与最终核验"]
+    SR -.原件仍在原处.-> G
+    SR -.原始坐标.-> E
+    C --> O["既有消费记录、反馈与纠正入口"]
+    O -->|原owner裁决| G
+    G -->|按Derived View v1传播更正与遗忘| P
+    C --> A["猫自选的seed / 日记 / 行动；原F255/F272合同"]
 ```
+
+`D`是所有**通用发现**的同一入口：不把两套终态搜索结果简单拼接，也不保留“新核心失败再跑旧搜索”。
+文档、聊天、Matter的底层索引与精确reader仍作为不同source adapter存在，因为它们的版本、权限和内容合同不同。
+这些adapter不各自持另一套通用候选/图扩展编排。原API与cue可以保留适合各消费者的格式/预算。
+
+已知Profile/Event/Seed的状态读取、原F321专用策展，以及直接按精确ID回原件不被强行变成关键词搜索；
+逐族取舍记在[source map](memory-cue-source-map.md#f332发现迁移目标2026-11-07)。
+人/Taste/Profile的批准与更正、Matter写入、守望触发/游标/是否递话仍由原owner持有。
+离线整理页沿Matter原写口形成页的canonical版本；页中归纳仍是归纳，不升级为人物/画像/Taste事实。
+推断关联只进导航投影，不进canonical权威层。W2试点不直接批量发人物/画像/Taste提案；
+这类线索在合法整理页中标候选，在场猫实际需要时再沿原lane判断是否提案。
+本批只借Dreaming方法，不默认接外部托管或另建隐性库。
+
+共同发现也覆盖`graph_resolve`的非精确query；精确anchor解析仍保留，图边遍历与关联展开复用同一实现。
+`KnowledgeResolver`的perspectives、F163审计/回放，以及Hub人用搜索、前台猫和答案卡/来源导航消费方，
+全部列入W1迁移验证清单 (internal)。
+
+三项派生登记回[既有census](memory-derived-view-census.md#f332计划内增量2026-11-07未实施)，
+生命周期只遵循[Derived View Contract v1](memory-derived-view-contract.md)。W1切换搜索/Matter/扩展的发现编排，
+W3切换cue重复发现，W4同时验新旅程和旧分支删除；回放按实现/数据版本冻结或重建基线，不能把换实现当效用。
+没有实现证据前本节持续标target。
 
 ### 为什么是两张 Opportunity Plane
 
@@ -276,13 +296,10 @@ Research-First roadmap §3.1 (internal)
 
 ### Derived View Contract v1
 
-拉式物化的结论、关系卡、综合页或摘要都只能是 cache。最小依赖合同是
-`sourceRefs + source revisions + constructedAt/asOf + valid-time + ACL intersection +
-constructor/model version + state`。source append/supersede 先按谓词依赖把相关 facet 标成
-`suspect`；correct/forget/scope-revoke 必须级联 `invalidated`；任何 stale/miss 都回 canonical source
-重建，不能静默使用旧 view。独立 spec 已冻结为
-[Memory Derived View Contract v1](./memory-derived-view-contract.md)；当前**尚无通用 runtime
-传播实现**，F276→F287 的 typed invalidation 只是可复用样板，不代表全局完成。
+lineage、状态、失效矩阵和读时动作的唯一语义是
+[Memory Derived View Contract v1](./memory-derived-view-contract.md) §2–7；本总图不另抄一份状态表。
+F332的整理归纳、推断关联与Matter索引按该合同在原census登记；W0逐项映射现有字段与实现缺口。
+合同存在和局部typed invalidation先例都不等于全库runtime已完成传播，须回各view的实际实现证据。
 
 ---
 
@@ -454,6 +471,9 @@ F263 不接走两个外部责任：F260 maintenance 需单独归属；soft-forge
 ---
 
 ## 当前施工的直线路径
+
+以下是2026-08-15的历史排程切面。11-07的F332发现重构按联合路线 (internal)，
+本次目标图更新不恢复下列旧Feature排程。
 
 详细 Ready/Done/evidence 合同见
 2026-08-15 Research-First Roadmap (internal)。

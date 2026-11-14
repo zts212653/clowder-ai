@@ -2,6 +2,7 @@ import type { ArtifactReviewRound } from '@cat-cafe/shared';
 import { act, createElement } from 'react';
 import { createRoot } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { SHELL_PRESENTATION_STORAGE_KEY, writeShellPresentation } from '@/components/shell/shell-presentation';
 import { ReviewComments } from '../ReviewComments';
 import { ReviewReply } from '../ReviewReply';
 import { ReviewRoundDecision } from '../ReviewRoundDecision';
@@ -39,6 +40,7 @@ let root: ReturnType<typeof createRoot>, container: HTMLDivElement;
 beforeEach(() => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
   localStorage.clear();
+  writeShellPresentation('v2');
   container = document.createElement('div');
   document.body.append(container);
   root = createRoot(container);
@@ -46,6 +48,7 @@ beforeEach(() => {
 afterEach(async () => {
   await act(async () => root.unmount());
   container.remove();
+  localStorage.removeItem(SHELL_PRESENTATION_STORAGE_KEY);
   vi.restoreAllMocks();
 });
 async function click(label: string) {
@@ -152,7 +155,8 @@ it('a browser storage failure leaves the source annotation available for a retry
   expect(startReviewReanchor('round:2', { body: '旧版意见', anchor: null })).toBe('unavailable');
 });
 
-it.each(['reply', 'decision'])('a late %s callback preserves the next draft at the same key', async (kind) => {
+it.each(['reply', 'decision'])('a late classic %s callback preserves the next draft at the same key', async (kind) => {
+  writeShellPresentation('classic');
   let resolveSave: (ok: boolean) => void = () => {};
   const save = () =>
     new Promise<boolean>((resolve) => {

@@ -41,14 +41,14 @@
   height: 100%;
   overflow: hidden;
   color: var(--shell-muted);
-  font-size: 11px;
+  font-size: var(--console-font-label);
   line-height: 16px;
   mask-image: linear-gradient(#000 55%, transparent 88%);
 }
 .work-cover-paper-text > strong {
   display: block;
   color: var(--shell-ink);
-  font-size: 12px;
+  font-size: var(--console-font-xs);
   font-weight: 600;
   overflow-wrap: anywhere;
 }
@@ -61,11 +61,11 @@
   font-family: var(--font-mono, ui-monospace), monospace;
 }
 .work-cover-paper-text > .work-cover-pr-number {
-  font-size: 14px;
+  font-size: var(--console-font-sm);
 }
 .work-cover-pr-repo {
   display: block;
-  font-size: 11px;
+  font-size: var(--console-font-label);
 }
 .work-cover-bar {
   display: block;
@@ -115,7 +115,7 @@
   border-radius: 6px;
   color: var(--shell-ink);
   background: color-mix(in oklch, var(--shell-paper) 94%, transparent);
-  font-size: 11px;
+  font-size: var(--console-font-label);
   font-weight: 500;
   white-space: nowrap;
 }
@@ -147,13 +147,6 @@
   background: oklch(0.24 0.01 60);
 }
 .work-cover-frame {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-}
-.work-cover-poster {
-  position: absolute;
-  inset: 0;
   width: 100%;
   height: 100%;
   object-fit: cover;
@@ -201,4 +194,31 @@
   flex: 1;
   border-radius: 2px;
   background: color-mix(in oklch, var(--shell-ink) 30%, transparent);
+}
+.work-cover-picture {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+}
+.work-cover-picture-main,
+.work-cover-picture-backdrop {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+.work-cover-picture-main {
+  object-fit: cover;
+}
+.work-cover-picture[data-cover-fit="contain"] .work-cover-picture-main {
+  object-fit: contain;
+}
+.work-cover-picture[data-cover-fit="pending"] .work-cover-picture-main {
+  opacity: 0;
+}
+/* Same picture, enlarged, blurred and darkened under a portrait/square/very wide cover. */
+.work-cover-picture-backdrop {
+  object-fit: cover;
+  filter: blur(18px) brightness(0.62) saturate(1.1);
+  transform: scale(1.18);
 }

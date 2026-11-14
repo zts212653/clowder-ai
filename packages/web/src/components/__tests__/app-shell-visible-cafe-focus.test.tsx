@@ -11,7 +11,17 @@ vi.mock('next/navigation', () => ({
 }));
 
 vi.mock('@/hooks/useIsDesktop', () => ({ useIsDesktop: () => true }));
-vi.mock('@/hooks/useWorkspaceNavigate', () => ({ useWorkspaceNavigate: vi.fn() }));
+vi.mock('@/hooks/useWorkspaceNavigate', () => {
+  // AppShell mounts the hook through WorkspaceNavigateHost; the host forwards to the mocked hook.
+  const useWorkspaceNavigate = vi.fn();
+  return {
+    useWorkspaceNavigate,
+    WorkspaceNavigateHost: ({ threadId, ...options }: { threadId: string | null }) => {
+      useWorkspaceNavigate(threadId, options);
+      return null;
+    },
+  };
+});
 vi.mock('@/stores/sidebarStore', () => ({
   initSidebarWidth: () => {},
   useSidebarStore: () => ({
@@ -41,12 +51,15 @@ describe('F258 Visible Cafe focused shell', () => {
     navState.pathname = '/starry';
     container = document.createElement('div');
     document.body.appendChild(container);
+    // The original cases below exercise the retained classic interface.
+    window.localStorage.setItem('cat-cafe:shell-presentation', 'classic');
     root = createRoot(container);
   });
 
   afterEach(() => {
     React.act(() => root.unmount());
     container.remove();
+    window.localStorage.removeItem('cat-cafe:shell-presentation');
     window.history.replaceState(null, '', '/');
   });
 

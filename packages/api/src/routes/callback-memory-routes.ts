@@ -3,15 +3,19 @@ import { z } from 'zod';
 import type { IMessageStore } from '../domains/cats/services/stores/ports/MessageStore.js';
 import type { IThreadStore } from '../domains/cats/services/stores/ports/ThreadStore.js';
 import { rankToMatchRank } from '../domains/memory/f163-types.js';
-import type { IEvidenceStore, IMarkerQueue, IReflectionService } from '../domains/memory/interfaces.js';
+import type { IEvidenceStore, IReflectionService } from '../domains/memory/interfaces.js';
 import { MessageSearchService } from '../domains/memory/MessageSearchService.js';
+import type { MatterMemoryService } from '../domains/memory/matters/MatterMemoryService.js';
+import { relevanceEvidence } from '../domains/memory/relevance-evidence.js';
 import { requireCallbackAuth } from './callback-auth-prehandler.js';
 import { registerCallbackMessageSearchAnswerRoutes } from './callback-message-search-answer-routes.js';
 import { registerCallbackRecallMetrics } from './callback-recall-metrics.js';
 import { mapKindToSourceType } from './evidence-helpers.js';
+import { registerCallbackMatterMemoryRoutes } from './memory-matter-routes.js';
 import { executeMessageSearch, messageSearchQuerySchema, toMessageSearchInput } from './message-search-handler.js';
 
 interface CallbackMemoryRoutesDeps {
+  matterMemoryService?: MatterMemoryService;
   cloudReturnGrantStore?: Pick<
     import('../domains/cats/services/cloud-bridge/cloud-return-grant.js').CloudReturnGrantStore,
     'claim' | 'release'
@@ -26,7 +30,6 @@ interface CallbackMemoryRoutesDeps {
   threadStore?: Pick<IThreadStore, 'get' | 'list'>;
   /** F102: DI — SQLite-backed services (required) */
   evidenceStore: IEvidenceStore;
-  markerQueue: IMarkerQueue;
   reflectionService: IReflectionService;
 }
 
@@ -35,16 +38,12 @@ const searchEvidenceQuerySchema = messageSearchQuerySchema;
 const reflectSchema = z.object({
   query: z.string().trim().min(1),
 });
-const retainMemorySchema = z.object({
-  content: z.string().trim().min(1).max(50000),
-  tags: z.union([z.string(), z.array(z.string())]).optional(),
-  metadata: z.record(z.string()).optional(),
-});
 
 export async function registerCallbackMemoryRoutes(
   app: FastifyInstance,
   deps: CallbackMemoryRoutesDeps,
 ): Promise<void> {
+  registerCallbackMatterMemoryRoutes(app, deps.matterMemoryService);
   await registerCallbackRecallMetrics(app);
   registerCallbackMessageSearchAnswerRoutes(app, {
     service: deps.messageSearchAnswerService,
@@ -103,6 +102,8 @@ export async function registerCallbackMemoryRoutes(
         anchor: item.anchor,
         snippet: item.summary ?? '',
         matchRank: rankToMatchRank(index),
+        rank: index + 1,
+        relevance: relevanceEvidence(item, q),
         ...(item.retrievalScore != null ? { retrievalScore: item.retrievalScore } : {}),
         sourceType: mapKindToSourceType(item.kind),
         ...(item.authority ? { authority: item.authority } : {}),
@@ -135,29 +136,6 @@ export async function registerCallbackMemoryRoutes(
         degradeReason: 'reflection_service_error',
         dispositionMode: 'off' as const,
       };
-    }
-  });
-
-  app.post('/api/callbacks/retain-memory', async (request, reply) => {
-    const record = requireCallbackAuth(request, reply);
-    if (!record) return;
-
-    const parsed = retainMemorySchema.safeParse(request.body);
-    if (!parsed.success) {
-      reply.status(400);
-      return { error: 'Invalid request body', details: parsed.error.issues };
-    }
-    const { content } = parsed.data;
-
-    try {
-      await deps.markerQueue.submit({
-        content,
-        source: `callback:${record.catId}:${record.invocationId}`,
-        status: 'captured',
-      });
-      return { status: 'ok' };
-    } catch {
-      return { status: 'degraded', degradeReason: 'marker_queue_error' };
     }
   });
 }

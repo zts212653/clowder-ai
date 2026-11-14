@@ -24,7 +24,15 @@ import {
   shellCall,
 } from './shell-code-inputs.mjs';
 import { scanShellText } from './shell-lexical.mjs';
-import { annotateCoordinate, moveCoordinate, programTokens, unreadableProgram } from './shell-program-tokens.mjs';
+import {
+  annotateCoordinate,
+  delegatedProgramTokens,
+  leadingShellControl,
+  moveCoordinate,
+  nativeBuiltinContext,
+  programTokens,
+  unreadableProgram,
+} from './shell-program-tokens.mjs';
 import { extractSubstitutions, SUBSTITUTION, splitCommandLines, splitPipelineStages, unquote } from './shell-text.mjs';
 import { afterWrapper, XARGS_WRAPPER } from './shell-wrappers.mjs';
 /** F300/F306 reader: program, argv, code input and completeness stay separate. */
@@ -32,7 +40,7 @@ export { optionValue, splitCommandLines, unquote };
 const MAX_RECURSION = 8;
 export function executedInvocations(
   raw,
-  { depth = 0, cwd, parameters = parameterFrame(), bindings, stdin: input } = {},
+  { depth = 0, cwd, parameters = parameterFrame(), bindings, stdin: input, builtinContext = false } = {},
 ) {
   if (depth > MAX_RECURSION) return { pipelines: [], complete: false };
   const pipelines = [];
@@ -46,14 +54,25 @@ export function executedInvocations(
   const uncertain =
     !lexical.complete ||
     lexical.boundaries.some((b) => b.kind === 'group' || ['&&', '||'].includes(raw.slice(b.start, b.end))) ||
-    lines.some((line) => /^(?:if|then|else|elif|for|while|until|case|function)\b/.test(line));
+    lines.some(leadingShellControl);
+  // Function/control groups can bind names in the parent shell. A syntactic
+  // `command -v` is a builtin inquiry only while that namespace is still known.
+  let inquiryContext =
+    nativeBuiltinContext(builtinContext) &&
+    !lexical.boundaries.some((b) => b.kind === 'group') &&
+    !lines.some(leadingShellControl);
   for (const line of lines) {
     const pipeline = [];
     const stages = splitPipelineStages(line);
     let stdin = input;
     for (const stage of stages) {
-      const parsed = parseStage(stage, depth, cwd, stdin, frame, bindings);
+      const parsed = parseStage(stage, depth, cwd, stdin, frame, bindings, inquiryContext);
       if (!parsed.complete) complete = false;
+      inquiryContext &&=
+        parsed.complete &&
+        !['alias', 'unalias', 'enable', 'autoload', 'functions', 'source', '.', 'eval'].includes(
+          parsed.invocation?.program,
+        );
       // Keep every stage: dropping one would hand its successor the wrong stdin.
       if (parsed.invocation) {
         pipeline.push(parsed.invocation);
@@ -66,7 +85,12 @@ export function executedInvocations(
       if (stages.length === 1 && parsed.invocation?.name === 'set' && parsed.invocation.operands[0] === '--') {
         const values = parsed.invocation.operands.slice(1);
         const sources = operandSources(values, parsed.markers, bindings, frame);
-        setParameters(frame, values, sources, uncertain);
+        setParameters(
+          frame,
+          values,
+          sources,
+          uncertain || parsed.invocation.wrappers?.some((wrapper) => wrapper.inquiry),
+        );
       }
     }
     if (pipeline.length > 0) pipelines.push(pipeline);
@@ -83,11 +107,11 @@ export function executedInvocations(
     output,
   };
 }
-export function executionChainInvocations(raw, { cwd, bindings, stdin: input } = {}) {
+export function executionChainInvocations(raw, { cwd, bindings, stdin: input, builtinContext = false } = {}) {
   const combined = { pipelines: [], complete: true, unresolvedEvidence: [] };
   let stdin = input;
   for (const unit of splitPipelineStages(raw)) {
-    const reader = executedInvocations(unit, { cwd, bindings, stdin });
+    const reader = executedInvocations(unit, { cwd, bindings, stdin, builtinContext });
     combined.pipelines.push(...reader.pipelines);
     combined.unresolvedEvidence.push(...reader.unresolvedEvidence);
     combined.complete &&= reader.complete;
@@ -95,8 +119,8 @@ export function executionChainInvocations(raw, { cwd, bindings, stdin: input } =
   }
   return { ...combined, output: stdin };
 }
-function nestedFrom(source, depth, cwd, parameters = parameterFrame(), bindings) {
-  const result = executedInvocations(source, { depth: depth + 1, cwd, parameters, bindings });
+function nestedFrom(source, depth, cwd, parameters = parameterFrame(), bindings, builtinContext = false) {
+  const result = executedInvocations(source, { depth: depth + 1, cwd, parameters, bindings, builtinContext });
   attachArgumentEvidence(result, parameters);
   return {
     nested: result.pipelines,
@@ -131,7 +155,9 @@ function inlineExecution({
   if (!script) {
     return { invocation: stageInvocation, nested, complete: false };
   }
-  const result = nestedFrom(script, depth, cwd, parameters, bindings);
+  // Interpreter/code-input startup may source files or import functions before
+  // this script. Its namespace is not certified by the native caller's argv.
+  const result = nestedFrom(script, depth, cwd, parameters, bindings, false);
   for (const call of result.nested.flat())
     if (call.parameterScope === result.parameterScope && (call.generatedCode || call.name === undefined))
       call.codeEvidence = [...(call.codeEvidence ?? []), ...(codeEvidence ?? [])];
@@ -143,7 +169,7 @@ function inlineExecution({
     unresolvedEvidence: result.unresolvedEvidence,
   };
 }
-function parseStage(stage, depth, outerCwd, stdin, frame, bindings) {
+function parseStage(stage, depth, outerCwd, stdin, frame, bindings, builtinContext) {
   const substitutions = extractSubstitutions(stage, {
     continuations: true,
     parameters: true,
@@ -153,7 +179,7 @@ function parseStage(stage, depth, outerCwd, stdin, frame, bindings) {
   const nested = [];
   let complete = substitutions.readable;
   for (const inner of substitutions.inner) {
-    const result = nestedFrom(inner, depth, outerCwd, frame, bindings);
+    const result = nestedFrom(inner, depth, outerCwd, frame, bindings, builtinContext);
     nested.push(...result.nested);
     if (!result.complete) complete = false;
   }
@@ -168,7 +194,7 @@ function parseStage(stage, depth, outerCwd, stdin, frame, bindings) {
     complete = false;
   }
   if (!tokens || tokens.length === 0) return unreadable;
-  const program = programTokens(tokens, outerCwd);
+  const program = programTokens(tokens, outerCwd, builtinContext);
   const result = parseArgv(program, stage, depth, nested, complete, {
     stdin,
     frame,
@@ -252,11 +278,12 @@ function parseArgv(program, stage, depth, nested = [], complete = true, inputs =
         codeEvidence: operandSources([command.source], inputs.markers, inputs.bindings, inputs.frame).flat(),
       });
     if (command.kind === 'argv') {
-      const childProgram = programTokens(command.argv, childCwd);
+      const childProgram = delegatedProgramTokens(command.argv, childCwd, program);
       const child = parseArgv(childProgram, stage, depth + 1, [], true, {
         ...inputs,
         sourceScope: inputs.sourceScope ?? depth,
       });
+      annotateCoordinate(child, childProgram, child.complete && command.complete && coordinateComplete);
       if (child.invocation) {
         child.invocation.parameterScope = inputs.sourceScope ?? depth;
         nested.push([child.invocation]);
@@ -313,13 +340,14 @@ function parseArgv(program, stage, depth, nested = [], complete = true, inputs =
 
   if (name === 'find' || name === 'xargs') {
     const consumed = name === 'xargs' ? afterWrapper(XARGS_WRAPPER, operands) : undefined;
-    const childInputs = launcherInputs(name, consumed, inputs, stage);
+    const launcherOptions = name === 'xargs' ? operands.slice(0, operands.length - consumed.rest.length) : [];
+    const childInputs = launcherInputs(name, consumed, inputs, stage, launcherOptions);
     const children =
       name === 'find'
         ? findExecutedCommands(operands)
         : [{ args: childInputs.args, complete: consumed.complete, localCwd: true }];
     for (const child of children) {
-      const childProgram = programTokens(child.args, child.localCwd ? cwd : undefined);
+      const childProgram = delegatedProgramTokens(child.args, child.localCwd ? cwd : undefined, program);
       const parsed = parseArgv(childProgram, stage, depth + 1, [], true, {
         ...childInputs,
         stdin:
@@ -328,8 +356,12 @@ function parseArgv(program, stage, depth, nested = [], complete = true, inputs =
             : childInputs.stdin,
         sourceScope: inputs.sourceScope ?? depth,
       });
+      annotateCoordinate(parsed, childProgram, child.complete && parsed.complete);
       if (parsed.invocation) {
-        if (name === 'xargs') parsed.invocation.inputOwner = 'xargs';
+        if (name === 'xargs') {
+          parsed.invocation.inputOwner = 'xargs';
+          parsed.invocation.inputEvidence = childInputs.launcherEvidence;
+        }
         nested.push([parsed.invocation]);
       }
       nested.push(...parsed.nested);

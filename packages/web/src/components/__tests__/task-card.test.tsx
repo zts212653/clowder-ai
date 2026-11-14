@@ -59,4 +59,31 @@ describe('TaskCard', () => {
     const html = renderToStaticMarkup(<TaskCard task={makeTask({ status: 'doing' })} onStatusChange={vi.fn()} />);
     expect(html).toContain('border-l-cafe-crosspost');
   });
+
+  it('shows recovery disposition on the original task card', async () => {
+    const { TaskCard } = await import('../TaskCard');
+    const html = renderToStaticMarkup(
+      <TaskCard
+        task={makeTask({
+          recovery: {
+            v: 1,
+            ownerRef: 'task:task-1',
+            incidents: [
+              {
+                source: 'ball_probe',
+                lane: 'probe',
+                disposition: 'needs_attention',
+                reasonCode: 'ball_recovery_failed',
+                executionRef: 'ball:task:task-1:g1',
+              },
+            ],
+          },
+        })}
+        onStatusChange={vi.fn()}
+      />,
+    );
+    expect(html).toContain('data-testid="task-recovery"');
+    expect(html).toContain('ball_recovery_failed');
+    expect(html).toContain('Fix the redirect bug');
+  });
 });

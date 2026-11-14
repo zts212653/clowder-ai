@@ -90,6 +90,7 @@ export function UnifiedAuthModal({
 
   const isOAuth = authMode === 'oauth';
   const isCodexLogin = isOAuth && (initialClientId ?? clientId) === 'openai';
+  const isPlatformKey = !isOAuth && ['anthropic', 'openai', 'google'].includes(initialClientId ?? clientId ?? '');
 
   /** Build envVars Record from entries, filtering empty/invalid/reserved keys. */
   const buildEnvVars = (): Record<string, string> | undefined => {
@@ -123,7 +124,9 @@ export function UnifiedAuthModal({
     Boolean(clientId) &&
     (isOAuth
       ? isCodexLogin || Boolean(displayName.trim())
-      : Boolean(displayName.trim()) && models.length > 0 && (isEdit || Boolean(baseUrl.trim() && apiKey.trim())));
+      : Boolean(displayName.trim()) &&
+        (isPlatformKey || models.length > 0) &&
+        (isEdit || Boolean(apiKey.trim() && (isPlatformKey || baseUrl.trim()))));
 
   const handleSubmit = async () => {
     if (!canSubmit) return;
@@ -138,7 +141,7 @@ export function UnifiedAuthModal({
           envVars: envVars ?? {},
         };
         patch.clientId = initialClientId ?? clientId;
-        if (baseUrl.trim()) patch.baseUrl = baseUrl.trim();
+        if (baseUrl.trim() || isPlatformKey) patch.baseUrl = baseUrl.trim();
         if (apiKey.trim()) patch.apiKey = apiKey.trim();
         const res = await apiFetch(`/api/accounts/${encodeURIComponent(editProfile!.id)}`, {
           method: 'PATCH',
@@ -185,9 +188,9 @@ export function UnifiedAuthModal({
             displayName: displayName.trim(),
             authType: 'api_key',
             clientId: initialClientId ?? clientId,
-            baseUrl: baseUrl.trim(),
+            ...(baseUrl.trim() ? { baseUrl: baseUrl.trim() } : {}),
             apiKey: apiKey.trim(),
-            models,
+            ...(models.length ? { models } : {}),
             ...(() => {
               const ev = buildEnvVars();
               return ev ? { envVars: ev } : {};
@@ -285,7 +288,7 @@ export function UnifiedAuthModal({
               {isOAuth ? t.provider : t.keyOwner}
             </label>
             {initialClientId ? (
-              <p className={formInputClass}>{builtinClientLabel(initialClientId)}</p>
+              <p className={formInputClass}>{builtinClientLabel(initialClientId, authMode)}</p>
             ) : (
               <select
                 aria-label={isOAuth ? t.provider : t.keyOwner}
@@ -300,7 +303,7 @@ export function UnifiedAuthModal({
                 )}
                 {(isOAuth && !isEdit ? ['openai' as const] : CLIENT_OPTIONS).map((c) => (
                   <option key={c} value={c}>
-                    {builtinClientLabel(c)}
+                    {builtinClientLabel(c, authMode)}
                   </option>
                 ))}
               </select>

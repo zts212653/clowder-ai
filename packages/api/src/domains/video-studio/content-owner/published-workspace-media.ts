@@ -8,7 +8,8 @@ import { workspaceSnapshotSourceRef } from './publication.js';
 import type { MediaReviewPrincipal } from './published-media-access.js';
 import type { WorkspaceSnapshotPublicationScopeV1 } from './types.js';
 
-export type WorkspaceMediaSourcePort = Pick<WorkspaceContentSourceService, 'describe' | 'openMedia'>;
+export type WorkspaceMediaSourcePort = Pick<WorkspaceContentSourceService, 'describe' | 'openMedia'> &
+  Partial<Pick<WorkspaceContentSourceService, 'describeFileReference'>>;
 
 export async function assertWorkspaceSnapshotVisible(
   workspace: WorkspaceMediaSourcePort | undefined,

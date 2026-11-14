@@ -6,6 +6,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest
 import { useChatCommands } from '@/hooks/useChatCommands';
 import { activeExecutionKey, useActiveExecutionStore } from '@/stores/activeExecutionStore';
 import { useChatStore } from '@/stores/chatStore';
+import { useSidebarProjectionStore } from '@/stores/sidebarProjectionStore';
 import { MiniThreadSidebar } from '../MiniThreadSidebar';
 import { SplitPaneView } from '../SplitPaneView';
 
@@ -140,9 +141,25 @@ describe('MiniThreadSidebar thread-state subscription', () => {
     delete (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT;
   });
 
-  it('refreshes a background thread unread badge when threadStates changes', () => {
+  // PR-3a: the badge reads the F297 canonical snapshot; thread rooms stop feeding background state.
+  it('refreshes a background thread unread badge when the Sidebar snapshot changes', () => {
     const threadId = 'subscription-test-thread';
-    const backgroundState = useChatStore.getState().getThreadState(threadId);
+    const snapshotRow = (unreadCount: number) => ({
+      id: threadId,
+      title: 'Subscription test',
+      participants: [],
+      pinned: false,
+      favorited: false,
+      labels: [],
+      preferredCats: [],
+      projectPath: '/test',
+      lastActiveAt: 1,
+      systemKind: null,
+      isHubThread: false,
+      unreadCount,
+      hasUserMention: false,
+      presence: { status: 'idle' as const },
+    });
 
     act(() => {
       useChatStore.setState({
@@ -159,11 +176,8 @@ describe('MiniThreadSidebar thread-state subscription', () => {
           },
         ],
         splitPaneThreadIds: [],
-        threadStates: {
-          ...originalState.threadStates,
-          [threadId]: { ...backgroundState, unreadCount: 1 },
-        },
       });
+      useSidebarProjectionStore.setState({ rows: [snapshotRow(1)] });
     });
 
     container = document.createElement('div');
@@ -173,14 +187,10 @@ describe('MiniThreadSidebar thread-state subscription', () => {
     expect(container.textContent).toContain('1');
 
     act(() => {
-      useChatStore.setState((state) => ({
-        threadStates: {
-          ...state.threadStates,
-          [threadId]: { ...state.threadStates[threadId], unreadCount: 2 },
-        },
-      }));
+      useSidebarProjectionStore.setState({ rows: [snapshotRow(2)] });
     });
     expect(container.textContent).toContain('2');
+    useSidebarProjectionStore.setState({ rows: [] });
   });
 });
 

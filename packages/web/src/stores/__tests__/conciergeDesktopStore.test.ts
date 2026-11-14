@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 
 vi.mock('@/utils/api-client', () => ({ apiFetch: vi.fn() }));

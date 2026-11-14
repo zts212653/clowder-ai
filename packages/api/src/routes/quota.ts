@@ -24,6 +24,7 @@ import { resolveForClient } from '../config/account-resolver.js';
 import { type CodexAccountLaunchDescriptor, resolveCodexAccountLaunch } from '../config/codex-account-launch.js';
 import type { RoutingQuotaSnapshotObserver } from '../domains/routing-context/F051QuotaRoutingSignalAdapter.js';
 import { resolveCliCommand } from '../utils/cli-resolve.js';
+import { fetchCodexQuota } from './codex-quota-fetch.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -1416,7 +1417,12 @@ export async function refreshOfficialQuotaViaOAuth(options: RefreshOAuthOptions)
           let json: unknown;
           let headers: Headers | undefined;
           try {
-            ({ json, headers } = await fetchProviderUsage(OPENAI_WHAM_USAGE_URL, token, extraHeaders, fetchFn));
+            ({ json, headers } = await fetchProviderUsage(
+              OPENAI_WHAM_USAGE_URL,
+              token,
+              extraHeaders,
+              options.fetchLike ?? fetchCodexQuota,
+            ));
           } catch (err) {
             if (err instanceof TokenExpiredError) {
               // Codex refresh tokens rotate. Refreshing here without atomically updating

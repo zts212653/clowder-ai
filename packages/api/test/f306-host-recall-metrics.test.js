@@ -4,11 +4,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'node:test';
 import Database from 'better-sqlite3';
-import Fastify from 'fastify';
 import { CANONICAL_TOOL_REGISTRY } from '../../mcp-server/dist/canonical-server-tools.js';
 import { createServer } from '../../mcp-server/dist/index.js';
 import { useInvocationAuth } from '../../mcp-server/test/helpers/invocation-auth.js';
 import { applyMigrations, SCHEMA_V1 } from '../dist/domains/memory/schema.js';
+import { createApiServer } from '../dist/infrastructure/api-server.js';
 import { registerCallbackAuthHook } from '../dist/routes/callback-auth-prehandler.js';
 import { registerCallbackMemoryRoutes } from '../dist/routes/callback-memory-routes.js';
 import { clearRecallMetricsCache, recallMetricsRoutes } from '../dist/routes/recall-metrics.js';
@@ -48,7 +48,7 @@ describe('F306 named Host recall metrics', () => {
     observed = [];
     policy = undefined;
     rewriteReport = undefined;
-    app = Fastify();
+    app = createApiServer();
     app.addHook('onRequest', async (request) => {
       if (request.url.startsWith('/api/recall/metrics'))
         observed.push({ method: request.method, url: request.url, actor: request.headers['x-cat-cafe-user'] });

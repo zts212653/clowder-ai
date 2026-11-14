@@ -1,8 +1,10 @@
 import assert from 'node:assert/strict';
 import { readFile, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
 import {
+  checkGifClipboardFrame,
   checkNativeImageCoordinates,
   checkNativeImagePixels,
   checkNativeImageSelection,
@@ -10,6 +12,7 @@ import {
 } from './f309-artwork-lightbox-image-formats.mjs';
 import { verifyNativeArtworkCatalogues } from './f309-artwork-lightbox-native-catalogues.mjs';
 import { createNativeArtworkFixture, digest } from './f309-artwork-lightbox-native-fixture.mjs';
+import { downloadNativeOriginal, openNativeArtwork } from './f309-artwork-native-opening.mjs';
 import { openDocumentSession } from './f309-ordinary-document-session.mjs';
 import {
   startF309OrdinaryWorkspaceJourney,
@@ -19,34 +22,69 @@ import { verifyTextAnnotationWorkBoundary } from './f309-text-annotation-work-bo
 
 async function selectPlaces(page, f, kind) {
   const original = page.locator(`[data-message-id="${f.publication.id}"]`);
-  await original.getByRole('button', { name: /打开作品/ }).click();
-  const dialog = page.getByRole('dialog');
-  const surface = dialog.getByTestId('workspace-content-review-surface');
-  await surface.getByTestId('workspace-content-review-media').waitFor();
+  if (kind === 'gif') {
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await page.waitForFunction((messageId) => {
+      const img = document.querySelector(`[data-message-id="${messageId}"] [data-testid="file-block-cover"] img`);
+      return img?.src.includes('gif-poster') && img.complete && img.naturalWidth > 0;
+    }, f.publication.id);
+    f.reducedMotionPreview = await original
+      .getByTestId('file-block-cover')
+      .locator('img')
+      .evaluate((img) => ({
+        src: img.src,
+        width: img.naturalWidth,
+        height: img.naturalHeight,
+      }));
+  }
+  const { dialog, surface } = await openNativeArtwork(page, original, f, kind);
   if (kind === 'jpg' || kind === 'webp') {
     await page.waitForFunction(() => {
       const img = document.querySelector('[role="dialog"] img[data-testid="workspace-content-review-media"]');
       return img?.complete && img.naturalWidth > 0;
     });
     f.displayCoordinates = await checkNativeImageCoordinates(surface, f.original, f.source.media);
-    const download = dialog.locator('a[download]').first();
-    assert.ok((await download.getAttribute('download')).endsWith(`.${kind}`));
-    const href = await download.getAttribute('href');
-    assert.ok(href && !href.includes('display=oriented'));
-    const downloaded = await download.evaluate(async (link) => {
-      const response = await fetch(link.href, { headers: { 'x-cat-cafe-user': 'operator' } });
-      const data = await response.arrayBuffer();
-      const hash = await crypto.subtle.digest('SHA-256', data);
-      return {
-        status: response.status,
-        mime: response.headers.get('content-type'),
-        sha256: [...new Uint8Array(hash)].map((value) => value.toString(16).padStart(2, '0')).join(''),
-      };
-    });
-    assert.equal(downloaded.status, 200);
-    assert.equal(downloaded.mime, f.source.mime);
-    assert.equal(downloaded.sha256, digest(f.original));
-    f.displayCoordinates.download = downloaded;
+    f.displayCoordinates.download = await downloadNativeOriginal(page, dialog, f, kind);
+  }
+  if (kind === 'gif') {
+    const snapshot = () =>
+      dialog.getByLabel('GIF 帧位置', { exact: true }).evaluate((slider) => {
+        const props = Object.keys(slider).find((key) => key.startsWith('__reactProps$'));
+        return {
+          value: slider.value,
+          disabled: slider.disabled,
+          frame: document
+            .querySelector('[role="dialog"] [data-testid="gif-frame-media"]')
+            ?.getAttribute('data-frame-index'),
+          homeHandler: typeof slider[props]?.onKeyDown === 'function',
+        };
+      });
+    const states = [await snapshot()];
+    f.gifFrameSteps ??= [];
+    f.gifFrameSteps.push(states);
+    await page.waitForFunction(
+      () => document.querySelector('[role="dialog"] input[aria-label="GIF 帧位置"]')?.disabled === false,
+    );
+    states.push(await snapshot());
+    const pause = dialog.getByRole('button', { name: '暂停 GIF', exact: true });
+    if (await pause.count()) await pause.click();
+    states.push(await snapshot());
+    await dialog.getByLabel('GIF 帧位置', { exact: true }).press('Home');
+    states.push(await snapshot());
+    assert.equal(states.at(-1).frame, '0', JSON.stringify(states));
+    await dialog.getByRole('button', { name: '下一帧', exact: true }).click();
+    states.push(await snapshot());
+    assert.equal(
+      await surface.getByTestId('gif-frame-media').getAttribute('data-frame-index'),
+      '1',
+      JSON.stringify(states),
+    );
+    f.clipboardFrames ??= [];
+    f.clipboardFrames.push(await checkGifClipboardFrame(page, dialog, f.original, 1));
+    await dialog.getByLabel('GIF 帧位置', { exact: true }).press('End');
+    f.clipboardFrames.push(await checkGifClipboardFrame(page, dialog, f.original, 2));
+    await dialog.getByLabel('GIF 帧位置', { exact: true }).press('Home');
+    await dialog.getByRole('button', { name: '下一帧', exact: true }).click();
   }
   if (kind === 'mp4') {
     const video = surface.getByTestId('workspace-content-review-media');
@@ -121,7 +159,15 @@ async function readComparisonPixels(comparison, kind, fixture, returned, record)
       const hash = await crypto.subtle.digest('SHA-256', data);
       return [...new Uint8Array(hash)].map((value) => value.toString(16).padStart(2, '0')).join('');
     });
-    if (kind === 'webp') {
+    if (kind === 'gif') {
+      const response = await fetch(
+        `${fixture.owner.api}/api/artifact-reviews/${encodeURIComponent(record.progress.review.reviewId)}/media/${index + 1}`,
+        { headers: { 'x-cat-cafe-user': 'operator' } },
+      );
+      assert.equal(response.status, 200);
+      assert.equal(response.headers.get('content-type'), 'image/gif');
+      versions.push({ label, sha256: digest(Buffer.from(await response.arrayBuffer())), displaySha256: bytes });
+    } else if (kind === 'webp') {
       const original = index === 0 ? fixture.original : returned.bytes;
       assert.equal(bytes, digest(await nativeWebpDisplayBytes(original)));
       const pixels = await checkNativeImagePixels(media, original, fixture.source.media);
@@ -139,6 +185,8 @@ async function readComparisonPixels(comparison, kind, fixture, returned, record)
 
 export function registerNativeArtworkLightboxJourneys() {
   for (const { kind, width, dark, sourceKind } of [
+    { kind: 'gif', width: 1440, dark: false, sourceKind: 'workspace' },
+    { kind: 'svg', width: 390, dark: true, sourceKind: 'publication' },
     { kind: 'png', width: 1440, dark: false, sourceKind: 'workspace' },
     { kind: 'mp4', width: 390, dark: true, sourceKind: 'workspace' },
     { kind: 'jpg', width: 1440, dark: false, sourceKind: 'workspace' },
@@ -151,7 +199,7 @@ export function registerNativeArtworkLightboxJourneys() {
       { timeout: 240_000 },
       async () => {
         const evidence = path.join(
-          process.env.F309_BROWSER_EVIDENCE_DIR ?? '/tmp/f309-artwork-lightbox-native',
+          process.env.F309_BROWSER_EVIDENCE_DIR ?? path.join(tmpdir(), 'f309-artwork-lightbox-native'),
           `${kind}-${width}`,
         );
         const f = await createNativeArtworkFixture(kind, evidence, sourceKind);
@@ -179,6 +227,8 @@ export function registerNativeArtworkLightboxJourneys() {
           const send = async () => {
             const originalComposer = await composer.elementHandle();
             const dialog = await selectPlaces(page, f, kind);
+            observations.opening = f.opening;
+            observations.openingResponse = f.openingResponse;
             assert.equal(await composer.evaluate((node, original) => node === original, originalComposer), true);
             await page.screenshot({ path: path.join(evidence, `selected-${f.sent.length}.png`) });
             await dialog.getByRole('button', { name: '发送消息', exact: true }).click();
@@ -201,6 +251,10 @@ export function registerNativeArtworkLightboxJourneys() {
             if (kind === 'jpg' || kind === 'webp') {
               checkNativeImageSelection(attachment.selections[0].selection, f.source.media);
               observations.displayCoordinates = f.displayCoordinates;
+            }
+            if (kind === 'gif') {
+              assert.equal(attachment.selections[0].selection.frameIndex, 1);
+              assert.equal(attachment.selections[0].selection.timestampMs, 80);
             }
             assert.deepEqual(await readFile(f.absolute), f.original);
             await page.keyboard.press('Escape');
@@ -304,12 +358,18 @@ export function registerNativeArtworkLightboxJourneys() {
           observations.calls = session.calls;
         } catch (error) {
           observations.failure = { error: String(error), stack: error.stack };
+          observations.opening = f.opening;
+          observations.openingResponse = f.openingResponse;
           if (session) {
+            observations.calls = session.calls;
             observations.body = await session.page.locator('body').innerText();
             await session.page.screenshot({ path: path.join(evidence, 'failure.png') });
           }
           throw error;
         } finally {
+          if (f.gifFrameSteps) observations.gifFrameSteps = f.gifFrameSteps;
+          if (f.clipboardFrames) observations.clipboardFrames = f.clipboardFrames;
+          if (f.reducedMotionPreview) observations.reducedMotionPreview = f.reducedMotionPreview;
           await writeFile(path.join(evidence, 'report.json'), JSON.stringify(observations, null, 2));
           await session?.context.unrouteAll({ behavior: 'ignoreErrors' });
           await session?.context.close();

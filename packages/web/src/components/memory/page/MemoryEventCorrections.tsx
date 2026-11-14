@@ -34,10 +34,12 @@ export function MemoryEventCorrections({
   proposals,
   revision,
   reread,
+  onDecided,
 }: {
   proposals: EventMemoryCorrectionProposalView[];
   revision: string;
   reread: () => void;
+  onDecided?: () => void;
 }) {
   if (!proposals.length) return null;
   return (
@@ -50,6 +52,7 @@ export function MemoryEventCorrections({
           proposal={proposal}
           revision={revision}
           reread={reread}
+          onDecided={onDecided}
           noun="事件"
           endpoint="/api/event-memory-corrections"
           matchesReceipt={matchesReceipt}

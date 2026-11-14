@@ -65,3 +65,21 @@ it('keeps an unavailable canon source explicit instead of substituting another a
   );
   expect(getImg().getAttribute('src')).toContain('/api/cats/member/avatar?bindingRevision=2');
 });
+
+it("shows the caller's own fallback when the image fails, and the image again once src changes (F314-1)", async () => {
+  await act(async () =>
+    root.render(<AvatarImageWithFallback src="https://example.invalid/me.png" alt="" fallback={<b>L</b>} />),
+  );
+  await act(async () => getImg().dispatchEvent(new Event('error')));
+  expect(container.querySelector('img')).toBeNull();
+  expect(container.textContent).toBe('L');
+
+  await act(async () =>
+    root.render(<AvatarImageWithFallback src="https://example.invalid/me-v2.png" alt="" fallback={<b>L</b>} />),
+  );
+  expect(getImg().getAttribute('src')).toBe('https://example.invalid/me-v2.png');
+
+  await act(async () => root.render(<AvatarImageWithFallback src={null} alt="" fallback={<b>L</b>} />));
+  expect(container.querySelector('img')).toBeNull();
+  expect(container.textContent).toBe('L');
+});

@@ -28,8 +28,8 @@ export async function setRuntimeState(
   execution: RuntimeExecution,
   runtimeState: RuntimeState,
 ): Promise<void> {
-  await deps.inventory.transaction((transaction: PluginInventoryTransaction) => {
-    const instance = transaction.instances.get(execution.pluginInstanceId);
+  await deps.inventory.transaction(async (transaction: PluginInventoryTransaction) => {
+    const instance = await transaction.instances.get(execution.pluginInstanceId);
     if (
       !instance ||
       instance.lifecycleState !== 'installed' ||
@@ -43,9 +43,9 @@ export async function setRuntimeState(
       );
     }
     if (runtimeState === 'starting') {
-      transaction.instances.put({ ...withoutRuntimeFailure(instance), runtimeState, updatedAt: deps.now() });
+      await transaction.instances.put({ ...withoutRuntimeFailure(instance), runtimeState, updatedAt: deps.now() });
     } else {
-      transaction.instances.put({ ...instance, runtimeState, updatedAt: deps.now() });
+      await transaction.instances.put({ ...instance, runtimeState, updatedAt: deps.now() });
     }
   });
 }

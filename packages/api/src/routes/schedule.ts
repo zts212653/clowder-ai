@@ -133,10 +133,7 @@ export const scheduleRoutes: FastifyPluginAsync<ScheduleRoutesOptions> = async (
 
     const registered = taskRunner.getRegisteredTasks();
     const dynamicDef = dynamicTaskStore?.getById(id);
-    if (
-      dynamicDef?.templateId === DEVELOPMENT_RETURN_TEMPLATE_ID ||
-      (!registered.includes(id) && !isVisibleDynamicTaskDef(dynamicDef))
-    ) {
+    if (dynamicDef?.templateId === DEVELOPMENT_RETURN_TEMPLATE_ID || (!registered.includes(id) && !dynamicDef)) {
       reply.status(404);
       return { error: 'Task not found' };
     }
@@ -180,7 +177,7 @@ export const scheduleRoutes: FastifyPluginAsync<ScheduleRoutesOptions> = async (
       return f255ManagedTask();
     }
     const registered = taskRunner.getRegisteredTasks();
-    if (dynamicDef?.templateId === DEVELOPMENT_RETURN_TEMPLATE_ID || !registered.includes(id)) {
+    if ((dynamicDef && !isVisibleDynamicTaskDef(dynamicDef)) || !registered.includes(id)) {
       reply.status(404);
       return { error: 'Task not found' };
     }

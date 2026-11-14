@@ -33,6 +33,11 @@ vi.mock('@/stores/callbackAuthStore', () => ({
 }));
 vi.mock('@/hooks/useWorkspaceNavigate', () => ({
   useWorkspaceNavigate: useWorkspaceNavigateMock,
+  // AppShell mounts the hook through WorkspaceNavigateHost; the host forwards to the mocked hook.
+  WorkspaceNavigateHost: ({ threadId, ...options }: { threadId: string | null }) => {
+    useWorkspaceNavigateMock(threadId, options);
+    return null;
+  },
 }));
 
 import { AppShell } from '@/components/AppShell';

@@ -61,9 +61,13 @@ for (const route of [routeSerial, routeParallel]) {
       assert.equal(record.providerTeardownAt !== undefined, confirmed);
       await collect(route(deps, [catId], 'next task', 'owner', threadId, { thinkingMode: 'play' }));
       const next = await deps.invocationDeps.turnExecutionStore.get('journey-2');
-      assert.equal(next.status, confirmed ? 'succeeded' : 'failed');
-      assert.equal(next.providerStartedAt !== undefined, confirmed);
-      assert.equal(ending === 'contract-eof' ? provider.bytes.length : starts, confirmed ? 2 : 1);
+      assert.equal(next.status, confirmed ? 'succeeded' : ending === 'contract-eof' ? 'running' : 'failed');
+      assert.equal(next.providerStartedAt !== undefined, true);
+      assert.equal(
+        ending === 'contract-eof' ? provider.bytes.length : starts,
+        confirmed || ending === 'contract-eof' ? 2 : 1,
+        'the native controller still rejects overlapping ACP turns',
+      );
     });
   }
 }

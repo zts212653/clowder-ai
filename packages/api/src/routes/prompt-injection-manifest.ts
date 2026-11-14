@@ -8,26 +8,22 @@
  * with live scanning via HookRegistry.
  */
 
-import { existsSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { HookManifest } from '@cat-cafe/shared';
 import type { FastifyPluginAsync } from 'fastify';
 import { getTemplateFileInfo } from '../domains/cats/services/context/prompt-template-loader.js';
 import { HookRegistry } from '../domains/prompt-hooks/HookRegistry.js';
+import { findMonorepoRootOrNull } from '../utils/monorepo-root.js';
 import { resolveUserId } from '../utils/request-identity.js';
 
 // ---------------------------------------------------------------------------
 // Project root resolution (same pattern as other routes)
 // ---------------------------------------------------------------------------
 
+/** The monorepo this code runs from; an install without the workspace marker falls back to cwd. */
 function findProjectRoot(): string {
-  let dir = dirname(fileURLToPath(import.meta.url));
-  while (dir !== dirname(dir)) {
-    if (existsSync(`${dir}/pnpm-workspace.yaml`)) return dir;
-    dir = dirname(dir);
-  }
-  return process.cwd();
+  return findMonorepoRootOrNull(dirname(fileURLToPath(import.meta.url))) ?? process.cwd();
 }
 
 // ---------------------------------------------------------------------------

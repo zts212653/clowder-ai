@@ -245,6 +245,7 @@ describe('MCP Server Tool Registration', () => {
       'cat_cafe_list_schedule_templates',
       'cat_cafe_preview_scheduled_task',
       'cat_cafe_register_scheduled_task',
+      'cat_cafe_update_scheduled_task_params',
     ];
 
     for (const name of setupToolNames) {
@@ -288,6 +289,10 @@ describe('MCP Server Tool Registration', () => {
       'cat_cafe_update_task',
       'cat_cafe_create_task',
       'cat_cafe_create_rich_block',
+      'cat_cafe_offer_suggestion',
+      'cat_cafe_post_action_receipt',
+      'cat_cafe_bring_to_desk',
+      'cat_cafe_suggestion_facts',
       'cat_cafe_generate_document',
       'cat_cafe_register_deployment_wait',
       'cat_cafe_register_pr_tracking', // mcp-cutover-negative-reference: absence
@@ -362,6 +367,7 @@ describe('MCP Server Tool Registration', () => {
       'cat_cafe_open_evolution_round',
       'cat_cafe_record_evolution_evaluation',
       'cat_cafe_register_scheduled_task',
+      'cat_cafe_update_scheduled_task_params',
       'cat_cafe_remove_scheduled_task',
       'cat_cafe_retry_custody_admission',
       'cat_cafe_start_evolution_program',
@@ -558,6 +564,7 @@ describe('F061 READONLY_ALLOWED_TOOLS whitelist', () => {
         names.includes('cat_cafe_teleport') ||
         names.includes('cat_cafe_register_scheduled_task') ||
         names.includes('cat_cafe_remove_scheduled_task') ||
+        names.includes('cat_cafe_update_scheduled_task_params') ||
         names.includes('cat_cafe_publish_verdict') ||
         names.includes('cat_cafe_backfill_events') ||
         // agent-key-only read tools are also outside the strict readonly allowlist
@@ -614,6 +621,7 @@ describe('F061 READONLY_ALLOWED_TOOLS whitelist', () => {
         !names.includes('cat_cafe_preview_scheduled_task') ||
         !names.includes('cat_cafe_register_scheduled_task') ||
         !names.includes('cat_cafe_remove_scheduled_task') ||
+        !names.includes('cat_cafe_update_scheduled_task_params') ||
         names.includes('cat_cafe_create_rich_block') ||
         names.includes('cat_cafe_list_tasks') ||
         names.includes('cat_cafe_multi_mention') ||
@@ -661,6 +669,7 @@ describe('F061 READONLY_ALLOWED_TOOLS whitelist', () => {
         names.includes('cat_cafe_teleport') ||
         names.includes('cat_cafe_register_scheduled_task') ||
         names.includes('cat_cafe_remove_scheduled_task') ||
+        names.includes('cat_cafe_update_scheduled_task_params') ||
         names.includes('cat_cafe_publish_verdict')
       ) {
         console.error(JSON.stringify(names.sort()));
@@ -696,6 +705,7 @@ describe('F061 READONLY_ALLOWED_TOOLS whitelist', () => {
         names.includes('cat_cafe_teleport') ||
         names.includes('cat_cafe_register_scheduled_task') ||
         names.includes('cat_cafe_remove_scheduled_task') ||
+        names.includes('cat_cafe_update_scheduled_task_params') ||
         names.includes('cat_cafe_publish_verdict')
       ) {
         console.error(JSON.stringify(names.sort()));

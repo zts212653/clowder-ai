@@ -18,10 +18,10 @@ const binding = {
   effectiveAccountRef: 'enterprise-account',
   resolvedAccount: {
     id: 'enterprise-account',
-    apiKey: 'private-credential-canary',
+    apiKey: 'private-key-canary',
     accountRevision: 'private-secret-hash',
   },
-  accountEnv: { ENTERPRISE_API_KEY: 'private-credential-canary' },
+  accountEnv: { ENTERPRISE_API_KEY: 'private-key-canary' },
   providerOptions: { callbackToken: 'private-callback-canary' },
 };
 

@@ -10,7 +10,9 @@ import { stampVisibleTurn } from '../domains/cats/services/agents/invocation/vis
 import { publishGeneratedImage } from '../domains/cats/services/agents/providers/generated-image-publication.js';
 import type { IMessageStore, StoredMessage } from '../domains/cats/services/stores/ports/MessageStore.js';
 import { isDurableOwnerReadEvidence } from '../domains/cats/services/stores/visibility.js';
+import { probeImmutableImage } from '../domains/video-studio/content-owner/published-image-probe.js';
 import type { SocketManager } from '../infrastructure/websocket/index.js';
+import { detectImageMime } from '../utils/image-mime.js';
 import { ImagePublicationConflictError, MAX_IMAGE_FILE_SIZE } from '../utils/image-storage.js';
 import { requireCallbackAuth } from './callback-auth-prehandler.js';
 
@@ -61,10 +63,16 @@ async function admit(deps: ImageRouteDeps, record: InvocationRecord, reply: Fast
   return true;
 }
 
-async function decodePng(input: ImageInput): Promise<Buffer> {
+async function decodeImage(input: ImageInput): Promise<Buffer> {
   const bytes = Buffer.from(input.imageBase64, 'base64');
   if (!bytes.length || bytes.length > MAX_IMAGE_FILE_SIZE || bytes.toString('base64') !== input.imageBase64)
-    throw new Error('Expected canonical base64 PNG at most 10 MiB');
+    throw new Error('Expected canonical base64 image at most 10 MiB');
+  const mime = detectImageMime(bytes);
+  if (!mime) throw new Error('Unsupported or unsafe image');
+  if (mime !== 'image/png') {
+    await probeImmutableImage(bytes, mime);
+    return bytes;
+  }
   const decoder = sharp(bytes, { limitInputPixels: 16_777_216, animated: false });
   const metadata = await decoder.metadata();
   if (metadata.format !== 'png' || (metadata.pages ?? 1) !== 1) throw new Error('Expected a single PNG image');
@@ -104,9 +112,11 @@ export function registerCallbackImageRoutes(app: FastifyInstance, deps: ImageRou
       const input = parsed.data;
       let bytes: Buffer;
       try {
-        bytes = await decodePng(input);
+        bytes = await decodeImage(input);
       } catch {
-        return reply.status(400).send({ error: 'Expected a valid single PNG, at most 10 MiB and 16 megapixels' });
+        return reply
+          .status(400)
+          .send({ error: 'Expected a valid PNG, JPEG, WebP, GIF or safe SVG within image resource limits' });
       }
       return publishMemberImage(deps, record, input, bytes, reply);
     },

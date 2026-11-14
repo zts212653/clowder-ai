@@ -6,6 +6,7 @@ import {
   producerAttentionReevaluationLinkV1Schema,
 } from '@cat-cafe/shared';
 import type Database from 'better-sqlite3';
+import type { ManagedCommandWaitRecoveryFact } from '../../domains/ball-custody/managed-command-wait-recovery-state.js';
 import {
   normalizeToolExecutionPolicy,
   parseToolExecutionPolicy,
@@ -17,8 +18,16 @@ import {
 } from '../../domains/cats/services/owner-auth-provenance.js';
 import type { ToolExecutionPolicy } from '../../domains/cats/services/types.js';
 import { assertDevelopmentReturnChain } from './development-return/DevelopmentReturnChain.js';
+import { HOLD_WAIT_CANDIDATE_FILTER } from './hold-wait-candidate-schema.js';
+import { MANAGED_COMMAND_RECOVERY_DUE } from './managed-command/recovery-schema.js';
+import {
+  managedCommandWaitsForSource,
+  readManagedCommandRecoveryState,
+  writeManagedCommandRecoveryState,
+} from './managed-command/recovery-store.js';
 import { MANAGED_COMMAND_CANDIDATE_FILTER } from './managed-command-candidate-schema.js';
 import { type RetainedManagedCommandState, reconcileRetainedManagedCommand } from './retained-managed-command.js';
+import { SCHEDULE_LIST_FILTER } from './schedule-list-schema.js';
 import type { TaskDisplayMeta, TriggerSpec } from './types.js';
 
 function returnIdentity(state: DevelopmentReturnRegistrationV1): string {
@@ -226,6 +235,14 @@ export class DynamicTaskStore {
     return rows.map(todef);
   }
 
+  /** Indexed schedule projection; retired wake carriers stay available by ID. */
+  getScheduleTasks(): DynamicTaskDef[] {
+    const rows = this.db
+      .prepare(`SELECT * FROM dynamic_task_defs WHERE ${SCHEDULE_LIST_FILTER} ORDER BY created_at DESC`)
+      .all() as RawRow[];
+    return rows.map(todef);
+  }
+
   /** Select before decoding historical payloads; private return projections remain authoritative. */
   getEnabled(): DynamicTaskDef[] {
     const rows = this.db
@@ -256,11 +273,39 @@ export class DynamicTaskStore {
    * Lifecycle parsers remain the authority; this selector only removes settled
    * history before hydration, and never changes a task or its private provenance.
    */
-  listManagedCommandCandidates(): DynamicTaskDef[] {
+  listManagedCommandCandidates(now?: number, limit = 100): DynamicTaskDef[] {
+    if (now !== undefined) {
+      if (!Number.isSafeInteger(limit) || limit < 1 || limit > 1000)
+        throw new Error('invalid_managed_wait_batch_limit');
+      return (
+        this.db
+          .prepare(`SELECT * FROM dynamic_task_defs WHERE ${MANAGED_COMMAND_RECOVERY_DUE} IS NOT NULL
+        AND ${MANAGED_COMMAND_RECOVERY_DUE} <= ? ORDER BY ${MANAGED_COMMAND_RECOVERY_DUE},id LIMIT ?`)
+          .all(now, limit) as RawRow[]
+      ).map(todef);
+    }
     const rows = this.db
       .prepare(`SELECT * FROM dynamic_task_defs
       WHERE ${MANAGED_COMMAND_CANDIDATE_FILTER}
       ORDER BY created_at DESC`)
+      .all() as RawRow[];
+    return rows.map(todef);
+  }
+
+  getManagedCommandRecoveryState(id: string) {
+    return readManagedCommandRecoveryState(this.db, id);
+  }
+  updateManagedCommandRecoveryState(id: string, revision: number, fact: ManagedCommandWaitRecoveryFact): boolean {
+    return writeManagedCommandRecoveryState(this.db, id, revision, fact);
+  }
+  findManagedCommandWaitsForSource(messageId: string): string[] {
+    return managedCommandWaitsForSource(this.db, messageId);
+  }
+
+  /** Armed hold-ball carriers for the "在等" projection; served by the schedule-list partial index. */
+  listHoldWaitCandidates(): DynamicTaskDef[] {
+    const rows = this.db
+      .prepare(`SELECT * FROM dynamic_task_defs WHERE ${HOLD_WAIT_CANDIDATE_FILTER} ORDER BY created_at DESC`)
       .all() as RawRow[];
     return rows.map(todef);
   }

@@ -1241,7 +1241,12 @@ describe('service lifecycle write routes', () => {
         startupReadinessTimeoutMs: 250,
         startupProbeIntervalMs: 5,
         onServiceReady: (event) => {
-          readyEvents.push({ serviceId: event.service.id, operator: event.operator, reason: event.reason });
+          readyEvents.push({
+            serviceId: event.service.id,
+            operator: event.operator,
+            reason: event.reason,
+            configuredModel: event.configuredModel,
+          });
         },
         serviceConfig: {
           get: (id) => configs.get(id) ?? { enabled: false },
@@ -1273,7 +1278,14 @@ describe('service lifecycle write routes', () => {
       for (let attempt = 0; attempt < 20; attempt += 1) {
         await new Promise((resolve) => setTimeout(resolve, 10));
         if (readyEvents.length > 0) {
-          assert.deepEqual(readyEvents, [{ serviceId: 'embedding-model', operator: 'you', reason: 'readiness' }]);
+          assert.deepEqual(readyEvents, [
+            {
+              serviceId: 'embedding-model',
+              operator: 'you',
+              reason: 'readiness',
+              configuredModel: 'mlx-community/Qwen3-Embedding-0.6B-4bit-DWQ',
+            },
+          ]);
           return;
         }
       }
@@ -3103,7 +3115,7 @@ describe('deep health probe (zombie detection)', () => {
         ok: true,
         status: 200,
         error: null,
-        details: { capabilities: ['speech', 'speech-stream-route-v1'] },
+        details: { model: 'mlx-community/Kokoro-82M-bf16', capabilities: ['speech', 'speech-stream-route-v1'] },
       }),
       lifecycle: {
         serviceConfig: {

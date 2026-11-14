@@ -85,6 +85,8 @@ describe('ProposalCard', () => {
   beforeEach(() => {
     container = document.createElement('div');
     document.body.appendChild(container);
+    // The block-backed producer and its terminal actions remain available in classic.
+    window.localStorage.setItem('cat-cafe:shell-presentation', 'classic');
     root = createRoot(container);
     apiFetchMock.mockReset();
     navigateMock.mockReset();
@@ -99,6 +101,7 @@ describe('ProposalCard', () => {
   afterEach(() => {
     act(() => root.unmount());
     container.remove();
+    window.localStorage.removeItem('cat-cafe:shell-presentation');
   });
 
   async function render(block: RichCardBlock = makeBlock()) {

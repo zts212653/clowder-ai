@@ -107,7 +107,19 @@ function happyFetch(fixture, calls) {
 }
 
 describe('F287 person-memory lifecycle alpha UAT harness', () => {
-  test('keeps the real three-surface owner fixture inside the approval-card budget', async () => {
+  test('keeps the real three-surface owner fixture inside the approval-card budget', async (t) => {
+    const { _resetCachedConfig, getCoCreatorConfig, loadCatConfig } = await import(
+      '../../dist/config/cat-config-loader.js'
+    );
+    const { personMemoryProposalCardText } = await import('../../dist/routes/person-memory-proposal-card.js');
+    t.after(_resetCachedConfig);
+    const fixtureConfig = loadCatConfig(process.env.CAT_TEMPLATE_PATH);
+    const owner = (name) =>
+      getCoCreatorConfig({
+        ...fixtureConfig,
+        version: 2,
+        coCreator: { name, aliases: [], mentionPatterns: ['@co-creator'] },
+      });
     const { buildF287AlphaOwnerFixture, buildF287PersonMemoryProposalBody } = await import(
       '../../dist/scripts/f287-person-memory-lifecycle-uat.js'
     );
@@ -178,10 +190,22 @@ describe('F287 person-memory lifecycle alpha UAT harness', () => {
         makeCandidateInput(parsed, auth, 'message-alpha-source', [], sourceBundle),
       );
 
+      // The historical UAT's four-token headroom assumes this declared owner.
+      // Configured display names are runtime input, independent of fixture data.
+      owner('You');
       const preflight = preflightPersonMemoryProposalCard(candidate);
-
       assert.equal(preflight.status, 'ready', `${runId}: ${JSON.stringify(preflight)}`);
       assert.ok(preflight.estimatedTokens <= 236, `${runId}: expected at least four tokens of headroom`);
+
+      owner('co-creator');
+      const localized = preflightPersonMemoryProposalCard(candidate);
+      assert.equal(localized.status, 'ready', `${runId}: configured owner still fits the product budget`);
+      assert.equal(localized.maxTokens, 240);
+      assert.ok(personMemoryProposalCardText(localized.card).includes('co-creator 明确陈述'));
+      assert.ok(localized.estimatedTokens > preflight.estimatedTokens, 'count the configured source labels');
+
+      owner('co-creator'.repeat(40));
+      assert.equal(preflightPersonMemoryProposalCard(candidate).status, 'blocked', 'over-budget names stay blocked');
     }
   });
 

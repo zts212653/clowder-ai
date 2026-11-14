@@ -1,8 +1,9 @@
 import { existsSync, readdirSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
-import { dirname, join, resolve } from 'node:path';
+import { join } from 'node:path';
 import { deploymentDefaults } from '@cat-cafe/shared';
 import { parse as parseYaml } from 'yaml';
+import { findMonorepoRoot } from '../utils/monorepo-root.js';
 import { parseActiveFeaturesFromBacklog } from './backlog-doc-import.js';
 
 export interface FeatIndexEntry {
@@ -19,16 +20,6 @@ interface FeatureDocEntry {
   status?: string;
   owner?: string;
   keyDecisions?: string[];
-}
-
-function findMonorepoRoot(start = process.cwd()): string {
-  let current = resolve(start);
-  while (true) {
-    if (existsSync(join(current, 'pnpm-workspace.yaml'))) return current;
-    const parent = dirname(current);
-    if (parent === current) return start;
-    current = parent;
-  }
 }
 
 function normalizeFeatId(value: string): string {

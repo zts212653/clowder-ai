@@ -11,19 +11,19 @@ import type { SidebarPresence, SidebarSystemKind } from '@/stores/sidebarProject
 // and per-cat (with "AFFECTED CATS" affordance) inside HubCallbackAuthPanel.
 import { CatAvatar } from '../CatAvatar';
 import { ExportButton } from '../ExportButton';
-import { HubIcon as ActionIcon } from '../hub-icons';
 import { HubIcon } from '../icons/HubIcon';
 import { PawIcon } from '../icons/PawIcon';
 import { useShellCopy } from '../shell/shell-copy';
 import { useShellPresentation } from '../shell/shell-presentation';
 import { ThreadCatStatus } from '../ThreadCatStatus';
+import { useAnchoredMenu } from '../useAnchoredMenu';
+import { CopyThreadIdMenuItem } from './CopyThreadIdMenuItem';
 import { useSidebarDraftDecoration } from './sidebar-draft-decoration';
 import { ThreadPinV2 } from './ThreadPinV2';
 import { ThreadRowSignals } from './ThreadRowSignals';
 import { RowTip, RowTitleTip } from './ThreadRowTips';
 import { ThreadSettingsPanel } from './ThreadSettingsPanel';
 import { useOpenThreadSettings } from './ThreadSettingsProvider';
-import { threadDeletionCopy } from './thread-deletion.shell-copy';
 import { formatSidebarActivityTime, threadSignalsCopy } from './thread-signals.shell-copy';
 import { formatRelativeTime, formatSidebarStatusTime } from './thread-utils';
 
@@ -93,7 +93,6 @@ function ThreadItemComponent({
   const isV2 = useShellPresentation() === 'v2';
   const openThreadSettings = useOpenThreadSettings();
   const copy = useShellCopy(threadSignalsCopy);
-  const deletionCopy = useShellCopy(threadDeletionCopy);
   const { getCatById } = useCatData();
   const canDelete = id !== 'default' && onDelete;
   const canRename = id !== 'default' && onRename;
@@ -107,6 +106,7 @@ function ThreadItemComponent({
   const inputRef = useRef<HTMLInputElement>(null);
   const moreButtonRef = useRef<HTMLButtonElement>(null);
   const moreMenuRef = useRef<HTMLDivElement>(null);
+  const menu = useAnchoredMenu(isMoreOpen, moreButtonRef, moreMenuRef, () => setIsMoreOpen(false));
   const ime = useIMEGuard();
   const [, refreshWorkingClock] = useState(0);
 
@@ -370,6 +370,12 @@ function ThreadItemComponent({
                   aria-label="更多操作"
                   aria-haspopup="menu"
                   aria-expanded={isMoreOpen}
+                  aria-controls={isMoreOpen ? menu.menuId : undefined}
+                  onKeyDown={(event) => {
+                    if (event.key !== 'ArrowDown') return;
+                    event.preventDefault();
+                    setIsMoreOpen(true);
+                  }}
                 >
                   <MoreVerticalIcon />
                 </button>
@@ -377,9 +383,13 @@ function ThreadItemComponent({
               {isMoreOpen && (
                 <div
                   ref={moreMenuRef}
+                  id={menu.menuId}
                   role="menu"
                   aria-label="对话操作"
-                  className="absolute right-0 top-5 z-50 min-w-[144px] rounded-lg border border-cafe bg-cafe-surface py-1 shadow-lg"
+                  popover="manual"
+                  onKeyDown={menu.onKeyDown}
+                  style={{ inset: 'auto', margin: 0, visibility: 'hidden', maxWidth: 'calc(100vw - 16px)' }}
+                  className="fixed z-[70] min-w-[144px] overflow-y-auto overscroll-contain rounded-lg border border-cafe bg-cafe-surface py-1 shadow-lg"
                 >
                   <ThreadActionMenuItem icon={<SettingsIcon />} onClick={startThreadSettings}>
                     对话设置
@@ -406,6 +416,7 @@ function ThreadItemComponent({
                     </ThreadActionMenuItem>
                   )}
                   <ExportButton threadId={id} variant="thread-menu" onSelect={() => setIsMoreOpen(false)} />
+                  <CopyThreadIdMenuItem threadId={id} />
                   {onReplay && (
                     <ThreadActionMenuItem icon={<ReplayIcon />} onClick={startReplay}>
                       回放剧场
@@ -427,24 +438,6 @@ function ThreadItemComponent({
                 </div>
               )}
             </div>
-          )}
-          {canDelete && !isHubThread && !systemKind && !isEditing && (
-            <RowTip enabled={isV2} label={deletionCopy.moveToTrash}>
-              <button
-                type="button"
-                data-testid="thread-quick-delete"
-                aria-label={deletionCopy.quickDelete(displayTitle)}
-                title={isV2 ? undefined : deletionCopy.moveToTrash}
-                disabled={isDeleting}
-                onClick={(event) => {
-                  event.stopPropagation();
-                  deleteThread();
-                }}
-                className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded text-cafe-muted opacity-0 transition-colors hover:text-conn-red-text group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100 disabled:cursor-wait disabled:opacity-40 [@media(hover:none)]:opacity-100"
-              >
-                <ActionIcon name="trash" className="h-3.5 w-3.5" />
-              </button>
-            </RowTip>
           )}
         </div>
       </div>
@@ -672,7 +665,7 @@ function ThreadActionMenuItem({
       role="menuitem"
       onClick={onClick}
       disabled={disabled}
-      className={`flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs transition-colors disabled:cursor-wait disabled:opacity-40 ${
+      className={`shell-focusable flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs transition-colors disabled:cursor-wait disabled:opacity-40 ${
         danger ? 'text-conn-red-text hover:bg-conn-red-bg' : 'text-cafe-secondary hover:bg-cafe-surface-elevated'
       }`}
     >

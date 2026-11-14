@@ -11,8 +11,12 @@ import { homedir } from 'node:os';
 import { basename, posix, resolve, win32 } from 'node:path';
 import { promisify } from 'node:util';
 import type { FastifyPluginAsync, FastifyReply, FastifyRequest } from 'fastify';
-import { resolvePersistentProjectPath } from '../utils/persistent-project-path.js';
-import { getAllowedRoots, isDenylistMode, isUnderAllowedRoot } from '../utils/project-path.js';
+import {
+  classifyProjectSelection,
+  resolvePersistentProjectPath,
+  validateNewProjectPath,
+} from '../utils/persistent-project-path.js';
+import { getAllowedRoots, isDenylistMode, isUnderAllowedRoot, validateProjectPath } from '../utils/project-path.js';
 import { resolveHeaderUserId } from '../utils/request-identity.js';
 import { resolveRecommendedProjectPath } from './project-workspace-recommendation.js';
 
@@ -195,19 +199,22 @@ export const projectsRoutes: FastifyPluginAsync = async (app) => {
       reply.status(500);
       return { error: result.message };
     }
-    const validated = await resolvePersistentProjectPath(result.path);
-    if (!validated) {
+    const validated = await validateNewProjectPath(
+      result.path,
+      isDenylistMode()
+        ? 'Selected directory is under a restricted system path'
+        : 'Selected directory is outside allowed roots',
+    );
+    if (!validated.ok) {
       reply.status(403);
       return {
-        error: isDenylistMode()
-          ? 'Selected directory is under a restricted system path'
-          : 'Selected directory is outside allowed roots',
+        error: validated.error,
         selectedPath: result.path,
         restrictedRoots: isDenylistMode() ? getAllowedRoots() : undefined,
         allowedRoots: isDenylistMode() ? undefined : getAllowedRoots(),
       };
     }
-    return { path: validated, name: basename(validated) };
+    return { path: validated.path, name: basename(validated.path) };
   });
 
   // GET /api/projects/complete?prefix=src/comp&cwd=/path/to/project&limit=10
@@ -281,7 +288,7 @@ export const projectsRoutes: FastifyPluginAsync = async (app) => {
     const targetPath = query.path || homedir();
 
     // Validate path: realpath() resolves symlinks, then boundary check
-    const validatedPath = await resolvePersistentProjectPath(targetPath);
+    const validatedPath = await validateProjectPath(targetPath);
     if (!validatedPath) {
       reply.status(403);
       return {
@@ -292,7 +299,10 @@ export const projectsRoutes: FastifyPluginAsync = async (app) => {
     }
 
     try {
-      const entries = await readdir(validatedPath, { withFileTypes: true });
+      const [entries, projectRestriction] = await Promise.all([
+        readdir(validatedPath, { withFileTypes: true }),
+        classifyProjectSelection(validatedPath),
+      ]);
       const dirs: ProjectEntry[] = [];
 
       for (const entry of entries) {
@@ -325,6 +335,7 @@ export const projectsRoutes: FastifyPluginAsync = async (app) => {
         homePath: homedir(),
         entries: dirs,
         isWindows: process.platform === 'win32',
+        projectRestriction,
       };
     } catch (err) {
       reply.status(400);

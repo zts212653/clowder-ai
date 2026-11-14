@@ -20,6 +20,8 @@ import { z } from 'zod';
 import type { AssetCanonService } from '../domains/collaborative-content/asset-canon/service.js';
 import { AssetCanonConflictError } from '../domains/collaborative-content/asset-canon/store.js';
 import { WorkContextConflictError } from '../domains/collaborative-content/works/context-store.js';
+import type { WorkCoverService } from '../domains/collaborative-content/works/cover/cover-service.js';
+import { WorkCoverConflictError } from '../domains/collaborative-content/works/cover/cover-store.js';
 import { inspectWorkResult } from '../domains/collaborative-content/works/inspection.js';
 import {
   type LivingWorkService,
@@ -59,25 +61,41 @@ const callbackEnvelope = envelope.extend({
     .optional(),
 });
 
+type VersionNotes = { contexts?: WorkVideoContextService; covers?: WorkCoverService };
+
+/** Per-version notes (video index, adopted cover) are separate owners of the same fixed work version. */
+function runVersionNotes(command: WorkCommand, principal: WorkPrincipal, notes: VersionNotes) {
+  if (command.action === 'set-cover' || command.action === 'read-cover') {
+    if (!notes.covers) throw new MediaOwnerError('media_unavailable');
+    return command.action === 'set-cover'
+      ? notes.covers.set(command, principal)
+      : notes.covers.read({ reference: command.reference, coverRevision: command.coverRevision }, principal);
+  }
+  if (command.action === 'set-context' || command.action === 'import-context' || command.action === 'read-context') {
+    if (!notes.contexts) throw new MediaOwnerError('media_unavailable');
+    if (command.action === 'import-context') return notes.contexts.import(command, principal);
+    return command.action === 'set-context'
+      ? notes.contexts.save(command, principal)
+      : notes.contexts.read(command.reference, principal, command.metadataRevision);
+  }
+  return undefined;
+}
+
 async function run(
   service: LivingWorkService,
   command: WorkCommand,
   principal: WorkPrincipal,
   contexts?: WorkVideoContextService,
   assets?: AssetCanonService,
+  covers?: WorkCoverService,
 ) {
   if (isAssetCommand(command)) {
     if (!assets) throw new MediaOwnerError('media_unavailable');
     return assets.run(command, principal);
   }
   if (command.action === 'resolve-review-submission') return service.resolveReviewSubmission(command, principal);
-  if (command.action === 'set-context' || command.action === 'import-context' || command.action === 'read-context') {
-    if (!contexts) throw new MediaOwnerError('media_unavailable');
-    if (command.action === 'import-context') return contexts.import(command, principal);
-    return command.action === 'set-context'
-      ? contexts.save(command, principal)
-      : contexts.read(command.reference, principal, command.metadataRevision);
-  }
+  const notes = runVersionNotes(command, principal, { contexts, covers });
+  if (notes) return notes;
   if (command.action === 'read-body') return service.readBody(command.reference, principal);
   if (command.action === 'read') return service.read(command.reference, principal);
   if (command.action === 'publish-reference') return service.reference(command.reference, principal);
@@ -94,6 +112,7 @@ function fail(reply: FastifyReply, error: unknown) {
   if (error instanceof z.ZodError) return reply.code(400).send({ error: 'invalid_request' });
   if (error instanceof ContentOwnerCapacityError) return reply.code(409).send({ error: 'work_version_limit' });
   if (error instanceof WorkContextConflictError) return reply.code(409).send({ error: 'context_conflict' });
+  if (error instanceof WorkCoverConflictError) return reply.code(409).send({ error: 'cover_conflict' });
   if (error instanceof WorkProjectionPendingError)
     return reply.code(503).send({
       status: 'version_saved',
@@ -145,6 +164,7 @@ export async function registerLivingWorkRoutes(
     registry: CallbackAuthRegistry;
     contexts?: WorkVideoContextService;
     assets?: AssetCanonService;
+    covers?: WorkCoverService;
   },
 ) {
   app.get('/api/works/resolve-file', async (request, reply) => {
@@ -178,7 +198,14 @@ export async function registerLivingWorkRoutes(
     if (!human) return reply.code(401).send({ error: 'identity_required' });
     try {
       const body = envelope.required({ threadId: true }).parse(request.body);
-      return await run(deps.service, body.command, { ...human, threadId: body.threadId }, deps.contexts, deps.assets);
+      return await run(
+        deps.service,
+        body.command,
+        { ...human, threadId: body.threadId },
+        deps.contexts,
+        deps.assets,
+        deps.covers,
+      );
     } catch (error) {
       return fail(reply, error);
     }
@@ -207,6 +234,7 @@ export async function registerLivingWorkRoutes(
           },
           deps.contexts,
           deps.assets,
+          deps.covers,
         );
         return inspectWorkResult(body, result);
       } catch (error) {

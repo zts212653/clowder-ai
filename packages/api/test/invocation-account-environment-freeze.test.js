@@ -48,7 +48,7 @@ test('provider configuration capture and invocation use the same frozen account 
           envVars: {
             KIMI_CODE_HOME: join(root, marker),
             CUSTOM_EMPTY: '',
-            CAT_CAFE_CALLBACK_TOKEN: 'must-not-cross-account-boundary',
+            CAT_CAFE_CALLBACK_TOKEN: 'account-fixture',
             FROM_TEMPLATE: '${api_key}',
             lowercase: 'invalid-key',
           },
@@ -100,7 +100,7 @@ test('provider configuration capture and invocation use the same frozen account 
   assert.equal(binding.resolvedAccount.envVars.KIMI_CODE_HOME, expected.KIMI_CODE_HOME);
   assert.equal(
     binding.resolvedAccount.envVars.CAT_CAFE_CALLBACK_TOKEN,
-    'must-not-cross-account-boundary',
+    'account-fixture',
     'filtering must not alter the account store projection',
   );
   const messages = await Array.fromAsync(

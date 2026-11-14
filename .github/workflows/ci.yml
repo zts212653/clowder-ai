@@ -20,6 +20,9 @@ jobs:
   lint:
     name: Lint
     runs-on: ubuntu-latest
+    env:
+      # Branch creation has no previous commit; other runs compare the exact event baseline.
+      CAT_CAFE_GATE_BASE_SHA: ${{ github.event.pull_request.base.sha || (github.event.before != '0000000000000000000000000000000000000000' && github.event.before) || github.sha }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -150,6 +153,7 @@ jobs:
         run: >-
           pnpm --filter @cat-cafe/web exec node scripts/run-with-node-env-test.mjs
           pnpm exec vitest run src/components/plugins/__tests__/plugin-ui.test.tsx
+          src/components/plugins/__tests__/plugin-ui-close.test.tsx
           src/components/plugins/__tests__/plugin-panel-http.test.ts
       - name: Provider EOF and plugin UI stop preserve lifecycle fences
         run: >-
@@ -210,12 +214,19 @@ jobs:
         env:
           CAT_CAFE_ENTRY_EVIDENCE_DIR: ${{ github.workspace }}/.tmp/first-run-entry-ci
         run: |
-          pnpm --filter @cat-cafe/web exec playwright install --with-deps chromium
+          # Browser runtime libraries already ship with the runner image; apt only
+          # adds fonts here and is blocked by the Ubuntu mirror DNS failure.
+          pnpm --filter @cat-cafe/web exec playwright install chromium
           pnpm --filter @cat-cafe/web test:first-run-entry:production
       - name: Production member creation and recovery HTTP contracts
         env:
           CAT_CAFE_ONBOARDING_E2E_EVIDENCE: ${{ github.workspace }}/.tmp/native-team-setup-ci
         run: pnpm --filter @cat-cafe/web test:onboarding:production-contracts
+      - name: Plugin close recovery in restricted embed with real theme CSS
+        env:
+          FEEDBACK_JOURNEY_ARTIFACTS: ${{ github.workspace }}/.tmp/plugin-panel-close-ci
+          FEEDBACK_PLAYWRIGHT_MODULE: ${{ github.workspace }}/packages/web/node_modules/playwright
+        run: pnpm --filter @cat-cafe/api exec node --import tsx test/plugin-panel-close-recovery.journey.mts
       - name: Plugin document direct-navigation origin isolation
         env:
           PLUGIN_ORIGIN_ARTIFACTS: ${{ github.workspace }}/.tmp/plugin-document-origin-ci
@@ -233,6 +244,7 @@ jobs:
             .tmp/first-run-entry-ci
             .tmp/native-team-setup-ci
             .tmp/plugin-document-origin-ci
+            .tmp/plugin-panel-close-ci
           if-no-files-found: ignore
           retention-days: 7
 
@@ -265,7 +277,9 @@ jobs:
           src/components/shell/__tests__/conversation-view-header.test.tsx
       - name: Browser evidence rejects user echoes and accepts normal identity signatures
         run: |
-          pnpm --filter @cat-cafe/web exec playwright install --with-deps chromium
+          # Browser runtime libraries already ship with the runner image; apt only
+          # adds fonts here and is blocked by the Ubuntu mirror DNS failure.
+          pnpm --filter @cat-cafe/web exec playwright install chromium
           node --test packages/web/test/browser/native-team-rendered-reply.test.mjs
           node --test packages/web/test/browser/native-team-observers.test.mjs
           node --test packages/web/test/browser/native-request-cancellations.test.mjs
@@ -365,11 +379,27 @@ jobs:
           artifact-ids: ${{ needs.public-test-prepare.outputs.plan-artifact-id }}
           path: ${{ runner.temp }}/public-test
           merge-multiple: true
-      - name: Install owned Redis test executables
+      - name: Build owned Redis test executables
         if: matrix.lane != 'serial-shared'
+        shell: bash
         run: |
-          sudo apt-get update
-          sudo apt-get install --no-install-recommends -y redis-server
+          set -euo pipefail
+          version=8.0.5
+          source_dir="$RUNNER_TEMP/redis-$version"
+          bin_dir="$RUNNER_TEMP/owned-redis-bin"
+          mkdir -p "$source_dir" "$bin_dir"
+          curl --fail --location --retry 3 --max-time 120 \
+            "https://github.com/redis/redis/archive/refs/tags/${version}.tar.gz" \
+            --output "$RUNNER_TEMP/redis.tar.gz"
+          tar -xzf "$RUNNER_TEMP/redis.tar.gz" -C "$source_dir" --strip-components=1
+          # GCC 15 in ubuntu-26.04 ICEs while LTO-linking redis-cli from Redis 8.0.5.
+          # Build the default all target so redis-cli links every shared object.
+          make -C "$source_dir" -j"$(nproc)" BUILD_TLS=no MALLOC=libc OPTIMIZATION=-O2
+          install -m 0755 "$source_dir/src/redis-server" "$bin_dir/redis-server"
+          install -m 0755 "$source_dir/src/redis-cli" "$bin_dir/redis-cli"
+          "$bin_dir/redis-server" --version
+          "$bin_dir/redis-cli" --version
+          echo "$bin_dir" >> "$GITHUB_PATH"
         # Tests start their own temporary instances. External-network isolation
         # remains enforced by the lane wrapper; this is not a shared Redis service.
       - name: Run shared-resource public-test lane

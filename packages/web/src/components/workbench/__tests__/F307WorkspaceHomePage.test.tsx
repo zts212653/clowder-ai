@@ -63,6 +63,8 @@ describe('F307 canonical Home destination admission', () => {
     onSelectSurface = vi.fn<(surface: WorkspaceSurfaceDescriptor) => void>();
     container = document.createElement('div');
     document.body.appendChild(container);
+    // Legacy owner-surface contracts explicitly retain classic; v2 cases select v2 below.
+    writeShellPresentation('classic');
     root = createRoot(container);
   });
 

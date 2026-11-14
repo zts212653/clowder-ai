@@ -73,6 +73,7 @@ for (const first of ['api', 'web'])
     };
     value._startNextJs = () => starts.push('web');
     value._waitForHttpReady = async () => web.promise;
+    value.assertStartupProcessesRunning = () => {};
     let settled = false;
     const startup = value.startAll().then(() => {
       settled = true;

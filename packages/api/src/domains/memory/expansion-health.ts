@@ -3,7 +3,7 @@ import {
   type ExpansionFunnelMeta,
   type ExpansionHealthGateReason,
 } from '@cat-cafe/shared';
-import type { ExpansionFunnel, ExpansionHint } from './TopkExpansionService.js';
+import type { ExpansionFunnel, ExpansionHint } from './knowledge-associations.js';
 
 const EMPTY_KEYWORD = Object.freeze({ probed: 0, added: 0, deduped: 0 });
 const EMPTY_CONVENTION = Object.freeze({ attempted: false, added: 0, deduped: 0, staleSkipped: 0 });

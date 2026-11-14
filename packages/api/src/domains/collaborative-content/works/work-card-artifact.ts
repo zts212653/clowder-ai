@@ -12,8 +12,11 @@ export function workCardArtifact(item: WorkReadResult, production?: WorkVideoCon
         ? 'widget'
         : item.description.mediaType === 'video/mp4'
           ? 'video'
-          : 'file',
+          : item.description.mediaType.startsWith('image/')
+            ? 'image'
+            : 'file',
     name: item.version.title,
+    mime: item.description.mediaType,
     catId: item.revision.committedBy.kind === 'cat' ? item.revision.committedBy.actorId : null,
     createdAt,
     sourceMessageId: null,

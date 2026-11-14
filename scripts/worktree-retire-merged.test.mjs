@@ -3,6 +3,9 @@ import { chmodSync, existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { fixture, git, idle, NOW } from './lib/worktree-finish-fixture.mjs';
+import { worktreeInventory } from './lib/worktree-inventory.mjs';
+import { mergedNoticeKey, mergedWorktreeNotices } from './lib/worktree-merged-notices.mjs';
+import { bindWorktreePr } from './worktree-bind-pr.mjs';
 import { createWorktree } from './worktree-new.mjs';
 import { retireMergedWorktree } from './worktree-retire-merged.mjs';
 
@@ -43,7 +46,7 @@ function setup(f) {
       dataRoot: join(f.root, 'data'),
       now: NOW,
       cwdProbe: idle,
-      readPr: () => ({ sourceRef, state: 'MERGED', mergedAt: entry.head, commits: [entry.head] }),
+      readPr: () => ({ sourceRef, state: 'MERGED', baseRef: 'main', mergedAt: entry.head, commits: [entry.head] }),
       ...options,
     });
   return {
@@ -54,6 +57,74 @@ function setup(f) {
     },
   };
 }
+test('unbound live task and Alpha checkouts do not produce merged cleanup notices', () => {
+  const f = fixture();
+  const a = setup(f);
+  try {
+    for (const role of ['author', 'alpha']) {
+      const e = a.make(`live-${role}`, role);
+      git(
+        e.path,
+        'config',
+        '--worktree',
+        'catcafe.lifecycle.origin',
+        JSON.stringify({
+          threadId: 'thread_original',
+          userId: 'owner',
+          sourceRef: 'task:work:current',
+          role,
+        }),
+      );
+    }
+    const head = git(f.repo, 'rev-parse', 'HEAD').trim();
+    const result = mergedWorktreeNotices(f.repo, worktreeInventory(f.repo), {
+      now: 0,
+      findSources: () => [sourceRef],
+      readPr: () => ({ sourceRef, state: 'MERGED', baseRef: 'main', mergedAt: head, commits: [head] }),
+    });
+    assert.deepEqual(result.notices, [], 'GitHub commit-to-PR discovery is not worktree ownership');
+    assert.equal(result.unknown.length, 2);
+    assert(result.unknown.every((row) => row.reason.includes('provenance')));
+  } finally {
+    a.restoreEnv();
+    rmSync(f.root, { recursive: true, force: true });
+  }
+});
+
+test('a queued notice cannot retire a checkout whose source changed at the same HEAD', () => {
+  const f = fixture();
+  const a = setup(f);
+  try {
+    const e = a.make('same-head-new-source');
+    assert.throws(
+      () =>
+        a.retire(e, {
+          readPr: () => {
+            git(
+              e.path,
+              'config',
+              '--worktree',
+              'catcafe.lifecycle.origin',
+              JSON.stringify({
+                threadId: 'thread_original',
+                userId: 'owner',
+                sourceRef: 'task:work:next',
+                role: 'author',
+              }),
+            );
+            return { sourceRef, state: 'MERGED', baseRef: 'main', mergedAt: e.head, commits: [e.head] };
+          },
+        }),
+      /PR association/,
+    );
+    assert(existsSync(e.path));
+    assert(!existsSync(join(f.root, '.worktree-release-archives')));
+  } finally {
+    a.restoreEnv();
+    rmSync(f.root, { recursive: true, force: true });
+  }
+});
+
 test('automatic retirement keeps dirty, busy and unknown-process worktrees', () => {
   const f = fixture();
   const a = setup(f);
@@ -109,13 +180,53 @@ test('a checkout that changes HEAD after the scan is not retired', () => {
             writeFileSync(join(e.path, 'new.txt'), 'new source');
             git(e.path, 'add', 'new.txt');
             git(e.path, 'commit', '-qm', 'new work');
-            return { sourceRef, state: 'MERGED', mergedAt: e.head, commits: [e.head] };
+            return { sourceRef, state: 'MERGED', baseRef: 'main', mergedAt: e.head, commits: [e.head] };
           },
         }),
       /HEAD changed/,
     );
     assert(existsSync(join(e.path, 'new.txt')));
     assert(!existsSync(join(f.root, '.worktree-release-archives')));
+  } finally {
+    a.restoreEnv();
+    rmSync(f.root, { recursive: true, force: true });
+  }
+});
+test('a collected key cannot retire a replacement generation at the same path and HEAD', () => {
+  const f = fixture();
+  const a = setup(f);
+  try {
+    const e = a.make('generation');
+    const birth = git(e.path, 'config', '--worktree', '--get', 'catcafe.lifecycle.createdAt').trim();
+    const noticeKey = mergedNoticeKey(f.repo, e.path, e.head, 'codex61-sol', sourceRef, e.head, birth);
+    git(e.path, 'config', '--worktree', 'catcafe.lifecycle.createdAt', new Date(NOW + 1000).toISOString());
+    assert.throws(() => a.retire(e, { noticeKey }), /checkout generation changed/);
+    assert(existsSync(e.path));
+    assert(!existsSync(join(f.root, '.worktree-release-archives')));
+  } finally {
+    a.restoreEnv();
+    rmSync(f.root, { recursive: true, force: true });
+  }
+});
+test('a bound invocation-origin author is discovered and retired with its current notice key', () => {
+  const f = fixture();
+  const a = setup(f);
+  try {
+    const e = a.make('matching-generation');
+    const origin = { threadId: 'thread_original', userId: 'owner', sourceRef: 'invocation:author', role: 'author' };
+    git(e.path, 'config', '--worktree', 'catcafe.lifecycle.origin', JSON.stringify(origin));
+    const readPr = () => ({ sourceRef, state: 'MERGED', baseRef: 'main', mergedAt: e.head, commits: [e.head] });
+    const binding = bindWorktreePr({ repo: f.repo, path: e.path, owner: 'codex61-sol', sourceRef, readPr });
+    assert.deepEqual(binding.origin, origin);
+    const notices = mergedWorktreeNotices(f.repo, worktreeInventory(f.repo), {
+      now: 0,
+      readPr,
+    }).notices;
+    assert.equal(notices.length, 1);
+    const receipt = a.retire(e, { noticeKey: notices[0].key });
+    assert.equal(receipt.state, 'released');
+    assert.equal(receipt.storageDisposition, 'removed');
+    assert.equal(existsSync(e.path), false);
   } finally {
     a.restoreEnv();
     rmSync(f.root, { recursive: true, force: true });
@@ -142,35 +253,57 @@ test('expired named retention can finish through fresh PR truth without rewritin
     rmSync(f.root, { recursive: true, force: true });
   }
 });
-test('a merged PR refreshes a stale origin/main before native finish', () => {
-  const f = fixture();
-  const a = setup(f);
-  try {
-    const e = a.make('published');
-    const remote = join(f.root, 'origin.git');
-    git(f.root, 'clone', '--bare', '-q', f.repo, remote);
-    git(f.repo, 'remote', 'add', 'origin', remote);
-    const base = e.head;
-    writeFileSync(join(e.path, 'feature.txt'), 'merged feature');
-    git(e.path, 'add', 'feature.txt');
-    git(e.path, 'commit', '-qm', 'feature');
-    e.head = git(e.path, 'rev-parse', 'HEAD').trim();
-    git(f.repo, 'merge', '--squash', e.head);
-    git(f.repo, 'commit', '-qm', 'published squash');
-    const mergedAt = git(f.repo, 'rev-parse', 'HEAD').trim();
-    git(f.repo, 'push', '-q', 'origin', 'main');
-    git(f.repo, 'update-ref', 'refs/remotes/origin/main', base);
-    assert.equal(
-      a.retire(e, { readPr: () => ({ sourceRef, state: 'MERGED', mergedAt, commits: [e.head] }) }).state,
-      'released',
-    );
-    assert.equal(git(f.repo, 'rev-parse', 'origin/main').trim(), mergedAt);
-    assert(!existsSync(e.path));
-  } finally {
-    a.restoreEnv();
-    rmSync(f.root, { recursive: true, force: true });
-  }
-});
+for (const [baseRef, rewritten] of [
+  ['main', false],
+  ['next', false],
+  ['next', true],
+]) {
+  test(`a merged PR refreshes a ${rewritten ? 'rewritten' : 'stale'} origin/${baseRef} before native finish`, () => {
+    const f = fixture();
+    const a = setup(f);
+    try {
+      const e = a.make('published');
+      const base = e.head;
+      if (baseRef !== 'main') git(f.repo, 'checkout', '-qb', baseRef);
+      const remote = join(f.root, 'origin.git');
+      git(f.root, 'clone', '--bare', '-q', f.repo, remote);
+      git(f.repo, 'remote', 'add', 'origin', remote);
+      let cached = base;
+      if (rewritten) {
+        writeFileSync(join(f.repo, 'old-base.txt'), 'superseded base');
+        git(f.repo, 'add', 'old-base.txt');
+        git(f.repo, 'commit', '-qm', 'old base');
+        cached = git(f.repo, 'rev-parse', 'HEAD').trim();
+        git(f.repo, 'push', '-q', 'origin', baseRef);
+        git(f.repo, 'checkout', '--detach', base);
+      }
+      writeFileSync(join(e.path, 'feature.txt'), 'merged feature');
+      git(e.path, 'add', 'feature.txt');
+      git(e.path, 'commit', '-qm', 'feature');
+      e.head = git(e.path, 'rev-parse', 'HEAD').trim();
+      git(f.repo, 'merge', '--squash', e.head);
+      git(f.repo, 'commit', '-qm', 'published squash');
+      const mergedAt = git(f.repo, 'rev-parse', 'HEAD').trim();
+      // Publish the object then rewrite only the disposable bare fixture's base ref.
+      git(f.repo, 'push', '-q', 'origin', `HEAD:refs/heads/${rewritten ? 'rewritten-base' : baseRef}`);
+      if (rewritten) {
+        git(remote, 'update-ref', `refs/heads/${baseRef}`, mergedAt);
+        assert.throws(() => git(f.repo, 'merge-base', '--is-ancestor', cached, mergedAt));
+      }
+      git(f.repo, 'update-ref', `refs/remotes/origin/${baseRef}`, cached);
+      assert.equal(
+        a.retire(e, { readPr: () => ({ sourceRef, state: 'MERGED', baseRef, mergedAt, commits: [e.head] }) }).state,
+        'released',
+      );
+      assert.equal(git(f.repo, 'rev-parse', `origin/${baseRef}`).trim(), mergedAt);
+      if (baseRef !== 'main') assert.equal(git(f.repo, 'rev-parse', 'origin/main').trim(), base);
+      assert(!existsSync(e.path));
+    } finally {
+      a.restoreEnv();
+      rmSync(f.root, { recursive: true, force: true });
+    }
+  });
+}
 test('a public checkout family keeps its own resident runtime and default Alpha', () => {
   const f = fixture();
   const a = setup(f);

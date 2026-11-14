@@ -5,7 +5,7 @@
  * cannot hold: force-reset floats for exactly three abnormal classes, a reason this code has never heard of
  * still has words, and a visible row never renders as an empty string.
  */
-import type { ActiveExecutionProjection } from '@cat-cafe/shared';
+import type { ActiveExecutionProjection, ActiveHoldWaitProjection } from '@cat-cafe/shared';
 import { describe, expect, it } from 'vitest';
 import { activeExecutionKey } from '@/stores/activeExecutionStore';
 import type { QueueEntry } from '@/stores/chat-types';
@@ -15,6 +15,7 @@ import {
   type ExecutionRowInput,
   FORCE_RESET_REASON_COPY,
   formatClock,
+  rowCompactStatusText,
   rowStatusText,
 } from '../row-model';
 
@@ -302,5 +303,58 @@ describe('rules the states do not state', () => {
     expect(formatClock(125_000)).toBe('2:05');
     expect(formatClock(-5)).toBe('0:00');
     expect(formatClock(3_600_000)).toBe('60:00');
+  });
+});
+
+describe('a held ball: the cat exited and only a wake is armed', () => {
+  // Local wall-clock times, so the expected words hold in every test timezone.
+  const at = (hours: number, minutes: number) => new Date(2026, 10, 2, hours, minutes).getTime();
+  function hold(catId: string, wakeAt: number, over: Partial<ActiveHoldWaitProjection> = {}): ActiveHoldWaitProjection {
+    return {
+      waitId: `hold-ball-${catId}`,
+      threadId: 'thread-1',
+      threadTitle: null,
+      catId,
+      since: NOW - 60_000,
+      wakeAt,
+      cancelability: { state: 'cancelable', target: { kind: 'hold_ball', taskId: `hold-ball-${catId}` } },
+      ...over,
+    };
+  }
+
+  it('shows who is waiting and when they wake, with a cancel for that one hold', () => {
+    const h = hold('codex', at(2, 11));
+    const model = deriveExecutionRow(input({ waits: [h] }));
+    expect(model.visible).toBe(true);
+    expect(model.status).toBe('holding');
+    expect(rowStatusText(model, nameOf)).toBe('砚砚 在等 · 02:11 醒');
+    expect(rowCompactStatusText(model)).toBe('在等');
+    expect(model.hold).toEqual(h);
+    // Nothing runs, so nothing to stop or force-reset.
+    expect(model.stop).toEqual({ kind: 'none' });
+    expect(model.forceReset).toEqual([]);
+  });
+
+  it('several holds read as a count with the earliest wake', () => {
+    const model = deriveExecutionRow(input({ waits: [hold('opus', at(3, 40)), hold('codex', at(2, 11))] }));
+    expect(rowStatusText(model, nameOf)).toBe('2 只猫在等 · 最早 02:11 醒');
+    expect(model.hold).toBeNull();
+  });
+
+  it('running work and a waiting queue speak first; the hold does not hide them', () => {
+    const h = hold('codex', at(2, 11));
+    expect(deriveExecutionRow(input({ executions: [live('opus')], waits: [h] })).status).toBe('working');
+    expect(deriveExecutionRow(input({ queue: { entries: [entry('q1')] }, waits: [h] })).status).toBe('waiting');
+  });
+
+  it('is invisible without holds, and another principal’s hold offers no cancel', () => {
+    expect(deriveExecutionRow(input()).visible).toBe(false);
+    const foreign = hold('codex', at(2, 11), {
+      waitId: 'occupied:thread-1:codex:1',
+      cancelability: { state: 'not_cancelable', reason: 'foreign_principal' },
+    });
+    const model = deriveExecutionRow(input({ waits: [foreign] }));
+    expect(model.status).toBe('holding');
+    expect(model.hold?.cancelability.state).toBe('not_cancelable');
   });
 });

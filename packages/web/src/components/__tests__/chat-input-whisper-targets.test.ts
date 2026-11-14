@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 /**
  * F32-b Phase 3: Regression test for whisper target selection.
  *

@@ -4,6 +4,7 @@
 import { deploymentDefaults } from '@cat-cafe/shared';
 import type { Metadata, Viewport } from 'next';
 import { AppShell } from '@/components/AppShell';
+import { WorkCoverLayer } from '@/components/artifacts/WorkCoverLayer';
 import { BrakeModal } from '@/components/BrakeModal';
 import { CatHueInjector } from '@/components/CatHueInjector';
 import { CoCreatorHueInjector } from '@/components/CoCreatorHueInjector';
@@ -18,6 +19,7 @@ import { META_THEME_COLOR } from '@/lib/color-defaults';
 import { buildPwaRetirementScript } from '@/lib/pwa-retirement-script';
 import { runtimeApiOriginFromPort } from '@/lib/runtime-api-origin';
 import './globals.css';
+import './watcher.css';
 
 // The document must carry this process's API port, never a statically baked build port.
 export const dynamic = 'force-dynamic';
@@ -88,6 +90,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           <BrakeModal />
           <GuideOverlay />
           <ToastContainer />
+          <WorkCoverLayer />
         </ThemeProvider>
       </body>
     </html>

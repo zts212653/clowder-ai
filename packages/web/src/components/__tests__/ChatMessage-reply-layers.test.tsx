@@ -321,6 +321,24 @@ describe('F322 B §1.16 — a cat reply in three layers (new shell only)', () =>
     });
 
     describe('a merged reply and a plain one', () => {
+      it('keeps retained R21 speech visible in the v2 body without a legacy CLI disclosure', () => {
+        render(
+          streamReply({
+            id: 'cached-r21-stream-only',
+            catId: 'codex-sol',
+            content: '',
+            isStreaming: false,
+            toolEvents: [],
+            extra: { stream: { invocationId: 'parent-1', cliStdout: '', speechContent: 'CACHED_R21_SPEECH' } },
+          }),
+        );
+
+        expect(q('message-bubble'), 'CACHED_R21_SPEECH must retain its visible reply').not.toBeNull();
+        expect(q('message-bubble')?.textContent).toContain('CACHED_R21_SPEECH');
+        expect(q('reply-layers')).not.toBeNull();
+        expect(q('message-bubble')?.textContent).not.toContain('CLI Output');
+      });
+
       it('a reply that merged a spoken callback keeps the spoken part as the body and the stream text in the record', () => {
         render(
           streamReply({

@@ -1,13 +1,12 @@
 'use client';
 
 import { resolvePluginDescription } from '@cat-cafe/shared';
-import { personalChromeSettingsHref } from '@/utils/personal-chrome-settings';
 import { HubIcon } from '../../hub-icons';
 import { settingsResourceCardClass, settingsResourceRowClass } from '../../SettingsResourceCard';
 import { SettingsText } from '../primitives/SettingsText';
 import { PluginDetailFooter, PluginDetailHeader, PluginDetailStateAction } from './controls/PluginManagerDetailChrome';
 import { pluginManagerText } from './controls/plugin-manager.shell-copy';
-import { DotConnectionDetail } from './DotConnectionDetail';
+import { PluginAddressSettings } from './PluginAddressSettings';
 import { PluginCapabilityDocumentation } from './PluginCapabilityDocumentation';
 import PluginConnectorSettings from './PluginConnectorSettings';
 import { PluginManagerBindings } from './PluginManagerBindings';
@@ -135,80 +134,48 @@ export function PluginManagerDetailCard({
           </div>
         )}
 
-        {plugin.id === 'official.chatgpt-dot' ? (
-          <>
-            <section className="space-y-2">
-              <SectionHeading>ChatGPT Pro · 本机 Chrome</SectionHeading>
-              <SettingsText as="p" variant="sm" tone="secondary">
-                要让砚砚 Pro 接收消息，请安装并启用 Personal Chrome，准备 Chrome
-                连接，再在扩展中授权指定会话。回到当前对话选择并连接该会话后，才能向它发送消息。
-              </SettingsText>
-              <a
-                href={personalChromeSettingsHref()}
-                className="inline-block text-sm font-medium text-cafe-interactive hover:underline"
-              >
-                设置 Personal Chrome
-              </a>
-            </section>
-            {presentation === 'v2' && (
-              <PluginManagerDetailPrelude
-                plugin={plugin}
-                description={description}
-                locale={locale}
-                busy={busy}
-                onInstall={onInstall}
-                onRepair={onRepair}
-              />
-            )}
-            <DotConnectionDetail
-              installed={installed}
-              compact={presentation === 'v2'}
-              activationRequest={configurationValidationRequest}
-              activationAllowed={plugin.intent === 'enabled' || plugin.actions?.setEnabled === true}
-              onStateChanged={onStateChanged}
-              secondaryAction
-            />
-          </>
-        ) : (
-          <>
-            <PluginManagerConfigurationSection
-              plugin={plugin}
-              presentation={presentation}
-              beforeConfiguration={
-                presentation === 'v2' ? (
-                  <PluginManagerDetailPrelude
-                    plugin={plugin}
-                    description={description}
-                    locale={locale}
-                    busy={busy}
-                    onInstall={onInstall}
-                    onRepair={onRepair}
-                  />
-                ) : undefined
-              }
-              onOperationChange={onOperationChange}
-              busy={busy}
-              onSaveConfig={onSaveConfig}
-              validationRequest={configurationValidationRequest}
-              saved={configurationSaved}
-            />
-
-            {installed && plugin.permissions && (
-              <PluginConnectorSettings key={plugin.id} pluginId={plugin.id} pluginLabel={plugin.permissions.label} />
-            )}
-
-            {plugin.bindings !== undefined && (
-              <PluginManagerBindings
-                key={plugin.id}
-                pluginId={plugin.id}
-                bindings={plugin.bindings}
-                onChange={onOperationChange}
-              />
-            )}
-
-            <PluginCapabilityDocumentation plugin={plugin} presentation={presentation} />
-          </>
+        {plugin.pluginInstanceId && plugin.address && (
+          <PluginAddressSettings key={plugin.pluginInstanceId} plugin={plugin} onSaved={onStateChanged} />
         )}
+
+        <>
+          <PluginManagerConfigurationSection
+            plugin={plugin}
+            presentation={presentation}
+            beforeConfiguration={
+              presentation === 'v2' ? (
+                <PluginManagerDetailPrelude
+                  plugin={plugin}
+                  description={description}
+                  locale={locale}
+                  busy={busy}
+                  onInstall={onInstall}
+                  onRepair={onRepair}
+                />
+              ) : undefined
+            }
+            onOperationChange={onOperationChange}
+            busy={busy}
+            onSaveConfig={onSaveConfig}
+            validationRequest={configurationValidationRequest}
+            saved={configurationSaved}
+          />
+
+          {installed && plugin.permissions && (
+            <PluginConnectorSettings key={plugin.id} pluginId={plugin.id} pluginLabel={plugin.permissions.label} />
+          )}
+
+          {plugin.bindings !== undefined && (
+            <PluginManagerBindings
+              key={plugin.id}
+              pluginId={plugin.id}
+              bindings={plugin.bindings}
+              onChange={onOperationChange}
+            />
+          )}
+
+          <PluginCapabilityDocumentation plugin={plugin} presentation={presentation} />
+        </>
         {presentation === 'v2' && (
           <PluginDetailFooter plugin={plugin} locale={locale} busy={busy} onUninstall={onUninstall} />
         )}

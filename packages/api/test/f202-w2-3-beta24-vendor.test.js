@@ -11,6 +11,7 @@ import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { validateManifest } from '@clowder-ai/plugin-contract';
 import { HostPluginConfigurationService } from '../dist/domains/plugin/manager/plugin-manager-configuration.js';
+import { snapshotInventoryFixture } from './helpers/snapshot-inventory-fixture.js';
 
 const pluginId = 'dev.clowder.row-action-fixture';
 const roots = [];
@@ -56,7 +57,7 @@ function manifest() {
 }
 
 function inventory(manifestValue) {
-  return {
+  return snapshotInventoryFixture({
     async snapshot() {
       return {
         schemaVersion: 1,
@@ -90,7 +91,7 @@ function inventory(manifestValue) {
         grants: [],
       };
     },
-  };
+  });
 }
 
 test('beta.24 admits a row action, and the Host never projects it as a standalone button', async () => {

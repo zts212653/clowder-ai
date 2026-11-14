@@ -31,7 +31,15 @@ export const WRAPPERS = new Map([
   ['nice', { flags: new Set(['--']), valued: new Set(['-n', '--adjustment']) }],
   ['nohup', { flags: new Set(['--']), valued: new Set() }],
   ['time', { flags: new Set(['-p', '-a', '--']), valued: new Set(['-o', '-f', '--output', '--format']) }],
-  ['command', { flags: new Set(['-p', '-v', '-V', '--']), valued: new Set() }],
+  [
+    'command',
+    {
+      flags: new Set(['-p', '-v', '-V', '--']),
+      valued: new Set(),
+      clusteredFlags: true,
+      inquiryFlags: new Set(['-v', '-V']),
+    },
+  ],
   ['exec', { flags: new Set(['-c', '-l', '--']), valued: new Set(['-a']) }],
   ['builtin', { flags: new Set(['--']), valued: new Set() }],
   ['setsid', { flags: new Set(['-f', '-w', '--fork', '--wait', '--']), valued: new Set() }],
@@ -128,12 +136,13 @@ export const XARGS_WRAPPER = {
  * executed content. Losing either while reporting a complete parse is how a
  * delete inside our own checkout came back allowed.
  *
- * @returns {{rest: string[], complete: boolean, cwd?: string, splitString?: string, replacement?: string}}
+ * @returns {{rest: string[], complete: boolean, cwd?: string, splitString?: string, commandString?: string, replacement?: string, inquiry?: boolean}}
  * `complete: false` when an option was not in the table -- it could take a
  * value, or change what runs.
  */
 export function afterWrapper(spec, operands) {
   let index = 0;
+  let inquiry = false;
   let leading = spec.leadingOperands ?? 0;
   let cwd;
   let replacement;
@@ -145,6 +154,7 @@ export function afterWrapper(spec, operands) {
           rest: operands.slice(index),
           complete: true,
           cwd,
+          inquiry,
           ...(replacement === undefined ? {} : { replacement }),
         };
       leading -= 1;
@@ -156,6 +166,7 @@ export function afterWrapper(spec, operands) {
         rest: operands.slice(index + 1),
         complete: true,
         cwd,
+        inquiry,
         ...(replacement === undefined ? {} : { replacement }),
       };
     const inline = token.includes('=');
@@ -185,11 +196,17 @@ export function afterWrapper(spec, operands) {
       index = next;
       continue;
     }
-    if (spec.flags.has(named)) {
+    const flags = spec.flags.has(named)
+      ? [named]
+      : spec.clusteredFlags && /^-[^-]+$/.test(token)
+        ? [...token.slice(1)].map((char) => `-${char}`)
+        : [];
+    if (flags.length && flags.every((flag) => spec.flags.has(flag))) {
+      inquiry ||= flags.some((flag) => spec.inquiryFlags?.has(flag));
       index += 1;
       continue;
     }
     return { rest: [], complete: false };
   }
-  return { rest: [], complete: true, cwd, ...(replacement === undefined ? {} : { replacement }) };
+  return { rest: [], complete: true, cwd, inquiry, ...(replacement === undefined ? {} : { replacement }) };
 }

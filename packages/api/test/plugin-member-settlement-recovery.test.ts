@@ -9,9 +9,7 @@ import { memberExecutionFixture as fixture } from './helpers/plugin-member-execu
 function cancelProvider(f: Awaited<ReturnType<typeof fixture>>, teardown = true) {
   if (teardown) f.turns.recordProviderTeardown(f.claim.invocationId, 200);
   const terminal = { status: 'canceled' as const, endedAt: 200, terminalReason: 'user_stop' };
-  if (teardown || f.turns.get(f.claim.invocationId)?.providerStartedAt === undefined)
-    f.turns.transitionTerminal(f.claim.invocationId, terminal);
-  else assert.throws(() => f.turns.transitionTerminal(f.claim.invocationId, terminal), /provider_teardown_unconfirmed/);
+  f.turns.transitionTerminal(f.claim.invocationId, terminal);
   f.messages.commitLifecycleResponseTerminal(f.response.id, {
     invocationId: f.claim.invocationId,
     status: 'canceled',
@@ -61,14 +59,38 @@ test('a recreated Host reads canonical terminal evidence when the original final
   assert.equal(f.sends(), 1);
 });
 
-test('recovery never turns an ended response into a terminal receipt while the original provider is still alive', async () => {
-  const f = await fixture();
-  await f.host().claim(f.claim);
-  cancelProvider(f, false);
-  const lookup = { sessionId: f.session.sessionId, generation: f.session.generation, executionId: f.input.executionId };
-  assert.equal((await f.service().forInstance(f.scope()).getExecution(lookup))?.phase, 'running');
-  assert.equal((await f.port.get(f.session.sessionId))?.consumedCursor, 0);
-});
+for (const status of ['failed', 'canceled', 'interrupted'] as const) {
+  test(`a logical ${status} still needs physical teardown for a terminal member receipt`, async () => {
+    const f = await fixture();
+    await f.host().claim(f.claim);
+    f.turns.transitionTerminal(f.claim.invocationId, { status, endedAt: 200, terminalReason: 'process_restart' });
+    f.messages.commitLifecycleResponseTerminal(f.response.id, {
+      invocationId: f.claim.invocationId,
+      status,
+      completedAt: 202,
+      content: '',
+      mentions: [],
+    });
+    const lookup = {
+      sessionId: f.session.sessionId,
+      generation: f.session.generation,
+      executionId: f.input.executionId,
+    };
+    assert.equal(f.turns.get(f.claim.invocationId)?.status, status);
+    assert.equal(f.turns.get(f.claim.invocationId)?.providerTeardownAt, undefined);
+    assert.equal((await f.service().forInstance(f.scope()).getExecution(lookup))?.phase, 'running');
+    await assert.rejects(f.host().settle(f.claim), /settlement_pending/);
+    assert.equal((await f.port.get(f.session.sessionId))?.consumedCursor, 0);
+    assert.equal(f.sends(), 1);
+
+    f.turns.recordProviderTeardown(f.claim.invocationId, 201);
+    const recovered = await f.service().forInstance(f.scope()).getExecution(lookup);
+    assert.equal(recovered?.phase, status);
+    assert.equal(recovered?.invocationId, f.claim.invocationId);
+    assert.equal((await f.port.get(f.session.sessionId))?.consumedCursor, 0);
+    assert.equal(f.sends(), 1);
+  });
+}
 
 test('read-only recovery finds an unstarted canceled child through the original canonical source and response index', async () => {
   const f = await fixture({ providerStarted: false });

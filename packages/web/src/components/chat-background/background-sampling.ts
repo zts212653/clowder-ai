@@ -1,7 +1,8 @@
 import type { BackgroundOpacity, BackgroundPlacement } from '@cat-cafe/shared';
 import type { ActualColours } from '@/lib/readable-name-plate';
 import { useSidebarStore } from '@/stores/sidebarStore';
-import { readableBackgroundOpacity, type SampleArea } from './background-contrast';
+import type { SampleArea } from './background-contrast';
+import type { BackgroundOpacityJob, ViewportSample } from './background-opacity-job';
 import { readBackgroundPalettes } from './background-palette';
 
 export function backgroundTextAreas(width: number, height: number, scale: number): SampleArea[] {
@@ -44,13 +45,12 @@ export function backgroundTextAreas(width: number, height: number, scale: number
   ].map(scaleArea);
 }
 
-function sampleViewport(
+function captureViewport(
   image: HTMLImageElement,
   placement: BackgroundPlacement,
-  palettes: ReturnType<typeof readBackgroundPalettes>,
   viewWidth: number,
   viewHeight: number,
-): BackgroundOpacity {
+): ViewportSample {
   const scale = Math.min(1, 360 / viewWidth, 360 / viewHeight);
   const canvas = document.createElement('canvas');
   canvas.width = Math.ceil(viewWidth * scale);
@@ -68,12 +68,21 @@ function sampleViewport(
     for (let y = top; y < canvas.height; y += h)
       for (let x = left; x < canvas.width; x += w) context.drawImage(image, x, y, w, h);
   } else context.drawImage(image, left, top, w, h);
-  const pixels = context.getImageData(0, 0, canvas.width, canvas.height);
-  const areas = backgroundTextAreas(viewWidth, viewHeight, scale);
-  return {
-    light: Math.min(...palettes.light.map((palette) => readableBackgroundOpacity(pixels, areas, palette, 'light'))),
-    dark: Math.min(...palettes.dark.map((palette) => readableBackgroundOpacity(pixels, areas, palette, 'dark'))),
-  };
+  const { data, width, height } = context.getImageData(0, 0, canvas.width, canvas.height);
+  return { pixels: { data, width, height }, areas: backgroundTextAreas(viewWidth, viewHeight, scale) };
+}
+
+/** Seconds of per-pixel search must never hold the thread that paints clicks and keystrokes. */
+function searchOffMainThread(job: BackgroundOpacityJob): Promise<BackgroundOpacity> {
+  const worker = new Worker(new URL('./background-opacity.worker.ts', import.meta.url));
+  return new Promise<BackgroundOpacity>((resolve, reject) => {
+    worker.onmessage = (event: MessageEvent<BackgroundOpacity>) => resolve(event.data);
+    worker.onerror = (event) => reject(new Error(event.message || 'Background sampling failed'));
+    worker.postMessage(
+      job,
+      job.viewports.map(({ pixels }) => pixels.data.buffer),
+    );
+  }).finally(() => worker.terminate());
 }
 
 /** Keep one durable value readable at selection time, on the accepted desktop and 390px layouts too. */
@@ -91,11 +100,8 @@ export async function sampleBackgroundOpacity(
     ['1440x900', [1440, 900]],
     ['390x900', [390, 900]],
   ]);
-  const opacity = { light: 0.4, dark: 0.4 };
-  for (const [width, height] of viewports.values()) {
-    const recommendation = sampleViewport(image, placement, palettes, width, height);
-    opacity.light = Math.min(opacity.light, recommendation.light);
-    opacity.dark = Math.min(opacity.dark, recommendation.dark);
-  }
-  return opacity;
+  return searchOffMainThread({
+    palettes,
+    viewports: [...viewports.values()].map(([width, height]) => captureViewport(image, placement, width, height)),
+  });
 }

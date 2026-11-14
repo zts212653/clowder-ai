@@ -1,7 +1,13 @@
 import assert from 'node:assert/strict';
+import { join } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { discoverAlphaBrowserRevisionSnapshot } from '../../../scripts/lib/alpha-browser-revisions.mjs';
+import { runAlphaBrowserRevision } from '../../../scripts/lib/alpha-browser-runner.mjs';
+import { fixture as runnerFixture } from '../../../scripts/lib/alpha-browser-runner-fixture.mjs';
+import { openAlphaBrowserSubscription } from '../../../scripts/lib/alpha-browser-subscription.mjs';
 import { getRoster } from '../dist/config/cat-config-loader.js';
+import { executeTaskPipeline } from '../dist/infrastructure/scheduler/execute-pipeline.js';
 import { createAlphaBrowserTemplate } from '../dist/infrastructure/scheduler/templates/alpha-browser.js';
 import { fixture } from './helpers/alpha-browser-template-fixture.js';
 
@@ -19,7 +25,8 @@ test('production default readers enforce the actual dossier and current roster b
   });
   for (const [ownerCatId, available, expected] of [
     ['fable-5', true, 'codex-astra'],
-    ['opus55', true, 'codex-astra'],
+    // Dossier v0.12 (2026-10-23) removed this member's quota restriction.
+    ['opus55', true, 'opus55'],
     ['codex-sol', true, 'codex-sol'],
     ['codex-sol', false, 'codex-astra'],
   ]) {
@@ -98,4 +105,56 @@ test('default scheduler runtime keeps HTTP responsive while its Alpha child wait
   await work;
   await closed;
   assert.equal(f.tasks.size, 0);
+});
+
+test('a real remote read failure is reported after the same enrolled Alpha revision executes', async (t) => {
+  const f = fixture();
+  const runner = runnerFixture(t);
+  const subscriptionId = 'alpha-subscription';
+  Object.assign(runner.input, {
+    subscriptionId,
+    originTaskId: subscriptionId,
+    ownerPrincipal: `schedule:owner:${subscriptionId}`,
+    databasePath: join(runner.input.repoRoot, '.git', 'cat-cafe-full-gate-resources.sqlite'),
+  });
+  const store = openAlphaBrowserSubscription(runner.input);
+  t.after(() => store.close());
+  store.enroll(
+    discoverAlphaBrowserRevisionSnapshot({
+      repoRoot: runner.input.repoRoot,
+      subscribedAfterSha: runner.input.baselineSha,
+      targetSha: runner.revisions[1],
+    }),
+  );
+  const original = store.pending();
+  // No external network: Git itself reports an unavailable configured origin.
+  runner.git('remote', 'add', 'origin', join(runner.input.repoRoot, 'missing-remote'));
+  f.options.repoRoot = runner.input.repoRoot;
+  delete f.options.inspectMain;
+  f.params.params.baselineSha = runner.input.baselineSha;
+  f.runtime.runAlphaBrowserRevision = (input) => {
+    const { targetSha: _target, ...dependencies } = runner.input;
+    return runAlphaBrowserRevision({ ...dependencies, ...input });
+  };
+  const spec = createAlphaBrowserTemplate(f.options).createSpec(subscriptionId, f.params);
+  const rows = [];
+  await executeTaskPipeline({
+    task: spec,
+    ledger: { record: (row) => rows.push(row) },
+    logger: { info() {}, error() {} },
+    running: new Map(),
+    tickCounts: new Map(),
+    lastRunAt: new Map(),
+  });
+  assert.equal(rows.at(-1).outcome, 'RUN_FAILED', 'remote discovery failure remains visible in the original ledger');
+  assert.match(rows.at(-1).error_summary, /ls-remote|remote/i);
+  assert.deepEqual(runner.executed, [original.jobId], 'remote discovery must not block admitted local work');
+  assert.deepEqual(runner.checkedOut, [original.headSha]);
+  assert.equal(store.list()[0].terminalStatus, 'green');
+  assert.equal(store.cursor(), original.headSha, 'failure cannot enroll the newer local HEAD');
+  assert.equal(store.list().length, 1);
+  assert.match(rows.at(-1).error_summary, new RegExp(`${original.headSha}: green`));
+  await assert.rejects(spec.run.execute('alpha', 'alpha', f.context), /ls-remote|remote/i);
+  assert.deepEqual(runner.executed, [original.jobId], 'no second execution or stale discovery after settlement');
+  assert.deepEqual(f.delivered, []);
 });

@@ -15,15 +15,19 @@ import type {
 } from '@cat-cafe/shared';
 import { normalizeLoopbackUrl } from '../../../services/loopback-url.js';
 import { getServiceConfig } from '../../../services/service-config.js';
-import { getServiceManifest, resolveServiceEndpoint } from '../../../services/service-manifest.js';
+import { getServiceManifest, normalizeTtsModelId, resolveServiceEndpoint } from '../../../services/service-manifest.js';
+import { prepareTtsIdentity, verifyTtsIdentity, verifyTtsResponse } from './TtsSynthesisIdentity.js';
 
 export interface MlxAudioTtsProviderOptions {
   /** Base URL of the Python TTS server (default: http://localhost:9879) */
   readonly baseUrl?: string;
-  /** Model to request (default: mlx-community/Qwen3-TTS-12Hz-1.7B-Base-bf16) */
+  /** Explicit override; otherwise follows the existing local-service selection. */
   readonly model?: string;
   /** Request timeout in ms (default: 30000) */
   readonly timeoutMs?: number;
+  /** Internal immutable snapshot; null means the sidecar has no profile. */
+  readonly generationProfile?: string | null;
+  readonly cacheOnly?: boolean;
 }
 
 /**
@@ -103,7 +107,7 @@ function inferWavDurationSec(audio: Uint8Array): number | undefined {
 
 export class MlxAudioTtsProvider implements ITtsProvider {
   readonly id = 'mlx-audio';
-  readonly model: string;
+  private readonly modelOverride: string | undefined;
   // When the caller passes an explicit baseUrl (mostly tests, also legacy
   // hard-coded env wiring), freeze it. When omitted, leave undefined so
   // synthesize() resolves the URL from the service manifest + persisted
@@ -112,22 +116,58 @@ export class MlxAudioTtsProvider implements ITtsProvider {
   // (codex P1 2026-05-26).
   private readonly baseUrlOverride: string | undefined;
   private readonly timeoutMs: number;
+  private readonly generationProfile: string | null | undefined;
+  private readonly cacheOnly: boolean;
 
   constructor(options?: MlxAudioTtsProviderOptions) {
     this.baseUrlOverride = options?.baseUrl ? normalizeLoopbackUrl(options.baseUrl) : undefined;
-    this.model = options?.model ?? 'mlx-community/Qwen3-TTS-12Hz-1.7B-Base-bf16';
+    this.modelOverride = options?.model;
     this.timeoutMs = options?.timeoutMs ?? 30_000;
+    this.generationProfile = options?.generationProfile;
+    this.cacheOnly = options?.cacheOnly ?? false;
+  }
+
+  get model(): string {
+    return this.configuredModel() ?? 'auto';
+  }
+
+  private configuredModel(): string | undefined {
+    if (this.modelOverride !== undefined) return this.modelOverride;
+    const selected = getServiceConfig('mlx-tts')?.selectedModel?.trim() || process.env.TTS_MODEL?.trim();
+    return selected ? normalizeTtsModelId(selected) : undefined;
+  }
+
+  get cacheIdentity(): string {
+    return JSON.stringify([
+      this.resolveBaseUrl(),
+      this.model,
+      ...(this.generationProfile ? [this.generationProfile] : []),
+    ]);
+  }
+
+  async snapshot(options?: { readonly cacheDir?: string }): Promise<MlxAudioTtsProvider> {
+    const baseUrl = this.resolveBaseUrl();
+    const selectedModel = this.configuredModel();
+    const identity = await prepareTtsIdentity(baseUrl, selectedModel, options?.cacheDir);
+    return new MlxAudioTtsProvider({
+      baseUrl,
+      model: identity.model,
+      timeoutMs: this.timeoutMs,
+      generationProfile: identity.generationProfile,
+      cacheOnly: identity.cacheOnly,
+    });
   }
 
   private resolveBaseUrl(): string {
     return this.baseUrlOverride ?? normalizeLoopbackUrl(resolveTtsBaseUrl());
   }
 
-  private requestBody(request: TtsSynthesizeRequest): string {
+  private requestBody(request: TtsSynthesizeRequest, model: string): string {
     return JSON.stringify({
       input: request.text,
       voice: request.voice,
-      model: this.model,
+      model,
+      generation_profile: this.generationProfile ?? '',
       response_format: request.format ?? 'wav',
       speed: request.speed ?? 1.0,
       lang_code: request.langCode ?? 'z',
@@ -139,10 +179,15 @@ export class MlxAudioTtsProvider implements ITtsProvider {
   }
 
   async synthesize(request: TtsSynthesizeRequest): Promise<TtsSynthesizeResult> {
-    const url = `${this.resolveBaseUrl()}/v1/audio/speech`;
+    if (this.generationProfile === undefined) return (await this.snapshot()).synthesize(request);
+    if (this.cacheOnly) throw new Error('TTS is offline; no matching verified cached audio');
+    const baseUrl = this.resolveBaseUrl();
+    const url = `${baseUrl}/v1/audio/speech`;
+    const model = this.model;
+    await verifyTtsIdentity(baseUrl, model, this.generationProfile ?? null);
 
     // F066: Build request body with optional clone params for Qwen3-TTS Base
-    const body = this.requestBody(request);
+    const body = this.requestBody(request, model);
 
     // Dynamic timeout: prevents premature abort while server is still generating.
     // Long voice messages (~400 chars) routinely exceeded the old 120 s clone-mode
@@ -166,6 +211,7 @@ export class MlxAudioTtsProvider implements ITtsProvider {
         throw new Error(`TTS server returned ${response.status}: ${detail}`);
       }
 
+      await verifyTtsResponse(response, this.generationProfile ?? null);
       const arrayBuffer = await response.arrayBuffer();
       const audio = new Uint8Array(arrayBuffer);
 
@@ -182,7 +228,7 @@ export class MlxAudioTtsProvider implements ITtsProvider {
         ...(durationSec != null ? { durationSec } : {}),
         metadata: {
           provider: this.id,
-          model: this.model,
+          model,
           voice: request.voice,
         },
       };
@@ -195,6 +241,18 @@ export class MlxAudioTtsProvider implements ITtsProvider {
     request: TtsSynthesizeRequest,
     options: TtsSynthesizeStreamOptions = {},
   ): AsyncIterable<TtsSynthesizeStreamEvent> {
+    const provider = this.generationProfile === undefined ? await this.snapshot() : this;
+    if (provider.cacheOnly) throw new Error('TTS is offline; no matching verified cached audio');
+    yield* provider.streamForModel(request, options);
+  }
+
+  private async *streamForModel(
+    request: TtsSynthesizeRequest,
+    options: TtsSynthesizeStreamOptions,
+  ): AsyncIterable<TtsSynthesizeStreamEvent> {
+    const baseUrl = this.resolveBaseUrl();
+    const model = this.model;
+    await verifyTtsIdentity(baseUrl, model, this.generationProfile ?? null);
     const controller = new AbortController();
     const abortFromCaller = () => controller.abort(options.signal?.reason);
     if (options.signal?.aborted) abortFromCaller();
@@ -203,16 +261,17 @@ export class MlxAudioTtsProvider implements ITtsProvider {
     const timer = setTimeout(() => controller.abort(), effectiveTimeout);
     let reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
     try {
-      const response = await fetch(`${this.resolveBaseUrl()}/v1/audio/speech/stream`, {
+      const response = await fetch(`${baseUrl}/v1/audio/speech/stream`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: this.requestBody(request),
+        body: this.requestBody(request, model),
         signal: controller.signal,
       });
       if (!response.ok) {
         const detail = await response.text().catch(() => 'unknown');
         throw new Error(`TTS stream server returned ${response.status}: ${detail}`);
       }
+      await verifyTtsResponse(response, this.generationProfile ?? null);
       if (!response.body) throw new Error('TTS stream server returned no response body');
 
       reader = response.body.getReader();
@@ -230,7 +289,7 @@ export class MlxAudioTtsProvider implements ITtsProvider {
         }
         for (const line of lines) {
           if (!line.trim()) continue;
-          const event = this.parseStreamEvent(line, request);
+          const event = this.parseStreamEvent(line, request, model);
           if (event.type === 'chunk') {
             if (pendingChunk) yield pendingChunk;
             if (event.isFinalChunk) {
@@ -257,7 +316,7 @@ export class MlxAudioTtsProvider implements ITtsProvider {
     }
   }
 
-  private parseStreamEvent(line: string, request: TtsSynthesizeRequest): TtsSynthesizeStreamEvent {
+  private parseStreamEvent(line: string, request: TtsSynthesizeRequest, model: string): TtsSynthesizeStreamEvent {
     const event = JSON.parse(line) as {
       type?: string;
       audio_base64?: string;
@@ -285,7 +344,7 @@ export class MlxAudioTtsProvider implements ITtsProvider {
         audio,
         format: 'wav',
         ...(event.duration_sec != null ? { durationSec: event.duration_sec } : {}),
-        metadata: { provider: this.id, model: this.model, voice: request.voice },
+        metadata: { provider: this.id, model, voice: request.voice },
       },
     };
   }

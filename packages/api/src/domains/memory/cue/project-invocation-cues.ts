@@ -1,4 +1,4 @@
-import type { RecallResolverFamily } from '@cat-cafe/shared';
+import type { MatterReadDetails, RecallResolverFamily } from '@cat-cafe/shared';
 import type { MemoryCueEvent, MemoryCueInvalidationReason } from './MemoryCueEpisodeStore.js';
 
 /**
@@ -16,6 +16,8 @@ export interface MemoryCueInvocationCueEntry {
   sourceAnchor: string;
   sourceRevision: string;
   consumerCatId: string;
+  source?: 'push' | 'pull';
+  readDetails?: MatterReadDetails;
   pushSurface?: 'profile_opening';
   status: MemoryCueInvocationStatus;
   invalidationReason: MemoryCueInvalidationReason | null;
@@ -26,13 +28,21 @@ export interface MemoryCueInvocationCueEntry {
 export function projectInvocationCues(events: readonly MemoryCueEvent[]): MemoryCueInvocationCueEntry[] {
   const byCueId = new Map<string, MemoryCueEvent[]>();
   for (const event of events) {
-    const list = byCueId.get(event.cueId);
+    const key = JSON.stringify([
+      event.scope.ownerUserId,
+      event.scope.threadId,
+      event.scope.invocationId,
+      event.consumerCatId,
+      event.cueId,
+      event.sourceRevision,
+    ]);
+    const list = byCueId.get(key);
     if (list) list.push(event);
-    else byCueId.set(event.cueId, [event]);
+    else byCueId.set(key, [event]);
   }
 
   const entries: MemoryCueInvocationCueEntry[] = [];
-  for (const [cueId, cueEvents] of byCueId) {
+  for (const cueEvents of byCueId.values()) {
     const first = cueEvents[0];
     if (!first) continue;
 
@@ -76,11 +86,27 @@ export function projectInvocationCues(events: readonly MemoryCueEvent[]): Memory
     }
 
     entries.push({
-      cueId,
+      cueId: first.cueId,
       resolverFamily: first.resolverFamily,
       sourceAnchor: first.sourceAnchor,
       sourceRevision: first.sourceRevision,
       consumerCatId: first.consumerCatId,
+      ...(first.readOrigin === 'explicit_read' ? { source: 'pull' as const } : {}),
+      ...(first.readDetails
+        ? {
+            readDetails: {
+              ...first.readDetails,
+              entries: [
+                ...new Map(
+                  cueEvents
+                    .filter((event) => event.axis === 'consumption' && event.consumptionOutcome === 'drilled')
+                    .flatMap((event) => event.readDetails?.entries ?? [])
+                    .map((entry) => [JSON.stringify(entry), entry]),
+                ).values(),
+              ].sort((a, b) => a.entryId.localeCompare(b.entryId) || a.sourceRevision.localeCompare(b.sourceRevision)),
+            },
+          }
+        : {}),
       ...(first.resolverFamily === 'profile' &&
       (first.sourceAnchor === 'profile:opening-capsule' || first.sourceAnchor.startsWith('profile:opening-primer:'))
         ? { pushSurface: 'profile_opening' as const }

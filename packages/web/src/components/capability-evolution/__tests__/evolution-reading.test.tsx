@@ -36,6 +36,7 @@ describe('F311 exact version reading in shared owner surfaces', () => {
 
   beforeEach(() => {
     (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+    localStorage.setItem('cat-cafe:shell-presentation', 'classic');
     current = 'v2';
     unavailable = false;
     wrongVersion = false;
@@ -67,6 +68,7 @@ describe('F311 exact version reading in shared owner surfaces', () => {
   afterEach(() => {
     act(() => root.unmount());
     host.remove();
+    localStorage.removeItem('cat-cafe:shell-presentation');
     window.history.replaceState({}, '', '/');
     delete (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT;
   });

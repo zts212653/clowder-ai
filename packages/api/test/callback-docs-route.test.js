@@ -40,6 +40,10 @@ describe('Callback Docs Routes', () => {
       assert.ok(body.rules, 'response should have rules field');
       assert.ok(body.rules.length > 0, 'rules should be non-empty');
       assert.ok(
+        body.rules.includes('cat_cafe_work'),
+        'live HTML delivery rules must expose the existing versioned-work tool',
+      );
+      assert.ok(
         body.rules.includes('cat-cafe-runtime/packages/api/uploads/'),
         'rules should warn cats that /uploads/ files must land in the runtime API upload directory',
       );

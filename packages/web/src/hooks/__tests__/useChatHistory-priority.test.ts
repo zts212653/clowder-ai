@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -171,12 +172,17 @@ describe('useChatHistory request priority', () => {
     const bootstrapResponse = new Promise<Response>((resolve) => {
       resolveBootstrap = resolve;
     });
+    let resolveCatchUp: ((value: Response) => void) | undefined;
+    const catchUpResponse = new Promise<Response>((resolve) => {
+      resolveCatchUp = resolve;
+    });
     let messageRequestCount = 0;
 
     apiFetchMock.mockImplementation((url: string) => {
       if (typeof url === 'string' && url.includes('/api/messages')) {
         messageRequestCount += 1;
         if (messageRequestCount === 1) return bootstrapResponse;
+        if (messageRequestCount === 2) return catchUpResponse;
         return Promise.resolve(new Response(JSON.stringify({ messages: [], hasMore: false }), { status: 200 }));
       }
       if (typeof url === 'string' && url.includes('/task-progress')) {
@@ -206,17 +212,21 @@ describe('useChatHistory request priority', () => {
       await vi.advanceTimersByTimeAsync(600);
     });
 
-    resolveBootstrap?.(new Response(JSON.stringify({ messages: [], hasMore: false }), { status: 200 }));
+    // The catch-up waited behind the bootstrap read instead of reusing it.
+    expect(messageRequestCount).toBe(1);
     await act(async () => {
-      await Promise.resolve();
-      await Promise.resolve();
+      resolveBootstrap?.(new Response(JSON.stringify({ messages: [], hasMore: false }), { status: 200 }));
+      await vi.advanceTimersByTimeAsync(0);
     });
 
+    // The bootstrap settled: a new read is issued at once, and only it may acknowledge.
+    expect(messageRequestCount).toBe(2);
     expect(useChatStore.getState().lastConsumedCatchUpVersionByThread['thread-priority'] ?? 0).toBe(0);
     expect(useChatStore.getState().pendingCatchUpTargetSeqByThread['thread-priority']).toBe(7);
 
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(1000);
+      resolveCatchUp?.(new Response(JSON.stringify({ messages: [], hasMore: false }), { status: 200 }));
+      await vi.advanceTimersByTimeAsync(0);
     });
 
     expect(messageRequestCount).toBe(2);

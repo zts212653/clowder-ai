@@ -1,10 +1,8 @@
 import type { ContextAttachment } from '@cat-cafe/shared';
 import { apiFetch } from '@/utils/api-client';
-import { getContextAttachmentDraft, threadImageDrafts } from '../thread-drafts';
 import type { PendingNewConversationIntent } from './first-message-admission';
 import { loadNewConversationIntent } from './new-conversation-intent-store';
 
-const DRAFT_THREAD_ID = 'default';
 function randomUuid(): string {
   if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
   const hex = (length: number) => Array.from({ length }, () => Math.floor(Math.random() * 16).toString(16)).join('');
@@ -54,7 +52,7 @@ export async function hydrateAdmissionState(signal: AbortSignal): Promise<Hydrat
   return {
     ownerUserId,
     intent: stored?.intent ?? freshIntent(cwd),
-    files: stored?.files ?? threadImageDrafts.get(DRAFT_THREAD_ID) ?? [],
-    contextAttachments: stored?.contextAttachments ?? [...getContextAttachmentDraft(DRAFT_THREAD_ID)],
+    files: stored?.files ?? [],
+    contextAttachments: stored?.contextAttachments ?? [],
   };
 }

@@ -69,6 +69,8 @@ export class NativeMcpLaunches {
 
   async resolveShared(instanceId: string, contributionId: string, revision: string) {
     const { activation, current } = await this.currentActivation(instanceId);
+    if (activation.factoryUnavailableReasons.get(contributionId) === 'tool_schema_invalid')
+      throw new NativePluginActionError(503, 'Plugin tool schema is invalid; this capability is unavailable');
     // Discovery denies ambiguous same-plugin sources. A guessed HTTP URL must
     // not select one of those sources through a different entry point.
     if (
@@ -99,6 +101,8 @@ export class NativeMcpLaunches {
     if (request.mode !== 'plugin_native') throw unavailable();
     const { pluginInstanceId, contributionId } = request;
     const { activation, current } = await this.currentActivation(pluginInstanceId);
+    if (activation.factoryUnavailableReasons.get(contributionId) === 'tool_schema_invalid')
+      throw new NativePluginActionError(503, 'Plugin tool schema is invalid; this capability is unavailable');
 
     const declarations = current.packageRecord.manifest.contributions?.filter(
       (item) => item.type === 'mcp' && item.id === contributionId,
@@ -186,6 +190,8 @@ export class NativeMcpLaunches {
       current.instance.activationState !== 'enabled' ||
       current.instance.lifecycleState !== 'installed' ||
       current.instance.configReadiness !== 'ready' ||
+      current.instance.runtimeState === 'crashed' ||
+      current.instance.runtimeState === 'stopped' ||
       current.packageRecord.packageState !== 'installed' ||
       current.instance.pluginId !== original.instance.pluginId ||
       current.instance.packageDigest !== original.instance.packageDigest ||

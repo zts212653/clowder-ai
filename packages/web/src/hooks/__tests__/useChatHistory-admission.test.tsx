@@ -240,4 +240,159 @@ describe('useChatHistory runtime admission', () => {
     expect(messageRequestCount).toBe(3);
     expect(useChatStore.getState().hasMore).toBe(false);
   });
+
+  // PR-3a contract 3.2 (Astra P1-4): every confirmed thread-room join owes one History read issued
+  // after the confirmation. A read already in flight must neither absorb it nor spend its retries.
+  describe('post-join catch-up behind a slow History read', () => {
+    const before = { id: 'before', type: 'user', content: 'before', timestamp: 100 };
+    const savedInJoinGap = { id: 'gap-post', type: 'assistant', catId: 'opus', content: 'saved', timestamp: 200 };
+    const page = (messages: unknown[]) => new Response(JSON.stringify({ messages, hasMore: false }), { status: 200 });
+    const unavailable = () => new Response(JSON.stringify({ error: 'offline' }), { status: 503 });
+
+    /** Holds the first History read (the bootstrap); later reads answer with `later(readNumber)`. */
+    function holdFirstHistoryRead(later: (read: number) => Response) {
+      let releaseFirst: (response: Response) => void = () => {};
+      const first = new Promise<Response>((resolve) => {
+        releaseFirst = resolve;
+      });
+      const standard = apiFetchMock.getMockImplementation();
+      let reads = 0;
+      apiFetchMock.mockImplementation((url: string, ...rest) => {
+        if (url.includes('/api/messages')) {
+          reads += 1;
+          return reads === 1 ? first : Promise.resolve(later(reads));
+        }
+        return standard ? standard(url, ...rest) : Promise.resolve(page([]));
+      });
+      return {
+        reads: () => reads,
+        historyCalls: () => apiFetchMock.mock.calls.filter(([url]) => String(url).includes('/api/messages')),
+        release: () => releaseFirst(page([before])),
+      };
+    }
+
+    const messageIds = () => useChatStore.getState().messages.map((message) => message.id);
+    const consumed = () => useChatStore.getState().lastConsumedCatchUpVersionByThread[THREAD_ID] ?? 0;
+
+    async function confirmJoinWhileBootstrapIsHeld(history: ReturnType<typeof holdFirstHistoryRead>) {
+      expect(history.reads()).toBe(1);
+      // What onRoomConfirmed asks for when join_room is acknowledged.
+      act(() => useChatStore.getState().requestStreamCatchUp(THREAD_ID));
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(9000);
+      });
+      expect(history.reads()).toBe(1);
+      await act(async () => {
+        history.release();
+        await vi.advanceTimersByTimeAsync(0);
+      });
+    }
+
+    beforeEach(() => {
+      vi.useFakeTimers();
+      useChatStore.setState({
+        streamCatchUpVersionByThread: {},
+        lastConsumedCatchUpVersionByThread: {},
+        pendingCatchUpTargetSeqByThread: {},
+      });
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it('issues the post-join read once a slow cold bootstrap settles', async () => {
+      const history = holdFirstHistoryRead(() => page([before, savedInJoinGap]));
+      await act(async () => {
+        root.render(
+          <Harness>
+            <HistoryProbe capture={() => {}} />
+          </Harness>,
+        );
+        await Promise.resolve();
+      });
+
+      await confirmJoinWhileBootstrapIsHeld(history);
+
+      expect(history.reads()).toBe(2);
+      expect(history.historyCalls()[1]?.[2]).toEqual({ afterCurrentGet: true });
+      expect(messageIds()).toEqual(['before', 'gap-post']);
+      expect(consumed()).toBe(1);
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(20000);
+      });
+      expect(history.reads()).toBe(2);
+      expect(useChatStore.getState().isLoadingHistory).toBe(false);
+    });
+
+    it('reads once for one confirmed join with two surfaces of the thread mounted', async () => {
+      const history = holdFirstHistoryRead(() => page([before, savedInJoinGap]));
+      await act(async () => {
+        root.render(
+          <Harness>
+            <HistoryProbe key="main" capture={() => {}} />
+            <HistoryProbe key="split" capture={() => {}} />
+          </Harness>,
+        );
+        await Promise.resolve();
+      });
+
+      await confirmJoinWhileBootstrapIsHeld(history);
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(20000);
+      });
+
+      expect(history.reads()).toBe(2);
+      expect(messageIds()).toEqual(['before', 'gap-post']);
+      expect(consumed()).toBe(1);
+    });
+
+    it('keeps the whole failure retry budget after waiting behind the slow read', async () => {
+      const history = holdFirstHistoryRead((read) => (read < 5 ? unavailable() : page([before, savedInJoinGap])));
+      await act(async () => {
+        root.render(
+          <Harness>
+            <HistoryProbe capture={() => {}} />
+          </Harness>,
+        );
+        await Promise.resolve();
+      });
+
+      await confirmJoinWhileBootstrapIsHeld(history);
+      expect(history.reads()).toBe(2);
+      for (const [backoff, reads] of [
+        [1000, 3],
+        [2000, 4],
+        [4000, 5],
+      ]) {
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(backoff);
+        });
+        expect(history.reads()).toBe(reads);
+      }
+
+      expect(messageIds()).toEqual(['before', 'gap-post']);
+      expect(consumed()).toBe(1);
+    });
+
+    it('still stops after three failed retries', async () => {
+      const history = holdFirstHistoryRead(() => unavailable());
+      await act(async () => {
+        root.render(
+          <Harness>
+            <HistoryProbe capture={() => {}} />
+          </Harness>,
+        );
+        await Promise.resolve();
+      });
+
+      await confirmJoinWhileBootstrapIsHeld(history);
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(60000);
+      });
+
+      expect(history.reads()).toBe(5);
+      expect(consumed()).toBe(0);
+    });
+  });
 });

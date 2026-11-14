@@ -1,6 +1,7 @@
 import type { ApprovalEnvelope, ApprovalPublication, DispatchProposal } from '@cat-cafe/shared';
 import { assertApprovalEnvelopeIdentity } from '@cat-cafe/shared';
 import type { RedisClient } from '@cat-cafe/shared/utils';
+import { recoveryRedis } from '../../../../infrastructure/recovery/recovery-redis.js';
 import type { SettledHistoryPageOptions } from '../../../../utils/settled-history-page.js';
 import { type OwnerAuthProvenance, requireOwnerAuthProvenance } from '../../../cats/services/owner-auth-provenance.js';
 import { commitRedisApprovalEnvelope } from '../../../cats/services/stores/redis/RedisApprovalPublication.js';
@@ -44,8 +45,9 @@ export class RedisDispatchProposalStore implements IDispatchProposalStore, Appro
   private readonly canonicalAdmission: RedisDispatchProposalCanonicalAdmission;
 
   constructor(private readonly redis: RedisClient) {
-    this.negativeAuthorization = new RedisDispatchProposalNegativeAuthorization(redis);
-    this.canonicalAdmission = new RedisDispatchProposalCanonicalAdmission(redis);
+    this.redis = recoveryRedis(redis);
+    this.negativeAuthorization = new RedisDispatchProposalNegativeAuthorization(this.redis);
+    this.canonicalAdmission = new RedisDispatchProposalCanonicalAdmission(this.redis);
   }
 
   async create(input: CreateDispatchProposalInput): Promise<CreateDispatchProposalResult> {

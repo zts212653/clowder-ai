@@ -185,6 +185,46 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
     console.log('Retained isolated catalog fixtures:', JSON.stringify(tempDirs));
   });
 
+  it('returns compiler identity inputs on reads and saves without persisting those projections', async () => {
+    const projectRoot = createProjectRoot();
+    const previousCwd = process.cwd();
+    process.chdir(projectRoot);
+    process.env.CAT_TEMPLATE_PATH = join(projectRoot, 'cat-template.json');
+    mkdirSync(join(projectRoot, 'docs/team'), { recursive: true });
+    writeFileSync(
+      join(projectRoot, 'docs/team/cat-dossier.md'),
+      '# Fixture\n```yaml\n# structured-profile: cat:opus\nentityId: "cat:opus"\nl0RosterSummary: "profile contribution"\nl0RoutingNote: "profile limitation"\n```\n',
+    );
+    const app = (await import('fastify')).default();
+    await app.register((await import('../dist/routes/cats.js')).catsRoutes);
+    const headers = { 'x-cat-cafe-user': 'default-user' };
+    try {
+      const listed = await app.inject({ method: 'GET', url: '/api/cats', headers });
+      assert.equal(listed.statusCode, 200, listed.payload);
+      let cat = listed.json().cats.find((entry) => entry.id === 'opus');
+      assert.equal(cat.identitySources.roleDescription, 'breed');
+      assert.equal(cat.identityProfile.l0RosterSummary, 'profile contribution');
+      assert.equal(cat.identityProfile.l0RoutingNote, 'profile limitation');
+      for (const caution of ['own limitation', null]) {
+        const response = await app.inject({
+          method: 'PATCH',
+          url: '/api/cats/opus',
+          headers,
+          payload: { caution, expectedRevision: cat.configurationRevision },
+        });
+        assert.equal(response.statusCode, 200, response.payload);
+        cat = response.json().cat;
+        assert.equal(cat.identitySources.caution, caution ? 'variant' : 'template');
+        assert.equal(cat.identityProfile.l0RoutingNote, 'profile limitation');
+      }
+      const persisted = readFileSync(join(projectRoot, '.cat-cafe/cat-catalog.json'), 'utf8');
+      assert.doesNotMatch(persisted, /identitySources|identityProfile|profile limitation/);
+    } finally {
+      await app.close();
+      process.chdir(previousCwd);
+    }
+  });
+
   it('persists a member banner through POST, GET and PATCH removal without changing its avatar', async () => {
     const projectRoot = createProjectRoot();
     process.env.CAT_TEMPLATE_PATH = join(projectRoot, 'cat-template.json');
@@ -4645,7 +4685,7 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
     assert.equal(fetched.cli, undefined, 'GET confirms cli removed after PATCH cli:null');
   });
 
-  it('plugin agentProvider cannot change either protected cloud identity', async () => {
+  it('plugin agentProvider cannot change the protected gpt-pro identity', async () => {
     const projectRoot = createProjectRootFromRepoTemplate();
     const catalogPath = join(projectRoot, '.cat-cafe', 'cat-catalog.json');
     const Fastify = (await import('fastify')).default;
@@ -4655,20 +4695,20 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
     // Read current versions and complete read-time catalog migration before the write-side-effect snapshot.
     await app.inject({ method: 'GET', url: '/api/cats' });
     const before = readFileSync(catalogPath, 'utf8');
-    for (const id of ['gpt-pro', 'gpt-dot']) {
-      const response = await app.inject({
-        method: 'PATCH',
-        url: `/api/cats/${id}`,
-        headers: { 'x-cat-cafe-user': 'codex' },
-        payload: {
-          expectedRevision: await readMemberRequestRevision(app, `/api/cats/${id}`, { 'x-cat-cafe-user': 'codex' }),
-          agentProvider: 'plugin:official.acp-clients/dsh',
-        },
-      });
-      assert.equal(response.statusCode, 409, response.body);
-      assert.equal(response.json().code, 'BUILTIN_CLOUD_IDENTITY_PROTECTED');
-      assert.equal(readFileSync(catalogPath, 'utf8'), before);
-    }
+    const response = await app.inject({
+      method: 'PATCH',
+      url: '/api/cats/gpt-pro',
+      headers: { 'x-cat-cafe-user': 'codex' },
+      payload: {
+        expectedRevision: await readMemberRequestRevision(app, '/api/cats/gpt-pro', {
+          'x-cat-cafe-user': 'codex',
+        }),
+        agentProvider: 'plugin:official.acp-clients/dsh',
+      },
+    });
+    assert.equal(response.statusCode, 409, response.body);
+    assert.equal(response.json().code, 'BUILTIN_CLOUD_IDENTITY_PROTECTED');
+    assert.equal(readFileSync(catalogPath, 'utf8'), before);
     const unchanged = await app.inject({
       method: 'PATCH',
       url: '/api/cats/gpt-pro',
@@ -4756,6 +4796,57 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
     });
     assert.equal(deleteResult.statusCode, 409, deleteResult.body);
     assert.equal(JSON.parse(deleteResult.body).code, 'BUILTIN_CLOUD_IDENTITY_PROTECTED');
+    await app.close();
+  });
+
+  it('F202: retired gpt-dot is an ordinary member identity that the owner can rename or remove', async () => {
+    createProjectRoot();
+    const Fastify = (await import('fastify')).default;
+    const { catsRoutes } = await import('../dist/routes/cats.js');
+    const app = Fastify();
+    await app.register(catsRoutes);
+    const headers = { 'content-type': 'application/json', 'x-cat-cafe-user': 'codex' };
+
+    const created = await app.inject({
+      method: 'POST',
+      url: '/api/cats',
+      headers,
+      body: JSON.stringify({
+        catId: 'gpt-dot',
+        name: '旧 Dot',
+        displayName: '旧 Dot',
+        avatar: '/avatars/default.png',
+        color: { primary: '#123456', secondary: '#abcdef' },
+        mentionPatterns: ['@dot'],
+        roleDescription: '迁移后可由 owner 管理的历史成员',
+        clientId: 'openai',
+        accountRef: 'codex',
+        defaultModel: 'gpt-5.6-sol',
+        mcpSupport: true,
+      }),
+    });
+    assert.equal(created.statusCode, 201, created.body);
+    assert.equal(JSON.parse(created.body).cat.identityProtection, undefined);
+
+    const renamed = await app.inject({
+      method: 'PATCH',
+      url: '/api/cats/gpt-dot',
+      headers,
+      body: JSON.stringify({
+        expectedRevision: await readMemberRequestRevision(app, '/api/cats/gpt-dot', headers),
+        mentionPatterns: ['@legacy-dot'],
+      }),
+    });
+    assert.equal(renamed.statusCode, 200, renamed.body);
+    assert.deepEqual(JSON.parse(renamed.body).cat.mentionPatterns, ['@legacy-dot']);
+
+    const removed = await app.inject({
+      method: 'DELETE',
+      url: '/api/cats/gpt-dot',
+      headers,
+      body: JSON.stringify({ expectedRevision: await readMemberRequestRevision(app, '/api/cats/gpt-dot', headers) }),
+    });
+    assert.equal(removed.statusCode, 200, removed.body);
     await app.close();
   });
 

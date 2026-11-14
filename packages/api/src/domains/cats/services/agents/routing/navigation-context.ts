@@ -1,73 +1,10 @@
-import type { CatId, ConnectorSource, MessageFrom } from '@cat-cafe/shared';
 import { getCoCreatorConfig } from '../../../../../config/cat-config-loader.js';
 import { getCoCreatorDisplay } from '../../../../../config/co-creator-display.js';
-import { getMessageSpeakerName, getSenderName } from '../../context/ContextAssembler.js';
+import { getSenderName } from '../../context/ContextAssembler.js';
 import { renderSegment } from '../../context/prompt-template-loader.js';
 import { formatPromptTime } from '../../format-time.js';
-import { messageFrom } from '../../stores/message-from.js';
 import type { ThreadExecutionSituation } from '../invocation/thread-execution-situation.js';
-import { formatThreadContextDrill } from './thread-drill-pointer.js';
-
-export interface BatonContext {
-  fromMessageId: string;
-  fromSpeaker: string;
-  fromSpeakerDisplay: string;
-  timestamp: number;
-  mentionExcerpt: string;
-  staleHoldWarning: boolean;
-}
-
-export function extractBatonContext(
-  messages: Array<{
-    id: string;
-    catId: CatId | null;
-    from?: MessageFrom;
-    content: string;
-    timestamp: number;
-    userId: string;
-    origin?: 'stream' | 'callback' | 'briefing';
-    mentions?: readonly string[];
-    source?: ConnectorSource;
-  }>,
-  targetCatId: string,
-): BatonContext | null {
-  const mentionPattern = new RegExp(`@${targetCatId}\\b`);
-
-  for (let i = messages.length - 1; i >= 0; i--) {
-    const m = messages[i];
-    const mentioned =
-      m.mentions && m.mentions.length > 0 ? m.mentions.includes(targetCatId) : mentionPattern.test(m.content);
-    if (!mentioned) continue;
-
-    const from = messageFrom(m);
-    const fromSpeaker =
-      from.kind === 'user'
-        ? 'user'
-        : from.kind === 'agent'
-          ? from.catId
-          : from.kind === 'external'
-            ? `external:${from.connectorId}:${from.sender?.id ?? ''}`
-            : from.kind === 'plugin'
-              ? `plugin:${from.instanceId}`
-              : `system:${from.service}`;
-
-    const excerpt = m.content
-      .split('\n')[0]
-      .replace(/@[\p{L}\p{N}_-]+/gu, '')
-      .trim();
-
-    return {
-      fromMessageId: m.id,
-      fromSpeaker,
-      fromSpeakerDisplay: getMessageSpeakerName(m),
-      timestamp: m.timestamp,
-      mentionExcerpt: excerpt,
-      // Navigation presents provenance. Only an explicit custody action can supersede a hold.
-      staleHoldWarning: false,
-    };
-  }
-  return null;
-}
+import type { InvocationSource } from './navigation-sources.js';
 
 export interface TaskSummary {
   id: string;
@@ -103,14 +40,13 @@ export interface TruthSourceInfo {
 
 export interface NavigationContext {
   threadId?: string;
+  threadTitle?: string;
   currentCatId?: string;
-  baton: BatonContext | null;
+  sources?: readonly InvocationSource[];
   tasks: TaskSummary[];
   executionSituation?: ThreadExecutionSituation;
   artifacts?: NavigationArtifact[];
   truthSource?: TruthSourceInfo | null;
-  bestNextSource?: string;
-  recentWorkDirectory?: boolean;
   /** Explicit original roadmap pointer; never a directive or custody grant. */
   roadmapPointer?: string;
 }
@@ -142,27 +78,15 @@ function buildNavigationInner(ctx: NavigationContext, options?: NavigationFormat
   const lines: string[] = [];
   const coCreatorTimeZone = getCoCreatorConfig().timeZone;
   const nowMs = options?.nowMs;
-  if (ctx.recentWorkDirectory) {
-    lines.push(
-      '近期工作线: 用户提到本线程外的“那个X/上次的Y” → cat_cafe_list_threads({ includeWork: true }) 按标题+毛线球认线；别只拿原话当keyword；近期没找到≠不存在。',
-    );
-  }
-
   if (typeof nowMs === 'number') {
     lines.push(
       `当前时间: ${formatPromptTime(nowMs, { timeZone: coCreatorTimeZone })} (relative terms use this now; refreshed per invocation)`,
     );
   }
 
-  if (ctx.baton) {
-    const timeStr = formatPromptTime(ctx.baton.timestamp, { timeZone: coCreatorTimeZone });
-    lines.push(`传球: ${ctx.baton.fromSpeakerDisplay} → 你 (${timeStr})`);
-    if (ctx.baton.mentionExcerpt) {
-      lines.push(`原文: "${ctx.baton.mentionExcerpt}"`);
-    }
-    if (ctx.baton.staleHoldWarning) {
-      lines.push(`⚠️ ${ctx.baton.fromSpeakerDisplay} 之前说过"别动/等等"，但已传球给你——以传球为准`);
-    }
+  if (ctx.sources?.length) {
+    lines.push('本轮输入来源（触发事实，不表示接责或新增授权）:');
+    for (const source of ctx.sources) lines.push(`  - ${formatInvocationSource(source)}`);
   }
 
   if (ctx.tasks.length > 0) {
@@ -201,23 +125,21 @@ function buildNavigationInner(ctx: NavigationContext, options?: NavigationFormat
     }
   }
 
-  if (ctx.truthSource !== undefined) {
-    if (ctx.truthSource === null) {
-      const coordinate = ctx.threadId ? `（threadId=${ctx.threadId}）` : '';
-      lines.push(`真相源: 未定位${coordinate}`);
-    } else {
-      const tag = ctx.truthSource.provenance === 'regex' ? ' (推断)' : '';
-      lines.push(`真相源: ${ctx.truthSource.label}${tag} — ${ctx.truthSource.ref}`);
-    }
-    if (ctx.bestNextSource) {
-      lines.push(`下一步: ${ctx.bestNextSource}`);
-    } else if (ctx.truthSource === null && ctx.threadId) {
-      lines.push(`下一步: ${formatThreadContextDrill(ctx.threadId)}`);
-    }
+  if (ctx.truthSource) {
+    const tag = ctx.truthSource.provenance === 'regex' ? ' (推断)' : '';
+    lines.push(`工作材料: ${ctx.truthSource.label}${tag} — ${ctx.truthSource.ref}`);
   }
 
   if (ctx.roadmapPointer) lines.push(ctx.roadmapPointer);
   return lines.join('\n');
+}
+
+export function formatInvocationSource(source: InvocationSource): string {
+  const time = formatPromptTime(source.timestamp, { timeZone: getCoCreatorConfig().timeZone });
+  const origin = source.sourceThreadId
+    ? ` · 来源thread=${source.sourceThreadId}${source.sourceMessageId ? `#${source.sourceMessageId}` : ''}`
+    : '';
+  return `${source.fromSpeakerDisplay} · messageId=${source.fromMessageId} · ${time}${origin}`;
 }
 
 /* @segment N1 — 导航块 (template: n1-navigation.md) */

@@ -1,3 +1,4 @@
+import { reviewedMediaTypeSchema } from '@cat-cafe/shared';
 import { MediaOwnerError } from '../../video-studio/content-owner/media-errors.js';
 import type { WorkspaceContentSourceService } from '../../workspace/workspace-content-source.js';
 import type { OpenWorkSource, WorkPrincipal, WorkSourcePort } from './service.js';
@@ -13,10 +14,10 @@ export function createWorkWorkspaceSource(source: WorkspaceContentSourceService)
     const description = await source.describe(request);
     if (expectedRevision !== undefined && description.revision !== expectedRevision)
       throw new MediaOwnerError('publication_changed');
-    if (description.mime !== 'video/mp4') throw new MediaOwnerError('invalid_media');
     const opened = await source.openMedia({ ...request, expectedRevision: description.revision });
+    const mediaType = reviewedMediaTypeSchema.parse(opened.mime);
     return {
-      mediaType: 'video/mp4',
+      mediaType,
       media: opened.media,
       stream: opened.stream,
       byteLength: opened.byteLength,
@@ -39,16 +40,16 @@ export function createWorkWorkspaceSource(source: WorkspaceContentSourceService)
         locator: input.locator,
         principal: { userId: input.principal.userId },
       });
-      if (description.mime !== 'video/mp4') throw new MediaOwnerError('invalid_media');
       const frozen = await source.openMedia({
         locator: description.locator,
         principal: { userId: input.principal.userId },
         expectedRevision: description.revision,
       });
       try {
+        const mediaType = reviewedMediaTypeSchema.parse(frozen.mime);
         return {
           source: { ...description.locator, expectedSourceRevision: description.revision },
-          mediaType: description.mime,
+          mediaType,
           byteLength: description.byteLength,
           media: frozen.media,
         };

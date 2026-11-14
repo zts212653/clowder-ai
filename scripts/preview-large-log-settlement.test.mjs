@@ -9,11 +9,13 @@ import {
   renameSync,
   statSync,
   symlinkSync,
+  writeFileSync,
 } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { original, stop, stoppedFixture } from './lib/preview-alpha-settlement-test-fixture.mjs';
 import { expiredLeaseFixture } from './lib/preview-expired-lease-test-fixture.mjs';
+import { standardAlphaDeadFixture } from './lib/preview-standard-alpha-test-fixture.mjs';
 
 function attachLargeLog(f) {
   const log = join(f.config.stateDir, `${f.config.id}.log`);
@@ -52,6 +54,7 @@ for (const [kind, fixture] of [
   ['ordinary', ordinary],
   ['named Alpha', stoppedFixture],
   ['expired lease', expiredLeaseFixture],
+  ['standard Alpha', (t) => standardAlphaDeadFixture(t, { mode: 'failed-owner-v2' })],
 ]) {
   test(`${kind} stop retains a large diagnostic log in place and releases only proven stopped ownership`, async (t) => {
     const f = fixture(t);
@@ -98,5 +101,34 @@ for (const change of ['append', 'symlink', 'coordinate', 'live-process']) {
     await assert.rejects(stop(f), /log|live|running/);
     assert.equal(existsSync(f.config.recordPath), true);
     assert.deepEqual(original(f), before);
+  });
+}
+
+for (const change of ['append', 'symlink', 'nonexistent-coordinate', 'created-mid-retirement']) {
+  test(`standard Alpha retirement rejects ${change} diagnostic log anomaly without removing record`, async (t) => {
+    const f = standardAlphaDeadFixture(t, { mode: 'unclaimed-v2' });
+    if (change === 'nonexistent-coordinate') {
+      f.record.logPath = join(f.config.stateDir, 'missing-other.log');
+      f.write(f.config.recordPath, f.record);
+    } else if (change === 'created-mid-retirement') {
+      f.recovery.afterSettlementJournal = () => {
+        writeFileSync(f.record.logPath, 'late writer\n');
+      };
+    } else {
+      const log = attachLargeLog(f);
+      f.recovery.afterSettlementJournal = () => {
+        if (change === 'append') appendFileSync(log, 'unexpected writer\n');
+        else {
+          renameSync(log, `${log}.original`);
+          symlinkSync(`${log}.original`, log);
+        }
+      };
+    }
+    const beforeRecord = readFileSync(f.config.recordPath);
+    const beforeCompletion = readFileSync(f.record.completionPath);
+    await assert.rejects(stop(f), /log/);
+    assert.equal(existsSync(f.config.recordPath), true);
+    assert.deepEqual(readFileSync(f.config.recordPath), beforeRecord);
+    assert.deepEqual(readFileSync(f.record.completionPath), beforeCompletion);
   });
 }

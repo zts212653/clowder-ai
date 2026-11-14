@@ -28,10 +28,7 @@ const { fixture: windowFixture, input } = require('../../../desktop/plugin-windo
 const { createManagedWindow } = require('../../../desktop/plugin-window/window.cjs');
 
 async function fixture(t: TestContext, includeFenceRead = true) {
-  const isolated = createIsolatedTemplateRoot(
-    process.env.TMPDIR ?? '/tmp',
-    fileURLToPath(new URL('../../../cat-template.json', import.meta.url)),
-  );
+  const isolated = createIsolatedTemplateRoot(fileURLToPath(new URL('../../../cat-template.json', import.meta.url)));
   t.after(isolated.cleanup);
   const template = loadCatConfig(isolated.templatePath);
   const cats = Object.values(toAllCatConfigs(template));

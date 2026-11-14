@@ -1,8 +1,8 @@
 ---
 name: image-generation
 description: >
-  AI 图片生成：原生 tool call（Codex/Antigravity）或浏览器自动化（Gemini/ChatGPT）。
-  Use when: 需要 AI 生成概念图、解释型漫画、UI 参考、像素画素材、完整 PPT 页面、复杂架构图、信息图或视觉 mock。
+  AI 图片生成：原生 tool call（Codex/Antigravity）、家里 OpenAI 平台账号的图片接口（任何猫可用，能出 GIF 动图），或浏览器自动化（Gemini/ChatGPT）。
+  Use when: 需要 AI 生成概念图、解释型漫画、UI 参考、像素画素材、动图/GIF、完整 PPT 页面、复杂架构图、信息图或视觉 mock。
   Not for: 已有图片的展示（用 media_gallery rich block）、硬要求可编辑/native text 的 PPT/图表（用 PPT/HTML 管线）。
   Output: 生成图片自动发布，或作为完整视觉 mock / 图像素材进入后续交付。
 ---
@@ -79,9 +79,11 @@ Codex `image_gen` 不只是“概念图/素材生成器”。当前实测能力�
 ├─ 是（Codex / Antigravity）→ 用原生 tool call（§ 原生路径）
 │   优势：快、自动发布到气泡、无需浏览器
 │
-├─ 否（Claude / 其他）→ 能 shell out 到有能力的 CLI 吗？
-│   ├─ 是 → 借用（§ 跨引擎借用）
-│   └─ 否 → 浏览器自动化（§ 浏览器路径）
+├─ 否（Claude / 其他）→ 家里 OpenAI 平台账号的图片接口（§ 平台接口路径）
+│   优势：任何猫都能用、能带参考图编辑、能直接出 GIF；产物要自己解码和发布
+│   └─ 平台账号不可用（not_sent / platform_account_unavailable）→ 借用 CLI（§ 跨引擎借用）或浏览器（§ 浏览器路径）
+│
+├─ 要会动的（GIF / 动图表情）？→ 不论哪只猫，走平台接口出 GIF（§ 平台接口路径）
 │
 └─ 需要特定风格控制 / inpainting / 局部编辑？
     └─ 是 → 即使有原生能力也走浏览器路径
@@ -92,6 +94,7 @@ Codex `image_gen` 不只是“概念图/素材生成器”。当前实测能力�
 |------|------|------|---------|-------------|
 | **原生** | **Codex CLI** | 内置 `image_gen` tool call | `~/.codex/generated_images/<sessionId>/` | ✅ scanner 自动拾取 |
 | **原生** | **Antigravity** | 内置 `generate_image` tool call | `~/.gemini/antigravity/brain/<cascadeId>/` | ✅ GENERATE_IMAGE step 自动拾取 |
+| **平台接口** | OpenAI Platform（家里账号） | `pnpm platform:request`（宿主 CLI，key 不进命令） | `packages/api/uploads/platform-calls/<callId>/response.bin`（JSON，`data[0].b64_json` 要自己解码） | ❌ 自己用 `cat_cafe_publish_image` 发 |
 | 浏览器 | Gemini Web | Chrome MCP 自动化 | 本地下载目录 | 按 rich-messaging 的本地图片路径处理 |
 | 浏览器 | ChatGPT Web | Chrome MCP 自动化 | 本地下载目录 | 按 rich-messaging 的本地图片路径处理 |
 
@@ -147,6 +150,32 @@ codex exec "生成一张猫咖全景图，手绘水彩风格"
 ```
 
 注意：跨引擎借用目前只适合**离线资产生成**。它会创建另一个 Codex session，产物通常不会被当前猫的 F172 scanner 自动拾取，也不会自动出现在当前气泡里。需要气泡内展示时，优先把球权交给有原生能力的猫，或显式走 artifact promotion / rich block 路径。
+
+## 平台接口路径（任何猫可用；能出 GIF）
+
+2026-11-08 上线（F317）：宿主 CLI 用「猫猫团队 → 账户与登录」里登记的 OpenAI Platform 账号发官方请求，key 由宿主注入，不进命令、响应和日志。完整规则、退出码和限额以 `docs/guides/platform-api-requests.md` 为准；本节只写生图怎么走通。
+
+1. **写请求**：不含密钥的请求 JSON（`accountRef`、`/v1/images/edits` 或 `/v1/images/generations`、multipart `fields`/`files`）。提示词和参考图放在请求 JSON 同目录或其子目录，用相对路径（默认文件根 = 请求 JSON 所在目录）。
+2. **发送**：`node <cat-cafe 主仓>/scripts/platform-request.mjs --request <绝对路径>.json`（或主仓里 `pnpm platform:request --request …`）。stdout 一行收据：`callId`、HTTP 状态、`usage`、`responseFile`。
+3. **解码**：从 `responseFile` 读 `data[0].b64_json`，写成 `.png` / `.gif`。
+4. **发布**：`cat_cafe_publish_image`。文件要在允许的文件根里：放在 scratchpad（`/private/tmp/...`）会被拒（`outside allowed file roots`）；放回同一个 `packages/api/uploads/platform-calls/<callId>/` 再发（该目录已 gitignore，原件和收据也在那里）。
+5. **不报用量**：不向 You 报 token 数或费用，也不为了报去查消耗（You 11-09：「我们的 api 费用花不完，而且还有期限，别查了别查了」）。收据留在 `platform-calls/<callId>/receipt.json`，要对账时再看。
+
+**家里实测过的请求形状**（2026-11-09，F336 与 opus55 的贴贴图；参数以官方文档为准，不外推成功率）：
+
+| 产物 | `fields` |
+|------|----------|
+| 单图 | `model: gpt-image-2.6-sunburst`、`output_format: png`、`quality: xhigh`、`complexity: high`、`size: 1024x1024`（或 `1536x1024`） |
+| GIF | 同上，改 `output_format: gif`、`frame_count: "16"`、`frame_duration_ms: "180"`、`size: 512x512` |
+
+现成请求样例：`.cat-cafe/evidence/f336-production/20261109/argon-start-gif/requests/run-01.json`（GIF）、`.../argon-turnaround/v2/requests/sheet-01-1536x1024.json`（单图）。
+
+**画家里的猫**：第一张参考图用 You 认过的 2D 正典（Ragdoll opus55 用 `docs/videos/cucu-pr-flow/assets/references/xianxian-faces/avatars/director-chair.png`，其他猫从 `docs/videos/cucu-pr-flow/character-bible-v0.1.md` §7 和 You 之后认过的 2D 图里找；3D 线的设定图不当 2D 参考），prompt 里写清每张参考图只管什么。GIF 走两步法：先出一张单图，再用「原头像 + 这张单图（当首帧）」出 GIF。背景小道具也写清特征，否则会画成通用物件（11-09 猫粮碗被画成圆颗粒狗粮，You 一眼看出）。
+
+**真踩过的坑**：
+- 多个请求放后台并行时，等结束要按 node PID 等；沙箱里 `process.kill(pid, 0)` 会抛 `EPERM`，要算「还活着」，否则会误判已结束。别用 `until ! pgrep -f 名字`，它会匹配到等待命令自己。
+- `cd` + 子 shell + 重定向拼成的复合命令可能被 native guard 以 `protected_target_unparsed` 拦下；拆成单条命令、全用绝对路径就能过。
+- 不读凭据文件自己拼请求，也不用 `codex exec` 代替；走这个宿主 CLI。
 
 ---
 

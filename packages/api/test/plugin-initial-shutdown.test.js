@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
-import { randomUUID } from 'node:crypto';
-import { mkdtemp, readFile } from 'node:fs/promises';
+import { access, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
+import { setTimeout as delay } from 'node:timers/promises';
 import Fastify from 'fastify';
 import { MessageStore } from '../dist/domains/cats/services/stores/ports/MessageStore.js';
 import {
@@ -11,8 +11,22 @@ import {
   createPluginManagerRuntimeComposition,
 } from '../dist/domains/plugin/index.js';
 import { prepareHostInitialPlugins } from '../dist/domains/plugin/manager/initial-plugin-installation.js';
+import { SqlitePluginInventoryStore } from '../dist/domains/plugin/state-worker/stores.js';
 import { registerPluginRuntimeShutdown } from '../dist/routes/plugin-runtime-shutdown.js';
 import { catalogEntry, manifest, packageArchive } from './plugin-official-package-installer.fixture.js';
+
+async function waitForFile(path) {
+  for (let attempt = 0; attempt < 2000; attempt++) {
+    try {
+      await access(path);
+      return;
+    } catch (error) {
+      if (error.code !== 'ENOENT') throw error;
+    }
+    await delay(5);
+  }
+  throw new Error(`Fixture did not reach its worker gate: ${path}`);
+}
 
 test('a failed initial stop still invokes final runtime shutdown and rejects Host close', async () => {
   const app = Fastify();
@@ -38,8 +52,12 @@ for (const heldStage of ['discovery', 'archive', 'activation'])
     const root = await mkdtemp(join(tmpdir(), 'initial-shutdown-'));
     const entered = Promise.withResolvers(),
       release = Promise.withResolvers();
-    const gateKey = `initial_shutdown_${randomUUID()}`;
-    globalThis[gateKey] = { entered, release };
+    const enteredPath = join(root, 'activation-entered');
+    const releasePath = join(root, 'activation-release');
+    const releaseStage = async () => {
+      release.resolve();
+      await writeFile(releasePath, 'released');
+    };
     const archive = await packageArchive({
       packageManifest: manifest({
         signals: undefined,
@@ -49,7 +67,13 @@ for (const heldStage of ['discovery', 'archive', 'activation'])
       extraFiles: {
         'dist/entrypoint.js':
           heldStage === 'activation'
-            ? `export default {create(){return {async start(){const gate=globalThis[${JSON.stringify(gateKey)}];gate.entered.resolve();await gate.release.promise;return {actions:{},async stop(){}}}}}};`
+            ? `import { access, writeFile } from 'node:fs/promises';
+import { setTimeout as delay } from 'node:timers/promises';
+export default {create(){return {async start(){
+await writeFile(${JSON.stringify(enteredPath)}, 'entered');
+for (;;) { try { await access(${JSON.stringify(releasePath)}); break; }
+catch (error) { if (error.code !== 'ENOENT') throw error; } await delay(5); }
+return {actions:{},async stop(){}};}}}};`
             : 'export default {create(){return {async start(){return {actions:{},async stop(){}}}}}};',
       },
     });
@@ -99,7 +123,8 @@ for (const heldStage of ['discovery', 'archive', 'activation'])
         if (!controller.signal.aborted) throw error;
       });
     try {
-      await entered.promise;
+      if (heldStage === 'activation') await waitForFile(enteredPath);
+      else await entered.promise;
       await app.ready();
       let closed = false;
       const closing = app.close().then(() => {
@@ -107,15 +132,22 @@ for (const heldStage of ['discovery', 'archive', 'activation'])
       });
       if (heldStage === 'discovery') {
         await closing;
-        release.resolve();
+        await releaseStage();
       } else {
         await new Promise((resolve) => setImmediate(resolve));
         assert.equal(closed, false, 'an in-flight admission must finish before shutdown reports complete');
-        release.resolve();
+        await releaseStage();
         await closing;
       }
       await task;
-      const inventory = await runtime.inventoryStore.snapshot();
+      // Shutdown closes the Host worker. Read durable state through a fresh owner.
+      const reopened = new SqlitePluginInventoryStore(runtime.paths.inventorySnapshotPath);
+      let inventory;
+      try {
+        inventory = await reopened.snapshot();
+      } finally {
+        await reopened.close();
+      }
       assert.equal(inventory.instances.length, heldStage === 'discovery' ? 0 : 1);
       for (const instance of inventory.instances) {
         assert.equal(instance.activationState, heldStage === 'activation' ? 'error' : 'disabled');
@@ -129,11 +161,9 @@ for (const heldStage of ['discovery', 'archive', 'activation'])
         assert.ok(journal.plugins[0].instanceId, 'an admitted package keeps its receipt');
       }
     } finally {
-      release.resolve();
+      await releaseStage();
       controller.abort();
       await task;
       await app.close();
-      await runtime.shutdown('test_cleanup');
-      delete globalThis[gateKey];
     }
   });

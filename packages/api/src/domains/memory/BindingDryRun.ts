@@ -1,5 +1,6 @@
 import { lstatSync, readdirSync, readFileSync } from 'node:fs';
 import { join, relative } from 'node:path';
+import { matchGlob } from './CatCafeScanner.js';
 import type { SecretFinding } from './SecretScanner.js';
 import { SecretScanner } from './SecretScanner.js';
 
@@ -112,16 +113,4 @@ export class BindingDryRun {
 function isExcluded(relPath: string, patterns: string[]): boolean {
   if (!patterns.length) return false;
   return patterns.some((p) => matchGlob(p, relPath));
-}
-
-function matchGlob(pattern: string, path: string): boolean {
-  const regex = pattern
-    .replace(/\*\*\//g, '§GS§')
-    .replace(/\*\*/g, '§G§')
-    .replace(/\*/g, '§S§')
-    .replace(/[.+^${}()|[\]\\]/g, '\\$&')
-    .replace(/§GS§/g, '(.+/)?')
-    .replace(/§G§/g, '.*')
-    .replace(/§S§/g, '[^/]*');
-  return new RegExp(`^${regex}$`).test(path);
 }

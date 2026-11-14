@@ -2,7 +2,6 @@ import type { CatId } from '@cat-cafe/shared';
 import { type CanonicalVisibilityCursor, compareCursors, cursorFor, parseCursor } from '../../stores/cursor.js';
 import { type MessageDeliveryBoundary, parseMessageDeliveryBoundary } from '../../stores/message-delivery-boundary.js';
 import type { StoredMessage } from '../../stores/ports/MessageStore.js';
-import type { ITurnExecutionStore } from '../../stores/ports/TurnExecutionStore.js';
 import { canViewMessage, isOwnerVisibleManagedHoldConnector } from '../../stores/visibility.js';
 
 interface Target {
@@ -89,52 +88,4 @@ export function recoverableDeliveryBoundary(
     if (reply.content.trim() || (reply.contentBlocks?.length ?? 0) > 0) answeredSourceIds.add(proof.sourceMessageId);
   }
   return { ...(cursor ? { cursor } : {}), answeredSourceIds };
-}
-
-/** One bounded lookup for the selected legacy baton; missing/failed records remain visible. */
-export async function legacyBatonHasSucceededReply(input: {
-  messages: readonly StoredMessage[];
-  sourceMessageId: string;
-  explicitSourceMessageId: string | undefined;
-  target: Target;
-  turnExecutionStore: ITurnExecutionStore | undefined;
-}): Promise<boolean> {
-  const { messages, sourceMessageId, explicitSourceMessageId, target, turnExecutionStore } = input;
-  if (!turnExecutionStore || sourceMessageId === explicitSourceMessageId) return false;
-  const source = messages.find((message) => message.id === sourceMessageId);
-  if (!source || !belongsToSource(source, target)) return false;
-  let reply: StoredMessage | undefined;
-  for (const message of messages) {
-    if (
-      isOwnReply(message, target) &&
-      !message.extra?.deliveryBoundary &&
-      message.extra?.causal?.triggerMessageId === sourceMessageId &&
-      (message.content.trim().length > 0 || (message.contentBlocks?.length ?? 0) > 0)
-    )
-      reply = message;
-  }
-  const childId = reply?.extra?.stream?.turnInvocationId;
-  if (
-    !reply ||
-    !childId ||
-    source.visibilitySeq === undefined ||
-    reply.visibilitySeq === undefined ||
-    compareCursors(cursorFor(source), cursorFor(reply)) >= 0
-  )
-    return false;
-  try {
-    const child = await turnExecutionStore.get(childId);
-    return (
-      child?.status === 'succeeded' &&
-      child.userId === target.userId &&
-      child.threadId === target.threadId &&
-      child.catId === target.catId &&
-      child.invocationId === childId &&
-      child.parentInvocationId === reply.extra?.stream?.invocationId &&
-      child.causal?.triggerMessageId === sourceMessageId
-    );
-  } catch {
-    // A navigation projection cannot manufacture consumption during a read outage.
-    return false;
-  }
 }

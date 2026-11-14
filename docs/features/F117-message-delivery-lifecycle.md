@@ -1,12 +1,12 @@
 ---
 feature_ids: [F117]
-related_features: [F039, F086, F122, F167, F173, F183, F233, F254, F264, F280]
-related_decisions: [043]
+related_features: [F039, F047, F086, F122, F167, F173, F183, F233, F254, F264, F280]
 topics: [message, queue, delivery, lifecycle, context]
 doc_kind: spec
 created: 2026-03-14
-updated: 2026-10-11
-tips_exempt: 2026-10-11 documentation aligns existing delivery, guidance and receipt contracts; no additional user-facing action or capability
+tips_exempt: "2026-11-04: this specification describes the reviewed History append recovery through existing original-message receipt actions; current F117/F047 tips cover that entry, with no separate discovery surface."
+related_decisions: [043]
+updated: 2026-11-04
 ---
 
 # F117: Message Delivery Lifecycle — 消息投递生命周期真相源
@@ -34,18 +34,18 @@ Why: pending delivery, accepted inputs, response outcomes and optional read evid
 
 ## Unified State Model
 
-旧版 A2A 前端的 develop_base 对照、已保留能力与 classic／v2 分阶段补齐，见 [前端迁移清单](../plans/2026-10-13-f117-classic-a2a-frontend-parity.md)。该清单不改变下面的单一 Queue／History 契约。
+旧版 A2A 前端的 develop_base 对照、已保留能力与 classic／v2 分阶段补齐，见 [前端迁移清单](https://github.com/zts212653/clowder-ai/blob/7fca378fa010a288484e909446a2faeee5a7fbe2/feature-specs/2026-10-13-f117-classic-a2a-frontend-parity.md)。该清单不改变下面的单一 Queue／History 契约。
 
 | 事实 | Owner |
 |---|---|
 | 内容、作者身份、可见性、原始消息身份 | MessageStore source record |
-| 尚待投递或追加结果待核对的目标、顺序、策略与短 claim | 一条 source Queue entry |
+| 交接前待投递工作、顺序、策略与短 claim | 一条 source Queue entry |
 | 实际 source×target 投递及 optional read receipt | source `dispatchRefs[]` |
 | 输入与 exact 执行的关联、正文与终局；接纳另有证据 | 固定 response lifecycle 与 TurnExecution |
 | action／wait 的责任、权限与 generation | 各自 structured owner |
 | caller 尚需观察的 outbound 变化 | 可丢弃的 process-local view；不裁决执行 |
 
-Queue 保存待投递工作及追加尚未确认的原目标责任，不保存 processing／terminal／seen／handled 的第二套账。普通投递完成后退役对应 target；追加须等 exact 接纳证据落稳后才退役，明确未接纳则恢复原目标下一轮工作，结果未知则保留原目标等待核对。最后一个 target 离开后删除 entry；History 保留结果。新消息不复活旧终局。
+Queue 只保存交接前待投递工作，不保存 processing／terminal／seen／handled 的第二套账。source→target 已持久交接给 exact response 后，该 target 立即离开 Queue，未知接纳与 native 待完成均归 History。最后一个 target 离开后删除 entry；明确未接纳的下一轮是新 pending，旧尝试失败保留在 History。新消息不复活旧终局。
 
 ## What
 
@@ -65,7 +65,7 @@ Queue Panel 展示 pending 工作，聊天面板展示 History 与固定 respons
 
 Append 的 `inputMessageIds` 保存输入与 exact response 的持久关联，单凭该关联不能证明 provider 已接纳或模型已读。`dispatchRef.appendAcceptance` 区分待确认与已接纳；支持读取回执的 adapter 另在 `dispatchRef.inputRead` 上保存 `pending` 或 `{ status: 'read', at }`。原 ID 在 exact native thread／turn 的记录中出现，只能证明已接纳，不能标成已读；查询缺项、失败或不可用也不能证明未接纳。没有读取回执能力时不伪造已读，缺少已读证据不自动重派。
 
-追加结果未知时，系统先核对原消息 ID、首次 handoff 和原生证据，界面显示“正在核对 [成员] 收到没…”且不提供操作按钮；确认接纳后恢复正常回执，仍未知才展示“再发一次”与“如果它其实收到了，会再回一遍”。迟到的接纳／已读证据会撤掉过时操作。普通待发送输入在已知目标空闲、自动执行且无同目标积压时显示“发送中”，忙碌、积压或手动队列才显示“排队中”；保留的未知追加不计为待发送新输入前面的普通队列项。
+追加结果未知时，系统先核对原消息 ID、首次 handoff 和原生证据，界面显示“正在核对 [成员] 收到没…”，原消息下提供只核对、不发送正文的“核对状态”；确认接纳后恢复正常回执，仍未知才展示“再发一次”与“如果它其实收到了，会再回一遍”。迟到的接纳／已读证据会撤掉过时操作。普通待发送输入在已知目标空闲、自动执行且无同目标积压时显示“发送中”，忙碌、积压或手动队列才显示“排队中”；未知追加已退出 Queue，不占待发送新输入的位置。
 
 ### Phase D: Queue 内核
 
@@ -80,8 +80,8 @@ Append 的 `inputMessageIds` 保存输入与 exact response 的持久关联，�
 - 默认策略为 `next_work`；`continue_current` 是可选的非中断引导。全局、thread 与单次选择使用同一契约。
 - Steer 读取当前 pending／dispatched join；确认时重读资格和 exact run，逐成员选择引导或中断。已投递目标不被旧快照复活。
 - 引导在 exact 支持的当前回复追加；无当前父执行或不支持时保留普通 Queue 工作，不暗中中断。准备中的父执行保留引导意图，ready 回调重新通知 drain。
-- 追加明确未被接纳时，保留原 source、首次 Queue admission 和原收件人，在权限与路由资格仍成立时自动进入下一轮；结果未知先核对，不能自动按原输入重发。
-- 核对后仍未知时，只有原人类作者通过严格 owner 校验才能选择“再发一次”。它为同一收件人创建新消息 ID 和新 admission，并显示可能重复回复的警告；保留私密可见域、附件及回复引用，不改写原消息与原回执。并发点击或丢失 HTTP 响应后的同一操作重试复用这个新 admission。
+- 追加当场明确未被接纳时，以内存中原 admission 和未取消的 exact receiver 为依据，原子记录失败并安排下一轮；不改变原 scope／fence，执行时继续复验。重启后才证实未接收只提供 History“重新发送”，不重建旧授权。结果未知只核对；native 未完成可能已有副作用，均不自动重发。
+- 核对后仍未知时，只有原人类作者通过严格 owner 校验才能选择“再发一次”；另保留 native 本输入 `incomplete` 的 A2A 显式恢复（严格 owner 发起，不能冒充原猫）。external／system／plugin 来源不得通过该动作提升为人类 owner 授权。它为同一收件人创建新消息 ID 和新 admission，并显示可能重复回复的警告；保留私密可见域、附件及回复引用，不改写原消息与原回执。并发点击或丢失 HTTP 响应后的同一操作重试复用这个新 admission。
 - 已确认接纳或已读、原目标已撤掉等资格变化会拒绝过时的新发请求，即使旧 Queue 清理尚未完成；已经创建的新输入仍按自己的身份处理。
 - 中断先取得精确 claim，再取消该目标执行；失败恢复未投递工作，不回滚已接收的 sibling。
 - Stop 控制 exact 执行。没有可控活候选时按既有 reconciliation 收敛真实运行状态，不删除消息、历史或其他目标的运行。
@@ -102,6 +102,8 @@ action／wait／callback 的 private input 保留 exact owner、principal、gene
 ### Phase H: Caller outbound view 与失败回流
 
 caller 的运行时观察以 exact source×target 为单位，记录已提交的选择变化与呈现 revision。实际 pending、dispatch、delivery failure 与 terminal 都从 Queue／History 反查。成功呈现 terminal／withdrawn revision 后 compare-and-clear，期间新增 revision 不被旧 invocation 清掉。
+
+Append 的调用方观察、HTTP 查询与原消息进度都从同一 exact History ref 推导：明确未接收为 `not_delivered(append not accepted)`，自身未完成为 `incomplete`，未确认接纳／自身完成时保留 unknown，不能借关联 response 的 completed 冒充成功。迟到接纳／非 native 已读可推进观察，旧 ref 的失败不影响新 ref。A2A 未接收的发送方在下一次自然 invocation 读到该终态后，可通过正常发送入口发起新意图；不把通知文本变成自动重发命令，也不新增唤醒通道。
 
 正常 completed／canceled／interrupted 不自动重启 caller。exact A2A failed 与原失败 response 原子提交幂等 `a2a_failure` message-ref control wake，唤醒 exact caller 读取原结果；不复制失败正文，不登记新的业务 handoff，不递归 fail-back。重启不自动重建旧进程的观察集合；历史结果仍可查询。
 
@@ -129,11 +131,11 @@ provider 自发 task/channel/peer 通知的 result 不能在缺少对应输入�
 
 ### Phase M: 追加、读取与执行归属
 
-调用 provider 前，先在原 Queue 记录该 target 的待确认 handoff，再持久绑定 source、exact response 和输入身份；发起 native 调用不先删除原目标责任。确认接纳先落 source 证据，再清理该 target；已读证据独立单调更新，并可先于接纳确认到达。
+调用 provider 前，先持久绑定 source、exact response 和输入身份，并记录本次追加是否已开始写入、是否要求独立完成回执，再退出 Queue。History 不复制 Queue payload／scope／pending target set。已读和接纳证据独立单调更新；late ACK 只能更新其 exact response，不能覆盖下一轮。
 
-恢复在既有 source、response 与 Queue 三条记录上原子提交：明确未接纳时清除该次输入关联并保留原 admission 的下一轮工作；结果未知时保留原关联与待核对目标。失败原因按原分类保留，异常不一律解释成“客户端已关闭”或“确定没收到”。恢复写入失败或进程重启仍从这些持久记录继续，不能丢掉首次责任、复制正文或自动重放未知输入。
+当场明确拒收的下一轮与失败事实原子提交，停止在事务前复验。重启恢复只读 History 与其派生未完成索引：未送出显示“重新发送”，unknown 显示“核对状态／再发一次”，native 已写入或已读但执行退出显示“追加未完成”；缺少接纳、关联回复结束、已读和本输入完成是四种不同事实。任何已交接 target 都不重新制造旧 Queue 工作。
 
-迟到的接纳／已读证据优先于失败补偿；补偿只修改仍存在的 exact 目标并保留其他成员的 claim，不从旧快照重建已退役目标。系统自动恢复和同 ID 幂等重放复用原输入；用户明确“再发一次”则是另一条新输入，不能承诺模型绝不重复回复。成功接纳后，缺少模型读取证据本身不能成为第二次 admission。
+显式再发采用既有新 source＋幂等 admission，保留原消息和因果关联；严格认证当前 owner，不复制旧执行权限。unknown 与 incomplete 提示可能重复执行，只有确定 not_accepted 不带该提示。旧 Queue 双占行按 exact History 消除；尚未交接的其他目标和持久内容均保留。Memory、Redis、HTTP 和原消息交互共同验证，不能只把旧测试期望改绿。
 
 ## Acceptance Criteria
 
@@ -141,9 +143,9 @@ provider 自发 task/channel/peer 通知的 result 不能在缺少对应输入�
 - Message＋Queue 原子性、同 ID 并发／重载与 target／policy 快照同时覆盖内存和真实隔离 Redis；空 target 数组不变为对象。
 - 普通与 A2A 路由、混合有效／无效 mention、公开 fallback、whisper/private 授权和 late invalidation 互不混淆。
 - 同目标 FIFO、跨目标进度、慢 native ACK、取消／重试 fence 及一次 source 的 fan-out 均保持幂等。
-- 延迟客户端就绪后自动出队；HTTP Steer、自动追加与自然 next-work 均走真实产品装配。确认接纳后清理对应 Queue work；明确未接纳恢复原输入下一轮，仍未知则保留可追溯的核对责任，不伪造完成。
+- 延迟客户端就绪后自动出队；HTTP Steer、自动追加与自然 next-work 均走真实产品装配。交接即清理对应 Queue target；当场明确未接纳原子安排下一轮，仍未知或 native 未完成均留 History 核对，不伪造完成。
 - 普通会话的最后真人点名不因时间、消息条数、成员忙碌或 A2A 变化而丢失；刚入队的新点名立即参与选择，旧输入晚投递不覆盖它；实际不可用改投时预览有可见说明。
-- 未知追加先核对原 ID，核对中无操作按钮；明确新发保留原回执、使用新 ID、严格校验原人类作者与私密边界。迟到接纳／已读、恢复写入失败、重启及 sibling claim 均不丢责任或复活已退役目标。
+- 未知追加先核对原 ID，核对不重发正文；明确新发保留原回执、使用新 ID、严格校验当前 owner 与私密边界。迟到接纳／已读、恢复写入失败、重启及 sibling claim 均不丢责任或复活已退役目标。
 - Console 点击、原气泡归属、读取回执、刷新、Stop／恢复与成员交接覆盖实际使用；provider 能力结论只覆盖真实验证的配置。
 - 故障与重启只收敛原 owner，不删除用户数据、不复制失败结果、不自动恢复已终局工单。
 
@@ -163,7 +165,7 @@ provider 自发 task/channel/peer 通知的 result 不能在缺少对应输入�
 
 ## Delivery Status
 
-实现已进入 fork；运行验收与持续观察属于发布状态，不能由这份规范自行宣告完成。上游 #1398 的 Draft／review／merge 状态以 GitHub 和维护者决策为准。
+本规范描述当前源码契约。安装版本是否包含对应修复，以其公开提交和发布记录为准；文档本身不签运行验收，也不重新关闭或打开 F117。
 
 ## Code Anchors
 
@@ -171,6 +173,6 @@ provider 自发 task/channel/peer 通知的 result 不能在缺少对应输入�
 - `packages/api/src/domains/cats/services/agents/invocation/QueueProcessor.ts`：唯一 drain、追加、ready、Steer、Stop 与执行。
 - `packages/api/src/domains/cats/services/agents/invocation/PersistedQueueDelivery.ts`：外部持久投递适配。
 - `packages/api/src/domains/cats/services/agents/routing/AgentRouter.ts`、`last-user-mentions.ts`：普通 fallback、最后真人点名与 exact recipient 解析。
-- `packages/api/src/domains/cats/services/stores/lifecycle-append-recovery.ts`：source／response／Queue 的追加恢复准备与并发守卫。
+- `packages/api/src/domains/cats/services/stores/lifecycle-append-recovery.ts`：source／response History 的追加恢复准备与并发守卫；`lifecycle-append-state.ts` 与 `redis/redis-lifecycle-append-index.ts`：同一持久事实的派生状态与未完成索引。
 - `packages/api/src/domains/cats/services/agents/invocation/repeat-uncertain-append.ts`：严格原作者的新输入；`queue-routing-recovery-policy.ts`：当前资格校验。
 - `packages/shared/src/types/message-lifecycle.ts`：source／response／dispatchRef 与 optional read receipt。

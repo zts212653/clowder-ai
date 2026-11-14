@@ -10,6 +10,10 @@ const { createCompanionPipe } = require('./companion-pipe.cjs');
 const { createAppAssistOwnerPipe } = require('./app-assist-pipe.cjs');
 const { createAppAssistHost } = require('./app-assist-host.cjs');
 const { createNativeAppAssistSource } = require('./app-assist-source.cjs');
+const { createDeskOwnerPipe } = require('./desk-pipe.cjs');
+const { createDeskDeliveryHost } = require('./desk-delivery-host.cjs');
+const { companionContractHas } = require('./companion-contracts.cjs');
+const { createUserActivity } = require('./user-activity.cjs');
 const { prepareWindowResources } = require('./preload-bundle.cjs');
 const { configureCompanionAppIdentity } = require('./app-identity.cjs');
 const { createExecutorStdio } = require('./executor-stdio.cjs');
@@ -21,6 +25,10 @@ let companion;
 let appAssist;
 let appAssistOwner;
 let appAssistClosed = Promise.resolve();
+// F335 交付三：desk delivery (Host-private presence + the desk owner pipe to the API).
+let desk;
+let deskOwner;
+let deskActivity;
 const stdio = createExecutorStdio(process.stdout, process.stderr, quit);
 const stage = (value) => {
   if (!ended) stdio.diagnostic(`[desktop-stage] ${value}\n`);
@@ -40,12 +48,16 @@ let buffer = Buffer.alloc(0);
 let queue = Promise.resolve();
 companion = createCompanionPipe((frame, callback) => stdio.write(frame, callback));
 appAssistOwner = createAppAssistOwnerPipe((frame, callback) => stdio.write(frame, callback));
+deskOwner = createDeskOwnerPipe((frame, callback) => stdio.write(frame, callback));
 function finish() {
   if (ended) return false;
   ended = true;
   stdio.close();
   companion?.close();
   appAssistOwner?.close();
+  deskActivity?.stop();
+  desk?.close();
+  deskOwner?.close();
   appAssistClosed = appAssist?.close() ?? Promise.resolve();
   window?.close();
   return true;
@@ -88,10 +100,24 @@ async function handle(message) {
         validateReply: loadedContract.appAssistReplyValidator(message.params.companionContract),
         selfBundleIds: ['ai.clowderai.desktop', 'com.github.Electron'],
       });
+    if (message.params.desk === true) {
+      // The API grants the desk only for a desk-capable archive; the kernel checks that against its own table.
+      if (!companionContractHas(message.params.companionContract, 'desk')) throw new Error('Protocol');
+      desk = createDeskDeliveryHost({
+        owner: deskOwner,
+        activity: { presence: () => deskActivity?.presence() ?? 'unknown' },
+      });
+      deskActivity = createUserActivity({
+        powerMonitor: electron.powerMonitor,
+        onChange: (change) => desk?.presenceChanged(change),
+      });
+      deskActivity.start();
+    }
     stage('contract-ready');
-    const { appAssist: _appAssistCapability, ...windowInput } = message.params;
+    const { appAssist: _appAssistCapability, desk: _deskCapability, ...windowInput } = message.params;
     const opened = await createManagedWindow(electron, windowInput, {
       ...(appAssist ? { appAssist } : {}),
+      ...(desk ? { desk } : {}),
       voiceResources: prepareWindowResources(profile),
       onFailure: (reason) => {
         if (!ended) stdio.diagnostic(`[desktop-runtime] ${reason}\n`);
@@ -120,7 +146,9 @@ async function handle(message) {
   } else {
     if (
       !window ||
-      !['poll', 'show', 'close', 'navigate', 'revoke-media', 'app-assist-policy'].includes(message.method) ||
+      !['poll', 'show', 'close', 'navigate', 'revoke-media', 'app-assist-policy', 'desk-changed'].includes(
+        message.method,
+      ) ||
       (!['navigate', 'app-assist-policy'].includes(message.method) && message.params !== null)
     )
       throw new Error('Protocol');
@@ -128,6 +156,7 @@ async function handle(message) {
     if (message.method === 'show') window.show();
     if (message.method === 'revoke-media') await window.revokeMedia();
     if (message.method === 'navigate') await window.navigate(message.params);
+    if (message.method === 'desk-changed') desk?.changed();
     if (message.method === 'app-assist-policy') {
       if (
         !appAssist ||
@@ -163,6 +192,10 @@ process.stdin.on('data', (chunk) => {
       const message = JSON.parse(line.toString('utf8'));
       if (message.type === 'app_assist') {
         appAssistOwner.accept(message);
+        continue;
+      }
+      if (message.type === 'desk') {
+        deskOwner.accept(message);
         continue;
       }
       if (message.type === 'companion') {

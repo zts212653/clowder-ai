@@ -133,6 +133,7 @@ describe('F321 Event owner lifecycle', () => {
         {
           label: 'Event source',
           occurredAt: 90,
+          speaker: '你',
           canOpen: true,
           threadId: 'thread-event-source',
           messageId: 'message-event-source',

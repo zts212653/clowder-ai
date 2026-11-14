@@ -54,10 +54,11 @@ export async function openReviewPanel(page, panel) {
   const drawer = page.getByRole('complementary', { name: target.landmark, exact: true });
   if (await drawer.isVisible()) return;
   if (panel === 'comments' && (await isImageReview(page))) {
-    const menu = page.getByLabel('图片更多操作', { exact: true });
-    if (!(await menu.evaluate((element) => element.parentElement.open))) await menu.click();
+    await page.getByRole('button', { name: '作品更多操作', exact: true }).click();
+    await page.getByRole('menuitem', { name: target.button, exact: true }).click();
+  } else {
+    await page.getByRole('button', { name: target.button, exact: typeof target.button === 'string' }).click();
   }
-  await page.getByRole('button', { name: target.button, exact: typeof target.button === 'string' }).click();
   await drawer.waitFor();
 }
 

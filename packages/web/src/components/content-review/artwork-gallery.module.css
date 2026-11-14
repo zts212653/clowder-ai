@@ -10,7 +10,7 @@
   background: var(--cafe-surface);
   --chat-background-role: cafe;
   color: var(--cafe-text);
-  font-size: 30px;
+  font-size: var(--console-font-3xl);
   line-height: 1;
   box-shadow: 0 3px 14px #0003;
 }
@@ -57,7 +57,7 @@
   position: absolute;
   border-radius: 8px;
   padding: 1px 5px;
-  font-size: 10px;
+  font-size: var(--console-font-micro);
   background: #000a;
   color: white;
 }
@@ -74,7 +74,7 @@
   .arrow {
     width: 30px;
     height: 30px;
-    font-size: 24px;
+    font-size: var(--console-font-2xl);
   }
   .previous {
     left: 1px;
@@ -131,12 +131,12 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 12px;
+  font-size: var(--console-font-xs);
   color: var(--cafe-text-muted);
 }
 .summary {
   max-width: 9rem;
-  font-size: 10px;
+  font-size: var(--console-font-micro);
   line-height: 1.2;
   color: var(--cafe-text-muted);
 }

@@ -91,7 +91,8 @@ function summary(proposal: ScheduleMutationProposal): string {
   if (proposal.mutation.kind === 'create') {
     return `Create schedule: ${proposal.mutation.task.display.label}`;
   }
-  return `Delete schedule: ${proposal.mutation.taskSnapshot.display.label}`;
+  const verb = proposal.mutation.kind === 'update' ? 'Update' : 'Delete';
+  return `${verb} schedule: ${proposal.mutation.taskSnapshot.display.label}`;
 }
 
 function detail(proposal: ScheduleMutationProposal): Record<string, unknown> {
@@ -105,10 +106,13 @@ function detail(proposal: ScheduleMutationProposal): Record<string, unknown> {
     };
   }
   return {
-    mutationKind: 'delete',
+    mutationKind: proposal.mutation.kind,
     taskId: proposal.mutation.taskId,
     expectedFingerprint: proposal.mutation.expectedFingerprint,
     trigger: proposal.mutation.taskSnapshot.trigger,
     deliveryThreadId: proposal.mutation.taskSnapshot.deliveryThreadId,
+    ...(proposal.mutation.kind === 'update'
+      ? { previousParams: proposal.mutation.taskSnapshot.params, params: proposal.mutation.params }
+      : {}),
   };
 }

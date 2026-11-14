@@ -1,0 +1,1002 @@
+{
+  "source": "cb70a3ecf1e31cbaedab40bcb4611ea32e8b1ee6",
+  "browser": "157.0.4341.42",
+  "entry": "http://127.0.0.1:4177/ production ChatInput component host; API/submission fixtures",
+  "method": "Native Windows SendInput scan codes for ASCII pinyin, Space, Escape and Ctrl+Z/Ctrl+Y; no Chinese paste or DOM/CDP composition injection",
+  "startedAt": "2026-11-09T07:12:24.161Z",
+  "desktop": "Default",
+  "results": [
+    {
+      "classic": true,
+      "name": "tail-confirm",
+      "keyboard": {
+        "layout": 134481924
+      },
+      "during": {
+        "value": "https://example.com/abCDzhongwen 说明",
+        "start": 32,
+        "end": 32,
+        "mirrorActive": null,
+        "textColor": "oklch(0.2 0.005 30)",
+        "ranges": [],
+        "events": [
+          {
+            "type": "keydown",
+            "key": "Process",
+            "isTrusted": true,
+            "isComposing": false,
+            "value": "https://example.com/abCD 说明",
+            "start": 24,
+            "end": 24
+          },
+          {
+            "type": "compositionstart",
+            "data": "",
+            "isTrusted": true,
+            "value": "https://example.com/abCD 说明",
+            "start": 24,
+            "end": 24
+          },
+          {
+            "type": "compositionupdate",
+            "data": "z",
+            "isTrusted": true,
+            "value": "https://example.com/abCD 说明",
+            "start": 24,
+            "end": 24
+          },
+          {
+            "type": "beforeinput",
+            "data": "z",
+            "isTrusted": true,
+            "isComposing": true,
+            "inputType": "insertCompositionText",
+            "value": "https://example.com/abCD 说明",
+            "start": 24,
+            "end": 24
+          },
+          {
+            "type": "input",
+            "data": "z",
+            "isTrusted": true,
+            "isComposing": true,
+            "inputType": "insertCompositionText",
+            "value": "https://example.com/abCDz 说明",
+            "start": 25,
+            "end": 25
+          },
+          {
+            "type": "keyup",
+            "key": "Process",
+            "isTrusted": true,
+            "isComposing": true,
+            "value": "https://example.com/abCDz 说明",
+            "start": 25,
+            "end": 25
+          },
+          {
+            "type": "keyup",
+            "key": "z",
+            "isTrusted": true,
+            "isComposing": true,
+            "value": "https://example.com/abCDz 说明",
+            "start": 25,
+            "end": 25
+          },
+          {
+            "type": "keydown",
+            "key": "Process",
+            "isTrusted": true,
+            "isComposing": true,
+            "value": "https://example.com/abCDz 说明",
+            "start": 25,
+            "end": 25
+          },
+          {
+            "type": "compositionupdate",
+            "data": "zh",
+            "isTrusted": true,
+            "value": "https://example.com/abCDz 说明",
+            "start": 24,
+            "end": 25
+          },
+          {
+            "type": "beforeinput",
+            "data": "zh",
+            "isTrusted": true,
+            "isComposing": true,
+            "inputType": "insertCompositionText",
+            "value": "https://example.com/abCDz 说明",
+            "start": 24,
+            "end": 25
+          },
+          {
+            "type": "input",
+            "data": "zh",
+            "isTrusted": true,
+            "isComposing": true,
+            "inputType": "insertCompositionText",
+            "value": "https://example.com/abCDzh 说明",
+            "start": 26,
+            "end": 26
+          },
+          {
+            "type": "keyup",
+            "key": "Process",
+            "isTrusted": true,
+            "isComposing": true,
+            "value": "https://example.com/abCDzh 说明",
+            "start": 26,
+            "end": 26
+          },
+          {
+            "type": "keyup",
+            "key": "h",
+            "isTrusted": true,
+            "isComposing": true,
+            "value": "https://example.com/abCDzh 说明",
+            "start": 26,
+            "end": 26
+          },
+          {
+            "type": "keydown",
+            "key": "Process",
+            "isTrusted": true,
+            "isComposing": true,
+            "value": "https://example.com/abCDzh 说明",
+            "start": 26,
+            "end": 26
+          },
+          {
+            "type": "compositionupdate",
+            "data": "zho",
+            "isTrusted": true,
+            "value": "https://example.com/abCDzh 说明",
+            "start": 24,
+            "end": 26
+          },
+          {
+            "type": "beforeinput",
+            "data": "zho",
+            "isTrusted": true,
+            "isComposing": true,
+            "inputType": "insertCompositionText",
+            "value": "https://example.com/abCDzh 说明",
+            "start": 24,
+            "end": 26
+          },
+          {
+            "type": "input",
+            "data": "zho",
+            "isTrusted": true,
+            "isComposing": true,
+            "inputType": "insertCompositionText",
+            "value": "https://example.com/abCDzho 说明",
+            "start": 27,
+            "end": 27
+          },
+          {
+            "type": "keyup",
+            "key": "Process",
+            "isTrusted": true,
+            "isComposing": true,
+            "value": "https://example.com/abCDzho 说明",
+            "start": 27,
+            "end": 27
+          },
+          {
+            "type": "keyup",
+            "key": "o",
+            "isTrusted": true,
+            "isComposing": true,
+            "value": "https://example.com/abCDzho 说明",
+            "start": 27,
+            "end": 27
+          },
+          {
+            "type": "keydown",
+            "key": "Process",
+            "isTrusted": true,
+            "isComposing": true,
+            "value": "https://example.com/abCDzho 说明",
+            "start": 27,
+            "end": 27
+          },
+          {
+            "type": "compositionupdate",
+            "data": "zhon",
+            "isTrusted": true,
+            "value": "https://example.com/abCDzho 说明",
+            "start": 24,
+            "end": 27
+          },
+          {
+            "type": "beforeinput",
+            "data": "zhon",
+            "isTrusted": true,
+            "isComposing": true,
+            "inputType": "insertCompositionText",
+            "value": "https://example.com/abCDzho 说明",
+            "start": 24,
+            "end": 27
+          },
+          {
+            "type": "input",
+            "data": "zhon",
+            "isTrusted": true,
+            "isComposing": true,
+            "inputType": "insertCompositionText",
+            "value": "https://example.com/abCDzhon 说明",
+            "start": 28,
+            "end": 28
+          },
+          {
+            "type": "keyup",
+            "key": "Process",
+            "isTrusted": true,
+            "isComposing": true,
+            "value": "https://example.com/abCDzhon 说明",
+            "start": 28,
+            "end": 28
+          },
+          {
+            "type": "keyup",
+            "key": "n",
+            "isTrusted": true,
+            "isComposing": true,
+            "value": "https://example.com/abCDzhon 说明",
+            "start": 28,
+            "end": 28
+          },
+          {
+            "type": "keydown",
+            "key": "Process",
+            "isTrusted": true,
+            "isComposing": true,
+            "value": "https://example.com/abCDzhon 说明",
+            "start": 28,
+            "end": 28
+          },
+          {
+            "type": "compositionupdate",
+            "data": "zhong",
+            "isTrusted": true,
+            "value": "https://example.com/abCDzhon 说明",
+            "start": 24,
+            "end": 28
+          },
+          {
+            "type": "beforeinput",
+            "data": "zhong",
+            "isTrusted": true,
+            "isComposing": true,
+            "inputType": "insertCompositionText",
+            "value": "https://example.com/abCDzhon 说明",
+            "start": 24,
+            "end": 28
+          },
+          {
+            "type": "input",
+            "data": "zhong",
+            "isTrusted": true,
+            "isComposing": true,
+            "inputType": "insertCompositionText",
+            "value": "https://example.com/abCDzhong 说明",
+            "start": 29,
+            "end": 29
+          },
+          {
+            "type": "keyup",
+            "key": "Process",
+            "isTrusted": true,
+            "isComposing": true,
+            "value": "https://example.com/abCDzhong 说明",
+            "start": 29,
+            "end": 29
+          },
+          {
+            "type": "keyup",
+            "key": "g",
+            "isTrusted": true,
+            "isComposing": true,
+            "value": "https://example.com/abCDzhong 说明",
+            "start": 29,
+            "end": 29
+          },
+          {
+            "type": "keydown",
+            "key": "Process",
+            "isTrusted": true,
+            "isComposing": true,
+            "value": "https://example.com/abCDzhong 说明",
+            "start": 29,
+            "end": 29
+          },
+          {
+            "type": "compositionupdate",
+            "data": "zhongw",
+            "isTrusted": true,
+            "value": "https://example.com/abCDzhong 说明",
+            "start": 24,
+            "end": 29
+          },
+          {
+            "type": "beforeinput",
+            "data": "zhongw",
+            "isTrusted": true,
+            "isComposing": true,
+            "inputType": "insertCompositionText",
+            "value": "https://example.com/abCDzhong 说明",
+            "start": 24,
+            "end": 29
+          },
+          {
+            "type": "input",
+            "data": "zhongw",
+            "isTrusted": true,
+            "isComposing": true,
+            "inputType": "insertCompositionText",
+            "value": "https://example.com/abCDzhongw 说明",
+            "start": 30,
+            "end": 30
+          },
+          {
+            "type": "keyup",
+            "key": "Process",
+            "isTrusted": true,
+            "isComposing": true,
+            "value": "https://example.com/abCDzhongw 说明",
+            "start": 30,
+            "end": 30
+          },
+          {
+            "type": "keyup",
+            "key": "w",
+            "isTrusted": true,
+            "isComposing": true,
+            "value": "https://example.com/abCDzhongw 说明",
+            "start": 30,
+            "end": 30
+          },
+          {
+            "type": "keydown",
+            "key": "Process",
+            "isTrusted": true,
+            "isComposing": true,
+            "value": "https://example.com/abCDzhongw 说明",
+            "start": 30,
+            "end": 30
+          },
+          {
+            "type": "compositionupdate",
+            "data": "zhongwe",
+            "isTrusted": true,
+            "value": "https://example.com/abCDzhongw 说明",
+            "start": 24,
+            "end": 30
+          },
+          {
+            "type": "beforeinput",
+            "data": "zhongwe",
+            "isTrusted": true,
+            "isComposing": true,
+            "inputType": "insertCompositionText",
+            "value": "https://example.com/abCDzhongw 说明",
+            "start": 24,
+            "end": 30
+          },
+          {
+            "type": "input",
+            "data": "zhongwe",
+            "isTrusted": true,
+            "isComposing": true,
+            "inputType": "insertCompositionText",
+            "value": "https://example.com/abCDzhongwe 说明",
+            "start": 31,
+            "end": 31
+          },
+          {
+            "type": "keyup",
+            "key": "Process",
+            "isTrusted": true,
+            "isComposing": true,
+            "value": "https://example.com/abCDzhongwe 说明",
+            "start": 31,
+            "end": 31
+          },
+          {
+            "type": "keyup",
+            "key": "e",
+            "isTrusted": true,
+            "isComposing": true,
+            "value": "https://example.com/abCDzhongwe 说明",
+            "start": 31,
+            "end": 31
+          },
+          {
+            "type": "keydown",
+            "key": "Process",
+            "isTrusted": true,
+            "isComposing": true,
+            "value": "https://example.com/abCDzhongwe 说明",
+            "start": 31,
+            "end": 31
+          },
+          {
+            "type": "compositionupdate",
+            "data": "zhongwen",
+            "isTrusted": true,
+            "value": "https://example.com/abCDzhongwe 说明",
+            "start": 24,
+            "end": 31
+          },
+          {
+            "type": "beforeinput",
+            "data": "zhongwen",
+            "isTrusted": true,
+            "isComposing": true,
+            "inputType": "insertCompositionText",
+            "value": "https://example.com/abCDzhongwe 说明",
+            "start": 24,
+            "end": 31
+          },
+          {
+            "type": "input",
+            "data": "zhongwen",
+            "isTrusted": true,
+            "isComposing": true,
+            "inputType": "insertCompositionText",
+            "value": "https://example.com/abCDzhongwen 说明",
+            "start": 32,
+            "end": 32
+          },
+          {
+            "type": "keyup",
+            "key": "Process",
+            "isTrusted": true,
+            "isComposing": true,
+            "value": "https://example.com/abCDzhongwen 说明",
+            "start": 32,
+            "end": 32
+          },
+          {
+            "type": "keyup",
+            "key": "n",
+            "isTrusted": true,
+            "isComposing": true,
+            "value": "https://example.com/abCDzhongwen 说明",
+            "start": 32,
+            "end": 32
+          }
+        ]
+      },
+      "after": {
+        "value": "https://example.com/abCD中文 说明",
+        "start": 26,
+        "end": 26,
+        "mirrorActive": null,
+        "textColor": "oklch(0.2 0.005 30)",
+        "ranges": [],
+        "events": [
+          {
+            "type": "keydown",
+            "key": "Process",
+            "isTrusted": true,
+            "isComposing": false,
+            "value": "https://example.com/abCD 说明",
+            "start": 24,
+            "end": 24
+          },
+          {
+            "type": "compositionstart",
+            "data": "",
+            "isTrusted": true,
+            "value": "https://example.com/abCD 说明",
+            "start": 24,
+            "end": 24
+          },
+          {
+            "type": "compositionupdate",
+            "data": "z",
+            "isTrusted": true,
+            "value": "https://example.com/abCD 说明",
+            "start": 24,
+            "end": 24
+          },
+          {
+            "type": "beforeinput",
+            "data": "z",
+            "isTrusted": true,
+            "isComposing": true,
+            "inputType": "insertCompositionText",
+            "value": "https://example.com/abCD 说明",
+            "start": 24,
+            "end": 24
+          },
+          {
+            "type": "input",
+            "data": "z",
+            "isTrusted": true,
+            "isComposing": true,
+            "inputType": "insertCompositionText",
+            "value": "https://example.com/abCDz 说明",
+            "start": 25,
+            "end": 25
+          },
+          {
+            "type": "keyup",
+            "key": "Process",
+            "isTrusted": true,
+            "isComposing": true,
+            "value": "https://example.com/abCDz 说明",
+            "start": 25,
+            "end": 25
+          },
+          {
+            "type": "keyup",
+            "key": "z",
+            "isTrusted": true,
+            "isComposing": true,
+            "value": "https://example.com/abCDz 说明",
+            "start": 25,
+            "end": 25
+          },
+          {
+            "type": "keydown",
+            "key": "Process",
+            "isTrusted": true,
+            "isComposing": true,
+            "value": "https://example.com/abCDz 说明",
+            "start": 25,
+            "end": 25
+          },
+          {
+            "type": "compositionupdate",
+            "data": "zh",
+            "isTrusted": true,
+            "value": "https://example.com/abCDz 说明",
+            "start": 24,
+            "end": 25
+          },
+          {
+            "type": "beforeinput",
+            "data": "zh",
+            "isTrusted": true,
+            "isComposing": true,
+            "inputType": "insertCompositionText",
+            "value": "https://example.com/abCDz 说明",
+            "start": 24,
+            "end": 25
+          },
+          {
+            "type": "input",
+            "data": "zh",
+            "isTrusted": true,
+            "isComposing": true,
+            "inputType": "insertCompositionText",
+            "value": "https://example.com/abCDzh 说明",
+            "start": 26,
+            "end": 26
+          },
+          {
+            "type": "keyup",
+            "key": "Process",
+            "isTrusted": true,
+            "isComposing": true,
+            "value": "https://example.com/abCDzh 说明",
+            "start": 26,
+            "end": 26
+          },
+          {
+            "type": "keyup",
+            "key": "h",
+            "isTrusted": true,
+            "isComposing": true,
+            "value": "https://example.com/abCDzh 说明",
+            "start": 26,
+            "end": 26
+          },
+          {
+            "type": "keydown",
+            "key": "Process",
+            "isTrusted": true,
+            "isComposing": true,
+            "value": "https://example.com/abCDzh 说明",
+            "start": 26,
+            "end": 26
+          },
+          {
+            "type": "compositionupdate",
+            "data": "zho",
+            "isTrusted": true,
+            "value": "https://example.com/abCDzh 说明",
+            "start": 24,
+            "end": 26
+          },
+          {
+            "type": "beforeinput",
+            "data": "zho",
+            "isTrusted": true,
+            "isComposing": true,
+            "inputType": "insertCompositionText",
+            "value": "https://example.com/abCDzh 说明",
+            "start": 24,
+            "end": 26
+          },
+          {
+            "type": "input",
+            "data": "zho",
+            "isTrusted": true,
+            "isComposing": true,
+            "inputType": "insertCompositionText",
+            "value": "https://example.com/abCDzho 说明",
+            "start": 27,
+            "end": 27
+          },
+          {
+            "type": "keyup",
+            "key": "Process",
+            "isTrusted": true,
+            "isComposing": true,
+            "value": "https://example.com/abCDzho 说明",
+            "start": 27,
+            "end": 27
+          },
+          {
+            "type": "keyup",
+            "key": "o",
+            "isTrusted": true,
+            "isComposing": true,
+            "value": "https://example.com/abCDzho 说明",
+            "start": 27,
+            "end": 27
+          },
+          {
+            "type": "keydown",
+            "key": "Process",
+            "isTrusted": true,
+            "isComposing": true,
+            "value": "https://example.com/abCDzho 说明",
+            "start": 27,
+            "end": 27
+          },
+          {
+            "type": "compositionupdate",
+            "data": "zhon",
+            "isTrusted": true,
+            "value": "https://example.com/abCDzho 说明",
+            "start": 24,
+            "end": 27
+          },
+          {
+            "type": "beforeinput",
+            "data": "zhon",
+            "isTrusted": true,
+            "isComposing": true,
+            "inputType": "insertCompositionText",
+            "value": "https://example.com/abCDzho 说明",
+            "start": 24,
+            "end": 27
+          },
+          {
+            "type": "input",
+            "data": "zhon",
+            "isTrusted": true,
+            "isComposing": true,
+            "inputType": "insertCompositionText",
+            "value": "https://example.com/abCDzhon 说明",
+            "start": 28,
+            "end": 28
+          },
+          {
+            "type": "keyup",
+            "key": "Process",
+            "isTrusted": true,
+            "isComposing": true,
+            "value": "https://example.com/abCDzhon 说明",
+            "start": 28,
+            "end": 28
+          },
+          {
+            "type": "keyup",
+            "key": "n",
+            "isTrusted": true,
+            "isComposing": true,
+            "value": "https://example.com/abCDzhon 说明",
+            "start": 28,
+            "end": 28
+          },
+          {
+            "type": "keydown",
+            "key": "Process",
+            "isTrusted": true,
+            "isComposing": true,
+            "value": "https://example.com/abCDzhon 说明",
+            "start": 28,
+            "end": 28
+          },
+          {
+            "type": "compositionupdate",
+            "data": "zhong",
+            "isTrusted": true,
+            "value": "https://example.com/abCDzhon 说明",
+            "start": 24,
+            "end": 28
+          },
+          {
+            "type": "beforeinput",
+            "data": "zhong",
+            "isTrusted": true,
+            "isComposing": true,
+            "inputType": "insertCompositionText",
+            "value": "https://example.com/abCDzhon 说明",
+            "start": 24,
+            "end": 28
+          },
+          {
+            "type": "input",
+            "data": "zhong",
+            "isTrusted": true,
+            "isComposing": true,
+            "inputType": "insertCompositionText",
+            "value": "https://example.com/abCDzhong 说明",
+            "start": 29,
+            "end": 29
+          },
+          {
+            "type": "keyup",
+            "key": "Process",
+            "isTrusted": true,
+            "isComposing": true,
+            "value": "https://example.com/abCDzhong 说明",
+            "start": 29,
+            "end": 29
+          },
+          {
+            "type": "keyup",
+            "key": "g",
+            "isTrusted": true,
+            "isComposing": true,
+            "value": "https://example.com/abCDzhong 说明",
+            "start": 29,
+            "end": 29
+          },
+          {
+            "type": "keydown",
+            "key": "Process",
+            "isTrusted": true,
+            "isComposing": true,
+            "value": "https://example.com/abCDzhong 说明",
+            "start": 29,
+            "end": 29
+          },
+          {
+            "type": "compositionupdate",
+            "data": "zhongw",
+            "isTrusted": true,
+            "value": "https://example.com/abCDzhong 说明",
+            "start": 24,
+            "end": 29
+          },
+          {
+            "type": "beforeinput",
+            "data": "zhongw",
+            "isTrusted": true,
+            "isComposing": true,
+            "inputType": "insertCompositionText",
+            "value": "https://example.com/abCDzhong 说明",
+            "start": 24,
+            "end": 29
+          },
+          {
+            "type": "input",
+            "data": "zhongw",
+            "isTrusted": true,
+            "isComposing": true,
+            "inputType": "insertCompositionText",
+            "value": "https://example.com/abCDzhongw 说明",
+            "start": 30,
+            "end": 30
+          },
+          {
+            "type": "keyup",
+            "key": "Process",
+            "isTrusted": true,
+            "isComposing": true,
+            "value": "https://example.com/abCDzhongw 说明",
+            "start": 30,
+            "end": 30
+          },
+          {
+            "type": "keyup",
+            "key": "w",
+            "isTrusted": true,
+            "isComposing": true,
+            "value": "https://example.com/abCDzhongw 说明",
+            "start": 30,
+            "end": 30
+          },
+          {
+            "type": "keydown",
+            "key": "Process",
+            "isTrusted": true,
+            "isComposing": true,
+            "value": "https://example.com/abCDzhongw 说明",
+            "start": 30,
+            "end": 30
+          },
+          {
+            "type": "compositionupdate",
+            "data": "zhongwe",
+            "isTrusted": true,
+            "value": "https://example.com/abCDzhongw 说明",
+            "start": 24,
+            "end": 30
+          },
+          {
+            "type": "beforeinput",
+            "data": "zhongwe",
+            "isTrusted": true,
+            "isComposing": true,
+            "inputType": "insertCompositionText",
+            "value": "https://example.com/abCDzhongw 说明",
+            "start": 24,
+            "end": 30
+          },
+          {
+            "type": "input",
+            "data": "zhongwe",
+            "isTrusted": true,
+            "isComposing": true,
+            "inputType": "insertCompositionText",
+            "value": "https://example.com/abCDzhongwe 说明",
+            "start": 31,
+            "end": 31
+          },
+          {
+            "type": "keyup",
+            "key": "Process",
+            "isTrusted": true,
+            "isComposing": true,
+            "value": "https://example.com/abCDzhongwe 说明",
+            "start": 31,
+            "end": 31
+          },
+          {
+            "type": "keyup",
+            "key": "e",
+            "isTrusted": true,
+            "isComposing": true,
+            "value": "https://example.com/abCDzhongwe 说明",
+            "start": 31,
+            "end": 31
+          },
+          {
+            "type": "keydown",
+            "key": "Process",
+            "isTrusted": true,
+            "isComposing": true,
+            "value": "https://example.com/abCDzhongwe 说明",
+            "start": 31,
+            "end": 31
+          },
+          {
+            "type": "compositionupdate",
+            "data": "zhongwen",
+            "isTrusted": true,
+            "value": "https://example.com/abCDzhongwe 说明",
+            "start": 24,
+            "end": 31
+          },
+          {
+            "type": "beforeinput",
+            "data": "zhongwen",
+            "isTrusted": true,
+            "isComposing": true,
+            "inputType": "insertCompositionText",
+            "value": "https://example.com/abCDzhongwe 说明",
+            "start": 24,
+            "end": 31
+          },
+          {
+            "type": "input",
+            "data": "zhongwen",
+            "isTrusted": true,
+            "isComposing": true,
+            "inputType": "insertCompositionText",
+            "value": "https://example.com/abCDzhongwen 说明",
+            "start": 32,
+            "end": 32
+          },
+          {
+            "type": "keyup",
+            "key": "Process",
+            "isTrusted": true,
+            "isComposing": true,
+            "value": "https://example.com/abCDzhongwen 说明",
+            "start": 32,
+            "end": 32
+          },
+          {
+            "type": "keyup",
+            "key": "n",
+            "isTrusted": true,
+            "isComposing": true,
+            "value": "https://example.com/abCDzhongwen 说明",
+            "start": 32,
+            "end": 32
+          },
+          {
+            "type": "keydown",
+            "key": "Process",
+            "isTrusted": true,
+            "isComposing": true,
+            "value": "https://example.com/abCDzhongwen 说明",
+            "start": 32,
+            "end": 32
+          },
+          {
+            "type": "compositionupdate",
+            "data": "中文",
+            "isTrusted": true,
+            "value": "https://example.com/abCDzhongwen 说明",
+            "start": 24,
+            "end": 32
+          },
+          {
+            "type": "beforeinput",
+            "data": "中文",
+            "isTrusted": true,
+            "isComposing": true,
+            "inputType": "insertCompositionText",
+            "value": "https://example.com/abCDzhongwen 说明",
+            "start": 24,
+            "end": 32
+          },
+          {
+            "type": "input",
+            "data": "中文",
+            "isTrusted": true,
+            "isComposing": true,
+            "inputType": "insertCompositionText",
+            "value": "https://example.com/abCD中文 说明",
+            "start": 26,
+            "end": 26
+          },
+          {
+            "type": "compositionend",
+            "data": "中文",
+            "isTrusted": false,
+            "value": "https://example.com/abCD中文 说明",
+            "start": 26,
+            "end": 26
+          },
+          {
+            "type": "keyup",
+            "key": "Process",
+            "isTrusted": true,
+            "isComposing": false,
+            "value": "https://example.com/abCD中文 说明",
+            "start": 26,
+            "end": 26
+          },
+          {
+            "type": "keyup",
+            "key": " ",
+            "isTrusted": true,
+            "isComposing": false,
+            "value": "https://example.com/abCD中文 说明",
+            "start": 26,
+            "end": 26
+          }
+        ]
+      },
+      "pass": true
+    }
+  ],
+  "error": "Error: Native bridge exited 1\n    at ChildProcess.<anonymous> (file:///C:/Users/Administrator/AppData/Local/Clowder%20AI/project/workspace/issue1863-input-plan-20261105/windows-native-ime.mjs:22:54)\n    at ChildProcess.emit (node:events:509:28)\n    at ChildProcess._handle.onexit (node:internal/child_process:295:12)",
+  "finishedAt": "2026-11-09T07:12:37.009Z",
+  "restore": {
+    "bridgeExited": 1
+  }
+}

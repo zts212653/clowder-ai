@@ -1,0 +1,44 @@
+{
+  "version": 1,
+  "activeId": "g0",
+  "retainedIds": ["g0"],
+  "buildTargetId": "g1",
+  "generations": {
+    "g0": {
+      "recipe": null,
+      "runtime": {
+        "maxModelMemMb": 800,
+        "cacheMb": 0,
+        "retainedEndpoint": null
+      }
+    },
+    "g1": {
+      "recipe": {
+        "version": 1,
+        "modelId": "Qwen/Qwen3-Embedding-4B",
+        "modelRevision": "5cf2132abc99cad020ac570b19d031efec650f2b",
+        "modelConfigSha256": "78d2861cbbfd80eee05839200c5a3b7ed64c789f6c1cab4fbb84cc4eae33eaf5",
+        "weightsSha256": "e70bfe3c970523fb7ef4eddffed2254ce3f1e7150c3de2af4342de129dd756f8:ed1b87c8e9eb7e535a1a155e4fd00d9f4dba80e58a6db48a4c9f82cede7079c1",
+        "quantization": "none-bfloat16",
+        "tokenizerSha256": "83cdf8c3a34f68862319cb1810ee7b1e2c0a44e0864ae930194ddb76bb7feb8d",
+        "backend": "mlx-embeddings",
+        "backendVersion": "0.0.5",
+        "backendCodeSha256": "e673cdeadc9cd9bba9d48594f1be3d9a4fcd940e42bda1703c359bb087c7651a",
+        "mlxVersion": "0.31.1",
+        "queryInstruction": "Instruct: Given a web search query, retrieve relevant passages that answer the query\nQuery:",
+        "documentInstruction": "",
+        "textCharacterLimit": 8192,
+        "tokenLimit": 2048,
+        "pooling": "last-non-padding-token",
+        "nativeDim": 2560,
+        "dim": 1024,
+        "normalization": "truncate-then-l2",
+        "tokenizerConfigSha256": "2f58f4bbd7bbce15d683f525954ef3a92cd82f5e06415a9c513859bf8ab72436"
+      },
+      "runtime": {
+        "maxModelMemMb": null,
+        "cacheMb": 0
+      }
+    }
+  }
+}

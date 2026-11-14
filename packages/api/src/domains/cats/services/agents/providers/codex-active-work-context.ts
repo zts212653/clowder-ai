@@ -1,3 +1,4 @@
+import { deploymentDefaults } from '@cat-cafe/shared';
 import type { PreparedProviderRequestV1 } from '../../types.js';
 import { requireExactPreparedProviderMessage } from '../../types.js';
 import { asCodexAppServerRecord } from './CodexAppServerEventMapper.js';
@@ -32,7 +33,7 @@ export function codexActiveWorkContext(
     body: [
       'This Host invocation already has a request. It may be a conversation, review, or implementation task.',
       'After a native context-window change, recover that exact request and its latest progress before responding.',
-      'Use the available Clowder AI thread-context tools with the coordinates below; native history/notes may be unavailable.',
+      `Use the available ${deploymentDefaults.brand.name} thread-context tools with the coordinates below; native history/notes may be unavailable.`,
       'Verify current state and completed side effects before repeating work. Preserve the original scope and authorization.',
       'AGENTS.md/environment setup alone is not the current request. Do not ask for a new task merely because those are all the new window shows.',
       'These coordinates grant no new authority and never override cancellation, later user instructions, or an already completed request.',

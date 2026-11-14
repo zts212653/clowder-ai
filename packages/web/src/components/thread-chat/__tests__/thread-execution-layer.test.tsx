@@ -33,7 +33,7 @@ describe('ThreadExecutionLayer', () => {
     delete (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT;
   });
   beforeEach(() => {
-    window.localStorage.removeItem(SHELL_PRESENTATION_STORAGE_KEY);
+    writeShellPresentation('classic');
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
@@ -46,17 +46,19 @@ describe('ThreadExecutionLayer', () => {
 
   const ids = () => [...container.querySelectorAll('[data-testid]')].map((el) => el.getAttribute('data-testid'));
 
-  it('classic (and the default): the old execution bar then the queue panel, in that order, and no row', () => {
+  it('classic: the old execution bar then the queue panel, in that order, and no row', () => {
     act(() => root.render(<ThreadExecutionLayer threadId="t1" />));
     expect(ids()).toEqual(['old-execution-bar', 'old-queue-panel']);
     expect(container.querySelector('[data-testid="old-execution-bar"]')?.getAttribute('data-thread')).toBe('t1');
     expect(container.querySelector('[data-testid="old-queue-panel"]')?.getAttribute('data-thread')).toBe('t1');
   });
 
-  it('classic chosen explicitly renders exactly what the default renders', () => {
+  it('a new visit defaults to the same execution row as an explicit v2 choice', () => {
+    window.localStorage.removeItem(SHELL_PRESENTATION_STORAGE_KEY);
     act(() => root.render(<ThreadExecutionLayer threadId="t1" />));
     const byDefault = container.innerHTML;
-    act(() => writeShellPresentation('classic'));
+    expect(ids()).toEqual(['execution-row']);
+    act(() => writeShellPresentation('v2'));
     expect(container.innerHTML).toBe(byDefault);
   });
 

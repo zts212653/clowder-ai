@@ -1,18 +1,11 @@
-import { CHATGPT_CLOUD_ENTRY_LABEL } from '@cat-cafe/shared';
+import { validateManifest } from '@clowder-ai/plugin-contract';
+import manifestJson from './bundled-packages/chatgpt-dot/0.2.0-alpha.52/manifest.json' with { type: 'json' };
 
-export const CHATGPT_DOT_PLUGIN_ID = 'official.chatgpt-dot';
+const validated = validateManifest(manifestJson);
+if (!validated.valid) {
+  throw new TypeError(`Bundled plugin manifest is invalid: ${validated.errors[0]?.message ?? 'unknown error'}`);
+}
 
-export const CHATGPT_DOT_PLUGIN_MANIFEST = {
-  pluginId: CHATGPT_DOT_PLUGIN_ID,
-  version: '0.1.2',
-  contractVersion: '0.1.0',
-  name: CHATGPT_CLOUD_ENTRY_LABEL,
-  icon: { type: 'svg', src: 'assets/chatgpt-cloud.svg' },
-  description: 'Pro 与 dot 共用已连接的猫咖插件。在这里为目标 dot 准备召唤订阅，回复和原图回到原对话。',
-  features: [{ id: 'dot-connection', name: 'dot 连接', resources: [], capabilities: [] }],
-  data: [
-    { name: 'dot-connection', dataClass: 'relationship', strategy: 'retained', schemaVersion: '1' },
-    { name: 'dot-dispatch', dataClass: 'interaction-history', strategy: 'retained', schemaVersion: '1' },
-  ],
-  runtime: { transport: 'builtin' },
-} as const;
+/** Catalog projection of the manifest generated beside the exact bundled archive. */
+export const CHATGPT_DOT_PLUGIN_MANIFEST = validated.manifest;
+export const CHATGPT_DOT_PLUGIN_ID = CHATGPT_DOT_PLUGIN_MANIFEST.pluginId;

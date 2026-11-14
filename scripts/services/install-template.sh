@@ -57,8 +57,8 @@ install_service_main() {
   : "${VENV_NAME:?install-template: VENV_NAME is required}"
   : "${DISK_REQUIRED_GB:?install-template: DISK_REQUIRED_GB is required}"
   : "${MODEL_ENV_VAR:?install-template: MODEL_ENV_VAR is required}"
-  : "${PIP_DEPS_ARM64:?install-template: PIP_DEPS_ARM64 is required (empty string OK if unused)}"
-  : "${PIP_DEPS_OTHER:?install-template: PIP_DEPS_OTHER is required (empty string OK if unused)}"
+  : "${PIP_DEPS_ARM64?install-template: PIP_DEPS_ARM64 is required (empty string OK if unused)}"
+  : "${PIP_DEPS_OTHER?install-template: PIP_DEPS_OTHER is required (empty string OK if unused)}"
 
   # 0.5. Early hardware reject for REQUIRED_PYTHON_ARCH (#1061).
   if [ -n "${REQUIRED_PYTHON_ARCH:-}" ]; then

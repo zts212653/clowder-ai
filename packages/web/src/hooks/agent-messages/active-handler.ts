@@ -1,4 +1,5 @@
 import { writePersistedPost, writeStreamText, writeToolEvent } from '@/hooks/named-message-writer';
+import { admitStreamEvent } from '@/hooks/stream-position';
 import type { ToolEvent } from '@/stores/chat-types';
 import { useChatStore } from '@/stores/chatStore';
 import { type ActiveContext, activeSystemInfoPort, openThreadStore } from './active-context';
@@ -23,6 +24,8 @@ import type { AgentMsg } from './types';
  */
 export function handleActiveAgentMessage(msg: AgentMsg, ctx: ActiveContext): void {
   const threadId = msg.threadId ?? useChatStore.getState().currentThreadId;
+  // PR-3a2: one position step per numbered event, before any branch draws, hides or ignores it.
+  if (!admitStreamEvent(msg, threadId, openThreadStore)) return;
   if (msg.semanticEvent && applySemanticEvent(msg, activeSystemInfoPort(threadId, ctx))) return;
 
   switch (msg.type) {

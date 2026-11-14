@@ -362,6 +362,29 @@ test('explicit material selection uses the same Task revision and survives compl
   assert.deepEqual((await f.ownerRead.listForOwner('owner', 'completed'))[0].preparedArtifact, before);
 });
 
+test('plugin material selection emits works_changed only for a real attachment change', async () => {
+  const f = await materialFixture();
+  const changes = [];
+  const host = createPluginTaskHost({
+    ...f.deps,
+    artifactReader: f.artifactReader,
+    onTaskDataChanged: (task, reason) => changes.push({ id: task.id, ...(reason ? { reason } : {}) }),
+  });
+  const task = await host.create(f.input, { onConflict: 'update' });
+  changes.length = 0;
+  const selected = await host.update(task.id, {
+    entrustedWork: { expectedRevision: 1, artifactRefs: [f.artifactRef] },
+  });
+  assert.deepEqual(changes.at(-1), { id: task.id, reason: 'works_changed' });
+  await host.update(task.id, {
+    entrustedWork: {
+      expectedRevision: selected.entrustedWork.revision,
+      time: { businessDeadline: { value: 1900000200000, sourceRef: `message:${f.source.id}` } },
+    },
+  });
+  assert.deepEqual(changes.at(-1), { id: task.id });
+});
+
 test('closing already selected material calls the original F232 completion reader', async () => {
   const f = await materialFixture();
   const task = await f.host.create(f.input, { onConflict: 'update' });

@@ -209,10 +209,27 @@ export const entrustedWorkV1Schema = z
       .strict(),
     progress: z
       .object({
-        summary: z.string().trim().min(1).max(600),
-        nextStep: z.string().trim().min(1).max(600).optional(),
-        blockerReason: z.string().trim().min(1).max(600).optional(),
-        sourceRef: boundedRef,
+        summary: z
+          .string()
+          .trim()
+          .min(1)
+          .max(600)
+          .describe('Current progress summary; 1–600 UTF-16 code units after trimming (JavaScript string.length)'),
+        nextStep: z
+          .string()
+          .trim()
+          .min(1)
+          .max(600)
+          .optional()
+          .describe('Next step; 1–600 UTF-16 code units after trimming (JavaScript string.length)'),
+        blockerReason: z
+          .string()
+          .trim()
+          .min(1)
+          .max(600)
+          .optional()
+          .describe('Current blocker; 1–600 UTF-16 code units after trimming (JavaScript string.length)'),
+        sourceRef: boundedRef.describe('Source for this progress note; 1–1000 UTF-16 code units after trimming'),
       })
       .strict()
       .optional(),

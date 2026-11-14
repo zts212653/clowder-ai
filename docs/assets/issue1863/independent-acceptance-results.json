@@ -1,0 +1,791 @@
+{
+  "head": "2645d8f3bd24b50732409492e400fabcefd84d1b",
+  "base": "http://127.0.0.1:4174",
+  "cases": [
+    {
+      "id": "bare-cn",
+      "scope": "thread",
+      "pass": true,
+      "failures": [],
+      "marks": [
+        {
+          "text": "https://github.com/meow-club/cat-cafe-map这是链接",
+          "start": 0,
+          "end": 45
+        }
+      ],
+      "markHrefs": ["https://github.com/meow-club/cat-cafe-map%E8%BF%99%E6%98%AF%E9%93%BE%E6%8E%A5"],
+      "bubbleHrefs": ["https://github.com/meow-club/cat-cafe-map%E8%BF%99%E6%98%AF%E9%93%BE%E6%8E%A5"],
+      "mailto": [],
+      "unmapped": 0,
+      "pageErrors": []
+    },
+    {
+      "id": "bare-space",
+      "scope": "thread",
+      "pass": true,
+      "failures": [],
+      "marks": [
+        {
+          "text": "https://github.com/meow-club/cat-cafe-map",
+          "start": 0,
+          "end": 41
+        }
+      ],
+      "markHrefs": ["https://github.com/meow-club/cat-cafe-map"],
+      "bubbleHrefs": ["https://github.com/meow-club/cat-cafe-map"],
+      "mailto": [],
+      "unmapped": 0,
+      "pageErrors": []
+    },
+    {
+      "id": "bare-newline",
+      "scope": "thread",
+      "pass": true,
+      "failures": [],
+      "marks": [
+        {
+          "text": "https://github.com/meow-club/cat-cafe-map",
+          "start": 0,
+          "end": 41
+        }
+      ],
+      "markHrefs": ["https://github.com/meow-club/cat-cafe-map"],
+      "bubbleHrefs": ["https://github.com/meow-club/cat-cafe-map"],
+      "mailto": [],
+      "unmapped": 0,
+      "pageErrors": []
+    },
+    {
+      "id": "bare-cn-comma",
+      "scope": "thread",
+      "pass": true,
+      "failures": [],
+      "marks": [
+        {
+          "text": "https://github.com/meow-club/cat-cafe-map，这是说明",
+          "start": 0,
+          "end": 46
+        }
+      ],
+      "markHrefs": ["https://github.com/meow-club/cat-cafe-map%EF%BC%8C%E8%BF%99%E6%98%AF%E8%AF%B4%E6%98%8E"],
+      "bubbleHrefs": ["https://github.com/meow-club/cat-cafe-map%EF%BC%8C%E8%BF%99%E6%98%AF%E8%AF%B4%E6%98%8E"],
+      "mailto": [],
+      "unmapped": 0,
+      "pageErrors": []
+    },
+    {
+      "id": "bare-cn-period",
+      "scope": "thread",
+      "pass": true,
+      "failures": [],
+      "marks": [
+        {
+          "text": "https://github.com/meow-club/cat-cafe-map。这是说明",
+          "start": 0,
+          "end": 46
+        }
+      ],
+      "markHrefs": ["https://github.com/meow-club/cat-cafe-map%E3%80%82%E8%BF%99%E6%98%AF%E8%AF%B4%E6%98%8E"],
+      "bubbleHrefs": ["https://github.com/meow-club/cat-cafe-map%E3%80%82%E8%BF%99%E6%98%AF%E8%AF%B4%E6%98%8E"],
+      "mailto": [],
+      "unmapped": 0,
+      "pageErrors": []
+    },
+    {
+      "id": "bare-ideographic-space",
+      "scope": "thread",
+      "pass": true,
+      "failures": [],
+      "marks": [
+        {
+          "text": "https://github.com/meow-club/cat-cafe-map",
+          "start": 0,
+          "end": 41
+        }
+      ],
+      "markHrefs": ["https://github.com/meow-club/cat-cafe-map"],
+      "bubbleHrefs": ["https://github.com/meow-club/cat-cafe-map"],
+      "mailto": [],
+      "unmapped": 0,
+      "pageErrors": []
+    },
+    {
+      "id": "bare-nbsp",
+      "scope": "thread",
+      "pass": true,
+      "failures": [],
+      "marks": [
+        {
+          "text": "https://github.com/meow-club/cat-cafe-map",
+          "start": 0,
+          "end": 41
+        }
+      ],
+      "markHrefs": ["https://github.com/meow-club/cat-cafe-map"],
+      "bubbleHrefs": ["https://github.com/meow-club/cat-cafe-map"],
+      "mailto": [],
+      "unmapped": 0,
+      "pageErrors": []
+    },
+    {
+      "id": "bare-trailing-ascii-dot",
+      "scope": "thread",
+      "pass": true,
+      "failures": [],
+      "marks": [
+        {
+          "text": "https://github.com/meow-club/cat-cafe-map",
+          "start": 0,
+          "end": 41
+        }
+      ],
+      "markHrefs": ["https://github.com/meow-club/cat-cafe-map"],
+      "bubbleHrefs": ["https://github.com/meow-club/cat-cafe-map"],
+      "mailto": [],
+      "unmapped": 0,
+      "pageErrors": []
+    },
+    {
+      "id": "bare-cn-path",
+      "scope": "thread",
+      "pass": true,
+      "failures": [],
+      "marks": [
+        {
+          "text": "https://example.com/中文文档",
+          "start": 0,
+          "end": 24
+        }
+      ],
+      "markHrefs": ["https://example.com/%E4%B8%AD%E6%96%87%E6%96%87%E6%A1%A3"],
+      "bubbleHrefs": ["https://example.com/%E4%B8%AD%E6%96%87%E6%96%87%E6%A1%A3"],
+      "mailto": [],
+      "unmapped": 0,
+      "pageErrors": []
+    },
+    {
+      "id": "bare-query-cn",
+      "scope": "thread",
+      "pass": true,
+      "failures": [],
+      "marks": [
+        {
+          "text": "https://example.com/search?q=猫咪",
+          "start": 0,
+          "end": 31
+        }
+      ],
+      "markHrefs": ["https://example.com/search?q=%E7%8C%AB%E5%92%AA"],
+      "bubbleHrefs": ["https://example.com/search?q=%E7%8C%AB%E5%92%AA"],
+      "mailto": [],
+      "unmapped": 0,
+      "pageErrors": []
+    },
+    {
+      "id": "bare-query-comma",
+      "scope": "thread",
+      "pass": true,
+      "failures": [],
+      "marks": [
+        {
+          "text": "https://example.com/search?q=甲，乙",
+          "start": 0,
+          "end": 32
+        }
+      ],
+      "markHrefs": ["https://example.com/search?q=%E7%94%B2%EF%BC%8C%E4%B9%99"],
+      "bubbleHrefs": ["https://example.com/search?q=%E7%94%B2%EF%BC%8C%E4%B9%99"],
+      "mailto": [],
+      "unmapped": 0,
+      "pageErrors": []
+    },
+    {
+      "id": "bare-query-paren",
+      "scope": "thread",
+      "pass": true,
+      "failures": [],
+      "marks": [
+        {
+          "text": "https://example.com/search?q=）",
+          "start": 0,
+          "end": 30
+        }
+      ],
+      "markHrefs": ["https://example.com/search?q=%EF%BC%89"],
+      "bubbleHrefs": ["https://example.com/search?q=%EF%BC%89"],
+      "mailto": [],
+      "unmapped": 0,
+      "pageErrors": []
+    },
+    {
+      "id": "angle-cn",
+      "scope": "thread",
+      "pass": true,
+      "failures": [],
+      "marks": [
+        {
+          "text": "<https://github.com/meow-club/cat-cafe-map>",
+          "start": 0,
+          "end": 43
+        }
+      ],
+      "markHrefs": ["https://github.com/meow-club/cat-cafe-map"],
+      "bubbleHrefs": ["https://github.com/meow-club/cat-cafe-map"],
+      "mailto": [],
+      "unmapped": 0,
+      "pageErrors": []
+    },
+    {
+      "id": "explicit-cn",
+      "scope": "thread",
+      "pass": true,
+      "failures": [],
+      "marks": [
+        {
+          "text": "[仓库](https://github.com/meow-club/cat-cafe-map)",
+          "start": 0,
+          "end": 47
+        }
+      ],
+      "markHrefs": ["https://github.com/meow-club/cat-cafe-map"],
+      "bubbleHrefs": ["https://github.com/meow-club/cat-cafe-map"],
+      "mailto": [],
+      "unmapped": 0,
+      "pageErrors": []
+    },
+    {
+      "id": "explicit-angle-cn",
+      "scope": "thread",
+      "pass": true,
+      "failures": [],
+      "marks": [
+        {
+          "text": "[仓库](<https://github.com/meow-club/cat-cafe-map>)",
+          "start": 0,
+          "end": 49
+        }
+      ],
+      "markHrefs": ["https://github.com/meow-club/cat-cafe-map"],
+      "bubbleHrefs": ["https://github.com/meow-club/cat-cafe-map"],
+      "mailto": [],
+      "unmapped": 0,
+      "pageErrors": []
+    },
+    {
+      "id": "reference-after",
+      "scope": "thread",
+      "pass": true,
+      "failures": [],
+      "marks": [
+        {
+          "text": "[仓库][r]",
+          "start": 0,
+          "end": 7
+        }
+      ],
+      "markHrefs": ["https://github.com/meow-club/cat-cafe-map"],
+      "bubbleHrefs": ["https://github.com/meow-club/cat-cafe-map"],
+      "mailto": [],
+      "unmapped": 0,
+      "pageErrors": []
+    },
+    {
+      "id": "reference-before",
+      "scope": "thread",
+      "pass": true,
+      "failures": [],
+      "marks": [
+        {
+          "text": "[仓库][r]",
+          "start": 48,
+          "end": 55
+        }
+      ],
+      "markHrefs": ["https://github.com/meow-club/cat-cafe-map"],
+      "bubbleHrefs": ["https://github.com/meow-club/cat-cafe-map"],
+      "mailto": [],
+      "unmapped": 0,
+      "pageErrors": []
+    },
+    {
+      "id": "reference-missing",
+      "scope": "thread",
+      "pass": true,
+      "failures": [],
+      "marks": [],
+      "markHrefs": [],
+      "bubbleHrefs": [],
+      "mailto": [],
+      "unmapped": 0,
+      "pageErrors": []
+    },
+    {
+      "id": "shortcut-reference",
+      "scope": "thread",
+      "pass": true,
+      "failures": [],
+      "marks": [
+        {
+          "text": "[仓库]",
+          "start": 0,
+          "end": 4
+        }
+      ],
+      "markHrefs": ["https://github.com/meow-club/cat-cafe-map"],
+      "bubbleHrefs": ["https://github.com/meow-club/cat-cafe-map"],
+      "mailto": [],
+      "unmapped": 0,
+      "pageErrors": []
+    },
+    {
+      "id": "inline-code-url",
+      "scope": "thread",
+      "pass": true,
+      "failures": [],
+      "marks": [
+        {
+          "text": "`https://github.com/meow-club/cat-cafe-map这是链接`",
+          "start": 0,
+          "end": 47
+        }
+      ],
+      "markHrefs": ["https://github.com/meow-club/cat-cafe-map%E8%BF%99%E6%98%AF%E9%93%BE%E6%8E%A5"],
+      "bubbleHrefs": ["https://github.com/meow-club/cat-cafe-map%E8%BF%99%E6%98%AF%E9%93%BE%E6%8E%A5"],
+      "mailto": [],
+      "unmapped": 0,
+      "pageErrors": []
+    },
+    {
+      "id": "fenced-code",
+      "scope": "thread",
+      "pass": true,
+      "failures": [],
+      "marks": [],
+      "markHrefs": [],
+      "bubbleHrefs": [],
+      "mailto": [],
+      "unmapped": 0,
+      "pageErrors": []
+    },
+    {
+      "id": "indented-code",
+      "scope": "thread",
+      "pass": true,
+      "failures": [],
+      "marks": [],
+      "markHrefs": [],
+      "bubbleHrefs": [],
+      "mailto": [],
+      "unmapped": 0,
+      "pageErrors": []
+    },
+    {
+      "id": "math-inline",
+      "scope": "thread",
+      "pass": true,
+      "failures": [],
+      "marks": [],
+      "markHrefs": [],
+      "bubbleHrefs": [],
+      "mailto": [],
+      "unmapped": 0,
+      "pageErrors": []
+    },
+    {
+      "id": "math-block",
+      "scope": "thread",
+      "pass": true,
+      "failures": [],
+      "marks": [],
+      "markHrefs": [],
+      "bubbleHrefs": [],
+      "mailto": [],
+      "unmapped": 0,
+      "pageErrors": []
+    },
+    {
+      "id": "www-cn",
+      "scope": "thread",
+      "pass": true,
+      "failures": [],
+      "marks": [
+        {
+          "text": "www.example.com这是说明",
+          "start": 0,
+          "end": 19
+        }
+      ],
+      "markHrefs": ["http://www.example.xn--com-k58ftfo43umyf/"],
+      "bubbleHrefs": ["http://www.example.xn--com-k58ftfo43umyf/"],
+      "mailto": [],
+      "unmapped": 0,
+      "pageErrors": []
+    },
+    {
+      "id": "www-space",
+      "scope": "thread",
+      "pass": true,
+      "failures": [],
+      "marks": [
+        {
+          "text": "www.example.com",
+          "start": 0,
+          "end": 15
+        }
+      ],
+      "markHrefs": ["http://www.example.com/"],
+      "bubbleHrefs": ["http://www.example.com/"],
+      "mailto": [],
+      "unmapped": 0,
+      "pageErrors": []
+    },
+    {
+      "id": "mailto",
+      "scope": "thread",
+      "pass": true,
+      "failures": [],
+      "marks": [],
+      "markHrefs": [],
+      "bubbleHrefs": [],
+      "mailto": [],
+      "unmapped": 0,
+      "pageErrors": []
+    },
+    {
+      "id": "local-path",
+      "scope": "thread",
+      "pass": true,
+      "failures": [],
+      "marks": [],
+      "markHrefs": [],
+      "bubbleHrefs": [],
+      "mailto": [],
+      "unmapped": 0,
+      "pageErrors": []
+    },
+    {
+      "id": "commit",
+      "scope": "thread",
+      "pass": true,
+      "failures": [],
+      "marks": [],
+      "markHrefs": [],
+      "bubbleHrefs": [],
+      "mailto": [],
+      "unmapped": 0,
+      "pageErrors": []
+    },
+    {
+      "id": "image",
+      "scope": "thread",
+      "pass": true,
+      "failures": [],
+      "marks": [],
+      "markHrefs": [],
+      "bubbleHrefs": [],
+      "mailto": [],
+      "unmapped": 0,
+      "pageErrors": []
+    },
+    {
+      "id": "duplicate-url",
+      "scope": "thread",
+      "pass": true,
+      "failures": [],
+      "marks": [
+        {
+          "text": "https://github.com/meow-club/cat-cafe-map",
+          "start": 0,
+          "end": 41
+        },
+        {
+          "text": "https://github.com/meow-club/cat-cafe-map",
+          "start": 42,
+          "end": 83
+        }
+      ],
+      "markHrefs": ["https://github.com/meow-club/cat-cafe-map", "https://github.com/meow-club/cat-cafe-map"],
+      "bubbleHrefs": ["https://github.com/meow-club/cat-cafe-map", "https://github.com/meow-club/cat-cafe-map"],
+      "mailto": [],
+      "unmapped": 0,
+      "pageErrors": []
+    },
+    {
+      "id": "leading-whitespace",
+      "scope": "thread",
+      "pass": true,
+      "failures": [],
+      "marks": [
+        {
+          "text": "https://github.com/meow-club/cat-cafe-map这是链接",
+          "start": 4,
+          "end": 49
+        }
+      ],
+      "markHrefs": ["https://github.com/meow-club/cat-cafe-map%E8%BF%99%E6%98%AF%E9%93%BE%E6%8E%A5"],
+      "bubbleHrefs": ["https://github.com/meow-club/cat-cafe-map%E8%BF%99%E6%98%AF%E9%93%BE%E6%8E%A5"],
+      "mailto": [],
+      "unmapped": 0,
+      "pageErrors": []
+    },
+    {
+      "id": "command-prefix",
+      "scope": "thread",
+      "pass": true,
+      "failures": [],
+      "marks": [
+        {
+          "text": "https://github.com/meow-club/cat-cafe-map这是链接",
+          "start": 5,
+          "end": 50
+        }
+      ],
+      "markHrefs": ["https://github.com/meow-club/cat-cafe-map%E8%BF%99%E6%98%AF%E9%93%BE%E6%8E%A5"],
+      "bubbleHrefs": ["https://github.com/meow-club/cat-cafe-map%E8%BF%99%E6%98%AF%E9%93%BE%E6%8E%A5"],
+      "mailto": [],
+      "unmapped": 0,
+      "pageErrors": []
+    },
+    {
+      "id": "list",
+      "scope": "thread",
+      "pass": true,
+      "failures": [],
+      "marks": [
+        {
+          "text": "https://github.com/meow-club/cat-cafe-map这是链接",
+          "start": 2,
+          "end": 47
+        }
+      ],
+      "markHrefs": ["https://github.com/meow-club/cat-cafe-map%E8%BF%99%E6%98%AF%E9%93%BE%E6%8E%A5"],
+      "bubbleHrefs": ["https://github.com/meow-club/cat-cafe-map%E8%BF%99%E6%98%AF%E9%93%BE%E6%8E%A5"],
+      "mailto": [],
+      "unmapped": 0,
+      "pageErrors": []
+    },
+    {
+      "id": "blockquote",
+      "scope": "thread",
+      "pass": true,
+      "failures": [],
+      "marks": [
+        {
+          "text": "https://github.com/meow-club/cat-cafe-map这是链接",
+          "start": 2,
+          "end": 47
+        }
+      ],
+      "markHrefs": ["https://github.com/meow-club/cat-cafe-map%E8%BF%99%E6%98%AF%E9%93%BE%E6%8E%A5"],
+      "bubbleHrefs": ["https://github.com/meow-club/cat-cafe-map%E8%BF%99%E6%98%AF%E9%93%BE%E6%8E%A5"],
+      "mailto": [],
+      "unmapped": 0,
+      "pageErrors": []
+    },
+    {
+      "id": "github-pr-valid",
+      "scope": "thread",
+      "pass": true,
+      "failures": [],
+      "marks": [
+        {
+          "text": "https://github.com/zts212653/clowder-ai/pull/1859",
+          "start": 0,
+          "end": 49
+        }
+      ],
+      "markHrefs": ["https://github.com/zts212653/clowder-ai/pull/1859"],
+      "bubbleHrefs": ["https://github.com/zts212653/clowder-ai/pull/1859"],
+      "mailto": [],
+      "unmapped": 0,
+      "pageErrors": []
+    },
+    {
+      "id": "github-pr-cn-suffix",
+      "scope": "thread",
+      "pass": true,
+      "failures": [],
+      "marks": [
+        {
+          "text": "https://github.com/zts212653/clowder-ai/pull/1859这个PR",
+          "start": 0,
+          "end": 53
+        }
+      ],
+      "markHrefs": ["https://github.com/zts212653/clowder-ai/pull/1859%E8%BF%99%E4%B8%AAPR"],
+      "bubbleHrefs": ["https://github.com/zts212653/clowder-ai/pull/1859%E8%BF%99%E4%B8%AAPR"],
+      "mailto": [],
+      "unmapped": 0,
+      "pageErrors": []
+    },
+    {
+      "id": "long-url",
+      "scope": "thread",
+      "pass": true,
+      "failures": [],
+      "marks": [
+        {
+          "text": "https://example.com/very/long/path/segment-1/segment-2/segment-3/segment-4/segment-5/segment-6/这是链接",
+          "start": 0,
+          "end": 99
+        }
+      ],
+      "markHrefs": [
+        "https://example.com/very/long/path/segment-1/segment-2/segment-3/segment-4/segment-5/segment-6/%E8%BF%99%E6%98%AF%E9%93%BE%E6%8E%A5"
+      ],
+      "bubbleHrefs": [
+        "https://example.com/very/long/path/segment-1/segment-2/segment-3/segment-4/segment-5/segment-6/%E8%BF%99%E6%98%AF%E9%93%BE%E6%8E%A5"
+      ],
+      "mailto": [],
+      "unmapped": 0,
+      "pageErrors": []
+    },
+    {
+      "id": "new-conversation-inline-code",
+      "scope": "new-conversation",
+      "pass": true,
+      "failures": [],
+      "marks": [
+        {
+          "text": "`https://github.com/meow-club/cat-cafe-map这是链接`",
+          "start": 0,
+          "end": 47
+        }
+      ],
+      "markHrefs": ["https://github.com/meow-club/cat-cafe-map%E8%BF%99%E6%98%AF%E9%93%BE%E6%8E%A5"],
+      "bubbleHrefs": ["https://github.com/meow-club/cat-cafe-map%E8%BF%99%E6%98%AF%E9%93%BE%E6%8E%A5"],
+      "mailto": [],
+      "unmapped": 0,
+      "pageErrors": []
+    },
+    {
+      "id": "new-conversation-reference",
+      "scope": "new-conversation",
+      "pass": true,
+      "failures": [],
+      "marks": [
+        {
+          "text": "[仓库][r]",
+          "start": 0,
+          "end": 7
+        }
+      ],
+      "markHrefs": ["https://github.com/meow-club/cat-cafe-map"],
+      "bubbleHrefs": ["https://github.com/meow-club/cat-cafe-map"],
+      "mailto": [],
+      "unmapped": 0,
+      "pageErrors": []
+    }
+  ],
+  "operations": [
+    {
+      "label": "reference-definition-one",
+      "pass": true,
+      "failures": [],
+      "pageErrors": []
+    },
+    {
+      "label": "reference-definition-two",
+      "pass": true,
+      "failures": [],
+      "pageErrors": []
+    },
+    {
+      "label": "reference-definition-deleted",
+      "pass": true,
+      "failures": [],
+      "pageErrors": []
+    },
+    {
+      "label": "selection-replace",
+      "pass": true,
+      "failures": [],
+      "pageErrors": []
+    },
+    {
+      "label": "undo-redo",
+      "pass": true,
+      "failures": [],
+      "pageErrors": []
+    }
+  ],
+  "geometry": [
+    {
+      "width": 687,
+      "textHeight": 1232,
+      "mirrorHeight": 1232,
+      "scrollTop": 1032,
+      "mirrorScrollTop": 1032,
+      "mirrorClientWidth": 687,
+      "windowWidth": 1180,
+      "horizontalOverflow": false,
+      "pass": true
+    },
+    {
+      "width": 663,
+      "textHeight": 1232,
+      "mirrorHeight": 1232,
+      "scrollTop": 1112,
+      "mirrorScrollTop": 1112,
+      "mirrorClientWidth": 663,
+      "windowWidth": 760,
+      "horizontalOverflow": false,
+      "pass": true
+    },
+    {
+      "width": 293,
+      "textHeight": 3032,
+      "mirrorHeight": 3032,
+      "scrollTop": 2912,
+      "mirrorScrollTop": 2912,
+      "mirrorClientWidth": 293,
+      "windowWidth": 390,
+      "horizontalOverflow": false,
+      "pass": true
+    }
+  ],
+  "ime": {
+    "composingVisibility": "hidden",
+    "composingMarks": ["https://github.com/meow-club/cat-cafe-map这是说明"],
+    "committed": "https://github.com/meow-club/cat-cafe-map这是说明",
+    "committedMarks": ["https://github.com/meow-club/cat-cafe-map这是说明"],
+    "pass": true
+  },
+  "refresh": {
+    "markHrefs": [
+      "https://example.com/very/long/path/segment-1/segment-2/segment-3/segment-4/segment-5/segment-6/%E8%BF%99%E6%98%AF%E9%93%BE%E6%8E%A5"
+    ],
+    "webHrefs": [
+      "https://example.com/very/long/path/segment-1/segment-2/segment-3/segment-4/segment-5/segment-6/%E8%BF%99%E6%98%AF%E9%93%BE%E6%8E%A5"
+    ],
+    "pass": true
+  },
+  "dark": {
+    "theme": "dark"
+  },
+  "classic": {
+    "mirrorCount": 0,
+    "textareaCount": 1,
+    "pass": true
+  },
+  "pageErrors": [],
+  "caveats": [
+    "each case ran in a fresh isolated host; the thread-vs-new distinction is not separately exercised (the band parser is thread-agnostic and the bubble scope was always present)",
+    "fixture always wraps sent messages in ChatReferenceScope; no-thread / optimistic no-scope frame is not exercised",
+    "isolated host: submit is local demo, not full product API thread creation / backend persistence / restart recovery",
+    "physical Windows IME candidate selection and macOS are not verified; CDP composition is not the OS candidate UI",
+    "product layer exposes source-position gaps only through data-unmapped; the visible gap notice is in the demo host, so a formal product needs its own user-facing treatment",
+    "escaped prose (e.g. https\\://example.com) is intentionally an exposed gap, not full coverage; the demo host warns and the product does not guess a position"
+  ],
+  "escapedGap": {
+    "unmapped": 1,
+    "marks": 0,
+    "demoWarning": 1,
+    "pass": true
+  },
+  "casesFailed": 0,
+  "operationsFailed": 0,
+  "geometryFailed": 0,
+  "verdict": "exploratory-effect-draft-ok"
+}

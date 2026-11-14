@@ -117,7 +117,13 @@ function repositoryFixture(t, files) {
   t.after(() => rmSync(root, { recursive: true, force: true }));
   mkdirSync(join(root, 'scripts/lib'), { recursive: true });
   mkdirSync(join(root, 'assets'));
-  for (const file of [...files, 'scripts/brand-dictionary-helper.mjs']) cpSync(file, join(root, file));
+  for (const file of [
+    ...files,
+    'scripts/brand-dictionary-helper.mjs',
+    'scripts/lib/publication-branches.mjs',
+    'scripts/publication-branches.json',
+  ])
+    cpSync(file, join(root, file));
   const raw = readFileSync('assets/brand-dictionary.yaml', 'utf8').replace(
     /(- id: deployment\.repository[\s\S]*?)(?=\n {2}- id:|$)/,
     (block) =>
@@ -150,6 +156,10 @@ test(
       'scripts/lib/intake-mechanical.mjs',
       'scripts/lib/daily-public-sync-pr.mjs',
       'scripts/lib/daily-public-sync-git.mjs',
+      'scripts/lib/daily-publisher-identity.mjs',
+      'scripts/lib/sync-git-remote-read.mjs',
+      'scripts/lib/sync-git-remote-read.sh',
+      'scripts/test-bash-runtime.mjs',
     ]);
     const intake = await import(pathToFileURL(join(root, 'scripts/lib/intake-github.mjs')));
     assert.equal(intake.HOME_REPO, 'synthetic-owner/home');

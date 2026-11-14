@@ -1,6 +1,6 @@
 import type { ListenDocumentIdentity, ListenDocumentState } from '@cat-cafe/shared';
 import type { DocumentListenRepository, ListenDocumentKey } from './DocumentListenRepository.js';
-import type { ListenAssetService, ListenSynthesisOptions } from './ListenAssetService.js';
+import type { ListenAssetService, PreparedListenSynthesis } from './ListenAssetService.js';
 
 export interface EphemeralListenSentence {
   anchor: string;
@@ -18,6 +18,7 @@ interface ActiveRun {
   synthesisFingerprint: string;
   sentences: EphemeralListenSentence[];
   controller: AbortController;
+  synthesis: PreparedListenSynthesis;
 }
 
 interface RunError {
@@ -39,10 +40,10 @@ export class DocumentCacheRunManager {
     key: ListenDocumentKey;
     identity: ListenDocumentIdentity;
     sentences: EphemeralListenSentence[];
-    synthesis?: ListenSynthesisOptions;
+    synthesis: PreparedListenSynthesis;
     startAnchor?: string;
   }): DocumentCacheRunProjection {
-    const synthesisFingerprint = this.assets.getSynthesisFingerprint(input.synthesis);
+    const synthesisFingerprint = input.synthesis.fingerprint;
     this.repository.prepareCacheRun(
       input.key,
       input.identity.contentDigest,
@@ -69,9 +70,10 @@ export class DocumentCacheRunManager {
       synthesisFingerprint,
       sentences: orderedFrom(input.sentences, input.startAnchor),
       controller: new AbortController(),
+      synthesis: input.synthesis,
     };
     this.runs.set(documentKey, run);
-    void this.advance(documentKey, run, input.synthesis);
+    void this.advance(documentKey, run);
     return { active: true };
   }
 
@@ -134,10 +136,10 @@ export class DocumentCacheRunManager {
     this.errors.clear();
   }
 
-  private async advance(documentKey: string, run: ActiveRun, synthesis?: ListenSynthesisOptions): Promise<void> {
+  private async advance(documentKey: string, run: ActiveRun): Promise<void> {
     try {
       for (const sentence of run.sentences) {
-        if (!(await this.cacheSentence(documentKey, run, sentence, synthesis))) return;
+        if (!(await this.cacheSentence(documentKey, run, sentence))) return;
       }
     } catch (error) {
       this.recordError(documentKey, run, error);
@@ -150,12 +152,14 @@ export class DocumentCacheRunManager {
     documentKey: string,
     run: ActiveRun,
     sentence: EphemeralListenSentence,
-    synthesis?: ListenSynthesisOptions,
   ): Promise<boolean> {
     if (!this.isCurrent(documentKey, run)) return false;
     const state = this.repository.loadDocument(run.key);
     if (state?.sentences.some(({ anchor, assetId }) => anchor === sentence.anchor && assetId)) return true;
-    const asset = await this.assets.getOrCreate(sentence.text, { synthesis, signal: run.controller.signal });
+    const asset = await this.assets.getOrCreate(sentence.text, {
+      preparedSynthesis: run.synthesis,
+      signal: run.controller.signal,
+    });
     if (!this.isCurrent(documentKey, run)) return false;
     const linked = this.repository.setSentenceAssetIfCurrent(run.key, {
       contentDigest: run.contentDigest,

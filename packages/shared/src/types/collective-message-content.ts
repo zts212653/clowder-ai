@@ -21,7 +21,10 @@ export const collectiveMessageAttachmentSchema = z
     v: z.literal(1),
     sticker: messageStickerSchema.optional(),
     attachmentId: z.string().regex(/^att_[A-Za-z0-9_-]{8,120}$/),
-    contentRef: z.string().startsWith('collective-attachment:').max(240),
+    contentRef: z
+      .string()
+      .regex(/^collective-attachment:/)
+      .max(240),
     ownerRevision: z.literal(1),
     ownerReceiptRef: z.string().trim().min(1).max(240),
     blobDigest: z.string().regex(/^sha256:[a-f0-9]{64}$/),

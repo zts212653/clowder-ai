@@ -93,10 +93,10 @@ for (const sibling of [false, true])
     const after = store.getThreadState('background');
     expect(after.isLoading).toBe(sibling);
     expect(after.hasActiveInvocation).toBe(sibling);
-    // The established last-slot teardown clears status badges; the failure toast must survive it.
+    // The established last-slot teardown clears status badges. PR-3a: the failure toast comes from
+    // the failed response's lifecycle snapshot, not from the room's error event.
     if (sibling) expect(after.catStatuses.opus5).toBe('error');
-    expect(addToast.mock.calls.some(([toast]) => toast.type === 'success')).toBe(false);
-    expect(addToast.mock.calls.some(([toast]) => toast.type === 'error')).toBe(true);
+    expect(addToast).not.toHaveBeenCalled();
     if (sibling) expect(after.activeInvocations['parent-kimi']?.catId).toBe('kimi');
   });
 

@@ -1,16 +1,18 @@
 import { randomUUID } from 'node:crypto';
-import { mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
+import { access, mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import type { SnapshotReadDiagnostics } from '../diagnostics/observation-work.js';
-import type {
-  BrokerCallStore,
-  BrokerRuntimeLeaseStore,
-  BrokerSessionStore,
-  HostBrokerStore,
-  HostBrokerTransaction,
-} from './ports.js';
+import type { HostBrokerStore, HostBrokerTransaction } from './ports.js';
+import { brokerReadConnection, brokerReadPorts, matchesBrokerPhase } from './read-ports.js';
 import { cloneHostBrokerSnapshot, emptyHostBrokerSnapshot, parseHostBrokerSnapshot } from './snapshot.js';
-import { emptyStaticFeatureLedger, type StaticFeatureLedger } from './static-feature-ledger.js';
+import {
+  emptyStaticFeatureLedger,
+  mergeStaticFeatures,
+  type StaticFeatureLedger,
+  selectStaticFeatures,
+  updateStaticFeatures,
+} from './static-feature-ledger.js';
+import { selectFeatureActivation } from './static-feature-selection.js';
 import type { BrokerCallRecord, BrokerRuntimeLeaseRecord, BrokerSessionRecord, HostBrokerSnapshot } from './types.js';
 import { HOST_BROKER_SCHEMA_VERSION, HostBrokerError } from './types.js';
 
@@ -51,9 +53,29 @@ class MutableBrokerSnapshot implements HostBrokerTransaction {
   private written = false;
   private featureLedger: StaticFeatureLedger | undefined;
   readonly staticFeatures = {
-    get: () => structuredClone(this.featureLedger ?? emptyStaticFeatureLedger()),
-    put: (ledger: StaticFeatureLedger) => {
-      this.featureLedger = structuredClone(ledger);
+    getPreference: (id: string, featureId: string) => {
+      const record = this.featureLedger?.preferences.find(
+        (r) => r.pluginInstanceId === id && r.featureId === featureId,
+      );
+      return record && structuredClone(record);
+    },
+    getForActivation: (id: string, featureId: string, sessionId: string) =>
+      selectFeatureActivation(this.featureLedger ?? emptyStaticFeatureLedger(), id, featureId, sessionId),
+    getActive: (id: string) => {
+      const ledger = selectStaticFeatures(this.featureLedger ?? emptyStaticFeatureLedger(), id);
+      return { ...ledger, leases: ledger.leases.filter((r) => r.state !== 'revoked') };
+    },
+    update: (ledger: StaticFeatureLedger) => {
+      this.featureLedger = updateStaticFeatures(this.featureLedger ?? emptyStaticFeatureLedger(), ledger);
+      this.written = true;
+    },
+    get: (instanceId?: string) => selectStaticFeatures(this.featureLedger ?? emptyStaticFeatureLedger(), instanceId),
+    getLease: (id: string) => {
+      const record = this.featureLedger?.leases.find((r) => r.executionLease === id);
+      return record && structuredClone(record);
+    },
+    put: (ledger: StaticFeatureLedger, instanceId?: string) => {
+      this.featureLedger = mergeStaticFeatures(this.featureLedger ?? emptyStaticFeatureLedger(), ledger, instanceId);
       this.written = true;
     },
   };
@@ -61,30 +83,38 @@ class MutableBrokerSnapshot implements HostBrokerTransaction {
   private readonly runtimeLeaseRecords = new Map<string, BrokerRuntimeLeaseRecord>();
   private readonly callRecords = new Map<string, BrokerCallRecord>();
 
-  readonly sessions: BrokerSessionStore = {
-    getByConnectionId: (connectionId) => this.clone(this.sessionRecords.get(connectionId)),
-    getBySessionId: (brokerSessionId) =>
+  readonly sessions = {
+    getByConnectionId: (connectionId: string) => this.clone(this.sessionRecords.get(connectionId)),
+    getBySessionId: (brokerSessionId: string) =>
       this.clone([...this.sessionRecords.values()].find((record) => record.brokerSessionId === brokerSessionId)),
-    list: () => [...this.sessionRecords.values()].map((record) => structuredClone(record)),
-    put: (record) => {
+    list: (pluginInstanceId?: string, phase?: string | readonly string[]) =>
+      [...this.sessionRecords.values()]
+        .filter(
+          (r) => (!pluginInstanceId || r.pluginInstanceId === pluginInstanceId) && matchesBrokerPhase(r.phase, phase),
+        )
+        .map((record) => structuredClone(record)),
+    put: (record: BrokerSessionRecord) => {
       this.sessionRecords.set(record.connectionId, structuredClone(record));
       this.written = true;
     },
   };
 
-  readonly runtimeLeases: BrokerRuntimeLeaseStore = {
-    get: (runtimeLeaseId) => this.clone(this.runtimeLeaseRecords.get(runtimeLeaseId)),
-    list: () => [...this.runtimeLeaseRecords.values()].map((record) => structuredClone(record)),
-    put: (record) => {
+  readonly runtimeLeases = {
+    get: (runtimeLeaseId: string) => this.clone(this.runtimeLeaseRecords.get(runtimeLeaseId)),
+    list: (state?: string | readonly string[]) =>
+      [...this.runtimeLeaseRecords.values()]
+        .filter((r) => matchesBrokerPhase(r.state, state))
+        .map((record) => structuredClone(record)),
+    put: (record: BrokerRuntimeLeaseRecord) => {
       this.runtimeLeaseRecords.set(record.runtimeLeaseId, structuredClone(record));
       this.written = true;
     },
   };
 
-  readonly calls: BrokerCallStore = {
-    get: (ledgerKey) => this.clone(this.callRecords.get(ledgerKey)),
+  readonly calls = {
+    get: (ledgerKey: string) => this.clone(this.callRecords.get(ledgerKey)),
     list: () => [...this.callRecords.values()].map((record) => structuredClone(record)),
-    put: (record) => {
+    put: (record: BrokerCallRecord) => {
       this.callRecords.set(record.ledgerKey, structuredClone(record));
       this.written = true;
     },
@@ -119,6 +149,10 @@ class MutableBrokerSnapshot implements HostBrokerTransaction {
 }
 
 export class MemoryHostBrokerStore implements HostBrokerStore {
+  readonly read = brokerReadPorts(this);
+  readConnection(id: string) {
+    return brokerReadConnection(this, id);
+  }
   private current: HostBrokerSnapshot;
   private readonly queue = new SerialQueue();
 
@@ -160,6 +194,10 @@ function isNotFound(error: unknown): boolean {
 }
 
 export class FileHostBrokerStore implements HostBrokerStore {
+  readonly read = brokerReadPorts(this);
+  readConnection(id: string) {
+    return brokerReadConnection(this, id);
+  }
   readonly path: string;
   private readonly queue: SerialQueue;
   private readonly fileOps: HostBrokerFileOps;
@@ -207,6 +245,15 @@ export class FileHostBrokerStore implements HostBrokerStore {
   }
 
   private async load(diagnostics?: SnapshotReadDiagnostics): Promise<HostBrokerSnapshot> {
+    let migrated = false;
+    try {
+      await access(`${this.path}.state.sqlite`);
+      migrated = true;
+    } catch (error) {
+      if (!isNotFound(error)) throw error;
+    }
+    if (migrated)
+      throw new HostBrokerError('BROKER_INVARIANT', 'Legacy JSON store was migrated; use the SQLite state owner');
     let raw: string;
     try {
       const read = () => this.fileOps.readFile(this.path, 'utf8');

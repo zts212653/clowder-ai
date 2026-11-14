@@ -10,6 +10,7 @@ import { useConciergeStore } from '@/stores/conciergeStore';
 import { apiFetch } from '@/utils/api-client';
 import { RadioOption, RangeSlider, TextInput, ToggleSwitch } from './ConciergeSettingsParts';
 import { SettingsField, SettingsPillButton, SettingsSection, SettingsText } from './primitives';
+import { WatcherSettings } from './WatcherSettings';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -157,6 +158,7 @@ export function ConciergeSettingsContent() {
         </SettingsText>
       )}
 
+      <WatcherSettings />
       <SettingsSection title="伴随入口" description="左侧猫图标可唤回桌面猫猫，或打开原伴随对话。">
         <a href="/settings?s=plugins" className="text-cafe-accent underline">
           查看桌面插件的启停与恢复状态

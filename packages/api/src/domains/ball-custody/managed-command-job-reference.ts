@@ -7,12 +7,16 @@ import { readManagedCommandWakeProjection } from './managed-command-wake-task-pr
 export function resolveManagedCommandJob(task: DynamicTaskDef): DurableManagedGateJob | undefined {
   const command = readManagedCommandWakeProjection(task);
   if (!command) return undefined;
-  if (!command.jobId) return command.durableJob;
-  const job = new ManagedJobService().resolve(command.jobId);
-  return job &&
+  const job = command.jobId ? new ManagedJobService().resolve(command.jobId) : command.durableJob;
+  return job && managedCommandJobMatchesTask(task, job) ? job : undefined;
+}
+
+/** Same owner association for an already-loaded worker snapshot and the synchronous mutation path. */
+export function managedCommandJobMatchesTask(task: DynamicTaskDef, job: DurableManagedGateJob): boolean {
+  return (
     job.originTaskId === task.id &&
     job.wakeTarget.threadId === task.deliveryThreadId &&
+    job.wakeTarget.userId === task.params.triggerUserId &&
     task.createdBy === `hold-ball:${job.wakeTarget.catId}`
-    ? job
-    : undefined;
+  );
 }

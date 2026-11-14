@@ -122,6 +122,8 @@ for (const language of ['zh', 'en'])
               {
                 head: process.env.F322_INBOX_PARITY_HEAD,
                 source: { thread: source.thread.id, message: source.message.id, sha: source.sha },
+                boundary:
+                  'Controlled local files and Git objects, real owner session/API/Workspace reads; GitHub CLI bytes and desktop POST execution only are controlled, never historical PR evidence.',
                 text: await page.locator('body').innerText(),
                 errors,
                 batches,
@@ -212,6 +214,7 @@ for (const language of ['zh', 'en'])
     });
     // A browser journey verifies the explicit action request; the OS boundary is tested separately without launching applications.
     await page.route('**/api/workspace/file/actions/**', async (route) => {
+      if (route.request().method() !== 'POST') return route.continue();
       desktop.push({ url: route.request().url(), method: route.request().method(), body: route.request().postData() });
       await route.fulfill({ status: 200, contentType: 'application/json', body: '{"ok":true}' });
     });
@@ -292,9 +295,19 @@ for (const language of ['zh', 'en'])
     );
     await page.screenshot({ path: path.join(evidence, 'mixed-chat.png'), fullPage: true, animations: 'disabled' });
     await inline.hover();
-    const menu = page.getByRole('group', { name: language === 'en' ? 'File actions' : '文件操作', exact: true });
+    const menu = page.getByRole('menu', {
+      name: language === 'en' ? 'More artwork actions' : '作品更多操作',
+      exact: true,
+    });
     await menu.waitFor();
-    assert.ok((await menu.locator('code').innerText()).endsWith('/docs/delivery.md'));
+    const location = menu.getByRole('button', { name: /\/docs\/delivery\.md$/ });
+    await location.waitFor();
+    assert.ok((await location.innerText()).endsWith('/docs/delivery.md'));
+    assert.equal(
+      await menu.evaluate((element) => element.matches(':popover-open')),
+      true,
+      'The native top layer keeps actions above the message viewport',
+    );
     const menuBox = await menu.boundingBox();
     await writeFile(
       path.join(evidence, 'path-menu-geometry.json'),
@@ -303,7 +316,7 @@ for (const language of ['zh', 'en'])
           box: menuBox,
           viewport: 390,
           contrast,
-          bodyPortal: await menu.evaluate((element) => !element.closest('[data-message-viewport-boundary]')),
+          nativeTopLayer: await menu.evaluate((element) => element.matches(':popover-open')),
         },
         null,
         2,
@@ -321,7 +334,7 @@ for (const language of ['zh', 'en'])
         response.status() === 200,
     );
     await menu
-      .getByRole('button', { name: language === 'en' ? 'Show in Finder' : '在 Finder 中显示', exact: true })
+      .getByRole('menuitem', { name: language === 'en' ? 'Show in Finder' : '在 Finder 中显示', exact: true })
       .click();
     await revealResponse;
     assert.equal(desktop.length, 1);
@@ -339,12 +352,17 @@ for (const language of ['zh', 'en'])
       fullPage: true,
       animations: 'disabled',
     });
-    const more = viewer.locator(`summary[title="${language === 'en' ? 'More file actions' : '更多文件操作'}"]`);
-    await more.click();
-    const fileMenu = page.locator(`[id="${await more.getAttribute('aria-controls')}"]`);
-    const openNative = fileMenu.getByRole('button', {
-      name: language === 'en' ? 'Open with default application' : '用默认应用打开',
+    const more = viewer.getByRole('button', {
+      name: language === 'en' ? 'More artwork actions' : '作品更多操作',
       exact: true,
+    });
+    await more.click();
+    const fileMenu = page.getByRole('menu', {
+      name: language === 'en' ? 'More artwork actions' : '作品更多操作',
+      exact: true,
+    });
+    const openNative = fileMenu.getByRole('menuitem', {
+      name: language === 'en' ? /^Open with default application/ : /^用默认应用打开/,
     });
     await openNative.waitFor();
     if (language === 'en') assert.doesNotMatch(await fileMenu.innerText(), /[\u3400-\u9fff]/);
@@ -390,7 +408,26 @@ for (const language of ['zh', 'en'])
       await office.waitFor();
       await office.getByRole('heading', { name: filename, exact: true }).waitFor();
       assert.match(await office.innerText(), new RegExp(String(count)));
-      assert.match(await office.innerText(), language === 'en' ? /Open with default application/ : /用默认应用打开/);
+      assert.match(
+        await office.innerText(),
+        language === 'en' ? /Inline page preview is not available yet/ : /右边暂时不能直接翻页预览/,
+      );
+      const toolbar = page.getByTestId('content-file-toolbar');
+      await toolbar
+        .getByRole('button', { name: language === 'en' ? 'More artwork actions' : '作品更多操作', exact: true })
+        .click();
+      const officeMenu = page.getByRole('menu', {
+        name: language === 'en' ? 'More artwork actions' : '作品更多操作',
+        exact: true,
+      });
+      await officeMenu
+        .getByRole('menuitem', { name: language === 'en' ? /^Open with default application/ : /^用默认应用打开/ })
+        .waitFor();
+      await officeMenu
+        .getByRole('button')
+        .filter({ hasText: '/docs/' + filename })
+        .waitFor();
+      await page.keyboard.press('Escape');
       await page.screenshot({
         path: path.join(evidence, filename + '-workspace.png'),
         fullPage: true,
@@ -425,12 +462,31 @@ for (const language of ['zh', 'en'])
       .waitFor();
     assert.equal(commitReads(), 1, 'Reentry reuses the loaded canonical commit surface');
     await page.screenshot({ path: path.join(evidence, 'commit-changes.png'), fullPage: true, animations: 'disabled' });
+    const githubLink = pr.getByRole('link', { name: /^#5963 / });
+    const githubUrl = await githubLink.getAttribute('href');
+    assert.equal(githubUrl, 'https://github.com/zts212653/clowder-ai/pull/5963');
+    const prReadsBeforeLink = reads.filter((url) => url.startsWith('/api/workspace/chat-pull-request-changes?')).length;
+    // Verify native popup navigation without depending on GitHub availability or login.
+    await context.route(githubUrl, (route) =>
+      route.fulfill({ contentType: 'text/html', body: '<title>GitHub original destination</title>' }),
+    );
+    const popupPromise = page.waitForEvent('popup');
+    await githubLink.click();
+    const popup = await popupPromise;
+    await popup.waitForURL(githubUrl);
+    assert.equal(await popup.title(), 'GitHub original destination');
+    await popup.close();
+    assert.equal(
+      reads.filter((url) => url.startsWith('/api/workspace/chat-pull-request-changes?')).length,
+      prReadsBeforeLink,
+      'Opening the original PR does not read an internal diff',
+    );
     await Promise.all([
       page.waitForResponse(
         (response) =>
           new URL(response.url()).pathname === '/api/workspace/chat-pull-request-changes' && response.status() === 200,
       ),
-      pr.locator('button').click(),
+      pr.getByRole('button', { name: /查看变更|View changes/ }).click(),
     ]);
     await page
       .locator('[data-testid="f307-owner-surface-host"]:visible')

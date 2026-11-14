@@ -39,11 +39,11 @@ function envelope(targetCats = [], content = 'hello', idempotencyKey = 'fixed-re
     },
   ];
 }
-function fixture({ unavailable = false, noServices = false } = {}) {
+function fixture({ unavailable = false } = {}) {
   const agents = new AgentRegistry();
-  if (!noServices) agents.register('codex', { invoke: async function* () {} });
+  agents.register('codex', { invoke: async function* () {} });
   if (unavailable) agents.markUnavailable('opus', { code: 'rejected-account-binding', message: 'owned fixture' });
-  else if (!noServices) agents.register('opus', { invoke: async function* () {} });
+  else agents.register('opus', { invoke: async function* () {} });
   const messages = new MessageStore();
   const threads = new ThreadStore();
   const registry = new InvocationRegistry();
@@ -105,8 +105,8 @@ for (const [content, expected] of [
     assert.equal(result.entry.payload.routingWarnings, undefined);
   });
 }
-test('unavailable named recipient persists its identity and drain settles that exact target', async () => {
-  const f = fixture({ noServices: true });
+test('a terminally unavailable named recipient persists its identity and drain settles that exact target', async () => {
+  const f = fixture({ unavailable: true });
   const result = await f.queue.send(f.messages, ...envelope([], '@opus hello'));
   assert.equal(result.outcome, 'enqueued');
   assert.deepEqual(result.entry.targets, ['opus']);
@@ -121,11 +121,13 @@ test('unavailable named recipient persists its identity and drain settles that e
   });
   await processor.requestDrain('thread');
   assert.equal(f.queue.list('thread', 'owner').length, 0);
-  const failure = f.messages
+  const [failure, ...duplicates] = f.messages
     .getByThread('thread')
-    .find((message) => message.lifecycle?.reason === 'invalid_explicit_target');
-  assert.ok(failure);
+    .filter((message) => message.lifecycle?.reason === 'invalid_explicit_target');
+  assert.deepEqual(duplicates, []);
   assert.match(failure.content, /指定的接收对象当前无效/);
+  const [ref] = f.messages.getById(result.message.id).lifecycle.dispatchRefs;
+  assert.deepEqual([ref.targetId, ref.phase, ref.statusMessageId], ['opus', 'settled', failure.id]);
 });
 test('HTTP unavailable member needs confirmation and same-ID retry retains the approved target', async (t) => {
   const f = fixture({ unavailable: true });

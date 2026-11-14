@@ -1,11 +1,21 @@
-import { tasteMemoryOwnerActionSchema } from '@cat-cafe/shared';
+import { type MemoryOwnerActionReceipt, tasteMemoryOwnerActionSchema } from '@cat-cafe/shared';
 import { useState } from 'react';
 import { MemoryForgetControl, MemoryOwnerFeedback } from './MemoryOwnerControls';
 import { currentTakeawayCandidate } from './taste-format';
 import type { TasteMemory } from './taste-types';
 import { useMemoryOwnerAction } from './use-memory-owner-action';
 
-export function MemoryTasteActions({ entry, reload }: { entry: TasteMemory; reload: () => void }) {
+export function MemoryTasteActions({
+  entry,
+  reload,
+  canEdit = true,
+  onApplied,
+}: {
+  entry: TasteMemory;
+  reload: () => void;
+  canEdit?: boolean;
+  onApplied?: (receipt: MemoryOwnerActionReceipt) => void;
+}) {
   const candidate = currentTakeawayCandidate(entry);
   const [candidateText, setCandidateText] = useState(candidate?.takeaway ?? '');
   const [takeaway, setTakeaway] = useState(entry.takeaway ?? '');
@@ -14,7 +24,11 @@ export function MemoryTasteActions({ entry, reload }: { entry: TasteMemory; relo
   const [editing, setEditing] = useState(false);
   const [retiring, setRetiring] = useState(false);
   const [error, setError] = useState('');
-  const action = useMemoryOwnerAction(`/api/memory/taste/${encodeURIComponent(entry.id)}/actions`, entry.id, reload);
+  const action = useMemoryOwnerAction(
+    `/api/memory/taste/${encodeURIComponent(entry.id)}/actions`,
+    entry.id,
+    onApplied ?? reload,
+  );
   const active = entry.status === 'active';
   function correct() {
     const parsed = tasteMemoryOwnerActionSchema.safeParse({
@@ -77,29 +91,30 @@ export function MemoryTasteActions({ entry, reload }: { entry: TasteMemory; relo
             确认这句
           </button>
         </div>
-      ) : (
-        <p className="text-compact text-cafe-muted">
-          {entry.takeawayCandidate ? '概括候选已过时，请重读。' : '还没有待确认的概括候选。'}当前品味
-          {active ? '照常生效' : '已不再使用'}。
-        </p>
-      )}
+      ) : entry.takeawayCandidate ? (
+        <p className="text-compact text-cafe-muted">概括候选已过时，请重读。</p>
+      ) : null}
       {active && (
         <>
           <div className="flex gap-3 text-compact text-cafe-accent">
             <button
               type="button"
-              disabled={action.blocked}
+              disabled={action.blocked || !canEdit}
+              className="console-button-secondary disabled:opacity-50"
               onClick={() => {
                 setTakeaway(entry.takeaway ?? '');
                 setEditing(!editing);
               }}
             >
-              修改
+              编辑
             </button>
             <button type="button" disabled={action.blocked} onClick={() => setRetiring(!retiring)}>
               不再使用
             </button>
           </div>
+          {!canEdit && (
+            <p className="text-xs text-cafe-muted">来源读不到，暂时不能编辑。可以重读来源，或者不再使用、忘掉这条。</p>
+          )}
           {editing && (
             <form
               className="space-y-3 text-compact"
@@ -147,10 +162,10 @@ export function MemoryTasteActions({ entry, reload }: { entry: TasteMemory; relo
                   />
                 </label>
               ))}
-              <p className="text-xs text-cafe-muted">修改这条记忆的概括、引用与情景，原始对话不变。</p>
+              <p className="text-xs text-cafe-muted">改的是这条记忆，原对话里的消息不会改。</p>
               {error && <p role="alert">{error}</p>}
-              <button type="submit" disabled={action.blocked} className="text-cafe-accent underline">
-                保存品味
+              <button type="submit" disabled={action.blocked || !canEdit} className="text-cafe-accent underline">
+                保存
               </button>
             </form>
           )}
@@ -169,7 +184,7 @@ export function MemoryTasteActions({ entry, reload }: { entry: TasteMemory; relo
           )}
         </>
       )}
-      <MemoryForgetControl revision={entry.revision} noun="品味" action={action} retainedAudit />
+      <MemoryForgetControl revision={entry.revision} noun="品味" action={action} retainedAudit quiet />
     </section>
   );
 }

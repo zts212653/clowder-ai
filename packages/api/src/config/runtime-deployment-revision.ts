@@ -26,3 +26,17 @@ export function resolveRuntimeDeploymentRevision(runtimeRoot: string | undefined
   if (!apiRevision || apiRevision !== webRevision) return null;
   return apiRevision;
 }
+
+/**
+ * Direct launches can identify their own build without owning a deployment ledger.
+ * Managed launches still obtain their revision from the validated boot context.
+ * Read once at startup: later builds on disk do not change the running process.
+ */
+export function resolveInitialBuildRevision(input: {
+  entrypointRoot: string;
+  declaredRuntimeRoot: string | undefined;
+  declaredDeploymentId: string | undefined;
+}): string | null {
+  if (input.declaredRuntimeRoot && input.declaredDeploymentId) return null;
+  return resolveRuntimeDeploymentRevision(input.entrypointRoot);
+}

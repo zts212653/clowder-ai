@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 /**
  * Regression: switching projectPath must clear stale health before fetching.
  *

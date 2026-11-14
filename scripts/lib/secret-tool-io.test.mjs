@@ -308,18 +308,28 @@ describe('outbound attachments and confirmed result exposure', () => {
     const path = join(root, 'note.txt');
     writeFileSync(path, fake());
     let calls = 0;
-    const result = await withSecretToolGuard('browser_upload_file', { paths: [path] }, async () => {
-      calls++;
-      return {};
-    });
+    const result = await withSecretToolGuard(
+      'browser_upload_file',
+      { paths: [path] },
+      async () => {
+        calls++;
+        return {};
+      },
+      { outbound: true },
+    );
     assert.equal(result.isError, true);
     assert.equal(calls, 0);
     writeFileSync(path, 'clean note');
-    const clean = await withSecretToolGuard('browser_upload_file', { paths: [path] }, async (input) => {
-      writeFileSync(path, fake());
-      assert.notEqual(input.paths[0], path);
-      return { content: [{ type: 'text', text: readFileSync(input.paths[0], 'utf8') }] };
-    });
+    const clean = await withSecretToolGuard(
+      'browser_upload_file',
+      { paths: [path] },
+      async (input) => {
+        writeFileSync(path, fake());
+        assert.notEqual(input.paths[0], path);
+        return { content: [{ type: 'text', text: readFileSync(input.paths[0], 'utf8') }] };
+      },
+      { outbound: true },
+    );
     assert.equal(clean.content[0].text, 'clean note');
   });
 });

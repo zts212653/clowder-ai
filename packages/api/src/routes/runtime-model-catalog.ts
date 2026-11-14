@@ -8,16 +8,26 @@ export interface CatalogOption {
   group?: string;
 }
 export interface CatalogModel extends CatalogOption {
+  resolvedModel?: string;
   efforts?: CatalogOption[];
+  defaultEffort?: string;
 }
+export type CatalogSource = 'tool_config' | 'client_report' | 'account_config';
 export interface RuntimeModelCatalog {
+  thinkingEnabled?: boolean;
   status: 'live' | 'configured' | 'unavailable';
   models: CatalogModel[];
   defaultModel?: string;
   defaultModelLabel?: string;
   defaultModelStatus?: 'reported' | 'unreported' | 'unavailable';
   defaultEffort?: string;
+  defaultEffortLabel?: string;
+  defaultModelSource?: CatalogSource;
+  defaultEffortSource?: CatalogSource;
   selectedModel?: string;
+  selectedEffort?: string;
+  selectedEffortLabel?: string;
+  selectedEffortSource?: CatalogSource;
   effortOptions?: CatalogOption[];
   message?: string;
 }
@@ -47,22 +57,32 @@ export function acpOption(session: unknown, category: string) {
 export function parseAcpCatalog(session: unknown, defaults: unknown, _requested?: string): RuntimeModelCatalog {
   const model = acpOption(session, 'model');
   const effort = acpOption(session, 'thought_level');
+  const nativeEffort = acpOption(defaults, 'thought_level');
+  const defaultEffort = text(nativeEffort?.currentValue);
+  const selectedEffort = text(effort?.currentValue);
   const legacy = record(record(session).models);
-  const reportedDefault = reportedSessionModel(record(defaults));
-  const defaultChoices = acpOption(defaults, 'model')
-    ? acpChoices(acpOption(defaults, 'model')?.options).map((item) => item.value)
+  const nativeModel = acpOption(defaults, 'model');
+  const nativeModels = acpChoices(nativeModel?.options);
+  const reportedDefault =
+    nativeModel?.currentValue === '' && nativeModels.some((item) => item.value === '')
+      ? ''
+      : reportedSessionModel(record(defaults));
+  const defaultChoices = nativeModel
+    ? nativeModels.map((item) => item.value)
     : rows(record(record(defaults).models).availableModels).flatMap((item) =>
         typeof item.id === 'string' ? [item.id] : [],
       );
-  const defaultModelStatus = !reportedDefault
-    ? 'unreported'
-    : defaultChoices.length && !defaultChoices.includes(reportedDefault)
-      ? 'unavailable'
-      : 'reported';
+  const defaultModelStatus =
+    reportedDefault === undefined
+      ? 'unreported'
+      : defaultChoices.length && !defaultChoices.includes(reportedDefault)
+        ? 'unavailable'
+        : 'reported';
   const defaultModel = defaultModelStatus === 'reported' ? reportedDefault : undefined;
-  const defaultModelLabel = acpChoices(acpOption(defaults, 'model')?.options).find(
-    (item) => item.value === defaultModel,
-  )?.label;
+  const defaultChoice = nativeModels.find((item) => item.value === defaultModel);
+  const defaultModelLabel = defaultChoice
+    ? [defaultChoice.group, defaultChoice.label].filter(Boolean).join(' / ')
+    : undefined;
   const models = model
     ? acpChoices(model.options)
     : rows(legacy.availableModels).flatMap((item) =>
@@ -74,9 +94,18 @@ export function parseAcpCatalog(session: unknown, defaults: unknown, _requested?
     defaultModel,
     defaultModelStatus,
     defaultModelLabel,
-    defaultEffort: text(acpOption(defaults, 'thought_level')?.currentValue),
-    selectedModel: reportedSessionModel(record(session)),
-    ...(model ? { effortOptions: effort ? acpChoices(effort.options) : [] } : {}),
+    defaultEffort,
+    defaultEffortLabel: acpChoices(nativeEffort?.options).find((item) => item.value === defaultEffort)?.label,
+    defaultModelSource: defaultModel !== undefined ? 'client_report' : undefined,
+    defaultEffortSource: defaultEffort !== undefined ? 'client_report' : undefined,
+    selectedModel:
+      model?.currentValue === '' && models.some((item) => item.value === '')
+        ? ''
+        : reportedSessionModel(record(session)),
+    selectedEffort,
+    selectedEffortLabel: acpChoices(effort?.options).find((item) => item.value === selectedEffort)?.label,
+    selectedEffortSource: selectedEffort !== undefined ? 'client_report' : undefined,
+    ...(effort ? { effortOptions: acpChoices(effort.options) } : {}),
   };
 }
 export function parseCodexModels(value: unknown): CatalogModel[] {
@@ -110,6 +139,7 @@ export function parseClaudeModels(value: unknown): CatalogModel[] {
       ? [
           {
             value: item.value,
+            resolvedModel: text(item.resolvedModel),
             label: text(item.displayName) ?? item.value,
             description: text(item.description),
             ...(item.supportsEffort === false

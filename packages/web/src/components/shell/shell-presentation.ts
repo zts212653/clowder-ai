@@ -8,6 +8,7 @@
  * It is a browser-local preference (like the theme and pinned sections) and never gates data,
  * permissions or any store. `?shell=v2` / `?shell=classic` in the URL sets it once so the state
  * can be shared by link and verified in a real browser; the choice then persists.
+ * New visits default to v2; an explicitly saved classic choice still wins.
  */
 
 import { createContext, useContext, useSyncExternalStore } from 'react';
@@ -17,6 +18,7 @@ export type ShellPresentation = 'classic' | 'v2';
 export const ShellPresentationContext = createContext<ShellPresentation | null>(null);
 
 export const SHELL_PRESENTATION_STORAGE_KEY = 'cat-cafe:shell-presentation';
+const DEFAULT_PRESENTATION: ShellPresentation = 'v2';
 const SYNC_EVENT = 'cat-cafe:shell-presentation-sync';
 let transientPresentation: ShellPresentation | null = null;
 
@@ -25,12 +27,12 @@ export function parseShellPresentation(value: unknown): ShellPresentation | null
 }
 
 export function readShellPresentation(): ShellPresentation {
-  if (typeof window === 'undefined') return 'classic';
+  if (typeof window === 'undefined') return DEFAULT_PRESENTATION;
   if (transientPresentation) return transientPresentation;
   try {
-    return parseShellPresentation(window.localStorage.getItem(SHELL_PRESENTATION_STORAGE_KEY)) ?? 'classic';
+    return parseShellPresentation(window.localStorage.getItem(SHELL_PRESENTATION_STORAGE_KEY)) ?? DEFAULT_PRESENTATION;
   } catch {
-    return 'classic';
+    return DEFAULT_PRESENTATION;
   }
 }
 
@@ -68,6 +70,6 @@ function subscribe(onChange: () => void): () => void {
 
 export function useShellPresentation(): ShellPresentation {
   const resolved = useContext(ShellPresentationContext);
-  const stored = useSyncExternalStore<ShellPresentation>(subscribe, readShellPresentation, () => 'classic');
+  const stored = useSyncExternalStore<ShellPresentation>(subscribe, readShellPresentation, () => DEFAULT_PRESENTATION);
   return resolved ?? stored;
 }

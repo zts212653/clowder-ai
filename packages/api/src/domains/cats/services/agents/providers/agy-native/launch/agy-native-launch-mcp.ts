@@ -1,4 +1,5 @@
 import { join } from 'node:path';
+import { pluginMcpEnvironment } from '../../../../../../../config/capabilities/plugin-mcp-environment.js';
 import { findMonorepoRoot } from '../../../../../../../utils/monorepo-root.js';
 import { resolveProviderMcpConfig } from '../../provider-mcp-config.js';
 import { prepareAgyNativeCredentialFile } from '../agy-native-credential-file.js';
@@ -15,7 +16,15 @@ export async function materializeAgyLaunchMcp(
   const member = input.options?.pluginNativeLaunch;
   if (member) {
     await member.assertCurrent();
-    materializeAgyNativeMcpConfig({ profileHome: home, runtimeRoot, serverNames: [], memberServer: member.server });
+    materializeAgyNativeMcpConfig({
+      profileHome: home,
+      runtimeRoot,
+      serverNames: [],
+      memberServer: {
+        ...member.server,
+        env: { ...pluginMcpEnvironment({ source: 'plugin', env: { ...member.server.env } }, callbackEnv ?? {}) },
+      },
+    });
     return undefined;
   }
   const ordinary = input.options?.toolExecutionPolicy?.mode !== 'read_only';

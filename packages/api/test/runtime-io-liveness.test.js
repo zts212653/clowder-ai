@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
+import childProcess from 'node:child_process';
 import { chmod, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
+import { syncBuiltinESMExports } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
@@ -19,15 +21,23 @@ async function executable(path, text) {
 test(
   'R06: Taste snapshot resolves repository once and yields while Git is slow',
   { skip: process.platform === 'win32' },
-  async () => {
+  async (t) => {
     const root = await fixture();
     const previousPath = process.env.PATH;
+    const syncGitCalls = [];
+    const runSync = childProcess.execFileSync;
+    const syncProbe = t.mock.method(childProcess, 'execFileSync', (file, ...args) => {
+      if (file === 'git') syncGitCalls.push(args[0]);
+      return runSync(file, ...args);
+    });
+    syncBuiltinESMExports();
+    let timer;
     try {
       await mkdir(join(root, 'bin'));
       await mkdir(join(root, 'docs/taste/vignettes'), { recursive: true });
       await executable(
         join(root, 'bin/git'),
-        `#!/bin/sh\nprintf x >> '${join(root, 'git-calls')}'\n/bin/sleep 0.04\ncase "$1" in\nrev-parse) printf '%s\\n' '${root}' ;;\nworktree) printf 'worktree ${root}\\000branch refs/heads/main\\000' ;;\nesac\n`,
+        `#!/bin/sh\nprintf '%s\\n' "$*" >> '${join(root, 'git-calls')}'\n/bin/sleep 0.04\ncase "$1" in\nrev-parse) printf '%s\\n' '${root}' ;;\nworktree) printf 'worktree ${root}\\000branch refs/heads/main\\000' ;;\nesac\n`,
       );
       process.env.PATH = `${join(root, 'bin')}:${previousPath}`;
       for (let i = 0; i < 12; i++) {
@@ -39,7 +49,7 @@ test(
       await symlink(join(root, 'docs/taste/vignettes/0.md'), join(root, 'docs/taste/vignettes/link.md'));
       const source = new CanonicalTasteMemoryCueSource(new FileTasteRepository(root), 'owner');
       let ticks = 0;
-      const timer = setInterval(() => ticks++, 5);
+      timer = setInterval(() => ticks++, 5);
       const result = await source.resolve({
         ownerUserId: 'owner',
         stage: 'review',
@@ -49,11 +59,19 @@ test(
       clearInterval(timer);
       assert.ok(result);
       assert.ok(ticks >= 3, `health timer starved (${ticks} ticks)`);
-      assert.equal(
-        (await readFile(join(root, 'git-calls'), 'utf8')).length,
-        2,
+      assert.deepEqual(syncGitCalls, [], 'Taste reads must not run synchronous Git on the API event loop');
+      const calls = (await readFile(join(root, 'git-calls'), 'utf8')).trim().split('\n');
+      assert.deepEqual(
+        calls.filter((call) => /^(rev-parse|worktree) /.test(call)),
+        ['rev-parse --show-toplevel', 'worktree list --porcelain -z'],
         'repository identity must be resolved once per snapshot',
       );
+      for (const ref of ['refs/remotes/origin/main', 'refs/cat-cafe/taste/published']) {
+        assert.ok(
+          calls.some((call) => call.startsWith('for-each-ref ') && call.split(' ').includes(ref)),
+          `probe ${ref} even when this local fixture has no published tree`,
+        );
+      }
       const payload = await source.read({
         ownerUserId: 'owner',
         anchor: 'taste-dimensions:cognitive-honesty',
@@ -61,7 +79,11 @@ test(
       });
       assert.equal(payload.status, 'ok');
       if (payload.status === 'ok') assert.equal(payload.payload.totalCount, 12, 'symlink must remain excluded');
+      assert.deepEqual(syncGitCalls, [], 'the exact drill must also remain asynchronous');
     } finally {
+      clearInterval(timer);
+      syncProbe.mock.restore();
+      syncBuiltinESMExports();
       process.env.PATH = previousPath;
       await rm(root, { recursive: true, force: true });
     }

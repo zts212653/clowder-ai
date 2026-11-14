@@ -13,6 +13,7 @@ import {
 } from '../dist/domains/plugin/operations/plugin-operation-routes.js';
 import { readPluginConfig, readPluginOperationState } from '../dist/domains/plugin/plugin-config-store.js';
 import { sessionAuthPlugin, sessionRoute } from '../dist/infrastructure/session-auth.js';
+import { snapshotInventoryFixture } from './helpers/snapshot-inventory-fixture.js';
 
 const pluginId = 'dev.clowder.owner-operation';
 const instanceId = 'owner-operation-instance';
@@ -89,7 +90,7 @@ async function fixture(
     },
   });
   const packageRecord = { packageDigest: instance.packageDigest, pluginId, manifest, packageState: 'installed' };
-  const inventory = {
+  const inventory = snapshotInventoryFixture({
     snapshot: async () => ({
       schemaVersion: 1,
       instances: [structuredClone(instance)],
@@ -103,7 +104,7 @@ async function fixture(
         packages: { get: () => structuredClone(packageRecord) },
       });
     },
-  };
+  });
   let projectRoot;
   if (disk) {
     projectRoot = await mkdtemp(join(tmpdir(), 'owner-operation-store-'));
@@ -256,7 +257,6 @@ test('a declared confirmation reaches the module only after the authenticated ow
   assert.equal(f.records[0].context.operationKey, 'recovery');
   assert.equal(f.records[0].context.actionId, 'reconcile');
 });
-
 test('completed Manager action invalidates its saved owner authority', async (t) => {
   const f = await fixture(t, validResult);
   assert.equal((await f.call()).statusCode, 200);

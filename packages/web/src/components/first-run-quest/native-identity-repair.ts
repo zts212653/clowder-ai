@@ -13,28 +13,30 @@ export function repairLegacyNativeIdentityFields(
   recommended: HubCatEditorFormState,
   runtime: RuntimeChoice,
 ): Partial<HubCatEditorFormState> {
-  const identity = nativeToolIdentityFor({
-    clientId: runtime.clientId,
-    catId: runtime.id,
-    acp: runtime.acp,
-  });
+  const identity = nativeToolIdentityFor(runtime);
   if (!identity) return {};
   const legacy = identity.legacy;
+  // An empty DSH field may be a deliberate edit, such as a cleared nickname.
+  const fillMissing = identity.key !== 'dsh';
   const changes: Partial<HubCatEditorFormState> = {};
 
   const nameIsLegacy =
-    (current.name === legacy.name && current.displayName === legacy.name) || (!current.name && !current.displayName);
+    (current.name === legacy.name && current.displayName === legacy.name) ||
+    (fillMissing && !current.name && !current.displayName);
   if (nameIsLegacy) {
     if (recommended.name && recommended.name !== current.name) changes.name = recommended.name;
     if (recommended.displayName && recommended.displayName !== current.displayName)
       changes.displayName = recommended.displayName;
   }
 
-  if ((!current.nickname || current.nickname === legacy.nickname) && recommended.nickname !== current.nickname) {
+  if (
+    (current.nickname === legacy.nickname || (fillMissing && !current.nickname)) &&
+    recommended.nickname !== current.nickname
+  ) {
     changes.nickname = recommended.nickname;
   }
 
-  if ((!current.avatar?.trim() || current.avatar === legacy.avatar) && recommended.avatar?.trim()) {
+  if ((current.avatar === legacy.avatar || (fillMissing && !current.avatar?.trim())) && recommended.avatar?.trim()) {
     if (recommended.avatar !== current.avatar) changes.avatar = recommended.avatar;
   }
 

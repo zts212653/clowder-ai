@@ -4,6 +4,7 @@ import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { pluginMcpEnvironment } from '../../../../../../../config/capabilities/plugin-mcp-environment.js';
 import type { DshNativeAccount } from '../../../../../../../config/native-accounts/dsh-account.js';
 import type { DshNativeLaunch } from '../../../../../../../config/native-accounts/dsh-installation.js';
 import type { AgentServiceOptions } from '../../../../types.js';
@@ -30,6 +31,7 @@ export async function prepareDshMemberLaunch(input: {
   readonly account: DshNativeAccount;
   readonly identity: string;
   readonly member: NonNullable<AgentServiceOptions['pluginNativeLaunch']>;
+  readonly callbackEnv: Readonly<Record<string, string>>;
 }) {
   const root = await mkdtemp(join(tmpdir(), 'cat-cafe-dsh-member-'));
   const dispose = () => rm(root, { recursive: true, force: true });
@@ -71,7 +73,13 @@ export async function prepareDshMemberLaunch(input: {
                 mcpModule: pathToFileURL(require.resolve('@deepseek-ai/dsh-mcp-client')).href,
                 toolPrefix: `mcp__${serverName}__`,
                 serverName,
-                server: input.member.server,
+                server: {
+                  ...input.member.server,
+                  env: pluginMcpEnvironment(
+                    { source: 'plugin', env: { ...input.member.server.env } },
+                    input.callbackEnv,
+                  ),
+                },
               },
             },
           ],

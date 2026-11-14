@@ -315,6 +315,12 @@ for (const language of ['zh', 'en'])
         assert.deepEqual(fixture.approvalResponses, [
           { path: '/api/proposals/inbox-native-approve/approve', threadId: result.threadId, pinned: true },
         ]);
+        // Approval leaves its receipt in place; entering the created conversation is an explicit action.
+        assert.equal(new URL(page.url()).pathname, `/thread/${CALENDAR_THREAD}`);
+        const receipt = page.locator(
+          `[data-testid="mailbox-retained-result"][data-state="decided"][data-decision-key='${JSON.stringify(['F128', 'inbox-native-approve'])}']`,
+        );
+        await receipt.getByTestId('proposal-result-open').click();
         await page.waitForURL((url) => url.pathname === `/thread/${result.threadId}`);
         const created = fixture.threads.get(result.threadId),
           approvedRecord = fixture.proposals.get('inbox-native-approve');
@@ -392,7 +398,10 @@ for (const language of ['zh', 'en'])
         await page.keyboard.press('Enter');
         assert.equal((await rejected).status(), 200);
         assert.equal(fixture.proposals.get('inbox-native-reject').status, 'rejected');
-        const resultLine = page.getByTestId('proposal-result-label').filter({
+        const rejectedReceipt = page.locator(
+          `[data-testid="mailbox-retained-result"][data-state="decided"][data-decision-key='${JSON.stringify(['F128', 'inbox-native-reject'])}']`,
+        );
+        const resultLine = rejectedReceipt.getByTestId('proposal-result-label').filter({
           hasText: language === 'en' ? 'Declined' : '已拒绝',
         });
         await resultLine.waitFor();
@@ -416,8 +425,11 @@ for (const language of ['zh', 'en'])
         assert.ok(resultPresentation.box.x >= 0 && resultPresentation.box.x + resultPresentation.box.width <= width);
         await page.screenshot({ path: path.join(evidence, 'rejected.png'), fullPage: true });
         await resultLine.locator('..').click();
-        await page.getByTestId('proposal-result-details').waitFor();
-        assert.match(await page.getByTestId('proposal-result-details').innerText(), language === 'en' ? /You/ : /你/);
+        await rejectedReceipt.getByTestId('proposal-result-details').waitFor();
+        assert.match(
+          await rejectedReceipt.getByTestId('proposal-result-details').innerText(),
+          language === 'en' ? /You/ : /你/,
+        );
         await page.getByTestId('mailbox-panel').screenshot({ path: path.join(evidence, 'inbox-declined-details.png') });
         await page.getByTestId('mailbox-close').click();
         await page.reload();

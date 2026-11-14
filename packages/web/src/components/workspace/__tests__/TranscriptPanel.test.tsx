@@ -2,6 +2,7 @@ import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { ShellPresentationContext } from '@/components/shell/shell-presentation';
 
 import type { TranscriptLine } from '../TranscriptPanel';
 import { TranscriptLineRow } from '../TranscriptPanel';
@@ -9,6 +10,13 @@ import { TranscriptLineRow } from '../TranscriptPanel';
 // ---------------------------------------------------------------------------
 // Section 1: TranscriptLineRow — pure component (SSR, no mocks needed)
 // ---------------------------------------------------------------------------
+// These cases protect the explicitly selected classic interface, independently of the new-visit default.
+function renderClassic(element: React.ReactNode) {
+  return renderToStaticMarkup(
+    <ShellPresentationContext.Provider value="classic">{element}</ShellPresentationContext.Provider>,
+  );
+}
+
 describe('TranscriptPanel — TranscriptLineRow', () => {
   const baseLine: TranscriptLine = {
     ts: 1715400000,
@@ -25,32 +33,32 @@ describe('TranscriptPanel — TranscriptLineRow', () => {
       speaker_confidence: 0.95,
       speaker_id: 'spk001',
     };
-    const html = renderToStaticMarkup(<TranscriptLineRow line={line} />);
+    const html = renderClassic(<TranscriptLineRow line={line} />);
     expect(html).toContain('Alice:');
     expect(html).toContain('text-cafe-accent-primary');
     expect(html).toContain('你好世界');
   });
 
   it('omits speaker label element when speaker_label is absent', () => {
-    const html = renderToStaticMarkup(<TranscriptLineRow line={baseLine} />);
+    const html = renderClassic(<TranscriptLineRow line={baseLine} />);
     expect(html).toContain('你好世界');
     expect(html).not.toContain('text-cafe-accent-primary');
   });
 
   it('omits speaker label element when speaker_label is empty string', () => {
     const line: TranscriptLine = { ...baseLine, speaker_label: '' };
-    const html = renderToStaticMarkup(<TranscriptLineRow line={line} />);
+    const html = renderClassic(<TranscriptLineRow line={line} />);
     expect(html).not.toContain('text-cafe-accent-primary');
   });
 
   it('renders timestamp in correct format', () => {
-    const html = renderToStaticMarkup(<TranscriptLineRow line={baseLine} />);
+    const html = renderClassic(<TranscriptLineRow line={baseLine} />);
     expect(html).toMatch(/\[[\d:]+\]/);
   });
 
   it('renders text content', () => {
     const line: TranscriptLine = { ...baseLine, text: '第二句话包含特殊字符 <>&' };
-    const html = renderToStaticMarkup(<TranscriptLineRow line={line} />);
+    const html = renderClassic(<TranscriptLineRow line={line} />);
     expect(html).toContain('第二句话包含特殊字符');
     expect(html).toContain('&amp;');
   });
@@ -64,7 +72,7 @@ describe('TranscriptPanel — TranscriptLineRow', () => {
       input_source: 'app',
       input_label: 'WeLink',
     };
-    const html = renderToStaticMarkup(<TranscriptLineRow line={line} />);
+    const html = renderClassic(<TranscriptLineRow line={line} />);
 
     expect(html).toContain('Speaker 2:');
     expect(html).toContain('WeLink');
@@ -139,6 +147,7 @@ describe('TranscriptPanel — full panel integration', () => {
   });
 
   beforeEach(() => {
+    window.localStorage.setItem('cat-cafe:shell-presentation', 'classic');
     mockApiFetch.mockReset();
     latestEventSource = null;
     container = document.createElement('div');
@@ -151,6 +160,7 @@ describe('TranscriptPanel — full panel integration', () => {
       root.unmount();
     });
     container.remove();
+    window.localStorage.removeItem('cat-cafe:shell-presentation');
   });
 
   /** Set up apiFetch to return transcript lines with speaker fields on /api/audio/transcript */

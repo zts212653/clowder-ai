@@ -30,9 +30,12 @@ export const PLUGIN_HOST_ENTRIES = {
   mediaPostProcessing: 'media-post-processing',
   projectOutputs: 'project-outputs',
   quarantines: 'quarantines.json',
+  externalAccess: 'external-access.json',
+  sharedExtension: 'shared-extension.json',
   dotConnection: 'dot-connection.json',
   dotDispatches: 'dot-dispatches',
   dotImages: 'dot-images',
+  dotMigrationAudit: 'dot-migration-audit.json',
 } as const;
 
 const HOST_ENTRY_NAMES: ReadonlySet<string> = new Set(Object.values(PLUGIN_HOST_ENTRIES));

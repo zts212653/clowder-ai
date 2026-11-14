@@ -47,9 +47,19 @@ export function MessageSourceContext({
       {[context.message, ...context.following].map((message, index) => (
         <div key={message.messageId} ref={index === 0 ? original : undefined}>
           <p className="mb-1 text-xs text-cafe-muted">
-            {index === 0 ? '原文' : index === 1 ? '后面接着：' : '接着说'} ·{' '}
+            {index === 0
+              ? result.selection
+                ? '同条消息（正文、引文与批注）'
+                : '原文'
+              : index === 1
+                ? '后面接着：'
+                : '接着说'}{' '}
+            · {result.selection ? '发布者：' : ''}
             {sourceSpeakerLabel(message, resolveSpeaker)} · {sourceTime(message.timestamp)}
           </p>
+          {index === 0 && result.selection && (
+            <p className="text-xs text-cafe-muted">引文与当条批注的归属以上方分栏为准。</p>
+          )}
           <p className="whitespace-pre-wrap break-words leading-6">
             {paragraphs(message.content).map((part) => (
               <span key={part.start} data-source-paragraph>

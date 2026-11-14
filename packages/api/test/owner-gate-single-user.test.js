@@ -15,6 +15,9 @@
  */
 
 import assert from 'node:assert/strict';
+import { mkdir, mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'node:test';
 import { requireCapabilityWriteOwner } from '../dist/config/capabilities/capability-write-guards.js';
 import { requireOwnerWrite, requireOwnerWriteNetworkGuard } from '../dist/config/owner-write-guards.js';
@@ -206,8 +209,12 @@ describe('Issue #794 — owner gate single-user fallthrough', () => {
 
   describe('skills requireSkillsOwner (via route)', () => {
     let app;
+    let projectRoot;
 
     beforeEach(async () => {
+      projectRoot = await mkdtemp(join(tmpdir(), 'owner-gate-skills-'));
+      const skillsSourceDir = join(projectRoot, 'cat-cafe-skills');
+      await mkdir(skillsSourceDir);
       const Fastify = (await import('fastify')).default;
       app = Fastify();
       app.addHook('preHandler', async (request) => {
@@ -218,13 +225,17 @@ describe('Issue #794 — owner gate single-user fallthrough', () => {
       });
       const { skillsRoutes } = await import('../dist/routes/skills.js');
       const { skillsWriteRoutes } = await import('../dist/routes/skills-write.js');
-      await app.register(skillsRoutes);
-      await app.register(skillsWriteRoutes);
+      await app.register(skillsRoutes, { mainProjectRoot: projectRoot, skillsSourceDir });
+      await app.register(skillsWriteRoutes, { mainProjectRoot: projectRoot, skillsSourceDir });
       await app.ready();
     });
 
     afterEach(async () => {
-      await app?.close();
+      try {
+        await app?.close();
+      } finally {
+        if (projectRoot) await rm(projectRoot, { recursive: true, force: true });
+      }
     });
 
     it('does not 403 on POST /api/skills/sync in single-user mode', async () => {

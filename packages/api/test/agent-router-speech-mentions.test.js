@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { catRegistry } from '@cat-cafe/shared';
 import { migrateRouterOpts } from './helpers/agent-registry-helpers.js';
 
 function createNoopService(catId) {
@@ -30,6 +31,33 @@ function createNoopMessageStore() {
     restore: () => null,
   };
 }
+
+test('user routing accepts stable IDs and slash-separated targets in a nickname-only catalog', async (t) => {
+  const { AgentRouter } = await import('../dist/domains/cats/services/agents/routing/AgentRouter.js');
+  const original = catRegistry.getAllConfigs();
+  t.after(() => {
+    catRegistry.reset();
+    for (const [id, config] of Object.entries(original)) catRegistry.register(id, config);
+  });
+  catRegistry.reset();
+  for (const [id, config] of Object.entries(original)) {
+    catRegistry.register(id, id === 'codex' ? { ...config, mentionPatterns: ['@砚砚'] } : config);
+  }
+  const router = new AgentRouter(
+    await migrateRouterOpts({
+      claudeService: createNoopService('opus'),
+      codexService: createNoopService('codex'),
+      registry: createNoopRegistry(),
+      messageStore: createNoopMessageStore(),
+    }),
+  );
+  const handoff = await router.resolveTargetsAndIntent('@opus/@CODEX 请复核', 'thread-text');
+  assert.equal(handoff.hasMentions, true);
+  assert.deepEqual(handoff.targetCats, ['opus', 'codex']);
+  const path = await router.resolveTargetsAndIntent('@CODEX/docs 已更新', 'thread-text');
+  assert.equal(path.hasMentions, false);
+  assert.deepEqual(path.routing_warnings, []);
+});
 
 test('resolveTargetsAndIntent supports speech-style "at + nickname" mentions', async () => {
   const { AgentRouter } = await import('../dist/domains/cats/services/agents/routing/AgentRouter.js');

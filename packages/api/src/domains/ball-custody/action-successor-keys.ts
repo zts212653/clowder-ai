@@ -8,6 +8,13 @@ function part(value: string): string {
 export const ActionSuccessorKeys = {
   DETAIL_PREFIX: 'action:successor:detail:',
   ALL: 'action:successor:all',
+  RECOVERY_MIGRATION: 'action:successor:recovery-index:v1',
+  recoveryDue(lane: 'return' | 'dispatch' | 'task'): string {
+    return `action:successor:due:${lane}`;
+  },
+  recoveryIndexes(): string[] {
+    return ['return', 'dispatch', 'task'].map((lane) => `action:successor:due:${lane}`);
+  },
   detail(leaseId: string): string {
     return `${this.DETAIL_PREFIX}${part(leaseId)}`;
   },

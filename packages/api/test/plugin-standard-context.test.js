@@ -38,5 +38,5 @@ test('members reads the same global directory without contribution-specific elig
   assert.equal((await f.host().members.get('b')).nickname, 'Bee');
   assert.equal(await f.host().members.get('missing'), null);
   await f.runtime.shutdown('test_stop');
-  await assert.rejects(() => f.host().members.list(), /current/);
+  await assert.rejects(() => f.host().members.list(), /current|Execution lease closed/);
 });

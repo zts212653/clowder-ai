@@ -7,7 +7,7 @@ const frozenL0Schema = z
     schemaVersion: z.literal(1),
     compilerVersion: z.literal(L0_COMPILER_VERSION),
     catId: z.string().min(1),
-    projection: z.enum(['owner', 'public', 'scoped-member']),
+    projection: z.enum(['owner', 'public', 'collective-work', 'scoped-member']),
     template: z.string().min(1),
     sections: z.record(z.string()).readonly(),
     variables: z.record(z.string()).readonly(),

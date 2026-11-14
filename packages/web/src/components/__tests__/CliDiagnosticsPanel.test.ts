@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import type { CliDiagnostics, CliErrorReasonCode } from '@cat-cafe/shared';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -489,7 +490,7 @@ describe('F212 CliDiagnosticsPanel (AC-B2/B3/B4)', () => {
   });
 
   it('renders actual upstream diagnostics with a full request ID, without a VPN instruction', async () => {
-    const { buildCliDiagnostics } = await import('../../../../api/src/utils/cli-diagnostics');
+    const { buildCliDiagnostics } = await import('../../../../api/dist/utils/cli-diagnostics');
     const { CliDiagnosticsPanel } = await import('../CliDiagnosticsPanel');
     const requestId = '7ab62694-a1b3-4ef6-977e-7edb76b44640';
     const diagnostics = buildCliDiagnostics({

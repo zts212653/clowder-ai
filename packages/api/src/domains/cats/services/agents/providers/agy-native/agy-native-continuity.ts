@@ -30,12 +30,18 @@ export function createAgyNativeContinuityInput(
         options?.contentBlocks,
         launch.binding.workspaceRoot,
         options?.uploadDir,
+        launch.volatileL0Context,
       );
       const message = launch.preparedRequest.message;
       if (!('body' in message)) throw new Error('Native launch omitted its exact input contract');
+      const { injectionDecision: _initialDecision, ...messageBase } = message;
       await options?.beforeProviderLaunch?.({
         ...launch.preparedRequest,
-        message: { ...message, body: input.prompt },
+        message: {
+          ...messageBase,
+          body: input.prompt,
+          ...(input.injectionDecision ? { injectionDecision: input.injectionDecision } : {}),
+        },
       });
       options?.signal?.throwIfAborted();
       writer(`${encodeAgyStreamJsonUserMessage(input.prompt)}\n`);

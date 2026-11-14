@@ -12,6 +12,8 @@ vi.mock('@/components/ChatVoiceFeatureControls', () => ({ ChatVoiceFeatureContro
 vi.mock('@/components/workspace/RecentTrajectoryRecall', () => ({ RecentTrajectoryRecall: () => null }));
 vi.mock('@/components/workspace-home/HomeLiveCard', () => ({ HomeLiveCard: () => null }));
 vi.mock('@/components/workspace-home/HomeWaitCard', () => ({ HomeWaitCard: () => null }));
+vi.mock('@/components/workspace-home/HomeStatusSummary', () => ({ HomeStatusSummary: () => null }));
+vi.mock('@/components/workspace-home/HomeWorksSummary', () => ({ HomeWorksSummary: () => null }));
 
 describe('canonical Home card return geometry', () => {
   let container: HTMLDivElement;

@@ -19,6 +19,7 @@ function buildDeps(overrides = {}) {
       append: mock.fn(async (msg) => ({ id: `msg-${Date.now()}`, ...msg })),
       getByThread: mock.fn(async () => []),
       getByThreadBefore: mock.fn(async () => []),
+      getLatestVisibleCursor: mock.fn(async () => null),
     },
     socketManager: {
       broadcastAgentMessage: mock.fn(),
@@ -107,6 +108,7 @@ describe('GET /api/messages source.sender serialization', () => {
         append: mock.fn(async (msg) => ({ id: `msg-${Date.now()}`, ...msg })),
         getByThread: mock.fn(async () => [groupMessage]),
         getByThreadBefore: mock.fn(async () => []),
+        getLatestVisibleCursor: mock.fn(async () => null),
       },
     });
 
@@ -154,6 +156,7 @@ describe('GET /api/messages source.sender serialization', () => {
         append: mock.fn(async (msg) => ({ id: `msg-${Date.now()}`, ...msg })),
         getByThread: mock.fn(async () => [p2pMessage]),
         getByThreadBefore: mock.fn(async () => []),
+        getLatestVisibleCursor: mock.fn(async () => null),
       },
     });
 
@@ -196,6 +199,7 @@ describe('GET /api/messages source.sender serialization', () => {
         append: mock.fn(async (msg) => ({ id: `msg-${Date.now()}`, ...msg })),
         getByThread: mock.fn(async () => [noNameMessage]),
         getByThreadBefore: mock.fn(async () => []),
+        getLatestVisibleCursor: mock.fn(async () => null),
       },
     });
 

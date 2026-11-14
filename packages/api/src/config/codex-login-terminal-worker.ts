@@ -2,7 +2,9 @@
 import { execFileSync, spawn } from 'node:child_process';
 import { existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { closeCatalogProcess } from '../routes/runtime-catalog-process.js';
 import { CliTerminationController } from '../utils/CliTerminationController.js';
+import { resolveWindowsSpawnPlan } from '../utils/cli-spawn-win.js';
 import { withoutUnreviewedCodexEnvironment } from './codex-env-namespace.js';
 
 const requestPath = process.argv[2];
@@ -32,14 +34,27 @@ function ownerGone(): boolean {
 let exitCode = 1;
 if (!existsSync(cancelPath) && !ownerGone()) {
   const args = ['-c', 'cli_auth_credentials_store="file"', 'login'];
-  const child = spawn(request.command, args, { cwd: request.cwd, env, stdio: 'inherit' });
+  const plan =
+    process.platform === 'win32' ? resolveWindowsSpawnPlan(request.command, args) : { command: request.command, args };
+  const child = spawn(plan.command, plan.args, {
+    cwd: request.cwd,
+    env,
+    stdio: 'inherit',
+    shell: 'shell' in plan ? plan.shell : false,
+  });
+  writeFileSync(join(request.home, '..', 'terminal-ready'), '', { mode: 0o600 });
   let exited = false;
   const termination = new CliTerminationController({
     child,
     isChildExited: () => exited,
     graces: { interruptMs: 300, terminateMs: 300 },
   });
-  const cancel = () => termination.request('interrupt-first');
+  let cancellation: Promise<void> | undefined;
+  const cancel = () => {
+    if (process.platform === 'win32') {
+      cancellation ??= closeCatalogProcess(child, requestPath);
+    } else termination.request('interrupt-first');
+  };
   process.once('SIGTERM', cancel);
   process.once('SIGINT', cancel);
   const monitor = setInterval(() => {
@@ -54,16 +69,28 @@ if (!existsSync(cancelPath) && !ownerGone()) {
       });
       child.once('exit', (code) => resolve(code ?? 1));
     });
-    if (termination.getState() !== 'running' || existsSync(cancelPath)) exitCode = 1;
+    if (cancellation || termination.getState() !== 'running' || existsSync(cancelPath)) exitCode = 1;
     if (exitCode === 0) {
       // A successful native login AND its official status are required; no raw output is persisted.
       try {
-        execFileSync(request.command, [...args, 'status'], { cwd: request.cwd, env, timeout: 5000, stdio: 'ignore' });
+        const status =
+          process.platform === 'win32'
+            ? resolveWindowsSpawnPlan(request.command, [...args, 'status'])
+            : { command: request.command, args: [...args, 'status'] };
+        execFileSync(status.command, status.args, {
+          cwd: request.cwd,
+          env,
+          timeout: 5000,
+          stdio: 'ignore',
+          shell: 'shell' in status ? status.shell : false,
+          windowsHide: true,
+        });
       } catch {
         exitCode = 1;
       }
     }
   } finally {
+    await cancellation;
     exited = true;
     termination.markExited();
     clearInterval(monitor);

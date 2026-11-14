@@ -62,11 +62,18 @@ function expectedJourneys(testPath) {
 const testPath = currentTestPath();
 const expectedForCurrentTest = expectedJourneys(testPath);
 after(() => {
-  for (const journey of expectedForCurrentTest) {
-    const key = journeyKey(journey);
-    const label = `${journey.journeyId} (${journey.surfaceTestId})`;
-    assert.ok(registeredJourneys.has(key), `${label}: claimed default-entry journey tuple was never registered`);
-    assert.ok(completedJourneys.has(key), `${label}: claimed default-entry journey tuple never completed`);
+  try {
+    for (const journey of expectedForCurrentTest) {
+      const key = journeyKey(journey);
+      const label = `${journey.journeyId} (${journey.surfaceTestId})`;
+      assert.ok(registeredJourneys.has(key), `${label}: claimed default-entry journey tuple was never registered`);
+      assert.ok(completedJourneys.has(key), `${label}: claimed default-entry journey tuple never completed`);
+    }
+  } catch (error) {
+    // Throwing here makes node:test skip later suite cleanup hooks. Keep the
+    // claim failure visible and the file red while allowing those hooks to run.
+    console.error(error);
+    process.exitCode ||= 1;
   }
 });
 

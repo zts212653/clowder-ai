@@ -1,12 +1,10 @@
 'use client';
-import Link from 'next/link';
 import { useState } from 'react';
-import { openExactPlace } from '@/components/shell/mailbox/open-exact-place';
-import { useWorkspaceChatReveal } from '@/components/workbench/WorkspaceChatReveal';
-import { recallDeliveryLabel, recallResultHref, recallResultTitle, recallTypeLabel } from '@/hooks/recall-display';
+import { recallDeliveryLabel, recallResultTitle, recallTypeLabel } from '@/hooks/recall-display';
 import type { RecallKind } from '@/hooks/recall-feed-model';
 import { recallEventDisplayTitle, recallEventResultLabel, recallKind } from '@/hooks/recall-feed-model';
 import type { RecallEvent } from '@/hooks/recall-types';
+import { RecallDestinations } from './RecallDestinations';
 
 export function RecallIcon({ kind }: { kind: RecallKind }) {
   return (
@@ -40,6 +38,25 @@ export function RecallIcon({ kind }: { kind: RecallKind }) {
     </svg>
   );
 }
+function recallEmptyDetail(event: RecallEvent): string {
+  switch (event.resultStatus) {
+    case 'error':
+      return '工具调用失败';
+    case 'timeout':
+      return '工具调用超时';
+    case 'cancelled':
+      return '检索在返回结果前取消';
+    case 'parser_miss':
+      return '工具已返回，结果未能解析';
+    case 'result_unmerged':
+      return '这次检索的结果尚未记录';
+    case 'no_results':
+      return '没有命中';
+    default:
+      return event.resultCount === 0 ? '没有命中' : '命中详情没有记录下来';
+  }
+}
+
 export function RecallCard({
   event,
   allowDeliveryExpansion = true,
@@ -48,14 +65,16 @@ export function RecallCard({
   allowDeliveryExpansion?: boolean;
 }) {
   const [expanded, setExpanded] = useState(false);
-  const revealChat = useWorkspaceChatReveal();
   const title = recallEventDisplayTitle(event);
   const results = event.results ?? [];
   const kind = recallKind(event);
   const expandable = kind !== 'delivery' || allowDeliveryExpansion;
   const summary = (
     <>
-      <span className="mt-1 text-cafe-secondary" title={{ search: '检索', graph: '关系查询', delivery: '递送' }[kind]}>
+      <span
+        className="mt-1 text-cafe-secondary"
+        title={{ search: '检索', graph: '关系查询', delivery: '递送', read: '读取' }[kind]}
+      >
         <RecallIcon kind={kind} />
       </span>
       <span className="min-w-0 flex-1">
@@ -85,9 +104,7 @@ export function RecallCard({
       )}
       {expandable && expanded && (
         <div className="ml-8 mt-1 rounded-lg border border-cafe-border-subtle bg-cafe-surface-canvas px-3 py-1 text-compact">
-          {!results.length && (
-            <p className="py-3 text-cafe-secondary">{event.resultCount === 0 ? '没有命中' : '命中详情没有记录下来'}</p>
-          )}
+          {!results.length && <p className="py-3 text-cafe-secondary">{recallEmptyDetail(event)}</p>}
           {results.map((item, index) => (
             <div
               key={`${item.anchor ?? item.title}:${index}`}
@@ -104,34 +121,7 @@ export function RecallCard({
                 <span className="text-cafe-secondary">
                   {event.cueStatus ? recallEventResultLabel(event) : item.consumed ? '之后读了' : '之后没看到读取'}
                 </span>
-                {recallResultHref(item) && (
-                  <Link
-                    href={recallResultHref(item)!}
-                    onClick={(event) => {
-                      if (
-                        event.defaultPrevented ||
-                        event.button !== 0 ||
-                        event.metaKey ||
-                        event.ctrlKey ||
-                        event.shiftKey ||
-                        event.altKey
-                      )
-                        return;
-                      const source = /^\/thread\/([A-Za-z0-9_-]{1,200})\?message=([A-Za-z0-9_-]{1,200})$/.exec(
-                        recallResultHref(item) ?? '',
-                      );
-                      if (!source) return;
-                      event.preventDefault();
-                      // The Chat host owns panel visibility (it re-opens a 'workspace' panel on its own);
-                      // ask it to reveal this conversation so the exact message is not left under the overlay.
-                      revealChat?.(source[1]);
-                      openExactPlace(`message:${source[1]}:${source[2]}`, window.location.pathname);
-                    }}
-                    className="text-cafe-accent hover:underline"
-                  >
-                    打开<span className="sr-only"> {recallResultTitle(item)}</span>
-                  </Link>
-                )}
+                <RecallDestinations item={item} />
               </div>
             </div>
           ))}

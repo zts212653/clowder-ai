@@ -2,6 +2,7 @@ import { useLayoutEffect, useState, useSyncExternalStore } from 'react';
 import { createRoot } from 'react-dom/client';
 import '@/app/globals.css';
 import { ChatMessage } from '@/components/ChatMessage';
+import { ContextAttachmentList } from '@/components/ContextAttachmentView';
 import { MessageViewportBoundary } from '@/components/MessageViewportBoundary';
 import { MessageSearchButton } from '@/components/message-search/MessageSearchButton';
 import { MessageSearchOverlay } from '@/components/message-search/MessageSearchOverlay';
@@ -32,6 +33,8 @@ function ControlledReadingSurface() {
   const threadId = routeThread === 'default' ? 'recall-controlled' : routeThread;
   useLayoutEffect(() => useChatStore.getState().setCurrentThread(threadId), [threadId]);
   const longMessage = new URLSearchParams(window.location.search).has('proofLong');
+  const answerCard = new URLSearchParams(window.location.search).has('proofAnswer');
+  const queuedQuote = useChatStore((state) => state.pendingChatInsert);
   const history = useChatHistory(threadId);
   const messages = useThreadMessages(threadId);
   const host = useMessageSearchHost({
@@ -91,7 +94,7 @@ function ControlledReadingSurface() {
           >
             {messages.map((message) => (
               <MessageViewportBoundary key={message.id} messageId={message.id} eager>
-                {longMessage && message.id === 'old-0' ? (
+                {(longMessage && message.id === 'old-0') || answerCard ? (
                   <ChatMessage message={message} getCatById={getCatById} threadId={threadId} />
                 ) : (
                   <article data-message-id={message.id} className="min-h-[160px] py-6 text-sm text-cafe-secondary">
@@ -104,6 +107,11 @@ function ControlledReadingSurface() {
           </div>
         </div>
         <footer className="shrink-0 border-t border-[var(--console-border-soft)] p-4 text-sm text-cafe-secondary">
+          {answerCard && queuedQuote?.threadId === threadId && (
+            <div role="region" aria-label="聊天输入的引用">
+              <ContextAttachmentList attachments={queuedQuote.contextAttachments ?? []} onRemove={() => {}} />
+            </div>
+          )}
           原阅读表面 · Host 控件在浮层
         </footer>
       </div>

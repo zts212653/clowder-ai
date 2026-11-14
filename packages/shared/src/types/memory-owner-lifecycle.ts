@@ -209,6 +209,7 @@ export interface MemoryOwnerActionReceipt {
 }
 
 export interface MemoryOwnerSourceCoordinate {
+  speaker?: string;
   label: string;
   occurredAt: number | null;
   canOpen: boolean;

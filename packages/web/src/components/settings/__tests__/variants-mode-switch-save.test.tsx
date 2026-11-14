@@ -9,8 +9,8 @@ vi.mock('@/utils/api-client', () => ({ apiFetch: vi.fn() }));
 const variants: NonNullable<PluginManagerConfigField['configurationVariants']> = {
   discriminator: 'mode',
   branches: [
-    { id: 'hook', when: { properties: { mode: { const: 'hook' } } }, fields: ['token'] },
-    { id: 'socket', when: { properties: { mode: { const: 'socket' } } }, fields: [] },
+    { id: 'hook', when: { properties: { mode: { const: 'hook' } } }, fields: ['token', 'start-hook'] },
+    { id: 'socket', when: { properties: { mode: { const: 'socket' } } }, fields: ['start-socket'] },
   ],
 };
 const field = (
@@ -123,6 +123,29 @@ it('omits the inactive branch token when switching back to the socket branch', a
       const updates = onSave.mock.calls[0]![0] as { key: string; value: string | null }[];
       expect(updates.find((u) => u.key === 'mode')?.value).toBe('socket');
       expect(updates.some((u) => u.key === 'token')).toBe(false);
+    },
+  );
+});
+it('shows only the operation owned by the selected branch', async () => {
+  const operation = (key: string, label: string) =>
+    field(key, {
+      kind: 'operation',
+      label,
+      actions: [{ id: 'start', label, render: 'button' }],
+    });
+  await withForm(
+    [
+      mode('socket'),
+      field('token', { kind: 'secret', required: true, sensitive: true }),
+      operation('start-hook', 'Start Hook'),
+      operation('start-socket', 'Start Socket'),
+    ],
+    async (container) => {
+      expect(container.textContent).not.toContain('Start Hook');
+      expect(container.textContent).toContain('Start Socket');
+      await chooseMode(container, 'hook');
+      expect(container.textContent).toContain('Start Hook');
+      expect(container.textContent).not.toContain('Start Socket');
     },
   );
 });

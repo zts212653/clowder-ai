@@ -1,3 +1,4 @@
+import { isDshLauncher } from '@cat-cafe/shared';
 import type { CatData } from '@/hooks/useCatData';
 import { autoSlug, type HubCatEditorFormState, initialState } from '../hub-cat-editor.model';
 import { matchesRuntime, type RuntimeChoice, runtimeDefaults } from '../settings/members/member-runtime-draft';
@@ -14,9 +15,12 @@ export interface NativePartner {
   selected: boolean;
   /** Persisted before POST; independent of descriptor-based UI identity and member ID. */
   creationRequestKey?: string;
+  /** Exact prepared write intent retained across an uncertain POST response. */
+  creationForm?: HubCatEditorFormState;
   /** Upgrade-only marker: several old descriptors shared this pending request key. */
   legacySharedRequestKey?: string;
   existingId?: string;
+  identityConflict?: boolean;
   missingExisting?: boolean;
   recoverable?: { id: string; form: HubCatEditorFormState };
 }
@@ -35,11 +39,35 @@ export const newNativeRequestKey = () =>
  */
 export function nativeRuntimeSelectable(runtime: RuntimeChoice, form?: HubCatEditorFormState): boolean {
   if (!runtime.installed || (runtime.clientId === 'acp' && !runtime.acp)) return false;
+  if (runtime.acp && isDshLauncher(runtime.acp.command, runtime.acp.startupArgs)) {
+    return runtime.discoveryStatus !== 'acp_profile_invalid';
+  }
   if (form && !usesDetectedRuntimeConfiguration(form, runtime)) return true;
   if (['openai', 'anthropic'].includes(runtime.clientId) && runtime.readiness) {
     return runtime.readiness.status === 'configured';
   }
   return runtime.readiness?.status !== 'login_required';
+}
+
+/** Protect visible identities without inferring template ownership from a runtime. */
+export function hasNativeIdentityConflict(
+  partner: Pick<NativePartner, 'form' | 'existingId' | 'legacySharedRequestKey'>,
+  cats: Pick<CatData, 'id' | 'nickname' | 'displayName'>[],
+  selected: NativePartner[] = [],
+) {
+  // Legacy shared-key requests must replay unchanged before their ownership is known.
+  if (partner.existingId || partner.legacySharedRequestKey) return false;
+  const identity = (member: Pick<CatData, 'nickname' | 'displayName'>) =>
+    (member.nickname?.trim() || member.displayName.trim()).normalize('NFKC').toLowerCase();
+  const key = identity(partner.form);
+  return (
+    key !== '' &&
+    // Existing receipt handling owns same-ID retries, including old shared ACP keys.
+    (cats.some((cat) => cat.id !== partner.form.catId && identity(cat) === key) ||
+      selected.some(
+        (peer) => (peer.existingId ?? peer.form.catId) !== partner.form.catId && identity(peer.form) === key,
+      ))
+  );
 }
 
 /** Registry-generated ACP ids change after creation; the launch descriptor does not. */
@@ -61,6 +89,7 @@ export function recommendNativePartners(
   const reservedIds = new Set(cats.map((cat) => cat.id.toLowerCase()));
   const reservedAliases = new Set(cats.flatMap((cat) => cat.mentionPatterns.map((alias) => alias.toLowerCase())));
   return runtimes.flatMap((runtime) => {
+    if (runtime.onboardingEligible === false) return [];
     // Keep existing/manual OpenCode members, but do not recommend new ones during the compatibility pause.
     if (runtime.clientId === 'opencode') return [];
     const descriptor = JSON.stringify([
@@ -71,7 +100,7 @@ export function recommendNativePartners(
     ]);
     // Full descriptor equality prevents short-hash collisions in the local partner index.
     const key = runtime.acp ? `acp:${encodeURIComponent(descriptor)}` : runtime.id;
-    const discoveryIdentity = runtime.acp ? descriptor : runtime.id;
+    const discoveryIdentity = runtime.dshDesktop ? 'dsh' : runtime.acp ? descriptor : runtime.id;
     if (seen.has(discoveryIdentity)) return [];
     seen.add(discoveryIdentity);
     const form = nativePartnerIdentity(runtime, templates, cats);
@@ -95,18 +124,18 @@ export function recommendNativePartners(
     reservedIds.add(catId.toLowerCase());
     const existingForm = existing ? initialState(existing) : undefined;
     const persistedForm = existingForm ? withLegacyNativeIdentityRepair(existingForm, form, runtime) : undefined;
-    return [
-      {
-        id: key,
-        creationRequestKey: runtime.acp ? newNativeRequestKey() : key,
-        runtime,
-        form: persistedForm
-          ? persistedForm
-          : { ...form, ...runtimeDefaults(runtime), catId, mentionPatterns: uniqueAlias },
-        selected: nativeRuntimeSelectable(runtime, persistedForm),
-        ...(existing ? { existingId: existing.id } : {}),
-      },
-    ];
+    const partner = {
+      id: key,
+      creationRequestKey: runtime.acp ? newNativeRequestKey() : key,
+      runtime,
+      form: persistedForm
+        ? persistedForm
+        : { ...form, ...runtimeDefaults(runtime), catId, mentionPatterns: uniqueAlias },
+      selected: nativeRuntimeSelectable(runtime, persistedForm),
+      ...(existing ? { existingId: existing.id } : {}),
+    };
+    const identityConflict = hasNativeIdentityConflict(partner, cats);
+    return [{ ...partner, identityConflict, selected: partner.selected && !identityConflict }];
   });
 }
 

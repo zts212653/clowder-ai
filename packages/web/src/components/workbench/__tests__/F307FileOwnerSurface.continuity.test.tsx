@@ -2,28 +2,20 @@ import { act, type ReactNode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useChatStore } from '@/stores/chatStore';
+import { createFakeHubSocket, type FakeHubSocket, withHubSocket } from '@/test-utils/fake-hub-socket';
 import { writeShellPresentation } from '../../shell/shell-presentation';
 import { useF307ExperienceWorkbenchStore } from '../experience-workbench-store';
 import { F307FileOwnerSurface } from '../F307FileOwnerSurface';
 import { createFileSurface, createFilesSurface } from '../real-surface-adapters';
+import { WorkspaceSurfaceVisibilityProvider } from '../WorkspaceSurfaceVisibility';
 
 const mocks = vi.hoisted(() => ({
   apiFetch: vi.fn(),
-  handlers: new Map<string, (payload?: unknown) => void>(),
-  emit: vi.fn(),
-  disconnect: vi.fn(),
 }));
 
 vi.mock('@/utils/api-client', () => ({
   API_URL: 'http://localhost:3102',
   apiFetch: (...args: unknown[]) => mocks.apiFetch(...args),
-}));
-vi.mock('socket.io-client', () => ({
-  io: () => ({
-    on: (event: string, handler: (payload?: unknown) => void) => mocks.handlers.set(event, handler),
-    emit: mocks.emit,
-    disconnect: mocks.disconnect,
-  }),
 }));
 vi.mock('../content-review/WorkspaceContentReviewSurface', () => ({
   WorkspaceContentReviewSurface: ({
@@ -72,14 +64,15 @@ vi.mock('@/components/workspace/WorkspaceFileViewer', () => ({
 describe('F307 file owner continuity', () => {
   let container: HTMLDivElement;
   let root: Root;
+  let fake: FakeHubSocket;
   let content = 'owner-a';
   let sha256 = 'sha-a';
 
   beforeEach(() => {
     (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-    mocks.handlers.clear();
-    mocks.emit.mockReset();
-    mocks.disconnect.mockReset();
+    content = 'owner-a';
+    sha256 = 'sha-a';
+    fake = createFakeHubSocket();
     mocks.apiFetch.mockReset().mockImplementation(async (url: string) => {
       if (url.startsWith('/api/workspace/file?')) {
         return new Response(
@@ -92,7 +85,7 @@ describe('F307 file owner continuity', () => {
     useChatStore.setState({ presentationLock: null, workspaceScrollTop: null });
     container = document.createElement('div');
     document.body.appendChild(container);
-    root = createRoot(container);
+    root = withHubSocket(createRoot(container), fake.hub);
   });
 
   afterEach(() => {
@@ -102,13 +95,15 @@ describe('F307 file owner continuity', () => {
     delete (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT;
   });
 
-  async function renderOwner(worktreeId = 'worktree-a') {
+  async function renderOwner(worktreeId = 'worktree-a', visible = true) {
     await act(async () => {
       root.render(
-        <F307FileOwnerSurface
-          surface={createFileSurface({ worktreeId, path: 'README.md' })}
-          onRequestDetach={() => undefined}
-        />,
+        <WorkspaceSurfaceVisibilityProvider visible={visible}>
+          <F307FileOwnerSurface
+            surface={createFileSurface({ worktreeId, path: 'README.md' })}
+            onRequestDetach={() => undefined}
+          />
+        </WorkspaceSurfaceVisibilityProvider>,
       );
       await Promise.resolve();
       await Promise.resolve();
@@ -120,6 +115,8 @@ describe('F307 file owner continuity', () => {
   }
 
   const fileReads = () => mocks.apiFetch.mock.calls.filter(([url]) => String(url).startsWith('/api/workspace/file?'));
+  const emitted = (event: string) => fake.emitted(event).map(([payload]) => payload);
+  const lastWatchId = () => (emitted('workspace:watch-file').at(-1) as { watchId?: string } | undefined)?.watchId;
 
   it('uses the original file viewport ports for only the exact locked worktree and path', async () => {
     writeShellPresentation('v2');
@@ -233,15 +230,25 @@ describe('F307 file owner continuity', () => {
     expect(fileReads()).toHaveLength(1);
     expect(container.querySelector('[data-testid="file-owner-viewer"]')).toBe(viewer);
 
-    mocks.handlers.get('connect')?.();
-    expect(mocks.emit).toHaveBeenCalledWith('workspace:watch-file', {
+    fake.connect();
+    expect(emitted('workspace:watch-file')).toContainEqual({
+      watchId: expect.any(String),
       worktreeId: 'worktree-a',
       path: 'README.md',
       sha256: 'sha-a',
     });
+    const watchId = lastWatchId();
 
-    mocks.handlers.get('workspace:file-changed')?.({
+    fake.deliver('workspace:file-changed', {
+      watchId,
       worktreeId: 'worktree-b',
+      path: 'README.md',
+      sha256: 'sha-b',
+    });
+    // Another watch's change on a shared socket is not this owner's.
+    fake.deliver('workspace:file-changed', {
+      watchId: 'another-watch',
+      worktreeId: 'worktree-a',
       path: 'README.md',
       sha256: 'sha-b',
     });
@@ -250,7 +257,8 @@ describe('F307 file owner continuity', () => {
     content = 'owner-a-updated';
     sha256 = 'sha-b';
     await act(async () => {
-      mocks.handlers.get('workspace:file-changed')?.({
+      fake.deliver('workspace:file-changed', {
+        watchId,
         worktreeId: 'worktree-a',
         path: 'README.md',
         sha256: 'sha-b',
@@ -264,7 +272,8 @@ describe('F307 file owner continuity', () => {
     content = 'must-not-replace-draft';
     sha256 = 'sha-c';
     await act(async () => {
-      mocks.handlers.get('workspace:file-changed')?.({
+      fake.deliver('workspace:file-changed', {
+        watchId,
         worktreeId: 'worktree-a',
         path: 'README.md',
         sha256: 'sha-c',
@@ -274,5 +283,24 @@ describe('F307 file owner continuity', () => {
     expect(fileReads()).toHaveLength(2);
     expect(viewer?.dataset.content).toBe('owner-a-updated');
     expect(viewer?.dataset.pendingExternalSha).toBe('sha-c');
+  });
+
+  it('watches the file only while its surface is visible and releases its own watch', async () => {
+    await renderOwner('worktree-a', false);
+    expect(fileReads()).toHaveLength(1);
+    fake.connect();
+    expect(emitted('workspace:watch-file')).toHaveLength(0);
+
+    // Already connected: becoming visible watches at once with the loaded sha.
+    await renderOwner('worktree-a', true);
+    expect(emitted('workspace:watch-file')).toEqual([
+      { watchId: expect.any(String), worktreeId: 'worktree-a', path: 'README.md', sha256: 'sha-a' },
+    ]);
+    const watchId = lastWatchId();
+
+    await renderOwner('worktree-a', false);
+    expect(emitted('workspace:unwatch-file')).toEqual([{ watchId }]);
+    // The page connection stays up; only this surface's listener is gone.
+    expect(fake.listenerCount('workspace:file-changed')).toBe(0);
   });
 });

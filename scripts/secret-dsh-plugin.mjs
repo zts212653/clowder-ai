@@ -1,3 +1,4 @@
+import { nativeAuthenticationDenial } from './native-auth-effect.mjs';
 import { nativeSecretDenial } from './native-secret-policy.mjs';
 
 export const name = 'cat-cafe-secret-content';
@@ -10,11 +11,13 @@ export function apply(ctx) {
     if (!['bash', 'shell', 'exec_command', 'run_command'].includes(execution.name.toLowerCase())) return undefined;
     try {
       return (
+        nativeAuthenticationDenial(execution.arguments) ??
         nativeSecretDenial({
           tool_name: execution.name,
           tool_input: execution.arguments,
           cwd: execution.agent?.session ? ctx.workingDirectory.get(execution.agent.session) : process.cwd(),
-        }) ?? undefined
+        }) ??
+        undefined
       );
     } catch {
       return 'secret_payload_uninspectable';

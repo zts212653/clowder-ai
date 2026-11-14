@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { existsSync, mkdtempSync, readFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
@@ -55,7 +55,7 @@ test('real ACP Host preserves a Pi load failure instead of silently starting a r
       workingDirectory: root,
       sessionId: 'old-native-id',
     });
-    assert.equal(messages.find((m) => m.type === 'error')?.errorCode, 'prompt_failure');
+    assert.equal(messages.find((m) => m.type === 'error')?.errorCode, 'init_failure');
     assert.equal(
       messages.some((m) => m.type === 'session_init'),
       false,
@@ -70,7 +70,9 @@ test('real ACP Host classifies empty turns, recovers final text, accepts tool-on
     const service = serviceFor(client, root);
     for (const prompt of ['empty', 'empty-string', 'thinking-only']) {
       const messages = await collect(service, prompt, { workingDirectory: root });
-      assert.equal(messages.find((m) => m.type === 'error')?.errorCode, 'empty_response');
+      const failure = messages.find((m) => m.type === 'error');
+      assert.equal(failure?.errorCode, 'prompt_failure');
+      assert.match(failure.error, /Pi.*without usable assistant text or tool calls/);
     }
     for (const prompt of ['empty-delta-final', 'tool-only']) {
       const messages = await collect(service, prompt, { workingDirectory: root });
@@ -87,6 +89,63 @@ test('real ACP Host classifies empty turns, recovers final text, accepts tool-on
     assert.match(failure.error, /model is unavailable/);
     assert.doesNotMatch(failure.error, /secret-fixture-token/);
   }));
+
+test('empty Pi turns report sanitized CLI diagnostics through the real ACP Host and allow retry', () =>
+  fixture(async ({ root, make }) => {
+    const client = make();
+    await client.initialize();
+    const sessionId = (await client.newSession(root, [])).sessionId;
+    const service = serviceFor(client, root);
+    const failure = (await collect(service, 'empty-diagnostic', { workingDirectory: root, sessionId })).find(
+      (message) => message.type === 'error',
+    );
+    assert.equal(failure?.errorCode, 'prompt_failure');
+    assert.doesNotMatch(failure.error, /provider quota exhausted|secret-empty-response-token/);
+    assert.match(failure.metadata.cliDiagnostics.safeExcerpt, /provider quota exhausted/);
+    assert.doesNotMatch(failure.metadata.cliDiagnostics.safeExcerpt, /secret-empty-response-token/);
+    assert.equal(failure.metadata.cliDiagnostics.reasonCode, undefined);
+    const retry = await collect(service, 'normal', { workingDirectory: root, sessionId });
+    assert.equal(
+      retry.some((message) => message.type === 'error'),
+      false,
+    );
+    assert.ok(retry.some((message) => message.type === 'text'));
+  }));
+
+for (const diagnostic of [
+  'MCP server initialized successfully',
+  'capacity monitor initialized normally',
+  'Internal error: turn failed: llm-deepseek: no API key for provider route "deepseek-official"; store DEEPSEEK_API_KEY through the credentials service',
+]) {
+  for (const incomplete of [false, true]) {
+    test(`Pi ${incomplete ? 'incomplete' : 'empty'} settled preserves neutral classification with recent ${diagnostic}`, () =>
+      fixture(async ({ root, make }) => {
+        writeFileSync(join(root, 'diagnostic-text'), diagnostic);
+        if (incomplete) writeFileSync(join(root, 'incomplete-diagnostic'), '');
+        const client = make();
+        await client.initialize();
+        const sessionId = (await client.newSession(root, [])).sessionId;
+        const service = serviceFor(client, root);
+        const options = { workingDirectory: root, sessionId };
+        const failure = (await collect(service, 'empty-diagnostic', options)).find((m) => m.type === 'error');
+        assert.equal(failure?.errorCode, 'prompt_failure');
+        assert.equal(failure.error.includes(diagnostic), false);
+        assert.ok(failure.metadata.cliDiagnostics.safeExcerpt.includes(diagnostic));
+        assert.equal(failure.metadata.cliDiagnostics.reasonCode, undefined);
+        assert.doesNotMatch(failure.error, /服务端容量不足|MCP 服务端错误/);
+        const retry = await collect(service, 'normal', options);
+        assert.equal(
+          retry.some((m) => m.type === 'error'),
+          false,
+        );
+        assert.ok(retry.some((m) => m.type === 'text'));
+        const later = (await collect(service, 'empty', options)).find((m) => m.type === 'error');
+        assert.equal(later?.errorCode, 'prompt_failure', 'stale diagnostics cannot classify a later empty turn');
+        assert.equal(later.error.includes(diagnostic), false);
+        assert.ok(later.metadata.cliDiagnostics.safeExcerpt.includes(diagnostic));
+      }));
+  }
+}
 
 test('actual ACP pool evicts the bridge and restores the same Pi history in a new process', () =>
   fixture(async ({ root, make }) => {
@@ -138,7 +197,19 @@ test('a native writer without bridge state blocks recovery until the actual writ
       assert.equal((await native.request('get_state')).sessionId, id);
       const second = make();
       await second.initialize();
-      await assert.rejects(second.loadSession(id, root, []), /写者|占用/);
+      await assert.rejects(second.loadSession(id, root, []), (error) => {
+        assert.ok(error instanceof AcpSessionBindingError);
+        assert.match(error.cause.data.diagnostics, /writer|写者|占用/i);
+        return true;
+      });
+      const messages = await collect(serviceFor(second, root), 'normal', { workingDirectory: root, sessionId: id });
+      const failure = messages.find((message) => message.type === 'error');
+      assert.equal(failure?.errorCode, 'init_failure');
+      assert.equal(
+        messages.some((message) => message.type === 'session_init'),
+        false,
+      );
+      assert.match(failure.metadata.cliDiagnostics.safeExcerpt, /writer|写者|占用/i);
       await native.close();
       assert.equal((await second.loadSession(id, root, [])).sessionId, id);
     } finally {

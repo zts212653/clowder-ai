@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs';
-import { parse as parseYaml } from 'yaml';
+import { readMarkdownFrontmatter } from './markdown-frontmatter.js';
 
 export type DescriptionSource = 'human' | 'model' | 'imported';
 export type DiagnosticLevel = 'error' | 'warn';
@@ -74,43 +74,15 @@ export function loadProfileEntries(paths: string[]): LoadProfileEntriesResult {
 }
 
 function parseFrontmatter(content: string, path: string): { parts: FrontmatterParts; diagnostics: ParseDiagnostic[] } {
-  const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/);
-  if (!match) {
-    return {
-      parts: { frontmatter: {}, body: content },
-      diagnostics: [
-        {
-          path,
-          level: 'error',
-          code: 'f243/missing-frontmatter',
-          message: 'missing YAML frontmatter',
-        },
-      ],
-    };
+  const header = readMarkdownFrontmatter(content);
+  if (header.status === 'parsed') {
+    return { parts: { frontmatter: header.data, body: header.body }, diagnostics: [] };
   }
-
-  try {
-    const parsed = parseYaml(match[1] ?? '') as unknown;
-    return {
-      parts: {
-        frontmatter: isRecord(parsed) ? parsed : {},
-        body: content.slice(match[0].length),
-      },
-      diagnostics: [],
-    };
-  } catch (error) {
-    return {
-      parts: { frontmatter: {}, body: content.slice(match[0].length) },
-      diagnostics: [
-        {
-          path,
-          level: 'error',
-          code: 'f243/invalid-frontmatter',
-          message: error instanceof Error ? error.message : 'invalid YAML frontmatter',
-        },
-      ],
-    };
-  }
+  const diagnostic: ParseDiagnostic =
+    header.status === 'missing'
+      ? { path, level: 'error', code: 'f243/missing-frontmatter', message: 'missing YAML frontmatter' }
+      : { path, level: 'error', code: 'f243/invalid-frontmatter', message: header.message };
+  return { parts: { frontmatter: {}, body: header.body }, diagnostics: [diagnostic] };
 }
 
 function buildEntry(path: string, frontmatter: Record<string, unknown>, body: string): ProfileEntry {
@@ -266,10 +238,6 @@ function stringArrayField(value: unknown): string[] {
     return value.map((item) => stringField(item)).filter((item): item is string => Boolean(item));
   const single = stringField(value);
   return single ? [single] : [];
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 function hasOwn(value: Record<string, unknown>, key: string): boolean {

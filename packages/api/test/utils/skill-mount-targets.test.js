@@ -2,7 +2,13 @@ import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 
 import { DEFAULT_MOUNT_RULES } from '@cat-cafe/shared';
-import { buildMountPointDirCandidates, buildSkillMountTargets } from '../../dist/utils/skill-mount.js';
+import {
+  buildMountPointDirCandidates,
+  buildProjectSkillMountDirs,
+  buildProjectSkillMountTargets,
+  buildSkillMountTargets,
+  symlinkTargetFor,
+} from '../../dist/utils/skill-mount.js';
 
 const PROJECT = '/tmp/proj';
 const HOME = '/home/user';
@@ -118,5 +124,52 @@ describe('buildSkillMountTargets (F228)', () => {
     };
     const targets = buildSkillMountTargets(PROJECT, HOME, rules);
     assert.deepEqual(targets, []);
+  });
+});
+
+describe('project-local skill mount dirs (F314-12: one implementation for mount, sync, drift and plugin sync)', () => {
+  const rules = {
+    ...DEFAULT_MOUNT_RULES,
+    mountPoints: {
+      ...DEFAULT_MOUNT_RULES.mountPoints,
+      gemini: { enabled: false, path: '.gemini/skills' },
+    },
+    customPaths: [
+      { alias: 'acp', path: 'agents/skills' },
+      { alias: 'home-tool', path: '~/tool/skills' },
+    ],
+  };
+
+  test('groups enabled standard project dirs and custom dirs by mount point; home candidates are left out', () => {
+    assert.deepEqual(buildProjectSkillMountTargets(PROJECT, HOME, rules), [
+      { id: 'claude', kind: 'standard', dirs: ['/tmp/proj/.claude/skills'] },
+      { id: 'codex', kind: 'standard', dirs: ['/tmp/proj/.codex/skills'] },
+      { id: 'kimi', kind: 'standard', dirs: ['/tmp/proj/.kimi-code/skills'] },
+      { id: 'acp', kind: 'custom', dirs: ['/tmp/proj/agents/skills'] },
+      { id: 'home-tool', kind: 'custom', dirs: ['/home/user/tool/skills'] },
+    ]);
+  });
+
+  test('the grouped targets and the flat dir list name the same directories', () => {
+    const grouped = buildProjectSkillMountTargets(PROJECT, HOME, rules).flatMap((t) => t.dirs);
+    assert.deepEqual(grouped, buildProjectSkillMountDirs(PROJECT, HOME, rules));
+  });
+
+  test('cleanup dirs add the disabled standard mount points, in standard order', () => {
+    assert.deepEqual(buildProjectSkillMountDirs(PROJECT, HOME, rules, { includeDisabledStandardMountPoints: true }), [
+      '/tmp/proj/.claude/skills',
+      '/tmp/proj/.codex/skills',
+      '/tmp/proj/.gemini/skills',
+      '/tmp/proj/.kimi-code/skills',
+      '/tmp/proj/agents/skills',
+      '/home/user/tool/skills',
+    ]);
+  });
+
+  test('skill links are relative on POSIX', { skip: process.platform === 'win32' }, () => {
+    assert.equal(
+      symlinkTargetFor('/tmp/proj/.claude/skills/tdd', '/tmp/proj/cat-cafe-skills/tdd'),
+      '../../cat-cafe-skills/tdd',
+    );
   });
 });

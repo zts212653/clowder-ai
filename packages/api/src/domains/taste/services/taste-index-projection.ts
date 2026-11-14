@@ -1,5 +1,6 @@
 import { posix } from 'node:path';
 import type { TasteDecisionPayload } from '../../memory/taste/TasteMemoryReader.js';
+import { singleLine, withoutTrailingWhitespace } from './taste-text.js';
 
 const DIMENSION_TO_SECTION: Record<string, string> = {
   'relationship-stance': '### 关系姿态',
@@ -23,10 +24,12 @@ export function projectTasteIndex(
     filename,
   );
   if (!payload) return withoutCurrent;
+  const tags = payload.tags.map(singleLine).filter(Boolean);
   const entry = [
-    `- [**${payload.tags[0] ?? slug}**](vignettes/${filename})`,
-    `  - 搜索词：${payload.tags.join('、')}`,
-    `  - 场景：${payload.scene.slice(0, 80)}`,
+    `- [**${tags[0] ?? slug}**](vignettes/${filename})`,
+    `  - 搜索词：${tags.join('、')}`,
+    // An 80-character preview; a cut can land on a space, which the end trim removes.
+    `  - 场景：${Array.from(singleLine(payload.scene)).slice(0, 80).join('').trimEnd()}`,
   ];
   const section = payload.dimension ? DIMENSION_TO_SECTION[payload.dimension] : undefined;
   const lines = withoutCurrent.split('\n');
@@ -56,5 +59,7 @@ function removeTasteIndexEntry(content: string, filename: string): string {
 }
 
 function normalizeBlankLines(content: string): string {
-  return `${content.replace(/\n{3,}/g, '\n\n').trimEnd()}\n`;
+  return `${withoutTrailingWhitespace(content)
+    .replace(/\n{3,}/g, '\n\n')
+    .trimEnd()}\n`;
 }

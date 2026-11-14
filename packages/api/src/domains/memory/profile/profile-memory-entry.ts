@@ -22,7 +22,7 @@ export function sharedProfileMemoryEntry(
     layer,
     relationshipKey: null,
     uri: capsule ? CURRENT_CAPSULE_PROFILE_URI : CURRENT_CORPUS_PROFILE_URI,
-    title: capsule ? '开场简介' : '共同画像',
+    title: capsule ? '关于你' : '共同画像',
     status: 'active',
     profileDir: repository.profileDir(ownerUserId),
     targetPath: capsule ? PROFILE_CAPSULE_RELATIVE_PATH : PROFILE_CORPUS_RELATIVE_PATH,

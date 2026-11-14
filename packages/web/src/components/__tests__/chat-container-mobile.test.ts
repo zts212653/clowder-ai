@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -98,6 +99,7 @@ const mockStoreState = () => ({
   closeRightPanel: mockCloseRightPanel,
 });
 
+vi.mock('@/components/thread-chat/hub-socket-context', () => import('@/test-utils/hub-socket-context-mock'));
 vi.mock('@/stores/chatStore', () => {
   const hook = (selector?: (s: ReturnType<typeof mockStoreState>) => unknown) => {
     const state = mockStoreState();

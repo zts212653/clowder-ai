@@ -7,6 +7,10 @@
  */
 
 import type { SchedulerAwaitStateV1 } from '@cat-cafe/shared';
+import {
+  type HoldLifecycleStatus,
+  isTerminalHoldLifecycleStatus,
+} from '../domains/ball-custody/hold-lifecycle-status.js';
 import { readManagedCommandWakeProjection } from '../domains/ball-custody/ManagedCommandWakeRecoverySweep.js';
 import { resolveManagedCommandJob } from '../domains/ball-custody/managed-command-job-reference.js';
 import {
@@ -31,17 +35,7 @@ export type HoldExpectedSignalKey =
   | 'managed_command_complete'
   | 'user_message';
 
-export type HoldLifecycleStatus =
-  | 'not_started'
-  | 'active'
-  | 'retired_by_event'
-  | 'retired_by_replacement'
-  | 'retired_expired'
-  | 'retired_invalid'
-  | 'cancel_requested'
-  | 'cancelled_by_user'
-  | 'escalated'
-  | 'fired';
+export type { HoldLifecycleStatus } from '../domains/ball-custody/hold-lifecycle-status.js';
 
 export interface HoldLifecycleProjection {
   readonly mode: 'timer' | 'wake_when';
@@ -107,19 +101,30 @@ export const isPendingHoldBallTask = isPendingHoldBallWakeTask;
 /** 判别 owner 在 ball-custody domain（R4 P2-1）；此处只保留既有 import 路径。 */
 export const isRetiredWakeWithRunningManagedCommand = isRetiredWakeWithRunningManagedCommandTask;
 
+const CANCELABLE_MANAGED_JOB_STATES = new Set(['queued', 'running', 'waiting', 'cancelling']);
+
+/** The mutation path and the worker-backed read view use the same admission/state predicate. */
+export function isCancelableHoldJobRecord(
+  record: { readonly admissionMessageId?: string; readonly state?: string | null } | null | undefined,
+): boolean {
+  return (
+    !!record?.admissionMessageId && typeof record.state === 'string' && CANCELABLE_MANAGED_JOB_STATES.has(record.state)
+  );
+}
+
 export function isCancelableHoldBallTask(task: DynamicTaskDef): boolean {
   const lifecycle = task.params.holdLifecycle as Record<string, unknown> | undefined;
   const command = lifecycle?.managedCommand as Record<string, unknown> | undefined;
   if (command?.jobId) {
     const job = resolveManagedCommandJob(task);
     const record = job ? readDurableGateRecord(job) : null;
-    return !!record?.admissionMessageId && record.state !== 'terminal';
+    return isCancelableHoldJobRecord(record);
   }
   return isPendingHoldBallTask(task) || isRetiredWakeWithRunningManagedCommand(task);
 }
 
 export function isRetiredHoldBallTombstone(task: DynamicTaskDef): boolean {
-  return isHoldBallTask(task) && readHoldLifecycle(task)?.status === 'retired_by_event';
+  return isHoldBallTask(task) && isTerminalHoldLifecycleStatus(readHoldLifecycle(task)?.status);
 }
 
 function isPlainRecord(value: unknown): value is Record<string, unknown> {

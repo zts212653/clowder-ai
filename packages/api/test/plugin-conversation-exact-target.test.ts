@@ -8,8 +8,17 @@ test('an explicit plugin recipient is resolved exactly and never falls back when
   const enqueued: unknown[] = [];
   let available = true;
   const delivery = createPluginConversationDelivery({
-    messageStore: { getById: async () => ({ id: 'message', from: { kind: 'plugin', id: 'installed' } }) } as never,
+    messageStore: {
+      getById: async () => ({
+        id: 'message',
+        threadId: 'thread',
+        userId: 'owner',
+        content: 'game request',
+        from: { kind: 'plugin', id: 'installed' },
+      }),
+    } as never,
     queue: {
+      getDurableEntriesForMessages: async () => new Map(),
       enqueueExistingMessageDurable: async (...args: unknown[]) => {
         enqueued.push(args);
         return { outcome: 'enqueued' };

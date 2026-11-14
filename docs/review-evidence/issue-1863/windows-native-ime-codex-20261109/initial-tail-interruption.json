@@ -1,0 +1,275 @@
+{
+  "source": "cb70a3ecf1e31cbaedab40bcb4611ea32e8b1ee6",
+  "browser": "157.0.4341.42",
+  "entry": "http://127.0.0.1:4177/ production ChatInput component host; API/submission fixtures",
+  "method": "Native Windows SendInput scan codes for ASCII pinyin, Space, Escape and Ctrl+Z/Ctrl+Y; no Chinese paste or DOM/CDP composition injection",
+  "startedAt": "2026-11-09T07:11:17.204Z",
+  "desktop": "Default",
+  "results": [
+    {
+      "classic": false,
+      "name": "tail-confirm",
+      "keyboard": {
+        "layout": 134481924
+      },
+      "during": {
+        "value": "https://example.com/abCD 说明",
+        "start": 24,
+        "end": 24,
+        "mirrorActive": "true",
+        "textColor": "rgba(0, 0, 0, 0)",
+        "ranges": [
+          {
+            "text": "https://example.com/abCD",
+            "start": "0",
+            "end": "24",
+            "href": "https://example.com/abCD"
+          }
+        ],
+        "events": [
+          {
+            "type": "keydown",
+            "key": "Process",
+            "isTrusted": true,
+            "isComposing": false,
+            "value": "https://example.com/abCD 说明",
+            "start": 24,
+            "end": 24
+          },
+          {
+            "type": "compositionstart",
+            "data": "",
+            "isTrusted": true,
+            "value": "https://example.com/abCD 说明",
+            "start": 24,
+            "end": 24
+          },
+          {
+            "type": "compositionupdate",
+            "data": "z",
+            "isTrusted": true,
+            "value": "https://example.com/abCD 说明",
+            "start": 24,
+            "end": 24
+          },
+          {
+            "type": "beforeinput",
+            "data": "z",
+            "isTrusted": true,
+            "isComposing": true,
+            "inputType": "insertCompositionText",
+            "value": "https://example.com/abCD 说明",
+            "start": 24,
+            "end": 24
+          },
+          {
+            "type": "input",
+            "data": "z",
+            "isTrusted": true,
+            "isComposing": true,
+            "inputType": "insertCompositionText",
+            "value": "https://example.com/abCDz 说明",
+            "start": 25,
+            "end": 25
+          },
+          {
+            "type": "keyup",
+            "key": "Process",
+            "isTrusted": true,
+            "isComposing": true,
+            "value": "https://example.com/abCDz 说明",
+            "start": 25,
+            "end": 25
+          },
+          {
+            "type": "compositionupdate",
+            "data": "",
+            "isTrusted": true,
+            "value": "https://example.com/abCDz 说明",
+            "start": 24,
+            "end": 25
+          },
+          {
+            "type": "beforeinput",
+            "data": "",
+            "isTrusted": true,
+            "isComposing": true,
+            "inputType": "insertCompositionText",
+            "value": "https://example.com/abCDz 说明",
+            "start": 24,
+            "end": 25
+          },
+          {
+            "type": "input",
+            "data": null,
+            "isTrusted": true,
+            "isComposing": true,
+            "inputType": "insertCompositionText",
+            "value": "https://example.com/abCD 说明",
+            "start": 24,
+            "end": 24
+          },
+          {
+            "type": "compositionend",
+            "data": "",
+            "isTrusted": false,
+            "value": "https://example.com/abCD 说明",
+            "start": 24,
+            "end": 24
+          }
+        ]
+      },
+      "after": {
+        "value": "https://example.com/abCD  说明",
+        "start": 25,
+        "end": 25,
+        "mirrorActive": "true",
+        "textColor": "rgba(0, 0, 0, 0)",
+        "ranges": [
+          {
+            "text": "https://example.com/abCD",
+            "start": "0",
+            "end": "24",
+            "href": "https://example.com/abCD"
+          }
+        ],
+        "events": [
+          {
+            "type": "keydown",
+            "key": "Process",
+            "isTrusted": true,
+            "isComposing": false,
+            "value": "https://example.com/abCD 说明",
+            "start": 24,
+            "end": 24
+          },
+          {
+            "type": "compositionstart",
+            "data": "",
+            "isTrusted": true,
+            "value": "https://example.com/abCD 说明",
+            "start": 24,
+            "end": 24
+          },
+          {
+            "type": "compositionupdate",
+            "data": "z",
+            "isTrusted": true,
+            "value": "https://example.com/abCD 说明",
+            "start": 24,
+            "end": 24
+          },
+          {
+            "type": "beforeinput",
+            "data": "z",
+            "isTrusted": true,
+            "isComposing": true,
+            "inputType": "insertCompositionText",
+            "value": "https://example.com/abCD 说明",
+            "start": 24,
+            "end": 24
+          },
+          {
+            "type": "input",
+            "data": "z",
+            "isTrusted": true,
+            "isComposing": true,
+            "inputType": "insertCompositionText",
+            "value": "https://example.com/abCDz 说明",
+            "start": 25,
+            "end": 25
+          },
+          {
+            "type": "keyup",
+            "key": "Process",
+            "isTrusted": true,
+            "isComposing": true,
+            "value": "https://example.com/abCDz 说明",
+            "start": 25,
+            "end": 25
+          },
+          {
+            "type": "compositionupdate",
+            "data": "",
+            "isTrusted": true,
+            "value": "https://example.com/abCDz 说明",
+            "start": 24,
+            "end": 25
+          },
+          {
+            "type": "beforeinput",
+            "data": "",
+            "isTrusted": true,
+            "isComposing": true,
+            "inputType": "insertCompositionText",
+            "value": "https://example.com/abCDz 说明",
+            "start": 24,
+            "end": 25
+          },
+          {
+            "type": "input",
+            "data": null,
+            "isTrusted": true,
+            "isComposing": true,
+            "inputType": "insertCompositionText",
+            "value": "https://example.com/abCD 说明",
+            "start": 24,
+            "end": 24
+          },
+          {
+            "type": "compositionend",
+            "data": "",
+            "isTrusted": false,
+            "value": "https://example.com/abCD 说明",
+            "start": 24,
+            "end": 24
+          },
+          {
+            "type": "keydown",
+            "key": " ",
+            "isTrusted": true,
+            "isComposing": false,
+            "value": "https://example.com/abCD 说明",
+            "start": 24,
+            "end": 24
+          },
+          {
+            "type": "beforeinput",
+            "data": " ",
+            "isTrusted": true,
+            "isComposing": false,
+            "inputType": "insertText",
+            "value": "https://example.com/abCD 说明",
+            "start": 24,
+            "end": 24
+          },
+          {
+            "type": "input",
+            "data": " ",
+            "isTrusted": true,
+            "isComposing": false,
+            "inputType": "insertText",
+            "value": "https://example.com/abCD  说明",
+            "start": 25,
+            "end": 25
+          },
+          {
+            "type": "keyup",
+            "key": " ",
+            "isTrusted": true,
+            "isComposing": false,
+            "value": "https://example.com/abCD  说明",
+            "start": 25,
+            "end": 25
+          }
+        ]
+      },
+      "pass": false
+    }
+  ],
+  "error": "Error: tail-confirm: unexpected native result \"https://example.com/abCD  说明\"\n    at file:///C:/Users/Administrator/AppData/Local/Clowder%20AI/project/workspace/issue1863-input-plan-20261105/windows-native-ime.mjs:122:43",
+  "finishedAt": "2026-11-09T07:11:26.000Z",
+  "restore": {
+    "restored": true
+  }
+}

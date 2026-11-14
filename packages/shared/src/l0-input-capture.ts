@@ -3,7 +3,7 @@ import { dirname, resolve } from 'node:path';
 import YAML from 'yaml';
 import { z } from 'zod';
 import { collectRosterFamilyLabels, formatRosterLabel } from './cat-display-name.js';
-import { resolvePromptTemplateVariables } from './deployment-defaults.js';
+import { resolveL0Projections, resolvePromptTemplateVariables } from './deployment-defaults.js';
 import { getDossierL0Pronouns, loadDossierProfiles } from './dossier/index.js';
 import { freezeL0Input, L0_COMPILER_VERSION } from './l0-input.js';
 import { resolveMemberIdentity } from './member-identity.js';
@@ -72,7 +72,10 @@ export function resolveUserCapsule(profileDir: string, relationshipKey: string) 
     }
   });
   const pointers = entries.length
-    ? [...entries, '读源走本轮绑定的 Clowder AI 连接；勿用独立 App 的同名工具替代。'].join('\n')
+    ? [
+        ...entries,
+        `读源走本轮绑定的 ${resolvePromptTemplateVariables().PRODUCT_DISPLAY_NAME} 连接；勿用独立 App 的同名工具替代。`,
+      ].join('\n')
     : '';
   let raw: string;
   try {
@@ -153,11 +156,12 @@ export function captureFrozenL0Input(
         dossierRoot?: string;
         profileDir?: string;
         governanceText?: string;
-        projection: 'owner';
+        projection: 'owner' | 'collective-work';
       }
   ),
 ) {
   const { catId, projection } = input;
+  if (!resolveL0Projections().includes(projection)) throw new Error(`Unsupported L0 projection: ${projection}`);
   const templates = resolve(input.installRoot, 'assets/prompt-templates');
   if (projection === 'public')
     return freezeL0Input({
@@ -189,7 +193,7 @@ export function captureFrozenL0Input(
       },
     });
   }
-  if (!input.profileDir || input.governanceText === undefined)
+  if ((projection === 'owner' && !input.profileDir) || input.governanceText === undefined)
     throw new Error('Owner L0 profile/governance sources are required');
   const config = input.member;
   const dossierRoot = input.dossierRoot ?? input.installRoot;
@@ -248,7 +252,11 @@ export function captureFrozenL0Input(
     variables: {
       ...edition,
       IDENTITY_BLOCK: identityLines.join('\n'),
-      USER_CAPSULE: resolveUserCapsule(input.profileDir, resolveRelationshipKey(config, catId)),
+      // Home Work retains home identity/rules, excluding the entire owner capsule slot and its source reads.
+      USER_CAPSULE:
+        projection === 'owner' && input.profileDir
+          ? resolveUserCapsule(input.profileDir, resolveRelationshipKey(config, catId))
+          : '',
       TEAMMATE_ROSTER: rows.length
         ? ['## 队友名册', '| 猫猫 | @mention · 当前模型 | 路由边界 |', '|------|---------|------|', ...rows].join('\n')
         : '（无其他可用队友）',

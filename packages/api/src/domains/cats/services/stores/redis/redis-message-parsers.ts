@@ -1,3 +1,4 @@
+import { isTargetResponseRecord } from '@cat-cafe/shared';
 /**
  * Redis message field parsers — 从 RedisMessageStore 拆出的纯函数
  *
@@ -253,12 +254,16 @@ type ExtraCarrierPersistenceClassification<
  * Every StoredMessage.extra key must be classified when it is introduced.
  */
 type ExtraCarrierPersistence = ExtraCarrierPersistenceClassification<{
+  watcher: 'parsed';
   cloudBridgeReturn: 'parsed';
   taskHandoff: 'parsed';
   taskHandoffInvalid: 'derived';
   taskAssignmentRequestDigest: 'parsed';
   collectiveOwnerAdmissionV1: 'parsed';
   collectiveAuthorizationInvalid: 'derived';
+  pluginAddressedReceipt: 'parsed';
+  targetResponse: 'parsed';
+  targetResponseResult: 'parsed';
   outputLayout: 'parsed';
   a2aFailureReturn: 'parsed';
   coveredA2AFailureReturns: 'parsed';
@@ -272,6 +277,7 @@ type ExtraCarrierPersistence = ExtraCarrierPersistenceClassification<{
   liveAdmission: 'parsed';
   routingTargetSource: 'parsed';
   rich: 'parsed';
+  richBlockPublicationId: 'parsed';
   messageSearchAnswer: 'parsed';
   callbackRichRequestDigest: 'parsed';
   isExplicitPost: 'parsed';
@@ -553,6 +559,43 @@ export function safeParseExtra(raw: string | undefined): StoredMessage['extra'] 
       result.collectiveAuthorizationInvalid = true;
       hasField = true;
     }
+    if (isTargetResponseRecord(parsed.targetResponse)) {
+      result.targetResponse = parsed.targetResponse;
+      hasField = true;
+    }
+    const rr = parsed.targetResponseResult;
+    if (
+      rr &&
+      isNonEmptyString(rr.carrierMessageId) &&
+      isNonEmptyString(rr.deliveryId) &&
+      ['processing', 'completed', 'failed', 'canceled', 'interrupted'].includes(rr.status)
+    ) {
+      result.targetResponseResult = {
+        carrierMessageId: rr.carrierMessageId,
+        deliveryId: rr.deliveryId,
+        status: rr.status,
+      };
+      hasField = true;
+    }
+    const pluginReceipt = parsed.pluginAddressedReceipt;
+    if (
+      pluginReceipt &&
+      isNonEmptyString(pluginReceipt.targetId) &&
+      isNonEmptyString(pluginReceipt.inputMessageId) &&
+      typeof pluginReceipt.accepted === 'boolean'
+    ) {
+      result.pluginAddressedReceipt = {
+        targetId: pluginReceipt.targetId,
+        inputMessageId: pluginReceipt.inputMessageId,
+        accepted: pluginReceipt.accepted,
+        ...(pluginReceipt.phase === 'sending' ||
+        pluginReceipt.phase === 'accepted' ||
+        pluginReceipt.phase === 'unconfirmed'
+          ? { phase: pluginReceipt.phase }
+          : {}),
+      };
+      hasField = true;
+    }
     const failureReturn = parseA2AFailureReturn(parsed.a2aFailureReturn);
     if (failureReturn) {
       result.a2aFailureReturn = failureReturn;
@@ -831,6 +874,22 @@ export function safeParseExtra(raw: string | undefined): StoredMessage['extra'] 
       hasField = true;
     }
 
+    const watcher =
+      typeof parsed.watcher === 'object' && parsed.watcher !== null
+        ? (parsed.watcher as Record<string, unknown>)
+        : undefined;
+    if (
+      watcher?.kind === 'nudge' &&
+      isNonEmptyString(watcher.sourceInvocationId) &&
+      isNonEmptyString(watcher.sourceMessageId) &&
+      isNonEmptyString(watcher.watcherInvocationId)
+    )
+      result.watcher = {
+        kind: 'nudge',
+        sourceInvocationId: watcher.sourceInvocationId,
+        sourceMessageId: watcher.sourceMessageId,
+        watcherInvocationId: watcher.watcherInvocationId,
+      };
     const turnExecution = parseTurnExecutionProjection(parsed.turnExecution);
     if (turnExecution) {
       result.turnExecution = turnExecution;
@@ -936,6 +995,10 @@ export function safeParseExtra(raw: string | undefined): StoredMessage['extra'] 
       hasField = true;
     }
 
+    if (isNonEmptyString(parsed.richBlockPublicationId)) {
+      result.richBlockPublicationId = parsed.richBlockPublicationId;
+      hasField = true;
+    }
     if (
       typeof parsed.callbackRichRequestDigest === 'string' &&
       /^[0-9a-f]{64}$/.test(parsed.callbackRichRequestDigest)

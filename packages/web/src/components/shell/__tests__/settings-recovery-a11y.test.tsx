@@ -1,6 +1,10 @@
 import { act, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { useChatStore } from '@/stores/chatStore';
+
+const { push } = vi.hoisted(() => ({ push: vi.fn() }));
+vi.mock('next/navigation', () => ({ useRouter: () => ({ push }) }));
 
 vi.mock('@/components/settings/SettingsContent', () => ({
   SettingsContent: ({ section }: { section: string }) => <section data-testid="owner-content">{section}</section>,
@@ -14,6 +18,7 @@ vi.mock('@/hooks/useCoCreatorConfig', () => ({
   useCoCreatorConfig: () => ({ name: 'You', avatar: '/uploads/avatar-operator.png' }),
 }));
 
+import { OpenTeamWorkspaceButton } from '@/components/settings/OpenTeamWorkspaceButton';
 import { SettingsShellV2 } from '@/components/settings/SettingsShellV2';
 
 function SettingsProof() {
@@ -24,6 +29,7 @@ describe('F322 settings secondary navigation contracts', () => {
   let host: HTMLDivElement;
   let root: Root;
   beforeEach(() => {
+    push.mockClear();
     (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
     host = document.createElement('div');
     document.body.append(host);
@@ -52,8 +58,15 @@ describe('F322 settings secondary navigation contracts', () => {
     expect(tab?.getAttribute('aria-controls')).toBe(panel?.id);
     expect(panel?.getAttribute('aria-labelledby')).toBe(tab?.id);
   });
-  it('workspace-team secondary destination offers a pin action', () => {
-    expect(host.querySelector('button[aria-label="固定「成员能力与路由状态」到窄栏"]')).not.toBeNull();
+  it('opens the canonical Team destination from the current Workspace entry', async () => {
+    useChatStore.setState({ currentThreadId: 'thread-team-entry', workspaceMode: 'dev' });
+    act(() => root.render(<OpenTeamWorkspaceButton />));
+    const entry = host.querySelector<HTMLButtonElement>('[data-testid="settings-open-team"]');
+    expect(entry?.textContent).toBe('打开猫猫团队');
+    await act(async () => entry?.click());
+    expect(useChatStore.getState().workspaceMode).toBe('team');
+    expect(useChatStore.getState().rightPanelMode).toBe('workspace');
+    expect(push).toHaveBeenCalledWith('/thread/thread-team-entry');
   });
   it('opens the personal page from the first owner row, with the actual avatar and name', () => {
     const owner = host.querySelector<HTMLButtonElement>('[data-testid="settings-entry-you"]');

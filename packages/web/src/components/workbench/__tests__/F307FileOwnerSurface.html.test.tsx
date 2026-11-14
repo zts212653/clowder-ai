@@ -4,6 +4,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { writeShellLanguage } from '@/components/shell/shell-language';
 import { writeShellPresentation } from '@/components/shell/shell-presentation';
+import { withHubSocket } from '@/test-utils/fake-hub-socket';
 import { F307FileOwnerSurface } from '../F307FileOwnerSurface';
 import { createFileSurface } from '../real-surface-adapters';
 
@@ -12,7 +13,6 @@ vi.mock('@/utils/api-client', () => ({
   API_URL: 'http://api.test',
   apiFetch: (...args: unknown[]) => mocks.apiFetch(...args),
 }));
-vi.mock('socket.io-client', () => ({ io: () => ({ on: vi.fn(), emit: vi.fn(), disconnect: vi.fn() }) }));
 vi.mock('@/components/MarkdownContent', () => ({ MarkdownContent: () => null }));
 
 let container: HTMLDivElement;
@@ -25,7 +25,7 @@ beforeEach(() => {
   mocks.apiFetch.mockReset();
   container = document.createElement('div');
   document.body.append(container);
-  root = createRoot(container);
+  root = withHubSocket(createRoot(container));
 });
 afterEach(() => {
   act(() => root.unmount());

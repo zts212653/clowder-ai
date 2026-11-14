@@ -108,6 +108,29 @@ it('does not take focus or alter the mounted draft when a pointer previews file 
   expect(document.activeElement).toBe(composer);
 });
 
+it('keeps a dragged filename quote without opening the file and retains keyboard activation', async () => {
+  const file = files()[0],
+    button = file.querySelector<HTMLButtonElement>('button');
+  const text = [...file.querySelectorAll('span')].find(
+    (node) => node.textContent === 'one.md' && node.children.length === 0,
+  )?.firstChild;
+  if (!button || !text) throw new Error('Missing real filename');
+  const range = document.createRange();
+  range.selectNodeContents(text);
+  const selection = window.getSelection();
+  if (!selection) throw new Error('Missing selection');
+  selection.removeAllRanges();
+  selection.addRange(range);
+  try {
+    await act(async () => button.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 1 })));
+    expect(transport.open).not.toHaveBeenCalled();
+    await act(async () => button.click()); // Keyboard activation has click detail=0.
+    expect(transport.open).toHaveBeenCalledTimes(1);
+  } finally {
+    selection.removeAllRanges();
+  }
+});
+
 it('keeps keyboard focus in an open menu after pointer exit and closes after focus also leaves', async () => {
   const file = files()[0];
   await pointer(file, true);
@@ -154,6 +177,19 @@ it('allows crossing into the menu and performs the original file action before d
   expect(transport.copy).toHaveBeenCalledWith('/original/docs/one.md');
   expect(menus()).toHaveLength(0);
   expect(transport.open).not.toHaveBeenCalled();
+});
+
+it('dismisses transient copy feedback when reading selection starts', async () => {
+  const file = files()[0];
+  await pointer(file, true);
+  const copy = [...menus()[0].querySelectorAll<HTMLButtonElement>('button')].find(
+    (button) => button.textContent === 'Copy path',
+  );
+  if (!copy) throw new Error('Missing copy action');
+  await act(async () => copy.click());
+  expect(file.querySelector('output')).not.toBeNull();
+  await act(async () => file.dispatchEvent(new Event('selectstart', { bubbles: true })));
+  expect(file.querySelector('output')).toBeNull();
 });
 
 it.each([

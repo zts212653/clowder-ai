@@ -75,6 +75,21 @@ function assertGlobalReads(reads) {
   );
 }
 
+function stopExecutionButton(row) {
+  return row.getByRole('button', { name: 'Stop this execution by codex-astra', exact: true });
+}
+
+async function confirmStopExecution(page, row, writes) {
+  await stopExecutionButton(row).click();
+  const dialog = page.getByRole('dialog', { name: 'Stop this execution by codex-astra?', exact: true });
+  await dialog.waitFor({ state: 'visible' });
+  assert.deepEqual(writes, [], 'opening confirmation must not cancel an execution');
+  await Promise.all([
+    page.waitForRequest((request) => request.method() === 'POST'),
+    dialog.getByRole('button', { name: 'Stop', exact: true }).click(),
+  ]);
+}
+
 async function openProof() {
   const page = await browser.newPage();
   await page.addInitScript(() => localStorage.setItem('cat-cafe:shell-language', 'en'));
@@ -92,7 +107,7 @@ async function openProof() {
     assert.equal(url.origin, origin, 'the fixture must not contact a live service');
     if (url.pathname === '/proof.js') return route.fulfill({ contentType: 'text/javascript', body: bundle.code });
     if (!url.pathname.startsWith('/api/')) {
-      state.documents += 1;
+      if (request.resourceType() === 'document') state.documents += 1;
       return route.fulfill({
         contentType: 'text/html',
         body: '<!doctype html><meta charset="utf-8"><div id="root"></div><script type="module" src="/proof.js"></script>',
@@ -134,18 +149,16 @@ test('same-project navigation keeps all running views and pending action without
           window.continuityBlankCount += 1;
       }).observe(document.querySelector('main'), { subtree: true, childList: true });
     });
-    const cancelRequest = page.waitForRequest((request) => request.method() === 'POST');
     const selected = page.getByTestId('workspace-running-object').filter({ hasText: 'Still working' });
     const other = page.getByTestId('workspace-running-object').filter({ hasText: 'Working in another project' });
-    await selected.locator('button').click();
-    await cancelRequest;
+    await confirmStopExecution(page, selected, writes);
     state.delayed = true;
     const refresh = page.waitForRequest((request) => request.url().includes('/executions/active'));
     await page.getByRole('button', { name: 'thread-b', exact: true }).click();
     await refresh;
     assert.equal(await page.getByTestId('workspace-running-object').count(), 2);
-    assert.equal(await selected.locator('button').isDisabled(), true);
-    assert.equal(await other.locator('button').isDisabled(), false);
+    assert.equal(await stopExecutionButton(selected).isDisabled(), true);
+    assert.equal(await stopExecutionButton(other).isDisabled(), false);
     executionGate.release();
     for (let n = 0; n < 20; n++) {
       await page.getByRole('button', { name: n % 2 ? 'thread-b' : 'thread-a', exact: true }).click();
@@ -171,19 +184,19 @@ test('changing project retains global work and the exact pending cancellation th
   try {
     const selected = page.getByTestId('workspace-running-object').filter({ hasText: 'Still working' });
     const other = page.getByTestId('workspace-running-object').filter({ hasText: 'Working in another project' });
-    const cancelRequest = page.waitForRequest((request) => request.method() === 'POST');
-    await selected.locator('button').click();
-    await cancelRequest;
+    await confirmStopExecution(page, selected, writes);
     state.delayed = true;
     const refresh = page.waitForRequest((request) => request.url().endsWith('/executions/active?scope=all'));
     await page.getByRole('button', { name: 'thread-other', exact: true }).click();
     await refresh;
     assert.equal(await page.locator('main').getAttribute('data-thread'), 'thread-other');
     assert.equal(await page.getByTestId('workspace-running-object').count(), 2);
-    assert.equal(await selected.locator('button').isDisabled(), true);
-    assert.equal(await other.locator('button').isDisabled(), false);
+    assert.equal(await stopExecutionButton(selected).isDisabled(), true);
+    assert.equal(await stopExecutionButton(other).isDisabled(), false);
     assert.deepEqual(
-      await page.getByTestId('workspace-running-project').evaluateAll((rows) => rows.map((row) => row.title).sort()),
+      await page
+        .locator('[data-testid="home-live-project"] > button')
+        .evaluateAll((rows) => rows.map((row) => row.title).sort()),
       ['/fixture', '/other'],
     );
     assert.equal(await page.getByText('正在同步所有对话的运行状态…', { exact: true }).count(), 0);
@@ -192,7 +205,7 @@ test('changing project retains global work and the exact pending cancellation th
     await refreshed;
     await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
     assert.equal(await page.getByTestId('workspace-running-object').count(), 2);
-    assert.equal(await selected.locator('button').isDisabled(), true);
+    assert.equal(await stopExecutionButton(selected).isDisabled(), true);
     const afterCancel = page.waitForResponse((response) => response.url().endsWith('/executions/active?scope=all'));
     cancelGate.release();
     assert.deepEqual(
@@ -201,7 +214,7 @@ test('changing project retains global work and the exact pending cancellation th
     );
     await selected.waitFor({ state: 'hidden' });
     assert.equal(await other.count(), 1);
-    assert.equal(await other.locator('button').isDisabled(), false);
+    assert.equal(await stopExecutionButton(other).isDisabled(), false);
     assert.deepEqual(writes, ['POST /api/threads/thread-a/executions/live/run-a/cancel']);
     assertGlobalReads(reads);
     assert.equal(state.documents, 1);

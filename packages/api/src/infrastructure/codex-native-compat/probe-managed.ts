@@ -3,8 +3,9 @@ import { lstat, mkdir, readdir, readFile, realpath, rm, symlink, writeFile } fro
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { validateCodexOAuthConfig } from '../../config/codex-account-environment.js';
+import { resolveWindowsSpawnPlan } from '../../utils/cli-spawn-win.js';
 import { type Check, expect, record, type Socket } from './probe-check.js';
-import { type ProbeHost, probePath, startProbeHost, startProbeModel, waitUntil } from './probe-host.js';
+import { type ProbeHost, probeEnvironment, startProbeHost, startProbeModel, waitUntil } from './probe-host.js';
 
 const MEMORY_MARKER = 'CAT_CAFE_COMPAT_NATIVE_MEMORY';
 const SHARED_DIRECTORIES = ['sessions', 'archived_sessions', 'thread-writer-locks', 'memories', 'memories_v2'];
@@ -46,7 +47,7 @@ async function probeNoHostLoginFallback(binary: string, root: string, check: Che
   await writeFile(join(hostHome, '.codex', 'auth.json'), login, { mode: 0o600 });
   await writeFile(join(privateHome, 'auth.json'), login, { mode: 0o600 });
   const env = {
-    PATH: probePath(),
+    ...probeEnvironment(hostHome),
     HOME: hostHome,
     CODEX_HOME: privateHome,
     HTTP_PROXY: 'http://127.0.0.1:1',
@@ -54,8 +55,15 @@ async function probeNoHostLoginFallback(binary: string, root: string, check: Che
     ALL_PROXY: 'http://127.0.0.1:1',
     NO_PROXY: '127.0.0.1,localhost',
   };
+  const args = ['--config', 'cli_auth_credentials_store="file"', 'login', 'status'];
+  const plan = process.platform === 'win32' ? resolveWindowsSpawnPlan(binary, args) : { command: binary, args };
   const status = () =>
-    run(binary, ['--config', 'cli_auth_credentials_store="file"', 'login', 'status'], { env, timeout: 10_000 }).then(
+    run(plan.command, plan.args, {
+      env,
+      timeout: 10_000,
+      windowsHide: true,
+      shell: 'shell' in plan ? plan.shell : false,
+    }).then(
       () => ({ code: 0, stderr: '' }),
       (error: { code?: unknown; stderr?: string }) => ({ code: error.code ?? -1, stderr: String(error.stderr ?? '') }),
     );
@@ -202,7 +210,7 @@ async function probeConfigSemantics(
     const cwd = join(base, 'work');
     const envState = join(base, 'env-state');
     for (const dir of [home, cwd, envState]) await mkdir(dir, { recursive: true });
-    await run('git', ['init', '--quiet', cwd], { env: { PATH: probePath(), HOME: home } });
+    await run('git', ['init', '--quiet', cwd], { env: probeEnvironment(home), windowsHide: true });
     let config = 'cli_auth_credentials_store="file"\n';
     if (name === 'owned-https') config += OWNED_HTTPS_PROVIDER;
     if (name.includes('relative')) config += 'sqlite_home="state"\n';

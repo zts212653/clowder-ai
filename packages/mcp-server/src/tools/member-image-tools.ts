@@ -26,7 +26,13 @@ const defineTool = defineMcpCanonicalFactory('member-image-tools.ts', undefined,
   authority: 'callback-thread',
 });
 export const publishImageInputSchema = {
-  path: z.string().min(1).max(4096).describe('Absolute PNG path inside the existing allowed workspace/file roots.'),
+  path: z
+    .string()
+    .min(1)
+    .max(4096)
+    .describe(
+      'Absolute PNG/JPEG/WebP/GIF/SVG path inside the existing allowed workspace/file roots. Bytes determine the published format; SVG must be static and self-contained.',
+    ),
   publicationKey: z
     .string()
     .min(1)
@@ -108,7 +114,7 @@ export const memberImageTools = [
   defineTool({
     name: 'cat_cafe_publish_image',
     description:
-      'Publish an existing local PNG as a durable image message in your current thread. Use when: you rendered a PNG and need Chat delivery or the existing Task/artifact review chain. NOT for: generating images, remote URLs, another thread, or changing Task/owner state. Output: canonical image URL, persisted messageId, real timestamp revision and attributed member-file provenance. GOTCHA: macOS and Linux only, with existing allowed local file roots; a rich-block buffer is not publication. Retry the same publicationKey and exact payload. Different bytes conflict; after message persistence, changed metadata or a retained withdrawn/deleted message also conflicts. Use a new key for an intended new version. Register only the returned URL as the Task primary artifact, then prepare through the existing artifact-review tool; later versions retain that content lineage.',
+      'Publish an existing local PNG/JPEG/WebP/GIF or safe static SVG as a durable image message in your current thread. Use when: an existing original image needs Chat delivery or the existing Task/artifact review chain. NOT for: generating images, remote URLs, another thread, or changing Task/owner state. Output: canonical image URL with content-detected MIME/extension, persisted messageId, real timestamp revision and attributed original-file provenance; GIF animation and SVG source bytes are preserved. GOTCHA: macOS and Linux only, with existing allowed file roots and a 10 MiB file limit; SVG is at most 2 MiB with no scripts, events, external resources or XML entities; GIF is at most 600 frames and 32 million accumulated decoded pixels. A filename is not format proof. Retry the same publicationKey and exact payload. Different bytes or changed metadata after persistence conflict; use a new key for an intended new version. Register only the returned URL as the Task primary artifact; later versions retain that content lineage.',
     inputSchema: publishImageInputSchema,
     handler: handlePublishImage,
     governance: {

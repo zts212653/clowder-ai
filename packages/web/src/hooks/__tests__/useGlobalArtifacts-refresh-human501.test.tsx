@@ -7,6 +7,16 @@ vi.mock('@/utils/api-client', () => ({ apiFetch }));
 
 import { useGlobalArtifacts } from '@/hooks/useGlobalArtifacts';
 
+const sourceChanged = (threadId?: string) =>
+  act(async () => {
+    window.dispatchEvent(
+      new CustomEvent('cat-cafe:entrusted-work-projection-invalidated', {
+        detail: { threadId, reason: 'works_changed' },
+      }),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+
 it('refreshes mounted recent Works on the existing owner source invalidation', async () => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
   apiFetch.mockResolvedValue({
@@ -24,9 +34,30 @@ it('refreshes mounted recent Works on the existing owner source invalidation', a
       root.render(<Probe />);
     });
     expect(apiFetch).toHaveBeenCalledTimes(1);
-    await act(async () => {
-      window.dispatchEvent(new CustomEvent('cat-cafe:entrusted-work-projection-invalidated'));
-    });
+    await sourceChanged();
+    expect(apiFetch).toHaveBeenCalledTimes(2);
+  } finally {
+    act(() => root.unmount());
+    vi.unstubAllGlobals();
+  }
+});
+
+it('a global catalogue refreshes for another threads scoped work event', async () => {
+  vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+  apiFetch.mockReset();
+  apiFetch.mockResolvedValue({
+    ok: true,
+    json: async () => ({ artifacts: [], complete: false, workLineage: 'resolved' }),
+  });
+  function Probe() {
+    useGlobalArtifacts(true, { view: 'recent-works', limit: 12 }, 'host');
+    return null;
+  }
+  const root = createRoot(document.createElement('div'));
+  try {
+    await act(async () => root.render(<Probe />));
+    expect(apiFetch).toHaveBeenCalledTimes(1);
+    await sourceChanged('another');
     expect(apiFetch).toHaveBeenCalledTimes(2);
   } finally {
     act(() => root.unmount());
@@ -55,10 +86,10 @@ it('retains known cards after a temporary source failure but clears them after p
   try {
     await act(async () => root.render(<Probe />));
     expect(names).toEqual(['known original']);
-    await act(async () => window.dispatchEvent(new Event('cat-cafe:entrusted-work-projection-invalidated')));
+    await sourceChanged();
     expect(names).toEqual(['known original']);
     expect(complete).toBe(false);
-    await act(async () => window.dispatchEvent(new Event('cat-cafe:entrusted-work-projection-invalidated')));
+    await sourceChanged();
     expect(names).toEqual([]);
   } finally {
     act(() => root.unmount());

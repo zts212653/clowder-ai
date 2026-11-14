@@ -1,3 +1,4 @@
+import { RECALL_OPPORTUNITY_CATALOG_VERSION } from '@cat-cafe/shared';
 import '../helpers/setup-cat-registry.js';
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
@@ -53,7 +54,7 @@ function envelope(scope, opportunityId, source, entry, size = 40, valid = true) 
         sourceRevision: 'v1',
         axis: 'consumption',
         consumptionOutcome: 'presented',
-        catalogVersion: 7,
+        catalogVersion: RECALL_OPPORTUNITY_CATALOG_VERSION,
         resolverVersion: 1,
         occurredAt: Date.now(),
       },

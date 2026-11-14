@@ -2,7 +2,11 @@ import type { SessionRecord } from '@cat-cafe/shared';
 
 /** Shared boundary for home resume, control and derived continuity. Owner trace readers keep the full chain. */
 export function isHomeSession(session: SessionRecord | null | undefined): session is SessionRecord {
-  return session != null && session.scopedInvocation === undefined;
+  return session != null && session.scopedInvocation === undefined && session.sessionPurpose !== 'watcher';
+}
+
+export function watcherSessionChainKey(userId: string, catId: string, threadId: string): string {
+  return `watcher:${JSON.stringify([userId, catId, threadId])}`;
 }
 
 export interface HomeSessionPosition {

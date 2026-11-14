@@ -2,6 +2,7 @@ import { isAbsolute } from 'node:path';
 import type { AgyProfileConfig, ClientId } from '@cat-cafe/shared';
 import { z } from 'zod';
 import { resolveByAccountRef } from './account-resolver.js';
+import { inspectAgyLogin } from './agy-account.js';
 
 /** Member settings select the carrier and explicit automatic approval. */
 export const agyNativeMemberSettingsSchema = z
@@ -51,6 +52,7 @@ export function resolveAgyNativeMemberPatch(input: {
     throw new Error('AGY ACP requires carrier=acp and an ACP launch configuration');
   if (proposed?.carrier === 'acp' && input.clientId === 'google' && selectedAcp && input.acp) {
     const account = resolveByAccountRef(input.projectRoot, input.accountRef ?? 'gemini');
+    if (account?.agy) throw new Error('F320 AGY 文件登录目前用于 Native；ACP 请继续使用其独立官方登录');
     if (
       account &&
       (account.client !== 'google' || account.authType !== 'oauth' || Object.keys(account.envVars ?? {}).length)
@@ -70,6 +72,12 @@ export function resolveAgyNativeMemberPatch(input: {
   if (account?.client !== 'google' || account.authType !== 'oauth' || Object.keys(account.envVars ?? {}).length) {
     throw new Error('AGY Native requires Gemini OAuth with no account environment overrides');
   }
+  if (
+    account.agy &&
+    input.accountRef !== input.previousAccountRef &&
+    !['ready', 'refreshable'].includes(inspectAgyLogin(account.agy.credentialHome))
+  )
+    throw new Error('AGY 账号未登录或登录文件读不到，请先完成官方登录');
   if (input.cliConfigArgs?.length) throw new Error('AGY Native does not accept CLI extension arguments');
   if (next.model !== input.model) throw new Error('AGY Native profile model must match the member model ID');
   return input.requested ?? undefined;

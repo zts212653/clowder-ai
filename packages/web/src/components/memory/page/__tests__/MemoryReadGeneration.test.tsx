@@ -1,6 +1,7 @@
 import { act, useLayoutEffect } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { observeApiSessionOwner } from '@/utils/api-session-identity';
 import { useMemoryRead } from '../use-memory-read';
 import { useMemoryRecall } from '../use-memory-recall';
 import { deferred, page, type Reply, recallRow, response } from './recall-page-fixture';
@@ -88,4 +89,18 @@ it('rejects a late response from an earlier generic read', async () => {
   await act(async () => root.render(<ReadProbe path="/stats?days=30" />));
   await act(async () => old.resolve(response({ value: 'old-window' })));
   expect(snapshots.at(-1)).toEqual({ label: '/stats?days=30', data: 'new-window', loading: false, error: false });
+});
+
+it('rereads after the first browser session is observed and never promotes an earlier owner response', async () => {
+  observeApiSessionOwner(null);
+  const bootstrap = deferred<Reply>();
+  mocks.fetch
+    .mockReturnValueOnce(bootstrap.promise)
+    .mockResolvedValue(response(page({ records: [recallRow('current', 'current-owner-record')] })));
+  await act(async () => root.render(<RecallProbe source="all" />));
+  await act(async () => observeApiSessionOwner('newly-observed-owner'));
+  await act(async () => bootstrap.resolve(response(page({ records: [recallRow('old', 'previous-owner-record')] }))));
+  expect(snapshots.at(-1)?.data).toBe('current-owner-record');
+  expect(snapshots.at(-1)?.error).toBe(false);
+  await act(async () => observeApiSessionOwner(null));
 });

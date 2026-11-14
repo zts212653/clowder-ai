@@ -84,10 +84,16 @@ test('serial public lane overrides a legal isolated runner URL before executing 
 
   const previousProbe = process.env.PUBLIC_REDIS_PROBE_OUT;
   const previousRedis = process.env.REDIS_URL;
+  const previousNodeOptions = process.env.NODE_OPTIONS;
   process.env.PUBLIC_REDIS_PROBE_OUT = output;
   process.env.REDIS_URL = 'redis://127.0.0.1:6921/2867';
   try {
-    const outcome = await run([fixture], { env: withoutRedisRunnerEnv() });
+    const childEnv = withoutRedisRunnerEnv();
+    // The resource guard deliberately pins parent NODE_OPTIONS for children.
+    // Remove only this fixture's Redis loader from both views, retaining the guard.
+    if (childEnv.NODE_OPTIONS === undefined) delete process.env.NODE_OPTIONS;
+    else process.env.NODE_OPTIONS = childEnv.NODE_OPTIONS;
+    const outcome = await run([fixture], { env: childEnv });
     assert.equal(outcome.code, 0, `public runner exited ${outcome.code}`);
     const observed = JSON.parse(readFileSync(output, 'utf8'));
     assert.equal(observed.redis, PUBLIC_TEST_DENY_REDIS_URL);
@@ -99,6 +105,8 @@ test('serial public lane overrides a legal isolated runner URL before executing 
     else process.env.PUBLIC_REDIS_PROBE_OUT = previousProbe;
     if (previousRedis === undefined) delete process.env.REDIS_URL;
     else process.env.REDIS_URL = previousRedis;
+    if (previousNodeOptions === undefined) delete process.env.NODE_OPTIONS;
+    else process.env.NODE_OPTIONS = previousNodeOptions;
     rmSync(root, { recursive: true, force: true });
   }
 });

@@ -2,6 +2,7 @@ import './helpers/setup-cat-registry.js';
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { BundledPluginRuntimeCarrier } from '../dist/domains/plugin/builtin-runtime/carriers/bundled-runtime-carrier.js';
+import { snapshotInventoryFixture } from './helpers/snapshot-inventory-fixture.js';
 
 function deferred() {
   let resolve;
@@ -11,7 +12,7 @@ function deferred() {
   return { promise, resolve };
 }
 
-function fixture(runtime) {
+function fixture(runtime, observe = () => {}) {
   const instance = {
     pluginInstanceId: 'pi_lifecycle',
     pluginId: 'fixture.lifecycle',
@@ -27,12 +28,13 @@ function fixture(runtime) {
       { pluginId: instance.pluginId, packageDigest: instance.packageDigest, manifest: { pluginId: instance.pluginId } },
     ],
   };
+  observe(instance);
   return new BundledPluginRuntimeCarrier({
-    inventory: {
+    inventory: snapshotInventoryFixture({
       snapshot: async () => structuredClone(state),
       transaction: async (work) =>
         work({ instances: { get: () => instance, put: (next) => Object.assign(instance, next) } }),
-    },
+    }),
     runtimes: [{ claims: () => true, start: async () => {}, invoke: async () => 'ok', ...runtime }],
   });
 }
@@ -53,6 +55,80 @@ test('stop refuses new calls while closed still waits for cleanup', async () => 
   await stopping;
   await started.closed;
   assert.equal(closed, true);
+});
+
+test('unexpected runtime completion revokes publication before waiting for cleanup', async () => {
+  const exit = deferred();
+  const cleanup = deferred();
+  const cleanupEntered = deferred();
+  const carrier = fixture({
+    completion: () => exit.promise,
+    stop: () => {
+      cleanupEntered.resolve();
+      return cleanup.promise;
+    },
+  });
+  let revoked = false;
+  const started = await carrier.start('pi_lifecycle', undefined, () => {
+    revoked = true;
+  });
+  exit.resolve(new Error('private plugin failure must not enter owner diagnostics'));
+  await cleanupEntered.promise;
+  try {
+    assert.equal(revoked, true, 'cleanup must not hold failed optional capabilities current');
+    await assert.rejects(carrier.invoke('pi_lifecycle', 'fixture.call', {}));
+  } finally {
+    cleanup.resolve();
+    await started.closed;
+  }
+});
+
+test('a rejected publication cleanup still stops the crashed runtime and permits repair', async () => {
+  const exit = deferred();
+  let stops = 0;
+  const carrier = fixture({
+    completion: () => (stops === 0 ? exit.promise : undefined),
+    stop: async () => {
+      stops++;
+    },
+  });
+  const started = await carrier.start('pi_lifecycle', undefined, async () => {
+    throw new Error('provider release failed');
+  });
+  exit.resolve(new Error('execution failed'));
+  await new Promise(setImmediate);
+  try {
+    assert.equal(stops, 1, 'notification failure must not skip runtime cleanup');
+    await started.closed;
+    const repaired = await carrier.start('pi_lifecycle');
+    await carrier.stop('pi_lifecycle');
+    await repaired.closed;
+  } finally {
+    await carrier.stop('pi_lifecycle');
+  }
+});
+
+test('execution exit during contribution admission records failure without a later healthy state', async () => {
+  const exit = deferred(),
+    admission = deferred(),
+    entered = deferred();
+  let instance;
+  const carrier = fixture({ completion: () => exit.promise, stop: async () => {} }, (record) => {
+    instance = record;
+  });
+  const starting = carrier.start('pi_lifecycle', async () => {
+    entered.resolve();
+    await admission.promise;
+  });
+  const rejected = assert.rejects(starting, /cancelled/);
+  await entered.promise;
+  exit.resolve(new Error('execution failed during admission'));
+  await new Promise(setImmediate);
+  admission.resolve();
+  await rejected;
+  assert.equal(instance.runtimeState, 'crashed');
+  assert.equal(instance.lastRuntimeError.code, 'UNEXPECTED_RUNTIME_FAILURE');
+  await carrier.stop('pi_lifecycle');
 });
 
 test('cleanup failure retains closed handle until successful stop retry', async () => {

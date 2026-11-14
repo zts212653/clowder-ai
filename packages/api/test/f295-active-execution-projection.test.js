@@ -239,6 +239,7 @@ function buildDeps() {
       }),
     },
     turnExecutionStore: {
+      get: mock.fn(async () => null),
       listByParent: mock.fn(async () => []),
       transitionTerminal: mock.fn(async (invocationId, terminal) => {
         turnTerminalCalls.push({ invocationId, terminal });
@@ -325,7 +326,7 @@ describe('F295 active execution projection', () => {
       headers: { 'x-cat-cafe-user': 'empty-user' },
     });
     assert.equal(empty.statusCode, 200);
-    assert.deepEqual(empty.json(), { scope: 'all', executions: [] });
+    assert.deepEqual(empty.json(), { scope: 'all', executions: [], waits: [] });
     const anonymous = await app.inject({ method: 'GET', url: '/api/executions/active?scope=all' });
     assert.equal(anonymous.statusCode, 401);
     const mixed = await app.inject({
@@ -401,6 +402,8 @@ describe('F295 active execution projection', () => {
           },
         },
       ],
+      // A running command hold is an execution, never repeated as a wait.
+      waits: [],
     });
   });
 

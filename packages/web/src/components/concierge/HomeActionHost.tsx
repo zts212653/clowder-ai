@@ -1,13 +1,18 @@
 'use client';
 import { useRouter } from 'next/navigation';
 import { useEffect, useRef } from 'react';
-import { io } from 'socket.io-client';
-import { API_URL, apiFetch } from '@/utils/api-client';
+import { apiFetch } from '@/utils/api-client';
 import { useSettingsReadingEntry } from '../shell/useSettingsSourceReturn';
+import { useHubSocket } from '../thread-chat/hub-socket-context';
 import { applyHomeCommand, homeHubObservation } from './home-action-bridge';
 
-/** Authenticated Hub delivery consumer, mounted with the original shell across route changes. */
+/**
+ * Authenticated Hub delivery consumer, mounted with the original shell across route changes.
+ * It rides the page connection: the server delivers home commands to the socket id this
+ * window registered, so every new connection registers again.
+ */
 export function HomeActionHost({ enabled = true }: { enabled?: boolean }) {
+  const hub = useHubSocket();
   const router = useRouter();
   const capture = useSettingsReadingEntry();
   const ports = useRef({ router, capture });
@@ -18,10 +23,8 @@ export function HomeActionHost({ enabled = true }: { enabled?: boolean }) {
     const clientId = crypto.randomUUID();
     const pending = new Map<string, AbortController>();
     const consumed = new Map<string, number>();
-    const socket = io(API_URL, { transports: ['websocket'], withCredentials: true, autoConnect: false });
     let windowLease: { clientToken: string; expiresAt: number } | undefined;
     let registering: Promise<void> | undefined;
-    let bootstrapping: Promise<void> | undefined;
     let connectionEpoch = 0;
     let suspended = false;
     const releaseLease = (lease: { clientToken: string }) => {
@@ -39,25 +42,28 @@ export function HomeActionHost({ enabled = true }: { enabled?: boolean }) {
       if (lease) releaseLease(lease);
     };
     const register = () => {
-      if (disposed || suspended || !socket.connected) return Promise.resolve();
+      const socketId = hub.connectedSocketId();
+      if (disposed || suspended || !socketId) return Promise.resolve();
       if (windowLease && windowLease.expiresAt > Date.now()) return Promise.resolve();
       const epoch = connectionEpoch;
       registering ??= apiFetch('/api/concierge/home/clients', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ clientId, socketId: socket.id }),
+        body: JSON.stringify({ clientId, socketId }),
       })
         .then(async (response) => {
           const value = await response.json();
           if (!response.ok || typeof value.clientToken !== 'string' || typeof value.expiresAt !== 'number')
             throw new Error('Home window not registered');
-          if (disposed || suspended || !socket.connected || epoch !== connectionEpoch) releaseLease(value);
+          if (disposed || suspended || hub.connectedSocketId() !== socketId || epoch !== connectionEpoch)
+            releaseLease(value);
           else windowLease = value;
         })
         .finally(() => {
           registering = undefined;
           // A fresh connection supersedes the old registration; network failures do not retry.
-          if (!disposed && !suspended && socket.connected && epoch !== connectionEpoch) void register().catch(() => {});
+          if (!disposed && !suspended && hub.connectedSocketId() && epoch !== connectionEpoch)
+            void register().catch(() => {});
         });
       return registering;
     };
@@ -107,33 +113,22 @@ export function HomeActionHost({ enabled = true }: { enabled?: boolean }) {
     const cancel = (data: { token?: string; clientId?: string }) => {
       if (data?.clientId === clientId && data.token) pending.get(data.token)?.abort('request_changed');
     };
-    socket.on('home:inspect', inspect);
-    socket.on('home:execute', execute);
-    socket.on('home:cancel', cancel);
-    socket.on('connect', () => {
-      void register().catch(() => {});
-    });
-    socket.on('disconnect', () => {
-      release();
-      for (const controller of pending.values()) controller.abort('hub_disconnected');
-    });
-    const recover = () => {
-      if (disposed || suspended) return;
-      if (socket.connected) {
+    const releaseListeners = [
+      hub.on('home:inspect', inspect),
+      hub.on('home:execute', execute),
+      hub.on('home:cancel', cancel),
+      hub.on('disconnect', () => {
+        release();
+        for (const controller of pending.values()) controller.abort('hub_disconnected');
+      }),
+      // Runs now when already connected; the runtime that owns the connection also restores it.
+      hub.onConnected(() => {
         void register().catch(() => {});
-        return;
-      }
-      if (bootstrapping) return;
-      bootstrapping = apiFetch('/api/session')
-        .then((response) => {
-          if (response.ok && !disposed && !suspended) socket.connect();
-        })
-        .catch(() => {})
-        .finally(() => {
-          bootstrapping = undefined;
-        });
+      }),
+    ];
+    const recover = () => {
+      if (!disposed && !suspended) void register().catch(() => {});
     };
-    recover();
     const hide = () => {
       suspended = true;
       release();
@@ -151,10 +146,10 @@ export function HomeActionHost({ enabled = true }: { enabled?: boolean }) {
       window.removeEventListener('online', recover);
       window.removeEventListener('pagehide', hide);
       window.removeEventListener('pageshow', show);
+      for (const releaseListener of releaseListeners) releaseListener();
       release();
       for (const controller of pending.values()) controller.abort('hub_unmounted');
-      socket.disconnect();
     };
-  }, [enabled]);
+  }, [enabled, hub]);
   return null;
 }

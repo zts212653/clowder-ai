@@ -4,7 +4,7 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { CLIENT_REQUEST_DIAGNOSTIC_HEADER } from '@cat-cafe/shared';
+import { CLIENT_DIAGNOSTIC_REQUEST_HEADERS } from '@cat-cafe/shared';
 import cookie from '@fastify/cookie';
 import Fastify from 'fastify';
 import '../../../api/test/helpers/setup-cat-registry.js';
@@ -232,7 +232,7 @@ export async function createCalendarFixture() {
     res.setHeader('Access-Control-Allow-Credentials', 'true');
     res.setHeader(
       'Access-Control-Allow-Headers',
-      `Content-Type,x-cat-cafe-user,x-csrf-token,${CLIENT_REQUEST_DIAGNOSTIC_HEADER}`,
+      `Content-Type,x-cat-cafe-user,x-csrf-token,${CLIENT_DIAGNOSTIC_REQUEST_HEADERS.join(',')}`,
     );
     res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
     if (req.method === 'OPTIONS') {

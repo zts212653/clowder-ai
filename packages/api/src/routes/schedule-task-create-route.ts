@@ -9,10 +9,10 @@ import {
   producerAttentionReevaluationTaskId,
 } from '../domains/growing/ProducerAttentionReevaluationTaskSpec.js';
 import { f255ConfigRequired, isF255ConfigOnlyTemplate } from '../infrastructure/scheduler/f255-template-boundary.js';
-import { notifyTaskRegistered } from '../infrastructure/scheduler/schedule-notify.js';
 import type { TriggerSpec } from '../infrastructure/scheduler/types.js';
 import { requireScheduleMutationPrincipal } from './schedule-mutation-principal.js';
-import { createScheduleMutationAuditEntry, publishScheduleMutationProposal } from './schedule-mutation-proposal.js';
+import { publishScheduleMutationProposal } from './schedule-mutation-proposal.js';
+import { commitOwnerDynamicTask } from './schedule-owner-commit.js';
 import {
   deriveScheduleRequestContext,
   normalizeOnceTrigger,
@@ -233,20 +233,16 @@ export function registerScheduleTaskCreateRoute(app: FastifyInstance, opts: Sche
       };
     }
 
-    const spec = template.createSpec(id, {
-      trigger,
-      params,
-      ...(entrustedWorkReevaluation ? { entrustedWorkReevaluation } : {}),
-      deliveryThreadId: def.deliveryThreadId,
-    });
-    spec.display = display;
-    const audit = createScheduleMutationAuditEntry(ownerUserId, mutationPrincipal, 'create', id, {
-      templateId: def.templateId,
-      deliveryThreadId: def.deliveryThreadId,
-    });
-    scheduleMutationProposalStore.insertTaskWithAudit(def, audit);
-    taskRunner.registerDynamic(spec, id);
-    notifyTaskRegistered(notifyLifecycle, def);
+    commitOwnerDynamicTask(
+      { taskRunner, scheduleMutationProposalStore, notifyLifecycle },
+      {
+        ownerUserId,
+        principal: mutationPrincipal,
+        template,
+        def,
+        ...(entrustedWorkReevaluation ? { entrustedWorkReevaluation } : {}),
+      },
+    );
     return { success: true, proposed: false, task: { id, ...display, trigger } };
   });
 }

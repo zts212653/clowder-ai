@@ -1,10 +1,13 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { constants as fsConstants } from 'node:fs';
-import { access, copyFile, link, mkdir, open, stat, unlink, writeFile } from 'node:fs/promises';
-import { join, resolve } from 'node:path';
+import { link, mkdir, open, unlink, writeFile } from 'node:fs/promises';
+import { dirname, join, resolve } from 'node:path';
 import type { ImageContent } from '@cat-cafe/shared';
+import { probeGifImage } from './gif-image.js';
+import { detectImageMime } from './image-mime.js';
+import { probeSvgImage } from './svg-image.js';
 
-export const ALLOWED_IMAGE_MIME_LIST = ['image/png', 'image/jpeg', 'image/gif', 'image/webp'] as const;
+export const ALLOWED_IMAGE_MIME_LIST = ['image/png', 'image/jpeg', 'image/gif', 'image/webp', 'image/svg+xml'] as const;
 export type SupportedImageMime = (typeof ALLOWED_IMAGE_MIME_LIST)[number];
 export const ALLOWED_IMAGE_MIMES: ReadonlySet<SupportedImageMime> = new Set(ALLOWED_IMAGE_MIME_LIST);
 export const MAX_IMAGE_FILE_SIZE = 10 * 1024 * 1024; // 10MB
@@ -41,6 +44,8 @@ export function mimeToImageExt(mimeType: SupportedImageMime): string {
       return '.gif';
     case 'image/webp':
       return '.webp';
+    case 'image/svg+xml':
+      return '.svg';
     default:
       throw new ImageUploadError(`Unsupported file type: ${String(mimeType)}`);
   }
@@ -103,9 +108,19 @@ export async function saveImageBufferToUploadDir(input: {
   filenameStem: string;
   onExists?: OnExistsBehavior | 'verify';
 }): Promise<SavedImageAsset> {
-  const mimeType = ensureSupportedImageMime(input.mimeType);
+  ensureSupportedImageMime(input.mimeType);
   if (input.buffer.byteLength > MAX_IMAGE_FILE_SIZE) {
     throw new ImageUploadError(`File too large: ${input.buffer.byteLength} bytes (max ${MAX_IMAGE_FILE_SIZE})`);
+  }
+  const mimeType = detectImageMime(input.buffer);
+  if (!mimeType) throw new ImageUploadError('Unsafe or unsupported image content');
+  if (mimeType === 'image/svg+xml' || mimeType === 'image/gif') {
+    try {
+      if (mimeType === 'image/gif') await probeGifImage(input.buffer);
+      else await probeSvgImage(input.buffer);
+    } catch {
+      throw new ImageUploadError(`Unsafe or unsupported ${mimeType === 'image/gif' ? 'GIF' : 'SVG'}`);
+    }
   }
 
   const target = await ensureImageTarget(input.uploadDir, mimeType, input.filenameStem);
@@ -122,7 +137,7 @@ export async function saveImageBufferToUploadDir(input: {
 
 /** Publish a complete immutable file; concurrent writers compare the winner, never a partial write. */
 async function saveImmutableImageBuffer(target: SavedImageAsset, bytes: Buffer): Promise<SavedImageAsset> {
-  const temporary = `${target.absPath}.${randomUUID()}.tmp`;
+  const temporary = join(dirname(target.absPath), `.image-publication-${randomUUID()}.tmp`);
   try {
     await writeFile(temporary, bytes, { flag: 'wx', mode: 0o600, flush: true });
     try {
@@ -166,33 +181,43 @@ export async function copyImageFileToUploadDir(input: {
   filenameStem: string;
   onExists?: OnExistsBehavior;
 }): Promise<SavedImageAsset> {
-  const mimeType = ensureSupportedImageMime(input.mimeType);
-
-  const target = await ensureImageTarget(input.uploadDir, mimeType, input.filenameStem);
-  const onExists = input.onExists ?? 'reuse';
-  if (onExists === 'reuse') {
-    try {
-      await access(target.absPath);
-      return target;
-    } catch (error) {
-      if (!isFileNotFoundError(error)) throw error;
-    }
-  }
-
-  const sourceStats = await stat(input.sourcePath);
-  if (sourceStats.size > MAX_IMAGE_FILE_SIZE) {
-    throw new ImageUploadError(`File too large: ${sourceStats.size} bytes (max ${MAX_IMAGE_FILE_SIZE})`);
-  }
-  if (resolve(input.sourcePath) === target.absPath) {
-    await access(target.absPath);
-    return handleExistingTarget(target, onExists);
-  }
-
+  let bytes: Buffer;
   try {
-    await copyFile(input.sourcePath, target.absPath, fsConstants.COPYFILE_EXCL);
+    bytes = await readImageFile(input.sourcePath);
   } catch (error) {
-    if (!isFileExistsError(error)) throw error;
-    return handleExistingTarget(target, onExists);
+    if ((input.onExists ?? 'reuse') !== 'reuse' || !isFileNotFoundError(error)) throw error;
+    // An already published original remains recoverable after its temporary generation source is removed.
+    const mime = ensureSupportedImageMime(input.mimeType);
+    const target = await ensureImageTarget(input.uploadDir, mime, input.filenameStem);
+    bytes = await readImageFile(target.absPath);
   }
-  return target;
+  return saveImageBufferToUploadDir({
+    buffer: bytes,
+    mimeType: input.mimeType,
+    uploadDir: input.uploadDir,
+    filenameStem: input.filenameStem,
+    onExists: input.onExists,
+  });
+}
+
+/** A bounded snapshot closes before publication; a renamed/relabelled source cannot alter the bytes being saved. */
+export async function readImageFile(path: string): Promise<Buffer> {
+  const handle = await open(path, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW | fsConstants.O_NONBLOCK);
+  try {
+    const info = await handle.stat();
+    if (!info.isFile()) throw new ImageUploadError('Image must be a regular file');
+    if (info.size > MAX_IMAGE_FILE_SIZE)
+      throw new ImageUploadError(`File too large: ${info.size} bytes (max ${MAX_IMAGE_FILE_SIZE})`);
+    const chunks: Buffer[] = [];
+    let size = 0;
+    for await (const chunk of handle.createReadStream({ autoClose: false })) {
+      size += chunk.length;
+      if (size > MAX_IMAGE_FILE_SIZE)
+        throw new ImageUploadError(`File too large: ${size} bytes (max ${MAX_IMAGE_FILE_SIZE})`);
+      chunks.push(chunk);
+    }
+    return Buffer.concat(chunks, size);
+  } finally {
+    await handle.close();
+  }
 }

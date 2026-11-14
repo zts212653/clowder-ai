@@ -1,5 +1,6 @@
 import { act } from 'react';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { writeShellPresentation } from '@/components/shell/shell-presentation';
 import type { Thread } from '@/stores/chat-types';
 import { useLabelStore } from '@/stores/label-store';
 import { useSidebarProjectionStore } from '@/stores/sidebarProjectionStore';
@@ -27,6 +28,7 @@ describe('Group member sorting and reading stability', () => {
   beforeEach(() => {
     installThreadSidebarGlobals();
     resetThreadSidebarMocks();
+    writeShellPresentation('classic');
     open = { [anchor]: true };
     memberSort = {};
     failSave = false;

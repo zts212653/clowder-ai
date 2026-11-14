@@ -1,3 +1,4 @@
+import { isDeepStrictEqual } from 'node:util';
 import {
   type DeploymentObservationV1,
   type DeploymentWaitOutcomeV1,
@@ -5,19 +6,22 @@ import {
   evaluateDeploymentWait,
   type TaskItem,
   type WaitTerminationActor,
+  waitTerminationEventSchema,
 } from '@cat-cafe/shared';
 import type {
   ConnectorDeliveryDeps,
   ConnectorDeliveryInput,
 } from '../../infrastructure/email/deliver-connector-message.js';
+import { recoveryGuarded } from '../../infrastructure/recovery/recovery-deadline.js';
 import type { IWaitLifecycleEventLog } from '../ball-custody/WaitLifecycleEventLog.js';
 import type { InvocationRegistry } from '../cats/services/agents/invocation/InvocationRegistry.js';
+import type { DeploymentWaitAudit } from '../cats/services/stores/ports/deployment-wait/recovery-facts.js';
 import type { IMessageStore } from '../cats/services/stores/ports/MessageStore.js';
 import type { ITaskStore } from '../cats/services/stores/ports/TaskStore.js';
 import type { ITurnExecutionStore } from '../cats/services/stores/ports/TurnExecutionStore.js';
 import { isDeploymentWaitTask } from './DeploymentWaitAuthority.js';
 import { DeploymentWaitCurrentTurnClaim } from './DeploymentWaitCurrentTurnClaim.js';
-import { lifecycleEvent, matchedOutcomeId, originalRegistration } from './DeploymentWaitOutcome.js';
+import { matchedOutcomeId, originalRegistration } from './DeploymentWaitOutcome.js';
 import { DeploymentWaitPublisher } from './DeploymentWaitPublisher.js';
 import type { SessionHandoffWaitSourceDeps } from './SessionHandoffWaitSource.js';
 
@@ -72,9 +76,10 @@ export class DeploymentWaitLifecycleService {
   private readonly publisher: DeploymentWaitPublisher;
 
   constructor(private readonly opts: DeploymentWaitLifecycleServiceOptions) {
+    this.opts = recoveryGuarded(opts);
     this.now = opts.now ?? Date.now;
-    this.currentTurnClaim = new DeploymentWaitCurrentTurnClaim(opts);
-    this.publisher = new DeploymentWaitPublisher(opts, this.currentTurnClaim, (outcome) =>
+    this.currentTurnClaim = new DeploymentWaitCurrentTurnClaim(this.opts);
+    this.publisher = new DeploymentWaitPublisher(this.opts, this.currentTurnClaim, (outcome) =>
       this.hasCurrentEvidence(outcome),
     );
   }
@@ -247,28 +252,24 @@ export class DeploymentWaitLifecycleService {
     return { kind: 'unrecorded', reason: 'generation_changed_concurrently' };
   }
 
+  /** Audit-only recovery never observes deployments, mutates business state or publishes a wake. */
+  async recoverAudit(entry: DeploymentWaitAudit): Promise<boolean> {
+    if (!this.opts.eventLog || !waitTerminationEventSchema.safeParse(entry.event).success) return false;
+    const facts = await this.opts.taskStore.getDeploymentWaitRecoveryFacts(entry.taskId);
+    const current = facts?.pending[entry.event.eventId];
+    if (!current || current.token !== entry.token || !isDeepStrictEqual(current.event, entry.event)) return false;
+    const result = await this.opts.eventLog.append(current.event);
+    if (result?.confirmed !== true) return false;
+    return this.opts.taskStore.ackDeploymentWaitAudit(entry);
+  }
+
   private async appendLifecycleEvent(task: TaskItem, outcome: DeploymentWaitOutcomeV1): Promise<void> {
-    if (!this.opts.eventLog) return;
     try {
-      const event = lifecycleEvent(task, outcome);
-      if (outcome.reason === 'owner_changed' || outcome.reason === 'subject_terminal') {
-        const snapshot = await this.opts.taskStore.getWaitRegistration(task.id);
-        const receipt = snapshot?.receipt;
-        if (
-          receipt?.proofKind === 'deployment_predicate' &&
-          receipt.taskId === task.id &&
-          receipt.userId === task.userId &&
-          receipt.subjectRef === outcome.subjectRef &&
-          receipt.generation === outcome.generation
-        ) {
-          event.ownerUserId = receipt.userId;
-          event.ownerCatId = receipt.catId;
-          event.threadId = receipt.threadId;
-        }
-      }
-      await this.opts.eventLog.append(event);
+      const facts = await this.opts.taskStore.getDeploymentWaitRecoveryFacts(task.id);
+      const entry = facts?.pending[`${task.id}:${outcome.outcomeId}`];
+      if (entry) await this.recoverAudit(entry);
     } catch (error) {
-      this.opts.log.warn({ error, taskId: task.id }, '[F323] deployment wait event append deferred');
+      this.opts.log.warn({ err: error, taskId: task.id }, '[F323] deployment wait event append deferred');
     }
   }
 

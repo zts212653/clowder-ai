@@ -44,8 +44,9 @@ export async function* invokeDshMember(input: {
     if (!member || !options.workingDirectory || member.server.transport !== 'stdio')
       throw new Error('dsh_member_launch_required');
     const executionAccount = Object.freeze(structuredClone(options.executionAccount));
+    const callbackEnv = Object.freeze({ ...options.callbackEnv });
     const workingDirectory = options.workingDirectory,
-      userId = options.callbackEnv?.CAT_CAFE_USER_ID,
+      userId = callbackEnv.CAT_CAFE_USER_ID,
       beforeProviderLaunch = options.beforeProviderLaunch;
     const current = async () => {
       signal.throwIfAborted();
@@ -70,7 +71,7 @@ export async function* invokeDshMember(input: {
       requireFrozenInput: true,
     });
     await current();
-    const launch = await prepareDshMemberLaunch({ native: input.native, account, identity, member });
+    const launch = await prepareDshMemberLaunch({ native: input.native, account, identity, member, callbackEnv });
     dispose = launch.dispose;
     await current();
     client = new AcpClient({ ...launch, inheritParentEnv: false, defaultPermissionDecision: 'reject' });

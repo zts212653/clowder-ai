@@ -1,28 +1,14 @@
 // @vitest-environment node
 
-import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
+import { typographyViolations } from './f190-typography-audit';
 
 const testDir = dirname(fileURLToPath(import.meta.url));
 function readSrc(relativePath: string): string {
   return readFileSync(resolve(testDir, '..', relativePath), 'utf8');
-}
-
-function collectSourceFiles(root: string): string[] {
-  const files: string[] = [];
-  for (const entry of readdirSync(root)) {
-    const full = resolve(root, entry);
-    if (full.includes('/__tests__/')) continue;
-    const stat = statSync(full);
-    if (stat.isDirectory()) {
-      files.push(...collectSourceFiles(full));
-    } else if (/\.(ts|tsx|css)$/.test(entry)) {
-      files.push(full);
-    }
-  }
-  return files;
 }
 
 interface ModalOverlayCandidate {
@@ -76,12 +62,6 @@ describe('F190 visual contract — no hard borders in card/panel components', ()
 
   it('SessionChainPanel uses settingsResourceCardClass, not border-[var(--console-border-soft)]', () => {
     const src = readSrc('SessionChainPanel.tsx');
-    expect(src).toContain('settingsResourceCardClass');
-    expect(src).not.toMatch(/className="rounded-lg border border-\[var\(--console-border-soft\)\]/);
-  });
-
-  it('AuditExplorerPanel uses settingsResourceCardClass, not border-[var(--console-border-soft)]', () => {
-    const src = readSrc('audit/AuditExplorerPanel.tsx');
     expect(src).toContain('settingsResourceCardClass');
     expect(src).not.toMatch(/className="rounded-lg border border-\[var\(--console-border-soft\)\]/);
   });
@@ -477,21 +457,7 @@ describe('F190 visual contract — no hard borders in card/panel components', ()
 describe('F190 typography guard — no hardcoded font sizes in console scope', () => {
   it('src-wide guard: no raw pixel font definitions outside typography tokens', () => {
     const srcRoot = resolve(testDir, '..', '..');
-    /* F056: dev/ tools (OklchTuner) intentionally use dense px sizes */
-    const DEV_EXCLUDE = /[\\/]dev[\\/]/;
-    const violations = collectSourceFiles(srcRoot)
-      .filter((file) => !DEV_EXCLUDE.test(file))
-      .flatMap((file) => {
-        const src = readFileSync(file, 'utf8');
-        const matches = [
-          ...(src.match(/text-\[\d+(?:\.\d+)?px\]/g) ?? []),
-          ...(src.match(/fontSize:\s*['"]?\d/g) ?? []),
-          ...(src.match(/fontSize=\{\d/g) ?? []),
-          ...(src.match(/font-size:\s*(?:\d|0\.)/g) ?? []),
-        ];
-        return matches.map((match) => `${file.replace(srcRoot, 'src')}: ${match}`);
-      });
-    expect(violations).toEqual([]);
+    expect(typographyViolations(srcRoot)).toEqual([]);
   });
 });
 
@@ -506,7 +472,6 @@ describe('F190 divider guard — console-scope dividers use semantic class', () 
     'UnifiedAuthModal.tsx',
     'PushSettingsPanel.tsx',
     'ThreadExecutionBar.tsx',
-    'audit/AuditExplorerPanel.tsx',
     'mission-control/WorkflowSopPanel.tsx',
     'mission-control/FeatureRowList.tsx',
     'workspace/WorldPanel.tsx',
@@ -1051,7 +1016,8 @@ describe('#723 round 6 — select/toggle/button primitive convergence', () => {
   });
 
   it('IndexStatus toggles: cafe-accent for on, no emerald/zinc hardcodes on toggle buttons', () => {
-    const src = readSrc('memory/IndexStatus.tsx');
+    expect(readSrc('memory/IndexStatus.tsx')).toContain('<EvidenceFeatureFlag');
+    const src = readSrc('memory/EvidenceFeatureFlag.tsx');
     expect(src).not.toContain('bg-emerald-600');
     expect(src).not.toContain('bg-zinc-400');
     const toggleButtons =
@@ -1348,6 +1314,7 @@ describe('#723 round 9 — install button, error suppression, breadcrumb, tab/ca
   });
 
   it('console modal scrims consistently blur the page behind them', () => {
+    expect(readSrc('ThreadSidebar/ThreadSidebar.tsx')).toContain('<ThreadDeleteConfirmDialog');
     const modalOverlayFiles = [
       'Lightbox.tsx',
       'VoteConfigModal.tsx',
@@ -1369,7 +1336,7 @@ describe('#723 round 9 — install button, error suppression, breadcrumb, tab/ca
       'McpConfigModal.tsx',
       'SteerQueuedEntryModal.tsx',
       'ThreadSidebar/DirectoryPickerModal.tsx',
-      'ThreadSidebar/ThreadSidebar.tsx',
+      'ThreadSidebar/ThreadDeleteConfirmDialog.tsx',
       'ThreadSidebar/ThreadOrganizerModal.tsx',
     ];
 

@@ -1,12 +1,14 @@
-import type { RecallResolverFamily } from '@cat-cafe/shared';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import type { ChatMessage } from '@/stores/chat-types';
 import { useChatStore } from '@/stores/chatStore';
-import { apiFetch } from '@/utils/api-client';
+import { apiSessionIdentity } from '@/utils/api-session-identity';
 import { deduplicateRecallEvents, recallReplyInvocationId } from './recall-feed-model';
 import { lookupRecallReply, type RecallReplyCursor, recallReplyMessage } from './recall-reply-lookup';
+import { readScopedRecallJson } from './recall-scoped-read';
 import { filterRecallEvents } from './recall-tool-events';
-import type { MemoryCueStatus, RecallEvent, RecallResultItem, RecallSourceView } from './recall-types';
+import type { RecallEvent, RecallResultItem, RecallSourceView } from './recall-types';
+import { useRecallCueDeliveries } from './useRecallCueDeliveries';
+import { useRecallRefresh } from './useRecallRefresh';
 
 export {
   deduplicateRecallEvents,
@@ -21,25 +23,22 @@ type ReadStatus = 'loading' | 'ready' | 'error';
 function cueViewKey(input: { invocationId?: string; cueId?: string; sourceRevision?: string; anchor?: string }) {
   return JSON.stringify([input.invocationId, input.cueId, input.sourceRevision, input.anchor]);
 }
-interface CueEntry {
-  cueId: string;
-  consumerCatId: string;
-  sourceAnchor: string;
-  sourceRevision: string;
-  resolverFamily: RecallResolverFamily;
-  status: MemoryCueStatus;
-  presentedAt: number;
-}
 export function useThreadRecall(options: { threadId?: string; messages?: readonly ChatMessage[] } = {}) {
   const currentMessages = useChatStore((store) => store.messages);
   const currentThreadId = useChatStore((store) => store.currentThreadId);
   const messages = options.messages ?? currentMessages;
   const threadId = options.threadId ?? currentThreadId;
-  const [generation, setGeneration] = useState(0);
+  const session = useSyncExternalStore(
+    apiSessionIdentity.subscribe,
+    apiSessionIdentity.getSnapshot,
+    apiSessionIdentity.getSnapshot,
+  );
+  const scope = JSON.stringify([threadId, session.generation]);
+  const { generation, sourceGeneration, retry } = useRecallRefresh();
   const [cueViewGeneration, setCueViewGeneration] = useState(0);
-  const requestedCueViews = useRef({ threadId, keys: new Set<string>() });
-  const cueCache = useRef(new Map<string, { token: string; events: RecallEvent[]; failed: boolean }>());
+  const requestedCueViews = useRef({ scope, keys: new Set<string>() });
   const [history, setHistory] = useState<{
+    scope: string;
     threadId: string | null;
     events: RecallEvent[];
     status: ReadStatus;
@@ -48,17 +47,13 @@ export function useThreadRecall(options: { threadId?: string; messages?: readonl
     cueInvocationIds?: string[];
     sourceViews?: RecallSourceView[];
     cueViewGeneration?: number;
+    sourceGeneration?: number;
   }>({
+    scope: '',
     threadId: null,
     events: [],
     status: 'loading',
   });
-  const [deliveries, setDeliveries] = useState<{
-    threadId: string | null;
-    events: RecallEvent[];
-    failed: boolean;
-    loading: boolean;
-  }>({ threadId: null, events: [], failed: false, loading: true });
   const live = useMemo(
     () =>
       messages.flatMap((message) => {
@@ -83,31 +78,36 @@ export function useThreadRecall(options: { threadId?: string; messages?: readonl
     .map((message) => `${message.id}:${message.toolEvents?.length ?? 0}`)
     .join('|');
   const historyRequest = useMemo(
-    () => ({ threadId, generation, finished, cueViewGeneration }),
-    [threadId, generation, finished, cueViewGeneration],
+    () => ({ threadId, scope, generation, sourceGeneration, finished, cueViewGeneration }),
+    [threadId, scope, generation, sourceGeneration, finished, cueViewGeneration],
   );
   useEffect(() => {
-    const { threadId, cueViewGeneration } = historyRequest;
+    const { threadId, scope, cueViewGeneration, sourceGeneration } = historyRequest;
     let active = true;
     const controller = new AbortController();
     setHistory((previous) => ({
       threadId,
-      events: previous.threadId === threadId ? previous.events : [],
-      replies: previous.threadId === threadId ? previous.replies : [],
-      replyCursor: previous.threadId === threadId ? previous.replyCursor : null,
-      cueInvocationIds: previous.threadId === threadId ? previous.cueInvocationIds : [],
-      sourceViews: previous.threadId === threadId ? previous.sourceViews : [],
-      cueViewGeneration: previous.threadId === threadId ? previous.cueViewGeneration : 0,
+      scope,
+      events: previous.scope === scope ? previous.events : [],
+      replies: previous.scope === scope ? previous.replies : [],
+      replyCursor: previous.scope === scope ? previous.replyCursor : null,
+      cueInvocationIds: previous.scope === scope ? previous.cueInvocationIds : [],
+      sourceViews: previous.scope === scope ? previous.sourceViews : [],
+      cueViewGeneration: previous.scope === scope ? previous.cueViewGeneration : 0,
+      sourceGeneration: previous.scope === scope ? previous.sourceGeneration : undefined,
       status: 'loading',
     }));
     if (!threadId) {
-      setHistory({ threadId, events: [], status: 'ready' });
+      setHistory({ threadId, scope, events: [], status: 'ready' });
       return;
     }
-    apiFetch(`/api/recall/events?threadId=${encodeURIComponent(threadId)}&limit=100`, { signal: controller.signal })
-      .then(async (response) => {
-        if (!response.ok) throw new Error('History unavailable');
-        const body = (await response.json()) as {
+    readScopedRecallJson(
+      `/api/recall/events?threadId=${encodeURIComponent(threadId)}&limit=100`,
+      JSON.stringify(historyRequest),
+      controller.signal,
+    )
+      .then((response) => {
+        const body = response as {
           events?: RecallEvent[];
           sourceViews?: RecallSourceView[];
           cueInvocationIds?: string[];
@@ -125,9 +125,11 @@ export function useThreadRecall(options: { threadId?: string; messages?: readonl
         if (active)
           setHistory({
             threadId,
+            scope,
             events: body.events,
             sourceViews: body.sourceViews ?? [],
             cueViewGeneration,
+            sourceGeneration,
             status: 'ready',
             cueInvocationIds: body.cueInvocationIds ?? [],
             replies,
@@ -135,111 +137,42 @@ export function useThreadRecall(options: { threadId?: string; messages?: readonl
           });
       })
       .catch(() => {
-        if (active) setHistory((previous) => ({ ...previous, threadId, status: 'error' }));
+        if (active)
+          setHistory((previous) => ({
+            ...(previous.scope === scope
+              ? previous
+              : { events: [], replies: [], cueInvocationIds: [], sourceViews: [] }),
+            threadId,
+            scope,
+            status: 'error',
+          }));
       });
     return () => {
       active = false;
       controller.abort();
     };
   }, [historyRequest]);
-  const historyEvents = useMemo(() => (history.threadId === threadId ? history.events : []), [history, threadId]);
+  const historyEvents = useMemo(() => (history.scope === scope ? history.events : []), [history, scope]);
   const replyMessages =
-    history.threadId === threadId
+    history.scope === scope
       ? [
           ...messages,
           ...(history.replies ?? []).filter((reply) => !messages.some((message) => message.id === reply.id)),
         ]
       : messages;
-  const invocationKey = JSON.stringify(
-    [
-      ...new Set(
-        [
-          ...(history.threadId === threadId ? (history.cueInvocationIds ?? []) : []),
-          ...messages.map(recallReplyInvocationId),
-        ].filter((id): id is string => !!id),
-      ),
-    ]
-      .sort()
-      .map((id) => {
-        const message = messages.find((message) => recallReplyInvocationId(message) === id);
-        return {
-          id,
-          token: `${generation}:${message ? `${message.isStreaming}:${message.toolEvents?.length ?? 0}` : 'history'}`,
-        };
-      }),
-  );
+  const deliveries = useRecallCueDeliveries({
+    threadId,
+    scope,
+    generation,
+    messages,
+    historyInvocations: history.scope === scope ? (history.cueInvocationIds ?? []) : [],
+  });
   useEffect(() => {
-    let active = true;
-    const controller = new AbortController();
-    setDeliveries((previous) => ({
-      threadId,
-      events: previous.threadId === threadId ? previous.events : [],
-      failed: false,
-      loading: true,
-    }));
-    const ids = JSON.parse(invocationKey) as Array<{ id: string; token: string }>;
-    if (!threadId || !ids.length) {
-      setDeliveries({ threadId, events: [], failed: false, loading: false });
-      return;
-    }
-    // Bounded concurrency; one unavailable cue source never discards the sources that succeeded.
-    (async () => {
-      const events: RecallEvent[] = [];
-      let failed = false;
-      for (let offset = 0; offset < ids.length && active; offset += 4) {
-        await Promise.all(
-          ids.slice(offset, offset + 4).map(async ({ id: invocationId, token }) => {
-            const cacheKey = `${threadId}:${invocationId}`;
-            const cached = cueCache.current.get(cacheKey);
-            if (cached?.token === token) {
-              events.push(...cached.events);
-              failed ||= cached.failed;
-              return;
-            }
-            try {
-              const response = await apiFetch(
-                `/api/threads/${encodeURIComponent(threadId)}/invocations/${encodeURIComponent(invocationId)}/memory-cues`,
-                { signal: controller.signal },
-              );
-              if (!response.ok) throw new Error('Cue source unavailable');
-              const body = (await response.json()) as { cues?: CueEntry[] };
-              if (!Array.isArray(body.cues)) throw new Error('Cue response unavailable');
-              const cueEvents = body.cues.map((cue) => ({
-                id: `cue:${invocationId}:${cue.cueId}`,
-                catId: cue.consumerCatId === 'legacy-unbound' ? undefined : cue.consumerCatId,
-                invocationId,
-                cueId: cue.cueId,
-                sourceRevision: cue.sourceRevision,
-                query: '',
-                resolverFamily: cue.resolverFamily,
-                timestamp: cue.presentedAt,
-                source: 'push' as const,
-                cueStatus: cue.status,
-                results: [{ title: '', anchor: cue.sourceAnchor, sourceType: cue.resolverFamily }],
-              }));
-              events.push(...cueEvents);
-              if (active) cueCache.current.set(cacheKey, { token, events: cueEvents, failed: false });
-            } catch {
-              if (active) {
-                failed = true;
-                cueCache.current.set(cacheKey, { token, events: [], failed: true });
-              }
-            }
-          }),
-        );
-      }
-      if (active) setDeliveries({ threadId, events, failed, loading: false });
-    })();
-    return () => {
-      active = false;
-      controller.abort();
-    };
-  }, [threadId, invocationKey]);
-  useEffect(() => {
-    if (requestedCueViews.current.threadId !== threadId) requestedCueViews.current = { threadId, keys: new Set() };
-    if (history.threadId !== threadId || history.status !== 'ready' || deliveries.threadId !== threadId) return;
+    if (requestedCueViews.current.scope !== scope) requestedCueViews.current = { scope, keys: new Set() };
+    if (history.scope !== scope || history.status !== 'ready' || deliveries.scope !== scope) return;
     const available = new Set((history.sourceViews ?? []).filter((view) => view.cueId).map(cueViewKey));
     const missing = deliveries.events.filter((event) => {
+      if (event.resolverFamily === 'matter') return false;
       const key = cueViewKey({ ...event, anchor: event.results?.[0]?.anchor });
       return !available.has(key) && !requestedCueViews.current.keys.has(key);
     });
@@ -248,17 +181,30 @@ export function useThreadRecall(options: { threadId?: string; messages?: readonl
       requestedCueViews.current.keys.add(cueViewKey({ ...event, anchor: event.results?.[0]?.anchor }));
     // One extra read per newly observed cue coordinate; omitted/failed views cannot form a refresh loop.
     setCueViewGeneration((value) => value + 1);
-  }, [threadId, history, deliveries]);
+  }, [scope, history, deliveries]);
   const events = useMemo(() => {
-    const sourceViews = history.threadId === threadId ? (history.sourceViews ?? []) : [];
+    const sourceViews =
+      history.scope === scope && history.sourceGeneration === sourceGeneration ? (history.sourceViews ?? []) : [];
     const views = new Map(sourceViews.filter((view) => !view.cueId).map((view) => [view.anchor, view]));
     const cueViews = new Map(sourceViews.filter((view) => view.cueId).map((view) => [cueViewKey(view), view]));
     return [
       ...deduplicateRecallEvents(live, historyEvents),
-      ...(deliveries.threadId === threadId ? deliveries.events : []),
+      ...(deliveries.scope === scope ? deliveries.events : []),
     ].map((event) => ({
       ...event,
       results: event.results?.map((item): RecallResultItem => {
+        if (event.resolverFamily === 'matter') {
+          const read = event.matterRead;
+          return read?.status === 'current'
+            ? { ...item, title: read.title, href: `/memory?matter=${encodeURIComponent(read.matterId)}` }
+            : {
+                ...item,
+                title: '',
+                titleStatus: 'unavailable',
+                href: null,
+                ...(read?.status === 'changed' ? { sourceUnavailableReason: 'source_corrected' } : {}),
+              };
+        }
         const key = cueViewKey({ ...event, anchor: item.anchor });
         const view = event.cueId ? cueViews.get(key) : item.anchor ? views.get(item.anchor) : undefined;
         if (view)
@@ -268,31 +214,35 @@ export function useThreadRecall(options: { threadId?: string; messages?: readonl
             titleStatus: view.titleStatus,
             sourceType: view.kind ?? item.sourceType,
             href: view.href,
+            messageHref: view.messageHref,
+            memoryHref: view.memoryHref,
             sourceUnavailableReason: view.sourceUnavailableReason,
           };
         if (!event.cueId) return item;
         if (history.status === 'error') return { ...item, href: null, titleStatus: 'unavailable' };
         const pending =
-          history.threadId !== threadId ||
+          history.scope !== scope ||
           history.status === 'loading' ||
           (history.cueViewGeneration ?? 0) < cueViewGeneration ||
-          requestedCueViews.current.threadId !== threadId ||
+          requestedCueViews.current.scope !== scope ||
           !requestedCueViews.current.keys.has(key);
         return { ...item, href: null, titleStatus: pending ? 'loading' : 'unavailable' };
       }),
     }));
-  }, [live, historyEvents, deliveries, history, threadId, cueViewGeneration]);
+  }, [live, historyEvents, deliveries, history, scope, cueViewGeneration, sourceGeneration]);
   const findReply = async (event: RecallEvent, signal: AbortSignal) => {
     if (!threadId) return undefined;
     return lookupRecallReply({
       threadId,
       event,
       messages: replyMessages,
-      cursor: history.threadId === threadId ? (history.replyCursor ?? null) : null,
+      cursor: history.scope === scope ? (history.replyCursor ?? null) : null,
       signal,
-      isCurrent: () => useChatStore.getState().currentThreadId === threadId,
+      isCurrent: () =>
+        useChatStore.getState().currentThreadId === threadId &&
+        apiSessionIdentity.getSnapshot().generation === session.generation,
       onPage: (replies, replyCursor) =>
-        setHistory((previous) => (previous.threadId === threadId ? { ...previous, replies, replyCursor } : previous)),
+        setHistory((previous) => (previous.scope === scope ? { ...previous, replies, replyCursor } : previous)),
     });
   };
   return {
@@ -300,14 +250,14 @@ export function useThreadRecall(options: { threadId?: string; messages?: readonl
     findReply,
     messages: replyMessages,
     threadId,
-    historyStatus: history.threadId === threadId ? history.status : ('loading' as ReadStatus),
+    historyStatus: history.scope === scope ? history.status : ('loading' as ReadStatus),
     historyCount: historyEvents.length,
-    hasOlderReplies: history.threadId === threadId && !!history.replyCursor,
+    hasOlderReplies: history.scope === scope && !!history.replyCursor,
     retainedHistory:
-      history.threadId === threadId && (history.events.length > 0 || (history.cueInvocationIds?.length ?? 0) > 0),
-    cuesFailed: deliveries.threadId === threadId && deliveries.failed,
-    cuesLoading: deliveries.threadId !== threadId || deliveries.loading,
-    retry: () => setGeneration((value) => value + 1),
+      history.scope === scope && (history.events.length > 0 || (history.cueInvocationIds?.length ?? 0) > 0),
+    cuesFailed: deliveries.scope === scope && deliveries.failed,
+    cuesLoading: deliveries.scope !== scope || deliveries.loading,
+    retry,
   };
 }
 export function useRecallEvents(): RecallEvent[] {

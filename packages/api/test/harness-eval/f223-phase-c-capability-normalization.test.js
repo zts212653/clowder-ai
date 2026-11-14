@@ -13,7 +13,13 @@ const TIER_1_CAPABILITIES = [
   { label: 'workspace-navigator', wakeup: /workspace-navigator/i, inventory: /workspace-navigator/i },
   { label: 'pencil-design', wakeup: /pencil-design/i, inventory: /pencil-design/i },
   { label: 'guide-interaction', wakeup: /guide-interaction/i, inventory: /guide-interaction/i },
-  { label: 'expert-panel', wakeup: /expert-panel/i, inventory: /expert-panel/i },
+  // Eval capability id 'expert-panel' is kept for history; the skill was retired 2026-11-03 and the
+  // explicit multi-cat wording now routes to collaborative-thinking.
+  {
+    label: 'collaborative-thinking (multi-cat, incl. 专家辩论)',
+    wakeup: /`collaborative-thinking` — 探索与多视角判断[\s\S]*「专家辩论」/,
+    inventory: /`collaborative-thinking`（含「专家辩论」/,
+  },
   { label: 'cat_cafe_propose_thread', wakeup: /cat_cafe_propose_thread/i, inventory: /cat_cafe_propose_thread/i },
   {
     label: 'F211 external runtime sessions',

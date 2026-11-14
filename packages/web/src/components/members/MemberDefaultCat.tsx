@@ -1,5 +1,6 @@
 import { useId } from 'react';
 import type { CatData } from '@/hooks/useCatData';
+import { useMemberModelLabel } from '@/lib/member-model-display';
 import { HelpTip } from '../settings/HelpTip';
 import { useMemberText } from './editor-presentation';
 import type { useMemberList } from './useMemberList';
@@ -7,6 +8,7 @@ import type { useMemberList } from './useMemberList';
 export function MemberDefaultCat({ cats, list }: { cats: CatData[]; list: ReturnType<typeof useMemberList> }) {
   const id = useId();
   const t = useMemberText();
+  const modelLabel = useMemberModelLabel();
   return (
     <>
       <div className="member-default-control">
@@ -31,7 +33,12 @@ export function MemberDefaultCat({ cats, list }: { cats: CatData[]; list: Return
             .filter((cat) => cat.roster?.available !== false || cat.id === list.defaultId)
             .map((cat) => (
               <option key={cat.id} value={cat.id} disabled={cat.roster?.available === false}>
-                {cat.nickname || cat.displayName} · {cat.defaultModel}
+                {cat.nickname || cat.displayName} ·{' '}
+                {modelLabel(
+                  cat,
+                  t(cat.configurationSource === 'native_tool' ? '跟随工具设置' : '未设置'),
+                  t('未设置') === 'Not set',
+                )}
                 {cat.roster?.available === false ? t('（已停用）') : ''}
               </option>
             ))}

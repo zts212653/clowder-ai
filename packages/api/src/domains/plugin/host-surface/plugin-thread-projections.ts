@@ -7,6 +7,8 @@ import { ExternalPluginRuntimeError } from '../external-runtime/types.js';
 
 export interface PluginThreadSummary {
   readonly id: string;
+  /** Canonical creator; readability alone is not proof that a mailbox belongs to the selected owner. */
+  readonly createdBy?: string;
   readonly projectRef?: string;
   readonly deepLinkUrl: string;
   readonly title: string | null;
@@ -98,6 +100,7 @@ export async function projectThread(
   ];
   return {
     id: thread.id,
+    createdBy: thread.createdBy,
     projectRef: thread.projectPath,
     deepLinkUrl: threadDeepLinkUrl(thread.id),
     title: thread.title,

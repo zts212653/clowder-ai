@@ -1,5 +1,5 @@
 import { fileContentKind } from '@cat-cafe/shared';
-import { type ReactNode, type RefObject, useLayoutEffect } from 'react';
+import { type CSSProperties, type ReactNode, type RefObject, useLayoutEffect } from 'react';
 import { useShellCopy } from '@/components/shell/shell-copy';
 import { useShellLanguage } from '@/components/shell/shell-language';
 import styles from './artwork-actions.module.css';
@@ -22,6 +22,8 @@ export function FileActionMenu({
   position,
   menu,
   info,
+  infoError,
+  retryInfo,
   link,
   filename,
   mime,
@@ -47,6 +49,8 @@ export function FileActionMenu({
   position: { x: number; y: number };
   menu: RefObject<HTMLDivElement>;
   info: ContentFileInfo | null;
+  infoError: boolean;
+  retryInfo: () => void;
   link: string;
   filename: string;
   mime?: string;
@@ -80,7 +84,7 @@ export function FileActionMenu({
   const nativeMedia = ['image', 'video', 'audio'].includes(fileContentKind(filename, info?.mime ?? mime));
   const nativeLink = nativeMedia ? link : fileDownloadUrl(link);
   const date = artworkFileDate(info?.createdAt ?? info?.modifiedAt, language);
-  const location = info === null ? t.loading : info.local ? (info.displayPath ?? info.path) : link;
+  const location = info?.local ? (info.displayPath ?? info.path) : link;
   const bytes = info?.byteLength ?? byteLength;
   const fileSize = fileByteLengthLabel(bytes);
   return (
@@ -90,7 +94,13 @@ export function FileActionMenu({
       role="menu"
       popover="manual"
       aria-label={t.more}
-      style={{ position: 'fixed', left: position.x, top: position.y }}
+      style={
+        {
+          position: 'fixed',
+          '--file-menu-x': `${position.x}px`,
+          '--file-menu-y': `${position.y}px`,
+        } as CSSProperties
+      }
       onClick={(event) => event.stopPropagation()}
       onKeyDown={(event) => {
         if (event.key === 'Escape') {
@@ -128,7 +138,7 @@ export function FileActionMenu({
         ) : null}
         <button role="menuitem" type="button" disabled={info === null} onClick={copyLocation}>
           <ReviewToolbarIcon name="copy" />
-          {info === null ? t.loading : info.local ? t.copyPath : t.copyLink}
+          {info === null && !infoError ? t.loading : info?.local ? t.copyPath : t.copyLink}
         </button>
         {src && !directory ? (
           <button role="menuitem" type="button" disabled={!src} onClick={copyPixels}>
@@ -226,7 +236,9 @@ export function FileActionMenu({
         ) : null}
       </div>
       <section className={styles.info} aria-label={t.fileInfo}>
-        <strong>{filename}</strong>
+        <strong>{info?.filename ?? filename}</strong>
+        {info?.reason && <p role="status">{info.reason}</p>}
+        {info?.local && info.canOpen === false && info.canReveal === false ? <p>{t.localActionsUnavailable}</p> : null}
         {copyName && (
           <button type="button" onClick={copyName}>
             {t.copyFilename}
@@ -239,9 +251,18 @@ export function FileActionMenu({
           {` · ${info?.author ?? t.unknownAuthor}`}
           {date ? ` · ${date}` : ''}
         </p>
-        <button type="button" className={styles.path} disabled={info === null} onClick={copyLocation}>
-          {location}
-        </button>
+        {infoError ? (
+          <>
+            <p role="alert">{t.fileInfoFailed}</p>
+            <button type="button" onClick={retryInfo}>
+              {t.retry}
+            </button>
+          </>
+        ) : (
+          <button type="button" className={styles.path} disabled={info === null} onClick={copyLocation}>
+            {info === null ? t.loading : location}
+          </button>
+        )}
       </section>
     </div>
   );

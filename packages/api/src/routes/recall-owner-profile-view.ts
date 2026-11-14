@@ -1,3 +1,4 @@
+import { catRegistry } from '@cat-cafe/shared';
 import {
   assertProfilePathSegment,
   CURRENT_CORPUS_PROFILE_URI,
@@ -44,11 +45,21 @@ export function readOwnerProfileView(
   const opening = cue.source_anchor.startsWith('profile:opening-');
   return {
     kind: 'profile',
-    title: opening ? `开场递送 · ${entry.title}` : entry.title,
+    title: ownerProfileTitle(memoryId, entry.title),
+    memoryHref: `/memory?${query}`,
     href: `/memory?${query}`,
     ...(opening ? { profileMemoryId: memoryId } : {}),
   };
 }
 function unavailable(reason: NonNullable<RecallCandidateView['sourceUnavailableReason']>): RecallCandidateView {
   return { kind: 'profile', titleStatus: 'unavailable', href: null, sourceUnavailableReason: reason };
+}
+
+function ownerProfileTitle(memoryId: string, title: string): string {
+  if (memoryId === 'capsule') return '关于你';
+  if (!memoryId.startsWith('primer:')) return title;
+  const names = Object.values(catRegistry.getAllConfigs())
+    .filter((cat) => cat.relationshipKey === memoryId.slice('primer:'.length))
+    .map((cat) => cat.nickname || cat.displayName);
+  return names.length ? `与 ${[...new Set(names)].join('、')} 的关系画像` : '关系画像';
 }

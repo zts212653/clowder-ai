@@ -78,6 +78,7 @@ beforeEach(() => {
 afterEach(async () => {
   await act(() => root.unmount());
   container.remove();
+  window.history.replaceState(null, '', '/');
   vi.clearAllMocks();
 });
 const render = async (tab: 'library' | 'brakes' | 'all') => {
@@ -85,6 +86,34 @@ const render = async (tab: 'library' | 'brakes' | 'all') => {
 };
 
 describe('memory page read-only preview', () => {
+  it('lets a memory search replace an open matter detail while preserving the conversation return', async () => {
+    const original = fetchMock.getMockImplementation();
+    fetchMock.mockImplementation((path: string) =>
+      path.startsWith('/api/memory/matters/')
+        ? ok({
+            matter: {
+              matterId: 'matter-source',
+              title: 'Source matter',
+              description: '',
+              revision: 1,
+              status: 'active',
+              createdAt: 1,
+              updatedAt: 1,
+            },
+            entries: [],
+          })
+        : original?.(path),
+    );
+    window.history.replaceState(null, '', '/memory?matter=matter-source&q=%E8%AE%BE%E7%BD%AE%E5%85%A5%E5%8F%A3');
+    await act(async () =>
+      root.render(
+        <MemoryPagePreview tab="all" shell="v2" matterId="matter-source" initialQuery="设置入口" from="thread-owner" />,
+      ),
+    );
+    expect(container.querySelector('[aria-label="记忆搜索结果"]')).not.toBeNull();
+    expect(container.querySelector('[aria-label="事情详情"]')).toBeNull();
+    expect(container.querySelector('a[aria-label="返回原对话"]')?.getAttribute('href')).toBe('/thread/thread-owner');
+  });
   it('all memories starts with the home study and does not read or place curation records', async () => {
     const original = fetchMock.getMockImplementation();
     fetchMock.mockImplementation((path: string) =>

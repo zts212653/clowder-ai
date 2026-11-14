@@ -10,11 +10,20 @@ export interface DeclaredPluginWebhook {
   readonly path: string;
   readonly methods: readonly string[];
   readonly anonymous: boolean;
+  readonly requestBodyLimitBytes: number;
 }
+
+export const DEFAULT_PLUGIN_WEBHOOK_REQUEST_BODY_LIMIT_BYTES = 1024 * 1024;
+export const MAX_PLUGIN_WEBHOOK_REQUEST_BODY_LIMIT_BYTES = 15 * 1024 * 1024;
+
+type WebhookContributionWithRequestLimit = WebhookContribution & {
+  readonly requestBodyLimitBytes?: number;
+};
 
 export function validateDeclaredWebhooks(webhooks: readonly WebhookContribution[]): void {
   const previous: WebhookContribution[] = [];
   for (const webhook of webhooks) {
+    requestBodyLimitBytes(webhook);
     const segments = webhook.path.split('/');
     validatePattern(webhook.id, segments);
     for (const other of previous) {
@@ -98,5 +107,15 @@ export function resolveDeclaredWebhook(
     // A method miss exposes all methods at this path without invoking a handler.
     methods: methodMatch ? methodMatch.methods : [...new Set(matching.flatMap((candidate) => candidate.methods))],
     anonymous: selected.verificationSecretRef !== undefined,
+    requestBodyLimitBytes: requestBodyLimitBytes(selected),
   };
+}
+
+function requestBodyLimitBytes(webhook: WebhookContribution): number {
+  const value = (webhook as WebhookContributionWithRequestLimit).requestBodyLimitBytes;
+  if (value === undefined) return DEFAULT_PLUGIN_WEBHOOK_REQUEST_BODY_LIMIT_BYTES;
+  if (!Number.isSafeInteger(value) || value <= 0 || value > MAX_PLUGIN_WEBHOOK_REQUEST_BODY_LIMIT_BYTES) {
+    refuse(`Webhook contribution ${webhook.id} has an invalid request body limit`);
+  }
+  return value;
 }

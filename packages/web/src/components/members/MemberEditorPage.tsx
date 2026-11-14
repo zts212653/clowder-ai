@@ -2,6 +2,7 @@
 
 import { BUILTIN_GPT_PRO_CANONICAL_MENTION, supportsCodexFastModel } from '@cat-cafe/shared';
 import { useEffect, useId, useRef, useState } from 'react';
+import { useMemberModelLabel } from '@/lib/member-model-display';
 import { AvatarImageWithFallback } from '../AvatarImageWithFallback';
 import {
   AccountSection,
@@ -30,6 +31,7 @@ export function MemberEditorPage({
   embedded = false,
 }: HubCatEditorProps & { editor: HubCatEditorController; embedded?: boolean }) {
   const t = useMemberText();
+  const modelLabel = useMemberModelLabel();
   const copy = useMembersCopy();
   const required = cat ? null : requiredHubCatFields(e.form, e.selectedProfile, true);
   const showRequired =
@@ -109,7 +111,7 @@ export function MemberEditorPage({
                     <h2>{cat ? cat.nickname || cat.displayName : t('添加成员')}</h2>
                     <p>
                       {cat
-                        ? `${cat.displayName} · ${cat.id} · ${cat.defaultModel}`
+                        ? `${cat.displayName} · ${cat.id} · ${modelLabel(cat, t(cat.configurationSource === 'native_tool' ? '跟随工具设置' : '未设置'), t('未设置') === 'Not set')}`
                         : t('从家里的一只猫开始：名字、性格、颜色都带过来，再按需要改。')}
                     </p>
                   </div>
@@ -159,14 +161,7 @@ export function MemberEditorPage({
               <fieldset className="member-editor-fields" disabled={e.saving}>
                 {!cat && identitySection}
                 <div id={sectionId('model')}>
-                  {cat?.id === 'gpt-dot' ? (
-                    <p className="member-helper">
-                      砚砚 · dot 身份独立，沿用 ChatGPT 已连接的猫咖插件。
-                      <a className="underline" href="/settings?s=plugins#chatgpt-dot">
-                        在插件集成中管理连接 ›
-                      </a>
-                    </p>
-                  ) : cat && e.protectedCloudIdentity ? (
+                  {cat && e.protectedCloudIdentity ? (
                     <ProtectedCloudIdentitySection
                       protection={e.protectedCloudIdentity}
                       restoring={e.restoringCloudIdentity}

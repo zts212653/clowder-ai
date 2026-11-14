@@ -10,6 +10,7 @@ const MCP_ENV_KEYS = [
   'CAT_CAFE_API_URL',
   'CAT_CAFE_INVOCATION_ID',
   'CAT_CAFE_CALLBACK_TOKEN',
+  'CAT_CAFE_CREDENTIAL_FILE',
   'CAT_CAFE_USER_ID',
   'CAT_CAFE_CAT_ID',
   'CAT_CAFE_THREAD_ID',
@@ -22,6 +23,8 @@ export async function probeCodexNativePolicy({
   codeMode = false,
   nativeSubtask = false,
   carrier = 'exec_json',
+  credentialFile = false,
+  identity = { invocationId: 'probe-invocation', callbackToken: 'probe-token', threadId: 'probe-thread' },
   requestedCall,
   prepare,
 } = {}) {
@@ -58,7 +61,7 @@ export async function probeCodexNativePolicy({
       firstCallbackAt ??= Date.now();
       callbacks.push({ path: req.url, headers: req.headers });
       res.writeHead(200, { 'content-type': 'application/json' });
-      res.end(JSON.stringify({ threadId: 'probe-thread', contextScope: 'history', messages: [], hasMore: false }));
+      res.end(JSON.stringify({ threadId: identity.threadId, contextScope: 'history', messages: [], hasMore: false }));
       return;
     }
     if (req.method !== 'POST') {
@@ -232,12 +235,23 @@ export async function probeCodexNativePolicy({
     NO_PROXY: '127.0.0.1,localhost',
     no_proxy: '127.0.0.1,localhost',
     CAT_CAFE_API_URL: 'http://127.0.0.1:' + port,
-    CAT_CAFE_INVOCATION_ID: 'probe-invocation',
-    CAT_CAFE_CALLBACK_TOKEN: 'probe-token',
+    CAT_CAFE_INVOCATION_ID: identity.invocationId,
+    CAT_CAFE_CALLBACK_TOKEN: identity.callbackToken,
     CAT_CAFE_USER_ID: 'probe-owner',
     CAT_CAFE_CAT_ID: 'codex-astra',
-    CAT_CAFE_THREAD_ID: 'probe-thread',
+    CAT_CAFE_THREAD_ID: identity.threadId,
   };
+  if (credentialFile) {
+    env.CAT_CAFE_CREDENTIAL_FILE = join(root, 'mcp-credentials.json');
+    await writeFile(
+      env.CAT_CAFE_CREDENTIAL_FILE,
+      JSON.stringify({
+        invocationId: env.CAT_CAFE_INVOCATION_ID,
+        callbackToken: env.CAT_CAFE_CALLBACK_TOKEN,
+      }),
+    );
+    delete env.CAT_CAFE_CALLBACK_TOKEN;
+  }
   const mcp = [
     '--config',
     'mcp_servers.cat-cafe-collab.command=' + JSON.stringify(process.execPath),

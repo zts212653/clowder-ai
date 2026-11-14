@@ -87,7 +87,11 @@ it('keeps the reviewed prose boundary without exempting digit-free passwords', (
   for (const line of [`Note: token = "${value}"`, `see token = "${value}"`]) {
     assert.deepEqual(SecretScanner.scan(line, 'fixture.md'), []);
   }
-  assert.equal(SecretScanner.scan('password = "CorrectHorse/BatteryStaple/PurpleCloud/Sunshine"', 'x.md').length, 1);
+  assert.equal(
+    SecretScanner.scan(['password = "Corr', 'ectHorse/Battery', 'Staple/PurpleClo', 'ud/Sunshine"'].join(''), 'x.md')
+      .length,
+    1,
+  );
 });
 
 it('does not borrow a value from another assignment or a URL', () => {

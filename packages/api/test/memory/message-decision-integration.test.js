@@ -2,9 +2,9 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import Fastify from 'fastify';
 import { MessageSearchAccessError, MessageSearchService } from '../../dist/domains/memory/MessageSearchService.js';
-import { MessageQueryQualifier } from '../../dist/domains/memory/message-query-qualifier.js';
 import { buildSearchableMessageContent } from '../../dist/domains/memory/message-search-content.js';
 import { projectCanonicalSearchMessage } from '../../dist/domains/memory/message-search-projection.js';
+import { verifySelectedMessageQuote } from '../../dist/domains/memory/message-selected-quote.js';
 import { registerMessageNavigationSourceRoute } from '../../dist/routes/message-navigation-source-route.js';
 
 const principal = { userId: 'owner', viewer: { type: 'user' } };
@@ -42,12 +42,11 @@ function fixture(decisionIndex) {
   const messages = new Map([source, ...following].map((m) => [m.id, m]));
   const thread = { id: 'visible', title: '原对话', createdBy: 'owner' };
   const deps = {
-    qualifier: new MessageQueryQualifier(async (batch) =>
-      JSON.stringify({
-        requestId: batch.requestId,
-        rows: batch.rows.map((row) => [row.id, 'supported', row.body]),
-      }),
-    ),
+    qualifier: {
+      qualify() {
+        throw new Error('Generative qualification is retired');
+      },
+    },
     evidenceStore: {
       readMessagePassageState: () => ({ current: true, suppressThreadTitle: false }),
       searchMessagePassages: async () => ({
@@ -116,7 +115,7 @@ test('a ledger I/O delay cannot keep a withdrawn or revised source alive at publ
   });
   const result = await f.service.search({ query: 'piano', mode: 'lexical' }, principal);
   assert.deepEqual(result.results, []);
-  assert.equal(result.meta.qualification.unassessed, 1);
+  assert.equal(result.meta.qualification, undefined);
 });
 
 test('structured human quotes display the original text and comment, not the transport JSON or source metadata', async () => {
@@ -163,7 +162,7 @@ test('an attachment-only callback retains the separate spoken body in its source
   assert.equal(result.message.content, '我同意继续保留两行。\n\n侧栏标题的原提议\n\n对照这一段');
 });
 
-test('structured excerpts retain the actual qualified evidence, including when it cannot map to a displayed field', () => {
+test('structured cat selections retain the real comment and reject a transport JSON fragment as an original quote', async () => {
   const f = fixture();
   f.source.content =
     '你看看\n<context_attachments>[{"text":"标题要一行？","comment":"不要一行这种"}]</context_attachments>';
@@ -190,13 +189,26 @@ test('structured excerpts retain the actual qualified evidence, including when i
     docAnchor: 'thread-visible',
     match: 'lexical',
   };
-  const project = (evidence) =>
-    projectCanonicalSearchMessage(f.source, f.thread, { current: true }, candidate, '一行', evidence);
-  assert.ok(project('\n不要一行这种').result.snippet.text.includes('不要一行这种'));
+  const admitted = {
+    message: f.source,
+    result: projectCanonicalSearchMessage(f.source, f.thread, { current: true }, candidate, '一行').result,
+  };
+  const input = {
+    threadId: 'visible',
+    messageId: sourceId,
+    contentRevision: admitted.result.contentRevision,
+    quote: '不要一行这种',
+    reason: 'The cat chose the publisher comment.',
+  };
+  const selected = await verifySelectedMessageQuote(input, admitted, async () => null);
+  assert.equal(selected.quote, '不要一行这种');
+  assert.equal(selected.part.kind, 'comment');
+  assert.ok(selected.context.text.includes('不要一行这种'));
+  assert.equal(selected.quotation.text, '标题要一行？');
   const exact = '"comment":"不要一行这种"';
-  assert.ok(
-    project(exact).result.snippet.text.includes(exact),
-    'presentation cannot replace qualified evidence with unrelated opening words',
+  await assert.rejects(
+    verifySelectedMessageQuote({ ...input, quote: exact }, admitted, async () => null),
+    /absent/,
   );
 });
 

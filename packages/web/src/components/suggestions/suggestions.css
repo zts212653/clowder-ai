@@ -1,0 +1,134 @@
+/*
+ * F335 交付二：回话下面那一排（一键提议、原地回执）与「设置 › 你 › 已隐藏的建议」。
+ * Sizes are copied from the north-star frames (docs/evidence/2026-11-02-f335-watcher-northstar/scripts/frames.mjs);
+ * the sample's HEX values are the DESIGN.md light tokens, so colours go through the shell role variables
+ * (canvas → --shell-paper, ink, muted, body, hairline(-strong), surface-3 → --shell-selected,
+ * primary-active → --shell-primary-text, success → --semantic-success) and follow the active theme.
+ */
+.w-av {
+  position: relative;
+  display: inline-block;
+  flex: none;
+  line-height: 0;
+}
+.w-av img {
+  display: block;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  object-fit: cover;
+}
+.w-av .eye {
+  position: absolute;
+  right: -3px;
+  bottom: -3px;
+  display: flex;
+  width: 12px;
+  height: 12px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: var(--shell-paper);
+  box-shadow: 0 0 0 1.5px var(--shell-paper);
+  color: var(--semantic-success);
+}
+.w-av .eye svg {
+  width: 10px;
+  height: 10px;
+}
+
+.w-sugg,
+.w-rcpt {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 10px 0 2px;
+}
+.w-sugg .pill {
+  display: inline-flex;
+  height: 28px;
+  align-items: center;
+  gap: 6px;
+  padding: 0 12px;
+  border-radius: 8px;
+  background: var(--shell-paper);
+  box-shadow: inset 0 0 0 1px var(--shell-hairline-strong);
+  color: var(--shell-ink);
+  font-size: var(--console-font-compact);
+  font-weight: 500;
+}
+.w-sugg .x {
+  position: relative;
+  display: flex;
+  width: 24px;
+  height: 24px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  color: var(--shell-muted);
+}
+.w-sugg .x:hover,
+.w-sugg .x:focus-visible {
+  background: var(--shell-selected);
+}
+.w-rcpt {
+  color: var(--shell-muted);
+  font-size: var(--console-font-compact);
+}
+.w-rcpt .ok {
+  width: 8px;
+  height: 8px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--semantic-success);
+}
+.w-rcpt .link,
+.w-rcpt .ghost.primary {
+  color: var(--shell-primary-text);
+}
+.w-rcpt .ghost {
+  color: var(--shell-muted);
+}
+.w-sugg button:disabled,
+.w-rcpt button:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+.w-row-error {
+  color: var(--shell-danger);
+  font-size: var(--console-font-xs);
+}
+/* Under the person's own message the row sits on the right, like the bubble. */
+.w-row-end {
+  width: max-content;
+  max-width: 100%;
+  margin-left: auto;
+}
+
+.w-hidden-list {
+  border-top: 1px solid var(--shell-hairline);
+}
+.w-hidden-row {
+  display: flex;
+  height: 44px;
+  align-items: center;
+  gap: 10px;
+  border-bottom: 1px solid var(--shell-hairline);
+}
+.w-hidden-row > .name {
+  color: var(--shell-ink);
+  font-size: var(--console-font-sm);
+}
+.w-hidden-row > .restore {
+  display: inline-flex;
+  height: 28px;
+  align-items: center;
+  margin-left: auto;
+  padding: 0 10px;
+  border-radius: 8px;
+  background: var(--shell-paper);
+  box-shadow: inset 0 0 0 1px var(--shell-hairline-strong);
+  color: var(--shell-body);
+  font-size: var(--console-font-compact);
+  font-weight: 500;
+}

@@ -2,18 +2,149 @@
 title: F287 Memory Cue Source Map
 doc_kind: architecture
 feature_ids: [F287]
-related_features: [F321, F102, F152, F186, F188, F200, F209, F221, F227, F231, F256, F260, F263, F271, F276, F281, F282, F312]
+related_features: [F321, F102, F152, F186, F188, F200, F209, F221, F227, F231, F256, F260, F263, F271, F276, F281, F282, F312, F332, F335]
 topics: [memory, recall, cue-plane, ownership, source-map, lifecycle]
 created: 2026-08-01
+updated: 2026-11-07
 description: "F287 对既有记忆源、消费者、cue 路径、drill、纠正遗忘以及 main/live/UAT 真相的逐 lane 边界普查。"
 description_source: human
 description_author: codex-sol
 description_updated_at: 2026-09-03T00:00:00Z
+mcp_admission_status: accepted
+mcp_admission_ref: "file:docs/architecture/memory-cue-source-map.md"
+mcp_admission_claims:
+  - {ref: "file:docs/architecture/memory-cue-source-map.md", toolName: cat_cafe_prepare_memory_context, resourceFamily: memory-cue, boundaryKind: side-effect-boundary, decision: accepted}
 ---
 
 # F287 Memory Cue Source Map
 
 Architecture cell: memory
+
+## F332发现迁移目标（2026-11-07）
+
+本节据You843和Opus845补入。核查main `90245ad815` 的`createMemoryCueRuntime.ts`：
+装配八个原resolver family及`thread_overview`，Matter则经显式read分支接回执。
+后面的“八个family”与各catalog版本是当时快照，不当作今天的总数或运行状态。
+
+目标是演进既有`KnowledgeResolver`承接共同候选发现/关联展开，接入已准入的cue和F335读源；
+详见[总图](memory-system-overview.md#f332共同发现目标拓扑2026-11-07)与路线迁退表 (internal)。
+下表是**待实施迁移**，并未改closed catalog、启动Luna、变更Profile/Taste审批或启用守望。
+
+| 当前family / 实际职责 | 共同发现接手的部分 | 必须留在原owner/consumer的部分 | 迁移与删除完成点 |
+| --- | --- | --- | --- |
+| `project_knowledge`：精确Feature读源；新上下文分支经`ContextProjectCueSource.discover()`另查项目候选 | W3把后一个分支的query编排、候选选择与关联展开接W1核心 | 项目绑定、published source、确切Feature读取、revision终检与cue封装 | W3同包删`discover()`中的旧独立查询/选择分支；保留`bind/project/read`的来源职责，必要时抽成原owner适配器 |
+| `taste`：closed ELI5、具名task bundle、dimension map | 泛化工作情境的候选发现由共同核心供给；既有明确来源/维度映射作为受治理source adapter，不复制到新规则表 | 批准、visibility、原vignette读口、ELI5使用证明、具名bundle和机会predicate | W3迁完同类工作旅程后删新增/旧有的重复通用发现分支；不把特定适用/批准规则误删为重复检索 |
+| `person_entity`、`operational_precedent`、`decision`：现代码从已准入实体/外部条件/ADR坐标读源 | 若需通用候选/关联则调用共同核心；当前精确coordinate解析不假称另一套全文搜索 | 实体revision双核、Person权限、外部状态边界、ADR接受状态及原文读取 | W0逐族登记无通用搜索的保留理由；W3验无旁路query/扩展。只承担精确读取/封装的resolver无需为删类名而删 |
+| `profile`、`event`、`cat_owned_seed`：首包或已知profile/event/seed及revision | 这些已知状态不强制重新关键词发现；任何新增自由查找部分统一走核心 | 画像首包与persona边界、Event原窗口、seed生产猫/私有域、terminal/失效与原reader | W3核当前状态和精确读源不被新候选预算意外关掉；移除的是重复发现，不是原数据与state contract |
+| `thread_overview`：F321 source-owned目录/策展与原件 | 按原F321接受范围接共同索引/寻址；通用搜索不再复制线程概况发现 | 已接受的专用策展方式、完整目录/原件权限、修订、F296显式clue合同 | W0核consumer映射，W3接线；不借F332迁移自行替换Luna合同或给新自动producer授权 |
+| `matter`显式read与开场目录/守望消费 | W1共同索引取候选，删除目录旧全量发现扫描/子串筛选 | [Matter合同](f332-matter-memory-contract.md)的唯一权限投影、整页支持源回验、完整归纳预算、管理占位与显式read回执 | W1把全部目录consumer一起验过再删旧分支；保留源权限投影和原写/忘接口 |
+
+没有通用搜索的精确读源属于读取层，不因归一被强行绕路；这不构成另一套发现核心。
+反过来，曾经属于某family的自由query、候选排序或图扩展，一旦被核心接手就不得留作旧fallback。
+派生依赖及失效只按[Derived View v1](memory-derived-view-contract.md)，新增view列在[原census](memory-derived-view-census.md#f332计划内增量2026-11-07未实施)。
+
+## F332 W3：工作准备的生产者与呈现合同
+
+本节是已接受W3范围内的接线合同，实施责任在W2→W3现场；不是已上线声明。来源为
+`message:private-source-id`及联合路线W3。W1先交共同入口，W3改closed catalog、
+MCP与callback、递送以及各family重复发现；工程验证仍由Kimi独审。普通查找不依赖这个入口。
+
+### 最早能证明的信号
+
+现行`get_rich_block_rules`没有制作类型，只证明取通用规则；`prepare_skill_consumption`属于Workspace
+消费测量，request-review有自己单独的纵切。本地`cat SKILL.md`、shell读文件、自然语言提及HTML/视频
+均不证明Host收到了准备动作。已有完整HTML/视频产物时才看见，只能称为复核机会。
+已回读F309 #6791的`3129a6adfc38ebb9166602afc25971ce2480f523`：工具描述新增HTML widget与versioned work
+用途选择，但`richBlockRulesInputSchema = {}`，handler仍只读取通用规则；描述变化不增加准备信号。
+W2 #6788的两页只是离线草稿与人工导航，未发布为生产Matter或其他可发现记忆，W3不把试点JSON直接当候选源。
+
+W3在既有`memory-cue`工具族提供可选的`cat_cafe_prepare_memory_context`，输入限于
+`activity: html | video`、`query`（1–500字符的当前制作问题）。它是猫主动说明“现在准备做什么”的取材入口，
+不新增意图分类模型、常驻观察器或制作授权。HTML与视频相关skill只在确需旧经验且开始制作前使用它；
+没走这个入口的载体记`not_observed`，不得从skill名、完成作品或后续成功补造覆盖。
+通用规则工具和两项skill消费收据保持原义，不把它们改成任意制作活动的代理。
+
+Host从有效invocation绑定owner/thread/cat/invocation、原触发消息与项目，并写真实接收时刻；
+调用者不能自报这些字段、源版本或“已经准备/递送”。新机会在原F287 catalog登记一个具名
+`work_preparation / explicit_preparation`配对，按当前catalog版本递增，不复用含义不同的workflow机会。
+首次准备与同线程由阅读转为制作都由这项实际动作触发；此后重复同类动作按下述键去重。
+
+### 输入、候选与预算
+
+查询由`activity + query`构成，原触发消息/已接受Task来源仅作可核的上下文坐标；模型提供的文字不是来源事实。
+共同入口为`KnowledgeResolver.discover(query, { sources, limit, signal, deadlineAt })`，源适配器直接读原索引候选，
+在`project/projectWave`里走各owner的权限与revision回验，再给相同的候选编排去重、补位和合并。
+禁止把`MessageSearchService.search()`或`MatterMemoryService.catalog()`等最终响应拼成第二搜索核心。
+共同结果的`version`与`sourceId`随来路记账；每个cue仍须携带原坐标/revision，排名不升级来源权威。
+
+首包限原项目合法文档、当前可读聊天和Matter，以及已经准入的Taste映射；不扩大profile、person、seed
+或thread_overview的自动机会。文档沿published/collection绑定，聊天沿canonical消息/索引版本终检，
+Matter沿全部支持源的`project()`；无法核源的候选omit，其他合法候选继续。已知精确状态保留原reader。
+
+一次准备共用原`ContextSourceWorkBudget`和F287呈现预算，候选上限20、对外最多2条有来路的指针，
+总发现时限不超过现行15秒且服从更短调用方deadline；取消传到索引/读源。失败/超时返回明确的空或部分取材结果，
+不阻断制作，也不回落旧搜索。大原文按原reader分页，不能截断条件后包装成完整规则。
+去重键绑定owner/cat/thread/context epoch、规范化activity/query、source ref/revision及catalog/resolver版本；
+同版已递送/已在当前上下文读取的来源不再提示。新源版本、明确转向或新context epoch可重新判断，
+主动搜索不继承此dismiss过滤；不能用全局缓存抑制另一只猫或另一次合法任务。
+
+### 为什么此刻，以及什么算收到
+
+每条指针说明本次明确准备动作、来源是什么、与当前问题的候选关联以及原适用条件仍待核验，
+不由Host生成新的经验结论。`whyNow`指向实际prepare事件及activity，不能写“系统判断你需要”。
+相关性不足/无关新词、同动作重复、已在当前上下文的同版本材料，均可零提示。
+
+构造候选、生成handle、callback返回200不写`presented`。复用原F287/F296递送接缝：
+只有可核的provider输入/工具结果commit证据才结算presented，并保留具体carrier与receipt。
+没有此观察能力的载体标递送unknown；不得伪造`generationId/evidenceRef`。显式drill仍用原reader重验，
+若该载体只能以成功drill证明收到handle，可按Matter已有显式read方式，在实际读取时原子记录presented/drilled，
+证据必须标明来自这次显式读取，不能回填成较早的制作前曝光。若现行drill要求已递送，W3在原F287合同及
+同一ledger中实现这个具名显式读取分支，不另建receipt表或以HTTP成功绕过。
+`applied/dismissed`沿原消费后果合同；Matter只允许presented/drilled，禁止由准备、读取、输出作品推断采用。
+
+### W3必须交的实物
+
+在实际支持载体上分别走“读论文→调用video准备取材→读取来源→开始视频”和
+“调用html准备取材→读取规则/来源→开始HTML”；记录各动作先后与能核实的版本/receipt。
+另验无关、重复、同版已读、未经过Host、原文撤权/更正/遗忘、超时与取消。
+晚信号只能记复核；transport缺证的presented保持unknown，不抵算首次制作前提醒成绩。
+各family的精确reader/治理边界仍按本页迁退表处理；迁移通用发现时同包删旧query/选择/扩展分支。
+
+### W3实现落点（2026-11-07，工程候选）
+
+本文件的typed MCP admission仅转录W1已合入的明确准备入口合同（`e5b3e6436c`）：
+它与drill/消费后果的边界不同，承担真实准备事件接收，不是增加另一个普通查询工具。
+该准入不等于实现已审、生产写入授权或正式加载验收。
+
+本节记录本包实现，合入、Alpha与正式加载仍分别取实际回执；不改上面的接受范围。
+`work_preparation / explicit_preparation`进入catalog v9；`message_evidence`只允许明确准备，
+不新增自动producer。`createMemoryCueRuntime`接入原callback族；HTML/video skill在确需旧经验时
+调用新入口，不把静态skill读取或通用rich-block规则当成准备信号。
+
+- `WorkPreparationAuthority`从callback principal绑定严格owner、原触发消息、项目与原context epoch。
+  `WorkPreparationService`用一个原`ContextSourceWorkBudget`（现行为1500ms，接受更短Host deadline），
+  各源合计最多20候选、2指针、catalog的900-token预算。activity保留typed字段并与query共同取材。
+- `OwnerPreparationSources`只适配W1原生文档、聊天、Matter和原closed ELI5映射；索引、
+  canonical消息、Matter整页`project()`和Taste批准/读源仍由原owner核验。
+  `ContextProjectCueSource`已移除旧`IKnowledgeResolver.resolve()`最终响应查询、五条候选循环及
+  bootstrap的旧resolver依赖；其`discover()`只调用共同入口，`bind/project/read`仍守原来源。
+- 其余family的当前代码没有通用自由query分支：Person/外部precedent/ADR/Feature仍按准入坐标读取；
+  Profile/Event/seed保留既定state与owner；thread overview保留F321策展/原件合同。
+  不为删类名重做这些reader，也不启动Luna或新增守望。
+- `memory_cue_preparation_opportunities`只持Host接收事件、query digest、来源坐标、版本及发现停止原因；
+  不存query正文、源正文或第二套receipt；候选计数/停止原因不回传普通cat读面，避免泄漏未准入对象的数量。
+  HTTP成功保持`delivery=unknown`。
+  只有原`memory_cue_events`的具名显式准备读取事务能在实际读源后写`presented + drilled`，
+  `read_origin=explicit_read`保留时序；未读取的句柄不能结算采用。Matter仍不支持applied/dismissed。
+- 去重使用本猫/本owner/thread/context epoch、activity/query、source ref/revision和catalog/resolver版本；
+  已观测F287递送/准备读取先移出候选再补位。原`get_message`及native shell等缺少可归属epoch的读证据
+  不冒充已观测；原Matter直接read缺少epoch字段，也不按墙钟反推归属。猫已持有的材料直接读原坐标，
+  无需重复准备。此缺口按来路留W4，不能从零applied判无用。
+
+开发样本与原Matter回归见W3证据 (internal)。
+本包不自动推断关联、不把W2离线草稿写入生产，也不以整理成功作为在线前提。
+
+## 既有来源普查与历史交付快照
 
 这张图回答一个窄问题：F287 在执行现场可以从哪里产生线索，又绝不能从原 lane
 搬走什么。Phase A 审计基线是 origin/main@30db246a82ad8b0f7feb3d80854775e0e53305b1；

@@ -102,6 +102,29 @@ function button(label: string) {
 async function more() {
   await act(async () => button('⋯').click());
 }
+it('file information names the same resolved file that the native action opens', async () => {
+  mocks.apiFetch.mockResolvedValue(
+    new Response(
+      JSON.stringify({ local: true, path: '/private/open-exports/reviewed-v2.jpg', filename: 'reviewed-v2.jpg' }),
+    ),
+  );
+  await render();
+  await more();
+  expect(container.querySelector('[role="menu"] section strong')?.textContent).toBe('reviewed-v2.jpg');
+});
+it('an unavailable native copy explains why file actions are absent without exposing an internal path', async () => {
+  const reason = '无法准备可安全交给本机应用的作品副本，请稍后重试。';
+  mocks.apiFetch.mockResolvedValue(
+    new Response(JSON.stringify({ local: false, canOpen: false, canReveal: false, reason })),
+  );
+  await render();
+  await more();
+  expect(container.querySelector('[role="menu"]')?.textContent).toContain(reason);
+  expect([...container.querySelectorAll('[role="menuitem"]')].map((node) => node.textContent).join()).not.toMatch(
+    /在 Finder 中显示|用默认应用打开/,
+  );
+  expect(container.textContent).not.toContain('/blobs/');
+});
 it('more and right click expose the same file actions and use the full path for copy', async () => {
   await render();
   await more();

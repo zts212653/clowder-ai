@@ -1,12 +1,14 @@
 import assert from 'node:assert/strict';
 import { mkdir, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { chromium } from 'playwright';
 import { evolutionExplorationReviewV1Schema } from '../../../shared/dist/index.js';
 
 const origin = 'http://127.0.0.1:5188';
 const program = 'evolution-program:31103110311031103110311031103110';
 const url = `${origin}/thread/thread-f311-workspace-contract?evolutionProgram=${encodeURIComponent(program)}&evolutionView=judgment&mockExploration=1`;
-const output = '/tmp/cat-cafe-evidence/f311-semantic-lineage';
+const output = join(tmpdir(), 'cat-cafe-evidence/f311-semantic-lineage');
 await mkdir(output, { recursive: true });
 const report = { url, checks: [], errors: [], writes: [] };
 const browser = await chromium.launch({ headless: true });

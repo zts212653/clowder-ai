@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import React from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { act } from 'react-dom/test-utils';
@@ -46,7 +47,7 @@ function getToggle(): HTMLButtonElement {
 }
 
 function getMenu(): HTMLDivElement | null {
-  return container.querySelector('.absolute');
+  return container.querySelector('[role="menu"][aria-label="导出格式"]');
 }
 
 function getMenuButtons(): HTMLButtonElement[] {

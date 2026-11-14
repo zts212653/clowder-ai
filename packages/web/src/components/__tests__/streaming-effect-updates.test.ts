@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 /**
  * F117 baseline B (2026-09-28): while replies stream, `messages` changes on nearly every commit. An effect keyed on
  * it that calls setState even when nothing changed leaves the "no change" check to React, and React cannot skip the

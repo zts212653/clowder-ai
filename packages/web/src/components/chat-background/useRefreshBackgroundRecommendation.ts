@@ -20,7 +20,9 @@ export function useRefreshBackgroundRecommendation(image: ChatBackgroundImage | 
   const actual = useActualColours();
   const actualColourKey = JSON.stringify(actual);
   const themeKey = useMemo(() => JSON.stringify(themes.map(({ base, params }) => ({ base, params }))), [themes]);
-  const pathname = usePathname();
+  // Sampling reads the text regions of the current layout. Every thread shares one layout, so the
+  // open thread id is not an input: keying on it re-ran seconds of pixel work on each thread switch.
+  const surface = usePathname().replace(/^\/thread\/[^/]+/, '/thread');
   const section = useSearchParams().get('s');
   const current = useRef(image);
   current.current = image;
@@ -30,7 +32,7 @@ export function useRefreshBackgroundRecommendation(image: ChatBackgroundImage | 
   const override = threadId && controller?.preferences.threads[threadId] !== undefined ? threadId : null;
   useEffect(() => {
     if (!image || !ready || !save) return;
-    const key = JSON.stringify([themeKey, actualColourKey, pathname, section, override, image.url, image.placement]);
+    const key = JSON.stringify([themeKey, actualColourKey, surface, section, override, image.url, image.placement]);
     if (attempted.current === key) return;
     attempted.current = key;
     let active = true;
@@ -67,5 +69,5 @@ export function useRefreshBackgroundRecommendation(image: ChatBackgroundImage | 
       active = false;
       if (!finished && attempted.current === key) attempted.current = null;
     };
-  }, [image, themeKey, actualColourKey, actual, pathname, section, override, ready, save]);
+  }, [image, themeKey, actualColourKey, actual, surface, section, override, ready, save]);
 }

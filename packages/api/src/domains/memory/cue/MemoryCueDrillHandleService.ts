@@ -40,7 +40,16 @@ export const memoryCueDrillCoordinateSchema = z
     catalogVersion: z.literal(RECALL_OPPORTUNITY_CATALOG_VERSION),
     resolverFamily: z.enum(RECALL_RESOLVER_FAMILIES),
     resolverVersion: z.number().int().positive(),
-    family: z.enum(['person_memory', 'evidence', 'taste', 'profile', 'event', 'owned_seed', 'thread_overview']),
+    family: z.enum([
+      'person_memory',
+      'evidence',
+      'taste',
+      'profile',
+      'event',
+      'owned_seed',
+      'thread_overview',
+      'matter',
+    ]),
     anchor: identifierSchema,
     revision: identifierSchema,
     scope: recallScopeV1Schema,
@@ -60,6 +69,12 @@ const memoryCueDrillReferenceSchema = z.tuple([
 type MemoryCueDrillReference = z.infer<typeof memoryCueDrillReferenceSchema>;
 
 export interface MemoryCuePresentedCoordinateReader {
+  findPreparedCoordinate?(
+    scope: RecallScopeV1,
+    cueId: string,
+    expiresAt: number,
+    consumerCatId?: string,
+  ): MemoryCueDrillCoordinate | null;
   findPresentedCoordinate(
     scope: RecallScopeV1,
     cueId: string,
@@ -167,6 +182,25 @@ export class MemoryCueDrillHandleService {
     }
     if (now >= coordinate.expiresAt) return { ok: false, reason: 'expired', coordinate };
     return { ok: true, coordinate };
+  }
+
+  /** Named explicit-read admission; outcome settlement never calls this branch. */
+  verifyPreparationRead(
+    handle: string,
+    scope: RecallScopeV1,
+    now: number,
+    catId?: string,
+  ): MemoryCueDrillHandleVerification {
+    const reference = this.decrypt(handle, catId);
+    if (!reference) return { ok: false, reason: 'invalid_handle' };
+    const [cueId, expiresAt, digest] = reference;
+    if (digest !== scopeDigest(scope)) return { ok: false, reason: 'scope_mismatch' };
+    const coordinate = this.presentedCoordinates.findPreparedCoordinate?.(scope, cueId, expiresAt, catId);
+    if (!coordinate || !coordinate.opportunityId.startsWith('preparation-'))
+      return { ok: false, reason: 'presentation_required' };
+    if (!sameScope(coordinate.scope, scope) || coordinate.consumerCatId !== catId)
+      return { ok: false, reason: 'scope_mismatch' };
+    return now >= coordinate.expiresAt ? { ok: false, reason: 'expired', coordinate } : { ok: true, coordinate };
   }
 
   private decrypt(handle: string, serverCatId: string | undefined): MemoryCueDrillReference | null {

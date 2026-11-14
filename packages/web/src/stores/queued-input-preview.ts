@@ -14,6 +14,7 @@ export function withQueuedInputPreviews(
     ids.add(entry.messageId);
     pending.push({
       id: entry.messageId,
+      ...(entry.clientMessageId ? { clientMessageId: entry.clientMessageId } : {}),
       from: entry.from,
       type: 'user',
       content: entry.content,

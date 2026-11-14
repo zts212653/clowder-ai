@@ -47,6 +47,16 @@ export async function startSearchGroupApi(port = 0) {
     return thread?.createdBy === owner ? thread : reply.code(404).send({ error: 'Thread not found' });
   });
   app.get('/api/session', async () => ({ userId: owner }));
+  app.get('/api/debug/callback-auth', async () => ({
+    reasonCounts: {},
+    toolCounts: {},
+    byCat: {},
+    recentSamples: [],
+    totalFailures: 0,
+    startedAt: 0,
+    uptimeMs: 0,
+    recent24h: { totalFailures: 0, byReason: {}, byTool: {}, byCat: {} },
+  }));
   app.get('/api/cats', async () => ({ cats: proposals.cats }));
   app.get('/api/labels', async () => []);
   app.get('/api/governance/health', async () => ({ projects: [] }));

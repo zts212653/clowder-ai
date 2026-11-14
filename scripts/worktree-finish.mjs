@@ -1,12 +1,12 @@
 #!/usr/bin/env node
 /** Explicitly finish one owned checkout: reversible release or bounded named retention. */
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, lstatSync, readFileSync, realpathSync } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { requireNoDurableConsumers } from './lib/worktree-consumers.mjs';
 import { directReleaseReceipt, removeFinishedWorktree } from './lib/worktree-direct-release.mjs';
 import { requireVisibleWorktreeIndex } from './lib/worktree-light.mjs';
-import { parsePrSource, readPrTruth } from './lib/worktree-pr.mjs';
+import { parsePrSource, prBaseTrackingRef, readPrTruth } from './lib/worktree-pr.mjs';
 import { quarantineRoot, readQuarantineRecords } from './lib/worktree-quarantine.mjs';
 import { isProtected, LIFECYCLE_POLICIES, parseWorktreePorcelain } from './lib/worktree-reaper-core.mjs';
 import {
@@ -127,8 +127,8 @@ function requireCleanTarget(path) {
 function requireMergedContent(entry, opts) {
   if (opts.prTruth) {
     if (!opts.prTruth.commits.includes(entry.head)) fail('PR does not contain the exact checkout HEAD');
-    if (isAncestor(opts.repo, opts.mergedAt, 'origin/main') !== true)
-      fail('PR merge commit must be in origin/main history; fetch before finishing');
+    if (isAncestor(opts.repo, opts.mergedAt, opts.prBaseTrackingRef) !== true)
+      fail(`PR merge commit must be in ${opts.prBaseTrackingRef} history; fetch the actual PR base before finishing`);
     return;
   }
   if (entry.lifecycle.policy !== 'merged') {
@@ -200,6 +200,31 @@ function resolveMergedPr(opts) {
       fail('merged PR truth unavailable or invalid');
     opts.prTruth = truth;
     opts.mergedAt = truth.mergedAt;
+    opts.prBaseTrackingRef = prBaseTrackingRef(opts.repo, truth);
+  }
+}
+
+/** Resolve a removed checkout through its existing parent; never guess from ledger names. */
+function checkedPath(input) {
+  let current = resolve(input);
+  const missing = [];
+  for (;;) {
+    try {
+      return join(realpathSync(current), ...missing);
+    } catch (error) {
+      if (error.code !== 'ENOENT') throw error;
+      // A dangling link is an existing filesystem object, not a removed checkout.
+      try {
+        lstatSync(current);
+        fail('unresolved symlink in checked worktree path');
+      } catch (statError) {
+        if (statError.code !== 'ENOENT') throw statError;
+      }
+      missing.unshift(basename(current));
+      const parent = dirname(current);
+      if (parent === current) throw error;
+      current = parent;
+    }
   }
 }
 
@@ -209,7 +234,7 @@ export function finishWorktree(input) {
     mode: 'release',
     now: Date.now(),
     ...input,
-    path: safeRealpath(resolve(input.path)),
+    path: input.mode === 'check' ? checkedPath(input.path) : safeRealpath(resolve(input.path)),
     repo: safeRealpath(input.repo),
   };
   for (const key of ['owner', 'sourceRef']) {

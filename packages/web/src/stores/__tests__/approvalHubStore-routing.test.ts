@@ -219,6 +219,21 @@ describe('approvalHubStore — per-feature endpoint routing', () => {
     );
   });
 
+  it('sends the digest captured by the displayed Taste card, not a newer store copy', async () => {
+    useApprovalHubStore.setState((state) => ({
+      items: state.items.map((item) =>
+        item.proposalId === 'f221-1' ? { ...item, detail: { ...item.detail, decisionDigest: 'b'.repeat(64) } } : item,
+      ),
+    }));
+    await useApprovalHubStore.getState().approveProposal('f221-1', 'a'.repeat(64));
+    expect(mockApiFetch).toHaveBeenCalledWith(
+      '/api/taste-proposals/f221-1/approve',
+      expect.objectContaining({
+        body: JSON.stringify({ decisionDigest: 'a'.repeat(64) }),
+      }),
+    );
+  });
+
   it('shows the backend detail when an F221 approval write fails', async () => {
     mockApiFetch.mockResolvedValueOnce({
       ok: false,

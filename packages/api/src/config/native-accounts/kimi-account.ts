@@ -4,7 +4,6 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { parse } from 'smol-toml';
 import { prepareAcpProcessEnv } from '../../domains/cats/services/agents/providers/acp/acp-spawn-env.js';
-import { hasManagedKimiSecretHooks } from '../../domains/cats/services/agents/providers/kimi-secret-hooks.js';
 import { resolveKimiRuntimePaths } from '../../utils/kimi-cli-runtime.js';
 import { type RuntimeProviderProfile, resolveForClient } from '../account-resolver.js';
 import { inspectKimiNativeLaunch, type KimiNativeLaunch } from './kimi-installation.js';
@@ -74,7 +73,8 @@ export async function readKimiNativeAccount(
     const paths = resolveKimiRuntimePaths(env);
     env.KIMI_CODE_HOME = paths.shareDir;
     const configText = await boundedText(paths.configPath);
-    if (!hasManagedKimiSecretHooks(configText)) throw new Error('native_secret_guard_unavailable');
+    // Scoped ACP installs a sole-MCP tool allowlist. Global Shell hooks can
+    // belong to another Host checkout and are preserved with the native config.
     const config = parse(configText),
       model = record(record(config.models)[modelAlias]);
     if (typeof model.provider !== 'string' || typeof model.model !== 'string') throw new Error('native_model_missing');

@@ -161,17 +161,6 @@ describe('usage route', () => {
     await app.close();
   });
 
-  test('no header → 401', async () => {
-    const store = makeMockStore([]);
-    const app = await buildApp(store);
-
-    const res = await app.inject({ method: 'GET', url: '/api/usage/daily' });
-    assert.equal(res.statusCode, 401, 'missing header should return 401');
-    assert.equal(scanAllCallCount, 0, 'scanAll should NOT be called without auth');
-
-    await app.close();
-  });
-
   test('request without identity header → 401', async () => {
     const store = makeMockStore([]);
     const app = await buildApp(store);

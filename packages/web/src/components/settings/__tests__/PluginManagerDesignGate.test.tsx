@@ -414,11 +414,13 @@ describe('F202 terminal Plugin Manager Design Gate', () => {
       })),
       { id: 'github-notification', name: 'github-notification', kind: 'identity' as const },
       { id: 'github-wait', name: 'github-wait', kind: 'identity' as const },
-      ...(['mcp', 'skill', 'schedule', 'direct-tool', 'limb', 'ui', 'desktop-window'] as const).map((kind) => ({
-        id: `public-${kind}`,
-        name: `public-${kind}`,
-        kind,
-      })),
+      ...(['mcp', 'skill', 'schedule', 'direct-tool', 'limb', 'ui', 'external-request', 'desktop-window'] as const).map(
+        (kind) => ({
+          id: `public-${kind}`,
+          name: `public-${kind}`,
+          kind,
+        }),
+      ),
     ];
     const plugin = {
       ...PLUGIN_MANAGER_DESIGN_FIXTURES[0],
@@ -429,10 +431,22 @@ describe('F202 terminal Plugin Manager Design Gate', () => {
     const detail = container.querySelector('[data-testid="plugin-manager-detail"]');
     expect(detail?.textContent).not.toMatch(/community-http|github-notification|github-wait/);
     expect(detail?.textContent).toContain('github_read');
-    for (const kind of ['mcp', 'skill', 'schedule', 'direct-tool', 'limb', 'ui', 'desktop-window']) {
+    for (const kind of [
+      'mcp',
+      'skill',
+      'schedule',
+      'direct-tool',
+      'limb',
+      'ui',
+      'external-request',
+      'desktop-window',
+    ]) {
       expect(detail?.querySelector(`[data-contribution-kind="${kind}"]`)).not.toBeNull();
     }
-    expect(plugin.contributions).toHaveLength(38);
+    expect(detail?.querySelector('[data-contribution-kind="external-request"]')?.textContent).toContain(
+      presentation === 'v2' ? '外部请求入口' : 'External Request',
+    );
+    expect(plugin.contributions).toHaveLength(39);
   });
 
   it('labels content editor provider contributions from the manifest without Host-specific copy', async () => {

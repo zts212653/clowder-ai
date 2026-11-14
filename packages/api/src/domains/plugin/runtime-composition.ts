@@ -1,18 +1,21 @@
 import { randomUUID } from 'node:crypto';
 import { dirname, resolve } from 'node:path';
-import type { PluginIconSpec, PluginManagerDetail } from '@cat-cafe/shared';
+import { catRegistry, type PluginIconSpec, type PluginManagerDetail } from '@cat-cafe/shared';
 import type { RedisClient } from '@cat-cafe/shared/utils';
 import type { DeliveryPresentationContext } from '@clowder-ai/plugin-contract';
 import { type PluginManifest } from '@clowder-ai/plugin-contract';
 import { fileBasedMcpIO, type McpConfigIO } from '../../config/capabilities/capability-mcp-service.js';
 import { allowsImplicitCapabilityWrites } from '../../config/capabilities/startup-cli-config.js';
+import { getCoCreatorMentionPatterns } from '../../config/cat-config-loader.js';
 import { createThreadDeepLinkUrl, resolveFrontendBaseUrl } from '../../config/frontend-origin.js';
 import type { IConnectorThreadBindingStore } from '../../infrastructure/connectors/ConnectorThreadBindingStore.js';
 import { WhisperSttProvider } from '../../infrastructure/connectors/media/WhisperSttProvider.js';
 import { createModuleLogger } from '../../infrastructure/logger.js';
+import type { AgentKeyRegistry } from '../cats/services/agents/agent-key/AgentKeyRegistry.js';
 import type { IMessageStore } from '../cats/services/stores/ports/MessageStore.js';
 import type { ITaskStore } from '../cats/services/stores/ports/TaskStore.js';
 import type { IThreadStore } from '../cats/services/stores/ports/ThreadStore.js';
+import type { EntrustedWorkChangeReason } from '../growing/EntrustedWorkLifecycleService.js';
 import type { LimbRegistry } from '../limb/LimbRegistry.js';
 import { MessagingLedger } from '../messaging/ledger.js';
 import {
@@ -61,6 +64,10 @@ import type {
   DesktopWindowFailure,
 } from './desktop-window-runtime/types.js';
 import type { PluginStartFailureObserver } from './diagnostics/plugin-start-failure.js';
+import {
+  FilePluginExternalAccessStore,
+  PluginExternalAccessService,
+} from './external-access/plugin-external-access.js';
 import { ExternalPluginLifecycleService } from './external-plugin-lifecycle.js';
 import { PLUGIN_OWNER_UNINSTALLED_REASON } from './external-plugin-lifecycle-types.js';
 import { FilesystemVerifiedPluginPackageLocator } from './external-runtime/filesystem-package-locator.js';
@@ -68,22 +75,25 @@ import { ExternalPluginRuntimeSupervisor } from './external-runtime/supervisor.j
 import type { ExternalPluginProcessAdapter, VerifiedPluginPackageLocator } from './external-runtime/types.js';
 import { HostBrokerControlPlane } from './host-broker/control-plane.js';
 import { createMessagingBrokerHandlers } from './host-broker/messaging-handler.js';
-import { FileHostBrokerStore } from './host-broker/stores.js';
 import { HostInventoryControlPlane } from './host-inventory/control-plane.js';
 import type { PackageAdmissionContractRuntime } from './host-inventory/manifest-verifier.js';
 import { PLUGIN_HOST_ENTRIES, pluginHostRoot } from './host-inventory/plugin-host-layout.js';
-import { FilePluginInventoryStore } from './host-inventory/stores.js';
 import type { PluginInstanceRecord, PluginInventorySnapshot } from './host-inventory/types.js';
 import { pluginDataDirectoryParent } from './host-surface/plugin-data-directory.js';
 import { PluginMediaReadService } from './host-surface/plugin-media-host.js';
 import type { PluginMembersServices } from './host-surface/plugin-members-host.js';
 import { createPluginNeutralHost } from './host-surface/plugin-neutral-host.js';
+import { createPluginOwnerChatHost } from './host-surface/plugin-owner-chat.js';
 import { type PluginPrivateStoragePort, RedisPluginPrivateStorage } from './host-surface/plugin-private-storage.js';
+import { PluginAddressedTargets } from './manager/addressing/plugin-addressed-targets.js';
 import { connectorPermissionsProjection } from './manager/connector-settings.js';
 import { GitPluginPackageAdmission } from './manager/git-package-admission.js';
 import { LocalPluginPackageAdmission } from './manager/local-package-admission.js';
 import { GitMarketplaceCatalog } from './manager/marketplace/git-marketplace-catalog.js';
-import { prepareMarketplaceDirectory } from './manager/marketplace/git-marketplace-preparation.js';
+import {
+  MarketplacePreparationError,
+  prepareMarketplaceDirectory,
+} from './manager/marketplace/git-marketplace-preparation.js';
 import type { GitMarketplaceRepository } from './manager/marketplace/git-marketplace-repository.js';
 import type { GitMarketplaceSources } from './manager/marketplace/git-marketplace-sources.js';
 import type {
@@ -119,6 +129,12 @@ import { type OfficialPluginCatalogEntry, officialPluginPresentationMatches } fr
 import { OfficialPluginPackageInstaller } from './official-package-installer.js';
 import { PluginProjectOutputs } from './outputs/project-output-actions.js';
 import { readPluginConfig } from './plugin-config-store.js';
+import {
+  FilePluginSharedExtensionStore,
+  PluginSharedExtensionService,
+} from './shared-extension/plugin-shared-extension.js';
+import { PluginStateClient } from './state-worker/client.js';
+import { SqliteHostBrokerStore, SqlitePluginInventoryStore } from './state-worker/stores.js';
 
 type BuiltinPluginRuntime = Pick<BundledPluginRuntime, 'start' | 'stop'>;
 
@@ -157,6 +173,8 @@ export interface DormantPluginRuntimeCompositionOptions {
     signal?: AbortSignal,
   ) => import('./member-sessions/host.js').PluginMemberSessionsHost;
   readonly redis?: RedisClient;
+  /** Injectable isolated state backend; production derives this from redis. */
+  readonly privateStorage?: PluginPrivateStoragePort;
   /** The Host-wide messaging stores shared with the one publishing MessageStore wrapper. */
   readonly messagingStores?: MessagingStores;
   readonly onMessagePublished?: (threadId: string) => void;
@@ -176,6 +194,12 @@ export interface DormantPluginRuntimeCompositionOptions {
    * through the real authority is projectable without extra wiring.
    */
   readonly configuration?: PluginRuntimeConfigurationPort;
+  /** Public or deployment-relative endpoint presented to package code with its Host-owned token. */
+  readonly externalRequestEndpoint?: string;
+  /** Host-local origin used only as the upstream coordinate for plugin-owned narrow forwarders. */
+  readonly externalRequestLoopbackOrigin?: string;
+  readonly sharedPublicEndpoint?: string;
+  readonly sharedAgentKeys?: Pick<AgentKeyRegistry, 'verify' | 'list'>;
   /** Live Host registries consumed by package-declared runtime contributions. */
   readonly limbRegistry?: LimbRegistry;
   readonly cloudConversationHosts?: CloudConversationHostRegistry;
@@ -197,7 +221,7 @@ export interface DormantPluginRuntimeCompositionOptions {
   readonly threadStore?: IThreadStore;
   readonly threadBindingStore?: IConnectorThreadBindingStore;
   readonly threadOwnerUserId?: string;
-  readonly onTaskDataChanged?: (task: import('@cat-cafe/shared').TaskItem) => void;
+  readonly onTaskDataChanged?: (task: import('@cat-cafe/shared').TaskItem, reason?: EntrustedWorkChangeReason) => void;
   readonly threadProjections?: import('./host-surface/plugin-thread-projections.js').PluginThreadProjectionDeps;
   readonly threadDeepLinkUrl?: (threadId: string) => string;
   readonly desktopExecutor?: DesktopWindowExecutor;
@@ -230,15 +254,16 @@ export interface DormantPluginRuntimeRecoveryOptions {
 export interface DormantPluginRuntimeComposition {
   readonly privateStorage?: PluginPrivateStoragePort;
   readonly settingsInvocation: import('./builtin-runtime/carriers/module-plugin-settings.js').PluginSettingsInvocation;
+  readonly configuration: PluginRuntimeConfigurationPort;
   readonly projectRoot: string;
   readonly paths: PluginRuntimePersistencePaths;
-  readonly inventoryStore: FilePluginInventoryStore;
-  readonly brokerStore: FileHostBrokerStore;
+  readonly inventoryStore: SqlitePluginInventoryStore;
+  readonly brokerStore: SqliteHostBrokerStore;
   readonly inventory: HostInventoryControlPlane;
-  /** Stored values shared with execution; consumers apply manifest defaults themselves. */
-  readonly configuration: Pick<PluginRuntimeConfigurationPort, 'readConfig'>;
   readonly broker: HostBrokerControlPlane;
   readonly supervisor: PluginRuntimeCarrierRouter;
+  readonly externalAccess: PluginExternalAccessService;
+  readonly sharedExtension?: PluginSharedExtensionService;
   /** The child-process carrier itself. Exposed so the Host's one pre-active budget
    * stays assertable against the runtime that spends it, not just the constant. */
   readonly externalRuntime: ExternalPluginRuntimeSupervisor;
@@ -295,10 +320,12 @@ export function createDormantPluginRuntimeComposition(
   const paths = options.paths
     ? normalizePaths(options.paths)
     : resolvePluginRuntimePersistencePaths(options.projectRoot);
-  const inventoryStore = new FilePluginInventoryStore(paths.inventorySnapshotPath, {
+  const stateClient = new PluginStateClient();
+  const inventoryStore = new SqlitePluginInventoryStore(paths.inventorySnapshotPath, {
+    client: stateClient,
     ...(options.contract === undefined ? {} : { contract: options.contract }),
   });
-  const brokerStore = new FileHostBrokerStore(paths.brokerSnapshotPath);
+  const brokerStore = new SqliteHostBrokerStore(paths.brokerSnapshotPath, stateClient);
   const inventory = new HostInventoryControlPlane(inventoryStore, {
     ...(options.now === undefined ? {} : { now: options.now }),
     ...(options.contract === undefined ? {} : { contract: options.contract }),
@@ -312,11 +339,41 @@ export function createDormantPluginRuntimeComposition(
   );
   const moduleLogger = createModuleLogger('plugin/module-runtime');
   const deliveryTarget: { current?: PluginRuntimeCarrierRouter } = {};
+  const externalAccessStore = new FilePluginExternalAccessStore(
+    resolve(dirname(paths.inventorySnapshotPath), PLUGIN_HOST_ENTRIES.externalAccess),
+  );
+  const externalAccess = new PluginExternalAccessService({
+    endpoint: options.externalRequestEndpoint ?? '/api/plugin-runtime/handle',
+    upstreamLoopbackOrigin: options.externalRequestLoopbackOrigin,
+    store: externalAccessStore,
+    ...(options.now === undefined ? {} : { now: options.now }),
+    inventory: inventoryStore,
+    handler: {
+      handle: (instanceId, request) => {
+        if (!deliveryTarget.current) throw new Error('plugin runtime supervisor is unavailable');
+        return deliveryTarget.current.handle(instanceId, request);
+      },
+    },
+  });
+  const sharedExtension = options.sharedAgentKeys
+    ? new PluginSharedExtensionService({
+        store: new FilePluginSharedExtensionStore(
+          resolve(dirname(paths.inventorySnapshotPath), PLUGIN_HOST_ENTRIES.sharedExtension),
+        ),
+        inventory: inventoryStore,
+        keys: options.sharedAgentKeys,
+        publicEndpoint: () => options.sharedPublicEndpoint,
+        handle: (instanceId, request) => {
+          if (!deliveryTarget.current) throw new Error('plugin runtime supervisor is unavailable');
+          return deliveryTarget.current.handle(instanceId, request);
+        },
+        ...(options.now === undefined ? {} : { now: options.now }),
+      })
+    : undefined;
   const resolveInstalledManifest = async (instanceId: string): Promise<PluginManifest | undefined> => {
-    const snapshot = await inventoryStore.snapshot();
-    const instance = snapshot.instances.find((candidate) => candidate.pluginInstanceId === instanceId);
-    if (!instance || instance.lifecycleState !== 'installed') return undefined;
-    return snapshot.packages.find((item) => item.packageDigest === instance.packageDigest)?.manifest ?? undefined;
+    const authority = await inventoryStore.readAuthority(instanceId);
+    if (!authority || authority.instance.lifecycleState !== 'installed') return undefined;
+    return authority.packageRecord?.manifest ?? undefined;
   };
   const mediaImporter = new HostMediaSourceImporter({
     ledger: mediaLedger,
@@ -389,8 +446,7 @@ export function createDormantPluginRuntimeComposition(
       ...(options.contract === undefined ? {} : { validateManifest: options.contract.validateManifest }),
     });
   const readStoredConfigurationValue = async (pluginInstanceId: string, key: string) => {
-    const snapshot = await inventoryStore.snapshot();
-    const instance = snapshot.instances.find((candidate) => candidate.pluginInstanceId === pluginInstanceId);
+    const instance = await inventoryStore.read.instances.get(pluginInstanceId);
     return instance ? readPluginConfig(options.projectRoot, instance.pluginId)[key] : undefined;
   };
   const configuration: PluginRuntimeConfigurationPort = options.configuration ?? {
@@ -399,6 +455,7 @@ export function createDormantPluginRuntimeComposition(
   };
   const subscriptionDelivery = createSubscriptionDelivery({
     messaging,
+    onReady: options.onMessagePublished,
     presentation:
       options.deliveryPresentation ??
       ((threadId, actor) => Promise.resolve(buildDeliveryPresentation(threadId, actor))),
@@ -468,7 +525,12 @@ export function createDormantPluginRuntimeComposition(
         ? {}
         : { validateManifest: options.contract.validateManifest }),
     });
-  const privateStorage = options.redis === undefined ? undefined : new RedisPluginPrivateStorage(options.redis);
+  const privateStorage =
+    options.privateStorage ?? (options.redis === undefined ? undefined : new RedisPluginPrivateStorage(options.redis));
+  const ownerChatSource =
+    options.threadStore && options.threadOwnerUserId
+      ? { threads: options.threadStore, ownerUserId: options.threadOwnerUserId }
+      : undefined;
   const moduleRuntime = new ModulePluginRuntime({
     ...(options.taskArtifactReader ? { taskArtifactReader: options.taskArtifactReader } : {}),
     ...(options.onTaskDataChanged ? { onTaskDataChanged: options.onTaskDataChanged } : {}),
@@ -492,6 +554,20 @@ export function createDormantPluginRuntimeComposition(
         packageDigest,
         assertActivation,
         inventory: inventoryStore,
+        ...(ownerChatSource
+          ? {
+              ownerChat: (assertCurrent: () => Promise<void>) =>
+                createPluginOwnerChatHost({
+                  pluginInstanceId,
+                  packageDigest,
+                  ownerUserId: ownerChatSource.ownerUserId,
+                  messages: options.messageStore,
+                  threads: ownerChatSource.threads,
+                  assertCurrent,
+                  assertWriteCurrent: assertActivation,
+                }),
+            }
+          : {}),
         ...(options.members ? { members: options.members } : {}),
         ...(options.runtimeInfo ? { runtimeInfo: options.runtimeInfo } : {}),
         ...(options.memberSessions && options.threadOwnerUserId
@@ -513,6 +589,7 @@ export function createDormantPluginRuntimeComposition(
     packages,
     materializer: builtinPackages,
     configuration,
+    externalAccess: (pluginInstanceId) => externalAccess.legacyAccess(pluginInstanceId),
     media: mediaRead,
     dataDirectoryParent: pluginDataDirectoryParent(resolve(options.projectRoot)),
     ...(privateStorage === undefined ? {} : { storage: privateStorage }),
@@ -590,7 +667,10 @@ export function createDormantPluginRuntimeComposition(
       ...(options.redis === undefined ? {} : { redis: options.redis }),
     },
     async (instanceId, reason) => {
-      if (reason === PLUGIN_OWNER_UNINSTALLED_REASON) await mediaPending.uninstall(instanceId);
+      if (reason === PLUGIN_OWNER_UNINSTALLED_REASON) {
+        await externalAccessStore.revoke(instanceId);
+        await mediaPending.uninstall(instanceId);
+      }
       await subscriptionDelivery.cancelInstance(
         instanceId,
         reason === PLUGIN_OWNER_UNINSTALLED_REASON ? 'instance_uninstalled' : 'instance_stopped',
@@ -602,11 +682,18 @@ export function createDormantPluginRuntimeComposition(
       ledger: mediaLedger,
       ...(options.threadStore ? { threads: options.threadStore } : {}),
     }),
+    (instanceId) => subscriptionDelivery.activateInstance(instanceId),
+    (instanceId) => subscriptionDelivery.beginInstance(instanceId),
   );
   deliveryTarget.current = supervisor;
   supervisor.register(
     new BundledPluginRuntimeCarrier({
       inventory: inventoryStore,
+      onExecutionError: (pluginInstanceId) =>
+        moduleLogger.error(
+          { pluginInstanceId, code: 'MODULE_EXECUTION_EXIT_SETTLEMENT_FAILED' },
+          'Module execution exit cleanup could not be committed',
+        ),
       runtimes: [
         ...[...(options.builtinRuntimes ?? [])].map(
           ([pluginId, runtime]): BundledPluginRuntime => ({
@@ -644,6 +731,8 @@ export function createDormantPluginRuntimeComposition(
     configuration,
     broker,
     supervisor,
+    externalAccess,
+    ...(sharedExtension ? { sharedExtension } : {}),
     settingsInvocation: moduleRuntime.invokeSettings,
     ...(privateStorage === undefined ? {} : { privateStorage }),
     externalRuntime: externalSupervisor,
@@ -665,12 +754,13 @@ export function createDormantPluginRuntimeComposition(
     mcpConfigIO,
     ...(options.contract === undefined ? {} : { contract: options.contract }),
     async recoverAfterRestart({ desktopWindowsAfter } = {}) {
+      await Promise.all([inventoryStore.initialize(), brokerStore.initialize()]);
       await recoverAgentClientMetadata({
         inventory: inventoryStore,
         packages,
         onFailure: (pluginId) => moduleLogger.warn({ pluginId }, 'agent client metadata recovery failed'),
       });
-      const [inventorySnapshot] = await Promise.all([inventoryStore.snapshot(), brokerStore.snapshot()]);
+      const inventorySnapshot = await inventoryStore.snapshot({ currentOnly: true });
       const brokerSessions = await supervisor.recoverAfterRestart();
       const isDesktopWindow = (instance: PluginInstanceRecord) => {
         const record = inventorySnapshot.packages.find((pkg) => pkg.packageDigest === instance.packageDigest);
@@ -697,6 +787,7 @@ export function createDormantPluginRuntimeComposition(
         // An admitted start can acquire ownership after the first stop snapshot.
         // Recovery is now closed and drained, so this final stop has a stable set.
         await supervisor.stopAll(reason);
+        await stateClient.close();
       }
     },
   };
@@ -825,10 +916,10 @@ function inventoryCandidate(packageRecord: PluginInventorySnapshot['packages'][n
 
 /** Keeps every admitted current instance visible even when catalog discovery is offline. */
 export class InventoryPluginManagerInstalledPackages implements PluginManagerInstalledPackagesPort {
-  constructor(private readonly inventory: FilePluginInventoryStore) {}
+  constructor(private readonly inventory: Pick<SqlitePluginInventoryStore, 'snapshot'>) {}
 
   async list(): Promise<readonly PluginManagerDetail[]> {
-    const inventory = await this.inventory.snapshot();
+    const inventory = await this.inventory.snapshot({ currentOnly: true });
     const plugins: PluginManagerDetail[] = [];
     for (const instance of inventory.instances.filter((candidate) => candidate.lifecycleState === 'installed')) {
       const packageRecord = inventory.packages.find((candidate) => candidate.packageDigest === instance.packageDigest);
@@ -880,6 +971,7 @@ export interface PluginManagerRuntimeCompositionOptions {
 }
 
 export interface PluginManagerRuntimeComposition {
+  readonly addressedTargets: PluginAddressedTargets;
   readonly manager: PluginManagerService;
   readonly officialCatalog: OfficialPluginManagerCatalogAdapter;
   readonly configuration: HostPluginConfigurationService;
@@ -981,7 +1073,16 @@ export function createPluginManagerRuntimeComposition(
     inventory: options.runtime.inventoryStore,
     now,
   });
+  const addressedTargets = new PluginAddressedTargets({
+    inventory: options.runtime.inventoryStore,
+    memberAliases: () => [
+      ...getCoCreatorMentionPatterns(),
+      ...Object.entries(catRegistry.getAllConfigs()).flatMap(([id, config]) => [id, ...config.mentionPatterns]),
+    ],
+  });
   const manager = new PluginManagerService({
+    addressedTargets,
+    delivery: options.runtime.supervisor,
     catalog,
     inventory: options.runtime.inventoryStore,
     installedPackages,
@@ -993,7 +1094,7 @@ export function createPluginManagerRuntimeComposition(
         if ('expectedVersion' in request) {
           if (!candidate) throw new PluginManagerServiceError('PLUGIN_NOT_FOUND', 'Catalog plugin is unavailable');
           // Capture current identity and lifecycle before preparation; all sources share the same fenced rollback.
-          const inventoryAtRequest = await options.runtime.inventoryStore.snapshot();
+          const inventoryAtRequest = await options.runtime.inventoryStore.snapshot({ pluginId: candidate.pluginId });
           const installed = await officialInstaller.install(
             request.source.catalogId,
             { version: request.expectedVersion, packageDigest: request.expectedDigest },
@@ -1010,6 +1111,7 @@ export function createPluginManagerRuntimeComposition(
             throw new PluginManagerServiceError(
               'INSTALL_UNAVAILABLE',
               error instanceof Error ? error.message : 'Repository installation failed',
+              error instanceof MarketplacePreparationError ? error.diagnostic : undefined,
             );
           }
         }
@@ -1048,6 +1150,7 @@ export function createPluginManagerRuntimeComposition(
     },
   });
   return {
+    addressedTargets,
     manager,
     officialCatalog: baseCatalog,
     configuration,

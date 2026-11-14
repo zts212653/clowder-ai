@@ -1,4 +1,5 @@
 import type { TasteProposal } from '@cat-cafe/shared';
+import type { IMessageStore } from '../../cats/services/stores/ports/MessageStore.js';
 import type {
   HostF221Preview,
   HostF221TrialReceipt,
@@ -49,6 +50,7 @@ export class CompanionF221SyntheticDecision {
     private readonly current: () => Context,
     private readonly authority: () => boolean,
     private readonly store: ITasteProposalStore,
+    private readonly messageStore: Pick<IMessageStore, 'getById'>,
     private readonly approvalCoordinator: TasteApprovalCoordinator,
     private readonly writeVignette: VignetteWriterFn,
     private readonly now: () => number = Date.now,
@@ -142,6 +144,7 @@ export class CompanionF221SyntheticDecision {
     try {
       result = await approveTasteProposal(receipt.proposalId, this.ownerUserId, {
         store: this.store,
+        messageStore: this.messageStore,
         lock: this.approvalCoordinator.lock,
         lockKey: this.approvalCoordinator.lockKey,
         writeVignette: this.writeVignette,

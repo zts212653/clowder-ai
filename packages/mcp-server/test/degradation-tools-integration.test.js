@@ -120,16 +120,6 @@ describe('write-class tool degradation policy declarations (F174-E AC-E2/E5)', (
     });
   });
 
-  test('retain_memory_callback with kind:none surfaces failure', async () => {
-    const memMod = await import('../dist/tools/callback-memory-tools.js');
-    await withMockedCallbackPost(async () => {
-      const result = await memMod.handleCallbackRetainMemory({ content: 'remember this' });
-      assert.ok(result.isError);
-      const text = result.content[0].text;
-      assert.ok(text.includes('[degrade]') && text.includes('reason=unknown_invocation'));
-    });
-  });
-
   // Cloud Codex P2 (PR #1384, 01:59Z): the legacy 403/not-configured branch
   // in handleCreateRichBlock returns Route B from `primary`, so the framework
   // treats it as primary success and skips DEGRADED:true tagging. Both

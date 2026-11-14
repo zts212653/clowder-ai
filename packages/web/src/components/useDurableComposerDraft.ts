@@ -2,14 +2,16 @@
 
 import type { ContextAttachment, MessageContent } from '@cat-cafe/shared';
 import { type Dispatch, type RefObject, type SetStateAction, useCallback, useEffect, useRef, useState } from 'react';
+import type { OwnerComposerDraft } from '@/stores/chat-types';
 import { useChatStore } from '@/stores/chatStore';
+import { apiSessionIdentity } from '@/utils/api-session-identity';
 import { loadOwnerComposerDraft } from '@/utils/true-recall';
 import {
   type ComposerAdmissionReply,
   type ComposerAdmissionSnapshot,
   durableDraftForAdmission,
 } from './composer-draft-admission';
-import { useComposerDraftConsumption } from './composer-draft-consumption';
+import { registerComposerDraftRecovery, useComposerDraftConsumption } from './composer-draft-consumption';
 import { composerAttachments, queuedServerAckBlocks } from './composer-queue';
 import {
   type PendingComposerAdmissionDraft,
@@ -23,18 +25,19 @@ import {
   imageUrlsFromDraft,
   mergeHydratedDraft,
   preservedBlocksFromDraft,
+  writeOwnerComposerDraft,
 } from './durable-composer-draft-helpers';
 import { mergeContextAttachments } from './durable-composer-draft-merge';
 import { enqueueComposerDraftSave, waitForComposerDraftSaves } from './durable-composer-draft-save-queue';
 import { useComposerDraftAutosave } from './use-composer-draft-autosave';
 import { useComposerDraftObservation } from './use-composer-draft-observation';
-import { type PendingComposerRecovery, useComposerDraftPersistence } from './use-composer-draft-persistence';
 import { useDurableComposerDraftImageState } from './use-durable-composer-draft-images';
 import { usePendingComposerDraftInsert } from './use-pending-composer-draft-insert';
 import { type PendingComposerSelection, usePendingComposerSelection } from './use-pending-composer-selection';
 import { useThreadDraftSelection } from './use-thread-draft-selection';
 
 interface UseDurableComposerDraftOptions {
+  isDraftHandedOff?: (threadId: string, draft: OwnerComposerDraft, revision: number) => Promise<boolean>;
   threadId?: string;
   input: string;
   setInput: Dispatch<SetStateAction<string>>;
@@ -48,6 +51,7 @@ interface UseDurableComposerDraftOptions {
 }
 
 export function useDurableComposerDraft({
+  isDraftHandedOff,
   threadId,
   input,
   setInput,
@@ -73,7 +77,11 @@ export function useDurableComposerDraft({
   const admissionsPendingRef = useRef(0);
   const pendingAdmissionDraftRef = useRef<PendingComposerAdmissionDraft | null>(null);
   const canonicalDraftRef = useRef<DurableDraftSnapshot | null>(null);
-  const pendingRecoveryRef = useRef<PendingComposerRecovery | null>(null);
+  const pendingRecoveryRef = useRef<{
+    snapshot: DurableDraftSnapshot;
+    revision: number;
+    source: 'hydration' | 'conflict';
+  } | null>(null);
   const clearFallbackRef = useRef<(ComposerAdmissionSnapshot & { imageUrls: string[] }) | null>(null);
   const pendingSelectionRef = useRef<PendingComposerSelection | null>(null);
   const [admissionEpoch, setAdmissionEpoch] = useState(0);
@@ -136,20 +144,27 @@ export function useDurableComposerDraft({
     resetImageRecovery();
     const hydration = waitForComposerDraftSaves(threadId)
       .then(() => loadOwnerComposerDraft(threadId))
-      .then(async ({ draft, revision }) => {
+      .then(async ({ draft: storedDraft, revision }) => {
         if (hydrationGenerationRef.current !== generation) return;
+        const transferred =
+          storedDraft && isDraftHandedOff ? await isDraftHandedOff(threadId, storedDraft, revision) : false;
+        if (hydrationGenerationRef.current !== generation) return;
+        // Keep the server revision as the write boundary, but do not refill a
+        // draft already transferred to an account/thread-bound durable attempt.
+        const draft = transferred ? null : storedDraft;
         const serverText = draft?.text ?? '';
         const imageUrls = imageUrlsFromDraft(draft);
         const serverContextAttachments = contextAttachmentsFromDraft(draft);
         preservedBlocksRef.current = preservedBlocksFromDraft(draft);
-        canonicalDraftRef.current = durableDraftSnapshotFromOwner(draft);
+        const storedSnapshot = durableDraftSnapshotFromOwner(storedDraft);
+        canonicalDraftRef.current = storedSnapshot;
         revisionRef.current = revision;
         const recoveredSignature = composerDraftSignature(
-          serverText,
-          imageUrls,
-          serverContextAttachments,
-          preservedBlocksRef.current,
-          draft?.replyTo,
+          storedSnapshot.text,
+          storedSnapshot.imageUrls,
+          storedSnapshot.contextAttachments,
+          storedSnapshot.preservedBlocks,
+          storedSnapshot.replyTo,
         );
         // P1 R10: Capture current signature BEFORE projection, not after
         // Reading inputRef.current after setInput may see the projected value
@@ -191,7 +206,90 @@ export function useDurableComposerDraft({
     return () => {
       if (hydrationGenerationRef.current === generation) hydrationGenerationRef.current += 1;
     };
-  }, [imageUrlsRef, resetImageRecovery, restoreDraftImages, setContextAttachments, setInput, setReplyTo, threadId]);
+  }, [
+    imageUrlsRef,
+    isDraftHandedOff,
+    resetImageRecovery,
+    restoreDraftImages,
+    setContextAttachments,
+    setInput,
+    setReplyTo,
+    threadId,
+  ]);
+
+  const restoreAdmissionFallback = useCallback(() => {
+    const fallback = clearFallbackRef.current;
+    if (!fallback) return;
+    setInput((current) => mergeHydratedDraft(current, fallback.text));
+    restoreFallbackImages(fallback.images, fallback.imageUrls);
+    setContextAttachments((current) => mergeContextAttachments(current, fallback.contextAttachments));
+    if (fallback.replyTo && !useChatStore.getState().replyToMessage) setReplyTo(fallback.replyTo);
+  }, [restoreFallbackImages, setContextAttachments, setInput, setReplyTo]);
+
+  const reconcileConflict = useCallback(
+    (
+      draft: Awaited<ReturnType<typeof loadOwnerComposerDraft>>,
+      shouldClear: boolean,
+      saveOwnerId?: number,
+      saveThreadId?: string | null,
+    ) => {
+      // P1 R7: Verify owner if this conflict is from a queued save
+      if (saveOwnerId !== undefined && saveThreadId !== undefined) {
+        if (saveOwnerId !== ownerIdRef.current || saveThreadId !== threadId) {
+          // Stale conflict from old owner - don't pollute current owner's state
+          return;
+        }
+      }
+
+      revisionRef.current = draft.revision;
+      const currentImages = imageUrlsFromDraft(draft.draft);
+      const currentContextAttachments = contextAttachmentsFromDraft(draft.draft);
+      preservedBlocksRef.current = preservedBlocksFromDraft(draft.draft);
+      canonicalDraftRef.current = durableDraftSnapshotFromOwner(draft.draft);
+      const conflictSignature = composerDraftSignature(
+        draft.draft?.text ?? '',
+        currentImages,
+        currentContextAttachments,
+        preservedBlocksRef.current,
+        draft.draft?.replyTo,
+      );
+      lastSavedSignatureRef.current = conflictSignature;
+      void restoreDraftImages(currentImages, threadId ?? '', false);
+      if (!shouldClear) {
+        // Mark as pending recovery - not yet displayed
+        if (canonicalDraftRef.current) {
+          pendingRecoveryRef.current = {
+            snapshot: canonicalDraftRef.current,
+            revision: draft.revision,
+            source: 'conflict',
+          };
+        }
+        return;
+      }
+      setInput((localText) => mergeHydratedDraft(draft.draft?.text ?? '', localText));
+      setContextAttachments((local) => mergeContextAttachments(currentContextAttachments, local));
+      if (draft.draft?.replyTo && !useChatStore.getState().replyToMessage) {
+        const store = useChatStore.getState();
+        const parent = store.messages.find((message) => message.id === draft.draft?.replyTo);
+        setReplyTo({
+          id: draft.draft.replyTo,
+          content: parent?.content ?? '(原消息未加载)',
+          senderCatId: parent?.catId ?? null,
+          threadId: threadId ?? '',
+        });
+      }
+      // Displayed, so mark as pending recovery
+      if (canonicalDraftRef.current) {
+        pendingRecoveryRef.current = {
+          snapshot: canonicalDraftRef.current,
+          revision: draft.revision,
+          source: 'conflict',
+        };
+      }
+      clearFallbackRef.current = null;
+    },
+    [restoreDraftImages, setContextAttachments, setInput, setReplyTo, threadId],
+  );
 
   const captureCurrentDraft = useCallback(
     (): DurableDraftSnapshot => ({
@@ -208,25 +306,133 @@ export function useDurableComposerDraft({
     [imageUrlsRef, threadId],
   );
 
-  const { persistDraftSnapshot, persistCurrentDraft } = useComposerDraftPersistence({
-    threadId,
-    ownerIdRef,
-    revisionRef,
-    lastSavedSignatureRef,
-    canonicalDraftRef,
-    pendingRecoveryRef,
-    preservedBlocksRef,
-    hydratedRef,
-    admissionsPendingRef,
-    clearFallbackRef,
-    captureCurrentDraft,
-    setInput,
-    setContextAttachments,
-    setReplyTo,
-    restoreFallbackImages,
-    restoreDraftImages,
-    saveCurrentDraftForImagesRef,
-  });
+  useEffect(() => {
+    if (!threadId) return;
+    let active = true;
+    const unregister = registerComposerDraftRecovery(threadId, async (draft) => {
+      const owner = apiSessionIdentity.getSnapshot().ownerUserId;
+      const ownerGeneration = ownerIdRef.current;
+      await hydrationSettledRef.current;
+      if (
+        !active ||
+        owner !== draft.ownerUserId ||
+        apiSessionIdentity.getSnapshot().ownerUserId !== owner ||
+        ownerGeneration !== ownerIdRef.current ||
+        draft.threadId !== threadId ||
+        admissionsPendingRef.current > 0
+      )
+        return false;
+      if (hydratedRef.current && revisionRef.current >= draft.revision) return true;
+      const pending = useChatStore.getState().pendingChatInsert;
+      if (pending?.threadId === threadId && (pending.serverRevision ?? -1) >= draft.revision) return true;
+      reconcileConflict({ draft, revision: draft.revision }, true);
+      hydratedRef.current = true;
+      return true;
+    });
+    return () => {
+      active = false;
+      unregister();
+    };
+  }, [reconcileConflict, threadId]);
+
+  const persistDraftSnapshot = useCallback(
+    async (
+      snapshot: DurableDraftSnapshot,
+      allowPendingAdmission = false,
+      boundOwnerId?: number,
+      boundThreadId?: string | null,
+    ) => {
+      // P1 R7: Use bound owner ID if provided, otherwise current
+      const capturedOwnerId = boundOwnerId ?? ownerIdRef.current;
+      const capturedThreadId = boundThreadId ?? threadId;
+
+      if (!capturedThreadId || (admissionsPendingRef.current > 0 && !allowPendingAdmission)) return false;
+
+      // P1 R7: Validate owner identity at execution time
+      if (boundOwnerId !== undefined) {
+        if (capturedOwnerId !== ownerIdRef.current || capturedThreadId !== threadId) {
+          // Owner changed - don't execute stale task
+          return false;
+        }
+      }
+
+      const signature = composerDraftSignature(
+        snapshot.text,
+        snapshot.imageUrls,
+        snapshot.contextAttachments,
+        snapshot.preservedBlocks,
+        snapshot.replyTo,
+      );
+      if (signature === lastSavedSignatureRef.current) return true;
+
+      // P1-1: Block autosave if there's unseen recovery, unless it's from hydration and user has seen it
+      if (!allowPendingAdmission && pendingRecoveryRef.current) {
+        // Allow autosave if recovery is from hydration and user has been editing (hydratedRef=true)
+        if (pendingRecoveryRef.current.source === 'hydration' && hydratedRef.current) {
+          // User saw hydration and is now editing - clear the old recovery and allow save
+          pendingRecoveryRef.current = null;
+        } else {
+          // Conflict recovery or hydration not yet seen - block save
+          return false;
+        }
+      }
+
+      const shouldClear =
+        !snapshot.text.trim() &&
+        snapshot.imageUrls.length === 0 &&
+        snapshot.contextAttachments.length === 0 &&
+        snapshot.preservedBlocks.length === 0 &&
+        !snapshot.replyTo;
+
+      // P1 R7: Read current revision dynamically, not frozen at enqueue time
+      const result = await writeOwnerComposerDraft(capturedThreadId, revisionRef.current, snapshot);
+
+      // P1 R7: Always validate owner after async write
+      if (capturedOwnerId !== ownerIdRef.current || capturedThreadId !== threadId) {
+        return false; // Owner changed - discard stale save result
+      }
+
+      if (result.kind === 'conflict') {
+        reconcileConflict(result, shouldClear, capturedOwnerId, capturedThreadId);
+        return false;
+      }
+      if (result.kind === 'failed') {
+        if (shouldClear) restoreAdmissionFallback();
+        return false;
+      }
+      revisionRef.current = result.revision;
+      lastSavedSignatureRef.current = signature;
+      canonicalDraftRef.current = snapshot;
+      clearFallbackRef.current = null;
+      return true;
+    },
+    [reconcileConflict, restoreAdmissionFallback, threadId],
+  );
+
+  const persistCurrentDraft = useCallback(() => {
+    // P1 R7: Capture owner identity and snapshot, let revision advance dynamically
+    const ownerContext = {
+      ownerId: ownerIdRef.current,
+      threadId: threadId,
+      snapshot: captureCurrentDraft(),
+    };
+
+    if (!ownerContext.threadId) return Promise.resolve(false);
+
+    return persistDraftSnapshot(ownerContext.snapshot, false, ownerContext.ownerId, ownerContext.threadId);
+  }, [captureCurrentDraft, persistDraftSnapshot, threadId]);
+
+  // P1 R9: Image save must capture owner at assignment, not at call time
+  saveCurrentDraftForImagesRef.current = threadId
+    ? () => {
+        const ownerId = ownerIdRef.current;
+        const capturedThreadId = threadId;
+        const snapshot = captureCurrentDraft();
+        return enqueueComposerDraftSave(threadId, () =>
+          persistDraftSnapshot(snapshot, false, ownerId, capturedThreadId),
+        );
+      }
+    : async () => false;
 
   const { persistSettledDraft } = useComposerDraftAutosave({
     threadId,
@@ -285,7 +491,7 @@ export function useDurableComposerDraft({
       };
       pendingAdmissionDraftRef.current = pendingAdmission;
       admissionsPendingRef.current += 1;
-      return (accepted: boolean | undefined) => {
+      return (accepted: boolean | undefined, options?: { localDurableAttempt: boolean }) => {
         // P1-2 R8: Check stable owner ID, not hydration generation
         if (ownerId !== ownerIdRef.current || pendingAdmission.threadId !== threadId) {
           return;
@@ -322,7 +528,9 @@ export function useDurableComposerDraft({
             }
           }
         } else {
-          clearFallbackRef.current = durableSnapshot;
+          // A durable send attempt owns this snapshot now. A remote draft-save
+          // failure must not turn the same content into a new composer send.
+          clearFallbackRef.current = options?.localDurableAttempt ? null : durableSnapshot;
           persistSettledDraft(hydrationGeneration);
         }
         setAdmissionEpoch((current) => current + 1);

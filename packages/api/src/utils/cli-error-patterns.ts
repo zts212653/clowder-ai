@@ -30,9 +30,12 @@ const OSC = /\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g;
 // JWT: 3 base64url segments separated by '.', first 2 begin with 'eyJ'
 const JWT = /eyJ[A-Za-z0-9_-]+\.eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/g;
 
-// PEM block: -----BEGIN ... PRIVATE KEY----- to matching END
-const PEM = /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/g;
+// Truncated diagnostics may omit END; suppress the remaining private-key block through EOF.
+const PEM = /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?(?:-----END [A-Z ]*PRIVATE KEY-----|$)/g;
 
+// URL userinfo. Anchoring the scheme after a non-scheme character prevents the
+// engine from retrying an unbounded scheme prefix at every word boundary.
+const URL_USERINFO = /(^|[^a-z0-9+.-])([a-z][a-z0-9+.-]*:\/\/)[^/\s'"<>@]+@/gi;
 // URL query — everything after ? until whitespace or closing quote/paren
 const URL_QUERY = /(\?)([^\s'"<>)]+)/g;
 // URL fragment — OAuth implicit/callback flows often place access_token/state after #.
@@ -69,6 +72,7 @@ export const SANITIZER_PATTERNS = {
   osc: OSC,
   jwt: JWT,
   pem: PEM,
+  urlUserinfo: URL_USERINFO,
   urlQuery: URL_QUERY,
   urlFragment: URL_FRAGMENT,
   cookieHeader: COOKIE_HEADER,
@@ -195,8 +199,12 @@ export const CLASSIFIER_PATTERNS: Array<{ code: CliErrorReasonCode; regex: RegEx
   },
   {
     code: 'network_error',
+    // Includes Go net/http *url.Error transport EOF (witnessed in AGY Native startup
+    // archives a62b4b95 & 2654c868: `Get "https://www.googleapis.com/oauth2/v2/userinfo": EOF`).
+    // Scoped to `<HTTP method> "http(s)://...": [unexpected ]EOF` per LL-059 so carrier stdio
+    // `stream_disconnected` and non-HTTP generic EOF strings remain unaffected.
     regex:
-      /(ETIMEDOUT|ECONNREFUSED|ENOTFOUND|ECONNRESET|socket hang up|fetch failed|connect ECONN|getaddrinfo|error sending request for url)/i,
+      /(ETIMEDOUT|ECONNREFUSED|ENOTFOUND|ECONNRESET|socket hang up|fetch failed|connect ECONN|getaddrinfo|error sending request for url|\b(?:Get|Post|Head|Put|Delete|Patch)\s+"https?:\/\/[^"\r\n]+":\s*(?:unexpected\s+)?EOF\b)/i,
   },
   {
     code: 'stream_disconnected',

@@ -1,18 +1,42 @@
 // @vitest-environment jsdom
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { createElement } from 'react';
+import { renderToString } from 'react-dom/server';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   parseShellPresentationParam,
   readShellPresentation,
   SHELL_PRESENTATION_STORAGE_KEY,
+  useShellPresentation,
   writeShellPresentation,
 } from '../shell-presentation';
 
 describe('F322 shell presentation switch', () => {
   beforeEach(() => window.localStorage.clear());
-  afterEach(() => window.localStorage.clear());
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+    window.localStorage.clear();
+  });
 
-  it('defaults to classic so the old shell is untouched until someone opts in', () => {
-    expect(readShellPresentation()).toBe('classic');
+  it('defaults to v2 without writing a preference for the user', () => {
+    expect(readShellPresentation()).toBe('v2');
+    expect(window.localStorage.getItem(SHELL_PRESENTATION_STORAGE_KEY)).toBeNull();
+  });
+
+  it('uses the same v2 default during server rendering', () => {
+    function Presentation() {
+      return useShellPresentation();
+    }
+    expect(renderToString(createElement(Presentation))).toBe('v2');
+  });
+
+  it('defaults to v2 without a browser window or readable storage', () => {
+    vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
+      throw new DOMException('Storage denied', 'SecurityError');
+    });
+    expect(readShellPresentation()).toBe('v2');
+    vi.stubGlobal('window', undefined);
+    expect(readShellPresentation()).toBe('v2');
   });
 
   it('persists v2 and classic, and ignores anything else', () => {
@@ -21,7 +45,7 @@ describe('F322 shell presentation switch', () => {
     writeShellPresentation('classic');
     expect(readShellPresentation()).toBe('classic');
     window.localStorage.setItem(SHELL_PRESENTATION_STORAGE_KEY, 'something-else');
-    expect(readShellPresentation()).toBe('classic');
+    expect(readShellPresentation()).toBe('v2');
   });
 
   it('notifies same-tab listeners when written', () => {

@@ -75,7 +75,7 @@ import { createModuleLogger } from '../infrastructure/logger.js';
 import { visibilityCursorUnresolvedRepair } from '../infrastructure/telemetry/instruments.js';
 import type { SocketManager } from '../infrastructure/websocket/index.js';
 import { CHATGPT_CHAT_URL_REGEX } from '../utils/chatgpt-chat-url.js';
-import { migrateStoredProjectPath, resolvePersistentProjectPathDetailed } from '../utils/persistent-project-path.js';
+import { migrateStoredProjectPath, validateNewProjectPath } from '../utils/persistent-project-path.js';
 import { resolveStrictUserId, resolveUserId } from '../utils/request-identity.js';
 import { getMultiMentionOrchestrator } from './callback-multi-mention-routes.js';
 import { readRecentWorksView } from './recent-works-view.js';
@@ -724,15 +724,14 @@ async function resolveCreateThreadProjectPath(
   }
 
   if (projectPath && projectPath !== 'default') {
-    const resolved = await resolvePersistentProjectPathDetailed(projectPath);
+    const resolved = await validateNewProjectPath(projectPath);
     if (!resolved.ok) {
-      const runtimeConfigError = ['runtime_root_invalid', 'runtime_workspace_missing'].includes(resolved.reason);
       return {
         ok: false,
-        statusCode: runtimeConfigError ? 500 : 400,
-        error: runtimeConfigError
-          ? `Unable to resolve persistent workspace: ${resolved.message ?? resolved.reason}`
-          : 'Invalid projectPath: must be an existing directory under allowed roots',
+        statusCode: resolved.restriction
+          ? { configuration_unknown: 500, runtime_read_only: 403 }[resolved.restriction]
+          : 400,
+        error: resolved.error,
       };
     }
     return { ok: true, projectPath: resolved.path };
@@ -1530,6 +1529,7 @@ export const threadsRoutes: FastifyPluginAsync<ThreadsRoutesOptions> = async (ap
 
     try {
       const thread = await threadStore.get(id);
+      const userId = resolveUserId(request, {});
 
       // F095 Phase G + F192 livefix: Protect system threads from casual deletion.
       // Covers both IM Hub (connectorHubState) and eval domain (systemKind) threads.
@@ -1553,11 +1553,19 @@ export const threadsRoutes: FastifyPluginAsync<ThreadsRoutesOptions> = async (ap
         return { error: 'Cannot delete this thread' };
       }
 
+      const ownerUserId = thread && !SYSTEM_USER_IDS.has(thread.createdBy) ? thread.createdBy : userId;
+      if (ownerUserId) {
+        opts.socketManager?.emitToUser(ownerUserId, 'entrusted_work_projection_invalidated', {
+          ownerUserId,
+          threadId: id,
+          reason: 'access_revoked',
+        });
+      }
+
       // B-4: Cascade delete guide session to prevent stale sessions on deleted threads
       void opts.guideSessionStore?.delete(id).catch(() => {});
 
       // I-2: Audit thread deletion for traceability (best-effort, don't block response)
-      const userId = resolveUserId(request, {});
       void getEventAuditLog()
         .append({
           threadId: id,

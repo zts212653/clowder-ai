@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import type { MessageSearchResponse } from './message-search.js';
+import { messageAnswerSelectionSchema, messageSourceSelectionSchema } from './message-search-selection.js';
 
 const text = z.string().max(24000);
 const id = z.string().min(1).max(2048);
@@ -38,8 +39,12 @@ export const messageSearchResponseSchema = z.object({
         timelineOrderAt: z.number().finite(),
         snippet: z.object({ text, start: count, end: count, source: z.enum(['body', 'attachment-text']) }),
         highlights: z.array(z.object({ start: count, end: count })).max(200),
-        match: mode,
+        match: z.enum(['lexical', 'semantic', 'hybrid', 'selected']),
+        matchEvidence: z
+          .object({ kind: z.enum(['literal', 'lexical', 'semantic']), terms: z.array(z.string().max(2000)).max(1000) })
+          .optional(),
         contentRevision: id,
+        selection: messageSourceSelectionSchema.optional(),
         publiclyQuotable: z.boolean(),
         decisionSources: z
           .array(
@@ -63,9 +68,9 @@ export const messageSearchResponseSchema = z.object({
   meta: z.object({
     scope: z.enum(['thread', 'global']),
     threadId: id.optional(),
-    sort: z.enum(['time', 'relevance']),
-    requestedMode: mode,
-    effectiveMode: mode,
+    sort: z.enum(['time', 'relevance', 'selected']),
+    requestedMode: z.enum(['lexical', 'semantic', 'hybrid', 'selected']),
+    effectiveMode: z.enum(['lexical', 'semantic', 'hybrid', 'selected']),
     degraded: z.boolean(),
     degradeReason: text.optional(),
     partial: z.boolean(),
@@ -74,6 +79,12 @@ export const messageSearchResponseSchema = z.object({
     semanticCandidatesLimited: z.boolean(),
     sourceCoverage: z.literal('unknown'),
     freshness: z.literal('unknown'),
+    resultKind: z.enum(['sources', 'selected-answer']).optional(),
+    answerSelection: messageAnswerSelectionSchema.optional(),
+    answerBinding: z
+      .object({ messageId: z.string().min(1).max(2048), blockId: z.string().min(1).max(2048) })
+      .optional(),
+    timeWindow: z.object({ limit: count, admitted: count, complete: z.boolean() }).optional(),
     decisionIndex: z.object({ status: z.enum(['ready', 'unavailable']), revision: id.optional() }).optional(),
     qualification: z
       .object({

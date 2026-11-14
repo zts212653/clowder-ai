@@ -21,6 +21,8 @@ export const executionRowCopy = defineShellCopy(
         queuePausedTail: ' · 排队已暂停',
         quietMinutes: (minutes: number): string => `${minutes} 分钟没有动静`,
         quietUnknown: '没有动静',
+        holdingOne: (who: string, time: string): string => `${who} 在等 · ${time} 醒`,
+        holdingMany: (count: number, time: string): string => `${count} 只猫在等 · 最早 ${time} 醒`,
       },
       compact: {
         working: '处理中',
@@ -32,6 +34,7 @@ export const executionRowCopy = defineShellCopy(
         stuck: '处理受阻',
         paused: '已暂停',
         waiting: (count: number): string => `排队 ${count}`,
+        holding: '在等',
       },
       activity: {
         full_gate: '全量门禁',
@@ -63,6 +66,8 @@ export const executionRowCopy = defineShellCopy(
         forceReset: '强制重置',
         continue: '继续',
         recover: '恢复',
+        cancelHold: '取消持球',
+        cancellingHold: '取消中…',
       },
       panel: {
         running: (count: number): string => `在跑 ${count}`,
@@ -96,6 +101,8 @@ export const executionRowCopy = defineShellCopy(
         queuePausedTail: ' · queue paused',
         quietMinutes: (minutes: number): string => `No activity for ${minutes} min`,
         quietUnknown: 'No activity',
+        holdingOne: (who: string, time: string): string => `${who} waiting · wakes ${time}`,
+        holdingMany: (count: number, time: string): string => `${count} cats waiting · first wakes ${time}`,
       },
       compact: {
         working: 'Working',
@@ -107,6 +114,7 @@ export const executionRowCopy = defineShellCopy(
         stuck: 'Blocked',
         paused: 'Paused',
         waiting: (count: number): string => `${count} queued`,
+        holding: 'Waiting',
       },
       activity: {
         full_gate: 'Full gate',
@@ -138,6 +146,8 @@ export const executionRowCopy = defineShellCopy(
         forceReset: 'Force reset',
         continue: 'Continue',
         recover: 'Recover',
+        cancelHold: 'Cancel hold',
+        cancellingHold: 'Cancelling…',
       },
       panel: {
         running: (count: number): string => `${count} running`,
@@ -197,6 +207,14 @@ export const executionRowCopy = defineShellCopy(
         ['Opus', '2:05'],
       ],
       'panel.waitSchedule': [['Sol'], ['Opus, Sol']],
+      'status.holdingOne': [
+        ['Sol', '02:11'],
+        ['Opus', '23:40'],
+      ],
+      'status.holdingMany': [
+        [2, '02:11'],
+        [5, '23:40'],
+      ],
     },
   },
 );

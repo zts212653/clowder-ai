@@ -13,13 +13,14 @@ export function workMediaPrincipal(principal: WorkPrincipal): MediaReviewPrincip
   return { ...principal, actor: principal.actor };
 }
 
-/** Current authenticated production callback + owning thread; foreign authors still need the existing exact Task grant. */
+/** Current callback identity and resource access; writes additionally require independent production or an exact Task grant. */
 export function createWorkAuthorizer(deps: {
   ownerUserId: string;
   access: PublishedMediaAccess;
   invocation: (id: string) => Promise<InvocationRecord | null>;
 }) {
-  return async ({ principal, permission, scope }: WorkAuthorizationInput): Promise<void> => {
+  return async (input: WorkAuthorizationInput): Promise<void> => {
+    const { principal, permission, scope } = input;
     if (principal.userId !== deps.ownerUserId) throw new MediaOwnerError('access_denied');
     const mediaPrincipal = workMediaPrincipal(principal);
     await deps.access.authorizeThread(principal.threadId, mediaPrincipal);
@@ -27,10 +28,27 @@ export function createWorkAuthorizer(deps: {
       if (scope.ownerUserId !== principal.userId) throw new MediaOwnerError('access_denied');
       await deps.access.authorizeScope(scope, mediaPrincipal, true, workPublicationContentRef(scope));
     }
-    await requireCurrentProducer(principal, deps.invocation);
-    if (permission === 'write' && scope && needsPublicationGrant(principal, scope.createdBy))
-      await deps.access.authorizePublicationTask(workPublicationContentRef(scope), mediaPrincipal, false);
+    const invocation = await requireCurrentIdentity(principal, deps.invocation);
+    if (permission === 'write') await authorizeWorkWrite(input, invocation, deps.access);
   };
+}
+
+async function authorizeWorkWrite(
+  { principal, scope, operation }: WorkAuthorizationInput,
+  invocation: InvocationRecord | null,
+  access: PublishedMediaAccess,
+) {
+  if (principal.actor.kind === 'human') return;
+  const mediaPrincipal = workMediaPrincipal(principal);
+  // Explicit continuation consumes this exact current grant, including for the original author.
+  // A failed grant never falls back to independent production authority.
+  if (scope && operation !== 'create' && principal.contentTaskId) {
+    await access.authorizePublicationTask(workPublicationContentRef(scope), mediaPrincipal, false);
+    return;
+  }
+  if (invocation?.ownerAuthProvenance !== 'strict') throw new MediaOwnerError('access_denied');
+  if (scope && needsPublicationGrant(principal, scope.createdBy))
+    await access.authorizePublicationTask(workPublicationContentRef(scope), mediaPrincipal, false);
 }
 
 function needsPublicationGrant(principal: WorkPrincipal, creator: WorkPrincipal['actor']) {
@@ -38,26 +56,26 @@ function needsPublicationGrant(principal: WorkPrincipal, creator: WorkPrincipal[
   return creator.kind !== 'cat' || creator.actorId !== principal.actor.actorId;
 }
 
-async function requireCurrentProducer(
+async function requireCurrentIdentity(
   principal: WorkPrincipal,
   read: (id: string) => Promise<InvocationRecord | null>,
 ) {
   if (principal.actor.kind === 'human') {
     if (principal.invocationId) throw new MediaOwnerError('access_denied');
-    return;
+    return null;
   }
   const invocation = principal.invocationId ? await read(principal.invocationId) : null;
-  if (!currentProductionInvocation(invocation, principal)) throw new MediaOwnerError('access_denied');
+  if (!isCurrentWorkInvocation(invocation, principal)) throw new MediaOwnerError('access_denied');
+  return invocation;
 }
 
-function currentProductionInvocation(invocation: InvocationRecord | null, principal: WorkPrincipal): boolean {
+function isCurrentWorkInvocation(invocation: InvocationRecord | null, principal: WorkPrincipal): boolean {
   return (
     invocation !== null &&
     invocation.state === 'active' &&
     invocation.userId === principal.userId &&
     invocation.catId === principal.actor.actorId &&
     invocation.threadId === principal.threadId &&
-    invocation.ownerAuthProvenance === 'strict' &&
     toolExecutionPolicyDenial(invocation.toolExecutionPolicy, 'POST /api/callbacks/work') === null
   );
 }

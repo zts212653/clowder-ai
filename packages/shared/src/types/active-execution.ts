@@ -48,10 +48,38 @@ export interface ActiveExecutionProjection {
   readonly inputCapabilities?: LifecycleInputCapabilities;
 }
 
+/**
+ * A held ball: the cat's process has exited and a wake is armed. It is waiting, not running, so it never appears in
+ * `executions` (whose consumers treat every entry as stoppable running work).
+ */
+export interface ActiveHoldWaitProjection {
+  /** The hold task id when the viewer owns it; a masked, unresolvable occupancy id otherwise. */
+  readonly waitId: string;
+  readonly threadId: string;
+  readonly threadTitle: string | null;
+  /** Owning project from the readable thread; supplied by all-project snapshots. */
+  readonly projectPath?: string;
+  readonly catId: string;
+  /** When the hold was registered. */
+  readonly since: number;
+  /** When the scheduler will wake the cat; a busy thread re-arms this later. */
+  readonly wakeAt: number;
+  readonly cancelability:
+    | { readonly state: 'cancelable'; readonly target: { readonly kind: 'hold_ball'; readonly taskId: string } }
+    | { readonly state: 'not_cancelable'; readonly reason: 'foreign_principal' };
+}
+
 export type ActiveExecutionListResponse =
-  | { readonly scope?: 'project'; readonly projectPath: string; readonly executions: ActiveExecutionProjection[] }
+  | {
+      readonly scope?: 'project';
+      readonly projectPath: string;
+      readonly executions: ActiveExecutionProjection[];
+      /** Absent from servers that predate hold projection; read as none. */
+      readonly waits?: readonly ActiveHoldWaitProjection[];
+    }
   | {
       readonly scope: 'all';
       readonly executions: ActiveExecutionProjection[];
+      readonly waits?: readonly ActiveHoldWaitProjection[];
       readonly unavailableProjectPaths?: readonly string[];
     };

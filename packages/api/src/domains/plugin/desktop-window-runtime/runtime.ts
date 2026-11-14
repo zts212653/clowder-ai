@@ -102,7 +102,15 @@ export class DesktopWindowPluginRuntime implements BundledPluginRuntime {
   }
 
   async unexpectedLossId(): Promise<string | null> {
-    return unexpectedDesktopLossId(await this.options.inventory.snapshot(), 'official.companion');
+    const authority = await this.options.inventory.readCurrentAuthority('official.companion');
+    return unexpectedDesktopLossId(
+      {
+        schemaVersion: 1,
+        instances: authority ? [authority.instance] : [],
+        packages: authority?.packageRecord ? [authority.packageRecord] : [],
+      },
+      'official.companion',
+    );
   }
 
   /** Revocation is cleanup, never an effect that can mint or renew authority. */
@@ -152,9 +160,9 @@ export class DesktopWindowPluginRuntime implements BundledPluginRuntime {
     let pkg: VerifiedPluginPackage | undefined;
     let connection: BuiltinBrokerConnection | undefined;
     try {
-      const snapshot = await this.options.inventory.snapshot();
-      const instance = snapshot.instances.find((r) => r.pluginInstanceId === id && r.lifecycleState === 'installed');
-      const installed = instance && snapshot.packages.find((r) => r.packageDigest === instance.packageDigest);
+      const authority = await this.options.inventory.readAuthority(id);
+      const instance = authority?.instance?.lifecycleState === 'installed' ? authority.instance : undefined;
+      const installed = authority?.packageRecord;
       const contribution = installed?.manifest && desktopWindowContribution(installed.manifest);
       if (!instance || !installed || !contribution) throw new Error('unsupported desktop companion');
       pkg = await this.options.packages.resolveInstalledPackage(instance.packageDigest);
@@ -232,6 +240,7 @@ export class DesktopWindowPluginRuntime implements BundledPluginRuntime {
           }),
         ...(run.bridge ? { request: (input: unknown) => run.bridge!.request(input) } : {}),
         ...(run.bridge?.appAssist ? { appAssist: run.bridge.appAssist } : {}),
+        ...(run.bridge?.desk ? { desk: run.bridge.desk } : {}),
         ...(run.bridge?.observeVoice
           ? {
               onVoiceObservation: async (observation) => {
@@ -309,8 +318,8 @@ export class DesktopWindowPluginRuntime implements BundledPluginRuntime {
     void this.close(run, 'desktop_runtime_lost')
       .catch(() => undefined) // Cleanup failure must not erase the observed loss from inventory.
       .then(() =>
-        this.options.inventory.transaction((tx) => {
-          const current = tx.instances.get(run.id);
+        this.options.inventory.transaction(async (tx) => {
+          const current = await tx.instances.get(run.id);
           if (
             current?.packageDigest === run.digest &&
             current.lifecycleRevision === run.lifecycleRevision &&
@@ -318,7 +327,7 @@ export class DesktopWindowPluginRuntime implements BundledPluginRuntime {
             !this.active
           ) {
             const occurredAt = this.now();
-            tx.instances.put({
+            await tx.instances.put({
               ...current,
               runtimeState: 'crashed',
               updatedAt: occurredAt,
@@ -347,7 +356,7 @@ export class DesktopWindowPluginRuntime implements BundledPluginRuntime {
     if (this.active !== run || !run.ready || run.closing || !run.lease || !disable)
       throw new Error('Current companion unavailable');
     await this.features.run(run.lease, async () => undefined);
-    const before = (await this.options.inventory.snapshot()).instances.find((row) => row.pluginInstanceId === run.id);
+    const before = await this.options.inventory.read.instances.get(run.id);
     if (before?.packageDigest !== run.digest || before.activationState !== 'enabled')
       throw new Error('Current companion changed');
     // Admit the fixed revision under this exact feature generation. Do not hold
@@ -361,7 +370,7 @@ export class DesktopWindowPluginRuntime implements BundledPluginRuntime {
       return { completion };
     });
     await admitted.completion;
-    const after = (await this.options.inventory.snapshot()).instances.find((row) => row.pluginInstanceId === run.id);
+    const after = await this.options.inventory.read.instances.get(run.id);
     if (after?.packageDigest !== run.digest || after.activationState !== 'disabled' || this.active === run)
       throw new Error('Companion disable unconfirmed');
   }

@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import type { FrozenL0Input } from '@cat-cafe/shared/l0-input';
 import { profileCapsuleReadRelativePath } from '@cat-cafe/shared/profile-contract';
 
 export interface L0CacheGeneration {
@@ -77,7 +78,7 @@ export class L0ProfileCache {
   private readonly profileSignatures = new Map<string, string>();
   private globalGeneration = 0;
 
-  key(userId: string, catId: string, projection: L0Projection = 'owner', frozenKey?: string): string {
+  key(userId: string, catId: string, projection: FrozenL0Input['projection'] = 'owner', frozenKey?: string): string {
     return `${userId}\0${catId}\0${projection}${frozenKey ? `\0${frozenKey}` : ''}`;
   }
 

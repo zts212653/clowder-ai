@@ -13,7 +13,7 @@ import {
 import { replaceTaskPluginWait } from '../ports/TaskPluginWait.js';
 import type { ReplaceDeploymentWaitIfGenerationInput, ReplacePluginWaitInput } from '../ports/TaskStoreContract.js';
 import { TaskKeys } from '../redis-keys/task-keys.js';
-import { DEPLOYMENT_WAIT_INDEX } from './deployment-wait-index.js';
+import { commitTaskTransaction, publishTaskRecovery } from './publish-task-recovery.js';
 import { hydrateTask, serializeTask } from './RedisTaskCodec.js';
 import { runWithExclusiveRedisWatchSession } from './RedisWatchSession.js';
 
@@ -36,15 +36,14 @@ export async function replaceDeploymentWaitInSession(
       input.waitRegistration,
       parseTypedWaitRegistration(data[TYPED_WAIT_REGISTRATION_FIELD]),
     );
+  const fields = serializeTask(updated);
+  const removed: string[] = [];
+  if (input.waitRegistration) fields[TYPED_WAIT_REGISTRATION_FIELD] = JSON.stringify(input.waitRegistration);
+  else if (deploymentWaitGeneration(existing.deploymentWait) !== deploymentWaitGeneration(updated.deploymentWait))
+    removed.push(TYPED_WAIT_REGISTRATION_FIELD);
   const pipeline = session.multi();
-  pipeline.hset(key, serializeTask(updated));
-  pipeline.sadd(DEPLOYMENT_WAIT_INDEX, updated.id);
-  if (input.waitRegistration) {
-    pipeline.hset(key, TYPED_WAIT_REGISTRATION_FIELD, JSON.stringify(input.waitRegistration));
-  } else if (deploymentWaitGeneration(existing.deploymentWait) !== deploymentWaitGeneration(updated.deploymentWait)) {
-    pipeline.hdel(key, TYPED_WAIT_REGISTRATION_FIELD);
-  }
-  return (await pipeline.exec()) ? updated : undefined;
+  publishTaskRecovery(pipeline, key, fields, removed);
+  return (await commitTaskTransaction(pipeline)) ? updated : undefined;
 }
 
 export async function replacePluginWait(
@@ -59,7 +58,9 @@ export async function replacePluginWait(
       if (!raw.id) return null;
       const updated = replaceTaskPluginWait(hydrateTask(raw), input);
       if (!updated) return null;
-      return (await session.multi().hset(key, serializeTask(updated)).exec()) ? updated : undefined;
+      const tx = session.multi();
+      publishTaskRecovery(tx, key, serializeTask(updated));
+      return (await commitTaskTransaction(tx)) ? updated : undefined;
     });
     if (result !== undefined) return result;
   }

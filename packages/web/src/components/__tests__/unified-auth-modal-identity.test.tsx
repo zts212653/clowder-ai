@@ -39,6 +39,76 @@ async function fill(placeholder: string, value: string) {
   });
 }
 
+it.each([
+  { client: 'openai', label: 'OpenAI Platform', placeholder: 'sk-...', endpoint: 'https://api.openai.com' },
+  { client: 'anthropic', label: 'Anthropic API', placeholder: 'sk-ant-...', endpoint: 'https://api.anthropic.com' },
+  {
+    client: 'google',
+    label: 'Google API',
+    placeholder: 'AIza...',
+    endpoint: 'https://aiplatform.googleapis.com',
+  },
+])('$label saves a named key without models/endpoint or any login/binding request', async ({
+  client,
+  label,
+  placeholder,
+  endpoint,
+}) => {
+  await act(async () => root.render(<UnifiedAuthModal open onClose={close} onCreated={created} />));
+  await click('API Key');
+  const select = document.querySelector('select')!;
+  await act(async () => {
+    select.value = client;
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+  });
+  await fill('例如: my-claude-account', 'Platform');
+  const keyInput = document.querySelector<HTMLInputElement>('input[aria-label="API Key"]')!;
+  await fill(keyInput.placeholder, 'FAKE_PLATFORM_KEY');
+  const save = [...document.querySelectorAll('button')].find((item) => item.textContent === '保存')!;
+  expect(save.disabled).toBe(false);
+  expect(select.selectedOptions[0].textContent).toBe(label);
+  expect(keyInput.placeholder).toBe(placeholder);
+  expect(document.body.textContent).toContain(endpoint);
+  await click('保存');
+  expect(vi.mocked(apiFetch).mock.calls.map((call) => call[0])).toEqual(['/api/accounts']);
+  expect(JSON.parse(String(vi.mocked(apiFetch).mock.calls[0][1]?.body))).toEqual({
+    displayName: 'Platform',
+    authType: 'api_key',
+    clientId: client,
+    apiKey: 'FAKE_PLATFORM_KEY',
+  });
+});
+
+it.each([
+  { client: 'openai' as const, endpoint: 'https://api.openai.com/v1' },
+  { client: 'google' as const, endpoint: 'https://aiplatform.googleapis.com' },
+  { client: 'anthropic' as const, endpoint: 'https://api.anthropic.com' },
+])('editing a model-free $client account preserves the key and can clear an endpoint override', async ({
+  client,
+  endpoint,
+}) => {
+  await act(async () =>
+    root.render(
+      <UnifiedAuthModal
+        open
+        onClose={close}
+        onCreated={created}
+        editProfile={{
+          id: 'platform',
+          displayName: 'Platform',
+          authType: 'api_key',
+          clientId: client,
+          baseUrl: 'https://gateway.invalid/v1',
+        }}
+      />,
+    ),
+  );
+  await fill(endpoint, '');
+  await click('保存');
+  expect(JSON.parse(String(vi.mocked(apiFetch).mock.calls[0]?.[1]?.body))).toMatchObject({ baseUrl: '' });
+  expect(JSON.parse(String(vi.mocked(apiFetch).mock.calls[0]?.[1]?.body))).not.toHaveProperty('apiKey');
+});
+
 it('standalone API key creation submits the selected identity', async () => {
   await act(async () => root.render(<UnifiedAuthModal open onClose={close} onCreated={created} />));
   await click('API Key');
@@ -180,5 +250,29 @@ it('editing an API Key note preserves server-valid mixed-case environment keys',
   await click('保存');
   const body = JSON.parse(String(vi.mocked(apiFetch).mock.calls[0]?.[1]?.body));
   expect(body).toMatchObject({ displayName: 'new note', envVars: { FOO_bar: 'keep-me', _Mixed2: 'also-keep' } });
+  expect(body).not.toHaveProperty('apiKey');
+});
+
+it('editing an existing Anthropic key keeps its endpoint and models without replacing its secret', async () => {
+  await act(async () =>
+    root.render(
+      <UnifiedAuthModal
+        open
+        onClose={close}
+        onCreated={created}
+        editProfile={{
+          id: 'existing-anthropic',
+          displayName: 'Existing Anthropic',
+          authType: 'api_key',
+          clientId: 'anthropic',
+          baseUrl: 'https://api.anthropic.com',
+          models: ['claude-fixture'],
+        }}
+      />,
+    ),
+  );
+  await click('保存');
+  const body = JSON.parse(String(vi.mocked(apiFetch).mock.calls[0]?.[1]?.body));
+  expect(body).toMatchObject({ baseUrl: 'https://api.anthropic.com', models: ['claude-fixture'] });
   expect(body).not.toHaveProperty('apiKey');
 });

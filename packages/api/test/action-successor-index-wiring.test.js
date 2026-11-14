@@ -70,8 +70,8 @@ describe('F167 successor runtime wiring', () => {
     assert.match(queueWiring, /classifyInvocationRecoveryStatus\(/);
     assert.match(queueWiring, /outcome: 'completed'/);
     assert.doesNotMatch(queueWiring, /outcome: 'durable'/);
-    assert.match(queueWiring, /runActionSuccessorRecovery\(\)/);
-    assert.match(queueWiring, /setInterval\(runActionSuccessorRecovery, 30_000\)/);
+    assert.match(queueWiring, /registerRecoveryLoop\(\{\s*id: 'action-successor',\s*intervalMs: 30_000/);
+    assert.match(queueWiring, /runOnce: async[\s\S]*await runRecoveryCycle\(\)/);
   });
 
   it('keeps approved speech published and proves durable Queue custody before reporting delivery', () => {

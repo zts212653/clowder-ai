@@ -1,6 +1,17 @@
+import { createModuleLogger } from '../../../../infrastructure/logger.js';
+import {
+  assertRecoveryCurrent,
+  RecoveryDeadlineExceeded,
+  recoveryGuarded,
+} from '../../../../infrastructure/recovery/recovery-deadline.js';
+import { runDueBatch } from '../../../../infrastructure/recovery/run-due-batch.js';
+import { schedulerError } from '../../../../infrastructure/scheduler/logging/adapter.js';
+
 import type { ISessionSealer, SealReason } from '../session/SessionSealer.js';
 import type { RuntimeSessionDrainResult, RuntimeSessionMetadata } from './RuntimeSessionMetadata.js';
 import type { IRuntimeSessionStore } from './RuntimeSessionStore.js';
+
+const log = createModuleLogger('runtime-session/seal-reaper');
 
 export type RuntimeSessionSealReaperDrainResult =
   | {
@@ -54,9 +65,9 @@ export class RuntimeSessionSealReaper {
   private readonly now: () => number;
 
   constructor(options: RuntimeSessionSealReaperOptions) {
-    this.runtimeSessionStore = options.runtimeSessionStore;
-    this.sessionSealer = options.sessionSealer;
-    this.drainRuntimeSession = options.drainRuntimeSession;
+    this.runtimeSessionStore = recoveryGuarded(options.runtimeSessionStore);
+    this.sessionSealer = recoveryGuarded(options.sessionSealer);
+    this.drainRuntimeSession = recoveryGuarded({ run: options.drainRuntimeSession }).run;
     this.maxRetries =
       Number.isSafeInteger(options.maxRetries) && (options.maxRetries ?? 0) > 0
         ? Math.floor(options.maxRetries as number)
@@ -65,13 +76,35 @@ export class RuntimeSessionSealReaper {
   }
 
   async runOnce(): Promise<RuntimeSessionSealReaperRunResult> {
-    const records = await this.runtimeSessionStore.listByLifecycleState('runtime_seal_pending');
-    const result = emptyRunResult(records.length);
-
-    for (const record of records) {
-      addRunResult(result, await this.processRecord(record));
-    }
-
+    const result = emptyRunResult();
+    const batch = await runDueBatch({
+      limit: 100,
+      budgetMs: 5000,
+      selectDue: (limit) => this.runtimeSessionStore.listSealRecoveryCandidates(limit),
+      process: async (record) => {
+        const outcome = await this.processRecord(record);
+        assertRecoveryCurrent();
+        addRunResult(result, outcome);
+      },
+      onItemError: async (record, error) => {
+        result.failed++;
+        await this.runtimeSessionStore.failSealRecovery(
+          record,
+          this.now(),
+          this.maxRetries,
+          error instanceof RecoveryDeadlineExceeded ? 'seal_recovery_deadline' : 'seal_recovery_item_failed',
+        );
+        log.warn(
+          { sessionId: record.sessionId, err: schedulerError(error) },
+          'Runtime seal recovery isolated a metadata failure',
+        );
+      },
+    });
+    result.scanned = batch.selected;
+    log.info(
+      { loopId: 'runtime-session-seal', elapsedMs: batch.elapsedMs, deferred: batch.deferred, ...result },
+      'runtime session seal recovery summary',
+    );
     return result;
   }
 
@@ -79,6 +112,11 @@ export class RuntimeSessionSealReaper {
     const result = emptyRunResult();
     const retryCount = record.lifecycle.retryCount ?? 0;
     if (retryCount >= this.maxRetries) {
+      if (await this.runtimeSessionStore.parkSealRecovery(record, this.now()))
+        log.warn(
+          { sessionId: record.sessionId, reasonCode: 'seal_retry_exhausted', retryCount },
+          'Runtime seal automatic recovery paused; original lifecycle retained',
+        );
       result.skippedMaxRetries = 1;
       return result;
     }

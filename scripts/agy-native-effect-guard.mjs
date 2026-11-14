@@ -48,11 +48,14 @@ function profileControlPath(path, profileHome) {
   const root = roots.find((root) => normalized.startsWith(`${root}/`));
   // The run's data alias is the account's native storage. Keep ordinary brain
   // artifacts writable there; configuration and the alias directory itself stay protected.
-  const suffix = (root ? normalized.slice(root.length + 1) : '').replace(
+  let suffix = (root ? normalized.slice(root.length + 1) : '').replace(
     /^\.cat-cafe-native-runs\/run-[a-z0-9]+\/(?=\.gemini\/antigravity-cli\/)/,
     '',
   );
+  const view = suffix.match(/^\.cat-cafe-account-views\/[a-f0-9]{64}(?:\/(.*))?$/);
+  if (view) suffix = `.gemini/antigravity-cli${view[1] ? `/${view[1]}` : ''}`;
   return (
+    suffix === '.cat-cafe-account-views' ||
     suffix === 'library' ||
     suffix === 'library/keychains' ||
     suffix.startsWith('library/keychains/') ||
@@ -139,16 +142,20 @@ export function decideAgyNativeHookPayload(payload, options = {}) {
   if (secretDenial) return deny(secretDenial);
   if (options.readOnly && !READERS.has(name)) return deny('read-only invocation');
   const isControl = (path, directory, profileHome) =>
-    controlPath(path, directory, profileHome) || (options.toolHome && controlPath(path, directory, options.toolHome));
+    controlPath(path, directory, profileHome) ||
+    (options.toolHome && controlPath(path, directory, options.toolHome)) ||
+    (options.credentialHome && controlPath(path, directory, options.credentialHome));
 
   let toolName;
   let toolInput;
   let overwrite;
   if (FILE_WRITERS.has(name)) {
-    const target = args.TargetFile ?? args.NotebookPath;
+    // 1.5 file tools execute Path; a legacy field must never substitute a
+    // different target for policy checks, even in a malformed mixed payload.
+    const target = name === 'write_file' || name === 'edit_file' ? args.Path : (args.TargetFile ?? args.NotebookPath);
     if (typeof target !== 'string' || !target) return deny('missing file target');
     if (isControl(target, cwd, options.profileHome)) return deny('AGY executable control-plane write');
-    toolName = name === 'write_to_file' ? 'Write' : 'Edit';
+    toolName = name === 'write_to_file' || name === 'write_file' ? 'Write' : 'Edit';
     toolInput = { file_path: target };
   } else if (COMMANDS.has(name)) {
     const quote = (value) => `'${value.replaceAll("'", `'"'"'`)}'`;
@@ -204,6 +211,10 @@ async function main() {
     const decision = decideAgyNativeHookPayload(JSON.parse(raw), {
       profileHome,
       toolHome,
+      credentialHome: process.argv
+        .slice(5)
+        .find((arg) => arg.startsWith('--credential-home='))
+        ?.slice('--credential-home='.length),
       ...(process.argv[5] !== undefined ? { workspaceRoot: process.argv[5] } : {}),
       readOnly: process.argv[3] === 'read-only',
       ...(process.argv[3] === 'plugin-native' ? { pluginServerName: process.argv[6] ?? '' } : {}),

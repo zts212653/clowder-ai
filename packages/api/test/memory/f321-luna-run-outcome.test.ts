@@ -13,6 +13,7 @@ import type { AgentService } from '../../src/domains/cats/services/types.js';
 import { SqliteEvidenceStore } from '../../src/domains/memory/SqliteEvidenceStore.js';
 import type { createSummaryCompactionTaskSpec } from '../../src/domains/memory/SummaryCompactionTaskSpec.js';
 import { registerLunaCuration } from '../../src/luna-curation-setup.js';
+import { adaptMessageStore } from '../helpers/message-from-fixtures.js';
 
 for (const outcome of [
   'recall during generation',
@@ -30,7 +31,7 @@ for (const outcome of [
     const db = evidence.getDb();
     const threads = new ThreadStore();
     const thread = threads.create('owner', 'Current work');
-    const messages = new MessageStore();
+    const messages = adaptMessageStore(new MessageStore());
     const started = Date.now() - 30 * 60_000;
     saveCurationPreference(root, db, { enabled: true }, started);
     const fresh = messages.append({

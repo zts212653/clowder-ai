@@ -89,3 +89,32 @@ test('AGY shared-target CLI denials carry the same parsed target and local audit
   assert.equal(entry.provider, 'agy');
   assert.equal(entry.target.value, target);
 });
+
+test('the actual denied clause survives long harmless prefixes and is redacted before bounding', (t) => {
+  const home = mkdtempSync(join(tmpdir(), 'f306-denial-clause-'));
+  t.after(() => rmSync(home, { recursive: true, force: true }));
+  const runtime = join(home, 'cat-cafe-runtime');
+  const token = 'sk-proj-' + 'Q'.repeat(80);
+  const deniedClause = `touch "${runtime}/blocked\nline"`;
+  const command = `printf '%s' '${'prefix'.repeat(80)} ${token}' > /dev/null; ${deniedClause}`;
+  const env = { ...process.env, HOME: home };
+  delete env.CAT_CAFE_DEPLOYMENT_ID;
+  const result = spawnSync(process.execPath, [join(root, 'scripts/native-effect-target-guard.mjs')], {
+    env,
+    encoding: 'utf8',
+    input: JSON.stringify({
+      tool_name: 'exec_command',
+      turn_id: 'audit-clause',
+      cwd: home,
+      tool_input: { cmd: command },
+    }),
+  });
+  assert.equal(result.status, 0, result.stderr);
+  const text = readFileSync(join(home, '.cat-cafe/guard-denials/native.jsonl'), 'utf8');
+  const entry = JSON.parse(text);
+  assert.equal(entry.offendingClause, deniedClause);
+  assert.equal(entry.cwd, home);
+  assert.equal(entry.commandSummaryTruncated, true);
+  assert.equal(entry.offendingClauseTruncated, false);
+  assert.equal(text.includes(token), false);
+});

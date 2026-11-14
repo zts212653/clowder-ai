@@ -7,6 +7,7 @@ import {
 } from '../ports/TaskDataControllerTransition.js';
 import type { TaskMutationWriteFence } from '../ports/TaskStoreContract.js';
 import { TaskKeys } from '../redis-keys/task-keys.js';
+import { commitTaskTransaction, publishTaskRecovery } from './publish-task-recovery.js';
 import { hydrateTask, serializeTask } from './RedisTaskCodec.js';
 import { runWithExclusiveRedisWatchSession } from './RedisWatchSession.js';
 
@@ -34,12 +35,12 @@ export class RedisTaskDataControllerStore {
           const prepared = transitionEntrustedTaskDataController(data?.id ? hydrateTask(data) : null, input);
           if (prepared.kind !== 'bound' && prepared.kind !== 'revoked') return prepared;
           const pipeline = session.multi();
-          pipeline.hset(key, serializeTask(prepared.task));
+          publishTaskRecovery(pipeline, key, serializeTask(prepared.task));
           // Controller receipts are permanent owner state. Clear a pre-existing
           // ordinary Task TTL in the same transaction as the binding/receipt CAS.
           pipeline.persist(key);
           await writeFence?.assertCurrent();
-          return (await pipeline.exec()) ? prepared : undefined;
+          return (await commitTaskTransaction(pipeline)) ? prepared : undefined;
         },
       );
       if (result !== undefined) {

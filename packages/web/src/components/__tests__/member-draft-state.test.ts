@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import { describe, expect, it } from 'vitest';
 import type { CatData } from '@/hooks/useCatData';
 import { initialState } from '../hub-cat-editor.model';
@@ -8,6 +9,7 @@ import {
   persistMemberDraft,
   readMemberDraft,
   rebaseMemberDraft,
+  templateForm,
 } from '../settings/members/member-editor-state';
 import { type RuntimeChoice, switchMemberRuntime } from '../settings/members/member-runtime-draft';
 
@@ -26,6 +28,45 @@ const original = {
   configurationRevision: 'before',
   cli: { effort: 'high' },
 } as CatData;
+
+it.each([
+  'anthropic',
+  'openai',
+  'acp',
+] as const)('the whale template recommends DSH without inheriting the previous %s connection', (clientId) => {
+  const form = templateForm(
+    {
+      id: 'dsh',
+      name: '小鲸鱼',
+      nickname: '鲸鲸',
+      avatar: '/avatars/family/dsh.png',
+      color: { primary: '#123456', secondary: '#abcdef' },
+      roleDescription: '共创伙伴',
+      personality: '',
+    },
+    [],
+    {
+      ...initialState(),
+      clientId,
+      accountRef: 'other',
+      acpCommand: 'other-agent',
+      env: { DSH_HOME: '/another/member' },
+      defaultModel: 'other-model',
+      cliEffort: 'high',
+    },
+  );
+  expect(form).toMatchObject({
+    clientId: 'acp',
+    carrier: 'acp',
+    configurationSource: 'native_tool',
+    acpCommand: 'dsh',
+    acpStartupArgs: '--profile acp',
+    accountRef: '',
+    defaultModel: '',
+    cliEffort: '',
+  });
+  expect(form.env).toBeUndefined();
+});
 
 describe('member drafts survive navigation and concurrent edits', () => {
   it('isolates AGY profile permissions per tool and restores the exact persisted profile draft', () => {
@@ -182,4 +223,42 @@ it('commits the separately saved canon avatar without dropping other unsaved mem
   const patch = buildMemberPatchPayload(committed.form, committed.baseline!);
   expect(patch.nickname).toBe('还没保存的昵称');
   expect(patch).not.toHaveProperty('avatar');
+});
+
+it('restores exact prepared display evidence with the draft without adding it to the member payload', () => {
+  const runtime: RuntimeChoice = {
+    id: 'acp:draft',
+    label: 'DSH',
+    clientId: 'acp',
+    installed: true,
+    dshSetupSupported: true,
+    models: [],
+    acp: {
+      command: 'node',
+      startupArgs: ['/fixture/installed/dsh/lib/bin.js', '--profile', 'acp', '--patch', '/fixture/prepared.yml'],
+      transport: 'stdio',
+    },
+  };
+  const baseline = {
+    ...original,
+    clientId: 'acp',
+    carrier: 'acp',
+    accountRef: '',
+    acp: { ...runtime.acp, startupArgs: runtime.acp!.startupArgs.slice(0, 3) },
+  } as CatData;
+  const draft: MemberDraft = {
+    version: 1,
+    baseline,
+    form: { ...initialState(baseline), acpStartupArgs: runtime.acp!.startupArgs.join(' ') },
+    section: 'identity',
+    templateId: null,
+    preparedRuntime: runtime,
+  };
+  expect(persistMemberDraft('prepared-draft-owner', draft)).toBe(true);
+  const restored = readMemberDraft('prepared-draft-owner')!;
+  expect(restored.preparedRuntime).toEqual(runtime);
+  const payload = buildMemberPatchPayload(restored.form, baseline);
+  expect(payload.acp).toEqual({ ...baseline.acp, startupArgs: runtime.acp!.startupArgs, transport: undefined });
+  expect(JSON.stringify(payload)).not.toContain('preparedRuntime');
+  expect(JSON.stringify(payload)).not.toContain('dshSetupSupported');
 });

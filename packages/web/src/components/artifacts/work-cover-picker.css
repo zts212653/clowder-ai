@@ -1,0 +1,223 @@
+/* Cover picker: a floating dialog over the original page; the chat composer and its draft stay untouched. */
+.work-cover-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 120;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  background: var(--console-overlay-backdrop, rgba(20, 20, 19, 0.45));
+}
+.work-cover-dialog {
+  display: flex;
+  flex-direction: column;
+  width: min(960px, 100%);
+  max-height: min(720px, calc(100dvh - 32px));
+  overflow: hidden;
+  border: 1px solid var(--shell-hairline-strong, var(--cafe-border));
+  border-radius: 12px;
+  background: var(--cafe-surface);
+  color: var(--cafe-text);
+  box-shadow: 0 4px 10px rgba(20, 20, 19, 0.1);
+  --chat-background-role: cafe;
+}
+.work-cover-dialog-head {
+  padding: 18px 22px 14px;
+  border-bottom: 1px solid var(--cafe-border);
+}
+.work-cover-dialog-head h2 {
+  margin: 0;
+  font-size: var(--console-font-base);
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.work-cover-dialog-head p {
+  margin: 4px 0 0;
+  color: var(--cafe-text-secondary);
+  font-size: var(--console-font-compact);
+}
+.work-cover-dialog-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 320px;
+  gap: 20px;
+  min-height: 0;
+  overflow: auto;
+  padding: 16px 22px;
+}
+.work-cover-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-bottom: 12px;
+}
+.work-cover-tabs button {
+  padding: 6px 12px;
+  border-radius: 8px;
+  color: var(--cafe-text-secondary);
+  font-size: var(--console-font-compact);
+}
+.work-cover-tabs button[aria-selected="true"] {
+  background: var(--shell-selected);
+  color: var(--cafe-text);
+  font-weight: 600;
+}
+.work-cover-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 10px;
+}
+.work-cover-thumb {
+  position: relative;
+  display: block;
+  aspect-ratio: 16 / 10;
+  overflow: hidden;
+  border: 1px solid var(--cafe-border);
+  border-radius: 8px;
+  background: var(--shell-selected);
+}
+.work-cover-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+.work-cover-thumb[aria-checked="true"] {
+  outline: 2px solid var(--cafe-accent);
+  outline-offset: 1px;
+}
+.work-cover-thumb-ratio,
+.work-cover-thumb-name {
+  position: absolute;
+  bottom: 6px;
+  max-width: calc(50% - 8px);
+  overflow: hidden;
+  padding: 1px 6px;
+  border-radius: 5px;
+  background: color-mix(in oklch, var(--shell-paper) 92%, transparent);
+  color: var(--shell-ink);
+  font-size: var(--console-font-label);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.work-cover-thumb-ratio {
+  left: 6px;
+}
+.work-cover-thumb-name {
+  right: 6px;
+}
+.work-cover-empty,
+.work-cover-note {
+  margin: 8px 0 0;
+  color: var(--cafe-text-secondary);
+  font-size: var(--console-font-xs);
+  line-height: 1.5;
+}
+.work-cover-upload {
+  display: inline-flex;
+  align-items: center;
+  padding: 8px 14px;
+  border: 1px solid var(--cafe-border);
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: var(--console-font-compact);
+}
+.work-cover-upload input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+}
+.work-cover-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+.work-cover-preview-label {
+  color: var(--cafe-text-secondary);
+  font-size: var(--console-font-xs);
+}
+.work-cover-preview-card .work-gallery-card {
+  width: 100%;
+}
+.work-cover-dialog-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 12px 22px;
+  border-top: 1px solid var(--cafe-border);
+}
+.work-cover-error {
+  flex: 1 1 100%;
+  margin: 0;
+  color: var(--semantic-danger, #b42318);
+  font-size: var(--console-font-compact);
+}
+.work-cover-button {
+  min-height: 34px;
+  padding: 0 14px;
+  border: 1px solid var(--cafe-border);
+  border-radius: 8px;
+  font-size: var(--console-font-compact);
+}
+.work-cover-button-primary {
+  border-color: var(--cafe-accent);
+  background: var(--cafe-accent);
+  color: var(--cafe-accent-foreground, #fff);
+  font-weight: 600;
+}
+.work-cover-button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.work-cover-menu-group {
+  margin-top: 5px;
+  padding-top: 5px;
+  border-top: 1px solid var(--cafe-border);
+}
+.work-cover-notice {
+  position: fixed;
+  left: 50%;
+  top: 72px;
+  z-index: 130;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  max-width: calc(100vw - 32px);
+  padding: 10px 16px;
+  border-radius: 10px;
+  background: var(--shell-ink, #222);
+  color: var(--shell-paper, #fff);
+  font-size: var(--console-font-compact);
+  transform: translateX(-50%);
+  box-shadow: 0 4px 10px rgba(20, 20, 19, 0.18);
+}
+.work-cover-notice button {
+  color: var(--cafe-accent);
+  font-weight: 600;
+}
+@media (max-width: 720px) {
+  .work-cover-scrim {
+    padding: 0;
+    align-items: end;
+  }
+  .work-cover-dialog {
+    max-height: 100dvh;
+    border-radius: 12px 12px 0 0;
+  }
+  .work-cover-dialog-head,
+  .work-cover-dialog-body,
+  .work-cover-dialog-foot {
+    padding-inline: 16px;
+  }
+  .work-cover-dialog-body {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .work-cover-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .work-cover-preview-card {
+    max-width: 280px;
+  }
+}

@@ -34,10 +34,13 @@ export interface ExternalPluginRestartRecoveryOptions {
   readonly resumeGate?: (instance: PluginInstanceRecord) => PromiseLike<unknown> | undefined;
 }
 
-function currentInstance(transaction: PluginInventoryTransaction, instanceId: string): PluginInstanceRecord {
-  const instance = transaction.instances.get(instanceId);
+async function currentInstance(
+  transaction: PluginInventoryTransaction,
+  instanceId: string,
+): Promise<PluginInstanceRecord> {
+  const instance = await transaction.instances.get(instanceId);
   if (!instance) throw new PluginLifecycleError('INSTANCE_NOT_FOUND', `unknown plugin instance ${instanceId}`);
-  const current = transaction.instances.getCurrent(instance.pluginId);
+  const current = await transaction.instances.getCurrent(instance.pluginId);
   if (instance.lifecycleState !== 'installed' || current?.pluginInstanceId !== instanceId) {
     throw new PluginLifecycleError('STALE_INSTANCE', `${instanceId} is not the current installed instance`);
   }
@@ -154,8 +157,7 @@ export class ExternalPluginLifecycleService {
       }
       const shouldResume =
         initial.activationState === 'enabled' &&
-        (await this.options.store.snapshot()).packages.find((pkg) => pkg.packageDigest === initial.packageDigest)
-          ?.manifest != null;
+        (await this.options.store.read.packages.get(initial.packageDigest))?.manifest != null;
       if (!shouldResume && !['stopped', 'crashed'].includes(initial.runtimeState)) {
         throw new PluginLifecycleError('INVALID_TRANSITION', 'dormant plugin maintenance requires a stopped runtime');
       }
@@ -244,8 +246,7 @@ export class ExternalPluginLifecycleService {
   }
 
   private async assertCompatible(instance: PluginInstanceRecord): Promise<void> {
-    const snapshot = await this.options.store.snapshot();
-    if (snapshot.packages.find((pkg) => pkg.packageDigest === instance.packageDigest)?.manifest == null)
+    if ((await this.options.store.read.packages.get(instance.packageDigest))?.manifest == null)
       throw new PluginLifecycleError('INVALID_TRANSITION', 'Plugin version is incompatible; update or reinstall it');
   }
 
@@ -273,25 +274,27 @@ export class ExternalPluginLifecycleService {
     options: ExternalPluginRestartRecoveryOptions = {},
   ): Promise<ExternalPluginRestartRecovery> {
     if (this.restartRecoveryStopped) return { recoveredInstances: 0, resumeRequested: 0 };
-    const recovery = await this.options.store.transaction((transaction) => {
+    const recovery = await this.options.store.transaction(async (transaction) => {
       let recoveredInstances = 0;
-      for (const instance of transaction.instances.list()) {
+      for (const instance of await transaction.instances.list(undefined, 'installed')) {
         const recovered = normalizePluginInstanceAfterRestart(instance, this.now());
         if (recovered === undefined) continue;
-        transaction.instances.put(recovered);
+        await transaction.instances.put(recovered);
         recoveredInstances += 1;
       }
-      const resumable = transaction.instances
-        .list()
-        .filter(
-          (instance) =>
-            instance.lifecycleState === 'installed' &&
-            transaction.packages.get(instance.packageDigest)?.manifest != null &&
-            transaction.instances.getCurrent(instance.pluginId)?.pluginInstanceId === instance.pluginInstanceId &&
-            instance.configReadiness === 'ready' &&
-            instance.activationState === 'enabled' &&
-            instance.runtimeState === 'stopped',
-        );
+      const resumable: PluginInstanceRecord[] = [];
+      for (const instance of await transaction.instances.list(undefined, 'installed')) {
+        if (
+          instance.lifecycleState !== 'installed' ||
+          instance.configReadiness !== 'ready' ||
+          instance.activationState !== 'enabled' ||
+          instance.runtimeState !== 'stopped'
+        )
+          continue;
+        const pkg = await transaction.packages.get(instance.packageDigest);
+        const current = await transaction.instances.getCurrent(instance.pluginId);
+        if (pkg?.manifest != null && current?.pluginInstanceId === instance.pluginInstanceId) resumable.push(instance);
+      }
       return { recoveredInstances, resumable };
     });
     for (const instance of recovery.resumable) {
@@ -348,18 +351,18 @@ export class ExternalPluginLifecycleService {
   }
 
   private projectResumeFailure(instanceId: string, failure: ReturnType<typeof startFailureRecord>): Promise<void> {
-    return this.options.store.transaction((transaction) => {
-      const current = transaction.instances.get(instanceId);
+    return this.options.store.transaction(async (transaction) => {
+      const current = await transaction.instances.get(instanceId);
       if (
         !current ||
         current.lifecycleState !== 'installed' ||
-        transaction.instances.getCurrent(current.pluginId)?.pluginInstanceId !== instanceId ||
+        (await transaction.instances.getCurrent(current.pluginId))?.pluginInstanceId !== instanceId ||
         current.activationState !== 'enabled' ||
         (current.runtimeState !== 'stopped' && current.runtimeState !== 'crashed')
       ) {
         return;
       }
-      transaction.instances.put({
+      await transaction.instances.put({
         ...withRuntimeFailure(current, failure.record),
         activationState: 'error',
         runtimeState: 'stopped',
@@ -374,10 +377,10 @@ export class ExternalPluginLifecycleService {
     code: PluginMaintenanceResumeFailureCode,
     preserveEnabledIntent = false,
   ): Promise<void> {
-    return this.options.store.transaction((transaction) => {
-      const current = currentInstance(transaction, instanceId);
+    return this.options.store.transaction(async (transaction) => {
+      const current = await currentInstance(transaction, instanceId);
       const now = this.now();
-      transaction.instances.put({
+      await transaction.instances.put({
         ...withRuntimeFailure(current, { code, exitCode: null, signal: null, occurredAt: now }),
         activationState: preserveEnabledIntent
           ? 'enabled'
@@ -401,8 +404,8 @@ export class ExternalPluginLifecycleService {
       readonly at?: number;
     } = {},
   ): Promise<PluginInstanceRecord> {
-    return this.options.store.transaction((transaction) => {
-      const current = currentInstance(transaction, instanceId);
+    return this.options.store.transaction(async (transaction) => {
+      const current = await currentInstance(transaction, instanceId);
       assertRevision(current, expectedRevision);
       const base = options.failure
         ? withRuntimeFailure(current, options.failure.record)
@@ -415,7 +418,7 @@ export class ExternalPluginLifecycleService {
         lifecycleRevision: current.lifecycleRevision + 1,
         updatedAt: options.at ?? this.now(),
       };
-      transaction.instances.put(next);
+      await transaction.instances.put(next);
       return next;
     });
   }
@@ -450,12 +453,8 @@ export class ExternalPluginLifecycleService {
   }
 
   private async readCurrent(instanceId: string): Promise<PluginInstanceRecord> {
-    const snapshot = await this.options.store.snapshot();
-    const instance = snapshot.instances.find((candidate) => candidate.pluginInstanceId === instanceId);
+    const { instance, current } = (await this.options.store.readAuthority(instanceId)) ?? {};
     if (!instance) throw new PluginLifecycleError('INSTANCE_NOT_FOUND', `unknown plugin instance ${instanceId}`);
-    const current = snapshot.instances.find(
-      (candidate) => candidate.pluginId === instance.pluginId && candidate.lifecycleState === 'installed',
-    );
     if (current?.pluginInstanceId !== instanceId) {
       throw new PluginLifecycleError('STALE_INSTANCE', `${instanceId} is not the current installed instance`);
     }

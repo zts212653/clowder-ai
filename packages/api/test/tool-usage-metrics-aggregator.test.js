@@ -38,7 +38,7 @@ function createRecallDb() {
   return db;
 }
 
-function persistedExpansionOutcome({ followed = 0, used = followed, sourceRevision = 'f256-health-v2' } = {}) {
+function persistedExpansionOutcome({ followed = 0, used = followed, sourceRevision = 'f332-discovery-v1' } = {}) {
   return JSON.stringify({
     schemaVersion: 1,
     cohort: 'natural_topk',

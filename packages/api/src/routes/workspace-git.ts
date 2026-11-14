@@ -10,9 +10,12 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import type { FastifyPluginAsync } from 'fastify';
+import { probeGitWorkTree } from '../domains/workspace/git-worktree-probe.js';
 import { getWorktreeRoot, WorkspaceSecurityError } from '../domains/workspace/workspace-security.js';
 
 const execFileAsync = promisify(execFile);
+
+export { isGitWorkTree, probeGitRepository, probeGitWorkTree } from '../domains/workspace/git-worktree-probe.js';
 
 // ── Parsers (exported for unit testing) ─────────────────────────────
 
@@ -219,6 +222,27 @@ async function detectRuntimeDrift(repoRoot: string): Promise<RuntimeDrift | null
 
 // ── Routes ──────────────────────────────────────────────────────────
 
+function isGitCommandFailure(error: unknown): boolean {
+  if (typeof error !== 'object' || error === null || !('code' in error)) return false;
+  const code = String((error as { code?: unknown }).code);
+  return code === 'ENOENT' || code === '128';
+}
+
+async function resolveGitRoot(
+  worktreeId: string,
+  reply: { status: (code: number) => unknown },
+): Promise<string | null> {
+  try {
+    return await getWorktreeRoot(worktreeId);
+  } catch (error) {
+    if (isGitCommandFailure(error)) {
+      reply.status(503);
+      return null;
+    }
+    throw error;
+  }
+}
+
 export const workspaceGitRoutes: FastifyPluginAsync = async (app) => {
   // GET /api/workspace/git-log
   app.get<{
@@ -230,7 +254,16 @@ export const workspaceGitRoutes: FastifyPluginAsync = async (app) => {
       return { error: 'worktreeId required' };
     }
     try {
-      const root = await getWorktreeRoot(worktreeId);
+      const root = await resolveGitRoot(worktreeId, reply);
+      if (!root) return { error: 'Git is unavailable', code: 'git_unavailable' };
+      const probe = await probeGitWorkTree(root);
+      if (probe === 'unavailable') {
+        reply.status(503);
+        return { error: 'Git is unavailable', code: 'git_unavailable' };
+      }
+      if (probe === 'not-git') {
+        return { worktreeId, isGitRepository: false, commits: [] };
+      }
       const n = Math.min(Math.max(1, Number(limit) || 50), 200);
       const { stdout } = await execFileAsync(
         'git',
@@ -260,7 +293,27 @@ export const workspaceGitRoutes: FastifyPluginAsync = async (app) => {
       return { error: 'worktreeId required' };
     }
     try {
-      const root = await getWorktreeRoot(worktreeId);
+      const root = await resolveGitRoot(worktreeId, reply);
+      if (!root) return { error: 'Git is unavailable', code: 'git_unavailable' };
+      const probe = await probeGitWorkTree(root);
+      if (probe === 'unavailable') {
+        reply.status(503);
+        return { error: 'Git is unavailable', code: 'git_unavailable' };
+      }
+      if (probe === 'bare') {
+        reply.status(409);
+        return { error: 'Git worktree required', code: 'git_worktree_required' };
+      }
+      if (probe === 'not-git') {
+        return {
+          worktreeId,
+          isGitRepository: false,
+          branch: '',
+          staged: [],
+          unstaged: [],
+          untracked: [],
+        };
+      }
       const { stdout } = await execFileAsync('git', ['status', '--porcelain', '-uall'], {
         cwd: root,
         timeout: 5000,
@@ -294,7 +347,8 @@ export const workspaceGitRoutes: FastifyPluginAsync = async (app) => {
       return { error: 'invalid hash' };
     }
     try {
-      const root = await getWorktreeRoot(worktreeId);
+      const root = await resolveGitRoot(worktreeId, reply);
+      if (!root) return { error: 'Git is unavailable', code: 'git_unavailable' };
       const { stdout } = await execFileAsync('git', ['show', '--stat', '--no-color', hash], {
         cwd: root,
         timeout: 5000,
@@ -321,7 +375,20 @@ export const workspaceGitRoutes: FastifyPluginAsync = async (app) => {
       return { error: 'worktreeId required' };
     }
     try {
-      const root = await getWorktreeRoot(worktreeId);
+      const root = await resolveGitRoot(worktreeId, reply);
+      if (!root) return { error: 'Git is unavailable', code: 'git_unavailable' };
+      const probe = await probeGitWorkTree(root);
+      if (probe === 'unavailable') {
+        reply.status(503);
+        return { error: 'Git is unavailable', code: 'git_unavailable' };
+      }
+      if (probe === 'bare') {
+        reply.status(409);
+        return { error: 'Git worktree required', code: 'git_worktree_required' };
+      }
+      if (probe === 'not-git') {
+        return { isGitRepository: false, staleBranches: [], worktrees: [], runtimeDrift: null };
+      }
 
       // 1. Stale branches: merged into main but not deleted
       const { stdout: mergedOut } = await execFileAsync(

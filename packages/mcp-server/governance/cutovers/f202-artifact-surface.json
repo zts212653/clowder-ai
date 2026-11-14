@@ -4,13 +4,11 @@
     "resourceFamily": "artifact-surface"
   },
   "retiredNames": [],
-  "canonicalNames": [],
+  "canonicalNames": ["cat_cafe_bring_to_desk"],
   "expectedProfiles": {
-    "cat_cafe_create_rich_block": ["full", "desktop:live-companion"],
-    "cat_cafe_generate_document": ["full"],
-    "cat_cafe_get_rich_block_rules": ["full", "readonly", "desktop:live-companion"]
+    "cat_cafe_bring_to_desk": ["full"]
   },
-  "rollbackRevision": "466d4549fe2d75c9cc5c96b9497f47e464d13cf2",
+  "rollbackRevision": "9b3c73184bc32a6d7841693a0b3c5d8234110085",
   "layers": {
     "mcp-definition": {
       "status": "covered",
@@ -41,7 +39,7 @@
     },
     "eval": {
       "status": "not-applicable",
-      "rationale": "C1 moves provider business to installed contributions and removes the retired task execution profile. Deterministic registration, profile and installed-contribution tests cover this ownership change; no model quality claim is made.",
+      "rationale": "F335 交付三 adds one callback tool: a cat hands a saved work to the desktop cat (「桌面猫带来」). Deterministic registration, profile and API route tests cover it; whether cats bring well is judged by the per-kind facts (brought-work) and F335's own GT, not by an MCP eval.",
       "absenceEvidence": []
     },
     "observability": {

@@ -158,6 +158,7 @@ it('opens the current installed package from the retained Pro settings bookmark'
     actions: { install: false, setEnabled: true, uninstall: true, blockingReasons: [] },
   };
   fetch.mockImplementation(async (path) => {
+    if (path === '/api/plugin-manager/marketplaces/refresh') return json({ sources: [] });
     if (path === '/api/plugin-manager/plugins') return json({ plugins: [plugin], catalog: { status: 'fresh' } });
     if (path === `/api/plugin-manager/plugins/${pluginId}`) return json({ plugin, catalog: { status: 'fresh' } });
     return json({}, 404);
@@ -169,5 +170,8 @@ it('opens the current installed package from the retained Pro settings bookmark'
     ),
   );
   expect(fetch.mock.calls.some(([path]) => String(path).includes('/personal-chrome-host'))).toBe(false);
-  expect(fetch.mock.calls.some(([, init]) => init?.method === 'POST')).toBe(false);
+  // The current Manager checks its derived catalog once; navigation still performs no install, enable or bind.
+  expect(fetch.mock.calls.filter(([, init]) => init?.method === 'POST').map(([path]) => path)).toEqual([
+    '/api/plugin-manager/marketplaces/refresh',
+  ]);
 });

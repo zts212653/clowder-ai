@@ -1,4 +1,4 @@
-import { useCallback, useRef } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import type { ChatInputDraftSnapshot } from '../ChatInput';
 import {
   ComposerDraftConfirmationRequiredError,
@@ -29,6 +29,7 @@ interface UseNewConversationAdmissionSendOptions {
   submit: (payload: FirstMessagePayload) => Promise<boolean>;
   setPhasePreparing: () => void;
   setPrepareFailed: () => void;
+  setPreparationCancelled: () => void;
   setDraftRecovered: () => void;
   setDraftRecoveryBlocked: () => void;
   setLocalSaveFailed: (failed: boolean) => void;
@@ -82,13 +83,22 @@ export function useNewConversationAdmissionSend({
   submit,
   setPhasePreparing,
   setPrepareFailed,
+  setPreparationCancelled,
   setDraftRecovered,
   setDraftRecoveryBlocked,
   setLocalSaveFailed,
 }: UseNewConversationAdmissionSendOptions) {
   const admissionSnapshotRef = useRef<ChatInputDraftSnapshot | null>(null);
   const sendInFlightRef = useRef<Promise<boolean> | null>(null);
+  const preparationRef = useRef<{ cancel: () => void } | null>(null);
+  const [preparing, setPreparing] = useState(false);
   const isAdmissionPending = useCallback(() => admissionSnapshotRef.current !== null, []);
+  const cancelPreparation = useCallback(() => {
+    const preparation = preparationRef.current;
+    if (!preparation) return false;
+    preparation.cancel();
+    return true;
+  }, []);
 
   const send = useCallback(
     (payload: FirstMessagePayload): Promise<boolean> => {
@@ -104,38 +114,68 @@ export function useNewConversationAdmissionSend({
       draftRef.current = admissionSnapshot;
       admissionSnapshotRef.current = admissionSnapshot;
       setPhasePreparing();
+      setPreparing(true);
+      const attempt = { cancelled: false, cancel: () => {} };
+      const cancellation = new Promise<boolean>((resolve) => {
+        attempt.cancel = () => {
+          attempt.cancelled = true;
+          preparationRef.current = null;
+          setPreparing(false);
+          setLocalSaveFailed(false);
+          setPreparationCancelled();
+          resolve(false);
+        };
+      });
+      preparationRef.current = attempt;
+      const awaitPreparation = async <T>(operation: Promise<T>) => {
+        const value = await operation;
+        if (attempt.cancelled) throw new DOMException('Send preparation cancelled', 'AbortError');
+        return value;
+      };
 
-      const request = (async () => {
+      const work = (async () => {
         try {
-          await saveSnapshot(initialIntent, admissionSnapshot);
-          const ticket = await prepareComposerDraftAdmission(DRAFT_THREAD_ID);
+          await awaitPreparation(saveSnapshot(initialIntent, admissionSnapshot));
+          const ticket = await awaitPreparation(prepareComposerDraftAdmission(DRAFT_THREAD_ID));
           if (ticket.threadId !== DRAFT_THREAD_ID) throw new Error('unexpected composer draft owner');
           const currentIntent = intentRef.current;
           if (!currentIntent) throw new Error('new-conversation intent unavailable');
-          await persistIntent({
-            ...currentIntent,
-            composerDraftAdmission: {
-              threadId: DRAFT_THREAD_ID,
-              expectedRevision: ticket.expectedRevision,
-            },
-          });
+          await awaitPreparation(
+            persistIntent({
+              ...currentIntent,
+              composerDraftAdmission: {
+                threadId: DRAFT_THREAD_ID,
+                expectedRevision: ticket.expectedRevision,
+              },
+            }),
+          );
+          // The controller now owns creation/delivery. Cancel only preparation,
+          // never a request whose outcome may already have reached the server.
+          preparationRef.current = null;
+          setPreparing(false);
           setLocalSaveFailed(false);
           return await submit(payload);
         } catch (error) {
-          handleDraftPreparationFailure(error, {
-            setDraftRecovered,
-            setDraftRecoveryBlocked,
-            setLocalSaveFailed,
-            setPrepareFailed,
-          });
+          if (!attempt.cancelled) {
+            handleDraftPreparationFailure(error, {
+              setDraftRecovered,
+              setDraftRecoveryBlocked,
+              setLocalSaveFailed,
+              setPrepareFailed,
+            });
+          }
           return false;
-        } finally {
-          admissionSnapshotRef.current = null;
         }
       })();
+      const request = Promise.race([work, cancellation]);
       sendInFlightRef.current = request;
       void request.finally(() => {
         if (sendInFlightRef.current === request) sendInFlightRef.current = null;
+        if (admissionSnapshotRef.current === admissionSnapshot) admissionSnapshotRef.current = null;
+        if (preparationRef.current === attempt) {
+          preparationRef.current = null;
+          setPreparing(false);
+        }
       });
       return request;
     },
@@ -149,9 +189,10 @@ export function useNewConversationAdmissionSend({
       setLocalSaveFailed,
       setPhasePreparing,
       setPrepareFailed,
+      setPreparationCancelled,
       submit,
     ],
   );
 
-  return { isAdmissionPending, send };
+  return { isAdmissionPending, send, preparing, cancelPreparation };
 }

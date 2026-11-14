@@ -4,7 +4,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { imageArtworkCopy } from '@/components/content-review/image-artwork.shell-copy';
 import { checkShellCopyParity } from '@/components/shell/__tests__/shell-copy-parity-check';
-import { writeShellPresentation } from '@/components/shell/shell-presentation';
+import { SHELL_PRESENTATION_STORAGE_KEY, writeShellPresentation } from '@/components/shell/shell-presentation';
 import { getContextAttachmentDraft, syncContextAttachmentDraftToStorage } from '@/components/thread-drafts';
 import { useChatStore } from '@/stores/chatStore';
 import { openFileMenu } from '@/test-utils/open-file-menu';
@@ -31,6 +31,7 @@ it('keeps the new image actions complete in both shell languages', () => {
 
 beforeEach(() => {
   localStorage.clear();
+  writeShellPresentation('v2');
   mocks.apiFetch.mockClear();
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   syncContextAttachmentDraftToStorage(threadId, []);
@@ -46,6 +47,7 @@ beforeEach(() => {
 afterEach(() => {
   act(() => root.unmount());
   container.remove();
+  localStorage.removeItem(SHELL_PRESENTATION_STORAGE_KEY);
   vi.restoreAllMocks();
 });
 
@@ -97,7 +99,8 @@ it('a readable historical image can be circled for Chat while drawing and saving
   expect(mocks.apiFetch.mock.calls.filter(([url]) => !String(url).includes('/file-info'))).toHaveLength(1);
 });
 
-it('keeps an acknowledged removal cleared when the image owner remounts hidden', async () => {
+it('classic: keeps an acknowledged removal cleared when the image owner remounts hidden', async () => {
+  writeShellPresentation('classic');
   await openImage();
   const original = useChatStore.getState().pendingChatInsert?.contextAttachments;
   expect(original?.[0].kind).toBe('media');
@@ -112,7 +115,8 @@ it('keeps an acknowledged removal cleared when the image owner remounts hidden',
   expect(getContextAttachmentDraft(threadId)).toEqual([]);
 });
 
-it('references the original work once when its hidden surface is explicitly shown', async () => {
+it('classic: references the original work once when its hidden surface is explicitly shown', async () => {
+  writeShellPresentation('classic');
   await openImage(mediaView(), false);
   useChatStore.setState({ pendingChatInsert: null });
   await openImage();
@@ -193,8 +197,11 @@ it('keeps an original PNG draft readable through records without a second sender
       );
     throw new Error(`unexpected write or read: ${url}`);
   });
-  const records = container.querySelector<HTMLButtonElement>('[data-testid="content-modification-records"]');
-  expect(records).not.toBeNull();
+  await openFileMenu(container);
+  const records = [...container.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find(
+    (button) => button.textContent?.trim() === '修改记录',
+  );
+  expect(records).toBeDefined();
   await act(async () => {
     records?.click();
     for (let i = 0; i < 20; i++) await Promise.resolve();
@@ -209,11 +216,15 @@ it('keeps an original PNG draft readable through records without a second sender
 
 it('adding the whole image twice retains one reference with the original attachment id', async () => {
   await openImage();
-  const button = container.querySelector<HTMLButtonElement>('[data-testid="workspace-media-chat-whole-work"]');
-  await act(async () => button?.click());
+  await openFileMenu(container);
+  const button = () => container.querySelector<HTMLButtonElement>('[data-testid="workspace-media-chat-whole-work"]');
+  expect(button()).not.toBeNull();
+  await act(async () => button()?.click());
   const first = useChatStore.getState().pendingChatInsert?.contextAttachments?.[0];
   expect(first?.kind).toBe('media');
-  await act(async () => button?.click());
+  await openFileMenu(container);
+  expect(button()).not.toBeNull();
+  await act(async () => button()?.click());
   expect(useChatStore.getState().pendingChatInsert?.contextAttachments).toEqual([first]);
   expect(mocks.apiFetch.mock.calls.filter(([url]) => !String(url).includes('/file-info'))).toHaveLength(1);
 });

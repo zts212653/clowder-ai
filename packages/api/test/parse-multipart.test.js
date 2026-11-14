@@ -4,8 +4,13 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 import { setTimeout as delay } from 'node:timers/promises';
+import sharp from 'sharp';
 
 import { parseMultipart } from '../dist/routes/parse-multipart.js';
+
+const png = await sharp({ create: { width: 2, height: 2, channels: 4, background: 'red' } })
+  .png()
+  .toBuffer();
 
 test('parseMultipart drains file stream before waiting for remaining parts', async () => {
   const uploadDir = await mkdtemp(join(tmpdir(), 'cat-cafe-parse-multipart-'));
@@ -23,7 +28,7 @@ test('parseMultipart drains file stream before waiting for remaining parts', asy
         mimetype: 'image/png',
         toBuffer: async () => {
           fileConsumed = true;
-          return Buffer.from('fake-png');
+          return png;
         },
       };
 

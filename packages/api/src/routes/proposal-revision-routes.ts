@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { requireAnchoredPublication } from '../domains/approval-hub/requireAnchoredPublication.js';
 import { generateSortableId } from '../domains/cats/services/stores/ports/MessageStore.js';
 import { primaryMentionHandleForCatId } from '../utils/cat-mention-handle.js';
-import { resolvePersistentProjectPath } from '../utils/persistent-project-path.js';
+import { validateNewProjectPath } from '../utils/persistent-project-path.js';
 import { resolveStrictUserId } from '../utils/request-identity.js';
 import { validateProposalGroup } from './proposal-group-placement.js';
 import type { ProposalRoutesOptions } from './proposal-route-options.js';
@@ -43,9 +43,9 @@ export function registerProposalRevisionRoutes(app: FastifyInstance, opts: Propo
         return reply.code(400).send({ error: 'Selected Group does not belong to you' });
       const { instruction, ...choices } = parsed.data;
       if (choices.projectPath) {
-        const canonical = await resolvePersistentProjectPath(choices.projectPath);
-        if (!canonical) return reply.code(400).send({ error: 'Invalid projectPath' });
-        choices.projectPath = canonical;
+        const canonical = await validateNewProjectPath(choices.projectPath, 'Invalid projectPath');
+        if (!canonical.ok) return reply.code(400).send({ error: canonical.error });
+        choices.projectPath = canonical.path;
       }
       await requireAnchoredPublication(opts.proposalStore, proposal.proposalId);
       const reserved = await opts.proposalStore.recordRevisionRequest(proposal.proposalId, {

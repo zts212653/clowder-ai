@@ -9,6 +9,7 @@ import type {
   ListenDocumentKey,
 } from '../domains/cats/services/tts/DocumentListenRepository.js';
 import type { ListenAssetService } from '../domains/cats/services/tts/ListenAssetService.js';
+import { ListenDocumentMutationQueue } from '../domains/cats/services/tts/ListenDocumentMutationQueue.js';
 import { resolveStrictUserId, resolveUserId } from '../utils/request-identity.js';
 
 const AUDIO_ASSET_ID_RE = /^[0-9a-f]{64}\.(wav|mp3)$/;
@@ -149,11 +150,12 @@ async function startDocumentCacheRun(
   if (!current) return { error: { statusCode: 404, message: 'Listen document not found' } };
   const reconciled = await reconcileDocumentCache(options.cacheDir, options.repository, current);
   try {
+    const synthesis = await options.assets.prepareSynthesis(input.synthesis);
     const cacheRun = options.cacheRuns.start({
       key,
       identity: input.identity,
       sentences: input.sentences,
-      ...(input.synthesis ? { synthesis: input.synthesis } : {}),
+      synthesis,
       ...(input.startAnchor ? { startAnchor: input.startAnchor } : {}),
     });
     const state = options.repository.loadDocument(key) ?? reconciled.state;
@@ -167,6 +169,7 @@ async function startDocumentCacheRun(
 
 export function registerTtsListenRoutes(app: FastifyInstance, options: TtsListenRouteOptions): void {
   const { cacheDir, repository, assets, cacheRuns } = options;
+  const mutations = new ListenDocumentMutationQueue();
 
   app.get<{ Querystring: unknown }>('/api/tts/listen/document', async (request, reply) => {
     const userId = requireReadIdentity(request);
@@ -189,21 +192,22 @@ export function registerTtsListenRoutes(app: FastifyInstance, options: TtsListen
     const parsed = documentWriteSchema.safeParse(request.body);
     if (!parsed.success) return reply.status(400).send({ error: 'Invalid request', details: parsed.error.issues });
     const key = documentKey(userId, parsed.data.identity);
-    let synthesisFingerprint: string | undefined;
-    try {
-      synthesisFingerprint = assets.getSynthesisFingerprint(parsed.data.synthesis);
-    } catch {
-      // Persist the user's document state even while a local TTS provider is
-      // unavailable. A later cache start computes the authoritative fingerprint.
-    }
-    const { synthesis: _synthesis, ...state } = parsed.data;
-    const saved = { ...state, ...(synthesisFingerprint ? { synthesisFingerprint } : {}) };
-    repository.saveDocument(key, saved);
-    // saveDocument preserves a same-digest fingerprint while it is temporarily
-    // unknown. Invalidate against that durable result, not the transient input.
-    const persisted = repository.loadDocument(key) ?? saved;
-    cacheRuns.invalidateStale(key, persisted);
-    return persisted;
+    return mutations.run(key, async () => {
+      let synthesisFingerprint: string | undefined;
+      try {
+        synthesisFingerprint = await assets.getSynthesisFingerprint(parsed.data.synthesis);
+      } catch {
+        // Persist state even when the provider is temporarily unavailable.
+      }
+      const { synthesis: _synthesis, ...state } = parsed.data;
+      const saved = { ...state, ...(synthesisFingerprint ? { synthesisFingerprint } : {}) };
+      repository.saveDocument(key, saved);
+      // Invalidate against the durable fingerprint, which saveDocument may
+      // preserve while the current provider identity is temporarily unknown.
+      const persisted = repository.loadDocument(key) ?? saved;
+      cacheRuns.invalidateStale(key, persisted);
+      return persisted;
+    });
   });
 
   app.put<{ Body: unknown }>('/api/tts/listen/document/asset', async (request, reply) => {
@@ -213,18 +217,20 @@ export function registerTtsListenRoutes(app: FastifyInstance, options: TtsListen
     if (!parsed.success) return reply.status(400).send({ error: 'Invalid request', details: parsed.error.issues });
     const { anchor, assetId, contentDigest, synthesisFingerprint } = parsed.data;
     const key = documentKey(userId, parsed.data);
-    try {
-      if (contentDigest && synthesisFingerprint) {
-        return {
-          ok: true,
-          linked: repository.setSentenceAssetIfCurrent(key, { contentDigest, synthesisFingerprint, anchor, assetId }),
-        };
+    return mutations.run(key, () => {
+      try {
+        if (contentDigest && synthesisFingerprint) {
+          return {
+            ok: true,
+            linked: repository.setSentenceAssetIfCurrent(key, { contentDigest, synthesisFingerprint, anchor, assetId }),
+          };
+        }
+        repository.setSentenceAsset(key, anchor, assetId);
+        return { ok: true, linked: true };
+      } catch (error) {
+        return reply.status(404).send({ error: error instanceof Error ? error.message : 'Listen sentence not found' });
       }
-      repository.setSentenceAsset(key, anchor, assetId);
-      return { ok: true, linked: true };
-    } catch (error) {
-      return reply.status(404).send({ error: error instanceof Error ? error.message : 'Listen sentence not found' });
-    }
+    });
   });
 
   app.post<{ Body: unknown }>('/api/tts/listen/document/cache', async (request, reply) => {
@@ -233,7 +239,7 @@ export function registerTtsListenRoutes(app: FastifyInstance, options: TtsListen
     const parsed = cacheRunSchema.safeParse(request.body);
     if (!parsed.success) return reply.status(400).send({ error: 'Invalid request', details: parsed.error.issues });
     const key = documentKey(userId, parsed.data.identity);
-    const outcome = await startDocumentCacheRun(options, key, parsed.data);
+    const outcome = await mutations.run(key, () => startDocumentCacheRun(options, key, parsed.data));
     if ('error' in outcome) return reply.status(outcome.error.statusCode).send({ error: outcome.error.message });
     return outcome.response;
   });
@@ -244,19 +250,21 @@ export function registerTtsListenRoutes(app: FastifyInstance, options: TtsListen
     const parsed = cacheCancelSchema.safeParse(request.body);
     if (!parsed.success) return reply.status(400).send({ error: 'Invalid request', details: parsed.error.issues });
     const key = documentKey(userId, parsed.data);
-    const state = repository.loadDocument(key);
-    if (!state) return reply.status(404).send({ error: 'Listen document not found' });
-    const cancelled = cacheRuns.cancel(key, {
-      contentDigest: parsed.data.contentDigest,
-      synthesisFingerprint: parsed.data.synthesisFingerprint,
+    return mutations.run(key, async () => {
+      const state = repository.loadDocument(key);
+      if (!state) return reply.status(404).send({ error: 'Listen document not found' });
+      const cancelled = cacheRuns.cancel(key, {
+        contentDigest: parsed.data.contentDigest,
+        synthesisFingerprint: parsed.data.synthesisFingerprint,
+      });
+      const reconciled = await reconcileDocumentCache(cacheDir, repository, state);
+      return {
+        ...reconciled.state,
+        cache: reconciled.cache,
+        cacheRun: cacheRuns.status(key, reconciled.state),
+        cancelled,
+      };
     });
-    const reconciled = await reconcileDocumentCache(cacheDir, repository, state);
-    return {
-      ...reconciled.state,
-      cache: reconciled.cache,
-      cacheRun: cacheRuns.status(key, reconciled.state),
-      cancelled,
-    };
   });
 
   app.delete<{ Body: unknown }>('/api/tts/listen/document/audio', async (request, reply) => {
@@ -264,18 +272,20 @@ export function registerTtsListenRoutes(app: FastifyInstance, options: TtsListen
     if (!userId) return reply.status(401).send({ error: 'Identity required' });
     const parsed = documentKeySchema.safeParse(request.body);
     if (!parsed.success) return reply.status(400).send({ error: 'Invalid request', details: parsed.error.issues });
-    try {
-      const key = documentKey(userId, parsed.data);
-      cacheRuns.cancel(key);
-      const orphaned = repository.clearDocumentAudio(key);
-      const deletion = await deleteOrphanedAssets(cacheDir, repository, orphaned);
-      const result = { clearedReferences: orphaned.length, ...deletion };
-      if (deletion.failed > 0) {
-        return reply.status(500).send({ error: 'Failed to delete one or more listen audio assets', ...result });
+    const key = documentKey(userId, parsed.data);
+    return mutations.run(key, async () => {
+      try {
+        cacheRuns.cancel(key);
+        const orphaned = repository.clearDocumentAudio(key);
+        const deletion = await deleteOrphanedAssets(cacheDir, repository, orphaned);
+        const result = { clearedReferences: orphaned.length, ...deletion };
+        if (deletion.failed > 0) {
+          return reply.status(500).send({ error: 'Failed to delete one or more listen audio assets', ...result });
+        }
+        return result;
+      } catch (error) {
+        return reply.status(404).send({ error: error instanceof Error ? error.message : 'Listen document not found' });
       }
-      return result;
-    } catch (error) {
-      return reply.status(404).send({ error: error instanceof Error ? error.message : 'Listen document not found' });
-    }
+    });
   });
 }

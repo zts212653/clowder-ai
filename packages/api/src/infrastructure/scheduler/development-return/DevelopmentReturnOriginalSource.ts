@@ -17,6 +17,7 @@ type Deps = Pick<DevelopmentReturnDeps, 'tasks' | 'messages' | 'definitions' | '
 
 type ApprovedCatTriggerRelation =
   | { kind: 'owner' }
+  | { kind: 'peer_same_thread'; authorCatId: string; humanSourceMessageId: string }
   | {
       kind: 'peer_cross_post';
       authorCatId: string;
@@ -72,6 +73,14 @@ function approvedCatTriggerRelation(
   actor: DevelopmentWorkActor,
 ): ApprovedCatTriggerRelation | null {
   if (message.catId === actor.catId) return { kind: 'owner' };
+  const causal = message.extra?.causal;
+  if (
+    message.catId &&
+    message.origin === 'stream' &&
+    message.threadId === actor.threadId &&
+    causal?.kind === 'invocation_reply'
+  )
+    return { kind: 'peer_same_thread', authorCatId: message.catId, humanSourceMessageId: causal.triggerMessageId };
   const crossPost = message.extra?.crossPost;
   const targetCatIds = [...new Set(message.extra?.targetCats)].sort();
   if (
@@ -148,6 +157,7 @@ async function resolveApprovedCatTrigger(
 ): Promise<ResolvedDevelopmentReturnSource | null> {
   const human = await resolveHumanTaskSource(deps, actor, task, preferredSourceActionRef);
   if (!human) return null;
+  if (relation.kind === 'peer_same_thread' && relation.humanSourceMessageId !== human.id) return null;
   const humanSourceRef = `message:${human.id}`;
   const sourceRelation = {
     humanSourceRef,
@@ -170,18 +180,26 @@ async function resolveApprovedCatTrigger(
     sourceMessageRevision:
       relation.kind === 'owner'
         ? relationRevision('approved-task-authority-plus-owner-proposal-trigger-v1', sourceRelation)
-        : relationRevision('approved-task-authority-plus-peer-cross-post-trigger-v1', {
-            ...sourceRelation,
-            taskOwnerCatId: task.ownerCatId,
-            proposalSourceCatId: proposal.sourceCatId,
-            proposalTriggerCatId: relation.authorCatId,
-            proposalTriggerCrossPost: {
-              sourceThreadId: relation.sourceThreadId,
-              sourceInvocationId: relation.sourceInvocationId,
-              targetCatIds: relation.targetCatIds,
-              effectClass: relation.effectClass,
-            },
-          }),
+        : relation.kind === 'peer_cross_post'
+          ? relationRevision('approved-task-authority-plus-peer-cross-post-trigger-v1', {
+              ...sourceRelation,
+              taskOwnerCatId: task.ownerCatId,
+              proposalSourceCatId: proposal.sourceCatId,
+              proposalTriggerCatId: relation.authorCatId,
+              proposalTriggerCrossPost: {
+                sourceThreadId: relation.sourceThreadId,
+                sourceInvocationId: relation.sourceInvocationId,
+                targetCatIds: relation.targetCatIds,
+                effectClass: relation.effectClass,
+              },
+            })
+          : relationRevision('approved-task-authority-plus-peer-same-thread-reply-trigger-v1', {
+              ...sourceRelation,
+              taskOwnerCatId: task.ownerCatId,
+              proposalSourceCatId: proposal.sourceCatId,
+              proposalTriggerCatId: relation.authorCatId,
+              proposalTriggerReply: { humanSourceRef },
+            }),
   };
 }
 

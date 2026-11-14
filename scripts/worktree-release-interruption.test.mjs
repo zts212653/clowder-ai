@@ -177,7 +177,7 @@ test('SIGTERM during real original copying is reconciled without another archive
       join(bin, 'gh'),
       `#!/usr/bin/env node
 const args=process.argv.slice(2),h=${JSON.stringify(head)};
-if(args[0]==='repo')console.log('fixture/repo');else if(args.includes('--paginate'))console.log(h);else console.log(JSON.stringify({base:{repo:{full_name:'fixture/repo'}},state:'closed',merged:true,head:{sha:h},merge_commit_sha:h,commits:1,html_url:'https://github.com/fixture/repo/pull/42'}));`,
+if(args[0]==='repo')console.log('fixture/repo');else if(args.includes('--paginate'))console.log(h);else console.log(JSON.stringify({base:{ref:'main',repo:{full_name:'fixture/repo'}},state:'closed',merged:true,head:{sha:h},merge_commit_sha:h,commits:1,html_url:'https://github.com/fixture/repo/pull/42'}));`,
     );
     chmodSync(join(bin, 'gh'), 0o700);
     child = spawn(

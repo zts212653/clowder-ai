@@ -1,4 +1,5 @@
 'use client';
+import type { MemoryOwnerActionReceipt } from '@cat-cafe/shared';
 import { useRouter } from 'next/navigation';
 import { handleTeleportEvent } from '@/hooks/useTeleport';
 import { scrollToMessage } from '@/utils/scrollToMessage';
@@ -17,11 +18,15 @@ export function MemoryTasteDetail({
   close,
   reload,
   closeLabel = '返回全部',
+  onApplied,
+  onDecisionApplied,
 }: {
   entry: TasteMemory;
   close: () => void;
   reload: () => void;
   closeLabel?: string;
+  onApplied?: (receipt: MemoryOwnerActionReceipt) => void;
+  onDecisionApplied?: () => void;
 }) {
   const endpoint = `/api/memory/taste/${encodeURIComponent(entry.id)}?revision=${encodeURIComponent(entry.revision)}`;
   const detail = useMemoryRead<TasteMemory>(endpoint, isTasteMemory);
@@ -70,8 +75,21 @@ export function MemoryTasteDetail({
           <h3 className="mt-2 whitespace-pre-wrap break-words font-serif text-display-sm">
             {data.takeaway || (data.quotes.length ? data.quotes.map(tasteQuote).join('\n\n') : data.title)}
           </h3>
-          <MemoryTasteActions key={`${data.id}:${data.revision}`} entry={data} reload={reload} />
-          <MemoryTasteCorrections proposals={data.correctionProposals ?? []} revision={data.revision} reread={reload} />
+          <p className="mt-4 text-compact text-cafe-muted">
+            ● {data.status === 'retired' ? '已不再使用' : '生效中'} ·{' '}
+            {data.takeawayCandidate ? '有待确认的概括' : '还没有待确认的概括'}
+          </p>
+          <MemoryTasteActions
+            key={`${data.id}:${data.revision}`}
+            entry={data}
+            reload={reload}
+            onApplied={onApplied}
+            canEdit={
+              !source.loading &&
+              !source.error &&
+              (source.data?.status === 'ready' || source.data?.status === 'not_recorded')
+            }
+          />
           {data.takeaway && (
             <section className="mt-5 border-t border-cafe-subtle pt-4">
               <h4 className="text-compact text-cafe-muted">原话</h4>
@@ -93,16 +111,22 @@ export function MemoryTasteDetail({
             <h4 className="text-compact text-cafe-muted">当时</h4>
             <p className="mt-2 whitespace-pre-wrap break-words text-sm">{data.scene}</p>
           </section>
+          <TasteSourceLocation source={source} locate={locate} />
+          <MemoryTasteCorrections
+            proposals={data.correctionProposals ?? []}
+            revision={data.revision}
+            reread={reload}
+            onDecided={onDecisionApplied}
+          />
           <section className="mt-5 border-t border-cafe-subtle pt-4">
             <h4 className="text-compact text-cafe-muted">什么时候会想起</h4>
             <p className="mt-2 text-sm">{data.whenRemembered || '触发条件暂时读不到'}</p>
           </section>
-          <TasteApprovalSummary entry={data} />
           <section className="mt-5 border-t border-cafe-subtle pt-4">
-            <h4 className="mb-3 text-compact text-cafe-muted">被想起</h4>
+            <h4 className="mb-3 text-compact text-cafe-muted">使用记录</h4>
             <MemoryTasteRecall entry={entry} />
           </section>
-          <TasteSourceLocation source={source} locate={locate} />
+          <TasteApprovalSummary entry={data} />
         </>
       )}
     </aside>

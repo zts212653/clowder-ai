@@ -24,6 +24,58 @@ const LOG_DIR = process.env.LOG_DIR ? resolve(process.env.LOG_DIR) : resolve(pro
 const RETENTION_FILES = 14;
 
 /**
+ * Request URLs are serialized before Fastify enters a route handler. Redact
+ * credential-shaped query parameters here so both accepted and rejected
+ * requests stay safe in stdout and the rolling file sink.
+ */
+export function redactRequestUrl(value: unknown): unknown {
+  if (typeof value !== 'string') return value;
+  const queryStart = value.indexOf('?');
+  if (queryStart < 0) return value;
+  const fragmentStart = value.indexOf('#', queryStart + 1);
+  const queryEnd = fragmentStart < 0 ? value.length : fragmentStart;
+  let changed = false;
+  const query = value
+    .slice(queryStart + 1, queryEnd)
+    .split('&')
+    .map((part) => {
+      const separator = part.indexOf('=');
+      const rawKey = separator < 0 ? part : part.slice(0, separator);
+      let key: string;
+      try {
+        key = decodeURIComponent(rawKey.replace(/\+/gu, ' '));
+      } catch {
+        return part;
+      }
+      if (key.toLowerCase() !== 'token') return part;
+      changed = true;
+      return `${rawKey}=[REDACTED]`;
+    })
+    .join('&');
+  if (!changed) return value;
+  return `${value.slice(0, queryStart + 1)}${query}${value.slice(queryEnd)}`;
+}
+
+function requestLogSerializer(request: unknown): Record<string, unknown> {
+  const value = request as {
+    method?: unknown;
+    url?: unknown;
+    headers?: Record<string, unknown>;
+    hostname?: unknown;
+    ip?: unknown;
+    socket?: { remotePort?: unknown };
+  };
+  return {
+    method: value.method,
+    url: redactRequestUrl(value.url),
+    version: value.headers?.['accept-version'],
+    hostname: value.hostname,
+    remoteAddress: value.ip,
+    remotePort: value.socket?.remotePort,
+  };
+}
+
+/**
  * Pino redaction paths — masks values at these JSON paths.
  * Uses fast-redact: compiled once at creation, zero per-log overhead.
  */
@@ -82,6 +134,7 @@ export const logger = pino(
   {
     level: LOG_LEVEL,
     timestamp: () => `,"time":"${new Date().toISOString()}"`,
+    serializers: { req: requestLogSerializer },
     redact: {
       paths: REDACT_PATHS,
       censor: '[REDACTED]',

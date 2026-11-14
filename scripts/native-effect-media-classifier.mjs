@@ -28,15 +28,21 @@ export function isConstrainedLocalMediaObservation(raw) {
 }
 
 /** Keep copy read provenance separate from its complete destination namespace. */
-export function explicitCopyRoles(raw) {
+export function explicitCopyRoles(raw, cwd) {
   const parsed = exactCopyGrammar(raw);
   if (!parsed) return null;
-  const { source, destination, recursive } = parsed;
-  if (!isAbsoluteSingleFilePath(source) || !isAbsoluteSingleFilePath(destination)) return null;
+  const { recursive } = parsed;
+  const sources = parsed.sources.map((path) => copyPath(path, cwd));
+  const source = sources[0],
+    destination = copyPath(parsed.destination, cwd);
+  if (!sources.every(Boolean) || !destination) return null;
   const targets = [destination];
   try {
-    if (statSync(destination).isDirectory()) targets.push(join(destination, basename(source)));
+    const directory = statSync(destination).isDirectory();
+    if (sources.length > 1 && !directory) return null;
+    if (directory) targets.push(...sources.map((input) => join(destination, basename(input))));
   } catch (error) {
+    if (sources.length > 1) return null;
     if (error.code !== 'ENOENT') return { source, destination, complete: false };
   }
   const physical = targets.map((target) => physicalWriteTarget(target));
@@ -44,33 +50,56 @@ export function explicitCopyRoles(raw) {
     source,
     destination,
     recursive,
-    complete: physical.every(Boolean) && (!recursive || recursiveTargetIsUnique(physical.at(-1))),
+    complete:
+      physical.every(Boolean) &&
+      (!recursive || (targets.length > 1 ? physical.slice(1) : physical).every(recursiveTargetIsUnique)),
     targetText: [...targets, ...physical.filter(Boolean)].map((path) => JSON.stringify(path)).join(' '),
   };
+}
+
+function copyPath(path, cwd) {
+  if (!isLiteralSinglePath(path)) return null;
+  if (isAbsolute(path)) return path;
+  try {
+    return cwd ? join(realpathSync.native(cwd), path) : null;
+  } catch {
+    return null;
+  }
 }
 
 /** An exact plain-file copy cannot create or redirect a filesystem alias. */
 export function isExactNonRecursiveCopy(raw) {
   const parsed = exactCopyGrammar(raw);
   return Boolean(
-    parsed && !parsed.recursive && isLiteralSinglePath(parsed.source) && isLiteralSinglePath(parsed.destination),
+    parsed && !parsed.recursive && parsed.sources.every(isLiteralSinglePath) && isLiteralSinglePath(parsed.destination),
   );
 }
 
 function exactCopyGrammar(raw) {
   const tokens = tokenizeSimpleShellCommand(raw);
-  if (!tokens || tokens[0] !== 'cp') return null;
+  if (!tokens || commandName(tokens[0]) !== 'cp') return null;
   let index = 1;
-  const recursive = tokens[index] === '-R';
-  if (recursive) index += 1;
-  if (tokens[index] === '--') index += 1;
-  else if (!recursive) return null;
-  if (tokens.length - index !== 2) return null;
-  const [source, destination] = tokens.slice(index);
-  return { source, destination, recursive };
+  let recursive = false;
+  let separated = false;
+  for (; index < tokens.length; index++) {
+    if (tokens[index] === '--') {
+      separated = true;
+      index++;
+      break;
+    }
+    if (!tokens[index].startsWith('-')) break;
+    // Neither overwrite policy nor preserving metadata changes source/destination roles.
+    if (!/^-[Rnp]+$/.test(tokens[index])) return null;
+    recursive ||= tokens[index].includes('R');
+  }
+  if (tokens.length - index < 2) return null;
+  if (!separated && tokens.slice(index).some((token) => token.startsWith('-'))) return null;
+  const sources = tokens.slice(index, -1),
+    destination = tokens.at(-1);
+  return { source: sources[0], sources, destination, recursive };
 }
 
-function physicalWriteTarget(path, depth = 0) {
+export function physicalWriteTarget(path, depth = 0) {
   if (depth > 128) return null;
   try {
     const metadata = lstatSync(path);

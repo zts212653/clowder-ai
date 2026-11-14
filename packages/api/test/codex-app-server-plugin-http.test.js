@@ -84,13 +84,15 @@ function configuredCapability(entry, mode) {
 
 function fixture(t, mode = 'shared') {
   const root = mkdtempSync(join(tmpdir(), 'codex-plugin-http-'));
-  for (const name of ['.cat-cafe', 'credentials', 'data', 'tmp']) mkdirSync(join(root, name));
+  for (const name of ['.cat-cafe', 'credentials', 'data', 'tmp', 'program-data']) mkdirSync(join(root, name));
   const env = {
     CAT_CAFE_CONFIG_ROOT: root,
+    CAT_CAFE_GLOBAL_CONFIG_ROOT: root,
     CAT_CAFE_WORKSPACE_ROOT: root,
     CAT_CAFE_RUNTIME_ROOT: resolve('../..'),
     CAT_CAFE_DATA_DIR: join(root, 'data'),
     CAT_CAFE_MCP_CREDS_DIR: join(root, 'credentials'),
+    ProgramData: join(root, 'program-data'),
     TMPDIR: join(root, 'tmp'),
   };
   const saved = Object.fromEntries(Object.keys(env).map((key) => [key, process.env[key]]));
@@ -154,7 +156,7 @@ function fixture(t, mode = 'shared') {
     root,
     entries,
     callback,
-    async run(resume = false) {
+    async run(resume = false, accountEnv) {
       const wire = new Wire();
       let launch;
       const service = new CodexAgentService({
@@ -171,6 +173,7 @@ function fixture(t, mode = 'shared') {
               invocationId: callback.CAT_CAFE_INVOCATION_ID,
               workingDirectory: root,
               callbackEnv: callback,
+              ...(accountEnv ? { accountEnv } : {}),
               ...(resume ? { sessionId: 'plugin-thread' } : {}),
               agentCarrierSessionFactory: async (options) => {
                 launch = options;
@@ -219,6 +222,69 @@ for (const resume of [false, true])
     assert.deepEqual(wrappers, [], 'HTTP contributions must never create even an unused env-wrapper');
     assert.equal(JSON.stringify(servers).includes('action-secret-'), false);
     assert.doesNotMatch(JSON.stringify(launch.args), /action-secret-|callback-secret|mcp-env-wrapper/);
+  });
+
+for (const resume of [false, true])
+  test(`shared HTTP ${resume ? 'resume' : 'start'} bypasses loopback after account environment overrides`, async (t) => {
+    const f = fixture(t);
+    f.callback.NO_PROXY = 'callback-only.example';
+    const accountEnv = {
+      NO_PROXY: 'account.example,LOCALHOST',
+      no_proxy: 'lower.example,10.0.0.0/8',
+      HTTP_PROXY: 'http://outbound.example:8080',
+      https_proxy: 'http://secure-outbound.example:8081',
+      ALL_PROXY: 'socks5://outbound.example:8082',
+    };
+    const { launch } = await f.run(resume, accountEnv);
+    for (const key of process.platform === 'win32' ? ['NO_PROXY'] : ['NO_PROXY', 'no_proxy']) {
+      const excluded = (launch.env[key] ?? '')
+        .toLowerCase()
+        .split(',')
+        .map((host) => host.trim());
+      for (const host of ['127.0.0.1', '::1', 'localhost', 'account.example', 'lower.example', '10.0.0.0/8'])
+        assert.ok(excluded.includes(host), `${key} must preserve ${host} in the actual provider launch`);
+      assert.equal(excluded.includes('callback-only.example'), false, 'final account precedence remains intact');
+      assert.equal(excluded.includes('*'), false, 'loopback bypass must not disable outbound proxies');
+    }
+    for (const key of ['HTTP_PROXY', 'https_proxy', 'ALL_PROXY']) assert.equal(launch.env[key], accountEnv[key]);
+    assert.doesNotMatch(JSON.stringify(launch.args), /outbound\.example|account\.example|lower\.example/);
+  });
+
+test('explicit stdio preserves outbound proxies while receiving the final loopback projection', async (t) => {
+  const f = fixture(t, 'stdio');
+  const accountEnv = {
+    NO_PROXY: 'stdio.example',
+    no_proxy: 'lower.stdio.example',
+    HTTP_PROXY: 'http://proxy.example:8080',
+  };
+  const { launch } = await f.run(false, accountEnv);
+  assert.equal(launch.env.HTTP_PROXY, accountEnv.HTTP_PROXY);
+  assert.deepEqual(
+    new Set(launch.env.NO_PROXY.split(',')),
+    new Set(['stdio.example', 'lower.stdio.example', 'localhost', '127.0.0.1', '::1']),
+  );
+  assert.equal(launch.env.no_proxy, process.platform === 'win32' ? undefined : launch.env.NO_PROXY);
+  assert.equal(launch.inheritParentEnv, false);
+});
+
+for (const platform of ['darwin', 'win32'])
+  test(`shared HTTP keeps deterministic loopback after deleted proxy aliases on ${platform}`, async (t) => {
+    const f = fixture(t);
+    const descriptor = Object.getOwnPropertyDescriptor(process, 'platform');
+    const previous = { NO_PROXY: process.env.NO_PROXY, no_proxy: process.env.no_proxy };
+    Object.assign(process.env, { NO_PROXY: 'deleted-upper.example', no_proxy: 'deleted-lower.example' });
+    Object.defineProperty(process, 'platform', { ...descriptor, value: platform });
+    t.after(() => {
+      Object.defineProperty(process, 'platform', descriptor);
+      for (const [key, value] of Object.entries(previous)) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
+    });
+    const { launch } = await f.run(false, { NO_PROXY: null, no_proxy: '', HTTP_PROXY: 'http://proxy.example:8080' });
+    assert.deepEqual(new Set(launch.env.NO_PROXY.split(',')), new Set(['localhost', '127.0.0.1', '::1']));
+    assert.equal(launch.env.HTTP_PROXY, 'http://proxy.example:8080');
+    assert.equal(launch.inheritParentEnv, false);
   });
 
 for (const mode of ['stdio', 'nonshared', 'custom-command', 'custom-args', 'custom-token'])

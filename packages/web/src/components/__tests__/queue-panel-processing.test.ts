@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 /** Pending Queue controls; response recovery belongs to ExecutionRow and the original response. */
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';

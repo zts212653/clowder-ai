@@ -1,11 +1,13 @@
 import { createHash } from 'node:crypto';
-import { access, readFile, stat } from 'node:fs/promises';
+import { access } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { RichMediaGalleryBlock } from '@cat-cafe/shared';
+import { detectImageMime } from '../../../../../utils/image-mime.js';
 import {
-  copyImageFileToUploadDir,
-  MAX_IMAGE_FILE_SIZE,
+  ALLOWED_IMAGE_MIME_LIST,
+  ImagePublicationConflictError,
   mimeToImageExt,
+  readImageFile,
   type SavedImageAsset,
   type SupportedImageMime,
   sanitizeFilenameStem,
@@ -55,8 +57,16 @@ export async function publishGeneratedImage(input: GeneratedImagePublicationInpu
   assertMemberSource(input);
   const resolvedUploadDir = getDefaultUploadDir(input.uploadDir ?? process.env.UPLOAD_DIR);
   const publicationStem = buildPublicationStem(input.publicationKey);
+  const bytes = await readPublicationBytes(input, resolvedUploadDir);
+  if (
+    input.nativeOrigin &&
+    `sha256:${createHash('sha256').update(bytes).digest('hex')}` !== input.nativeOrigin.blobDigest
+  )
+    throw new Error('Published image bytes do not match their native generation');
+  const mimeType = detectImageMime(bytes);
+  if (!mimeType) throw new Error('Unsupported or unsafe generated image content');
 
-  const expectedFilename = `${sanitizeFilenameStem(publicationStem)}${mimeToImageExt(input.mimeType)}`;
+  const expectedFilename = `${sanitizeFilenameStem(publicationStem)}${mimeToImageExt(mimeType)}`;
   let isNew = true;
   try {
     await access(join(resolvedUploadDir, expectedFilename));
@@ -65,30 +75,13 @@ export async function publishGeneratedImage(input: GeneratedImagePublicationInpu
     /* not yet published */
   }
 
-  const stored = input.memberBytes
-    ? await saveImageBufferToUploadDir({
-        buffer: input.memberBytes,
-        mimeType: input.mimeType,
-        uploadDir: resolvedUploadDir,
-        filenameStem: publicationStem,
-        onExists: 'verify',
-      })
-    : await copyImageFileToUploadDir({
-        sourcePath: input.sourcePath,
-        mimeType: input.mimeType,
-        uploadDir: resolvedUploadDir,
-        filenameStem: publicationStem,
-        onExists: 'reuse',
-      });
-  if (
-    input.nativeOrigin &&
-    ((await stat(stored.absPath)).size > MAX_IMAGE_FILE_SIZE ||
-      `sha256:${createHash('sha256')
-        .update(await readFile(stored.absPath))
-        .digest('hex')}` !== input.nativeOrigin.blobDigest)
-  )
-    throw new Error('Published image bytes do not match their native generation');
-
+  const stored = await saveImageBufferToUploadDir({
+    buffer: bytes,
+    mimeType,
+    uploadDir: resolvedUploadDir,
+    filenameStem: publicationStem,
+    onExists: 'verify',
+  });
   const provenance: GeneratedImagePublicationProvenance = {
     provider: input.provider,
     toolName: input.toolName,
@@ -109,7 +102,7 @@ export async function publishGeneratedImage(input: GeneratedImagePublicationInpu
   return {
     ...stored,
     isNew,
-    mimeType: input.mimeType,
+    mimeType,
     originalPath: input.sourcePath,
     publicationKey: input.publicationKey,
     richBlock: {
@@ -122,6 +115,40 @@ export async function publishGeneratedImage(input: GeneratedImagePublicationInpu
     } as RichMediaGalleryBlock,
     provenance,
   };
+}
+
+/** Source cleanup must not erase an already-published result, including a corrected extension. */
+async function readPublicationBytes(input: GeneratedImagePublicationInput, uploadDir: string): Promise<Buffer> {
+  if (input.memberBytes) return input.memberBytes;
+  try {
+    return await readImageFile(input.sourcePath);
+  } catch (sourceError) {
+    if (!isMissingFile(sourceError)) throw sourceError;
+    const published = await recoverPublishedImageBytes(input.publicationKey, uploadDir);
+    if (!published) throw sourceError;
+    return published;
+  }
+}
+
+async function recoverPublishedImageBytes(publicationKey: string, uploadDir: string): Promise<Buffer | undefined> {
+  let published: Buffer | undefined;
+  for (const mimeType of ALLOWED_IMAGE_MIME_LIST) {
+    try {
+      const candidate = await readImageFile(
+        generatedImagePublicationLocation(publicationKey, mimeType, uploadDir).absPath,
+      );
+      if (published && !published.equals(candidate))
+        throw new ImagePublicationConflictError('Publication key already names different image bytes');
+      published = candidate;
+    } catch (error) {
+      if (!isMissingFile(error)) throw error;
+    }
+  }
+  return published;
+}
+
+function isMissingFile(error: unknown): boolean {
+  return Boolean(error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT');
 }
 
 function assertMemberSource(input: GeneratedImagePublicationInput): void {

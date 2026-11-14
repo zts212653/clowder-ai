@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -434,7 +435,7 @@ describe('ServiceStatusPanel', () => {
       if (path === '/api/services') {
         return { ok: true, json: async () => installablePayload };
       }
-      if (path === '/api/services/audio-capture/install-preview') {
+      if (new URL(path, 'http://test.local').pathname === '/api/services/audio-capture/install-preview') {
         return {
           ok: true,
           json: async () => ({

@@ -5,7 +5,7 @@ import { expect, it, vi } from 'vitest';
 const data = vi.hoisted(() => ({ apiFetch: vi.fn(), messages: [] }));
 vi.mock('@/utils/api-client', () => ({ apiFetch: data.apiFetch }));
 vi.mock('../useThreadScopedSelectors', () => ({
-  useThreadMessages: () => data.messages,
+  selectThreadMessagesRaw: () => data.messages,
   useThreadLiveness: () => ({ hasActive: false }),
 }));
 

@@ -25,6 +25,63 @@ const explain = (
   });
 
 describe('one qualification explanation for cat and human consumers', () => {
+  it('explains selected material without turning the cat judgment into qualification counts', () => {
+    const notice = messageSearchNotice({ results: [{}], meta: { resultKind: 'selected-answer', hasMore: true } });
+    expect(notice.summary).toContain('猫选出的 1 处来源');
+    expect(notice.summary).toContain('选用理由由选材猫判断');
+    expect(notice.coverage).toContain('没有重新搜索');
+    expect(notice.coverage).toContain('未在本卡显示');
+    expect(notice.counts).toBeUndefined();
+    expect(notice.execution).toBeUndefined();
+  });
+  it('explains ordinary sources without inventing qualification or forcing a narrower second query', () => {
+    const notice = messageSearchNotice({ results: [{}, {}], meta: { resultKind: 'sources', sort: 'relevance' } });
+    expect(notice.summary).toContain('2 处可打开的原文');
+    expect(notice.summary).not.toMatch(/资格|未评|支持|拒绝/);
+    expect(notice.counts).toBeUndefined();
+    expect(notice.execution).toBeUndefined();
+    expect(notice.nextStep).toContain('打开原文');
+    expect(notice.nextStep).not.toContain('缩小');
+  });
+
+  it('reports a completed relevance window and its honest early-stop coverage separately', () => {
+    const full = messageSearchNotice({
+      results: [{}],
+      meta: {
+        resultKind: 'sources',
+        sort: 'time',
+        timeWindow: { limit: 32, admitted: 32, complete: true },
+      },
+    });
+    expect(full.coverage).toContain('前 32 条');
+    expect(full.coverage).toContain('窗口外可能有更早的原文');
+    const partial = messageSearchNotice({
+      results: [{}],
+      meta: {
+        resultKind: 'sources',
+        sort: 'time',
+        timeWindow: { limit: 32, admitted: 12, complete: false },
+      },
+    });
+    expect(partial.coverage).toContain('核完 12 条');
+    expect(partial.coverage).toContain('未读满 32 条');
+    expect(partial.coverage).not.toContain('取得前 32 条');
+  });
+
+  it('discloses omitted sources even when the relevance window itself was read completely', () => {
+    const notice = messageSearchNotice({
+      results: Array(8).fill({}),
+      meta: {
+        resultKind: 'sources',
+        sort: 'time',
+        hasMore: true,
+        timeWindow: { limit: 32, admitted: 32, complete: true },
+      },
+    });
+    expect(notice.coverage).toContain('前 32 条');
+    expect(notice.coverage).toContain('仅列出本次可得的部分来源');
+  });
+
   it('round-trips optional notice fields through JSON without changing own keys', () => {
     const notices = [
       messageSearchNotice({ results: [] }),

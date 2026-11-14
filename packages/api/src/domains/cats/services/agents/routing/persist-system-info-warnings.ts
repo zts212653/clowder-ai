@@ -1,6 +1,7 @@
 import {
   type CloudBridgeOutboundReceiptV1,
   type CloudBridgeRecoveryV1,
+  catRegistry,
   createCatId,
   isCloudBridgeOutboundReceiptV1,
 } from '@cat-cafe/shared';
@@ -57,6 +58,9 @@ function parseVisibleNotice(
       v?: unknown;
       status?: unknown;
       reason?: unknown;
+      catId?: unknown;
+      sessionId?: unknown;
+      sessionSeq?: unknown;
       rolloverId?: unknown;
       failureStage?: unknown;
       message?: unknown;
@@ -67,6 +71,22 @@ function parseVisibleNotice(
     // bubble owns its processing/terminal state, so never append a parallel
     // system row for pending, success, or failure.
     if (parsed.type === 'session_rollover_lifecycle') return undefined;
+    if (parsed.type === 'session_seal_requested') {
+      if (parsed.reason !== 'native_binding_changed') return undefined;
+      const targetId = typeof parsed.catId === 'string' && parsed.catId ? parsed.catId : catId;
+      const registeredName = catRegistry.tryGet(createCatId(targetId))?.config.displayName;
+      const displayName = registeredName ? registeredName : targetId;
+      const sessionSeq = typeof parsed.sessionSeq === 'number' ? parsed.sessionSeq : '?';
+      const sessionId = typeof parsed.sessionId === 'string' && parsed.sessionId ? parsed.sessionId : undefined;
+      return {
+        content: `${displayName} 的原生配置已更新，会话 #${sessionSeq} 已封存；正在带上历史继续`,
+        connector: 'native-session-seal',
+        label: '会话续接',
+        icon: '🔄',
+        tone: 'info',
+        ...(sessionId ? { idempotencyKey: `native-binding-seal:${sessionId}` } : {}),
+      };
+    }
     if (typeof parsed.message !== 'string') return undefined;
     if (parsed.type === 'warning' && parsed.presentation === 'user_action_required') {
       return {

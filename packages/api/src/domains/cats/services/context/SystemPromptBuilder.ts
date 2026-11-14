@@ -30,7 +30,6 @@ import {
 import type {
   BootcampStateV1,
   ThreadMentionRoutingFeedback,
-  ThreadParticipantActivity,
   ThreadRoutingPolicyV1,
 } from '../stores/ports/ThreadStore.js';
 import { loadCompiledGovernanceL0, loadCompiledGovernanceL0Sync } from './governance-l0.js';
@@ -113,7 +112,6 @@ export interface InvocationContext {
   mentionRoutingFeedback?: ThreadMentionRoutingFeedback;
   /** F042 Wave 3: Thread-level participant activity for @ disambiguation.
    *  Sorted by lastMessageAt desc. Injected per-invocation to survive compression. */
-  activeParticipants?: readonly ThreadParticipantActivity[];
   /** F042: Thread-scoped routing policy summary (intent/scope). Injected per-invocation. */
   routingPolicy?: ThreadRoutingPolicyV1;
   /**

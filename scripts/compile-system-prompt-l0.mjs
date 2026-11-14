@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { Console } from 'node:console';
 /** L0 CLI: diagnostics capture live inputs; invocation mode renders only the parent-owned snapshot. */
 import { createHash } from 'node:crypto';
 import { realpathSync, writeFileSync } from 'node:fs';
@@ -122,10 +123,18 @@ if (isCliEntrypoint(import.meta.url, process.argv[1])) {
       );
       process.exit(2);
     }
+    const projection = value('--projection') ?? 'owner';
+    if (!resolveL0Projections().includes(projection))
+      throw new Error(`compileL0: unsupported projection "${projection}"`);
+    // Import the API bridge first, then keep all diagnostic console output on stderr in this CLI only.
+    await import('../packages/api/dist/infrastructure/logger.js');
+    const diagnosticConsole = new Console({ stdout: process.stderr, stderr: process.stderr });
+    for (const method of ['log', 'info', 'warn', 'error', 'debug'])
+      console[method] = diagnosticConsole[method].bind(diagnosticConsole);
     snapshot = await captureDiagnosticL0({
       catId,
       profileDir: value('--profile-dir'),
-      projection: value('--projection'),
+      projection,
       runtimeModel: value('--runtime-model'),
     });
     const { memberConfigurationRevision } = await import('../packages/api/dist/config/member-config-revision.js');
@@ -135,8 +144,12 @@ if (isCliEntrypoint(import.meta.url, process.argv[1])) {
       createHash('sha256')
         .update(JSON.stringify(catRegistry.getOrThrow(catId).config))
         .digest('hex');
-    console.error(`Live L0 diagnostic: configurationRevision=${revision} inputDigest=${snapshot.inputDigest}`);
+    // API imports route console.error through a stdout logger; keep diagnostic bytes on stderr.
+    process.stderr.write(`Live L0 diagnostic: configurationRevision=${revision} inputDigest=${snapshot.inputDigest}\n`);
   }
+  // Frozen input keeps the captured projection; edition policy also applies to the stdin entry.
+  if (!resolveL0Projections().includes(snapshot.projection))
+    throw new Error(`compileL0: unsupported projection "${snapshot.projection}"`);
   const compiled = renderFrozenL0Input(snapshot);
   if (outPath) writeFileSync(outPath, compiled, 'utf8');
   else process.stdout.write(compiled);

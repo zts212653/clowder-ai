@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 /**
  * Regression: Sequential multi-cat execution must clean up each cat's invocation slot
  * when it finishes, even if isFinal=false (meaning more cats are coming).

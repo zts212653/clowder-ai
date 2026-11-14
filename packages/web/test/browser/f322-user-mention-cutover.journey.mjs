@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
-import { mkdirSync } from 'node:fs';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import path from 'node:path';
-import { installMentionPreferences } from './f322-mention-personal-owner.mjs';
+import { emptyCollectiveAttentionFor, installMentionPreferences } from './f322-mention-personal-owner.mjs';
 
 /** The mailbox consumer and real owner writers; only the browser transport is isolated. */
 export function registerMentionCutoverJourney({ test, openProof, closeProof }) {
@@ -41,6 +41,7 @@ export function registerMentionCutoverJourney({ test, openProof, closeProof }) {
     const preferences = await installMentionPreferences(app);
     await app.register(companionDecisionRoutes, {
       ownerUserId: 'owner-1',
+      collectiveAccountability: emptyCollectiveAttentionFor('owner-1'),
       messageStore: messages,
       runtimeInteractionStore: new InMemoryRuntimeInteractionStore(),
       readIgnoredItemPreferences: preferences.read,
@@ -56,6 +57,22 @@ export function registerMentionCutoverJourney({ test, openProof, closeProof }) {
         return { status: r.statusCode, body: r.json() };
       },
       api: async ({ request, url }) => {
+        if (url.pathname === '/api/approval-hub/settled/page') {
+          assert.equal(request.method(), 'GET');
+          assert.equal(url.search, '?limit=30');
+          // This isolated app registers no approval producers. Its real mention
+          // owner supplies the separate handled/ignored request history below.
+          return {
+            body: {
+              items: [],
+              count: 0,
+              identity: { ownerUserId: 'owner-1' },
+              manifest: [],
+              page: { limit: 30, nextCursor: null, hasMore: false },
+              coverage: { state: 'complete', orderVersion: 1, sources: [] },
+            },
+          };
+        }
         if (url.pathname === '/api/approval-hub/settled') return { body: { items: [] } };
         if (!url.pathname.startsWith('/api/concierge/work/mentions/') && url.pathname !== '/api/config/ignored-items')
           return null;
@@ -102,6 +119,10 @@ export function registerMentionCutoverJourney({ test, openProof, closeProof }) {
       const primary = page.getByTestId('mailbox-mentions-ignore-confirm');
       assert.notEqual(await primary.evaluate((el) => getComputedStyle(el).backgroundColor), 'rgba(0, 0, 0, 0)');
       await primary.click();
+      await page.getByTestId('mailbox-transient-result').filter({ hasText: '忽略了' }).first().waitFor();
+      assert.equal(await page.getByTestId('mailbox-item').count(), 0);
+      await page.getByTestId('mailbox-close').click();
+      await page.getByTestId('mailbox-button').click();
       await page.getByTestId('mailbox-group-mentions').getByText('暂无 @你 请求', { exact: true }).waitFor();
       const saved = preferences.read('owner-1');
       assert.equal(saved.entries.length, 558, 'the complete period, not either visible page, is persisted');
@@ -112,19 +133,29 @@ export function registerMentionCutoverJourney({ test, openProof, closeProof }) {
       await page.getByTestId('mailbox-button').click();
       await page.getByTestId('mailbox-item-toggle').filter({ hasText: 'F320 登录修复' }).waitFor();
       assert.deepEqual(preferences.read('owner-1'), saved, 'reload keeps every persisted ignored version');
-      await page.getByTestId('mailbox-open-ignored').click();
-      await page.getByTestId('mailbox-period-earlier').click();
-      await page.waitForFunction(() => document.querySelectorAll('[data-testid="mailbox-item"]').length === 20);
-      await page.getByTestId('mailbox-next-page').click();
-      await page.getByText('第 2 页', { exact: true }).waitFor();
-      const restoredRow = page.getByTestId('mailbox-item').first();
-      const restoredKey = await restoredRow.getAttribute('data-row-key');
-      const restoredEntry = saved.entries.find((entry) => restoredKey.includes(entry.coordinate.decisionRef));
+      await page.getByTestId('mailbox-history').click();
+      await page.getByTestId('mailbox-history-tab-ignored').click();
+      const historyRows = page.getByTestId('mailbox-history-row');
+      await historyRows.first().waitFor();
+      const initialIgnored = await historyRows.count();
+      assert.ok(initialIgnored > 0 && initialIgnored <= 30, 'ignored history starts with a bounded window');
+      await page.getByTestId('mailbox-history-load-more').click();
+      await page.waitForFunction(
+        (before) => document.querySelectorAll('[data-testid="mailbox-history-row"]').length > before,
+        initialIgnored,
+      );
+      const restoredRow = historyRows.nth(initialIgnored);
+      const restoredKey = await restoredRow.getAttribute('data-decision-ref');
+      const restoredEntry = saved.entries.find((entry) => restoredKey === entry.coordinate.decisionRef);
       assert.ok(restoredEntry);
-      await restoredRow.getByTestId('mailbox-item-toggle').click();
+      await restoredRow.getByTestId('mailbox-history-item-toggle').click();
       await restoredRow.getByTestId('mailbox-item-restore').click();
       await page.waitForFunction(
-        () => document.querySelector('[data-testid="mailbox-state-text"]')?.textContent === '当前范围共 557 件',
+        (key) =>
+          ![...document.querySelectorAll('[data-testid="mailbox-history-row"]')].some(
+            (row) => row.getAttribute('data-decision-ref') === key,
+          ),
+        restoredKey,
       );
       const personalAfterRestore = preferences.read('owner-1');
       assert.deepEqual(
@@ -153,24 +184,40 @@ export function registerMentionCutoverJourney({ test, openProof, closeProof }) {
       assert.equal(messages.listUserMentionRequests('owner-1').length, 0);
       if (out) await page.screenshot({ path: path.join(out, 'cutover-handled-undo.png'), fullPage: true });
       await page.getByTestId('mailbox-history').click();
-      await page.getByTestId('mailbox-title').filter({ hasText: '已处理的 @你' }).waitFor();
-      await page.getByTestId('mailbox-state-text').filter({ hasText: '559' }).waitFor();
+      await page.getByTestId('mailbox-title').filter({ hasText: '已处理的' }).waitFor();
+      await page.getByTestId('mailbox-history-tab-mentions').click();
       await page.getByTestId('mailbox-mentions-undo').waitFor();
-      assert.equal(await page.getByTestId('mailbox-item').count(), 20);
-      assert.equal(await page.getByText('类型', { exact: true }).count(), 0);
-      await page.getByTestId('mailbox-next-page').click();
-      await page.getByText('第 2 页', { exact: true }).waitFor();
-      assert.equal(await page.getByTestId('mailbox-item').count(), 20);
-      await page.getByTestId('mailbox-previous-page').click();
-      await page.getByText('第 1 页', { exact: true }).waitFor();
+      await historyRows.first().waitFor();
+      const initialHandled = await historyRows.evaluateAll((rows) =>
+        rows.map((row) => row.getAttribute('data-decision-ref')),
+      );
+      assert.ok(initialHandled.length > 0 && initialHandled.length <= 30);
+      await page.getByTestId('mailbox-history-load-more').click();
+      await page.waitForFunction(
+        (before) => document.querySelectorAll('[data-testid="mailbox-history-row"]').length > before,
+        initialHandled.length,
+      );
+      const extendedHandled = await historyRows.evaluateAll((rows) =>
+        rows.map((row) => row.getAttribute('data-decision-ref')),
+      );
+      assert.ok(
+        initialHandled.every((key) => extendedHandled.includes(key)),
+        'continuation retains every earlier row while the combined window is ordered',
+      );
+      assert.equal(
+        new Set(extendedHandled).size,
+        extendedHandled.length,
+        'history does not duplicate a canonical request',
+      );
       if (out) await page.screenshot({ path: path.join(out, 'cutover-history.png'), fullPage: true });
-      await page.getByTestId('mailbox-item-toggle').filter({ hasText: 'F320 登录修复' }).click();
+      await page.getByTestId('mailbox-history-item-toggle').filter({ hasText: 'F320 登录修复' }).click();
       await page.getByTestId('mailbox-mention-restore').click();
       await page.getByTestId('mailbox-mentions-undo').filter({ hasText: '剩 558 件' }).waitFor();
       await page.getByTestId('mailbox-handled-back').click();
       await page.reload();
       await page.getByTestId('mailbox-button').click();
       await page.getByTestId('mailbox-history').click();
+      await page.getByTestId('mailbox-history-tab-mentions').click();
       await page.getByTestId('mailbox-mentions-undo').filter({ hasText: '剩 558 件' }).waitFor();
       await page.getByTestId('mailbox-mentions-undo').click();
       await page.getByRole('status').filter({ hasText: '已撤销 558 件' }).waitFor();
@@ -200,6 +247,26 @@ export function registerMentionCutoverJourney({ test, openProof, closeProof }) {
         assert.ok(old);
         assert.notEqual(coordinate.version, old.coordinate.version);
       }
+    } catch (error) {
+      const out = process.env.F322_USER_MENTION_EVIDENCE_DIR;
+      if (out) {
+        mkdirSync(out, { recursive: true });
+        writeFileSync(path.join(out, 'cutover-failure.html'), await page.content());
+        writeFileSync(
+          path.join(out, 'cutover-failure.json'),
+          JSON.stringify(
+            {
+              error: error.message,
+              requests: proof.requests,
+              preferences: preferences.read('owner-1'),
+              canonicalPending: messages.listUserMentionRequests('owner-1').length,
+            },
+            null,
+            2,
+          ),
+        );
+      }
+      throw error;
     } finally {
       await closeProof(proof);
       await app.close();

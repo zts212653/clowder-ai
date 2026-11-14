@@ -2,7 +2,6 @@ import { reconcileComposerAdmission } from './composer-draft-admission';
 import { registerComposerDraftFlusher } from './composer-draft-flush-registry';
 import type { DurableDraftSnapshot } from './durable-composer-draft-helpers';
 import type { enqueueComposerDraftSave } from './durable-composer-draft-save-queue';
-import type { PendingComposerRecovery } from './use-composer-draft-persistence';
 
 interface ValueRef<T> {
   current: T;
@@ -22,7 +21,11 @@ interface RegisterAdmissionFlusherOptions {
   ownerIdRef: ValueRef<number>;
   pendingAdmissionDraftRef: ValueRef<PendingComposerAdmissionDraft | null>;
   canonicalDraftRef: ValueRef<DurableDraftSnapshot | null>;
-  pendingRecoveryRef: ValueRef<PendingComposerRecovery | null>;
+  pendingRecoveryRef: ValueRef<{
+    snapshot: DurableDraftSnapshot;
+    revision: number;
+    source: 'hydration' | 'conflict';
+  } | null>;
   admissionImagesReady: (pendingFiles: readonly File[], requiredUrls: readonly string[]) => boolean;
   revisionRef: ValueRef<number>;
   captureCurrentDraft: () => DurableDraftSnapshot;
@@ -95,18 +98,17 @@ async function flushAdmission(state: RegisterAdmissionFlusherOptions) {
       state.threadId,
     );
 
-    if (persisted) {
-      if (
-        reconciliation.requiresConfirmation &&
-        state.pendingAdmissionDraftRef.current === pending &&
-        pendingRecovery
-      ) {
+    if (reconciliation.requiresConfirmation && persisted) {
+      if (state.pendingAdmissionDraftRef.current === pending && pendingRecovery) {
         pending.reconciliationResult = {
           merged: reconciliation.snapshot,
           recoveryRevision: pendingRecovery.revision,
         };
       }
-      if (state.pendingRecoveryRef.current === pendingRecovery) state.pendingRecoveryRef.current = null;
+    }
+    // Successful admission consumes only the recovery it inspected, including an equal-content no-op.
+    if (persisted && state.pendingRecoveryRef.current === pendingRecovery) {
+      state.pendingRecoveryRef.current = null;
     }
 
     return flushResult(state, reconciliation.snapshot, persisted, reconciliation.requiresConfirmation);

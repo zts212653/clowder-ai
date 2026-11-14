@@ -2,11 +2,11 @@ import assert from 'node:assert/strict';
 import { afterEach, test } from 'node:test';
 import Fastify from 'fastify';
 import { createModuleHostInvocation } from '../dist/domains/plugin/builtin-runtime/carriers/module-host-invocation.js';
-
 import {
   InstalledPluginOperations,
   pluginOperationRoutes,
 } from '../dist/domains/plugin/operations/plugin-operation-routes.js';
+import { snapshotInventoryFixture } from './helpers/snapshot-inventory-fixture.js';
 
 const apps = [];
 
@@ -17,13 +17,27 @@ afterEach(async () => {
 const pluginId = 'dev.clowder.operation-fixture';
 const pluginInstanceId = 'pi_operation_fixture';
 
-function manifest() {
-  return {
+function manifest(variant = undefined) {
+  const base = {
     pluginId,
     version: '1.0.0',
-    contractVersion: '0.1.0',
+    contractVersion: variant === undefined ? '0.1.0' : '0.2.0',
     name: 'Operation fixture',
     configuration: [
+      ...(variant === undefined
+        ? []
+        : [
+            {
+              key: 'mode',
+              label: 'Mode',
+              kind: 'select',
+              required: true,
+              options: [
+                { value: 'hook', label: 'Hook' },
+                { value: 'socket', label: 'Socket' },
+              ],
+            },
+          ]),
       { key: 'account', label: 'Account', kind: 'string', required: false },
       { key: 'BOT_TOKEN', label: 'Token', kind: 'secret', required: false },
       {
@@ -56,9 +70,21 @@ function manifest() {
     features: [{ id: 'main', name: 'Main', capabilities: [], contributions: [] }],
     runtime: { transport: 'builtin', entrypoint: 'dist/index.js' },
   };
+  return variant === undefined
+    ? base
+    : {
+        ...base,
+        configurationVariants: {
+          discriminator: 'mode',
+          branches: [
+            { id: 'hook', when: { properties: { mode: { const: 'hook' } } }, fields: ['qr_login'] },
+            { id: 'socket', when: { properties: { mode: { const: 'socket' } } }, fields: [] },
+          ],
+        },
+      };
 }
 
-function snapshot({ enabled = true, installed = true } = {}) {
+function snapshot({ enabled = true, installed = true, variant } = {}) {
   return {
     schemaVersion: 1,
     packages: installed
@@ -67,8 +93,8 @@ function snapshot({ enabled = true, installed = true } = {}) {
             packageDigest: 'sha512-fixture',
             pluginId,
             version: '1.0.0',
-            contractVersion: '0.1.0',
-            manifest: manifest(),
+            contractVersion: variant === undefined ? '0.1.0' : '0.2.0',
+            manifest: manifest(variant),
             signalSchemas: {},
             packageState: 'installed',
             verifiedAt: 1,
@@ -101,6 +127,7 @@ async function harness({
   timeoutMs = 50,
   generate = 'valid',
   confirmation = false,
+  variant,
 } = {}) {
   let now = 10_000;
   let operationState;
@@ -109,7 +136,7 @@ async function harness({
   const logRecords = [];
   const configuration = {
     async readActionInput() {
-      return { account: 'owner@example.com' };
+      return { account: 'owner@example.com', ...(variant === undefined ? {} : { mode: variant }) };
     },
     async readOperationState() {
       return operationState;
@@ -154,14 +181,14 @@ async function harness({
   );
   const invocation = createModuleHostInvocation({ runtime: { actions: () => actions } });
   const operations = new InstalledPluginOperations({
-    inventory: {
+    inventory: snapshotInventoryFixture({
       snapshot: async () => {
-        const value = snapshot({ enabled, installed });
+        const value = snapshot({ enabled, installed, variant });
         if (confirmation && value.packages[0])
           value.packages[0].manifest.configuration[2].actions[0].confirm = 'Confirm generation';
         return value;
       },
-    },
+    }),
     configuration,
     invocation,
     timeoutMs,
@@ -374,6 +401,43 @@ test('operation routes fail closed for auth, lifecycle, declarations, invalid re
   assert.equal(bounded.json().error, `Action failed: ${'x'.repeat(200)}`);
 });
 
+test('an operation owned by an inactive configuration branch cannot be invoked directly', async () => {
+  const inactive = await harness({ variant: 'socket' });
+  const rejected = await inject(inactive.app, {
+    method: 'POST',
+    url: `/api/plugins/${pluginId}/actions/qr_login/generate`,
+    headers: auth,
+  });
+  assert.equal(rejected.statusCode, 409, rejected.payload);
+  assert.deepEqual(rejected.json(), { error: 'Operation is unavailable for the selected configuration' });
+  assert.deepEqual(inactive.calls, []);
+});
+
+test('a draft configuration branch selects the same operation input the plugin receives', async () => {
+  const selected = await harness({ variant: 'socket' });
+  const accepted = await inject(selected.app, {
+    method: 'POST',
+    url: `/api/plugins/${pluginId}/actions/qr_login/generate`,
+    headers: auth,
+    payload: { mode: 'hook', account: 'draft@example.com' },
+  });
+  assert.equal(accepted.statusCode, 200, accepted.payload);
+  assert.deepEqual(selected.calls[0].params.input, {
+    account: 'draft@example.com',
+    mode: 'hook',
+  });
+
+  const deselected = await harness({ variant: 'hook' });
+  const rejected = await inject(deselected.app, {
+    method: 'POST',
+    url: `/api/plugins/${pluginId}/actions/qr_login/generate`,
+    headers: auth,
+    payload: { mode: 'socket' },
+  });
+  assert.equal(rejected.statusCode, 409, rejected.payload);
+  assert.deepEqual(deselected.calls, []);
+});
+
 test('declared test route requires a direct local owner session before invoking a package', async () => {
   const h = await harness();
   const url = `/api/plugins/${pluginId}/test`;
@@ -402,7 +466,7 @@ test('loaded settings run before enable without restoring previous action output
   const calls = [];
   const completed = [];
   const operations = new InstalledPluginOperations({
-    inventory: { snapshot: async () => structuredClone(current) },
+    inventory: snapshotInventoryFixture({ snapshot: async () => structuredClone(current) }),
     invocation: {
       invoke: async () => {
         started++;

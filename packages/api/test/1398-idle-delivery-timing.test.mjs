@@ -48,15 +48,23 @@ test('idle delivery timing distinguishes local admission from slow provider star
   let contextEntered = deferred();
   const counted =
     (name, fn) =>
-    async (...args) => {
+    (...args) => {
       const start = performance.now();
       counters[name] ??= { calls: 0, durationMs: 0 };
       const counter = counters[name];
       counter.calls++;
-      try {
-        return await fn(...args);
-      } finally {
+      const complete = () => {
         counter.durationMs += performance.now() - start;
+      };
+      try {
+        const result = fn(...args);
+        // Instrumentation must preserve synchronous in-memory store reads.
+        if (result instanceof Promise) return result.finally(complete);
+        complete();
+        return result;
+      } catch (error) {
+        complete();
+        throw error;
       }
     };
   for (const name of ['getById', 'getByThread', 'getByThreadAfter', 'appendAndObservePriorFrontier']) {

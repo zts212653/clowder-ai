@@ -25,6 +25,8 @@ test(
     sqliteVec.load(db);
     ensureVectorTable(db, 4);
     ensurePassageVectorTable(db, 4);
+    const vectorStore = new VectorStore(db, 4);
+    vectorStore.initMeta({ modelId: 'neutral-fixture', modelRev: '1', dim: 4 });
     db.prepare(
       "INSERT INTO evidence_docs(anchor,kind,status,title,updated_at) VALUES('thread-neutral','thread','active','Neutral','2026-01-01')",
     ).run();
@@ -40,7 +42,7 @@ test(
     let releaseNearDeadline;
     store.setEmbedDeps({
       mode: 'on',
-      vectorStore: new VectorStore(db, 4),
+      vectorStore,
       passageVectorStore: new PassageVectorStore(db, 4),
       embedding: {
         isReady: () => true,

@@ -2,6 +2,7 @@ import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { useChatStore } from '@/stores/chatStore';
+import { createFakeHubSocket, type FakeHubSocket, withHubSocket } from '@/test-utils/fake-hub-socket';
 import { __resetPendingTeleportForTest, peekPendingTeleport } from '@/utils/teleport';
 import { useTeleport } from '../useTeleport';
 import { type NavigateEvent, useWorkspaceNavigate } from '../useWorkspaceNavigate';
@@ -9,64 +10,15 @@ import { getPendingWorkspaceNavigation } from '../workspace-navigation-pending';
 
 Object.assign(globalThis, { React, IS_REACT_ACT_ENVIRONMENT: true });
 
-const transport = vi.hoisted(() => {
-  type Listener = (...args: unknown[]) => void;
-  class Socket {
-    connected = false;
-    rooms = new Set<string>();
-    bufferedJoins: string[] = [];
-    listeners = new Map<string, Set<Listener>>();
-    emit = vi.fn((event: string, room: string) => {
-      if (event === 'join_room') {
-        if (this.connected) this.rooms.add(room);
-        else this.bufferedJoins.push(room);
-      }
-    });
-    on = vi.fn((event: string, listener: Listener) => {
-      const entries = this.listeners.get(event) ?? new Set<Listener>();
-      entries.add(listener);
-      this.listeners.set(event, entries);
-      return this;
-    });
-    off = vi.fn((event: string, listener: Listener) => {
-      this.listeners.get(event)?.delete(listener);
-      return this;
-    });
-    disconnect = vi.fn(() => {
-      this.connected = false;
-      this.rooms.clear();
-    });
-    connectTransport() {
-      // Socket.IO room membership belongs to the server connection, not the hook.
-      this.rooms.clear();
-      this.connected = true;
-      for (const room of this.bufferedJoins.splice(0)) this.rooms.add(room);
-      this.announceConnect();
-    }
-    announceConnect() {
-      for (const listener of this.listeners.get('connect') ?? []) listener();
-    }
-    deliver(room: string, event: string, data: unknown, acknowledge?: Listener) {
-      if (!this.connected || !this.rooms.has(room)) return false;
-      for (const listener of this.listeners.get(event) ?? []) listener(data, acknowledge);
-      return true;
-    }
-  }
-  const sockets: Socket[] = [];
-  const factory = {
-    sockets,
-    connectedOnCreate: false,
-    create: vi.fn(() => {
-      const socket = new Socket();
-      socket.connected = factory.connectedOnCreate;
-      sockets.push(socket);
-      return socket;
-    }),
-  };
-  return factory;
-});
-
-vi.mock('socket.io-client', () => ({ io: () => transport.create() }));
+// Room membership and reconnects belong to the page connection (useSocket-hub.test.tsx).
+// These hooks hold their room and listener on it; delivery reaches them only while the page
+// connection is up and the room is held, as the server delivers by room.
+let fake: FakeHubSocket;
+function deliver(room: string, event: string, data: unknown, acknowledge?: (...args: unknown[]) => void) {
+  if (!fake.hub.connectedSocketId() || !fake.heldRooms().includes(room)) return false;
+  fake.deliver(event, data, acknowledge);
+  return true;
+}
 
 type DeliveryOptions = { threadId?: string; isChatRoute?: boolean; isWorkspaceVisible?: boolean; enabled?: boolean };
 function NavigateProbe({ threadId = 'thread-current', ...options }: DeliveryOptions) {
@@ -81,9 +33,7 @@ function TeleportProbe() {
 let container: HTMLDivElement;
 let root: Root;
 beforeEach(() => {
-  transport.sockets.length = 0;
-  transport.connectedOnCreate = false;
-  transport.create.mockClear();
+  fake = createFakeHubSocket();
   window.history.replaceState({}, '', '/thread/thread-current');
   window.sessionStorage.clear();
   __resetPendingTeleportForTest();
@@ -101,7 +51,7 @@ beforeEach(() => {
   });
   container = document.createElement('div');
   document.body.append(container);
-  root = createRoot(container);
+  root = withHubSocket(createRoot(container), fake.hub);
 });
 afterEach(async () => {
   await act(async () => root.unmount());
@@ -110,64 +60,67 @@ afterEach(async () => {
   __resetPendingTeleportForTest();
 });
 
-async function mountedSocket(kind: 'navigate' | 'teleport', options: DeliveryOptions = {}) {
+async function mount(kind: 'navigate' | 'teleport', options: DeliveryOptions = {}) {
   await act(async () => root.render(kind === 'navigate' ? <NavigateProbe {...options} /> : <TeleportProbe />));
-  await vi.waitFor(() => expect(transport.sockets).toHaveLength(1));
-  return transport.sockets[0];
 }
 
-it.each(['navigate', 'teleport'] as const)('joins an already connected socket for %s', async (kind) => {
-  transport.connectedOnCreate = true;
-  const socket = await mountedSocket(kind);
-  expect(socket.rooms.has(kind === 'navigate' ? 'workspace:navigate:ack' : 'workspace:global')).toBe(true);
+it.each([
+  'navigate',
+  'teleport',
+] as const)('holds its room on an already connected page connection for %s', async (kind) => {
+  fake.connect();
+  await mount(kind);
+  expect(fake.heldRooms()).toEqual([kind === 'navigate' ? 'workspace:navigate:ack' : 'workspace:global']);
 });
 
 it('the mounted navigation hook receives a second real delivery after transport reconnect, then detaches', async () => {
-  const socket = await mountedSocket('navigate');
+  await mount('navigate');
   const acknowledge = vi.fn();
   const send = (path: string, eventId: string) => {
     const data: NavigateEvent = { action: 'open', path, worktreeId: 'cat-cafe', threadId: 'thread-current', eventId };
-    act(() => socket.deliver('workspace:navigate:ack', 'workspace:navigate', data, acknowledge));
+    act(() => {
+      deliver('workspace:navigate:ack', 'workspace:navigate', data, acknowledge);
+    });
   };
-  socket.connectTransport();
+  fake.connect();
   send('docs/before.md', 'before');
   expect(useChatStore.getState().workspaceOpenFilePath).toBe('docs/before.md');
-  socket.disconnect();
-  socket.connectTransport();
+  fake.disconnect();
+  fake.connect();
   send('docs/after.md', 'after');
   expect(useChatStore.getState().workspaceOpenFilePath).toBe('docs/after.md');
   expect(acknowledge).toHaveBeenLastCalledWith({ status: 'applied', eventId: 'after' });
-  socket.announceConnect();
   send('docs/after.md', 'after');
   expect(acknowledge).toHaveBeenCalledTimes(2);
-  expect(socket.listeners.get('workspace:navigate')?.size).toBe(1);
+  expect(fake.listenerCount('workspace:navigate')).toBe(1);
   await act(async () => root.unmount());
-  expect(socket.listeners.get('connect')?.size ?? 0).toBe(0);
-  expect(socket.listeners.get('workspace:navigate')?.size).toBe(0);
+  expect(fake.listenerCount('workspace:navigate')).toBe(0);
+  expect(fake.heldRooms()).toEqual([]);
 });
 
 it('the same Teleport hook navigates after reconnect without remounting or duplicating the event listener', async () => {
-  const socket = await mountedSocket('teleport');
+  await mount('teleport');
   const send = (threadId: string, eventId: string) => {
-    act(() => socket.deliver('workspace:global', 'thread:teleport', { threadId, messageId: eventId, eventId }));
+    act(() => {
+      deliver('workspace:global', 'thread:teleport', { threadId, messageId: eventId, eventId });
+    });
   };
-  socket.connectTransport();
+  fake.connect();
   send('thread-before', 'message-before');
   expect(window.location.pathname).toBe('/thread/thread-before');
-  socket.disconnect();
-  socket.connectTransport();
+  fake.disconnect();
+  fake.connect();
   send('thread-after', 'message-after');
   expect(window.location.pathname).toBe('/thread/thread-after');
   expect(peekPendingTeleport('thread-after')).toEqual({ threadId: 'thread-after', messageId: 'message-after' });
-  socket.announceConnect();
-  expect(socket.listeners.get('thread:teleport')?.size).toBe(1);
+  expect(fake.listenerCount('thread:teleport')).toBe(1);
   const pushState = vi.spyOn(window.history, 'pushState');
   send('thread-after', 'message-after');
   expect(pushState).not.toHaveBeenCalled();
   pushState.mockRestore();
   await act(async () => root.unmount());
-  expect(socket.listeners.get('connect')?.size ?? 0).toBe(0);
-  expect(socket.listeners.get('thread:teleport')?.size).toBe(0);
+  expect(fake.listenerCount('thread:teleport')).toBe(0);
+  expect(fake.heldRooms()).toEqual([]);
 });
 
 it.each([
@@ -181,10 +134,10 @@ it.each([
   target,
   status,
 }) => {
-  const socket = await mountedSocket('navigate', options);
-  socket.connectTransport();
-  socket.disconnect();
-  socket.connectTransport();
+  await mount('navigate', options);
+  fake.connect();
+  fake.disconnect();
+  fake.connect();
   if (reason === 'presentation_lock') {
     useChatStore.setState({
       presentationLock: {
@@ -199,8 +152,8 @@ it.each([
     });
   }
   const acknowledge = vi.fn();
-  act(() =>
-    socket.deliver(
+  act(() => {
+    deliver(
       'workspace:navigate:ack',
       'workspace:navigate',
       {
@@ -211,21 +164,23 @@ it.each([
         eventId: reason,
       },
       acknowledge,
-    ),
-  );
+    );
+  });
   expect(acknowledge).toHaveBeenCalledWith({ status, reason, eventId: reason });
   expect(useChatStore.getState().workspaceOpenFilePath).toBeNull();
   expect(getPendingWorkspaceNavigation(window.sessionStorage, target)?.path).toBe('docs/queued.md');
 });
 
-it('does not create a socket while disabled and disconnects the current subscription when disabled', async () => {
+it('holds nothing while disabled and releases its room and listener when disabled again', async () => {
+  fake.connect();
   await act(async () => root.render(<NavigateProbe enabled={false} />));
-  expect(transport.create).not.toHaveBeenCalled();
+  expect(fake.heldRooms()).toEqual([]);
+  expect(fake.listenerCount('workspace:navigate')).toBe(0);
   await act(async () => root.render(<NavigateProbe enabled />));
-  const socket = transport.sockets[0];
-  socket.connectTransport();
-  expect(socket.rooms.has('workspace:navigate:ack')).toBe(true);
+  expect(fake.heldRooms()).toEqual(['workspace:navigate:ack']);
   await act(async () => root.render(<NavigateProbe enabled={false} />));
-  expect(socket.connected).toBe(false);
-  expect(socket.listeners.get('connect')?.size ?? 0).toBe(0);
+  expect(fake.heldRooms()).toEqual([]);
+  expect(fake.listenerCount('workspace:navigate')).toBe(0);
+  // The page connection itself stays up for the rest of the page.
+  expect(fake.hub.connectedSocketId()).not.toBeNull();
 });

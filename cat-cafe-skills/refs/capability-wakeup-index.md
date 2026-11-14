@@ -126,16 +126,16 @@ opus-47 原把 `workspace-navigator` / `rich-messaging` / `browser-preview` 一�
 
 **用法**：分步走动 + 视觉提示，配合 Guide Engine
 
-### 8. `collaborative-thinking` / `expert-panel` — 探索与多视角判断
+### 8. `collaborative-thinking` — 探索与多视角判断
 
 **坏直觉**：在同一个方向反复改 / 等人先把答案说清
 **场景 trigger**：
 - 有目标但不知道怎么做，或改了几版仍不满意
 - 架构决定（需要多视角校验）
 - 讨论中需要探索不同解释、方法或方向
-- operator明确要求专家团
+- operator说「头脑风暴」，或「专家辩论」「多猫分析」「三猫讨论」这类要几只猫各自想的说法
 
-**用法**：普通探索用 `collaborative-thinking`，它支持单猫与多猫思考，不自动召集队友。用户明确要求专家团时才用 `expert-panel`；普通“帮我分析一下”可以直接回答，需继续探索时走前者。已确定的实现与日常 bug 定位沿原工作路径，不为多视角重开讨论。
+**用法**：普通探索用 `collaborative-thinking`，它支持单猫与多猫思考，不自动召集队友。operator说「专家辩论」这类说法时，走它的多猫独立思考（Mode B）；普通“帮我分析一下”可以直接回答，需继续探索时再走它。已确定的实现与日常 bug 定位沿原工作路径，不为多视角重开讨论。
 
 ### 9. `cat_cafe_propose_thread` — 提议创建新 thread（F128）
 
@@ -240,7 +240,8 @@ opus-47 原把 `workspace-navigator` / `rich-messaging` / `browser-preview` 一�
 
 **坏直觉**：项目 repo 里搜不到就说"没有"
 **场景 trigger**：跨领域知识 / Lexander 虚拟世界 / 多 domain knowledge
-**Tools**：`cat_cafe_library_list` / `cat_cafe_library_dry_run` / `cat_cafe_library_create` / `cat_cafe_library_rebuild` / `cat_cafe_library_verify`
+**Tools**：`cat_cafe_library_list` / `cat_cafe_library_rebuild` / `cat_cafe_library_verify`
+**新建、归档资料库**：在主人的记忆页「资料库」里做（新建时先预览扫描，可填不收录的路径），猫侧没有对应工具；需要新库就请主人在页面上建。
 
 ### 18. `video-forge` / `ppt-forge` / `tech-writing` — 对外产出
 
@@ -268,23 +269,13 @@ opus-47 原把 `workspace-navigator` / `rich-messaging` / `browser-preview` 一�
 
 **Pipeline**：Web Deep Research + Coder 合成 + 云端模型咨询
 
-### 21. `mark_generalizable` / `nominate_for_global` — Lesson 全局化
-
-**坏直觉**：学到 lesson 只记 local memory
-**场景 trigger**：
-- 跨 feature / 跨族适用的 lesson
-- 别族猫也会犯的错
-- shared-rules 候选
-
-**Tools**：`cat_cafe_mark_generalizable` / `cat_cafe_nominate_for_global`
-
-### 22. F210 AGY adapter sticky 行为
+### 21. F210 AGY adapter sticky 行为
 
 **坏直觉**：以为 `/model` 直觉判断就够
 **场景 trigger**：Siamese / Antigravity carrier 或 model sticky 行为异常
 **Source**：`docs/architecture/cli-integration.md` + F210
 
-### 23. `capability-evolution` — F311 能力进化入口
+### 22. `capability-evolution` — F311 能力进化入口
 
 **坏直觉**：听到“你们能进化什么”只加载通用 `self-evolution` 讲理念；听到“我们来进化 X”或直接的 Agent / 业务结果，只给建议，不启动已经上线的 Program
 
@@ -310,9 +301,8 @@ opus-47 原把 `workspace-navigator` / `rich-messaging` / `browser-preview` 一�
 |---|---|---|
 | 多猫意见不一就无限互 @ 辩论 | `cat_cafe_start_vote` | 结构化表决，N 票收敛，不靠口头来回（v1.1 已进 L0 §8） |
 | 一个个 @ 召集猫开会 | `cat_cafe_multi_mention` | 一次性 @ 多猫进同 thread（L0 §7 quick index 有，但 trigger 易忘） |
-| expert-panel / review 报告只发聊天 | `cat_cafe_generate_document` | 生成正式 DOCX/PDF 文档（凭证不过期、可存档、可对外） |
+| 讨论纪要 / review 报告只发聊天 | `cat_cafe_generate_document` | 生成正式 DOCX/PDF 文档（凭证不过期、可存档、可对外） |
 | 想重开一条已知调查路线 | `cat_cafe_run_perspective` | git-backed Perspective live query 计划重放（advanced/niche，返回 route hints + anchors，仍需 typed reader 取证据） |
-| review 后 lesson 散在脑子里 | `cat_cafe_review_distillation` | 蒸馏 review 结论沉淀（配合 mark_generalizable） |
 | 想记住operator本人、个人近况、称谓或这只 persona 与operator之间特有的沟通边界 | `cat_cafe_propose_profile_update` | 提议更新 relationship primer（F231）；回答”operator是谁 / 咱们怎样相处”，不是通用质量判断；owner-wide 共享事实加 `targetLayer:'corpus'`；工具在 deferred list 需先 `tool_search` |
 | operator表达可复用的审美/品味/质量/设计或工程判断（正向“这就对了”或负向“太客服了”） | `cat_cafe_propose_taste` | 提议 taste vignette（F221）；回答“什么样的输出/系统才算好”，不是个人事实或重复流程规则；误投 profile 时有 `routing_advisory` |
 | 当轮确认了稳定人名↔workspace handle/别名，或人物私域事实/关系/互动，却当成一次性上下文放过 | `cat_cafe_propose_entity` / `cat_cafe_propose_person_memory` | 已查证、带 provenance 的 workspace 定位别名走 entity；owner-private 人物事实/关系/互动走 person-memory；两类同时成立则分别提案、分别审批。禁止裸名字猜身份或静默写入；工具在 deferred list 需先 `tool_search` |

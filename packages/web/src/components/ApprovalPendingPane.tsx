@@ -4,11 +4,12 @@ import type { ApprovalFeatureId, ApprovalHubItem } from '@cat-cafe/shared';
 import { Fragment, type ReactNode, useEffect, useMemo, useRef } from 'react';
 import { countApprovalFeatures, isApprovalItemBatchDecidable } from '@/lib/approval-features';
 import { approvalNavigationThreadIds } from '@/lib/approval-navigation';
+import { isScheduleDriftBlocked } from '@/stores/approval-decision-attempts';
 import { useApprovalHubStore } from '@/stores/approvalHubStore';
 import { ApprovalFeatureFilter } from './ApprovalFeatureFilter';
 import { ApprovalItemCard } from './ApprovalItemCard';
-
 import { approvalHistoryCopy } from './approval-history.shell-copy';
+import { approvalReconcileCopy } from './shell/mailbox/approval-reconcile.shell-copy';
 import { useShellCopy } from './shell/shell-copy';
 
 export type ApprovalStatusFilter = 'all' | 'pending' | 'stale';
@@ -18,6 +19,7 @@ export interface ApprovalPendingConsumer {
   /** The owner's displayed census; eligibility must never remove an existing decision. */
   items: readonly ApprovalHubItem[];
   canBatchDecide(item: ApprovalHubItem): boolean;
+  canBatchApprove?(item: ApprovalHubItem): boolean;
   emptyMessage: string;
   renderItem(item: ApprovalHubItem): ReactNode;
   onBatchDecision(kind: 'approve' | 'reject'): void;
@@ -69,6 +71,8 @@ export function ApprovalPendingPane({
   onThreadQueryChange,
 }: ApprovalPendingPaneProps) {
   const t = useShellCopy(approvalHistoryCopy);
+  const driftCopy = useShellCopy(approvalReconcileCopy);
+  const driftBlocked = useApprovalHubStore((state) => state.scheduleDriftBlocked);
   const rawItems = useApprovalHubStore((state) => state.items);
   const items = useMemo(
     () =>
@@ -214,6 +218,11 @@ export function ApprovalPendingPane({
                 onClick={() => (consumer ? consumer.onBatchDecision('approve') : batchApprove())}
                 className="rounded px-2 py-0.5 text-micro font-medium text-[var(--semantic-success)] hover:bg-[var(--semantic-success)]/10"
                 data-testid="approval-batch-approve"
+                disabled={batchItems.some(
+                  (item) =>
+                    selectedIds.has(item.proposalId) &&
+                    (isScheduleDriftBlocked(item, driftBlocked) || consumer?.canBatchApprove?.(item) === false),
+                )}
               >
                 {consumer ? t.agreeBatch : t.approveBatch}
               </button>
@@ -241,7 +250,8 @@ export function ApprovalPendingPane({
             <ul className="mt-1 space-y-0.5">
               {failedResults.map((result) => (
                 <li key={result.proposalId} data-testid={`batch-fail-${result.proposalId}`} className="break-all">
-                  {result.proposalId}: {result.error ?? t.unknownError}
+                  {result.proposalId}:{' '}
+                  {result.code === 'SCHEDULE_TASK_DRIFT' ? driftCopy.scheduleDrift : (result.error ?? t.unknownError)}
                 </li>
               ))}
             </ul>

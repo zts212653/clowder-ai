@@ -16,6 +16,7 @@
 
 import type { DynamicTaskDef } from '../../infrastructure/scheduler/DynamicTaskStore.js';
 import type { DurableManagedGateJob } from './durable-managed-gate-job.js';
+import { isTerminalHoldLifecycleStatus } from './hold-lifecycle-status.js';
 
 export type ManagedCommandWakeState =
   | 'not_started'
@@ -65,6 +66,8 @@ export interface ManagedCommandWakeProjection {
   /** F167 Phase P: true once the admission-fact visibility message was durably appended. */
   readonly admissionFactAppended?: boolean;
   readonly conditionMetAt?: number;
+  /** Job-owner production identity; it never represents Queue or response state. */
+  readonly productionIntentKey?: string;
   readonly lostAt?: number;
   readonly lostReason?: ManagedCommandWakeLostReason;
   readonly lostDetail?: string;
@@ -159,15 +162,8 @@ export function readHoldLifecycleProjection(task: DynamicTaskDef): Record<string
   if (lifecycle.mode !== 'timer' && lifecycle.mode !== 'wake_when') return null;
   if (
     lifecycle.status !== 'active' &&
-    lifecycle.status !== 'not_started' &&
-    lifecycle.status !== 'retired_by_event' &&
-    lifecycle.status !== 'retired_by_replacement' &&
-    lifecycle.status !== 'retired_expired' &&
-    lifecycle.status !== 'retired_invalid' &&
     lifecycle.status !== 'cancel_requested' &&
-    lifecycle.status !== 'cancelled_by_user' &&
-    lifecycle.status !== 'escalated' &&
-    lifecycle.status !== 'fired'
+    !isTerminalHoldLifecycleStatus(lifecycle.status)
   ) {
     return null;
   }

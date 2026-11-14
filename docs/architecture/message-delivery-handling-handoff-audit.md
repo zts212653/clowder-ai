@@ -5,7 +5,7 @@ doc_kind: architecture
 feature_ids: [F039, F055, F078, F117, F122, F167, F175, F177, F194, F233, F254, F264, F275, F277, F280, F296]
 topics: [message, queue, delivery, execution, a2a, routing, history, failure, observability]
 created: 2026-08-13
-updated: 2026-10-11
+updated: 2026-11-03
 status: approved
 architecture_cell: "dispatch + ball-custody + bubble-pipeline + approval-index"
 architecture_map_delta: "none — consolidates existing delivery, custody, result, and responsibility owners; adds no canonical cell or parallel ledger"
@@ -733,7 +733,7 @@ Queue commit 自身就是外部输入的持久边界。排队阶段的 source re
 
 新契约只保留一个 pre-admission 用户表面：Queue acceptance 后，发送者从 Queue Panel 获得完整正文、附件、持久 identity、reload 恢复与 Cancel/Steer/reorder 操作；共同 Chat History 只包含已经发生 actual dispatch 的输入。这样排序事实只在 Queue，conversation order 只在第一次 actual dispatch 时生成；每目标是否已经投递则只由 History `dispatchRefs` 表达，不再用一条 owner-only bubble 横跨多个时间坐标。排队消息在第一次 actual dispatch 前不会出现在 Chat History；这是 live cutover 必须一次完成的产品契约，不是兼容性 fallback。
 
-若 client 支持引导回复且已保存策略请求引导，服务端按同一 Queue 顺序领取 exact target，持久绑定 History 与原 response 后调用 dispatcher；客户端准备中时保留 exact parent，ready 回调重新通知 drain，不将暂未绑定 dispatcher 判为永久不支持。迁移时，旧 `deliveryStatus='queued'` owner-only records 若尚未发生实际投递，就降为 Queue source record 并从 shared History membership 移除；已经拥有 actual dispatch 或外部公开引用的 record 必须保留原 identity，并走显式 migration/quarantine，不能静默重排既有公开事实。
+若 client 支持引导回复且已保存策略请求引导，服务端按 §6.3 的当前引导顺序领取 exact target，持久绑定 History 与原 response 后调用 dispatcher；客户端准备中时保留 exact parent，ready 回调重新通知 drain，不将暂未绑定 dispatcher 判为永久不支持。迁移时，旧 `deliveryStatus='queued'` owner-only records 若尚未发生实际投递，就降为 Queue source record 并从 shared History membership 移除；已经拥有 actual dispatch 或外部公开引用的 record 必须保留原 identity，并走显式 migration/quarantine，不能静默重排既有公开事实。
 
 ### 5.3 Agent `post_message` 与 completed final：共用 History ref，写入时机不同
 
@@ -869,7 +869,7 @@ drain 已运行时，新事件不能被“已有任务”简单吞掉；它必�
 
 所有 entry kind 共用 `position → urgent/normal → enqueuedAt → stable id` comparator。priority 是 envelope 的显式两值字段，默认 normal；Queue 不按 kind、来源或正文暗中升级。drain 按 comparator 顺序扫描，保留已越过等待项的 target set：
 
-1. 自动追加与新回合都不能越过较早的同目标等待项、取消 fence 或尚未到期的重试。
+1. 新回合不能越过较早的同目标待办。已绑定有效父执行的当前引导可越过等待下一轮的待办，但不能越过较早的当前引导、在途 claim、取消 fence 或自身尚未到期的重试；未来工作仍保留原顺序。
 2. 普通新回合只领取一条 source 本轮完整可准入 target set；无关 target 可以越过忙项继续，targetless 且等待 thread idle 的历史输入则阻挡后续未知目标。
 3. 解析期间 Queue 可能被重排；领取前复核越过项身份和 targets，变化则重新扫描，不凭旧快照 side effect。
 4. durable receiver/ref 提交后，native ACK 只占自己的 exact target；完成通知同一 drain，不拖住无关成员或普通 HTTP 接纳。
@@ -877,14 +877,17 @@ drain 已运行时，新事件不能被“已有任务”简单吞掉；它必�
 
 ```text
 A 正在运行
-Queue: M1 → A (next_work), M2 → B, M3 → A
+Queue: M1 → A (next_work), M2 → B, M3 → A (next_work)
 M1 等待，B 可以处理 M2；M3 仍排在 M1 后面。
 A 终局后 requestDrain，先处理 M1，再处理 M3。
+
+若 M3 明确是绑定 A 当前父执行的 continue_current，则追加到该回合；
+M1 仍等待下一轮，既不提前启动，也不被删除。
 ```
 
 一次 try-drain 推进一条 source 的交接，后续信号继续扫描；不合并相邻 source 的正文或身份。失败退避只安排明确的下一次重试时间，并通知同一 owner，不新增 watchdog 或平行调度器。
 
-用户 reorder 提交 `expectedQueueRevision + orderedVisibleEntryIds`，同一事务写完整 visible positions；revision/集合/资格变化则拒绝并刷新。hidden private rows 不被客户端寻址，仍按显式 priority/FIFO 排序。有 position 的集合在未定位集合前，所以 `[V1,C1,V2,C2,V3]` 中把 visible 改为 `[V1,V3,V2]` 的结果是 `[V1,V3,V2,C1,C2]`。显式 Steer/Append 的 exact selection 与普通自动推进不同，不能使自动追加绕过上述同目标顺序。
+用户 reorder 提交 `expectedQueueRevision + orderedVisibleEntryIds`，同一事务写完整 visible positions；revision/集合/资格变化则拒绝并刷新。hidden private rows 不被客户端寻址，仍按显式 priority/FIFO 排序。有 position 的集合在未定位集合前，所以 `[V1,C1,V2,C2,V3]` 中把 visible 改为 `[V1,V3,V2]` 的结果是 `[V1,V3,V2,C1,C2]`。显式 Steer/Append 的 exact selection 与普通自动推进不同；自动追加仍遵守上面的当前引导顺序，不能改动未来待办的 comparator。
 
 ### 6.4 一次 drain 一条 source：不合并消息
 
@@ -1093,7 +1096,7 @@ Stop Agent 是 typed Agent execution control，不是 Queue control，也不是�
 
 ### 持久 cutover 与客户端确认
 
-自动追加和显式引导共用 QueueProcessor 的 exact append 路径，保留原 source message 与 response identity。普通自动追加先遵守同目标 comparator/held-target 顺序，再 claim exact entry；显式用户操作保留其独立选择语义。两者都在生命周期曝光或 native dispatcher 前核对 source/receiver 可见性、owner 和 exact parent。
+自动追加和显式引导共用 QueueProcessor 的 exact append 路径，保留原 source message 与 response identity。普通自动追加先遵守 §6.3 的同目标当前引导顺序，再 claim exact entry；较早的未来待办不阻挡有效当前引导。显式用户操作保留其独立选择语义。两者都在生命周期曝光或 native dispatcher 前核对 source/receiver 可见性、owner 和 exact parent。
 
 持久 acceptance 绑定 input IDs、source dispatch ref 与原 response，退役对应 pending target 后才调用 dispatcher。客户端拒收复用 exact input/generation 补偿，恢复尚未接管的目标；已接管 sibling 和已经提交的终局不能被回滚。读取回执只更新展示，不触发第二次投递。
 

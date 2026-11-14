@@ -17,6 +17,10 @@ export interface ToastItem {
   exiting?: boolean;
   /** The reader was opened, so this toast now requires an explicit dismissal. */
   manualDismissOnly?: boolean;
+  /** Retain owner-managed status notices when the transient queue fills. */
+  pinned?: boolean;
+  /** Let clicks pass through status text while keeping its buttons interactive. */
+  passThrough?: boolean;
 }
 
 interface ToastState {
@@ -37,12 +41,16 @@ export const useToastStore = create<ToastState>((set) => ({
     const item: ToastItem = { ...toast, id, createdAt: Date.now() };
     set((state) => {
       const next = [...state.toasts, item];
-      let transientToEvict = Math.max(0, next.filter((candidate) => !candidate.manualDismissOnly).length - 10);
+      let transientToEvict = Math.max(
+        0,
+        next.filter((candidate) => !candidate.manualDismissOnly && !candidate.pinned).length - 10,
+      );
       return {
         // Reader-opened toasts are user-held state. Keep them until explicit
-        // dismissal while bounding only the transient notification queue.
+        // dismissal; owner-managed status stays until resolved. Bound only the
+        // transient notification queue.
         toasts: next.filter((candidate) => {
-          if (candidate.manualDismissOnly || transientToEvict === 0) return true;
+          if (candidate.manualDismissOnly || candidate.pinned || transientToEvict === 0) return true;
           transientToEvict -= 1;
           return false;
         }),

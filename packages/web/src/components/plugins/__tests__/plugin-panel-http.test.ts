@@ -5,6 +5,37 @@ import { requestPluginHttp } from '../plugin-panel-http';
 const transport = vi.hoisted(() => vi.fn());
 vi.mock('@/utils/api-client', () => ({ apiFetch: transport }));
 
+it('preserves the authenticated mutation budget together with the notification policy', async () => {
+  transport.mockImplementation(async () => Response.json({ ok: true }));
+  const entry = { pluginId: 'dev.fixture', instanceId: 'fixture', generation: 'activation' };
+  try {
+    await requestPluginHttp(entry, { method: 'POST', path: 'action', body: {} }, undefined, {
+      notifyFailure: false,
+    });
+    expect(transport).toHaveBeenLastCalledWith(
+      '/api/plugins/dev.fixture/action',
+      expect.objectContaining({ method: 'POST', redirect: 'error' }),
+      { mutationTimeoutMs: 185_000, notifyFailure: false },
+    );
+
+    await requestPluginHttp(entry, { method: 'DELETE', path: 'action', body: {} });
+    expect(transport).toHaveBeenLastCalledWith(
+      '/api/plugins/dev.fixture/action',
+      expect.objectContaining({ method: 'DELETE' }),
+      { mutationTimeoutMs: 185_000 },
+    );
+
+    await requestPluginHttp(entry, { method: 'GET', path: 'resource' });
+    expect(transport).toHaveBeenLastCalledWith(
+      '/api/plugins/dev.fixture/resource',
+      expect.objectContaining({ method: 'GET' }),
+      undefined,
+    );
+  } finally {
+    transport.mockReset();
+  }
+});
+
 it('does not follow a plugin 307 into another Host endpoint with owner credentials', async () => {
   let writes = 0;
   const server = createServer((request, response) => {

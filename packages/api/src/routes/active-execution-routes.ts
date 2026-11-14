@@ -6,6 +6,7 @@ import type {
 } from '@cat-cafe/shared';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
+import { listPendingHoldWaits } from '../domains/ball-custody/hold-wait-projection.js';
 import {
   listManagedCommandExecutions,
   type ManagedCommandExecution,
@@ -17,6 +18,7 @@ import type { ITurnExecutionStore } from '../domains/cats/services/stores/ports/
 import type { DynamicTaskDef } from '../infrastructure/scheduler/DynamicTaskStore.js';
 import { migrateStoredProjectPath } from '../utils/persistent-project-path.js';
 import { resolveUserId } from '../utils/request-identity.js';
+import { projectHoldWaits } from './active-hold-wait-projection.js';
 import { nativeControlReceiptHooks, nativeLiveControlCommand } from './native-control-receipts.js';
 
 export interface LiveExecutionCandidate {
@@ -55,7 +57,11 @@ export interface ActiveExecutionRouteDeps {
    */
   readonly buildLiveCandidateSnapshot?: LiveExecutionCandidateSnapshotSource;
   readonly invocationTracker: ActiveExecutionTracker;
-  readonly dynamicTaskStore?: { getAll(): DynamicTaskDef[]; listManagedCommandCandidates?(): DynamicTaskDef[] };
+  readonly dynamicTaskStore?: {
+    getAll(): DynamicTaskDef[];
+    listManagedCommandCandidates?(): DynamicTaskDef[];
+    listHoldWaitCandidates?(): DynamicTaskDef[];
+  };
   readonly resolveLiveExecutions: (
     threadId: string,
     userId: string,
@@ -71,8 +77,20 @@ export interface ActiveExecutionRouteDeps {
     candidate: LiveExecutionCandidate;
     request: FastifyRequest;
   }) =>
-    | { cancelled: boolean; reconciled?: boolean; controlPlaneUnavailable?: boolean }
-    | Promise<{ cancelled: boolean; reconciled?: boolean; controlPlaneUnavailable?: boolean }>;
+    | {
+        cancelled: boolean;
+        reconciled?: boolean;
+        controlPlaneUnavailable?: boolean;
+        error?: string;
+        code?: string;
+      }
+    | Promise<{
+        cancelled: boolean;
+        reconciled?: boolean;
+        controlPlaneUnavailable?: boolean;
+        error?: string;
+        code?: string;
+      }>;
   /**
    * Reconcile an exact execution that disappeared between projection and Stop.
    * This runs only after the process-owner snapshot is complete and no newer
@@ -291,9 +309,13 @@ async function buildActiveExecutionList(
 ): Promise<ActiveExecutionListResponse> {
   const totalStartedAt = performance.now();
   const candidateStartedAt = performance.now();
+  // A store without the narrow selectors falls back to one full read per request, shared by both faces.
+  let allTasks: DynamicTaskDef[] | undefined;
+  const readAllTasks = () => (allTasks ??= deps.dynamicTaskStore?.getAll() ?? []);
   const managed = listManagedCommandExecutions(
-    deps.dynamicTaskStore?.listManagedCommandCandidates?.() ?? deps.dynamicTaskStore?.getAll() ?? [],
+    deps.dynamicTaskStore?.listManagedCommandCandidates?.() ?? readAllTasks(),
   );
+  const holds = listPendingHoldWaits(deps.dynamicTaskStore?.listHoldWaitCandidates?.() ?? readAllTasks());
   let snapshot: Awaited<ReturnType<LiveExecutionCandidateSnapshotSource>> | undefined;
   try {
     snapshot = await deps.buildLiveCandidateSnapshot?.(userId, request);
@@ -305,7 +327,11 @@ async function buildActiveExecutionList(
     (projectPath === null
       ? deps.threadStore.listCandidates !== undefined
       : deps.threadStore.hasByProject !== undefined && deps.threadStore.listProjectCandidates !== undefined);
-  const candidateIds = new Set([...(snapshot?.threadIds ?? []), ...managed.map((item) => item.threadId)]);
+  const candidateIds = new Set([
+    ...(snapshot?.threadIds ?? []),
+    ...managed.map((item) => item.threadId),
+    ...holds.map((item) => item.threadId),
+  ]);
   const visibleThreads: Thread[] = [];
   if (sparse) {
     visibleThreads.push(
@@ -376,14 +402,16 @@ async function buildActiveExecutionList(
   const unavailableProjectPaths = [
     ...new Set(liveGroups.filter((group) => group.unavailable).map((group) => group.thread.projectPath)),
   ];
+  const waits = projectHoldWaits(holds, userId, threadById, projectPath === null);
   const response: ActiveExecutionListResponse =
     projectPath === null
       ? {
           scope: 'all',
           executions: sortExecutions(executions),
+          waits,
           ...(unavailableProjectPaths.length ? { unavailableProjectPaths } : {}),
         }
-      : { projectPath, executions: sortExecutions(executions) };
+      : { projectPath, executions: sortExecutions(executions), waits };
   traceActiveProjectionStage(request, 'classification_assembly', elapsedMs(classificationStartedAt), {
     threadCount: threads.length,
     scanTargetCount: scanTargets.length,
@@ -576,8 +604,8 @@ export function registerActiveExecutionRoutes(app: FastifyInstance, deps: Active
       if (result.controlPlaneUnavailable) {
         reply.status(503);
         return {
-          error: '执行控制面暂时不可用，请重试',
-          code: 'EXECUTION_CONTROL_UNAVAILABLE',
+          error: result.error ?? '执行控制面暂时不可用，请重试',
+          code: result.code ?? 'EXECUTION_CONTROL_UNAVAILABLE',
         };
       }
       return {

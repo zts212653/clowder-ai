@@ -1,6 +1,7 @@
 import '../helpers/setup-cat-registry.js';
 import assert from 'node:assert/strict';
 import { mkdtemp, rm } from 'node:fs/promises';
+import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
@@ -13,7 +14,6 @@ import { AgentSessionBridgeService } from '../../dist/domains/cats/services/agen
 import { AcpSessionProvider } from '../../dist/domains/cats/services/agents/session-contract/acp-session-provider.js';
 import { MessageStore } from '../../dist/domains/cats/services/stores/ports/MessageStore.js';
 import { buildCancelMessages, SocketManager } from '../../dist/infrastructure/websocket/SocketManager.js';
-import { ThreadSequencer } from '../../dist/infrastructure/websocket/ThreadSequencer.js';
 import { appendTestLifecycleResponseSource } from '../helpers/message-from-fixtures.js';
 
 // A socket cancellation is a request. The route owns the one terminal after
@@ -80,10 +80,11 @@ for (const bridged of [false, true]) {
         const batch = tracker.startAll(threadId, ['codex'], 'user1');
         const store = new MessageStore();
         const emitted = [];
-        const socket = Object.create(SocketManager.prototype);
-        socket.sequencer = new ThreadSequencer();
-        socket.rateMonitor = { record() {} };
-        socket.io = { to: (room) => ({ emit: (event, message) => emitted.push({ room, event, message }) }) };
+        const socket = new SocketManager(createServer());
+        t.after(() => socket.close());
+        t.mock.method(socket.getIO(), 'to', (room) => ({
+          emit: (event, message) => emitted.push({ room, event, message }),
+        }));
         const deps = {
           services: { codex: service },
           invocationDeps: {

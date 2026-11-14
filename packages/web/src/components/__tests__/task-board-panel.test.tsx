@@ -2,6 +2,7 @@ import type { TaskItem } from '@cat-cafe/shared';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { ShellPresentationContext } from '@/components/shell/shell-presentation';
 
 Object.assign(globalThis as Record<string, unknown>, { React });
 
@@ -39,6 +40,13 @@ vi.mock('../TaskComposer', () => ({
   TaskComposer: () => <div data-testid="task-composer" />,
 }));
 
+// These cases protect the explicitly selected classic interface, independently of the new-visit default.
+function renderClassic(element: React.ReactNode) {
+  return renderToStaticMarkup(
+    <ShellPresentationContext.Provider value="classic">{element}</ShellPresentationContext.Provider>,
+  );
+}
+
 describe('TaskBoardPanel', () => {
   beforeEach(() => {
     mockTasks = [];
@@ -50,7 +58,7 @@ describe('TaskBoardPanel', () => {
   it('renders four status sections in correct order: doing, blocked, todo, done', async () => {
     mockTasks = makeTasks();
     const { TaskBoardPanel } = await import('../TaskBoardPanel');
-    const html = renderToStaticMarkup(<TaskBoardPanel />);
+    const html = renderClassic(<TaskBoardPanel />);
     const sections = ['进行中', '阻塞中', '待办', '已完成'];
     for (const label of sections) {
       expect(html).toContain(label);
@@ -64,7 +72,7 @@ describe('TaskBoardPanel', () => {
   it('shows doing and blocked task items (expanded by default)', async () => {
     mockTasks = makeTasks();
     const { TaskBoardPanel } = await import('../TaskBoardPanel');
-    const html = renderToStaticMarkup(<TaskBoardPanel />);
+    const html = renderClassic(<TaskBoardPanel />);
     expect(html).toContain('Doing task');
     expect(html).toContain('Blocked task');
   });
@@ -72,7 +80,7 @@ describe('TaskBoardPanel', () => {
   it('hides todo and done task items (collapsed by default)', async () => {
     mockTasks = makeTasks();
     const { TaskBoardPanel } = await import('../TaskBoardPanel');
-    const html = renderToStaticMarkup(<TaskBoardPanel />);
+    const html = renderClassic(<TaskBoardPanel />);
     expect(html).not.toContain('Todo task');
     expect(html).not.toContain('Done task');
   });
@@ -80,21 +88,21 @@ describe('TaskBoardPanel', () => {
   it('renders header with stats badge', async () => {
     mockTasks = makeTasks();
     const { TaskBoardPanel } = await import('../TaskBoardPanel');
-    const html = renderToStaticMarkup(<TaskBoardPanel />);
+    const html = renderClassic(<TaskBoardPanel />);
     expect(html).toContain('毛线球');
   });
 
   it('renders blocked section with red highlight', async () => {
     mockTasks = makeTasks();
     const { TaskBoardPanel } = await import('../TaskBoardPanel');
-    const html = renderToStaticMarkup(<TaskBoardPanel />);
+    const html = renderClassic(<TaskBoardPanel />);
     expect(html).toContain('bg-conn-red-bg');
   });
 
   it('shows empty state with guidance when no tasks', async () => {
     mockTasks = [];
     const { TaskBoardPanel } = await import('../TaskBoardPanel');
-    const html = renderToStaticMarkup(<TaskBoardPanel />);
+    const html = renderClassic(<TaskBoardPanel />);
     expect(html).toContain('把长期事项挂在线上');
     expect(html).toContain('创建第一颗毛线球');
     expect(html).toContain('何时该用毛线球');
@@ -108,7 +116,7 @@ describe('TaskBoardPanel', () => {
       JSON.stringify({ todo: false, done: true, doing: false, blocked: false }),
     );
     const { TaskBoardPanel } = await import('../TaskBoardPanel');
-    const html = renderToStaticMarkup(<TaskBoardPanel />);
+    const html = renderClassic(<TaskBoardPanel />);
     // todo section was set to not-collapsed, so its task should be visible
     expect(html).toContain('Todo task');
     // done section is still collapsed

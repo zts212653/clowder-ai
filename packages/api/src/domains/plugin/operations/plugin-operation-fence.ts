@@ -7,14 +7,14 @@ export interface PluginOperationCommitFence {
   assertRequestCurrent(): void;
   assertRecords(instance: PluginInstanceRecord | undefined, record: PluginPackageRecord | undefined): void;
 }
-export function assertOperationCommit(
+export async function assertOperationCommit(
   fence: PluginOperationCommitFence,
   transaction: PluginInventoryTransaction,
   pluginId: string,
-): void {
+): Promise<void> {
   fence.assertRequestCurrent();
-  const instance = transaction.instances.getCurrent(pluginId);
-  fence.assertRecords(instance, instance ? transaction.packages.get(instance.packageDigest) : undefined);
+  const instance = await transaction.instances.getCurrent(pluginId);
+  fence.assertRecords(instance, instance ? await transaction.packages.get(instance.packageDigest) : undefined);
 }
 export function expiredOperation(): never {
   throw new PluginOwnerOperationExpiredError();

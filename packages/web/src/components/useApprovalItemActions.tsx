@@ -56,9 +56,21 @@ export function useApprovalItemActions(
 
   const handleApprove = useCallback(async () => {
     if (!(await prepare('approve'))) return;
-    await guardedWrite('approve', () => approveProposal(item.proposalId));
+    await guardedWrite('approve', () =>
+      item.sourceFeatureId === 'F221' && typeof item.detail.decisionDigest === 'string'
+        ? approveProposal(item.proposalId, item.detail.decisionDigest)
+        : approveProposal(item.proposalId),
+    );
     await afterWrite?.();
-  }, [afterWrite, approveProposal, guardedWrite, item.proposalId, prepare]);
+  }, [
+    afterWrite,
+    approveProposal,
+    guardedWrite,
+    item.proposalId,
+    item.sourceFeatureId,
+    item.detail.decisionDigest,
+    prepare,
+  ]);
 
   const handleReject = useCallback(async () => {
     if (usesFeedbackDialog) {

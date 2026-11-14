@@ -257,20 +257,6 @@ export function readWindowsCreationMs(pid) {
   return output ? windowsCreationMs(output) : undefined;
 }
 
-/** Refuse to kill when the PID no longer belongs to the snapshotted process.
- * The creation timestamp is the cheap identity check Windows exposes; a
- * recycled PID would be a different process and must not be terminated. */
-export function revalidateWindowsTarget(pid, expectedCreatedAtMs, { readCreationMs = readWindowsCreationMs } = {}) {
-  if (expectedCreatedAtMs === undefined) return;
-  const actual = readCreationMs(pid);
-  if (actual === undefined) {
-    throw Object.assign(new Error(`process ${pid} is already gone`), { code: 'ESRCH' });
-  }
-  if (Math.abs(actual - expectedCreatedAtMs) > WINDOWS_CREATION_TOLERANCE_MS) {
-    throw Object.assign(new Error(`process ${pid} was recycled before termination`), { code: 'ESRCH' });
-  }
-}
-
 const WINDOWS_TERMINATE_SCRIPT = String.raw`
 $ErrorActionPreference = 'Stop'
 Add-Type -TypeDefinition @"

@@ -21,6 +21,7 @@ import {
 import { type PublishableTasteRepository, resolveCanonicalTasteRoot } from '../../taste/services/TasteRepository.js';
 import { projectTasteIndex } from '../../taste/services/taste-index-projection.js';
 import { parseTasteVignette, type TasteDecisionPayload, type TasteMemoryVisibility } from './TasteMemoryReader.js';
+import { serializeTasteFrontmatter } from './taste-frontmatter-serialization.js';
 import { validTasteSourcePath } from './taste-memory-identity.js';
 
 export class TasteMemoryMutationError extends Error {
@@ -225,7 +226,10 @@ function mutateTasteContent(
   const document = parseDocument(match[1]);
   if (document.errors.length > 0) throw new TasteMemoryMutationError('source_unavailable');
   applyTasteCommand(document, command);
-  return `---\n${document.toString().trimEnd()}\n---${match[2]}`;
+  const next = serializeTasteFrontmatter(document, match[2]);
+  // Never publish a re-serialization that a reader would see differently, or that the commit guard rejects.
+  if (next === undefined) throw new TasteMemoryMutationError('source_unavailable');
+  return next;
 }
 
 function applyTasteCommand(

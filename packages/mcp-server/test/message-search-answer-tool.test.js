@@ -31,7 +31,7 @@ afterEach(() => {
   Object.assign(process.env, savedEnv);
   globalThis.fetch = savedFetch;
 });
-test('one declared-write tool reuses the original message query while ordinary recall stays a readonly GET', async () => {
+test('one declared-write tool submits cat selections while ordinary recall stays a readonly GET', async () => {
   const read = evidenceTools.find((tool) => tool.name === 'cat_cafe_search_evidence');
   const write = evidenceTools.find((tool) => tool.name === 'cat_cafe_prepare_message_search_answer');
   assert.equal(read.annotations.readOnlyHint, true);
@@ -50,6 +50,15 @@ test('one declared-write tool reuses the original message query while ordinary r
   await handlePrepareMessageSearchAnswer({
     query: '一行',
     operationId: 'one-purpose',
+    selections: [
+      {
+        threadId: 'sources',
+        messageId: 'original',
+        contentRevision: 'a'.repeat(64),
+        quote: '一行',
+        reason: 'Chosen from the original.',
+      },
+    ],
     threadId: 'sources',
     destinationThreadId: 'answer-target',
     retrievalMode: 'hybrid',
@@ -65,6 +74,7 @@ test('one declared-write tool reuses the original message query while ordinary r
   for (const name of ['q', 'threadId', 'mode', 'messageSort', 'limit', 'resultUnit'])
     assert.equal(String(body[name]), calls[0].url.searchParams.get(name));
   assert.equal(body.operationId, 'one-purpose');
+  assert.equal(body.selections[0].quote, '一行');
   assert.equal(body.userId, undefined);
 });
 test('answer preparation does not retry a failed POST or enqueue a hidden second search', async () => {
@@ -74,6 +84,45 @@ test('answer preparation does not retry a failed POST or enqueue a hidden second
   };
   await handlePrepareMessageSearchAnswer({ query: '一行', operationId: 'same-operation' });
   assert.equal(calls.length, 1);
+});
+test('ordinary default changes do not alter the legacy answer retry identity when sort was omitted', async () => {
+  await handlePrepareMessageSearchAnswer({ query: 'piano', operationId: 'saved-legacy' });
+  assert.equal(JSON.parse(calls[0].init.body).messageSort, 'time');
+});
+test('chosen sources cross the declared write boundary without caller-supplied publisher authority', async () => {
+  const write = evidenceTools.find((tool) => tool.name === 'cat_cafe_prepare_message_search_answer');
+  const selections = [
+    {
+      threadId: 'original',
+      messageId: 'message',
+      contentRevision: 'a'.repeat(64),
+      quote: 'Only if tests pass.',
+      reason: 'A conditional suggestion.',
+    },
+  ];
+  assert.equal(write.inputSchema.selections.safeParse(selections).success, true);
+  assert.equal(write.inputSchema.selections.safeParse([{ ...selections[0], author: 'user' }]).success, false);
+  assert.equal(write.inputSchema.selections.safeParse([selections[0], selections[0]]).success, false);
+  await handlePrepareMessageSearchAnswer({ query: 'decision', operationId: 'selected-purpose', selections });
+  assert.deepEqual(JSON.parse(calls[0].init.body).selections, selections);
+  assert.match(write.description, /without another search or generative judge/);
+  assert.match(write.description, /your judgment, not system-certified support/);
+});
+test('answer preparation requires selected originals while preserving the identity of saved-operation retries', () => {
+  const read = evidenceTools.find((tool) => tool.name === 'cat_cafe_search_evidence');
+  const write = evidenceTools.find((tool) => tool.name === 'cat_cafe_prepare_message_search_answer');
+  assert.match(read.inputSchema.messageSort.description, /first 32 admitted relevance sources/);
+  assert.doesNotMatch(read.description, /legacy qualified mode is transitional/i);
+  assert.match(read.description, /New cards require selections/);
+  assert.match(read.description, /Only saved legacy query-only operations accept retries without selections/);
+  assert.doesNotMatch(write.inputSchema.messageSort.description, /first 32|32.*window/);
+  assert.match(write.inputSchema.messageSort.description, /request identity.*retries/);
+  assert.match(write.description, /New cards require selections/);
+  assert.match(write.inputSchema.selections.description, /Required for a new card/);
+  assert.match(write.inputSchema.selections.description, /legacy query-only/);
+  assert.match(write.description, /same operationId and original arguments/);
+  assert.doesNotMatch(write.description, /Host-qualified subset|legacy search policy|During migration/);
+  assert.doesNotMatch(write.description, /same bounded message result|same decided-table card/);
 });
 test('explicit replies carry only a reference and require the original stable message identity', async () => {
   const searchAnswer = { publicationRef: `message-search-answer:${'a'.repeat(64)}` };

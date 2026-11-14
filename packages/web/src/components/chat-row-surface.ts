@@ -1,3 +1,4 @@
+import { readHoldCardCancelability } from '@cat-cafe/shared';
 import { formatVisibleSystemInfo } from '@/hooks/system-info-visible';
 import type { ChatMessage, EvidenceData, RichBlock } from '@/stores/chat-types';
 import { isLinkedDeliveryFailureCarrier } from './MessageDispatchAvatars';
@@ -41,6 +42,7 @@ export function isAbsorbedManagedJobMessage(message: ChatMessage, timeline: read
     !source.meta.jobId ||
     typeof source.meta.taskId !== 'string' ||
     !source.meta.taskId ||
+    readHoldCardCancelability(source.meta) === 'informational' ||
     source.meta.managedJobCard === true
   )
     return false;

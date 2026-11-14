@@ -23,7 +23,7 @@ export interface WorkListReader {
 }
 
 interface Dependencies {
-  owner: Pick<ProjectContentOwnerService, 'retainedMediaHeads'>;
+  owner: Pick<ProjectContentOwnerService, 'retainedMediaHeads' | 'retainedThreadMediaHeads'>;
   authorize(input: WorkAuthorizationInput): Promise<void>;
   read(reference: WorkReference, principal: WorkPrincipal): Promise<WorkReadResult>;
 }
@@ -37,7 +37,20 @@ export async function withWorkCatalogueRead<T>(
 ): Promise<T> {
   const timing = createWorkCatalogueReadTiming(observer);
   let outcome: 'success' | 'failed' = 'failed';
-  let catalogue: Promise<RetainedMediaHead[]> | undefined;
+  const catalogues = new Map<string | undefined, Promise<RetainedMediaHead[]>>();
+  const catalogueFor = (threadId?: string) => {
+    let catalogue = catalogues.get(threadId);
+    if (!catalogue) {
+      catalogue = timing
+        .measure('discovery', () => readHeads(deps.owner, ownerUserId, threadId))
+        .then((heads) => {
+          timing.counts.heads += heads.length;
+          return heads;
+        });
+      catalogues.set(threadId, catalogue);
+    }
+    return catalogue;
+  };
   const returned: { principal: WorkPrincipal; scope: WorkPublicationScopeV1 }[] = [];
   let active = true;
   const reader: WorkListReader = {
@@ -46,13 +59,16 @@ export async function withWorkCatalogueRead<T>(
       if (!Number.isSafeInteger(limit) || limit < 1 || limit > 512) throw new TypeError('Invalid recent Work limit');
       await timing.measure('admission', () => deps.authorize({ principal, permission: 'read' }));
       timing.counts.pages++;
-      catalogue ??= timing
-        .measure('discovery', () => readHeads(deps.owner, ownerUserId))
-        .then((heads) => {
-          timing.counts.heads = heads.length;
-          return heads;
-        });
-      const heads = await catalogue;
+      const pending = new Set(threadIds).values();
+      const heads: RetainedMediaHead[] = [];
+      const reads = await Promise.allSettled(
+        Array.from({ length: Math.min(4, threadIds.length) }, async () => {
+          for (const threadId of pending) heads.push(...(await catalogueFor(threadId)));
+        }),
+      );
+      reads.forEach((result) => {
+        if (result.status === 'rejected') throw result.reason;
+      });
       const visible = new Set(
         (await timing.measure('visibility', () => visibleHeads(deps, heads, principal, new Set(threadIds)))).map(
           (item) => item.contentRef,
@@ -83,13 +99,7 @@ export async function withWorkCatalogueRead<T>(
       if (!active || principal.userId !== ownerUserId) throw new MediaOwnerError('access_denied');
       await timing.measure('admission', () => deps.authorize({ principal, permission: 'read' }));
       timing.counts.pages++;
-      catalogue ??= timing
-        .measure('discovery', () => readHeads(deps.owner, ownerUserId))
-        .then((heads) => {
-          timing.counts.heads = heads.length;
-          return heads;
-        });
-      const heads = await catalogue;
+      const heads = await catalogueFor(threadFilter);
       const visible = await timing.measure('visibility', () => visibleHeads(deps, heads, principal, threadFilter));
       const snapshot = `sha256:${createHash('sha256').update(JSON.stringify(visible)).digest('hex')}`;
       if ((after && !expectedSnapshot) || (expectedSnapshot && expectedSnapshot !== snapshot))
@@ -110,12 +120,13 @@ export async function withWorkCatalogueRead<T>(
   };
   try {
     const result = await consume(reader);
-    if (
-      catalogue &&
-      JSON.stringify(await catalogue) !==
-        JSON.stringify(await timing.measure('manifestValidation', () => readHeads(deps.owner, ownerUserId)))
-    )
-      throw new MediaOwnerError('publication_changed');
+    for (const [threadId, catalogue] of catalogues) {
+      if (
+        JSON.stringify(await catalogue) !==
+        JSON.stringify(await timing.measure('manifestValidation', () => readHeads(deps.owner, ownerUserId, threadId)))
+      )
+        throw new MediaOwnerError('publication_changed');
+    }
     await timing.measure('finalAuthorization', async () => {
       for (const { principal, scope } of returned) await deps.authorize({ principal, permission: 'read', scope });
     });
@@ -169,9 +180,13 @@ async function visibleHeads(
   return visible;
 }
 
-async function readHeads(owner: Dependencies['owner'], ownerUserId: string) {
+async function readHeads(owner: Dependencies['owner'], ownerUserId: string, threadId?: string) {
   const heads: RetainedMediaHead[] = [];
-  for await (const head of owner.retainedMediaHeads(ownerUserId, true)) {
+  const source =
+    threadId === undefined
+      ? owner.retainedMediaHeads(ownerUserId, true)
+      : owner.retainedThreadMediaHeads(ownerUserId, threadId);
+  for await (const head of source) {
     heads.push(head);
     if (heads.length > 10000) throw new MediaOwnerError('media_unavailable');
   }

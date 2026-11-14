@@ -8,10 +8,22 @@ const EN_TIME_BOUND =
 const ZH_PAST_REFERENCE = /(?:很久|很早|过去|以前|此前|先前|上次|当时|原来|曾经)/u;
 const ZH_PAST_ACTION =
   /(?:已经|曾经|过去|以前|此前|先前|上次|当时|原来|(?:讨论|说|做|完成|提交|交付|处理|准备|发布|发|聊|看|改|审|批准|验收|整理|定|去|来)(?:过|了))/u;
+const ZH_NOMINALIZED_PAST_STATE = /^(?:设计|开发|实现|安装|配置)的[^，,。！？!?；;\n]{0,24}是(?:可|已|曾|当时|原来)/u;
+const ZH_OBLIGATION_TERMS = '请|要|必须|需要|务必|应当|应该|尽量|麻烦你';
+const ZH_NOMINALIZED_STATE_OBLIGATION = new RegExp(`(?:${ZH_OBLIGATION_TERMS}|得)`, 'u');
+const ZH_RECOLLECTION_COMPLEMENT_OBLIGATION = new RegExp(
+  `(?:${ZH_OBLIGATION_TERMS}|得(?=(?:在|于|是|保证|确保)))`,
+  'u',
+);
 const ZH_REPORTED = /(?:说过|提过|写着|写道|记着|记录着|(?:他|她|用户).{0,8}说)/u;
+const ZH_RECOLLECTION = /我(?:还)?记得/gu;
 const ZH_RETURN = /^(?:(?:请|要|麻烦你)\s*)?(?:回到|返回到?|恢复到|退回到|切回到|回溯到)/u;
-const ZH_PROSPECTIVE_MODAL =
-  /^(?:(?:我们|你们|我|你|现在|如今|接下来)\s*){0,2}(?:请|要|必须|需要|务必|应当|应该|尽量|麻烦你)/u;
+const ZH_PROSPECTIVE_COMMITMENT = /(?:承诺|约定|答应|说好)(?:在|于|是)/u;
+const ZH_FUTURE_DIRECTION = /(?:下次|即将|下一轮|未来)/u;
+const ZH_PROSPECTIVE_MODAL = new RegExp(
+  `^(?:(?:我们|你们|我|你|现在|如今|接下来)\\s*){0,2}(?:${ZH_OBLIGATION_TERMS})`,
+  'u',
+);
 const ZH_CURRENT_RESET = /^(?:但|不过|而)?(?:现在|如今)/u;
 const ZH_CONTRAST = /(?:但|不过|然而|可是|而)/u;
 const ZH_PERSON_ONLY = /^(?:我|我们|你|你们|他|他们|她|她们)$/u;
@@ -44,6 +56,24 @@ function localModality(prefix: string, afterModal: boolean, contrast: RegExp, re
 
 function reportedInScope(prefix: string, attributionClause: string, currentShift: boolean, reported: RegExp) {
   return reported.test(prefix) || (!currentShift && reported.test(attributionClause));
+}
+
+function lastRecollectionComplement(prefix: string): string | undefined {
+  let complement: string | undefined;
+  for (const match of prefix.matchAll(ZH_RECOLLECTION)) {
+    complement = prefix.slice(match.index + match[0].length).trim();
+  }
+  return complement;
+}
+
+function nominalizedPastStateRelation(prefix: string, action: string): EntrustedWorkTimeRelation | undefined {
+  if (!ZH_NOMINALIZED_PAST_STATE.test(action)) return undefined;
+  if (ZH_FUTURE_DIRECTION.test(prefix)) return 'deadline';
+  if (ZH_PROSPECTIVE_COMMITMENT.test(prefix)) return 'deadline';
+  if (ZH_NOMINALIZED_STATE_OBLIGATION.test(action)) return 'deadline';
+  const complement = lastRecollectionComplement(prefix);
+  if (complement === undefined) return 'deadline';
+  return ZH_RECOLLECTION_COMPLEMENT_OBLIGATION.test(complement) ? 'deadline' : 'historical_reference';
 }
 
 function englishPastMatrix(preceding: string): EntrustedWorkTimeRelation | undefined {
@@ -86,7 +116,10 @@ function classifyChineseMarker(leading: string, prefix: string, following: strin
   if (ZH_RETURN.test(prefix)) return 'ambiguous';
   if (modality.prospective) return 'deadline';
   if (ZH_PAST_REFERENCE.test(event)) return event.includes('的') ? 'ambiguous' : 'historical_reference';
-  return ZH_PAST_ACTION.test(action) ? 'historical_reference' : 'deadline';
+  if (ZH_PAST_ACTION.test(action)) return 'historical_reference';
+  const nominalizedState = nominalizedPastStateRelation(prefix, action);
+  if (nominalizedState) return nominalizedState;
+  return 'deadline';
 }
 
 function chineseBeforeRelation(sentence: string): EntrustedWorkTimeRelation {

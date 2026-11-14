@@ -44,6 +44,10 @@ const titles = {
 const readViews = (sourceReader: MemoryCueSourceReader) =>
   readRecallSourceViews(db, 'owner', 'thread', [], ['inv'], {
     cueSourceReader: sourceReader,
+    personDeliveryReader: async (_owner, _id, revision) => {
+      assert.equal(revision, 'r1');
+      return { status: 'ready', displayName: titles.person_entity, message: null };
+    },
     personMemoryStore: { getPerson: async (ownerUserId) => ({ ownerUserId, displayName: '吴浪', status: 'active' }) },
   });
 
@@ -58,7 +62,7 @@ it('opening history identifies the profile owner target without using an expired
   assert.equal(views.find((item) => item.anchor === 'profile:opening-capsule')?.profileMemoryId, 'capsule');
   const primer = views.find((item) => item.anchor === 'profile:opening-primer:astra:sonnet');
   assert.equal(primer?.profileMemoryId, 'primer:astra');
-  assert.equal(primer?.title, '开场递送 · 关系参考');
+  assert.equal(primer?.title, '关系画像');
   assert.equal(primer?.href, null, 'no fabricated profile deep link before the real UI entry exists');
 });
 
@@ -116,7 +120,7 @@ it('projects readable titles for all admitted families without exporting source 
       assert.equal(input.consumerCatId, 'sonnet');
       const payload =
         input.family === 'taste'
-          ? { vignette: { when: titles.taste, quotes: ['PRIVATE'], scene: 'PRIVATE' } }
+          ? { vignette: { when: '2026-11-09', takeaway: titles.taste, quotes: ['PRIVATE'], scene: 'PRIVATE' } }
           : input.family === 'profile'
             ? { profileUri: 'cat-cafe-profile://relationship/current', content: 'PRIVATE' }
             : input.family === 'event'
@@ -197,7 +201,12 @@ it('reads the title from taste task-bundle and dimension payloads without quotes
         status: 'ok',
         payload:
           input.anchor === 'bundle'
-            ? { vignette: { sourcePath: 'PRIVATE', payload: { when: '任务里的品味', quotes: ['PRIVATE'] } } }
+            ? {
+                vignette: {
+                  sourcePath: 'PRIVATE',
+                  payload: { when: '2026-11-09', takeaway: '任务里的品味', quotes: ['PRIVATE'] },
+                },
+              }
             : { vignettes: [{ payload: { when: '第一条品味' } }, { payload: { when: '第二条品味' } }] },
       };
     },
@@ -215,7 +224,8 @@ it('projects an actual approved ELI5 vignette through the canonical owner and re
   writeFileSync(
     join(root, sourcePath),
     `---
-when: "提到 ELI5 时先讲直觉"
+when: "2026-11-09"
+takeaway: "提到 ELI5 时先讲直觉"
 quotes: ["PRIVATE quote"]
 scene: "PRIVATE scene"
 tags: [ELI5, HTML富文本, 概念对比, 可视化优先]

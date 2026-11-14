@@ -11,22 +11,11 @@
  * | M2      | invoke-single-cat.ts | Transport-layer (transcript path hints)       |
  */
 
-import { createHash } from 'node:crypto';
 import type { HookStage, TraceEventObserved } from '@cat-cafe/shared';
-
-// ---------------------------------------------------------------------------
-// Helpers (shared with HookPipeline but kept local to avoid circular deps)
-// ---------------------------------------------------------------------------
-
-function hashOrNull(content: string | null | undefined): string | null {
-  if (!content) return null;
-  return createHash('sha256').update(content, 'utf8').digest('hex').slice(0, 16);
-}
-
-function estimateTokens(content: string | null | undefined): number {
-  if (!content) return 0;
-  return Math.ceil(content.length / 4);
-}
+// Same hash and token heuristic as the pipeline's fired events, so observed and
+// fired events in one trace are measured alike. HookPipeline imports nothing
+// from this file, so there is no cycle.
+import { estimateTokens, hashContent } from './HookPipeline.js';
 
 // ---------------------------------------------------------------------------
 // Adapter factory
@@ -46,8 +35,8 @@ export function createObservedEvent(
     stage,
     timestamp: Date.now(),
     status: 'observed',
-    contentHash: hashOrNull(content) ?? '',
-    tokenEstimate: estimateTokens(content),
+    contentHash: content ? hashContent(content) : '',
+    tokenEstimate: content ? estimateTokens(content) : 0,
   };
 }
 

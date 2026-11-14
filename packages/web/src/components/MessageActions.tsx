@@ -243,9 +243,10 @@ export function MessageActions({
   const isAssistant = message.type === 'assistant' || (message.type === 'user' && !!message.catId);
   const isRecalled = Boolean(message.extra?.recall);
   const invocationTrajectory = describeMessageInvocationTrajectory(message);
-  const canAct = (isUser || isAssistant) && !message.isStreaming && !message.queuedEntryId && !isRecalled;
+  const canAct =
+    (isUser || isAssistant) && !message.sendAttempt && !message.isStreaming && !message.queuedEntryId && !isRecalled;
   // #699: Reply is available on all message types (not just user/assistant)
-  const canReply = !message.isStreaming && !message.queuedEntryId && !isRecalled;
+  const canReply = !message.sendAttempt && !message.isStreaming && !message.queuedEntryId && !isRecalled;
   // A processing lifecycle can exist before its assistant bubble has any body.
   // In that state MessageActionSlot has not mounted, so the legacy fallback dock
   // would float over the author row. Wait for the real bubble-owned slot instead.

@@ -2,6 +2,7 @@
 import type { MemberVisualAssets } from '@cat-cafe/shared';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { CatData } from '@/hooks/useCatData';
+import { isDshMember, useMemberModelCatalogs } from '@/lib/member-model-display';
 import { API_URL, apiFetch } from '@/utils/api-client';
 import type { MemberSaveTrace } from '@/utils/member-save-trace';
 import type { TemplateCard } from '../../first-run-quest/TemplateStep';
@@ -25,7 +26,7 @@ import {
   rebaseMemberDraft,
   templateForm,
 } from './member-editor-state';
-import { patchMemberRuntime, type RuntimeChoice, switchMemberRuntime } from './member-runtime-draft';
+import { matchesRuntime, patchMemberRuntime, type RuntimeChoice, switchMemberRuntime } from './member-runtime-draft';
 import { readMemberResponse as readResponse, saveMemberExtras } from './member-save-extras';
 import { saveMemberRecord } from './member-save-record';
 import { useMemberSaveTrace } from './useMemberSaveTrace';
@@ -192,6 +193,7 @@ export function useMemberEditor(
       ...previous,
       templateId: template?.id ?? null,
       runtimeDrafts: undefined,
+      preparedRuntime: undefined,
       form: template ? templateForm(template, cats, previous.form) : initialState(),
     }));
   const patchStrategy = (change: Partial<StrategyFormState>) =>
@@ -262,7 +264,18 @@ export function useMemberEditor(
         conflict: () => setConflicted(true),
       });
       persisted = member;
-      const next = await saveMemberExtras(snapshot, member, trace, commit);
+      const prepared = snapshot.preparedRuntime;
+      if (prepared && matchesRuntime(initialState(member), prepared) && isDshMember(member, [prepared])) {
+        // The confirmed saved descriptor now owns this backend preparation proof.
+        // A successful discovery replaces this cache; failed discovery keeps it.
+        const id = `acp:${member.id}`;
+        useMemberModelCatalogs.setState(({ runtimes, runtimeRevision }) => ({
+          runtimes: [...runtimes.filter((runtime) => runtime.id !== id), { ...prepared, id }],
+          runtimeRevision: runtimeRevision + 1,
+          runtimeConfirmedRevision: runtimeRevision + 1,
+        }));
+      }
+      const next = await saveMemberExtras({ ...snapshot, preparedRuntime: undefined }, member, trace, commit);
       persistMemberDraft(storageKey.current, null);
       setDraft({ ...next, strategyBaseline: next.strategy });
       setNotice('已保存。正在运行的回合不变，后续调用使用新设置。');

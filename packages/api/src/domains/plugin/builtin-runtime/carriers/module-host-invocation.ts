@@ -87,7 +87,7 @@ function projectNativeContext(caller: PluginCallContext | undefined) {
 }
 
 /** Reuse the HTTP route's captured facts and lifetime; no package-supplied identity. */
-function projectOwnerHttpContext(instanceId: string) {
+export function projectOwnerHttpContext(instanceId: string) {
   const caller = currentPluginOwnerRequestContext(instanceId);
   return caller
     ? Object.freeze({

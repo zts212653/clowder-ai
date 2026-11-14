@@ -74,6 +74,10 @@ export class CatCafeScanner implements RepoScanner {
     return results;
   }
 
+  acceptsPath(filePath: string, projectRoot: string): boolean {
+    return !this.isExcluded(filePath, projectRoot);
+  }
+
   private isExcluded(filePath: string, projectRoot: string): boolean {
     const rel = relative(projectRoot, filePath);
     if (rel.split(/[\\/]+/).some((segment) => GENERATED_DOC_DIRS.has(segment))) return true;
@@ -95,6 +99,19 @@ export class CatCafeScanner implements RepoScanner {
       return null;
     }
 
+    return this.parseContent(filePath, projectRoot, content);
+  }
+
+  parseContents(filePath: string, projectRoot: string, content: string): ScannedEvidence[] {
+    if (!this.acceptsPath(filePath, projectRoot)) return [];
+    const parsed = this.parseContent(filePath, projectRoot, content);
+    return [
+      ...(relative(projectRoot, filePath) === 'lessons-learned.md' ? splitLessonContent(content) : []),
+      ...(parsed ? [parsed] : []),
+    ];
+  }
+
+  private parseContent(filePath: string, projectRoot: string, content: string): ScannedEvidence | null {
     if (filePath.endsWith('.svg')) {
       return parseSvgAssetToEvidence(filePath, projectRoot, content);
     }
@@ -178,6 +195,10 @@ function splitLessonsLearned(docsRoot: string) {
     return [];
   }
 
+  return splitLessonContent(content);
+}
+
+function splitLessonContent(content: string): ScannedEvidence[] {
   const results: ScannedEvidence[] = [];
   for (const section of lessonSections(content)) {
     const body = section.content.slice(section.content.indexOf('\n') + 1).trim();

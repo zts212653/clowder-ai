@@ -605,19 +605,74 @@ describe('F263 Phase A coverage contract', () => {
     assert.ok(result.degraded?.some((item) => item.source === 'threads' && item.reason.includes('latency budget')));
   });
 
-  it('marks all-source timeout as retryable incomplete without a continuation pointer', async () => {
+  it('marks all-source timeout as retryable incomplete without a continuation pointer', async (t) => {
     const { CoverageSearchService } = await import('../../dist/domains/memory/CoverageSearchService.js');
-    const service = new CoverageSearchService({ searchWithMeta: async () => new Promise(() => {}) }, null, {
-      latencyBudgetMs: 20,
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    let wallTime = 1000;
+    t.mock.method(Date, 'now', () => wallTime);
+    let entered = 0;
+    let canceled = 0;
+    let allEntered;
+    const started = new Promise((resolve) => {
+      allEntered = resolve;
     });
+    const service = new CoverageSearchService(
+      {
+        searchWithMeta: (_query, { signal }) => {
+          if (++entered === 2) allEntered();
+          return new Promise((resolve) =>
+            signal.addEventListener(
+              'abort',
+              () => {
+                canceled++;
+                resolve({ items: [], meta: { degraded: false } });
+              },
+              { once: true },
+            ),
+          );
+        },
+      },
+      null,
+      { latencyBudgetMs: 20 },
+    );
 
-    const result = await service.search('all stalled', { scope: 'all', limit: 20 });
+    const pending = service.search('all stalled', { scope: 'all', limit: 20 });
+    let earlyError;
+    void pending.catch((error) => {
+      earlyError = error;
+    });
+    // The outer timer is already armed for 20ms. The next macrotask arms the
+    // discovery timers for 19ms, then they wake while wall time is still 1019.
+    wallTime = 1001;
+    await started;
+    wallTime = 1019;
+    t.mock.timers.tick(19);
+    await new Promise((resolve) => setImmediate(resolve));
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(earlyError, undefined, 'inner timer ordering must not leak a TimeoutError out of coverage');
+    wallTime = 1020;
+    t.mock.timers.tick(1);
+
+    const result = await pending;
 
     assert.deepEqual(result.matrix, []);
     assert.equal(result.contract.latency.timedOut, true);
+    assert.equal(result.contract.latency.abortPropagated, true);
+    assert.equal(canceled, 2, 'both owned reads must stop before coverage returns');
     assert.equal(result.contract.response.hasMore, false);
     assert.equal(result.contract.response.drillDown, undefined);
     assert.deepEqual(result.degraded?.map((item) => item.source).sort(), ['docs', 'threads']);
+  });
+
+  it('preserves a source TimeoutError before the coverage deadline', async () => {
+    const { CoverageSearchService } = await import('../../dist/domains/memory/CoverageSearchService.js');
+    const failure = new DOMException('source transport failed', 'TimeoutError');
+    const service = new CoverageSearchService({
+      searchWithMeta: async () => {
+        throw failure;
+      },
+    });
+    await assert.rejects(service.search('source failure', { scope: 'threads' }), (error) => error === failure);
   });
 
   it('keeps completed all-scope hits and degrades only the source that stalls', async () => {

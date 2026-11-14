@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 /**
  * P1 regression test for cross-thread event leakage via useSocket.
  *
@@ -58,6 +59,8 @@ const mockClearThreadActiveInvocation = vi.fn();
 const mockSetPendingPreviewAutoOpen = vi.fn();
 const mockQueueThreadPreview = vi.fn();
 const mockUpsertLifecycleMessage = vi.fn();
+const mockSetLastSeq = vi.fn();
+const mockSetPendingCatchUpTargetSeq = vi.fn();
 // Stateful slot records so spawn_started/intent_mode registration behavior
 // (startedAt preservation, slot-count stability) can be asserted through the
 // real handler code, mimicking chatStore's `startedAt ?? Date.now()` write.
@@ -140,6 +143,8 @@ vi.mock('@/stores/chatStore', () => {
     setPendingPreviewAutoOpen: mockSetPendingPreviewAutoOpen,
     queueThreadPreview: mockQueueThreadPreview,
     upsertLifecycleMessage: mockUpsertLifecycleMessage,
+    setLastSeq: mockSetLastSeq,
+    setPendingCatchUpTargetSeq: mockSetPendingCatchUpTargetSeq,
   });
   const useChatStore = ((selector?: (state: ReturnType<typeof getState>) => unknown) =>
     selector ? selector(getState()) : getState()) as {
@@ -972,7 +977,7 @@ describe('useSocket thread guard (P1 regression: cross-thread event leakage)', (
     expect(mockAddFlatActiveInvocation).toHaveBeenCalledWith('inv-1', 'opus', 'execute', undefined);
     expect(mockAddFlatActiveInvocation).toHaveBeenCalledWith('inv-1-kimi', 'kimi', 'execute', undefined);
     expect(Object.keys(mockActiveInvocations)).toHaveLength(2);
-    expect(mockApiFetch).toHaveBeenCalledWith('/api/executions/active?projectPath=%2Fproject%2Fcafe', {
+    expect(mockApiFetch).toHaveBeenCalledWith('/api/executions/active?scope=all', {
       signal: undefined,
     });
   });
@@ -1008,7 +1013,7 @@ describe('useSocket thread guard (P1 regression: cross-thread event leakage)', (
     });
     await act(async () => Promise.resolve());
 
-    expect(mockApiFetch).toHaveBeenCalledWith('/api/executions/active?projectPath=%2Fproject%2Fcafe', {
+    expect(mockApiFetch).toHaveBeenCalledWith('/api/executions/active?scope=all', {
       signal: undefined,
     });
   });
@@ -2071,7 +2076,9 @@ describe('useSocket thread guard (P1 regression: cross-thread event leakage)', (
     expect(onIntentMode2).toHaveBeenCalledTimes(1);
   });
 
-  it('rejoins persisted thread rooms on connect after refresh', () => {
+  // PR-3b: a page subscribes to its foreground threads only; an earlier page's rooms are not
+  // restored after a refresh (rooms an older build saved in sessionStorage are ignored).
+  it('joins only the foreground thread on connect after refresh', () => {
     window.sessionStorage.setItem(
       'cat-cafe:ws:joined-rooms:v1:test-user',
       JSON.stringify(['thread:thread-A', 'thread:thread-B']),
@@ -2092,7 +2099,7 @@ describe('useSocket thread guard (P1 regression: cross-thread event leakage)', (
 
     const joinedRooms = emitMock.mock.calls.filter(([event]) => event === 'join_room').map(([, room]) => room);
 
-    expect(new Set(joinedRooms)).toEqual(new Set(['thread:thread-A', 'thread:thread-B']));
+    expect(new Set(joinedRooms)).toEqual(new Set(['thread:thread-B']));
   });
 
   it('repairs the foreground room when the initial connect generation misses its one-shot join', async () => {
@@ -2139,11 +2146,6 @@ describe('useSocket thread guard (P1 regression: cross-thread event leakage)', (
     act(() => {
       controls.joinRoom('thread-C');
     });
-
-    const desiredRooms = JSON.parse(
-      window.sessionStorage.getItem('cat-cafe:ws:joined-rooms:v1:test-user') ?? '[]',
-    ) as string[];
-    expect(desiredRooms).toContain('thread:thread-C');
 
     controls.socketRef.current = mockSocket as never;
     const emitMock = mockSocket.emit as unknown as ReturnType<typeof vi.fn>;
@@ -2306,7 +2308,6 @@ describe('useSocket thread guard (P1 regression: cross-thread event leakage)', (
   });
 
   it('leaves inactive rooms when the foreground thread changes', () => {
-    window.sessionStorage.setItem('cat-cafe:ws:joined-rooms:v1:test-user', JSON.stringify(['thread:thread-A']));
     const callbacks: SocketCallbacks = { onMessage: vi.fn() };
 
     act(() => {
@@ -2320,11 +2321,88 @@ describe('useSocket thread guard (P1 regression: cross-thread event leakage)', (
     });
 
     const leftRooms = emitMock.mock.calls.filter(([event]) => event === 'leave_room').map(([, room]) => room);
-    expect(new Set(leftRooms)).toEqual(new Set(['thread:thread-A', 'thread:thread-B']));
+    expect(new Set(leftRooms)).toEqual(new Set(['thread:thread-B']));
   });
 
-  it('retains an active background room while leaving inactive rooms on a foreground switch', () => {
-    window.sessionStorage.setItem('cat-cafe:ws:joined-rooms:v1:test-user', JSON.stringify(['thread:thread-A']));
+  it('forgets a left thread room sequence so a rejoin seeds instead of reporting a gap', () => {
+    const callbacks: SocketCallbacks = { onMessage: vi.fn() };
+    act(() => {
+      root.render(React.createElement(HookWrapper, { callbacks, threadId: 'thread-A' }));
+    });
+    act(() => {
+      root.render(React.createElement(HookWrapper, { callbacks, threadId: 'thread-B' }));
+    });
+    mockSetLastSeq.mockClear();
+    mockSetPendingCatchUpTargetSeq.mockClear();
+
+    act(() => {
+      root.render(React.createElement(HookWrapper, { callbacks, threadId: 'thread-C' }));
+    });
+
+    expect(mockSetLastSeq).toHaveBeenCalledExactlyOnceWith('thread-B', 0);
+    expect(mockSetPendingCatchUpTargetSeq).toHaveBeenCalledExactlyOnceWith('thread-B', 0);
+  });
+
+  describe('PR-3a: a confirmed thread room join is followed by a History catch-up', () => {
+    type JoinAck = (ack: { ok: boolean; room: string; error?: string }) => void;
+    const joinAcksFor = (room: string): JoinAck[] => {
+      const emitMock = mockSocket.emit as unknown as ReturnType<typeof vi.fn>;
+      return emitMock.mock.calls
+        .filter(([event, joined]) => event === 'join_room' && joined === room)
+        .map(([, , ack]) => ack as JoinAck);
+    };
+
+    it('requests one catch-up when the server confirms the join, and none before', () => {
+      const callbacks: SocketCallbacks = { onMessage: vi.fn() };
+      act(() => {
+        root.render(React.createElement(HookWrapper, { callbacks, threadId: 'thread-B' }));
+      });
+      // The latest request is the one the current connection epoch still accepts.
+      const ack = joinAcksFor('thread:thread-B').at(-1);
+      expect(ack).toBeTypeOf('function');
+      mockRequestStreamCatchUp.mockClear();
+
+      act(() => ack!({ ok: true, room: 'thread:thread-B' }));
+
+      expect(mockRequestStreamCatchUp).toHaveBeenCalledExactlyOnceWith('thread-B');
+    });
+
+    it('requests no catch-up for a rejected join', () => {
+      const callbacks: SocketCallbacks = { onMessage: vi.fn() };
+      act(() => {
+        root.render(React.createElement(HookWrapper, { callbacks, threadId: 'thread-B' }));
+      });
+      // The latest request is the one the current connection epoch still accepts.
+      const ack = joinAcksFor('thread:thread-B').at(-1);
+      mockRequestStreamCatchUp.mockClear();
+
+      act(() => ack!({ ok: false, room: 'thread:thread-B', error: 'forbidden_room' }));
+
+      expect(mockRequestStreamCatchUp).not.toHaveBeenCalled();
+    });
+
+    it('on reconnect waits for the rejoin to be confirmed before requesting a catch-up', () => {
+      const callbacks: SocketCallbacks = { onMessage: vi.fn() };
+      act(() => {
+        root.render(React.createElement(HookWrapper, { callbacks, threadId: 'thread-B' }));
+      });
+      act(() => simulateServerEvent('connect', undefined));
+      const emitMock = mockSocket.emit as unknown as ReturnType<typeof vi.fn>;
+      emitMock.mockClear();
+      mockRequestStreamCatchUp.mockClear();
+
+      act(() => simulateServerEvent('connect', undefined));
+      expect(mockRequestStreamCatchUp).not.toHaveBeenCalled();
+
+      const rejoinAck = joinAcksFor('thread:thread-B').at(-1);
+      expect(rejoinAck).toBeTypeOf('function');
+      act(() => rejoinAck!({ ok: true, room: 'thread:thread-B' }));
+      expect(mockRequestStreamCatchUp).toHaveBeenCalledExactlyOnceWith('thread-B');
+    });
+  });
+
+  // PR-3b: its endings reach the owner room and it is read back when it returns (PR-3a).
+  it('leaves a thread room when the thread leaves the foreground, even with its work still running', () => {
     mockGetThreadState.mockImplementation((threadId: string) => ({
       messages: [],
       queue: [],
@@ -2343,22 +2421,21 @@ describe('useSocket thread guard (P1 regression: cross-thread event leakage)', (
     const callbacks: SocketCallbacks = { onMessage: vi.fn() };
 
     act(() => {
-      root.render(React.createElement(HookWrapper, { callbacks, threadId: 'thread-B' }));
+      root.render(React.createElement(HookWrapper, { callbacks, threadId: 'thread-A' }));
     });
     const emitMock = mockSocket.emit as unknown as ReturnType<typeof vi.fn>;
     emitMock.mockClear();
 
     act(() => {
-      root.render(React.createElement(HookWrapper, { callbacks, threadId: 'thread-C' }));
+      root.render(React.createElement(HookWrapper, { callbacks, threadId: 'thread-B' }));
     });
 
     const leftRooms = emitMock.mock.calls.filter(([event]) => event === 'leave_room').map(([, room]) => room);
-    expect(leftRooms).toContain('thread:thread-B');
-    expect(leftRooms).not.toContain('thread:thread-A');
+    expect(leftRooms).toEqual(['thread:thread-A']);
   });
 
-  it('retains a queued background room while leaving inactive rooms on a foreground switch', () => {
-    window.sessionStorage.setItem('cat-cafe:ws:joined-rooms:v1:test-user', JSON.stringify(['thread:thread-A']));
+  // PR-3b: its endings reach the owner room and it is read back when it returns (PR-3a).
+  it('leaves a thread room when the thread leaves the foreground, even with work still queued', () => {
     mockGetThreadState.mockImplementation((threadId: string) => ({
       messages: [],
       queue: threadId === 'thread-A' ? [{ id: 'queued-A' }] : [],
@@ -2377,63 +2454,17 @@ describe('useSocket thread guard (P1 regression: cross-thread event leakage)', (
     const callbacks: SocketCallbacks = { onMessage: vi.fn() };
 
     act(() => {
-      root.render(React.createElement(HookWrapper, { callbacks, threadId: 'thread-B' }));
+      root.render(React.createElement(HookWrapper, { callbacks, threadId: 'thread-A' }));
     });
     const emitMock = mockSocket.emit as unknown as ReturnType<typeof vi.fn>;
     emitMock.mockClear();
 
     act(() => {
-      root.render(React.createElement(HookWrapper, { callbacks, threadId: 'thread-C' }));
+      root.render(React.createElement(HookWrapper, { callbacks, threadId: 'thread-B' }));
     });
 
     const leftRooms = emitMock.mock.calls.filter(([event]) => event === 'leave_room').map(([, room]) => room);
-    expect(leftRooms).toContain('thread:thread-B');
-    expect(leftRooms).not.toContain('thread:thread-A');
-  });
-
-  it('keeps a bounded restored room until the client has enough state to prove it inactive', () => {
-    window.sessionStorage.setItem('cat-cafe:ws:joined-rooms:v1:test-user', JSON.stringify(['thread:thread-A']));
-    mockKnownThreadIds.delete('thread-A');
-    const callbacks: SocketCallbacks = { onMessage: vi.fn() };
-
-    act(() => {
-      root.render(React.createElement(HookWrapper, { callbacks, threadId: 'thread-B' }));
-    });
-    const emitMock = mockSocket.emit as unknown as ReturnType<typeof vi.fn>;
-    emitMock.mockClear();
-
-    act(() => {
-      root.render(React.createElement(HookWrapper, { callbacks, threadId: 'thread-C' }));
-    });
-
-    const leftRooms = emitMock.mock.calls.filter(([event]) => event === 'leave_room').map(([, room]) => room);
-    expect(leftRooms).toContain('thread:thread-B');
-    expect(leftRooms).not.toContain('thread:thread-A');
-  });
-
-  // thread_summary tests removed (clowder-ai#343): listener and callback no longer exist.
-
-  it('does not restore rooms persisted by another user id', () => {
-    window.sessionStorage.setItem('cat-cafe:ws:joined-rooms:v1:alice', JSON.stringify(['thread:alice-secret']));
-    window.sessionStorage.setItem('cat-cafe:ws:joined-rooms:v1:bob', JSON.stringify(['thread:bob-work']));
-    mockUserId = 'bob';
-
-    const callbacks: SocketCallbacks = { onMessage: vi.fn() };
-
-    act(() => {
-      root.render(React.createElement(HookWrapper, { callbacks, threadId: 'thread-B' }));
-    });
-
-    const emitMock = mockSocket.emit as unknown as ReturnType<typeof vi.fn>;
-    emitMock.mockClear();
-
-    act(() => {
-      simulateServerEvent('connect', undefined);
-    });
-
-    const joinedRooms = emitMock.mock.calls.filter(([event]) => event === 'join_room').map(([, room]) => room);
-
-    expect(new Set(joinedRooms)).toEqual(new Set(['thread:bob-work', 'thread:thread-B']));
+    expect(leftRooms).toEqual(['thread:thread-A']);
   });
 
   it('connector_message from active thread is appended immediately (no F5 needed)', () => {

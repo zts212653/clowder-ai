@@ -40,6 +40,7 @@ export async function runChatHistoryControls(browser, built, evidenceDir) {
       const proof = await harness.openProof({ width, sidebar, language, base, surface: true });
       const { page, api } = proof;
       const name = `${width}-${language}-${base}`;
+      const latestName = language === 'en' ? 'Back to latest' : '到最新';
       try {
         await page.getByTestId('header-works').filter({ hasText: '774' }).waitFor();
         assert.ok(api.requests.some((r) => r.path.endsWith('/artifacts') && r.search === '?view=works'));
@@ -49,17 +50,19 @@ export async function runChatHistoryControls(browser, built, evidenceDir) {
         assert.ok(bounds?.height > 100);
         await page.mouse.move(bounds.x + 40, bounds.y + 80);
         await page.mouse.wheel(0, -10000);
-        const latest = page.getByRole('button', { name: '到最新', exact: true });
+        const latest = page.getByRole('button', { name: latestName, exact: true });
         await latest.waitFor();
         const measure = () =>
-          page.evaluate(() => {
+          page.evaluate((latestName) => {
             const rect = (node) => {
               if (!node) return null;
               const r = node.getBoundingClientRect();
               return { x: r.x, y: r.y, right: r.right, bottom: r.bottom, width: r.width, height: r.height };
             };
             const port = document.querySelector('[data-chat-container]');
-            const button = document.querySelector('button[aria-label="到最新"]');
+            const button = [...document.querySelectorAll('button[data-thread-scroll-placement]')].find(
+              (node) => node.getAttribute('aria-label') === latestName,
+            );
             return {
               port: rect(port),
               reading: rect(document.querySelector('[data-thread-chat-reading-column]')),
@@ -68,7 +71,7 @@ export async function runChatHistoryControls(browser, built, evidenceDir) {
               footer: rect(document.querySelector('[data-thread-chat-footer]')),
               overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
             };
-          });
+          }, latestName);
         const before = await measure();
         await page.screenshot({ path: path.join(out, `${name}-reading.png`) });
         observations.push({ name, before });
@@ -76,10 +79,16 @@ export async function runChatHistoryControls(browser, built, evidenceDir) {
         assert.ok(before.button.y >= before.port.y, 'latest control stays inside the reading viewport');
         assert.ok(before.button.bottom <= before.port.bottom, 'latest control stays above the viewport edge');
         assert.ok(
-          before.button.x >= before.reading.right,
+          before.button.x >= before.reading.right + 8,
           'latest control uses the navigation rail instead of covering readable messages',
         );
-        assert.ok(before.button.right <= before.piano.x, 'latest control stays clear of the message piano');
+        // The existing <=420px pane stacks these targets with an 8px gap;
+        // wider panes keep them side by side. Check the pane, not the window.
+        if (before.port.width <= 420) {
+          assert.ok(before.piano.bottom + 8 <= before.button.y, 'latest stays below the full piano hit target');
+        } else {
+          assert.ok(before.button.right + 4 <= before.piano.x, 'latest stays beside the full piano hit target');
+        }
         const historyFooterGap = before.footer.y - before.port.bottom;
         assert.ok(
           historyFooterGap >= 0 && historyFooterGap <= 8.5,

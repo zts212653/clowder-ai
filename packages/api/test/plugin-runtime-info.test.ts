@@ -10,6 +10,7 @@ import {
 } from '../src/domains/plugin/carrier/plugin-owner-request-context.js';
 import { createPluginNeutralHost } from '../src/domains/plugin/host-surface/plugin-neutral-host.js';
 import { createPluginThreadHost } from '../src/domains/plugin/host-surface/plugin-thread-host.js';
+import { snapshotInventoryFixture } from './helpers/snapshot-inventory-fixture.js';
 
 test('runtime-info returns only current instance facts under an owner request', async () => {
   let active = true;
@@ -19,7 +20,7 @@ test('runtime-info returns only current instance facts under an owner request', 
     assertActivation: () => {
       if (!active) throw new Error('stopped');
     },
-    inventory: {
+    inventory: snapshotInventoryFixture({
       snapshot: async () => ({
         instances: [
           {
@@ -33,7 +34,7 @@ test('runtime-info returns only current instance facts under an owner request', 
         ],
         packages: [{ pluginId: 'dev.fixture', packageDigest: 'digest', packageState: 'installed' }],
       }),
-    },
+    }),
     runtimeInfo: () => ({
       version: 'revision',
       platform: 'win32',

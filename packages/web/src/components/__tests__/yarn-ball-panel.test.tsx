@@ -134,6 +134,35 @@ describe('v2 conversation yarn balls', () => {
     expect(host.textContent).toContain('真实工作 c');
   });
 
+  it('keeps recovery disposition and reason on the collapsed v2 card and reveals the original execution when expanded', () => {
+    useTaskStore.getState().setTasks(
+      [
+        task('recovery', 'blocked', {
+          recovery: {
+            v: 1,
+            ownerRef: 'task:recovery',
+            incidents: [
+              {
+                source: 'ball_probe',
+                lane: 'probe',
+                disposition: 'needs_attention',
+                reasonCode: 'ball_recovery_failed',
+                executionRef: 'ball:task:recovery:owner',
+              },
+            ],
+          },
+        }),
+      ],
+      't1',
+    );
+    render();
+    expect(host.textContent).toContain('自动恢复已暂停');
+    expect(host.textContent).toContain('需要检查 · ball_recovery_failed');
+    expect(host.textContent).not.toContain('ball:task:recovery:owner');
+    act(() => button('真实工作 recovery').click());
+    expect(host.textContent).toContain('原执行：ball:task:recovery:owner');
+  });
+
   it('changes the panel and controls to English while retaining real task titles', () => {
     render();
     act(() => writeShellLanguage('en'));
