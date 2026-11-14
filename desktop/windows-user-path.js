@@ -61,22 +61,42 @@ function mergeWindowsPath(env, normalPath) {
     .sort();
   const pathKey = pathKeys[0] ?? 'Path';
   const inheritedPath = env[pathKey] ?? '';
-  const normalize = (entry) =>
-    entry
-      .trim()
-      .replace(/^"(.*)"$/, '$1')
+  const splitPath = (value) => {
+    const entries = [];
+    let start = 0;
+    while (start <= value.length) {
+      let end = start;
+      // libuv only treats an entry's first character as an opening quote.
+      if (value[start] === '"' || value[start] === "'") {
+        const closing = value.indexOf(value[start], start + 1);
+        end = closing === -1 ? value.length : closing;
+      }
+      const separator = value.indexOf(';', end);
+      if (separator === -1) {
+        entries.push(value.slice(start));
+        break;
+      }
+      entries.push(value.slice(start, separator));
+      start = separator + 1;
+    }
+    return entries;
+  };
+  const normalize = (entry) => {
+    const value = entry
+      .replace(/^["']|["']$/g, '')
       .replaceAll('/', '\\')
-      .replace(/\\+$/, '')
       .toLowerCase();
-  const inherited = inheritedPath ? inheritedPath.split(';') : [];
+    // Never trim below a lexical root: C:\ is distinct from drive-relative C:.
+    const root = path.win32.parse(value).root;
+    return value.slice(0, Math.max(root.length, value.replace(/\\+$/, '').length));
+  };
+  const inherited = inheritedPath ? splitPath(inheritedPath) : [];
   const inheritedKeys = inherited.map(normalize);
   const seen = new Set(inheritedKeys);
   const merged = [];
   let cursor = 0;
   let missing = [];
-  normalPath
-    .split(';')
-    .map((entry) => entry.trim())
+  splitPath(normalPath)
     .filter(Boolean)
     .forEach((entry) => {
       const key = normalize(entry);

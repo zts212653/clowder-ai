@@ -7,6 +7,16 @@ const path = require('node:path');
 const { after, test } = require('node:test');
 
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'desktop-user-path-'));
+const storeEnvKeys = [
+  'EVIDENCE_DB',
+  'WORLD_DB',
+  'TASK_OUTCOME_DB',
+  'GLOBAL_KNOWLEDGE_DB',
+  'LOG_DIR',
+  'CAT_CAFE_DATA_DIR',
+  'CAT_CAFE_RUNTIME_ROOT',
+  'CAT_CAFE_WORKSPACE_ROOT',
+];
 const envKeys = [
   'HOME',
   'USERPROFILE',
@@ -17,11 +27,17 @@ const envKeys = [
   'FRONTEND_PORT',
   'API_SERVER_PORT',
   'REDIS_PORT',
+  ...storeEnvKeys,
+  'REDIS_URL',
 ];
 const originalEnv = Object.fromEntries(envKeys.map((key) => [key, process.env[key]]));
 envKeys.slice(0, 4).forEach((key) => {
   process.env[key] = root;
 });
+storeEnvKeys.forEach((key) => {
+  process.env[key] = path.join(root, key);
+});
+process.env.REDIS_URL = 'redis://127.0.0.1:6386';
 delete process.env.CAT_CAFE_DESKTOP_INSTANCE_ROOT;
 
 const originalSpawn = childProcess.spawn;
@@ -272,6 +288,113 @@ test('does not use an explicitly promoted registered directory as a later anchor
   const env = { Path: 'C:\\Custom;C:\\MachineTools;C:\\WindowsApps' };
   mergeWindowsPath(env, 'C:\\MachineTools;C:\\UserTools;C:\\Custom;C:\\WindowsApps');
   assert.equal(env.Path, 'C:\\Custom;C:\\MachineTools;C:\\UserTools;C:\\WindowsApps');
+});
+
+test('keeps semicolons inside quoted PATH entries intact', () => {
+  ['"', "'"].forEach((quote) => {
+    const env = { Path: `${quote}C:\\Old;shared${quote};C:\\WindowsApps` };
+    mergeWindowsPath(env, `${quote}C:\\New;shared${quote};${quote}C:\\Old;shared${quote};C:\\WindowsApps`);
+    assert.equal(env.Path, `${quote}C:\\New;shared${quote};${quote}C:\\Old;shared${quote};C:\\WindowsApps`);
+  });
+});
+
+test('retains empty entries and treats leading spaces as part of a relative directory', () => {
+  const env = { Path: ' Tools;;WindowsApps;' };
+  mergeWindowsPath(env, 'Tools;WindowsApps');
+  assert.equal(env.Path, ' Tools;;Tools;WindowsApps;');
+});
+
+test('distinguishes drive roots and current-drive roots from relative or empty entries', () => {
+  [
+    ['C:', 'C:\\'],
+    ['', '\\'],
+    ['\\\\?\\C:', '\\\\?\\C:\\'],
+  ].forEach(([relative, rooted]) => {
+    const env = { Path: `${relative};C:\\WindowsApps` };
+    mergeWindowsPath(env, `${rooted};C:\\WindowsApps`);
+    assert.equal(env.Path, `${relative};${rooted};C:\\WindowsApps`);
+  });
+});
+
+[false, true].forEach((isolated) => {
+  test(
+    `real Windows Node lookup preserves quoted semicolons and root PATH forms (isolated=${isolated})`,
+    windowsOnly,
+    async () => {
+      const value = manager({ stdout: '' });
+      const fixture = path.join(root, `semantics-${isolated}`);
+      const [old, newer, work] = ['Old;shared', 'New;shared', 'work'].map((name) => path.join(fixture, name));
+      [old, newer, work].forEach((dir) => fs.mkdirSync(dir, { recursive: true }));
+      const executable = path.join(fixture, 'issue1986-root.exe');
+      fs.copyFileSync(process.execPath, executable);
+      fs.linkSync(executable, path.join(old, 'issue1986-old.exe'));
+      fs.linkSync(executable, path.join(newer, 'issue1986-new.exe'));
+      const subst = path.join(process.env.SystemRoot, 'System32', 'subst.exe');
+      const drive = ['Z:', 'Y:', 'X:', 'W:', 'V:'].find(
+        (letter) => childProcess.spawnSync(subst, [letter, fixture], { windowsHide: true }).status === 0,
+      );
+      assert.ok(drive, 'root semantics require a temporary drive backed by the test fixture');
+      if (isolated) {
+        process.env.CAT_CAFE_DESKTOP_INSTANCE_ROOT = path.join(root, 'isolated-semantics');
+        process.env.FRONTEND_PORT = '5186';
+        process.env.API_SERVER_PORT = '3186';
+        process.env.REDIS_PORT = '6386';
+      }
+      realChildren = true;
+      try {
+        const scenarios = [
+          {
+            inherited: `"${old}"`,
+            normal: `"${newer}";"${old}"`,
+            cwd: work,
+            commands: ['issue1986-old.exe', 'issue1986-new.exe'],
+            expected: [path.join(old, 'issue1986-old.exe'), path.join(newer, 'issue1986-new.exe')],
+          },
+          ...[drive, ''].map((relative) => ({
+            inherited: `${relative};${work}`,
+            normal: `${relative}\\;${work}`,
+            cwd: `${drive}\\work`,
+            commands: ['issue1986-root.exe'],
+            expected: [executable],
+          })),
+        ];
+        for (const [index, scenario] of scenarios.entries()) {
+          process.env.PATH = scenario.inherited;
+          const inherited = process.env.PATH;
+          value.windowsPath = scenario.normal;
+          const outputFile = path.join(fixture, `lookup-${index}.json`);
+          value._startProcess(
+            'probe',
+            process.execPath,
+            [
+              '-e',
+              `const cp=require('node:child_process');const commands=${JSON.stringify(scenario.commands)}.map(name=>{const r=cp.spawnSync(name,['-p','process.execPath'],{encoding:'utf8',windowsHide:true});return {status:r.status,error:r.error?.code,executable:r.stdout?.trim()};});require('node:fs').writeFileSync(${JSON.stringify(outputFile)},JSON.stringify({commands,keys:Object.keys(process.env).filter(k=>k.toUpperCase()==='PATH'),home:process.env.HOME}));`,
+            ],
+            { cwd: scenario.cwd },
+          );
+          const [code] = await once(value.procs.probe, 'exit');
+          assert.equal(code, 0);
+          const captured = JSON.parse(fs.readFileSync(outputFile, 'utf8'));
+          captured.commands.forEach((command, commandIndex) => {
+            assert.equal(command.error, undefined);
+            assert.equal(command.status, 0);
+            assert.equal(
+              fs.realpathSync.native(command.executable),
+              fs.realpathSync.native(scenario.expected[commandIndex]),
+            );
+          });
+          assert.equal(captured.keys.length, 1);
+          assert.equal(captured.home, isolated ? path.join(root, 'isolated-semantics', 'home') : root);
+          assert.equal(process.env.PATH, inherited);
+        }
+      } finally {
+        realChildren = false;
+        delete process.env.CAT_CAFE_DESKTOP_INSTANCE_ROOT;
+        assert.equal(childProcess.spawnSync(subst, [drive, '/D'], { windowsHide: true }).status, 0);
+        assert.equal(fs.existsSync(`${drive}\\`), false);
+      }
+    },
+  );
 });
 
 [false, true].forEach((isolated) => {
