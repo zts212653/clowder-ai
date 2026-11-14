@@ -221,12 +221,15 @@ describe('ThreadChatSurface density contract', () => {
     'failed',
     'unknown',
     'canceled',
+    'accepted',
+    'recalled',
   ] as const)('keeps a local %s bubble visible in a proven single-cat view without inventing a receipt', async (status) => {
     fixture.extraMessages = [
       {
         id: 'local-attempt',
         type: 'user',
-        content: 'my visible attempt',
+        content: '@codex my visible attempt for another member',
+        ...(status === 'accepted' ? { queuedEntryId: 'queue:other-member' } : {}),
         timestamp: 6,
         sendAttempt: { id: 'local-key', status },
       },

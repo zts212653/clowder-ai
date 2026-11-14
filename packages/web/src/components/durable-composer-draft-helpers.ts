@@ -7,6 +7,7 @@ import { loadOwnerComposerDraft } from '@/utils/true-recall';
 /** The same saved composer revision and payload, not text similarity between messages. */
 export function composerDraftIsTransferred(draft: OwnerComposerDraft, revision: number, attempt: SendAttempt) {
   return (
+    attempt.status !== 'recalled' &&
     attempt.composerDraftRevision === revision &&
     draft.text.trim() === attempt.content &&
     JSON.stringify(contextAttachmentsFromDraft(draft)) === JSON.stringify(attempt.contextAttachments ?? []) &&

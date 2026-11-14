@@ -1,5 +1,6 @@
 import 'fake-indexeddb/auto';
 import { beforeEach, expect, it, vi } from 'vitest';
+import { registerComposerDraftRecovery } from '@/components/composer-draft-consumption';
 import { observeApiSessionOwner } from '@/utils/api-session-identity';
 import type { SendAttempt } from '@/utils/send-attempt-db';
 import * as attemptDb from '@/utils/send-attempt-db';
@@ -143,6 +144,24 @@ it.each([
     expect(findSendAttempt(attempt.ownerUserId, attempt.threadId, attempt.id)).toMatchObject({ removed: true });
     apiFetch.mockResolvedValue(new Response(JSON.stringify({ draft: null, revision: 2 })));
     await retireSendAttempt(saved);
+  } else {
+    expect(findSendAttempt(attempt.ownerUserId, attempt.threadId, attempt.id)?.status).toBe('recalled');
+    const unregister = registerComposerDraftRecovery(attempt.threadId, async () => true);
+    apiFetch.mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          draft: {
+            text: 'keep',
+            threadId: attempt.threadId,
+            ownerUserId: attempt.ownerUserId,
+            revision: 2,
+          },
+          revision: 2,
+        }),
+      ),
+    );
+    await retireSendAttempt(saved);
+    unregister();
   }
   expect(findSendAttempt(attempt.ownerUserId, attempt.threadId, attempt.id)).toBeUndefined();
   expect(await attemptDb.loadSendAttempts(attempt.ownerUserId, attempt.threadId)).toEqual([]);
@@ -157,7 +176,9 @@ it.each([
   putSendAttempt(saved);
   apiFetch.mockResolvedValue(new Response(JSON.stringify({ status: 'unknown' })));
   await observeCanceledSendAttempts(attempt.threadId, ['soft-id']);
-  expect(findSendAttempt(attempt.ownerUserId, attempt.threadId, attempt.id)).toMatchObject({ status });
+  expect(findSendAttempt(attempt.ownerUserId, attempt.threadId, attempt.id)).toMatchObject({
+    status: status === 'delivered' ? 'delivered' : 'unknown',
+  });
   apiFetch.mockResolvedValue(
     new Response(JSON.stringify({ status: 'removed', userMessage: { id: 'soft-id', timestamp: 10 } })),
   );
@@ -202,6 +223,150 @@ it('rechecks a Queue removal that arrives during an older receipt request', asyn
   );
   expect(apiFetch).toHaveBeenCalledTimes(2);
   await attemptDb.deleteSendAttempt(accepted);
+});
+
+it.each([
+  503, 200,
+])('leaves a manual check after Queue disappears and its receipt is unavailable (%s)', async (status) => {
+  const accepted = { ...attempt, status: 'accepted' as const, serverMessageId: 'missing-from-queue' };
+  await attemptDb.saveSendAttempt(accepted);
+  putSendAttempt(accepted);
+  apiFetch.mockResolvedValue(new Response(JSON.stringify({ status: 'unknown' }), { status }));
+  observeQueuedSendAttempts(attempt.threadId, []);
+  await vi.waitFor(() =>
+    expect(findSendAttempt(attempt.ownerUserId, attempt.threadId, attempt.id)).toMatchObject({
+      status: 'unknown',
+      serverMessageId: 'missing-from-queue',
+      content: 'keep',
+    }),
+  );
+  expect(apiFetch).toHaveBeenCalledTimes(1);
+  expect(apiFetch.mock.calls.every(([, init]) => init?.method !== 'POST')).toBe(true);
+  await attemptDb.deleteSendAttempt(accepted);
+});
+
+it('discards an invalidated accepted receipt before one trailing check, even if that check fails', async () => {
+  const accepted = { ...attempt, status: 'accepted' as const, serverMessageId: 'stale-receipt' };
+  putSendAttempt(accepted);
+  let resolve!: (value: Response) => void;
+  apiFetch
+    .mockImplementationOnce(
+      () =>
+        new Promise<Response>((finish) => {
+          resolve = finish;
+        }),
+    )
+    .mockResolvedValue(new Response('{}', { status: 503 }));
+  const observed: string[] = [];
+  const unsubscribe = useSendAttemptStore.subscribe((state) => {
+    const status = state.attempts.find((item) => item.id === attempt.id)?.status;
+    if (status) observed.push(status);
+  });
+  const checking = checkSendAttempt(accepted);
+  observeQueuedSendAttempts(attempt.threadId, []);
+  observeQueuedSendAttempts(attempt.threadId, []);
+  resolve(new Response(JSON.stringify({ status: 'accepted', userMessage: { id: 'stale-receipt', timestamp: 10 } })));
+  await checking;
+  await vi.waitFor(() => expect(apiFetch).toHaveBeenCalledTimes(2));
+  await vi.waitFor(() =>
+    expect(findSendAttempt(attempt.ownerUserId, attempt.threadId, attempt.id)?.status).toBe('unknown'),
+  );
+  unsubscribe();
+  expect(observed).not.toContain('accepted');
+});
+
+it('retains known admission when an account switch abandons a receipt check', async () => {
+  const accepted = { ...attempt, status: 'accepted' as const, serverMessageId: 'known-admission' };
+  putSendAttempt(accepted);
+  let resolve!: (value: Response) => void;
+  apiFetch.mockImplementationOnce(
+    () =>
+      new Promise<Response>((finish) => {
+        resolve = finish;
+      }),
+  );
+  const checking = checkSendAttempt(accepted);
+  observeApiSessionOwner('other-owner');
+  resolve(new Response(JSON.stringify({ status: 'delivered', userMessage: { id: 'not-consumed', timestamp: 10 } })));
+  await checking;
+  observeApiSessionOwner(attempt.ownerUserId);
+  expect(findSendAttempt(attempt.ownerUserId, attempt.threadId, attempt.id)).toMatchObject({
+    status: 'accepted',
+    serverMessageId: 'known-admission',
+  });
+});
+
+it('cannot recreate a retired delivered attempt when its removed update reaches IndexedDB late', async () => {
+  const delivered = { ...attempt, status: 'delivered' as const, serverMessageId: 'removed-late' };
+  await attemptDb.saveSendAttempt(delivered);
+  putSendAttempt(delivered);
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const write = attemptDb.updateStoredSendAttempt;
+  vi.spyOn(attemptDb, 'updateStoredSendAttempt').mockImplementationOnce(async (next) => {
+    await gate;
+    await write(next);
+  });
+  const updating = patchSendAttempt(delivered, { removed: true });
+  await retireSendAttempt(delivered);
+  release();
+  await updating;
+  expect(await attemptDb.loadSendAttempts(attempt.ownerUserId, attempt.threadId)).toEqual([]);
+  expect(findSendAttempt(attempt.ownerUserId, attempt.threadId, attempt.id)).toBeUndefined();
+});
+
+it.each([
+  503,
+  'no-draft',
+  'unmounted',
+] as const)('retains the visible local recall copy when recovery is unavailable (%s)', async (result) => {
+  const recalled = {
+    ...attempt,
+    status: 'accepted' as const,
+    serverMessageId: 'recall-unavailable',
+    composerDraftRevision: 1,
+  };
+  await attemptDb.saveSendAttempt(recalled);
+  putSendAttempt(recalled);
+  apiFetch.mockResolvedValue(
+    new Response(
+      JSON.stringify({
+        draft:
+          result === 'unmounted'
+            ? {
+                text: 'keep',
+                threadId: attempt.threadId,
+                ownerUserId: attempt.ownerUserId,
+                revision: 2,
+              }
+            : null,
+        revision: 2,
+      }),
+      { status: result === 503 ? 503 : 200 },
+    ),
+  );
+  await observeCanceledSendAttempts(attempt.threadId, ['recall-unavailable'], 'recalled');
+  expect(findSendAttempt(attempt.ownerUserId, attempt.threadId, attempt.id)).toMatchObject({
+    content: 'keep',
+    status: 'recalled',
+  });
+  expect((await attemptDb.loadSendAttempts(attempt.ownerUserId, attempt.threadId))[0]).toMatchObject({
+    content: 'keep',
+    status: 'recalled',
+  });
+  await attemptDb.deleteSendAttempt(recalled);
+});
+
+it('keeps recall stronger than delivered and never sends a recalled attempt to the receipt endpoint', async () => {
+  putSendAttempt({ ...attempt, status: 'delivered', serverMessageId: 'recalled-id' });
+  await patchSendAttempt(attempt, { status: 'recalled' });
+  await patchSendAttempt(attempt, { status: 'delivered' });
+  expect(findSendAttempt(attempt.ownerUserId, attempt.threadId, attempt.id)?.status).toBe('recalled');
+  apiFetch.mockResolvedValue(new Response(JSON.stringify({ draft: null, revision: 1 })));
+  await checkSendAttempt(attempt);
+  expect(apiFetch.mock.calls.every(([url]) => String(url).endsWith('/composer-draft'))).toBe(true);
 });
 
 it.each([

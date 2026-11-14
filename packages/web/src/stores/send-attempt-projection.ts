@@ -8,26 +8,31 @@ export function withSendAttempts(
   queue: readonly QueueEntry[] = [],
 ): readonly ChatMessage[] {
   const remaining = attempts.filter((attempt) => attempt.threadId === threadId && !attempt.removed);
-  const projected = messages.map((message) => {
+  const projected = messages.flatMap((message) => {
     const attempt = remaining.find(
       (item) => item.id === message.clientMessageId || item.serverMessageId === message.id,
     );
-    if (!attempt) return message;
+    if (!attempt) return [message];
+    // Until the recalled draft is recovered, the owner's local copy supplies
+    // the body and recovery actions instead of an empty History recall stub.
+    if (attempt.status === 'recalled') return [];
     remaining.splice(remaining.indexOf(attempt), 1);
     // A canonical message has its own execution/read receipts; Queue is still a view.
-    return {
-      ...message,
-      clientMessageId: attempt.id,
-      ...(message.queuedEntryId
-        ? {
-            ...(attempt.whisper ?? {}),
-            sendAttempt: {
-              id: attempt.id,
-              status: attempt.status === 'canceled' ? ('canceled' as const) : ('accepted' as const),
-            },
-          }
-        : {}),
-    };
+    return [
+      {
+        ...message,
+        clientMessageId: attempt.id,
+        ...(message.queuedEntryId
+          ? {
+              ...(attempt.whisper ?? {}),
+              sendAttempt: {
+                id: attempt.id,
+                status: attempt.status === 'canceled' ? attempt.status : ('accepted' as const),
+              },
+            }
+          : {}),
+      },
+    ];
   });
   remaining.forEach((attempt) => {
     const entry = queue.find(
@@ -68,7 +73,12 @@ export function withSendAttempts(
       ...(entry ? { queuedEntryId: entry.id } : {}),
       sendAttempt: {
         id: attempt.id,
-        status: attempt.status === 'canceled' ? 'canceled' : entry ? 'accepted' : attempt.status,
+        status:
+          attempt.status === 'canceled' || attempt.status === 'recalled'
+            ? attempt.status
+            : entry
+              ? 'accepted'
+              : attempt.status,
         error: attempt.error,
         persistenceError: attempt.persistenceError,
         retryable: attempt.retryable,

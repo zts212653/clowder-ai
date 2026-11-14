@@ -271,9 +271,9 @@ test('an invalid payload offers copy and editing, and keeps that failure across 
     });
     await page.locator('textarea').fill(text);
     await page.locator('textarea').press('Enter');
-    await page.getByRole('button', { name: '复制这条消息的内容' }).waitFor();
+    await page.getByRole('button', { name: '复制这条消息的正文' }).waitFor();
     await page.reload();
-    await page.getByRole('button', { name: '复制这条消息的内容' }).waitFor();
+    await page.getByRole('button', { name: '复制这条消息的正文' }).waitFor();
     assert.equal(await page.getByRole('button', { name: '重试发送这条消息' }).count(), 0);
     await page.evaluate(() =>
       Object.defineProperty(navigator, 'clipboard', {
@@ -285,7 +285,7 @@ test('an invalid payload offers copy and editing, and keeps that failure across 
         },
       }),
     );
-    await page.getByRole('button', { name: '复制这条消息的内容' }).click();
+    await page.getByRole('button', { name: '复制这条消息的正文' }).click();
     assert.equal(await page.evaluate(() => window.__copied1973), text);
     assert.equal(posts, 1);
     assert.equal(await page.getByText(text, { exact: true }).count(), 1);
@@ -399,7 +399,7 @@ test('a disappeared Queue entry is checked and an explicit cancellation cannot r
     await page.locator('[data-send-status="canceled"]').waitFor();
     assert.equal(await page.getByText(text, { exact: true }).count(), 1);
     assert.equal(await page.getByRole('button', { name: '重试发送这条消息' }).count(), 0);
-    await page.getByRole('button', { name: '复制这条消息的内容' }).waitFor();
+    await page.getByRole('button', { name: '复制这条消息的正文' }).waitFor();
     await page.reload();
     await page.locator('[data-send-status="canceled"]').waitFor();
     assert.equal(await page.getByText(text, { exact: true }).count(), 1);
@@ -410,3 +410,96 @@ test('a disappeared Queue entry is checked and an explicit cancellation cannot r
     await proof.finish();
   }
 });
+
+test('a missing Queue entry with an unavailable receipt stays visible and can be checked without resending', async () => {
+  const proof = await scene();
+  const { page } = proof;
+  let unavailable = false,
+    posts = 0;
+  try {
+    await page.route('**/message-attempts/*', (route) =>
+      route.fulfill(
+        unavailable
+          ? json({}, 503)
+          : json({ status: 'accepted', userMessage: { id: 'uncertain-admission', timestamp: 100 } }),
+      ),
+    );
+    await page.route('**/api/messages', (route) => {
+      if (route.request().method() !== 'POST') return route.fallback();
+      posts++;
+      return route.fulfill(json({ status: 'queued', userMessageId: 'uncertain-admission' }, 202));
+    });
+    await page.locator('textarea').fill('受理后核对暂时不可用，气泡仍须保留。');
+    await page.locator('textarea').press('Enter');
+    await page.locator('[data-send-status="accepted"]').waitFor();
+    unavailable = true;
+    await page.evaluate((thread) => window.__f322Chat.queue(thread, []), CURRENT_THREAD);
+    await page.locator('[data-send-status="unknown"]').waitFor();
+    await page.getByText('已发出 · 接收状态待确认', { exact: true }).waitFor();
+    await page.getByRole('button', { name: '检查这条消息是否发出' }).click();
+    await page.locator('[data-send-status="unknown"]').waitFor();
+    assert.equal(posts, 1);
+    assert.equal(await page.getByRole('button', { name: '重试发送这条消息' }).count(), 0);
+    await proof.harness.capture(page, 'desktop-admitted-unconfirmed');
+  } finally {
+    await proof.finish();
+  }
+});
+
+for (const unavailable of [false, true]) {
+  test(`event-only recall ${unavailable ? 'retains a recoverable copy on 503' : 'merges into the native composer with new typing'}`, async () => {
+    const proof = await scene();
+    const { page } = proof;
+    let posts = 0;
+    const text = '等待撤回恢复的原文。';
+    try {
+      await page.route('**/message-attempts/*', (route) =>
+        route.fulfill(json({ status: 'accepted', userMessage: { id: 'recall-canonical', timestamp: 100 } })),
+      );
+      await page.route('**/api/messages', (route) => {
+        if (route.request().method() !== 'POST') return route.fallback();
+        posts++;
+        return route.fulfill(json({ status: 'queued', userMessageId: 'recall-canonical' }, 202));
+      });
+      await page.locator('textarea').fill(text);
+      await page.locator('textarea').press('Enter');
+      await page.locator('[data-send-status="accepted"]').waitFor();
+      await page.locator('textarea').fill('后来输入的补充。');
+      await page.route('**/composer-draft', (route) =>
+        route.request().method() === 'GET'
+          ? route.fulfill(
+              unavailable
+                ? json({}, 503)
+                : json({
+                    draft: {
+                      version: 1,
+                      ownerUserId: 'owner-proof',
+                      threadId: CURRENT_THREAD,
+                      revision: 100,
+                      text,
+                      updatedAt: Date.now(),
+                    },
+                    revision: 100,
+                  }),
+            )
+          : route.fallback(),
+      );
+      await page.evaluate((thread) => window.__f322Chat.recall(thread, 'recall-canonical'), CURRENT_THREAD);
+      if (unavailable) {
+        await page.locator('[data-send-status="recalled"]').waitFor();
+        await page.getByText(text, { exact: true }).waitFor();
+        await page.getByRole('button', { name: '复制这条消息的正文' }).waitFor();
+        await page.getByRole('button', { name: '恢复草稿', exact: true }).click();
+        assert.equal(await page.locator('textarea').inputValue(), '后来输入的补充。');
+      } else {
+        await page.waitForFunction(() => document.querySelector('textarea')?.value.includes('等待撤回恢复的原文。'));
+        assert.ok((await page.locator('textarea').inputValue()).includes('后来输入的补充。'));
+        assert.equal(await page.getByTestId('send-attempt-status').count(), 0);
+      }
+      assert.equal(posts, 1);
+      await proof.harness.capture(page, unavailable ? 'desktop-recall-recovery-failed' : 'desktop-recall-recovered');
+    } finally {
+      await proof.finish();
+    }
+  });
+}

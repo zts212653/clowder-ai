@@ -4,13 +4,14 @@ import type { ContextAttachment, MessageContent } from '@cat-cafe/shared';
 import { type Dispatch, type RefObject, type SetStateAction, useCallback, useEffect, useRef, useState } from 'react';
 import type { OwnerComposerDraft } from '@/stores/chat-types';
 import { useChatStore } from '@/stores/chatStore';
+import { apiSessionIdentity } from '@/utils/api-session-identity';
 import { loadOwnerComposerDraft } from '@/utils/true-recall';
 import {
   type ComposerAdmissionReply,
   type ComposerAdmissionSnapshot,
   durableDraftForAdmission,
 } from './composer-draft-admission';
-import { useComposerDraftConsumption } from './composer-draft-consumption';
+import { registerComposerDraftRecovery, useComposerDraftConsumption } from './composer-draft-consumption';
 import { composerAttachments, queuedServerAckBlocks } from './composer-queue';
 import {
   type PendingComposerAdmissionDraft,
@@ -304,6 +305,35 @@ export function useDurableComposerDraft({
     }),
     [imageUrlsRef, threadId],
   );
+
+  useEffect(() => {
+    if (!threadId) return;
+    let active = true;
+    const unregister = registerComposerDraftRecovery(threadId, async (draft) => {
+      const owner = apiSessionIdentity.getSnapshot().ownerUserId;
+      const ownerGeneration = ownerIdRef.current;
+      await hydrationSettledRef.current;
+      if (
+        !active ||
+        owner !== draft.ownerUserId ||
+        apiSessionIdentity.getSnapshot().ownerUserId !== owner ||
+        ownerGeneration !== ownerIdRef.current ||
+        draft.threadId !== threadId ||
+        admissionsPendingRef.current > 0
+      )
+        return false;
+      if (hydratedRef.current && revisionRef.current >= draft.revision) return true;
+      const pending = useChatStore.getState().pendingChatInsert;
+      if (pending?.threadId === threadId && (pending.serverRevision ?? -1) >= draft.revision) return true;
+      reconcileConflict({ draft, revision: draft.revision }, true);
+      hydratedRef.current = true;
+      return true;
+    });
+    return () => {
+      active = false;
+      unregister();
+    };
+  }, [reconcileConflict, threadId]);
 
   const persistDraftSnapshot = useCallback(
     async (

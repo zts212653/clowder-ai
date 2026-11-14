@@ -61,6 +61,33 @@ it('merges a Queue event that arrives before HTTP, then hands off to exact Histo
 it('never merges two intentional identical sends by their text', () => {
   expect(withSendAttempts([], [attempt, { ...attempt, id: 'another-key' }], 'thread')).toHaveLength(2);
 });
+
+it('keeps the original recalled body and actions instead of an exposed History stub until draft recovery', () => {
+  const canonical: ChatMessage = {
+    id: 'server-id',
+    clientMessageId: attempt.id,
+    type: 'user',
+    content: '',
+    timestamp: 20,
+    deliveredAt: 30,
+  };
+  const recalled = {
+    ...attempt,
+    serverMessageId: canonical.id,
+    status: 'recalled' as const,
+    files: [new File(['keep attachment'], 'original.txt', { type: 'text/plain' })],
+    previewUrls: ['blob:original'],
+  };
+  const [visible] = withSendAttempts([canonical], [recalled], 'thread');
+  expect(visible).toMatchObject({ content: attempt.content, sendAttempt: { status: 'recalled' } });
+  expect(visible).not.toHaveProperty('deliveredAt');
+  expect(visible?.contentBlocks).toContainEqual(
+    expect.objectContaining({ type: 'file', fileName: 'original.txt', url: 'blob:original' }),
+  );
+  expect(canonical.content).toBe('');
+  expect(withSendAttempts([], [recalled], 'thread')).toHaveLength(1);
+  expect(withSendAttempts([canonical], [], 'thread')).toEqual([canonical]);
+});
 it('does not turn local attempts into a reading checkpoint or a selectable History source', () => {
   const local = withSendAttempts([], [attempt], 'thread')[0]!;
   expect(isMessageSelectableForBundle(local)).toBe(false);

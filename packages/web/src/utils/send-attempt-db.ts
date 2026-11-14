@@ -8,7 +8,16 @@ export interface SendAttempt {
   content: string;
   files: File[];
   timestamp: number;
-  status: 'preparing' | 'sending' | 'accepted' | 'unknown' | 'checking' | 'failed' | 'delivered' | 'canceled';
+  status:
+    | 'preparing'
+    | 'sending'
+    | 'accepted'
+    | 'unknown'
+    | 'checking'
+    | 'failed'
+    | 'delivered'
+    | 'canceled'
+    | 'recalled';
   retryable?: boolean;
   removed?: boolean;
   replyTo?: string;

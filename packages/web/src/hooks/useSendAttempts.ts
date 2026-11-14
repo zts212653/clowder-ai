@@ -66,7 +66,9 @@ export function useSendAttempts(threadId: string, messages: readonly ChatMessage
         );
         const key = `${attempt.ownerUserId}:${threadId}:${attempt.id}`;
         if (
-          (attempt.removed || (canonical && (canonical.deliveredAt || attempt.status === 'delivered'))) &&
+          (attempt.removed ||
+            attempt.status === 'recalled' ||
+            (canonical && (canonical.deliveredAt || attempt.status === 'delivered'))) &&
           (retry || !retirementChecks.current.has(key))
         ) {
           retirementChecks.current.add(key);

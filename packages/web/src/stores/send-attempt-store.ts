@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { create } from 'zustand';
+import { recoverMountedComposerDraft } from '@/components/composer-draft-consumption';
 import { composerDraftIsTransferred } from '@/components/durable-composer-draft-helpers';
 import { apiFetch } from '@/utils/api-client';
 import { apiSessionIdentity } from '@/utils/api-session-identity';
@@ -39,20 +40,23 @@ export function patchSendAttempt(attempt: SendAttempt, patch: Partial<SendAttemp
     ...current,
     ...patch,
     ...(current.serverMessageId ? { serverMessageId: current.serverMessageId } : {}),
-    ...(current.status === 'delivered' || patch.status === 'delivered'
-      ? { status: 'delivered' as const }
-      : current.status === 'canceled' || patch.status === 'canceled'
-        ? { status: 'canceled' as const }
-        : current.serverMessageId && (patch.status === 'failed' || patch.status === 'unknown')
-          ? { status: 'accepted' as const }
-          : {}),
+    ...(current.status === 'recalled' || patch.status === 'recalled'
+      ? { status: 'recalled' as const }
+      : current.status === 'delivered' || patch.status === 'delivered'
+        ? { status: 'delivered' as const }
+        : current.status === 'canceled' || patch.status === 'canceled'
+          ? { status: 'canceled' as const }
+          : current.serverMessageId &&
+              (patch.status === 'failed' || (patch.status === 'unknown' && current.status !== 'checking'))
+            ? { status: 'accepted' as const }
+            : {}),
   };
   if (
     JSON.stringify({ ...next, files: undefined, previewUrls: undefined }) ===
     JSON.stringify({ ...current, files: undefined, previewUrls: undefined })
   )
     return;
-  if (next.status === 'failed' || next.status === 'canceled') {
+  if (next.status === 'failed' || next.status === 'canceled' || next.status === 'recalled') {
     return updateStoredSendAttempt(next).then(
       () => {
         const latest = findSendAttempt(next.ownerUserId, next.threadId, next.id);
@@ -86,10 +90,21 @@ export function retireSendAttempt(attempt: SendAttempt) {
   if (pending) return pending;
   const retirement = (async () => {
     if (apiSessionIdentity.getSnapshot().ownerUserId !== attempt.ownerUserId) return;
-    if (attempt.composerDraftRevision !== undefined) {
+    if (
+      findSendAttempt(attempt.ownerUserId, attempt.threadId, attempt.id)?.status === 'recalled' ||
+      attempt.composerDraftRevision !== undefined
+    ) {
       const current = await loadOwnerComposerDraft(attempt.threadId);
       if (apiSessionIdentity.getSnapshot().ownerUserId !== attempt.ownerUserId) return;
-      if (current.draft && current.revision === attempt.composerDraftRevision) return;
+      if (findSendAttempt(attempt.ownerUserId, attempt.threadId, attempt.id)?.status === 'recalled') {
+        if (
+          !current.draft ||
+          current.revision === attempt.composerDraftRevision ||
+          !(await recoverMountedComposerDraft(current.draft))
+        )
+          return;
+        if (apiSessionIdentity.getSnapshot().ownerUserId !== attempt.ownerUserId) return;
+      } else if (current.draft && current.revision === attempt.composerDraftRevision) return;
     }
     await discardSendAttempt(attempt);
   })().finally(() => retiringAttempts.delete(key));
@@ -125,7 +140,11 @@ export async function observeCanceledSendAttempts(
   await Promise.all(
     attempts.map(async (attempt) => {
       if (!removal) return checkSendAttempt(attempt, true);
-      if (removal === 'recalled') return discardSendAttempt(attempt);
+      if (removal === 'recalled') {
+        await patchSendAttempt(attempt, { status: 'recalled', error: undefined });
+        await retireSendAttempt(attempt).catch(() => {});
+        return;
+      }
       await patchSendAttempt(attempt, { removed: true });
       await retireSendAttempt(attempt).catch(() => {});
     }),
@@ -182,6 +201,7 @@ export async function checkSendAttempt(attempt: SendAttempt, afterDeletion = fal
     return;
   }
   if (current.status === 'checking') return;
+  if (current.status === 'recalled') return retireSendAttempt(current).catch(() => {});
   const priorStatus = current.status;
   checkingAttempts.set(key, false);
   patchSendAttempt(current, { status: 'checking', error: undefined });
@@ -192,14 +212,21 @@ export async function checkSendAttempt(attempt: SendAttempt, afterDeletion = fal
     if (!response.ok) throw new Error('未能核对，请稍后重试');
     const receipt = receiptSchema.parse(await response.json());
     if (apiSessionIdentity.getSnapshot().ownerUserId !== current.ownerUserId) return;
+    if (findSendAttempt(current.ownerUserId, current.threadId, current.id)?.status === 'recalled') return;
     if (receipt.status !== 'unknown' && !receipt.userMessage) throw new Error('接收状态尚未确认');
+    // Queue removal invalidated this read. Only the trailing read can confirm
+    // whether an earlier admission is still queued, delivered, or canceled.
+    if (checkingAttempts.get(key) && receipt.status === 'accepted') return;
     if (receipt.status === 'removed') {
       await patchSendAttempt(current, { removed: true });
       await retireSendAttempt(current).catch(() => {});
       return;
     }
     await patchSendAttempt(current, {
-      status: receipt.status === 'unknown' && priorStatus === 'accepted' ? 'accepted' : receipt.status,
+      status:
+        receipt.status === 'unknown' && priorStatus === 'accepted' && !afterDeletion && !checkingAttempts.get(key)
+          ? 'accepted'
+          : receipt.status,
       ...(receipt.userMessage ? { serverMessageId: receipt.userMessage.id } : {}),
       error: undefined,
     });
@@ -207,13 +234,14 @@ export async function checkSendAttempt(attempt: SendAttempt, afterDeletion = fal
   } catch {
     if (apiSessionIdentity.getSnapshot().ownerUserId === current.ownerUserId)
       patchSendAttempt(current, {
-        status: priorStatus === 'accepted' ? 'accepted' : 'unknown',
+        status: priorStatus === 'accepted' && !afterDeletion && !checkingAttempts.get(key) ? 'accepted' : 'unknown',
         error: '未能核对，请稍后重试',
       });
   } finally {
     const latest = findSendAttempt(current.ownerUserId, current.threadId, current.id);
-    if (latest?.status === 'checking') await patchSendAttempt(latest, { status: priorStatus });
     const changedWhileChecking = checkingAttempts.get(key);
+    if (latest?.status === 'checking')
+      await patchSendAttempt(latest, { status: changedWhileChecking ? 'unknown' : priorStatus });
     checkingAttempts.delete(key);
     if (changedWhileChecking) void checkSendAttempt(current, true);
   }
@@ -226,7 +254,7 @@ export function recoverSendAttempts(threadId?: string) {
       (attempt) =>
         attempt.ownerUserId === owner &&
         (!threadId || attempt.threadId === threadId) &&
-        ['unknown', 'accepted', 'canceled'].includes(attempt.status),
+        ['unknown', 'accepted', 'canceled', 'recalled'].includes(attempt.status),
     )
     .forEach((attempt) => void checkSendAttempt(attempt));
 }

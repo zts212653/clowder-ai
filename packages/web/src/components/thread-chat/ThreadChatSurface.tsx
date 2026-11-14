@@ -235,6 +235,8 @@ export function ThreadChatSurface({
   ]);
   const singleCatLocalAttempts = useMemo(() => {
     if (!singleCatProjection) return [];
+    // Own sends belong to the thread even while viewing another member. They
+    // remain outside member execution evidence until the existing projection owns them.
     const projectedIds = new Set(flattenConversationProjection(singleCatProjection).map((message) => message.id));
     return messages.filter((message) => message.sendAttempt && !projectedIds.has(message.id));
   }, [messages, singleCatProjection]);

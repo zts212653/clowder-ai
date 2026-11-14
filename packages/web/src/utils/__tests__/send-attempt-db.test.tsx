@@ -1,6 +1,12 @@
 import 'fake-indexeddb/auto';
 import { expect, it } from 'vitest';
-import { deleteSendAttempt, loadSendAttempts, type SendAttempt, saveSendAttempt } from '../send-attempt-db';
+import {
+  deleteSendAttempt,
+  loadSendAttempts,
+  type SendAttempt,
+  saveSendAttempt,
+  updateStoredSendAttempt,
+} from '../send-attempt-db';
 
 it('keeps original file bytes and pending input across reload, partitioned by account and thread', async () => {
   const file = new File([new Uint8Array([0, 1, 255, 3])], 'original.png', { type: 'image/png', lastModified: 123 });
@@ -38,5 +44,29 @@ it('keeps original file bytes and pending input across reload, partitioned by ac
   });
   expect([...new Uint8Array(bytes)]).toEqual([0, 1, 255, 3]);
   await deleteSendAttempt(restored!);
+  expect(await loadSendAttempts(attempt.ownerUserId, attempt.threadId)).toEqual([]);
+});
+
+it.each([
+  'update-first',
+  'delete-first',
+])('never recreates removed content across serialized transactions (%s)', async (order) => {
+  const attempt: SendAttempt = {
+    id: order,
+    ownerUserId: 'race-owner',
+    threadId: 'race-thread',
+    content: 'remove this',
+    files: [],
+    timestamp: 1,
+    status: 'delivered',
+    serverMessageId: 'delivered-id',
+  };
+  await saveSendAttempt(attempt);
+  if (order === 'update-first')
+    await Promise.all([updateStoredSendAttempt({ ...attempt, removed: true }), deleteSendAttempt(attempt)]);
+  else {
+    await deleteSendAttempt(attempt);
+    await updateStoredSendAttempt({ ...attempt, removed: true });
+  }
   expect(await loadSendAttempts(attempt.ownerUserId, attempt.threadId)).toEqual([]);
 });

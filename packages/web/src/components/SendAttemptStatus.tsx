@@ -20,23 +20,22 @@ export function SendAttemptStatus({
   const { handleSend } = useSendMessage(threadId);
   const failed = attempt.status === 'failed';
   const canceled = attempt.status === 'canceled';
+  const recalled = attempt.status === 'recalled';
   const retryable = attempt.retryable !== false;
   const unknown = attempt.status === 'unknown';
   const checking = attempt.status === 'checking';
   const busy = attempt.status === 'preparing' || attempt.status === 'sending' || checking;
-  const text = canceled
-    ? '已取消 · 未交给成员'
-    : failed
-      ? `未发出${attempt.error ? ` · ${attempt.error}` : ''}`
-      : unknown
-        ? '暂未确认是否发出'
-        : checking
-          ? '正在确认是否发出…'
-          : attempt.status === 'accepted'
-            ? '已发出 · 等待接收确认'
-            : attempt.status === 'delivered'
-              ? '已投递 · 正在同步回执'
-              : '发送中…';
+  const text = {
+    preparing: '发送中…',
+    sending: '发送中…',
+    accepted: '已发出 · 等待接收确认',
+    delivered: '已投递 · 正在同步回执',
+    canceled: '已取消 · 未交给成员',
+    recalled: '已撤回 · 正文待恢复',
+    checking: '正在确认是否发出…',
+    unknown: stored?.serverMessageId ? '已发出 · 接收状态待确认' : '暂未确认是否发出',
+    failed: `未发出${attempt.error ? ` · ${attempt.error}` : ''}`,
+  }[attempt.status];
   const retry = () => {
     if (stored)
       void handleSend(
@@ -63,12 +62,21 @@ export function SendAttemptStatus({
     }
     void copied.then(
       () =>
-        useToastStore
-          .getState()
-          .addToast({ type: 'success', title: '内容已复制', message: '调整后可以作为新消息发送。', duration: 2000 }),
+        useToastStore.getState().addToast({
+          type: 'success',
+          title: '正文已复制',
+          message: '调整后可以作为新消息发送；附件仍保留在气泡中。',
+          duration: 2000,
+        }),
       failedCopy,
     );
   };
+  const check = () => {
+    if (stored) void checkSendAttempt(stored);
+  };
+  const copyAction = canceled || recalled || (failed && !retryable);
+  const actionLabel = copyAction ? '复制正文' : failed ? '重试' : checking ? '检查中…' : '检查状态';
+  const actionDescription = copyAction ? '复制这条消息的正文' : failed ? '重试发送这条消息' : '检查这条消息是否发出';
   return (
     <span
       data-testid="send-attempt-status"
@@ -94,7 +102,7 @@ export function SendAttemptStatus({
             <circle cx="8" cy="8" r="6" />
             <path
               d={
-                canceled
+                canceled || recalled
                   ? 'm5 5 6 6m0-6-6 6'
                   : failed
                     ? 'M8 4v5m0 2v1'
@@ -107,21 +115,24 @@ export function SendAttemptStatus({
         )}
       </svg>
       <span>{text}</span>
-      {stored && (failed || canceled || unknown || checking) ? (
+      {stored && (failed || canceled || recalled || unknown || checking) ? (
         <button
           type="button"
           disabled={checking}
-          onClick={canceled ? copy : failed ? (retryable ? retry : copy) : () => void checkSendAttempt(stored)}
+          onClick={copyAction ? copy : failed ? retry : check}
           className="shell-focusable min-h-11 min-w-11 rounded px-1 underline underline-offset-4 disabled:cursor-wait"
-          aria-label={
-            canceled || (failed && !retryable)
-              ? '复制这条消息的内容'
-              : failed
-                ? '重试发送这条消息'
-                : '检查这条消息是否发出'
-          }
+          aria-label={actionDescription}
         >
-          {canceled ? '复制内容' : failed ? (retryable ? '重试' : '复制内容') : checking ? '检查中…' : '检查状态'}
+          {actionLabel}
+        </button>
+      ) : null}
+      {stored && recalled ? (
+        <button
+          type="button"
+          onClick={check}
+          className="shell-focusable min-h-11 min-w-11 rounded px-1 underline underline-offset-4"
+        >
+          恢复草稿
         </button>
       ) : null}
       {failed && !retryable ? <span>请调整内容后重新发送</span> : null}

@@ -1,4 +1,5 @@
 import { type MutableRefObject, useEffect } from 'react';
+import type { OwnerComposerDraft } from '@/stores/chat-types';
 import { composerDraftSignature, type DurableDraftSnapshot } from './durable-composer-draft-helpers';
 
 export interface ComposerDraftConsumption {
@@ -8,6 +9,21 @@ export interface ComposerDraftConsumption {
 }
 
 const consumers = new Map<string, (receipt: ComposerDraftConsumption) => void>();
+const recoverers = new Map<string, (draft: OwnerComposerDraft) => Promise<boolean>>();
+
+/** Transfer a recalled draft to its mounted owner; this port stores no content. */
+export function registerComposerDraftRecovery(
+  threadId: string,
+  recover: (draft: OwnerComposerDraft) => Promise<boolean>,
+) {
+  recoverers.set(threadId, recover);
+  return () => {
+    if (recoverers.get(threadId) === recover) recoverers.delete(threadId);
+  };
+}
+export async function recoverMountedComposerDraft(draft: OwnerComposerDraft) {
+  return (await recoverers.get(draft.threadId)?.(draft)) ?? false;
+}
 
 /** A port to the mounted canonical owner; no second draft or receipt store. */
 export function registerComposerDraftConsumption(
