@@ -1,4 +1,7 @@
-import { reportedSessionModel } from '../domains/cats/services/agents/providers/acp/session-configuration.js';
+import {
+  replayableSessionPreferences,
+  reportedSessionModel,
+} from '../domains/cats/services/agents/providers/acp/session-configuration.js';
 
 /** Only advertised capabilities are selectable; configured values are a separate fallback. */
 export interface CatalogOption {
@@ -58,36 +61,21 @@ export function parseAcpCatalog(session: unknown, defaults: unknown, _requested?
   const model = acpOption(session, 'model');
   const effort = acpOption(session, 'thought_level');
   const nativeEffort = acpOption(defaults, 'thought_level');
-  const defaultEffort = text(nativeEffort?.currentValue);
-  const selectedEffort = text(effort?.currentValue);
-  const legacy = record(record(session).models);
+  const nativePreferences = replayableSessionPreferences(record(defaults));
+  const selectedPreferences = replayableSessionPreferences(record(session));
+  const defaultEffort = nativePreferences.effort;
+  const selectedEffort = selectedPreferences.effort;
   const nativeModel = acpOption(defaults, 'model');
   const nativeModels = acpChoices(nativeModel?.options);
-  const reportedDefault =
-    nativeModel?.currentValue === '' && nativeModels.some((item) => item.value === '')
-      ? ''
-      : reportedSessionModel(record(defaults));
-  const defaultChoices = nativeModel
-    ? nativeModels.map((item) => item.value)
-    : rows(record(record(defaults).models).availableModels).flatMap((item) =>
-        typeof item.id === 'string' ? [item.id] : [],
-      );
+  const reportedDefault = nativeModel ? reportedSessionModel({ configOptions: [nativeModel] }) : undefined;
+  const defaultModel = nativePreferences.model;
   const defaultModelStatus =
-    reportedDefault === undefined
-      ? 'unreported'
-      : defaultChoices.length && !defaultChoices.includes(reportedDefault)
-        ? 'unavailable'
-        : 'reported';
-  const defaultModel = defaultModelStatus === 'reported' ? reportedDefault : undefined;
+    defaultModel !== undefined ? 'reported' : reportedDefault !== undefined ? 'unavailable' : 'unreported';
   const defaultChoice = nativeModels.find((item) => item.value === defaultModel);
   const defaultModelLabel = defaultChoice
     ? [defaultChoice.group, defaultChoice.label].filter(Boolean).join(' / ')
     : undefined;
-  const models = model
-    ? acpChoices(model.options)
-    : rows(legacy.availableModels).flatMap((item) =>
-        typeof item.id === 'string' ? [{ value: item.id, label: text(item.name) ?? item.id }] : [],
-      );
+  const models = acpChoices(model?.options);
   return {
     status: models.length ? 'live' : 'unavailable',
     models,
@@ -98,10 +86,7 @@ export function parseAcpCatalog(session: unknown, defaults: unknown, _requested?
     defaultEffortLabel: acpChoices(nativeEffort?.options).find((item) => item.value === defaultEffort)?.label,
     defaultModelSource: defaultModel !== undefined ? 'client_report' : undefined,
     defaultEffortSource: defaultEffort !== undefined ? 'client_report' : undefined,
-    selectedModel:
-      model?.currentValue === '' && models.some((item) => item.value === '')
-        ? ''
-        : reportedSessionModel(record(session)),
+    selectedModel: selectedPreferences.model,
     selectedEffort,
     selectedEffortLabel: acpChoices(effort?.options).find((item) => item.value === selectedEffort)?.label,
     selectedEffortSource: selectedEffort !== undefined ? 'client_report' : undefined,
