@@ -17,7 +17,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { PassThrough } from 'node:stream';
 import { mock, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
@@ -913,8 +913,11 @@ test('yields error on spawn ENOENT', async () => {
   const promise = collect(service.invoke('hi'));
 
   await waitForMockProcessReady(proc);
-  const err = new Error('spawn claude ENOENT');
-  err.code = 'ENOENT';
+  const err = Object.assign(new Error('spawn C:\\private-install\\claude.exe ENOENT'), {
+    code: 'ENOENT',
+    errno: -4058,
+    syscall: 'spawn C:\\private-install\\claude.exe',
+  });
   proc._emitter.emit('error', err);
   proc.stdout.end();
   await emitProcessExit(proc, null, null);
@@ -923,6 +926,59 @@ test('yields error on spawn ENOENT', async () => {
   const errMsg = msgs.find((m) => m.type === 'error');
   assert.ok(errMsg);
   assert.ok(errMsg.error.includes('ENOENT'));
+  const diagnostics = errMsg.metadata.cliDiagnostics;
+  assert.equal(diagnostics?.reasonCode, 'spawn_failed');
+  assert.match(diagnostics.safeExcerpt, /errno: -4058/);
+  assert.match(diagnostics.safeExcerpt, /syscall: spawn/);
+  assert.equal(diagnostics.debugRef.command, basename(spawnFn.mock.calls[0].arguments[0]));
+  assert.doesNotMatch(JSON.stringify(diagnostics), /private-install/);
+  assert.equal(msgs.at(-1).type, 'done');
+});
+
+['UNKNOWN', 'EACCES', 'EPERM', 'ENOEXEC'].forEach((code) => {
+  test(`#1664: synchronous spawn ${code} carries safe startup diagnostics`, async () => {
+    const spawnFn = mock.fn(() => {
+      throw Object.assign(new Error(`spawn C:\\private-install\\claude.exe ${code} SECRET-ARG`), {
+        code,
+        errno: -4094,
+        syscall: 'spawn C:\\private-install\\claude.exe',
+        path: 'C:\\private-install\\claude.exe',
+        spawnargs: ['SECRET-ARG'],
+      });
+    });
+    const service = createClaudeAgentService({ spawnFn });
+    const messages = await collect(service.invoke('PRIVATE-PROMPT', { invocationId: 'inv-1664' }));
+    assert.deepEqual(
+      messages.map((message) => message.type),
+      ['error', 'done'],
+    );
+    const diagnostics = messages[0].metadata.cliDiagnostics;
+    assert.equal(diagnostics?.reasonCode, 'spawn_failed');
+    assert.match(diagnostics.safeExcerpt, new RegExp(`spawn ${code}`));
+    assert.match(diagnostics.safeExcerpt, /errno: -4094/);
+    assert.match(diagnostics.safeExcerpt, /syscall: spawn/);
+    assert.equal(diagnostics.debugRef.command, basename(spawnFn.mock.calls[0].arguments[0]));
+    assert.equal(diagnostics.debugRef.invocationId, 'inv-1664');
+    assert.match(diagnostics.publicHint, /PATH/);
+    assert.match(diagnostics.publicHint, /权限/);
+    assert.match(diagnostics.publicHint, /重新安装/);
+    assert.doesNotMatch(JSON.stringify(diagnostics), /private-install|PRIVATE-PROMPT|SECRET-ARG/);
+  });
+});
+
+test('#1664: non-spawn failures keep their original error without startup diagnostics', async () => {
+  const service = createClaudeAgentService({
+    spawnFn: () => {
+      throw Object.assign(new Error('open fixture EACCES'), { code: 'EACCES', syscall: 'open' });
+    },
+  });
+  const messages = await collect(service.invoke('hi'));
+  assert.deepEqual(
+    messages.map((message) => message.type),
+    ['error', 'done'],
+  );
+  assert.equal(messages[0].error, 'open fixture EACCES');
+  assert.equal(messages[0].metadata.cliDiagnostics, undefined);
 });
 
 test('ignores system/hook and unknown event types', async () => {
