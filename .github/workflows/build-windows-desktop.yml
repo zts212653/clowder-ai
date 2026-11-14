@@ -20,6 +20,10 @@ on:
         required: false
         type: boolean
         default: false
+      source-sha:
+        description: "Exact candidate source commit for an artifact-only build"
+        required: false
+        type: string
   workflow_dispatch:
     inputs:
       version:
@@ -27,8 +31,8 @@ on:
         required: true
         type: string
 
-permissions:
-  contents: write
+# Release builds inherit write access from the release caller. Nightly builds
+# inherit read-only access from the nightly caller.
 
 jobs:
   build:
@@ -41,6 +45,8 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          ref: ${{ inputs.source-sha || github.sha }}
+          persist-credentials: false
 
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
@@ -73,7 +79,7 @@ jobs:
         env:
           NODE_OPTIONS: --max-old-space-size=4096
           CATCAFE_VERSION: ${{ inputs.version }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ !inputs.source-sha && secrets.GITHUB_TOKEN || '' }}
         shell: pwsh
         run: |
           .\desktop\scripts\build-desktop.ps1
@@ -83,7 +89,7 @@ jobs:
         run: Get-ChildItem dist\
 
       - name: Upload installer to release
-        if: inputs.upload-to-release
+        if: inputs.upload-to-release && !inputs.source-sha
         uses: softprops/action-gh-release@v2
         with:
           files: |
@@ -95,14 +101,31 @@ jobs:
         if: ${{ !inputs.upload-to-release }}
         uses: actions/upload-artifact@v4
         with:
-          name: windows-installer-${{ inputs.version }}
+          name: windows-installer-${{ inputs.version }}${{ inputs.source-sha && format('-attempt-{0}', github.run_attempt) || '' }}
           path: dist/ClowderAI-Setup-*.exe
+          if-no-files-found: error
+
+      - name: Record the published installer SHA-256
+        if: inputs.source-sha && !inputs.upload-to-release
+        shell: pwsh
+        run: |
+          $installers = @(Get-ChildItem -File dist/ClowderAI-Setup-*.exe)
+          if ($installers.Count -ne 1) { throw 'Expected exactly one published Windows installer' }
+          $hash = (Get-FileHash -LiteralPath $installers[0].FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+          [IO.File]::WriteAllText((Join-Path $env:RUNNER_TEMP 'installer-sha256.txt'), $hash)
+
+      - name: Upload the installer checksum
+        if: inputs.source-sha && !inputs.upload-to-release
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-build-hash-windows-x64-attempt-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/installer-sha256.txt
           if-no-files-found: error
 
       - name: Upload portable zip as workflow artifact
         if: ${{ !inputs.upload-to-release }}
         uses: actions/upload-artifact@v4
         with:
-          name: windows-portable-${{ inputs.version }}
+          name: windows-portable-${{ inputs.version }}${{ inputs.source-sha && format('-attempt-{0}', github.run_attempt) || '' }}
           path: dist/ClowderAI-*.zip
           if-no-files-found: error

@@ -1,0 +1,175 @@
+{
+  "cases": [
+    {
+      "id": "WIN-CLEAN-INSTALL",
+      "level": "L0",
+      "platforms": ["windows-x64"],
+      "title": "真实 EXE 首装、启动和状态回读",
+      "executor": "windows-installer",
+      "setup": "全新程序和数据目录，未被占用的测试端口，适当的安装权限",
+      "steps": "运行候选 EXE，启动安装后的应用，写入测试会话与资料，退出再启动",
+      "expected": "候选构建标识与目标 SHA 一致，渲染器和服务健康，回读同一会话、资料和默认插件状态",
+      "evidence": "安装日志、包哈希、分阶段验证、重启回读和清理记录"
+    },
+    {
+      "id": "MAC-CLEAN-INSTALL",
+      "level": "L0",
+      "platforms": ["macos-arm64", "macos-x64"],
+      "title": "真实 DMG 安装、启动和状态回读",
+      "executor": "macos-dmg",
+      "setup": "对应架构的隔离 macOS 机器，Applications 安装位置空闲",
+      "steps": "挂载候选 DMG，把应用复制到 Applications，卸载镜像，启动应用，写入测试会话与资料，退出再启动",
+      "expected": "运行对应架构的候选应用，服务可用，退出后同一测试状态可恢复",
+      "evidence": "DMG 哈希、应用版本、重启回读和卸载镜像记录"
+    },
+    {
+      "id": "DESKTOP-ONBOARDING",
+      "level": "L0",
+      "platforms": ["windows-x64", "macos-arm64", "macos-x64"],
+      "title": "真实桌面首启引导和会话入口",
+      "executor": "computer-use",
+      "setup": "已校验的候选包，干净实例，独占且可交互的桌面会话",
+      "steps": "从安装后的桌面入口启动，观察首启状态，完成或跳过引导，通过主界面创建测试会话",
+      "expected": "引导可以退出，主窗口可用，所创建会话确实出现在本实例",
+      "evidence": "首启、主窗口、创建会话截图，关联同一构建和实例"
+    },
+    {
+      "id": "WIN-PORTABLE",
+      "level": "L1",
+      "platforms": ["windows-x64"],
+      "title": "便携 ZIP 首次启动和重启回读",
+      "executor": "windows-portable",
+      "setup": "全新的独立便携目录及状态目录",
+      "steps": "解压实际 ZIP，从自带入口启动，写入测试会话与资料并重启",
+      "expected": "启动的是对应版本，重启后读到原有测试状态",
+      "evidence": "ZIP 哈希、启动日志、重启回读和清理记录"
+    },
+    {
+      "id": "WIN-PORT-PREFLIGHT",
+      "level": "L1",
+      "platforms": ["windows-x64"],
+      "title": "Windows 安装版拒绝启动前的端口占用",
+      "executor": "windows-port-preflight",
+      "setup": "在临时 Windows runner 上用真实 EXE 安装候选，使用全新测试实例与专用回环端口",
+      "steps": "分别占用 API、Web 和两者端口，再启动已安装的应用",
+      "expected": "候选启动失败并指出每个被占端口，原监听者保留，Electron 不打开 Web 页面",
+      "evidence": "候选启动状态、原监听 PID、Electron 页面列表和清理记录",
+      "issues": [1749]
+    },
+    {
+      "id": "MAC-PORT-PREFLIGHT",
+      "level": "L1",
+      "platforms": ["macos-arm64", "macos-x64"],
+      "title": "macOS 安装版拒绝启动前的端口占用",
+      "executor": "macos-port-preflight",
+      "setup": "在临时 macOS runner 上用真实 DMG 安装候选，使用新测试实例和专用回环端口",
+      "steps": "分别占用 API、Web 和两者端口，再启动已安装的应用",
+      "expected": "候选启动失败并指出每个被占端口，原监听者保留，Electron 不打开 Web 页面",
+      "evidence": "候选启动状态、原监听 PID、窗口生命周期日志、受控 Web 请求计数和清理记录",
+      "issues": [1749]
+    },
+    {
+      "id": "DESKTOP-PORT-OWNERSHIP",
+      "level": "L1",
+      "platforms": ["windows-x64", "macos-arm64", "macos-x64"],
+      "title": "端口已占用时识别实例归属",
+      "executor": "manual",
+      "setup": "用两套隔离数据目录和专用测试端口。外来实例可使用同一构建，记录其 PID、数据根和健康响应",
+      "steps": "用另一套健康实例在启动前分别占用 API、Web 和两者端口。另在候选通过预查后让外来实例抢占，观察候选状态和真实桌面内容",
+      "expected": "候选只在本次启动进程拥有服务时进入主窗口。固定端口冲突须指出服务和端口，外来实例仍然健康，候选窗口不会显示外来页面",
+      "evidence": "每轮的监听 PID、程序路径、数据根、健康响应、启动状态和渲染证据",
+      "issues": [1749]
+    },
+    {
+      "id": "WIN-UPGRADE-STATE",
+      "level": "L1",
+      "platforms": ["windows-x64"],
+      "title": "Windows 发布版原位升级与会话画像回读",
+      "executor": "windows-upgrade",
+      "setup": "在临时 runner 安装记录的公开发布版，创建会话和画像样本，正常退出",
+      "steps": "将候选 EXE 安装到同一程序路径和状态目录，启动后回读同一会话和画像",
+      "expected": "实例标记保持一致，原会话与画像内容及版本可读取，候选实际版本和源码戳正确，进程与端口清理完成",
+      "evidence": "前后包哈希、版本、源码戳、安装日志、历史样本回读和清理收据",
+      "baseline": {
+        "tag": "v0.14.1",
+        "version": "0.14.1",
+        "source": "592f07ae085f9a7e961e82ca8ade695581170407",
+        "filename": "ClowderAI-Setup-0.14.1.exe",
+        "assetId": 695910932,
+        "sha256": "e9022222cedb4fa70f772278399a2c2972e1ca6a9c0b3365c0e335289460db45"
+      },
+      "issues": [1788, 1789]
+    },
+    {
+      "id": "DESKTOP-UPGRADE",
+      "level": "L1",
+      "platforms": ["windows-x64", "macos-arm64", "macos-x64"],
+      "title": "覆盖升级与历史资源回读",
+      "executor": "manual",
+      "setup": "隔离旧安装和人工创建的会话、设置、工作区、上传样本",
+      "steps": "使用候选安装介质升级，记录安装过程，打开旧会话和样本资源",
+      "expected": "升级状态可辨识，重启后各历史样本可读取且仍归属于同一测试实例",
+      "evidence": "前后版本、安装阶段日志、历史资源读取证据",
+      "issues": [1788, 1789]
+    },
+    {
+      "id": "DESKTOP-WORKS-PAGINATION",
+      "level": "L1",
+      "platforms": ["windows-x64", "macos-arm64", "macos-x64"],
+      "title": "作品目录按批读取与首页入口",
+      "executor": "manual",
+      "setup": "在专用隔离安装准备超过 128 件作品的目录和跨多页零命中的筛选样本，记录测试会话、数据根和目录请求",
+      "steps": "从首页顶部和底部打开全局 Works，滚动展开已读作品，再主动继续读取。保持筛选切换到零命中状态后继续。隐藏目录并恢复，最后主动刷新",
+      "expected": "首页保留 12 件近期预览，两入口使用同一全局目录。目录首开只请求一页，滚动本地展开不追加目录请求。主动继续最多串行读四页，新增至少 24 件可显示作品或末页时提前停止，最后一页整页保留。部分结果明确显示已加载范围，零命中仍可继续。隐藏后保留查询和已提交 cursor，恢复不自动续读，主动刷新从第一页开始",
+      "evidence": "安装版本与源码戳、目录请求和 cursor、操作前后截图、测试作品归属与已加载数量",
+      "issues": [1864]
+    },
+    {
+      "id": "DESKTOP-PROVIDER",
+      "level": "L2",
+      "platforms": ["windows-x64", "macos-arm64", "macos-x64"],
+      "title": "实际客户端回复及重启续聊",
+      "executor": "manual",
+      "setup": "专用授权测试账号与独立原生客户端 HOME",
+      "steps": "在候选包内通过指定 provider 发出测试消息，关闭应用后重新打开并续聊",
+      "expected": "完成真实调用，第二轮可使用第一轮上下文，记录 provider 和 native/ACP 路线",
+      "evidence": "脱敏请求和回复、provider 路线、原生测试会话归属"
+    },
+    {
+      "id": "DESKTOP-NATIVE-AUTH-DIAGNOSTIC",
+      "level": "L2",
+      "platforms": ["windows-x64", "macos-arm64", "macos-x64"],
+      "title": "安装版原生诊断隔离认证副作用",
+      "executor": "installed-auth",
+      "setup": "在临时 runner 安装候选，从已安装 API 解析原生工具 hook 的包路径",
+      "steps": "以惰性命令载荷调用 Kimi、OpenCode 和 DSH 的实际安装入口，覆盖裸登录、登出、事故形态的命令包装、状态和帮助查询",
+      "expected": "三个入口明确拒绝认证变更并允许只读查询。夹具只执行准入逻辑",
+      "evidence": "包哈希、实际 hook 路径和逐 provider 的准入检查",
+      "issues": [1811]
+    },
+    {
+      "id": "DESKTOP-DSH-IMAGE-ROUTE",
+      "level": "L2",
+      "platforms": ["windows-x64", "macos-arm64", "macos-x64"],
+      "title": "DSH 视觉模型切换与同会话续接",
+      "executor": "manual",
+      "setup": "使用已授权的测试账号、独立 DSH HOME 和文本默认 profile，备有视觉与文本模型及一张仅像素包含随机码的合成 PNG",
+      "steps": "在已安装客户端自动检测并添加 DSH，选择视觉模型并提交 PNG。切到文本模型再次提交图片，再切回视觉模型继续原会话",
+      "expected": "视觉路由重新握手后能读出图片随机码，文本路由明确拒绝图片，切回视觉后恢复同一原生会话。原 profile 保持原样",
+      "evidence": "脱敏的 UI 观察、两种握手图片能力、原生会话 ID 和 profile 前后哈希",
+      "issues": [1899]
+    },
+    {
+      "id": "DESKTOP-INSTALL-PRESENTATION",
+      "level": "L3",
+      "platforms": ["windows-x64", "macos-arm64", "macos-x64"],
+      "title": "安装界面的缩放和语言",
+      "executor": "manual",
+      "setup": "用例负责人确认的语言、显示缩放和 OS 组合",
+      "steps": "打开真实安装界面，核对主要步骤、取消入口和状态提示",
+      "expected": "主要文字与操作完整可见，缩放或翻译不遮挡关键按钮",
+      "evidence": "界面截图及平台、语言和缩放记录"
+    }
+  ],
+  "expectedFailures": []
+}
