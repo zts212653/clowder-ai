@@ -15,6 +15,7 @@ import {
   resolveEffectiveSkillMountPaths,
   validateSkillName,
 } from '../config/governance/skill-sync.js';
+import { resolveMountBoundaryEscape } from '../utils/mount-path-boundary.js';
 import { pathsEqual } from '../utils/project-path.js';
 import {
   buildProjectSkillMountDirs,
@@ -320,6 +321,7 @@ async function syncProjectUnlocked(
   for (const target of activeTargets) {
     const targetEnabled = enabledNames.filter((n) => mountTargetIdsBySkill.get(n)?.has(target.id));
     for (const dir of target.dirs) {
+      if (await resolveMountBoundaryEscape(projectRoot, dir)) continue;
       const converted = await convertDirectoryLevelMount(dir, skillsSource, targetEnabled, effectiveSourceMap);
       if (converted) {
         // Disabled skills + enabled skills filtered by mount policy are implicitly unmounted
@@ -339,47 +341,58 @@ async function syncProjectUnlocked(
     const outOfPolicy = enabledNames.filter((n) => !mountTargetIdsBySkill.get(n)?.has(target.id));
 
     for (const skillsDir of target.dirs) {
-      let isLegacyManaged = false;
-      try {
-        isLegacyManaged = await isManagedDirectoryLevelSkillsSymlink(skillsDir, skillsSource);
-      } catch {
-        /* */
-      }
-      if (isLegacyManaged) continue;
-      try {
-        if ((await lstat(skillsDir)).isSymbolicLink()) {
-          if (force) {
-            await rm(skillsDir, { force: true });
-          } else {
-            for (const sn of targetEnabled)
-              result.conflicts.push({ skillName: sn, mountPointId: target.id, path: skillsDir });
-            continue;
-          }
+      if (await resolveMountBoundaryEscape(projectRoot, skillsDir)) {
+        console.warn(`[syncProject] Skipping skill mount outside project root: ${skillsDir}`);
+        result.conflicts.push(
+          ...targetEnabled.map((skillName) => ({
+            skillName,
+            mountPointId: target.id,
+            path: join(skillsDir, skillName),
+          })),
+        );
+      } else {
+        let isLegacyManaged = false;
+        try {
+          isLegacyManaged = await isManagedDirectoryLevelSkillsSymlink(skillsDir, skillsSource);
+        } catch {
+          /* */
         }
-      } catch {
-        /* ENOENT — will be created below */
-      }
-      await mkdir(skillsDir, { recursive: true });
-      const sharedRefsStatus = await ensureSharedSkillRefsMount(skillsDir, skillsSource);
-      if (sharedRefsStatus === 'conflict' || sharedRefsStatus === 'source-missing') {
-        result.conflicts.push({
-          skillName: SHARED_SKILL_REFS_ALIAS,
-          mountPointId: target.id,
-          path: join(skillsDir, SHARED_SKILL_REFS_ALIAS),
-        });
-      }
+        if (isLegacyManaged) continue;
+        try {
+          if ((await lstat(skillsDir)).isSymbolicLink()) {
+            if (force) {
+              await rm(skillsDir, { force: true });
+            } else {
+              for (const sn of targetEnabled)
+                result.conflicts.push({ skillName: sn, mountPointId: target.id, path: skillsDir });
+              continue;
+            }
+          }
+        } catch {
+          /* ENOENT — will be created below */
+        }
+        await mkdir(skillsDir, { recursive: true });
+        const sharedRefsStatus = await ensureSharedSkillRefsMount(skillsDir, skillsSource);
+        if (sharedRefsStatus === 'conflict' || sharedRefsStatus === 'source-missing') {
+          result.conflicts.push({
+            skillName: SHARED_SKILL_REFS_ALIAS,
+            mountPointId: target.id,
+            path: join(skillsDir, SHARED_SKILL_REFS_ALIAS),
+          });
+        }
 
-      for (const skillName of targetEnabled) {
-        validateSkillName(skillName);
-        const effSource = effectiveSourceMap.get(skillName) ?? skillsSource;
-        const linkPath = join(skillsDir, skillName);
-        const status = await classifyMountPath(linkPath, effSource, skillName);
-        if (status === 'missing' || (status === 'conflict' && force)) {
-          if (status === 'conflict') await rm(linkPath, { recursive: true, force: true });
-          await createSkillSymlink(symlinkTargetFor(linkPath, join(effSource, skillName)), linkPath);
-          result.mounted.push({ skillName, mountPointId: target.id, path: linkPath });
-        } else if (status === 'conflict') {
-          result.conflicts.push({ skillName, mountPointId: target.id, path: linkPath });
+        for (const skillName of targetEnabled) {
+          validateSkillName(skillName);
+          const effSource = effectiveSourceMap.get(skillName) ?? skillsSource;
+          const linkPath = join(skillsDir, skillName);
+          const status = await classifyMountPath(linkPath, effSource, skillName);
+          if (status === 'missing' || (status === 'conflict' && force)) {
+            if (status === 'conflict') await rm(linkPath, { recursive: true, force: true });
+            await createSkillSymlink(symlinkTargetFor(linkPath, join(effSource, skillName)), linkPath);
+            result.mounted.push({ skillName, mountPointId: target.id, path: linkPath });
+          } else if (status === 'conflict') {
+            result.conflicts.push({ skillName, mountPointId: target.id, path: linkPath });
+          }
         }
       }
 
@@ -504,9 +517,14 @@ async function syncProjectUnlocked(
     }
     for (const op of result.unmounted) {
       if (!op.path || op.skillName === '*') continue; // No path or directory-level rollback not feasible
+      const linkPath = op.path;
       const effSource = effectiveSourceMap.get(op.skillName) ?? skillsSource;
       const target = join(effSource, op.skillName);
-      await createSkillSymlink(symlinkTargetFor(op.path, target), op.path).catch(() => {});
+      await resolveMountBoundaryEscape(projectRoot, linkPath)
+        .then((outside) => {
+          if (!outside) return createSkillSymlink(symlinkTargetFor(linkPath, target), linkPath);
+        })
+        .catch(() => {});
     }
     throw configWriteErr;
   }

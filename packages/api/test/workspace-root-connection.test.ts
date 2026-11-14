@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, readFile, realpath, rename, rm, symlink } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, realpath, rename, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
@@ -107,6 +107,71 @@ test('human connection receipts survive response loss and removal without reacti
     process.chdir(cwd);
     if (priorDataDir === undefined) delete process.env.CAT_CAFE_DATA_DIR;
     else process.env.CAT_CAFE_DATA_DIR = priorDataDir;
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('removing a legacy linked root revokes file and raw reads even after /api/workspace/worktrees discovery', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'f309-legacy-linked-revoke-'));
+  const cwd = process.cwd();
+  const priorDataDir = process.env.CAT_CAFE_DATA_DIR;
+  const priorLinkedEnv = process.env.WORKSPACE_LINKED_ROOTS;
+  const app = Fastify();
+  const headers = { 'x-cat-cafe-user': 'operator' };
+  try {
+    process.chdir(dir);
+    process.env.CAT_CAFE_DATA_DIR = join(dir, 'state');
+    delete process.env.WORKSPACE_LINKED_ROOTS;
+    const fileRoot = join(dir, 'legacy-review-root');
+    await mkdir(fileRoot, { recursive: true });
+    await mkdir(join(dir, 'state', 'workspace'), { recursive: true });
+    await writeFile(
+      join(fileRoot, 'picture.png'),
+      Buffer.from(
+        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a9V8AAAAASUVORK5CYII=',
+        'base64',
+      ),
+    );
+    await writeFile(
+      join(dir, 'state', 'workspace', 'linked-roots.json'),
+      JSON.stringify([{ name: 'review', path: fileRoot }]),
+    );
+    await app.register(workspaceRoutes, { auditLog: new EventAuditLog({ auditDir: join(dir, 'audit') }) });
+
+    const discovery = await app.inject({ method: 'GET', url: '/api/workspace/worktrees', headers });
+    assert.equal(discovery.statusCode, 200);
+    const query = new URLSearchParams({ worktreeId: 'linked_review', path: 'picture.png' });
+    assert.equal((await app.inject({ method: 'GET', url: `/api/workspace/file?${query}`, headers })).statusCode, 200);
+    assert.equal(
+      (await app.inject({ method: 'GET', url: `/api/workspace/file/raw?${query}`, headers })).statusCode,
+      200,
+    );
+
+    assert.equal(await removeLinkedRoot('linked_review'), true);
+
+    assert.equal((await app.inject({ method: 'GET', url: `/api/workspace/file?${query}`, headers })).statusCode, 404);
+    assert.equal(
+      (await app.inject({ method: 'GET', url: `/api/workspace/file/raw?${query}`, headers })).statusCode,
+      404,
+    );
+    assert.equal(
+      (
+        await app.inject({
+          method: 'POST',
+          url: '/api/workspace/resolve-file-source',
+          headers,
+          payload: { worktreeId: 'linked_review', path: 'picture.png' },
+        })
+      ).statusCode,
+      404,
+    );
+  } finally {
+    await app.close();
+    process.chdir(cwd);
+    if (priorDataDir === undefined) delete process.env.CAT_CAFE_DATA_DIR;
+    else process.env.CAT_CAFE_DATA_DIR = priorDataDir;
+    if (priorLinkedEnv === undefined) delete process.env.WORKSPACE_LINKED_ROOTS;
+    else process.env.WORKSPACE_LINKED_ROOTS = priorLinkedEnv;
     await rm(dir, { recursive: true, force: true });
   }
 });

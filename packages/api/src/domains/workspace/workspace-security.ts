@@ -25,7 +25,10 @@ const DENYLIST_DIRS = new Set(['.git', 'secrets']);
 const worktreeRegistry = new Map<string, string>();
 
 export function registerWorktrees(entries: WorktreeEntry[]): void {
-  for (const e of entries) worktreeRegistry.set(e.id, e.root);
+  for (const e of entries) {
+    if (e.head === 'linked') continue;
+    worktreeRegistry.set(e.id, e.root);
+  }
 }
 
 export function assertWorkspacePathAllowed(path: string): void {

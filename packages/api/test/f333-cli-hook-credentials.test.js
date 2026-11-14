@@ -40,7 +40,10 @@ for (const transport of ['shared', 'stdio']) {
         CAT_CAFE_CREDENTIAL_FILE: '/fixture/original-turn.json',
       }),
     );
-    assert.equal(resolveModeFilePath(env), '/tmp/cat-cafe-anchor-mode-fixture-hook-A');
+    assert.equal(
+      resolveModeFilePath(env),
+      join(process.platform === 'win32' ? tmpdir() : '/tmp', 'cat-cafe-anchor-mode-fixture-hook-A'),
+    );
     assert.equal(originFromEnvironment(env).sourceRef, 'invocation:fixture-hook-A');
     assert.equal(env.CAT_CAFE_CALLBACK_TOKEN, undefined);
   });
@@ -161,7 +164,7 @@ for (const transport of ['shared', 'stdio']) {
         `cat-cafe-opus-recent-compact-${sessionId}.marker`,
         `cat-cafe-sop-stage-${sessionId}.json`,
       ]) {
-        rmSync(join('/tmp', name), { force: true });
+        rmSync(join(tmpdir(), name), { force: true });
       }
     }
   });

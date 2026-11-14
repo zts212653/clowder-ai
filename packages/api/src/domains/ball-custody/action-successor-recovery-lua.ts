@@ -23,8 +23,6 @@ local function validRecoveryFact(fact, generation)
     type(fact.attempts) ~= 'number' or fact.attempts < 0 or fact.attempts % 1 ~= 0 then return false end
   if fact.nextAttemptAt ~= cjson.null and (type(fact.nextAttemptAt) ~= 'number' or fact.nextAttemptAt < 0) then return false end
   if fact.claim ~= nil and (type(fact.claim) ~= 'table' or type(fact.claim.token) ~= 'string' or type(fact.claim.expiresAt) ~= 'number') then return false end
-  if fact.notification ~= nil and (type(fact.notification) ~= 'table' or type(fact.notification.key) ~= 'string' or
-    type(fact.notification.reasonCode) ~= 'string' or type(fact.notification.attempts) ~= 'number') then return false end
   return true
 end
 local function actionRecoveryActive(record, lane)
@@ -88,20 +86,16 @@ local function saveActionRecoveryOwner(detail, candidate, previous, indexes, pre
     if fact == nil and not existingRecovery then
       fact = {v=1,generation=candidate.generation,attempts=0,nextAttemptAt=0}
     elseif not validRecoveryFact(fact,candidate.generation) then
-      fact = {v=1,generation=candidate.generation,attempts=5,nextAttemptAt=0,
-        disposition='needs_attention',reasonCode='malformed_recovery_fact',
-        notification={key='action-recovery:'..candidate.leaseId..':'..candidate.generation..':owner:malformed_recovery_fact',
-          reasonCode='malformed_recovery_fact',attempts=0}}
+      fact = {v=1,generation=candidate.generation,attempts=5,nextAttemptAt=cjson.null,
+        disposition='needs_attention',reasonCode='malformed_recovery_fact'}
     elseif previous and previous.generation == candidate.generation and
       not actionRecoveryActive(previous,lane) and actionRecoveryActive(candidate,lane) and not fact.disposition then
       fact.nextAttemptAt = 0
     end
-    local pendingNotice = type(fact.notification) == 'table' and not fact.notification.deliveredAt and
-      (tonumber(fact.notification.attempts) or 0) < 5
-    if not actionRecoveryActive(candidate,lane) and not pendingNotice then
+    if not actionRecoveryActive(candidate,lane) then
       fact.nextAttemptAt = cjson.null
       fact.claim = nil
-    elseif fact.disposition and not pendingNotice then fact.nextAttemptAt = cjson.null end
+    elseif fact.disposition then fact.nextAttemptAt = cjson.null end
     candidate._recovery[lane] = fact
     if type(fact.nextAttemptAt) == 'number' then redis.call('ZADD',indexes[i],fact.nextAttemptAt,detail)
     else redis.call('ZREM',indexes[i],detail) end

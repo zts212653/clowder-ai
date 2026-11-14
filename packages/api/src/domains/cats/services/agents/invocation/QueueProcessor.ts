@@ -154,6 +154,7 @@ import {
   PerCatTerminalDispositionCollector,
 } from './PerCatTerminalDispositionCollector.js';
 import type { OwnedQueueProgress } from './PersistedQueueCarrier.js';
+import { persistStreamedInteractiveBlock } from './persist-streamed-interactive-block.js';
 import { queueEntryId } from './queue-ledger/QueueLedger.js';
 import {
   type ContinuationOutcome,
@@ -2971,6 +2972,8 @@ export class QueueProcessor {
     const failedIds: string[] = [];
     const deliveredMessages: Array<{
       id: string;
+      visibility?: StoredMessage['visibility'];
+      whisperTo?: readonly string[];
       content: string;
       lifecycle?: import('@cat-cafe/shared').LifecycleStoredMessageMetadata;
       catId: string | null;
@@ -3015,6 +3018,9 @@ export class QueueProcessor {
         const projectedExtra = result.extra ?? {};
         deliveredMessages.push({
           id: result.id,
+          ...(result.from?.kind === 'user' && result.clientMessageId
+            ? { clientMessageId: result.clientMessageId }
+            : {}),
           ...(result.from ? { from: result.from } : {}),
           content: result.content,
           ...(result.lifecycle ? { lifecycle: result.lifecycle } : {}),
@@ -3024,6 +3030,8 @@ export class QueueProcessor {
           mentions: result.mentions,
           userId: result.userId,
           contentBlocks: result.contentBlocks,
+          ...(result.visibility ? { visibility: result.visibility } : {}),
+          ...(result.whisperTo ? { whisperTo: result.whisperTo } : {}),
           ...(Object.keys(projectedExtra).length > 0 ? { extra: projectedExtra as Record<string, unknown> } : {}),
           ...(result.origin ? { origin: result.origin } : {}),
           ...(result.replyTo ? { replyTo: result.replyTo } : {}),
@@ -6589,6 +6597,11 @@ export class QueueProcessor {
         // History owns one response lifecycle for every admitted dispatch.
         // Action-successor custody may still accept/reject the terminal commit,
         // but it must not create a second, terminal-only presentation protocol.
+        await persistStreamedInteractiveBlock(
+          messageStore,
+          visibleMessage,
+          typeof msg.catId === 'string' ? lifecycleResponseMessageIdByCat.get(msg.catId) : undefined,
+        );
         socketManager.broadcastAgentMessage(visibleMessage, threadId);
         // A target's done follows its response commit: publish that committed truth
         // now instead of when the whole entry (every sibling target) settles.

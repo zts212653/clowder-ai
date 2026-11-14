@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { startRealDocumentOwner } from './f309-ordinary-document-owner.mjs';
 import { WEB_ROOT } from './f309-ordinary-workspace-journey-fixture.mjs';
@@ -84,7 +85,7 @@ export async function observeFirstFileQuote(page) {
 
 /** No review, request, Task or Human source is seeded before the native file selection/send. */
 export async function createFirstFileFixture(extension, { longMarkdown = false } = {}) {
-  const evidence = await mkdtemp('/tmp/f309-first-file-native-');
+  const evidence = await mkdtemp(path.join(tmpdir(), 'f309-first-file-native-'));
   const owner = await startRealDocumentOwner(path.join(evidence, 'data'), { executionSource: 'human' });
   const filename = `f309-first-file-${randomUUID()}.${extension}`;
   const filePath = `packages/web/test/browser/fixtures/${filename}`;

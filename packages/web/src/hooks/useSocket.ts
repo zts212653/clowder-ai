@@ -23,6 +23,12 @@ import { useBrakeStore } from '@/stores/brakeStore';
 import { useChatStore } from '@/stores/chatStore';
 import { useGuideStore } from '@/stores/guideStore';
 import { findLatestMessageByTimeline } from '@/stores/message-timeline';
+import {
+  observeCanceledSendAttempts,
+  observeDeliveredSendAttempts,
+  observeQueuedSendAttempts,
+  recoverSendAttempts,
+} from '@/stores/send-attempt-store';
 import { useSidebarProjectionStore } from '@/stores/sidebarProjectionStore';
 import { beginThreadRecovery } from '@/stores/thread-recovery';
 import { useToastStore } from '@/stores/toastStore';
@@ -450,6 +456,7 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string, foregro
     };
 
     socket.on('connect', () => {
+      recoverSendAttempts();
       setSocketConnected(true);
       const tid = threadIdRef.current;
       if (tid) joinedRoomsRef.current.add(`thread:${tid}`);
@@ -834,9 +841,11 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string, foregro
     });
 
     socket.on('message_deleted', (data: { messageId: string; threadId: string; deletedBy: string }) => {
+      void observeCanceledSendAttempts(data.threadId, [data.messageId]).catch(() => {});
       callbacksRef.current.onMessageDeleted?.(data);
     });
     socket.on('message_hard_deleted', (data: { messageId: string; threadId: string; deletedBy: string }) => {
+      void observeCanceledSendAttempts(data.threadId, [data.messageId], 'deleted').catch(() => {});
       callbacksRef.current.onMessageDeleted?.(data);
     });
     socket.on('message_restored', (data: { messageId: string; threadId: string }) => {
@@ -845,7 +854,9 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string, foregro
     socket.on(
       'message_recalled',
       (data: { messageId: string; threadId: string; verdict: 'zero_exposure' | 'exposed' }) => {
-        callbacksRef.current.onMessageRecalled?.(data);
+        void observeCanceledSendAttempts(data.threadId, [data.messageId], 'recalled')
+          .catch(() => {})
+          .then(() => callbacksRef.current.onMessageRecalled?.(data));
       },
     );
     socket.on('message_receipt_updated', (data: { messageId: string; threadId: string }) => {
@@ -875,6 +886,7 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string, foregro
       void invalidateSidebarProjection();
       const store = useChatStore.getState();
       const queue = normalizeQueueEntries(data.queue);
+      observeQueuedSendAttempts(data.threadId, queue);
       const epoch = bumpLiveQueueHydrateEpoch(data.threadId);
       const known = data.threadId === store.currentThreadId ? store.queue : store.getThreadState(data.threadId).queue;
       const projected = queue.map((entry) => {
@@ -972,6 +984,9 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string, foregro
         deliveredAt: number;
         messages?: Array<{
           id: string;
+          clientMessageId?: string;
+          visibility?: import('@/stores/chat-types').ChatMessage['visibility'];
+          whisperTo?: string[];
           from?: MessageFrom;
           content: string;
           lifecycle?: import('@cat-cafe/shared').LifecycleStoredMessageMetadata;
@@ -992,6 +1007,7 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string, foregro
         }>;
       }) => {
         void invalidateSidebarProjection();
+        observeDeliveredSendAttempts(data.threadId, data.messages ?? []);
         useChatStore.getState().markMessagesDelivered(data.threadId, data.messageIds, data.deliveredAt, data.messages);
       },
     );
@@ -1000,6 +1016,7 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string, foregro
       commit?: unknown;
       message: {
         id: string;
+        clientMessageId?: string;
         from?: MessageFrom;
         catId: string | null;
         content: string;
@@ -1030,6 +1047,7 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string, foregro
           : (timelineMessageKind(data.message.from, Boolean(data.message.source)) ??
             (data.message.catId ? 'assistant' : 'user')),
         ...(data.message.from ? { from: data.message.from } : {}),
+        ...(data.message.clientMessageId ? { clientMessageId: data.message.clientMessageId } : {}),
         ...(data.message.source ? { source: data.message.source } : {}),
         ...(isDeliveryFailure ? { variant: 'error' as const } : {}),
         ...(data.message.catId && !isDeliveryFailure ? { catId: data.message.catId } : {}),

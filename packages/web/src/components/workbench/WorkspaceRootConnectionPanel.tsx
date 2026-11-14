@@ -216,7 +216,12 @@ export function WorkspaceRootConnectionPanel({
         </p>
       )}
       {ready && !removedFileConnection ? (
-        <button type="button" disabled={busy || disabled} onClick={() => void connect()}>
+        <button
+          type="button"
+          disabled={busy || disabled}
+          className="rounded-md bg-cafe-accent px-3 py-1.5 text-xs font-medium text-[var(--cafe-accent-foreground)] disabled:opacity-50"
+          onClick={() => void connect()}
+        >
           {busy
             ? '正在核对连接…'
             : knownConnected
@@ -226,7 +231,11 @@ export function WorkspaceRootConnectionPanel({
                 : `连接 ${connection.name} 并继续`}
         </button>
       ) : (
-        <button type="button" onClick={() => setAttempt((value) => value + 1)}>
+        <button
+          type="button"
+          className="rounded-md border border-cafe bg-cafe-surface-elevated px-3 py-1.5 text-xs font-medium text-cafe hover:bg-cafe-surface-sunken"
+          onClick={() => setAttempt((value) => value + 1)}
+        >
           重新读取连接记录
         </button>
       )}

@@ -577,8 +577,7 @@
       "mentionPatterns": ["@gemini", "@暹罗猫", "@暹罗", "@siamese", "@暄罗猫", "@暄罗", "@烁烁"],
       "roleDescription": "视觉设计师和创意顾问，擅长 UI/UX 设计和视觉表达",
       "teamStrengths": "审美、前端设计风格、打破常规",
-      "caution": "禁止写代码！幻觉多，不遵守 SOP",
-      "restrictions": ["禁止写代码"],
+      "caution": null,
       "features": {
         "sessionChain": true
       },
@@ -594,6 +593,8 @@
             "outputFormat": "plainText",
             "defaultArgs": []
           },
+          "caution": "禁止写代码！幻觉多，不遵守 SOP",
+          "restrictions": ["禁止写代码"],
           "personality": "热血奔放，善用富文本语音，表达力最强",
           "strengths": ["visual-design", "ui-ux", "creativity"],
           "voiceConfig": {

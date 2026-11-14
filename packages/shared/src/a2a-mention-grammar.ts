@@ -21,10 +21,38 @@ const LEADING_MARKDOWN_MENTION_PREFIX_RE = /^(?:(?:>\s*)|(?:[-*+]\s+)|(?:\d+[.)]
 const LINE_START_MARKDOWN_PREFIX_PATTERN = String.raw`\s*(?:(?:>\s*)|(?:[-*+]\s+)|(?:\d+[.)]\s+))*`;
 const HANDLE_BOUNDARY_PATTERN = String.raw`(?=$|[\s,.:;!?()\[\]{}<>，。！？、：；（）【】《》「」『』〈〉]|[^a-z0-9_.-])`;
 
-export interface MentionHandle {
-  readonly catId: string;
+export interface MentionHandle<Id extends string = string> {
+  readonly catId: Id;
   /** Lowercase handle including the leading `@`. */
   readonly pattern: string;
+  readonly stableIdFallback?: true;
+}
+
+/** Keep configured aliases in their original order and add IDs that have no competing handle. */
+export function buildCatMentionHandles<Id extends string>(
+  cats: readonly { id: Id; mentionPatterns?: readonly string[] }[],
+  reserved: readonly string[],
+): MentionHandle<Id>[] {
+  const handles: MentionHandle<Id>[] = cats.flatMap(({ id, mentionPatterns }) =>
+    (mentionPatterns ?? []).map((pattern) => ({ catId: id, pattern: pattern.toLowerCase() })),
+  );
+  const occupied = new Set(reserved.map((pattern) => pattern.toLowerCase()));
+  for (const { pattern } of handles) occupied.add(pattern);
+  for (const { id } of cats) {
+    const pattern = `@${id.toLowerCase()}`;
+    if (pattern === '@__none__' || /^@(?:all(?:-.+)?|全体.*|thread|本帖)$/u.test(pattern) || occupied.has(pattern)) {
+      continue;
+    }
+    handles.push({ catId: id, pattern, stableIdFallback: true });
+    occupied.add(pattern);
+  }
+  return handles;
+}
+
+/** Keep newly routable IDs out of package/path text. Slash-separated mentions are still valid. */
+export function isMentionPathSuffix(text: string, end: number): boolean {
+  const charAfter = text[end];
+  return (charAfter === '/' || charAfter === '\\') && text[end + 1] !== '@';
 }
 
 /** Cat ids of the line-start mentions in `text`, in order of appearance (repeats included). */
@@ -54,6 +82,7 @@ function readLineStartHandles(rawLine: string, entries: readonly MentionHandle[]
 }
 
 function endsOnBoundary(segment: string, entry: MentionHandle): boolean {
+  if (entry.stableIdFallback && isMentionPathSuffix(segment, entry.pattern.length)) return false;
   const charAfter = segment[entry.pattern.length];
   return !charAfter || TOKEN_BOUNDARY_RE.test(charAfter) || !HANDLE_CONTINUATION_RE.test(charAfter);
 }

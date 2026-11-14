@@ -229,12 +229,11 @@ export const messageActionsRoutes: FastifyPluginAsync<MessageActionsRoutesOption
       return { error: `Block ${blockId} is not interactive (kind: ${block.kind})` };
     }
 
-    // Merge patch into block
-    const mutable = block as unknown as Record<string, unknown>;
-    if (disabled !== undefined) mutable.disabled = disabled;
-    if (selectedIds !== undefined) mutable.selectedIds = selectedIds;
-
-    await opts.messageStore.updateExtra(id, msg.extra);
+    const updated = await opts.messageStore.setInteractiveBlockState(id, blockId, { disabled, selectedIds });
+    if (!updated) {
+      reply.status(409);
+      return { error: 'Interactive block changed before save' };
+    }
     return { status: 'ok' };
   });
 };

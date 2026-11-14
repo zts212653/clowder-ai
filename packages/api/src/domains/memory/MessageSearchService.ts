@@ -9,6 +9,7 @@ import type {
 import { resolveThreadAccess } from '../cats/services/session/thread-access-policy.js';
 import type { IMessageStore, StoredMessage } from '../cats/services/stores/ports/MessageStore.js';
 import type { IThreadStore, Thread } from '../cats/services/stores/ports/ThreadStore.js';
+import { isReadableSchedulerWork } from '../cats/services/stores/readable-scheduler-work.js';
 import {
   canQuoteInPublicReply,
   canViewMessage,
@@ -169,10 +170,11 @@ export class MessageSearchService {
     checkSearchExecution(execution);
     const sourceRef = principal.source;
     if (!sourceRef) return;
+    let sourceThread: Thread | undefined;
     try {
       const read = () =>
         this.readableThreads({ query: input.query, threadId: sourceRef.threadId }, principal, execution);
-      await (observation ? observation.run('source-thread', read) : read());
+      sourceThread = (await (observation ? observation.run('source-thread', read) : read())).get(sourceRef.threadId);
       checkSearchExecution(execution);
     } catch (error) {
       if (error instanceof MessageSearchAccessError)
@@ -191,7 +193,13 @@ export class MessageSearchService {
       source.deletedAt ||
       source._tombstone ||
       source.deliveryStatus === 'canceled' ||
-      isInternalNonQuotableParent(source) ||
+      (isInternalNonQuotableParent(source) &&
+        !isReadableSchedulerWork(
+          source,
+          principal.userId,
+          sourceThread,
+          principal.viewer.type === 'cat' ? principal.viewer.catId : undefined,
+        )) ||
       !canViewMessage(source, principal.viewer) ||
       (source.userId !== principal.userId && !isSystemUserMessage(source)) ||
       !passesManagedHoldViewerBoundary(source, principal.userId)

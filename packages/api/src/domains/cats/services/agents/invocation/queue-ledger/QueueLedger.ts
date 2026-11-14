@@ -28,6 +28,8 @@ export interface QueuePrestartRetirementIntent {
 }
 
 export interface QueueLedgerPayload {
+  /** Optional owner-private browser correlation, separate from the durable source record identity. */
+  clientMessageId?: string;
   /** Stable identity of the one source record represented by this Queue Entry. */
   sourceRecordId: string;
   content: string;
@@ -237,7 +239,10 @@ export function queueLedgerAdmissionsMatch(existing: QueueLedgerEntry, incoming:
 /** Private targets are derived; the producer envelope survives target retirement and config changes. */
 function admissionIdentity(entry: QueueLedgerEntry) {
   const { callerTraceContext: _trace, ...execution } = entry.execution;
-  const { requestedTargetCats, ...privatePayload } = entry.payload;
+  const payload = { ...entry.payload };
+  // Browser correlation is not producer identity; old admissions have no such metadata.
+  delete payload.clientMessageId;
+  const { requestedTargetCats, ...privatePayload } = payload;
   const privateInput = entry.kind === 'private_input';
   return {
     version: entry.version,
@@ -248,7 +253,7 @@ function admissionIdentity(entry: QueueLedgerEntry) {
     from: entry.from,
     targets: privateInput ? (requestedTargetCats ?? entry.targets) : entry.targets,
     // Omitting this derived projection preserves receipts written before successor admission.
-    payload: privateInput ? privatePayload : entry.payload,
+    payload: privateInput ? privatePayload : payload,
     execution,
     authorIntentByTarget: entry.delivery.authorIntentByTarget,
     priority: entry.priority,

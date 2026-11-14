@@ -5,6 +5,7 @@ import { apiFetch } from '@/utils/api-client';
 import { apiSessionIdentity } from '@/utils/api-session-identity';
 import { MemoryEventDetail } from './MemoryEventDetail';
 import { MemoryPersonDetail } from './MemoryPersonDetail';
+import { MemoryPersonMaintenanceRecovery } from './MemoryPersonMaintenance';
 import { MemoryReadState } from './MemoryReadState';
 import { MemoryTaste } from './MemoryTaste';
 import { MemoryTasteDetail } from './MemoryTasteDetail';
@@ -106,6 +107,9 @@ export function MemorySourceDetail({ target }: { target: Target }) {
   const noun = { taste: '品味', person: '人物', event: '事件' }[target.family];
   return (
     <section className="space-y-4" aria-label={`${noun}来源`}>
+      {target.family === 'person' && (
+        <MemoryPersonMaintenanceRecovery changed={() => retry((n) => n + 1)} applied={showCurrent} />
+      )}
       {status === 'loading' && (
         <MemoryReadState loading error={false} empty={false} noun="这条记忆" retry={() => retry((n) => n + 1)} />
       )}
@@ -144,6 +148,7 @@ export function MemorySourceDetail({ target }: { target: Target }) {
       )}
       {memory?.family === 'person' && (
         <MemoryPersonDetail
+          showMaintenanceRecovery={false}
           personId={target.id}
           deliveryRevision={target.revision}
           close={close}

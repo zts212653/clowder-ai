@@ -56,6 +56,7 @@ export class CodexLoginManager {
     root: string;
     ref: string;
     attempt: CodexLoginAttempt;
+    terminal: boolean;
   }> = [];
   private occupied = false;
   private closing = false;
@@ -90,7 +91,7 @@ export class CodexLoginManager {
       return { ...account, codex: { ...account.codex, attempt: projectCodexAccountReuse(root, attempt) } };
     return account as AccountConfig & { codex: CodexManagedAccount };
   }
-  start(root: string, ref: string): CodexLoginAttempt {
+  start(root: string, ref: string, terminal = false): CodexLoginAttempt {
     if (this.closing) throw new Error('codex_login_interrupted');
     const current = this.read(root, ref);
     assertCodexSharedStateRoots(root, { layout: current.codex });
@@ -113,7 +114,7 @@ export class CodexLoginManager {
       updatedAt: now,
     };
     writeCatalogAccount(root, ref, { ...current, codex: { ...layout, attempt } });
-    this.queue.push({ root, ref, attempt });
+    this.queue.push({ root, ref, attempt, terminal });
     this.drain();
     return attempt;
   }
@@ -239,7 +240,7 @@ export class CodexLoginManager {
     if (this.occupied || this.closing) return;
     const item = this.queue.shift();
     if (!item) return;
-    const { root, ref, attempt } = item;
+    const { root, ref, attempt, terminal } = item;
     // The account may have been canceled or deleted while another native login occupied
     // the callback port. The existing CAS safely skips it without requiring a live row.
     if (!this.update(root, ref, attempt, { state: 'preparing' })) {
@@ -265,6 +266,7 @@ export class CodexLoginManager {
         home: attempt.credentialHome,
         cwd: root,
         signal: controller.signal,
+        terminal,
         onReady: () => {
           terminalOpened = true;
           this.update(root, ref, attempt, { state: 'waiting' });
@@ -292,10 +294,19 @@ export class CodexLoginManager {
                 [/codex_managed_policy_unsupported/, '当前组织托管策略尚不支持新增 Codex 账号，请联系管理员核对'],
                 [/codex_managed_version_unverified/, '当前 Codex 版本的账号隔离检查未通过，请查看兼容性检查结果后重试'],
                 [/codex_cli_unavailable/, '未找到官方 Codex 命令，请安装后重试'],
-                [/osascript|Terminal|terminal_open/, '未能唤起终端，请允许打开终端后重试'],
+                [
+                  /osascript|Terminal|terminal_open/,
+                  process.platform === 'win32' && !terminal
+                    ? '未能开始官方登录，请在此重试'
+                    : '未能唤起终端，请允许打开终端后重试',
+                ],
               ] as const
             ).find(([pattern]) => pattern.test(String(error)))?.[1] ??
-            (terminalOpened ? '官方登录未完成，请查看终端输出后在此重试' : '未能开始官方登录，请在此重试'),
+            (terminalOpened
+              ? process.platform === 'win32' && !terminal
+                ? '官方登录未完成，请重试；若浏览器未打开，可打开登录终端'
+                : '官方登录未完成，请查看终端输出后在此重试'
+              : '未能开始官方登录，请在此重试'),
         });
       })
       .finally(() => {

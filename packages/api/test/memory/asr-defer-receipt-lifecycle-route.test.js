@@ -42,9 +42,21 @@ describe('F276 deferred receipt lifecycle invalidates write-opportunity lineage'
         async get(_owner, receiptId) {
           return storedReceipts.find((receipt) => receipt.receiptId === receiptId) ?? null;
         },
+        async prepareOwnerForget(input) {
+          const index = storedReceipts.findIndex((receipt) => receipt.receiptId === input.receiptId);
+          if (index < 0) return { outcome: 'already_absent' };
+          const receipt = {
+            ...storedReceipts[index],
+            state: 'withdrawn',
+            ownerForget: { requestId: input.requestId, expectedRevision: input.expectedRevision },
+          };
+          storedReceipts[index] = receipt;
+          return { outcome: 'prepared', receipt };
+        },
         async withdraw(_owner, receiptId) {
           withdrawals.push(receiptId);
           const receipt = storedReceipts.find((candidate) => candidate.receiptId === receiptId);
+          if (receipt) receipt.state = 'withdrawn';
           return receipt ? { outcome: 'withdrawn', receipt } : { outcome: 'not_available' };
         },
         async hardForget(_owner, receiptId) {
@@ -93,6 +105,8 @@ describe('F276 deferred receipt lifecycle invalidates write-opportunity lineage'
 
   const lineageReceipt = (receiptId) => ({
     receiptId,
+    ownerUserId: 'owner-1',
+    state: 'deferred',
     writeOpportunityLineage: {
       reflexId: 'asr-person-memory',
       reflexVersion: 1,
@@ -152,7 +166,7 @@ describe('F276 deferred receipt lifecycle invalidates write-opportunity lineage'
 
   it('leaves lineage-free receipts alone', async () => {
     const receiptId = `deferred_person_${'e'.repeat(32)}`;
-    storedReceipts.push({ receiptId });
+    storedReceipts.push({ receiptId, ownerUserId: 'owner-1', state: 'deferred' });
     await post('withdraw', receiptId);
     assert.deepEqual(invalidations, []);
     assert.deepEqual(purges, []);
@@ -170,7 +184,7 @@ describe('F276 deferred receipt lifecycle invalidates write-opportunity lineage'
     assert.deepEqual(purges, []);
   });
 
-  it('does not report withdraw success or mutate the receipt when delivery purge fails', async () => {
+  it('keeps withdrawal recoverable and does not report success when delivery purge fails', async () => {
     const receiptId = `deferred_person_${'d'.repeat(32)}`;
     storedReceipts.push(lineageReceipt(receiptId));
     purgeError = new Error('delivery purge unavailable');
@@ -179,6 +193,7 @@ describe('F276 deferred receipt lifecycle invalidates write-opportunity lineage'
 
     assert.equal(response.statusCode, 503, response.body);
     assert.equal(invalidations[0].reason, 'superseded');
-    assert.deepEqual(withdrawals, []);
+    assert.deepEqual(withdrawals, [receiptId]);
+    assert.equal(storedReceipts[0].state, 'withdrawn');
   });
 });

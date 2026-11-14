@@ -50,7 +50,7 @@ export function registerCodexQuotaRoutes(
       if (error instanceof QuotaCredentialChanged)
         return reply.code(409).send({ error: '账号登录已变化，请刷新账号列表后重新查询' });
       return reply
-        .code(error instanceof Error && error.message === 'Codex account not found' ? 404 : 409)
+        .code(error instanceof Error && error.message === 'Codex account not found' ? 404 : 500)
         .send({ error: '无法读取账号，请核对账号配置' });
     }
   });

@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'node:test';
 
@@ -23,7 +24,7 @@ describe('readInboxRecords', () => {
   let paths;
 
   beforeEach(() => {
-    tempRoot = mkdtempSync('/tmp/cat-cafe-inbox-records-');
+    tempRoot = mkdtempSync(join(tmpdir(), 'cat-cafe-inbox-records-'));
     paths = resolveSignalPaths(tempRoot);
     mkdirSync(paths.inboxDir, { recursive: true });
   });

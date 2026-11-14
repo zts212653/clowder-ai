@@ -12,7 +12,11 @@ import { appendFileSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'node:test';
-
+import {
+  resolveEvalFilePath as hookEvalPath,
+  resolveModeFilePath as hookModePath,
+  resolveStateFilePath as hookStatePath,
+} from '../../../.claude/hooks/f236-anchor-posttool.mjs';
 import {
   cleanupSessionFiles,
   evalEntriesToDrillEvents,
@@ -255,8 +259,8 @@ describe('evalEntriesToDrillEvents', () => {
 // ─── Unit: resolveEvalJsonlPath ───────────────────────────────────
 
 describe('resolveEvalJsonlPath', () => {
-  it('returns /tmp path with invocation ID', () => {
-    assert.equal(resolveEvalJsonlPath('abc123'), '/tmp/cat-cafe-anchor-eval-abc123.jsonl');
+  it('returns the hook temporary path with invocation ID', () => {
+    assert.equal(resolveEvalJsonlPath('abc123'), hookEvalPath({ CAT_CAFE_INVOCATION_ID: 'abc123' }));
   });
 
   it('returns null for undefined invocation ID', () => {
@@ -271,8 +275,8 @@ describe('resolveEvalJsonlPath', () => {
 // ─── Unit: resolveModeFilePath ──────────────────────────────────────
 
 describe('resolveModeFilePath', () => {
-  it('returns /tmp path with invocation ID', () => {
-    assert.equal(resolveModeFilePath('abc123'), '/tmp/cat-cafe-anchor-mode-abc123');
+  it('returns the hook temporary path with invocation ID', () => {
+    assert.equal(resolveModeFilePath('abc123'), hookModePath({ CAT_CAFE_INVOCATION_ID: 'abc123' }));
   });
 
   it('returns null for undefined invocation ID', () => {
@@ -354,9 +358,9 @@ describe('cleanupSessionFiles', () => {
 // ─── Unit: resolveStateFilePath ──────────────────────────────────────
 
 describe('resolveStateFilePath', () => {
-  it('returns /tmp path with invocation ID', () => {
+  it('returns the hook temporary path with invocation ID', () => {
     const path = resolveStateFilePath('inv-stale-123');
-    assert.strictEqual(path, '/tmp/cat-cafe-anchor-filestate-inv-stale-123.json');
+    assert.strictEqual(path, hookStatePath({ CAT_CAFE_INVOCATION_ID: 'inv-stale-123' }));
   });
 
   it('returns null for undefined invocation ID', () => {

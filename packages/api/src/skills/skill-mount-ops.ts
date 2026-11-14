@@ -11,6 +11,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 
 import type { MountRules } from '@cat-cafe/shared';
+import { resolveMountBoundaryEscape } from '../utils/mount-path-boundary.js';
 import {
   buildProjectSkillMountDirs,
   buildProjectSkillMountTargets,
@@ -66,6 +67,11 @@ export async function mountSkillSymlinks(
       continue;
     }
     for (const dir of target.dirs) {
+      if (await resolveMountBoundaryEscape(projectRoot, dir)) {
+        console.warn(`[mountSkillSymlinks] Skipping skill mount outside project root: ${dir}`);
+        result.conflicts.push({ skillName, mountPointId: target.id, path: join(dir, skillName) });
+        continue;
+      }
       // Guard: reject symlinked mount dirs to prevent writing outside project
       try {
         const dirStat = await lstat(dir);

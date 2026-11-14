@@ -1,4 +1,4 @@
-import type { ResponseStreamReplay } from '@cat-cafe/shared';
+import { preserveInteractiveBlockStates, type ResponseStreamReplay } from '@cat-cafe/shared';
 import { createStore } from 'zustand/vanilla';
 import { type ChatMessage, DEFAULT_THREAD_STATE } from '@/stores/chat-types';
 import { type ChatState, chatStoreCreator, useChatStore } from '@/stores/chatStore';
@@ -166,9 +166,16 @@ function* rebuildResponse(
     projectReplayedEvent({ ...event, threadId, messageId }, threadId, index, store);
     yield;
   }
-  return store()
+  const rebuilt = store()
     .getThreadState(threadId)
     .messages.find((message) => message.id === messageId);
+  if (rebuilt?.extra?.rich && base?.extra?.rich) {
+    rebuilt.extra.rich = {
+      ...rebuilt.extra.rich,
+      blocks: preserveInteractiveBlockStates(rebuilt.extra.rich.blocks, base.extra.rich.blocks),
+    };
+  }
+  return rebuilt;
 }
 
 /** A response this page has not seen and cannot rebuild: shown once History brings its draft. */

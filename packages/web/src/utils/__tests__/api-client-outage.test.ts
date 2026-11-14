@@ -168,4 +168,27 @@ describe('API outage notification lifecycle (#1881)', () => {
     await apiFetch('/api/threads', undefined, { ifNoneMatch: 'fixture' });
     expect(useToastStore.getState().toasts).toEqual([]);
   });
+
+  it('suppresses the connection notice only for a mutation that opts out', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn<typeof fetch>(async () => {
+        throw new TypeError('offline');
+      }),
+    );
+    const { apiFetch } = await import('../api-client');
+    const { useToastStore } = await import('../../stores/toastStore');
+
+    await expect(
+      apiFetch(
+        '/api/plugins/official.quick-phrases/phrases',
+        { method: 'POST', body: '{"id":"saved"}' },
+        { notifyFailure: false },
+      ),
+    ).rejects.toThrow('offline');
+    expect(useToastStore.getState().toasts).toEqual([]);
+
+    await expect(apiFetch('/api/threads', { method: 'POST', body: '{}' })).rejects.toThrow('offline');
+    expect(useToastStore.getState().toasts).toHaveLength(1);
+  });
 });

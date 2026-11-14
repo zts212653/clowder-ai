@@ -15,6 +15,8 @@ export interface CodexNativeAccountExpectation {
   readonly cwd: string;
   readonly credentialHome?: string;
   readonly identity?: { userId: string; workspaceId: string };
+  /** F320 KD-3: an official API key logged in to the native ephemeral store, never a file. */
+  readonly apiKey?: string;
 }
 type Request = (method: string, params: Record<string, unknown>) => Promise<unknown>;
 function unavailable(): never {
@@ -40,7 +42,10 @@ export async function validateCodexNativeAccount(
   const constraints = requiredRecord(await request('configRequirements/read', {}));
   if (!Object.hasOwn(constraints, 'requirements')) unavailable();
   const requirements = constraints.requirements === null ? {} : requiredRecord(constraints.requirements);
+  if (expectation.authMode === 'api_key' && expectation.apiKey)
+    await request('account/login/start', { type: 'apiKey', apiKey: expectation.apiKey });
   const observed = requiredRecord(await request('account/read', { refreshToken: false }));
+  if (expectation.apiKey && codexConfigRecord(observed.account).type !== 'apiKey') conflict('auth_mode');
   if (expectation.identity) {
     const current = expectation.credentialHome ? readCodexAccountIdentity(expectation.credentialHome) : undefined;
     if (!sameCodexIdentity(expectation.identity, current)) conflict('account_identity');

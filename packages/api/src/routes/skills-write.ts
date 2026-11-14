@@ -18,6 +18,7 @@ import { requireLocalCapabilityWriteRequest } from '../config/capabilities/capab
 import { validateSkillName } from '../config/governance/skill-sync.js';
 import { readMountRules } from '../config/mount/mount-rules-store.js';
 import { classifyMountPath, syncProject } from '../skills/skill-sync-engine.js';
+import { resolveMountBoundaryEscape } from '../utils/mount-path-boundary.js';
 import { resolveOwnerGate } from '../utils/owner-gate.js';
 import { redirectRuntimeProjectPath, resolvePersistentProjectPath } from '../utils/persistent-project-path.js';
 import { resolvePluginSkillSourcesForProject } from '../utils/plugin-skill-source.js';
@@ -122,6 +123,11 @@ export const skillsWriteRoutes: FastifyPluginAsync<SkillsWriteRouteOptions> = as
             const linkPath = join(dir, ps.skillName);
             const status = await classifyMountPath(linkPath, ps.skillsSource, ps.skillName);
             if (shouldMount && status === 'missing') {
+              if (await resolveMountBoundaryEscape(projectRoot, dir)) {
+                result.conflicts.push({ skillName: ps.skillName, mountPointId: target.id, path: linkPath });
+                console.warn(`[skills/sync] Skipping plugin skill ${ps.skillName} outside project root: ${dir}`);
+                continue;
+              }
               // Guard: reject symlinked provider dirs to prevent writing outside project
               try {
                 const dirStat = await lstat(dir);

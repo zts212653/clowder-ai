@@ -138,14 +138,12 @@ export function acknowledgeManagedJobWake(
   if (!current?.recovery.wakeIntent || current.recovery.wakeIntent.key !== key || !messageId) return false;
   const intent = current.recovery.wakeIntent;
   if (intent.status === 'delivered') return intent.messageId === messageId;
+  const { notification: _legacyNotification, ...recovery } = current.recovery as ManagedJobRecoveryFact & {
+    notification?: unknown;
+  };
   return updateManagedJobRecovery(job, current.revision, {
-    ...current.recovery,
-    nextAttemptAt:
-      current.recovery.notification &&
-      !current.recovery.notification.deliveredAt &&
-      current.recovery.notification.attempts < 5
-        ? now
-        : null,
+    ...recovery,
+    nextAttemptAt: null,
     disposition: undefined,
     reasonCode: undefined,
     wakeIntent: { ...intent, status: 'delivered', messageId, deliveredAt: now },

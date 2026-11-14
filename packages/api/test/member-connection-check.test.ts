@@ -35,6 +35,15 @@ test('DSH checks also recognize structured provider error data without inventing
   assert.equal(dshConnectionFailureReason(new Error('unclassified fixture failure')), 'check_result_unknown');
 });
 
+function useFixtureOwner(t: test.TestContext) {
+  const previousOwner = process.env.DEFAULT_OWNER_USER_ID;
+  process.env.DEFAULT_OWNER_USER_ID = 'fixture-owner';
+  t.after(() => {
+    if (previousOwner === undefined) delete process.env.DEFAULT_OWNER_USER_ID;
+    else process.env.DEFAULT_OWNER_USER_ID = previousOwner;
+  });
+}
+
 function factStore() {
   const data = new Map<string, string>();
   return new RedisDshMemberConnectionCheckStore({
@@ -74,6 +83,7 @@ test('checks include activation-only plugins with the same member scope and inva
   let prompts = 0;
   const app = Fastify();
   t.after(() => app.close());
+  useFixtureOwner(t);
   app.decorateRequest('sessionUserId', 'fixture-owner');
   registerDshMemberConnectionChecks(app, {
     store: factStore(),
@@ -151,6 +161,7 @@ test('checks include activation-only plugins with the same member scope and inva
 test('refresh is free, current tool hashes invalidate old results, and attempt replay does not bill again', async (t) => {
   const app = Fastify();
   t.after(() => app.close());
+  useFixtureOwner(t);
   app.decorateRequest('sessionUserId', 'fixture-owner');
   let calls = 0;
   let tools = 'schema-v1';
@@ -191,6 +202,7 @@ test('refresh is free, current tool hashes invalidate old results, and attempt r
 test('a connected model retains explicit optional-plugin diagnostics without being marked disconnected', async (t) => {
   const app = Fastify();
   t.after(() => app.close());
+  useFixtureOwner(t);
   app.decorateRequest('sessionUserId', 'fixture-owner');
   const issue = {
     pluginId: 'fixture',
@@ -229,6 +241,7 @@ test('a restarted API projects a recorded started attempt as unknown and refuses
   const restarted = Fastify();
   t.after(() => app.close());
   t.after(() => restarted.close());
+  useFixtureOwner(t);
   app.decorateRequest('sessionUserId', 'fixture-owner');
   restarted.decorateRequest('sessionUserId', 'fixture-owner');
   let entered!: () => void;

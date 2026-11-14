@@ -66,7 +66,7 @@ test('person revision replaces three names without absorbing read or destructive
   assert.equal(tool.annotations.readOnlyHint, false);
   assert.equal(tool.annotations.destructiveHint, false);
   assert.ok(names.includes('cat_cafe_drill_person_memory'));
-  assert.ok(names.includes('cat_cafe_redact_person_memory_item'));
+  assert.equal(names.includes('cat_cafe_redact_person_memory_item'), false); // mcp-cutover-negative-reference: absence
 });
 
 for (const scenario of cases) {

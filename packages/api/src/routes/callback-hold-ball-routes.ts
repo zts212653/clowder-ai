@@ -375,7 +375,10 @@ export interface HoldBallRouteDeps extends CustodyEventRouteDeps, EventWaitDispo
    */
   taskStore?: CrossStoreTaskStore;
   invocationRecordStore: IInvocationRecordStore;
-  managedCommandWakeRecovery?: Pick<ManagedCommandWakeRecoverySweep, 'recordCompletion' | 'recordLost'> &
+  managedCommandWakeRecovery?: Pick<
+    ManagedCommandWakeRecoverySweep,
+    'recordCompletion' | 'recordLost' | 'recoverTask'
+  > &
     Partial<Pick<ManagedCommandWakeRecoverySweep, 'recordCancelledCompletion' | 'recordRetiredCompletion'>>;
   /**
    * F117 Phase I: atomic Message + Queue admission for a wakeWhen completion.

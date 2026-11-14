@@ -132,6 +132,12 @@ export interface QueueRoutesOptions {
   /** Durable OS owner truth used when the in-memory tracker handle is gone. */
   cliExecutionOwnerService?: CliExecutionOwnerService;
   /**
+   * F048 Phase C: false while startup recovery is still settling the executions the previous
+   * process left. Those belong to startup recovery, which ends them as `process_restart` and wakes
+   * the interrupted cats. A Hub read in that window must not end them first as an owner loss.
+   */
+  isStartupRecoveryComplete?: () => boolean;
+  /**
    * #1838: Stop of one execution whose provider started and whose stop is unconfirmed. It ends the
    * execution only with an exact stop proof (the Windows API job it belonged to verifiably closed);
    * otherwise it names why it could not, and the execution keeps its occupancy.
@@ -1176,6 +1182,10 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
     // classifier then lists it as unverified, and repairing it here would erase that.
     const invocationRecords = opts.invocationRecordStore;
     if (!invocationRecords || !opts.cliExecutionOwnerService) return candidates;
+    // 11-10 boot 84: the Hub reconnected within a second of listen, this repair ended three
+    // restart-interrupted executions as owner loss 16s before startup recovery reached them, and
+    // no cat was woken. Until recovery finishes, a running record is listed, never repaired.
+    if (opts.isStartupRecoveryComplete?.() === false) return candidates;
     const processSnapshot = await processOwnerSnapshotForRequest(request, opts.cliExecutionOwnerService);
     if (!processSnapshot.complete) {
       activeReadRepair.forgetThread(threadId, userId);

@@ -23,7 +23,10 @@ import { createAcpPermissionHandler } from './permissions/acp-permission-interac
  */
 
 import { type CatId, type ClientId, catRegistry } from '@cat-cafe/shared';
-import { invocationPluginMcpIssues } from '../../../../../../config/capabilities/invocation-plugin-mcp-view.js';
+import {
+  captureInvocationPluginMcpCurrentness,
+  invocationPluginMcpIssues,
+} from '../../../../../../config/capabilities/invocation-plugin-mcp-view.js';
 import { getCatEffort } from '../../../../../../config/cat-config-loader.js';
 import { getCatModel } from '../../../../../../config/cat-models.js';
 import { readDshNativeAccount } from '../../../../../../config/native-accounts/dsh-account.js';
@@ -42,8 +45,10 @@ import type {
 import { agentServiceGeneration } from '../../registry/AgentRegistry.js';
 import {
   type AcpCapacitySignal,
+  type AcpClient,
   type AcpPermissionHandler,
   AcpProtocolError,
+  AcpSessionCancelledError,
   AcpStreamIdleError,
   AcpTimeoutError,
 } from './AcpClient.js';
@@ -63,11 +68,13 @@ import {
   materializeIcodeSessionMcpServers,
   materializeSessionMcpServers,
 } from './acp-session-env.js';
+import { settlePendingAcpRecalls } from './acp-tool-events.js';
 import { AcpSessionBindingError } from './active-session-cache.js';
 import { createAgyAcpPermissionHandler } from './agy/agy-acp-permission.js';
 import { type AgyAcpConfig, prepareAgyAcpSession, selectAgyAcpModel } from './agy/agy-acp-session.js';
 import { captureAcpMcpSources } from './configuration/acp-mcp-source.js';
 import { invokeDshMember } from './dsh/dsh-member-invocation.js';
+import { DshTurnInput } from './dsh/dsh-turn-input.js';
 import { type AcpRequestInputBridge, createAcpRequestInputBridge } from './icode/runtime-interaction-adapter.js';
 import { invokeKimiMember } from './kimi/kimi-member-invocation.js';
 import {
@@ -154,6 +161,8 @@ type PromptPhase =
   | 'busy_backoff';
 
 export interface AcpAgentServiceConfig {
+  /** Factory admitted the reviewed Desktop turn bridge for this pooled carrier. */
+  dshTurnInput?: boolean;
   executionApproval?: 'auto' | 'ask_user';
   defaultPermissionDecision?: 'allow' | 'reject';
   /** Factory-verified installed native DSH, separate from ordinary pooled sessions. */
@@ -221,6 +230,7 @@ export class AcpAgentService implements AgentService {
    */
   readonly windowsProviderHosts = false;
   private readonly nativeDsh?: DshNativeLaunch;
+  private readonly dshTurnInput: boolean;
   private readonly nativeKimi?: KimiNativeLaunch;
   private readonly antigravity?: AgyAcpConfig;
   readonly catId: CatId;
@@ -262,6 +272,7 @@ export class AcpAgentService implements AgentService {
   }
 
   constructor(config: AcpAgentServiceConfig) {
+    this.dshTurnInput = config.dshTurnInput === true;
     this.nativeDsh = config.nativeDsh;
     this.nativeKimi = config.nativeKimi;
     this.antigravity = config.antigravity;
@@ -306,6 +317,7 @@ export class AcpAgentService implements AgentService {
     const toolIssues = mcpSupport ? invocationPluginMcpIssues(input.mcpWhitelist ?? this.mcpWhitelist) : [];
     return {
       frozenAcpMcpServers,
+      frozenAcpMcpCurrentness: captureInvocationPluginMcpCurrentness(frozenAcpMcpServers),
       ...(toolIssues.length ? { frozenAcpMcpIssues: toolIssues } : {}),
     };
   }
@@ -354,11 +366,12 @@ export class AcpAgentService implements AgentService {
   }
 
   freshnessCarrierCapability(): import('../../../types.js').AgentFreshnessCarrierCapability {
+    // Factory admission verifies the bridge; each invocation still requires a successful wire handshake.
     return {
       provider: this.antigravity ? 'google' : 'other',
       carrier: this.antigravity ? 'agy_acp' : 'other',
-      deliverySemantics: 'unsupported',
-      activeInvocationGuidance: 'unsupported',
+      deliverySemantics: this.dshTurnInput ? 'exact_active_turn' : 'unsupported',
+      activeInvocationGuidance: this.dshTurnInput ? 'supported' : 'unsupported',
     };
   }
 
@@ -429,6 +442,7 @@ export class AcpAgentService implements AgentService {
           while (true) {
             const next = await stream.next();
             if (next.done) {
+              if (next.value === 'cancelled' && !signal?.aborted) throw new AcpPromptCancelledError();
               if (this.antigravity && next.value !== 'end_turn')
                 throw new Error(`AGY ACP prompt stopped: ${String(next.value)}`);
               if (!signal?.aborted && typeof next.value === 'string' && next.value !== 'end_turn')
@@ -549,7 +563,7 @@ export class AcpAgentService implements AgentService {
     const ctx = { catId: this.catId, threadId, invocationId };
     // F197 KD-5: per-invocation transformer state for toolCallId dedup + lifecycle tracking.
     // Lifecycle = ACP session/invocation (this generator) — GC'd when invoke() returns.
-    const acpState = createAcpSessionState();
+    let acpState = createAcpSessionState();
 
     // Window 1: pre-aborted signal short-circuits immediately
     if (options?.signal?.aborted) {
@@ -578,15 +592,21 @@ export class AcpAgentService implements AgentService {
     };
     let lease: AcpLease | null = null;
     let invokeServers: AcpMcpServer[];
+    let pluginMcpCurrentness: AgentServiceOptions['frozenAcpMcpCurrentness'];
     let preparingMcp = true;
     try {
       const captured = options?.frozenAcpMcpServers
-        ? { frozenAcpMcpServers: options.frozenAcpMcpServers, frozenAcpMcpIssues: options.frozenAcpMcpIssues }
+        ? {
+            frozenAcpMcpServers: options.frozenAcpMcpServers,
+            frozenAcpMcpIssues: options.frozenAcpMcpIssues,
+            frozenAcpMcpCurrentness: options.frozenAcpMcpCurrentness,
+          }
         : await this.captureInvocationOptions({ workingDirectory: options?.workingDirectory });
       invokeServers = captured.frozenAcpMcpServers;
+      pluginMcpCurrentness = captured.frozenAcpMcpCurrentness;
       if (captured.frozenAcpMcpIssues?.length) {
         const unavailable = captured.frozenAcpMcpIssues.map(({ capabilityId }) => capabilityId).join(', ');
-        const content = `可选插件工具定义无效，以下能力暂不可用：${unavailable}。其他工具不受本次限制；任务需要这些能力时请明确说明不可用，不得声称已执行。`;
+        const content = `可选插件能力暂不可用：${unavailable}。其他工具不受本次限制；任务需要这些能力时请明确说明不可用，不得声称已执行。`;
         yield { type: 'system_info', catId: this.catId, content, timestamp: Date.now() };
         prompt = `${prompt}\n\n[Host 工具状态]\n${content}`;
       }
@@ -655,12 +675,41 @@ export class AcpAgentService implements AgentService {
     const cwd = options?.workingDirectory ?? this.projectRoot;
     let sessionId: string | undefined;
     let promptPhase: PromptPhase = 'not_started';
+    let sessionSetupComplete = false;
+    let initializationRecoveryUsed = false;
+    // Only the original admitted activations may remove their own selected servers.
+    // This never reads new settings, adds a server or follows a repaired activation.
+    const removeUnavailablePluginMcp = () => {
+      const scoped = options?.toolExecutionPolicy?.mode === 'plugin_native';
+      const requiredServer = scoped ? options.pluginNativeLaunch?.server.name : undefined;
+      if (scoped && !requiredServer) return undefined;
+      const unavailable = pluginMcpCurrentness?.filter(
+        (entry) =>
+          !entry.isCurrent() &&
+          entry.capabilityId.replaceAll(':', '__') !== requiredServer &&
+          invokeServers.some(
+            (server) =>
+              'hostSource' in server &&
+              server.hostSource === 'plugin' &&
+              server.name === entry.capabilityId.replaceAll(':', '__'),
+          ),
+      );
+      if (!unavailable?.length) return undefined;
+      const names = new Set(unavailable.map(({ capabilityId }) => capabilityId.replaceAll(':', '__')));
+      invokeServers = invokeServers.filter(
+        (server) => !('hostSource' in server && server.hostSource === 'plugin' && names.has(server.name)),
+      );
+      const content = `可选插件能力暂不可用：${unavailable.map(({ capabilityId }) => capabilityId).join(', ')}。任务需要这些能力时请明确说明不可用，不得声称已执行。`;
+      prompt = `${prompt}\n\n[Host 工具状态]\n${content}`;
+      return { type: 'system_info' as const, catId: this.catId, content, timestamp: Date.now() };
+    };
     // #1838: an abnormal terminal is held until lease.release reports whether this release actually
     // stopped the carrier. Emitting it earlier would mark an unknown stop even when the pool then
     // completes a controlled close, suppressing the cancel terminal the route must broadcast.
     let deferredTerminal: { metadata: MessageMetadata; unconfirmed: boolean } | undefined;
     /** F306 Phase C: iCode ask-user bridge active for this turn. */
     let requestInputBridge: AcpRequestInputBridge | null = null;
+    let dshTurn: DshTurnInput | undefined;
     let agyActive = true;
     let permissionLifetime: AbortController | undefined;
     let permissionHandler: AcpPermissionHandler | undefined;
@@ -745,7 +794,10 @@ export class AcpAgentService implements AgentService {
       // is decided before session/new (MCP subprocess env freezes at session creation),
       // and resume rewrites the same file with fresh creds. A superseded process keeps
       // its own file, which stops updating — its late callbacks fail registry.isLatest().
+      const unavailableBeforeSetup = removeUnavailablePluginMcp();
+      if (unavailableBeforeSetup) yield unavailableBeforeSetup;
       const buildSessionConfig = (preparedCreds: PreparedCredentialEnv | null) => {
+        options?.signal?.throwIfAborted();
         const invocationBound = isInvocationBoundMcpLaunch(options?.callbackEnv);
         if (agy && options?.callbackEnv?.CAT_CAFE_INVOCATION_ID && !preparedCreds && !invocationBound)
           throw new Error('AGY ACP invocation credentials could not be prepared');
@@ -880,7 +932,11 @@ export class AcpAgentService implements AgentService {
             }
           }
         } catch (err) {
-          if (agy || err instanceof AcpSessionBindingError) throw err;
+          if (agy || err instanceof AcpSessionBindingError || options?.signal?.aborted) throw err;
+          // The existing resume -> fresh fallback uses the same one-shot budget.
+          initializationRecoveryUsed = true;
+          const unavailable = removeUnavailablePluginMcp();
+          if (unavailable) yield unavailable;
           resumeDisposition = 'load_failed_fresh';
           const errorMsg = err instanceof Error ? err.message : String(err);
           log.warn(
@@ -899,14 +955,27 @@ export class AcpAgentService implements AgentService {
         const freshCreds = isInvocationBoundMcpLaunch(options?.callbackEnv)
           ? null
           : prepareSessionCredentialFile(options?.callbackEnv);
-        const freshConfig = buildSessionConfig(freshCreds);
+        let freshConfig = buildSessionConfig(freshCreds);
         sessionMcpServers = freshConfig.mcpServers;
         envDiag = freshConfig.envDiag;
         log.info(
           { ...ctx, cwd, promptLen: prompt.length, mcpCount: sessionMcpServers.length, ...envDiag },
           'ACP newSession starting',
         );
-        const session = await client.newSession(cwd, sessionMcpServers, agy?.meta);
+        let session: AcpNewSessionResult;
+        try {
+          session = await client.newSession(cwd, sessionMcpServers, agy?.meta);
+        } catch (error) {
+          if (initializationRecoveryUsed || options?.signal?.aborted) throw error;
+          const unavailable = removeUnavailablePluginMcp();
+          if (!unavailable) throw error;
+          initializationRecoveryUsed = true;
+          yield unavailable;
+          freshConfig = buildSessionConfig(freshCreds);
+          sessionMcpServers = freshConfig.mcpServers;
+          envDiag = freshConfig.envDiag;
+          session = await client.newSession(cwd, sessionMcpServers, agy?.meta);
+        }
         await configureNative(session, true);
         sessionId = session.sessionId;
         if (agy) await selectAgyAcpModel(client, session, sessionId, this.modelName);
@@ -1010,6 +1079,7 @@ export class AcpAgentService implements AgentService {
         log.info({ ...ctx, sessionId }, 'ACP icode request_input bridged to runtime interaction port');
       }
 
+      sessionSetupComplete = true;
       // Window 2: abort may have fired during newSession
       if (options?.signal?.aborted) {
         yield {
@@ -1102,6 +1172,17 @@ export class AcpAgentService implements AgentService {
       log.info({ ...ctx, sessionId, promptDigest, idleTtlMs: this.idleTtlMs }, 'ACP promptStream starting');
       eventCount = 0;
       let hasResponseOutput = false;
+      if (this.dshTurnInput) {
+        const dshClient = lease.client as unknown as AcpClient;
+        const capability = await dshClient.probeTurnBridge();
+        if (options?.signal?.aborted) {
+          yield { type: 'done', catId: this.catId, metadata, timestamp: Date.now() };
+          return;
+        }
+        const bridgeSteerAvailable = capability?.steer === true && capability.nativeTurns === true;
+        if (bridgeSteerAvailable && options?.activeRunDispatch)
+          dshTurn = new DshTurnInput(dshClient, sessionId, options);
+      }
       promptPhase = 'active_unacknowledged';
       for await (const event of this.promptStreamWithBusyRetry(
         client,
@@ -1235,6 +1316,10 @@ export class AcpAgentService implements AgentService {
           // Repoint the outer sessionId so the abort handler cancels the fresh
           // session, not the dead resumed one.
           sessionId = freshSessionId;
+          if (dshTurn && options) {
+            await dshTurn.dispose();
+            dshTurn = new DshTurnInput(lease.client as unknown as AcpClient, freshSessionId, options);
+          }
 
           // The replacement session must serve ask_user too. Rebind the
           // request_input bridge to the fresh session, clear the replaced
@@ -1320,7 +1405,8 @@ export class AcpAgentService implements AgentService {
               ? `${options.resumeFallbackSystemPrompt}\n\n${prompt}`
               : prompt;
 
-          const retryState = createAcpSessionState();
+          acpState = createAcpSessionState();
+          const retryState = acpState;
           let retryEventCount = 0;
           let retryHasResponseOutput = false;
           log.info({ ...ctx, sessionId: freshSessionId }, '#1091: retry promptStream on fresh session');
@@ -1390,6 +1476,11 @@ export class AcpAgentService implements AgentService {
           if (sessionId && (retryErr instanceof AcpTimeoutError || retryErr instanceof AcpStreamIdleError)) {
             sealActivePromptSession(sessionId);
           }
+          if (retryErr instanceof AcpTimeoutError || retryErr instanceof AcpStreamIdleError) {
+            yield* settlePendingAcpRecalls(acpState, this.catId, metadata, 'timeout');
+          } else if (retryErr instanceof AcpSessionCancelledError || retryErr instanceof AcpPromptCancelledError) {
+            yield* settlePendingAcpRecalls(acpState, this.catId, metadata, 'cancelled');
+          }
           const retryErrMsg = retryErr instanceof Error ? retryErr.message : String(retryErr);
           log.error({ ...ctx, sessionId, err: retryErrMsg }, '#1091: retry with fresh session also failed');
           const terminalFailure = retryErr instanceof AcpTerminalFailureError;
@@ -1434,6 +1525,11 @@ export class AcpAgentService implements AgentService {
       if (sessionId && (err instanceof AcpTimeoutError || err instanceof AcpStreamIdleError)) {
         sealActivePromptSession(sessionId);
       }
+      if (err instanceof AcpTimeoutError || err instanceof AcpStreamIdleError) {
+        yield* settlePendingAcpRecalls(acpState, this.catId, metadata, 'timeout');
+      } else if (err instanceof AcpSessionCancelledError || err instanceof AcpPromptCancelledError) {
+        yield* settlePendingAcpRecalls(acpState, this.catId, metadata, 'cancelled');
+      }
       const waitedMs = promptStreamStartedAt ? Date.now() - promptStreamStartedAt : 0;
       // P1: stderr may arrive after timeout — give a grace window for late capacity signals
       if (!capacitySignal && err instanceof AcpTimeoutError) {
@@ -1449,9 +1545,23 @@ export class AcpAgentService implements AgentService {
       const pendingThinking = flushAcpThinking(acpState, this.catId, metadata);
       if (pendingThinking) yield pendingThinking;
 
-      const { errorCode, errorMsg } = classifyError(err, capacitySignal, client.recentCapacitySignal);
+      const classified = classifyError(err, capacitySignal, client.recentCapacitySignal);
+      const errorCode =
+        !sessionSetupComplete && classified.errorCode === 'prompt_failure' ? 'init_failure' : classified.errorCode;
+      const { errorMsg } = classified;
       const diagnostics = protocolErrorDiagnostics(err, this.providerName);
-      log.error({ ...ctx, errorCode, err: errorMsg, sessionId, eventCount, waitedMs }, 'ACP prompt failure');
+      log.error(
+        {
+          ...ctx,
+          errorCode,
+          err: errorMsg,
+          phase: sessionSetupComplete ? 'prompt' : 'session_setup',
+          sessionId,
+          eventCount,
+          waitedMs,
+        },
+        'ACP invocation failure',
+      );
       yield {
         type: 'error',
         catId: this.catId,
@@ -1468,6 +1578,7 @@ export class AcpAgentService implements AgentService {
       if (sessionId && client.hasPromptFinalResponse?.(sessionId) === true) markPromptAcknowledged();
       deferredTerminal = { metadata, unconfirmed: promptStopUnconfirmed() };
     } finally {
+      const [dshSettlement] = await Promise.allSettled([dshTurn?.dispose()]);
       if (sessionId) cancelActivePromptSession(sessionId);
       agyActive = false;
       permissionLifetime?.abort('provider_cancelled');
@@ -1558,6 +1669,7 @@ export class AcpAgentService implements AgentService {
           }
           throw releaseError;
         }
+        if (dshSettlement.status === 'rejected') throw dshSettlement.reason;
         if (deferredTerminal) {
           yield {
             type: 'done',
@@ -1636,6 +1748,12 @@ function hasAcpResponseOutput(message: AgentMessage): boolean {
 }
 
 /** Some providers resolve failed turns as end_turn without forwarding a cause. */
+class AcpPromptCancelledError extends Error {
+  constructor() {
+    super('ACP prompt stopped: cancelled');
+  }
+}
+
 class AcpEmptyResponseError extends Error {
   constructor(providerName: string) {
     super(

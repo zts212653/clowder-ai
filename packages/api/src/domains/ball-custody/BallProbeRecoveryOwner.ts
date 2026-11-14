@@ -108,11 +108,11 @@ export class BallProbeRecoveryOwner {
     candidate: BallRecoveryCandidate,
     outcome: BallRecoveryOutcome,
     now: number,
-    owner?: BallRecoveryOwner,
+    _owner?: BallRecoveryOwner,
     reasonCode?: string,
   ): Promise<boolean> {
     return this.backend.mutate(candidate.subjectKey, ({ facts }) => ({
-      result: finishBallProbeFacts(facts, candidate, outcome, now, owner, reasonCode),
+      result: finishBallProbeFacts(facts, candidate, outcome, now, reasonCode),
     }));
   }
   async claimIdleIntent(candidate: BallRecoveryCandidate, now: number): Promise<BallRecoveryCandidate | null> {

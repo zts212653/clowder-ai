@@ -99,6 +99,7 @@ import type {
   CustodyOfferTransitionResult,
   HostMessageExtra,
   IdempotentAppendResult,
+  InteractiveBlockState,
   LifecycleAppendAdmissionInput,
   LifecycleInputDispatchPatch,
   LifecyclePreAdmissionFailureInput,
@@ -130,6 +131,7 @@ import type {
 } from '../ports/MessageStore.js';
 import {
   advanceLifecycleInputDispatchMetadata,
+  applyInteractiveBlockState,
   applyStreamMetadataAugment,
   assertPrivateNoticeQueueAdmission,
   assertQueueMessageReplay,
@@ -475,7 +477,7 @@ if existing.status == 'processing' then
   -- A child dispatch can settle while its parent response is still processing.
   -- Never replace that newer lifecycle snapshot with a terminal state prepared
   -- from an older read; make the caller re-read and preserve the child transition.
-  if existingRaw ~= ARGV[14] then return 0 end
+  if existingRaw ~= ARGV[14] or not sameField('extra', ARGV[15]) then return 0 end
   lifecycleNeedsWrite = true
 elseif not (existingRaw == ARGV[2] and
      sameField('content', ARGV[3]) and
@@ -562,9 +564,9 @@ local lifecycleOk, existingLifecycle = pcall(cjson.decode, existingLifecycleRaw)
 if not lifecycleOk or type(existingLifecycle) ~= 'table' or existingLifecycle.kind ~= 'response' then return -2 end
 if existingLifecycle.invocationId ~= ARGV[1] then return -3 end
 
-local maxUserSources = tonumber(ARGV[15])
-local count = tonumber(ARGV[16])
-local expectedMode = ARGV[17]
+local maxUserSources = tonumber(ARGV[16])
+local count = tonumber(ARGV[17])
+local expectedMode = ARGV[18]
 if not count or count < 1 then return redis.error_reply('QUEUE_ADMISSION_EMPTY') end
 
 local incoming = {}
@@ -572,7 +574,7 @@ local entryIds = {}
 local incomingIds = {}
 local incomingUserSources = {}
 for i = 1, count do
-  local raw = ARGV[17 + i]
+  local raw = ARGV[18 + i]
   local row = cjson.decode(raw)
   if row.status ~= 'queued' or not row.payload or row.payload.sourceRecordId ~= messageId or
      row.payload.messageId ~= messageId then
@@ -590,7 +592,7 @@ for i = 1, count do
   if expectedMode == 'absent' then
     if currentRaw then return -10 end
   elseif expectedMode == 'present' then
-    local expectedRaw = ARGV[17 + count + i]
+    local expectedRaw = ARGV[18 + count + i]
     if not currentRaw or currentRaw ~= expectedRaw then return -10 end
   else
     return redis.error_reply('QUEUE_ADMISSION_EXPECTATION_INVALID')
@@ -624,7 +626,7 @@ end
 
 local lifecycleNeedsWrite = false
 if existingLifecycle.status == 'processing' then
-  if existingLifecycleRaw ~= ARGV[14] then return -10 end
+  if existingLifecycleRaw ~= ARGV[14] or not sameField('extra', ARGV[15]) then return -10 end
   lifecycleNeedsWrite = true
 elseif not (existingLifecycleRaw == ARGV[2] and
      sameField('content', ARGV[3]) and
@@ -1069,6 +1071,7 @@ return redis.call('HGETALL', KEYS[1])
 const UPDATE_EXTRA_IF_NOT_RECALLED_LUA = `
 if redis.call('EXISTS', KEYS[1]) == 0 then return 0 end
 if redis.call('HGET', KEYS[1], 'recall') or redis.call('HGET', KEYS[1], '_tombstone') then return 0 end
+if (redis.call('HGET', KEYS[1], 'extra') or '') ~= ARGV[3] then return -1 end
 local extra=cjson.decode(ARGV[1])
 local currentRaw=redis.call('HGET',KEYS[1],'extra')
 local current={}
@@ -1088,6 +1091,16 @@ redis.call('HSET', KEYS[1], 'extra', cjson.encode(extra))
 if ARGV[2] ~= '' then redis.call('HSETNX', KEYS[1], 'pluginMessage', ARGV[2]) end
 return 1
 `;
+
+const UPDATE_STREAM_METADATA_LUA = withUserMentionIndex(`
+if redis.call('EXISTS', KEYS[1]) == 0 then return -1 end
+if redis.call('HGET', KEYS[1], 'recall') or redis.call('HGET', KEYS[1], '_tombstone') then return -1 end
+local fields = cjson.decode(ARGV[1])
+if fields.extra and (redis.call('HGET', KEYS[1], 'extra') or '') ~= ARGV[3] then return 0 end
+for field, value in pairs(fields) do redis.call('HSET', KEYS[1], field, value) end
+if ARGV[2] ~= '' then redis.call('HSETNX', KEYS[1], 'pluginMessage', ARGV[2]) end
+return 1
+`);
 
 const COMPARE_AND_TRANSITION_CUSTODY_OFFER_LUA = `
 if redis.call('EXISTS', KEYS[1]) == 0 then return {-1} end
@@ -1155,6 +1168,7 @@ function lifecycleResponseTerminalLuaArgs(
   patch: LifecycleResponseTerminalPatch,
   nextMessage: StoredMessage,
   expectedLifecycleRaw: string,
+  expectedExtraRaw: string,
 ): string[] {
   const { pluginMessage } = splitMessageExtra(patch.extra);
   return [
@@ -1164,7 +1178,7 @@ function lifecycleResponseTerminalLuaArgs(
     patch.contentBlocks === undefined ? '' : JSON.stringify(patch.contentBlocks),
     patch.toolEvents === undefined ? '' : JSON.stringify(patch.toolEvents),
     patch.metadata === undefined ? '' : JSON.stringify(patch.metadata),
-    patch.extra === undefined ? '' : serializeHostExtra(patch.extra),
+    nextMessage.extra === undefined ? '' : serializeHostExtra(nextMessage.extra),
     patch.thinking ?? '',
     patch.origin ?? '',
     JSON.stringify(patch.mentions),
@@ -1172,6 +1186,7 @@ function lifecycleResponseTerminalLuaArgs(
     patch.replyTo ?? '',
     pluginMessage ? JSON.stringify(pluginMessage) : '',
     expectedLifecycleRaw,
+    expectedExtraRaw,
   ];
 }
 
@@ -1805,8 +1820,8 @@ export class RedisMessageStore {
 
     for (let attempt = 0; attempt < 4; attempt += 1) {
       const key = MessageKeys.detail(messageId);
-      const expectedLifecycleRaw = (await this.redis.hget(key, 'lifecycle')) ?? '';
-      const current = await this.getById(messageId);
+      const snapshot = await this.redis.hgetall(key);
+      const current = this.hydrateHash(snapshot);
       if (!current) return { kind: 'not_found' };
       const prepared = prepareLifecycleResponseTerminalWithLedgerTargets(current, patch, entries);
       if (prepared.kind !== 'prepared') return prepared;
@@ -1854,7 +1869,12 @@ export class RedisMessageStore {
           QueueLedgerKeys.messageIndex(threadId!),
           MessageKeys.threadVisibility(threadId!),
           MessageKeys.threadVisibilityMeta(threadId!),
-          ...lifecycleResponseTerminalLuaArgs(patch, terminalMessageForLua, expectedLifecycleRaw),
+          ...lifecycleResponseTerminalLuaArgs(
+            patch,
+            terminalMessageForLua,
+            snapshot.lifecycle ?? '',
+            snapshot.extra ?? '',
+          ),
           maxQueuedUserEntries === undefined ? '-1' : String(maxQueuedUserEntries),
           String(prepared.entries.length),
           expectedMode,
@@ -1968,6 +1988,7 @@ export class RedisMessageStore {
       String(msg.timestamp),
     ];
     if (msg.thinking) hashFields.push('thinking', msg.thinking);
+    if (msg.clientMessageId) hashFields.push('clientMessageId', msg.clientMessageId);
     if (msg.origin) hashFields.push('origin', msg.origin);
     if (msg.visibility) hashFields.push('visibility', msg.visibility);
     if (msg.whisperTo) hashFields.push('whisperTo', JSON.stringify(msg.whisperTo));
@@ -2373,6 +2394,7 @@ export class RedisMessageStore {
     const companionDeliveryReceipt = readStoredCompanionDelivery(data.companionDeliveryReceipt);
     return {
       id: data.id,
+      ...(data.clientMessageId ? { clientMessageId: data.clientMessageId } : {}),
       threadId: data.threadId || DEFAULT_THREAD_ID,
       userId: data.userId ?? 'unknown',
       ...(from ? { from } : {}),
@@ -3858,9 +3880,6 @@ return 1`,
   }
 
   async updateExtra(id: string, extra: HostMessageExtra): Promise<StoredMessage | null> {
-    const msg = await this.getById(id);
-    if (!msg) return null;
-    const { hostExtra: current, pluginMessage } = splitMessageExtra(msg.extra);
     const {
       messageSearchAnswer: _stripAnswer,
       pluginMessage: _stripPlugin,
@@ -3875,19 +3894,66 @@ return 1`,
       collectiveWorkDelegationV1: _stripCollectiveDelegation,
       ...hostPatch
     } = extra as Record<string, unknown>;
-    const merged = { ...current, ...hostPatch };
-    const updated = await this.redis.eval(
-      UPDATE_EXTRA_IF_NOT_RECALLED_LUA,
-      1,
-      MessageKeys.detail(id),
-      serializeExtra(merged ?? {}),
-      pluginMessage ? JSON.stringify(pluginMessage) : '',
-    );
-    if (Number(updated) !== 1) return null;
-    const result = await this.getById(id);
-    if (result && hostPatch.rich !== undefined && JSON.stringify(current?.rich) !== JSON.stringify(result.extra?.rich))
-      notifyMessageTimelineChange(this, result);
-    return result;
+    const key = MessageKeys.detail(id);
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      const snapshot = await this.redis.hgetall(key);
+      const msg = this.hydrateHash(snapshot);
+      if (!msg) return null;
+      const { hostExtra: current, pluginMessage } = splitMessageExtra(msg.extra);
+      const merged = { ...current, ...hostPatch };
+      const updated = Number(
+        await this.redis.eval(
+          UPDATE_EXTRA_IF_NOT_RECALLED_LUA,
+          1,
+          key,
+          serializeExtra(merged),
+          pluginMessage ? JSON.stringify(pluginMessage) : '',
+          snapshot.extra ?? '',
+        ),
+      );
+      if (updated === -1) continue;
+      if (updated !== 1) return null;
+      const result = await this.getById(id);
+      if (
+        result &&
+        hostPatch.rich !== undefined &&
+        JSON.stringify(current?.rich) !== JSON.stringify(result.extra?.rich)
+      )
+        notifyMessageTimelineChange(this, result);
+      return result;
+    }
+    throw Object.assign(new Error(`Message extra changed during update: ${id}`), { statusCode: 503 });
+  }
+
+  async setInteractiveBlockState(
+    id: string,
+    blockId: string,
+    state: InteractiveBlockState,
+  ): Promise<StoredMessage | null> {
+    const key = MessageKeys.detail(id);
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      const snapshot = await this.redis.hgetall(key);
+      const msg = this.hydrateHash(snapshot);
+      if (!msg) return null;
+      const previousRich = JSON.stringify(msg.extra?.rich);
+      const updated = applyInteractiveBlockState(msg, blockId, state);
+      if (!updated) return null;
+      const result = Number(
+        await this.redis.eval(
+          UPDATE_STREAM_METADATA_LUA,
+          1,
+          key,
+          JSON.stringify({ extra: serializeHostExtra(updated.extra) }),
+          '',
+          snapshot.extra ?? '',
+        ),
+      );
+      if (result === 0) continue;
+      if (result === -1) return null;
+      if (previousRich !== JSON.stringify(updated.extra?.rich)) notifyMessageTimelineChange(this, updated);
+      return updated;
+    }
+    throw Object.assign(new Error(`Interactive state changed during save: ${id}`), { statusCode: 503 });
   }
 
   async compareAndTransitionCustodyOffer(
@@ -3947,36 +4013,41 @@ return 1`,
   }
 
   async augmentStreamMetadata(id: string, patch: StreamMetadataAugmentInput): Promise<StoredMessage | null> {
-    const msg = await this.getById(id);
-    if (!msg) return null;
-    const previousRich = JSON.stringify(msg.extra?.rich);
-    const augmented = applyStreamMetadataAugment(msg, patch);
-    const fields: Record<string, string> = {};
-    if (patch.thinking && augmented.thinking) fields.thinking = augmented.thinking;
-    if (patch.metadata && augmented.metadata) fields.metadata = JSON.stringify(augmented.metadata);
-    if (patch.toolEvents?.length && augmented.toolEvents) fields.toolEvents = JSON.stringify(augmented.toolEvents);
-    if (patch.replyTo && augmented.replyTo) fields.replyTo = augmented.replyTo;
-    if (patch.mentionsUser && augmented.mentionsUser) fields.mentionsUser = '1';
-    const { pluginMessage } = splitMessageExtra(augmented.extra);
-    if (patch.extra && augmented.extra) fields.extra = serializeHostExtra(augmented.extra);
-    if (Object.keys(fields).length > 0) {
-      await this.redis.eval(
-        withUserMentionIndex(`
-        local fields = cjson.decode(ARGV[1])
-        for field, value in pairs(fields) do redis.call('HSET', KEYS[1], field, value) end
-        if ARGV[2] ~= '' then redis.call('HSETNX', KEYS[1], 'pluginMessage', ARGV[2]) end
-        return 1
-      `),
-        1,
-        MessageKeys.detail(id),
-        JSON.stringify(fields),
-        pluginMessage ? JSON.stringify(pluginMessage) : '',
-      );
+    const key = MessageKeys.detail(id);
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      const snapshot = await this.redis.hgetall(key);
+      const msg = this.hydrateHash(snapshot);
+      if (!msg) return null;
+      const previousRich = JSON.stringify(msg.extra?.rich);
+      const augmented = applyStreamMetadataAugment(msg, patch);
+      const fields: Record<string, string> = {};
+      if (patch.thinking && augmented.thinking) fields.thinking = augmented.thinking;
+      if (patch.metadata && augmented.metadata) fields.metadata = JSON.stringify(augmented.metadata);
+      if (patch.toolEvents?.length && augmented.toolEvents) fields.toolEvents = JSON.stringify(augmented.toolEvents);
+      if (patch.replyTo && augmented.replyTo) fields.replyTo = augmented.replyTo;
+      if (patch.mentionsUser && augmented.mentionsUser) fields.mentionsUser = '1';
+      const { pluginMessage } = splitMessageExtra(augmented.extra);
+      if (patch.extra && augmented.extra) fields.extra = serializeHostExtra(augmented.extra);
+      if (Object.keys(fields).length > 0) {
+        const result = Number(
+          await this.redis.eval(
+            UPDATE_STREAM_METADATA_LUA,
+            1,
+            key,
+            JSON.stringify(fields),
+            pluginMessage ? JSON.stringify(pluginMessage) : '',
+            snapshot.extra ?? '',
+          ),
+        );
+        if (result === 0) continue;
+        if (result === -1) return null;
+      }
+      const updated = (await this.getById(id)) ?? augmented;
+      if (patch.mentionsUser || (patch.extra?.rich && previousRich !== JSON.stringify(updated.extra?.rich)))
+        notifyMessageTimelineChange(this, updated);
+      return updated;
     }
-    const updated = (await this.getById(id)) ?? augmented;
-    if (patch.mentionsUser || (patch.extra?.rich && previousRich !== JSON.stringify(updated.extra?.rich)))
-      notifyMessageTimelineChange(this, updated);
-    return updated;
+    throw Object.assign(new Error(`Stream metadata changed during update: ${id}`), { statusCode: 503 });
   }
 
   async commitLifecycleResponseTerminal(
@@ -3994,11 +4065,9 @@ return 1`,
   ): Promise<CommitLifecycleResponseTerminalResult> {
     const key = MessageKeys.detail(id);
     for (let attempt = 0; attempt < 4; attempt += 1) {
-      // Read the expected lifecycle before hydrating the full message. If a child
-      // settles between these reads, the Lua comparison fails instead of blessing
-      // a terminal state derived from mismatched snapshots.
-      const expectedLifecycleRaw = (await this.redis.hget(key, 'lifecycle')) ?? '';
-      const current = await this.getById(id);
+      // Raw CAS tokens and hydrated values must describe the same snapshot.
+      const snapshot = await this.redis.hgetall(key);
+      const current = this.hydrateHash(snapshot);
       if (!current) return { kind: 'not_found' };
       const prepared = prepareRedisLifecycleResponseTerminal(current, patch);
       if (prepared.kind === 'result') {
@@ -4017,7 +4086,12 @@ return 1`,
           key,
           MessageKeys.threadVisibility(current.threadId),
           MessageKeys.threadVisibilityMeta(current.threadId),
-          ...lifecycleResponseTerminalLuaArgs(patch, prepared.nextMessage, expectedLifecycleRaw),
+          ...lifecycleResponseTerminalLuaArgs(
+            patch,
+            prepared.nextMessage,
+            snapshot.lifecycle ?? '',
+            snapshot.extra ?? '',
+          ),
         ),
       );
       // Both codes mean the snapshot changed after our read. Re-read even when

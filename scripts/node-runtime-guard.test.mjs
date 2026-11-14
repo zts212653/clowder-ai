@@ -325,3 +325,80 @@ test('bootstrap installers require and install Node 24 to match the root preinst
   assert.doesNotMatch(installPs1, /\$nodeMajor -ge 20|>= 20|need >= 20/);
   assert.doesNotMatch(installPs1, /\$nodeMajor -ge 24\) \{/);
 });
+
+const guardScriptSource = readFileSync(resolve(import.meta.dirname, '..', 'scripts/lib/node-runtime-guard.sh'), 'utf8');
+const pinnedMajorMatch = guardScriptSource.match(
+  /CAT_CAFE_NODE_PINNED_MAJOR="\$\{CAT_CAFE_NODE_PINNED_MAJOR:-(\d+)\}"/,
+);
+const maxMajorExclusiveMatch = guardScriptSource.match(
+  /CAT_CAFE_NODE_MAX_MAJOR_EXCLUSIVE="\$\{CAT_CAFE_NODE_MAX_MAJOR_EXCLUSIVE:-(\d+)\}"/,
+);
+if (!pinnedMajorMatch || !maxMajorExclusiveMatch) {
+  throw new Error('Could not parse Node major bounds from scripts/lib/node-runtime-guard.sh');
+}
+const pinnedMajor = Number(pinnedMajorMatch[1]);
+const maxMajorExclusive = Number(maxMajorExclusiveMatch[1]);
+const pinnedTargetVersion = `${pinnedMajor}.16.0`;
+const unpinnedSupportedVersion = `${maxMajorExclusive - 1}.9.0`;
+const unsupportedMajorVersion = `${maxMajorExclusive}.0.0`;
+
+const startDevSource = readFileSync(resolve(import.meta.dirname, '..', 'scripts/start-dev.sh'), 'utf8');
+const startDevGuardCallMatch = startDevSource.match(/^\s*ensure_supported_node_runtime\s+.*$/m);
+if (!startDevGuardCallMatch) {
+  throw new Error('Could not locate ensure_supported_node_runtime call in scripts/start-dev.sh');
+}
+const startDevGuardCall = startDevGuardCallMatch[0].trim();
+
+for (const [label, currentVersion] of [
+  [`pinned branch (${unpinnedSupportedVersion} -> ${pinnedTargetVersion})`, unpinnedSupportedVersion],
+  [`unsupported branch (${unsupportedMajorVersion} -> ${pinnedTargetVersion})`, unsupportedMajorVersion],
+]) {
+  test(`start-dev + node runtime guard preserve exact /bin/bash command across re-exec on ${label}`, () => {
+    const tmp = mkdtempSync(join(tmpdir(), 'cat-cafe-node-guard-argv-'));
+    try {
+      fakeNode(join(tmp, 'current', 'bin'), currentVersion);
+      writeFileSync(join(tmp, 'current', 'bin', 'brew'), '#!/bin/sh\nexit 1\n', { mode: 0o755 });
+      const expected = fakeNode(join(tmp, 'brew', `node@${pinnedMajor}`, 'bin'), pinnedTargetVersion);
+      mkdirSync(join(tmp, 'scripts'), { recursive: true });
+      const script = join(tmp, 'scripts', 'start-dev.sh');
+      writeFileSync(
+        script,
+        `#!/bin/bash
+if [ "\${CAT_CAFE_NODE_RUNTIME_GUARD_REEXEC:-0}" != "1" ]; then
+  printf 'BEFORE=%s\\n' "$(ps -ww -p "$$" -o command=)"
+fi
+SCRIPT_DIR="$(cd "$(dirname "\${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+source "${resolve(import.meta.dirname, '..')}/scripts/lib/node-runtime-guard.sh"
+${startDevGuardCall}
+printf 'AFTER=%s\\n' "$(ps -ww -p "$$" -o command=)"
+`,
+        { mode: 0o755 },
+      );
+
+      for (const target of ['./scripts/start-dev.sh', script]) {
+        const result = spawnSync(target, ['--daemon', '--quick', '--cat-cafe-daemon-token=argv0-token'], {
+          cwd: tmp,
+          encoding: 'utf8',
+          env: {
+            HOME: tmp,
+            PATH: [join(tmp, 'current', 'bin'), process.env.PATH].filter(Boolean).join(':'),
+            CAT_CAFE_NODE_BIN: expected,
+          },
+        });
+
+        assert.equal(result.status, 0, `stdout:\n${result.stdout}\nstderr:\n${result.stderr}`);
+        const lines = result.stdout.trim().split('\n');
+        const beforeLine = lines.find((line) => line.startsWith('BEFORE='));
+        const afterLine = lines.find((line) => line.startsWith('AFTER='));
+        assert.ok(beforeLine, `missing BEFORE line in ${result.stdout}`);
+        assert.ok(afterLine, `missing AFTER line in ${result.stdout}`);
+        const before = beforeLine.slice('BEFORE='.length);
+        const after = afterLine.slice('AFTER='.length);
+        assert.equal(after, before, `re-exec mutated ps command for ${target} on ${label}`);
+      }
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+}
