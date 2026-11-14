@@ -48,6 +48,11 @@ const EXCLUDED_REASON_CODES = new Set([
   // and operator fatigue. F212 cliDiagnostics already surfaces the rephrase hint
   // to the user, and the underlying decision is upstream policy (not our layer).
   'upstream_policy_reject',
+  // A missing local CLI is user-environment state with a documented install command,
+  // not a defect in our spawn path. Unlike spawn_failed (a process we tried to start
+  // and lost), there is no process here. Keep it out of TRIGGERING_REASON_CODES so a
+  // fresh install does not file one project issue per provider.
+  'cli_not_found',
 ]);
 
 /** Minimum permission denials in CANCEL_WINDOW_MS to trigger cancel_burst. */

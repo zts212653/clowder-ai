@@ -226,9 +226,12 @@ export function resolveCliCommandOrBare(command: string): string {
 }
 
 /**
- * Format a user-friendly install hint for a missing CLI.
+ * Copy-pasteable install command for a missing CLI.
+ *
+ * Kept as the one install-hint table shared by the human-readable paragraph and the
+ * structured `cliDiagnostics.publicHint`, so the two surfaces cannot drift.
  */
-export function formatCliNotFoundError(command: string, platform: NodeJS.Platform = process.platform): string {
+export function cliInstallHint(command: string, platform: NodeJS.Platform = process.platform): string {
   const installHints: Record<string, string> = {
     claude: 'npm install -g @anthropic-ai/claude-code',
     codex: 'npm install -g @openai/codex',
@@ -243,6 +246,13 @@ export function formatCliNotFoundError(command: string, platform: NodeJS.Platfor
         : 'curl -fsSL https://code.kimi.com/kimi-code/install.sh | bash',
     opencode: 'npm install -g opencode-ai',
   };
-  const hint = installHints[command] ?? `install the "${command}" CLI`;
+  return installHints[command] ?? `install the "${command}" CLI`;
+}
+
+/**
+ * Format a user-friendly install hint for a missing CLI.
+ */
+export function formatCliNotFoundError(command: string, platform: NodeJS.Platform = process.platform): string {
+  const hint = cliInstallHint(command, platform);
   return `${command} CLI 未找到。请先运行 \`${hint}\` 安装，再重试。`;
 }

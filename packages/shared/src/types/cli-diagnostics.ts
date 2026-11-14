@@ -28,6 +28,12 @@ export type CliErrorReasonCode =
   | 'stream_disconnected'
   | 'invalid_config'
   | 'spawn_failed'
+  /** The provider CLI is not installed on this machine. Distinct from `spawn_failed`
+   *  (we tried to start a process and lost it): there is no process, no exit code and
+   *  no stderr to classify. Detection is spawn-free per LL-055; the install hint is
+   *  the actionable next step. Excluded from F222 auto-issue triggering because a
+   *  missing local CLI is user-environment state, not a defect in the harness. */
+  | 'cli_not_found'
   | 'context_window_exceeded'
   | 'tool_call_parse_failed'
   | 'server_overloaded'
