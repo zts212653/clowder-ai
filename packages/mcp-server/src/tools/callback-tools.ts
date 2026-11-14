@@ -1,3 +1,5 @@
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import {
   deploymentDefaults,
   type MessageSearchAnswerAttachmentRequest,
@@ -3495,7 +3497,7 @@ const defineCanonicalTool = defineMcpCanonicalFactory('callback-tools.ts');
 function resolveAnchorModeFilePath(): string | null {
   const invocationId = getInvocationAuthSignal().invocationId;
   if (invocationId) {
-    return `/tmp/cat-cafe-anchor-mode-${invocationId}`;
+    return join(process.platform === 'win32' ? tmpdir() : '/tmp', `cat-cafe-anchor-mode-${invocationId}`);
   }
   return null;
 }

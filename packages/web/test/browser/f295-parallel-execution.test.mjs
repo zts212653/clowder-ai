@@ -4,6 +4,7 @@ import { once } from 'node:events';
 import { existsSync } from 'node:fs';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:net';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { after, before, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
@@ -297,7 +298,7 @@ for (const viewport of [
         }
         assert.equal(await page.getByTestId('f307-tab-kind-agent-run').count(), 2);
         assert.deepEqual([...new Set(requestedInvocations)].sort(), ['turn-codex-astra', 'turn-fable5']);
-        await page.screenshot({ path: `/tmp/f295-running-navigation-${viewport.width}.png` });
+        await page.screenshot({ path: path.join(tmpdir(), `f295-running-navigation-${viewport.width}.png`) });
         assert.match(await rows.nth(0).innerText(), /codex-astra/);
         assert.match(await rows.nth(1).innerText(), /fable5/);
         console.log(`F295 browser: ${baseUrl} shows both parallel cats`);

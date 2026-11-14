@@ -10,7 +10,7 @@
 import assert from 'node:assert/strict';
 import { existsSync, mkdirSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'node:test';
 import {
   appendDrillEvalEvent,
@@ -37,7 +37,7 @@ import {
 const TEST_DIR = join(tmpdir(), `f236-hook-test-${process.pid}`);
 
 function makeModeFile(path, content = 'anchor') {
-  const dir = path.substring(0, path.lastIndexOf('/'));
+  const dir = dirname(path);
   mkdirSync(dir, { recursive: true });
   writeFileSync(path, content);
 }
@@ -54,7 +54,7 @@ function makeTestFile(name, content) {
 describe('resolveModeFilePath', () => {
   it('uses invocation ID when available', () => {
     const path = resolveModeFilePath({ CAT_CAFE_INVOCATION_ID: 'inv-123' });
-    assert.strictEqual(path, '/tmp/cat-cafe-anchor-mode-inv-123');
+    assert.strictEqual(path, join(process.platform === 'win32' ? tmpdir() : '/tmp', 'cat-cafe-anchor-mode-inv-123'));
   });
 
   it('falls back to CLAUDE_PROJECT_DIR', () => {
@@ -67,7 +67,7 @@ describe('resolveModeFilePath', () => {
       CAT_CAFE_INVOCATION_ID: 'inv-456',
       CLAUDE_PROJECT_DIR: '/home/user/project',
     });
-    assert.strictEqual(path, '/tmp/cat-cafe-anchor-mode-inv-456');
+    assert.strictEqual(path, join(process.platform === 'win32' ? tmpdir() : '/tmp', 'cat-cafe-anchor-mode-inv-456'));
   });
 
   it('returns null when neither is set', () => {
@@ -383,7 +383,7 @@ describe('wrapForPostToolUse', () => {
 
 describe('processHookEvent', () => {
   const invId = `test-${process.pid}`;
-  const modePath = `/tmp/cat-cafe-anchor-mode-${invId}`;
+  const modePath = resolveModeFilePath({ CAT_CAFE_INVOCATION_ID: invId });
   const env = { CAT_CAFE_INVOCATION_ID: invId };
 
   beforeEach(() => makeModeFile(modePath, 'anchor'));
@@ -577,7 +577,10 @@ describe('processHookEvent', () => {
 describe('resolveEvalFilePath', () => {
   it('uses invocation ID when available', () => {
     const path = resolveEvalFilePath({ CAT_CAFE_INVOCATION_ID: 'inv-123' });
-    assert.strictEqual(path, '/tmp/cat-cafe-anchor-eval-inv-123.jsonl');
+    assert.strictEqual(
+      path,
+      join(process.platform === 'win32' ? tmpdir() : '/tmp', 'cat-cafe-anchor-eval-inv-123.jsonl'),
+    );
   });
 
   it('falls back to project dir', () => {
@@ -593,7 +596,7 @@ describe('resolveEvalFilePath', () => {
 
 describe('appendEvalEvent — eval file recording', () => {
   const evalInvocationId = `eval-test-${process.pid}`;
-  const evalPath = `/tmp/cat-cafe-anchor-eval-${evalInvocationId}.jsonl`;
+  const evalPath = resolveEvalFilePath({ CAT_CAFE_INVOCATION_ID: evalInvocationId });
 
   afterEach(() => {
     rmSync(evalPath, { force: true });
@@ -659,7 +662,7 @@ describe('appendEvalEvent — eval file recording', () => {
 
 describe('processHookEvent — eval file integration', () => {
   const evalInvocationId = `eval-int-${process.pid}`;
-  const evalPath = `/tmp/cat-cafe-anchor-eval-${evalInvocationId}.jsonl`;
+  const evalPath = resolveEvalFilePath({ CAT_CAFE_INVOCATION_ID: evalInvocationId });
   const evalEnv = {
     CAT_CAFE_INVOCATION_ID: evalInvocationId,
     CLAUDE_PROJECT_DIR: join(tmpdir(), `f236-eval-int-test-${process.pid}`),
@@ -667,13 +670,13 @@ describe('processHookEvent — eval file integration', () => {
 
   beforeEach(() => {
     mkdirSync(join(tmpdir(), `f236-eval-int-test-${process.pid}`), { recursive: true });
-    writeFileSync(`/tmp/cat-cafe-anchor-mode-${evalInvocationId}`, 'anchor');
+    writeFileSync(resolveModeFilePath({ CAT_CAFE_INVOCATION_ID: evalInvocationId }), 'anchor');
     rmSync(evalPath, { force: true });
   });
 
   afterEach(() => {
     rmSync(evalPath, { force: true });
-    rmSync(`/tmp/cat-cafe-anchor-mode-${evalInvocationId}`, { force: true });
+    rmSync(resolveModeFilePath({ CAT_CAFE_INVOCATION_ID: evalInvocationId }), { force: true });
     rmSync(join(tmpdir(), `f236-eval-int-test-${process.pid}`), { recursive: true, force: true });
   });
 
@@ -758,7 +761,7 @@ describe('processHookEvent — eval file integration', () => {
   });
 
   it('pass-through (no mode file) does NOT write eval event', () => {
-    rmSync(`/tmp/cat-cafe-anchor-mode-${evalInvocationId}`, { force: true });
+    rmSync(resolveModeFilePath({ CAT_CAFE_INVOCATION_ID: evalInvocationId }), { force: true });
     processHookEvent(
       {
         tool_name: 'Read',
@@ -794,7 +797,7 @@ describe('processHookEvent — eval file integration', () => {
   });
 
   it('bounded Read in full mode (no mode file) does NOT emit drill event', () => {
-    rmSync(`/tmp/cat-cafe-anchor-mode-${evalInvocationId}`, { force: true });
+    rmSync(resolveModeFilePath({ CAT_CAFE_INVOCATION_ID: evalInvocationId }), { force: true });
     processHookEvent(
       {
         tool_name: 'Read',
@@ -814,7 +817,7 @@ describe('processHookEvent — eval file integration', () => {
 
 describe('appendDrillEvalEvent', () => {
   const drillInvocationId = `drill-test-${Date.now()}`;
-  const drillEvalPath = `/tmp/cat-cafe-anchor-eval-${drillInvocationId}.jsonl`;
+  const drillEvalPath = resolveEvalFilePath({ CAT_CAFE_INVOCATION_ID: drillInvocationId });
   const drillEnv = { CAT_CAFE_INVOCATION_ID: drillInvocationId, CAT_CAFE_CAT_ID: 'opus-test' };
 
   afterEach(() => {
@@ -869,7 +872,10 @@ describe('appendDrillEvalEvent', () => {
 describe('resolveStateFilePath', () => {
   it('uses invocation ID when available', () => {
     const path = resolveStateFilePath({ CAT_CAFE_INVOCATION_ID: 'inv-789' });
-    assert.strictEqual(path, '/tmp/cat-cafe-anchor-filestate-inv-789.json');
+    assert.strictEqual(
+      path,
+      join(process.platform === 'win32' ? tmpdir() : '/tmp', 'cat-cafe-anchor-filestate-inv-789.json'),
+    );
   });
 
   it('falls back to CLAUDE_PROJECT_DIR', () => {
@@ -887,7 +893,7 @@ describe('resolveStateFilePath', () => {
 
 describe('stale detection (recordFileState + checkFileStale)', () => {
   const staleInvId = `stale-test-${process.pid}`;
-  const stateFilePath = `/tmp/cat-cafe-anchor-filestate-${staleInvId}.json`;
+  const stateFilePath = resolveStateFilePath({ CAT_CAFE_INVOCATION_ID: staleInvId });
   const staleEnv = { CAT_CAFE_INVOCATION_ID: staleInvId };
 
   beforeEach(() => mkdirSync(TEST_DIR, { recursive: true }));
@@ -965,9 +971,9 @@ describe('stale detection (recordFileState + checkFileStale)', () => {
 
 describe('processHookEvent — stale detection', () => {
   const staleIntInvId = `stale-int-${process.pid}`;
-  const staleModePath = `/tmp/cat-cafe-anchor-mode-${staleIntInvId}`;
-  const staleStatePath = `/tmp/cat-cafe-anchor-filestate-${staleIntInvId}.json`;
-  const staleEvalPath = `/tmp/cat-cafe-anchor-eval-${staleIntInvId}.jsonl`;
+  const staleModePath = resolveModeFilePath({ CAT_CAFE_INVOCATION_ID: staleIntInvId });
+  const staleStatePath = resolveStateFilePath({ CAT_CAFE_INVOCATION_ID: staleIntInvId });
+  const staleEvalPath = resolveEvalFilePath({ CAT_CAFE_INVOCATION_ID: staleIntInvId });
   const staleIntEnv = { CAT_CAFE_INVOCATION_ID: staleIntInvId };
 
   beforeEach(() => {

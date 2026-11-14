@@ -117,7 +117,7 @@ describe('Skills Route', () => {
   });
 
   it('GET /api/skills excludes plugin-owned skills from source-tree registration consistency', async () => {
-    const rawProjectDir = join('/tmp', `skills-route-test-plugin-registration-${Date.now()}`);
+    const rawProjectDir = join(tmpdir(), `skills-route-test-plugin-registration-${Date.now()}`);
     await mkdir(rawProjectDir, { recursive: true });
     const projectDir = await realpath(rawProjectDir);
     const sourceSkillsDir = resolveRepoSkillsDir();
@@ -254,8 +254,8 @@ describe('Skills Route', () => {
   });
 
   it('treats directory-level project skills symlinks as mounted for all providers', async () => {
-    const projectDir = join('/tmp', `skills-route-test-dir-symlink-${Date.now()}`);
-    const homeDir = join('/tmp', `skills-route-test-home-${Date.now()}`);
+    const projectDir = join(tmpdir(), `skills-route-test-dir-symlink-${Date.now()}`);
+    const homeDir = join(tmpdir(), `skills-route-test-home-${Date.now()}`);
     const sourceSkillsDir = resolveRepoSkillsDir();
     const prevHome = process.env.HOME;
 
@@ -303,8 +303,8 @@ describe('Skills Route', () => {
   });
 
   it('accepts HOME-level fallback symlinks that still point to the main repo skills tree', async () => {
-    const projectDir = join('/tmp', `skills-route-test-fallback-project-${Date.now()}`);
-    const homeDir = join('/tmp', `skills-route-test-fallback-home-${Date.now()}`);
+    const projectDir = join(tmpdir(), `skills-route-test-fallback-project-${Date.now()}`);
+    const homeDir = join(tmpdir(), `skills-route-test-fallback-home-${Date.now()}`);
     const prevHome = process.env.HOME;
     const mainRepo = resolveStartupProjectRoot();
     const mainSkillsDir = join(mainRepo, 'cat-cafe-skills');
@@ -354,8 +354,8 @@ describe('Skills Route', () => {
   });
 
   it('counts canonical HOME mounts when standard project mount path is customized', async () => {
-    const projectDir = join('/tmp', `skills-route-test-custom-project-path-${Date.now()}`);
-    const homeDir = join('/tmp', `skills-route-test-custom-project-path-home-${Date.now()}`);
+    const projectDir = join(tmpdir(), `skills-route-test-custom-project-path-${Date.now()}`);
+    const homeDir = join(tmpdir(), `skills-route-test-custom-project-path-home-${Date.now()}`);
     const sourceSkillsDir = resolveRepoSkillsDir();
     const prevHome = process.env.HOME;
     const rules = {
@@ -409,8 +409,8 @@ describe('Skills Route', () => {
   });
 
   it('summary and per-skill mount health ignore intentionally disabled standard providers', async () => {
-    const projectDir = join('/tmp', `skills-route-test-disabled-provider-${Date.now()}`);
-    const homeDir = join('/tmp', `skills-route-test-disabled-provider-home-${Date.now()}`);
+    const projectDir = join(tmpdir(), `skills-route-test-disabled-provider-${Date.now()}`);
+    const homeDir = join(tmpdir(), `skills-route-test-disabled-provider-home-${Date.now()}`);
     const sourceSkillsDir = resolveRepoSkillsDir();
     const prevHome = process.env.HOME;
     const rules = {
@@ -468,8 +468,8 @@ describe('Skills Route', () => {
   });
 
   it('summary and per-skill mount health use capability mountPaths as the required provider set', async () => {
-    const projectDir = join('/tmp', `skills-route-test-mountpaths-health-${Date.now()}`);
-    const homeDir = join('/tmp', `skills-route-test-mountpaths-health-home-${Date.now()}`);
+    const projectDir = join(tmpdir(), `skills-route-test-mountpaths-health-${Date.now()}`);
+    const homeDir = join(tmpdir(), `skills-route-test-mountpaths-health-home-${Date.now()}`);
     const sourceSkillsDir = resolveRepoSkillsDir();
     const sourceSkillNames = await listSourceSkillNames(sourceSkillsDir);
     const prevHome = process.env.HOME;
@@ -535,8 +535,8 @@ describe('Skills Route', () => {
   });
 
   it('mountPaths containing a disabled provider does not inflate required count', async () => {
-    const projectDir = join('/tmp', `skills-route-test-disabled-in-mountpaths-${Date.now()}`);
-    const homeDir = join('/tmp', `skills-route-test-disabled-in-mountpaths-home-${Date.now()}`);
+    const projectDir = join(tmpdir(), `skills-route-test-disabled-in-mountpaths-${Date.now()}`);
+    const homeDir = join(tmpdir(), `skills-route-test-disabled-in-mountpaths-home-${Date.now()}`);
     const sourceSkillsDir = resolveRepoSkillsDir();
     const sourceSkillNames = await listSourceSkillNames(sourceSkillsDir);
     const prevHome = process.env.HOME;
@@ -609,8 +609,8 @@ describe('Skills Route', () => {
   });
 
   it('GET /api/skills counts custom mount targets in summary and per-skill health', async () => {
-    const projectDir = join('/tmp', `skills-route-test-custom-health-${Date.now()}`);
-    const homeDir = join('/tmp', `skills-route-test-custom-health-home-${Date.now()}`);
+    const projectDir = join(tmpdir(), `skills-route-test-custom-health-${Date.now()}`);
+    const homeDir = join(tmpdir(), `skills-route-test-custom-health-home-${Date.now()}`);
     const customSkillsDir = 'custom-client-skills';
     const customSkillsDirPath = join(projectDir, customSkillsDir);
     const sourceSkillsDir = resolveRepoSkillsDir();
@@ -687,8 +687,8 @@ describe('Skills Route', () => {
   });
 
   it('GET /api/skills treats globally disabled cat-cafe skills as not required mounts', async () => {
-    const projectDir = join('/tmp', `skills-route-test-disabled-skill-health-${Date.now()}`);
-    const homeDir = join('/tmp', `skills-route-test-disabled-skill-health-home-${Date.now()}`);
+    const projectDir = join(tmpdir(), `skills-route-test-disabled-skill-health-${Date.now()}`);
+    const homeDir = join(tmpdir(), `skills-route-test-disabled-skill-health-home-${Date.now()}`);
     const sourceSkillsDir = resolveRepoSkillsDir();
     const sourceSkillNames = await listSourceSkillNames(sourceSkillsDir);
     const prevHome = process.env.HOME;
@@ -747,9 +747,9 @@ describe('Skills Route', () => {
   });
 
   it('GET /api/skills merges global disabled policy when external project has no local skill entry', async () => {
-    const mainRoot = join('/tmp', `skills-route-test-global-disabled-main-${Date.now()}`);
-    const projectDir = join('/tmp', `skills-route-test-global-disabled-external-${Date.now()}`);
-    const homeDir = join('/tmp', `skills-route-test-global-disabled-home-${Date.now()}`);
+    const mainRoot = join(tmpdir(), `skills-route-test-global-disabled-main-${Date.now()}`);
+    const projectDir = join(tmpdir(), `skills-route-test-global-disabled-external-${Date.now()}`);
+    const homeDir = join(tmpdir(), `skills-route-test-global-disabled-home-${Date.now()}`);
     const prevHome = process.env.HOME;
 
     await Promise.all([mkdir(mainRoot, { recursive: true }), mkdir(projectDir, { recursive: true }), mkdir(homeDir)]);
@@ -791,8 +791,8 @@ describe('Skills Route', () => {
   });
 
   it('GET /api/skills treats non-empty mountPaths as project-enabled even when cap.enabled is stale false', async () => {
-    const projectDir = join('/tmp', `skills-route-test-mountpaths-stale-enabled-${Date.now()}`);
-    const homeDir = join('/tmp', `skills-route-test-mountpaths-stale-enabled-home-${Date.now()}`);
+    const projectDir = join(tmpdir(), `skills-route-test-mountpaths-stale-enabled-${Date.now()}`);
+    const homeDir = join(tmpdir(), `skills-route-test-mountpaths-stale-enabled-home-${Date.now()}`);
     const sourceSkillsDir = resolveRepoSkillsDir();
     const sourceSkillNames = await listSourceSkillNames(sourceSkillsDir);
     const prevHome = process.env.HOME;
@@ -853,9 +853,9 @@ describe('Skills Route', () => {
     const sourceSkillNames = await listSourceSkillNames(sourceSkillsDir);
     const skillName = sourceSkillNames[0];
     assert.ok(skillName, 'expected at least one source skill for same-id plugin policy regression');
-    const mainRoot = join('/tmp', `skills-route-test-plugin-same-id-policy-main-${Date.now()}`);
-    const projectDir = join('/tmp', `skills-route-test-plugin-same-id-policy-${Date.now()}`);
-    const homeDir = join('/tmp', `skills-route-test-plugin-same-id-policy-home-${Date.now()}`);
+    const mainRoot = join(tmpdir(), `skills-route-test-plugin-same-id-policy-main-${Date.now()}`);
+    const projectDir = join(tmpdir(), `skills-route-test-plugin-same-id-policy-${Date.now()}`);
+    const homeDir = join(tmpdir(), `skills-route-test-plugin-same-id-policy-home-${Date.now()}`);
     const prevHome = process.env.HOME;
 
     await Promise.all([
@@ -927,7 +927,7 @@ describe('Skills Route', () => {
   });
 
   it('GET /api/skills resolves project-local plugin skillsSource against selected project', async () => {
-    const rawProjectDir = join('/tmp', `skills-route-test-project-plugin-source-${Date.now()}`);
+    const rawProjectDir = join(tmpdir(), `skills-route-test-project-plugin-source-${Date.now()}`);
     await mkdir(rawProjectDir, { recursive: true });
     const projectDir = await realpath(rawProjectDir);
     const pluginId = 'test-project-local-source-plugin';
@@ -990,8 +990,8 @@ describe('Skills Route', () => {
   it('POST /api/skills/sync does not remount globally disabled cat-cafe skills', async () => {
     const previousOwner = process.env.DEFAULT_OWNER_USER_ID;
     process.env.DEFAULT_OWNER_USER_ID = 'you';
-    const mainRoot = join('/tmp', `skills-route-test-disabled-skill-sync-main-${Date.now()}`);
-    const projectDir = join('/tmp', `skills-route-test-disabled-skill-sync-${Date.now()}`);
+    const mainRoot = join(tmpdir(), `skills-route-test-disabled-skill-sync-main-${Date.now()}`);
+    const projectDir = join(tmpdir(), `skills-route-test-disabled-skill-sync-${Date.now()}`);
     const sourceSkillsDir = resolveRepoSkillsDir();
     const staleDisabledLink = join(projectDir, '.claude/skills/debugging');
     await mkdir(mainRoot, { recursive: true });
@@ -1131,8 +1131,8 @@ describe('Skills Route', () => {
     // withdrew after KD-6 design context).
     const previousOwner = process.env.DEFAULT_OWNER_USER_ID;
     process.env.DEFAULT_OWNER_USER_ID = 'you';
-    const mainRoot = join('/tmp', `skills-route-kd6-affirmative-main-${Date.now()}`);
-    const projectDir = join('/tmp', `skills-route-kd6-affirmative-${Date.now()}`);
+    const mainRoot = join(tmpdir(), `skills-route-kd6-affirmative-main-${Date.now()}`);
+    const projectDir = join(tmpdir(), `skills-route-kd6-affirmative-${Date.now()}`);
     await mkdir(mainRoot, { recursive: true });
     await mkdir(projectDir, { recursive: true });
     // global state: tdd enabled with default mount paths
@@ -1205,7 +1205,7 @@ describe('Skills Route', () => {
   it('POST /api/skills/sync-skill rejects unknown skills before mounting', async () => {
     const previousOwner = process.env.DEFAULT_OWNER_USER_ID;
     process.env.DEFAULT_OWNER_USER_ID = 'you';
-    const rawProjectDir = join('/tmp', `skills-route-test-sync-skill-unknown-${Date.now()}`);
+    const rawProjectDir = join(tmpdir(), `skills-route-test-sync-skill-unknown-${Date.now()}`);
     await mkdir(rawProjectDir, { recursive: true });
     const projectDir = await realpath(rawProjectDir);
     const sourceSkillsDir = resolveRepoSkillsDir();
@@ -1248,8 +1248,8 @@ describe('Skills Route', () => {
   it('POST /api/skills/sync-skill ignores same-id disabled plugin skill in global guard', async () => {
     const previousOwner = process.env.DEFAULT_OWNER_USER_ID;
     process.env.DEFAULT_OWNER_USER_ID = 'you';
-    const mainRoot = join('/tmp', `skills-route-test-sync-skill-plugin-same-id-main-${Date.now()}`);
-    const rawProjectDir = join('/tmp', `skills-route-test-sync-skill-plugin-same-id-${Date.now()}`);
+    const mainRoot = join(tmpdir(), `skills-route-test-sync-skill-plugin-same-id-main-${Date.now()}`);
+    const rawProjectDir = join(tmpdir(), `skills-route-test-sync-skill-plugin-same-id-${Date.now()}`);
     await mkdir(mainRoot, { recursive: true });
     await mkdir(rawProjectDir, { recursive: true });
     const projectDir = await realpath(rawProjectDir);
@@ -1310,8 +1310,8 @@ describe('Skills Route', () => {
   it('POST /api/skills/sync-skill preserves narrowed mountPaths policy', async () => {
     const previousOwner = process.env.DEFAULT_OWNER_USER_ID;
     process.env.DEFAULT_OWNER_USER_ID = 'you';
-    const mainRoot = join('/tmp', `skills-route-test-sync-skill-mountpaths-main-${Date.now()}`);
-    const rawProjectDir = join('/tmp', `skills-route-test-sync-skill-mountpaths-${Date.now()}`);
+    const mainRoot = join(tmpdir(), `skills-route-test-sync-skill-mountpaths-main-${Date.now()}`);
+    const rawProjectDir = join(tmpdir(), `skills-route-test-sync-skill-mountpaths-${Date.now()}`);
     await mkdir(mainRoot, { recursive: true });
     await mkdir(rawProjectDir, { recursive: true });
     const projectDir = await realpath(rawProjectDir);
@@ -1382,8 +1382,8 @@ describe('Skills Route', () => {
   it('POST /api/skills/sync-skill caps mountPaths to enabled project providers', async () => {
     const previousOwner = process.env.DEFAULT_OWNER_USER_ID;
     process.env.DEFAULT_OWNER_USER_ID = 'you';
-    const mainRoot = join('/tmp', `skills-route-test-sync-skill-enabled-cap-main-${Date.now()}`);
-    const rawProjectDir = join('/tmp', `skills-route-test-sync-skill-enabled-cap-${Date.now()}`);
+    const mainRoot = join(tmpdir(), `skills-route-test-sync-skill-enabled-cap-main-${Date.now()}`);
+    const rawProjectDir = join(tmpdir(), `skills-route-test-sync-skill-enabled-cap-${Date.now()}`);
     await mkdir(mainRoot, { recursive: true });
     await mkdir(rawProjectDir, { recursive: true });
     const projectDir = await realpath(rawProjectDir);
@@ -1446,8 +1446,8 @@ describe('Skills Route', () => {
   it('POST /api/skills/sync-skill restores old provider links when a new target mount fails', async () => {
     const previousOwner = process.env.DEFAULT_OWNER_USER_ID;
     process.env.DEFAULT_OWNER_USER_ID = 'you';
-    const mainRoot = join('/tmp', `skills-route-test-sync-skill-rollback-main-${Date.now()}`);
-    const rawProjectDir = join('/tmp', `skills-route-test-sync-skill-rollback-${Date.now()}`);
+    const mainRoot = join(tmpdir(), `skills-route-test-sync-skill-rollback-main-${Date.now()}`);
+    const rawProjectDir = join(tmpdir(), `skills-route-test-sync-skill-rollback-${Date.now()}`);
     await mkdir(mainRoot, { recursive: true });
     await mkdir(rawProjectDir, { recursive: true });
     const projectDir = await realpath(rawProjectDir);
@@ -1515,7 +1515,7 @@ describe('Skills Route', () => {
   });
 
   it('resolves required MCP status from the selected project capabilities config', async () => {
-    const projectDir = join('/tmp', `skills-route-test-project-mcp-${Date.now()}`);
+    const projectDir = join(tmpdir(), `skills-route-test-project-mcp-${Date.now()}`);
     await mkdir(projectDir, { recursive: true });
     await writeCapabilitiesConfig(projectDir, {
       version: 1,
@@ -1596,7 +1596,7 @@ describe('Skills Route', () => {
   it('POST /api/skills/sync mounts enabled plugin skill and unmounts disabled plugin skill', async () => {
     const previousOwner = process.env.DEFAULT_OWNER_USER_ID;
     process.env.DEFAULT_OWNER_USER_ID = 'you';
-    const rawProjectDir = join('/tmp', `skills-route-test-plugin-sync-${Date.now()}`);
+    const rawProjectDir = join(tmpdir(), `skills-route-test-plugin-sync-${Date.now()}`);
     await mkdir(rawProjectDir, { recursive: true });
     // Canonicalize to avoid macOS /tmp → /private/tmp mismatch with route's realpath()
     const projectDir = await realpath(rawProjectDir);
@@ -1696,7 +1696,7 @@ describe('Skills Route', () => {
   it('POST /api/skills/sync mounts enabled project-local plugin skill', async () => {
     const previousOwner = process.env.DEFAULT_OWNER_USER_ID;
     process.env.DEFAULT_OWNER_USER_ID = 'you';
-    const rawProjectDir = join('/tmp', `skills-route-test-project-plugin-sync-${Date.now()}`);
+    const rawProjectDir = join(tmpdir(), `skills-route-test-project-plugin-sync-${Date.now()}`);
     await mkdir(rawProjectDir, { recursive: true });
     const projectDir = await realpath(rawProjectDir);
     const pluginsDir = join(projectDir, 'plugins');
@@ -1762,8 +1762,8 @@ describe('Skills Route', () => {
   it('POST /api/skills/sync converts legacy Clowder AI directory mounts before plugin sync', async () => {
     const previousOwner = process.env.DEFAULT_OWNER_USER_ID;
     process.env.DEFAULT_OWNER_USER_ID = 'you';
-    const mainRoot = join('/tmp', `skills-route-test-plugin-sync-legacy-root-main-${Date.now()}`);
-    const rawProjectDir = join('/tmp', `skills-route-test-plugin-sync-legacy-root-${Date.now()}`);
+    const mainRoot = join(tmpdir(), `skills-route-test-plugin-sync-legacy-root-main-${Date.now()}`);
+    const rawProjectDir = join(tmpdir(), `skills-route-test-plugin-sync-legacy-root-${Date.now()}`);
     await mkdir(mainRoot, { recursive: true });
     await mkdir(rawProjectDir, { recursive: true });
     const projectDir = await realpath(rawProjectDir);
@@ -1842,7 +1842,7 @@ describe('Skills Route', () => {
   it('POST /api/skills/sync preserves plugin skill mountPaths policy', async () => {
     const previousOwner = process.env.DEFAULT_OWNER_USER_ID;
     process.env.DEFAULT_OWNER_USER_ID = 'you';
-    const rawProjectDir = join('/tmp', `skills-route-test-plugin-sync-policy-${Date.now()}`);
+    const rawProjectDir = join(tmpdir(), `skills-route-test-plugin-sync-policy-${Date.now()}`);
     await mkdir(rawProjectDir, { recursive: true });
     const projectDir = await realpath(rawProjectDir);
     const repoRoot = resolveRepoSkillsDir().replace(/\/cat-cafe-skills$/, '');
@@ -1919,7 +1919,7 @@ describe('Skills Route', () => {
   it('POST /api/skills/sync preserves empty plugin skill mountPaths policy', async () => {
     const previousOwner = process.env.DEFAULT_OWNER_USER_ID;
     process.env.DEFAULT_OWNER_USER_ID = 'you';
-    const rawProjectDir = join('/tmp', `skills-route-test-plugin-sync-empty-policy-${Date.now()}`);
+    const rawProjectDir = join(tmpdir(), `skills-route-test-plugin-sync-empty-policy-${Date.now()}`);
     await mkdir(rawProjectDir, { recursive: true });
     const projectDir = await realpath(rawProjectDir);
     const repoRoot = resolveRepoSkillsDir().replace(/\/cat-cafe-skills$/, '');
