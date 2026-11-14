@@ -29,7 +29,7 @@ import {
 } from '../config/mount/mount-rules-store.js';
 import { syncAll } from '../skills/skill-sync-all.js';
 import { classifyMountPath, syncProject } from '../skills/skill-sync-engine.js';
-import { resolveForeignAgentMountRoot } from '../utils/foreign-agent-mount-guard.js';
+import { resolveMountBoundaryEscape } from '../utils/mount-path-boundary.js';
 import { resolveOwnerGate } from '../utils/owner-gate.js';
 import { redirectRuntimeProjectPath, resolvePersistentProjectPath } from '../utils/persistent-project-path.js';
 import { resolvePluginSkillSourcesForProject } from '../utils/plugin-skill-source.js';
@@ -276,10 +276,9 @@ async function reconcilePluginMounts(
       const shouldMount = ps.enabled && !!target && (!allowed || allowed.has(target.id));
       const status = await classifyMountPath(linkPath, ps.skillsSource, ps.skillName);
       if (shouldMount && status === 'missing') {
-        const privateRoot = await resolveForeignAgentMountRoot(dir);
-        if (privateRoot) {
+        if (await resolveMountBoundaryEscape(projectRoot, dir)) {
           skipped.push(ps.skillName);
-          console.warn(`[mount-rules] Skipping plugin skill ${ps.skillName} in foreign agent directory ${privateRoot}`);
+          console.warn(`[mount-rules] Skipping plugin skill ${ps.skillName} outside project root: ${dir}`);
           continue;
         }
         // Guard: reject symlinked provider dirs to prevent writing outside project

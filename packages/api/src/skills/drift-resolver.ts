@@ -14,7 +14,7 @@ import { join } from 'node:path';
 import type { MountRules } from '@cat-cafe/shared';
 import { withCapabilityLock } from '../config/capabilities/capability-orchestrator.js';
 import { isValidSkillName } from '../config/governance/skill-sync.js';
-import { resolveForeignAgentMountRoot } from '../utils/foreign-agent-mount-guard.js';
+import { resolveMountBoundaryEscape } from '../utils/mount-path-boundary.js';
 import { buildSkillMountTargets } from '../utils/skill-mount.js';
 import type { DriftResult } from './drift-detector.js';
 import { syncProject } from './skill-sync-engine.js';
@@ -100,7 +100,7 @@ async function syncDriftUnlocked(
     // Standard mount points: only use project path (candidates[0]), skip HOME fallback.
     const dirs = target.kind === 'standard' ? target.candidates.slice(0, 1) : target.candidates;
     for (const dir of dirs) {
-      if (await resolveForeignAgentMountRoot(dir)) {
+      if (await resolveMountBoundaryEscape(projectRoot, dir)) {
         skippedSkills.add(conflict.skill);
         continue;
       }

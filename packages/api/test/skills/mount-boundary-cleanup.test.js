@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, readdir, rm, symlink, writeFile } from 'node:fs/promises';
+import fs, { lstat, mkdir, mkdtemp, readdir, rm, symlink, writeFile } from 'node:fs/promises';
+import { syncBuiltinESMExports } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { it } from 'node:test';
@@ -16,8 +17,9 @@ const { skillsWriteRoutes } = await import('../../dist/routes/skills-write.js');
 const { syncProject } = await import('../../dist/skills/skill-sync-engine.js');
 
 async function fixture(t) {
-  const root = await mkdtemp(join(tmpdir(), 'foreign-mount-cleanup-'));
+  const root = await mkdtemp(join(tmpdir(), 'mount-boundary-cleanup-'));
   const home = join(root, 'home');
+  const project = join(root, 'project');
   const source = join(root, 'source');
   const privateDir = join(home, '.cac', 'skills');
   const previous = {
@@ -35,11 +37,13 @@ async function fixture(t) {
   });
   t.mock.method(console, 'warn', () => {});
   await Promise.all(
-    [privateDir, join(source, 'probe-skill'), join(source, 'refs')].map((dir) => mkdir(dir, { recursive: true })),
+    [project, privateDir, join(source, 'probe-skill'), join(source, 'refs')].map((dir) =>
+      mkdir(dir, { recursive: true }),
+    ),
   );
   await writeFile(join(source, 'probe-skill', 'SKILL.md'), '# probe\n');
   const linkType = process.platform === 'win32' ? 'junction' : 'dir';
-  await symlink(join(home, '.cac'), join(home, 'bridge'), linkType);
+  await symlink(join(home, '.cac'), join(project, 'bridge'), linkType);
   // Simulate a link left by the old bug; this setup remains inside the temporary home.
   await symlink(join(source, 'probe-skill'), join(privateDir, 'probe-skill'), linkType);
   const rules = {
@@ -52,13 +56,13 @@ async function fixture(t) {
       { alias: 'safe', path: '.test-skills' },
     ],
   };
-  await writeMountRules(home, rules);
-  return { home, source, privateDir, rules };
+  await writeMountRules(project, rules);
+  return { project, source, privateDir, rules };
 }
 
-it('removes an enabled skill from a private target when its mountPaths become out of policy', async (t) => {
-  const { home, source, privateDir, rules } = await fixture(t);
-  const result = await syncProject(home, source, {
+it('removes an enabled skill from an external target when its mountPaths become out of policy', async (t) => {
+  const { project, source, privateDir, rules } = await fixture(t);
+  const result = await syncProject(project, source, {
     mountRules: rules,
     mountPathsBySkill: new Map([['probe-skill', ['safe']]]),
   });
@@ -67,13 +71,39 @@ it('removes an enabled skill from a private target when its mountPaths become ou
   assert.ok(result.mounted.some((item) => item.skillName === 'probe-skill' && item.mountPointId === 'safe'));
 });
 
+it('rollback restores local managed links without recreating a link in an external directory', async (t) => {
+  const { project, source, privateDir, rules } = await fixture(t);
+  const localDir = join(project, '.test-skills');
+  await mkdir(localDir);
+  const localLink = join(localDir, 'probe-skill');
+  await symlink(join(source, 'probe-skill'), localLink, process.platform === 'win32' ? 'junction' : 'dir');
+  const nativeRename = fs.rename;
+  t.mock.method(fs, 'rename', (from, to) => {
+    if (to === join(project, '.cat-cafe', 'capabilities.json')) {
+      return Promise.reject(new Error('injected config write failure'));
+    }
+    return nativeRename(from, to);
+  });
+  syncBuiltinESMExports();
+  t.after(() => {
+    t.mock.restoreAll();
+    syncBuiltinESMExports();
+  });
+  await assert.rejects(
+    syncProject(project, source, { mountRules: rules, disabledSkills: new Set(['probe-skill']) }),
+    /injected config write failure/,
+  );
+  assert.equal((await lstat(localLink)).isSymbolicLink(), true);
+  assert.deepEqual(await readdir(privateDir), []);
+});
+
 [
   { method: 'POST', url: '/api/skills/sync', routes: skillsWriteRoutes },
   { method: 'PUT', url: '/api/mount-rules', routes: mountRulesRoutes },
 ].forEach(({ method, url, routes }) => {
-  it(`${method} ${url} cleans a disabled plugin's private managed link`, async (t) => {
-    const { home, source, privateDir, rules } = await fixture(t);
-    const config = await readCapabilitiesConfig(home);
+  it(`${method} ${url} cleans a disabled plugin's external managed link`, async (t) => {
+    const { project, source, privateDir, rules } = await fixture(t);
+    const config = await readCapabilitiesConfig(project);
     // Plugin-owned entries are reconciled by the route, independently of cat-cafe skill cleanup.
     config.capabilities = [
       {
@@ -85,14 +115,14 @@ it('removes an enabled skill from a private target when its mountPaths become ou
         skillsSource: source,
       },
     ];
-    await writeCapabilitiesConfig(home, config);
+    await writeCapabilitiesConfig(project, config);
     const app = Fastify();
     t.after(() => app.close());
     app.addHook('preHandler', async (request) => {
       request.sessionUserId = 'owner-user';
     });
     await app.register(routes, {
-      mainProjectRoot: home,
+      mainProjectRoot: project,
       ...(method === 'POST' ? { skillsSourceDir: join(source, 'refs') } : {}),
     });
     const response = await app.inject({
