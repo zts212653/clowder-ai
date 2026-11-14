@@ -18,6 +18,7 @@
  * Appends publish complete messages immediately. Lifecycle response admission is only a
  * processing placeholder; both terminal commit paths publish the final body instead.
  * The frontier append path is covered as well as ordinary and idempotent appends.
+ * Atomic Queue writes publish visible speech; queued user input waits for markDelivered.
  *
  * WHAT IS DELIBERATELY NOT PUBLISHED HERE:
  *  - whispers, fail-closed: being authorised for a thread is not being authorised for a
@@ -36,6 +37,7 @@ import {
   type StoredMessage,
   type ThreadObservedAppendResult,
 } from '../cats/services/stores/ports/MessageStore.js';
+import { isTimelinePublished } from '../cats/services/stores/visibility.js';
 import { hasMediaRichBlocks, projectEnvelope } from './envelope.js';
 import type { OutboundMediaPublication } from './outbound-media/publication.js';
 import type { EventLogStore, HostPublicationTracker } from './stores/ports.js';
@@ -103,6 +105,7 @@ export function createPublishingMessageStore<T extends IMessageStore>(inner: T, 
   }
 
   async function publish(stored: StoredMessage): Promise<void> {
+    if (!isTimelinePublished(stored)) return;
     if (stored.lifecycle?.kind === 'response' && stored.lifecycle.status === 'processing') return;
     if (stored.extra?.pluginMessage !== undefined) return;
     if (stored.visibility === 'whisper') return;
@@ -180,6 +183,34 @@ export function createPublishingMessageStore<T extends IMessageStore>(inner: T, 
   // forwarding list would silently stop covering whatever method is added to it next.
   return new Proxy(inner, {
     get(target, property, receiver) {
+      if (property === 'markDelivered') {
+        return async (...args: Parameters<IMessageStore['markDelivered']>) => {
+          const current = await target.getById(args[0]);
+          if (!current) return target.markDelivered(...args);
+          return withinPublicationSpan(current.threadId, async () => {
+            const result = await target.markDelivered(...args);
+            // Replaying delivery repairs a failed derived publish using the same event key.
+            if (result) await publish(result);
+            return result;
+          });
+        };
+      }
+      if (property === 'appendWithQueueLedgerAdmission') {
+        return (...args: Parameters<IMessageStore['appendWithQueueLedgerAdmission']>) =>
+          withinPublicationSpan(args[0].threadId ?? DEFAULT_THREAD_ID, async () => {
+            const result = await target.appendWithQueueLedgerAdmission(prepare(args[0]), args[1], args[2], args[3]);
+            if (result.outcome === 'enqueued' && result.message) await publish(result.message);
+            return result;
+          });
+      }
+      if (property === 'appendNoticeWithPrivateQueueAdmission') {
+        return (...args: Parameters<IMessageStore['appendNoticeWithPrivateQueueAdmission']>) =>
+          withinPublicationSpan(args[0].threadId ?? DEFAULT_THREAD_ID, async () => {
+            const result = await target.appendNoticeWithPrivateQueueAdmission(prepare(args[0]), args[1], args[2]);
+            if (result.outcome === 'enqueued' && result.message) await publish(result.message);
+            return result;
+          });
+      }
       if (property === 'commitLifecycleResponseTerminal') {
         return (id: string, patch: LifecycleResponseTerminalPatch) =>
           observedTerminal(

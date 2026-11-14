@@ -20,6 +20,7 @@ import {
 } from '@/utils/sidebar-thread-snapshot';
 import { BootcampListModal } from '../BootcampListModal';
 import { BootcampIcon } from '../icons/BootcampIcon';
+import { PluginConversationEntries } from '../plugins/PluginConversationEntries';
 import { resolveShellCopy, useShellCopy } from '../shell/shell-copy';
 import { readShellLanguage } from '../shell/shell-language';
 import type { ShellDestination } from '../shell/shell-navigation';
@@ -178,7 +179,11 @@ export function ThreadSidebar({ onClose, className, routeThreadId, activeDestina
       refreshing: state.refreshing,
     })),
   );
-  const threads = useMemo(() => projectSidebarRows({ rows, pendingThreadCommands }), [pendingThreadCommands, rows]);
+  const [residentThreadIds, setResidentThreadIds] = useState<string[]>([]);
+  const threads = useMemo(
+    () => projectSidebarRows({ rows, pendingThreadCommands }).filter((row) => !residentThreadIds.includes(row.id)),
+    [pendingThreadCommands, rows, residentThreadIds],
+  );
   const isLoadingThreads = refreshing;
   const [creationPhase, setCreationPhase] = useState<'idle' | 'submitting' | 'reconciling'>('idle');
   const isCreating = creationPhase !== 'idle';
@@ -1765,6 +1770,11 @@ export function ThreadSidebar({ onClose, className, routeThreadId, activeDestina
           </>
         )}
 
+        <PluginConversationEntries
+          onSelect={handleSelect}
+          currentThreadId={currentConversationId}
+          onThreadsChange={setResidentThreadIds}
+        />
         <div
           ref={scrollContainerRef}
           data-testid="sidebar-thread-list"

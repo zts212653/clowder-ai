@@ -18,6 +18,7 @@ import vendorStylesheets from '@/generated/vendor-stylesheets.json';
 import { META_THEME_COLOR } from '@/lib/color-defaults';
 import { buildPwaRetirementScript } from '@/lib/pwa-retirement-script';
 import { runtimeApiOriginFromPort } from '@/lib/runtime-api-origin';
+import { SuperagentPreviewShell } from './dev/superagent-preview/shell';
 import './globals.css';
 import './watcher.css';
 
@@ -79,19 +80,25 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             dangerouslySetInnerHTML={{ __html: pwaRetirementScript }}
           />
         ) : null}
-        <SessionBootstrap />
-        <CatHueInjector />
-        <CoCreatorHueInjector />
-        <ThemeProvider>
-          <ThemeApplier />
-          <ConfirmProvider>
-            <AppShell>{children}</AppShell>
-          </ConfirmProvider>
-          <BrakeModal />
-          <GuideOverlay />
-          <ToastContainer />
-          <WorkCoverLayer />
-        </ThemeProvider>
+        {process.env.NODE_ENV !== 'production' && process.env.SUPERAGENT_PREVIEW_FIXTURES === '1' ? (
+          <SuperagentPreviewShell>{children}</SuperagentPreviewShell>
+        ) : (
+          <>
+            <SessionBootstrap />
+            <CatHueInjector />
+            <CoCreatorHueInjector />
+            <ThemeProvider>
+              <ThemeApplier />
+              <ConfirmProvider>
+                <AppShell>{children}</AppShell>
+              </ConfirmProvider>
+              <BrakeModal />
+              <GuideOverlay />
+              <ToastContainer />
+              <WorkCoverLayer />
+            </ThemeProvider>
+          </>
+        )}
       </body>
     </html>
   );

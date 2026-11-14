@@ -5974,7 +5974,10 @@ async function main(): Promise<void> {
     ui: pluginRuntime.supervisor.ui,
   });
   const { pluginUiRoutes } = await import('./routes/plugin/plugin-ui-routes.js');
-  await app.register(pluginUiRoutes, { ui: pluginRuntime.supervisor.ui });
+  await app.register(pluginUiRoutes, {
+    ui: pluginRuntime.supervisor.ui,
+    conversations: { inventory: pluginRuntime.inventoryStore, runtime: pluginRuntime.supervisor, threads: threadStore },
+  });
 
   // F246/F313: one registry and one renderer projection. The F266 writer stays
   // fenced until an owner-backed resolver/dispatcher and a v1_active epoch are

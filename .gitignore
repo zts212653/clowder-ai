@@ -246,3 +246,7 @@ packages/api/test/__b1_parent_a__/
 var/f309-artwork-preview/
 # Host-owned build output; release afterPack compiles its own target binary.
 desktop/plugin-window/native/app-assist
+
+# Superagent acceptance state includes retained databases and isolated native authentication.
+artifacts/superagent-live/
+artifacts/superagent-installed-*/

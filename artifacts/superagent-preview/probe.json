@@ -1,0 +1,23 @@
+{
+  "kind": "synthetic-design-preview",
+  "pageErrors": [],
+  "apiRequests": [],
+  "verified": [
+    "native-sidebar-v2",
+    "scope-empty-and-escape",
+    "feedback-keeps-two-items",
+    "decision-and-delivery",
+    "pause-and-repair",
+    "install-setup",
+    "390px"
+  ],
+  "notVerified": [
+    "real-plugin-install",
+    "real-events",
+    "semantic-intake",
+    "real-member-execution",
+    "restart-recovery",
+    "macOS",
+    "classic-shell"
+  ]
+}
