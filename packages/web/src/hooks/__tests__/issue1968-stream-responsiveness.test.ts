@@ -249,4 +249,28 @@ describe('issue #1968: bounded work without dropping or reordering messages', ()
     await finish();
     expect(useChatStore.getState().getThreadState(threadId).messages).toEqual([]);
   });
+
+  it.each(['unseen', 'hydrated-then-deleted', 'existing-with-live-tail'] as const)(
+    'keeps deletion authoritative during yielded replay: %s',
+    async (scenario) => {
+      useChatStore.setState({ messages: scenario === 'existing-with-live-tail' ? [response()] : [] });
+      const originalWrite = writer.writeToolEvent;
+      vi.spyOn(writer, 'writeToolEvent').mockImplementation((...args) => {
+        clock += 2;
+        originalWrite(...args);
+      });
+      const subject = queue((item) =>
+        dispatchAgentQueueItem(item, () => writer.writeStreamText(target, { content: 'LIVE' })),
+      );
+      subject.push(new StreamReplayItem(replay()));
+      await drain();
+      expect(tasks.length).toBeGreaterThan(0);
+      if (scenario === 'hydrated-then-deleted') writer.writeStoredSnapshot(threadId, response('HISTORY'));
+      if (scenario === 'existing-with-live-tail') subject.push('LIVE');
+      useChatStore.getState().removeThreadMessage(threadId, target.messageId);
+      expect(useChatStore.getState().getThreadState(threadId).messages).toEqual([]);
+      await finish();
+      expect(useChatStore.getState().getThreadState(threadId).messages).toEqual([]);
+    },
+  );
 });
