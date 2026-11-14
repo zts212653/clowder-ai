@@ -2972,6 +2972,8 @@ export class QueueProcessor {
     const failedIds: string[] = [];
     const deliveredMessages: Array<{
       id: string;
+      visibility?: StoredMessage['visibility'];
+      whisperTo?: readonly string[];
       content: string;
       lifecycle?: import('@cat-cafe/shared').LifecycleStoredMessageMetadata;
       catId: string | null;
@@ -3028,6 +3030,8 @@ export class QueueProcessor {
           mentions: result.mentions,
           userId: result.userId,
           contentBlocks: result.contentBlocks,
+          ...(result.visibility ? { visibility: result.visibility } : {}),
+          ...(result.whisperTo ? { whisperTo: result.whisperTo } : {}),
           ...(Object.keys(projectedExtra).length > 0 ? { extra: projectedExtra as Record<string, unknown> } : {}),
           ...(result.origin ? { origin: result.origin } : {}),
           ...(result.replyTo ? { replyTo: result.replyTo } : {}),

@@ -24,6 +24,7 @@ import { useChatStore } from '@/stores/chatStore';
 import { useGuideStore } from '@/stores/guideStore';
 import { findLatestMessageByTimeline } from '@/stores/message-timeline';
 import {
+  observeCanceledSendAttempts,
   observeDeliveredSendAttempts,
   observeQueuedSendAttempts,
   recoverSendAttempts,
@@ -843,9 +844,11 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string, foregro
     });
 
     socket.on('message_deleted', (data: { messageId: string; threadId: string; deletedBy: string }) => {
+      void observeCanceledSendAttempts(data.threadId, [data.messageId]).catch(() => {});
       callbacksRef.current.onMessageDeleted?.(data);
     });
     socket.on('message_hard_deleted', (data: { messageId: string; threadId: string; deletedBy: string }) => {
+      void observeCanceledSendAttempts(data.threadId, [data.messageId], 'deleted').catch(() => {});
       callbacksRef.current.onMessageDeleted?.(data);
     });
     socket.on('message_restored', (data: { messageId: string; threadId: string }) => {
@@ -854,7 +857,9 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string, foregro
     socket.on(
       'message_recalled',
       (data: { messageId: string; threadId: string; verdict: 'zero_exposure' | 'exposed' }) => {
-        callbacksRef.current.onMessageRecalled?.(data);
+        void observeCanceledSendAttempts(data.threadId, [data.messageId], 'recalled')
+          .catch(() => {})
+          .then(() => callbacksRef.current.onMessageRecalled?.(data));
       },
     );
     socket.on('message_receipt_updated', (data: { messageId: string; threadId: string }) => {
@@ -983,6 +988,8 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string, foregro
         messages?: Array<{
           id: string;
           clientMessageId?: string;
+          visibility?: import('@/stores/chat-types').ChatMessage['visibility'];
+          whisperTo?: string[];
           from?: MessageFrom;
           content: string;
           lifecycle?: import('@cat-cafe/shared').LifecycleStoredMessageMetadata;

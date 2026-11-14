@@ -8,7 +8,9 @@ export interface SendAttempt {
   content: string;
   files: File[];
   timestamp: number;
-  status: 'preparing' | 'sending' | 'accepted' | 'unknown' | 'checking' | 'failed' | 'delivered';
+  status: 'preparing' | 'sending' | 'accepted' | 'unknown' | 'checking' | 'failed' | 'delivered' | 'canceled';
+  retryable?: boolean;
+  removed?: boolean;
   replyTo?: string;
   contextAttachments?: ContextAttachment[];
   explicitTargetCats?: string[];

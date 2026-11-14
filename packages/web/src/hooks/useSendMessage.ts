@@ -40,7 +40,7 @@ export interface SendMessageAdmissionOptions {
   messageDisposition?: MessageWorkDisposition;
   /** Ordinary conversation composer only; other admission owners retain their existing recovery. */
   localAttempt?: boolean;
-  onPrepared?: () => void;
+  onPrepared?: (localDurableAttempt: boolean) => void;
 }
 
 interface MessageAdmissionResponse {
@@ -135,7 +135,7 @@ export function useSendMessage(activeThreadId?: string) {
 
       const wasCommand = !existing && (await processCommand(content, threadId));
       if (wasCommand) {
-        admissionOptions?.onPrepared?.();
+        admissionOptions?.onPrepared?.(false);
         return false;
       }
 
@@ -163,6 +163,7 @@ export function useSendMessage(activeThreadId?: string) {
       if (attempt) putSendAttempt(attempt);
       let submitted = false;
       let rejected = false;
+      let retryable = true;
 
       try {
         if (attempt) {
@@ -178,7 +179,7 @@ export function useSendMessage(activeThreadId?: string) {
           if (apiSessionIdentity.getSnapshot().ownerUserId !== attempt.ownerUserId)
             throw new Error('身份已变更，内容已保留');
           patchSendAttempt(attempt, { status: 'sending' });
-          admissionOptions?.onPrepared?.();
+          admissionOptions?.onPrepared?.(true);
         }
         const submit = (confirmedTargetCats?: string[]) => {
           if (attempt && apiSessionIdentity.getSnapshot().ownerUserId !== attempt.ownerUserId)
@@ -233,7 +234,11 @@ export function useSendMessage(activeThreadId?: string) {
             .catch(() => null);
           const redirect = routingConfirmationRequiredSchema.safeParse(payload);
           if (redirect.success) {
-            if (!confirm) throw new Error('需要在聊天页面确认实际接收者后才能改发。');
+            rejected = true;
+            if (!confirm) {
+              retryable = false;
+              throw new Error('需要在聊天页面确认实际接收者后才能改发。');
+            }
             const unavailable = redirect.data.unavailable.map((member) => member.displayName).join('、');
             const targets = redirect.data.targets.map((member) => member.displayName).join('、');
             const accepted = await confirm({
@@ -244,18 +249,20 @@ export function useSendMessage(activeThreadId?: string) {
             });
             if (!accepted) {
               setUploadStatus('idle');
-              if (attempt) patchSendAttempt(attempt, { status: 'failed', error: '已取消，未发出' });
+              if (attempt)
+                await patchSendAttempt(attempt, { status: 'failed', error: '已取消，未发出', retryable: true });
               return false;
             }
             if (attempt)
               patchSendAttempt(attempt, { confirmedTargetCats: redirect.data.targets.map((member) => member.catId) });
+            rejected = false;
             response = await submit(redirect.data.targets.map((member) => member.catId));
           }
         }
 
         if (!response.ok) {
-          rejected =
-            response.status >= 400 && response.status < 500 && response.status !== 408 && response.status !== 409;
+          rejected = response.status >= 400 && response.status < 500 && response.status !== 408;
+          retryable = response.status === 429;
           const body = await response.json().catch(() => null);
           throw new Error(body?.detail ?? body?.error ?? `Server error: ${response.status}`);
         }
@@ -285,9 +292,10 @@ export function useSendMessage(activeThreadId?: string) {
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : 'Unknown error';
         if (attempt) {
-          patchSendAttempt(attempt, {
+          await patchSendAttempt(attempt, {
             status: !submitted || rejected ? 'failed' : 'unknown',
             error: !submitted ? '未能安全保存，内容仍在输入框' : rejected ? errorMessage : undefined,
+            retryable,
           });
           setUploadStatus('idle');
           if (submitted && !rejected) void checkSendAttempt(attempt);

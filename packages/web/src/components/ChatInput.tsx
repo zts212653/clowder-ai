@@ -34,6 +34,7 @@ import { useThreadLiveness } from '@/hooks/useThreadScopedSelectors';
 import { formatCatDisplayName } from '@/lib/cat-display-name';
 import { useChatStore } from '@/stores/chatStore';
 import { useInputHistoryStore } from '@/stores/inputHistoryStore';
+import { isPreparedComposerDraft } from '@/stores/send-attempt-store';
 import { useToastStore } from '@/stores/toastStore';
 import { compressImage } from '@/utils/compressImage';
 import { AppTooltip } from './AppTooltip';
@@ -132,7 +133,7 @@ interface ChatInputProps {
     contextAttachments?: ContextAttachment[],
     explicitTargetCats?: string[],
     messageDisposition?: MessageWorkDisposition,
-    onPrepared?: () => void,
+    onPrepared?: (localDurableAttempt: boolean) => void,
   ) => void | boolean | Promise<void | boolean>;
   disabled?: boolean;
   sendBlocked?: boolean;
@@ -407,6 +408,7 @@ export function ChatInput({
     retryUnrestoredImages,
     unrestoredImageCount,
   } = useDurableComposerDraft({
+    isDraftHandedOff: localSendFeedback ? isPreparedComposerDraft : undefined,
     threadId,
     input,
     setInput,
@@ -531,7 +533,9 @@ export function ChatInput({
           localSendFeedback && current !== draftSnapshot.text
             ? current.startsWith(draftSnapshot.text)
               ? current.slice(draftSnapshot.text.length)
-              : current
+              : current.endsWith(draftSnapshot.text)
+                ? current.slice(0, current.length - draftSnapshot.text.length)
+                : current
             : '',
         );
         ghostRef.current = null;
@@ -547,13 +551,13 @@ export function ChatInput({
         setShowMentions(false);
         if (replyToMessage && useChatStore.getState().replyToMessage?.id === replyToMessage.id) clearReplyTo();
       };
-      const onPrepared = () => {
+      const onPrepared = (localDurableAttempt: boolean) => {
         if (prepared) return;
         prepared = true;
-        flushSync(clearSentSnapshot);
-        settleAdmission(true);
         preparingSendRef.current = false;
         setIsPreparingSend(false);
+        flushSync(clearSentSnapshot);
+        settleAdmission(true, { localDurableAttempt });
       };
       if (localSendFeedback) {
         preparingSendRef.current = true;
@@ -569,7 +573,7 @@ export function ChatInput({
               replyToMessage?.id,
               sendContexts.length ? sendContexts : undefined,
               undefined,
-              undefined,
+              messageDisposition.effective,
               onPrepared,
             )
           : sendContexts.length > 0
@@ -602,6 +606,7 @@ export function ChatInput({
   }, [
     input,
     localSendFeedback,
+    messageDisposition.effective,
     answerCopy,
     disabled,
     onSend,

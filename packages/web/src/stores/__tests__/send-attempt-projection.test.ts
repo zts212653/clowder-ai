@@ -48,6 +48,9 @@ it('merges a Queue event that arrives before HTTP, then hands off to exact Histo
     timestamp: 20,
   };
   expect(withSendAttempts([preview], [attempt], 'thread', [queue])).toHaveLength(1);
+  expect(
+    withSendAttempts([preview], [{ ...attempt, status: 'canceled' }], 'thread', [queue])[0]?.sendAttempt?.status,
+  ).toBe('canceled');
   const canonical = { ...preview, queuedEntryId: undefined, deliveredAt: 30 };
   const settled = withSendAttempts([canonical], [attempt], 'thread');
   expect(settled).toHaveLength(1);

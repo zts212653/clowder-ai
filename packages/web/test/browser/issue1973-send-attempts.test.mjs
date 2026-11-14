@@ -32,8 +32,13 @@ after(async () => {
 });
 async function scene(options = {}) {
   const context = await browser.newContext({ reducedMotion: 'reduce' });
+  context.on('page', page => {
+    page.setDefaultNavigationTimeout(30_000);
+    page.on('pageerror', error => process.stderr.write(`Browser page error: ${error.stack}\n`));
+  });
   const harness = createChatProofHarness(context, built, evidence, measurements);
   const proof = await harness.openProof({ surface: true, ...options });
+  await proof.page.route('**/message-attempts/*', (route) => route.fulfill(json({ status: 'unknown' })));
   const finish = async () => {
     try {
       await harness.closeProof(proof);
@@ -209,6 +214,159 @@ test('a rejected attachment and its text survive refresh, and retry sends the sa
       assert.ok(body.includes('issue1973-persistent-file-bytes'));
       assert.ok(body.includes(text));
     }
+  } finally {
+    await proof.finish();
+  }
+});
+
+test('an invalid payload offers copy and editing, and keeps that failure across refresh', async () => {
+  const proof = await scene();
+  const { page } = proof;
+  let posts = 0;
+  const text = '这条内容需要调整后再发送。';
+  try {
+    await page.route('**/api/messages', (route) => {
+      if (route.request().method() !== 'POST') return route.fallback();
+      posts++;
+      return route.fulfill(json({ error: '请求内容不符合要求' }, 400));
+    });
+    await page.locator('textarea').fill(text);
+    await page.locator('textarea').press('Enter');
+    await page.getByRole('button', { name: '复制这条消息的内容' }).waitFor();
+    await page.reload();
+    await page.getByRole('button', { name: '复制这条消息的内容' }).waitFor();
+    assert.equal(await page.getByRole('button', { name: '重试发送这条消息' }).count(), 0);
+    await page.evaluate(() =>
+      Object.defineProperty(navigator, 'clipboard', {
+        configurable: true,
+        value: {
+          writeText: async (text) => {
+            window.__copied1973 = text;
+          },
+        },
+      }),
+    );
+    await page.getByRole('button', { name: '复制这条消息的内容' }).click();
+    assert.equal(await page.evaluate(() => window.__copied1973), text);
+    assert.equal(posts, 1);
+    assert.equal(await page.getByText(text, { exact: true }).count(), 1);
+  } finally {
+    await proof.finish();
+  }
+});
+
+test('checking a lost delivery requests canonical History without another submit', async () => {
+  const proof = await scene();
+  const { page } = proof;
+  let posts = 0,
+    reads = 0,
+    key;
+  const text = '回执丢失后，通过核对找到同一条正式消息。';
+  try {
+    await page.route('**/message-attempts/*', (route) =>
+      route.fulfill(json({ status: 'delivered', userMessage: { id: 'checked-canonical', timestamp: 100 } })),
+    );
+    await page.route('**/api/messages?**', (route) => {
+      reads++;
+      return route.fulfill(
+        json({
+          messages: [
+            {
+              id: 'checked-canonical',
+              clientMessageId: key,
+              type: 'user',
+              from: { kind: 'user', userId: 'owner-proof' },
+              catId: null,
+              content: text,
+              timestamp: Date.now(),
+              deliveredAt: Date.now(),
+            },
+          ],
+          hasMore: false,
+        }),
+      );
+    });
+    await page.route('**/api/messages', (route) => {
+      if (route.request().method() !== 'POST') return route.fallback();
+      posts++;
+      key = route.request().postDataJSON().idempotencyKey;
+      return route.fulfill(json({ error: 'response lost' }, 500));
+    });
+    await page.locator('textarea').fill(text);
+    await page.locator('textarea').press('Enter');
+    await page.locator(`[data-message-viewport-id="checked-canonical"]`).waitFor();
+    assert.equal(await page.getByTestId('send-attempt-status').count(), 0);
+    assert.equal(await page.getByText(text, { exact: true }).count(), 1);
+    assert.ok(reads >= 1);
+    assert.equal(posts, 1);
+  } finally {
+    await proof.finish();
+  }
+});
+
+test('a disappeared Queue entry is checked and an explicit cancellation cannot reappear as accepted', async () => {
+  const proof = await scene();
+  const { page } = proof;
+  let key,
+    canceled = false,
+    posts = 0;
+  const text = '这条随后被撤回的消息。';
+  try {
+    await page.route('**/message-attempts/*', (route) =>
+      route.fulfill(
+        json({ status: canceled ? 'canceled' : 'accepted', userMessage: { id: 'canceled-canonical', timestamp: 100 } }),
+      ),
+    );
+    await page.route('**/api/messages', (route) => {
+      if (route.request().method() !== 'POST') return route.fallback();
+      posts++;
+      key = route.request().postDataJSON().idempotencyKey;
+      return route.fulfill(
+        json(
+          {
+            status: 'queued',
+            userMessageId: 'canceled-canonical',
+            userMessage: { id: 'canceled-canonical', timestamp: 100 },
+          },
+          202,
+        ),
+      );
+    });
+    await page.locator('textarea').fill(text);
+    await page.locator('textarea').press('Enter');
+    await page.locator('[data-send-status="accepted"]').waitFor();
+    await page.evaluate(
+      ({ thread, key, text }) =>
+        window.__f322Chat.queue(thread, [
+          {
+            id: 'queue:canceled-canonical',
+            messageId: 'canceled-canonical',
+            clientMessageId: key,
+            threadId: thread,
+            userId: 'owner-proof',
+            from: { kind: 'user', userId: 'owner-proof' },
+            content: text,
+            mergedMessageIds: [],
+            targetCats: ['opus'],
+            intent: 'execute',
+            status: 'queued',
+            createdAt: 100,
+          },
+        ]),
+      { thread: CURRENT_THREAD, key, text },
+    );
+    canceled = true;
+    await page.evaluate((thread) => window.__f322Chat.queue(thread, []), CURRENT_THREAD);
+    await page.locator('[data-send-status="canceled"]').waitFor();
+    assert.equal(await page.getByText(text, { exact: true }).count(), 1);
+    assert.equal(await page.getByRole('button', { name: '重试发送这条消息' }).count(), 0);
+    await page.getByRole('button', { name: '复制这条消息的内容' }).waitFor();
+    await page.reload();
+    await page.locator('[data-send-status="canceled"]').waitFor();
+    assert.equal(await page.getByText(text, { exact: true }).count(), 1);
+    assert.equal(await page.locator('textarea').inputValue(), '');
+    assert.equal(posts, 1);
+    await proof.harness.capture(page, 'desktop-canceled-restored');
   } finally {
     await proof.finish();
   }

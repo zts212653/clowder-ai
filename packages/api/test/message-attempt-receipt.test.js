@@ -124,3 +124,34 @@ test('an unavailable receipt store returns 503 rather than claiming the attempt 
   assert.equal(result.headers['cache-control'], 'no-store');
   assert.equal(result.json().status, undefined);
 });
+
+test('a canceled queued source is reported as canceled, never accepted', async () => {
+  const store = new MessageStore();
+  const message = await store.append({
+    from: { kind: 'user', userId: 'owner' },
+    userId: 'owner',
+    threadId: 'thread',
+    content: 'withdrawn',
+    mentions: [],
+    timestamp: 100,
+    deliveryStatus: 'queued',
+    idempotencyKey: 'canceled-key',
+  });
+  await store.markCanceled(message.id);
+  app = Fastify();
+  await app.register(messagesRoutes, { messageStore: store, router: {}, registry: {}, socketManager: {} });
+  const result = await app.inject({
+    method: 'GET',
+    url: '/api/threads/thread/message-attempts/canceled-key',
+    headers: { 'x-cat-cafe-user': 'owner' },
+  });
+  assert.equal(result.statusCode, 200);
+  assert.equal(result.json().status, 'canceled');
+  await store.softDelete(message.id, 'owner');
+  const removed = await app.inject({
+    method: 'GET',
+    url: '/api/threads/thread/message-attempts/canceled-key',
+    headers: { 'x-cat-cafe-user': 'owner' },
+  });
+  assert.equal(removed.json().status, 'removed');
+});

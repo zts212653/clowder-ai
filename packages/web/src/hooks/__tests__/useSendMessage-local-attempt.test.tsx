@@ -1,17 +1,21 @@
 import 'fake-indexeddb/auto';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { afterEach, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { ThreadChatHistoryAdmissionProvider } from '@/components/thread-chat/ThreadChatRuntimeProvider';
 import { useChatHistory } from '@/hooks/useChatHistory';
 import { useSendMessage } from '@/hooks/useSendMessage';
 import { useChatStore } from '@/stores/chatStore';
+import { useSendAttemptStore } from '@/stores/send-attempt-store';
 import { observeApiSessionOwner } from '@/utils/api-session-identity';
 import * as attemptDb from '@/utils/send-attempt-db';
 
-const { apiFetch } = vi.hoisted(() => ({ apiFetch: vi.fn() }));
+const { apiFetch, processCommand } = vi.hoisted(() => ({
+  apiFetch: vi.fn(),
+  processCommand: vi.fn(async () => false),
+}));
 vi.mock('@/utils/api-client', () => ({ apiFetch }));
-vi.mock('@/hooks/useChatCommands', () => ({ useChatCommands: () => ({ processCommand: async () => false }) }));
+vi.mock('@/hooks/useChatCommands', () => ({ useChatCommands: () => ({ processCommand }) }));
 
 let root: Root;
 let host: HTMLDivElement;
@@ -32,6 +36,9 @@ function Conversation() {
     </main>
   );
 }
+beforeEach(() => {
+  processCommand.mockReset().mockResolvedValue(false);
+});
 afterEach(async () => {
   await act(async () => {
     if (rejectSend) {
@@ -41,8 +48,93 @@ afterEach(async () => {
   });
   act(() => root?.unmount());
   host?.remove();
+  await Promise.all(useSendAttemptStore.getState().attempts.map(attemptDb.deleteSendAttempt));
+  useSendAttemptStore.setState({ attempts: [] });
   vi.restoreAllMocks();
   delete (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT;
+});
+
+it.each([
+  { status: 400, result: 'failed', retryable: false },
+  { status: 409, result: 'failed', retryable: false },
+  { status: 413, result: 'failed', retryable: false },
+  { status: 429, result: 'failed', retryable: true },
+  { status: 408, result: 'unknown', retryable: false },
+  { status: 500, result: 'unknown', retryable: false },
+  { status: 202, result: 'unknown', retryable: true },
+])('keeps the appropriate recovery state for HTTP $status', async ({ status, result, retryable }) => {
+  (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+  observeApiSessionOwner('send-proof-owner');
+  apiFetch.mockImplementation(
+    async (path, init) =>
+      new Response(
+        JSON.stringify(
+          path === '/api/messages' && init?.method === 'POST' ? { error: 'not admitted' } : { status: 'unknown' },
+        ),
+        { status: init?.method === 'POST' ? status : 200 },
+      ),
+  );
+  function Sender() {
+    send = useSendMessage(threadId).handleSend;
+    return null;
+  }
+  host = document.createElement('div');
+  root = createRoot(host);
+  await act(async () => root.render(<Sender />));
+  await act(async () => {
+    await send('keep this request', undefined, undefined, undefined, undefined, undefined, undefined, {
+      localAttempt: true,
+    });
+  });
+  await vi.waitFor(() =>
+    expect(useSendAttemptStore.getState().attempts[0]).toMatchObject({ status: result, retryable }),
+  );
+  const stored = await attemptDb.loadSendAttempts('send-proof-owner', threadId);
+  expect(stored[0]?.status).toBe(result);
+});
+
+it('commands retain their existing composer owner and canceled attempts cannot be submitted with their old key', async () => {
+  (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+  observeApiSessionOwner('send-proof-owner');
+  function Sender() {
+    send = useSendMessage(threadId).handleSend;
+    return null;
+  }
+  host = document.createElement('div');
+  root = createRoot(host);
+  await act(async () => root.render(<Sender />));
+  const prepared = vi.fn();
+  const priorPosts = apiFetch.mock.calls.length;
+  processCommand.mockResolvedValueOnce(true);
+  await act(async () => {
+    await send('/command', undefined, undefined, undefined, undefined, undefined, undefined, {
+      localAttempt: true,
+      onPrepared: prepared,
+    });
+  });
+  expect(prepared).toHaveBeenCalledWith(false);
+  useSendAttemptStore.setState({
+    attempts: [
+      {
+        id: 'cancel-key',
+        ownerUserId: 'send-proof-owner',
+        threadId,
+        content: 'keep',
+        files: [],
+        timestamp: 10,
+        status: 'canceled',
+      },
+    ],
+  });
+  await act(async () => {
+    expect(
+      await send('keep', undefined, undefined, undefined, undefined, undefined, undefined, {
+        localAttempt: true,
+        idempotencyKey: 'cancel-key',
+      }),
+    ).toBe(false);
+  });
+  expect(apiFetch.mock.calls.length).toBe(priorPosts);
 });
 
 it('shows a recoverable user bubble before HTTP completes, without publishing it into History', async () => {

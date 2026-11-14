@@ -23,7 +23,14 @@ export function registerMessageAttemptReceipt(app: FastifyInstance, store: IMess
       )
         return { status: 'unknown' };
       return {
-        status: message.deliveryStatus === 'delivered' ? 'delivered' : 'accepted',
+        status:
+          message.deletedAt || message.recall
+            ? 'removed'
+            : message.deliveryStatus === 'canceled'
+              ? 'canceled'
+              : message.deliveryStatus === 'delivered'
+                ? 'delivered'
+                : 'accepted',
         userMessage: { id: message.id, timestamp: message.timestamp },
       };
     } catch (error) {

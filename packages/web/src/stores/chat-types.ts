@@ -178,7 +178,10 @@ export interface ChatMessage {
   /** Owner-private browser correlation; not a canonical History id or model-read receipt. */
   clientMessageId?: string;
   /** View-only local attempt. Never written to chatStore.messages or offline History snapshots. */
-  sendAttempt?: Pick<import('@/utils/send-attempt-db').SendAttempt, 'id' | 'status' | 'error' | 'persistenceError'>;
+  sendAttempt?: Pick<
+    import('@/utils/send-attempt-db').SendAttempt,
+    'id' | 'status' | 'error' | 'persistenceError' | 'retryable'
+  >;
   /** View-only Queue projection; never persisted as a second History record. */
   queuedEntryId?: string;
   /** RFC #1356 canonical sender identity for persisted messages. */

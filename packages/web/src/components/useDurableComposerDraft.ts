@@ -2,6 +2,7 @@
 
 import type { ContextAttachment, MessageContent } from '@cat-cafe/shared';
 import { type Dispatch, type RefObject, type SetStateAction, useCallback, useEffect, useRef, useState } from 'react';
+import type { OwnerComposerDraft } from '@/stores/chat-types';
 import { useChatStore } from '@/stores/chatStore';
 import { loadOwnerComposerDraft } from '@/utils/true-recall';
 import {
@@ -35,6 +36,7 @@ import { type PendingComposerSelection, usePendingComposerSelection } from './us
 import { useThreadDraftSelection } from './use-thread-draft-selection';
 
 interface UseDurableComposerDraftOptions {
+  isDraftHandedOff?: (threadId: string, draft: OwnerComposerDraft, revision: number) => Promise<boolean>;
   threadId?: string;
   input: string;
   setInput: Dispatch<SetStateAction<string>>;
@@ -48,6 +50,7 @@ interface UseDurableComposerDraftOptions {
 }
 
 export function useDurableComposerDraft({
+  isDraftHandedOff,
   threadId,
   input,
   setInput,
@@ -140,20 +143,27 @@ export function useDurableComposerDraft({
     resetImageRecovery();
     const hydration = waitForComposerDraftSaves(threadId)
       .then(() => loadOwnerComposerDraft(threadId))
-      .then(async ({ draft, revision }) => {
+      .then(async ({ draft: storedDraft, revision }) => {
         if (hydrationGenerationRef.current !== generation) return;
+        const transferred =
+          storedDraft && isDraftHandedOff ? await isDraftHandedOff(threadId, storedDraft, revision) : false;
+        if (hydrationGenerationRef.current !== generation) return;
+        // Keep the server revision as the write boundary, but do not refill a
+        // draft already transferred to an account/thread-bound durable attempt.
+        const draft = transferred ? null : storedDraft;
         const serverText = draft?.text ?? '';
         const imageUrls = imageUrlsFromDraft(draft);
         const serverContextAttachments = contextAttachmentsFromDraft(draft);
         preservedBlocksRef.current = preservedBlocksFromDraft(draft);
-        canonicalDraftRef.current = durableDraftSnapshotFromOwner(draft);
+        const storedSnapshot = durableDraftSnapshotFromOwner(storedDraft);
+        canonicalDraftRef.current = storedSnapshot;
         revisionRef.current = revision;
         const recoveredSignature = composerDraftSignature(
-          serverText,
-          imageUrls,
-          serverContextAttachments,
-          preservedBlocksRef.current,
-          draft?.replyTo,
+          storedSnapshot.text,
+          storedSnapshot.imageUrls,
+          storedSnapshot.contextAttachments,
+          storedSnapshot.preservedBlocks,
+          storedSnapshot.replyTo,
         );
         // P1 R10: Capture current signature BEFORE projection, not after
         // Reading inputRef.current after setInput may see the projected value
@@ -195,7 +205,16 @@ export function useDurableComposerDraft({
     return () => {
       if (hydrationGenerationRef.current === generation) hydrationGenerationRef.current += 1;
     };
-  }, [imageUrlsRef, resetImageRecovery, restoreDraftImages, setContextAttachments, setInput, setReplyTo, threadId]);
+  }, [
+    imageUrlsRef,
+    isDraftHandedOff,
+    resetImageRecovery,
+    restoreDraftImages,
+    setContextAttachments,
+    setInput,
+    setReplyTo,
+    threadId,
+  ]);
 
   const restoreAdmissionFallback = useCallback(() => {
     const fallback = clearFallbackRef.current;
@@ -442,7 +461,7 @@ export function useDurableComposerDraft({
       };
       pendingAdmissionDraftRef.current = pendingAdmission;
       admissionsPendingRef.current += 1;
-      return (accepted: boolean | undefined) => {
+      return (accepted: boolean | undefined, options?: { localDurableAttempt: boolean }) => {
         // P1-2 R8: Check stable owner ID, not hydration generation
         if (ownerId !== ownerIdRef.current || pendingAdmission.threadId !== threadId) {
           return;
@@ -479,7 +498,9 @@ export function useDurableComposerDraft({
             }
           }
         } else {
-          clearFallbackRef.current = durableSnapshot;
+          // A durable send attempt owns this snapshot now. A remote draft-save
+          // failure must not turn the same content into a new composer send.
+          clearFallbackRef.current = options?.localDurableAttempt ? null : durableSnapshot;
           persistSettledDraft(hydrationGeneration);
         }
         setAdmissionEpoch((current) => current + 1);

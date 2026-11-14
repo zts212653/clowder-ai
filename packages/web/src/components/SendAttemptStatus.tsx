@@ -3,6 +3,7 @@
 import { useSendMessage } from '@/hooks/useSendMessage';
 import type { ChatMessage } from '@/stores/chat-types';
 import { checkSendAttempt, useSendAttemptStore } from '@/stores/send-attempt-store';
+import { useToastStore } from '@/stores/toastStore';
 import { apiSessionIdentity } from '@/utils/api-session-identity';
 
 export function SendAttemptStatus({
@@ -18,20 +19,24 @@ export function SendAttemptStatus({
   );
   const { handleSend } = useSendMessage(threadId);
   const failed = attempt.status === 'failed';
+  const canceled = attempt.status === 'canceled';
+  const retryable = attempt.retryable !== false;
   const unknown = attempt.status === 'unknown';
   const checking = attempt.status === 'checking';
   const busy = attempt.status === 'preparing' || attempt.status === 'sending' || checking;
-  const text = failed
-    ? `未发出${attempt.error ? ` · ${attempt.error}` : ''}`
-    : unknown
-      ? '暂未确认是否发出'
-      : checking
-        ? '正在确认是否发出…'
-        : attempt.status === 'accepted'
-          ? '已发出 · 等待接收确认'
-          : attempt.status === 'delivered'
-            ? '已投递 · 正在同步回执'
-            : '发送中…';
+  const text = canceled
+    ? '已取消 · 未交给成员'
+    : failed
+      ? `未发出${attempt.error ? ` · ${attempt.error}` : ''}`
+      : unknown
+        ? '暂未确认是否发出'
+        : checking
+          ? '正在确认是否发出…'
+          : attempt.status === 'accepted'
+            ? '已发出 · 等待接收确认'
+            : attempt.status === 'delivered'
+              ? '已投递 · 正在同步回执'
+              : '发送中…';
   const retry = () => {
     if (stored)
       void handleSend(
@@ -44,6 +49,25 @@ export function SendAttemptStatus({
         stored.explicitTargetCats,
         { localAttempt: true, idempotencyKey: stored.id },
       );
+  };
+  const copy = () => {
+    if (!stored) return;
+    const failedCopy = () =>
+      useToastStore
+        .getState()
+        .addToast({ type: 'error', title: '未能复制', message: '请选中正文手动复制', duration: 4000 });
+    const copied = navigator.clipboard?.writeText(stored.content);
+    if (!copied) {
+      failedCopy();
+      return;
+    }
+    void copied.then(
+      () =>
+        useToastStore
+          .getState()
+          .addToast({ type: 'success', title: '内容已复制', message: '调整后可以作为新消息发送。', duration: 2000 }),
+      failedCopy,
+    );
   };
   return (
     <span
@@ -68,22 +92,39 @@ export function SendAttemptStatus({
         ) : (
           <>
             <circle cx="8" cy="8" r="6" />
-            <path d={failed ? 'M8 4v5m0 2v1' : unknown ? 'M6 6a2 2 0 1 1 3 1.7L8 9m0 2v1' : 'm4.5 8 2.2 2.2 4.8-4.5'} />
+            <path
+              d={
+                canceled
+                  ? 'm5 5 6 6m0-6-6 6'
+                  : failed
+                    ? 'M8 4v5m0 2v1'
+                    : unknown
+                      ? 'M6 6a2 2 0 1 1 3 1.7L8 9m0 2v1'
+                      : 'm4.5 8 2.2 2.2 4.8-4.5'
+              }
+            />
           </>
         )}
       </svg>
       <span>{text}</span>
-      {stored && (failed || unknown || checking) ? (
+      {stored && (failed || canceled || unknown || checking) ? (
         <button
           type="button"
           disabled={checking}
-          onClick={failed ? retry : () => void checkSendAttempt(stored)}
+          onClick={canceled ? copy : failed ? (retryable ? retry : copy) : () => void checkSendAttempt(stored)}
           className="shell-focusable min-h-11 min-w-11 rounded px-1 underline underline-offset-4 disabled:cursor-wait"
-          aria-label={failed ? '重试发送这条消息' : '检查这条消息是否发出'}
+          aria-label={
+            canceled || (failed && !retryable)
+              ? '复制这条消息的内容'
+              : failed
+                ? '重试发送这条消息'
+                : '检查这条消息是否发出'
+          }
         >
-          {failed ? '重试' : checking ? '检查中…' : '检查状态'}
+          {canceled ? '复制内容' : failed ? (retryable ? '重试' : '复制内容') : checking ? '检查中…' : '检查状态'}
         </button>
       ) : null}
+      {failed && !retryable ? <span>请调整内容后重新发送</span> : null}
       {attempt.persistenceError ? (
         <span>恢复信息未更新</span>
       ) : unknown && attempt.error ? (

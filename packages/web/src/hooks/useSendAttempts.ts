@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useSyncExternalStore } from 'react';
+import { useEffect, useMemo, useRef, useSyncExternalStore } from 'react';
 import type { ChatMessage, QueueEntry } from '@/stores/chat-types';
 import {
   findSendAttempt,
@@ -13,6 +13,7 @@ import { apiSessionIdentity } from '@/utils/api-session-identity';
 import { loadSendAttempts } from '@/utils/send-attempt-db';
 
 export function useSendAttempts(threadId: string, messages: readonly ChatMessage[], queue: readonly QueueEntry[]) {
+  const retirementChecks = useRef(new Set<string>());
   const identity = useSyncExternalStore(
     apiSessionIdentity.subscribe,
     apiSessionIdentity.getSnapshot,
@@ -56,14 +57,26 @@ export function useSendAttempts(threadId: string, messages: readonly ChatMessage
     observeQueuedSendAttempts(threadId, queue);
   }, [threadId, queue]);
   useEffect(() => {
-    attempts.forEach((attempt) => {
-      const canonical = messages.find(
-        (message) =>
-          !message.queuedEntryId && (message.clientMessageId === attempt.id || message.id === attempt.serverMessageId),
-      );
-      if (canonical && (canonical.deliveredAt || attempt.status === 'delivered'))
-        void retireSendAttempt(attempt).catch(() => {});
-    });
-  }, [messages, attempts]);
+    const retire = (retry = false) =>
+      attempts.forEach((attempt) => {
+        const canonical = messages.find(
+          (message) =>
+            !message.queuedEntryId &&
+            (message.clientMessageId === attempt.id || message.id === attempt.serverMessageId),
+        );
+        const key = `${attempt.ownerUserId}:${threadId}:${attempt.id}`;
+        if (
+          (attempt.removed || (canonical && (canonical.deliveredAt || attempt.status === 'delivered'))) &&
+          (retry || !retirementChecks.current.has(key))
+        ) {
+          retirementChecks.current.add(key);
+          void retireSendAttempt(attempt).catch(() => {});
+        }
+      });
+    retire();
+    const online = () => retire(true);
+    window.addEventListener('online', online);
+    return () => window.removeEventListener('online', online);
+  }, [messages, attempts, threadId]);
   return attempts;
 }

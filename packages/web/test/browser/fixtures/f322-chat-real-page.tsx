@@ -226,6 +226,7 @@ declare global {
       selectedThread: () => string;
       currentProject: () => string;
       incoming: (threadId: string, message: ChatMessageData) => void;
+      queue: (threadId: string, entries: import('../../../src/stores/chat-types').QueueEntry[]) => void;
     };
   }
 }
@@ -237,6 +238,7 @@ window.__f322Chat = {
   selectedThread: () => useChatStore.getState().currentThreadId,
   currentProject: () => useChatStore.getState().currentProjectPath,
   incoming: (threadId, message) => useChatStore.getState().addMessageToThread(threadId, message),
+  queue: (threadId, entries) => useChatStore.getState().setQueue(threadId, entries),
 };
 const root = document.getElementById('root');
 if (!root) throw new Error('Missing chat proof root');

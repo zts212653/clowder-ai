@@ -7,7 +7,7 @@ export function withSendAttempts(
   threadId: string,
   queue: readonly QueueEntry[] = [],
 ): readonly ChatMessage[] {
-  const remaining = attempts.filter((attempt) => attempt.threadId === threadId);
+  const remaining = attempts.filter((attempt) => attempt.threadId === threadId && !attempt.removed);
   const projected = messages.map((message) => {
     const attempt = remaining.find(
       (item) => item.id === message.clientMessageId || item.serverMessageId === message.id,
@@ -18,7 +18,15 @@ export function withSendAttempts(
     return {
       ...message,
       clientMessageId: attempt.id,
-      ...(message.queuedEntryId ? { sendAttempt: { id: attempt.id, status: 'accepted' as const } } : {}),
+      ...(message.queuedEntryId
+        ? {
+            ...(attempt.whisper ?? {}),
+            sendAttempt: {
+              id: attempt.id,
+              status: attempt.status === 'canceled' ? ('canceled' as const) : ('accepted' as const),
+            },
+          }
+        : {}),
     };
   });
   remaining.forEach((attempt) => {
@@ -60,9 +68,10 @@ export function withSendAttempts(
       ...(entry ? { queuedEntryId: entry.id } : {}),
       sendAttempt: {
         id: attempt.id,
-        status: entry ? 'accepted' : attempt.status,
+        status: attempt.status === 'canceled' ? 'canceled' : entry ? 'accepted' : attempt.status,
         error: attempt.error,
         persistenceError: attempt.persistenceError,
+        retryable: attempt.retryable,
       },
     });
   });
