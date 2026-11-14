@@ -23,6 +23,7 @@ const {
 } = require('./startup-services');
 const { resolveExternalNodeEntry } = require('./subprocess-entry');
 const { readClientHomes, resolveDefaultClientHomes } = require('./client-homes');
+const windowsUserPath = require('./windows-user-path');
 const {
   consumeMemoryFallbackConsent,
   discardMemoryFallbackConsent,
@@ -180,6 +181,7 @@ class ServiceManager {
   }
 
   async _startAll() {
+    const userPathReady = IS_WIN ? windowsUserPath.readWindowsPath(this.startupAbort.signal) : Promise.resolve(null);
     log(`=== ServiceManager.startAll() ===`);
     log(`projectRoot: ${this.root}`);
     const endpoints = [
@@ -242,6 +244,7 @@ class ServiceManager {
       throw new Error('Isolated desktop requires its own persistent Redis');
     log(`Redis phase complete. memoryMode=${this.memoryMode}`);
 
+    this.windowsPath = await userPathReady;
     this.startupAbort.signal.throwIfAborted();
     await this._startPluginNetworkBridge();
     this.onStatus('Starting API and Web...');
@@ -736,6 +739,8 @@ class ServiceManager {
       ...(resolveDesktopRuntime().instanceRoot ? { FRONTEND_URL: `http://localhost:${this.frontendPort}` } : {}),
       PROMPT_DEBUG: '1',
     };
+
+    if (IS_WIN) windowsUserPath.mergeWindowsPath(env, this.windowsPath);
 
     // macOS Electron apps launched from Finder/Dock inherit a minimal PATH
     // (/usr/bin:/bin:/usr/sbin:/sbin) that excludes common CLI install dirs.
