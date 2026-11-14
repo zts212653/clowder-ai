@@ -4,15 +4,26 @@ const HOUR = 60 * 60;
 // 6399=runtime sanctuary / 6401=user-redis persistent data.
 const PROTECTED_REDIS_PORTS = new Set([6379, 6099, 6397, 6398, 6399, 6401]);
 const CAT_CAFE_WORKTREE_PATH = /\/cat-cafe(?:-[^/\s]+)?(?:\/|$)/;
+// NTFS paths are case-insensitive, so a worktree named `Cat-Cafe` must match
+// the same rules as `cat-cafe` on Windows.
+const CAT_CAFE_WORKTREE_PATH_CI = /\/cat-cafe(?:-[^/\s]+)?(?:\/|$)/i;
+const GATE_PERMIT_SCRIPT = /\/scripts\/run-with-gate-resource-permit\.mjs(?=["']?(?:\s|$))/;
 
 function tokenizeCommand(command) {
-  return command.trim().split(/\s+/);
+  return command.match(/"[^"]*"|'[^']*'|\S+/g)?.map((token) => token.replace(/^(['"])(.*)\1$/, '$2')) ?? [];
 }
 
 function execBasename(token) {
   if (!token) return '';
-  const index = token.lastIndexOf('/');
-  return index >= 0 ? token.slice(index + 1) : token;
+  const index = Math.max(token.lastIndexOf('/'), token.lastIndexOf('\\'));
+  const basename = index >= 0 ? token.slice(index + 1) : token;
+  return basename.replace(/\.(?:exe|cmd|bat)$/i, '');
+}
+
+/** POSIX reparents orphans to PID 1; Windows keeps the dead parent PID, so the
+ * process snapshot supplies the orphan bit explicitly. */
+export function isOrphaned(processRow) {
+  return processRow.orphaned ?? processRow.ppid === 1;
 }
 
 function isNodeCommand(command) {
@@ -20,8 +31,8 @@ function isNodeCommand(command) {
   return execBasename(executable) === 'node';
 }
 
-export function isCatCafeCommand(command) {
-  return CAT_CAFE_WORKTREE_PATH.test(command);
+export function isCatCafeCommand(command, { caseInsensitive = process.platform === 'win32' } = {}) {
+  return (caseInsensitive ? CAT_CAFE_WORKTREE_PATH_CI : CAT_CAFE_WORKTREE_PATH).test(command);
 }
 
 function isPinchtabBinaryBasename(name) {
@@ -74,7 +85,7 @@ export const STALE_DEV_PROCESS_RULES = [
     id: 'cat-cafe-node-test-watch',
     minAgeSeconds: HOUR,
     match: (processRow) =>
-      processRow.ppid === 1 &&
+      isOrphaned(processRow) &&
       processRow.command.includes('--test-timeout=0') &&
       /test\/cli-spawn-[\w-]+\.test\.js/.test(processRow.command),
     reason: 'orphaned Node test/watch process',
@@ -83,7 +94,7 @@ export const STALE_DEV_PROCESS_RULES = [
     id: 'orphan-cat-cafe-node-test',
     minAgeSeconds: HOUR,
     match: (processRow) =>
-      processRow.ppid === 1 &&
+      isOrphaned(processRow) &&
       isNodeCommand(processRow.command) &&
       /(?:^|\s)--test(?:\s|=)/.test(processRow.command) &&
       isCatCafeCommand(processRow.command),
@@ -93,28 +104,28 @@ export const STALE_DEV_PROCESS_RULES = [
     id: 'orphan-cat-cafe-gate-permit',
     minAgeSeconds: HOUR,
     match: (processRow) =>
-      processRow.ppid === 1 &&
+      isOrphaned(processRow) &&
       isNodeCommand(processRow.command) &&
-      /\/scripts\/run-with-gate-resource-permit\.mjs(?:\s|$)/.test(processRow.command) &&
+      GATE_PERMIT_SCRIPT.test(processRow.command) &&
       isCatCafeCommand(processRow.command),
     reason: 'orphaned Clowder AI gate resource permit runner (reparented to init)',
   },
   {
     id: 'agent-browser-cli',
     minAgeSeconds: HOUR,
-    match: (processRow) => processRow.ppid === 1 && /\/agent-browser(?:-[\w]+)*$/.test(processRow.command.trim()),
+    match: (processRow) => isOrphaned(processRow) && /\/agent-browser(?:-[\w]+)*$/.test(processRow.command.trim()),
     reason: 'orphaned agent-browser CLI',
   },
   {
     id: 'catcafe-test-tmux',
     minAgeSeconds: HOUR,
-    match: (processRow) => processRow.ppid === 1 && /tmux\b.*\bcatcafe-test-agent-spawn-/.test(processRow.command),
+    match: (processRow) => isOrphaned(processRow) && /tmux\b.*\bcatcafe-test-agent-spawn-/.test(processRow.command),
     reason: 'orphaned Clowder AI test tmux session',
   },
   {
     id: 'orphan-alpha-start',
     minAgeSeconds: 12 * HOUR,
-    match: (processRow) => processRow.ppid === 1 && /\bpnpm\b.*\balpha:start\b/.test(processRow.command),
+    match: (processRow) => isOrphaned(processRow) && /\bpnpm\b.*\balpha:start\b/.test(processRow.command),
     reason: 'orphaned alpha:start process',
   },
   {
