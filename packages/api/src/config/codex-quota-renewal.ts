@@ -59,7 +59,13 @@ async function performRenewal(
     if (value === null) delete env[key];
     else env[key] = value;
   }
-  const child = spawn(command, args, { cwd, env, detached: process.platform !== 'win32', stdio: 'ignore' });
+  const child = spawn(command, args, {
+    cwd,
+    env,
+    detached: process.platform !== 'win32',
+    stdio: 'ignore',
+    windowsHide: true,
+  });
   let exited = false;
   let termination: CliTerminationController | undefined;
   const done = new Promise<void>((resolve) => {
