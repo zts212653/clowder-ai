@@ -3,7 +3,8 @@ import { existsSync, mkdirSync, readFileSync, realpathSync } from 'node:fs';
 import { isAbsolute, join, relative, sep } from 'node:path';
 import type { AgyProfileConfig, CatId, NativeSessionBinding } from '@cat-cafe/shared';
 import { inspectAgyLogin } from '../../../../../../config/agy-account.js';
-import { resolveCliCommand } from '../../../../../../utils/cli-resolve.js';
+import { buildCliNotFoundDiagnostic } from '../../../../../../utils/cli-diagnostics.js';
+import { formatCliNotFoundError, resolveCliCommand } from '../../../../../../utils/cli-resolve.js';
 import type { CliSpawnOptions } from '../../../../../../utils/cli-types.js';
 import { findMonorepoRoot } from '../../../../../../utils/monorepo-root.js';
 import type { AgentServiceOptions, PreparedProviderRequestV1 } from '../../../types.js';
@@ -11,7 +12,7 @@ import { preflightAgyProfile, resolveAgyProfile, resolveAgySpawnCwd } from '../a
 import { encodeAgyStreamJsonUserMessage } from '../agy-stream-json-parser.js';
 import { materializeAgyNativeAgentFile } from './agy-native-agent-file.js';
 import { materializeAgyNativeEffectGuard } from './agy-native-effect-guard.js';
-import { AgyNativeResumeMismatchError } from './agy-native-errors.js';
+import { AgyNativeResumeMismatchError, AgyNativeStartupError } from './agy-native-errors.js';
 import { prepareAgyNativeInput } from './agy-native-input.js';
 import { prepareAgyNativeKeychain } from './agy-native-keychain.js';
 import { validateAgyNativeAccountMcp } from './agy-native-mcp-config.js';
@@ -88,6 +89,11 @@ function matchesAgyNativeBindingL0(
   const suffix = agent.agentName.slice(prefix.length + 16);
   const expectedLegacyAgentName = `${prefix}${legacyFullHash.slice(0, 16)}${suffix}`;
   return prior.agentName === expectedLegacyAgentName;
+}
+
+/** Missing AGY binary: same structured diagnostic surface as other startup failures. */
+export function missingAgyNativeCliError(): AgyNativeStartupError {
+  return new AgyNativeStartupError(formatCliNotFoundError('agy'), buildCliNotFoundDiagnostic('agy'));
 }
 
 /** Prepare the ordinary native tool surface with canonical MCP identity and resume provenance. */
@@ -194,7 +200,7 @@ export async function prepareAgyNativeLaunch(input: AgyNativeLaunchInput): Promi
       ...(member ? { pluginServerName: member.server.name } : {}),
     });
     const command = input.command ?? resolveCliCommand('agy');
-    if (!command) throw new Error('AGY native CLI binary was not found');
+    if (!command) throw missingAgyNativeCliError();
     const profilePreflight = preflightAgyProfile(
       memberSettingsPath ? { ...profile, settingsPath: memberSettingsPath } : profile,
       {

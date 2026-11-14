@@ -98,6 +98,9 @@ const REASON_PALETTE: Record<CliErrorReasonCode, Palette> = {
   cli_stall_timeout: { ...PALETTE_TRANSIENT, Icon: HourglassIcon },
   // Tier 3 — system / environment
   spawn_failed: { ...PALETTE_SYSTEM, Icon: TerminalIcon },
+  // #1463 S3: missing local CLI is environment state, not a spawn failure; same system
+  // tier and terminal icon keep the folded panel's at-a-glance semantics.
+  cli_not_found: { ...PALETTE_SYSTEM, Icon: TerminalIcon },
   missing_rollout: { ...PALETTE_SYSTEM, Icon: FileXIcon },
   // clowder-ai#1038: opencode resumed a stale --session (session DB rebuilt/cleared while
   // Redis held the old cliSessionId). Same system tier as missing_rollout — session-side

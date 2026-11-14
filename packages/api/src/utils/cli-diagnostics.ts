@@ -14,6 +14,7 @@
 
 import type { CliDiagnostics, CliErrorReasonCode } from '@cat-cafe/shared';
 import { CLASSIFIER_PATTERNS } from './cli-error-patterns.js';
+import { cliInstallHint } from './cli-resolve.js';
 import { sanitizeCliStderr } from './sanitize-cli-stderr.js';
 
 // F212 Phase B: CliDiagnostics + CliErrorReasonCode hoisted to @cat-cafe/shared so the web
@@ -101,6 +102,10 @@ const REASON_TEXT: Record<CliErrorReasonCode, { summary: string; hint: string }>
   spawn_failed: {
     summary: 'CLI 进程无法启动',
     hint: '检查 CLI 是否已安装（`which codex` / `which claude` 等）和文件权限。',
+  },
+  cli_not_found: {
+    summary: 'CLI 未找到',
+    hint: '请先安装对应的 CLI，再重试。',
   },
   context_window_exceeded: {
     summary: '对话上下文超长',
@@ -681,5 +686,26 @@ export function buildSilentCompletionDiagnostic(input: {
           ),
     // Self-built structured payload — safe like Phase D's 'cc_structured' channel
     excerptSource: 'cc_structured',
+  };
+}
+
+/**
+ * Structured diagnostic for a provider CLI that is not installed.
+ *
+ * A missing binary is detected before any spawn, so this payload deliberately carries
+ * no exit code and no `safeExcerpt`: inventing either would claim evidence that does
+ * not exist. The install command is the actionable next step; the reasonCode is
+ * excluded from F222 auto-issue triggering (user-environment state, not our defect).
+ */
+export function buildCliNotFoundDiagnostic(
+  command: string,
+  platform: NodeJS.Platform = process.platform,
+): CliDiagnostics {
+  const installHint = cliInstallHint(command, platform);
+  return {
+    reasonCode: 'cli_not_found',
+    publicSummary: `${command} CLI 未找到`,
+    publicHint: `请先运行 ${installHint} 安装，再重试。`,
+    debugRef: { command, signal: null },
   };
 }
