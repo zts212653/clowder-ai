@@ -943,26 +943,51 @@ export function ChatInput({
     return () => document.removeEventListener('mousedown', handler);
   }, [activeMenu, closeMenus]);
 
+  const attachmentFeedbackClassName = `pt-2 text-xs ${shellV2 ? '' : 'px-4'}`;
   const composerDraftExtras = (
-    <ChatComposerDraftExtras
-      threadId={effectiveThreadId}
-      files={images}
-      contextAttachments={shownContextAttachments}
-      replyToMessage={replyToMessage}
-      cats={cats}
-      whisperMode={whisperMode}
-      whisperCats={whisperCats}
-      whisperTargets={whisperTargets}
-      onToggleWhisperTarget={toggleWhisperTarget}
-      onRemoveFile={handleRemoveImage}
-      onRemoveContext={(id) =>
-        setContextAttachments((previous) => previous.filter((attachment) => attachment.id !== id))
-      }
-      onClearReply={clearReplyTo}
-    />
+    <>
+      {imageLifecycleStatus === 'preparing' && (
+        <div className={`${attachmentFeedbackClassName} text-cafe-secondary`} role="status">
+          附件处理中，完成后可发送
+        </div>
+      )}
+      {imageLifecycleStatus === 'uploading' && (
+        <div className={`${attachmentFeedbackClassName} text-[var(--semantic-info)]`} role="status">
+          附件上传中，请稍候...
+        </div>
+      )}
+      {imageLifecycleStatus === 'failed' && uploadError && (
+        <div className={`${attachmentFeedbackClassName} text-conn-red-text`} role="alert">
+          附件发送失败：{uploadError}
+        </div>
+      )}
+      <ChatComposerDraftExtras
+        threadId={effectiveThreadId}
+        files={images}
+        contextAttachments={shownContextAttachments}
+        replyToMessage={replyToMessage}
+        cats={cats}
+        whisperMode={whisperMode}
+        whisperCats={whisperCats}
+        whisperTargets={whisperTargets}
+        onToggleWhisperTarget={toggleWhisperTarget}
+        onRemoveFile={handleRemoveImage}
+        onRemoveContext={(id) =>
+          setContextAttachments((previous) => previous.filter((attachment) => attachment.id !== id))
+        }
+        onClearReply={clearReplyTo}
+      />
+    </>
   );
+  // Batch feedback stays visible after sending optimistically clears the thumbnails.
   const hasComposerDraftExtras =
-    whisperMode || images.length > 0 || shownContextAttachments.length > 0 || replyToMessage !== null;
+    whisperMode ||
+    images.length > 0 ||
+    shownContextAttachments.length > 0 ||
+    replyToMessage !== null ||
+    imageLifecycleStatus === 'preparing' ||
+    imageLifecycleStatus === 'uploading' ||
+    (imageLifecycleStatus === 'failed' && Boolean(uploadError));
   const hasComposerHeader = shellV2 && composerHeader !== undefined && composerHeader !== null;
   const headerRowCount: 0 | 1 = hasComposerHeader ? 1 : 0;
   const draftExtrasRowCount: 0 | 1 = hasComposerDraftExtras ? 1 : 0;
@@ -1016,22 +1041,6 @@ export function ChatInput({
           activeCatIds={activeCatIds}
           onToggle={toggleWhisperTarget}
         />
-      )}
-
-      {imageLifecycleStatus === 'preparing' && (
-        <div className="px-4 pt-2 text-xs text-cafe-secondary" role="status">
-          附件处理中，完成后可发送
-        </div>
-      )}
-      {imageLifecycleStatus === 'uploading' && (
-        <div className="px-4 pt-2 text-xs text-[var(--semantic-info)]" role="status">
-          附件上传中，请稍候...
-        </div>
-      )}
-      {imageLifecycleStatus === 'failed' && uploadError && (
-        <div className="px-4 pt-2 text-xs text-conn-red-text" role="alert">
-          附件发送失败：{uploadError}
-        </div>
       )}
 
       {shellV2 && (
