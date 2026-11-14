@@ -12,13 +12,17 @@ function readWindowsPath(signal) {
     execFile(
       path.join(process.env.SystemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'),
       ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', command],
-      { encoding: 'utf8', timeout: 3000, windowsHide: true, signal },
+      { encoding: 'utf8', timeout: 5000, windowsHide: true, signal },
       (error, stdout) => {
         if (error || !stdout.trim()) return resolve(null);
         // Validate the subprocess response once at this boundary.
         try {
           const paths = JSON.parse(Buffer.from(stdout.trim(), 'base64').toString('utf8'));
-          resolve(typeof paths?.machinePath === 'string' && typeof paths?.userPath === 'string' ? paths : null);
+          resolve(
+            typeof paths?.machinePath === 'string' && paths.machinePath.trim() && typeof paths?.userPath === 'string'
+              ? paths
+              : null,
+          );
         } catch {
           resolve(null);
         }

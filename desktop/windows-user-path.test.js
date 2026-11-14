@@ -42,7 +42,8 @@ childProcess.spawn = (executable, args, options) => {
   return realChildren ? originalSpawn(executable, args, options) : new EventEmitter();
 };
 const ServiceManager = require('./service-manager');
-const { mergeWindowsPath } = require('./windows-user-path');
+const windowsUserPath = require('./windows-user-path');
+const { mergeWindowsPath } = windowsUserPath;
 
 after(() => {
   childProcess.spawn = originalSpawn;
@@ -95,7 +96,7 @@ test('reads registered PATH once alongside Redis preparation and before API/Web 
     assert.equal(redisStarted, true, 'the registry read must not delay Redis preparation');
     assert.equal(children.length, 0, 'API and Web must wait for the recovered PATH');
     assert.equal(queries[0].options.windowsHide, true);
-    assert.equal(queries[0].options.timeout, 3000);
+    assert.equal(queries[0].options.timeout, 5000);
     assert.equal(path.isAbsolute(queries[0].executable), true);
     assert.ok(queries[0].args.includes('-NoProfile'));
     assert.ok(queries[0].args.includes('-NonInteractive'));
@@ -122,6 +123,21 @@ test('cancels the PATH reader and starts no API/Web children after quitting', wi
   assert.equal(children.length, 0);
 });
 
+test('continues startup if the PATH reader rejects, including failed preflight', windowsOnly, async () => {
+  const originalReader = windowsUserPath.readWindowsPath;
+  windowsUserPath.readWindowsPath = () => Promise.reject(new Error('reader unavailable'));
+  try {
+    const value = manager({ stdout: '' });
+    await value.startAll();
+    assert.equal(children.length, 2);
+    const occupied = manager({ stdout: '' });
+    occupied._isPortOpen = async () => true;
+    await assert.rejects(occupied.startAll(), { code: 'DESKTOP_PORT_CONFLICT' });
+  } finally {
+    windowsUserPath.readWindowsPath = originalReader;
+  }
+});
+
 test('restores machine then user PATH order when a user CLI is missing', windowsOnly, async () => {
   const value = manager({ stdout: '' });
   const machinePath = 'C:\\Windows\\System32;C:\\MachineTools';
@@ -146,6 +162,8 @@ test('restores machine then user PATH order when a user CLI is missing', windows
   { error: null, stdout: '' },
   { error: null, stdout: 'not-json' },
   { error: null, stdout: Buffer.from('{"machinePath":5,"userPath":[]}').toString('base64') },
+  { error: null, stdout: Buffer.from('{"machinePath":"","userPath":"C:\\\\User"}').toString('base64') },
+  { error: null, stdout: Buffer.from('{"machinePath":"  ","userPath":"C:\\\\User"}').toString('base64') },
 ].forEach((failure) => {
   test(
     `starts with the inherited PATH when the registry read returns ${failure.error?.message || 'empty'}`,
@@ -162,6 +180,24 @@ test('restores machine then user PATH order when a user CLI is missing', windows
       });
     },
   );
+});
+
+test('the real PowerShell reader returns machine and user PATH strings', windowsOnly, async () => {
+  const outputFile = path.join(root, 'registered-paths.json');
+  const executable = require.resolve('./windows-user-path');
+  const child = originalSpawn(
+    process.execPath,
+    [
+      '-e',
+      `require(${JSON.stringify(executable)}).readWindowsPath().then(paths=>require('node:fs').writeFileSync(${JSON.stringify(outputFile)},JSON.stringify(paths)));`,
+    ],
+    { windowsHide: true, stdio: 'ignore' },
+  );
+  const [code] = await once(child, 'exit');
+  assert.equal(code, 0);
+  const paths = JSON.parse(fs.readFileSync(outputFile, 'utf8'));
+  assert.equal(typeof paths.machinePath, 'string');
+  assert.equal(typeof paths.userPath, 'string');
 });
 
 test('keeps a complete parent PATH byte-for-byte, including its own priority', () => {

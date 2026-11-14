@@ -181,7 +181,9 @@ class ServiceManager {
   }
 
   async _startAll() {
-    const userPathReady = IS_WIN ? windowsUserPath.readWindowsPath(this.startupAbort.signal) : Promise.resolve(null);
+    const userPathReady = IS_WIN
+      ? windowsUserPath.readWindowsPath(this.startupAbort.signal).catch(() => null)
+      : Promise.resolve(null);
     log(`=== ServiceManager.startAll() ===`);
     log(`projectRoot: ${this.root}`);
     const endpoints = [
@@ -246,6 +248,7 @@ class ServiceManager {
 
     this.windowsPath = await userPathReady;
     this.startupAbort.signal.throwIfAborted();
+    if (IS_WIN && !this.windowsPath) log('Windows PATH recovery unavailable; keeping the inherited PATH');
     await this._startPluginNetworkBridge();
     this.onStatus('Starting API and Web...');
     await prepareStartupServices({
