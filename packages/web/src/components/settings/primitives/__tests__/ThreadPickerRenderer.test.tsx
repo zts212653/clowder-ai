@@ -81,7 +81,7 @@ const attention = {
   recentGroupIds: [],
 };
 
-function installFixture(rows: SidebarSnapshotRow[], selected: string[], excluded: string[] = []) {
+function installFixture(rows: SidebarSnapshotRow[], selected: string[], excluded: string[] = [], summary?: string) {
   useSidebarProjectionStore.setState({
     rows,
     pendingThreadCommands: {},
@@ -97,14 +97,18 @@ function installFixture(rows: SidebarSnapshotRow[], selected: string[], excluded
     calls.push({ url: path, ...(body === undefined ? {} : { body }) });
     if (path === '/api/config/thread-attention') return jsonResponse(attention);
     if (path === '/api/plugins/fixture/actions/threads/list') {
-      return jsonResponse({ ok: true, render: 'thread-picker', data: { selected, excluded } });
+      return jsonResponse({
+        ok: true,
+        render: 'thread-picker',
+        data: { selected, excluded, ...(summary ? { summary } : {}) },
+      });
     }
     if (path === '/api/plugins/fixture/actions/threads/choose') {
       const parsed = JSON.parse(body ?? '{}') as { selection: string; ids: string[] };
       return jsonResponse({
         ok: true,
         render: 'thread-picker',
-        data: { selected: parsed.ids, excluded },
+        data: { selected: parsed.ids, excluded, ...(summary ? { summary } : {}) },
       });
     }
     return jsonResponse({ error: `unexpected request ${path}` }, 500);
@@ -218,6 +222,17 @@ describe('generic thread-picker renderer', () => {
     expect(new Set(body.ids)).toEqual(new Set(['t1', 't2']));
     expect(container.querySelector('[data-testid="thread-picker-dialog"]')).toBeNull();
     expect(byTestId(container, 'thread-picker-summary').textContent).toContain('已选 2 个');
+  });
+
+  it('shows the optional plugin summary below the manual selected count', async () => {
+    installFixture([row('t1'), row('t2')], ['t2'], [], '手动 15 个 · 自动置顶 10 个 · 合计 17 个');
+    await act(async () => root.render(<ActionRenderer target={target} operation={operation} />));
+    await flush();
+
+    expect(byTestId(container, 'thread-picker-summary').textContent).toContain('已选 1 个');
+    expect(byTestId(container, 'thread-picker-plugin-summary').textContent).toContain(
+      '手动 15 个 · 自动置顶 10 个 · 合计 17 个',
+    );
   });
 
   it('keeps checked rows that search hides in the saved draft', async () => {

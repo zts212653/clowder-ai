@@ -1,5 +1,5 @@
 import { validateNewProjectPath } from '../../../utils/persistent-project-path.js';
-import type { IThreadStore, Thread } from '../../cats/services/stores/ports/ThreadStore.js';
+import { DEFAULT_THREAD_ID, type IThreadStore, type Thread } from '../../cats/services/stores/ports/ThreadStore.js';
 import { ExternalPluginRuntimeError } from '../external-runtime/types.js';
 import {
   boundedLimit,
@@ -30,6 +30,8 @@ export interface PluginThreadListOptions {
   /** Exact owner-visible candidates. This mode is complete for the supplied ids
    * and must not be combined with directory pagination. */
   readonly threadIds?: readonly string[];
+  /** Owner-visible pinned threads only; page mode only. */
+  readonly pinnedOnly?: boolean;
 }
 
 export interface PluginThreadHost {
@@ -123,18 +125,27 @@ function listCursor(value: PluginThreadListCursor | undefined): PluginThreadList
 
 type ThreadListRequest =
   | { readonly kind: 'candidates'; readonly threadIds: readonly string[] }
-  | { readonly kind: 'page'; readonly limit: number; readonly before?: PluginThreadListCursor };
+  | {
+      readonly kind: 'page';
+      readonly limit: number;
+      readonly before?: PluginThreadListCursor;
+      readonly pinnedOnly: boolean;
+    };
 
 function threadListRequest(value: unknown): ThreadListRequest {
   if (!value || typeof value !== 'object' || Array.isArray(value))
     throw new TypeError('list options must be an object');
-  if (Object.keys(value).some((key) => key !== 'limit' && key !== 'before' && key !== 'threadIds'))
-    throw new TypeError('list options must contain limit, before or threadIds only');
+  if (
+    Object.keys(value).some((key) => key !== 'limit' && key !== 'before' && key !== 'threadIds' && key !== 'pinnedOnly')
+  )
+    throw new TypeError('list options must contain limit, before, threadIds or pinnedOnly only');
   const options = value as PluginThreadListOptions;
+  if (options.pinnedOnly !== undefined && typeof options.pinnedOnly !== 'boolean')
+    throw new TypeError('pinnedOnly must be a boolean');
   const threadIds = candidateThreadIds(options.threadIds);
   if (threadIds !== undefined) {
-    if (options.limit !== undefined || options.before !== undefined)
-      throw new TypeError('threadIds cannot be combined with limit or before');
+    if (options.limit !== undefined || options.before !== undefined || options.pinnedOnly !== undefined)
+      throw new TypeError('threadIds cannot be combined with limit, before or pinnedOnly');
     return { kind: 'candidates', threadIds };
   }
   const before = listCursor(options.before);
@@ -142,6 +153,7 @@ function threadListRequest(value: unknown): ThreadListRequest {
     kind: 'page',
     limit: boundedLimit(options.limit ?? 50, 50),
     ...(before ? { before } : {}),
+    pinnedOnly: options.pinnedOnly === true,
   };
 }
 
@@ -187,7 +199,19 @@ export function createPluginThreadHost(input: PluginThreadHostDeps): PluginThrea
       for (const thread of [...visible].sort(compareThreadPosition)) {
         if (accessible.length === request.limit) break;
         if (request.before && compareThreadPosition(thread, request.before) <= 0) continue;
-        if (!thread.deletedAt) accessible.push(thread);
+        if (request.pinnedOnly) {
+          if (
+            thread.id === DEFAULT_THREAD_ID ||
+            thread.deletedAt ||
+            thread.systemKind ||
+            thread.connectorHubState
+          )
+            continue;
+          if (thread.pinned !== true) continue;
+        } else if (thread.deletedAt) {
+          continue;
+        }
+        accessible.push(thread);
       }
       return Promise.all(accessible.map(summary));
     },

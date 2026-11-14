@@ -22,15 +22,24 @@ import { buildThreadPickerRows } from './thread-picker-projection';
 interface PickerData {
   readonly selected: string[];
   readonly excluded: string[];
+  readonly summary?: string;
 }
 
 function pickerDataFrom(result: ActionApiResult | undefined): PickerData | undefined {
   if (result?.render !== 'thread-picker' || result.data === null || typeof result.data !== 'object') return undefined;
-  const data = result.data as { selected?: unknown; excluded?: unknown };
+  const data = result.data as { selected?: unknown; excluded?: unknown; summary?: unknown };
   const valid = (value: unknown): value is string[] =>
     Array.isArray(value) && value.every((id) => typeof id === 'string');
   if (!valid(data.selected) || !valid(data.excluded)) return undefined;
-  return { selected: [...new Set(data.selected)], excluded: [...new Set(data.excluded)] };
+  const summary =
+    typeof data.summary === 'string' && data.summary.trim().length > 0 && data.summary.trim().length <= 200
+      ? data.summary.trim()
+      : undefined;
+  return {
+    selected: [...new Set(data.selected)],
+    excluded: [...new Set(data.excluded)],
+    ...(summary ? { summary } : {}),
+  };
 }
 
 function uniqueLabels(ids: readonly string[], names: ReadonlyMap<string, string>): string[] {
@@ -66,6 +75,7 @@ export function ThreadPickerRenderer({
   const labelNames = useMemo(() => new Map(labels.map((label) => [label.id, label.name])), [labels]);
   const [selected, setSelected] = useState<ReadonlySet<string>>(() => new Set());
   const [excluded, setExcluded] = useState<ReadonlySet<string>>(() => new Set());
+  const [summary, setSummary] = useState<string | null>(null);
   const [directoryState, setDirectoryState] = useState<'loading' | 'ready' | 'error'>(() => {
     const state = useSidebarProjectionStore.getState();
     return state.rows.length > 0 && state.hasCanonicalSnapshot ? 'ready' : 'loading';
@@ -156,6 +166,7 @@ export function ThreadPickerRenderer({
       const nextExcluded = new Set(data.excluded);
       setSelected(new Set(data.selected));
       setExcluded(nextExcluded);
+      setSummary(data.summary ?? null);
       setDraft((current) => new Set([...current].filter((id) => !nextExcluded.has(id))));
       setLoaded(true);
     },
@@ -288,12 +299,25 @@ export function ThreadPickerRenderer({
     const data = pickerDataFrom(result);
     setSelected(new Set(data?.selected ?? draft));
     setExcluded(new Set(data?.excluded ?? excluded));
+    setSummary(data?.summary ?? summary);
     setLoaded(true);
     setSaving(false);
     setOpen(false);
     setQuery('');
     onStatusChange?.();
-  }, [choose, confirmAction, draft, excluded, onStatusChange, open, operation.name, saving, send, stableTarget]);
+  }, [
+    choose,
+    confirmAction,
+    draft,
+    excluded,
+    onStatusChange,
+    open,
+    operation.name,
+    saving,
+    send,
+    stableTarget,
+    summary,
+  ]);
 
   const displayDetail = (row: (typeof selectableRows)[number]) => {
     const parts = [projectDisplayName(row.projectPath), ...uniqueLabels(row.labels, labelNames)];
@@ -345,6 +369,11 @@ export function ThreadPickerRenderer({
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="min-w-0">
             <p className="text-sm font-medium">{summaryText}</p>
+            {summary ? (
+              <p className="text-xs text-cafe-secondary" data-testid="thread-picker-plugin-summary">
+                {summary}
+              </p>
+            ) : null}
             <p className="text-xs text-cafe-muted">分组、置顶与顺序与左侧会话列表一致；勾选不会移动会话。</p>
           </div>
           {directoryState === 'loading' ? (
