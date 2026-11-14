@@ -15,6 +15,7 @@ export const policy = (overrides = {}) => ({
 
 export async function fixture(t, options = {}) {
   const root = await mkdtemp(join(tmpdir(), 'plugin-native-launch-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
   const packageRoot = join(root, 'package');
   await mkdir(join(packageRoot, 'dist'), { recursive: true });
   await writeFile(join(packageRoot, 'dist/mcp.js'), 'process.exit(0);\n');
@@ -96,10 +97,7 @@ export async function fixture(t, options = {}) {
     ...(options.factory ? { resolveMcpFactory: async () => options.factory } : {}),
     ...options.carrier,
   });
-  t.after(async () => {
-    await router.stopAll('test_cleanup');
-    await rm(root, { recursive: true, force: true, maxRetries: 3 });
-  });
+  t.after(() => router.stopAll('test_cleanup'));
   return {
     router,
     instance,

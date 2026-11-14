@@ -12,7 +12,7 @@ function deferred() {
   return { promise, resolve };
 }
 
-function fixture(runtime) {
+function fixture(runtime, observe = () => {}) {
   const instance = {
     pluginInstanceId: 'pi_lifecycle',
     pluginId: 'fixture.lifecycle',
@@ -28,6 +28,7 @@ function fixture(runtime) {
       { pluginId: instance.pluginId, packageDigest: instance.packageDigest, manifest: { pluginId: instance.pluginId } },
     ],
   };
+  observe(instance);
   return new BundledPluginRuntimeCarrier({
     inventory: snapshotInventoryFixture({
       snapshot: async () => structuredClone(state),
@@ -80,6 +81,54 @@ test('unexpected runtime completion revokes publication before waiting for clean
     cleanup.resolve();
     await started.closed;
   }
+});
+
+test('a rejected publication cleanup still stops the crashed runtime and permits repair', async () => {
+  const exit = deferred();
+  let stops = 0;
+  const carrier = fixture({
+    completion: () => (stops === 0 ? exit.promise : undefined),
+    stop: async () => {
+      stops++;
+    },
+  });
+  const started = await carrier.start('pi_lifecycle', undefined, async () => {
+    throw new Error('provider release failed');
+  });
+  exit.resolve(new Error('execution failed'));
+  await new Promise(setImmediate);
+  try {
+    assert.equal(stops, 1, 'notification failure must not skip runtime cleanup');
+    await started.closed;
+    const repaired = await carrier.start('pi_lifecycle');
+    await carrier.stop('pi_lifecycle');
+    await repaired.closed;
+  } finally {
+    await carrier.stop('pi_lifecycle');
+  }
+});
+
+test('execution exit during contribution admission records failure without a later healthy state', async () => {
+  const exit = deferred(),
+    admission = deferred(),
+    entered = deferred();
+  let instance;
+  const carrier = fixture({ completion: () => exit.promise, stop: async () => {} }, (record) => {
+    instance = record;
+  });
+  const starting = carrier.start('pi_lifecycle', async () => {
+    entered.resolve();
+    await admission.promise;
+  });
+  const rejected = assert.rejects(starting, /cancelled/);
+  await entered.promise;
+  exit.resolve(new Error('execution failed during admission'));
+  await new Promise(setImmediate);
+  admission.resolve();
+  await rejected;
+  assert.equal(instance.runtimeState, 'crashed');
+  assert.equal(instance.lastRuntimeError.code, 'UNEXPECTED_RUNTIME_FAILURE');
+  await carrier.stop('pi_lifecycle');
 });
 
 test('cleanup failure retains closed handle until successful stop retry', async () => {

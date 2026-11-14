@@ -680,10 +680,13 @@ export class AcpAgentService implements AgentService {
     // Only the original admitted activations may remove their own selected servers.
     // This never reads new settings, adds a server or follows a repaired activation.
     const removeUnavailablePluginMcp = () => {
-      if (options?.toolExecutionPolicy?.mode === 'plugin_native') return undefined;
+      const scoped = options?.toolExecutionPolicy?.mode === 'plugin_native';
+      const requiredServer = scoped ? options.pluginNativeLaunch?.server.name : undefined;
+      if (scoped && !requiredServer) return undefined;
       const unavailable = pluginMcpCurrentness?.filter(
         (entry) =>
           !entry.isCurrent() &&
+          entry.capabilityId.replaceAll(':', '__') !== requiredServer &&
           invokeServers.some(
             (server) =>
               'hostSource' in server &&

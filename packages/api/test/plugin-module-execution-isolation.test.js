@@ -196,6 +196,12 @@ test(
     const refused = await router.attemptInvoke('instance', 'inspect', {});
     assert.equal(refused.status, 'failed');
     assert.equal(refused.effect, 'not_started');
+    const repaired = await router.start('instance');
+    assert.equal((await router.invoke('instance', 'inspect', {})).isMainThread, false);
+    assert.equal(view.entries[0].isCurrent(), false, 'repair must not revive the old captured activation');
+    assert.equal((await router.resolveMemberMcpView()).entries[0].isCurrent(), true);
+    await router.stop('instance', 'test_cleanup');
+    await repaired.closed;
   },
 );
 

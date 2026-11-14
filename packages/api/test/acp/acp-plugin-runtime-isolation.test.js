@@ -16,6 +16,8 @@ for (const failureAt of [
   'foreign',
   'override',
   'wrong-token',
+  'policy-optional',
+  'policy-target',
 ]) {
   test(`optional plugin crash at ${failureAt} preserves the ACP prompt boundary and initialization budget`, async () => {
     let current = true;
@@ -28,14 +30,20 @@ for (const failureAt of [
       ...(failureAt === 'foreign' ? {} : { hostSource: 'plugin' }),
     };
     const core = { name: 'host-core', command: process.execPath, args: ['--host-core'], env: [] };
-    const healthy = { ...broken, name: 'plugin__fixture__healthy', args: ['--healthy-plugin'] };
+    const healthyCapabilityId = 'plugin:healthy-fixture:healthy';
+    const healthy = { ...broken, name: healthyCapabilityId.replaceAll(':', '__'), args: ['--healthy-plugin'] };
     const attempts = [];
     const prompts = [];
     const client = {
       async newSession(_cwd, servers) {
         attempts.push(servers.map(({ name }) => name));
         if (failureAt === 'unrelated') throw new Error('provider initialization failed');
-        if (['new', 'required', 'foreign', 'override', 'wrong-token'].includes(failureAt) && attempts.length === 1) {
+        if (
+          ['new', 'required', 'foreign', 'override', 'wrong-token', 'policy-optional', 'policy-target'].includes(
+            failureAt,
+          ) &&
+          attempts.length === 1
+        ) {
           current = false;
           throw new Error('ACP error -32603: Internal error');
         }
@@ -77,7 +85,7 @@ for (const failureAt of [
     });
     const entry = (id, server, isCurrent) => ({
       capabilityId: id,
-      pluginId: 'fixture',
+      pluginId: id === capabilityId ? 'fixture' : 'healthy-fixture',
       isCurrent,
       server: {
         command: server.command,
@@ -89,21 +97,45 @@ for (const failureAt of [
     if (failureAt === 'override') original.server.args = ['--registered-original'];
     if (failureAt === 'wrong-token') original.server.env.CLOWDER_PLUGIN_ACTION_TOKEN = 'other-activation-token';
     const frozen = await withInvocationPluginMcpView(() => service.captureInvocationOptions({}), {
-      entries: [original, entry('plugin:fixture:healthy', healthy, () => true)],
+      entries: [original, entry(healthyCapabilityId, healthy, () => true)],
     });
+    const required = failureAt === 'policy-optional' ? healthy : broken;
     const messages = [];
     for await (const message of service.invoke('read the Host', {
       ...frozen,
       ...(['load', 'load-fresh-fails'].includes(failureAt) ? { sessionId: 'old-session' } : {}),
-      ...(failureAt === 'required'
-        ? { toolExecutionPolicy: { mode: 'plugin_native', pluginInstanceId: 'instance', contributionId: 'broken' } }
+      ...(['required', 'policy-optional', 'policy-target'].includes(failureAt)
+        ? {
+            toolExecutionPolicy: {
+              mode: 'plugin_native',
+              pluginInstanceId: failureAt === 'policy-optional' ? 'healthy-instance' : 'instance',
+              contributionId: failureAt === 'policy-optional' ? 'healthy' : 'broken',
+            },
+          }
+        : {}),
+      ...(['policy-optional', 'policy-target'].includes(failureAt)
+        ? {
+            pluginNativeLaunch: {
+              server: {
+                ...required,
+                env: Object.fromEntries(required.env.map(({ name, value }) => [name, value])),
+                workingDirectory: process.cwd(),
+                transport: 'stdio',
+              },
+              sandbox: { kind: 'scoped-member', workspaceRoot: process.cwd() },
+              assertCurrent: async () => {},
+            },
+          }
         : {}),
     }))
       messages.push(message);
 
-    const succeeds = ['lease', 'new', 'load'].includes(failureAt);
+    const succeeds = ['lease', 'new', 'load', 'policy-optional'].includes(failureAt);
     assert.equal(prompts.length, succeeds || failureAt === 'prompt' ? 1 : 0);
-    assert.equal(attempts.length, ['new', 'load', 'second-init', 'load-fresh-fails'].includes(failureAt) ? 2 : 1);
+    assert.equal(
+      attempts.length,
+      ['new', 'load', 'second-init', 'load-fresh-fails', 'policy-optional'].includes(failureAt) ? 2 : 1,
+    );
     if (succeeds) {
       assert.deepEqual(attempts.at(-1), [core.name, healthy.name]);
       assert.ok(messages.some((message) => message.content === 'host works'));
