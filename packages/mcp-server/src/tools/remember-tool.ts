@@ -90,6 +90,7 @@ const rememberItemInputSchema = z.discriminatedUnion('target', [
       .strict()
       .describe(
         'Workspace entity for the registry: a verified durable name/handle/alias mapping with provenance, a registration nudge, or an explicit operator request. ' +
+          'For useful shared history, pair an exact provenance sourcePath or threadId/messageId with note explaining what the reader can learn and when it applies. These pointers and purposes are shown for approval; source access is checked on read. ' +
           'Not for an unverified bare name, bulk extraction, or owner-private facts about a person (use person). GOTCHA: correcting a pending/private F276 card is not an Entity mutation; use person with replacesProposalId. ' +
           'stance rejected/critique_target mark terms the registry should not match or entities under critique; visibilityScope is workspace.',
       ),

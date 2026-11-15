@@ -660,14 +660,7 @@ export async function* routeSerial(
   // P1-2 R2 fix: Use shared singletons from entity-nudge-state.ts (cross-strategy state).
   const cueOccurredAt = Date.now();
   const memoryCueOpportunitySeeds = [...(options.memoryCueOpportunitySeeds ?? [])];
-  const memoryCueLegacyFallbacks: Array<{
-    seed: MemoryCueOpportunitySeed;
-    promptContext: string;
-  }> = [];
   let entityNudgePresentation:
-    | { service: EntityNudgeService; candidates: EntityNudgeCandidateBatch; sourceMessageId: string }
-    | undefined;
-  let entityNudgeCuePresentation:
     | {
         service: EntityNudgeService;
         candidates: EntityNudgeCandidateBatch;
@@ -696,43 +689,16 @@ export async function* routeSerial(
             })
           : [];
         memoryCueOpportunitySeeds.push(...subjectCueSeeds);
-        const subjectCueEntityIds = new Set(subjectCueSeeds.map((seed) => seed.payload.entityId));
-        const subjectCueCandidates: EntityNudgeCandidateBatch = {
-          ...nudgeResult,
-          nudges: nudgeResult.nudges.filter((nudge) => nudge.entityId && subjectCueEntityIds.has(nudge.entityId)),
-        };
-        if (currentUserMessageId && subjectCueCandidates.nudges.length > 0) {
-          entityNudgeCuePresentation = {
+        // One F260 consumer admission owns the combined cap and delivery receipt.
+        // Private person cues remain a separate projection of these admitted subjects.
+        if (currentUserMessageId && nudgeResult.nudges.length > 0) {
+          entityNudgePresentation = {
             service: nudgeService,
-            candidates: subjectCueCandidates,
+            candidates: nudgeResult,
             sourceMessageId: currentUserMessageId,
             seeds: subjectCueSeeds,
           };
-        }
-        for (const seed of subjectCueSeeds) {
-          const nudge = nudgeResult.nudges.find(
-            (candidate) =>
-              candidate.entityId === seed.payload.entityId && candidate.matchedAlias === seed.payload.matchedAlias,
-          );
-          if (nudge) {
-            memoryCueLegacyFallbacks.push({
-              seed,
-              promptContext: EntityNudgeService.formatForPrompt({ ...nudgeResult, nudges: [nudge] }),
-            });
-          }
-        }
-        const cueEntityIds = new Set(subjectCueSeeds.map((seed) => seed.payload.entityId));
-        const presentationCandidates: EntityNudgeCandidateBatch = {
-          ...nudgeResult,
-          nudges: nudgeResult.nudges.filter((nudge) => !nudge.entityId || !cueEntityIds.has(nudge.entityId)),
-        };
-        if (currentUserMessageId && presentationCandidates.nudges.length > 0) {
-          entityNudgePresentation = {
-            service: nudgeService,
-            candidates: presentationCandidates,
-            sourceMessageId: currentUserMessageId,
-          };
-          entityNudgePromptTokenEstimate = estimateTokens(EntityNudgeService.formatForPrompt(presentationCandidates));
+          entityNudgePromptTokenEstimate = estimateTokens(EntityNudgeService.formatForPrompt(nudgeResult));
         }
       }
     } catch (nudgeErr) {
@@ -2043,9 +2009,7 @@ export async function* routeSerial(
         continuityCapsule,
         ...(memoryCueOpportunitySeeds.length > 0 ? { memoryCueOpportunitySeeds } : {}),
         ...(entityNudgePresentation ? { entityNudgePresentation } : {}),
-        ...(entityNudgeCuePresentation ? { entityNudgeCuePresentation } : {}),
         ...(options.asrPersonMemoryScenes?.length ? { asrPersonMemoryScenes: options.asrPersonMemoryScenes } : {}),
-        ...(memoryCueLegacyFallbacks.length > 0 ? { memoryCueLegacyFallbacks } : {}),
         ...(options.toolExecutionPolicy ? { toolExecutionPolicy: options.toolExecutionPolicy } : {}),
         executionKind: initialExecutionKind,
         ...(options.beforeOutputCommit ? { outputFenced: true } : {}),

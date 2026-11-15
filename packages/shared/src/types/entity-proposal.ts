@@ -18,6 +18,7 @@
  */
 
 import type { ApprovalOriginRef, ApprovalPublication } from './approval-hub.js';
+import type { EntityProvenance } from './entity-provenance.js';
 
 /**
  * Entity types — mirrors the api-side EntityType union (packages/api/src/domains/memory/interfaces.ts).
@@ -108,6 +109,7 @@ export interface EntityProposalApprovalDetail {
   stance: EntityStance;
   visibilityScope: EntityVisibilityScope;
   rationale: string;
+  provenance?: EntityProposalProvenance[];
   conflict?: EntityConflictContext;
   conflictError?: string;
 }
@@ -161,9 +163,4 @@ export interface EntityProposal {
   publication?: ApprovalPublication;
 }
 
-export interface EntityProposalProvenance {
-  source: string;
-  anchor?: string;
-  note?: string;
-  date?: string;
-}
+export type EntityProposalProvenance = EntityProvenance;

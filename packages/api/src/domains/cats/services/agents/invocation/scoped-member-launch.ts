@@ -17,7 +17,6 @@ export function captureScopedMemberLaunch(
     readonly memoryCueLegacyFallbacks?: unknown;
     readonly asrPersonMemoryScenes?: unknown;
     readonly entityNudgePresentation?: unknown;
-    readonly entityNudgeCuePresentation?: unknown;
   },
   workingDirectory: string | undefined,
 ): AgentServiceOptions['pluginNativeLaunch'] {
@@ -38,7 +37,6 @@ export function captureScopedMemberLaunch(
     input.memoryCueLegacyFallbacks !== undefined ||
     input.asrPersonMemoryScenes !== undefined ||
     input.entityNudgePresentation !== undefined ||
-    input.entityNudgeCuePresentation !== undefined ||
     !workingDirectory ||
     launch.sandbox.workspaceRoot !== workingDirectory
   )

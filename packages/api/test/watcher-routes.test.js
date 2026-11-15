@@ -144,32 +144,59 @@ test('thread controls enforce scope and revision, and a global reopen does not r
   }
 });
 
-test('daily usage is owner scoped and UTC indexed, and absent cache creation is unknown', async () => {
+test('daily usage preserves reported lower bounds when a settled failed wake has one unreported request', async () => {
   const f = await fixture();
   try {
-    const at = Date.UTC(2026, 10, 2, 12);
+    const at = Date.parse('2026-11-13T20:00:00Z');
     f.turns.createRunning({
-      invocationId: 'watch-day',
-      parentInvocationId: 'watch-day',
+      invocationId: 'partial-usage',
+      parentInvocationId: 'partial-source',
       userId: USER,
       threadId: f.thread.id,
       catId: 'codex',
       executionKind: 'watcher',
-      outputFence: 'open',
       startedAt: at,
     });
-    const usage = { reportedAt: at, inputTokens: 100, outputTokens: 7, cacheReadTokens: 25 };
-    f.turns.recordWatcherModelAttempt('watch-day', 'model-1', at, usage);
-    f.turns.recordWatcherUsage('watch-day', usage);
-    f.turns.transitionTerminal('watch-day', { status: 'succeeded', endedAt: at + 1 });
-    f.turns.markResponseSettled('watch-day', { kind: 'no_response', reason: 'tool_only', settledAt: at + 2 });
-    const day = await f.app.inject({ url: '/api/watcher/daily?day=2026-11-02', headers });
-    assert.equal(day.statusCode, 200, day.body);
-    assert.equal(day.json().rows[0].count, 1);
-    assert.equal(day.json().rows[0].rewrittenTokens, null);
-    assert.equal(day.json().rows[0].outputTokens, 7);
-    assert.equal(day.json().rows[0].cacheCreationTokens, null);
-    assert.equal((await f.app.inject({ url: '/api/watcher/daily?day=2026-11-03', headers })).json().rows.length, 0);
+    const large = { inputTokens: 50036, outputTokens: 1956, cacheReadTokens: 30843, workingContextTokens: 27023 };
+    const small = { inputTokens: 1, outputTokens: 1, cacheReadTokens: 1, workingContextTokens: 10 };
+    for (let i = 0; i < 6; i++) {
+      f.turns.recordWatcherModelAttempt('partial-usage', `request-${i}`, at + i, {
+        reportedAt: at + i,
+        ...(i === 0 ? large : small),
+      });
+    }
+    f.turns.recordWatcherModelAttempt('partial-usage', 'request-unreported', at + 6);
+    f.turns.transitionTerminal('partial-usage', {
+      status: 'failed',
+      terminalReason: 'provider_failed',
+      endedAt: at + 10,
+    });
+    f.turns.markResponseSettled('partial-usage', { kind: 'no_response', reason: 'tool_only', settledAt: at + 11 });
+    const response = await f.app.inject({
+      url: '/api/watcher/daily?day=2026-11-13&timezone=America%2FLos_Angeles',
+      headers,
+    });
+    assert.equal(response.statusCode, 200, response.body);
+    const [row] = response.json().rows;
+    assert.equal(row.modelAttempts, 7);
+    assert.equal(row.failed, 1);
+    // Old consumers only understand complete totals; partial sums are additive metadata.
+    assert.equal(row.inputTokens, null);
+    assert.equal(row.outputTokens, null);
+    assert.equal(row.cacheReadTokens, null);
+    assert.equal(row.workingContextTokens, null);
+    assert.equal(row.knownTotals.inputTokens, 50041);
+    assert.equal(row.knownTotals.outputTokens, 1961);
+    assert.equal(row.knownTotals.cacheReadTokens, 30848);
+    assert.equal(row.knownTotals.workingContextTokens, 27023);
+    assert.equal(row.cacheCreationTokens, null);
+    assert.equal(row.rewrittenTokens, null);
+    assert.equal(row.usageSamples, 7);
+    assert.equal(row.reportedUsageSamples, 6);
+    assert.equal(row.coverage.inputTokens, 6);
+    assert.equal(row.coverage.cacheCreationTokens, 0);
+    assert.deepEqual(row.cacheRatio, { inputTokens: 50041, cacheReadTokens: 30848, samples: 6 });
+    assert.equal((await f.app.inject({ url: '/api/watcher/daily?day=2026-11-14', headers })).json().rows.length, 0);
     assert.equal((await f.app.inject({ url: '/api/watcher/daily?day=2026-02-31', headers })).statusCode, 400);
   } finally {
     await f.app.close();
@@ -298,14 +325,19 @@ test('legacy usage remains readable while an explicit empty request ledger stays
     executionKind: 'watcher',
     status: 'succeeded',
     startedAt: 100,
+    endedAt: 102,
     watcherUsage: { reportedAt: 101, inputTokens: 100, outputTokens: 7, cacheReadTokens: 25 },
   };
   const [legacy] = watcherDailyRows([record]);
   assert.equal(legacy.inputTokens, 100);
   assert.equal(legacy.outputTokens, 7);
   assert.equal(legacy.rewrittenTokens, null);
+  assert.equal(legacy.legacyRecords, 1);
+  assert.equal(legacy.usageSamples, 1);
   const [noRequest] = watcherDailyRows([{ ...record, watcherModelAttempts: {} }]);
   assert.equal(noRequest.modelAttempts, 0);
   assert.equal(noRequest.inputTokens, 0);
   assert.equal(noRequest.outputTokens, 0);
+  assert.equal(noRequest.usageSamples, 0);
+  assert.equal(noRequest.legacyRecords, 0);
 });

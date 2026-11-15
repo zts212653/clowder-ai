@@ -22,6 +22,7 @@ import {
   ENTITY_STANCES,
   type EntityProposal,
   type EntityVisibilityScope,
+  entityProvenanceSchema,
 } from '@cat-cafe/shared';
 import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
@@ -55,14 +56,7 @@ const proposeEntitySchema = z.object({
         'global alias/mention output without a read-path visibility check)',
     ),
   provenance: z
-    .array(
-      z.object({
-        source: z.string().min(1).max(200),
-        anchor: z.string().min(1).max(500).optional(),
-        note: z.string().max(500).optional(),
-        date: z.string().max(20).optional(),
-      }),
-    )
+    .array(entityProvenanceSchema)
     .min(1)
     .max(10)
     .describe('Provenance chain — at least one entry with source + thread anchor'),

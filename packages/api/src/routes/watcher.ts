@@ -82,10 +82,15 @@ export const watcherRoutes: FastifyPluginAsync<WatcherRouteOptions> = async (app
       limit: 200,
     });
     return {
+      usageVersion: 2,
       day: parsed.data.day,
       timezone: parsed.data.timezone,
       rows: await Promise.all(
-        watcherDailyRows(page.records, (at) => dayOf(at) === parsed.data.day).map(async (row) => ({
+        watcherDailyRows(
+          page.records,
+          (at) => dayOf(at) === parsed.data.day,
+          (start, end) => dayOf(start) <= parsed.data.day && (end === undefined || dayOf(end) >= parsed.data.day),
+        ).map(async (row) => ({
           ...row,
           title: (await deps.threadStore.get(row.threadId))?.title ?? '已删除的对话',
         })),
