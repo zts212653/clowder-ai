@@ -148,12 +148,7 @@ views:
                                 of: "@error"
                                 map: {"true": false, _: true}
                           ticking: "@ticking"
-                          open:
-                            - act: execOpen
-                              args: {k: "@exec"}
-                              when: "@command"
-                            - act: msgJump
-                              args: {mid: "@mid"}
+                          open: [{act: executionLocate, args: {k: "@key", startedAt: "@startedAt", inv: "@actions.inv", thread: "@actions.thread", who: "@who"}}]
                           actions:
                             - label:
                                 t: composer.actions.label
@@ -3564,8 +3559,28 @@ views:
   work.body:
     vm: work
     blocks:
+      - type: notice
+        when: $.sourceResolution.notice
+        tone: warn
+        text:
+          t: work.sourceState
+          args:
+            - $.sourceResolution.kind
+            - of: $.sourceResolution.code
+              map:
+                access_denied: t:work.sourceDenied
+                identity_changed: t:work.sourceIdentityChanged
+                identity_required: t:work.sourceDenied
+                not_found: t:work.sourceNotFound
+                too_large: t:work.sourceTooLarge
+                directory_inventory_unavailable: t:work.sourceInventory
+                connection_required: t:work.sourceConnection
+                checking: t:work.sourceChecking
+                _: t:work.sourceUnknown
+        action: {type: button, label: t:common.retry, act: workSourceRetry, args: {id: $.id}, busy: $.sourceResolution.busy}
       - type: box
         key: work-content
+        when: "!$.sourceBlocked"
         note: "2"
         load: $.bodyLoad
         loading: t:work.restoring
@@ -3823,9 +3838,7 @@ views:
             label: t:common.download
             act: workDownload
             args: {id: $.id}
-            when:
-              of: $.target.kind
-              map: {work: true, _: false}
+            when: [$.source, {of: $.target.kind, map: {work: true, _: false}}]
         blocks:
           - type: text
             variant: meta
@@ -5363,10 +5376,7 @@ nodes:
             blocks:
               - {$frag: CHAT_RICH}
     meta: {$frag: CHAT_META}
-    below:
-      - {$frag: CHAT_WATCHER}
-      - {$frag: CHAT_EXEC}
-      - {$frag: CHAT_SUPP}
+    below: {$frag: CHAT_FOOTER}
     acts: {$frag: CHAT_ACTS}
   chat.node/typing:
     frame: msg
@@ -5478,17 +5488,7 @@ nodes:
             blocks:
               - {$frag: CHAT_RICH}
     meta: {$frag: CHAT_META}
-    below:
-      - type: text
-        variant: meta
-        parts:
-          - {text: t:chatMessage.runtimeSlot.hint, variant: meta}
-          - {lit: " "}
-          - {text: "@tip"}
-        when: "@tip"
-      - {$frag: CHAT_WATCHER}
-      - {$frag: CHAT_EXEC}
-      - {$frag: CHAT_SUPP}
+    below: {$frag: CHAT_FOOTER}
   chat.node/user:
     frame: msg
     who: "@who"
@@ -9145,10 +9145,7 @@ nodes:
             blocks:
               - {$frag: CHAT_RICH}
     meta: {$frag: CHAT_META}
-    below:
-      - {$frag: CHAT_WATCHER}
-      - {$frag: CHAT_EXEC}
-      - {$frag: CHAT_SUPP}
+    below: {$frag: CHAT_FOOTER}
     acts: {$frag: CHAT_ACTS}
   chat.node/wake:
     frame: msg
@@ -9371,8 +9368,5 @@ nodes:
             blocks:
               - {$frag: CHAT_RICH}
     meta: {$frag: CHAT_META}
-    below:
-      - {$frag: CHAT_WATCHER}
-      - {$frag: CHAT_EXEC}
-      - {$frag: CHAT_SUPP}
+    below: {$frag: CHAT_FOOTER}
     acts: {$frag: CHAT_ACTS}

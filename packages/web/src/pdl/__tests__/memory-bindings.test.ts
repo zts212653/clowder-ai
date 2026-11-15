@@ -7,6 +7,7 @@ import type {
 import { readProfileOpeningReference, updateProfileOpeningReference } from '@cat-cafe/shared/profile-opening-reference';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { apiFetch } from '@/utils/api-client';
+import { observeApiSessionOwner } from '@/utils/api-session-identity';
 import { useMemoryBindings } from '../useMemoryBindings';
 import { act, cleanup, renderHook, waitFor } from './hook-host';
 import { projectOwner } from './owner-console';
@@ -653,4 +654,81 @@ it('undoes a knowledge candidate through its marker owner and refreshes the libr
       vi.mocked(apiFetch).mock.calls.filter(([path]) => path === '/api/memory/library-feed').length,
     ).toBeGreaterThan(before),
   );
+});
+
+it('replays an unknown person maintenance result after remount with the same stored command and strict request body', async () => {
+  observeApiSessionOwner('maintenance-owner');
+  localStorage.clear();
+  try {
+    const first = renderHook(() => useMemoryBindings(() => false));
+    fail = true;
+    const revision = 'sha256:' + 'a'.repeat(64);
+    expect(
+      await act(() =>
+        first.result.current.action('personMaintenanceWrite', {
+          action: 'withdraw',
+          receiptId: 'receipt',
+          expectedRevision: revision,
+        }),
+      ),
+    ).toBe(false);
+    const command = writes[0];
+    expect(command).toEqual({
+      action: 'withdraw',
+      expectedRevision: revision,
+      confirmed: true,
+      requestId: expect.any(String),
+    });
+    const stored = Object.keys(localStorage).find((key) =>
+      key.startsWith('cat-cafe:person-maintenance:v1:maintenance-owner:'),
+    )!;
+    expect(JSON.parse(localStorage.getItem(stored)!)).toMatchObject({
+      receiptId: 'receipt',
+      requestId: command.requestId,
+    });
+    await cleanup();
+    const second = renderHook(() => useMemoryBindings(() => false));
+    expect(second.result.current.data.personMaintenance.pending?.requestId).toBe(command.requestId);
+    expect(await act(() => second.result.current.action('personMaintenanceRetry', {}))).toBe(true);
+    expect(writes[1]).toEqual(command);
+    expect(localStorage.getItem(stored)).toBeNull();
+    expect(second.result.current.data.personMaintenance.pending).toBeNull();
+  } finally {
+    await cleanup();
+    observeApiSessionOwner(null);
+    localStorage.clear();
+  }
+});
+
+it('keeps the person locator in the maintenance journal and sends only the redaction command to its owner', async () => {
+  observeApiSessionOwner('maintenance-owner');
+  const revision = 'sha256:' + 'b'.repeat(64),
+    requestId = 'person_maintenance_01234567-89ab-4cde-8f01-234567890abc';
+  const journal = {
+    action: 'redact_item',
+    personId: 'person',
+    item: { kind: 'event', id: 'interaction' },
+    expectedRevision: revision,
+    requestId,
+  };
+  localStorage.setItem('cat-cafe:person-maintenance:v1:maintenance-owner:' + requestId, JSON.stringify(journal));
+  try {
+    const hook = renderHook(() => useMemoryBindings(() => false));
+    expect(await act(() => hook.result.current.action('personMaintenanceRetry', {}))).toBe(true);
+    expect(writes[0]).toEqual({
+      action: 'redact_item',
+      item: journal.item,
+      expectedRevision: revision,
+      requestId,
+      confirmed: true,
+    });
+    expect(apiFetch).toHaveBeenCalledWith(
+      '/api/memory/people/person/actions',
+      expect.objectContaining({ method: 'POST' }),
+    );
+  } finally {
+    await cleanup();
+    observeApiSessionOwner(null);
+    localStorage.clear();
+  }
 });

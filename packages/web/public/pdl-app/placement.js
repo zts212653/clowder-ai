@@ -145,6 +145,7 @@ function bindPlacement() {
   VM.marketSources = function () {
     const raw = placementData();
     return {
+      raw: Object.assign({ sources: [] }, raw.marketSources, { error: raw.marketError }),
       load: raw.marketError ? 'error' : raw.marketSources ? '' : 'loading',
       sources:
         raw.marketError || !raw.marketSources

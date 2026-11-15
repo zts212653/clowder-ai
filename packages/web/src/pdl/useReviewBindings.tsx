@@ -30,9 +30,75 @@ import { useGlobalArtifacts } from '@/hooks/useGlobalArtifacts';
 import { useThreadArtifacts } from '@/hooks/useThreadArtifacts';
 import type { FileData } from '@/hooks/useWorkspace';
 import { useChatStore } from '@/stores/chatStore';
+import { apiFetch } from '@/utils/api-client';
 import { request, write } from './owner-api';
 import type { ChatUiState } from './types';
 
+interface SourceResolution {
+  kind: 'ready' | 'blocked' | 'preview-fallback';
+  code: string;
+  notice: boolean;
+  target?: { worktreeId: string; path: string };
+  metadata?: FileData;
+  locations?: string[];
+}
+export async function resolveArtifactFileSource(source: {
+  worktreeId: string;
+  path: string;
+}): Promise<SourceResolution> {
+  let code = '',
+    status = 0,
+    target = { worktreeId: source.worktreeId, path: source.path },
+    locations: string[] = [];
+  try {
+    const response = await apiFetch('/api/workspace/resolve-file-source', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(target),
+    });
+    status = response.status;
+    const body = await response.json();
+    if (response.ok && body.kind === 'file' && typeof body.worktreeId === 'string' && typeof body.path === 'string')
+      target = { worktreeId: body.worktreeId, path: body.path };
+    else
+      code =
+        status === 401 || status === 403
+          ? 'access_denied'
+          : body.kind === 'connection-required'
+            ? 'connection_required'
+            : typeof body.error === 'string'
+              ? body.error
+              : body.error?.code ||
+                ({ 404: 'not_found', 413: 'too_large' } as Record<number, string>)[status] ||
+                'unknown';
+    if (code === 'directory_inventory_unavailable')
+      locations = (body.error.locations as { label: string }[]).map((location) => location.label);
+  } catch {
+    code = 'unknown';
+  }
+  if (['identity_required', 'access_denied', 'identity_changed'].includes(code))
+    return { kind: 'blocked', code, notice: true, locations };
+  try {
+    const response = await apiFetch('/api/workspace/file?' + new URLSearchParams(target), { cache: 'no-store' });
+    if (response.ok) {
+      const file = (await response.json()) as FileData;
+      if (file.path === target.path)
+        return { kind: code ? 'preview-fallback' : 'ready', code, notice: !!code, target, metadata: file, locations };
+    }
+    return {
+      kind: 'blocked',
+      code:
+        response.status === 401 || response.status === 403
+          ? 'access_denied'
+          : response.status === 404 || status === 404
+            ? 'not_found'
+            : code || 'unknown',
+      notice: true,
+    };
+  } catch {
+    return { kind: 'blocked', code: code || 'unknown', notice: true };
+  }
+}
 type ScopedWork = ThreadArtifactDTO & { threadId?: string; threadTitle?: string };
 export function workKey(work: ScopedWork) {
   return JSON.stringify([
@@ -199,6 +265,9 @@ export function useReviewBindings(
     [reviewId, setReviewId] = useState<string | null>(null),
     [contexts, setContexts] = useState<Context[]>([]),
     [load, setLoad] = useState('');
+  const [workResolution, setWorkResolution] = useState<(SourceResolution & { key: string; busy?: boolean }) | null>(
+    null,
+  );
   const workKind = work ? projectFileContent(work).kind : null;
   const text = useArtifactContent(work, worktreeId, !!work && ['text', 'markdown', 'html', 'jsx'].includes(workKind!));
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null),
@@ -406,6 +475,7 @@ export function useReviewBindings(
         return selectionForChat.current;
       }
       case 'cafeWidgetRetry':
+      case 'workSourceRetry':
       case 'workOpen': {
         const stamp = ++ownerEpoch.current;
         historySequence.current++;
@@ -473,13 +543,18 @@ export function useReviewBindings(
         }
         const content = projectFileContent(found),
           source = artifactContentSource(found, worktreeId);
-        let metadata: typeof workMetadata = null;
+        let resolution: SourceResolution | null = null;
+        if (source.kind === 'workspace') {
+          setWorkResolution((current) =>
+            current?.key === workKey(found)
+              ? { ...current, busy: true }
+              : { key: workKey(found), kind: 'blocked', code: 'checking', notice: true, busy: true },
+          );
+          resolution = await resolveArtifactFileSource(source);
+        }
+        let metadata: typeof workMetadata = resolution?.metadata ?? null;
         if (content.kind === 'office' || content.kind === 'binary') {
-          if (source.kind === 'workspace')
-            metadata = await request<FileData>(
-              `/api/workspace/file?${new URLSearchParams({ worktreeId: source.worktreeId, path: source.path })}`,
-            );
-          else if (source.kind === 'url') {
+          if (source.kind === 'url') {
             const info = await contentFileInfo(source);
             metadata = {
               mime: info.mime ?? content.mime,
@@ -490,6 +565,7 @@ export function useReviewBindings(
         }
         if (stamp !== ownerEpoch.current) return true;
         setWorkMetadata(metadata);
+        setWorkResolution(resolution ? { ...resolution, key: workKey(found), busy: false } : null);
         setOpenedWork({ artifact: found, ...(exact ? { reference: exact.artifact.work } : {}) });
         ui.lb = { mid: '', block: '', i: 0 };
         ui.review = null;
@@ -843,6 +919,7 @@ export function useReviewBindings(
       selectionForChat: selectionForChat.current,
       openedWork: openedSource,
       workMetadata,
+      workResolution,
       text,
       contexts,
       load,
@@ -896,6 +973,7 @@ export function useReviewBindings(
       selectionForChat.current,
       openedSource,
       workMetadata,
+      workResolution,
       text,
       contexts,
       load,

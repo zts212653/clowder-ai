@@ -363,3 +363,48 @@ it('reads Taste from its own producer and refuses to submit after that owner cha
   );
   expect(apiFetch).not.toHaveBeenCalled();
 });
+
+it('keeps every original quote and submits the displayed taste decision digest', async () => {
+  const target = {
+    feature: 'F221' as const,
+    id: 'taste-digest',
+    threadId: 'thread',
+    mid: 'message',
+    block: {
+      v: 1 as const,
+      kind: 'card' as const,
+      id: 'taste-proposal-taste-digest',
+      title: 'Taste',
+      meta: { approval: { producerId: 'F221', canonicalProposalId: 'taste-digest' } },
+    },
+  };
+  const item = {
+    proposalId: target.id,
+    sourceFeatureId: 'F221',
+    ownerUserId: 'owner',
+    resolution: 'open',
+    inlineApprovable: true,
+    detail: { decisionDigest: 'displayed-digest', quotes: ['first quote', 'second quote'], privacy: 'public' },
+  } as unknown as ApprovalHubItem;
+  vi.mocked(readDomainApprovalSource).mockResolvedValue({
+    item,
+    ownerUserId: 'owner',
+    row: {} as UnifiedAttentionItemV1,
+  });
+  vi.mocked(readApprovalProducerBody).mockResolvedValue({
+    proposal: { id: target.id, userId: 'owner', threadId: target.threadId, status: 'pending' },
+  });
+  useApprovalHubStore.setState({ items: [item], count: 1, error: null, decisionAttempts: {}, deciding: {} });
+  const read = await readMemoryMessage(target, new AbortController().signal);
+  expect(memoryMessageView({ target, read, current: true, refresh: vi.fn() })).toMatchObject({
+    quotes: ['first quote', 'second quote'],
+    privacy: 'public',
+  });
+  vi.mocked(apiFetch).mockResolvedValue(Response.json({ proposalId: target.id, status: 'approved' }));
+  await decideMemoryMessage({ target, read, current: true, refresh: vi.fn() }, 'approve');
+  expect(apiFetch).toHaveBeenLastCalledWith('/api/taste-proposals/taste-digest/approve', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ decisionDigest: 'displayed-digest' }),
+  });
+});

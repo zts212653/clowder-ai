@@ -123,7 +123,11 @@ export async function decideMemoryMessage(binding: MemoryMessageBinding, decisio
     throw new Error('提议已变化，请重新读取');
   if (binding.target.feature !== 'F321') {
     const store = useApprovalHubStore.getState();
-    if (decision === 'approve') await store.approveProposal(binding.target.id);
+    if (decision === 'approve')
+      await store.approveProposal(
+        binding.target.id,
+        typeof next.item.detail.decisionDigest === 'string' ? next.item.detail.decisionDigest : undefined,
+      );
     else await store.rejectProposal(binding.target.id);
     await binding.refresh();
     const attempt = useApprovalHubStore.getState().decisionAttempts[binding.target.id]?.state;
@@ -157,8 +161,15 @@ export function memoryMessageView(binding: MemoryMessageBinding, draft: Record<s
       : undefined;
   const mid = binding.target.mid,
     selected = String(draft['entity-action-' + mid] ?? '');
+  const detail = ['F193', 'F221', 'F260'].includes(binding.target.feature) ? read?.item?.detail : undefined;
   return {
     title: binding.target.block.title,
+    privacy: detail?.privacy,
+    quotes: Array.isArray(detail?.quotes)
+      ? detail.quotes.filter((quote): quote is string => typeof quote === 'string')
+      : typeof detail?.quote === 'string'
+        ? [detail.quote]
+        : [],
     conflict: conflict
       ? {
           fingerprint: conflict.fingerprint,

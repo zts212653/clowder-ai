@@ -5,6 +5,45 @@ import { chatModels, composerTrigger } from '../chat-models';
 import { fixtureData, fixtureUi } from './chat-fixture';
 
 describe('chat contract projections', () => {
+  it('provides raw composer preferences, connection and admission state for both theme contracts', () => {
+    const data = fixtureData(),
+      ui = fixtureUi();
+    data.forwardingBlocked = false;
+    data.cats.push({ ...data.cats[0], id: 'opencode-glm', displayName: 'GLM', mentionPatterns: ['@glm'] });
+    data.images = [new File(['draft'], 'draft.txt', { type: 'text/plain' })];
+    ui.pop = { kind: 'plus', preferredExpanded: true };
+    ui.sendScope = 'thread';
+    const popup = chatModels(data, ui).chatPop;
+    expect(popup).toMatchObject({
+      preferredIds: ['codex'],
+      preferredExpanded: true,
+      sendScope: 'thread',
+      homeState: null,
+      members: expect.arrayContaining([expect.objectContaining({ id: 'codex', selected: true })]),
+      connection: { isReadonly: false, forwardingBlocked: false, updateRequired: false, canReload: false },
+      attachments: [expect.objectContaining({ name: 'draft.txt', size: 5 })],
+    });
+    data.threadId = 'default';
+    data.readonly = true;
+    data.updateRequired = true;
+    const admission = {
+      ready: true,
+      optionsLocked: true,
+      preferredCats: ['opencode-glm'],
+      homeState: { busy: true, state: 'creating' },
+    };
+    const home = chatModels(data, ui, { admission });
+    expect(home.chatPop).toMatchObject({
+      preferredIds: ['opencode-glm'],
+      homeState: admission.homeState,
+      members: expect.arrayContaining([expect.objectContaining({ id: 'opencode-glm', selected: true })]),
+      connection: { isReadonly: true, canReload: true, updateRequired: true, forwardingBlocked: false },
+    });
+    expect(home.runtimeConnection).toEqual(home.chatPage.connection);
+    const empty = chatModels({ ...data, threads: [], images: [] }, ui).chatPop;
+    expect(empty).toMatchObject({ preferredIds: [], attachments: [], members: expect.any(Array) });
+  });
+
   it('derives execution rows once per unchanged message and keeps paired output when another source changes', () => {
     const data = fixtureData(),
       ui = fixtureUi();
@@ -505,4 +544,44 @@ it.each(['message', 'messageId'])('puts watcher routing and the %s citation in c
   expect(row.md).toContain('Nudge sentence');
   expect(row.md).not.toContain('@codex');
   expect(row.md).not.toContain('[原话]');
+});
+
+it('retains routing warning identities and shares the canonical execution shape with composer', () => {
+  const data = fixtureData(),
+    ui = fixtureUi();
+  data.messages[1] = {
+    ...data.messages[1],
+    extra: {
+      routingWarnings: [
+        { kind: 'handoff_blocked_by_failed_turn', targetCats: [createCatId('codex')] },
+        { kind: 'cat_not_found', mention: '@missing', alternatives: [] },
+      ],
+    },
+  };
+  data.executions = [
+    {
+      executionId: 'parent',
+      turnInvocationId: 'child',
+      threadId: data.threadId,
+      threadTitle: 'thread',
+      catId: 'codex',
+      kind: 'live_invocation',
+      startedAt: Date.now(),
+      cancelability: { state: 'not_cancelable', reason: 'foreign_principal' },
+      inputCapabilities: {
+        append: { expectedRun: { invocationId: 'child', targetId: 'codex', responseMessageId: 'older-reply' } },
+      },
+    } as unknown as (typeof data.executions)[number],
+  ];
+  const vm = chatModels(data, ui);
+  expect(vm.chatStream.items.find((m) => m.mid === 'reply-1')?.routingWarnings).toEqual(
+    data.messages[1].extra?.routingWarnings,
+  );
+  expect(vm.chatComposer.runners[0]).toMatchObject(vm.executionRows[0]);
+  expect(vm.executionRows[0].actions).toMatchObject({
+    id: 'parent',
+    inv: 'child',
+    thread: data.threadId,
+    who: 'codex',
+  });
 });

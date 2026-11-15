@@ -168,7 +168,12 @@ function bindInbox() {
       ready = p && p.coverage.state === 'complete' && p.consistency.state === 'verified';
     return {
       error: m.error,
-      vm: { ready: ready, count: p ? p.requests.length : 0, ignoredCount: p ? p.personalView.ignoredCount : 0 },
+      vm: {
+        preview: p,
+        ready: ready,
+        count: p ? p.requests.length : 0,
+        ignoredCount: p ? p.personalView.ignoredCount : 0,
+      },
       submitDisabled: !ready || !p.requests.length,
       submit: async function () {
         const fresh = await api.get('/api/concierge/work/mentions/handling-preview', {

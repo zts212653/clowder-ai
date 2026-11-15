@@ -200,8 +200,8 @@ function bindChatOwners() {
     const s = CS.queueTargets,
       r = queueRead();
     if (!s) return null;
-    if (!r || r.load) return { load: r ? r.load : 'loading' };
-    if (s.error) return { load: 'error' };
+    if (!r || r.load) return { load: r ? r.load : 'loading', error: r && r.error };
+    if (s.error) return { load: 'error', error: s.error };
     const source = r.value.source,
       cats = r.value.cats,
       done = source.targets
@@ -212,6 +212,8 @@ function bindChatOwners() {
           return t.targetCatId;
         });
     return {
+      state: Object.assign({}, s, r.value),
+      cats: projectChatData().cats,
       load: '',
       selected: s.selected,
       pool: cats.routableNow

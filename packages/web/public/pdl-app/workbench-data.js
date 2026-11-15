@@ -143,6 +143,33 @@ function fileTree(nodes, out = {}, parent = '') {
   for (const node of nodes) if (node.children) fileTree(node.children, out, `${node.path}/`);
   return out;
 }
+function recoveryModel(incidents, read, taskId, busy) {
+  const facts = read ? [read.recovery, read.job && read.job.recovery].filter(Boolean) : [];
+  const pending = facts.some(function (fact) {
+    return (
+      !fact.disposition &&
+      (typeof fact.nextAttemptAt === 'number' ||
+        fact.claim ||
+        (fact.wakeIntent && fact.wakeIntent.status === 'pending'))
+    );
+  });
+  const rows = (incidents || []).concat(
+    facts.filter(function (fact) {
+      return fact.disposition;
+    }),
+  );
+  return rows.length || pending
+    ? {
+        incidents: rows,
+        pending: !!pending,
+        taskId: taskId,
+        busy: !!busy,
+        canRecheck: facts.some(function (fact) {
+          return fact.recheck && ['observe_original_wait', 'observe_original_job'].includes(fact.recheck.kind);
+        }),
+      }
+    : null;
+}
 function taskView(task) {
   const cats = projectChatData().cats,
     owner = cats.find(function (c) {
@@ -152,6 +179,7 @@ function taskView(task) {
       return c.id === task.createdBy;
     });
   return {
+    recovery: recoveryModel(task.recovery && task.recovery.incidents),
     id: task.id,
     title: task.title,
     status: task.status,
@@ -287,7 +315,7 @@ function workbenchModels() {
       const wt = workspace.worktrees.find((w) => w.id === workspace.worktreeId),
         picker = wt ? { root: wt.root, branch: wt.branch, head: wt.head, worktrees: workspace.worktrees } : null;
       const g = git.id === workspace.worktreeId ? git.data : undefined,
-        drift = g ? g.health.runtimeDrift : null;
+        drift = g && g.health ? g.health.runtimeDrift : null;
       const fileRow = (f) => ({
         path: f.path,
         name: f.path.split('/').pop(),
@@ -315,6 +343,11 @@ function workbenchModels() {
 
       return {
         load: ui.reviewOpen ? native.load || git.load : git.load,
+        gitError:
+          git.id === workspace.worktreeId && git.errors
+            ? git.errors[{ status: 'status', commits: 'log', health: 'health' }[ui.gitView]] ||
+              (ui.gitView === 'status' ? git.errors.diff : '')
+            : '',
         prChanges: ui.prTarget ? prChangesVM(ui.prTarget) : null,
         nativeTargets: native.nativeTargets,
         reviewOpen: ui.reviewOpen,
@@ -357,28 +390,29 @@ function workbenchModels() {
           : null,
         view: ui.gitView,
         diffMode: ui.diffMode,
-        count: g ? g.status.staged.length + g.status.unstaged.length + g.status.untracked.length : 0,
-        commitCount: g ? g.log.commits.length : 0,
-        groups: g
-          ? [
-              ['staged', g.status.staged],
-              ['unstaged', g.status.unstaged],
-              ['untracked', g.status.untracked],
-            ].map(([kind, files]) => ({ id: kind, label: kind, count: files.length, items: files.map(fileRow) }))
-          : [],
-        commits: g?.log.commits.map((c) => ({
+        count: g && g.status ? g.status.staged.length + g.status.unstaged.length + g.status.untracked.length : 0,
+        commitCount: g && g.log ? g.log.commits.length : 0,
+        groups:
+          g && g.status
+            ? [
+                ['staged', g.status.staged],
+                ['unstaged', g.status.unstaged],
+                ['untracked', g.status.untracked],
+              ].map(([kind, files]) => ({ id: kind, label: kind, count: files.length, items: files.map(fileRow) }))
+            : [],
+        commits: g?.log?.commits.map((c) => ({
           ...c,
           short: c.short || c.hash,
           authorName: c.author,
           files: c.files,
           actsCtx: { short: c.hash },
         })),
-        wts: g?.health.worktrees.map((w) => ({
+        wts: g?.health?.worktrees.map((w) => ({
           ...w,
           orphan: w.isOrphan,
         })),
         behind: drift ? drift.behindCommits.map((c) => ({ id: c.short, title: c.subject })) : [],
-        stale: g?.health.staleBranches.map((b) => ({ ...b, branch: b.name, date: b.lastCommitDate })),
+        stale: g?.health?.staleBranches.map((b) => ({ ...b, branch: b.name, date: b.lastCommitDate })),
       };
     },
     get exec() {
@@ -606,6 +640,9 @@ function recallModel() {
   const groups = recallGroups(events, data);
   const selected = ui.recallFor;
   return {
+    raw: Object.assign({}, page, { events: events, next: page?.nextCursor ?? null }),
+    threadId: data.threadId,
+    sourceFilter: ui.recallSource,
     load: read.threadId !== data.threadId ? 'loading' : read.load || (page?.readStatus === 'partial' ? 'stale' : ''),
     replyCount: selected
       ? Number(groups.some((group) => group.key === selected))
@@ -689,28 +726,7 @@ function homeModels() {
       });
       return { id: id, name: c ? c.displayName : id, handle: c ? c.mentionPatterns[0] : '' };
     },
-    runs = data.executions.map(function (x) {
-      const cmd = x.kind === 'managed_command';
-      return {
-        key: x.executionId,
-        who: x.catId,
-        command: cmd,
-        activity: x.activity,
-        carrier: x.carrier,
-        thread: x.threadTitle || x.threadId,
-        here: x.threadId === data.threadId,
-        time: (now - x.startedAt) / 1000,
-        actions: {
-          id: x.executionId,
-          inv: x.turnInvocationId,
-          thread: x.threadId,
-          cmd: cmd,
-          name: member(x.catId).name,
-          activity: x.activity,
-          cancel: x.cancelability,
-        },
-      };
-    }),
+    runs = projectChat(data, CS).executionRows,
     items = (waits.projection ? waits.projection.items : [])
       .slice()
       .sort(function (a, b) {
@@ -793,6 +809,14 @@ function homeModels() {
         ? { load: detail.id === ui.execDetail ? detail.load : 'loading' }
         : {
             id: ui.execDetail,
+            recovery: recoveryModel(
+              [],
+              read,
+              ui.execDetail,
+              projectData('sources') &&
+                projectData('sources').holdBusy &&
+                projectData('sources').holdBusy[ui.execDetail],
+            ),
             state: job.state,
             failed: ['failed', 'timed_out', 'lost'].includes(job.state),
             live: !!current,

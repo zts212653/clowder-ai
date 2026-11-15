@@ -325,7 +325,12 @@ export interface ChatProjectionInput {
     workbench?: ReturnType<typeof import('./useWorkbenchBindings').useWorkbenchBindings>['data'];
   };
   outputPreference?: { mode: string; status: string; error: unknown };
-  admission?: { ready?: boolean; optionsLocked?: boolean };
+  admission?: {
+    ready?: boolean;
+    optionsLocked?: boolean;
+    preferredCats?: string[];
+    homeState?: { busy: boolean; state: string };
+  };
   export?: {
     mids: readonly string[] | null;
     items?: readonly import('@cat-cafe/shared').ResolvedMessageSelectionItem[];
@@ -407,6 +412,44 @@ function draftSource(file: File): string {
   return url;
 }
 
+export function activeExecutionRows(data: ChatData, ui: ChatUiState) {
+  return data.executions.map((x) => {
+    const cat = data.cats.find((cat) => cat.id === x.catId),
+      command = x.kind === 'managed_command';
+    const status = data.live?.[x.threadId]?.[x.catId],
+      seconds = Math.floor((Date.now() - x.startedAt) / 1000);
+    return {
+      key: x.executionId,
+      who: x.catId,
+      name: cat?.displayName ?? x.catId,
+      handle: cat?.mentionPatterns[0] ?? '',
+      command,
+      kind: command ? 'command' : 'reply',
+      activity: x.activity,
+      what: x.activity,
+      cur: ui.target === x.catId,
+      thread: x.threadTitle || x.threadId,
+      here: x.threadId === data.threadId,
+      startedAt: x.startedAt,
+      seconds,
+      time: seconds,
+      ticking: true,
+      error: status === 'error',
+      quiet: status === 'alive_but_silent' || status === 'suspected_stall',
+      actions: {
+        id: x.executionId,
+        inv: x.turnInvocationId,
+        thread: x.threadId,
+        who: x.catId,
+        startedAt: x.startedAt,
+        cmd: command,
+        name: cat?.displayName ?? x.catId,
+        activity: x.activity,
+        cancel: x.cancelability,
+      },
+    };
+  });
+}
 export function chatModels(data: ChatData, ui: ChatUiState, input?: ChatProjectionInput) {
   const raw = data,
     project = input?.project;
@@ -504,6 +547,26 @@ export function chatModels(data: ChatData, ui: ChatUiState, input?: ChatProjecti
   const recipientMembers = () =>
     recipients().map((id) => members().find((m) => m.id === id) ?? { name: id, handle: '' });
   const targetHandle = () => (recipientMembers().length === 1 ? recipientMembers()[0].handle : '');
+  const preferredIds = () =>
+    data.threadId === 'default' ? (input?.admission?.preferredCats ?? []) : (thread()?.preferredCats ?? []);
+  const connection = () => ({
+    updateRequired: !!data.updateRequired,
+    canReload: !!data.updateRequired,
+    isReadonly: !!data.readonly,
+    forwardingBlocked: data.forwardingBlocked !== false,
+  });
+  const memberItems = (selected: readonly string[]) =>
+    members().map((member) => {
+      const execution = data.executions.find((e) => e.catId === member.id && e.threadId === data.threadId);
+      return {
+        id: member.id,
+        name: member.name,
+        handle: member.handle,
+        executing: !!execution,
+        state: execution ? (execution.kind === 'live_invocation' ? 'reply' : 'command') : 'idle',
+        selected: selected.includes(member.id),
+      };
+    });
   // A plugin's reply carrier is the reply's typing row until the reply arrives; a result without content shows nothing.
   const sourceMessages = (timeline = messages()) =>
     timeline
@@ -756,6 +819,7 @@ export function chatModels(data: ChatData, ui: ChatUiState, input?: ChatProjecti
             ].join(' ')
           : body,
         error: message.variant === 'error',
+        routingWarnings: message.extra?.routingWarnings ?? [],
         watcher: message.extra?.watcher,
         nudge: message.extra?.watcher
           ? {
@@ -1120,14 +1184,13 @@ export function chatModels(data: ChatData, ui: ChatUiState, input?: ChatProjecti
         findOpen: pop()?.kind === 'find',
       };
     },
+    get runtimeConnection() {
+      return connection();
+    },
     get chatPage() {
       const pageItems = sourceMessages();
       return {
-        connection: {
-          updateRequired: !!data.updateRequired,
-          canReload: !!data.updateRequired,
-          isReadonly: !!data.readonly,
-        },
+        connection: connection(),
         messages: pageItems.map((m) => ({ mid: m.id })),
         lobby: data.threadId === 'default',
         title: thread()?.title,
@@ -1155,6 +1218,9 @@ export function chatModels(data: ChatData, ui: ChatUiState, input?: ChatProjecti
         },
       };
     },
+    get executionRows() {
+      return activeExecutionRows(data, ui);
+    },
     get cafeHome() {
       return {
         navHidden: ui.navHidden,
@@ -1174,24 +1240,7 @@ export function chatModels(data: ChatData, ui: ChatUiState, input?: ChatProjecti
         locked: locked(),
         top: true,
         notices: notices(),
-        runners: data.executions
-          .filter((e) => e.threadId === data.threadId)
-          .map((e) => {
-            const member = members().find((m) => m.id === e.catId);
-            return {
-              who: e.catId,
-              name: member?.name,
-              handle: member?.handle,
-              cur: target() === e.catId,
-              command: e.kind === 'managed_command',
-              kind: e.kind === 'live_invocation' ? 'reply' : 'command',
-              what: e.activity,
-              seconds: Math.floor((Date.now() - e.startedAt) / 1000),
-              ticking: true,
-              exec: e.executionId,
-              mid: [...messages()].reverse().find((m) => m.catId === e.catId && replying(m))?.id,
-            };
-          }),
+        runners: activeExecutionRows(data, ui).filter((x) => x.actions.thread === data.threadId),
         queue: data.queue.length
           ? {
               key: data.threadId,
@@ -1381,22 +1430,17 @@ export function chatModels(data: ChatData, ui: ChatUiState, input?: ChatProjecti
         return {
           ...base,
           groupSelected: !viewCat(),
-          members: members().map((member) => {
-            const execution = data.executions.find((e) => e.catId === member.id && e.threadId === data.threadId);
-            return {
-              id: member.id,
-              name: member.name,
-              handle: member.handle,
-              executing: !!execution,
-              state: execution ? (execution.kind === 'live_invocation' ? 'reply' : 'command') : 'idle',
-              selected:
-                kind === 'people'
-                  ? viewCat() === member.id
-                  : kind === 'whisper' || subpage === 'whisper'
-                    ? ui.whisperTo.includes(member.id)
-                    : target() === member.id,
-            };
-          }),
+          members: memberItems(
+            kind === 'people'
+              ? viewCat()
+                ? [viewCat()!]
+                : []
+              : kind === 'whisper' || subpage === 'whisper'
+                ? ui.whisperTo
+                : subpage === 'prefer'
+                  ? preferredIds()
+                  : recipients(),
+          ),
         };
       if (kind === 'plus' && subpage === 'mode') return { ...base, sendScope: ui.sendScope, sendMode: ui.sendMode };
       if (kind === 'plus')
@@ -1405,7 +1449,14 @@ export function chatModels(data: ChatData, ui: ChatUiState, input?: ChatProjecti
           sendMode: ui.sendMode,
           attachmentFull: data.images.length >= 5,
           whisperOn: ui.whisper,
-          preferNames: recipientMembers().map((m) => m.name),
+          preferNames: preferredIds().map((id) => members().find((member) => member.id === id)?.name ?? id),
+          preferredIds: preferredIds(),
+          preferredExpanded: !!pop()?.preferredExpanded,
+          members: memberItems(preferredIds()),
+          connection: connection(),
+          homeState: data.threadId === 'default' ? (input?.admission?.homeState ?? null) : null,
+          attachments: attachments(),
+          sendScope: ui.sendScope,
         };
       if (kind === 'projView')
         return { ...base, noProject: !thread()?.projectPath, pathCopy: thread()?.projectPath ?? '' };

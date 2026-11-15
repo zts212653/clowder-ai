@@ -1152,6 +1152,90 @@ function bindPluginRequests() {
       },
     );
   }
+
+  function frameCloseShow() {
+    if (S.dialog && S.dialog.kind === 'pluginFrameClose') {
+      if (guards[S.dialog.args.node].wait) {
+        render(true);
+        return;
+      }
+      S.dialog = null;
+    }
+    const node = Object.keys(guards).find(function (k) {
+      return guards[k].wait && (guards[k].phase === 'slow' || guards[k].phase === 'failed');
+    });
+    if (node && !S.dialog) {
+      guards[node].shown = true;
+      dialog({ kind: 'pluginFrameClose', args: { node: node } });
+    } else render(true);
+  }
+  function frameCloseFinish(node, leave) {
+    const g = guards[node],
+      wait = g.wait;
+    clearTimeout(g.timer);
+    g.wait = null;
+    g.phase = 'idle';
+    g.discard = false;
+    g.shown = false;
+    if (leave) g.on = false;
+    frameCloseShow();
+    (leave ? wait.resolve : wait.reject)();
+  }
+  function frameCloseWait(node) {
+    const g = guards[node];
+    if (g.wait) return g.wait.promise;
+    const wait = {};
+    wait.promise = new Promise(function (resolve, reject) {
+      wait.resolve = resolve;
+      wait.reject = reject;
+    });
+    g.wait = wait;
+    g.phase = 'saving';
+    g.discard = false;
+    g.timer = setTimeout(function () {
+      g.phase = 'slow';
+      frameCloseShow();
+    }, 200);
+    ENGINE_PARTS.framePost(node, { channel: CHANNEL, nonce: nonces[node], type: 'before-close' });
+    return wait.promise;
+  }
+  VM.pluginFrameClose = function () {
+    if (!S.dialog || S.dialog.kind !== 'pluginFrameClose') return null;
+    const node = S.dialog.args.node,
+      g = guards[node];
+    return { node: node, phase: g.phase, discard: g.discard };
+  };
+  A.pluginFrameDiscard = function (d) {
+    guards[d.node].discard = true;
+    render(true);
+  };
+  A.pluginFrameContinue = function (d) {
+    guards[d.node].discard = false;
+    render(true);
+  };
+  A.pluginFrameForce = function (d) {
+    frameCloseFinish(d.node, true);
+  };
+  A.pluginFrameStay = function () {
+    Object.keys(guards)
+      .filter(function (k) {
+        return guards[k].wait;
+      })
+      .forEach(function (k) {
+        frameCloseFinish(k, false);
+      });
+  };
+  A.pluginFrameDialogChanged = function (value) {
+    if (value) return;
+    const node = Object.keys(guards).find(function (k) {
+      return guards[k].wait && guards[k].shown;
+    });
+    if (!node) return;
+    if (guards[node].discard) {
+      guards[node].discard = false;
+      dialog({ kind: 'pluginFrameClose', args: { node: node } });
+    } else A.pluginFrameStay({ node: node });
+  };
   LEAVE_ASK.push(function (els) {
     const nodes = Object.keys(guards).filter(function (k) {
       return (
@@ -1162,14 +1246,7 @@ function bindPluginRequests() {
       );
     });
     if (!nodes.length) return null;
-    return Promise.all(
-      nodes.map(function (k) {
-        return new Promise(function (resolve, reject) {
-          guards[k].wait = { resolve: resolve, reject: reject };
-          ENGINE_PARTS.framePost(k, { channel: CHANNEL, nonce: nonces[k], type: 'before-close' });
-        });
-      }),
-    );
+    return Promise.all(nodes.map(frameCloseWait));
   });
   A.pluginFrameMessage = function (m, el) {
     const node = el.dataset.frameKey,
@@ -1185,13 +1262,19 @@ function bindPluginRequests() {
       return;
     }
     if (m.type === 'close' || m.type === 'close.cancel') {
-      const w = g.wait;
-      g.wait = null;
-      if (w) (m.type === 'close' ? w.resolve : w.reject)();
-      else if (m.type === 'close') {
+      if (g.wait) {
+        if (m.type === 'close') frameCloseFinish(node, true);
+        else {
+          clearTimeout(g.timer);
+          g.phase = 'failed';
+          g.discard = false;
+          frameCloseShow();
+        }
+      } else if (m.type === 'close') {
         g.on = false;
         actFn('close')({ node: node });
       }
+      reply({ result: true });
       return;
     }
     Promise.resolve()

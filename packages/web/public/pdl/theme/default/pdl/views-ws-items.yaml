@@ -288,6 +288,8 @@ views:
                       _: "@nextStatus"
           title: "@title"
           inline:
+            - control: {type: status, tone: warn, text: t:recovery.paused}
+              when: "@recovery.incidents"
             - icon:
                 of: "@kind"
                 map: {pr_tracking: pr, issue_tracking: issue, work: "", _: "@kind"}
@@ -345,6 +347,7 @@ views:
                       _: "@updatedAt"
           acts: {slot: ws.tasks.task, ctx: "@actsCtx"}
           expand:
+            - {type: view, id: recovery.notice, data: "@recovery", when: "@recovery"}
             - type: text
               parts:
                 - {text: "@why"}
@@ -946,292 +949,302 @@ views:
                   - {v: health, label: t:wsCode.git.health}
                 act: set
                 args: {path: wc.gitView}
-          - type: toolbar
-            when:
-              of: $.view
-              map: {status: true, _: false}
-            items:
-              - {type: grow}
-              - type: button
-                icon: review
-                label: t:wsChanges.review
-                act: toggle
-                args: {path: wc.reviewOpen}
-                pressed: $.reviewOpen
-              - type: button
-                iconOnly: true
-                icon: rows2
-                label: t:wsChanges.unified
-                act: set
-                args: {path: wc.diffMode, v: unified}
-                pressed:
-                  of: $.diffMode
-                  map: {unified: true, _: false}
-              - type: button
-                iconOnly: true
-                icon: split2
-                label: t:wsChanges.split
-                act: set
-                args: {path: wc.diffMode, v: split}
-                pressed:
-                  of: $.diffMode
-                  map: {split: true, _: false}
+          - type: notice
+            when: $.gitError
+            tone: warn
+            text:
+              of: $.gitError
+              map: {git_worktree_required: t:wsGit.worktreeRequired, git_unavailable: t:wsGit.unavailable, _: t:wsGit.readFailed}
+            action: {type: button, label: t:common.retry, act: refresh, args: {k: git}}
           - type: box
-            variant: card
-            when: $.reviewOpen
+            when: "!$.gitError"
             blocks:
-              - type: settings
-                rows:
-                  - label: t:wsChanges.reviewTarget
-                    control:
-                      type: select
-                      id: wc-rv-target
-                      options:
-                        - {v: uncommitted, label: t:wsCode.changes.targets}
-                        - {v: base, label: t:wsCode.changes.baseBranch}
-                        - {v: sha, label: t:wsCode.changes.specificCommit}
-                        - {v: ask, label: t:wsCode.changes.customDescription}
-                      value: $.review.target
-                      change: wcReviewTarget
-                      label: t:wsChanges.reviewTarget
-                  - label: t:wsChanges.runMode
-                    control:
-                      type: select
-                      id: wc-rv-mode
-                      options:
-                        - {v: session, label: t:wsCode.changes.modes}
-                        - {v: thread, label: t:wsCode.changes.separateCodexThread}
-                      value: $.review.mode
-                      change: wcReviewMode
-                      label: t:wsChanges.runMode
-                  - label: t:wsChanges.baseBranch
-                    when:
-                      of: $.review.target
-                      map: {base: true, _: false}
-                    control:
-                      type: input
-                      id: wc-rv-base
-                      value: $.review.baseVal
-                      placeholder: origin/main
-                      mono: true
-                      input: wcReviewIn
-                  - label: t:wsChanges.commit
-                    when:
-                      of: $.review.target
-                      map: {sha: true, _: false}
-                    control:
-                      type: input
-                      id: wc-rv-sha
-                      value: $.review.shaVal
-                      placeholder: t:wsChanges.commitSha
-                      mono: true
-                      input: wcReviewIn
-                  - label: t:common.note
-                    when:
-                      of: $.review.target
-                      map: {ask: true, _: false}
-                    control:
-                      type: input
-                      id: wc-rv-ask
-                      value: $.review.askVal
-                      placeholder: t:wsChanges.notePlaceholder
-                      input: wcReviewIn
               - type: toolbar
+                when:
+                  of: $.view
+                  map: {status: true, _: false}
                 items:
+                  - {type: grow}
                   - type: button
-                    primary: true
-                    label: t:wsChanges.startReview
-                    act: wcReviewStart
-              - {type: label, text: t:wsChanges.recentResults}
-              - type: list
-                id: wcReviews
-                from: $.reviews
-                row:
-                  layout: two
-                  key: "@id"
-                  lead:
-                    dot:
-                      of: "@state"
-                      map: {running: info, done: ok, failed: danger, _: "@state"}
-                    tip:
-                      of: "@state"
+                    icon: review
+                    label: t:wsChanges.review
+                    act: toggle
+                    args: {path: wc.reviewOpen}
+                    pressed: $.reviewOpen
+                  - type: button
+                    iconOnly: true
+                    icon: rows2
+                    label: t:wsChanges.unified
+                    act: set
+                    args: {path: wc.diffMode, v: unified}
+                    pressed:
+                      of: $.diffMode
+                      map: {unified: true, _: false}
+                  - type: button
+                    iconOnly: true
+                    icon: split2
+                    label: t:wsChanges.split
+                    act: set
+                    args: {path: wc.diffMode, v: split}
+                    pressed:
+                      of: $.diffMode
+                      map: {split: true, _: false}
+              - type: box
+                variant: card
+                when: $.reviewOpen
+                blocks:
+                  - type: settings
+                    rows:
+                      - label: t:wsChanges.reviewTarget
+                        control:
+                          type: select
+                          id: wc-rv-target
+                          options:
+                            - {v: uncommitted, label: t:wsCode.changes.targets}
+                            - {v: base, label: t:wsCode.changes.baseBranch}
+                            - {v: sha, label: t:wsCode.changes.specificCommit}
+                            - {v: ask, label: t:wsCode.changes.customDescription}
+                          value: $.review.target
+                          change: wcReviewTarget
+                          label: t:wsChanges.reviewTarget
+                      - label: t:wsChanges.runMode
+                        control:
+                          type: select
+                          id: wc-rv-mode
+                          options:
+                            - {v: session, label: t:wsCode.changes.modes}
+                            - {v: thread, label: t:wsCode.changes.separateCodexThread}
+                          value: $.review.mode
+                          change: wcReviewMode
+                          label: t:wsChanges.runMode
+                      - label: t:wsChanges.baseBranch
+                        when:
+                          of: $.review.target
+                          map: {base: true, _: false}
+                        control:
+                          type: input
+                          id: wc-rv-base
+                          value: $.review.baseVal
+                          placeholder: origin/main
+                          mono: true
+                          input: wcReviewIn
+                      - label: t:wsChanges.commit
+                        when:
+                          of: $.review.target
+                          map: {sha: true, _: false}
+                        control:
+                          type: input
+                          id: wc-rv-sha
+                          value: $.review.shaVal
+                          placeholder: t:wsChanges.commitSha
+                          mono: true
+                          input: wcReviewIn
+                      - label: t:common.note
+                        when:
+                          of: $.review.target
+                          map: {ask: true, _: false}
+                        control:
+                          type: input
+                          id: wc-rv-ask
+                          value: $.review.askVal
+                          placeholder: t:wsChanges.notePlaceholder
+                          input: wcReviewIn
+                  - type: toolbar
+                    items:
+                      - type: button
+                        primary: true
+                        label: t:wsChanges.startReview
+                        act: wcReviewStart
+                  - {type: label, text: t:wsChanges.recentResults}
+                  - type: list
+                    id: wcReviews
+                    from: $.reviews
+                    row:
+                      layout: two
+                      key: "@id"
+                      lead:
+                        dot:
+                          of: "@state"
+                          map: {running: info, done: ok, failed: danger, _: "@state"}
+                        tip:
+                          of: "@state"
+                          map:
+                            running: t:wsCode.changes.state.running
+                            done: t:common.status.completed
+                            failed: t:wsCode.changes.state.failed
+                            _: "@state"
+                      title:
+                        - text:
+                            of: "@target"
+                            map:
+                              uncommitted: t:wsCode.changes.targets
+                              base: t:wsCode.changes.baseBranch
+                              sha: t:wsCode.changes.specificCommit
+                              ask: t:wsCode.changes.customDescription
+                              _: "@target"
+                        - parts:
+                            - parts: [" · ", "@targetValue"]
+                              sep: ""
+                          when: "@targetValue"
+                        - text:
+                            of: "@mode"
+                            map:
+                              session: t:wsCode.changes.modes
+                              thread: t:wsCode.changes.separateCodexThread
+                              _: "@mode"
+                          variant: meta
+                      sub:
+                        - {text: "@summary", when: "@summary"}
+                        - {text: t:wsCode.changes.sub, when: "!@summary"}
+                      cols:
+                        - v:
+                            text:
+                              of: "@timestamp"
+                              map:
+                                "true": {of: "@at", fmt: ago}
+                                _: "@at"
+                          w: time
+                    empty: t:wsChanges.noReviews
+              - type: each
+                from: $.groups
+                when:
+                  of: $.view
+                  map: {status: true, _: false}
+                blocks:
+                  - type: label
+                    text:
+                      of: "@label"
                       map:
-                        running: t:wsCode.changes.state.running
-                        done: t:common.status.completed
-                        failed: t:wsCode.changes.state.failed
-                        _: "@state"
-                  title:
-                    - text:
-                        of: "@target"
-                        map:
-                          uncommitted: t:wsCode.changes.targets
-                          base: t:wsCode.changes.baseBranch
-                          sha: t:wsCode.changes.specificCommit
-                          ask: t:wsCode.changes.customDescription
-                          _: "@target"
-                    - parts:
-                        - parts: [" · ", "@targetValue"]
-                          sep: ""
-                      when: "@targetValue"
-                    - text:
-                        of: "@mode"
-                        map:
-                          session: t:wsCode.changes.modes
-                          thread: t:wsCode.changes.separateCodexThread
-                          _: "@mode"
-                      variant: meta
-                  sub:
-                    - {text: "@summary", when: "@summary"}
-                    - {text: t:wsCode.changes.sub, when: "!@summary"}
+                        staged: t:wsCode.git.group.staged
+                        modified: t:films.opinionState.modified
+                        untracked: t:wsCode.git.group.untracked
+                        _: "@label"
+                    count: "@count"
+                  - type: list
+                    id:
+                      t: wsCode.git.listId
+                      args: ["@label"]
+                    from: "@items"
+                    item:
+                      name: {of: "@path", fmt: basename}
+                      parent: {of: "@path", fmt: dirname}
+                      hasParent: true
+                      slot: ws.changes.file
+                      actsCtx: "@"
+                      expand:
+                        lit: {$frag: CHANGE_EXPAND}
+                    row: file.row
+              - type: list
+                id: wcGitClean
+                from: []
+                row: file.row
+                empty: t:wsGit.clean
+                when:
+                  - of: $.view
+                    map: {status: true, _: false}
+                  - of: $.count
+                    map: {"0": true, _: false}
+              - type: list
+                id: wcCommits
+                from: $.commits
+                row:
+                  layout: line
+                  key: "@short"
+                  lead: {who: "@author", form: avatar}
+                  title: "@subject"
+                  acts: {slot: ws.git.commit, ctx: "@actsCtx"}
                   cols:
                     - v:
                         text:
-                          of: "@timestamp"
-                          map:
-                            "true": {of: "@at", fmt: ago}
-                            _: "@at"
-                      w: time
-                empty: t:wsChanges.noReviews
-          - type: each
-            from: $.groups
-            when:
-              of: $.view
-              map: {status: true, _: false}
-            blocks:
-              - type: label
-                text:
-                  of: "@label"
-                  map:
-                    staged: t:wsCode.git.group.staged
-                    modified: t:films.opinionState.modified
-                    untracked: t:wsCode.git.group.untracked
-                    _: "@label"
-                count: "@count"
-              - type: list
-                id:
-                  t: wsCode.git.listId
-                  args: ["@label"]
-                from: "@items"
-                item:
-                  name: {of: "@path", fmt: basename}
-                  parent: {of: "@path", fmt: dirname}
-                  hasParent: true
-                  slot: ws.changes.file
-                  actsCtx: "@"
+                          of: "@short"
+                          slice: [0, 7]
+                        mono: true
+                      w: id
+                      tip:
+                        t: workbench.commitTip
+                        args: ["@authorName", "@authorHandle", "@short"]
+                    - {v: "@date", w: time}
                   expand:
-                    lit: {$frag: CHANGE_EXPAND}
-                row: file.row
-          - type: list
-            id: wcGitClean
-            from: []
-            row: file.row
-            empty: t:wsGit.clean
-            when:
-              - of: $.view
-                map: {status: true, _: false}
-              - of: $.count
-                map: {"0": true, _: false}
-          - type: list
-            id: wcCommits
-            from: $.commits
-            row:
-              layout: line
-              key: "@short"
-              lead: {who: "@author", form: avatar}
-              title: "@subject"
-              acts: {slot: ws.git.commit, ctx: "@actsCtx"}
-              cols:
-                - v:
-                    text:
-                      of: "@short"
-                      slice: [0, 7]
-                    mono: true
-                  w: id
-                  tip:
-                    t: workbench.commitTip
-                    args: ["@authorName", "@authorHandle", "@short"]
-                - {v: "@date", w: time}
-              expand:
-                - type: list
-                  inline: true
-                  from: "@files"
-                  item:
-                    name: {of: "@path", fmt: basename}
-                    parent: {of: "@path", fmt: dirname}
-                    hasParent: true
-                  row: file.row
-            when:
-              of: $.view
-              map: {commits: true, _: false}
-          - type: label
-            text: t:wsGit.behindMain
-            count: $.behind.length
-            when:
-              of: $.view
-              map: {health: true, _: false}
-          - type: list
-            id: wcBehind
-            from: $.behind
-            row:
-              layout: line
-              lead: {icon: branch, size: s}
-              title: "@title"
-              cols:
-                - v: {text: "@id", mono: true}
-                  w: id
-            when:
-              of: $.view
-              map: {health: true, _: false}
-          - type: label
-            text: t:wsGit.mergedBranches
-            count: $.stale.length
-            when:
-              of: $.view
-              map: {health: true, _: false}
-          - type: list
-            id: wcStale
-            from: $.stale
-            row:
-              layout: line
-              lead: {who: "@author", form: avatar}
-              title: {text: "@branch", mono: true}
-              cols:
-                - {v: "@date", w: time}
-            when:
-              of: $.view
-              map: {health: true, _: false}
-          - type: label
-            text: t:wsGit.worktrees
-            count: $.wts.length
-            when:
-              of: $.view
-              map: {health: true, _: false}
-          - type: list
-            id: wcWts
-            from: $.wts
-            item:
-              sub: {of: "@path", fmt: basename}
-            row:
-              layout: two
-              lead: {icon: folder, size: s}
-              title: {text: "@branch", mono: true}
-              inline:
-                - {dot: warn, tip: t:wsGit.orphan, when: "@orphan"}
-              sub: "@sub"
-              cols:
-                - v: {text: "@head", mono: true}
-                  w: id
-                - v:
-                    text:
-                      of: "@orphan"
-                      map: {"true": t:wsCode.git.worktreeState.true, "false": t:theme.inUse, _: "@orphan"}
-                  w: time
-                  tone:
-                    of: "@orphan"
-                    map: {"true": warn, "false": "", _: "@orphan"}
-            when:
-              of: $.view
-              map: {health: true, _: false}
+                    - type: list
+                      inline: true
+                      from: "@files"
+                      item:
+                        name: {of: "@path", fmt: basename}
+                        parent: {of: "@path", fmt: dirname}
+                        hasParent: true
+                      row: file.row
+                when:
+                  of: $.view
+                  map: {commits: true, _: false}
+              - type: label
+                text: t:wsGit.behindMain
+                count: $.behind.length
+                when:
+                  of: $.view
+                  map: {health: true, _: false}
+              - type: list
+                id: wcBehind
+                from: $.behind
+                row:
+                  layout: line
+                  lead: {icon: branch, size: s}
+                  title: "@title"
+                  cols:
+                    - v: {text: "@id", mono: true}
+                      w: id
+                when:
+                  of: $.view
+                  map: {health: true, _: false}
+              - type: label
+                text: t:wsGit.mergedBranches
+                count: $.stale.length
+                when:
+                  of: $.view
+                  map: {health: true, _: false}
+              - type: list
+                id: wcStale
+                from: $.stale
+                row:
+                  layout: line
+                  lead: {who: "@author", form: avatar}
+                  title: {text: "@branch", mono: true}
+                  cols:
+                    - {v: "@date", w: time}
+                when:
+                  of: $.view
+                  map: {health: true, _: false}
+              - type: label
+                text: t:wsGit.worktrees
+                count: $.wts.length
+                when:
+                  of: $.view
+                  map: {health: true, _: false}
+              - type: list
+                id: wcWts
+                from: $.wts
+                item:
+                  sub: {of: "@path", fmt: basename}
+                row:
+                  layout: two
+                  lead: {icon: folder, size: s}
+                  title: {text: "@branch", mono: true}
+                  inline:
+                    - {dot: warn, tip: t:wsGit.orphan, when: "@orphan"}
+                  sub: "@sub"
+                  cols:
+                    - v: {text: "@head", mono: true}
+                      w: id
+                    - v:
+                        text:
+                          of: "@orphan"
+                          map: {"true": t:wsCode.git.worktreeState.true, "false": t:theme.inUse, _: "@orphan"}
+                      w: time
+                      tone:
+                        of: "@orphan"
+                        map: {"true": warn, "false": "", _: "@orphan"}
+                when:
+                  of: $.view
+                  map: {health: true, _: false}
   ws.terminal:
     loading: t:wsTerminal.load.loading
     error: t:wsTerminal.load.error

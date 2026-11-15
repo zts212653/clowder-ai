@@ -200,7 +200,16 @@ function reviewsModels() {
       [...localWorks, ...globalWorks, ...recentOwners].some((w) => workKey(w) === workKey(selectedWork.artifact)))
       ? selectedWork.artifact
       : null;
-  const fileSource = work ? work.sourceFacts.fileSource : null;
+  const sourceResolution =
+    work && source.workResolution && source.workResolution.key === workKey(work) ? source.workResolution : null;
+  const sourceBlocked = sourceResolution && sourceResolution.kind === 'blocked',
+    sourceReadonly = sourceResolution && sourceResolution.kind !== 'ready';
+  const fileSource =
+    sourceResolution && sourceResolution.target
+      ? Object.assign({ kind: 'workspace' }, sourceResolution.target)
+      : work
+        ? work.sourceFacts.fileSource
+        : null;
   const s = state(),
     r = currentRound(),
     canWrite = !!view?.authority.canWrite && !view.pendingVersion && r === view.review.rounds.at(-1),
@@ -481,15 +490,17 @@ function reviewsModels() {
     work: work
       ? {
           id: workKey(work),
+          sourceResolution,
+          sourceBlocked: !!sourceBlocked,
           title: work.name,
           i: workKey(work),
           kind:
-            text.error || (!work.url && !work.ref)
+            sourceBlocked || text.error || (!work.url && !work.ref)
               ? 'nosrc'
               : workKind === 'office' || workKind === 'binary'
                 ? 'bin'
                 : workKind,
-          source: work.sourceFacts.fileUrl || work.sourceFacts.mediaUrl,
+          source: sourceBlocked ? null : work.sourceFacts.fileUrl || work.sourceFacts.mediaUrl,
           openPath: fileSource && fileSource.kind === 'workspace' ? fileSource.path : work.name,
           meta: {
             type: work.type,
@@ -501,7 +512,7 @@ function reviewsModels() {
           },
           bodyLoad: text.loading ? 'loading' : '',
           text:
-            text.content === null
+            sourceBlocked || text.content === null
               ? null
               : {
                   path: text.path,
@@ -518,7 +529,7 @@ function reviewsModels() {
                 }
               : null,
           bin:
-            ['office', 'binary'].includes(workKind) && fileSource && fileSource.kind !== 'none'
+            !sourceBlocked && ['office', 'binary'].includes(workKind) && fileSource && fileSource.kind !== 'none'
               ? { source: work.sourceFacts.fileUrl }
               : null,
           fileInfo: workMetadata ? fileInfoVM(workMetadata) : null,
@@ -529,10 +540,10 @@ function reviewsModels() {
             work.type === 'video' && work.work
               ? { contentRef: work.work.contentRef, ownerRevision: work.work.ownerRevision }
               : null,
-          canReview: ['image', 'video'].includes(work.type),
+          canReview: !sourceReadonly && ['image', 'video'].includes(work.type),
           review: !!review,
           media:
-            review || !['image', 'video', 'audio'].includes(workKind)
+            sourceBlocked || review || !['image', 'video', 'audio'].includes(workKind)
               ? null
               : {
                   id: workKey(work),
@@ -540,7 +551,7 @@ function reviewsModels() {
                   src: work.url ? work.sourceFacts.mediaUrl : null,
                   label: work.name,
                   marks: ui.lb?.selection ? [ui.lb.selection] : [],
-                  canPick: work.type === 'image',
+                  canPick: !sourceReadonly && work.type === 'image',
                   canWrite: false,
                 },
         }
@@ -557,17 +568,19 @@ function reviewsModels() {
             index: 1,
             total: 1,
             file:
-              fileSource && fileSource.kind === 'workspace'
+              !sourceReadonly && fileSource && fileSource.kind === 'workspace'
                 ? { path: fileSource.path, worktreeId: fileSource.worktreeId }
                 : null,
             many: false,
-            source: s
-              ? view && snapshot?.round === r?.number
-                ? snapshot?.download
-                : undefined
-              : work.url
-                ? work.sourceFacts.mediaUrl
-                : null,
+            source: sourceBlocked
+              ? null
+              : s
+                ? view && snapshot?.round === r?.number
+                  ? snapshot?.download
+                  : undefined
+                : work.url
+                  ? work.sourceFacts.mediaUrl
+                  : null,
             selection: ui.lb?.selection,
             words: ui.lb?.words,
           }

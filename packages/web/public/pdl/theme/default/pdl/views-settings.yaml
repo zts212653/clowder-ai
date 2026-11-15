@@ -2647,6 +2647,14 @@ views:
           open: false
           rows: []
           toggle: t:control.envToggle
+  dlg.agy:
+    title: t:accounts.agy.title
+    ok: t:common.save
+    fields:
+      - label: t:accounts.form.noteName
+        id: agy-note
+        value: $.name
+        req: true
   dlg.token:
     okArgs:
       name: t:accounts.token.longLivedToken
@@ -3208,6 +3216,48 @@ views:
       t: settingsUi.confirm.fileOverwrite.text
       args: [$.name]
     ok: t:common.confirm
+  dlg.pluginFrameClose:
+    vm: pluginFrameClose
+    title: t:pluginFrameClose.title
+    blocks:
+      - type: box
+        when: "!$.discard"
+        blocks:
+          - type: notice
+            tone: warn
+            text:
+              of: $.phase
+              map:
+                slow: t:pluginFrameClose.saving
+                failed: t:pluginFrameClose.failed
+          - type: toolbar
+            items:
+              - type: button
+                label: t:pluginFrameClose.stillClose
+                act: pluginFrameDiscard
+                args: {node: $.node}
+              - type: button
+                label: t:common.cancel
+                act: pluginFrameStay
+                args: {node: $.node}
+      - type: box
+        when: $.discard
+        blocks:
+          - type: text
+            text: t:pluginFrameClose.discardTitle
+          - type: text
+            text: t:pluginFrameClose.discardText
+          - type: toolbar
+            items:
+              - type: button
+                label: t:pluginFrameClose.discard
+                danger: true
+                act: pluginFrameForce
+                args: {node: $.node}
+              - type: button
+                label: t:pluginFrameClose.wait
+                act: pluginFrameContinue
+                args: {node: $.node}
   dlg.routingPreferenceRetire:
     title: t:settingsUi.confirm.routingPreferenceRetire
     fields:
@@ -3350,6 +3400,10 @@ rows:
         variant: meta
         when: "!@renaming"
     sub:
+      - text:
+          of: "@agyState"
+          map: {ready: t:accounts.agy.ready, refreshable: t:accounts.agy.ready, unreadable: t:accounts.agy.unreadable, _: t:accounts.agy.notReady}
+        when: "@agy"
       - text: {t: accounts.googleCloud, args: ["@projectId"]}
         when: "@projectId"
       - control:
@@ -3368,6 +3422,16 @@ rows:
               conflict: warn
               _: "@state"
         when: {$frag: ACCOUNT_EXCEPTION}
+      - text:
+          of: "@loginState"
+          map: {waiting: t:accounts.awaitBrowser, preparing: t:accounts.preparingLogin, queued: t:accounts.preparingLogin, review: t:accounts.reviewLogin, _: ""}
+        when: "@loginState"
+      - control:
+          type: button
+          label: t:accounts.openLoginTerminal
+          act: accLogin
+          args: {k: "@id", v: terminal}
+        when: "@terminalAvailable"
       - text:
           of: "@state"
           map:
@@ -3417,6 +3481,12 @@ rows:
                           sep: ""
                 when: "@hasUsers"
               - {type: text, variant: value, text: t:chip.empty, when: "!@hasUsers"}
+          - label: t:accounts.agy.command
+            when: "@agy"
+            ctls:
+              - {type: copy, value: "@agyCommand", v: "@agyCommand", when: "@agyCommand"}
+              - {type: text, variant: meta, text: t:accounts.agy.noCommand, when: "!@agyCommand"}
+              - {type: button, label: t:accounts.agy.refresh, act: agyRefresh, args: {id: "@id"}}
           - label: t:accounts.detail.loginIdentity
             when: "@email"
             control: {type: text, variant: value, text: "@email"}
@@ -3445,6 +3515,10 @@ rows:
           - label: t:accounts.quota
             when: "@quota"
             ctls:
+              - type: status
+                tone: warn
+                text: t:accounts.quotaIdentityChanged
+                when: "@quotaIdentityChanged"
               - type: status
                 tone:
                   of: "@quotaData.fail"
@@ -3551,6 +3625,10 @@ rows:
                     act: accRelogin
                     args: {id: "@id"}
                     when: ["!@builtin", "@managed"]
+                  - label: t:common.edit
+                    act: agyOpen
+                    args: {id: "@id"}
+                    when: "@agy"
                   - label: t:common.edit
                     act: accOpen
                     args: {kind: acc, v: key, id: "@id"}

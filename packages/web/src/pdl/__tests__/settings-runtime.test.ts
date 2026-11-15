@@ -1932,6 +1932,7 @@ describe('r141 placement owners', () => {
       await w.__settled();
       expect(w.document.querySelector('[data-act="marketSourcesRefresh"]')).not.toBeNull();
       expect(w.eval('VM.marketSources().sources.map(x=>x.canRemove)')).toEqual([true, false]);
+      expect(w.eval('VM.marketSources().raw.sources')).toEqual(raw.marketSources.sources);
       w.document.getElementById('market-branch').value = 'dev';
       await w.eval("A.marketSourceAdd({v:' https://plugins.test/new '})");
       expect(action).toHaveBeenLastCalledWith(

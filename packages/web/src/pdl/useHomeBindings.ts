@@ -1,6 +1,7 @@
 'use client';
 import type { ActiveExecutionProjection } from '@cat-cafe/shared';
 import { useEffect, useMemo, useState } from 'react';
+import { recoveryPending } from '@/components/managed-job/recovery-projection';
 import {
   cancelHoldWait,
   cancelProjectedExecution,
@@ -16,7 +17,9 @@ interface JobRead {
   catId: string;
   access: { lifecycleVisibility: string };
   cancelable: boolean;
+  recovery?: unknown;
   job?: {
+    recovery?: unknown;
     originTaskId: string;
     createdAt: number;
     state: string;
@@ -52,7 +55,11 @@ export function useHomeBindings(data: ChatData, ui: { execDetail: string | null 
         )
           throw new Error('执行详情身份已变化');
         if (!abort.signal.aborted) setDetail({ id: selected.executionId, load: '', read: result });
-        return result.job?.state;
+        return (
+          (!!result.job && ['queued', 'running', 'cancelling'].includes(result.job.state)) ||
+          recoveryPending(result.recovery) ||
+          recoveryPending(result.job?.recovery)
+        );
       } catch {
         if (!abort.signal.aborted) setDetail({ id: selected.executionId, load: 'error' });
       }
@@ -65,7 +72,7 @@ export function useHomeBindings(data: ChatData, ui: { execDetail: string | null 
       clearTimeout(timer);
       if (document.hidden) return;
       const state = await read();
-      if (!abort.signal.aborted && state && state !== 'terminal') timer = setTimeout(poll, 2000);
+      if (!abort.signal.aborted && state) timer = setTimeout(poll, 2000);
     };
     void poll();
     document.addEventListener('visibilitychange', poll);

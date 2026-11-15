@@ -813,6 +813,33 @@
         "forget": "清除这页及其来源关联，原消息会保留。此操作无法撤销。",
         "retire": "停止用于新的回看，保留记录与来源。"
       }
+    },
+    "deferred": {
+      "title": "暂存的人物线索",
+      "error": "暂存条目暂时读不到",
+      "empty": "当前没有暂存的人物线索",
+      "awaiting": "待确认",
+      "deferred": "暂存待整理",
+      "claimed": "正在整理",
+      "withdrawn": "已撤回，内容已清空",
+      "notActionable": "未采纳，内容已清空",
+      "proposed": "已转为正式人物提议",
+      "unknown": "状态暂不可确认",
+      "pendingForget": "永久遗忘尚未完成",
+      "withdraw": "撤回",
+      "forget": "永久遗忘",
+      "proposal": "前往原提议"
+    },
+    "personMaintenance": {
+      "unknown": "结果尚未确认；重试会继续同一次操作。",
+      "retry": "重试这次操作",
+      "usageError": "读取记录暂不可用",
+      "directRead": "主动读取",
+      "cueDrill": "点名记忆点开",
+      "forgetItem": "遗忘这条内容",
+      "confirmTitle": "确认人物记忆操作",
+      "withdrawConfirm": "停止整理并清空这条暂存线索。原始对话保留。",
+      "forgetConfirm": "永久遗忘这条内容，不能撤销。原始对话保留。"
     }
   },
   "chatMessage": {
@@ -864,7 +891,16 @@
       "undone": "已撤销",
       "target": "→ {0}",
       "original": "原话"
-    }
+    },
+    "routing": {
+      "mention": "@{0}",
+      "handoff": "正文未交接给 {0}。需要时可引用回复并点名。",
+      "disabled": "@{0} 已停用，已跳过。可用替代：{1}",
+      "outside": "@{0} 不在当前对话的参与者列表中，已跳过。",
+      "ack": "{0} 已有 terminal ACK，未触发新回复。",
+      "missing": "{0} 不存在，已跳过。"
+    },
+    "executionUnavailable": "执行定位已不可用"
   },
   "classify": {
     "dialog": {
@@ -1128,7 +1164,20 @@
     "openGithub": "在 GitHub 打开",
     "noPreview": "这种类型不能在这里预览。",
     "openNewTab": "新标签打开",
-    "noSource": "这个作品没有内容源。"
+    "noSource": "这个作品没有内容源。",
+    "sourceState": {
+      "preview-fallback": "只读预览（无法批注） · {0}",
+      "blocked": "{0}",
+      "ready": "{0}"
+    },
+    "sourceDenied": "无权访问原文件，已停止展示缓存预览",
+    "sourceIdentityChanged": "登录身份已变化，无法沿用原文件访问",
+    "sourceNotFound": "原文件或目录未连接",
+    "sourceTooLarge": "原文件超出协作打开大小限制",
+    "sourceInventory": "已登记目录暂时无法核验",
+    "sourceConnection": "原文件目录尚未连接",
+    "sourceChecking": "正在核验原文件位置",
+    "sourceUnknown": "暂时无法核验原文件位置"
   },
   "search": {
     "scope": {
@@ -1206,7 +1255,8 @@
       "applied": "日程已实际更新",
       "effectUnknown": "已批准，生效结果尚未确认",
       "applying": "正在应用日程更改…"
-    }
+    },
+    "originalQuotes": "原话"
   },
   "trash": {
     "deletedAgo": "{0}删除",
@@ -1357,10 +1407,50 @@
       "dsh_setup_model_unavailable": "所选路线或模型已不可用。请刷新模型设置并重新选择；当前草稿已保留。",
       "dsh_setup_busy": "正在读取其他 Desktop 配置。请稍后重试，当前草稿已保留。",
       "default": "无法准备 Desktop 配置。请检查 DSH Desktop 的模型和认证设置后重试，当前配置已保留。"
+    },
+    "dshCheck": {
+      "unchecked": "尚未检查",
+      "checking": "正在检查连接",
+      "passed": "模型已连接",
+      "partial": "模型已连接，部分工具不可用",
+      "failed": "连接检查失败",
+      "unknown": "无法确认连接结果",
+      "stale": "配置或工具已变化",
+      "refresh": "刷新状态",
+      "check": "检查连接",
+      "cost": "可能产生模型费用",
+      "tool_schema_rejected": "工具配置被模型拒绝",
+      "session_configuration_unavailable": "客户端未能采用所选模型或思考强度",
+      "check_timed_out": "连接检查超时",
+      "check_store_unavailable": "检查记录服务暂不可用",
+      "model_reply_unconfirmed": "未确认正常的文本回复",
+      "plugin_activation_unavailable": "插件运行不可用",
+      "invalidTool": "工具定义无效"
     }
   },
   "theater": {
     "label": "回放剧场",
     "empty": "暂无可回放的记录"
+  },
+  "memoryGroup": {
+    "unreadable": "原记录暂时无法读取",
+    "matter": "事项",
+    "person": "人物记忆",
+    "profile": "画像",
+    "taste": "品味",
+    "entity": "实体",
+    "event": "事件修正",
+    "saved": "已保存",
+    "deferred": "已暂存",
+    "joined": "已合并",
+    "unavailable": "不可用",
+    "refused": "未写入",
+    "completed": "已完成",
+    "forgotten": "已遗忘",
+    "sourceChanged": "来源已变化",
+    "source": "查看原话",
+    "change": "修改建议",
+    "changePrompt": "请按修改建议重新提交这条记忆提案：",
+    "changeBlocked": "原对话草稿暂未就绪，请稍后重试。"
   }
 }

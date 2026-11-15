@@ -78,5 +78,18 @@
  },
  "wsEvolution": {
   "automaticRetired": "Automatic evaluation retired; start one on demand"
- }
+ },
+  "wsGit": {
+    "worktreeRequired": "This is a bare Git repository; this view requires a worktree",
+    "unavailable": "Git repository unavailable",
+    "readFailed": "Could not read Git"
+  },
+  "recovery": {
+    "paused": "Automatic recovery paused",
+    "pending": "Recovery pending",
+    "needsAttention": "Needs attention",
+    "parked": "Parked",
+    "interrupted": "Interrupted",
+    "recheck": "Recheck"
+  }
 }

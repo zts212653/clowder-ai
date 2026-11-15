@@ -1461,6 +1461,8 @@ it('opens a project recent work in the existing work owner with shared Office me
     const url = new URL(String(raw), 'https://api.test');
     if (url.pathname === '/api/artifacts')
       return response({ artifacts: [office], complete: true, workLineage: 'resolved' });
+    if (url.pathname === '/api/workspace/resolve-file-source')
+      return response({ kind: 'file', worktreeId: 'source-wt', path: 'owner.pptx' });
     expect(url.pathname).toBe('/api/workspace/file');
     expect(Object.fromEntries(url.searchParams)).toEqual({ worktreeId: 'source-wt', path: 'owner.pptx' });
     return response({

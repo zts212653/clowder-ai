@@ -438,6 +438,13 @@ slots:
     scope: row
     accepts: row-action
     kids:
+      - id: live.locate
+        scope: row
+        move: ws.live.run
+        title: t:reply.jump
+        icon: jump
+        open: {action: executionLocate}
+        args: {k: id, startedAt: startedAt, inv: inv, thread: thread, who: who}
       - id: live.trace
         scope: row
         move: ws.live.run

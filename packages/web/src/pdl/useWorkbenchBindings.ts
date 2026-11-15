@@ -28,11 +28,11 @@ interface WorkspacePatch {
   diff: string;
 }
 interface GitData {
-  status: GitStatusResult;
-  log: {
+  status?: GitStatusResult;
+  log?: {
     commits: (GitCommit & Pick<CommitDetail, 'files'>)[];
   };
-  health: GitHealthResult;
+  health?: GitHealthResult;
 }
 interface ProjectDirectory {
   current: string;
@@ -248,7 +248,10 @@ export function useWorkbenchBindings(
   if (needed.tasks) heldTasks.current = liveTasks;
   const tasks = heldTasks.current;
   const recall = useRecallBindings(data, state.current, needed.recall);
-  const [git, setGit] = useState<{ id: string; data?: GitData; load: string }>({ id: '', load: 'loading' });
+  const [git, setGit] = useState<{ id: string; data?: GitData; errors?: Record<string, string>; load: string }>({
+    id: '',
+    load: 'loading',
+  });
   const [generation, setGeneration] = useState(0);
   const [native, setNative] = useState<{
     load: string;
@@ -318,33 +321,58 @@ export function useWorkbenchBindings(
     }
     setGit((current) => (current.id === id ? current : { id, load: 'loading' }));
     const query = new URLSearchParams({ worktreeId: id });
-    void Promise.all([
-      request<GitData['status']>(`/api/workspace/git-status?${query}`, { signal: abort.signal }),
-      request<{ commits: GitCommit[] }>(`/api/workspace/git-log?${query}&limit=20`, { signal: abort.signal }),
-      request<GitData['health']>(`/api/workspace/git-health?${query}`, { signal: abort.signal }),
-    ])
-      .then(async ([status, log, health]) => {
-        const [commits, patch] = await Promise.all([
-          Promise.all(
-            log.commits.map(async (commit) => ({
-              ...commit,
-              files: (
-                await request<CommitDetail>(`/api/workspace/git-show?${query}&hash=${commit.hash}`, {
-                  signal: abort.signal,
-                })
-              ).files,
-            })),
-          ),
-          request<WorkspacePatch>(`/api/workspace/diff?${query}`, { signal: abort.signal }),
-        ]);
-        if (!abort.signal.aborted) {
-          setGit({ id, data: { status, log: { commits }, health }, load: '' });
-          setPatch({ id, data: patch, parsed: parseUnifiedDiff(patch.diff) });
+    const read = async () => {
+      const errors: Record<string, string> = {};
+      const result = await Promise.allSettled([
+        request<GitStatusResult>(`/api/workspace/git-status?${query}`, { signal: abort.signal }),
+        request<{ commits: GitCommit[] }>(`/api/workspace/git-log?${query}&limit=20`, { signal: abort.signal }).then(
+          async (log) => ({
+            commits: await Promise.all(
+              log.commits.map(async (commit) => ({
+                ...commit,
+                files: (
+                  await request<CommitDetail>(`/api/workspace/git-show?${query}&hash=${commit.hash}`, {
+                    signal: abort.signal,
+                  })
+                ).files,
+              })),
+            ),
+          }),
+        ),
+        request<GitHealthResult>(`/api/workspace/git-health?${query}`, { signal: abort.signal }),
+        request<WorkspacePatch>(`/api/workspace/diff?${query}`, { signal: abort.signal }),
+      ]);
+      const keys = ['status', 'log', 'health', 'diff'];
+      result.forEach((value, i) => {
+        if (value.status === 'rejected') {
+          const failure = value.reason;
+          errors[keys[i]] =
+            failure.status === 409 && failure.code === 'git_worktree_required'
+              ? failure.code
+              : failure.status === 503 && failure.code === 'git_unavailable'
+                ? failure.code
+                : 'error';
         }
-      })
-      .catch(() => {
-        if (!abort.signal.aborted) setGit({ id, load: 'error' });
       });
+      if (abort.signal.aborted) return;
+      const [status, log, health, patch] = result;
+      setGit({
+        id,
+        data: {
+          status: status.status === 'fulfilled' ? status.value : undefined,
+          log: log.status === 'fulfilled' ? log.value : undefined,
+          health: health.status === 'fulfilled' ? health.value : undefined,
+        },
+        errors,
+        load: Object.values(errors).includes('error') ? 'error' : '',
+      });
+      setPatch(
+        patch.status === 'fulfilled'
+          ? { id, data: patch.value, parsed: parseUnifiedDiff(patch.value.diff) }
+          : undefined,
+      );
+    };
+    void read();
     return () => abort.abort();
   }, [needed.git, workspace.worktreeId, workspace.worktrees, generation]);
   const fileScope = JSON.stringify([opened?.worktreeId, opened?.file.path]);

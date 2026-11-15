@@ -274,7 +274,114 @@ function chatFindResults() {
     });
 }
 const chatMarkdown = new Map();
+function memoryGroupVM(block, read, threadId, key) {
+  const group = block.meta.memoryGroup;
+  return {
+    key: key,
+    load: read ? (read.error ? 'error' : '') : 'loading',
+    rows: read
+      ? read.rows.map(function (entry) {
+          const row = entry.row,
+            matter = entry.matter && entry.matter.matter,
+            person = entry.person;
+          const claim =
+              person &&
+              person.claims.find(function (claim) {
+                return claim.claimId === row.resultRef;
+              }),
+            event =
+              person &&
+              person.interactions.find(function (event) {
+                return event.eventId === row.resultRef;
+              });
+          const original = entry.original,
+            redacted =
+              (claim && (claim.status === 'redacted' || claim.payload.kind === 'redacted')) ||
+              (event && event.status === 'redacted');
+          return {
+            key: row.itemId,
+            target: row.target,
+            title: matter ? matter.title : person ? person.displayName : original ? original.block.title : '',
+            state: row.statusCode >= 400 || row.error || entry.error ? 'refused' : row.status || 'completed',
+            error: row.error || entry.error,
+            unreadable:
+              (!!row.proposalId && !original) || (row.target === 'person_revision' && !!person && !claim && !event),
+            redacted: !!redacted,
+            body: redacted
+              ? ''
+              : matter
+                ? matter.description
+                : original
+                  ? original.block.bodyMarkdown
+                  : claim
+                    ? claim.approvedText ||
+                      claim.payload.statement ||
+                      (claim.payload.value === undefined ? '' : JSON.stringify(claim.payload.value))
+                    : event
+                      ? event.headline
+                      : '',
+            sources: entry.matter
+              ? entry.matter.entries.map(function (source) {
+                  return {
+                    quote: source.sourceStatus === 'current' ? source.quote : '',
+                    sourceChanged: source.sourceStatus !== 'current',
+                    threadId: source.source.threadId,
+                    messageId: source.source.messageId,
+                  };
+                })
+              : [],
+            original: original && original.coordinate,
+            canChange: !!original,
+            canOpen: !!original || !!matter || !!person,
+            open: {
+              target: row.target,
+              id: matter ? matter.matterId : person ? person.personId : '',
+              thread: original ? original.coordinate.threadId : threadId,
+              mid: original && original.coordinate.messageId,
+            },
+            groupKey: key,
+            itemId: row.itemId,
+          };
+        })
+      : [],
+    count: read ? read.rows.length : 0,
+  };
+}
 function chatMessageVM(x) {
+  const message = chatMessageIndex.get(x.mid),
+    locator = message && message.source;
+  const taskId = locator && locator.connector === 'hold-ball' && locator.meta && locator.meta.taskId;
+  if (taskId) {
+    const source = projectData('sources');
+    x = Object.assign({}, x, {
+      recovery: recoveryModel(
+        [],
+        source && source.records.holds && source.records.holds[taskId],
+        taskId,
+        source && source.holdBusy && source.holdBusy[taskId],
+      ),
+    });
+  }
+  if (x.embeds)
+    x = Object.assign({}, x, {
+      embeds: x.embeds.map(function (entry) {
+        const rich = entry.rich,
+          block = rich && rich.block;
+        if (!block || block.kind !== 'card' || !block.meta || block.meta.kind !== 'memory_group') return entry;
+        const source = projectData('sources'),
+          key = x.mid + ':' + block.id;
+        return Object.assign({}, entry, {
+          rich: Object.assign({}, rich, {
+            group: memoryGroupVM(
+              block,
+              source && source.records.memoryGroups && source.records.memoryGroups[key],
+              chatDataSnapshot.chat.threadId,
+              key,
+            ),
+          }),
+        });
+      }),
+    });
   let body = chatMarkdown.get(x.mid);
   if (!body || body.md !== x.md) {
     body = msgMd({ md: x.md });
@@ -512,6 +619,7 @@ window.clowderChat = {
         chatConfirm = null;
         resolve(false);
       }
+      A.pluginFrameDialogChanged(value);
     };
     Object.assign(S, {
       navW: port.navResize.width(),
@@ -532,7 +640,7 @@ window.clowderChat = {
     A.scheduleDecide = function (d) {
       return chatAction('cardDecide', { mid: d.mid, v: d.decision === 'approve' ? 'ok' : 'no' });
     };
-    ['chatHeader', 'chatPage', 'chatComposer', 'chatPop', 'chatWelcome'].forEach(function (name) {
+    ['chatHeader', 'chatPage', 'chatComposer', 'chatPop', 'chatWelcome', 'runtimeConnection'].forEach(function (name) {
       VM[name] = function () {
         return chatRead(name);
       };
@@ -850,6 +958,22 @@ window.clowderChat = {
     A.draftAttachment = function (d) {
       CS.lb = { mid: '', block: '', i: +d.i, target: { kind: 'draftAttachment', i: +d.i } };
       render(true);
+    };
+    A.memoryGroupRefresh = function (d) {
+      return chatAction('memoryGroupRefresh', d);
+    };
+    A.memoryGroupOpen = function (d) {
+      if (d.mid) return A.msgJump({ t: d.thread, mid: d.mid });
+      if (d.target === 'matter') {
+        A.matterOpen({ id: d.id });
+        return go('memory');
+      }
+      return A.memOpen({ family: 'person', id: d.id });
+    };
+    A.memoryGroupChange = function (d) {
+      return chatAction('memoryGroupChange', d).then(function (origin) {
+        if (origin) return A.msgJump({ t: origin.threadId, mid: origin.messageId });
+      });
     };
     A.msgJump = function (d) {
       S.inboxOpen = false;

@@ -766,3 +766,25 @@ it('projects the recorded recall count and consumed count together', () => {
   });
   expect(groups[0].items[0]).toMatchObject({ resultStatus: 'hits', resultCount: 9, readCount: 2, empty: false });
 });
+
+it('keeps bare-repository commits while status and health require a worktree, and classifies damaged repositories', async () => {
+  const original = vi.mocked(apiFetch).getMockImplementation()!;
+  let damaged = false;
+  vi.mocked(apiFetch).mockImplementation(async (path, init, options) => {
+    const endpoint = new URL(String(path), 'https://api.test').pathname;
+    if (damaged && /git-|\/diff$/.test(endpoint))
+      return response({ code: 'git_unavailable', error: 'unavailable' }, 503);
+    if (['/api/workspace/git-status', '/api/workspace/git-health', '/api/workspace/diff'].includes(endpoint))
+      return response({ code: 'git_worktree_required', error: 'bare' }, 409);
+    if (endpoint === '/api/workspace/git-log')
+      return response({ commits: [{ hash: 'commit', short: 'commit', subject: 'Bare history', author: 'owner' }] });
+    if (endpoint === '/api/workspace/git-show') return response({ files: [] });
+    return original(path, init, options);
+  });
+  const hook = await ready();
+  expect(hook.result.current.project().git.gitError).toBe('git_worktree_required');
+  expect(hook.result.current.project().git.commits[0].subject).toBe('Bare history');
+  damaged = true;
+  await act(() => hook.result.current.action('refresh', { k: 'git' }));
+  await waitFor(() => expect(hook.result.current.project().git.gitError).toBe('git_unavailable'));
+});

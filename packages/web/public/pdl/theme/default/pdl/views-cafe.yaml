@@ -147,6 +147,47 @@ views:
             placeholder: t:memory.searchPlaceholder
             value: $.q
             input: cafeMemQ
+      - type: box
+        when: $.personMaintenance.pending
+        blocks:
+          - {type: status, tone: warn, text: t:memoryOwners.personMaintenance.unknown}
+          - {type: button, label: t:memoryOwners.personMaintenance.retry, act: personMaintenanceRetry, busy: $.personMaintenance.busy}
+      - type: section
+        title: t:memoryOwners.deferred.title
+        when: $.deferred
+        blocks:
+          - type: list
+            from: $.deferred.entries
+            load: $.deferred.load
+            error: t:memoryOwners.deferred.error
+            retry: {act: personDeferredRefresh}
+            empty: t:memoryOwners.deferred.empty
+            row:
+              layout: two
+              key: "@receiptId"
+              title:
+                - text: "@subject"
+                  when: {of: "@state", map: {awaiting_confirmation: true, deferred: true, claimed: true, _: false}}
+                - text:
+                    of: "@state"
+                    map: {awaiting_confirmation: t:memoryOwners.deferred.awaiting, deferred: t:memoryOwners.deferred.deferred, claimed: t:memoryOwners.deferred.claimed, withdrawn: t:memoryOwners.deferred.withdrawn, not_actionable: t:memoryOwners.deferred.notActionable, proposed: t:memoryOwners.deferred.proposed, _: t:memoryOwners.deferred.unknown}
+              sub:
+                - {text: t:memoryOwners.deferred.pendingForget, when: "@pendingAction"}
+                - {text: {of: "@updatedAt", fmt: ago}}
+              acts:
+                - label: t:memoryOwners.deferred.withdraw
+                  act: personDeferredAction
+                  args: {receiptId: "@receiptId", expectedRevision: "@revision", action: withdraw}
+                  when: {of: "@state", map: {awaiting_confirmation: true, deferred: true, claimed: true, _: false}}
+                - label: t:memoryOwners.deferred.forget
+                  act: personDeferredAction
+                  args: {receiptId: "@receiptId", expectedRevision: "@revision", action: forget}
+                  when: {of: "@state", map: {awaiting_confirmation: true, deferred: true, claimed: true, withdrawn: true, not_actionable: true, _: false}}
+                - label: t:memoryOwners.deferred.proposal
+                  act: personDeferredProposal
+                  args: {id: "@proposalId", section: "@proposalSection"}
+                  when: "@proposalId"
+          - {type: button, label: t:common.more, act: personDeferredMore, when: $.deferred.nextCursor}
       - type: view
         id: memory.matters
         when:
@@ -532,6 +573,9 @@ views:
                           - label: t:common.edit
                             act: cafeMemAct
                             args: {family: person, op: claim, id: "@claimId", expectedRevision: "@revision"}
+                          - label: t:memoryOwners.personMaintenance.forgetItem
+                            act: personItemForget
+                            args: {kind: claim, id: "@claimId", expectedRevision: "@revision"}
                           - label: t:memoryOwners.retireClaim
                             act: setStatus
                             args: {entity: personClaim, id: "@claimId", field: status, v: retired}
@@ -596,6 +640,11 @@ views:
                           act: cafeMemAct
                           when: "@canWrite"
                           args: {family: person, op: event, id: "@eventId", expectedRevision: "@revision"}
+                        - type: button
+                          label: t:memoryOwners.personMaintenance.forgetItem
+                          act: personItemForget
+                          when: "@canWrite"
+                          args: {kind: event, id: "@eventId", expectedRevision: "@revision"}
           - type: disclosure
             key: memory-sources
             title: t:common.source
@@ -611,21 +660,33 @@ views:
           - type: disclosure
             key: memory-usage
             title: t:memoryOwners.usage
-            when: $.detail.profile
+            when: $.detail.usage
             blocks:
+              - type: status
+                tone: warn
+                text: t:memoryOwners.personMaintenance.usageError
+                when: $.detail.usage.error
+              - type: button
+                label: t:common.retry
+                act: personUsageRefresh
+                when: [$.detail.usage.error, $.detail.person]
               - type: stats
-                when: "!$.detail.profile.usage.error"
+                when: "!$.detail.usage.error"
                 from:
                   - l: t:memoryOwners.metric.currentOpening
-                    v: $.detail.profile.usage.currentVersion.opening
+                    v: $.detail.usage.currentVersion.opening
+                    when: $.detail.profile
                   - l: t:memoryOwners.metric.currentRead
-                    v: $.detail.profile.usage.currentVersion.read
+                    v: $.detail.usage.currentVersion.read
                   - l: t:memoryOwners.metric.allOpening
-                    v: $.detail.profile.usage.allVersions.opening
+                    v: $.detail.usage.allVersions.opening
+                    when: $.detail.profile
                   - l: t:memoryOwners.metric.allRead
-                    v: $.detail.profile.usage.allVersions.read
+                    v: $.detail.usage.allVersions.read
+                  - {l: t:memoryOwners.personMaintenance.directRead, v: $.detail.usage.currentVersion.directRead, when: $.detail.person}
+                  - {l: t:memoryOwners.personMaintenance.cueDrill, v: $.detail.usage.currentVersion.cueDrill, when: $.detail.person}
               - type: list
-                from: $.detail.profile.usageRows
+                from: $.detail.usage.recent
                 item:
                   kind:
                     of: "@kind"
@@ -5441,6 +5502,12 @@ views:
     danger:
       of: $.operation
       map: {forget: true, _: false}
+  dlg.personMaintenance:
+    title: t:memoryOwners.personMaintenance.confirmTitle
+    text:
+      of: $.action
+      map: {withdraw: t:memoryOwners.personMaintenance.withdrawConfirm, _: t:memoryOwners.personMaintenance.forgetConfirm}
+    ok: t:common.confirm
 rows:
   thread.row:
     layout: two

@@ -8,12 +8,14 @@ import type {
   ProfileUsageSummary,
   TasteMemoryCorrectionProposalView,
 } from '@cat-cafe/shared';
+import { type MemoryReadUsage, memoryReadUsageSchema } from '@cat-cafe/shared';
 import {
   readProfileOpeningReference,
   splitProfileBody,
   updateProfileOpeningReference,
 } from '@cat-cafe/shared/profile-opening-reference';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import { z } from 'zod';
 import type { LibraryCollection } from '@/components/memory/page/MemoryLibrary';
 import {
   hasValidOriginalProposals,
@@ -37,6 +39,7 @@ import {
 import { useMemoryRead } from '@/components/memory/page/use-memory-read';
 import { parseUnifiedAttentionRead } from '@/components/shell/parse-unified-attention';
 import { apiFetch } from '@/utils/api-client';
+import { apiSessionIdentity } from '@/utils/api-session-identity';
 import { failRead, request, write } from './owner-api';
 import { useMemoryExploreBindings } from './useMemoryExploreBindings';
 
@@ -88,7 +91,7 @@ interface Detail {
   id: string;
   entry: Entry & { revision: string };
   source: Source;
-  usage?: ProfileUsageSummary;
+  usage?: ProfileUsageSummary | MemoryReadUsage | { error: string };
   sources: Record<string, Source>;
   correctionCards: Record<string, { threadId: string; messageId: string }>;
 }
@@ -122,7 +125,91 @@ function useMemoryPages(family: 'person' | 'event', limit: number, needed: boole
   }, [needed, family, limit, attempt]);
   return { ...read, retry: () => retry((n) => n + 1) };
 }
+const deferredSchema = z.object({
+  entries: z.array(
+    z.object({
+      receiptId: z.string(),
+      revision: z.string(),
+      subject: z.string().optional(),
+      state: z.string(),
+      createdAt: z.number(),
+      updatedAt: z.number(),
+      sourceCount: z.number(),
+      pendingAction: z.literal('forget').optional(),
+      proposalId: z.string().optional(),
+      proposalSection: z.enum(['pending', 'history']).optional(),
+    }),
+  ),
+  nextCursor: z.string().nullable(),
+});
+const isDeferredPage = (value: unknown): value is z.infer<typeof deferredSchema> =>
+  deferredSchema.safeParse(value).success;
+const maintenanceSchema = z.intersection(
+  z.object({ requestId: z.string().min(32), expectedRevision: z.string().regex(/^sha256:[a-f0-9]{64}$/) }),
+  z.discriminatedUnion('action', [
+    z.object({
+      action: z.literal('redact_item'),
+      personId: z.string(),
+      item: z.object({ kind: z.enum(['claim', 'event']), id: z.string() }),
+    }),
+    z.object({ action: z.literal('withdraw'), receiptId: z.string() }),
+    z.object({ action: z.literal('forget'), receiptId: z.string() }),
+  ]),
+);
+type Maintenance = z.infer<typeof maintenanceSchema>;
+const maintenancePrefix = (owner: string) => 'cat-cafe:person-maintenance:v1:' + encodeURIComponent(owner) + ':';
+function pendingMaintenance(owner: string | null): Maintenance | null {
+  if (!owner) return null;
+  try {
+    for (const key of Object.keys(localStorage)
+      .filter((key) => key.startsWith(maintenancePrefix(owner)))
+      .sort()) {
+      let raw: unknown;
+      try {
+        raw = JSON.parse(localStorage.getItem(key)!);
+      } catch {
+        continue;
+      }
+      const parsed = maintenanceSchema.safeParse(raw);
+      if (parsed.success && key === maintenancePrefix(owner) + parsed.data.requestId) return parsed.data;
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
 export function useMemoryBindings(needed: (source: string) => boolean | number = () => false) {
+  const { ownerUserId: owner } = useSyncExternalStore(
+    apiSessionIdentity.subscribe,
+    apiSessionIdentity.getSnapshot,
+    apiSessionIdentity.getSnapshot,
+  );
+  const [maintenance, setMaintenance] = useState<Maintenance | null>(() => pendingMaintenance(owner));
+  const [maintenanceBusy, setMaintenanceBusy] = useState(false);
+  useEffect(() => {
+    const read = () => setMaintenance(pendingMaintenance(owner));
+    read();
+    window.addEventListener('storage', read);
+    return () => window.removeEventListener('storage', read);
+  }, [owner]);
+  const [deferredCursor, setDeferredCursor] = useState('0');
+  const [deferredEntries, setDeferredEntries] = useState<z.infer<typeof deferredSchema>['entries']>([]);
+  const deferred = useMemoryRead(
+    '/api/memory/people/deferred?' + new URLSearchParams({ cursor: deferredCursor, limit: '20' }),
+    isDeferredPage,
+    needed('deferred'),
+  );
+  useEffect(() => {
+    if (deferred.data)
+      setDeferredEntries((previous) =>
+        deferredCursor === '0'
+          ? deferred.data!.entries
+          : [
+              ...previous.filter((old) => !deferred.data!.entries.some((next) => next.receiptId === old.receiptId)),
+              ...deferred.data!.entries,
+            ],
+      );
+  }, [deferred.data, deferredCursor]);
   const detailRequest = useRef(0);
   const selection = useRef<{ family: Family | 'document'; id: string; collection?: string } | null>(null);
   const ui = useRef({
@@ -279,6 +366,18 @@ export function useMemoryBindings(needed: (source: string) => boolean | number =
         if (family === 'profile')
           usage = await request<ProfileUsageSummary>(`${base}/usage?revision=${encodeURIComponent(entry.revision)}`);
       }
+      if (family === 'person') {
+        try {
+          const value = memoryReadUsageSchema.parse(
+            await request<unknown>(`${base}/usage?revision=${encodeURIComponent(ownerRevision)}`),
+          );
+          if (value.sourceAnchor !== 'person-memory:' + id || value.revision !== ownerRevision)
+            throw new Error('source_changed');
+          usage = value;
+        } catch {
+          usage = { error: 'unavailable' };
+        }
+      }
       if (ticket !== detailRequest.current) throw new Error('记忆选择已变化');
       setDetail({ family, id, entry, source, usage, sources, correctionCards });
       setLoad('');
@@ -288,6 +387,56 @@ export function useMemoryBindings(needed: (source: string) => boolean | number =
         setError(e instanceof Error ? e.message : '记忆读取不可用');
       }
       failRead(e);
+    }
+  };
+  const executeMaintenance = async (draft?: Omit<Maintenance, 'requestId'>) => {
+    if (!owner || apiSessionIdentity.getSnapshot().ownerUserId !== owner || maintenanceBusy)
+      throw new Error('person_maintenance_unavailable');
+    let current = pendingMaintenance(owner);
+    if (draft) {
+      if (current) throw new Error('person_maintenance_pending');
+      current = maintenanceSchema.parse({ ...draft, requestId: 'person_maintenance_' + crypto.randomUUID() });
+      const key = maintenancePrefix(owner) + current.requestId;
+      localStorage.setItem(key, JSON.stringify(current));
+      if (localStorage.getItem(key) !== JSON.stringify(current)) throw new Error('person_maintenance_storage');
+      setMaintenance(current);
+    }
+    if (!current) return false;
+    setMaintenanceBusy(true);
+    try {
+      const path =
+        current.action === 'redact_item'
+          ? `${paths.person}/${encodeURIComponent(current.personId)}/actions`
+          : `${paths.person}/deferred/${encodeURIComponent(current.receiptId)}/actions`;
+      const response = await apiFetch(path, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: current.action,
+          requestId: current.requestId,
+          expectedRevision: current.expectedRevision,
+          confirmed: true,
+          ...(current.action === 'redact_item' ? { item: current.item } : {}),
+        }),
+      });
+      const body = await response.json();
+      if (apiSessionIdentity.getSnapshot().ownerUserId !== owner) return false;
+      const applied = response.ok && body.action === current.action && ['applied', 'replayed'].includes(body.outcome);
+      if (applied || [400, 401, 403, 404, 409].includes(response.status)) {
+        localStorage.removeItem(maintenancePrefix(owner) + current.requestId);
+        setMaintenance(pendingMaintenance(owner));
+        setDeferredCursor('0');
+        deferred.retry();
+        people.retry();
+        if (selection.current?.family === 'person') await open('person', selection.current.id);
+      }
+      if (!applied && response.status < 500)
+        setError(typeof body.error === 'string' ? body.error : 'person_maintenance_refused');
+      return applied;
+    } catch {
+      return false;
+    } finally {
+      setMaintenanceBusy(false);
     }
   };
   const command = async (body: Record<string, unknown>, source: { family: Family; id: string } | null = detail) => {
@@ -595,6 +744,32 @@ export function useMemoryBindings(needed: (source: string) => boolean | number =
       edit.current = null;
       return true;
     }
+    if (name === 'personDeferredMore') {
+      if (deferred.data?.nextCursor) setDeferredCursor(deferred.data.nextCursor);
+      return true;
+    }
+    if (name === 'personDeferredRefresh') {
+      setDeferredCursor('0');
+      deferred.retry();
+      return true;
+    }
+    if (name === 'personUsageRefresh') {
+      if (detail?.family === 'person') await open('person', detail.id);
+      return true;
+    }
+    if (name === 'personMaintenanceRetry') return executeMaintenance();
+    if (name === 'personMaintenanceWrite') {
+      const draft =
+        args.action === 'redact_item'
+          ? {
+              action: 'redact_item' as const,
+              personId: detail!.id,
+              item: { kind: args.kind, id: args.id },
+              expectedRevision: args.expectedRevision,
+            }
+          : { action: args.action, receiptId: args.receiptId, expectedRevision: args.expectedRevision };
+      return executeMaintenance(draft as Omit<Maintenance, 'requestId'>);
+    }
     if (name === 'personClaimRetire') {
       const claim = detail?.entry.claims?.find((c) => c.claimId === args.id);
       if (!claim) throw new Error('判断已变化');
@@ -620,6 +795,12 @@ export function useMemoryBindings(needed: (source: string) => boolean | number =
         Object.entries(reads).map(([name, { data, loading, error }]) => [name, { data, loading, error }]),
       ),
       detail: heldDetail,
+      deferred: {
+        entries: deferredEntries,
+        nextCursor: deferred.data?.nextCursor,
+        load: deferred.loading ? 'loading' : deferred.error ? 'error' : '',
+      },
+      personMaintenance: { pending: maintenance, busy: maintenanceBusy },
       document,
       load,
       error,
@@ -642,6 +823,12 @@ export function useMemoryBindings(needed: (source: string) => boolean | number =
       taste.loading,
       taste.error,
       heldDetail,
+      deferredEntries,
+      deferred.data,
+      deferred.loading,
+      deferred.error,
+      maintenance,
+      maintenanceBusy,
       document,
       load,
       error,

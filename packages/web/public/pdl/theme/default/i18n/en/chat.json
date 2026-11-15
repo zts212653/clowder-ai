@@ -27,7 +27,26 @@
    "dsh_setup_model_unavailable": "The selected route or model is unavailable. Refresh model settings and select it again. Your draft is preserved.",
    "dsh_setup_busy": "Another Desktop configuration is being read. Retry shortly. Your draft is preserved.",
    "default": "Unable to prepare Desktop configuration. Check model and authentication settings in DSH Desktop, then retry. The current configuration is preserved."
-  }
+  },
+    "dshCheck": {
+      "unchecked": "Unchecked",
+      "checking": "Checking connection",
+      "passed": "Model connected",
+      "partial": "Model connected; some tools unavailable",
+      "failed": "Connection check failed",
+      "unknown": "Connection result unknown",
+      "stale": "Configuration or tools changed",
+      "refresh": "Refresh status",
+      "check": "Check connection",
+      "cost": "May incur model charges",
+      "tool_schema_rejected": "The model rejected the tool configuration",
+      "session_configuration_unavailable": "The client could not apply the selected model or reasoning effort",
+      "check_timed_out": "Connection check timed out",
+      "check_store_unavailable": "Check records are unavailable",
+      "model_reply_unconfirmed": "No normal text reply was confirmed",
+      "plugin_activation_unavailable": "Plugin activation unavailable",
+      "invalidTool": "Invalid tool definition"
+    }
  },
  "chat": {
   "projectGit": {
@@ -44,9 +63,86 @@
   "watcher": {
    "target": "→ {0}",
    "original": "Original message"
-  }
+  },
+    "routing": {
+      "mention": "@{0}",
+      "handoff": "The reply was not handed off to {0}. Quote it and mention them when needed.",
+      "disabled": "@{0} is disabled and was skipped. Alternatives: {1}",
+      "outside": "@{0} is not a participant in this conversation and was skipped.",
+      "ack": "{0} already has a terminal ACK; no new reply was triggered.",
+      "missing": "{0} does not exist and was skipped."
+    },
+    "executionUnavailable": "This execution can no longer be located"
  },
  "chatRich": {
   "saveFailed": "Submitted, but the selection could not be saved. Do not submit it again."
- }
+ },
+  "memoryGroup": {
+    "unreadable": "The original record cannot be read",
+    "matter": "Matter",
+    "person": "Person memory",
+    "profile": "Profile",
+    "taste": "Taste",
+    "entity": "Entity",
+    "event": "Event correction",
+    "saved": "Saved",
+    "deferred": "Deferred",
+    "joined": "Joined",
+    "unavailable": "Unavailable",
+    "refused": "Not saved",
+    "completed": "Completed",
+    "forgotten": "Forgotten",
+    "sourceChanged": "Source changed",
+    "source": "View source",
+    "change": "Suggest changes",
+    "changePrompt": "Please revise and resubmit this memory proposal:",
+    "changeBlocked": "The original conversation draft is not ready. Please try again."
+  },
+  "chatCards": {
+    "originalQuotes": "Original text"
+  },
+  "memoryOwners": {
+    "deferred": {
+      "title": "Deferred person notes",
+      "error": "Deferred notes unavailable",
+      "empty": "No deferred person notes",
+      "awaiting": "Awaiting confirmation",
+      "deferred": "Deferred",
+      "claimed": "Being organized",
+      "withdrawn": "Withdrawn; content cleared",
+      "notActionable": "Not adopted; content cleared",
+      "proposed": "Converted to a person proposal",
+      "unknown": "Status unknown",
+      "pendingForget": "Permanent forgetting is incomplete",
+      "withdraw": "Withdraw",
+      "forget": "Forget permanently",
+      "proposal": "Open original proposal"
+    },
+    "personMaintenance": {
+      "unknown": "Result unconfirmed; retry continues the same operation.",
+      "retry": "Retry this operation",
+      "usageError": "Read usage unavailable",
+      "directRead": "Direct reads",
+      "cueDrill": "Memory cue opens",
+      "forgetItem": "Forget this content",
+      "confirmTitle": "Confirm person memory action",
+      "withdrawConfirm": "Stop processing and clear this deferred note. The original conversation is retained.",
+      "forgetConfirm": "Permanently forget this content. This cannot be undone. The original conversation is retained."
+    }
+  },
+  "work": {
+    "sourceState": {
+      "preview-fallback": "Read-only preview (annotations unavailable) · {0}",
+      "blocked": "{0}",
+      "ready": "{0}"
+    },
+    "sourceDenied": "Access to the original file is denied; cached preview hidden",
+    "sourceIdentityChanged": "The login identity changed; original access cannot be reused",
+    "sourceNotFound": "Original file or directory unavailable",
+    "sourceTooLarge": "Original file exceeds the collaboration size limit",
+    "sourceInventory": "Registered directories cannot be verified",
+    "sourceConnection": "Original directory is not connected",
+    "sourceChecking": "Verifying the original file location",
+    "sourceUnknown": "Original file location could not be verified"
+  }
 }

@@ -73,6 +73,13 @@ export function composerInsertFromRecall(result: TrueRecallResponse): ComposerDr
   return {
     threadId: draft.threadId,
     text: draft.text,
+    ...((draft.contentBlocks ?? []).some((block) => block.type !== 'image' && block.type !== 'context_attachment')
+      ? {
+          preservedBlocks: (draft.contentBlocks ?? []).filter(
+            (block) => block.type !== 'image' && block.type !== 'context_attachment',
+          ),
+        }
+      : {}),
     ...(imageUrls.length > 0 ? { imageUrls } : {}),
     ...(contextAttachments.length > 0 ? { contextAttachments } : {}),
     ...(draft.replyTo ? { replyToId: draft.replyTo } : {}),

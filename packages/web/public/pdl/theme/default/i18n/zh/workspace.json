@@ -1639,7 +1639,10 @@
     "behindMain": "落后 main 的提交",
     "mergedBranches": "已合入的分支",
     "worktrees": "工作区",
-    "orphan": "孤立：目录还在，已没有分支在用"
+    "orphan": "孤立：目录还在，已没有分支在用",
+    "worktreeRequired": "这是裸 Git 仓库；此视图需要工作树",
+    "unavailable": "Git 仓库不可用",
+    "readFailed": "Git 读取失败"
   },
   "wsCode": {
     "files": {
@@ -2096,5 +2099,13 @@
   },
   "signals": {
     "fetchSummary": "新增 {0} · 获取 {1} · 重复 {2}"
+  },
+  "recovery": {
+    "paused": "自动恢复已暂停",
+    "pending": "正在恢复",
+    "needsAttention": "需要检查",
+    "parked": "已停放",
+    "interrupted": "已中断",
+    "recheck": "重新检查"
   }
 }

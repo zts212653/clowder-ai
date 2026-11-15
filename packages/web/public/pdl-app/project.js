@@ -418,12 +418,23 @@ function bindProject() {
     S.ws.recallExpected = item ? Number(item.meta.recall) : 0;
     return ENGINE_PARTS.openTab('panel', 'recall');
   };
+  A.executionLocate = function (d) {
+    return chatAction('executionLocate', d).then(function (r) {
+      if (r === 'command') return A.execOpen(d);
+      if (r === 'unavailable') toast(tc('chatMessage.executionUnavailable'));
+    });
+  };
   A.execOpen = function (d) {
     return chatAction('homeExecOpen', d).then(function (result) {
       if (result !== false) ENGINE_PARTS.openTab('panel', 'live');
     });
   };
 
+  A.recoveryRecheck = function (d) {
+    return chatAction('holdRecoveryRecheck', d).then(function (r) {
+      if (r !== false && S.ws.execDetail === d.taskId) return chatAction('refresh', { k: 'home' });
+    });
+  };
   A.opForceReset = function (d) {
     dialog({
       kind: 'opForceReset',
@@ -1910,6 +1921,7 @@ function bindProject() {
       vm: {
         type: f.draft.kind,
         vis: f.draft.sensitivity,
+        draft: { name: f.draft.name, displayName: f.draft.displayName, root: f.draft.root },
         scan: f.scan,
         created: !!f.created,
         indexStatus: f.created ? f.created.status : '',
@@ -2075,6 +2087,49 @@ function bindProject() {
   };
   A.runtimeExternalMore = function (d) {
     return chatAction('runtimeExternalMore', d);
+  };
+  A.personDeferredAction = function (d) {
+    dialog({
+      kind: 'personMaintenance',
+      args: { action: d.action },
+      on: function () {
+        return chatAction('personMaintenanceWrite', d);
+      },
+    });
+  };
+  A.personItemForget = function (d) {
+    return A.personDeferredAction(Object.assign({}, d, { action: 'redact_item' }));
+  };
+  A.personMaintenanceRetry = function (d) {
+    return chatAction('personMaintenanceRetry', d);
+  };
+  A.personDeferredMore = function (d) {
+    return chatAction('personDeferredMore', d);
+  };
+  A.personDeferredRefresh = function (d) {
+    return chatAction('personDeferredRefresh', d);
+  };
+  A.personUsageRefresh = function (d) {
+    return chatAction('personUsageRefresh', d);
+  };
+  A.personDeferredProposal = async function (d) {
+    let item, cursor;
+    do {
+      const page =
+        d.section === 'history'
+          ? await api.get('/api/approval-hub/settled/page', { producer: 'F276', limit: 100, cursor: cursor })
+          : await api.get('/api/approval-hub/pending');
+      item = page.items.find(function (row) {
+        return row.sourceFeatureId === 'F276' && row.proposalId === d.id;
+      });
+      cursor = d.section === 'history' && page.page.nextCursor;
+    } while (!item && cursor);
+    if (!item || item.navigation.state !== 'anchored') {
+      toast(tc('memoryOwners.matter.unavailable'), null, 'danger');
+      return false;
+    }
+    const ref = item.navigation.approvalCardRef;
+    return A.msgJump({ t: ref.threadId, mid: ref.messageId });
   };
   A.memOpen = function (d) {
     const sk = navFocusC();
@@ -2557,6 +2612,9 @@ function bindProject() {
   };
   A.workFileQuote = function (d) {
     return chatAction('workFileQuote', d);
+  };
+  A.workSourceRetry = function (d) {
+    return chatAction('workSourceRetry', d);
   };
   A.workOpenFile = function (d) {
     CS.lb = null;

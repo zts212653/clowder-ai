@@ -2706,6 +2706,8 @@ frags:
     - label: t:accounts.create.addClaudeToken
       act: tokenOpen
       args: {kind: token}
+    - label: t:accounts.agy.title
+      act: agyOpen
     - label: t:accounts.create.enterApiKey
       act: accOpen
       args: {kind: acc, v: key}
@@ -3431,6 +3433,7 @@ frags:
                   - from: $.form.accounts
                     item:
                       v: "@id"
+                      why: {of: "@blocked", map: {"true": t:accounts.agy.unavailable, _: ""}}
                       label:
                         t: settingsUi.member.accountName
                         args: ["@kind", "@name"]
@@ -3850,6 +3853,50 @@ frags:
       title: t:wsSessions.runtime
       keep: true
       blocks:
+        - type: box
+          when: $.form.runtime.savedCheck
+          blocks:
+            - type: status
+              text:
+                of: $.form.runtime.savedCheck.state
+                map: {unchecked: t:runtime.dshCheck.unchecked, checking: t:runtime.dshCheck.checking, passed: t:runtime.dshCheck.passed, partial: t:runtime.dshCheck.partial, failed: t:runtime.dshCheck.failed, unknown: t:runtime.dshCheck.unknown, stale: t:runtime.dshCheck.stale}
+              tone:
+                of: $.form.runtime.savedCheck.state
+                map: {passed: ok, failed: danger, partial: warn, stale: warn, _: info}
+            - type: text
+              variant: meta
+              when: $.form.runtime.savedCheck.reasonCode
+              text:
+                of: $.form.runtime.savedCheck.reasonCode
+                map:
+                  tool_schema_rejected: t:runtime.dshCheck.tool_schema_rejected
+                  dsh_setup_auth_refresh_required: t:runtime.dshSetupError.dsh_setup_auth_refresh_required
+                  dsh_setup_credential_missing: t:runtime.dshSetupError.dsh_setup_credential_missing
+                  dsh_setup_credential_invalid: t:runtime.dshSetupError.dsh_setup_credential_invalid
+                  dsh_setup_custom_startup: t:runtime.dshSetupError.dsh_setup_custom_startup
+                  session_configuration_unavailable: t:runtime.dshCheck.session_configuration_unavailable
+                  check_timed_out: t:runtime.dshCheck.check_timed_out
+                  check_store_unavailable: t:runtime.dshCheck.check_store_unavailable
+                  model_reply_unconfirmed: t:runtime.dshCheck.model_reply_unconfirmed
+                  _: t:runtime.dshCheck.unknown
+            - type: list
+              from: $.form.runtime.savedCheck.toolIssues
+              optional: true
+              row:
+                layout: two
+                title: "@pluginId"
+                sub:
+                  of: "@reasonCode"
+                  map: {plugin_activation_unavailable: t:runtime.dshCheck.plugin_activation_unavailable, _: t:runtime.dshCheck.invalidTool}
+            - type: toolbar
+              items:
+                - {type: button, label: t:runtime.dshCheck.refresh, act: memberDshRefresh, busy: $.form.runtime.checkBusy}
+                - type: button
+                  label: t:runtime.dshCheck.check
+                  tip: t:runtime.dshCheck.cost
+                  act: memberDshCheck
+                  busy: $.form.runtime.checkBusy
+                  when: {of: $.form.runtime.savedCheck.state, map: {checking: false, _: true}}
         - type: settings
           rows:
             - label: t:runtime.hooks.label
@@ -4805,6 +4852,46 @@ frags:
             html: {of: "@rich.markdown", fmt: markdown}
             when: "@rich.markdown"
           - {type: kv, from: "@rich.kv", when: "@rich.kv"}
+          - type: box
+            when: "@rich.group"
+            load: "@rich.group.load"
+            error: t:memoryGroup.unreadable
+            retry: {act: memoryGroupRefresh, args: {key: "@rich.group.key"}}
+            blocks:
+              - type: list
+                id: "@rich.group.key"
+                from: "@rich.group.rows"
+                row:
+                  layout: two
+                  key: "@key"
+                  title:
+                    - {text: "@title", when: "@title"}
+                    - text:
+                        of: "@target"
+                        map: {matter: t:memoryGroup.matter, person_revision: t:memoryGroup.person, profile: t:memoryGroup.profile, taste: t:memoryGroup.taste, person: t:memoryGroup.person, entity: t:memoryGroup.entity, event_correction: t:memoryGroup.event, _: "@target"}
+                      when: "!@title"
+                  sub:
+                    - text:
+                        of: "@state"
+                        map: {saved: t:memoryGroup.saved, updated: t:memoryGroup.saved, written: t:memoryGroup.saved, applied: t:memoryGroup.saved, deferred: t:memoryGroup.deferred, joined: t:memoryGroup.joined, deduped: t:memoryGroup.joined, unavailable: t:memoryGroup.unavailable, refused: t:memoryGroup.refused, stale_ignored: t:memoryGroup.refused, _: t:memoryGroup.completed}
+                    - {text: "@error", when: "@error"}
+                  acts:
+                    - {label: t:common.open, act: memoryGroupOpen, args: "@open", when: "@canOpen"}
+                    - label: t:memoryGroup.change
+                      act: memoryGroupChange
+                      args: {key: "@groupKey", itemId: "@itemId", prompt: t:memoryGroup.changePrompt, blocked: t:memoryGroup.changeBlocked}
+                      when: "@canChange"
+                  expand:
+                    - {type: notice, tone: warn, text: t:memoryGroup.unreadable, when: "@unreadable"}
+                    - {type: text, text: t:memoryGroup.forgotten, when: "@redacted"}
+                    - {type: markdown, text: "@body", when: "@body"}
+                    - type: each
+                      from: "@sources"
+                      blocks:
+                        - {type: text, text: "@quote", when: "@quote"}
+                        - {type: notice, tone: warn, text: t:memoryGroup.sourceChanged, when: "@sourceChanged"}
+                        - {type: button, link: true, label: t:memoryGroup.source, act: msgJump, args: {t: "@threadId", mid: "@messageId"}}
+
           - {type: steps, variant: checks, from: "@rich.checks", when: "@rich.checks"}
           - {type: component, use: diff, props: "@rich.diff", when: "@rich.diff"}
           - {type: component, use: media, props: "@rich.audio", when: "@rich.audio"}
@@ -5074,6 +5161,35 @@ frags:
           parts:
             - {icon: trace, size: s}
             - {text: t:wsTrace.timeline}
+  CHAT_FOOTER:
+    - {type: view, id: recovery.notice, data: "@recovery", when: "@recovery"}
+    - type: text
+      variant: meta
+      parts:
+        - {text: t:chatMessage.runtimeSlot.hint, variant: meta}
+        - {lit: " "}
+        - {text: "@tip"}
+      when: "@tip"
+    - type: each
+      from: "@routingWarnings"
+      blocks:
+        - type: text
+          variant: meta
+          text: {t: chatMessage.routing.handoff, args: [{of: "@targetCats", each: {t: chatMessage.routing.mention, args: ["@"]}, sep: ", "}]}
+          when: {of: "@kind", map: {handoff_blocked_by_failed_turn: true, _: false}}
+        - type: notice
+          tone: warn
+          text:
+            of: "@kind"
+            map:
+              cat_disabled: {t: chatMessage.routing.disabled, args: ["@catId", {of: "@alternatives", each: "@mention", sep: "、"}]}
+              target_not_in_thread: {t: chatMessage.routing.outside, args: ["@catId"]}
+              suppressed_by_terminal_ack: {t: chatMessage.routing.ack, args: [{of: "@droppedMentions", each: {t: chatMessage.routing.mention, args: ["@"]}, sep: "、"}]}
+              cat_not_found: {t: chatMessage.routing.missing, args: ["@mention"]}
+          when: {of: "@kind", map: {handoff_blocked_by_failed_turn: false, _: true}}
+    - {$frag: CHAT_WATCHER}
+    - {$frag: CHAT_EXEC}
+    - {$frag: CHAT_SUPP}
   CHAT_WATCHER:
     type: box
     when: "@watcher"
@@ -5450,18 +5566,31 @@ frags:
             args: ["@name", "@handle"]
     when: ["@card.fields", "!@card.result", "!@card.editing", "!@card.conflict"]
   CARD_FOLD:
-    type: fold
-    shape: bottom
-    key: "@card.firstKey"
-    height: s
-    when: ["@card.first", "!@card.result", "!@card.editing", "!@card.conflict"]
+    type: box
+    when: ["!@card.result", "!@card.editing", "!@card.conflict"]
     blocks:
-      - type: label
-        text:
-          t: chat.proposalFirst
-          args: ["@card.firstTitle"]
-      - type: content
-        html: {of: "@card.first", fmt: markdown}
+      - type: fold
+        shape: bottom
+        key: "@card.firstKey"
+        height: s
+        when: "@card.first"
+        blocks:
+          - type: label
+            text:
+              t: chat.proposalFirst
+              args: ["@card.firstTitle"]
+          - type: content
+            html: {of: "@card.first", fmt: markdown}
+      - type: disclosure
+        key: "@card.firstKey"
+        title: t:chatCards.originalQuotes
+        open: {of: "@card.privacy", map: {public: true, _: false}}
+        when: "@card.quotes"
+        blocks:
+          - type: each
+            from: "@card.quotes"
+            blocks:
+              - {type: text, text: "@"}
   CARD_OWNER_REFRESH:
     type: button
     iconOnly: true
@@ -5601,3 +5730,29 @@ frags:
     workref: card.work
     letter: chat.node/cat
     wake: chat.node/cat
+
+views:
+  recovery.notice:
+    blocks:
+      - type: status
+        tone: warn
+        text: t:recovery.paused
+        when: $.incidents
+      - {type: status, tone: info, text: t:recovery.pending, when: $.pending}
+      - type: list
+        from: $.incidents
+        optional: true
+        row:
+          layout: two
+          title:
+            - text:
+                of: "@disposition"
+                map: {needs_attention: t:recovery.needsAttention, parked: t:recovery.parked, interrupted: t:recovery.interrupted, _: "@disposition"}
+            - {text: "@reasonCode", mono: true}
+          sub: "@executionRef"
+      - type: button
+        label: t:recovery.recheck
+        act: recoveryRecheck
+        args: {taskId: $.taskId}
+        busy: $.busy
+        when: $.canRecheck

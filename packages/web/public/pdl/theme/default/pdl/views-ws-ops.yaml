@@ -119,6 +119,7 @@ views:
             act: close
             args: {path: ws.execDetail}
         blocks:
+          - {type: view, id: recovery.notice, data: $.recovery, when: $.recovery}
           - {type: pre, text: $.command}
           - type: kv
             from:
@@ -650,13 +651,8 @@ rows:
           args:
             - {of: "@time", fmt: clock}
     acts: {slot: ws.live.run, ctx: "@actions"}
-    act:
-      of: "@command"
-      map: {"true": execOpen, "false": goThread, _: execOpen}
-    args:
-      k:
-        of: "@command"
-        map: {"true": "@key", "false": "@actions.thread", _: "@command"}
+    act: executionLocate
+    args: {k: "@key", startedAt: "@startedAt", inv: "@actions.inv", thread: "@actions.thread", who: "@who"}
   live.wait:
     layout: two
     key: "@key"

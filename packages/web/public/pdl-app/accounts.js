@@ -1,6 +1,6 @@
 /* Account settings use the existing account and native-login owners. */
 'use strict';
-const ACCOUNT_STATE = { accQ: '', accOpen: {}, accountSwitch: null, evOpen: {} };
+const ACCOUNT_STATE = { accQ: '', accOpen: {}, accountSwitch: null, evOpen: {}, quota: {} };
 function bindAccounts() {
   const st = ACCOUNT_STATE;
   S.accountFilter = 'all';
@@ -8,6 +8,9 @@ function bindAccounts() {
     selections = {},
     load = 'loading',
     timer;
+  const accountTool = function (p) {
+    return p.agy ? 'agy' : p.clientId === 'anthropic' ? 'claude' : 'codex';
+  };
   const vendor = function (p) {
     return p.clientId === 'anthropic' ? 'Claude' : p.clientId === 'openai' ? 'Codex' : p.clientId;
   };
@@ -22,9 +25,10 @@ function bindAccounts() {
         api.get('/api/accounts'),
         api.get('/api/accounts/codex/members'),
         api.get('/api/accounts/claude/members'),
+        api.get('/api/accounts/agy/members'),
       ]);
       providers = values[0].providers;
-      selections = { codex: values[1].selection, claude: values[2].selection };
+      selections = { codex: values[1].selection, claude: values[2].selection, agy: values[3].selection };
       load = '';
       dataOk('accounts');
     } catch (error) {
@@ -61,9 +65,9 @@ function bindAccounts() {
   };
 
   function accountUsers(p) {
-    const tool = p.clientId === 'anthropic' ? 'claude' : 'codex';
+    const tool = accountTool(p);
     return (
-      p.clientId === 'openai' || p.clientId === 'anthropic'
+      p.clientId === 'openai' || p.clientId === 'anthropic' || p.agy
         ? selections[tool].members
         : chatRead('memberSettings').cats.map((m) => ({
             id: m.id,
@@ -74,8 +78,50 @@ function bindAccounts() {
           }))
     ).filter((m) => m.accountRef === p.id);
   }
+  function accountQuotaData(o) {
+    const items = o.status === 'ok' ? o.items : (o.lastSuccess || {}).items || [];
+    const left = function (x) {
+      return Math.max(0, Math.min(100, x.percentKind === 'remaining' ? x.usedPercent : 100 - x.usedPercent));
+    };
+    return {
+      items: items.map(function (x) {
+        return { label: x.label, left: left(x) };
+      }),
+      resets: items
+        .map(function (x) {
+          return x.resetsText || x.resetsAt;
+        })
+        .filter(Boolean),
+      at: o.lastSuccess ? o.lastSuccess.observedAt : o.observedAt,
+      hasAt: true,
+      out:
+        o.status === 'ok' &&
+        items.some(function (x) {
+          return left(x) === 0;
+        }),
+      fail: o.failure
+        ? o.failure.kind
+        : o.status === 'unsupported'
+          ? 'unsupported'
+          : o.status === 'unavailable'
+            ? 'service_unreachable'
+            : '',
+    };
+  }
+  function quotaMatches(p, observation) {
+    if (!p.managed && !(p.codex && p.codex.identity)) return true;
+    const identity = p.codex && p.codex.identity,
+      owner = observation && observation.owner;
+    return (
+      !!identity &&
+      !!owner &&
+      owner.accountRef === p.id &&
+      owner.userId === identity.userId &&
+      owner.workspaceId === identity.workspaceId
+    );
+  }
   function row(p) {
-    const tool = p.clientId === 'anthropic' ? 'claude' : 'codex',
+    const tool = accountTool(p),
       selection = selections[tool],
       users = accountUsers(p);
     const attempt = p.codex && p.codex.attempt,
@@ -102,7 +148,30 @@ function bindAccounts() {
       builtin: !!p.builtin,
       managed: !!p.managed,
       renaming: S.renaming && S.renaming.entity === 'account' && S.renaming.id === p.id,
-      state: state,
+      agy: !!p.agy,
+      agyState: p.agyLoginStatus,
+      agyCommand: p.agyLoginCommand,
+      state:
+        {
+          ready: 'ok',
+          success: 'ok',
+          reused: 'ok',
+          waiting: 'login',
+          queued: 'login',
+          preparing: 'login',
+          review: 'conflict',
+          canceled: 'cancelled',
+          interrupted: 'cancelled',
+          failed: 'cancelled',
+          timeout: 'cancelled',
+          not_logged_in: 'none',
+          saved: 'token',
+        }[state] || state,
+      loginState: attempt && attempt.state,
+      terminalAvailable:
+        !!p.codex &&
+        !!attempt &&
+        ['preparing', 'queued', 'waiting', 'failed', 'timeout', 'interrupted', 'canceled'].includes(attempt.state),
       projectId: p.googleCloud && p.googleCloud.projectId,
       activeUsers: users.filter((m) => m.available).length,
       usersCount: users.length,
@@ -115,8 +184,24 @@ function bindAccounts() {
       models: p.models,
       dir: p.codex && p.codex.credentialHome,
       open: open,
-      quota: false,
-      canSwitch: (p.clientId === 'openai' || p.clientId === 'anthropic') && selection.accountRef !== p.id,
+      quota:
+        p.clientId === 'openai' &&
+        p.authType === 'oauth' &&
+        ((p.codex && p.codex.status === 'ready') || (p.quota && p.quota.status === 'unavailable') || st.quota[p.id]),
+      quotaBusy: !!(st.quota[p.id] && st.quota[p.id].busy),
+      quotaIdentityChanged:
+        !!(st.quota[p.id] && st.quota[p.id].identityChanged) || (!!p.quota && !quotaMatches(p, p.quota)),
+      quotaData: (function () {
+        const observation = (st.quota[p.id] && st.quota[p.id].observation) || p.quota;
+        return observation && quotaMatches(p, observation) && !(st.quota[p.id] && st.quota[p.id].identityChanged)
+          ? accountQuotaData(observation)
+          : null;
+      })(),
+      canSwitch:
+        (p.clientId === 'openai' ||
+          p.clientId === 'anthropic' ||
+          (p.agy && ['ready', 'refreshable'].includes(p.agyLoginStatus))) &&
+        selection.accountRef !== p.id,
       loggingIn: !!busy || state === 'review',
       cancelled:
         !!p.codex &&
@@ -276,6 +361,31 @@ function bindAccounts() {
   CHANGES.accOwnerSet = function (e) {
     S.dialog.args.owner = e.target.value;
   };
+  A.agyOpen = function (d) {
+    const p = d.id ? account(d.id) : null;
+    dialog({
+      kind: 'agy',
+      args: { name: p ? p.displayName : '' },
+      on: async function () {
+        const body = { displayName: val('agy-note').trim() };
+        if (p) {
+          await chatPort.action('accountSave', { id: p.id, value: JSON.stringify(body) });
+          st.accOpen[p.id] = true;
+        } else {
+          const result = await api.post(
+            '/api/accounts',
+            {},
+            Object.assign(body, { clientId: 'google', authType: 'oauth', agyOAuth: true }),
+          );
+          st.accOpen[result.profile.id] = true;
+        }
+        await read();
+      },
+    });
+  };
+  A.agyRefresh = function () {
+    return read();
+  };
   A.tokenOpen = function (d) {
     const p = d.id ? account(d.id) : null;
     dialog({
@@ -294,12 +404,53 @@ function bindAccounts() {
       },
     });
   };
-  async function login(p, op) {
+  A.accQuota = async function (d) {
+    const p = account(d.k),
+      signature = JSON.stringify(p.codex && p.codex.identity),
+      previous = (st.quota[p.id] && st.quota[p.id].observation) || p.quota;
+    const state = (st.quota[p.id] = { busy: true });
+    render(true);
+    try {
+      const receipt = await api.post(
+        '/api/accounts/' + encodeURIComponent(p.id) + '/codex/quota',
+        {},
+        previous && previous.failure && previous.failure.kind === 'renewal_required' ? { renewExpired: true } : {},
+      );
+      await read();
+      const current = account(p.id);
+      state.identityChanged =
+        !current ||
+        signature !== JSON.stringify(current.codex && current.codex.identity) ||
+        !quotaMatches(current, receipt.quota);
+      if (!state.identityChanged) state.observation = receipt.quota;
+    } catch (error) {
+      if (error.status === 409) {
+        state.identityChanged = true;
+        await read();
+      } else
+        state.observation = {
+          observedAt: Date.now(),
+          status: 'unavailable',
+          items: [],
+          failure: { kind: 'service_unreachable' },
+          owner: previous && previous.owner,
+          lastSuccess:
+            previous &&
+            (previous.status === 'ok'
+              ? { observedAt: previous.observedAt, items: previous.items }
+              : previous.lastSuccess),
+        };
+    } finally {
+      state.busy = false;
+      render(true);
+    }
+  };
+  async function login(p, op, terminal = false) {
     try {
       await api.post(
         '/api/accounts/' + encodeURIComponent(p.id) + '/codex/login/' + op,
         {},
-        op === 'start' ? {} : { attemptId: p.codex.attempt.id },
+        op === 'start' ? (terminal ? { terminal: true } : {}) : { attemptId: p.codex.attempt.id },
       );
       await read();
     } catch (error) {
@@ -312,14 +463,18 @@ function bindAccounts() {
   A.accLogin = function (d) {
     const p = account(d.k),
       attempt = p.codex.attempt;
-    return login(p, d.v === 'cancel' ? 'cancel' : attempt && attempt.state === 'review' ? 'confirm' : 'start');
+    return login(
+      p,
+      d.v === 'cancel' ? 'cancel' : d.v !== 'terminal' && attempt && attempt.state === 'review' ? 'confirm' : 'start',
+      d.v === 'terminal',
+    );
   };
   A.accConflict = function (d) {
     return login(account(d.k), d.v === 'keep' ? 'create-new' : 'cancel');
   };
   async function preview(id, overrides) {
     const p = account(id),
-      tool = p.clientId === 'anthropic' ? 'claude' : 'codex';
+      tool = accountTool(p);
     const state = (st.accountSwitch = {
       id: id,
       tool: tool,

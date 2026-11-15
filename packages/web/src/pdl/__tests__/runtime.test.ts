@@ -493,6 +493,122 @@ async function boot(
 }
 
 describe('unmodified runtime and project chat bindings', () => {
+  it('locates a deferred person proposal by its exact producer and original card across history pages', async () => {
+    const source = {
+      sourceFeatureId: 'F276',
+      proposalId: 'person-proposal',
+      navigation: { state: 'anchored', approvalCardRef: { threadId: 'pdl-test', messageId: 'reply-1' } },
+    };
+    const reads: unknown[] = [];
+    const { dom, w, action, errors } = await boot(undefined, undefined, undefined, {}, (port) => {
+      const original = port.get;
+      port.get = async (path, params) => {
+        if (path === '/api/approval-hub/pending') return { items: [source] };
+        if (path === '/api/approval-hub/settled/page') {
+          reads.push(params);
+          return params?.cursor
+            ? { items: [source], page: { nextCursor: null } }
+            : { items: [], page: { nextCursor: 'older-person-proposals' } };
+        }
+        return original(path, params);
+      };
+    });
+    try {
+      await w.eval("A.personDeferredProposal({id:'person-proposal',section:'pending'})");
+      expect(action).toHaveBeenLastCalledWith('jump', { t: 'pdl-test', thread: 'pdl-test', mid: 'reply-1' }, undefined);
+      await w.eval("A.personDeferredProposal({id:'person-proposal',section:'history'})");
+      expect(reads).toEqual([
+        { producer: 'F276', limit: 100, cursor: undefined },
+        { producer: 'F276', limit: 100, cursor: 'older-person-proposals' },
+      ]);
+      expect(action).toHaveBeenLastCalledWith('jump', { t: 'pdl-test', thread: 'pdl-test', mid: 'reply-1' }, undefined);
+      expect(errors).not.toHaveBeenCalled();
+    } finally {
+      dom.window.close();
+    }
+  });
+
+  it('provides the v2 memory environment from the existing projected settings owner', async () => {
+    const { dom, w, port, errors } = await boot();
+    try {
+      w.eval("CS.m.hubTab='feed';CS.m.view='status';go('memory');render(true)");
+      await w.__settled();
+      expect(port.get).toHaveBeenCalledWith('/api/config/env-summary');
+      expect(w.eval('VM.cafeMemory().status.environment.variables')).toEqual(environmentSummaryFixture().variables);
+      expect(w.eval('VM.cafeMemory().hubTab')).toBe('feed');
+      const count = port.get.mock.calls.length;
+      for (let i = 0; i < 5; i++) w.eval('VM.cafeMemory()');
+      expect(port.get).toHaveBeenCalledTimes(count);
+      expect(errors).not.toHaveBeenCalled();
+    } finally {
+      dom.window.close();
+    }
+  });
+
+  it('keeps guarded plugin frames open through slow or failed saves and confirms forced discard', async () => {
+    const { dom, w, errors } = await boot();
+    try {
+      w.eval(`
+        PDL_VIEWS['test.guarded']={plugin:'test-guard',type:'frame'};
+        PDL_PLUGIN_REQ['test-guard']={frame:{path:'frame'}};
+        pushProjectData({'plugin:test-guard/frame':{load:'',value:{html:'<p>Draft</p>'}}});
+      `);
+      const frame = w.document.createElement('iframe');
+      frame.dataset.frameKey = 'test.guarded';
+      const region = w.document.createElement('div');
+      region.append(frame);
+      w.document.body.append(region);
+      w.testFrame = frame;
+      w.testRegion = region;
+      const nonce = w.eval("VM.pluginFrame('test-guard',{request:'frame'},{},'test.guarded').name");
+      const message = (type: string, value?: boolean) => {
+        w.testMessage = { channel: 'clowder-plugin-ui/v1', nonce, type, value, requestId: 1 };
+        w.eval('A.pluginFrameMessage(window.testMessage,window.testFrame)');
+      };
+      const ask = () => w.eval('LEAVE_ASK[LEAVE_ASK.length-1]([window.testRegion])');
+      message('close.guard', true);
+      let left = false;
+      const pending = ask().then(() => {
+        left = true;
+      });
+      expect(w.eval('S.dialog')).toBeNull();
+      await new Promise((resolve) => setTimeout(resolve, 230));
+      expect(w.document.querySelector('[data-view="dlg.pluginFrameClose"]').textContent).toContain('正在保存草稿');
+      expect(left).toBe(false);
+      message('close.cancel');
+      expect(w.eval('VM.pluginFrameClose().phase')).toBe('failed');
+      expect(w.document.querySelector('[data-view="dlg.pluginFrameClose"]').textContent).toContain('草稿未保存');
+      w.eval("A.pluginFrameDiscard({node:'test.guarded'})");
+      expect(w.document.querySelector('[data-view="dlg.pluginFrameClose"]').textContent).toContain(
+        '放弃未保存的修改？',
+      );
+      w.eval("A.close({path:'s.dialog'})");
+      expect(w.eval('VM.pluginFrameClose().discard')).toBe(false);
+      expect(left).toBe(false);
+      w.eval("A.pluginFrameDiscard({node:'test.guarded'});A.pluginFrameForce({node:'test.guarded'})");
+      await pending;
+      expect(left).toBe(true);
+      expect(w.eval('S.dialog')).toBeNull();
+
+      message('close.guard', true);
+      const saved = ask();
+      message('close');
+      await saved;
+      expect(w.eval('S.dialog')).toBeNull();
+      message('close.guard', true);
+      const cancelled = ask().then(
+        () => 'left',
+        () => 'stayed',
+      );
+      message('close.cancel');
+      w.eval("A.close({path:'s.dialog'})");
+      expect(await cancelled).toBe('stayed');
+      expect(errors).not.toHaveBeenCalled();
+    } finally {
+      dom.window.close();
+    }
+  });
+
   it('applies a restored draft through the local input path and projects the store draft flag', async () => {
     const { dom, w, data, ui, push } = await boot();
     try {
@@ -3285,6 +3401,7 @@ describe('unmodified runtime and project chat bindings', () => {
       await w.__settled();
       input = w.document.getElementById('chat-input');
       expect(w.eval('VM.chatPop().mentions').some((item: { name: string }) => item.name === 'New member')).toBe(true);
+      expect(w.eval('VM.runtimeConnection()')).toEqual(w.eval('VM.chatPage().connection'));
       expect(w.eval('WHO_DATA.members()').some((member: { id: string }) => member.id === 'new-member')).toBe(true);
       expect(w.document.querySelector('[data-stream] > [data-mid="reply-1"]')).toBe(stream);
       input.value = '@nothing-matches';
@@ -4815,6 +4932,10 @@ describe('unmodified runtime and project chat bindings', () => {
       expect(w.eval('S.ws.recallFor')).toBe('reply-1');
       expect(w.eval('S.ws.recallExpected')).toBe(1);
       expect(w.eval('VM.cafeWsRecall().groups[0].key')).toBe('reply-1');
+      expect(w.eval('VM.cafeWsRecall().raw.events[0].id')).toBe('stored-recall');
+      expect(w.eval('VM.cafeWsRecall().threadId')).toBe(data.threadId);
+      w.eval("S.ws.recallSource='push'");
+      expect(w.eval('VM.cafeWsRecall().sourceFilter')).toBe('push');
       expect(errors).not.toHaveBeenCalled();
       expect(buildModels).not.toHaveBeenCalled();
     } finally {
@@ -6341,8 +6462,8 @@ it('binds DSH inspection, exact revision preparation and optional test, then inv
     expect(calls).toEqual([]);
     await w.eval('A.memberProviderSetup({op:"inspect"})');
     expect(w.eval('VM.member().form.model.provider.error')).toBe('dsh_setup_profile_required');
-    expect(w.document.querySelector('[data-for="rt-dsh-profile"][role="alert"]')?.textContent).toContain(
-      'dsh_setup_profile_required',
+    expect(w.document.querySelector('[data-for="rt-dsh-profile"][role="alert"]')?.textContent).toBe(
+      '无法准备 Desktop 配置。请检查 DSH Desktop 的模型和认证设置后重试，当前配置已保留。',
     );
     const profile = w.document.getElementById('rt-dsh-profile');
     profile.value = 'work';
@@ -6701,6 +6822,7 @@ it('uses the r135 library form values and captured Mission Hub dialog fields thr
   try {
     await w.eval("A.modal({ v:'lib'})");
     await w.__settled();
+    expect(w.eval('MODALS.lib().vm.draft')).toEqual({ name: '', displayName: '', root: '' });
     expect([...w.document.querySelectorAll('#lib-type option')].map((option) => option.value)).toEqual([
       'project',
       'world',

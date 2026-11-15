@@ -37,6 +37,10 @@ function bindMembers() {
           if (id && id !== 'new' && id !== 'list') {
             const values = await Promise.all([act('settingsHooksRead', {}), act('memberCanonRead', { id: id })]);
             data.canon = values[1];
+            data.savedCheck =
+              data.dshMembers && data.dshMembers.includes(id)
+                ? await act('memberDshRead', { id: id, value: JSON.stringify(data.runtimes) })
+                : null;
           }
           if (target === page) {
             meta = data;
@@ -443,11 +447,39 @@ function bindMembers() {
         meta.clients.some(function (c) {
           return c.id === f.clientId;
         }),
+      savedCheck: meta.savedCheck
+        ? Object.assign({}, meta.savedCheck, {
+            toolIssues: meta.savedCheck.toolIssues || (meta.savedCheck.fact && meta.savedCheck.fact.toolIssues) || [],
+          })
+        : null,
+      checkBusy: !!meta.checkBusy,
       connection: result
         ? { status: result.skipped ? 'skipped' : result.ok ? 'ok' : 'error', tip: result.error || result.message }
         : null,
     };
   }
+  async function dshCheck(run) {
+    const state = draft();
+    meta.checkBusy = true;
+    if (run) meta.savedCheck = { state: 'checking', toolIssues: [] };
+    render(true);
+    try {
+      meta.savedCheck = await act(run ? 'memberDshCheck' : 'memberDshRead', {
+        id: state.id,
+        expectedRevision: state.revision || '',
+        value: JSON.stringify(meta.runtimes),
+      });
+    } finally {
+      meta.checkBusy = false;
+      render(true);
+    }
+  }
+  A.memberDshCheck = function () {
+    return dshCheck(true);
+  };
+  A.memberDshRefresh = function () {
+    return dshCheck(false);
+  };
   A.memberConnection = function () {
     const f = draft().form;
     return chatAction('settingsMemberConnection', {
@@ -593,6 +625,10 @@ function bindMembers() {
             id: a.id,
             name: a.displayName,
             kind: a.builtin ? 'builtin' : a.authType === 'api_key' ? 'key' : a.authType,
+            blocked:
+              !!a.agy &&
+              (!(f.clientId === 'google' && f.agyNativeEnabled) ||
+                !['ready', 'refreshable'].includes(a.agyLoginStatus)),
           };
         }),
       preferences: cloud

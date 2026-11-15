@@ -4,7 +4,7 @@ import { appliedResult, initial, REVIEW_ID } from '@/components/content-review/_
 import { syncContextAttachmentDraftToStorage } from '@/components/thread-drafts';
 import type { ComposerDraftInsert } from '@/stores/chat-types';
 import { apiFetch } from '@/utils/api-client';
-import { ReviewOwnerBinding, useReviewBindings } from '../useReviewBindings';
+import { ReviewOwnerBinding, resolveArtifactFileSource, useReviewBindings } from '../useReviewBindings';
 import { fixtureUi } from './chat-fixture';
 import { act, cleanup, renderHook, waitFor } from './hook-host';
 import { useOwnerProjection } from './owner-console';
@@ -515,4 +515,38 @@ it.each([
   expect(second.insert).toBeUndefined();
   expect(paths.filter((path) => path.includes('composer-draft'))).toEqual([]);
   syncContextAttachmentDraftToStorage('source-thread', []);
+});
+
+it.each([
+  'not_found',
+  'too_large',
+  'directory_inventory_unavailable',
+])('keeps a readonly fallback for %s only with a fresh matching file read', async (code) => {
+  vi.mocked(apiFetch)
+    .mockReset()
+    .mockResolvedValueOnce(response({ error: { code, locations: [{ label: 'Drive' }] } }, 503))
+    .mockResolvedValueOnce(response({ path: 'art.png', binary: true }));
+  const result = await resolveArtifactFileSource({ worktreeId: 'wt', path: 'art.png' });
+  expect(result).toMatchObject({ kind: 'preview-fallback', code });
+  expect(apiFetch).toHaveBeenLastCalledWith('/api/workspace/file?worktreeId=wt&path=art.png', { cache: 'no-store' });
+});
+it.each([401, 403])('blocks cached previews for HTTP %s without trying to reuse the old identity', async (status) => {
+  vi.mocked(apiFetch)
+    .mockReset()
+    .mockResolvedValueOnce(response({ error: 'not_found' }, status));
+  expect(await resolveArtifactFileSource({ worktreeId: 'wt', path: 'art.png' })).toMatchObject({
+    kind: 'blocked',
+    code: 'access_denied',
+  });
+  expect(apiFetch).toHaveBeenCalledTimes(1);
+});
+it('blocks cached previews when a source failure is followed by a missing file', async () => {
+  vi.mocked(apiFetch)
+    .mockReset()
+    .mockResolvedValueOnce(response({ error: 'not_found' }, 404))
+    .mockResolvedValueOnce(response({ error: 'missing' }, 404));
+  expect(await resolveArtifactFileSource({ worktreeId: 'wt', path: 'art.png' })).toMatchObject({
+    kind: 'blocked',
+    code: 'not_found',
+  });
 });

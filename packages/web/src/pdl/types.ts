@@ -10,6 +10,7 @@ export interface ChatUiState {
   pop: {
     kind: string;
     page?: string;
+    preferredExpanded?: boolean;
     mode?: string;
     typed?: boolean;
     input?: string;

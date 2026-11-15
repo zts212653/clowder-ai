@@ -4,6 +4,7 @@ import type { ArtifactReviewAnchor } from '@cat-cafe/shared';
 import {
   type ContextAttachment,
   ContextAttachmentsSchema,
+  type MessageContent,
   RichCardBlock,
   RuntimeInteractionRecord,
   RuntimeInteractionResponse,
@@ -91,6 +92,7 @@ import { useTts } from '@/hooks/useTts';
 import { useVoiceInput } from '@/hooks/useVoiceInput';
 import { useWorkspace } from '@/hooks/useWorkspace';
 import { fetchApprovalProducerBody } from '@/lib/approval-producer-read';
+import { isDshMember } from '@/lib/member-model-display';
 import { useApprovalResult } from '@/lib/use-approval-result';
 import { useActiveExecutionStore } from '@/stores/activeExecutionStore';
 import { useChatStore } from '@/stores/chatStore';
@@ -197,14 +199,20 @@ const subscribeNever = () => () => {};
 type PendingThreadJump = { threadId: string; mid: string; catId?: string };
 
 /** Message images as files again, for a retry or a recalled message going back into the input. */
-async function downloadImages(urls: readonly string[]): Promise<File[]> {
+async function downloadImages(urls: readonly string[], blocks: readonly MessageContent[] = []): Promise<File[]> {
   return Promise.all(
     urls.slice(0, 5).map(async (url, index) => {
       const response = await apiFetch(url);
       if (!response.ok) throw new Error('原图片未完整读取，请重试');
       const blob = await response.blob();
+      const descriptor = blocks.find((block) => block.type === 'file' && block.url === url);
+      if (descriptor?.type === 'file' && blob.size !== descriptor.fileSize) throw new Error('attachment_size_mismatch');
       const ext = url.split('.').pop() ?? 'png';
-      return new File([blob], `recalled-${Date.now()}-${index}.${ext}`, { type: blob.type || `image/${ext}` });
+      return new File(
+        [blob],
+        descriptor?.type === 'file' ? descriptor.fileName : `recalled-${Date.now()}-${index}.${ext}`,
+        { type: descriptor?.type === 'file' ? descriptor.mimeType : blob.type || `image/${ext}` },
+      );
     }),
   );
 }
@@ -479,9 +487,15 @@ function ChatBinding({
         threadId,
       });
     }
-    if (pendingInsert.imageUrls?.length) {
+    const attachments = [
+      ...new Set([
+        ...(pendingInsert.imageUrls ?? []),
+        ...(pendingInsert.preservedBlocks ?? []).flatMap((block) => (block.type === 'file' ? [block.url] : [])),
+      ]),
+    ];
+    if (attachments.length) {
       setPreparingImages(true);
-      downloadImages(pendingInsert.imageUrls)
+      downloadImages(attachments, pendingInsert.preservedBlocks)
         .then((files) => setImages((all) => [...all, ...files].slice(0, 5)))
         .catch((error: Error) =>
           useToastStore
@@ -920,8 +934,13 @@ function ChatBinding({
         admissionRef.current!.updateTitle(args.title);
         admissionRef.current!.updatePinned(args.pinned === 'true');
         return admissionRef.current!.importSession(JSON.parse(args.value));
-      case 'membersRead':
-        return readMemberSettings();
+      case 'membersRead': {
+        const meta = await readMemberSettings();
+        return {
+          ...meta,
+          dshMembers: current.current.cats.filter((cat) => isDshMember(cat, meta.runtimes)).map((cat) => cat.id),
+        };
+      }
       case 'memberCanonRead':
         return readMemberCanon(args.id, threadId);
       case 'memberCanonSave':
@@ -945,6 +964,26 @@ function ChatBinding({
           args.value,
           args.fixedClient ? JSON.parse(args.fixedClient) : undefined,
         );
+      case 'memberDshRead':
+      case 'memberDshCheck': {
+        const cat = current.current.cats.find((cat) => cat.id === args.id);
+        if (!cat || !isDshMember(cat, JSON.parse(args.value))) return null;
+        try {
+          const path = `/api/cats/${encodeURIComponent(cat.id)}/connection-check`;
+          return name === 'memberDshRead'
+            ? await request(path)
+            : await write(
+                path,
+                {
+                  attemptId: crypto.randomUUID(),
+                  ...(args.expectedRevision ? { expectedRevision: args.expectedRevision } : {}),
+                },
+                'POST',
+              );
+        } catch {
+          return { state: 'unknown', reasonCode: 'check_result_unknown' };
+        }
+      }
       case 'memberProviderSetup':
         return runMemberProviderSetup(args.op, args.value);
       case 'memberRefAudioUpload':
@@ -1685,6 +1724,40 @@ function ChatBinding({
         if (voice.state === 'recording') voice.stopRecording();
         else await voice.startRecording();
         return;
+      case 'executionLocate': {
+        const execution = Object.values(useActiveExecutionStore.getState().executionsByKey).find(
+          (e) => e.executionId === args.k && e.threadId === args.thread && e.catId === args.who,
+        );
+        if (
+          !execution ||
+          execution.startedAt !== Number(args.startedAt) ||
+          (execution.turnInvocationId ?? '') !== (args.inv ?? '')
+        )
+          return 'unavailable';
+        if (execution.kind === 'managed_command') return 'command';
+        if (!execution.turnInvocationId) return 'unavailable';
+        const expected = execution.inputCapabilities?.append?.expectedRun;
+        if (expected && (expected.invocationId !== execution.turnInvocationId || expected.targetId !== execution.catId))
+          return 'unavailable';
+        const message = state
+          .getThreadState(execution.threadId)
+          .messages.find(
+            (m) =>
+              m.catId === execution.catId &&
+              (expected
+                ? m.id === expected.responseMessageId
+                : m.lifecycle?.kind === 'response'
+                  ? m.lifecycle.invocationId === execution.turnInvocationId
+                  : m.isStreaming &&
+                    (m.extra?.stream?.turnInvocationId ?? m.extra?.stream?.invocationId) ===
+                      execution.turnInvocationId),
+          );
+        const mid = expected?.responseMessageId ?? message?.id;
+        if (!mid) return 'unavailable';
+        ui.current.execOpen[mid] = true;
+        await action('jump', { thread: execution.threadId, mid });
+        return 'opened';
+      }
       case 'jump': {
         if (args.thread && args.thread !== threadId) {
           pendingJump.current = { threadId: args.thread, mid: args.mid };
@@ -1837,7 +1910,12 @@ function ChatBinding({
       export: exportMids === undefined ? undefined : { mids: exportMids, items: window.__catCafeImageExportItems },
       playback: playback.current,
       outputPreference: { mode: preference.mode, status: preference.status, error: preference.error },
-      admission: { ready: admissionRef.current?.ready, optionsLocked: admissionRef.current?.optionsLocked },
+      admission: admissionRef.current && {
+        ready: admissionRef.current.ready,
+        optionsLocked: admissionRef.current.optionsLocked,
+        preferredCats: admissionRef.current.intent?.preferredCats ?? [],
+        homeState: { busy: admissionRef.current.optionsLocked, state: admissionRef.current.phase },
+      },
     };
   };
   const port = useRef<ChatPort>(null!);

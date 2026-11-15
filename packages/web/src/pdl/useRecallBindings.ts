@@ -132,7 +132,7 @@ export function useRecallBindings(
     () => ({
       threadId: read.threadId,
       load: read.load,
-      page: page && { readStatus: page.readStatus, nextCursor: page.nextCursor },
+      page,
       events: recallSourceRecords(events, replies),
     }),
     [read.threadId, read.load, page, events, replies],
