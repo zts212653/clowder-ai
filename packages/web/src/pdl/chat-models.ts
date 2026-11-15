@@ -1430,6 +1430,7 @@ export function chatModels(data: ChatData, ui: ChatUiState, input?: ChatProjecti
         return {
           ...base,
           groupSelected: !viewCat(),
+          systemSelected: preferredIds().length === 0,
           members: memberItems(
             kind === 'people'
               ? viewCat()

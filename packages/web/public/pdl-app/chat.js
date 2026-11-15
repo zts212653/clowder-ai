@@ -902,6 +902,10 @@ window.clowderChat = {
     SET_AFTER['cs.viewCat'] = function () {
       return chatAction('conversationView', { v: CS.viewCat || '' });
     };
+    SET_AFTER['cs.prefer'] = function (value, d) {
+      CS.prefer = [];
+      return chatAction('preferredCats', d.none != null ? { none: '1' } : { id: d.id });
+    };
     SET_AFTER['cs.speaking'] = function () {
       return chatAction('speak', { mid: CS.speaking || '' });
     };

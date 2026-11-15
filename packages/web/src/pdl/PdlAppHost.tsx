@@ -1193,6 +1193,21 @@ function ChatBinding({
       case 'threadFeatureSave':
         await patchThread(args.id || threadId, { backlogItemId: args.value || null });
         return true;
+      case 'preferredCats': {
+        const admission = threadId === 'default' ? admissionRef.current : null;
+        const selected =
+          (admission
+            ? admission.intent?.preferredCats
+            : current.current.threads.find((t) => t.id === threadId)?.preferredCats) ?? [];
+        const next = args.none
+          ? []
+          : selected.includes(args.id)
+            ? selected.filter((id) => id !== args.id)
+            : [...selected, args.id];
+        if (admission) admission.updatePreferredCats(next);
+        else await patchThread(threadId, { preferredCats: next });
+        return;
+      }
       case 'threadStatus': {
         const t = current.current.threads.find((t) => t.id === (args.id || threadId));
         const key = args.field === 'fav' ? 'favorited' : 'pinned';
