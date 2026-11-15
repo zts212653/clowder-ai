@@ -205,12 +205,8 @@ function pdlRegister(frag, pk, plug) {
     }
     return Object.assign({}, x, { node: node });
   });
-  /* 内置模块的插入就是主题的一部分：登记时直接放进主题声明（不带 ins，不随插件重算）；后加载的主题包里同名的插入替换先前的（和视图同名替换一样） */
-  if (!pk) inserts.forEach(function (x) {
-    pdlTreeIndex().forEach(function (e) { if (e.node.id === x.id && e.list && !e.node.ins) e.list.splice(e.list.indexOf(e.node), 1); });
-    if (!pdlInsertOne(pdlTreeIndex(), x, Object.assign({ id: x.id }, x.node))) throw new Error('builtin insert ' + x.id + ' found no anchor');
-  });
-  if (!pk && inserts.length) pdlEntryReset();   /* 入口索引按新树重建 */
+  /* 内置模块的插入就是主题的一部分：登记时直接放进主题声明（不带 ins，不随插件重算） */
+  if (!pk) inserts.forEach(function (x) { if (!pdlInsertOne(pdlTreeIndex(), x, Object.assign({ id: x.id }, x.node))) throw new Error('builtin insert ' + x.id + ' found no anchor'); });
   if (pk) {
     PDL_PLUGIN_FRAGS[pk] = Object.assign({}, frag, { inserts: inserts });
     PDL_PLUGINS.push(pk);

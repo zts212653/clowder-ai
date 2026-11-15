@@ -972,7 +972,7 @@ modules:
         node:
           title: t:settingsUi.starry
           icon: planet
-          open: {node: builtin.starry, anchor: builtin.starry, depth: 65536, as: cover, backLabel: true}
+          open: {node: builtin.starry, anchor: shell, as: cover, backLabel: true}
     views:
       builtin.starry:
         route: starry
