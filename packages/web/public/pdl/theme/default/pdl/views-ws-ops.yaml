@@ -339,11 +339,19 @@ views:
             - {text: "@name"}
             - {text: "@id", mono: true, tone: muted}
           sub:
-            - {text: "@frequency"}
+            - text:
+                of: "@automaticStatus"
+                map:
+                  retired: {t: wsEval.previousCadence, args: ["@frequency"]}
+                  _: "@frequency"
             - {text: ·}
             - text:
-                t: wsEval.ledger.next
-                args: ["@hasNext", "@next"]
+                of: "@automaticStatus"
+                map:
+                  retired: t:wsEval.automaticRetiredDetail
+                  _:
+                    t: wsEval.ledger.next
+                    args: ["@hasNext", "@next"]
           cols:
             - v: {who: "@cat", form: avatar}
               w: icon

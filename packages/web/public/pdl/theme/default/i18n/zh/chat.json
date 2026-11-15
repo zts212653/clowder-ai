@@ -861,7 +861,9 @@
       "globalOff": "总开关已关闭",
       "dismiss": "忽略",
       "dismissed": "已忽略",
-      "undone": "已撤销"
+      "undone": "已撤销",
+      "target": "→ {0}",
+      "original": "原话"
     }
   },
   "classify": {
@@ -947,7 +949,8 @@
     },
     "openWork": "打开作品",
     "confirmPick": "确认选择",
-    "randomPick": "随机抽"
+    "randomPick": "随机抽",
+    "saveFailed": "操作已提交，但选择状态未能保存。请勿重复提交"
   },
   "chatHeader": {
     "actions": {
@@ -1339,7 +1342,22 @@
       "stale": "有变更"
     },
     "connectionFailed": "连接失败",
-    "companionHidden": "猫猫球已隐藏"
+    "companionHidden": "猫猫球已隐藏",
+    "dshSetupError": {
+      "dsh_config_complex_patch": "无法安全读取 Desktop 配置补丁。请在 DSH Desktop 中检查补丁目标和结构后重试，当前配置已保留。",
+      "dsh_config_expression": "Desktop 模型或认证配置包含暂不支持的表达式。请在 DSH Desktop 中检查配置后重试，当前配置已保留。",
+      "dsh_config_ambiguous": "Desktop 模型或认证配置存在重复定义。请在 DSH Desktop 中检查配置冲突后重试，当前配置已保留。",
+      "dsh_config_manual": "Desktop 使用了暂不支持的自定义插件配置。请在 DSH Desktop 中检查插件配置后重试，当前配置已保留。",
+      "dsh_setup_changed": "Desktop 配置已变化。请刷新配置后重新保存，当前草稿已保留。",
+      "dsh_setup_desktop_ambiguous": "发现多套 DSH Desktop。请在模型设置中选择安装位置后再保存。",
+      "dsh_setup_custom_startup": "未找到可用的 DSH Desktop。请完成安装后刷新，当前配置已保留。",
+      "dsh_setup_credential_missing": "所选路线尚未配置认证。请在 DSH Desktop 中完成登录或配置密钥后重试。",
+      "dsh_setup_credential_invalid": "无法读取 Desktop 认证文件。请在 DSH Desktop 中修复认证后重试。",
+      "dsh_setup_auth_refresh_required": "Desktop 登录需要更新。请在 DSH Desktop 重新登录后重试。",
+      "dsh_setup_model_unavailable": "所选路线或模型已不可用。请刷新模型设置并重新选择；当前草稿已保留。",
+      "dsh_setup_busy": "正在读取其他 Desktop 配置。请稍后重试，当前草稿已保留。",
+      "default": "无法准备 Desktop 配置。请检查 DSH Desktop 的模型和认证设置后重试，当前配置已保留。"
+    }
   },
   "theater": {
     "label": "回放剧场",

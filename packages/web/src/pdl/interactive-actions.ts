@@ -9,6 +9,8 @@ import { buildGroupMessage, buildSelectionMessage } from '@/components/rich/inte
 import { apiFetch } from '@/utils/api-client';
 import { getUserId } from '@/utils/userId';
 
+type SubmittedPatches = { blockId: string; disabled: boolean; selectedIds: string[] }[];
+
 /** Keep ordinary interactive choices on their existing callback/chat and block-state owners. */
 export async function submitInteractiveSelection(
   messageId: string,
@@ -16,6 +18,7 @@ export async function submitInteractiveSelection(
   selectedIds: string[],
   customInput: string | undefined,
   send: (text: string) => Promise<boolean | void>,
+  onSubmitted?: (patches: SubmittedPatches) => void,
 ) {
   validateSelection(block, selectedIds, customInput);
   const options = block.options.filter((o) => selectedIds.includes(o.id));
@@ -41,7 +44,8 @@ export async function submitInteractiveSelection(
     await dispatchGuideStartIfNeeded(endpoint, callback.payload);
     if (endpoint === GUIDE_PREVIEW_CALLBACK_PATH && (await send(text)) === false) throw new Error('选择未发送');
   } else if ((await send(text)) === false) throw new Error('选择未发送');
-  await persistSelection(messageId, block, selectedIds);
+  onSubmitted?.([{ blockId: block.id, ...selectionPatch(block, selectedIds) }]);
+  return persistSelection(messageId, block, selectedIds);
 }
 
 function validateSelection(block: RichInteractiveBlock, selectedIds: string[], customInput?: string) {
@@ -58,30 +62,34 @@ function validateSelection(block: RichInteractiveBlock, selectedIds: string[], c
     throw new Error('请填写补充回答');
 }
 
+function selectionPatch(block: RichInteractiveBlock, selectedIds: string[]) {
+  const selected = block.options.find((o) => selectedIds.includes(o.id));
+  return { selectedIds, disabled: !shouldKeepGuideOfferInteractive(block, selected) };
+}
 async function persistSelection(messageId: string, block: RichInteractiveBlock, selectedIds: string[]) {
-  const options = block.options.filter((o) => selectedIds.includes(o.id));
-  const response = await apiFetch(`/api/messages/${encodeURIComponent(messageId)}/block-state`, {
-    method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      userId: getUserId(),
-      blockId: block.id,
-      selectedIds,
-      disabled: !shouldKeepGuideOfferInteractive(block, options[0]),
-    }),
-  });
-  if (!response.ok) throw new Error('选择状态尚未保存，请重新读取');
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const response = await apiFetch(`/api/messages/${encodeURIComponent(messageId)}/block-state`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userId: getUserId(), blockId: block.id, ...selectionPatch(block, selectedIds) }),
+    }).catch(() => null);
+    if (response?.ok) return true;
+    if (response && response.status < 500) break;
+    if (attempt < 2) await new Promise((resolve) => setTimeout(resolve, 200 * (attempt + 1)));
+  }
+  return false;
 }
 
 export async function submitInteractiveGroup(
   messageId: string,
   picks: { block: RichInteractiveBlock; selectedIds: string[]; customInput?: string }[],
   send: (text: string) => Promise<boolean | void>,
+  onSubmitted?: (patches: SubmittedPatches) => void,
 ) {
   for (const p of picks) validateSelection(p.block, p.selectedIds, p.customInput);
   if (picks.length === 1) {
     const p = picks[0];
-    return submitInteractiveSelection(messageId, p.block, p.selectedIds, p.customInput, send);
+    return submitInteractiveSelection(messageId, p.block, p.selectedIds, p.customInput, send, onSubmitted);
   }
   const text = buildGroupMessage(
     picks.map((p) => p.block),
@@ -89,5 +97,8 @@ export async function submitInteractiveGroup(
     new Map(picks.map((p) => [p.block.id, p.customInput ?? ''])),
   );
   if ((await send(text)) === false) throw new Error('选择未发送');
-  for (const p of picks) await persistSelection(messageId, p.block, p.selectedIds);
+  onSubmitted?.(picks.map((p) => ({ blockId: p.block.id, ...selectionPatch(p.block, p.selectedIds) })));
+  let saved = true;
+  for (const p of picks) if (!(await persistSelection(messageId, p.block, p.selectedIds))) saved = false;
+  return saved;
 }

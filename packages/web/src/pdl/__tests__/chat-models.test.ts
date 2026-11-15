@@ -474,3 +474,35 @@ it('projects proven final text and ordered commentary/tools, and ignores it afte
   expect(item).toMatchObject({ md: '', recalled: true });
   expect(JSON.stringify(item)).not.toContain('answer');
 });
+
+it('matches each mention alias and the nickname without changing the inserted handle', () => {
+  const data = fixtureData(),
+    ui = fixtureUi();
+  data.cats[0] = { ...data.cats[0], nickname: '小太阳', mentionPatterns: ['@codex', '@reviewer', '@sunshine'] };
+  for (const q of ['小太阳', 'reviewer', 'sunshine']) {
+    ui.pop = { kind: 'mention', q };
+    const popup = chatModels(data, ui).chatPop;
+    expect('mentions' in popup && popup.mentions).toMatchObject([{ who: 'codex', ins: '@codex' }]);
+  }
+});
+it.each(['message', 'messageId'])('puts watcher routing and the %s citation in chrome', (key) => {
+  const data = fixtureData();
+  data.messages[1] = {
+    ...data.messages[1],
+    content: `@codex\n\nNudge sentence\n\n[原话](/thread/pdl-test?${key}=original)`,
+    extra: {
+      targetCats: ['codex'],
+      watcher: {
+        kind: 'nudge',
+        sourceInvocationId: 'source',
+        watcherInvocationId: 'watcher',
+        sourceMessageId: 'original',
+      },
+    },
+  };
+  const row = chatModels(data, fixtureUi()).chatStream.items.find((r) => r.mid === 'reply-1')!;
+  expect(row.nudge).toMatchObject({ source: 'original', thread: 'pdl-test' });
+  expect(row.md).toContain('Nudge sentence');
+  expect(row.md).not.toContain('@codex');
+  expect(row.md).not.toContain('[原话]');
+});

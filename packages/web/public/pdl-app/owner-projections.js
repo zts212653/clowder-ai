@@ -2391,6 +2391,7 @@
                   id: d.domainId,
                   name: d.displayName,
                   frequency: d.frequency,
+                  automaticStatus: d.automaticStatus,
                   next: d.nextCronFireAt,
                   hasNext: !!d.nextCronFireAt,
                   cat: d.evalCatId,

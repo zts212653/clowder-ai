@@ -93,3 +93,43 @@ describe('grouped interactive submission', () => {
     expect(transport).not.toHaveBeenCalled();
   });
 });
+
+it('retries a transient state save three times without sending the answer again', async () => {
+  transport.mockResolvedValue({ ok: false, status: 503 });
+  const send = vi.fn(async () => true);
+  await expect(submitInteractiveSelection('message-1', choice(), ['a'], undefined, send)).resolves.toBe(false);
+  expect(send).toHaveBeenCalledOnce();
+  expect(transport).toHaveBeenCalledTimes(3);
+});
+it('does not retry a rejected state save', async () => {
+  transport.mockResolvedValue({ ok: false, status: 409 });
+  await expect(
+    submitInteractiveSelection(
+      'message-1',
+      choice(),
+      ['a'],
+      undefined,
+      vi.fn(async () => true),
+    ),
+  ).resolves.toBe(false);
+  expect(transport).toHaveBeenCalledOnce();
+});
+
+it('locks an admitted answer before the first save, even if every save fails', async () => {
+  const committed = vi.fn();
+  transport.mockImplementation(async () => {
+    expect(committed).toHaveBeenCalledWith([{ blockId: 'choice-1', disabled: true, selectedIds: ['a'] }]);
+    return { ok: false, status: 503 };
+  });
+  await expect(
+    submitInteractiveSelection(
+      'message-1',
+      choice(),
+      ['a'],
+      undefined,
+      vi.fn(async () => true),
+      committed,
+    ),
+  ).resolves.toBe(false);
+  expect(committed).toHaveBeenCalledOnce();
+});

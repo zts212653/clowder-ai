@@ -3350,6 +3350,8 @@ rows:
         variant: meta
         when: "!@renaming"
     sub:
+      - text: {t: accounts.googleCloud, args: ["@projectId"]}
+        when: "@projectId"
       - control:
           type: status
           text:

@@ -727,3 +727,42 @@ it('loads the selected reply through event cursors without discarding other repl
   expect(hook.result.current.project().cafeWsRecall.filtered).toBe(false);
   expect(apiFetch).toHaveBeenCalledTimes(2);
 });
+
+it.each([
+  'error',
+  'timeout',
+  'cancelled',
+  'parser_miss',
+  'result_unmerged',
+  'no_results',
+])('keeps recall %s and the empty reason in the owner projection', (status) => {
+  const event = {
+    id: 'outcome',
+    query: 'query',
+    timestamp: 1,
+    source: 'pull',
+    resultStatus: status,
+    resultCount: status === 'no_results' ? 0 : undefined,
+    results: [],
+  };
+  const groups = consoleValue('recallGroups(events, data)', { events: [event], data: fixtureData() });
+  expect(groups[0].items[0]).toMatchObject({ emptyReason: status, empty: true, results: [] });
+  expect(groups[0].items[0].resultStatus).toBe(status === 'result_unmerged' ? 'unrecorded' : status);
+});
+it('projects the recorded recall count and consumed count together', () => {
+  const groups = consoleValue('recallGroups(events, data)', {
+    events: [
+      {
+        id: 'outcome',
+        query: 'query',
+        timestamp: 1,
+        resultStatus: 'counted',
+        resultCount: 9,
+        consumedCount: 2,
+        results: [{ title: 'One preview' }],
+      },
+    ],
+    data: fixtureData(),
+  });
+  expect(groups[0].items[0]).toMatchObject({ resultStatus: 'hits', resultCount: 9, readCount: 2, empty: false });
+});

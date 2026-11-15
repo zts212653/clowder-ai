@@ -54,6 +54,31 @@ function recallItems(events, threadId) {
     });
   });
 }
+function recallResultVM(event) {
+  const status = event.cueStatus
+    ? event.cueStatus === 'drilled' && event.source === 'pull'
+      ? 'read'
+      : event.cueStatus
+    : ['error', 'timeout', 'cancelled', 'parser_miss'].indexOf(event.resultStatus) >= 0
+      ? event.resultStatus
+      : event.resultCount === 0 || event.resultStatus === 'no_results'
+        ? 'no_results'
+        : event.resultCount == null
+          ? 'unrecorded'
+          : 'hits';
+  return {
+    resultStatus: status,
+    resultCount: event.resultCount,
+    readCount:
+      event.consumedCount == null
+        ? (event.results || []).filter(function (r) {
+            return r.consumed === true;
+          }).length
+        : event.consumedCount,
+    emptyReason: event.resultStatus || (event.resultCount === 0 ? 'no_results' : 'unrecorded'),
+    empty: !(event.results && event.results.length),
+  };
+}
 function recallGroups(events, data) {
   const groups = new Map();
   events
@@ -85,20 +110,22 @@ function recallGroups(events, data) {
         groups.set(key, group);
       }
       const results = recallItems([event], data.threadId);
-      group.items.push({
-        key: event.id,
-        title: event.query,
-        source: event.source,
-        tool: event.toolName,
-        graph: event.toolName === 'cat_cafe_graph_resolve',
-        push: event.source === 'push',
-        date: event.timestamp,
-        results: results,
-        canLocate: !!mid,
-        mid: mid,
-        thread: data.threadId,
-        ctx: results[0].ctx,
-      });
+      group.items.push(
+        Object.assign(recallResultVM(event), {
+          key: event.id,
+          title: event.query,
+          source: event.source,
+          tool: event.toolName,
+          graph: event.toolName === 'cat_cafe_graph_resolve',
+          push: event.source === 'push',
+          date: event.timestamp,
+          results: event.results && event.results.length ? results : [],
+          canLocate: !!mid,
+          mid: mid,
+          thread: data.threadId,
+          ctx: results[0].ctx,
+        }),
+      );
       if (mid) group.count = group.items.length;
     });
   return Array.from(groups.values()).sort(function (a, b) {

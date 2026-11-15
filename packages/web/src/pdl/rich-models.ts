@@ -132,13 +132,15 @@ function kindView(
       return { rk: block.kind, title: block.title ?? '', widget: { html: block.html } };
     case 'interactive': {
       const key = `${mid}:${block.id}`;
-      const selected = (b: typeof block): string[] =>
-        b.disabled ? (b.selectedIds ?? []) : ((draft[`pick:${mid}:${b.id}`] as string[] | undefined) ?? []);
-      const ids = selected(block);
       const group = block.groupId
         ? siblings.filter((b): b is typeof block => b.kind === 'interactive' && b.groupId === block.groupId)
         : [block];
-      const custom = !block.disabled && block.options.find((o) => o.customInput && ids.includes(o.id));
+      const done =
+        !!block.disabled || !!(block.groupId?.startsWith('codex-async-question-') && group.some((b) => b.disabled));
+      const selected = (b: typeof block): string[] =>
+        done || b.disabled ? (b.selectedIds ?? []) : ((draft[`pick:${mid}:${b.id}`] as string[] | undefined) ?? []);
+      const ids = selected(block);
+      const custom = !done && block.options.find((o) => o.customInput && ids.includes(o.id));
       return {
         rk: block.kind,
         title: block.title ?? '',
@@ -156,15 +158,15 @@ function kindView(
           value: ids[0] ?? '',
           custom: custom ? { id: `pick-${key}-t`, ph: custom.customInputPlaceholder ?? '' } : null,
           allowRandom: !!block.allowRandom,
-          submit: !block.disabled && group.at(-1)?.id === block.id,
+          submit: !done && group.at(-1)?.id === block.id,
           cant: !group.every(
             (b) =>
               selected(b).length &&
               (!b.options.some((o) => o.customInput && selected(b).includes(o.id)) ||
                 String(draft[`pick-${mid}:${b.id}-t`] ?? '').trim()),
           ),
-          done: !!block.disabled,
-          result: block.disabled ? block.options.filter((o) => ids.includes(o.id)).map((o) => o.label) : [],
+          done: !!done,
+          result: done ? block.options.filter((o) => ids.includes(o.id)).map((o) => o.label) : [],
         },
       };
     }

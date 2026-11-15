@@ -12,7 +12,22 @@
    "stale": "Changed"
   },
   "connectionFailed": "Connection failed",
-  "noConversationSource": "No cloud conversation source available"
+  "noConversationSource": "No cloud conversation source available",
+  "dshSetupError": {
+   "dsh_config_complex_patch": "Unable to read the Desktop configuration patch safely. Check its target and structure in DSH Desktop, then retry. The current configuration is preserved.",
+   "dsh_config_expression": "The Desktop model or authentication configuration contains an unsupported expression. Check it in DSH Desktop, then retry. The current configuration is preserved.",
+   "dsh_config_ambiguous": "The Desktop model or authentication configuration has duplicate definitions. Resolve the conflict in DSH Desktop, then retry. The current configuration is preserved.",
+   "dsh_config_manual": "Desktop uses an unsupported custom plugin configuration. Check it in DSH Desktop, then retry. The current configuration is preserved.",
+   "dsh_setup_changed": "Desktop configuration changed. Refresh it before saving again. Your draft is preserved.",
+   "dsh_setup_desktop_ambiguous": "Multiple DSH Desktop installations were found. Select an installation in model settings before saving.",
+   "dsh_setup_custom_startup": "No usable DSH Desktop installation was found. Install it and refresh. The current configuration is preserved.",
+   "dsh_setup_credential_missing": "The selected route has no authentication. Sign in or configure credentials in DSH Desktop, then retry.",
+   "dsh_setup_credential_invalid": "Unable to read Desktop credentials. Repair authentication in DSH Desktop, then retry.",
+   "dsh_setup_auth_refresh_required": "Desktop authentication needs renewal. Sign in again in DSH Desktop, then retry.",
+   "dsh_setup_model_unavailable": "The selected route or model is unavailable. Refresh model settings and select it again. Your draft is preserved.",
+   "dsh_setup_busy": "Another Desktop configuration is being read. Retry shortly. Your draft is preserved.",
+   "default": "Unable to prepare Desktop configuration. Check model and authentication settings in DSH Desktop, then retry. The current configuration is preserved."
+  }
  },
  "chat": {
   "projectGit": {
@@ -24,5 +39,14 @@
    "building": "Preparing",
    "failed": "Preparation failed"
   }
+ },
+ "chatMessage": {
+  "watcher": {
+   "target": "→ {0}",
+   "original": "Original message"
+  }
+ },
+ "chatRich": {
+  "saveFailed": "Submitted, but the selection could not be saved. Do not submit it again."
  }
 }

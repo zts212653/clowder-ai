@@ -644,7 +644,8 @@
     "inProgress": "正在进行",
     "recentDone": "最近完成",
     "doneHelp": "完成、停止和放弃的都会留在这里，连同为什么。",
-    "newGoal": "新建目标"
+    "newGoal": "新建目标",
+    "automaticRetired": "自动评估已停用；可按需发起"
   },
   "wsCommunity": {
     "priority": {
@@ -879,7 +880,32 @@
     },
     "help": "每次回复前，从记忆里检索、按关系查询、或被递送进来的条目；一次回复一组，新的在前",
     "empty": "这个对话还没有召回记忆。",
-    "replies": "{0} 次回复用到了记忆"
+    "replies": "{0} 次回复用到了记忆",
+    "result": {
+      "error": "检索失败",
+      "timeout": "检索超时",
+      "cancelled": "检索已取消",
+      "parser_miss": "无法读取检索结果",
+      "no_results": "没有命中",
+      "unrecorded": "结果没有记录下来",
+      "read": "已读取",
+      "presented_unreported": "已递送·未回报",
+      "drilled": "点开看过",
+      "applied": "采用",
+      "dismissed": "明确不用",
+      "invalidated": "递送已失效",
+      "hits": "命中 {0} 条 · {1}",
+      "afterRead": "之后读了 {0} 条",
+      "noRead": "之后没看到读取"
+    },
+    "emptyReason": {
+      "error": "工具调用失败",
+      "timeout": "工具调用超时",
+      "cancelled": "检索在返回结果前取消",
+      "parser_miss": "工具已返回，结果未能解析",
+      "result_unmerged": "这次检索的结果尚未记录",
+      "unrecorded": "命中详情没有记录下来"
+    }
   },
   "voiceReview": {
     "recording": {
@@ -1052,7 +1078,9 @@
       "last": {
         "true": "上次结论：{0}"
       }
-    }
+    },
+    "previousCadence": "原评估周期：{0}",
+    "automaticRetiredDetail": "自动评估已停用；历史与按需入口保留"
   },
   "wsLive": {
     "load": {

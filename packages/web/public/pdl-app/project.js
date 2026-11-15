@@ -1305,6 +1305,7 @@ function bindProject() {
             return { title: e.message };
           })
         : [],
+      automaticStatus: p.observation && p.observation.trigger && p.observation.trigger.automaticStatus,
       nextEvaluation:
         p.observation && p.observation.nextEvaluationAt ? Date.parse(p.observation.nextEvaluationAt) : null,
       decide: reading.decision,

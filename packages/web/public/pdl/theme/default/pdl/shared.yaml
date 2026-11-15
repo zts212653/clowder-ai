@@ -3726,7 +3726,24 @@ frags:
                       args: {path: ss.providerSetup.sourceProfile}
                     - type: component
                       use: fieldError
-                      props: {id: rt-dsh-profile, text: $.form.model.provider.error}
+                      props:
+                        id: rt-dsh-profile
+                        text:
+                          of: $.form.model.provider.error
+                          map:
+                            dsh_config_complex_patch: t:runtime.dshSetupError.dsh_config_complex_patch
+                            dsh_config_expression: t:runtime.dshSetupError.dsh_config_expression
+                            dsh_config_ambiguous: t:runtime.dshSetupError.dsh_config_ambiguous
+                            dsh_config_manual: t:runtime.dshSetupError.dsh_config_manual
+                            dsh_setup_changed: t:runtime.dshSetupError.dsh_setup_changed
+                            dsh_setup_desktop_ambiguous: t:runtime.dshSetupError.dsh_setup_desktop_ambiguous
+                            dsh_setup_custom_startup: t:runtime.dshSetupError.dsh_setup_custom_startup
+                            dsh_setup_credential_missing: t:runtime.dshSetupError.dsh_setup_credential_missing
+                            dsh_setup_credential_invalid: t:runtime.dshSetupError.dsh_setup_credential_invalid
+                            dsh_setup_auth_refresh_required: t:runtime.dshSetupError.dsh_setup_auth_refresh_required
+                            dsh_setup_model_unavailable: t:runtime.dshSetupError.dsh_setup_model_unavailable
+                            dsh_setup_busy: t:runtime.dshSetupError.dsh_setup_busy
+                            _: t:runtime.dshSetupError.default
                       when: $.form.model.provider.error
                 - label: t:runtime.provider
                   when: $.form.model.provider.canPrepare
@@ -4957,6 +4974,7 @@ frags:
                 label: t:chatRich.confirmPick
                 act: richSubmit
                 args:
+                  saveFailed: t:chatRich.saveFailed
                   mid: "@rich.pick.mid"
                   b: "@rich.pick.b"
                   pickedPattern: t:chatRich.selection.picked
@@ -5060,7 +5078,19 @@ frags:
     type: box
     when: "@watcher"
     blocks:
-      - {type: label, text: t:chatMessage.watcher.title}
+      - type: toolbar
+        items:
+          - {type: text, variant: meta, text: t:chatMessage.watcher.title}
+          - type: text
+            variant: meta
+            text: {t: chatMessage.watcher.target, args: ["@nudge.target"]}
+            when: "@nudge.target"
+          - type: button
+            link: true
+            label: t:chatMessage.watcher.original
+            act: msgJump
+            args: {mid: "@nudge.source", t: "@nudge.thread"}
+            when: "@nudge.source"
       - type: list
         id: watcher-suggestions
         from: "@suggestions"

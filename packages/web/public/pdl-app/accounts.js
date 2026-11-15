@@ -103,6 +103,7 @@ function bindAccounts() {
       managed: !!p.managed,
       renaming: S.renaming && S.renaming.entity === 'account' && S.renaming.id === p.id,
       state: state,
+      projectId: p.googleCloud && p.googleCloud.projectId,
       activeUsers: users.filter((m) => m.available).length,
       usersCount: users.length,
       hasUsers: !!users.length,

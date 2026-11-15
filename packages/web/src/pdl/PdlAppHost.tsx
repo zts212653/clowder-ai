@@ -1638,15 +1638,43 @@ function ChatBinding({
           const attempt =
             previous?.signature === signature ? previous : { signature, operationId: crypto.randomUUID() };
           interactiveAttempts.current.set(key, attempt);
-          await submitInteractiveGroup(message.id, picks, (text) =>
-            handleSend(text, undefined, threadId, undefined, message.id, undefined, [message.catId!], {
-              idempotencyKey: attempt.operationId,
-            }),
+          const saved = await submitInteractiveGroup(
+            message.id,
+            picks,
+            (text) =>
+              handleSend(text, undefined, threadId, undefined, message.id, undefined, [message.catId!], {
+                idempotencyKey: attempt.operationId,
+              }),
+            (patches) => {
+              const owner = useChatStore.getState();
+              owner.replaceThreadMessages(
+                threadId,
+                owner.getThreadState(threadId).messages.map((row) =>
+                  row.id !== message.id || !row.extra?.rich
+                    ? row
+                    : {
+                        ...row,
+                        extra: {
+                          ...row.extra,
+                          rich: {
+                            ...row.extra.rich,
+                            blocks: row.extra.rich.blocks.map((b) => {
+                              const patch = patches.find((p) => p.blockId === b.id);
+                              return patch ? { ...b, disabled: patch.disabled, selectedIds: patch.selectedIds } : b;
+                            }),
+                          },
+                        },
+                      },
+                ),
+              );
+            },
           );
           for (const b of group) {
             delete ui.current.f[`pick:${message.id}:${b.id}`];
             delete ui.current.f[`pick-${message.id}:${b.id}-t`];
           }
+          if (!saved)
+            useToastStore.getState().addToast({ type: 'error', title: args.saveFailed, message: '', duration: 8000 });
         } finally {
           cardWrites.current.delete(key);
           await reconcileThreadWithServer(threadId, () => false, 'PdlInteractive');

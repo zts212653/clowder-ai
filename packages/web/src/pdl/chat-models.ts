@@ -36,6 +36,18 @@ import { messageRichBlocks, richBlockView } from './rich-models';
 import { type QuestionBinding, runtimeAskView } from './runtime-questions';
 import type { ChatUiState } from './types';
 
+function watcherSentence(content: string, target: string | undefined, threadId: string, sourceId: string | undefined) {
+  const prefix = target ? '@' + target + '\n\n' : '';
+  if (prefix && content.indexOf(prefix) === 0) content = content.slice(prefix.length);
+  if (sourceId)
+    ['message', 'messageId'].forEach((key) => {
+      const suffix =
+        '\n\n[原话](/thread/' + encodeURIComponent(threadId) + '?' + key + '=' + encodeURIComponent(sourceId) + ')';
+      if (content.endsWith(suffix)) content = content.slice(0, -suffix.length);
+    });
+  return content;
+}
+
 export interface ChatData {
   threadId: string;
   newProjectId?: string;
@@ -517,15 +529,22 @@ export function chatModels(data: ChatData, ui: ChatUiState, input?: ChatProjecti
       stream =
         message.origin === 'stream' &&
         !(message.lifecycle?.kind === 'response' && message.lifecycle.status === 'failed'),
-      body = output
-        ? output.answers.map((run) => run.text).join('\n\n')
-        : stream
-          ? (message.extra?.stream?.speechContent ??
-            (message.extra?.stream?.cliStdout === '' && message.content
-              ? message.content
-              : message.extra?.stream?.cliStdout) ??
-            message.content)
-          : message.content,
+      body = message.extra?.watcher
+        ? watcherSentence(
+            message.content,
+            message.extra.targetCats?.[0],
+            data.threadId,
+            message.extra.watcher.sourceMessageId,
+          )
+        : output
+          ? output.answers.map((run) => run.text).join('\n\n')
+          : stream
+            ? (message.extra?.stream?.speechContent ??
+              (message.extra?.stream?.cliStdout === '' && message.content
+                ? message.content
+                : message.extra?.stream?.cliStdout) ??
+              message.content)
+            : message.content,
       stdout = stream && message.extra?.stream?.cliStdout !== body ? (message.extra?.stream?.cliStdout ?? '') : '';
     const md = output
       ? body
@@ -738,6 +757,16 @@ export function chatModels(data: ChatData, ui: ChatUiState, input?: ChatProjecti
           : body,
         error: message.variant === 'error',
         watcher: message.extra?.watcher,
+        nudge: message.extra?.watcher
+          ? {
+              target:
+                members().find((m) => m.id === message.extra?.targetCats?.[0])?.name ??
+                message.extra.targetCats?.[0] ??
+                '',
+              source: message.extra.watcher.sourceMessageId,
+              thread: data.threadId,
+            }
+          : null,
         actsCtx: {
           mid: message.id,
           i,
@@ -887,7 +916,7 @@ export function chatModels(data: ChatData, ui: ChatUiState, input?: ChatProjecti
         kind: 'member',
         meta: [member.breed, member.model],
         ins: member.handle,
-        key: `${member.name}${member.handle}${member.breed}`.toLowerCase(),
+        key: `${member.name}${member.handle}${member.breed}${data.cats.find((cat) => cat.id === member.id)!.mentionPatterns.join(' ')}`.toLowerCase(),
       })),
       // a plugin instance is a candidate like a member; its avatar resolves from the instance id
       ...(data.pluginTargets?.targets ?? []).map((target) => ({

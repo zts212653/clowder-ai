@@ -223,7 +223,7 @@ it('binds the theme built-in frame without registering another entry or installe
     id: 'builtin.starry',
     anchor: 'nav.settings',
     at: 'inside',
-    node: { open: { node: 'builtin.starry', anchor: 'builtin.starry', depth: 65536, as: 'cover' } },
+    node: { open: { node: 'builtin.starry', anchor: 'shell', as: 'cover' } },
   });
   expect(fragment.views['builtin.starry'].route).toBe('starry');
   expect(fragment.views['builtin.starry'].blocks[0]).toMatchObject({

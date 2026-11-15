@@ -85,3 +85,19 @@ describe('rich blocks projected into the existing component contract', () => {
     ).toBe('https://api.test/uploads/report.pdf');
   });
 });
+
+it('treats a Codex question group as submitted when a sibling has a saved answer', () => {
+  const first = {
+    id: 'first',
+    v: 1 as const,
+    kind: 'interactive' as const,
+    groupId: 'codex-async-question-group',
+    interactiveType: 'select' as const,
+    disabled: true,
+    selectedIds: ['a'],
+    options: [{ id: 'a', label: 'A' }],
+  };
+  const second = { ...first, id: 'second', disabled: false, selectedIds: [] };
+  const result = richBlockView(second, 'message', (url) => url, {}, [first, second]);
+  expect(result?.pick).toMatchObject({ done: true, submit: false, custom: null });
+});

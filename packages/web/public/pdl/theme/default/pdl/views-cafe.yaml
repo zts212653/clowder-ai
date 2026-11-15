@@ -2045,7 +2045,44 @@ views:
                       - {of: "@date", fmt: day}
                       - {of: "@date", fmt: hm}
                 sep: ""
+              - text:
+                  of: "@resultStatus"
+                  map:
+                    error: t:wsRecall.result.error
+                    timeout: t:wsRecall.result.timeout
+                    cancelled: t:wsRecall.result.cancelled
+                    parser_miss: t:wsRecall.result.parser_miss
+                    no_results: t:wsRecall.result.no_results
+                    unrecorded: t:wsRecall.result.unrecorded
+                    read: t:wsRecall.result.read
+                    presented_unreported: t:wsRecall.result.presented_unreported
+                    drilled: t:wsRecall.result.drilled
+                    applied: t:wsRecall.result.applied
+                    dismissed: t:wsRecall.result.dismissed
+                    invalidated: t:wsRecall.result.invalidated
+                    hits:
+                      t: wsRecall.result.hits
+                      args:
+                        - "@resultCount"
+                        - of: "@readCount"
+                          gte: 1
+                          map:
+                            "true": {t: wsRecall.result.afterRead, args: ["@readCount"]}
+                            _: t:wsRecall.result.noRead
           expand:
+            - type: text
+              variant: meta
+              text:
+                of: "@emptyReason"
+                map:
+                  error: t:wsRecall.emptyReason.error
+                  timeout: t:wsRecall.emptyReason.timeout
+                  cancelled: t:wsRecall.emptyReason.cancelled
+                  parser_miss: t:wsRecall.emptyReason.parser_miss
+                  result_unmerged: t:wsRecall.emptyReason.result_unmerged
+                  no_results: t:wsRecall.result.no_results
+                  _: t:wsRecall.emptyReason.unrecorded
+              when: "@empty"
             - type: each
               from: "@results"
               blocks:
@@ -3239,8 +3276,14 @@ views:
           - {type: list, from: $.detail.judge.gaps, row: record.row}
           - type: text
             variant: meta
-            text: {of: $.detail.judge.nextEvaluation, fmt: ago}
-            when: $.detail.judge.nextEvaluation
+            text:
+              of: $.detail.judge.automaticStatus
+              map:
+                retired: t:wsEvolution.automaticRetired
+                _: {of: $.detail.judge.nextEvaluation, fmt: ago}
+            when:
+              of: $.detail.judge.automaticStatus
+              map: {retired: true, _: $.detail.judge.nextEvaluation}
       - type: section
         when:
           - {$frag: EVO_JUDGE}
