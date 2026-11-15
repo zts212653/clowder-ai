@@ -774,16 +774,47 @@ describe('F322 待办 (the mailbox) on the unified read', () => {
         open();
         act(() => toggle(0)?.click());
         expect(openOriginal()).toHaveLength(1);
+        const displayedDetails = body(0);
         show({ kind: 'loading' }, read({ items: [judgmentItem('j')], totalCount: 1 }));
         render();
         expect(rows()).toHaveLength(1);
         expect(rows()[0].getAttribute('data-stale')).toBe('true');
+        expect(body(0)).toBe(displayedDetails);
         expect(toggle(0)?.disabled).toBe(true);
         expect(openOriginal()).toHaveLength(0);
         // A click on it does nothing even if something forced one through.
         act(() => toggle(0)?.click());
         expect(openOriginal()).toHaveLength(0);
         expect(data.mode).not.toHaveBeenCalled();
+      });
+
+      it('keeps expanded mention text mounted without exposing canonical handling during refresh', () => {
+        const item: UnifiedAttentionItemV1 = {
+          decisionRef: 'mention:reading',
+          kind: 'user_mention',
+          summary: '留住正在读的内容',
+          linkedNeedsMe: [],
+          userMention: {
+            threadId: 'reading',
+            messageId: 'm1',
+            catId: 'opus',
+            content: '留住正在读的内容',
+            timestamp: 2,
+            expectedRevision: 0,
+          },
+        };
+        const confirmed = read({ items: [item], totalCount: 1, attentionCount: 0 });
+        show({ kind: 'ok', read: confirmed });
+        render();
+        open();
+        act(() => toggle(0)?.click());
+        const content = document.querySelector('[data-testid="mailbox-mention-content"]');
+        expect(content?.textContent).toBe(item.userMention?.content);
+        expect(document.querySelector('[data-testid="mailbox-mention-resolve"]')).not.toBeNull();
+        show({ kind: 'loading' }, confirmed);
+        render();
+        expect(document.querySelector('[data-testid="mailbox-mention-content"]')).toBe(content);
+        expect(document.querySelector('[data-testid="mailbox-mention-resolve"]')).toBeNull();
       });
     });
 

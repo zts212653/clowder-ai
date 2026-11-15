@@ -7,6 +7,7 @@ export interface ProposalSnapshot {
   proposalId: string;
   status: ProposalCardStatus;
   createdThreadId?: string;
+  attentionGroupId?: string | null;
   reportingMode?: ReportingModeEditValue;
   declaredWorkMode?: DeclaredWorkModeEditValue;
 }

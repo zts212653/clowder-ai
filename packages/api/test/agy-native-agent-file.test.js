@@ -4,7 +4,7 @@ import { homedir, tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { describe, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { renderFrozenL0Input } from '@cat-cafe/shared/l0-input';
+import { freezeL0Input, renderFrozenL0Input } from '@cat-cafe/shared/l0-input';
 import { captureFrozenL0Input } from '@cat-cafe/shared/l0-input-capture';
 
 const { canonicalAgyNativeBindingBody, materializeAgyNativeAgentFile } = await import(
@@ -19,6 +19,72 @@ function fixture() {
 }
 
 describe('F325 native L0 agent artifact', () => {
+  for (const section of ['L5_CONTENT', 'L6_CONTENT']) {
+    const marker = section === 'L5_CONTENT' ? 'TOOLS' : 'CAPABILITY';
+    for (const mode of ['markdown', 'frozen']) {
+      test(`${mode}: ${section} guidance updates stay live without changing the session identity`, () => {
+        const f = fixture();
+        try {
+          const initial = captureFrozenL0Input({
+            catId: 'gemini38',
+            projection: 'owner',
+            installRoot: REPO_ROOT,
+            overlayRoot: REPO_ROOT,
+            dossierRoot: REPO_ROOT,
+            profileDir: f.base,
+            member: { name: 'Fixture', breedId: 'siamese', relationshipKey: 'siamese', restrictions: ['禁止写代码'] },
+            model: 'gemini-3.8-flash-high',
+            governanceText: '## 3. 家规\nDo not change permissions.',
+            teammates: [],
+            coCreator: { name: 'Fixture', mentionPatterns: ['@owner'] },
+          });
+          const before = freezeL0Input({
+            ...initial,
+            sections: {
+              ...initial.sections,
+              L5_CONTENT: 'TOOLS-BEFORE',
+              L6_CONTENT: 'CAPABILITY-BEFORE',
+            },
+          });
+          const after = freezeL0Input({
+            ...before,
+            sections: {
+              ...before.sections,
+              [section]: section === 'L5_CONTENT' ? 'TOOLS-AFTER' : 'CAPABILITY-AFTER',
+            },
+          });
+          const materialize = (input) =>
+            materializeAgyNativeAgentFile({
+              profileHome: f.base,
+              catId: 'gemini38',
+              systemPrompt: renderFrozenL0Input(input),
+              ...(mode === 'frozen' ? { frozenL0Input: input } : {}),
+            });
+          const first = materialize(before);
+          const second = materialize(after);
+          assert.equal(second.l0Hash, first.l0Hash, 'help text must not invalidate an active conversation');
+          assert.equal(second.agentName, first.agentName);
+          const frozenBody = readFileSync(first.filePath, 'utf8');
+          assert.doesNotMatch(frozenBody, /TOOLS-BEFORE|CAPABILITY-BEFORE/);
+          assert.match(second.volatileL0Context, new RegExp(`${marker}-AFTER`));
+          assert.doesNotMatch(second.volatileL0Context, new RegExp(`${marker}-BEFORE`));
+          for (const key of ['L4_CONTENT', 'L7_CONTENT']) {
+            const hardChange = freezeL0Input({
+              ...after,
+              sections: {
+                ...after.sections,
+                [key]: `${after.sections[key]}\nChanged binding rule.`,
+              },
+            });
+            assert.notEqual(materialize(hardChange).l0Hash, second.l0Hash, `${key} stays session-bound`);
+          }
+        } finally {
+          f.cleanup();
+        }
+      });
+    }
+  }
+
   test('writes the compiled L0 to one isolated profile with stable content fingerprint', () => {
     const f = fixture();
     try {

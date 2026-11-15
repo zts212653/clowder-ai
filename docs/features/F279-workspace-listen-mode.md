@@ -4,10 +4,12 @@ related_features: [F063, F066, F091, F111, F112, F153, F284]
 topics: [workspace, markdown, listen-mode, tts, audio, cache, accessibility]
 doc_kind: spec
 created: 2026-07-28
+updated: 2026-11-14
 description: "让用户在 Workspace Markdown 中从任意句开始听读，并以可见、可复用、可清理的本地音频缓存持续续听。"
 description_source: human
 description_author: codex-sol
 description_updated_at: 2026-08-23T01:37:00-07:00
+tips_exempt: "Renewed 2026-11-14: PR #6701 enforces local TTS model selection consistency and per-document listen mutation ordering across existing speech and workspace listen routes without adding a new end-user capability surface."
 ---
 
 # F279: Workspace Listen Mode — 正文听读与可复用音频缓存

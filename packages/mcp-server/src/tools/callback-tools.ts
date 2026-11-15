@@ -1,10 +1,6 @@
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import {
-  deploymentDefaults,
-  type MessageSearchAnswerAttachmentRequest,
-  messageSearchAnswerAttachmentSchema,
-} from '@cat-cafe/shared';
+import { deploymentDefaults } from '@cat-cafe/shared';
 import { defineMcpCanonicalFactory, defineMcpMigrationFactory } from '../tool-governance-migration.js';
 import { invocationFetch } from './invocation-auth.js';
 
@@ -84,6 +80,12 @@ import { createPersonMemoryLifecycleTools } from './person-memory-lifecycle-tool
 import { createDeferredPersonMemoryTool } from './proactive-memory-opportunity-tool.js';
 import { withProfileReadRecovery } from './profile-read-recovery.js';
 import { projectRoutingCallbackResponse } from './routing-preflight-response.js';
+import {
+  prepareSourceReply,
+  type SourceReplyInput,
+  sourceCardRequestSchema,
+  sourceReplyInputSchema,
+} from './source-reply.js';
 
 /**
  * F174 Phase A — reason taxonomy lives in @cat-cafe/shared (single source of
@@ -374,10 +376,10 @@ const IMPLEMENTATION_REVIEW_ANCHOR_ERROR =
 const postMessageThreadIdSchema = z.string().min(1);
 
 export const postMessageInputSchema = {
-  searchAnswer: messageSearchAnswerAttachmentSchema
+  searchAnswer: sourceReplyInputSchema
     .optional()
     .describe(
-      'Prepared server-owned answer reference. Requires stable clientMessageId. For forwarding an actual bound card, add source={messageId,blockId}; the Host re-admits it for this destination.',
+      'Attach selected original sources with {query,selections:[{threadId,messageId,contentRevision,quote,reason,part?,range?}]}; full reads supply version and part coordinates. Host verifies and prepares them before sending. Requires stable clientMessageId; retain the same selection and optional operationId on retry. A saved {publicationRef} and bound-card source={messageId,blockId} still work for reuse/forwarding. Ordinary recall stays read-only.',
     ),
   content: z.string().min(1).describe('The message content to post'),
   effectClass: z
@@ -1042,7 +1044,7 @@ function containsPawFeelMarker(content: string): boolean {
 async function _executePostMessage(
   input: {
     content: string;
-    searchAnswer?: MessageSearchAnswerAttachmentRequest;
+    searchAnswer?: SourceReplyInput;
     contextAttachments?: ContextAttachment[] | undefined;
     threadId?: string | undefined;
     replyTo?: string | undefined;
@@ -1093,6 +1095,21 @@ async function _executePostMessage(
   if (!input.localReviewVerdict && hasAnyLocalReviewAnchor(input)) {
     return errorResult(`post_message ${IMPLEMENTATION_REVIEW_ANCHOR_ERROR}`);
   }
+  let searchAnswer = input.searchAnswer;
+  if (searchAnswer && !('publicationRef' in searchAnswer) && input.clientMessageId) {
+    const prepared = await prepareSourceReply(
+      searchAnswer,
+      {
+        operationId: input.clientMessageId,
+        ...(input.threadId ? { destinationThreadId: input.threadId } : {}),
+        ...(input.replyTo ? { replyTo: input.replyTo } : {}),
+        ...(input.agentKeyCatId ? { agentKeyCatId: input.agentKeyCatId } : {}),
+      },
+      callbackPost,
+    );
+    if (!prepared.ok) return prepared.result;
+    searchAnswer = { publicationRef: prepared.publicationRef };
+  }
   // F174 Phase E (AC-E2/E5): explicit kind:'none' policy. There's no useful
   // local fallback for post_message — losing the message is preferable to
   // re-creating server state on a stale invocation. Cats see the structured
@@ -1104,7 +1121,7 @@ async function _executePostMessage(
         '/api/callbacks/post-message',
         {
           content: input.content,
-          ...(input.searchAnswer ? { searchAnswer: input.searchAnswer } : {}),
+          ...(searchAnswer ? { searchAnswer } : {}),
           ...(input.contextAttachments?.length ? { contextAttachments: input.contextAttachments } : {}),
           ...(input.threadId ? { threadId: input.threadId } : {}),
           ...(input.replyTo ? { replyTo: input.replyTo } : {}),
@@ -1218,7 +1235,7 @@ async function _executePostMessage(
 export async function handlePostMessage(
   input: {
     content: string;
-    searchAnswer?: MessageSearchAnswerAttachmentRequest;
+    searchAnswer?: SourceReplyInput;
     contextAttachments?: ContextAttachment[] | undefined;
     threadId?: string | undefined;
     replyTo?: string | undefined;
@@ -1709,7 +1726,7 @@ export async function handleCreateTask(input: {
 export async function handleCrossPostMessage(input: {
   threadId: string;
   content: string;
-  searchAnswer?: MessageSearchAnswerAttachmentRequest;
+  searchAnswer?: SourceReplyInput;
   targetCats?: string[] | undefined;
   replyTo?: string | undefined;
   clientMessageId?: string | undefined;
@@ -1910,7 +1927,9 @@ export const createRichBlockInputSchema = {
   block: z
     .string()
     .min(1)
-    .describe('JSON string of the rich block object. Must include id, kind, v:1, and kind-specific fields.'),
+    .describe(
+      'JSON string with id, kind, v:1 and kind-specific fields. For verified original-source cards use kind:"sources", query, selections:[{threadId,messageId,contentRevision,quote,reason,part?,range?}]. Full reads supply version and sourceParts; reuse id and selections on retry. This author input is verified by Host, never rendered as an unchecked block.',
+    ),
   threadId: z
     .string()
     .min(1)
@@ -2001,6 +2020,27 @@ export async function handleCreateRichBlock(input: {
     parsed = JSON.parse(input.block);
   } catch {
     return errorResult('Invalid JSON in block parameter');
+  }
+
+  if (parsed && typeof parsed === 'object' && 'kind' in parsed && parsed.kind === 'sources') {
+    if (!getInvocationAuthSignal().hasFullCredentials)
+      return errorResult(
+        'Agent-key source cards must accompany the actual answer: use post_message with content, searchAnswer={query,selections}, clientMessageId, threadId and the original replyTo for a cloud return. No card or message was created.',
+      );
+    const source = sourceCardRequestSchema.safeParse(parsed);
+    if (!source.success) return errorResult(`Invalid source card: ${source.error.message}`);
+    if (input.awaitResponseV1) return errorResult('Source cards do not create owner decisions.');
+    const { kind: _kind, v: _version, id, ...selection } = source.data;
+    const prepared = await prepareSourceReply(
+      selection,
+      {
+        operationId: id,
+        ...(input.threadId ? { destinationThreadId: input.threadId } : {}),
+        ...(input.agentKeyCatId ? { agentKeyCatId: input.agentKeyCatId } : {}),
+      },
+      callbackPost,
+    );
+    return prepared.result;
   }
 
   // #85 M2c: normalize before validation (type→kind, auto v:1)
@@ -3502,6 +3542,7 @@ export const callbackTools = [
       'Use when: sharing a mid-task update, routing one ordinary @ notification, or handing one named external action to one successor with action.mode="single". ' +
       'NOT for: invocation-token delivery to another thread (use cross_post_message) or deliberate independent multi-cat review/ideation (use multi_mention with mode="parallel"). ' +
       'Output: the message is persisted in the principal-selected thread; routed targets are queued, and action conflicts return safe_wait without creating work. ' +
+      'For an answer with original-source citations, pass searchAnswer={query,selections} and stable clientMessageId; the Host verifies the selected quotes and binds its card to this message. Full reads supply contentRevision and sourceParts. Selection reasons remain your judgment. Ordinary updates need no card. ' +
       LOCAL_REVIEW_MESSAGE_USAGE_DESCRIPTION +
       'Examples: ordinary update {"content":"Verification complete."}; review request {"content":"@sonnet\\nReview pr:owner/repo#123 at the exact HEAD and accepted source cited here.","targetCats":["sonnet"]}. ' +
       "The receipt acknowledges submission, not the recipient's answer; wait for an inbound reply before claiming their result. " +
@@ -3573,9 +3614,10 @@ export const callbackTools = [
     name: 'cat_cafe_get_thread_context',
     description:
       'Read messages from one thread, with token-lean anchor previews by default and optional full bodies, ranked keywords, or a bounded window around messageId. ' +
+      'Full persisted originals include contentRevision and sourceParts (part coordinates and UTF-16 lengths) for source-card replies; previews, oversized anchors and merged queued text do not supply a quotable revision. Reading never publishes a card. ' +
       'Use when: browsing the current conversation, reading a different known threadId, finding relevant messages inside that thread, opening context around a known messageId, or explicitly catching up. ' +
       'NOT for: finding features, decisions, plans, lessons, or unknown threads across project knowledge; use search_evidence or list_threads first. ' +
-      'Output: a bounded aggregate envelope with threadId, ordered messages, contextScope, hasMore, and nextCursor when continuation is required; anchor mode includes drillDown pointers, while responseMode="full" returns complete bodies per ordinary item and includes same-target queued bodies. contextScope="unread_delta" contains only currently unread relevant messages; hasMore=false closes that selection, not all thread history. ' +
+      'Output: a bounded aggregate envelope with threadId, ordered messages, contextScope, hasMore, and nextCursor when continuation is required; anchor mode includes drillDown pointers (and bounded richBlocksSummary when extra.rich blocks exist), while responseMode="full" returns complete bodies (including attached richBlocks such as html_widget, card, checklist, or diff) per ordinary item and includes same-target queued bodies. contextScope="unread_delta" contains only currently unread relevant messages; hasMore=false closes that selection, not all thread history. ' +
       'When available, situation reports exact lifecycle-backed active runs; situation.complete=false means runtime evidence could not be fully joined, so do not infer execution from recent speech. ' +
       'GOTCHA: keep the same limit, readIntent and other read arguments when following nextCursor; changing one requires a new read without cursor. Keyword ranking is best-effort over a bounded recent scan; scanCapped=true means older history may contain additional matches. A single item larger than the full-page budget returns an honest anchor with a precise drill pointer, not read evidence; drill an oversized workflow SOP with cat_cafe_get_workflow_sop using the returned threadId. History is the default selection even in full mode; for a complete catch-up, set readIntent="unread" and responseMode="full" without catId/keyword/messageId/before/after filters and follow nextCursor until hasMore=false. Pass threadId only for a different thread; omit it for the current thread.',
     inputSchema: getThreadContextInputSchema,
@@ -3631,11 +3673,12 @@ export const callbackTools = [
     description:
       'Look up one original message. Use when following replyTo or a discovered source coordinate, including the origin of a remembered agreement. ' +
       'Not for broad discovery: use search_evidence first when the source ID is unknown. ' +
-      'Returns the message content, sender, timestamp, and optionally N nearby messages for context. ' +
+      'Returns the message content, sender, timestamp, attached richBlocks (in mode="full") or bounded richBlocksSummary (in mode="preview"), and optionally N nearby messages for context. ' +
+      'Full originals also return contentRevision and sourceParts (part coordinates and UTF-16 lengths); use them with your exact quote and reason in an ordinary source-card reply. Reading does not publish a card. ' +
       'A durable typed local-review message also includes localReviewFact, as does thread-context; prose alone never creates that fact. ' +
       'GOTCHA: messageId is the bare message ID; for threadId#messageId coordinates pass only the part after #, not the thread prefix. ' +
       'PARAM GUIDE: messageId = required exact ID. contextCount = number of messages before/after to include (default 0, max 10). ' +
-      'mode = "preview" (default — bounded excerpt that saves context) or "full" (complete original content; use when you need the whole message — anchor drillDown pointers already request mode=full).',
+      'mode = "preview" (default — bounded excerpt + richBlocksSummary that saves context; sets truncated=true with drillDown when richBlocks are omitted) or "full" (complete original content + full richBlocks; use when you need the whole message or html_widget/card source — anchor drillDown pointers already request mode=full).',
     inputSchema: {
       messageId: z.string().min(1).describe('The exact message ID to look up'),
       contextCount: z
@@ -4036,19 +4079,20 @@ export const callbackTools = [
   defineCanonicalTool({
     name: 'cat_cafe_create_rich_block',
     description:
-      'Create a rich block (card, diff, checklist, file, media_gallery, audio, interactive, or html_widget) attached to the current message. ' +
+      'Create a rich block (card, sources, diff, checklist, file, media_gallery, audio, interactive, or html_widget) attached to the current message. ' +
+      'Use sources when answering with original quotations and clickable provenance: {kind:"sources",v:1,id,query,selections:[{threadId,messageId,contentRevision,quote,reason,part?,range?}]}. Full original reads provide version and sourceParts. Host verifies provenance without another search or generative judge; reasons remain your judgment, not system-certified support. ' +
       'Use card for status/decisions, diff for code changes, checklist for inline todos, file for existing documents/audio/video, media_gallery for images, audio for voice, interactive for user selection/confirmation, html_widget for a small HTML explanation within the conversation. ' +
       `Use this when the user wants to see, hear, or interact with the result directly in ${deploymentDefaults.brand.name} Chat (for example: show me, draw an HTML demo, or send a screenshot); the user does not need to say "rich text". For a commissioned single-file HTML explainer/prototype or a reusable/evolving tool, use cat_cafe_work to save, then publish-reference to attach its fixed-version card to this Chat. Choose by purpose, not size; a tiny reusable tool can be a work. Continue existing works under the same contentRef. A one-off typo fix in a widget need not become a work. Use media_gallery for existing screenshots/images, and browser-preview for a complex localhost or multi-page app. ` +
       'NOT for discussing or editing HTML without a visible-delivery request. ' +
       'Use this for long structured replies/reports with lists, tables, code blocks, diffs, status fields, or multi-step checklists; F192 rich-messaging wakeup treats plain long Markdown with these signals and no rich block as a miss. ' +
       'NOT for: persistent task tracking across sessions (use create_task for 🧶 毛线球). NOT for: document generation/export (use generate_document). ' +
-      'Output: block rendered inline in the current message. ' +
+      'Output: block rendered inline in the current message. Sources writes one prepared publication through the existing verifier; successful normal R binds its card. Prepared is not published. Agent-key sources must use post_message with the actual answer in content, searchAnswer={query,selections}, stable clientMessageId, threadId and original replyTo for a cloud return; this rich-only call does not send a message or consume its grant. Reuse id and original arguments on retry, including saved legacy query-only operations. Ordinary recall never auto-publishes. ' +
       'GOTCHA: media_gallery local absolute image paths are resolved only inside registered workspaces (existing readable image, <=10MiB) to /api/workspace/file/raw?worktreeId=...&path=...; unknown/protected/unusable local paths are rejected. This is a file view, not upload publication. Automatic upload publication only covers native image_gen/Antigravity provider results; use publish_image for durable local PNG publication. ' +
       'GOTCHA: The block JSON must use "kind" (NOT "type") and include "v": 1 and a unique "id". ' +
       "GOTCHA: Call get_rich_block_rules first if you haven't loaded the full schema yet in this session. " +
       'GOTCHA: checklist kind is ephemeral inline content — for persistent cross-session work items, use create_task (毛线球) instead. ' +
       'In an ordinary conversation, when the requester explicitly needs one later owner decision, pass awaitResponseV1={mode:"once"}; the Host publishes a durable RuntimeInteraction and returns immediately. Scoped work/read-only invocations cannot use this mode. This is never inferred from interactiveType or prose, and callback/guide/action options are rejected. ' +
-      'Ordinary rich blocks fall back to cc_rich text encoding when callback auth is unavailable. awaitResponseV1 always fails closed because a text fallback cannot create the durable decision lifecycle.',
+      'Ordinary rich blocks fall back to cc_rich text encoding when callback auth is unavailable. Sources and awaitResponseV1 always fail closed: text fallback cannot create a verified binding or durable decision lifecycle.',
     inputSchema: createRichBlockInputSchema,
     handler: handleCreateRichBlock,
     governance: {

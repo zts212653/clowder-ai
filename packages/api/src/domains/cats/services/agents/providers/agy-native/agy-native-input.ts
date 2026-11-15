@@ -25,7 +25,7 @@ function formatAgyNativeTurnPrompt(
   if (!trimmed) return { prompt, hasDynamicL0: false };
   const dynamicBlock = [
     '<agy-turn-dynamic-l0>',
-    '以下为本轮实时生效的主人画像与队友名册快照（若与本会话早期轮次中的同名快照不同，一律以本轮最新快照为准）：',
+    '以下为本轮实时生效的主人画像、队友名册与工具/能力指引（若与本会话早期的同类内容不同，以本轮最新内容为准；身份、权限与家规铁律仍按原生系统指令执行）：',
     '',
     trimmed,
     '</agy-turn-dynamic-l0>',

@@ -177,6 +177,7 @@ import { appendMessageAndObservePriorFrontier } from './redis-message-frontier-a
 import {
   parseConnectorSourceField,
   safeParseContentBlocks,
+  safeParseDraftContentBlocks,
   safeParseExtra,
   safeParseLegacyLifecycleMessageFrom,
   safeParseLifecycleMetadata,
@@ -2223,7 +2224,7 @@ export class RedisMessageStore {
     const revision = Number(data.revision);
     const updatedAt = Number(data.updatedAt);
     if (!Number.isInteger(revision) || revision < 1 || !Number.isFinite(updatedAt)) return null;
-    const contentBlocks = safeParseContentBlocks(data.contentBlocks);
+    const contentBlocks = safeParseDraftContentBlocks(data.contentBlocks);
     return {
       version: 1,
       ownerUserId: data.ownerUserId,

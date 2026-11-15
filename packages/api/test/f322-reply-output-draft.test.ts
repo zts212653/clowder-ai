@@ -3,88 +3,13 @@ import { createHash } from 'node:crypto';
 import { test } from 'node:test';
 import type { MessageOutputLayoutV1 } from '@cat-cafe/shared';
 import type { RedisClient } from '@cat-cafe/shared/utils';
+import { projectAuthoredTextParts } from '../src/domains/cats/services/agents/message-output-authored-text.js';
+import { prepareResponseText } from '../src/domains/cats/services/agents/routing/response-text.js';
 import { type DraftRecord, DraftStore } from '../src/domains/cats/services/stores/ports/DraftStore.js';
 import { RedisDraftStore } from '../src/domains/cats/services/stores/redis/RedisDraftStore.js';
+import { captureTextProvenance, restoreTextSourceParts } from '../src/domains/cats/services/text-provenance.js';
 
-// Hash/set wire operations only. No network or Redis server is involved.
-class HashRedis {
-  hashes = new Map<string, Record<string, string>>();
-  sets = new Map<string, Set<string>>();
-  expirations: number[] = [];
-  persistentKeys = new Set<string>();
-
-  async hget(key: string, field: string) {
-    return this.hashes.get(key)?.[field] ?? null;
-  }
-  async hgetall(key: string) {
-    return { ...this.hashes.get(key) };
-  }
-  async hset(key: string, fields: Record<string, string>) {
-    this.hashes.set(key, { ...this.hashes.get(key), ...fields });
-    return 1;
-  }
-  async hsetnx(key: string, field: string, value: string) {
-    if (this.hashes.get(key)?.[field] !== undefined) return 0;
-    return this.hset(key, { [field]: value });
-  }
-  async hdel(key: string, field: string) {
-    const record = this.hashes.get(key);
-    if (record) delete record[field];
-    return 1;
-  }
-  async sadd(key: string, value: string) {
-    const set = this.sets.get(key) ?? new Set<string>();
-    set.add(value);
-    this.sets.set(key, set);
-    return 1;
-  }
-  async smembers(key: string) {
-    return [...(this.sets.get(key) ?? [])];
-  }
-  async expire(_key: string, seconds: number) {
-    this.expirations.push(seconds);
-    return 1;
-  }
-  async persist(key: string) {
-    this.persistentKeys.add(key);
-    return 1;
-  }
-  multi() {
-    const operations: Array<() => Promise<unknown>> = [];
-    const pipeline = {
-      hgetall: (key: string) => {
-        operations.push(() => this.hgetall(key));
-        return pipeline;
-      },
-      hset: (key: string, fields: Record<string, string>) => {
-        operations.push(() => this.hset(key, fields));
-        return pipeline;
-      },
-      hsetnx: (key: string, field: string, value: string) => {
-        operations.push(() => this.hsetnx(key, field, value));
-        return pipeline;
-      },
-      hdel: (key: string, field: string) => {
-        operations.push(() => this.hdel(key, field));
-        return pipeline;
-      },
-      sadd: (key: string, value: string) => {
-        operations.push(() => this.sadd(key, value));
-        return pipeline;
-      },
-      persist: (key: string) => {
-        operations.push(() => this.persist(key));
-        return pipeline;
-      },
-      expire: (key: string, seconds: number) => {
-        operations.push(() => this.expire(key, seconds));
-        return pipeline;
-      },
-      exec: async () => Promise.all(operations.map(async (operation) => [null, await operation()])),
-    };
-    return pipeline;
-  }
-}
+import { HashRedis } from './helpers/f322-draft-redis.mjs';
 
 const content = '过程。\n\n回答。';
 const outputLayout: MessageOutputLayoutV1 = {
@@ -126,6 +51,10 @@ const draft: DraftRecord & { extra: { outputLayout: MessageOutputLayoutV1 } } = 
   content,
   toolEvents: [{ id: 'tool-event-one', type: 'tool_use', label: 'Read', timestamp: 1 }],
   extra: { outputLayout },
+  textProvenance: captureTextProvenance(outputLayout.owner, [
+    { content: '过程。', textSource: 'provider_summary' },
+    { content: '\n\n回答。' },
+  ]),
   updatedAt: Date.now(),
 };
 
@@ -143,6 +72,7 @@ test('the Redis draft wire preserves ordered output ranges across a fresh reader
   assert.equal(restored.content, content, 'the complete body stays the only stored body');
   assert.deepEqual(restored.toolEvents, draft.toolEvents);
   assert.deepEqual(restored.extra?.outputLayout, outputLayout);
+  assert.deepEqual(restored.textProvenance, draft.textProvenance);
   assert.deepEqual(redis.expirations, [], 'user-visible drafts have no automatic expiration');
   assert.equal(redis.persistentKeys.size, 2, 'both the owned draft and its thread index remain persistent');
 });
@@ -150,11 +80,12 @@ test('the Redis draft wire preserves ordered output ranges across a fresh reader
 test('unknown/legacy draft content remains whole and owner-scoped', async () => {
   const redis = new HashRedis();
   const store = new RedisDraftStore(redis as unknown as RedisClient);
-  const { extra: _extra, ...legacy } = draft;
+  const { extra: _extra, textProvenance: _provenance, ...legacy } = draft;
   await store.upsert(legacy);
   const restored = (await store.getByThread('user-one', 'thread-one'))[0] as typeof draft;
   assert.equal(restored.content, content);
   assert.equal(restored.extra?.outputLayout, undefined);
+  assert.equal(restored.textProvenance, undefined);
   assert.deepEqual(await store.getByThread('other-user', 'thread-one'), []);
 });
 
@@ -162,9 +93,64 @@ test('a subsequent legacy snapshot clears stale layout on the existing draft has
   const redis = new HashRedis();
   const store = new RedisDraftStore(redis as unknown as RedisClient);
   await store.upsert(draft);
-  const { extra: _extra, ...legacy } = draft;
+  const { extra: _extra, textProvenance: _provenance, ...legacy } = draft;
   await store.upsert({ ...legacy, content: 'new whole body' });
   const restored = (await store.getByThread('user-one', 'thread-one'))[0];
   assert.equal(restored.content, 'new whole body');
   assert.equal(restored.extra?.outputLayout, undefined);
+  assert.equal(restored.textProvenance, undefined);
+});
+
+test('a malformed, foreign or stale Redis source map cannot turn summary syntax into rich blocks', async () => {
+  const body =
+    '摘要🐾。\n```cc_rich\n{"v":1,"blocks":[{"v":1,"kind":"card","id":"summary-card","title":"summary"}]}\n```';
+  const provenance = captureTextProvenance(outputLayout.owner, [{ content: body, textSource: 'provider_summary' }]);
+  assert.ok(provenance && !('status' in provenance));
+  const cases = [
+    ['broken JSON', '{'],
+    ['unsupported version', JSON.stringify({ ...provenance, v: 2 })],
+    ['foreign owner', JSON.stringify({ ...provenance, owner: { ...provenance.owner, catId: 'other' } })],
+    ['foreign thread', JSON.stringify({ ...provenance, owner: { ...provenance.owner, threadId: 'other' } })],
+    ['foreign turn', JSON.stringify({ ...provenance, owner: { ...provenance.owner, turnInvocationId: 'other' } })],
+    [
+      'stale length',
+      JSON.stringify({ ...provenance, contentRevision: { ...provenance.contentRevision, length: body.length + 1 } }),
+    ],
+    ['stale hash', JSON.stringify({ ...provenance, contentRevision: { length: body.length, sha256: '0'.repeat(64) } })],
+    ['empty sources', JSON.stringify({ ...provenance, providerSummaryRanges: [] })],
+    ['out of bounds', JSON.stringify({ ...provenance, providerSummaryRanges: [{ start: 0, end: body.length + 1 }] })],
+    [
+      'overlap',
+      JSON.stringify({
+        ...provenance,
+        providerSummaryRanges: [
+          { start: 0, end: 5 },
+          { start: 4, end: body.length },
+        ],
+      }),
+    ],
+  ];
+  for (const [label, raw] of cases) {
+    const redis = new HashRedis();
+    await new RedisDraftStore(redis as unknown as RedisClient).upsert({
+      ...draft,
+      content: body,
+      textProvenance: provenance,
+    });
+    const wire = [...redis.hashes.values()][0];
+    wire.textProvenance = raw;
+    const [restored] = await new RedisDraftStore(redis as unknown as RedisClient).getByThread(
+      draft.userId,
+      draft.threadId,
+    );
+    assert.ok(restored);
+    const parts = restoreTextSourceParts(restored.content, restored.textProvenance, outputLayout.owner);
+    const prepared = prepareResponseText(
+      restored.content,
+      { projectAuthoredText: (transform) => projectAuthoredTextParts(parts, transform) },
+      false,
+    );
+    assert.equal(prepared.content, body, `${label}: keep the complete literal body`);
+    assert.deepEqual(prepared.blocks, [], `${label}: a lost source proof does not create a card`);
+  }
 });

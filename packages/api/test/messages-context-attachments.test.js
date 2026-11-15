@@ -21,7 +21,7 @@ describe('messages ContextAttachment request contract', () => {
     assert.equal(sendMessageSchema.safeParse({ content: '' }).success, false);
   });
 
-  it('parses multipart JSON and enforces the attachment count bound', () => {
+  it('parses multipart JSON and accepts fifteen attachments within the content budget', () => {
     const parsed = sendMessageSchema.safeParse({
       content: 'look here',
       contextAttachments: JSON.stringify([attachment]),
@@ -30,10 +30,10 @@ describe('messages ContextAttachment request contract', () => {
     assert.deepEqual(parsed.data.contextAttachments, [attachment]);
     assert.equal(
       sendMessageSchema.safeParse({
-        content: 'too many',
-        contextAttachments: Array.from({ length: 13 }, () => attachment),
+        content: 'fifteen comments',
+        contextAttachments: Array.from({ length: 15 }, (_, index) => ({ ...attachment, id: `quote-${index}` })),
       }).success,
-      false,
+      true,
     );
   });
 

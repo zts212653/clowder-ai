@@ -9,6 +9,7 @@ import { useCatData } from '@/hooks/useCatData';
 import { useThreadDisplayInfo } from '@/hooks/useThreadDisplayInfo';
 import { useSidebarProjectionStore } from '@/stores/sidebarProjectionStore';
 import { refreshSidebarThreadSnapshot } from '@/utils/sidebar-thread-snapshot';
+import { ProposalApprovalRecovery } from './ProposalApprovalRecovery';
 import { ProposalCardDetails } from './ProposalCardDetails';
 import { ProposalChoice } from './ProposalChoice';
 import { ProposalGroupChoice } from './ProposalGroupChoice';
@@ -96,6 +97,7 @@ export function ProposalCardV2({
           {host.originalPlaceAction}
         </ThreadProposalResult>
         {state.error ? <output className={styles.notice}>{state.error}</output> : null}
+        <ProposalApprovalRecovery recovery={state.recovery} />
       </article>
     );
   return (
@@ -263,6 +265,7 @@ export function ProposalCardV2({
           {state.error || revision.error}
         </output>
       ) : null}
+      <ProposalApprovalRecovery recovery={state.recovery} />
     </article>
   );
 }

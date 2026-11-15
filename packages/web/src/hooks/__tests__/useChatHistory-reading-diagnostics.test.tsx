@@ -31,11 +31,36 @@ describe('real history owner cancellation discriminator', () => {
     const records = JSON.parse(localStorage.getItem('cat-cafe:connection-diagnostics:v1') ?? '[]');
     expect(records.filter((r: { kind: string }) => r.kind === 'reading_restore')).toEqual([]);
   });
-  it('user wheel cancels a pending refresh without unmounting reader', async () => {
+  it('user wheel reports takeover while cancelling a pending refresh without unmounting reader', async () => {
     const state = await open(false);
     act(() => state.el.dispatchEvent(new WheelEvent('wheel', { deltaY: -1 })));
-    expect(await state.receipt).toEqual({ status: 'interrupted' });
+    expect(await state.receipt).toEqual({ status: 'interrupted', reason: 'user-input' });
     expect(unmounts).toBe(0);
+  });
+  it('quietly yields pending position restoration to scrolling and keeps the retry source', async () => {
+    const state = await beginBridge();
+    await act(async () => {
+      release();
+      await Promise.resolve();
+    });
+    expect(state.bridge.getSnapshot().returning).toBe(true);
+    state.el.scrollTop = 120;
+    await act(async () => state.el.dispatchEvent(new WheelEvent('wheel', { deltaY: 40 })));
+    expect(state.readingDiagnostics().findLast((r: { phase: string }) => r.phase === 'cancel')).toMatchObject({
+      cancelSource: 'native_input',
+      refreshPending: false,
+      restorePending: true,
+    });
+    expect(state.bridge.getSnapshot()).toMatchObject({
+      returning: false,
+      notice: null,
+      source: { id: state.source.id },
+    });
+    expect(readSettingsReadingSession('boot76-probe')?.id).toBe(state.source.id);
+    await flush();
+    expect(state.top()).toBe(120);
+    expect(state.diagnostics().some((r: { phase: string }) => r.phase === 'notice')).toBe(false);
+    state.checkDrafts();
   });
   it('real unmount cancels a pending refresh', async () => {
     const state = await open(false);
@@ -139,7 +164,7 @@ describe('real history owner cancellation discriminator', () => {
       const diagnostic = state.diagnostics().findLast((r: { phase: string }) => r.phase === 'cancel');
       expect(state.bridge.getSnapshot()).toMatchObject({
         returning: false,
-        notice: 'interrupted',
+        notice: scenario.kind === 'user' ? null : 'interrupted',
         source: { id: state.source.id },
       });
       expect(readSettingsReadingSession('boot76-probe')?.id).toBe(state.source.id);

@@ -11,7 +11,8 @@
   overflow-y: auto;
 }
 .desk [data-video-work-canvas] > [data-testid="workspace-review-artwork"]:not(:fullscreen) {
-  flex: 0 0 auto;
+  /* A short host shrinks the frame while the playback controls keep their space. */
+  flex: 0 1 auto;
   height: auto;
   min-height: 0;
 }
@@ -19,7 +20,7 @@
   [data-video-work-canvas]
   > [data-testid="workspace-review-artwork"]:not(:fullscreen)
   > [data-artwork-video-viewport] {
-  flex: 0 0 auto;
+  flex: 0 1 auto;
   height: auto;
   aspect-ratio: 16 / 9;
   max-height: 50vh;

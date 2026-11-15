@@ -8,6 +8,9 @@ export interface CjkReadSnapshot {
   complete: boolean;
   returnedRows: number | null;
   elapsedMs: number;
+  resourcesBefore: NativeReadResources | null;
+  resourcesAfter: NativeReadResources | null;
+  resourceDelta: NativeReadResourceDelta | null;
 }
 
 /** Eight geometric IPC checkpoints/job, not one event per body. A killed worker cannot report a finish. */
@@ -17,8 +20,11 @@ export function observeCjkRead(sink: (snapshot: CjkReadSnapshot) => void) {
   let checkpoints = 0;
   let nextCheckpoint = 256;
   let started = 0;
+  let resourcesBefore: NativeReadResources | null = null;
   const report = (outcome: CjkReadSnapshot['outcome'], returnedRows: number | null) => {
     try {
+      // Only the existing terminal event samples the closing process counters.
+      const resourcesAfter = outcome === 'running' ? null : captureNativeReadResources();
       sink({
         bodyVisits,
         bodyUtf16,
@@ -28,6 +34,9 @@ export function observeCjkRead(sink: (snapshot: CjkReadSnapshot) => void) {
         complete: outcome !== 'running',
         returnedRows,
         elapsedMs: performance.now() - started,
+        resourcesBefore,
+        resourcesAfter,
+        resourceDelta: nativeReadResourceDelta(resourcesBefore, resourcesAfter),
       });
     } catch {
       /* Diagnostics cannot affect the SQLite callback or its native result. */
@@ -48,6 +57,7 @@ export function observeCjkRead(sink: (snapshot: CjkReadSnapshot) => void) {
     },
     read<T extends readonly unknown[]>(run: () => T): T {
       started = performance.now();
+      resourcesBefore = captureNativeReadResources();
       try {
         const rows = run();
         report('fulfilled', rows.length);
@@ -59,3 +69,10 @@ export function observeCjkRead(sink: (snapshot: CjkReadSnapshot) => void) {
     },
   };
 }
+
+import {
+  captureNativeReadResources,
+  type NativeReadResourceDelta,
+  type NativeReadResources,
+  nativeReadResourceDelta,
+} from '../../infrastructure/sqlite-native-read-resources.js';

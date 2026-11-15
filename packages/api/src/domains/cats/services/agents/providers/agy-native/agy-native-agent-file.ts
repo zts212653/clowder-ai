@@ -16,6 +16,35 @@ export interface AgyNativeAgentFileInput {
   readonly tools?: readonly string[];
 }
 
+// Only these two advisory sections are live guidance; identity, workflow and hard rules stay bound.
+const GUIDANCE_SECTION =
+  /^## (?:7\. MCP 工具 quick index[^\n]*|8\. [^\n]*能力唤醒指南[^\n]*)\n[\s\S]*?(?=^#{1,2} |$(?![\r\n]))/gm;
+const GUIDANCE_KEYS = ['L5_CONTENT', 'L6_CONTENT'] as const;
+
+function stripGuidanceSections(markdown: string): string {
+  return markdown
+    .replace(GUIDANCE_SECTION, '\n\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+function extractGuidanceSections(markdown: string, frozenL0Input?: FrozenL0Input): string {
+  if (frozenL0Input) {
+    const keys = GUIDANCE_KEYS.filter(
+      (key) => Object.hasOwn(frozenL0Input.sections, key) && frozenL0Input.template.includes(`{{${key}}}`),
+    );
+    return renderFrozenL0Input({ ...frozenL0Input, template: keys.map((key) => `{{${key}}}`).join('\n\n') }).trim();
+  }
+  return Array.from(markdown.replace(/\r\n/g, '\n').matchAll(GUIDANCE_SECTION), ([section]) =>
+    section
+      .replace(/^## [^\n]*\n/, '')
+      .replace(/\n+---\s*$/, '')
+      .trim(),
+  )
+    .filter(Boolean)
+    .join('\n\n');
+}
+
 function stripVolatileL0Sections(markdown: string): string {
   return markdown
     .replace(/\r\n/g, '\n')
@@ -72,7 +101,7 @@ function extractVolatileL0SectionsFromMarkdown(markdown: string): string {
 }
 
 /**
- * F325: Extract the per-turn volatile L0 sections (`USER_CAPSULE` and `TEAMMATE_ROSTER`)
+ * F325: Extract live capsule, roster and advisory tool/skill guidance
  * excluded from the session-frozen `agent.md` so `--conversation` hot resumes receive
  * fresh capsule/roster updates on every turn.
  */
@@ -86,25 +115,43 @@ export function extractVolatileAgyNativeL0Context(systemPrompt: string, frozenL0
       : '';
     const capsuleBlock = formatVolatileCapsuleBlock(capsuleVar);
     const rosterBlock = formatVolatileRosterBlock(rosterVar);
-    return [capsuleBlock, rosterBlock].filter(Boolean).join('\n\n');
+    return [capsuleBlock, rosterBlock, extractGuidanceSections(systemPrompt, frozenL0Input)]
+      .filter(Boolean)
+      .join('\n\n');
   }
-  return extractVolatileL0SectionsFromMarkdown(systemPrompt);
+  return [extractVolatileL0SectionsFromMarkdown(systemPrompt), extractGuidanceSections(systemPrompt)]
+    .filter(Boolean)
+    .join('\n\n');
 }
 
 /**
  * F325: AGY CLI freezes `agent.md` inside `trajectory_metadata_blob` on Turn 1,
  * so own-identity / restriction / house-governance edits MUST rotate `l0Hash`
  * (matching F274 `kimi-l0-session-fingerprint.ts`), whereas teammate roster and
- * owner capsule churn must NOT seal active sessions across the cafe.
+ * owner capsule and advisory tool/skill guidance churn must NOT seal active sessions.
  */
 export function canonicalAgyNativeBindingBody(systemPrompt: string, frozenL0Input?: FrozenL0Input): string {
+  return stripGuidanceSections(bindingBody(systemPrompt, frozenL0Input, true));
+}
+
+/** Exact pre-guidance contract only: migration never accepts an unknown identity or old hard rule. */
+export function previousAgyNativeBindingHash(systemPrompt: string, frozenL0Input?: FrozenL0Input): string {
+  return createHash('sha256')
+    .update(bindingBody(systemPrompt, frozenL0Input, false))
+    .digest('hex');
+}
+
+function bindingBody(systemPrompt: string, frozenL0Input: FrozenL0Input | undefined, liveGuidance: boolean): string {
   if (frozenL0Input && renderFrozenL0Input(frozenL0Input) === systemPrompt) {
     const strippedVariables = {
       ...frozenL0Input.variables,
       ...(Object.hasOwn(frozenL0Input.variables, 'USER_CAPSULE') ? { USER_CAPSULE: '' } : {}),
       ...(Object.hasOwn(frozenL0Input.variables, 'TEAMMATE_ROSTER') ? { TEAMMATE_ROSTER: '' } : {}),
     };
-    return renderFrozenL0Input({ ...frozenL0Input, variables: strippedVariables })
+    const sections = liveGuidance
+      ? { ...frozenL0Input.sections, ...Object.fromEntries(GUIDANCE_KEYS.map((key) => [key, ''])) }
+      : frozenL0Input.sections;
+    return renderFrozenL0Input({ ...frozenL0Input, sections, variables: strippedVariables })
       .replace(/\r\n/g, '\n')
       .replace(/\n{3,}/g, '\n\n')
       .trim();

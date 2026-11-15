@@ -3,7 +3,7 @@ import * as sqliteVec from 'sqlite-vec';
 import { createSqliteReadDiagnostics } from '../../infrastructure/sqlite-read-diagnostics.js';
 import { CatCafeScanner } from './CatCafeScanner.js';
 import { checkpointMemoryDatabase } from './checkpoint-memory-database.js';
-import { prepareFileVectorReadWindow } from './file-vector-read-window.js';
+import { type FileVectorReadWindowSnapshot, prepareFileVectorReadWindow } from './file-vector-read-window.js';
 import { GenericRepoScanner } from './GenericRepoScanner.js';
 import type { EmbedModelInfo, IEmbeddingService } from './interfaces.js';
 import { memoryProcessStderrBoundary } from './memory-process-diagnostics.js';
@@ -58,15 +58,20 @@ function embeddingProxy(snapshot: EmbeddingSnapshot): IEmbeddingService {
   };
 }
 
-function prepareVectorReadQuery(job: MemoryProcessJob, db: Database.Database) {
+function prepareVectorReadQuery(
+  job: MemoryProcessJob,
+  db: Database.Database,
+  observe: (snapshot: FileVectorReadWindowSnapshot) => void,
+) {
   if (job.kind !== 'search' && job.kind !== 'message-search') return;
-  return job.embedding?.passages ? prepareFileVectorReadWindow(db) : undefined;
+  return job.embedding?.passages ? prepareFileVectorReadWindow(db, undefined, observe) : undefined;
 }
 
 async function execute(
   job: MemoryProcessJob,
   started: () => void,
   report: (event: MemoryReadDiagnostic) => void,
+  observeWindow: (snapshot: FileVectorReadWindowSnapshot) => void,
 ): Promise<unknown> {
   if (job.kind === 'scan') {
     started();
@@ -105,7 +110,14 @@ async function execute(
   try {
     const db = store.getDb();
     // Only a killable read-pool child may map file-backed vector reads.
-    const readVectorQuery = prepareVectorReadQuery(job, db);
+    let readWindow: FileVectorReadWindowSnapshot | undefined;
+    const recordWindow = (snapshot: FileVectorReadWindowSnapshot) => {
+      readWindow = snapshot;
+      observeWindow(snapshot);
+    };
+    if (job.kind === 'search' || job.kind === 'message-search')
+      recordWindow({ prepared: false, active: null, reason: 'not_configured', cleanup: null, counters: null });
+    const readVectorQuery = prepareVectorReadQuery(job, db, recordWindow);
     // Register existing vec0 tables; this does not create/migrate or mutate them.
     try {
       sqliteVec.load(db);
@@ -117,7 +129,8 @@ async function execute(
         onSlowRead() {},
         maxReports: 20,
         describeNativeRead: describePassageVectorRead,
-        onReadStarted: (sql) => report({ phase: 'sql-start', sql }),
+        onReadStarted: (sql) =>
+          report({ phase: 'sql-start', sql, ...(sql.native && readWindow ? { readWindow } : {}) }),
         onReadFinished: (sql) => report({ phase: 'sql-finish', sql }),
       })(db);
     started();
@@ -184,19 +197,23 @@ process.on('message', (message: ParentMessage) => {
     return;
   }
   process.stderr.write(memoryProcessStderrBoundary(message.stderrToken, message.id, 'begin'));
+  let readWindow: FileVectorReadWindowSnapshot | undefined;
   const finish = (result: Extract<ChildMessage, { type: 'result' }>) => {
     process.stderr.write(memoryProcessStderrBoundary(message.stderrToken, message.id, 'end'));
-    send(result);
+    send({ ...result, ...(readWindow ? { readWindow } : {}) });
   };
   void execute(
     message.job,
-    () => send({ type: 'started', id: message.id, pid: process.pid }),
+    () => send({ type: 'started', id: message.id, pid: process.pid, ...(readWindow ? { readWindow } : {}) }),
     (diagnostic) => {
       try {
         send({ type: 'read-diagnostic', id: message.id, diagnostic });
       } catch {
         /* Optional witness. */
       }
+    },
+    (snapshot) => {
+      readWindow = snapshot;
     },
   ).then(
     (value) => finish({ type: 'result', id: message.id, value }),

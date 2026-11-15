@@ -14,6 +14,7 @@ const {
   truncateHead,
   truncateHeadTail,
   truncateAroundMatch,
+  summarizeRichBlocks,
   anchorThreadMessage,
   anchorPendingMention,
   anchorTaskWhy,
@@ -270,5 +271,214 @@ describe('callback-anchor-helpers (F236 Phase A)', () => {
     };
     const a = anchorTaskWhy(task);
     assert.deepEqual(a.automationState, { ci: { state: 'green' } });
+  });
+
+  // ---- Rich blocks anchor summary (honesty contract without payload bloat) ----
+  test('summarizeRichBlocks: returns undefined when blocks are absent or empty', () => {
+    assert.equal(summarizeRichBlocks(undefined), undefined);
+    assert.equal(summarizeRichBlocks([]), undefined);
+  });
+
+  test('summarizeRichBlocks: projects bounded metadata per kind without heavy bodies', () => {
+    const longTitle = 'T'.repeat(200);
+    const summary = summarizeRichBlocks([
+      {
+        id: 'w1',
+        kind: 'html_widget',
+        v: 1,
+        title: longTitle,
+        html: '<svg>' + 'x'.repeat(5000) + '</svg>',
+        height: 320,
+      },
+      {
+        id: 'c1',
+        kind: 'card',
+        v: 1,
+        title: 'Status Card',
+        tone: 'info',
+        bodyMarkdown: 'secret body',
+        fields: [{ label: 'a', value: 'b' }],
+      },
+      {
+        id: 'cl1',
+        kind: 'checklist',
+        v: 1,
+        title: 'Steps',
+        items: [
+          { id: '1', text: 'one', checked: true },
+          { id: '2', text: 'two' },
+        ],
+      },
+      { id: 'd1', kind: 'diff', v: 1, filePath: 'src/index.ts', diff: '@@ -1 +1 @@\n-old\n+new' },
+      {
+        id: 'f1',
+        kind: 'file',
+        v: 1,
+        url: '/uploads/spec.pdf',
+        fileName: 'spec.pdf',
+        mimeType: 'application/pdf',
+        fileSize: 1024,
+      },
+    ]);
+    assert.equal(summary.length, 5);
+    assert.equal(summary[0].id, 'w1');
+    assert.equal(summary[0].kind, 'html_widget');
+    assert.equal(summary[0].title.length, 120);
+    assert.equal(summary[0].summaryTruncated, true);
+    assert.equal(summary[0].htmlLength, 5011);
+    assert.equal(summary[0].height, 320);
+    assert.equal('html' in summary[0], false);
+    assert.deepEqual(summary[1], {
+      id: 'c1',
+      kind: 'card',
+      title: 'Status Card',
+      tone: 'info',
+      bodyLength: 'secret body'.length,
+      fieldCount: 1,
+    });
+    assert.deepEqual(summary[2], { id: 'cl1', kind: 'checklist', title: 'Steps', itemCount: 2 });
+    assert.deepEqual(summary[3], { id: 'd1', kind: 'diff', filePath: 'src/index.ts', diffLength: 21 });
+    assert.deepEqual(summary[4], {
+      id: 'f1',
+      kind: 'file',
+      fileName: 'spec.pdf',
+      mimeType: 'application/pdf',
+      fileSize: 1024,
+    });
+  });
+
+  test('anchorThreadMessage: bounds oversized block id, mimeType, and high block counts with honest omission flags', () => {
+    const hugeIdItem = anchorThreadMessage(
+      {
+        id: 'rb-huge-id',
+        userId: 'user-1',
+        catId: 'gemini-carbon',
+        content: 'short',
+        timestamp: 20,
+        extra: {
+          rich: {
+            v: 1,
+            blocks: [{ id: 'x'.repeat(25_000), kind: 'html_widget', v: 1, html: '<svg/>' }],
+          },
+        },
+      },
+      { effectiveThreadId: 'thread-x', speaker: '碳碳·烁烁' },
+    );
+    assert.equal(hugeIdItem.truncated, true);
+    assert.equal(hugeIdItem.richBlocksSummaryTruncated, true);
+    assert.equal(hugeIdItem.richBlocksSummary[0].summaryTruncated, true);
+    assert.ok(hugeIdItem.richBlocksSummary[0].id.length <= 64);
+    assert.ok(Buffer.byteLength(JSON.stringify(hugeIdItem), 'utf8') <= 2_500);
+
+    const hugeMimeItem = anchorThreadMessage(
+      {
+        id: 'rb-huge-mime',
+        userId: 'user-1',
+        catId: 'gemini-carbon',
+        content: 'short',
+        timestamp: 21,
+        extra: {
+          rich: {
+            v: 1,
+            blocks: [
+              {
+                id: 'f-mime',
+                kind: 'file',
+                v: 1,
+                url: '/uploads/a.bin',
+                fileName: 'a.bin',
+                mimeType: 'm'.repeat(25_000),
+              },
+            ],
+          },
+        },
+      },
+      { effectiveThreadId: 'thread-x', speaker: '碳碳·烁烁' },
+    );
+    assert.equal(hugeMimeItem.richBlocksSummaryTruncated, true);
+    assert.equal(hugeMimeItem.richBlocksSummary[0].summaryTruncated, true);
+    assert.ok(hugeMimeItem.richBlocksSummary[0].mimeType.length <= 80);
+    assert.ok(Buffer.byteLength(JSON.stringify(hugeMimeItem), 'utf8') <= 2_500);
+
+    const manyBlocksItem = anchorThreadMessage(
+      {
+        id: 'rb-many',
+        userId: 'user-1',
+        catId: 'gemini-carbon',
+        content: 'many widgets',
+        timestamp: 22,
+        extra: {
+          rich: {
+            v: 1,
+            blocks: Array.from({ length: 150 }, (_, idx) => ({
+              id: `w-${idx}`,
+              kind: 'html_widget',
+              v: 1,
+              title: '标'.repeat(120),
+              html: '<svg/>',
+            })),
+          },
+        },
+      },
+      { effectiveThreadId: 'thread-x', speaker: '碳碳·烁烁' },
+    );
+    assert.equal(manyBlocksItem.truncated, true);
+    assert.equal(manyBlocksItem.richBlocksSummaryTruncated, true);
+    assert.equal(manyBlocksItem.richBlocksTotalCount, 150);
+    assert.ok(manyBlocksItem.richBlocksSummary.length >= 1 && manyBlocksItem.richBlocksSummary.length <= 8);
+    assert.equal(manyBlocksItem.richBlocksOmittedCount, 150 - manyBlocksItem.richBlocksSummary.length);
+    assert.ok(Buffer.byteLength(JSON.stringify(manyBlocksItem), 'utf8') <= 2_500);
+    assert.deepEqual(manyBlocksItem.drillDown, {
+      tool: 'cat_cafe_get_message',
+      args: { messageId: 'rb-many', mode: 'full' },
+    });
+  });
+
+  test('anchorThreadMessage: short prose with extra.rich.blocks flags truncated=true and includes richBlocksSummary', () => {
+    const item = {
+      id: 'rb1',
+      userId: 'user-1',
+      catId: 'gemini-carbon',
+      content: '画好啦 🐬',
+      timestamp: 10,
+      extra: {
+        rich: {
+          v: 1,
+          blocks: [{ id: 'dolphin', kind: 'html_widget', v: 1, title: '深海跃浪的小海豚', html: '<svg>dolphin</svg>' }],
+        },
+      },
+    };
+    const a = anchorThreadMessage(item, { effectiveThreadId: 'thread-x', speaker: '碳碳·烁烁' });
+    assert.equal(a.preview, '画好啦 🐬');
+    assert.equal(a.truncated, true, 'withheld richBlocks must mark anchor as truncated so callers drill');
+    assert.equal('richBlocks' in a, false);
+    assert.deepEqual(a.richBlocksSummary, [
+      { id: 'dolphin', kind: 'html_widget', title: '深海跃浪的小海豚', htmlLength: '<svg>dolphin</svg>'.length },
+    ]);
+    assert.deepEqual(a.drillDown, {
+      tool: 'cat_cafe_get_message',
+      args: { messageId: 'rb1', mode: 'full' },
+    });
+  });
+
+  test('anchorPendingMention: short mention with extra.rich.blocks sets requiresDrill=true and includes richBlocksSummary', () => {
+    const item = {
+      id: 'pm-rb1',
+      userId: 'user-1',
+      catId: 'gemini-argon',
+      content: '@gemini-carbon 看看我的海豚',
+      timestamp: 11,
+      extra: {
+        rich: {
+          v: 1,
+          blocks: [{ id: 'dolphin', kind: 'html_widget', v: 1, title: 'Argon Dolphin', html: '<svg>argon</svg>' }],
+        },
+      },
+    };
+    const a = anchorPendingMention(item, { from: '闪闪·烁烁' });
+    assert.equal(a.requiresDrill, true);
+    assert.deepEqual(a.richBlocksSummary, [
+      { id: 'dolphin', kind: 'html_widget', title: 'Argon Dolphin', htmlLength: '<svg>argon</svg>'.length },
+    ]);
   });
 });

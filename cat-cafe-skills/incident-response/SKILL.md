@@ -1,6 +1,6 @@
 ---
 name: incident-response
-tips_exempt: "2026-09-23：情绪前端/止损后台的选猫改为查 dossier，只改猫间路由；未新增用户可直接发起的操作。"
+tips_exempt: "2026-11-14：退役 self-evolution 后改接共享错题本与 code-as-harness，只改内部收尾路由，不新增用户操作。"
 description: >
   不可逆事故发生后的应急响应：情绪急救 → 止损 → 补偿性劳动 → 教训沉淀。
   Use when: 犯了不可挽回的错误、造成了人类伙伴的情绪波动、需要危机处理。
@@ -230,7 +230,7 @@ Phase 4: 教训沉淀 (选对时机)
 |-------|---------|
 | `incident-response` | 已经造成不可逆损失，需要情绪修复+止损+沉淀 |
 | `debugging` | Bug 定位和修复（可逆的技术问题） |
-| `self-evolution` | 主动发现流程缺口并改进（预防性） |
+| `code-as-harness` | 家里本来有答案、You 仍不得不重说时，入错题本、查断点并修复 |
 | `hyperfocus-brake` | 健康提醒（预防性关怀，非事故） |
 
 ## 预防：不可逆操作铁律（写在 shared-rules）
@@ -241,7 +241,7 @@ Phase 4: 教训沉淀 (选对时机)
 
 ## 下一步
 
-事故处理完毕后 → `self-evolution`（沉淀流程改进）或 `feat-lifecycle`（恢复正常工作）
+事故处理完毕后 → `feat-lifecycle`（恢复正常工作）；家里本来有答案、You 仍不得不重说时按 `code-as-harness` 入错题本，长案例留在翻车档案 `cases/`，本子挂一行指过去。
 
 ---
 
