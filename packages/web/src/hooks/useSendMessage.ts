@@ -8,6 +8,7 @@ import { z } from 'zod';
 import {
   acknowledgeSendComposerDraftConsumption,
   type ComposerDraftConsumption,
+  consumePreparedComposerDraft,
 } from '@/components/composer-draft-consumption';
 import { observeComposerDraft } from '@/components/composer-draft-flush-registry';
 import { useOptionalConfirm } from '@/components/useConfirm';
@@ -40,7 +41,7 @@ export interface SendMessageAdmissionOptions {
   messageDisposition?: MessageWorkDisposition;
   /** Ordinary conversation composer only; other admission owners retain their existing recovery. */
   localAttempt?: boolean;
-  onPrepared?: (localDurableAttempt: boolean) => void;
+  onPrepared?: (localDurableAttempt: boolean) => void | boolean;
 }
 
 interface MessageAdmissionResponse {
@@ -128,6 +129,9 @@ export function useSendMessage(activeThreadId?: string) {
       const composerDraftRevision =
         existing?.composerDraftRevision ??
         (admissionOptions?.consumeComposerDraft ? observeComposerDraft(threadId)?.revision : undefined);
+      const heldComposerText =
+        existing?.composerDraftText ??
+        (admissionOptions?.onPrepared ? (observeComposerDraft(threadId)?.text ?? content) : undefined);
       const messageDisposition = existing?.messageDisposition ?? admissionOptions?.messageDisposition;
       const hasImages = Boolean(images?.length);
       setUploadError(null);
@@ -162,6 +166,7 @@ export function useSendMessage(activeThreadId?: string) {
         : undefined;
       if (attempt) putSendAttempt(attempt);
       let submitted = false;
+      let prepared = false;
       let rejected = false;
       let retryable = true;
 
@@ -178,8 +183,19 @@ export function useSendMessage(activeThreadId?: string) {
           await saveSendAttempt(attempt);
           if (apiSessionIdentity.getSnapshot().ownerUserId !== attempt.ownerUserId)
             throw new Error('身份已变更，内容已保留');
+          if (attempt.composerDraftText !== undefined) {
+            if (!consumePreparedComposerDraft(attempt)) throw new Error('原输入框尚不可移交，内容已保留');
+            prepared = true;
+            attempt = { ...attempt, composerDraftText: undefined };
+            putSendAttempt(attempt);
+            // Commit the completed handoff before any POST; an interrupted write
+            // must not restore a pending handoff over newly typed input.
+            await saveSendAttempt(attempt);
+          } else {
+            if (admissionOptions?.onPrepared?.(true) === false) throw new Error('原输入框尚不可移交，内容已保留');
+            prepared = true;
+          }
           patchSendAttempt(attempt, { status: 'sending' });
-          admissionOptions?.onPrepared?.(true);
         }
         const submit = (confirmedTargetCats?: string[]) => {
           if (attempt && apiSessionIdentity.getSnapshot().ownerUserId !== attempt.ownerUserId)
@@ -300,11 +316,14 @@ export function useSendMessage(activeThreadId?: string) {
         if (attempt) {
           const abandoned = submitted && apiSessionIdentity.getSnapshot().ownerUserId !== attempt.ownerUserId;
           await patchSendAttempt(attempt, {
+            ...(!prepared && heldComposerText !== undefined ? { composerDraftText: heldComposerText } : {}),
             status: abandoned ? 'unknown' : !submitted || rejected ? 'failed' : 'unknown',
             error: abandoned
               ? undefined
               : !submitted
-                ? '未能安全保存，内容仍在输入框'
+                ? prepared
+                  ? '未能更新恢复记录，内容已保留在气泡'
+                  : '未能安全保存，内容仍在输入框'
                 : rejected
                   ? errorMessage
                   : undefined,

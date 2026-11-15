@@ -125,11 +125,6 @@ export const DEFAULT_CAPABILITY_WAKEUP_RULES: CapabilityWakeupRule[] = [
     'CLI.*退出|退出了|debugRef|cliDiagnostics|stderr|子进程.*退出|cli diagnostics',
   ),
   textRule(
-    'eval-verdict-harness-closure',
-    'eval-verdict',
-    'eval hub|verdict|评估报告|harness.*修了|publish_verdict|re-eval|闭环证据',
-  ),
-  textRule(
     'memory-drilldown-recall-source',
     'memory-drilldown',
     '压缩后失忆|旧决策|哪里.*说过|找.*源头|session.*digest|read_session|drill.?down',

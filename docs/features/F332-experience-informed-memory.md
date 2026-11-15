@@ -17,8 +17,8 @@ mcp_admission_claims:
     boundaryKind: side-effect-boundary
     decision: accepted
 created: 2026-10-23
-updated: 2026-11-11
-tips_exempt: "Renewed 2026-11-10: existing owner-memory wrappers were retired after the owner journeys were verified. The existing exact-proposal tip now points to Handled and its guide; retained memory-page, capsule and watcher controls keep their current tips. This is delivery truth, not a new capability entry."
+updated: 2026-11-13
+tips_exempt: "Renewed 2026-11-13: daily doc guard records PR #6483 profile/capsule revision invalidation and source/usage refresh fix in Timeline; existing memory-page, capsule, and watcher controls and tips are unchanged."
 description: 让共同经历在未见情境中帮助猫自主联想、核证与修正判断，并让人看见和纠正记忆。
 description_source: human
 description_author: codex-astra
@@ -35,7 +35,7 @@ Map delta why: 聚合用户结果与既有责任，不在本轮另建 store、pl
 
 ## Current tool contract
 
-`cat_cafe_remember`每次提交1–4项，逐条使用现有提交入口并返回原提案、直接结果或拒绝原因及groupId。现有Chat卡按组重读原提案、逐行沿原决议处理；修改建议进入原对话草稿。原八个写工具保留到W4与完整替代核收均通过。
+`cat_cafe_remember`每次提交1–4项，逐条使用现有提交入口并返回原提案、直接结果或拒绝原因及groupId。现有Chat卡按组重读原提案、逐行沿原决议处理；修改建议进入原对话草稿。按 KD-13，#7028 先撤五件，[PR #7029](https://github.com/zts212653/clowder-ai/pull/7029)（`01092998f4`）完成守望票据接线并撤画像、品味、事项三件及临时 watcher MCP profile；普通猫和守望猫均用统一入口，原领域路由、批准与存储不变。守望猫仅保留原 profile/taste/matter 权限；本笔 main 已落地，运行加载与自然样本仍由 F335 原 home 核验。
 
 Person-memory corrections use `cat_cafe_revise_person_memory` with one of
 `correct_claim`, `retire_claim` or `amend_event`. Each action retains its original

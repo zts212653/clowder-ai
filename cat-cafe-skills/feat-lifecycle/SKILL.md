@@ -302,21 +302,16 @@ human_disposition_feedback:
 keep/tune/sunset consumer 时才走 eval-design。完整判据与 F281 dogfood 见
 `docs/decisions/038-l0-staging-protocol.md`「主动交互面的反馈出生三件套」。
 
-**Eval Contract 门禁（F192）🔴**：
+**效用比较约定（Eval Contract，按问题使用方法）**：
 
-harness / skill / MCP / shared-rules 类 feature 的 spec，**若含"不确定效用"类 claim（ADR-031 v3.4 机制选择第三行：效果未知 + 明确 consumer + keep/tune/sunset 决策），必须含 `## Eval / Tracking Contract` 节**，否则 Design Gate 不通过。
+当本次决定依赖不确定效用、且有明确 consumer 时，用 eval-design 在原 Task / spec 写清：
 
-**触发条件**（两问都 yes 才填）：
-- 改动会改变猫猫行为模式？（新增 skill / MCP tool / shared-rules section / SOP step / 显著行为变更）
-- 存在效用不确定、且有明确 verdict consumer 的 claim？
+1. 谁依据结果决定保留、调整或停用，目标与对象/版本是什么；
+2. 真实样本/来源、必要对照、判断依据与有效性边界；
+3. 谁校准量尺、怎样保留独立验收，成本由谁承担；
+4. 哪种结果支持采用，哪种结果要求继续取证、回滚或停止。
 
-**不触发**：typo / wording 微调 / 纯重构（行为不变）/ 文档补充 / 只有确定契约或原始运行健康信号。未触发时不要创建空白或 N/A Eval 节。
-
-**触发即 4 项必填**（模板见 *(internal reference removed)*）：
-1. Primary Users + Activation Signal
-2. Friction Metric
-3. Regression Fixture（最少 1 条，建议 2-5）
-4. Sunset Signal（**空填 = 不通过，不设 reviewer 签字降级**——KD-4）
+沿用已有材料即可，不强制固定章节、平台注册、publish_verdict 或自动复评。需要多轮才说明接续条件与原负责人；不为单次问题新建常驻系统。确定性 bug、规约回归、原始运行健康以及纯措辞变化分别用已有测试、日志或自检，不为它们附加效用评估。
 
 **Harness 方法论教学（F218 / ADR-031 v3.4 机制选择）🔴**：
 
@@ -328,7 +323,7 @@ ADR-031 v3.4 选择器速查：
 |----|------|----------|
 | Convention/skill | 让猫在正确认知路径上想起该动作 | L0 触发句 / skill description / SOP 教学 |
 | Test/guard | 不靠自觉也能挡住或暴露错误 | test / linter / schema / runtime guard / compile gate |
-| Eval | 检验"效用不确定"的机制是否真的让行为变好 | F192 fixture / regression case / friction metric / sunset signal |
+| Eval | 检验"效用不确定"的机制是否真的让行为变好 | 真实样本 / 配对对照 / 校准记录 / 独立验收 / 原任务的采用决定 |
 | Observability | 原始运行健康信号供诊断与 SLO | logs / traces / metrics（默认留在 F153；若升为带 utility claim + consumer + verdict 的估计量，再走 Eval Contract） |
 
 一句话判断：**机制是按问题选的工具箱，不是待填清单**——claim 配错机制（工程 telemetry 硬挂 Eval Hub / 确定契约硬造 friction metric）和该配未配同样是 Design Gate 打回理由（LL-095）。
@@ -477,29 +472,11 @@ AC 全打勾 ≠ 完成（F041 教训：12 项 AC ✅ 但 UI 不可用）。回�
 3. 保存到 `project-reflections/YYYY-MM-DD-{topic}-capsule.md`
 4. Feature spec 只挂链接，不把正文塞回去
 
-没有新发现不写空胶囊、不填六节“无”。下述 Harness Eval Checkpoint 有自己的触发契约，不能因此省略。
+没有新发现不写空胶囊、不填六节“无”。Feature close 仍对照原托付与真实结果；已有测试、日志、作品和独立验收能够回答的问题，沿用原证据。
 
-**Step 0.6: Harness Eval Checkpoint（F192 Phase A）🔴**
+收到“不是我要的”时，回读原话，分清愿景偏差、需求转译偏差与执行机制不适配；确认历史重复后再用 code-as-harness 处理，不因这句反馈自动开启平台评估。
 
-Close Gate Report 之前，判断是否需要 harness-level 评估。**Checkpoint 必做**，但不一定每次都展开——大多数 feature 写 `harness_feedback: none` 即可。
-
-**触发条件**（任一满足 → 必须展开写 harness-feedback 文档）：
-
-| 触发 | 说明 |
-|------|------|
-| Harness / skill / MCP feature close | harness 自身变化必须评估 fit |
-| operator 不满意 / "不是我要的" | 需要分清 vision gap / translation gap / harness misfit |
-| Trace anomaly（重复 tool call、handoff 断链、长时间无 tool call） | trace 只能给 what，猫解释 why |
-| 抽样（normal feature close） | 防止只看失败样本 |
-
-**未触发时**：在 CloseGateReport 中写 `harness_feedback: none | reason: {简短理由}`。
-
-**触发时**：
-
-1. 在 `docs/harness-feedback/YYYY-MM-DD-Fxxx-{topic}.md` 创建 harness-feedback 文档（schema 见 `docs/harness-feedback/README.md`）
-2. 使用 `evidence_refs` 指向 canonical trace/thread/session，**不复制 raw tool-call payload**
-3. 如需 evidence-directed cat interview，**必须在独立 session 或独立 turn 进行**，不接在工作上下文尾巴上
-4. 在 feature spec 和 CloseGateReport 中链接 harness-feedback 文档
+如存在真正未解决的效用判断，在原 Task / spec 按 eval-design 补具体比较或校准，不因 harness / skill / MCP 变更自动新增 F192 harness-feedback 报告或等待周期复评。兼容已有 CloseGateReport 的 harness_feedback 字段时，引用实际已有材料或如实写 none，不据此开启平台流程。
 
 **Step 1: Close Gate Report（F177 Phase A）🔴**
 

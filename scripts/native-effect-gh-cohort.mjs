@@ -77,6 +77,9 @@ const PREVIOUS_COHORT = 'e8ad0622c739c0b902a22f973659aafa811430da55c474b8959b814
 // Reviewed #6899, merged as 0f473c7f36: existing deployments may still delegate
 // through this exact 50-module source/stage cohort during a guard upgrade.
 const PUBLISHED_6899_COHORT = '7bfcffb3257286345761350b492b776f7c97fed0301e26aa3248460b853e2e93';
+// Reviewed #6988, merged d270a8529e. Scope inheritance changes the shared
+// walker; the deployed wrapper still proves this exact complete cohort.
+const PUBLISHED_6988_COHORT = '1f3f4ef41ccbe34810a6aed19a77d2482a45de18a85288e8ce045530d55aaab0';
 const LEGACY_FILES = [
   ...GH_COHORT_FILES.filter((file) => file !== 'scripts/native-effect-gh-cohort.mjs'),
   'scripts/native-effect-invocation-targets.mjs',
@@ -138,7 +141,8 @@ export function verifiedGhCohort(entry, stage) {
   if (!selected) return false;
   if (current) {
     if (GH_COHORT_FILES.every((file) => selected.get(file) === ownCohort.get(file))) return true;
-    return cohortDigest(selected, GH_COHORT_FILES) === PUBLISHED_6899_COHORT;
+    const published = cohortDigest(selected, GH_COHORT_FILES);
+    return published === PUBLISHED_6899_COHORT || published === PUBLISHED_6988_COHORT;
   }
   return cohortDigest(selected, LEGACY_FILES) === PREVIOUS_COHORT;
 }

@@ -15,12 +15,12 @@ import { useInvocationAuth } from './helpers/invocation-auth.js';
 
 const { CANONICAL_TOOL_REGISTRY } = await import('../dist/server-toolsets.js');
 
+// Cat mounts project the full profile; watcher-only tools live in the registry for the watcher's ticketed surface.
+const CAT_FACING = CANONICAL_TOOL_REGISTRY.filter((definition) => definition.policy.runtimeProfiles.includes('full'));
 const expectedNames = (serverFamily) =>
-  CANONICAL_TOOL_REGISTRY.filter((definition) => definition.serverFamily === serverFamily).map(
-    (definition) => definition.name,
-  );
+  CAT_FACING.filter((definition) => definition.serverFamily === serverFamily).map((definition) => definition.name);
 
-const EXPECTED_TOOLS = CANONICAL_TOOL_REGISTRY.map((definition) => definition.name);
+const EXPECTED_TOOLS = CAT_FACING.map((definition) => definition.name);
 const EXPECTED_COLLAB_TOOLS = expectedNames('collab');
 const EXPECTED_MEMORY_TOOLS = expectedNames('memory');
 const EXPECTED_SIGNAL_TOOLS = expectedNames('signals');
@@ -305,8 +305,6 @@ describe('MCP Server Tool Registration', () => {
       'cat_cafe_propose_thread',
       'cat_cafe_continue_approved_task',
       'cat_cafe_propose_session_handoff',
-      'cat_cafe_propose_profile_update',
-      'cat_cafe_propose_taste',
       'cat_cafe_propose_eval_repair',
       'cat_cafe_update_bootcamp_state',
       'cat_cafe_bootcamp_env_check',

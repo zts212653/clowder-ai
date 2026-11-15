@@ -64,10 +64,11 @@ for (const status of ['running', 'succeeded', 'failed']) {
     // omit optional hash fields in a hand-built fixture, which masked the production failure.
     await client.eval(
       CREATE_TURN_EXECUTION_LUA,
-      3,
+      4,
       'turnexec:record:old',
       'turnexec:parent:legacy-parent',
       'turnexec:running',
+      `turnexec:member-started:${old.userId}:${old.threadId}:${old.catId}`,
       old.immutableIdentity,
       old.invocationId,
       old.parentInvocationId,
@@ -84,14 +85,17 @@ for (const status of ['running', 'succeeded', 'failed']) {
     if (status !== 'running') {
       await client.eval(
         TERMINALIZE_TURN_EXECUTION_LUA,
-        3,
+        4,
         'turnexec:record:old',
         'turnexec:running',
         'turnexec:response-pending',
+        'turnexec:sleep-continuation-owed',
         status,
         '20',
         terminalReason,
         old.invocationId,
+        '',
+        'host_sleep',
       );
     }
     const before = await client.hgetall('turnexec:record:old');

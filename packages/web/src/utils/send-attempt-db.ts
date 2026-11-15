@@ -26,6 +26,8 @@ export interface SendAttempt {
   whisper?: { visibility: 'whisper'; whisperTo: string[] };
   messageDisposition?: MessageWorkDisposition;
   composerDraftRevision?: number;
+  /** Present only while a failed local save has left its snapshot in the native composer. */
+  composerDraftText?: string;
   confirmedTargetCats?: string[];
   serverMessageId?: string;
   contentBlocks?: MessageContent[];

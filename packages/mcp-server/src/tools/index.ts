@@ -202,7 +202,6 @@ export {
 export {
   handleListMemoryMatters,
   handleReadMemoryMatter,
-  handleWriteMemoryMatter,
   matterMemoryTools,
 } from './matter-memory-tools.js';
 export {

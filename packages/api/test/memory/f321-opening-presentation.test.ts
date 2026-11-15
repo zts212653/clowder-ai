@@ -1,10 +1,15 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import { RECALL_OPPORTUNITY_CATALOG_VERSION } from '@cat-cafe/shared';
 import { mapToPresentation } from '../../src/domains/cats/services/session/context/context-presentation.js';
+
+// Build the admitted entry from the live catalog version; a pinned number goes stale on the next bump
+// and turns the "valid clue" fixtures into stale-version rejections.
+const THREAD_OPENING_ENTRY = `recall-catalog:${RECALL_OPPORTUNITY_CATALOG_VERSION}:thread_opened:owner_message`;
 
 test('only the exact admitted thread-opening source can present a T2 historical clue', () => {
   const admission = {
-    entryVersion: 'recall-catalog:7:thread_opened:owner_message',
+    entryVersion: THREAD_OPENING_ENTRY,
     policyRef: 'F321.ThreadOpeningClue',
     sourceAnchor: 'thread-overview:old',
     sourceRevision: 'revision',
@@ -46,7 +51,7 @@ test('the final provider boundary rejects a forged envelope policy for an otherw
     epistemicCeiling: 'historical_clue' as const,
     invalidator: { owner: 'thread_overview', ref: 'thread-overview:old@rev' },
     historicalClueAdmission: {
-      entryVersion: 'recall-catalog:7:thread_opened:owner_message',
+      entryVersion: THREAD_OPENING_ENTRY,
       policyRef: 'F321.ThreadOpeningClue',
       sourceAnchor: 'thread-overview:old',
       sourceRevision: 'rev',
@@ -74,7 +79,7 @@ test('the final provider boundary rejects a forged envelope policy for an otherw
       return {
         admitted: true as const,
         reservation: {
-          address: { scopeKey: 's', entryField: 'e' },
+          address: { scopeKey: 's', contextScopeKey: 's', writeEpoch: 1, entryField: 'e' },
           token: 't',
           expiresAtMs: 10000,
           promptGenerationId: 'g',

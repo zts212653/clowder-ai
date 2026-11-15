@@ -1,7 +1,7 @@
 /**
  * F260 Phase A: Entity proposal types.
  *
- * Cats propose new entity registry entries via `cat_cafe_propose_entity`;
+ * Cats propose new entity registry entries via `cat_cafe_remember` (target `entity`);
  * the operator sees a card in the Approval Hub and approves/rejects.
  * On approve, the backend upserts into EntityRegistry (atomic SQLite).
  * On reject, the proposal is settled (audit trail only).

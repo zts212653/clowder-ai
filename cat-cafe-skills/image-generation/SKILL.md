@@ -170,6 +170,13 @@ codex exec "生成一张猫咖全景图，手绘水彩风格"
 
 现成请求样例：`.cat-cafe/evidence/f336-production/20261109/argon-start-gif/requests/run-01.json`（GIF）、`.../argon-turnaround/v2/requests/sheet-01-1536x1024.json`（单图）。
 
+**两个模型、三档 `complexity` 怎么选**（F336 11-12～11-13 三轮 25 条 GIF 对照，记录见 *(internal reference removed)*）：
+- `gpt-image-2.6-sunburst` 注重细节、精准编辑；`gpt-image-2.6-flare` 更小更快（GIF 约 30 秒一条，Sunburst 约 80 秒），表演更放得开，会自己加动作线、感叹号、小桃心。家里的猫做互动动图，You 更喜欢 Flare。
+- `complexity` 的 high、medium、low 在两轮里都看不出差别，用默认 high 即可；Flare 的 low 反而跑偏最多。
+- 同样的输入每条演法都不同，是抽卡：一个动作多出几条给 You 挑。
+- 参考图只放 You 认过的同一只猫，最多三张（原头像、起始姿势、目标姿势），不放别的画法的图，哪怕写了「只参考手」：11-12 混进云端 GIF 截帧后，第一帧和后面的猫大小、画风都对不上。
+- 参考图之间条纹、毛量要一致，动图会往细节多的那张靠；人眼记不住上一张的细节，用程序量。生成的猫普遍比参考图大 18–25%，拼接时整条统一缩放。
+
 **画家里的猫**：第一张参考图用 You 认过的 2D 正典（Ragdoll opus55 用 `docs/videos/cucu-pr-flow/assets/references/xianxian-faces/avatars/director-chair.png`，其他猫从 `docs/videos/cucu-pr-flow/character-bible-v0.1.md` §7 和 You 之后认过的 2D 图里找；3D 线的设定图不当 2D 参考），prompt 里写清每张参考图只管什么。GIF 走两步法：先出一张单图，再用「原头像 + 这张单图（当首帧）」出 GIF。背景小道具也写清特征，否则会画成通用物件（11-09 猫粮碗被画成圆颗粒狗粮，You 一眼看出）。
 
 **真踩过的坑**：

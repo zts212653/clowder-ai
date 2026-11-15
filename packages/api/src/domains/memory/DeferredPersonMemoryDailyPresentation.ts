@@ -42,7 +42,7 @@ function writeOpportunityReentryText(signal: DeferredPersonMemoryDailyItem): str
     `write-opportunity lineage: reflex=${lineage.reflexId} v${lineage.reflexVersion} ` +
     `sourceOpportunityId=${lineage.opportunityId} lineage=${lineage.dedupeLineage} priorGeneration=${lineage.generation}\n` +
     'The server has mechanically re-entered the next generation through F296. Use the exact writeOpportunityRef ' +
-    'printed in the write-opportunity prompt for propose, defer, or abstain; all lanes remain on F276.CaptureCandidate.v1. ' +
+    'printed in the write-opportunity prompt for propose, defer, or abstain (cat_cafe_remember target person, person_defer or person_abstain); all lanes remain on F276.CaptureCandidate.v1. ' +
     `If deferring again, also pass reentryReceipt={receiptId:${signal.receiptId},claimId:${signal.claimId}} so this same receipt is re-armed instead of creating another one.\n`
   );
 }
