@@ -35,6 +35,7 @@ import {
   type DecisionErrorBody,
   decisionErrorMessage,
   resolveEndpoint,
+  tasteApprovalRequest,
 } from './approval-decision-http';
 
 /** Result of a batch operation for a single item. */
@@ -86,7 +87,7 @@ interface ApprovalHubState {
   close: () => void;
   toggle: () => void;
   /** F246 Phase B: approve an inlineApprovable dispatch proposal */
-  approveProposal: (proposalId: string) => Promise<void>;
+  approveProposal: (proposalId: string, displayedDigest?: string) => Promise<void>;
   /** F246 Phase B: reject an inlineApprovable dispatch proposal */
   rejectProposal: (proposalId: string, feedback?: HumanDispositionFeedbackInput) => Promise<boolean>;
   /** F276: approve an exact subset of the proposal's remaining drafts. */
@@ -223,7 +224,10 @@ export const useApprovalHubStore = create<ApprovalHubState>((set, get) => ({
     // Execute sequentially to avoid overwhelming the server
     for (const t of targets) {
       try {
-        const res = await apiFetch(resolveEndpoint(t.sourceFeatureId, t.proposalId, 'approve'), { method: 'POST' });
+        const res = await apiFetch(resolveEndpoint(t.sourceFeatureId, t.proposalId, 'approve'), {
+          method: 'POST',
+          ...tasteApprovalRequest(t.sourceFeatureId, t.detail.decisionDigest),
+        });
         if (!res.ok) {
           const data = (await res.json().catch(() => ({}))) as DecisionErrorBody;
           const drift = t.sourceFeatureId === 'F139' && res.status === 409 && data.code === 'SCHEDULE_TASK_DRIFT';

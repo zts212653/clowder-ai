@@ -1,5 +1,6 @@
 import type { RichCardBlock, UnifiedAttentionItemV1 } from '@cat-cafe/shared';
 import { beforeEach, expect, it, vi } from 'vitest';
+import { collectiveFailure } from '@/components/shell/mailbox/__tests__/collective-failure.fixture';
 import { approvalRow, okRead, storeItem } from '@/components/shell/mailbox/__tests__/mailbox-fixtures';
 import { useApprovalHubStore } from '@/stores/approvalHubStore';
 import { apiFetch } from '@/utils/api-client';
@@ -128,4 +129,114 @@ it('refuses a fresh Hub copy anchored to another publication', async () => {
       }) as Response,
   );
   expect(await readDomainApprovalSource(block, coordinate)).toBeNull();
+});
+
+it.each([
+  'F193',
+  'F221',
+  'F260',
+] as const)('keeps %s original approval cards readable during Collective plugin, connection, and project attention outages', async (feature) => {
+  const prefix = feature === 'F193' ? 'dispatch' : feature === 'F221' ? 'taste-proposal' : 'entity-proposal';
+  const featureBlock: RichCardBlock = {
+    id: `${prefix}-p-1`,
+    kind: 'card',
+    v: 1,
+    title: 'Original proposal',
+    bodyMarkdown: 'Original request',
+    meta: { approval: { producerId: feature, canonicalProposalId: 'p-1' } },
+  };
+  const featureItem = storeItem({
+    sourceFeatureId: feature,
+    createdAt: Date.now(),
+    detail: { content: 'Original request' },
+    navigation: item.navigation,
+  });
+  const featureRow = {
+    ...approvalRow(featureItem),
+    originalApprovalCard: { cardRef: { ...coordinate, blockId: featureBlock.id }, block: featureBlock },
+  };
+  const dualOutage = collectiveFailure(okRead([featureRow]), true);
+  if (dualOutage.kind !== 'ok') throw new Error('Expected ok read');
+
+  const partialMultiConnection = structuredClone(dualOutage.read);
+  partialMultiConnection.sources.collectiveAccountabilityRequests = {
+    status: 'available',
+    coverage: 'pending_f290_collective_accountability_requests',
+    exhaustiveness: 'partial',
+    startedAt: 1,
+    observedAt: 2,
+  };
+  partialMultiConnection.sources.collectiveProjectAttention = {
+    status: 'available',
+    coverage: 'pending_f290_project_materials_and_dates',
+    exhaustiveness: 'partial',
+    startedAt: 1,
+    observedAt: 2,
+  };
+  partialMultiConnection.consistency = {
+    state: 'uncertain',
+    reasons: ['collective_accountability_connection_read_failed', 'collective_project_attention_source_unavailable'],
+  };
+
+  const revokingAuthorityOutage = structuredClone(dualOutage.read);
+  revokingAuthorityOutage.sources.collectiveAccountabilityRequests = {
+    status: 'unavailable',
+    coverage: 'pending_f290_collective_accountability_requests',
+    exhaustiveness: 'partial',
+    startedAt: 1,
+    observedAt: 2,
+  };
+  revokingAuthorityOutage.consistency = {
+    state: 'uncertain',
+    reasons: ['collective_accountability_connection_authority_unavailable'],
+  };
+
+  for (const candidateRead of [dualOutage.read, partialMultiConnection, revokingAuthorityOutage]) {
+    useApprovalHubStore.setState({ items: [], pendingReadAvailable: false, isLoading: false });
+    vi.mocked(apiFetch).mockImplementation(
+      async (path) =>
+        ({
+          ok: true,
+          json: async () =>
+            String(path) === '/api/session'
+              ? { userId: 'owner-1' }
+              : String(path).includes('/approval-hub/pending')
+                ? { items: [featureItem], count: 1 }
+                : candidateRead,
+        }) as Response,
+    );
+    expect((await readDomainApprovalSource(featureBlock, coordinate))?.item.proposalId).toBe(featureItem.proposalId);
+  }
+
+  const degradedApprovals = structuredClone(dualOutage.read);
+  degradedApprovals.sources.approvals.exhaustiveness = 'partial';
+  vi.mocked(apiFetch).mockImplementation(
+    async (path) =>
+      ({
+        ok: true,
+        json: async () =>
+          String(path) === '/api/session'
+            ? { userId: 'owner-1' }
+            : String(path).includes('/approval-hub/pending')
+              ? { items: [featureItem], count: 1 }
+              : degradedApprovals,
+      }) as Response,
+  );
+  expect(await readDomainApprovalSource(featureBlock, coordinate)).toBeNull();
+
+  const conflictRead = structuredClone(dualOutage.read);
+  conflictRead.consistency.reasons = ['collective_project_attention_identity_conflict'];
+  vi.mocked(apiFetch).mockImplementation(
+    async (path) =>
+      ({
+        ok: true,
+        json: async () =>
+          String(path) === '/api/session'
+            ? { userId: 'owner-1' }
+            : String(path).includes('/approval-hub/pending')
+              ? { items: [featureItem], count: 1 }
+              : conflictRead,
+      }) as Response,
+  );
+  expect(await readDomainApprovalSource(featureBlock, coordinate)).toBeNull();
 });

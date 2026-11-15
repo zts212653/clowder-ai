@@ -921,23 +921,23 @@
     "owner": "codex"
   },
   {
-    "id": "capability-eval-verdict",
+    "id": "capability-eval-design",
     "kind": "capability",
     "sourceRef": {
-      "path": "cat-cafe-skills/refs/capability-wakeup-index.md",
-      "anchor": "F192 Eval Hub / Verdict Handoff"
+      "path": "cat-cafe-skills/eval-design/SKILL.md",
+      "anchor": "Eval Design"
     },
     "structureSource": {
-      "path": "packages/api/src/infrastructure/harness-eval/capability-wakeup/capability-wakeup-rules.ts",
-      "anchor": "eval-verdict"
+      "path": "cat-cafe-skills/manifest.yaml",
+      "anchor": "eval-design"
     },
     "bodySource": {
-      "path": "cat-cafe-skills/refs/capability-wakeup-index.md",
-      "anchor": "Eval Hub"
+      "path": "cat-cafe-skills/eval-design/SKILL.md",
+      "anchor": "方法独立于平台"
     },
-    "contexts": ["review", "merge_gate"],
+    "contexts": ["thinking", "feature_dev"],
     "audience": ["developer", "maintainer"],
-    "body": "改 harness 后要有 verdict/eval 闭环，不能只说「修了」。",
+    "body": "想比较方案是否更有效？让猫猫用 eval-design 在原任务设计样本、对照、校准与独立验收，不必注册旧评估平台。",
     "action": {
       "type": "open_concierge_draft",
       "label": "了解更多"
@@ -2417,34 +2417,6 @@
     "owner": "codex"
   },
   {
-    "id": "feature-f245-friction-eval-rollup",
-    "kind": "feature",
-    "sourceRef": {
-      "path": "docs/features/F245-friction-signal-eval.md",
-      "anchor": "Friction Signal Eval"
-    },
-    "structureSource": {
-      "path": "docs/features/F245-friction-signal-eval.md",
-      "anchor": "Phase D"
-    },
-    "bodySource": {
-      "path": "docs/features/F245-friction-signal-eval.md",
-      "anchor": "Why"
-    },
-    "contexts": ["thinking", "feature_dev"],
-    "audience": ["cvo"],
-    "body": "觉得某个地方用着别扭？Eval Hub 会把爪感差、cancel、反馈汇成周期报告；标「建议修复」的是待判断线索，不会自动给猫派活。",
-    "action": {
-      "type": "open_source",
-      "label": "打开 spec",
-      "sourceRef": {
-        "path": "docs/features/F245-friction-signal-eval.md",
-        "anchor": "Friction Signal Eval"
-      }
-    },
-    "owner": "gpt52"
-  },
-  {
     "id": "feature-f260-entity-conflict-resolution",
     "kind": "feature",
     "sourceRef": {
@@ -2524,6 +2496,34 @@
       "draftPrompt": "请帮我在 Workspace 打开一篇 Markdown 长文，先缓存全文，再用听读模式从指定句子开始。"
     },
     "owner": "codex-sol"
+  },
+  {
+    "id": "feature-f332-owner-person-maintenance",
+    "kind": "feature",
+    "sourceRef": {
+      "path": "docs/guides/person-memory-maintenance.md",
+      "anchor": "# 管理一条人物记忆或暂存线索"
+    },
+    "structureSource": {
+      "path": "packages/web/src/components/memory/page/MemoryPersonMaintenance.tsx",
+      "anchor": "MemoryPersonMaintenanceConfirm"
+    },
+    "bodySource": {
+      "path": "docs/guides/person-memory-maintenance.md",
+      "anchor": "# 管理一条人物记忆或暂存线索"
+    },
+    "contexts": ["concierge_open"],
+    "audience": ["cvo"],
+    "body": "想清理一条人物记忆，打开记忆→全部记忆→人物，在准确判断或经历旁选「忘掉这条内容」。页面下方还可撤回或永久遗忘暂存线索。结果未确认时，刷新后用「重试这次操作」继续原请求；原聊天会保留。",
+    "action": {
+      "type": "open_source",
+      "label": "查看操作步骤",
+      "sourceRef": {
+        "path": "docs/guides/person-memory-maintenance.md",
+        "anchor": "# 管理一条人物记忆或暂存线索"
+      }
+    },
+    "owner": "codex61-sol"
   },
   {
     "id": "feature-f281-exact-proposal-forget",
@@ -3354,19 +3354,28 @@
   {
     "id": "feature-f309-gif-svg-originals",
     "kind": "feature",
-    "sourceRef": { "path": "docs/guides/gif-svg-works.md", "anchor": "## 帧定位与原件" },
+    "sourceRef": {
+      "path": "docs/guides/gif-svg-works.md",
+      "anchor": "## 帧定位与原件"
+    },
     "structureSource": {
       "path": "packages/web/src/components/content-review/GifFrameMedia.tsx",
       "anchor": "GifFrameControls"
     },
-    "bodySource": { "path": "docs/guides/gif-svg-works.md", "anchor": "意见会带上当前版本" },
+    "bodySource": {
+      "path": "docs/guides/gif-svg-works.md",
+      "anchor": "意见会带上当前版本"
+    },
     "contexts": ["concierge_open", "pet_waiting_for_user"],
     "audience": ["all"],
     "body": "改 GIF 时，先用帧控制条停到要改的画面，再圈选或画笔标记，伙伴就能读到对应版本和帧号。SVG 可以放大看细节；下载原件会保留向量源码或完整动画。",
     "action": {
       "type": "open_source",
       "label": "查看动图与矢量作品说明",
-      "sourceRef": { "path": "docs/guides/gif-svg-works.md", "anchor": "## 帧定位与原件" }
+      "sourceRef": {
+        "path": "docs/guides/gif-svg-works.md",
+        "anchor": "## 帧定位与原件"
+      }
     },
     "owner": "codex61-sol"
   },
@@ -3442,6 +3451,31 @@
       "type": "open_concierge_draft",
       "label": "打开记忆搜索",
       "draftPrompt": "请打开 /memory?tab=all&shell=v2，带我用顶栏搜索记忆、文档和对话，并说明本次结果的读取范围。"
+    },
+    "owner": "codex61-sol"
+  },
+  {
+    "id": "feature-f321-person-event-read-counts",
+    "kind": "feature",
+    "sourceRef": {
+      "path": "docs/features/F321-memory-sky-experience-loop.md",
+      "anchor": "AC-A2"
+    },
+    "structureSource": {
+      "path": "packages/web/src/components/memory/page/MemoryReadUsage.tsx",
+      "anchor": "MemoryReadUsage"
+    },
+    "bodySource": {
+      "path": "packages/web/src/components/memory/page/MemoryReadUsage.tsx",
+      "anchor": "MemoryReadUsage"
+    },
+    "contexts": ["feature_dev", "concierge_open"],
+    "audience": ["cvo"],
+    "body": "想核对哪只猫读过某个人物或事件？在记忆页打开该条详情，查看“被猫翻到”和“统计范围与原使用记录”。当前版与旧版分开计数；历史未计入的次数仍是未知，读到也不代表采用。",
+    "action": {
+      "type": "open_concierge_draft",
+      "label": "查看人物或事件的读取记录",
+      "draftPrompt": "请打开 /memory?tab=all&shell=v2，带我从一条人物或事件详情查看已核实的读取次数、渠道与历史范围。先浏览，不替我更正或遗忘。"
     },
     "owner": "codex61-sol"
   },

@@ -5,15 +5,19 @@ import {
   assertCoveredMessageIds,
   assertCreatableOutputFence,
   assertCreateTurnExecutionInput,
+  assertRecentSettledLimit,
   assertTurnExecutionTerminalInput,
   type BindCoveredMessageIdsResult,
   type CreateTurnExecutionInput,
   type CreateTurnExecutionResult,
   cloneTurnExecutionRecord,
   createdOutputFence,
+  HOST_SLEEP_TERMINAL_REASON,
   type InterruptRunningTurnExecutionsInput,
   type ITurnExecutionStore,
+  type MemberTurnStartedAfterQuery,
   matchesTurnExecutionSource,
+  type RecentSettledTurnQuery,
   serializeTurnExecutionIdentity,
   type TransitionTurnExecutionResult,
   type TurnExecutionRecord,
@@ -102,10 +106,11 @@ export class RedisTurnExecutionStore implements ITurnExecutionStore {
     const result = Number(
       await this.redis.eval(
         CREATE_TURN_EXECUTION_LUA,
-        3,
+        4,
         TurnExecutionKeys.record(input.invocationId),
         TurnExecutionKeys.parent(input.parentInvocationId),
         TurnExecutionKeys.running,
+        TurnExecutionKeys.memberStarted(input.userId, input.threadId, input.catId as string),
         serializeTurnExecutionIdentity(input),
         input.invocationId,
         input.parentInvocationId,
@@ -266,15 +271,17 @@ export class RedisTurnExecutionStore implements ITurnExecutionStore {
     const result = Number(
       await this.redis.eval(
         TERMINALIZE_TURN_EXECUTION_LUA,
-        3,
+        4,
         TurnExecutionKeys.record(invocationId),
         TurnExecutionKeys.running,
         TurnExecutionKeys.responsePending,
+        TurnExecutionKeys.sleepContinuationOwed,
         input.status,
         String(input.endedAt),
         input.terminalReason ?? '',
         invocationId,
         input.providerTeardownAt === undefined ? '' : String(input.providerTeardownAt),
+        HOST_SLEEP_TERMINAL_REASON,
       ),
     );
     if (result === -2) throw new Error('provider_teardown_unconfirmed');
@@ -356,6 +363,44 @@ export class RedisTurnExecutionStore implements ITurnExecutionStore {
 
   markResponseSettled(invocationId: string, settlement: TurnResponseSettlement) {
     return new RedisTurnExecutionSettlement(this.redis, (id) => this.get(id)).mark(invocationId, settlement);
+  }
+
+  async hasMemberTurnStartedAfter(query: MemberTurnStartedAfterQuery): Promise<boolean> {
+    const later = await this.redis.zrangebyscore(
+      TurnExecutionKeys.memberStarted(query.userId, query.threadId, query.catId),
+      `(${query.startedAfter}`,
+      '+inf',
+      'LIMIT',
+      0,
+      1,
+    );
+    return later.length > 0;
+  }
+
+  async listOwedSleepContinuations(): Promise<TurnExecutionRecord[]> {
+    const ids = await this.redis.smembers(TurnExecutionKeys.sleepContinuationOwed);
+    const records = await Promise.all(ids.map((id) => this.get(id)));
+    return records.filter((record): record is TurnExecutionRecord => record !== null);
+  }
+
+  async settleOwedSleepContinuations(invocationIds: readonly string[]): Promise<void> {
+    if (invocationIds.length > 0) await this.redis.srem(TurnExecutionKeys.sleepContinuationOwed, ...invocationIds);
+  }
+
+  async listRecentSettled(query: RecentSettledTurnQuery): Promise<TurnExecutionRecord[]> {
+    assertRecentSettledLimit(query.limit);
+    const key = query.threadId
+      ? TurnExecutionKeys.settledThread(query.userId, query.threadId)
+      : TurnExecutionKeys.settledUser(query.userId);
+    const ids = await this.redis.zrevrange(key, 0, query.limit - 1);
+    const records = await Promise.all(ids.map((id) => this.get(id)));
+    return records.filter(
+      (record): record is TurnExecutionRecord =>
+        record !== null &&
+        Boolean(record.responseSettlement) &&
+        record.userId === query.userId &&
+        (query.threadId === undefined || record.threadId === query.threadId),
+    );
   }
 
   listSettled(query: SettledTurnQuery) {

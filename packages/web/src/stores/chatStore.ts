@@ -1012,6 +1012,8 @@ export interface ChatState {
     deliveredAt: number,
     messages?: Array<{
       id: string;
+      visibility?: ChatMessage['visibility'];
+      whisperTo?: string[];
       from?: import('@cat-cafe/shared').MessageFrom;
       content: string;
       lifecycle?: import('@cat-cafe/shared').LifecycleStoredMessageMetadata;
@@ -1306,6 +1308,8 @@ export const chatStoreCreator: StateCreator<ChatState> = (set, get) => ({
             ...(serverMessage
               ? {
                   content: serverMessage.content,
+                  ...(serverMessage.visibility ? { visibility: serverMessage.visibility } : {}),
+                  ...(serverMessage.whisperTo ? { whisperTo: serverMessage.whisperTo } : {}),
                   ...(serverMessage.from ? { from: serverMessage.from } : {}),
                   ...(serverMessage.source ? { source: serverMessage.source } : {}),
                   ...(serverMessage.lifecycle ? { lifecycle: serverMessage.lifecycle } : {}),
@@ -1342,6 +1346,8 @@ export const chatStoreCreator: StateCreator<ChatState> = (set, get) => ({
             if (existingIds.has(sm.id)) continue;
             const incoming: ChatMessage = {
               id: sm.id,
+              ...(sm.visibility ? { visibility: sm.visibility } : {}),
+              ...(sm.whisperTo ? { whisperTo: sm.whisperTo } : {}),
               // One shared rule, so a connector notice delivered through the Queue keeps the same
               // framing the server timeline gives it. The fallback covers an absent `from` only.
               type: timelineMessageKind(sm.from, Boolean(sm.source)) ?? (sm.catId ? 'assistant' : 'user'),

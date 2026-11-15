@@ -74,9 +74,10 @@ source "$VENV_DIR/bin/activate"
 echo "Starting Embedding server: model=$MODEL, port=$PORT"
 echo "[start] launching python: python3 $API_SCRIPT --model $MODEL --port $PORT"
 set +e
-LIMIT_ARGS=()
-if [ -n "${EMBED_MAX_MODEL_MEM_MB:-}" ]; then LIMIT_ARGS=(--max-model-mem-mb "$EMBED_MAX_MODEL_MEM_MB"); fi
-python3 "$API_SCRIPT" --model "$MODEL" --port "$PORT" --generation "$GENERATION" "${LIMIT_ARGS[@]}"
+# Keep the argv array nonempty: Bash 3.2 treats an empty array as unset under -u.
+SERVER_ARGS=("$API_SCRIPT" --model "$MODEL" --port "$PORT" --generation "$GENERATION")
+if [ -n "${EMBED_MAX_MODEL_MEM_MB:-}" ]; then SERVER_ARGS+=(--max-model-mem-mb "$EMBED_MAX_MODEL_MEM_MB"); fi
+python3 "${SERVER_ARGS[@]}"
 EXIT_CODE=$?
 set -e
 echo "[start] python exited with code $EXIT_CODE"

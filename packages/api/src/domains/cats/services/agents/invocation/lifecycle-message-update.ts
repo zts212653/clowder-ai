@@ -50,6 +50,9 @@ function emitSnapshot(
     threadId: message.threadId,
     message: {
       id: message.id,
+      ...(message.from?.kind === 'user' && message.userId === userId && message.clientMessageId
+        ? { clientMessageId: message.clientMessageId }
+        : {}),
       ...(message.from ? { from: message.from } : {}),
       catId: message.catId,
       content: message.content,

@@ -14,10 +14,7 @@ import { companionConfigurationFixture } from './helpers/companion-configuration
 import { createIsolatedTemplateRoot } from './helpers/isolated-template-root.js';
 
 async function fixture(t: TestContext) {
-  const isolated = createIsolatedTemplateRoot(
-    '/tmp',
-    fileURLToPath(new URL('../../../cat-template.json', import.meta.url)),
-  );
+  const isolated = createIsolatedTemplateRoot(fileURLToPath(new URL('../../../cat-template.json', import.meta.url)));
   t.after(isolated.cleanup);
   const template = loadCatConfig(isolated.templatePath);
   getRoster(template);

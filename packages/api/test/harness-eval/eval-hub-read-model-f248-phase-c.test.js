@@ -17,69 +17,18 @@ after(() => rmSync(activeEra.repoRoot, { recursive: true, force: true }));
 const FIXTURE_NOW_BEFORE_DEADLINE = new Date('2026-05-23T12:00:00.000Z');
 
 describe('Eval Hub read model — F248 Phase C', () => {
-  it('includes evalCatId and nextCronFireAt in domain summaries (#OQ-20)', () => {
-    const summary = loadEvalHubSummary({
-      harnessFeedbackRoot: activeEra.harnessFeedbackRoot,
-      now: FIXTURE_NOW_BEFORE_DEADLINE,
-    });
-
-    const a2aDomain = summary.domains.find((d) => d.domainId === 'eval:a2a');
-    assert.ok(a2aDomain);
-    assert.equal(a2aDomain.evalCatId, 'codex', 'domain summary must include evalCatId');
-    assert.equal(
-      a2aDomain.nextCronFireAt,
-      '2026-05-24T03:00:00.000Z',
-      'daily domain nextCronFireAt = next 03:00 UTC after now',
-    );
-
-    const memoryDomain = summary.domains.find((d) => d.domainId === 'eval:memory');
-    assert.ok(memoryDomain);
-    assert.equal(memoryDomain.evalCatId, 'opus-47');
-    assert.equal(
-      memoryDomain.nextCronFireAt,
-      '2026-05-24T03:00:00.000Z',
-      'no-verdict domain still gets nextCronFireAt',
-    );
-
-    const sopDomain = summary.domains.find((d) => d.domainId === 'eval:sop');
-    assert.ok(sopDomain);
-    assert.equal(sopDomain.enabled, true, 're-enabled sop domain must carry enabled=true');
-    assert.equal(
-      sopDomain.nextCronFireAt,
-      '2026-05-24T03:00:00.000Z',
-      're-enabled weekly sop domain nextCronFireAt = next Sunday 03:00 UTC',
-    );
-
-    const cwDomain = summary.domains.find((d) => d.domainId === 'eval:capability-wakeup');
-    assert.ok(cwDomain);
-    assert.equal(cwDomain.enabled, true, 'enabled weekly domain must carry enabled=true');
-    assert.equal(
-      cwDomain.nextCronFireAt,
-      '2026-05-24T03:00:00.000Z',
-      'enabled weekly domain nextCronFireAt = next Sunday 03:00 UTC',
-    );
-  });
-
-  it('attaches enabled flag for ALL domains in summary (sunset visibility — F192 silent-fire fix)', () => {
-    const summary = loadEvalHubSummary({
-      harnessFeedbackRoot: repoHarnessFeedbackRoot,
-      now: FIXTURE_NOW_BEFORE_DEADLINE,
-    });
-
-    for (const d of summary.domains) {
-      assert.equal(typeof d.enabled, 'boolean', `${d.domainId} must have boolean enabled field`);
+  it('preserves domain and cat identity without advertising any automatic next fire', () => {
+    for (const harnessFeedbackRoot of [repoHarnessFeedbackRoot, activeEra.harnessFeedbackRoot]) {
+      const summary = loadEvalHubSummary({ harnessFeedbackRoot, now: FIXTURE_NOW_BEFORE_DEADLINE });
+      const a2a = summary.domains.find((domain) => domain.domainId === 'eval:a2a');
+      assert.ok(a2a?.evalCatId);
+      assert.ok(summary.items.length > 0, 'retirement must keep historical verdicts readable');
+      for (const domain of summary.domains) {
+        assert.equal(domain.enabled, false);
+        assert.equal(domain.automaticStatus, 'retired');
+        assert.equal(domain.nextCronFireAt, undefined);
+      }
     }
-
-    // Dormant since 2026-10-01: visible, disabled, and never shown with a next cron fire.
-    const sopDomain = summary.domains.find((d) => d.domainId === 'eval:sop');
-    assert.ok(sopDomain);
-    assert.equal(sopDomain.enabled, false);
-    assert.equal(sopDomain.nextCronFireAt, undefined, 'dormant domain must not advertise a next cron fire');
-
-    const a2aDomain = summary.domains.find((d) => d.domainId === 'eval:a2a');
-    assert.ok(a2aDomain);
-    assert.equal(a2aDomain.enabled, true);
-    assert.ok(a2aDomain.nextCronFireAt, 'enabled domain must have nextCronFireAt');
   });
 
   it('fails closed when a live verdict points at a missing evidence bundle', () => {

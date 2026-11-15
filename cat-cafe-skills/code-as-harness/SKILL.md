@@ -1,6 +1,6 @@
 ---
 name: code-as-harness
-tips_exempt: "Renewed 2026-10-27: internal diagnostic guidance now chooses code repair, removal of unnecessary restrictions, or an observed delivery check according to the failure; it adds no end-user capability or new operation."
+tips_exempt: "Re-audited 2026-11-14: existing Profile and Taste judgments now use cat_cafe_remember targets; the same approval-first landing and routing boundaries remain. This changes internal agent guidance, with no new user command, setting or discovery action."
 description: "证据确认重复摩擦后修 harness。Use: 历史重复已确认。Not: 未确认重复、首次 bug、review 反馈。Output: 未确认不强制 block；需 operator 决策发 interactive，否则行动后发 card（均含根因、证据、处置）。"
 triggers:
   - "又忘了"
@@ -140,7 +140,7 @@ C. 反复出现的新任务类型（做过 ≥2 次且没有对应 harness）→
 | **架构限制** | 问题出在平台层（如记忆不支持图片） | Research → 升级提案 |
 | **执行失误** | 家规/SOP 已覆盖但猫忘了 | 检查为什么没遵守 |
 | **可沉淀的新能力** | 同类任务做过 ≥2 次 + 未来还会来 | Agent Team Leadership → 新 harness |
-| **Taste 信号** | "这不美"/"太客服了"/"aha"/"这就是我要的" — 品味而非缺陷 | 调用 `cat_cafe_propose_taste`（见下方） |
+| **Taste 信号** | "这不美"/"太客服了"/"aha"/"这就是我要的" — 品味而非缺陷 | 调用 `cat_cafe_remember`（target `taste`，见下方） |
 
 #### Taste 信号路径（F221 Phase B）
 
@@ -151,7 +151,7 @@ Taste 信号**不是 harness 缺陷**，不用写代码修。它是品味瞬间�
 - 正向类："这就是我要的" / "aha" / "对！就是这个感觉"
 - 关系姿态类："猫是伙伴不是工具"这类可跨场景复用的好坏判断；不是operator个人事实
 
-**动作**：调用 `cat_cafe_propose_taste`，**不直接写文件**。operator 在 Approval Hub 审批后自动落盘为 vignette。
+**动作**：调用 `cat_cafe_remember`，这一条选 target `taste`，**不直接写文件**。operator 在 Approval Hub 审批后自动落盘为 vignette。
 
 1. 选对 `dimension`（7 个维度：relationship-stance / cognitive-honesty / architecture-aesthetics / visual-quality / authentic-expression / system-philosophy / creative-craft）
 2. 保留原话原语言在 `quote`，描述场景在 `scene`
@@ -162,11 +162,11 @@ Taste 信号**不是 harness 缺陷**，不用写代码修。它是品味瞬间�
 
 | Lane | 它回答什么 | 典型内容 | 出口 |
 |------|------------|----------|------|
-| Profile | “operator是谁 / 这只 persona 与operator怎样相处？” | 个人近况、称谓、关系特有的沟通边界 | `cat_cafe_propose_profile_update` → primer |
-| Taste | “什么样的作品、表达、设计或系统才算好？” | 正负审美判断、质量标准、设计/工程哲学 | `cat_cafe_propose_taste` → vignette |
+| Profile | “operator是谁 / 这只 persona 与operator怎样相处？” | 个人近况、称谓、关系特有的沟通边界 | `cat_cafe_remember` target `profile` → primer |
+| Taste | “什么样的作品、表达、设计或系统才算好？” | 正负审美判断、质量标准、设计/工程哲学 | `cat_cafe_remember` target `taste` → vignette |
 | Harness/work | “什么流程必须稳定做到？” | 重复工具摩擦、runtime 纪律、可机械守护的工作规则 | `code-as-harness` → hook/lint/guard |
 
-去掉“这句话是在纠正/表扬我”这一层后再判断：描述人或关系 → Profile；仍是可复用的好坏标准 → Taste；可执行的重复流程规则 → Harness。混合信号拆开处理，不硬塞一个 lane。误用 `propose_profile_update` 发 taste 信号时，response 会包含 `routing_advisory`。
+去掉“这句话是在纠正/表扬我”这一层后再判断：描述人或关系 → Profile；仍是可复用的好坏标准 → Taste；可执行的重复流程规则 → Harness。混合信号拆开处理，不硬塞一个 lane；拆出的 Profile、Taste 可作为同一次 `remember` 的两条，各自审批。把 taste 信号当 `profile` 提交时，该条结果会包含 `routing_advisory`。
 
 **和其他根因的区别**：
 - Harness 缺陷 → 猫做错了，写代码防住
@@ -248,7 +248,7 @@ fields:
 | 架构限制 | 需要 operator 决定时发诊断决策块；同意后提议 F128（带 initialMessage）→ 平行猫启动 research pipeline |
 | 执行失误 | 检查 L0/skill 加载情况，不需要新 thread |
 | 可沉淀新能力 | 需要 operator 决定时发 Build 诊断决策块 → 同意后用 Agent Team Leadership 规划 |
-| Taste 信号 | **不走 Phase 4 诊断卡**——调用 `cat_cafe_propose_taste`，由 operator 审批后落盘 |
+| Taste 信号 | **不走 Phase 4 诊断卡**——调用 `cat_cafe_remember`（target `taste`），由 operator 审批后落盘 |
 
 ## F128 initialMessage 模板（平行猫的任务上下文）
 

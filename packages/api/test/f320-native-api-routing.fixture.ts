@@ -67,6 +67,8 @@ for (const selectedRouting of [{}, { OPENAI_ORGANIZATION: 'org-b', OPENAI_PROJEC
       assertSelectedApiProvider(launch, 'https://api.openai.com/v1');
       assert.notEqual(launch.env?.CODEX_HOME, join(root, '.codex'));
       const requests: Array<{ authorization?: string; organization?: string; project?: string }> = [];
+      // The CLI retries authentication for a long time; one authenticated attempt is the observation.
+      let observed = () => {};
       const server = createServer((request, response) => {
         requests.push({
           authorization: request.headers.authorization,
@@ -77,9 +79,25 @@ for (const selectedRouting of [{}, { OPENAI_ORGANIZATION: 'org-b', OPENAI_PROJEC
           project:
             typeof request.headers['openai-project'] === 'string' ? request.headers['openai-project'] : undefined,
         });
+        observed();
         request.resume();
         response.writeHead(401, { 'content-type': 'application/json' });
         response.end(JSON.stringify({ error: { message: 'fixture stops after observing authentication' } }));
+      });
+      // The builtin provider authenticates its WebSocket handshake first; record it like a request.
+      server.on('upgrade', (request, socket) => {
+        socket.on('error', () => {}); // stopping the CLI resets the handshake socket
+        requests.push({
+          authorization: request.headers.authorization,
+          organization:
+            typeof request.headers['openai-organization'] === 'string'
+              ? request.headers['openai-organization']
+              : undefined,
+          project:
+            typeof request.headers['openai-project'] === 'string' ? request.headers['openai-project'] : undefined,
+        });
+        observed();
+        socket.end('HTTP/1.1 401 Unauthorized\r\nContent-Length: 0\r\n\r\n');
       });
       await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
       t.after(
@@ -92,6 +110,7 @@ for (const selectedRouting of [{}, { OPENAI_ORGANIZATION: 'org-b', OPENAI_PROJEC
       const address = server.address();
       assert.ok(address && typeof address !== 'string');
       // Substitute only the transport endpoint. Keep the actual producer's provider/key/header configuration.
+      // F320 KD-3: the official endpoint is the builtin provider's pinned openai_base_url (no custom table).
       const configArgs = launch.args.flatMap((arg, index) =>
         arg === '--config' || arg === '-c' ? [arg, launch.args[index + 1]] : [],
       );
@@ -101,9 +120,7 @@ for (const selectedRouting of [{}, { OPENAI_ORGANIZATION: 'org-b', OPENAI_PROJEC
         '--skip-git-repo-check',
         ...configArgs,
         '--config',
-        `model_providers.custom.base_url="http://127.0.0.1:${address.port}/v1"`,
-        '--config',
-        'model_providers.custom.request_max_retries=0',
+        `openai_base_url="http://127.0.0.1:${address.port}/v1"`,
         '--config',
         'features.apps=false',
         '--config',
@@ -114,11 +131,11 @@ for (const selectedRouting of [{}, { OPENAI_ORGANIZATION: 'org-b', OPENAI_PROJEC
         'mcp_servers={}',
         '-',
       ];
-      const env = buildChildEnv(launch.env);
-      delete env.HTTP_PROXY;
-      delete env.HTTPS_PROXY;
-      delete env.ALL_PROXY;
+      const env = buildChildEnv(launch.env, { inheritParentEnv: launch.inheritParentEnv });
+      for (const key of ['HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'http_proxy', 'https_proxy', 'all_proxy'])
+        delete env[key];
       env.NO_PROXY = '127.0.0.1,localhost';
+      env.no_proxy = '127.0.0.1,localhost';
       const child = spawn('codex', args, { cwd: root, env, stdio: ['pipe', 'ignore', 'pipe'] });
       const timeout = setTimeout(() => child.kill('SIGKILL'), 12_000);
       t.after(() => {
@@ -129,13 +146,14 @@ for (const selectedRouting of [{}, { OPENAI_ORGANIZATION: 'org-b', OPENAI_PROJEC
       child.stderr.on('data', (chunk: Buffer) => {
         stderr += chunk.toString();
       });
+      observed = () => child.kill();
       child.stdin.end('fixture');
       const code = await new Promise<number | null>((resolve, reject) => {
         child.once('error', reject);
         child.once('close', resolve);
       });
       clearTimeout(timeout);
-      assert.equal(code, 1, stderr);
+      assert.notEqual(code, 0, stderr);
       assert.ok(requests.length > 0, stderr);
       for (const request of requests) {
         assert.equal(request.authorization, 'Bearer selected-key-b-fixture');

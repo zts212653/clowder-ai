@@ -59,7 +59,11 @@ export interface PluginRuntimeCarrier {
   /** Derived from the admitted package alone. Carrier selection has no other input. */
   claims(admission: PluginRuntimeAdmission): boolean;
   /** In-process carriers join Host contribution admission before publishing runtime health. */
-  start(pluginInstanceId: string, admitContributions?: () => Promise<void>): Promise<unknown>;
+  start(
+    pluginInstanceId: string,
+    admitContributions?: () => Promise<void>,
+    onRuntimeExit?: () => Promise<void> | void,
+  ): Promise<unknown>;
   stop(pluginInstanceId: string, reason: string): Promise<void>;
   readStream?(
     pluginInstanceId: string,
@@ -164,7 +168,13 @@ export class PluginRuntimeCarrierRouter implements PluginRuntimeLifecyclePort {
         this.#nativeMcpLaunches.activate(admission, generation, launches, shared.factories, shared.unavailable);
       })());
     try {
-      const result = await carrier.start(pluginInstanceId, admitContributions);
+      const result = await carrier.start(pluginInstanceId, admitContributions, async () => {
+        if (this.nativeActions.generation(pluginInstanceId) !== generation) return;
+        // The generation fence invalidates captured views immediately. Keep the MCP
+        // slot so a failed same-plugin instance cannot silently elect another source.
+        this.nativeActions.deactivate(pluginInstanceId);
+        await this.#runtimeContributions.deactivate(pluginInstanceId);
+      });
       // External and legacy carriers may not publish a separate Host-ready state.
       // Joining the same promise preserves one admission and its original rollback boundary.
       await admitContributions();

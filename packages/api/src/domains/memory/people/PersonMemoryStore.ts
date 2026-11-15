@@ -205,11 +205,13 @@ export interface RedactPersonMemoryItemInput {
   item: { kind: 'claim' | 'event'; id: string };
   requestId: string;
   redactedAt: number;
+  /** Browser confirmation revision; callback callers retain their existing contract. */
+  expectedRevision?: string;
 }
 
 export type PersonMemoryRedactionResult =
   | { outcome: 'applied' | 'replayed'; item: RedactPersonMemoryItemInput['item'] }
-  | { outcome: 'not_available' | 'conflict' };
+  | { outcome: 'not_available' | 'conflict' | 'stale_revision' };
 
 export interface HardForgetPersonInput {
   ownerUserId: string;

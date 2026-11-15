@@ -12,7 +12,48 @@
 
 import { parseRecallMetaFromText, stripAppendedRecallMetaBlock } from '@cat-cafe/shared';
 
+import type { AgentMessage } from '../types.js';
+
 export type ResultSummary = Record<string, unknown>;
+
+export function isRecallLookupTool(name: string): boolean {
+  return name === 'search_evidence' || name === 'graph_resolve' || name === 'list_recent';
+}
+
+/** Only the fields used by the recall ledger and its consumers belong in the summary. */
+export function recallToolInputSummary(name: string, input: AgentMessage['toolInput']): ResultSummary {
+  const fields = name === 'list_recent' ? ['since', 'scope'] : ['query', 'mode', 'scope'];
+  const summary: ResultSummary = {};
+  for (const field of fields) {
+    const value = input?.[field];
+    if (typeof value === 'string' && value.trim()) summary[field] = value;
+  }
+  return summary;
+}
+
+export function deriveToolEventResultSummary(
+  normalizedName: string,
+  message: Pick<AgentMessage, 'content' | 'toolInput' | 'toolResultStatus'>,
+): ResultSummary {
+  if (!isRecallLookupTool(normalizedName)) return deriveResultSummary(normalizedName, message.content);
+  const input = recallToolInputSummary(normalizedName, message.toolInput);
+  const result = deriveResultSummary(normalizedName, message.content);
+  const status = result.resultStatus;
+  if (message.toolResultStatus === 'error' && status !== 'overflow') {
+    const resultStatus = status === 'timeout' || status === 'cancelled' ? status : 'error';
+    return {
+      ...input,
+      resultStatus,
+      resultCount: null,
+      isError: true,
+      ...(result._f200HasPrivateHits === true ? { _f200HasPrivateHits: true } : {}),
+    };
+  }
+  return {
+    ...input,
+    ...(Object.keys(result).length ? result : { resultStatus: 'parser_miss' }),
+  };
+}
 
 /**
  * Parse tool_result content (string OR structured array). Returns the fields
@@ -35,6 +76,8 @@ export function deriveResultSummary(normalizedToolName: string, content: unknown
       return derivePersonMemoryProposalResult(text);
     case 'record_proactive_memory_abstention':
       return deriveProactiveMemoryAbstentionResult(text);
+    case 'remember':
+      return deriveRememberResult(text);
     default:
       return deriveGenericError(text) ?? {};
   }
@@ -61,6 +104,48 @@ function deriveProactiveMemoryAbstentionResult(text: string): ResultSummary {
   const value = parseExactJsonRecord(text, ['status']);
   if (value?.status !== 'recorded') return {};
   return { proactiveMemoryOutcome: 'abstention_recorded' };
+}
+
+/**
+ * cat_cafe_remember forwards each item to its original route (2026-11-13 the per-kind tools left the
+ * cat surface). Only accepted person / person_defer / person_abstain rows become proactive-memory
+ * outcomes, keyed by itemId so the evaluator can read the matching item payload.
+ */
+function deriveRememberResult(text: string): ResultSummary {
+  // A refused row carries its own `error`; only a non-JSON callback failure is a tool error.
+  let body: unknown;
+  try {
+    body = JSON.parse(text);
+  } catch {
+    return deriveGenericError(text) ?? {};
+  }
+  const results = body && typeof body === 'object' ? (body as { results?: unknown }).results : undefined;
+  if (!Array.isArray(results)) return {};
+  const outcomes = results.flatMap((row) => {
+    const outcome = rememberRowOutcome(row);
+    return outcome ? [outcome] : [];
+  });
+  return outcomes.length > 0 ? { proactiveMemoryOutcomes: outcomes } : {};
+}
+
+function rememberRowOutcome(row: unknown): { itemId: string; outcome: string } | null {
+  if (!row || typeof row !== 'object') return null;
+  const { itemId, target, statusCode, result } = row as Record<string, unknown>;
+  if (typeof itemId !== 'string' || typeof statusCode !== 'number' || statusCode < 200 || statusCode >= 300)
+    return null;
+  if (!result || typeof result !== 'object' || Array.isArray(result)) return null;
+  const value = result as Record<string, unknown>;
+  if (target === 'person') {
+    const summary = derivePersonMemoryProposalResult(JSON.stringify(value));
+    return summary.proactiveMemoryOutcome === 'proposal_submitted' ? { itemId, outcome: 'proposal_submitted' } : null;
+  }
+  if (target === 'person_defer')
+    return typeof value.receiptId === 'string' && typeof value.status === 'string' && value.status !== 'stale_ignored'
+      ? { itemId, outcome: 'deferred_receipt_recorded' }
+      : null;
+  if (target === 'person_abstain')
+    return value.status === 'recorded' ? { itemId, outcome: 'abstention_recorded' } : null;
+  return null;
 }
 
 function parseExactJsonRecord(text: string, allowedKeys: readonly string[]): Record<string, unknown> | null {

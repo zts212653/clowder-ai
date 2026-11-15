@@ -12,6 +12,7 @@ import {
   projectHoldOwner,
   resolveHoldAccess,
 } from '../domains/ball-custody/hold-ball-access-policy.js';
+import type { ManagedCommandWakeRecoverySweep } from '../domains/ball-custody/ManagedCommandWakeRecoverySweep.js';
 import {
   managedCommandJobMatchesTask,
   resolveManagedCommandJob,
@@ -53,6 +54,7 @@ export interface HoldBallCancelRouteDeps {
   socketManager: SocketManager;
   threadStore: Pick<IThreadStore, 'get' | 'list'>;
   ownerUserId: string;
+  managedCommandWakeRecovery?: Pick<ManagedCommandWakeRecoverySweep, 'recoverTask'>;
   scheduleMutationAuditStore: {
     deleteTaskWithAudit(taskId: string, audit: ScheduleMutationAuditEntry): boolean;
     setTaskEnabledWithAudit(taskId: string, enabled: boolean, audit: ScheduleMutationAuditEntry): boolean;
@@ -387,9 +389,15 @@ export function registerHoldBallCancelRoutes(app: FastifyInstance, deps: HoldBal
     if (authorization.access.lifecycleVisibility !== 'full')
       return reply.code(403).send({ error: 'Only the command principal or operator may recheck its execution' });
     try {
+      const waitOutcome = await deps.managedCommandWakeRecovery?.recoverTask(task.id, true);
       const command = readManagedCommandWakeProjection(task);
       const jobId = command?.jobId ?? command?.durableJob?.jobId;
-      if (!jobId || !task.deliveryThreadId) return { outcome: 'unknown', taskId: task.id };
+      if (!jobId || !task.deliveryThreadId)
+        return {
+          outcome: waitOutcome === undefined ? 'unknown' : 'observed',
+          taskId: task.id,
+          recovery: dynamicTaskStore.getManagedCommandRecoveryState?.(task.id)?.fact,
+        };
       const service = new ManagedJobService(undefined, 4, deps.ownerUserId);
       const principal = jobAccess(authorization.access, task.deliveryThreadId);
       const { job } = await service.readStatus(principal, jobId);
@@ -399,6 +407,7 @@ export function registerHoldBallCancelRoutes(app: FastifyInstance, deps: HoldBal
       return {
         outcome: 'observed',
         taskId: task.id,
+        waitOutcome,
         job: (await service.readStatus(principal, job.jobId)).status,
         recovery: dynamicTaskStore.getManagedCommandRecoveryState?.(task.id)?.fact,
       };

@@ -8,11 +8,13 @@ import type { composerWebLinks } from './composer-web-links';
 export function ComposerLinkMirror({
   input,
   textareaRef,
+  textareaReady,
   composing,
   links,
 }: {
   input: string;
   textareaRef: RefObject<HTMLTextAreaElement>;
+  textareaReady: boolean;
   composing: boolean;
   links: ReturnType<typeof composerWebLinks>;
 }) {
@@ -21,7 +23,7 @@ export function ComposerLinkMirror({
   const { ranges, unmapped } = links;
   const active = ranges.length > 0 && !composing;
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: Synchronize after React commits each changed draft, including a change that does not resize the textarea.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: The later textarea sibling attaches after our first layout effect; retry before paint once ready, and after every draft change.
   useLayoutEffect(() => {
     const textarea = textareaRef.current;
     const viewport = viewportRef.current;
@@ -61,7 +63,7 @@ export function ComposerLinkMirror({
       textarea.removeEventListener('scroll', sync);
       observer.disconnect();
     };
-  }, [textareaRef, input]);
+  }, [textareaRef, textareaReady, input]);
 
   let end = 0;
   const spans = ranges.flatMap((range) => {

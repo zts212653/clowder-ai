@@ -1,6 +1,7 @@
 import { useCallback, useLayoutEffect, useRef, useState } from 'react';
 import { useChatStore } from '../stores/chatStore';
 import { apiFetch } from '../utils/api-client';
+import { readGitErrorCode } from '../utils/git-response-error';
 
 export interface StaleBranch {
   name: string;
@@ -62,7 +63,7 @@ export function useGitHealth() {
     setLoading(true);
     try {
       const res = await apiFetch(`/api/workspace/git-health?worktreeId=${encodeURIComponent(target)}`);
-      if (!res.ok) throw new Error(await res.text());
+      if (!res.ok) throw new Error(await readGitErrorCode(res));
       const json = await res.json();
       if (request === epoch.current && targetRef.current === target) {
         setHealthSnap({ worktreeId: target, value: json });

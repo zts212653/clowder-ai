@@ -30,10 +30,20 @@ export function upsertCapacityPinRecoveryNote(provenance: string, note: string):
 
 import { randomUUID } from 'node:crypto';
 import type { CatId, HybridProgress, SessionCapacityPin, SessionPolicySnapshot, SessionRecord } from '@cat-cafe/shared';
-import { parseWatcherSessionState, type WatcherSessionState } from '@cat-cafe/shared';
+import {
+  parseWatcherSessionState,
+  type WatcherSessionState,
+  type WatcherSurfaceRetirement,
+  watcherSurfaceRetirementSchema,
+} from '@cat-cafe/shared';
 import { isHomeSession, watcherSessionChainKey } from '../../session/session-scope.js';
 import type { SessionChainReadOptions } from './SessionChainReadOptions.js';
 import { throwIfStoreReadAborted } from './StoreReadOptions.js';
+import {
+  assertWatcherRetirementTransition,
+  type WatcherRolloverInput,
+  watcherSuccessorState,
+} from './watcher-session-rollover.js';
 
 export interface CreateSessionInput {
   sessionPurpose?: 'watcher';
@@ -150,7 +160,10 @@ export interface ISessionChainStore {
     id: string,
     expectedRevision: number,
     next: WatcherSessionState,
+    retirement?: WatcherSurfaceRetirement,
   ): WatcherSessionState | null | Promise<WatcherSessionState | null>;
+  /** Atomic old-owner retirement, initialized successor publication and chain-index switch. */
+  rolloverWatcherSession(input: WatcherRolloverInput): SessionRecord | null | Promise<SessionRecord | null>;
   /** Create SessionRecord (seq auto-increments, status=active) */
   create(input: CreateSessionInput): SessionRecord | Promise<SessionRecord>;
   /** Atomically return the existing active record or create one logical unbound node. */
@@ -260,7 +273,11 @@ export class SessionChainStore implements ISessionChainStore {
       .filter((record) => {
         if (record.userId !== userId || record.sessionPurpose !== 'watcher') return false;
         const state = parseWatcherSessionState(record.watcherState);
-        return Boolean(state.attempt || state.wakeInvocationId);
+        return Boolean(
+          state.attempt ||
+            state.wakeInvocationId ||
+            (record.watcherRetirement && record.watcherRetirement.phase !== 'retired'),
+        );
       })
       .map((record) => structuredClone(record));
   }
@@ -268,6 +285,7 @@ export class SessionChainStore implements ISessionChainStore {
     id: string,
     expectedRevision: number,
     next: WatcherSessionState,
+    retirement?: WatcherSurfaceRetirement,
   ): WatcherSessionState | null {
     const record = this.records.get(id);
     if (!record || record.sessionPurpose !== 'watcher') return null;
@@ -276,9 +294,58 @@ export class SessionChainStore implements ISessionChainStore {
     const validated = parseWatcherSessionState(next);
     if (validated.revision !== expectedRevision + 1 || validated.afterSequence < current.afterSequence)
       throw new Error('invalid watcher session transition');
+    if (record.status !== 'active') return null;
+    if (retirement) {
+      const operation = watcherSurfaceRetirementSchema.parse(retirement);
+      assertWatcherRetirementTransition(record.watcherRetirement, operation);
+      record.watcherRetirement = operation;
+    }
     record.watcherState = validated;
     record.updatedAt = Date.now();
     return parseWatcherSessionState(validated);
+  }
+  rolloverWatcherSession(input: WatcherRolloverInput): SessionRecord | null {
+    const old = this.records.get(input.sessionId);
+    if (!old || old.sessionPurpose !== 'watcher' || !old.chainKey) return null;
+    const operation = old.watcherRetirement;
+    if (!operation || operation.id !== input.retirementId) return null;
+    if (operation.phase === 'retired') {
+      const successor = operation.successorSessionId && this.records.get(operation.successorSessionId);
+      return successor ? structuredClone(successor) : null;
+    }
+    const state = parseWatcherSessionState(old.watcherState);
+    if (
+      old.status !== 'active' ||
+      this.chainKeyIndex.get(old.chainKey) !== old.id ||
+      operation.phase !== 'idle' ||
+      state.revision !== input.expectedRevision ||
+      old.cliSessionId !== input.expectedCliSessionId ||
+      old.cliSessionId !== operation.nativeCliSessionId ||
+      JSON.stringify(old.nativeSessionBinding) !== JSON.stringify(input.expectedNativeSessionBinding) ||
+      state.toolSchemaHash !== operation.oldSchemaHash ||
+      state.attempt ||
+      state.wakeInvocationId
+    )
+      return null;
+    const nextState = watcherSuccessorState(state);
+    // Preflight capacity before mutating any index. No observer sees an uninitialized successor.
+    if (this.records.size >= MAX_RECORDS) throw new Error('watcher_rollover_store_at_capacity');
+    const successor = this.create({
+      sessionPurpose: 'watcher',
+      chainKey: old.chainKey,
+      userId: old.userId,
+      threadId: old.threadId,
+      catId: old.catId,
+      ...(old.workingDirectory ? { workingDirectory: old.workingDirectory } : {}),
+      ...(old.workspaceFingerprint ? { workspaceFingerprint: old.workspaceFingerprint } : {}),
+    });
+    successor.watcherState = nextState;
+    old.status = 'sealed';
+    old.sealReason = 'watcher_native_tool_surface_changed';
+    old.sealedAt = old.updatedAt = Date.now();
+    old.watcherState = { ...state, revision: state.revision + 1 };
+    old.watcherRetirement = { ...operation, phase: 'retired', successorSessionId: successor.id };
+    return structuredClone(successor);
   }
   private records = new Map<string, SessionRecord>();
   /** catId:threadId → session IDs ordered by seq */

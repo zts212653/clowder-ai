@@ -40,6 +40,33 @@ export function invocationPluginMcpIssues(whitelist?: readonly string[] | null) 
   return whitelist?.length ? issues.filter((issue) => whitelist.includes(issue.capabilityId)) : [...issues];
 }
 
+/** Execution-local fences for the original selected activations, never serialized into MCP servers. */
+export function captureInvocationPluginMcpCurrentness(
+  servers: readonly {
+    name: string;
+    hostSource?: 'plugin';
+    command?: string;
+    args?: readonly string[];
+    env?: readonly { name: string; value: string }[];
+  }[],
+) {
+  const entries = invocationView.getStore()?.view?.entries ?? [];
+  return entries
+    .filter((entry) =>
+      servers.some(
+        (server) =>
+          server.hostSource === 'plugin' &&
+          server.name === entry.capabilityId.replaceAll(':', '__') &&
+          server.command === entry.server.command &&
+          JSON.stringify(server.args) === JSON.stringify(entry.server.args) &&
+          server.env?.some(
+            ({ name, value }) => name === 'CLOWDER_PLUGIN_ACTION_TOKEN' && value === entry.server.env[name],
+          ),
+      ),
+    )
+    .map(({ capabilityId, pluginId, isCurrent }) => ({ capabilityId, pluginId, isCurrent }));
+}
+
 export function invocationPluginMcpHttpPaths(servers: Record<string, Record<string, unknown>>): Record<string, string> {
   const result: Record<string, string> = {};
   for (const entry of invocationView.getStore()?.view?.entries ?? []) {
@@ -66,9 +93,27 @@ export function withInvocationPluginMcpView<T>(
   return invocationView.run({ view, scope: scope ? Object.freeze({ ...scope }) : undefined, toolIssues: [] }, run);
 }
 
-export function invocationPluginMcpConfig(config: import('@cat-cafe/shared').CapabilitiesConfig, memberCatId: string) {
+export function invocationPluginMcpConfig(
+  config: import('@cat-cafe/shared').CapabilitiesConfig,
+  memberCatId: string,
+  isEnabled: (policy: CapabilityEntry) => boolean,
+) {
   const context = invocationView.getStore();
-  return projectLocalPluginMcpCapabilities(config, context?.view, context?.scope, memberCatId).config;
+  const projected = projectLocalPluginMcpCapabilities(config, context?.view, context?.scope, memberCatId);
+  for (const policy of projected.unavailablePolicies ?? []) {
+    if (
+      context &&
+      policy.pluginId &&
+      isEnabled(policy) &&
+      !context.toolIssues.some((issue) => issue.capabilityId === policy.id)
+    )
+      context.toolIssues.push({
+        pluginId: policy.pluginId,
+        capabilityId: policy.id,
+        reasonCode: 'plugin_activation_unavailable',
+      });
+  }
+  return projected.config;
 }
 
 export function projectInvocationPluginMcp(
@@ -86,13 +131,19 @@ export function projectInvocationPluginMcp(
   );
   const local = matches.length === 1 ? matches[0] : undefined;
   // An isolated Host must not fall back to a different deployment's activation.
-  if (!local || !local.isCurrent()) return { capability, available: false };
-  if (local.sharedHttpUnavailableReason === 'tool_schema_invalid') {
+  const reasonCode =
+    local && !local.isCurrent()
+      ? 'plugin_activation_unavailable'
+      : local?.sharedHttpUnavailableReason === 'tool_schema_invalid'
+        ? 'tool_schema_invalid'
+        : undefined;
+  if (reasonCode) {
     const issues = invocationView.getStore()?.toolIssues;
     if (enabled && issues && !issues.some((issue) => issue.capabilityId === capability.id))
-      issues.push({ pluginId: local.pluginId, capabilityId: capability.id, reasonCode: 'tool_schema_invalid' });
+      issues.push({ pluginId: capability.pluginId, capabilityId: capability.id, reasonCode });
     return { capability, available: false };
   }
+  if (!local) return { capability, available: false };
   return {
     available: true,
     capability: {

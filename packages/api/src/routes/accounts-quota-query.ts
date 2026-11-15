@@ -12,6 +12,7 @@ import {
 } from '../config/codex-account-identity.js';
 import { resolveCodexAccountLaunch } from '../config/codex-account-launch.js';
 import { renewCodexQuotaLogin } from '../config/codex-quota-renewal.js';
+import { readNativeCodexQuota, writeNativeCodexQuota } from '../config/native-codex-quota.js';
 import { officialQuotaFailure, projectQuotaRenewal, quotaCredentialVersion } from './accounts-quota-feedback.js';
 import { parseCodexWhamUsageResponse } from './quota.js';
 
@@ -39,7 +40,12 @@ export async function queryAccountQuota(
 ) {
   const profile = resolveByAccountRef(root, profileId);
   if (!profile || profile.client !== 'openai') throw new Error('Codex account not found');
-  const previousAttempt = readAccountStoreSnapshot(root).resolve(profileId).account?.quota;
+  const native =
+    profileId === 'codex' && profile.syntheticNative ? resolveCodexAccountLaunch(profile, { cwd: root }) : undefined;
+  const nativeIdentity = native ? readCodexAccountIdentity(native.credentialHome) : undefined;
+  const previousAttempt = native
+    ? readNativeCodexQuota(root, native.credentialHome, nativeIdentity)
+    : readAccountStoreSnapshot(root).resolve(profileId).account?.quota;
   const expired =
     previousAttempt?.failure?.kind === 'renewal_required' || /登录凭据已过期/.test(previousAttempt?.error ?? '');
   const homeForRenewal =
@@ -53,8 +59,8 @@ export async function queryAccountQuota(
       // A failed diagnostic does not become a fabricated quota result; query the official endpoint next.
     }
   }
-  let requestedIdentity = profile.codex?.identity;
-  let credentialHome: string | undefined;
+  let requestedIdentity = profile.codex?.identity ?? nativeIdentity;
+  let credentialHome: string | undefined = native?.credentialHome;
   const wasReady = !!profile.codex && codexManagedStatus(profile.codex) === 'ready';
   let observation: AccountQuotaObservation;
   let credentialVersion: string | undefined;
@@ -99,7 +105,9 @@ export async function queryAccountQuota(
       if (!profile.codex) requestedIdentity = codexIdentityFromAuth(raw);
       if (automaticVersion) {
         if (automaticVersion !== credentialVersion) throw new QuotaCredentialChanged();
-        const cached = readAccountStoreSnapshot(root).resolve(profileId).account?.quota;
+        const cached = native
+          ? readNativeCodexQuota(root, home, requestedIdentity)
+          : readAccountStoreSnapshot(root).resolve(profileId).account?.quota;
         if (
           cached?.credentialVersion === automaticVersion &&
           (!requestedIdentity || accountQuotaOwnerMatches(cached, profileId, requestedIdentity))
@@ -155,9 +163,18 @@ export async function queryAccountQuota(
   }
   const current = readAccountStoreSnapshot(root).resolve(profileId).account;
   // The same ref may now name another principal. Reject late results before synchronous write.
-  if (!current || (profile.codex && !managedQuotaOwnerUnchanged(profile.codex, current.codex, wasReady)))
+  if (native) {
+    const resolved = resolveByAccountRef(root, profileId);
+    const currentIdentity = readCodexAccountIdentity(native.credentialHome);
+    if (
+      !resolved?.syntheticNative ||
+      resolveCodexAccountLaunch(resolved, { cwd: root }).credentialHome !== native.credentialHome ||
+      (requestedIdentity ? !sameCodexIdentity(requestedIdentity, currentIdentity) : !!currentIdentity)
+    )
+      throw new QuotaCredentialChanged();
+  } else if (!current || (profile.codex && !managedQuotaOwnerUnchanged(profile.codex, current.codex, wasReady)))
     throw new QuotaCredentialChanged();
-  if (!profile.codex && credentialHome) {
+  if (!native && !profile.codex && credentialHome) {
     const resolved = resolveByAccountRef(root, profileId);
     if (
       !resolved ||
@@ -175,7 +192,7 @@ export async function queryAccountQuota(
         workspaceId: requestedIdentity.workspaceId,
       },
     };
-  const previous = current.quota;
+  const previous = native ? previousAttempt : current?.quota;
   const sameOwner = requestedIdentity
     ? accountQuotaOwnerMatches(previous, profileId, requestedIdentity)
     : !!credentialVersion && previous?.credentialVersion === credentialVersion;
@@ -185,6 +202,7 @@ export async function queryAccountQuota(
     if (lastSuccess) observation = { ...observation, lastSuccess };
   }
   // Preserve a concurrently changed note/attempt, without recreating a deleted account.
-  writeCatalogAccount(root, profileId, { ...current, quota: observation });
+  if (native) writeNativeCodexQuota(root, native.credentialHome, observation);
+  else writeCatalogAccount(root, profileId, { ...current!, quota: observation });
   return { accountRef: profileId, quota: observation };
 }

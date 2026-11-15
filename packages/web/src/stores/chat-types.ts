@@ -776,6 +776,8 @@ export interface ComposerDraftInsert {
   threadId: string;
   text: string;
   imageUrls?: string[];
+  /** Server-owned non-image blocks, including recoverable file descriptors. */
+  preservedBlocks?: MessageContent[];
   contextAttachments?: ContextAttachment[];
   /** Places to take out of the input (or replace in place by an incoming one with the same id). */
   removeContextAttachmentIds?: string[];

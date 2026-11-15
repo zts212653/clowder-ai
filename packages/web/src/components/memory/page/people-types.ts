@@ -25,6 +25,7 @@ export interface PersonClaim {
   status: string;
   recordedAt: number;
   sourceCount: number;
+  approvedText?: string;
 }
 export interface PersonInteraction {
   eventId: string;
@@ -118,6 +119,7 @@ function isClaim(value: unknown): value is PersonClaim {
     !['claimId', 'revision', 'status'].every((key) => text(value[key])) ||
     !time(value.recordedAt) ||
     !count(value.sourceCount) ||
+    (value.approvedText !== undefined && !text(value.approvedText)) ||
     !record(value.payload)
   )
     return false;
@@ -184,9 +186,4 @@ export function isPersonSources(value: unknown): value is PersonSources {
             (source.title === null || text(source.title)))),
     )
   );
-}
-export function personClaimText(payload: PersonClaim['payload']): string {
-  if (payload.kind === 'redacted') return '这条内容已遗忘';
-  if (payload.kind === 'user_assessment') return payload.statement;
-  return `${payload.predicate}：${typeof payload.value === 'string' ? payload.value : JSON.stringify(payload.value)}`;
 }

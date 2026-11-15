@@ -28,9 +28,9 @@ const TIER_1_CAPABILITIES = [
   },
   { label: 'F212 CLI diagnostics', wakeup: /F212[\s\S]*cliDiagnostics/i, inventory: /F212 CLI diagnostics/i },
   {
-    label: 'F192 Eval Hub / Verdict Handoff',
-    wakeup: /F192 Eval Hub \/ Verdict Handoff/i,
-    inventory: /F192 Eval Hub \/ Verdict Handoff/i,
+    label: 'eval-design concrete utility comparison',
+    wakeup: /eval-design 具体效用比较/,
+    inventory: /`eval-design` 具体效用比较/,
   },
   { label: 'search_evidence', wakeup: /search_evidence/i, inventory: /search_evidence/i },
   { label: 'cat_cafe_update_workflow', wakeup: /cat_cafe_update_workflow/i, inventory: /cat_cafe_update_workflow/i },

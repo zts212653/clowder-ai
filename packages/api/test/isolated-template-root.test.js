@@ -19,8 +19,8 @@ describe('createIsolatedTemplateRoot (catalog test isolation)', () => {
   test('returns a distinct root each call (no pid-reuse collision)', () => {
     const base = mkdtempSync(resolve(tmpdir(), 'iso-base-'));
     try {
-      const a = createIsolatedTemplateRoot(base, REAL_TEMPLATE);
-      const b = createIsolatedTemplateRoot(base, REAL_TEMPLATE);
+      const a = createIsolatedTemplateRoot(REAL_TEMPLATE, base);
+      const b = createIsolatedTemplateRoot(REAL_TEMPLATE, base);
       assert.notEqual(a.root, b.root, 'two calls must yield distinct roots');
       assert.ok(existsSync(a.templatePath), 'first template copy exists');
       assert.ok(existsSync(b.templatePath), 'second template copy exists');
@@ -32,7 +32,7 @@ describe('createIsolatedTemplateRoot (catalog test isolation)', () => {
   test('the root carries the template but NO .cat-cafe overlay', () => {
     const base = mkdtempSync(resolve(tmpdir(), 'iso-base-'));
     try {
-      const { templatePath, root } = createIsolatedTemplateRoot(base, REAL_TEMPLATE);
+      const { templatePath, root } = createIsolatedTemplateRoot(REAL_TEMPLATE, base);
       assert.ok(existsSync(templatePath), 'cat-template.json copied');
       assert.equal(
         existsSync(resolve(root, '.cat-cafe', 'cat-catalog.json')),
@@ -63,7 +63,7 @@ describe('createIsolatedTemplateRoot (catalog test isolation)', () => {
       );
       // The fixed (mkdtemp) scheme must NOT reuse the stale pid-named root, and the fresh
       // root must be clean — so getRoster() reads the full template, not breeds:[].
-      const { root, templatePath } = createIsolatedTemplateRoot(base, REAL_TEMPLATE);
+      const { root, templatePath } = createIsolatedTemplateRoot(REAL_TEMPLATE, base);
       assert.notEqual(root, staleRoot, 'fresh root must differ from the stale pid-named root');
       assert.ok(existsSync(templatePath), 'fresh template copied');
       assert.equal(

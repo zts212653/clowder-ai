@@ -13,7 +13,11 @@ import type { SettledHistoryPageOptions, SettledHistorySourcePage } from '../../
 import type { ApprovalEnvelope, ApprovalPublication, TasteProposal } from '@cat-cafe/shared';
 import { assertApprovalEnvelopeIdentity, commitApprovalEnvelope, generateProposalId } from '@cat-cafe/shared';
 import type { ApprovalPublicationStore } from '../../approval-hub/ports/ApprovalPublicationStore.js';
-import { matchesTasteDecisionSnapshot, type TasteDecisionSnapshot } from '../services/taste-decision-snapshot.js';
+import {
+  matchesTasteContentSnapshot,
+  matchesTasteDecisionSnapshot,
+  type TasteDecisionSnapshot,
+} from '../services/taste-decision-snapshot.js';
 import type {
   CreateTasteProposalInput,
   ITasteProposalStore,
@@ -63,6 +67,7 @@ export class InMemoryTasteProposalStore implements ITasteProposalStore, Approval
       sourceMessageId: input.sourceMessageId,
       scene: input.scene,
       quote: input.quote,
+      ...(input.resolvedQuotes ? { resolvedQuotes: [...input.resolvedQuotes] } : {}),
       ...(input.takeaway ? { takeaway: input.takeaway } : {}),
       tags: [...input.tags],
       dimension: input.dimension,
@@ -134,6 +139,25 @@ export class InMemoryTasteProposalStore implements ITasteProposalStore, Approval
       return null;
     proposal.status = 'approving';
     proposal.approvedBy = approvedBy;
+    delete proposal.legacyPublicationRecovery;
+    if (expected) proposal.decisionDigest = expected.digest;
+    return this.indexedSnapshot(proposal);
+  }
+
+  recordApprovalProof(id: string, approvedBy: string, expected: TasteDecisionSnapshot): TasteProposal | null {
+    const proposal = this.proposals.get(id);
+    if (
+      !proposal ||
+      proposal.status !== 'approving' ||
+      expected.ownerUserId !== approvedBy ||
+      !matchesTasteContentSnapshot(proposal, expected) ||
+      (proposal.decisionDigest !== undefined && proposal.decisionDigest !== expected.digest) ||
+      (proposal.approvedBy !== undefined && proposal.approvedBy !== approvedBy)
+    )
+      return null;
+    if (proposal.decisionDigest === undefined) proposal.legacyPublicationRecovery = true;
+    proposal.approvedBy = approvedBy;
+    proposal.decisionDigest = expected.digest;
     return this.indexedSnapshot(proposal);
   }
 
@@ -161,6 +185,8 @@ export class InMemoryTasteProposalStore implements ITasteProposalStore, Approval
     if (!proposal || proposal.status !== 'approving') return false;
     proposal.status = 'pending';
     delete proposal.approvedBy;
+    delete proposal.decisionDigest;
+    delete proposal.legacyPublicationRecovery;
     delete proposal.vignetteSlug;
     delete proposal.vignettePath;
     return true;
@@ -253,6 +279,7 @@ function clone(proposal: TasteProposal): TasteProposal {
   return {
     ...proposal,
     tags: [...proposal.tags],
+    ...(proposal.resolvedQuotes ? { resolvedQuotes: [...proposal.resolvedQuotes] } : {}),
     ...(proposal.approvalOriginRef ? { approvalOriginRef: { ...proposal.approvalOriginRef } } : {}),
     ...(proposal.correctionTarget ? { correctionTarget: structuredClone(proposal.correctionTarget) } : {}),
   };

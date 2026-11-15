@@ -10,15 +10,25 @@ import { captureInvocationL0Input } from '../providers/l0-input-capture.js';
 import { agentServiceGeneration } from '../registry/AgentRegistry.js';
 import { ExecutionAdmissionConflict, StaleServiceSourceConflict } from '../registry/AgentServiceUnavailableError.js';
 import { deepFreeze, type FrozenExecutionBinding, freezeExecutionAccountBinding } from './execution-account-binding.js';
-import { freezeExecutionWorkspace } from './execution-workspace.js';
+import { freezeExecutionWorkspace, requiresAgyThreadWorkspace } from './execution-workspace.js';
 import { captureHostExecutionBoundary, changedHostExecutionBoundary } from './host-execution-boundary.js';
+import { findSleepInterruption } from './host-sleep/HostSleepEvidence.js';
 import { InvocationServiceScope } from './invocation-service-scope.js';
 import {
   isConfirmedNativeAuthFailure,
   NATIVE_AUTH_CONTINUATION_PROMPT,
   type NativeAuthContinuation,
 } from './native-auth-continuation.js';
+import { isContinuationMessage } from './restart-continuation/RestartContinuation.js';
 import { protectNativeProviderResult } from './secret-provider-result.js';
+import {
+  HOST_SLEEP_ERROR_CODE,
+  HOST_SLEEP_ERROR_NOTE,
+  HOST_SLEEP_REPEAT_ERROR_CODE,
+  HOST_SLEEP_REPEAT_ERROR_NOTE,
+  HOST_SLEEP_REPEAT_TERMINAL_REASON,
+  HOST_SLEEP_TERMINAL_REASON,
+} from './stop-reason-wording.js';
 /**
  * Single Cat Invocation
  * 单猫调用的核心逻辑，从 AgentRouter 提取。
@@ -647,6 +657,7 @@ import {
   type TurnExecutionKind,
   type TurnExecutionTerminalInput,
 } from '../../stores/ports/TurnExecutionStore.js';
+import type { ToolEventLog } from '../../tool-usage/ToolEventLog.js';
 import type {
   AgentMessage,
   AgentRouteIntent,
@@ -679,6 +690,7 @@ import {
   isPromptTokenLimitExceededError,
   isSessionNotFoundDiagnostic,
   isTransientAcpPromptFailure,
+  isTransientAgyNativePreInitFailure,
   isTransientCliExitCode1,
   preflightRace,
 } from './invoke-helpers.js';
@@ -1163,6 +1175,11 @@ async function syncAntigravityRuntimeMetadata(input: {
  * Shared dependencies for all cat invocations within one AgentRouter
  */
 export interface InvocationDeps {
+  /** F337: tells a mid-turn machine sleep apart from a provider failure and waits for the lid to open. */
+  readonly hostSleep?: {
+    readonly readEvidence: import('./host-sleep/HostSleepEvidence.js').HostSleepEvidenceReader;
+    readonly scheduleContinuation: (input: { readonly invocationId: string; readonly sleptAt: number }) => void;
+  };
   /** Scheduler system delivery used to wake a cat whose reply waited for an absent owner without a mention. */
   readonly ownerAskCorrectionDeliver?: (
     opts: import('../../../../../infrastructure/scheduler/types.js').DeliverOpts,
@@ -1271,6 +1288,7 @@ export interface InvocationDeps {
  * Per-invocation parameters
  */
 export interface InvocationParams {
+  readonly toolEventLog?: ToolEventLog;
   /** Owner-admitted member context; only its declared native MCP and approved prompt are projected. */
   readonly scopedMemberLaunch?: AgentServiceOptions['pluginNativeLaunch'];
   readonly routingAdmission?: import('@cat-cafe/shared').RoutingAdmissionProvenanceV1;
@@ -1491,8 +1509,7 @@ export async function prepareInvocationExecutionBinding(
       userId: input.userId,
       provider: catConfig?.clientId,
       ...(input.signal ? { signal: input.signal } : {}),
-      requiresAgyWorkspace:
-        Boolean(input.service && usesAgyNativeCarrier(input.service)) || carrier?.carrier === 'agy_acp',
+      requiresAgyWorkspace: Boolean(input.service && requiresAgyThreadWorkspace(input.service)),
     });
     input.signal?.throwIfAborted();
     const [effort, speed] = await Promise.allSettled([
@@ -1897,6 +1914,46 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
   let turnExecutionCompletedSuccessfully = false;
   let routingDispatchFailureClass: RoutingDispatchFailureClass | undefined;
   let routingFailureObservedAt: number | undefined;
+  // F337: read once, at the first provider failure; null = no sleep evidence (or none readable).
+  let hostSleepInterruption: import('./host-sleep/HostSleepEvidence.js').SleepInterruption | null | undefined;
+  // A turn that was itself a continuation is not woken again (loop guard), so it must not promise to be.
+  let hostSleepRepeat = false;
+  const noteProviderFailure = async (out: AgentMessage): Promise<void> => {
+    if (hostSleepInterruption === undefined) {
+      hostSleepInterruption = null;
+      if (deps.hostSleep) {
+        const failedAt = Date.now();
+        try {
+          const evidence = await deps.hostSleep.readEvidence({ from: executionStartedAt, to: failedAt });
+          hostSleepInterruption = findSleepInterruption(evidence, { turnStartedAt: executionStartedAt, failedAt });
+        } catch {
+          hostSleepInterruption = null;
+        }
+      }
+      const triggerMessageId = params.executionCausal?.triggerMessageId ?? params.a2aTriggerMessageId;
+      if (hostSleepInterruption && triggerMessageId) {
+        try {
+          hostSleepRepeat = isContinuationMessage(await deps.messageStore?.getById(triggerMessageId));
+        } catch {
+          // Unknown trigger: do not promise a wake the loop guard may refuse.
+          hostSleepRepeat = true;
+        }
+      }
+    }
+    if (!hostSleepInterruption) {
+      turnExecutionFailureReason ??= 'provider_execution_failed';
+      return;
+    }
+    // The machine slept, the provider did not fail: no availability penalty, and say so in the reply
+    // the owner and the waiting caller read.
+    turnExecutionFailureReason ??= hostSleepRepeat ? HOST_SLEEP_REPEAT_TERMINAL_REASON : HOST_SLEEP_TERMINAL_REASON;
+    routingDispatchFailureClass = undefined;
+    routingFailureObservedAt = undefined;
+    const note = hostSleepRepeat ? HOST_SLEEP_REPEAT_ERROR_NOTE : HOST_SLEEP_ERROR_NOTE;
+    if (out.type === 'error') out.error = `${out.error ?? ''}${note}`.trim();
+    // The response reason comes from `done.errorCode`; carry the sleep there so receipts can say so.
+    if (out.type === 'done') out.errorCode = hostSleepRepeat ? HOST_SLEEP_REPEAT_ERROR_CODE : HOST_SLEEP_ERROR_CODE;
+  };
   // F153: Record cat invocation count with trigger type
   const triggerType = params.a2aTriggerMessageId ? 'mention' : params.parentInvocationId ? 'routing' : 'default';
   catInvocationCount.add(1, { [AGENT_ID]: catId, [TRIGGER]: triggerType });
@@ -4196,6 +4253,7 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
       ...(requestedServiceTier ? { requestedServiceTier } : {}),
       ...(accountEnv ? { accountEnv } : {}),
       ...(resolvedAccount?.claude ? { claudeTokenAccount: true } : {}),
+      ...(resolvedAccount?.agy ? { agyAccount: resolvedAccount.agy } : {}),
       ...(codexAccountLaunch ? { codexAccountLaunch } : {}),
       auditContext: {
         invocationId,
@@ -5538,18 +5596,19 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
       if (!sourceMsg) return;
       const messageObservedAt = Date.now();
       for (const out of await processMessage(sourceMsg)) {
-        routingDispatchFailureClass ??= classifyRoutingDispatchFailure({
-          ...(out.metadata?.cliDiagnostics?.reasonCode
-            ? { cliReasonCode: out.metadata.cliDiagnostics.reasonCode }
-            : {}),
-          ...(out.errorCode ? { providerErrorCode: out.errorCode } : {}),
-        });
+        if (!hostSleepInterruption)
+          routingDispatchFailureClass ??= classifyRoutingDispatchFailure({
+            ...(out.metadata?.cliDiagnostics?.reasonCode
+              ? { cliReasonCode: out.metadata.cliDiagnostics.reasonCode }
+              : {}),
+            ...(out.errorCode ? { providerErrorCode: out.errorCode } : {}),
+          });
         if (routingDispatchFailureClass !== undefined) routingFailureObservedAt ??= messageObservedAt;
         if (out.type === 'error') {
           hadError = true;
           const cancelled = out.errorCode === 'INVOCATION_CANCELLED';
           hadProviderCancellation ||= cancelled;
-          if (!cancelled) turnExecutionFailureReason ??= 'provider_execution_failed';
+          if (!cancelled) await noteProviderFailure(out);
           terminalTaskProgressStatus = 'interrupted';
           terminalInterruptReason = cancelled ? 'aborted' : 'error';
         }
@@ -5558,7 +5617,7 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
             hadProviderCancellation = true;
             terminalTaskProgressStatus = 'interrupted';
             terminalInterruptReason = 'aborted';
-          } else turnExecutionFailureReason ??= 'provider_execution_failed';
+          } else await noteProviderFailure(out);
         }
         await maybePersistTaskProgress(out);
         if (out.type === 'done' && terminalTaskProgressStatus === null) {
@@ -5575,7 +5634,11 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
         }
         if (out.type === 'done') {
           if (hadError && out.errorCode === undefined) {
-            out.errorCode = 'PROVIDER_EXECUTION_FAILED';
+            out.errorCode = hostSleepInterruption
+              ? hostSleepRepeat
+                ? HOST_SLEEP_REPEAT_ERROR_CODE
+                : HOST_SLEEP_ERROR_CODE
+              : 'PROVIDER_EXECUTION_FAILED';
           }
           await finalizeTaskProgress();
           if (!out.tracing) {
@@ -5646,6 +5709,7 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
     let allowSessionRetry = !isScopedMember && Boolean(sessionId) && !requiresImportedHistory && !isAgyAcp;
     let allowTransientRetry = !isScopedMember && !isAgyAcp;
     let nextRequestGenerationReason: RequestGenerationRetryReason | undefined;
+    let retryFreshReason: 'resume_rejected' | 'resume_failed' | undefined;
     let consumedClaudeCompactionObservation: string | undefined;
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
       await scopedMemberLaunch?.assertCurrent();
@@ -5681,10 +5745,26 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
         yield continuityInfoMessage();
       }
       const generationRecorder = requestGenerationRecorder;
+      const toolEventLog = params.toolEventLog;
+      const onRecallInputUpdate = toolEventLog
+        ? async (message: AgentMessage): Promise<void> => {
+            const safe = await protectNativeProviderResult(message, options);
+            if (!safe.toolUseId || !safe.toolName) return;
+            // The ledger serializes this update with the original append and later result.
+            toolEventLog
+              .updateRecallInput(
+                threadId,
+                { catId, invocationId, toolUseId: safe.toolUseId, toolName: safe.toolName },
+                safe.toolInput,
+              )
+              .catch(() => {});
+          }
+        : undefined;
       const options: AgentServiceOptions = {
         hostSessionId: activeSessionRecordForResume?.id,
         ...(sessionId ? { sessionId } : {}),
         ...baseOptions,
+        onRecallInputUpdate,
         ...(params.liveCompanion
           ? {
               onLiveInputOutcome: async (receipt: import('../../types.js').LiveProviderInputOutcome) => {
@@ -5873,6 +5953,7 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
               evidence,
               coordinate: contextContinuityHandshake.coordinate,
               invocationId,
+              ...(retryFreshReason ? { freshReason: retryFreshReason } : {}),
             }),
           };
           await applyProviderCompactions(compactions);
@@ -5984,6 +6065,10 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
           activeServiceIterator = null;
           unclosedServiceIterators.delete(serviceIter);
           break;
+        }
+        if (iterResult.value.type === 'recall_input_update') {
+          await onRecallInputUpdate?.(iterResult.value);
+          continue;
         }
         let msg = await protectNativeProviderResult(iterResult.value, options);
         if (msg.providerTeardown === 'unconfirmed') {
@@ -6145,7 +6230,9 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
           allowTransientRetry &&
           !attemptHasContentOutput &&
           msg.type === 'error' &&
-          (isTransientCliExitCode1(msg.error) || isTransientAcpPromptFailure(msg.error))
+          (isAgyNative
+            ? isTransientAgyNativePreInitFailure(msg)
+            : isTransientCliExitCode1(msg.error) || isTransientAcpPromptFailure(msg.error))
         ) {
           suppressedTransientCliError = msg;
           continue;
@@ -6477,6 +6564,10 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
       if (shouldRetryWithoutSession && !requiresImportedHistory && attempt + 1 < maxAttempts) {
         await presentationDelivery?.release('provider_generation_replaced');
         const nativeBindingChanged = suppressedMissingSessionError?.errorCode === 'AGY_NATIVE_RESUME_MISMATCH';
+        const currentRetryFreshReason: 'resume_rejected' | 'resume_failed' = nativeBindingChanged
+          ? 'resume_rejected'
+          : 'resume_failed';
+        retryFreshReason = currentRetryFreshReason;
         const retryReason = nativeBindingChanged
           ? 'native_binding_changed'
           : suppressedPromptLimitError
@@ -6607,7 +6698,7 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
             ? resolveContextContinuity({
                 capability: contextCapability,
                 invocationId,
-                freshReason: 'resume_failed',
+                freshReason: currentRetryFreshReason,
                 invocationOrigin: params.invocationOrigin ?? 'unknown',
                 routeTopology: params.routeTopology ?? 'independent',
                 // F296 B4 (kimi review): without this the retry silently
@@ -6893,6 +6984,13 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
           await deps.turnExecutionStore.recordProviderTeardown?.(invocationId, terminal.endedAt);
         }
         const result = await deps.turnExecutionStore.transitionTerminal(invocationId, terminal);
+        if (
+          hostSleepInterruption &&
+          result.record?.status === 'failed' &&
+          result.record.terminalReason === HOST_SLEEP_TERMINAL_REASON
+        ) {
+          deps.hostSleep?.scheduleContinuation({ invocationId, sleptAt: hostSleepInterruption.sleptAt });
+        }
         if (result.outcome === 'not_found' || result.record === null) {
           log.error({ invocationId, terminal }, 'Turn execution disappeared before terminal transition');
         } else if (

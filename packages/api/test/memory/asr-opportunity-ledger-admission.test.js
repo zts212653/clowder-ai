@@ -274,7 +274,8 @@ describe('ledger-aware opportunity admission', () => {
     // The printed lineage must be the full 32-hex value, not the truncated prefix embedded in the id.
     const printed = segment.match(/dedupeLineage=(write_lineage_[a-f0-9]+)/)[1];
     assert.equal(printed, scene.opportunity.dedupeLineage);
-    assert.match(segment, /pass the writeOpportunityRef triple above verbatim to propose, defer, or abstain/i);
+    assert.match(segment, /cat_cafe_remember target person \| person_defer \| person_abstain/);
+    assert.match(segment, /pass the writeOpportunityRef triple above verbatim/i);
     assert.equal(printed.length, 'write_lineage_'.length + 32);
 
     // Still content-free: exposing the ref must not drag in speaker labels or transcript.

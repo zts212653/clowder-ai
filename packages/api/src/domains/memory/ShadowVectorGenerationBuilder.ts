@@ -1,10 +1,16 @@
 import type { EmbedModelInfo, IEmbeddingService } from './interfaces.js';
+import { runMemoryVectorGenerationRead } from './MemoryProcess.js';
 import { openVectorGeneration, type VectorBackend } from './open-vector-generation.js';
 import type { SqliteEvidenceStore } from './SqliteEvidenceStore.js';
-import { generationIdentity, missingVectorSource } from './vector-generation-identity.js';
-import { inspectVectorGeneration, type VectorGenerationCoverage } from './vector-generation-readiness.js';
-import { captureVectorSource, commitVectorSource, type VectorSourceSnapshot } from './vector-source-binding.js';
-import { ELIGIBLE_VECTOR_PASSAGE } from './vector-source-fields.js';
+import { generationIdentity } from './vector-generation-identity.js';
+import { inspectStoreVectorGeneration, reconcileStoreVectorGeneration } from './vector-generation-inspection.js';
+import {
+  deleteStillOrphanedVectors,
+  type PendingVectorSources,
+  readPendingVectorSources,
+} from './vector-generation-pending.js';
+import type { VectorGenerationCoverage } from './vector-generation-readiness.js';
+import { captureVectorSource, commitVectorSource } from './vector-source-binding.js';
 
 export interface ShadowBuildOptions {
   signal?: AbortSignal;
@@ -72,20 +78,54 @@ export class ShadowVectorGenerationBuilder {
         this.embedding.isReady() &&
         JSON.stringify(this.embedding.getModelInfo()) === signature;
       const backend = await Promise.race([this.prepare(model, isCurrent), aborted]);
+      await this.store.runExclusive(() => {
+        signal.throwIfAborted();
+        if (!isCurrent()) throw new Error('Shadow encoder retired');
+        return reconcileStoreVectorGeneration(this.store, model, { signal, deadlineAt: options.deadlineAt });
+      });
       let committed = 0;
       let batches = 0;
+      let pending: PendingVectorSources | undefined;
       for (let batch = 0; batch < options.maxBatches; batch++) {
         signal.throwIfAborted();
         if (!isCurrent()) throw new Error('Shadow encoder retired');
-        const pending = await Promise.race([
+        if (
+          !pending ||
+          (!pending.sources.length && !pending.orphanDocuments.length && !pending.orphanPassages.length)
+        ) {
+          const limit = Math.min(64, batchSize * (options.maxBatches - batch));
+          // One bounded candidate page serves several encoder batches. Expensive
+          // anti-joins run in the existing killable maintenance child, outside
+          // the writer queue and never on the API connection for file stores.
+          pending = this.store.usesIsolatedProcesses()
+            ? await runMemoryVectorGenerationRead<PendingVectorSources>(
+                { kind: 'vector-generation-read', operation: 'pending', dbPath: this.store.getDb().name, model, limit },
+                { signal, deadlineAt: options.deadlineAt },
+              )
+            : readPendingVectorSources(this.store.getDb(), model, limit);
+          signal.throwIfAborted();
+        }
+        if (!pending.sources.length && !pending.orphanDocuments.length && !pending.orphanPassages.length) break;
+        const page = pending;
+        const sources = await Promise.race([
           this.store.runExclusive(() => {
             if (!isCurrent()) throw new Error('Shadow encoder retired');
-            return this.readPending(backend, batchSize);
+            deleteStillOrphanedVectors(this.store.getDb(), backend, {
+              orphanDocuments: page.orphanDocuments.splice(0, batchSize),
+              orphanPassages: page.orphanPassages.splice(0, batchSize),
+            });
+            // A queued page is never authority to encode a forgotten, revoked
+            // or changed source. Retain the ordinary post-encode CAS as well.
+            return page.sources
+              .splice(0, batchSize)
+              .filter(
+                (source) =>
+                  captureVectorSource(this.store.getDb(), source.kind, source.key)?.revisionHash ===
+                  source.revisionHash,
+              );
           }),
           aborted,
         ]);
-        const { sources, cleaned } = pending;
-        if (!sources.length && !cleaned) break;
         batches++;
         if (!sources.length) continue;
         const vectors = await Promise.race([
@@ -121,32 +161,42 @@ export class ShadowVectorGenerationBuilder {
         await new Promise<void>((resolve) => setImmediate(resolve));
       }
       return await Promise.race([
-        this.store.runExclusive(() =>
-          this.store.getDb().transaction(() => {
-            signal.throwIfAborted();
-            if (!isCurrent()) throw new Error('Shadow encoder retired');
-            const coverage = inspectVectorGeneration(this.store.getDb(), model, { allowBuilding: true });
-            if (coverage.ready)
-              this.store.getDb().transaction(() => {
-                this.store
-                  .getDb()
-                  .prepare("UPDATE vector_generations SET state='ready' WHERE id=? AND fingerprint=?")
-                  .run(backend.vectorStore.tables.generationId, generationIdentity(model));
-                this.store
-                  .getDb()
-                  .prepare(
-                    `INSERT OR REPLACE INTO ${backend.vectorStore.tables.metadata}(key,value) VALUES('last_verified_source_cut_hash',?)`,
-                  )
-                  .run(coverage.sourceCutHash!);
-              })();
-            return {
-              ...coverage,
-              committed,
-              batches,
-              status: coverage.ready ? ('ready' as const) : ('paused' as const),
-            };
-          })(),
-        ),
+        this.store.runExclusive(async () => {
+          const proof = await inspectStoreVectorGeneration(this.store, model, {
+            allowBuilding: true,
+            signal,
+            deadlineAt: options.deadlineAt,
+          });
+          return this.store
+            .getDb()
+            .transaction(() => {
+              signal.throwIfAborted();
+              if (!isCurrent()) throw new Error('Shadow encoder retired');
+              const coverage: VectorGenerationCoverage = proof.isCurrent()
+                ? proof.coverage
+                : { ...proof.coverage, ready: false, sourceCutHash: undefined, reason: 'concurrent_mutation' };
+              if (coverage.ready)
+                this.store.getDb().transaction(() => {
+                  this.store
+                    .getDb()
+                    .prepare("UPDATE vector_generations SET state='ready' WHERE id=? AND fingerprint=?")
+                    .run(backend.vectorStore.tables.generationId, generationIdentity(model));
+                  this.store
+                    .getDb()
+                    .prepare(
+                      `INSERT OR REPLACE INTO ${backend.vectorStore.tables.metadata}(key,value) VALUES('last_verified_source_cut_hash',?)`,
+                    )
+                    .run(coverage.sourceCutHash!);
+                })();
+              return {
+                ...coverage,
+                committed,
+                batches,
+                status: coverage.ready ? ('ready' as const) : ('paused' as const),
+              };
+            })
+            .immediate();
+        }),
         aborted,
       ]);
     } finally {
@@ -167,7 +217,7 @@ export class ShadowVectorGenerationBuilder {
           | undefined;
         if (existing && existing.fingerprint !== generationIdentity(model))
           throw new Error('Cannot reuse a generation with another representation');
-        const backend = openVectorGeneration(db, model, { create: true });
+        const backend = openVectorGeneration(db, model, { create: true, reconcile: false });
         const meta = backend.vectorStore.getMeta();
         if (meta.embedding_model_id && !backend.vectorStore.checkMetaConsistency(model).consistent)
           throw new Error('Cannot overwrite another generation identity');
@@ -178,52 +228,5 @@ export class ShadowVectorGenerationBuilder {
         return backend;
       })();
     });
-  }
-
-  private readPending(backend: VectorBackend, limit: number): { sources: VectorSourceSnapshot[]; cleaned: number } {
-    const db = this.store.getDb();
-    const tables = backend.vectorStore.tables;
-    const orphanDocs = db
-      .prepare(
-        `SELECT v.id AS key FROM ${tables.documents}_rowids v LEFT JOIN evidence_docs d ON d.anchor=v.id WHERE d.anchor IS NULL LIMIT ?`,
-      )
-      .all(limit) as Array<{ key: string }>;
-    const orphanPassages = db
-      .prepare(
-        `SELECT v.id AS key FROM ${tables.passages}_rowids v LEFT JOIN evidence_passages p ON p.doc_anchor=CASE WHEN json_valid(v.id) THEN json_extract(v.id,'$[0]') END AND p.passage_id=CASE WHEN json_valid(v.id) THEN json_extract(v.id,'$[1]') END WHERE p.id IS NULL OR NOT (${ELIGIBLE_VECTOR_PASSAGE}) LIMIT ?`,
-      )
-      .all(limit) as Array<{ key: string }>;
-    db.transaction(() => {
-      for (const { key } of orphanDocs) {
-        backend.vectorStore.delete(key);
-        db.prepare(`DELETE FROM ${tables.documentSources} WHERE anchor=?`).run(key);
-      }
-      for (const { key } of orphanPassages) {
-        backend.passageVectorStore.delete(key);
-        db.prepare(`DELETE FROM ${tables.passageSources} WHERE passage_key=?`).run(key);
-      }
-    })();
-    const docs = db
-      .prepare(`SELECT d.anchor AS key FROM evidence_docs d
-      LEFT JOIN ${tables.documentSources} s ON s.anchor=d.anchor LEFT JOIN ${tables.documents}_rowids v ON v.id=d.anchor
-      WHERE ${missingVectorSource('documents', tables.generationId)} ORDER BY d.anchor LIMIT ?`)
-      .all(limit) as Array<{ key: string }>;
-    const sources = docs.flatMap((row) => {
-      const source = captureVectorSource(db, 'documents', row.key);
-      return source ? [source] : [];
-    });
-    const cleaned = orphanDocs.length + orphanPassages.length;
-    if (sources.length === limit) return { sources, cleaned };
-    const passages = db
-      .prepare(`SELECT json_array(p.doc_anchor,p.passage_id) AS key FROM evidence_passages p
-      LEFT JOIN ${tables.passageSources} s ON s.passage_key=json_array(p.doc_anchor,p.passage_id)
-      LEFT JOIN ${tables.passages}_rowids v ON v.id=json_array(p.doc_anchor,p.passage_id)
-      WHERE (${ELIGIBLE_VECTOR_PASSAGE}) AND (${missingVectorSource('passages', tables.generationId)}) ORDER BY p.id LIMIT ?`)
-      .all(limit - sources.length) as Array<{ key: string }>;
-    for (const row of passages) {
-      const source = captureVectorSource(db, 'passages', row.key);
-      if (source) sources.push(source);
-    }
-    return { sources, cleaned };
   }
 }

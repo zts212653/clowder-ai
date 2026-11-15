@@ -1,5 +1,5 @@
 /** Durable, explicit acceptance sample. It never starts a cat, shell command, Redis, or a real cancellation. */
-export function createF322BControlledFixture(threadId) {
+export function createF322BControlledFixture(threadId, { olderResponse = false } = {}) {
   const catId = 'codex61-sol';
   const startedAt = Date.now() - 12_000;
   const title = 'F322 受控验收样本 · 非真实猫执行';
@@ -11,6 +11,16 @@ export function createF322BControlledFixture(threadId) {
     threadTitle: title,
     catId,
     startedAt,
+    inputCapabilities: {
+      append: {
+        kind: 'append',
+        expectedRun: {
+          targetId: catId,
+          invocationId: 'sample-turn-exact',
+          responseMessageId: 'sample-live-message-exact',
+        },
+      },
+    },
     cancelability: {
       state: 'cancelable',
       target: { kind: 'live_invocation', threadId, catId, executionId: 'sample-parent' },
@@ -100,6 +110,15 @@ export function createF322BControlledFixture(threadId) {
         };
       if (url.pathname === '/api/threads') return { threads: [thread] };
       if (url.pathname === `/api/threads/${threadId}`) return thread;
+      if (url.pathname === '/api/messages' && olderResponse && !url.searchParams.has('before'))
+        return {
+          messages: Array.from({ length: 50 }, (_, index) => ({
+            id: `sample-newer-${index}`,
+            content: `Newer message ${index}: the active response remains on an older page.`,
+            timestamp: startedAt + 1000 + index,
+          })),
+          hasMore: true,
+        };
       if (url.pathname === '/api/messages')
         return {
           messages: [

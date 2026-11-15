@@ -19,12 +19,6 @@ export interface ManagedJobRecoveryFact {
   readonly recheck?: { readonly kind: 'observe_original_job'; readonly jobId: string };
   readonly observedRevision?: number;
   readonly claim?: { readonly expiresAt: number };
-  readonly notification?: {
-    readonly key: string;
-    readonly reasonCode: string;
-    readonly attempts: number;
-    readonly deliveredAt?: number;
-  };
   readonly wakeIntent?: {
     readonly key: string;
     readonly terminalEpoch: number;
@@ -105,22 +99,20 @@ export function applyManagedJobRecoveryOutcome(
   if (outcome.kind === 'stale') return current;
   if (outcome.kind === 'settled') return { ...current, nextAttemptAt: null };
   if (outcome.kind === 'waiting') return { ...current, nextAttemptAt: now + MANAGED_JOB_RECOVERY_INTERVAL_MS };
-  const attempts = current.attempts + (outcome.kind === 'retryable_error' ? 1 : 0);
+  const { notification: _legacyNotification, ...fact } = current as ManagedJobRecoveryFact & {
+    notification?: unknown;
+  };
+  const attempts = fact.attempts + (outcome.kind === 'retryable_error' ? 1 : 0);
   if (outcome.kind === 'permanent_error' || attempts >= MANAGED_JOB_RECOVERY_MAX_ERRORS) {
     const disposition = outcome.kind === 'permanent_error' ? 'needs_attention' : 'parked';
     return {
-      ...current,
+      ...fact,
       attempts,
       disposition,
       reasonCode: outcome.reason,
       recheck: { kind: 'observe_original_job', jobId },
-      nextAttemptAt: now,
-      notification: current.notification ?? {
-        key: `managed-job-recovery:${jobId}:${outcome.reason}`,
-        reasonCode: outcome.reason,
-        attempts: 0,
-      },
+      nextAttemptAt: null,
     };
   }
-  return { ...current, attempts, nextAttemptAt: now + Math.min(300_000, 1000 * 2 ** attempts) };
+  return { ...fact, attempts, nextAttemptAt: now + Math.min(300_000, 1000 * 2 ** attempts) };
 }

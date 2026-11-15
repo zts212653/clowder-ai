@@ -40,6 +40,7 @@ export function serializeProfileUpdateProposal(proposal: ProfileUpdateProposal):
     String(proposal.createdAt),
   ];
   if (proposal.cardMessageId) fields.push('cardMessageId', proposal.cardMessageId);
+  if (proposal.clientRequestId) fields.push('clientRequestId', proposal.clientRequestId);
   if (proposal.publication) fields.push('publication', serializeApprovalPublication(proposal.publication));
   return fields;
 }
@@ -63,6 +64,7 @@ export function hydrateProfileUpdateProposal(data: Record<string, string>): Prof
     ...approvalPublicationField(data.publication),
   };
   if (data.cardMessageId) proposal.cardMessageId = data.cardMessageId;
+  if (data.clientRequestId) proposal.clientRequestId = data.clientRequestId;
   if (data.approvedBy) proposal.approvedBy = data.approvedBy;
   if (data.approvedAt) proposal.approvedAt = parseInt(data.approvedAt, 10);
   const claimedAt = parseInt(data.claimedAt ?? '0', 10);

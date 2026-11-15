@@ -1,3 +1,4 @@
+import { tmpdir } from 'node:os';
 /**
  * CodexAgentService Tests (CLI mode)
  * 测试缅因猫 CLI 子进程调用
@@ -2280,8 +2281,8 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
       'ordinary user-configurable Codex preferences must retain their existing precedence',
     );
     assert.ok(
-      args.includes('model_provider="custom"'),
-      'account-owned API provider must coexist with the context-capacity binding',
+      args.includes('model_provider="openai"') && args.includes('cli_auth_credentials_store="ephemeral"'),
+      'account-owned API identity must coexist with the context-capacity binding',
     );
   });
 
@@ -2452,7 +2453,7 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
     const proc = createMockProcess();
     const spawnFn = createMockSpawnFn(proc);
     const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn, model: 'gpt-5.3-codex' });
-    const nonGitDir = mkdtempSync(join('/tmp', 'codex-non-git-'));
+    const nonGitDir = mkdtempSync(join(tmpdir(), 'codex-non-git-'));
 
     try {
       const promise = collect(service.invoke('hello', { workingDirectory: nonGitDir }));
@@ -2480,7 +2481,7 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
   });
 
   test('isGitRepositoryPath walks parent directories instead of shelling out to git', () => {
-    const root = mkdtempSync(join('/tmp', 'codex-git-marker-'));
+    const root = mkdtempSync(join(tmpdir(), 'codex-git-marker-'));
     const nestedDir = join(root, 'packages', 'api');
 
     try {
@@ -3509,9 +3510,12 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
     const spawnOpts = spawnFn.mock.calls[0].arguments[2];
     const args = spawnFn.mock.calls[0].arguments[1];
     assert.equal(spawnOpts.env.OPENAI_API_KEY, 'sk-test-api-mode');
-    assert.ok(args.includes('model_provider="custom"'), 'explicit API mode must use its selected env_key');
-    assert.ok(args.includes('model_providers.custom.base_url="https://api.openai.com/v1"'));
-    assert.ok(args.includes('model_providers.custom.env_key="OPENAI_API_KEY"'));
+    // F320 KD-3: the official endpoint keeps OAuth's provider id so threads resume across both;
+    // the selected key outranks any stored login and is never written to disk.
+    assert.equal(spawnOpts.env.CODEX_API_KEY, 'sk-test-api-mode', 'explicit API mode must select its own key');
+    assert.ok(args.includes('model_provider="openai"'));
+    assert.ok(args.includes('cli_auth_credentials_store="ephemeral"'));
+    assert.ok(!args.some((arg) => arg.startsWith('model_providers.custom.')));
   });
 
   test('auto mode inherits the active Codex config provider instead of forcing OpenAI OAuth', async () => {
@@ -3552,7 +3556,7 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
     assert.equal(opts.env.OPENAI_API_KEY, undefined);
   });
 
-  test('explicit API Key binding retains its key without forcing the OAuth provider', async () => {
+  test('explicit API Key binding retains its key and never falls back to an OAuth login', async () => {
     const proc = createMockProcess();
     const spawnFn = createMockSpawnFn(proc);
     const service = new ProductionCodexAgentService({
@@ -3569,8 +3573,10 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
     emitCodexEvents(proc, [{ type: 'thread.started', thread_id: 'explicit-key-thread' }]);
     await promise;
     const [, args, opts] = spawnFn.mock.calls[0].arguments;
-    assert.ok(!args.includes('model_provider="openai"'));
     assert.equal(opts.env.OPENAI_API_KEY, 'fixture-key');
+    assert.equal(opts.env.CODEX_API_KEY, 'fixture-key', 'the selected key outranks any stored ChatGPT login');
+    assert.ok(args.includes('cli_auth_credentials_store="ephemeral"'), 'no login file is read or written');
+    assert.ok(!existsSync(join(opts.env.CODEX_HOME, 'auth.json')));
   });
 
   test('callbackEnv auth mode overrides process default when launching codex child env', async () => {

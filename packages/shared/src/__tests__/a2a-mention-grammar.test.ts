@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { findLineStartMentions, type MentionHandle } from '../a2a-mention-grammar.js';
+import { buildCatMentionHandles, findLineStartMentions, type MentionHandle } from '../a2a-mention-grammar.js';
 
 const handles: MentionHandle[] = [
   { catId: 'opus', pattern: '@opus' },
@@ -9,6 +9,25 @@ const handles: MentionHandle[] = [
 ];
 
 describe('findLineStartMentions', () => {
+  it('adds stable IDs without taking configured aliases or reserved handles', () => {
+    const entries = buildCatMentionHandles(
+      [
+        { id: 'opus', mentionPatterns: ['@宪宪'] },
+        { id: 'codex', mentionPatterns: ['@OPUS'] },
+        { id: 'boss', mentionPatterns: ['@reviewer'] },
+        { id: 'thread' },
+        { id: '__none__', mentionPatterns: ['@no-member'] },
+      ],
+      ['@Boss'],
+    );
+    expect(findLineStartMentions('@opus\n@宪宪\n@codex\n@Boss\n@thread\n@__none__', entries)).toEqual([
+      'codex',
+      'opus',
+      'codex',
+    ]);
+    expect(findLineStartMentions('@codex/docs\n@codex/@宪宪\n@no-member', entries)).toEqual(['codex', '__none__']);
+  });
+
   it('reads the F314 report inputs the way the API routes them', () => {
     expect(findLineStartMentions('ask @opus in prose', handles)).toEqual([]);
     expect(findLineStartMentions('@opus 请继续，如果需要再找 @codex', handles)).toEqual(['opus']);

@@ -1,11 +1,12 @@
 import assert from 'node:assert/strict';
 import { mkdirSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { after, test } from 'node:test';
 import { routingContextReadModelV1Schema } from '@cat-cafe/shared';
 import { scene } from './f322-members-fixture.mjs';
 
-const out = process.env.MEMBERS_EVIDENCE_DIR ?? '/tmp/f322-member-detail-header';
+const out = process.env.MEMBERS_EVIDENCE_DIR ?? path.join(tmpdir(), 'f322-member-detail-header');
 mkdirSync(out, { recursive: true });
 const results = [];
 after(() => writeFileSync(path.join(out, 'result.json'), `${JSON.stringify(results, null, 2)}\n`));

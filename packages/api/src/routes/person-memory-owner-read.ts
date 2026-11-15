@@ -14,8 +14,15 @@ import {
   PersonMemoryOwnerReadService,
 } from '../domains/memory/people/PersonMemoryOwnerReadService.js';
 import type { PersonMemoryStore } from '../domains/memory/people/PersonMemoryStore.js';
+import { readMemoryUsage } from '../domains/memory/read-usage/MemoryReadUsageReader.js';
 import { resolveSessionUserId } from '../utils/request-identity.js';
+import { projectMemoryUsageThreads } from './memory-usage-threads.js';
 import { authorizeOwnerBrowserAction, ownerMemoryActionHttpStatus } from './owner-memory-browser-auth.js';
+import {
+  type PersonMemoryOwnerDeferredDeps,
+  registerPersonMemoryOwnerDeferredRoutes,
+} from './person-memory-owner-deferred.js';
+import { executeOwnerPersonRedaction } from './person-memory-owner-redaction.js';
 import { registerPersonMemoryProposalForgetRoutes } from './person-memory-proposal-forget-routes.js';
 
 const listQuerySchema = z
@@ -36,6 +43,18 @@ const ownerForgetRequestIdSchema = personForgetRequestIdSchema.refine((value) =>
   message: 'requestId must contain a high-entropy suffix',
 });
 const ownerActionBodySchema = z.discriminatedUnion('action', [
+  z
+    .object({
+      action: z.literal('redact_item'),
+      requestId: ownerActionRequestIdSchema,
+      item: z.discriminatedUnion('kind', [
+        z.object({ kind: z.literal('claim'), id: personClaimIdSchema }).strict(),
+        z.object({ kind: z.literal('event'), id: interactionEventIdSchema }).strict(),
+      ]),
+      expectedRevision: ownerActionRevisionSchema,
+      confirmed: z.literal(true),
+    })
+    .strict(),
   z
     .object({
       action: z.literal('correct_claim'),
@@ -83,7 +102,10 @@ const sourceQuerySchema = z
     }
   });
 
-export interface PersonMemoryOwnerReadRouteDeps extends Omit<PersonMemoryOwnerReadDeps, 'store'> {
+export interface PersonMemoryOwnerReadRouteDeps
+  extends Omit<PersonMemoryOwnerReadDeps, 'store'>,
+    PersonMemoryOwnerDeferredDeps {
+  readEvidenceDb?: import('better-sqlite3').Database;
   ownerUserId: string;
   store: PersonMemoryStore | null;
 }
@@ -121,6 +143,38 @@ export const personMemoryOwnerReadRoutes: FastifyPluginAsync<PersonMemoryOwnerRe
   });
 
   registerPersonMemoryProposalForgetRoutes(app, deps);
+  registerPersonMemoryOwnerDeferredRoutes(app, deps);
+
+  app.get<{ Params: { personId: string }; Querystring: { revision?: string } }>(
+    '/api/memory/people/:personId/usage',
+    async (request, reply) => {
+      const params = personParamsSchema.safeParse(request.params);
+      if (!params.success) return reply.code(404).send({ error: 'not_available' });
+      if (!request.query.revision || !ownerActionRevisionSchema.safeParse(request.query.revision).success)
+        return reply.code(400).send({ error: 'Revision required' });
+      if (!service || !deps.readEvidenceDb) return reply.code(503).send({ error: 'usage_unavailable' });
+      try {
+        const result = await service.readDetail(deps.ownerUserId, params.data.personId);
+        if (result.status !== 'ready') return reply.code(404).send({ error: 'not_available' });
+        if (result.detail.personRevision !== request.query.revision)
+          return reply.code(409).send({ error: 'Revision changed' });
+        return await projectMemoryUsageThreads(
+          readMemoryUsage(deps.readEvidenceDb, {
+            owner: deps.ownerUserId,
+            family: 'person_entity',
+            anchor: `person-memory:${params.data.personId}`,
+            revision: result.detail.personRevision,
+            cueRevision: result.detail.readRevision,
+          }),
+          deps.ownerUserId,
+          deps.threadStore,
+        );
+      } catch (error) {
+        request.log.warn({ err: error }, 'Person usage unavailable');
+        return reply.code(503).send({ error: 'usage_unavailable' });
+      }
+    },
+  );
 
   app.get('/api/memory/people', async (request, reply) => {
     if (!service) return reply.code(503).send(unavailableList());
@@ -164,13 +218,15 @@ export const personMemoryOwnerReadRoutes: FastifyPluginAsync<PersonMemoryOwnerRe
     if (!params.success) return reply.code(404).send({ error: 'not_available' });
     if (!query.success) return reply.code(400).send({ error: 'invalid_request', details: query.error.issues });
     try {
-      const result = await service.readSource(deps.ownerUserId, params.data.personId, query.data);
+      const result = await service.readSource(deps.ownerUserId, params.data.personId, query.data, (reason) =>
+        request.log.info({ reason }, '[F276] Owner person source rejected'),
+      );
       if (result.status === 'not_available') return reply.code(404).send({ error: 'not_available' });
       if (result.status === 'unavailable') return { status: 'unavailable', sources: [] };
       return result;
     } catch (error) {
       request.log.warn({ err: error }, '[F276] Owner person source unavailable');
-      return { status: 'unavailable', sources: [] };
+      return reply.code(503).send({ status: 'unavailable', sources: [] });
     }
   });
 
@@ -179,21 +235,24 @@ export const personMemoryOwnerReadRoutes: FastifyPluginAsync<PersonMemoryOwnerRe
     if (!browserAuth) {
       return reply.code(403).send({ error: 'invalid_action' });
     }
-    if (!mutationService) return reply.code(503).send({ error: 'mutation_unavailable' });
+    if (!mutationService || !deps.store) return reply.code(503).send({ error: 'mutation_unavailable' });
     const params = personParamsSchema.safeParse(request.params);
     if (!params.success) return reply.code(404).send({ error: 'not_available' });
     const body = ownerActionBodySchema.safeParse(request.body);
     if (!body.success) return reply.code(400).send({ error: 'invalid_request', details: body.error.issues });
     const command = { ...body.data, personId: params.data.personId };
     try {
-      const result = await mutationService.execute(
-        {
-          ownerUserId: deps.ownerUserId,
-          sessionBindingId: browserAuth.sessionBindingId,
-          csrfToken: browserAuth.csrfToken,
-        },
-        command,
-      );
+      const result =
+        command.action === 'redact_item'
+          ? await executeOwnerPersonRedaction({ ...deps, store: deps.store }, command, request.log)
+          : await mutationService.execute(
+              {
+                ownerUserId: deps.ownerUserId,
+                sessionBindingId: browserAuth.sessionBindingId,
+                csrfToken: browserAuth.csrfToken,
+              },
+              command,
+            );
       if (result.outcome === 'applied' || result.outcome === 'replayed') return result;
       return reply.code(ownerMemoryActionHttpStatus(result.outcome)).send({ error: result.outcome });
     } catch (error) {

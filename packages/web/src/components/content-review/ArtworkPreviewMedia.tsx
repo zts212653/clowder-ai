@@ -11,11 +11,13 @@ export function ArtworkPreviewMedia({
   title,
   video,
   gallery,
+  onError,
 }: {
   url: string;
   title: string;
   video: boolean;
   gallery?: ArtworkGallery;
+  onError?: () => void;
 }) {
   const root = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState({ width: 0, height: 0 });
@@ -38,7 +40,7 @@ export function ArtworkPreviewMedia({
         viewport={viewport}
       />
       {video ? (
-        <ArtworkPreviewVideo url={url} stageStyle={viewport.stageStyle} onSize={setSize} />
+        <ArtworkPreviewVideo url={url} stageStyle={viewport.stageStyle} onSize={setSize} onError={onError} />
       ) : (
         <ContentMediaElement
           kind="image"
@@ -46,6 +48,7 @@ export function ArtworkPreviewMedia({
           title={title}
           style={viewport.stageStyle}
           className="object-contain"
+          onError={onError}
           onLoad={(event) =>
             setSize({ width: event.currentTarget.naturalWidth, height: event.currentTarget.naturalHeight })
           }

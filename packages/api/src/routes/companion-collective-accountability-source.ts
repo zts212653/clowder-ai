@@ -54,25 +54,32 @@ export interface CollectiveAccountabilityAttentionSourceRead {
   readonly reasons: string[];
 }
 
-/** Dot consumes the installed package's owner action; connection discovery and authority stay with that owner. */
-export async function readCollectiveAccountabilityAttentionSource(
-  read: CollectiveAccountabilitySource | undefined,
-  ownerUserId: string,
-): Promise<CollectiveAccountabilityAttentionSourceRead> {
-  const startedAt = Date.now();
-  let status: UnifiedAttentionSourceRead['status'] = 'unavailable';
-  try {
-    if (!read) throw new Error('Plugin attention reader unavailable');
-    const response = await read(ownerUserId);
-    if (response.status === 200) {
-      const parsed = sourceSchema.safeParse(response.body.data);
-      if (parsed.success) return parsed.data;
-      status = 'invalid';
-    } else if (response.status === 401) status = 'unauthenticated';
-    else if (response.status === 403) status = 'forbidden';
-  } catch {
-    // Failed installation, execution, or transport never means an empty complete inbox.
+const REMOTE_AUTHORITY_REASONS = new Set([
+  'collective_accountability_connection_authority_unavailable',
+  'collective_accountability_connection_read_failed',
+  'collective_accountability_route_read_failed',
+]);
+
+function normalizeRemoteConnectionStatus(
+  read: z.infer<typeof sourceSchema>,
+): CollectiveAccountabilityAttentionSourceRead {
+  if (
+    read.state.status === 'unauthenticated' &&
+    read.reasons.length > 0 &&
+    read.reasons.every((reason) => REMOTE_AUTHORITY_REASONS.has(reason))
+  ) {
+    return {
+      ...read,
+      state: { ...read.state, status: 'unavailable' },
+    };
   }
+  return read;
+}
+
+function unavailableSource(
+  startedAt: number,
+  status: UnifiedAttentionSourceRead['status'] = 'unavailable',
+): CollectiveAccountabilityAttentionSourceRead {
   return {
     items: [],
     reasons: ['collective_accountability_plugin_unavailable'],
@@ -80,9 +87,57 @@ export async function readCollectiveAccountabilityAttentionSource(
   };
 }
 
-export type CollectiveAccountabilitySource = (
-  userId: string,
-) => Promise<{ status: number; body: Readonly<Record<string, unknown>> }>;
+function parseSourceResponse(
+  response: Awaited<ReturnType<CollectiveAccountabilitySource>>,
+  startedAt: number,
+): CollectiveAccountabilityAttentionSourceRead {
+  let status: UnifiedAttentionSourceRead['status'] = 'unavailable';
+  if (response.status === 200) {
+    const parsed = sourceSchema.safeParse(response.body.data);
+    if (parsed.success) return normalizeRemoteConnectionStatus(parsed.data);
+    status = 'invalid';
+  } else if (response.status === 401) status = 'unauthenticated';
+  else if (response.status === 403) status = 'forbidden';
+  return unavailableSource(startedAt, status);
+}
+
+/** Dot consumes the installed package's owner action; connection discovery and authority stay with that owner. */
+export async function readCollectiveAccountabilityAttentionSource(
+  read: CollectiveAccountabilitySource | undefined,
+  ownerUserId: string,
+): Promise<CollectiveAccountabilityAttentionSourceRead> {
+  const startedAt = Date.now();
+  if (!read) return unavailableSource(startedAt);
+  try {
+    return parseSourceResponse(await read(ownerUserId), startedAt);
+  } catch {
+    // Failed installation, execution, or transport never means an empty complete inbox.
+    return unavailableSource(startedAt);
+  }
+}
+
+/** Omits the optional Collective attention source when uncomposed, uninstalled, or explicitly owner-disabled. */
+export async function readOptionalCollectiveAccountabilityAttentionSource(
+  read: CollectiveAccountabilitySource | undefined,
+  ownerUserId: string,
+): Promise<CollectiveAccountabilityAttentionSourceRead | undefined> {
+  if (!read) return undefined;
+  const startedAt = Date.now();
+  try {
+    const response = await read(ownerUserId);
+    if (response.matched === false || response.disabled === true) return undefined;
+    return parseSourceResponse(response, startedAt);
+  } catch {
+    return unavailableSource(startedAt);
+  }
+}
+
+export type CollectiveAccountabilitySource = (userId: string) => Promise<{
+  readonly matched?: boolean;
+  readonly disabled?: boolean;
+  readonly status: number;
+  readonly body: Readonly<Record<string, unknown>>;
+}>;
 
 /** Called only inside the Host's already-authorized Dot read. No HTTP identity or package-supplied owner. */
 export function createCollectiveAccountabilitySource(

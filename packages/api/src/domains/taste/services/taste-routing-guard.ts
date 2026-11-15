@@ -1,15 +1,16 @@
 /**
  * F221 Phase B: Taste signal routing guard.
  *
- * Detects taste-signal keywords in propose_profile_update content and returns
- * a routing advisory suggesting cat_cafe_propose_taste instead.
+ * Detects taste-signal keywords in profile-update content and returns
+ * a routing advisory suggesting the taste lane (cat_cafe_remember target taste) instead.
  *
  * This is an ADVISORY — it does NOT block proposal creation.
  * Per KD-8: we give data (advisory), not conclusions (blocking).
  */
 
 export interface TasteRoutingAdvisory {
-  suggestedTool: 'cat_cafe_propose_taste';
+  suggestedTool: 'cat_cafe_remember';
+  suggestedTarget: 'taste';
   reason: string;
 }
 
@@ -37,7 +38,8 @@ export function detectTasteSignal(input: { rationale?: string; afterContent?: st
   if (!match) return null;
 
   return {
-    suggestedTool: 'cat_cafe_propose_taste',
-    reason: `Content contains taste signal keyword "${match}". Consider using cat_cafe_propose_taste to capture this as a taste vignette instead of a profile update.`,
+    suggestedTool: 'cat_cafe_remember',
+    suggestedTarget: 'taste',
+    reason: `Content contains taste signal keyword "${match}". Consider cat_cafe_remember with target taste to capture this as a taste vignette instead of a profile update.`,
   };
 }

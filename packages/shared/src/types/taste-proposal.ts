@@ -44,6 +44,8 @@ export interface TasteProposal {
   scene: string;
   /** operator verbatim words. */
   quote: string;
+  /** Complete resulting quote list for an existing-vignette correction; create uses [quote]. */
+  resolvedQuotes?: string[];
   /** A cat's one-sentence hypothesis about the owner's reusable preference. */
   takeaway?: string;
   /** Search keywords for later retrieval. */
@@ -71,6 +73,10 @@ export interface TasteProposal {
   approvedAt?: number;
   /** userId of the approver. */
   approvedBy?: string;
+  /** Exact candidate digest accepted by the owner, retained through approving recovery. */
+  decisionDigest?: string;
+  /** A pre-digest approving claim may recognize its exact historical publication, but never create new legacy bytes. */
+  legacyPublicationRecovery?: true;
   /** Epoch ms when operator rejected. */
   rejectedAt?: number;
   /** userId of the rejecter. */

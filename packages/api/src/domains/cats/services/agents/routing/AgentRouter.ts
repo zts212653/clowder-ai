@@ -19,7 +19,13 @@
  */
 
 import type { CatId, CatRoutingError, MessageContent } from '@cat-cafe/shared';
-import { catRegistry, deploymentDefaults, escapeRegExp } from '@cat-cafe/shared';
+import {
+  catRegistry,
+  deploymentDefaults,
+  escapeRegExp,
+  isMentionPathSuffix,
+  type MentionHandle,
+} from '@cat-cafe/shared';
 import type {
   RoutingPreviewReason,
   RoutingPreviewReasonKind,
@@ -74,6 +80,7 @@ import {
 import type { RouteExecutionOptions, RouteOptions, RouteStrategyDeps } from '../routing/route-helpers.js';
 import { routeParallel } from '../routing/route-parallel.js';
 import { routeSerial } from '../routing/route-serial.js';
+import { getCatRoutingHandles } from './cat-routing-handles.js';
 import { resolveCatTarget } from './cat-target-resolver.js';
 import { appendContextAttachmentsToPrompt } from './context-attachment-prompt.js';
 import { findLastUserMentions } from './last-user-mentions.js';
@@ -110,10 +117,7 @@ interface ParsedMention {
   position: number;
 }
 
-interface MentionPattern {
-  pattern: string;
-  catId: CatId;
-}
+type MentionPattern = MentionHandle<CatId>;
 
 type MarkdownMentionMarker = '*' | '_';
 
@@ -361,6 +365,7 @@ function findMentionPatternAt(
     const patternEnd = matchMentionPatternEnd(message, pos, entry.pattern);
     if (patternEnd === null) continue;
     const boundaryEnd = normalizePatternEnd ? normalizePatternEnd(patternEnd) : patternEnd;
+    if (entry.stableIdFallback && isMentionPathSuffix(message, boundaryEnd)) continue;
     if (!isMentionEndBoundary(message, boundaryEnd)) continue;
     return entry;
   }
@@ -417,7 +422,9 @@ function recordResolvedMention(catId: CatId, position: number, seenCats: Set<str
 function buildMentionData(configs: Record<string, import('@cat-cafe/shared').CatConfig>) {
   const mentionAliases = Array.from(
     new Set(
-      Object.values(configs).flatMap((config) => config.mentionPatterns.map((pattern) => pattern.replace(/^@/, ''))),
+      Object.values(configs).flatMap((config) =>
+        (config.mentionPatterns ?? []).map((pattern) => pattern.replace(/^@/, '')),
+      ),
     ),
   ).sort((a, b) => b.length - a.length);
 
@@ -473,6 +480,8 @@ export interface AgentRouterOptions {
   routingDispatchPreflight?: import('../../../../routing-context/RoutingDispatchPreflightPort.js').RoutingDispatchPreflightPort;
   /** F293: durable dispatch terminal observer over the same routing signal graph. */
   routingDispatchSignalObserver?: import('../../../../routing-context/RoutingDispatchSignalContract.js').RoutingDispatchTerminalObserver;
+  /** F337: machine-sleep interruption evidence and the after-wake continuation. */
+  hostSleep?: import('../invocation/invoke-single-cat.js').InvocationDeps['hostSleep'];
   /** F276: terminal disposition authority for person-memory write opportunities. */
   writeOpportunityTerminalLedger?: import('../invocation/invoke-single-cat.js').InvocationDeps['writeOpportunityTerminalLedger'];
   /** F276: reservation and delivery authority for person-memory write opportunities. */
@@ -591,6 +600,7 @@ export class AgentRouter {
   private routingContextPromptProjection?: import('../../../../routing-context/RoutingContextPromptProjector.js').RoutingContextPromptProjectionPort;
   private routingDispatchPreflight?: import('../../../../routing-context/RoutingDispatchPreflightPort.js').RoutingDispatchPreflightPort;
   private routingDispatchSignalObserver?: import('../../../../routing-context/RoutingDispatchSignalContract.js').RoutingDispatchTerminalObserver;
+  private hostSleep?: import('../invocation/invoke-single-cat.js').InvocationDeps['hostSleep'];
   private writeOpportunityTerminalLedger?: import('../invocation/invoke-single-cat.js').InvocationDeps['writeOpportunityTerminalLedger'];
   private writeOpportunityDeliveryStore?: import('../invocation/invoke-single-cat.js').InvocationDeps['writeOpportunityDeliveryStore'];
   private runtimeSessionStore: IRuntimeSessionStore | undefined;
@@ -708,6 +718,7 @@ export class AgentRouter {
     this.routingContextPromptProjection = options.routingContextPromptProjection;
     this.routingDispatchPreflight = options.routingDispatchPreflight;
     this.routingDispatchSignalObserver = options.routingDispatchSignalObserver;
+    this.hostSleep = options.hostSleep;
     this.writeOpportunityTerminalLedger = options.writeOpportunityTerminalLedger;
     this.writeOpportunityDeliveryStore = options.writeOpportunityDeliveryStore;
     this.runtimeSessionStore = options.runtimeSessionStore;
@@ -1020,16 +1031,7 @@ export class AgentRouter {
     const lowerMessage = message.toLowerCase();
     const speechRouteMessage = this.normalizeSpeechMentions(message).toLowerCase();
 
-    // 1. Collect all mentionPatterns → catId, sorted by length descending
-    const allPatterns: MentionPattern[] = [];
-    const allConfigs = catRegistry.getAllConfigs();
-    for (const config of Object.values(allConfigs)) {
-      for (const pattern of config.mentionPatterns) {
-        allPatterns.push({ pattern: pattern.toLowerCase(), catId: config.id });
-      }
-    }
-    for (const plugin of plugins) allPatterns.push({ pattern: `@${plugin.alias}`, catId: plugin.id as CatId });
-    allPatterns.sort((a, b) => b.pattern.length - a.pattern.length); // longest first
+    const allPatterns = getCatRoutingHandles(plugins).sort((a, b) => b.pattern.length - a.pattern.length);
 
     // 2-4. User-authored messages accept explicit @mentions anywhere in prose.
     // A2A/callback handoffs still use the stricter line-start parser in a2a-mentions.ts.
@@ -1472,6 +1474,7 @@ export class AgentRouter {
         ...(this.routingDispatchSignalObserver
           ? { routingDispatchSignalObserver: this.routingDispatchSignalObserver }
           : {}),
+        ...(this.hostSleep ? { hostSleep: this.hostSleep } : {}),
         ...(this.writeOpportunityTerminalLedger
           ? { writeOpportunityTerminalLedger: this.writeOpportunityTerminalLedger }
           : {}),

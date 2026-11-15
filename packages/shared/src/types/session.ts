@@ -74,6 +74,8 @@ export interface SessionRecord {
   /** A resumable observer role is separate from this member's ordinary home chain. */
   readonly sessionPurpose?: 'watcher';
   watcherState?: import('./watcher.js').WatcherSessionState;
+  /** Durable, bounded retirement of the old native contract; not a model-recovery allowance. */
+  watcherRetirement?: import('./watcher.js').WatcherSurfaceRetirement;
   /** A one-shot scoped execution is traceable history, never a home resume candidate. */
   readonly scopedInvocation?:
     | {

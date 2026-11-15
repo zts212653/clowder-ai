@@ -35,11 +35,17 @@ test('ordinary cat and human searches consume the same real worker queue for bot
     })),
   );
   const db = store.getDb();
+  // Exercise the global indexed CJK path together with real file-worker
+  // vector IPC; nonmatching source rows add no lexical/vector candidate.
+  const putNoise = db.prepare(
+    "INSERT INTO evidence_passages(doc_anchor,passage_id,content,created_at) VALUES('thread-visible',?,'zzfixture5190301','2026-01-01')",
+  );
+  db.transaction(() => {
+    for (let i = 0; i < 8193; i++) putNoise.run(`msg-noise-${i}`);
+  })();
   sqliteVec.load(db);
   ensureVectorTable(db, 4);
   ensurePassageVectorTable(db, 4);
-  const vectorStore = new VectorStore(db, 4);
-  vectorStore.initMeta({ modelId: 'controlled-delivery', modelRev: '1', dim: 4 });
   const vectors = new PassageVectorStore(db, 4);
   const insert = db.prepare('INSERT INTO evidence_passages(doc_anchor,passage_id,content,created_at) VALUES (?,?,?,?)');
   const messages = new Map();
@@ -60,15 +66,17 @@ test('ordinary cat and human searches consume the same real worker queue for bot
       timestamp: Date.parse(date),
     });
   }
+  const model = { modelId: 'controlled-delivery', modelRev: '1', dim: 4 };
+  new VectorStore(db, 4).initMeta(model);
   store.setEmbedDeps({
     mode: 'on',
-    vectorStore,
+    vectorStore: new VectorStore(db, 4),
     passageVectorStore: vectors,
     embedding: {
       load: async () => {},
       reprobeIfNeeded: async () => {},
       isReady: () => true,
-      getModelInfo: () => ({ modelId: 'controlled-delivery', modelRev: '1', dim: 4 }),
+      getModelInfo: () => model,
       embed: async (texts) => texts.map(() => new Float32Array([1, 0, 0, 0])),
     },
   });

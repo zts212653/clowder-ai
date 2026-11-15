@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, describe, it } from 'node:test';
 import Fastify from 'fastify';
@@ -20,7 +21,7 @@ describe('GET /api/projects/complete', () => {
 
   before(async () => {
     // Create test directory structure under /tmp (allowed root)
-    testDir = mkdtempSync('/tmp/cat-cafe-test-complete-');
+    testDir = mkdtempSync(join(tmpdir(), 'cat-cafe-test-complete-'));
     mkdirSync(join(testDir, 'src'));
     mkdirSync(join(testDir, 'src', 'components'));
     mkdirSync(join(testDir, 'src', 'utils'));

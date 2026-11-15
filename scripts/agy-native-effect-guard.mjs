@@ -48,11 +48,14 @@ function profileControlPath(path, profileHome) {
   const root = roots.find((root) => normalized.startsWith(`${root}/`));
   // The run's data alias is the account's native storage. Keep ordinary brain
   // artifacts writable there; configuration and the alias directory itself stay protected.
-  const suffix = (root ? normalized.slice(root.length + 1) : '').replace(
+  let suffix = (root ? normalized.slice(root.length + 1) : '').replace(
     /^\.cat-cafe-native-runs\/run-[a-z0-9]+\/(?=\.gemini\/antigravity-cli\/)/,
     '',
   );
+  const view = suffix.match(/^\.cat-cafe-account-views\/[a-f0-9]{64}(?:\/(.*))?$/);
+  if (view) suffix = `.gemini/antigravity-cli${view[1] ? `/${view[1]}` : ''}`;
   return (
+    suffix === '.cat-cafe-account-views' ||
     suffix === 'library' ||
     suffix === 'library/keychains' ||
     suffix.startsWith('library/keychains/') ||
@@ -139,7 +142,9 @@ export function decideAgyNativeHookPayload(payload, options = {}) {
   if (secretDenial) return deny(secretDenial);
   if (options.readOnly && !READERS.has(name)) return deny('read-only invocation');
   const isControl = (path, directory, profileHome) =>
-    controlPath(path, directory, profileHome) || (options.toolHome && controlPath(path, directory, options.toolHome));
+    controlPath(path, directory, profileHome) ||
+    (options.toolHome && controlPath(path, directory, options.toolHome)) ||
+    (options.credentialHome && controlPath(path, directory, options.credentialHome));
 
   let toolName;
   let toolInput;
@@ -206,6 +211,10 @@ async function main() {
     const decision = decideAgyNativeHookPayload(JSON.parse(raw), {
       profileHome,
       toolHome,
+      credentialHome: process.argv
+        .slice(5)
+        .find((arg) => arg.startsWith('--credential-home='))
+        ?.slice('--credential-home='.length),
       ...(process.argv[5] !== undefined ? { workspaceRoot: process.argv[5] } : {}),
       readOnly: process.argv[3] === 'read-only',
       ...(process.argv[3] === 'plugin-native' ? { pluginServerName: process.argv[6] ?? '' } : {}),

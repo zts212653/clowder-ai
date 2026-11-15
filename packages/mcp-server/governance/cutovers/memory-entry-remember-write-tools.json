@@ -1,0 +1,88 @@
+{
+  "resource": {
+    "kind": "tightly-coupled-group",
+    "groupName": "memory-write-entry",
+    "resourceFamilies": ["identity-proposal", "person-memory", "memory-write", "memory-matter"],
+    "evidenceRef": "file:docs/architecture/memory/remember-entry.md"
+  },
+  "retiredNames": [
+    "cat_cafe_defer_person_memory_delta",
+    "cat_cafe_propose_entity",
+    "cat_cafe_propose_event_memory_correction",
+    "cat_cafe_propose_person_memory",
+    "cat_cafe_propose_profile_update",
+    "cat_cafe_propose_taste",
+    "cat_cafe_record_proactive_memory_abstention",
+    "cat_cafe_write_memory_matter"
+  ],
+  "canonicalNames": [],
+  "rollbackRevision": "08f1d5f1408ae030f77b666ca7dfb4bc22c38a1b",
+  "layers": {
+    "mcp-definition": {
+      "status": "covered",
+      "consumers": [
+        "packages/mcp-server/src/tools/remember-tool.ts",
+        "packages/mcp-server/src/tools/callback-tools.ts",
+        "packages/mcp-server/src/tools/person-memory-proposal-tool.ts",
+        "packages/mcp-server/src/tools/proactive-memory-opportunity-tool.ts",
+        "packages/mcp-server/src/tools/matter-memory-tools.ts",
+        "packages/mcp-server/src/tool-governance-types.ts",
+        "packages/mcp-server/src/canonical-tool-registry.ts",
+        "packages/api/src/domains/cats/services/agents/invocation/WatcherToolTicket.ts"
+      ]
+    },
+    "runtime-catalog-profile": {
+      "status": "covered",
+      "consumers": [
+        "packages/mcp-server/governance/mcp-surface-baseline.json",
+        "packages/api/src/domains/concierge/watcher/watcher-surface.ts"
+      ]
+    },
+    "prompt-l0": {
+      "status": "covered",
+      "consumers": ["packages/api/src/domains/concierge/watcher/watcher-prompt.ts"]
+    },
+    "skill-convention": {
+      "status": "covered",
+      "consumers": [
+        "cat-cafe-skills/proactive-memory-judgment/SKILL.md",
+        "cat-cafe-skills/refs/capability-wakeup-index.md",
+        "cat-cafe-skills/code-as-harness/SKILL.md",
+        "scripts/compile-system-prompt-l0.test.mjs"
+      ]
+    },
+    "fixture-test": {
+      "status": "covered",
+      "consumers": [
+        "packages/mcp-server/test/memory-entry-subtraction.test.js",
+        "packages/mcp-server/test/remember-tool.test.js",
+        "packages/mcp-server/test/proactive-memory-opportunity-tool.test.js",
+        "packages/api/test/callback-remember-routes.test.js",
+        "packages/api/test/taste-write-native-journey.test.js",
+        "packages/mcp-server/test/matter-memory-tools.test.js",
+        "packages/mcp-server/test/proposal-memory-routing-description.test.js",
+        "packages/api/test/watcher-remember.test.js",
+        "packages/api/test/watcher-remember-redis.test.js",
+        "packages/api/test/watcher-quiet-memory-native.test.js",
+        "packages/api/test/f296-b3b3-post-compact-hook.test.js",
+        "packages/web/test/browser/reference-quote-forward.test.mjs",
+        "packages/mcp-server/test/remember-write-cutover-manifest.test.ts"
+      ]
+    },
+    "eval": {
+      "status": "covered",
+      "consumers": [
+        "packages/api/src/domains/memory/ProactiveMemoryOpportunityEvaluator.ts",
+        "packages/api/test/memory/f282-proactive-memory-phase-d.test.js"
+      ]
+    },
+    "observability": {
+      "status": "covered",
+      "consumers": [
+        "packages/api/src/domains/cats/services/tool-usage/derive-result-summary.ts",
+        "packages/api/test/memory/f282-proactive-memory-phase-d.test.js"
+      ]
+    }
+  },
+  "expectedProfiles": {}
+}

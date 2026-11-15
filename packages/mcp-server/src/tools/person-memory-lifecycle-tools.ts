@@ -51,14 +51,6 @@ export const drillPersonMemoryInputSchema = {
     .describe('Required inclusive recorded-at window in epoch milliseconds.'),
   agentKeyCatId: agentKeyCatIdSchema,
 };
-export const redactPersonMemoryItemInputSchema = {
-  personId: personIdSchema.describe('Exact active private person ID containing the item.'),
-  item: z
-    .object({ kind: z.enum(['claim', 'event']), id: z.string().trim().min(1).max(200) })
-    .strict()
-    .describe('Exact item whose payload and source refs must be purged.'),
-  clientRequestId: z.string().trim().min(1).max(200).optional(),
-};
 export function createPersonMemoryLifecycleTools(callbackPost: CallbackPost, callbackGet: CallbackGet) {
   const revision = createPersonMemoryRevisionTool(callbackPost);
   const handleGetPersonMemoryProposalStatus = (input: {
@@ -72,7 +64,11 @@ export function createPersonMemoryLifecycleTools(callbackPost: CallbackPost, cal
     );
 
   const handleRecallPersonRelationship = (input: { alias: string; agentKeyCatId?: string }) =>
-    callbackPost('/api/callbacks/person-memory/recall', { alias: input.alias }, agentKeyOptions(input));
+    callbackPost(
+      '/api/callbacks/person-memory/recall',
+      { alias: input.alias, readRequestId: `person_read_${randomUUID()}` },
+      agentKeyOptions(input),
+    );
 
   const handleDrillPersonMemory = (input: {
     personId: z.infer<typeof personIdSchema>;
@@ -82,27 +78,20 @@ export function createPersonMemoryLifecycleTools(callbackPost: CallbackPost, cal
   }) =>
     callbackPost(
       '/api/callbacks/person-memory/drill',
-      { personId: input.personId, item: input.item, timeWindow: input.timeWindow },
+      {
+        personId: input.personId,
+        item: input.item,
+        timeWindow: input.timeWindow,
+        readRequestId: `person_drill_${randomUUID()}`,
+      },
       agentKeyOptions(input),
     );
-
-  const handleRedactPersonMemoryItem = (input: {
-    personId: z.infer<typeof personIdSchema>;
-    item: { kind: 'claim' | 'event'; id: string };
-    clientRequestId?: string;
-  }) =>
-    callbackPost('/api/callbacks/person-memory/redact', {
-      personId: input.personId,
-      item: input.item,
-      requestId: input.clientRequestId ?? `redaction_${randomUUID()}`,
-    });
 
   return {
     handleGetPersonMemoryProposalStatus,
     handleRecallPersonRelationship,
     handleDrillPersonMemory,
     handleRevisePersonMemory: revision.handleRevisePersonMemory,
-    handleRedactPersonMemoryItem,
     tools: [
       defineTool({
         name: 'cat_cafe_get_person_memory_proposal_status',
@@ -144,19 +133,6 @@ export function createPersonMemoryLifecycleTools(callbackPost: CallbackPost, cal
         },
       }),
       revision.tool,
-      defineTool({
-        name: 'cat_cafe_redact_person_memory_item',
-        description:
-          'Destructively purge payload and source refs from one exact claim or event while retaining a redacted lifecycle marker. Requires an explicit owner request.',
-        inputSchema: redactPersonMemoryItemInputSchema,
-        handler: handleRedactPersonMemoryItem,
-        governance: {
-          implementationExport: 'handleRedactPersonMemoryItem',
-          action: 'close',
-          risk: { level: 'destructive', openWorld: false },
-          runtimeProfiles: ['full'],
-        },
-      }),
     ],
   };
 }

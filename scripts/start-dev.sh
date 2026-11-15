@@ -69,7 +69,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 source "$SCRIPT_DIR/lib/node-runtime-guard.sh"
 if [[ "${1:-}" != "--source-only" ]]; then
-    ensure_supported_node_runtime "$SCRIPT_DIR/start-dev.sh" "$@"
+    ensure_supported_node_runtime "$0" "$@"
 fi
 source "$SCRIPT_DIR/lib/redis-rdb-first.sh"
 source "$SCRIPT_DIR/download-source-overrides.sh"
@@ -2039,15 +2039,26 @@ main() {
 launch_daemon_child() {
     local script_path=$1
     local launch_token=$2
+    local restore_monitor_off=false
     shift 2
+    case "$-" in
+        *m*) ;;
+        *)
+            restore_monitor_off=true
+            set -m
+            ;;
+    esac
     if verified_runtime_artifacts_for_current_tree; then
         # Only the self re-exec receives this one-shot proof. Its startup
         # snapshots and unsets the variable before launching the API.
-        CAT_CAFE_RUNTIME_ARTIFACTS_VERIFIED=1 nohup "$script_path" "$@" --cat-cafe-daemon-token="$launch_token" > "$DAEMON_LOG_FILE" 2>&1 &
+        CAT_CAFE_RUNTIME_ARTIFACTS_VERIFIED=1 nohup "$script_path" "$@" --cat-cafe-daemon-token="$launch_token" </dev/null > "$DAEMON_LOG_FILE" 2>&1 &
     else
-        nohup "$script_path" "$@" --cat-cafe-daemon-token="$launch_token" > "$DAEMON_LOG_FILE" 2>&1 &
+        nohup "$script_path" "$@" --cat-cafe-daemon-token="$launch_token" </dev/null > "$DAEMON_LOG_FILE" 2>&1 &
     fi
     DAEMON_PID=$!
+    if [ "$restore_monitor_off" = true ]; then
+        set +m
+    fi
 }
 
 # Allow sourcing for testing without executing main

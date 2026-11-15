@@ -12,7 +12,6 @@ import {
 } from './ActionSuccessorDispatchRecovery.js';
 import type { ActionSuccessorLeaseStore } from './ActionSuccessorLeaseStore.js';
 import { recordActionRecoveryBatchFailure, runActionDueRecovery } from './action-successor-due-recovery.js';
-import type { ActionRecoveryNotification } from './action-successor-recovery-state.js';
 import { type ActionSuccessorLease, isRecoverableActionSuccessorReturn } from './action-successor-state-machine.js';
 import { isRetiredTaskAction } from './retired-task-action.js';
 
@@ -57,7 +56,6 @@ export interface ActionSuccessorRecoverySweepDeps {
   readonly deliverReturnCarrier: (
     carrier: ActionSuccessorReturnCarrier,
   ) => Promise<ActionSuccessorReturnDeliveryResult>;
-  readonly notifyRecovery?: ActionRecoveryNotification;
   readonly now?: () => number;
   readonly scanLimit?: number;
   readonly onOverdue?: (input: {
@@ -136,7 +134,6 @@ export class ActionSuccessorRecoverySweep {
           lease: candidate,
           lane: 'return',
           now: this.now(),
-          notify: this.deps.notifyRecovery,
           recover: async (lease) => {
             if (!isRecoverableActionSuccessorReturn(lease)) return { kind: 'settled' };
             if (lease.mode !== 'single' || lease.holderCatIds.length !== 1 || !lease.predecessorCatId)

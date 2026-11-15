@@ -73,10 +73,12 @@ export function readableSelectionText(selection: Selection, root: Element): stri
           other !== node && ((whole.has(other) && other.contains(node)) || (!whole.has(node) && node.contains(other))),
       ),
   );
-  if (!labels.length) return rendered.trim();
+  // Chromium also inserts layout newlines around plain inline code. Rebuild
+  // block separators even when no source label needs restoring.
   const raw = readableDom(range.cloneContents());
-  // The selected characters must still be identical; only layout whitespace is reconstructed.
-  if (withoutSpace(raw) !== withoutSpace(rendered)) return null;
+  // Label replacement needs identical characters for offset alignment. Plain
+  // viewers may render transformed text and retain their existing quote path.
+  if (withoutSpace(raw) !== withoutSpace(rendered)) return labels.length ? null : rendered.trim();
   const characters: number[] = [];
   for (let index = 0; index < raw.length; index++) if (!/\s/u.test(raw[index] ?? '')) characters.push(index);
   const replacements: Replacement[] = [];

@@ -1,3 +1,5 @@
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import {
   deploymentDefaults,
   type MessageSearchAnswerAttachmentRequest,
@@ -79,11 +81,7 @@ import {
 } from './invocation-auth.js';
 import { createMemoryCueTools } from './memory-cue-tools.js';
 import { createPersonMemoryLifecycleTools } from './person-memory-lifecycle-tools.js';
-import { createPersonMemoryProposalTool } from './person-memory-proposal-tool.js';
-import {
-  createDeferredPersonMemoryTool,
-  createProactiveMemoryAbstentionTool,
-} from './proactive-memory-opportunity-tool.js';
+import { createDeferredPersonMemoryTool } from './proactive-memory-opportunity-tool.js';
 import { withProfileReadRecovery } from './profile-read-recovery.js';
 import { projectRoutingCallbackResponse } from './routing-preflight-response.js';
 
@@ -426,7 +424,9 @@ export const postMessageInputSchema = {
         .max(128)
         .regex(/^[A-Za-z0-9._:-]+$/)
         .optional()
-        .describe('Existing coordination id to continue explicitly. Usually omit: the server mints/inherits it.'),
+        .describe(
+          'Coordination id to continue or close explicitly (e.g., an outbound active id returned in this invocation). Usually omit: the server mints/inherits it.',
+        ),
       subjectRef: z
         .string()
         .trim()
@@ -918,7 +918,9 @@ export const crossPostMessageInputSchema = {
         .max(128)
         .regex(/^[A-Za-z0-9._:-]+$/)
         .optional()
-        .describe('Existing coordination id to continue explicitly. Usually omit: the server mints/inherits it.'),
+        .describe(
+          'Coordination id to continue or close explicitly (e.g., an outbound active id returned in this invocation). Usually omit: the server mints/inherits it.',
+        ),
       subjectRef: z
         .string()
         .trim()
@@ -2884,73 +2886,36 @@ export const proposeProfileUpdateInputSchema = {
     .min(1)
     .optional()
     .describe(
-      'Optional exact message ID assertion. When omitted, the API derives the unambiguous origin from authenticated callback provenance; when supplied, it must match that origin.',
+      'Optional exact source assertion. A new request must match the authenticated invocation origin. On a retry, keep the original sourceMessageId or omit it; a supplied ID must match the saved proposal source, not replace it with a later trigger.',
+    ),
+  expectedRevision: z
+    .string()
+    .regex(/^sha256:[a-f0-9]{64}$/)
+    .optional()
+    .describe(
+      'Revision returned by reading the same profile layer (or emptyRevision from its no_primer/no_corpus/no_capsule response). Rejects a stale whole-file draft before submission. Keep it unchanged when retrying the same request.',
     ),
   clientRequestId: z
     .string()
     .min(1)
     .max(200)
     .optional()
-    .describe('Optional idempotency key. Resending with the same value returns the same proposalId.'),
+    .describe(
+      'Optional stable retry key. The same request recovers its original proposal; changed content, target, or revision returns a conflict. Use a new key for a revised draft.',
+    ),
 };
-
-export async function handleProposeProfileUpdate(input: {
-  afterContent: string;
-  rationale: string;
-  signalKind: 'cat-declared' | 'cvo-instructed';
-  targetLayer?: ProfileUpdateTargetLayer | undefined;
-  sourceMessageId?: string | undefined;
-  clientRequestId?: string | undefined;
-  agentKeyCatId?: string | undefined;
-}): Promise<ToolResult> {
-  // Always send an idempotency key — auto-generate when the caller didn't supply one, so transient
-  // callbackPost retries never produce duplicate proposals (mirrors F128 handleProposeThread).
-  const body: Record<string, unknown> = {
-    afterContent: input.afterContent,
-    rationale: input.rationale,
-    signalKind: input.signalKind,
-    ...(input.targetLayer ? { targetLayer: input.targetLayer } : {}),
-    ...(input.sourceMessageId ? { sourceMessageId: input.sourceMessageId } : {}),
-    clientRequestId: input.clientRequestId ?? randomUUID(),
-  };
-
-  const result = await callbackPost('/api/callbacks/propose-profile-update', body, agentKeyOptions(input));
-  if (!result.isError) {
-    try {
-      const data = JSON.parse((result.content[0] as { text: string }).text);
-      if (data?.status === 'stale_ignored') {
-        return errorResult(
-          'Profile-update proposal was NOT created: this invocation has been superseded by a newer one (stale_ignored).',
-        );
-      }
-    } catch {
-      // parse failure is fine
-    }
-  }
-  return result;
-}
 
 // ============ F276: People & Relationship Memory ============
 
-const personMemoryProposalToolset = createPersonMemoryProposalTool(callbackPost);
 const personMemoryLifecycleToolset = createPersonMemoryLifecycleTools(callbackPost, callbackGet);
 const memoryCueToolset = createMemoryCueTools(callbackPost);
-const proactiveMemoryAbstentionToolset = createProactiveMemoryAbstentionTool(callbackPost);
 const deferredPersonMemoryToolset = createDeferredPersonMemoryTool(callbackPost);
-export const { handleProposePersonMemory } = personMemoryProposalToolset;
-export const { handleRecordProactiveMemoryAbstention } = proactiveMemoryAbstentionToolset;
-export const {
-  handleDeferPersonMemoryDelta,
-  handleDisposeDeferredPersonMemory,
-  handleWithdrawDeferredPersonMemory,
-  handleForgetDeferredPersonMemory,
-} = deferredPersonMemoryToolset;
+export const { handleDisposeDeferredPersonMemory } = deferredPersonMemoryToolset;
 export const {
   handleGetPersonMemoryProposalStatus,
   handleRecallPersonRelationship,
   handleDrillPersonMemory,
   handleRevisePersonMemory,
-  handleRedactPersonMemoryItem,
 } = personMemoryLifecycleToolset;
 export const { handlePrepareMemoryContext, handleDrillMemoryCue, handleRecordMemoryCueOutcome } = memoryCueToolset;
 
@@ -3006,30 +2971,6 @@ export const proposeEntityInputSchema = {
     .optional()
     .describe('Optional idempotency key. Resending with the same value returns the same proposalId.'),
 };
-
-export async function handleProposeEntity(input: {
-  entityId: string;
-  entityType: 'person' | 'cat' | 'feature' | 'concept' | 'external';
-  canonicalName: string;
-  aliases: string[];
-  stance: 'endorsed' | 'rejected' | 'critique_target' | 'deliverable_only' | 'unknown';
-  visibilityScope: string;
-  provenance: Array<{ source: string; anchor?: string; note?: string; date?: string }>;
-  rationale: string;
-  clientRequestId?: string | undefined;
-}): Promise<ToolResult> {
-  return callbackPost('/api/callbacks/propose-entity', {
-    entityId: input.entityId,
-    entityType: input.entityType,
-    canonicalName: input.canonicalName,
-    aliases: input.aliases,
-    stance: input.stance,
-    visibilityScope: input.visibilityScope,
-    provenance: input.provenance,
-    rationale: input.rationale,
-    clientRequestId: input.clientRequestId ?? randomUUID(),
-  });
-}
 
 // ============ F221: Taste Capture Loop ============
 
@@ -3148,11 +3089,17 @@ export const proposeTasteInputSchema = {
   privacy: z
     .enum(['public', 'sensitive'])
     .describe(
-      'public: vignette goes to docs/taste/vignettes/ (visible in repo). ' +
+      'public: owner approval shares the vignette in the private home repository, never on the public internet. ' +
         'sensitive: vignette goes to private/taste/ (gitignored, local only)',
     )
     .optional(),
-  sourceMessageId: z.string().min(1).optional().describe('Message ID where the taste signal was observed'),
+  sourceMessageId: z
+    .string()
+    .min(1)
+    .optional()
+    .describe(
+      'Optional exact source assertion. A new request must match the authenticated invocation origin. On a retry, keep the original sourceMessageId or omit it; a supplied ID must match the saved proposal source, not replace it with a later trigger.',
+    ),
   target: tasteCorrectionTargetInputSchema
     .optional()
     .describe(
@@ -3166,81 +3113,6 @@ export const proposeTasteInputSchema = {
     .optional()
     .describe('Idempotency key — same clientRequestId returns cached proposal'),
 };
-
-export async function handleProposeTaste(input: {
-  scene?: string;
-  quote?: string;
-  takeaway?: string;
-  tags?: string[];
-  dimension?: string;
-  privacy?: 'public' | 'sensitive';
-  sourceMessageId?: string;
-  target?: z.infer<typeof tasteCorrectionTargetInputSchema>;
-  clientRequestId?: string;
-}): Promise<ToolResult> {
-  const createSchema = z
-    .object({
-      scene: z.string().min(1).max(2000),
-      quote: z.string().min(1).max(2000),
-      takeaway: z.string().trim().min(1).max(500).optional(),
-      tags: z.array(z.string().min(1).max(50)).min(1).max(10),
-      dimension: proposeTasteInputSchema.dimension.unwrap(),
-      privacy: z.enum(['public', 'sensitive']),
-      sourceMessageId: z.string().min(1).optional(),
-      clientRequestId: z.string().min(1).max(200).optional(),
-      target: z.undefined().optional(),
-    })
-    .strict();
-  const correctionSchema = z
-    .object({
-      target: tasteCorrectionTargetInputSchema,
-      clientRequestId: z
-        .string()
-        .trim()
-        .min(32)
-        .max(200)
-        .regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/)
-        .optional(),
-      scene: z.undefined().optional(),
-      quote: z.undefined().optional(),
-      takeaway: z.undefined().optional(),
-      tags: z.undefined().optional(),
-      dimension: z.undefined().optional(),
-      privacy: z.undefined().optional(),
-      sourceMessageId: z.undefined().optional(),
-    })
-    .strict();
-  const parsed = z.union([createSchema, correctionSchema]).safeParse(input);
-  if (!parsed.success) {
-    return errorResult(
-      'Invalid Taste proposal input. Expected either create fields ' +
-        '{scene, quote, tags, dimension, privacy} or correction fields ' +
-        '{target:{sourceAnchor, expectedRevision, reason, suggestedPatch}}, without mixing them. ' +
-        'Example correction: target.sourceAnchor="taste-vignette:docs/taste/vignettes/example.md", ' +
-        'target.expectedRevision="sha256:<64 lowercase hex>". ' +
-        `Details: ${parsed.error.issues.map((issue) => issue.message).join('; ')}`,
-    );
-  }
-  const request = parsed.data.target
-    ? { target: parsed.data.target, clientRequestId: parsed.data.clientRequestId ?? randomUUID() }
-    : { ...parsed.data, clientRequestId: parsed.data.clientRequestId ?? randomUUID() };
-  const result = await callbackPost('/api/callbacks/propose-taste', request);
-  // Detect stale_ignored: match thread/profile/handoff pattern — a stale invocation
-  // gets HTTP 200 with status='stale_ignored' but no proposal was actually created.
-  if (!result.isError) {
-    try {
-      const data = JSON.parse((result.content[0] as { text: string }).text);
-      if (data?.status === 'stale_ignored') {
-        return errorResult(
-          'Taste proposal NOT created: this invocation was superseded by a newer one (stale_ignored).',
-        );
-      }
-    } catch {
-      // parse failure is fine — means result is not a stale_ignored response
-    }
-  }
-  return result;
-}
 
 // ============ F321: source-bound Event memory correction ============
 
@@ -3275,24 +3147,6 @@ export const proposeEventMemoryCorrectionInputSchema = {
     .optional()
     .describe('Idempotency key; retries with the same request return the same proposal.'),
 };
-
-export async function handleProposeEventMemoryCorrection(input: {
-  eventId: string;
-  expectedRevision: string;
-  reason: 'unsupported_by_source' | 'outdated' | 'not_applicable_here';
-  suggestedPatch: {
-    summary?: string;
-    cognitiveTransition?: (typeof COGNITIVE_TRANSITIONS)[number] | null;
-    relatedHarness?: string[] | null;
-    confidence?: (typeof EVENT_CONFIDENCES)[number];
-  };
-  clientRequestId?: string;
-}): Promise<ToolResult> {
-  return callbackPost('/api/callbacks/propose-event-memory-correction', {
-    ...input,
-    clientRequestId: input.clientRequestId ?? randomUUID(),
-  });
-}
 
 // ============ Thread Cats Discovery ============
 
@@ -3480,7 +3334,7 @@ const defineCanonicalTool = defineMcpCanonicalFactory('callback-tools.ts');
 function resolveAnchorModeFilePath(): string | null {
   const invocationId = getInvocationAuthSignal().invocationId;
   if (invocationId) {
-    return `/tmp/cat-cafe-anchor-mode-${invocationId}`;
+    return join(process.platform === 'win32' ? tmpdir() : '/tmp', `cat-cafe-anchor-mode-${invocationId}`);
   }
   return null;
 }
@@ -3655,7 +3509,7 @@ export const callbackTools = [
       'Scarce dossier engagementPolicy seats receive effectClass=fyi or coordination.phase=terminal unread without waking; deliveredWithoutWake confirms delivery, not reading. Active coordination, actions and localReviewVerdict retain their wake. ' +
       'GOTCHA: action is Task-backed implement work: subjectRef=subject:task:<taskId>, terminalPredicate={kind:"task_done"}, explicit clientMessageId and exactly one targetCats entry. For ordinary work (work Task, no namespaced subject or entrusted contract), send expectedOwnerRevision from list_tasks and optionally stopPreviousExecution; the server reuses Task/Message/Queue, reports queueing separately from execution, and never requires lease replacement or another approval for the same authorized work. Ordinary existing-owner notifications need no action; removing action does not authorize new work. ' +
       'For a direct Claim/Release chain, pass coordination.phase=active on work hops and terminal on the final delivery; terminal recipients may clean-stop without another @. ' +
-      'An unaddressed terminal transition whose id or bound subject conflicts with the incoming coordination fails with HTTP 409 before persistence. After an incoming terminal, any authored target is genuinely new active work even if the caller repeats a stale terminal label. ' +
+      'A terminal transition may close the incoming coordination or an active coordination started by this invocation; unproven or conflicting ids/subjects fail with HTTP 409 before persistence. After an incoming terminal, repeating that incoming lineage with an authored target starts new active work. ' +
       'A reply after terminal is a quiet courtesy ACK only when it has no explicit routing credential; line-start @mentions and structured targetCats always start a new active routing generation and remain subject to the normal loop-streak guard. ' +
       'For a local review result, route an ordinary @author message with localReviewVerdict + exact reviewedHeadSha + reviewSubjectRef + acceptedSourceRef + acceptedRevision + clientMessageId. This durable fact needs no action lease, coordination generation, replacement, or issuer route. Public prose is never parsed. ' +
       'Governed lease work alone uses existing_standing + groundingEvidenceRef or returnToPredecessor. Ordinary Task handoff uses the current assignment revision; its original home, source, approvals and WIP remain canonical. ' +
@@ -3905,7 +3759,7 @@ export const callbackTools = [
       'GOTCHA: Requires threadId — use feat_index/list_threads plus thread truth to verify the exact owning thread; never guess a nearby thread. ' +
       'PAW-FEEL: The original [爪感差: ...] message is already collected. Cross-post only a marker-free sourceMessageId reference to a verified owner; if none exists, use cat_cafe_propose_thread (F128). A genuinely new authorization uses effectClass=assign_work plus proposedAction for Approval Hub review; the same already-authorized ordinary Task uses its native handoff and creates no second card. ' +
       'GOTCHA: For Claim/Release coordination, pass coordination.phase=active on Claim/work hops and terminal on Release. ' +
-      'An unaddressed terminal transition whose id or bound subject conflicts with the incoming coordination fails with HTTP 409 before persistence. Cross-thread routing credentials after an incoming terminal always name genuinely new active work. ' +
+      'A terminal transition may close the incoming coordination or an active coordination started by this invocation; unproven or conflicting ids/subjects fail with HTTP 409 before persistence. Repeating an incoming terminal lineage with cross-thread routing credentials starts new active work. ' +
       'For a local review result, route one ordinary @author cross-post with localReviewVerdict + exact reviewedHeadSha + reviewSubjectRef + acceptedSourceRef + acceptedRevision + clientMessageId. This durable fact needs no action lease, coordination generation, replacement, or issuer route; prose is never parsed. ' +
       'The server carries a stable id across active hops. Every cross-thread post supplies an explicit routing credential, so a line-start @mention or structured targetCats after terminal always starts a new active routing generation and remains subject to the normal loop-streak guard. ' +
       'If terminal reveals genuinely new work, start a new coordination with phase=active instead of ACKing the closed chain. ' +
@@ -3987,6 +3841,9 @@ export const callbackTools = [
     description:
       'Read a bounded list of durable tasks with optional threadId/catId/status/kind filters, or exact featureId matching canonical TaskItem.relatedFeatureId. ' +
       'Use when: resuming existing work and checking its current scope, status, authorization source or execution artifacts before asking the owner again; also for finding tasks, owners, blockers and feature work. ' +
+      'When resuming, reconcile Task status, saved why and closure evidence with the current request; done records an ended Task, not proof that every artifact is complete. ' +
+      'If the intended work or its authority remains unclear, clarify before writing: name the candidate works, or state the recorded result and the specific conflict and ask the one missing question. ' +
+      'Otherwise carry out the clearly authorized request through the existing Task lifecycle without asking again or silently reopening an ended Task. ' +
       'NOT for: creating or changing tasks (use cat_cafe_create_task or cat_cafe_update_task). ' +
       'Output: up to 50 tasks plus totalMatched/truncated; feature-filtered reads also return a content-free queryRef for owner verification. ' +
       'GOTCHA: overview why fields can be anchored; pass taskId to retrieve one task with its full untruncated why. Drill the original authorization and receipts when needed; discovery grants no new authority, and search summaries do not replace current Task truth.',
@@ -4469,112 +4326,12 @@ export const callbackTools = [
       ],
     },
   }),
-  defineCanonicalTool({
-    name: 'cat_cafe_propose_profile_update',
-    description:
-      'Propose an update to a profile layer — the "养熟循环" digest entry point (F231 KD-12/KD-18). ' +
-      'Supports primer (default, per-persona relationship), corpus (owner-wide shared facts), and capsule (a 1–300 character opening portrait). ' +
-      'Output: returns a proposalId, NOT a written file; the content is only written after operator approval (reject/expire = nothing changes). ' +
-      'Use when: the content is a durable fact about the authenticated person or this persona-operator relationship — personal context, preferred address, or a relationship-specific communication boundary. ' +
-      'Use targetLayer:corpus for owner-wide personal facts independent of persona relationship (birthday, background, preferences that all cats should know). ' +
-      'Use targetLayer:capsule to draft the short portrait visible in Memory → Profile; read layer:capsule first, keep supporting source coordinates in the rationale, and wait for the owner to confirm. Capsule content belongs only in private owner data, never repository defaults. ' +
-      'NOT for reusable judgments about what makes output, design, expression, architecture, or systems good (use cat_cafe_propose_taste), repeated operational/tool/process rules (use code-as-harness), or one-off context. ' +
-      'A correction, praise, or Magic Word does not choose the lane; semantic content does. ' +
-      'afterContent is the COMPLETE new content (whole-file replacement, not a diff) — include everything you want kept. ' +
-      'Use cat_cafe_read_profile first when preserving existing content matters. For names/roles, state the subject cat, current agreement and original proposal/response message coordinates separately; the registration source is not the original event. GOTCHA: shared-persona primers retain family continuity, but an old cat role is not a new cat identity. signalKind records proposal provenance; current profile takes effect only after owner approval.',
-    inputSchema: proposeProfileUpdateInputSchema,
-    handler: handleProposeProfileUpdate,
-    governance: {
-      implementationExport: 'handleProposeProfileUpdate',
-      resourceFamily: 'identity-proposal',
-      action: 'create',
-      authority: 'callback-owner',
-      risk: { level: 'write', openWorld: false },
-      runtimeProfiles: ['full'],
-    },
-  }),
-  personMemoryProposalToolset.tool,
-  proactiveMemoryAbstentionToolset.tool,
-  deferredPersonMemoryToolset.tool,
+
   ...deferredPersonMemoryToolset.lifecycleTools,
   ...personMemoryLifecycleToolset.tools,
   ...memoryCueToolset.tools,
-  // F260 Phase A: Entity registration proposal (operator approves via Hub, then entity enters registry)
-  defineTool({
-    name: 'cat_cafe_propose_entity',
-    description:
-      'Propose a workspace entity for the registry. Returns a proposalId — the entity is only registered ' +
-      'after the operator approves in the Approval Hub. ' +
-      'Use when: (1) responding to a registration nudge with pre-filled params; ' +
-      '(2) the operator explicitly requests entity registration; or ' +
-      '(3) the current turn verified a durable workspace name/handle/alias mapping and provenance identifies its source. ' +
-      'NOT for an unverified or bare proper name, bulk proper-noun extraction, or owner-private facts, relationships, or interactions ' +
-      '(use cat_cafe_propose_person_memory). Do not infer identity from spelling or silently write either lane. ' +
-      'GOTCHA: correcting a pending/private F276 card is not an Entity mutation; use cat_cafe_propose_person_memory with replacesProposalId, or withdraw the F276 proposal. ' +
-      'stance includes negative values: "rejected" marks terms the registry should explicitly NOT match, ' +
-      '"critique_target" marks entities under critique (e.g. architectural patterns being evaluated). ' +
-      'visibilityScope: only "workspace" accepted (KD-7 gate — private scope deferred until resolver supports visibility filtering).',
-    inputSchema: proposeEntityInputSchema,
-    handler: handleProposeEntity,
-    governance: {
-      implementationExport: 'handleProposeEntity',
-      resourceFamily: 'identity-proposal',
-      action: 'create',
-      authority: 'callback-owner',
-      risk: { level: 'write', openWorld: false },
-      runtimeProfiles: ['full'],
-    },
-  }),
   // F221 Phase B: Taste Capture Loop — cat proposes a taste vignette for operator approval
-  defineCanonicalTool({
-    name: 'cat_cafe_propose_taste',
-    description:
-      'Propose a taste vignette capturing a operator preference/aesthetic signal (F221 Taste Capture Loop). ' +
-      'Output: returns a proposalId; the vignette is only written after operator approval in the Approval Hub. ' +
-      'Use when: the content is a reusable judgment about what makes output, design, expression, architecture, or system behavior good or bad — including positive and negative taste signals. ' +
-      'NOT for durable personal facts or relationship-specific context (use cat_cafe_propose_profile_update), repeated operational/tool/process rules (use code-as-harness), or transient reactions. ' +
-      'A correction or praise does not choose the lane; semantic content does. ' +
-      'To challenge an existing Taste memory as unsupported, outdated, or not applicable here, pass target with the exact sourceAnchor, expectedRevision, reason, and suggestedPatch; that creates an attached owner approval instead of mutating canonical memory directly. ' +
-      'The 7 taste dimensions cover relationship-stance, cognitive-honesty, architecture-aesthetics, ' +
-      'visual-quality, authentic-expression, system-philosophy, and creative-craft. ' +
-      'GOTCHA: relationship-stance stores a reusable stance such as partner-not-tool, not a personal fact about the current operator. Preserve original language in quote — taste signals lose meaning when paraphrased.' +
-      ' Use optional takeaway for a one-sentence hypothesis of what {{coCreator.name}} prefers; approval covers that hypothesis with the quote and scene.',
-    inputSchema: proposeTasteInputSchema,
-    handler: handleProposeTaste,
-    governance: {
-      implementationExport: 'handleProposeTaste',
-      resourceFamily: 'identity-proposal',
-      action: 'create',
-      authority: 'callback-owner',
-      risk: { level: 'write', openWorld: false },
-      runtimeProfiles: ['full'],
-    },
-  }),
-  defineCanonicalTool({
-    name: 'cat_cafe_propose_event_memory_correction',
-    description:
-      'Propose a source-bound correction to an existing Event memory after using or inspecting it. ' +
-      'Returns a pending proposal for the owner; it never mutates the Event directly. ' +
-      'Use when the current Event summary is unsupported by its original source, outdated, or not applicable in the present context. ' +
-      'Pass the exact eventId and revision you read plus a bounded patch to interpretive fields. ' +
-      'NOT for creating a new Event, changing source coordinates/identity, or bypassing owner approval. ' +
-      'GOTCHA: a stale revision or unavailable original source is rejected; reread the Event instead of guessing.',
-    inputSchema: proposeEventMemoryCorrectionInputSchema,
-    handler: handleProposeEventMemoryCorrection,
-    governance: {
-      implementationExport: 'handleProposeEventMemoryCorrection',
-      resourceFamily: 'identity-proposal',
-      action: 'create',
-      authority: 'callback-owner',
-      risk: { level: 'write', openWorld: false },
-      runtimeProfiles: ['full'],
-      standaloneReason: {
-        disposition: 'accepted-boundary',
-        kind: 'resource-entry',
-        admissionRef: 'architecture-cell:memory',
-      },
-    },
-  }),
+
   // ============ F155: Guide Engine ============
   defineTool({
     name: 'cat_cafe_update_guide_state',

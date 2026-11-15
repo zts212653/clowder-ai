@@ -23,12 +23,13 @@ try {
   if (!requestPath) throw new Error('Missing request file');
   // Machine-readable stdout is only the receipt. The shared audit writer still persists its events.
   process.env.LOG_LEVEL = 'silent';
-  const [{ createPlatformInputReader }, { platformAccountProjectRoot }, { executeOpenAIPlatformRequest }] =
-    await Promise.all([
+  const [{ createPlatformInputReader }, { platformAccountProjectRoot }, { executePlatformRequest }] = await Promise.all(
+    [
       import('../packages/api/dist/domains/services/openai-platform/input-files.js'),
       import('../packages/api/dist/config/platform-authentication.js'),
       import('../packages/api/dist/domains/services/openai-platform/request.js'),
-    ]);
+    ],
+  );
   const projectRoot = platformAccountProjectRoot();
   const reader = createPlatformInputReader({ projectRoot, fileRoot: dirname(resolve(requestPath)), credentials: [] });
   const input = JSON.parse(reader.read(resolve(requestPath)).toString('utf8'));
@@ -37,7 +38,7 @@ try {
   process.once('SIGINT', cancel);
   process.once('SIGTERM', cancel);
   try {
-    const receipt = await executeOpenAIPlatformRequest(
+    const receipt = await executePlatformRequest(
       {
         projectRoot,
         fileRoot: resolve(flags.get('--file-root') ?? dirname(resolve(requestPath))),
@@ -69,7 +70,7 @@ try {
       error: sendRef
         ? 'Platform request could not return a receipt; inspect the callId audit before repeating a potentially charged request'
         : error?.code === 'platform_account_unavailable'
-          ? 'Selected OpenAI Platform API key account is unavailable; check the Hub account configuration. No request was sent.'
+          ? `${error.message}. No request was sent.`
           : `Request input, installation or output admission failed; no request was sent. Usage: ${usage}`,
     }),
   );

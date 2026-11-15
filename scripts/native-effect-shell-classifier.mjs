@@ -45,13 +45,13 @@ export const SHELL_EFFECT_PRIORITY = new Map([
   ['auth_mutation', 9],
 ]);
 
-export function classifyShellSegment(raw) {
+export function classifyShellSegment(raw, { builtinContext = true } = {}) {
   const command = stripHarmlessRedirections(stripShellComments(raw));
   if (redisEffect(command) === 'service_mutation') return 'service_mutation';
   if (isUnsafeDateOperation(command)) return 'service_mutation';
   const httpEffect = classifyHttpOperation(command);
   if (httpEffect) return httpEffect;
-  const execution = executedInvocations(command);
+  const execution = executedInvocations(command, { builtinContext });
   const invocations = execution.pipelines.flat();
   const authEffect = codexAuthenticationEffect(invocations);
   if (authEffect === 'auth_mutation') return authEffect;
@@ -69,7 +69,13 @@ export function classifyShellSegment(raw) {
   if (isWriteOperation(command)) return 'write';
   if (invocations.some(({ name, operands }) => name === 'find' && findExecutedCommands(operands).length))
     return 'unknown';
-  if (execution.complete && (authEffect === 'read' || isReadOperation(command))) return 'read';
+  if (
+    execution.complete &&
+    (authEffect === 'read' ||
+      (invocations.length > 0 && invocations.every((call) => call.lookupOnly)) ||
+      isReadOperation(command))
+  )
+    return 'read';
   return 'unknown';
 }
 
@@ -173,7 +179,7 @@ function provenGitData(call) {
 
 function provenDataCall(call) {
   if (call.unprovedCodeEvidence?.length) return false;
-  return call.delegated || namedDataCall(call) || provenGitData(call);
+  return call.lookupOnly || call.delegated || namedDataCall(call) || provenGitData(call);
 }
 
 /** Evidence that may still be executed; classified data roles never become shell source. */

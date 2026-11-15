@@ -347,16 +347,17 @@
       "id": "exempt:infrastructure/harness-eval/domain/eval-domain-daily.ts",
       "owner": "packages/api/src/infrastructure/harness-eval/domain/eval-domain-daily.ts",
       "state": "exempt",
-      "reason": "Scheduled effect-quality evaluation; not recovery of pending work.",
+      "reason": "Retired automatic evaluation scheduler identities; no work dispatch or recovery of pending work.",
       "sites": [
-        "packages/api/src/infrastructure/harness-eval/domain/eval-domain-daily.ts#createEvalDomainSpec.trigger:cron"
+        "packages/api/src/infrastructure/harness-eval/domain/eval-domain-daily.ts#createEvalDomainDailySpec.trigger:cron",
+        "packages/api/src/infrastructure/harness-eval/domain/eval-domain-daily.ts#createEvalDomainWeeklySpec.trigger:cron"
       ]
     },
     {
       "id": "exempt:infrastructure/harness-eval/domain/eval-domain-nday.ts",
       "owner": "packages/api/src/infrastructure/harness-eval/domain/eval-domain-nday.ts",
       "state": "exempt",
-      "reason": "Scheduled effect-quality evaluation; not recovery of pending work.",
+      "reason": "Retired automatic evaluation scheduler identity; no work dispatch or recovery of pending work.",
       "sites": [
         "packages/api/src/infrastructure/harness-eval/domain/eval-domain-nday.ts#createEvalDomainNDaySpec.trigger:cron"
       ]
@@ -383,7 +384,7 @@
       "id": "exempt:infrastructure/harness-eval/reeval-closure-task-spec.ts",
       "owner": "packages/api/src/infrastructure/harness-eval/reeval-closure-task-spec.ts",
       "state": "exempt",
-      "reason": "Eval verdict closure reconciliation is explicitly owned by harness-eval outside #1843.",
+      "reason": "Retired automatic closure scheduler identity; retained lifecycle APIs remain owned by harness-eval.",
       "sites": [
         "packages/api/src/infrastructure/harness-eval/reeval-closure-task-spec.ts#createReevalClosureTaskSpec.trigger:interval"
       ]

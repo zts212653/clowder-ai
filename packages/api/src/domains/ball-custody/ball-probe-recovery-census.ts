@@ -4,7 +4,7 @@ import type { RedisClient } from '@cat-cafe/shared/utils';
 import { BallCustodyKeys } from './ball-custody-keys.js';
 import { BallProbeRecoveryConflict } from './ball-probe-recovery-backend.js';
 
-const COMPLETE = 'ballcustody:recovery:census:v1';
+const COMPLETE = 'ballcustody:recovery:census:v2';
 const CHECKPOINT = `
 if (redis.call('GET', KEYS[1]) or '') ~= ARGV[1] then return 0 end
 redis.call('SET', KEYS[1], ARGV[2]); return 1`;

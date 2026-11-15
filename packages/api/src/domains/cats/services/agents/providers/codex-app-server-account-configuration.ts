@@ -38,6 +38,7 @@ export function bindCodexAccountConfiguration(
         authMode: env.CODEX_AUTH_MODE === 'api_key' ? 'api_key' : env.CODEX_AUTH_MODE === 'auto' ? 'auto' : 'oauth',
         sqliteHome: env.CODEX_SQLITE_HOME ?? '',
         cwd: options.cwd ?? process.cwd(),
+        ...(env.CODEX_AUTH_MODE === 'api_key' && env.CODEX_API_KEY ? { apiKey: env.CODEX_API_KEY } : {}),
         ...(env.CODEX_CAT_EXPECTED_USER_ID && env.CODEX_CAT_EXPECTED_WORKSPACE_ID
           ? {
               credentialHome: env.CODEX_CAT_EXPECTED_CREDENTIAL_HOME ?? '',

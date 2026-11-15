@@ -1,15 +1,13 @@
 import { randomUUID } from 'node:crypto';
 import { mkdir, rename, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { configuredCredentialValues } from '@cat-cafe/mcp-server/dist/secret-runtime.js';
-import { resolveOpenAIPlatformAccount } from '../../../config/account-resolver.js';
-import { assertPlatformAccountDestination, platformAccountBaseUrl } from '../../../config/platform-authentication.js';
 import { getDefaultUploadDir } from '../../../utils/upload-paths.js';
 import { EventAuditLog } from '../../cats/services/orchestration/EventAuditLog.js';
 import { platformHttpTransport } from './http-transport.js';
 import { assertNoRequestCredential } from './input-files.js';
+import { resolvePlatformTarget } from './platform-target.js';
 import { buildPlatformRequestBody } from './request-body.js';
-import { type PlatformRequestReceipt, parsePlatformRequest } from './request-contract.js';
+import { type PlatformRequestReceipt, parsePlatformRequest, platformPathModel } from './request-contract.js';
 import { abortable, readPlatformUsage, savePlatformResponse } from './response-file.js';
 
 export interface PlatformRequestOptions {
@@ -22,42 +20,23 @@ export interface PlatformRequestOptions {
   onSend?: (ref: Pick<PlatformRequestReceipt, 'callId' | 'receiptFile'>) => void;
 }
 
-function accountForRequest(projectRoot: string, accountRef: string) {
-  try {
-    const profile = resolveOpenAIPlatformAccount(projectRoot, accountRef);
-    if (!profile?.apiKey?.trim() || /[\r\n\s]/u.test(profile.apiKey)) throw new Error('unavailable');
-    return { ...profile, apiKey: profile.apiKey };
-  } catch {
-    throw Object.assign(
-      new Error('Selected OpenAI Platform API key account is unavailable; check the Hub account configuration'),
-      {
-        code: 'platform_account_unavailable',
-      },
-    );
-  }
-}
-
 /** Server-side full HTTP requests. No model list or provider parameter rewriting. No paid retries. */
-export async function executeOpenAIPlatformRequest(
+export async function executePlatformRequest(
   options: PlatformRequestOptions,
   value: unknown,
 ): Promise<PlatformRequestReceipt> {
   const input = parsePlatformRequest(value);
-  const profile = accountForRequest(options.projectRoot, input.accountRef);
-  const credentials = [...new Set([profile.apiKey, ...configuredCredentialValues()])];
-  const base = platformAccountBaseUrl(profile, 'openai');
-  const url = new URL(base.href);
-  const requested = new URL(input.request.path, 'https://api.openai.com');
-  url.pathname = base.pathname.replace(/\/+$/, '').replace(/\/v1$/, '') + requested.pathname;
-  url.search = requested.search;
-  assertPlatformAccountDestination(profile, 'openai', url.href);
-  assertNoRequestCredential(url.href + input.accountRef, credentials);
+  const signal = AbortSignal.any([...(options.signal ? [options.signal] : []), AbortSignal.timeout(input.timeoutMs)]);
+  const send = options.fetch ?? platformHttpTransport.fetch;
+  const target = await resolvePlatformTarget(options.projectRoot, input, { fetch: send, signal });
+  const { provider } = target;
+  const credentials = [...new Set(target.credentials)];
+  assertNoRequestCredential(target.url + input.accountRef, credentials);
   const built = buildPlatformRequestBody(input, {
     projectRoot: options.projectRoot,
     fileRoot: options.fileRoot,
     credentials,
   });
-  const signal = AbortSignal.any([...(options.signal ? [options.signal] : []), AbortSignal.timeout(input.timeoutMs)]);
   signal.throwIfAborted();
   const callId = randomUUID();
   const directory = join(
@@ -71,10 +50,10 @@ export async function executeOpenAIPlatformRequest(
   const receipt: PlatformRequestReceipt = {
     callId,
     accountRef: input.accountRef,
-    provider: 'openai',
+    provider,
     method: input.request.method,
     path: input.request.path,
-    model: built.model,
+    model: platformPathModel(provider, input.request.path) ?? built.model,
     status: 'unconfirmed',
     startedAt,
     durationMs: 0,
@@ -94,19 +73,25 @@ export async function executeOpenAIPlatformRequest(
   // Admission is durable before spending. This log never stores prompts, headers or credentials.
   await audit.append({
     type: 'platform.request.started',
-    data: { callId, accountRef: receipt.accountRef, method: receipt.method, path: receipt.path, model: receipt.model },
+    data: {
+      callId,
+      accountRef: receipt.accountRef,
+      provider,
+      method: receipt.method,
+      path: receipt.path,
+      model: receipt.model,
+    },
   });
   const began = Date.now();
   const responsePath = join(directory, 'response.bin');
   try {
     signal.throwIfAborted();
-    // Revalidate the actual URL, immediately before the only send.
-    assertPlatformAccountDestination(profile, 'openai', url.href);
-    built.headers.set('authorization', `Bearer ${profile.apiKey}`);
+    // Revalidate the actual URL and add host-owned authentication, immediately before the only send.
+    target.authenticate(built.headers);
     options.onSend?.({ callId, receiptFile: receipt.receiptFile });
     const response = await abortable(
       signal,
-      (options.fetch ?? platformHttpTransport.fetch)(url.href, {
+      send(target.url, {
         method: input.request.method,
         redirect: 'error',
         signal,

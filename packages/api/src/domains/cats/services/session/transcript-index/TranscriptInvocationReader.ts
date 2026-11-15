@@ -48,7 +48,9 @@ export class TranscriptInvocationReader {
     const inputs: SessionIndexInput[] = [];
     for (const session of sessions) {
       signal?.throwIfAborted();
-      const includeLive = session.status !== 'sealed';
+      // Session rollover seals metadata atomically; transcript publication is a separate owner boundary.
+      const includeLive =
+        session.status !== 'sealed' || !(await this.reader.hasTranscript(session.id, session.threadId, session.catId));
       const snapshot =
         includeLive && this.writer
           ? await this.writer.readBufferedSnapshot({
@@ -162,7 +164,7 @@ export class TranscriptInvocationReader {
     signal?: AbortSignal,
   ): Promise<InvocationReadPage> {
     signal?.throwIfAborted();
-    if (session.status === 'sealed') {
+    if (session.status === 'sealed' && (await this.reader.hasTranscript(session.id, session.threadId, session.catId))) {
       return this.reader.readEvents(
         session.id,
         session.threadId,
@@ -175,6 +177,22 @@ export class TranscriptInvocationReader {
     const materialized = this.materializePages(result, snapshots).get(session.id);
     if (!materialized) throw new Error('Transcript index omitted the requested session');
     return materialized;
+  }
+
+  /** Bulk/full consumers keep row limits without inheriting the interactive Raw byte bound. */
+  async readTranscriptEvents(
+    session: IndexedSession,
+    page: { cursor?: number; limit?: number } = {},
+    signal?: AbortSignal,
+  ): Promise<InvocationReadPage> {
+    const { result, snapshots } = await this.read([session], { kind: 'transcriptEvents', ...page }, signal);
+    const materialized = this.materializePages(result, snapshots).get(session.id);
+    if (!materialized) throw new Error('Transcript index omitted the requested session');
+    return materialized;
+  }
+
+  async readAllEvents(session: IndexedSession, signal?: AbortSignal): Promise<TranscriptEvent[]> {
+    return (await this.readTranscriptEvents(session, {}, signal)).events;
   }
 
   private materializePages(

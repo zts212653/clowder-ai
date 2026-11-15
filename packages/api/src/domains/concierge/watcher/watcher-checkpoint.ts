@@ -236,6 +236,7 @@ export async function recoverWatcherAttempt(
   client: CodexAppServerNativeRpcClient,
   allowRetry = true,
   retryWindow?: WatcherWindow,
+  terminalReason = 'watcher_checkpoint_retry_exhausted',
 ): Promise<WatcherSessionState> {
   if (!state.attempt || !session.cliSessionId) throw new Error('watcher_recovery_binding_missing');
   if (watcherBudgetFailure(state.attempt.failure)) {
@@ -327,7 +328,7 @@ export async function recoverWatcherAttempt(
     await owners.executions.transitionTerminal(attempt.invocationId, {
       status: 'failed',
       endedAt: Date.now(),
-      terminalReason: 'watcher_checkpoint_retry_exhausted',
+      terminalReason,
       providerTeardownAt: Date.now(),
     });
     await owners.executions.markResponseSettled(attempt.invocationId, {

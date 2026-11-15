@@ -10,10 +10,11 @@ import {
   initializeVectorBackend,
   loadLegacyEmbeddingService,
   prepareLifecycleBindings,
+  type VectorBackendInitializer,
   VectorBackendUnavailableError,
 } from './embedding-lifecycle-backend.js';
 import { IndexBuilder } from './IndexBuilder.js';
-import type { EmbedConfig, EmbedModelInfo, IEmbeddingService } from './interfaces.js';
+import type { EmbedConfig, IEmbeddingService } from './interfaces.js';
 import type { VectorBackend } from './open-vector-generation.js';
 import { PassageVectorStore } from './PassageVectorStore.js';
 import type { ShadowBuildOptions } from './ShadowVectorGenerationBuilder.js';
@@ -42,7 +43,7 @@ export interface EmbeddingActivationResult {
 
 interface MemoryEmbeddingLifecycleOptions {
   createEmbeddingService?: (config: EmbedConfig) => IEmbeddingService;
-  initializeVectorBackend?: (store: SqliteEvidenceStore, dim: number, model?: EmbedModelInfo) => Promise<VectorBackend>;
+  initializeVectorBackend?: VectorBackendInitializer;
   getDeployment?: () => EmbeddingDeployment;
   requireLegacyConsumer?: boolean;
   getDependentStores?: () => Iterable<SqliteEvidenceStore>;
@@ -60,6 +61,7 @@ export class MemoryEmbeddingLifecycle {
   private vectorStore: VectorStore | undefined;
   private passageVectorStore: PassageVectorStore | undefined;
   private activation: Promise<EmbeddingActivationResult> | undefined;
+  private activationController?: AbortController;
   private catchUp: Promise<{ docsEmbedded: number; durationMs: number }> | undefined;
   private recoveryTimer: ReturnType<typeof setTimeout> | undefined;
   private generation = 0;
@@ -73,11 +75,7 @@ export class MemoryEmbeddingLifecycle {
   private readonly getDeployment: () => EmbeddingDeployment;
   private readonly requireLegacyConsumer: boolean;
   private readonly createEmbeddingService: (config: EmbedConfig) => IEmbeddingService;
-  private readonly initializeVectorBackend: (
-    store: SqliteEvidenceStore,
-    dim: number,
-    model?: EmbedModelInfo,
-  ) => Promise<VectorBackend>;
+  private readonly initializeVectorBackend: VectorBackendInitializer;
   private readonly getDependentStores: () => Iterable<SqliteEvidenceStore>;
 
   constructor(
@@ -112,14 +110,24 @@ export class MemoryEmbeddingLifecycle {
     if (config.generationId === 'g1') this.legacyConsumerService?.pinLoadedEndpoint?.();
     const key = JSON.stringify([config, Boolean(options.rebuildLegacyModel)]);
     if (this.activation && this.activationKey === key) return this.activation;
+    this.activationController?.abort(new DOMException('Activation replaced', 'AbortError'));
+    const controller = new AbortController();
+    this.activationController = controller;
     this.stopShadowBuild();
     clearTimeout(this.recoveryTimer);
     this.recoveryTimer = undefined;
     const generation = ++this.generation;
     this.activationKey = key;
     if (!this.service?.isReady()) this.status = 'activating';
-    const activation = this.activateOnce(generation, config, Boolean(options.rebuildLegacyModel)).finally(() => {
+    const activation = this.activateOnce(
+      generation,
+      config,
+      Boolean(options.rebuildLegacyModel),
+      controller.signal,
+    ).finally(() => {
       if (this.activation === activation) this.activation = undefined;
+      if (this.activationController === controller) this.activationController = undefined;
+      controller.abort(new DOMException('Activation scope closed', 'AbortError'));
     });
     this.activation = activation;
     return activation;
@@ -131,6 +139,7 @@ export class MemoryEmbeddingLifecycle {
         ? this.legacyConsumerService
         : undefined;
     this.stopShadowBuild();
+    this.activationController?.abort(new DOMException('Activation stopped', 'AbortError'));
     this.generation++;
     this.activation = undefined;
     this.catchUp = undefined;
@@ -235,6 +244,9 @@ export class MemoryEmbeddingLifecycle {
 
   catchUpAfterReady(): Promise<{ docsEmbedded: number; durationMs: number }> {
     if (this.catchUp) return this.catchUp;
+    // Lexical index/publication completion can arrive while a cohort recovery
+    // is paused. It owns no active geometry and must not cancel that retry.
+    if (this.status !== 'ready' || !this.service?.isReady()) return Promise.resolve({ docsEmbedded: 0, durationMs: 0 });
     clearTimeout(this.recoveryTimer);
     this.recoveryTimer = undefined;
     const catchUp = this.catchUpOnce(this.generation).finally(() => {
@@ -282,6 +294,7 @@ export class MemoryEmbeddingLifecycle {
     generation: number,
     config: EmbedConfig,
     rebuildLegacy: boolean,
+    signal: AbortSignal,
   ): Promise<EmbeddingActivationResult> {
     const id = config.generationId ?? 'g0';
     const service =
@@ -313,6 +326,7 @@ export class MemoryEmbeddingLifecycle {
       return this.snapshot(false);
     };
     if (!service.isReady()) return fail('service_not_ready');
+    let checkingCohort = false;
     try {
       if (id !== 'g0' && this.requireLegacyConsumer && !(await this.ensureLegacyConsumer(generation))) {
         if (!this.isCurrent(generation)) {
@@ -332,12 +346,15 @@ export class MemoryEmbeddingLifecycle {
         return fail('generation_not_ready');
       const stores = this.enabledStores();
       const coverageRequired = requiresCohortCoverage(stores, model);
+      checkingCohort = true;
+      const lifetime = { signal };
       const recovery = await inspectCohortRecovery(
         stores,
         model,
         rebuildLegacy,
         () => this.isCurrent(generation),
         coverageRequired,
+        lifetime,
       );
       if (!this.isCurrent(generation)) return this.snapshot(false);
       if (recovery === 'blocked') return fail('generation_not_ready');
@@ -357,7 +374,9 @@ export class MemoryEmbeddingLifecycle {
         const scope = startShadowGenerationWork(
           stores,
           service,
-          { deadlineAt: Date.now() + 15_000, maxBatches: 8, batchSize: 2 },
+          // A live G0 tail can outgrow sixteen sources per 30s retry despite a fast encoder.
+          // Use more of the same 15s owned window, retaining two-source batches and the G1 bound.
+          { ...lifetime, deadlineAt: Date.now() + 15_000, maxBatches: id === 'g0' ? 256 : 8, batchSize: 2 },
           currentCohort,
           false,
         );
@@ -385,6 +404,7 @@ export class MemoryEmbeddingLifecycle {
         () => this.isCurrent(generation),
         () => this.enabledStores(),
         coverageRequired,
+        lifetime,
       );
       if (!bindings) {
         if (service !== this.service) service.dispose();
@@ -407,7 +427,11 @@ export class MemoryEmbeddingLifecycle {
       this.reason = undefined;
       return this.snapshot(true);
     } catch (error) {
-      if (this.isCurrent(generation) && this.status === 'degraded')
+      if (!this.isCurrent(generation)) {
+        if (service !== this.service && ![...this.services.values()].includes(service)) service.dispose();
+        return this.snapshot(false);
+      }
+      if (this.isCurrent(generation) && (this.status === 'degraded' || checkingCohort))
         this.scheduleRecovery(generation, () =>
           this.activate(this.mode as ActiveEmbeddingRuntimeMode, {
             rebuildLegacyModel: rebuildLegacy ? config.embedModel : undefined,

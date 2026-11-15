@@ -53,7 +53,7 @@ triggers:
 1. **这条信息忘了以后，必须每轮付代价，还是任务出现时按需再读即可？** 跨压缩持续约束才进 L0；单轮反射进 staging；runtime 专属执行边界进对应 harness；任务方法进 skill；事实契约留 docs/code；可机械判定的交给 test/lint/guard。
 2. **价值缺口来自哪里，产物在做什么？** 区分私有/项目知识、公开但新近知识、持续变化的外部事实、模型行为缺口；再区分知识 payload、resolver/probe、治理边界、结果 verifier。只会自然过期的 payload / 行为代偿需要 keep/tune/sunset 信号；resolver、治理与 verifier 不因模型变强就自动退役。
 
-不要给全部 skill 建 expiry registry 或机械到期日。不确定效用且有明确 consumer 时，复用 F192 eval 的 keep/tune/sunset 闭环。
+不要给全部 skill 建 expiry registry 或机械到期日。不确定效用且有明确 consumer 时，按 eval-design 在原任务设计具体比较与采用判断；不要求 F192 注册、verdict 发布或自动复评。
 
 ## 开工前：先看范本再动手
 

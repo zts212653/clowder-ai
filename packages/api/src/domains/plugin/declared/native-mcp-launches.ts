@@ -190,6 +190,8 @@ export class NativeMcpLaunches {
       current.instance.activationState !== 'enabled' ||
       current.instance.lifecycleState !== 'installed' ||
       current.instance.configReadiness !== 'ready' ||
+      current.instance.runtimeState === 'crashed' ||
+      current.instance.runtimeState === 'stopped' ||
       current.packageRecord.packageState !== 'installed' ||
       current.instance.pluginId !== original.instance.pluginId ||
       current.instance.packageDigest !== original.instance.packageDigest ||

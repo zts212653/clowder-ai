@@ -146,6 +146,14 @@ describe('P1-1 R3: retry recovery — commitEnvelope failure, then successful re
     const messageStore = new MessageStore();
     const threadStore = new ThreadStore();
     const thread = await threadStore.create('user-1', 'Taste');
+    const origin = await messageStore.append({
+      userId: 'user-1',
+      threadId: thread.id,
+      from: { kind: 'user', userId: 'user-1' },
+      content: 'Taste source',
+      mentions: [],
+      timestamp: Date.now(),
+    });
     const tasteStore = new InMemoryTasteProposalStore();
 
     let commitCount = 0;
@@ -165,6 +173,7 @@ describe('P1-1 R3: retry recovery — commitEnvelope failure, then successful re
     app.addHook('preHandler', (request, _reply, done) => {
       request.callbackAuth = {
         invocationId: 'inv-taste-retry',
+        originTriggerMessageId: origin.id,
         callbackToken: 'tok',
         catId: 'opus',
         threadId: thread.id,
@@ -178,6 +187,7 @@ describe('P1-1 R3: retry recovery — commitEnvelope failure, then successful re
     await app.register(callbackProposeTasteRoutes, {
       registry: { ...registry, isLatest: async () => true },
       tasteProposalStore: tasteStore,
+      messageStore,
       socketManager: { emitToUser() {} },
       approvalIngress: ingress,
     });

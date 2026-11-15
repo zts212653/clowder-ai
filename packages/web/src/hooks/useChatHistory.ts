@@ -3,6 +3,7 @@
 import {
   type CliDiagnostics,
   mergeCodexStartupRecovery,
+  preserveInteractiveBlockStates,
   type ReplyPreview,
   timelineMessageKind,
 } from '@cat-cafe/shared';
@@ -56,6 +57,7 @@ import {
   type SavedScrollState,
   saveChatScrollState,
 } from '@/utils/chat-scroll-memory';
+import { type ChatUserScrollGesture, registerChatScrollOwner } from '@/utils/chat-scroll-owner';
 import { peekPendingCrossPostScroll, resolveCrossPostScrollTarget } from '@/utils/crosspost-scroll-target';
 import {
   loadThreadMessages as loadCachedMessages,
@@ -146,10 +148,7 @@ function bindReadingAbort<T>(receipt: Promise<T>, signal: AbortSignal | undefine
   return receipt.finally(() => signal.removeEventListener('abort', cancel));
 }
 
-export interface ChatUserScrollGesture {
-  scrollTo(top: number): boolean;
-  end(): void;
-}
+export type { ChatUserScrollGesture } from '@/utils/chat-scroll-owner';
 
 const taskCacheByThread = new Map<string, TaskItem[]>();
 // Sparse publication recovery must not move the ordinary older-page boundary.
@@ -413,7 +412,7 @@ function mergeRichPayload(
     seen.add(block.id);
     blocks.push(block);
   }
-  return { v: 1 as const, blocks };
+  return { v: 1 as const, blocks: preserveInteractiveBlockStates(blocks, fallback?.blocks ?? []) };
 }
 
 type RequiredMessageExtraFields = {
@@ -1829,6 +1828,7 @@ export function useChatHistory(
         // wait immediately without cancelling that shared fetch or its hydration.
         void fetchHistory(undefined, {
           replace: true,
+          afterCurrentGet: true,
           retryTimeoutWhile: () =>
             readingRefreshRef.current === operation &&
             generation === restoreGenerationRef.current &&
@@ -2985,6 +2985,11 @@ export function useChatHistory(
       ? fetchHistory(`${getMessageTimelineCursorTime(oldest)}:${oldest.id}`)
       : Promise.resolve();
   }, [threadId, fetchHistory]);
+
+  useLayoutEffect(() => {
+    const viewport = scrollContainerRef.current;
+    return viewport ? registerChatScrollOwner(viewport, beginUserScroll) : undefined;
+  }, [beginUserScroll]);
 
   return {
     captureReadingPosition,

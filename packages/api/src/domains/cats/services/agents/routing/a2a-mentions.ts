@@ -23,6 +23,7 @@ import {
   TOKEN_BOUNDARY_RE,
 } from '@cat-cafe/shared';
 import { isCatAvailable } from '../../../../../config/cat-config-loader.js';
+import { getCatRoutingHandles } from './cat-routing-handles.js';
 import { resolveCatTarget } from './cat-target-resolver.js';
 
 /** Max A2A chain depth, configurable via env (read at call time for hot-reload) */
@@ -66,22 +67,9 @@ export function analyzeA2AMentions(
   currentCatId?: CatId,
   plugins: readonly PluginMention[] = [],
 ): A2AMentionAnalysis {
-  // F32-a: read from catRegistry (.cat-cafe/cat-catalog.json)
-  const allConfigs = catRegistry.getAllConfigs();
-
   // F182 KD-10: include ALL cats (including disabled) so patterns participate in matching;
   // availability is checked at match-time via resolveCatTarget, not here.
-  const handles: MentionPatternEntry[] = [];
-  for (const [id, config] of Object.entries(allConfigs)) {
-    if (currentCatId && id === currentCatId) continue; // Filter self (skip when cross-thread)
-    for (const pattern of config.mentionPatterns) {
-      handles.push({ catId: id as CatId, pattern: pattern.toLowerCase() });
-    }
-  }
-
-  for (const plugin of plugins) {
-    if (plugin.id !== currentCatId) handles.push({ catId: plugin.id as CatId, pattern: `@${plugin.alias}` });
-  }
+  const handles = getCatRoutingHandles(plugins).filter(({ catId }) => catId !== currentCatId);
   const found: CatId[] = [];
   const seen = new Set<string>();
   const routing_warnings: CatRoutingError[] = [];

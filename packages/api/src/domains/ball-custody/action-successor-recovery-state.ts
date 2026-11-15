@@ -10,12 +10,6 @@ export interface ActionRecoveryFact {
   readonly disposition?: 'parked' | 'interrupted' | 'needs_attention';
   readonly reasonCode?: string;
   readonly claim?: { readonly token: string; readonly expiresAt: number };
-  readonly notification?: {
-    readonly key: string;
-    readonly reasonCode: string;
-    readonly attempts: number;
-    readonly deliveredAt?: number;
-  };
 }
 export interface ActionRecoverySnapshot {
   readonly lease: ActionSuccessorLease;
@@ -33,12 +27,6 @@ export interface ActionRecoveryPort {
     expectedClaim?: string,
   ): Promise<boolean>;
 }
-export type ActionRecoveryNotification = (input: {
-  lease: ActionSuccessorLease;
-  lane: ActionRecoveryLane;
-  key: string;
-  reasonCode: string;
-}) => Promise<'delivered' | 'owner_unavailable'>;
 export type ActionRecoveryOutcome =
   | { kind: 'waiting' }
   | { kind: 'settled' }
@@ -48,14 +36,6 @@ export type ActionRecoveryOutcome =
 
 export function initialActionRecovery(generation: number): ActionRecoveryFact {
   return { v: 1, generation, attempts: 0, nextAttemptAt: 0 };
-}
-export function actionRecoveryIncident(lease: ActionSuccessorLease, lane: ActionRecoveryLane, reason: string) {
-  const scope = ['identity_index_mismatch', 'malformed_recovery_fact'].includes(reason) ? 'owner' : lane;
-  return {
-    key: `action-recovery:${lease.leaseId}:${lease.generation}:${scope}:${reason}`,
-    reasonCode: reason,
-    attempts: 0,
-  };
 }
 function object(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -78,31 +58,22 @@ export function validActionRecovery(value: unknown, generation: number): value i
     (!object(value.claim) || typeof value.claim.token !== 'string' || !natural(value.claim.expiresAt))
   )
     return false;
-  const n = value.notification;
-  return (
-    n === undefined ||
-    (object(n) &&
-      typeof n.key === 'string' &&
-      typeof n.reasonCode === 'string' &&
-      natural(n.attempts) &&
-      (n.deliveredAt === undefined || natural(n.deliveredAt)))
-  );
+  return true;
 }
 export function planActionRecovery(
   current: ActionRecoveryFact,
   outcome: ActionRecoveryOutcome,
-  lease: ActionSuccessorLease,
-  lane: ActionRecoveryLane,
   now: number,
 ): ActionRecoveryFact {
-  const { claim: _claim, ...fact } = current;
+  const {
+    claim: _claim,
+    notification: _legacyNotification,
+    ...fact
+  } = current as ActionRecoveryFact & {
+    notification?: unknown;
+  };
   if (outcome.kind === 'stale') return { ...fact, nextAttemptAt: now + 30_000 };
-  if (outcome.kind === 'settled')
-    return {
-      ...fact,
-      nextAttemptAt:
-        fact.notification && fact.notification.deliveredAt === undefined && fact.notification.attempts < 5 ? now : null,
-    };
+  if (outcome.kind === 'settled') return { ...fact, nextAttemptAt: null };
   if (outcome.kind === 'waiting') return { ...fact, nextAttemptAt: now + 30_000 };
   const attempts = fact.attempts + (outcome.kind === 'retryable_error' ? 1 : 0);
   if (outcome.kind === 'permanent_error' || attempts >= 5)
@@ -111,8 +82,7 @@ export function planActionRecovery(
       attempts,
       disposition: outcome.kind === 'permanent_error' ? 'needs_attention' : 'parked',
       reasonCode: outcome.reason,
-      nextAttemptAt: now,
-      notification: fact.notification ?? actionRecoveryIncident(lease, lane, outcome.reason),
+      nextAttemptAt: null,
     };
   return { ...fact, attempts, nextAttemptAt: now + Math.min(300_000, 1000 * 2 ** attempts) };
 }

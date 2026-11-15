@@ -1,4 +1,4 @@
-import type Database from 'better-sqlite3';
+import Database from 'better-sqlite3';
 import * as sqliteVec from 'sqlite-vec';
 import { createSqliteReadDiagnostics } from '../../infrastructure/sqlite-read-diagnostics.js';
 import { CatCafeScanner } from './CatCafeScanner.js';
@@ -18,8 +18,12 @@ import type { MemoryReadDiagnostic } from './memory-read-execution.js';
 import { describePassageVectorRead } from './native-vector-read-context.js';
 import { openVectorGeneration } from './open-vector-generation.js';
 import { projectEntityMentions } from './project-entity-mentions.js';
+import { reconcileVectorGenerationDatabase } from './reconcile-vector-generation.js';
 import { repackPassageVectorDatabase } from './repack-passage-vectors.js';
 import { lookupShadowRanking, SqliteEvidenceStore } from './SqliteEvidenceStore.js';
+import { readTastePullRecallRows } from './taste/taste-pull-recall-rows.js';
+import { readPendingVectorSources } from './vector-generation-pending.js';
+import { inspectVectorGeneration } from './vector-generation-readiness.js';
 
 let rpcSequence = 0;
 const pending = new Map<number, { resolve(value: Extract<ParentMessage, { type: 'embedding-result' }>): void }>();
@@ -69,6 +73,15 @@ async function execute(
     const scanner = job.scanner === 'cat-cafe' ? new CatCafeScanner(job.excludes) : new GenericRepoScanner();
     return job.singlePath ? scanner.parseSingle(job.singlePath, job.root) : scanner.discover(job.root, job.options);
   }
+  if (job.kind === 'taste-recall-read') {
+    const db = new Database(job.dbPath, { readonly: true, fileMustExist: true });
+    try {
+      started();
+      return readTastePullRecallRows(db);
+    } finally {
+      db.close();
+    }
+  }
   if (job.kind === 'checkpoint') {
     started();
     return checkpointMemoryDatabase(job.dbPath);
@@ -76,6 +89,10 @@ async function execute(
   if (job.kind === 'vector-repack') {
     started();
     return repackPassageVectorDatabase(job.dbPath, job.generationId);
+  }
+  if (job.kind === 'vector-generation-reconcile') {
+    started();
+    return reconcileVectorGenerationDatabase(job.dbPath, job.generationId);
   }
   const readJob = job.kind === 'message-search';
   if (readJob) report({ phase: 'database-initialization' });
@@ -105,6 +122,10 @@ async function execute(
       })(db);
     started();
     switch (job.kind) {
+      case 'vector-generation-read':
+        return job.operation === 'coverage'
+          ? inspectVectorGeneration(db, job.model, { allowBuilding: job.allowBuilding })
+          : readPendingVectorSources(db, job.model, job.limit);
       case 'search':
       case 'message-search': {
         for (const key of Object.keys(process.env))

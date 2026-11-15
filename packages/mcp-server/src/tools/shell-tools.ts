@@ -265,7 +265,7 @@ export async function handleShellExec(input: { commandLine: string; cwd?: string
       ...(shared
         ? {
             env: Object.fromEntries(
-              ['PATH', 'HOME', 'LANG', 'TMPDIR'].flatMap((name) =>
+              ['PATH', 'HOME', 'LANG', 'TMPDIR', 'TEMP', 'TMP'].flatMap((name) =>
                 process.env[name] ? [[name, process.env[name]!]] : [],
               ),
             ),

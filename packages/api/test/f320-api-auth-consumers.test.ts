@@ -62,6 +62,7 @@ for (const carrier of ['direct', 'pooled'] as const)
                 buildChildEnv(launch.env, { inheritParentEnv: launch.inheritParentEnv }),
                 'selected-key-fixture',
                 selectedRouting,
+                { official: !custom },
               );
               assertSelectedApiProvider(launch, baseUrl);
               assert.notEqual(launch.env.CODEX_HOME, descriptor.credentialHome);
@@ -112,6 +113,7 @@ for (const carrier of ['direct', 'pooled'] as const)
                     buildChildEnv(options.env, { inheritParentEnv: options.inheritParentEnv }),
                     'selected-key-fixture',
                     selectedRouting,
+                    { official: !custom },
                   );
                   assertSelectedApiProvider(options, baseUrl);
                   assert.notEqual(options.env.CODEX_HOME, descriptor.credentialHome);

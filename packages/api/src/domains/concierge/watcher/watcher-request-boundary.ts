@@ -17,6 +17,7 @@ export async function createWatcherRequestBoundary(
   upstreamBaseUrl: string,
   input: {
     signal: AbortSignal;
+    controlOnly?: boolean;
     transportEnv?: Readonly<Record<string, string>>;
     observed?(row: WatcherRequestObservation): void | Promise<void>;
     completed?(row: WatcherRequestObservation, usage: WatcherUsage): void | Promise<void>;
@@ -38,6 +39,7 @@ export async function createWatcherRequestBoundary(
   };
   const server = createServer(async (request, reply) => {
     try {
+      if (input.controlOnly) reject('watcher_retirement_model_forbidden');
       const requestUrl = new URL(request.url ?? '/', 'http://127.0.0.1');
       if (
         request.method !== 'POST' ||

@@ -11,7 +11,7 @@ import { MessageStore } from '../../dist/domains/cats/services/stores/ports/Mess
 import { queueRoutes } from '../../dist/routes/queue.js';
 
 /** Real HTTP route and lifecycle stores; only the unavailable owner and failure boundary are controlled. */
-export async function readRepairFixture(t, turnExecutionStore = new InMemoryTurnExecutionStore()) {
+export async function readRepairFixture(t, turnExecutionStore = new InMemoryTurnExecutionStore(), routeOptions = {}) {
   let now = 1_800_000_000_000;
   t.mock.method(Date, 'now', () => now);
   const threadId = 'retry-thread';
@@ -128,6 +128,7 @@ export async function readRepairFixture(t, turnExecutionStore = new InMemoryTurn
     socketManager,
     cliExecutionOwnerService: { listLive: async () => ({ owners: [...h.owners], complete: h.ownerComplete }) },
     agentSessionMutex: { forceReleaseByScope: () => ({ releasedHolders: 0, rejectedWaiters: 0, catIds: [] }) },
+    ...routeOptions,
   });
   await app.ready();
   t.after(() => app.close());

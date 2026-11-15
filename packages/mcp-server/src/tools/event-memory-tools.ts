@@ -8,6 +8,7 @@
  * cat_cafe_workspace_navigate (design gate).
  */
 
+import { randomUUID } from 'node:crypto';
 import { deploymentDefaults } from '@cat-cafe/shared';
 import { z } from 'zod';
 import { defineMcpCanonicalFactory, defineMcpMigrationFactory } from '../tool-governance-migration.js';
@@ -124,6 +125,7 @@ export async function handleListEvents(input: ListEventsInput): Promise<ToolResu
     const value = input[key];
     if (value !== undefined) params[key] = String(value);
   }
+  params.readRequestId = `event_read_${randomUUID()}`;
   return callbackGet('/api/memory/events', params, { agentKeyCatId: input.agentKeyCatId });
 }
 
@@ -137,12 +139,13 @@ function handleEventDetail(input: ListEventsInput): Promise<ToolResult> | ToolRe
   if (input.charOffset !== undefined && !input.revision) {
     return errorResult('revision is required with charOffset so slices cannot mix Event versions.');
   }
-  const query: Record<string, string> | undefined =
+  const query: Record<string, string> =
     input.charOffset === undefined
       ? input.revision
         ? { revision: input.revision }
-        : undefined
+        : {}
       : { charOffset: String(input.charOffset), revision: input.revision ?? '' };
+  query.readRequestId = `event_read_${randomUUID()}`;
   return callbackGet(`/api/memory/events/${encodeURIComponent(input.eventId)}`, query, {
     agentKeyCatId: input.agentKeyCatId,
   });

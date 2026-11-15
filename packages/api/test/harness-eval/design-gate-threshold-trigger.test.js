@@ -105,7 +105,7 @@ describe('F303 design-gate threshold trigger', () => {
     }
   });
 
-  it('dispatches the 1→20 threshold crossing once and dedupes replay', async () => {
+  it('keeps threshold crossings and replays retired', async () => {
     const state = setup(transition(1, 20));
     state.input.deliver = state.deliver;
     state.input.invokeTrigger = state.invokeTrigger;
@@ -113,11 +113,9 @@ describe('F303 design-gate threshold trigger', () => {
     const first = await observeDesignGateThresholdTrigger(state.input);
     const replay = await observeDesignGateThresholdTrigger(state.input);
 
-    assert.equal(first.outcome, 'dispatched');
-    assert.equal(replay.outcome, 'deduped');
-    assert.equal(state.deliver.mock.callCount(), 1);
-    assert.equal(state.deliver.mock.callCount(), 1);
-    assert.match(state.deliver.mock.calls[0].arguments[0].content, /Trigger channel: threshold_event/);
+    assert.equal(first.outcome, 'automation_retired');
+    assert.equal(replay.outcome, 'automation_retired');
+    assert.equal(state.deliver.mock.callCount(), 0);
   });
 
   it('records 20→21 as non-crossing without invoking', async () => {
@@ -127,7 +125,7 @@ describe('F303 design-gate threshold trigger', () => {
 
     const result = await observeDesignGateThresholdTrigger(state.input);
 
-    assert.equal(result.outcome, 'not_crossing');
+    assert.equal(result.outcome, 'automation_retired');
     assert.equal(state.deliver.mock.callCount(), 0);
   });
 
@@ -153,7 +151,7 @@ describe('F303 design-gate threshold trigger', () => {
 
     const result = await observeDesignGateThresholdTrigger(state.input);
 
-    assert.equal(result.outcome, 'unavailable');
+    assert.equal(result.outcome, 'automation_retired');
     assert.equal(state.deliver.mock.callCount(), 0);
   });
 

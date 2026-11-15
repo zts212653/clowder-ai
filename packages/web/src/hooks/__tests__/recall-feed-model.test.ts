@@ -98,6 +98,6 @@ describe('F321 reply attribution', () => {
     expect(recallEventResultLabel(event({ cueStatus }))).toBe(label);
   });
   it('does not replace recorded failure with a zero or stale count', () => {
-    expect(recallEventResultLabel(event({ resultStatus: 'error', resultCount: 12 }))).toBe('召回失败');
+    expect(recallEventResultLabel(event({ resultStatus: 'error', resultCount: 12 }))).toBe('检索失败');
   });
 });

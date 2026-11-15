@@ -129,7 +129,7 @@ test(
           child.exitCode !== null ? Promise.resolve() : new Promise((resolve) => child.once('exit', resolve)),
         ),
       );
-      fs.rmSync(base, { recursive: true, force: true });
+      await fs.promises.rm(base, { recursive: true, force: true, maxRetries: 2, retryDelay: 100 });
     }
   },
 );

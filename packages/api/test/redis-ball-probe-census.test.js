@@ -6,12 +6,14 @@ import { BallCustodyProbeScheduler } from '../dist/domains/ball-custody/BallCust
 import { RedisBallCustodyProjectionStore } from '../dist/domains/ball-custody/BallCustodyProjectionStore.js';
 import { createInitialProjection } from '../dist/domains/ball-custody/ball-custody-projection-reducer.js';
 import { BallProbeRecoveryCensusPending } from '../dist/domains/ball-custody/ball-probe-recovery-backend.js';
+import { TaskRecoveryReadModel } from '../dist/domains/ball-custody/TaskRecoveryReadModel.js';
 import { RecoveryDeadlineExceeded, withinRecoveryDeadline } from '../dist/infrastructure/recovery/recovery-deadline.js';
 import { ownedRedisFixture } from './helpers/owned-redis-fixture.js';
 import { auditRecoveryRedis } from './helpers/recovery-store-audit.js';
 
 const fixture = ownedRedisFixture('1843-ball-probe-census');
-const completeKey = 'ballcustody:recovery:census:v1';
+const legacyCompleteKey = 'ballcustody:recovery:census:v1';
+const completeKey = 'ballcustody:recovery:census:v2';
 
 async function legacyProjections(redis, count) {
   // This journey restarts the API owner while its exclusively owned Redis stays alive.
@@ -97,6 +99,98 @@ test('cold periodic census is bounded, reports incomplete readiness and resumes 
   } finally {
     audit.stop();
   }
+});
+
+test('ordinary upgrade retires legacy notice facts even when the old census was already complete', async () => {
+  const redis = fixture.client(`notice-retirement-${randomUUID()}:`);
+  const subject = 'ball:task:legacy-notice';
+  const malformedSubject = 'ball:task:legacy-malformed';
+  const invalidProjectionSubject = 'ball:task:invalid-projection';
+  const pending = {
+    key: 'pending-notice',
+    lane: 'probe',
+    scope: `${subject}:g1`,
+    owner: { taskId: 'legacy-notice', userId: 'user', threadId: 'home' },
+    reasonCode: 'legacy_pending',
+    nextAt: 1000,
+    failures: 2,
+    state: 'pending',
+  };
+  const delivered = { ...pending, key: 'delivered-notice', reasonCode: 'legacy_delivered', state: 'delivered' };
+  await redis.set(legacyCompleteKey, '1');
+  await redis.set(
+    `ballcustody:projection:${subject}`,
+    JSON.stringify({ ...createInitialProjection(subject, 1), state: 'blocked', blockedSinceAt: 1 }),
+  );
+  await redis.sadd('ballcustody:projections:index', subject);
+  await redis.hset(
+    `ballcustody:events:meta:${subject}`,
+    'probeRecovery',
+    JSON.stringify({
+      v: 1,
+      subjectKey: subject,
+      generation: 1,
+      notices: { [pending.key]: pending, [delivered.key]: delivered },
+    }),
+  );
+  const malformedRaw = JSON.stringify({ v: 1, subjectKey: malformedSubject, notices: { broken: true } });
+  await redis.hset(`ballcustody:events:meta:${malformedSubject}`, 'probeRecovery', malformedRaw);
+  const invalidProjectionRaw = JSON.stringify({ subjectKey: invalidProjectionSubject, state: 42 });
+  await redis.set(`ballcustody:projection:${invalidProjectionSubject}`, invalidProjectionRaw);
+  await redis.sadd('ballcustody:projections:index', invalidProjectionSubject);
+  await redis.zadd('ballcustody:recovery:notice:due', 1000, subject, 1000, malformedSubject);
+
+  const store = new RedisBallCustodyProjectionStore(redis);
+  await store.initializeRecovery();
+
+  assert.equal(await redis.get(legacyCompleteKey), '1', 'the upgrade does not rewrite the old owner marker');
+  assert.equal(await redis.get(completeKey), '1', 'the new retirement census completes durably');
+  assert.equal(await redis.zcard('ballcustody:recovery:notice:due'), 0);
+  assert.deepEqual(await store.listRecoveryNotices(100, 1_000_000), []);
+  const facts = await store.getRecoveryFacts(subject);
+  assert.deepEqual(facts.notices, {});
+  assert.equal(
+    JSON.parse(await redis.hget(`ballcustody:events:meta:${subject}`, `notice:${pending.key}`)).state,
+    'pending',
+  );
+  assert.equal(
+    JSON.parse(await redis.hget(`ballcustody:events:meta:${subject}`, `notice:${delivered.key}`)).state,
+    'delivered',
+  );
+  const malformed = await store.getRecoveryFacts(malformedSubject);
+  assert.equal(malformed.disposition, 'needs_attention');
+  assert.equal(malformed.reasonCode, 'invalid_recovery_metadata');
+  assert.equal(malformed.originalRaw, malformedRaw);
+  assert.deepEqual(malformed.notices, {});
+  const invalidProjection = await store.getRecoveryFacts(invalidProjectionSubject);
+  assert.equal(invalidProjection.disposition, 'needs_attention');
+  assert.equal(invalidProjection.reasonCode, 'invalid_projection');
+  assert.equal(invalidProjection.originalRaw, invalidProjectionRaw);
+  const taskRecovery = new TaskRecoveryReadModel({ ball: store });
+  for (const [taskId, reasonCode] of [
+    ['legacy-malformed', 'invalid_recovery_metadata'],
+    ['invalid-projection', 'invalid_projection'],
+  ]) {
+    const projected = await taskRecovery.project({ id: taskId });
+    assert.equal(projected.recovery.incidents[0].reasonCode, reasonCode);
+    assert.equal(projected.recovery.ownerRef, `task:${taskId}`);
+  }
+
+  const mixed = { ...pending, key: 'mixed-version-pending', reasonCode: 'old_binary_returned' };
+  await redis.hset(
+    `ballcustody:events:meta:${subject}`,
+    'probeRecovery',
+    JSON.stringify({ ...facts, notices: { [mixed.key]: mixed } }),
+  );
+  await redis.zadd('ballcustody:recovery:notice:due', mixed.nextAt, subject);
+  await new RedisBallCustodyProjectionStore(redis).initializeRecovery();
+  assert.equal(await redis.get(completeKey), '1');
+  assert.equal(await redis.zcard('ballcustody:recovery:notice:due'), 0);
+  assert.deepEqual((await store.getRecoveryFacts(subject)).notices, {});
+  assert.equal(
+    JSON.parse(await redis.hget(`ballcustody:events:meta:${subject}`, `notice:${mixed.key}`)).reasonCode,
+    'old_binary_returned',
+  );
 });
 
 test('a delayed earlier-generation census cannot mark a fresh rebuild complete', async () => {

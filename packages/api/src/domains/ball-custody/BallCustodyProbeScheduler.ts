@@ -1,21 +1,13 @@
-import { recoveryGuarded } from '../../infrastructure/recovery/recovery-deadline.js';
-import { matchesTaskProbeSource, taskProbeSource } from '../cats/services/stores/ports/TaskProbeSource.js';
-
-export { createBallProbeRecoveryNotification } from './ball-probe-recovery-notification.js';
-
 import type { BallCustodyProjection, TaskItem } from '@cat-cafe/shared';
+import { recoveryGuarded } from '../../infrastructure/recovery/recovery-deadline.js';
 import { runDueBatch } from '../../infrastructure/recovery/run-due-batch.js';
+import { matchesTaskProbeSource, taskProbeSource } from '../cats/services/stores/ports/TaskProbeSource.js';
 import type { ITaskStore } from '../cats/services/stores/ports/TaskStore.js';
 import type { IBallCustodyIngest } from './BallCustodyIngest.js';
 import type { IBallCustodyProjectionStore } from './BallCustodyProjectionStore.js';
 import { buildTaskIdleLongEvent, buildWakeSentEvent } from './ball-custody-events.js';
 import { BallProbeRecoveryCensusPending, BallProbeRecoveryConflict } from './ball-probe-recovery-backend.js';
-import type {
-  BallRecoveryCandidate,
-  BallRecoveryNotice,
-  BallRecoveryOutcome,
-  BallRecoveryOwner,
-} from './ball-probe-recovery-state.js';
+import type { BallRecoveryCandidate, BallRecoveryOutcome, BallRecoveryOwner } from './ball-probe-recovery-state.js';
 
 export interface BallCustodyProbeResult {
   readonly satisfied: boolean;
@@ -49,7 +41,6 @@ export interface BallCustodyProbeSchedulerOptions {
   readonly probeEvaluator: BallCustodyProbeEvaluator;
   readonly wakeSender: BallCustodyWakeSender;
   readonly now?: () => number;
-  readonly notifyRecovery?: (notice: BallRecoveryNotice) => Promise<'delivered' | 'owner_unavailable'>;
   readonly wakeCooldownMs?: number;
   readonly idleLongMs?: number;
   readonly logger?: {
@@ -148,20 +139,6 @@ export class BallCustodyProbeScheduler {
         result.failed++;
         await this.opts.projectionStore.finishWakeAudit(subjectKey, audit, false, now);
         this.opts.logger?.warn?.({ err, subjectKey, eventId: audit.key }, 'ball-custody exact wake audit deferred');
-      },
-    });
-    await runDueBatch({
-      limit: 100,
-      budgetMs: 5_000,
-      selectDue: (limit) => this.opts.projectionStore.listRecoveryNotices(limit, now),
-      process: async ({ subjectKey, notice }) => {
-        if (!this.opts.notifyRecovery) throw new Error('ball_recovery_notification_unavailable');
-        const disposition = await this.opts.notifyRecovery(notice);
-        await this.opts.projectionStore.finishRecoveryNotice(subjectKey, notice, disposition, now);
-      },
-      onItemError: async ({ subjectKey, notice }, err) => {
-        await this.opts.projectionStore.finishRecoveryNotice(subjectKey, notice, 'failed', now);
-        this.opts.logger?.warn?.({ err, subjectKey }, 'ball-custody recovery notice deferred');
       },
     });
   }
