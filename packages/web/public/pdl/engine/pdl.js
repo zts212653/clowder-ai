@@ -210,6 +210,7 @@ function pdlRegister(frag, pk, plug) {
     pdlTreeIndex().forEach(function (e) { if (e.node.id === x.id && e.list && !e.node.ins) e.list.splice(e.list.indexOf(e.node), 1); });
     if (!pdlInsertOne(pdlTreeIndex(), x, Object.assign({ id: x.id }, x.node))) throw new Error('builtin insert ' + x.id + ' found no anchor');
   });
+  if (!pk && inserts.length) pdlEntryReset();   /* 入口索引按新树重建 */
   if (pk) {
     PDL_PLUGIN_FRAGS[pk] = Object.assign({}, frag, { inserts: inserts });
     PDL_PLUGINS.push(pk);
