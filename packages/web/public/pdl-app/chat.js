@@ -1042,6 +1042,15 @@ window.clowderChat = {
       render(true);
       return A.insert({ into: 'chat-input', text: d.v, mode: 'replace' });
     };
+    A.popPage = function (d) {
+      const stack = CS.pop.stack || (CS.pop.stack = []),
+        page = CS.pop.page || 'main';
+      if (stack.length && stack[stack.length - 1] === d.v) stack.pop();
+      else if (d.v === 'main') stack.length = 0;
+      else stack.push(page);
+      CS.pop.page = d.v;
+      render(true);
+    };
     A.popBack = function () {
       const stack = CS.pop.stack || [];
       CS.pop.page = stack.pop() || 'main';
