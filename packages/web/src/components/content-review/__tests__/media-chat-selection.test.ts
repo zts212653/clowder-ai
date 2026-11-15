@@ -115,8 +115,7 @@ describe('addMediaSelection — one pending media attachment per message', () =>
     expect(addMediaSelection(current, target(), POINT)).toEqual({ kind: 'refused', reason: 'full' });
   });
 
-  it('does not start a new media attachment when the composer already holds twelve things', () => {
-    // The persisted draft is thrown away as invalid past twelve attachments, so a thirteenth must be refused out loud.
+  it('adds a media attachment after twelve quotes and still extends existing media in place', () => {
     const twelve: ContextAttachment[] = Array.from({ length: 12 }, (_, i) => ({
       v: 1,
       id: `quote-${i}`,
@@ -124,7 +123,7 @@ describe('addMediaSelection — one pending media attachment per message', () =>
       text: 'x',
       source: { kind: 'workspace_file', path: 'a.md' },
     }));
-    expect(addMediaSelection(twelve, target(), REGION)).toEqual({ kind: 'refused', reason: 'composer_full' });
+    expect(addMediaSelection(twelve, target(), REGION).kind).toBe('added');
     // A media attachment already in the list grows in place and does not need a new slot.
     const eleven = twelve.slice(0, 11);
     const first = added(addMediaSelection(eleven, target(), REGION));

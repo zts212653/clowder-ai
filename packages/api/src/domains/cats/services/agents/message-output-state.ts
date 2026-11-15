@@ -8,6 +8,7 @@ import type {
 export interface OutputTextRun {
   kind: 'text';
   text: string;
+  textSource?: 'provider_summary';
   identity?: OutputMessageIdentity;
   channel?: 'commentary' | 'final';
   complete: boolean;
@@ -36,6 +37,7 @@ export interface MessageOutputState {
 
 export interface MessageOutputTextInput {
   content: string;
+  textSource?: OutputTextRun['textSource'];
   textMode?: unknown;
   outputMessage?: unknown;
   hostOutput?: unknown;

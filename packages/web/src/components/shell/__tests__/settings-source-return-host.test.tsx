@@ -101,7 +101,7 @@ describe('the real Settings entry and original reader survive the route boundary
     useToastStore.setState({ toasts: [] });
     useChatStore.getState().setCurrentThread('origin');
     vi.clearAllMocks();
-    vi.mocked(apiFetch).mockResolvedValue(
+    vi.mocked(apiFetch).mockImplementation(async () =>
       Response.json({ status: 'available', updated: false, target: { threadId: 'origin' } }),
     );
     host = document.createElement('div');
@@ -174,6 +174,48 @@ describe('the real Settings entry and original reader survive the route boundary
     expect(useToastStore.getState().toasts.some((toast) => toast.message?.includes('返回已中断'))).toBe(false);
     await click('pin');
     expect(readSettingsReadingSession()?.label).toBe('Hydrated canonical title');
+  });
+
+  it.each([
+    'user-input',
+    'unexpected',
+  ] as const)('handles %s interruption through the real return notice consumer', async (reason) => {
+    render('/thread/origin', old);
+    await click('pin');
+    const source = readSettingsReadingSession();
+    render('/settings');
+    useToastStore.setState({ toasts: [] });
+    const unrelated = useToastStore
+      .getState()
+      .addToast({ type: 'info', title: 'Other', message: 'Keep me', duration: 0 });
+    await click('return');
+    const mounted = readingPort('return-owner');
+    vi.mocked(mounted.restoreReadingRef).mockResolvedValueOnce(
+      reason === 'user-input' ? { status: 'interrupted', reason: 'user-input' } : { status: 'interrupted' },
+    );
+    render('/thread/origin', mounted);
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(readSettingsReadingSession()?.id).toBe(source?.id);
+    const toasts = useToastStore.getState().toasts;
+    if (reason === 'unexpected') {
+      expect(toasts).toHaveLength(2);
+      expect(toasts.at(-1)).toMatchObject({ type: 'error', duration: 0 });
+      expect(toasts.at(-1)?.message).toContain('返回已中断');
+      return;
+    }
+    expect(toasts.map((toast) => toast.id)).toEqual([unrelated]);
+    render('/settings');
+    expect(host.querySelector('[data-testid="return"]')).not.toBeNull();
+    await click('return');
+    render('/thread/origin', mounted);
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(mounted.restoreReadingRef).toHaveBeenCalledTimes(2);
+    expect(readSettingsReadingSession()).toBeNull();
+    expect(useToastStore.getState().toasts.map((toast) => toast.id)).toEqual([unrelated]);
   });
 
   it('shows an honest existing toast when fresh admission rejects return, preserving its source', async () => {

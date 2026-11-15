@@ -1,6 +1,6 @@
 ---
 name: rich-messaging
-tips_exempt: "2026-11-07 renewal: member-side purpose routing now reuses the existing HTML Works capability and fixed-version cards; users request the result in ordinary Chat, with no new operation or carrier approval. The existing HTML Works guide/tip covers the human entry."
+tips_exempt: "Original-source replies now use the existing sources rich block or post_message searchAnswer after a full original read; this changes member-side routing and retires the separate preparation tool, without adding a user command, setting or approval surface. Existing rich-message and HTML Works tips cover the human Chat entry; provenance checks and author-selected quotes remain required."
 description: >
   Use when: 在当前 Chat 交付可看、可听或可操作产物（语音、图片、截图、HTML/demo、卡片、清单、diff、交互选择），或保存、继续修改 HTML 图解/小工具，无需用户说“富文本”。
   Not for: 纯文字、仅讨论 HTML 原理或修改仓库源码；复杂 localhost 应用用 browser-preview。
@@ -178,6 +178,11 @@ DOMPurify 静默剥掉所有 `on*` 属性——widget 照常渲染，点击不�
 
 用 MCP 工具 `cat_cafe_create_rich_block`，参数 `block` 传 JSON 字符串。
 发 block 前**先写 1-2 句自然语言摘要**，再发 block。
+
+**找原话带出处**：全文读取已给 `contentRevision` 和 `sourceParts`，猫选原句与理由，
+用 `kind:"sources"` 随普通回复交卡；显式发消息用 `post_message` 的 `searchAnswer={query,selections}`。
+完整字段、agent-key 和旧操作重试见 [sources 约定](../.cat-cafe-shared-refs/rich-blocks.md#sources-原话与出处)。
+Host 核出处，理由仍是猫的判断；prepared 不等于已发布，普通搜索不自动发卡。
 
 如果图片来源是本地文件（例如 Codex CLI / 本地脚本刚生成的 PNG）：
 

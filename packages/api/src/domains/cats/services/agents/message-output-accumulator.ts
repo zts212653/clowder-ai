@@ -45,6 +45,7 @@ function observation(input: MessageOutputTextInput) {
     mode,
     displayPrefix: prefix === 2 && validPrefix,
     text: prefix === 2 && validPrefix ? input.content.slice(2) : input.content,
+    ...(input.textSource ? { textSource: input.textSource } : {}),
     reason:
       observationReason(validPrefix, nativeMode, identity, metadata?.complete) ??
       (input.fragment?.changed ? ('content_changed' as const) : undefined),
@@ -58,7 +59,15 @@ function appendRun(state: MessageOutputState, run: OutputTextRun): MessageOutput
     ...state,
     entries: [
       ...state.entries,
-      { ...run, paragraphBoundary: hasText && (run.displayPrefix || last?.kind === 'tool' || !!run.identity) },
+      {
+        ...run,
+        paragraphBoundary:
+          hasText &&
+          (run.displayPrefix ||
+            last?.kind === 'tool' ||
+            !!run.identity ||
+            (last?.kind === 'text' && last.textSource !== run.textSource)),
+      },
     ],
     ...(state.entries.filter((entry) => entry.kind === 'text').length >= MAX_MESSAGE_OUTPUT_RUNS
       ? { reason: 'oversized' }
@@ -89,6 +98,7 @@ function duplicateCompletion(previous: OutputTextRun, next: Observation): boolea
   return (
     previous.complete &&
     next.complete &&
+    previous.textSource === next.textSource &&
     previous.channel === next.channel &&
     next.mode === 'replace' &&
     previous.text === next.text
@@ -122,6 +132,7 @@ function updateExistingRun(
     return next.reason ? { ...state, reason: state.reason ?? next.reason } : state;
   const conflictingObservation = next.reason && next.reason !== 'content_changed';
   if (
+    previous.textSource !== next.textSource ||
     (!sameChannel && !observedChannel) ||
     previous.complete ||
     (index !== state.entries.length - 1 && !continuesAcrossTools(state, next, index, previous, signatureSuffix)) ||
@@ -143,7 +154,13 @@ function updateExistingRun(
 
 function appendUnobservedRun(state: MessageOutputState, next: Observation): MessageOutputState {
   const last = state.entries.at(-1);
-  if (!next.identity && !next.displayPrefix && last?.kind === 'text' && !last.identity) {
+  if (
+    !next.identity &&
+    !next.displayPrefix &&
+    last?.kind === 'text' &&
+    !last.identity &&
+    last.textSource === next.textSource
+  ) {
     return { ...state, entries: [...state.entries.slice(0, -1), { ...last, text: last.text + next.text }] };
   }
   return appendRun(state, { kind: 'text', ...next, paragraphBoundary: false });
@@ -194,7 +211,14 @@ export function accumulateMessageOutputText(
       reason: 'whole_body_replaced',
       entries: [
         ...state.entries.filter((entry) => entry.kind === 'tool'),
-        { kind: 'text', text: input.content, complete: false, paragraphBoundary: false, displayPrefix: false },
+        {
+          kind: 'text',
+          text: input.content,
+          complete: false,
+          paragraphBoundary: false,
+          displayPrefix: false,
+          ...(input.textSource ? { textSource: input.textSource } : {}),
+        },
       ],
     };
   }

@@ -60,7 +60,11 @@ export function MailboxRowBody({
       style={{ color: 'var(--shell-ink)' }}
     >
       {item.userMention ? (
-        <UserMentionDetails key={item.userMention.messageId} request={item.userMention} showHandling={!personal} />
+        <UserMentionDetails
+          key={item.userMention.messageId}
+          request={item.userMention}
+          showHandling={!personal && readCurrent}
+        />
       ) : item.approval || item.choiceRequest || item.runtimeInteraction || reviewSource ? null : (
         <MailboxWorkDetails item={item} />
       )}
@@ -191,7 +195,8 @@ export function MailboxRowBody({
         ((item.choiceRequest || item.runtimeInteraction) && hosted) ||
         reviewSource ||
         originalSource ||
-        executionRecovery ? null : (
+        executionRecovery ||
+        !readCurrent ? null : (
         <PlaceAction quiet={Boolean(item.approval)} place={place} onOpen={onOpen} />
       )}
     </section>

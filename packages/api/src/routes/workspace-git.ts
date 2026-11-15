@@ -10,6 +10,12 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import type { FastifyPluginAsync } from 'fastify';
+import {
+  compareGitStatusEntries,
+  type GitStatusEntry,
+  GitStatusReadError,
+  readGitStatus,
+} from '../domains/workspace/git-status.js';
 import { probeGitWorkTree } from '../domains/workspace/git-worktree-probe.js';
 import { getWorktreeRoot, WorkspaceSecurityError } from '../domains/workspace/workspace-security.js';
 
@@ -44,33 +50,15 @@ export interface GitStatusResult {
   untracked: Array<{ status: string; path: string }>;
 }
 
-function classifyStatusLine(
-  line: string,
-): { category: 'staged' | 'unstaged' | 'untracked'; status: string; path: string }[] {
-  if (line.length < 4) return [];
-  const x = line[0] ?? ' ';
-  const y = line[1] ?? ' ';
-  const filePath = line.slice(3);
-  if (x === '?' && y === '?') return [{ category: 'untracked', status: '??', path: filePath }];
-  const entries: { category: 'staged' | 'unstaged'; status: string; path: string }[] = [];
-  if (x !== ' ' && x !== '?') entries.push({ category: 'staged', status: x, path: filePath });
-  if (y !== ' ' && y !== '?') entries.push({ category: 'unstaged', status: y, path: filePath });
-  return entries;
-}
-
-export function parseGitStatus(stdout: string): GitStatusResult {
-  const result: GitStatusResult = { staged: [], unstaged: [], untracked: [] };
-  if (!stdout.trim()) return result;
-  // Do NOT trim the whole blob: the X/Y status columns are leading spaces, and
-  // trimming eats the first line's X column (' M …' → 'M …'), misclassifying
-  // the entry as staged and shifting its path. Lines without 4+ chars (e.g. the
-  // trailing newline's empty tail) are ignored by classifyStatusLine.
-  for (const line of stdout.split('\n')) {
-    for (const entry of classifyStatusLine(line)) {
-      result[entry.category].push({ status: entry.status, path: entry.path });
-    }
+export function appendGitStatus(result: GitStatusResult, entry: GitStatusEntry): void {
+  const [x = ' ', y = ' '] = entry.status;
+  const path = entry.path;
+  if (x === '?' && y === '?') {
+    result.untracked.push({ status: '??', path });
+    return;
   }
-  return result;
+  if (x !== ' ' && x !== '?') result.staged.push({ status: x, path });
+  if (y !== ' ' && y !== '?') result.unstaged.push({ status: y, path });
 }
 
 export function parseGitShow(statOutput: string): Array<{ path: string; summary: string }> {
@@ -314,17 +302,18 @@ export const workspaceGitRoutes: FastifyPluginAsync = async (app) => {
           untracked: [],
         };
       }
-      const { stdout } = await execFileAsync('git', ['status', '--porcelain', '-uall'], {
-        cwd: root,
-        timeout: 5000,
-        maxBuffer: 1024 * 1024,
-      });
+      const status: GitStatusResult = { staged: [], unstaged: [], untracked: [] };
+      await readGitStatus(root, (entry) => appendGitStatus(status, entry));
+      for (const entries of Object.values(status)) entries.sort(compareGitStatusEntries);
       const { stdout: branchOut } = await execFileAsync('git', ['branch', '--show-current'], {
         cwd: root,
         timeout: 3000,
       });
-      return { worktreeId, branch: branchOut.trim(), ...parseGitStatus(stdout) };
+      return { worktreeId, branch: branchOut.trim(), ...status };
     } catch (e) {
+      if (e instanceof GitStatusReadError) {
+        request.log.warn({ worktreeId, gitStatus: e.diagnostics }, 'workspace Git status failed');
+      }
       if (e instanceof WorkspaceSecurityError) {
         reply.status(e.code === 'NOT_FOUND' ? 404 : 403);
         return { error: e.message };

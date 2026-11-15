@@ -3,7 +3,10 @@ import type { StoredMessage } from './ports/MessageStore.js';
 import type { Thread } from './ports/ThreadStore.js';
 import { isTimelinePublished, SYSTEM_USER_IDS } from './visibility.js';
 
-/** Read/source admission only. Native dispatch proves work delivery, never reply or execution authority. */
+/**
+ * Read/source admission only. Native dispatch proves work delivery, never reply or execution authority.
+ * hiddenTrigger hides chat rows; private Queue payloads have no published Message input to admit here.
+ */
 export function isReadableSchedulerWork(
   message: StoredMessage,
   ownerUserId: string,
@@ -24,7 +27,6 @@ export function isReadableSchedulerWork(
     thread.deletedAt ||
     message.sourceParseFailure ||
     message.origin === 'briefing' ||
-    message.extra?.scheduler?.hiddenTrigger === true ||
     message.deletedAt ||
     message.recall ||
     message._tombstone ||

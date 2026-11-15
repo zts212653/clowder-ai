@@ -29,8 +29,8 @@ import type { UnifiedAttentionView } from './use-unified-attention';
 const PANEL_WIDTH = 440;
 /**
  * What the panel shows, and whose it is. While re-reading, the previous rows may stay visible, but only labelled as the
- * previous read — never as current. The owner is the read's verified identity (a previous read is shown only once its owner is
- * confirmed again); with no read to confirm one there is no owner, and so nothing that belongs to an owner is shown.
+ * previous read — never as current write authority. The reader retains it only within its observed owner/query;
+ * identity changes and read failures withdraw it.
  */
 function panelRows(view: UnifiedAttentionView, sessions: ApprovalSessions) {
   const read = view.result.kind === 'ok' ? view.result.read : null;
@@ -146,17 +146,19 @@ function MailboxPanelContent({
     }
   }, [selectedProposalId, rows, openKey, toggle]);
 
+  // Presentation follows the last confirmed snapshot; all writers below still receive only `read` and its generation.
+  const displayRead = read ?? staleRead;
   const completeRead = Boolean(
-    read &&
-      read.status === 'available' &&
-      read.consistency.state === 'verified' &&
-      read.totalCount !== undefined &&
-      Object.values(read.sources).every(
+    displayRead &&
+      displayRead.status === 'available' &&
+      displayRead.consistency.state === 'verified' &&
+      displayRead.totalCount !== undefined &&
+      Object.values(displayRead.sources).every(
         (source) => source.status === 'available' && source.exhaustiveness === 'complete',
       ),
   );
-  const completePage = Boolean(completeRead && read?.page.offset === 0 && !read.page.hasMore);
-  const personalRead = read?.personalView;
+  const completePage = Boolean(completeRead && displayRead?.page.offset === 0 && !displayRead.page.hasMore);
+  const personalRead = displayRead?.personalView;
   const groupCounts = completeRead && personalRead ? personalRead.groupCounts?.[personalRead.mode] : undefined;
   const renderRow = (row: MailboxDisplayRow) =>
     row.kind === 'feedback' ? (
@@ -225,7 +227,7 @@ function MailboxPanelContent({
             verifyCurrent={() => view.resultGeneration === view.readsStarted()}
           />
         </>
-      ) : section === 'tools' && read !== null ? (
+      ) : section === 'tools' && displayRead !== null ? (
         <MailboxApprovalTools
           section={section}
           view={view}
@@ -241,7 +243,7 @@ function MailboxPanelContent({
           className="flex min-h-0 flex-1 flex-col overflow-y-auto px-[22px] pb-4"
         >
           <MailboxPersonalNotice personal={personal} />
-          <MailboxReadNotes state={state} read={read} stale={staleRead !== null} />
+          <MailboxReadNotes state={state} read={displayRead} stale={staleRead !== null} />
           {section === 'pending' && onSectionChange ? (
             <button
               type="button"
@@ -256,7 +258,7 @@ function MailboxPanelContent({
             <MailboxItemGroups
               section={section}
               rows={rows}
-              readKnown={read !== null}
+              readKnown={displayRead !== null}
               complete={completePage}
               groupCounts={groupCounts}
               mentionControls={
@@ -267,7 +269,7 @@ function MailboxPanelContent({
                     view={view}
                     personal={personal}
                     count={
-                      !read
+                      !displayRead
                         ? t.state.unconfirmed
                         : groupCounts
                           ? String(groupCounts.userMentions)
@@ -283,7 +285,7 @@ function MailboxPanelContent({
           ) : rows.length ? (
             <ul className="m-0 flex list-none flex-col gap-2 p-0">{rows.map(renderRow)}</ul>
           ) : null}
-          <MailboxPagination read={read} onNextPage={view.nextPage} onPreviousPage={view.previousPage} />
+          <MailboxPagination read={displayRead} onNextPage={view.nextPage} onPreviousPage={view.previousPage} />
           {canRetry ? (
             <div className="pt-1.5">
               <button

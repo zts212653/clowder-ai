@@ -219,7 +219,7 @@ description: >
 
 - `tdd`：写**代码**的测试驱动纪律 — writing-skills 是写 **skill/MCP** 的质量纪律
 - `quality-gate`：**代码**完成后的自检 — writing-skills 是 **skill 文件**的质量检查
-- `self-evolution`：从经验中**提炼**知识对象 — writing-skills 是把知识对象**写成合格的 skill**
+- `code-as-harness`：家里已有答案却让 You 重说后，入错题本、查断点并修复；同类新活做到第二次、想沉淀成技能时直接用 writing-skills
 
 ## 下一步
 

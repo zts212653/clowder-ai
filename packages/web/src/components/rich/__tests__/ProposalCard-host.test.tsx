@@ -22,7 +22,10 @@ vi.mock('@/hooks/useCatData', () => ({ useCatData: () => ({ cats: [], getCatById
 vi.mock('@/hooks/useThreadDisplayInfo', () => ({
   useThreadDisplayInfo: () => ({ currentThread: { title: 'Parent discussion' } }),
 }));
-vi.mock('@/utils/sidebar-thread-snapshot', () => ({ refreshSidebarThreadSnapshot: vi.fn(async () => true) }));
+vi.mock('@/utils/sidebar-thread-snapshot', () => ({
+  refreshSidebarThreadSnapshot: vi.fn(async () => true),
+  invalidateSidebarProjection: vi.fn(async () => true),
+}));
 const proposal: ThreadProposal = {
   proposalId: 'proposal-1',
   status: 'pending',

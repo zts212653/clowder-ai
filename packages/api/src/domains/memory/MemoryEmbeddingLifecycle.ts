@@ -187,6 +187,7 @@ export class MemoryEmbeddingLifecycle {
   }
 
   getFailureReason(): EmbeddingActivationFailure | undefined {
+    if (this.status === 'ready' && !this.service?.isReady()) return 'service_not_ready';
     return this.reason;
   }
 
@@ -246,7 +247,9 @@ export class MemoryEmbeddingLifecycle {
     if (this.catchUp) return this.catchUp;
     // Lexical index/publication completion can arrive while a cohort recovery
     // is paused. It owns no active geometry and must not cancel that retry.
-    if (this.status !== 'ready' || !this.service?.isReady()) return Promise.resolve({ docsEmbedded: 0, durationMs: 0 });
+    if (this.status !== 'ready' || !this.service) return Promise.resolve({ docsEmbedded: 0, durationMs: 0 });
+    // Publication shares an outage retry; it must not move its original deadline.
+    if (!this.service.isReady() && this.recoveryTimer) return Promise.resolve({ docsEmbedded: 0, durationMs: 0 });
     clearTimeout(this.recoveryTimer);
     this.recoveryTimer = undefined;
     const catchUp = this.catchUpOnce(this.generation).finally(() => {
@@ -257,7 +260,14 @@ export class MemoryEmbeddingLifecycle {
   }
 
   private async catchUpOnce(generation: number): Promise<{ docsEmbedded: number; durationMs: number }> {
+    const service = this.service;
     try {
+      await service?.reprobeIfNeeded();
+      if (!this.isCurrent(generation) || this.service !== service) return { docsEmbedded: 0, durationMs: 0 };
+      if (!service?.isReady()) {
+        this.scheduleRecovery(generation);
+        return { docsEmbedded: 0, durationMs: 0 };
+      }
       return await this.indexBuilder.embedMissingDocumentVectors();
     } catch (error) {
       this.scheduleRecovery(generation);

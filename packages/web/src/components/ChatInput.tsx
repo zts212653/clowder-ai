@@ -1,11 +1,6 @@
 'use client';
 
-import {
-  CONTEXT_ATTACHMENT_MAX_COUNT,
-  type ContextAttachment,
-  ContextAttachmentSchema,
-  type MessageWorkDisposition,
-} from '@cat-cafe/shared';
+import { type ContextAttachment, ContextAttachmentSchema, type MessageWorkDisposition } from '@cat-cafe/shared';
 import { ComposerControl, ComposerFrame } from '@cat-cafe/ui';
 import {
   type Dispatch,
@@ -738,9 +733,7 @@ export function ChatInput({
           .addToast({ type: 'error', title: '没能放进输入框', message: conflict, duration: 6000 });
         return;
       }
-      setContextAttachments((previous) =>
-        [...previous, parsed.data as ContextAttachment].slice(0, CONTEXT_ATTACHMENT_MAX_COUNT),
-      );
+      setContextAttachments((previous) => [...previous, parsed.data as ContextAttachment]);
       if (contextShortcutRange) {
         setInput(
           (previous) => `${previous.slice(0, contextShortcutRange.start)}${previous.slice(contextShortcutRange.end)}`,

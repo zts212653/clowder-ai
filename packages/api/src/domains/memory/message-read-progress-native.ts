@@ -1,4 +1,8 @@
 import type { NativeReadResources } from '../../infrastructure/sqlite-native-read-resources.js';
+import {
+  type FileVectorReadWindowSnapshot,
+  safeFileVectorReadWindowSnapshot,
+} from './file-vector-read-window-diagnostics.js';
 import type { CjkReadSnapshot } from './message-cjk-read-diagnostics.js';
 
 type SqlEvent = 'sql-start' | 'sql-finish';
@@ -35,6 +39,7 @@ export interface NativeMessageReadProgress {
   lastObservedSql?: SqlProgress;
   nativeVectorRead?: Omit<SqlProgress, 'rows'> & { native: NativeInput };
   cjk?: CjkReadSnapshot;
+  readWindow?: FileVectorReadWindowSnapshot;
 }
 
 const phases = new Set([
@@ -133,6 +138,9 @@ function cjkProgress(value: unknown): CjkReadSnapshot | undefined {
     (outcome === 'fulfilled' ? !count(returnedRows) : returnedRows !== null)
   )
     return;
+  const before = resources(v.resourcesBefore);
+  const after = outcome === 'running' ? null : resources(v.resourcesAfter);
+  const delta = outcome === 'running' ? null : resources(v.resourceDelta, true);
   return {
     bodyVisits,
     bodyUtf16,
@@ -142,6 +150,13 @@ function cjkProgress(value: unknown): CjkReadSnapshot | undefined {
     complete,
     returnedRows: returnedRows as number | null,
     elapsedMs,
+    resourcesBefore:
+      before && resourceKeys.every((k) => before[k] !== undefined) ? (before as NativeReadResources) : null,
+    resourcesAfter: after && resourceKeys.every((k) => after[k] !== undefined) ? (after as NativeReadResources) : null,
+    resourceDelta:
+      delta && resourceKeys.every((k) => k === 'maxRssKiB' || delta[k] !== undefined)
+        ? (delta as NonNullable<CjkReadSnapshot['resourceDelta']>)
+        : null,
   };
 }
 
@@ -163,6 +178,7 @@ export function safeNativeReadProgress(value: unknown): NativeMessageReadProgres
     const lastObservedSql = sqlProgress(v.lastObservedSql),
       nativeVectorRead = nativeProgress(v.nativeVectorRead),
       cjk = cjkProgress(v.cjk);
+    const readWindow = safeFileVectorReadWindowSnapshot(v.readWindow);
     return {
       phase: phase as NativeMessageReadProgress['phase'],
       outcome: outcome as NativeMessageReadProgress['outcome'],
@@ -174,6 +190,7 @@ export function safeNativeReadProgress(value: unknown): NativeMessageReadProgres
       ...(lastObservedSql ? { lastObservedSql } : {}),
       ...(nativeVectorRead ? { nativeVectorRead } : {}),
       ...(cjk ? { cjk } : {}),
+      ...(readWindow ? { readWindow } : {}),
     };
   } catch {
     return;

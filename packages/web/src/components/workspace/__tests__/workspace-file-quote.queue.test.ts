@@ -1,4 +1,4 @@
-import { type ContextAttachment } from '@cat-cafe/shared';
+import { type ContextAttachment, ContextAttachmentDraftsSchema, ContextAttachmentsSchema } from '@cat-cafe/shared';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { addMediaSelectionToChat, removeMediaSelectionFromChat } from '@/components/content-review/media-chat-composer';
 import { getContextAttachmentDraft, syncContextAttachmentDraftToStorage } from '@/components/thread-drafts';
@@ -28,13 +28,20 @@ beforeEach(() => {
 
 describe('a place added while the input is full', () => {
   it('is refused with the reason shown to the person and told to the caller, and nothing is queued', () => {
-    syncContextAttachmentDraftToStorage(
-      THREAD,
-      Array.from({ length: 12 }, (_, i) => reference(i)),
-    );
+    const oversized: ContextAttachment[] = Array.from({ length: 3 }, (_, i) => ({
+      v: 1,
+      kind: 'quote',
+      id: `large-${i}`,
+      text: 'x'.repeat(17_000),
+      source: { kind: 'message', threadId: 'source', messageId: `message-${i}` },
+    }));
+    expect(ContextAttachmentDraftsSchema.safeParse(oversized).success).toBe(true);
+    expect(ContextAttachmentsSchema.safeParse(oversized).success).toBe(false);
+    syncContextAttachmentDraftToStorage(THREAD, oversized);
     const result = addWorkspaceFileQuoteToChat(THREAD, { ...SELECTION, text: '第十三处' });
     expect(result).toEqual({ kind: 'refused', reason: 'too_large' });
     expect(useChatStore.getState().pendingChatInsert).toBeNull();
+    expect(getContextAttachmentDraft(THREAD)).toEqual(oversized);
     const [toast] = useToastStore.getState().toasts;
     expect(toast?.message).toContain('请先发送或移除几个');
   });

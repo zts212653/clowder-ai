@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import json
 import logging
 import os
 import platform
@@ -177,10 +178,24 @@ async def create_embeddings(req: EmbedRequest, request: Request):
             400, detail=f"Batch too large ({len(texts)}, max {MAX_BATCH_SIZE})"
         )
 
+    memory_shape = {
+        "batch_size": len(texts),
+        "request_chars_total": sum(map(len, texts)),
+        "request_chars_max": max(map(len, texts)),
+        "token_batch": None,
+        "padded_token_width": None,
+        "configured_token_limit": (
+            _representation_recipe["tokenLimit"] if _representation_recipe else None
+        ),
+    }
     # Truncate long texts
     texts = [t[:MAX_TEXT_LENGTH] for t in texts]
+    memory_shape.update(
+        encode_chars_total=sum(map(len, texts)), encode_chars_max=max(map(len, texts))
+    )
 
     start_ms = time.time() * 1000
+    guard_phase = "pre"
     try:
         async with _admission.admit(
             deadline_ms=req.deadline_ms,
@@ -191,7 +206,8 @@ async def create_embeddings(req: EmbedRequest, request: Request):
                     _memory_envelope.assert_within_budget,
                     req.max_model_mem_mb,
                 )
-            embeddings = await asyncio.to_thread(_encode, texts)
+            embeddings = await asyncio.to_thread(_encode, texts, memory_shape)
+            guard_phase = "post"
             if _memory_envelope is not None:
                 await asyncio.to_thread(
                     _memory_envelope.assert_within_budget,
@@ -204,10 +220,22 @@ async def create_embeddings(req: EmbedRequest, request: Request):
         ) from error
     except MemoryBudgetExceeded as error:
         log.critical(
-            "Embedding memory envelope tripped: observed=%d delta=%d budget=%d; exiting sidecar",
+            "Embedding memory envelope tripped: observed=%d delta=%d budget=%d; "
+            "context=%s; exiting sidecar",
             error.observed_bytes,
             error.footprint_delta_bytes,
             error.budget_bytes,
+            json.dumps(
+                {
+                    **memory_shape,
+                    "phase": guard_phase,
+                    "mlx_active_memory_bytes": error.mlx_active_memory_bytes,
+                    "mlx_cache_memory_bytes": error.mlx_cache_memory_bytes,
+                    "os_footprint_bytes": error.os_footprint_bytes,
+                    "baseline_os_footprint_bytes": error.baseline_os_footprint_bytes,
+                },
+                separators=(",", ":"),
+            ),
         )
         _schedule_resource_exit()
         raise HTTPException(
@@ -308,16 +336,20 @@ def _schedule_resource_exit() -> None:
 # ─── Encoding ─────────────────────────────────────────────────────
 
 
-def _encode(texts: List[str]) -> np.ndarray:
+def _encode(
+    texts: List[str], memory_shape: dict[str, int | None] | None = None
+) -> np.ndarray:
     """Encode texts to normalized embeddings with MRL truncation."""
     if _use_fastembed:
         return _encode_fastembed(texts)
     if _use_fallback:
         return _encode_fallback(texts)
-    return _encode_mlx(texts)
+    return _encode_mlx(texts, memory_shape)
 
 
-def _encode_mlx(texts: List[str]) -> np.ndarray:
+def _encode_mlx(
+    texts: List[str], memory_shape: dict[str, int | None] | None = None
+) -> np.ndarray:
     """MLX-native encoding using mlx-embeddings library."""
     from mlx_embeddings.utils import generate
 
@@ -326,6 +358,15 @@ def _encode_mlx(texts: List[str]) -> np.ndarray:
     output = generate(mlx_model, mlx_tokenizer, texts, **(
         {"max_length": _representation_recipe["tokenLimit"]} if _representation_recipe else {}
     ))
+    if memory_shape is not None:
+        # Read shape metadata only. Do not retain hidden tensors or tokenize/eval
+        # a second time just to diagnose a guard failure.
+        token_shape = getattr(getattr(output, "last_hidden_state", None), "shape", ())
+        if isinstance(token_shape, tuple) and len(token_shape) == 3 and all(
+            isinstance(dim, int) for dim in token_shape[:2]
+        ):
+            memory_shape["token_batch"] = token_shape[0]
+            memory_shape["padded_token_width"] = token_shape[1]
 
     # Unwrap BaseModelOutput if present (check value, not just attribute)
     if hasattr(output, "text_embeds") and output.text_embeds is not None:

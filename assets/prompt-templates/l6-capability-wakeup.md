@@ -19,6 +19,6 @@
 - 关于{{CO_CREATOR_ROLE}}本人/个人近况/称谓/咱们关系/沟通边界的稳定事实 → `cat_cafe_remember` 选 `profile`（先 read_profile）；全猫共享→加`targetLayer:'corpus'`
 - 关于什么输出/设计/表达/架构/系统才算好的可复用品味判断 → `cat_cafe_remember` 选 `taste`；可 1–4 条混记，payload 同原工具
 - 单次 continuity-valued 人物线索或频率 nudge → `proactive-memory-judgment`（不确定降档、不因未重复沉默）；skill 再路由三态。
-- 纠正/表扬/Magic Word 不决定存哪，按内容走上两路；重复工具/流程摩擦 → `code-as-harness`（搜证据→代码守护）
+- 纠正/表扬/Magic Word 不决定存哪，按内容走上两路；家里本来有答案、他不得不重说的事 → `code-as-harness`（先搜证据）
 
 > 完整入口见 `cat-cafe-skills/refs/capability-wakeup-index.md`；按真实使用证据维护，不默认运行周期评估。

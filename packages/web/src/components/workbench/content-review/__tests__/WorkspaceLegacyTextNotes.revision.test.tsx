@@ -1,3 +1,4 @@
+import { type ContextAttachment, ContextAttachmentDraftsSchema, ContextAttachmentsSchema } from '@cat-cafe/shared';
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { expect, it, vi } from 'vitest';
@@ -58,10 +59,15 @@ it('continuing a quote captured in an old version preserves that source revision
 
 it('a continuation the input refuses leaves the old note unsettled and the card open', async () => {
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-  const full = Array.from(
-    { length: 12 },
-    (_, i) => ({ v: 1, kind: 'thread', id: `t-${i}`, threadId: `ref-${i}`, title: 'kept' }) as const,
-  );
+  const full: ContextAttachment[] = Array.from({ length: 3 }, (_, i) => ({
+    v: 1,
+    kind: 'quote',
+    id: `large-${i}`,
+    text: 'x'.repeat(17_000),
+    source: { kind: 'message', threadId: 'source', messageId: `message-${i}` },
+  }));
+  expect(ContextAttachmentDraftsSchema.safeParse(full).success).toBe(true);
+  expect(ContextAttachmentsSchema.safeParse(full).success).toBe(false);
   syncContextAttachmentDraftToStorage('legacy-refused', [...full]);
   useChatStore.setState({ currentThreadId: 'legacy-refused', pendingChatInsert: null });
   const continued = vi.fn(() => 'settled' as const);

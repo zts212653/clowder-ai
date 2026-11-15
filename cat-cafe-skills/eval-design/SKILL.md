@@ -249,9 +249,9 @@ F311 项目选好试验后回到[实际学习循环](../capability-evolution/ref
 | Skill | 分工 |
 |---|---|
 | `quality-gate` | 单次交付的自检；本 skill 管**度量体系本身**的设计与体检 |
-| `code-as-harness` | 摩擦→修 harness；本 skill 是它 eval 机制的设计手册 |
+| `code-as-harness` | 家里已有答案却让 You 重说时，入错题本、按断点修；修法需要效用比较时用本 skill，结果回原任务 |
 | `source-audit` | 审外部 claim；本 skill 审**自家指标**（对内的 source-audit） |
-| `self-evolution` | 知识沉淀通道；本 skill 产出的教训经它归档 |
+| `writing-skills` | 同类新活做到第二次、想沉淀成技能时用；本 skill 产出的判断与教训先回原任务或现有方法文档 |
 | `capability-evolution` | 进化项目的入口与续办；需要本 skill 设计量尺/归因/干预时进入，带着设计结果及真实 owner refs 返回原 Program |
 
 ## 下一步

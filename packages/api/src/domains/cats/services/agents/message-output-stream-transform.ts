@@ -64,6 +64,13 @@ export function createRoutedOutputTransform(
 
   function text(message: AgentMessage): AgentMessage[] {
     if (message.origin === 'callback' || message.extra?.isExplicitPost) return [message];
+    if (message.textSource === 'provider_summary') {
+      // A summary is its own literal contribution. A deferred authored fragment
+      // must not inherit its provenance or consume text from this block.
+      const prefix = flush(message);
+      stripper = makeStripper();
+      return [...prefix, message];
+    }
     prepareSource(message);
     const content = message.content ? stripper.push(message.content) : message.content;
     rewritten ||= stripper.wasRewritten();
@@ -81,29 +88,33 @@ export function createRoutedOutputTransform(
     return [output];
   }
 
+  function flush(message: AgentMessage): AgentMessage[] {
+    const content = stripper.flush();
+    rewritten ||= stripper.wasRewritten();
+    const source = mixed ? undefined : pendingSource;
+    pendingSource = undefined;
+    const output: AgentMessage = {
+      ...source,
+      type: 'text',
+      catId: source?.catId ?? message.catId ?? explicitCatId,
+      content,
+      timestamp: source?.timestamp ?? message.timestamp,
+    };
+    facts.set(output, {
+      mode: 'append',
+      complete: source?.outputMessage?.complete === true,
+      changed: rewritten || mixed,
+    });
+    mixed = false;
+    return content ? [output] : [];
+  }
+
   return {
     outputFactsFor: (message) => facts.get(message),
     transform(message) {
       if (message.type === 'text') return text(message);
       if (message.type !== 'done') return [message];
-      const content = stripper.flush();
-      rewritten ||= stripper.wasRewritten();
-      const source = mixed ? undefined : pendingSource;
-      pendingSource = undefined;
-      const output: AgentMessage = {
-        ...source,
-        type: 'text',
-        catId: source?.catId ?? message.catId ?? explicitCatId,
-        content,
-        timestamp: source?.timestamp ?? message.timestamp,
-      };
-      facts.set(output, {
-        mode: 'append',
-        complete: source?.outputMessage?.complete === true,
-        changed: rewritten || mixed,
-      });
-      mixed = false;
-      return content ? [output, message] : [message];
+      return [...flush(message), message];
     },
   };
 }
