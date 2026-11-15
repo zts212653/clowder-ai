@@ -20,7 +20,7 @@ it('sends the real operation coordinates and owner-confirmed header only after t
       headers: { 'Content-Type': 'application/json', 'x-cat-cafe-owner-confirmed': 'true' },
       body: '{"rowKey":"row/one","input":{"sessionId":"session-one"}}',
     }),
-    undefined,
+    { mutationTimeoutMs: 185_000 },
   );
 });
 it('keeps every plugin declaration as admitted and calls no plugin endpoint of its own', async () => {

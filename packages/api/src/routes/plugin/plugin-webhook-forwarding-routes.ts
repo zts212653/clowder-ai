@@ -11,6 +11,8 @@ import {
 import { pluginAccessError, requirePluginOwnerLocalAccess } from '../plugin-access-guards.js';
 
 const DEFAULT_TIMEOUT_MS = 30_000;
+/** A request the owner started from the console may run longer than an anonymous callback. */
+const OWNER_TIMEOUT_MS = 180_000;
 const MAX_RESPONSE_BODY_BYTES = 1024 * 1024;
 const MAX_RESPONSE_HEADERS = 32;
 const MAX_RESPONSE_HEADER_VALUE_BYTES = 8 * 1024;
@@ -136,7 +138,7 @@ async function forwardPluginWebhook(
   let returnedBody: Readable | undefined;
   let failurePhase: 'invocation' | 'validation' = 'invocation';
   try {
-    const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+    const timeoutMs = options.timeoutMs ?? (principal === undefined ? DEFAULT_TIMEOUT_MS : OWNER_TIMEOUT_MS);
     if (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0) throw new TypeError('timeoutMs must be positive');
     const invoke = () =>
       withTimeout(
