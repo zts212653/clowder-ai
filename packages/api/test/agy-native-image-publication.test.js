@@ -14,6 +14,10 @@ const model = 'gemini-3.8-flash-high';
 const sessionId = 'image-publication-session';
 
 async function fixture(t) {
+  // Give invocation, filename and filesystem one explicit clock. A tiny fixture
+  // write can otherwise precede Date.now() in the filesystem's timestamp precision.
+  const generatedAt = Math.floor(Date.now() / 1000) * 1000;
+  t.mock.method(Date, 'now', () => generatedAt);
   const base = await realpath(await mkdtemp(join(tmpdir(), 'agy-image-publication-')));
   t.after(() => rm(base, { recursive: true, force: true }));
   const profileHome = join(base, 'profile');
@@ -27,6 +31,7 @@ async function fixture(t) {
     await mkdir(directory, { recursive: true });
     const path = join(directory, `${name}_${timestamp}.png`);
     await writeFile(path, bytes);
+    await utimes(path, new Date(timestamp), new Date(timestamp));
     return path;
   };
   const run = async (
@@ -153,6 +158,8 @@ test('only publishes current completed generation, not views, failures, stale fi
     await writeImage('wanted');
     const stale = await writeImage('wanted', brain, 1);
     await utimes(stale, new Date(0), new Date(0));
+    const backdated = await writeImage('backdated');
+    await utimes(backdated, new Date(0), new Date(0));
     await writeImage('wanted_legacy');
     await writeImage('failed');
     await writeImage('active');
@@ -163,6 +170,7 @@ test('only publishes current completed generation, not views, failures, stale fi
       tool(2, 'failed', { state: 'ERROR' }),
       tool(3, 'active', { state: 'ACTIVE' }),
       tool(4, 'viewed', { tool_name: 'view_file' }),
+      tool(5, 'backdated'),
     ];
   });
   assert.equal(galleries(messages).length, 1);

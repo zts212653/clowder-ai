@@ -70,13 +70,24 @@ const harness = createChatProofHarness(context, built, out, [], (api) => {
       drafts.set(threadId, next);
       return reply(method === 'DELETE' ? { cleared: true, revision } : next);
     }
+    const receipt = url.pathname.match(/^\/api\/threads\/([^/]+)\/message-attempts\/([^/]+)$/);
+    if (receipt && method === 'GET') {
+      assert.equal(receipt[1], CURRENT_THREAD);
+      assert.ok(attempts.some((attempt) => attempt.idempotencyKey === receipt[2]));
+      const accepted = api.sent.findIndex((attempt) => attempt.idempotencyKey === receipt[2]);
+      return reply(
+        accepted < 0
+          ? { status: 'unknown' }
+          : { status: 'accepted', userMessage: { id: `accepted-${accepted + 1}`, timestamp: Date.now() } },
+      );
+    }
     if (url.pathname === '/api/messages' && method === 'POST') {
       const body = request.postDataJSON();
       attempts.push(body);
       assert.equal(sendMessageSchema.safeParse(body).success, true, 'actual send schema accepts the entire collection');
       if (refuseNextSend) {
         refuseNextSend = false;
-        return reply({ error: 'fixture send refusal' }, 400);
+        return reply({ error: 'fixture send refusal', code: 'QUEUE_FULL' }, 429);
       }
     }
     return original(request, url);
@@ -146,10 +157,24 @@ try {
     ),
     field.press('Enter'),
   ]);
-  assert.equal(await summary.innerText(), '15 annotations', 'failed send preserves every comment');
-  assert.equal(await field.inputValue(), DRAFT);
-  await field.press('Enter');
+  // Admission to the durable local attempt transfers the composer content to its
+  // bubble. A retryable refusal retains that attempt, not a second editable draft.
+  const failed = page.locator('[data-testid="send-attempt-status"][data-send-status="failed"]');
+  await failed.waitFor();
+  assert.equal(await field.inputValue(), '');
   await summary.waitFor({ state: 'hidden' });
+  await page.reload({ waitUntil: 'networkidle' });
+  await failed.waitFor();
+  for (let index = 1; index <= 15; index++)
+    assert.equal(await page.getByText(`comment ${String(index).padStart(2, '0')}`, { exact: false }).count(), 1);
+  if (out) await page.screenshot({ path: path.join(out, 'refused-send-restored.png') });
+  await Promise.all([
+    page.waitForResponse(
+      (response) => response.url().endsWith('/api/messages') && response.request().method() === 'POST',
+    ),
+    page.getByRole('button', { name: '重试发送这条消息', exact: true }).click(),
+  ]);
+  await page.locator('[data-testid="send-attempt-status"][data-send-status="accepted"]').waitFor();
   assert.equal(api.sent.length, 1);
   assert.equal(attempts.length, 2);
   const expected = Array.from({ length: 15 }, (_, index) => `comment ${String(index + 1).padStart(2, '0')}`);
@@ -168,6 +193,7 @@ try {
           switchedAndReturned: true,
           restoredFromServer: true,
           refusedSendPreserved: true,
+          refusedSendRestoredFromLocalAttempt: true,
           successfulSends: api.sent.length,
           browserErrors: proof.errors,
         },
@@ -175,9 +201,7 @@ try {
         2,
       ),
     );
-  console.log(
-    'PASS: 15 annotations → switch → return → server reload → refused send preserved → successful complete send',
-  );
+  console.log('PASS: 15 annotations → switch → return → server reload → refused attempt reload → complete retry');
 } catch (error) {
   if (proof && out) await harness.captureFailure(proof.page, 'comment-retention', error);
   throw error;
