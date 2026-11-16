@@ -1,13 +1,13 @@
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
-import { once } from 'node:events';
 import { existsSync } from 'node:fs';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
-import { createServer } from 'node:net';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { after, before, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
+import { findFreePort, stopServer, waitForPage } from './_harness.mjs';
 import { trajectoryFixture } from './f295-trajectory-fixture.mjs';
 import { runWorkGroupsJourney } from './f295-work-groups.journey.mjs';
 import { ensureWorkspaceOpen } from './f307-workspace-open.mjs';
@@ -19,39 +19,6 @@ const NEXT_BIN = path.resolve(WEB_ROOT, '../../node_modules/next/dist/bin/next')
 const PRODUCTION_BUILD_ID_PATH = path.join(WEB_ROOT, '.next', 'BUILD_ID');
 const THREAD_ID = 'thread-f295-parallel';
 const HOST_THREAD_ID = 'thread-f295-host';
-
-async function findFreePort() {
-  const socket = createServer();
-  socket.listen(0, '127.0.0.1');
-  await once(socket, 'listening');
-  const address = socket.address();
-  assert(address && typeof address !== 'string');
-  socket.close();
-  await once(socket, 'close');
-  return address.port;
-}
-
-async function waitForPage(url, server, output) {
-  const deadline = Date.now() + 180_000;
-  while (Date.now() < deadline) {
-    if (server.exitCode !== null) throw new Error(`Next.js exited before readiness:\n${output.join('')}`);
-    try {
-      const response = await fetch(url);
-      if (response.ok) return;
-    } catch {
-      // The real Thread route is still compiling.
-    }
-    await new Promise((resolve) => setTimeout(resolve, 250));
-  }
-  throw new Error(`Timed out waiting for ${url}:\n${output.join('')}`);
-}
-
-async function stopServer(server) {
-  if (server.exitCode !== null) return;
-  server.kill('SIGTERM');
-  await Promise.race([once(server, 'exit'), new Promise((resolve) => setTimeout(resolve, 5_000))]);
-  if (server.exitCode === null) server.kill('SIGKILL');
-}
 
 async function readProductionBuildId() {
   if (!existsSync(PRODUCTION_BUILD_ID_PATH)) return null;
@@ -206,6 +173,7 @@ for (const [width, language] of [
       fixtureForApi,
       viewport: { width, height: 900 },
       language,
+      olderResponse: width === 1440,
     }),
   );
 }
@@ -296,7 +264,7 @@ for (const viewport of [
         }
         assert.equal(await page.getByTestId('f307-tab-kind-agent-run').count(), 2);
         assert.deepEqual([...new Set(requestedInvocations)].sort(), ['turn-codex-astra', 'turn-fable5']);
-        await page.screenshot({ path: `/tmp/f295-running-navigation-${viewport.width}.png` });
+        await page.screenshot({ path: path.join(tmpdir(), `f295-running-navigation-${viewport.width}.png`) });
         assert.match(await rows.nth(0).innerText(), /codex-astra/);
         assert.match(await rows.nth(1).innerText(), /fable5/);
         console.log(`F295 browser: ${baseUrl} shows both parallel cats`);

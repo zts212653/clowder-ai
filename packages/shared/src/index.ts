@@ -66,6 +66,7 @@ export * from './explicit-stop-intent.js';
 export * from './feature-demos.js';
 export * from './html-inline-event-handlers.js';
 export * from './ignored-item-preference.js';
+export * from './interactive-block-state.js';
 export * from './markdown-link-safety.js';
 // Export shared text helpers
 export * from './markdown-readable-text.js';
@@ -198,4 +199,5 @@ export * from './utils/media-byte-range.js';
 export * from './utils/pull-request-changes-target.js';
 // Export subject key utilities (#320)
 export * from './utils/subject-key.js';
+export * from './watcher-daily.js';
 export * from './worktree-notice.js';

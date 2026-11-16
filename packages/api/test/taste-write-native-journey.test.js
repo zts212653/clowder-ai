@@ -4,7 +4,7 @@ import { test } from 'node:test';
 import { parse as parseYaml } from 'yaml';
 import { F221ApprovalAdapter } from '../dist/domains/approval-hub/adapters/F221ApprovalAdapter.js';
 import { createVignetteWriter } from '../dist/domains/taste/services/writeVignette.js';
-import { memoryProposalNativeClient } from './helpers/memory-proposal-native-client.js';
+import { callRememberItem, memoryProposalNativeClient } from './helpers/memory-proposal-native-client.js';
 import { tasteAdmissionFixture, tasteDraft } from './helpers/taste-admission-fixture.js';
 import { createRemoteFixture, remoteFile, remoteHead } from './taste-publication-fixtures.js';
 
@@ -29,7 +29,7 @@ test(
         clientRequestId: 'm3-native-taste-request',
         sourceMessageId: source.id,
       };
-      const response = await client.callTool({ name: 'cat_cafe_propose_taste', arguments: input });
+      const response = await callRememberItem(client, 'taste', input);
       assert.notEqual(response.isError, true, JSON.stringify(response));
       const proposed = JSON.parse(response.content.find((part) => part.type === 'text').text);
       assert.equal(proposed.status, 'pending');
@@ -68,22 +68,16 @@ test(
       await client.close();
       const later = await fixture.source({ content: 'Recover that exact earlier request' });
       client = await memoryProposalNativeClient(api, await fixture.auth(later), repository.root);
-      const replay = await client.callTool({ name: 'cat_cafe_propose_taste', arguments: input });
+      const replay = await callRememberItem(client, 'taste', input);
       assert.notEqual(replay.isError, true, JSON.stringify(replay));
       const recovered = JSON.parse(replay.content.find((part) => part.type === 'text').text);
       assert.equal(recovered.proposalId, proposed.proposalId);
       assert.equal(recovered.status, 'approved');
       assert.equal(remoteHead(repository), publishedHead);
-      const replacedSource = await client.callTool({
-        name: 'cat_cafe_propose_taste',
-        arguments: { ...input, sourceMessageId: later.id },
-      });
+      const replacedSource = await callRememberItem(client, 'taste', { ...input, sourceMessageId: later.id });
       assert.equal(replacedSource.isError, true, JSON.stringify(replacedSource));
       assert.ok(JSON.stringify(replacedSource).includes('client_request_conflict'));
-      const conflict = await client.callTool({
-        name: 'cat_cafe_propose_taste',
-        arguments: { ...input, scene: 'Changed under the same key' },
-      });
+      const conflict = await callRememberItem(client, 'taste', { ...input, scene: 'Changed under the same key' });
       assert.equal(conflict.isError, true);
       assert.ok(JSON.stringify(conflict).includes('client_request_conflict'));
       assert.equal(remoteHead(repository), publishedHead);

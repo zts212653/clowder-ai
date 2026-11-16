@@ -14,7 +14,11 @@ const entriesSchema = z.object({
   ),
 });
 export type QuickPhrasesEntry = z.infer<typeof entriesSchema>['entries'][number];
-const phraseSchema = z.object({ id: z.string(), text: z.string() });
+const phraseSchema = z.object({
+  id: z.string(),
+  text: z.string(),
+  onInserted: z.object({ request: z.unknown(), notifyFailure: z.boolean().optional() }).optional(),
+});
 export type QuickPhrase = z.infer<typeof phraseSchema>;
 const pageSchema = z.object({
   items: z.array(phraseSchema).max(5),

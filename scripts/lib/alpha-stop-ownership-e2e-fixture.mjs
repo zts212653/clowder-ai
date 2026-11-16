@@ -60,12 +60,22 @@ export async function createIsolatedAlphaE2EFixture(t) {
       copyScript(`scripts/lib/${name}`, mainDir, 0o644);
   }
 
+  const realStartDev = readFileSync(join(REPO_ROOT, 'scripts/start-dev.sh'), 'utf8');
+  const guardCallMatch = realStartDev.match(/^\s*ensure_supported_node_runtime\s+.*$/m);
+  if (!guardCallMatch) throw new Error('Could not locate ensure_supported_node_runtime call in scripts/start-dev.sh');
+  const launchChildMatch = realStartDev.match(/^launch_daemon_child\(\)\s*\{[\s\S]*?^\}/m);
+  if (!launchChildMatch) throw new Error('Could not locate launch_daemon_child() in scripts/start-dev.sh');
+
   writeFileSync(
     join(mainDir, 'scripts/start-dev.sh'),
-    `#!/usr/bin/env bash
+    `#!/bin/bash
 set -euo pipefail
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "\${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+source "$SCRIPT_DIR/lib/node-runtime-guard.sh"
+${guardCallMatch[0].trim()}
+verified_runtime_artifacts_for_current_tree() { return 1; }
+${launchChildMatch[0]}
 DAEMON_MODE=false
 DAEMON_CHILD=false
 ORIG_ARGS=("$@")
@@ -76,11 +86,22 @@ for a in "$@"; do
   esac
 done
 if [ "$DAEMON_MODE" = true ] && [ "$DAEMON_CHILD" = false ]; then
+  DAEMON_LOG_FILE="$PROJECT_ROOT/.daemon.log"
   node "$SCRIPT_DIR/daemon-state.mjs" prepare --home "$HOME" --project-root "$PROJECT_ROOT" --deployment-id "\${CAT_CAFE_DEPLOYMENT_ID:-worktree}"
   TOKEN="$(node -e "console.log(require('node:crypto').randomUUID())")"
-  nohup "$0" "\${ORIG_ARGS[@]}" --cat-cafe-daemon-token="$TOKEN" >"$PROJECT_ROOT/.daemon.log" 2>&1 </dev/null &
-  CHILD_PID=$!
-  node "$SCRIPT_DIR/daemon-state.mjs" write --home "$HOME" --project-root "$PROJECT_ROOT" --deployment-id "\${CAT_CAFE_DEPLOYMENT_ID:-worktree}" --pid "$CHILD_PID" --launch-token "$TOKEN" --log-file "$PROJECT_ROOT/.daemon.log" --frontend-port "\${FRONTEND_PORT:-3011}" --api-port "\${API_SERVER_PORT:-3012}" --redis-port "\${REDIS_PORT:-6397}" --preview-port "\${PREVIEW_GATEWAY_PORT:-4111}" >/dev/null
+  RESTART_ARGS=()
+  for a in "\${ORIG_ARGS[@]}"; do
+    case "$a" in
+      --daemon|-d) ;;
+      *) RESTART_ARGS+=("$a") ;;
+    esac
+  done
+  launch_daemon_child "$0" "$TOKEN" "\${RESTART_ARGS[@]}"
+  disown "$DAEMON_PID" 2>/dev/null || true
+  if ! node "$SCRIPT_DIR/daemon-state.mjs" write --home "$HOME" --project-root "$PROJECT_ROOT" --deployment-id "\${CAT_CAFE_DEPLOYMENT_ID:-worktree}" --pid "$DAEMON_PID" --launch-token "$TOKEN" --log-file "$DAEMON_LOG_FILE" --frontend-port "\${FRONTEND_PORT:-3011}" --api-port "\${API_SERVER_PORT:-3012}" --redis-port "\${REDIS_PORT:-6397}" --preview-port "\${PREVIEW_GATEWAY_PORT:-4111}" >/dev/null; then
+    kill "$DAEMON_PID" 2>/dev/null || true
+    exit 1
+  fi
   exit 0
 fi
 node -e "const http=require('node:http');const s=http.createServer((_,r)=>r.end('ok'));s.listen(Number(process.env.API_SERVER_PORT),'127.0.0.1');process.on('SIGTERM',()=>s.close(()=>process.exit(0)));" &
@@ -152,9 +173,60 @@ wait "$SERVER_PID"
     })}\n`,
   );
   writeFileSync(completionPath, completionBytes);
+  const historicalPredecessorPath = join(stateDir, '406ff05731d624d5.json');
+  const historicalPredecessorBytes = `${JSON.stringify({
+    version: 1,
+    id: '406ff05731d624d5',
+    cwd: join(root, 'cat-cafe-f290-historical'),
+    port: 3011,
+    command: ['pnpm', 'alpha:start'],
+    origin: 'detached',
+    pid: 900000998,
+    processStartedAt: 'Tue Aug 25 08:39:44 2026',
+    processCommand: '/usr/bin/env node /opt/homebrew/bin/pnpm alpha:start',
+    startedAt: '2026-08-25T15:39:44.886Z',
+    logPath: join(stateDir, '406ff05731d624d5.log'),
+  })}\n`;
+  writeFileSync(historicalPredecessorPath, historicalPredecessorBytes);
+
+  const guardSh = readFileSync(join(REPO_ROOT, 'scripts/lib/node-runtime-guard.sh'), 'utf8');
+  const maxMajorMatch = guardSh.match(
+    /CAT_CAFE_NODE_MAX_MAJOR_EXCLUSIVE="\$\{CAT_CAFE_NODE_MAX_MAJOR_EXCLUSIVE:-(\d+)\}"/,
+  );
+  if (!maxMajorMatch) throw new Error('Could not locate CAT_CAFE_NODE_MAX_MAJOR_EXCLUSIVE in node-runtime-guard.sh');
+  const unsupportedMajor = maxMajorMatch[1];
+  const unsupportedNodeVersion = `${unsupportedMajor}.0.0`;
+  const barrierMarkerPath = join(root, '.daemon-json-barrier-met');
 
   const binDir = join(root, 'bin');
   mkdirSync(binDir);
+  writeFileSync(
+    join(binDir, 'node'),
+    `#!/bin/bash
+if [ "\${CAT_CAFE_NODE_RUNTIME_GUARD_REEXEC:-0}" != "1" ] && [ "\${1:-}" = "-p" ]; then
+  parent_cmd="$(ps -ww -p "$PPID" -o command= 2>/dev/null || true)"
+  case "$parent_cmd" in
+    *--cat-cafe-daemon-token=*)
+      for _ in $(seq 1 200); do
+        if compgen -G "$HOME/.cat-cafe/daemons/alpha-*/daemon.json" >/dev/null; then
+          : > "${barrierMarkerPath}"
+          break
+        fi
+        sleep 0.01
+      done
+      case "\${2:-}" in
+        *split*) printf '${unsupportedMajor}\\n' ;;
+        *) printf '${unsupportedNodeVersion}\\n' ;;
+      esac
+      exit 0
+      ;;
+  esac
+fi
+exec "${process.execPath}" "$@"
+`,
+    { mode: 0o755 },
+  );
+  writeFileSync(join(binDir, 'brew'), '#!/bin/sh\nexit 1\n', { mode: 0o755 });
   writeFileSync(join(binDir, 'redis-cli'), '#!/bin/sh\nexit 1\n', { mode: 0o755 });
   writeFileSync(
     join(binDir, 'lsof'),
@@ -183,6 +255,10 @@ exec /usr/sbin/lsof "$@"
     previewId,
     completionPath,
     completionBytes,
+    historicalPredecessorPath,
+    historicalPredecessorBytes,
     virtualPort3011PreloadUrl,
+    unsupportedNodeVersion,
+    barrierMarkerPath,
   };
 }

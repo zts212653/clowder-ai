@@ -106,7 +106,8 @@ function RowSessionLine({
 
 /**
  * One 待办 item. Collapsed it is a line; expanded (one at a time) it says what the read carries and offers exactly one
- * way forward: open the place that owns the decision. A row from a previous read is never interactive.
+ * way forward: open the place that owns the decision. Refresh keeps an expanded body mounted;
+ * its actions still follow the current-read fence.
  */
 export function MailboxRow({
   item,
@@ -147,10 +148,7 @@ export function MailboxRow({
   const bodyId = useId();
   const { catId, lead, title, source, time } = useMailboxRowText(item);
   const heading = lead ? `${lead} ${title}` : title;
-  const session =
-    hosted && item.approval ? hosted.sessions.get(sessionKey(hosted.ownerUserId, item.approval)) : undefined;
-  const retainingDecision = session !== undefined && session.model.state.kind !== 'idle';
-  const open = expanded && (!stale || retainingDecision);
+  const open = expanded;
   const nativeProposal =
     hosted !== undefined && item.approval?.sourceFeatureId === 'F128' && !item.approval.inlineApprovable;
   const nativeOriginal = Boolean(hosted && originalApprovalSource(item));
@@ -194,7 +192,6 @@ export function MailboxRow({
       className="rounded-[14px]"
       data-chat-background-surface={item.userMention ? 'work' : 'paper'}
       style={{
-        opacity: stale ? 0.6 : undefined,
         border: `1px solid ${open ? 'var(--shell-hairline-strong)' : 'var(--shell-hairline)'}`,
         background: item.userMention ? 'var(--shell-work)' : 'var(--shell-paper)',
       }}

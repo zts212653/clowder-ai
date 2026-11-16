@@ -1,8 +1,6 @@
-import {
-  deploymentDefaults,
-  type MessageSearchAnswerAttachmentRequest,
-  messageSearchAnswerAttachmentSchema,
-} from '@cat-cafe/shared';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { deploymentDefaults, entityProvenanceSchema } from '@cat-cafe/shared';
 import { defineMcpCanonicalFactory, defineMcpMigrationFactory } from '../tool-governance-migration.js';
 import { invocationFetch } from './invocation-auth.js';
 
@@ -79,13 +77,15 @@ import {
 } from './invocation-auth.js';
 import { createMemoryCueTools } from './memory-cue-tools.js';
 import { createPersonMemoryLifecycleTools } from './person-memory-lifecycle-tools.js';
-import { createPersonMemoryProposalTool } from './person-memory-proposal-tool.js';
-import {
-  createDeferredPersonMemoryTool,
-  createProactiveMemoryAbstentionTool,
-} from './proactive-memory-opportunity-tool.js';
+import { createDeferredPersonMemoryTool } from './proactive-memory-opportunity-tool.js';
 import { withProfileReadRecovery } from './profile-read-recovery.js';
 import { projectRoutingCallbackResponse } from './routing-preflight-response.js';
+import {
+  prepareSourceReply,
+  type SourceReplyInput,
+  sourceCardRequestSchema,
+  sourceReplyInputSchema,
+} from './source-reply.js';
 
 /**
  * F174 Phase A — reason taxonomy lives in @cat-cafe/shared (single source of
@@ -376,10 +376,10 @@ const IMPLEMENTATION_REVIEW_ANCHOR_ERROR =
 const postMessageThreadIdSchema = z.string().min(1);
 
 export const postMessageInputSchema = {
-  searchAnswer: messageSearchAnswerAttachmentSchema
+  searchAnswer: sourceReplyInputSchema
     .optional()
     .describe(
-      'Prepared server-owned answer reference. Requires stable clientMessageId. For forwarding an actual bound card, add source={messageId,blockId}; the Host re-admits it for this destination.',
+      'Attach selected original sources with {query,selections:[{threadId,messageId,contentRevision,quote,reason,part?,range?}]}; full reads supply version and part coordinates. Host verifies and prepares them before sending. Requires stable clientMessageId; retain the same selection and optional operationId on retry. A saved {publicationRef} and bound-card source={messageId,blockId} still work for reuse/forwarding. Ordinary recall stays read-only.',
     ),
   content: z.string().min(1).describe('The message content to post'),
   effectClass: z
@@ -1044,7 +1044,7 @@ function containsPawFeelMarker(content: string): boolean {
 async function _executePostMessage(
   input: {
     content: string;
-    searchAnswer?: MessageSearchAnswerAttachmentRequest;
+    searchAnswer?: SourceReplyInput;
     contextAttachments?: ContextAttachment[] | undefined;
     threadId?: string | undefined;
     replyTo?: string | undefined;
@@ -1095,6 +1095,21 @@ async function _executePostMessage(
   if (!input.localReviewVerdict && hasAnyLocalReviewAnchor(input)) {
     return errorResult(`post_message ${IMPLEMENTATION_REVIEW_ANCHOR_ERROR}`);
   }
+  let searchAnswer = input.searchAnswer;
+  if (searchAnswer && !('publicationRef' in searchAnswer) && input.clientMessageId) {
+    const prepared = await prepareSourceReply(
+      searchAnswer,
+      {
+        operationId: input.clientMessageId,
+        ...(input.threadId ? { destinationThreadId: input.threadId } : {}),
+        ...(input.replyTo ? { replyTo: input.replyTo } : {}),
+        ...(input.agentKeyCatId ? { agentKeyCatId: input.agentKeyCatId } : {}),
+      },
+      callbackPost,
+    );
+    if (!prepared.ok) return prepared.result;
+    searchAnswer = { publicationRef: prepared.publicationRef };
+  }
   // F174 Phase E (AC-E2/E5): explicit kind:'none' policy. There's no useful
   // local fallback for post_message — losing the message is preferable to
   // re-creating server state on a stale invocation. Cats see the structured
@@ -1106,7 +1121,7 @@ async function _executePostMessage(
         '/api/callbacks/post-message',
         {
           content: input.content,
-          ...(input.searchAnswer ? { searchAnswer: input.searchAnswer } : {}),
+          ...(searchAnswer ? { searchAnswer } : {}),
           ...(input.contextAttachments?.length ? { contextAttachments: input.contextAttachments } : {}),
           ...(input.threadId ? { threadId: input.threadId } : {}),
           ...(input.replyTo ? { replyTo: input.replyTo } : {}),
@@ -1220,7 +1235,7 @@ async function _executePostMessage(
 export async function handlePostMessage(
   input: {
     content: string;
-    searchAnswer?: MessageSearchAnswerAttachmentRequest;
+    searchAnswer?: SourceReplyInput;
     contextAttachments?: ContextAttachment[] | undefined;
     threadId?: string | undefined;
     replyTo?: string | undefined;
@@ -1711,7 +1726,7 @@ export async function handleCreateTask(input: {
 export async function handleCrossPostMessage(input: {
   threadId: string;
   content: string;
-  searchAnswer?: MessageSearchAnswerAttachmentRequest;
+  searchAnswer?: SourceReplyInput;
   targetCats?: string[] | undefined;
   replyTo?: string | undefined;
   clientMessageId?: string | undefined;
@@ -1912,7 +1927,9 @@ export const createRichBlockInputSchema = {
   block: z
     .string()
     .min(1)
-    .describe('JSON string of the rich block object. Must include id, kind, v:1, and kind-specific fields.'),
+    .describe(
+      'JSON string with id, kind, v:1 and kind-specific fields. For verified original-source cards use kind:"sources", query, selections:[{threadId,messageId,contentRevision,quote,reason,part?,range?}]. Full reads supply version and sourceParts; reuse id and selections on retry. This author input is verified by Host, never rendered as an unchecked block.',
+    ),
   threadId: z
     .string()
     .min(1)
@@ -2003,6 +2020,27 @@ export async function handleCreateRichBlock(input: {
     parsed = JSON.parse(input.block);
   } catch {
     return errorResult('Invalid JSON in block parameter');
+  }
+
+  if (parsed && typeof parsed === 'object' && 'kind' in parsed && parsed.kind === 'sources') {
+    if (!getInvocationAuthSignal().hasFullCredentials)
+      return errorResult(
+        'Agent-key source cards must accompany the actual answer: use post_message with content, searchAnswer={query,selections}, clientMessageId, threadId and the original replyTo for a cloud return. No card or message was created.',
+      );
+    const source = sourceCardRequestSchema.safeParse(parsed);
+    if (!source.success) return errorResult(`Invalid source card: ${source.error.message}`);
+    if (input.awaitResponseV1) return errorResult('Source cards do not create owner decisions.');
+    const { kind: _kind, v: _version, id, ...selection } = source.data;
+    const prepared = await prepareSourceReply(
+      selection,
+      {
+        operationId: id,
+        ...(input.threadId ? { destinationThreadId: input.threadId } : {}),
+        ...(input.agentKeyCatId ? { agentKeyCatId: input.agentKeyCatId } : {}),
+      },
+      callbackPost,
+    );
+    return prepared.result;
   }
 
   // #85 M2c: normalize before validation (type→kind, auto v:1)
@@ -2907,54 +2945,12 @@ export const proposeProfileUpdateInputSchema = {
     ),
 };
 
-export async function handleProposeProfileUpdate(input: {
-  afterContent: string;
-  rationale: string;
-  signalKind: 'cat-declared' | 'cvo-instructed';
-  targetLayer?: ProfileUpdateTargetLayer | undefined;
-  sourceMessageId?: string | undefined;
-  expectedRevision?: string | undefined;
-  clientRequestId?: string | undefined;
-  agentKeyCatId?: string | undefined;
-}): Promise<ToolResult> {
-  // Always send an idempotency key — auto-generate when the caller didn't supply one, so transient
-  // callbackPost retries never produce duplicate proposals (mirrors F128 handleProposeThread).
-  const body: Record<string, unknown> = {
-    afterContent: input.afterContent,
-    rationale: input.rationale,
-    signalKind: input.signalKind,
-    ...(input.expectedRevision ? { expectedRevision: input.expectedRevision } : {}),
-    ...(input.targetLayer ? { targetLayer: input.targetLayer } : {}),
-    ...(input.sourceMessageId ? { sourceMessageId: input.sourceMessageId } : {}),
-    clientRequestId: input.clientRequestId ?? randomUUID(),
-  };
-
-  const result = await callbackPost('/api/callbacks/propose-profile-update', body, agentKeyOptions(input));
-  if (!result.isError) {
-    try {
-      const data = JSON.parse((result.content[0] as { text: string }).text);
-      if (data?.status === 'stale_ignored') {
-        return errorResult(
-          'Profile-update proposal was NOT created: this invocation has been superseded by a newer one (stale_ignored).',
-        );
-      }
-    } catch {
-      // parse failure is fine
-    }
-  }
-  return result;
-}
-
 // ============ F276: People & Relationship Memory ============
 
-const personMemoryProposalToolset = createPersonMemoryProposalTool(callbackPost);
 const personMemoryLifecycleToolset = createPersonMemoryLifecycleTools(callbackPost, callbackGet);
 const memoryCueToolset = createMemoryCueTools(callbackPost);
-const proactiveMemoryAbstentionToolset = createProactiveMemoryAbstentionTool(callbackPost);
 const deferredPersonMemoryToolset = createDeferredPersonMemoryTool(callbackPost);
-export const { handleProposePersonMemory } = personMemoryProposalToolset;
-export const { handleRecordProactiveMemoryAbstention } = proactiveMemoryAbstentionToolset;
-export const { handleDeferPersonMemoryDelta, handleDisposeDeferredPersonMemory } = deferredPersonMemoryToolset;
+export const { handleDisposeDeferredPersonMemory } = deferredPersonMemoryToolset;
 export const {
   handleGetPersonMemoryProposalStatus,
   handleRecallPersonRelationship,
@@ -2992,17 +2988,12 @@ export const proposeEntityInputSchema = {
       'Visibility: only "workspace" accepted (KD-7 gate — private scope deferred until resolver supports visibility filtering)',
     ),
   provenance: z
-    .array(
-      z.object({
-        source: z.string().min(1).max(200).describe('Provenance source (e.g. "cat-proposed", "nudge")'),
-        anchor: z.string().min(1).max(500).optional().describe('Thread/message anchor for traceability'),
-        note: z.string().max(500).optional().describe('Optional note'),
-        date: z.string().max(20).optional().describe('ISO date (YYYY-MM-DD)'),
-      }),
-    )
+    .array(entityProvenanceSchema)
     .min(1)
     .max(10)
-    .describe('Provenance chain — at least one entry with source; include thread anchor for traceability'),
+    .describe(
+      'Existing source pointers and cat-authored reading purposes. Pair note with an exact sourcePath or threadId/messageId so a later cat can read the applicable history. Approval does not grant source access.',
+    ),
   rationale: z
     .string()
     .min(1)
@@ -3015,30 +3006,6 @@ export const proposeEntityInputSchema = {
     .optional()
     .describe('Optional idempotency key. Resending with the same value returns the same proposalId.'),
 };
-
-export async function handleProposeEntity(input: {
-  entityId: string;
-  entityType: 'person' | 'cat' | 'feature' | 'concept' | 'external';
-  canonicalName: string;
-  aliases: string[];
-  stance: 'endorsed' | 'rejected' | 'critique_target' | 'deliverable_only' | 'unknown';
-  visibilityScope: string;
-  provenance: Array<{ source: string; anchor?: string; note?: string; date?: string }>;
-  rationale: string;
-  clientRequestId?: string | undefined;
-}): Promise<ToolResult> {
-  return callbackPost('/api/callbacks/propose-entity', {
-    entityId: input.entityId,
-    entityType: input.entityType,
-    canonicalName: input.canonicalName,
-    aliases: input.aliases,
-    stance: input.stance,
-    visibilityScope: input.visibilityScope,
-    provenance: input.provenance,
-    rationale: input.rationale,
-    clientRequestId: input.clientRequestId ?? randomUUID(),
-  });
-}
 
 // ============ F221: Taste Capture Loop ============
 
@@ -3182,81 +3149,6 @@ export const proposeTasteInputSchema = {
     .describe('Idempotency key — same clientRequestId returns cached proposal'),
 };
 
-export async function handleProposeTaste(input: {
-  scene?: string;
-  quote?: string;
-  takeaway?: string;
-  tags?: string[];
-  dimension?: string;
-  privacy?: 'public' | 'sensitive';
-  sourceMessageId?: string;
-  target?: z.infer<typeof tasteCorrectionTargetInputSchema>;
-  clientRequestId?: string;
-}): Promise<ToolResult> {
-  const createSchema = z
-    .object({
-      scene: z.string().min(1).max(2000),
-      quote: z.string().min(1).max(2000),
-      takeaway: z.string().trim().min(1).max(500).optional(),
-      tags: z.array(z.string().min(1).max(50)).min(1).max(10),
-      dimension: proposeTasteInputSchema.dimension.unwrap(),
-      privacy: z.enum(['public', 'sensitive']),
-      sourceMessageId: z.string().min(1).optional(),
-      clientRequestId: z.string().min(1).max(200).optional(),
-      target: z.undefined().optional(),
-    })
-    .strict();
-  const correctionSchema = z
-    .object({
-      target: tasteCorrectionTargetInputSchema,
-      clientRequestId: z
-        .string()
-        .trim()
-        .min(32)
-        .max(200)
-        .regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/)
-        .optional(),
-      scene: z.undefined().optional(),
-      quote: z.undefined().optional(),
-      takeaway: z.undefined().optional(),
-      tags: z.undefined().optional(),
-      dimension: z.undefined().optional(),
-      privacy: z.undefined().optional(),
-      sourceMessageId: z.undefined().optional(),
-    })
-    .strict();
-  const parsed = z.union([createSchema, correctionSchema]).safeParse(input);
-  if (!parsed.success) {
-    return errorResult(
-      'Invalid Taste proposal input. Expected either create fields ' +
-        '{scene, quote, tags, dimension, privacy} or correction fields ' +
-        '{target:{sourceAnchor, expectedRevision, reason, suggestedPatch}}, without mixing them. ' +
-        'Example correction: target.sourceAnchor="taste-vignette:docs/taste/vignettes/example.md", ' +
-        'target.expectedRevision="sha256:<64 lowercase hex>". ' +
-        `Details: ${parsed.error.issues.map((issue) => issue.message).join('; ')}`,
-    );
-  }
-  const request = parsed.data.target
-    ? { target: parsed.data.target, clientRequestId: parsed.data.clientRequestId ?? randomUUID() }
-    : { ...parsed.data, clientRequestId: parsed.data.clientRequestId ?? randomUUID() };
-  const result = await callbackPost('/api/callbacks/propose-taste', request);
-  // Detect stale_ignored: match thread/profile/handoff pattern — a stale invocation
-  // gets HTTP 200 with status='stale_ignored' but no proposal was actually created.
-  if (!result.isError) {
-    try {
-      const data = JSON.parse((result.content[0] as { text: string }).text);
-      if (data?.status === 'stale_ignored') {
-        return errorResult(
-          'Taste proposal NOT created: this invocation was superseded by a newer one (stale_ignored).',
-        );
-      }
-    } catch {
-      // parse failure is fine — means result is not a stale_ignored response
-    }
-  }
-  return result;
-}
-
 // ============ F321: source-bound Event memory correction ============
 
 const eventCorrectionPatchInputSchema = z
@@ -3290,24 +3182,6 @@ export const proposeEventMemoryCorrectionInputSchema = {
     .optional()
     .describe('Idempotency key; retries with the same request return the same proposal.'),
 };
-
-export async function handleProposeEventMemoryCorrection(input: {
-  eventId: string;
-  expectedRevision: string;
-  reason: 'unsupported_by_source' | 'outdated' | 'not_applicable_here';
-  suggestedPatch: {
-    summary?: string;
-    cognitiveTransition?: (typeof COGNITIVE_TRANSITIONS)[number] | null;
-    relatedHarness?: string[] | null;
-    confidence?: (typeof EVENT_CONFIDENCES)[number];
-  };
-  clientRequestId?: string;
-}): Promise<ToolResult> {
-  return callbackPost('/api/callbacks/propose-event-memory-correction', {
-    ...input,
-    clientRequestId: input.clientRequestId ?? randomUUID(),
-  });
-}
 
 // ============ Thread Cats Discovery ============
 
@@ -3495,7 +3369,7 @@ const defineCanonicalTool = defineMcpCanonicalFactory('callback-tools.ts');
 function resolveAnchorModeFilePath(): string | null {
   const invocationId = getInvocationAuthSignal().invocationId;
   if (invocationId) {
-    return `/tmp/cat-cafe-anchor-mode-${invocationId}`;
+    return join(process.platform === 'win32' ? tmpdir() : '/tmp', `cat-cafe-anchor-mode-${invocationId}`);
   }
   return null;
 }
@@ -3663,6 +3537,7 @@ export const callbackTools = [
       'Use when: sharing a mid-task update, routing one ordinary @ notification, or handing one named external action to one successor with action.mode="single". ' +
       'NOT for: invocation-token delivery to another thread (use cross_post_message) or deliberate independent multi-cat review/ideation (use multi_mention with mode="parallel"). ' +
       'Output: the message is persisted in the principal-selected thread; routed targets are queued, and action conflicts return safe_wait without creating work. ' +
+      'For an answer with original-source citations, pass searchAnswer={query,selections} and stable clientMessageId; the Host verifies the selected quotes and binds its card to this message. Full reads supply contentRevision and sourceParts. Selection reasons remain your judgment. Ordinary updates need no card. ' +
       LOCAL_REVIEW_MESSAGE_USAGE_DESCRIPTION +
       'Examples: ordinary update {"content":"Verification complete."}; review request {"content":"@sonnet\\nReview pr:owner/repo#123 at the exact HEAD and accepted source cited here.","targetCats":["sonnet"]}. ' +
       "The receipt acknowledges submission, not the recipient's answer; wait for an inbound reply before claiming their result. " +
@@ -3734,9 +3609,10 @@ export const callbackTools = [
     name: 'cat_cafe_get_thread_context',
     description:
       'Read messages from one thread, with token-lean anchor previews by default and optional full bodies, ranked keywords, or a bounded window around messageId. ' +
+      'For "find the original words and cite them / 找原话带出处", full persisted originals include contentRevision and sourceParts (part coordinates and UTF-16 lengths): select the exact quote and your reason, then attach it through create_rich_block kind="sources" in the ordinary reply, or post_message searchAnswer with the actual answer. Previews, oversized anchors and merged queued text do not supply a quotable revision. Reading never publishes a card. ' +
       'Use when: browsing the current conversation, reading a different known threadId, finding relevant messages inside that thread, opening context around a known messageId, or explicitly catching up. ' +
       'NOT for: finding features, decisions, plans, lessons, or unknown threads across project knowledge; use search_evidence or list_threads first. ' +
-      'Output: a bounded aggregate envelope with threadId, ordered messages, contextScope, hasMore, and nextCursor when continuation is required; anchor mode includes drillDown pointers, while responseMode="full" returns complete bodies per ordinary item and includes same-target queued bodies. contextScope="unread_delta" contains only currently unread relevant messages; hasMore=false closes that selection, not all thread history. ' +
+      'Output: a bounded aggregate envelope with threadId, ordered messages, contextScope, hasMore, and nextCursor when continuation is required; anchor mode includes drillDown pointers (and bounded richBlocksSummary when extra.rich blocks exist), while responseMode="full" returns complete bodies (including attached richBlocks such as html_widget, card, checklist, or diff) per ordinary item and includes same-target queued bodies. contextScope="unread_delta" contains only currently unread relevant messages; hasMore=false closes that selection, not all thread history. ' +
       'When available, situation reports exact lifecycle-backed active runs; situation.complete=false means runtime evidence could not be fully joined, so do not infer execution from recent speech. ' +
       'GOTCHA: keep the same limit, readIntent and other read arguments when following nextCursor; changing one requires a new read without cursor. Keyword ranking is best-effort over a bounded recent scan; scanCapped=true means older history may contain additional matches. A single item larger than the full-page budget returns an honest anchor with a precise drill pointer, not read evidence; drill an oversized workflow SOP with cat_cafe_get_workflow_sop using the returned threadId. History is the default selection even in full mode; for a complete catch-up, set readIntent="unread" and responseMode="full" without catId/keyword/messageId/before/after filters and follow nextCursor until hasMore=false. Pass threadId only for a different thread; omit it for the current thread.',
     inputSchema: getThreadContextInputSchema,
@@ -3792,11 +3668,12 @@ export const callbackTools = [
     description:
       'Look up one original message. Use when following replyTo or a discovered source coordinate, including the origin of a remembered agreement. ' +
       'Not for broad discovery: use search_evidence first when the source ID is unknown. ' +
-      'Returns the message content, sender, timestamp, and optionally N nearby messages for context. ' +
+      'Returns the message content, sender, timestamp, attached richBlocks (in mode="full") or bounded richBlocksSummary (in mode="preview"), and optionally N nearby messages for context. ' +
+      'For "find the original words and cite them / 找原话带出处", use mode="full" to obtain contentRevision and sourceParts, select the exact quote and your reason, then attach it through create_rich_block kind="sources" in the ordinary reply, or post_message searchAnswer with the actual answer. Preview is a location clue, not full source verification. Reading does not publish a card. ' +
       'A durable typed local-review message also includes localReviewFact, as does thread-context; prose alone never creates that fact. ' +
       'GOTCHA: messageId is the bare message ID; for threadId#messageId coordinates pass only the part after #, not the thread prefix. ' +
       'PARAM GUIDE: messageId = required exact ID. contextCount = number of messages before/after to include (default 0, max 10). ' +
-      'mode = "preview" (default — bounded excerpt that saves context) or "full" (complete original content; use when you need the whole message — anchor drillDown pointers already request mode=full).',
+      'mode = "preview" (default — bounded excerpt + richBlocksSummary that saves context; sets truncated=true with drillDown when richBlocks are omitted) or "full" (complete original content + full richBlocks; use when you need the whole message or html_widget/card source — anchor drillDown pointers already request mode=full).',
     inputSchema: {
       messageId: z.string().min(1).describe('The exact message ID to look up'),
       contextCount: z
@@ -4002,6 +3879,9 @@ export const callbackTools = [
     description:
       'Read a bounded list of durable tasks with optional threadId/catId/status/kind filters, or exact featureId matching canonical TaskItem.relatedFeatureId. ' +
       'Use when: resuming existing work and checking its current scope, status, authorization source or execution artifacts before asking the owner again; also for finding tasks, owners, blockers and feature work. ' +
+      'When resuming, reconcile Task status, saved why and closure evidence with the current request; done records an ended Task, not proof that every artifact is complete. ' +
+      'If the intended work or its authority remains unclear, clarify before writing: name the candidate works, or state the recorded result and the specific conflict and ask the one missing question. ' +
+      'Otherwise carry out the clearly authorized request through the existing Task lifecycle without asking again or silently reopening an ended Task. ' +
       'NOT for: creating or changing tasks (use cat_cafe_create_task or cat_cafe_update_task). ' +
       'Output: up to 50 tasks plus totalMatched/truncated; feature-filtered reads also return a content-free queryRef for owner verification. ' +
       'GOTCHA: overview why fields can be anchored; pass taskId to retrieve one task with its full untruncated why. Drill the original authorization and receipts when needed; discovery grants no new authority, and search summaries do not replace current Task truth.',
@@ -4194,19 +4074,20 @@ export const callbackTools = [
   defineCanonicalTool({
     name: 'cat_cafe_create_rich_block',
     description:
-      'Create a rich block (card, diff, checklist, file, media_gallery, audio, interactive, or html_widget) attached to the current message. ' +
+      'Create a rich block (card, sources, diff, checklist, file, media_gallery, audio, interactive, or html_widget) attached to the current message. ' +
+      'Use sources when answering with original quotations and clickable provenance: {kind:"sources",v:1,id,query,selections:[{threadId,messageId,contentRevision,quote,reason,part?,range?}]}. Full original reads provide version and sourceParts. Host verifies provenance without another search or generative judge; reasons remain your judgment, not system-certified support. ' +
       'Use card for status/decisions, diff for code changes, checklist for inline todos, file for existing documents/audio/video, media_gallery for images, audio for voice, interactive for user selection/confirmation, html_widget for a small HTML explanation within the conversation. ' +
       `Use this when the user wants to see, hear, or interact with the result directly in ${deploymentDefaults.brand.name} Chat (for example: show me, draw an HTML demo, or send a screenshot); the user does not need to say "rich text". For a commissioned single-file HTML explainer/prototype or a reusable/evolving tool, use cat_cafe_work to save, then publish-reference to attach its fixed-version card to this Chat. Choose by purpose, not size; a tiny reusable tool can be a work. Continue existing works under the same contentRef. A one-off typo fix in a widget need not become a work. Use media_gallery for existing screenshots/images, and browser-preview for a complex localhost or multi-page app. ` +
       'NOT for discussing or editing HTML without a visible-delivery request. ' +
       'Use this for long structured replies/reports with lists, tables, code blocks, diffs, status fields, or multi-step checklists; F192 rich-messaging wakeup treats plain long Markdown with these signals and no rich block as a miss. ' +
       'NOT for: persistent task tracking across sessions (use create_task for 🧶 毛线球). NOT for: document generation/export (use generate_document). ' +
-      'Output: block rendered inline in the current message. ' +
+      'Output: block rendered inline in the current message. Sources writes one prepared publication through the existing verifier; successful normal R binds its card. Prepared is not published. Agent-key sources must use post_message with the actual answer in content, searchAnswer={query,selections}, stable clientMessageId, threadId and original replyTo for a cloud return; this rich-only call does not send a message or consume its grant. Reuse id and original arguments on retry, including saved legacy query-only operations. Ordinary recall never auto-publishes. ' +
       'GOTCHA: media_gallery local absolute image paths are resolved only inside registered workspaces (existing readable image, <=10MiB) to /api/workspace/file/raw?worktreeId=...&path=...; unknown/protected/unusable local paths are rejected. This is a file view, not upload publication. Automatic upload publication only covers native image_gen/Antigravity provider results; use publish_image for durable local PNG publication. ' +
       'GOTCHA: The block JSON must use "kind" (NOT "type") and include "v": 1 and a unique "id". ' +
       "GOTCHA: Call get_rich_block_rules first if you haven't loaded the full schema yet in this session. " +
       'GOTCHA: checklist kind is ephemeral inline content — for persistent cross-session work items, use create_task (毛线球) instead. ' +
       'In an ordinary conversation, when the requester explicitly needs one later owner decision, pass awaitResponseV1={mode:"once"}; the Host publishes a durable RuntimeInteraction and returns immediately. Scoped work/read-only invocations cannot use this mode. This is never inferred from interactiveType or prose, and callback/guide/action options are rejected. ' +
-      'Ordinary rich blocks fall back to cc_rich text encoding when callback auth is unavailable. awaitResponseV1 always fails closed because a text fallback cannot create the durable decision lifecycle.',
+      'Ordinary rich blocks fall back to cc_rich text encoding when callback auth is unavailable. Sources and awaitResponseV1 always fail closed: text fallback cannot create a verified binding or durable decision lifecycle.',
     inputSchema: createRichBlockInputSchema,
     handler: handleCreateRichBlock,
     governance: {
@@ -4484,115 +4365,12 @@ export const callbackTools = [
       ],
     },
   }),
-  defineCanonicalTool({
-    name: 'cat_cafe_propose_profile_update',
-    description:
-      'Propose an update to a profile layer — the "养熟循环" digest entry point (F231 KD-12/KD-18). ' +
-      'Supports primer (default, per-persona relationship), corpus (owner-wide shared facts), and capsule (a 1–300 character opening portrait). ' +
-      'Output: returns a proposalId, NOT a written file; the content is only written after operator approval (reject/expire = nothing changes). ' +
-      'Use when: the content is a durable fact about the authenticated person or this persona-operator relationship — personal context, preferred address, or a relationship-specific communication boundary. ' +
-      'Use targetLayer:corpus for owner-wide personal facts independent of persona relationship (birthday, background, preferences that all cats should know). ' +
-      'Use targetLayer:capsule to draft the short portrait visible in Memory → Profile; read layer:capsule first, keep supporting source coordinates in the rationale, and wait for the owner to confirm. Capsule content belongs only in private owner data, never repository defaults. ' +
-      'NOT for reusable judgments about what makes output, design, expression, architecture, or systems good (use cat_cafe_propose_taste), repeated operational/tool/process rules (use code-as-harness), or one-off context. ' +
-      'A correction, praise, or Magic Word does not choose the lane; semantic content does. ' +
-      'afterContent is the COMPLETE new content (whole-file replacement, not a diff) — include everything you want kept. ' +
-      'Use cat_cafe_read_profile first when preserving existing content matters. For names/roles, state the subject cat, current agreement and original proposal/response message coordinates separately; the registration source is not the original event. GOTCHA: shared-persona primers retain family continuity, but an old cat role is not a new cat identity. signalKind records proposal provenance; current profile takes effect only after owner approval.',
-    inputSchema: proposeProfileUpdateInputSchema,
-    handler: handleProposeProfileUpdate,
-    governance: {
-      implementationExport: 'handleProposeProfileUpdate',
-      resourceFamily: 'identity-proposal',
-      action: 'create',
-      authority: 'callback-owner',
-      risk: { level: 'write', openWorld: false },
-      runtimeProfiles: ['full'],
-    },
-  }),
-  personMemoryProposalToolset.tool,
-  proactiveMemoryAbstentionToolset.tool,
-  deferredPersonMemoryToolset.tool,
+
   ...deferredPersonMemoryToolset.lifecycleTools,
   ...personMemoryLifecycleToolset.tools,
   ...memoryCueToolset.tools,
-  // F260 Phase A: Entity registration proposal (operator approves via Hub, then entity enters registry)
-  defineTool({
-    name: 'cat_cafe_propose_entity',
-    description:
-      'Propose a workspace entity for the registry. Returns a proposalId — the entity is only registered ' +
-      'after the operator approves in the Approval Hub. ' +
-      'Use when: (1) responding to a registration nudge with pre-filled params; ' +
-      '(2) the operator explicitly requests entity registration; or ' +
-      '(3) the current turn verified a durable workspace name/handle/alias mapping and provenance identifies its source. ' +
-      'NOT for an unverified or bare proper name, bulk proper-noun extraction, or owner-private facts, relationships, or interactions ' +
-      '(use cat_cafe_propose_person_memory). Do not infer identity from spelling or silently write either lane. ' +
-      'GOTCHA: correcting a pending/private F276 card is not an Entity mutation; use cat_cafe_propose_person_memory with replacesProposalId, or withdraw the F276 proposal. ' +
-      'stance includes negative values: "rejected" marks terms the registry should explicitly NOT match, ' +
-      '"critique_target" marks entities under critique (e.g. architectural patterns being evaluated). ' +
-      'visibilityScope: only "workspace" accepted (KD-7 gate — private scope deferred until resolver supports visibility filtering).',
-    inputSchema: proposeEntityInputSchema,
-    handler: handleProposeEntity,
-    governance: {
-      implementationExport: 'handleProposeEntity',
-      resourceFamily: 'identity-proposal',
-      action: 'create',
-      authority: 'callback-owner',
-      risk: { level: 'write', openWorld: false },
-      runtimeProfiles: ['full'],
-    },
-  }),
   // F221 Phase B: Taste Capture Loop — cat proposes a taste vignette for operator approval
-  defineCanonicalTool({
-    name: 'cat_cafe_propose_taste',
-    description:
-      'Propose a taste vignette capturing a operator preference/aesthetic signal (F221 Taste Capture Loop). ' +
-      'Output: returns a proposalId; the vignette is only written after operator approval in the Approval Hub. ' +
-      'Use when: the content is a reusable judgment about what makes output, design, expression, architecture, or system behavior good or bad — including positive and negative taste signals. ' +
-      'NOT for durable personal facts or relationship-specific context (use cat_cafe_propose_profile_update), repeated operational/tool/process rules (use code-as-harness), or transient reactions. ' +
-      'A correction or praise does not choose the lane; semantic content does. ' +
-      'To challenge an existing Taste memory as unsupported, outdated, or not applicable here, pass target with the exact sourceAnchor, expectedRevision, reason, and suggestedPatch; that creates an attached owner approval instead of mutating canonical memory directly. ' +
-      'The 7 taste dimensions cover relationship-stance, cognitive-honesty, architecture-aesthetics, ' +
-      'visual-quality, authentic-expression, system-philosophy, and creative-craft. ' +
-      'GOTCHA: relationship-stance stores a reusable stance such as partner-not-tool, not a personal fact about the current operator. Preserve original language in quote — taste signals lose meaning when paraphrased.' +
-      ' Use optional takeaway for a one-sentence hypothesis of what {{coCreator.name}} prefers; approval covers that hypothesis with the quote and scene. ' +
-      'New proposals bind to the authenticated origin message owned by the same user in this thread. On retries, both the current origin and saved original source must remain eligible. ' +
-      'Retry with the same clientRequestId, unchanged content and original explicit sourceMessageId (or omit it), including from a later invocation or after approval; a changed payload needs a new key. ' +
-      'Public means sharing within the private home repository after the owner approves the complete fields, not publishing on the internet.',
-    inputSchema: proposeTasteInputSchema,
-    handler: handleProposeTaste,
-    governance: {
-      implementationExport: 'handleProposeTaste',
-      resourceFamily: 'identity-proposal',
-      action: 'create',
-      authority: 'callback-owner',
-      risk: { level: 'write', openWorld: false },
-      runtimeProfiles: ['full'],
-    },
-  }),
-  defineCanonicalTool({
-    name: 'cat_cafe_propose_event_memory_correction',
-    description:
-      'Propose a source-bound correction to an existing Event memory after using or inspecting it. ' +
-      'Returns a pending proposal for the owner; it never mutates the Event directly. ' +
-      'Use when the current Event summary is unsupported by its original source, outdated, or not applicable in the present context. ' +
-      'Pass the exact eventId and revision you read plus a bounded patch to interpretive fields. ' +
-      'NOT for creating a new Event, changing source coordinates/identity, or bypassing owner approval. ' +
-      'GOTCHA: a stale revision or unavailable original source is rejected; reread the Event instead of guessing.',
-    inputSchema: proposeEventMemoryCorrectionInputSchema,
-    handler: handleProposeEventMemoryCorrection,
-    governance: {
-      implementationExport: 'handleProposeEventMemoryCorrection',
-      resourceFamily: 'identity-proposal',
-      action: 'create',
-      authority: 'callback-owner',
-      risk: { level: 'write', openWorld: false },
-      runtimeProfiles: ['full'],
-      standaloneReason: {
-        disposition: 'accepted-boundary',
-        kind: 'resource-entry',
-        admissionRef: 'architecture-cell:memory',
-      },
-    },
-  }),
+
   // ============ F155: Guide Engine ============
   defineTool({
     name: 'cat_cafe_update_guide_state',

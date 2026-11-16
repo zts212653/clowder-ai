@@ -32,7 +32,8 @@ import {
   type SkillConsumptionVerificationFailure,
   WORKSPACE_NAVIGATOR_CONSUMER_ID,
 } from '../domains/cats/services/tool-usage/SkillConsumptionReceiptService.js';
-import { probeGitRepository } from '../domains/workspace/git-worktree-probe.js';
+import { compareGitStatusEntries, GitStatusReadError, readGitStatus } from '../domains/workspace/git-status.js';
+import { probeGitWorkTree } from '../domains/workspace/git-worktree-probe.js';
 import type { PullRequestChangesDependencies } from '../domains/workspace/pull-request-changes.js';
 import { canonicalLinkedRootId, readLinkedRootState } from '../domains/workspace/roots/workspace-linked-root-store.js';
 import { readWorkspaceFileMetadata } from '../domains/workspace/workspace-file-metadata.js';
@@ -70,7 +71,7 @@ import { registerWorkspaceMediaFileActions } from './local-media-file-actions.js
 import { sendStoredGifPoster } from './uploaded-gif-poster.js';
 import { registerChatChanges } from './workspace-chat-changes.js';
 import { registerWorkspaceChatReferences } from './workspace-chat-references.js';
-import { parseWorkspaceChangedFiles } from './workspace-diff.js';
+import { toWorkspaceChangedFile, type WorkspaceChangedFile } from './workspace-diff.js';
 import { workspaceDirectHuman } from './workspace-direct-human.js';
 import { registerWorkspaceFileActions } from './workspace-file-actions.js';
 import { registerWorkspaceFileDownload } from './workspace-file-download.js';
@@ -341,7 +342,7 @@ export const workspaceRoutes: FastifyPluginAsync<WorkspaceRouteOpts> = async (ap
         };
       }),
     );
-    registerWorktrees(all);
+    registerWorktrees(entries);
     return { worktrees: all };
   });
 
@@ -545,9 +546,9 @@ export const workspaceRoutes: FastifyPluginAsync<WorkspaceRouteOpts> = async (ap
     }
   });
 
-  // GET /api/workspace/diff?worktreeId=&path=&view=files — file list or full patch
+  // GET /api/workspace/diff?worktreeId=&path=&view=files|count — metadata or full patch
   app.get<{
-    Querystring: { worktreeId?: string; path?: string; view?: 'files' };
+    Querystring: { worktreeId?: string; path?: string; view?: 'files' | 'count' };
   }>('/api/workspace/diff', async (request, reply) => {
     const { worktreeId, path: filePath } = request.query;
     if (!worktreeId) {
@@ -556,23 +557,48 @@ export const workspaceRoutes: FastifyPluginAsync<WorkspaceRouteOpts> = async (ap
     }
 
     try {
-      const root = await getWorktreeRoot(worktreeId);
-      const probe = await probeGitRepository(root);
+      let root: string;
+      try {
+        root = await getWorktreeRoot(worktreeId);
+      } catch (error) {
+        const code =
+          typeof error === 'object' && error !== null && 'code' in error
+            ? String((error as { code?: unknown }).code)
+            : '';
+        if (code === 'ENOENT' || code === '128') {
+          reply.status(503);
+          return { error: 'Git is unavailable', code: 'git_unavailable' };
+        }
+        throw error;
+      }
+      const probe = await probeGitWorkTree(root);
       if (probe === 'unavailable') {
         reply.status(503);
         return { error: 'Git is unavailable', code: 'git_unavailable' };
       }
+      if (probe === 'bare') {
+        reply.status(409);
+        return { error: 'Git worktree required', code: 'git_worktree_required' };
+      }
       if (probe === 'not-git') {
-        return { worktreeId, isGitRepository: false, changedFiles: [], diff: '' };
+        return request.query.view === 'count'
+          ? { worktreeId, isGitRepository: false, changedFileCount: 0 }
+          : { worktreeId, isGitRepository: false, changedFiles: [], diff: '' };
       }
 
-      // Get list of changed files (staged + unstaged)
-      const { stdout: statusOut } = await execFileAsync('git', ['status', '--porcelain', '-uall'], {
-        cwd: root,
-        timeout: 5000,
+      const changedFiles: WorkspaceChangedFile[] = [];
+      let changedFileCount = 0;
+      await readGitStatus(root, (entry) => {
+        if (isDenylisted(entry.path)) return;
+        changedFileCount++;
+        if (request.query.view !== 'count') changedFiles.push(toWorkspaceChangedFile(entry));
       });
+      if (request.query.view === 'count') {
+        if (filePath) await resolveWorkspaceFilesystemPath(root, filePath);
+        return { worktreeId, changedFileCount };
+      }
 
-      const changedFiles = parseWorkspaceChangedFiles(statusOut).filter((file) => !isDenylisted(file.path));
+      changedFiles.sort(compareGitStatusEntries);
 
       // Build pathspec: only diff allowed (non-denylisted) files
       // P0 security: git diff without pathspec would leak .env/.pem/.key content
@@ -637,6 +663,9 @@ export const workspaceRoutes: FastifyPluginAsync<WorkspaceRouteOpts> = async (ap
 
       return { worktreeId, changedFiles, diff: diffOutput };
     } catch (e) {
+      if (e instanceof GitStatusReadError) {
+        request.log.warn({ worktreeId, gitStatus: e.diagnostics }, 'workspace Git status failed');
+      }
       if (e instanceof WorkspaceSecurityError) {
         reply.status(e.code === 'NOT_FOUND' ? 404 : 403);
         return { error: e.message };

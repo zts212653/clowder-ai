@@ -81,6 +81,7 @@ import {
 import type { InvocationRegistry } from '../domains/cats/services/agents/invocation/InvocationRegistry.js';
 import type { InvocationTracker } from '../domains/cats/services/agents/invocation/InvocationTracker.js';
 import { MessageDeliveryService } from '../domains/cats/services/agents/invocation/MessageDeliveryService.js';
+import { persistStreamedInteractiveBlock } from '../domains/cats/services/agents/invocation/persist-streamed-interactive-block.js';
 import type { QueueLedgerEntry } from '../domains/cats/services/agents/invocation/queue-ledger/QueueLedger.js';
 import { getRichBlockBuffer } from '../domains/cats/services/agents/invocation/RichBlockBuffer.js';
 import type { ThreadExecutionSituationSource } from '../domains/cats/services/agents/invocation/thread-execution-situation.js';
@@ -176,7 +177,13 @@ import {
   carrierRecoveryPendingResponse,
   resolveSafeWaitCarrier,
 } from './callback-action-carrier-resolution.js';
-import { anchorPendingMention, anchorThreadMessage, truncateHead } from './callback-anchor-helpers.js';
+import {
+  anchorPendingMention,
+  anchorThreadMessage,
+  callbackRichSearchText,
+  projectRichBlocksSummary,
+  truncateHead,
+} from './callback-anchor-helpers.js';
 import {
   extractCallbackCredentials,
   registerCallbackAuthHook,
@@ -201,7 +208,11 @@ import { registerCallbackImageRoutes } from './callback-image-routes.js';
 import { registerCallbackLimbRoutes } from './callback-limb-routes.js';
 import { type CallbackMemoryCueDeps, registerCallbackMemoryCueRoutes } from './callback-memory-cue-routes.js';
 import { registerCallbackMemoryRoutes } from './callback-memory-routes.js';
-import { projectCallbackMessageBody, projectQueuedCallbackMessageBody } from './callback-message-body.js';
+import {
+  projectCallbackMessageBody,
+  projectCallbackMessageCitation,
+  projectQueuedCallbackMessageBody,
+} from './callback-message-body.js';
 import { registerCallbackMessageReadRoutes } from './callback-message-read-routes.js';
 import {
   prepareCallbackSearchAnswer,
@@ -429,7 +440,7 @@ function buildPostMessageRoutingMessage(
       parts.push(`@${w.catId} 不在目标 thread (${w.threadId}) 的参与者列表中，请确认 threadId 是否正确。`);
     } else if (w.kind === 'suppressed_by_terminal_ack') {
       parts.push(`${w.droppedMentions.map((id) => `@${id}`).join('、')} 因 terminal ACK 已记录但未触发新 invocation。`);
-    } else {
+    } else if (w.kind === 'cat_not_found') {
       parts.push(`${w.mention} 不存在，已跳过。`);
     }
   }
@@ -4005,6 +4016,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
               timestamp: item.timestamp,
               contentLength: body.contentLength,
               ...(body.contentBlocks ? { contentBlocks: body.contentBlocks } : {}),
+              ...(body.richBlocks ? { richBlocks: body.richBlocks } : {}),
               requiresDrill: false,
               ...(shouldIncludeAcked ? { acked: await isMentionAcked(item) } : {}),
             };
@@ -4265,7 +4277,9 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
     const getKeywordScore = (item: Awaited<ReturnType<typeof messageStore.getByThread>>[number]): number => {
       const cached = relevanceScores.get(item.id);
       if (cached !== undefined) return cached;
-      const score = scoreKeywordRelevance(item.content, keywordTerms);
+      const richText = callbackRichSearchText(item.extra?.rich?.blocks);
+      const searchableText = richText ? [item.content, richText].filter(Boolean).join('\n') : item.content;
+      const score = scoreKeywordRelevance(searchableText, keywordTerms);
       relevanceScores.set(item.id, score);
       return score;
     };
@@ -4651,6 +4665,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
           timestamp: item.timestamp,
           speaker: getMessageSpeakerName(item),
           ...projectedBody,
+          ...(isFullMode ? projectCallbackMessageCitation(item) : {}),
           truncated: false,
           ...queuedProjection,
           ...localReviewProjection,
@@ -4668,6 +4683,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
           truncated: true,
           oversized: true,
           drillDown: anchored.drillDown,
+          ...projectRichBlocksSummary(item.extra?.rich?.blocks),
           ...queuedProjection,
           ...localReviewProjection,
           ...(keywordTerms.length > 0 ? { relevanceScore: getKeywordScore(item) } : {}),
@@ -4689,6 +4705,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
             userId: principalUserId,
             catId: null,
             content: message.content,
+            ...(message.richBlocks ? { extra: { rich: { blocks: message.richBlocks } } } : {}),
             timestamp: message.timestamp,
           },
           { effectiveThreadId, speaker: message.speaker },
@@ -4718,6 +4735,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
                   : {
                       content: message.content,
                       ...(message.contentBlocks ? { contentBlocks: message.contentBlocks } : {}),
+                      ...(message.richBlocks ? { richBlocks: message.richBlocks } : {}),
                     }),
                 contentLength: message.contentLength,
                 truncated: Boolean(message.sourceUnavailableReason),
@@ -4732,6 +4750,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
             contentLength: message.content.length,
             oversized: true,
             truncated: true,
+            ...projectRichBlocksSummary(message.richBlocks),
             deliveryStatus: message.deliveryStatus,
             queueEntryId: message.queueEntryId,
             ...(message.id.startsWith('queued:')
@@ -5735,16 +5754,20 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       invocationId,
     );
     if (addResult === 'added' || addResult === 'updated') {
-      socketManager.broadcastAgentMessage(
-        {
-          type: 'system_info' as const,
-          catId: record.catId,
-          content: JSON.stringify({ type: 'rich_block', block: resolvedBlock }),
-          ...stampVisibleTurn(effectiveInvId, invocationId),
-          ...(responseMessageId ? { messageId: responseMessageId } : {}),
-          timestamp: Date.now(),
+      const event = {
+        type: 'system_info' as const,
+        catId: record.catId,
+        content: JSON.stringify({ type: 'rich_block', block: resolvedBlock }),
+        ...stampVisibleTurn(effectiveInvId, invocationId),
+        ...(responseMessageId ? { messageId: responseMessageId } : {}),
+        timestamp: Date.now(),
+      };
+      await persistStreamedInteractiveBlock(messageStore, event, responseMessageId).then(
+        () => socketManager.broadcastAgentMessage(event, record.threadId),
+        (err) => {
+          // Keep the buffered block for terminal publication; don't expose an unpersisted question.
+          app.log.warn({ err, responseMessageId, blockId: resolvedBlock.id }, 'Deferring buffered question broadcast');
         },
-        record.threadId,
       );
     }
 

@@ -1,3 +1,4 @@
+import { tmpdir } from 'node:os';
 /**
  * CodexAgentService Tests (CLI mode)
  * 测试缅因猫 CLI 子进程调用
@@ -2452,7 +2453,7 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
     const proc = createMockProcess();
     const spawnFn = createMockSpawnFn(proc);
     const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn, model: 'gpt-5.3-codex' });
-    const nonGitDir = mkdtempSync(join('/tmp', 'codex-non-git-'));
+    const nonGitDir = mkdtempSync(join(tmpdir(), 'codex-non-git-'));
 
     try {
       const promise = collect(service.invoke('hello', { workingDirectory: nonGitDir }));
@@ -2480,7 +2481,7 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
   });
 
   test('isGitRepositoryPath walks parent directories instead of shelling out to git', () => {
-    const root = mkdtempSync(join('/tmp', 'codex-git-marker-'));
+    const root = mkdtempSync(join(tmpdir(), 'codex-git-marker-'));
     const nestedDir = join(root, 'packages', 'api');
 
     try {

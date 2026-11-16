@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { decideNativeHookPayload } from '../../../scripts/native-effect-target-guard.mjs';
@@ -10,7 +11,7 @@ test(
     skip: process.platform === 'win32' ? 'POSIX shell parameter contract' : false,
   },
   () => {
-    const base = mkdtempSync('/tmp/f306-remove-parameters-');
+    const base = mkdtempSync(join(tmpdir(), 'f306-remove-parameters-'));
     try {
       const checkout = join(base, 'repo');
       const sibling = join(base, 'sibling');

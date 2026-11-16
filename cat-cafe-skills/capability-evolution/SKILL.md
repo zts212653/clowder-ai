@@ -8,9 +8,9 @@ description: "F311 能力进化入口与续办。Use when: 用户询问可进化
 
 ## 为什么需要这条路由
 
-F311 是围绕一个可变对象运行的长期 Evolution Program；`self-evolution` 是把已经发生的流程经验沉淀成规则、方法或 skill。两者不是同一件事。真实失败是猫听到“能自进化什么”后只讲了通用理念，没有认出已经上线的 F311 产品，也没有建立“具体目标 → canonical start action”的预期。
+F311 是围绕一个可变对象运行的长期 Evolution Program：用户要改善某项 Agent 或业务能力时，这里负责从目标接到实际准备与后续改进。真实失败是猫听到“能自进化什么”后只讲了通用理念，没有认出已经上线的 F311 产品，也没有建立“具体目标 → canonical start action”的预期。
 
-先问时间方向：用户要**从现在开始进化一个对象**，走本 skill；用户在**复盘已经发生的工作**并要沉淀教训，才走 `self-evolution`。不要因为两句话都含“进化”就按词面路由。
+先看要交付的结果：用户要**改善一个对象的能力**，走本 skill；只是总结既往工作，留在原任务或对应文档；家里本来有答案、You 仍不得不重说的事，走 `code-as-harness` 入错题本、查断点；同类新活做到第二次、想沉淀成技能时用 `writing-skills`。不要因为都在谈改进，就建同一种项目或把它们塞进同一本账。
 
 ## 先分意图，再决定是否写入
 
@@ -98,7 +98,7 @@ begin/submit 只对当前 invocation 的 full MCP 开放。浏览器、agent-key
 
 ## Common Mistakes
 
-- **把产品问题路由到 `self-evolution`**：只讲成长理念，用户不知道 F311 已可用。修复：先做本 skill 的信息/动作分流。
+- **把能力目标当成复盘或记错题**：只讲成长理念、记一条教训，用户不知道 F311 已可用。修复：先按要改善的对象识别目标，再做本 skill 的信息/动作分流；新目标不因家里以前没有答案就失去产品入口。
 - **信息问题也创建 Program**：用户还没选对象就产生持久状态。修复：没有具体 X 时零写入。
 - **具体目标只给建议、不调用工具**：看似回答了，Workspace 没有 Program。修复：有具体 X 就走 canonical start action。
 - **把命令式业务目标当咨询问句**：猫承认“这是明确能力目标”，却因没写“我们来进化”而反问用户。修复：直接“让 / 请让 Agent 或业务能力达到 Y”且无延后限定时就是动作型；用 admission identity 建制。
@@ -121,4 +121,4 @@ begin/submit 只对当前 invocation 的 full MCP 开放。浏览器、agent-key
 
 ## 下一步
 
-Program 创建后以返回 projection 和 F307 surface 为真相，沿[跨对象进化方法](refs/evolution-method.md)选择下一步；度量、归因或干预需要设计时转 `eval-design`，完成后返回同一 Program。准备后的承接见[完整学习循环](refs/learning-loop.md)，修订方法时查[出处与证明范围](refs/method-evidence.md)。任务转为提炼既往方法时才切到 `self-evolution`；整理出方法本身不证明方法已有净效用。
+Program 创建后以返回 projection 和 F307 surface 为真相，沿[跨对象进化方法](refs/evolution-method.md)选择下一步；度量、归因或干预需要设计时转 `eval-design`，完成后返回同一 Program。准备后的承接见[完整学习循环](refs/learning-loop.md)，修订方法时查[出处与证明范围](refs/method-evidence.md)。既往方法总结回现有方法入口；同类新活做到第二次、想沉淀成技能时用 `writing-skills`。只有家里已有答案却让 You 重说才转 `code-as-harness`，整理出方法本身不证明方法已有净效用。

@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { startRealDocumentOwner } from './f309-ordinary-document-owner.mjs';
 import { WEB_ROOT } from './f309-ordinary-workspace-journey-fixture.mjs';
@@ -10,7 +11,7 @@ export const DOCUMENT_TEXT =
 
 /** Owned temporary document only. Journal/Task/candidate/Host coordinates are produced by the shipped owner. */
 export async function createDocumentRequest({ executionSource = 'carrier' } = {}) {
-  const evidence = await mkdtemp('/tmp/f309-document-owner-');
+  const evidence = await mkdtemp(path.join(tmpdir(), 'f309-document-owner-'));
   const owner = await startRealDocumentOwner(path.join(evidence, 'data'), { executionSource });
   const filename = `f309-document-${randomUUID()}.md`;
   const filePath = `packages/web/test/browser/fixtures/${filename}`;

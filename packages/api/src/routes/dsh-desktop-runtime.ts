@@ -84,7 +84,13 @@ export async function inspect(source) {
     files.push(path);
     layers.push(api.boot.loadOptionalPatches('dsh', path) ?? []);
   }
-  const rows = api.boot.composeEntries(layers, () => { throw Error('dsh_config_complex_patch'); });
+  const rows = api.boot.composeEntries(layers, warning => {
+    const target = /^patch: entry "([^"]+)" not found$/.exec(warning)?.[1] ??
+      /^patch: name mismatch for "([^"]+)" \(expected "[^"]*", got "[^"]*"\), skipping$/.exec(warning)?.[1];
+    // Only skipped non-insert overrides outside the configuration we read are harmless.
+    if (!target || ['credentials', 'llm-deepseek', 'llm-pi-ai', 'agent-default-model'].includes(target))
+      throw Error('dsh_config_complex_patch');
+  });
   const config = id => {
     const matches = rows.filter(row => row.id === id);
     if (matches.length > 1) throw Error('dsh_config_ambiguous');

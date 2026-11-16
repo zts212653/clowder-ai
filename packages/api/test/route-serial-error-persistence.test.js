@@ -744,6 +744,10 @@ describe('route-serial error persistence (F5 reload)', () => {
       const response = await messages.getById(responseId);
       assert.equal(response.lifecycle.status, fails ? 'failed' : 'completed');
       assert.ok(response.content.includes(body), 'the same persisted response retains its actual content');
+      assert.deepEqual(
+        response.extra?.routingWarnings,
+        fails ? [{ kind: 'handoff_blocked_by_failed_turn', targetCats: ['opus'] }] : undefined,
+      );
       const pending = await queue.listAllDurable('thread1');
       assert.equal(pending.length, fails ? 0 : 1, 'only successful content may admit a downstream wake');
       if (!fails) {

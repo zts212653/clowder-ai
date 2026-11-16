@@ -18,6 +18,8 @@ import { recordThreadProposalDemoUse } from '@/lib/feature-demo-telemetry';
 import type { RichCardBlock } from '@/stores/chat-types';
 import { useChatStore } from '@/stores/chatStore';
 import { apiFetch } from '@/utils/api-client';
+import { invalidateSidebarProjection } from '@/utils/sidebar-thread-snapshot';
+import { invalidateThreadAttentionPreferences } from '@/utils/thread-attention-invalidation';
 import { formatDeclaredWorkMode, formatReportingMode, type ReportingModeEditValue } from './ProposalCardFields';
 import {
   extractProposalId,
@@ -33,6 +35,7 @@ import {
 } from './ProposalCardUtils';
 import { proposalCardCopy } from './proposal-card.shell-copy';
 import { useApprovalStatus } from './use-approval-status';
+import { type ProposalRecoveryRecord, useProposalApprovalRecovery } from './use-proposal-approval-recovery';
 
 export type ProposalCardInput =
   | { block: RichCardBlock; proposal?: never; messageId?: string; coordinate?: PublishedMessageCoordinate }
@@ -72,7 +75,26 @@ export function useProposalCardState({ block, proposal }: ProposalCardInput) {
   );
   const guardedWrite = useGuardedWrite();
   const authorizeContinuation = useAuthorizeWrite();
-  const writeBlocked = useWriteBlocked(loading);
+  const onRecoveryRead = useCallback((record: ProposalRecoveryRecord) => {
+    setStatus(record.status);
+    setResultThreadId(record.createdThreadId ?? null);
+  }, []);
+  const onRecoveredApproval = useCallback(() => {
+    void invalidateSidebarProjection();
+    invalidateThreadAttentionPreferences();
+  }, []);
+  const producerRecord = proposal?.status === 'approved' ? proposal : (native.record as ProposalSnapshot | null);
+  const recovery = useProposalApprovalRecovery({
+    proposalId,
+    status,
+    hasThread: Boolean(resultThreadId),
+    approvedGroupId: producerRecord?.attentionGroupId,
+    read: native.refresh,
+    reading: native.reading,
+    onRead: onRecoveryRead,
+    onApproved: onRecoveredApproval,
+  });
+  const writeBlocked = useWriteBlocked(loading || recovery.blocked);
   useReportEditing('thread-proposal', editing);
   const [effectiveReportingMode, setEffectiveReportingMode] = useState<ReportingModeEditValue>(() =>
     proposal
@@ -162,6 +184,7 @@ export function useProposalCardState({ block, proposal }: ProposalCardInput) {
   const approveOriginal = useCallback(
     async (reportEvidence: (evidence: WriteEvidence) => void) => {
       if (!proposalId) return;
+      recovery.reset();
       setLoading(true);
       setError(null);
       const body: Record<string, unknown> =
@@ -182,6 +205,7 @@ export function useProposalCardState({ block, proposal }: ProposalCardInput) {
             : {};
       if (pinOnApprove) body.pinned = true;
       let receivedResponse = false;
+      let needsReadback = true;
       try {
         const res = await apiFetch(`/api/proposals/${proposalId}/approve`, {
           method: 'POST',
@@ -189,16 +213,23 @@ export function useProposalCardState({ block, proposal }: ProposalCardInput) {
           body: JSON.stringify(body),
         });
         receivedResponse = true;
+        needsReadback = res.ok || res.status >= 500 || res.status === 408;
         reportEvidence({ outcome: res.ok ? 'settled' : 'http-error', status: res.status });
         const data = (await res.json()) as { threadId?: string; error?: string; warnings?: string[] };
         if (!res.ok) throw new Error(data.error ?? `HTTP ${res.status}`);
         recordThreadProposalDemoUse(data);
         const newThreadId = data.threadId ?? null;
+        needsReadback = false;
         setEffectiveReportingMode(editing ? edits.reportingMode : effectiveReportingMode);
         setEffectiveDeclaredWorkMode(editing ? edits.declaredWorkMode : effectiveDeclaredWorkMode);
         setResultThreadId(newThreadId);
         setStatus('approved');
-        window.dispatchEvent(new CustomEvent('cat-cafe:proposal-updated', { detail: { proposalId } }));
+        if (newThreadId) void invalidateSidebarProjection();
+        window.dispatchEvent(
+          new CustomEvent('cat-cafe:proposal-updated', {
+            detail: { proposalId, status: 'approved', createdThreadId: newThreadId },
+          }),
+        );
         setEditing(false);
         if (data.warnings?.length) setError(data.warnings.join(' · '));
         if (newThreadId) {
@@ -210,7 +241,15 @@ export function useProposalCardState({ block, proposal }: ProposalCardInput) {
         }
       } catch (err) {
         if (!receivedResponse) reportEvidence({ outcome: 'network-error' });
-        setError(err instanceof Error ? err.message : '批准失败');
+        if (needsReadback) {
+          recovery.markUncertain();
+          void invalidateSidebarProjection();
+          invalidateThreadAttentionPreferences();
+          // This asks the existing producer reader to confirm; it does not assert an outcome.
+          window.dispatchEvent(new CustomEvent('cat-cafe:proposal-updated', { detail: { proposalId } }));
+        } else {
+          setError(err instanceof Error ? err.message : '批准失败');
+        }
       } finally {
         setLoading(false);
       }
@@ -224,6 +263,8 @@ export function useProposalCardState({ block, proposal }: ProposalCardInput) {
       pinOnApprove,
       authorizeContinuation,
       t.continuationRefused,
+      recovery.markUncertain,
+      recovery.reset,
       isV2,
       proposal,
       attentionGroupId,
@@ -260,8 +301,12 @@ export function useProposalCardState({ block, proposal }: ProposalCardInput) {
     [proposalId],
   );
 
-  const approve = useCallback(() => guardedWrite('producer-card', approveOriginal), [guardedWrite, approveOriginal]);
-  const reject = useCallback(() => guardedWrite('producer-card', rejectOriginal), [guardedWrite, rejectOriginal]);
+  const approve = useCallback(() => {
+    if (!recovery.blocked) return guardedWrite('producer-card', approveOriginal);
+  }, [guardedWrite, approveOriginal, recovery.blocked]);
+  const reject = useCallback(() => {
+    if (!recovery.blocked) return guardedWrite('producer-card', rejectOriginal);
+  }, [guardedWrite, rejectOriginal, recovery.blocked]);
 
   return {
     proposalId,
@@ -271,6 +316,7 @@ export function useProposalCardState({ block, proposal }: ProposalCardInput) {
     setEditing,
     loading,
     error,
+    recovery,
     pinOnApprove,
     setPinOnApprove,
     attentionGroupId,

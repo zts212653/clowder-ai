@@ -15,12 +15,12 @@ import { useInvocationAuth } from './helpers/invocation-auth.js';
 
 const { CANONICAL_TOOL_REGISTRY } = await import('../dist/server-toolsets.js');
 
+// Cat mounts project the full profile; watcher-only tools live in the registry for the watcher's ticketed surface.
+const CAT_FACING = CANONICAL_TOOL_REGISTRY.filter((definition) => definition.policy.runtimeProfiles.includes('full'));
 const expectedNames = (serverFamily) =>
-  CANONICAL_TOOL_REGISTRY.filter((definition) => definition.serverFamily === serverFamily).map(
-    (definition) => definition.name,
-  );
+  CAT_FACING.filter((definition) => definition.serverFamily === serverFamily).map((definition) => definition.name);
 
-const EXPECTED_TOOLS = CANONICAL_TOOL_REGISTRY.map((definition) => definition.name);
+const EXPECTED_TOOLS = CAT_FACING.map((definition) => definition.name);
 const EXPECTED_COLLAB_TOOLS = expectedNames('collab');
 const EXPECTED_MEMORY_TOOLS = expectedNames('memory');
 const EXPECTED_SIGNAL_TOOLS = expectedNames('signals');
@@ -120,6 +120,13 @@ describe('MCP Server Tool Registration', () => {
     assert.match(threadContextTool.description, /single item larger/);
     assert.match(threadContextTool.description, /oversized workflow SOP/);
     assert.match(threadContextTool.description, /cat_cafe_get_workflow_sop/);
+    assert.match(threadContextTool.description, /richBlocks/);
+    assert.match(threadContextTool.description, /richBlocksSummary/);
+
+    const getMessageTool = server._registeredTools.cat_cafe_get_message;
+    assert.ok(getMessageTool, 'get_message tool should exist');
+    assert.match(getMessageTool.description, /richBlocks/);
+    assert.match(getMessageTool.description, /richBlocksSummary/);
   });
 
   // F167 Phase P fix: hold_ball description must steer "等人" to @co-creator/@cat, NOT hold_ball,
@@ -305,8 +312,6 @@ describe('MCP Server Tool Registration', () => {
       'cat_cafe_propose_thread',
       'cat_cafe_continue_approved_task',
       'cat_cafe_propose_session_handoff',
-      'cat_cafe_propose_profile_update',
-      'cat_cafe_propose_taste',
       'cat_cafe_propose_eval_repair',
       'cat_cafe_update_bootcamp_state',
       'cat_cafe_bootcamp_env_check',
@@ -347,7 +352,6 @@ describe('MCP Server Tool Registration', () => {
       'cat_cafe_list_schedule_templates',
       'cat_cafe_list_threads',
       'cat_cafe_post_message',
-      'cat_cafe_prepare_message_search_answer',
       'cat_cafe_preview_open',
       'cat_cafe_offer_custody',
       'cat_cafe_preview_scheduled_task',

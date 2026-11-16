@@ -118,6 +118,7 @@ async function stablePackageRoot(
       packageDigest: admission.packageRecord.packageDigest,
       packageName,
       sourceKind: provenance.kind,
+      ...(provenance.dependencyClosure === undefined ? {} : { dependencyClosure: provenance.dependencyClosure }),
     });
     try {
       if (!isDeepStrictEqual(materialized.manifest, admission.packageRecord.manifest)) {

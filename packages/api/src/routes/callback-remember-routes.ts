@@ -1,5 +1,10 @@
 import { createHash } from 'node:crypto';
-import { type RememberGroup, type RememberRowResult, rememberInputSchema } from '@cat-cafe/shared';
+import {
+  REMEMBER_QUIET_TARGETS,
+  type RememberGroup,
+  type RememberRowResult,
+  rememberInputSchema,
+} from '@cat-cafe/shared';
 import type { FastifyInstance } from 'fastify';
 import type { InvocationRegistry } from '../domains/cats/services/agents/invocation/InvocationRegistry.js';
 import { emitStoredMessageUpdated } from '../domains/cats/services/agents/invocation/lifecycle-message-update.js';
@@ -7,6 +12,7 @@ import type { IMessageStore } from '../domains/cats/services/stores/ports/Messag
 import type { SocketManager } from '../infrastructure/websocket/index.js';
 import { requireCallbackAuth } from './callback-auth-prehandler.js';
 import { originalRememberSubmission, rememberGroupRow } from './remember-original-submission.js';
+import { withWatcherRememberForward } from './watcher-remember-forward.js';
 
 interface RememberDeps {
   registry: Pick<InvocationRegistry, 'isLatest'>;
@@ -38,12 +44,14 @@ export function registerCallbackRememberRoutes(app: FastifyInstance, deps: Remem
         });
         continue;
       }
-      const response = await app.inject({
-        method: 'POST',
-        url: original.path,
-        headers: { 'x-invocation-id': auth.invocationId, 'x-callback-token': auth.callbackToken },
-        payload: original.payload,
-      });
+      const response = await withWatcherRememberForward(request, original.path, original.payload, () =>
+        app.inject({
+          method: 'POST',
+          url: original.path,
+          headers: { 'x-invocation-id': auth.invocationId, 'x-callback-token': auth.callbackToken },
+          payload: original.payload,
+        }),
+      );
       results.push({
         itemId: item.itemId,
         target: item.target,
@@ -51,12 +59,23 @@ export function registerCallbackRememberRoutes(app: FastifyInstance, deps: Remem
         result: response.json<unknown>(),
       });
     }
-    const group: RememberGroup = { v: 1, groupId, rows: results.map(rememberGroupRow) };
+    const visible = results.filter((row) => !REMEMBER_QUIET_TARGETS.has(row.target));
+    if (visible.length === 0) return { groupId, results };
+    const group: RememberGroup = {
+      v: 1,
+      groupId,
+      rows: visible.map((row) =>
+        rememberGroupRow(
+          row,
+          parsed.data.items.find((item) => item.itemId === row.itemId),
+        ),
+      ),
+    };
     let message = await deps.messageStore.append({
       from: { kind: 'agent', catId: auth.catId },
       userId: auth.userId,
       threadId: auth.threadId,
-      content: `这次提交的 ${results.length} 项记忆`,
+      content: `这次提交的 ${visible.length} 项记忆`,
       mentions: [],
       timestamp: Date.now(),
       idempotencyKey: groupId,

@@ -38,6 +38,36 @@ const input: AgentMessage = {
   outputMessage: observation,
 };
 
+test('a deferred authored fragment cannot borrow summary authority or absorb a summary', () => {
+  const transform = createRoutingMessageTransform();
+  const projection = new RoutingMessageOutputProjection({
+    threadId: 'thread',
+    catId: 'opus',
+    turnInvocationId: 'child',
+  });
+  const summary = '@codex\n这是供应商摘要。';
+  const events: AgentMessage[] = [
+    { type: 'text', catId: 'opus' as AgentMessage['catId'], content: '保留正文。\n{', timestamp: 1 },
+    {
+      type: 'text',
+      catId: 'opus' as AgentMessage['catId'],
+      content: summary,
+      textSource: 'provider_summary',
+      timestamp: 2,
+    },
+    { type: 'done', catId: 'opus' as AgentMessage['catId'], timestamp: 3 },
+  ];
+  for (const event of events) {
+    for (const output of transform.transform(event)) {
+      if (output.type === 'text') projection.text(output, transform.outputFactsFor(output));
+    }
+  }
+  const body = projection.projectAuthoredText((content) => content);
+  assert.ok(body.content.includes(summary));
+  assert.equal(body.authoredContent, '保留正文。\n{');
+  assert.ok(!body.authoredContent.includes('@codex'));
+});
+
 test('a deferred flush retains its unique native provenance without redefining native mode', () => {
   const transform = createRoutingMessageTransform();
   const prefix = transform.transform(input)[0];

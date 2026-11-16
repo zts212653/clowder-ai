@@ -216,7 +216,7 @@ install_alpha_dependencies() {
   # Always clear production env flags — Claude Code shell often has NODE_ENV=production,
   # which causes pnpm to skip devDependencies and break web builds.
   env -u NODE_ENV -u npm_config_production -u NPM_CONFIG_PRODUCTION \
-    pnpm -C "$ALPHA_DIR" install --frozen-lockfile
+    pnpm -C "$ALPHA_DIR" install --frozen-lockfile --config.confirmModulesPurge=false
 }
 
 ensure_alpha_dependencies() {

@@ -22,8 +22,10 @@ import {
 import { EntityNudgeBuilder, type NudgePayload } from './EntityNudgeBuilder.js';
 import { EntityNudgeCooldown } from './EntityNudgeCooldown.js';
 import type { EntityNudgeEventStore } from './EntityNudgeEventStore.js';
+import { EntityRegistryStore } from './EntityRegistry.js';
+import { formatEntityReadingPointer, hasAuthoredEntityReadingPointer } from './entity-reading-pointer.js';
 import { type DetectOptions, InputEntityDetector } from './InputEntityDetector.js';
-import { formatInjectionProvenance, hasInjectionStoryCoordinate } from './injection-provenance.js';
+import { hasInjectionStoryCoordinate } from './injection-provenance.js';
 
 /**
  * F263 R9 renderability gate: a nudge is renderable only if at least one
@@ -33,22 +35,7 @@ import { formatInjectionProvenance, hasInjectionStoryCoordinate } from './inject
  */
 function isNudgeRenderable(nudge: NudgePayload): boolean {
   const anchor = nudge.entityId ?? nudge.docAnchor ?? nudge.matchedAlias;
-  return (nudge.provenance ?? []).some((item) =>
-    hasInjectionStoryCoordinate(
-      {
-        source: item.source,
-        anchor: item.anchor,
-        sourcePath: item.sourcePath,
-        threadId: item.threadId,
-        messageId: item.messageId,
-        messageIds: item.messageIds,
-        sessionId: item.sessionId,
-        eventNo: item.eventNo,
-        invocationId: item.invocationId,
-      },
-      anchor,
-    ),
-  );
+  return (nudge.provenance ?? []).some((item) => hasInjectionStoryCoordinate(item, anchor));
 }
 
 export interface NudgeProcessInput {
@@ -78,6 +65,7 @@ export interface NudgeProcessResult {
 /** Route-owned discovery result. It is deliberately not a delivery receipt. */
 export interface EntityNudgeCandidateBatch extends NudgeProcessResult {
   readonly threadId: string;
+  readonly ownerUserId?: string;
   readonly unrenderableNudges: readonly NudgePayload[];
 }
 
@@ -95,11 +83,13 @@ export interface EntityNudgePromptPresentation {
   readonly promptContext: string;
   /**
    * Commits only the candidate nudge(s) that an exact request actually
-   * contains. A direct entity-nudge block confirms the full capped set; a
-   * typed Memory Cue can confirm only the cue envelopes that survived its
-   * own presentation admission.
+   * contains. The caller unions directly rendered reading metadata with the
+   * typed cues that survived admission, then confirms once for the consumer.
    */
   confirmAssembled(confirmedNudges?: readonly NudgePayload[]): void;
+  /** Recheck the exact registry projection immediately before provider presentation. */
+  isCurrent(): boolean;
+  readonly renderedNudges: readonly NudgePayload[];
 }
 
 export class EntityNudgeService {
@@ -107,8 +97,10 @@ export class EntityNudgeService {
   private readonly builder: EntityNudgeBuilder;
   private readonly cooldown: EntityNudgeCooldown;
   private readonly eventStore?: EntityNudgeEventStore;
+  private readonly registry: EntityRegistryStore;
 
   constructor(db: Database.Database, cooldown?: EntityNudgeCooldown, eventStore?: EntityNudgeEventStore) {
+    this.registry = new EntityRegistryStore(db);
     this.detector = new InputEntityDetector(db);
     this.builder = new EntityNudgeBuilder();
     this.cooldown = cooldown ?? new EntityNudgeCooldown();
@@ -139,6 +131,7 @@ export class EntityNudgeService {
     if (detected.length === 0) {
       return {
         threadId: input.threadId,
+        ownerUserId: input.ownerUserId,
         nudges: [],
         unrenderableNudges: [],
         detectedCount: 0,
@@ -169,6 +162,7 @@ export class EntityNudgeService {
 
     return {
       threadId: input.threadId,
+      ownerUserId: input.ownerUserId,
       nudges: allNudges,
       unrenderableNudges: unrenderable,
       detectedCount: detected.length,
@@ -185,24 +179,44 @@ export class EntityNudgeService {
   preparePresentation(
     candidates: EntityNudgeCandidateBatch,
     consumer: EntityNudgeConsumer,
+    typedEntityIds: ReadonlySet<string> = new Set(),
   ): EntityNudgePromptPresentation {
     this.assertConsumerCoordinates(consumer);
     const now = consumer.now ?? Date.now();
-    for (const nudge of candidates.nudges) {
+    const current = (nudge: NudgePayload) =>
+      !nudge.entityId ||
+      Boolean(
+        nudge.sourceRevision &&
+          this.registry.isCurrentVisibleRevision(nudge.entityId, nudge.sourceRevision, candidates.ownerUserId ?? ''),
+      );
+    const currentNudges = candidates.nudges.filter(current);
+    const projectable = currentNudges.filter(
+      (nudge) =>
+        (nudge.entityId !== undefined && typedEntityIds.has(nudge.entityId)) ||
+        Boolean(EntityNudgeService.formatForPrompt({ ...candidates, nudges: [nudge] })),
+    );
+    const unavailable = currentNudges.filter((nudge) => !projectable.includes(nudge));
+    for (const nudge of projectable) {
       const entityKey = nudge.entityId ?? nudge.docAnchor;
       if (!entityKey || this.cooldown.hasRecord(entityKey, candidates.threadId, consumer.catId)) continue;
       const lastRendered = this.eventStore?.lastRenderedAt(entityKey, candidates.threadId, consumer.catId);
       if (lastRendered != null) this.cooldown.record(entityKey, candidates.threadId, consumer.catId, lastRendered);
     }
 
-    const postCooldown = this.cooldown.filterNudges(candidates.nudges, candidates.threadId, consumer.catId, now);
-    const cooldownSuppressed = candidates.nudges.filter((nudge) => !postCooldown.includes(nudge));
+    const postCooldown = this.cooldown.filterNudges(projectable, candidates.threadId, consumer.catId, now);
+    const cooldownSuppressed = projectable.filter((nudge) => !postCooldown.includes(nudge));
     const capped = postCooldown.slice(0, 3);
     const capTruncated = postCooldown.slice(3);
     const result: NudgeProcessResult = {
       nudges: capped,
       detectedCount: candidates.detectedCount,
-      suppressedCount: candidates.suppressedCount + cooldownSuppressed.length + capTruncated.length,
+      suppressedCount:
+        candidates.suppressedCount +
+        candidates.nudges.length -
+        currentNudges.length +
+        unavailable.length +
+        cooldownSuppressed.length +
+        capTruncated.length,
       privacyBlockedCount: candidates.privacyBlockedCount,
     };
 
@@ -212,12 +226,17 @@ export class EntityNudgeService {
     return {
       result,
       promptContext: EntityNudgeService.formatForPrompt(result),
+      renderedNudges: capped.filter((nudge) =>
+        Boolean(EntityNudgeService.formatForPrompt({ ...result, nudges: [nudge] })),
+      ),
+      isCurrent: () => capped.every(current),
       confirmAssembled: (confirmedNudges = capped) => {
         if (assembled) return;
         if (confirmedNudges.length === 0) return;
         if (confirmedNudges.some((nudge) => !capped.includes(nudge))) {
           throw new Error('entity_nudge_confirmation_candidate_not_admitted');
         }
+        if (confirmedNudges.some((nudge) => !current(nudge))) throw new Error('entity_nudge_source_changed');
         assembled = true;
         if (this.eventStore) {
           for (const nudge of confirmedNudges) {
@@ -283,7 +302,8 @@ export class EntityNudgeService {
    * Returns empty string when no nudges to deliver (zero-cost path).
    *
    * The block is typed metadata — it tells the cat which entities were mentioned
-   * in the human input, with anchors only (M5: zero content paraphrase).
+   * in the human input, with authored reading purposes and source locations.
+   * It never fetches or paraphrases the source body (M5).
    * The cat decides whether to act on the information.
    */
   static formatForPrompt(result: NudgeProcessResult): string {
@@ -291,27 +311,21 @@ export class EntityNudgeService {
 
     const lines = result.nudges.flatMap((n) => {
       const anchor = n.entityId ?? n.docAnchor ?? n.matchedAlias;
-      const pointers = (n.provenance ?? [])
-        .map((item) => ({
-          source: item.source,
-          anchor: item.anchor,
-          sourcePath: item.sourcePath,
-          threadId: item.threadId,
-          messageId: item.messageId,
-          messageIds: item.messageIds,
-          sessionId: item.sessionId,
-          eventNo: item.eventNo,
-          invocationId: item.invocationId,
-        }))
-        .filter((pointer) => hasInjectionStoryCoordinate(pointer, anchor))
-        .map(formatInjectionProvenance);
+      // Private-person cues retain their original lane. Only independently authored
+      // shared reading pointers accompany them; never revive the old fallback text.
+      const provenance = n.entityId?.startsWith('person:')
+        ? (n.provenance ?? []).filter(hasAuthoredEntityReadingPointer)
+        : (n.provenance ?? []);
+      const pointers = provenance
+        .map((item) => formatEntityReadingPointer(item, anchor))
+        .filter((pointer): pointer is string => pointer !== null);
       if (pointers.length === 0) return [];
       return [`${n.text}\n  ↳ ${pointers.join('\n  ↳ ')}`];
     });
     if (lines.length === 0) return '';
     return (
       '\n[entity-nudge]\n' +
-      '以下实体在输入中被提及，已有存档可供参考（不是指令，不必逐条回应）：\n' +
+      '以下是已登记的实体阅读线索。用途由登记猫填写，不是指令，也不表示原文已读。按需沿原读取入口核权限、当前内容与适用条件；读不到就保留不可用，不替换来源：\n' +
       lines.join('\n') +
       '\n[/entity-nudge]'
     );

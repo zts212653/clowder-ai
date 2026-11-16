@@ -128,7 +128,7 @@ test('configured Luna service receives full attributed material and returns per-
   assert.deepEqual(result.usage, { inputTokens: 123, outputTokens: 45, totalTokens: 168 });
   assert.equal(result.modelId, 'gpt-6-luna');
   assert.equal((options[0] as { toolExecutionPolicy: { mode: string } }).toolExecutionPolicy.mode, 'read_only');
-  assert.equal(result.segments[0].candidates?.length ?? 0, 0);
+  assert.equal('candidates' in result.segments[0], false);
 });
 
 test('provider failure leaves input unacknowledged and reports tokens already spent', async () => {

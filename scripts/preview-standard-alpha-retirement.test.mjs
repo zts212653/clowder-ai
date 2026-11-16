@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { existsSync, readFileSync } from 'node:fs';
+import { closeSync, existsSync, ftruncateSync, openSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
@@ -97,4 +97,179 @@ test('after standard Alpha dead registration retirement, subsequent preview star
   // Process exits 9 before listening, proving start moved past unsettled-cleanup refusal and cleared old pointer.
   assert.doesNotMatch(cli.stderr, /cleanup remains unsettled/);
   assert.equal(existsSync(join(f.config.stateDir, `${f.config.id}.settlement.json`)), false);
+});
+
+test('standard Alpha dead registration retires cleanly when older dead historical port-3011 records exist in stateDir without mutating them', async (t) => {
+  const f = standardAlphaDeadFixture(t, { mode: 'unclaimed-v2' });
+  const targetStartMs = Date.parse(f.record.startedAt);
+  const olderIso = new Date(targetStartMs - 60_000).toISOString();
+  const unloadedId = '1111111111111111';
+  const loadedIdleId = '2222222222222222';
+  const unloadedPath = join(f.config.stateDir, `${unloadedId}.json`);
+  const unloadedPlistPath = join(f.config.stateDir, `${unloadedId}.plist`);
+  const loadedIdlePath = join(f.config.stateDir, `${loadedIdleId}.json`);
+  const loadedIdlePlistPath = join(f.config.stateDir, `${loadedIdleId}.plist`);
+  const olderV2Path = join(f.config.stateDir, 'bbbbbbbbbbbbbbbb.json');
+  const olderV2CompletionPath = join(
+    f.config.stateDir,
+    'bbbbbbbbbbbbbbbb.22222222-2222-4222-8222-222222222222.completion.json',
+  );
+  const olderUnknownCmdPath = join(f.config.stateDir, 'cccccccccccccccc.json');
+  const olderUnknownCmdCompletionPath = join(
+    f.config.stateDir,
+    'cccccccccccccccc.33333333-3333-4333-8333-333333333333.completion.json',
+  );
+
+  f.write(unloadedPath, {
+    version: 1,
+    id: unloadedId,
+    cwd: join(f.directory, 'cat-cafe-old-unloaded'),
+    port: 3011,
+    command: ['pnpm', 'alpha:start'],
+    origin: process.platform === 'darwin' ? 'launchd' : 'detached',
+    launchdLabel: `com.catcafe.preview.${unloadedId}`,
+    plistPath: unloadedPlistPath,
+    pid: 900000881,
+    processStartedAt: 'Tue Aug 25 08:39:44 2026',
+    processCommand: `xpcproxy com.catcafe.preview.${unloadedId}`,
+    startedAt: olderIso,
+    logPath: join(f.config.stateDir, `${unloadedId}.log`),
+  });
+  f.write(loadedIdlePath, {
+    version: 1,
+    id: loadedIdleId,
+    cwd: join(f.directory, 'cat-cafe-old-loaded-idle'),
+    port: 3011,
+    command: ['pnpm', 'alpha:start'],
+    origin: process.platform === 'darwin' ? 'launchd' : 'detached',
+    launchdLabel: `com.catcafe.preview.${loadedIdleId}`,
+    plistPath: loadedIdlePlistPath,
+    pid: 900000885,
+    processStartedAt: 'Tue Aug 25 09:00:00 2026',
+    processCommand: `xpcproxy com.catcafe.preview.${loadedIdleId}`,
+    startedAt: olderIso,
+    logPath: join(f.config.stateDir, `${loadedIdleId}.log`),
+  });
+  f.write(loadedIdlePlistPath, { Label: `com.catcafe.preview.${loadedIdleId}`, KeepAlive: false });
+
+  f.write(olderV2Path, {
+    version: 1,
+    id: 'bbbbbbbbbbbbbbbb',
+    cwd: join(f.directory, 'cat-cafe-alpha'),
+    port: 3011,
+    command: ['pnpm', 'alpha:start'],
+    origin: 'detached',
+    pid: 900000882,
+    processStartedAt: 'Sat Sep 19 07:02:21 2026',
+    processCommand: 'node preview-process-lease-runner.mjs',
+    startedAt: olderIso,
+    expiresAt: new Date(targetStartMs - 30_000).toISOString(),
+    completionPath: olderV2CompletionPath,
+    logPath: join(f.config.stateDir, 'bbbbbbbbbbbbbbbb.log'),
+  });
+  f.write(`${olderV2CompletionPath}.owner.json`, {
+    pid: 900000883,
+    processGroupId: 900000883,
+    version: 2,
+    exitCode: 1,
+    commandExitCode: 0,
+    cleanupExitCode: 1,
+  });
+  f.write(`${olderV2CompletionPath}.command.json`, {
+    version: 1,
+    identityStatus: 'observed',
+    pid: 900000884,
+    processGroupId: 900000884,
+  });
+
+  f.write(olderUnknownCmdPath, {
+    version: 1,
+    id: 'cccccccccccccccc',
+    cwd: join(f.directory, 'cat-cafe-fast-exit'),
+    port: 3011,
+    command: ['pnpm', 'alpha:start'],
+    origin: 'detached',
+    pid: 900000886,
+    startedAt: olderIso,
+    completionPath: olderUnknownCmdCompletionPath,
+  });
+  f.write(`${olderUnknownCmdCompletionPath}.command.json`, {
+    version: 1,
+    identityStatus: 'unknown',
+    pid: null,
+    processGroupId: null,
+  });
+
+  const beforeUnloaded = readFileSync(unloadedPath);
+  const beforeLoadedIdle = readFileSync(loadedIdlePath);
+  const beforeV2 = readFileSync(olderV2Path);
+  const beforeUnknownCmd = readFileSync(olderUnknownCmdPath);
+  const readJobCalls = [];
+  f.recovery.isRunning = () => false;
+  f.recovery.groupRunning = () => false;
+  f.recovery.readJob = (cmd, args) => {
+    readJobCalls.push([cmd, ...args].join(' '));
+    const target = String(args.at(-1) ?? '');
+    if (cmd === 'launchctl' && target.endsWith(`com.catcafe.preview.${unloadedId}`)) {
+      throw Object.assign(new Error('launchctl exited 113'), {
+        status: 113,
+        stderr: `Bad request.\nCould not find service "com.catcafe.preview.${unloadedId}" in domain for user gui: 501\n`,
+      });
+    }
+    if (cmd === 'launchctl' && target.endsWith(`com.catcafe.preview.${loadedIdleId}`)) {
+      return '\tstate = not running\n';
+    }
+    if (cmd === 'plutil' && target === loadedIdlePlistPath) {
+      return JSON.stringify({ Label: `com.catcafe.preview.${loadedIdleId}`, KeepAlive: false });
+    }
+    throw new Error(`unexpected readJob call: ${cmd} ${args.join(' ')}`);
+  };
+
+  const result = await stop(f);
+  assert.equal(result.settlement.status, 'registration_retired');
+  assert.equal(existsSync(f.config.recordPath), false);
+  if (process.platform === 'darwin') {
+    const uid = process.getuid();
+    assert.deepEqual(
+      new Set(readJobCalls),
+      new Set([
+        `launchctl print gui/${uid}/com.catcafe.preview.${unloadedId}`,
+        `launchctl print gui/${uid}/com.catcafe.preview.${loadedIdleId}`,
+        `plutil -convert json -o - ${loadedIdlePlistPath}`,
+      ]),
+    );
+  }
+  assert.deepEqual(readFileSync(unloadedPath), beforeUnloaded);
+  assert.deepEqual(readFileSync(loadedIdlePath), beforeLoadedIdle);
+  assert.deepEqual(readFileSync(olderV2Path), beforeV2);
+  assert.deepEqual(readFileSync(olderUnknownCmdPath), beforeUnknownCmd);
+});
+
+test('standard Alpha unclaimed retirement retains oversized (>16 MB) diagnostic log in place and archives bounded logs', async (t) => {
+  const fLarge = standardAlphaDeadFixture(t, { mode: 'unclaimed-v2' });
+  const fd = openSync(fLarge.record.logPath, 'wx', 0o600);
+  try {
+    ftruncateSync(fd, 17 * 1024 * 1024);
+  } finally {
+    closeSync(fd);
+  }
+  const logBefore = statSync(fLarge.record.logPath);
+  const largeRes = await stop(fLarge);
+  assert.equal(largeRes.settlement.status, 'registration_retired');
+  assert.equal(existsSync(fLarge.config.recordPath), false);
+  assert.deepEqual(statSync(fLarge.record.logPath), logBefore);
+  assert.equal(existsSync(join(largeRes.settlement.journalPath, 'preview.log')), false);
+  const largeJournal = JSON.parse(readFileSync(join(largeRes.settlement.journalPath, 'result.json'), 'utf8'));
+  assert.equal(largeJournal.diagnosticLog.path, fLarge.record.logPath);
+  assert.equal(largeJournal.diagnosticLog.bytes, logBefore.size);
+  assert.equal(largeJournal.diagnosticLog.status, 'retained_at_source');
+  assert.deepEqual(readPreviewSettlement(fLarge.config), largeRes.settlement);
+  assert.equal(readRetiredPreviewRecord(fLarge.config).id, fLarge.config.id);
+
+  const fSmall = standardAlphaDeadFixture(t, { mode: 'unclaimed-v2' });
+  writeFileSync(fSmall.record.logPath, 'bounded alpha log\n');
+  const smallRes = await stop(fSmall);
+  assert.equal(readFileSync(join(smallRes.settlement.journalPath, 'preview.log'), 'utf8'), 'bounded alpha log\n');
+  const smallJournal = JSON.parse(readFileSync(join(smallRes.settlement.journalPath, 'result.json'), 'utf8'));
+  assert.equal('diagnosticLog' in smallJournal, false);
 });

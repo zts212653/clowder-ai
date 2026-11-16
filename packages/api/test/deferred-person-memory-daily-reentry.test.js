@@ -118,6 +118,7 @@ describe('F276 deferred person-memory daily clerk re-entry', () => {
       },
     };
     const spec = createDeferredPersonMemoryDailyTaskSpec({
+      isActorEligible: () => true,
       receiptStore: {
         async listReady() {
           return [receipt];
@@ -210,6 +211,7 @@ describe('F276 deferred person-memory daily clerk re-entry', () => {
 
     const released = [];
     const missingAuthoritySpec = createDeferredPersonMemoryDailyTaskSpec({
+      isActorEligible: () => true,
       receiptStore: {
         async listReady() {
           return [receipt];

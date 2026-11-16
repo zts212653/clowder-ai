@@ -652,7 +652,11 @@ describe('useChatHistory navigation input owner', () => {
       if (cancellation === 'abort') controller.abort();
       else el.dispatchEvent(new WheelEvent('wheel', { deltaY: -100 }));
     });
-    expect(settled).toHaveBeenCalledWith({ status: 'interrupted' });
+    expect(settled).toHaveBeenCalledWith(
+      kind === 'return' && cancellation === 'wheel'
+        ? { status: 'interrupted', reason: 'user-input' }
+        : { status: 'interrupted' },
+    );
     await act(async () => {
       el.dispatchEvent(new WheelEvent('wheel', { deltaY: -100 }));
       top.set(200);
@@ -799,7 +803,7 @@ describe('useChatHistory navigation input owner', () => {
       beginGesture().scrollTo(200);
       flushAnimationFrames();
     });
-    expect(await receipt).toEqual({ status: 'interrupted' });
+    expect(await receipt).toEqual({ status: 'interrupted', reason: 'user-input' });
     expect(top.get()).toBe(200);
   });
 
@@ -1111,7 +1115,7 @@ describe('useChatHistory navigation input owner', () => {
       await act(async () => window.dispatchEvent(queuedNotification));
       expect(top.get()).toBe(2866);
       expect(readChatScrollState(threadId)?.top).toBe(2866);
-      expect(await receipt).toEqual({ status: 'interrupted' });
+      expect(await receipt).toEqual({ status: 'interrupted', reason: 'user-input' });
       act(() => flushAnimationFrames());
       expect(top.get()).toBe(2866);
     } finally {
@@ -1222,7 +1226,7 @@ describe('useChatHistory navigation input owner', () => {
         else fixture.acknowledge(fixture.requests()[0]!, { inputOccurredAt: performance.timeOrigin + 110 });
       });
       expect(top.get()).toBe(2866);
-      expect(await receipt).toEqual({ status: 'interrupted' });
+      expect(await receipt).toEqual({ status: 'interrupted', reason: 'user-input' });
       act(() => flushAnimationFrames());
       expect(top.get()).toBe(2866);
     } finally {
@@ -1359,7 +1363,7 @@ describe('useChatHistory navigation input owner', () => {
         fixture.acknowledge(fixture.requests()[0]!, { inputOccurredAt: performance.timeOrigin + performance.now() }),
       );
       expect(top.get()).toBe(201);
-      expect(await receipt).toEqual({ status: 'interrupted' });
+      expect(await receipt).toEqual({ status: 'interrupted', reason: 'user-input' });
     } finally {
       fixture.dispose();
     }

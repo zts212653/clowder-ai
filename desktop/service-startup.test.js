@@ -3,6 +3,10 @@ const { test, after } = require('node:test');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const windowsUserPath = require('./windows-user-path');
+
+const originalReadPath = windowsUserPath.readWindowsPath;
+windowsUserPath.readWindowsPath = async () => null;
 
 const moduleRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'startup-order-'));
 const envKeys = ['CAT_CAFE_DESKTOP_INSTANCE_ROOT', 'HOME', 'USERPROFILE', 'APPDATA', 'LOCALAPPDATA'];
@@ -14,7 +18,10 @@ for (const [key, value] of Object.entries(prior)) {
   if (value === undefined) delete process.env[key];
   else process.env[key] = value;
 }
-after(() => fs.rmSync(moduleRoot, { recursive: true, force: true }));
+after(() => {
+  windowsUserPath.readWindowsPath = originalReadPath;
+  fs.rmSync(moduleRoot, { recursive: true, force: true });
+});
 const deferred = () => {
   let resolve, reject;
   const promise = new Promise((yes, no) => {

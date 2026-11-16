@@ -6,7 +6,6 @@ import { previewProcessRecordId } from './preview-process-record-key.mjs';
 
 export function standardAlphaDeadFixture(t, { mode = 'unclaimed-v2', command } = {}) {
   const f = stoppedFixture(t);
-  const isolatedPort = f.config.port;
   const oldRecordPath = f.config.recordPath;
   const oldCompletionPath = f.record.completionPath;
   const cwd = f.config.cwd;
@@ -14,7 +13,7 @@ export function standardAlphaDeadFixture(t, { mode = 'unclaimed-v2', command } =
   const preloadPath = join(f.directory, 'virtual-port-3011.mjs');
   writeFileSync(
     preloadPath,
-    `import net from 'node:net';\nconst orig = net.createConnection;\nnet.createConnection = function patched(...args) {\n  if (args[0] && typeof args[0] === 'object' && Number(args[0].port) === 3011) {\n    return orig.call(this, { ...args[0], port: ${isolatedPort} }, ...args.slice(1));\n  }\n  return orig.apply(this, args);\n};\n`,
+    `import net from 'node:net';\nconst orig = net.createConnection;\nnet.createConnection = function patched(...args) {\n  if (args[0] && typeof args[0] === 'object' && Number(args[0].port) === 3011) {\n    const socket = new net.Socket();\n    queueMicrotask(() => socket.destroy(Object.assign(new Error('ECONNREFUSED'), { code: 'ECONNREFUSED' })));\n    return socket;\n  }\n  return orig.apply(this, args);\n};\n`,
   );
   f.virtualPort3011PreloadUrl = pathToFileURL(preloadPath).href;
   const id = previewProcessRecordId(cwd, port);

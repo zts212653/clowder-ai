@@ -197,7 +197,12 @@ export function PublicationLandingResolver({
             正在核对作品的原讨论…
           </p>
           {error ? (
-            <button data-content-opening-state="blocked" type="button" onClick={() => setAttempt((n) => n + 1)}>
+            <button
+              data-content-opening-state="blocked"
+              type="button"
+              className="mt-2 rounded-md border border-cafe bg-cafe-surface-elevated px-3 py-1.5 text-xs font-medium text-cafe hover:bg-cafe-surface-sunken"
+              onClick={() => setAttempt((n) => n + 1)}
+            >
               重新读取
             </button>
           ) : null}

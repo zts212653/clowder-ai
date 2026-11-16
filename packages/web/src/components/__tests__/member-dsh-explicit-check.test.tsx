@@ -6,6 +6,31 @@ import { DshConnectionStatus } from '../settings/members/DshConnectionStatus';
 
 vi.mock('@/utils/api-client', () => ({ apiFetch: vi.fn() }));
 
+it('renders runtime unavailability while keeping ordinary chat available', async () => {
+  vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+  vi.mocked(apiFetch).mockResolvedValue(
+    Response.json({
+      state: 'unchecked',
+      toolIssues: [
+        { pluginId: 'broken', capabilityId: 'plugin:broken:main', reasonCode: 'plugin_activation_unavailable' },
+      ],
+    }),
+  );
+  const host = document.createElement('div');
+  const root = createRoot(host);
+  try {
+    await act(async () => root.render(<DshConnectionStatus member={{ id: 'whale', configurationRevision: 'r1' }} />));
+    expect(host.textContent).toContain('可以直接聊天');
+    expect(host.textContent).toContain('插件运行不可用');
+    expect(host.textContent).not.toContain('工具定义无效');
+    expect(vi.mocked(apiFetch).mock.calls.some(([, request]) => request?.method === 'POST')).toBe(false);
+  } finally {
+    await act(async () => root.unmount());
+    vi.resetAllMocks();
+    vi.unstubAllGlobals();
+  }
+});
+
 it.each(['passed', 'failed'] as const)('keeps %s diagnostics explicit and refreshes without billing', async (state) => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
   const host = document.createElement('div');

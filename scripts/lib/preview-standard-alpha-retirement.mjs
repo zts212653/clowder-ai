@@ -12,6 +12,7 @@ import {
 } from './preview-alpha-registration-settlement.mjs';
 import { ordinaryUnclaimedReceiptFormat } from './preview-cleanup-result.mjs';
 import { readBoundPreviewCommand } from './preview-command-identity.mjs';
+import { capturePreviewDiagnosticLog } from './preview-diagnostic-log.mjs';
 import {
   assertStandardAlphaIdle,
   failedOwnerReceiptFormat,
@@ -55,12 +56,19 @@ function loadStandardAlphaEvidence(config, record) {
 }
 
 function snapshotOptionalSources(config, record, evidence) {
-  if (record.logPath && recoveryPathExists(record.logPath)) {
-    if (record.logPath !== (config.logPath ?? join(config.stateDir, `${config.id}.log`)))
-      throw new Error('standard Alpha log coordinate changed');
-    evidence.sources.log = recoverySnapshot(record.logPath, { maxBytes: 16 * 1024 * 1024 });
-  }
+  if (record.logPath && record.logPath !== (config.logPath ?? join(config.stateDir, `${config.id}.log`)))
+    throw new Error('preview log coordinate changed');
+  const log =
+    record.logPath && recoveryPathExists(record.logPath)
+      ? capturePreviewDiagnosticLog(config, record, evidence)
+      : {
+          details: {},
+          assertCurrent() {
+            if (record.logPath && recoveryPathExists(record.logPath)) throw new Error('preview diagnostic log changed');
+          },
+        };
   if (record.origin === 'launchd') evidence.sources.plist = recoverySnapshot(config.plistPath);
+  return log;
 }
 
 /** Retires only a dead standard Alpha preview registration; shared 6397 is never signalled. */
@@ -72,14 +80,16 @@ export async function retireStandardAlphaRegistration(config, record, deps = {})
   const { evidence, completion, owner, command, unclaimedFormat, format } = loaded;
   const idleState = { ...resolved, owner, command, unclaimedFormat };
   assertStandardAlphaIdle(config, record, idleState, deps);
-  snapshotOptionalSources(config, record, evidence);
+  const log = snapshotOptionalSources(config, record, evidence);
   const journal = preserveRegistrationJournal(record, evidence, [], 'standard-alpha-registration-retirement', {
+    ...log.details,
     ownerAbsent: Boolean(unclaimedFormat),
     receiptFormat: format,
     dataCoordinatesStatus: 'shared_alpha_not_reverified',
   });
   const assertReadyToRelease = () => {
     assertRegistrationSources(evidence, []);
+    log.assertCurrent();
     assertStandardAlphaIdle(config, record, idleState, deps);
   };
   assertReadyToRelease();

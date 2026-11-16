@@ -812,6 +812,32 @@ test_build_alpha_stale_packages_rebuilds_when_head_moved() {
   echo "PASS: build_alpha_stale_packages rebuilds stale packages when HEAD moved after sync"
 }
 
+test_install_alpha_dependencies_disables_interactive_purge_prompt() {
+  local tmp_root alpha_dir fake_bin args_file pnpm_args=""
+  tmp_root="$(mktemp -d)"
+  trap 'rm -rf "$tmp_root"' RETURN
+  alpha_dir="$tmp_root/cat-cafe-alpha"
+  fake_bin="$tmp_root/bin"
+  args_file="$tmp_root/pnpm-args.txt"
+  mkdir -p "$alpha_dir" "$fake_bin"
+  cat > "$fake_bin/pnpm" <<EOF
+#!/bin/sh
+printf '%s' "\$*" > "$args_file"
+EOF
+  chmod +x "$fake_bin/pnpm"
+  ALPHA_DIR="$alpha_dir"
+
+  PATH="$fake_bin:$PATH" NODE_ENV=production install_alpha_dependencies
+  pnpm_args="$(cat "$args_file")"
+
+  echo "$pnpm_args" | grep -q -- "--config.confirmModulesPurge=false" || {
+    echo "FAIL: install_alpha_dependencies should pass --config.confirmModulesPurge=false, got: $pnpm_args"
+    exit 1
+  }
+
+  echo "PASS: install_alpha_dependencies disables interactive modules purge prompt"
+}
+
 test_usage_includes_alpha_commands
 test_print_alpha_env_exports
 test_apply_alpha_env_overrides_inherited_runtime_paths
@@ -833,3 +859,4 @@ test_noninteractive_alpha_start_enables_daemon_and_preserves_foreground_contract
 test_build_alpha_stale_packages_rebuilds_missing_dist
 test_build_alpha_stale_packages_skips_fresh_packages
 test_build_alpha_stale_packages_rebuilds_when_head_moved
+test_install_alpha_dependencies_disables_interactive_purge_prompt

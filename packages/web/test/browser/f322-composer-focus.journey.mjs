@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
 import { mkdir, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { test } from 'node:test';
 import { createWorkspaceV3Fixture, WORKSPACE_SAMPLE_THREAD } from './f322-b-workspace-v3-fixture.mjs';
 
@@ -7,7 +9,7 @@ export function registerComposerFocusJourneys(getSuite) {
   for (const theme of ['light', 'dark']) {
     test(`F322 composer single frame ${theme}`, async () => {
       const suite = getSuite();
-      const output = process.env.F322_FOCUS_EVIDENCE_DIR ?? '/tmp/f322-composer-focus';
+      const output = process.env.F322_FOCUS_EVIDENCE_DIR ?? join(tmpdir(), 'f322-composer-focus');
       await mkdir(output, { recursive: true });
       const context = await suite.browser.newContext({ viewport: { width: 1440, height: 1000 } });
       await context.addInitScript((theme) => {

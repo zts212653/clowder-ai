@@ -1,11 +1,12 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { validateCodexOAuthConfig } from '../dist/config/codex-account-environment.js';
 import { startLayoutHost } from './helpers/f320-layout-rpc.mjs';
 
-const root = await realpath(await mkdtemp('/tmp/f320-native-config-'));
+const root = await realpath(await mkdtemp(join(tmpdir(), 'f320-native-config-')));
 const report = { version: execFileSync('codex', ['--version'], { encoding: 'utf8' }).trim(), cases: [] };
 assert.equal(report.version, 'codex-cli 0.159.0');
 try {

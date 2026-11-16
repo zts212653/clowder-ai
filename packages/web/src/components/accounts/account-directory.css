@@ -148,6 +148,21 @@
 .account-state {
   white-space: nowrap;
 }
+.account-login-recovery {
+  display: block;
+  min-height: 24px;
+  margin-top: 4px;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: var(--shell-body, var(--cafe-text-secondary));
+  font: inherit;
+  font-size: var(--console-font-xs);
+  line-height: 1.5;
+  text-align: left;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
 .account-name {
   color: var(--shell-ink, var(--cafe-text));
   background: transparent;

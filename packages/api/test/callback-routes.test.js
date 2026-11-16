@@ -5164,6 +5164,93 @@ describe('Callback Routes', () => {
     assert.equal(richMsg.messageId, response.id, 'the block must land in the turn response by id');
   });
 
+  test('#1951 callback questions are durable before their direct broadcast', async (t) => {
+    const threadId = 'thread-1951-callback';
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus', threadId);
+    const { response, invocationTracker } = await createQueuedReadProcessor({ threadId, invocationId });
+    const app = await createApp({ invocationTracker });
+    const { messageActionsRoutes } = await import('../dist/routes/message-actions.js');
+    await app.register(messageActionsRoutes, { messageStore, socketManager });
+    t.after(() => app.close());
+    const block = {
+      id: 'callback-question',
+      kind: 'interactive',
+      v: 1,
+      interactiveType: 'select',
+      options: [{ id: 'a', label: 'A' }],
+    };
+    let atBroadcast;
+    const broadcast = socketManager.broadcastAgentMessage.bind(socketManager);
+    socketManager.broadcastAgentMessage = (event) => {
+      atBroadcast = structuredClone(messageStore.getById(response.id).extra?.rich?.blocks);
+      broadcast(event);
+    };
+    const created = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/create-rich-block',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+      payload: { block },
+    });
+    assert.equal(created.statusCode, 200, created.body);
+    assert.deepEqual(atBroadcast, [block]);
+    const saved = await app.inject({
+      method: 'PATCH',
+      url: `/api/messages/${response.id}/block-state`,
+      payload: { userId: 'user-1', blockId: block.id, disabled: true, selectedIds: ['a'] },
+    });
+    assert.equal(saved.statusCode, 200, saved.body);
+    assert.equal(messageStore.getById(response.id).lifecycle.status, 'processing');
+    assert.equal(messageStore.getById(response.id).extra.rich.blocks[0].disabled, true);
+  });
+
+  test('#1951 callback write failures retain the buffered question without an early actionable broadcast', async (t) => {
+    const threadId = 'thread-1951-callback-failure';
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus', threadId);
+    const { response, invocationTracker } = await createQueuedReadProcessor({ threadId, invocationId });
+    const app = await createApp({ invocationTracker });
+    t.after(() => app.close());
+    messageStore.augmentStreamMetadata = async () => {
+      throw new Error('Question storage unavailable');
+    };
+    const block = {
+      id: 'buffered-question',
+      kind: 'interactive',
+      v: 1,
+      interactiveType: 'select',
+      options: [{ id: 'a', label: 'A' }],
+    };
+    const created = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/create-rich-block',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+      payload: { block },
+    });
+    assert.equal(created.statusCode, 200, created.body);
+    assert.equal(socketManager.getMessages().length, 0);
+    const { getRichBlockBuffer } = await import('../dist/domains/cats/services/agents/invocation/RichBlockBuffer.js');
+    const buffered = await getRichBlockBuffer().consume(threadId, 'opus', invocationId);
+    assert.deepEqual(buffered, [block]);
+    const { commitLifecycleResponseFromAppendInput } = await import(
+      '../dist/domains/cats/services/stores/ports/MessageStore.js'
+    );
+    await commitLifecycleResponseFromAppendInput(
+      messageStore,
+      response.id,
+      invocationId,
+      { status: 'completed', completedAt: Date.now() },
+      {
+        from: { kind: 'agent', catId: 'opus' },
+        userId: 'user-1',
+        threadId,
+        content: 'Finished',
+        mentions: [],
+        timestamp: Date.now(),
+        extra: { rich: { v: 1, blocks: buffered } },
+      },
+    );
+    assert.deepEqual(messageStore.getById(response.id).extra.rich.blocks, [block]);
+  });
+
   test('rich blocks remain writable after an interim post and reject callbacks after final consume', async () => {
     const app = await createApp();
     const thread = threadStore.create('user-1', 'Rich block lifecycle');

@@ -5,6 +5,7 @@
   "description": "Your AI team collaboration space",
   "scripts": {
     "agy:acp:login": "pnpm --filter @cat-cafe/api exec tsx src/scripts/agy-acp-login.ts",
+    "agy:account:login": "pnpm --filter @cat-cafe/api exec tsx src/scripts/agy-account-login.ts",
     "init": "./scripts/init-cafe.sh",
     "preinstall": "node scripts/check-node-runtime.mjs",
     "gate": "bash ./scripts/pre-merge-check.sh",

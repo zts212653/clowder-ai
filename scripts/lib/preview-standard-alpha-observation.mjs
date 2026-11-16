@@ -12,6 +12,7 @@ import {
   recoveryListeners,
 } from './preview-alpha-recovery-observation.mjs';
 import { physicalDirectory } from './preview-coordinates.mjs';
+import { isQuiescentHistoricalPredecessor } from './preview-standard-alpha-predecessor.mjs';
 import { isProcessRunning } from './process-tree.mjs';
 import { readSelfHostFacet } from './self-host-facet.mjs';
 
@@ -114,12 +115,17 @@ function assertDaemonNotRunning(coordinates, deps) {
   if (!['missing', 'stale'].includes(daemon.kind)) throw new Error(`standard Alpha daemon state is ${daemon.kind}`);
 }
 
-function assertNoSuccessor(config) {
+function assertNoSuccessor(config, record, deps) {
   const names = readdirSync(config.stateDir);
   if (names.length > 16384) throw new Error('standard Alpha successor observation exceeds its bound');
   for (const name of names.filter((n) => /^[a-f0-9]{16}\.json$/.test(n))) {
     const path = join(config.stateDir, name);
-    if (path !== config.recordPath && ALL_PORTS.includes(recoveryFile(path).value.port))
+    if (path === config.recordPath) continue;
+    const other = recoveryFile(path).value;
+    if (
+      ALL_PORTS.includes(other.port) &&
+      !isQuiescentHistoricalPredecessor(config, record, name.slice(0, 16), other, deps)
+    )
       throw new Error('another preview generation is registered on a standard Alpha port');
   }
 }
@@ -152,5 +158,5 @@ export function assertStandardAlphaIdle(config, record, state, deps) {
       throw new Error(`standard Alpha application port ${port} remains occupied`);
   }
   assertDaemonNotRunning(coordinates, deps);
-  assertNoSuccessor(config);
+  assertNoSuccessor(config, record, deps);
 }

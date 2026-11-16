@@ -10,23 +10,42 @@ CAT_CAFE_NODE_MAX_MAJOR_EXCLUSIVE="${CAT_CAFE_NODE_MAX_MAJOR_EXCLUSIVE:-26}"
 CAT_CAFE_NODE_PINNED_MAJOR="${CAT_CAFE_NODE_PINNED_MAJOR:-24}"
 CAT_CAFE_NODE_PREFERRED_MAJORS="${CAT_CAFE_NODE_PREFERRED_MAJORS:-24 25}"
 
+# Keep output as a string (process.versions.node); numeric `node -p` output is
+# ANSI-colored when FORCE_COLOR is set in the caller environment.
 node_runtime_version() {
   local node_bin="$1"
   "$node_bin" -p 'process.versions.node' 2>/dev/null || return 1
 }
 
+node_major_from_version() {
+  local version="$1"
+  local major="${version%%.*}"
+  case "$major" in
+    ''|*[!0-9]*) return 1 ;;
+  esac
+  printf '%s\n' "$major"
+}
+
 node_runtime_major() {
   local node_bin="$1"
-  # Keep this a string: Number(...) gains ANSI decoration when FORCE_COLOR is set.
-  "$node_bin" -p 'process.versions.node.split(".")[0]' 2>/dev/null || return 1
+  local version
+  version="$(node_runtime_version "$node_bin")" || return 1
+  node_major_from_version "$version"
+}
+
+node_version_supported() {
+  local version="$1"
+  local major
+  major="$(node_major_from_version "$version")" || return 1
+  [ "$major" -ge "$CAT_CAFE_NODE_MIN_MAJOR" ] && [ "$major" -lt "$CAT_CAFE_NODE_MAX_MAJOR_EXCLUSIVE" ]
 }
 
 node_runtime_supported() {
   local node_bin="$1"
-  local major
+  local version
   [ -x "$node_bin" ] || return 1
-  major="$(node_runtime_major "$node_bin")" || return 1
-  [ "$major" -ge "$CAT_CAFE_NODE_MIN_MAJOR" ] && [ "$major" -lt "$CAT_CAFE_NODE_MAX_MAJOR_EXCLUSIVE" ]
+  version="$(node_runtime_version "$node_bin")" || return 1
+  node_version_supported "$version"
 }
 
 candidate_node_paths() {
@@ -89,11 +108,13 @@ ensure_supported_node_runtime() {
   local current_node="" current_version="" current_major=""
   if command -v node >/dev/null 2>&1; then
     current_node="$(command -v node)"
-    current_version="$(node_runtime_version "$current_node" || true)"
-    current_major="$(node_runtime_major "$current_node" || true)"
+    if [ -x "$current_node" ]; then
+      current_version="$(node_runtime_version "$current_node" || true)"
+      current_major="$(node_major_from_version "$current_version" || true)"
+    fi
   fi
 
-  if [ -n "$current_node" ] && node_runtime_supported "$current_node"; then
+  if [ -n "$current_node" ] && [ -x "$current_node" ] && node_version_supported "$current_version"; then
     if [ -n "$CAT_CAFE_NODE_PINNED_MAJOR" ] &&
       [ "$current_major" != "$CAT_CAFE_NODE_PINNED_MAJOR" ] &&
       [ "${CAT_CAFE_NODE_RUNTIME_GUARD_REEXEC:-0}" != "1" ]; then
@@ -105,7 +126,7 @@ ensure_supported_node_runtime() {
           echo "[node-runtime] current Node ${current_version:-<missing>} is supported but Clowder AI startup is pinned to Node ${CAT_CAFE_NODE_PINNED_MAJOR}; re-exec with $pinned_node ($pinned_version)" >&2
           export PATH="$pinned_dir:$PATH"
           export CAT_CAFE_NODE_RUNTIME_GUARD_REEXEC=1
-          exec bash "$script_path" "$@"
+          exec "${BASH:-/bin/bash}" "$script_path" "$@"
         fi
       fi
     fi
@@ -125,7 +146,7 @@ ensure_supported_node_runtime() {
     echo "[node-runtime] current Node ${current_version:-<missing>} is unsupported for Clowder AI startup; re-exec with $selected ($selected_version)" >&2
     export PATH="$selected_dir:$PATH"
     export CAT_CAFE_NODE_RUNTIME_GUARD_REEXEC=1
-    exec bash "$script_path" "$@"
+    exec "${BASH:-/bin/bash}" "$script_path" "$@"
   fi
 
   echo "[node-runtime] ERROR: Node ${current_version:-<missing>} is unsupported for Clowder AI startup; expected >=${CAT_CAFE_NODE_MIN_MAJOR} <${CAT_CAFE_NODE_MAX_MAJOR_EXCLUSIVE}." >&2

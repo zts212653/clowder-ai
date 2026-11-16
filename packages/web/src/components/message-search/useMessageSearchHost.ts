@@ -1,5 +1,6 @@
 import type { MessageSearchResponse, MessageSearchResult } from '@cat-cafe/shared';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { releaseChatReadingRef } from '@/utils/chat-scroll-memory';
 import type { ChatReadingPort, RegisterChatReadingPort } from '../thread-chat/useThreadChatReadingPort';
 import { consumeMessageFindReturn } from './message-find-events';
 import type { MessageFindContext, MessageFindDestination, MessageFindState } from './message-find-state';
@@ -20,6 +21,7 @@ import {
   saveMessageReadingSession,
 } from './message-reading-session';
 import {
+  dismissMessageReadingTrip,
   interruptMessageReadingTrip,
   type MessageReadingEffect,
   requestMessageReadingReturn,
@@ -47,6 +49,8 @@ export interface MessageSearchHost {
   jumpInThread: (messageId: string, options?: { refresh?: boolean }) => boolean;
   moveTo: (index: number) => void;
   returnToOrigin: () => void;
+  /** End a return bar the reader no longer needs, without moving the reader. */
+  dismissReturn: () => void;
 }
 
 /** A navigation consumer: route and reading owners retain all authorization, paging and geometry. */
@@ -207,6 +211,15 @@ export function useMessageSearchHost({
       );
   }, [available, request]);
 
+  const dismissReturn = useCallback(() => {
+    const active = current.current;
+    if (!active || active.trip.status === 'completed') return;
+    pending.current?.controller.abort();
+    pending.current = null;
+    releaseChatReadingRef(active.trip.origin.readingRef, active.trip.origin.threadId);
+    publish({ ...active, trip: dismissMessageReadingTrip(active.trip) });
+  }, [publish]);
+
   const jumpInThread = useCallback<MessageSearchHost['jumpInThread']>(
     (messageId, options) => {
       if (!availableNow.current) return false;
@@ -343,5 +356,6 @@ export function useMessageSearchHost({
     jumpInThread,
     moveTo,
     returnToOrigin,
+    dismissReturn,
   };
 }

@@ -2,6 +2,7 @@ import type { ThreadProposal } from '@cat-cafe/shared';
 import type { ApprovalHost } from '@/components/ApprovalHost';
 import { useShellCopy } from '@/components/shell/shell-copy';
 import { ApprovalMember } from './ApprovalMember';
+import { ProposalApprovalRecovery } from './ProposalApprovalRecovery';
 import { ProposalCardDetails } from './ProposalCardDetails';
 import { ProposalCardEditor } from './ProposalCardEditor';
 import { proposalCardCopy } from './proposal-card.shell-copy';
@@ -49,6 +50,7 @@ export function ProposalCardMailbox({
           {host.originalPlaceAction}
         </ThreadProposalResult>
         {state.error ? <output className="block text-xs text-[var(--semantic-critical)]">{state.error}</output> : null}
+        <ProposalApprovalRecovery recovery={state.recovery} />
       </article>
     );
   }
@@ -113,6 +115,7 @@ export function ProposalCardMailbox({
         </output>
       )}
       {state.error ? <output className="block text-xs text-[var(--semantic-critical)]">{state.error}</output> : null}
+      <ProposalApprovalRecovery recovery={state.recovery} />
     </article>
   );
 }

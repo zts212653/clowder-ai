@@ -45,7 +45,8 @@ it('shows the ordered original results in one group without creating an approval
   ).toEqual(['p', 't', 'a', 'm']);
   expect(host.textContent).toContain('原来源不符合要求');
   expect(host.textContent).toContain('这次不记');
-  expect(host.textContent).toContain('已记下');
+  // Static rendering cannot read the original matter owner until the effect runs in the browser.
+  expect(host.querySelector('[data-memory-group-row="m"] [role="status"]')?.textContent).toBe('正在读取记录…');
   for (const id of ['t', 'a', 'm']) expect(host.querySelector(`[data-memory-group-row="${id}"] button`)).toBeNull();
 });
 

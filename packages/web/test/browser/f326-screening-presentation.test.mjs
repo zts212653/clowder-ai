@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { readFile, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
 import { createScreeningJourney, decodedSeek, openPreparedProject } from './f326-screening-journey.harness.mjs';
@@ -9,9 +10,10 @@ test(
   'F326 retained opinion survives preview restart; real dark and narrow screening layouts',
   { timeout: 300000 },
   async (t) => {
+    if (!process.env.F326_BROWSER_MANIFEST) return t.skip('dedicated F326 browser manifest required');
     const journey = await createScreeningJourney();
     const manifest = JSON.parse(await readFile(process.env.F326_BROWSER_MANIFEST, 'utf8'));
-    const sent = JSON.parse(await readFile('/tmp/f326-b-human-send-receipt.json', 'utf8'));
+    const sent = JSON.parse(await readFile(path.join(tmpdir(), 'f326-b-human-send-receipt.json'), 'utf8'));
     const result = { outcome: 'running', assertions: [] };
     let failure;
     t.after(async () => {

@@ -169,6 +169,7 @@ it('keeps the existing name filter and carries the same find return through a wo
     jumpInThread: vi.fn(() => false),
     moveTo: vi.fn(),
     returnToOrigin: vi.fn(),
+    dismissReturn: vi.fn(),
   };
   const returning = vi.fn();
   window.addEventListener(MESSAGE_FIND_RETURN_EVENT, returning);

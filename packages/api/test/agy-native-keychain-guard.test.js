@@ -36,6 +36,37 @@ test('the native model cannot replace its private credential store or keychain p
   }
 });
 
+test('managed account file and stable data view keep the native control boundary', () => {
+  const credentialHome = '/tmp/f320-selected-account';
+  const managed = { ...options, credentialHome };
+  for (const path of [
+    `${credentialHome}/.gemini/antigravity-cli/antigravity-oauth-token`,
+    `${profileHome}/.cat-cafe-account-views/${'a'.repeat(64)}/antigravity-oauth-token`,
+    `${profileHome}/.cat-cafe-account-views/${'a'.repeat(64)}/settings.json`,
+    `${profileHome}/.cat-cafe-account-views`,
+  ]) {
+    assert.equal(
+      decideAgyNativeHookPayload(
+        { toolCall: { name: 'write_file', args: { Path: path, Content: 'foreign' } }, workspacePaths: [cwd] },
+        managed,
+      ).decision,
+      'deny',
+      path,
+    );
+    assert.equal(
+      decideAgyNativeHookPayload(
+        {
+          toolCall: { name: 'run_command', args: { CommandLine: `rm -rf '${path}'`, Cwd: cwd } },
+          workspacePaths: [cwd],
+        },
+        managed,
+      ).decision,
+      'deny',
+      path,
+    );
+  }
+});
+
 test('implicit keychain operations cannot change the host-owned authentication plane', () => {
   for (const text of [
     'security login-keychain -d user -s /tmp/foreign.keychain-db',

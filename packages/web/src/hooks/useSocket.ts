@@ -23,6 +23,12 @@ import { useBrakeStore } from '@/stores/brakeStore';
 import { useChatStore } from '@/stores/chatStore';
 import { useGuideStore } from '@/stores/guideStore';
 import { findLatestMessageByTimeline } from '@/stores/message-timeline';
+import {
+  observeCanceledSendAttempts,
+  observeDeliveredSendAttempts,
+  observeQueuedSendAttempts,
+  recoverSendAttempts,
+} from '@/stores/send-attempt-store';
 import { useSidebarProjectionStore } from '@/stores/sidebarProjectionStore';
 import { beginThreadRecovery } from '@/stores/thread-recovery';
 import { useToastStore } from '@/stores/toastStore';
@@ -342,15 +348,8 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string, foregro
   callbacksRef.current = callbacks;
   const lastPreviewAutoOpenEventIdRef = useRef<string | null>(null);
 
-  // clowder-ai#789: coalesce synchronous agent_message bursts into one microtask flush.
-  // callbacksRef.current is always live (updated above on every render), so the closure
-  // never goes stale. One coalescer per socket mount — reset only when the component unmounts.
+  // The effect owns its queue, including cancellation of a replay suspended between browser tasks.
   const agentMessageCoalescerRef = useRef<AgentMessageCoalescer | null>(null);
-  if (agentMessageCoalescerRef.current === null) {
-    agentMessageCoalescerRef.current = createAgentMessageCoalescer((item) =>
-      dispatchAgentQueueItem<AgentMessage>(item, (msg) => callbacksRef.current.onMessage(msg)),
-    );
-  }
 
   // PR-3a2: a thread room's stream replay joins the agent-message queue together with the join
   // confirmation it was sent under. PR-3a contract 3.2 still holds: whatever the room broadcast before
@@ -396,6 +395,10 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string, foregro
   } = useHubSocketOutlet(socketRef);
 
   useEffect(() => {
+    const coalescer = createAgentMessageCoalescer((item) =>
+      dispatchAgentQueueItem<AgentMessage>(item, (msg) => callbacksRef.current.onMessage(msg)),
+    );
+    agentMessageCoalescerRef.current = coalescer;
     userIdRef.current = getUserId();
     // PR-3b: a page subscribes to its foreground threads only. Background threads learn what
     // happened from the owner room (PR-3a), and a thread that returns to the foreground is read back
@@ -453,6 +456,7 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string, foregro
     };
 
     socket.on('connect', () => {
+      recoverSendAttempts();
       setSocketConnected(true);
       const tid = threadIdRef.current;
       if (tid) joinedRoomsRef.current.add(`thread:${tid}`);
@@ -837,9 +841,11 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string, foregro
     });
 
     socket.on('message_deleted', (data: { messageId: string; threadId: string; deletedBy: string }) => {
+      void observeCanceledSendAttempts(data.threadId, [data.messageId]).catch(() => {});
       callbacksRef.current.onMessageDeleted?.(data);
     });
     socket.on('message_hard_deleted', (data: { messageId: string; threadId: string; deletedBy: string }) => {
+      void observeCanceledSendAttempts(data.threadId, [data.messageId], 'deleted').catch(() => {});
       callbacksRef.current.onMessageDeleted?.(data);
     });
     socket.on('message_restored', (data: { messageId: string; threadId: string }) => {
@@ -848,7 +854,9 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string, foregro
     socket.on(
       'message_recalled',
       (data: { messageId: string; threadId: string; verdict: 'zero_exposure' | 'exposed' }) => {
-        callbacksRef.current.onMessageRecalled?.(data);
+        void observeCanceledSendAttempts(data.threadId, [data.messageId], 'recalled')
+          .catch(() => {})
+          .then(() => callbacksRef.current.onMessageRecalled?.(data));
       },
     );
     socket.on('message_receipt_updated', (data: { messageId: string; threadId: string }) => {
@@ -878,6 +886,7 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string, foregro
       void invalidateSidebarProjection();
       const store = useChatStore.getState();
       const queue = normalizeQueueEntries(data.queue);
+      observeQueuedSendAttempts(data.threadId, queue);
       const epoch = bumpLiveQueueHydrateEpoch(data.threadId);
       const known = data.threadId === store.currentThreadId ? store.queue : store.getThreadState(data.threadId).queue;
       const projected = queue.map((entry) => {
@@ -975,6 +984,9 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string, foregro
         deliveredAt: number;
         messages?: Array<{
           id: string;
+          clientMessageId?: string;
+          visibility?: import('@/stores/chat-types').ChatMessage['visibility'];
+          whisperTo?: string[];
           from?: MessageFrom;
           content: string;
           lifecycle?: import('@cat-cafe/shared').LifecycleStoredMessageMetadata;
@@ -995,6 +1007,7 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string, foregro
         }>;
       }) => {
         void invalidateSidebarProjection();
+        observeDeliveredSendAttempts(data.threadId, data.messages ?? []);
         useChatStore.getState().markMessagesDelivered(data.threadId, data.messageIds, data.deliveredAt, data.messages);
       },
     );
@@ -1003,6 +1016,7 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string, foregro
       commit?: unknown;
       message: {
         id: string;
+        clientMessageId?: string;
         from?: MessageFrom;
         catId: string | null;
         content: string;
@@ -1033,6 +1047,7 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string, foregro
           : (timelineMessageKind(data.message.from, Boolean(data.message.source)) ??
             (data.message.catId ? 'assistant' : 'user')),
         ...(data.message.from ? { from: data.message.from } : {}),
+        ...(data.message.clientMessageId ? { clientMessageId: data.message.clientMessageId } : {}),
         ...(data.message.source ? { source: data.message.source } : {}),
         ...(isDeliveryFailure ? { variant: 'error' as const } : {}),
         ...(data.message.catId && !isDeliveryFailure ? { catId: data.message.catId } : {}),
@@ -1318,6 +1333,8 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string, foregro
 
     return () => {
       disposed = true;
+      coalescer.dispose();
+      if (agentMessageCoalescerRef.current === coalescer) agentMessageCoalescerRef.current = null;
       socket.off('artifact_review_changed', onArtifactReviewChanged);
       socket.off('content_modification_source_saved', onContentModificationSourceSaved);
       clearInterval(watchdogTimer);

@@ -25,7 +25,7 @@ export interface PipelineContext {
   running: Map<string, boolean>;
   tickCounts: Map<string, number>;
   lastRunAt: Map<string, number | null>;
-  actorResolver?: (role: ActorRole, costTier: CostTier) => string | null;
+  actorResolver?: (role: ActorRole, costTier: CostTier, isEligible?: (catId: string) => boolean) => string | null;
   /** Phase 3B (AC-D1): governance store — optional for backwards compat */
   globalControlStore?: GlobalControlStore;
   /** Phase 3B (AC-D2): emission store for self-echo suppression */
@@ -233,7 +233,8 @@ export async function executeTaskPipeline(ctx: PipelineContext): Promise<void> {
     }
 
     // Phase 1b: Actor resolution — resolve once per task tick, not per workItem
-    const assignedCatId = task.actor && actorResolver ? actorResolver(task.actor.role, task.actor.costTier) : null;
+    const assignedCatId =
+      task.actor && actorResolver ? actorResolver(task.actor.role, task.actor.costTier, task.actorEligibility) : null;
     // A planned slot survives re-entry; interval/manual executions are distinct
     // fires. Mint once here, never once per deliver() retry inside a template.
     const occurrenceId =
@@ -246,6 +247,20 @@ export async function executeTaskPipeline(ctx: PipelineContext): Promise<void> {
     // Step 4 + 5: Execute per workItem → ledger per subject
     for (const item of gateResult.workItems) {
       const itemStartMs = Date.now();
+      if (task.actorEligibility && !assignedCatId) {
+        ledger.record({
+          task_id: task.id,
+          subject_key: item.subjectKey,
+          outcome: 'SKIP_NO_SIGNAL',
+          signal_summary: 'no executable actor for task scope',
+          duration_ms: Date.now() - itemStartMs,
+          started_at: new Date(itemStartMs).toISOString(),
+          assigned_cat_id: null,
+          error_summary: null,
+          ...timing,
+        });
+        continue;
+      }
 
       // AC-D2: Only thread-driven admission can feed back on this task's posts.
       if (suppressSelfEcho && emissionStore && item.subjectKey.startsWith('thread-')) {

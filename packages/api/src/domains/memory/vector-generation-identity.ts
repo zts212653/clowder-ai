@@ -48,5 +48,9 @@ export function canInitializeVectorIdentity(db: Database.Database, model: EmbedM
 /** G0 retains its existing V48/physical-membership compatibility, explicitly short of full revision proof. */
 export function missingVectorSource(kind: 'documents' | 'passages', generation: 'g0' | 'g1'): string {
   if (generation === 'g1') return "v.id IS NULL OR s.revision_hash IS NULL OR s.revision_hash='invalidated'";
-  return `v.id IS NULL OR s.revision_hash='invalidated'${kind === 'documents' ? ' OR (s.source_hash IS NOT NULL AND s.source_hash IS NOT d.source_hash)' : ''}`;
+  // Source capture and ordinary document preparation persist an absent optional
+  // source hash as ''. Compare that same representation: NULL must not make a
+  // successfully committed G0 document permanently pending. Revision CAS still
+  // distinguishes canonical mutations, including NULL -> ''.
+  return `v.id IS NULL OR s.revision_hash='invalidated'${kind === 'documents' ? " OR (s.source_hash IS NOT NULL AND s.source_hash IS NOT COALESCE(d.source_hash,''))" : ''}`;
 }

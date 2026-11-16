@@ -2,6 +2,8 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { ContentBlocks } from '@/components/ContentBlocks';
+import { ArtworkLightboxHost } from '@/components/content-review/ArtworkLightboxHost';
+import { ArtworkLightboxProvider } from '@/components/content-review/ArtworkLightboxScope';
 import { useChatArtworkEntry } from '@/components/content-review/useChatArtworkEntry';
 import type { ArtworkOpenResult } from '@/components/content-review/usePublishedContent';
 import { FileBlock } from '@/components/rich/FileBlock';
@@ -178,4 +180,158 @@ it('a conversation switch closes a previously admitted floating work', async () 
   await act(async () => useChatStore.getState().setCurrentThread('another-thread'));
   expect(document.querySelector('[role="dialog"]')).toBeNull();
   expect(useChatStore.getState().workspaceOpenRequest).toBeNull();
+});
+
+it('keeps the clicked unlinked-worktree gallery image and download working through the real ArtworkLightboxHost when resolve-file-source returns 404', async () => {
+  const worktreeId = '09b32b_cat-planet-lookdev-rig-20261110';
+  const imgPath = 'docs/evidence/2026-11-11-f329-game-look/graphics-switches-off-on.jpg';
+  const rawUrl = `/api/workspace/file/raw?${new URLSearchParams({ worktreeId, path: imgPath })}`;
+  const coordPublication = {
+    threadId: 'thread_owned_12f36a5ce1ccd054f12ecc7980ebbcf3f6af664f',
+    messageId: '0001794401107691-000529-d99e68fd',
+    messageRevision: '1',
+  };
+  useChatStore.setState({ currentThreadId: coordPublication.threadId, workspaceOpenRequest: null });
+  mocks.apiFetch.mockImplementation(async (url: string) => {
+    if (url.startsWith('/api/workspace/file?'))
+      return new Response(JSON.stringify({ path: imgPath, mime: 'image/jpeg', binary: true, size: 389875 }));
+    if (url === '/api/workspace/resolve-file-source')
+      return new Response(JSON.stringify({ error: { code: 'not_found' } }), { status: 404 });
+    if (url.startsWith('/api/workspace/file/download?'))
+      return new Response(new Uint8Array([0xff, 0xd8, 0xff]), { headers: { 'content-type': 'image/jpeg' } });
+    throw new Error(`unexpected request: ${url}`);
+  });
+
+  await act(async () => {
+    root.render(
+      <ArtworkLightboxProvider threadId={coordPublication.threadId}>
+        <MediaGalleryBlock
+          publication={coordPublication}
+          block={{ kind: 'media_gallery', v: 1, id: 'g1', items: [{ url: rawUrl, alt: '开关对照图' }] }}
+        />
+        <ArtworkLightboxHost />
+      </ArtworkLightboxProvider>,
+    );
+  });
+
+  const thumb = container.querySelector<HTMLButtonElement>('button[aria-label^="打开作品"]');
+  expect(thumb).not.toBeNull();
+  await act(async () => thumb!.click());
+
+  const dialog = document.body.querySelector('[role="dialog"]');
+  expect(dialog).not.toBeNull();
+  expect(dialog?.querySelector('[data-testid="artwork-chat-preview"] img')?.getAttribute('src')).toBe(
+    `http://api.test${rawUrl}`,
+  );
+  const fallback = dialog?.querySelector('[data-testid="artwork-preview-fallback"]');
+  expect(fallback?.textContent).toContain('无法批注');
+
+  const createObjectUrl = vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:http://api.test/downloaded');
+  const revokeObjectUrl = vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {});
+  const anchorClick = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+  const downloadBtn = dialog?.querySelector<HTMLButtonElement>('button[aria-label="下载"]');
+  expect(downloadBtn).not.toBeNull();
+  await act(async () => downloadBtn!.click());
+  expect(mocks.apiFetch.mock.calls.some(([called]) => String(called).startsWith('/api/workspace/file/download?'))).toBe(
+    true,
+  );
+  expect(anchorClick).toHaveBeenCalledOnce();
+  createObjectUrl.mockRestore();
+  revokeObjectUrl.mockRestore();
+  anchorClick.mockRestore();
+});
+
+it('removes the floating preview through ArtworkLightboxHost when resolve-file-source returns 403 access_denied', async () => {
+  const rawUrl = '/api/workspace/file/raw?worktreeId=revoked-wt&path=art/secret.jpg';
+  mocks.apiFetch.mockImplementation(async (url: string) => {
+    if (url.startsWith('/api/workspace/file?'))
+      return new Response(JSON.stringify({ path: 'art/secret.jpg', mime: 'image/jpeg', binary: true, size: 1024 }));
+    if (url === '/api/workspace/resolve-file-source')
+      return new Response(JSON.stringify({ error: { code: 'access_denied' } }), { status: 403 });
+    throw new Error(`unexpected request: ${url}`);
+  });
+
+  await act(async () => {
+    root.render(
+      <ArtworkLightboxProvider threadId={publication.threadId}>
+        <MediaGalleryBlock
+          publication={publication}
+          block={{ kind: 'media_gallery', v: 1, id: 'g2', items: [{ url: rawUrl, alt: '受限图片' }] }}
+        />
+        <ArtworkLightboxHost />
+      </ArtworkLightboxProvider>,
+    );
+  });
+
+  await act(async () => container.querySelector<HTMLButtonElement>('button[aria-label^="打开作品"]')!.click());
+
+  const dialog = document.body.querySelector('[role="dialog"]');
+  expect(dialog).not.toBeNull();
+  expect(dialog?.querySelector('[data-testid="artwork-chat-preview"]')).toBeNull();
+  expect(dialog?.querySelector('[data-testid="artwork-lightbox-owner"] [role="alert"]')?.textContent).toContain(
+    '无权访问',
+  );
+});
+
+it('unmounts a previously loaded floating preview when a linked directory is revoked before source resolution completes (404 not_found + /file 404)', async () => {
+  const rawUrl = '/api/workspace/file/raw?worktreeId=linked_review&path=picture.png';
+  let revoked = false;
+  mocks.apiFetch.mockImplementation(async (url: string) => {
+    if (url.startsWith('/api/workspace/file?')) {
+      if (revoked) return new Response(JSON.stringify({ error: 'Unknown worktreeId: linked_review' }), { status: 404 });
+      revoked = true; // Directory grant removed right after Stage 1 read, before Stage 2 resolve-file-source.
+      return new Response(JSON.stringify({ path: 'picture.png', mime: 'image/png', binary: true, size: 68 }));
+    }
+    if (url === '/api/workspace/resolve-file-source')
+      return new Response(JSON.stringify({ error: { code: 'not_found' } }), { status: 404 });
+    throw new Error(`unexpected request: ${url}`);
+  });
+
+  await act(async () => {
+    root.render(
+      <ArtworkLightboxProvider threadId={publication.threadId}>
+        <MediaGalleryBlock
+          publication={publication}
+          block={{ kind: 'media_gallery', v: 1, id: 'g-revoked', items: [{ url: rawUrl, alt: '已撤销目录图片' }] }}
+        />
+        <ArtworkLightboxHost />
+      </ArtworkLightboxProvider>,
+    );
+  });
+
+  await act(async () => container.querySelector<HTMLButtonElement>('button[aria-label^="打开作品"]')!.click());
+
+  const dialog = document.body.querySelector('[role="dialog"]');
+  expect(dialog).not.toBeNull();
+  expect(dialog?.querySelector('[data-testid="artwork-chat-preview"]')).toBeNull();
+  expect(dialog?.querySelector('button[aria-label="下载"]')).toBeNull();
+  expect(dialog?.querySelector('[data-testid="artwork-lightbox-owner"] [role="alert"]')?.textContent).toContain(
+    '不可读取',
+  );
+});
+
+it('refuses to keep an early floating preview open when a linked directory was already revoked before clicking (/file 404)', async () => {
+  const rawUrl = '/api/workspace/file/raw?worktreeId=linked_review&path=picture.png';
+  mocks.apiFetch.mockImplementation(async (url: string) => {
+    if (url.startsWith('/api/workspace/file?'))
+      return new Response(JSON.stringify({ error: 'Unknown worktreeId: linked_review' }), { status: 404 });
+    throw new Error(`unexpected request: ${url}`);
+  });
+
+  await act(async () => {
+    root.render(
+      <ArtworkLightboxProvider threadId={publication.threadId}>
+        <MediaGalleryBlock
+          publication={publication}
+          block={{ kind: 'media_gallery', v: 1, id: 'g-revoked-early', items: [{ url: rawUrl, alt: '已断开图片' }] }}
+        />
+        <ArtworkLightboxHost />
+      </ArtworkLightboxProvider>,
+    );
+  });
+
+  await act(async () => container.querySelector<HTMLButtonElement>('button[aria-label^="打开作品"]')!.click());
+
+  expect(document.body.querySelector('[role="dialog"]')).toBeNull();
+  expect(container.querySelector('[role="alert"]')?.textContent).toContain('不可读取');
 });

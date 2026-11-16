@@ -85,6 +85,7 @@ function describeAccountConflict(existing: AccountConfig, incoming: AccountConfi
   if (current.clientId !== next.clientId) diffs.push('clientId differs');
   if (canonicalJson(current.envVars) !== canonicalJson(next.envVars)) diffs.push('envVars differ');
   if (canonicalJson(current.codex) !== canonicalJson(next.codex)) diffs.push('Codex account metadata differs');
+  if (canonicalJson(current.agy) !== canonicalJson(next.agy)) diffs.push('AGY account metadata differs');
   if ((current.baseUrl ?? '(none)') !== (next.baseUrl ?? '(none)')) {
     diffs.push(`baseUrl ${current.baseUrl ?? '(none)'} vs ${next.baseUrl ?? '(none)'}`);
   }

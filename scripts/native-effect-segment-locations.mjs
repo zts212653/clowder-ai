@@ -1,5 +1,5 @@
 import { homedir } from 'node:os';
-import { expandPositionalParameters, parameterFrame } from './lib/shell-code-inputs.mjs';
+import { expandPositionalParameters, forkParameterFrame, parameterFrame } from './lib/shell-code-inputs.mjs';
 import { cdReadings, kernelPath } from './lib/shell-directory.mjs';
 import { executedInvocations } from './lib/shell-invocation.mjs';
 import { scanShellText, shellSubstitutions } from './lib/shell-lexical.mjs';
@@ -53,8 +53,8 @@ export function segmentLocations(segments, cwd, env = process.env) {
  * an operand's value, read with `expandWordValues`). `bindings` is the path's own map; a
  * forgotten map (too many paths) makes every variable unreadable.
  */
-export function segmentContexts(segments, cwd, env = process.env) {
-  return judgedPaths(segments, cwd, env).map((judged) => {
+export function segmentContexts(segments, cwd, env = process.env, builtinContexts = [], initialScope = {}) {
+  return judgedPaths(segments, cwd, env, builtinContexts, initialScope).map((judged) => {
     const seen = new Map();
     for (const path of judged) {
       for (const directory of directoriesOf(path.location)) {
@@ -66,10 +66,17 @@ export function segmentContexts(segments, cwd, env = process.env) {
   });
 }
 
-function judgedPaths(segments, cwd, env) {
+function judgedPaths(segments, cwd, env, builtinContexts = [], initialScope = {}) {
   const start = cwd === undefined ? UNKNOWN : { logical: cwd, physical: kernelPath(cwd) ?? cwd };
   let paths = [
-    { location: start, bindings: new Map(), parameters: parameterFrame(), status: 'ok', frames: [], skipped: [] },
+    {
+      location: start,
+      bindings: new Map(initialScope.bindings),
+      parameters: forkParameterFrame(initialScope.parameters ?? parameterFrame()),
+      status: 'ok',
+      frames: [],
+      skipped: [],
+    },
   ];
   return segments.map((segment, index) => {
     const shape = segmentShape(segment.text);
@@ -83,7 +90,7 @@ function judgedPaths(segments, cwd, env) {
         continue;
       }
       running.push(path);
-      next.push(...runSegment(path, shape, inSubshell, env));
+      next.push(...runSegment(path, shape, inSubshell, env, builtinContexts[index] ?? false));
     }
     const judged = running.length > 0 ? running : paths;
     paths = dedupe(next);
@@ -208,7 +215,7 @@ function skipSegment(path, shape) {
   return { ...current, skipped };
 }
 
-function runSegment(path, shape, inSubshell, env) {
+function runSegment(path, shape, inSubshell, env, builtinContext) {
   const frames = [...path.frames];
   const subshells = shape.openers.filter((type) => type === '(').length;
   for (let i = 0; i < subshells; i += 1)
@@ -218,7 +225,7 @@ function runSegment(path, shape, inSubshell, env) {
   const command = shape.tokens ? peel(shape.tokens) : { words: [OPAQUE], mayNotRun: false, negated: false };
   if (command.mayNotRun) outcomes.push(entry);
   const argv = shape.argv ? peel(shape.argv).words : command.words;
-  for (const outcome of execute(entry, argv, env, shape.bindingSource)) {
+  for (const outcome of execute(entry, argv, env, shape.bindingSource, builtinContext)) {
     const status = command.negated ? (outcome.status === 'ok' ? 'fail' : 'ok') : outcome.status;
     // An explicit subshell group restores its state at the closing parenthesis,
     // not after its first command when the group happens to follow a pipe.
@@ -253,7 +260,7 @@ function peel(tokens) {
   return { words: bare, mayNotRun, negated };
 }
 
-function execute(path, words, env, bindingSource) {
+function execute(path, words, env, bindingSource, builtinContext) {
   // Positionals have the same path/subshell lifetime as directory and named bindings.
   const projected = expandPositionalParameters(bindingSource, path.parameters);
   if (projected !== bindingSource) {
@@ -276,6 +283,7 @@ function execute(path, words, env, bindingSource) {
       cwd: directoriesOf(path.location)[0],
       bindings: path.bindings,
       parameters: path.parameters,
+      builtinContext,
     });
     if (parsed.directInvocations.some((call) => call.name === 'set' && call.operands[0] === '--'))
       return [{ ...path, parameters: parsed.parameters, status: 'ok' }];

@@ -60,6 +60,12 @@ export function filterRecallEvents(events: ToolEvent[]): RecallEvent[] {
       }
     }
     if (!match) continue;
+    if (event.toolUseId && match.toolUseId === event.toolUseId) {
+      const input = parseRecallToolInput(event.inputDetail);
+      match.recall.query = input.query || input.q || input.anchor || match.recall.query;
+      match.recall.mode = input.mode ?? match.recall.mode;
+      match.recall.scope = input.scope ?? match.recall.scope;
+    }
     applyResultToRecall(match.recall, text, parseResultQueryFromText(text));
     if (
       !parseRecallMetaFromText(text) &&

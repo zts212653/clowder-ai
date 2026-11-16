@@ -2,7 +2,7 @@
 
 import { AppTooltip } from '../AppTooltip';
 import { useShellCopy } from '../shell/shell-copy';
-import type { GroupPeekProjection } from './collapsed-group-peek';
+import type { GroupPeekEntry } from './collapsed-group-peek';
 import { sidebarStatusTextColor, ThreadSignalPills } from './ThreadRowSignals';
 import { threadSignalsCopy } from './thread-signals.shell-copy';
 
@@ -12,11 +12,15 @@ export function CollapsedGroupPeek({
   currentId,
   onSelect,
   onExpand,
+  moreCount,
+  moreSlot,
 }: {
-  peek: GroupPeekProjection;
+  peek: { entries: (Omit<GroupPeekEntry, 'reason'> & { reason: GroupPeekEntry['reason'] | null })[]; total: number };
   currentId: string | null;
   onSelect: (threadId: string) => void;
   onExpand: () => void;
+  moreCount?: number;
+  moreSlot?: boolean;
 }) {
   const copy = useShellCopy(threadSignalsCopy);
   return (
@@ -28,15 +32,17 @@ export function CollapsedGroupPeek({
             ? copy.needsDecision
             : reason === 'mention'
               ? copy.mention
-              : `${member.unreadCount} ${copy.unreadBadge}`;
+              : reason === 'unread'
+                ? `${member.unreadCount} ${copy.unreadBadge}`
+                : '';
         return (
-          <AppTooltip key={member.id} label={`${title} · ${label}`} side="right" intent="content">
+          <AppTooltip key={member.id} label={label ? `${title} · ${label}` : title} side="right" intent="content">
             <button
               type="button"
               data-thread-id={member.id}
               data-peek-reason={reason}
               aria-current={member.id === currentId ? 'page' : undefined}
-              aria-label={`${title} · ${label}`}
+              aria-label={label ? `${title} · ${label}` : title}
               onClick={() => onSelect(member.id)}
               className="shell-focusable flex min-h-7 w-full min-w-0 items-center gap-1 rounded-md text-left text-xs"
               data-chat-background-surface={member.id === currentId ? 'selected' : undefined}
@@ -62,7 +68,7 @@ export function CollapsedGroupPeek({
                   />
                   {label}
                 </span>
-              ) : (
+              ) : reason ? (
                 <div className="flex h-5 shrink-0 items-center" data-testid="group-peek-label">
                   <ThreadSignalPills
                     unreadCount={reason === 'unread' ? member.unreadCount : 0}
@@ -70,22 +76,25 @@ export function CollapsedGroupPeek({
                     testIdPrefix="group-peek"
                   />
                 </div>
-              )}
+              ) : null}
             </button>
           </AppTooltip>
         );
       })}
-      {peek.total > peek.entries.length && (
-        <button
-          type="button"
-          onClick={onExpand}
-          className="shell-focusable h-7 w-full min-w-0 truncate rounded text-left text-xs"
-          style={{ color: 'var(--shell-muted)' }}
-          data-testid="group-peek-more"
-        >
-          {copy.moreToSee(peek.total - peek.entries.length)}
-        </button>
-      )}
+      {(moreSlot ?? peek.total > peek.entries.length) &&
+        ((moreCount ?? peek.total - peek.entries.length) > 0 ? (
+          <button
+            type="button"
+            onClick={onExpand}
+            className="shell-focusable h-7 w-full min-w-0 truncate rounded text-left text-xs"
+            style={{ color: 'var(--shell-muted)' }}
+            data-testid="group-peek-more"
+          >
+            {copy.moreToSee(moreCount ?? peek.total - peek.entries.length)}
+          </button>
+        ) : (
+          <div aria-hidden="true" className="h-7" data-testid="group-peek-more-slot" />
+        ))}
     </div>
   );
 }

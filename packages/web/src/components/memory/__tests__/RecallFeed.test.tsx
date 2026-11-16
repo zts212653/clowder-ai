@@ -94,6 +94,21 @@ describe('F321 recall row facts', () => {
     expect(container.textContent).toContain('结果没有记录下来');
     expect(container.textContent).not.toContain('没有命中');
   });
+  it.each([
+    ['error', undefined, '检索失败', '工具调用失败'],
+    ['timeout', undefined, '检索超时', '工具调用超时'],
+    ['cancelled', undefined, '检索已取消', '检索在返回结果前取消'],
+    ['parser_miss', undefined, '无法读取检索结果', '工具已返回，结果未能解析'],
+    ['result_unmerged', undefined, '结果没有记录下来', '这次检索的结果尚未记录'],
+    ['no_results', 0, '没有命中', '没有命中'],
+  ] as const)('distinguishes %s when collapsed and expanded', async (resultStatus, resultCount, label, detail) => {
+    await act(async () =>
+      root.render(<RecallCard event={{ id: 'outcome', query: 'fixture', timestamp: 1, resultStatus, resultCount }} />),
+    );
+    expect(container.querySelector('button')?.textContent).toContain(label);
+    await act(async () => container.querySelector('button')?.click());
+    expect(container.querySelector('p')?.textContent).toBe(detail);
+  });
   it('names a generic context delivery without exposing the pipeline', async () => {
     await act(async () =>
       root.render(

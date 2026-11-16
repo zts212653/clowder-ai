@@ -46,6 +46,7 @@ function applyPendingServerRevision(insert: ComposerDraftInsert, refs: PendingCo
   refs.imageUrlsRef.current = [...imageUrls];
   refs.revisionRef.current = insert.serverRevision;
   refs.hydratedRef.current = true;
+  if (insert.preservedBlocks) refs.preservedBlocksRef.current = [...insert.preservedBlocks];
   const signature = composerDraftSignature(
     insert.text,
     imageUrls,
@@ -141,6 +142,17 @@ export function usePendingComposerDraftInsert({
     let active = true;
     const apply = () => {
       if (!active || useChatStore.getState().pendingChatInsert !== pendingChatInsert) return;
+      // Socket recovery may already have handed this recall revision to the
+      // mounted owner before the initiating tab receives its HTTP response.
+      if (
+        pendingChatInsert.authoritative &&
+        hydratedRef.current &&
+        pendingChatInsert.serverRevision !== undefined &&
+        pendingChatInsert.serverRevision <= revisionRef.current
+      ) {
+        setPendingChatInsert(null);
+        return;
+      }
       hydrationGenerationRef.current += 1;
       const refs = {
         hydrationGenerationRef,
