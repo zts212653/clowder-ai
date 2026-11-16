@@ -8,6 +8,7 @@ const postDescription =
   'For a root message, omit replyTo; select targetCats after get_thread_cats only when intentionally waking cat teammates. ' +
   'For a gpt-pro return, copy replyTo=sourceMessageId and threadId from the runtime delta; authorization stays in the server grant. ' +
   'Output: a durable message and routing results. Only status ok/duplicate confirms success; queued/routed does not mean a teammate completed work. ' +
+  'To attach original-source citations, use searchAnswer={query,selections:[{threadId,messageId,contentRevision,quote,reason,part?,range?}]} and stable clientMessageId. Full source reads supply revision and part coordinates; Host verifies and binds the card through this same post and existing destination/replyTo grant. Reasons remain your judgment. Saved publicationRef/source forwarding still works. ' +
   'effectClass=fyi delivers unread without waking scarce dossier engagementPolicy seats; check deliveredWithoutWake, which does not confirm reading. Local review facts and exact-source returns retain their wake. ' +
   'NOT for invocation-only structured action/coordination or replacing a provider final. ' +
   'GOTCHA: targetCats and line-start mentions are merged; never add your own catId unless self-invocation is intended. ' +

@@ -241,7 +241,7 @@ function DomainCard({ domain, onCatUpdated }: { domain: EvalDomainSummary; onCat
             const line = deriveDomainScheduleLine(domain, language);
             if (line.kind === 'sunset') {
               return (
-                <p className="mt-0.5 text-xs text-cafe-muted" title="Sunset — domain.yaml has enabled: false">
+                <p className="mt-0.5 text-xs text-cafe-muted" title={line.text}>
                   {line.text}
                 </p>
               );

@@ -30,6 +30,7 @@ import {
   isBeforeHistoryPageCursor,
 } from '@/stores/message-timeline';
 import { withQueuedInputPreviews } from '@/stores/queued-input-preview';
+import { withSendAttempts } from '@/stores/send-attempt-projection';
 import { ownsStreamedBody, withStreamedBodyOf } from '@/stores/streamed-body';
 import type { TaskItem } from '@/stores/taskStore';
 import { useTaskStore } from '@/stores/taskStore';
@@ -106,10 +107,22 @@ import {
 } from '@/utils/teleport';
 import { hydrateQueueActiveInvocationSlots, type QueueActiveInvocationSlot } from './queue-active-invocation-hydration';
 import { acknowledgeThreadHistoryWatermark, readThreadHistoryWatermark } from './thread-history-watermark';
+import { useSendAttempts } from './useSendAttempts';
 import { useViewportMessageTimeline } from './useViewportMessageTimeline';
 
 type RestoreFrameKind = 'restore' | 'navigation' | 'correction';
-type ReadingRefreshStatus = 'ready' | 'unavailable' | 'interrupted';
+type ReadingInterruption = { status: 'interrupted'; reason?: 'user-input' };
+type ReadingRefreshResult = { status: 'ready' } | { status: 'unavailable' } | ReadingInterruption;
+// These existing cancellation paths represent explicit reading actions. Lifecycle,
+// replacement and abort failures stay distinguishable from the user taking over.
+const USER_READING_CANCELLATIONS: ReadonlySet<ReadingCancelSource> = new Set([
+  'native_input',
+  'rail_input',
+  'jump_latest',
+  'reading_disclosure',
+  'reading_capture',
+  'viewport_anchor',
+]);
 type NavigationSettleSample = {
   top: number;
   messageAnchor: MessageScrollAnchor;
@@ -138,7 +151,8 @@ export type { CapturedChatReadingRef, ChatReadingRef, ChatReadingSnapshot } from
 
 export type ChatReadingRestoreReceipt =
   | { status: 'settled'; exact: boolean; position: SavedScrollState }
-  | { status: 'interrupted' | 'unavailable' };
+  | { status: 'unavailable' }
+  | ReadingInterruption;
 
 export type ChatMessageNavigationReceipt =
   | { status: 'settled'; threadId: string; messageId: string; position: SavedScrollState }
@@ -841,9 +855,16 @@ export function useChatHistory(threadId: string) {
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const sendAttempts = useSendAttempts(threadId, rawMessages, pendingQueue ?? []);
   const presentedMessages = useMemo(
-    () => withQueuedInputPreviews(rawMessages, pendingQueue, threadId),
-    [rawMessages, pendingQueue, threadId],
+    () =>
+      withSendAttempts(
+        withQueuedInputPreviews(rawMessages, pendingQueue, threadId),
+        sendAttempts,
+        threadId,
+        pendingQueue,
+      ),
+    [rawMessages, pendingQueue, threadId, sendAttempts],
   );
   const messages = useViewportMessageTimeline(threadId, presentedMessages);
 
@@ -861,7 +882,7 @@ export function useChatHistory(threadId: string) {
   readingOwnerIdRef.current ??= readingDiagnosticId();
   const readingOwnerMountedRef = useRef<string | null>(null);
   const readingRefreshRef = useRef<{
-    resolve: (status: ReadingRefreshStatus) => void;
+    resolve: (result: ReadingRefreshResult) => void;
     diagnostic?: ReadingDiagnosticContext;
   } | null>(null);
   const readingReceiptRef = useRef<{
@@ -974,13 +995,16 @@ export function useChatHistory(threadId: string) {
         cancelSource,
         input,
       );
-      readingRefreshRef.current?.resolve('interrupted');
+      const interruption: ReadingInterruption = USER_READING_CANCELLATIONS.has(cancelSource)
+        ? { status: 'interrupted', reason: 'user-input' }
+        : { status: 'interrupted' };
+      readingRefreshRef.current?.resolve(interruption);
       readingRefreshRef.current = null;
       if (!preserveRestoreWrites) restoreWritesRef.current.invalidate();
       navigationHighlightRef.current?.();
       navigationHighlightRef.current = undefined;
       if (!preserveReadingReceipt && readingReceiptRef.current) {
-        readingReceiptRef.current.resolve({ status: 'interrupted' });
+        readingReceiptRef.current.resolve(interruption);
         readingReceiptRef.current = null;
       }
       if (!preserveNavigationReceipt && navigationReceiptRef.current) {
@@ -1550,12 +1574,13 @@ export function useChatHistory(threadId: string) {
         params.set('threadId', fetchForThread);
         // PR-3a2: the recovery round and write count this read is issued at decide what it may change.
         const issue = issueReplaceRead(fetchForThread);
+        const hasDeletions = (useChatStore.getState().deletedMessageIds[fetchForThread]?.size ?? 0) > 0;
         // A catch-up must be a read issued now: joining a same-URL GET already in flight would
         // reuse a snapshot taken before the room join it is meant to cover (PR-3a, contract 3.2).
         const res = await apiFetch(
           `/api/messages?${params}`,
-          { signal: controller.signal },
-          options?.afterCurrentGet ? { afterCurrentGet: true } : undefined,
+          { signal: controller.signal, ...(hasDeletions ? { cache: 'no-store' as const } : {}) },
+          options?.afterCurrentGet || hasDeletions ? { afterCurrentGet: true } : undefined,
         );
         if (!res.ok) return;
         // Stale check: discard if the request was superseded while the response body was in flight.
@@ -1566,6 +1591,7 @@ export function useChatHistory(threadId: string) {
           .map(
             (m: {
               id: string;
+              clientMessageId?: string;
               type: string;
               from?: import('@cat-cafe/shared').MessageFrom;
               catId?: string;
@@ -1622,6 +1648,7 @@ export function useChatHistory(threadId: string) {
                           ? 'assistant'
                           : 'user')) as 'user' | 'assistant' | 'system' | 'summary' | 'connector',
                 ...(m.from ? { from: m.from } : {}),
+                ...(m.clientMessageId ? { clientMessageId: m.clientMessageId } : {}),
                 catId: m.catId,
                 content: (() => {
                   if (!m.extra?.semanticEvent) return m.content;
@@ -1697,7 +1724,7 @@ export function useChatHistory(threadId: string) {
           // (instead of bare replaceMessages + saveMessagesSnapshot pair).
           // AC-C10: server GET 是 authoritative，IDB snapshot 必须被 GET
           // 响应覆盖而不是合并。
-          hydrateThread(fetchForThread, mergedMsgs, data.hasMore ?? false);
+          hydrateThread(fetchForThread, mergedMsgs, data.hasMore ?? false, issue.localWriteSeq);
           restoreActiveFromDrafts(fetchForThread, data.messages ?? []);
           // The page boundary follows what stays loaded: a read that unloaded the older pages (a
           // recovery round, an IndexedDB copy) restarts it at this page, while older pages the merge
@@ -1725,7 +1752,7 @@ export function useChatHistory(threadId: string) {
           ...beforePrepend,
         ];
         // hasMore propagates older-history pagination state.
-        replaceThreadMessages(fetchForThread, union, data.hasMore ?? false);
+        replaceThreadMessages(fetchForThread, union, data.hasMore ?? false, issue.localWriteSeq);
         restoreActiveFromDrafts(fetchForThread, data.messages ?? []);
         if (
           typeof data.historyPageCursor === 'string' &&
@@ -1809,26 +1836,26 @@ export function useChatHistory(threadId: string) {
   // A search admission checks authority; this original reader still refreshes the
   // actual transcript before choosing a DOM target from its cache.
   const refreshReadingHistory = useCallback(
-    async (signal?: AbortSignal, diagnostic?: ReadingDiagnosticContext): Promise<ReadingRefreshStatus> => {
-      if (signal?.aborted) return 'interrupted';
+    async (signal?: AbortSignal, diagnostic?: ReadingDiagnosticContext): Promise<ReadingRefreshResult> => {
+      if (signal?.aborted) return { status: 'interrupted' };
       if (threadIdRef.current !== threadId || useChatStore.getState().currentThreadId !== threadId)
-        return 'unavailable';
+        return { status: 'unavailable' };
       cancelPendingRestore('refresh_request');
       readingRestoreRef.current = null;
       restoreFrameKindRef.current = 'navigation';
       const generation = restoreGenerationRef.current;
-      const receipt = new Promise<ReadingRefreshStatus>((resolve) => {
+      const receipt = new Promise<ReadingRefreshResult>((resolve) => {
         const operation = { resolve, diagnostic };
         readingRefreshRef.current = operation;
         const finish = (refreshed: boolean | undefined) => {
           if (readingRefreshRef.current !== operation) return;
           readingRefreshRef.current = null;
           if (generation !== restoreGenerationRef.current || threadIdRef.current !== threadId || signal?.aborted) {
-            resolve('interrupted');
+            resolve({ status: 'interrupted' });
             return;
           }
           restoreFrameKindRef.current = null;
-          resolve(refreshed === true ? 'ready' : 'unavailable');
+          resolve({ status: refreshed === true ? 'ready' : 'unavailable' });
         };
         // History can be shared with another reader. Retire this navigation's
         // wait immediately without cancelling that shared fetch or its hydration.
@@ -1858,8 +1885,8 @@ export function useChatHistory(threadId: string) {
       options?: { refresh?: boolean },
     ): Promise<ChatMessageNavigationReceipt> => {
       if (options?.refresh) {
-        const status = await refreshReadingHistory(signal);
-        if (status !== 'ready') return { status };
+        const result = await refreshReadingHistory(signal);
+        if (result.status !== 'ready') return { status: result.status };
       }
       return beginMessageNavigation(messageId, signal);
     },
@@ -1878,8 +1905,8 @@ export function useChatHistory(threadId: string) {
           : undefined;
       return observeReadingRestore(diagnostic, readingDiagnosticState, async () => {
         if (options?.refresh) {
-          const status = await refreshReadingHistory(signal, diagnostic);
-          if (status !== 'ready') return { status };
+          const result = await refreshReadingHistory(signal, diagnostic);
+          if (result.status !== 'ready') return result;
         }
         return restoreCapturedReadingRef(ref, signal, diagnostic);
       });

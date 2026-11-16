@@ -48,6 +48,7 @@ import { buildSearchableMessageContent } from './message-search-content.js';
 import { type PassageVectorStore, passageVectorKey } from './PassageVectorStore.js';
 import { readPassageEmbeddingPage } from './passage-embedding-page.js';
 import { PassageWarmupDiagnostics } from './passage-warmup-diagnostics.js';
+import { type PassageWarmupState, readPassageWarmupState } from './passage-warmup-state.js';
 import { prepareDocumentVectors } from './prepare-document-vectors.js';
 import { type DocumentPassageSource, replaceDocumentPassages } from './replace-document-passages.js';
 import type { SqliteEvidenceStore } from './SqliteEvidenceStore.js';
@@ -206,6 +207,7 @@ export class IndexBuilder implements IIndexBuilder {
   private dirtyFlushInFlight: Promise<number> | null = null;
 
   private passageEmbeddingWarmupInFlight: Promise<void> | null = null;
+  private completedPassageWarmup?: { deps: object; state: PassageWarmupState };
 
   /** F152 Phase A: pluggable scanner — defaults to CatCafeScanner */
   private readonly scanner: RepoScanner & {
@@ -259,6 +261,7 @@ export class IndexBuilder implements IIndexBuilder {
     ) {
       this.store.invalidateVectorProjection();
     }
+    if (this.embedDeps !== deps) this.completedPassageWarmup = undefined;
     this.embedDeps = deps;
   }
 
@@ -709,6 +712,21 @@ export class IndexBuilder implements IIndexBuilder {
   private runPassageEmbeddingWarmup(): Promise<void> {
     if (this.passageEmbeddingWarmupInFlight) return this.passageEmbeddingWarmupInFlight;
 
+    const deps = this.embedDeps;
+    const state = () =>
+      deps ? readPassageWarmupState(this.store.getDb(), deps.passageVectorStore, deps.embedding) : undefined;
+    const before = state();
+    const completed = this.completedPassageWarmup;
+    if (
+      before &&
+      completed &&
+      completed.deps === deps &&
+      completed.state.source === before.source &&
+      completed.state.vectorCount === before.vectorCount
+    )
+      return Promise.resolve();
+    this.completedPassageWarmup = undefined;
+
     const observation = new PassageWarmupDiagnostics();
     const warmup = this.embedMissingPassages(undefined, observation)
       .catch(() => {
@@ -716,6 +734,18 @@ export class IndexBuilder implements IIndexBuilder {
         /* fail-open: passage vectors are an accelerator; passage_fts remains canonical */
       })
       .finally(() => {
+        if (
+          deps &&
+          before &&
+          this.embedDeps === deps &&
+          observation.outcome === 'fulfilled' &&
+          observation.scanExhausted &&
+          observation.batchFailures === 0 &&
+          observation.sourceChanged === 0
+        ) {
+          const after = state();
+          if (after?.source === before.source) this.completedPassageWarmup = { deps, state: after };
+        }
         if (this.passageEmbeddingWarmupInFlight === warmup) {
           this.passageEmbeddingWarmupInFlight = null;
         }

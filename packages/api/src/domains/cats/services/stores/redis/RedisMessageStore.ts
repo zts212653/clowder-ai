@@ -177,6 +177,7 @@ import { appendMessageAndObservePriorFrontier } from './redis-message-frontier-a
 import {
   parseConnectorSourceField,
   safeParseContentBlocks,
+  safeParseDraftContentBlocks,
   safeParseExtra,
   safeParseLegacyLifecycleMessageFrom,
   safeParseLifecycleMetadata,
@@ -1988,6 +1989,7 @@ export class RedisMessageStore {
       String(msg.timestamp),
     ];
     if (msg.thinking) hashFields.push('thinking', msg.thinking);
+    if (msg.clientMessageId) hashFields.push('clientMessageId', msg.clientMessageId);
     if (msg.origin) hashFields.push('origin', msg.origin);
     if (msg.visibility) hashFields.push('visibility', msg.visibility);
     if (msg.whisperTo) hashFields.push('whisperTo', JSON.stringify(msg.whisperTo));
@@ -2222,7 +2224,7 @@ export class RedisMessageStore {
     const revision = Number(data.revision);
     const updatedAt = Number(data.updatedAt);
     if (!Number.isInteger(revision) || revision < 1 || !Number.isFinite(updatedAt)) return null;
-    const contentBlocks = safeParseContentBlocks(data.contentBlocks);
+    const contentBlocks = safeParseDraftContentBlocks(data.contentBlocks);
     return {
       version: 1,
       ownerUserId: data.ownerUserId,
@@ -2393,6 +2395,7 @@ export class RedisMessageStore {
     const companionDeliveryReceipt = readStoredCompanionDelivery(data.companionDeliveryReceipt);
     return {
       id: data.id,
+      ...(data.clientMessageId ? { clientMessageId: data.clientMessageId } : {}),
       threadId: data.threadId || DEFAULT_THREAD_ID,
       userId: data.userId ?? 'unknown',
       ...(from ? { from } : {}),

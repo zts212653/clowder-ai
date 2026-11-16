@@ -44,28 +44,39 @@ for (const kind of ['entity', 'event'] as const) {
       });
       transport.stderr?.resume();
       await client.connect(transport);
-      const name = kind === 'entity' ? 'cat_cafe_propose_entity' : 'cat_cafe_propose_event_memory_correction';
-      const first = await client.callTool({ name, arguments: f.input });
-      assert.notEqual(first.isError, true, JSON.stringify(first));
-      const replay = await client.callTool({ name, arguments: f.input });
-      assert.notEqual(replay.isError, true, JSON.stringify(replay));
-      assert.ok(JSON.stringify(replay).includes('deduped'));
-      assert.equal(
-        f.messages.getByThread(f.thread.id, 100, f.owner).filter((message) => message.extra?.rich?.blocks.length)
-          .length,
-        1,
-      );
+      const target = kind === 'entity' ? 'entity' : 'event_correction';
+      const remember = (payload: Record<string, unknown>, clientRequestId = `m3-${kind}-remember`) =>
+        client.callTool({
+          name: 'cat_cafe_remember',
+          arguments: { clientRequestId, items: [{ itemId: 'one', target, payload }] },
+        });
+      const row = (result: Awaited<ReturnType<typeof remember>>) => {
+        assert.notEqual(result.isError, true, JSON.stringify(result));
+        const text = (result.content as Array<{ text: string }>)[0]?.text ?? '{}';
+        return JSON.parse(text).results[0] as { statusCode: number; result: unknown };
+      };
+      const first = row(await remember(f.input));
+      assert.equal(first.statusCode, 200, JSON.stringify(first));
+      const replay = row(await remember(f.input));
+      assert.equal(replay.statusCode, 200, JSON.stringify(replay));
+      assert.ok(JSON.stringify(replay.result).includes('deduped'));
+      const cards = () =>
+        f.messages
+          .getByThread(f.thread.id, 100, f.owner)
+          .filter((message) => message.extra?.rich?.blocks.length)
+          .map((message) => message.extra?.rich?.blocks[0]?.meta?.kind ?? 'original');
+      assert.deepEqual(cards().sort(), ['memory_group', 'original'], 'one original card plus one group card');
       const changed =
         kind === 'entity'
           ? { ...f.input, rationale: 'Changed through the real MCP front door' }
           : { ...f.input, suggestedPatch: { summary: 'Changed through the real MCP front door' } };
-      const conflict = await client.callTool({ name, arguments: changed });
-      assert.equal(conflict.isError, true, JSON.stringify(conflict));
-      assert.ok(JSON.stringify(conflict).includes('client_request_conflict'));
+      const conflict = row(await remember(changed, `m3-${kind}-remember-changed`));
+      assert.notEqual(conflict.statusCode, 200, JSON.stringify(conflict));
+      assert.ok(JSON.stringify(conflict.result).includes('client_request_conflict'));
       await f.messages.softDelete(f.origin.id, f.owner);
-      const withdrawn = await client.callTool({ name, arguments: f.input });
-      assert.equal(withdrawn.isError, true, JSON.stringify(withdrawn));
-      assert.ok(JSON.stringify(withdrawn).includes('origin_not_eligible'));
+      const withdrawn = row(await remember(f.input, `m3-${kind}-remember-withdrawn`));
+      assert.notEqual(withdrawn.statusCode, 200, JSON.stringify(withdrawn));
+      assert.ok(JSON.stringify(withdrawn.result).includes('origin_not_eligible'));
     },
   );
 

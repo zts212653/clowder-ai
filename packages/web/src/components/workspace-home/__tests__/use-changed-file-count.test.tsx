@@ -41,12 +41,12 @@ describe('useChangedFileCount: a number only when the 变更 list would have tha
     expect(shown()).toBe('null');
     expect(mocks.apiFetch).not.toHaveBeenCalled();
 
-    reply({ changedFiles: [], diff: '' });
+    reply({ changedFileCount: 0 });
     await show('wt-empty');
     expect(shown()).toBe('0');
   });
 
-  it('stays unknown when the read fails or the answer is not the changed-files list', async () => {
+  it('stays unknown when the read fails or the answer is not a file count', async () => {
     reply({}, false);
     await show('wt-a');
     expect(shown()).toBe('null');
@@ -55,13 +55,13 @@ describe('useChangedFileCount: a number only when the 变更 list would have tha
     await show('wt-b');
     expect(shown()).toBe('null');
 
-    reply({ changedFiles: 'three' });
+    reply({ changedFileCount: 'three' });
     await show('wt-c');
     expect(shown()).toBe('null');
   });
 
   it('never shows one worktree’s number for another', async () => {
-    reply({ changedFiles: [{}, {}, {}] });
+    reply({ changedFileCount: 3 });
     await show('wt-1');
     expect(shown()).toBe('3');
 
@@ -74,7 +74,7 @@ describe('useChangedFileCount: a number only when the 变更 list would have tha
   });
   describe('a number belongs to the read that produced it: coming back to a worktree starts a new, unknown read', () => {
     const readA = async () => {
-      reply({ changedFiles: [{}, {}, {}] });
+      reply({ changedFileCount: 3 });
       await show('wt-A');
       expect(shown()).toBe('3');
     };
@@ -96,7 +96,7 @@ describe('useChangedFileCount: a number only when the 变更 list would have tha
     it.each([
       ['offline', () => mocks.apiFetch.mockRejectedValueOnce(new Error('offline'))],
       ['refused (403)', () => reply({}, false)],
-      ['not the changed-files list', () => reply({ changedFiles: 'three' })],
+      ['not a file count', () => reply({ changedFileCount: 'three' })],
     ])('A → B → A: a re-read of A that is %s shows nothing', async (_name, arrange) => {
       await readA();
       await wentToB();
@@ -117,7 +117,7 @@ describe('useChangedFileCount: a number only when the 变更 list would have tha
     it('A → B → A: a fresh successful re-read replaces the old number', async () => {
       await readA();
       await wentToB();
-      reply({ changedFiles: [{}, {}, {}, {}, {}] });
+      reply({ changedFileCount: 5 });
       await show('wt-A');
       expect(shown()).toBe('5');
     });
@@ -128,7 +128,7 @@ describe('useChangedFileCount: a number only when the 变更 list would have tha
       await show('wt-A');
       mocks.apiFetch.mockReturnValueOnce(new Promise(() => undefined));
       await show('wt-B');
-      await act(async () => late({ ok: true, json: async () => ({ changedFiles: [{}, {}] }) }));
+      await act(async () => late({ ok: true, json: async () => ({ changedFileCount: 2 }) }));
       expect(shown()).toBe('null');
       mocks.apiFetch.mockReturnValueOnce(new Promise(() => undefined));
       await show('wt-A');

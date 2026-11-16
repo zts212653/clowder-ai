@@ -1,5 +1,5 @@
 import { markAllThreadRoomsLost, markThreadRoomLive, markThreadRoomLost } from '@/stores/thread-room-presence';
-import { applyResponseStreamReplay, type StreamReplay, StreamReplayItem } from './response-stream-replay';
+import { iterateResponseStreamReplay, type StreamReplay, StreamReplayItem } from './response-stream-replay';
 import type { RoomConfirmation } from './useSocket-room-membership';
 
 const THREAD_ROOM_PREFIX = 'thread:';
@@ -62,7 +62,8 @@ export function createStreamReplayRelay(deps: StreamReplayRelayDeps) {
 }
 
 /** One item of the agent-message queue: a stream replay, or a live `agent_message`. */
-export function dispatchAgentQueueItem<Message>(item: unknown, onMessage: (message: Message) => void): void {
-  if (item instanceof StreamReplayItem) applyResponseStreamReplay(item.replay, undefined, item.runningAtConfirmation);
+export function dispatchAgentQueueItem<Message>(item: unknown, onMessage: (message: Message) => void) {
+  if (item instanceof StreamReplayItem)
+    return iterateResponseStreamReplay(item.replay, undefined, item.runningAtConfirmation);
   else onMessage(item as Message);
 }

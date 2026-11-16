@@ -54,6 +54,12 @@ describe('message-owner navigation error signal', () => {
     content: 'Error: historical text is not a status',
     timestamp: 1,
   };
+  it('keeps a local send attempt outside canonical navigation and reading anchors', () => {
+    render({ ...message, type: 'user', sendAttempt: { id: 'attempt', status: 'sending' } });
+    expect(host.querySelector('[data-message-viewport-boundary]')).not.toBeNull();
+    expect(host.querySelector('[data-message-viewport-id]')).toBeNull();
+    expect(host.textContent).toContain(message.content);
+  });
   it('uses only the explicit variant and clears the signal when that message recovers', () => {
     expect(render(message).dataset.messageNavigationError).toBeUndefined();
     expect(render({ ...message, variant: 'error' }).dataset.messageNavigationError).toBe('true');

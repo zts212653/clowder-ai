@@ -5,6 +5,7 @@ import Database from 'better-sqlite3';
 import { sanitizeCliStderr } from '../../../../../utils/sanitize-cli-stderr.js';
 
 export const OPENCODE_DB_ENV = 'OPENCODE_DB';
+export const OPENCODE_MESSAGE_REF_CONFLICT = 'conflict';
 export const OPENCODE_CONFIG_CONTENT_ENV = 'OPENCODE_CONFIG_CONTENT';
 export const OPENCODE_PERMISSION_ENV = 'OPENCODE_PERMISSION';
 export const OPENCODE_NO_TOOL_FINALIZER_AGENT = 'cat-cafe-no-tool-finalizer';
@@ -181,32 +182,41 @@ export function buildOpenCodePostToolFallbackText(trace: OpenCodeToolTrace | nul
   return lines.filter((line): line is string => Boolean(line)).join('\n\n');
 }
 
-export function extractOpenCodeMessageRef(event: unknown): OpenCodeMessageRef | null {
+export function extractOpenCodeMessageRef(
+  event: unknown,
+): OpenCodeMessageRef | typeof OPENCODE_MESSAGE_REF_CONFLICT | null {
   if (!isRecord(event)) return null;
-  if (event.type !== 'step_start') return null;
+  // These CLI part events refer to assistant messages, including 2.x streams without step_start.
+  if (
+    typeof event.type !== 'string' ||
+    !['step_start', 'text', 'reasoning', 'tool_use', 'step_finish'].includes(event.type)
+  )
+    return null;
   const part = isRecord(event.part) ? event.part : {};
-  const sessionId =
-    typeof part.sessionID === 'string'
-      ? part.sessionID
-      : typeof event.sessionID === 'string'
-        ? event.sessionID
-        : undefined;
-  const messageId =
-    typeof part.messageID === 'string'
-      ? part.messageID
-      : typeof event.messageID === 'string'
-        ? event.messageID
-        : undefined;
+  const partSessionId = typeof part.sessionID === 'string' ? part.sessionID : undefined;
+  const eventSessionId = typeof event.sessionID === 'string' ? event.sessionID : undefined;
+  const partMessageId = typeof part.messageID === 'string' ? part.messageID : undefined;
+  const eventMessageId = typeof event.messageID === 'string' ? event.messageID : undefined;
+  if (
+    (partSessionId !== undefined && eventSessionId !== undefined && partSessionId !== eventSessionId) ||
+    (partMessageId !== undefined && eventMessageId !== undefined && partMessageId !== eventMessageId)
+  )
+    return OPENCODE_MESSAGE_REF_CONFLICT;
+  const sessionId = partSessionId ?? eventSessionId;
+  const messageId = partMessageId ?? eventMessageId;
   if (!sessionId && !messageId) return null;
   return { ...(sessionId ? { sessionId } : {}), ...(messageId ? { messageId } : {}) };
 }
 
-function extractOpenCodePartText(data: string): string | null {
+function extractOpenCodePersistedText(data: string, schema: 'part' | 'session_message'): string | null {
   try {
     const parsed = JSON.parse(data) as unknown;
     if (!isRecord(parsed)) return null;
-    if (parsed.type !== 'text' || typeof parsed.text !== 'string') return null;
-    const text = parsed.text;
+    const parts = schema === 'session_message' ? parsed.content : [parsed];
+    if (!Array.isArray(parts)) return null;
+    const text = parts
+      .flatMap((part) => (isRecord(part) && part.type === 'text' && typeof part.text === 'string' ? [part.text] : []))
+      .join('');
     return text.trim().length > 0 ? text : null;
   } catch {
     return null;
@@ -369,6 +379,30 @@ export function recoverOpenCodeSilentCompletion(options: OpenCodeSilentRecoveryO
     let db: Database.Database | undefined;
     try {
       db = new Database(candidate.path, { readonly: true, fileMustExist: true });
+      const tables = db
+        .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('session_message', 'part')")
+        .all() as Array<{ name: string }>;
+      const tableNames = new Set(tables.map((table) => table.name));
+      if (tableNames.size === 0) {
+        sawSchemaError = true;
+        schemaErrorSource = candidate.source;
+        continue;
+      }
+      if (tableNames.has('session_message')) {
+        const row = db
+          .prepare('SELECT type, data FROM session_message WHERE session_id = ? AND id = ?')
+          .get(options.sessionId, options.messageId) as { type: string; data: unknown } | undefined;
+        if (row) {
+          const text =
+            row.type === 'assistant' && typeof row.data === 'string'
+              ? extractOpenCodePersistedText(row.data, 'session_message')
+              : null;
+          return text
+            ? { text, source: candidate.source }
+            : { text: null, source: candidate.source, reason: 'no_text' };
+        }
+      }
+      if (!tableNames.has('part')) continue;
       const rows = db
         .prepare(
           `
@@ -380,7 +414,7 @@ export function recoverOpenCodeSilentCompletion(options: OpenCodeSilentRecoveryO
         )
         .all(options.sessionId, options.messageId) as Array<{ data: unknown }>;
       const text = rows
-        .map((row) => (typeof row.data === 'string' ? extractOpenCodePartText(row.data) : null))
+        .map((row) => (typeof row.data === 'string' ? extractOpenCodePersistedText(row.data, 'part') : null))
         .filter((partText): partText is string => partText !== null)
         .join('');
       if (text.trim().length > 0) return { text, source: candidate.source };

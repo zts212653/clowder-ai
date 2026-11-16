@@ -108,14 +108,7 @@ export function buildEntityRecord(proposal: EntityProposal, userId: string): Ent
     visibilityScope: proposal.visibilityScope,
     status: 'active',
     provenance: [
-      ...proposal.provenance.map(
-        (p): EntityProvenance => ({
-          source: p.source,
-          ...(p.anchor ? { anchor: p.anchor } : {}),
-          ...(p.note ? { note: p.note } : {}),
-          ...(p.date ? { date: p.date } : {}),
-        }),
-      ),
+      ...proposal.provenance.map((p): EntityProvenance => structuredClone(p)),
       {
         source: 'proposal',
         anchor: proposal.proposalId,

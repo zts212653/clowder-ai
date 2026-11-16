@@ -69,6 +69,52 @@ function fakeSpawn(launches, conversationId, model = 'gemini-3.8-flash-high') {
 }
 
 describe('F325 native AGY session binding', () => {
+  test('migrates an exact pre-guidance binding, then resumes through guidance edits without weakening hard rules', async () => {
+    const f = fixture();
+    try {
+      const body =
+        '# Identity\nFixed identity.\n\n## 7. MCP 工具 quick index\nTOOLS-OLD\n\n## 8. 家里能力唤醒指南\nCAPABILITY-OLD\n\n## 9. 代码哲学\nFixed hard rules.\n';
+      f.setNativeBody(body);
+      const launches = [];
+      const run = (binding) =>
+        collect(
+          f.service.invoke('current turn', {
+            workingDirectory: f.workspace,
+            ...(binding ? { sessionId: binding.cliSessionId, nativeSessionBinding: binding } : {}),
+            spawnCliOverride: fakeSpawn(launches, 'session-guidance'),
+          }),
+        );
+      const first = await run();
+      const firstBinding = first.find((event) => event.type === 'session_init').nativeSessionBinding;
+      const oldHash = createHash('sha256').update(body.trim()).digest('hex');
+      const prefix = 'cat-cafe-gemini38-';
+      const legacy = {
+        ...firstBinding,
+        l0Hash: oldHash,
+        agentName: `${prefix}${oldHash.slice(0, 16)}${firstBinding.agentName.slice(prefix.length + 16)}`,
+      };
+      const migrated = await run(legacy);
+      assert.equal(migrated.at(-1).errorCode, undefined);
+      const binding = migrated.find((event) => event.type === 'session_init').nativeSessionBinding;
+      f.setNativeBody(body.replaceAll('-OLD', '-NEW'));
+      const resumed = await run(binding);
+      assert.equal(resumed.at(-1).errorCode, undefined);
+      assert.deepEqual(launches[2].args.slice(-2), ['--conversation', 'session-guidance']);
+      assert.match(JSON.parse(launches[2].stdinInput).message.content[0].text, /TOOLS-NEW[\s\S]*CAPABILITY-NEW/);
+      for (const invalid of [
+        { ...legacy, agentName: legacy.agentName.replace('gemini38', 'other-cat') },
+        { ...legacy, l0Hash: '0'.repeat(64) },
+      ]) {
+        assert.equal((await run(invalid)).at(-1).errorCode, 'AGY_NATIVE_RESUME_MISMATCH');
+      }
+      f.setNativeBody(body.replaceAll('-OLD', '-NEW').replace('Fixed hard rules.', 'Changed hard rules.'));
+      assert.equal((await run(binding)).at(-1).errorCode, 'AGY_NATIVE_RESUME_MISMATCH');
+      assert.equal(launches.length, 3, 'mismatches must not launch the provider');
+    } finally {
+      f.cleanup();
+    }
+  });
+
   test('resumes only with the verified binding; missing binding or identity drift requires router rebuilding', async () => {
     const f = fixture();
     try {
@@ -289,7 +335,7 @@ describe('F325 native AGY session binding', () => {
   });
 
   test(
-    'real agy CLI loopback wire: delivers updated USER_CAPSULE and TEAMMATE_ROSTER on --conversation hot resume in Markdown and frozenL0Input paths',
+    'real agy CLI loopback wire: delivers current capsule, roster and tool/skill guidance on --conversation hot resume in Markdown and frozenL0Input paths',
     { timeout: 60_000, skip: !resolveCliCommand('agy') },
     async () => {
       const agyBinary = resolveCliCommand('agy');
@@ -325,15 +371,15 @@ describe('F325 native AGY session binding', () => {
       server.listen(0, '127.0.0.1');
       await once(server, 'listening');
 
-      const buildFrozen = (capsule, roster) =>
+      const buildFrozen = (capsule, roster, guidanceRevision) =>
         freezeL0Input({
           schemaVersion: 1,
           compilerVersion: L0_COMPILER_VERSION,
           catId: 'gemini38',
           projection: 'owner',
           template:
-            '## 1. 身份与伙伴声明\n\n{{IDENTITY_BLOCK}}\n{{USER_CAPSULE}}\n\n{{TEAMMATE_ROSTER}}\n\n---\n\n{{GOVERNANCE_L0}}\n',
-          sections: {},
+            '## 1. 身份与伙伴声明\n\n{{IDENTITY_BLOCK}}\n{{USER_CAPSULE}}\n\n{{TEAMMATE_ROSTER}}\n\n---\n\n{{GOVERNANCE_L0}}\n\n## 7. MCP 工具 quick index（cat-cafe-* 工具家族）\n\n{{L5_CONTENT}}\n\n---\n\n## 8. Clowder AI 家里独有能力唤醒指南（场景→skill 触发反射）\n\n{{L6_CONTENT}}\n\n---\n\n## 9. 代码哲学\nRetain binding rules.\n',
+          sections: { L5_CONTENT: `TOOLS-${guidanceRevision}`, L6_CONTENT: `CAPABILITY-${guidanceRevision}` },
           variables: {
             IDENTITY_BLOCK: '你是 暹罗猫/烁烁。\n**硬限制**：禁止触碰 6399。',
             USER_CAPSULE: `## 主人画像\n\n${capsule}`,
@@ -349,7 +395,7 @@ describe('F325 native AGY session binding', () => {
 
       try {
         for (const mode of ['markdown', 'frozen']) {
-          let currentFrozen = buildFrozen('CAPSULE-OLD', 'ROSTER-OLD');
+          let currentFrozen = buildFrozen('CAPSULE-OLD', 'ROSTER-OLD', 'OLD');
           const homeRoot = join(root, `profiles-${mode}`);
           const service = new AgyNativeAgentService({
             catId: 'gemini38',
@@ -435,9 +481,12 @@ describe('F325 native AGY session binding', () => {
           );
           assert.match(turn1UserEntry, /CAPSULE-OLD/);
           assert.match(turn1UserEntry, /ROSTER-OLD/);
+          assert.doesNotMatch(turn1Main.systemText, /TOOLS-OLD|CAPABILITY-OLD/, 'guidance must not be frozen by CLI');
+          assert.match(turn1UserEntry, /TOOLS-OLD/);
+          assert.match(turn1UserEntry, /CAPABILITY-OLD/);
           assert.match(turn1UserEntry, /CURRENT-TURN-1/);
 
-          currentFrozen = buildFrozen('CAPSULE-NEW', 'ROSTER-NEW');
+          currentFrozen = buildFrozen('CAPSULE-NEW', 'ROSTER-NEW', 'NEW');
           const bindingTurn2 = await runWireTurn(
             'turn2',
             'CURRENT-TURN-2',
@@ -464,6 +513,10 @@ describe('F325 native AGY session binding', () => {
           assert.match(turn2UserEntry, /CURRENT-TURN-2/);
           assert.ok(!turn2UserEntry.includes('CAPSULE-OLD'));
           assert.ok(!turn2UserEntry.includes('ROSTER-OLD'));
+          assert.match(turn2UserEntry, /TOOLS-NEW/);
+          assert.match(turn2UserEntry, /CAPABILITY-NEW/);
+          assert.doesNotMatch(turn2UserEntry, /TOOLS-OLD|CAPABILITY-OLD/);
+          assert.doesNotMatch(turn2Main.systemText, /TOOLS-OLD|CAPABILITY-OLD/);
         }
       } finally {
         server.closeAllConnections?.();

@@ -16,9 +16,9 @@ import { MessageStore } from '../../../../api/dist/domains/cats/services/stores/
 import { ResponseStreamRecords } from '../../../../api/dist/infrastructure/websocket/ResponseStreamRecords.js';
 import { handleActiveAgentMessage } from '../agent-messages/active-handler';
 import { writeStoredSnapshot } from '../named-message-writer';
-import { isRunningResponse, type StreamReplay } from '../response-stream-replay';
+import { applyResponseStreamReplay, isRunningResponse, type StreamReplay } from '../response-stream-replay';
 import { issueReplaceRead, mergeReplaceHydrationMessages } from '../useChatHistory';
-import { createStreamReplayRelay, dispatchAgentQueueItem } from '../useSocket-stream-replay';
+import { createStreamReplayRelay } from '../useSocket-stream-replay';
 
 const T = 'pr3b-running-bg';
 const ROOM = `thread:${T}`;
@@ -102,7 +102,7 @@ function pageRelay() {
           .messages.filter(isRunningResponse)
           .map((message) => message.id),
       ),
-    enqueue: (item) => dispatchAgentQueueItem(item, () => {}),
+    enqueue: (item) => applyResponseStreamReplay(item.replay, undefined, item.runningAtConfirmation),
     beginRecovery: (threadId) => beginThreadRecovery(threadId),
     requestCatchUp: () => {},
   });
@@ -139,12 +139,17 @@ function live(records: Recorder, event: ServerEvent) {
   });
 }
 
-function land(issue: ReturnType<typeof issueReplaceRead>, history: ChatMessage[]) {
+function land(
+  issue: ReturnType<typeof issueReplaceRead>,
+  history: ChatMessage[],
+  mode: 'replace' | 'hydrate' = 'replace',
+) {
   const merged = mergeReplaceHydrationMessages(history, useChatStore.getState().getThreadState(T).messages, {
     ...issue,
     landedInGeneration: currentRecoveryGeneration(T),
   });
-  useChatStore.getState().replaceThreadMessages(T, merged.messages);
+  if (mode === 'hydrate') useChatStore.getState().hydrateThread(T, merged.messages, false, issue.localWriteSeq);
+  else useChatStore.getState().replaceThreadMessages(T, merged.messages, undefined, issue.localWriteSeq);
 }
 
 beforeEach(() => {
@@ -153,6 +158,7 @@ beforeEach(() => {
     currentThreadId: T,
     messages: [],
     threadStates: {},
+    deletedMessageIds: {},
     catInvocations: {},
     activeInvocations: {},
   });
@@ -218,5 +224,117 @@ describe('Astra #6718 R1: returning to a still-running thread whose room the pag
         .getThreadState(T)
         .messages.map((message) => message.id),
     ).toEqual([]);
+  });
+
+  it.each(
+    ['leave', 'disconnect'].flatMap((gap) => (['replace', 'hydrate'] as const).map((mode) => ({ gap, mode }))),
+  )('accepts authoritative History after missing a restore during $gap via $mode', ({ gap, mode }) => {
+    const relay = pageRelay();
+    const server = new MessageStore();
+    const saved = server.append({
+      threadId: T,
+      userId: 'owner',
+      from: { kind: 'agent', catId: 'opus' },
+      content: 'RESTORED',
+      mentions: [],
+      timestamp: 100,
+      origin: 'callback',
+    });
+    join(relay, undefined, 'before-gap');
+    useChatStore.getState().addMessageToThread(T, { ...saved, type: 'assistant' } as ChatMessage);
+    server.softDelete(saved.id, 'owner');
+    useChatStore.getState().removeThreadMessage(T, saved.id);
+    if (gap === 'leave') leave(relay);
+    else relay.reset();
+    server.restore(saved.id);
+    useChatStore.getState().setCurrentThread(T);
+    join(relay, undefined, 'after-gap');
+    const issue = issueReplaceRead(T);
+    const history = server.getByThread(T, 100, 'owner');
+    expect(history.map((message) => message.id)).toEqual([saved.id]);
+    land(
+      issue,
+      history.map((message) => ({ ...message, type: 'assistant' }) as ChatMessage),
+      mode,
+    );
+    expect(
+      useChatStore
+        .getState()
+        .getThreadState(T)
+        .messages.map((message) => message.id),
+    ).toEqual([saved.id]);
+  });
+
+  it.each([false, true])('keeps deletion unless History or an event proves restore: restored=%s', (restored) => {
+    const relay = pageRelay();
+    const server = new MessageStore();
+    const saved = server.append({
+      threadId: T,
+      userId: 'owner',
+      from: { kind: 'agent', catId: 'opus' },
+      content: 'BODY',
+      mentions: [],
+      timestamp: 100,
+      origin: 'callback',
+    });
+    join(relay, undefined, 'before-delete');
+    useChatStore.getState().addMessageToThread(T, { ...saved, type: 'assistant' } as ChatMessage);
+    server.softDelete(saved.id, 'owner');
+    useChatStore.getState().removeThreadMessage(T, saved.id);
+    if (restored) {
+      server.restore(saved.id);
+      useChatStore.getState().clearThreadMessageDeletion(T, saved.id);
+    }
+    land(
+      issueReplaceRead(T),
+      server.getByThread(T, 100, 'owner').map((message) => ({ ...message, type: 'assistant' }) as ChatMessage),
+    );
+    expect(
+      useChatStore
+        .getState()
+        .getThreadState(T)
+        .messages.map((message) => message.id),
+    ).toEqual(restored ? [saved.id] : []);
+  });
+
+  it.each(['first-delete', 'delete-again'] as const)('rejects a read issued before %s', (deletion) => {
+    const relay = pageRelay();
+    const server = new MessageStore();
+    const saved = server.append({
+      threadId: T,
+      userId: 'owner',
+      from: { kind: 'agent', catId: 'opus' },
+      content: 'OLD READ',
+      mentions: [],
+      timestamp: 100,
+      origin: 'callback',
+    });
+    join(relay, undefined, 'joined');
+    if (deletion === 'delete-again') {
+      server.softDelete(saved.id, 'owner');
+      useChatStore.getState().removeThreadMessage(T, saved.id);
+      server.restore(saved.id); // the page misses this event, so its first deletion fact remains
+    }
+    const issue = issueReplaceRead(T);
+    const history = server.getByThread(T, 100, 'owner');
+    server.softDelete(saved.id, 'owner');
+    useChatStore.getState().removeThreadMessage(T, saved.id);
+    land(
+      issue,
+      history.map((message) => ({ ...message, type: 'assistant' }) as ChatMessage),
+    );
+    expect(useChatStore.getState().getThreadState(T).messages).toEqual([]);
+    server.restore(saved.id);
+    const restored = server.getByThread(T, 100, 'owner');
+    land(
+      issueReplaceRead(T),
+      restored.map((message) => ({ ...message, type: 'assistant' }) as ChatMessage),
+    );
+    expect(
+      useChatStore
+        .getState()
+        .getThreadState(T)
+        .messages.map((message) => message.id),
+    ).toEqual([saved.id]);
   });
 });

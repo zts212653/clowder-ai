@@ -24,6 +24,7 @@ export function useChatSocketCallbacks({ threadId, handleAgentMessage, onIndexEv
     setIntentMode,
     setTargetCats,
     removeThreadMessage,
+    clearThreadMessageDeletion,
     requestStreamCatchUp,
   } = useChatStore(
     useShallow((s) => ({
@@ -34,6 +35,7 @@ export function useChatSocketCallbacks({ threadId, handleAgentMessage, onIndexEv
       setIntentMode: s.setIntentMode,
       setTargetCats: s.setTargetCats,
       removeThreadMessage: s.removeThreadMessage,
+      clearThreadMessageDeletion: s.clearThreadMessageDeletion,
       requestStreamCatchUp: s.requestStreamCatchUp,
     })),
   );
@@ -87,6 +89,7 @@ export function useChatSocketCallbacks({ threadId, handleAgentMessage, onIndexEv
       onMessageDeleted: (data: { messageId: string; threadId: string }) =>
         removeThreadMessage(data.threadId, data.messageId),
       onMessageRestored: (data: { messageId: string; threadId: string }) => {
+        clearThreadMessageDeletion(data.threadId, data.messageId);
         requestStreamCatchUp(data.threadId);
       },
       onMessageRecalled: (data) => {
@@ -120,6 +123,7 @@ export function useChatSocketCallbacks({ threadId, handleAgentMessage, onIndexEv
       addTask,
       updateTask,
       removeThreadMessage,
+      clearThreadMessageDeletion,
       requestStreamCatchUp,
       onIndexEvent,
       threadId,

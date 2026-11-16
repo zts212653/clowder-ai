@@ -266,20 +266,23 @@ describe('L0 Staging Protocol PR-B-impl (ADR-038)', () => {
       assert.ok(!out.includes('source-audit'), 'F218 source-audit reflex must NOT be in staging body');
     });
 
-    sourceOnlyTest(
-      'Cloud R1 P2 #2239: 摩擦检测反射 trigger phrases rendered (positive coverage for demoted reflex)',
-      () => {
-        // Same hole-plugging: ensure co-creator重复不满 → code-as-harness reflex
-        // is actually injected, not just declared in manifest.
-        const out = buildStagingPrepend('opus-47');
-        assert.ok(
-          out.includes('co-creator重复不满'),
-          '摩擦检测反射 trigger "co-creator重复不满" must be rendered (demoted from L0 §2)',
-        );
-        assert.ok(out.includes('code-as-harness'), '摩擦检测反射 action "code-as-harness" must be rendered');
-        assert.ok(out.includes('搜证据确认'), '摩擦检测反射 procedure "搜证据确认" must be rendered');
-      },
-    );
+    sourceOnlyTest('#7097: 摩擦检测反射 renders evidence-first repeated-correction boundaries', () => {
+      // Preserve #2239's positive injection coverage using #7097's accepted
+      // trigger: confirm prior knowledge before loading the correction skill.
+      const out = buildStagingPrepend('opus-47');
+      assert.ok(out.includes('co-creator重说或纠正'), '摩擦检测反射 must cover repeated statements and corrections');
+      assert.ok(
+        out.includes('同一件事之前发生过或家里已有答案'),
+        '摩擦检测反射 must require evidence of a prior occurrence or existing answer',
+      );
+      assert.ok(out.includes('没有就是新知识，正常处理'), 'first-time knowledge must stay on the normal path');
+      assert.ok(
+        out.includes('没让他重说的工具故障只留爪感差'),
+        'tool failures without a repeated owner request must stay on the paw-feel path',
+      );
+      assert.ok(out.includes('code-as-harness'), '摩擦检测反射 action "code-as-harness" must be rendered');
+      assert.ok(out.includes('搜证据确认'), '摩擦检测反射 procedure "搜证据确认" must be rendered');
+    });
 
     sourceOnlyTest('LL-095 v2: 机制选择反射 rendered (discriminator, not slogan)', () => {
       // History: born unconditional in PR #2005 (c3f6812ad, "harness 改动按

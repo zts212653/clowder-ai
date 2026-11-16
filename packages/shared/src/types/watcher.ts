@@ -209,6 +209,7 @@ export const watcherUsageSchema = z
     cacheReadTokens: z.number().int().nonnegative().optional(),
     cacheCreationTokens: z.number().int().nonnegative().optional(),
     rewrittenTokens: z.number().int().nonnegative().optional(),
+    // Request budget upper bound (estimated input + reserved output), not measured context usage.
     workingContextTokens: z.number().int().nonnegative().optional(),
   })
   .strict();

@@ -4,6 +4,7 @@ import { messageFrom } from '../../stores/message-from.js';
 import type { IMessageStore, StoredMessage } from '../../stores/ports/MessageStore.js';
 import { canViewMessage, isTimelinePublished } from '../../stores/visibility.js';
 import type { CallerDispatchObservationPointer, ObservationLine } from './caller-dispatch-observation-model.js';
+import { describeStopReason } from './stop-reason-wording.js';
 
 const MAX_BODY_CHARS = 1_200;
 
@@ -117,10 +118,14 @@ function terminalObservationLine(
     if (response.lifecycle.status === 'processing') {
       return unknownLine(pointer, 'settled ref 指向 processing response');
     }
+    // F337: carry the recorded stop reason (never invented); unknown stays unsaid.
+    const { status, reason } = response.lifecycle;
+    const stopped =
+      status !== 'completed' && reason ? `; reason=${reason}（${describeStopReason(status, reason)}）` : '';
     return {
-      line: `- ${pointer.sourceMessageId} → ${pointer.targetId}: ${response.lifecycle.status}; response=${response.id}`,
+      line: `- ${pointer.sourceMessageId} → ${pointer.targetId}: ${status}${stopped}; response=${response.id}`,
       terminal: true,
-      fingerprint: `response:${response.id}:${response.lifecycle.status}`,
+      fingerprint: `response:${response.id}:${status}`,
     };
   }
   if (

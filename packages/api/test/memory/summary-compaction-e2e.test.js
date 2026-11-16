@@ -152,8 +152,7 @@ describe('SummaryCompaction e2e', () => {
     );
   });
 
-  it('e2e: mock Opus → inserts segment → submits candidate → updates watermark', async () => {
-    const candidates = [];
+  it('e2e: mock Opus → inserts segment → updates watermark', async () => {
     const msgs = makeMsgs(25);
 
     const deps = {
@@ -175,21 +174,10 @@ describe('SummaryCompaction e2e', () => {
             fromMessageId: msgs[0].id,
             toMessageId: msgs[msgs.length - 1].id,
             messageCount: msgs.length,
-            candidates: [
-              {
-                kind: 'decision',
-                title: 'Knowledge Feed uses YAML files as truth source',
-                claim: 'YAML files are truth source for git-trackability',
-                confidence: 'explicit',
-              },
-            ],
           },
         ],
       }),
       reEmbed: async () => {},
-      submitCandidate: async (c) => {
-        candidates.push(c);
-      },
       logger: { info: () => {}, error: () => {} },
     };
 
@@ -216,6 +204,8 @@ describe('SummaryCompaction e2e', () => {
     assert.equal(segments.length, 1);
     assert.equal(segments[0].level, 1); // L1
     assert.ok(segments[0].summary.includes('memory architecture'));
+    // Summaries no longer carry knowledge candidates; the column stays only for historical rows.
+    assert.equal(segments[0].candidates, null);
 
     // Verify evidence_docs.summary updated (read model)
     const doc = db.prepare('SELECT summary FROM evidence_docs WHERE anchor = ?').get('thread-test-thread');
@@ -226,11 +216,6 @@ describe('SummaryCompaction e2e', () => {
     assert.equal(state.last_summarized_message_id, msgs[msgs.length - 1].id);
     assert.equal(state.summary_type, 'abstractive');
     assert.ok(state.last_abstractive_at);
-
-    // Verify candidate submitted
-    assert.equal(candidates.length, 1);
-    assert.equal(candidates[0].kind, 'decision');
-    assert.ok(candidates[0].title.includes('YAML'));
   });
 
   it('sets carry_over=1 when messages remain after batch', async () => {
@@ -335,63 +320,10 @@ describe('SummaryCompaction e2e', () => {
     assert.equal(state.last_summarized_message_id, null);
   });
 
-  it('continues when submitCandidate throws (fail-open)', async () => {
-    const msgs = makeMsgs(25);
-    const deps = {
-      db,
-      enabled: () => true,
-      getThreadLastActivity: async () => ({
-        threadId: 'test-thread',
-        lastMessageAt: Date.now() - 20 * 60 * 1000,
-      }),
-      getMessagesAfterWatermark: async () => msgs,
-      generateAbstractive: async () => ({
-        segments: [
-          {
-            summary: 'Summary with failing candidate',
-            topicKey: 'fail-candidate',
-            topicLabel: 'Fail Candidate',
-            boundaryReason: 'test',
-            boundaryConfidence: 'high',
-            fromMessageId: msgs[0].id,
-            toMessageId: msgs[msgs.length - 1].id,
-            messageCount: msgs.length,
-            candidates: [{ kind: 'lesson', title: 'Test lesson', claim: 'test', confidence: 'inferred' }],
-          },
-        ],
-      }),
-      submitCandidate: async () => {
-        throw new Error('MarkerQueue unavailable');
-      },
-      logger: { info: () => {}, error: () => {} },
-    };
-
-    const result = await processThread(
-      {
-        thread_id: 'test-thread',
-        last_summarized_message_id: null,
-        pending_message_count: 25,
-        pending_token_count: 2000,
-        pending_signal_flags: 0,
-        summary_type: 'concat',
-        last_abstractive_at: null,
-        abstractive_token_count: null,
-        carry_over: 0,
-      },
-      deps,
-      SUMMARY_CONFIG_OVERRIDE,
-    );
-
-    assert.equal(result, true, 'should succeed despite submitCandidate failure');
-    const segments = db.prepare('SELECT count(*) as n FROM summary_segments').get();
-    assert.equal(segments.n, 1, 'segment should still be inserted');
-  });
-
-  it('full pipeline: gate → execute → segment + candidate', async () => {
+  it('full pipeline: gate → execute → segment', async () => {
     const { createSummaryCompactionTaskSpec } = await import('../../dist/domains/memory/SummaryCompactionTaskSpec.js');
 
     const msgs = makeMsgs(25);
-    const candidates = [];
 
     const spec = createSummaryCompactionTaskSpec({
       db,
@@ -412,21 +344,10 @@ describe('SummaryCompaction e2e', () => {
             fromMessageId: msgs[0].id,
             toMessageId: msgs[msgs.length - 1].id,
             messageCount: msgs.length,
-            candidates: [
-              {
-                kind: 'decision',
-                title: 'Pipeline verification is essential for runtime trust',
-                claim: 'Must verify full pipeline before declaring Phase G complete',
-                confidence: 'explicit',
-              },
-            ],
           },
         ],
       }),
       reEmbed: async () => {},
-      submitCandidate: async (c) => {
-        candidates.push(c);
-      },
       logger: { info: () => {}, error: () => {} },
     });
 
@@ -448,68 +369,10 @@ describe('SummaryCompaction e2e', () => {
     assert.equal(segments.length, 1);
     assert.ok(segments[0].summary.includes('pipeline'));
 
-    // Verify candidate submitted
-    assert.equal(candidates.length, 1);
-    assert.equal(candidates[0].kind, 'decision');
-
     // Verify watermark advanced
     const state = db.prepare('SELECT * FROM summary_state WHERE thread_id = ?').get('test-thread');
     assert.equal(state.summary_type, 'abstractive');
     assert.ok(state.last_abstractive_at);
-  });
-
-  it('skips candidate submission when submitCandidate is undefined (F102_DURABLE_CANDIDATES=off)', async () => {
-    const msgs = makeMsgs(25);
-    const deps = {
-      db,
-      enabled: () => true,
-      getThreadLastActivity: async () => ({
-        threadId: 'test-thread',
-        lastMessageAt: Date.now() - 20 * 60 * 1000,
-      }),
-      getMessagesAfterWatermark: async () => msgs,
-      generateAbstractive: async () => ({
-        segments: [
-          {
-            summary: 'Summary with candidates but no submission',
-            topicKey: 'no-submit',
-            topicLabel: 'No Submit',
-            boundaryReason: 'test',
-            boundaryConfidence: 'high',
-            fromMessageId: msgs[0].id,
-            toMessageId: msgs[msgs.length - 1].id,
-            messageCount: msgs.length,
-            candidates: [{ kind: 'decision', title: 'Should not be submitted', claim: 'test', confidence: 'explicit' }],
-          },
-        ],
-      }),
-      // submitCandidate intentionally undefined — simulates F102_DURABLE_CANDIDATES=off
-      logger: { info: () => {}, error: () => {} },
-    };
-
-    const result = await processThread(
-      {
-        thread_id: 'test-thread',
-        last_summarized_message_id: null,
-        pending_message_count: 25,
-        pending_token_count: 2000,
-        pending_signal_flags: 0,
-        summary_type: 'concat',
-        last_abstractive_at: null,
-        abstractive_token_count: null,
-        carry_over: 0,
-      },
-      deps,
-      SUMMARY_CONFIG_OVERRIDE,
-    );
-
-    assert.equal(result, true, 'should succeed without submitCandidate');
-    // Segment still inserted even without candidate submission
-    const segments = db.prepare('SELECT count(*) as n FROM summary_segments').get();
-    assert.equal(segments.n, 1);
-    // Watermark still advanced
-    const state = db.prepare('SELECT * FROM summary_state WHERE thread_id = ?').get('test-thread');
-    assert.equal(state.summary_type, 'abstractive');
   });
 
   it('continues when reEmbed throws (fail-open)', async () => {

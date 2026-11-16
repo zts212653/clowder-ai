@@ -17,6 +17,13 @@ export type AttentionRenderItem =
   | { kind: 'thread'; thread: SidebarSnapshotRow }
   | { kind: 'cluster'; cluster: AttentionCluster; members: SidebarSnapshotRow[] };
 
+export interface ArrangeHeaderSlots {
+  height?: number;
+  presence: boolean;
+  peekIds: string[];
+  more: boolean;
+}
+
 export type AttentionListRow =
   | { kind: 'thread'; key: string; thread: SidebarSnapshotRow }
   | {
@@ -32,6 +39,7 @@ export type AttentionListRow =
       cluster: AttentionCluster;
       members: SidebarSnapshotRow[];
       expanded: boolean;
+      arrangeHeader?: ArrangeHeaderSlots;
     }
   | {
       kind: 'cluster-member';

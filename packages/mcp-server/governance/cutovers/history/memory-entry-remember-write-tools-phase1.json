@@ -1,0 +1,79 @@
+{
+  "resource": {
+    "kind": "tightly-coupled-group",
+    "groupName": "memory-write-entry",
+    "resourceFamilies": ["identity-proposal", "person-memory", "memory-write", "memory-matter"],
+    "evidenceRef": "file:docs/architecture/memory/remember-entry.md"
+  },
+  "retiredNames": [
+    "cat_cafe_defer_person_memory_delta",
+    "cat_cafe_propose_entity",
+    "cat_cafe_propose_event_memory_correction",
+    "cat_cafe_propose_person_memory",
+    "cat_cafe_record_proactive_memory_abstention"
+  ],
+  "canonicalNames": [],
+  "rollbackRevision": "08f1d5f1408ae030f77b666ca7dfb4bc22c38a1b",
+  "layers": {
+    "mcp-definition": {
+      "status": "covered",
+      "consumers": [
+        "packages/mcp-server/src/tools/remember-tool.ts",
+        "packages/mcp-server/src/tools/callback-tools.ts",
+        "packages/mcp-server/src/tools/person-memory-proposal-tool.ts",
+        "packages/mcp-server/src/tools/proactive-memory-opportunity-tool.ts",
+        "packages/mcp-server/src/tools/matter-memory-tools.ts",
+        "packages/mcp-server/src/tool-governance-types.ts"
+      ]
+    },
+    "runtime-catalog-profile": {
+      "status": "covered",
+      "consumers": ["packages/mcp-server/governance/mcp-surface-baseline.json"]
+    },
+    "prompt-l0": {
+      "status": "not-applicable",
+      "rationale": "PR #7024 already pointed the L6 capability lines at cat_cafe_remember; no system prompt or prompt template names these tools.",
+      "absenceEvidence": [
+        "cat_cafe_defer_person_memory_delta",
+        "cat_cafe_propose_entity",
+        "cat_cafe_propose_event_memory_correction",
+        "cat_cafe_propose_person_memory",
+        "cat_cafe_record_proactive_memory_abstention"
+      ]
+    },
+    "skill-convention": {
+      "status": "covered",
+      "consumers": [
+        "cat-cafe-skills/proactive-memory-judgment/SKILL.md",
+        "cat-cafe-skills/refs/capability-wakeup-index.md",
+        "cat-cafe-skills/code-as-harness/SKILL.md",
+        "scripts/compile-system-prompt-l0.test.mjs"
+      ]
+    },
+    "fixture-test": {
+      "status": "covered",
+      "consumers": [
+        "packages/mcp-server/test/memory-entry-subtraction.test.js",
+        "packages/mcp-server/test/remember-tool.test.js",
+        "packages/mcp-server/test/proactive-memory-opportunity-tool.test.js",
+        "packages/api/test/callback-remember-routes.test.js",
+        "packages/api/test/taste-write-native-journey.test.js"
+      ]
+    },
+    "eval": {
+      "status": "covered",
+      "consumers": [
+        "packages/api/src/domains/memory/ProactiveMemoryOpportunityEvaluator.ts",
+        "packages/api/test/memory/f282-proactive-memory-phase-d.test.js"
+      ]
+    },
+    "observability": {
+      "status": "covered",
+      "consumers": [
+        "packages/api/src/domains/cats/services/tool-usage/derive-result-summary.ts",
+        "packages/api/test/memory/f282-proactive-memory-phase-d.test.js"
+      ]
+    }
+  },
+  "expectedProfiles": {}
+}

@@ -17,6 +17,16 @@ import {
 } from '@/components/HubEvalTypes';
 
 describe('deriveDomainScheduleLine (sunset / next-eval / none)', () => {
+  it('shows explicit retirement independently of registry availability or old verdicts', () => {
+    const domain = {
+      enabled: true,
+      hasVerdict: true,
+      automaticStatus: 'retired' as const,
+      nextCronFireAt: '2026-11-15T03:00:00.000Z',
+    };
+    expect(deriveDomainScheduleLine(domain)).toEqual({ kind: 'sunset', text: '自动评估已停用；历史与按需入口保留' });
+    expect(deriveDomainStateBadge(domain)).toBe('自动评估已停用');
+  });
   it('returns sunset line when enabled === false (even if nextCronFireAt is somehow present)', () => {
     const result = deriveDomainScheduleLine({
       enabled: false,

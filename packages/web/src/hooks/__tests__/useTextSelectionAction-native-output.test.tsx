@@ -1,4 +1,4 @@
-import { act, useRef } from 'react';
+import { act, type ReactNode, useRef } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { registerReplyOutputSelectionSource } from '@/components/reply-layers/reply-output-selection';
@@ -8,22 +8,24 @@ function Host({
   source,
   display,
   excludedRecord = false,
+  native = true,
 }: {
   source: string;
-  display: string;
+  display: ReactNode;
   excludedRecord?: boolean;
+  native?: boolean;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const action = useTextSelectionAction(ref, true, source, 'viewport');
   return (
     <>
       <div ref={ref} data-context-quote-source={excludedRecord ? 'cli_output' : undefined}>
-        <span
+        <div
           data-testid="source"
-          data-context-quote-source={excludedRecord ? undefined : 'message'}
+          data-context-quote-source={excludedRecord || !native ? undefined : 'message'}
           data-quote-exclude={excludedRecord || undefined}
           ref={(node) => {
-            if (node && !excludedRecord)
+            if (node && native && !excludedRecord)
               registerReplyOutputSelectionSource(node, {
                 kind: 'text',
                 id: 'native',
@@ -34,9 +36,11 @@ function Host({
           }}
         >
           {display}
-        </span>
+        </div>
       </div>
-      <output>{action ? `${action.selectionStart}:${action.selectionEnd}` : 'none'}</output>
+      <output data-selection-text={action?.text}>
+        {action ? `${action.selectionStart}:${action.selectionEnd}` : 'none'}
+      </output>
     </>
   );
 }
@@ -81,6 +85,59 @@ describe('native reply selection binds the original whole content, not display o
   it('maps a Markdown answer selection through the original source span', async () => {
     await act(async () => root.render(<Host source="**答案段**" display="答案段" />));
     expect(container.querySelector('output')?.textContent).toBe('122:125');
+  });
+
+  it('retains the existing unmarked workspace quote when rendered heading case differs from DOM text', async () => {
+    await act(async () => root.render(<Host source="title" display="title" native={false} />));
+    const selection = window.getSelection();
+    if (!selection) throw new Error('Missing workspace heading selection');
+    vi.spyOn(window, 'getSelection').mockReturnValue({ ...selection, toString: () => 'TITLE' } as Selection);
+    await act(async () => document.dispatchEvent(new Event('selectionchange')));
+    expect(container.querySelector('output')?.getAttribute('data-selection-text')).toBe('TITLE');
+  });
+
+  it('keeps comments available when Chromium inserts layout newlines around inline code', async () => {
+    const source = '**能发包**\n\n- 实测失败 `ENEEDAUTH`。';
+    await act(async () =>
+      root.render(
+        <Host
+          source={source}
+          display={
+            <>
+              <p>
+                <strong>能发包</strong>
+              </p>
+              <ul>
+                <li>
+                  实测失败 <code>ENEEDAUTH</code>。
+                </li>
+              </ul>
+            </>
+          }
+        />,
+      ),
+    );
+    vi.spyOn(window, 'getSelection').mockImplementation(() => {
+      const node = container.querySelector('[data-testid=source]');
+      if (!node) throw new Error('Missing native answer fixture');
+      const range = document.createRange();
+      range.selectNodeContents(node);
+      Object.defineProperties(range, {
+        getClientRects: { value: () => [new DOMRect(200, 200, 100, 20)] },
+      });
+      return {
+        anchorNode: node,
+        focusNode: node,
+        rangeCount: 1,
+        isCollapsed: false,
+        getRangeAt: () => range,
+        // Measured in the actual /thread host from the owner's recording.
+        toString: () => '能发包\n\n实测失败 \nENEEDAUTH\n。',
+      } as unknown as Selection;
+    });
+    await act(async () => document.dispatchEvent(new Event('selectionchange')));
+    expect(container.querySelector('output')?.textContent).toBe(`122:${120 + source.length}`);
+    expect(container.querySelector('output')?.getAttribute('data-selection-text')).toContain('ENEEDAUTH。');
   });
   it('keeps transformed/generated or repeated text on the existing whole-message quote path', async () => {
     for (const [source, display] of [

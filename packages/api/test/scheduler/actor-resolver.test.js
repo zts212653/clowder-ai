@@ -73,6 +73,25 @@ describe('ActorResolver', () => {
     assert.equal(resolve('memory-curator', 'cheap'), 'sonnet');
   });
 
+  it('filters actual execution eligibility before ranking and preserves no-candidate results', async () => {
+    const { createActorResolver } = await import('../../dist/infrastructure/scheduler/ActorResolver.js');
+    const roster = {
+      'agy-opus55': { family: 'claude', roles: ['assistant'], lead: false, available: true },
+      sonnet: { family: 'claude', roles: ['assistant'], lead: false, available: true },
+      scarce: { family: 'claude', roles: ['memory-spike'], lead: false, available: true },
+    };
+    const resolve = createActorResolver(() => roster, { isScarce: (catId) => catId === 'scarce' });
+    assert.equal(
+      resolve('memory-curator', 'cheap', (catId) => catId !== 'agy-opus55'),
+      'sonnet',
+    );
+    assert.equal(
+      resolve('memory-curator', 'cheap', () => false),
+      null,
+    );
+    assert.equal(resolve('memory-curator', 'cheap'), 'agy-opus55', 'unrelated tasks retain existing selection');
+  });
+
   it('returns null when no cat matches role', async () => {
     const { createActorResolver } = await import('../../dist/infrastructure/scheduler/ActorResolver.js');
     // gemini has visual-designer which maps to nothing in actor roles

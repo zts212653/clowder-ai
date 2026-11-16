@@ -233,9 +233,19 @@ export function ThreadChatSurface({
     conversationViewQueue,
     messages,
   ]);
+  const singleCatLocalAttempts = useMemo(() => {
+    if (!singleCatProjection) return [];
+    // Own sends belong to the thread even while viewing another member. They
+    // remain outside member execution evidence until the existing projection owns them.
+    const projectedIds = new Set(flattenConversationProjection(singleCatProjection).map((message) => message.id));
+    return messages.filter((message) => message.sendAttempt && !projectedIds.has(message.id));
+  }, [messages, singleCatProjection]);
   const visibleMessages = useMemo(
-    () => (singleCatProjection ? flattenConversationProjection(singleCatProjection) : messages),
-    [messages, singleCatProjection],
+    () =>
+      singleCatProjection
+        ? [...flattenConversationProjection(singleCatProjection), ...singleCatLocalAttempts]
+        : messages,
+    [messages, singleCatProjection, singleCatLocalAttempts],
   );
   // Read the history owner's existing anchor. Its row must exist on the first
   // paint of a returning thread, before an observer can mount deferred content.
@@ -272,7 +282,7 @@ export function ThreadChatSurface({
       (!selection.selectionMode || selected || selection.selectedMessageIds.size < MAX_SELECTED_MESSAGES);
     return (
       <ChatMessageRow
-        key={message.id}
+        key={message.clientMessageId ? `send-attempt:${message.clientMessageId}` : message.id}
         message={message}
         compact={compact}
         threadId={threadId}
@@ -394,7 +404,19 @@ export function ThreadChatSurface({
               {visibleMessages.length === 0 && !isLoadingHistory ? (
                 projectedEmptyState
               ) : singleCatProjection ? (
-                <SingleCatConversationTimeline projection={singleCatProjection} renderMessage={renderTimelineMessage} />
+                <>
+                  <SingleCatConversationTimeline
+                    projection={singleCatProjection}
+                    renderMessage={renderTimelineMessage}
+                  />
+                  {singleCatLocalAttempts.map((message, index) =>
+                    renderTimelineMessage(
+                      message,
+                      visibleMessages.length - singleCatLocalAttempts.length + index,
+                      visibleMessages.length,
+                    ),
+                  )}
+                </>
               ) : (
                 messages.map((message, index) => renderTimelineMessage(message, index, messages.length))
               )}
@@ -453,6 +475,7 @@ export function ThreadChatSurface({
           ) : (
             <div className={composerClassName}>
               <ChatInput
+                localSendFeedback
                 key={threadId}
                 presentation={composerPresentation}
                 composerContext={
@@ -467,6 +490,7 @@ export function ThreadChatSurface({
                   contextAttachments,
                   explicitTargetCats,
                   messageDisposition,
+                  onPrepared,
                 ) => {
                   const sent = await handleSend(
                     content,
@@ -478,6 +502,8 @@ export function ThreadChatSurface({
                     explicitTargetCats,
                     {
                       consumeComposerDraft: true,
+                      localAttempt: true,
+                      ...(onPrepared ? { onPrepared } : {}),
                       ...(messageDisposition ? { messageDisposition } : {}),
                     },
                   );

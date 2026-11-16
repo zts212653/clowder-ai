@@ -21,7 +21,11 @@ export function MailboxMentionControls({
   count: string;
 }) {
   const t = useShellCopy(mailboxEntryCopy);
-  const period = read?.mentionPeriod === 'today' || read?.mentionPeriod === 'earlier' ? read.mentionPeriod : 'week';
+  const displayRead = read ?? view.staleRead;
+  const period =
+    displayRead?.mentionPeriod === 'today' || displayRead?.mentionPeriod === 'earlier'
+      ? displayRead.mentionPeriod
+      : 'week';
   const batch = usePersonalMentionBatch(read, view, personal);
   const labels = { today: t.today, week: t.week, earlier: t.earlierPeriod, all: t.allTime };
   return (
@@ -34,7 +38,7 @@ export function MailboxMentionControls({
           </span>
         </h3>
         <div className="flex flex-none items-center gap-1">
-          <MailboxPeriodFilter read={read} view={view} busy={batch.busy} compact />
+          <MailboxPeriodFilter read={displayRead} view={view} busy={batch.busy} compact />
           <MailboxPersonalButton
             type="button"
             data-testid="mailbox-mentions-ignore-all"

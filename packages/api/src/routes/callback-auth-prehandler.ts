@@ -15,6 +15,7 @@ import type { CallbackAuthSystemMessageNotifier } from './callback-auth-system-m
 import { recordCallbackAuthFailure, recordLegacyFallbackHit } from './callback-auth-telemetry.js';
 import { makeCallbackAuthError } from './callback-errors.js';
 import { derivePrincipal } from './callback-scope-helpers.js';
+import { claimWatcherRememberForward } from './watcher-remember-forward.js';
 
 /**
  * F174 Phase D1: derive a concise tool name from the request URL for
@@ -50,6 +51,7 @@ async function allowToolExecution(
       record.toolExecutionPolicy?.mode === 'watcher' &&
       request.routeOptions.url !== '/api/callbacks/watcher-tool-admission'
     ) {
+      if (claimWatcherRememberForward(request, record)) return true;
       const callId = firstHeaderValue(request.headers['x-watcher-tool-call-id']);
       if (
         request.watcherToolTicket?.invocationId === record.invocationId &&

@@ -29,6 +29,28 @@ const MESSAGE_BUNDLE = {
 };
 
 describe('durable message extra carriers survive Redis round-trips', () => {
+  it('F335 preserves a valid watcher as the only recognized carrier on legacy nudges', async () => {
+    const { serializeExtra, safeParseExtra } = await import(
+      '../dist/domains/cats/services/stores/redis/redis-message-parsers.js'
+    );
+    const watcher = {
+      kind: 'nudge',
+      sourceInvocationId: 'ordinary-work',
+      sourceMessageId: 'original-message',
+      watcherInvocationId: 'watcher-work',
+    };
+    for (const extra of [
+      { watcher },
+      {
+        watcher,
+        turnExecution: { invocationId: 'watcher-work', parentInvocationId: 'parent', executionKind: 'watcher' },
+      },
+    ]) {
+      assert.deepEqual(safeParseExtra(serializeExtra(extra))?.watcher, watcher);
+    }
+    assert.equal(safeParseExtra(serializeExtra({ watcher: { ...watcher, sourceMessageId: '' } })), undefined);
+  });
+
   it('preserves plugin input acceptance without inventing an invocation, and drops malformed receipts', async () => {
     const { serializeExtra, safeParseExtra } = await import(
       '../dist/domains/cats/services/stores/redis/redis-message-parsers.js'

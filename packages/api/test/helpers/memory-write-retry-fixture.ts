@@ -7,8 +7,10 @@ import { MessageStore } from '../../src/domains/cats/services/stores/ports/Messa
 import { ThreadStore } from '../../src/domains/cats/services/stores/ports/ThreadStore.js';
 import { EventMemoryStore, eventMemoryRevision } from '../../src/domains/memory/EventMemoryStore.js';
 import { InMemoryEventMemoryCorrectionProposalStore } from '../../src/domains/memory/event/InMemoryEventMemoryCorrectionProposalStore.js';
+import { registerCallbackAuthHook } from '../../src/routes/callback-auth-prehandler.js';
 import { callbackProposeEntityRoutes } from '../../src/routes/callback-propose-entity-routes.js';
 import { callbackProposeEventMemoryCorrectionRoutes } from '../../src/routes/callback-propose-event-memory-correction-routes.js';
+import { registerCallbackRememberRoutes } from '../../src/routes/callback-remember-routes.js';
 
 export async function memoryRetryFixture(kind: 'entity' | 'event') {
   const app = Fastify();
@@ -62,6 +64,11 @@ export async function memoryRetryFixture(kind: 'entity' | 'event') {
       sourceReaders: { threadStore: threads, messageStore: messages },
       approvalIngress: ingress,
     });
+  // Cats reach both original routes only through cat_cafe_remember since 2026-11-13.
+  await app.register(async (scope) => {
+    registerCallbackAuthHook(scope, registry);
+    registerCallbackRememberRoutes(scope, { registry, messageStore: messages, socketManager });
+  });
   await app.ready();
   const input =
     kind === 'entity'

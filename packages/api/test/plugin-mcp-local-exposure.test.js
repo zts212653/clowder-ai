@@ -8,7 +8,10 @@ import {
   readCapabilitiesConfigState,
   resolveServersForCat,
 } from '../dist/config/capabilities/capability-orchestrator.js';
-import { bindInvocationPluginMcpView } from '../dist/config/capabilities/invocation-plugin-mcp-view.js';
+import {
+  bindInvocationPluginMcpView,
+  invocationPluginMcpIssues,
+} from '../dist/config/capabilities/invocation-plugin-mcp-view.js';
 import { readInvocationMcpConfig } from '../dist/config/capabilities/invoke-mcp-config.js';
 import {
   pluginMcpExposureProject,
@@ -34,6 +37,26 @@ const view = (root, change = {}) => ({
     },
   ],
 });
+
+for (const blocked of [false, true]) {
+  test(`unavailable local policy stays out of config and reports status only to an allowed member: blocked=${blocked}`, async (t) => {
+    const root = await rootFixture(t);
+    const selected = view(root, { isCurrent: () => false });
+    if (blocked) selected.entries[0].installationPolicy.blockedCats = ['codex'];
+    const iterator = bindInvocationPluginMcpView(
+      () =>
+        (async function* () {
+          yield { servers: resolveServersForCat(config(), 'codex'), issues: invocationPluginMcpIssues() };
+        })(),
+      selected,
+      member(root),
+    );
+    const { servers, issues } = (await iterator.next()).value;
+    assert.deepEqual(servers, []);
+    assert.equal(issues.length, blocked ? 0 : 1);
+    if (!blocked) assert.equal(issues[0].reasonCode, 'plugin_activation_unavailable');
+  });
+}
 
 async function rootFixture(t) {
   const root = await mkdtemp(join(tmpdir(), 'local-mcp-policy-'));

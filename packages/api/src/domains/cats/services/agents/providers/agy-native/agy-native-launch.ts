@@ -9,7 +9,7 @@ import { findMonorepoRoot } from '../../../../../../utils/monorepo-root.js';
 import type { AgentServiceOptions, PreparedProviderRequestV1 } from '../../../types.js';
 import { preflightAgyProfile, resolveAgyProfile, resolveAgySpawnCwd } from '../agy-profile-manager.js';
 import { encodeAgyStreamJsonUserMessage } from '../agy-stream-json-parser.js';
-import { materializeAgyNativeAgentFile } from './agy-native-agent-file.js';
+import { materializeAgyNativeAgentFile, previousAgyNativeBindingHash } from './agy-native-agent-file.js';
 import { materializeAgyNativeEffectGuard } from './agy-native-effect-guard.js';
 import { AgyNativeResumeMismatchError } from './agy-native-errors.js';
 import { prepareAgyNativeInput } from './agy-native-input.js';
@@ -80,13 +80,15 @@ function matchesAgyNativeBindingL0(
   catId: CatId,
   agent: { readonly l0Hash: string; readonly agentName: string },
   fullSystemPrompt: string,
+  frozenL0Input?: AgentServiceOptions['frozenL0Input'],
 ): boolean {
   if (prior.l0Hash === agent.l0Hash) return prior.agentName === agent.agentName;
   const legacyFullHash = createHash('sha256').update(fullSystemPrompt).digest('hex');
-  if (prior.l0Hash !== legacyFullHash) return false;
+  if (prior.l0Hash !== legacyFullHash && prior.l0Hash !== previousAgyNativeBindingHash(fullSystemPrompt, frozenL0Input))
+    return false;
   const prefix = `cat-cafe-${catId}-`;
   const suffix = agent.agentName.slice(prefix.length + 16);
-  const expectedLegacyAgentName = `${prefix}${legacyFullHash.slice(0, 16)}${suffix}`;
+  const expectedLegacyAgentName = `${prefix}${prior.l0Hash.slice(0, 16)}${suffix}`;
   return prior.agentName === expectedLegacyAgentName;
 }
 
@@ -209,7 +211,7 @@ export async function prepareAgyNativeLaunch(input: AgyNativeLaunchInput): Promi
       prior?.v === 1 &&
       prior.carrier === 'agy_stream_json' &&
       prior.cliSessionId === options?.sessionId &&
-      matchesAgyNativeBindingL0(prior, input.catId, agent, input.body) &&
+      matchesAgyNativeBindingL0(prior, input.catId, agent, input.body, options?.frozenL0Input) &&
       prior.workspaceRoot === policy.workspaceRoot &&
       prior.profileHome === home &&
       prior.model === input.model &&

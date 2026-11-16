@@ -12,6 +12,19 @@ import { maybeCollectStreamError } from '../dist/utils/cli-spawn.js';
 
 const baseRef = { command: 'codex', exitCode: 1, signal: null, invocationId: 'inv-1' };
 
+test('#1664: operating-system startup codes classify without guessing their specific cause', () => {
+  ['ENOENT', 'EACCES', 'EPERM', 'UNKNOWN', 'ENOEXEC'].forEach((code) => {
+    const diagnostic = buildCliDiagnostics({ rawText: `spawn claude ${code}`, debugRef: baseRef });
+    assert.strictEqual(diagnostic.reasonCode, 'spawn_failed', code);
+    assert.match(diagnostic.publicHint, /PATH/);
+    assert.match(diagnostic.publicHint, /权限/);
+    assert.match(diagnostic.publicHint, /重新安装/);
+  });
+  ['UNKNOWN', 'spawn UNKNOWN_REASON', 'spawn event\nUNKNOWN'].forEach((rawText) => {
+    assert.notStrictEqual(buildCliDiagnostics({ rawText, debugRef: baseRef }).reasonCode, 'spawn_failed', rawText);
+  });
+});
+
 test('AC-A5: unknown stderr → sanitized safeExcerpt (#857), publicSummary fallback', () => {
   const d = buildCliDiagnostics({ rawText: 'some weird thing happened', debugRef: baseRef });
   assert.strictEqual(d.reasonCode, undefined);

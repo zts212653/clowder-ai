@@ -108,8 +108,6 @@ import { createConciergeMessageSearch } from '../../../../concierge/concierge-me
 import {
   buildConciergeActions,
   extractTriagePlanIdsFromActions,
-  projectConciergeStoredContent,
-  stripTriagePlanMarkers,
   type TriagePlanExtractionDeps,
 } from '../../../../concierge/concierge-reply-validator.js';
 import { buildConciergeSearchContext, type HandleEntry } from '../../../../concierge/concierge-search-context.js';
@@ -222,13 +220,14 @@ import { finalRoutingSlot, validateRoutingSyntax } from './final-routing-slot.js
 import { buildBriefingMessage } from './format-briefing.js';
 import { resolveEventBackedRoutingExit } from './guards/event-backed-routing-exit.js';
 import { isDirectOwnerDispositionOrigin } from './human-disposition-invocation-origin.js';
-import { outputLayoutExtra, RoutingMessageOutputProjection } from './message-output-projection.js';
+import { draftOutputFields, outputLayoutExtra, RoutingMessageOutputProjection } from './message-output-projection.js';
 import { requestOwnerAskCorrection } from './owner-ask-correction.js';
 import { detectUnaddressedOwnerAsk, opensOwnerDecision } from './owner-ask-detect.js';
 import { persistUserFacingSystemInfoNotices } from './persist-system-info-warnings.js';
 import { appendRemoteCancellationNotice, createRemoteCancellationObserver } from './remote-cancellation.js';
 import { recordStoppedRecallCalls, resolveResponseTerminal, stoppedByMemberTimeout } from './response-terminal.js';
-import { extractRichFromText, isValidRichBlock } from './rich-block-extract.js';
+import { prepareResponseText } from './response-text.js';
+import { isValidRichBlock } from './rich-block-extract.js';
 import type { RouteOptions, RouteStrategyDeps } from './route-helpers.js';
 import {
   assembleIncrementalContext,
@@ -248,7 +247,6 @@ import {
   mergePersistedPromptMessages,
   operationalKnowledgeCueSeeds,
   routeContentBlocksForCat,
-  sanitizeInjectedContent,
   shouldPersistContextBriefing,
   storedMessageTimestamp,
   subjectSeenCueSeeds,
@@ -662,14 +660,7 @@ export async function* routeSerial(
   // P1-2 R2 fix: Use shared singletons from entity-nudge-state.ts (cross-strategy state).
   const cueOccurredAt = Date.now();
   const memoryCueOpportunitySeeds = [...(options.memoryCueOpportunitySeeds ?? [])];
-  const memoryCueLegacyFallbacks: Array<{
-    seed: MemoryCueOpportunitySeed;
-    promptContext: string;
-  }> = [];
   let entityNudgePresentation:
-    | { service: EntityNudgeService; candidates: EntityNudgeCandidateBatch; sourceMessageId: string }
-    | undefined;
-  let entityNudgeCuePresentation:
     | {
         service: EntityNudgeService;
         candidates: EntityNudgeCandidateBatch;
@@ -698,43 +689,16 @@ export async function* routeSerial(
             })
           : [];
         memoryCueOpportunitySeeds.push(...subjectCueSeeds);
-        const subjectCueEntityIds = new Set(subjectCueSeeds.map((seed) => seed.payload.entityId));
-        const subjectCueCandidates: EntityNudgeCandidateBatch = {
-          ...nudgeResult,
-          nudges: nudgeResult.nudges.filter((nudge) => nudge.entityId && subjectCueEntityIds.has(nudge.entityId)),
-        };
-        if (currentUserMessageId && subjectCueCandidates.nudges.length > 0) {
-          entityNudgeCuePresentation = {
+        // One F260 consumer admission owns the combined cap and delivery receipt.
+        // Private person cues remain a separate projection of these admitted subjects.
+        if (currentUserMessageId && nudgeResult.nudges.length > 0) {
+          entityNudgePresentation = {
             service: nudgeService,
-            candidates: subjectCueCandidates,
+            candidates: nudgeResult,
             sourceMessageId: currentUserMessageId,
             seeds: subjectCueSeeds,
           };
-        }
-        for (const seed of subjectCueSeeds) {
-          const nudge = nudgeResult.nudges.find(
-            (candidate) =>
-              candidate.entityId === seed.payload.entityId && candidate.matchedAlias === seed.payload.matchedAlias,
-          );
-          if (nudge) {
-            memoryCueLegacyFallbacks.push({
-              seed,
-              promptContext: EntityNudgeService.formatForPrompt({ ...nudgeResult, nudges: [nudge] }),
-            });
-          }
-        }
-        const cueEntityIds = new Set(subjectCueSeeds.map((seed) => seed.payload.entityId));
-        const presentationCandidates: EntityNudgeCandidateBatch = {
-          ...nudgeResult,
-          nudges: nudgeResult.nudges.filter((nudge) => !nudge.entityId || !cueEntityIds.has(nudge.entityId)),
-        };
-        if (currentUserMessageId && presentationCandidates.nudges.length > 0) {
-          entityNudgePresentation = {
-            service: nudgeService,
-            candidates: presentationCandidates,
-            sourceMessageId: currentUserMessageId,
-          };
-          entityNudgePromptTokenEstimate = estimateTokens(EntityNudgeService.formatForPrompt(presentationCandidates));
+          entityNudgePromptTokenEstimate = estimateTokens(EntityNudgeService.formatForPrompt(nudgeResult));
         }
       }
     } catch (nudgeErr) {
@@ -2045,9 +2009,7 @@ export async function* routeSerial(
         continuityCapsule,
         ...(memoryCueOpportunitySeeds.length > 0 ? { memoryCueOpportunitySeeds } : {}),
         ...(entityNudgePresentation ? { entityNudgePresentation } : {}),
-        ...(entityNudgeCuePresentation ? { entityNudgeCuePresentation } : {}),
         ...(options.asrPersonMemoryScenes?.length ? { asrPersonMemoryScenes: options.asrPersonMemoryScenes } : {}),
-        ...(memoryCueLegacyFallbacks.length > 0 ? { memoryCueLegacyFallbacks } : {}),
         ...(options.toolExecutionPolicy ? { toolExecutionPolicy: options.toolExecutionPolicy } : {}),
         executionKind: initialExecutionKind,
         ...(options.beforeOutputCommit ? { outputFenced: true } : {}),
@@ -2389,9 +2351,7 @@ export async function* routeSerial(
                   catId,
                   content: textContent,
                   ...(persistedMetadata ? { metadata: persistedMetadata } : {}),
-                  ...(outputProjection
-                    ? { extra: { outputLayout: outputProjection.snapshot(textContent).layout } }
-                    : {}),
+                  ...draftOutputFields(outputProjection, textContent),
                   ...(collectedToolEvents.length > 0 ? { toolEvents: collectedToolEvents } : {}),
                   ...(thinkingChunks.length > 0 ? { thinking: renderThinkingChunks(thinkingChunks) } : {}),
                   updatedAt: now,
@@ -2419,9 +2379,7 @@ export async function* routeSerial(
                     catId,
                     content: textContent,
                     ...(persistedMetadata ? { metadata: persistedMetadata } : {}),
-                    ...(outputProjection
-                      ? { extra: { outputLayout: outputProjection.snapshot(textContent).layout } }
-                      : {}),
+                    ...draftOutputFields(outputProjection, textContent),
                     ...(collectedToolEvents.length > 0 ? { toolEvents: collectedToolEvents } : {}),
                     ...(thinkingChunks.length > 0 ? { thinking: renderThinkingChunks(thinkingChunks) } : {}),
                     updatedAt: now,
@@ -2727,11 +2685,16 @@ export async function* routeSerial(
         }
       } else if (textContent) {
         catProducedOutput = true;
-        const sanitized = sanitizeInjectedContent(textContent);
-
-        // F22: Extract cc_rich blocks from text (Route B fallback for non-MCP cats)
-        const { cleanText, blocks: textBlocks } = extractRichFromText(sanitized);
-        let storedContent = cleanText;
+        const preparedText = prepareResponseText(
+          textContent,
+          outputProjection,
+          Boolean(
+            'conciergeConfig' in conciergeCtx && conciergeContextForCat(conciergeCtx, catId as string)?.conciergeConfig,
+          ),
+        );
+        // Only authored prose may drive mentions, votes, rich blocks or verdicts.
+        const authoredContent = preparedText.authoredContent;
+        const { content: persistedContent, blocks: textBlocks, conciergeActionSourceContent } = preparedText;
         let allRichBlocks = [...bufferedBlocks, ...textBlocks, ...streamRichBlocks];
 
         // F34-b: Resolve voice blocks (audio with text, no url) — Route B path.
@@ -2750,18 +2713,6 @@ export async function* routeSerial(
           }
         }
 
-        const conciergeActionSourceContent =
-          'conciergeConfig' in conciergeCtx &&
-          conciergeContextForCat(conciergeCtx, catId as string)?.conciergeConfig &&
-          storedContent
-            ? storedContent
-            : undefined;
-        if (conciergeActionSourceContent) {
-          storedContent = stripTriagePlanMarkers(storedContent);
-        }
-        const persistedContent = conciergeActionSourceContent
-          ? projectConciergeStoredContent(storedContent)
-          : storedContent;
         // Layout hashes must attest the same normalized body for live done and cold history.
         // Keep the existing done.content policy independent of this proof input.
         persistedLayoutContent = persistedContent;
@@ -2771,7 +2722,7 @@ export async function* routeSerial(
 
         // A2A mention detection (缅因猫 P1-3: only after full text accumulated)
         // Line-start @mention = always actionable (no keyword gate)
-        const bodyA2AMentions = parseA2AMentions(storedContent, catId, await deps.addressedPlugins?.list());
+        const bodyA2AMentions = parseA2AMentions(authoredContent, catId, await deps.addressedPlugins?.list());
         a2aMentions = bodyA2AMentions;
 
         // clowder-ai#489: baseline counter — line-start mentions
@@ -2780,8 +2731,8 @@ export async function* routeSerial(
         }
 
         const routingExitLineStartMentions = getRoutingExitLineStartMentions(a2aMentions);
-        const routingExitHasCoCreatorLineStartMention = hasRoutingExitCoCreatorLineStartMention(storedContent);
-        const localCvoHasCoCreatorLineStartMention = hasLocalCoCreatorLineStartMention(storedContent);
+        const routingExitHasCoCreatorLineStartMention = hasRoutingExitCoCreatorLineStartMention(authoredContent);
+        const localCvoHasCoCreatorLineStartMention = hasLocalCoCreatorLineStartMention(authoredContent);
 
         const textLegacyObservedBlock = Boolean(
           !hadError &&
@@ -2811,7 +2762,7 @@ export async function* routeSerial(
         // Only debug mode injects an earlier cat's in-flight response directly;
         // later invocations still receive that response after it is persisted.
         if (!incrementalMode && thinkingMode === 'debug') {
-          previousResponses.push({ catId, content: storedContent });
+          previousResponses.push({ catId, content: persistedContent });
         }
 
         // F167 Phase H AC-H3/H5 (KD-24): final routing slot validator.
@@ -2826,7 +2777,7 @@ export async function* routeSerial(
           }
         }
         const phaseHResult = validateRoutingSyntax({
-          text: storedContent,
+          text: authoredContent,
           lineStartMentions: routingExitLineStartMentions,
           toolNames: collectedToolNames,
           structuredTargetCats: [...structuredTargetCats],
@@ -2849,7 +2800,7 @@ export async function* routeSerial(
             strictHits: inlineHits,
             shadowMisses,
             routedSetSkips,
-          } = detectInlineActionMentionsWithShadow(storedContent, catId, a2aMentions);
+          } = detectInlineActionMentionsWithShadow(authoredContent, catId, a2aMentions);
           const agentAttr = { 'agent.id': catId as string };
           inlineActionChecked.add(1, agentAttr);
           if (inlineHits.length > 0) inlineActionDetected.add(inlineHits.length, agentAttr);
@@ -2911,7 +2862,7 @@ export async function* routeSerial(
           // frustrationAutoIssueEligible=false but still need verdict-pass handoff guards.
           options.verdictPassWarningEnabled !== false &&
           shouldWarnVerdictWithoutPass({
-            text: storedContent,
+            text: authoredContent,
             lineStartMentions: routingExitLineStartMentions,
             toolNames: collectedToolNames,
             structuredTargetCats: [...structuredTargetCats],
@@ -2920,7 +2871,7 @@ export async function* routeSerial(
         ) {
           const verdictFireAttr: Record<string, string> = {
             ...c2BaseAttr,
-            [TRIGGER]: detectMatchedVerdictKeyword(storedContent) ?? 'unknown',
+            [TRIGGER]: detectMatchedVerdictKeyword(authoredContent) ?? 'unknown',
           };
           // Historical metric name retained for eval continuity. This is an
           // internal protocol signal and no longer creates a public History row.
@@ -2943,7 +2894,7 @@ export async function* routeSerial(
         // hold-claim message, so drilldown lands on the original content, not on the hint.
         let pendingC2VoidHoldSampleTrigger: string | null = null;
         const voidHoldEval = evaluateVoidHold({
-          text: storedContent,
+          text: authoredContent,
           toolNames: collectedToolNames,
           lineStartMentions: routingExitLineStartMentions,
           structuredTargetCats: [...structuredTargetCats],
@@ -2966,10 +2917,10 @@ export async function* routeSerial(
         // mention never reach the mailbox. Remind the cat next turn; after storage, wake it once
         // to decide or mention the owner when he is away (see owner-ask-correction.ts).
         const unaddressedOwnerAsk =
-          localCvoHasCoCreatorLineStartMention || detectUserMention(storedContent)
+          localCvoHasCoCreatorLineStartMention || detectUserMention(authoredContent)
             ? null
             : detectUnaddressedOwnerAsk({
-                text: storedContent,
+                text: authoredContent,
                 routedToCat: routingExitLineStartMentions.length > 0 || structuredTargetCats.size > 0,
                 blocks: allRichBlocks,
                 openedOwnerDecision,
@@ -2998,7 +2949,7 @@ export async function* routeSerial(
         }
 
         // F079 Phase 2: Vote interception — extract [VOTE:xxx] from cat response
-        const votedOption = extractVoteFromText(storedContent);
+        const votedOption = extractVoteFromText(authoredContent);
         if (votedOption && deps.invocationDeps.threadStore) {
           try {
             const voteState = await deps.invocationDeps.threadStore.getVotingState(threadId);
@@ -3087,7 +3038,7 @@ export async function* routeSerial(
         // Cross-post callbacks can satisfy the guard and emit target-thread operator, but must not
         // create a source-thread unread/user notification.
         mentionsUser = Boolean(
-          (storedContent ? detectUserMention(storedContent) : false) || localCvoHasCoCreatorLineStartMention,
+          (authoredContent ? detectUserMention(authoredContent) : false) || localCvoHasCoCreatorLineStartMention,
         );
 
         // Store with actual mentions — degrade on failure to ensure done reaches frontend
@@ -3187,7 +3138,7 @@ export async function* routeSerial(
           const streamMessageInput: AppendMessageInput = {
             from: { kind: 'agent', catId },
             userId,
-            content: terminalFailureContent ? `${storedContent}\n\n${terminalFailureContent}` : storedContent,
+            content: terminalFailureContent ? `${persistedContent}\n\n${terminalFailureContent}` : persistedContent,
             mentions: a2aMentions,
             origin: 'stream',
             timestamp: storedTimestamp,
@@ -3344,7 +3295,7 @@ export async function* routeSerial(
                   askMessageId: storedMsg.id,
                   answeredAt: Date.now(),
                   ...(currentUserMessageId ? { triggerMessageId: currentUserMessageId } : {}),
-                  excerpt: finalRoutingSlot(stripTrailingCatSignatures(storedContent)),
+                  excerpt: finalRoutingSlot(stripTrailingCatSignatures(authoredContent)),
                 },
               );
               log.info({ catId: catId as string, threadId, outcome: correction.outcome }, 'Owner ask correction');

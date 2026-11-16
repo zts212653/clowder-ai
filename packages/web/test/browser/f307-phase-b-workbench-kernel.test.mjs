@@ -1,13 +1,12 @@
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
-import { once } from 'node:events';
 import { existsSync } from 'node:fs';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
-import { createServer } from 'node:net';
 import path from 'node:path';
 import { after, before, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
+import { findFreePort, stopServer, waitForPage } from './_harness.mjs';
 import {
   canonicalWorktreeId,
   collaborationOwnerOutOfScopeResponse,
@@ -23,39 +22,6 @@ const WORKTREE_ID = 'worktree-f307-kernel';
 // F309 AC-U3: the file surface is keyed by the durable F063 root its alias resolves to.
 const FILE_OWNER_WORKTREE_ID = canonicalWorktreeId(WORKTREE_ID);
 const FILE_PATH = 'docs/features/F307-composable-workbench.md';
-
-async function findFreePort() {
-  const socket = createServer();
-  socket.listen(0, '127.0.0.1');
-  await once(socket, 'listening');
-  const address = socket.address();
-  assert(address && typeof address !== 'string');
-  socket.close();
-  await once(socket, 'close');
-  return address.port;
-}
-
-async function waitForPage(url, server, output) {
-  const deadline = Date.now() + 180_000;
-  while (Date.now() < deadline) {
-    if (server.exitCode !== null) throw new Error(`Next.js exited before readiness:\n${output.join('')}`);
-    try {
-      const response = await fetch(url);
-      if (response.ok) return;
-    } catch {
-      // The real Thread route is still compiling.
-    }
-    await new Promise((resolve) => setTimeout(resolve, 250));
-  }
-  throw new Error(`Timed out waiting for ${url}:\n${output.join('')}`);
-}
-
-async function stopServer(server) {
-  if (server.exitCode !== null) return;
-  server.kill('SIGTERM');
-  await Promise.race([once(server, 'exit'), new Promise((resolve) => setTimeout(resolve, 5_000))]);
-  if (server.exitCode === null) server.kill('SIGKILL');
-}
 
 async function readProductionBuildId() {
   if (!existsSync(PRODUCTION_BUILD_ID_PATH)) return null;

@@ -1,3 +1,4 @@
+import { usePathname } from 'next/navigation';
 import { useCallback, useEffect, useMemo } from 'react';
 import { createRoot } from 'react-dom/client';
 import { CatHueInjector } from '@/components/CatHueInjector';
@@ -27,6 +28,7 @@ import { useThreadMessages } from '@/hooks/useThreadScopedSelectors';
 import type { ChatMessage as ChatMessageData } from '@/stores/chat-types';
 import { useChatStore } from '@/stores/chatStore';
 import { withQueuedInputPreviews } from '@/stores/queued-input-preview';
+import { observeCanceledSendAttempts } from '@/stores/send-attempt-store';
 import { useSidebarProjectionStore } from '@/stores/sidebarProjectionStore';
 import { useSidebarStore } from '@/stores/sidebarStore';
 import { useThemeStore } from '@/stores/themeStore';
@@ -77,25 +79,30 @@ const messages: ChatMessageData[] = [
 const EMPTY_QUEUE = [] as const;
 
 function ChatProof() {
+  const pathname = usePathname();
+  const threadId = params.get('followRoute') === '1' ? (pathname.split('/')[2] ?? CURRENT_THREAD) : CURRENT_THREAD;
+  useEffect(() => {
+    if (params.get('followRoute') === '1') useChatStore.getState().setCurrentThread(threadId);
+  }, [threadId]);
   const presentation = useShellPresentation();
   const { width, handleResize } = useSidebarStore();
   const { getCatById } = useCatData();
-  const threadMessages = useThreadMessages(CURRENT_THREAD);
-  const queue = useChatStore((state) => scopedQueue(state, CURRENT_THREAD)) ?? EMPTY_QUEUE;
+  const threadMessages = useThreadMessages(threadId);
+  const queue = useChatStore((state) => scopedQueue(state, threadId)) ?? EMPTY_QUEUE;
   const conversationMessages = useMemo(
-    () => withQueuedInputPreviews(threadMessages, queue, CURRENT_THREAD),
-    [queue, threadMessages],
+    () => withQueuedInputPreviews(threadMessages, queue, threadId),
+    [queue, threadMessages, threadId],
   );
-  const conversationViewController = useConversationViewPreference(CURRENT_THREAD, presentation === 'v2');
+  const conversationViewController = useConversationViewPreference(threadId, presentation === 'v2');
   const conversationViewReading = useConversationViewReadingCheckpoint({
-    threadId: CURRENT_THREAD,
+    threadId: threadId,
     controller: conversationViewController,
     messages: conversationMessages,
     queue,
   });
   const navigateToNoop = useCallback(() => undefined, []);
   const messageSearch = useMessageSearchHost({
-    threadId: CURRENT_THREAD,
+    threadId: threadId,
     pushThreadRoute: navigateToNoop,
     available: surface,
     searchAvailable: surface && presentation === 'v2',
@@ -129,7 +136,7 @@ function ChatProof() {
     >
       {sidebar && (
         <div style={{ width: resizable ? width : 300, flexShrink: 0, minWidth: 0, height: '100%' }}>
-          <ThreadSidebar routeThreadId={CURRENT_THREAD} className="w-full h-full min-w-0" />
+          <ThreadSidebar routeThreadId={threadId} className="w-full h-full min-w-0" />
         </div>
       )}
       {sidebar && resizable && <ResizeHandle direction="horizontal" label="侧栏" onResize={handleResize} />}
@@ -144,7 +151,7 @@ function ChatProof() {
         }}
       >
         <ChatContainerHeader
-          threadId={CURRENT_THREAD}
+          threadId={threadId}
           sidebarOpen={sidebar}
           onToggleSidebar={() => undefined}
           viewMode="single"
@@ -157,10 +164,10 @@ function ChatProof() {
         />
         {surface ? (
           <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
-            <MessageSearchOverlay threadId={CURRENT_THREAD} host={messageSearch} available={surface} />
-            <ThreadChatRuntimeProvider routeThreadId={CURRENT_THREAD}>
+            <MessageSearchOverlay threadId={threadId} host={messageSearch} available={surface} />
+            <ThreadChatRuntimeProvider routeThreadId={threadId}>
               <ThreadChatSurface
-                threadId={CURRENT_THREAD}
+                threadId={threadId}
                 density="full"
                 conversationViewController={conversationViewController}
                 conversationViewQueue={queue}
@@ -187,7 +194,7 @@ function ChatProof() {
                 <ChatMessage
                   key={message.id}
                   message={message}
-                  threadId={CURRENT_THREAD}
+                  threadId={threadId}
                   getCatById={getCatById}
                   onEditCat={() => undefined}
                 />
@@ -195,14 +202,14 @@ function ChatProof() {
             </div>
             <div style={{ width: '100%', maxWidth: 752, alignSelf: 'center' }}>
               <ChatInput
-                threadId={CURRENT_THREAD}
+                threadId={threadId}
                 presentation={presentation}
-                composerContext={<ThreadComposerContext threadId={CURRENT_THREAD} />}
+                composerContext={<ThreadComposerContext threadId={threadId} />}
                 onSend={async (content) => {
                   const response = await apiFetch('/api/messages', {
                     method: 'POST',
                     headers: { 'content-type': 'application/json' },
-                    body: JSON.stringify({ threadId: CURRENT_THREAD, content }),
+                    body: JSON.stringify({ threadId: threadId, content }),
                   });
                   return response.ok;
                 }}
@@ -226,6 +233,8 @@ declare global {
       selectedThread: () => string;
       currentProject: () => string;
       incoming: (threadId: string, message: ChatMessageData) => void;
+      queue: (threadId: string, entries: import('../../../src/stores/chat-types').QueueEntry[]) => void;
+      recall: (threadId: string, messageId: string) => Promise<void>;
     };
   }
 }
@@ -237,6 +246,11 @@ window.__f322Chat = {
   selectedThread: () => useChatStore.getState().currentThreadId,
   currentProject: () => useChatStore.getState().currentProjectPath,
   incoming: (threadId, message) => useChatStore.getState().addMessageToThread(threadId, message),
+  queue: (threadId, entries) => useChatStore.getState().setQueue(threadId, entries),
+  recall: async (threadId, messageId) => {
+    await observeCanceledSendAttempts(threadId, [messageId], 'recalled');
+    useChatStore.getState().removeThreadMessage(threadId, messageId);
+  },
 };
 const root = document.getElementById('root');
 if (!root) throw new Error('Missing chat proof root');
