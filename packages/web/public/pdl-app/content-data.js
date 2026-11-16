@@ -76,7 +76,9 @@ function documentModels() {
     documentReview: s
       ? {
           work: s.file.absolutePath ?? s.file.path,
-          load: s.review.error ? 'error' : v ? '' : 'loading',
+          // A review message (why this file cannot be reviewed, or a save receipt) is a note, not a failed read.
+          load: v || s.review.error ? '' : 'loading',
+          message: s.review.error || '',
           retryKey: `document-review:${s.file.path}`,
           annotations: v?.review.annotations.map((a) => ({
             id: a.id,

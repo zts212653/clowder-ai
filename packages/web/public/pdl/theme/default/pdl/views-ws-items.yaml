@@ -17,6 +17,7 @@ views:
               act: refresh
               args: {k: $.documentReview.retryKey}
             blocks:
+              - {type: text, parts: [{text: $.documentReview.message, variant: meta}], when: $.documentReview.message}   # 批注不可用的原因、保存回执：一行弱提示，文件照常显示
               - type: toolbar
                 items:
                   - type: button
