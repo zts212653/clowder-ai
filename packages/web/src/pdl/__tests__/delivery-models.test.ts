@@ -103,10 +103,11 @@ describe('precise lifecycle evidence in engine message components', () => {
   it('marks a delivery processing while its reply to this message is still running', () => {
     const messages = records();
     expect(deliveryView(messages[1], messages, [], 'thread')[0].processing).toBe(false);
-    if (messages[2].lifecycle?.kind === 'response') {
-      const { completedAt: _done, ...running } = messages[2].lifecycle;
-      messages[2] = { ...messages[2], lifecycle: { ...running, status: 'processing' } };
-    }
+    if (messages[2].lifecycle?.kind === 'response')
+      messages[2] = {
+        ...messages[2],
+        lifecycle: { ...messages[2].lifecycle, status: 'processing', completedAt: undefined },
+      };
     messages[1] = {
       ...messages[1],
       lifecycle: {
