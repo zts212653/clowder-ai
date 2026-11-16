@@ -808,6 +808,7 @@ export interface IThreadStore {
     title: string,
     source: 'temporary' | 'cat',
     catId?: string,
+    intent?: 'name' | 'update' | 'user_requested',
   ): boolean | Promise<boolean>;
   /** Exact title CAS used to scrub/restore message-derived copies without clobbering user edits. */
   compareAndSetTitle(threadId: string, expectedTitle: string, nextTitle: string): boolean | Promise<boolean>;
@@ -1307,14 +1308,24 @@ export class ThreadStore implements IThreadStore {
     if (thread) thread.sessionImport = value;
   }
 
-  setAutomaticTitle(threadId: string, title: string, source: 'temporary' | 'cat', catId?: string): boolean {
+  setAutomaticTitle(
+    threadId: string,
+    title: string,
+    source: 'temporary' | 'cat',
+    catId?: string,
+    intent: 'name' | 'update' | 'user_requested' = 'name',
+  ): boolean {
     const thread = this.get(threadId);
-    if (!thread || thread.deletedAt || (thread.titleSource ?? (thread.title ? 'user' : 'temporary')) !== 'temporary')
-      return false;
+    if (!thread || thread.deletedAt) return false;
+    const currentSource = thread.titleSource ?? (thread.title ? 'user' : 'temporary');
+    const effectiveIntent = source === 'cat' ? intent : 'name';
+    if (effectiveIntent === 'name' && currentSource !== 'temporary') return false;
+    if (effectiveIntent === 'update' && currentSource === 'user') return false;
     if (source === 'temporary' && thread.title !== null) return false;
     thread.title = title;
-    thread.titleSource = source;
-    if (source === 'cat' && catId) thread.titleCatId = catId;
+    thread.titleSource = effectiveIntent === 'user_requested' ? 'user' : source;
+    if (thread.titleSource === 'cat' && catId) thread.titleCatId = catId;
+    else delete thread.titleCatId;
     return true;
   }
 

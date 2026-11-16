@@ -57,3 +57,37 @@ test('Redis title provenance survives reload and a concurrent user rename wins',
     await redis.quit();
   }
 });
+
+test('Redis progress and user-requested titles survive fresh detail and list readers without TTL', async (t) => {
+  assertRedisIsolationOrThrow(process.env.REDIS_URL, 'Issue #2006 title updates');
+  const redisUrl = process.env.REDIS_URL;
+  if (!redisUrl) throw new Error('An isolated Redis URL is required');
+  const redis = new Redis(redisUrl);
+  t.after(() => redis.quit());
+  const store = new RedisThreadStore(redis);
+  const thread = await store.create('issue2006-test');
+  assert.equal(await store.setAutomaticTitle(thread.id, '排查', 'cat', 'sonnet'), true);
+  assert.equal(await store.setAutomaticTitle(thread.id, '修复中', 'cat', 'codex', 'update'), true);
+  const fresh = new RedisThreadStore(redis);
+  assert.equal((await fresh.get(thread.id))?.title, '修复中');
+  assert.equal((await fresh.get(thread.id))?.titleSource, 'cat');
+  assert.equal((await fresh.list('issue2006-test')).find((item) => item.id === thread.id)?.title, '修复中');
+  assert.equal(await fresh.setAutomaticTitle(thread.id, '用户要求替换猫标题', 'cat', 'codex', 'user_requested'), true);
+  assert.equal((await new RedisThreadStore(redis).get(thread.id))?.titleCatId, undefined);
+  await store.updateTitle(thread.id, '用户手工标题');
+  assert.equal(await fresh.setAutomaticTitle(thread.id, '自动覆盖', 'cat', 'codex', 'update'), false);
+  assert.equal(
+    await fresh.setAutomaticTitle(thread.id, 'issue#2006 用户指定标题', 'cat', 'codex', 'user_requested'),
+    true,
+  );
+  const reloaded = new RedisThreadStore(redis);
+  assert.equal((await reloaded.get(thread.id))?.title, 'issue#2006 用户指定标题');
+  assert.equal((await reloaded.get(thread.id))?.titleSource, 'user');
+  assert.equal((await reloaded.get(thread.id))?.titleCatId, undefined);
+  assert.equal(
+    (await reloaded.list('issue2006-test')).find((item) => item.id === thread.id)?.title,
+    'issue#2006 用户指定标题',
+  );
+  assert.equal(await reloaded.setAutomaticTitle(thread.id, '后续自动覆盖', 'cat', 'codex', 'update'), false);
+  assert.equal(await redis.ttl(`thread:${thread.id}`), -1);
+});

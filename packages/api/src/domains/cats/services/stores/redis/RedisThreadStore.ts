@@ -766,6 +766,7 @@ export class RedisThreadStore implements IThreadStore {
     title: string,
     source: 'temporary' | 'cat',
     catId?: string,
+    intent: 'name' | 'update' | 'user_requested' = 'name',
   ): Promise<boolean> {
     const key = ThreadKeys.detail(threadId);
     const changed = await this.redis.eval(
@@ -776,9 +777,11 @@ export class RedisThreadStore implements IThreadStore {
       local current = redis.call('HGET', KEYS[1], 'title') or ''
       local source = redis.call('HGET', KEYS[1], 'titleSource')
       if not source then source = current == '' and 'temporary' or 'user' end
-      if source ~= 'temporary' then return 0 end
+      if ARGV[4] == 'name' and source ~= 'temporary' then return 0 end
+      if ARGV[4] == 'update' and source == 'user' then return 0 end
       if ARGV[2] == 'temporary' and current ~= '' then return 0 end
-      redis.call('HSET', KEYS[1], 'title', ARGV[1], 'titleSource', ARGV[2], 'titleCatId', ARGV[3])
+      local nextSource = ARGV[4] == 'user_requested' and 'user' or ARGV[2]
+      redis.call('HSET', KEYS[1], 'title', ARGV[1], 'titleSource', nextSource, 'titleCatId', nextSource == 'cat' and ARGV[3] or '')
       return 1
     `,
       1,
@@ -786,6 +789,7 @@ export class RedisThreadStore implements IThreadStore {
       title,
       source,
       catId ?? '',
+      source === 'cat' ? intent : 'name',
     );
     if (changed === 1) await this.applyKeyRetention([key]);
     return changed === 1;

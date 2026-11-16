@@ -23,12 +23,13 @@ async function run(
   imported: boolean,
   behavior: 'missing' | 'malformed' | 'different' | 'done',
   system?: 'default' | 'system',
+  titleSource: 'temporary' | 'cat' | 'user' = 'temporary',
 ) {
   const catId = createCatId('opus');
   const threads = new ThreadStore();
   const thread = system === 'default' ? threads.get('default') : threads.create('u');
   assert.ok(thread);
-  thread.titleSource = 'temporary'; // Includes Redis-hydrated empty lobby/system threads.
+  thread.titleSource = titleSource; // Includes Redis-hydrated empty lobby/system threads.
   if (system === 'system') threads.updateSystemKind(thread.id, 'memory_ops');
   const sessions = new SessionChainStore();
   const record = sessions.create({ threadId: thread.id, catId, userId: 'u', cliSessionId: 'native-original' });
@@ -149,3 +150,14 @@ for (const system of ['default', 'system'] as const) {
     assert.ok(result.prompts.every((p) => !p.includes('这条对话尚未起名')));
   });
 }
+
+(['cat', 'user'] as const).forEach((source) => {
+  test(`${source} title guidance explains progress updates and explicit user rename requests`, async () => {
+    const result = await run(false, 'done', undefined, source);
+    assert.equal(result.inputs.length, 1);
+    assert.ok(result.prompts.some((prompt) => prompt.includes('user_requested')));
+    assert.ok(result.prompts.some((prompt) => prompt.includes('titleIntent')));
+    assert.ok(result.prompts.every((prompt) => !prompt.includes('猫只起一次名')));
+    if (source === 'cat') assert.ok(result.prompts.some((prompt) => prompt.includes('update')));
+  });
+});

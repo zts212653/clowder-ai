@@ -1111,6 +1111,7 @@ const setThreadMetadataSchema = z
     roadmap: roadmapInputSchema.optional(),
     // P2: match PATCH /api/threads/:id invariants — trim + min(1) + max
     title: z.string().trim().min(1).max(200).optional(),
+    titleIntent: z.enum(['name', 'update', 'user_requested']).optional(),
     labels: z.array(z.string().trim().min(1).max(50)).max(20).optional(),
     // #872 cloud-review P2 (R4): cap per-request payload sizes to prevent unbounded growth.
     // These are low-frequency anchors; generous caps that no real usage should hit.
@@ -1127,7 +1128,11 @@ const setThreadMetadataSchema = z
     removeIssues: z.array(refItemSchema).max(50).optional(),
     removeFeatures: z.array(z.string().max(50)).max(50).optional(),
   })
-  .refine((body) => Object.keys(body).length > 0, { message: SET_THREAD_METADATA_EMPTY_UPDATE_MESSAGE });
+  .refine((body) => Object.keys(body).length > 0, { message: SET_THREAD_METADATA_EMPTY_UPDATE_MESSAGE })
+  .refine((body) => body.titleIntent === undefined || body.title !== undefined, {
+    path: ['titleIntent'],
+    message: 'titleIntent requires title',
+  });
 
 const featIndexQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(100).optional(),
@@ -5350,7 +5355,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       return { error: 'Thread not found' };
     }
 
-    const { title, labels, roadmap, ...metadataFields } = parsed.data;
+    const { title, titleIntent, labels, roadmap, ...metadataFields } = parsed.data;
     let roadmapMutation: Awaited<ReturnType<typeof prepareRoadmapMutation>> | undefined;
     if (roadmap) {
       try {
@@ -5412,7 +5417,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
     }
     let titleApplied: boolean | undefined;
     if (title !== undefined) {
-      titleApplied = await threadStore.setAutomaticTitle(effectiveThreadId, title, 'cat', principal.catId);
+      titleApplied = await threadStore.setAutomaticTitle(effectiveThreadId, title, 'cat', principal.catId, titleIntent);
       if (titleApplied)
         opts.socketManager.broadcastToRoom(`thread:${effectiveThreadId}`, 'thread_updated', {
           threadId: effectiveThreadId,

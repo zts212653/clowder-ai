@@ -33,3 +33,28 @@ test('parallel cats can only claim one automatic title', async () => {
   ]);
   assert.deepEqual(results, [true, false]);
 });
+
+test('progress updates a cat title but respects a subsequent user rename', () => {
+  const store = new ThreadStore();
+  const thread = store.create('u');
+  store.setAutomaticTitle(thread.id, '排查问题', 'cat', 'sonnet');
+  assert.equal(store.setAutomaticTitle(thread.id, 'issue#2006 提交修复', 'cat', 'codex', 'update'), true);
+  assert.equal(store.get(thread.id)?.title, 'issue#2006 提交修复');
+  assert.equal(store.get(thread.id)?.titleCatId, 'codex');
+  store.updateTitle(thread.id, '用户保留的标题');
+  assert.equal(store.setAutomaticTitle(thread.id, '自动更新', 'cat', 'codex', 'update'), false);
+  assert.equal(store.get(thread.id)?.title, '用户保留的标题');
+});
+
+(['cat', 'user'] as const).forEach((source) => {
+  test(`an explicit user request replaces a ${source} title and remains protected`, () => {
+    const store = new ThreadStore();
+    const thread = store.create('u', source === 'user' ? '原来的标题' : undefined);
+    if (source === 'cat') store.setAutomaticTitle(thread.id, '原来的标题', 'cat', 'sonnet');
+    assert.equal(store.setAutomaticTitle(thread.id, '用户指定的新标题', 'cat', 'codex', 'user_requested'), true);
+    assert.equal(store.get(thread.id)?.title, '用户指定的新标题');
+    assert.equal(store.get(thread.id)?.titleSource, 'user');
+    assert.equal(store.get(thread.id)?.titleCatId, undefined);
+    assert.equal(store.setAutomaticTitle(thread.id, '继续自动更新', 'cat', 'codex', 'update'), false);
+  });
+});

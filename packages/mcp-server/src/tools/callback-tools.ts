@@ -3439,8 +3439,13 @@ export const setThreadMetadataInputSchema = {
     .describe(
       'Bind one original work-line roadmap in this thread, or retain a revocation tombstone. Active: existing project root + repository-relative Markdown path. sourceRef=thread:<currentThreadId>#<messageId> must be readable here. expectedRevision=null for first bind; otherwise use roadmapBinding.revision from get_thread_metadata. Server normalizes disposable worktrees to a persistent root and derives actor/time/version; a pointer grants no read or work authority.',
     ),
-  // Keep the legacy title hint; the server and tool-level contract govern protected title writes.
-  title: z.string().min(1).optional().describe('Update thread title (replaces existing)'),
+  title: z.string().min(1).optional().describe('Thread title to save; use titleIntent for later renames'),
+  titleIntent: z
+    .enum(['name', 'update', 'user_requested'])
+    .optional()
+    .describe(
+      'Requires title. Default name: name a temporary title once. update: revise a cat title as work progresses, preserving user titles. user_requested: only when the user explicitly asks to rename this conversation; may replace any title and saves it as user-chosen, protected from later automatic updates.',
+    ),
   labels: z.array(z.string()).optional().describe('Update thread labels (replaces entire array)'),
   worktrees: z.array(z.string()).optional().describe('Worktree paths to add (append + dedupe)'),
   prs: z
@@ -3473,6 +3478,7 @@ export const setThreadMetadataInputSchema = {
 export async function handleSetThreadMetadata(input: {
   roadmap?: z.infer<typeof setThreadMetadataInputSchema.roadmap>;
   title?: string;
+  titleIntent?: z.infer<typeof setThreadMetadataInputSchema.titleIntent>;
   labels?: string[];
   worktrees?: string[];
   prs?: Array<{ repo: string; number: number }>;
@@ -3493,6 +3499,7 @@ export async function handleSetThreadMetadata(input: {
         {
           ...(input.roadmap !== undefined ? { roadmap: input.roadmap } : {}),
           ...(input.title !== undefined ? { title: input.title } : {}),
+          ...(input.titleIntent !== undefined ? { titleIntent: input.titleIntent } : {}),
           ...(input.labels !== undefined ? { labels: input.labels } : {}),
           ...(input.worktrees !== undefined ? { worktrees: input.worktrees } : {}),
           ...(input.prs !== undefined ? { prs: input.prs } : {}),
@@ -4722,13 +4729,13 @@ export const callbackTools = [
     name: 'cat_cafe_set_thread_metadata',
     description:
       'Write low-frequency metadata anchors for the current thread. Merge semantics: ' +
-      'title names an untitled conversation once; labels REPLACE; worktrees/prs/issues/features APPEND with dedupe (use remove* fields to remove); ' +
+      'titleIntent defaults to name (first naming); update revises cat titles as work progresses; user_requested honors an explicit user rename and saves a protected user title. labels REPLACE; worktrees/prs/issues/features APPEND with dedupe (use remove* fields to remove); ' +
       'notes MERGE (string sets, null deletes key). roadmap binds one original file or records a revocation tombstone, with expectedRevision concurrency protection. ' +
       'Notes limits: keys at most 100 and string values at most 2000 UTF-16 code units, without trimming; at most 50 keys per request including null deletions, and 200 surviving keys after merge. Oversize updates are rejected without truncation. ' +
-      'Use when: naming an untitled conversation, recording an association, or explicitly choosing/revoking the original roadmap for a long work line. NOT for: renaming an already named conversation, taking over a Task or storing derived progress. ' +
+      'Use when: naming or updating this conversation title, honoring a user rename request, recording an association, or explicitly choosing/revoking the original roadmap for a long work line. NOT for: automatic changes to user-chosen titles, taking over a Task or storing derived progress. ' +
       'Output: updated metadata; roadmapBinding returns normalized persistent coordinates and revision, roadmap returns current file/version/as-of or revoked/invalid/unavailable. Later activity means needs checking, never automatically obsolete. File readers retain their own access checks. Title requests include titleApplied and titleSource. If titleApplied=false, report that the title was not changed. ' +
       'SCOPE: current thread only (no threadId param); cross-thread writes are impossible. ' +
-      'GOTCHA: the legacy title parameter hint does not authorize replacement. User and previously cat-named titles are protected; check titleApplied.',
+      'GOTCHA: supply titleIntent for later renames; user_requested requires an explicit user instruction. Check titleApplied before reporting success.',
     inputSchema: setThreadMetadataInputSchema,
     handler: handleSetThreadMetadata,
     governance: {
