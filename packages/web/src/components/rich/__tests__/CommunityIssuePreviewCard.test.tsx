@@ -70,7 +70,7 @@ it('never marks a successful HTTP response without a real Issue receipt as publi
   await act(async () => root.render(<CommunityIssuePreviewCard inlineDraftId={draft.draftId} />));
   await act(async () => container.querySelector('button')?.click());
   expect(container.textContent).not.toContain('已发布到 GitHub');
-  expect(container.textContent).toContain('尚未确认');
+  expect(container.textContent).toContain('暂未确认');
   await act(async () => container.querySelector('button')?.click());
   expect(container.querySelector('a')?.href).toBe('https://github.com/owner/repo/issues/7');
   expect(
@@ -174,4 +174,148 @@ it('keeps the trusted connector block entry and its irreversible cancellation ca
   expect(container.textContent).toContain('不可重新发布');
   expect(container.textContent).not.toContain('重新打开');
   expect(container.querySelector('textarea')).toBeNull();
+});
+
+it.each([
+  'network',
+  'timeout',
+  'gateway-html',
+  'server-json',
+  'missing-draft',
+  'invalid-receipt',
+  'no-draft',
+  'not-published',
+  'rate-limit',
+])('keeps %s publication failure uncertain and reconciles the same draft without editing or cancelling', async (failure) => {
+  let attempts = 0;
+  vi.mocked(apiFetch).mockImplementation(async (_url, init) => {
+    if (init?.method !== 'POST') return new Response(JSON.stringify({ draft }));
+    if (++attempts === 1) {
+      if (failure === 'network') throw new TypeError('Failed to fetch');
+      if (failure === 'timeout') throw new DOMException('Timed out', 'TimeoutError');
+      if (failure === 'gateway-html') return new Response('<h1>Bad Gateway</h1>', { status: 502 });
+      if (failure === 'server-json')
+        return new Response(JSON.stringify({ error: 'Publication failed' }), { status: 502 });
+      if (failure === 'missing-draft')
+        return new Response(JSON.stringify({ error: 'Publication outcome uncertain' }), { status: 409 });
+      if (failure === 'no-draft') return new Response(JSON.stringify({}));
+      if (failure === 'not-published') return new Response(JSON.stringify({ draft }));
+      if (failure === 'rate-limit')
+        return new Response(JSON.stringify({ error: 'Too many requests' }), { status: 429 });
+      return new Response(JSON.stringify({ draft: { ...draft, status: 'published' } }));
+    }
+    return new Response(
+      JSON.stringify({
+        draft: {
+          ...draft,
+          status: 'published',
+          githubIssueNumber: 7,
+          githubIssueUrl: 'https://github.com/owner/repo/issues/7',
+        },
+      }),
+    );
+  });
+  await act(async () => root.render(<CommunityIssuePreviewCard inlineDraftId={draft.draftId} />));
+  await act(async () => container.querySelector('button')?.click());
+  expect(container.textContent).toContain('结果待确认');
+  expect(container.textContent).not.toContain('尚未外发');
+  expect(container.querySelector('input')?.disabled).toBe(true);
+  expect(container.querySelector('textarea')?.disabled).toBe(true);
+  expect([...container.querySelectorAll('button')].find((button) => button.textContent === '取消草稿')?.disabled).toBe(
+    true,
+  );
+  expect(container.querySelector('button')?.textContent).toBe('重新核对结果');
+  await act(async () => container.querySelector('button')?.click());
+  expect(container.querySelector('a')?.href).toBe('https://github.com/owner/repo/issues/7');
+  expect(
+    vi
+      .mocked(apiFetch)
+      .mock.calls.filter(([, init]) => init?.method === 'POST')
+      .map(([url]) => url),
+  ).toEqual([`${endpoint}/publish`, `${endpoint}/publish`]);
+});
+
+it.each([
+  [400, 'Invalid body', '报告内容或草稿标识无效'],
+  [401, 'Not authenticated', '登录已失效'],
+  [403, 'Repository not allowed', '不允许发布'],
+  [404, 'Draft not found', '未找到这份草稿'],
+  [422, 'Content contains forbidden patterns', '报告内容未通过发布检查'],
+  [409, 'repository is not in publish allowlist', '不允许发布'],
+  [409, 'draft no longer passes sanitization', '报告内容未通过发布检查'],
+])('shows a Chinese actionable reason for a confirmed %s rejection', async (status, message, expected) => {
+  vi.mocked(apiFetch).mockImplementation(
+    async (_url, init) =>
+      new Response(JSON.stringify(init?.method === 'POST' ? { error: message } : { draft }), {
+        status: init?.method === 'POST' ? Number(status) : 200,
+      }),
+  );
+  await act(async () => root.render(<CommunityIssuePreviewCard inlineDraftId={draft.draftId} />));
+  await act(async () => container.querySelector('button')?.click());
+  expect(container.querySelector('[role="alert"]')?.textContent).toContain(expected);
+  expect(container.textContent).not.toContain('尚未确认远端提交结果');
+  if (status === 404) {
+    expect(container.querySelector('textarea')).toBeNull();
+    expect(container.querySelector('button')?.textContent).toBe('重新加载草稿');
+  } else expect(container.querySelector('textarea')?.disabled).toBe(false);
+});
+
+it.each(['Draft cancelled', 'draft cancelled'])('recognizes the existing cancelled rejection: %s', async (message) => {
+  vi.mocked(apiFetch).mockImplementation(
+    async (_url, init) =>
+      new Response(JSON.stringify(init?.method === 'POST' ? { error: message } : { draft }), {
+        status: init?.method === 'POST' ? 409 : 200,
+      }),
+  );
+  await act(async () => root.render(<CommunityIssuePreviewCard inlineDraftId={draft.draftId} />));
+  await act(async () => container.querySelector('button')?.click());
+  expect(container.textContent).toContain('已取消草稿 · 不可重新发布');
+  expect(container.querySelector('input')).toBeNull();
+  expect(container.querySelector('button')).toBeNull();
+});
+
+it.each([
+  [400, 'Invalid body'],
+  [401, 'Not authenticated'],
+  [403, 'Repository not allowed'],
+  [404, 'Draft not found'],
+  [422, 'Content contains forbidden patterns'],
+  [409, 'Draft cancelled'],
+  [409, 'draft cancelled'],
+  [409, 'repository is not in publish allowlist'],
+  [409, 'draft no longer passes sanitization'],
+])('a later %s rejection cannot clear an earlier unknown publication outcome', async (status, message) => {
+  let attempts = 0;
+  vi.mocked(apiFetch).mockImplementation(async (_url, init) => {
+    if (init?.method !== 'POST') return new Response(JSON.stringify({ draft }));
+    if (++attempts === 1) throw new TypeError('Failed to fetch');
+    if (attempts === 2) return new Response(JSON.stringify({ error: message }), { status });
+    return new Response(
+      JSON.stringify({
+        draft: {
+          ...draft,
+          status: 'published',
+          githubIssueNumber: 7,
+          githubIssueUrl: 'https://github.com/owner/repo/issues/7',
+        },
+      }),
+    );
+  });
+  await act(async () => root.render(<CommunityIssuePreviewCard inlineDraftId={draft.draftId} />));
+  await act(async () => container.querySelector('button')?.click());
+  await act(async () => container.querySelector('button')?.click());
+  expect(container.textContent).toContain('结果待确认');
+  expect(container.textContent).not.toContain('尚未外发');
+  expect(container.querySelector('textarea')?.disabled).toBe(true);
+  expect([...container.querySelectorAll('button')].find((button) => button.textContent === '取消草稿')?.disabled).toBe(
+    true,
+  );
+  await act(async () => container.querySelector('button')?.click());
+  expect(container.querySelector('a')?.href).toBe('https://github.com/owner/repo/issues/7');
+  expect(
+    vi
+      .mocked(apiFetch)
+      .mock.calls.filter(([, init]) => init?.method === 'POST')
+      .map(([url]) => url),
+  ).toEqual([`${endpoint}/publish`, `${endpoint}/publish`, `${endpoint}/publish`]);
 });

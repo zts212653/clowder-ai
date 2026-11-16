@@ -49,7 +49,7 @@ export function CommunityIssueEditor({
           value={title}
           onChange={(event) => onTitleChange(event.target.value)}
           disabled={disabled}
-          className="mt-1 w-full rounded-md border border-cafe bg-cafe-surface p-2 text-sm text-cafe-text focus:outline-2 focus:outline-offset-2 focus:outline-[var(--evolution-focus)] disabled:opacity-60"
+          className="mt-1 w-full rounded-md border border-cafe bg-cafe-surface p-2 text-sm text-cafe focus:outline-2 focus:outline-offset-2 focus:outline-[var(--evolution-focus)] disabled:opacity-60"
         />
       </label>
       <label htmlFor={`${id}-body`} className="block text-xs text-cafe-muted">
@@ -61,7 +61,7 @@ export function CommunityIssueEditor({
           value={bodyMarkdown}
           onChange={(event) => onBodyChange(event.target.value)}
           disabled={disabled}
-          className="mt-1 w-full rounded-md border border-cafe bg-cafe-surface p-2 text-sm leading-relaxed text-cafe-text focus:outline-2 focus:outline-offset-2 focus:outline-[var(--evolution-focus)] disabled:opacity-60"
+          className="mt-1 w-full rounded-md border border-cafe bg-cafe-surface p-2 text-sm leading-relaxed text-cafe focus:outline-2 focus:outline-offset-2 focus:outline-[var(--evolution-focus)] disabled:opacity-60"
         />
       </label>
     </div>

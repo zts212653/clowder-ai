@@ -19,7 +19,15 @@ interface CommunityIssuePreviewCardProps {
   unavailableFallback?: ReactNode;
   onDraftCancelled?: () => void;
 }
-type PreviewState = 'loading' | 'editing' | 'publishing' | 'published' | 'cancelling' | 'cancelled' | 'error';
+type PreviewState =
+  | 'loading'
+  | 'editing'
+  | 'publishing'
+  | 'uncertain'
+  | 'published'
+  | 'cancelling'
+  | 'cancelled'
+  | 'error';
 const uncertainMessage = '暂未确认 GitHub 是否已创建，请用同一份草稿核对结果；不会重复提单。';
 
 /** Only the trusted publisher connector can supply a standalone preview. */
@@ -79,6 +87,7 @@ export function CommunityIssuePreviewCard({
     };
   }, [draftId, retry]);
 
+  const reconciling = state === 'uncertain' || draft?.status === 'publishing' || draft?.status === 'uncertain';
   const handlePublish = async () => {
     if (!draftId) return;
     setState('publishing');
@@ -92,7 +101,9 @@ export function CommunityIssuePreviewCard({
           body: JSON.stringify({ title: editTitle, bodyMarkdown: editBody }),
         },
       );
-      const data = await response.json();
+      const payload: unknown = await response.json();
+      if (!payload || typeof payload !== 'object') throw new Error('尚未确认发布结果。');
+      const data = payload as { draft?: unknown; error?: unknown };
       if (response.status === 409 && data.draft) {
         const retained = communityDraftSchema.parse(data.draft);
         if (retained.status === 'publishing' || retained.status === 'uncertain') {
@@ -100,18 +111,44 @@ export function CommunityIssuePreviewCard({
           setEditTitle(retained.title);
           setEditBody(retained.bodyMarkdown);
           setError(uncertainMessage);
-          setState('editing');
+          setState('uncertain');
           return;
         }
       }
-      if (!response.ok) throw new Error('尚未确认发布结果。');
+      if (!response.ok) {
+        if (response.status === 409 && (data.error === 'Draft cancelled' || data.error === 'draft cancelled')) {
+          setError(reconciling ? `草稿已取消，当前无法核验。${uncertainMessage}` : null);
+          setState(reconciling ? 'uncertain' : 'cancelled');
+          return;
+        }
+        const rejected: Record<number, string> = {
+          400: '报告内容或草稿标识无效，请检查后重试。',
+          401: '登录已失效，请重新登录后重试。',
+          403: '当前账号或目标仓库不允许发布，请检查 GitHub 插件权限与仓库配置。',
+          404: '未找到这份草稿，请重新读取草稿。',
+          422: '报告内容未通过发布检查，请修改后重试。',
+        };
+        const nativeRejected: Record<string, string> = {
+          'repository is not in publish allowlist': rejected[403],
+          'draft no longer passes sanitization': rejected[422],
+        };
+        const reason =
+          rejected[response.status] ??
+          (response.status === 409 && typeof data.error === 'string' ? nativeRejected[data.error] : undefined);
+        if (reason) {
+          setError(reconciling ? `${reason} ${uncertainMessage}` : reason);
+          setState(reconciling ? 'uncertain' : response.status === 404 ? 'error' : 'editing');
+          return;
+        }
+        throw new Error('尚未确认发布结果。');
+      }
       const result = communityDraftSchema.parse(data.draft);
       if (result.status !== 'published') throw new Error('尚未确认发布结果。');
       setDraft(result);
       setState('published');
     } catch {
-      setError('尚未确认远端提交结果，请使用同一草稿重试核验。');
-      setState('editing');
+      setError(uncertainMessage);
+      setState('uncertain');
     }
   };
   const handleCancel = async () => {
@@ -136,7 +173,6 @@ export function CommunityIssuePreviewCard({
     }
   };
   const busy = state === 'publishing' || state === 'cancelling';
-  const reconciling = draft?.status === 'publishing' || draft?.status === 'uncertain';
   const differentTarget = Boolean(
     draft && expectedRepo && draft.targetRepo.toLowerCase() !== expectedRepo.toLowerCase(),
   );
@@ -150,7 +186,7 @@ export function CommunityIssuePreviewCard({
           <p role="alert" className="text-xs text-cafe-muted">
             {error}
           </p>
-          {unavailableFallback}
+          {!draft && unavailableFallback}
           <button type="button" onClick={() => setRetry((value) => value + 1)} className={communityPrimaryAction}>
             重新加载草稿
           </button>

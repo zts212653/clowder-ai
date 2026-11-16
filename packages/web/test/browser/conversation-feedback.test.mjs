@@ -21,7 +21,27 @@ after(async () => browser?.close());
 for (const entry of ['local', 'agent', 'connector']) {
   for (const scenario of entry === 'connector'
     ? ['ready', 'cancel']
-    : ['ready', 'ready-mobile', 'offline', 'empty', 'uncertain', 'uncertain-mobile', 'conflict']) {
+    : [
+        'ready',
+        'ready-mobile',
+        'offline',
+        'empty',
+        'uncertain',
+        'uncertain-mobile',
+        'conflict',
+        ...(entry === 'agent'
+          ? [
+              'network',
+              'network-mobile',
+              'gateway',
+              'gateway-mobile',
+              'invalid',
+              'invalid-mobile',
+              'rejected',
+              'denied',
+            ]
+          : []),
+      ]) {
     test(
       `${entry}/${scenario}: real chat draft, confirmation, receipt and safe fallback`,
       { timeout: 30000 },
@@ -58,26 +78,26 @@ for (const entry of ['local', 'agent', 'connector']) {
           const primary = page.getByRole('button', { name: /^(核对并继续|发布到 GitHub|重新核对结果)$/ });
           let primaryContrast;
           let primaryHoverContrast;
-          if (await primary.count()) {
-            const contrastOf = (button) => {
-              const style = getComputedStyle(button);
-              const canvas = document.createElement('canvas');
-              canvas.width = canvas.height = 1;
-              const ctx = canvas.getContext('2d');
-              const luminance = (color) => {
-                ctx.clearRect(0, 0, 1, 1);
-                ctx.fillStyle = color;
-                ctx.fillRect(0, 0, 1, 1);
-                const channels = [...ctx.getImageData(0, 0, 1, 1).data]
-                  .slice(0, 3)
-                  .map((value) => value / 255)
-                  .map((value) => (value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4));
-                return channels[0] * 0.2126 + channels[1] * 0.7152 + channels[2] * 0.0722;
-              };
-              const foreground = luminance(style.color);
-              const background = luminance(style.backgroundColor);
-              return (Math.max(foreground, background) + 0.05) / (Math.min(foreground, background) + 0.05);
+          const contrastOf = (button) => {
+            const style = getComputedStyle(button);
+            const canvas = document.createElement('canvas');
+            canvas.width = canvas.height = 1;
+            const ctx = canvas.getContext('2d');
+            const luminance = (color) => {
+              ctx.clearRect(0, 0, 1, 1);
+              ctx.fillStyle = color;
+              ctx.fillRect(0, 0, 1, 1);
+              const channels = [...ctx.getImageData(0, 0, 1, 1).data]
+                .slice(0, 3)
+                .map((value) => value / 255)
+                .map((value) => (value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4));
+              return channels[0] * 0.2126 + channels[1] * 0.7152 + channels[2] * 0.0722;
             };
+            const foreground = luminance(style.color);
+            const background = luminance(style.backgroundColor);
+            return (Math.max(foreground, background) + 0.05) / (Math.min(foreground, background) + 0.05);
+          };
+          if (await primary.count()) {
             primaryContrast = await primary.evaluate(contrastOf);
             assert(
               primaryContrast >= 4.5,
@@ -94,11 +114,27 @@ for (const entry of ['local', 'agent', 'connector']) {
               await page.mouse.move(0, 0);
             }
           }
-          widths.push({ stage, width: box.width, primaryContrast, primaryHoverContrast });
+          const editorContrasts =
+            stage === 'editing'
+              ? await Promise.all(
+                  ['报告标题', '公开报告'].map(async (name) => {
+                    const field = page.getByLabel(name, { exact: true });
+                    const contrast = await field.evaluate(contrastOf);
+                    const colors = await field.evaluate((node) => ({
+                      color: getComputedStyle(node).color,
+                      background: getComputedStyle(node).backgroundColor,
+                    }));
+                    assert(contrast >= 4.5, `${name} contrast ${contrast.toFixed(2)}:1 at ${entry}/${scenario}`);
+                    return { name, contrast, ...colors };
+                  }),
+                )
+              : undefined;
+          widths.push({ stage, width: box.width, primaryContrast, primaryHoverContrast, editorContrasts });
           await page.screenshot({ path: path.join(evidence, `${entry}-${scenario}-${stage}.png`), fullPage: true });
         };
         let creates = 0;
         let issuePosts = 0;
+        let publishAttempts = 0;
         let published = false;
         await page.route('**/*', (route) =>
           route.request().url().startsWith(origin) ? route.fallback() : route.abort(),
@@ -129,7 +165,14 @@ for (const entry of ['local', 'agent', 'connector']) {
           if (pathname.endsWith('/publish')) {
             const submitted = request.postDataJSON();
             draft = { ...draft, title: submitted.title, bodyMarkdown: submitted.bodyMarkdown };
+            publishAttempts++;
+            if (scenario === 'rejected') return json({ error: 'Content contains forbidden patterns' }, 422);
+            if (scenario === 'denied') return json({ error: 'Repository not allowed' }, 403);
             if (!issuePosts) issuePosts++;
+            if (publishAttempts === 1 && scenario.startsWith('network')) return route.abort('failed');
+            if (publishAttempts === 1 && scenario.startsWith('gateway'))
+              return route.fulfill({ status: 502, contentType: 'text/html', body: '<h1>Bad Gateway</h1>' });
+            if (publishAttempts === 1 && scenario.startsWith('invalid')) return json({ accepted: true });
             if (scenario.startsWith('uncertain') && !published) {
               published = true;
               draft = { ...draft, status: 'publishing' };
@@ -253,31 +296,44 @@ for (const entry of ['local', 'agent', 'connector']) {
             assert.equal(issuePosts, 0);
           }
           await page.getByRole('button', { name: '发布到 GitHub', exact: true }).click();
-          if (scenario.startsWith('uncertain')) {
+          if (scenario === 'rejected' || scenario === 'denied') {
             await page
-              .getByText('暂未确认 GitHub 是否已创建，请用同一份草稿核对结果；不会重复提单。', { exact: true })
+              .getByRole('alert')
+              .filter({ hasText: scenario === 'rejected' ? '报告内容未通过发布检查' : '不允许发布' })
               .waitFor();
-            assert.equal(await page.getByLabel('公开报告', { exact: true }).isDisabled(), true);
-            await capture('uncertain');
-            await page.getByRole('button', { name: '重新核对结果', exact: true }).click();
+            assert.equal(await page.getByLabel('公开报告', { exact: true }).isEnabled(), true);
+            assert.equal(await page.getByRole('button', { name: '取消草稿', exact: true }).isEnabled(), true);
+            assert.equal(issuePosts, 0);
+            await capture('rejected');
+          } else {
+            if (['uncertain', 'network', 'gateway', 'invalid'].some((name) => scenario.startsWith(name))) {
+              await page
+                .getByText('暂未确认 GitHub 是否已创建，请用同一份草稿核对结果；不会重复提单。', { exact: true })
+                .waitFor();
+              assert.equal(await page.getByLabel('公开报告', { exact: true }).isDisabled(), true);
+              assert.equal(await page.getByRole('button', { name: '取消草稿', exact: true }).isDisabled(), true);
+              assert.equal(await page.getByText('编辑草稿 · 尚未外发', { exact: true }).count(), 0);
+              await capture('uncertain');
+              await page.getByRole('button', { name: '重新核对结果', exact: true }).click();
+            }
+            await page.getByRole('link', { name: /#7/ }).waitFor();
+            assert.equal(issuePosts, 1);
+            await capture('published-simulated');
+            assert(
+              widths.every(({ width }) => Math.abs(width - widths[0].width) < 1),
+              JSON.stringify(widths),
+            );
+            await page.getByText('查看报告', { exact: true }).click();
+            await page.getByRole('region', { name: '公开报告', exact: true }).waitFor();
+            assert.match(await page.getByRole('region', { name: '公开报告', exact: true }).innerText(), /由人明确发布/);
+            await capture('published-report');
+            await open();
+            assert.doesNotMatch(await page.locator('main').innerText(), /尚未提交/);
+            if (entry !== 'connector') await page.getByRole('button', { name: '核对并继续', exact: true }).click();
+            await page.getByRole('link', { name: /#7/ }).waitFor();
+            assert.equal(creates, entry === 'connector' ? 0 : 1);
+            assert.equal(issuePosts, 1);
           }
-          await page.getByRole('link', { name: /#7/ }).waitFor();
-          assert.equal(issuePosts, 1);
-          await capture('published-simulated');
-          assert(
-            widths.every(({ width }) => Math.abs(width - widths[0].width) < 1),
-            JSON.stringify(widths),
-          );
-          await page.getByText('查看报告', { exact: true }).click();
-          await page.getByRole('region', { name: '公开报告', exact: true }).waitFor();
-          assert.match(await page.getByRole('region', { name: '公开报告', exact: true }).innerText(), /由人明确发布/);
-          await capture('published-report');
-          await open();
-          assert.doesNotMatch(await page.locator('main').innerText(), /尚未提交/);
-          if (entry !== 'connector') await page.getByRole('button', { name: '核对并继续', exact: true }).click();
-          await page.getByRole('link', { name: /#7/ }).waitFor();
-          assert.equal(creates, entry === 'connector' ? 0 : 1);
-          assert.equal(issuePosts, 1);
         }
         assert.deepEqual(errors, []);
         assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true);
