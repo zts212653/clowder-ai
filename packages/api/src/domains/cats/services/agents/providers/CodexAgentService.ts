@@ -2349,9 +2349,7 @@ export class CodexAgentService implements AgentService {
         yield {
           type: 'error' as const,
           catId: this.catId,
-          error: knownCommand
-            ? formatCliNotFoundError(this.cliCommand)
-            : formatCustomCliNotFoundError(publicLabel),
+          error: knownCommand ? formatCliNotFoundError(this.cliCommand) : formatCustomCliNotFoundError(publicLabel),
           metadata: {
             ...metadata,
             cliDiagnostics: buildCliNotFoundDiagnostic(
