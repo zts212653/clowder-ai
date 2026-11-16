@@ -7,7 +7,13 @@ function record(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object';
 }
 function isUnknownModel(value: string): boolean {
-  return value.trim().toLowerCase() === 'unknown' || /^\[\s*"unknown"\s*,\s*"unknown"\s*\]$/.test(value);
+  if (value.trim().toLowerCase() === 'unknown') return true;
+  try {
+    const parsed: unknown = JSON.parse(value);
+    return Array.isArray(parsed) && parsed.length === 2 && parsed[0] === 'unknown' && parsed[1] === 'unknown';
+  } catch {
+    return false;
+  }
 }
 
 /** Absence/opaque unknown sentinels are not evidence of a selected model. */

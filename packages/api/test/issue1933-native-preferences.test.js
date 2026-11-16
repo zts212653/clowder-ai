@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { catRegistry } from '@cat-cafe/shared';
+import { withInvocationPluginMcpView } from '../dist/config/capabilities/invocation-plugin-mcp-view.js';
 import { AcpAgentService } from '../dist/domains/cats/services/agents/providers/acp/AcpAgentService.js';
 import {
   captureNativeDefaults,
@@ -205,4 +206,116 @@ test('an invalid explicit model remains rejected with an actionable correction',
     ),
     /重选模型.*清空模型/,
   );
+});
+
+test('plugin initialization recovery keeps unconfirmed defaults inherited and sends one business prompt', async () => {
+  const catId = 'issue1933-plugin-recovery';
+  catRegistry.register(catId, { id: catId, clientId: 'acp', configurationSource: 'native_tool', defaultModel: '' });
+  let current = true;
+  const capabilityId = 'plugin:issue1933:optional';
+  const server = {
+    name: capabilityId.replaceAll(':', '__'),
+    command: process.execPath,
+    args: ['--fixture-plugin'],
+    env: [{ name: 'CLOWDER_PLUGIN_ACTION_TOKEN', value: 'fixture-token' }],
+    hostSource: 'plugin',
+  };
+  const initializations = [],
+    prompts = [];
+  const client = {
+    async newSession(_cwd, servers) {
+      initializations.push(servers.map(({ name }) => name));
+      if (initializations.length === 1) {
+        current = false;
+        throw new Error('ACP error -32603: Internal error');
+      }
+      return {
+        sessionId: 'history',
+        configOptions: [{ id: 'model', currentValue: 'observed', options: [{ value: 'real' }] }],
+      };
+    },
+    setSessionConfigOption: () => assert.fail('recovery must not select an unconfirmed model'),
+    async *promptStream(_id, prompt) {
+      prompts.push(prompt);
+      yield { update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'ok' } } };
+    },
+    onCapacity() {},
+    offCapacity() {},
+    clearRecentCapacitySignal() {},
+  };
+  const service = new AcpAgentService({
+    catId,
+    projectRoot: '/fixture',
+    mcpServers: [server],
+    poolKey: { projectPath: '/fixture', providerProfile: catId },
+    pool: { acquire: async () => ({ client, release() {} }) },
+  });
+  const frozen = await withInvocationPluginMcpView(() => service.captureInvocationOptions({}), {
+    entries: [
+      {
+        capabilityId,
+        pluginId: 'issue1933',
+        isCurrent: () => current,
+        server: {
+          command: server.command,
+          args: server.args,
+          env: { CLOWDER_PLUGIN_ACTION_TOKEN: 'fixture-token' },
+        },
+      },
+    ],
+  });
+  const messages = [];
+  for await (const message of service.invoke('business prompt', frozen)) messages.push(message);
+  assert.deepEqual(initializations, [[server.name], []]);
+  assert.equal(prompts.length, 1);
+  assert.match(prompts[0], /business prompt/);
+  assert.equal(
+    messages.find((message) => message.type === 'error'),
+    undefined,
+  );
+  assert.equal(messages.find((message) => message.type === 'text')?.content, 'ok');
+});
+
+[' ["unknown","unknown"] \n', '["\\u0075nknown","unknown"]', '["unknown","\\u0075nknown"]'].forEach((value) => {
+  test(`semantic unknown pair is not captured or replayed on resume: ${JSON.stringify(value)}`, async () => {
+    const option = { id: 'model', category: 'model', currentValue: value, options: [{ value }] };
+    const calls = [];
+    const client = {
+      async setSessionConfigOption(_id, _configId, selected) {
+        calls.push(selected);
+        return { configOptions: [{ ...option, currentValue: selected }] };
+      },
+    };
+    const captured = await captureNativeDefaults(client, { sessionId: 'new', configOptions: [option] }, '/fixture');
+    const resumed = await defaultsForNativeResume(client, '/fixture', {}, () => assert.fail('already cached'));
+    await applySessionConfiguration(
+      client,
+      { sessionId: 'history', configOptions: [{ ...option, currentValue: 'real' }] },
+      resumed,
+    );
+    assert.deepEqual(captured, {});
+    assert.deepEqual(resumed, {});
+    assert.deepEqual(calls, []);
+  });
+});
+
+['', ' ["provider","\\u006dodel"] '].forEach((value) => {
+  test(`advertised non-unknown wire values remain byte-for-byte replayable: ${JSON.stringify(value)}`, async () => {
+    const option = { id: 'model', category: 'model', currentValue: value, options: [{ value }] };
+    const calls = [];
+    const client = {
+      async setSessionConfigOption(_id, _configId, selected) {
+        calls.push(selected);
+        return { configOptions: [{ ...option, currentValue: selected }] };
+      },
+    };
+    const captured = await captureNativeDefaults(client, { sessionId: 'new', configOptions: [option] }, '/fixture');
+    await applySessionConfiguration(
+      client,
+      { sessionId: 'history', configOptions: [{ ...option, currentValue: 'real' }] },
+      captured,
+    );
+    assert.deepEqual(captured, { model: value });
+    assert.deepEqual(calls, [value]);
+  });
 });
