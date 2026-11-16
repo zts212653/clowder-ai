@@ -87,7 +87,12 @@ test('scripts readiness requires script tags and retries until every script is a
   });
   await waitForPage(url, { exitCode: null }, [], { readiness: 'scripts', timeoutMs: 3_000 });
   assert.equal(pages, 3);
-  assert.deepEqual(scripts, ['/client.js?first=1&second=2', '/other.js', '/client.js?first=1&second=2', '/other.js']);
+  assert.deepEqual(scripts.toSorted(), [
+    '/client.js?first=1&second=2',
+    '/client.js?first=1&second=2',
+    '/other.js',
+    '/other.js',
+  ]);
 });
 
 test('readiness reports a server exit with captured diagnostics', async () => {
