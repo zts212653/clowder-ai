@@ -10,6 +10,7 @@ import { ThreadStore } from '../../dist/domains/cats/services/stores/ports/Threa
 import { createDeliverFn } from '../../dist/infrastructure/scheduler/delivery.js';
 import { reportAlphaFailures } from '../../dist/infrastructure/scheduler/templates/alpha-browser-reporting.js';
 import { notifyAlphaRepair } from '../../dist/infrastructure/scheduler/templates/alpha-repair-notification.js';
+import { reminderTemplate } from '../../dist/infrastructure/scheduler/templates/reminder.js';
 import { callbacksRoutes } from '../../dist/routes/callbacks.js';
 import { fixture as alphaFixture } from './alpha-browser-template-fixture.js';
 
@@ -105,6 +106,19 @@ export async function schedulerReadFixture(t) {
         ownerCatId: CAT,
       });
       await notifyAlphaRepair(options, { deliver }, task, CAT);
+    } else if (producer === 'reminder') {
+      const spec = reminderTemplate.createSpec(`dyn-synthetic-${messages.getByThread(thread.id).length}`, {
+        trigger: { type: 'once', fireAt: Date.now() },
+        params: { message: 'Ordinary owner reminder', triggerUserId: OWNER, targetCatId: CAT },
+        deliveryThreadId: thread.id,
+      });
+      const admission = await spec.admission.gate({ taskId: spec.id, lastRunAt: null, tickCount: 1 });
+      assert.equal(admission.run, true);
+      await spec.run.execute(admission.workItems[0].signal, admission.workItems[0].subjectKey, {
+        occurrenceId: `synthetic-${Date.now()}`,
+        assignedCatId: CAT,
+        deliver,
+      });
     } else {
       const f = alphaFixture(),
         drafts = await f.runtime.alphaBrowserFailureTasks();
@@ -166,8 +180,10 @@ export async function schedulerReadFixture(t) {
     answer,
     publish,
     dispatch,
+    deliver,
     auth,
     read,
+    readHeaders,
     search,
     setDuringSearch: (f) => {
       duringSearch = f;

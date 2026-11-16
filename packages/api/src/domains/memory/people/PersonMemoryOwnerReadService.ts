@@ -349,6 +349,7 @@ export class PersonMemoryOwnerReadService {
             sourceRefs: current.sourceRefs,
             typedProvenance: current.typedProvenance,
             materializedBy: current.materializedBy,
+            recordedAt: current.recordedAt,
           }
         : relationship,
     };

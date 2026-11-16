@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { CAT, OWNER, schedulerReadFixture } from './helpers/scheduler-read-fixture.js';
 
-for (const producer of ['repair', 'legacy-failure']) {
+for (const producer of ['repair', 'legacy-failure', 'reminder']) {
   test(`current authenticated ${producer} can search ordinary message evidence`, async (t) => {
     const f = await schedulerReadFixture(t),
       notice = await f.publish(producer);

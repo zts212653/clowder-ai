@@ -22,6 +22,18 @@ const threadAttachment = {
 } as const;
 
 describe('ContextAttachmentSchema', () => {
+  it('accepts fifteen distinct comments when the serialized context fits the existing prompt budget', () => {
+    const attachments = Array.from({ length: 15 }, (_, index) => ({
+      v: 1 as const,
+      id: `comment-${index}`,
+      kind: 'quote' as const,
+      text: `source ${index}`,
+      comment: `my comment ${index}`,
+      source: { kind: 'message' as const, threadId: 'source-thread', messageId: `message-${index}` },
+    }));
+    expect(ContextAttachmentsSchema.parse(attachments)).toEqual(attachments);
+  });
+
   it('retains a Channel quote in the same sourced quote contract without inventing a private Thread', () => {
     const quote = {
       v: 1,

@@ -33,7 +33,6 @@ async function run(
   const state = db.prepare("SELECT * FROM summary_state WHERE thread_id = 'fixture'").get() as Parameters<
     typeof processThread
   >[0];
-  const submitted: unknown[] = [];
   const attempts: SummaryAttempt[] = [];
   try {
     const deps: SummaryCompactionDeps = {
@@ -56,9 +55,6 @@ async function run(
       onAttempt: (attempt) => {
         attempts.push(attempt);
       },
-      submitCandidate: async (c) => {
-        submitted.push(c);
-      },
       logger: { info() {}, error() {} },
     };
     const changed = await processThread(state, deps, SUMMARY_CONFIG);
@@ -78,7 +74,6 @@ async function run(
       resumed,
       state: firstState,
       segments: db.prepare('SELECT * FROM summary_segments').all() as Array<Record<string, unknown>>,
-      submitted,
       attempts,
     };
   } finally {
@@ -98,14 +93,6 @@ test('watermark persists only the consumed prefix and marks the unread tail as c
         fromMessageId: 'first',
         toMessageId: 'first',
         messageCount: 1,
-        candidates: [
-          {
-            kind: 'decision',
-            title: 'Real source',
-            claim: 'Supported',
-            evidence: [{ threadId: 'fixture', messageId: 'first', span: '' }],
-          },
-        ],
       },
     ],
   }));
@@ -114,9 +101,6 @@ test('watermark persists only the consumed prefix and marks the unread tail as c
   assert.equal(result.state.carry_over, 1);
   assert.equal(result.state.pending_message_count, 1);
   assert.equal(result.segments[0].to_message_id, 'first');
-  assert.deepEqual((result.submitted[0] as { evidence: unknown }).evidence, [
-    { threadId: 'fixture', messageId: 'first', span: '' },
-  ]);
 });
 
 test('a noncontiguous segment cannot advance the watermark over missing input', async () => {

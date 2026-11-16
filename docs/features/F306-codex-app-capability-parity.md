@@ -76,7 +76,7 @@ PR [#6899](https://github.com/zts212653/clowder-ai/pull/6899)（`0f473c7f36`）�
 
 ### 非 D 自然查询续修（2026-11-11）
 
-**本次加载与续办**：`main=landed:d270a8529e`，`live=dormant:boot84`；当前 boot84 仍为旧版 `605bd477d3`。原 Task3168 已登记 runtime 等待 **g12**，要求包含本次合入提交且 API ready，再由新 invocation 核实际 Codex 配置、stage、私有 hook 与原输入纯策略判定；未执行原 SQL/HTTP/SSH 载荷，不主动重启。上述 boot81 为 #6899 的历史验收，不能代签 #6988 已加载或自然使用已恢复。旧 executionRef 与 blocked 记账保留；D/6263/OpenCode 继续暂停，Feature 与原 Task 不关闭。
+### 非 D AGY profile 消费者续修（2026-11-12）
 
 ### Codex root/subexecution isolation（2026-09-14）
 

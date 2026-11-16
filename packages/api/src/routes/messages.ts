@@ -1209,7 +1209,8 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
         ...(m.metadata ? { metadata: m.metadata } : {}),
         ...(m.origin ? { origin: m.origin } : {}),
         ...(m.thinking ? { thinking: m.thinking } : {}),
-        ...(m.extra?.cloudBridgeReturn ||
+        ...(m.extra?.watcher ||
+        m.extra?.cloudBridgeReturn ||
         m.extra?.outputLayout ||
         m.extra?.runtimeInteractionCard ||
         m.extra?.pluginAddressedReceipt ||
@@ -1240,6 +1241,7 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
         m.extra?.recovery
           ? {
               extra: {
+                ...(m.extra?.watcher ? { watcher: m.extra.watcher } : {}),
                 ...(m.extra?.cloudBridgeReturn ? { cloudBridgeReturn: m.extra.cloudBridgeReturn } : {}),
                 ...(m.extra?.outputLayout ? { outputLayout: m.extra.outputLayout } : {}),
                 ...(m.extra?.runtimeInteractionCard ? { runtimeInteractionCard: m.extra.runtimeInteractionCard } : {}),
@@ -1265,7 +1267,9 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
                 ...(m.extra?.coordination ? { coordination: m.extra.coordination } : {}),
                 ...(m.extra?.isExplicitPost ? { isExplicitPost: true } : {}),
                 ...(m.extra?.stream ? { stream: m.extra.stream } : {}),
-                ...(m.extra?.targetCats ? { targetCats: m.extra.targetCats } : {}),
+                ...(m.extra?.targetCats || m.extra?.watcher
+                  ? { targetCats: m.extra?.targetCats ?? [...m.mentions] }
+                  : {}),
                 ...(m.extra?.messageBundle ? { messageBundle: m.extra.messageBundle } : {}),
                 ...(m.extra?.evolutionUseSourceV1 ? { evolutionUseSourceV1: m.extra.evolutionUseSourceV1 } : {}),
                 ...(m.extra?.scheduler ? { scheduler: m.extra.scheduler } : {}),

@@ -169,6 +169,7 @@ describe('QueuePanel withdraw UX (F39)', () => {
       text: 'queued to withdraw',
       authoritative: true,
       serverRevision: 1,
+      preservedBlocks: [],
       selectionRange: { start: 0, end: 18 },
     });
 
@@ -228,6 +229,7 @@ describe('QueuePanel withdraw UX (F39)', () => {
       text: 'queued to withdraw',
       authoritative: true,
       serverRevision: 1,
+      preservedBlocks: [],
       selectionRange: { start: 0, end: 18 },
       imageUrls: ['/uploads/img.png'],
     });
@@ -278,6 +280,7 @@ describe('QueuePanel withdraw UX (F39)', () => {
       text: 'queued to withdraw',
       authoritative: true,
       serverRevision: 1,
+      preservedBlocks: [],
       selectionRange: { start: 0, end: 18 },
       replyToId: 'msg-original-123',
     });
@@ -322,6 +325,7 @@ describe('QueuePanel withdraw UX (F39)', () => {
       text: 'queued to withdraw',
       authoritative: true,
       serverRevision: 1,
+      preservedBlocks: [],
       selectionRange: { start: 0, end: 18 },
       contextAttachments: [attachment],
     });

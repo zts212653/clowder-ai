@@ -13,6 +13,7 @@
 | Kind | 场景 |
 |------|------|
 | card | Review 结论、状态报告、决策摘要 |
+| sources | 随回答引用选好的原话，让主人点回出处；Host 核原句与版本，理由归猫判断 |
 | diff | 代码修改建议、重构前后对比 |
 | checklist | 待办项、检查清单、验证步骤 |
 | file | 已有文件、成片视频、导出物；`video/*` 文件会内联播放 |
@@ -40,6 +41,7 @@ widget 后来开始持续迭代时，在现有权限内取回原 HTML、以原�
 | Kind | 必填 | 可选 |
 |------|------|------|
 | card | title | bodyMarkdown, tone (info/success/warning/danger), fields |
+| sources | query, selections（新卡；随 normal R） | 旧操作重试保留原检索参数 |
 | diff | filePath, diff | languageHint |
 | checklist | items (id+text) | title |
 | file | url, fileName | mimeType, fileSize |
@@ -47,6 +49,24 @@ widget 后来开始持续迭代时，在现有权限内取回原 HTML、以原�
 | audio | text | — |
 | interactive | interactiveType, options (id+label) | title, description, maxSelect, allowRandom, messageTemplate |
 | html_widget | html | title, height (50-2000, default 300) |
+
+### sources 原话与出处
+
+全文原消息的 `contentRevision` 和 `sourceParts` 可直接复用。选好原句及理由后，传
+`{kind:"sources",v:1,id,query,selections:[{threadId,messageId,contentRevision,quote,reason,part?,range?}]}`。
+保留原句的条件与否定；同一原消息只选一次。1–20 条，quote/reason 各 ≤1000 UTF-16 单位；
+重复文本用 sourceParts 的 part 及该部分内的 range 消歧。不要把他人的引文当成发布者自己的话。
+
+普通成功回复由 Host 绑定卡；prepared 不是 published。显式发消息可用
+`post_message` 的 `content` 写实际回答，同时带 `searchAnswer={query,selections}` 和稳定 `clientMessageId`；
+agent-key 必须走这条路，仍给目的 `threadId`，云端返回仍给原 `replyTo`。agent-key 单发 sources 富块
+会在写入前拒绝并指向 post_message，不自动发 query 或提前占用单次回信授权。
+原版本变化需重读；不能复制 card/meta 或文本降级成已验证出处。
+
+重试保留同一 id（显式 post 可给 searchAnswer.operationId）及原参数。旧 query-only 操作可用原
+query/retrievalMode/messageSort/threadId/limit/dateFrom/dateTo 续读，省略 selections 不创建新卡。
+已有 publicationRef 的附卡/转发仍走 post_message，原 source={messageId,blockId} 绑定要求不变。
+普通搜索保持只读，不因找到来源自动发布。
 
 ### media_gallery 图片 URL 规范
 

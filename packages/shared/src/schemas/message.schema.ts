@@ -122,7 +122,7 @@ export const MessageContentSchema = z.discriminatedUnion('type', [
 /**
  * Collection-level message contract. Individual variants remain independently
  * parseable, while every durable/request content array shares aggregate
- * ContextAttachment count and prompt-budget invariants.
+ * ContextAttachment prompt-budget invariant. Draft readers validate individual blocks instead.
  */
 export const MessageContentsSchema = z.array(MessageContentSchema).superRefine((contents, ctx) => {
   const attachments = contents

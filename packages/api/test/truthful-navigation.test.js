@@ -183,6 +183,63 @@ test('ordinary new input preserves independently owned Task, wait and lifecycle 
   assert.equal(taskStore.get(task.id).status, task.status);
 });
 
+test('F337: navigation shows how teammates in this thread last stopped, for the thread owner', async () => {
+  const { deps, append } = setup();
+  const seen = [];
+  deps.threadExecutionSituationSource = {
+    resolve: async (threadId, userId) => {
+      seen.push([threadId, userId]);
+      return {
+        kind: 'thread_execution_situation.v1',
+        complete: true,
+        activeRuns: [],
+        recentStops: [
+          { catId: 'kimi31-pro', status: 'failed', terminalReason: 'host_sleep', endedAt: NOW - 60_000 },
+          { catId: 'opus', status: 'canceled', terminalReason: 'user_cancel', endedAt: NOW - 30_000 },
+        ],
+      };
+    },
+  };
+  const current = append({ kind: 'user', userId: 'owner' }, '别找墨墨了');
+  const result = await assembleIncrementalContext(
+    deps,
+    'owner',
+    THREAD,
+    'opus',
+    current.id,
+    'play',
+    options('cold', 'serial'),
+  );
+  assert.deepEqual(seen, [[THREAD, 'owner']]);
+  assert.match(result.navigationHeader, /最近停下的成员/);
+  assert.match(result.navigationHeader, /\(kimi31-pro\) · .* · 电脑睡眠打断，开盖后会自动接着做/);
+  assert.doesNotMatch(result.navigationHeader, /\(opus\) · /, 'the reader’s own ending is not a teammate stop');
+});
+
+test('F337: a stop read cut by its page says so instead of presenting the window as complete', async () => {
+  const { deps, append } = setup();
+  deps.threadExecutionSituationSource = {
+    resolve: async () => ({
+      kind: 'thread_execution_situation.v1',
+      complete: true,
+      activeRuns: [],
+      recentStops: [],
+      recentStopsComplete: false,
+    }),
+  };
+  const current = append({ kind: 'user', userId: 'owner' }, '谁停了？');
+  const result = await assembleIncrementalContext(
+    deps,
+    'owner',
+    THREAD,
+    'opus',
+    current.id,
+    'play',
+    options('cold', 'serial'),
+  );
+  assert.match(result.navigationHeader, /最近停下的成员:\n  （本线程最近结束的轮次很多，只核对了最新的一页/);
+});
+
 test('a pending wake is input provenance only after its full body survives the actual projection', async () => {
   const { deps, append } = setup();
   const pending = append({ kind: 'agent', catId: 'codex' }, 'x'.repeat(120000));

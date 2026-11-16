@@ -14,7 +14,8 @@ const fixture = JSON.parse(readFileSync(fixtureUrl, 'utf8'));
 const drafts = fixture.draftFiles.map((file) => JSON.parse(readFileSync(new URL(file, fixtureUrl), 'utf8')));
 const actor = { userId: 'default-user', viewer: { type: 'cat', catId: 'codex61-sol' } };
 const primaryId = fixture.rebuildExercise.removedMessageId;
-const directoryItems = (rendered) => JSON.parse(rendered.split('\n').find((line) => line.startsWith('{'))).items;
+const directoryItems = (rendered) =>
+  JSON.parse(rendered.split('\n').find((line) => line.startsWith('{'))).groups.flatMap((group) => group.items);
 
 // Fixed, author-visible source mirrors in a fresh temporary SQLite file. No runtime/Redis readers or writes.
 // Structural checks cannot judge whether a paraphrase preserves meaning; Argon reviews each conclusion.

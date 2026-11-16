@@ -1,5 +1,5 @@
 import 'fake-indexeddb/auto';
-import type { ContextAttachment } from '@cat-cafe/shared';
+import type { ContextAttachment, MessageContent } from '@cat-cafe/shared';
 import { act, useRef, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
@@ -24,6 +24,7 @@ import {
 import { apiFetch } from '@/utils/api-client';
 import { observeApiSessionOwner } from '@/utils/api-session-identity';
 import { deleteSendAttempt, loadSendAttempts, saveSendAttempt } from '@/utils/send-attempt-db';
+import { composerInsertFromRecall } from '@/utils/true-recall';
 
 vi.mock('@/utils/api-client', () => ({ apiFetch: vi.fn() }));
 const THREAD = 'draft-page-exit';
@@ -35,21 +36,23 @@ const quote = workspaceFileQuoteAttachment({
 });
 let root: Root;
 let container: HTMLDivElement;
-let owner: { text: string; contentBlocks?: { type: 'context_attachment'; attachment: ContextAttachment }[] } | null;
+let owner: { text: string; contentBlocks?: MessageContent[] } | null;
 let writes: RequestInit[];
 let revision: number;
 let settleAdmission: (accepted: boolean | undefined) => void;
 let clearInput: () => void;
 let typeNewInput: (text: string) => void;
+let removeRecoveredFile: (index: number) => void;
+let discardUnrestoredFiles: () => Promise<void>;
 const setIsPreparingImages = () => {};
 
-function Harness() {
+function Harness({ threadId = THREAD }: { threadId?: string } = {}) {
   const [input, setInput] = useState('');
   const [images, setImages] = useState<File[]>([]);
   const [attachments, setAttachments] = useState<ContextAttachment[]>([]);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const durable = useDurableComposerDraft({
-    threadId: THREAD,
+    threadId,
     input,
     setInput,
     images,
@@ -61,6 +64,8 @@ function Harness() {
     setIsPreparingImages,
   });
   typeNewInput = setInput;
+  removeRecoveredFile = durable.removeImage;
+  discardUnrestoredFiles = durable.discardUnrestoredImages;
   clearInput = () => {
     settleAdmission = durable.beginAdmission({ text: input, images, contextAttachments: attachments, replyTo: null });
     durable.markOptimisticallyCleared();
@@ -72,6 +77,8 @@ function Harness() {
     <>
       <textarea ref={textareaRef} value={input} readOnly />
       <span data-testid="quotes">{attachments.length}</span>
+      <span data-testid="images">{images.length}</span>
+      <span data-testid="unrestored">{durable.unrestoredImageCount}</span>
     </>
   );
 }
@@ -121,6 +128,153 @@ async function render() {
   await settle();
   expect(container.querySelector('[data-testid="quotes"]')?.textContent).toBe('1');
 }
+
+it('HTTP recall inserts a visible ordinary file and removing it removes its durable reference', async () => {
+  vi.useRealTimers();
+  observeApiSessionOwner('http-file-owner');
+  await render();
+  const fileBlock = {
+    type: 'file' as const,
+    url: '/uploads/http-note.txt',
+    fileName: 'http-note.txt',
+    mimeType: 'text/plain',
+    fileSize: 4,
+  };
+  const originalFetch = vi.mocked(apiFetch).getMockImplementation()!;
+  vi.mocked(apiFetch).mockImplementation((url, init) =>
+    String(url) === fileBlock.url
+      ? Promise.resolve(new Response('note', { headers: { 'Content-Type': 'text/plain' } }))
+      : originalFetch(url, init),
+  );
+  revision = 70;
+  const insert = composerInsertFromRecall({
+    verdict: 'already_recalled',
+    message: { id: 'http-recalled', threadId: THREAD, recall: { version: 1, exposure: 'none', recalledAt: 1 } },
+    draft: {
+      version: 1,
+      ownerUserId: 'http-file-owner',
+      threadId: THREAD,
+      revision,
+      text: 'http recalled file',
+      contentBlocks: [fileBlock],
+      updatedAt: 1,
+    },
+    insertedRange: null,
+    queue: [],
+  });
+  await act(async () => useChatStore.getState().setPendingChatInsert(insert));
+  await settle();
+  expect(container.querySelector('[data-testid="images"]')?.textContent).toBe('1');
+  await act(async () => removeRecoveredFile(0));
+  window.dispatchEvent(new Event('pagehide'));
+  await settle();
+  const last = writes.at(-1);
+  expect(last?.method).toBe('PUT');
+  expect(JSON.parse(String(last?.body)).contentBlocks ?? []).not.toContainEqual(fileBlock);
+});
+
+it('does not roll an old owner file reference back after a failed explicit discard completes late', async () => {
+  vi.useRealTimers();
+  observeApiSessionOwner('discard-file-owner');
+  const originalFetch = vi.mocked(apiFetch).getMockImplementation()!;
+  owner = {
+    text: 'old file draft',
+    contentBlocks: [
+      { type: 'context_attachment', attachment: quote },
+      {
+        type: 'file',
+        url: '/uploads/unavailable.txt',
+        fileName: 'unavailable.txt',
+        mimeType: 'text/plain',
+        fileSize: 4,
+      },
+    ],
+  };
+  let finishDiscard!: (response: Response) => void;
+  vi.mocked(apiFetch).mockImplementation((url, init) => {
+    if (String(url) === '/uploads/unavailable.txt') return Promise.resolve(new Response('{}', { status: 503 }));
+    if (init?.method === 'PUT')
+      return new Promise<Response>((resolve) => {
+        finishDiscard = resolve;
+      });
+    return originalFetch(url, init);
+  });
+  await render();
+  expect(container.querySelector('[data-testid="unrestored"]')?.textContent).toBe('1');
+  let discarded!: Promise<void>;
+  await act(async () => {
+    discarded = discardUnrestoredFiles();
+  });
+  await settle();
+  expect(finishDiscard).toBeTypeOf('function');
+  await act(async () => {
+    observeApiSessionOwner('discard-new-owner');
+    typeNewInput('new account typing');
+  });
+  vi.mocked(apiFetch).mockImplementation(originalFetch);
+  await act(async () => {
+    finishDiscard(new Response('{}', { status: 503 }));
+    await discarded;
+  });
+  expect(container.querySelector('textarea')?.value).toBe('new account typing');
+  expect(container.querySelector('[data-testid="unrestored"]')?.textContent).toBe('0');
+});
+
+it.each([
+  ['account', 'image'],
+  ['thread', 'image'],
+  ['account', 'file'],
+  ['thread', 'file'],
+])('abandons late recalled %s owner changes for %s bytes', async (change, kind) => {
+  vi.useRealTimers();
+  observeApiSessionOwner('late-image-owner');
+  await render();
+  const originalFetch = vi.mocked(apiFetch).getMockImplementation()!;
+  let finishImage!: (response: Response) => void;
+  vi.mocked(apiFetch).mockImplementation((url, init) =>
+    String(url) === '/uploads/late-recall.png'
+      ? new Promise<Response>((resolve) => {
+          finishImage = resolve;
+        })
+      : originalFetch(url, init),
+  );
+  let recovery!: Promise<boolean>;
+  await act(async () => {
+    recovery = recoverMountedComposerDraft({
+      version: 1,
+      ownerUserId: 'late-image-owner',
+      threadId: THREAD,
+      revision: 70,
+      text: 'old recalled body',
+      contentBlocks: [
+        kind === 'file'
+          ? {
+              type: 'file',
+              url: '/uploads/late-recall.png',
+              fileName: 'late.txt',
+              mimeType: 'text/plain',
+              fileSize: 16,
+            }
+          : { type: 'image', url: '/uploads/late-recall.png' },
+      ],
+      updatedAt: 1,
+    });
+    for (let i = 0; i < 12; i++) await Promise.resolve();
+  });
+  expect(finishImage).toBeTypeOf('function');
+  await act(async () => {
+    if (change === 'account') observeApiSessionOwner('new-image-owner');
+    else root.render(<Harness threadId="new-image-thread" />);
+  });
+  await settle();
+  await act(async () => typeNewInput('new owner input'));
+  await act(async () => {
+    finishImage(new Response(new Blob(['late image bytes'], { type: 'image/png' })));
+    expect(await recovery).toBe(false);
+  });
+  expect(container.querySelector('textarea')?.value).toBe('new owner input');
+  expect(container.querySelector('[data-testid="images"]')?.textContent).toBe('0');
+});
 
 it('recovers an event-only recall through the mounted draft owner without erasing newly typed text', async () => {
   vi.useRealTimers();
@@ -308,7 +462,7 @@ it('pagehide flushes typing on the debounce as one keepalive PUT with the new te
   expect(writes.map((write) => write.method)).toEqual(['PUT']);
   expect(writes[0]?.keepalive).toBe(true);
   expect(JSON.parse(String(writes[0]?.body)).text).toBe('刚打的字\nnot yet saved');
-  expect(owner?.contentBlocks?.[0]?.attachment).toEqual(quote);
+  expect(owner?.contentBlocks?.find((block) => block.type === 'context_attachment')?.attachment).toEqual(quote);
 });
 
 it('writes the successful admission clear before the autosave timer or a page-exit event', async () => {
@@ -328,7 +482,7 @@ it('keeps a rejected admission draft without committing the optimistic clear', a
   await settle();
   expect(container.querySelector('textarea')?.value).toBe('原聊天草稿');
   expect(container.querySelector('[data-testid="quotes"]')?.textContent).toBe('1');
-  expect(owner?.contentBlocks?.[0]?.attachment).toEqual(quote);
+  expect(owner?.contentBlocks?.find((block) => block.type === 'context_attachment')?.attachment).toEqual(quote);
   expect(writes).toEqual([]);
 });
 

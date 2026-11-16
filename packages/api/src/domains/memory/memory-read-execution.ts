@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { SqliteReadDiagnostic } from '../../infrastructure/sqlite-read-diagnostics.js';
+import type { FileVectorReadWindowSnapshot } from './file-vector-read-window.js';
 import type { ChildMessage } from './memory-process-protocol.js';
 import { type MessageCandidateAuditSnapshot, safeCandidateAudit } from './message-candidate-audit-wire.js';
 import type { CjkReadSnapshot } from './message-cjk-read-diagnostics.js';
@@ -8,13 +9,18 @@ export type MemoryReadDiagnostic =
   | { phase: 'database-initialization' }
   | { phase: 'cjk-read'; cjk: CjkReadSnapshot }
   | { phase: 'candidate-audit'; candidateAudit: MessageCandidateAuditSnapshot }
-  | { phase: 'sql-start'; sql: Omit<SqliteReadDiagnostic, 'elapsedMs' | 'rows'> }
+  | {
+      phase: 'sql-start';
+      sql: Omit<SqliteReadDiagnostic, 'elapsedMs' | 'rows'>;
+      readWindow?: FileVectorReadWindowSnapshot;
+    }
   | { phase: 'sql-finish'; sql: SqliteReadDiagnostic };
 
 /** One request's last observed progress, discarded with its Promise; never a work/telemetry ledger. */
 export class MemoryReadExecution {
   private readonly executionId = randomUUID();
   private cjk?: CjkReadSnapshot;
+  private readWindow?: FileVectorReadWindowSnapshot;
   private candidateAudit?: MessageCandidateAuditSnapshot;
   private readonly submitted = performance.now();
   private phase = 'queue';
@@ -42,7 +48,13 @@ export class MemoryReadExecution {
         if (message.id === jobId) this.observe(message.diagnostic);
         return true;
       case 'started':
-        if (message.id === jobId) this.ready();
+        if (message.id === jobId) {
+          if (message.readWindow) this.readWindow = message.readWindow;
+          this.ready();
+        }
+        return false;
+      case 'result':
+        if (message.id === jobId && message.readWindow) this.readWindow = message.readWindow;
         return false;
       case 'embedding':
         this.embeddingStarted(message.id, message.method);
@@ -63,6 +75,7 @@ export class MemoryReadExecution {
   }
 
   observe(event: MemoryReadDiagnostic) {
+    if ('readWindow' in event && event.readWindow) this.readWindow = event.readWindow;
     if (event.phase === 'candidate-audit') {
       this.candidateAudit = safeCandidateAudit(event.candidateAudit);
       return;
@@ -114,6 +127,7 @@ export class MemoryReadExecution {
       lastObservedSql: this.lastObservedSql,
       nativeVectorRead: this.nativeVectorRead ?? null,
       cjk: this.cjk ? { ...this.cjk } : null,
+      ...(this.readWindow ? { readWindow: { ...this.readWindow } } : {}),
       ...(outcome === 'fulfilled' && this.candidateAudit ? { candidateAudit: this.candidateAudit } : {}),
     };
   }

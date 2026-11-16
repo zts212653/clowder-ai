@@ -10,13 +10,27 @@ type OpeningItem = Pick<MatterCatalogItem, 'matterId' | 'title' | 'revision' | '
   contextHint?: string;
 };
 function render(items: OpeningItem[], nextCursor?: string): string {
+  const groups = [
+    { label: '含本线程原话的事情', items: items.filter((item) => item.threadSource) },
+    { label: '其他线程最近更新的事情', items: items.filter((item) => !item.threadSource) },
+  ].map((group) => ({
+    label: group.label,
+    count: group.items.length,
+    items: group.items.map((item) => ({
+      ...item,
+      ...(item.contextHint
+        ? { contextHintLabel: `猫的归纳（r${item.revision}）` }
+        : { readHint: '归纳未附；按ID读取' }),
+    })),
+  }));
   return [
     '[事情目录]',
-    '以下是当前有权读取的事情线索，不是原话、决定或执行授权；目录和语境线索均不表示已读。',
-    '“含本线程来源”只表示原话出处，不证明适用本线程。语境线索是该页版本的整段猫的归纳，保留其适用/不适用范围；装不下则只给读入口，不截断。来源已变的归纳未经复核，不作现行结论。',
-    '本轮相关页仍须调用 cat_cafe_read_memory_matter 读完整归纳与原话，核范围和当前版本；即使上轮读过也要重读。当前用户新指令按其范围优先，历史解释不新增授权。',
-    '找更多页用 cat_cafe_list_memory_matters(query 或 cursor)。新原话/更正用 cat_cafe_write_memory_matter；人物/画像/品味仍走各自提案。',
-    JSON.stringify({ budget, items, ...(nextCursor ? { nextCursor } : {}) }),
+    '这是当前有权读取的事情页目录，未按当前问题筛选；先列含本线程原话的页，再列其他线程最近更新的页。数量仅指本次列出的页。',
+    '目录和归纳均不表示已读，也不是原话、决定或执行授权。“含本线程原话”只说明出处，不证明适用本轮。',
+    'contextHint 是该页版本的整段猫的归纳，保留其适用/不适用范围；装不下则只给读入口，不截断。来源已变的归纳未经复核，不作现行结论。',
+    '不用逐页读完；本轮要用的相关页仍须调用 cat_cafe_read_memory_matter(matterId) 读完整归纳与原话，核范围和当前版本，即使上轮读过也要重读。当前用户新指令按其范围优先，历史解释不新增授权。',
+    '更多事情用 cat_cafe_list_memory_matters(query 或 cursor)；找项目资料、历史讨论（含品味线索）用 cat_cafe_search_evidence。当前画像用 cat_cafe_read_profile，按所需 layer 核当前 revision；当前人物关系用 cat_cafe_recall_person_relationship，按别名读已生效关系卡。新原话/更正用 cat_cafe_remember（target matter）；人物/画像/品味也走对应 target，仍各自审批。',
+    JSON.stringify({ budget, groups, ...(nextCursor ? { nextCursor } : {}) }),
     '[/事情目录]',
   ].join('\n');
 }

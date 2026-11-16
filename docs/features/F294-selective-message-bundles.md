@@ -4,11 +4,12 @@ related_features: [F017, F052, F063, F193, F264, F290, F322]
 topics: [message-selection, quote-selection, context-attachments, message-bundle, export, rich-message, cross-thread, lineage]
 doc_kind: spec
 created: 2026-08-11
-updated: 2026-10-25
+updated: 2026-11-14
 description: "让用户从一条 Thread 精确选择整条消息、普通/CLI 文字片段或单个 Rich Block，以同一份有来源的 Message Bundle 导出、留言转发，并安全衔接 Collective 发布。"
 description_source: human
 description_author: codex-sol
 description_updated_at: 2026-08-12T01:28:05Z
+tips_exempt: "Renewed 2026-11-14: PR #6664 adds passive deployment-revision response headers and request queue-wait telemetry for the existing deployment admission guard without introducing any new user-facing capability or action."
 ---
 
 # F294: Selective Message Bundles — 消息多选、选择性导出与跨 Thread 富文本转发

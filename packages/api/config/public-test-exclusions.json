@@ -337,17 +337,27 @@
       "match": "^test/f306-native-home-provider-hooks\\.test\\.js$",
       "category": "source_only",
       "reason": "Only the extracted real-provider integration requires the unexported home Claude runtime-sanctuary hook and a clean-loader process. Portable output-role and observation tests, including the shared CLI under public isolation, remain selected.",
-      "owner": "@codex-astra",
+      "owner": "@codex61-sol",
       "introducedBy": "Task606 public CI 38355110794",
-      "expiresOn": "2026-11-13",
+      "expiresOn": "2026-12-14",
       "audit": {
-        "reviewedOn": "2026-10-13",
-        "sourceHead": "fcad23f52b25d20777d377c9ceedcc06df35ceab",
-        "publicHead": "18a76aac38b686bb19d3211aed4268f565e9b416",
+        "reviewedOn": "2026-11-14",
+        "sourceHead": "e998aae57590116dde4e81b10e788a502fa97372",
+        "publicHead": "15a11a536547af8ba103263e1bff5597c245ed28",
         "status": "source_dependency_failure",
         "matchedFileCount": 1,
         "matchedFilesHash": "2a15edf12af91760ca24a3c5c95c08b9d099bc69bcceb49ea2d3a497a01bfc90"
-      }
+      },
+      "auditHistory": [
+        {
+          "reviewedOn": "2026-10-13",
+          "sourceHead": "fcad23f52b25d20777d377c9ceedcc06df35ceab",
+          "publicHead": "18a76aac38b686bb19d3211aed4268f565e9b416",
+          "status": "source_dependency_failure",
+          "matchedFileCount": 1,
+          "matchedFilesHash": "2a15edf12af91760ca24a3c5c95c08b9d099bc69bcceb49ea2d3a497a01bfc90"
+        }
+      ]
     },
     {
       "id": "alpha-managed-home-integration",

@@ -64,9 +64,9 @@ export function MailboxReadNotes({
         </p>
       ) : null}
       {stale ? (
-        <p className="m-0 pb-1 text-xs" style={{ color: 'var(--shell-muted)' }} data-testid="mailbox-stale-note">
+        <output className="sr-only" data-testid="mailbox-stale-note">
           {t.stale}
-        </p>
+        </output>
       ) : null}
     </>
   );

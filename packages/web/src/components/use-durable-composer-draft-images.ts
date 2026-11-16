@@ -1,13 +1,21 @@
 'use client';
 
+import type { MessageContent } from '@cat-cafe/shared';
 import { type Dispatch, type MutableRefObject, type SetStateAction, useCallback, useRef, useState } from 'react';
 import { useChatStore } from '@/stores/chatStore';
-import { downloadDraftImages, getRecoveredDraftImageUrl } from './durable-composer-draft-helpers';
+import { apiSessionIdentity } from '@/utils/api-session-identity';
+import {
+  downloadDraftAttachments,
+  draftAttachmentUrls,
+  getRecoveredDraftImageUrl,
+} from './durable-composer-draft-helpers';
 import { hasPendingThreadDraft, threadImageDrafts } from './thread-drafts';
 
 interface DraftImageRestorationOptions {
   threadId?: string;
+  ownerIdRef: MutableRefObject<number>;
   imageUrlsRef: MutableRefObject<string[]>;
+  preservedBlocksRef: MutableRefObject<MessageContent[]>;
   setImages: Dispatch<SetStateAction<File[]>>;
   setIsPreparingImages: Dispatch<SetStateAction<boolean>>;
 }
@@ -61,10 +69,14 @@ function restoreEmptyDraftImages(
 
 export function useDraftImageRestoration({
   threadId,
+  ownerIdRef,
   imageUrlsRef,
+  preservedBlocksRef,
   setImages,
   setIsPreparingImages,
 }: DraftImageRestorationOptions) {
+  const currentThreadRef = useRef(threadId);
+  currentThreadRef.current = threadId;
   const setThreadHasDraft = useChatStore((state) => state.setThreadHasDraft);
   return useCallback(
     async (
@@ -72,16 +84,32 @@ export function useDraftImageRestoration({
       targetThreadId: string,
       authoritative: boolean,
     ): Promise<DraftImageRestorationResult> => {
-      const uniqueUrls = [...new Set(urls)];
-      imageUrlsRef.current = authoritative ? uniqueUrls : [...new Set([...imageUrlsRef.current, ...uniqueUrls])];
+      const uniqueImageUrls = [...new Set(urls)];
+      const blocks = preservedBlocksRef.current;
+      const uniqueUrls = draftAttachmentUrls(uniqueImageUrls, blocks);
+      const ownerId = ownerIdRef.current;
+      const ownerUserId = apiSessionIdentity.getSnapshot().ownerUserId;
+      const stillOwned = () =>
+        ownerIdRef.current === ownerId &&
+        currentThreadRef.current === targetThreadId &&
+        apiSessionIdentity.getSnapshot().ownerUserId === ownerUserId;
+      if (!stillOwned()) return { complete: false, unresolvedUrls: uniqueUrls };
+      imageUrlsRef.current = authoritative
+        ? uniqueImageUrls
+        : [...new Set([...imageUrlsRef.current, ...uniqueImageUrls])];
       if (uniqueUrls.length === 0) {
         restoreEmptyDraftImages(authoritative, targetThreadId, setImages);
-        return draftImageCoverage(imageUrlsRef.current, threadImageDrafts.get(targetThreadId) ?? []);
+        return draftImageCoverage(
+          draftAttachmentUrls(imageUrlsRef.current, preservedBlocksRef.current),
+          threadImageDrafts.get(targetThreadId) ?? [],
+        );
       }
       setIsPreparingImages(true);
       try {
-        const restored = await downloadDraftImages(uniqueUrls);
-        const currentUrls = new Set(imageUrlsRef.current);
+        const restored = await downloadDraftAttachments(uniqueUrls, blocks);
+        if (!stillOwned()) return { complete: false, unresolvedUrls: uniqueUrls };
+        const requiredUrls = draftAttachmentUrls(imageUrlsRef.current, preservedBlocksRef.current);
+        const currentUrls = new Set(requiredUrls);
         const existing = priorDraftImages(authoritative, targetThreadId);
         const merged = mergeDraftImages(
           existing,
@@ -91,12 +119,12 @@ export function useDraftImageRestoration({
         else threadImageDrafts.delete(targetThreadId);
         setThreadHasDraft(targetThreadId, merged.length > 0 || hasPendingThreadDraft(targetThreadId));
         if (targetThreadId === threadId) setImages(merged);
-        return draftImageCoverage(imageUrlsRef.current, merged);
+        return draftImageCoverage(requiredUrls, merged);
       } finally {
-        setIsPreparingImages(false);
+        if (stillOwned()) setIsPreparingImages(false);
       }
     },
-    [imageUrlsRef, setImages, setIsPreparingImages, setThreadHasDraft, threadId],
+    [imageUrlsRef, ownerIdRef, preservedBlocksRef, setImages, setIsPreparingImages, setThreadHasDraft, threadId],
   );
 }
 
@@ -104,13 +132,13 @@ export function removeDraftImage(
   index: number,
   imageUrlsRef: MutableRefObject<string[]>,
   setImages: Dispatch<SetStateAction<File[]>>,
-  onChange?: (files: File[]) => void,
+  onChange?: (files: File[], removedUrl: string | undefined) => void,
 ): void {
   setImages((current) => {
     const removedUrl = getRecoveredDraftImageUrl(current[index]);
     if (removedUrl) imageUrlsRef.current = imageUrlsRef.current.filter((url) => url !== removedUrl);
     const next = current.filter((_, itemIndex) => itemIndex !== index);
-    onChange?.(next);
+    onChange?.(next, removedUrl);
     return next;
   });
 }
@@ -122,6 +150,7 @@ interface SaveCurrentDraftRef {
 interface DurableComposerDraftImageStateOptions {
   threadId?: string;
   ownerIdRef: MutableRefObject<number>;
+  preservedBlocksRef: MutableRefObject<MessageContent[]>;
   setImages: Dispatch<SetStateAction<File[]>>;
   setIsPreparingImages: Dispatch<SetStateAction<boolean>>;
   saveCurrentDraftRef: SaveCurrentDraftRef;
@@ -130,6 +159,7 @@ interface DurableComposerDraftImageStateOptions {
 export function useDurableComposerDraftImageState({
   threadId,
   ownerIdRef,
+  preservedBlocksRef,
   setImages,
   setIsPreparingImages,
   saveCurrentDraftRef,
@@ -137,27 +167,42 @@ export function useDurableComposerDraftImageState({
   const imageUrlsRef = useRef<string[]>([]);
   const unresolvedImageUrlsRef = useRef<string[]>([]);
   const [unrestoredImageCount, setUnrestoredImageCount] = useState(0);
-  const restoreImages = useDraftImageRestoration({ threadId, imageUrlsRef, setImages, setIsPreparingImages });
+  const restoreImages = useDraftImageRestoration({
+    threadId,
+    ownerIdRef,
+    imageUrlsRef,
+    preservedBlocksRef,
+    setImages,
+    setIsPreparingImages,
+  });
 
   const applyRestoration = useCallback((result: DraftImageRestorationResult) => {
     unresolvedImageUrlsRef.current = result.unresolvedUrls;
     setUnrestoredImageCount(result.unresolvedUrls.length);
   }, []);
   const applyCoverage = useCallback(
-    (files: readonly File[]) => applyRestoration(draftImageCoverage(imageUrlsRef.current, files)),
-    [applyRestoration],
+    (files: readonly File[]) =>
+      applyRestoration(
+        draftImageCoverage(draftAttachmentUrls(imageUrlsRef.current, preservedBlocksRef.current), files),
+      ),
+    [applyRestoration, preservedBlocksRef],
   );
   const resetImageRecovery = useCallback(() => {
     imageUrlsRef.current = [];
     applyRestoration({ complete: true, unresolvedUrls: [] });
-  }, [applyRestoration]);
+    setIsPreparingImages(false);
+  }, [applyRestoration, setIsPreparingImages]);
   const restoreDraftImages = useCallback(
     async (urls: readonly string[], targetThreadId: string, authoritative: boolean) => {
+      const ownerId = ownerIdRef.current;
+      const ownerUserId = apiSessionIdentity.getSnapshot().ownerUserId;
       const result = await restoreImages(urls, targetThreadId, authoritative);
+      if (ownerId !== ownerIdRef.current || apiSessionIdentity.getSnapshot().ownerUserId !== ownerUserId)
+        return { complete: false, unresolvedUrls: [...urls] };
       applyRestoration(result);
       return result;
     },
-    [applyRestoration, restoreImages],
+    [applyRestoration, ownerIdRef, restoreImages],
   );
   const restoreFallbackImages = useCallback(
     (fallbackFiles: readonly File[], fallbackUrls: readonly string[]) => {
@@ -178,10 +223,17 @@ export function useDurableComposerDraftImageState({
     if (!threadId || unresolvedImageUrlsRef.current.length === 0) return;
     // P1 R9: Capture owner before async save
     const ownerId = ownerIdRef.current;
+    const ownerUserId = apiSessionIdentity.getSnapshot().ownerUserId;
     const capturedThreadId = threadId;
+    const stillOwned = () =>
+      ownerId === ownerIdRef.current &&
+      capturedThreadId === threadId &&
+      apiSessionIdentity.getSnapshot().ownerUserId === ownerUserId;
     const priorUrls = imageUrlsRef.current;
+    const priorBlocks = preservedBlocksRef.current;
     const discarded = new Set(unresolvedImageUrlsRef.current);
     imageUrlsRef.current = priorUrls.filter((url) => !discarded.has(url));
+    preservedBlocksRef.current = priorBlocks.filter((block) => block.type !== 'file' || !discarded.has(block.url));
     applyCoverage(threadImageDrafts.get(threadId) ?? []);
     setIsPreparingImages(true);
     let persisted = false;
@@ -192,27 +244,37 @@ export function useDurableComposerDraftImageState({
     }
     // P1 R9: Validate owner after async save - rollback only if still same owner
     if (!persisted) {
-      if (ownerId === ownerIdRef.current && capturedThreadId === threadId) {
+      if (stillOwned()) {
         imageUrlsRef.current = priorUrls;
+        preservedBlocksRef.current = priorBlocks;
         applyCoverage(threadImageDrafts.get(threadId) ?? []);
       }
       // If owner changed, old rollback must not pollute new owner state
     }
     // P1 R9: Only clear preparing if still same owner
-    if (ownerId === ownerIdRef.current && capturedThreadId === threadId) {
+    if (stillOwned()) {
       setIsPreparingImages(false);
     }
-  }, [applyCoverage, ownerIdRef, saveCurrentDraftRef, setIsPreparingImages, threadId]);
+  }, [applyCoverage, ownerIdRef, preservedBlocksRef, saveCurrentDraftRef, setIsPreparingImages, threadId]);
   const removeImage = useCallback(
-    (index: number) => removeDraftImage(index, imageUrlsRef, setImages, applyCoverage),
-    [applyCoverage, setImages],
+    (index: number) =>
+      removeDraftImage(index, imageUrlsRef, setImages, (files, removedUrl) => {
+        preservedBlocksRef.current = preservedBlocksRef.current.filter(
+          (block) => block.type !== 'file' || block.url !== removedUrl,
+        );
+        applyCoverage(files);
+      }),
+    [applyCoverage, preservedBlocksRef, setImages],
   );
   const admissionImagesReady = useCallback(
     (pendingFiles: readonly File[], requiredUrls: readonly string[]) => {
       const current = threadId ? (threadImageDrafts.get(threadId) ?? []) : [];
-      return draftImageCoverage(requiredUrls, mergeDraftImages(pendingFiles, current)).complete;
+      return draftImageCoverage(
+        draftAttachmentUrls(requiredUrls, preservedBlocksRef.current),
+        mergeDraftImages(pendingFiles, current),
+      ).complete;
     },
-    [threadId],
+    [preservedBlocksRef, threadId],
   );
 
   return {

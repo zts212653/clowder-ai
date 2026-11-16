@@ -158,7 +158,7 @@ export function MailboxButton() {
       {open && (
         <MailboxPanel
           anchor={buttonRef}
-          state={deriveMailboxPanelState(view.result)}
+          state={deriveMailboxPanelState(view.badgeResult ?? view.result)}
           view={view}
           sessions={sessions}
           historyRead={historyRead}

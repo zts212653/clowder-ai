@@ -46,6 +46,7 @@ const EMBED_BATCH_SIZE = 64;
 export class EmbeddingService implements IEmbeddingService {
   private config: EmbeddingServiceConfig;
   private ready = false;
+  private availabilityRevision = 0;
   private modelId = '';
   private modelRev = 'http-client';
   private loader: (() => Promise<void>) | null = null; // test hook
@@ -75,6 +76,7 @@ export class EmbeddingService implements IEmbeddingService {
   }
 
   async load(parentSignal?: AbortSignal): Promise<void> {
+    const revision = ++this.availabilityRevision;
     if (this.loader) {
       await this.loader();
       return;
@@ -89,6 +91,7 @@ export class EmbeddingService implements IEmbeddingService {
       });
       if (!res.ok) throw new Error(`Health check failed: ${res.status}`);
       const health = (await res.json()) as HealthResponse;
+      if (this.availabilityRevision !== revision) return;
       if (health.status === 'ok') {
         this.assertIdentity(health);
         this.observedIdentity = {
@@ -105,7 +108,7 @@ export class EmbeddingService implements IEmbeddingService {
       }
     } catch (error) {
       // fail-open: server not running → isReady()=false → lexical-only degradation
-      this.ready = false;
+      if (this.availabilityRevision === revision) this.ready = false;
       if (parentSignal?.aborted) throw parentSignal.reason ?? error;
     }
   }
@@ -115,6 +118,7 @@ export class EmbeddingService implements IEmbeddingService {
   }
 
   markReady(modelId?: string): void {
+    this.availabilityRevision++;
     this.ready = true;
     if (modelId) this.modelId = modelId;
   }
@@ -159,54 +163,70 @@ export class EmbeddingService implements IEmbeddingService {
   }
 
   private async embedBatch(texts: string[], parentSignal?: AbortSignal): Promise<Float32Array[]> {
+    const revision = this.availabilityRevision;
     const timeoutMs = this.config.embedTimeoutMs;
     const timeoutSignal = AbortSignal.timeout(timeoutMs);
     const signal = parentSignal ? AbortSignal.any([parentSignal, timeoutSignal]) : timeoutSignal;
     const deadlineMs = Date.now() + timeoutMs;
-    const res = await fetch(`${this.resolveBaseUrl()}/v1/embeddings`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        input: texts,
-        deadline_ms: deadlineMs,
-        max_model_mem_mb: this.config.maxModelMemMb,
-        ...(this.config.representationFingerprint
-          ? { representation_fingerprint: this.config.representationFingerprint }
-          : {}),
-      }),
-      signal,
-    });
+    let res: Response;
+    try {
+      res = await fetch(`${this.resolveBaseUrl()}/v1/embeddings`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          input: texts,
+          deadline_ms: deadlineMs,
+          max_model_mem_mb: this.config.maxModelMemMb,
+          ...(this.config.representationFingerprint
+            ? { representation_fingerprint: this.config.representationFingerprint }
+            : {}),
+        }),
+        signal,
+      });
+    } catch (error) {
+      // A caller's cancellation/deadline says nothing about provider health.
+      if (!signal.aborted) this.retireAvailability(revision);
+      throw error;
+    }
 
     if (!res.ok) {
+      if (res.status >= 500 || res.status === 409) this.retireAvailability(revision);
       const detail = await res.text().catch(() => '');
       throw new Error(`Embed API error: ${res.status} ${res.statusText}${detail ? ` — ${detail.slice(0, 200)}` : ''}`);
     }
 
-    const body = (await res.json()) as EmbedApiResponse;
     try {
+      const body = (await res.json()) as EmbedApiResponse;
       this.assertIdentity(body);
+      const targetDim = this.config.embedDim;
+      if (!Array.isArray(body.data) || body.data.length !== texts.length)
+        throw new Error('Embedding response shape mismatch');
+      return body.data
+        .sort((a, b) => a.index - b.index)
+        .map((d, index) => {
+          const emb = d.embedding;
+          if (d.index !== index || !Array.isArray(emb) || !emb.every(Number.isFinite))
+            throw new Error('Invalid embedding response vector');
+          if (this.config.representationFingerprint && emb.length !== targetDim)
+            throw new Error('Embedding representation dimension mismatch');
+          const arr = new Float32Array(targetDim);
+          for (let i = 0; i < Math.min(emb.length, targetDim); i++) {
+            const value = emb[i];
+            if (value !== undefined) arr[i] = value;
+          }
+          return arr;
+        });
     } catch (error) {
-      this.ready = false;
+      if (!signal.aborted) this.retireAvailability(revision);
       throw error;
     }
-    const targetDim = this.config.embedDim;
-    if (!Array.isArray(body.data) || body.data.length !== texts.length)
-      throw new Error('Embedding response shape mismatch');
-    return body.data
-      .sort((a, b) => a.index - b.index)
-      .map((d, index) => {
-        const emb = d.embedding;
-        if (d.index !== index || !Array.isArray(emb) || !emb.every(Number.isFinite))
-          throw new Error('Invalid embedding response vector');
-        if (this.config.representationFingerprint && emb.length !== targetDim)
-          throw new Error('Embedding representation dimension mismatch');
-        const arr = new Float32Array(targetDim);
-        for (let i = 0; i < Math.min(emb.length, targetDim); i++) {
-          const value = emb[i];
-          if (value !== undefined) arr[i] = value;
-        }
-        return arr;
-      });
+  }
+
+  private retireAvailability(revision: number): void {
+    // A late failure from an older request cannot retire a newer /health proof.
+    if (revision !== this.availabilityRevision) return;
+    this.ready = false;
+    this.lastProbeAt = Date.now();
   }
 
   private assertIdentity(body: HealthResponse | EmbedApiResponse): void {
@@ -238,6 +258,7 @@ export class EmbeddingService implements IEmbeddingService {
   }
 
   dispose(): void {
+    this.availabilityRevision++;
     this.ready = false;
   }
 
@@ -246,8 +267,7 @@ export class EmbeddingService implements IEmbeddingService {
   /** @internal test-only: mark as ready with mock */
   _setPipelineForTest(_fn: unknown): void {
     // Compat with existing tests — just mark as ready
-    this.ready = true;
-    this.modelId = 'test-mock';
+    this.markReady('test-mock');
   }
 
   /** @internal test-only: set mock loader */

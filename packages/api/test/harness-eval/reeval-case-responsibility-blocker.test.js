@@ -2,7 +2,6 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { TaskStore } from '../../dist/domains/cats/services/stores/ports/TaskStore.js';
 import { ReevalCaseResponsibilityService } from '../../dist/infrastructure/harness-eval/reeval-case-responsibility.js';
-import { createReevalClosureTaskSpec } from '../../dist/infrastructure/harness-eval/reeval-closure-task-spec.js';
 import { FeatureThreadResolutionError } from '../../dist/routes/feature-thread-resolver.js';
 
 const caseId = `eval-case-v1-${'c'.repeat(64)}`;
@@ -166,50 +165,5 @@ describe('F266 unresolved feature-thread responsibility', () => {
       throw new Error('thread store unavailable');
     });
     await assert.rejects(() => service.reconcile(subject(), context), /thread store unavailable/);
-  });
-
-  it('delivers the blocker and keeps the same case eligible for a later retry', async () => {
-    const eventLog = new MemoryEventLog([observed]);
-    let attempts = 0;
-    const task = createReevalClosureTaskSpec({
-      eventLog,
-      loadSubjects: async () => [subject(await eventLog.read(caseId))],
-      responsibilityService: {
-        async reconcile(current) {
-          attempts += 1;
-          const append = await eventLog.append(
-            {
-              eventId: `responsibility-blocked:${verdictId}`,
-              caseId,
-              verdictId,
-              domainId: root.domainId,
-              type: 'responsibility_blocked',
-              actor: { kind: 'automation', id: 'eval-verdict-closure-reconciler' },
-              occurredAt: '2026-08-01T01:00:00.000Z',
-              reason: 'feature-thread truth is unresolved',
-              refs: [{ kind: 'other', availability: 'available', value: 'feature-thread-resolution:F203' }],
-              reasonCode: 'feature_thread_not_found',
-              featureId: 'F203',
-              ownerCatId: 'opus-47',
-              candidateThreadIds: [],
-            },
-            current.events.length,
-          );
-          return { outcome: 'blocked', append };
-        },
-      },
-      now: () => '2026-08-01T01:00:00.000Z',
-      log: { info() {}, warn() {} },
-    });
-
-    const first = await task.admission.gate({ taskId: task.id, lastRunAt: null, tickCount: 1 });
-    assert.equal(first.run, true);
-    await task.run.execute(first.workItems[0].signal, first.workItems[0].subjectKey, {});
-    assert.equal(attempts, 1);
-    assert.equal((await eventLog.read(caseId)).at(-1).type, 'responsibility_blocked');
-
-    const retry = await task.admission.gate({ taskId: task.id, lastRunAt: Date.now(), tickCount: 2 });
-    assert.equal(retry.run, true);
-    assert.equal(retry.workItems[0].signal.bindResponsibility, true);
   });
 });

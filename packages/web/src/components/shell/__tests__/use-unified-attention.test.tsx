@@ -337,7 +337,7 @@ describe('useUnifiedAttention — one verified read of the owner’s attention',
   });
 
   describe('previous rows are only ever shown to the person who read them', () => {
-    it('hides them while this round’s session is not yet confirmed, then shows them for the same owner', async () => {
+    it('keeps the observed owner’s display while rechecking the same session, without restoring write authority', async () => {
       route(() => Promise.resolve(Response.json(readBody())));
       await mount();
       expect(latest.result.kind).toBe('ok');
@@ -349,7 +349,8 @@ describe('useUnifiedAttention — one verified read of the owner’s attention',
       );
       await fire('cat-cafe:proposal-updated');
       expect(latest.result).toEqual({ kind: 'loading' });
-      expect(latest.staleRead).toBeNull();
+      expect(latest.staleRead?.identity.ownerUserId).toBe('owner-1');
+      expect(latest.resultGeneration).toBeNull();
 
       await act(async () => sessionPending.resolve(Response.json({ userId: 'owner-1' })));
       expect(latest.staleRead?.identity.ownerUserId).toBe('owner-1');

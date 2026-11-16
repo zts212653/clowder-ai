@@ -196,7 +196,15 @@ class MlxMemoryApi(Protocol):
 
 class MemoryBudgetExceeded(RuntimeError):
     def __init__(
-        self, *, budget_bytes: int, footprint_delta_bytes: int, observed_bytes: int
+        self,
+        *,
+        budget_bytes: int,
+        footprint_delta_bytes: int,
+        observed_bytes: int,
+        mlx_active_memory_bytes: int | None = None,
+        mlx_cache_memory_bytes: int | None = None,
+        os_footprint_bytes: int | None = None,
+        baseline_os_footprint_bytes: int | None = None,
     ) -> None:
         super().__init__(
             f"embedding memory budget exceeded: observed={observed_bytes} "
@@ -205,6 +213,10 @@ class MemoryBudgetExceeded(RuntimeError):
         self.budget_bytes = budget_bytes
         self.footprint_delta_bytes = footprint_delta_bytes
         self.observed_bytes = observed_bytes
+        self.mlx_active_memory_bytes = mlx_active_memory_bytes
+        self.mlx_cache_memory_bytes = mlx_cache_memory_bytes
+        self.os_footprint_bytes = os_footprint_bytes
+        self.baseline_os_footprint_bytes = baseline_os_footprint_bytes
 
 
 class MemoryMetricUnavailable(RuntimeError):
@@ -262,9 +274,9 @@ class MlxMemoryEnvelope:
             raise MemoryMetricUnavailable(
                 "macOS process footprint became unavailable; stopping MLX inference"
             )
-        allocator_bytes = int(self._mlx.get_active_memory()) + int(
-            self._mlx.get_cache_memory()
-        )
+        active_bytes = int(self._mlx.get_active_memory())
+        cache_bytes = int(self._mlx.get_cache_memory())
+        allocator_bytes = active_bytes + cache_bytes
         baseline = self._baseline_footprint_bytes
         footprint_delta = (
             max(0, footprint - baseline)
@@ -279,6 +291,10 @@ class MlxMemoryEnvelope:
                 budget_bytes=budget_bytes,
                 footprint_delta_bytes=footprint_delta,
                 observed_bytes=observed_bytes,
+                mlx_active_memory_bytes=active_bytes,
+                mlx_cache_memory_bytes=cache_bytes,
+                os_footprint_bytes=footprint,
+                baseline_os_footprint_bytes=baseline,
             )
 
     def snapshot(

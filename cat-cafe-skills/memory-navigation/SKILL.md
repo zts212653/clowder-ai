@@ -1,6 +1,6 @@
 ---
 name: memory-navigation
-tips_exempt: "Renewed 2026-11-05: internal recall routing uses the existing work-line directory for explicit prior-work topic clues and follows candidate sources to original discussion. The human entry remains an ordinary Chat question; this skill change adds no end-user control, configuration or approval action."
+tips_exempt: "Renewed 2026-11-15: this update links the existing read-only recall entries to the existing source-card reply path after an original read. The human entry remains an ordinary Chat question; there is no new end-user control, configuration, approval or publication permission."
 description: >
   记忆系统三入口路由（search_evidence / graph_resolve / list_recent）决策树 + 噪音控制 + 加载时机。F188 Phase F (AC-F6) 配套 skill。
   Use when: 没先验、压缩后回顾、"我记得最近讨论过 X"、search_evidence 反复 low-hit。
@@ -54,6 +54,7 @@ Not for:
 都只说明这次读取的断点；仍有能补原话缺口的候选时，回到它们的 Thread/Work 入口核读。
 不必通读所有命中，也不反复重搜同一空入口。文档转述与原聊天读取分开报告；
 原话确实读回后再用于回答，剩余权限、版本或范围缺口如实保留。
+需要“原话带出处”时，再沿[回复的出处卡入口](../rich-messaging/SKILL.md#发送方式)选句交付；原文读取本身不发卡。
 
 先识别坐标的类型：`threadId#messageId` 或裸消息 ID 直接走
 `cat_cafe_get_message(messageId="裸消息ID", mode="full")`，不要把 thread 前缀传进 messageId；

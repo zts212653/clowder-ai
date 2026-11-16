@@ -13,6 +13,7 @@
  */
 
 import type { CatId, MessageOutputLayoutV1 } from '@cat-cafe/shared';
+import type { TextProvenance } from '../../text-provenance.js';
 import type { MessageMetadata } from '../../types.js';
 
 export interface DraftRecord {
@@ -27,6 +28,8 @@ export interface DraftRecord {
   metadata?: MessageMetadata;
   /** Optional message-owned references; content remains the one full body. */
   extra?: { outputLayout?: MessageOutputLayoutV1 };
+  /** Durable source references, independent of optional display-layout availability. */
+  textProvenance?: TextProvenance;
   /** First time this draft was created. Stable across touch/upsert updates. */
   createdAt?: number;
   updatedAt: number;

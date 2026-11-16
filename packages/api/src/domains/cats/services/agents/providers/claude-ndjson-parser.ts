@@ -242,17 +242,30 @@ export function transformClaudeEvent(
     }
 
     const messages: AgentMessage[] = [];
-    for (const block of content) {
+    for (const [blockIndex, block] of content.entries()) {
       if (typeof block !== 'object' || block === null) continue;
       const b = block as Record<string, unknown>;
 
-      if (b.type === 'text' && typeof b.text === 'string' && b.text.length > 0) {
-        if (skipFinalText) continue;
+      // Claude tags summaries of user-facing prose as thinking blocks. Only
+      // indexes in this frame's provider annotation are public narration;
+      // unlisted thinking and opaque signatures keep their existing treatment.
+      const text =
+        b.type === 'text'
+          ? b.text
+          : b.type === 'thinking' &&
+              Array.isArray(e.narration_block_indexes) &&
+              e.narration_block_indexes.includes(blockIndex)
+            ? b.thinking
+            : undefined;
+      if (typeof text === 'string' && text.length > 0) {
+        // Ordinary text deltas do not cover a separate narration block.
+        if (b.type === 'text' && skipFinalText) continue;
         streamState.textBoundaryState ??= {};
         messages.push({
           type: 'text',
           catId,
-          content: withClaudeMessageBoundary(b.text, messageId, streamState.textBoundaryState),
+          content: withClaudeMessageBoundary(text, messageId, streamState.textBoundaryState),
+          ...(b.type === 'thinking' ? { textSource: 'provider_summary' as const } : {}),
           timestamp: Date.now(),
         });
       } else if (b.type === 'tool_use' && typeof b.name === 'string') {
