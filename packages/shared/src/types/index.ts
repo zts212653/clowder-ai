@@ -545,7 +545,6 @@ export {
   DISTILLATION_SOURCE_EVENTS,
   isDistillationSourceEvent,
 } from './dossier-distillation.js';
-// Entity proposal types (F260 Phase A 实体治理)
 export type {
   EntityConflictContext,
   EntityConflictReason,
@@ -565,6 +564,8 @@ export {
   ENTITY_STANCES,
   ENTITY_VISIBILITY_SCOPES,
 } from './entity-proposal.js';
+// Entity proposal types (F260 Phase A 实体治理)
+export { type EntityProvenance, entityProvenanceSchema } from './entity-provenance.js';
 // F310 Phase B: source-owned custody, Task-owned entrusted work, and shared owner-read contracts.
 export {
   type CustodyAdmissionRequestV1,

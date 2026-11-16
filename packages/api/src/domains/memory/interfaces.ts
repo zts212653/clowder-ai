@@ -1,7 +1,10 @@
 // F102: Memory component interfaces — 6 pluggable adapters
 // See docs/features/F102-memory-adapter-refactor.md for architecture
 
-import type { EntityConflictContext, EntityConflictResolutionRequest } from '@cat-cafe/shared';
+import type { EntityConflictContext, EntityConflictResolutionRequest, EntityProvenance } from '@cat-cafe/shared';
+
+export type { EntityProvenance } from '@cat-cafe/shared';
+
 import type { CollectionSensitivity, ReviewStatus, SearchDimension } from './collection-types.js';
 import type { F163Activation, F163Authority } from './f163-types.js';
 
@@ -166,20 +169,6 @@ export interface EvidenceItem {
 }
 
 export type EntityType = 'person' | 'cat' | 'feature' | 'concept' | 'external';
-
-export interface EntityProvenance {
-  source: string;
-  anchor?: string;
-  sourcePath?: string;
-  threadId?: string;
-  messageId?: string;
-  messageIds?: string[];
-  sessionId?: string;
-  eventNo?: number;
-  invocationId?: string;
-  note?: string;
-  date?: string;
-}
 
 export interface EntityRecord {
   entityId: string;
