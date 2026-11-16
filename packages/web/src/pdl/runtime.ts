@@ -4,6 +4,10 @@ import { frameRequest } from './frame-bridge';
 import type { ChatPort } from './types';
 
 const { scripts, styles } = loadOrder;
+// The script and style URLs are the same in every build, so they carry the build: a document of a new
+// build never gets an older worker's cached copy of them.
+const build = process.env.NEXT_PUBLIC_CAT_CAFE_BUILD_REVISION;
+const ofBuild = (url: string) => (build ? `${url}?v=${encodeURIComponent(build)}` : url);
 
 export const scriptSources = [
   ...scripts.map((path) => `/pdl/${path}`),
@@ -53,7 +57,7 @@ async function startChat(port: ChatPort): Promise<void> {
   for (const path of styles) {
     const link = document.createElement('link');
     link.rel = 'stylesheet';
-    link.href = `/pdl/${path}`;
+    link.href = ofBuild(`/pdl/${path}`);
     await new Promise<void>((resolve, reject) => {
       link.onload = () => resolve();
       link.onerror = () => reject(new Error(`Failed to load ${path}`));
@@ -63,7 +67,7 @@ async function startChat(port: ChatPort): Promise<void> {
   for (const path of scriptSources) {
     await new Promise<void>((resolve, reject) => {
       const script = document.createElement('script');
-      script.src = path;
+      script.src = ofBuild(path);
       script.onload = () => resolve();
       script.onerror = () => reject(new Error(`Failed to load ${path}`));
       document.body.append(script);
