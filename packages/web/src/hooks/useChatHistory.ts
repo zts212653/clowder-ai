@@ -1574,12 +1574,13 @@ export function useChatHistory(threadId: string) {
         params.set('threadId', fetchForThread);
         // PR-3a2: the recovery round and write count this read is issued at decide what it may change.
         const issue = issueReplaceRead(fetchForThread);
+        const hasDeletions = (useChatStore.getState().deletedMessageIds[fetchForThread]?.size ?? 0) > 0;
         // A catch-up must be a read issued now: joining a same-URL GET already in flight would
         // reuse a snapshot taken before the room join it is meant to cover (PR-3a, contract 3.2).
         const res = await apiFetch(
           `/api/messages?${params}`,
-          { signal: controller.signal },
-          options?.afterCurrentGet ? { afterCurrentGet: true } : undefined,
+          { signal: controller.signal, ...(hasDeletions ? { cache: 'no-store' as const } : {}) },
+          options?.afterCurrentGet || hasDeletions ? { afterCurrentGet: true } : undefined,
         );
         if (!res.ok) return;
         // Stale check: discard if the request was superseded while the response body was in flight.
@@ -1723,7 +1724,7 @@ export function useChatHistory(threadId: string) {
           // (instead of bare replaceMessages + saveMessagesSnapshot pair).
           // AC-C10: server GET 是 authoritative，IDB snapshot 必须被 GET
           // 响应覆盖而不是合并。
-          hydrateThread(fetchForThread, mergedMsgs, data.hasMore ?? false);
+          hydrateThread(fetchForThread, mergedMsgs, data.hasMore ?? false, issue.localWriteSeq);
           restoreActiveFromDrafts(fetchForThread, data.messages ?? []);
           // The page boundary follows what stays loaded: a read that unloaded the older pages (a
           // recovery round, an IndexedDB copy) restarts it at this page, while older pages the merge
@@ -1751,7 +1752,7 @@ export function useChatHistory(threadId: string) {
           ...beforePrepend,
         ];
         // hasMore propagates older-history pagination state.
-        replaceThreadMessages(fetchForThread, union, data.hasMore ?? false);
+        replaceThreadMessages(fetchForThread, union, data.hasMore ?? false, issue.localWriteSeq);
         restoreActiveFromDrafts(fetchForThread, data.messages ?? []);
         if (
           typeof data.historyPageCursor === 'string' &&

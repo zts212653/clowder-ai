@@ -41,7 +41,7 @@ import type {
 } from './chat-types';
 import { DEFAULT_THREAD_STATE } from './chat-types';
 import { projectTerminalActiveInvocationSlots } from './invocation-liveness';
-import { stampMessageWrite } from './local-write-clock';
+import { nextLocalWriteSeq, stampMessageWrite } from './local-write-clock';
 import {
   findLatestMessageIndexByTimeline,
   getMessageTimelineCursorTime,
@@ -77,6 +77,25 @@ export type {
 export { DEFAULT_THREAD_STATE } from './chat-types';
 
 // ── Helpers ──
+
+/** Only a server read issued after the latest deletion can prove that an id was restored. */
+function filterThreadDeletions(state: ChatState, threadId: string, msgs: ChatMessage[], readLocalWriteSeq?: number) {
+  const deleted = state.deletedMessageIds[threadId];
+  if (!deleted?.size) return { messages: msgs, deletedMessageIds: state.deletedMessageIds };
+  const remaining = new Map(deleted);
+  const messages = msgs.filter((message) => {
+    const deletedAt = deleted.get(message.id);
+    if (deletedAt === undefined) return true;
+    if (readLocalWriteSeq === undefined || readLocalWriteSeq < deletedAt) return false;
+    remaining.delete(message.id);
+    return true;
+  });
+  return {
+    messages,
+    deletedMessageIds:
+      remaining.size === deleted.size ? state.deletedMessageIds : { ...state.deletedMessageIds, [threadId]: remaining },
+  };
+}
 
 /**
  * Merge invocation metadata without letting a new parent inherit the previous child turn.
@@ -712,8 +731,8 @@ export interface ChatState {
 
   // Multi-thread state map (preserves per-thread state across switches)
   threadStates: Record<string, ThreadState>;
-  /** Page-local deletion facts fence queued stream writes and stale History until explicit restore. */
-  deletedMessageIds: Record<string, ReadonlySet<string>>;
+  /** Latest deletion positions; a later server History read or restore event can supersede them. */
+  deletedMessageIds: Record<string, ReadonlyMap<string, number>>;
 
   // Multi-thread UI
   viewMode: 'single' | 'split';
@@ -749,8 +768,9 @@ export interface ChatState {
    *  Server GET is authoritative: replaces flat messages AND overwrites
    *  IDB snapshot in one atomic call. Use this instead of bare
    *  replaceMessages + saveMessagesSnapshot whenever a server GET response
-   *  fully replaces the current thread timeline. AC-C10. */
-  hydrateThread: (threadId: string, msgs: ChatMessage[], hasMore: boolean) => void;
+   *  fully replaces the current thread timeline. AC-C10.
+   *  Only server History supplies its issue-time write count; replay/IDB writes omit it. */
+  hydrateThread: (threadId: string, msgs: ChatMessage[], hasMore: boolean, readLocalWriteSeq?: number) => void;
   /**
    * F183 Phase B1.7 — thread-scoped reducer write entry point. Mirror of
    * `replaceMessages` but for arbitrary thread (current OR background).
@@ -760,7 +780,7 @@ export interface ChatState {
    * no IDB write, no hasMore-required (defaults to existing thread.hasMore),
    * mirrors flat when threadId === currentThreadId.
    */
-  replaceThreadMessages: (threadId: string, msgs: ChatMessage[], hasMore?: boolean) => void;
+  replaceThreadMessages: (threadId: string, msgs: ChatMessage[], hasMore?: boolean, readLocalWriteSeq?: number) => void;
   patchMessage: (id: string, patch: ChatMessagePatch) => void;
   appendToLastMessage: (content: string) => void;
   appendToMessage: (id: string, content: string) => void;
@@ -2100,15 +2120,15 @@ export const chatStoreCreator: StateCreator<ChatState> = (set, get) => ({
   },
 
   // F183 Phase B1.7 — see interface comment.
-  replaceThreadMessages: (threadId, msgs, hasMore) => {
-    const deleted = get().deletedMessageIds[threadId];
-    const messages = deleted ? msgs.filter((message) => !deleted.has(message.id)) : msgs;
+  replaceThreadMessages: (threadId, msgs, hasMore, readLocalWriteSeq) => {
     return set((state) => {
+      const { messages, deletedMessageIds } = filterThreadDeletions(state, threadId, msgs, readLocalWriteSeq);
       if (threadId === state.currentThreadId) {
         revokeRemovedBlobUrls(state.messages, messages);
         const nextHasMore = hasMore ?? state.hasMore;
         return {
           messages,
+          deletedMessageIds,
           hasMore: nextHasMore,
           ...mirrorActiveFlat(state, { messages, hasMore: nextHasMore }),
         };
@@ -2117,6 +2137,7 @@ export const chatStoreCreator: StateCreator<ChatState> = (set, get) => ({
       revokeRemovedBlobUrls(baseThreadState.messages, messages);
       const nextHasMore = hasMore ?? baseThreadState.hasMore;
       return {
+        deletedMessageIds,
         threadStates: {
           ...state.threadStates,
           [threadId]: { ...baseThreadState, messages, hasMore: nextHasMore },
@@ -2125,9 +2146,8 @@ export const chatStoreCreator: StateCreator<ChatState> = (set, get) => ({
     });
   },
 
-  hydrateThread: (threadId, msgs, hasMore) => {
-    const deleted = get().deletedMessageIds[threadId];
-    const messages = deleted ? msgs.filter((message) => !deleted.has(message.id)) : msgs;
+  hydrateThread: (threadId, msgs, hasMore, readLocalWriteSeq) => {
+    let hydrated = msgs;
     // F173 Phase C Task 5+6+7 — atomic server-authoritative hydration that
     // honors KD-2 (threadStates is the writer source, flat is compat mirror).
     //
@@ -2141,10 +2161,13 @@ export const chatStoreCreator: StateCreator<ChatState> = (set, get) => ({
     // F183 Phase E AC-E2 (砚砚 R2 P1 fix): same strict-gate as the other
     // caller-driven writers. Runs only when strict mode is on.
     set((state) => {
+      const { messages, deletedMessageIds } = filterThreadDeletions(state, threadId, msgs, readLocalWriteSeq);
+      hydrated = messages;
       if (threadId === state.currentThreadId) {
         revokeRemovedBlobUrls(state.messages, messages);
         return {
           messages,
+          deletedMessageIds,
           hasMore,
           ...mirrorActiveFlat(state, { messages, hasMore }),
         };
@@ -2161,6 +2184,7 @@ export const chatStoreCreator: StateCreator<ChatState> = (set, get) => ({
       // until reload otherwise). No-op when prev messages is [].
       revokeRemovedBlobUrls(baseThreadState.messages, messages);
       return {
+        deletedMessageIds,
         threadStates: {
           ...state.threadStates,
           [threadId]: { ...baseThreadState, messages, hasMore },
@@ -2171,7 +2195,7 @@ export const chatStoreCreator: StateCreator<ChatState> = (set, get) => ({
     // current — avoids race against a thread switch that already cleared
     // the outgoing thread's IDB snapshot.
     if (get().currentThreadId === threadId) {
-      void saveMessagesSnapshot(threadId, messages, hasMore).catch(() => {});
+      void saveMessagesSnapshot(threadId, hydrated, hasMore).catch(() => {});
     }
   },
 
@@ -2842,7 +2866,7 @@ export const chatStoreCreator: StateCreator<ChatState> = (set, get) => ({
       // Record unseen ids too: a suspended replay may not have inserted the response yet.
       const deletedMessageIds = {
         ...state.deletedMessageIds,
-        [threadId]: new Set(state.deletedMessageIds[threadId]).add(messageId),
+        [threadId]: new Map(state.deletedMessageIds[threadId]).set(messageId, nextLocalWriteSeq()),
       };
       if (threadId === state.currentThreadId) {
         const nextMessages = state.messages.filter((m) => m.id !== messageId);
@@ -2873,7 +2897,7 @@ export const chatStoreCreator: StateCreator<ChatState> = (set, get) => ({
     set((state) => {
       const deleted = state.deletedMessageIds[threadId];
       if (!deleted?.has(messageId)) return state;
-      const remaining = new Set(deleted);
+      const remaining = new Map(deleted);
       remaining.delete(messageId);
       return { deletedMessageIds: { ...state.deletedMessageIds, [threadId]: remaining } };
     }),
