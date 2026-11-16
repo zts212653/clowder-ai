@@ -56,6 +56,9 @@
     },
     "file": {
       "openProject": "打开项目文件",
+      "outsideWorkspace": "文件所在目录未注册到工作区",
+      "needsConnection": "需要先连接文件所在的目录才能打开",
+      "unreadable": "这个文件暂时打不开",
       "noPreview": "这种文件不能在这里预览",
       "openLocal": "用默认应用打开"
     },

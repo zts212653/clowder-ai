@@ -32,6 +32,11 @@
   }
  },
  "workbench": {
+  "file": {
+   "outsideWorkspace": "This file's folder is not registered as a workspace",
+   "needsConnection": "Connect the file's folder first to open it",
+   "unreadable": "This file cannot be opened right now"
+  },
   "pageActionResult": {
    "applied": "Applied",
    "no_effect": "No effect",

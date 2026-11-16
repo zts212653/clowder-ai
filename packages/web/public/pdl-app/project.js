@@ -1997,10 +1997,22 @@ function bindProject() {
         .sort(function (a, b) {
           return b.root.length - a.root.length;
         })[0];
-      if (!owner) {
-        toast('文件所属工作区尚未登记');
-        return Promise.resolve(false);
-      }
+      if (!owner)
+        return chatAction('fileOpenPath', { p: data.p }).then(function (result) {
+          if (!result || !result.w) {
+            toast(
+              tc(
+                result && result.code === 'connection_required'
+                  ? 'workbench.file.needsConnection'
+                  : 'workbench.file.unreadable',
+              ),
+            );
+            return false;
+          }
+          rtOpen('panel', projectFileKey(result), { preview: !!d.preview });
+          render(true);
+          return true;
+        });
       data.p = data.p.slice(owner.root.length + 1);
       data.w = owner.id;
     }

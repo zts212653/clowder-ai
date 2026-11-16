@@ -24285,6 +24285,11 @@ pdl:
                             act: wsTool
                             args:
                               k: files
+                            why:
+                              of: $.outsideWorkspace
+                              map:
+                                "true": t:workbench.file.outsideWorkspace
+                                _: ""
                           - label: t:control.reveal
                             act: fileAction
                             args:

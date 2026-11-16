@@ -277,6 +277,7 @@ function workbenchModels() {
             name: file.path.split('/').pop(),
             filePath: file.path,
             worktreeId: opened?.worktreeId,
+            outsideWorkspace: !source.workspace.worktrees.some((w) => w.id === opened?.worktreeId),
             canEdit: editing.canEdit,
             editing: isEditing,
             edit: draft ? { ...draft, inputId: 'file-edit-' + fileScope, conflict: editing.saveError ?? '' } : null,

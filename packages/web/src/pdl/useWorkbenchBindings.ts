@@ -507,12 +507,25 @@ export function useWorkbenchBindings(
           path = args.p;
         if (!path) throw new Error('缺少文件路径');
         if (!worktreeId) throw new Error('请先选择工作区');
-        if (worktreeId !== workspace.worktreeId) {
+        // A file location outside the registered workspaces (opened by full path) does not change the conversation's workspace.
+        if (worktreeId !== workspace.worktreeId && workspace.worktrees.some((w) => w.id === worktreeId)) {
           const { useChatStore } = await import('@/stores/chatStore');
           useChatStore.getState().setWorkspaceWorktreeId(worktreeId);
         }
         setFileTarget({ worktreeId, path });
         return true;
+      }
+      case 'fileOpenPath': {
+        // A full path outside the registered workspaces: the host resolves its folder as a file location and the file
+        // opens there without changing the conversation's workspace. A folder that must be connected first is reported.
+        const result = await write<{ kind: string; worktreeId?: string; path?: string }>(
+          '/api/workspace/resolve-file-source',
+          { path: args.p },
+        );
+        if (result.kind !== 'file' || !result.worktreeId || !result.path)
+          return { code: result.kind === 'connection-required' ? 'connection_required' : result.kind };
+        setFileTarget({ worktreeId: result.worktreeId, path: result.path });
+        return { w: result.worktreeId, p: result.path };
       }
       case 'fileEdit':
         fileEdits.current[fileScope] ??= {
