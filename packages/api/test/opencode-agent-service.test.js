@@ -1146,6 +1146,90 @@ describe('OpenCodeAgentService', () => {
     });
   });
 
+  // Deterministic conflicting inputs, not conflicts observed in the official CLI captures.
+  [
+    ['session', 'ses_other', 'msg_other', 'FOREIGN ANSWER'],
+    ['message', 'ses_current', 'msg_older', 'OLDER ANSWER'],
+  ].forEach(([label, sessionId, messageId, text]) => {
+    [false, true].forEach((hasPriorRef) => {
+      test(`OpenCode recovery rejects conflicting ${label} identities, prior reference: ${hasPriorRef}`, async () => {
+        const proc = createMockProcess();
+        const spawnFn = mock.fn(() => proc);
+        const service = new OpenCodeAgentService({
+          catId: 'opencode',
+          spawnFn,
+          opencodeDbPath: createOpenCodeRecoveryDb({ sessionId, messageId, text, storage: 'session_message' }),
+        });
+        const priorEvent = {
+          type: 'reasoning',
+          sessionID: sessionId,
+          part: { type: 'reasoning', sessionID: sessionId, messageID: messageId, text: 'thinking' },
+        };
+        const conflictingEvent = {
+          ...priorEvent,
+          sessionID: 'ses_current',
+          ...(label === 'message' ? { messageID: 'msg_current' } : {}),
+        };
+        const promise = collect(service.invoke('Reject conflicting recovery identities'));
+        emitOpenCodeEvents(proc, [...(hasPriorRef ? [priorEvent] : []), conflictingEvent]);
+        const messages = await promise;
+        assert.deepEqual(
+          messages.filter((message) => message.type === 'text'),
+          [],
+        );
+        assert.ok(messages.some((message) => message.metadata?.cliDiagnostics?.reasonCode === 'silent_completion'));
+        assert.equal(
+          messages.filter(
+            (message) =>
+              message.type === 'system_info' &&
+              message.content === JSON.stringify({ type: 'thinking', text: 'thinking' }),
+          ).length,
+          hasPriorRef ? 2 : 1,
+          'rejecting the recovery anchor must preserve the reasoning events',
+        );
+        assert.equal(spawnFn.mock.callCount(), 1, 'rejecting a reference must not rerun the turn');
+        assert.equal(messages.filter((message) => message.type === 'done').length, 1);
+      });
+    });
+  });
+
+  ['top-level', 'part', 'both', 'after conflict'].forEach((location) => {
+    test(`OpenCode recovery accepts consistent identities: ${location}`, async () => {
+      const proc = createMockProcess();
+      const spawnFn = mock.fn(() => proc);
+      const sessionId = 'ses_current';
+      const messageId = 'msg_current';
+      const service = new OpenCodeAgentService({
+        catId: 'opencode',
+        spawnFn,
+        opencodeDbPath: createOpenCodeRecoveryDb({
+          sessionId,
+          messageId,
+          text: 'CURRENT ANSWER',
+          storage: 'session_message',
+        }),
+      });
+      const identities = { sessionID: sessionId, messageID: messageId };
+      const event = {
+        type: 'reasoning',
+        ...(location === 'part' ? {} : identities),
+        part: { type: 'reasoning', text: 'thinking', ...(location === 'top-level' ? {} : identities) },
+      };
+      const promise = collect(service.invoke('Recover consistent assistant identities'));
+      emitOpenCodeEvents(proc, [
+        ...(location === 'after conflict' ? [{ ...event, messageID: 'msg_other' }] : []),
+        event,
+      ]);
+      const messages = await promise;
+      assert.deepEqual(
+        messages.filter((message) => message.type === 'text').map((message) => message.content),
+        ['CURRENT ANSWER'],
+      );
+      assert.ok(!messages.some((message) => message.metadata?.cliDiagnostics?.reasonCode === 'silent_completion'));
+      assert.equal(spawnFn.mock.callCount(), 1);
+    });
+  });
+
   test('recovers a captured 2.0.28 reasoning stream with its text event deliberately dropped', async () => {
     const capture = JSON.parse(
       readFileSync(new URL('./fixtures/opencode-2.0.28/captured.json', import.meta.url), 'utf8'),

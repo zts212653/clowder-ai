@@ -62,6 +62,23 @@ test('extracts exact assistant references from known OpenCode part events withou
   assert.equal(extractOpenCodeMessageRef({ type: 'error', sessionID: 'ses_current', messageID: 'msg_error' }), null);
 });
 
+test('distinguishes conflicting assistant identities from absent references', () => {
+  ['step_start', 'text', 'reasoning', 'tool_use', 'step_finish'].forEach((type) => {
+    ['sessionID', 'messageID'].forEach((field) => {
+      assert.equal(
+        extractOpenCodeMessageRef({
+          type,
+          sessionID: 'ses_current',
+          messageID: 'msg_current',
+          part: { sessionID: 'ses_current', messageID: 'msg_current', [field]: 'conflicting_id' },
+        }),
+        'conflict',
+        `${type}: ${field}`,
+      );
+    });
+  });
+});
+
 test('recovers only the exact 2.x assistant message text, preserving content order', () => {
   const options = createMessageDb([
     {
