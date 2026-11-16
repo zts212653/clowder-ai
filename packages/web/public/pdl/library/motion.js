@@ -24,7 +24,7 @@ RENDER_BEFORE.push(function () {
 function beatAnims(e) { return e.target.getAnimations().concat(e.pseudoElement ? e.target.getAnimations({ subtree: true }).filter(function (a) { return a.effect && a.effect.pseudoElement === e.pseudoElement; }) : []).filter(function (a) { return a.animationName === e.animationName; }); }
 document.addEventListener('animationstart', function (e) {
   if (!e.target.getAnimations) return;
-  const roll = e.animationName === 'roll-up';
+  const roll = /^roll-/.test(e.animationName);   /* 轮换的滚动和它收宽的那一行：同一个时间原点 */
   if (!/^mo-|^rot$/.test(e.animationName) && !roll) return;
   beatAnims(e).forEach(function (a) {
     if (a.__beat) return;

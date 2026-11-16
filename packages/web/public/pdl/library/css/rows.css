@@ -58,7 +58,9 @@
 .roll-in { display: flex; flex-direction: column; animation: roll-up calc(var(--roll-hold) + .3s) ease forwards; }
 .roll-in > span { height: var(--av-s); white-space: nowrap; overflow: clip; text-overflow: ellipsis; }
 .roll-in > span > .ic { display: inline-block; vertical-align: middle; margin-left: var(--sp-hair); }   /* 行尾的箭头紧跟这一行的文字 */
-@keyframes roll-up { 0%, 90.9% { transform: none; } 100% { transform: translateY(-18px); } }   /* 0–90.9% = --roll-hold（3s / 3.3s）停着；诞生时按 data-at 接上进度 */
+@keyframes roll-up { 0%, 90.9% { transform: none; } 100% { transform: translateY(-18px); } }
+.roll-a { animation: roll-gone calc(var(--roll-hold) + .3s) step-end forwards; }   /* 滚完以后当前动作那一行不再占宽：轮换的宽度跟着看得见的那一行（累计数），后面不留空白 */
+@keyframes roll-gone { to { max-width: 0; } }   /* 0–90.9% = --roll-hold（3s / 3.3s）停着；诞生时按 data-at 接上进度 */
 :root[data-motion="reduce"] .roll-in { animation-timing-function: step-end; }
 .lr-text { padding: var(--sp-hair) 0; line-height: 1.6; }
 .dot { display: inline-block; flex: none; width: var(--dot); height: var(--dot); border-radius: 50%; vertical-align: middle; background: var(--fg-disabled); }   /* 唯一的圆点：色调走 data-tone，身份走 --c */

@@ -5284,6 +5284,7 @@ frags:
                 of: "@kind"
                 map:
                   commentary: {of: "@title", fmt: plainLine}
+                  thinking: {of: "@title", fmt: plainLine}
                   _: "@title"
               mono:
                 of: "@kind"
@@ -5325,6 +5326,7 @@ frags:
                 of: "@kind"
                 map:
                   commentary: {of: "@detail", fmt: markdownRest}
+                  thinking: {of: "@detail", fmt: markdownRest}
                   _: {of: "@detail", fmt: escaped}
               raw: true
               when:
@@ -5333,6 +5335,7 @@ frags:
                 - of: "@kind"
                   map:
                     commentary: {of: "@detail", fmt: markdownRest}
+                    thinking: {of: "@detail", fmt: markdownRest}
                     _: true
             - type: each
               from: "@details"
