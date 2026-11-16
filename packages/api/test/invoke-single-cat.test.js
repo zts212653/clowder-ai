@@ -6814,6 +6814,9 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
             candidates: {},
             service: {
               preparePresentation: () => ({
+                result: { nudges: [] },
+                renderedNudges: [{}],
+                isCurrent: () => true,
                 promptContext: '[entity-nudge]known source[/entity-nudge]',
                 confirmAssembled: () => {
                   confirmations++;
@@ -6927,6 +6930,9 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
               candidates: {},
               service: {
                 preparePresentation: () => ({
+                  result: { nudges: [] },
+                  renderedNudges: [{}],
+                  isCurrent: () => true,
                   promptContext: '[entity-nudge]known source[/entity-nudge]',
                   confirmAssembled: () => {
                     confirmations++;
@@ -7007,6 +7013,9 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
             candidates: {},
             service: {
               preparePresentation: () => ({
+                result: { nudges: [] },
+                renderedNudges: [{}],
+                isCurrent: () => true,
                 promptContext: '[entity-nudge]known source[/entity-nudge]',
                 confirmAssembled: () => {
                   confirmations++;
@@ -7083,6 +7092,9 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
             candidates: {},
             service: {
               preparePresentation: () => ({
+                result: { nudges: [] },
+                renderedNudges: [{}],
+                isCurrent: () => true,
                 promptContext: '[entity-nudge]known source[/entity-nudge]',
                 confirmAssembled: () => {
                   confirmations++;

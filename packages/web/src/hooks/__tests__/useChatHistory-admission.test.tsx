@@ -4,6 +4,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import { ThreadChatHistoryAdmissionProvider } from '@/components/thread-chat/ThreadChatRuntimeProvider';
 import { useChatStore } from '@/stores/chatStore';
 import { apiFetch } from '@/utils/api-client';
+import * as offline from '@/utils/offline-store';
 import { __resetTaskCacheForTest, useChatHistory } from '../useChatHistory';
 
 vi.mock('@/utils/api-client', () => ({
@@ -53,6 +54,7 @@ describe('useChatHistory runtime admission', () => {
       catStatuses: {},
       catInvocations: {},
       threadStates: {},
+      deletedMessageIds: {},
       currentThreadId: THREAD_ID,
       viewMode: 'single',
       splitPaneThreadIds: [],
@@ -83,6 +85,41 @@ describe('useChatHistory runtime admission', () => {
     act(() => root.unmount());
     container.remove();
     apiFetchMock.mockReset();
+    vi.restoreAllMocks();
+  });
+
+  it('uses a fresh physical read to restore an id whose room notification was missed', async () => {
+    const save = vi.spyOn(offline, 'saveThreadMessages').mockResolvedValue(undefined);
+    useChatStore.getState().removeThreadMessage(THREAD_ID, 'restored');
+    const standard = apiFetchMock.getMockImplementation();
+    apiFetchMock.mockImplementation((url: string, ...rest) =>
+      url.includes('/api/messages')
+        ? Promise.resolve(
+            Response.json({
+              messages: [{ id: 'restored', catId: 'opus', content: 'SERVER RESTORED', timestamp: 100 }],
+              hasMore: false,
+            }),
+          )
+        : standard!(url, ...rest),
+    );
+    await act(async () => {
+      root.render(
+        <Harness>
+          <HistoryProbe capture={() => {}} />
+        </Harness>,
+      );
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    const request = apiFetchMock.mock.calls.find(([url]) => String(url).includes('/api/messages'));
+    expect(request?.[2]).toEqual({ afterCurrentGet: true });
+    expect(request?.[1]?.cache).toBe('no-store');
+    expect(useChatStore.getState().messages.map((message) => message.id)).toEqual(['restored']);
+    expect(save).toHaveBeenCalledWith(
+      THREAD_ID,
+      expect.arrayContaining([expect.objectContaining({ id: 'restored', content: 'SERVER RESTORED' })]),
+      false,
+    );
   });
 
   it('hydrates one thread once while keeping viewport refs local to each surface', async () => {

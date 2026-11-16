@@ -1,6 +1,6 @@
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { deploymentDefaults } from '@cat-cafe/shared';
+import { deploymentDefaults, entityProvenanceSchema } from '@cat-cafe/shared';
 import { defineMcpCanonicalFactory, defineMcpMigrationFactory } from '../tool-governance-migration.js';
 import { invocationFetch } from './invocation-auth.js';
 
@@ -2988,17 +2988,12 @@ export const proposeEntityInputSchema = {
       'Visibility: only "workspace" accepted (KD-7 gate — private scope deferred until resolver supports visibility filtering)',
     ),
   provenance: z
-    .array(
-      z.object({
-        source: z.string().min(1).max(200).describe('Provenance source (e.g. "cat-proposed", "nudge")'),
-        anchor: z.string().min(1).max(500).optional().describe('Thread/message anchor for traceability'),
-        note: z.string().max(500).optional().describe('Optional note'),
-        date: z.string().max(20).optional().describe('ISO date (YYYY-MM-DD)'),
-      }),
-    )
+    .array(entityProvenanceSchema)
     .min(1)
     .max(10)
-    .describe('Provenance chain — at least one entry with source; include thread anchor for traceability'),
+    .describe(
+      'Existing source pointers and cat-authored reading purposes. Pair note with an exact sourcePath or threadId/messageId so a later cat can read the applicable history. Approval does not grant source access.',
+    ),
   rationale: z
     .string()
     .min(1)
@@ -3614,7 +3609,7 @@ export const callbackTools = [
     name: 'cat_cafe_get_thread_context',
     description:
       'Read messages from one thread, with token-lean anchor previews by default and optional full bodies, ranked keywords, or a bounded window around messageId. ' +
-      'Full persisted originals include contentRevision and sourceParts (part coordinates and UTF-16 lengths) for source-card replies; previews, oversized anchors and merged queued text do not supply a quotable revision. Reading never publishes a card. ' +
+      'For "find the original words and cite them / 找原话带出处", full persisted originals include contentRevision and sourceParts (part coordinates and UTF-16 lengths): select the exact quote and your reason, then attach it through create_rich_block kind="sources" in the ordinary reply, or post_message searchAnswer with the actual answer. Previews, oversized anchors and merged queued text do not supply a quotable revision. Reading never publishes a card. ' +
       'Use when: browsing the current conversation, reading a different known threadId, finding relevant messages inside that thread, opening context around a known messageId, or explicitly catching up. ' +
       'NOT for: finding features, decisions, plans, lessons, or unknown threads across project knowledge; use search_evidence or list_threads first. ' +
       'Output: a bounded aggregate envelope with threadId, ordered messages, contextScope, hasMore, and nextCursor when continuation is required; anchor mode includes drillDown pointers (and bounded richBlocksSummary when extra.rich blocks exist), while responseMode="full" returns complete bodies (including attached richBlocks such as html_widget, card, checklist, or diff) per ordinary item and includes same-target queued bodies. contextScope="unread_delta" contains only currently unread relevant messages; hasMore=false closes that selection, not all thread history. ' +
@@ -3674,7 +3669,7 @@ export const callbackTools = [
       'Look up one original message. Use when following replyTo or a discovered source coordinate, including the origin of a remembered agreement. ' +
       'Not for broad discovery: use search_evidence first when the source ID is unknown. ' +
       'Returns the message content, sender, timestamp, attached richBlocks (in mode="full") or bounded richBlocksSummary (in mode="preview"), and optionally N nearby messages for context. ' +
-      'Full originals also return contentRevision and sourceParts (part coordinates and UTF-16 lengths); use them with your exact quote and reason in an ordinary source-card reply. Reading does not publish a card. ' +
+      'For "find the original words and cite them / 找原话带出处", use mode="full" to obtain contentRevision and sourceParts, select the exact quote and your reason, then attach it through create_rich_block kind="sources" in the ordinary reply, or post_message searchAnswer with the actual answer. Preview is a location clue, not full source verification. Reading does not publish a card. ' +
       'A durable typed local-review message also includes localReviewFact, as does thread-context; prose alone never creates that fact. ' +
       'GOTCHA: messageId is the bare message ID; for threadId#messageId coordinates pass only the part after #, not the thread prefix. ' +
       'PARAM GUIDE: messageId = required exact ID. contextCount = number of messages before/after to include (default 0, max 10). ' +

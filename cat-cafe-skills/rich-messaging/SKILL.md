@@ -1,12 +1,14 @@
 ---
 name: rich-messaging
-tips_exempt: "Original-source replies now use the existing sources rich block or post_message searchAnswer after a full original read; this changes member-side routing and retires the separate preparation tool, without adding a user command, setting or approval surface. Existing rich-message and HTML Works tips cover the human Chat entry; provenance checks and author-selected quotes remain required."
+tips_exempt: "Renewed 2026-11-15: original-source reply discovery now explicitly covers requests to find exact words with clickable sources. Members use the existing sources block or searchAnswer after a full read; quotes stay author-selected and existing provenance and grant checks remain required. Existing rich-message tips cover the same human Chat entry; no new command, setting or approval surface is introduced."
 description: >
-  Use when: 在当前 Chat 交付可看、可听或可操作产物（语音、图片、截图、HTML/demo、卡片、清单、diff、交互选择），或保存、继续修改 HTML 图解/小工具，无需用户说“富文本”。
-  Not for: 纯文字、仅讨论 HTML 原理或修改仓库源码；复杂 localhost 应用用 browser-preview。
+  Use when: 找原话并带可点击出处，或在当前 Chat 交付可看、可听或可操作产物（语音、图片、截图、HTML/demo、卡片、清单、diff、交互选择），或保存、继续修改 HTML 图解/小工具，无需用户说“富文本”。
+  Not for: 不附来源或媒体的普通文字回复、仅讨论 HTML 原理或修改仓库源码；复杂 localhost 应用用 browser-preview。
   Output: 消息内富块，或按用途保存 HTML 作品并把固定版本卡发回当前 Chat；续改保留同一作品的历史。
 triggers:
   - "发语音"
+  - "找原话"
+  - "带出处"
   - "说一句"
   - "录一段"
   - "用语音说"
@@ -56,6 +58,10 @@ triggers:
 ## 默认触发：Chat 内可见交付
 
 统一判断不是用户有没有说“富文本”，而是：**用户是否要在当前 Clowder AI Chat 里直接看到、听到或操作结果。** 命中时，生成一个本地文件或贴源码路径都不算完成；产物必须通过富块、作品卡或 Browser panel 进入当前消费面。不要求用户说出“富文本”这个实现词。
+
+**找原话带出处也属于交付。** 用简短回答加核过原句的 `sources` 卡，让主人直接回到原消息。
+这项能力在常用回复入口里；旧独立制备工具退役，不代表出处卡不可用。先核当前入口，
+不要只凭旧工具名消失就报“做不了”。确实发布失败时保留已核原文与可点击链接，并说明卡未交付。
 
 | 用户真正要的交付 | 默认执行面 |
 |---|---|

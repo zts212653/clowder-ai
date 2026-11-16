@@ -377,12 +377,6 @@ function resolveMemoryCueLegacyFallbacks(
   });
 }
 
-function isSubjectSeenNudgeSeed(
-  seed: MemoryCueOpportunitySeed,
-): seed is Extract<MemoryCueOpportunitySeed, { kind: 'subject_seen' }> {
-  return seed.kind === 'subject_seen' && seed.producer === 'entity_nudge';
-}
-
 function subjectSeenSeedMatchesNudge(
   seed: Extract<MemoryCueOpportunitySeed, { kind: 'subject_seen' }>,
   nudge: NudgePayload,
@@ -1433,22 +1427,12 @@ export interface InvocationParams {
     seed: MemoryCueOpportunitySeed;
     promptContext: string;
   }[];
-  /** Route-level candidates, presented and accounted only for this exact consumer. */
+  /** One route-level candidate set feeds reading metadata and any private-person cues. */
   readonly entityNudgePresentation?: {
     readonly service: EntityNudgeService;
     readonly candidates: EntityNudgeCandidateBatch;
     readonly sourceMessageId: string;
-  };
-  /**
-   * Person entity candidates projected as typed F287 Memory Cues. They still
-   * use F260's per-consumer cooldown, but their delivery is confirmed only if
-   * their exact Cue envelope is admitted into the provider request.
-   */
-  readonly entityNudgeCuePresentation?: {
-    readonly service: EntityNudgeService;
-    readonly candidates: EntityNudgeCandidateBatch;
-    readonly sourceMessageId: string;
-    readonly seeds: readonly Extract<MemoryCueOpportunitySeed, { kind: 'subject_seen' }>[];
+    readonly seeds?: readonly Extract<MemoryCueOpportunitySeed, { kind: 'subject_seen' }>[];
   };
 }
 
@@ -2042,12 +2026,6 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
   let memoryCuePresentationEnvelopes: readonly InvocationPresentationEnvelope[] = [];
   let omittedMemoryCueOpportunityIds: readonly string[] = [];
   let entityNudgePromptPresentation: EntityNudgePromptPresentation | undefined;
-  let entityNudgeCuePromptPresentation:
-    | {
-        readonly source: NonNullable<InvocationParams['entityNudgeCuePresentation']>;
-        readonly presentation: EntityNudgePromptPresentation;
-      }
-    | undefined;
   const resolveInvocationMemoryCues = async (): Promise<void> => {
     invocationPromptAdditions.length = 0;
     if (isScopedMember) return;
@@ -2070,7 +2048,6 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
     memoryCuePresentationEnvelopes = [];
     omittedMemoryCueOpportunityIds = [];
     const serverScope = { ownerUserId: userId, threadId, invocationId };
-    const cueSource = params.entityNudgeCuePresentation;
     let seeds = params.memoryCueOpportunitySeeds ?? [];
     if (deps.contextSourceAdmission && contextSourceDecision && params.contextSourceIngress && !params.liveCompanion) {
       const seed = await contextSourceBudget
@@ -2094,25 +2071,7 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
         seeds = [...seeds, seed];
       }
     }
-    let fallbacks = params.memoryCueLegacyFallbacks;
-    if (cueSource) {
-      entityNudgeCuePromptPresentation ??= {
-        source: cueSource,
-        presentation: cueSource.service.preparePresentation(cueSource.candidates, {
-          catId: catId as string,
-          invocationId,
-          sourceMessageId: cueSource.sourceMessageId,
-        }),
-      };
-      const sourceSeeds = new Set<MemoryCueOpportunitySeed>(cueSource.seeds);
-      const admittedNudges = entityNudgeCuePromptPresentation.presentation.result.nudges;
-      const mayPresentSeed = (seed: MemoryCueOpportunitySeed): boolean => {
-        if (!sourceSeeds.has(seed) || !isSubjectSeenNudgeSeed(seed)) return true;
-        return admittedNudges.some((nudge) => subjectSeenSeedMatchesNudge(seed, nudge));
-      };
-      seeds = seeds.filter(mayPresentSeed);
-      fallbacks = fallbacks?.filter((fallback) => mayPresentSeed(fallback.seed));
-    }
+    const fallbacks = params.memoryCueLegacyFallbacks;
     if (
       deps.profileCueOpportunitySource &&
       params.invocationOrigin === 'interactive' &&
@@ -2218,38 +2177,56 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
   const resolveEntityNudgePresentation = (): void => {
     const source = params.entityNudgePresentation;
     if (!source) return;
-    entityNudgePromptPresentation ??= source.service.preparePresentation(source.candidates, {
-      catId: catId as string,
-      invocationId,
-      sourceMessageId: source.sourceMessageId,
+    // Resolve the bounded person sources before applying the shared F260 cap:
+    // a person with neither independent reading metadata nor a private cue must
+    // not displace a later readable entity.
+    const sourceSeeds = new Map(
+      (source.seeds ?? []).map((seed) => [
+        memoryCueOpportunityId(seed, { ownerUserId: userId, threadId, invocationId }),
+        seed,
+      ]),
+    );
+    const typedEntityIds = new Set<string>();
+    for (const envelope of memoryCuePresentationEnvelopes) {
+      if (envelope.receipt.domain !== 'memory_cue') continue;
+      const seed = sourceSeeds.get(envelope.receipt.receipt.event.opportunityId);
+      if (seed) typedEntityIds.add(seed.payload.entityId);
+    }
+    entityNudgePromptPresentation ??= source.service.preparePresentation(
+      source.candidates,
+      { catId: catId as string, invocationId, sourceMessageId: source.sourceMessageId },
+      typedEntityIds,
+    );
+    const admittedNudges = entityNudgePromptPresentation.result.nudges;
+    memoryCuePresentationEnvelopes = memoryCuePresentationEnvelopes.filter((envelope) => {
+      if (envelope.receipt.domain !== 'memory_cue') return true;
+      const seed = sourceSeeds.get(envelope.receipt.receipt.event.opportunityId);
+      return !seed || admittedNudges.some((nudge) => subjectSeenSeedMatchesNudge(seed, nudge));
     });
     if (entityNudgePromptPresentation.promptContext) {
       invocationPromptAdditions.push(entityNudgePromptPresentation.promptContext);
     }
   };
-  const confirmEntityNudgeCuePresentation = (preparedBody: string): void => {
-    const pending = entityNudgeCuePromptPresentation;
-    if (!pending || pending.presentation.result.nudges.length === 0) return;
-    const attempt = currentPresentationAttempt;
-    if (!attempt) throw new Error('entity_nudge_cue_presentation_attempt_unavailable');
-    const admittedPromptSegments = new Map<string, string>();
-    for (const admitted of attempt.admitted) {
-      if (admitted.envelope.receipt.domain !== 'memory_cue') continue;
-      admittedPromptSegments.set(admitted.envelope.receipt.receipt.event.opportunityId, admitted.promptSegment);
-    }
-    const exactNudges: NudgePayload[] = [];
-    for (const nudge of pending.presentation.result.nudges) {
-      const seed = pending.source.seeds.find((candidate) => subjectSeenSeedMatchesNudge(candidate, nudge));
-      if (!seed) throw new Error('entity_nudge_cue_seed_mapping_unavailable');
-      const opportunityId = memoryCueOpportunityId(seed, { ownerUserId: userId, threadId, invocationId });
-      const promptSegment = admittedPromptSegments.get(opportunityId);
-      if (!promptSegment) continue;
-      if (!preparedBody.includes(promptSegment)) {
-        throw new Error('entity_nudge_cue_prepared_prompt_not_exact');
+  const confirmEntityNudgePresentation = (preparedBody: string | undefined): void => {
+    const presentation = entityNudgePromptPresentation;
+    const source = params.entityNudgePresentation;
+    if (!presentation || !source) return;
+    if (preparedBody === undefined) throw new Error('entity_nudge_prepared_prompt_unavailable');
+    const confirmed = new Set(presentation.renderedNudges);
+    for (const seed of source.seeds ?? []) {
+      const id = memoryCueOpportunityId(seed, { ownerUserId: userId, threadId, invocationId });
+      const delivered = (currentPresentationAttempt?.admitted ?? []).filter(
+        ({ envelope }) =>
+          envelope.receipt.domain === 'memory_cue' && envelope.receipt.receipt.event.opportunityId === id,
+      );
+      if (delivered.length === 0) continue;
+      if (delivered.some(({ promptSegment }) => !preparedBody.includes(promptSegment))) {
+        throw new Error('entity_nudge_prepared_prompt_not_exact');
       }
-      exactNudges.push(nudge);
+      const nudge = presentation.result.nudges.find((candidate) => subjectSeenSeedMatchesNudge(seed, candidate));
+      if (nudge) confirmed.add(nudge);
     }
-    if (exactNudges.length > 0) pending.presentation.confirmAssembled(exactNudges);
+    presentation.confirmAssembled([...confirmed]);
   };
   const asrPersonMemoryPromptService = new AsrPersonMemoryOpportunityPromptService({
     ...(deps.writeOpportunityTerminalLedger ? { terminalLedger: deps.writeOpportunityTerminalLedger } : {}),
@@ -5787,10 +5764,7 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
               },
             }
           : {}),
-        ...(generationRecorder ||
-        entityNudgePromptPresentation ||
-        entityNudgeCuePromptPresentation ||
-        deps.memoryCuePromptService
+        ...(generationRecorder || entityNudgePromptPresentation || deps.memoryCuePromptService
           ? {
               beforeProviderLaunch: async (prepared) => {
                 signal?.throwIfAborted();
@@ -5864,7 +5838,6 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
                 }
 
                 const presentation = entityNudgePromptPresentation;
-                const hasCueNudge = Boolean(entityNudgeCuePromptPresentation?.presentation.result.nudges.length);
                 // These continuations carry only recovery context; the original
                 // prompt already delivered and confirmed its nudges. Requiring
                 // or confirming them again either blocks recovery or double-writes
@@ -5874,18 +5847,11 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
                     'body' in prepared.message &&
                     prepared.message.body === '') ||
                   isCodexCompactionContinuation(prepared);
-                if (
-                  !liveFollowup &&
-                  !isContextContinuation &&
-                  !nativeAuthContinuation &&
-                  (presentation?.promptContext || hasCueNudge)
-                ) {
+                if (!liveFollowup && !isContextContinuation && !nativeAuthContinuation && presentation) {
                   if (!('body' in prepared.message)) throw new Error('entity_nudge_prepared_prompt_unavailable');
                   if (presentation?.promptContext && !prepared.message.body.includes(presentation.promptContext)) {
                     throw new Error('entity_nudge_prepared_prompt_not_exact');
                   }
-                  presentation?.confirmAssembled();
-                  confirmEntityNudgeCuePresentation(prepared.message.body);
                 }
                 if (
                   !liveFollowup &&
@@ -5897,6 +5863,16 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
                   await currentPresentationAttempt.release('source_changed_before_provider');
                   sourceRefreshRequired = true;
                   throw new Error('memory_cue_source_changed_before_provider');
+                }
+                if (!liveFollowup && !isContextContinuation && !nativeAuthContinuation) {
+                  // The asynchronous cue revalidation above may race an Entity
+                  // correction/retirement. Keep this check and confirmation in
+                  // the same synchronous turn so the main reply can rebuild.
+                  if (presentation && !presentation.isCurrent()) {
+                    sourceRefreshRequired = true;
+                    throw new Error('entity_source_changed_before_provider');
+                  }
+                  confirmEntityNudgePresentation('body' in prepared.message ? prepared.message.body : undefined);
                 }
                 return committed;
               },
@@ -6499,10 +6475,12 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
         sourceRefreshRequired = false;
         await terminateCurrentRequestGeneration('replaced', 'source_changed_before_provider');
         await presentationDelivery?.release('source_changed_before_provider');
-        // Only metadata already rejected by its source fence is rebuilt; this retry made no provider request.
-        memoryCuePresentationEnvelopes = memoryCuePresentationEnvelopes.filter(
-          (envelope) => !invalidSourceKeys.has(memoryCuePresentationKey(envelope)),
-        );
+        // Both projections belong to the same entity revision. Re-resolve before
+        // rebuilding so a retired entity cannot retain a previously resolved
+        // private-person handle. This rejected attempt made no provider request.
+        entityNudgePromptPresentation = undefined;
+        await resolveInvocationMemoryCues();
+        resolveEntityNudgePresentation();
         if (!usesProviderContinuityPreflight) await prepareCurrentPresentationDelivery();
         attempt -= 1;
         continue;
