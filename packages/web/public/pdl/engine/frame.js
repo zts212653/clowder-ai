@@ -522,21 +522,21 @@ function vmSeen(name, fn, args, v, got) {
   const k = '~vm:' + name + (args.length ? '|' + vmJson(args) : '');   /* ~ 开头：界面这边的读取，不是要向宿主要的数据来源 */
   readNote(k);
   const src = new Set(); got.forEach(function (r) { if (r[0] !== '~') src.add(r); });
-  VM_SEEN.set(k, { fn: fn, at: fn(), args: args, ctx: { tab: PV.tabKey, nav: NAV_CTX }, json: vmJson(v), src: src });
+  VM_SEEN.set(k, { fn: fn, at: fn(), args: args, ctx: { tab: PV.tabKey, region: PV.region, nav: NAV_CTX }, json: vmJson(v), src: src });
 }
 function vmChanged() {
-  const out = [], tab = PV.tabKey, nav = NAV_CTX, scope = new Set(), own = READ_OWN;
+  const out = [], tab = PV.tabKey, region = PV.region, nav = NAV_CTX, scope = new Set(), own = READ_OWN;
   READ_SCOPES.push(scope); READ_OWN = null; VM_REDO = true;   /* 重算不算哪一块读的 */
   try {
     VM_SEEN.forEach(function (e, k) {
-      PV.tabKey = e.ctx.tab; NAV_CTX = e.ctx.nav;
+      PV.tabKey = e.ctx.tab; PV.region = e.ctx.region; NAV_CTX = e.ctx.nav;
       const f = e.fn(); if (f !== e.at) { out.push(k); return; }   /* 函数换掉了（重新登记）：算变了 */
       const got = new Set(); READ_SCOPES.push(got);
       let v = null; try { v = typeof f === 'function' ? f.apply(null, e.args) : null; } catch (err) { v = null; } finally { READ_SCOPES.pop(); }
       const j = vmJson(v), more = Array.from(got).some(function (r) { return r[0] !== '~' && !e.src.has(r); });   /* 要读的数据来源多了（读回来的数据带出新的依赖）：重画一次，画的时候登记 */
       if (j === null || j !== e.json || more) out.push(k);
     });
-  } finally { READ_SCOPES.pop(); READ_OWN = own; VM_REDO = false; PV.tabKey = tab; NAV_CTX = nav; }
+  } finally { READ_SCOPES.pop(); READ_OWN = own; VM_REDO = false; PV.tabKey = tab; PV.region = region; NAV_CTX = nav; }
   return out;
 }
 /* 不在页面上的视图模型不再比：画完以后，哪一块都没读的记录拿掉 */
@@ -684,7 +684,7 @@ function ctLeaf(k, sig, draw) {
     if (was.focus) PROJ_FOCUS = true;
     return typeof was.piece === 'string' ? (/^<div class="vw-view/.test(was.piece) ? keptStub(k, was.piece) : was.piece) : Object.assign({}, was.piece, { html: keptStub(k, was.piece.html) });   /* 只交一个壳：比对时原来那棵整个留着（patchEl） */
   }
-  const reads = new Set(), own = new Set(), own0 = READ_OWN, focus0 = PROJ_FOCUS, up = CT_UP.slice(), ctx = { tab: PV.tabKey, nav: NAV_CTX, back: { page: BACK.page, detail: BACK.detail, placed: BACK.placed } };
+  const reads = new Set(), own = new Set(), own0 = READ_OWN, focus0 = PROJ_FOCUS, up = CT_UP.slice(), ctx = { tab: PV.tabKey, region: PV.region, nav: NAV_CTX, back: { page: BACK.page, detail: BACK.detail, placed: BACK.placed } };
   READ_SCOPES.push(reads); READ_OWN = own; CT_UP.push(k);
   let x;
   try { PROJ_FOCUS = false; x = draw(); } finally { READ_SCOPES.pop(); READ_OWN = own0; CT_UP.pop(); }
@@ -723,8 +723,8 @@ function renderLocal(keep, changed) {
   if (!targets.length && !pops.length && !ov) { applyTheme(); RENDER_AFTER.forEach(function (f) { f(keep); }); return true; }   /* 主题的值（透明度、字号……）是根上的样式变量，不在任何一块里 */   /* 读过变了的东西的一个都没有：什么都不画 */
   SETTLE.n++; RENDERING = true;
   targets.forEach(function (t) {
-    const tab = PV.tabKey, nav = NAV_CTX, back = Object.assign({}, BACK); PV.tabKey = t.p.ctx.tab; NAV_CTX = t.p.ctx.nav; Object.assign(BACK, t.p.ctx.back); CT_UP.push.apply(CT_UP, t.p.up);
-    try { t.x = ctLeaf(t.k, t.p.sig, t.p.draw); } finally { PV.tabKey = tab; NAV_CTX = nav; Object.assign(BACK, back); CT_UP.length = 0; }
+    const tab = PV.tabKey, region = PV.region, nav = NAV_CTX, back = Object.assign({}, BACK); PV.tabKey = t.p.ctx.tab; PV.region = t.p.ctx.region; NAV_CTX = t.p.ctx.nav; Object.assign(BACK, t.p.ctx.back); CT_UP.push.apply(CT_UP, t.p.up);
+    try { t.x = ctLeaf(t.k, t.p.sig, t.p.draw); } finally { PV.tabKey = tab; PV.region = region; NAV_CTX = nav; Object.assign(BACK, back); CT_UP.length = 0; }
     t.tpl = document.createElement('template'); t.tpl.innerHTML = t.x || '';
   });
   if (targets.some(function (t) { return t.tpl.content.childElementCount > 1; })) { RENDERING = false; return false; }   /* 重画出来不止一个根：换不进它原来那一个节点，走整页这一遍（这几块已经是新的，整页照样认它们变了） */
@@ -988,9 +988,9 @@ document.addEventListener('dblclick', function (e) {
    项的标题是视图里返回的默认名字 */
 function rtBody(r, k, fn, stack) {
   const b = REGION_TABS[r], sk = stack || navTabKey(r, k), cur = !stack && k === navTabCur(r);
-  const sub = !stack && navDepth(sk) > 1 ? navBackOf(sk, b.title(k)) : null, from = !sub && cur ? navBackOf(r) : null, prevT = PV.ctTitle, prevK = PV.tabKey;
-  PV.ctTitle = b.title(k); PV.tabKey = k;
-  try { return backIn('detail', sub, function () { return backIn('page', from, fn); }); } finally { PV.ctTitle = prevT; PV.tabKey = prevK; }
+  const sub = !stack && navDepth(sk) > 1 ? navBackOf(sk, b.title(k)) : null, from = !sub && cur ? navBackOf(r) : null, prevT = PV.ctTitle, prevK = PV.tabKey, prevR = PV.region;
+  PV.ctTitle = b.title(k); PV.tabKey = k; PV.region = r;   /* 正在画哪个区域：分栏按它的宽窄收起（regionNarrow） */
+  try { return backIn('detail', sub, function () { return backIn('page', from, fn); }); } finally { PV.ctTitle = prevT; PV.tabKey = prevK; PV.region = prevR; }
 }
 /* 预览窗：居中、可拖动、点外面关闭（内容是一个视图） */
 /* 返回 / 前进（引擎唯一的一处）：出栈 / 压回，离开前过未保存确认（proj.js） */

@@ -100,6 +100,32 @@ describe('precise lifecycle evidence in engine message components', () => {
     notice.source!.meta = { cloudBridgeOutboundReceipt: { ...receipt, dispatchInvocationId: 'previous-attempt' } };
     expect(deliveryView(source, messages, [], 'thread')[0].state).toBe('unknown');
   });
+  it('marks a delivery processing while its reply to this message is still running', () => {
+    const messages = records();
+    expect(deliveryView(messages[1], messages, [], 'thread')[0].processing).toBe(false);
+    if (messages[2].lifecycle?.kind === 'response') {
+      const { completedAt: _done, ...running } = messages[2].lifecycle;
+      messages[2] = { ...messages[2], lifecycle: { ...running, status: 'processing' } };
+    }
+    messages[1] = {
+      ...messages[1],
+      lifecycle: {
+        ...messages[1].lifecycle!,
+        dispatchRefs: [{ targetId: 'codex', phase: 'dispatched', statusMessageId: 'reply', dispatchedAt: 2100 }],
+      },
+    } as ChatMessage;
+    const run = {
+      threadId: 'thread',
+      targetId: 'codex',
+      invocationId: 'turn',
+      responseMessageId: 'reply',
+      inputEntryIds: ['e1', 'e2'],
+      inputMessageIds: ['initial', 'append'],
+      privateInputEntryIds: [],
+      startedAt: 1000,
+    };
+    expect(deliveryView(messages[1], messages, [run], 'thread')[0].processing).toBe(true);
+  });
   it('does not infer reading from a completed or failed reply', () => {
     const messages = records();
     expect(deliveryView(messages[1], messages, [], 'thread')[0]).toMatchObject({

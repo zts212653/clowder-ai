@@ -328,6 +328,7 @@ function bindPluginSpaces() {
       sel: chosen
         ? Object.assign({}, selected, {
             key: chosen.pluginId,
+            detailLoad: placementData().pluginDetails[chosen.pluginId] ? '' : 'loading',
             name: chosen.displayName,
             icon: chosen.icon,
             publisher: chosen.publisher,

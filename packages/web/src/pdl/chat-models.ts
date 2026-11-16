@@ -839,13 +839,15 @@ export function chatModels(data: ChatData, ui: ChatUiState, input?: ChatProjecti
           speaking: ui.speaking === message.id,
         },
         delivery: deliveryView(message, timeline, data.activeRuns ?? [], data.threadId).map((item) => {
-          // The delivery moves with the member's run in this thread while delivered or being read; nothing once read
-          // or when delivery failed. Its text is separate.
+          // The delivery moves with the member's run in this thread while delivered, being read, or its reply to this
+          // message is still running; nothing after that or when delivery failed. Its text is separate.
           const member = data.live?.[data.threadId]?.[item.who];
           return {
             ...item,
             live:
-              (item.state === 'busy' || item.state === 'delivered') && !item.cloud && member !== 'done'
+              (item.state === 'busy' || item.state === 'delivered' || item.processing) &&
+              !item.cloud &&
+              member !== 'done'
                 ? (member ?? '')
                 : '',
           };

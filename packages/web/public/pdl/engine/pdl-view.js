@@ -153,7 +153,7 @@ const PDL_SCHEMA = {
   disclosure: { act: 1, args: 1, blocks: 1, count: 1, key: 1, note: 1, open: 1, sub: 1, title: 1, trail: 1, when: 1 },   /* act：开合由视图模型管（open 来自数据，点了执行 act，参数 k = key）；没写时开合是组件自己的状态 */
   each: { blocks: 1, control: 1, from: 1, when: 1 },
   empty: { action: 1, help: 1, icon: 1, text: 1, when: 1 },
-  fold: { blocks: 1, height: ['m', 's'], key: 1, shape: ['$', 'bottom'], when: 1 },
+  fold: { blocks: 1, height: ['m', 's'], key: 1, more: { act: 1, args: 1, when: 1 }, shape: ['$', 'bottom'], when: 1 },
   dialog: { pop: 1, title: 1, help: 1, wide: 1, layout: ['viewport', 'fill'], span: ['full'], form: 1, error: 1, actions: 1, footer: 1, blocks: 1, when: 1 },   /* footer：底部区域的块声明，与标题栏 actions 分开。 */
   form: { args: 1, blocks: 1, from: 1, htmlId: 1, id: 1, note: 1, when: 1 },
   frame: { html: 1, src: 1, message: 1, on: 1, icon: 1, note: 1, plugin: 1, tall: 1, title: 1, what: 1, when: 1 },   /* html 自动量内容；src 填满视口。on.message 把框内消息交给动作，origin 的判断属于应用。 */
@@ -290,7 +290,7 @@ function pvList(v, sc, root) { const x = Array.isArray(v) ? v : pv(v, sc, root);
 function ctlJoin(a, b) { return (a || '') + (b || ''); }
 function pvAnnot(l, sc, root) { if (!l) return null; if (typeof l === 'string') { const t = pv(l, sc, root); if (Array.isArray(t)) return t.map(function (x) { return typeof x === 'string' ? { text: x, pos: 'after' } : x; }); if (t && typeof t === 'object') return t; return t ? { text: t, pos: 'after' } : null; } const t = pv(l.text, sc, root); return t ? { text: t, pos: l.pos || 'after', tone: pv(l.tone, sc, root) } : null; }
 function pvNote(n) { return n ? ' data-note="' + n + '"' : ''; }
-const PV = { units: {}, ro: 0, inert: 0, ctTitle: '', leadSize: '', load: '', viewId: '', tabKey: '' };   /* ctTitle：正在画的容器的名字（工作台标签的标题），视图下钻返回的默认名字 */   /* units：按单元画、自己逐项映射 item 的块（组件库登记） */
+const PV = { units: {}, ro: 0, inert: 0, ctTitle: '', leadSize: '', load: '', viewId: '', tabKey: '', region: '' };   /* ctTitle：正在画的容器的名字（工作台标签的标题），视图下钻返回的默认名字 */   /* units：按单元画、自己逐项映射 item 的块（组件库登记） */
 /* stay 的标记：不占布局的一层（display: contents），弹窗引擎看点击落在不在 [data-stay] 里 */
 function pvStay(html) { return html ? '<span class="vw-stay" data-stay>' + html + '</span>' : ''; }
 /* item：按数据重复的块 / 控件（from，或写成绑定的 options / items）每一项的字段在这里声明：对每一项按 item 取值（@ 是那一项），盖在这一项的数据上，
@@ -368,6 +368,7 @@ function pdlView(id) {
   const v = pdlLoc(PDL_VIEWS[id]); if (!v) return '';
   if (v.plugin) { pdlPluginNeed(v.plugin); if (!v.blocks && v.type !== 'frame') return ''; }   /* 插件的视图：第一次画时取回它的子树（延迟加载）；还没取回时只有节点声明，先画空 */
   const root = v.sources ? pdlSourceOf(v, NAV_CTX ? NAV_CTX.a : {}) : v.plugin && !v.vm ? {} : vmRead(v.vm);   /* 插件视图：数据来自它登记的请求（应用的通用 VM.plugin 去读） */
+  if (v.vm && vmFailed(v.vm)) return PV_DRAW.state('error', { text: tc('common.viewError') });   /* 视图模型或它读的数据出错：在这个视图的位置说 */
   if (!root) return v.empty ? PV_DRAW.state('empty', { text: pvText(v.empty, {}, {}) }) : '';
   if (v.type === 'frame') { const prev = PV.viewId; PV.viewId = id; try { return pvBlocks([Object.assign({}, v, { sources: null })], root, root); } finally { PV.viewId = prev; } }
   const placed = backPlaced(v.blocks, root);   /* 视图自己声明了返回放在哪（back 控件）：标题行不取返回 */

@@ -24,6 +24,7 @@ export function deliveryView(
         cloud: true,
         canRepeat: false,
         who: projection.targetId,
+        processing: projection.phase === 'processing',
         state: receipt
           ? { sent: 'delivered', failed: 'failed', unknown: 'unknown' }[receipt.status]
           : projection.phase === 'processing'
@@ -43,6 +44,7 @@ export function deliveryView(
       cloud: false,
       canRepeat: read.state === 'unconfirmed_delivery',
       who: projection.targetId,
+      processing: projection.phase === 'processing',
       state:
         response?.lifecycle?.kind === 'delivery_failure'
           ? 'failed'

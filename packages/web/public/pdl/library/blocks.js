@@ -414,8 +414,7 @@ function pvHead(b, sc, root) {
   return pageHead({ back: bk, lead: b.lead ? pvJoin(b.lead, sc, root, '') : '', title: pvText(b.title, sc, root), status: hs.status, titleNote: b.note, help: pv(b.help, sc, root) || (b.desc ? pvText(b.desc, sc, root) : ''), sub: sub, label: pvAnnot(b.label, sc, root), actions: (b.tools ? pvControls(b.tools, sc, root) : '') + actions, actNote: b.actNote });
 }
 /* list / cards 共用续读尾标（唯一一个）：服务端的下一页（声明的 next）和本地的下一页（渐进显示）都是它。
-   还有下一批时末尾是一个 ⋯（悬停“读取更多”），点它就读下一批；服务端的下一页滚到附近也会自动读（节点重画不续读，离开附近再进入或向下滚轮才触发下一批），
-   本地的下一页只在点 ⋯ 时多画（行已经读到了，不让页面自己往下长） */
+   还有下一批时末尾是一个 ⋯（悬停“查看更多”），点它就读下一批；滚到附近也会自动读（服务端的下一页、本地的下一页一样；节点重画不续读，离开附近再进入或向下滚轮才触发下一批） */
 const LIST_NEXT = {};
 function listNextHtml(decl, sc, root) {
   const d = pv(decl, sc, root); if (!d) return '';
@@ -429,7 +428,7 @@ A.listNextGo = function (d) { const x = LIST_NEXT[d.k]; if (x && x.enabled && !x
 function listNextRead(el, near) {
   const d = LIST_NEXT[el.dataset.listNext];
   if (!near) { el._nextRead = false; return; }
-  if (!d.enabled || d.busy || d.click || el._nextRead || !el.checkVisibility()) return;
+  if (!d.enabled || d.busy || el._nextRead || !el.checkVisibility()) return;
   el._nextRead = true; actFn(d.act)(d.args, el);
 }
 nearView('[data-list-next]', listNextRead);
@@ -454,7 +453,7 @@ function pvListBody(b, sc, root) {
   /* 渐进显示（列表自己的行为）：已经读到的行超过一页时先画一页，末尾“读取更多”每次多画一页。
      服务端分页的列表（next：滚到底读下一页）、限行滚动的（rows）、可拖动排序的、嵌在别处的紧凑列表不再本地分页 */
   const pageKey = id || PV.viewId + ':' + (typeof b.from === 'string' ? b.from : ''), items = b.order || b.inline || b.next || b.rows ? found : found.slice(0, LIST_PAGE[pageKey] || LIST_PAGE_N);
-  const more = items.length < found.length ? listNextTail('page:' + pageKey, { act: 'listMore', args: { list: pageKey }, enabled: true, busy: false, click: true }) : '';
+  const more = items.length < found.length ? listNextTail('page:' + pageKey, { act: 'listMore', args: { list: pageKey }, enabled: true, busy: false }) : '';
   if (tpl && tpl.moreAfter) {   /* 行模板把展开的块画在行后面（moreAfter）：展开由各行的数据管，可以同时展开多行 */
     const rows = items.map(function (it) { return pvRowHtml(b.row, it, root, null); }).join('');
     return b.inline ? (rows ? '<div class="lr-inline"' + lrCols(items.map(function (it) { return pvRow(b.row, it, root, null); })) + '>' + rows + '</div>' : emptyState({ text: pvText(b.empty, sc, root) || tc('list.empty') })) : '<div class="group lr-list"' + lrCols(items.map(function (it) { return pvRow(b.row, it, root, null); })) + '>' + (rows || emptyState({ html: pvText(b.empty, sc, root) || h(tc('list.empty')) })) + '</div>' + more;
@@ -589,9 +588,9 @@ Object.assign(PDL_BLOCKS, {
       const pane = function (side, cls) { const follow = b.scroll && (b.follow === side || b.follow === 'both'), body = pvBlocks(b[side], sc, root); return '<div class="' + cls + (b.scroll ? ' scroll' : '') + (follow ? ' stick-end' : '') + '">' + (follow ? '<div>' + body + '</div>' : body) + '</div>'; };
       return '<div class="cafe-two"' + (b.scroll ? ' data-scroll="panes"' : '') + '>' + pane('left', 'cafe-two-main') + pane('right', 'cafe-two-side') + '</div>';
     }
-    /* 容器树：分栏（split）下面两栏（pane-l 列表 / pane-r 详情）。并排时选中的详情打开在 pane-r（列表的兄弟）；收起时（窄屏，布局状态 VIEWPORT.narrow）
+    /* 容器树：分栏（split）下面两栏（pane-l 列表 / pane-r 详情）。并排时选中的详情打开在 pane-r（列表的兄弟）；收起时（窗口窄（VIEWPORT.narrow），或者画在窄的区域里（regionNarrow：没放大的工作台））
        分栏变成“列表 → 详情”，详情打开在两栏共同的父容器 split 里。打开到哪个容器写在 data-into 上，返回的判断只看容器树，在画之前从触发点定（见 core.js 的 go、proj.js 的 navOpen） */
-    const col = VIEWPORT.narrow, picked = !!pv(b.picked, sc, root);
+    const col = VIEWPORT.narrow || regionNarrow(PV.region), picked = !!pv(b.picked, sc, root);
     /* 收起时选了一项：详情盖住了列表，详情的头先画（引擎的返回落在看得见的那一栏的头里） */
     let L, Rr; if (col && picked) { Rr = pvBlocks(b.right, sc, root); L = pvBlocks(b.left, sc, root); } else { L = pvBlocks(b.left, sc, root); Rr = pvBlocks(b.right, sc, root); }
     /* 并排时两栏各自滚动（详情栏是自己的滚动容器，列表栏里的列表自己滚），滚详情不带着整页；收起时只有一栏，照常随页面滚 */
@@ -702,7 +701,7 @@ Object.assign(PDL_BLOCKS, {
     const it = pv(b.data, sc, root), node = pdlTyped(b.slot, pv(b.of, sc, root));
     if (!node) return pvBlocks(b.blocks, sc, root);
     const r = node.sources ? pdlSourceOf(node, it) : node.vm ? vmRead(node.vm, it) : it;
-    return r ? pvBlocks(node.blocks, r, r) : '';
+    return r ? pvBlocks(node.blocks, r, r) : node.vm && vmFailed(node.vm) ? viewState('error', { text: tc('common.viewError') }) : '';
   },
   component: function (b, sc, root) { const f = PDL_COMPONENTS[b.use]; return f ? f(pv(b.props, sc, root), sc, root) : ''; },
   /* 容器：给一组块套组件库里的一种角色（见 PDL_ROLES.box）；里面什么都没有就不画。tone：带状态色调的容器（告警卡片）；faint：被新的取代了（旧提议） */
@@ -728,7 +727,8 @@ Object.assign(PDL_BLOCKS, {
     const one = (b.blocks || []).length === 1 ? b.blocks[0] : null, list = one && (one.type === 'list' || one.type === 'each') ? one : null;   /* 包着一个列表（list / each）：单位是项，项数来自数据 */
     const body = one && one.type === 'each' ? pvList(one.from, sc, root).map(function (it) { return '<div class="fold-item">' + pvBlocks(one.blocks, it, root) + '</div>'; }).join('') : pvBlocks(b.blocks, sc, root);   /* each 的一项可以是几个块：包成一个单位，折叠按项数 */
     if (!body) return '';
-    return foldBox(pv(b.shape, sc, root) || 'bottom', pv(b.key, sc, root), body, { height: b.height, items: list ? pvList(list.from, sc, root).length : null });
+    const more = b.more && pvOk(b.more.when, sc, root) ? { act: pv(b.more.act, sc, root), args: pvArgsObj(b.more.args, sc, root) } : null;   /* 数据说还有更多：开关写“查看更多”，展开时读 */
+    return foldBox(pv(b.shape, sc, root) || 'bottom', pv(b.key, sc, root), body, { height: b.height, items: list ? pvList(list.from, sc, root).length : null, more: more });
   },
   stream: function (b, sc, root) { const id = b.id || 'chat', slot = b.slot || 'chat.node'; return '<div class="stream-list" data-stream="' + h(id) + '" data-own="stream">' + unitsHtml('stream:' + id, pvList(b.from, sc, root), streamUnitKey, function (it, r) { const t = pdlTyped(slot, it.kind); return t ? pvNode(t, it, r) : ''; }, root) + '</div>'; },
   /* 消息正文：内容本身（来自消息的富文本），不是界面标记；clamp 时收成几行 */

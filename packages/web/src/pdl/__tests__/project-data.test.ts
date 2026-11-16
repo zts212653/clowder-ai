@@ -32,7 +32,7 @@ it('holds each raw binding independently and reports the same failed source only
   expect(engine.dataError).toHaveBeenCalledOnce();
   console.push({ broken: { items: [] }, readFailures: {} });
   expect(console.read("projectData('broken').items")).toEqual([]);
-  expect(engine.dataOk).toHaveBeenCalledWith('broken');
+  expect(engine.dataOk).toHaveBeenCalledWith('project.broken');
   console.push({ broken: null, readFailures: { broken: new Error('source unavailable') } });
   expect(engine.dataError).toHaveBeenCalledTimes(2);
   expect(console.read("projectData('healthy')")).toBe(held);
@@ -51,8 +51,8 @@ it('routes an unpresented API error envelope through the held boundary and never
   expect(console.read("projectData('healthy')")).toEqual({ title: 'Owner record' });
   console.push(input);
   expect(engine.dataError).toHaveBeenCalledOnce();
-  expect(engine.dataError).toHaveBeenLastCalledWith('owner', failedRead);
-  expect(engine.dataOk).not.toHaveBeenCalledWith('owner');
+  expect(engine.dataError).toHaveBeenLastCalledWith('project.owner', failedRead);
+  expect(engine.dataOk).not.toHaveBeenCalledWith('project.owner');
 });
 
 it('keeps the existing error/retry state for a real owner read and adds no duplicate toast', async () => {
@@ -82,5 +82,5 @@ it('keeps the existing error/retry state for a real owner read and adds no dupli
   expect(read()).toMatchObject({ ops: { cafeWsOps: { load: 'error' } }, healthy: { title: 'Other owner' } });
   read();
   expect(engine.dataError).not.toHaveBeenCalled();
-  expect(engine.dataOk).not.toHaveBeenCalledWith('ops');
+  expect(engine.dataOk).not.toHaveBeenCalledWith('project.ops');
 });

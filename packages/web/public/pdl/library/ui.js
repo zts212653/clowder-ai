@@ -364,7 +364,12 @@ function checkBox(on, label, act, data, disabled) { return '<button type="button
 /* 单行输入框：o.mono 等宽、o.max 最长、o.disabled、o.input 输入时的处理（默认 cafeField） */
 function textInput(id, val, ph, o) { o = o || {}; return '<input class="input' + (o.mono ? ' mono' : '') + '" id="' + id + '" value="' + h(val == null ? '' : val) + '" placeholder="' + h(ph || '') + '" data-input="' + (o.input || 'cafeField') + '"' + (o.max ? ' maxlength="' + o.max + '"' : '') + (o.disabled ? ' disabled' : '') + (o.type ? ' type="' + o.type + '"' : '') + (o.k != null ? ' data-k="' + h(o.k) + '"' : '') + '>'; }
 function glyphSrc(n) { return n && typeof n === 'object' ? n.src : /^(https?:|data:|blob:|\/|\.{1,2}\/)/.test(n) ? n : ''; }
-function glyph(n, cls) { const src = glyphSrc(n); return '<span class="glyph' + (cls ? ' ' + cls : '') + '">' + (src ? '<img src="' + h(src) + '" alt="">' : icon(n, 18)) + '</span>'; }
+/* 图片图标：读到之前用骨架同一个节拍闪；读过的地址记住，重画时直接是读到的样子（不再闪） */
+const GLYPH_LOADED = new Set();
+function glyph(n, cls) { const src = glyphSrc(n); return '<span class="glyph' + (cls ? ' ' + cls : '') + '">' + (src ? '<img src="' + h(src) + '" alt=""' + (GLYPH_LOADED.has(src) ? ' data-loaded' : '') + '>' : icon(n, 18)) + '</span>'; }
+['load', 'error'].forEach(function (type) {
+  document.addEventListener(type, function (e) { const img = e.target; if (img.tagName !== 'IMG' || !img.parentNode || !img.parentNode.classList.contains('glyph')) return; GLYPH_LOADED.add(img.getAttribute('src')); img.setAttribute('data-loaded', ''); }, true);
+});
 function muted(t) { return '<span class="t-m muted">' + t + '</span>'; }
 /* 一个输入框（组件库，表单输入的唯一规则）：回车提交，Esc 取消（声明了 cancel 时失焦也取消；没声明时 Esc 清空）；
    提交只有框里最后一个图标，框外不放“添加 / 保存 / 创建 / 取消”这类文字按钮。一个框里可以有几个输入（“听成 → 应为”），中间一个箭头；

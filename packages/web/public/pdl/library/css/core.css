@@ -99,6 +99,8 @@ body, [data-grid] > *, .chat > .stream { --g-w: min(100cqi - var(--g-pad) - max(
 :is(.msg-body, .md) .divider { margin: var(--sp-l) 0; }
 .glyph { width: var(--ctl-m); height: var(--ctl-m); border-radius: var(--r-m); background: var(--bg-field); color: var(--fg-muted); display: grid; place-items: center; flex-shrink: 0; }
 .glyph > img { width: 100%; height: 100%; object-fit: cover; border-radius: inherit; display: block; }
+.glyph:has(> img:not([data-loaded])) { animation: mo-skel var(--loop) ease-in-out infinite backwards; }   /* 图片还没读到：骨架的节拍 */
+.glyph > img:not([data-loaded]) { visibility: hidden; }
 .glyph.glyph-xl { width: var(--av-xl); height: var(--av-xl); border-radius: var(--r-l); }   /* 页头的大图标（插件详情），和成员详情的 xl 头像同一个尺寸 */
 .glyph.glyph-xl svg { width: 50%; height: 50%; }
 .field { display: flex; flex-wrap: wrap; gap: var(--field-gap); padding: var(--sp-s) var(--sp-m); align-items: start; }   /* 字段：名字一列 + 控件；放不下时控件自己换到下一行（按字段自己的宽度，不看在对话框还是工作台里） */
@@ -1156,6 +1158,7 @@ button.tw:is(:hover, :focus-visible) { color: var(--accent-fg); }   /* 行本身
 /* 折叠组件（foldBox）：测量前、或内容不够长（data-foldable 不是 1）时就是完整内容，开关不出现 */
 .fold { position: relative; }
 .fold:not([data-foldable="1"]) > .fold-tg, .fold:not([data-foldable="1"]) > .fold-tail { display: none; }
+.fold[data-more] > .fold-tg { display: flex; }   /* 查看更多：内容短也有开关（后面还有没读的） */
 /* bottom：浏览器的行数截断（line-clamp，跨段落按行数）——整行切、不量；最后一行从上到下渐隐一行高（1lh）。档位 s 3 行 · m 5 行 · l 8 行（data-lines）；开关紧贴在下面，后面不留空 */
 /* bottom 折叠：档位 k = 收起时完整显示的单位数；收起 = k 个完整单位 + 第 k+1 个整单位渐隐到透明；多于 k+1 个单位才折。单位跟着内容走：
    正文的单位是行——收起时截成 k+1 行，截断后还溢出（有东西被藏起来）才有开关，最后一行整行渐隐；列表的单位是项（data-unit="item"）——露 k 项 + 第 k+1 项整项渐隐，后面的项不画，折不折按项数画好 */

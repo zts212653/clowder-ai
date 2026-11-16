@@ -184,10 +184,11 @@ function receiveProjectData(next) {
       const failure = failures[owner],
         state = projectReadState(held[owner]);
       if (held[owner] === previous[owner] && failure === beforeFailures[owner]) return;
-      // Existing read-error/retry components own this failure without a second toast.
+      // Existing read-error/retry components own this failure. Otherwise the failure is named by its read path, so the
+      // views that read this owner draw their error state in place.
       if (state === 'error') return;
-      if (!failure || projectReadState(previous[owner]) === 'error') dataOk(owner);
-      else if (beforeFailures[owner] !== failure) dataError(owner, failure);
+      if (!failure || projectReadState(previous[owner]) === 'error') dataOk(`project.${owner}`);
+      else if (beforeFailures[owner] !== failure) dataError(`project.${owner}`, failure);
     });
     syncWorkspace();
     syncChatOwners();

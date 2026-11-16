@@ -643,7 +643,8 @@ function recallModel() {
     raw: Object.assign({}, page, { events: events, next: page?.nextCursor ?? null }),
     threadId: data.threadId,
     sourceFilter: ui.recallSource,
-    load: read.threadId !== data.threadId ? 'loading' : read.load || (page?.readStatus === 'partial' ? 'stale' : ''),
+    load: read.threadId !== data.threadId ? 'loading' : read.load,
+    partial: page?.readStatus === 'partial',
     replyCount: selected
       ? Number(groups.some((group) => group.key === selected))
       : groups.filter((group) => group.key !== 'unlocated').length,

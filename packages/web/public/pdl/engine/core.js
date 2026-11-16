@@ -366,7 +366,7 @@ function reuseApply(old) {
   });
 }
 /* 滚动区的锚点（唯一一份）：窗口是固定的，内容里有变化（一张卡片变长变短、插入、删除、流式输出、展开收起、图片读完）时，
-   只有变了的那一块自己重画，其余的按窗口的锚点往能伸展的方向挪，不跳。锚点只由窗口的状态决定，和点了什么、动作同步还是异步无关：
+   只有变了的那一块自己重画，其余的按窗口的锚点往能伸展的方向挪，不跳。锚点由窗口的状态决定（用户点的那一下例外，见 anchorPin）：
    · 贴底的区（stick-end）停在底部：锚点是底，变化往上长（浏览器的反向排列本来就这样，不用补）；普通的区停在顶上：锚点是顶，变化往下长；
    · 否则：锚点是窗口里第一张完整可见的单位（带身份的最外层节点：消息、行……）的上沿，它不动，变化都往它下面长；
      它被删掉了，就由紧挨着它的下一张接到它原来的位置；
@@ -404,7 +404,7 @@ function anchorApply(sc, a) {
   if (!a || !a.refs || !sc.isConnected) return;
   for (let i = 0; i < a.refs.length; i++) {
     const n = anchorFind(sc, a.refs[i]); if (!n || !n.getBoundingClientRect().height) continue;
-    const d = n.getBoundingClientRect().top - sc.getBoundingClientRect().top - a.y;
+    const d = n.getBoundingClientRect().top - sc.getBoundingClientRect().top - (a.refs[i].y != null ? a.refs[i].y : a.y);
     if (Math.abs(d) >= 1) { const st = sc.scrollTop; sc.scrollTop += d; if (sc.scrollTop !== st) ANCHOR_SELF.set(sc, sc.scrollTop); }
     return;
   }
@@ -417,6 +417,17 @@ function anchorKeep(sc) {
   const a = ANCHOR.get(sc);
   if (a && Math.abs(sc.scrollTop - a.st) <= 1) anchorApply(sc, a);
   ANCHOR.set(sc, anchorTake(sc));
+}
+/* 用户点了一个东西（展开、打开、收起……）就是用户在操作这个区：和用户滚动一样，贴底的区不再跟着往下走，被点的节点是锚点——它不动，变化往它下面长。
+   锚点是它所在滚动区里它和它带身份的祖先（它没了就由祖先接着）；用户再滚动时重新按窗口取（滚回底部就又跟着往下） */
+function anchorPin(el) {
+  for (let sc = el.closest('.scroll'); sc; sc = sc.parentElement && sc.parentElement.closest('.scroll')) {
+    const refs = []; for (let n = el.closest(KEYED_SEL); n && sc.contains(n) && n !== sc; n = n.parentElement && n.parentElement.closest(KEYED_SEL)) if (nodeId(n)) refs.push(anchorRef(sc, n));
+    if (!refs.length) continue;
+    const r = sc.getBoundingClientRect();
+    refs.forEach(function (ref) { ref.y = ref.el.getBoundingClientRect().top - r.top; });
+    ANCHOR.set(sc, { st: sc.scrollTop, y: refs[0].y, refs: refs });
+  }
 }
 /* 滚动后立刻重新取锚点（滚动事件每帧一次，在尺寸观察之前到）；引擎自己为了还原而改的那一下不算 */
 document.addEventListener('scroll', function (e) { const sc = e.target; if (!sc.classList || !sc.classList.contains('scroll')) return; const own = ANCHOR_SELF.get(sc); ANCHOR_SELF.delete(sc); if (own != null && Math.abs(sc.scrollTop - own) <= 1) return; ANCHOR.set(sc, anchorTake(sc)); }, true);
@@ -811,7 +822,7 @@ document.addEventListener('click', function (e) {
   const inner = e.target.closest('button, .switch, select, input, textarea, a');
   if (inner && inner !== el && el.contains(inner) && !inner.dataset.act) return;
   const fn = actFn(el.dataset.act);
-  if (fn) { e.preventDefault(); e.stopPropagation(); ACT_FROM = el; ACT_TRIGGER = actTrigger(el); try { fn(actionArgs(el), el); } finally { ACT_FROM = null; } }
+  if (fn) { e.preventDefault(); e.stopPropagation(); anchorPin(el); ACT_FROM = el; ACT_TRIGGER = actTrigger(el); try { fn(actionArgs(el), el); } finally { ACT_FROM = null; } }
 });
 document.addEventListener('keydown', function (e) {
   if (e.key === 'Escape' && !e.isComposing && popEsc()) { e.preventDefault(); e.stopImmediatePropagation(); return; }   /* 弹窗框架：Esc 关最上面一个 */
@@ -1044,17 +1055,22 @@ function msgMd(x) { if (x && x.md != null && x.html == null) x.html = ENGINE_PAR
 /* 经组件库得到的两样文字和一个节点（ENGINE_PARTS 登记）：应用、视图模型只经这里取，不认识组件 */
 function whoSync() { ENGINE_PARTS.whoSync(); }
 function whoText(x, o) { return ENGINE_PARTS.whoText(x, o); }
-/* 数据出错：当空数据画（由调用的一方给空），这里只给一条通用提示。
-   来源（一份视图模型、宿主的一份数据……）的同一个错误只提示一次；dataOk 之后再出错会再提示。提示放到这一轮画完之后。 */
+/* 数据出错：不弹全局提示；读它的视图 / 块在自己的位置画出错状态（vmFailed）。来源按读取的名字记（视图模型出错是 vm:名字，宿主的一份数据是它被读的路径），
+   视图模型读到的来源里有出错的（同名或在它下面）就算这个视图读取出错。同一个错误只往控制台打一次，dataOk 之后再出错会再打 */
 const DATA_ERR = {};
 function dataError(source, e) {
   const m = String((e && e.message) || e);
-  if (DATA_ERR[source] === m) return;   /* 同一个错误：不再提示，也不再往控制台打 */
+  if (DATA_ERR[source] === m) return;
   console.error(e);
-  DATA_ERR[source] = m; setTimeout(function () { toast(tc('common.dataError'), null, 'danger'); }, 0);
+  DATA_ERR[source] = m;
 }
 function dataOk(source) { delete DATA_ERR[source]; }
-/* 读一份视图模型：读出错就当空数据（null，各处按自己的空状态画） */
+function vmFailed(name) {
+  if (DATA_ERR['vm:' + name]) return true;
+  const e = VM_SEEN.get('~vm:vm:' + name), bad = Object.keys(DATA_ERR);
+  return !!e && bad.length > 0 && Array.from(e.src).some(function (r) { return bad.some(function (k) { return r === k || r.indexOf(k + '.') === 0; }); });
+}
+/* 读一份视图模型：读出错给 null，读它的视图 / 块画出错状态（vmFailed），别处按空画 */
 function vmRead(name, arg) {   /* arg：按渲染类型取到的模板，它的视图模型收到这一项的数据（见组件库的 typed 块） */
   if (!VM[name]) return null;
   try { const r = VM[name](arg); dataOk('vm:' + name); return r; }

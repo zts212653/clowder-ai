@@ -60,6 +60,8 @@ CT_DRAW.main = function () {
   return { key: 'main', html: '<div class="main-col scroll" data-okey="main" data-c="' + c + '"' + ctGridAttr('main') + '>' + html + '</div>', col: 'minmax(0, 1fr)' };
 };
 CT_DRAW.main.hidden = function () { return !!S.panelWide && CT_DRAW.panel.open(); };
+/* 区域的宽窄（分栏按它收起）：工作台没放大、或者里面两项并排时是窄的；主区跟着窗口（VIEWPORT.narrow） */
+function regionNarrow(r) { return r === 'panel' && (!S.panelWide || !!navTabs(r).split); }
 /* 临时投影的关闭仍走原有出栈和离开检查；界面只画一个通用图标按钮。 */
 function layerExit(c, l) { return (l.exit || []).indexOf('x') >= 0 ? '<div class="layer-exit">' + btn(tc('common.close'), { iconOnly: true, icon: 'close', act: 'back', data: ' data-c="' + h(c) + '" data-exit="x"' }) + '</div>' : ''; }
 ENGINE_PARTS.layerExit = layerExit;

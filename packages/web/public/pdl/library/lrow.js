@@ -395,14 +395,18 @@ function foldTg(open, act, data, label, tip, shape) {
   const ic = shape === 'middle' ? (open ? 'chevin' : 'chevboth') : shape === 'up' ? (open ? 'down' : 'chevup') : (open ? 'chevup' : 'down');
   return '<button type="button" class="fold-tg" data-act="' + act + '"' + (data || '') + ' aria-expanded="' + open + '" aria-label="' + h(tip || label || tc(open ? 'common.collapse' : 'common.expand')) + '" data-tip="' + h(tip || tc(open ? 'common.collapse' : 'common.expand')) + '">' + icon(ic, 14) + (label ? '<span>' + label + '</span>' : '') + '</button>';
 }
+/* 查看更多（折叠的 more）：数据说后面还有（全文还没读、还有下一批……）时，开关一直在，写“查看更多”；展开时执行声明的读取。读到了数据就不再说有更多，回到普通的折叠 */
+const FOLD_MORE = {};
 function foldBox(style, key, html, o) {
   o = o || {};
-  const open = !!S.folds[key], k = h(key), tg = foldTg(open, 'fold', ' data-k="' + k + '"', '', style === 'middle' ? tc(open ? 'fold.collapseMiddle' : 'fold.expandMiddle') : '', style);
+  const open = !!S.folds[key], k = h(key), more = o.more && !open ? o.more : null;
+  if (o.more) FOLD_MORE[key] = o.more; else delete FOLD_MORE[key];
+  const tg = more ? foldTg(false, 'fold', ' data-k="' + k + '"', tc('fold.viewMore'), tc('fold.viewMore'), style) : foldTg(open, 'fold', ' data-k="' + k + '"', '', style === 'middle' ? tc(open ? 'fold.collapseMiddle' : 'fold.expandMiddle') : '', style);
   if (style === 'middle') return '<div class="fold" data-fold="middle" data-fold-key="' + k + '" data-open="' + open + '"><div class="msg-body fold-head">' + html + '</div>' +
     '<div class="msg-body fold-tail" aria-hidden="true" inert><div class="fold-tail-in">' + html + '</div></div>' + tg + '</div>';   /* 尾巴一直画着，展开时样式藏起来：开关只改属性 */
   /* 单位跟着里面的内容走：包着一个列表（o.items = 项数）时单位是项——一项换行了还是一项，折不折由项数直接决定（多于 k+1 项），不测量；正文的单位是行（line-clamp k+1，最后一行渐隐，截断后溢出才折） */
   const n = FOLD_LINES[o.height] || FOLD_LINES.l, items = o.items != null;
-  return '<div class="fold" data-fold="bottom" data-fold-key="' + k + '" data-open="' + open + '" data-lines="' + n + '"' + (items ? ' data-unit="item" data-foldable="' + (o.items > n + 1 ? 1 : 0) + '"' : '') + '><div class="fold-in' + (o.cls ? ' ' + o.cls : '') + '">' + html + '</div>' + tg + '</div>';
+  return '<div class="fold" data-fold="bottom" data-fold-key="' + k + '" data-open="' + open + '" data-lines="' + n + '"' + (more ? ' data-more' : '') + (items ? ' data-unit="item" data-foldable="' + (o.items > n + 1 ? 1 : 0) + '"' : '') + '><div class="fold-in' + (o.cls ? ' ' + o.cls : '') + '">' + html + '</div>' + tg + '</div>';
 }
 /* 分组列表的一段（组件库）：侧栏的置顶、对话组、项目、最近……都是它。
    - 只有一个滚动：外面的列表（导航栏）。段里不再套滚动容器。
@@ -542,7 +546,7 @@ LOCAL_NORM.push(function (root) {
   root.querySelectorAll('[data-fold]').forEach(function (f) {
     if (f.dataset.unit !== 'item') f.removeAttribute('data-foldable'); f.removeAttribute('style');   /* 列表的 data-foldable 是画出来的，不是量的 */
     const tg = f.querySelector(':scope > .fold-tg'), open = f.dataset.open === 'true', shape = f.dataset.fold;
-    if (tg) tg.outerHTML = foldTg(open, 'fold', ' data-k="' + h(f.dataset.foldKey) + '"', '', shape === 'middle' ? tc(open ? 'fold.collapseMiddle' : 'fold.expandMiddle') : '', shape);
+    if (tg && !f.hasAttribute('data-more')) tg.outerHTML = foldTg(open, 'fold', ' data-k="' + h(f.dataset.foldKey) + '"', '', shape === 'middle' ? tc(open ? 'fold.collapseMiddle' : 'fold.expandMiddle') : '', shape);
   });
 });
 /* 折叠开关：本地更新——改 data-open、换开关、重新量；不重画消息、不重画对话流。改完把所在消息 / 孤岛记下的“版本”更新成现在的样子，
@@ -550,6 +554,7 @@ LOCAL_NORM.push(function (root) {
 /* 决定结果的详情开合（result 块）：展开状态在数据里，改完重画 */
 function foldBlock(d) {
   const k = d.k, open = S.folds[k] = !S.folds[k];
+  if (open && FOLD_MORE[k]) { actFn(FOLD_MORE[k].act)(FOLD_MORE[k].args); render(true); return; }   /* 查看更多：读剩下的，重画（读到之前照样展开着） */
   document.querySelectorAll('[data-fold-key]').forEach(function (f) {
     if (f.dataset.foldKey !== k) return;
     f.setAttribute('data-open', String(open));
