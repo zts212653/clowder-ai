@@ -562,10 +562,11 @@ describe('unmodified runtime and project chat bindings', () => {
           { act: 'notPublic', args: {} },
           { act: 'toast', args: { msg: 'two' } },
         ],
-      });
+      } as never);
       await w.eval("A.plugin({plugin:'t-p',request:'save'})");
-      expect(port.post.mock.calls.at(-1)![0]).toBe('/api/plugins/t-p/save');
-      expect(port.post.mock.calls.at(-1)![1]).toMatchObject({ thread, pick: 'obj:a', tab: 'version' });
+      const [path, query] = port.post.mock.calls.at(-1) as unknown[];
+      expect(path).toBe('/api/plugins/t-p/save');
+      expect(query).toMatchObject({ thread, pick: 'obj:a', tab: 'version' });
       expect(w.eval('TOAST_LOG.slice(-2)')).toEqual(['one', 'two']);
       // a { t, args } in returned data is text in the plugin's packs, like one written in PDL; other objects stay data
       expect(w.eval("pv('$.x', {}, { x: { t: 'common.viewError' } })")).toBe(w.eval("tc('common.viewError')"));

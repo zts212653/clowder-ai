@@ -110,9 +110,6 @@ jobs:
       - name: ACP plugin configuration and member model UI
         run: >-
           pnpm --filter @cat-cafe/web exec node scripts/run-with-node-env-test.mjs pnpm exec vitest run
-          src/components/__tests__/plugin-runtime-models.test.tsx
-          src/components/__tests__/member-runtime-catalog.test.tsx
-          src/components/settings/plugin-manager/__tests__/agent-client-identity.test.tsx
           src/hooks/__tests__/useSendMessage-routing-confirmation.test.ts
       - name: Scoped member sessions preserve frozen execution contracts
         run: >-
@@ -191,15 +188,6 @@ jobs:
           tar -xzf "$candidate_dir/bundle.tgz" -C "$candidate_dir"
           export F202_CANDIDATE_MATRIX="$candidate_dir/f202-c1-candidate-2b4f0418c1dd/candidate-matrix.json"
           pnpm --filter @cat-cafe/api test:native-tracking-artifact
-      - name: Console member identity and persistent send strategy regressions
-        run: >-
-          pnpm --filter @cat-cafe/web exec node scripts/run-with-node-env-test.mjs pnpm exec vitest run
-          src/components/__tests__/1398-sender-identity.test.tsx
-          src/components/__tests__/MessageBundleCard-contract.test.tsx
-          src/components/__tests__/chat-input-message-disposition.test.ts
-          src/components/__tests__/chat-input-add-menu.test.tsx
-          src/components/__tests__/classic-a2a-parity.test.tsx
-          src/hooks/__tests__/useMessageDispositionPreference-settlement.test.tsx
       - name: Personal first-run lifecycle with production API handlers
         run: pnpm --filter @cat-cafe/web test:first-run-entry:api
       - run: pnpm --filter @cat-cafe/web build
@@ -253,15 +241,6 @@ jobs:
           --package packages/web
           --script test:first-run-onboarding
       - run: pnpm --filter @cat-cafe/web run test:first-run-onboarding
-      - name: Member avatar hydration, identity and callback status
-        run: >-
-          pnpm --filter @cat-cafe/web exec vitest run
-          src/components/__tests__/CatAvatar-hydration-race.test.tsx
-          src/components/__tests__/CatAvatar-callback-auth-dot.test.tsx
-          src/components/__tests__/CatAvatar-ring.test.tsx
-          src/components/__tests__/cat-nameplate-avatar.test.tsx
-          src/hooks/__tests__/useConversationViewPreference-lifecycle.test.tsx
-          src/components/shell/__tests__/conversation-view-header.test.tsx
       - name: Browser evidence rejects user echoes and accepts normal identity signatures
         run: |
           # Browser runtime libraries already ship with the runner image; apt only

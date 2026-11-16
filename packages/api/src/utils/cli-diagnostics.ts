@@ -14,6 +14,7 @@
 
 import type { CliDiagnostics, CliErrorReasonCode } from '@cat-cafe/shared';
 import { CLASSIFIER_PATTERNS } from './cli-error-patterns.js';
+import { cliInstallHint, isKnownCliCommand } from './cli-resolve.js';
 import { sanitizeCliStderr } from './sanitize-cli-stderr.js';
 
 // F212 Phase B: CliDiagnostics + CliErrorReasonCode hoisted to @cat-cafe/shared so the web
@@ -101,6 +102,10 @@ const REASON_TEXT: Record<CliErrorReasonCode, { summary: string; hint: string }>
   spawn_failed: {
     summary: 'CLI 进程无法启动',
     hint: 'ENOENT：检查 CLI 入口、工作目录和 PATH（Windows 用 where，其他系统用 which）。EACCES/EPERM：检查文件权限或安全软件拦截。UNKNOWN/ENOEXEC：错误码不能确定具体原因，请检查入口文件完整性与系统兼容性，必要时按 CLI 官方说明重新安装。展开详细诊断查看启动证据，并用 invocationId 关联后端日志。',
+  },
+  cli_not_found: {
+    summary: 'CLI 未找到',
+    hint: '请先安装对应的 CLI，再重试。',
   },
   context_window_exceeded: {
     summary: '对话上下文超长',
@@ -681,5 +686,35 @@ export function buildSilentCompletionDiagnostic(input: {
           ),
     // Self-built structured payload — safe like Phase D's 'cc_structured' channel
     excerptSource: 'cc_structured',
+  };
+}
+
+/**
+ * Structured diagnostic for a provider CLI that is not installed.
+ *
+ * A missing binary is detected before any spawn, so this payload deliberately carries
+ * no exit code and no `safeExcerpt`: inventing either would claim evidence that does
+ * not exist. The install command is the actionable next step; the reasonCode is
+ * excluded from F222 auto-issue triggering (user-environment state, not our defect).
+ *
+ * `publicLabel` is only used for a custom wrapper and must be a fixed, path-safe
+ * description (for example `Codex CLI`). Known commands keep their bare command name
+ * and shared install hint. Never pass a raw configured executable path here.
+ */
+export function buildCliNotFoundDiagnostic(
+  command: string,
+  platform: NodeJS.Platform = process.platform,
+  publicLabel?: string,
+): CliDiagnostics {
+  const knownCommand = isKnownCliCommand(command);
+  const label = knownCommand ? `${command} CLI` : (publicLabel ?? '自定义 CLI');
+  const installHint = knownCommand ? cliInstallHint(command, platform) : undefined;
+  return {
+    reasonCode: 'cli_not_found',
+    publicSummary: `${label} 未找到`,
+    publicHint: installHint
+      ? `请先运行 ${installHint} 安装，再重试。`
+      : '请检查该成员配置的自定义 CLI 命令或路径，确认可执行后重试。',
+    debugRef: { command: knownCommand ? command : label, signal: null },
   };
 }
