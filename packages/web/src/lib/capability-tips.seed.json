@@ -1033,7 +1033,7 @@
     },
     "bodySource": {
       "path": "cat-cafe-skills/refs/memory-routing-partial.md",
-      "anchor": "graph_resolve"
+      "anchor": "cat_cafe_read_memory"
     },
     "contexts": ["thinking", "review"],
     "audience": ["all"],
@@ -1053,7 +1053,7 @@
     },
     "structureSource": {
       "path": "cat-cafe-skills/memory-search-best-practices/SKILL.md",
-      "anchor": "Output: 单一 owner"
+      "anchor": "## 单一 owner 闭环"
     },
     "bodySource": {
       "path": "cat-cafe-skills/memory-search-best-practices/SKILL.md",
@@ -3551,6 +3551,31 @@
       "type": "open_concierge_draft",
       "label": "配置共用平台 API Key 账号",
       "draftPrompt": "请带我到猫猫团队的账户与登录页，选择 Anthropic API、OpenAI Platform 或 Google API 添加平台账号；密钥由我自己填写，模型由使用方选择，并保留现有 Claude/Codex/Gemini 登录绑定。"
+    },
+    "owner": "codex61-sol"
+  },
+  {
+    "id": "capability-claude-account-quota-windows",
+    "kind": "capability",
+    "sourceRef": {
+      "path": "packages/web/src/components/accounts/ClaudeQuotaControl.tsx",
+      "anchor": "ClaudeQuotaControl"
+    },
+    "structureSource": {
+      "path": "packages/web/src/components/accounts/ClaudeQuotaControl.tsx",
+      "anchor": "ClaudeQuotaControl"
+    },
+    "bodySource": {
+      "path": "packages/web/src/components/accounts/claude-quota.shell-copy.ts",
+      "anchor": "claudeQuotaCopy"
+    },
+    "contexts": ["concierge_open"],
+    "audience": ["cvo"],
+    "body": "想看两个 Claude 订阅号还剩多少？到「猫猫团队 → 账户与登录」点各号的「读取余量」，会分别读取 Haiku 和 Fable，显示每个窗口与采集时间。备用号保留最后读数；需要换号时仍由你点「换成这个」并确认。",
+    "action": {
+      "type": "open_concierge_draft",
+      "label": "查看 Claude 两号余量",
+      "draftPrompt": "请带我到账户与登录页，查看两个 Claude 订阅号的总周额度、Fable 窗口、重置和采集时间；解释怎样显式读取余量，由我亲自确认是否切号。"
     },
     "owner": "codex61-sol"
   },

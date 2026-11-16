@@ -1,13 +1,12 @@
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
-import { once } from 'node:events';
 import { mkdir } from 'node:fs/promises';
-import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { after, before, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
+import { findFreePort, stopServer, waitForPage } from './_harness.mjs';
 import { registerDefaultEntryJourney } from './default-entry-journey.harness.mjs';
 import { registerChatFileTabJourneys } from './f307-chat-file-tabs.journey.mjs';
 import { registerHomeSearchReturnJourneys } from './f307-home-search-return.journey.mjs';
@@ -46,39 +45,6 @@ async function openFileTools(page) {
     .locator(`[data-surface-id="${FILE_SURFACE_ID}"]`)
     .getByRole('button', { name: '文件工具', exact: true })
     .click();
-}
-
-async function findFreePort() {
-  const socket = createServer();
-  socket.listen(0, '127.0.0.1');
-  await once(socket, 'listening');
-  const address = socket.address();
-  assert(address && typeof address !== 'string');
-  socket.close();
-  await once(socket, 'close');
-  return address.port;
-}
-
-async function waitForPage(url, server, output) {
-  const deadline = Date.now() + 180_000;
-  while (Date.now() < deadline) {
-    if (server.exitCode !== null) throw new Error(`Next.js exited before readiness:\n${output.join('')}`);
-    try {
-      const response = await fetch(url);
-      if (response.ok) return;
-    } catch {
-      // The real Thread route is still compiling.
-    }
-    await new Promise((resolve) => setTimeout(resolve, 250));
-  }
-  throw new Error(`Timed out waiting for ${url}:\n${output.join('')}`);
-}
-
-async function stopServer(server) {
-  if (server.exitCode !== null) return;
-  server.kill('SIGTERM');
-  await Promise.race([once(server, 'exit'), new Promise((resolve) => setTimeout(resolve, 5_000))]);
-  if (server.exitCode === null) server.kill('SIGKILL');
 }
 
 function json(route, body, status = 200) {

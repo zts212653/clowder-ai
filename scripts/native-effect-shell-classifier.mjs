@@ -3,7 +3,7 @@ import { shellSegments } from './lib/shell-lexical.mjs';
 import { SUBSTITUTION } from './lib/shell-text.mjs';
 import { codexAuthenticationEffect } from './native-auth-effect.mjs';
 import { DELETE_PROGRAMS, findArgvDeletes, findExecutedCommands } from './native-effect-find-classifier.mjs';
-import { constrainedGhApiOperation } from './native-effect-github-classifier.mjs';
+import { constrainedGhApiOperation, isConstrainedGhRead } from './native-effect-github-classifier.mjs';
 import { classifyHttpOperation } from './native-effect-http-classifier.mjs';
 import { FOREIGN_INTERPRETERS } from './native-effect-interpreter-source.mjs';
 import { isConstrainedLocalMediaObservation } from './native-effect-media-classifier.mjs';
@@ -11,7 +11,6 @@ import {
   constrainedGhPullRequestOperation,
   gitArgvRewritesRepository,
   gitSubcommandArgs,
-  isConstrainedGhPullRequestRead,
   isGitRepositoryObservation,
   isGitWriteOperation,
   isRepositoryRefresh,
@@ -253,8 +252,7 @@ function isReadOperation(raw) {
     isStatRead(raw) ||
     isConstrainedLocalMediaObservation(raw) ||
     isGitRepositoryObservation(raw) ||
-    isConstrainedGhPullRequestRead(raw) ||
-    constrainedGhApiOperation(raw)?.effect === 'read' ||
+    isConstrainedGhRead(raw) ||
     isConstrainedSqliteRead(raw) ||
     isLocalObservation(raw) ||
     /^\s*cd\b[^;&|]*$/i.test(raw) ||

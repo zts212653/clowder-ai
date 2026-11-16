@@ -26,57 +26,43 @@ const ROOT = (() => {
 const FULL_CANONICAL_SOURCES = ['CLAUDE.md', 'AGENTS.md', 'GEMINI.md'];
 const BRIEF_CANONICAL_SOURCES = ['OPENCODE.md'];
 
-const FULL_REQUIRED_PHRASES = [
-  '三入口',
-  'cat_cafe_graph_resolve',
-  'cat_cafe_list_recent',
-  'cat_cafe_search_evidence',
-  'memory-routing-partial',
-];
+// F332 F2 (2026-11-16): graph_resolve and list_recent became groups of the one find entry; the canonical
+// sources now teach one entry plus the read entry, and must not route cats to the retired names.
+const FULL_REQUIRED_PHRASES = ['cat_cafe_search_evidence', 'cat_cafe_read_memory', 'memory-routing-partial'];
 
-const BRIEF_REQUIRED_PHRASES = ['graph_resolve', 'list_recent', 'search_evidence', 'memory-routing-partial'];
+const BRIEF_REQUIRED_PHRASES = ['search_evidence', 'read_memory', 'memory-routing-partial'];
 
 const PARTIAL_PATH = 'cat-cafe-skills/refs/memory-routing-partial.md';
 
 describe('F188 Phase F — harness-mismatch-canonical-sources fixture', () => {
-  test('partial source-of-truth exists', () => {
+  test('partial source-of-truth exists and teaches one find entry', () => {
     const full = join(ROOT, PARTIAL_PATH);
     assert.ok(existsSync(full), `partial missing: ${PARTIAL_PATH}`);
     const content = readFileSync(full, 'utf-8');
-    assert.ok(content.includes('cat_cafe_graph_resolve'));
-    assert.ok(content.includes('cat_cafe_list_recent'));
     assert.ok(content.includes('cat_cafe_search_evidence'));
+    assert.ok(content.includes('cat_cafe_read_memory'));
+    assert.ok(content.includes('not_covered'), 'partial keeps the coverage judgement');
+    assert.equal(content.includes('cat_cafe_graph_resolve'), false); // mcp-cutover-negative-reference: absence
+    assert.equal(content.includes('cat_cafe_list_recent'), false); // mcp-cutover-negative-reference: absence
   });
 
-  for (const file of FULL_CANONICAL_SOURCES) {
-    test(`${file} contains 三入口路由 + all 3 entry tool names + partial reference`, () => {
+  for (const file of [...FULL_CANONICAL_SOURCES, ...BRIEF_CANONICAL_SOURCES]) {
+    const phrases = FULL_CANONICAL_SOURCES.includes(file) ? FULL_REQUIRED_PHRASES : BRIEF_REQUIRED_PHRASES;
+    test(`${file} teaches the one find entry, the read entry and the partial reference`, () => {
       const content = readFileSync(join(ROOT, file), 'utf-8');
-      for (const phrase of FULL_REQUIRED_PHRASES) {
+      for (const phrase of phrases) {
         assert.ok(content.includes(phrase), `${file} missing required phrase: "${phrase}"`);
       }
+      assert.equal(content.includes('三入口'), false, `${file} still routes by the retired three entries`);
     });
   }
 
-  for (const file of BRIEF_CANONICAL_SOURCES) {
-    test(`${file} (brief reference style) contains all 3 entry tool names + partial reference`, () => {
-      const content = readFileSync(join(ROOT, file), 'utf-8');
-      for (const phrase of BRIEF_REQUIRED_PHRASES) {
-        assert.ok(content.includes(phrase), `${file} missing required phrase: "${phrase}"`);
-      }
-    });
-  }
-
-  test('memory-navigation skill registered in manifest', () => {
+  test('memory-navigation retired: its useful noise control lives in memory-search-best-practices', () => {
     const manifest = readFileSync(join(ROOT, 'cat-cafe-skills/manifest.yaml'), 'utf-8');
-    assert.ok(manifest.includes('memory-navigation:'), 'manifest missing memory-navigation entry');
-    assert.ok(manifest.includes('F188 Phase F'), 'manifest entry should reference F188 Phase F');
-  });
-
-  test('memory-navigation SKILL.md exists with key sections', () => {
-    const skill = readFileSync(join(ROOT, 'cat-cafe-skills/memory-navigation/SKILL.md'), 'utf-8');
-    assert.ok(skill.includes('When to load'));
-    assert.ok(skill.includes('三入口决策树'));
-    assert.ok(skill.includes('噪音控制'));
-    assert.ok(skill.includes('KD-8') || skill.includes('隐私'));
+    assert.equal(manifest.includes('memory-navigation:'), false);
+    assert.equal(existsSync(join(ROOT, 'cat-cafe-skills/memory-navigation/SKILL.md')), false);
+    const search = readFileSync(join(ROOT, 'cat-cafe-skills/memory-search-best-practices/SKILL.md'), 'utf-8');
+    assert.ok(search.includes('graphDepth'));
+    assert.ok(search.includes('since='));
   });
 });

@@ -118,7 +118,7 @@ describe('MCP Perspective Tools', () => {
     assert.ok(text.includes('search-f209 [search_evidence] status=ok hits=2 degraded=true effectiveMode=lexical'));
     assert.ok(text.includes('degradeReason=passage_embedding_unavailable'));
     assert.ok(text.includes('docs/features/F209-evidence-recall-optimization.md'));
-    assert.ok(text.includes('drillDown: cat_cafe_read_file_slice'));
+    assert.equal(JSON.parse(text.match(/^ {3}readRef: (.+)$/m)[1]).kind, 'file');
     assert.ok(text.includes('route: docs/features/F209-evidence-recall-optimization.md status=route_identified'));
     assert.ok(text.includes('hint: open feature slice'));
     assert.ok(

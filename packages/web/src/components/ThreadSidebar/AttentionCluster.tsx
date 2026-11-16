@@ -5,7 +5,7 @@ import { type FormEvent, type ReactNode, useEffect, useState } from 'react';
 import type { SidebarSnapshotRow } from '@/stores/sidebarProjectionStore';
 import { useShellPresentation } from '../shell/shell-presentation';
 import { AttentionClusterHeaderV2 } from './AttentionClusterHeaderV2';
-import type { AttentionCluster } from './attention-clusters';
+import type { ArrangeHeaderSlots, AttentionCluster } from './attention-clusters';
 import type { GroupPeekProjection } from './collapsed-group-peek';
 import { SidebarGroupSegmentV2 } from './SidebarGroupSegmentV2';
 import { formatRelativeTime } from './thread-utils';
@@ -23,6 +23,8 @@ export interface AttentionClusterHeaderProps {
   onResetMemberSort?: () => void;
   sortingDisabled?: boolean;
   peek?: GroupPeekProjection;
+  arrangeHeader?: ArrangeHeaderSlots;
+  decisionThreadIds?: ReadonlySet<string>;
   peekEnabled?: boolean;
   decisionsConfirmed?: boolean;
   currentId?: string | null;
@@ -68,6 +70,8 @@ export function AttentionClusterHeader({
   onResetMemberSort,
   sortingDisabled = false,
   peek,
+  arrangeHeader,
+  decisionThreadIds,
   peekEnabled,
   decisionsConfirmed,
   currentId,
@@ -105,6 +109,8 @@ export function AttentionClusterHeader({
         onResetMemberSort={onResetMemberSort}
         sortingDisabled={sortingDisabled}
         peek={peek}
+        arrangeHeader={arrangeHeader}
+        decisionThreadIds={decisionThreadIds}
         peekEnabled={peekEnabled}
         decisionsConfirmed={decisionsConfirmed}
         currentId={currentId}

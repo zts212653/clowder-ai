@@ -29,9 +29,7 @@ afterEach(() => {
   }
 });
 test('matter tools carry source selections and exact retries through the shared callback routes', async () => {
-  const { matterMemoryTools, handleListMemoryMatters, handleReadMemoryMatter } = await import(
-    '../dist/tools/matter-memory-tools.js'
-  );
+  const { handleListMemoryMatters, handleReadMemoryMatter } = await import('../dist/tools/matter-memory-tools.js');
   await handleListMemoryMatters({ query: '设置入口', cursor: 'next-page', limit: 2 });
   await handleReadMemoryMatter({ matterId: 'matter/one', cursor: 'entry-page', limit: 3, history: true });
   const change = {
@@ -58,18 +56,16 @@ test('matter tools carry source selections and exact retries through the shared 
   );
 });
 
-test('canonical matter descriptions distinguish contextual interpretation, exact speech and a real read', async () => {
-  const { matterMemoryTools } = await import('../dist/tools/matter-memory-tools.js');
-  const read = matterMemoryTools.find((tool) => tool.name === 'cat_cafe_read_memory_matter');
+test('canonical matter description separates summaries, optional quotations and current-page reads', async () => {
   const { rememberTools } = await import('../dist/tools/remember-tool.js');
   const description = z
     .object(rememberTools[0].inputSchema)
     .shape.items.element.options.find((item) => item.shape.target.value === 'matter').shape.payload.description;
-  assert.match(read.description, /description.*contextual interpretation/i);
-  assert.match(read.description, /raw quotes/i);
-  assert.match(read.description, /changed.*interpretation.*unverified/i);
-  assert.match(read.description, /Directory.*do not count/i);
-  assert.match(description, /description is optional cat-written context and applicability/i);
-  assert.match(description, /exact original/i);
-  assert.match(description, /raw UTF-16/i);
+  assert.match(description, /summary: your interpretation/i);
+  assert.match(description, /sources are optional threadId pointers/i);
+  assert.match(description, /a pointer is not verified original speech/i);
+  assert.match(description, /actual summary writer/i);
+  assert.match(description, /description is optional.*context.*applicability/i);
+  assert.match(description, /exact quotations remain optional.*raw UTF-16/i);
+  assert.match(description, /expectedRevision from cat_cafe_read_memory/i);
 });

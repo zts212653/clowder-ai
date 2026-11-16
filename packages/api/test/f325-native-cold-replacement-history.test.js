@@ -32,7 +32,7 @@ function buildL0({ rosterRow, capsuleText, restricted }) {
     '',
     capsuleText,
     '',
-    '共享事实: cat-cafe-profile://corpus/current（cat_cafe_read_profile layer=corpus 按需读）',
+    '共享事实: cat-cafe-profile://corpus/current（cat_cafe_read_memory layer=corpus 按需读）',
     '读源走本轮绑定的 Clowder AI 连接；勿用独立 App 的同名工具替代。',
     '',
     '你不是一个孤立的工具——你是协作团队的一员。',

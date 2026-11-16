@@ -274,7 +274,7 @@ export class WorkPreparationService {
         whyNow: cue.whyNow,
         association: { kind: 'indexed_query_match', queryDigest: record.queryDigest },
         source: cue.source,
-        read: { tool: 'cat_cafe_drill_memory_cue', handle: cue.drill.handle },
+        readRef: { kind: 'cue', handle: cue.drill.handle, expectedRevision: cue.source.revision },
         ...(item.family === 'matter' ? { application: 'not_supported' } : {}),
       };
       if (estimateTokens(JSON.stringify({ ...envelope, pointers: [...pointers, pointer] })) > maxTokens) break;

@@ -257,6 +257,7 @@ function createOversizePlaceholder(item: CoverageMatrixItem): CoverageMatrixItem
     source: item.source,
     representation: 'oversize-placeholder',
     identityDigest,
+    ...(item.readRef ? { readRef: item.readRef } : {}),
     ...(drillDown
       ? { drillDown }
       : {

@@ -122,11 +122,13 @@ it.each([
   expect(host.querySelector('.account-expanded')).toBeNull();
   if (clientId === 'openai') expect(host.querySelectorAll('[role="meter"]')).toHaveLength(2);
   else {
-    expect(host.textContent).toContain('No quota API for this provider');
+    expect(host.textContent).toContain('No verified reading yet');
+    expect(button('Read quota').disabled).toBe(false);
     expect(host.querySelector('[role="meter"]')).toBeNull();
   }
   await act(async () => button('Fixture').click());
   expect(host.querySelector('.account-expanded [role="meter"]')).toBeNull();
+  expect(host.querySelector('.account-expanded .claude-quota')).toBeNull();
   expect(host.querySelector('.account-expanded')?.textContent).toContain('Members using this account');
 });
 

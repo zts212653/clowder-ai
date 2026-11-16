@@ -1,5 +1,6 @@
 import {
   isValidRichBlock,
+  matterWriteRefSchema,
   REMEMBER_TARGETS,
   type RememberGroup,
   type RememberGroupRow,
@@ -21,6 +22,7 @@ const schema = z.object({
         proposalId: z.string().optional(),
         messageId: z.string().optional(),
         resultRef: z.string().optional(),
+        matterWriteRef: matterWriteRefSchema.optional(),
         personId: z.string().optional(),
         status: z.string().optional(),
         error: z.string().optional(),

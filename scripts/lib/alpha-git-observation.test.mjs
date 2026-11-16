@@ -33,7 +33,8 @@ function failedVerification(
 import { appendFileSync, fstatSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 const argv = process.argv.slice(2);
-const match = argv[0] === ${JSON.stringify(command)} && process.cwd() === ${JSON.stringify(scope === 'main' ? f.mainRoot : f.alphaRoot)};
+const operation = argv[0] === '-c' && argv[1] === 'core.fsmonitor=false' ? argv[2] : argv[0];
+const match = operation === ${JSON.stringify(command)} && process.cwd() === ${JSON.stringify(scope === 'main' ? f.mainRoot : f.alphaRoot)};
 const traceFd = process.env.GIT_TRACE2_EVENT === '3' ? 3 : null;
 appendFileSync(${JSON.stringify(trace)}, JSON.stringify({ argv, match, traceFd,
   traceMode: traceFd ? fstatSync(traceFd).mode & 0o777 : null,

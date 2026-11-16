@@ -93,6 +93,7 @@ export interface EvidenceDrillDown {
 }
 
 export interface EvidenceItem {
+  readRef?: import('@cat-cafe/shared').ReadRef;
   anchor: string;
   kind: EvidenceKind;
   status: EvidenceStatus;

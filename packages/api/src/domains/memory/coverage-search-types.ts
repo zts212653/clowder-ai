@@ -30,6 +30,7 @@ export interface ExpansionProvenance {
 // ── Coverage matrix output ──────────────────────────────────────────
 
 export interface CoverageMatrixItem {
+  readRef?: import('@cat-cafe/shared').ReadRef;
   anchor: string;
   title: string;
   kind: EvidenceKind;

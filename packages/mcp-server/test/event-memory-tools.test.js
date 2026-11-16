@@ -68,6 +68,43 @@ test('F324: canonical Event Memory tool exposes exact giant-record continuation'
   assert.equal(createHash('sha256').update(recovered).digest('hex'), createHash('sha256').update(source).digest('hex'));
 });
 
+test('Event list ref projection preserves all source data and the same page in one callback', async () => {
+  const { handleListEvents } = await import('../dist/tools/event-memory-tools.js');
+  const events = Array.from({ length: 50 }, (_, index) => ({
+    eventId: `event-${index}`,
+    ownerUserId: 'default-user',
+    threadId: `thread-${index}`,
+    messageId: `message-${index}`,
+    summary: 'Original condition. '.repeat(10),
+    cat: 'codex61-sol',
+    timestamp: index,
+    revision: `sha256:${'a'.repeat(64)}`,
+    status: 'active',
+  }));
+  const meta = { count: 50, hasMore: true, nextOffset: 50 };
+  let calls = 0;
+  globalThis.fetch = async () => {
+    calls++;
+    return { ok: true, json: async () => ({ events, meta }) };
+  };
+  const result = await handleListEvents({});
+  const page = JSON.parse(result.content[0].text);
+  assert.equal(calls, 1);
+  assert.equal(page.events.length, events.length);
+  assert.deepEqual(page.meta, meta);
+  assert.ok(result.content[0].text.length <= 24000);
+  assert.deepEqual(
+    page.events.map(({ readRef, ...event }) => ({
+      ...event,
+      ownerUserId: page.ownerUserId,
+      threadId: readRef.threadId,
+      messageId: readRef.messageId,
+    })),
+    events,
+    'every original field is retained or factored without loss',
+  );
+});
+
 test('F324: Event detail and list filters are mutually exclusive at the MCP boundary', async () => {
   const { handleListEvents } = await import('../dist/tools/event-memory-tools.js');
   globalThis.fetch = async () => {

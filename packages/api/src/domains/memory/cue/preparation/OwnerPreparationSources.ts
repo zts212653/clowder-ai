@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { checkDiscoveryLifetime, type KnowledgeDiscoverySource } from '../../knowledge-discovery.js';
 import type { MessageSearchService } from '../../MessageSearchService.js';
 import type { MatterMemoryService } from '../../matters/MatterMemoryService.js';
+import { matterReadEvidenceEntries } from '../../matters/matter-read-evidence.js';
 import { matchExplicitApprovedTasteTrigger } from '../ExplicitApprovedTasteTriggerCatalog.js';
 import type { ContextProjectCueSource } from '../sources/ContextProjectCueSource.js';
 import type { CanonicalTasteMemoryCueSource } from '../sources/TasteMemoryCueSource.js';
@@ -105,9 +106,7 @@ export class OwnerPreparationSources implements WorkPreparationSources {
               page.matter.revision !== row.item.revision
             )
               return null;
-            const entries = page.entries
-              .filter((entry) => entry.status === 'active' && entry.sourceStatus === 'current' && entry.quote)
-              .map((entry) => ({ entryId: entry.entryId, sourceRevision: entry.source.sourceRevision }));
+            const entries = matterReadEvidenceEntries(page.entries.filter((entry) => entry.status === 'active'));
             if (!entries.length) return null;
             return {
               family: 'matter',
@@ -115,7 +114,7 @@ export class OwnerPreparationSources implements WorkPreparationSources {
                 anchor: `matter:${page.matter.matterId}`,
                 revision: `revision:${page.matter.revision}`,
                 title: 'Sourced Matter page',
-                summary: 'Read all supporting messages and verify the page conditions.',
+                summary: 'Read the cat interpretation and page conditions; linked sources are separate reads.',
                 visibility: 'owner_private',
                 drillFamily: 'matter',
               },

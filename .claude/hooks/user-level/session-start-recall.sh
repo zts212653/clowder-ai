@@ -153,7 +153,7 @@ if [ -n "$WARNINGS" ]; then
 fi
 
 # 通用提醒（F256 Phase A: hook 升级 + skill link）
-echo "📌 Recall 三入口（按场景选）：精确 anchor/看关系 → cat_cafe_graph_resolve | 零先验/扫最近 → cat_cafe_list_recent | 语义/模糊找 → cat_cafe_search_evidence（不确定→search_evidence mode=hybrid）。结果已融合消费加权排序（F200）。若 MCP 未暴露，先 tool_search 精确搜工具名。"
+echo "📌 找记忆：cat_cafe_search_evidence 交原句或编号（一次找文档/原话/图谱/事情；精确编号同时得关系），不带 query 看最近；已知坐标用 cat_cafe_read_memory({ref}) 直接读。结果已融合消费加权排序（F200）。若 MCP 未暴露，先 tool_search 精确搜工具名。"
 echo "🔍 复杂搜索（coverage/source-map/absence/delta）→ 加载 memory-search-best-practices skill。按问题和证据缺口补查，核用于结论的原文；证据足够或未知已说明就收敛，不按家族或固定轮次搜索。"
 
 exit 0

@@ -28,6 +28,7 @@ const FILE_OPERATIONS = new Set([
   'multi_replace_file_content',
 ]);
 const FILE_TARGET_KEYS = [
+  'Path',
   'TargetFile',
   'target_file',
   'FilePath',
@@ -51,6 +52,7 @@ export function createAgyAcpPermissionHandler(input: {
   workspace: string;
   profileHome: string;
   autoApprove: boolean;
+  delegateApprovalToHost?: boolean;
   readOnly: boolean;
   mcpServers: readonly string[];
   isActive(): boolean;
@@ -97,9 +99,17 @@ export function createAgyAcpPermissionHandler(input: {
             { toolCall: { name: nativeName, args: normalized }, workspacePaths: [input.workspace] },
             { profileHome: input.profileHome, readOnly: input.readOnly },
           ).decision === 'allow';
-        // Restricted mode remains conservative for effects; reads and known
-        // provider interactions retain the original Native behavior.
-        if (!input.autoApprove && ['execute', 'edit', 'delete', 'move'].includes(String(call.kind))) allowed = false;
+        // When wrapped by the host ask_user human confirmation bridge, let safe
+        // workspace edits/commands reach human approval while still blocking any
+        // sanctuary/secret/control-plane denial above; standalone callers without
+        // a human approval wrapper continue to fail closed.
+        if (
+          !input.autoApprove &&
+          !input.delegateApprovalToHost &&
+          ['execute', 'edit', 'delete', 'move'].includes(String(call.kind))
+        ) {
+          allowed = false;
+        }
       }
       const options = Array.isArray(request.params.options) ? request.params.options : [];
       const allow = options.map(record).find((option) => option?.kind === 'allow_once');

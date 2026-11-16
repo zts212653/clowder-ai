@@ -1,3 +1,4 @@
+import type { ReadRef } from '@cat-cafe/shared';
 import { formatInjectionProvenance, hasInjectionStoryCoordinate } from './injection-provenance.js';
 import type { EntityProvenance } from './interfaces.js';
 
@@ -25,6 +26,14 @@ export function formatEntityReadingPointer(pointer: EntityProvenance, selfAnchor
   if (pointer.eventNo !== undefined) locations.push(`事件 ${pointer.eventNo}`);
   if (pointer.invocationId) locations.push(`轮次 ${label(pointer.invocationId)}`);
   if (!locations.length && pointer.anchor) locations.push(`原文锚点 ${label(pointer.anchor)}`);
+  const refs: ReadRef[] = [];
+  if (pointer.sourcePath) refs.push({ kind: 'file', path: pointer.sourcePath, startLine: 1, endLine: 120 });
+  if (pointer.threadId)
+    for (const messageId of [
+      ...new Set([pointer.messageId, ...(pointer.messageIds ?? [])].filter((id): id is string => Boolean(id))),
+    ])
+      refs.push({ kind: 'message', threadId: pointer.threadId, messageId });
+  const reads = refs.length ? `\n    ReadRefs: ${JSON.stringify(refs)}; cat_cafe_read_memory({ref})` : '';
   const purpose = pointer.note?.trim() ? `登记的阅读用途：${label(pointer.note.trim())}；` : '';
-  return `${purpose}阅读位置：${locations.join('，')}\n    ${formatInjectionProvenance(pointer)}`;
+  return `${purpose}阅读位置：${locations.join('，')}\n    ${formatInjectionProvenance(pointer)}${reads}`;
 }

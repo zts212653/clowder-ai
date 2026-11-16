@@ -21,7 +21,7 @@ test('rank alone neither calls unrelated results high matches nor suppresses alt
       { status: 200, headers: { 'content-type': 'application/json' } },
     );
   try {
-    const result = await handleSearchEvidence({ query: '不存在的专有术语Quasar' });
+    const result = await handleSearchEvidence({ resultUnit: 'document', query: '不存在的专有术语Quasar' });
     const text = result.content[0].text;
     assert.doesNotMatch(text, /高匹配/);
     assert.match(text, /Memory navigation/);

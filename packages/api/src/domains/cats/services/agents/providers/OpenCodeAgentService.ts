@@ -19,7 +19,11 @@ import { readFileSync } from 'node:fs';
 import { type CatId, createCatId } from '@cat-cafe/shared';
 import { getCatModel } from '../../../../../config/cat-models.js';
 import { createModuleLogger } from '../../../../../infrastructure/logger.js';
-import { buildCliDiagnostics, buildSilentCompletionDiagnostic } from '../../../../../utils/cli-diagnostics.js';
+import {
+  buildCliDiagnostics,
+  buildCliNotFoundDiagnostic,
+  buildSilentCompletionDiagnostic,
+} from '../../../../../utils/cli-diagnostics.js';
 import { formatCliExitError } from '../../../../../utils/cli-format.js';
 import { formatCliNotFoundError, resolveCliCommand } from '../../../../../utils/cli-resolve.js';
 import { isCliError, isCliTimeout, isLivenessWarning, spawnCli } from '../../../../../utils/cli-spawn.js';
@@ -61,6 +65,7 @@ import {
   hasOpenCodeManagedConfig,
   identifierPrefix,
   OPENCODE_CONFIG_CONTENT_ENV,
+  OPENCODE_MESSAGE_REF_CONFLICT,
   OPENCODE_NO_TOOL_FINALIZER_AGENT,
   OPENCODE_NO_TOOL_PERMISSION,
   OPENCODE_PERMISSION_ENV,
@@ -348,7 +353,7 @@ export class OpenCodeAgentService implements L0InjectableAgentService {
           type: 'error' as const,
           catId: this.catId,
           error: formatCliNotFoundError('opencode'),
-          metadata,
+          metadata: { ...metadata, cliDiagnostics: buildCliNotFoundDiagnostic('opencode') },
           timestamp: Date.now(),
         };
         yield { type: 'done' as const, catId: this.catId, metadata, timestamp: Date.now() };
@@ -476,8 +481,13 @@ export class OpenCodeAgentService implements L0InjectableAgentService {
         uniqueEventTypes.add(evtType);
         if (evtType === 'step_start') stepStartCount++;
         const messageRef = extractOpenCodeMessageRef(event);
-        if (messageRef?.sessionId) metadata.sessionId = messageRef.sessionId;
-        if (messageRef?.messageId) lastAssistantMessageId = messageRef.messageId;
+        if (messageRef === OPENCODE_MESSAGE_REF_CONFLICT) {
+          // A contradictory current event must not revive a previously captured recovery anchor.
+          lastAssistantMessageId = undefined;
+        } else {
+          if (messageRef?.sessionId) metadata.sessionId = messageRef.sessionId;
+          if (messageRef?.messageId) lastAssistantMessageId = messageRef.messageId;
+        }
         log.debug({ catId: this.catId, eventIndex: eventCount, type: evtType }, 'CLI event received');
         if (isCliTimeout(event)) {
           yield {

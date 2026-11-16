@@ -16,6 +16,7 @@ import { AccountRowActions } from './AccountRowActions';
 import { accountDisplayName, accountStatus } from './account-directory-view';
 import { accountMessage } from './account-message';
 import { accountsCopy } from './accounts.shell-copy';
+import { ClaudeQuotaControl } from './ClaudeQuotaControl';
 
 export function AccountDirectoryRow({
   account,
@@ -200,6 +201,8 @@ export function AccountDirectoryRow({
             ) : (
               <small>{t.noQuota}</small>
             )
+          ) : account.clientId === 'anthropic' && account.authType === 'oauth' ? (
+            <ClaudeQuotaControl accountRef={account.id} observation={account.claudeQuota} reload={refresh} />
           ) : (
             <small>{account.authType === 'api_key' ? t.providerBalance : quota.unsupported}</small>
           )}

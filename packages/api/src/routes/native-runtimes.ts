@@ -111,7 +111,7 @@ export async function discoverNativeRuntimes(projectRoot: string, commandFor = r
               acp: { command: config.command, startupArgs: config.startupArgs, transport: config.transport },
             }
           : {}),
-        models: cat.defaultModel ? [cat.defaultModel] : [],
+        models: [],
         defaultsStatus: 'session_only',
         transport: 'acp',
       },

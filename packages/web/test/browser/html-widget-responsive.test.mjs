@@ -1,58 +1,23 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
-import { createServer } from 'node:net';
 import path from 'node:path';
 import { after, before, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { CLIENT_REQUEST_DIAGNOSTIC_HEADER, CLIENT_SENT_AT_DIAGNOSTIC_HEADER } from '@cat-cafe/shared';
 import { chromium } from 'playwright';
+import { findFreePort, stopServer, waitForPage } from './_harness.mjs';
 import { countMagentaPixels, runF294HtmlWidgetExportContract } from './f294-html-widget-export.harness.mjs';
 import { startHtmlWidgetFixtureApi } from './html-widget-api.fixture.mjs';
 import { createNextDevTestEnvironment } from './next-dev-test-environment.mjs';
 
 await import('tsx/esm');
+
 const { ImageExporter } = await import('../../../api/src/services/ImageExporter.ts');
 
 const WEB_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const NEXT_BIN = path.resolve(WEB_ROOT, '../../node_modules/next/dist/bin/next');
 const FIXTURE_MESSAGE_ID = 'html-widget-export-fixture-message';
-
-async function findFreePort() {
-  const server = createServer();
-  server.listen(0, '127.0.0.1');
-  await once(server, 'listening');
-  const address = server.address();
-  assert(address && typeof address !== 'string');
-  server.close();
-  await once(server, 'close');
-  return address.port;
-}
-
-async function waitForPage(url, server, output) {
-  const deadline = Date.now() + 60_000;
-  while (Date.now() < deadline) {
-    if (server.exitCode !== null) throw new Error(`Next.js exited before readiness:\n${output.join('')}`);
-    try {
-      const response = await fetch(url);
-      if (response.ok) {
-        await response.arrayBuffer();
-        return;
-      }
-    } catch {
-      // The dev server is still compiling or has not opened its socket yet.
-    }
-    await new Promise((resolve) => setTimeout(resolve, 250));
-  }
-  throw new Error(`Timed out waiting for ${url}:\n${output.join('')}`);
-}
-
-async function stopServer(server) {
-  if (server.exitCode !== null) return;
-  server.kill('SIGTERM');
-  await Promise.race([once(server, 'exit'), new Promise((resolve) => setTimeout(resolve, 5_000))]);
-  if (server.exitCode === null) server.kill('SIGKILL');
-}
 
 async function waitForWidgetMeasurement(page) {
   await page.waitForFunction(() => {
@@ -83,7 +48,7 @@ before(async () => {
   server.stdout.on('data', (chunk) => output.push(chunk.toString()));
   server.stderr.on('data', (chunk) => output.push(chunk.toString()));
   url = `http://127.0.0.1:${port}/dev/f294-html-widget-responsive-export`;
-  await waitForPage(url, server, output);
+  await waitForPage(url, server, output, { timeoutMs: 60_000, readiness: 'body' });
 });
 after(async () => {
   try {
@@ -173,7 +138,10 @@ test(
       browser = await chromium.launch({ headless: true });
       // Compiling the sibling route can rewrite app/layout.js while the parent
       // downloads it. Finish that compilation before opening either live page.
-      await waitForPage(new URL('/dev/f294-html-widget-live-message', url).href, server, output);
+      await waitForPage(new URL('/dev/f294-html-widget-live-message', url).href, server, output, {
+        timeoutMs: 60_000,
+        readiness: 'body',
+      });
       const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
       page.on('pageerror', (error) => pageErrors.push(error.message));
       await page.goto(url, { waitUntil: 'domcontentloaded' });

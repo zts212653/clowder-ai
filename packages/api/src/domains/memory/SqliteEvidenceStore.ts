@@ -2,6 +2,7 @@
 
 import { basename, isAbsolute, relative, resolve } from 'node:path';
 import type { EntityConflictContext, EntityConflictResolutionRequest } from '@cat-cafe/shared';
+import { type ReadRef, readRefFromDrillDown } from '@cat-cafe/shared';
 import Database from 'better-sqlite3';
 import { computeConsumptionPrior } from './consumption-prior.js';
 import { type EntityMentionPassageHit, EntityRegistryStore, normalizeEntityAlias } from './EntityRegistry.js';
@@ -56,6 +57,12 @@ import {
   vectorGenerationTables,
 } from './vector-generation-tables.js';
 import { createVectorInvalidator } from './vector-invalidation.js';
+import {
+  describeVectorSearchFailure,
+  publishVectorSearchDegrade,
+  type VectorSearchDegradeRecord,
+  type VectorSearchDegradeStage,
+} from './vector-search-degrade-report.js';
 import { writeEvidenceItems } from './write-evidence-items.js';
 
 // DF-8: asymmetric RRF weight for CJK queries — BM25/FTS5 has poor recall
@@ -147,6 +154,8 @@ export interface SqliteEvidenceStoreOptions {
   workerMode?: 'read';
   /** Optional API-owned observation. Standalone and worker stores have no implicit logger dependency. */
   readDiagnostics?: (db: Database.Database) => () => void;
+  /** @internal The read worker forwards a degrade over its IPC; other stores publish it in-process. */
+  onVectorSearchDegrade?: (record: VectorSearchDegradeRecord) => void;
 }
 
 interface SearchFilterContext {
@@ -180,6 +189,7 @@ export class SqliteEvidenceStore implements IEvidenceStore {
   private vectorProjection = { ready: true };
   private readonly workerMode?: 'read';
   private readonly readDiagnostics?: SqliteEvidenceStoreOptions['readDiagnostics'];
+  private readonly onVectorSearchDegrade: (record: VectorSearchDegradeRecord) => void;
   private detachReadDiagnostics?: () => void;
   private initialization?: Promise<void>;
   private sourceRoot?: string;
@@ -192,6 +202,7 @@ export class SqliteEvidenceStore implements IEvidenceStore {
     this.dbPath = dbPath === ':memory:' ? dbPath : resolve(dbPath);
     this.workerMode = options?.workerMode;
     this.readDiagnostics = options?.readDiagnostics;
+    this.onVectorSearchDegrade = options?.onVectorSearchDegrade ?? publishVectorSearchDegrade;
     this.embedDeps = embedDeps;
     this.sourceRoot = options?.sourceRoot ? resolve(options.sourceRoot) : undefined;
     this.sourceRef = options?.sourceRoot ? options.sourceRef : undefined;
@@ -397,6 +408,7 @@ export class SqliteEvidenceStore implements IEvidenceStore {
       semanticSearch: (limit, audit) => this.semanticPassageNNSearch(query, limit, normalized, audit),
       hybridSearch: (lexical, limit, accept, compare, audit) =>
         this.hybridPassageRRFSearch(query, lexical, limit, normalized, accept, compare, audit),
+      reportVectorDegrade: (stage, error) => this.reportVectorDegrade(stage, error),
     });
   }
 
@@ -903,6 +915,7 @@ export class SqliteEvidenceStore implements IEvidenceStore {
         };
       } catch (error) {
         rethrowIfSearchCancelled(options, error);
+        this.reportVectorDegrade('summary_semantic', error);
         return {
           items: this.enrichWithDrillDown(
             this.attachEntityMatches(lexicalResults, entityMentionDocs.matchesByAnchor),
@@ -946,6 +959,7 @@ export class SqliteEvidenceStore implements IEvidenceStore {
         };
       } catch (error) {
         rethrowIfSearchCancelled(options, error);
+        this.reportVectorDegrade('summary_hybrid', error);
         return {
           items: this.enrichWithDrillDown(
             this.attachEntityMatches(lexicalResults, entityMentionDocs.matchesByAnchor),
@@ -1006,6 +1020,7 @@ export class SqliteEvidenceStore implements IEvidenceStore {
           passages = await this.semanticPassageNNSearch(query, pool, options);
         } catch (error) {
           rethrowIfSearchCancelled(options, error);
+          this.reportVectorDegrade('raw_passage_semantic', error);
           passages = lexical();
           meta = {
             degraded: true,
@@ -1027,6 +1042,7 @@ export class SqliteEvidenceStore implements IEvidenceStore {
           passages = await this.hybridPassageRRFSearch(query, lexical(), pool, options);
         } catch (error) {
           rethrowIfSearchCancelled(options, error);
+          this.reportVectorDegrade('raw_passage_hybrid', error);
           passages = lexical();
           meta = {
             degraded: true,
@@ -1196,6 +1212,11 @@ export class SqliteEvidenceStore implements IEvidenceStore {
     };
   }
 
+  /** A swallowed vector failure still says where and what; see vector-search-degrade-report. */
+  private reportVectorDegrade(stage: VectorSearchDegradeStage, error: unknown): void {
+    this.onVectorSearchDegrade(describeVectorSearchFailure(stage, error));
+  }
+
   private async isEmbeddingAvailable(options?: SearchOptions): Promise<boolean> {
     const deps = this.embedDeps;
     if (!deps || deps.mode !== 'on') return false;
@@ -1204,6 +1225,7 @@ export class SqliteEvidenceStore implements IEvidenceStore {
       await embedding.reprobeIfNeeded(options?.signal);
     } catch (error) {
       rethrowIfSearchCancelled(options, error);
+      this.reportVectorDegrade('embedding_availability', error);
       return false;
     }
     return embedding.isReady();
@@ -1217,6 +1239,7 @@ export class SqliteEvidenceStore implements IEvidenceStore {
       await embedding.reprobeIfNeeded(options?.signal);
     } catch (error) {
       rethrowIfSearchCancelled(options, error);
+      this.reportVectorDegrade('passage_embedding_availability', error);
       return false;
     }
     return embedding.isReady();
@@ -1618,10 +1641,24 @@ export class SqliteEvidenceStore implements IEvidenceStore {
         }
       }
     }
+    for (const item of results) item.readRef = this.readRefForEvidence(item);
     return results;
   }
 
-  private resolveSourcePathForDrillDown(sourcePath: string, item: EvidenceItem): string | null {
+  /** Pure projection of the same source-root/published addressing used by search drills. */
+  readRefForEvidence(
+    item: Pick<EvidenceItem, 'anchor' | 'sourcePath' | 'sourceHash' | 'drillDown'> & { kind?: EvidenceKind },
+  ): ReadRef | undefined {
+    if (item.drillDown) return readRefFromDrillDown(item.drillDown);
+    if (item.kind && ['session', 'thread', 'diary'].includes(item.kind)) return undefined;
+    const path = item.sourcePath && this.resolveSourcePathForDrillDown(item.sourcePath, item);
+    return path ? { kind: 'file', path, startLine: 1, endLine: 120 } : undefined;
+  }
+
+  private resolveSourcePathForDrillDown(
+    sourcePath: string,
+    item: Pick<EvidenceItem, 'anchor' | 'sourceHash'>,
+  ): string | null {
     if (this.sourceRef === 'published:project')
       return item.sourceHash ? `cat-cafe://published/${item.sourceHash}/${encodeURIComponent(item.anchor)}` : null;
     if (!this.sourceRoot) return null;
@@ -1905,7 +1942,10 @@ export class SqliteEvidenceStore implements IEvidenceStore {
     const row = this.db?.prepare('SELECT * FROM evidence_docs WHERE anchor = ? COLLATE NOCASE').get(anchor) as
       | RowShape
       | undefined;
-    return row ? rowToItem(row) : null;
+    if (!row) return null;
+    const item = rowToItem(row);
+    item.readRef = this.readRefForEvidence(item);
+    return item;
   }
 
   async getIndexedSourceRevision(

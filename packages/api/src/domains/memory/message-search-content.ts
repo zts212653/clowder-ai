@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto';
+
 /** Canonical searchable text projection shared by index writing and source validation. */
 export interface SearchableMessageContent {
   content: string;
@@ -19,6 +21,11 @@ const SEARCHABLE_BLOCK_TEXT_FIELDS = [
   'summary',
   'comment',
 ];
+
+/** Same whole-message version carried by the original message reader. */
+export function messageContentRevision(message: SearchableMessageContent): string {
+  return createHash('sha256').update(buildSearchableMessageContent(message)).digest('hex');
+}
 
 export function buildSearchableMessageContent(message: SearchableMessageContent): string {
   const parts: string[] = [];

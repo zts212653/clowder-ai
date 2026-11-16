@@ -1,5 +1,6 @@
 import { mkdirSync, renameSync, statSync } from 'node:fs';
 import { dirname, join, relative, resolve } from 'node:path';
+import { isValidRecentSince } from '@cat-cafe/shared';
 import type { FastifyPluginAsync } from 'fastify';
 import { ToolEventLog } from '../domains/cats/services/tool-usage/ToolEventLog.js';
 import { BindingDryRun } from '../domains/memory/BindingDryRun.js';
@@ -645,8 +646,8 @@ export const libraryRoutes: FastifyPluginAsync<LibraryRoutesOptions> = async (ap
     // returning the input unchanged for unrecognized values, which then enters
     // SQL `WHERE updated_at >= ?` as a string comparison — typos like
     // `since=tomorrow` / `since=7days` silently produce empty/wrong slices.
-    // Accept relative durations (\d+d / \d+h) or ISO 8601 date.
-    if (!isValidSince(since)) {
+    // Accept 1–5 digit relative durations (d/h) or an anchored ISO 8601 date (shared with the find entry).
+    if (!isValidRecentSince(since)) {
       reply.status(400);
       return { error: 'since must be /\\d+d/, /\\d+h/, or ISO 8601 date (e.g. 7d, 24h, 2026-05-01)' };
     }
@@ -693,27 +694,3 @@ export const libraryRoutes: FastifyPluginAsync<LibraryRoutesOptions> = async (ap
     return response;
   });
 };
-
-/**
- * Accept relative durations `\d+d` / `\d+h` or ISO 8601 date (YYYY-MM-DD or
- * full ISO 8601 timestamp). Rejects bare strings like `tomorrow` / `7days`
- * which would fall through to SQL string-comparison and silently produce
- * empty/full result slices.
- *
- * 砚砚 cloud-10 P2: full-string anchored ISO regex. `Date.parse` is
- * permissive (accepts trailing garbage in some runtimes); the prefix check
- * was too loose. Full anchor + Date.parse both required.
- */
-const ISO_8601_RE = /^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:?\d{2})?)?$/;
-// 砚砚 cloud-11 P2: cap digits on relative durations. Max 5 = 99999d (~273
-// years) / 99999h (~11 years). Without this cap, `since=999999999999999d`
-// passes route validation, overflows Date arithmetic, and crashes
-// toISOString → 500. Reasonable "recent" windows fit well under 5 digits.
-const RELATIVE_SINCE_RE = /^\d{1,5}[dh]$/;
-
-function isValidSince(since: string): boolean {
-  if (RELATIVE_SINCE_RE.test(since)) return true;
-  if (!ISO_8601_RE.test(since)) return false;
-  const ms = Date.parse(since);
-  return !Number.isNaN(ms);
-}

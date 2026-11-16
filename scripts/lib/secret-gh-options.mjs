@@ -1,4 +1,4 @@
-import { expandShortOption, splitOption } from './secret-send-options.mjs';
+import { expandShortOption, sendArguments, splitOption } from './secret-send-options.mjs';
 
 const ROOT_OPTIONS = {
   values: new Set(['--repo', '-R', '--hostname']),
@@ -79,6 +79,9 @@ const COMMAND_OPTIONS = new Map([
   ['gist:edit', policy('--add -a --desc -d --filename -f --remove -r', '--help')],
 ]);
 
+// These grammars prove a help flag's role, not permission to run the command.
+const HELP_ONLY_OPTIONS = new Map([['run:rerun', policy('--job -j', '--debug --failed')]]);
+
 // These built-ins have no input-file upload grammar. Preserve their arguments,
 // including read filters/formatting; argument content has already been scanned.
 const READ_OPERATIONS = new Set([
@@ -99,6 +102,7 @@ const READ_OPERATIONS = new Set([
   'run:list',
   'run:watch',
   'run:download',
+  'label:list',
   'repo:view',
   'repo:list',
   'repo:clone',
@@ -133,7 +137,9 @@ export function ghOperation(args) {
 }
 
 function groupPrefixOptions(group) {
-  const schemas = [...COMMAND_OPTIONS].filter(([command]) => command.startsWith(`${group}:`)).map(([, value]) => value);
+  const schemas = [...COMMAND_OPTIONS, ...HELP_ONLY_OPTIONS]
+    .filter(([command]) => command.startsWith(`${group}:`))
+    .map(([, value]) => value);
   const values = new Set(ROOT_OPTIONS.values);
   const flags = new Set(ROOT_OPTIONS.flags);
   for (const schema of schemas) {
@@ -148,6 +154,41 @@ function groupPrefixOptions(group) {
     flags.delete(name);
   }
   return { values, flags };
+}
+
+/** A help flag must survive value consumption and --; the last boolean wins. */
+export function isGhHelpRequest(args) {
+  const operation = ghOperation(args);
+  if (operation.unresolved) return false;
+  const action =
+    operation.action === 'new' && ['gist', 'release', 'pr', 'issue'].includes(operation.group)
+      ? 'create'
+      : operation.action;
+  const command = operation.group === 'api' ? 'api' : `${operation.group}:${action}`;
+  const groupHelp =
+    !operation.group ||
+    (!action && [...COMMAND_OPTIONS.keys(), ...READ_OPERATIONS].some((key) => key.startsWith(`${operation.group}:`)));
+  const options = COMMAND_OPTIONS.get(command) ?? HELP_ONLY_OPTIONS.get(command) ?? (groupHelp ? ROOT_OPTIONS : null);
+  if (!options) return false;
+  try {
+    const parameters = sendArguments(args, options.values, options.flags);
+    if (parameters.some((argument) => argument.kind === 'flag' && !options.flags.has(argument.name))) return false;
+    const help = parameters.findLast(({ kind, name }) => kind === 'flag' && ['--help', '-h'].includes(name));
+    return Boolean(help && /^(?:--help|-h)(?:=(?:1|t|T|TRUE|true|True))?$/.test(help.word));
+  } catch {
+    return false;
+  }
+}
+
+// Unlike clone/download passthrough, these queries do not mutate local files.
+export function isGhObservation(args) {
+  const operation = ghOperation(args);
+  if (operation.unresolved) return false;
+  return (
+    isGhHelpRequest(args) ||
+    (operation.group === 'auth' && operation.action === 'status') ||
+    (operation.group === 'label' && operation.action === 'list')
+  );
 }
 
 function nextCommand(args, start, options) {

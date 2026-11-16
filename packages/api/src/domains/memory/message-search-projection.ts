@@ -75,6 +75,12 @@ export function projectCanonicalSearchMessage(
     candidate,
     contentRevision: createHash('sha256').update(canonical).digest('hex'),
     result: {
+      readRef: {
+        kind: 'message',
+        threadId: thread.id,
+        messageId: message.id,
+        expectedRevision: createHash('sha256').update(canonical).digest('hex'),
+      },
       threadId: thread.id,
       messageId: message.id,
       threadTitle: indexState.suppressThreadTitle ? `原对话 (${thread.id})` : (thread.title ?? thread.id),

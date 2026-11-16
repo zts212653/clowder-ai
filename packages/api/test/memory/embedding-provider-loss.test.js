@@ -8,6 +8,10 @@ import { EmbeddingService } from '../../dist/domains/memory/EmbeddingService.js'
 import { IndexBuilder } from '../../dist/domains/memory/IndexBuilder.js';
 import { MemoryEmbeddingLifecycle } from '../../dist/domains/memory/MemoryEmbeddingLifecycle.js';
 import { SqliteEvidenceStore } from '../../dist/domains/memory/SqliteEvidenceStore.js';
+import {
+  logVectorSearchDegradesTo,
+  onVectorSearchDegrade,
+} from '../../dist/domains/memory/vector-search-degrade-report.js';
 import { evidenceRoutes } from '../../dist/routes/evidence.js';
 
 const config = {
@@ -318,6 +322,8 @@ test('real file-worker query RPC observes loss and existing catch-up restores se
   f.lifecycle.getPassageVectorStore().upsert(JSON.stringify([anchor, 'msg-synthetic']), new Float32Array([1, 0, 0, 0]));
   await f.lifecycle.catchUpAfterReady();
   const vectorCount = f.lifecycle.getVectorStore().count();
+  const degrades = [];
+  t.after(onVectorSearchDegrade((record) => degrades.push(record)));
   f.setOnline(false);
   const snapshots = [];
   const result = await f.store.searchMessagePassages('synthetic', {
@@ -329,6 +335,11 @@ test('real file-worker query RPC observes loss and existing catch-up restores se
   assert.ok(snapshots.at(-1).pid);
   assert.equal(result.meta.degraded, true);
   assert.equal(result.meta.degradeReason, 'passage_vector_search_error');
+  // The worker's stderr is dropped when its job succeeds; the reason has to arrive over IPC.
+  assert.deepEqual(
+    degrades.map((record) => [record.stage, record.errorCategory, record.errorName]),
+    [['message_passage_hybrid', 'embed_api_unreachable', 'TypeError']],
+  );
   assert.equal(f.service.isReady(), false, 'a worker RPC rejection must invalidate its actual parent provider');
   assert.equal(f.lifecycle.getStatus(), 'degraded');
   const requests = f.counts().encodes;
@@ -347,4 +358,86 @@ test('real file-worker query RPC observes loss and existing catch-up restores se
   assert.equal(recovered.meta.degraded, false);
   assert.equal(recovered.meta.effectiveMode, 'hybrid');
   assert.ok(f.counts().encodes > requests);
+  assert.equal(degrades.length, 1, 'a search that did not degrade reports nothing');
+});
+
+test('a document search degraded inside the real file worker reports its reason to the parent', async (t) => {
+  // The 2026-11-15 19:10 PST shape: scope=docs, mode=hybrid, answered 200 with lexical results.
+  const f = await lifecycleFixture(t, true);
+  await f.lifecycle.catchUpAfterReady();
+  const degrades = [];
+  t.after(onVectorSearchDegrade((record) => degrades.push(record)));
+  f.setOnline(false);
+  const result = await f.store.searchWithMeta('Synthetic', { mode: 'hybrid', deadlineAt: Date.now() + 15_000 });
+  assert.equal(result.meta.degraded, true);
+  assert.equal(result.meta.degradeReason, 'passage_vector_search_error');
+  assert.deepEqual(
+    degrades.map((record) => [record.stage, record.errorCategory, record.errorName]),
+    [['summary_hybrid', 'embed_api_unreachable', 'TypeError']],
+  );
+  assert.ok(!JSON.stringify(degrades[0]).includes('Synthetic'), 'the query is never part of the record');
+});
+
+test('a provider error that echoes the query cannot carry it from the real file worker into the API log', async (t) => {
+  // Review probe for #7145: the 503 body repeats its input on a line shaped like a stack frame.
+  // EmbeddingService puts the body into the Error; the worker receives it over the embedding RPC.
+  const f = await lifecycleFixture(t, true);
+  await f.lifecycle.catchUpAfterReady();
+  const rows = [];
+  const app = Fastify({ logger: { level: 'warn', stream: { write: (line) => rows.push(JSON.parse(line)) } } });
+  t.after(logVectorSearchDegradesTo(app.log));
+  t.after(() => app.close());
+  t.mock.method(globalThis, 'fetch', async (url, init) => {
+    if (String(url).endsWith('/health')) return health();
+    const { input } = JSON.parse(init.body);
+    return new Response(`provider rejected text\n    at ${input[0]}`, {
+      status: 503,
+      statusText: 'Service Unavailable',
+    });
+  });
+  const loggedFor = async (query) => {
+    rows.length = 0;
+    f.service.markReady();
+    const result = await f.store.searchWithMeta(query, { mode: 'hybrid', deadlineAt: Date.now() + 15_000 });
+    assert.equal(result.meta.degradeReason, 'passage_vector_search_error');
+    const logged = rows.filter((row) => row.module === 'memory-vector-search');
+    assert.equal(logged.length, 1, 'the worker report reaches the real logger exactly once');
+    assert.ok(!JSON.stringify(logged[0]).includes(query), 'no part of the query is logged');
+    const { time: _time, pid: _pid, hostname: _hostname, ...fields } = logged[0];
+    return fields;
+  };
+  const first = await loggedFor('PRIVATE_QUERY_SENTINEL_7831');
+  assert.deepEqual(first, {
+    level: 40,
+    module: 'memory-vector-search',
+    stage: 'summary_hybrid',
+    errorName: 'Error',
+    errorCode: null,
+    errorCategory: 'embed_api_http_503',
+    msg: 'Vector search degraded to lexical',
+  });
+  // Nothing in the line depends on the text: a reader cannot test candidate queries against it.
+  assert.deepEqual(await loggedFor('UNRELATED_QUERY_4402'), first);
+});
+
+test('vector tables the worker cannot open are reported, and only to a search that asked for vectors', async (t) => {
+  const f = await lifecycleFixture(t, true);
+  await f.lifecycle.catchUpAfterReady();
+  const degrades = [];
+  t.after(onVectorSearchDegrade((record) => degrades.push(record)));
+  // The parent's snapshot now names a geometry the stored tables do not have.
+  const model = f.service.getModelInfo();
+  f.service.getModelInfo = () => ({ ...model, dim: model.dim + 1 });
+
+  const lexical = await f.store.searchWithMeta('Synthetic', { deadlineAt: Date.now() + 15_000 });
+  assert.equal(lexical.meta.degraded, false);
+  assert.deepEqual(degrades, [], 'a lexical search never wanted the accelerator');
+
+  const hybrid = await f.store.searchWithMeta('Synthetic', { mode: 'hybrid', deadlineAt: Date.now() + 15_000 });
+  assert.equal(hybrid.meta.degraded, true);
+  assert.equal(hybrid.meta.degradeReason, 'passage_embedding_unavailable');
+  assert.deepEqual(
+    degrades.map((record) => [record.stage, record.errorCategory]),
+    [['vector_generation_open', 'vector_generation_unavailable']],
+  );
 });

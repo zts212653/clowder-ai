@@ -4,6 +4,7 @@ import { type ReactNode, useEffect, useMemo, useState } from 'react';
 import type { PublishedMessageCoordinate } from '@/components/content-review/usePublishedContent';
 import { useShellCopy } from '../shell/shell-copy';
 import { MemoryGroupMatter } from './MemoryGroupMatter';
+import { MemoryGroupMatterWrite } from './MemoryGroupMatterWrite';
 import { MemoryGroupPersonRevision } from './MemoryGroupPersonRevision';
 import { MemoryGroupRequestChanges } from './MemoryGroupRequestChanges';
 import { memoryGroupCopy } from './memory-group.shell-copy';
@@ -99,6 +100,15 @@ function MemoryGroupRow({
   threadId?: string;
 }) {
   const t = useShellCopy(memoryGroupCopy);
+  if (row.target === 'matter' && row.statusCode < 400 && !row.error && row.resultRef && row.matterWriteRef)
+    return (
+      <MemoryGroupMatterWrite
+        key={`${row.resultRef}:${row.matterWriteRef.actorKey}:${row.matterWriteRef.requestId}`}
+        matterId={row.resultRef}
+        writeRef={row.matterWriteRef}
+        threadId={threadId}
+      />
+    );
   if (row.target === 'matter' && row.statusCode < 400 && !row.error && row.resultRef)
     return <MemoryGroupMatter key={row.resultRef} matterId={row.resultRef} threadId={threadId} />;
   if (row.target === 'person_revision' && row.statusCode < 400 && !row.error && row.resultRef && row.personId)

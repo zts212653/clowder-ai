@@ -94,22 +94,16 @@ test('CLAUDE.md keeps 1-line pointers to truth sources', () => {
   }
 });
 
-// F188 harness-consistency compat: even slimmed, root md must keep the
-// 三入口 memory routing with FULL cat_cafe_* tool names (f188-harness-
-// consistency.test.js FULL_REQUIRED_PHRASES). Lock it into Phase D's own
-// guard so future slimming can't silently re-break F188.
-test('root md keeps F188 三入口 full tool names (CLAUDE.md + AGENTS.md)', () => {
+// F188 harness-consistency compat, updated by F332 F2: even slimmed, root md must keep the memory pointer with
+// full cat_cafe_* names — now the one find entry and the read entry, never the retired three-entry choice.
+test('root md keeps the one find entry and read entry with full tool names (CLAUDE.md + AGENTS.md)', () => {
   for (const file of ['CLAUDE.md', 'AGENTS.md']) {
     const md = read(file);
-    for (const phrase of [
-      '三入口',
-      'cat_cafe_graph_resolve',
-      'cat_cafe_list_recent',
-      'cat_cafe_search_evidence',
-      'memory-routing-partial',
-    ]) {
-      assert.ok(md.includes(phrase), `${file} must keep F188 phrase: "${phrase}"`);
+    for (const phrase of ['cat_cafe_search_evidence', 'cat_cafe_read_memory', 'memory-routing-partial']) {
+      assert.ok(md.includes(phrase), `${file} must keep memory phrase: "${phrase}"`);
     }
+    assert.equal(md.includes('cat_cafe_graph_resolve'), false); // mcp-cutover-negative-reference: absence
+    assert.equal(md.includes('cat_cafe_list_recent'), false); // mcp-cutover-negative-reference: absence
   }
 });
 

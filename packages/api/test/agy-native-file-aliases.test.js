@@ -11,7 +11,7 @@ const { projectAgyNativeTurn } = await import(
 const { summarizeAgyStreamJsonTurn } = await import(
   '../dist/domains/cats/services/agents/providers/agy-stream-json-parser.js'
 );
-const { verifiedInitSessionId } = await import(
+const { extractUnrecognizedInitTools, verifiedInitSessionId } = await import(
   '../dist/domains/cats/services/agents/providers/agy-native/agy-native-stream-validation.js'
 );
 const { materializeAgyNativeAgentFile } = await import(
@@ -162,7 +162,7 @@ test('explicit modern declarations accept only their matching legacy spelling', 
   );
 });
 
-test('modern init vocabulary is qualified, while unrecognized operations still fail closed', () => {
+test('modern init vocabulary is qualified, records new CLI tool names without crashing init, and rejects malformed tool lists', () => {
   const expected = { agentName: 'fixture', spawnCwd: '/tmp', model: 'gemini-4-argon-high' };
   const envelope = {
     conversation_id: 'files15',
@@ -175,14 +175,18 @@ test('modern init vocabulary is qualified, while unrecognized operations still f
     },
   };
   assert.equal(verifiedInitSessionId(envelope, expected, false), 'files15');
+  assert.deepEqual(extractUnrecognizedInitTools(envelope), []);
+
+  const withFutureTool = {
+    ...envelope,
+    init: { ...envelope.init, tools: ['read_file', 'future_native_tool'] },
+  };
+  assert.equal(verifiedInitSessionId(withFutureTool, expected, false), 'files15');
+  assert.deepEqual(extractUnrecognizedInitTools(withFutureTool), ['future_native_tool']);
+
   assert.throws(
-    () =>
-      verifiedInitSessionId(
-        { ...envelope, init: { ...envelope.init, tools: ['future_native_tool'] } },
-        expected,
-        false,
-      ),
-    /unqualified tool/,
+    () => verifiedInitSessionId({ ...envelope, init: { ...envelope.init, tools: [''] } }, expected, false),
+    /malformed tool list/,
   );
 });
 

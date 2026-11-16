@@ -5,7 +5,7 @@
  * Used by route-serial / route-parallel tool_result handler to merge
  * result-side data back into the event log via ToolEventLog.updateSummary().
  *
- * MCP tool wrappers (evidence-tools, graph-tools, recent-tools) embed
+ * MCP tool wrappers (evidence-tools; graph_resolve/list_recent until F332 F2 retired them) embed
  * machine-readable result markers in their text output; this parser
  * extracts the structured summary the aggregator needs.
  */
@@ -230,6 +230,28 @@ function extractText(content: unknown): string {
   return '';
 }
 
+/**
+ * F332 find: beside other find groups a coverage page may use compact rows — one `rows: anchor [matchType] [fields]`
+ * header, then `  anchor: <anchor> [matchType:x] [values]` per row, where a sourcePath equal to the anchor is "=".
+ * Returns a reader of one row block's sourcePath so the same original Read still pairs with its candidate.
+ */
+function compactCoverageSourcePathReader(text: string): (block: string, anchor: string) => string | undefined {
+  const header = /^rows: anchor \[matchType\] \[([^\]]*)\]/m.exec(text);
+  const index = header ? header[1]!.split(', ').indexOf('sourcePath') : -1;
+  if (index < 0) return () => undefined;
+  return (block, anchor) => {
+    const row = /^\s+anchor:\s+\S+ \[matchType:[^\]]+\] (\[.*\])$/m.exec(block)?.[1];
+    if (!row) return undefined;
+    try {
+      const value = (JSON.parse(row) as unknown[])[index];
+      if (value === '=') return anchor;
+      return typeof value === 'string' && value ? value : undefined;
+    } catch {
+      return undefined;
+    }
+  };
+}
+
 function deriveSearchEvidence(text: string): ResultSummary {
   const meta = parseRecallMetaFromText(text);
   const summary: ResultSummary = meta ? { ...meta } : {};
@@ -265,6 +287,7 @@ function deriveSearchEvidence(text: string): ResultSummary {
   // lines pair to their own anchor instead of a global regex drifting
   // across result blocks when sourcePath is absent on some results.
   const f200Cands: Array<{ anchor: string; rank: number; docKind?: string; sourcePath?: string }> = [];
+  const compactSourcePath = compactCoverageSourcePathReader(text);
   const anchorMatches = [...text.matchAll(/^\s+anchor:\s+(\S+)/gm)];
   for (let i = 0; i < anchorMatches.length; i++) {
     const anchor = anchorMatches[i]![1]!;
@@ -272,7 +295,7 @@ function deriveSearchEvidence(text: string): ResultSummary {
     const blockEnd = i + 1 < anchorMatches.length ? (anchorMatches[i + 1]!.index ?? text.length) : text.length;
     const block = text.slice(blockStart, blockEnd);
     const docKind = /^\s+type:\s+(\S+)/m.exec(block)?.[1];
-    const sourcePath = /^\s+sourcePath:\s+(\S+)/m.exec(block)?.[1];
+    const sourcePath = /^\s+sourcePath:\s+(\S+)/m.exec(block)?.[1] ?? compactSourcePath(block, anchor);
     f200Cands.push({ anchor, rank: f200Cands.length, docKind, ...(sourcePath ? { sourcePath } : {}) });
   }
   if (f200Cands.length > 0) summary._f200Candidates = f200Cands;

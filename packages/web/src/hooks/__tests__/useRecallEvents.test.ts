@@ -330,16 +330,16 @@ describe('F321 invocation boundaries', () => {
       ),
     ).toHaveLength(2);
   });
-  it('extracts graph and recent-memory tools as recall operations', () => {
+  it('still extracts historical graph and recent-memory tool events as recall operations', () => {
     const recalls = filterRecallEvents([
       {
         id: 'g',
         type: 'tool_use',
-        label: 'sonnet → cat_cafe_graph_resolve',
+        label: 'sonnet → graph_resolve',
         detail: '{"query":"F321"}',
         timestamp: 100,
       },
-      { id: 'l', type: 'tool_use', label: 'sonnet → cat_cafe_list_recent', detail: '{}', timestamp: 101 },
+      { id: 'l', type: 'tool_use', label: 'sonnet → list_recent', detail: '{}', timestamp: 101 },
     ]);
     expect(recalls.map((event) => event.toolName)).toEqual(['graph_resolve', 'list_recent']);
   });

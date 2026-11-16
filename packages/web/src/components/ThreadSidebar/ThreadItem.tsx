@@ -20,7 +20,7 @@ import { useAnchoredMenu } from '../useAnchoredMenu';
 import { CopyThreadIdMenuItem } from './CopyThreadIdMenuItem';
 import { useSidebarDraftDecoration } from './sidebar-draft-decoration';
 import { ThreadPinV2 } from './ThreadPinV2';
-import { ThreadRowSignals } from './ThreadRowSignals';
+import { ArrangeSignalBadge, type ArrangeSignalSlot, ThreadRowSignals } from './ThreadRowSignals';
 import { RowTip, RowTitleTip } from './ThreadRowTips';
 import { ThreadSettingsPanel } from './ThreadSettingsPanel';
 import { useOpenThreadSettings } from './ThreadSettingsProvider';
@@ -51,6 +51,8 @@ export interface ThreadItemProps {
   unreadCount: number;
   hasUserMention: boolean;
   hasPendingDecision?: boolean;
+  arrangeSignalSlot?: ArrangeSignalSlot;
+  arrangeFeedback?: string;
   projectPath?: string;
   indented?: boolean;
   preferredCats?: readonly string[];
@@ -80,6 +82,8 @@ function ThreadItemComponent({
   unreadCount,
   hasUserMention,
   hasPendingDecision,
+  arrangeSignalSlot,
+  arrangeFeedback,
   projectPath,
   indented,
   preferredCats,
@@ -174,6 +178,13 @@ function ThreadItemComponent({
   // Build hover tooltip: full title + participants + time (clowder-ai#29)
   const displayTitle = title ?? (id === 'default' ? '大厅' : '未命名对话');
   const hasDraft = hasDraftDecoration && (isV2 || !isActive);
+  const signalBadge =
+    arrangeSignalSlot &&
+    ((presence.status !== 'idle' && !arrangeSignalSlot.presence) ||
+      (unreadCount > 0 && !arrangeSignalSlot.unread) ||
+      (hasUserMention && !arrangeSignalSlot.mention) ||
+      (hasDraft && !arrangeSignalSlot.draft) ||
+      (hasPendingDecision && !arrangeSignalSlot.decision));
   const participantNames = participants.map((catId) => resolveCatDisplayName(catId, getCatById)).join(', ');
   const tooltipLines = [displayTitle];
   if (participantNames) tooltipLines.push(`参与: ${participantNames}`);
@@ -270,7 +281,20 @@ function ThreadItemComponent({
           />
         ) : (
           <span className="flex min-w-0 flex-1 items-center gap-1">
-            {isV2 && <ThreadPinV2 id={id} title={displayTitle} pinned={isPinned} onToggle={onTogglePin} />}
+            {isV2 && (
+              <span className="relative inline-flex h-5 w-4 flex-none">
+                <ThreadPinV2 id={id} title={displayTitle} pinned={isPinned} onToggle={onTogglePin} />
+                {signalBadge && (
+                  <ArrangeSignalBadge
+                    presence={presence}
+                    unreadCount={unreadCount}
+                    hasUserMention={hasUserMention}
+                    hasDraft={hasDraft}
+                    hasPendingDecision={hasPendingDecision}
+                  />
+                )}
+              </span>
+            )}
             {!isV2 && canPin && (
               <RowTip enabled={isV2} label={isPinned ? '取消置顶' : '置顶'}>
                 <button
@@ -333,22 +357,33 @@ function ThreadItemComponent({
                       }
                     : undefined
                 }
-                className={`min-w-0 flex-1 line-clamp-2 ${isV2 ? 'break-words' : ''} text-sm ${isV2 ? 'leading-5' : 'leading-normal'} ${isV2 ? `${unreadCount > 0 || hasUserMention || presence.status === 'error' ? 'font-semibold' : 'font-normal'} text-[var(--shell-ink)]` : isActive ? 'font-medium text-cafe-black' : 'text-cafe-secondary'} ${isV2 ? 'shell-focusable rounded-sm' : ''}`}
+                className={`min-w-0 flex-1 line-clamp-2 ${isV2 ? 'break-words' : ''} text-sm ${isV2 ? 'leading-5' : 'leading-normal'} ${isV2 ? `${(arrangeSignalSlot?.emphasized ?? (unreadCount > 0 || hasUserMention || presence.status === 'error')) ? 'font-semibold' : 'font-normal'} text-[var(--shell-ink)]` : isActive ? 'font-medium text-cafe-black' : 'text-cafe-secondary'} ${isV2 ? 'shell-focusable relative rounded-sm' : ''}`}
               >
                 {title ?? (id === 'default' ? '大厅' : '未命名对话')}
+                {isV2 && arrangeFeedback && (
+                  <span
+                    aria-hidden="true"
+                    data-attention-arrange-feedback
+                    className="pointer-events-none absolute inset-x-0 top-0 z-10 h-5 truncate rounded-sm border border-[var(--shell-hairline)] bg-[var(--shell-paper)] px-1 text-xs font-medium leading-[18px] text-[var(--shell-body)]"
+                  >
+                    {arrangeFeedback}
+                  </span>
+                )}
               </span>
             </RowTitleTip>
           </span>
         )}
         <div className={`flex items-center gap-0.5 flex-shrink-0 ${isV2 ? '' : 'mt-0.5'}`}>
           {isV2 && !isEditing && (
-            <span
-              data-testid="thread-row-time"
-              className="order-last text-label leading-5 tabular-nums"
-              style={{ color: 'var(--shell-muted)' }}
-            >
-              {formatSidebarActivityTime(lastActiveAt, copy)}
-            </span>
+            <RowTip enabled={Boolean(arrangeSignalSlot)} label={formatSidebarActivityTime(lastActiveAt, copy)}>
+              <span
+                data-testid="thread-row-time"
+                className="order-last truncate text-label leading-5 tabular-nums"
+                style={{ color: 'var(--shell-muted)', width: arrangeSignalSlot?.timeWidth }}
+              >
+                {formatSidebarActivityTime(lastActiveAt, copy)}
+              </span>
+            </RowTip>
           )}
           {hasMoreActions && (
             <div className={isV2 ? 'relative flex h-5 items-center' : 'relative'}>
@@ -443,6 +478,7 @@ function ThreadItemComponent({
       </div>
       {isV2 ? (
         <ThreadRowSignals
+          slot={arrangeSignalSlot}
           presence={presence}
           unreadCount={unreadCount}
           hasUserMention={hasUserMention}

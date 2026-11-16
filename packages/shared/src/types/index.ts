@@ -1030,6 +1030,7 @@ export {
 export { type ContextSourceEvidenceV1, contextSourceEvidenceV1Schema } from './memory-cue-context.js';
 export * from './memory-owner-lifecycle.js';
 export * from './memory-owner-views.js';
+export * from './memory-read.js';
 export * from './memory-read-usage.js';
 export {
   ASR_PERSON_MEMORY_REFLEX_ENTRY_V1,

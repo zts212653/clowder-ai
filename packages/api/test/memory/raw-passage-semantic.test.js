@@ -246,12 +246,20 @@ describe('raw passage semantic and hybrid retrieval', () => {
       mode: 'on',
     });
 
-    const result = await store.searchWithMeta('appointment', {
-      depth: 'raw',
-      mode: 'hybrid',
-      scope: 'threads',
-      limit: 2,
-    });
+    const { onVectorSearchDegrade } = await import('../../dist/domains/memory/vector-search-degrade-report.js');
+    const records = [];
+    const unsubscribe = onVectorSearchDegrade((record) => records.push(record));
+    let result;
+    try {
+      result = await store.searchWithMeta('appointment', {
+        depth: 'raw',
+        mode: 'hybrid',
+        scope: 'threads',
+        limit: 2,
+      });
+    } finally {
+      unsubscribe();
+    }
 
     assert.equal(result.meta.degraded, true);
     assert.equal(result.meta.degradeReason, 'passage_vector_search_error');
@@ -260,5 +268,10 @@ describe('raw passage semantic and hybrid retrieval', () => {
       result.items.some((r) => r.anchor === 'thread-thread_lexical'),
       'lexical fallback still returns results',
     );
+    assert.equal(records.length, 1, 'the swallowed failure leaves one record of why');
+    assert.equal(records[0].stage, 'raw_passage_hybrid');
+    assert.equal(records[0].errorName, 'Error');
+    const line = JSON.stringify(records[0]);
+    assert.ok(!line.includes('vec0 unavailable') && !line.includes('appointment'), line);
   });
 });

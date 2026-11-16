@@ -1,11 +1,11 @@
 import { randomUUID } from 'node:crypto';
 import { createServer } from 'node:http';
 import type { WatcherUsage } from '@cat-cafe/shared';
-import { estimateTokens } from '../../../utils/token-counter.js';
 import { WATCHER_TURN_RESERVE_TOKENS } from './context/watcher-context-budget.js';
+import { createWatcherRequestAccounting, type WatcherContextEstimate } from './context/watcher-request-accounting.js';
 import { watcherProviderHttp } from './watcher-provider-http.js';
 
-export interface WatcherRequestObservation {
+export interface WatcherRequestObservation extends WatcherContextEstimate {
   request: number;
   inputUpperBound: number;
   maxOutputTokens: number;
@@ -20,6 +20,7 @@ export async function createWatcherRequestBoundary(
     controlOnly?: boolean;
     transportEnv?: Readonly<Record<string, string>>;
     observed?(row: WatcherRequestObservation): void | Promise<void>;
+    rejected?(row: WatcherRequestObservation): void | Promise<void>;
     completed?(row: WatcherRequestObservation, usage: WatcherUsage): void | Promise<void>;
   },
 ) {
@@ -29,7 +30,7 @@ export async function createWatcherRequestBoundary(
   const path = `/watcher-${randomUUID()}`;
   const abort = new AbortController();
   const signal = AbortSignal.any([input.signal, abort.signal]);
-  let previousOutputs = 0;
+  const accounting = createWatcherRequestAccounting();
   let requests = 0;
   let maximum = 0;
   let failed: Error | undefined;
@@ -60,21 +61,22 @@ export async function createWatcherRequestBoundary(
       }
       const body = JSON.parse(Buffer.concat(buffers).toString('utf8')) as Record<string, unknown>;
       if (body.previous_response_id) reject('watcher_hidden_response_chain_not_budgetable');
-      // Includes escaped arguments/results, tools, instructions and all native response-chain items.
-      // Previous reasoning is charged as well, even when it is represented by an opaque native item.
-      const items = Array.isArray(body.input) ? body.input.length : 1;
-      const tools = Array.isArray(body.tools) ? body.tools.length : 0;
-      const inputUpperBound = estimateTokens(JSON.stringify(body)) + previousOutputs + 1024 + 64 * (items + tools);
-      const available = 30000 - inputUpperBound;
-      if (available < WATCHER_TURN_RESERVE_TOKENS) reject(`watcher_context_budget_exceeded:${inputUpperBound}`);
+      const estimate = accounting.estimate(body);
+      const { inputUpperBound } = estimate;
       const maxOutputTokens = WATCHER_TURN_RESERVE_TOKENS;
-      body.max_output_tokens = maxOutputTokens; // Includes reasoning and final output in the Responses contract.
       const observation = {
-        request: ++requests,
-        inputUpperBound,
+        ...estimate,
+        request: requests + 1,
         maxOutputTokens,
         workingContextUpperBound: inputUpperBound + maxOutputTokens,
       };
+      if (observation.workingContextUpperBound > 30000) {
+        failed ??= new Error(`watcher_context_budget_exceeded:${inputUpperBound}`);
+        await input.rejected?.(observation);
+        throw failed;
+      }
+      requests++;
+      body.max_output_tokens = maxOutputTokens; // Includes reasoning and final output in the Responses contract.
       maximum = Math.max(maximum, observation.workingContextUpperBound);
       await input.observed?.(observation);
       const headers = new Headers();
@@ -113,6 +115,7 @@ export async function createWatcherRequestBoundary(
             const event = JSON.parse(data) as {
               type?: string;
               response?: {
+                output?: unknown[];
                 incomplete_details?: { reason?: string };
                 usage?: {
                   input_tokens?: number;
@@ -126,14 +129,13 @@ export async function createWatcherRequestBoundary(
               if (typeof output === 'number' && Number.isSafeInteger(output) && output >= 0) {
                 if (output > maxOutputTokens) reject('watcher_provider_output_limit_violated');
               }
-              previousOutputs +=
-                typeof output === 'number' && Number.isSafeInteger(output) && output >= 0 ? output : maxOutputTokens;
               charged = true;
               const reported = event.response?.usage;
               const valid = (value: unknown): value is number =>
                 typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
               if (valid(reported?.input_tokens) && reported.input_tokens + maxOutputTokens > 30000)
                 reject('watcher_provider_input_limit_violated');
+              accounting.completed(body, event.response, event.type === 'response.completed', estimate);
               await input.completed?.(observation, {
                 reportedAt: Date.now(),
                 workingContextTokens: observation.workingContextUpperBound,
@@ -154,7 +156,7 @@ export async function createWatcherRequestBoundary(
           reply.write(`${frame}\n\n`);
         }
       }
-      if (!charged) previousOutputs += maxOutputTokens;
+      if (!charged) accounting.unknownOutput();
       if (pending) reply.write(pending);
       reply.end();
     } catch (error) {
@@ -177,6 +179,7 @@ export async function createWatcherRequestBoundary(
       if (failed) throw failed;
     },
     async close() {
+      accounting.clear();
       abort.abort(new Error('watcher_request_boundary_closed'));
       http.close();
       server.closeAllConnections();

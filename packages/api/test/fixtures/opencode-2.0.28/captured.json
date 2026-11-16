@@ -1,0 +1,221 @@
+{
+  "version": "2.0.28",
+  "runs": [
+    {
+      "name": "text-first",
+      "events": [
+        {
+          "type": "text",
+          "timestamp": 1794796123529,
+          "sessionID": "ses_text",
+          "part": {
+            "id": "prt_text_first_text",
+            "sessionID": "ses_text",
+            "messageID": "msg_text_first",
+            "type": "text",
+            "text": "Hi",
+            "time": {
+              "start": 1794796123471,
+              "end": 1794796123529
+            }
+          }
+        }
+      ],
+      "messages": [
+        {
+          "id": "msg_text_first",
+          "session_id": "ses_text",
+          "type": "assistant",
+          "seq": 5,
+          "time_created": 1794796123471,
+          "time_updated": 1794796123531,
+          "data": {
+            "time": {
+              "created": 1794796123471,
+              "streamed": 1794796123525,
+              "completed": 1794796123529
+            },
+            "agent": "build",
+            "model": {
+              "id": "mock-model",
+              "providerID": "mock",
+              "variant": "default"
+            },
+            "content": [
+              {
+                "type": "text",
+                "text": "Hi"
+              }
+            ],
+            "finish": "stop",
+            "rawFinish": "stop",
+            "cost": 0,
+            "tokens": {
+              "input": 0,
+              "output": 0,
+              "reasoning": 0,
+              "cache": {
+                "read": 0,
+                "write": 0
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "text-second",
+      "events": [
+        {
+          "type": "text",
+          "timestamp": 1794796140324,
+          "sessionID": "ses_text",
+          "part": {
+            "id": "prt_text_second_text",
+            "sessionID": "ses_text",
+            "messageID": "msg_text_second",
+            "type": "text",
+            "text": "Hi",
+            "time": {
+              "start": 1794796140294,
+              "end": 1794796140324
+            }
+          }
+        }
+      ],
+      "messages": [
+        {
+          "id": "msg_text_second",
+          "session_id": "ses_text",
+          "type": "assistant",
+          "seq": 16,
+          "time_created": 1794796140294,
+          "time_updated": 1794796140326,
+          "data": {
+            "time": {
+              "created": 1794796140294,
+              "streamed": 1794796140320,
+              "completed": 1794796140324
+            },
+            "agent": "build",
+            "model": {
+              "id": "mock-model",
+              "providerID": "mock",
+              "variant": "default"
+            },
+            "content": [
+              {
+                "type": "text",
+                "text": "Hi"
+              }
+            ],
+            "finish": "stop",
+            "rawFinish": "stop",
+            "cost": 0,
+            "tokens": {
+              "input": 0,
+              "output": 0,
+              "reasoning": 0,
+              "cache": {
+                "read": 0,
+                "write": 0
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "reasoning",
+      "events": [
+        {
+          "type": "reasoning",
+          "timestamp": 1794796154533,
+          "sessionID": "ses_reasoning",
+          "part": {
+            "id": "prt_reasoning_reasoning",
+            "sessionID": "ses_reasoning",
+            "messageID": "msg_reasoning",
+            "type": "reasoning",
+            "text": "thinking about it",
+            "metadata": {
+              "reasoningField": "reasoning_content"
+            },
+            "time": {
+              "start": 1794796154481,
+              "end": 1794796154533
+            }
+          }
+        },
+        {
+          "type": "text",
+          "timestamp": 1794796154533,
+          "sessionID": "ses_reasoning",
+          "part": {
+            "id": "prt_reasoning_text",
+            "sessionID": "ses_reasoning",
+            "messageID": "msg_reasoning",
+            "type": "text",
+            "text": "Hi",
+            "time": {
+              "start": 1794796154481,
+              "end": 1794796154533
+            }
+          }
+        }
+      ],
+      "messages": [
+        {
+          "id": "msg_reasoning",
+          "session_id": "ses_reasoning",
+          "type": "assistant",
+          "seq": 5,
+          "time_created": 1794796154481,
+          "time_updated": 1794796154535,
+          "data": {
+            "time": {
+              "created": 1794796154481,
+              "streamed": 1794796154529,
+              "completed": 1794796154533
+            },
+            "agent": "build",
+            "model": {
+              "id": "mock-model",
+              "providerID": "mock",
+              "variant": "default"
+            },
+            "content": [
+              {
+                "type": "reasoning",
+                "text": "thinking about it",
+                "state": {
+                  "reasoningField": "reasoning_content"
+                },
+                "time": {
+                  "created": 1794796154509,
+                  "completed": 1794796154519
+                }
+              },
+              {
+                "type": "text",
+                "text": "Hi"
+              }
+            ],
+            "finish": "stop",
+            "rawFinish": "stop",
+            "cost": 0,
+            "tokens": {
+              "input": 0,
+              "output": 0,
+              "reasoning": 0,
+              "cache": {
+                "read": 0,
+                "write": 0
+              }
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

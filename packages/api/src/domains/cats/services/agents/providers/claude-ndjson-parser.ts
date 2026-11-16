@@ -5,6 +5,7 @@
  */
 
 import type { CatId } from '@cat-cafe/shared';
+import { claudeRateLimitMessage } from '../../../../../config/claude-quota-event.js';
 import type { AgentMessage, TokenUsage } from '../../types.js';
 import { extractClaudeMcpStatusSnapshot } from './claude-mcp-status.js';
 import { type ClaudeTextBoundaryState, withClaudeMessageBoundary } from './claude-text-boundaries.js';
@@ -309,14 +310,12 @@ export function transformClaudeEvent(
     return messages.length > 0 ? messages : null;
   }
 
-  // F045: rate_limit_event → system_info
+  // Official CLI and SDK share this complete, model-scoped quota observation.
   if (e.type === 'rate_limit_event') {
-    const utilization = typeof e.utilization === 'number' ? e.utilization : undefined;
-    const resetsAt = typeof e.resets_at === 'string' ? e.resets_at : undefined;
     return {
       type: 'system_info',
       catId,
-      content: JSON.stringify({ type: 'rate_limit', catId, utilization, resetsAt }),
+      content: claudeRateLimitMessage(e, catId),
       timestamp: Date.now(),
     };
   }

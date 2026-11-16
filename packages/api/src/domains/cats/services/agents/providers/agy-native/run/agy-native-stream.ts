@@ -10,6 +10,7 @@ import {
 import { agyNativePolicyDiagnostics, missingAgyNativeInitError } from '../agy-native-errors.js';
 import {
   type ExpectedNativeInit,
+  extractUnrecognizedInitTools,
   readAgyNativeEnvelope,
   verifiedInitSessionId,
   verifyAgyNativeResult,
@@ -19,6 +20,7 @@ export interface AgyNativeObservedTurn {
   readonly sessionId: string;
   readonly turn: AgyStreamJsonTurn;
   readonly transportError: string | null;
+  readonly unrecognizedAdvertisedTools?: readonly string[];
   readonly cliDiagnostics?: CliDiagnostics;
   readonly transportExit?: { readonly code: number | null; readonly signal: string | null };
   readonly cancelledBeforeTerminal?: boolean;
@@ -50,6 +52,7 @@ export async function* observeAgyNativeTurn(
 ): AsyncGenerator<AgyNativeStreamObservation> {
   const lines: string[] = [];
   let sessionId: string | null = null;
+  let unrecognizedAdvertisedTools: readonly string[] = [];
   let transportError: string | null = null;
   let cliDiagnostics: CliDiagnostics | undefined;
   let transportExit: AgyNativeObservedTurn['transportExit'];
@@ -77,6 +80,7 @@ export async function* observeAgyNativeTurn(
     if (record.event === 'init') {
       if (resultCount > 0) throw new Error('AGY native init followed a terminal result');
       sessionId = verifiedInitSessionId(record, expected, sessionId !== null);
+      unrecognizedAdvertisedTools = extractUnrecognizedInitTools(record);
       yield { kind: 'init', sessionId };
     }
     const line = JSON.stringify(raw);
@@ -121,6 +125,7 @@ export async function* observeAgyNativeTurn(
           sessionId,
           turn,
           transportError,
+          ...(unrecognizedAdvertisedTools.length ? { unrecognizedAdvertisedTools } : {}),
           ...(resultDiagnostics ? { cliDiagnostics: resultDiagnostics } : {}),
           cancelledBeforeTerminal: signal?.aborted === true && !resultSeenBeforeCancellation,
         },
@@ -136,6 +141,7 @@ export async function* observeAgyNativeTurn(
       sessionId,
       turn,
       transportError,
+      ...(unrecognizedAdvertisedTools.length ? { unrecognizedAdvertisedTools } : {}),
       ...(cliDiagnostics ? { cliDiagnostics } : {}),
       ...(transportExit ? { transportExit } : {}),
       cancelledBeforeTerminal: signal?.aborted === true && !resultSeenBeforeCancellation,

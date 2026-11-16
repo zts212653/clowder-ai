@@ -36,7 +36,7 @@ const rememberItemInputSchema = z.discriminatedUnion('target', [
       .describe(
         'Durable fact about the authenticated person or this persona-operator relationship: personal context, preferred address, a relationship-specific communication boundary. ' +
           'targetLayer primer (default) = this persona relationship; corpus = owner-wide facts every cat should know; capsule = the 1–300 character opening portrait. ' +
-          'Read the same layer with cat_cafe_read_profile first; afterContent replaces the whole file. For names/roles, state the subject cat, current agreement and original message coordinates. ' +
+          'Read the same layer with cat_cafe_read_memory({ref:{kind:"profile",layer:targetLayer}}) first; afterContent replaces the whole file. For names/roles, state the subject cat, current agreement and original message coordinates. ' +
           'Nothing is written until the owner approves.',
       ),
   ),
@@ -107,8 +107,10 @@ const rememberItemInputSchema = z.discriminatedUnion('target', [
   rememberItem(
     'matter',
     matterAgentChangeSchema.describe(
-      'Create, append to, correct or retire a shared matter page from exact original message selections (raw UTF-16 start/end, end exclusive). ' +
-        'description is optional cat-written context and applicability; updates need expectedRevision from a fresh cat_cafe_read_memory_matter. Reuse requestId only for the exact same change.',
+      'Create, append to, correct or retire a shared matter page. Give summary: your interpretation in one sentence or more; sources are optional threadId pointers, with messageId when known. ' +
+        'Without sources the server binds this real invocation thread and any confirmed trigger, including a cat/system message; a pointer is not verified original speech. No quote, selected block, attachment or offsets are needed. ' +
+        'The server records the actual summary writer. description is optional page context/applicability. Exact quotations remain optional and use their original raw UTF-16 selection fields. ' +
+        'Updates need expectedRevision from cat_cafe_read_memory({ref:{kind:"matter",matterId}}). Reuse requestId only for the exact same change.',
     ),
   ),
   rememberItem(
@@ -131,7 +133,7 @@ export const rememberTools = [
     description:
       'The write entry for memory: submit 1–4 items, each forwarded to its existing owner route. Choose target by semantic content (a correction, praise or Magic Word does not choose it): ' +
       'profile = facts about the person or this relationship; taste = reusable quality judgments; person = a named third party (F276); ' +
-      'person_defer / person_abstain = quiet proactive-memory dispositions; entity = workspace name mappings; event_correction = fix an Event memory; matter = shared cross-thread quotes and decisions. ' +
+      'person_defer / person_abstain = quiet proactive-memory dispositions; entity = workspace name mappings; event_correction = fix an Event memory; matter = shared cat summaries with return addresses and optional exact quotations. ' +
       'NOT for repeated operational/tool/process rules (use code-as-harness), reading memory, approving proposals or forgetting data. ' +
       'Output: each original proposal/receipt or rejection plus a groupId; visible items share one Chat group card, quiet items post none. ' +
       'Approval, source checks, deduplication and direct-write rules still apply per item; one refusal does not undo another. Keep clientRequestId when retrying the same request.',

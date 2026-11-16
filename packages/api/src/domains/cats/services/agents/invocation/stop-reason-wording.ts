@@ -6,18 +6,47 @@
  * an automatic continuation is promised only where one is actually scheduled.
  */
 
-import { HOST_SLEEP_TERMINAL_REASON } from '../../stores/ports/TurnExecutionStore.js';
+import { HOST_SLEEP_TERMINAL_REASON, RESTART_SHUTDOWN_TERMINAL_REASON } from '../../stores/ports/TurnExecutionStore.js';
 
-export { HOST_SLEEP_TERMINAL_REASON };
+export { HOST_SLEEP_TERMINAL_REASON, RESTART_SHUTDOWN_TERMINAL_REASON };
 /** The cut-off turn was itself a continuation; the loop guard will not wake it again. */
 export const HOST_SLEEP_REPEAT_TERMINAL_REASON = 'host_sleep_repeat';
 export const HOST_SLEEP_ERROR_CODE = 'HOST_SLEEP';
 export const HOST_SLEEP_REPEAT_ERROR_CODE = 'HOST_SLEEP_REPEAT';
+export const RESTART_SHUTDOWN_REPEAT_TERMINAL_REASON = 'restart_shutdown_repeat';
+export const RESTART_SHUTDOWN_ERROR_CODE = 'RESTART_SHUTDOWN';
+export const RESTART_SHUTDOWN_REPEAT_ERROR_CODE = 'RESTART_SHUTDOWN_REPEAT';
 
 /** Appended to the failed reply the owner and the waiting caller read. */
 export const HOST_SLEEP_ERROR_NOTE = '\n\n（这一轮做到一半电脑睡着了，不是这只猫坏了；开盖后它会自动在这里接着做。）';
 export const HOST_SLEEP_REPEAT_ERROR_NOTE =
   '\n\n（这一轮做到一半电脑睡着了，不是这只猫坏了。这一轮本身就是被叫回来接着做的，为了不反复打断，这次不再自动叫回；需要的话请再喊它一声。）';
+export const RESTART_SHUTDOWN_ERROR_NOTE =
+  '\n\n（这一轮做到一半 runtime 重启了，不是这只猫坏了；重启后它会自动在这里接着做。）';
+export const RESTART_SHUTDOWN_REPEAT_ERROR_NOTE =
+  '\n\n（这一轮做到一半 runtime 重启了，不是这只猫坏了。这一轮本身就是被叫回来接着做的，为了不反复打断，这次不再自动叫回；需要的话请再喊它一声。）';
+
+/** How a host event cut a turn off: the terminal reason, reply note and response reason it carries. */
+export type HostCutKind = 'host_sleep' | 'restart_shutdown';
+
+export const HOST_CUT = {
+  host_sleep: {
+    terminalReason: HOST_SLEEP_TERMINAL_REASON,
+    repeatTerminalReason: HOST_SLEEP_REPEAT_TERMINAL_REASON,
+    errorCode: HOST_SLEEP_ERROR_CODE,
+    repeatErrorCode: HOST_SLEEP_REPEAT_ERROR_CODE,
+    note: HOST_SLEEP_ERROR_NOTE,
+    repeatNote: HOST_SLEEP_REPEAT_ERROR_NOTE,
+  },
+  restart_shutdown: {
+    terminalReason: RESTART_SHUTDOWN_TERMINAL_REASON,
+    repeatTerminalReason: RESTART_SHUTDOWN_REPEAT_TERMINAL_REASON,
+    errorCode: RESTART_SHUTDOWN_ERROR_CODE,
+    repeatErrorCode: RESTART_SHUTDOWN_REPEAT_ERROR_CODE,
+    note: RESTART_SHUTDOWN_ERROR_NOTE,
+    repeatNote: RESTART_SHUTDOWN_REPEAT_ERROR_NOTE,
+  },
+} as const satisfies Record<HostCutKind, Record<string, string>>;
 
 export function describeStopReason(status: string, reason: string | undefined): string {
   switch (reason) {
@@ -27,6 +56,12 @@ export function describeStopReason(status: string, reason: string | undefined): 
     case HOST_SLEEP_REPEAT_TERMINAL_REASON:
     case HOST_SLEEP_REPEAT_ERROR_CODE:
       return '电脑睡眠打断；这一轮本身是被叫回来的，这次不再自动叫回';
+    case RESTART_SHUTDOWN_TERMINAL_REASON:
+    case RESTART_SHUTDOWN_ERROR_CODE:
+      return 'runtime 重启打断，重启后会自动接着做';
+    case RESTART_SHUTDOWN_REPEAT_TERMINAL_REASON:
+    case RESTART_SHUTDOWN_REPEAT_ERROR_CODE:
+      return 'runtime 重启打断；这一轮本身是被叫回来的，这次不再自动叫回';
     case 'process_restart':
       return 'runtime 重启打断，重启后会尝试自动叫回';
   }
