@@ -39,6 +39,32 @@ describe('resolveProbeTimeoutMs', () => {
     assert.equal(resolveProbeTimeoutMs(cap), 7000);
   });
 
+  it('uses slow-start timeout for package runners that fetch on first use', () => {
+    for (const [command, args] of [
+      ['uvx', ['some-python-mcp-package']],
+      ['uv', ['run', 'some-python-mcp-package']],
+      ['uv', ['tool', 'run', 'some-python-mcp-package']],
+      ['uv', ['--no-cache', 'run', 'some-python-mcp-package']],
+      ['uv', ['--cache-dir', '/tmp/uv-cache', 'run', 'some-python-mcp-package']],
+      ['uv', ['--color=never', '--offline', 'tool', 'run', 'some-python-mcp-package']],
+      ['uv', ['--project=/repo', 'run', 'some-python-mcp-package']],
+      ['uv', ['--python', '3.12', 'run', 'some-python-mcp-package']],
+      ['bunx', ['some-mcp-package']],
+      ['bun', ['x', 'some-mcp-package']],
+      ['pipx', ['run', 'some-python-mcp-package']],
+      [String.raw`C:\Tools\uvx.exe`, ['some-python-mcp-package']],
+      ['/usr/local/bin/bunx', ['some-mcp-package']],
+    ]) {
+      assert.equal(resolveProbeTimeoutMs(makeCapability(command, args)), 7000, `${command} ${args.join(' ')}`);
+    }
+  });
+
+  it('does not slow down plain uv/pipx commands without a package-run subcommand', () => {
+    assert.equal(resolveProbeTimeoutMs(makeCapability('uv', ['--version'])), 2500);
+    assert.equal(resolveProbeTimeoutMs(makeCapability('uv', ['--offline', '--version'])), 2500);
+    assert.equal(resolveProbeTimeoutMs(makeCapability('pipx', ['list'])), 2500);
+  });
+
   it('uses slow-start timeout for docker mcp gateway run', () => {
     const cap = makeCapability('docker', ['mcp', 'gateway', 'run']);
     assert.equal(resolveProbeTimeoutMs(cap), 7000);
