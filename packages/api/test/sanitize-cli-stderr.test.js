@@ -126,6 +126,12 @@ test('redacts query strings in relative HTTP requests and schemeless URLs', () =
   });
 });
 
+test('redacts URL queries immediately following a log or HTTP header colon', () => {
+  ['Location:', 'url:'].forEach((prefix) => {
+    assert.equal(sanitizeCliStderr(`${prefix}https://x.test/a?token=1`), `${prefix}https://x.test/a?[QUERY_REDACTED]`);
+  });
+});
+
 test('keeps fullwidth question punctuation after URLs and does not mistake Windows files for URLs', () => {
   const input =
     '访问 https://x.test/a？页面空白\n访问 /settings？就报错\n访问 example.com？为什么打不开\nC:\\tmp\\file.txt?not-a-url';
