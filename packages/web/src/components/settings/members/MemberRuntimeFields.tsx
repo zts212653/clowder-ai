@@ -190,10 +190,10 @@ export function MemberRuntimeFields({
     !!form.cliEffort &&
     !efforts.some((item) => item.value === form.cliEffort);
   const invalidRuntime = !dsh && selected?.discoveryStatus === 'acp_profile_invalid';
-  const invalidDefaultModel = !dsh && native && !form.defaultModel && catalog?.defaultModelStatus === 'unavailable';
+  const unconfirmedDefaultModel = !dsh && native && !form.defaultModel && catalog?.defaultModelStatus === 'unavailable';
   useEffect(
-    () => onValidityChange?.(!invalidEffort && !invalidRuntime && !invalidDefaultModel),
-    [invalidEffort, invalidRuntime, invalidDefaultModel, onValidityChange],
+    () => onValidityChange?.(!invalidEffort && !invalidRuntime),
+    [invalidEffort, invalidRuntime, onValidityChange],
   );
   const follow = t(native ? `跟随 ${tool} 设置` : '跟随连接设置', `Follow ${native ? tool : 'connection'} settings`);
   const accountOptions = [
@@ -369,7 +369,7 @@ export function MemberRuntimeFields({
             notImplemented={catalogNotImplemented}
             loading={catalogLoading}
             needsLogin={needsLogin}
-            invalidDefault={invalidDefaultModel}
+            unconfirmedDefault={unconfirmedDefaultModel}
             inheritsModel={native && !form.defaultModel}
             tool={tool}
             modelCount={models.length}
