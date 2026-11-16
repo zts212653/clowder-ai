@@ -153,6 +153,7 @@ beforeEach(() => {
     currentThreadId: T,
     messages: [],
     threadStates: {},
+    deletedMessageIds: {},
     catInvocations: {},
     activeInvocations: {},
   });
@@ -218,5 +219,50 @@ describe('Astra #6718 R1: returning to a still-running thread whose room the pag
         .getThreadState(T)
         .messages.map((message) => message.id),
     ).toEqual([]);
+  });
+
+  it.each(['leave', 'disconnect'] as const)(
+    'accepts authoritative History after missing a restore during %s',
+    (gap) => {
+      const relay = pageRelay();
+      const server = new MessageStore();
+      const saved = server.append({
+        threadId: T, userId: 'owner', from: { kind: 'agent', catId: 'opus' },
+        content: 'RESTORED', mentions: [], timestamp: 100, origin: 'callback',
+      });
+      join(relay, undefined, 'before-gap');
+      useChatStore.getState().addMessageToThread(T, { ...saved, type: 'assistant' } as ChatMessage);
+      server.softDelete(saved.id, 'owner');
+      useChatStore.getState().removeThreadMessage(T, saved.id);
+      if (gap === 'leave') leave(relay);
+      else relay.reset();
+      server.restore(saved.id);
+      useChatStore.getState().setCurrentThread(T);
+      join(relay, undefined, 'after-gap');
+      const issue = issueReplaceRead(T);
+      const history = server.getByThread(T, 100, 'owner');
+      expect(history.map((message) => message.id)).toEqual([saved.id]);
+      land(issue, history.map((message) => ({ ...message, type: 'assistant' }) as ChatMessage));
+      expect(useChatStore.getState().getThreadState(T).messages.map((message) => message.id)).toEqual([saved.id]);
+    },
+  );
+
+  it.each([false, true])('keeps deletion unless History or an event proves restore: restored=%s', (restored) => {
+    const relay = pageRelay();
+    const server = new MessageStore();
+    const saved = server.append({
+      threadId: T, userId: 'owner', from: { kind: 'agent', catId: 'opus' },
+      content: 'BODY', mentions: [], timestamp: 100, origin: 'callback',
+    });
+    join(relay, undefined, 'before-delete');
+    useChatStore.getState().addMessageToThread(T, { ...saved, type: 'assistant' } as ChatMessage);
+    server.softDelete(saved.id, 'owner');
+    useChatStore.getState().removeThreadMessage(T, saved.id);
+    if (restored) {
+      server.restore(saved.id);
+      useChatStore.getState().clearThreadMessageDeletion(T, saved.id);
+    }
+    land(issueReplaceRead(T), server.getByThread(T, 100, 'owner').map((message) => ({ ...message, type: 'assistant' }) as ChatMessage));
+    expect(useChatStore.getState().getThreadState(T).messages.map((message) => message.id)).toEqual(restored ? [saved.id] : []);
   });
 });
