@@ -155,13 +155,22 @@ test('keeps fullwidth question punctuation and conservatively redacts ambiguous 
   assert.equal(sanitizeCliStderr(input), input.replace('?not-a-url', '?[QUERY_REDACTED]'));
 });
 
-test('URL query scanning stays bounded on long non-URL delimiter output', () => {
-  const input = ':/'.repeat(32_768);
-  const startedAt = performance.now();
-  const out = sanitizeCliStderr(input);
-  const elapsedMs = performance.now() - startedAt;
-  assert.strictEqual(out, input);
-  assert.ok(elapsedMs < 500, `64 KiB query scanning took ${elapsedMs.toFixed(1)}ms`);
+test('redacts URL queries inside parentheses and after literal path parentheses', () => {
+  [
+    ['((https://x.test/a?token=1))', '((https://x.test/a?[QUERY_REDACTED]))'],
+    ['https://x.test/a(b?token=1', 'https://x.test/a(b?[QUERY_REDACTED]'],
+  ].forEach(([input, expected]) => assert.equal(sanitizeCliStderr(input), expected));
+});
+
+[':/', '(', '(/', '(a'].forEach((pattern) => {
+  test(`URL query scanning stays bounded on long ${pattern} output`, () => {
+    const input = pattern.repeat(65_536 / pattern.length);
+    const startedAt = performance.now();
+    const out = sanitizeCliStderr(input);
+    const elapsedMs = performance.now() - startedAt;
+    assert.strictEqual(out, input);
+    assert.ok(elapsedMs < 500, `64 KiB query scanning took ${elapsedMs.toFixed(1)}ms`);
+  });
 });
 
 test('redacts URL userinfo credentials while retaining the destination host', () => {
