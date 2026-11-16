@@ -119,8 +119,8 @@ function ioNow() { return IO.port && IO.port.now ? IO.port.now() : Date.now(); }
 function ioFile(path) { return IO.port && IO.port.file ? IO.port.file(path) : ''; }
 /* 身份的数据（应用登记）：组件库的身份组件（identity.js）、选成员、提及、徽标只经这里读数据，不认识应用的数据——
    member(id) 成员（找不到给第一个）· members() 全部成员 · me() 你 · plugins() 插件（按 id）· builtinConnector(id) 宿主内置的连接器 ·
-   health() 回调授权健康（没有就 null）· live(id, 回合) 执行状态 · handleId(句柄) 句柄是哪个成员 */
-const WHO_DATA = pdlReads('who', { member: function () { return null; }, members: function () { return []; }, me: function () { return {}; }, plugins: function () { return {}; }, builtinConnector: function () { return false; }, health: function () { return null; }, live: null, handleId: function () { return null; } });
+   health() 回调授权健康（没有就 null）· live(id, 回合) 执行状态 · handleWho(句柄) 这个 @ 是谁（成员 / 你 / 插件，和消息作者同一种写法；不是有效的 @ 给 null） */
+const WHO_DATA = pdlReads('who', { member: function () { return null; }, members: function () { return []; }, me: function () { return {}; }, plugins: function () { return {}; }, builtinConnector: function () { return false; }, health: function () { return null; }, live: null, handleWho: function () { return null; } });
 /* 根元素上的状态类（各层登记：返回类名或空串），画在外壳的固定类之后 */
 const APP_CLASS = [];
 /* 整页画完、弹窗里正在填的值放回之后，组件同步自己的显示（下拉按钮上的字……）：组件库登记 */

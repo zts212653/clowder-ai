@@ -555,6 +555,24 @@ describe('unmodified runtime and project chat bindings', () => {
     }
   });
 
+  it('a valid @ is anyone in the one @-mentionable list (members, you, plugins), recognised by any of their handles', async () => {
+    const { dom, w } = await boot();
+    try {
+      const cat = w.eval('chatDataSnapshot.chat.cats[0]');
+      const me = w.eval('chatDataSnapshot.chat.me');
+      for (const handle of cat.mentionPatterns)
+        expect(w.eval(`WHO_DATA.handleWho(${JSON.stringify(handle.toUpperCase())})`)).toEqual({
+          kind: 'agent',
+          catId: cat.id,
+        });
+      if (me.mentionPatterns[0])
+        expect(w.eval(`WHO_DATA.handleWho(${JSON.stringify(me.mentionPatterns[0])})`)).toEqual({ kind: 'user' });
+      expect(w.eval("WHO_DATA.handleWho('@nobody-here')")).toBeNull();
+    } finally {
+      dom.window.close();
+    }
+  });
+
   it('plugin requests read host sources, writes run every returned public action, plugSet writes also', async () => {
     const { dom, w, port } = await boot();
     try {

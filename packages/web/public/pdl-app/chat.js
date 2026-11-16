@@ -404,10 +404,24 @@ function cafeTypedItems() {
         ? model.commands
         : model.paths;
 }
-let chatCatalogSource, chatCatalogValue, chatMeSource, chatMeValue;
+let chatCatalogSource, chatCatalogValue, chatMeSource, chatMeValue, chatMentionSource, chatMentionValue;
 let chatServiceItems,
   chatSpeechAvailable = false;
 function chatRead(name) {
+  if (name === 'mentionables') {
+    const chat = chatDataSnapshot.chat,
+      source = [chat.cats, chat.me, chat.pluginTargets];
+    if (
+      !chatMentionSource ||
+      source.some(function (x, i) {
+        return x !== chatMentionSource[i];
+      })
+    ) {
+      chatMentionSource = source;
+      chatMentionValue = projectChat(projectChatData(), CS, chatDataSnapshot).mentionables;
+    }
+    return chatMentionValue;
+  }
   if (name === 'memberCatalog') {
     const cats = chatDataSnapshot.chat.cats;
     if (chatCatalogSource !== cats) {
@@ -718,15 +732,15 @@ window.clowderChat = {
       threadLive: function (tid, id) {
         return chatLive(id, undefined, tid);
       },
-      // any of the member's mention patterns (@opus, @小狸 …), not only the first one shown as its handle
-      handleId: function (handle) {
+      // who a valid @ is: the one in the @-mentionable list (members, you, plugin instances) that has this handle
+      handleWho: function (handle) {
         const k = handle.toLowerCase(),
-          cat = chatDataSnapshot.chat.cats.find(function (c) {
-            return c.mentionPatterns.some(function (p) {
-              return p.toLowerCase() === k;
+          m = chatRead('mentionables').find(function (x) {
+            return x.handles.some(function (h) {
+              return h.toLowerCase() === k;
             });
           });
-        return cat ? cat.id : null;
+        return m ? m.who : null;
       },
     });
     ENGINE_PARTS.navState = function () {
