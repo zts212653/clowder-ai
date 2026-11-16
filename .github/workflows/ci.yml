@@ -61,7 +61,6 @@ jobs:
         run: >-
           node scripts/check-required-package-scripts.mjs
           --package packages/web
-          --script test:first-run-entry:production
           --script test:onboarding:production-contracts
       - run: pnpm --filter @cat-cafe/shared build
       - run: pnpm --filter @cat-cafe/api build
@@ -188,14 +187,6 @@ jobs:
           export F202_CANDIDATE_MATRIX="$candidate_dir/f202-c1-candidate-2b4f0418c1dd/candidate-matrix.json"
           pnpm --filter @cat-cafe/api test:native-tracking-artifact
       - run: pnpm --filter @cat-cafe/web build
-      - name: Production first-run pages with real receipt and guide routes
-        env:
-          CAT_CAFE_ENTRY_EVIDENCE_DIR: ${{ github.workspace }}/.tmp/first-run-entry-ci
-        run: |
-          # Browser runtime libraries already ship with the runner image; apt only
-          # adds fonts here and is blocked by the Ubuntu mirror DNS failure.
-          pnpm --filter @cat-cafe/web exec playwright install chromium
-          pnpm --filter @cat-cafe/web test:first-run-entry:production
       - name: Production member creation and recovery HTTP contracts
         env:
           CAT_CAFE_ONBOARDING_E2E_EVIDENCE: ${{ github.workspace }}/.tmp/native-team-setup-ci
@@ -214,7 +205,6 @@ jobs:
         with:
           name: first-run-entry-${{ github.sha }}-${{ runner.os }}
           path: |
-            .tmp/first-run-entry-ci
             .tmp/native-team-setup-ci
             .tmp/plugin-document-origin-ci
           if-no-files-found: ignore

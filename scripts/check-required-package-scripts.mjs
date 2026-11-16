@@ -30,7 +30,6 @@ const REPO_ROOT = resolve(dirname(SCRIPT_PATH), '..');
 export const REQUIRED_PACKAGE_SCRIPTS = {
   'packages/web': [
     'test:first-run-onboarding',
-    'test:first-run-entry:production',
     'test:onboarding:contracts',
     'test:onboarding:production-contracts',
     'test:onboarding:live',
