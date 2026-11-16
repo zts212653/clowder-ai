@@ -120,6 +120,8 @@ test('redacts query strings in relative HTTP requests and schemeless URLs', () =
     'example.test/path?code=private-code',
     'https://example.test/path?q=中文',
     'https://example.test/path?opaque-query',
+    'localhost:3000/x?token=1',
+    '127.0.0.1:3000/x?token=1',
   ].forEach((url) => {
     const out = sanitizeCliStderr(`GET ${url} HTTP/1.1`);
     assert.equal(out, `GET ${url.slice(0, url.indexOf('?') + 1)}[QUERY_REDACTED] HTTP/1.1`);
