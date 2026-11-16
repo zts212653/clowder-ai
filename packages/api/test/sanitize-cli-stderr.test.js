@@ -138,6 +138,15 @@ test('redacts URL queries immediately following a log or HTTP header colon', () 
   });
 });
 
+test('keeps Chinese question boundaries while redacting the URL that follows', () => {
+  [
+    ['为什么？https://x.test/a?token=1', '为什么？https://x.test/a?[QUERY_REDACTED]'],
+    ['？localhost:3002/x?token=1', '？localhost:3002/x?[QUERY_REDACTED]'],
+    ['为什么？api/v1/users?sid=deadbeef12', '为什么？api/v1/users?[QUERY_REDACTED]'],
+    ['为什么？我重试?了', '为什么？我重试?了'],
+  ].forEach(([input, expected]) => assert.equal(sanitizeCliStderr(input), expected));
+});
+
 test('keeps fullwidth question punctuation and conservatively redacts ambiguous filenames', () => {
   const input =
     '访问 https://x.test/a？页面空白\n访问 /settings？就报错\n访问 example.com？为什么打不开\nC:\\tmp\\file.txt?not-a-url';
