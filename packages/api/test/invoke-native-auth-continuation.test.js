@@ -36,8 +36,8 @@ test('Native unknown tool result cannot be treated as completed by a synthetic e
   assert.ok(f.messages.some((m) => m.type === 'error'));
 });
 
-test('Native auth recovery stops on binding drift without a cold replacement or a second submission', async () => {
-  const f = await run('binding-drift');
+test('Native auth recovery stops on an unrelated workspace without a cold replacement or a second submission', async () => {
+  const f = await run('workspace-drift');
   assert.equal(f.calls, 2);
   assert.equal(f.launches.length, 1);
   assert.equal(f.writes.length, 1);
@@ -45,6 +45,36 @@ test('Native auth recovery stops on binding drift without a cold replacement or 
   assert.equal(f.current.status, 'active');
   assert.equal(f.effects, 'A\n');
   assert.ok(f.messages.some((m) => m.type === 'error' && m.errorCode === 'AGY_NATIVE_RESUME_MISMATCH'));
+  assert.equal(f.factoryCalls, 1);
+  assert.deepEqual(
+    f.events.filter((e) => e.type === 'request_generation_terminal').map((e) => e.outcome),
+    ['error'],
+  );
+});
+
+test('Native auth recovery accepts live L0 refresh while preserving exact continuation and the failed generation', async () => {
+  const f = await run('l0-drift');
+  assert.equal(f.calls, 2);
+  assert.equal(f.launches.length, 2);
+  assert.equal(f.writes.length, 2);
+  assert.equal(f.factoryCalls, 1);
+  assert.doesNotMatch(f.writes[1], /ORIGINAL_WORK/);
+  assert.match(f.writes[1], /continu|继续/i);
+  assert.equal(f.effects, 'A\nB\n');
+  assert.equal(f.chain.length, 1);
+  assert.equal(f.current.cliSessionId, 'same-native');
+  assert.equal(
+    f.messages.some((m) => m.type === 'error'),
+    false,
+    JSON.stringify(f.messages),
+  );
+  const bindings = f.messages.filter((m) => m.type === 'session_init').map((m) => m.nativeSessionBinding);
+  assert.equal(bindings.length, 2);
+  assert.notEqual(bindings[0].l0Hash, bindings[1].l0Hash);
+  assert.deepEqual(
+    f.events.filter((e) => e.type === 'request_generation_terminal').map((e) => e.outcome),
+    ['error', 'accepted'],
+  );
 });
 
 test('Native repeated auth failure remains a failure after the single continuation budget', async () => {

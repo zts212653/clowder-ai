@@ -50,7 +50,7 @@ function buildL0({ rosterRow, capsuleText, restricted }) {
 }
 
 describe('F325 AGY Native session continuity & cold-replacement history backfill', () => {
-  test('hot-resumes across roster/capsule churn and backfills read-only thread history on native_binding_changed seal without rewinding cursors', async () => {
+  test('hot-resumes live rules and backfills history after a real profile boundary without rewinding cursors', async () => {
     const base = mkdtempSync(join(tmpdir(), 'f325-cold-history-'));
     const workspace = join(base, 'workspace');
     const dataDir = join(base, 'data');
@@ -68,55 +68,60 @@ describe('F325 AGY Native session continuity & cold-replacement history backfill
       const launches = [];
       const stdinPayloads = [];
 
-      const service = new AgyNativeAgentService({
-        catId: CAT_ID,
-        profile: {
-          enabled: true,
-          profileId: CAT_ID,
-          homeRoot: join(base, 'profiles'),
-          model: 'gemini-3.8-flash-high',
-          trustedWorkspaces: [workspace],
-        },
-        command: '/usr/bin/true',
-        l0CompilerFn: async () => currentL0,
-      });
-      const actualInvokeWithPreflight = service.invokeWithContinuityPreflight.bind(service);
-      service.invokeWithContinuityPreflight = (preflight, options) =>
-        actualInvokeWithPreflight(preflight, {
-          ...options,
-          spawnCliOverride: async function* (launch) {
-            launches.push(launch);
-            launch.onStdinReady((rawStdin) => {
-              const decoded = JSON.parse(rawStdin.trim());
-              const textPart = Array.isArray(decoded.message?.content)
-                ? decoded.message.content[0]?.text
-                : decoded.message?.content;
-              stdinPayloads.push(typeof textPart === 'string' ? textPart : rawStdin);
-            });
-            const resumeIdx = launch.args.indexOf('--conversation');
-            const convId = resumeIdx >= 0 ? launch.args[resumeIdx + 1] : `native-conv-${++freshConversationCounter}`;
-            yield {
-              event: 'init',
-              conversation_id: convId,
-              init: {
-                agent: launch.args[launch.args.indexOf('--agent') + 1],
-                cwd: launch.cwd,
-                model: 'gemini-3.8-flash-high',
-                permission_mode: 'request-review',
-                tools: [],
-              },
-            };
-            yield {
-              event: 'result',
-              result: {
-                conversation_id: convId,
-                status: 'SUCCESS',
-                response: `${nextReplyText}\n\n[烁烁/gemini-3.8-flash-high🐾]`,
-                num_turns: 1,
-              },
-            };
+      const createService = (profileId) => {
+        const service = new AgyNativeAgentService({
+          catId: CAT_ID,
+          profile: {
+            enabled: true,
+            profileId,
+            homeRoot: join(base, 'profiles'),
+            model: 'gemini-3.8-flash-high',
+            trustedWorkspaces: [workspace],
           },
+          command: '/usr/bin/true',
+          l0CompilerFn: async () => currentL0,
         });
+        const actualInvokeWithPreflight = service.invokeWithContinuityPreflight.bind(service);
+        service.invokeWithContinuityPreflight = (preflight, options) =>
+          actualInvokeWithPreflight(preflight, {
+            ...options,
+            spawnCliOverride: async function* (launch) {
+              launches.push(launch);
+              launch.onStdinReady((rawStdin) => {
+                const decoded = JSON.parse(rawStdin.trim());
+                const textPart = Array.isArray(decoded.message?.content)
+                  ? decoded.message.content[0]?.text
+                  : decoded.message?.content;
+                stdinPayloads.push(typeof textPart === 'string' ? textPart : rawStdin);
+              });
+              const resumeIdx = launch.args.indexOf('--conversation');
+              const convId = resumeIdx >= 0 ? launch.args[resumeIdx + 1] : `native-conv-${++freshConversationCounter}`;
+              yield {
+                event: 'init',
+                conversation_id: convId,
+                init: {
+                  agent: launch.args[launch.args.indexOf('--agent') + 1],
+                  cwd: launch.cwd,
+                  model: 'gemini-3.8-flash-high',
+                  permission_mode: 'request-review',
+                  tools: [],
+                },
+              };
+              yield {
+                event: 'result',
+                result: {
+                  conversation_id: convId,
+                  status: 'SUCCESS',
+                  response: `${nextReplyText}\n\n[烁烁/gemini-3.8-flash-high🐾]`,
+                  num_turns: 1,
+                },
+              };
+            },
+          });
+
+        return service;
+      };
+      const service = createService(CAT_ID);
 
       const messageStore = new MessageStore();
       const deliveryCursorStore = new DeliveryCursorStore();
@@ -202,11 +207,11 @@ describe('F325 AGY Native session continuity & cold-replacement history backfill
       assert.equal(activeSessionId, 'native-conv-1');
       assert.deepEqual(turn1.exposedBatches, [[turn1.userMsg.id]]);
 
-      // Turn 2 (2 hours later): Teammate @dot removed + owner capsule edited -> MUST hot-resume Session #1!
+      // Turn 2: roster/capsule and own restriction update remain in Session #1.
       currentL0 = buildL0({
         rosterRow: '| 缅因猫 Sol | @codex61-sol · gpt-6.1-sol | — |',
         capsuleText: '默认中文；最近在验收新猫。',
-        restricted: true,
+        restricted: false,
       });
       const turn2 = await runUserTurn('Q2: 帮我看下目录结构', 'A2: 目录结构已核对完毕', t0 + 2 * 60 * 60 * 1000);
       assert.equal(launches.length, 2, 'roster/capsule update must resume hot without sealing');
@@ -222,7 +227,7 @@ describe('F325 AGY Native session continuity & cold-replacement history backfill
       const cursorBeforeTurn3 = await deliveryCursorStore.getCursor(USER_ID, CAT_ID, THREAD_ID);
       assert.ok(cursorBeforeTurn3, 'delivery cursor recorded before Turn 3');
 
-      // Turn 3 (4 hours after Turn 2): Own restriction unlocked + 1 non-trigger unread note -> seals Session #1 & starts Session #2 with backfilled history!
+      // Turn 3: changing the actual profile crosses a hard binding boundary; history must backfill.
       const unreadNote = await messageStore.append(
         canonicalTestMessageInput({
           threadId: THREAD_ID,
@@ -238,6 +243,7 @@ describe('F325 AGY Native session continuity & cold-replacement history backfill
         capsuleText: '默认中文；最近在验收新猫。',
         restricted: false,
       });
+      deps.services[CAT_ID] = createService(`${CAT_ID}-replacement`);
       const turn3 = await runUserTurn(
         'Q3: 现在开工位把三处问题修掉',
         'A3: 已结合前两轮结论开始修复',
@@ -252,6 +258,12 @@ describe('F325 AGY Native session continuity & cold-replacement history backfill
       assert.equal(chain[0].sealReason, 'native_binding_changed');
       assert.equal(chain[1].status, 'active');
       assert.equal(chain[1].cliSessionId, 'native-conv-2');
+      assert.notEqual(chain[0].nativeSessionBinding.profileHome, chain[1].nativeSessionBinding.profileHome);
+      assert.equal(
+        chain[0].nativeSessionBinding.l0Hash,
+        chain[1].nativeSessionBinding.l0Hash,
+        'a profile change requires replacement even when the current L0 stays identical',
+      );
 
       // Replacement prompt must report fresh/resume_rejected (NOT no_prior_session) and include Q1, A1, Q2, A2 + NOTE3 + Q3!
       const replacementPrompt = stdinPayloads[2];
@@ -307,7 +319,7 @@ describe('F325 AGY Native session continuity & cold-replacement history backfill
     }
   });
 
-  test('on native_binding_changed cold replacement, settles with resume_rejected and backfills prior Q&A instead of waking with amnesia', async () => {
+  test('on profile-boundary cold replacement, settles with resume_rejected and backfills prior Q&A instead of waking with amnesia', async () => {
     const base = mkdtempSync(join(tmpdir(), 'f325-amnesia-red-'));
     const workspace = join(base, 'workspace');
     const dataDir = join(base, 'data');
@@ -315,7 +327,7 @@ describe('F325 AGY Native session continuity & cold-replacement history backfill
     mkdirSync(dataDir, { recursive: true });
 
     try {
-      let currentL0 = buildL0({
+      const currentL0 = buildL0({
         rosterRow: '| 缅因猫 Sol | @codex61-sol · gpt-6.1-sol | — |',
         capsuleText: '默认中文。',
         restricted: true,
@@ -324,54 +336,59 @@ describe('F325 AGY Native session continuity & cold-replacement history backfill
       let freshCounter = 0;
       const stdinPayloads = [];
 
-      const service = new AgyNativeAgentService({
-        catId: CAT_ID,
-        profile: {
-          enabled: true,
-          profileId: CAT_ID,
-          homeRoot: join(base, 'profiles'),
-          model: 'gemini-3.8-flash-high',
-          trustedWorkspaces: [workspace],
-        },
-        command: '/usr/bin/true',
-        l0CompilerFn: async () => currentL0,
-      });
-      const actualInvokeWithPreflight = service.invokeWithContinuityPreflight.bind(service);
-      service.invokeWithContinuityPreflight = (preflight, options) =>
-        actualInvokeWithPreflight(preflight, {
-          ...options,
-          spawnCliOverride: async function* (launch) {
-            launch.onStdinReady((rawStdin) => {
-              const decoded = JSON.parse(rawStdin.trim());
-              const textPart = Array.isArray(decoded.message?.content)
-                ? decoded.message.content[0]?.text
-                : decoded.message?.content;
-              stdinPayloads.push(typeof textPart === 'string' ? textPart : rawStdin);
-            });
-            const resumeIdx = launch.args.indexOf('--conversation');
-            const convId = resumeIdx >= 0 ? launch.args[resumeIdx + 1] : `conv-${++freshCounter}`;
-            yield {
-              event: 'init',
-              conversation_id: convId,
-              init: {
-                agent: launch.args[launch.args.indexOf('--agent') + 1],
-                cwd: launch.cwd,
-                model: 'gemini-3.8-flash-high',
-                permission_mode: 'request-review',
-                tools: [],
-              },
-            };
-            yield {
-              event: 'result',
-              result: {
-                conversation_id: convId,
-                status: 'SUCCESS',
-                response: `${nextReplyText}\n\n[烁烁/gemini-3.8-flash-high🐾]`,
-                num_turns: 1,
-              },
-            };
+      const createService = (profileId) => {
+        const service = new AgyNativeAgentService({
+          catId: CAT_ID,
+          profile: {
+            enabled: true,
+            profileId,
+            homeRoot: join(base, 'profiles'),
+            model: 'gemini-3.8-flash-high',
+            trustedWorkspaces: [workspace],
           },
+          command: '/usr/bin/true',
+          l0CompilerFn: async () => currentL0,
         });
+        const actualInvokeWithPreflight = service.invokeWithContinuityPreflight.bind(service);
+        service.invokeWithContinuityPreflight = (preflight, options) =>
+          actualInvokeWithPreflight(preflight, {
+            ...options,
+            spawnCliOverride: async function* (launch) {
+              launch.onStdinReady((rawStdin) => {
+                const decoded = JSON.parse(rawStdin.trim());
+                const textPart = Array.isArray(decoded.message?.content)
+                  ? decoded.message.content[0]?.text
+                  : decoded.message?.content;
+                stdinPayloads.push(typeof textPart === 'string' ? textPart : rawStdin);
+              });
+              const resumeIdx = launch.args.indexOf('--conversation');
+              const convId = resumeIdx >= 0 ? launch.args[resumeIdx + 1] : `conv-${++freshCounter}`;
+              yield {
+                event: 'init',
+                conversation_id: convId,
+                init: {
+                  agent: launch.args[launch.args.indexOf('--agent') + 1],
+                  cwd: launch.cwd,
+                  model: 'gemini-3.8-flash-high',
+                  permission_mode: 'request-review',
+                  tools: [],
+                },
+              };
+              yield {
+                event: 'result',
+                result: {
+                  conversation_id: convId,
+                  status: 'SUCCESS',
+                  response: `${nextReplyText}\n\n[烁烁/gemini-3.8-flash-high🐾]`,
+                  num_turns: 1,
+                },
+              };
+            },
+          });
+
+        return service;
+      };
+      const service = createService(CAT_ID);
 
       const messageStore = new MessageStore();
       const deliveryCursorStore = new DeliveryCursorStore();
@@ -441,12 +458,8 @@ describe('F325 AGY Native session continuity & cold-replacement history backfill
         // drain
       }
 
-      // Unlock own restriction 3 hours later -> triggers native_binding_changed cold replacement
-      currentL0 = buildL0({
-        rosterRow: '| 缅因猫 Sol | @codex61-sol · gpt-6.1-sol | — |',
-        capsuleText: '默认中文。',
-        restricted: false,
-      });
+      // A genuinely different profile requires cold replacement and complete prior history.
+      deps.services[CAT_ID] = createService(`${CAT_ID}-replacement`);
       nextReplyText = 'A2: 收到，立刻开工';
       const q2 = await messageStore.append(
         canonicalTestMessageInput({

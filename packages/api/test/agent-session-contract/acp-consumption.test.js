@@ -25,8 +25,15 @@ const { SessionChainStore } = await import('../../dist/domains/cats/services/sto
 const { toStoredToolEvent } = await import('../../dist/domains/cats/services/agents/routing/route-helpers.js');
 
 function acpService(updates, { workspace = '/tmp', home } = {}) {
-  const resumes = [];
+  const resumes = [],
+    sessionCalls = [],
+    prompts = [];
+  let l0Body = 'CANONICAL-L0';
   const configOptions = [{ id: 'model', currentValue: 'model', options: [{ value: 'model' }] }];
+  const session = (method, sessionId, cwd, meta) => {
+    sessionCalls.push({ method, sessionId, cwd, meta });
+    return { sessionId, configOptions };
+  };
   const client = {
     isAlive: true,
     agentCapabilities: {
@@ -39,16 +46,17 @@ function acpService(updates, { workspace = '/tmp', home } = {}) {
     offCapacity() {},
     clearRecentCapacitySignal() {},
     setSessionPermissionHandler() {},
-    newSession: async () => ({ sessionId: 'native', configOptions }),
-    resumeSession: async (id) => {
+    newSession: async (cwd, _servers, meta) => session('new', 'native', cwd, meta),
+    resumeSession: async (id, cwd, _servers, meta) => {
       resumes.push(id);
-      return { sessionId: id, configOptions };
+      return session('resume', id, cwd, meta);
     },
-    loadSession: async (id) => {
+    loadSession: async (id, cwd, _servers, meta) => {
       resumes.push(id);
-      return { sessionId: id, configOptions };
+      return session('load', id, cwd, meta);
     },
-    async *promptStream() {
+    async *promptStream(sessionId) {
+      prompts.push(sessionId);
       for (const update of updates) yield { sessionId: 'native', update };
       return 'end_turn';
     },
@@ -60,18 +68,29 @@ function acpService(updates, { workspace = '/tmp', home } = {}) {
     sessionModel: 'model',
     projectRoot: workspace,
     poolKey: { projectPath: workspace, providerProfile: 'test' },
-    pool: { acquire: async () => ({ client, release() {}, canResumeRequestedSession: true }), rememberSession() {} },
+    pool: {
+      acquire: async () => ({ client, release() {}, async closeTurn() {}, canResumeRequestedSession: true }),
+      rememberSession() {},
+    },
     ...(home
       ? {
           antigravity: {
             profile: { carrier: 'acp', enabled: true, profileId: 'fixture', model: 'model', autoApprove: true },
             profileHome: home,
-            l0CompilerFn: async () => 'CANONICAL-L0',
+            l0CompilerFn: async () => l0Body,
           },
         }
       : {}),
   });
-  return { service, resumes };
+  return {
+    service,
+    resumes,
+    sessionCalls,
+    prompts,
+    setL0: (body) => {
+      l0Body = body;
+    },
+  };
 }
 
 function consumer(service, plugin, workspace = '/tmp') {
@@ -145,27 +164,32 @@ const usageEvents = (messages) =>
     })
     .map((m) => JSON.parse(m.content));
 
-test('AGY ACP binding is committed and reaches the next validated native resume on both paths', async () => {
+test('AGY ACP resumes with live L0 while rejecting foreign bindings before native calls on both paths', async () => {
   const root = await mkdtemp(join(tmpdir(), 'acp-binding-consumption-'));
   try {
     const workspace = join(root, 'work'),
-      home = join(root, 'profile');
+      home = join(root, 'profile'),
+      otherHome = join(root, 'other-profile'),
+      otherWorkspace = join(root, 'other-workspace');
     await mkdir(workspace);
     await mkdir(home);
+    await mkdir(otherHome);
+    await mkdir(otherWorkspace);
     const results = [];
     for (const plugin of [false, true]) {
-      const { service, resumes } = acpService([answer], { workspace, home });
+      const { service, resumes, sessionCalls, prompts, setL0 } = acpService([answer], { workspace, home });
       const c = consumer(service, plugin, workspace);
       const first = await c.run();
       assert.equal(
         first.some((m) => m.type === 'error'),
         false,
       );
-      const binding = c.record().nativeSessionBinding;
+      const binding = structuredClone(c.record().nativeSessionBinding);
       assert.equal(binding?.carrier, 'agy_acp');
       assert.equal(binding.workspaceRoot, await realpath(workspace));
       assert.equal(binding.profileHome, await realpath(home));
       assert.equal(binding.cliSessionId, 'native');
+      setL0('UPDATED-CANONICAL-L0');
       const second = await c.run();
       assert.equal(
         second.some((m) => m.type === 'error'),
@@ -174,15 +198,50 @@ test('AGY ACP binding is committed and reaches the next validated native resume 
       assert.deepEqual(c.inputs[1].nativeSessionBinding, binding);
       assert.equal(c.inputs[1].sessionId, 'native');
       assert.deepEqual(resumes, ['native']);
-      const rejected = await Array.fromAsync(
-        service.invoke('hello', {
-          ...c.inputs[1],
-          signal: new AbortController().signal,
-          nativeSessionBinding: { ...binding, l0Hash: 'mismatched' },
-        }),
+      const currentBinding = structuredClone(c.record().nativeSessionBinding);
+      assert.notEqual(currentBinding.l0Hash, binding.l0Hash);
+      assert.equal(currentBinding.cliSessionId, 'native');
+      assert.equal(sessionCalls.at(-1).meta.antigravity.systemPrompt.append, 'UPDATED-CANONICAL-L0');
+      const invokeBinding = (nativeSessionBinding) =>
+        Array.fromAsync(
+          service.invoke('hello', {
+            ...c.inputs[1],
+            signal: new AbortController().signal,
+            nativeSessionBinding,
+          }),
+        );
+      const refreshed = await invokeBinding({ ...binding, l0Hash: 'mismatched', model: 'previous-model' });
+      assert.equal(
+        refreshed.some((m) => m.type === 'error'),
+        false,
       );
-      assert.ok(rejected.some((m) => m.type === 'error' && m.error.includes('binding differs')));
-      assert.deepEqual(resumes, ['native'], 'a mismatched binding must never reach native resume');
+      assert.deepEqual(refreshed.find((m) => m.type === 'session_init').nativeSessionBinding, currentBinding);
+      assert.deepEqual(resumes, ['native', 'native']);
+      assert.equal(sessionCalls.at(-1).meta.antigravity.systemPrompt.append, 'UPDATED-CANONICAL-L0');
+      const nativeCount = sessionCalls.length,
+        promptCount = prompts.length;
+      for (const mismatch of [
+        { carrier: 'agy_stream_json' },
+        { agentName: 'cat-cafe-foreign-member' },
+        { profileHome: await realpath(otherHome) },
+        { workspaceRoot: await realpath(otherWorkspace) },
+        { cliSessionId: 'other-session' },
+      ]) {
+        const rejected = await invokeBinding({ ...currentBinding, ...mismatch });
+        assert.ok(
+          rejected.some((m) => m.type === 'error'),
+          JSON.stringify(mismatch),
+        );
+        assert.equal(sessionCalls.length, nativeCount, 'foreign binding must never reach native new/load/resume');
+        assert.equal(prompts.length, promptCount, 'foreign binding must never send a native prompt');
+        assert.deepEqual(resumes, ['native', 'native']);
+      }
+      assert.equal(
+        (await invokeBinding(currentBinding)).some((m) => m.type === 'error'),
+        false,
+      );
+      assert.deepEqual(resumes, ['native', 'native', 'native']);
+      assert.equal(prompts.length, promptCount + 1);
       results.push(binding);
     }
     assert.deepEqual(results[1], results[0]);
