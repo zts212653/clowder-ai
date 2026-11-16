@@ -61,6 +61,7 @@ import {
   hasOpenCodeManagedConfig,
   identifierPrefix,
   OPENCODE_CONFIG_CONTENT_ENV,
+  OPENCODE_MESSAGE_REF_CONFLICT,
   OPENCODE_NO_TOOL_FINALIZER_AGENT,
   OPENCODE_NO_TOOL_PERMISSION,
   OPENCODE_PERMISSION_ENV,
@@ -476,8 +477,13 @@ export class OpenCodeAgentService implements L0InjectableAgentService {
         uniqueEventTypes.add(evtType);
         if (evtType === 'step_start') stepStartCount++;
         const messageRef = extractOpenCodeMessageRef(event);
-        if (messageRef?.sessionId) metadata.sessionId = messageRef.sessionId;
-        if (messageRef?.messageId) lastAssistantMessageId = messageRef.messageId;
+        if (messageRef === OPENCODE_MESSAGE_REF_CONFLICT) {
+          // A contradictory current event must not revive a previously captured recovery anchor.
+          lastAssistantMessageId = undefined;
+        } else {
+          if (messageRef?.sessionId) metadata.sessionId = messageRef.sessionId;
+          if (messageRef?.messageId) lastAssistantMessageId = messageRef.messageId;
+        }
         log.debug({ catId: this.catId, eventIndex: eventCount, type: evtType }, 'CLI event received');
         if (isCliTimeout(event)) {
           yield {
