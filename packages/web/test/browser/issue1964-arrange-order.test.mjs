@@ -6,6 +6,7 @@ import { test } from 'node:test';
 import { chromium } from 'playwright';
 import { startSearchGroupApi } from './f277-search-group.harness.mjs';
 import { startSearchGroupBrowserFixture } from './f277-search-group-browser.harness.mjs';
+import { verifyArrangeGeometry } from './issue1964-arrange-geometry.journey.mjs';
 import { verifyArrangeProjectMembership } from './issue1964-arrange-project.journey.mjs';
 import { verifyArrangeViewEntries } from './issue1964-arrange-views.journey.mjs';
 
@@ -294,6 +295,7 @@ test(
         await context.close();
       }
       await verifyArrangeViewEntries(browser, fixture, evidence, errors, owner);
+      await verifyArrangeGeometry(browser, fixture, evidence, errors, owner);
       assert.deepEqual(errors, []);
       await writeFile(
         path.join(evidence, 'result.json'),

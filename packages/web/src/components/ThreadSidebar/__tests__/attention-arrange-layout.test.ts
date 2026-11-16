@@ -173,3 +173,32 @@ describe('arrange membership deltas', () => {
     ]);
   });
 });
+
+it('captures header slots per project fragment even when both fragments share a group anchor', () => {
+  const live = ['a1', 'a2', 'b1', 'b2'].map((id) => ({
+    ...row(id, 50),
+    projectPath: id.startsWith('a') ? '/A' : '/B',
+    unreadCount: id === 'a1' ? 1 : 0,
+  }));
+  const groups = [{ id: 'shared', threadIds: live.map((item) => item.id) }];
+  const clusters = buildAttentionClusters(live, groups);
+  const lists = Object.fromEntries(
+    ['/A', '/B'].map((key) => {
+      const scoped = live.filter((item) => item.projectPath === key);
+      return [key, flattenAttentionRows(arrangeAttentionRows(scoped, scoped, clusters, 'project'), () => false, '')];
+    }),
+  );
+  const layout = captureArrangeLayout(lists, lists, new Set());
+  const projected = projectArrangeLayout(
+    layout,
+    live.map((item) => ({ ...item, unreadCount: 0, presence: { status: 'working' } })),
+    clusters,
+  );
+  const slots = Object.values(projected).map(
+    (items) => items.find((item) => item.kind === 'cluster-header')?.arrangeHeader,
+  );
+  expect(slots).toEqual([
+    { presence: false, peekIds: ['a1'], more: false },
+    { presence: false, peekIds: [], more: false },
+  ]);
+});

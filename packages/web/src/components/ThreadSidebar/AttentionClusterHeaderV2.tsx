@@ -8,7 +8,7 @@ import type { AttentionClusterHeaderProps } from './AttentionCluster';
 import { CollapsedGroupPeek } from './CollapsedGroupPeek';
 import { collapsedGroupPeek } from './collapsed-group-peek';
 import { SidebarGroupSegmentV2 } from './SidebarGroupSegmentV2';
-import { CollapsedGroupPresence, SidebarSignalLayout } from './ThreadRowSignals';
+import { ArrangeSignalBadge, CollapsedGroupPresence, SidebarSignalLayout } from './ThreadRowSignals';
 import { threadSignalsCopy } from './thread-signals.shell-copy';
 
 /** The same F277 group, preferences and actions; only its v2 presentation changes. */
@@ -25,6 +25,8 @@ export function AttentionClusterHeaderV2({
   onResetMemberSort,
   sortingDisabled = false,
   peek: suppliedPeek,
+  arrangeHeader,
+  decisionThreadIds = new Set<string>(),
   peekEnabled = true,
   decisionsConfirmed = true,
   currentId = null,
@@ -40,8 +42,25 @@ export function AttentionClusterHeaderV2({
   const moreRef = useRef<HTMLButtonElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const ime = useIMEGuard();
-  const peek = suppliedPeek ?? collapsedGroupPeek(members, new Set());
+  const peek = arrangeHeader
+    ? collapsedGroupPeek(members, decisionThreadIds)
+    : (suppliedPeek ?? collapsedGroupPeek(members, new Set()));
   const hasPresence = members.some((member) => member.presence.status !== 'idle');
+  const presenceMember =
+    members.find((member) => member.presence.status === 'working') ??
+    members.find((member) => member.presence.status === 'error') ??
+    members.find((member) => member.presence.status === 'done');
+  const displayPeek = arrangeHeader
+    ? {
+        total: peek.total,
+        entries: arrangeHeader.peekIds.flatMap((id) => {
+          const member = members.find((candidate) => candidate.id === id);
+          return member
+            ? [{ member, reason: collapsedGroupPeek([member], decisionThreadIds).entries[0]?.reason ?? null }]
+            : [];
+        }),
+      }
+    : peek;
   const countLabel = expanded
     ? `${members.length} ${copy.conversations}`
     : decisionsConfirmed
@@ -82,7 +101,11 @@ export function AttentionClusterHeaderV2({
       >
         <div className="flex min-w-0 items-center gap-1 leading-5" data-testid="group-title-line">
           {/* Group preferences have no pin fact. The folder occupies the outer conversation's mark column. */}
-          <span data-sidebar-pin-slot aria-hidden="true" className="inline-flex h-5 w-4 flex-none items-center">
+          <span
+            data-sidebar-pin-slot
+            aria-hidden={arrangeHeader && !arrangeHeader.presence && hasPresence ? undefined : true}
+            className="relative inline-flex h-5 w-4 flex-none items-center"
+          >
             <svg
               data-testid="group-folder-icon"
               viewBox="0 0 16 16"
@@ -94,6 +117,14 @@ export function AttentionClusterHeaderV2({
             >
               <path d="M2 4h4l1.5 2H14v7H2V4Zm0 3h12" strokeLinejoin="round" />
             </svg>
+            {!expanded && arrangeHeader && !arrangeHeader.presence && presenceMember && (
+              <ArrangeSignalBadge
+                presence={presenceMember.presence}
+                unreadCount={0}
+                hasUserMention={false}
+                hasDraft={false}
+              />
+            )}
           </span>
           <AppTooltip label={displayTitle} side="right" intent="content" onlyWhenTruncated multiline>
             <button
@@ -150,16 +181,30 @@ export function AttentionClusterHeaderV2({
             </button>
           </AppTooltip>
         </div>
-        {!expanded && hasPresence && (
+        {!expanded && (arrangeHeader?.presence ?? hasPresence) && (
           <SidebarSignalLayout
             testId="group-status-line"
-            presence={<CollapsedGroupPresence members={members} />}
+            presence={hasPresence ? <CollapsedGroupPresence members={members} /> : null}
             badges={null}
           />
         )}
-        {!expanded && peekEnabled && peek.total > 0 && onSelectPeek && (
-          <CollapsedGroupPeek peek={peek} currentId={currentId} onSelect={onSelectPeek} onExpand={onToggle} />
-        )}
+        {!expanded &&
+          peekEnabled &&
+          (arrangeHeader ? displayPeek.entries.length > 0 || arrangeHeader.more : peek.total > 0) &&
+          onSelectPeek && (
+            <CollapsedGroupPeek
+              peek={displayPeek}
+              currentId={currentId}
+              onSelect={onSelectPeek}
+              onExpand={onToggle}
+              moreSlot={arrangeHeader?.more}
+              moreCount={
+                arrangeHeader
+                  ? Math.max(0, peek.total - displayPeek.entries.filter((entry) => entry.reason !== null).length)
+                  : undefined
+              }
+            />
+          )}
         {menuOpen && (
           <div
             ref={menuRef}

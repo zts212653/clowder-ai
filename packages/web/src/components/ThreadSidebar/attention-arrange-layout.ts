@@ -1,17 +1,32 @@
 import type { ThreadAttentionGroup, ThreadAttentionMemberSort } from '@cat-cafe/shared';
 import type { SidebarSnapshotRow } from '@/stores/sidebarProjectionStore';
-import { type AttentionCluster, type AttentionListRow, flattenAttentionRows } from './attention-clusters';
+import {
+  type ArrangeHeaderSlots,
+  type AttentionCluster,
+  type AttentionListRow,
+  flattenAttentionRows,
+} from './attention-clusters';
 import { orderGroupMemberIds } from './attention-list-order';
+import { collapsedGroupPeek } from './collapsed-group-peek';
 
 type ArrangeItem =
   | { kind: 'thread'; id: string }
-  | { kind: 'group'; anchor: string; memberIds: string[]; visibleCount: number; expanded: boolean };
+  | {
+      kind: 'group';
+      anchor: string;
+      memberIds: string[];
+      visibleCount: number;
+      expanded: boolean;
+      header?: ArrangeHeaderSlots;
+    };
 export type ArrangeLayout = Record<string, ArrangeItem[]>;
 
 /** Keep layout IDs only. Every rendered title, pin and signal still comes from the live snapshot. */
 export function captureArrangeLayout(
   full: Record<string, AttentionListRow[]>,
   visible: Record<string, AttentionListRow[]>,
+  decisions?: ReadonlySet<string>,
+  headerHeights?: Record<string, Record<string, number>>,
 ): ArrangeLayout {
   return Object.fromEntries(
     Object.entries(full).map(([key, rows]) => [
@@ -19,6 +34,7 @@ export function captureArrangeLayout(
       rows.flatMap<ArrangeItem>((row) => {
         if (row.kind === 'thread') return [{ kind: 'thread' as const, id: row.thread.id }];
         if (row.kind !== 'cluster-header') return [];
+        const peek = decisions ? collapsedGroupPeek(row.members, decisions) : undefined;
         const members = row.expanded
           ? rows.flatMap((candidate) =>
               candidate.kind === 'cluster-member' && candidate.cluster.anchor === row.cluster.anchor
@@ -32,6 +48,16 @@ export function captureArrangeLayout(
             anchor: row.cluster.anchor,
             memberIds: members,
             expanded: row.expanded,
+            ...(peek
+              ? {
+                  header: {
+                    ...(headerHeights?.[key]?.[row.key] ? { height: headerHeights[key][row.key] } : {}),
+                    presence: row.members.some((member) => member.presence.status !== 'idle'),
+                    peekIds: peek.entries.map(({ member }) => member.id),
+                    more: peek.total > peek.entries.length,
+                  },
+                }
+              : {}),
             visibleCount: (visible[key] ?? []).filter(
               (candidate) => candidate.kind === 'cluster-member' && candidate.cluster.anchor === row.cluster.anchor,
             ).length,
@@ -64,6 +90,7 @@ export function projectArrangeLayout(
           return member ? [member] : [];
         });
         const rows = flattenAttentionRows([{ kind: 'cluster', cluster, members }], () => item.expanded, '');
+        for (const row of rows) if (row.kind === 'cluster-header') row.arrangeHeader = item.header;
         if (!item.expanded || item.visibleCount >= members.length) return rows;
         const next = members[item.visibleCount];
         return [

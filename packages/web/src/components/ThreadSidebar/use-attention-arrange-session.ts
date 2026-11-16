@@ -8,6 +8,7 @@ import {
   projectArrangeLayout,
 } from './attention-arrange-layout';
 import type { AttentionCluster, AttentionListRow } from './attention-clusters';
+import type { ArrangeSignalSlot } from './ThreadRowSignals';
 
 export function useAttentionArrangeSession(
   rows: readonly SidebarSnapshotRow[],
@@ -16,10 +17,22 @@ export function useAttentionArrangeSession(
   plainView = false,
 ) {
   const [layout, setLayout] = useState<ArrangeLayout | null>(null);
-  const finish = useCallback(() => setLayout(null), []);
+  const [signalSlots, setSignalSlots] = useState<Record<string, ArrangeSignalSlot>>({});
+  const finish = useCallback(() => {
+    setLayout(null);
+    setSignalSlots({});
+  }, []);
   const begin = useCallback(
-    (full: Record<string, AttentionListRow[]>, visible: Record<string, AttentionListRow[]>) =>
-      setLayout((current) => current ?? captureArrangeLayout(full, visible)),
+    (
+      full: Record<string, AttentionListRow[]>,
+      visible: Record<string, AttentionListRow[]>,
+      signals: Record<string, ArrangeSignalSlot>,
+      decisions: ReadonlySet<string>,
+      headerHeights: Record<string, Record<string, number>>,
+    ) => {
+      setLayout((current) => current ?? captureArrangeLayout(full, visible, decisions, headerHeights));
+      setSignalSlots(signals);
+    },
     [],
   );
   const reveal = useCallback(
@@ -77,6 +90,7 @@ export function useAttentionArrangeSession(
     reveal,
     toggle,
     apply,
+    signalSlots,
     project: (normal: Record<string, AttentionListRow[]>) =>
       layout ? projectArrangeLayout(layout, rows, clusters) : normal,
   };

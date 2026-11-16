@@ -41,6 +41,19 @@ export function useSidebarRowHeight(
   compact: boolean,
   groupDecisions: GroupDecisionRead,
 ) {
+  const signals = useSidebarRowSignals(rows, compact, groupDecisions);
+  return useCallback(
+    (row: SidebarSnapshotRow) => (!compact ? 80 : hasThreadRowSignals(signals(row)) ? 76 : 52),
+    [compact, signals],
+  );
+}
+
+/** Shared signal truth for virtual estimates and the one-time arrange slot capture. */
+export function useSidebarRowSignals(
+  rows: readonly SidebarSnapshotRow[],
+  compact: boolean,
+  groupDecisions: GroupDecisionRead,
+) {
   const ids = useMemo(() => (compact ? rows.map((row) => row.id) : []), [rows, compact]);
   const flagged = useChatStore(
     useCallback((state) => JSON.stringify(ids.filter((id) => state.threadStates[id]?.hasDraft === true)), [ids]),
@@ -53,18 +66,13 @@ export function useSidebarRowHeight(
   );
   const decisions = groupDecisions.status === 'ready' ? groupDecisions.threadIds : new Set<string>();
   return useCallback(
-    (row: SidebarSnapshotRow) => {
-      if (!compact) return 80;
-      return hasThreadRowSignals({
-        presence: row.presence,
-        unreadCount: row.unreadCount,
-        hasUserMention: row.hasUserMention,
-        hasDraft: drafts.has(row.id),
-        hasPendingDecision: decisions.has(row.id),
-      })
-        ? 76
-        : 52;
-    },
-    [compact, drafts, decisions],
+    (row: SidebarSnapshotRow) => ({
+      presence: row.presence,
+      unreadCount: row.unreadCount,
+      hasUserMention: row.hasUserMention,
+      hasDraft: drafts.has(row.id),
+      hasPendingDecision: decisions.has(row.id),
+    }),
+    [drafts, decisions],
   );
 }

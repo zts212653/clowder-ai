@@ -219,7 +219,7 @@ describe('Issue #1964 production arrange interaction', () => {
       ),
     );
     expect(order()).toEqual(before);
-    expect(harness.container.querySelector('[data-thread-id="unpinned"]')?.textContent).toContain('7');
+    expect(harness.container.querySelector('[data-thread-id="unpinned"] [aria-label*="7"]')).not.toBeNull();
     expect(harness.container.querySelector('[data-thread-id="new-arrival"]')).toBeNull();
     await done();
     expect(order()).toContain('new-arrival');

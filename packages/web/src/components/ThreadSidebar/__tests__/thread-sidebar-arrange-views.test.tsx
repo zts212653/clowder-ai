@@ -284,7 +284,7 @@ describe('Issue #1964 arrange entry coverage', () => {
     );
     expect(order()).toEqual(before);
     if (change === 'pin') expect(harness.container.querySelector('[aria-label="取消置顶 b1"]')).not.toBeNull();
-    else expect(harness.container.querySelector('[data-thread-id="b1"]')?.textContent).toContain('7');
+    else expect(harness.container.querySelector('[data-thread-id="b1"] [aria-label*="7"]')).not.toBeNull();
     await done();
     expect(order()[0]).toBe('b1');
   });

@@ -52,7 +52,7 @@ import { SidebarGroupSegmentV2 } from './SidebarGroupSegmentV2';
 import { SidebarTabIcon } from './SidebarTabIcon';
 import { SidebarViewBarV2 } from './SidebarViewBarV2';
 import type { SearchGroupRequest } from './search-group-types';
-import { useSidebarRowHeight } from './sidebar-draft-decoration';
+import { useSidebarRowSignals } from './sidebar-draft-decoration';
 import { sidebarHeaderCopy } from './sidebar-header.shell-copy';
 import {
   createSidebarTabState,
@@ -63,6 +63,7 @@ import {
 import { ThreadDeleteConfirmDialog } from './ThreadDeleteConfirmDialog';
 import { ThreadItem } from './ThreadItem';
 import { ThreadOrganizerModal } from './ThreadOrganizerModal';
+import { type ArrangeSignalSlot, hasThreadRowSignals } from './ThreadRowSignals';
 import { ThreadSidebarV2Header } from './ThreadSidebarV2Header';
 import { openTheaterReplay } from './theater-navigation';
 import { pushThreadRouteWithHistory } from './thread-navigation';
@@ -1131,11 +1132,17 @@ export function ThreadSidebar({ onClose, className, routeThreadId, activeDestina
       })),
     [activeTabContent.threads],
   );
+  const rowSignals = useSidebarRowSignals(liveThreads, isV2, groupDecisions);
+  const threadRowHeight = useCallback(
+    (row: SidebarSnapshotRow) => (!isV2 ? 80 : hasThreadRowSignals(rowSignals(row)) ? 76 : 52),
+    [isV2, rowSignals],
+  );
   const beginAttentionArrange = useCallback(() => {
     if (!isV2) {
       setClassicArrangeMode(true);
       return;
     }
+    if (arrangeSession.active) return;
     const full = { ...orderedAttentionRows };
     const visible = { ...normalAttentionListRows };
     if (activeTabContent.kind === 'flat' && !full.flat) {
@@ -1157,7 +1164,47 @@ export function ThreadSidebar({ onClose, className, routeThreadId, activeDestina
         visible[key] = normalizedQuery ? full[key] : previewAttentionRows(full[key]);
       }
     }
-    arrangeSession.begin(full, visible);
+    const mounted = new Map(
+      [
+        ...(scrollContainerRef.current?.querySelectorAll<HTMLElement>(
+          '[data-attention-draggable-thread] [data-thread-id]',
+        ) ?? []),
+      ].map((element) => [element.dataset.threadId, element]),
+    );
+    const signals = Object.fromEntries(
+      liveThreads.map((row) => {
+        const facts = rowSignals(row);
+        const line = mounted.get(row.id)?.querySelector<HTMLElement>('[data-testid="thread-row-signals"]');
+        const slot: ArrangeSignalSlot = {
+          height: line?.getBoundingClientRect().height || (hasThreadRowSignals(facts) ? 20 : 0),
+          rowHeight: mounted.get(row.id)?.getBoundingClientRect().height || undefined,
+          timeWidth:
+            mounted.get(row.id)?.querySelector('[data-testid="thread-row-time"]')?.getBoundingClientRect().width ||
+            undefined,
+          containerHeight:
+            mounted.get(row.id)?.closest('[data-sidebar-row-key]')?.getBoundingClientRect().height || undefined,
+          split: line?.dataset.signalSplit === 'true',
+          presence: facts.presence.status !== 'idle',
+          unread: facts.unreadCount > 0,
+          mention: facts.hasUserMention,
+          draft: facts.hasDraft,
+          decision: Boolean(facts.hasPendingDecision),
+          emphasized: facts.unreadCount > 0 || facts.hasUserMention || facts.presence.status === 'error',
+        };
+        return [row.id, slot];
+      }),
+    );
+    const headerHeights: Record<string, Record<string, number>> = {};
+    for (const element of scrollContainerRef.current?.querySelectorAll<HTMLElement>(
+      '[data-sidebar-list][data-sidebar-row-key]',
+    ) ?? []) {
+      const list = element.dataset.sidebarList ?? 'flat';
+      const header = element.querySelector<HTMLElement>('[data-attention-cluster][data-expanded="false"]');
+      if (header)
+        (headerHeights[list] ??= {})[`cluster:${header.dataset.attentionCluster}`] =
+          element.getBoundingClientRect().height;
+    }
+    arrangeSession.begin(full, visible, signals, groupDecisions.threadIds, headerHeights);
   }, [
     isV2,
     orderedAttentionRows,
@@ -1172,15 +1219,26 @@ export function ThreadSidebar({ onClose, className, routeThreadId, activeDestina
     normalizedQuery,
     previewAttentionRows,
     arrangeSession.begin,
+    arrangeSession.active,
+    liveThreads,
+    rowSignals,
+    groupDecisions.threadIds,
   ]);
-  const threadRowHeight = useSidebarRowHeight(liveThreads, currentConversationId, isV2, groupDecisions);
   const attentionRowHeight = useCallback(
     (row: AttentionListRow) => {
       if (!isV2) return 80;
       const heldHeight = readingSession.heights[sidebarReadingRowKey(row)];
-      if (heldHeight !== undefined) return heldHeight;
+      if (!arrangeSession.active && heldHeight !== undefined) return heldHeight;
       // Include the Group's 4px outer spacing and 1px top/bottom border in initial virtual slots.
       if (row.kind === 'cluster-header') {
+        if (row.arrangeHeader) {
+          const header = row.arrangeHeader;
+          const extra =
+            attentionCollapsedPeek[row.cluster.anchor] !== false && (header.peekIds.length > 0 || header.more)
+              ? 4 + header.peekIds.length * 28 + Number(header.more) * 28
+              : 0;
+          return row.expanded ? 37 : Math.max(header.height ?? 0, 42 + Number(header.presence) * 24 + extra);
+        }
         const peek = peekByAnchor.get(row.cluster.anchor);
         const extra =
           attentionCollapsedPeek[row.cluster.anchor] !== false && peek && peek.total > 0
@@ -1190,12 +1248,23 @@ export function ThreadSidebar({ onClose, className, routeThreadId, activeDestina
         return row.expanded ? 37 : (hasPresence ? 66 : 42) + extra;
       }
       if (row.kind === 'cluster-remainder') return 37;
+      const thread = row.kind === 'thread' ? row.thread : row.member;
+      const slot = arrangeSession.signalSlots[thread.id];
+      if (slot?.containerHeight) return slot.containerHeight;
       return (
-        threadRowHeight(row.kind === 'thread' ? row.thread : row.member) +
+        (slot ? (slot.rowHeight ?? 52 + (slot.height ? slot.height + 4 : 0)) : threadRowHeight(thread)) +
         (row.kind === 'cluster-member' && row.isLast ? 5 : 0)
       );
     },
-    [isV2, threadRowHeight, peekByAnchor, attentionCollapsedPeek, readingSession.heights],
+    [
+      isV2,
+      threadRowHeight,
+      peekByAnchor,
+      attentionCollapsedPeek,
+      readingSession.heights,
+      arrangeSession.signalSlots,
+      arrangeSession.active,
+    ],
   );
 
   const filterKey =
@@ -1549,6 +1618,7 @@ export function ThreadSidebar({ onClose, className, routeThreadId, activeDestina
             unreadCount={thread.unreadCount}
             hasUserMention={thread.hasUserMention}
             hasPendingDecision={groupDecisions.status === 'ready' && groupDecisions.threadIds.has(thread.id)}
+            arrangeSignalSlot={isV2 ? arrangeSession.signalSlots[thread.id] : undefined}
             projectPath={thread.projectPath}
             indented={indented}
             preferredCats={thread.preferredCats}
@@ -1561,6 +1631,7 @@ export function ThreadSidebar({ onClose, className, routeThreadId, activeDestina
     },
     [
       attentionArrangeMode,
+      arrangeSession.signalSlots,
       arrangeHint,
       beginAttentionArrange,
       attentionClusterByThreadId,
@@ -1679,6 +1750,8 @@ export function ThreadSidebar({ onClose, className, routeThreadId, activeDestina
               attentionArrangeMode || attentionLoadState !== 'ready' || attentionPendingSort.has(row.cluster.anchor)
             }
             peek={peekByAnchor.get(row.cluster.anchor)}
+            arrangeHeader={row.arrangeHeader}
+            decisionThreadIds={groupDecisions.threadIds}
             peekEnabled={attentionCollapsedPeek[row.cluster.anchor] !== false}
             decisionsConfirmed={groupDecisions.status === 'ready'}
             currentId={currentConversationId}
@@ -1724,19 +1797,30 @@ export function ThreadSidebar({ onClose, className, routeThreadId, activeDestina
   );
 
   const renderAttentionRow = useCallback(
-    (row: AttentionListRow) =>
-      isV2 ? (
+    (row: AttentionListRow, listKey = 'flat') => {
+      const thread = row.kind === 'thread' ? row.thread : row.kind === 'cluster-member' ? row.member : undefined;
+      const heldHeight =
+        row.kind === 'cluster-header'
+          ? !row.expanded
+            ? row.arrangeHeader?.height
+            : undefined
+          : thread
+            ? arrangeSession.signalSlots[thread.id]?.containerHeight
+            : undefined;
+      return isV2 ? (
         <div
           key={row.key}
           data-sidebar-row-key={sidebarReadingRowKey(row)}
-          style={{ minHeight: readingSession.heights[sidebarReadingRowKey(row)] }}
+          data-sidebar-list={listKey}
+          style={{ minHeight: heldHeight ?? readingSession.heights[sidebarReadingRowKey(row)] }}
         >
           {renderAttentionRowContent(row)}
         </div>
       ) : (
         renderAttentionRowContent(row)
-      ),
-    [isV2, readingSession.heights, renderAttentionRowContent],
+      );
+    },
+    [isV2, readingSession.heights, renderAttentionRowContent, arrangeSession.signalSlots],
   );
 
   const renderProjectSection = useCallback(
@@ -1760,7 +1844,7 @@ export function ThreadSidebar({ onClose, className, routeThreadId, activeDestina
           onRenameProject={forProjectPath(projectPath, (path) => (name: string) => handleRenameProject(path, name))}
           onArchiveThreads={forProjectPath(projectPath, (path) => () => handleArchiveThreads(path))}
         >
-          {attentionListRows[groupKey]?.map(renderAttentionRow)}
+          {attentionListRows[groupKey]?.map((row) => renderAttentionRow(row, groupKey))}
         </SectionGroup>
       );
     },
@@ -2126,7 +2210,7 @@ export function ThreadSidebar({ onClose, className, routeThreadId, activeDestina
                         />
                       )
                     ) : flatAttentionRows ? (
-                      flatAttentionRows.map(renderAttentionRow)
+                      flatAttentionRows.map((row) => renderAttentionRow(row))
                     ) : (
                       activeTabContent.threads.map((thread) => renderThreadItem(thread))
                     )}
