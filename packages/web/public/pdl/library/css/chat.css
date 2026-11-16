@@ -40,7 +40,7 @@
 :is(.msg-body, .md) tbody tr { cursor: default; }
 :is(.msg-body, .md) tbody tr:hover td { background: none; }
 :is(.msg-body, .md) blockquote { margin: 0 0 var(--sp-m); padding: var(--sp-hair) 0 var(--sp-hair) var(--sp-m); box-shadow: inset 2px 0 var(--line-strong); color: var(--fg-muted); }
-:is(.msg-body, .md) a, .mention { color: var(--accent-fg); text-decoration: none; font-weight: 500; }
+:is(.msg-body, .md) a, .mention { color: var(--mention-c, var(--accent-fg)); text-decoration: none; font-weight: 500; }   /* 有效的 @ 带着那个成员的身份色（--mention-c 只写在 @ 上），链接没有 */
 .msg-meta { grid-column: 2; display: flex; align-items: center; gap: var(--sp-xs); min-width: 0; }
 .msg-meta-start { display: block; min-width: 0; overflow: clip; white-space: nowrap; text-overflow: ellipsis; }
 .msg-meta-start > .sep { margin-inline: var(--sp-xs); }

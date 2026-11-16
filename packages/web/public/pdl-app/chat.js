@@ -718,11 +718,15 @@ window.clowderChat = {
       threadLive: function (tid, id) {
         return chatLive(id, undefined, tid);
       },
+      // any of the member's mention patterns (@opus, @小狸 …), not only the first one shown as its handle
       handleId: function (handle) {
-        const m = chatRead('memberCatalog').find(function (m) {
-          return m.handle === handle;
-        });
-        return m ? m.id : null;
+        const k = handle.toLowerCase(),
+          cat = chatDataSnapshot.chat.cats.find(function (c) {
+            return c.mentionPatterns.some(function (p) {
+              return p.toLowerCase() === k;
+            });
+          });
+        return cat ? cat.id : null;
       },
     });
     ENGINE_PARTS.navState = function () {

@@ -14,7 +14,7 @@ function mdInline(t) {
   s = mdLinks(s, ph);
   s = s.replace(/\*\*([^*]+?)\*\*/g, '<b>$1</b>').replace(/(^|[^\w])__([^_]+?)__(?!\w)/g, '$1<b>$2</b>')
     .replace(/(^|[^\w*])\*(?![\s*])([^*]+?)\*(?![\w*])/g, '$1<i>$2</i>').replace(/(^|[^\w])_(?![\s_])([^_]+?)_(?!\w)/g, '$1<i>$2</i>');
-  s = s.replace(/(^|[^\w@])(@[\w\u4e00-\u9fff-]+)/g, function (m, p, hd) { return WHO_DATA.handleId(hd) ? p + '<span class="mention">' + hd + '</span>' : m; });
+  s = s.replace(/(^|[^\w@])(@[\w\u4e00-\u9fff-]+)/g, function (m, p, hd) { const id = WHO_DATA.handleId(hd), c = id ? whoColors(WHO_DATA.member(id)).color : null; return id ? p + '<span class="mention"' + (c ? ' style="--mention-c:' + c + '"' : '') + '>' + hd + '</span>' : m; });   /* 有效的 @ 用那个成员的身份色（和作者名同一处取） */
   return s.replace(/\u0000(\d+)\u0000/g, function (m, i) { return keep[+i]; });
 }
 /* 链接 [文字](地址)：地址按括号配对扫描（路径里可以有括号，可以带 :行号）。
