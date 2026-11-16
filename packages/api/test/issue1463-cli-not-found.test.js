@@ -24,6 +24,7 @@ const { missingAgyNativeCliError } = await import(
   '../dist/domains/cats/services/agents/providers/agy-native/agy-native-launch.js'
 );
 const { KimiAgentService } = await import('../dist/domains/cats/services/agents/providers/KimiAgentService.js');
+const { CodexAgentService } = await import('../dist/domains/cats/services/agents/providers/CodexAgentService.js');
 const { catRegistry } = await import('@cat-cafe/shared');
 const { invalidateCliCommand, resolveCliCommand } = await import('../dist/utils/cli-resolve.js');
 
@@ -51,6 +52,37 @@ test('Windows install hint stays platform-specific', () => {
   const diagnostic = buildCliNotFoundDiagnostic('agy', 'win32');
   assert.match(diagnostic.publicHint, /install\.cmd/);
   assert.equal(diagnostic.publicHint.includes('install.sh'), false);
+});
+
+test('known command keeps the shared install hint and bare command', () => {
+  const diagnostic = buildCliNotFoundDiagnostic('codex', 'linux');
+  assert.equal(diagnostic.publicSummary, 'codex CLI 未找到');
+  assert.match(diagnostic.publicHint, /npm install -g @openai\/codex/);
+  assert.equal(diagnostic.debugRef.command, 'codex');
+  assertNoProcessEvidence(diagnostic);
+});
+
+test('custom POSIX executable path never reaches the public payload', () => {
+  const raw = '/srv/private-team/private-install/codex';
+  const diagnostic = buildCliNotFoundDiagnostic(raw, 'linux', 'Codex CLI');
+  assert.equal(diagnostic.publicSummary, 'Codex CLI 未找到');
+  assert.equal(diagnostic.debugRef.command, 'Codex CLI');
+  assert.match(diagnostic.publicHint, /自定义 CLI 命令或路径/);
+  const serialized = JSON.stringify(diagnostic);
+  assert.equal(serialized.includes(raw), false);
+  assert.equal(serialized.includes('/srv/private-team'), false);
+  assertNoProcessEvidence(diagnostic);
+});
+
+test('custom Windows executable path never reaches the public payload', () => {
+  const raw = 'C:\\Users\\alice\\private-install\\codex.exe';
+  const diagnostic = buildCliNotFoundDiagnostic(raw, 'win32', 'Codex CLI');
+  const serialized = JSON.stringify(diagnostic);
+  assert.equal(serialized.includes('alice'), false);
+  assert.equal(serialized.includes('private-install'), false);
+  assert.equal(serialized.includes('codex.exe'), false);
+  assert.equal(diagnostic.debugRef.command, 'Codex CLI');
+  assertNoProcessEvidence(diagnostic);
 });
 
 test('cli_not_found never auto-files an issue, while spawn_failed still does', () => {
@@ -137,4 +169,44 @@ test('Kimi missing CLI yields cliDiagnostics without spawning', async (t) => {
     if (originalKimiHome === undefined) delete process.env.KIMI_CODE_HOME;
     else process.env.KIMI_CODE_HOME = originalKimiHome;
   }
+});
+
+test('Codex custom CLI path is redacted from the public diagnostic', async (t) => {
+  const home = mkdtempSync(join(tmpdir(), 'issue1463-codex-'));
+  t.after(() => rmSync(home, { recursive: true, force: true }));
+  const raw = join(home, 'private-team', 'private-install', 'codex');
+  catRegistry.register('issue1463-codex', {
+    id: 'issue1463-codex',
+    name: 'issue1463-codex',
+    displayName: 'Issue 1463 Codex fixture',
+    clientId: 'openai',
+    carrier: 'cli',
+    configurationSource: 'native_tool',
+    defaultModel: 'gpt-5.3-codex',
+    cli: { command: raw, outputFormat: 'json' },
+  });
+
+  let spawned = false;
+  const service = new CodexAgentService({
+    catId: 'issue1463-codex',
+    model: 'gpt-5.3-codex',
+    cliCommand: raw,
+    l0CompilerFn: async () => '# Identity\nFixture cat.',
+    spawnFn: () => {
+      spawned = true;
+      throw new Error('missing-CLI path must not spawn');
+    },
+  });
+  const events = await Array.fromAsync(service.invoke('fixture prompt', { workingDirectory: home }));
+  const error = events.find((event) => event.type === 'error');
+
+  assert.equal(spawned, false, 'missing-CLI preflight must short-circuit before spawn');
+  assert.ok(error, 'expected an error event');
+  assert.match(error.error, /Codex CLI 未找到/);
+  assert.equal(error.metadata?.cliDiagnostics?.reasonCode, 'cli_not_found');
+  assert.equal(error.metadata?.cliDiagnostics?.debugRef?.command, 'Codex CLI');
+  assertNoProcessEvidence(error.metadata.cliDiagnostics);
+  const serialized = JSON.stringify(error);
+  assert.equal(serialized.includes(raw), false, 'raw configured path must not be public');
+  assert.equal(serialized.includes('private-install'), false, 'private path segment must not be public');
 });

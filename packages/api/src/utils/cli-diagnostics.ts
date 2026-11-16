@@ -14,7 +14,7 @@
 
 import type { CliDiagnostics, CliErrorReasonCode } from '@cat-cafe/shared';
 import { CLASSIFIER_PATTERNS } from './cli-error-patterns.js';
-import { cliInstallHint } from './cli-resolve.js';
+import { cliInstallHint, isKnownCliCommand } from './cli-resolve.js';
 import { sanitizeCliStderr } from './sanitize-cli-stderr.js';
 
 // F212 Phase B: CliDiagnostics + CliErrorReasonCode hoisted to @cat-cafe/shared so the web
@@ -696,16 +696,25 @@ export function buildSilentCompletionDiagnostic(input: {
  * no exit code and no `safeExcerpt`: inventing either would claim evidence that does
  * not exist. The install command is the actionable next step; the reasonCode is
  * excluded from F222 auto-issue triggering (user-environment state, not our defect).
+ *
+ * `publicLabel` is only used for a custom wrapper and must be a fixed, path-safe
+ * description (for example `Codex CLI`). Known commands keep their bare command name
+ * and shared install hint. Never pass a raw configured executable path here.
  */
 export function buildCliNotFoundDiagnostic(
   command: string,
   platform: NodeJS.Platform = process.platform,
+  publicLabel?: string,
 ): CliDiagnostics {
-  const installHint = cliInstallHint(command, platform);
+  const knownCommand = isKnownCliCommand(command);
+  const label = knownCommand ? `${command} CLI` : (publicLabel ?? '自定义 CLI');
+  const installHint = knownCommand ? cliInstallHint(command, platform) : undefined;
   return {
     reasonCode: 'cli_not_found',
-    publicSummary: `${command} CLI 未找到`,
-    publicHint: `请先运行 ${installHint} 安装，再重试。`,
-    debugRef: { command, signal: null },
+    publicSummary: `${label} 未找到`,
+    publicHint: installHint
+      ? `请先运行 ${installHint} 安装，再重试。`
+      : '请检查该成员配置的自定义 CLI 命令或路径，确认可执行后重试。',
+    debugRef: { command: knownCommand ? command : label, signal: null },
   };
 }
