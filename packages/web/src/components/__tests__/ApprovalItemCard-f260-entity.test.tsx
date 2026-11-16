@@ -150,6 +150,25 @@ describe('F260 T0: entity proposal card', () => {
 
   // --- P1 fix: approve/reject buttons ---
 
+  it('shows the exact reading location and author purpose before an entity decision', async () => {
+    const item = {
+      ...F260_ITEM,
+      detail: {
+        ...F260_ITEM.detail,
+        provenance: [
+          { source: 'cat-proposed', sourcePath: 'docs/stories/shared-work.md', note: '了解共同做作品的起因和当时限制' },
+        ],
+      },
+    };
+    await act(async () => {
+      root.render(React.createElement(ApprovalItemCard, { item }));
+    });
+    const reading = container.querySelector('[data-testid="entity-reading-pointers"]');
+    expect(reading?.textContent).toContain('docs/stories/shared-work.md');
+    expect(reading?.textContent).toContain('了解共同做作品的起因和当时限制');
+    expect(reading?.closest('details')?.open).toBe(true);
+  });
+
   it('F260 inlineApprovable card shows decisions and both provenance anchors', async () => {
     await act(async () => {
       root.render(React.createElement(ApprovalItemCard, { item: F260_ITEM }));

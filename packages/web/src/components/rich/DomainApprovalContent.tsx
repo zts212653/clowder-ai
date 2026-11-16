@@ -6,6 +6,7 @@ import { useThreadDisplayInfo } from '@/hooks/useThreadDisplayInfo';
 import { approvalOriginThreadId } from '@/lib/approval-navigation';
 import { ApprovalMember } from './ApprovalMember';
 import { domainApprovalCopy } from './domain-approval.shell-copy';
+import { EntityReadingPointers } from './EntityReadingPointers';
 
 const text = (value: unknown): string => (typeof value === 'string' ? value : '');
 const strings = (value: unknown): string[] =>
@@ -154,6 +155,7 @@ export function EntityApprovalContent({ item }: { item: ApprovalHubItem }) {
       <OriginalText label={t.rationale}>
         <MarkdownContent content={text(item.detail.rationale)} disableCommandPrefix />
       </OriginalText>
+      <EntityReadingPointers value={item.detail.provenance} />
       <details className="text-xs text-[var(--shell-muted)]" data-testid="entity-proposal-identity">
         <summary className="shell-focusable cursor-pointer">{t.identity}</summary>
         <p className="break-all">

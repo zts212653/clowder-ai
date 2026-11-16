@@ -44,7 +44,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleAckMentions",
-      "protectedImplementationDigest": "sha256:74c0a535ab0a7fb8feb022184f7a3183712d0f84c98827f193acfc5f2bddb57e"
+      "protectedImplementationDigest": "sha256:031ea25a027bcd4c47a9fba4b4318898838a0afd2929ee9b42046136a39d420c"
     },
     {
       "name": "cat_cafe_act_artifact_review",
@@ -1318,7 +1318,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleAdmitEntrustedWork",
-      "protectedImplementationDigest": "sha256:74c0a535ab0a7fb8feb022184f7a3183712d0f84c98827f193acfc5f2bddb57e"
+      "protectedImplementationDigest": "sha256:031ea25a027bcd4c47a9fba4b4318898838a0afd2929ee9b42046136a39d420c"
     },
     {
       "name": "cat_cafe_advance_evolution_program_change",
@@ -2186,7 +2186,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleBootcampEnvCheck",
-      "protectedImplementationDigest": "sha256:74c0a535ab0a7fb8feb022184f7a3183712d0f84c98827f193acfc5f2bddb57e"
+      "protectedImplementationDigest": "sha256:031ea25a027bcd4c47a9fba4b4318898838a0afd2929ee9b42046136a39d420c"
     },
     {
       "name": "cat_cafe_bring_to_desk",
@@ -2937,7 +2937,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleCloseEntrustedWork",
-      "protectedImplementationDigest": "sha256:74c0a535ab0a7fb8feb022184f7a3183712d0f84c98827f193acfc5f2bddb57e"
+      "protectedImplementationDigest": "sha256:031ea25a027bcd4c47a9fba4b4318898838a0afd2929ee9b42046136a39d420c"
     },
     {
       "name": "cat_cafe_constitute_evolution_program",
@@ -3155,7 +3155,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleContinueApprovedTask",
-      "protectedImplementationDigest": "sha256:74c0a535ab0a7fb8feb022184f7a3183712d0f84c98827f193acfc5f2bddb57e"
+      "protectedImplementationDigest": "sha256:031ea25a027bcd4c47a9fba4b4318898838a0afd2929ee9b42046136a39d420c"
     },
     {
       "name": "cat_cafe_create_rich_block",
@@ -3285,7 +3285,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleCreateRichBlock",
-      "protectedImplementationDigest": "sha256:74c0a535ab0a7fb8feb022184f7a3183712d0f84c98827f193acfc5f2bddb57e"
+      "protectedImplementationDigest": "sha256:031ea25a027bcd4c47a9fba4b4318898838a0afd2929ee9b42046136a39d420c"
     },
     {
       "name": "cat_cafe_create_task",
@@ -3379,7 +3379,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleCreateTask",
-      "protectedImplementationDigest": "sha256:74c0a535ab0a7fb8feb022184f7a3183712d0f84c98827f193acfc5f2bddb57e"
+      "protectedImplementationDigest": "sha256:031ea25a027bcd4c47a9fba4b4318898838a0afd2929ee9b42046136a39d420c"
     },
     {
       "name": "cat_cafe_cross_post_message",
@@ -3715,7 +3715,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleCrossPostMessage",
-      "protectedImplementationDigest": "sha256:74c0a535ab0a7fb8feb022184f7a3183712d0f84c98827f193acfc5f2bddb57e"
+      "protectedImplementationDigest": "sha256:031ea25a027bcd4c47a9fba4b4318898838a0afd2929ee9b42046136a39d420c"
     },
     {
       "name": "cat_cafe_development_return",
@@ -4386,7 +4386,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleDisposeDeferredPersonMemory",
-      "protectedImplementationDigest": "sha256:74c0a535ab0a7fb8feb022184f7a3183712d0f84c98827f193acfc5f2bddb57e"
+      "protectedImplementationDigest": "sha256:031ea25a027bcd4c47a9fba4b4318898838a0afd2929ee9b42046136a39d420c"
     },
     {
       "name": "cat_cafe_drill_memory_cue",
@@ -4455,7 +4455,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleDrillMemoryCue",
-      "protectedImplementationDigest": "sha256:74c0a535ab0a7fb8feb022184f7a3183712d0f84c98827f193acfc5f2bddb57e"
+      "protectedImplementationDigest": "sha256:031ea25a027bcd4c47a9fba4b4318898838a0afd2929ee9b42046136a39d420c"
     },
     {
       "name": "cat_cafe_drill_person_memory",
@@ -4552,7 +4552,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleDrillPersonMemory",
-      "protectedImplementationDigest": "sha256:74c0a535ab0a7fb8feb022184f7a3183712d0f84c98827f193acfc5f2bddb57e"
+      "protectedImplementationDigest": "sha256:031ea25a027bcd4c47a9fba4b4318898838a0afd2929ee9b42046136a39d420c"
     },
     {
       "name": "cat_cafe_edit_office_document",
@@ -4742,7 +4742,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleFeatIndex",
-      "protectedImplementationDigest": "sha256:74c0a535ab0a7fb8feb022184f7a3183712d0f84c98827f193acfc5f2bddb57e"
+      "protectedImplementationDigest": "sha256:031ea25a027bcd4c47a9fba4b4318898838a0afd2929ee9b42046136a39d420c"
     },
     {
       "name": "cat_cafe_finance_query",
@@ -4899,7 +4899,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleGenerateDocument",
-      "protectedImplementationDigest": "sha256:74c0a535ab0a7fb8feb022184f7a3183712d0f84c98827f193acfc5f2bddb57e"
+      "protectedImplementationDigest": "sha256:031ea25a027bcd4c47a9fba4b4318898838a0afd2929ee9b42046136a39d420c"
     },
     {
       "name": "cat_cafe_get_available_guides",
@@ -4935,7 +4935,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleGetAvailableGuides",
-      "protectedImplementationDigest": "sha256:74c0a535ab0a7fb8feb022184f7a3183712d0f84c98827f193acfc5f2bddb57e"
+      "protectedImplementationDigest": "sha256:031ea25a027bcd4c47a9fba4b4318898838a0afd2929ee9b42046136a39d420c"
     },
     {
       "name": "cat_cafe_get_custody_events",
@@ -4986,7 +4986,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleGetCustodyEvents",
-      "protectedImplementationDigest": "sha256:74c0a535ab0a7fb8feb022184f7a3183712d0f84c98827f193acfc5f2bddb57e"
+      "protectedImplementationDigest": "sha256:031ea25a027bcd4c47a9fba4b4318898838a0afd2929ee9b42046136a39d420c"
     },
     {
       "name": "cat_cafe_get_evolution_program",
@@ -5125,7 +5125,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleGetHoldStatus",
-      "protectedImplementationDigest": "sha256:74c0a535ab0a7fb8feb022184f7a3183712d0f84c98827f193acfc5f2bddb57e"
+      "protectedImplementationDigest": "sha256:031ea25a027bcd4c47a9fba4b4318898838a0afd2929ee9b42046136a39d420c"
     },
     {
       "name": "cat_cafe_get_message",
@@ -5135,10 +5135,10 @@
         "read"
       ],
       "activeState": "migration-candidate",
-      "description": "Look up one original message. Use when following replyTo or a discovered source coordinate, including the origin of a remembered agreement. Not for broad discovery: use search_evidence first when the source ID is unknown. Returns the message content, sender, timestamp, attached richBlocks (in mode=\"full\") or bounded richBlocksSummary (in mode=\"preview\"), and optionally N nearby messages for context. Full originals also return contentRevision and sourceParts (part coordinates and UTF-16 lengths); use them with your exact quote and reason in an ordinary source-card reply. Reading does not publish a card. A durable typed local-review message also includes localReviewFact, as does thread-context; prose alone never creates that fact. GOTCHA: messageId is the bare message ID; for threadId#messageId coordinates pass only the part after #, not the thread prefix. PARAM GUIDE: messageId = required exact ID. contextCount = number of messages before/after to include (default 0, max 10). mode = \"preview\" (default — bounded excerpt + richBlocksSummary that saves context; sets truncated=true with drillDown when richBlocks are omitted) or \"full\" (complete original content + full richBlocks; use when you need the whole message or html_widget/card source — anchor drillDown pointers already request mode=full).",
-      "descriptionDigest": "sha256:c117b7cdc1c673ea139e19a71ea2ad389ddebb548f7c6ac9f5cdcc54866530ee",
-      "descriptionCharacters": 1312,
-      "descriptionTokensCl100kBase": 267,
+      "description": "Look up one original message. Use when following replyTo or a discovered source coordinate, including the origin of a remembered agreement. Not for broad discovery: use search_evidence first when the source ID is unknown. Returns the message content, sender, timestamp, attached richBlocks (in mode=\"full\") or bounded richBlocksSummary (in mode=\"preview\"), and optionally N nearby messages for context. For \"find the original words and cite them / 找原话带出处\", use mode=\"full\" to obtain contentRevision and sourceParts, select the exact quote and your reason, then attach it through create_rich_block kind=\"sources\" in the ordinary reply, or post_message searchAnswer with the actual answer. Preview is a location clue, not full source verification. Reading does not publish a card. A durable typed local-review message also includes localReviewFact, as does thread-context; prose alone never creates that fact. GOTCHA: messageId is the bare message ID; for threadId#messageId coordinates pass only the part after #, not the thread prefix. PARAM GUIDE: messageId = required exact ID. contextCount = number of messages before/after to include (default 0, max 10). mode = \"preview\" (default — bounded excerpt + richBlocksSummary that saves context; sets truncated=true with drillDown when richBlocks are omitted) or \"full\" (complete original content + full richBlocks; use when you need the whole message or html_widget/card source — anchor drillDown pointers already request mode=full).",
+      "descriptionDigest": "sha256:609a8ba3498fd120a14d16742a902aa3dcb452664e70c906f241fa75c18e813f",
+      "descriptionCharacters": 1481,
+      "descriptionTokensCl100kBase": 312,
       "inputSchema": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "additionalProperties": false,
@@ -5191,7 +5191,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleGetMessage",
-      "protectedImplementationDigest": "sha256:74c0a535ab0a7fb8feb022184f7a3183712d0f84c98827f193acfc5f2bddb57e"
+      "protectedImplementationDigest": "sha256:031ea25a027bcd4c47a9fba4b4318898838a0afd2929ee9b42046136a39d420c"
     },
     {
       "name": "cat_cafe_get_pending_decisions",
@@ -5240,7 +5240,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleGetPendingDecisions",
-      "protectedImplementationDigest": "sha256:74c0a535ab0a7fb8feb022184f7a3183712d0f84c98827f193acfc5f2bddb57e"
+      "protectedImplementationDigest": "sha256:031ea25a027bcd4c47a9fba4b4318898838a0afd2929ee9b42046136a39d420c"
     },
     {
       "name": "cat_cafe_get_pending_mentions",
@@ -5287,7 +5287,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleGetPendingMentions",
-      "protectedImplementationDigest": "sha256:74c0a535ab0a7fb8feb022184f7a3183712d0f84c98827f193acfc5f2bddb57e"
+      "protectedImplementationDigest": "sha256:031ea25a027bcd4c47a9fba4b4318898838a0afd2929ee9b42046136a39d420c"
     },
     {
       "name": "cat_cafe_get_person_memory_proposal_status",
@@ -5338,7 +5338,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleGetPersonMemoryProposalStatus",
-      "protectedImplementationDigest": "sha256:74c0a535ab0a7fb8feb022184f7a3183712d0f84c98827f193acfc5f2bddb57e"
+      "protectedImplementationDigest": "sha256:031ea25a027bcd4c47a9fba4b4318898838a0afd2929ee9b42046136a39d420c"
     },
     {
       "name": "cat_cafe_get_recall_metrics",
@@ -5464,7 +5464,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleGetRunningWork",
-      "protectedImplementationDigest": "sha256:74c0a535ab0a7fb8feb022184f7a3183712d0f84c98827f193acfc5f2bddb57e"
+      "protectedImplementationDigest": "sha256:031ea25a027bcd4c47a9fba4b4318898838a0afd2929ee9b42046136a39d420c"
     },
     {
       "name": "cat_cafe_get_thread_cats",
@@ -5521,7 +5521,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleGetThreadCats",
-      "protectedImplementationDigest": "sha256:74c0a535ab0a7fb8feb022184f7a3183712d0f84c98827f193acfc5f2bddb57e"
+      "protectedImplementationDigest": "sha256:031ea25a027bcd4c47a9fba4b4318898838a0afd2929ee9b42046136a39d420c"
     },
     {
       "name": "cat_cafe_get_thread_context",
@@ -5531,10 +5531,10 @@
         "read"
       ],
       "activeState": "canonical",
-      "description": "Read messages from one thread, with token-lean anchor previews by default and optional full bodies, ranked keywords, or a bounded window around messageId. Full persisted originals include contentRevision and sourceParts (part coordinates and UTF-16 lengths) for source-card replies; previews, oversized anchors and merged queued text do not supply a quotable revision. Reading never publishes a card. Use when: browsing the current conversation, reading a different known threadId, finding relevant messages inside that thread, opening context around a known messageId, or explicitly catching up. NOT for: finding features, decisions, plans, lessons, or unknown threads across project knowledge; use search_evidence or list_threads first. Output: a bounded aggregate envelope with threadId, ordered messages, contextScope, hasMore, and nextCursor when continuation is required; anchor mode includes drillDown pointers (and bounded richBlocksSummary when extra.rich blocks exist), while responseMode=\"full\" returns complete bodies (including attached richBlocks such as html_widget, card, checklist, or diff) per ordinary item and includes same-target queued bodies. contextScope=\"unread_delta\" contains only currently unread relevant messages; hasMore=false closes that selection, not all thread history. When available, situation reports exact lifecycle-backed active runs; situation.complete=false means runtime evidence could not be fully joined, so do not infer execution from recent speech. GOTCHA: keep the same limit, readIntent and other read arguments when following nextCursor; changing one requires a new read without cursor. Keyword ranking is best-effort over a bounded recent scan; scanCapped=true means older history may contain additional matches. A single item larger than the full-page budget returns an honest anchor with a precise drill pointer, not read evidence; drill an oversized workflow SOP with cat_cafe_get_workflow_sop using the returned threadId. History is the default selection even in full mode; for a complete catch-up, set readIntent=\"unread\" and responseMode=\"full\" without catId/keyword/messageId/before/after filters and follow nextCursor until hasMore=false. Pass threadId only for a different thread; omit it for the current thread.",
-      "descriptionDigest": "sha256:6f356e36d24df6fe10eb70b5843998d8eb0194fbc92494b75c0a30fa18ef0a9f",
-      "descriptionCharacters": 2272,
-      "descriptionTokensCl100kBase": 434,
+      "description": "Read messages from one thread, with token-lean anchor previews by default and optional full bodies, ranked keywords, or a bounded window around messageId. For \"find the original words and cite them / 找原话带出处\", full persisted originals include contentRevision and sourceParts (part coordinates and UTF-16 lengths): select the exact quote and your reason, then attach it through create_rich_block kind=\"sources\" in the ordinary reply, or post_message searchAnswer with the actual answer. Previews, oversized anchors and merged queued text do not supply a quotable revision. Reading never publishes a card. Use when: browsing the current conversation, reading a different known threadId, finding relevant messages inside that thread, opening context around a known messageId, or explicitly catching up. NOT for: finding features, decisions, plans, lessons, or unknown threads across project knowledge; use search_evidence or list_threads first. Output: a bounded aggregate envelope with threadId, ordered messages, contextScope, hasMore, and nextCursor when continuation is required; anchor mode includes drillDown pointers (and bounded richBlocksSummary when extra.rich blocks exist), while responseMode=\"full\" returns complete bodies (including attached richBlocks such as html_widget, card, checklist, or diff) per ordinary item and includes same-target queued bodies. contextScope=\"unread_delta\" contains only currently unread relevant messages; hasMore=false closes that selection, not all thread history. When available, situation reports exact lifecycle-backed active runs; situation.complete=false means runtime evidence could not be fully joined, so do not infer execution from recent speech. GOTCHA: keep the same limit, readIntent and other read arguments when following nextCursor; changing one requires a new read without cursor. Keyword ranking is best-effort over a bounded recent scan; scanCapped=true means older history may contain additional matches. A single item larger than the full-page budget returns an honest anchor with a precise drill pointer, not read evidence; drill an oversized workflow SOP with cat_cafe_get_workflow_sop using the returned threadId. History is the default selection even in full mode; for a complete catch-up, set readIntent=\"unread\" and responseMode=\"full\" without catId/keyword/messageId/before/after filters and follow nextCursor until hasMore=false. Pass threadId only for a different thread; omit it for the current thread.",
+      "descriptionDigest": "sha256:3cf6badd4ef9eb2bacd40f27cb2b584b4d03094e4f80d723c5ba3b079c827085",
+      "descriptionCharacters": 2474,
+      "descriptionTokensCl100kBase": 484,
       "inputSchema": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "additionalProperties": false,
@@ -5627,7 +5627,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleGetThreadContext",
-      "protectedImplementationDigest": "sha256:74c0a535ab0a7fb8feb022184f7a3183712d0f84c98827f193acfc5f2bddb57e"
+      "protectedImplementationDigest": "sha256:031ea25a027bcd4c47a9fba4b4318898838a0afd2929ee9b42046136a39d420c"
     },
     {
       "name": "cat_cafe_get_thread_metadata",
@@ -5661,7 +5661,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleGetThreadMetadata",
-      "protectedImplementationDigest": "sha256:74c0a535ab0a7fb8feb022184f7a3183712d0f84c98827f193acfc5f2bddb57e"
+      "protectedImplementationDigest": "sha256:031ea25a027bcd4c47a9fba4b4318898838a0afd2929ee9b42046136a39d420c"
     },
     {
       "name": "cat_cafe_get_workflow_sop",
@@ -5710,7 +5710,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleGetWorkflowSop",
-      "protectedImplementationDigest": "sha256:74c0a535ab0a7fb8feb022184f7a3183712d0f84c98827f193acfc5f2bddb57e"
+      "protectedImplementationDigest": "sha256:031ea25a027bcd4c47a9fba4b4318898838a0afd2929ee9b42046136a39d420c"
     },
     {
       "name": "cat_cafe_graph_resolve",
@@ -5824,7 +5824,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleGuideControl",
-      "protectedImplementationDigest": "sha256:74c0a535ab0a7fb8feb022184f7a3183712d0f84c98827f193acfc5f2bddb57e"
+      "protectedImplementationDigest": "sha256:031ea25a027bcd4c47a9fba4b4318898838a0afd2929ee9b42046136a39d420c"
     },
     {
       "name": "cat_cafe_hold_ball",
@@ -5972,7 +5972,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleHoldBall",
-      "protectedImplementationDigest": "sha256:74c0a535ab0a7fb8feb022184f7a3183712d0f84c98827f193acfc5f2bddb57e"
+      "protectedImplementationDigest": "sha256:031ea25a027bcd4c47a9fba4b4318898838a0afd2929ee9b42046136a39d420c"
     },
     {
       "name": "cat_cafe_home_action",
@@ -6883,7 +6883,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleListLabels",
-      "protectedImplementationDigest": "sha256:74c0a535ab0a7fb8feb022184f7a3183712d0f84c98827f193acfc5f2bddb57e"
+      "protectedImplementationDigest": "sha256:031ea25a027bcd4c47a9fba4b4318898838a0afd2929ee9b42046136a39d420c"
     },
     {
       "name": "cat_cafe_list_memory_matters",
@@ -7284,7 +7284,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleListTasks",
-      "protectedImplementationDigest": "sha256:74c0a535ab0a7fb8feb022184f7a3183712d0f84c98827f193acfc5f2bddb57e"
+      "protectedImplementationDigest": "sha256:031ea25a027bcd4c47a9fba4b4318898838a0afd2929ee9b42046136a39d420c"
     },
     {
       "name": "cat_cafe_list_threads",
@@ -7362,7 +7362,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleListThreads",
-      "protectedImplementationDigest": "sha256:74c0a535ab0a7fb8feb022184f7a3183712d0f84c98827f193acfc5f2bddb57e"
+      "protectedImplementationDigest": "sha256:031ea25a027bcd4c47a9fba4b4318898838a0afd2929ee9b42046136a39d420c"
     },
     {
       "name": "cat_cafe_manage_conversation_decision",
@@ -7921,7 +7921,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleMultiMention",
-      "protectedImplementationDigest": "sha256:74c0a535ab0a7fb8feb022184f7a3183712d0f84c98827f193acfc5f2bddb57e"
+      "protectedImplementationDigest": "sha256:031ea25a027bcd4c47a9fba4b4318898838a0afd2929ee9b42046136a39d420c"
     },
     {
       "name": "cat_cafe_offer_custody",
@@ -7981,7 +7981,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleOfferCustody",
-      "protectedImplementationDigest": "sha256:74c0a535ab0a7fb8feb022184f7a3183712d0f84c98827f193acfc5f2bddb57e"
+      "protectedImplementationDigest": "sha256:031ea25a027bcd4c47a9fba4b4318898838a0afd2929ee9b42046136a39d420c"
     },
     {
       "name": "cat_cafe_offer_suggestion",
@@ -10140,7 +10140,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handlePostMessage",
-      "protectedImplementationDigest": "sha256:74c0a535ab0a7fb8feb022184f7a3183712d0f84c98827f193acfc5f2bddb57e"
+      "protectedImplementationDigest": "sha256:031ea25a027bcd4c47a9fba4b4318898838a0afd2929ee9b42046136a39d420c"
     },
     {
       "name": "cat_cafe_prepare_artifact_review",
@@ -10276,7 +10276,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handlePrepareMemoryContext",
-      "protectedImplementationDigest": "sha256:74c0a535ab0a7fb8feb022184f7a3183712d0f84c98827f193acfc5f2bddb57e"
+      "protectedImplementationDigest": "sha256:031ea25a027bcd4c47a9fba4b4318898838a0afd2929ee9b42046136a39d420c"
     },
     {
       "name": "cat_cafe_prepare_request_review_consumption",
@@ -10895,7 +10895,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleProposeSessionHandoff",
-      "protectedImplementationDigest": "sha256:74c0a535ab0a7fb8feb022184f7a3183712d0f84c98827f193acfc5f2bddb57e"
+      "protectedImplementationDigest": "sha256:031ea25a027bcd4c47a9fba4b4318898838a0afd2929ee9b42046136a39d420c"
     },
     {
       "name": "cat_cafe_propose_thread",
@@ -11021,7 +11021,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleProposeThread",
-      "protectedImplementationDigest": "sha256:74c0a535ab0a7fb8feb022184f7a3183712d0f84c98827f193acfc5f2bddb57e"
+      "protectedImplementationDigest": "sha256:031ea25a027bcd4c47a9fba4b4318898838a0afd2929ee9b42046136a39d420c"
     },
     {
       "name": "cat_cafe_publish_harness_history",
@@ -12802,7 +12802,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleReadProfile",
-      "protectedImplementationDigest": "sha256:74c0a535ab0a7fb8feb022184f7a3183712d0f84c98827f193acfc5f2bddb57e"
+      "protectedImplementationDigest": "sha256:031ea25a027bcd4c47a9fba4b4318898838a0afd2929ee9b42046136a39d420c"
     },
     {
       "name": "cat_cafe_read_session_digest",
@@ -13209,7 +13209,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleRecallPersonRelationship",
-      "protectedImplementationDigest": "sha256:74c0a535ab0a7fb8feb022184f7a3183712d0f84c98827f193acfc5f2bddb57e"
+      "protectedImplementationDigest": "sha256:031ea25a027bcd4c47a9fba4b4318898838a0afd2929ee9b42046136a39d420c"
     },
     {
       "name": "cat_cafe_record_eval_lifecycle",
@@ -13733,7 +13733,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleRecordMemoryCueOutcome",
-      "protectedImplementationDigest": "sha256:74c0a535ab0a7fb8feb022184f7a3183712d0f84c98827f193acfc5f2bddb57e"
+      "protectedImplementationDigest": "sha256:031ea25a027bcd4c47a9fba4b4318898838a0afd2929ee9b42046136a39d420c"
     },
     {
       "name": "cat_cafe_record_request_review_consumption",
@@ -14229,7 +14229,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleRegisterDeploymentWait",
-      "protectedImplementationDigest": "sha256:74c0a535ab0a7fb8feb022184f7a3183712d0f84c98827f193acfc5f2bddb57e"
+      "protectedImplementationDigest": "sha256:031ea25a027bcd4c47a9fba4b4318898838a0afd2929ee9b42046136a39d420c"
     },
     {
       "name": "cat_cafe_register_external_runtime_session",
@@ -15830,7 +15830,7 @@
                     },
                     "payload": {
                       "additionalProperties": false,
-                      "description": "Workspace entity for the registry: a verified durable name/handle/alias mapping with provenance, a registration nudge, or an explicit operator request. Not for an unverified bare name, bulk extraction, or owner-private facts about a person (use person). GOTCHA: correcting a pending/private F276 card is not an Entity mutation; use person with replacesProposalId. stance rejected/critique_target mark terms the registry should not match or entities under critique; visibilityScope is workspace.",
+                      "description": "Workspace entity for the registry: a verified durable name/handle/alias mapping with provenance, a registration nudge, or an explicit operator request. For useful shared history, pair an exact provenance sourcePath or threadId/messageId with note explaining what the reader can learn and when it applies. These pointers and purposes are shown for approval; source access is checked on read. Not for an unverified bare name, bulk extraction, or owner-private facts about a person (use person). GOTCHA: correcting a pending/private F276 card is not an Entity mutation; use person with replacesProposalId. stance rejected/critique_target mark terms the registry should not match or entities under critique; visibilityScope is workspace.",
                       "properties": {
                         "aliases": {
                           "description": "Aliases to register for matching (at least one required, includes the canonical name)",
@@ -15873,28 +15873,74 @@
                           "type": "string"
                         },
                         "provenance": {
-                          "description": "Provenance chain — at least one entry with source; include thread anchor for traceability",
+                          "description": "Existing source pointers and cat-authored reading purposes. Pair note with an exact sourcePath or threadId/messageId so a later cat can read the applicable history. Approval does not grant source access.",
                           "items": {
                             "additionalProperties": false,
                             "properties": {
                               "anchor": {
-                                "description": "Thread/message anchor for traceability",
+                                "description": "Existing document or thread anchor; not a guessed identifier",
                                 "maxLength": 500,
                                 "minLength": 1,
                                 "type": "string"
                               },
                               "date": {
-                                "description": "ISO date (YYYY-MM-DD)",
+                                "description": "Source date, YYYY-MM-DD when known",
                                 "maxLength": 20,
                                 "type": "string"
                               },
+                              "eventNo": {
+                                "description": "Source event number within sessionId",
+                                "minimum": 0,
+                                "type": "integer"
+                              },
+                              "invocationId": {
+                                "description": "Exact invocation ID within sessionId",
+                                "maxLength": 200,
+                                "minLength": 1,
+                                "type": "string"
+                              },
+                              "messageId": {
+                                "description": "Original message ID, paired with its threadId",
+                                "maxLength": 200,
+                                "minLength": 1,
+                                "type": "string"
+                              },
+                              "messageIds": {
+                                "description": "Exact original message IDs in threadId",
+                                "items": {
+                                  "maxLength": 200,
+                                  "minLength": 1,
+                                  "type": "string"
+                                },
+                                "maxItems": 20,
+                                "minItems": 1,
+                                "type": "array"
+                              },
                               "note": {
-                                "description": "Optional note",
+                                "description": "Cat-authored reading purpose and applicability: what this source helps the reader understand; not instructions or a substitute for the source",
                                 "maxLength": 500,
                                 "type": "string"
                               },
+                              "sessionId": {
+                                "description": "Exact session ID for an existing session read entry",
+                                "maxLength": 200,
+                                "minLength": 1,
+                                "type": "string"
+                              },
                               "source": {
-                                "description": "Provenance source (e.g. \"cat-proposed\", \"nudge\")",
+                                "description": "Origin of this registered pointer, for example cat-proposed",
+                                "maxLength": 200,
+                                "minLength": 1,
+                                "type": "string"
+                              },
+                              "sourcePath": {
+                                "description": "Exact workspace document path already read by the proposing cat",
+                                "maxLength": 1000,
+                                "minLength": 1,
+                                "type": "string"
+                              },
+                              "threadId": {
+                                "description": "Original thread ID for a message reading pointer",
                                 "maxLength": 200,
                                 "minLength": 1,
                                 "type": "string"
@@ -16383,7 +16429,7 @@
         ],
         "type": "object"
       },
-      "inputSchemaDigest": "sha256:4262b4fde055dc88cfa594eb5729f537e37530d82e3f360893edc79f2cb0d2b3",
+      "inputSchemaDigest": "sha256:8e39de55a4d49f97298c65156945809fa96b7d17588b5487572c14c46a4c753a",
       "annotations": {
         "destructiveHint": false,
         "openWorldHint": false,
@@ -16397,7 +16443,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/remember-tool.js#handleRemember",
-      "protectedImplementationDigest": "sha256:683312bb7e7d60816d332d907a4e131fb80ad29355dd24949257187a44acea17"
+      "protectedImplementationDigest": "sha256:f59633774c8d118314c29240406754aaa5917903e2c487102a35f7eda5a57f52"
     },
     {
       "name": "cat_cafe_remove_scheduled_task",
@@ -17221,7 +17267,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleRetryCustodyAdmission",
-      "protectedImplementationDigest": "sha256:74c0a535ab0a7fb8feb022184f7a3183712d0f84c98827f193acfc5f2bddb57e"
+      "protectedImplementationDigest": "sha256:031ea25a027bcd4c47a9fba4b4318898838a0afd2929ee9b42046136a39d420c"
     },
     {
       "name": "cat_cafe_revise_person_memory",
@@ -17524,7 +17570,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleRevisePersonMemory",
-      "protectedImplementationDigest": "sha256:74c0a535ab0a7fb8feb022184f7a3183712d0f84c98827f193acfc5f2bddb57e"
+      "protectedImplementationDigest": "sha256:031ea25a027bcd4c47a9fba4b4318898838a0afd2929ee9b42046136a39d420c"
     },
     {
       "name": "cat_cafe_run_perspective",
@@ -17842,7 +17888,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleSetReadMode",
-      "protectedImplementationDigest": "sha256:74c0a535ab0a7fb8feb022184f7a3183712d0f84c98827f193acfc5f2bddb57e"
+      "protectedImplementationDigest": "sha256:031ea25a027bcd4c47a9fba4b4318898838a0afd2929ee9b42046136a39d420c"
     },
     {
       "name": "cat_cafe_set_thread_metadata",
@@ -18087,7 +18133,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleSetThreadMetadata",
-      "protectedImplementationDigest": "sha256:74c0a535ab0a7fb8feb022184f7a3183712d0f84c98827f193acfc5f2bddb57e"
+      "protectedImplementationDigest": "sha256:031ea25a027bcd4c47a9fba4b4318898838a0afd2929ee9b42046136a39d420c"
     },
     {
       "name": "cat_cafe_settle_present_loop",
@@ -18789,7 +18835,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleStartGuide",
-      "protectedImplementationDigest": "sha256:74c0a535ab0a7fb8feb022184f7a3183712d0f84c98827f193acfc5f2bddb57e"
+      "protectedImplementationDigest": "sha256:031ea25a027bcd4c47a9fba4b4318898838a0afd2929ee9b42046136a39d420c"
     },
     {
       "name": "cat_cafe_start_vote",
@@ -18867,7 +18913,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleStartVote",
-      "protectedImplementationDigest": "sha256:74c0a535ab0a7fb8feb022184f7a3183712d0f84c98827f193acfc5f2bddb57e"
+      "protectedImplementationDigest": "sha256:031ea25a027bcd4c47a9fba4b4318898838a0afd2929ee9b42046136a39d420c"
     },
     {
       "name": "cat_cafe_submit_evolution_preparation",
@@ -20605,7 +20651,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleUpdateBootcampState",
-      "protectedImplementationDigest": "sha256:74c0a535ab0a7fb8feb022184f7a3183712d0f84c98827f193acfc5f2bddb57e"
+      "protectedImplementationDigest": "sha256:031ea25a027bcd4c47a9fba4b4318898838a0afd2929ee9b42046136a39d420c"
     },
     {
       "name": "cat_cafe_update_entrusted_work",
@@ -20790,7 +20836,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleUpdateEntrustedWork",
-      "protectedImplementationDigest": "sha256:74c0a535ab0a7fb8feb022184f7a3183712d0f84c98827f193acfc5f2bddb57e"
+      "protectedImplementationDigest": "sha256:031ea25a027bcd4c47a9fba4b4318898838a0afd2929ee9b42046136a39d420c"
     },
     {
       "name": "cat_cafe_update_evolution_program",
@@ -21137,7 +21183,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleUpdateGuideState",
-      "protectedImplementationDigest": "sha256:74c0a535ab0a7fb8feb022184f7a3183712d0f84c98827f193acfc5f2bddb57e"
+      "protectedImplementationDigest": "sha256:031ea25a027bcd4c47a9fba4b4318898838a0afd2929ee9b42046136a39d420c"
     },
     {
       "name": "cat_cafe_update_scheduled_task_params",
@@ -21290,7 +21336,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleUpdateTask",
-      "protectedImplementationDigest": "sha256:74c0a535ab0a7fb8feb022184f7a3183712d0f84c98827f193acfc5f2bddb57e"
+      "protectedImplementationDigest": "sha256:031ea25a027bcd4c47a9fba4b4318898838a0afd2929ee9b42046136a39d420c"
     },
     {
       "name": "cat_cafe_update_workflow",
@@ -21440,7 +21486,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleUpdateWorkflow",
-      "protectedImplementationDigest": "sha256:74c0a535ab0a7fb8feb022184f7a3183712d0f84c98827f193acfc5f2bddb57e"
+      "protectedImplementationDigest": "sha256:031ea25a027bcd4c47a9fba4b4318898838a0afd2929ee9b42046136a39d420c"
     },
     {
       "name": "cat_cafe_video_project_command",
@@ -22161,7 +22207,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleWithdrawThreadProposal",
-      "protectedImplementationDigest": "sha256:74c0a535ab0a7fb8feb022184f7a3183712d0f84c98827f193acfc5f2bddb57e"
+      "protectedImplementationDigest": "sha256:031ea25a027bcd4c47a9fba4b4318898838a0afd2929ee9b42046136a39d420c"
     },
     {
       "name": "cat_cafe_work",

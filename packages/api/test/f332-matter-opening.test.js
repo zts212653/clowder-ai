@@ -30,7 +30,16 @@ for (const mode of ['cold', 'hot', 'rebuilt']) {
           reads.push({ actor, options });
           return {
             items: [
-              { matterId: 'matter-actual', title: `Current matter v${version}`, revision: version, entryCount: 2 },
+              {
+                matterId: 'matter-actual',
+                title: `Current matter v${version}`,
+                revision: version,
+                entryCount: 2,
+                updatedAt: 1,
+                hasThreadSource: true,
+                description: '仅适用于社区现场；工程线程可继续获准工作。',
+              },
+              { matterId: 'matter-recent', title: 'A cross-thread example', revision: 1, entryCount: 1, updatedAt: 1 },
             ],
           };
         },
@@ -87,6 +96,20 @@ for (const mode of ['cold', 'hot', 'rebuilt']) {
     assert.match(prompts[1].prompt, /Current matter v2/);
     assert.doesNotMatch(prompts[1].prompt, /Current matter v1/);
     assert.match(prompts[1].prompt, /cat_cafe_read_memory_matter/);
+    const directory = prompts[1].prompt.split('[事情目录]')[1].split('[/事情目录]')[0];
+    const body = JSON.parse(directory.split('\n').find((line) => line.startsWith('{')));
+    assert.deepEqual(
+      body.groups.map(({ label, count }) => [label, count]),
+      [
+        ['含本线程原话的事情', 1],
+        ['其他线程最近更新的事情', 1],
+      ],
+    );
+    assert.equal(body.groups[0].items[0].contextHintLabel, '猫的归纳（r2）');
+    assert.equal(body.groups[0].items[0].contextHint, '仅适用于社区现场；工程线程可继续获准工作。');
+    assert.match(directory, /项目资料.*历史讨论.*cat_cafe_search_evidence/);
+    assert.match(directory, /当前画像用 cat_cafe_read_profile/);
+    assert.match(directory, /当前人物关系用 cat_cafe_recall_person_relationship/);
     assert.ok(reads.every(({ actor }) => actor.userId === 'owner' && actor.viewer.catId === 'opus'));
     assert.ok(reads.every(({ options }) => options.threadId === params.threadId));
     if (mode === 'hot') assert.equal(prompts[0].sessionId, 'existing-native');

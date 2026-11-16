@@ -199,4 +199,5 @@ export * from './utils/media-byte-range.js';
 export * from './utils/pull-request-changes-target.js';
 // Export subject key utilities (#320)
 export * from './utils/subject-key.js';
+export * from './watcher-daily.js';
 export * from './worktree-notice.js';

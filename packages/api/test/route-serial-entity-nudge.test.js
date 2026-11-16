@@ -106,6 +106,112 @@ function createEvidenceDb() {
 }
 
 describe('F260 AC-B8: route-serial entity nudge prompt injection (actual routeSerial)', { concurrency: false }, () => {
+  test('retirement at the provider boundary rebuilds without stale reading metadata or delivery credit', async () => {
+    const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
+    const { applyMigrations } = await import('../dist/domains/memory/schema.js');
+    const { EntityRegistryStore } = await import('../dist/domains/memory/EntityRegistry.js');
+    const db = createEvidenceDb();
+    applyMigrations(db);
+    const registry = new EntityRegistryStore(db);
+    registry.upsert([
+      {
+        entityId: 'cat:retired-reader',
+        type: 'cat',
+        canonicalName: '退役伙伴',
+        aliases: ['退役伙伴'],
+        updatedAt: '2026-11-15T00:00:00Z',
+        visibilityScope: 'workspace',
+        status: 'active',
+        provenance: [{ source: 'cat-proposed', sourcePath: 'docs/stories/retired.md', note: '旧阅读说明' }],
+      },
+    ]);
+    let attempts = 0;
+    const accepted = [];
+    const service = {
+      async *invoke(prompt, options) {
+        if (attempts++ === 0)
+          registry.upsert([{ ...registry.get('cat:retired-reader'), status: 'retired' }], {
+            source: 'owner-action',
+            actorId: 'user1',
+            reason: 'retirement',
+            conflictPolicy: 'allow-update',
+          });
+        await options.beforeProviderLaunch({
+          v: 1,
+          message: { body: prompt },
+          nativeInstructions: [],
+          runtime: {},
+          tools: { finalSurface: 'unknown' },
+          providerNativeVisibility: 'unknown',
+        });
+        accepted.push(prompt);
+        yield { type: 'text', catId: 'opus', content: '原工作继续', timestamp: Date.now() };
+        yield { type: 'done', catId: 'opus', timestamp: Date.now() };
+      },
+    };
+    try {
+      for await (const _ of routeSerial(
+        createMockDeps({ opus: service }, db),
+        ['opus'],
+        '退役伙伴的过往',
+        'user1',
+        'reading-retired',
+        { currentUserMessageId: 'reading-source' },
+      )) {
+      }
+      assert.equal(accepted.length, 1, 'the main reply still reaches its provider');
+      assert.doesNotMatch(accepted[0], /docs\/stories\/retired\.md|旧阅读说明/);
+      assert.equal(db.prepare("SELECT count(*) n FROM entity_nudge_events WHERE outcome='delivered'").get().n, 0);
+    } finally {
+      _resetSharedNudgeState();
+      db.close();
+    }
+  });
+  test('approved person reading pointer reaches the provider when the private-person cue has no card', async () => {
+    const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
+    const { applyMigrations } = await import('../dist/domains/memory/schema.js');
+    const { EntityRegistryStore } = await import('../dist/domains/memory/EntityRegistry.js');
+    const db = createEvidenceDb();
+    applyMigrations(db);
+    new EntityRegistryStore(db).upsert([
+      {
+        entityId: 'person:reading-fixture',
+        type: 'person',
+        canonicalName: '旅程人物',
+        updatedAt: '2026-11-15T00:00:00Z',
+        aliases: ['旅程人物'],
+        visibilityScope: 'workspace',
+        status: 'active',
+        provenance: [
+          { source: 'cat-proposed', sourcePath: 'docs/stories/reader.md', note: '了解当时共同做作品的限制' },
+        ],
+      },
+    ]);
+    const service = createCapturingService('opus', '继续读原文');
+    const deps = createMockDeps({ opus: service }, db);
+    deps.invocationDeps.memoryCuePromptService = {
+      resolve: async () => ({
+        promptSegment: '',
+        admittedOpportunityIds: [],
+        omittedOpportunityIds: [],
+        deliveryReceipts: [],
+        presentationEnvelopes: [],
+      }),
+    };
+    try {
+      for await (const _ of routeSerial(deps, ['opus'], '旅程人物一起工作', 'user1', 'reading-person', {
+        currentUserMessageId: 'reading-source',
+      })) {
+      }
+      assert.equal(service.calls.length, 1);
+      assert.match(service.calls[0], /docs\/stories\/reader\.md/);
+      assert.match(service.calls[0], /了解当时共同做作品的限制/);
+      assert.equal(db.prepare("SELECT count(*) n FROM entity_nudge_events WHERE outcome='delivered'").get().n, 1);
+    } finally {
+      _resetSharedNudgeState();
+      db.close();
+    }
+  });
   test('entity-nudge block appears in actual invokeSingleCat prompt', async () => {
     const original = catRegistry.getAllConfigs();
     await loadRealRoster();

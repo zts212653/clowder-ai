@@ -119,7 +119,7 @@ function createRouteDeps(service, evidenceDb, memoryCuePromptService) {
   };
 }
 
-function seedAlden() {
+function seedAlden(withReading = false) {
   const db = new Database(':memory:');
   databases.push(db);
   const applyPromise = import('../../dist/domains/memory/schema.js').then(({ applyMigrations }) => applyMigrations(db));
@@ -137,6 +137,7 @@ function seedAlden() {
             anchor: 'thread-other#message-owner-alden',
             threadId: 'thread-other',
             messageId: 'message-owner-alden',
+            ...(withReading ? { sourcePath: 'docs/stories/alden.md', note: '了解当时一起做作品的限制' } : {}),
           },
         ],
         visibilityScope: 'workspace',
@@ -257,10 +258,10 @@ describe('F287 D1 Alden golden journey', { concurrency: false }, () => {
     const { memoryCueOpportunityId } = await import(
       '../../dist/domains/memory/cue/MemoryCueInvocationPromptService.js'
     );
-    const run = async (strategy, admitCue = true) => {
+    const run = async (strategy, admitCue = true, withReading = false) => {
       const { _resetSharedNudgeState } = await import('../../dist/domains/memory/entity-nudge-state.js');
       _resetSharedNudgeState();
-      const evidenceDb = await seedAlden();
+      const evidenceDb = await seedAlden(withReading);
       const capturing = createCapturingService('opus');
       const calls = [];
       const memoryCuePromptService = {
@@ -444,5 +445,20 @@ describe('F287 D1 Alden golden journey', { concurrency: false }, () => {
     assert.equal(unresolved.prompt.includes('<recall-opportunity-pointer'), false);
     assert.equal(unresolved.prompt.includes('[entity-nudge]'), false, 'untyped fallback must remain withheld');
     assert.deepEqual(unresolved.nudgeEvents, []);
+
+    for (const strategy of [routeSerial, routeParallel]) {
+      for (const admitCue of [true, false]) {
+        const reading = await run(strategy, admitCue, true);
+        assert.match(reading.prompt, /docs\/stories\/alden\.md/);
+        assert.match(reading.prompt, /了解当时一起做作品的限制/);
+        assert.equal(reading.prompt.includes('<recall-opportunity-pointer'), admitCue);
+        assert.equal(
+          reading.nudgeEvents.filter((event) => event.outcome === 'delivered').length,
+          1,
+          'shared reading metadata and private cue share one actual-entity delivery receipt',
+        );
+        assert.equal(reading.prompt.includes('Title: Alden'), false, 'the private cue title remains gated');
+      }
+    }
   });
 });
