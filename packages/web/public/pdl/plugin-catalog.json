@@ -1515,6 +1515,7 @@
   "toast"
  ],
  "data": [
+  "composer",
   "currentThread",
   "members",
   "threads"

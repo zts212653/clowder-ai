@@ -950,10 +950,19 @@ function bindPluginRequests() {
       'openUrl',
       'dialog',
     ],
-    data: ['members', 'threads', 'currentThread'],
+    data: ['members', 'threads', 'currentThread', 'composer'],
   };
   // The host data a plugin may read are existing view models (already in component shape).
-  const HOST_DATA = { members: 'members', threads: 'navThreads', currentThread: 'chatHeader' };
+  // composer: the current input's text (a plugin may save it, e.g. as a quick phrase)
+  const HOST_DATA = {
+    members: 'members',
+    threads: 'navThreads',
+    currentThread: 'chatHeader',
+    composer: 'composerText',
+  };
+  VM.composerText = function () {
+    return { text: (CS.draft && CS.draft['chat-input']) || '' };
+  };
   const CSP =
     "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; connect-src 'none'; form-action 'none'; base-uri 'none'; frame-src 'none'; object-src 'none'";
   ENGINE_PARTS.pluginPublic = PLUGIN_PUBLIC;
