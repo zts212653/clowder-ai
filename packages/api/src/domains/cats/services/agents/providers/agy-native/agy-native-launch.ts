@@ -1,6 +1,5 @@
-import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, realpathSync } from 'node:fs';
-import { isAbsolute, join, relative, sep } from 'node:path';
+import { existsSync, lstatSync, mkdirSync, readdirSync, realpathSync } from 'node:fs';
+import { isAbsolute, join } from 'node:path';
 import type { AgyProfileConfig, CatId, NativeSessionBinding } from '@cat-cafe/shared';
 import { inspectAgyLogin } from '../../../../../../config/agy-account.js';
 import { buildCliNotFoundDiagnostic } from '../../../../../../utils/cli-diagnostics.js';
@@ -10,7 +9,7 @@ import { findMonorepoRoot } from '../../../../../../utils/monorepo-root.js';
 import type { AgentServiceOptions, PreparedProviderRequestV1 } from '../../../types.js';
 import { preflightAgyProfile, resolveAgyProfile, resolveAgySpawnCwd } from '../agy-profile-manager.js';
 import { encodeAgyStreamJsonUserMessage } from '../agy-stream-json-parser.js';
-import { materializeAgyNativeAgentFile, previousAgyNativeBindingHash } from './agy-native-agent-file.js';
+import { materializeAgyNativeAgentFile } from './agy-native-agent-file.js';
 import { materializeAgyNativeEffectGuard } from './agy-native-effect-guard.js';
 import { AgyNativeResumeMismatchError, AgyNativeStartupError } from './agy-native-errors.js';
 import { prepareAgyNativeInput } from './agy-native-input.js';
@@ -24,6 +23,12 @@ import { materializeAgyNativeSkills, retireAgyNativeLegacySkillAlias } from './a
 import { AGY_NATIVE_MCP_TOOLS } from './agy-native-tools.js';
 import { executionOwnerEnv, isolatedOAuthEnv } from './launch/agy-native-launch-env.js';
 import { materializeAgyLaunchMcp } from './launch/agy-native-launch-mcp.js';
+import {
+  canResumeAgyWorkspaceScope,
+  containsDirectoryPath,
+  hostAgyNativeAgentName,
+  matchesCatAgyAgentName,
+} from './launch/agy-session-compatibility.js';
 import { acquireAgyNativeProfileTurnAsync } from './profile-turn/async.js';
 
 export interface AgyNativeLaunchInput {
@@ -53,15 +58,19 @@ export interface AgyNativeLaunchPlan {
 
 function assertNoUntrustedProfilePrograms(home: string): void {
   for (const executable of ['plugins', 'skills.json']) {
-    if (existsSync(join(home, '.gemini', 'config', executable))) {
-      throw new Error(`AGY native profile has unvalidated executable config: ${executable}`);
+    const candidate = join(home, '.gemini', 'config', executable);
+    if (!existsSync(candidate)) continue;
+    const stat = lstatSync(candidate);
+    if (
+      !stat.isSymbolicLink() &&
+      stat.isDirectory() &&
+      executable === 'plugins' &&
+      readdirSync(candidate).length === 0
+    ) {
+      continue;
     }
+    throw new Error(`AGY native profile has unvalidated executable config: ${executable}`);
   }
-}
-
-function containsPath(parent: string, child: string): boolean {
-  const rel = relative(parent, child);
-  return rel === '' || (rel !== '..' && !rel.startsWith(`..${sep}`) && !isAbsolute(rel));
 }
 
 function assertOperatorTrustedWorkspace(config: AgyProfileConfig, workspaceRoot: string): void {
@@ -76,23 +85,6 @@ function assertOperatorTrustedWorkspace(config: AgyProfileConfig, workspaceRoot:
   if (!trusted) throw new Error('AGY native workspace is outside the operator trusted workspace list');
 }
 
-function matchesAgyNativeBindingL0(
-  prior: NativeSessionBinding,
-  catId: CatId,
-  agent: { readonly l0Hash: string; readonly agentName: string },
-  fullSystemPrompt: string,
-  frozenL0Input?: AgentServiceOptions['frozenL0Input'],
-): boolean {
-  if (prior.l0Hash === agent.l0Hash) return prior.agentName === agent.agentName;
-  const legacyFullHash = createHash('sha256').update(fullSystemPrompt).digest('hex');
-  if (prior.l0Hash !== legacyFullHash && prior.l0Hash !== previousAgyNativeBindingHash(fullSystemPrompt, frozenL0Input))
-    return false;
-  const prefix = `cat-cafe-${catId}-`;
-  const suffix = agent.agentName.slice(prefix.length + 16);
-  const expectedLegacyAgentName = `${prefix}${prior.l0Hash.slice(0, 16)}${suffix}`;
-  return prior.agentName === expectedLegacyAgentName;
-}
-
 /** Missing AGY binary: same structured diagnostic surface as other startup failures. */
 export function missingAgyNativeCliError(): AgyNativeStartupError {
   return new AgyNativeStartupError(formatCliNotFoundError('agy'), buildCliNotFoundDiagnostic('agy'));
@@ -102,10 +94,11 @@ export function missingAgyNativeCliError(): AgyNativeStartupError {
 export async function prepareAgyNativeLaunch(input: AgyNativeLaunchInput): Promise<AgyNativeLaunchPlan> {
   const options = input.options;
   const member = options?.pluginNativeLaunch;
+  const readOnly = options?.toolExecutionPolicy?.mode === 'read_only';
   const policy = buildAgyNativePolicy({
     workspaceRoot: input.workspace,
     autoApprove: input.profileConfig.autoApprove,
-    readOnly: options?.toolExecutionPolicy?.mode === 'read_only',
+    readOnly,
     ...(member ? { pluginServerName: member.server.name } : {}),
   });
   // A per-turn restriction narrows tools; it does not revoke the operator's workspace admission.
@@ -120,7 +113,7 @@ export async function prepareAgyNativeLaunch(input: AgyNativeLaunchInput): Promi
   });
   if (!profile) throw new Error('AGY native isolated profile is disabled');
   const home = realpathSync(profile.homePath);
-  if (containsPath(home, policy.workspaceRoot) || containsPath(policy.workspaceRoot, home)) {
+  if (containsDirectoryPath(home, policy.workspaceRoot) || containsDirectoryPath(policy.workspaceRoot, home)) {
     throw new Error('AGY native profile HOME overlaps the model-readable workspace');
   }
   assertNoUntrustedProfilePrograms(home);
@@ -165,31 +158,35 @@ export async function prepareAgyNativeLaunch(input: AgyNativeLaunchInput): Promi
       if (status !== 'ready' && status !== 'refreshable')
         throw new Error('AGY 账号未登录或登录文件读不到，请先在账号页完成官方登录');
     } else if (!options?.spawnCliOverride) await prepareAgyNativeKeychain({ profileHome: home });
-    // Shared settings are an account baseline, never the current turn's policy.
-    // CLI flags, the selected agent and this run's hook/MCP config own each turn.
+    // Shared settings remain a conservative account baseline; per-turn --settings
+    // in runProfile.home owns the exact current turn policy (fixing sandbox EPERM).
     if (!member) {
       materializeAgyNativeSettings({
         profileHome: home,
         model: input.model,
         policy: buildAgyNativePolicy({ workspaceRoot: input.workspace }),
         retainTrustedWorkspaces: true,
+        tolerateUnknownKeys: true,
       });
       retireAgyNativeLegacySkillAlias(home);
     }
     runProfile = createAgyNativeRunProfile(home, account?.credentialHome);
     await releaseProfile();
     const configHome = runProfile.home;
-    let memberSettingsPath: string | undefined;
-    if (member) {
-      mkdirSync(join(configHome, '.gemini/antigravity-cli'), { mode: 0o700 });
-      memberSettingsPath = materializeAgyNativeSettings({ profileHome: configHome, model: input.model, policy });
-    }
+    mkdirSync(join(configHome, '.gemini/antigravity-cli'), { mode: 0o700 });
+    const runSettingsPath = materializeAgyNativeSettings({
+      profileHome: configHome,
+      model: input.model,
+      policy,
+    });
     const agent = materializeAgyNativeAgentFile({
       profileHome: configHome,
       catId: input.catId,
       systemPrompt: input.body,
       ...(options?.frozenL0Input ? { frozenL0Input: options.frozenL0Input } : {}),
       autoApprove: policy.permissionMode === 'always-proceed',
+      readOnly,
+      scopedMember: Boolean(member),
       tools: policy.agentTools,
     });
     materializeAgyNativeEffectGuard({
@@ -198,38 +195,50 @@ export async function prepareAgyNativeLaunch(input: AgyNativeLaunchInput): Promi
       ...(account ? { credentialHome: account.credentialHome } : {}),
       runtimeRoot: findMonorepoRoot(process.cwd()),
       workspaceRoot: policy.workspaceRoot,
-      readOnly: options?.toolExecutionPolicy?.mode === 'read_only',
+      readOnly,
       ...(member ? { pluginServerName: member.server.name } : {}),
     });
     const command = input.command ?? resolveCliCommand('agy');
     if (!command) throw missingAgyNativeCliError();
     const profilePreflight = preflightAgyProfile(
-      memberSettingsPath ? { ...profile, settingsPath: memberSettingsPath } : profile,
+      { ...profile, settingsPath: runSettingsPath },
       {
         agyCommand: command,
         workingDirectory: policy.workspaceRoot,
       },
     );
     if (!profilePreflight.ok) throw new Error(profilePreflight.message);
+
     const prior = options?.nativeSessionBinding;
+    const priorAgentMatch = prior ? matchesCatAgyAgentName(prior.agentName, input.catId) : null;
     const resume =
       Boolean(options?.sessionId) &&
       prior?.v === 1 &&
       prior.carrier === 'agy_stream_json' &&
       prior.cliSessionId === options?.sessionId &&
-      matchesAgyNativeBindingL0(prior, input.catId, agent, input.body, options?.frozenL0Input) &&
-      prior.workspaceRoot === policy.workspaceRoot &&
       prior.profileHome === home &&
-      prior.model === input.model &&
-      prior.permissionMode === policy.permissionMode;
+      priorAgentMatch?.matches === true &&
+      !(priorAgentMatch.bornReadOnly && !readOnly) &&
+      canResumeAgyWorkspaceScope({
+        priorWorkspaceRoot: prior.workspaceRoot,
+        nextWorkspaceRoot: policy.workspaceRoot,
+        profileHome: home,
+        autoApprove: input.profileConfig.autoApprove === true,
+        trustedWorkspaces: input.profileConfig.trustedWorkspaces,
+      });
     if (options?.sessionId && !resume) {
       throw new AgyNativeResumeMismatchError(
-        'Native session binding is missing or differs from the current identity, model, workspace, profile or permissions; start a new session explicitly',
+        'Native session binding is missing, belongs to another carrier/member/profile, or crosses an unrelated workspace boundary; start a new session explicitly',
       );
     }
     if (options?.requireExactResume && !options.sessionId) {
       throw new AgyNativeResumeMismatchError('Native exact resume requires a session ID');
     }
+    const trajectoryBornReadOnly = resume && priorAgentMatch ? priorAgentMatch.bornReadOnly : readOnly;
+    const durableAgentName = member
+      ? agent.agentName
+      : hostAgyNativeAgentName(input.catId, trajectoryBornReadOnly ? 'readonly' : 'normal');
+
     const sessionScope = (conversationId: string) => ({ conversationId, runHome: configHome });
     if (resume && options?.sessionId) {
       releaseSession = input.controlOperation
@@ -241,14 +250,11 @@ export async function prepareAgyNativeLaunch(input: AgyNativeLaunchInput): Promi
           )
         : await waitForAgyNativeProfileTurn(home, ownerInvocationId, options.signal, sessionScope(options.sessionId));
     }
-    const allowDynamicL0 = input.controlOperation !== 'compact' && !member;
-    const volatileL0Context = allowDynamicL0 ? agent.volatileL0Context : '';
     const nativeInput = prepareAgyNativeInput(
       input.prompt,
       options?.contentBlocks,
       policy.workspaceRoot,
       options?.uploadDir,
-      volatileL0Context,
     );
     if (member) mkdirSync(join(configHome, '.gemini/config/skills'), { mode: 0o700 });
     const skillDirectories = member
@@ -266,8 +272,9 @@ export async function prepareAgyNativeLaunch(input: AgyNativeLaunchInput): Promi
       ...(!member ? nativeInput.accessDirectories.flatMap((directory) => ['--add-dir', directory]) : []),
       ...skillDirectories.flatMap((directory) => ['--add-dir', directory]),
       ...policy.cliArgs,
-      ...(memberSettingsPath ? ['--disable-slash-commands', '--new-project', '--settings', memberSettingsPath] : []),
-      ...(account && !memberSettingsPath ? ['--settings', profile.settingsPath] : []),
+      ...(member ? ['--disable-slash-commands', '--new-project'] : []),
+      '--settings',
+      runSettingsPath,
       '--agent',
       agent.agentName,
       '--model',
@@ -285,7 +292,7 @@ export async function prepareAgyNativeLaunch(input: AgyNativeLaunchInput): Promi
         ...(nativeInput.injectionDecision ? { injectionDecision: nativeInput.injectionDecision } : {}),
       }),
       nativeInstructions: Object.freeze([
-        { body: readFileSync(agent.filePath, 'utf8'), injectionDecision: 'native_agent_file_compiled' },
+        { body: agent.nativeInstructionBody, injectionDecision: 'native_agent_file_compiled' },
       ]),
       runtime: Object.freeze({
         provider: 'google',
@@ -313,16 +320,9 @@ export async function prepareAgyNativeLaunch(input: AgyNativeLaunchInput): Promi
       ...(options?.livenessProbe ? { livenessProbe: options.livenessProbe } : {}),
     };
     disposeCredentials = await materializeAgyLaunchMcp(configHome, input, options?.callbackEnv);
-    // CLI 1.3.5 treats a concurrent index-open lock error as corruption and
-    // recreates the shared database. Fence startup until verified init, never
-    // model work. Acquire after the conversation lease so a same-session
-    // waiter cannot block unrelated conversations behind this account fence.
     releaseStartup = await waitForAgyNativeProfileTurn(home, ownerInvocationId, options?.signal, {
       runHome: configHome,
     });
-    // Only authentication/startup is fenced across cats sharing an account.
-    // Different conversations remain concurrent after verified init. Run homes
-    // belong to the member profile; this account fence owns no run directory.
     if (account)
       releaseAccountStartup = await waitForAgyNativeProfileTurn(
         account.credentialHome,
@@ -333,12 +333,12 @@ export async function prepareAgyNativeLaunch(input: AgyNativeLaunchInput): Promi
       cliOptions,
       preparedRequest,
       agentName: agent.agentName,
-      volatileL0Context,
+      volatileL0Context: '',
       permissionMode: policy.permissionMode,
       agentTools: [
         ...policy.agentTools,
         ...(member ? ['call_mcp_tool'] : []),
-        ...(!member && input.options?.toolExecutionPolicy?.mode !== 'read_only' ? AGY_NATIVE_MCP_TOOLS : []),
+        ...(!member && !readOnly ? AGY_NATIVE_MCP_TOOLS : []),
       ],
       binding: {
         v: 1,
@@ -348,7 +348,7 @@ export async function prepareAgyNativeLaunch(input: AgyNativeLaunchInput): Promi
         l0Hash: agent.l0Hash,
         workspaceRoot: policy.workspaceRoot,
         permissionMode: policy.permissionMode,
-        agentName: agent.agentName,
+        agentName: durableAgentName,
       },
       ...(resume && options?.sessionId ? { resumeSessionId: options.sessionId } : {}),
       bindSession: async (sessionId) => {

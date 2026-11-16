@@ -15,7 +15,7 @@ describe('F287 memory cue MCP tools', () => {
 
     assert.deepEqual(
       toolset.tools.map((tool) => tool.name),
-      ['cat_cafe_prepare_memory_context', 'cat_cafe_drill_memory_cue', 'cat_cafe_record_memory_cue_outcome'],
+      ['cat_cafe_prepare_memory_context', 'cat_cafe_record_memory_cue_outcome'],
     );
     assert.deepEqual(Object.keys(drillMemoryCueInputSchema).sort(), ['clientRequestId', 'handle', 'window']);
     assert.deepEqual(Object.keys(recordMemoryCueOutcomeInputSchema).sort(), ['clientRequestId', 'handle', 'outcome']);
@@ -93,14 +93,8 @@ describe('F287 memory cue MCP tools', () => {
   it('documents the owner-bound drill and content-free outcome boundaries', async () => {
     const { createMemoryCueTools } = await import('../dist/tools/memory-cue-tools.js');
     const toolset = createMemoryCueTools(async () => ({ content: [] }));
-    const drill = toolset.tools.find((tool) => tool.name === 'cat_cafe_drill_memory_cue');
     const outcome = toolset.tools.find((tool) => tool.name === 'cat_cafe_record_memory_cue_outcome');
 
-    assert.match(drill.description, /owner-authenticated/i);
-    assert.match(drill.description, /current source revision/i);
-    assert.match(drill.description, /source_read_failed/i);
-    assert.match(drill.description, /retryable/i);
-    assert.match(drill.description, /not for.*raw/i);
     assert.match(outcome.description, /applied.*dismissed/i);
     assert.match(outcome.description, /no rationale/i);
     assert.match(outcome.description, /presented/i);

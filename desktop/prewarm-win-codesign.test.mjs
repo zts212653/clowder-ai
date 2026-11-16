@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import {
   existsSync,
@@ -13,6 +14,7 @@ import {
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { test } from 'node:test';
+import { fileURLToPath } from 'node:url';
 import {
   ensurePrewarmedWinCodeSign,
   expectedWinCodeSignDir,
@@ -68,6 +70,38 @@ function fetchReturning(bytes) {
   };
   return { fetchImpl, calls };
 }
+
+for (const platform of ['darwin', 'linux']) {
+  test(`${platform} skips before touching cache, downloading or extracting Windows tools`, async (t) => {
+    const root = tempRoot(t);
+    const result = await ensurePrewarmedWinCodeSign({
+      platform,
+      cacheRoot: join(root, 'cache'),
+      sevenZipPath: join(root, 'missing-7za.exe'),
+      fetchImpl: async () => assert.fail('non-Windows must not download'),
+      extract: async () => assert.fail('non-Windows must not extract'),
+      log: () => {},
+    });
+    assert.deepEqual(result, { skipped: true });
+    assert.deepEqual(readdirSync(root), [], 'non-Windows must leave the cache untouched');
+  });
+}
+
+test('native non-Windows CLI skips successfully with an empty cache', { skip: process.platform === 'win32' }, (t) => {
+  const root = tempRoot(t);
+  const result = spawnSync(
+    process.execPath,
+    [fileURLToPath(new URL('./scripts/prewarm-win-codesign.mjs', import.meta.url))],
+    {
+      env: { ELECTRON_BUILDER_CACHE: join(root, 'cache') },
+      encoding: 'utf8',
+      timeout: 5000,
+    },
+  );
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  assert.match(result.stdout, /skipped \(not Windows\)/);
+  assert.deepEqual(readdirSync(root), []);
+});
 
 test('resolveCacheRoot honours ELECTRON_BUILDER_CACHE', () => {
   assert.equal(

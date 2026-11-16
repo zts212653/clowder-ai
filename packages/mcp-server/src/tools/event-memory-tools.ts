@@ -14,6 +14,7 @@ import { z } from 'zod';
 import { defineMcpCanonicalFactory, defineMcpMigrationFactory } from '../tool-governance-migration.js';
 
 import { callbackGet, callbackPost } from './callback-tools.js';
+import { withEventReadRefs } from './event-read-ref-projection.js';
 import { errorResult, type ToolResult } from './file-tools.js';
 
 const defineTool = defineMcpMigrationFactory('event-memory-tools.ts');
@@ -126,7 +127,7 @@ export async function handleListEvents(input: ListEventsInput): Promise<ToolResu
     if (value !== undefined) params[key] = String(value);
   }
   params.readRequestId = `event_read_${randomUUID()}`;
-  return callbackGet('/api/memory/events', params, { agentKeyCatId: input.agentKeyCatId });
+  return withEventReadRefs(await callbackGet('/api/memory/events', params, { agentKeyCatId: input.agentKeyCatId }));
 }
 
 function handleEventDetail(input: ListEventsInput): Promise<ToolResult> | ToolResult {
@@ -184,7 +185,7 @@ export const eventMemoryTools = [
     description:
       'Query Event Memory — the timeline of cognitive-transition events (magic-word brakes, self-checks, aha). ' +
       'List mode: omit eventId; filter by trigger/cat/type/threadId/confidence/cognitiveTransition/since/until, limit (default 50, max 200), offset. ' +
-      'Returns a complete-response-bounded newest-first page with meta.hasMore/nextOffset and source thread/message coordinates. ' +
+      'Returns a complete-response-bounded newest-first page with meta.hasMore/nextOffset and full original-message readRef coordinates. A shared ownerUserId is carried once at page level; other Event data is retained. Pass a source ref to read_memory; Event detail paging keeps its original reader. ' +
       'Detail mode: pass eventId alone to read one owner-scoped record. For an oversized record, follow its drillDown with eventId, revision, and charOffset=0; repeat with the same revision and nextCharOffset until absent. A changed revision fails instead of mixing snapshots. ' +
       'List filters and detail mode are mutually exclusive. Read-only; foreign-owner ids return 404. Jump to a source message with cat_cafe_teleport.',
     inputSchema: listEventsInputSchema,

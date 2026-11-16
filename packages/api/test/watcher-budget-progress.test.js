@@ -400,7 +400,7 @@ for (const large of [false, true])
     const auth = await registry.create('owner', 'codex', 'line', undefined, undefined, {
       mode: 'watcher',
       maxToolCalls: 6,
-      allowedToolNames: ['cat_cafe_list_memory_matters'],
+      allowedToolNames: ['cat_cafe_search_evidence'],
       allowedCallbackRoutes: [],
     });
     const current = f.owners.sessions.get(f.session.id).watcherState;
@@ -420,7 +420,7 @@ for (const large of [false, true])
           async call(_name, _args, id) {
             fetches++;
             assert.equal(
-              await registry.consumeWatcherToolCall(auth.invocationId, id, 'cat_cafe_list_memory_matters'),
+              await registry.consumeWatcherToolCall(auth.invocationId, id, 'cat_cafe_search_evidence'),
               'accepted',
             );
             return {
@@ -455,7 +455,7 @@ for (const large of [false, true])
       threadId: 'native',
       turnId: 'turn',
       callId: id,
-      tool: 'cat_cafe_list_memory_matters',
+      tool: 'cat_cafe_search_evidence',
       arguments: { query: 'same matter', limit: 4 },
     });
     await createPort().callTool(args('first'));

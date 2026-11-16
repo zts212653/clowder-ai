@@ -162,11 +162,6 @@ export {
   financeTools,
   handleFinanceQuery,
 } from './finance-tools.js';
-export {
-  graphResolveInputSchema,
-  graphTools,
-  handleGraphResolve,
-} from './graph-tools.js';
 export { handleGetHarnessHistory, handlePublishHarnessHistory, harnessHistoryTools } from './harness-history-tools.js';
 export {
   capabilitiesSnapshotInputSchema,
@@ -202,7 +197,6 @@ export {
 export {
   handleListMemoryMatters,
   handleReadMemoryMatter,
-  matterMemoryTools,
 } from './matter-memory-tools.js';
 export {
   createMemoryCueTools,
@@ -265,11 +259,6 @@ export {
   realtimeCompanionTools,
 } from './realtime-companion-tools.js';
 export { recallMetricsTools } from './recall-metrics-tool.js';
-export {
-  handleListRecent,
-  listRecentInputSchema,
-  recentTools,
-} from './recent-tools.js';
 // F193 Phase D AC-D1: reflect-tools removed (deprecated)
 export {
   handleGetRichBlockRules,

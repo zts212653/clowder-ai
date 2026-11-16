@@ -260,11 +260,11 @@ export function cliInstallHint(command: string, platform: NodeJS.Platform = proc
 }
 
 /**
- * Format a user-friendly install hint for a missing CLI.
+ * Guide current-context resolution first; installation is optional when the CLI is absent.
  */
 export function formatCliNotFoundError(command: string, platform: NodeJS.Platform = process.platform): string {
   const hint = cliInstallHint(command, platform);
-  return `${command} CLI 未找到。请先运行 \`${hint}\` 安装，再重试。`;
+  return `${command} CLI 未找到。请检查当前执行环境的 PATH 或该成员的 CLI 命令配置；若尚未安装，可运行 \`${hint}\` 安装后重试。`;
 }
 
 /**

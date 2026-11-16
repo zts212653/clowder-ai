@@ -56,14 +56,14 @@ try {
     'packages/api/scripts/f321-experience-consumer.mjs',
     'packages/api/scripts/f321-experience-cases.mjs',
     'packages/mcp-server/test/fixtures/f321-experience-tools-server.mjs',
-    'cat-cafe-skills/memory-navigation/SKILL.md',
+    'cat-cafe-skills/memory-search-best-practices/SKILL.md',
     'cat-cafe-skills/refs/memory-routing-partial.md',
     'packages/api/src/routes/evidence.ts',
     'packages/api/src/domains/memory/KnowledgeResolver.ts',
     'packages/api/src/domains/cats/services/agents/routing/navigation-context.ts',
     'packages/mcp-server/src/tools/callback-tools.ts',
     'packages/mcp-server/src/tools/evidence-tools.ts',
-    'packages/mcp-server/src/tools/graph-tools.ts',
+    'packages/mcp-server/src/tools/memory-find.ts',
     'packages/mcp-server/src/tools/file-tools.ts',
   ];
   const frozenBuild = {

@@ -37,6 +37,7 @@ beforeEach(() => {
               entryId: 'entry',
               quote: 'Original decision',
               attribution: 'author',
+              status: 'active',
               source: { threadId: 'source', messageId: 'message', timestamp: 1, author: { kind: 'user' } },
             },
           ],
@@ -49,7 +50,7 @@ it('shows the receipt version interpretation before its original speech and keep
   await act(async () => root.render(<MatterRecallLine event={event} threadId="thread" />));
   await act(async () => container.querySelector('button')!.click());
   const dialog = document.querySelector('[role="dialog"]')!;
-  expect(dialog.textContent).toContain('猫的归纳（非原话）');
+  expect(dialog.textContent).toContain('归纳作者未知（非原话）');
   expect(dialog.textContent).toContain('第 2 版');
   expect(dialog.textContent).toContain('仅社区管理线程：先判断必要性，再合法派发。');
   expect(dialog.textContent!.indexOf('仅社区管理线程')).toBeLessThan(dialog.textContent!.indexOf('Original decision'));
@@ -58,6 +59,16 @@ it('shows the receipt version interpretation before its original speech and keep
   expect([...dialog.querySelectorAll('a')].map((link) => link.getAttribute('href'))).toContain(
     '/memory?matter=matter&from=thread',
   );
+});
+it('labels summary reads separately from original messages without claiming adoption', async () => {
+  const summaryEvent: RecallEvent = {
+    ...event,
+    matterRead: { status: 'current', matterId: 'matter', title: 'Settings', messageCount: 0, summaryCount: 2 },
+  };
+  await act(async () => root.render(<MatterRecallLine event={summaryEvent} threadId="thread" />));
+  expect(container.textContent).toContain('读了「Settings」的 2 条归纳');
+  expect(container.textContent).not.toContain('条消息');
+  expect(container.textContent).not.toContain('采用');
 });
 it('gives an honest empty interpretation and distinguishes a verified quoted speaker from the outer author', async () => {
   vi.mocked(apiFetch).mockResolvedValue(

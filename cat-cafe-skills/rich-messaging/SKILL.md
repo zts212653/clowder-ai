@@ -1,6 +1,6 @@
 ---
 name: rich-messaging
-tips_exempt: "Renewed 2026-11-15: original-source reply discovery now explicitly covers requests to find exact words with clickable sources. Members use the existing sources block or searchAnswer after a full read; quotes stay author-selected and existing provenance and grant checks remain required. Existing rich-message tips cover the same human Chat entry; no new command, setting or approval surface is introduced."
+tips_exempt: "Renewed 2026-11-16: unified memory readRef routing and the DOM-clobbering, hidden-frame and image-source examples only clarify how authors deliver existing rich/source blocks. Existing Chat discovery still applies; no new user command, setting or grant is introduced, and author-selected quotes and provenance checks remain required."
 description: >
   Use when: 找原话并带可点击出处，或在当前 Chat 交付可看、可听或可操作产物（语音、图片、截图、HTML/demo、卡片、清单、diff、交互选择），或保存、继续修改 HTML 图解/小工具，无需用户说“富文本”。
   Not for: 不附来源或媒体的普通文字回复、仅讨论 HTML 原理或修改仓库源码；复杂 localhost 应用用 browser-preview。
@@ -49,6 +49,8 @@ triggers:
 你可以发送富媒体消息——语音、图片、卡片、清单、代码 diff、交互选择。不只是打字！
 
 **不只是对话**：定时任务唤醒你后，你依然拥有全部 rich block 能力——发图、发语音、发 HTML 面板、发交互选择，都可以。
+
+记忆来源的完整 `readRef` 交给 `cat_cafe_read_memory({ref:readRef})`；`sources` 与 `nextRef` 原样递回。已知消息/文件坐标可直接构造 ref。普通读取不发卡；归纳、当前画像及文档版本不授予原消息引用资格，仍须明确选句。
 
 ## 首次使用
 
@@ -177,6 +179,32 @@ DOMPurify 静默剥掉所有 `on*` 属性——widget 照常渲染，点击不�
 <button id="btn">点我</button>
 <script>document.getElementById('btn').addEventListener('click', e => e.target.textContent = '点了')</script>
 ```
+
+#### 跟 `document`、`<form>` 自带属性同名的 `id`、`name` 也会被剥掉
+
+DOMPurify 默认防 DOM clobbering：`id` 或 `name` 的值只要是 `document` 或 `<form>` 元素已有的属性名（如 `timeline`、`title`、`body`、`images`、`links`、`forms`、`fonts`、`domain`、`cookie`、`location`、`reset`、`submit`、`action`、`method`、`elements`），整个属性会被删掉。`getElementById` 拿到 `null`，脚本在那一行报错停住，页面只剩静态外壳。本地直接打开 HTML 或用普通 `srcdoc` 都正常，只有进了聊天卡片、作品卡才坏。11-13 一个按钮 id、11-16 一张小猫一日串联卡的 `id="timeline"` 都踩过，后者 You 打开就看不到猫。
+
+id 加前缀，比如 `seam-timeline`。发卡前在浏览器控制台查一遍：
+
+```js
+[...document.querySelectorAll('[id],[name]')].flatMap(e => [e.id, e.getAttribute('name')]).filter(v => v && (v in document || v in document.createElement('form')))
+```
+
+结果不是空数组，就先改名。
+
+#### 卡片可能在 0×0 的框里就开始运行
+
+卡片面板还没展开、被收起，或者在后台标签页里时，卡片里的页面已经开始跑脚本，这时取到的房间宽高是 0。如果拿宽高去算位置并存下来（比如 `x = 宽 / 比例`），会得到「不是数字」，之后再也算不回来。11-16 一张小猫追纸团的互动卡第 3 版就是这样：You 打开只看到纸团，看不到猫（纸团在按鼠标时会重新放回指针处，所以能恢复）。
+
+宽高为 0 时不排版；第一次拿到正常宽高时，再放置各个角色；每帧检查一次位置是不是正常数字；用 `ResizeObserver` 监听尺寸变化，不只靠窗口的 `resize` 事件。发卡前补一个测试：把框设成 `display:none` 再加载页面，然后显示出来，看角色在不在。
+
+#### 卡片里引用 `/uploads/...` 图片，要写 api 域名的完整地址
+
+You 平时从 `https://cafe.clowder-ai.com` 打开 Hub，这个域名前面有 Cloudflare 登录。卡片在沙盒里运行，取图时不带他的登录 Cookie，相对地址 `/uploads/...` 会被 302 转到登录页，图片载不出来，也不报错。本机 `localhost:3003` 打开时没有这层登录，所以本机测试是好的。11-16 一张小猫眼睛跟着鼠标的互动卡第 1 版就是这样，You 打开后看不到猫。
+
+`cat_cafe_publish_image` 返回 `/uploads/...` 后，在 HTML 里依次尝试两个地址：先用 `https://api.clowder-ai.com/uploads/...`（Hub 自己显示图片也走这里，不需要登录），失败或 4 秒没载入，再退回相对地址（给本机打开 Hub 的人用）。页面上写明「正在载入」和「载入失败」，别让失败变成一块空白。
+
+发卡前，在 `https://cafe.clowder-ai.com` 下复现一遍：父页面用 Playwright 拦截一个空白页，图片走真实网络，看沙盒里的图是否载入。
 
 轻交互用 `<details><summary>` 或 CSS `:hover`，不用 JS。
 

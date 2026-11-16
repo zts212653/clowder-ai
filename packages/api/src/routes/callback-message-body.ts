@@ -1,19 +1,18 @@
-import { createHash } from 'node:crypto';
 import { type MessageContent, type RichBlock, serializeContextAttachmentsPrompt } from '@cat-cafe/shared';
 import type { IMessageStore } from '../domains/cats/services/stores/ports/MessageStore.js';
 import { canViewMessage, type Viewer } from '../domains/cats/services/stores/visibility.js';
-import { buildSearchableMessageContent } from '../domains/memory/message-search-content.js';
+import { messageContentRevision } from '../domains/memory/message-search-content.js';
 import { messageSourceParts } from '../domains/memory/message-source-parts.js';
 
 /** Only a single persisted original owns citation coordinates; merged Queue text does not. */
 export function projectCallbackMessageCitation(message: Parameters<typeof projectCallbackMessageBody>[0]) {
-  const canonical = buildSearchableMessageContent({
+  const contentRevision = messageContentRevision({
     content: message.content,
     contentBlocks: message.contentBlocks,
     richBlocks: message.extra?.rich?.blocks,
   });
   return {
-    contentRevision: createHash('sha256').update(canonical).digest('hex'),
+    contentRevision,
     sourceParts: messageSourceParts(message.content, message.contentBlocks).map(({ part, text }) => ({
       part,
       length: text.length,

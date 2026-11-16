@@ -11,6 +11,8 @@ export interface MatterActor {
   viewer: Viewer;
   publicReply?: boolean;
   signal?: AbortSignal;
+  /** Bound by authenticated callback state, never accepted in the model's payload. */
+  invocation?: { threadId: string; triggerMessageId?: string };
 }
 export interface MatterSourceReaders {
   messageStore: Pick<IMessageStore, 'getById'>;
@@ -19,9 +21,27 @@ export interface MatterSourceReaders {
 export class MatterMemoryError extends Error {
   constructor(
     readonly code: 'not_available' | 'invalid_source' | 'stale_revision' | 'request_conflict' | 'invalid_cursor',
+    readonly detail?: { reason: string; hint: string },
   ) {
     super(code);
   }
+}
+
+export async function canReadMatterThread(
+  readers: MatterSourceReaders,
+  actor: MatterActor,
+  threadId: string,
+): Promise<boolean> {
+  actor.signal?.throwIfAborted();
+  const thread = await readers.threadStore.get(threadId);
+  if (!thread || thread.deletedAt) return false;
+  const access = await resolveThreadAccess({
+    threadStore: readers.threadStore,
+    thread,
+    userId: actor.userId,
+    request: { resource: 'transcript', action: 'read' },
+  });
+  return access.status === 200;
 }
 export function matterDigest(value: unknown): string {
   return `sha256:${createHash('sha256').update(JSON.stringify(value)).digest('hex')}`;
@@ -34,15 +54,7 @@ export async function readMatterMessage(
   coordinate: { threadId: string; messageId: string },
 ): Promise<StoredMessage | null> {
   actor.signal?.throwIfAborted();
-  const thread = await readers.threadStore.get(coordinate.threadId);
-  if (!thread || thread.deletedAt) return null;
-  const access = await resolveThreadAccess({
-    threadStore: readers.threadStore,
-    thread,
-    userId: actor.userId,
-    request: { resource: 'transcript', action: 'read' },
-  });
-  if (access.status !== 200) return null;
+  if (!(await canReadMatterThread(readers, actor, coordinate.threadId))) return null;
   const message = await readers.messageStore.getById(coordinate.messageId);
   actor.signal?.throwIfAborted();
   if (
@@ -65,31 +77,56 @@ interface RawSegment {
   contentBlockIndex?: number;
   attachment?: QuoteContextAttachment;
 }
-function rawSegment(message: StoredMessage, source: Omit<MatterSourceInput, 'quote'>): RawSegment | null {
+function rawSegment(
+  message: StoredMessage,
+  source: Omit<MatterSourceInput, 'quote'>,
+  diagnose = false,
+): RawSegment | null {
+  const invalid = (reason: string, hint: string): null => {
+    if (diagnose) throw new MatterMemoryError('invalid_source', { reason, hint });
+    return null;
+  };
   const blocks = message.contentBlocks;
   if (source.segment === 'body') {
-    if (source.attachmentId) return null;
+    if (source.attachmentId)
+      return invalid('attachment', 'body has no attachmentId; omit it or select quote_comment/quote_text.');
     if (!blocks?.length) {
-      if (source.contentBlockIndex !== undefined) return null;
+      if (source.contentBlockIndex !== undefined)
+        return invalid('content_block', 'This message has no contentBlocks. Omit contentBlockIndex for its body.');
       return { text: message.content };
     }
     const textBlocks = blocks.flatMap((block, index) =>
       block.type === 'text' ? [{ text: block.text, contentBlockIndex: index }] : [],
     );
-    return source.contentBlockIndex === undefined
-      ? textBlocks.length === 1
-        ? textBlocks[0]!
-        : null
-      : (textBlocks.find((block) => block.contentBlockIndex === source.contentBlockIndex) ?? null);
+    const selected =
+      source.contentBlockIndex === undefined
+        ? textBlocks.length === 1
+          ? textBlocks[0]!
+          : null
+        : (textBlocks.find((block) => block.contentBlockIndex === source.contentBlockIndex) ?? null);
+    return (
+      selected ??
+      invalid(
+        'content_block',
+        'Read the original contentBlocks and supply the zero-based index of the text block, not its ordinal among text blocks.',
+      )
+    );
   }
-  if (source.contentBlockIndex === undefined || !source.attachmentId) return null;
+  if (source.contentBlockIndex === undefined)
+    return invalid(
+      'content_block',
+      'Read the original contentBlocks; quote segments require the zero-based index of their context_attachment block.',
+    );
+  if (!source.attachmentId)
+    return invalid('attachment', 'Copy the quote attachment id from that context_attachment block.');
   const block = blocks?.[source.contentBlockIndex];
-  if (
-    block?.type !== 'context_attachment' ||
-    block.attachment.kind !== 'quote' ||
-    block.attachment.id !== source.attachmentId
-  )
-    return null;
+  if (block?.type !== 'context_attachment' || block.attachment.kind !== 'quote')
+    return invalid(
+      'content_block',
+      'The selected contentBlockIndex is not a quote attachment. Read contentBlocks and choose its actual zero-based index.',
+    );
+  if (block.attachment.id !== source.attachmentId)
+    return invalid('attachment', 'attachmentId does not match the quote at contentBlockIndex; copy its actual id.');
   return {
     text: source.segment === 'quote_comment' ? (block.attachment.comment ?? '') : block.attachment.text,
     contentBlockIndex: source.contentBlockIndex,
@@ -126,6 +163,17 @@ function coordinateFor(
   };
 }
 
+/** Reuse the matter revision algorithm on an already authorized original, without another source read. */
+export function matchesMatterSourceSelection(
+  message: StoredMessage,
+  selection: import('@cat-cafe/shared').MemoryMessageSelection,
+): boolean {
+  const { expectedRevision, ...input } = selection;
+  const source = { threadId: message.threadId, messageId: message.id, ...input };
+  const segment = rawSegment(message, source);
+  return Boolean(segment && coordinateFor(message, source, segment).sourceRevision === expectedRevision);
+}
+
 export async function captureMatterSource(
   readers: MatterSourceReaders,
   actor: MatterActor,
@@ -133,10 +181,17 @@ export async function captureMatterSource(
 ): Promise<MatterSourceCoordinate> {
   const message = await readMatterMessage(readers, actor, input);
   if (!message) throw new MatterMemoryError('not_available');
-  const segment = rawSegment(message, input);
-  if (!segment || input.end > segment.text.length || segment.text.slice(input.start, input.end) !== input.quote) {
-    throw new MatterMemoryError('invalid_source');
-  }
+  const segment = rawSegment(message, input, true)!;
+  if (input.end > segment.text.length || input.start >= input.end || input.start < 0)
+    throw new MatterMemoryError('invalid_source', {
+      reason: 'range',
+      hint: `Use raw UTF-16 offsets inside this segment (length ${segment.text.length}), with 0 <= start < end <= length; end is exclusive.`,
+    });
+  if (segment.text.slice(input.start, input.end) !== input.quote)
+    throw new MatterMemoryError('invalid_source', {
+      reason: 'quote_mismatch',
+      hint: 'quote does not match the selected raw text, including whitespace. Reread the original and correct the range/text, or write summary with a thread/message pointer instead.',
+    });
   return coordinateFor(message, input, segment);
 }
 

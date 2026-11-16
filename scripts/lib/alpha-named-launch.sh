@@ -50,10 +50,10 @@ init_named_alpha_worktree() {
     return 0
   fi
   [ ! -e "$ALPHA_DIR" ] || die "preserve the existing unregistered named Alpha path"
-  ! git -C "$PROJECT_DIR" show-ref --verify --quiet "refs/heads/$ALPHA_BRANCH" || die "named Alpha branch already exists without its registered checkout"
-  git -C "$PROJECT_DIR" fetch origin main
+  ! git -c core.fsmonitor=false -C "$PROJECT_DIR" show-ref --verify --quiet "refs/heads/$ALPHA_BRANCH" || die "named Alpha branch already exists without its registered checkout"
+  git -c core.fsmonitor=false -C "$PROJECT_DIR" fetch origin main
   local target
-  target="$(git -C "$PROJECT_DIR" rev-parse --verify 'refs/remotes/origin/main^{commit}')"
+  target="$(git -c core.fsmonitor=false -C "$PROJECT_DIR" rev-parse --verify 'refs/remotes/origin/main^{commit}')"
   (cd "$PROJECT_DIR" && node "$SCRIPT_DIR/worktree-new.mjs" "$ALPHA_DIR" \
     --branch "$ALPHA_BRANCH" --base "$target" --policy merged --role alpha --full)
   assert_named_alpha_prepared
@@ -63,10 +63,10 @@ init_named_alpha_worktree() {
 
 sync_named_alpha_worktree() {
   assert_named_alpha_prepared
-  git -C "$PROJECT_DIR" fetch origin main
+  git -c core.fsmonitor=false -C "$PROJECT_DIR" fetch origin main
   local target
-  target="$(git -C "$PROJECT_DIR" rev-parse --verify 'refs/remotes/origin/main^{commit}')"
-  git -C "$ALPHA_DIR" merge --ff-only "$target"
+  target="$(git -c core.fsmonitor=false -C "$PROJECT_DIR" rev-parse --verify 'refs/remotes/origin/main^{commit}')"
+  git -c core.fsmonitor=false -C "$ALPHA_DIR" merge --ff-only "$target"
   NAMED_ALPHA_COORDINATES="$(named_alpha_coordinates derive --main-root "$PROJECT_DIR" --instance "$NAMED_ALPHA_INSTANCE" --ports "$NAMED_ALPHA_PORTS" --target-sha "$target")" || die "cannot freeze Alpha main revision"
   named_alpha_coordinates inspect --record "$NAMED_ALPHA_COORDINATES" >/dev/null || die "Alpha revision changed after exact main sync"
 }

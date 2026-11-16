@@ -47,6 +47,7 @@ describe('MCP Evidence Tools', () => {
     };
 
     const result = await handleSearchEvidence({
+      resultUnit: 'document',
       query: 'hindsight',
       scope: 'docs',
       mode: 'hybrid',
@@ -75,7 +76,7 @@ describe('MCP Evidence Tools', () => {
       return { ok: true, json: async () => ({ results: [], degraded: false }) };
     };
 
-    await handleSearchEvidence({ query: 'test' });
+    await handleSearchEvidence({ resultUnit: 'document', query: 'test' });
 
     assert.ok(capturedInit, 'expected fetch to be called');
     assert.equal(
@@ -102,6 +103,7 @@ describe('MCP Evidence Tools', () => {
     });
 
     const result = await handleSearchEvidence({
+      resultUnit: 'document',
       query: 'needle',
       scope: 'threads',
       threadId: 'thread_target',
@@ -143,7 +145,7 @@ describe('MCP Evidence Tools', () => {
       };
     };
 
-    const result = await handleSearchEvidence({ query: 'finding', scope: 'threads' });
+    const result = await handleSearchEvidence({ resultUnit: 'document', query: 'finding', scope: 'threads' });
 
     assert.equal(result.isError, undefined);
     assert.ok(capturedUrl, 'expected fetch to be called');
@@ -169,10 +171,7 @@ describe('MCP Evidence Tools', () => {
       };
     };
 
-    const result = await handleSearchEvidence({
-      query: 'cross-collection',
-      dimension: 'all',
-    });
+    const result = await handleSearchEvidence({ resultUnit: 'document', query: 'cross-collection', dimension: 'all' });
 
     assert.equal(result.isError, undefined);
     assert.ok(capturedUrl, 'expected fetch to be called');
@@ -202,7 +201,7 @@ describe('MCP Evidence Tools', () => {
       }),
     });
 
-    const result = await handleSearchEvidence({ query: 'decision' });
+    const result = await handleSearchEvidence({ resultUnit: 'document', query: 'decision' });
 
     assert.equal(result.isError, undefined);
     assert.ok(
@@ -232,7 +231,7 @@ describe('MCP Evidence Tools', () => {
       }),
     });
 
-    const result = await handleSearchEvidence({ query: 'F200' });
+    const result = await handleSearchEvidence({ resultUnit: 'document', query: 'F200' });
     const text = result.content[0].text;
     assert.ok(
       text.includes('sourcePath: docs/features/F200-memory-recall-eval.md'),
@@ -260,7 +259,7 @@ describe('MCP Evidence Tools', () => {
       }),
     });
 
-    const result = await handleSearchEvidence({ query: 'S4-DECISION-A' });
+    const result = await handleSearchEvidence({ resultUnit: 'document', query: 'S4-DECISION-A' });
     const text = result.content[0].text;
     assert.ok(text.includes('status: superseded'), 'expected stable `status:` temporal machine line');
   });
@@ -299,7 +298,7 @@ describe('MCP Evidence Tools', () => {
       }),
     });
 
-    const result = await handleSearchEvidence({ query: 'operator', mode: 'hybrid' });
+    const result = await handleSearchEvidence({ resultUnit: 'document', query: 'operator', mode: 'hybrid' });
     const text = result.content[0].text;
 
     assert.ok(text.includes('match: entity:person:operator'), 'should keep coarse entity match reason');
@@ -341,6 +340,7 @@ describe('MCP Evidence Tools', () => {
     });
 
     const result = await handleSearchEvidence({
+      resultUnit: 'document',
       query: 'Sol naming',
       scope: 'threads',
       mode: 'hybrid',
@@ -378,15 +378,11 @@ describe('MCP Evidence Tools', () => {
       }),
     });
 
-    const result = await handleSearchEvidence({ query: 'drill-down', mode: 'hybrid' });
+    const result = await handleSearchEvidence({ resultUnit: 'document', query: 'drill-down', mode: 'hybrid' });
     const text = result.content[0].text;
 
-    assert.ok(text.includes('drillDown: cat_cafe_get_thread_context'), 'should render drillDown tool');
-    assert.ok(text.includes('threadId=thread_vision'), 'should render threadId param');
-    assert.ok(text.includes('messageId=msg-42'), 'should render messageId param');
-    assert.ok(text.includes('before=3'), 'should render before window');
-    assert.ok(text.includes('after=3'), 'should render after window');
-    assert.ok(text.includes('hint: get_thread_context'), 'should render drillDown hint');
+    const ref = JSON.parse(text.match(/^ {2}readRef: (.+)$/m)[1]);
+    assert.deepEqual(ref, { kind: 'message', threadId: 'thread_vision', messageId: 'msg-42', contextCount: 3 });
   });
 
   test('Hook F-1: appends Read reminder when textual evidence supports document candidates', async () => {
@@ -432,7 +428,7 @@ describe('MCP Evidence Tools', () => {
       }),
     });
 
-    const result = await handleSearchEvidence({ query: 'F177 hooks' });
+    const result = await handleSearchEvidence({ resultUnit: 'document', query: 'F177 hooks' });
     const text = result.content[0].text;
 
     assert.ok(text.includes('Evidence search results:'), 'should include evidence result marker');
@@ -473,7 +469,7 @@ describe('MCP Evidence Tools', () => {
       }),
     });
 
-    const result = await handleSearchEvidence({ query: 'random' });
+    const result = await handleSearchEvidence({ resultUnit: 'document', query: 'random' });
     const text = result.content[0].text;
 
     assert.ok(!text.includes('📌 高匹配文档命中'), 'should not show reminder for non-doc or low match-rank results');
@@ -498,7 +494,7 @@ describe('MCP Evidence Tools', () => {
       }),
     });
 
-    const result = await handleSearchEvidence({ query: 'depth test' });
+    const result = await handleSearchEvidence({ resultUnit: 'document', query: 'depth test' });
     const text = result.content[0].text;
 
     assert.ok(!text.includes('📊 本轮第'), 'retired search-count nudge must be absent');
@@ -516,7 +512,7 @@ describe('MCP Evidence Tools', () => {
       }),
     });
 
-    const result = await handleSearchEvidence({ query: 'nonexistent topic' });
+    const result = await handleSearchEvidence({ resultUnit: 'document', query: 'nonexistent topic' });
     const text = result.content[0].text;
 
     assert.ok(
@@ -535,7 +531,7 @@ describe('MCP Evidence Tools', () => {
       throw new Error('connection refused');
     };
 
-    const result = await handleSearchEvidence({ query: 'quoted "topic"' });
+    const result = await handleSearchEvidence({ resultUnit: 'document', query: 'quoted "topic"' });
     const text = result.content[0].text;
 
     assert.equal(result.isError, true);
@@ -568,7 +564,7 @@ describe('MCP Evidence Tools', () => {
       };
     };
 
-    await handleSearchEvidence({ query: 'bounded', intent: 'coverage' });
+    await handleSearchEvidence({ resultUnit: 'document', query: 'bounded', intent: 'coverage' });
 
     assert.ok(fetchSignal instanceof AbortSignal, 'coverage HTTP fetch must always have a deadline signal');
   });
@@ -581,7 +577,12 @@ describe('MCP Evidence Tools', () => {
       text: async () => 'Client Timeout',
     });
 
-    const result = await handleSearchEvidence({ query: 'wide', intent: 'coverage', scope: 'docs' });
+    const result = await handleSearchEvidence({
+      resultUnit: 'document',
+      query: 'wide',
+      intent: 'coverage',
+      scope: 'docs',
+    });
     const text = result.content[0].text;
 
     assert.equal(result.isError, true);
@@ -630,7 +631,11 @@ describe('MCP Evidence Tools', () => {
       }),
     });
 
-    const result = await handleSearchEvidence({ query: 'production data boundary', intent: 'coverage' });
+    const result = await handleSearchEvidence({
+      resultUnit: 'document',
+      query: 'production data boundary',
+      intent: 'coverage',
+    });
 
     assert.equal(result.isError, undefined, 'should not crash on coverage response shape');
     const text = result.content[0].text;
@@ -681,7 +686,7 @@ describe('MCP Evidence Tools', () => {
       }),
     });
 
-    const result = await handleSearchEvidence({ query: 'axes' });
+    const result = await handleSearchEvidence({ resultUnit: 'document', query: 'axes' });
     const text = result.content[0].text;
     assert.match(
       text,
@@ -728,7 +733,13 @@ describe('MCP Evidence Tools', () => {
       }),
     });
 
-    const result = await handleSearchEvidence({ query: 'wide', intent: 'coverage', scope: 'threads', limit: 15 });
+    const result = await handleSearchEvidence({
+      resultUnit: 'document',
+      query: 'wide',
+      intent: 'coverage',
+      scope: 'threads',
+      limit: 15,
+    });
     const text = result.content[0].text;
 
     assert.match(text, /response truncated/i);
@@ -769,7 +780,13 @@ describe('MCP Evidence Tools', () => {
       }),
     });
 
-    const result = await handleSearchEvidence({ query: 'wide', intent: 'coverage', scope: 'threads', limit: 15 });
+    const result = await handleSearchEvidence({
+      resultUnit: 'document',
+      query: 'wide',
+      intent: 'coverage',
+      scope: 'threads',
+      limit: 15,
+    });
     const text = result.content[0].text;
 
     assert.ok(text.length <= COVERAGE_TOOL_RESPONSE_CHAR_BUDGET, `${text.length} exceeds tool output budget`);
@@ -815,7 +832,13 @@ describe('MCP Evidence Tools', () => {
       }),
     });
 
-    const result = await handleSearchEvidence({ query, intent: 'coverage', scope: 'docs', limit: 15 });
+    const result = await handleSearchEvidence({
+      resultUnit: 'document',
+      query,
+      intent: 'coverage',
+      scope: 'docs',
+      limit: 15,
+    });
     const text = result.content[0].text;
 
     assert.ok(text.length <= COVERAGE_TOOL_RESPONSE_CHAR_BUDGET, `${text.length} exceeds final MCP budget`);
@@ -849,7 +872,7 @@ describe('MCP Evidence Tools', () => {
             source: 'docs',
             representation: 'oversize-placeholder',
             identityDigest: 'bbbb',
-            drillDown: { tool: 'cat_cafe_graph_resolve', params: { anchor: 'F263' }, hint: 'Resolve F263' },
+            drillDown: { tool: 'cat_cafe_list_events', params: { anchor: 'F263' }, hint: 'Resolve F263' },
           },
         ],
         contract: {
@@ -866,12 +889,18 @@ describe('MCP Evidence Tools', () => {
       }),
     });
 
-    const result = await handleSearchEvidence({ query: 'oversize', intent: 'coverage', scope: 'docs', limit: 15 });
+    const result = await handleSearchEvidence({
+      resultUnit: 'document',
+      query: 'oversize',
+      intent: 'coverage',
+      scope: 'docs',
+      limit: 15,
+    });
     const text = result.content[0].text;
 
     assert.match(text, /representation: oversize-placeholder/);
     assert.match(text, /drillUnavailable: source-reference-unavailable/);
-    assert.match(text, /drillDown: cat_cafe_graph_resolve/);
+    assert.match(text, /drillDown: cat_cafe_list_events/);
   });
 
   test('search_evidence description warns coverage tasks are not single-query exhaustive', async () => {
@@ -950,7 +979,7 @@ describe('MCP Evidence Tools', () => {
       }),
     });
 
-    const result = await handleSearchEvidence({ query: 'routing' });
+    const result = await handleSearchEvidence({ resultUnit: 'document', query: 'routing' });
     const text = result.content[0].text;
 
     assert.ok(text.includes('📎 Related directions'), 'should render expansion hints header');
@@ -985,7 +1014,7 @@ describe('MCP Evidence Tools', () => {
       }),
     });
 
-    const result = await handleSearchEvidence({ query: 'basic' });
+    const result = await handleSearchEvidence({ resultUnit: 'document', query: 'basic' });
     const text = result.content[0].text;
 
     assert.ok(!text.includes('📎 Related directions'), 'should NOT render expansion block when hints absent');
@@ -1015,7 +1044,7 @@ describe('MCP Evidence Tools', () => {
       }),
     });
 
-    const result = await handleSearchEvidence({ query: 'missing' });
+    const result = await handleSearchEvidence({ resultUnit: 'document', query: 'missing' });
     const text = result.content[0].text;
     const sidecar = JSON.parse(text.match(/<recall-meta>(.+)<\/recall-meta>/)?.[1] ?? '{}');
 
@@ -1036,7 +1065,7 @@ describe('MCP Evidence Tools', () => {
       };
     };
 
-    await handleSearchEvidence({ query: 'test', include_expansion: false });
+    await handleSearchEvidence({ resultUnit: 'document', query: 'test', include_expansion: false });
 
     assert.ok(capturedUrl, 'expected fetch to be called');
     const parsed = new URL(String(capturedUrl));
@@ -1056,7 +1085,7 @@ describe('MCP Evidence Tools', () => {
       };
     };
 
-    await handleSearchEvidence({ query: 'test', include_expansion: true });
+    await handleSearchEvidence({ resultUnit: 'document', query: 'test', include_expansion: true });
 
     assert.ok(capturedUrl, 'expected fetch to be called');
     const parsed = new URL(String(capturedUrl));

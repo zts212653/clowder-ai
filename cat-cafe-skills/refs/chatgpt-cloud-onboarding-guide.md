@@ -370,13 +370,13 @@ B1A_TOKEN=$(cat ~/.cat-cafe/spike-token | sed 's/^TOKEN=//')
 curl -s "https://mcp.clowder-ai.com/health"
 # 期望: {"status":"ok","server":"cat-cafe-cloud-pro-b1a","version":"0.0.4-b1a","mode":"cloud-pro-phase0","cat_id":"gpt-pro"}
 
-# Test 2: tools/list 10 项白名单 (B1a ?token=)
+# Test 2: tools/list 8 项白名单 (B1a ?token=; F332 F2 前为 10 项)
 curl -s -X POST "https://mcp.clowder-ai.com/mcp?token=$B1A_TOKEN" \
   -H 'content-type: application/json' -H 'accept: application/json, text/event-stream' \
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}'
-# 期望: 10 项 (post_message / get_thread_context / get_message / list_threads /
-#             cross_post_message + search_evidence / graph_resolve / list_recent /
-#             list_session_chain / read_session_digest)
+# 期望: 8 项 (post_message / get_thread_context / get_message / list_threads /
+#             cross_post_message + search_evidence / list_session_chain / read_session_digest)
+#       F332 F2 起 graph_resolve / list_recent 并入 search_evidence 的图谱组与最近浏览。
 
 # Test 3: 反例 — 无 token (spike 401)
 curl -s -o /dev/null -w "%{http_code}\n" \
@@ -406,7 +406,7 @@ URL 里 `<B1A_TOKEN>` 替换成 `~/.cat-cafe/spike-token` 里 `TOKEN=...` 后面
 
 然后灌 Custom Instructions（短 L0）：见 [`gpt-pro-custom-instructions.md`](./gpt-pro-custom-instructions.md)。
 
-Maine Coon云端 ChatGPT 应该立刻能调 10 项工具。试 `cat_cafe_list_threads` 或 `cat_cafe_search_evidence` 看返回。
+Maine Coon云端 ChatGPT 应该立刻能调 8 项工具。试 `cat_cafe_list_threads` 或 `cat_cafe_search_evidence` 看返回。
 
 ### Transport 兼容性
 

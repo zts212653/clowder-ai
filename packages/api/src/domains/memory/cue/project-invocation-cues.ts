@@ -103,7 +103,9 @@ export function projectInvocationCues(events: readonly MemoryCueEvent[]): Memory
                     .flatMap((event) => event.readDetails?.entries ?? [])
                     .map((entry) => [JSON.stringify(entry), entry]),
                 ).values(),
-              ].sort((a, b) => a.entryId.localeCompare(b.entryId) || a.sourceRevision.localeCompare(b.sourceRevision)),
+              ].sort(
+                (a, b) => a.entryId.localeCompare(b.entryId) || JSON.stringify(a).localeCompare(JSON.stringify(b)),
+              ),
             },
           }
         : {}),

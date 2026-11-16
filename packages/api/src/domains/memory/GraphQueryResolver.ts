@@ -12,6 +12,7 @@ const NO_MATCH_EXAMPLES = ['F186', 'f186', 'harness', 'doc:plans/example.md'];
 type MatchReason = ReturnType<typeof classifyIndexedMatch>['matchReason'];
 
 export interface GraphQueryCandidate {
+  readRef?: import('@cat-cafe/shared').ReadRef;
   anchor: string;
   title: string;
   kind: string;
@@ -288,6 +289,7 @@ export class GraphQueryResolver {
       kind: item.kind,
       collectionId,
       ...(item.sourcePath ? { source: item.sourcePath } : {}),
+      ...(item.readRef ? { readRef: item.readRef } : {}),
       matchReason,
       ...(snippet ? { snippet } : {}),
       textMatchScore,

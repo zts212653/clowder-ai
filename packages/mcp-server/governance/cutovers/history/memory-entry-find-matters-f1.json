@@ -1,0 +1,65 @@
+{
+  "resource": {
+    "kind": "family",
+    "resourceFamily": "memory-matter"
+  },
+  "retiredNames": ["cat_cafe_list_memory_matters"],
+  "canonicalNames": [],
+  "expectedProfiles": {},
+  "rollbackRevision": "0596018e7c322839a0a1df01bac2da87fedf9642",
+  "layers": {
+    "mcp-definition": {
+      "status": "covered",
+      "consumers": [
+        "packages/mcp-server/src/tools/matter-memory-tools.ts",
+        "packages/mcp-server/src/tools/index.ts",
+        "packages/mcp-server/src/canonical-server-tools.ts",
+        "packages/mcp-server/src/tools/evidence-tools.ts",
+        "packages/mcp-server/src/tools/memory-find.ts",
+        "packages/mcp-server/src/tools/memory-find-matters.ts",
+        "packages/mcp-server/src/server-toolsets.ts"
+      ]
+    },
+    "runtime-catalog-profile": {
+      "status": "covered",
+      "consumers": [
+        "packages/mcp-server/governance/mcp-surface-baseline.json",
+        "packages/api/src/domains/cats/services/agents/invocation/WatcherToolTicket.ts",
+        "packages/api/src/domains/concierge/watcher/context/watcher-directory-read.ts",
+        "packages/api/src/domains/concierge/watcher/watcher-native-run.ts"
+      ]
+    },
+    "prompt-l0": {
+      "status": "covered",
+      "consumers": ["packages/api/src/domains/memory/matters/matter-opening-directory.ts"]
+    },
+    "skill-convention": {
+      "status": "not-applicable",
+      "rationale": "No skill, ref or L0 source named the directory tool; the opening directory injection was its only prompt pointer and now names the find entry.",
+      "absenceEvidence": ["cat_cafe_list_memory_matters"]
+    },
+    "fixture-test": {
+      "status": "covered",
+      "consumers": [
+        "packages/mcp-server/test/memory-find.test.js",
+        "packages/mcp-server/test/matter-memory-tools.test.js",
+        "packages/mcp-server/test/secret-tool-guard.test.ts",
+        "packages/api/test/memory/matter-context.test.js",
+        "packages/api/test/watcher-budget-native.test.js",
+        "packages/api/test/watcher-budget-progress.test.js",
+        "packages/api/test/watcher-native-material-replay.test.js",
+        "packages/api/test/watcher-quiet-memory-native.test.js"
+      ]
+    },
+    "eval": {
+      "status": "not-applicable",
+      "rationale": "No eval consumes the directory tool name; the matter directory route and its owner projection are unchanged.",
+      "absenceEvidence": ["cat_cafe_list_memory_matters"]
+    },
+    "observability": {
+      "status": "not-applicable",
+      "rationale": "Recall telemetry never classified this name; find calls are observed under cat_cafe_search_evidence with the docs recall sidecar kept as the final block.",
+      "absenceEvidence": ["cat_cafe_list_memory_matters"]
+    }
+  }
+}

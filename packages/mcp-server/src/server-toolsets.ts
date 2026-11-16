@@ -17,6 +17,8 @@ import {
   resolveInvocationRequestSignal,
   withWatcherToolCall,
 } from './tools/invocation-auth.js';
+import { searchEvidenceWatcherContract } from './tools/memory-find-watcher.js';
+import { withMemoryReadPolicy } from './tools/memory-read-access.js';
 import { admitWatcherTool, boundWatcherToolResponse } from './watcher-tool-guard.js';
 
 export { CANONICAL_TOOL_REGISTRY } from './canonical-server-tools.js';
@@ -223,7 +225,9 @@ function registerTools(server: McpServer, tools: readonly ToolDef[], env: Toolse
     const registered = registerExplicit(
       tool.name,
       {
-        ...projectRegistrationContract(tool, principal),
+        ...(env.watcher && tool.name === 'cat_cafe_search_evidence'
+          ? searchEvidenceWatcherContract
+          : projectRegistrationContract(tool, principal)),
         annotations,
         ...(deliveryMeta ? { _meta: deliveryMeta } : {}),
       },
@@ -250,7 +254,11 @@ function registerTools(server: McpServer, tools: readonly ToolDef[], env: Toolse
               },
               extra.requestId === undefined ? undefined : String(extra.requestId),
             );
-          const result = await (env.watcher ? withWatcherToolCall(watcherCallId, run) : run());
+          const scopedRun = () => (env.watcher ? withWatcherToolCall(watcherCallId, run) : run());
+          // Find groups and read kinds share the bound runtime qualification (F332 read/find entries).
+          const result = await (tool.name === 'cat_cafe_read_memory' || tool.name === 'cat_cafe_search_evidence'
+            ? withMemoryReadPolicy(env, scopedRun)
+            : scopedRun());
           const typed = {
             ...(result as Record<string, unknown>),
           } as {

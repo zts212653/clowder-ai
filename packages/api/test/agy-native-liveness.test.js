@@ -32,6 +32,19 @@ function init(launch) {
   };
 }
 
+function toolStep(state) {
+  return {
+    event: 'step_update',
+    step_update: {
+      conversation_id: 'liveness-session',
+      step_index: 1,
+      step_type: 'tool',
+      tool_name: 'run_command',
+      state,
+    },
+  };
+}
+
 const complete = {
   event: 'result',
   result: { conversation_id: 'liveness-session', status: 'SUCCESS', response: 'done' },
@@ -111,3 +124,67 @@ test('a pre-init liveness warning is visible but cannot certify a Native session
   assert.equal(messages.filter((m) => m.type === 'done').length, 1);
   assert.ok(messages.at(-1).errorCode, 'a warning is not verified init or a successful terminal');
 });
+
+test('Native liveness names the last observed tool and preserves its first observation across repeated updates', async (t) => {
+  const f = fixture(t);
+  const messages = [];
+  const untypedWarning = { ...warning, lastEventType: null };
+  for await (const message of f.service.invoke('work', {
+    workingDirectory: f.workspace,
+    spawnCliOverride: async function* (launch) {
+      yield init(launch);
+      yield toolStep('ACTIVE');
+      yield untypedWarning;
+      await new Promise((resolveDelay) => setTimeout(resolveDelay, 10));
+      yield toolStep('ACTIVE');
+      yield untypedWarning;
+      yield toolStep('DONE');
+      yield complete;
+    },
+  }))
+    messages.push(message);
+  const notices = messages.filter((m) => m.type === 'system_info').map((m) => JSON.parse(m.content));
+  assert.equal(notices.length, 2);
+  assert.equal(notices[0].lastEventType, 'step_update');
+  assert.equal(notices[0].lastNativeStep.stepIndex, 1);
+  assert.equal(notices[0].lastNativeStep.toolName, 'run_command');
+  assert.equal(notices[0].lastNativeStep.state, 'ACTIVE');
+  assert.ok(notices[0].lastNativeStep.firstObservedAt > 0);
+  assert.equal(notices[1].lastNativeStep.toolName, 'run_command');
+  assert.equal(notices[1].lastNativeStep.stepType, 'tool');
+  assert.equal(notices[1].lastNativeStep.firstObservedAt, notices[0].lastNativeStep.firstObservedAt);
+  assert.equal(untypedWarning.lastEventType, null, 'enrichment must not mutate the upstream warning');
+  assert.equal(messages.at(-1).errorCode, undefined, JSON.stringify(messages));
+  assert.equal(messages.filter((m) => m.type === 'done').length, 1);
+});
+
+for (const trailingEvent of [complete, { event: 'future_observation' }]) {
+  test(`Native retains step context without inventing the last event after ${trailingEvent.event}`, async (t) => {
+    const f = fixture(t);
+    const messages = [];
+    const untypedWarning = { ...warning, lastEventType: null };
+    for await (const message of f.service.invoke('work', {
+      workingDirectory: f.workspace,
+      spawnCliOverride: async function* (launch) {
+        yield init(launch);
+        yield toolStep('DONE');
+        yield trailingEvent;
+        yield untypedWarning;
+        if (trailingEvent.event !== 'result') yield complete;
+      },
+    }))
+      messages.push(message);
+    const notices = messages.filter((m) => m.type === 'system_info').map((m) => JSON.parse(m.content));
+    assert.equal(notices.length, 1);
+    assert.equal(notices[0].lastEventType, null, 'an earlier step must not overwrite the unknown final event type');
+    assert.equal(notices[0].lastNativeStep.toolName, 'run_command');
+    assert.equal(notices[0].lastNativeStep.state, 'DONE');
+    assert.equal(untypedWarning.lastEventType, null);
+    assert.equal(
+      messages.at(-1).errorCode,
+      trailingEvent.event === 'result' ? undefined : 'AGY_NATIVE_FAILED',
+      'an unknown native event must retain the existing protocol failure',
+    );
+    assert.equal(messages.filter((m) => m.type === 'done').length, 1);
+  });
+}

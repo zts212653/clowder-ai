@@ -19,6 +19,7 @@ import { MemoryReadExecution, type MemoryReadSnapshot } from './memory-read-exec
 import { ReadStopError } from './read-stop-diagnostics.js';
 import type { VectorRepackResult } from './repack-passage-vectors.js';
 import type { TastePullRecallRow } from './taste/taste-pull-recall-rows.js';
+import { publishVectorSearchDegrade } from './vector-search-degrade-report.js';
 
 function decodeError(error: ProcessError): Error {
   const details = error.details;
@@ -128,6 +129,11 @@ class MemoryProcess {
             let nativeStartObserved = false;
             const onMessage = (message: ChildMessage) => {
               if (ownsNativeWrite && controller.signal.aborted) return;
+              // The worker's stderr is dropped on success, and a degraded search succeeds.
+              if (message.type === 'read-diagnostic' && message.diagnostic.phase === 'vector-degrade') {
+                if (message.id === id) publishVectorSearchDegrade(message.diagnostic.degrade);
+                return;
+              }
               if (execution?.onMessage(message, id)) {
                 // Existing CJK progress/finish, plus at most one native-input start and final completion.
                 if (

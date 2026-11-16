@@ -5,6 +5,7 @@ import { lexicalMessagePassages } from './message-passage-lexical.js';
 import type { MessagePassageSearchExecution, MessagePassageSearchOptions } from './message-passage-search-types.js';
 import { readMessagePassageState } from './message-passage-state.js';
 import type { PassageResult } from './SqliteEvidenceStore.js';
+import type { VectorSearchDegradeStage } from './vector-search-degrade-report.js';
 
 interface MessagePassageSearchDeps {
   db: Database.Database;
@@ -17,6 +18,7 @@ interface MessagePassageSearchDeps {
     compare?: (a: PassageResult, b: PassageResult) => number,
     audit?: MessageCandidateAudit,
   ): Promise<PassageResult[]>;
+  reportVectorDegrade(stage: VectorSearchDegradeStage, error: unknown): void;
 }
 
 function eligibleAnchors(options: MessagePassageSearchOptions): Set<string> {
@@ -85,6 +87,10 @@ async function retrieveVectors(
     audit?.nativeUnavailable(true);
     options.signal?.throwIfAborted();
     if (options.deadlineAt !== undefined && Date.now() >= options.deadlineAt) throw error;
+    deps.reportVectorDegrade(
+      options.mode === 'semantic' ? 'message_passage_semantic' : 'message_passage_hybrid',
+      error,
+    );
     meta.degraded = true;
     meta.degradeReason = 'passage_vector_search_error';
     meta.effectiveMode = 'lexical';

@@ -48,19 +48,35 @@ export type AgyNativeWorkspacePreflight =
     };
 
 /** Workspace hooks/MCP/agents execute or rewrite model/tool behavior before host policy can act. */
-export function preflightAgyNativeWorkspace(workspaceRoot: string): AgyNativeWorkspacePreflight {
+export function preflightAgyNativeWorkspace(
+  workspaceRoot: string,
+  options?: { readonly hostAgentName?: string },
+): AgyNativeWorkspacePreflight {
   const root = realpathSync(workspaceRoot);
   const entries = readdirSync(root);
-  // Executable customization takes precedence: accepting sensitive content must
-  // never hide a hook, agent, plugin, skill registry, or workspace MCP binding.
-  // Match names explicitly: the rejection policy must not depend on the host
-  // filesystem folding case, and Linux can contain several aliases at once.
+  const hostAgentLower = options?.hostAgentName?.toLowerCase();
   for (const entry of entries.filter((name) => name.toLowerCase() === '.agents')) {
     const agentsDir = join(root, entry);
     if (!lstatSync(agentsDir).isDirectory()) {
       return { ok: false, reason: 'workspace_executable_customization', path: agentsDir };
     }
-    const unsafe = readdirSync(agentsDir).find((name) =>
+    const children = readdirSync(agentsDir);
+    if (hostAgentLower) {
+      for (const agentsSub of children.filter((name) => name.toLowerCase() === 'agents')) {
+        const subPath = join(agentsDir, agentsSub);
+        try {
+          if (lstatSync(subPath).isDirectory()) {
+            const shadowed = readdirSync(subPath).find((name) => name.toLowerCase() === hostAgentLower);
+            if (shadowed) {
+              return { ok: false, reason: 'workspace_executable_customization', path: join(subPath, shadowed) };
+            }
+          }
+        } catch {
+          return { ok: false, reason: 'workspace_executable_customization', path: subPath };
+        }
+      }
+    }
+    const unsafe = children.find((name) =>
       ['hooks.json', 'agents', 'plugins', 'skills.json', 'mcp_config.json'].includes(name.toLowerCase()),
     );
     if (unsafe) {

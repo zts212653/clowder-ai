@@ -40,6 +40,7 @@ const drillBodySchema = z
   .object({
     handle: z.string().trim().min(1).max(2_000),
     requestId: z.string().trim().min(1).max(200),
+    expectedRevision: z.string().min(1).max(300).optional(),
     window: memoryCueDocumentWindowRequestSchema.optional(),
   })
   .strict();
@@ -306,6 +307,8 @@ export function registerCallbackMemoryCueRoutes(app: FastifyInstance, deps: Call
       true,
     );
     if (!coordinate) return;
+    if (body.data.expectedRevision !== undefined && body.data.expectedRevision !== coordinate.revision)
+      return reply.code(409).send({ error: 'source_revision_changed', retryable: false });
     if (
       body.data.window &&
       (coordinate.family !== 'evidence' || !/^(?:project-collection:|F\d{3,}$|ADR-\d{3}$)/.test(coordinate.anchor))
@@ -327,7 +330,11 @@ export function registerCallbackMemoryCueRoutes(app: FastifyInstance, deps: Call
         return reply.code(503).send({ error: 'read_commit_failed', retryable: true });
       }
     } else if (!appendConsumptionOrReply(deps, coordinate, 'drilled', body.data.requestId, now, reply)) return;
-    return { status: 'ok', payload: source.payload };
+    return {
+      status: 'ok',
+      payload: source.payload,
+      source: { family: coordinate.family, revision: coordinate.revision },
+    };
   });
 
   app.post('/api/callbacks/memory-cues/outcome', async (request, reply) => {

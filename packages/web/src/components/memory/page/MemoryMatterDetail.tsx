@@ -1,9 +1,8 @@
 'use client';
-import type { MatterEntryView, MatterPage, MatterSourceInput, MessageFrom } from '@cat-cafe/shared';
+import type { MatterPage, MatterWriteSourceInput } from '@cat-cafe/shared';
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
-import { ExternalLinkIcon } from '@/components/HubConfigIcons';
-import { useCatData } from '@/hooks/useCatData';
+import { MatterEntryContent, MatterSummaryAuthor } from './MatterEntryContent';
 import { MemoryMatterActions } from './MemoryMatterActions';
 import { MemoryMatterSourceForm } from './MemoryMatterSourceForm';
 import { MemoryReadState } from './MemoryReadState';
@@ -29,7 +28,6 @@ export function MemoryMatterDetail({ matterId, from }: { matterId: string; from?
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [removed, setRemoved] = useState(false);
-  const { getCatById } = useCatData();
   const action = useMatterMutation((receipt) => {
     setEditing(false);
     setReplacement(null);
@@ -43,24 +41,25 @@ export function MemoryMatterDetail({ matterId, from }: { matterId: string; from?
   const back = `/memory${from ? `?from=${encodeURIComponent(from)}` : ''}`;
   const matter = read.data?.matter;
   const entries = [...(read.data?.entries ?? []), ...(extra?.entries ?? [])];
-  const speaker = (author: MessageFrom) =>
-    author.kind === 'user'
-      ? '你'
-      : author.kind === 'agent'
-        ? (getCatById(author.catId)?.displayName ?? '猫猫')
-        : '外部来源';
-  const authorLabel = (entry: MatterEntryView) =>
-    entry.attribution === 'quoted_in_message'
-      ? entry.verifiedQuotedAuthor
-        ? `${speaker(entry.verifiedQuotedAuthor)} · 引自原消息`
-        : `${speaker(entry.source.author)}的消息引用`
-      : speaker(entry.source.author);
-  const saveSource = (source: MatterSourceInput) => {
+  const saveSource = ({ source, summary }: { source: MatterWriteSourceInput; summary?: string }) => {
     if (!matter || !replacement) return;
     action.submit(
       replacement === 'append'
-        ? { operation: 'append', matterId, expectedRevision: matter.revision, sources: [source] }
-        : { operation: 'correct', matterId, expectedRevision: matter.revision, entryId: replacement, source },
+        ? {
+            operation: 'append',
+            matterId,
+            expectedRevision: matter.revision,
+            sources: [source],
+            ...(summary ? { summary } : {}),
+          }
+        : {
+            operation: 'correct',
+            matterId,
+            expectedRevision: matter.revision,
+            entryId: replacement,
+            source,
+            ...(summary ? { summary } : {}),
+          },
     );
   };
   return (
@@ -97,7 +96,9 @@ export function MemoryMatterDetail({ matterId, from }: { matterId: string; from?
               </header>
               {matter.description && (
                 <div className="rounded-lg bg-cafe-surface-sunken p-4">
-                  <p className="mb-2 text-xs text-cafe-muted">猫的说明</p>
+                  <p className="mb-2 text-xs text-cafe-muted">
+                    猫的说明 · <MatterSummaryAuthor author={matter.descriptionAuthor} />
+                  </p>
                   {read.data?.summaryStatus === 'sources_changed' && (
                     <p role="status" className="mb-2 text-sm text-cafe-muted">
                       来源已更正，猫的归纳尚未复核。请核对原话后更新说明。
@@ -170,6 +171,7 @@ export function MemoryMatterDetail({ matterId, from }: { matterId: string; from?
                 <MemoryMatterSourceForm
                   key={replacement}
                   busy={action.busy}
+                  entry={entries.find((entry) => entry.entryId === replacement)}
                   submit={saveSource}
                   cancel={() => setReplacement(null)}
                 />
@@ -177,27 +179,8 @@ export function MemoryMatterDetail({ matterId, from }: { matterId: string; from?
               <div className="divide-y divide-cafe-subtle rounded-xl border border-cafe-subtle bg-[var(--console-card-bg)] px-4">
                 {entries.map((entry) => (
                   <article key={entry.entryId} className="space-y-3 py-4">
-                    <div className="flex flex-wrap justify-between gap-2 text-xs text-cafe-muted">
-                      <span>
-                        {authorLabel(entry)} · {formatMemoryDate(entry.source.timestamp)}
-                      </span>
-                      {entry.status !== 'active' && (
-                        <span>{entry.status === 'superseded' ? '已替换' : '不再适用'}</span>
-                      )}
-                    </div>
-                    {entry.sourceStatus === 'current' ? (
-                      <blockquote className="whitespace-pre-wrap text-sm leading-relaxed">{entry.quote}</blockquote>
-                    ) : (
-                      <p className="text-sm text-cafe-muted">原消息已更正，请重新选择来源。</p>
-                    )}
+                    <MatterEntryContent entry={entry} />
                     <div className="flex flex-wrap gap-4 text-sm">
-                      <Link
-                        href={`/thread/${encodeURIComponent(entry.source.threadId)}?message=${encodeURIComponent(entry.source.messageId)}`}
-                        className="shell-focusable inline-flex items-center gap-1 text-cafe-accent hover:underline"
-                      >
-                        查看原消息
-                        <ExternalLinkIcon />
-                      </Link>
                       {entry.status === 'active' && (
                         <>
                           <button

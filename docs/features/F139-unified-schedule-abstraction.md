@@ -179,8 +179,7 @@ Approval Hub show the same original task, unchanged timing/destination, and the 
 Before approval or after rejection, the task keeps its old definition. Approval preserves the ID
 and progress, and reports the confirmed update through the original card and retained result.
 
-If the definition changed since the proposal was prepared, approval returns a conflict and the cat
-must prepare a fresh proposal. If the persistent effect committed but runtime refresh was interrupted,
+If the definition changed since the proposal was prepared (`409 SCHEDULE_TASK_DRIFT`), Chat, Approval Hub, and batch approval surfaces explain that the task changed after the proposal was created, disable the stale Approve action, and keep Reject + source navigation active so the user can reject the outdated request and ask the cat to prepare a fresh proposal (#6861). If the persistent effect committed but runtime refresh was interrupted,
 the card offers retry; it re-reads the current owner record and resumes from the checkpoint. Moving
 that recovery card between Inbox groups must not resurrect the old pending-create action.
 

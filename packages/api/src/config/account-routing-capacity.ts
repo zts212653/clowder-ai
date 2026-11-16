@@ -4,15 +4,18 @@ import {
   type AccountConfig,
   type AccountQuotaObservation,
   accountQuotaOwnerMatches,
+  builtinAccountFamilyForRef,
   type CatConfig,
   type CodexAccountIdentity,
   type RoutingAccountCapacityV1,
   type RoutingCandidateBindingV1,
   type RoutingCapacityWindowV1,
 } from '@cat-cafe/shared';
-import { accountToRuntimeProfile } from './account-resolver.js';
+import { accountToRuntimeProfile, resolveByAccountRef } from './account-resolver.js';
 import { readAccountStoreSnapshot } from './account-store-snapshot.js';
 import { resolveBoundAccountRefForCat, usesNativeToolConfiguration } from './cat-account-binding.js';
+import { hasClaudeQuotaAuthOverride } from './claude-quota-identity.js';
+import { readClaudeRoutingAccount } from './claude-routing-capacity.js';
 import { inspectCodexLogin, sameCodexIdentity } from './codex-account-identity.js';
 import { resolveCodexAccountLaunch } from './codex-account-launch.js';
 
@@ -105,6 +108,7 @@ function projectAccount(ref: string, account: AccountConfig, root: string, now: 
 export interface RoutingExecutionBindingProof {
   catId: string;
   accountRevision?: string;
+  credentialVersion?: string;
   providerId?: string;
 }
 
@@ -118,12 +122,36 @@ export function readAccountRoutingCapacity(input: {
   const store = readAccountStoreSnapshot(input.projectRoot);
   const accounts = new Map<
     string,
-    { clientId?: string; principalPinned?: boolean; capacity: RoutingAccountCapacityV1 }
+    {
+      clientId?: string;
+      principalPinned?: boolean;
+      capacity: RoutingAccountCapacityV1;
+      claude?: ReturnType<typeof readClaudeRoutingAccount>;
+    }
   >();
-  for (const ref of [...store.refs].sort()) {
+  const claudeRefs = Object.entries(input.configs).flatMap(([catId, config]) =>
+    config.clientId === 'anthropic'
+      ? [resolveBoundAccountRefForCat(input.projectRoot, catId, config)].filter((ref): ref is string => !!ref)
+      : [],
+  );
+  if (Object.values(input.configs).some((config) => config.clientId === 'anthropic')) claudeRefs.push('claude');
+  for (const ref of [...new Set([...store.refs, ...claudeRefs])].sort()) {
     try {
       const entry = store.resolve(ref);
-      if (entry.account)
+      const claudeProfile =
+        (entry.account?.clientId ?? builtinAccountFamilyForRef(ref)) === 'anthropic' ||
+        (!entry.account && claudeRefs.includes(ref))
+          ? resolveByAccountRef(input.projectRoot, ref)
+          : undefined;
+      if (claudeProfile?.client === 'anthropic' && claudeProfile.authType === 'oauth' && !claudeProfile.baseUrl) {
+        const claude = readClaudeRoutingAccount(claudeProfile, input.projectRoot, input.observedAt);
+        accounts.set(ref, {
+          clientId: 'anthropic',
+          principalPinned: !!claude.owner.credentialVersion,
+          capacity: claude.capacity,
+          claude,
+        });
+      } else if (entry.account)
         accounts.set(ref, {
           clientId: entry.account.clientId,
           principalPinned: Boolean(entry.account.codex?.identity),
@@ -148,11 +176,16 @@ export function readAccountRoutingCapacity(input: {
       const providerId = execution?.providerId ?? (config.provider?.trim() || config.clientId);
       let current =
         bound?.clientId === providerId ? bound.capacity : unknown(ref ? 'account_unavailable' : 'binding_unknown');
+      if (bound?.claude && ref && !store.resolve(ref).account?.claude && hasClaudeQuotaAuthOverride(config.env))
+        current = unknown('principal_unverified');
       if (
         execution &&
-        current.state !== 'unknown' &&
+        (current.state !== 'unknown' || current.windows.length > 0) &&
         // Legacy native launch revisions contain paths, not principal identity. They cannot prove C's quota.
-        (!bound?.principalPinned || !execution.accountRevision || current.bindingRevision !== execution.accountRevision)
+        (!bound?.principalPinned ||
+          !execution.accountRevision ||
+          current.bindingRevision !== execution.accountRevision ||
+          (bound.claude && execution.credentialVersion !== bound.claude.owner.credentialVersion))
       )
         current = unknown('execution_binding_changed');
       const switchRequired = [...accounts.entries()]

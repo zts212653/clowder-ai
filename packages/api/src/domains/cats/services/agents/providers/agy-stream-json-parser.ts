@@ -64,6 +64,8 @@ export interface AgyToolCall {
   readonly output: string;
   readonly errorMessage: string | null;
   readonly durationSeconds: number | null;
+  /** Set when an earlier update on the same step already reported DONE before a later non-DONE update. */
+  readonly completedOnce?: true;
 }
 
 export type AgyStreamJsonEvent =
@@ -342,6 +344,7 @@ function absorbStep(state: TurnAccumulator, observed: Extract<AgyStreamJsonEvent
   // （local review P2）。因此逐字段合并——新值只在真的携带内容时才生效，
   // 唯独 state/rawState 以最新事件为准（它描述的是当下，不是累积）。
   const previous = state.toolCalls.get(event.stepIndex);
+  const hadPriorDone = previous ? (previous.state === 'DONE' ? true : Boolean(previous.completedOnce)) : false;
   state.toolCalls.set(event.stepIndex, {
     stepIndex: event.stepIndex,
     state: event.state,
@@ -353,6 +356,7 @@ function absorbStep(state: TurnAccumulator, observed: Extract<AgyStreamJsonEvent
       ? (previous?.errorMessage ?? event.toolErrorMessage ?? null)
       : (event.toolErrorMessage ?? previous?.errorMessage ?? null),
     durationSeconds: event.durationSeconds ?? previous?.durationSeconds ?? null,
+    ...(hadPriorDone && event.state !== 'DONE' ? { completedOnce: true as const } : {}),
   });
 }
 

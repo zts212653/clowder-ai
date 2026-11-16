@@ -23,6 +23,7 @@ import { configEventBus, createChangeSetId } from '../config/config-event-bus.js
 import { deleteCredential, hasCredential, writeCredential } from '../config/credentials.js';
 import { resolveActiveProjectRoot } from '../utils/active-project-root.js';
 import { resolveUserId } from '../utils/request-identity.js';
+import { registerClaudeQuotaRoutes } from './accounts-claude-quota.js';
 import { registerCodexBindingRoutes } from './accounts-codex-binding.js';
 import { registerCodexLoginRoutes } from './accounts-codex-login.js';
 import { registerCodexQuotaRoutes } from './accounts-codex-quota.js';
@@ -69,6 +70,7 @@ export const accountsRoutes: FastifyPluginAsync<{
   registerCodexLoginRoutes(app, loginManager);
   registerCodexBindingRoutes(app);
   registerCodexQuotaRoutes(app, options.quotaFetcher);
+  registerClaudeQuotaRoutes(app);
   app.addHook('onClose', async () => {
     await loginManager.close();
   });

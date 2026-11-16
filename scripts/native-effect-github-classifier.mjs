@@ -1,9 +1,10 @@
-import { ghOperation, ghOptionPolicy } from './lib/secret-gh-options.mjs';
+import { ghOperation, ghOptionPolicy, isGhHelpRequest, isGhObservation } from './lib/secret-gh-options.mjs';
 import { shellInvocation, tokenizeSimpleShellCommand } from './native-effect-shell-tokenizer.mjs';
 
 /** Only reviewed built-ins may use the managed-wrapper carrier. Upload/API mutations
  * retain their existing native boundary; the wrapper still scans outbound bodies. */
 export function managedGhOperation(args) {
+  if (isGhHelpRequest(args)) return true;
   const operation = ghOperation(args);
   if (operation.group === 'api') {
     const command = ['gh', ...args].map((word) => `'${word.replaceAll("'", "'\\''")}'`).join(' ');
@@ -18,6 +19,22 @@ export function managedGhOperation(args) {
   } catch {
     return false;
   }
+}
+
+/** Only a literal bare command gains a lexical read effect; paths need identity proof. */
+export function isConstrainedGhObservation(raw) {
+  const parsed = shellInvocation(raw);
+  if (!parsed.complete || parsed.redirections.length || !parsed.words.every((word) => word.literal)) return false;
+  const tokens = parsed.words.map(({ value }) => value);
+  return tokens[0] === 'gh' && isGhObservation(tokens.slice(1));
+}
+
+export function isConstrainedGhRead(raw) {
+  return (
+    isConstrainedGhObservation(raw) ||
+    isConstrainedGhPullRequestRead(raw) ||
+    constrainedGhApiOperation(raw)?.effect === 'read'
+  );
 }
 
 const API_VALUES = new Map([

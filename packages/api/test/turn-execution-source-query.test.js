@@ -96,6 +96,7 @@ for (const status of ['running', 'succeeded', 'failed']) {
         old.invocationId,
         '',
         'host_sleep',
+        'restart_shutdown',
       );
     }
     const before = await client.hgetall('turnexec:record:old');

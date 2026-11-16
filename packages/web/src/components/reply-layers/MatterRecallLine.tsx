@@ -80,7 +80,9 @@ export function MatterRecallLine({ event, threadId }: { event: RecallEvent; thre
       : status === 'not_available'
         ? '参考资料已不可用'
         : summary.status === 'current'
-          ? `参考了「${summary.title}」的 ${summary.messageCount} 条消息`
+          ? summary.summaryCount
+            ? `读了「${summary.title}」的 ${summary.summaryCount} 条归纳${summary.messageCount ? `及 ${summary.messageCount} 条摘录` : ''}`
+            : `参考了「${summary.title}」的 ${summary.messageCount} 条消息`
           : '参考资料';
   const rect = trigger.current?.getBoundingClientRect();
   const width = typeof window === 'undefined' ? 0 : Math.min(760, window.innerWidth - 24);

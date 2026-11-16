@@ -836,7 +836,7 @@ describe('F263 Phase A coverage contract', () => {
         title: 'Oversize doc with drill',
         kind: 'feature',
         drillDown: {
-          tool: 'cat_cafe_graph_resolve',
+          tool: 'cat_cafe_list_events',
           params: { anchor: 'F263' },
           hint: 'Resolve F263',
         },
@@ -848,7 +848,7 @@ describe('F263 Phase A coverage contract', () => {
     const [item] = result.matrix;
 
     assert.equal(item.representation, 'oversize-placeholder');
-    assert.equal(item.drillDown?.tool, 'cat_cafe_graph_resolve');
+    assert.equal(item.drillDown?.tool, 'cat_cafe_list_events');
     assert.equal(item.drillUnavailable, undefined);
     assert.ok(JSON.stringify(item).length <= 512, 'placeholder with drill must remain bounded');
   });

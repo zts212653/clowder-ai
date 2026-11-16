@@ -9,7 +9,7 @@ const LITERAL_PATH = /^[A-Za-z0-9_./-]+$/;
 const MIN_BYTES = 512 * 1024;
 
 function run(repo, args, input) {
-  return execFileSync('git', ['-C', repo, ...args], {
+  return execFileSync('git', ['-c', 'core.fsmonitor=false', '-C', repo, ...args], {
     encoding: 'utf8',
     input,
     maxBuffer: 64 * 1024 * 1024,

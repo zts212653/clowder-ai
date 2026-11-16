@@ -102,6 +102,51 @@ test('each remember target carries its own payload schema', () => {
   assert.equal(schema.safeParse({ items: [abstainWithText] }).success, false);
 });
 
+test('registered remember accepts one summary with optional thread/message pointers and no selection call', async () => {
+  const schema = z.object(rememberTools[0].inputSchema);
+  for (const sources of [
+    undefined,
+    [{ threadId: 'thread-real' }],
+    [{ threadId: 'thread-real', messageId: 'message-real' }],
+  ]) {
+    const input = schema.parse({
+      items: [
+        {
+          itemId: 'one',
+          target: 'matter',
+          payload: {
+            operation: 'create',
+            title: '背景',
+            summary: '这是我对讨论的一句归纳。',
+            ...(sources ? { sources } : {}),
+          },
+        },
+      ],
+    });
+    await handleRemember(input);
+    assert.equal(requests.at(-1).body.items[0].payload.summary, '这是我对讨论的一句归纳。');
+    assert.equal(requests.at(-1).body.items[0].payload.sources?.[0]?.start, undefined);
+  }
+  assert.equal(requests.length, 3, 'Each write takes one remember call, without a source-selection round trip');
+  assert.equal(
+    schema.safeParse({
+      items: [
+        {
+          itemId: 'one',
+          target: 'matter',
+          payload: {
+            operation: 'create',
+            title: 'Forged',
+            summary: 'x',
+            summaryAuthor: { kind: 'user', userId: 'owner' },
+          },
+        },
+      ],
+    }).success,
+    false,
+  );
+});
+
 test('remember preserves all profile layers, source coordinates and a Taste correction payload without exposing callback credentials', async () => {
   const profiles = ['primer', 'corpus', 'capsule'].map((targetLayer) => ({
     itemId: targetLayer,

@@ -16,7 +16,7 @@ status: current-contract
 
 工具只以真实加载的 schema/call 为准。看到 Clowder AI/MCP/threadId 不凭记忆说没工具；有工具发现入口就先查。尚未检查字段=unknown，不等于不存在。只用已暴露工具和字段，不猜 ID。
 
-collab 的 post_message/cross_post_message/get_thread_context/get_thread_cats/list_threads/get_message 显式带 agentKeyCatId="gpt-pro"；memory 的 search_evidence/graph_resolve/list_recent/list_session_chain/read_session_digest 不加该字段。agent-key 读写已知 thread 时显式传 threadId。找 thread 用 list_threads，读原文用 get_thread_context/get_message，找知识用 search_evidence。截断就继续 drill，不假装读完。
+collab 的 post_message/cross_post_message/get_thread_context/get_thread_cats/list_threads/get_message 显式带 agentKeyCatId="gpt-pro"；memory 的 search_evidence/list_session_chain/read_session_digest 不加该字段（search_evidence 一个入口找文档/图谱/最近）。agent-key 读写已知 thread 时显式传 threadId。找 thread 用 list_threads，读原文用 get_thread_context/get_message，找知识用 search_evidence。截断就继续 drill，不假装读完。
 
 选队友：用 get_thread_cats(threadId) 取当前可路由 catId；routableNow 是已参与者，routableNotJoined 是尚未参与的候选。它们是服务注册与 roster 快照，不证明在线、空闲、额度或必达。实际发送再核验 routing_warnings；保留 You 指定目标，不静默改投。别用他猫的私有 session chain 探测在线。
 

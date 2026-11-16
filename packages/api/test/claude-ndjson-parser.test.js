@@ -464,6 +464,43 @@ test('rate_limit_event → system_info(rate_limit) with utilization and resetsAt
 
 // ── Empty text suppression in assistant events (empty bubble fix) ──
 
+test('real low-usage events retain every unified window when top-level utilization is absent', () => {
+  const windows = {
+    five_hour: { utilization: 0, resetsAt: 1794827400, status: 'allowed' },
+    seven_day: { utilization: 0, resetsAt: 1795406400, status: 'allowed' },
+    seven_day_overage_included: { utilization: 0, resetsAt: 1795406400, status: 'allowed' },
+    future_window: { utilization: 0.3, resetsAt: 1795406500, status: 'allowed' },
+  };
+  const result = transformClaudeEvent(
+    {
+      type: 'rate_limit_event',
+      rate_limit_info: { status: 'allowed', rateLimitType: 'five_hour', unifiedWindows: windows },
+    },
+    'fable-5',
+    makeStreamState(),
+  );
+  assert.deepEqual(JSON.parse(result.content).windows, windows);
+});
+
+test('real warning events use nested utilization and seconds-based resetsAt', () => {
+  const result = transformClaudeEvent(
+    {
+      type: 'rate_limit_event',
+      rate_limit_info: {
+        rateLimitType: 'seven_day',
+        utilization: 0.88,
+        resetsAt: 1794870000,
+        unifiedWindows: { seven_day: { utilization: 0.88, resetsAt: 1794870000, status: 'allowed_warning' } },
+      },
+    },
+    CAT,
+    makeStreamState(),
+  );
+  const data = JSON.parse(result.content);
+  assert.equal(data.utilization, 0.88);
+  assert.equal(data.resetsAt, '2026-11-16T23:00:00.000Z');
+});
+
 test('assistant event with only empty text block → null (no empty bubble)', () => {
   const state = makeStreamState();
   const event = {

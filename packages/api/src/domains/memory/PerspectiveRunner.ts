@@ -17,8 +17,14 @@ export interface PerspectiveRunnerDeps {
   resolveGraph?: (anchor: string) => Promise<{
     status: string;
     anchor?: string;
+    readRef?: import('@cat-cafe/shared').ReadRef;
     drillDown?: EvidenceDrillDown;
-    candidates?: Array<{ anchor: string; title?: string; drillDown?: EvidenceDrillDown }>;
+    candidates?: Array<{
+      anchor: string;
+      title?: string;
+      drillDown?: EvidenceDrillDown;
+      readRef?: import('@cat-cafe/shared').ReadRef;
+    }>;
   }>;
   now?: () => Date;
   randomId?: () => string;
@@ -230,6 +236,7 @@ function candidateFromEvidenceItem(
     ...(item.summary ? { summary: item.summary } : {}),
     ...(item.sourcePath ? { sourcePath: item.sourcePath } : {}),
     ...(item.drillDown ? { drillDown: item.drillDown } : {}),
+    ...(item.readRef ? { readRef: item.readRef } : {}),
     sourceStepId,
     rank: index + 1,
   };
@@ -241,19 +248,25 @@ function candidatesFromGraphResolution(
 ): PerspectiveAnchorCandidate[] {
   if (resolved.status === 'graph') {
     if (!resolved.anchor) return [];
-    return [candidateFromGraphAnchor(resolved.anchor, resolved.anchor, sourceStepId, 0, resolved.drillDown)];
+    return [
+      {
+        ...candidateFromGraphAnchor(resolved.anchor, resolved.anchor, sourceStepId, 0, resolved.drillDown),
+        ...(resolved.readRef ? { readRef: resolved.readRef } : {}),
+      },
+    ];
   }
   if (resolved.status === 'candidates') {
     if (!resolved.candidates) return [];
-    return resolved.candidates.map((candidate, index) =>
-      candidateFromGraphAnchor(
+    return resolved.candidates.map((candidate, index) => ({
+      ...candidateFromGraphAnchor(
         candidate.anchor,
         graphCandidateTitle(candidate),
         sourceStepId,
         index,
         candidate.drillDown,
       ),
-    );
+      ...(candidate.readRef ? { readRef: candidate.readRef } : {}),
+    }));
   }
   return [];
 }

@@ -4,7 +4,7 @@ related_features: [F048, F293, F300, F317, F334]
 topics: [stop-reason, host-sleep, restart-recovery, routing-context, cancellation, self-sensing]
 doc_kind: spec
 created: 2026-11-13
-tips_exempt: "Automatic stop-reason evidence and bounded host-sleep recovery add no separate user command or setting. F337 remains in-progress and real full-wake acceptance is pending; this implementation record must not advertise rollout completion or weaken the manual-cancellation boundary."
+tips_exempt: "Renewed 2026-11-16: this revision records the accepted restart_shutdown continuation path alongside host-sleep recovery. Recovery and stop-reason projection are automatic, with no separate user command or setting. Real full-wake and manual-cancellation acceptance stay open; the manual-cancellation boundary and in-progress status are unchanged, with no rollout-completion claim."
 description: "猫知道队友是怎么停的：合盖睡眠打断能被认出并在开盖后接着干，派活前看得见对方最近怎么停的，不再把已经停了的猫喊醒。"
 description_source: model
 description_author: opus55
@@ -15,7 +15,7 @@ description_updated_at: 2026-11-13T14:30:00Z
 
 > **Status**: in-progress | **Owner**: Ragdoll (@opus55) | **Priority**: P1
 >
-> **现状（2026-11-13 13:26 PST）**：Phase A（#7038，`05458c6b51`）已随 boot 88 加载：启动日志 `[F337] sleep continuations recovered at startup` owed=0，`turnexec:member-started:*` 已有写入。等一次「有猫在跑时合盖再开盖」的真实样本验收 AC-A2/AC-A5。
+> **现状（2026-11-15 13:07 PST）**：Phase A 两个 PR 都已合入。#7038（`05458c6b51`，睡眠打断认出与接续、派活前看见怎么停的）自 boot 88 起已加载；#7102（`a1ed7e28ff`，runtime 重启停服时被打断的轮记成「重启打断」、下次启动立即叫回）已合入，等下次 runtime 加载后验收。AC-A2/AC-A5 仍等真实样本：一次不撞重启的合盖，一次手动取消后不再喊醒。
 
 ## Why
 

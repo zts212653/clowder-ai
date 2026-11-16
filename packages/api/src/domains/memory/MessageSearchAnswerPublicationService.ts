@@ -129,6 +129,12 @@ export class MessageSearchAnswerPublicationService {
     return {
       status: published ? 'published' : 'prepared',
       publicationRef: ref,
+      readRefs: view.response.results.map((result) => ({
+        kind: 'message' as const,
+        threadId: result.threadId,
+        messageId: result.messageId,
+        expectedRevision: result.contentRevision,
+      })),
       searchId: view.response.searchId,
       ...view,
     };
@@ -315,6 +321,18 @@ export class MessageSearchAnswerPublicationService {
       blockId,
       principal,
       signal,
+    ).then((view) =>
+      view.response
+        ? {
+            ...view,
+            readRefs: view.response.results.map((result) => ({
+              kind: 'message' as const,
+              threadId: result.threadId,
+              messageId: result.messageId,
+              expectedRevision: result.contentRevision,
+            })),
+          }
+        : view,
     );
   }
 }
