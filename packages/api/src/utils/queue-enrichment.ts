@@ -41,6 +41,8 @@ export interface QueueEntryMessagePreview {
 /** Stable browser DTO. The durable ledger remains nested and is never leaked to clients. */
 export interface EnrichedQueueEntry {
   id: string;
+  /** Owner-private correlation with a browser send; the ledger already persists this producer key. */
+  clientMessageId?: string;
   threadId: string;
   userId: string;
   content: string;
@@ -86,6 +88,9 @@ export function projectPublicQueueEntry(entry: QueueEntry): EnrichedQueueEntry {
   const authorIntentByTarget = projectAuthorIntents(entry);
   return {
     id: entry.id,
+    ...(entry.from.kind === 'user' && entry.payload.clientMessageId
+      ? { clientMessageId: entry.payload.clientMessageId }
+      : {}),
     threadId: entry.threadId,
     userId: queueEntryOwnerId(entry),
     content: entry.payload.content,

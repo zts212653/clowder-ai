@@ -10,15 +10,25 @@ import { captureInvocationL0Input } from '../providers/l0-input-capture.js';
 import { agentServiceGeneration } from '../registry/AgentRegistry.js';
 import { ExecutionAdmissionConflict, StaleServiceSourceConflict } from '../registry/AgentServiceUnavailableError.js';
 import { deepFreeze, type FrozenExecutionBinding, freezeExecutionAccountBinding } from './execution-account-binding.js';
-import { freezeExecutionWorkspace } from './execution-workspace.js';
+import { freezeExecutionWorkspace, requiresAgyThreadWorkspace } from './execution-workspace.js';
 import { captureHostExecutionBoundary, changedHostExecutionBoundary } from './host-execution-boundary.js';
+import { findSleepInterruption } from './host-sleep/HostSleepEvidence.js';
 import { InvocationServiceScope } from './invocation-service-scope.js';
 import {
   isConfirmedNativeAuthFailure,
   NATIVE_AUTH_CONTINUATION_PROMPT,
   type NativeAuthContinuation,
 } from './native-auth-continuation.js';
+import { isContinuationMessage } from './restart-continuation/RestartContinuation.js';
 import { protectNativeProviderResult } from './secret-provider-result.js';
+import {
+  HOST_SLEEP_ERROR_CODE,
+  HOST_SLEEP_ERROR_NOTE,
+  HOST_SLEEP_REPEAT_ERROR_CODE,
+  HOST_SLEEP_REPEAT_ERROR_NOTE,
+  HOST_SLEEP_REPEAT_TERMINAL_REASON,
+  HOST_SLEEP_TERMINAL_REASON,
+} from './stop-reason-wording.js';
 /**
  * Single Cat Invocation
  * 单猫调用的核心逻辑，从 AgentRouter 提取。
@@ -365,12 +375,6 @@ function resolveMemoryCueLegacyFallbacks(
     if (admitted.has(opportunityId)) return [];
     return [{ opportunityId }];
   });
-}
-
-function isSubjectSeenNudgeSeed(
-  seed: MemoryCueOpportunitySeed,
-): seed is Extract<MemoryCueOpportunitySeed, { kind: 'subject_seen' }> {
-  return seed.kind === 'subject_seen' && seed.producer === 'entity_nudge';
 }
 
 function subjectSeenSeedMatchesNudge(
@@ -1165,6 +1169,11 @@ async function syncAntigravityRuntimeMetadata(input: {
  * Shared dependencies for all cat invocations within one AgentRouter
  */
 export interface InvocationDeps {
+  /** F337: tells a mid-turn machine sleep apart from a provider failure and waits for the lid to open. */
+  readonly hostSleep?: {
+    readonly readEvidence: import('./host-sleep/HostSleepEvidence.js').HostSleepEvidenceReader;
+    readonly scheduleContinuation: (input: { readonly invocationId: string; readonly sleptAt: number }) => void;
+  };
   /** Scheduler system delivery used to wake a cat whose reply waited for an absent owner without a mention. */
   readonly ownerAskCorrectionDeliver?: (
     opts: import('../../../../../infrastructure/scheduler/types.js').DeliverOpts,
@@ -1418,22 +1427,12 @@ export interface InvocationParams {
     seed: MemoryCueOpportunitySeed;
     promptContext: string;
   }[];
-  /** Route-level candidates, presented and accounted only for this exact consumer. */
+  /** One route-level candidate set feeds reading metadata and any private-person cues. */
   readonly entityNudgePresentation?: {
     readonly service: EntityNudgeService;
     readonly candidates: EntityNudgeCandidateBatch;
     readonly sourceMessageId: string;
-  };
-  /**
-   * Person entity candidates projected as typed F287 Memory Cues. They still
-   * use F260's per-consumer cooldown, but their delivery is confirmed only if
-   * their exact Cue envelope is admitted into the provider request.
-   */
-  readonly entityNudgeCuePresentation?: {
-    readonly service: EntityNudgeService;
-    readonly candidates: EntityNudgeCandidateBatch;
-    readonly sourceMessageId: string;
-    readonly seeds: readonly Extract<MemoryCueOpportunitySeed, { kind: 'subject_seen' }>[];
+    readonly seeds?: readonly Extract<MemoryCueOpportunitySeed, { kind: 'subject_seen' }>[];
   };
 }
 
@@ -1494,8 +1493,7 @@ export async function prepareInvocationExecutionBinding(
       userId: input.userId,
       provider: catConfig?.clientId,
       ...(input.signal ? { signal: input.signal } : {}),
-      requiresAgyWorkspace:
-        Boolean(input.service && usesAgyNativeCarrier(input.service)) || carrier?.carrier === 'agy_acp',
+      requiresAgyWorkspace: Boolean(input.service && requiresAgyThreadWorkspace(input.service)),
     });
     input.signal?.throwIfAborted();
     const [effort, speed] = await Promise.allSettled([
@@ -1900,6 +1898,46 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
   let turnExecutionCompletedSuccessfully = false;
   let routingDispatchFailureClass: RoutingDispatchFailureClass | undefined;
   let routingFailureObservedAt: number | undefined;
+  // F337: read once, at the first provider failure; null = no sleep evidence (or none readable).
+  let hostSleepInterruption: import('./host-sleep/HostSleepEvidence.js').SleepInterruption | null | undefined;
+  // A turn that was itself a continuation is not woken again (loop guard), so it must not promise to be.
+  let hostSleepRepeat = false;
+  const noteProviderFailure = async (out: AgentMessage): Promise<void> => {
+    if (hostSleepInterruption === undefined) {
+      hostSleepInterruption = null;
+      if (deps.hostSleep) {
+        const failedAt = Date.now();
+        try {
+          const evidence = await deps.hostSleep.readEvidence({ from: executionStartedAt, to: failedAt });
+          hostSleepInterruption = findSleepInterruption(evidence, { turnStartedAt: executionStartedAt, failedAt });
+        } catch {
+          hostSleepInterruption = null;
+        }
+      }
+      const triggerMessageId = params.executionCausal?.triggerMessageId ?? params.a2aTriggerMessageId;
+      if (hostSleepInterruption && triggerMessageId) {
+        try {
+          hostSleepRepeat = isContinuationMessage(await deps.messageStore?.getById(triggerMessageId));
+        } catch {
+          // Unknown trigger: do not promise a wake the loop guard may refuse.
+          hostSleepRepeat = true;
+        }
+      }
+    }
+    if (!hostSleepInterruption) {
+      turnExecutionFailureReason ??= 'provider_execution_failed';
+      return;
+    }
+    // The machine slept, the provider did not fail: no availability penalty, and say so in the reply
+    // the owner and the waiting caller read.
+    turnExecutionFailureReason ??= hostSleepRepeat ? HOST_SLEEP_REPEAT_TERMINAL_REASON : HOST_SLEEP_TERMINAL_REASON;
+    routingDispatchFailureClass = undefined;
+    routingFailureObservedAt = undefined;
+    const note = hostSleepRepeat ? HOST_SLEEP_REPEAT_ERROR_NOTE : HOST_SLEEP_ERROR_NOTE;
+    if (out.type === 'error') out.error = `${out.error ?? ''}${note}`.trim();
+    // The response reason comes from `done.errorCode`; carry the sleep there so receipts can say so.
+    if (out.type === 'done') out.errorCode = hostSleepRepeat ? HOST_SLEEP_REPEAT_ERROR_CODE : HOST_SLEEP_ERROR_CODE;
+  };
   // F153: Record cat invocation count with trigger type
   const triggerType = params.a2aTriggerMessageId ? 'mention' : params.parentInvocationId ? 'routing' : 'default';
   catInvocationCount.add(1, { [AGENT_ID]: catId, [TRIGGER]: triggerType });
@@ -1988,12 +2026,6 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
   let memoryCuePresentationEnvelopes: readonly InvocationPresentationEnvelope[] = [];
   let omittedMemoryCueOpportunityIds: readonly string[] = [];
   let entityNudgePromptPresentation: EntityNudgePromptPresentation | undefined;
-  let entityNudgeCuePromptPresentation:
-    | {
-        readonly source: NonNullable<InvocationParams['entityNudgeCuePresentation']>;
-        readonly presentation: EntityNudgePromptPresentation;
-      }
-    | undefined;
   const resolveInvocationMemoryCues = async (): Promise<void> => {
     invocationPromptAdditions.length = 0;
     if (isScopedMember) return;
@@ -2016,7 +2048,6 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
     memoryCuePresentationEnvelopes = [];
     omittedMemoryCueOpportunityIds = [];
     const serverScope = { ownerUserId: userId, threadId, invocationId };
-    const cueSource = params.entityNudgeCuePresentation;
     let seeds = params.memoryCueOpportunitySeeds ?? [];
     if (deps.contextSourceAdmission && contextSourceDecision && params.contextSourceIngress && !params.liveCompanion) {
       const seed = await contextSourceBudget
@@ -2040,25 +2071,7 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
         seeds = [...seeds, seed];
       }
     }
-    let fallbacks = params.memoryCueLegacyFallbacks;
-    if (cueSource) {
-      entityNudgeCuePromptPresentation ??= {
-        source: cueSource,
-        presentation: cueSource.service.preparePresentation(cueSource.candidates, {
-          catId: catId as string,
-          invocationId,
-          sourceMessageId: cueSource.sourceMessageId,
-        }),
-      };
-      const sourceSeeds = new Set<MemoryCueOpportunitySeed>(cueSource.seeds);
-      const admittedNudges = entityNudgeCuePromptPresentation.presentation.result.nudges;
-      const mayPresentSeed = (seed: MemoryCueOpportunitySeed): boolean => {
-        if (!sourceSeeds.has(seed) || !isSubjectSeenNudgeSeed(seed)) return true;
-        return admittedNudges.some((nudge) => subjectSeenSeedMatchesNudge(seed, nudge));
-      };
-      seeds = seeds.filter(mayPresentSeed);
-      fallbacks = fallbacks?.filter((fallback) => mayPresentSeed(fallback.seed));
-    }
+    const fallbacks = params.memoryCueLegacyFallbacks;
     if (
       deps.profileCueOpportunitySource &&
       params.invocationOrigin === 'interactive' &&
@@ -2164,38 +2177,56 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
   const resolveEntityNudgePresentation = (): void => {
     const source = params.entityNudgePresentation;
     if (!source) return;
-    entityNudgePromptPresentation ??= source.service.preparePresentation(source.candidates, {
-      catId: catId as string,
-      invocationId,
-      sourceMessageId: source.sourceMessageId,
+    // Resolve the bounded person sources before applying the shared F260 cap:
+    // a person with neither independent reading metadata nor a private cue must
+    // not displace a later readable entity.
+    const sourceSeeds = new Map(
+      (source.seeds ?? []).map((seed) => [
+        memoryCueOpportunityId(seed, { ownerUserId: userId, threadId, invocationId }),
+        seed,
+      ]),
+    );
+    const typedEntityIds = new Set<string>();
+    for (const envelope of memoryCuePresentationEnvelopes) {
+      if (envelope.receipt.domain !== 'memory_cue') continue;
+      const seed = sourceSeeds.get(envelope.receipt.receipt.event.opportunityId);
+      if (seed) typedEntityIds.add(seed.payload.entityId);
+    }
+    entityNudgePromptPresentation ??= source.service.preparePresentation(
+      source.candidates,
+      { catId: catId as string, invocationId, sourceMessageId: source.sourceMessageId },
+      typedEntityIds,
+    );
+    const admittedNudges = entityNudgePromptPresentation.result.nudges;
+    memoryCuePresentationEnvelopes = memoryCuePresentationEnvelopes.filter((envelope) => {
+      if (envelope.receipt.domain !== 'memory_cue') return true;
+      const seed = sourceSeeds.get(envelope.receipt.receipt.event.opportunityId);
+      return !seed || admittedNudges.some((nudge) => subjectSeenSeedMatchesNudge(seed, nudge));
     });
     if (entityNudgePromptPresentation.promptContext) {
       invocationPromptAdditions.push(entityNudgePromptPresentation.promptContext);
     }
   };
-  const confirmEntityNudgeCuePresentation = (preparedBody: string): void => {
-    const pending = entityNudgeCuePromptPresentation;
-    if (!pending || pending.presentation.result.nudges.length === 0) return;
-    const attempt = currentPresentationAttempt;
-    if (!attempt) throw new Error('entity_nudge_cue_presentation_attempt_unavailable');
-    const admittedPromptSegments = new Map<string, string>();
-    for (const admitted of attempt.admitted) {
-      if (admitted.envelope.receipt.domain !== 'memory_cue') continue;
-      admittedPromptSegments.set(admitted.envelope.receipt.receipt.event.opportunityId, admitted.promptSegment);
-    }
-    const exactNudges: NudgePayload[] = [];
-    for (const nudge of pending.presentation.result.nudges) {
-      const seed = pending.source.seeds.find((candidate) => subjectSeenSeedMatchesNudge(candidate, nudge));
-      if (!seed) throw new Error('entity_nudge_cue_seed_mapping_unavailable');
-      const opportunityId = memoryCueOpportunityId(seed, { ownerUserId: userId, threadId, invocationId });
-      const promptSegment = admittedPromptSegments.get(opportunityId);
-      if (!promptSegment) continue;
-      if (!preparedBody.includes(promptSegment)) {
-        throw new Error('entity_nudge_cue_prepared_prompt_not_exact');
+  const confirmEntityNudgePresentation = (preparedBody: string | undefined): void => {
+    const presentation = entityNudgePromptPresentation;
+    const source = params.entityNudgePresentation;
+    if (!presentation || !source) return;
+    if (preparedBody === undefined) throw new Error('entity_nudge_prepared_prompt_unavailable');
+    const confirmed = new Set(presentation.renderedNudges);
+    for (const seed of source.seeds ?? []) {
+      const id = memoryCueOpportunityId(seed, { ownerUserId: userId, threadId, invocationId });
+      const delivered = (currentPresentationAttempt?.admitted ?? []).filter(
+        ({ envelope }) =>
+          envelope.receipt.domain === 'memory_cue' && envelope.receipt.receipt.event.opportunityId === id,
+      );
+      if (delivered.length === 0) continue;
+      if (delivered.some(({ promptSegment }) => !preparedBody.includes(promptSegment))) {
+        throw new Error('entity_nudge_prepared_prompt_not_exact');
       }
-      exactNudges.push(nudge);
+      const nudge = presentation.result.nudges.find((candidate) => subjectSeenSeedMatchesNudge(seed, candidate));
+      if (nudge) confirmed.add(nudge);
     }
-    if (exactNudges.length > 0) pending.presentation.confirmAssembled(exactNudges);
+    presentation.confirmAssembled([...confirmed]);
   };
   const asrPersonMemoryPromptService = new AsrPersonMemoryOpportunityPromptService({
     ...(deps.writeOpportunityTerminalLedger ? { terminalLedger: deps.writeOpportunityTerminalLedger } : {}),
@@ -4308,6 +4339,28 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
       }
     };
 
+    const recordTranscriptEvent = async (msg: AgentMessage) => {
+      // F24 Phase C: Record event to transcript buffer (best-effort)
+      if (deps.transcriptWriter && deps.sessionChainStore) {
+        try {
+          const activeRec = await deps.sessionChainStore.getActive(catId, threadId, userId);
+          if (activeRec) {
+            const sessInfo: TranscriptSessionInfo = {
+              sessionId: activeRec.id,
+              threadId,
+              catId: activeRec.catId,
+              ...(activeRec.cliSessionId ? { cliSessionId: activeRec.cliSessionId } : {}),
+              seq: activeRec.seq,
+            };
+            // Record the raw agent message as a transcript event
+            deps.transcriptWriter.appendEvent(sessInfo, msg as unknown as Record<string, unknown>, invocationId);
+          }
+        } catch {
+          /* best-effort */
+        }
+      }
+    };
+
     const processMessage = async (msg: AgentMessage): Promise<AgentMessage[]> => {
       msg = redactClaudeLaunchToken(msg, resolvedAccount?.claude ? accountEnv?.CLAUDE_CODE_OAUTH_TOKEN : undefined);
       if (executionAccount && msg.metadata)
@@ -5342,6 +5395,9 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
 
         // F8/F24 usage + context_health (extracted to helper for clowder#915
         // — see processUsageAndContextHealth declaration at top of processMessage).
+        // #1580: seal clears the active pointer and flushes the transcript.
+        // Record the real done in its current session before either can happen.
+        await recordTranscriptEvent(msg);
         await processUsageAndContextHealth(msg);
 
         // clowder#915 R4 cloud P1 #3 (defer seal execution): if an earlier
@@ -5515,25 +5571,7 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
         }
       }
 
-      // F24 Phase C: Record event to transcript buffer (best-effort)
-      if (deps.transcriptWriter && deps.sessionChainStore) {
-        try {
-          const activeRec = await deps.sessionChainStore.getActive(catId, threadId, userId);
-          if (activeRec) {
-            const sessInfo: TranscriptSessionInfo = {
-              sessionId: activeRec.id,
-              threadId,
-              catId: activeRec.catId,
-              ...(activeRec.cliSessionId ? { cliSessionId: activeRec.cliSessionId } : {}),
-              seq: activeRec.seq,
-            };
-            // Record the raw agent message as a transcript event
-            deps.transcriptWriter.appendEvent(sessInfo, msg as unknown as Record<string, unknown>, invocationId);
-          }
-        } catch {
-          /* best-effort */
-        }
-      }
+      if (msg.type !== 'done') await recordTranscriptEvent(msg);
 
       return outputs;
     };
@@ -5542,18 +5580,19 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
       if (!sourceMsg) return;
       const messageObservedAt = Date.now();
       for (const out of await processMessage(sourceMsg)) {
-        routingDispatchFailureClass ??= classifyRoutingDispatchFailure({
-          ...(out.metadata?.cliDiagnostics?.reasonCode
-            ? { cliReasonCode: out.metadata.cliDiagnostics.reasonCode }
-            : {}),
-          ...(out.errorCode ? { providerErrorCode: out.errorCode } : {}),
-        });
+        if (!hostSleepInterruption)
+          routingDispatchFailureClass ??= classifyRoutingDispatchFailure({
+            ...(out.metadata?.cliDiagnostics?.reasonCode
+              ? { cliReasonCode: out.metadata.cliDiagnostics.reasonCode }
+              : {}),
+            ...(out.errorCode ? { providerErrorCode: out.errorCode } : {}),
+          });
         if (routingDispatchFailureClass !== undefined) routingFailureObservedAt ??= messageObservedAt;
         if (out.type === 'error') {
           hadError = true;
           const cancelled = out.errorCode === 'INVOCATION_CANCELLED';
           hadProviderCancellation ||= cancelled;
-          if (!cancelled) turnExecutionFailureReason ??= 'provider_execution_failed';
+          if (!cancelled) await noteProviderFailure(out);
           terminalTaskProgressStatus = 'interrupted';
           terminalInterruptReason = cancelled ? 'aborted' : 'error';
         }
@@ -5562,7 +5601,7 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
             hadProviderCancellation = true;
             terminalTaskProgressStatus = 'interrupted';
             terminalInterruptReason = 'aborted';
-          } else turnExecutionFailureReason ??= 'provider_execution_failed';
+          } else await noteProviderFailure(out);
         }
         await maybePersistTaskProgress(out);
         if (out.type === 'done' && terminalTaskProgressStatus === null) {
@@ -5579,7 +5618,11 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
         }
         if (out.type === 'done') {
           if (hadError && out.errorCode === undefined) {
-            out.errorCode = 'PROVIDER_EXECUTION_FAILED';
+            out.errorCode = hostSleepInterruption
+              ? hostSleepRepeat
+                ? HOST_SLEEP_REPEAT_ERROR_CODE
+                : HOST_SLEEP_ERROR_CODE
+              : 'PROVIDER_EXECUTION_FAILED';
           }
           await finalizeTaskProgress();
           if (!out.tracing) {
@@ -5728,10 +5771,7 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
               },
             }
           : {}),
-        ...(generationRecorder ||
-        entityNudgePromptPresentation ||
-        entityNudgeCuePromptPresentation ||
-        deps.memoryCuePromptService
+        ...(generationRecorder || entityNudgePromptPresentation || deps.memoryCuePromptService
           ? {
               beforeProviderLaunch: async (prepared) => {
                 signal?.throwIfAborted();
@@ -5805,7 +5845,6 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
                 }
 
                 const presentation = entityNudgePromptPresentation;
-                const hasCueNudge = Boolean(entityNudgeCuePromptPresentation?.presentation.result.nudges.length);
                 // These continuations carry only recovery context; the original
                 // prompt already delivered and confirmed its nudges. Requiring
                 // or confirming them again either blocks recovery or double-writes
@@ -5815,18 +5854,11 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
                     'body' in prepared.message &&
                     prepared.message.body === '') ||
                   isCodexCompactionContinuation(prepared);
-                if (
-                  !liveFollowup &&
-                  !isContextContinuation &&
-                  !nativeAuthContinuation &&
-                  (presentation?.promptContext || hasCueNudge)
-                ) {
+                if (!liveFollowup && !isContextContinuation && !nativeAuthContinuation && presentation) {
                   if (!('body' in prepared.message)) throw new Error('entity_nudge_prepared_prompt_unavailable');
                   if (presentation?.promptContext && !prepared.message.body.includes(presentation.promptContext)) {
                     throw new Error('entity_nudge_prepared_prompt_not_exact');
                   }
-                  presentation?.confirmAssembled();
-                  confirmEntityNudgeCuePresentation(prepared.message.body);
                 }
                 if (
                   !liveFollowup &&
@@ -5838,6 +5870,16 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
                   await currentPresentationAttempt.release('source_changed_before_provider');
                   sourceRefreshRequired = true;
                   throw new Error('memory_cue_source_changed_before_provider');
+                }
+                if (!liveFollowup && !isContextContinuation && !nativeAuthContinuation) {
+                  // The asynchronous cue revalidation above may race an Entity
+                  // correction/retirement. Keep this check and confirmation in
+                  // the same synchronous turn so the main reply can rebuild.
+                  if (presentation && !presentation.isCurrent()) {
+                    sourceRefreshRequired = true;
+                    throw new Error('entity_source_changed_before_provider');
+                  }
+                  confirmEntityNudgePresentation('body' in prepared.message ? prepared.message.body : undefined);
                 }
                 return committed;
               },
@@ -6440,10 +6482,12 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
         sourceRefreshRequired = false;
         await terminateCurrentRequestGeneration('replaced', 'source_changed_before_provider');
         await presentationDelivery?.release('source_changed_before_provider');
-        // Only metadata already rejected by its source fence is rebuilt; this retry made no provider request.
-        memoryCuePresentationEnvelopes = memoryCuePresentationEnvelopes.filter(
-          (envelope) => !invalidSourceKeys.has(memoryCuePresentationKey(envelope)),
-        );
+        // Both projections belong to the same entity revision. Re-resolve before
+        // rebuilding so a retired entity cannot retain a previously resolved
+        // private-person handle. This rejected attempt made no provider request.
+        entityNudgePromptPresentation = undefined;
+        await resolveInvocationMemoryCues();
+        resolveEntityNudgePresentation();
         if (!usesProviderContinuityPreflight) await prepareCurrentPresentationDelivery();
         attempt -= 1;
         continue;
@@ -6925,6 +6969,13 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
           await deps.turnExecutionStore.recordProviderTeardown?.(invocationId, terminal.endedAt);
         }
         const result = await deps.turnExecutionStore.transitionTerminal(invocationId, terminal);
+        if (
+          hostSleepInterruption &&
+          result.record?.status === 'failed' &&
+          result.record.terminalReason === HOST_SLEEP_TERMINAL_REASON
+        ) {
+          deps.hostSleep?.scheduleContinuation({ invocationId, sleptAt: hostSleepInterruption.sleptAt });
+        }
         if (result.outcome === 'not_found' || result.record === null) {
           log.error({ invocationId, terminal }, 'Turn execution disappeared before terminal transition');
         } else if (

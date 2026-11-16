@@ -301,6 +301,8 @@ export interface StoredToolEvent {
  */
 export interface StoredMessage {
   id: string;
+  /** Browser correlation metadata. Project only into the owning user's browser DTOs. */
+  clientMessageId?: string;
   /** Thread this message belongs to (always set after append) */
   threadId: string;
   userId: string;

@@ -14,6 +14,7 @@ export function createChatProofHarness(context, built, evidenceDir, measurements
     crowded = false,
     surface = false,
     resizable = false,
+    followRoute = false,
   } = {}) {
     const page = await context.newPage();
     await page.setViewportSize({ width, height: 900 });
@@ -67,9 +68,11 @@ export function createChatProofHarness(context, built, evidenceDir, measurements
       });
     });
     await page.goto(
-      `${origin}/thread/${CURRENT_THREAD}?sidebar=${sidebar ? '1' : '0'}&surface=${surface ? '1' : '0'}&resizable=${resizable ? '1' : '0'}`,
+      `${origin}/thread/${CURRENT_THREAD}?sidebar=${sidebar ? '1' : '0'}&surface=${surface ? '1' : '0'}&resizable=${resizable ? '1' : '0'}&followRoute=${followRoute ? '1' : '0'}`,
       {
-        waitUntil: 'networkidle',
+        // The explicit fixture, draft and theme checks below own readiness;
+        // background API polling must not block opening the conversation.
+        waitUntil: 'domcontentloaded',
       },
     );
     await page.getByTestId('chat-proof-ready').waitFor({ state: 'attached' });

@@ -2,6 +2,7 @@
 
 import { type MutableRefObject, useCallback, useEffect, useRef, useState } from 'react';
 import { apiFetch } from '@/utils/api-client';
+import { THREAD_ATTENTION_INVALIDATED } from '@/utils/thread-attention-invalidation';
 import type { ThreadAttentionPreferences } from './search-group-types';
 
 class GroupReadFailure extends Error {
@@ -39,11 +40,11 @@ function waitToRetry(signal: AbortSignal): Promise<void> {
 }
 
 /** One retry for transient failure; apiFetch still owns the 30s request bound. */
-async function readPreferences(signal: AbortSignal): Promise<ThreadAttentionPreferences> {
+async function readPreferences(signal: AbortSignal, afterCurrentGet: boolean): Promise<ThreadAttentionPreferences> {
   for (let attempt = 0; ; attempt += 1) {
     signal.throwIfAborted();
     try {
-      const response = await apiFetch('/api/config/thread-attention', { signal });
+      const response = await apiFetch('/api/config/thread-attention', { signal }, { afterCurrentGet });
       if (!response.ok) {
         throw new GroupReadFailure(
           '读取 Group 失败 · 重试',
@@ -70,6 +71,7 @@ export function useGroupPreferenceLoading(
     failure: GroupReadFailure | null;
   }>({ state: 'loading', failure: null });
   const lifecycle = useRef<AbortController | null>(null);
+  const invalidationVersion = useRef(0);
   const inFlight = useRef<{
     controller: AbortController;
     promise: Promise<ThreadAttentionPreferences | null>;
@@ -87,27 +89,40 @@ export function useGroupPreferenceLoading(
     const controller = lifecycle.current;
     if (!controller || controller.signal.aborted) return Promise.resolve(null);
     if (inFlight.current?.controller === controller) return inFlight.current.promise;
-    const promise = mutationQueue.current.then(async () => {
-      if (controller.signal.aborted) return null;
-      setLoad({ state: 'loading', failure: null });
+    const promise: Promise<ThreadAttentionPreferences | null> = mutationQueue.current.then(async () => {
       try {
-        const preferences = await readPreferences(controller.signal);
         if (controller.signal.aborted) return null;
-        accept(preferences);
-        return preferences;
-      } catch (error) {
-        if (!controller.signal.aborted) setLoad({ state: 'error', failure: describeFailure(error) });
-        return null;
+        setLoad({ state: 'loading', failure: null });
+        for (;;) {
+          const version = invalidationVersion.current;
+          try {
+            const preferences = await readPreferences(controller.signal, version > 0);
+            if (controller.signal.aborted) return null;
+            if (version !== invalidationVersion.current) continue;
+            accept(preferences);
+            return preferences;
+          } catch (error) {
+            if (controller.signal.aborted) return null;
+            if (version !== invalidationVersion.current) continue;
+            setLoad({ state: 'error', failure: describeFailure(error) });
+            return null;
+          }
+        }
+      } finally {
+        // Check, apply and release in one synchronous turn. A later hint starts a new queued read.
+        if (inFlight.current === flight) inFlight.current = null;
       }
     });
     mutationQueue.current = promise.then(() => undefined);
     const flight = { controller, promise };
     inFlight.current = flight;
-    void promise.then(() => {
-      if (inFlight.current === flight) inFlight.current = null;
-    });
     return promise;
   }, [accept, mutationQueue]);
+
+  const invalidate = useCallback(() => {
+    invalidationVersion.current += 1;
+    void reload();
+  }, [reload]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -117,9 +132,23 @@ export function useGroupPreferenceLoading(
   }, [reload]);
 
   useEffect(() => {
-    if (load.state !== 'error' || !load.failure?.retryable) return;
+    const approved = (event: Event) => {
+      const proposal = (event as CustomEvent<{ status?: string; createdThreadId?: string }>).detail;
+      if (proposal?.status === 'approved' && proposal.createdThreadId) invalidate();
+    };
+    window.addEventListener('cat-cafe:proposal-updated', approved);
+    window.addEventListener('cat-cafe:socket-reconnected', invalidate);
+    window.addEventListener(THREAD_ATTENTION_INVALIDATED, invalidate);
+    return () => {
+      window.removeEventListener('cat-cafe:proposal-updated', approved);
+      window.removeEventListener('cat-cafe:socket-reconnected', invalidate);
+      window.removeEventListener(THREAD_ATTENTION_INVALIDATED, invalidate);
+    };
+  }, [invalidate]);
+
+  useEffect(() => {
     const recover = () => {
-      if (navigator.onLine !== false) void reload();
+      if (navigator.onLine !== false && (load.state !== 'error' || load.failure?.retryable)) invalidate();
     };
     const visible = () => {
       if (document.visibilityState === 'visible') recover();
@@ -132,7 +161,7 @@ export function useGroupPreferenceLoading(
       window.removeEventListener('focus', recover);
       document.removeEventListener('visibilitychange', visible);
     };
-  }, [load, reload]);
+  }, [load, invalidate]);
 
   return { groupLoadState: load.state, groupLoadError: load.failure?.message ?? null, reloadGroups: reload, accept };
 }

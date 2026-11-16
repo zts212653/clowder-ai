@@ -1,6 +1,8 @@
 'use client';
 
 import { type ReactNode, useRef } from 'react';
+import { useCatData } from '@/hooks/useCatData';
+import { resolveCatDisplayName } from '@/lib/cat-display-name';
 import type { SidebarPresence, SidebarSnapshotRow } from '@/stores/sidebarProjectionStore';
 import { AppTooltip } from '../AppTooltip';
 import { useShellCopy } from '../shell/shell-copy';
@@ -14,6 +16,67 @@ interface RowSignalInput {
   hasUserMention: boolean;
   hasDraft: boolean;
   hasPendingDecision?: boolean;
+}
+
+export interface ArrangeSignalSlot {
+  height: number;
+  rowHeight?: number;
+  containerHeight?: number;
+  timeWidth?: number;
+  split: boolean;
+  presence: boolean;
+  unread: boolean;
+  mention: boolean;
+  draft: boolean;
+  decision: boolean;
+  emphasized: boolean;
+}
+
+/** A live summary in an existing icon slot; it never consumes title or signal-line space. */
+export function ArrangeSignalBadge(props: RowSignalInput & { inline?: boolean }) {
+  const copy = useShellCopy(threadSignalsCopy);
+  const { getCatById } = useCatData();
+  const labels = [
+    props.hasPendingDecision && copy.needsDecision,
+    props.hasUserMention && copy.mention,
+    props.unreadCount > 0 && `${props.unreadCount} ${copy.unread}`,
+    props.hasDraft && copy.draft,
+    props.presence.status === 'working' && `${copy.working}${executionDuration(props.presence.activeSince, copy)}`,
+    props.presence.status === 'done' && copy.replied,
+    props.presence.status === 'error' && copy.error,
+    ...(props.presence.cats ?? []).map((id) => resolveCatDisplayName(id, getCatById)),
+  ]
+    .filter(Boolean)
+    .join(' · ');
+  const tone =
+    props.presence.status === 'error'
+      ? 'critical'
+      : props.hasPendingDecision
+        ? 'warning'
+        : props.presence.status === 'done'
+          ? 'success'
+          : 'info';
+  if (!labels) return null;
+  return (
+    <AppTooltip label={labels} side="right" intent="content" multiline>
+      <span
+        role="img"
+        aria-label={labels}
+        // biome-ignore lint/a11y/noNoninteractiveTabindex: Keyboard focus reveals the live facts represented by this compact mark.
+        tabIndex={0}
+        data-testid="arrange-signal-badge"
+        data-presence={props.presence.status}
+        className={`shell-focusable inline-flex h-3 shrink-0 items-center justify-center rounded-sm ${props.inline ? 'w-2' : 'absolute -right-1 -top-1 w-3'}`}
+        onClick={(event) => event.stopPropagation()}
+      >
+        <span
+          aria-hidden="true"
+          className="h-1.5 w-1.5 rounded-full"
+          style={{ background: `var(--semantic-${tone})` }}
+        />
+      </span>
+    </AppTooltip>
+  );
 }
 
 /** True when a v2 row has anything to say on its second line. */
@@ -267,6 +330,7 @@ export function ThreadSignalPills({
   hasDraft = false,
   hasPendingDecision = false,
   testIdPrefix = 'thread-row',
+  compactUnread = false,
 }: {
   unreadCount: number;
   hasUserMention: boolean;
@@ -274,6 +338,7 @@ export function ThreadSignalPills({
   hasDraft?: boolean;
   hasPendingDecision?: boolean;
   testIdPrefix?: string;
+  compactUnread?: boolean;
 }) {
   const copy = useShellCopy(threadSignalsCopy);
   if (!hasDraft && !hasUserMention && unreadCount === 0 && !hasPendingDecision) return null;
@@ -328,15 +393,19 @@ export function ThreadSignalPills({
       )}
       {unreadCount > 0 && (
         <span data-signal-badge className="inline-flex h-5 flex-none items-center">
-          <span
-            className={PILL}
-            style={{ background: 'var(--shell-primary-soft)', color: 'var(--shell-primary-text)' }}
-            role="img"
-            aria-label={`${unreadCount} ${copy.unread}`}
-            data-testid={`${testIdPrefix}-unread`}
-          >
-            {unreadText} {copy.unreadBadge}
-          </span>
+          <AppTooltip label={`${unreadCount} ${copy.unread}`} side="right" intent="content" disabled={!compactUnread}>
+            <span
+              className={PILL}
+              style={{ background: 'var(--shell-primary-soft)', color: 'var(--shell-primary-text)' }}
+              role="img"
+              // biome-ignore lint/a11y/noNoninteractiveTabindex: The compact mark reveals its exact unread count on keyboard focus.
+              tabIndex={compactUnread ? 0 : undefined}
+              aria-label={`${unreadCount} ${copy.unread}`}
+              data-testid={`${testIdPrefix}-unread`}
+            >
+              {compactUnread ? '•' : `${unreadText} ${copy.unreadBadge}`}
+            </span>
+          </AppTooltip>
         </span>
       )}
     </div>
@@ -348,18 +417,23 @@ export function SidebarSignalLayout({
   presence,
   badges,
   testId,
+  held,
 }: {
   presence?: ReactNode;
   badges: ReactNode;
   testId: string;
+  held?: { height: number; split: boolean };
 }) {
   const ref = useRef<HTMLDivElement>(null);
-  const { split, presenceMinimum } = useSidebarSignalFlow(ref, presence, badges);
+  const flow = useSidebarSignalFlow(ref, presence, badges);
+  const split = held?.split ?? flow.split;
+  const presenceMinimum = flow.presenceMinimum;
   return (
     <div
       ref={ref}
       data-testid={testId}
       data-signal-split={split}
+      style={held ? { height: held.height } : undefined}
       className={`mt-1 flex min-h-5 min-w-0 gap-1 whitespace-nowrap text-xs leading-5 ${split ? 'flex-col' : 'items-center'}`}
     >
       {presence && (
@@ -377,20 +451,31 @@ export function SidebarSignalLayout({
 }
 
 /** Canonical presence on the left; independent badges flow right. Optional words yield first. */
-export function ThreadRowSignals(props: RowSignalInput) {
-  if (!hasThreadRowSignals(props)) return null;
+export function ThreadRowSignals(props: RowSignalInput & { slot?: ArrangeSignalSlot }) {
+  if (props.slot ? props.slot.height === 0 : !hasThreadRowSignals(props)) return null;
   const { presence, unreadCount, hasUserMention, hasDraft, hasPendingDecision } = props;
-  const hasPresence = presence.status !== 'idle';
+  const slot = props.slot;
+  const hasPresence = (slot?.presence ?? true) && presence.status !== 'idle';
   return (
     <SidebarSignalLayout
       testId="thread-row-signals"
-      presence={hasPresence ? <PresenceState presence={presence} /> : null}
+      held={slot}
+      presence={
+        hasPresence ? (
+          slot ? (
+            <ArrangeSignalBadge inline presence={presence} unreadCount={0} hasUserMention={false} hasDraft={false} />
+          ) : (
+            <PresenceState presence={presence} />
+          )
+        ) : null
+      }
       badges={
         <ThreadSignalPills
-          unreadCount={unreadCount}
-          hasUserMention={hasUserMention}
-          hasDraft={hasDraft}
-          hasPendingDecision={hasPendingDecision}
+          unreadCount={slot && !slot.unread ? 0 : unreadCount}
+          hasUserMention={hasUserMention && (!slot || slot.mention)}
+          hasDraft={hasDraft && (!slot || slot.draft)}
+          hasPendingDecision={hasPendingDecision && (!slot || slot.decision)}
+          compactUnread={Boolean(slot)}
         />
       }
     />

@@ -164,7 +164,7 @@ for (const transport of ['shared', 'stdio']) {
         `cat-cafe-opus-recent-compact-${sessionId}.marker`,
         `cat-cafe-sop-stage-${sessionId}.json`,
       ]) {
-        rmSync(join(tmpdir(), name), { force: true });
+        rmSync(join(process.platform === 'win32' ? tmpdir() : '/tmp', name), { force: true });
       }
     }
   });

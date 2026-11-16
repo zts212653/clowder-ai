@@ -277,7 +277,11 @@ export async function resolveAcpMcpServers(
   const configSourceRoot = opts?.configSourceRoot ?? resolveDeclaredCapabilityRoot() ?? projectRoot;
   const loadedConfig =
     opts?.capabilitiesConfig !== undefined ? opts.capabilitiesConfig : readCapabilitiesConfigSync(configSourceRoot);
-  const capConfig = loadedConfig && opts?.catId ? invocationPluginMcpConfig(loadedConfig, opts.catId) : loadedConfig;
+  const memberCatId = opts?.catId;
+  const capConfig =
+    loadedConfig && memberCatId
+      ? invocationPluginMcpConfig(loadedConfig, memberCatId, (cap) => isMcpEnabledForCat(cap, memberCatId, opts))
+      : loadedConfig;
   assertMappedCapabilitySource(capConfig !== null, resolveBinaryRoot(projectRoot), configSourceRoot);
   const retiredCapabilityIds = new Set(
     capConfig?.capabilities.filter(isRetiredGithubMcpCapability).map((capability) => capability.id) ?? [],
@@ -465,7 +469,7 @@ export function resolveDisabledServerIds(
   const capConfig = preloadedConfig !== undefined ? preloadedConfig : readCapabilitiesConfigSync(projectRoot);
   if (!capConfig) return new Set();
   const disabled = new Set(
-    invocationPluginMcpConfig(capConfig, catId)
+    invocationPluginMcpConfig(capConfig, catId, (cap) => isMcpEnabledForCat(cap, catId, options))
       .capabilities.filter((cap) => cap.type === 'mcp')
       .filter((cap) => !isMcpEnabledForCat(cap, catId, options) || !projectInvocationPluginMcp(cap).available)
       .map((cap) => cap.id),

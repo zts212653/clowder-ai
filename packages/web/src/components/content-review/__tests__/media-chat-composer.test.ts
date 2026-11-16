@@ -1,4 +1,10 @@
-import { type ArtifactReviewAnchor, type ContextAttachment, type MediaContextAttachment } from '@cat-cafe/shared';
+import {
+  type ArtifactReviewAnchor,
+  type ContextAttachment,
+  ContextAttachmentDraftsSchema,
+  ContextAttachmentsSchema,
+  type MediaContextAttachment,
+} from '@cat-cafe/shared';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { useChatStore } from '@/stores/chatStore';
 import { applyContextAttachmentDelta } from '../../durable-composer-draft-merge';
@@ -344,11 +350,13 @@ describe('addMediaSelectionToChat — the stored draft is never put at risk', ()
     expect(useChatStore.getState().pendingChatInsert?.contextAttachments).toEqual([bigQuote()]);
   });
 
-  it('documents why: the draft store throws a collection past the limit away whole, not just the new part', () => {
+  it('keeps the whole unfinished draft even when its combined prompt is too large to send', () => {
     const tooLarge: ContextAttachment[] = [bigQuote(), ...mediaWithWords('x'.repeat(1000))];
+    expect(ContextAttachmentDraftsSchema.safeParse(tooLarge).success).toBe(true);
+    expect(ContextAttachmentsSchema.safeParse(tooLarge).success).toBe(false);
     syncContextAttachmentDraftToStorage(THREAD, [bigQuote()]);
     syncContextAttachmentDraftToStorage(THREAD, tooLarge);
-    expect(getContextAttachmentDraft(THREAD)).toEqual([]);
+    expect(getContextAttachmentDraft(THREAD)).toEqual(tooLarge);
   });
 });
 

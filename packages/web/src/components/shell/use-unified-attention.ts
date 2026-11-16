@@ -24,8 +24,8 @@ export interface UnifiedAttentionView {
   /** Last confirmed count for this scope during refresh; never used to authorize panel actions. */
   badgeResult?: MailboxRead;
   /**
-   * Only while a re-read is in flight after a successful one: the rows read last time. The panel may keep showing
-   * them labelled as the previous read; nothing may count them as current. It is dropped on failure.
+   * Same-owner/query display snapshot while a re-read is in flight. Keep its card instances and confirmed display
+   * counts; it never supplies current write authority. Identity changes and read failures withdraw it.
    */
   staleRead: UnifiedAttentionReadV1 | null;
   refetch: () => void;
@@ -135,10 +135,18 @@ export function useUnifiedAttention(): UnifiedAttentionView {
     const cached = queryCache.current.get(queryKey(mode, period, offset));
     const previous = cached?.read ?? lastOkRef.current;
     const sameScope = previous && previous.personalView?.mode === mode && (previous.mentionPeriod ?? 'week') === period;
-    setBadgeResult(sameScope ? { kind: 'ok', read: previous } : { kind: 'loading' });
+    const identity = apiSessionIdentity.getSnapshot();
+    const retained =
+      previous &&
+      sameScope &&
+      previous.identity.ownerUserId === identity.ownerUserId &&
+      ownerRef.current === identity.ownerUserId
+        ? previous
+        : null;
+    setBadgeResult(retained ? { kind: 'ok', read: retained } : { kind: 'loading' });
     let settled = false,
       verifiedPrincipal: string | null = null;
-    const sessionGeneration = apiSessionIdentity.getSnapshot().generation;
+    const sessionGeneration = identity.generation;
     // Counted synchronously, before anything is awaited: a write that ends right now must see that this read has begun.
     startedRef.current += 1;
     const generation = startedRef.current;
@@ -146,9 +154,9 @@ export function useUnifiedAttention(): UnifiedAttentionView {
     // Re-reading withdraws the previous claim: loading carries no number, no rows and no generation.
     setResult({ kind: 'loading' });
     setResultGeneration(null);
-    // The previous rows belong to whoever read them. They are shown again only once THIS round's session is confirmed and
-    // is that same owner — a changed, unknown or refused session never sees them, not even while waiting for the read.
-    setStaleRead(null);
+    // A refresh does not revoke the already observed identity. Preserve display instances until a real identity/query
+    // change or failure, while resultGeneration above immediately withdraws every previous write permission.
+    setStaleRead(retained);
     void readOnce(
       controller.signal,
       (principal) => {

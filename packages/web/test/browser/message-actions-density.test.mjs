@@ -25,88 +25,24 @@
  */
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { once } from 'node:events';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
-import { createServer } from 'node:net';
 import path from 'node:path';
 import { after, before, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
 
+import {
+  assertNoTestRunnerEnvironment,
+  createTestChildEnvironment,
+  findFreePort,
+  stopServer,
+  waitForPage,
+} from './_harness.mjs';
+
 const WEB_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const NEXT_BIN = path.resolve(WEB_ROOT, '../../node_modules/next/dist/bin/next');
 const COLD_COMPILE_TIMEOUT_MS = 180_000;
 const HYDRATION_TIMEOUT_MS = 30_000;
-
-async function findFreePort() {
-  const server = createServer();
-  server.listen(0, '127.0.0.1');
-  await once(server, 'listening');
-  const address = server.address();
-  assert(address && typeof address !== 'string');
-  server.close();
-  await once(server, 'close');
-  return address.port;
-}
-
-async function waitForPage(url, server, output) {
-  // A route-level 200 can arrive before Next has emitted the client chunks referenced by that
-  // document. Opening Chromium in that gap yields a permanent chunk-load error, so readiness
-  // means both the HTML and every explicit first-screen script are fully retrievable.
-  const deadline = Date.now() + 180_000;
-  while (Date.now() < deadline) {
-    if (server.exitCode !== null) throw new Error(`Next.js exited before readiness:\n${output.join('')}`);
-    try {
-      const response = await fetch(url);
-      if (response.ok) {
-        const html = await response.text();
-        const scriptUrls = Array.from(
-          html.matchAll(/<script[^>]+src="([^"]+)"/g),
-          ([, source]) => new URL(source.replaceAll('&amp;', '&'), url),
-        );
-        if (scriptUrls.length > 0) {
-          const scriptResponses = await Promise.all(scriptUrls.map((scriptUrl) => fetch(scriptUrl)));
-          const scriptsReady = scriptResponses.every((scriptResponse) => scriptResponse.ok);
-          await Promise.all(scriptResponses.map((scriptResponse) => scriptResponse.arrayBuffer()));
-          if (scriptsReady) return;
-        }
-      }
-    } catch {
-      // The server is still compiling or has not opened its socket yet.
-    }
-    await new Promise((resolve) => setTimeout(resolve, 250));
-  }
-  throw new Error(`Timed out waiting for ${url}:\n${output.join('')}`);
-}
-
-async function stopServer(server) {
-  if (server.exitCode !== null) return;
-  server.kill('SIGTERM');
-  await Promise.race([once(server, 'exit'), new Promise((resolve) => setTimeout(resolve, 5_000))]);
-  if (server.exitCode === null) server.kill('SIGKILL');
-}
-
-function createTestChildEnvironment(overrides = {}) {
-  const childEnv = {
-    ...process.env,
-    ...overrides,
-  };
-
-  // Node's test runner owns every NODE_TEST_* variable. Letting any of them cross into the
-  // application server or browser process can change their runtime and corrupt client hydration.
-  for (const key of Object.keys(childEnv)) {
-    if (key.startsWith('NODE_TEST_')) delete childEnv[key];
-  }
-  return childEnv;
-}
-
-function assertNoTestRunnerEnvironment(childEnv, childName) {
-  assert.deepEqual(
-    Object.keys(childEnv).filter((key) => key.startsWith('NODE_TEST_')),
-    [],
-    `${childName} must not inherit Node test-runner coordination state`,
-  );
-}
 
 async function stubProvisionalAvatar(context) {
   // CatAvatar's provisional path is covered by its own hydration-race test. Keep this layout
@@ -388,7 +324,7 @@ before(async () => {
   server.stdout.on('data', (chunk) => serverOutput.push(chunk.toString()));
   server.stderr.on('data', (chunk) => serverOutput.push(chunk.toString()));
   baseUrl = `http://127.0.0.1:${port}/dev/f294-quote-plane-fixtures`;
-  await waitForPage(baseUrl, server, serverOutput);
+  await waitForPage(baseUrl, server, serverOutput, { readiness: 'scripts' });
   const browserEnvironment = createTestChildEnvironment();
   assertNoTestRunnerEnvironment(browserEnvironment, 'the Chromium child');
   browser = await chromium.launch({ headless: true, env: browserEnvironment });

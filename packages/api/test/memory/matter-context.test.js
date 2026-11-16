@@ -18,7 +18,10 @@ const selection = (message) => ({
   end: message.content.length,
   quote: message.content,
 });
-const payload = (text) => JSON.parse(text.split('\n').find((line) => line.startsWith('{')));
+const payload = (text) => {
+  const body = JSON.parse(text.split('\n').find((line) => line.startsWith('{')));
+  return { ...body, items: body.groups.flatMap((group) => group.items) };
+};
 
 describe('F332 contextual directory and the same-version interpretation', () => {
   let directory, evidence, service, messages, sequence;
@@ -71,6 +74,59 @@ describe('F332 contextual directory and the same-version interpretation', () => 
     });
     return { ...receipt.matter, message, description };
   };
+
+  it('distinguishes provenance from relevance and gives a scoped path to read each kind of item', async () => {
+    const local = await create('here', '仅在本社区现场适用；工程线程可继续施工。', 'Community boundary');
+    const recent = await create('elsewhere', '花生只是举例，并非本人过敏。', 'Cross-thread example');
+    const text = await matterOpeningDirectory(service, 'owner', 'codex61-sol', 'here');
+    const body = payload(text);
+    assert.deepEqual(
+      body.groups.map(({ label, count }) => [label, count]),
+      [
+        ['含本线程原话的事情', 1],
+        ['其他线程最近更新的事情', 1],
+      ],
+    );
+    const localItem = body.groups[0].items[0];
+    const recentItem = body.groups[1].items[0];
+    assert.equal(localItem.matterId, local.matterId);
+    assert.equal(localItem.contextHint, local.description);
+    assert.match(localItem.contextHintLabel, /猫的归纳.*r1/);
+    assert.equal(recentItem.matterId, recent.matterId);
+    assert.equal(recentItem.contextHint, undefined);
+    assert.match(recentItem.readHint, /归纳未附.*按.*ID.*读/);
+    assert.match(text, /事情页.*未按当前问题筛选/);
+    assert.match(text, /cat_cafe_list_memory_matters/);
+    assert.match(text, /项目资料.*历史讨论.*cat_cafe_search_evidence/);
+    assert.match(text, /当前画像用 cat_cafe_read_profile/);
+    assert.match(text, /当前人物关系用 cat_cafe_recall_person_relationship/);
+    assert.match(text, /不证明适用/);
+    assert.ok(estimateTokens(text) <= 3072);
+  });
+
+  it('keeps empty groups honest and a failed directory recoverable', async () => {
+    const empty = payload(await matterOpeningDirectory(service, 'owner', 'codex61-sol', 'here'));
+    assert.deepEqual(
+      empty.groups.map(({ count, items }) => [count, items]),
+      [
+        [0, []],
+        [0, []],
+      ],
+    );
+    const unavailable = await matterOpeningDirectory(
+      {
+        catalog: async () => {
+          throw new Error('unavailable');
+        },
+      },
+      'owner',
+      'codex61-sol',
+      'here',
+    );
+    assert.match(unavailable, /当前目录不可用/);
+    assert.match(unavailable, /cat_cafe_list_memory_matters/);
+    assert.doesNotMatch(unavailable, /"count":0/);
+  });
 
   it('finds a current-thread page beyond the old first twelve, then pages all readable items in stable time/ID order', async () => {
     const pages = [];

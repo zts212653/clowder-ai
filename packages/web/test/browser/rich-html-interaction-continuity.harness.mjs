@@ -1,10 +1,9 @@
 import assert from 'node:assert/strict';
 import { execFileSync, spawn } from 'node:child_process';
-import { once } from 'node:events';
-import { createServer } from 'node:net';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
+import { findFreePort, stopServer, waitForPage } from './_harness.mjs';
 import { createNextDevTestEnvironment } from './next-dev-test-environment.mjs';
 
 const WEB_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
@@ -27,17 +26,6 @@ const CAT = {
   personality: 'warm',
   roster: { family: 'maine-coon', roles: [], lead: false, available: true, evaluation: 'fixture' },
 };
-
-async function findFreePort() {
-  const probe = createServer();
-  probe.listen(0, '127.0.0.1');
-  await once(probe, 'listening');
-  const address = probe.address();
-  assert(address && typeof address !== 'string');
-  probe.close();
-  await once(probe, 'close');
-  return address.port;
-}
 
 function callbackAuthSnapshot() {
   return {
@@ -87,21 +75,6 @@ export function createContinuityHarness({ shellPresentation = 'classic' } = {}) 
   let baseUrl;
   let nextDev;
   const serverOutput = [];
-
-  async function waitForPage(url) {
-    const deadline = Date.now() + 180_000;
-    while (Date.now() < deadline) {
-      if (server.exitCode !== null) throw new Error(`Next.js exited before readiness:\n${serverOutput.join('')}`);
-      try {
-        const response = await fetch(url);
-        if (response.ok) return;
-      } catch {
-        // Next is still compiling.
-      }
-      await new Promise((resolve) => setTimeout(resolve, 250));
-    }
-    throw new Error(`Timed out waiting for ${url}:\n${serverOutput.join('')}`);
-  }
 
   async function stubApis(page, historyGate) {
     await page.route('**/api/**', async (route) => {
@@ -175,7 +148,7 @@ export function createContinuityHarness({ shellPresentation = 'classic' } = {}) 
     });
     server.stdout.on('data', (chunk) => serverOutput.push(chunk.toString()));
     server.stderr.on('data', (chunk) => serverOutput.push(chunk.toString()));
-    await waitForPage(`${baseUrl}${FIXTURE_PATH}`);
+    await waitForPage(`${baseUrl}${FIXTURE_PATH}`, server, serverOutput);
     browser = await chromium.launch({ headless: true });
     context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
     await context.addInitScript((presentation) => {
@@ -188,11 +161,7 @@ export function createContinuityHarness({ shellPresentation = 'classic' } = {}) 
   async function stop() {
     await context?.close();
     await browser?.close();
-    if (server?.exitCode === null) {
-      server.kill('SIGTERM');
-      await Promise.race([once(server, 'exit'), new Promise((resolve) => setTimeout(resolve, 5_000))]);
-      if (server.exitCode === null) server.kill('SIGKILL');
-    }
+    await stopServer(server);
     await nextDev?.cleanup();
   }
 

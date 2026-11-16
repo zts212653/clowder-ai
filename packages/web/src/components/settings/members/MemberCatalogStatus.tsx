@@ -7,7 +7,7 @@ export function MemberCatalogStatus({
   notImplemented = false,
   loading,
   needsLogin,
-  invalidDefault,
+  unconfirmedDefault,
   inheritsModel,
   tool,
   modelCount,
@@ -17,7 +17,7 @@ export function MemberCatalogStatus({
   notImplemented?: boolean;
   loading: boolean;
   needsLogin: boolean;
-  invalidDefault: boolean;
+  unconfirmedDefault: boolean;
   inheritsModel: boolean;
   tool: string;
   modelCount: number;
@@ -42,12 +42,12 @@ export function MemberCatalogStatus({
       </p>
     );
   if (loading) return <p>{t(`正在读取 ${tool} 的模型…`, `Reading ${tool} models…`)}</p>;
-  if (invalidDefault)
+  if (unconfirmedDefault)
     return (
-      <p role="alert">
+      <p>
         {t(
-          '客户端报告的默认模型不在可用清单中，请选择有效模型或修正客户端配置后刷新。',
-          'The reported default model is unavailable. Select a valid model or fix the client configuration and refresh.',
+          '客户端报告的默认模型尚未确认。可以继续跟随工具设置；保存不会切换客户端模型，实际调用仍待验证。',
+          'The reported default model is unconfirmed. You can keep following the tool; saving will not switch its model. Invocation remains unverified.',
         )}
       </p>
     );

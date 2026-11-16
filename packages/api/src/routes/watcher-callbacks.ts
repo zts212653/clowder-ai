@@ -110,11 +110,12 @@ export const watcherCallbackRoutes: FastifyPluginAsync<Options> = async (app, de
         userId: auth.userId,
         threadId: auth.threadId,
         from: { kind: 'agent', catId: auth.catId },
-        content: `@${source.catId}\n\n${parsed.data.sentence}\n\n[原话](/thread/${auth.threadId}?messageId=${citation.id})`,
+        content: `@${source.catId}\n\n${parsed.data.sentence}\n\n[原话](/thread/${auth.threadId}?message=${citation.id})`,
         timestamp: Date.now(),
         mentions: [source.catId],
         idempotencyKey: key,
         extra: {
+          targetCats: [source.catId],
           watcher: {
             kind: 'nudge',
             sourceInvocationId: source.invocationId,

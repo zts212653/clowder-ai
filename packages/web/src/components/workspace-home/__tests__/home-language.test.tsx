@@ -199,7 +199,7 @@ describe('F322 AC-B6–B8 · the Workspace home speaks the chosen language', () 
     });
 
     it('speaks only English across the whole page (what people and cats typed is data, and the fixture has none in Chinese)', async () => {
-      mocks.apiFetch.mockResolvedValue({ ok: true, json: async () => ({ changedFiles: [{}, {}, {}], diff: '' }) });
+      mocks.apiFetch.mockResolvedValue({ ok: true, json: async () => ({ changedFileCount: 3 }) });
       fillTheWholePage();
       await renderHome();
 

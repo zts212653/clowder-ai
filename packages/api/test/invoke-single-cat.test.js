@@ -1210,6 +1210,208 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     assert.equal(catError.length, 0, 'should NOT have cat_error for normal path');
   });
 
+  [
+    { name: 'threshold', used: 160_000, window: 200_000, reason: 'threshold' },
+    { name: 'budget', used: 90_000, window: 100_000, reason: 'budget_exhausted' },
+    { name: 'deferred', used: 160_000, window: 200_000, reason: 'threshold' },
+    { name: 'no-seal' },
+    { name: 'replacement' },
+  ].forEach(({ name, used, window, reason }) => {
+    it(`#1580 archives exactly one real done in its owning session (${name})`, async (t) => {
+      const { _setTestStrategyOverride, _clearTestStrategyOverrides } = await import(
+        '../dist/config/session-strategy.js'
+      );
+      _setTestStrategyOverride('codex', { strategy: 'handoff', thresholds: { warn: 0.75, action: 0.85 } });
+      t.after(_clearTestStrategyOverrides);
+      const { resolveContextCapacity } = await import('../dist/config/context-capacity.js');
+      const { SessionChainStore } = await import('../dist/domains/cats/services/stores/ports/SessionChainStore.js');
+      const { SessionSealer } = await import('../dist/domains/cats/services/session/SessionSealer.js');
+      const { TranscriptWriter } = await import('../dist/domains/cats/services/session/TranscriptWriter.js');
+      const { TranscriptReader } = await import('../dist/domains/cats/services/session/TranscriptReader.js');
+      const { TranscriptInvocationReader } = await import(
+        '../dist/domains/cats/services/session/transcript-index/TranscriptInvocationReader.js'
+      );
+      const dataDir = join(testGlobalConfigRoot, 'transcripts');
+      const store = new SessionChainStore();
+      const writer = new TranscriptWriter({ dataDir });
+      const sealer = new SessionSealer(store, writer);
+      const finalizations = [];
+      const finalize = sealer.finalize.bind(sealer);
+      sealer.finalize = (args) => {
+        const pending = finalize(args);
+        finalizations.push(pending);
+        return pending;
+      };
+      const threadId = `thread-1580-${name}`;
+      const archivePath = (record) =>
+        join(dataDir, 'threads', threadId, 'codex', 'sessions', record.id, 'events.jsonl');
+      let oldArchive;
+      const usage =
+        used === undefined
+          ? undefined
+          : {
+              inputTokens: used,
+              lastTurnInputTokens: used,
+              outputTokens: 10,
+              contextWindowSize: window,
+            };
+      const service = {
+        contextCapability: () => ({
+          provider: 'test',
+          carrier: 'test_stream',
+          reportsRuntimeWindow: true,
+          authoritativeUsage: true,
+          nativeWindowControl: false,
+          nativeCompressionControl: false,
+          observesCompression: false,
+          reason: 'isolated writer regression',
+        }),
+        async *invoke(prompt, options) {
+          await options.beforeProviderLaunch({
+            v: 1,
+            message: { body: prompt },
+            nativeInstructions: [],
+            runtime: { provider: 'openai', carrier: 'app_server' },
+            tools: { finalSurface: 'unknown' },
+            providerNativeVisibility: 'unknown',
+          });
+          yield { type: 'session_init', catId: 'codex', sessionId: `cli-${name}`, timestamp: Date.now() };
+          yield { type: 'text', catId: 'codex', content: 'real output', timestamp: Date.now() };
+          if (name === 'replacement') {
+            yield { type: 'session_init', catId: 'codex', sessionId: 'cli-replaced', timestamp: Date.now() };
+            await Promise.all(finalizations);
+            oldArchive = await readFile(archivePath(store.getChain('codex', threadId, 'user1')[0]), 'utf8');
+            yield { type: 'error', catId: 'codex', error: 'model_not_found', timestamp: Date.now() };
+          }
+          if (name === 'deferred') {
+            yield { type: 'agent_loop', catId: 'codex', metadata: { usage }, timestamp: Date.now() };
+            yield { type: 'text', catId: 'codex', content: 'after threshold', timestamp: Date.now() };
+          }
+          yield {
+            type: 'done',
+            catId: 'codex',
+            timestamp: Date.now(),
+            ...(usage && name !== 'deferred' ? { metadata: { usage } } : {}),
+          };
+        },
+      };
+      const messages = await collect(
+        invokeSingleCat(
+          {
+            ...makeDeps(),
+            sessionChainStore: store,
+            sessionSealer: sealer,
+            transcriptWriter: writer,
+          },
+          {
+            catId: 'codex',
+            threadId,
+            userId: 'user1',
+            prompt: 'test',
+            service,
+            isLastCat: true,
+            rebuildPromptAfterSessionSeal: async () => 'rebuilt test prompt',
+            capacitySnapshot: {
+              capacity: resolveContextCapacity({ catId: 'codex', memberWindowTokens: window ?? 200_000 }),
+              capability: service.contextCapability(),
+              memberWindowTokens: window ?? 200_000,
+              nativeWindowTokens: window ?? 200_000,
+              model: 'test-model',
+              binding: { model: 'test-model', windowTokens: window ?? 200_000, source: 'service_spawn' },
+            },
+          },
+        ),
+      );
+      assert.ok(
+        messages.some((message) => message.type === 'done'),
+        JSON.stringify(messages),
+      );
+      assert.deepEqual(
+        messages.filter((message) => message.type === 'error').map((message) => message.error),
+        name === 'replacement' ? ['model_not_found'] : [],
+      );
+      await Promise.all(finalizations);
+      await writer.drainPendingWrites();
+      const chain = store.getChain('codex', threadId, 'user1');
+      const current = chain.at(-1);
+      if (reason) {
+        assert.equal(
+          current.status,
+          'sealed',
+          JSON.stringify(messages.filter((message) => message.type === 'system_info')),
+        );
+        assert.equal(current.sealReason, reason);
+        assert.equal(store.getActive('codex', threadId, 'user1'), null);
+      } else {
+        assert.equal(current.status, 'active');
+        const buffered = writer.getBufferedEvents(current.id);
+        assert.equal(buffered.filter((entry) => entry.event.type === 'done').length, 1);
+        await sealer.requestSeal({ sessionId: current.id, reason: 'manual' });
+        await sealer.finalize({ sessionId: current.id });
+      }
+      const archive = await readFile(archivePath(current), 'utf8');
+      const events = archive
+        .trim()
+        .split('\n')
+        .map((line) => JSON.parse(line));
+      assert.equal(
+        events.filter((entry) => entry.event.type === 'done').length,
+        1,
+        'sealed archive must retain done exactly once',
+      );
+      const done = events.find((entry) => entry.event.type === 'done');
+      assert.equal(done.sessionId, current.id);
+      assert.equal(done.invocationId, 'inv-1');
+      if (reason) {
+        assert.ok(
+          events.findIndex((entry) => entry.event.type === 'done') <
+            events.findIndex(
+              (entry) =>
+                entry.event.type === 'system_info' && JSON.parse(entry.event.content).type === 'session_seal_requested',
+            ),
+          'done must enter the archive before the seal marker',
+        );
+      }
+      if (name === 'deferred') {
+        assert.ok(events.some((entry) => entry.event.content === 'after threshold'));
+      }
+      if (name === 'no-seal') {
+        assert.equal(events.at(-1).event.type, 'done');
+        assert.equal(
+          events.some(
+            (entry) =>
+              entry.event.type === 'system_info' && JSON.parse(entry.event.content).type === 'session_seal_requested',
+          ),
+          false,
+        );
+      }
+      if (name === 'replacement') {
+        assert.equal(
+          await readFile(archivePath(chain[0]), 'utf8'),
+          oldArchive,
+          'replacement must not rewrite the old archive',
+        );
+        assert.equal(
+          oldArchive
+            .trim()
+            .split('\n')
+            .map((line) => JSON.parse(line))
+            .some((entry) => entry.event.type === 'done'),
+          false,
+        );
+      }
+      // Reopen readers without live buffers: both list and detail must use the sealed archive.
+      const indexedSession = store.get(current.id);
+      const index = new TranscriptInvocationReader(new TranscriptReader({ dataDir }));
+      const list = await index.list([indexedSession], 10);
+      const summary = list.invocations[0];
+      const detail = await index.readInvocation([indexedSession], summary.invocationId);
+      assert.equal(summary.status, name === 'replacement' ? 'error' : 'done');
+      assert.deepEqual(detail.get(current.id).summary, summary);
+      assert.equal(await readFile(archivePath(current), 'utf8'), archive, 'reading must preserve the archive');
+    });
+  });
+
   it('F8: yields invocation_usage system_info when done has metadata.usage', async () => {
     const usageService = {
       async *invoke() {
@@ -6814,6 +7016,9 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
             candidates: {},
             service: {
               preparePresentation: () => ({
+                result: { nudges: [] },
+                renderedNudges: [{}],
+                isCurrent: () => true,
                 promptContext: '[entity-nudge]known source[/entity-nudge]',
                 confirmAssembled: () => {
                   confirmations++;
@@ -6927,6 +7132,9 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
               candidates: {},
               service: {
                 preparePresentation: () => ({
+                  result: { nudges: [] },
+                  renderedNudges: [{}],
+                  isCurrent: () => true,
                   promptContext: '[entity-nudge]known source[/entity-nudge]',
                   confirmAssembled: () => {
                     confirmations++;
@@ -7007,6 +7215,9 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
             candidates: {},
             service: {
               preparePresentation: () => ({
+                result: { nudges: [] },
+                renderedNudges: [{}],
+                isCurrent: () => true,
                 promptContext: '[entity-nudge]known source[/entity-nudge]',
                 confirmAssembled: () => {
                   confirmations++;
@@ -7083,6 +7294,9 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
             candidates: {},
             service: {
               preparePresentation: () => ({
+                result: { nudges: [] },
+                renderedNudges: [{}],
+                isCurrent: () => true,
                 promptContext: '[entity-nudge]known source[/entity-nudge]',
                 confirmAssembled: () => {
                   confirmations++;

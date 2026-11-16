@@ -26,7 +26,6 @@ import { type CoverageToolData, renderCoverageToolResponse } from './evidence-co
 import type { ToolResult } from './file-tools.js';
 import { errorResult, successResult } from './file-tools.js';
 import { resolveInvocationEnv } from './invocation-auth.js';
-import { defineMessageSearchAnswerTool } from './message-search-answer-tool.js';
 import { messageSearchParams } from './message-search-transport.js';
 
 function resolveApiUrl(): string {
@@ -790,7 +789,7 @@ export const evidenceTools = [
       'Use when: finding an earlier discussion ("以前聊过 / 找回旧消息", resultUnit=message), semantically finding project knowledge, tracing a topic across docs or threads, or building a bounded coverage/source map. ' +
       'NOT for: resolving a known exact anchor (use cat_cafe_graph_resolve), scanning recent items without a query (use cat_cafe_list_recent), or reading raw messages from a known thread (use get_thread_context). ' +
       'Output: document-mode evidence summaries, or message-mode canonical source snippets, thread/message coordinates and honest scope/degradation metadata; this is read-only and does not navigate. ' +
-      'To prepare an answer card, explicitly use cat_cafe_prepare_message_search_answer with your chosen sources, exact quotations and selection reasons; Host verifies provenance while your reasons remain your judgment. New cards require selections. Only saved legacy query-only operations accept retries without selections, using their original arguments without new search or qualification. Ordinary recall never publishes a card or launches a generative judge. ' +
+      'To answer with clickable original sources, read them in full, select exact quotations and your reasons, then attach them through the ordinary reply (create_rich_block kind:"sources", or post_message searchAnswer). Full original reads supply contentRevision and sourceParts. Host verifies provenance while your reasons remain your judgment. Ordinary recall never publishes a card or launches a generative judge. ' +
       'MESSAGE CONTRACT: resultUnit=message returns sources for the reader to judge, with matched query terms or semantic-retrieval evidence, not supported verdicts. messageSort=relevance (default) returns a relevance-ranked page and stops at the admitted page plus one witness; explicit messageSort=time orders the first 32 admitted relevance sources by canonical time. Incomplete time windows report actual coverage. It supports mode=hybrid (default); scope is threads, optional threadId means current conversation, omission means all readable project conversations. Authenticated invocation binds the exact question exclusion; caller-supplied user/source IDs are ignored. Limited results and unknown freshness do not prove the first occurrence or complete history. ' +
       'GOTCHA: rank/matchRank are position only, never relevance or trust; relevance states observed exact-anchor/title/phrase evidence or unknown; authority is document reliability, and broad coverage requires separate docs + threads searches instead of treating one all-scope query as exhaustive. ' +
       'Semantic/fuzzy find entry point for memory recall. For precise anchors (F186, ADR-019), prefer cat_cafe_graph_resolve; for zero-prior scanning, prefer cat_cafe_list_recent; when unsure, start here with mode=hybrid. ' +
@@ -884,5 +883,4 @@ export const evidenceTools = [
       ],
     },
   }),
-  defineMessageSearchAnswerTool(searchEvidenceInputSchema),
 ] as const;

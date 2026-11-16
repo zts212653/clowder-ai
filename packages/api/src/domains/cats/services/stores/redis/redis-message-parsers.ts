@@ -43,6 +43,7 @@ import {
   isValidReviewSubjectRef,
   localReviewGitRevisionSchema,
   MessageBundleCarrierV1Schema,
+  MessageContentSchema,
   MessageContentsSchema,
   messageSearchAnswerBindingSchema,
   parseCodexStartupRecovery,
@@ -108,6 +109,17 @@ export function safeParseContentBlocks(raw: string | undefined): readonly Messag
   if (!raw) return undefined;
   try {
     const result = MessageContentsSchema.safeParse(JSON.parse(raw));
+    return result.success ? (result.data as MessageContent[]) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** An unfinished owner draft may exceed the send budget without losing its content. */
+export function safeParseDraftContentBlocks(raw: string | undefined): readonly MessageContent[] | undefined {
+  if (!raw) return undefined;
+  try {
+    const result = MessageContentSchema.array().safeParse(JSON.parse(raw));
     return result.success ? (result.data as MessageContent[]) : undefined;
   } catch {
     return undefined;
@@ -883,13 +895,15 @@ export function safeParseExtra(raw: string | undefined): StoredMessage['extra'] 
       isNonEmptyString(watcher.sourceInvocationId) &&
       isNonEmptyString(watcher.sourceMessageId) &&
       isNonEmptyString(watcher.watcherInvocationId)
-    )
+    ) {
       result.watcher = {
         kind: 'nudge',
         sourceInvocationId: watcher.sourceInvocationId,
         sourceMessageId: watcher.sourceMessageId,
         watcherInvocationId: watcher.watcherInvocationId,
       };
+      hasField = true;
+    }
     const turnExecution = parseTurnExecutionProjection(parsed.turnExecution);
     if (turnExecution) {
       result.turnExecution = turnExecution;

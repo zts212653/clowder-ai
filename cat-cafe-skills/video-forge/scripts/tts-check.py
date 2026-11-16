@@ -43,7 +43,7 @@ from pathlib import Path
 
 TTS_URL = os.environ.get("TTS_URL", "http://127.0.0.1:9879/v1/audio/speech")
 ASR_URL = os.environ.get("ASR_URL", "http://127.0.0.1:9876/v1/audio/transcriptions")
-MODEL = os.environ.get("TTS_MODEL", "mlx-community/Qwen3-TTS-12Hz-1.7B-Base-bf16")
+MODEL = os.environ.get("TTS_MODEL", "mlx-community/Breeze-TTS-2-mlx")  # 本机配音服务 11 月起换成 Breeze（#6806）；模型对不上会被服务 409 拒绝
 
 SAFE_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,99}")
 

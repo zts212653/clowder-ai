@@ -353,7 +353,7 @@ export class InputEntityDetector {
     // Same pattern as resolveQuery's loadAliases({ includeCanonical: true }).
     const aliasRows = this.db
       .prepare(
-        `SELECT ea.entity_id, ea.alias, ea.alias_norm, ea.provenance_json,
+        `SELECT ea.entity_id, ea.alias, ea.alias_norm, er.provenance_json,
                 er.entity_type, er.canonical_name, er.stance, er.visibility_scope, er.status
          FROM entity_aliases ea
          JOIN entity_registry er ON er.entity_id = ea.entity_id`,

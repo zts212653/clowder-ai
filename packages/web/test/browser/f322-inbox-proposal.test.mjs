@@ -10,6 +10,7 @@ import { CALENDAR_THREAD } from './f310-work-calendar.fixture.mjs';
 import { registerInformationJourneys } from './f322-inbox-information.journey.mjs';
 import { registerOriginalApprovalJourneys } from './f322-inbox-original-approval.journey.mjs';
 import { createInboxProposalFixture } from './f322-inbox-proposal.fixture.mjs';
+import { assertInboxRefreshContinuity } from './f322-inbox-refresh.journey.mjs';
 import { createNextDevTestEnvironment } from './next-dev-test-environment.mjs';
 
 const web = fileURLToPath(new URL('../..', import.meta.url));
@@ -300,6 +301,7 @@ for (const language of ['zh', 'en'])
         await row.getByRole('combobox', { name: labels.project, exact: true }).click();
         await row.getByRole('option', { name: path.basename(tree), exact: true }).click();
         await row.getByRole('switch', { name: labels.pin, exact: true }).check();
+        await assertInboxRefreshContinuity(page, row, evidence, labels);
         await page.screenshot({ path: path.join(evidence, 'inline-choices.png'), fullPage: true });
         const approved = page.waitForResponse(
           (r) => r.url().endsWith('/api/proposals/inbox-native-approve/approve') && r.request().method() === 'POST',

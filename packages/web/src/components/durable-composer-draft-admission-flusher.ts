@@ -1,6 +1,6 @@
 import { reconcileComposerAdmission } from './composer-draft-admission';
 import { registerComposerDraftFlusher } from './composer-draft-flush-registry';
-import type { DurableDraftSnapshot } from './durable-composer-draft-helpers';
+import { type DurableDraftSnapshot, draftAttachmentUrls } from './durable-composer-draft-helpers';
 import type { enqueueComposerDraftSave } from './durable-composer-draft-save-queue';
 
 interface ValueRef<T> {
@@ -80,10 +80,11 @@ async function flushAdmission(state: RegisterAdmissionFlusherOptions) {
 
     // Earlier queued saves can discover a recovery, so inspect it only when this task executes.
     const pendingRecovery = state.pendingRecoveryRef.current;
-    const requiredImageUrls = [
-      ...new Set([...pending.snapshot.imageUrls, ...(pendingRecovery?.snapshot.imageUrls ?? [])]),
-    ];
-    if (!state.admissionImagesReady(pending.files, requiredImageUrls)) {
+    const requiredAttachmentUrls = draftAttachmentUrls(
+      [...pending.snapshot.imageUrls, ...(pendingRecovery?.snapshot.imageUrls ?? [])],
+      [...pending.snapshot.preservedBlocks, ...(pendingRecovery?.snapshot.preservedBlocks ?? [])],
+    );
+    if (!state.admissionImagesReady(pending.files, requiredAttachmentUrls)) {
       return flushResult(state, pending.snapshot, false, false, true);
     }
 

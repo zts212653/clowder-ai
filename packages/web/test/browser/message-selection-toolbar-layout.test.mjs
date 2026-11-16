@@ -1,11 +1,10 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { once } from 'node:events';
-import { createServer } from 'node:net';
 import path from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
+import { findFreePort, stopServer, waitForPage } from './_harness.mjs';
 import { createNextDevTestEnvironment } from './next-dev-test-environment.mjs';
 
 const WEB_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
@@ -19,39 +18,6 @@ function overlapArea(first, second) {
     Math.max(0, Math.min(first.x + first.width, second.x + second.width) - Math.max(first.x, second.x)) *
     Math.max(0, Math.min(first.y + first.height, second.y + second.height) - Math.max(first.y, second.y))
   );
-}
-
-async function findFreePort() {
-  const server = createServer();
-  server.listen(0, '127.0.0.1');
-  await once(server, 'listening');
-  const address = server.address();
-  assert(address && typeof address !== 'string');
-  server.close();
-  await once(server, 'close');
-  return address.port;
-}
-
-async function waitForPage(url, server, output) {
-  const deadline = Date.now() + 60_000;
-  while (Date.now() < deadline) {
-    if (server.exitCode !== null) throw new Error(`Next.js exited before readiness:\n${output.join('')}`);
-    try {
-      const response = await fetch(url);
-      if (response.ok) return;
-    } catch {
-      // The server is still compiling or has not opened its socket yet.
-    }
-    await new Promise((resolve) => setTimeout(resolve, 250));
-  }
-  throw new Error(`Timed out waiting for ${url}:\n${output.join('')}`);
-}
-
-async function stopServer(server) {
-  if (server.exitCode !== null) return;
-  server.kill('SIGTERM');
-  await Promise.race([once(server, 'exit'), new Promise((resolve) => setTimeout(resolve, 5_000))]);
-  if (server.exitCode === null) server.kill('SIGKILL');
 }
 
 async function assertLongRosterPickerLayout(page, surface, triggerTestId) {
@@ -147,7 +113,7 @@ test(
     });
     try {
       const url = `http://127.0.0.1:${port}/dev/f294-selection-toolbar-preview`;
-      await waitForPage(url, server, output);
+      await waitForPage(url, server, output, { timeoutMs: 60_000 });
       browser = await chromium.launch({ headless: true });
       const page = await browser.newPage({ viewport: { width: 360, height: 800 } });
       await page.route('**/api/health', async (route) => {

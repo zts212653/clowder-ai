@@ -51,8 +51,9 @@ const denied = {
   'internal briefing': (m) => {
     m.origin = 'briefing';
   },
-  'hidden trigger': (m) => {
+  'hidden history-only trigger': (m) => {
     m.extra = { scheduler: { hiddenTrigger: true } };
+    delete m.lifecycle;
   },
   'queued source': (m) => {
     m.deliveryStatus = 'queued';
@@ -76,25 +77,27 @@ const denied = {
     m.mentions = [];
   },
 };
-for (const [label, corrupt] of Object.entries(denied)) {
-  test(`${label} stays unreadable and cannot authorize search`, async (t) => {
-    const f = await schedulerReadFixture(t),
-      notice = await f.publish();
-    const altered = structuredClone(notice);
-    corrupt(altered);
-    const get = f.messages.getById.bind(f.messages);
-    f.messages.getById = (id) => (id === notice.id ? altered : get(id));
-    for (const mode of ['preview', 'full']) assert.equal((await f.read(notice, mode)).statusCode, 404, label);
-    const res = await f.search(await f.auth(notice));
-    assert.equal(res.statusCode, 403, res.body);
-    assert.equal(f.stats.reads, 0);
-    assert.equal(f.stats.adoptions, 0);
-    f.messages.getByThreadBefore = () => [altered];
-    f.messages.getByThreadAfter = () => [];
-    const neighbors = await f.read(f.answer, 'full', '&contextCount=1');
-    assert.equal(neighbors.statusCode, 200, neighbors.body);
-    assert.deepEqual(neighbors.json().context, []);
-  });
+for (const producer of ['repair', 'reminder']) {
+  for (const [label, corrupt] of Object.entries(denied)) {
+    test(`${producer}: ${label} stays unreadable and cannot authorize search`, async (t) => {
+      const f = await schedulerReadFixture(t),
+        notice = await f.publish(producer);
+      const altered = structuredClone(notice);
+      corrupt(altered);
+      const get = f.messages.getById.bind(f.messages);
+      f.messages.getById = (id) => (id === notice.id ? altered : get(id));
+      for (const mode of ['preview', 'full']) assert.equal((await f.read(notice, mode)).statusCode, 404, label);
+      const res = await f.search(await f.auth(notice));
+      assert.equal(res.statusCode, 403, res.body);
+      assert.equal(f.stats.reads, 0);
+      assert.equal(f.stats.adoptions, 0);
+      f.messages.getByThreadBefore = () => [altered];
+      f.messages.getByThreadAfter = () => [];
+      const neighbors = await f.read(f.answer, 'full', '&contextCount=1');
+      assert.equal(neighbors.statusCode, 200, neighbors.body);
+      assert.deepEqual(neighbors.json().context, []);
+    });
+  }
 }
 
 for (const missing of ['missing', 'deleted', 'foreign-owner']) {

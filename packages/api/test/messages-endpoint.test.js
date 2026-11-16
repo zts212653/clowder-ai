@@ -54,6 +54,38 @@ describe('GET /api/messages', () => {
     if (app) await app.close();
   });
 
+  it('preserves watcher provenance and exact recipient when reloading its historical message', async () => {
+    const watcher = {
+      kind: 'nudge',
+      sourceInvocationId: 'ordinary-work',
+      sourceMessageId: 'original-message',
+      watcherInvocationId: 'watcher-work',
+    };
+    const nudge = messageStore.append({
+      userId: 'default-user',
+      threadId: 'watcher-thread',
+      from: { kind: 'agent', catId: 'codex' },
+      content: '@gemini\n\nA helpful precedent.',
+      mentions: ['gemini'],
+      timestamp: 1000,
+      extra: { watcher },
+    });
+    const ordinary = messageStore.append({
+      userId: 'default-user',
+      threadId: 'watcher-thread',
+      from: { kind: 'agent', catId: 'codex' },
+      content: '守望猫 · 小太阳',
+      mentions: ['gemini'],
+      timestamp: 1001,
+    });
+    const response = await app.inject({ method: 'GET', url: '/api/messages?threadId=watcher-thread&limit=10' });
+    assert.equal(response.statusCode, 200);
+    const rows = response.json().messages;
+    assert.deepEqual(rows.find((m) => m.id === nudge.id)?.extra?.watcher, watcher);
+    assert.deepEqual(rows.find((m) => m.id === nudge.id)?.extra?.targetCats, ['gemini']);
+    assert.equal(rows.find((m) => m.id === ordinary.id)?.extra?.watcher, undefined);
+  });
+
   for (const status of [
     'delivering',
     'waiting',

@@ -4,6 +4,7 @@ import { MarkdownContent } from '@/components/MarkdownContent';
 import { pushThreadRouteWithHistory } from '@/components/ThreadSidebar/thread-navigation';
 import type { RichCardBlock } from '@/stores/chat-types';
 import { CafeIcon } from './CafeIcons';
+import { ProposalApprovalRecovery } from './ProposalApprovalRecovery';
 import {
   DeclaredWorkModeEdit,
   displayProposalTitle,
@@ -187,6 +188,7 @@ export function ProposalCardClassic({ block, state }: { block: RichCardBlock; st
         </div>
       )}
       {error && <div className="mt-1 text-xs text-conn-red-text">{error}</div>}
+      <ProposalApprovalRecovery recovery={state.recovery} />
     </div>
   );
 }

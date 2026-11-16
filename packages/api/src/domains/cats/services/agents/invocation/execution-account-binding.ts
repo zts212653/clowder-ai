@@ -56,6 +56,8 @@ export interface FrozenExecutionBinding {
     Pick<
       AgentServiceOptions,
       | 'frozenAcpMcpServers'
+      | 'frozenAcpMcpIssues'
+      | 'frozenAcpMcpCurrentness'
       | 'frozenNativeMcpConfig'
       | 'frozenKimiMcpConfig'
       | 'frozenCodexMcpInput'

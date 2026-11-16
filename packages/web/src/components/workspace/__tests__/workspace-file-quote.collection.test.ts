@@ -21,27 +21,38 @@ beforeEach(() => {
   syncContextAttachmentDraftToStorage(threadId, []);
 });
 
-it('does not enqueue a thirteenth reference on top of twelve valid queued references', () => {
+it('adds a thirteenth reference without losing the twelve queued references or their text', () => {
   const queued = Array.from({ length: 12 }, (_, i) => reference(i));
   expect(ContextAttachmentsSchema.safeParse(queued).success).toBe(true);
   useChatStore.setState({ pendingChatInsert: { threadId, text: 'keep these words', contextAttachments: queued } });
-  addWorkspaceFileQuoteToChat(threadId, quote);
+  expect(addWorkspaceFileQuoteToChat(threadId, quote)).toEqual({ kind: 'added' });
   const next = composerAttachments(threadId);
   expect(
     ContextAttachmentsSchema.safeParse(next).success,
     'the real queued replacement must still be a legal composer',
   ).toBe(true);
-  expect(next).toEqual(queued);
+  expect(next).toHaveLength(13);
+  expect(next.slice(0, 12)).toEqual(queued);
+  expect(next[12]).toMatchObject({
+    kind: 'quote',
+    text: quote.text,
+    comment: quote.comment,
+    source: { kind: 'workspace_file', path: quote.path, worktreeId: quote.worktreeId, revision: quote.revision },
+  });
+  expect(useChatStore.getState().pendingChatInsert?.text).toBe('keep these words');
 });
 
-it('does not enqueue another reference when twelve are already in the real saved draft', () => {
+it('persists the new quote alongside twelve references already in the real saved draft', () => {
   const saved = Array.from({ length: 12 }, (_, i) => reference(i));
   syncContextAttachmentDraftToStorage(threadId, saved);
   expect(getContextAttachmentDraft(threadId)).toEqual(saved);
-  addWorkspaceFileQuoteToChat(threadId, quote);
+  expect(addWorkspaceFileQuoteToChat(threadId, quote)).toEqual({ kind: 'added' });
   const next = composerAttachments(threadId);
   syncContextAttachmentDraftToStorage(threadId, next);
-  expect(getContextAttachmentDraft(threadId), 'the real writer must not lose all the old references').toEqual(saved);
+  expect(getContextAttachmentDraft(threadId), 'the real writer must not lose the earlier references').toEqual(next);
+  expect(next).toHaveLength(13);
+  expect(next.slice(0, 12)).toEqual(saved);
+  expect(next[12]).toMatchObject({ kind: 'quote', text: quote.text, comment: quote.comment });
 });
 
 it('preserves the saved collection when prompt escaping puts the next quote past the canonical size bound', () => {

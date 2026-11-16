@@ -921,23 +921,23 @@
     "owner": "codex"
   },
   {
-    "id": "capability-eval-verdict",
+    "id": "capability-eval-design",
     "kind": "capability",
     "sourceRef": {
-      "path": "cat-cafe-skills/refs/capability-wakeup-index.md",
-      "anchor": "F192 Eval Hub / Verdict Handoff"
+      "path": "cat-cafe-skills/eval-design/SKILL.md",
+      "anchor": "Eval Design"
     },
     "structureSource": {
-      "path": "packages/api/src/infrastructure/harness-eval/capability-wakeup/capability-wakeup-rules.ts",
-      "anchor": "eval-verdict"
+      "path": "cat-cafe-skills/manifest.yaml",
+      "anchor": "eval-design"
     },
     "bodySource": {
-      "path": "cat-cafe-skills/refs/capability-wakeup-index.md",
-      "anchor": "Eval Hub"
+      "path": "cat-cafe-skills/eval-design/SKILL.md",
+      "anchor": "方法独立于平台"
     },
-    "contexts": ["review", "merge_gate"],
+    "contexts": ["thinking", "feature_dev"],
     "audience": ["developer", "maintainer"],
-    "body": "改 harness 后要有 verdict/eval 闭环，不能只说「修了」。",
+    "body": "想比较方案是否更有效？让猫猫用 eval-design 在原任务设计样本、对照、校准与独立验收，不必注册旧评估平台。",
     "action": {
       "type": "open_concierge_draft",
       "label": "了解更多"
@@ -2417,34 +2417,6 @@
     "owner": "codex"
   },
   {
-    "id": "feature-f245-friction-eval-rollup",
-    "kind": "feature",
-    "sourceRef": {
-      "path": "docs/features/F245-friction-signal-eval.md",
-      "anchor": "Friction Signal Eval"
-    },
-    "structureSource": {
-      "path": "docs/features/F245-friction-signal-eval.md",
-      "anchor": "Phase D"
-    },
-    "bodySource": {
-      "path": "docs/features/F245-friction-signal-eval.md",
-      "anchor": "Why"
-    },
-    "contexts": ["thinking", "feature_dev"],
-    "audience": ["cvo"],
-    "body": "觉得某个地方用着别扭？Eval Hub 会把爪感差、cancel、反馈汇成周期报告；标「建议修复」的是待判断线索，不会自动给猫派活。",
-    "action": {
-      "type": "open_source",
-      "label": "打开 spec",
-      "sourceRef": {
-        "path": "docs/features/F245-friction-signal-eval.md",
-        "anchor": "Friction Signal Eval"
-      }
-    },
-    "owner": "gpt52"
-  },
-  {
     "id": "feature-f260-entity-conflict-resolution",
     "kind": "feature",
     "sourceRef": {
@@ -3168,27 +3140,27 @@
     "owner": "codex-sol"
   },
   {
-    "id": "capability-self-evolution",
+    "id": "capability-code-as-harness",
     "kind": "capability",
     "sourceRef": {
-      "path": "docs/features/F100-self-evolution.md",
-      "anchor": "Primary Journey: 从一次真实协作中形成可见、可验证的改进"
+      "path": "cat-cafe-skills/code-as-harness/SKILL.md",
+      "anchor": "Code as Harness：同一件事，You 说了第二遍之后"
     },
     "structureSource": {
-      "path": "cat-cafe-skills/self-evolution/SKILL.md",
-      "anchor": "三个模式"
+      "path": "cat-cafe-skills/code-as-harness/SKILL.md",
+      "anchor": "第二问：该用上的东西，当时在不在眼前"
     },
     "bodySource": {
-      "path": "cat-cafe-skills/self-evolution/SKILL.md",
-      "anchor": "先排除 F311 产品意图"
+      "path": "cat-cafe-skills/code-as-harness/SKILL.md",
+      "anchor": "第一问：这件事，家里之前有没有"
     },
     "contexts": ["thinking", "feature_dev", "review", "long_running"],
     "audience": ["all"],
-    "body": "想把这次已经发生的偏差、重复踩坑或好方法沉淀下来，可以让猫猫复盘并改进对应规则、Skill 或 Harness；这是经验闭环，不会冒充“我们来进化 X”的 Evolution Program。",
+    "body": "家里本来已有答案，还是让你不得不重说时，猫猫会先把被纠正的事做完，再搜证据、入共享错题本，查清断在哪、按断点修；第一次提出的新要求直接做。",
     "action": {
       "type": "open_concierge_draft",
-      "label": "复盘并沉淀",
-      "draftPrompt": "请复盘这次已经发生的工作，把可复用的教训沉淀到正确机制；一次性问题不要过度进化。"
+      "label": "查看共享错题本",
+      "draftPrompt": "请查看家里的共享错题本，讲清最近记录了哪些我不得不重说的事、断在哪、改了什么、什么算好了。"
     },
     "owner": "codex-sol"
   },
@@ -3209,7 +3181,7 @@
     },
     "contexts": ["thinking", "feature_dev", "concierge_idle", "concierge_open"],
     "audience": ["all"],
-    "body": "想知道咱们能进化什么，直接问猫猫；只有说“我们来进化 X”并给出具体目标时，才会创建可追踪的 Evolution Program，普通复盘仍走 self-evolution。",
+    "body": "想知道咱们能进化什么，直接问猫猫；给出要改善的 Agent 或业务能力目标时，可以创建可追踪的 Evolution Program。既往方法总结留在原任务或对应文档；家里已有答案却让你重说的事记共享错题本。",
     "action": {
       "type": "open_concierge_draft",
       "label": "了解可进化对象",
@@ -3382,19 +3354,28 @@
   {
     "id": "feature-f309-gif-svg-originals",
     "kind": "feature",
-    "sourceRef": { "path": "docs/guides/gif-svg-works.md", "anchor": "## 帧定位与原件" },
+    "sourceRef": {
+      "path": "docs/guides/gif-svg-works.md",
+      "anchor": "## 帧定位与原件"
+    },
     "structureSource": {
       "path": "packages/web/src/components/content-review/GifFrameMedia.tsx",
       "anchor": "GifFrameControls"
     },
-    "bodySource": { "path": "docs/guides/gif-svg-works.md", "anchor": "意见会带上当前版本" },
+    "bodySource": {
+      "path": "docs/guides/gif-svg-works.md",
+      "anchor": "意见会带上当前版本"
+    },
     "contexts": ["concierge_open", "pet_waiting_for_user"],
     "audience": ["all"],
     "body": "改 GIF 时，先用帧控制条停到要改的画面，再圈选或画笔标记，伙伴就能读到对应版本和帧号。SVG 可以放大看细节；下载原件会保留向量源码或完整动画。",
     "action": {
       "type": "open_source",
       "label": "查看动图与矢量作品说明",
-      "sourceRef": { "path": "docs/guides/gif-svg-works.md", "anchor": "## 帧定位与原件" }
+      "sourceRef": {
+        "path": "docs/guides/gif-svg-works.md",
+        "anchor": "## 帧定位与原件"
+      }
     },
     "owner": "codex61-sol"
   },

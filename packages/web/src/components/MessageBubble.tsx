@@ -15,8 +15,8 @@ import type { CSSProperties, ReactNode } from 'react';
  */
 
 interface MessageBubbleProps {
-  /** Message ID for DOM targeting (scrollTo, reply anchors, navigation). */
-  messageId: string;
+  /** Canonical message ID for navigation; local send attempts do not have one. */
+  messageId?: string;
   /** Avatar element — CatAvatar / connector icon / co-creator avatar. */
   avatar: ReactNode;
   /** Header row(s) — name, timestamp, badges, pills.

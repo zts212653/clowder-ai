@@ -10,6 +10,7 @@ test(
   'F326 original sent opinion → actual Cat save → artwork comparison → Human reopen → refresh',
   { timeout: 300000 },
   async (t) => {
+    if (!process.env.F326_BROWSER_MANIFEST) return t.skip('dedicated F326 browser manifest required');
     const journey = await createScreeningJourney();
     const manifest = JSON.parse(await readFile(process.env.F326_BROWSER_MANIFEST, 'utf8'));
     const sent = JSON.parse(await readFile(path.join(tmpdir(), 'f326-b-human-send-receipt.json'), 'utf8'));

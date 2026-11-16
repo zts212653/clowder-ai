@@ -64,6 +64,7 @@ import { normalizeJsonUnicode } from '../utils/json-unicode.js';
 import { buildThreadDeepLink } from '../utils/thread-deep-link.js';
 import { getDefaultUploadDir } from '../utils/upload-paths.js';
 import { registerGenerationMessagesRoute } from './generation-messages.js';
+import { registerMessageAttemptReceipt } from './message-attempt-receipt.js';
 import { observeMessageSend } from './message-send-diagnostics.js';
 import { importStoredProjectMessage } from './messages-project-review.js';
 import { captureSentComposerDraftConsumption } from './sent-composer-draft-consumption.js';
@@ -298,6 +299,7 @@ const MAX_FILES = 5;
 
 export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (app, opts) => {
   registerGenerationMessagesRoute(app, opts.messageStore);
+  registerMessageAttemptReceipt(app, opts.messageStore);
   const uploadDir = getDefaultUploadDir(opts.uploadDir ?? process.env.UPLOAD_DIR);
 
   // Register multipart parser for image uploads
@@ -656,6 +658,7 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
       timestamp: Date.now(),
       threadId: resolvedThreadId,
       idempotencyKey: resolvedIdempotencyKey,
+      clientMessageId: resolvedIdempotencyKey,
       deliveryStatus: 'queued',
       ...(contentBlocks ? { contentBlocks } : {}),
       ...(whisperVisibility && whisperRecipients
@@ -1192,6 +1195,9 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
       const type: TimelineItem['type'] = timelineMessageKind(from, Boolean(m.source)) ?? 'user';
       return {
         id: m.id,
+        ...(m.userId === userId && from.kind === 'user' && m.clientMessageId
+          ? { clientMessageId: m.clientMessageId }
+          : {}),
         type,
         from,
         catId: m.catId,
@@ -1203,7 +1209,8 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
         ...(m.metadata ? { metadata: m.metadata } : {}),
         ...(m.origin ? { origin: m.origin } : {}),
         ...(m.thinking ? { thinking: m.thinking } : {}),
-        ...(m.extra?.cloudBridgeReturn ||
+        ...(m.extra?.watcher ||
+        m.extra?.cloudBridgeReturn ||
         m.extra?.outputLayout ||
         m.extra?.runtimeInteractionCard ||
         m.extra?.pluginAddressedReceipt ||
@@ -1234,6 +1241,7 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
         m.extra?.recovery
           ? {
               extra: {
+                ...(m.extra?.watcher ? { watcher: m.extra.watcher } : {}),
                 ...(m.extra?.cloudBridgeReturn ? { cloudBridgeReturn: m.extra.cloudBridgeReturn } : {}),
                 ...(m.extra?.outputLayout ? { outputLayout: m.extra.outputLayout } : {}),
                 ...(m.extra?.runtimeInteractionCard ? { runtimeInteractionCard: m.extra.runtimeInteractionCard } : {}),
@@ -1259,7 +1267,9 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
                 ...(m.extra?.coordination ? { coordination: m.extra.coordination } : {}),
                 ...(m.extra?.isExplicitPost ? { isExplicitPost: true } : {}),
                 ...(m.extra?.stream ? { stream: m.extra.stream } : {}),
-                ...(m.extra?.targetCats ? { targetCats: m.extra.targetCats } : {}),
+                ...(m.extra?.targetCats || m.extra?.watcher
+                  ? { targetCats: m.extra?.targetCats ?? [...m.mentions] }
+                  : {}),
                 ...(m.extra?.messageBundle ? { messageBundle: m.extra.messageBundle } : {}),
                 ...(m.extra?.evolutionUseSourceV1 ? { evolutionUseSourceV1: m.extra.evolutionUseSourceV1 } : {}),
                 ...(m.extra?.scheduler ? { scheduler: m.extra.scheduler } : {}),

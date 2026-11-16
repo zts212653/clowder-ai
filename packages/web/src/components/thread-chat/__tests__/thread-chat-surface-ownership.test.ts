@@ -77,6 +77,8 @@ describe('ThreadChatSurface ownership', () => {
 
     expect(sendHookConsumers).toEqual([
       'components/PlanBoardPanel.tsx',
+      // Sender-local retries reuse the canonical send hook and persisted key.
+      'components/SendAttemptStatus.tsx',
       'components/SplitPaneView.tsx',
       // The root landing owns a pre-thread, idempotent create+first-message
       // transaction; it cannot enter ThreadChatSurface before a thread exists.
