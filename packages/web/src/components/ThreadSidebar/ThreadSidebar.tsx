@@ -18,6 +18,7 @@ import {
   invalidateSidebarProjection,
   refreshSidebarThreadSnapshot,
 } from '@/utils/sidebar-thread-snapshot';
+import { invalidateThreadAttentionPreferences } from '@/utils/thread-attention-invalidation';
 import { BootcampListModal } from '../BootcampListModal';
 import { BootcampIcon } from '../icons/BootcampIcon';
 import { resolveShellCopy, useShellCopy } from '../shell/shell-copy';
@@ -395,10 +396,14 @@ export function ThreadSidebar({ onClose, className, routeThreadId, activeDestina
       try {
         const res = await apiFetch(`/api/threads/${threadId}/restore`, { method: 'POST' });
         if (!res.ok) return;
+        invalidateThreadAttentionPreferences();
         await invalidateSidebarProjection();
         await loadTrash(true);
       } catch {
-        // Silently ignore
+        // The restore may have committed even when its response was lost.
+        invalidateThreadAttentionPreferences();
+        await invalidateSidebarProjection();
+        await loadTrash(true);
       }
     },
     [loadTrash],
@@ -528,6 +533,7 @@ export function ThreadSidebar({ onClose, className, routeThreadId, activeDestina
         (t) => t.projectPath === path && t.id !== 'default' && !t.isHubThread && !t.systemKind,
       );
       await Promise.allSettled(targets.map((t) => apiFetch(`/api/threads/${t.id}`, { method: 'DELETE' })));
+      if (targets.length > 0) invalidateThreadAttentionPreferences();
       // P2-1: If current thread was archived, redirect to default
       if (currentConversationId && targets.some((t) => t.id === currentConversationId)) {
         navigateToThread('default');

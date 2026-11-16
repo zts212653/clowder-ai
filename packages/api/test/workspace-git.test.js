@@ -12,7 +12,7 @@ import { describe, test } from 'node:test';
 const {
   isGitWorkTree,
   parseGitLog,
-  parseGitStatus,
+  appendGitStatus,
   parseGitShow,
   parseStaleBranches,
   parseWorktreeHealth,
@@ -65,7 +65,15 @@ describe('parseGitLog', () => {
   });
 });
 
-describe('parseGitStatus', () => {
+describe('appendGitStatus', () => {
+  // Feed independent framed records, as the streaming reader does in production.
+  function parseGitStatus(records) {
+    const result = { staged: [], unstaged: [], untracked: [] };
+    for (const record of records.split('\n').filter(Boolean)) {
+      appendGitStatus(result, { status: record.slice(0, 2), path: record.slice(3) });
+    }
+    return result;
+  }
   test('categorizes staged/unstaged/untracked', () => {
     const mockOutput = [
       'M  staged-file.ts',

@@ -5,7 +5,9 @@ import { InvocationRegistry } from '../../dist/domains/cats/services/agents/invo
 import { MessageStore } from '../../dist/domains/cats/services/stores/ports/MessageStore.js';
 import { InMemoryTasteProposalStore } from '../../dist/domains/taste/stores/InMemoryTasteProposalStore.js';
 import { sessionAuthPlugin, sessionRoute } from '../../dist/infrastructure/session-auth.js';
+import { registerCallbackAuthHook } from '../../dist/routes/callback-auth-prehandler.js';
 import { callbackProposeTasteRoutes } from '../../dist/routes/callback-propose-taste-routes.js';
+import { registerCallbackRememberRoutes } from '../../dist/routes/callback-remember-routes.js';
 import { registerTasteProposalDecisionRoutes } from '../../dist/routes/taste-proposal-decision-routes.js';
 import { canonicalTestMessageInput } from './message-from-fixtures.js';
 
@@ -44,6 +46,10 @@ export async function tasteAdmissionFixture(options = {}) {
     messageStore: messages,
     socketManager,
     approvalIngress: ingress,
+  });
+  await app.register(async (scope) => {
+    registerCallbackAuthHook(scope, registry);
+    registerCallbackRememberRoutes(scope, { registry, messageStore: messages, socketManager });
   });
   await app.ready();
   const source = (overrides = {}) =>

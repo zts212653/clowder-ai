@@ -2019,7 +2019,7 @@ async function assembleIncrementalContextInternal(
   let executionSituation: import('../invocation/thread-execution-situation.js').ThreadExecutionSituation | undefined;
   if (deps.threadExecutionSituationSource) {
     try {
-      executionSituation = await deps.threadExecutionSituationSource.resolve(threadId);
+      executionSituation = await deps.threadExecutionSituationSource.resolve(threadId, userId);
     } catch {
       executionSituation = {
         kind: 'thread_execution_situation.v1',

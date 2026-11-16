@@ -18,10 +18,11 @@ test(
     try {
       vec.load(writer);
       writer.pragma('journal_mode=WAL');
+      writer.exec('CREATE TABLE embedding_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)');
       writer.exec('CREATE VIRTUAL TABLE passage_vectors USING vec0(passage_key TEXT PRIMARY KEY, embedding float[4])');
       const vectors = new PassageVectorStore(writer, 4);
       for (let i = 0; i < 8; i++) vectors.upsert(`neutral-${i}`, new Float32Array([i, 0, 0, 0]));
-      for (const name of ['begin', 'end']) {
+      for (const name of ['begin', 'end', 'snapshot']) {
         writer.exec(`
         CREATE VIEW attack_${name} AS SELECT memory_read_window_${name}() FROM sqlite_schema LIMIT 1;
         CREATE TABLE target_${name}(v);
@@ -48,7 +49,7 @@ test(
         // Preparation must reject the trigger before a readonly write attempt; no INSERT is run.
         assert.throws(() => db.prepare(`INSERT INTO target_${name} VALUES(1)`), unsafe);
       };
-      for (const name of ['begin', 'end']) assertSchemaRejected(name);
+      for (const name of ['begin', 'end', 'snapshot']) assertSchemaRejected(name);
       db.exec('BEGIN');
       const begin = db.prepare('SELECT memory_read_window_begin() AS active FROM sqlite_schema LIMIT 1');
       assert.equal(begin.get().active, 1, 'schema did not open a scope');
@@ -58,7 +59,7 @@ test(
       db.exec('COMMIT');
       assert.deepEqual(new PassageVectorStore(db, 4, reader).search(query, 5), expected);
       const rebound = prepareFileVectorReadWindow(db);
-      for (const name of ['begin', 'end']) assertSchemaRejected(name);
+      for (const name of ['begin', 'end', 'snapshot']) assertSchemaRejected(name);
       assert.deepEqual(new PassageVectorStore(db, 4, rebound).search(query, 5), expected);
     } finally {
       db.close();

@@ -14,7 +14,8 @@ describe('taste-routing-guard', () => {
   it('detects taste signal keyword in rationale', () => {
     const result = detectTasteSignal({ rationale: 'co-creator说太客服了，需要记下来' });
     assert.ok(result);
-    assert.equal(result.suggestedTool, 'cat_cafe_propose_taste');
+    assert.equal(result.suggestedTool, 'cat_cafe_remember');
+    assert.equal(result.suggestedTarget, 'taste');
     assert.ok(result.reason.length > 0);
   });
 

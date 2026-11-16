@@ -111,7 +111,18 @@ import { useSendAttempts } from './useSendAttempts';
 import { useViewportMessageTimeline } from './useViewportMessageTimeline';
 
 type RestoreFrameKind = 'restore' | 'navigation' | 'correction';
-type ReadingRefreshStatus = 'ready' | 'unavailable' | 'interrupted';
+type ReadingInterruption = { status: 'interrupted'; reason?: 'user-input' };
+type ReadingRefreshResult = { status: 'ready' } | { status: 'unavailable' } | ReadingInterruption;
+// These existing cancellation paths represent explicit reading actions. Lifecycle,
+// replacement and abort failures stay distinguishable from the user taking over.
+const USER_READING_CANCELLATIONS: ReadonlySet<ReadingCancelSource> = new Set([
+  'native_input',
+  'rail_input',
+  'jump_latest',
+  'reading_disclosure',
+  'reading_capture',
+  'viewport_anchor',
+]);
 type NavigationSettleSample = {
   top: number;
   messageAnchor: MessageScrollAnchor;
@@ -140,7 +151,8 @@ export type { CapturedChatReadingRef, ChatReadingRef, ChatReadingSnapshot } from
 
 export type ChatReadingRestoreReceipt =
   | { status: 'settled'; exact: boolean; position: SavedScrollState }
-  | { status: 'interrupted' | 'unavailable' };
+  | { status: 'unavailable' }
+  | ReadingInterruption;
 
 export type ChatMessageNavigationReceipt =
   | { status: 'settled'; threadId: string; messageId: string; position: SavedScrollState }
@@ -870,7 +882,7 @@ export function useChatHistory(threadId: string) {
   readingOwnerIdRef.current ??= readingDiagnosticId();
   const readingOwnerMountedRef = useRef<string | null>(null);
   const readingRefreshRef = useRef<{
-    resolve: (status: ReadingRefreshStatus) => void;
+    resolve: (result: ReadingRefreshResult) => void;
     diagnostic?: ReadingDiagnosticContext;
   } | null>(null);
   const readingReceiptRef = useRef<{
@@ -983,13 +995,16 @@ export function useChatHistory(threadId: string) {
         cancelSource,
         input,
       );
-      readingRefreshRef.current?.resolve('interrupted');
+      const interruption: ReadingInterruption = USER_READING_CANCELLATIONS.has(cancelSource)
+        ? { status: 'interrupted', reason: 'user-input' }
+        : { status: 'interrupted' };
+      readingRefreshRef.current?.resolve(interruption);
       readingRefreshRef.current = null;
       if (!preserveRestoreWrites) restoreWritesRef.current.invalidate();
       navigationHighlightRef.current?.();
       navigationHighlightRef.current = undefined;
       if (!preserveReadingReceipt && readingReceiptRef.current) {
-        readingReceiptRef.current.resolve({ status: 'interrupted' });
+        readingReceiptRef.current.resolve(interruption);
         readingReceiptRef.current = null;
       }
       if (!preserveNavigationReceipt && navigationReceiptRef.current) {
@@ -1820,26 +1835,26 @@ export function useChatHistory(threadId: string) {
   // A search admission checks authority; this original reader still refreshes the
   // actual transcript before choosing a DOM target from its cache.
   const refreshReadingHistory = useCallback(
-    async (signal?: AbortSignal, diagnostic?: ReadingDiagnosticContext): Promise<ReadingRefreshStatus> => {
-      if (signal?.aborted) return 'interrupted';
+    async (signal?: AbortSignal, diagnostic?: ReadingDiagnosticContext): Promise<ReadingRefreshResult> => {
+      if (signal?.aborted) return { status: 'interrupted' };
       if (threadIdRef.current !== threadId || useChatStore.getState().currentThreadId !== threadId)
-        return 'unavailable';
+        return { status: 'unavailable' };
       cancelPendingRestore('refresh_request');
       readingRestoreRef.current = null;
       restoreFrameKindRef.current = 'navigation';
       const generation = restoreGenerationRef.current;
-      const receipt = new Promise<ReadingRefreshStatus>((resolve) => {
+      const receipt = new Promise<ReadingRefreshResult>((resolve) => {
         const operation = { resolve, diagnostic };
         readingRefreshRef.current = operation;
         const finish = (refreshed: boolean | undefined) => {
           if (readingRefreshRef.current !== operation) return;
           readingRefreshRef.current = null;
           if (generation !== restoreGenerationRef.current || threadIdRef.current !== threadId || signal?.aborted) {
-            resolve('interrupted');
+            resolve({ status: 'interrupted' });
             return;
           }
           restoreFrameKindRef.current = null;
-          resolve(refreshed === true ? 'ready' : 'unavailable');
+          resolve({ status: refreshed === true ? 'ready' : 'unavailable' });
         };
         // History can be shared with another reader. Retire this navigation's
         // wait immediately without cancelling that shared fetch or its hydration.
@@ -1869,8 +1884,8 @@ export function useChatHistory(threadId: string) {
       options?: { refresh?: boolean },
     ): Promise<ChatMessageNavigationReceipt> => {
       if (options?.refresh) {
-        const status = await refreshReadingHistory(signal);
-        if (status !== 'ready') return { status };
+        const result = await refreshReadingHistory(signal);
+        if (result.status !== 'ready') return { status: result.status };
       }
       return beginMessageNavigation(messageId, signal);
     },
@@ -1889,8 +1904,8 @@ export function useChatHistory(threadId: string) {
           : undefined;
       return observeReadingRestore(diagnostic, readingDiagnosticState, async () => {
         if (options?.refresh) {
-          const status = await refreshReadingHistory(signal, diagnostic);
-          if (status !== 'ready') return { status };
+          const result = await refreshReadingHistory(signal, diagnostic);
+          if (result.status !== 'ready') return result;
         }
         return restoreCapturedReadingRef(ref, signal, diagnostic);
       });

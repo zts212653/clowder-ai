@@ -98,6 +98,9 @@ export function composerInsertFromRecall(result: TrueRecallResponse) {
     text: draft.text,
     authoritative: true as const,
     serverRevision: draft.revision,
+    preservedBlocks: (draft.contentBlocks ?? []).filter(
+      (block) => block.type !== 'image' && block.type !== 'context_attachment',
+    ),
     ...(result.clientSnapshot ? { clientSnapshot: result.clientSnapshot } : {}),
     ...(result.insertedRange ? { selectionRange: result.insertedRange } : {}),
     ...(imageUrls.length > 0 ? { imageUrls } : {}),

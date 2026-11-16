@@ -28,7 +28,12 @@ async function addCodexAccount(page, note) {
   await page.getByRole('button', { name: '+ 添加账号', exact: true }).click();
   await page.getByRole('button', { name: 'Codex · 登录另一个账号', exact: true }).click();
   await page.getByRole('textbox', { name: '账号备注' }).fill(note);
+  const loginStarted = page.waitForResponse(
+    (response) => response.url().endsWith('/codex/login/start') && response.request().method() === 'POST',
+  );
   await page.getByRole('button', { name: '创建并开始登录' }).click();
+  const response = await loginStarted;
+  assert.equal(response.status(), 200, await response.text());
 }
 async function readCodexAccount(page, accountRef) {
   const response = await page.request.get(`${preview.url}/api/accounts`, { headers: { 'x-cat-cafe-user': 'fixture' } });
@@ -395,7 +400,7 @@ test(
 );
 
 test(
-  'native default quota survives page reload without registration and hides after an external sign-in change',
+  'native default quota survives reload and refreshes identity after an external sign-in change on the same page',
   { timeout: 60000 },
   async () => {
     const accountsPath = join(preview.root, '.cat-cafe/accounts.json');
@@ -443,8 +448,19 @@ test(
         });
       }
       await signIn('two');
+      preview.setQuota('headers');
+      const refreshed = page.waitForResponse(
+        (response) =>
+          response.url().endsWith('/api/accounts/codex/codex/quota') && response.request().method() === 'POST',
+      );
+      await row.getByRole('button', { name: '刷新额度', exact: true }).click();
+      const result = await (await refreshed).json();
+      assert.equal(result.quota.owner.userId, 'fixture-two');
+      assert.equal(result.quota.items[0].usedPercent, 40);
+      await row.getByText('剩 60%', { exact: true }).waitFor();
+      assert.equal(await row.getByText('剩 70%', { exact: true }).count(), 0);
       await page.reload({ waitUntil: 'domcontentloaded' });
-      await row.getByRole('button', { name: '查额度', exact: true }).waitFor();
+      await row.getByText('剩 60%', { exact: true }).waitFor();
       assert.equal(await row.getByText('剩 70%', { exact: true }).count(), 0);
     } finally {
       await page.close();

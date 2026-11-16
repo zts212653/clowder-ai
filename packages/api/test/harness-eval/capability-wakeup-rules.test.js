@@ -8,20 +8,10 @@ import {
   DEFAULT_CAPABILITY_WAKEUP_RULES,
   getCapabilityWakeupRules,
 } from '../../dist/infrastructure/harness-eval/capability-wakeup/capability-wakeup-rules.js';
-import {
-  buildCapabilityTrace,
-  evaluateCapabilityWakeupTrace,
-} from '../../dist/infrastructure/harness-eval/capability-wakeup/eval-capability-wakeup-adapter.js';
-import { toolEvent, transcriptEvent } from './capability-wakeup-test-helpers.js';
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../../../..');
 const autonomousCardRuleId = 'code-as-harness-confirmed-repeat-autonomous-card';
 const cvoDecisionRuleId = 'code-as-harness-confirmed-repeat-cvo-interactive';
-const outputContractClauses = [
-  '重复未确认=不强制 Rich Block',
-  '重复已确认且仍需 operator 决策=kind=interactive',
-  '重复已确认且无需 operator 决策=直接行动后 kind=card',
-];
 
 describe('CapabilityWakeupRulesRegistry (砚砚 R1 P2)', () => {
   describe('DEFAULT_CAPABILITY_WAKEUP_RULES', () => {
@@ -38,7 +28,6 @@ describe('CapabilityWakeupRulesRegistry (砚砚 R1 P2)', () => {
         'propose-thread',
         'external-runtime-sessions',
         'cli-diagnostics',
-        'eval-verdict',
         'memory-drilldown',
         'update-workflow',
       ];
@@ -46,6 +35,13 @@ describe('CapabilityWakeupRulesRegistry (砚砚 R1 P2)', () => {
       for (const capability of expected) {
         assert.ok(capabilities.has(capability), `missing ${capability}`);
       }
+    });
+
+    it('does not demand old-platform verdicts for ordinary harness work', () => {
+      assert.equal(
+        DEFAULT_CAPABILITY_WAKEUP_RULES.some((rule) => rule.capability === 'eval-verdict'),
+        false,
+      );
     });
 
     it('covers all 3 capabilities the normalizer classifies', () => {
@@ -219,113 +215,22 @@ describe('CapabilityWakeupRulesRegistry (砚砚 R1 P2)', () => {
     });
   });
 
-  describe('Code-as-Harness two-layer structured output contract', () => {
-    it('confirmed repeat without a operator decision emits create_rich_block(kind=card)', () => {
-      const block = {
-        id: 'code-as-harness-autonomous-result',
-        kind: 'card',
-        v: 1,
-        title: '重复摩擦诊断与结果',
-        bodyMarkdown: '已按授权完成修复。',
-        tone: 'success',
-        fields: [
-          { label: '根因', value: '结构化输出契约漂移' },
-          { label: '证据', value: '同类问题跨两个 thread 重复出现' },
-          { label: '处置/结果', value: '已修复并通过 targeted checks' },
-        ],
-      };
-      const trace = buildCodeAsHarnessTrace({
-        text: '重复已确认且无需 operator 决策，直接行动后回报结果。',
-        block,
-      });
-      const rules = getCapabilityWakeupRules({ ruleIds: [autonomousCardRuleId] });
-      assert.equal(rules.length, 1, `missing ${autonomousCardRuleId}`);
-      const trials = evaluateCapabilityWakeupTrace(trace, rules);
-      assert.equal(trials.length, 1);
-      assert.equal(trials[0].outcome, 'negative');
-      assert.deepEqual(readRichBlock(trace), block);
-      assert.deepEqual(
-        block.fields.map((field) => field.label),
-        ['根因', '证据', '处置/结果'],
-      );
+  describe('Code-as-Harness correction route', () => {
+    it('retires the rules that required a diagnostic rich block for confirmed repetition', () => {
+      assert.deepEqual(getCapabilityWakeupRules({ ruleIds: [autonomousCardRuleId, cvoDecisionRuleId] }), []);
     });
 
-    it('confirmed repeat requiring a operator decision emits the interactive three-choice contract', () => {
-      const block = {
-        id: 'code-as-harness-cvo-decision',
-        kind: 'interactive',
-        v: 1,
-        interactiveType: 'select',
-        title: '重复摩擦诊断',
-        description: '根因：契约漂移\n证据：重复出现\n建议：恢复结构化输出',
-        options: [
-          { id: 'agree', label: '同意，按建议执行', icon: 'check' },
-          {
-            id: 'disagree',
-            label: '不同意',
-            icon: 'cross',
-            customInput: true,
-            customInputPlaceholder: '请写明不同意的原因或修正方向…',
-          },
-          {
-            id: 'other',
-            label: '其他处理',
-            icon: 'idea',
-            customInput: true,
-            customInputPlaceholder: '请写下你希望的处理方式…',
-          },
-        ],
-        messageTemplate: '诊断决定：{selection}',
-      };
-      const trace = buildCodeAsHarnessTrace({
-        text: '重复已确认且仍需 operator 决策，等待结构化选择。',
-        block,
-      });
-      const rules = getCapabilityWakeupRules({ ruleIds: [cvoDecisionRuleId] });
-      assert.equal(rules.length, 1, `missing ${cvoDecisionRuleId}`);
-      const trials = evaluateCapabilityWakeupTrace(trace, rules);
-      assert.equal(trials.length, 1);
-      assert.equal(trials[0].outcome, 'negative');
-      assert.deepEqual(readRichBlock(trace), block);
-      assert.deepEqual(
-        block.options.map((option) => option.id),
-        ['agree', 'disagree', 'other'],
-      );
-      assert.equal(block.options[0].customInput, undefined);
-      for (const option of block.options.slice(1)) {
-        assert.equal(option.customInput, true);
-        assert.ok(option.customInputPlaceholder);
-      }
-    });
-
-    it('does not force a rich block when repetition is unconfirmed', () => {
-      const trace = buildCodeAsHarnessTrace({
-        text: '搜证据后未确认历史重复，按一次性问题正常处理。',
-      });
-      const rules = getCapabilityWakeupRules({
-        ruleIds: [autonomousCardRuleId, cvoDecisionRuleId],
-      });
-      assert.equal(rules.length, 2, 'fixture invariant: both confirmed-repeat rules exist');
-      assert.deepEqual(evaluateCapabilityWakeupTrace(trace, rules), []);
-      assert.equal(findRichBlockToolUse(trace), undefined);
-    });
-
-    it('keeps skill and manifest aligned with the generated-index source contract', () => {
+    it('keeps skill and manifest aligned while leaving the generated index to its finalizer', () => {
       const skill = readFileSync(resolve(repoRoot, 'cat-cafe-skills/code-as-harness/SKILL.md'), 'utf8');
       const manifest = parseYaml(readFileSync(resolve(repoRoot, 'cat-cafe-skills/manifest.yaml'), 'utf8'));
       const manifestEntry = manifest.skills?.['code-as-harness'];
       const index = readFileSync(resolve(repoRoot, 'cat-cafe-skills/index.md'), 'utf8');
       const generator = readFileSync(resolve(repoRoot, 'scripts/docs-discovery/generate-index.mjs'), 'utf8');
       assert.ok(manifestEntry, 'missing code-as-harness manifest entry');
-      const surfaces = {
-        skill,
-        manifest: `${manifestEntry.description}\n${manifestEntry.output}`,
-      };
-      for (const [surfaceName, surface] of Object.entries(surfaces)) {
-        for (const clause of outputContractClauses) {
-          assert.match(surface, new RegExp(escapeRegExp(clause)), `${surfaceName} missing contract clause: ${clause}`);
-        }
-      }
+      assert.match(skill, /不发诊断卡/);
+      assert.match(skill, /错题本那一行的编号/);
+      assert.equal(manifestEntry.output, '错题本一行、按断点选的修法、退役条件');
+      assert.doesNotMatch(manifestEntry.description, /kind=interactive|kind=card/);
       assert.match(index, /generated:\s*true/);
       assert.match(index, /directory:\s*cat-cafe-skills\//);
       assert.match(generator, /outputPath:\s*'cat-cafe-skills\/index\.md'/);
@@ -333,38 +238,3 @@ describe('CapabilityWakeupRulesRegistry (砚砚 R1 P2)', () => {
     });
   });
 });
-function buildCodeAsHarnessTrace({ text, block }) {
-  const invocationId = 'inv-code-as-harness-dogfood';
-  const transcriptEvents = [transcriptEvent(0, invocationId, { type: 'text', content: text })];
-  const toolEvents = [];
-  if (block) {
-    transcriptEvents.push(
-      transcriptEvent(1, invocationId, {
-        type: 'tool_use',
-        toolName: 'cat_cafe_create_rich_block',
-        toolInput: { block: JSON.stringify(block) },
-      }),
-    );
-    toolEvents.push(toolEvent({ invocationId, toolName: 'cat_cafe_create_rich_block' }));
-  }
-  return buildCapabilityTrace({
-    sessionId: 'session-cap',
-    threadId: 'thread-cap',
-    catId: 'gpt52',
-    transcriptEvents,
-    toolEvents,
-  });
-}
-function findRichBlockToolUse(trace) {
-  return trace.invocations
-    .flatMap((invocation) => invocation.transcriptToolUses)
-    .find((toolUse) => toolUse.normalizedToolName === 'create_rich_block');
-}
-function readRichBlock(trace) {
-  const toolUse = findRichBlockToolUse(trace);
-  assert.ok(toolUse, 'missing normalized create_rich_block transcript event');
-  return JSON.parse(toolUse.toolInput.block);
-}
-function escapeRegExp(value) {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}

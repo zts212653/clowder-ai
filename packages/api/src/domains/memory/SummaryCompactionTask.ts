@@ -1,10 +1,5 @@
 import type Database from 'better-sqlite3';
-import type {
-  AbstractiveMessage,
-  DurableCandidate,
-  SummaryAttempt,
-  SummaryGenerationUsage,
-} from './abstractive-summary-types.js';
+import type { AbstractiveMessage, SummaryAttempt, SummaryGenerationUsage } from './abstractive-summary-types.js';
 import {
   commitSummaryProjection,
   countCoveredSummaryMessages,
@@ -12,7 +7,6 @@ import {
   reEmbedSummary,
   refreshSummaryBacklog,
   reportSummaryAttempt,
-  submitSummaryCandidates,
 } from './summary-compaction-effects.js';
 import { SUMMARY_CONFIG } from './summary-config.js';
 import { isSummaryEligible } from './summary-eligibility.js';
@@ -76,22 +70,12 @@ export interface SummaryCompactionDeps {
       toMessageId: string;
       messageCount: number;
       relatedSegmentIds?: string[];
-      candidates?: unknown[];
     }>;
   } | null>;
   /** User-visible outcome follows final persistence; record failure remains fail-open. */
   onAttempt?: (attempt: SummaryAttempt) => Promise<void> | void;
   /** Re-embed a thread after summary update (for semantic search). Optional — fail-open. */
   reEmbed?: (anchor: string, text: string) => Promise<void>;
-  /** H-3: Submit durable candidate to MarkerQueue for knowledge emergence pipeline. Optional — fail-open. */
-  submitCandidate?: (candidate: {
-    kind: string;
-    title: string;
-    claim: string;
-    confidence: string;
-    threadId: string;
-    evidence?: DurableCandidate['evidence'];
-  }) => Promise<void>;
   /** Logger */
   logger: { info: (msg: string) => void; error: (msg: string, err?: unknown) => void };
   curation?: {
@@ -214,11 +198,10 @@ export async function processThread(
     committed = deps.runExclusive ? await deps.runExclusive(commit) : commit();
     if (!committed) return false;
 
-    // The watermark is now canonical. Derived embedding, candidates and backlog
-    // refresh must settle before terminal truth because the next tick cannot infer
-    // which post-commit effects were skipped.
+    // The watermark is now canonical. Derived embedding and backlog refresh must
+    // settle before terminal truth because the next tick cannot infer which
+    // post-commit effects were skipped.
     await reEmbedSummary(deps, state.thread_id, mergedSummary);
-    await submitSummaryCandidates(deps, state.thread_id, result);
     await refreshSummaryBacklog(deps, state.thread_id, settlement.lastMessageId);
 
     deps.logger.info(

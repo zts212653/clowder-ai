@@ -217,7 +217,8 @@ export const CLASSIFIER_PATTERNS: Array<{ code: CliErrorReasonCode; regex: RegEx
   },
   {
     code: 'spawn_failed',
-    regex: /(spawn.*ENOENT|spawn.*EACCES|ENOENT.*spawn|EACCES.*spawn)/i,
+    regex:
+      /\bspawn(?:Sync)?\b[^\r\n]*\b(ENOENT|EACCES|EPERM|UNKNOWN|ENOEXEC)\b|\b(ENOENT|EACCES|EPERM|UNKNOWN|ENOEXEC)\b[^\r\n]*\bspawn(?:Sync)?\b/i,
   },
   {
     code: 'context_window_exceeded',

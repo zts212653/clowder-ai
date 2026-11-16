@@ -20,6 +20,7 @@ test(
   'F326 formal import → ordinary Workspace → real movies → frozen positions → comparison/reload',
   { timeout: 360000 },
   async (t) => {
+    if (!process.env.F326_BROWSER_MANIFEST) return t.skip('dedicated F326 browser manifest required');
     const journey = await createScreeningJourney();
     const result = {
       outcome: 'running',

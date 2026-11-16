@@ -118,7 +118,7 @@ describe('F322 new-shell Workspace home · 工具清单', () => {
       expect(onOpenSettings).not.toHaveBeenCalled();
     });
     it('shows the tools in three groups with the one number or name each has', async () => {
-      mocks.apiFetch.mockResolvedValue({ ok: true, json: async () => ({ changedFiles: [{}, {}, {}], diff: '' }) });
+      mocks.apiFetch.mockResolvedValue({ ok: true, json: async () => ({ changedFileCount: 3 }) });
       await renderHome();
 
       expect(qa('.home-group-title').map((node) => node.textContent)).toEqual(['活动', '代码', '其他']);
@@ -148,14 +148,14 @@ describe('F322 new-shell Workspace home · 工具清单', () => {
       expect(meta('surface:git')).toBe('feat/f322-workspace-home');
       expect(meta('surface:changes')).toBe('3 个文件');
       expect(meta('surface:terminal')).toBeUndefined();
-      expect(mocks.apiFetch).toHaveBeenCalledWith('/api/workspace/diff?worktreeId=wt-1&view=files', expect.anything());
+      expect(mocks.apiFetch).toHaveBeenCalledWith('/api/workspace/diff?worktreeId=wt-1&view=count', expect.anything());
     });
 
     it('writes no number when it cannot read one, and none for zero changes', async () => {
       await renderHome();
       expect(q('[data-workspace-destination="surface:changes"] .home-tool-meta')).toBeNull();
 
-      mocks.apiFetch.mockResolvedValue({ ok: true, json: async () => ({ changedFiles: [], diff: '' }) });
+      mocks.apiFetch.mockResolvedValue({ ok: true, json: async () => ({ changedFileCount: 0 }) });
       await renderHome({ worktreeId: 'wt-2' });
       expect(q('[data-workspace-destination="surface:changes"] .home-tool-meta')).toBeNull();
 
@@ -166,7 +166,7 @@ describe('F322 new-shell Workspace home · 工具清单', () => {
 
     it('does not bring back an earlier worktree\u2019s count while its new read is unknown (A → B → A)', async () => {
       const changesMeta = () => q('[data-workspace-destination="surface:changes"] .home-tool-meta')?.textContent;
-      mocks.apiFetch.mockResolvedValueOnce({ ok: true, json: async () => ({ changedFiles: [{}, {}, {}], diff: '' }) });
+      mocks.apiFetch.mockResolvedValueOnce({ ok: true, json: async () => ({ changedFileCount: 3 }) });
       await renderHome({ worktreeId: 'wt-A' });
       expect(changesMeta()).toBe('3 个文件');
 
@@ -180,7 +180,7 @@ describe('F322 new-shell Workspace home · 工具清单', () => {
     });
 
     it('marks only the changed-file count as a count, so the narrow layout can keep number and unit whole under the name', async () => {
-      mocks.apiFetch.mockResolvedValue({ ok: true, json: async () => ({ changedFiles: [{}, {}, {}], diff: '' }) });
+      mocks.apiFetch.mockResolvedValue({ ok: true, json: async () => ({ changedFileCount: 3 }) });
       await renderHome();
       const kindOf = (id: string) => q(`[data-workspace-destination="${id}"]`)?.getAttribute('data-meta-kind');
       expect(kindOf('surface:changes')).toBe('count');

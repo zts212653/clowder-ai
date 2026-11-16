@@ -100,7 +100,7 @@ const REASON_TEXT: Record<CliErrorReasonCode, { summary: string; hint: string }>
   },
   spawn_failed: {
     summary: 'CLI 进程无法启动',
-    hint: '检查 CLI 是否已安装（`which codex` / `which claude` 等）和文件权限。',
+    hint: 'ENOENT：检查 CLI 入口、工作目录和 PATH（Windows 用 where，其他系统用 which）。EACCES/EPERM：检查文件权限或安全软件拦截。UNKNOWN/ENOEXEC：错误码不能确定具体原因，请检查入口文件完整性与系统兼容性，必要时按 CLI 官方说明重新安装。展开详细诊断查看启动证据，并用 invocationId 关联后端日志。',
   },
   context_window_exceeded: {
     summary: '对话上下文超长',

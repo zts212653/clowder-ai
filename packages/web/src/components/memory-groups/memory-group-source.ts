@@ -21,6 +21,7 @@ const schema = z.object({
         proposalId: z.string().optional(),
         messageId: z.string().optional(),
         resultRef: z.string().optional(),
+        personId: z.string().optional(),
         status: z.string().optional(),
         error: z.string().optional(),
       }),

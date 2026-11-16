@@ -197,7 +197,7 @@ describe('F311 owner-backed observation joins', () => {
     }
   });
 
-  it('registers event, quota, and time triggers in the canonical F192 domain', () => {
+  it('retains on-demand registration without registering automatic triggers', () => {
     const registration = loadEvolutionProgramTriggerRegistration({
       harnessFeedbackRoot,
       now: new Date('2026-08-31T22:00:00.000Z'),
@@ -206,11 +206,12 @@ describe('F311 owner-backed observation joins', () => {
     assert.equal(registration.status, 'registered');
     assert.equal(registration.registrationRef.ownerFeatureId, 'F192');
     assert.equal(registration.domainId, 'eval:capability-evolution');
-    assert.deepEqual(registration.channels, ['event', 'quota', 'time']);
+    assert.deepEqual(registration.channels, ['on_demand']);
+    assert.equal(registration.automaticStatus, 'retired');
     assert.equal(registration.policy.mode, 'threshold_or_time');
     assert.equal(registration.policy.eventSource, 'evolution-program-stream');
     assert.deepEqual(registration.policy.threshold, { counter: 'connectedOwnerSurfaces', crossingAt: 2 });
-    assert.equal(registration.nextEvaluationAt, '2026-09-06T03:00:00.000Z');
+    assert.equal(registration.nextEvaluationAt, undefined);
   });
 
   it('turns an unavailable F192 registration artifact into an honest missing-registration projection', () => {
@@ -222,19 +223,19 @@ describe('F311 owner-backed observation joins', () => {
     assert.equal(registration, undefined);
   });
 
-  it('keeps the next F192 evaluation time fresh across cron boundaries without reloading the domain', () => {
+  it('does not resurrect automatic dates across cron boundaries', () => {
     let now = new Date('2026-08-31T22:00:00.000Z');
     const registration = createEvolutionProgramTriggerRegistrationProvider({
       harnessFeedbackRoot,
       now: () => now,
     });
 
-    assert.equal(registration()?.nextEvaluationAt, '2026-09-06T03:00:00.000Z');
+    assert.equal(registration()?.nextEvaluationAt, undefined);
     now = new Date('2026-09-06T04:00:00.000Z');
-    assert.equal(registration()?.nextEvaluationAt, '2026-09-13T03:00:00.000Z');
+    assert.equal(registration()?.nextEvaluationAt, undefined);
   });
 
-  it('delegates a linked Program event to F192 threshold dispatch without an F311 scheduler or ledger', async () => {
+  it('does not turn linked Program events into new automatic evaluations', async () => {
     const claims = new Set();
     const delivered = [];
     const result = await dispatchEvolutionProgramThresholdTrigger({
@@ -261,8 +262,8 @@ describe('F311 owner-backed observation joins', () => {
       },
     });
 
-    assert.equal(result.outcome, 'dispatched');
-    assert.equal(delivered.length, 1);
-    assert.match(delivered[0].idempotencyKey, /^eval-domain-trigger:eval:capability-evolution:/);
+    assert.equal(result.outcome, 'automation_retired');
+    assert.equal(delivered.length, 0);
+    assert.equal(claims.size, 0);
   });
 });

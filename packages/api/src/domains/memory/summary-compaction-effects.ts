@@ -1,5 +1,5 @@
 import type Database from 'better-sqlite3';
-import type { AbstractiveMessage, DurableCandidate, SummaryGenerationUsage } from './abstractive-summary-types.js';
+import type { AbstractiveMessage, SummaryGenerationUsage } from './abstractive-summary-types.js';
 import { commitCurationState, overviewRevision } from './curation/LunaCurationState.js';
 import { buildSearchableMessageContent } from './message-search-content.js';
 import type { SummaryCompactionDeps } from './SummaryCompactionTask.js';
@@ -105,8 +105,8 @@ export function commitSummaryProjection(
     INSERT INTO summary_segments
     (id, thread_id, level, from_message_id, to_message_id, message_count,
      summary, topic_key, topic_label, boundary_reason, boundary_confidence,
-     related_segment_ids, candidates, model_id, prompt_version, generated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     related_segment_ids, model_id, prompt_version, generated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
   const tx = deps.db.transaction(() => {
     if (expectedSummary !== undefined) {
@@ -149,7 +149,6 @@ export function commitSummaryProjection(
         segment.boundaryReason,
         segment.boundaryConfidence,
         segment.relatedSegmentIds ? JSON.stringify(segment.relatedSegmentIds) : null,
-        segment.candidates ? JSON.stringify(segment.candidates) : null,
         result.modelId ?? 'unknown',
         result.promptVersion ?? 'g2-thread-abstract-v2',
         now,
@@ -201,40 +200,6 @@ export async function reEmbedSummary(
     await deps.reEmbed(`thread-${threadId}`, `${row?.title ?? ''} ${mergedSummary}`);
   } catch {
     // fail-open
-  }
-}
-
-export async function submitSummaryCandidates(
-  deps: SummaryCompactionDeps,
-  threadId: string,
-  result: GeneratedSummary,
-): Promise<void> {
-  if (!deps.submitCandidate) return;
-  for (const segment of result.segments) {
-    const candidates = (segment.candidates ?? []) as Array<{
-      kind: string;
-      title: string;
-      claim: string;
-      confidence?: string;
-      evidence?: DurableCandidate['evidence'];
-    }>;
-    for (const candidate of candidates) {
-      try {
-        await deps.submitCandidate({
-          kind: candidate.kind,
-          title: candidate.title,
-          claim: candidate.claim,
-          confidence: candidate.confidence ?? 'inferred',
-          threadId,
-          evidence: candidate.evidence,
-        });
-        deps.logger.info(`[summary-compaction] submitted candidate: [${candidate.kind}] ${candidate.title}`);
-      } catch (error) {
-        deps.logger.error(
-          `[summary-compaction] submitCandidate failed for [${candidate.kind}] ${candidate.title}: ${error}`,
-        );
-      }
-    }
   }
 }
 

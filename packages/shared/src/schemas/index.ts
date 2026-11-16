@@ -13,6 +13,7 @@ export {
 export {
   CliOutputQuoteSourceSchema,
   ContextAttachmentContentSchema,
+  ContextAttachmentDraftsSchema,
   ContextAttachmentSchema,
   ContextAttachmentsSchema,
   MediaContextAttachmentSchema,

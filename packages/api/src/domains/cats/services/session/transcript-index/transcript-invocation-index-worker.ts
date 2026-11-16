@@ -38,7 +38,7 @@ function collectLatest(db: Database.Database, limit: number, output: InvocationI
   }
 }
 
-type EventPageQuery = Extract<InvocationIndexRequest['query'], { kind: 'invocation' | 'events' }>;
+type EventPageQuery = Extract<InvocationIndexRequest['query'], { kind: 'invocation' | 'events' | 'transcriptEvents' }>;
 
 function selectEventPage(
   db: Database.Database,
@@ -46,6 +46,7 @@ function selectEventPage(
   query: EventPageQuery,
 ): { page: IndexedInvocationPage; rows: Iterable<IndexedEventPointer> } {
   const invocationId = query.kind === 'invocation' ? query.invocationId : undefined;
+  const limit = query.limit;
   const bindings = invocationId === undefined ? [] : [invocationId];
   const scope = invocationId === undefined ? '' : 'invocation_id = ? AND ';
   const total = (
@@ -68,11 +69,7 @@ function selectEventPage(
   const rows = db
     .prepare(`SELECT source, seq, event_no, byte_offset, byte_length FROM canonical
     WHERE ${scope}logical_no >= ? ORDER BY logical_no LIMIT ?`)
-    .iterate(
-      ...bindings,
-      start.start,
-      query.limit === undefined ? -1 : query.limit + 1,
-    ) as Iterable<IndexedEventPointer>;
+    .iterate(...bindings, start.start, limit === undefined ? -1 : limit + 1) as Iterable<IndexedEventPointer>;
   return { page, rows };
 }
 
@@ -117,12 +114,13 @@ async function readEventPage(
   diagnostics: InvocationIndexDiagnostics,
 ): Promise<IndexedInvocationPage> {
   const { page, rows } = selectEventPage(db, input.session.id, query);
+  const limit = query.limit;
   let hydratedPageBytes = 0;
   for (const row of rows) {
     // A Raw page stops before hydrating another large record. The first record
     // remains reachable through the existing exact-event character drill.
     if (
-      (query.limit !== undefined && page.events.length === query.limit) ||
+      (limit !== undefined && page.events.length === limit) ||
       (query.kind === 'events' && page.events.length > 0 && hydratedPageBytes + row.byte_length > 64 * 1024)
     ) {
       page.nextCursor = { eventNo: row.event_no };

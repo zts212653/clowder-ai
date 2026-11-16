@@ -145,3 +145,34 @@ describe('unchanged new-conversation autosave', () => {
     expect((await loadNewConversationIntent(ALICE))?.intent.title).toBe('second');
   });
 });
+
+it('round-trips pre-thread comments beyond both the old count cap and the send budget', async () => {
+  for (const [count, text] of [
+    [15, 'source'],
+    [3, 'x'.repeat(17_000)],
+  ] as const) {
+    const contextAttachments = Array.from({ length: count }, (_, index) => ({
+      v: 1 as const,
+      id: `quote-${index}`,
+      kind: 'quote' as const,
+      text,
+      comment: `comment ${index}`,
+      source: { kind: 'message' as const, threadId: 'source', messageId: `source-${index}` },
+    }));
+    await saveNewConversationIntent({
+      ownerUserId: ALICE,
+      intent: {
+        v: 1,
+        createIdempotencyKey: '11111111-1111-4111-8111-111111111111',
+        messageIdempotencyKey: '22222222-2222-4222-8222-222222222222',
+        preferredCats: [],
+        creationStarted: false,
+      },
+      files: [],
+      contextAttachments,
+      updatedAt: 42,
+    });
+    _resetNewConversationIntentDbForTests();
+    expect((await loadNewConversationIntent(ALICE))?.contextAttachments).toEqual(contextAttachments);
+  }
+});

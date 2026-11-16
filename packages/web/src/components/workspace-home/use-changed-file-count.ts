@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import { apiFetch } from '@/utils/api-client';
 
 /**
- * How many files the 变更 page will list for this worktree — the same `changedFiles` projection that page reads,
+ * How many files the 变更 page will list for this worktree — the same filtered Git status entries that page reads,
  * without generating the patch bodies that a count does not consume.
  *
  * `null` means "not known" (no worktree yet, the read is still in flight, or it failed). That is a third state, not zero:
@@ -24,13 +24,14 @@ export function useChangedFileCount(worktreeId: string | null): number | null {
     const controller = new AbortController();
     void (async () => {
       try {
-        const response = await apiFetch(`/api/workspace/diff?worktreeId=${encodeURIComponent(worktreeId)}&view=files`, {
+        const response = await apiFetch(`/api/workspace/diff?worktreeId=${encodeURIComponent(worktreeId)}&view=count`, {
           signal: controller.signal,
         });
         if (!response.ok) return;
-        const body = (await response.json()) as { changedFiles?: unknown };
-        if (!Array.isArray(body.changedFiles)) return;
-        if (!controller.signal.aborted) setRead({ worktreeId, count: body.changedFiles.length });
+        const body = (await response.json()) as { changedFileCount?: unknown };
+        const count = body.changedFileCount;
+        if (typeof count !== 'number' || !Number.isSafeInteger(count) || count < 0) return;
+        if (!controller.signal.aborted) setRead({ worktreeId, count });
       } catch {
         /* Unknown stays unknown: no stale or invented number. */
       }

@@ -2,6 +2,7 @@ import type Database from 'better-sqlite3';
 import type { PassageEmbeddingRow } from './embed-utils.js';
 import { type PassageVectorStore, passageVectorKey } from './PassageVectorStore.js';
 import { capturePassageVectorSource } from './vector-source-binding.js';
+import { ELIGIBLE_VECTOR_PASSAGE } from './vector-source-fields.js';
 
 /** Inspect a bounded metadata page; only missing vectors require passage bodies. */
 export function readPassageEmbeddingPage(
@@ -27,10 +28,10 @@ export function readPassageEmbeddingPage(
   const missing = rows.filter((row) => !existing.has(passageVectorKey(row.docAnchor, row.passageId)));
   const passages = missing.length
     ? (db
-        .prepare(`SELECT doc_anchor AS docAnchor, passage_id AS passageId, content FROM evidence_passages
-          WHERE id IN (${missing.map(() => '?').join(',')}) ORDER BY id`)
+        .prepare(`SELECT p.doc_anchor AS docAnchor, p.passage_id AS passageId, p.content FROM evidence_passages p
+          WHERE p.id IN (${missing.map(() => '?').join(',')}) AND (${ELIGIBLE_VECTOR_PASSAGE}) ORDER BY p.id`)
         .all(...missing.map(({ id }) => id)) as PassageEmbeddingRow[])
     : [];
   for (const passage of passages) passage.sourceSnapshot = capturePassageVectorSource(db, passage);
-  return { lastId: last.id, metadataRows: rows.length, passages };
+  return { lastId: last.id, metadataRows: rows.length, passages: passages.filter((passage) => passage.sourceSnapshot) };
 }

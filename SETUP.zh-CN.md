@@ -255,6 +255,21 @@ NEXT_PUBLIC_API_URL=http://localhost:3004
 
 ![成员绑定百炼 Provider](docs/setup/setup-member-binding.png)
 
+#### OpenCode 接入方式（CLI / ACP）
+
+以下内容适用于使用 OpenCode 的成员（如上面的 Qwen 示例）。在当前成员编辑器中，进入 **高级接入 → 接入方式** 选择 CLI 或 ACP；旧版本可能将这个 CLI/ACP 选择项标为 **Transport**。它只决定“通过哪种运行载体执行”，不改变 provider 的认证或 API Key：
+
+- **CLI（默认）**：启动 `opencode run`，使用绑定账号的 API Key / Base URL。使用 OpenCode 接入的 OpenAI-compatible provider 优先用这个。
+- **ACP**：启动独立的 `opencode acp` 子进程，需要本机 OpenCode 支持 ACP 并能正常启动；它不会自动修复 provider/key 配置。
+
+选中 ACP 后，另一个 **传输 / Transport** 字段选择的是 ACP 使用的 **stdio / HTTP stream**；它不能切换 CLI 和 ACP，切换时应使用 **接入方式**。
+
+建议先用 CLI 验证连通性。如果 ACP 报 `ACP process exited: code=1`，先在 **接入方式** 中切回 **CLI**，再在同一个项目目录运行 `opencode --version` 和 `opencode acp`，查看子进程的完整退出信息。
+
+Base URL 填 OpenAI-compatible **根地址**（通常到 `/v1`），不要填最终的 `/chat/completions` 接口。若 CLI 下某个模型失败、换一个模型正常，可把模型/provider 的可用性或兼容性作为排查方向；单次观察不足以定性，也不能据此认定 CLI/ACP 选择项缺失。
+
+> 其他 client 有各自的 carrier 和认证要求，不要把这里的 OpenCode 命令套用到它们。教程截图可能使用旧字段名，请以当前安装的成员编辑器为准。
+
 ## 可选功能
 
 只要有模型访问 + Redis（或 `--memory` 模式），Clowder 就能开箱即用。以下功能全是可选的。

@@ -13,6 +13,9 @@ reviewed_by: "斑斑/Claude Opus 4.6 Thinking (fact-check review, 2026-07-01)"
 
 # Clowder AI Eval 系统全景
 
+> **现行方法与执行边界（2026-11-13，F192 Phase S）**：eval-design 的测量、对照、校准、成本与独立验收方法在原 Task / 项目即可使用，不要求 F192 领域、publish_verdict 或自动复评。F192 常驻评估与 F266 自动追结案按已批准范围退役；下文的平台图、周期触发与历史落地记录用于理解既有实现，不是当前通用必经流程。既有 F311/F267 正式证据和 owner 权限在专门迁接前继续有效。范围与实际生效以 F192 Phase S 及原 Task 为准，不以本文注释代替部署验收。
+
+
 > 面向想理解 "Clowder AI 怎么评估猫猫和 harness 是否好用" 的工程师和新猫。
 >
 > 本文和 [memory-system-overview.md](./memory-system-overview.md) / [collaboration-landscape.md](./collaboration-landscape.md) 是同一类文档：不是某个 feature 的实施计划，而是把散落在 F153、F192、F200、F245、F248 等 spec 里的 eval 架构拼成一张系统地图。

@@ -215,7 +215,7 @@ export function compileGovernanceL0FromMarkdown(markdown: string): string {
     '- 共享状态文件只在 main 改，改完立刻 `git commit + git push`。',
     '- 跨 thread 阻塞依赖双写到可追溯状态；消息不是真相源。',
     '',
-    '- Bug 先定位根因、先红后绿；先完成被纠正的任务，再按 self-evolution 沉淀。',
+    '- Bug 先定位根因、先红后绿；先完成被纠正的任务，再按 code-as-harness 处理。',
     '',
     '### Magic Words（co-creator专用纠偏词）',
     ...magicWords,

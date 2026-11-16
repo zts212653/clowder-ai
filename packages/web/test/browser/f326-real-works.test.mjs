@@ -23,6 +23,7 @@ test(
   'a real delivered film enters the original Works, seeks a sourced paragraph and queues an original-composer mark',
   { timeout: 300000 },
   async (t) => {
+    if (!process.env.F326_C_REAL_FILM_MANIFEST) return t.skip('dedicated F326 film manifest required');
     assert.equal(process.env.F326_C_BROWSER_ALLOW_MUTATIONS, 'isolated-feature');
     const manifest = JSON.parse(await readFile(process.env.F326_C_REAL_FILM_MANIFEST, 'utf8'));
     assert.equal(await digestFile(manifest.film), manifest.digest);

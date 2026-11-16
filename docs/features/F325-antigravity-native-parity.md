@@ -167,6 +167,11 @@ ACP 原生 L0 缺口已证；You 已选择保留个人 OAuth 与原生 L0，继�
 - 状态：open，由 Astra 原 Task2347 持有。Carbon 原071已将媒体摘要错误与启动前 HTTP EOF 分开；Task088/#6953 的已完成会话连续性、Task133/#6964 的启动前有限重试均不覆盖本问题。内部清空机制、媒体预算与恢复性仍待合法原件核验，不能以“图片撑满”或“1M窗口正常”替代诊断。
 - Carbon 已回原888脱敏摘录：init后终态ERROR、最后工具为`.mp4`读取、无独立清空事件；六图后继在同一conversation完成。持久轨迹被清空、下一请求绝未发出均不能由错误文字/用量合计证明。下一步沿旧现场区分摘要输入、媒体预算及宿主安全恢复缺口；精确事发CLI版本仍未固定。不新增模型、多图或重启探针，不重开已done子Task或另建writer。
 
+#### Open issue：CLI 内部完成而宿主输出缺尾 {#native-completed-reply-unobserved}
+
+- 宿主独立核到 child `246862a3`、parent `9bd80bad`，直到用户取消才在次日00:32结算；原726只有启动诊断，没有终态判定。正式 boot84/605bd477 包含 #6329；无事发 Host 重启证据，19:39仍有协议记录，不能推三小时整点截断。
+- 状态：open，由 Astra 原 Task2347 持有。#6329处理已到达的完整回复，不覆盖本次未观察到终态；不把它先登记为同根回归。观察归档不是 OS stdout 抓取，尚不能唯一判为CLI写端缺失或宿主读取/消费链停滞；没有显式exit回执。沿原Task核区分证据和安全取回，媒体摘要问题独立保留，不新增Task/writer，不重跑已完成业务或擅加自动重试。
+
 #### 工作单元：Native CLI 同进程续轮（Claude SDK 档）{#native-same-process-followup}
 
 - **来源 / 分工**：You source1329（`private-source-id`）。Sol6.1（@codex61-sol）写代码，Argon（@gemini-argon）独立审查，印印（@agy-opus55）指挥并在合入后最终验收。官方 ACP 的插话下一轮再做，本单不碰。

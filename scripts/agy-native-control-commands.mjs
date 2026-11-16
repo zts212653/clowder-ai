@@ -1,6 +1,10 @@
 import { executedInvocations, optionValue } from './lib/shell-invocation.mjs';
-import { isShellStructure, segmentCommandText, segmentContexts } from './native-effect-segment-locations.mjs';
+import { scanShellText } from './lib/shell-lexical.mjs';
+import { extractSubstitutions } from './lib/shell-text.mjs';
+import { programNamespaceStability } from './native-effect-copy-namespace.mjs';
+import { segmentCommandText, segmentContexts } from './native-effect-segment-locations.mjs';
 import { classifyShellSegment, splitShellExecutionSegmentsWithSeparators } from './native-effect-shell-classifier.mjs';
+import { hasConcurrentShellExecution } from './native-effect-shell-concurrency.mjs';
 import { expandSegmentBindings } from './native-effect-shell-expansion.mjs';
 import { shellInvocation } from './native-effect-shell-tokenizer.mjs';
 import { fileProgramAnalysis } from './native-effect-write-effects.mjs';
@@ -43,56 +47,95 @@ function fileTargets(call) {
 }
 
 /** Carrier control files use the same shell coordinates and argv parser as the shared effect guard. */
-export function commandTouchesAgyControl(command, cwd, profileHome, isControl, depth = 0, toolHome = profileHome) {
-  if (depth > 8) return true;
+export function commandTouchesAgyControl(
+  command,
+  cwd,
+  profileHome,
+  isControl,
+  depth = 0,
+  toolHome = profileHome,
+  builtinContext = true,
+) {
   const env = { ...process.env, ...(toolHome ? { HOME: toolHome } : {}) };
-  // Preserve shared stdin-to-code attribution before splitting the pipeline.
-  // A quoted path printed as data becomes executable only at its shell consumer.
-  const delegated = executedInvocations(command, { cwd }).directInvocations ?? [];
-  if (
-    delegated.some(
-      (call) =>
-        call.delegated &&
-        call.script &&
-        commandTouchesAgyControl(call.script, call.cwd ?? cwd, profileHome, isControl, depth + 1, toolHome),
-    )
-  )
-    return true;
-  const segments = splitShellExecutionSegmentsWithSeparators(command);
-  const contexts = segmentContexts(segments, cwd, env);
-  return segments.some((segment, index) => {
-    if (isShellStructure(segment.text)) return false;
-    return contexts[index].some(({ directory, bindings }) =>
-      expandSegmentBindings(segmentCommandText(segment.text), bindings, env).some(({ text }) => {
-        const target = (path) => {
-          const expanded = path.startsWith('~/') && toolHome ? `${toolHome}/${path.slice(2)}` : path;
-          return isControl(expanded, directory ?? cwd, profileHome);
-        };
-        const parsed = shellInvocation(text);
-        if (parsed.redirections.some(({ operator, operand }) => operator.includes('>') && target(operand.value)))
-          return true;
-        if ((fileProgramAnalysis(text).writes ?? []).some(target)) return true;
-        const calls = executedInvocations(text, { cwd: directory, bindings }).pipelines.flat();
-        return calls.some((call) => {
-          if (call.script && call.delegated)
-            return commandTouchesAgyControl(
-              call.script,
-              call.cwd ?? directory ?? cwd,
-              profileHome,
-              isControl,
-              depth + 1,
-              toolHome,
-            );
-          if (profileHome && call.name.toLowerCase() === 'security') return !isReadOnlySecurityCall(call);
-          // Printing a filename is data. Read-only calls do not mutate the carrier.
-          if (
-            ['echo', 'printf', 'cd', 'pushd'].includes(call.name) ||
-            classifyShellSegment(call.text ?? text) === 'read'
-          )
-            return false;
-          return fileTargets(call).some(target);
-        });
-      }),
-    );
+  return inspectScript(command, { cwd, depth, builtinContext }, { profileHome, toolHome, isControl, env });
+}
+
+// A substitution inherits a fork of the caller's shell data. A new interpreter
+// starts without a native-builtin certificate; neither path borrows outer text.
+function inspectScript(command, scope, owner) {
+  if (scope.depth > 8) return true;
+  const parts = splitShellExecutionSegmentsWithSeparators(command);
+  const namespaces = programNamespaceStability(
+    parts.map(({ text }) => ({ segment: text })),
+    scope.builtinContext && !hasConcurrentShellExecution(scanShellText(command), command, true),
+  );
+  for (let index = 1; index < parts.length; index++)
+    if (['|', '|&'].includes(parts[index].separator)) {
+      namespaces[index] = false;
+      namespaces[index - 1] = false;
+    }
+  const contexts = segmentContexts(parts, scope.cwd, owner.env, namespaces, scope);
+  // Keep every pipeline's producer and consumer in one reader invocation.
+  return parts.some((part, index) => {
+    if (['|', '|&'].includes(part.separator)) return false;
+    let end = index;
+    while (['|', '|&'].includes(parts[end + 1]?.separator)) end++;
+    const chain = parts
+      .slice(index, end + 1)
+      .map((p, i) => `${i ? p.separator : ''} ${segmentCommandText(p.text)}`)
+      .join(' ');
+    return contexts[index].some(({ directory, bindings, parameters }) => {
+      const active = {
+        cwd: directory ?? scope.cwd,
+        bindings,
+        parameters,
+        depth: scope.depth,
+        builtinContext: namespaces[index] && index === end,
+      };
+      // Inspect child source before expanding the host's argv: host expansion
+      // must not rewrite a child's later binding or confuse its nested quotes.
+      const substitutions = extractSubstitutions(chain);
+      if (substitutions.inner.some((inner) => inspectScript(inner, { ...active, depth: scope.depth + 1 }, owner)))
+        return true;
+      return expandSegmentBindings(substitutions.text, bindings, owner.env).some(({ text }) =>
+        inspectChain(text, active, owner),
+      );
+    });
   });
+}
+
+function inspectChain(text, scope, owner) {
+  const target = (path, cwd = scope.cwd) => {
+    const expanded = path.startsWith('~/') && owner.toolHome ? `${owner.toolHome}/${path.slice(2)}` : path;
+    return owner.isControl(expanded, cwd, owner.profileHome);
+  };
+  if (writesControl(shellInvocation(text).redirections, target)) return true;
+  if ((fileProgramAnalysis(text).writes ?? []).some((path) => target(path))) return true;
+  const calls = executedInvocations(text, scope).pipelines.flat();
+  return calls.some((call) => {
+    const cwd = call.cwd ?? scope.cwd;
+    if (writesControl(call.redirections ?? [], (path) => target(path, cwd))) return true;
+    if (
+      call.script &&
+      call.delegated &&
+      inspectScript(call.script, { cwd, depth: scope.depth + 1, builtinContext: false }, owner)
+    )
+      return true;
+    if (call.lookupOnly) return false;
+    if (owner.profileHome && call.name?.toLowerCase() === 'security') return !isReadOnlySecurityCall(call);
+    // An execution call that was not certified by its own reader must not be
+    // recertified by parsing call.text with the parent namespace.
+    if (
+      ['echo', 'printf', 'cd', 'pushd'].includes(call.name) ||
+      classifyShellSegment(call.text ?? text, { builtinContext: false }) === 'read'
+    )
+      return false;
+    return fileTargets(call).some((path) => target(path, cwd));
+  });
+}
+
+function writesControl(redirections, target) {
+  return redirections.some(
+    ({ operator, operand }) => operator.includes('>') && typeof operand?.value === 'string' && target(operand.value),
+  );
 }

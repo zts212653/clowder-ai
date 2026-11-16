@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'node:test';
 import Fastify from 'fastify';
-import { memoryProposalNativeClient } from './helpers/memory-proposal-native-client.js';
+import { callRememberItem, memoryProposalNativeClient } from './helpers/memory-proposal-native-client.js';
 import { canonicalTestMessageInput } from './helpers/message-from-fixtures.js';
 
 describe('F231 approval origin authentication', () => {
@@ -41,6 +41,8 @@ describe('F231 approval origin authentication', () => {
       socketManager,
       repository,
     });
+    const rememberMod = await import('../dist/routes/callback-remember-routes.js');
+    rememberMod.registerCallbackRememberRoutes(app, { registry, messageStore, socketManager });
     await app.ready();
   });
 
@@ -140,7 +142,7 @@ describe('F231 approval origin authentication', () => {
         sourceMessageId: source.id,
         clientRequestId: 'native-profile-explicit-source',
       };
-      const call = (args) => client.callTool({ name: 'cat_cafe_propose_profile_update', arguments: args });
+      const call = (args) => callRememberItem(client, 'profile', args);
       const first = await call(input);
       assert.notEqual(first.isError, true, JSON.stringify(first));
       const id = JSON.parse(first.content[0].text).proposalId;

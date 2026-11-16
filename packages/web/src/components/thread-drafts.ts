@@ -1,4 +1,4 @@
-import { type ContextAttachment, ContextAttachmentsSchema, type ReplyPreview } from '@cat-cafe/shared';
+import { type ContextAttachment, ContextAttachmentDraftsSchema, type ReplyPreview } from '@cat-cafe/shared';
 
 const STORAGE_KEY = 'cat-cafe:thread-drafts';
 const REPLY_STORAGE_KEY = 'cat-cafe:thread-reply-drafts';
@@ -69,7 +69,7 @@ export function parseContextAttachmentDrafts(raw: string | null): Map<string, Co
     if (!Array.isArray(entries)) return map;
     for (const entry of entries) {
       if (!Array.isArray(entry) || typeof entry[0] !== 'string') continue;
-      const parsed = ContextAttachmentsSchema.safeParse(entry[1]);
+      const parsed = ContextAttachmentDraftsSchema.safeParse(entry[1]);
       if (parsed.success && parsed.data.length > 0) map.set(entry[0], parsed.data);
     }
   } catch {
@@ -222,8 +222,9 @@ export function syncReplyDraftToStorage(threadId: string, reply: DraftReplyConte
 
 export function syncContextAttachmentDraftToStorage(threadId: string, attachments: readonly ContextAttachment[]): void {
   const previousSignature = JSON.stringify(threadContextAttachmentDrafts.get(threadId) ?? EMPTY_CONTEXT_ATTACHMENTS);
-  const parsed = ContextAttachmentsSchema.safeParse(attachments);
-  const next = parsed.success && parsed.data.length > 0 ? parsed.data : EMPTY_CONTEXT_ATTACHMENTS;
+  const parsed = ContextAttachmentDraftsSchema.safeParse(attachments);
+  if (!parsed.success) return;
+  const next = parsed.data;
   const nextSignature = JSON.stringify(next);
   if (previousSignature === nextSignature) return;
   if (next.length > 0) threadContextAttachmentDrafts.set(threadId, [...next]);

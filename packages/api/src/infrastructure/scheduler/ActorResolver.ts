@@ -40,14 +40,15 @@ function requiredRoles(role: ActorRole, costTier: CostTier, policy?: ActorResolu
 export function createActorResolver(
   getRoster: RosterGetter,
   policy?: ActorResolutionPolicy,
-): (role: ActorRole, costTier: CostTier) => string | null {
-  return (role: ActorRole, costTier: CostTier): string | null => {
+): (role: ActorRole, costTier: CostTier, isEligible?: (catId: string) => boolean) => string | null {
+  return (role: ActorRole, costTier: CostTier, isEligible?: (catId: string) => boolean): string | null => {
     const roster = getRoster();
     const acceptedRoles = requiredRoles(role, costTier, policy);
 
     const candidates = Object.entries(roster)
       .filter(([catId, entry]) => {
         if (!entry.available) return false;
+        if (isEligible && !isEligible(catId)) return false;
         if (role === 'memory-curator' && costTier === 'cheap' && policy?.isScarce(catId)) return false;
         return acceptedRoles.some((r) => entry.roles.includes(r));
       })

@@ -14,16 +14,20 @@ import {
   assertCoveredMessageIds,
   assertCreatableOutputFence,
   assertCreateTurnExecutionInput,
+  assertRecentSettledLimit,
   assertTurnExecutionTerminalInput,
   type BindCoveredMessageIdsResult,
   type CreateTurnExecutionInput,
   type CreateTurnExecutionResult,
   cloneTurnExecutionRecord,
   createdOutputFence,
+  HOST_SLEEP_TERMINAL_REASON,
   hasUnconfirmedProviderTeardown,
   type InterruptRunningTurnExecutionsInput,
   type ITurnExecutionStore,
+  type MemberTurnStartedAfterQuery,
   matchesTurnExecutionSource,
+  type RecentSettledTurnQuery,
   serializeTurnExecutionIdentity,
   type TransitionTurnExecutionResult,
   type TurnExecutionRecord,
@@ -73,6 +77,7 @@ export class InMemoryTurnExecutionStore implements ITurnExecutionStore {
   }
 
   private readonly records = new Map<string, TurnExecutionRecord>();
+  private readonly owedSleepContinuations = new Set<string>();
   private readonly immutableIdentities = new Map<string, string>();
   private readonly parentIndex = new Map<string, Set<string>>();
   private readonly responsePending = new Set<string>();
@@ -192,6 +197,9 @@ export class InMemoryTurnExecutionStore implements ITurnExecutionStore {
     if (input.terminalReason !== undefined) record.terminalReason = input.terminalReason;
     if (input.providerTeardownAt !== undefined) record.providerTeardownAt = input.providerTeardownAt;
     this.responsePending.add(invocationId);
+    if (input.status === 'failed' && input.terminalReason === HOST_SLEEP_TERMINAL_REASON) {
+      this.owedSleepContinuations.add(invocationId);
+    }
     this.publishPending(record);
     return { outcome: 'transitioned', record: cloneTurnExecutionRecord(record) };
   }
@@ -244,6 +252,46 @@ export class InMemoryTurnExecutionStore implements ITurnExecutionStore {
   private publishPending(record: TurnExecutionRecord): void {
     if (record.pendingResponseSettlement && record.status !== 'running')
       this.markResponseSettled(record.invocationId, record.pendingResponseSettlement);
+  }
+
+  hasMemberTurnStartedAfter(query: MemberTurnStartedAfterQuery): boolean {
+    for (const record of this.records.values()) {
+      if (
+        record.userId === query.userId &&
+        record.threadId === query.threadId &&
+        record.catId === query.catId &&
+        record.executionKind !== 'watcher' &&
+        record.startedAt > query.startedAfter
+      )
+        return true;
+    }
+    return false;
+  }
+
+  listOwedSleepContinuations(): TurnExecutionRecord[] {
+    return [...this.owedSleepContinuations]
+      .map((invocationId) => this.records.get(invocationId))
+      .filter((record): record is TurnExecutionRecord => record !== undefined)
+      .map(cloneTurnExecutionRecord);
+  }
+
+  settleOwedSleepContinuations(invocationIds: readonly string[]): void {
+    for (const invocationId of invocationIds) this.owedSleepContinuations.delete(invocationId);
+  }
+
+  listRecentSettled(query: RecentSettledTurnQuery): TurnExecutionRecord[] {
+    assertRecentSettledLimit(query.limit);
+    return [...this.records.values()]
+      .filter(
+        (record) =>
+          record.userId === query.userId &&
+          (!query.threadId || record.threadId === query.threadId) &&
+          record.responseSettlement &&
+          record.settledSequence,
+      )
+      .sort((a, b) => b.settledSequence! - a.settledSequence!)
+      .slice(0, query.limit)
+      .map(cloneTurnExecutionRecord);
   }
 
   listSettled(query: SettledTurnQuery): SettledTurnPage {
