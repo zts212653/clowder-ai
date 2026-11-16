@@ -1025,8 +1025,10 @@ function bindPluginRequests() {
       : out;
   }
   function read(key) {
-    const s = held[key];
-    pushProjectData({ [key]: Object.assign({}, projectData(key), { load: 'loading' }) });
+    const s = held[key],
+      cur = projectData(key);
+    // a source that already has a value keeps drawing it while it is read again; only a first read is loading
+    if (!cur || cur.value === undefined) pushProjectData({ [key]: Object.assign({}, cur, { load: 'loading' }) });
     return call(s.plugin, s.request, s.input).then(
       function (v) {
         const before = projectData(key) || {};

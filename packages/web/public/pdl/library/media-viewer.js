@@ -108,7 +108,7 @@ document.addEventListener('pointerdown', function (e) {
     else { const a = area(end); shape.innerHTML = '<rect x="' + a.x + '" y="' + a.y + '" width="' + a.width + '" height="' + a.height + '"></rect>'; }
   };
   const finish = function (ev) {
-    native.removeEventListener('pointermove', move); native.removeEventListener('pointerup', finish); native.removeEventListener('pointercancel', finish); shape.remove(); if (ev.type === 'pointercancel') { if (mark) { state.mode = 'select'; mediaMarkupPaint(host); } return; }
+    native.removeEventListener('pointermove', move); native.removeEventListener('pointerup', finish); native.removeEventListener('pointercancel', finish); shape.remove(); clickEat();   /* 框选 / 点选 / 标绘到松手为止：松手后的 click 不算点在别处（不关掉它刚打开的选择工具条） */ if (ev.type === 'pointercancel') { if (mark) { state.mode = 'select'; mediaMarkupPaint(host); } return; }
     if (mark) { move(ev); mediaMarkupCommit(host, state.marks.concat([mark])); return; }
     if (!host.dataset.pick) { if (state) { state.selected = ''; mediaMarkupPaint(host); } return; }
     const end = point(ev), a = Math.hypot(ev.clientX - e.clientX, ev.clientY - e.clientY) > 4 ? area(end) : { x: start.x, y: start.y }, pick = JSON.parse(host.dataset.pick);

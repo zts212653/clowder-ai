@@ -570,8 +570,12 @@ function toast(msg, act, tone) { TOAST_LOG.push(String(msg)); S.toast = msg; S.t
    谁能被拖由登记的提供者决定（EDGE_DRAG）：find(目标) → 可拖的元素（或 { el, whole } 整块都算边缘）；start(元素, 事件) → 会话 { move(e), end(e, moved) }。
    弹窗框架（下面）和编辑布局里可编辑的节点（pdl.js）都登记在这里，用户只学一个手势。拖过之后紧跟的那次点击会被吃掉，免得拖完误触发 */
 const EDGE_DRAG = [];
+/* 一次手势（拖动、框选）在松手时结束：紧跟着的那一下 click 不是点击，吃掉（在点外面关弹窗之前），下一个任务就不再吃。拖动和组件自己的指针手势共用这一处 */
+let CLICK_EAT = false;
+function clickEat() { CLICK_EAT = true; setTimeout(function () { CLICK_EAT = false; }, 0); }
+document.addEventListener('click', function (e) { if (CLICK_EAT) { e.stopImmediatePropagation(); e.preventDefault(); CLICK_EAT = false; } }, true);
 (function () {
-  const EDGE = 6; let sess = null, eat = false, cur = null;
+  const EDGE = 6; let sess = null, cur = null;
   const onEdge = function (el, e) { const r = el.getBoundingClientRect(); return e.clientX - r.left < EDGE || r.right - e.clientX < EDGE || e.clientY - r.top < EDGE || r.bottom - e.clientY < EDGE; };
   /* 嵌套拖动按命中层级取最近的可抓元素；外层窗口不能先截走里面的入口。 */
   const hit = function (t, e) {
@@ -597,8 +601,7 @@ const EDGE_DRAG = [];
     sess = { s: s, moved: false }; e.preventDefault();
     document.querySelectorAll('iframe').forEach(function (f) { f.style.pointerEvents = 'none'; });   /* 拖过框（插件页面）时指针不被框吃掉 */
   }, true);
-  document.addEventListener('mouseup', function (e) { if (!sess) return; const s = sess; sess = null; document.querySelectorAll('iframe').forEach(function (f) { f.style.pointerEvents = ''; }); if (s.moved) eat = true; s.s.end(e, s.moved); setTimeout(function () { eat = false; }, 0); });
-  document.addEventListener('click', function (e) { if (eat) { e.stopImmediatePropagation(); e.preventDefault(); eat = false; } }, true);
+  document.addEventListener('mouseup', function (e) { if (!sess) return; const s = sess; sess = null; document.querySelectorAll('iframe').forEach(function (f) { f.style.pointerEvents = ''; }); if (s.moved) clickEat(); s.s.end(e, s.moved); });
 })();
 /* 弹窗拖动：弹窗框架（[data-pop] 的第一个子元素）能不能拖只看 PDL_POPUPS 的 drag 声明，不逐个开启。拖动是相对初始位置（at）的偏移，只在这次打开期间有效：关掉再打开回到初始位置 */
 S.dragPos = {};
