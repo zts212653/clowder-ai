@@ -71,7 +71,11 @@ export function sanitizeCliStderr(input: string, options: CliStderrSanitizerOpti
 
   // 5. URL userinfo / query / fragment strings
   out = out.replace(SANITIZER_PATTERNS.urlUserinfo, '$1$2[CREDENTIALS_REDACTED]@');
-  out = out.replace(SANITIZER_PATTERNS.urlQuery, '$1[QUERY_REDACTED]');
+  out = out.replace(SANITIZER_PATTERNS.urlQuery, (match, boundary: string, prefix: string) =>
+    /[/.]/.test(prefix) || /:\d+$/.test(prefix) || prefix.toLowerCase() === 'localhost'
+      ? `${boundary}${prefix}?[QUERY_REDACTED]`
+      : match,
+  );
   out = out.replace(SANITIZER_PATTERNS.urlFragment, '$1[FRAGMENT_REDACTED]');
 
   // 6. Provider tokens (specific first to avoid generic pattern eating prefix)

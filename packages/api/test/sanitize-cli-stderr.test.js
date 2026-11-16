@@ -106,10 +106,11 @@ test('redacts URL query string entirely', () => {
 });
 
 test('keeps natural-language questions while redacting actual URL queries', () => {
-  const input = '为什么失败？我重试了三次。Why?Still failing. https://example.test/path?code=private-code';
+  const input =
+    '为什么失败？我重试了三次。Why?Still failing. 怎么回事?我重试了。 https://example.test/path?code=private-code';
   assert.equal(
     sanitizeCliStderr(input),
-    '为什么失败？我重试了三次。Why?Still failing. https://example.test/path?[QUERY_REDACTED]',
+    '为什么失败？我重试了三次。Why?Still failing. 怎么回事?我重试了。 https://example.test/path?[QUERY_REDACTED]',
   );
 });
 
@@ -122,6 +123,9 @@ test('redacts query strings in relative HTTP requests and schemeless URLs', () =
     'https://example.test/path?opaque-query',
     'localhost:3000/x?token=1',
     '127.0.0.1:3000/x?token=1',
+    '10.0.0.5:8080/path?auth=hunter2hunter2',
+    'api/v1/users?sid=deadbeef12',
+    'https://例子.测试/路径?session=private-session',
   ].forEach((url) => {
     const out = sanitizeCliStderr(`GET ${url} HTTP/1.1`);
     assert.equal(out, `GET ${url.slice(0, url.indexOf('?') + 1)}[QUERY_REDACTED] HTTP/1.1`);
@@ -134,10 +138,19 @@ test('redacts URL queries immediately following a log or HTTP header colon', () 
   });
 });
 
-test('keeps fullwidth question punctuation after URLs and does not mistake Windows files for URLs', () => {
+test('keeps fullwidth question punctuation and conservatively redacts ambiguous filenames', () => {
   const input =
     '访问 https://x.test/a？页面空白\n访问 /settings？就报错\n访问 example.com？为什么打不开\nC:\\tmp\\file.txt?not-a-url';
-  assert.equal(sanitizeCliStderr(input), input);
+  assert.equal(sanitizeCliStderr(input), input.replace('?not-a-url', '?[QUERY_REDACTED]'));
+});
+
+test('URL query scanning stays bounded on long non-URL delimiter output', () => {
+  const input = ':/'.repeat(32_768);
+  const startedAt = performance.now();
+  const out = sanitizeCliStderr(input);
+  const elapsedMs = performance.now() - startedAt;
+  assert.strictEqual(out, input);
+  assert.ok(elapsedMs < 500, `64 KiB query scanning took ${elapsedMs.toFixed(1)}ms`);
 });
 
 test('redacts URL userinfo credentials while retaining the destination host', () => {
