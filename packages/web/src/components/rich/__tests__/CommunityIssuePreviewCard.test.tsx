@@ -27,6 +27,57 @@ beforeEach(() => {
 afterEach(() => {
   act(() => root.unmount());
   container.remove();
+  vi.unstubAllGlobals();
+});
+
+it('keeps the current edited report readable and copyable after publish and reload both return 404', async () => {
+  let published = false;
+  const writeText = vi.fn().mockResolvedValue(undefined);
+  vi.stubGlobal('navigator', { clipboard: { writeText } });
+  vi.mocked(apiFetch).mockImplementation(async (_url, init) => {
+    if (init?.method === 'POST') published = true;
+    return new Response(JSON.stringify(published ? { error: 'Draft not found' } : { draft }), {
+      status: published ? 404 : 200,
+    });
+  });
+  await act(async () =>
+    root.render(
+      <CommunityIssuePreviewCard inlineDraftId={draft.draftId} unavailableFallback={<p>Original fallback</p>} />,
+    ),
+  );
+  const input = container.querySelector('input');
+  const textarea = container.querySelector('textarea');
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set?.call(input, '当前编辑标题');
+    input?.dispatchEvent(new Event('input', { bubbles: true }));
+    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set?.call(textarea, '当前编辑正文');
+    textarea?.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  await act(async () => container.querySelector('button')?.click());
+  expect(apiFetch).toHaveBeenLastCalledWith(
+    `${endpoint}/publish`,
+    expect.objectContaining({ body: JSON.stringify({ title: '当前编辑标题', bodyMarkdown: '当前编辑正文' }) }),
+  );
+  expect(container.querySelector('[aria-label="公开报告"]')?.textContent).toContain('当前编辑标题');
+  expect(container.querySelector('[aria-label="公开报告"]')?.textContent).toContain('当前编辑正文');
+  await act(async () =>
+    [...container.querySelectorAll('button')].find((button) => button.textContent === '重新加载草稿')?.click(),
+  );
+  expect(apiFetch).toHaveBeenLastCalledWith(endpoint);
+  expect(container.querySelector('[aria-label="公开报告"]')?.textContent).toContain('当前编辑正文');
+  expect(container.textContent).not.toContain('Original fallback');
+  await act(async () =>
+    [...container.querySelectorAll('button')].find((button) => button.textContent === '复制报告')?.click(),
+  );
+  expect(writeText).toHaveBeenCalledWith('当前编辑标题\n\n当前编辑正文');
+  expect(
+    vi
+      .mocked(apiFetch)
+      .mock.calls.filter(([, init]) => init?.method === 'POST')
+      .map(([url]) => url),
+  ).toEqual([`${endpoint}/publish`]);
+  expect(container.querySelector('input')).toBeNull();
+  expect(container.textContent).not.toContain('已发布到 GitHub');
 });
 for (const action of ['publish', 'cancel'] as const) {
   it(`hydrates and sends ${action} through the plugin by-id path with a single encoded identifier`, async () => {
@@ -256,7 +307,9 @@ it.each([
   expect(container.textContent).not.toContain('尚未确认远端提交结果');
   if (status === 404) {
     expect(container.querySelector('textarea')).toBeNull();
-    expect(container.querySelector('button')?.textContent).toBe('重新加载草稿');
+    expect([...container.querySelectorAll('button')].some((button) => button.textContent === '重新加载草稿')).toBe(
+      true,
+    );
   } else expect(container.querySelector('textarea')?.disabled).toBe(false);
 });
 

@@ -50,6 +50,7 @@ export function CommunityIssuePreviewCard({
   const [targetAccepted, setTargetAccepted] = useState(false);
   const [retry, setRetry] = useState(0);
   const [error, setError] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: retry reloads the same retained draft.
   useEffect(() => {
@@ -60,6 +61,7 @@ export function CommunityIssuePreviewCard({
     }
     let cancelled = false;
     setState('loading');
+    setCopied(false);
     void apiFetch(
       `/api/plugins/official.github-operations/github/community-issue-drafts/by-id/${encodeURIComponent(draftId)}`,
     )
@@ -186,7 +188,25 @@ export function CommunityIssuePreviewCard({
           <p role="alert" className="text-xs text-cafe-muted">
             {error}
           </p>
-          {!draft && unavailableFallback}
+          {draft ? (
+            <div className="space-y-2 text-cafe">
+              <CommunityIssueReport title={editTitle} bodyMarkdown={editBody} />
+              <button
+                type="button"
+                className="text-xs underline"
+                onClick={() => {
+                  void navigator.clipboard.writeText(`${editTitle}\n\n${editBody}`).then(
+                    () => setCopied(true),
+                    () => setError('复制失败，可以直接选中报告文本复制。'),
+                  );
+                }}
+              >
+                {copied ? '已复制报告' : '复制报告'}
+              </button>
+            </div>
+          ) : (
+            unavailableFallback
+          )}
           <button type="button" onClick={() => setRetry((value) => value + 1)} className={communityPrimaryAction}>
             重新加载草稿
           </button>

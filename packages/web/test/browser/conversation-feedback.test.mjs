@@ -39,6 +39,8 @@ for (const entry of ['local', 'agent', 'connector']) {
               'invalid-mobile',
               'rejected',
               'denied',
+              'missing',
+              'missing-mobile',
             ]
           : []),
       ]) {
@@ -52,6 +54,17 @@ for (const entry of ['local', 'agent', 'connector']) {
         });
         t.after(() => context.close());
         const page = await context.newPage();
+        if (scenario.startsWith('missing'))
+          await page.addInitScript(() => {
+            Object.defineProperty(navigator, 'clipboard', {
+              configurable: true,
+              value: {
+                writeText: async (text) => {
+                  globalThis.copiedReport = text;
+                },
+              },
+            });
+          });
         const errors = [];
         page.on('pageerror', (error) => errors.push(error.message));
         const calls = [];
@@ -166,6 +179,8 @@ for (const entry of ['local', 'agent', 'connector']) {
             const submitted = request.postDataJSON();
             draft = { ...draft, title: submitted.title, bodyMarkdown: submitted.bodyMarkdown };
             publishAttempts++;
+            if (scenario.startsWith('missing'))
+              return json({ error: 'native draft not found; legacy drafts cannot be adopted' }, 404);
             if (scenario === 'rejected') return json({ error: 'Content contains forbidden patterns' }, 422);
             if (scenario === 'denied') return json({ error: 'Repository not allowed' }, 403);
             if (!issuePosts) issuePosts++;
@@ -190,7 +205,10 @@ for (const entry of ['local', 'agent', 'connector']) {
             draft = { ...draft, status: 'cancelled' };
             return json({ draft });
           }
-          if (pathname.includes('/by-id/')) return json({ draft });
+          if (pathname.includes('/by-id/'))
+            return scenario.startsWith('missing') && publishAttempts > 0
+              ? json({ error: 'native draft not found' }, 404)
+              : json({ draft });
           if (pathname.endsWith('/community-issue-drafts') && request.method() === 'POST') {
             const body = request.postDataJSON();
             if (scenario === 'conflict') return json({ error: 'draft requestId already has different content' }, 409);
@@ -285,6 +303,8 @@ for (const entry of ['local', 'agent', 'connector']) {
               '合成复现：运行示例工具后出现失败反馈卡。\n预期：审阅和修改后，由人明确发布。\n此为隔离截图，不含真实日志或用户信息。',
             );
           await capture('edited-confirmation');
+          const currentTitle = await page.getByLabel('报告标题', { exact: true }).inputValue();
+          const currentBody = await page.getByLabel('公开报告', { exact: true }).inputValue();
           if (entry !== 'connector') {
             const editedBody = await page.getByLabel('公开报告', { exact: true }).inputValue();
             await page.getByRole('button', { name: '收起报告', exact: true }).click();
@@ -296,7 +316,29 @@ for (const entry of ['local', 'agent', 'connector']) {
             assert.equal(issuePosts, 0);
           }
           await page.getByRole('button', { name: '发布到 GitHub', exact: true }).click();
-          if (scenario === 'rejected' || scenario === 'denied') {
+          if (scenario.startsWith('missing')) {
+            await page.getByRole('alert').filter({ hasText: '未找到这份草稿' }).waitFor();
+            await page
+              .getByRole('region', { name: '公开报告', exact: true })
+              .getByText(currentBody, { exact: true })
+              .waitFor();
+            await page.getByRole('button', { name: '重新加载草稿', exact: true }).click();
+            await page.getByRole('alert').filter({ hasText: '草稿暂不可用' }).waitFor();
+            const report = page.getByRole('region', { name: '公开报告', exact: true });
+            assert((await report.innerText()).includes(currentTitle));
+            assert((await report.innerText()).includes(currentBody));
+            await page.getByRole('button', { name: '复制报告', exact: true }).click();
+            await page.getByRole('button', { name: '已复制报告', exact: true }).waitFor();
+            assert.equal(await page.evaluate(() => globalThis.copiedReport), `${currentTitle}\n\n${currentBody}`);
+            assert.equal(
+              calls.filter((call) => call.method === 'POST' && call.pathname.endsWith('/publish')).length,
+              1,
+            );
+            assert.equal(creates, 1);
+            assert.equal(issuePosts, 0);
+            assert.equal(await page.getByRole('button', { name: '发布到 GitHub', exact: true }).count(), 0);
+            await capture('missing-report');
+          } else if (scenario === 'rejected' || scenario === 'denied') {
             await page
               .getByRole('alert')
               .filter({ hasText: scenario === 'rejected' ? '报告内容未通过发布检查' : '不允许发布' })
