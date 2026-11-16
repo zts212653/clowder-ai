@@ -100,7 +100,7 @@ function pdlLimitWhy(x) {
 /* ═════════════ 主题：系统主题 + 自定义主题 ═════════════
    系统主题（系统主题 1 / 2）不可改：就是基线（加各自的皮肤），随基线一起更新。
    自定义主题 = 一份完整文档 + 它派生自的基线快照。在系统主题上做任何调整（编辑布局、显示 / 隐藏、主题计算器）
-   都会自动复制出一份“自定义主题 N”，改动落在它上面（不打断，给一条可撤销的提示）；在自定义主题上就直接改它。
+   都会自动复制出一份（名字同原主题，重名加序号），改动落在它上面（不打断，给一条可撤销的提示）；在自定义主题上就直接改它。
    恢复 = 切回某个系统主题；自定义主题一直留在列表里，什么都不会丢。 */
 /* 每套主题只有一套配色（palette：浅色、深色两个变体由它推出）和一个强调色（在配色的值里，主题计算器改它）。
    外观（自动 / 浅色 / 深色）是用户偏好，不属于主题。系统主题 1 = 奶油配色，系统主题 2 = 石墨配色；主题插件带来的主题也是只读主题（id 'pack:…'，配色是插件给的值） */
@@ -139,7 +139,11 @@ function pdlSysTheme(id) { return PDL_SYS_THEMES.concat(pdlPackThemes(), pdlThem
 /* 当前主题的名字（主题页、主题计算器标题都用它） */
 function pdlRoName(d) { return d.name || tc('pdlDoc.sysName', d.n); }
 function pdlThemeName() { const t = pdlThemes(), c = pdlThemeActive(); return c ? c.name : pdlRoName(pdlSysTheme(t.active) || PDL_SYS_THEMES[0]); }
-function pdlCustomName(t) { let n = 1; while (t.customs.some(function (c) { return c.name === tc('pdlDoc.customName', n); })) n += 1; return tc('pdlDoc.customName', n); }
+/* 主题名字不重复：用户的主题（复制、导入、改名、存档）用给的名字，和列表里已有的重名就加序号（“简约经典 2”） */
+function pdlUniqueName(t, name, self) {
+  const taken = t.customs.filter(function (c) { return c.id !== self; }).map(function (c) { return c.name; }).concat(PDL_SYS_THEMES.concat(pdlPackThemes(), pdlThemePacks()).map(pdlRoName));
+  let n = 2, v = name; while (taken.indexOf(v) >= 0) { v = name + ' ' + n; n += 1; } return v;
+}
 function pdlDocSave(doc) {   /* 写回当前的自定义主题（系统主题不可写，见 pdlDocEdit） */
   const t = pdlThemes(), c = t.customs.find(function (x) { return x.id === t.active; }); if (!c) return;
   c.full = doc.full; c.base = doc.base; pdlThemesSave(t);
@@ -188,7 +192,7 @@ function pdlDocEdit(fn) {
   /* 一份自定义主题一直被改下去；只有当前主题是只读主题（系统主题）时改它才复制出新的一份，或者用户明确“复制为新主题” */
   if (!c) {
     const from = t.active, ro = pdlSysTheme(from) || PDL_SYS_THEMES[0];
-    c = { id: 'c' + Date.now(), name: pdlCustomName(t), skin: ro.skin, palette: ro.palette, theme: ro.theme, full: {}, base: pdlBaseNew(), from: from };
+    c = { id: 'c' + Date.now(), name: pdlUniqueName(t, pdlRoName(ro)), skin: ro.skin, palette: ro.palette, theme: ro.theme, full: {}, base: pdlBaseNew(), from: from };
     t.customs.push(c); t.active = c.id;
     S.pdlCopied = { id: c.id, from: from, name: c.name };
   }
@@ -206,13 +210,13 @@ function pdlThemeUndoCopy(id) {
 A.pdlThemeUse = function (d) { const t = pdlThemes(); if (t.active === d.id) return; t.active = d.id; pdlThemeGo(t); };
 A.pdlThemeDup = function (d) {   /* 复制为新主题（系统主题也能复制） */
   const t = pdlThemes(), src = t.customs.find(function (x) { return x.id === d.id; }), sys = pdlSysTheme(d.id);
-  const c = { id: 'c' + Date.now(), name: pdlCustomName(t), skin: src ? src.skin : sys ? sys.skin : 'default', palette: src ? src.palette : sys ? sys.palette : themeDefault(), theme: (src || sys || {}).theme, full: src ? pdlClone(src.full) : {}, base: src ? pdlClone(src.base) : pdlBaseNew() };
+  const c = { id: 'c' + Date.now(), name: pdlUniqueName(t, src ? src.name : pdlRoName(sys || PDL_SYS_THEMES[0])), skin: src ? src.skin : sys ? sys.skin : 'default', palette: src ? src.palette : sys ? sys.palette : themeDefault(), theme: (src || sys || {}).theme, full: src ? pdlClone(src.full) : {}, base: src ? pdlClone(src.base) : pdlBaseNew() };
   t.customs.push(c); t.active = c.id; pdlThemesSave(t); pdlThemeSync(); render(true);
 };
 /* 自定义主题：改名（只有自定义主题能改名）、删除（能撤回：回到列表里原来的位置，正在用的话再用回它） */
 ENT.theme = {
   coll: function () { return pdlThemes().customs; }, title: function () { return tc('common.rename'); },
-  rename: function (c, v) { const t = pdlThemes(), x = t.customs.find(function (y) { return y.id === c.id; }); if (x) { x.name = v; pdlThemesSave(t); } },
+  rename: function (c, v) { const t = pdlThemes(), x = t.customs.find(function (y) { return y.id === c.id; }); if (x) { x.name = pdlUniqueName(t, v, x.id); pdlThemesSave(t); } },
   undo: true, undoText: function (op, c) { return tc('pdlDoc.themeDropped', c.name); },
   remove: function (c) {
     const t = pdlThemes(), i = t.customs.findIndex(function (x) { return x.id === c.id; }), was = t.active;
@@ -265,9 +269,9 @@ function pdlThemePackWhy(o) {
   return '';
 }
 function pdlThemeAdd(o) {
-  const t = pdlThemes(), taken = t.customs.some(function (c) { return c.name === o.name; }) || PDL_SYS_THEMES.some(function (x) { return pdlRoName(x) === o.name; });
+  const t = pdlThemes();
   const base = PACK_LIST.some(function (p) { return p.id === o.extends; }) ? o.extends : undefined;
-  const c = { id: 'c' + Date.now(), name: o.name && !taken ? String(o.name) : pdlCustomName(t), skin: o.pdl.skin || 'default', palette: o.pdl.palette, theme: base, full: pdlClone(o.pdl.doc), base: pdlClone(o.pdl.base) };
+  const c = { id: 'c' + Date.now(), name: pdlUniqueName(t, o.name ? String(o.name) : pdlRoName(PDL_SYS_THEMES[0])), skin: o.pdl.skin || 'default', palette: o.pdl.palette, theme: base, full: pdlClone(o.pdl.doc), base: pdlClone(o.pdl.base) };
   t.customs.push(c); pdlThemesSave(t); return c;
 }
 A.pdlThemeImport = function () {
@@ -289,7 +293,7 @@ A.pdlArchiveApply = function (d) {
   const arch = pdlArchive(), i = arch.findIndex(function (a) { return a.key === d.k; }); if (i < 0) return;
   try {
     const up = pdlUpgrade(arch[i]);
-    const t = pdlThemes(), c = { id: 'c' + Date.now(), name: arch[i].name || pdlCustomName(t), skin: 'default', full: up.full, base: up.base };
+    const t = pdlThemes(), c = { id: 'c' + Date.now(), name: pdlUniqueName(t, arch[i].name || pdlRoName(PDL_SYS_THEMES[0])), skin: 'default', full: up.full, base: up.base };
     t.customs.push(c); t.active = c.id; pdlThemesSave(t); pdlThemeSync();
     arch.splice(i, 1); store.set('pdl-archive-v1', arch); S.pdlUpgradeFailed = null;
   } catch (e) { arch[i].error = String(e && e.message || e); arch[i].tried = true; store.set('pdl-archive-v1', arch); }   /* 合并成功：这一行消失、布局已变；仍失败：原因写在这一行上 */
