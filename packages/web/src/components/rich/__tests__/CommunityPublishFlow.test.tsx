@@ -115,6 +115,21 @@ test('a proposed target outside the configured list never becomes a manual submi
   expect(container.textContent).not.toContain('核对并继续');
 });
 
+test('the native create 200 contract restores an existing publishing draft for same-draft reconciliation', async () => {
+  vi.mocked(apiFetch).mockImplementation(async (url) =>
+    String(url).endsWith('/config')
+      ? response({ defaultRepo: 'org/repo', repos: ['org/repo'] })
+      : String(url).endsWith('/report-preview')
+        ? response({ title: draft.title, bodyMarkdown: draft.bodyMarkdown })
+        : response({ draft: { ...draft, status: 'publishing' } }),
+  );
+  await renderFlow();
+  await click('核对并继续');
+  expect(container.textContent).toContain('重新核对结果');
+  expect(container.querySelector('textarea')?.disabled).toBe(true);
+  expect(vi.mocked(apiFetch).mock.calls.some(([url]) => String(url).endsWith('/publish'))).toBe(false);
+});
+
 test('the native requestId content conflict offers an actionable message without publishing', async () => {
   vi.mocked(apiFetch).mockImplementation(async (url, init) =>
     String(url).endsWith('/report-preview')

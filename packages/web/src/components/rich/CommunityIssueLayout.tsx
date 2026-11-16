@@ -3,7 +3,7 @@
 import { type ReactNode, useId } from 'react';
 
 export const communityPrimaryAction =
-  'rounded-md bg-[var(--evolution-focus)] px-3 py-2 text-xs font-medium text-white transition hover:opacity-90 disabled:opacity-50';
+  'rounded-md bg-[var(--evolution-focus-text)] px-3 py-2 text-xs font-medium text-[var(--cafe-accent-foreground)] transition hover:bg-cafe-accent-hover disabled:opacity-50';
 
 export function CommunityIssueSurface({ children }: { children: ReactNode }) {
   return (

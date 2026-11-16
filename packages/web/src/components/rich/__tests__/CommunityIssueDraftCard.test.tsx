@@ -61,3 +61,47 @@ test.each([
     await act(async () => root.unmount());
   }
 });
+
+test('collapsing a retained draft preserves its editor without cancelling or recreating it', async () => {
+  vi.mocked(apiFetch).mockReset();
+  vi.mocked(apiFetch).mockImplementation(
+    async (path) =>
+      new Response(
+        JSON.stringify(
+          String(path).includes('/by-id/')
+            ? {
+                draft: {
+                  draftId: 'retained-id',
+                  title: 'Issue',
+                  bodyMarkdown: 'Details',
+                  targetRepo: 'org/repo',
+                  labels: [],
+                  status: 'draft',
+                },
+              }
+            : String(path).endsWith('/config')
+              ? { defaultRepo: 'org/repo', repos: ['org/repo'] }
+              : { title: 'Issue', bodyMarkdown: 'Details' },
+        ),
+      ),
+  );
+  const container = document.createElement('div');
+  const root = createRoot(container);
+  await act(async () => root.render(<CommunityIssueDraftCard block={block} />));
+  const editor = container.querySelector('textarea');
+  const collapse = [...container.querySelectorAll('button')].find((button) => button.textContent === '收起报告');
+  expect(collapse).toBeDefined();
+  await act(async () => collapse?.click());
+  expect(container.textContent).toContain('已收起报告 · 仅当前视图');
+  expect(editor?.closest('[hidden]')).not.toBeNull();
+  const expand = [...container.querySelectorAll('button')].find((button) => button.textContent === '展开报告');
+  await act(async () => expand?.click());
+  expect(container.querySelector('textarea')).toBe(editor);
+  expect(editor?.closest('[hidden]')).toBeNull();
+  expect(
+    vi
+      .mocked(apiFetch)
+      .mock.calls.some(([path, init]) => !String(path).endsWith('/report-preview') && init?.method === 'POST'),
+  ).toBe(false);
+  await act(async () => root.unmount());
+});

@@ -1,6 +1,5 @@
 'use client';
 
-import { useState } from 'react';
 import type { RichCardBlock } from '@/stores/chat-types';
 import { CommunityPublishFlow } from './CommunityPublishFlow';
 
@@ -19,16 +18,6 @@ export function CommunityIssueDraftCard({ block, messageId }: { block: RichCardB
         draftId?: string;
       }
     | undefined;
-  const [dismissed, setDismissed] = useState(false);
-  if (dismissed)
-    return (
-      <div className="text-xs text-cafe-muted">
-        已收起报告 · 仅当前视图
-        <button type="button" onClick={() => setDismissed(false)} className="ml-2 underline">
-          展开报告
-        </button>
-      </div>
-    );
   return (
     <CommunityPublishFlow
       issueId={block.id}
@@ -40,7 +29,6 @@ export function CommunityIssueDraftCard({ block, messageId }: { block: RichCardB
       source={{ sourceId: block.id, messageId }}
       status="confirmed"
       onStatusChange={() => {}}
-      onDismiss={() => setDismissed(true)}
     />
   );
 }

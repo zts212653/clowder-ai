@@ -297,6 +297,10 @@ describe('FrustrationIssueCard', () => {
     expect(container.textContent).toContain('模型工具调用解析失败');
     // F235: Community publish flow should render
     expect(container.textContent).toContain('核对并继续');
+    const evidence = container.querySelector('details');
+    await act(async () => evidence?.querySelector('summary')?.click());
+    expect(evidence?.open).toBe(true);
+    expect(evidence?.textContent).toContain(issueBlock.bodyMarkdown);
   });
 
   it('expands collapsed card on click', async () => {

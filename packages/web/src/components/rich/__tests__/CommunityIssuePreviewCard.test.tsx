@@ -171,6 +171,7 @@ it('keeps the trusted connector block entry and its irreversible cancellation ca
   expect(apiFetch).toHaveBeenLastCalledWith(`${endpoint}/cancel`, { method: 'POST' });
   expect(cancelled).toHaveBeenCalledOnce();
   expect(container.textContent).toContain('已取消草稿');
+  expect(container.textContent).toContain('不可重新发布');
   expect(container.textContent).not.toContain('重新打开');
   expect(container.querySelector('textarea')).toBeNull();
 });

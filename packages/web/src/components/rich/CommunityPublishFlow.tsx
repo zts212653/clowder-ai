@@ -23,7 +23,6 @@ interface CommunityPublishFlowProps {
   labels?: string[];
   initialDraftId?: string;
   source?: { sourceId: string; messageId?: string };
-  onDismiss?: () => void;
   sourceRecord?: ReactNode;
 }
 const endpoint = '/api/plugins/official.github-operations/github/community-issue-drafts';
@@ -41,7 +40,6 @@ export function CommunityPublishFlow({
   labels = [],
   initialDraftId,
   source,
-  onDismiss,
   sourceRecord,
 }: CommunityPublishFlowProps) {
   const [draftId, setDraftId] = useState(initialDraftId ?? null);
@@ -53,6 +51,7 @@ export function CommunityPublishFlow({
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [editingReport, setEditingReport] = useState(false);
+  const [collapsed, setCollapsed] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -232,11 +231,6 @@ export function CommunityPublishFlow({
             打开 GitHub 手动提交
           </a>
         )}
-        {onDismiss && (
-          <button type="button" onClick={onDismiss} className="text-cafe-muted">
-            收起报告
-          </button>
-        )}
       </div>
       {error && (
         <p role="alert" className="mt-2 text-xs text-[var(--semantic-critical)]">
@@ -247,16 +241,31 @@ export function CommunityPublishFlow({
   );
   return (
     <CommunityIssueSurface>
-      {draftId ? (
-        <CommunityIssuePreviewCard
-          inlineDraftId={draftId}
-          expectedRepo={selectedRepo}
-          unavailableFallback={reportForm}
-        />
-      ) : (
-        reportForm
+      {collapsed && (
+        <p className="text-xs text-cafe-muted">
+          已收起报告 · 仅当前视图
+          <button type="button" onClick={() => setCollapsed(false)} className="ml-2 underline">
+            展开报告
+          </button>
+        </p>
       )}
-      {sourceRecord}
+      <div hidden={collapsed} className="space-y-3">
+        {draftId ? (
+          <CommunityIssuePreviewCard
+            inlineDraftId={draftId}
+            expectedRepo={selectedRepo}
+            unavailableFallback={reportForm}
+          />
+        ) : (
+          reportForm
+        )}
+        {sourceRecord}
+      </div>
+      {!collapsed && (
+        <button type="button" onClick={() => setCollapsed(true)} className="text-xs text-cafe-muted underline">
+          收起报告
+        </button>
+      )}
     </CommunityIssueSurface>
   );
 }

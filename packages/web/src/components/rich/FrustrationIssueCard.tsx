@@ -232,11 +232,6 @@ export function FrustrationIssueCard({ block }: FrustrationIssueCardProps) {
                 </p>
               ))}
             </details>
-            {status === 'confirmed' && (
-              <button type="button" onClick={() => setCollapsed(true)} className="mt-2 underline">
-                收起报告
-              </button>
-            )}
           </div>
         }
       />

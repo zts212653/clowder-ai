@@ -20,21 +20,25 @@ before(
 after(async () => browser?.close());
 for (const entry of ['local', 'agent', 'connector']) {
   for (const scenario of entry === 'connector'
-    ? ['ready']
-    : ['ready', 'ready-mobile', 'offline', 'empty', 'uncertain', 'conflict']) {
+    ? ['ready', 'cancel']
+    : ['ready', 'ready-mobile', 'offline', 'empty', 'uncertain', 'uncertain-mobile', 'conflict']) {
     test(
       `${entry}/${scenario}: real chat draft, confirmation, receipt and safe fallback`,
       { timeout: 30000 },
       async (t) => {
         const context = await browser.newContext({
           deviceScaleFactor: 2,
-          viewport: { width: scenario === 'offline' || scenario === 'ready-mobile' ? 375 : 1280, height: 900 },
+          viewport: { width: scenario === 'offline' || scenario.endsWith('-mobile') ? 375 : 1280, height: 900 },
         });
         t.after(() => context.close());
         const page = await context.newPage();
         const errors = [];
         page.on('pageerror', (error) => errors.push(error.message));
         const calls = [];
+        const reportText =
+          entry === 'agent' && scenario === 'ready-mobile'
+            ? '## 复现步骤\n1. 运行示例工具。\n\n**预期**：人工核对后发布。'
+            : '有可复现的失败步骤。';
         let draft =
           entry === 'connector'
             ? {
@@ -51,7 +55,46 @@ for (const entry of ['local', 'agent', 'connector']) {
           await page.evaluate(() => document.fonts.ready);
           const box = await page.getByTestId('community-issue-card').boundingBox();
           assert(box);
-          widths.push({ stage, width: box.width });
+          const primary = page.getByRole('button', { name: /^(核对并继续|发布到 GitHub|重新核对结果)$/ });
+          let primaryContrast;
+          let primaryHoverContrast;
+          if (await primary.count()) {
+            const contrastOf = (button) => {
+              const style = getComputedStyle(button);
+              const canvas = document.createElement('canvas');
+              canvas.width = canvas.height = 1;
+              const ctx = canvas.getContext('2d');
+              const luminance = (color) => {
+                ctx.clearRect(0, 0, 1, 1);
+                ctx.fillStyle = color;
+                ctx.fillRect(0, 0, 1, 1);
+                const channels = [...ctx.getImageData(0, 0, 1, 1).data]
+                  .slice(0, 3)
+                  .map((value) => value / 255)
+                  .map((value) => (value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4));
+                return channels[0] * 0.2126 + channels[1] * 0.7152 + channels[2] * 0.0722;
+              };
+              const foreground = luminance(style.color);
+              const background = luminance(style.backgroundColor);
+              return (Math.max(foreground, background) + 0.05) / (Math.min(foreground, background) + 0.05);
+            };
+            primaryContrast = await primary.evaluate(contrastOf);
+            assert(
+              primaryContrast >= 4.5,
+              `primary action contrast ${primaryContrast.toFixed(2)}:1 at ${entry}/${scenario}/${stage}`,
+            );
+            if (stage === 'review') {
+              await primary.hover();
+              await page.waitForTimeout(200);
+              primaryHoverContrast = await primary.evaluate(contrastOf);
+              assert(
+                primaryHoverContrast >= 4.5,
+                `hover action contrast ${primaryHoverContrast.toFixed(2)}:1 at ${entry}/${scenario}`,
+              );
+              await page.mouse.move(0, 0);
+            }
+          }
+          widths.push({ stage, width: box.width, primaryContrast, primaryHoverContrast });
           await page.screenshot({ path: path.join(evidence, `${entry}-${scenario}-${stage}.png`), fullPage: true });
         };
         let creates = 0;
@@ -75,8 +118,7 @@ for (const entry of ['local', 'agent', 'connector']) {
           calls.push({ pathname, method: request.method() });
           if (pathname === '/api/session') return json({ userId: 'fixture', csrfToken: 'fixture' });
           if (pathname.endsWith('/status')) return json({ issue: { status: 'confirmed', signalType: 'cli_error' } });
-          if (pathname.endsWith('/report-preview'))
-            return json({ title: '工具执行失败', bodyMarkdown: '有可复现的失败步骤。' });
+          if (pathname.endsWith('/report-preview')) return json({ title: '工具执行失败', bodyMarkdown: reportText });
           if (pathname.endsWith('/config'))
             return scenario === 'offline'
               ? json({ error: 'unavailable' }, 503)
@@ -88,7 +130,7 @@ for (const entry of ['local', 'agent', 'connector']) {
             const submitted = request.postDataJSON();
             draft = { ...draft, title: submitted.title, bodyMarkdown: submitted.bodyMarkdown };
             if (!issuePosts) issuePosts++;
-            if (scenario === 'uncertain' && !published) {
+            if (scenario.startsWith('uncertain') && !published) {
               published = true;
               draft = { ...draft, status: 'publishing' };
               return json({ draft, error: uncertainError }, 409);
@@ -131,7 +173,7 @@ for (const entry of ['local', 'agent', 'connector']) {
           }
           return json({});
         });
-        const url = `${origin}/?entry=${entry}&theme=${scenario === 'offline' || scenario === 'ready-mobile' ? 'dark' : 'light'}`;
+        const url = `${origin}/?entry=${entry}&theme=${scenario === 'offline' || scenario.endsWith('-mobile') ? 'dark' : 'light'}${entry === 'agent' && scenario === 'ready-mobile' ? '&markdown=1' : ''}`;
         const open = async () => {
           await page.goto(url);
           if (entry === 'local') {
@@ -143,6 +185,7 @@ for (const entry of ['local', 'agent', 'connector']) {
             await page
               .getByRole('button', { name: '发布到 GitHub', exact: true })
               .or(page.getByRole('link', { name: /#7/ }))
+              .or(page.getByText('已取消草稿 · 不可重新发布', { exact: true }))
               .waitFor();
           else await page.getByRole('region', { name: '公开报告', exact: true }).waitFor();
         };
@@ -150,12 +193,20 @@ for (const entry of ['local', 'agent', 'connector']) {
         if (entry !== 'connector')
           await page
             .getByRole('region', { name: '公开报告', exact: true })
-            .getByText('有可复现的失败步骤。', { exact: true })
+            .getByText(reportText, { exact: true })
             .waitFor();
         await capture('review');
         assert.equal(creates, 0);
         assert.equal(issuePosts, 0);
-        if (scenario === 'offline' || scenario === 'empty') {
+        if (scenario === 'cancel') {
+          await page.getByRole('button', { name: '取消草稿', exact: true }).click();
+          await page.getByText('已取消草稿 · 不可重新发布', { exact: true }).waitFor();
+          assert.equal(await page.getByRole('button', { name: '发布到 GitHub', exact: true }).count(), 0);
+          await capture('cancelled');
+          await open();
+          assert.equal(issuePosts, 0);
+          assert.equal(calls.filter((call) => call.pathname.endsWith('/cancel')).length, 1);
+        } else if (scenario === 'offline' || scenario === 'empty') {
           assert.equal(await page.getByRole('button', { name: '核对并继续', exact: true }).count(), 0);
           assert.match(await page.locator('main').innerText(), /公开反馈报告/);
           assert.equal(await page.getByRole('button', { name: '复制报告' }).isEnabled(), true);
@@ -168,6 +219,12 @@ for (const entry of ['local', 'agent', 'connector']) {
           assert.equal(await page.getByRole('button', { name: '发布到 GitHub', exact: true }).count(), 0);
         } else {
           if (entry !== 'connector') {
+            if (entry === 'local') {
+              await page.getByText('已记录到本地 · 查看失败记录', { exact: true }).click();
+              await page.locator('details[open]').getByText('有可复现的失败步骤。', { exact: true }).waitFor();
+              await capture('local-evidence');
+              await page.getByText('已记录到本地 · 查看失败记录', { exact: true }).click();
+            }
             assert.equal(
               await page.getByRole('link', { name: '打开 GitHub 手动提交' }).getAttribute('href'),
               'https://github.com/fixture/repo/issues/new',
@@ -185,8 +242,18 @@ for (const entry of ['local', 'agent', 'connector']) {
               '合成复现：运行示例工具后出现失败反馈卡。\n预期：审阅和修改后，由人明确发布。\n此为隔离截图，不含真实日志或用户信息。',
             );
           await capture('edited-confirmation');
+          if (entry !== 'connector') {
+            const editedBody = await page.getByLabel('公开报告', { exact: true }).inputValue();
+            await page.getByRole('button', { name: '收起报告', exact: true }).click();
+            await page.getByText('已收起报告 · 仅当前视图', { exact: false }).waitFor();
+            await capture('collapsed');
+            await page.getByRole('button', { name: '展开报告', exact: true }).click();
+            assert.equal(await page.getByLabel('公开报告', { exact: true }).inputValue(), editedBody);
+            assert.equal(creates, 1);
+            assert.equal(issuePosts, 0);
+          }
           await page.getByRole('button', { name: '发布到 GitHub', exact: true }).click();
-          if (scenario === 'uncertain') {
+          if (scenario.startsWith('uncertain')) {
             await page
               .getByText('暂未确认 GitHub 是否已创建，请用同一份草稿核对结果；不会重复提单。', { exact: true })
               .waitFor();

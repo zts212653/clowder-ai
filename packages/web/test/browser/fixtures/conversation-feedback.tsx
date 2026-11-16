@@ -17,6 +17,9 @@ useChatStore.setState({ currentThreadId: 'feedback-proof', messages: [] });
 const params = new URLSearchParams(location.search);
 const local = params.get('entry') === 'local';
 const connector = params.get('entry') === 'connector';
+const reportBody = params.has('markdown')
+  ? '## 复现步骤\n1. 运行示例工具。\n\n**预期**：人工核对后发布。'
+  : '有可复现的失败步骤。';
 const dark = params.get('theme') === 'dark';
 document.documentElement.classList.toggle('dark', dark);
 document.documentElement.dataset.theme = dark ? 'dark' : 'light';
@@ -40,7 +43,7 @@ const message: Message = {
           kind: 'card',
           v: 1,
           title: '工具执行失败',
-          bodyMarkdown: '有可复现的失败步骤。',
+          bodyMarkdown: reportBody,
           meta: local
             ? { kind: 'frustration_auto_issue', issueId: 'fi-proof', signalType: 'cli_error' }
             : connector
@@ -48,7 +51,7 @@ const message: Message = {
               : {
                   kind: 'community_issue_draft',
                   proposedTitle: '工具执行失败',
-                  proposedBody: '有可复现的失败步骤。',
+                  proposedBody: reportBody,
                   proposedRepo: 'fixture/repo',
                   proposedLabels: ['bug'],
                 },
