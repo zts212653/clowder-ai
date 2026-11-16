@@ -58,7 +58,8 @@ function lrow(o) {
   const tw = o.twisty ? (o.twisty === 'leaf' ? '<span class="tw" aria-hidden="true"></span>' : o.twAct ? '<button type="button" class="tw" data-open="' + (o.twisty === 'open') + '" data-act="fold" data-f="tree"' + o.twAct + ' aria-label="' + h(tc('common.expand')) + '">' + icon('right', 14) + '</button>' : twisty(o.twisty === 'open')) : '';
   const actsHtml = nActs ? '<span class="lr-acts' + (o.swap ? ' swap' : '') + '">' + (o.actsHtml || acts.map(lrAct).join('')) + '</span>' : '';
   /* 按行对齐的尾部：第一行尾（时间）、第二行尾（角标）；swap 时悬停操作就出现在第一行尾的位置上（同一位置互斥） */
-  const aside = o.aside ? '<span class="lr-aside"><span class="lr-aside-t' + (o.swap ? ' swap-d' : '') + '">' + (o.aside[0] || '') + '</span>' + '<span class="lr-aside-b">' + (o.aside[1] || '') + '</span>' + (o.swap ? actsHtml : '') + '</span>' : '';
+  /* 行尾的提示（数量 / 状态在前、时间在最右）是一个整体：总在标题那一行、并排；有悬停操作时和操作互斥 */
+  const aside = o.aside ? '<span class="lr-aside"><span class="lr-aside-d' + (o.swap ? ' swap-d' : '') + '">' + (o.aside[1] ? '<span class="lr-aside-b">' + o.aside[1] + '</span>' : '') + '<span class="lr-aside-t">' + (o.aside[0] || '') + '</span></span>' + (o.swap ? actsHtml : '') + '</span>' : '';
   const tone = (o.tone ? ' ' + o.tone : '') + (o.cur ? ' selected' : '');
   return '<div class="lr' + tone + (canOpen || o.act ? ' click' : '') + (o.disabled ? ' off' : '') + (o.hook ? ' ' + o.hook : '') + '"' + ' data-layout="' + L + '"' + (o.swap ? ' data-swap' : '') + (o.rootAttrs || '') + (o.orderable && o.key != null ? ' data-okey="' + h(o.key) + '" data-edit="order"' : '') + (canOpen ? ' data-open="' + !!o.open + '"' : '') + (o.note ? ' data-note="' + o.note + '"' : '') + ' style="--acts:' + (nActs && !o.swap && !cols.length ? 'calc(' + nActs + ' * var(--ctl-s) + var(--sp-s))' : '0px') + ';--c:' + (o.color || 'initial') + (o.depth != null ? ';--d:' + o.depth : '') + '">' +
     (o.pre ? '<span class="lr-pre">' + o.pre + '</span>' : '') +
