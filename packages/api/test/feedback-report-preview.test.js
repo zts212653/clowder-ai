@@ -10,7 +10,8 @@ test('public report keeps Chinese question sentences in both title and body', as
   t.after(() => app.close());
   const payload = {
     title: '为什么不行？明明昨天还可以！',
-    bodyMarkdown: '这是怎么回事？我不知道为什么会这样，重试了三次还是失败。\n你怎么又不对?我再说一遍',
+    bodyMarkdown:
+      '这是怎么回事？我不知道为什么会这样，重试了三次还是失败。\n你怎么又不对?我再说一遍\n访问 https://x.test/a？页面空白\n访问 /settings？就报错\n访问 example.com？为什么打不开',
   };
   const result = await app.inject({
     method: 'POST',
@@ -20,8 +21,9 @@ test('public report keeps Chinese question sentences in both title and body', as
   });
   assert.equal(result.statusCode, 200);
   assert.deepEqual(result.json(), {
-    title: payload.title.normalize('NFKC'),
-    bodyMarkdown: payload.bodyMarkdown.normalize('NFKC'),
+    title: '为什么不行？明明昨天还可以!',
+    bodyMarkdown:
+      '这是怎么回事？我不知道为什么会这样,重试了三次还是失败。\n你怎么又不对?我再说一遍\n访问 https://x.test/a？页面空白\n访问 /settings？就报错\n访问 example.com？为什么打不开',
   });
 });
 

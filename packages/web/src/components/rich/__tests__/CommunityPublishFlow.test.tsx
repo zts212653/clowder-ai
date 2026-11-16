@@ -67,6 +67,7 @@ test('confirmed local feedback prepares a sanitized preview and publishes only a
   await renderFlow();
   expect(apiFetch).not.toHaveBeenCalledWith(endpoint, expect.objectContaining({ method: 'POST' }));
   expect(container.querySelector('textarea')?.readOnly).toBe(true);
+  expect(container.querySelector('a')?.href).toBe('https://github.com/org/repo/issues/new');
   await click('预览并提交');
   expect(apiFetch).toHaveBeenCalledWith(
     endpoint,

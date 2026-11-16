@@ -36,8 +36,9 @@ const PEM = /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?(?:-----END [A-Z ]*PRIVAT
 // URL userinfo. Anchoring the scheme after a non-scheme character prevents the
 // engine from retrying an unbounded scheme prefix at every word boundary.
 const URL_USERINFO = /(^|[^a-z0-9+.-])([a-z][a-z0-9+.-]*:\/\/)[^/\s'"<>@]+@/gi;
-// Require a URL scheme so natural-language questions retain the text after ?.
-const URL_QUERY = /((?:^|[^a-z0-9+.-])[a-z][a-z0-9+.-]*:\/\/[^\s'"<>?#)]*\?)[^\s'"<>)]+/gi;
+// Anchor queries to absolute, root-relative or schemeless URLs, preserving prose questions.
+const URL_QUERY =
+  /((?:^|[^a-z0-9+./\\:-])(?:[a-z][a-z0-9+.-]*:\/\/|\/|[a-z0-9.-]+\.[a-z]{2,}(?=[:/?]))[^\s'"<>?？#)]*\?)[^\s'"<>)？]+/gi;
 // URL fragment — OAuth implicit/callback flows often place access_token/state after #.
 // Redact only fragments carrying sensitive keys so ordinary issue anchors remain readable.
 const URL_FRAGMENT = /(#)(?=[^\s'"<>)\n]*(?:access_token|id_token|refresh_token|state|code)=)([^\s'"<>)]+)/gi;

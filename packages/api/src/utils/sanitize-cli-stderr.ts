@@ -51,8 +51,12 @@ function buildHomePathPattern(homePath: string): RegExp | null {
 export function sanitizeCliStderr(input: string, options: CliStderrSanitizerOptions = {}): string {
   if (!input) return '';
 
-  // 1. NFKC normalize (defeat fullwidth/homograph token bypass — e.g. U+FF53 ｓ → ASCII s)
-  let out = input.normalize('NFKC');
+  // 1. Normalize token homoglyphs (e.g. ｓ → s), retaining Chinese question punctuation.
+  // A prose ？ must not become a URL query delimiter; provider tokens do not use it.
+  let out = input
+    .split('？')
+    .map((segment) => segment.normalize('NFKC'))
+    .join('？');
 
   // 2. Control sequences (clean output noise, not security-critical but improves readability)
   out = out.replace(SANITIZER_PATTERNS.ansiCsi, '');

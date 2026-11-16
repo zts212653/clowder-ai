@@ -108,9 +108,7 @@ export function CommunityPublishFlow({
       });
       const result = await response.json();
       if (response.status === 409 && result.error === 'draft requestId already has different content')
-        throw new Error(
-          '同一来源已有不同仓库或内容的草稿。请恢复创建时的仓库与报告内容后重试，或从原草稿预览继续；不会创建替代草稿。',
-        );
+        throw new Error('同一来源已有不同仓库或内容的草稿。请恢复创建时的仓库与报告内容后重试；不会创建替代草稿。');
       if (!response.ok && !(response.status === 409 && result.draft?.status === 'published'))
         throw new Error(result.error ?? '创建草稿失败');
       const draft = communityDraftSchema.parse(result.draft);

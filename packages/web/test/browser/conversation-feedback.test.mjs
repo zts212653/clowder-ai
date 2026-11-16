@@ -6,6 +6,7 @@ import { chromium } from 'playwright';
 import { buildChatProof, origin } from './fixtures/f322-chat-real-page-build.mjs';
 
 const evidence = path.resolve(process.env.FEEDBACK_EVIDENCE_DIR ?? '../../artifacts/conversation-feedback/browser');
+const uncertainError = 'Publication outcome uncertain. Retry to look for the original issue without creating another.';
 let browser;
 let built;
 before(
@@ -24,6 +25,7 @@ for (const entry of ['local', 'agent']) {
       { timeout: 30000 },
       async (t) => {
         const context = await browser.newContext({
+          deviceScaleFactor: 2,
           viewport: { width: scenario === 'offline' ? 375 : 1280, height: 900 },
         });
         t.after(() => context.close());
@@ -66,7 +68,8 @@ for (const entry of ['local', 'agent']) {
             if (!issuePosts) issuePosts++;
             if (scenario === 'uncertain' && !published) {
               published = true;
-              return json({ error: '结果未知，请使用同一草稿核验' }, 409);
+              draft = { ...draft, status: 'publishing' };
+              return json({ draft, error: uncertainError }, 409);
             }
             draft = {
               ...draft,
@@ -128,13 +131,17 @@ for (const entry of ['local', 'agent']) {
           assert.equal(issuePosts, 0);
           assert.equal(await page.getByRole('button', { name: 'Submit to GitHub', exact: true }).count(), 0);
         } else {
+          assert.equal(
+            await page.getByRole('link', { name: '打开 GitHub 手动提交' }).getAttribute('href'),
+            'https://github.com/fixture/repo/issues/new',
+          );
           await page.getByRole('button', { name: '预览并提交', exact: true }).click();
           await page.getByRole('button', { name: 'Submit to GitHub', exact: true }).waitFor();
           assert.equal(creates, 1);
           assert.equal(issuePosts, 0);
           await page.getByRole('button', { name: 'Submit to GitHub', exact: true }).click();
           if (scenario === 'uncertain') {
-            await page.getByText('结果未知，请使用同一草稿核验', { exact: true }).waitFor();
+            await page.getByText(uncertainError, { exact: true }).waitFor();
             await page.getByRole('button', { name: 'Submit to GitHub', exact: true }).click();
           }
           await page.getByRole('link', { name: /#7/ }).waitFor();

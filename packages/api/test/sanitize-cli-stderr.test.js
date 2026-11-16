@@ -109,8 +109,27 @@ test('keeps natural-language questions while redacting actual URL queries', () =
   const input = '为什么失败？我重试了三次。Why?Still failing. https://example.test/path?code=private-code';
   assert.equal(
     sanitizeCliStderr(input),
-    '为什么失败?我重试了三次。Why?Still failing. https://example.test/path?[QUERY_REDACTED]',
+    '为什么失败？我重试了三次。Why?Still failing. https://example.test/path?[QUERY_REDACTED]',
   );
+});
+
+test('redacts query strings in relative HTTP requests and schemeless URLs', () => {
+  [
+    '/v1/foo?email=private-address',
+    '//example.test/path?code=private-code',
+    'example.test/path?code=private-code',
+    'https://example.test/path?q=中文',
+    'https://example.test/path?opaque-query',
+  ].forEach((url) => {
+    const out = sanitizeCliStderr(`GET ${url} HTTP/1.1`);
+    assert.equal(out, `GET ${url.slice(0, url.indexOf('?') + 1)}[QUERY_REDACTED] HTTP/1.1`);
+  });
+});
+
+test('keeps fullwidth question punctuation after URLs and does not mistake Windows files for URLs', () => {
+  const input =
+    '访问 https://x.test/a？页面空白\n访问 /settings？就报错\n访问 example.com？为什么打不开\nC:\\tmp\\file.txt?not-a-url';
+  assert.equal(sanitizeCliStderr(input), input);
 });
 
 test('redacts URL userinfo credentials while retaining the destination host', () => {
