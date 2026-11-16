@@ -71,11 +71,27 @@ export function sanitizeCliStderr(input: string, options: CliStderrSanitizerOpti
 
   // 5. URL userinfo / query / fragment strings
   out = out.replace(SANITIZER_PATTERNS.urlUserinfo, '$1$2[CREDENTIALS_REDACTED]@');
-  out = out.replace(SANITIZER_PATTERNS.urlQuery, (match, boundary: string, prefix: string) =>
-    /[/.]/.test(prefix) || /:\d+$/.test(prefix) || prefix.toLowerCase() === 'localhost'
-      ? `${boundary}${prefix}?[QUERY_REDACTED]`
-      : match,
-  );
+  out = out.replace(SANITIZER_PATTERNS.urlQuery, (candidate) => {
+    const parts = [];
+    let start = 0;
+    let question = candidate.indexOf('?');
+    while (question >= 0) {
+      const prefix = candidate.slice(start, question);
+      parts.push(candidate.slice(start, question + 1));
+      start = question + 1;
+      if (/[/.]/.test(prefix) || /:\d+$/.test(prefix) || /(?:^|[()])localhost$/i.test(prefix)) {
+        const closing = candidate.indexOf(')', start);
+        const end = closing < 0 ? candidate.length : closing;
+        if (end > start) {
+          parts.push('[QUERY_REDACTED]');
+          start = end;
+        }
+      }
+      question = candidate.indexOf('?', start);
+    }
+    parts.push(candidate.slice(start));
+    return parts.join('');
+  });
   out = out.replace(SANITIZER_PATTERNS.urlFragment, '$1[FRAGMENT_REDACTED]');
 
   // 6. Provider tokens (specific first to avoid generic pattern eating prefix)

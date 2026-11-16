@@ -159,10 +159,25 @@ test('redacts URL queries inside parentheses and after literal path parentheses'
   [
     ['((https://x.test/a?token=1))', '((https://x.test/a?[QUERY_REDACTED]))'],
     ['https://x.test/a(b?token=1', 'https://x.test/a(b?[QUERY_REDACTED]'],
+    ['fetch(localhost?sid=abcd1234)', 'fetch(localhost?[QUERY_REDACTED])'],
   ].forEach(([input, expected]) => assert.equal(sanitizeCliStderr(input), expected));
 });
 
-[':/', '(', '(/', '(a'].forEach((pattern) => {
+['sid', 'session', 'auth', 'code'].forEach((key) => {
+  test(`redacts ${key} queries after closing path parentheses and stray question marks`, () => {
+    [
+      ['GET https://en.example.org/wiki/Foo_(bar)', ' ok'],
+      ['GET https://x.test/a)', ' ok'],
+      ['GET /api/Foo_(bar)', ' ok'],
+      ['ERR ?(localhost:3002/x', ')'],
+      ['Why?(localhost:3002/x', ')'],
+    ].forEach(([prefix, suffix]) => {
+      assert.equal(sanitizeCliStderr(`${prefix}?${key}=abcd1234${suffix}`), `${prefix}?[QUERY_REDACTED]${suffix}`);
+    });
+  });
+});
+
+[':/', '(', '(/', '(a', 'a?', '?('].forEach((pattern) => {
   test(`URL query scanning stays bounded on long ${pattern} output`, () => {
     const input = pattern.repeat(65_536 / pattern.length);
     const startedAt = performance.now();
