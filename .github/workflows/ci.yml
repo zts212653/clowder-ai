@@ -190,7 +190,11 @@ jobs:
       - name: Production member creation and recovery HTTP contracts
         env:
           CAT_CAFE_ONBOARDING_E2E_EVIDENCE: ${{ github.workspace }}/.tmp/native-team-setup-ci
-        run: pnpm --filter @cat-cafe/web test:onboarding:production-contracts
+        run: |
+          # Browser runtime libraries already ship with the runner image; apt only
+          # adds fonts here and is blocked by the Ubuntu mirror DNS failure.
+          pnpm --filter @cat-cafe/web exec playwright install chromium
+          pnpm --filter @cat-cafe/web test:onboarding:production-contracts
       - name: Plugin document direct-navigation origin isolation
         env:
           PLUGIN_ORIGIN_ARTIFACTS: ${{ github.workspace }}/.tmp/plugin-document-origin-ci

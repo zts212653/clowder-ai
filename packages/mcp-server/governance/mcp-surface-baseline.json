@@ -8656,8 +8656,47 @@
                 {
                   "additionalProperties": false,
                   "properties": {
+                    "id": {
+                      "$ref": "#/properties/contextAttachments/items/anyOf/1/properties/id"
+                    },
+                    "kind": {
+                      "const": "work",
+                      "type": "string"
+                    },
+                    "title": {
+                      "maxLength": 500,
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "v": {
+                      "const": 1,
+                      "type": "number"
+                    },
+                    "version": {
+                      "exclusiveMinimum": 0,
+                      "maximum": 9007199254740991,
+                      "minimum": -9007199254740991,
+                      "type": "integer"
+                    },
+                    "workId": {
+                      "$ref": "#/properties/contextAttachments/items/anyOf/1/properties/id"
+                    }
+                  },
+                  "required": [
+                    "v",
+                    "id",
+                    "kind",
+                    "workId",
+                    "version",
+                    "title"
+                  ],
+                  "type": "object"
+                },
+                {
+                  "additionalProperties": false,
+                  "properties": {
                     "branch": {
-                      "$ref": "#/properties/contextAttachments/items/anyOf/2/properties/worktreeId"
+                      "$ref": "#/properties/contextAttachments/items/anyOf/3/properties/worktreeId"
                     },
                     "id": {
                       "$ref": "#/properties/contextAttachments/items/anyOf/1/properties/id"
@@ -8667,7 +8706,7 @@
                       "type": "string"
                     },
                     "lineEnd": {
-                      "$ref": "#/properties/contextAttachments/items/anyOf/2/properties/lineStart"
+                      "$ref": "#/properties/contextAttachments/items/anyOf/3/properties/lineStart"
                     },
                     "lineStart": {
                       "exclusiveMinimum": 0,
@@ -8717,7 +8756,7 @@
                       "type": "string"
                     },
                     "selectionEnd": {
-                      "$ref": "#/properties/contextAttachments/items/anyOf/3/properties/selectionStart"
+                      "$ref": "#/properties/contextAttachments/items/anyOf/4/properties/selectionStart"
                     },
                     "selectionStart": {
                       "maximum": 10000000,
@@ -8733,10 +8772,10 @@
                               "additionalProperties": false,
                               "properties": {
                                 "displayDigest": {
-                                  "$ref": "#/properties/contextAttachments/items/anyOf/2/properties/revision"
+                                  "$ref": "#/properties/contextAttachments/items/anyOf/3/properties/revision"
                                 },
                                 "fileName": {
-                                  "$ref": "#/properties/contextAttachments/items/anyOf/2/properties/worktreeId"
+                                  "$ref": "#/properties/contextAttachments/items/anyOf/3/properties/worktreeId"
                                 },
                                 "item": {
                                   "anyOf": [
@@ -8769,7 +8808,7 @@
                                       "additionalProperties": false,
                                       "properties": {
                                         "blockId": {
-                                          "$ref": "#/properties/contextAttachments/items/anyOf/3/properties/source/anyOf/0/properties/artifactFile/properties/item/anyOf/0/properties/blockId"
+                                          "$ref": "#/properties/contextAttachments/items/anyOf/4/properties/source/anyOf/0/properties/artifactFile/properties/item/anyOf/0/properties/blockId"
                                         },
                                         "kind": {
                                           "const": "rich-file",
@@ -8786,7 +8825,7 @@
                                       "additionalProperties": false,
                                       "properties": {
                                         "index": {
-                                          "$ref": "#/properties/contextAttachments/items/anyOf/3/properties/source/anyOf/0/properties/artifactFile/properties/item/anyOf/0/properties/itemIndex"
+                                          "$ref": "#/properties/contextAttachments/items/anyOf/4/properties/source/anyOf/0/properties/artifactFile/properties/item/anyOf/0/properties/itemIndex"
                                         },
                                         "kind": {
                                           "const": "content-block",
@@ -8822,7 +8861,7 @@
                               "type": "object"
                             },
                             "displayLabel": {
-                              "$ref": "#/properties/contextAttachments/items/anyOf/2/properties/worktreeId"
+                              "$ref": "#/properties/contextAttachments/items/anyOf/3/properties/worktreeId"
                             },
                             "kind": {
                               "const": "message",
@@ -8846,34 +8885,77 @@
                           "type": "object"
                         },
                         {
-                          "additionalProperties": false,
-                          "properties": {
-                            "kind": {
-                              "const": "cli_output",
-                              "type": "string"
+                          "anyOf": [
+                            {
+                              "additionalProperties": false,
+                              "properties": {
+                                "kind": {
+                                  "const": "cli_output",
+                                  "type": "string"
+                                },
+                                "messageId": {
+                                  "$ref": "#/properties/contextAttachments/items/anyOf/1/properties/id"
+                                },
+                                "segmentId": {
+                                  "$ref": "#/properties/contextAttachments/items/anyOf/3/properties/worktreeId"
+                                },
+                                "threadId": {
+                                  "$ref": "#/properties/contextAttachments/items/anyOf/1/properties/id"
+                                }
+                              },
+                              "required": [
+                                "kind",
+                                "threadId",
+                                "messageId"
+                              ],
+                              "type": "object"
                             },
-                            "messageId": {
-                              "$ref": "#/properties/contextAttachments/items/anyOf/1/properties/id"
-                            },
-                            "segmentId": {
-                              "$ref": "#/properties/contextAttachments/items/anyOf/2/properties/worktreeId"
-                            },
-                            "threadId": {
-                              "$ref": "#/properties/contextAttachments/items/anyOf/1/properties/id"
+                            {
+                              "additionalProperties": false,
+                              "properties": {
+                                "executionRef": {
+                                  "$ref": "#/properties/contextAttachments/items/anyOf/1/properties/id"
+                                },
+                                "kind": {
+                                  "const": "cli_output",
+                                  "type": "string"
+                                },
+                                "messageId": {
+                                  "$ref": "#/properties/contextAttachments/items/anyOf/1/properties/id"
+                                },
+                                "part": {
+                                  "enum": [
+                                    "call",
+                                    "input",
+                                    "result",
+                                    "meta"
+                                  ],
+                                  "type": "string"
+                                },
+                                "threadId": {
+                                  "$ref": "#/properties/contextAttachments/items/anyOf/1/properties/id"
+                                },
+                                "toolUseId": {
+                                  "$ref": "#/properties/contextAttachments/items/anyOf/1/properties/id"
+                                }
+                              },
+                              "required": [
+                                "kind",
+                                "threadId",
+                                "messageId",
+                                "toolUseId",
+                                "executionRef",
+                                "part"
+                              ],
+                              "type": "object"
                             }
-                          },
-                          "required": [
-                            "kind",
-                            "threadId",
-                            "messageId"
-                          ],
-                          "type": "object"
+                          ]
                         },
                         {
                           "additionalProperties": false,
                           "properties": {
                             "branch": {
-                              "$ref": "#/properties/contextAttachments/items/anyOf/2/properties/worktreeId"
+                              "$ref": "#/properties/contextAttachments/items/anyOf/3/properties/worktreeId"
                             },
                             "kind": {
                               "const": "workspace_file",
@@ -8885,19 +8967,19 @@
                               "type": "string"
                             },
                             "lineEnd": {
-                              "$ref": "#/properties/contextAttachments/items/anyOf/2/properties/lineStart"
+                              "$ref": "#/properties/contextAttachments/items/anyOf/3/properties/lineStart"
                             },
                             "lineStart": {
-                              "$ref": "#/properties/contextAttachments/items/anyOf/2/properties/lineStart"
+                              "$ref": "#/properties/contextAttachments/items/anyOf/3/properties/lineStart"
                             },
                             "path": {
-                              "$ref": "#/properties/contextAttachments/items/anyOf/2/properties/path"
+                              "$ref": "#/properties/contextAttachments/items/anyOf/3/properties/path"
                             },
                             "revision": {
-                              "$ref": "#/properties/contextAttachments/items/anyOf/2/properties/revision"
+                              "$ref": "#/properties/contextAttachments/items/anyOf/3/properties/revision"
                             },
                             "worktreeId": {
-                              "$ref": "#/properties/contextAttachments/items/anyOf/2/properties/worktreeId"
+                              "$ref": "#/properties/contextAttachments/items/anyOf/3/properties/worktreeId"
                             }
                           },
                           "required": [
@@ -8978,10 +9060,10 @@
                           "type": "integer"
                         },
                         "item": {
-                          "$ref": "#/properties/contextAttachments/items/anyOf/3/properties/source/anyOf/0/properties/artifactFile/properties/item"
+                          "$ref": "#/properties/contextAttachments/items/anyOf/4/properties/source/anyOf/0/properties/artifactFile/properties/item"
                         },
                         "messageId": {
-                          "$ref": "#/properties/contextAttachments/items/anyOf/4/properties/gallery/properties/threadId"
+                          "$ref": "#/properties/contextAttachments/items/anyOf/5/properties/gallery/properties/threadId"
                         },
                         "messageRevision": {
                           "maxLength": 64,
@@ -9092,17 +9174,17 @@
                                 "additionalProperties": false,
                                 "properties": {
                                   "endFrameIndex": {
-                                    "$ref": "#/properties/contextAttachments/items/anyOf/4/properties/selections/items/properties/selection/anyOf/0/properties/endFrameIndex"
+                                    "$ref": "#/properties/contextAttachments/items/anyOf/5/properties/selections/items/properties/selection/anyOf/0/properties/endFrameIndex"
                                   },
                                   "frameIndex": {
-                                    "$ref": "#/properties/contextAttachments/items/anyOf/4/properties/selections/items/properties/selection/anyOf/0/properties/frameIndex"
+                                    "$ref": "#/properties/contextAttachments/items/anyOf/5/properties/selections/items/properties/selection/anyOf/0/properties/frameIndex"
                                   },
                                   "kind": {
                                     "const": "image-point",
                                     "type": "string"
                                   },
                                   "timestampMs": {
-                                    "$ref": "#/properties/contextAttachments/items/anyOf/4/properties/selections/items/properties/selection/anyOf/0/properties/timestampMs"
+                                    "$ref": "#/properties/contextAttachments/items/anyOf/5/properties/selections/items/properties/selection/anyOf/0/properties/timestampMs"
                                   },
                                   "x": {
                                     "minimum": 0,
@@ -9124,19 +9206,19 @@
                                 "additionalProperties": false,
                                 "properties": {
                                   "endTick": {
-                                    "$ref": "#/properties/contextAttachments/items/anyOf/4/properties/selections/items/properties/selection/anyOf/2/properties/startTick"
+                                    "$ref": "#/properties/contextAttachments/items/anyOf/5/properties/selections/items/properties/selection/anyOf/2/properties/startTick"
                                   },
                                   "framePoint": {
                                     "additionalProperties": false,
                                     "properties": {
                                       "tick": {
-                                        "$ref": "#/properties/contextAttachments/items/anyOf/4/properties/selections/items/properties/selection/anyOf/2/properties/startTick"
+                                        "$ref": "#/properties/contextAttachments/items/anyOf/5/properties/selections/items/properties/selection/anyOf/2/properties/startTick"
                                       },
                                       "x": {
-                                        "$ref": "#/properties/contextAttachments/items/anyOf/4/properties/selections/items/properties/selection/anyOf/1/properties/x"
+                                        "$ref": "#/properties/contextAttachments/items/anyOf/5/properties/selections/items/properties/selection/anyOf/1/properties/x"
                                       },
                                       "y": {
-                                        "$ref": "#/properties/contextAttachments/items/anyOf/4/properties/selections/items/properties/selection/anyOf/1/properties/y"
+                                        "$ref": "#/properties/contextAttachments/items/anyOf/5/properties/selections/items/properties/selection/anyOf/1/properties/y"
                                       }
                                     },
                                     "required": [
@@ -9150,19 +9232,19 @@
                                     "additionalProperties": false,
                                     "properties": {
                                       "height": {
-                                        "$ref": "#/properties/contextAttachments/items/anyOf/4/properties/selections/items/properties/selection/anyOf/0/properties/height"
+                                        "$ref": "#/properties/contextAttachments/items/anyOf/5/properties/selections/items/properties/selection/anyOf/0/properties/height"
                                       },
                                       "tick": {
-                                        "$ref": "#/properties/contextAttachments/items/anyOf/4/properties/selections/items/properties/selection/anyOf/2/properties/startTick"
+                                        "$ref": "#/properties/contextAttachments/items/anyOf/5/properties/selections/items/properties/selection/anyOf/2/properties/startTick"
                                       },
                                       "width": {
-                                        "$ref": "#/properties/contextAttachments/items/anyOf/4/properties/selections/items/properties/selection/anyOf/0/properties/width"
+                                        "$ref": "#/properties/contextAttachments/items/anyOf/5/properties/selections/items/properties/selection/anyOf/0/properties/width"
                                       },
                                       "x": {
-                                        "$ref": "#/properties/contextAttachments/items/anyOf/4/properties/selections/items/properties/selection/anyOf/0/properties/x"
+                                        "$ref": "#/properties/contextAttachments/items/anyOf/5/properties/selections/items/properties/selection/anyOf/0/properties/x"
                                       },
                                       "y": {
-                                        "$ref": "#/properties/contextAttachments/items/anyOf/4/properties/selections/items/properties/selection/anyOf/0/properties/y"
+                                        "$ref": "#/properties/contextAttachments/items/anyOf/5/properties/selections/items/properties/selection/anyOf/0/properties/y"
                                       }
                                     },
                                     "required": [
@@ -9211,7 +9293,7 @@
                                     "type": "object"
                                   },
                                   "streamId": {
-                                    "$ref": "#/properties/contextAttachments/items/anyOf/4/properties/selections/items/properties/id"
+                                    "$ref": "#/properties/contextAttachments/items/anyOf/5/properties/selections/items/properties/id"
                                   }
                                 },
                                 "required": [
@@ -9241,7 +9323,7 @@
                           "properties": {
                             "annotationIds": {
                               "items": {
-                                "$ref": "#/properties/contextAttachments/items/anyOf/4/properties/source/anyOf/0/properties/contentRef"
+                                "$ref": "#/properties/contextAttachments/items/anyOf/5/properties/source/anyOf/0/properties/contentRef"
                               },
                               "maxItems": 12,
                               "minItems": 1,
@@ -9289,13 +9371,13 @@
                               "type": "string"
                             },
                             "media": {
-                              "$ref": "#/properties/contextAttachments/items/anyOf/4/properties/source/anyOf/0/properties/input"
+                              "$ref": "#/properties/contextAttachments/items/anyOf/5/properties/source/anyOf/0/properties/input"
                             },
                             "reviewId": {
-                              "$ref": "#/properties/contextAttachments/items/anyOf/4/properties/source/anyOf/0/properties/contentRef"
+                              "$ref": "#/properties/contextAttachments/items/anyOf/5/properties/source/anyOf/0/properties/contentRef"
                             },
                             "screeningId": {
-                              "$ref": "#/properties/contextAttachments/items/anyOf/4/properties/source/anyOf/0/properties/contentRef"
+                              "$ref": "#/properties/contextAttachments/items/anyOf/5/properties/source/anyOf/0/properties/contentRef"
                             }
                           },
                           "required": [
@@ -9314,7 +9396,7 @@
                           "additionalProperties": false,
                           "properties": {
                             "expectedReviewRevision": {
-                              "$ref": "#/properties/contextAttachments/items/anyOf/4/properties/source/anyOf/1/properties/round"
+                              "$ref": "#/properties/contextAttachments/items/anyOf/5/properties/source/anyOf/1/properties/round"
                             },
                             "kind": {
                               "const": "artifact-review",
@@ -9344,7 +9426,7 @@
                           "additionalProperties": false,
                           "properties": {
                             "expectedReviewRevision": {
-                              "$ref": "#/properties/contextAttachments/items/anyOf/4/properties/source/anyOf/1/properties/round"
+                              "$ref": "#/properties/contextAttachments/items/anyOf/5/properties/source/anyOf/1/properties/round"
                             },
                             "expectedSourceRevision": {
                               "pattern": "^sha256:[a-f0-9]{64}$",
@@ -9384,14 +9466,14 @@
                                   "type": "object"
                                 },
                                 "mediaRef": {
-                                  "$ref": "#/properties/contextAttachments/items/anyOf/4/properties/source/anyOf/2/properties/locator/properties/experimentRef"
+                                  "$ref": "#/properties/contextAttachments/items/anyOf/5/properties/source/anyOf/2/properties/locator/properties/experimentRef"
                                 },
                                 "programId": {
                                   "pattern": "^evolution-program:[a-f0-9]{32}$",
                                   "type": "string"
                                 },
                                 "recordRef": {
-                                  "$ref": "#/properties/contextAttachments/items/anyOf/4/properties/source/anyOf/2/properties/locator/properties/experimentRef"
+                                  "$ref": "#/properties/contextAttachments/items/anyOf/5/properties/source/anyOf/2/properties/locator/properties/experimentRef"
                                 }
                               },
                               "required": [
@@ -9403,7 +9485,7 @@
                               "type": "object"
                             },
                             "reviewId": {
-                              "$ref": "#/properties/contextAttachments/items/anyOf/4/properties/source/anyOf/1/properties/reviewId"
+                              "$ref": "#/properties/contextAttachments/items/anyOf/5/properties/source/anyOf/1/properties/reviewId"
                             }
                           },
                           "required": [
@@ -9419,20 +9501,20 @@
                           "additionalProperties": false,
                           "properties": {
                             "contentRef": {
-                              "$ref": "#/properties/contextAttachments/items/anyOf/4/properties/source/anyOf/1/properties/reviewId"
+                              "$ref": "#/properties/contextAttachments/items/anyOf/5/properties/source/anyOf/1/properties/reviewId"
                             },
                             "expectedLedgerRevision": {
-                              "$ref": "#/properties/contextAttachments/items/anyOf/4/properties/source/anyOf/1/properties/round"
+                              "$ref": "#/properties/contextAttachments/items/anyOf/5/properties/source/anyOf/1/properties/round"
                             },
                             "kind": {
                               "const": "publication",
                               "type": "string"
                             },
                             "ledgerRef": {
-                              "$ref": "#/properties/contextAttachments/items/anyOf/4/properties/source/anyOf/1/properties/reviewId"
+                              "$ref": "#/properties/contextAttachments/items/anyOf/5/properties/source/anyOf/1/properties/reviewId"
                             },
                             "ownerRevision": {
-                              "$ref": "#/properties/contextAttachments/items/anyOf/4/properties/source/anyOf/1/properties/round"
+                              "$ref": "#/properties/contextAttachments/items/anyOf/5/properties/source/anyOf/1/properties/round"
                             }
                           },
                           "required": [
@@ -9448,10 +9530,10 @@
                           "additionalProperties": false,
                           "properties": {
                             "expectedReviewRevision": {
-                              "$ref": "#/properties/contextAttachments/items/anyOf/4/properties/source/anyOf/1/properties/round"
+                              "$ref": "#/properties/contextAttachments/items/anyOf/5/properties/source/anyOf/1/properties/round"
                             },
                             "expectedSourceRevision": {
-                              "$ref": "#/properties/contextAttachments/items/anyOf/4/properties/source/anyOf/2/properties/expectedSourceRevision"
+                              "$ref": "#/properties/contextAttachments/items/anyOf/5/properties/source/anyOf/2/properties/expectedSourceRevision"
                             },
                             "kind": {
                               "const": "workspace",
@@ -9478,7 +9560,7 @@
                               "type": "object"
                             },
                             "reviewId": {
-                              "$ref": "#/properties/contextAttachments/items/anyOf/4/properties/source/anyOf/1/properties/reviewId"
+                              "$ref": "#/properties/contextAttachments/items/anyOf/5/properties/source/anyOf/1/properties/reviewId"
                             }
                           },
                           "required": [
@@ -9496,7 +9578,7 @@
                       "additionalProperties": false,
                       "properties": {
                         "expectedReviewRevision": {
-                          "$ref": "#/properties/contextAttachments/items/anyOf/4/properties/taskContext/properties/expectedTaskRevision"
+                          "$ref": "#/properties/contextAttachments/items/anyOf/5/properties/taskContext/properties/expectedTaskRevision"
                         },
                         "expectedTaskRevision": {
                           "exclusiveMinimum": 0,
@@ -9509,10 +9591,10 @@
                           "type": "string"
                         },
                         "reviewId": {
-                          "$ref": "#/properties/contextAttachments/items/anyOf/4/properties/taskContext/properties/taskId"
+                          "$ref": "#/properties/contextAttachments/items/anyOf/5/properties/taskContext/properties/taskId"
                         },
                         "round": {
-                          "$ref": "#/properties/contextAttachments/items/anyOf/4/properties/taskContext/properties/expectedTaskRevision"
+                          "$ref": "#/properties/contextAttachments/items/anyOf/5/properties/taskContext/properties/expectedTaskRevision"
                         },
                         "taskId": {
                           "maxLength": 256,
@@ -9555,7 +9637,7 @@
                   "additionalProperties": false,
                   "properties": {
                     "contentRef": {
-                      "$ref": "#/properties/contextAttachments/items/anyOf/5/properties/id"
+                      "$ref": "#/properties/contextAttachments/items/anyOf/6/properties/id"
                     },
                     "id": {
                       "maxLength": 256,
@@ -9563,24 +9645,24 @@
                       "type": "string"
                     },
                     "input": {
-                      "$ref": "#/properties/contextAttachments/items/anyOf/4/properties/source/anyOf/0/properties/input"
+                      "$ref": "#/properties/contextAttachments/items/anyOf/5/properties/source/anyOf/0/properties/input"
                     },
                     "kind": {
                       "const": "project-screening",
                       "type": "string"
                     },
                     "media": {
-                      "$ref": "#/properties/contextAttachments/items/anyOf/4/properties/source/anyOf/0/properties/input"
+                      "$ref": "#/properties/contextAttachments/items/anyOf/5/properties/source/anyOf/0/properties/input"
                     },
                     "screeningId": {
-                      "$ref": "#/properties/contextAttachments/items/anyOf/5/properties/id"
+                      "$ref": "#/properties/contextAttachments/items/anyOf/6/properties/id"
                     },
                     "selections": {
                       "items": {
                         "additionalProperties": false,
                         "properties": {
                           "canvasRegion": {
-                            "$ref": "#/properties/contextAttachments/items/anyOf/5/properties/selections/items/properties/target/anyOf/2/properties/region/anyOf/1"
+                            "$ref": "#/properties/contextAttachments/items/anyOf/6/properties/selections/items/properties/target/anyOf/2/properties/region/anyOf/1"
                           },
                           "comment": {
                             "maxLength": 8000,
@@ -9588,10 +9670,10 @@
                             "type": "string"
                           },
                           "displayRegion": {
-                            "$ref": "#/properties/contextAttachments/items/anyOf/5/properties/selections/items/properties/target/anyOf/2/properties/region/anyOf/0"
+                            "$ref": "#/properties/contextAttachments/items/anyOf/6/properties/selections/items/properties/target/anyOf/2/properties/region/anyOf/0"
                           },
                           "id": {
-                            "$ref": "#/properties/contextAttachments/items/anyOf/5/properties/id"
+                            "$ref": "#/properties/contextAttachments/items/anyOf/6/properties/id"
                           },
                           "mediaRange": {
                             "additionalProperties": false,
@@ -9698,7 +9780,7 @@
                                             "type": "string"
                                           },
                                           "height": {
-                                            "$ref": "#/properties/contextAttachments/items/anyOf/5/properties/selections/items/properties/target/anyOf/2/properties/endTick"
+                                            "$ref": "#/properties/contextAttachments/items/anyOf/6/properties/selections/items/properties/target/anyOf/2/properties/endTick"
                                           },
                                           "rotation": {
                                             "enum": [
@@ -9710,7 +9792,7 @@
                                             "type": "number"
                                           },
                                           "width": {
-                                            "$ref": "#/properties/contextAttachments/items/anyOf/5/properties/selections/items/properties/target/anyOf/2/properties/endTick"
+                                            "$ref": "#/properties/contextAttachments/items/anyOf/6/properties/selections/items/properties/target/anyOf/2/properties/endTick"
                                           }
                                         },
                                         "required": [
@@ -9726,21 +9808,21 @@
                                         "additionalProperties": false,
                                         "properties": {
                                           "bbox": {
-                                            "$ref": "#/properties/contextAttachments/items/anyOf/5/properties/selections/items/properties/target/anyOf/2/properties/region/anyOf/0/properties/bbox"
+                                            "$ref": "#/properties/contextAttachments/items/anyOf/6/properties/selections/items/properties/target/anyOf/2/properties/region/anyOf/0/properties/bbox"
                                           },
                                           "coordinateSpace": {
                                             "const": "canvas-pixels",
                                             "type": "string"
                                           },
                                           "height": {
-                                            "$ref": "#/properties/contextAttachments/items/anyOf/5/properties/selections/items/properties/target/anyOf/2/properties/endTick"
+                                            "$ref": "#/properties/contextAttachments/items/anyOf/6/properties/selections/items/properties/target/anyOf/2/properties/endTick"
                                           },
                                           "rotation": {
                                             "const": 0,
                                             "type": "number"
                                           },
                                           "width": {
-                                            "$ref": "#/properties/contextAttachments/items/anyOf/5/properties/selections/items/properties/target/anyOf/2/properties/endTick"
+                                            "$ref": "#/properties/contextAttachments/items/anyOf/6/properties/selections/items/properties/target/anyOf/2/properties/endTick"
                                           }
                                         },
                                         "required": [
@@ -9755,7 +9837,7 @@
                                     ]
                                   },
                                   "segmentId": {
-                                    "$ref": "#/properties/contextAttachments/items/anyOf/5/properties/selections/items/properties/target/anyOf/1/properties/segmentId"
+                                    "$ref": "#/properties/contextAttachments/items/anyOf/6/properties/selections/items/properties/target/anyOf/1/properties/segmentId"
                                   },
                                   "tick": {
                                     "maximum": 9007199254740991,
@@ -9766,10 +9848,10 @@
                                     "additionalProperties": false,
                                     "properties": {
                                       "denominator": {
-                                        "$ref": "#/properties/contextAttachments/items/anyOf/5/properties/selections/items/properties/target/anyOf/2/properties/endTick"
+                                        "$ref": "#/properties/contextAttachments/items/anyOf/6/properties/selections/items/properties/target/anyOf/2/properties/endTick"
                                       },
                                       "numerator": {
-                                        "$ref": "#/properties/contextAttachments/items/anyOf/5/properties/selections/items/properties/target/anyOf/2/properties/endTick"
+                                        "$ref": "#/properties/contextAttachments/items/anyOf/6/properties/selections/items/properties/target/anyOf/2/properties/endTick"
                                       }
                                     },
                                     "required": [
@@ -9779,7 +9861,7 @@
                                     "type": "object"
                                   },
                                   "visualUseId": {
-                                    "$ref": "#/properties/contextAttachments/items/anyOf/5/properties/selections/items/properties/target/anyOf/1/properties/segmentId"
+                                    "$ref": "#/properties/contextAttachments/items/anyOf/6/properties/selections/items/properties/target/anyOf/1/properties/segmentId"
                                   }
                                 },
                                 "required": [
@@ -9793,17 +9875,17 @@
                                 "additionalProperties": false,
                                 "properties": {
                                   "assetVersionRef": {
-                                    "$ref": "#/properties/contextAttachments/items/anyOf/5/properties/selections/items/properties/target/anyOf/1/properties/segmentId"
+                                    "$ref": "#/properties/contextAttachments/items/anyOf/6/properties/selections/items/properties/target/anyOf/1/properties/segmentId"
                                   },
                                   "kind": {
                                     "const": "artwork",
                                     "type": "string"
                                   },
                                   "region": {
-                                    "$ref": "#/properties/contextAttachments/items/anyOf/5/properties/selections/items/properties/target/anyOf/2/properties/region/anyOf/0"
+                                    "$ref": "#/properties/contextAttachments/items/anyOf/6/properties/selections/items/properties/target/anyOf/2/properties/region/anyOf/0"
                                   },
                                   "visualUseId": {
-                                    "$ref": "#/properties/contextAttachments/items/anyOf/5/properties/selections/items/properties/target/anyOf/1/properties/segmentId"
+                                    "$ref": "#/properties/contextAttachments/items/anyOf/6/properties/selections/items/properties/target/anyOf/1/properties/segmentId"
                                   }
                                 },
                                 "required": [
@@ -10122,7 +10204,7 @@
         ],
         "type": "object"
       },
-      "inputSchemaDigest": "sha256:e35f3e1d9149e3c2aa4474f7843f31661bab9a31344230bb3a78124e882845da",
+      "inputSchemaDigest": "sha256:edee2aa97d812d5a270a87873e9c931e31e3b36f51917367bc55f6fccf7cce76",
       "annotations": {
         "destructiveHint": false,
         "openWorldHint": false,
