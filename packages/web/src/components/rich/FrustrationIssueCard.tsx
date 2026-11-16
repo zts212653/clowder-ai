@@ -72,11 +72,11 @@ function resolvedLabel(status: IssueStatus): string {
   return '已跳过';
 }
 
-/** Status badge color class for resolved states. */
-function resolvedBadgeClass(status: IssueStatus): string {
-  if (status === 'confirmed') return 'bg-green-100 text-green-700';
-  if (status === 'false_positive') return 'bg-orange-100 text-orange-700';
-  return 'bg-cafe-muted/20 text-cafe-muted';
+/** Semantic status dot for resolved local records. */
+function resolvedDotClass(status: IssueStatus): string {
+  if (status === 'confirmed') return 'bg-[var(--semantic-success)]';
+  if (status === 'false_positive') return 'bg-[var(--semantic-warning)]';
+  return 'bg-cafe-muted';
 }
 
 export function FrustrationIssueCard({ block }: FrustrationIssueCardProps) {
@@ -197,13 +197,49 @@ export function FrustrationIssueCard({ block }: FrustrationIssueCardProps) {
       <button
         type="button"
         onClick={() => setCollapsed(false)}
-        className="flex w-full items-center gap-2 rounded-lg border border-cafe/20 bg-cafe-surface/30 px-3 py-2 text-left text-sm transition hover:bg-cafe-surface/50"
+        className="flex w-[42rem] max-w-full items-center gap-2 rounded-lg border border-cafe-subtle bg-cafe-surface px-3 py-2 text-left text-sm transition hover:bg-cafe-surface/50"
       >
         <CafeIcon name={frustrationIconName(block)} className="h-4 w-4 shrink-0 text-cafe-muted" />
         <span className="flex-1 truncate text-cafe-muted">{displayFrustrationTitle(block.title)}</span>
-        <span className={`rounded px-2 py-0.5 text-xs ${resolvedBadgeClass(status)}`}>{resolvedLabel(status)}</span>
+        <span className="inline-flex items-center gap-1.5 text-xs text-cafe-muted">
+          <span aria-hidden="true" className={`h-2 w-2 rounded-full ${resolvedDotClass(status)}`} />
+          {resolvedLabel(status)}
+        </span>
         <span className="text-xs text-cafe-muted/50">▸</span>
       </button>
+    );
+  }
+
+  if ((status === 'confirmed' || status === 'creating_draft' || status === 'draft_created') && issueId) {
+    return (
+      <CommunityPublishFlow
+        issueId={issueId}
+        status={status}
+        title={displayFrustrationTitle(block.title)}
+        bodyMarkdown={[block.bodyMarkdown, userDescription].filter(Boolean).join('\n\n')}
+        onStatusChange={setStatus}
+        sourceRecord={
+          <div className="border-t border-cafe-subtle pt-3 text-xs text-cafe-muted">
+            <details>
+              <summary className="cursor-pointer">已记录到本地 · 查看失败记录</summary>
+              <div className="mt-2 whitespace-pre-wrap break-words">
+                {block.bodyMarkdown}
+                {userDescription && `\n${userDescription}`}
+              </div>
+              {block.fields?.map((field) => (
+                <p key={field.label}>
+                  {field.label}：{field.value}
+                </p>
+              ))}
+            </details>
+            {status === 'confirmed' && (
+              <button type="button" onClick={() => setCollapsed(true)} className="mt-2 underline">
+                收起报告
+              </button>
+            )}
+          </div>
+        }
+      />
     );
   }
 
@@ -217,7 +253,8 @@ export function FrustrationIssueCard({ block }: FrustrationIssueCardProps) {
         <span className="font-medium text-cafe-text">{displayFrustrationTitle(block.title)}</span>
         {isResolved && (
           <>
-            <span className={`ml-auto rounded px-2 py-0.5 text-xs ${resolvedBadgeClass(status)}`}>
+            <span className="ml-auto inline-flex items-center gap-1.5 text-xs text-cafe-muted">
+              <span aria-hidden="true" className={`h-2 w-2 rounded-full ${resolvedDotClass(status)}`} />
               {resolvedLabel(status)}
             </span>
             <button
@@ -246,17 +283,6 @@ export function FrustrationIssueCard({ block }: FrustrationIssueCardProps) {
             </span>
           ))}
         </div>
-      )}
-
-      {/* F235: Community publish flow (extracted to stay under 350-line limit) */}
-      {(status === 'confirmed' || status === 'creating_draft' || status === 'draft_created') && issueId && (
-        <CommunityPublishFlow
-          issueId={issueId}
-          status={status}
-          title={displayFrustrationTitle(block.title)}
-          bodyMarkdown={[block.bodyMarkdown, userDescription].filter(Boolean).join('\n\n')}
-          onStatusChange={setStatus}
-        />
       )}
 
       {/* Actions — only when draft (hidden during community publish flow) */}

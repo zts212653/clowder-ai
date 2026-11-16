@@ -66,9 +66,10 @@ async function click(text: string) {
 test('confirmed local feedback prepares a sanitized preview and publishes only after separate confirmation', async () => {
   await renderFlow();
   expect(apiFetch).not.toHaveBeenCalledWith(endpoint, expect.objectContaining({ method: 'POST' }));
-  expect(container.querySelector('textarea')?.readOnly).toBe(true);
+  expect(container.querySelector('textarea')).toBeNull();
+  expect(container.textContent).toContain(draft.bodyMarkdown);
   expect(container.querySelector('a')?.href).toBe('https://github.com/org/repo/issues/new');
-  await click('预览并提交');
+  await click('核对并继续');
   expect(apiFetch).toHaveBeenCalledWith(
     endpoint,
     expect.objectContaining({
@@ -84,7 +85,7 @@ test('confirmed local feedback prepares a sanitized preview and publishes only a
   expect(vi.mocked(apiFetch).mock.calls.some(([url]) => String(url).endsWith('/publish'))).toBe(false);
   expect(container.querySelector('textarea')?.readOnly).toBe(false);
   expect(container.querySelector('textarea')?.disabled).toBe(false);
-  await click('Submit to GitHub');
+  await click('发布到 GitHub');
   expect(container.querySelector('a')?.href).toBe('https://github.com/org/repo/issues/12');
 });
 test.each([
@@ -96,11 +97,11 @@ test.each([
       : response({ defaultRepo: '', repos: [] }, status),
   );
   await renderFlow('suggested/repo');
-  expect(container.textContent).toContain('Issue 报告');
+  expect(container.textContent).toContain('公开反馈报告');
   expect(container.querySelector('a')).toBeNull();
   expect(container.textContent).toContain('复制报告');
-  expect(container.textContent).not.toContain('预览并提交');
-  expect(container.querySelector('textarea')?.value).toBe('Safe body');
+  expect(container.textContent).not.toContain('核对并继续');
+  expect(container.textContent).toContain('Safe body');
   expect(
     vi
       .mocked(apiFetch)
@@ -111,7 +112,7 @@ test.each([
 test('a proposed target outside the configured list never becomes a manual submission link', async () => {
   await renderFlow('suggested/repo');
   expect(container.querySelector('a')).toBeNull();
-  expect(container.textContent).not.toContain('预览并提交');
+  expect(container.textContent).not.toContain('核对并继续');
 });
 
 test('the native requestId content conflict offers an actionable message without publishing', async () => {
@@ -125,7 +126,7 @@ test('the native requestId content conflict offers an actionable message without
           : response({ draft }),
   );
   await renderFlow();
-  await click('预览并提交');
+  await click('核对并继续');
   expect(container.textContent).toContain('请恢复创建时的仓库与报告内容');
   expect(container.textContent).not.toContain('draft requestId already has different content');
   expect(vi.mocked(apiFetch).mock.calls.some(([url]) => String(url).includes('/by-id/'))).toBe(false);
@@ -133,8 +134,8 @@ test('the native requestId content conflict offers an actionable message without
 
 test('remounting after publication does not claim the issue is unsubmitted and restores the same draft', async () => {
   await renderFlow();
-  await click('预览并提交');
-  await click('Submit to GitHub');
+  await click('核对并继续');
+  await click('发布到 GitHub');
   const publishedDraft = {
     ...draft,
     status: 'published',
@@ -151,8 +152,8 @@ test('remounting after publication does not claim the issue is unsubmitted and r
   await act(async () => root.render(null));
   await renderFlow();
   expect(container.textContent).not.toContain('尚未提交');
-  expect(container.textContent).toContain('Issue 报告');
-  await click('预览并提交');
+  expect(container.textContent).toContain('公开反馈报告');
+  await click('核对并继续');
   expect(container.querySelector('a')?.href).toBe(publishedDraft.githubIssueUrl);
 });
 
@@ -194,11 +195,11 @@ test('changing the proposed repository A to allowed B previews and publishes B w
       select.dispatchEvent(new Event('change', { bubbles: true }));
     }
   });
-  await click('预览并提交');
+  await click('核对并继续');
   expect(container.textContent).not.toContain('确认使用草稿原仓库');
   expect(
-    [...container.querySelectorAll('button')].find((button) => button.textContent === 'Submit to GitHub')?.disabled,
+    [...container.querySelectorAll('button')].find((button) => button.textContent === '发布到 GitHub')?.disabled,
   ).toBe(false);
-  await click('Submit to GitHub');
+  await click('发布到 GitHub');
   expect(container.querySelector('a')?.href).toBe('https://github.com/org/B/issues/9');
 });

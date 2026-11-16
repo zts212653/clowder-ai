@@ -291,12 +291,12 @@ describe('FrustrationIssueCard', () => {
       confirmButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
 
-    // After confirm, card stays expanded (F235: "预览并提交" button must be visible)
+    // After confirm, card stays expanded (F235: "核对并继续" button must be visible)
     await vi.waitFor(() => expect(container.textContent).toContain('已记录'));
     // Body remains visible — card is NOT collapsed after confirm (unlike skip/false_positive)
     expect(container.textContent).toContain('模型工具调用解析失败');
     // F235: Community publish flow should render
-    expect(container.textContent).toContain('预览并提交');
+    expect(container.textContent).toContain('核对并继续');
   });
 
   it('expands collapsed card on click', async () => {

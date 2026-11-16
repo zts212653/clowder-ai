@@ -20,7 +20,15 @@ export function CommunityIssueDraftCard({ block, messageId }: { block: RichCardB
       }
     | undefined;
   const [dismissed, setDismissed] = useState(false);
-  if (dismissed) return <p className="text-xs text-cafe-muted">已暂不提交</p>;
+  if (dismissed)
+    return (
+      <div className="text-xs text-cafe-muted">
+        已收起报告 · 仅当前视图
+        <button type="button" onClick={() => setDismissed(false)} className="ml-2 underline">
+          展开报告
+        </button>
+      </div>
+    );
   return (
     <CommunityPublishFlow
       issueId={block.id}

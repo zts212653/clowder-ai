@@ -18,22 +18,42 @@ before(
   { timeout: 120000 },
 );
 after(async () => browser?.close());
-for (const entry of ['local', 'agent']) {
-  for (const scenario of ['ready', 'offline', 'empty', 'uncertain', 'conflict']) {
+for (const entry of ['local', 'agent', 'connector']) {
+  for (const scenario of entry === 'connector'
+    ? ['ready']
+    : ['ready', 'ready-mobile', 'offline', 'empty', 'uncertain', 'conflict']) {
     test(
       `${entry}/${scenario}: real chat draft, confirmation, receipt and safe fallback`,
       { timeout: 30000 },
       async (t) => {
         const context = await browser.newContext({
           deviceScaleFactor: 2,
-          viewport: { width: scenario === 'offline' ? 375 : 1280, height: 900 },
+          viewport: { width: scenario === 'offline' || scenario === 'ready-mobile' ? 375 : 1280, height: 900 },
         });
         t.after(() => context.close());
         const page = await context.newPage();
         const errors = [];
         page.on('pageerror', (error) => errors.push(error.message));
         const calls = [];
-        let draft;
+        let draft =
+          entry === 'connector'
+            ? {
+                draftId: 'retained-draft',
+                title: '工具执行失败',
+                bodyMarkdown: '有可复现的失败步骤。',
+                targetRepo: 'fixture/repo',
+                labels: ['bug'],
+                status: 'draft',
+              }
+            : undefined;
+        const widths = [];
+        const capture = async (stage) => {
+          await page.evaluate(() => document.fonts.ready);
+          const box = await page.getByTestId('community-issue-card').boundingBox();
+          assert(box);
+          widths.push({ stage, width: box.width });
+          await page.screenshot({ path: path.join(evidence, `${entry}-${scenario}-${stage}.png`), fullPage: true });
+        };
         let creates = 0;
         let issuePosts = 0;
         let published = false;
@@ -65,6 +85,8 @@ for (const entry of ['local', 'agent']) {
                   repos: scenario === 'empty' ? [] : ['fixture/repo'],
                 });
           if (pathname.endsWith('/publish')) {
+            const submitted = request.postDataJSON();
+            draft = { ...draft, title: submitted.title, bodyMarkdown: submitted.bodyMarkdown };
             if (!issuePosts) issuePosts++;
             if (scenario === 'uncertain' && !published) {
               published = true;
@@ -109,48 +131,85 @@ for (const entry of ['local', 'agent']) {
           }
           return json({});
         });
-        const url = `${origin}/?entry=${entry}&theme=${scenario === 'offline' ? 'dark' : 'light'}`;
+        const url = `${origin}/?entry=${entry}&theme=${scenario === 'offline' || scenario === 'ready-mobile' ? 'dark' : 'light'}`;
         const open = async () => {
           await page.goto(url);
-          if (entry === 'local') await page.getByRole('button', { name: /已记录/ }).click();
-          await page.getByLabel('公开报告', { exact: true }).waitFor();
+          if (entry === 'local') {
+            await page.getByRole('button', { name: /已记录/ }).waitFor();
+            await page.screenshot({ path: path.join(evidence, `${entry}-${scenario}-entry.png`), fullPage: true });
+            await page.getByRole('button', { name: /已记录/ }).click();
+          }
+          if (entry === 'connector')
+            await page
+              .getByRole('button', { name: '发布到 GitHub', exact: true })
+              .or(page.getByRole('link', { name: /#7/ }))
+              .waitFor();
+          else await page.getByRole('region', { name: '公开报告', exact: true }).waitFor();
         };
         await open();
-        await page.waitForFunction(() => document.querySelector('textarea')?.value.length > 0);
+        if (entry !== 'connector')
+          await page
+            .getByRole('region', { name: '公开报告', exact: true })
+            .getByText('有可复现的失败步骤。', { exact: true })
+            .waitFor();
+        await capture('review');
         assert.equal(creates, 0);
         assert.equal(issuePosts, 0);
         if (scenario === 'offline' || scenario === 'empty') {
-          assert.equal(await page.getByRole('button', { name: '预览并提交', exact: true }).count(), 0);
-          assert.match(await page.locator('main').innerText(), /Issue 报告/);
+          assert.equal(await page.getByRole('button', { name: '核对并继续', exact: true }).count(), 0);
+          assert.match(await page.locator('main').innerText(), /公开反馈报告/);
           assert.equal(await page.getByRole('button', { name: '复制报告' }).isEnabled(), true);
           assert.equal(await page.getByRole('link', { name: '打开 GitHub 手动提交' }).count(), 0);
         } else if (scenario === 'conflict') {
-          await page.getByRole('button', { name: '预览并提交', exact: true }).click();
+          await page.getByRole('button', { name: '核对并继续', exact: true }).click();
           await page.getByRole('alert').filter({ hasText: '请恢复创建时的仓库与报告内容' }).waitFor();
           assert.equal(creates, 0);
           assert.equal(issuePosts, 0);
-          assert.equal(await page.getByRole('button', { name: 'Submit to GitHub', exact: true }).count(), 0);
+          assert.equal(await page.getByRole('button', { name: '发布到 GitHub', exact: true }).count(), 0);
         } else {
-          assert.equal(
-            await page.getByRole('link', { name: '打开 GitHub 手动提交' }).getAttribute('href'),
-            'https://github.com/fixture/repo/issues/new',
-          );
-          await page.getByRole('button', { name: '预览并提交', exact: true }).click();
-          await page.getByRole('button', { name: 'Submit to GitHub', exact: true }).waitFor();
-          assert.equal(creates, 1);
+          if (entry !== 'connector') {
+            assert.equal(
+              await page.getByRole('link', { name: '打开 GitHub 手动提交' }).getAttribute('href'),
+              'https://github.com/fixture/repo/issues/new',
+            );
+            await page.getByRole('button', { name: '核对并继续', exact: true }).click();
+          }
+          await page.getByRole('button', { name: '发布到 GitHub', exact: true }).waitFor();
+          assert.equal(creates, entry === 'connector' ? 0 : 1);
           assert.equal(issuePosts, 0);
-          await page.getByRole('button', { name: 'Submit to GitHub', exact: true }).click();
+          await capture('editing');
+          await page.getByLabel('报告标题', { exact: true }).fill('工具执行失败（合成复现）');
+          await page
+            .getByLabel('公开报告', { exact: true })
+            .fill(
+              '合成复现：运行示例工具后出现失败反馈卡。\n预期：审阅和修改后，由人明确发布。\n此为隔离截图，不含真实日志或用户信息。',
+            );
+          await capture('edited-confirmation');
+          await page.getByRole('button', { name: '发布到 GitHub', exact: true }).click();
           if (scenario === 'uncertain') {
-            await page.getByText(uncertainError, { exact: true }).waitFor();
-            await page.getByRole('button', { name: 'Submit to GitHub', exact: true }).click();
+            await page
+              .getByText('暂未确认 GitHub 是否已创建，请用同一份草稿核对结果；不会重复提单。', { exact: true })
+              .waitFor();
+            assert.equal(await page.getByLabel('公开报告', { exact: true }).isDisabled(), true);
+            await capture('uncertain');
+            await page.getByRole('button', { name: '重新核对结果', exact: true }).click();
           }
           await page.getByRole('link', { name: /#7/ }).waitFor();
           assert.equal(issuePosts, 1);
+          await capture('published-simulated');
+          assert(
+            widths.every(({ width }) => Math.abs(width - widths[0].width) < 1),
+            JSON.stringify(widths),
+          );
+          await page.getByText('查看报告', { exact: true }).click();
+          await page.getByRole('region', { name: '公开报告', exact: true }).waitFor();
+          assert.match(await page.getByRole('region', { name: '公开报告', exact: true }).innerText(), /由人明确发布/);
+          await capture('published-report');
           await open();
           assert.doesNotMatch(await page.locator('main').innerText(), /尚未提交/);
-          await page.getByRole('button', { name: '预览并提交', exact: true }).click();
+          if (entry !== 'connector') await page.getByRole('button', { name: '核对并继续', exact: true }).click();
           await page.getByRole('link', { name: /#7/ }).waitFor();
-          assert.equal(creates, 1);
+          assert.equal(creates, entry === 'connector' ? 0 : 1);
           assert.equal(issuePosts, 1);
         }
         assert.deepEqual(errors, []);
@@ -158,7 +217,7 @@ for (const entry of ['local', 'agent']) {
         await page.screenshot({ path: path.join(evidence, `${entry}-${scenario}.png`), fullPage: true });
         writeFileSync(
           path.join(evidence, `${entry}-${scenario}.json`),
-          JSON.stringify({ entry, scenario, creates, issuePosts, calls, errors }, null, 2),
+          JSON.stringify({ entry, scenario, creates, issuePosts, calls, errors, widths }, null, 2),
         );
       },
     );

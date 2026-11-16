@@ -51,7 +51,7 @@ test.each([
     const container = document.createElement('div');
     const root = createRoot(container);
     await act(async () => root.render(<CommunityIssueDraftCard block={block} messageId="original-message" />));
-    expect(container.textContent).toContain(status === 'published' ? 'Published to Community' : 'Publish cancelled');
+    expect(container.textContent).toContain(status === 'published' ? '已发布到 GitHub' : '已取消草稿');
     if (status === 'published') expect(container.querySelector('a')?.href).toBe(url);
     expect(
       vi

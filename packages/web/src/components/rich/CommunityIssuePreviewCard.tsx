@@ -1,46 +1,30 @@
 'use client';
 
-/**
- * F235: Community Issue Preview Card — edit + publish flow.
- *
- * Renders as a rich block message in the thread. States:
- *   draft → editing → publishing → published
- *                   → cancelling → cancelled
- *                   → error (recoverable → back to editing)
- *
- * Matches wireframe: docs/designs/F235-publish-to-community.html
- */
-
-import { type ReactNode, useEffect, useId, useState } from 'react';
+import { type ReactNode, useEffect, useState } from 'react';
 import type { RichCardBlock } from '@/stores/chat-types';
 import { apiFetch } from '@/utils/api-client';
+import {
+  CommunityIssueEditor,
+  CommunityIssueReport,
+  CommunityIssueSurface,
+  communityPrimaryAction,
+} from './CommunityIssueLayout';
 import { communityDraftSchema } from './community-issue-draft-schema';
 
 interface CommunityIssuePreviewCardProps {
   block?: RichCardBlock;
   messageId?: string;
-  /** Direct draftId for inline rendering (e.g. from FrustrationIssueCard). */
   inlineDraftId?: string;
   expectedRepo?: string;
   unavailableFallback?: ReactNode;
-  /** Called when the user cancels the draft — parent resets to pre-draft state. */
   onDraftCancelled?: () => void;
 }
-
 type PreviewState = 'loading' | 'editing' | 'publishing' | 'published' | 'cancelling' | 'cancelled' | 'error';
+const uncertainMessage = '暂未确认 GitHub 是否已创建，请用同一份草稿核对结果；不会重复提单。';
 
-/**
- * Detect if a card block is a community issue preview card.
- * Must be from the specific community-publisher connector (P2-2 cloud R6:
- * accepting any connector lets a spoofed card render Submit/Cancel UI).
- */
+/** Only the trusted publisher connector can supply a standalone preview. */
 export function isCommunityIssuePreviewBlock(block: RichCardBlock, messageSource?: { connector?: string }): boolean {
-  const metaKind = (block.meta as { kind?: string } | undefined)?.kind;
-  return metaKind === 'community_issue_preview' && messageSource?.connector === 'community-publisher';
-}
-
-function extractDraftId(block: RichCardBlock): string | null {
-  return (block.meta as { draftId?: string } | undefined)?.draftId ?? null;
+  return block.meta?.kind === 'community_issue_preview' && messageSource?.connector === 'community-publisher';
 }
 
 export function CommunityIssuePreviewCard({
@@ -50,8 +34,7 @@ export function CommunityIssuePreviewCard({
   expectedRepo,
   unavailableFallback,
 }: CommunityIssuePreviewCardProps) {
-  const formId = useId();
-  const draftId = inlineDraftId ?? (block ? extractDraftId(block) : null);
+  const draftId = inlineDraftId ?? (block?.meta as { draftId?: string } | undefined)?.draftId ?? null;
   const [state, setState] = useState<PreviewState>('loading');
   const [draft, setDraft] = useState<import('zod').z.infer<typeof communityDraftSchema> | null>(null);
   const [editTitle, setEditTitle] = useState('');
@@ -60,8 +43,7 @@ export function CommunityIssuePreviewCard({
   const [retry, setRetry] = useState(0);
   const [error, setError] = useState<string | null>(null);
 
-  // Hydrate draft data on mount
-  // biome-ignore lint/correctness/useExhaustiveDependencies: retry explicitly reloads the same retained draft.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: retry reloads the same retained draft.
   useEffect(() => {
     if (!draftId) {
       setState('error');
@@ -69,33 +51,29 @@ export function CommunityIssuePreviewCard({
       return;
     }
     let cancelled = false;
-
     setState('loading');
-    const hydrate = async () => {
-      try {
-        const res = await apiFetch(
-          `/api/plugins/official.github-operations/github/community-issue-drafts/by-id/${encodeURIComponent(draftId)}`,
-        );
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const data = await res.json();
+    void apiFetch(
+      `/api/plugins/official.github-operations/github/community-issue-drafts/by-id/${encodeURIComponent(draftId)}`,
+    )
+      .then(async (response) => {
+        if (!response.ok) throw new Error('草稿暂不可用。');
+        const data = await response.json();
+        const retained = communityDraftSchema.parse(data.draft);
         if (cancelled) return;
-        const d = communityDraftSchema.parse(data.draft);
-        setDraft(d);
-        setEditTitle(d.title);
-        setEditBody(d.bodyMarkdown);
-
-        if (d.status === 'published') setState('published');
-        else if (d.status === 'cancelled') setState('cancelled');
-        else setState('editing');
-      } catch {
+        setDraft(retained);
+        setEditTitle(retained.title);
+        setEditBody(retained.bodyMarkdown);
+        setError(null);
+        setState(
+          retained.status === 'published' ? 'published' : retained.status === 'cancelled' ? 'cancelled' : 'editing',
+        );
+      })
+      .catch(() => {
         if (!cancelled) {
           setError('草稿暂不可用，请检查 GitHub 插件设置后重试。');
           setState('error');
         }
-      }
-    };
-
-    void hydrate();
+      });
     return () => {
       cancelled = true;
     };
@@ -106,214 +84,156 @@ export function CommunityIssuePreviewCard({
     setState('publishing');
     setError(null);
     try {
-      const res = await apiFetch(
+      const response = await apiFetch(
         `/api/plugins/official.github-operations/github/community-issue-drafts/by-id/${encodeURIComponent(draftId)}/publish`,
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            title: editTitle,
-            bodyMarkdown: editBody,
-          }),
+          body: JSON.stringify({ title: editTitle, bodyMarkdown: editBody }),
         },
       );
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        throw new Error(data.error ?? `HTTP ${res.status}`);
+      const data = await response.json();
+      if (response.status === 409 && data.draft) {
+        const retained = communityDraftSchema.parse(data.draft);
+        if (retained.status === 'publishing' || retained.status === 'uncertain') {
+          setDraft(retained);
+          setEditTitle(retained.title);
+          setEditBody(retained.bodyMarkdown);
+          setError(uncertainMessage);
+          setState('editing');
+          return;
+        }
       }
-      const data = await res.json();
+      if (!response.ok) throw new Error('尚未确认发布结果。');
       const result = communityDraftSchema.parse(data.draft);
-      if (result.status !== 'published') throw new Error('尚未确认远端提交结果，请使用同一草稿重试核验。');
+      if (result.status !== 'published') throw new Error('尚未确认发布结果。');
       setDraft(result);
       setState('published');
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Publish failed');
+    } catch {
+      setError('尚未确认远端提交结果，请使用同一草稿重试核验。');
       setState('editing');
     }
   };
-
   const handleCancel = async () => {
     if (!draftId) return;
     setState('cancelling');
     setError(null);
     try {
-      const res = await apiFetch(
+      const response = await apiFetch(
         `/api/plugins/official.github-operations/github/community-issue-drafts/by-id/${encodeURIComponent(draftId)}/cancel`,
-        {
-          method: 'POST',
-        },
+        { method: 'POST' },
       );
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        throw new Error(data.error ?? `HTTP ${res.status}`);
-      }
-      const data = await res.json();
-      setDraft(communityDraftSchema.parse(data.draft));
+      if (!response.ok) throw new Error('取消失败。');
+      const data = await response.json();
+      const result = communityDraftSchema.parse(data.draft);
+      if (result.status !== 'cancelled') throw new Error('尚未确认草稿取消结果。');
+      setDraft(result);
       setState('cancelled');
       onDraftCancelled?.();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Cancel failed');
+    } catch {
+      setError('尚未确认草稿取消结果，请重新读取或重试。');
       setState('editing');
     }
   };
-
-  // ── Loading ─────────────────────────────────────────────────
-  if (state === 'loading') {
-    return (
-      <div className="rounded-lg border border-sky-300/30 bg-sky-50/10 p-3 text-sm">
-        <div className="flex items-center gap-2 text-cafe-muted">
-          <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-sky-400 border-t-transparent" />
-          Loading preview...
-        </div>
-      </div>
-    );
-  }
-
-  if (state === 'error')
-    return (
-      <div className="space-y-2">
-        <p role="alert" className="text-xs text-red-500">
-          {error}
-        </p>
-        {unavailableFallback}
-        <button type="button" onClick={() => setRetry((value) => value + 1)} className="text-xs text-sky-600">
-          重新加载草稿
-        </button>
-      </div>
-    );
-
-  // ── Published (collapsed success) ───────────────────────────
-  if (state === 'published' && draft) {
-    return (
-      <div className="rounded-lg border border-green-300/40 bg-green-50/10 p-3 text-sm">
-        <div className="flex items-center gap-2">
-          <span className="text-green-600">✓</span>
-          <span className="font-medium text-cafe-text">Published to Community</span>
-          <span className="rounded bg-green-100 px-2 py-0.5 text-xs text-green-700">published</span>
-        </div>
-        {draft.githubIssueUrl && (
-          <a
-            href={draft.githubIssueUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="mt-1 block text-xs text-sky-600 hover:underline"
-          >
-            #{draft.githubIssueNumber} — {draft.title}
-          </a>
-        )}
-      </div>
-    );
-  }
-
-  // ── Cancelled ───────────────────────────────────────────────
-  if (state === 'cancelled') {
-    return (
-      <div className="rounded-lg border border-cafe/20 bg-cafe-surface/30 p-3 text-sm">
-        <div className="flex items-center gap-2">
-          <span className="text-cafe-muted">✕</span>
-          <span className="text-cafe-muted">Publish cancelled</span>
-          <span className="rounded bg-cafe-muted/20 px-2 py-0.5 text-xs text-cafe-muted">cancelled</span>
-        </div>
-      </div>
-    );
-  }
-
-  // ── Editing / Publishing / Error ────────────────────────────
-  const isActionInProgress = state === 'publishing' || state === 'cancelling';
+  const busy = state === 'publishing' || state === 'cancelling';
+  const reconciling = draft?.status === 'publishing' || draft?.status === 'uncertain';
   const differentTarget = Boolean(
     draft && expectedRepo && draft.targetRepo.toLowerCase() !== expectedRepo.toLowerCase(),
   );
-  const reconciling = draft?.status === 'publishing' || draft?.status === 'uncertain';
-
-  return (
-    <div className="rounded-lg border border-sky-300/40 bg-sky-50/10 p-3 text-sm">
-      {/* Header */}
-      <div className="mb-2 flex items-center gap-2">
-        <span className="font-medium text-cafe-text">Publish to Community</span>
-        <span className="rounded bg-sky-100 px-2 py-0.5 text-xs text-sky-700">preview</span>
-      </div>
-
-      {/* Editable title */}
-      <div className="mb-2">
-        <label htmlFor={`${formId}-title`} className="mb-1 block text-xs text-cafe-muted">
-          Title
-        </label>
-        <input
-          id={`${formId}-title`}
-          type="text"
-          value={editTitle}
-          onChange={(e) => setEditTitle(e.target.value)}
-          disabled={isActionInProgress || !draft || reconciling}
-          className="w-full rounded border border-cafe/30 bg-cafe-surface px-2 py-1.5 text-xs text-cafe-text focus:border-sky-400 focus:outline-none disabled:opacity-50"
-        />
-      </div>
-
-      {/* Editable body */}
-      <div className="mb-2">
-        <label htmlFor={`${formId}-body`} className="mb-1 block text-xs text-cafe-muted">
-          Description (Markdown)
-        </label>
-        <textarea
-          id={`${formId}-body`}
-          value={editBody}
-          onChange={(e) => setEditBody(e.target.value)}
-          disabled={isActionInProgress || !draft || reconciling}
-          rows={6}
-          className="w-full rounded border border-cafe/30 bg-cafe-surface px-2 py-1.5 text-xs text-cafe-text focus:border-sky-400 focus:outline-none disabled:opacity-50"
-        />
-      </div>
-
-      {/* Info fields */}
-      <div className="mb-3 flex flex-wrap gap-x-4 gap-y-1 text-xs">
-        <span>
-          <span className="text-cafe-muted">Repository:</span>{' '}
-          <span className="text-cafe-text">{draft?.targetRepo ?? block?.fields?.[0]?.value}</span>
-        </span>
-        <span>
-          <span className="text-cafe-muted">Labels:</span>{' '}
-          <span className="text-cafe-text">{draft?.labels?.join(', ') ?? block?.fields?.[1]?.value}</span>
-        </span>
-      </div>
-
-      {differentTarget && !targetAccepted && (
-        <p className="mb-2 text-xs text-cafe-muted">
-          已有草稿属于 {draft?.targetRepo}，与本次建议目标 {expectedRepo} 不同。
-          <button type="button" onClick={() => setTargetAccepted(true)} className="ml-2 underline">
-            确认使用草稿原仓库
+  const terminal = state === 'published' || state === 'cancelled';
+  const content = (
+    <div className="min-w-0 space-y-3">
+      {state === 'loading' ? (
+        <output className="block text-xs text-cafe-muted">正在读取草稿…</output>
+      ) : state === 'error' ? (
+        <>
+          <p role="alert" className="text-xs text-cafe-muted">
+            {error}
+          </p>
+          {unavailableFallback}
+          <button type="button" onClick={() => setRetry((value) => value + 1)} className={communityPrimaryAction}>
+            重新加载草稿
           </button>
-        </p>
-      )}
-      {/* Actions */}
-      <div className="flex gap-2">
-        <button
-          type="button"
-          onClick={handlePublish}
-          disabled={isActionInProgress || !draft || !editTitle.trim() || (differentTarget && !targetAccepted)}
-          className="rounded bg-sky-600 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-sky-700 disabled:opacity-50"
-        >
-          {state === 'publishing' ? (
-            <span className="flex items-center gap-1">
-              <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-white border-t-transparent" />
-              Publishing...
-            </span>
-          ) : reconciling ? (
-            '重新核验提交结果'
-          ) : (
-            'Submit to GitHub'
+        </>
+      ) : terminal && draft ? (
+        <>
+          <output className="flex flex-wrap items-center gap-2 text-sm">
+            <span
+              aria-hidden="true"
+              className={`h-2 w-2 shrink-0 rounded-full ${state === 'published' ? 'bg-[var(--semantic-success)]' : 'bg-cafe-muted'}`}
+            />
+            <span>{state === 'published' ? '已发布到 GitHub' : '已取消草稿 · 不可重新发布'}</span>
+            {state === 'published' && (
+              <a
+                href={draft.githubIssueUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="break-all text-[var(--evolution-focus-text)] underline"
+              >
+                {draft.targetRepo}#{draft.githubIssueNumber}
+              </a>
+            )}
+          </output>
+          <details className="text-xs text-cafe-muted">
+            <summary className="cursor-pointer">查看报告</summary>
+            <div className="mt-3 text-cafe-text">
+              <CommunityIssueReport title={draft.title} bodyMarkdown={draft.bodyMarkdown} />
+            </div>
+          </details>
+        </>
+      ) : (
+        <>
+          <p className="flex items-center gap-2 text-xs text-cafe-muted">
+            <span aria-hidden="true" className="h-2 w-2 rounded-full bg-[var(--semantic-warning)]" />
+            {reconciling ? '结果待确认' : busy ? '正在处理…' : '编辑草稿 · 尚未外发'}
+          </p>
+          <CommunityIssueEditor
+            title={editTitle}
+            bodyMarkdown={editBody}
+            onTitleChange={setEditTitle}
+            onBodyChange={setEditBody}
+            disabled={busy || !draft || reconciling}
+          />
+          <p className="break-all text-xs text-cafe-muted">
+            目标仓库：{draft?.targetRepo ?? block?.fields?.[0]?.value} · 标签：
+            {(draft?.labels?.join(', ') ?? block?.fields?.[1]?.value) || '无'}
+          </p>
+          <p className="text-xs text-cafe-muted">仅点击“发布到 GitHub”才会创建公开 Issue，请再次核对内容和隐私。</p>
+          {differentTarget && !targetAccepted && (
+            <p className="text-xs text-cafe-muted">
+              已有草稿属于 {draft?.targetRepo}，与本次建议目标 {expectedRepo} 不同。
+              <button type="button" onClick={() => setTargetAccepted(true)} className="ml-2 underline">
+                确认使用草稿原仓库
+              </button>
+            </p>
           )}
-        </button>
-        <button
-          type="button"
-          onClick={handleCancel}
-          disabled={isActionInProgress || !draft || reconciling}
-          className="rounded border border-cafe/30 px-3 py-1.5 text-xs text-cafe-muted transition hover:bg-cafe-surface disabled:opacity-50"
-        >
-          {state === 'cancelling' ? 'Cancelling...' : 'Cancel'}
-        </button>
-      </div>
-
-      {/* Error */}
-      {error && <p className="mt-2 text-xs text-red-500">{error}</p>}
+          <div className="flex flex-wrap gap-3">
+            <button
+              type="button"
+              onClick={handlePublish}
+              disabled={busy || !draft || !editTitle.trim() || (differentTarget && !targetAccepted)}
+              className={communityPrimaryAction}
+            >
+              {state === 'publishing' ? '正在核对提交结果…' : reconciling ? '重新核对结果' : '发布到 GitHub'}
+            </button>
+            <button
+              type="button"
+              onClick={handleCancel}
+              disabled={busy || !draft || reconciling}
+              className="text-xs text-cafe-muted underline disabled:opacity-50"
+            >
+              {state === 'cancelling' ? '正在取消…' : '取消草稿'}
+            </button>
+          </div>
+          {reconciling && !error && <output className="block text-xs text-cafe-muted">{uncertainMessage}</output>}
+          {error && (
+            <p role="alert" className="text-xs text-cafe-muted">
+              {error}
+            </p>
+          )}
+        </>
+      )}
     </div>
   );
+  return inlineDraftId ? content : <CommunityIssueSurface>{content}</CommunityIssueSurface>;
 }

@@ -1,8 +1,14 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { type ReactNode, useEffect, useState } from 'react';
 import { z } from 'zod';
 import { apiFetch } from '@/utils/api-client';
+import {
+  CommunityIssueEditor,
+  CommunityIssueReport,
+  CommunityIssueSurface,
+  communityPrimaryAction,
+} from './CommunityIssueLayout';
 import { CommunityIssuePreviewCard } from './CommunityIssuePreviewCard';
 import { communityDraftSchema } from './community-issue-draft-schema';
 
@@ -18,6 +24,7 @@ interface CommunityPublishFlowProps {
   initialDraftId?: string;
   source?: { sourceId: string; messageId?: string };
   onDismiss?: () => void;
+  sourceRecord?: ReactNode;
 }
 const endpoint = '/api/plugins/official.github-operations/github/community-issue-drafts';
 const configSchema = z.object({ defaultRepo: z.string(), repos: z.array(z.string()) });
@@ -35,6 +42,7 @@ export function CommunityPublishFlow({
   initialDraftId,
   source,
   onDismiss,
+  sourceRecord,
 }: CommunityPublishFlowProps) {
   const [draftId, setDraftId] = useState(initialDraftId ?? null);
   const [config, setConfig] = useState<z.infer<typeof configSchema> | null>(null);
@@ -44,6 +52,7 @@ export function CommunityPublishFlow({
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [editingReport, setEditingReport] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -107,15 +116,18 @@ export function CommunityPublishFlow({
         ),
       });
       const result = await response.json();
-      if (response.status === 409 && result.error === 'draft requestId already has different content')
-        throw new Error('同一来源已有不同仓库或内容的草稿。请恢复创建时的仓库与报告内容后重试；不会创建替代草稿。');
+      if (response.status === 409 && result.error === 'draft requestId already has different content') {
+        setError('同一来源已有不同仓库或内容的草稿。请恢复创建时的仓库与报告内容后重试；不会创建替代草稿。');
+        onStatusChange('confirmed');
+        return;
+      }
       if (!response.ok && !(response.status === 409 && result.draft?.status === 'published'))
         throw new Error(result.error ?? '创建草稿失败');
       const draft = communityDraftSchema.parse(result.draft);
       setDraftId(draft.draftId);
       onStatusChange('draft_created');
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : '创建草稿失败');
+    } catch {
+      setError('草稿暂不可用，请检查 GitHub 插件设置后重试。');
       onStatusChange('confirmed');
     } finally {
       setCreating(false);
@@ -128,41 +140,36 @@ export function CommunityPublishFlow({
       ? `https://github.com/${selectedRepo}/issues/new`
       : null;
   const reportForm = (
-    <div className="mt-2 rounded-lg border border-cafe/20 bg-cafe-surface p-3 text-sm">
-      <p className="font-medium text-cafe-text">Issue 报告</p>
+    <div className="min-w-0 space-y-3">
+      <p className="flex items-center gap-2 text-xs text-cafe-muted">
+        <span aria-hidden="true" className="h-2 w-2 rounded-full bg-cafe-muted" />
+        公开反馈报告 · 等待核对
+      </p>
       <p className="mt-1 text-xs text-cafe-muted">
         已过滤常见凭据和个人路径，仍请核对隐私；发布服务会再处理正文。预览不会创建远端
         Issue；继续预览后可编辑标题和正文。
       </p>
-      <label className="mt-2 block text-xs text-cafe-muted">
-        标题
-        <input
-          aria-label="报告标题"
-          className="mt-1 w-full rounded border border-cafe/30 bg-cafe-surface p-2 text-cafe-text"
-          value={report?.title ?? ''}
-          readOnly={!providerError}
-          disabled={!report || creating}
-          onChange={(e) => setReport(report && { ...report, title: e.target.value })}
-        />
-      </label>
-      <label className="mt-2 block text-xs text-cafe-muted">
-        公开报告
-        <textarea
-          aria-label="公开报告"
-          rows={6}
-          className="mt-1 w-full rounded border border-cafe/30 bg-cafe-surface p-2 text-cafe-text"
-          value={report?.bodyMarkdown ?? ''}
-          readOnly={!providerError}
-          disabled={!report || creating}
-          onChange={(e) => setReport(report && { ...report, bodyMarkdown: e.target.value })}
-        />
-      </label>
+      {report ? (
+        editingReport ? (
+          <CommunityIssueEditor
+            title={report.title}
+            bodyMarkdown={report.bodyMarkdown}
+            onTitleChange={(value) => setReport({ ...report, title: value })}
+            onBodyChange={(value) => setReport({ ...report, bodyMarkdown: value })}
+            disabled={creating}
+          />
+        ) : (
+          <CommunityIssueReport title={report.title} bodyMarkdown={report.bodyMarkdown} />
+        )
+      ) : (
+        <output className="block text-xs text-cafe-muted">正在准备公开报告…</output>
+      )}
       {config?.repos.length ? (
         <label className="mt-2 block text-xs text-cafe-muted">
           目标仓库
           <select
             aria-label="目标仓库"
-            className="ml-2 max-w-full rounded border border-cafe/30 bg-cafe-surface p-1 text-cafe-text"
+            className="ml-2 max-w-full rounded border border-cafe bg-cafe-surface p-1 text-cafe-text"
             value={selectedRepo}
             disabled={creating}
             onChange={(e) => setSelectedRepo(e.target.value)}
@@ -187,9 +194,9 @@ export function CommunityPublishFlow({
             type="button"
             disabled={creating || !report?.title.trim()}
             onClick={createDraft}
-            className="rounded bg-cocreator-primary px-3 py-1.5 text-white disabled:opacity-50"
+            className={communityPrimaryAction}
           >
-            {creating ? '正在准备预览…' : '预览并提交'}
+            {creating ? '正在准备预览…' : '核对并继续'}
           </button>
         )}
         <button
@@ -199,12 +206,22 @@ export function CommunityPublishFlow({
             void navigator.clipboard
               .writeText(`# ${report?.title}\n\n${report?.bodyMarkdown}`)
               .then(() => setCopied(true))
-              .catch(() => setError('复制失败，请从报告文本框手动复制。'));
+              .catch(() => setError('复制失败，请选中报告内容手动复制。'));
           }}
-          className="rounded border border-cafe/30 px-3 py-1.5 disabled:opacity-50"
+          className="rounded border border-cafe px-3 py-1.5 disabled:opacity-50"
         >
           {copied ? '已复制' : '复制报告'}
         </button>
+        {report && (providerError || error || editingReport) && (
+          <button
+            type="button"
+            disabled={creating}
+            onClick={() => setEditingReport((value) => !value)}
+            className="text-cafe-muted underline"
+          >
+            {editingReport ? '完成编辑' : '编辑报告'}
+          </button>
+        )}
         {manualUrl && (
           <a
             href={manualUrl}
@@ -217,7 +234,7 @@ export function CommunityPublishFlow({
         )}
         {onDismiss && (
           <button type="button" onClick={onDismiss} className="text-cafe-muted">
-            暂不
+            收起报告
           </button>
         )}
       </div>
@@ -228,9 +245,18 @@ export function CommunityPublishFlow({
       )}
     </div>
   );
-  return draftId ? (
-    <CommunityIssuePreviewCard inlineDraftId={draftId} expectedRepo={selectedRepo} unavailableFallback={reportForm} />
-  ) : (
-    reportForm
+  return (
+    <CommunityIssueSurface>
+      {draftId ? (
+        <CommunityIssuePreviewCard
+          inlineDraftId={draftId}
+          expectedRepo={selectedRepo}
+          unavailableFallback={reportForm}
+        />
+      ) : (
+        reportForm
+      )}
+      {sourceRecord}
+    </CommunityIssueSurface>
   );
 }
