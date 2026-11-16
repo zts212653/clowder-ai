@@ -521,6 +521,10 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
       if (activeUserId && activeUserId !== userId) {
         return { ok: false, status: 409, error: '当前有其他用户的调用在执行，无法立即执行', code: 'INVOCATION_ACTIVE' };
       }
+      const previousExecutionId = invocationTracker.getExecutionId?.(threadId, steerCatId);
+      const waitForProducer =
+        previousExecutionId !== undefined &&
+        queueProcessor.hasProcessingSlotReservation(threadId, steerCatId, previousExecutionId);
       const cancelResult = invocationTracker.cancel(threadId, steerCatId, userId, 'preempted');
       releaseAgentSessionLocks(
         { threadId, userId, catId: steerCatId },
@@ -538,6 +542,9 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
       if (!cancelResult.cancelled && invocationTracker.has(threadId, steerCatId)) {
         return { ok: false, status: 409, error: '当前调用无法取消，无法立即执行', code: 'INVOCATION_CANCEL_FAILED' };
       }
+      // The old Queue producer releases its own reservation after teardown and
+      // drains the saved replacement. Other owners keep the existing path.
+      if (waitForProducer) return { ok: true, deferred: true };
       queueProcessor.releaseSlot(threadId, steerCatId);
       return { ok: true, deferred: false };
     }
@@ -1710,6 +1717,22 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
         return { status: preemption.status, result: { error: preemption.error, code: preemption.code } };
       }
 
+      if (preemption.deferred && (await invocationQueue.restoreClaimedEntries(threadId, [entryId]))) {
+        handedOff = true;
+        await emitQueueUpdated(
+          socketManager,
+          userId,
+          threadId,
+          invocationQueue.list(threadId, userId),
+          'steer_deferred_prior_turn',
+        );
+        // Completion can have drained while this exact source was still claimed.
+        await queueProcessor.requestDrain(threadId);
+        return {
+          status: 200,
+          result: { outcome: 'queued', targetCatId: steerCatId, effective: 'next_work', reason: 'prior_turn_stopping' },
+        };
+      }
       const result = await queueProcessor.processClaimedSteerEntries(threadId, userId, [entryId], steerCatId);
       if (!result.started) {
         await invocationQueue.restoreClaimedEntries(threadId, [entryId]);

@@ -4929,6 +4929,7 @@ export class QueueProcessor {
       targetCatIds: targetCats,
       isCanceled: isAdmittedTargetCanceled,
     });
+    let broadcastTerminalError: string | undefined;
     const routingRejectedTargets = new Set<string>();
     let responseText = '';
     // F122B B6: completion hooks are registered before drain; keep their
@@ -6603,6 +6604,9 @@ export class QueueProcessor {
           typeof msg.catId === 'string' ? lifecycleResponseMessageIdByCat.get(msg.catId) : undefined,
         );
         socketManager.broadcastAgentMessage(visibleMessage, threadId);
+        if (msg.type === 'error' && isTerminalDispositionEvent(msg)) {
+          broadcastTerminalError ??= terminalDispositions.getPrimaryTerminalError();
+        }
         // A target's done follows its response commit: publish that committed truth
         // now instead of when the whole entry (every sibling target) settles.
         const doneResponseMessageId =
@@ -6913,16 +6917,18 @@ export class QueueProcessor {
           });
         }
         if (exposeFailure) {
-          socketManager.broadcastAgentMessage(
-            {
-              type: 'error',
-              catId: targetCats[0] ?? 'system',
-              error: errMsg,
-              isFinal: true,
-              timestamp: Date.now(),
-            },
-            threadId,
-          );
+          if (broadcastTerminalError !== errMsg) {
+            socketManager.broadcastAgentMessage(
+              {
+                type: 'error',
+                catId: targetCats[0] ?? 'system',
+                error: errMsg,
+                isFinal: true,
+                timestamp: Date.now(),
+              },
+              threadId,
+            );
+          }
           if (entry.from.kind === 'user') {
             const pushService = this.deps.getPushService?.();
             if (pushService) {

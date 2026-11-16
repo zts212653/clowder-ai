@@ -3593,7 +3593,7 @@ async function main(): Promise<void> {
           stopUnconfirmedProvider: (record: TurnExecutionRecord) =>
             stopWithWindowsJobProof({ store: turnExecutionStore, record, dataDir: process.env.CAT_CAFE_DATA_DIR }),
           findWindowsLiveOwner: (records: readonly TurnExecutionRecord[]) =>
-            findWindowsLiveOwner({ records, dataDir: process.env.CAT_CAFE_DATA_DIR }),
+            findWindowsLiveOwner({ records, store: turnExecutionStore, dataDir: process.env.CAT_CAFE_DATA_DIR }),
         }
       : {}),
   });
