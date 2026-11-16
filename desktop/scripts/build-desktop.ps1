@@ -400,6 +400,13 @@ if (-not $SkipElectronBuild) {
         Write-Err "desktop Electron $installedElectron still does not match package-lock $lockElectron"
         exit 1
     }
+    # electron-builder's Windows rcedit path asks app-builder for the legacy
+    # winCodeSign archive, which contains darwin symlinks and cannot be extracted
+    # by a non-elevated Windows user. Pre-extract only the Windows tools into the
+    # normal cache; rcedit then runs from a Medium-integrity cache and preserves
+    # the executable's icon/version resources.
+    & node (Join-Path $ProjectRoot "desktop/scripts/prewarm-win-codesign.mjs")
+    if ($LASTEXITCODE -ne 0) { Write-Err "winCodeSign prewarm failed"; exit 1 }
     npx electron-builder --win --dir --config windows-builder.cjs
     if ($LASTEXITCODE -ne 0) { Write-Err "electron-builder failed"; exit 1 }
     Pop-Location
