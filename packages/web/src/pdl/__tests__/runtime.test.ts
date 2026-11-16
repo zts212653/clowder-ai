@@ -8312,3 +8312,235 @@ it('reads watcher sources only in the projection and writes configuration and nu
     dom.window.close();
   }
 });
+
+// Arrange VM coverage: the component owns geometry and gesture rendering.
+describe('console sidebar arrange layout', () => {
+  async function arrangeFixture(mode: 'manual' | 'recent' | 'running-first' = 'recent', group = 'recent') {
+    const owner: SidebarOwner = {
+      preferences: {
+        groups: [{ id: 'g', name: 'Group', threadIds: ['a', 'b', 'c'] }],
+        open: { 'group:g': false },
+        memberSort: mode === 'recent' ? {} : { 'group:g': mode },
+      },
+      labels: [],
+    };
+    const runtime = await boot(
+      undefined,
+      (data) => {
+        data.threads = ['a', 'b', 'c', 'incoming', 'tail'].map((id, index) => ({
+          ...data.threads[0],
+          id,
+          title: id,
+          lastActiveAt: 100 - index * 10,
+          pinned: false,
+          favorited: true,
+          projectPath: index < 3 ? '/A' : '/B',
+        }));
+      },
+      undefined,
+      { sidebarOwner: owner },
+    );
+    const { w, port, data, action } = runtime;
+    function publish() {
+      port.sidebarData = fixtureSidebar(data, { owner });
+      w.clowderChat.pushSidebar(port.sidebarData);
+    }
+    action.mockImplementation(async (name, args) => {
+      if (name !== 'sidebarGroupWrite') return;
+      const command = JSON.parse(args.value);
+      const groups = owner.preferences.groups;
+      if (command.action === 'create') {
+        for (const saved of groups) saved.threadIds = saved.threadIds.filter((id) => !command.threadIds.includes(id));
+        groups.push({ id: 'created', threadIds: command.threadIds });
+      } else {
+        for (const saved of groups) saved.threadIds = saved.threadIds.filter((id) => id !== command.threadId);
+        if (command.action === 'move') {
+          const target = groups.find((g) => g.id === command.groupId)!;
+          const at = command.beforeThreadId
+            ? target.threadIds.indexOf(command.beforeThreadId)
+            : target.threadIds.length;
+          target.threadIds.splice(at, 0, command.threadId);
+        }
+      }
+      owner.preferences.groups = groups.filter((g) => g.threadIds.length >= 2);
+      publish();
+    });
+    action.mockClear();
+    w.eval('CS.group=' + JSON.stringify(group));
+    return { ...runtime, owner, publish };
+  }
+  function layout(w: Window) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- the production scripts run in jsdom
+    return (w as any).eval('VM.navThreads().sections.map(s=>({key:s.key,ids:s.rows.map(r=>r.id)}))');
+  }
+
+  it('keeps rows, hidden tails and collapsed peeks while live facts change; Done admits new rows', async () => {
+    const { w, dom, data, port, publish } = await arrangeFixture();
+    try {
+      const before = layout(w);
+      w.eval(`A.cafeArrangeBegin({value:JSON.stringify({rows:{a:{height:76}},sections:{'grp:g':{visibleCount:2}}})})`);
+      data.threads.reverse();
+      data.threads.find((t) => t.id === 'a')!.title = 'Live title';
+      data.threads.find((t) => t.id === 'incoming')!.pinned = true;
+      data.threads.push({ ...data.threads[0], id: 'new', title: 'New' });
+      publish();
+      port.sidebarData = {
+        ...port.sidebarData,
+        attention: [
+          {
+            id: 'a',
+            unreadCount: 9,
+            hasUserMention: true,
+            presence: { status: 'working', cats: ['codex'] },
+            lastWho: '',
+          },
+        ],
+      };
+      w.clowderChat.pushSidebar(port.sidebarData);
+      expect(layout(w)).toEqual(before);
+      expect(w.eval('VM.navThreads().sections[0]')).toMatchObject({ collapsed: true, visibleCount: 2, peek: [] });
+      expect(w.eval('VM.navThreads().sections[0].rows[0]')).toMatchObject({
+        title: 'Live title',
+        unread: 9,
+        running: true,
+        arrange: { height: 76 },
+      });
+      w.eval("A.cafeArrangeReveal({key:'grp:g'})");
+      expect(w.eval('VM.navThreads().sections[0].visibleCount')).toBe(3);
+      w.eval('A.cafeArrangeDone()');
+      expect(layout(w).flatMap((s: { ids: string[] }) => s.ids)).toContain('new');
+    } finally {
+      dom.window.close();
+    }
+  });
+
+  it.each([
+    'favorites',
+    'pinned',
+    'project',
+  ])('holds %s identities while membership commands persist', async (group) => {
+    const { w, dom, data, owner, publish, action } = await arrangeFixture('manual', group);
+    try {
+      if (group === 'pinned') {
+        data.threads.forEach((t) => {
+          t.pinned = true;
+        });
+        publish();
+      }
+      const before = layout(w);
+      w.eval('A.cafeArrangeBegin()');
+      data.threads[0].pinned = false;
+      data.threads[0].favorited = false;
+      data.threads.push({ ...data.threads[0], id: 'new', favorited: true, pinned: true });
+      publish();
+      await w.eval("A.cafeThreadMove({id:'incoming',target:'a'})");
+      expect(owner.preferences.groups[0].threadIds).toContain('incoming');
+      expect(layout(w)).toEqual(before);
+      const calls = action.mock.calls.length;
+      await w.eval("A.cafeThreadMove({id:'a',target:'b'})");
+      expect(action.mock.calls).toHaveLength(calls);
+      w.eval('A.cafeArrangeDone()');
+      expect(layout(w).flatMap((s: { ids: string[] }) => s.ids)).toContain('new');
+    } finally {
+      dom.window.close();
+    }
+  });
+
+  it.each(['recent', 'running-first', 'manual'] as const)('writes same-group insertion only for %s', async (mode) => {
+    const { w, dom, action, owner } = await arrangeFixture(mode);
+    try {
+      w.eval('A.cafeArrangeBegin()');
+      const before = layout(w);
+      await w.eval("A.cafeThreadMove({id:'a',target:'b',after:'true'})");
+      if (mode === 'manual') {
+        expect(owner.preferences.groups[0].threadIds).toEqual(['b', 'a', 'c']);
+        expect(w.eval('VM.navThreads().sections[0].rows.map(r=>r.id)')).toEqual(['b', 'a', 'c']);
+        expect(JSON.parse(action.mock.calls.at(-1)![1].value)).toMatchObject({ action: 'move', beforeThreadId: 'c' });
+      } else {
+        expect(action).not.toHaveBeenCalled();
+        expect(layout(w)).toEqual(before);
+        expect(w.eval('VM.navThreads().arrangeHint')).toEqual({
+          threadId: 'a',
+          sort: mode === 'recent' ? 'recent' : 'running',
+        });
+      }
+    } finally {
+      dom.window.close();
+    }
+  });
+
+  it('inserts incoming rows without reordering existing members and keeps an originally collapsed group closed', async () => {
+    const { w, dom, data, publish } = await arrangeFixture();
+    try {
+      w.eval(`A.cafeArrangeBegin({value:JSON.stringify({rows:{},sections:{'grp:g':{visibleCount:2}}})})`);
+      data.threads.find((t) => t.id === 'incoming')!.lastActiveAt = 95;
+      data.threads.find((t) => t.id === 'c')!.lastActiveAt = 999;
+      publish();
+      await w.eval("A.cafeThreadMove({id:'incoming',to:'g'})");
+      expect(w.eval('VM.navThreads().sections[0]')).toMatchObject({ collapsed: true, visibleCount: 3 });
+      expect(w.eval('VM.navThreads().sections[0].rows.map(r=>r.id)')).toEqual(['a', 'incoming', 'b', 'c']);
+    } finally {
+      dom.window.close();
+    }
+  });
+
+  it('creates a group at its target, dissolves a source shell in place, and keeps rejected writes unchanged', async () => {
+    const { w, dom, action } = await arrangeFixture();
+    try {
+      w.eval('A.cafeArrangeBegin()');
+      const before = layout(w);
+      action.mockRejectedValueOnce(new Error('HTTP 409'));
+      await expect(w.eval("A.cafeThreadMove({id:'a',target:'tail'})")).rejects.toThrow('HTTP 409');
+      expect(layout(w)).toEqual(before);
+      await w.eval("A.cafeThreadMove({id:'a',target:'tail'})");
+      expect(w.eval('VM.navThreads().sections.find(s=>s.gid==="created").rows.map(r=>r.id)')).toEqual(['a', 'tail']);
+      await w.eval("A.cafeThreadMove({id:'b',to:''})");
+      const ids = layout(w).flatMap((s: { ids: string[] }) => s.ids);
+      expect(ids).toEqual(['c', 'b', 'incoming', 'a', 'tail']);
+    } finally {
+      dom.window.close();
+    }
+  });
+
+  it('keeps a two-member manual shell and its captured slots during insertion', async () => {
+    const { w, dom, owner, publish } = await arrangeFixture('manual');
+    try {
+      owner.preferences.groups[0].threadIds = ['a', 'b'];
+      publish();
+      w.eval('A.cafeArrangeBegin()');
+      await w.eval("A.cafeThreadMove({id:'a',target:'b',after:'true'})");
+      expect(w.eval('VM.navThreads().sections[0]')).toMatchObject({ gid: 'g', collapsed: true });
+      expect(w.eval('VM.navThreads().sections[0].rows.map(r=>r.id)')).toEqual(['b', 'a']);
+    } finally {
+      dom.window.close();
+    }
+  });
+
+  it('keeps the hidden tail hidden when a new group splits the target section', async () => {
+    const { w, dom, data, publish } = await arrangeFixture();
+    try {
+      data.threads.push(...Array.from({ length: 5 }, (_, i) => ({ ...data.threads[0], id: 'extra-' + i })));
+      publish();
+      w.eval(`A.cafeArrangeBegin({value:JSON.stringify({rows:{},sections:{recent:{visibleCount:2}}})})`);
+      await w.eval("A.cafeThreadMove({id:'a',target:'tail'})");
+      expect(w.eval('VM.navThreads().sections.find(s=>s.key.startsWith("recent:after:"))')).toMatchObject({
+        visibleCount: 0,
+      });
+      expect(w.eval('VM.navThreads().sections.find(s=>s.key==="recent")')).toMatchObject({ visibleCount: 1 });
+    } finally {
+      dom.window.close();
+    }
+  });
+
+  it('ends arrange on scope changes and keeps the system view outside arrange', async () => {
+    const { w, dom } = await arrangeFixture();
+    try {
+      w.eval('A.cafeArrangeBegin();CS.tag="filtered"');
+      expect(w.eval('VM.navThreads().arranging')).toBe(false);
+      w.eval('CS.tag=null;CS.group="system";A.cafeArrangeBegin()');
+      expect(w.eval('VM.navThreads().arranging')).toBe(false);
+    } finally {
+      dom.window.close();
+    }
+  });
+});

@@ -46,6 +46,14 @@ export async function startSearchGroupApi(port = 0) {
     const thread = await store.get(request.params.threadId);
     return thread?.createdBy === owner ? thread : reply.code(404).send({ error: 'Thread not found' });
   });
+  app.patch('/api/threads/:threadId', async (request, reply) => {
+    const thread = await store.get(request.params.threadId);
+    if (thread?.createdBy !== owner) return reply.code(404).send({ error: 'Thread not found' });
+    const { pinned, favorited } = request.body ?? {};
+    if (typeof pinned === 'boolean') store.updatePin(thread.id, pinned);
+    if (typeof favorited === 'boolean') store.updateFavorite(thread.id, favorited);
+    return store.get(thread.id);
+  });
   app.get('/api/session', async () => ({ userId: owner }));
   app.get('/api/debug/callback-auth', async () => ({
     reasonCounts: {},
