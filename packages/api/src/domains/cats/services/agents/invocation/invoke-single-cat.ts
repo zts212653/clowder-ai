@@ -4339,6 +4339,28 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
       }
     };
 
+    const recordTranscriptEvent = async (msg: AgentMessage) => {
+      // F24 Phase C: Record event to transcript buffer (best-effort)
+      if (deps.transcriptWriter && deps.sessionChainStore) {
+        try {
+          const activeRec = await deps.sessionChainStore.getActive(catId, threadId, userId);
+          if (activeRec) {
+            const sessInfo: TranscriptSessionInfo = {
+              sessionId: activeRec.id,
+              threadId,
+              catId: activeRec.catId,
+              ...(activeRec.cliSessionId ? { cliSessionId: activeRec.cliSessionId } : {}),
+              seq: activeRec.seq,
+            };
+            // Record the raw agent message as a transcript event
+            deps.transcriptWriter.appendEvent(sessInfo, msg as unknown as Record<string, unknown>, invocationId);
+          }
+        } catch {
+          /* best-effort */
+        }
+      }
+    };
+
     const processMessage = async (msg: AgentMessage): Promise<AgentMessage[]> => {
       msg = redactClaudeLaunchToken(msg, resolvedAccount?.claude ? accountEnv?.CLAUDE_CODE_OAUTH_TOKEN : undefined);
       if (executionAccount && msg.metadata)
@@ -5373,6 +5395,9 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
 
         // F8/F24 usage + context_health (extracted to helper for clowder#915
         // — see processUsageAndContextHealth declaration at top of processMessage).
+        // #1580: seal clears the active pointer and flushes the transcript.
+        // Record the real done in its current session before either can happen.
+        await recordTranscriptEvent(msg);
         await processUsageAndContextHealth(msg);
 
         // clowder#915 R4 cloud P1 #3 (defer seal execution): if an earlier
@@ -5546,25 +5571,7 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
         }
       }
 
-      // F24 Phase C: Record event to transcript buffer (best-effort)
-      if (deps.transcriptWriter && deps.sessionChainStore) {
-        try {
-          const activeRec = await deps.sessionChainStore.getActive(catId, threadId, userId);
-          if (activeRec) {
-            const sessInfo: TranscriptSessionInfo = {
-              sessionId: activeRec.id,
-              threadId,
-              catId: activeRec.catId,
-              ...(activeRec.cliSessionId ? { cliSessionId: activeRec.cliSessionId } : {}),
-              seq: activeRec.seq,
-            };
-            // Record the raw agent message as a transcript event
-            deps.transcriptWriter.appendEvent(sessInfo, msg as unknown as Record<string, unknown>, invocationId);
-          }
-        } catch {
-          /* best-effort */
-        }
-      }
+      if (msg.type !== 'done') await recordTranscriptEvent(msg);
 
       return outputs;
     };
