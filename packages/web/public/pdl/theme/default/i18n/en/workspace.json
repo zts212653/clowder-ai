@@ -1,4 +1,7 @@
 {
+ "memory": {
+  "flagRerank": "Auto re-rank memory search results"
+ },
  "wsPreview": {
   "discovered": "Discovered services"
  },

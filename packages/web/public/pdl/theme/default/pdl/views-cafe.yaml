@@ -1564,7 +1564,11 @@ views:
                           "true":
                             t: workbench.flagName.true
                             args: ["@name"]
-                          _: "@name"
+                          _:
+                            of: "@id"
+                            map:
+                              F200_CONSUMPTION_RERANK: t:memory.flagRerank
+                              _: "@name"
                       tip: "@id"
                   trail:
                     - text:

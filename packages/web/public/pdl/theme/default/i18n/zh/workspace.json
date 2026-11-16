@@ -1904,7 +1904,8 @@
     "allCats": "全部猫",
     "rebuilding": "重建中…",
     "runLog": "运行日志",
-    "noLogs": "还没有日志"
+    "noLogs": "还没有日志",
+    "flagRerank": "记忆搜索结果自动重排序"
   },
   "wsExec": {
     "title": "执行",
