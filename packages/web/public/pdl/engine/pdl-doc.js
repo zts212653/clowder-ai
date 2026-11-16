@@ -106,34 +106,39 @@ function pdlLimitWhy(x) {
    外观（自动 / 浅色 / 深色）是用户偏好，不属于主题。系统主题 1 = 奶油配色，系统主题 2 = 石墨配色；主题插件带来的主题也是只读主题（id 'pack:…'，配色是插件给的值） */
 const PDL_SYS_THEMES = [];   /* 系统主题描述由当前主题的数据登记。 */
 function pdlPackThemes() { return THEME_SRC.packs().map(function (t) { return { id: 'pack:' + t.id, name: t.name, src: t.src, skin: 'default', palette: t.id }; }); }
-/* 主题文档放在哪：应用登记 THEME_DOCS = { read() → Promise<主题|null>, write(主题) }（宿主保存，清缓存也还在）；没登记时存在浏览器里。启动时先读回来（early 阶段：同一阶段的函数一起开始，主题文档在下一阶段） */
+/* 主题文档放在哪：应用登记 THEME_DOCS = { read() → Promise<主题|null>, write(主题) }（宿主保存，清缓存也还在）；没登记时存在浏览器里。启动时先读回来（theme 阶段：最先，读完主题文档再读主题包） */
 let THEME_DOCS = null, THEMES_HELD = null, THEMES_WRITE = Promise.resolve();
 function pdlThemes() { return (THEME_DOCS ? THEMES_HELD && pdlClone(THEMES_HELD) : store.get('pdl-themes-v1', null)) || { active: PDL_SYS_THEMES[0].id, customs: [] }; }   /* 每次给一份副本（和读存储一样）：改了要 pdlThemesSave 才算数 */
 function pdlThemesSave(t) { if (THEME_DOCS) { const j = JSON.stringify(t); if (j === JSON.stringify(pdlThemes())) return; THEMES_HELD = JSON.parse(j); THEMES_WRITE = Promise.resolve(THEME_DOCS.write(t)); }   /* 没变就不写宿主（启动时的整理多半什么都没改） */ else store.set('pdl-themes-v1', t); }
-/* 主题包（spec 主题包）：zip 由后端解开、按主题 id 存成目录；应用登记 THEME_PACKS = { list() → Promise<[{ id, name, version, contractVersion }]>,
+/* 主题包（spec 主题包）：所有主题都是主题包，一套加载规则。包在两处：内置的随代码发布（只读），导入的由后端解开、按主题 id 存成目录；后端两处一起列出（builtin 标出内置）。
+   应用登记 THEME_PACKS = { list() → Promise<[{ id, name, version, contractVersion, builtin }]>,
    read(id) → Promise<包：pdl、uses 用到的组件包代码 components、文案 i18n、素材 assets（地址）>, install(文件) → Promise<{ id } | { custom: 自定义主题 }>,
    remove(id), export(id), exportCustom(自定义主题) }。主题存储只记当前主题和自定义主题（自定义主题的 theme 是它基于的包）。
-   一次只渲染一套主题：启动时按当前主题的包 id 读这一个包——默认组件库与文案之后，依次是它用到的组件包、文案、素材、pdl（同 id 盖过默认，缺的回落默认）。
+   启动时先读内置的底包 default，当前主题是别的包再读它盖在上面（依次是它用到的组件包、文案、素材、pdl；同 id 盖过底包，缺的回落底包）；当前主题的包读不到就只用底包。
+   底包在主题页里就是系统主题（它的几套配色），不另列一行。
    切换主题 = 存完后整页重新载入（pdlThemeGo） */
 let THEME_PACKS = null, PACK_LIST = [], PACK_LOADED = null;
-function pdlThemePacks() { return PACK_LIST.map(function (p) { return { id: 'pkg:' + p.id, name: p.name, src: p.version, skin: 'default', palette: themeDefault(), theme: p.id }; }); }
+const PACK_BASE = 'default';
+function pdlThemePacks() { return PACK_LIST.map(function (p) { return { id: 'pkg:' + p.id, name: p.name, src: p.version, skin: 'default', palette: themeDefault(), theme: p.id, builtin: !!p.builtin }; }); }
 function pdlActivePack(t) { const x = t.customs.find(function (c) { return c.id === t.active; }) || pdlSysTheme(t.active) || {}; return PACK_LIST.some(function (p) { return p.id === x.theme; }) ? x.theme : null; }
+function pdlPackApply(p) {
+  const add = function (tag, text) { const el = document.createElement(tag); el.textContent = text; document.head.appendChild(el); };
+  Object.keys(p.components).forEach(function (u) { p.components[u].css.forEach(function (x) { add('style', x); }); p.components[u].js.forEach(function (x) { add('script', x); }); });
+  Object.keys(p.i18n).forEach(function (l) { defineI18n(l, p.i18n[l]); });
+  Object.assign(ASSETS, p.assets);
+  pdlThemeLoad(p.pdl, { id: p.id, name: p.name, version: p.version, contractVersion: p.contractVersion }); pdlBaseTake();
+}
 function pdlPackBoot() {
-  if (!THEME_PACKS) return;
   return THEME_PACKS.list().then(function (list) {
-    PACK_LIST = list; const id = pdlActivePack(pdlThemes()); if (!id) return;
-    return THEME_PACKS.read(id).then(function (p) {
-      const add = function (tag, text) { const el = document.createElement(tag); el.textContent = text; document.head.appendChild(el); };
-      Object.keys(p.components).forEach(function (u) { p.components[u].css.forEach(function (x) { add('style', x); }); p.components[u].js.forEach(function (x) { add('script', x); }); });
-      Object.keys(p.i18n).forEach(function (l) { defineI18n(l, p.i18n[l]); });
-      Object.assign(ASSETS, p.assets);
-      pdlThemeLoad(p.pdl, { id: p.id, name: p.name, version: p.version, contractVersion: p.contractVersion }); pdlBaseTake();
-      PACK_LOADED = id;
+    PACK_LIST = list.filter(function (p) { return p.id !== PACK_BASE; });
+    return THEME_PACKS.read(PACK_BASE).then(pdlPackApply).then(function () {
+      const id = pdlActivePack(pdlThemes()); if (!id) return;
+      return THEME_PACKS.read(id).then(function (p) { pdlPackApply(p); PACK_LOADED = id; }, function () { /* 当前主题的包不在了：只用底包 */ });
     });
   });
 }
 function pdlThemeGo(t) { pdlThemesSave(t); THEMES_WRITE.then(function () { location.reload(); }); }
-onStart('early', function () { if (!THEME_DOCS) return pdlPackBoot(); return THEME_DOCS.read().then(function (t) { THEMES_HELD = t; return pdlPackBoot(); }); });
+onStart('theme', function () { if (!THEME_DOCS) return pdlPackBoot(); return THEME_DOCS.read().then(function (t) { THEMES_HELD = t; return pdlPackBoot(); }); });
 function pdlThemeActive() { const t = pdlThemes(); return t.customs.find(function (c) { return c.id === t.active; }) || null; }
 function pdlSysTheme(id) { return PDL_SYS_THEMES.concat(pdlPackThemes(), pdlThemePacks()).find(function (x) { return x.id === id; }) || null; }   /* 只读主题：系统主题 + 主题插件带来的主题 + 装好的主题包 */
 /* 当前主题的名字（主题页、主题计算器标题都用它） */

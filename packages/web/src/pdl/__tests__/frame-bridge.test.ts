@@ -5,6 +5,7 @@ import { apiFetch } from '@/utils/api-client';
 import { config, middleware } from '../../middleware';
 import { apiFetch as childFetch, fetch as injectedFetch } from '../../starry/frame-api';
 import { frameRequest } from '../frame-bridge';
+import { defaultThemePdl } from './builtin-theme';
 
 vi.mock('@/utils/api-client', () => ({ apiFetch: vi.fn() }));
 
@@ -206,11 +207,9 @@ it('binds the theme built-in frame without registering another entry or installe
     onRender: vi.fn(),
     document: { addEventListener: vi.fn() },
   });
-  const theme = readFileSync('public/pdl/theme/default/pdl.js', 'utf8');
-  const modules = JSON.parse(`[${theme.slice(theme.indexOf('pdlThemeLoad(') + 13, theme.lastIndexOf(')'))}]`)[0]
-    .modules;
+  const modules = defaultThemePdl().modules;
   runInContext(
-    'pdlRegister(' + JSON.stringify(modules.find((m: { id: string }) => m.id === 'builtin.starry')) + ')',
+    `pdlRegister(${JSON.stringify(modules.find((m: { id: string }) => m.id === 'builtin.starry'))})`,
     context,
   );
   runInContext(readFileSync('public/pdl-app/starry.js', 'utf8'), context);

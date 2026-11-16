@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, readdir, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'node:test';
@@ -32,6 +32,7 @@ const files = () => ({
   'i18n/en/text.json': Buffer.from('{"label":"Night"}'),
   'assets/moon.png': Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]),
   'assets/text.woff2': Buffer.from('font bytes'),
+  'licenses/OFL-Text.txt': Buffer.from('SIL Open Font License'),
 });
 
 // A stored, data-descriptor ZIP independent of the production writer.
@@ -68,6 +69,7 @@ function storedZip(name: string, data: Buffer): Buffer {
 describe('owner console theme packages', () => {
   let app: FastifyInstance;
   let projectRoot: string;
+  let builtinRoot: string;
   let previousOwner: string | undefined;
   const upload = (zip: Buffer) => {
     const boundary = 'theme-package-boundary';
@@ -96,10 +98,11 @@ describe('owner console theme packages', () => {
 
   beforeEach(async () => {
     projectRoot = await mkdtemp(join(tmpdir(), 'console-theme-packages-'));
+    builtinRoot = join(projectRoot, 'builtin');
     previousOwner = process.env.DEFAULT_OWNER_USER_ID;
     process.env.DEFAULT_OWNER_USER_ID = owner;
     app = Fastify();
-    await app.register(configRoutes, { projectRoot });
+    await app.register(configRoutes, { projectRoot, builtinThemesRoot: builtinRoot });
     await app.ready();
   });
   afterEach(async () => {
@@ -145,6 +148,49 @@ describe('owner console theme packages', () => {
     app = Fastify();
     await app.register(configRoutes, { projectRoot });
     assert.deepEqual((await get('/night')).json(), original);
+  });
+
+  it('reads built-in packages with the same rule, lists them as builtin and never imports over or deletes them', async () => {
+    const base = join(builtinRoot, 'base');
+    await mkdir(join(base, 'assets'), { recursive: true });
+    await mkdir(join(base, 'components/cards'), { recursive: true });
+    await writeFile(
+      join(base, 'theme.yaml'),
+      stringify({
+        id: 'base',
+        name: '系统主题',
+        version: '1',
+        contractVersion: '0.4.0',
+        uses: ['cards'],
+        assets: { 'font.text': { family: 'Inter', weight: '100 900' } },
+        pdl: { views: {} },
+      }),
+    );
+    await writeFile(join(base, 'assets/font.text.woff2'), 'font bytes');
+    await writeFile(join(base, 'components/cards/a.js'), 'register("base");');
+    assert.deepEqual((await get()).json(), {
+      packages: [{ id: 'base', name: '系统主题', version: '1', contractVersion: '0.4.0', builtin: true }],
+    });
+    const read = (await get('/base')).json();
+    assert.deepEqual(read.assets['font.text'], {
+      family: 'Inter',
+      weight: '100 900',
+      type: 'font',
+      mime: 'font/woff2',
+      src: '/api/console-themes/packages/base/assets/font.text.woff2',
+    });
+    assert.equal((await get('/base/assets/font.text.woff2')).payload, 'font bytes');
+    // an owner package may use the built-in package's components
+    const user = { ...files(), 'theme.yaml': manifest({ ...theme, uses: ['cards'] }) };
+    for (const name of Object.keys(user)) if (name.startsWith('components/')) delete user[name as keyof typeof user];
+    assert.equal((await install(user)).statusCode, 200);
+    assert.deepEqual((await get('/night')).json().components.cards, { js: ['register("base");'], css: [] });
+    const over = await install({ ...files(), 'theme.yaml': manifest({ ...theme, id: 'base' }) });
+    assert.equal(over.statusCode, 400, over.payload);
+    assert.match(over.json().error, /Built-in theme id/);
+    const removed = await app.inject({ method: 'DELETE', url: `${url}/base`, headers });
+    assert.equal(removed.statusCode, 400, removed.payload);
+    assert.equal((await get('/base')).statusCode, 200);
   });
 
   it('updates the same id with a directory replacement and deletes the package', async () => {

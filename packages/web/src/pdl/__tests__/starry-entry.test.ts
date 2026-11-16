@@ -6,6 +6,7 @@ import { runInContext } from 'node:vm';
 import { beforeAll, expect, it, vi } from 'vitest';
 import loader from '../../../scripts/starry-frame-loader.mjs';
 import { scriptSources } from '../runtime';
+import { builtinThemes } from './builtin-theme';
 
 const { JSDOM, VirtualConsole } = createRequire(import.meta.url)('jsdom');
 let document: string;
@@ -60,6 +61,8 @@ it('renders the built-in entry through the copied frame block without VM.plug or
       evaluate(readFileSync(path.join('public', script), 'utf8'));
     }
     evaluate(readFileSync('public/pdl-app/starry.js', 'utf8'));
+    // the theme comes as a package at start; apply the built-in base package the same way
+    evaluate(`pdlPackApply(${JSON.stringify(await builtinThemes.read('default'))})`);
     expect(evaluate('pdlKids("nav.settings")')).toContain('builtin.starry');
     expect(evaluate('PDL_VIEWS["builtin.starry"].plugin')).toBeUndefined();
     expect(evaluate('pdlEntry("builtin.starry").when')).toBeUndefined();

@@ -22315,7 +22315,9 @@ pdl:
                         args:
                           entity: themePack
                           id: "@pack"
-                        when: "@package"
+                        when:
+                          - "@package"
+                          - "!@builtin"
                   rows: 5
               - type: component
                 use: v2List

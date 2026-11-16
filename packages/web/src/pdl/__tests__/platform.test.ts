@@ -46,7 +46,7 @@ it.each([
   ['/avatars/codex.png', '/avatars/codex.png'],
   ['/api/cats/codex/avatar', 'https://api.test/api/cats/codex/avatar'],
   ['/uploads/file.png', 'https://api.test/uploads/file.png'],
-  ['/pdl/theme/default/logo.svg', '/pdl/theme/default/logo.svg'],
+  ['/pdl/themes/default/assets/brand.logo.svg', '/pdl/themes/default/assets/brand.logo.svg'],
   ['https://external.test/image.png', 'https://external.test/image.png'],
 ])('routes %s to its actual asset owner', (path, expected) => {
   expect(resolveAssetUrl(path, 'https://api.test')).toBe(expected);

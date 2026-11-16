@@ -29,8 +29,20 @@ export const assetMimes: Record<string, string> = {
   '.ttf': 'font/ttf',
 };
 
-export function packagesRoot(projectRoot: string): string {
-  return join(projectRoot, '.cat-cafe', 'console-themes');
+/** One loading rule, two places: built-in packages ship with the console, the owner's own live in the project. */
+export interface ThemeRoots {
+  builtin: string;
+  custom: string;
+}
+export function themeRoots(projectRoot: string, builtinRoot: string): ThemeRoots {
+  return { builtin: builtinRoot, custom: join(projectRoot, '.cat-cafe', 'console-themes') };
+}
+/** The folder of package id: a built-in one wins (its id cannot be imported over). */
+export async function packageDir(roots: ThemeRoots, id: string): Promise<string> {
+  return (await packageIds(roots.builtin)).includes(id) ? join(roots.builtin, id) : join(roots.custom, id);
+}
+export async function isBuiltin(roots: ThemeRoots, id: string): Promise<boolean> {
+  return (await packageIds(roots.builtin)).includes(id);
 }
 
 function validateTheme(value: unknown): Theme {
@@ -70,13 +82,17 @@ function componentFiles(files: Record<string, Buffer>, id: string): string[] {
     .sort();
 }
 
-async function installedComponents(root: string, ownId: string, uses: string[], files: Record<string, Buffer>) {
+async function installedComponents(roots: ThemeRoots, ownId: string, uses: string[], files: Record<string, Buffer>) {
   const sources: Record<string, Record<string, Buffer>> = Object.create(null);
   const missing = new Set(uses.filter((id) => !componentFiles(files, id).length));
-  for (const id of await packageIds(root)) {
+  const dirs = [
+    ...(await packageIds(roots.builtin)).map((id) => [id, join(roots.builtin, id)]),
+    ...(await packageIds(roots.custom)).map((id) => [id, join(roots.custom, id)]),
+  ];
+  for (const [id, dir] of dirs) {
     if (!missing.size) break;
     if (id === ownId) continue;
-    const installed = await packageFiles(join(root, id));
+    const installed = await packageFiles(dir);
     for (const component of missing) {
       if (componentFiles(installed, component).length) {
         sources[component] = installed;
@@ -93,7 +109,8 @@ function allowedName(name: string): boolean {
     name === 'theme.yaml' ||
     /^components\/[^/]+\/[^/]+\.(js|css)$/.test(name) ||
     /^i18n\/[^/]+\/[^/]+\.json$/.test(name) ||
-    /^assets\/[^/]+\.(png|jpg|jpeg|webp|gif|svg|woff2|woff|ttf)$/.test(name)
+    /^assets\/[^/]+\.(png|jpg|jpeg|webp|gif|svg|woff2|woff|ttf)$/.test(name) ||
+    /^licenses\/[^/]+\.txt$/.test(name) // the assets' licence texts (a font's OFL) ship with the package
   );
 }
 /** A folder compressed with Finder / Explorer puts everything under one top folder: the package is that folder. */
@@ -111,7 +128,7 @@ function packageLayout(raw: Record<string, Buffer>): Record<string, Buffer> {
   return files;
 }
 
-export async function installPackage(projectRoot: string, zip: Buffer): Promise<{ id: string } | { custom: Theme }> {
+export async function installPackage(roots: ThemeRoots, zip: Buffer): Promise<{ id: string } | { custom: Theme }> {
   const files = packageLayout(readZip(zip));
   let value: unknown;
   try {
@@ -121,6 +138,7 @@ export async function installPackage(projectRoot: string, zip: Buffer): Promise<
   }
   const theme = validateTheme(value);
   if ('doc' in theme.pdl) return { custom: theme };
+  if (await isBuiltin(roots, theme.id)) throw new Error('Built-in theme id');
   for (const name of Object.keys(files).filter((name) => name.startsWith('i18n/'))) {
     try {
       if (!z.record(z.unknown()).safeParse(JSON.parse(files[name].toString('utf8'))).success) throw new Error();
@@ -128,8 +146,8 @@ export async function installPackage(projectRoot: string, zip: Buffer): Promise<
       throw new Error('Invalid i18n JSON');
     }
   }
-  const root = packagesRoot(projectRoot);
-  await installedComponents(root, theme.id, theme.uses ?? [], files);
+  const root = roots.custom;
+  await installedComponents(roots, theme.id, theme.uses ?? [], files);
   await mkdir(root, { recursive: true });
   const temporary = await mkdtemp(join(root, '.import-'));
   const target = join(root, theme.id);
@@ -169,19 +187,26 @@ function identity(theme: Theme) {
   return { id, name, version, contractVersion };
 }
 
-export async function listPackages(projectRoot: string) {
-  const root = packagesRoot(projectRoot);
-  return Promise.all(
-    (await packageIds(root)).map(async (id) => identity(parse(await readFile(join(root, id, 'theme.yaml'), 'utf8')))),
-  );
+export async function listPackages(roots: ThemeRoots) {
+  const builtin = await packageIds(roots.builtin);
+  const read = (root: string, id: string) => readFile(join(root, id, 'theme.yaml'), 'utf8').then(parse);
+  return [
+    ...(await Promise.all(builtin.map(async (id) => ({ ...identity(await read(roots.builtin, id)), builtin: true })))),
+    ...(await Promise.all(
+      (
+        await packageIds(roots.custom)
+      )
+        .filter((id) => !builtin.includes(id))
+        .map(async (id) => identity(await read(roots.custom, id))),
+    )),
+  ];
 }
 
-export async function readPackage(projectRoot: string, id: string) {
-  const root = packagesRoot(projectRoot);
-  const files = await packageFiles(join(root, id));
+export async function readPackage(roots: ThemeRoots, id: string) {
+  const files = await packageFiles(await packageDir(roots, id));
   const theme: Theme = parse(files['theme.yaml'].toString('utf8'));
   const uses = theme.uses ?? [];
-  const sources = await installedComponents(root, id, uses, files);
+  const sources = await installedComponents(roots, id, uses, files);
   const components: Record<string, { js: string[]; css: string[] }> = Object.create(null);
   for (const component of uses) {
     const source = sources[component] ?? files;
@@ -191,7 +216,10 @@ export async function readPackage(projectRoot: string, id: string) {
     }
   }
   const i18n: Record<string, Record<string, unknown>> = Object.create(null);
-  const assets: Record<string, { type: 'image' | 'font'; mime: string; src: string }> = Object.create(null);
+  // theme.yaml may describe an asset (a font's family / weight, its licence): the description travels with it
+  const meta = (theme.assets ?? {}) as Record<string, Record<string, unknown>>;
+  const assets: Record<string, Record<string, unknown> & { type: 'image' | 'font'; mime: string; src: string }> =
+    Object.create(null);
   for (const name of Object.keys(files).sort()) {
     if (name.startsWith('i18n/')) {
       const lang = name.split('/')[1];
@@ -200,7 +228,9 @@ export async function readPackage(projectRoot: string, id: string) {
       const file = name.slice('assets/'.length);
       const extension = extname(file);
       const mime = assetMimes[extension];
-      assets[file.slice(0, -extension.length)] = {
+      const key = file.slice(0, -extension.length);
+      assets[key] = {
+        ...meta[key],
         type: mime.startsWith('font/') ? 'font' : 'image',
         mime,
         src: `/api/console-themes/packages/${id}/assets/${encodeURIComponent(file)}`,
@@ -210,8 +240,8 @@ export async function readPackage(projectRoot: string, id: string) {
   return { ...identity(theme), uses, pdl: theme.pdl, components, i18n, assets };
 }
 
-export async function exportPackage(projectRoot: string, id: string): Promise<Buffer> {
-  return writeZip(await packageFiles(join(packagesRoot(projectRoot), id)));
+export async function exportPackage(roots: ThemeRoots, id: string): Promise<Buffer> {
+  return writeZip(await packageFiles(await packageDir(roots, id)));
 }
 
 export function exportCustomTheme(value: unknown): { id: string; zip: Buffer } {

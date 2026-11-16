@@ -45,6 +45,7 @@ import { LOG_DIR_PATH } from '../infrastructure/logger.js';
 import { resolveActiveProjectRoot } from '../utils/active-project-root.js';
 import { isDirectLoopbackRequest } from '../utils/loopback-request.js';
 import { saveSpan } from '../utils/member-save-diagnostics.js';
+import { findMonorepoRoot } from '../utils/monorepo-root.js';
 import { resolveOwnerGate } from '../utils/owner-gate.js';
 import { resolveHeaderUserId, resolveStrictUserId } from '../utils/request-identity.js';
 import { getDefaultUploadDir } from '../utils/upload-paths.js';
@@ -144,6 +145,8 @@ interface ConfigRoutesOptions {
   };
   envFilePath?: string;
   projectRoot?: string;
+  /** Built-in console theme packages (shipped with the web console). */
+  builtinThemesRoot?: string;
   threadStore?: Pick<IThreadStore, 'get' | 'list' | 'getThreadMetadata' | 'atomicMergeThreadMetadata'>;
 }
 
@@ -220,7 +223,10 @@ export async function configRoutes(app: FastifyInstance, opts: ConfigRoutesOptio
   await app.register(configChatBackgroundRoutes, { projectRoot, threadStore: opts.threadStore });
   await app.register(configIgnoredItemRoutes, { projectRoot });
   await app.register(configConsoleThemeRoutes, { projectRoot });
-  await app.register(consoleThemePackageRoutes, { projectRoot });
+  await app.register(consoleThemePackageRoutes, {
+    projectRoot,
+    builtinRoot: opts.builtinThemesRoot ?? resolve(findMonorepoRoot(process.cwd()), 'packages/web/public/pdl/themes'),
+  });
   await app.register(configProcessTalkRoutes, { projectRoot });
   await app.register(configMessageDispositionRoutes, { projectRoot });
   await app.register(configOnboardingRoutes, { projectRoot });

@@ -16,7 +16,7 @@ function h(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, function (c
    各层加载时只登记（组件、声明、动作、视图模型），不读数据；所有脚本加载完（DOMContentLoaded）之后按阶段跑：
    data 应用从接口读数据 → early 应用里依赖数据的初始化（PDL 之前的那些模块）→ pdl 插件的 PDL 片段 → doc 主题文档（当前主题、升级）→
    late 依赖主题文档的初始化（工作台的各个面板）→ boot 打开第一屏。返回 Promise 的函数要等它完成才进下一阶段。同一阶段里按登记的先后跑（就是脚本的加载顺序：engine → platform → library → theme → app） */
-const START = { data: [], early: [], pdl: [], doc: [], late: [], boot: [] };
+const START = { theme: [], data: [], early: [], pdl: [], doc: [], late: [], boot: [] };   /* theme 最先：主题包读完之前别的阶段都不开始（界面、配色、文案都来自主题） */
 function onStart(phase, fn) { START[phase].push(fn); }
 let START_WAIT = 0, START_BOOT = false;   /* START_BOOT：进入最后一个阶段（boot，画第一屏）之前，任何地方调 render 都不画 */   /* 正在等某个阶段返回的异步读（静止信号把它算作忙） */
 document.addEventListener('DOMContentLoaded', async function () {

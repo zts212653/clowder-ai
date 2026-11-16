@@ -1,7 +1,6 @@
 {
  "scripts": [
   "engine/i18n.js",
-  "theme/default/i18n.js",
   "engine/core.js",
   "engine/theme.js",
   "engine/proj.js",
@@ -38,11 +37,7 @@
   "library/charts.js",
   "library/widgets.js",
   "library/plugin-form.js",
-  "library/theme-calculator.js",
-  "theme/default/pdl.js",
-  "theme/default/assets.js",
-  "theme/default/assets/bg-assets.js",
-  "theme/default/assets/font-assets.js"
+  "library/theme-calculator.js"
  ],
  "styles": [
   "library/css/base.css",

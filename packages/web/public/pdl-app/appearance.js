@@ -117,6 +117,7 @@ function bindAppearance() {
         active: current.active === theme.id,
         custom: kind === 'custom',
         package: kind === 'package',
+        builtin: !!theme.builtin,
         pack: theme.theme,
       };
     };

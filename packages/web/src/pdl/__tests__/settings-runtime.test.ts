@@ -10,6 +10,7 @@ import { CLIENT_OPTIONS, carrierOptionsForClient, initialState } from '@/compone
 import { chatModels } from '../chat-models';
 import { scriptSources } from '../runtime';
 import type { ChatPort } from '../types';
+import { builtinThemes, defaultThemePdl } from './builtin-theme';
 import { fixtureData, fixtureInput, fixtureSidebar, fixtureUi } from './chat-fixture';
 import { fixtureWorkbenchSource } from './owner-console';
 import { environmentSummaryFixture, ownerData, settingsInput, systemSummaryFixture } from './owner-fixtures';
@@ -62,13 +63,7 @@ async function boot(
   };
   w.document.getAnimations = () => [];
   w.document.fonts = { ready: Promise.resolve() };
-  const theme = readFileSync(path.join(process.cwd(), 'public/pdl/theme/default/pdl.js'), 'utf8');
-  w.document.documentElement.style.setProperty(
-    '--hold-toast',
-    JSON.parse(`[${theme.slice(theme.indexOf('pdlThemeLoad(') + 13, theme.lastIndexOf(')'))}]`)[0].tokens.base[
-      '--hold-toast'
-    ],
-  );
+  w.document.documentElement.style.setProperty('--hold-toast', defaultThemePdl().tokens.base['--hold-toast']);
   for (const source of scriptSources)
     runInContext(readFileSync(path.join(process.cwd(), 'public', source), 'utf8'), dom.getInternalVMContext(), {
       filename: source,
@@ -81,7 +76,9 @@ async function boot(
     if (name === '/api/config/env-summary?surface=system') return systemSummaryFixture();
     if (name === '/api/config/env-summary') return environmentSummaryFixture();
     if (name === '/api/config/console-themes') return { themes: null };
-    if (name === '/api/console-themes/packages') return { packages: [] };
+    if (name === '/api/console-themes/packages') return { packages: await builtinThemes.list() };
+    if (name.startsWith('/api/console-themes/packages/'))
+      return builtinThemes.read(name.slice('/api/console-themes/packages/'.length));
     if (name === '/api/config/chat-background') return { threads: {} };
     if (name === '/api/config/chat-background/images') return { images: [] };
     if (name === '/api/plugin-manager/plugins') return { plugins };

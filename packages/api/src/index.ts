@@ -7156,7 +7156,10 @@ async function main(): Promise<void> {
   });
   await app.register(exportRoutes, { messageStore, threadStore });
   await app.register(debugInvocationExportRoutes, { projectRoot: findMonorepoRoot(process.cwd()) });
-  await app.register(configRoutes, { threadStore });
+  await app.register(configRoutes, {
+    threadStore,
+    builtinThemesRoot: join(runtimeEntrypointRoot, 'packages/web/public/pdl/themes'),
+  });
   await app.register(configSecretsRoutes);
   await app.register(rulesRoutes);
   await app.register(promptInjectionRoutes);

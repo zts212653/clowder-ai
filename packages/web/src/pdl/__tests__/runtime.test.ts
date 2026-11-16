@@ -32,6 +32,7 @@ import { scriptSources } from '../runtime';
 import { opinionComparison } from '../useFilmBindings';
 import { recallSourceRecords } from '../useRecallBindings';
 import type { SidebarOwner, SidebarSource } from '../useSidebarBindings';
+import { builtinThemes, defaultThemePdl } from './builtin-theme';
 import { fixtureData, fixtureInput, fixtureSidebar, fixtureUi } from './chat-fixture';
 import {
   consoleValue,
@@ -232,13 +233,7 @@ async function boot(
   for (const [key, value] of Object.entries(local))
     w.localStorage.setItem('clowder-proto3:' + key, JSON.stringify(value));
   const errors = vi.spyOn(w.console, 'error').mockImplementation(() => {});
-  const theme = readFileSync(path.join(process.cwd(), 'public/pdl/theme/default/pdl.js'), 'utf8');
-  w.document.documentElement.style.setProperty(
-    '--hold-toast',
-    JSON.parse(`[${theme.slice(theme.indexOf('pdlThemeLoad(') + 13, theme.lastIndexOf(')'))}]`)[0].tokens.base[
-      '--hold-toast'
-    ],
-  );
+  w.document.documentElement.style.setProperty('--hold-toast', defaultThemePdl().tokens.base['--hold-toast']);
   await new Promise<void>((resolve) => w.document.addEventListener('DOMContentLoaded', resolve, { once: true }));
   // jsdom lacks browser rendering APIs; this test verifies DOM/actions, never visual layout.
   w.document.timeline = { currentTime: 0 };
@@ -390,34 +385,36 @@ async function boot(
                   : path === '/api/config/console-themes'
                     ? { themes: null }
                     : path === '/api/console-themes/packages'
-                      ? { packages: [] }
-                      : path === '/api/config/chat-background'
-                        ? { threads: {} }
-                        : path === '/api/config/chat-background/images'
-                          ? { images: [] }
-                          : path === '/api/plugin-manager/plugins'
-                            ? { plugins: [] }
-                            : path === '/api/plugin-manager/pdl'
-                              ? { fragments: {} }
-                              : path.startsWith('/api/plugin-manager/pdl/')
-                                ? {}
-                                : path === '/api/push/status'
-                                  ? {
-                                      capability: {
-                                        enabled: false,
-                                        vapidPublicKeyConfigured: false,
-                                        pushServiceConfigured: false,
-                                      },
-                                      subscription: { count: 0, targets: [] },
-                                      delivery: {
-                                        lastResult: 'not_attempted',
-                                        lastAttemptAt: null,
-                                        lastHttpStatus: null,
-                                        lastError: null,
-                                      },
-                                      errorHints: [],
-                                    }
-                                  : undefined,
+                      ? builtinThemes.list().then((packages) => ({ packages }))
+                      : path.startsWith('/api/console-themes/packages/')
+                        ? builtinThemes.read(path.slice('/api/console-themes/packages/'.length))
+                        : path === '/api/config/chat-background'
+                          ? { threads: {} }
+                          : path === '/api/config/chat-background/images'
+                            ? { images: [] }
+                            : path === '/api/plugin-manager/plugins'
+                              ? { plugins: [] }
+                              : path === '/api/plugin-manager/pdl'
+                                ? { fragments: {} }
+                                : path.startsWith('/api/plugin-manager/pdl/')
+                                  ? {}
+                                  : path === '/api/push/status'
+                                    ? {
+                                        capability: {
+                                          enabled: false,
+                                          vapidPublicKeyConfigured: false,
+                                          pushServiceConfigured: false,
+                                        },
+                                        subscription: { count: 0, targets: [] },
+                                        delivery: {
+                                          lastResult: 'not_attempted',
+                                          lastAttemptAt: null,
+                                          lastHttpStatus: null,
+                                          lastError: null,
+                                        },
+                                        errorHints: [],
+                                      }
+                                    : undefined,
     ),
     post: vi.fn(async () => undefined),
     file: (s: string) => (s ? new URL(s, 'https://api.test').href : ''),
