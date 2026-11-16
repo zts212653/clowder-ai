@@ -542,6 +542,19 @@ describe('unmodified runtime and project chat bindings', () => {
     }
   });
 
+  it('相关处置 shows only on a signal message with dispositions on record', async () => {
+    const { dom, w } = await boot();
+    try {
+      const paw = () => w.eval("chatOwnerMessageVM({ mid: 'paw-1', actsCtx: { paw: true } }).actsCtx.paw");
+      expect(paw()).toBe(false);
+      w.eval("pushProjectData({ chatOwners: Object.assign({}, chatOwnerData(), { pawCounts: { 'paw-1': 2 } }) })");
+      expect(paw()).toBe(true);
+      expect(w.eval("chatOwnerMessageVM({ mid: 'plain', actsCtx: { paw: false } }).actsCtx.paw")).toBe(false);
+    } finally {
+      dom.window.close();
+    }
+  });
+
   it('plugin requests read host sources, writes run every returned public action, plugSet writes also', async () => {
     const { dom, w, port } = await boot();
     try {

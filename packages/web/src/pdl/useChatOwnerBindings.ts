@@ -42,6 +42,8 @@ interface ChatOwnerData {
   proposalErrors: Record<string, string>;
   onboarding?: { demo: OnboardingReceipt; entry: OnboardingReceipt };
   pawSource?: { messageId: string; page: PawFeelInboxPage | { error: string } };
+  /** How many disposition bundles each [爪感差 message has; 相关处置 shows only when it has some. */
+  pawCounts: Record<string, number>;
 }
 
 /** Source-owner responses are pushed as data; all cards, dialogs and popovers project in the app. */
@@ -58,6 +60,7 @@ export function useChatOwnerBindings(
     delivery: {},
     repeatReceipts: {},
     deliveryErrors: {},
+    pawCounts: {},
     proposalErrors: {},
   });
   useEffect(() => {
@@ -130,6 +133,30 @@ export function useChatOwnerBindings(
     void Promise.all(proposalTargets.map((t) => loadProposal(t.mid, abort.signal)));
     return () => abort.abort();
   }, [needed, identity]);
+  // A finished member message in its own thread carrying a [爪感差 signal: its dispositions are read once.
+  const pawTargets = data.messages
+    .filter(
+      (m) =>
+        !m.isStreaming &&
+        !!m.catId &&
+        m.content.includes('[爪感差') &&
+        !(m.extra?.crossPost?.sourceThreadId && m.extra.crossPost.sourceThreadId !== data.threadId),
+    )
+    .map((m) => m.id);
+  const pawIdentity = pawTargets.join(',');
+  useEffect(() => {
+    if (!needed) return;
+    const abort = new AbortController();
+    for (const mid of pawTargets.filter((id) => read.pawCounts[id] === undefined)) {
+      void request<PawFeelInboxPage>(`/api/paw-feel/source/${encodeURIComponent(mid)}`, { signal: abort.signal }).then(
+        (page) => setRead((s) => ({ ...s, pawCounts: { ...s.pawCounts, [mid]: page.bundles.length } })),
+        () => {
+          if (!abort.signal.aborted) setRead((s) => ({ ...s, pawCounts: { ...s.pawCounts, [mid]: 0 } }));
+        },
+      );
+    }
+    return () => abort.abort();
+  }, [needed, pawIdentity]);
 
   const action = async (name: string, args: Record<string, string>) => {
     switch (name) {

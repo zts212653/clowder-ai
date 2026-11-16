@@ -4,6 +4,11 @@ function chatOwnerData() {
   return chatDataSnapshot.project && chatDataSnapshot.project.chatOwners;
 }
 function chatOwnerMessageVM(x) {
+  // 相关处置: only when this signal message has dispositions on record (read by the host)
+  if (x.actsCtx && x.actsCtx.paw) {
+    const counts = chatOwnerData() && chatOwnerData().pawCounts;
+    x = Object.assign({}, x, { actsCtx: Object.assign({}, x.actsCtx, { paw: !!(counts && counts[x.mid]) }) });
+  }
   const message = chatMessageIndex.get(x.mid);
   if (!message || !message.extra) return x;
   const data = chatOwnerData(),
