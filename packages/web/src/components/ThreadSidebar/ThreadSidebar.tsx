@@ -586,7 +586,12 @@ export function ThreadSidebar({ onClose, className, routeThreadId, activeDestina
     attentionPlainView,
   );
   const attentionArrangeMode = isV2 ? arrangeSession.active : classicArrangeMode;
-  const [arrangeHint, setArrangeHint] = useState<{ threadId: string; text: string; summary: string } | null>(null);
+  const [arrangeHint, setArrangeHint] = useState<{
+    threadId: string;
+    text: string;
+    summary: string;
+    feedback: string;
+  } | null>(null);
   useEffect(() => {
     if (!arrangeHint) return;
     const timer = window.setTimeout(() => setArrangeHint(null), 4000);
@@ -639,6 +644,7 @@ export function ThreadSidebar({ onClose, className, routeThreadId, activeDestina
             threadId: sourceThreadId,
             text: mode === 'running-first' ? rowCopy.arrangeRunningHint : rowCopy.arrangeRecentHint,
             summary: mode === 'running-first' ? rowCopy.arrangeRunningSummary : rowCopy.arrangeRecentSummary,
+            feedback: mode === 'running-first' ? rowCopy.arrangeRunningFeedback : rowCopy.arrangeRecentFeedback,
           });
           return;
         }
@@ -680,6 +686,7 @@ export function ThreadSidebar({ onClose, className, routeThreadId, activeDestina
             threadId: sourceThreadId,
             text: mode === 'running-first' ? rowCopy.arrangeRunningHint : rowCopy.arrangeRecentHint,
             summary: mode === 'running-first' ? rowCopy.arrangeRunningSummary : rowCopy.arrangeRecentSummary,
+            feedback: mode === 'running-first' ? rowCopy.arrangeRunningFeedback : rowCopy.arrangeRecentFeedback,
           });
         }
         return;
@@ -1600,6 +1607,7 @@ export function ThreadSidebar({ onClose, className, routeThreadId, activeDestina
           <ThreadItem
             id={thread.id}
             title={thread.title}
+            arrangeFeedback={arrangeHint?.threadId === thread.id ? arrangeHint.feedback : undefined}
             participants={thread.participants}
             lastActiveAt={thread.lastActiveAt}
             isActive={currentConversationId === thread.id}

@@ -52,6 +52,7 @@ export interface ThreadItemProps {
   hasUserMention: boolean;
   hasPendingDecision?: boolean;
   arrangeSignalSlot?: ArrangeSignalSlot;
+  arrangeFeedback?: string;
   projectPath?: string;
   indented?: boolean;
   preferredCats?: readonly string[];
@@ -82,6 +83,7 @@ function ThreadItemComponent({
   hasUserMention,
   hasPendingDecision,
   arrangeSignalSlot,
+  arrangeFeedback,
   projectPath,
   indented,
   preferredCats,
@@ -355,9 +357,18 @@ function ThreadItemComponent({
                       }
                     : undefined
                 }
-                className={`min-w-0 flex-1 line-clamp-2 ${isV2 ? 'break-words' : ''} text-sm ${isV2 ? 'leading-5' : 'leading-normal'} ${isV2 ? `${(arrangeSignalSlot?.emphasized ?? (unreadCount > 0 || hasUserMention || presence.status === 'error')) ? 'font-semibold' : 'font-normal'} text-[var(--shell-ink)]` : isActive ? 'font-medium text-cafe-black' : 'text-cafe-secondary'} ${isV2 ? 'shell-focusable rounded-sm' : ''}`}
+                className={`min-w-0 flex-1 line-clamp-2 ${isV2 ? 'break-words' : ''} text-sm ${isV2 ? 'leading-5' : 'leading-normal'} ${isV2 ? `${(arrangeSignalSlot?.emphasized ?? (unreadCount > 0 || hasUserMention || presence.status === 'error')) ? 'font-semibold' : 'font-normal'} text-[var(--shell-ink)]` : isActive ? 'font-medium text-cafe-black' : 'text-cafe-secondary'} ${isV2 ? 'shell-focusable relative rounded-sm' : ''}`}
               >
                 {title ?? (id === 'default' ? '大厅' : '未命名对话')}
+                {isV2 && arrangeFeedback && (
+                  <span
+                    aria-hidden="true"
+                    data-attention-arrange-feedback
+                    className="pointer-events-none absolute inset-x-0 top-0 z-10 h-5 truncate rounded-sm border border-[var(--shell-hairline)] bg-[var(--shell-paper)] px-1 text-xs font-medium leading-[18px] text-[var(--shell-body)]"
+                  >
+                    {arrangeFeedback}
+                  </span>
+                )}
               </span>
             </RowTitleTip>
           </span>

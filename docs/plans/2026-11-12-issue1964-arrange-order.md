@@ -1,5 +1,26 @@
 # Issue #1964：整理期间保持可见布局
 
+## 松手处的可见解释（2026-11-16）
+
+[维护者复审](https://github.com/zts212653/clowder-ai/pull/1969#pullrequestreview-5914866918)已确认新壳、
+240px 离屏虚拟行反例转绿，接受显式 manual、紧凑标记和稳定字重；仍要求无效拖放在源行给可见解释。
+与鲸鲸按 visual-design 收敛为「源行标题内短句 + 整理条完整操作说明」：短句只盖原标题第一行，
+不进入文档流，不挤图钉/时间或邻行；读屏仍只由原 full status 播报，沿用原 4 秒时限，不加 portal。
+布局直接跟随 ThreadItem 的标题 span，避免普通行 mx-2、组内行 mx-0 的不同内边距导致手写定位偏移。
+标题原尺寸保留，第二行不遮盖，提示消失自动恢复。recent/running-first 无写入，manual 行为不变。
+
+验证：新增可见文本/读屏/消失检查先出现 5 项预期失败；修后相关 9 文件 129 项、Web 类型与 6 个
+代码文件 Biome/边界/tips/diff 检查通过。完整 canonical Chromium 1/1、exit 0，140.6 秒测试/
+146.8 秒总计，旧 258 次几何观测与 manual 插入线/HTTP 保存仍通过；新增 240px 中英文、
+recent/running-first 四种长列表下方场景，三行坐标在提示出现和 4 秒消失后均一致、无归属写入。
+短句实际宽度不截断，图钉命中保持可达；一行深色及两行中英文实屏均已查看，pageerror=0。
+新旅程先完整显示鼠标操作双方，避免把浏览器为裁挡目标自动滚动误计为布局位移，没有产品补偿逻辑。
+实物：[中文源行](assets/issue1964/240-source-row-feedback-zh.png)、
+[英文源行](assets/issue1964/240-source-row-feedback-en.png)，均为隔离合成数据的 2x 截图。
+
+合入后的 B3 回流应把维护者已接受的 manual 范围、紧凑状态/稳定字重，以及最终批准的行处短反馈，
+同步到家里的设计真相源；本 PR 不单独修改公开导出的 F277 文档。
+
 ## 整理期间首次形成组壳（2026-11-16）
 
 非作者 R5 与[维护者复审](https://github.com/zts212653/clowder-ai/pull/1969#pullrequestreview-5914745332)

@@ -150,7 +150,30 @@ describe('Issue #1964 production arrange interaction', () => {
         ?.textContent,
     ).toContain('手动');
     expect(harness.container.querySelector('[data-attention-arrange-hint]')?.classList.contains('sr-only')).toBe(true);
+    const feedback = harness.container.querySelector(
+      '[data-attention-draggable-thread="old-pin"] [data-attention-arrange-feedback]',
+    );
+    expect(feedback?.textContent).toBe(mode === 'recent' ? '本组按最近排列' : '本组按运行优先');
+    expect(feedback?.closest('.sr-only')).toBeNull();
+    expect(feedback?.classList.contains('absolute')).toBe(true);
+    expect(feedback?.classList.contains('pointer-events-none')).toBe(true);
+    expect(feedback?.getAttribute('aria-hidden')).toBe('true');
     await done();
+    expect(harness.container.querySelector('[data-attention-arrange-hint]')).toBeNull();
+    expect(harness.container.querySelector('[data-attention-arrange-feedback]')).toBeNull();
+  });
+
+  it('clears visible feedback after the existing four-second hint lifetime', async () => {
+    await setup('flat', 'running-first');
+    await enterArrange();
+    vi.useFakeTimers();
+    const source = harness.container.querySelector('[data-attention-draggable-thread="old-pin"]');
+    const target = harness.container.querySelector('[data-attention-draggable-thread="new-pin"]');
+    await act(async () => source?.dispatchEvent(new MouseEvent('dragstart', { bubbles: true })));
+    await act(async () => target?.dispatchEvent(new MouseEvent('drop', { bubbles: true })));
+    expect(harness.container.querySelector('[data-attention-arrange-feedback]')).not.toBeNull();
+    await act(async () => vi.advanceTimersByTime(4000));
+    expect(harness.container.querySelector('[data-attention-arrange-feedback]')).toBeNull();
     expect(harness.container.querySelector('[data-attention-arrange-hint]')).toBeNull();
   });
 
