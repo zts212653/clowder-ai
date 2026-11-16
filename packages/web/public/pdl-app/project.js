@@ -59,6 +59,10 @@ function syncWorkspace() {
     };
   }
 }
+// The route that shows the current thread (the space's threadView).
+function threadView() {
+  return PDL_SPACES[panelSpace()].threadView;
+}
 function panelScoped(key) {
   return !!PANEL_VIEWS[key] && PANEL_VIEWS[key][2] === 'thread';
 }

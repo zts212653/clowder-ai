@@ -2,7 +2,7 @@
 
 机制与时机：投影（`proj.js`、`frame.js`）、弹窗栈、锚点（`anchor.js`）、局部渲染、进树通知、静止信号、hover / 节拍 / 撤销的时机、通用动作（`core.js`）、启动阶段（`onStart`）、数据口（`ioConnect`）、主题的应用（`theme.js`）、PDL 的加载与校验（`pdl.js`、`pdl-doc.js`、`pdl-view.js` 的 `PDL_SCHEMA`、`pdl-check.js`）、平台口（`platform.js`）。`copy/` 是引擎自己用到的文案。
 
-不引用任何别的层；别的层经这里的登记点接进来（`ENGINE_PARTS`、`PV_DRAW`、`PDL_BLOCKS`、`VIEW_FNS`、`WHO_DATA`、`THEME_SRC`……）。
+不引用任何别的层；别的层经这里的登记点接进来（`ENGINE_PARTS`、`PV_DRAW`、`PDL_BLOCKS`、`VIEW_FNS`、`THEME_SRC`……）。
 
 ## 不放进来的（给接手的代理，改之前先读）
 

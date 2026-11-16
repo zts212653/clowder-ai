@@ -43,12 +43,15 @@ function pdlTrack(o, name) {
   return proxy;
 }
 /* 应用登记给界面读的数据函数（视图模型、身份、计数、条件……）：画的时候的每一次调用连同参数和结果记在正在画的那一块名下，
-   下次渲染开头照原样重算、比出变没变（frame.js vmSeen / vmChanged）；不在画的时候调用不记 */
+   下次渲染开头照原样重算、比出变没变（frame.js vmSeen / vmChanged）；不在画的时候调用不记。
+   同一个名字是同一个登记点：声明它的一层给默认值，别的层按名字取到同一个再登记（引擎不认名字里有什么） */
+const PDL_READS = {};
 function pdlReads(kind, o) {
+  if (PDL_READS[kind]) return Object.assign(PDL_READS[kind], o);
   const raw = {}, now = function (k) { return function () { return raw[k]; }; };   /* 重算时用现在登记的那个函数（换掉了就是新的） */
   const p = new Proxy({}, { set: function (t, k, fn) { raw[k] = fn; t[k] = typeof fn !== 'function' ? fn : function () { const args = Array.prototype.slice.call(arguments); while (args.length && args[args.length - 1] === undefined) args.pop(); if (!READ_SCOPES.length) return fn.apply(this, args); const got = new Set(); READ_SCOPES.push(got); let v; try { v = fn.apply(this, args); } finally { READ_SCOPES.pop(); } vmSeen(kind + ':' + String(k), now(k), args, v, got); return v; }; return true; } });   /* 画的时候：连同这次调用读到的数据来源一起记下 */
   Object.keys(o || {}).forEach(function (k) { p[k] = o[k]; });
-  return p;
+  return PDL_READS[kind] = p;
 }
 const S = pdlTrack({
   /* 路由、参数、空间、弹窗栈都由投影的运行时状态推出（proj.js 的 S.route / S.param / S.space / S.popOrder）；应用自己的字段由应用登记（app/state.js） */
@@ -56,8 +59,7 @@ const S = pdlTrack({
   popOn: {}, justAdded: null,
   tweaks: store.get('tweaks', { lines: false, sans: false, compact: false, theme: 'light' }),   /* 配色的默认值来自主题数据（themeDefault） */
   plugins: {},   /* 插件装没装、开没开（应用在启动时从插件列表定） */
-  lang: 'zh',
-  messages: null
+  lang: 'zh'
 }, 'S');
 function plugOn(k) { const p = S.plugins[k]; return !!(p && p.installed && p.on); }
 
@@ -68,10 +70,8 @@ function plugOn(k) { const p = S.plugins[k]; return !!(p && p.installed && p.on)
 /* 路由属于哪个空间、工作台属于哪个空间：都读空间声明（PDL_SPACES，pdl.js），引擎不认空间名和路由名 */
 function routeSpace(r) { const ks = Object.keys(PDL_SPACES); return ks.find(function (k) { const s = PDL_SPACES[k]; return (s.routes || []).indexOf(r) >= 0 || (s.prefix && r.indexOf(s.prefix) === 0); }) || ks.find(function (k) { return PDL_SPACES[k].fallback; }); }
 function startRoute() { const k = Object.keys(PDL_SPACES).find(function (x) { return PDL_SPACES[x].start; }); return PDL_SPACES[k].home; }
-function threadView() { return PDL_SPACES[panelSpace()].threadView; }   /* 显示当前对话的那个路由 */
 function panelSpace() { return Object.keys(PDL_SPACES).find(function (k) { return PDL_SPACES[k].panel; }); }
 function inPanelSpace(r) { return routeSpace(r) === panelSpace(); }
-/* 工作台面板的范围：面板登记里声明 scope: 'thread'（内容跟着当前对话）的，只在空间声明的 threadRoutes 里显示，不记成“上次的面板” */
 function space() { if (!S.space) S.space = routeSpace(S.route); return S.space; }
 /* 二级栏的外壳：标题行、可滚动的内容、底部；右边缘是可以拖动的分隔线（宽度记在这台设备上）。所有二级栏都用它画 */
 
@@ -117,10 +117,6 @@ function ioSend(ev, payload) { if (IO.port) IO.port.send(ev, payload); }
 function ioOn(ev, fn) { if (IO.port) IO.port.on(ev, fn); else IO.subs.push([ev, fn]); }
 function ioNow() { return IO.port && IO.port.now ? IO.port.now() : Date.now(); }   /* 现在几点：数据层的时钟 */
 function ioFile(path) { return IO.port && IO.port.file ? IO.port.file(path) : ''; }
-/* 身份的数据（应用登记）：组件库的身份组件（identity.js）、选成员、提及、徽标只经这里读数据，不认识应用的数据——
-   member(id) 成员（找不到给第一个）· members() 全部成员 · me() 你 · plugins() 插件（按 id）· builtinConnector(id) 宿主内置的连接器 ·
-   health() 回调授权健康（没有就 null）· live(id, 回合) 执行状态 · handleWho(句柄) 这个 @ 是谁（成员 / 你 / 插件，和消息作者同一种写法；不是有效的 @ 给 null） */
-const WHO_DATA = pdlReads('who', { member: function () { return null; }, members: function () { return []; }, me: function () { return {}; }, plugins: function () { return {}; }, builtinConnector: function () { return false; }, health: function () { return null; }, live: null, handleWho: function () { return null; } });
 /* 根元素上的状态类（各层登记：返回类名或空串），画在外壳的固定类之后 */
 const APP_CLASS = [];
 /* 整页画完、弹窗里正在填的值放回之后，组件同步自己的显示（下拉按钮上的字……）：组件库登记 */
@@ -501,7 +497,7 @@ function navIsPage(r) {
   const also = pdlEntryIds().some(function (k) { return (pdlEntry(k).also || []).indexOf(r) >= 0; });
   if (pdlEntryIds().some(function (k) { return (pdlEntry(k).open || {}).page === r; })) return true;
   if (also) return false;
-  return Object.keys(PDL_SPACES).some(function (k) { const s = PDL_SPACES[k]; return s.home === r || s.threadView === r || (s.routes || []).indexOf(r) >= 0 || (s.prefix && r.indexOf(s.prefix) === 0); });
+  return Object.keys(PDL_SPACES).some(function (k) { const s = PDL_SPACES[k]; return s.home === r || (s.routes || []).indexOf(r) >= 0 || (s.prefix && r.indexOf(s.prefix) === 0); });
 }
 /* 地址栏保存页面容器的底层路由及参数（底层是 keep 的页面、上面盖着一页时是那一页）；临时叠加内容不覆盖可恢复的地址。盖在上面、自己声明了路由的帧（从地址打开的那一层）例外，地址是它 */
 function navHash() { const fc = navCovers().find(function (c) { const l = navStack(c)[0]; return l && String(l.f).indexOf('node:') === 0 && navRouteOf(l); }), st = navStack(fc || ctPages()), base = st[navKeptLayer(st[0].f) && st[1] ? 1 : 0], r = navRouteOf(base), p = ENGINE_PARTS.addressParam(r, base.a); try { history.replaceState(null, '', '#' + (p != null ? r + '-' + p : r)); } catch (e) { /* 某些环境不允许改地址 */ } }

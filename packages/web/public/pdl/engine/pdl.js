@@ -377,7 +377,7 @@ function pdlInRail(id) { return !!pdlRailRef(id); }
    受保护区域 = 放着设置入口的那个区域（由摆放推出，不按位置写死），永远不能被占用。 */
 const PDL_LAYOUT = {};
 /* 空间（第二栏显示什么）：主页 home、属于它的路由 routes（prefix：插件页面的路由前缀）；没列出的路由属于 fallback 空间。
-   start：打开时进入它的主页；threadView：显示当前对话的路由；panel：工作台在这个空间里（threadRoutes：跟着对话的面板在哪些路由显示）；own：进出它的路由就换空间 */
+   start：打开时进入它的主页；panel：工作台在这个空间里；own：进出它的路由就换空间。别的字段（threadView / threadRoutes）引擎不读，归应用 */
 const PDL_SPACES = {};
 const PDL_LAYOUT_SKINS = {};   /* 皮肤自己的布局数据（区域顺序、入口在哪打开）；返回带不带上一层的标题不是皮肤的开关，按容器 / 打开方式声明 */
 /* 结构页里加的容器（容器树上不在默认树里的）：它用 slots 声明自己的内容容器 ct:<键>（在自定义主题里），编辑布局时可以把入口拖进来 */

@@ -11,6 +11,10 @@
      line    头像 + 名字 + 句柄
      text    纯文字（提示、通知里用） */
 'use strict';
+/* 身份的数据（应用登记）：这个文件的身份组件、选成员、提及、徽标只经这里读数据，不认识应用的数据——
+   member(id) 成员（找不到给第一个）· members() 全部成员 · me() 你 · plugins() 插件（按 id）· builtinConnector(id) 宿主内置的连接器 ·
+   health() 回调授权健康（没有就 null）· live(id, 回合) 执行状态 · handleWho(句柄) 这个 @ 是谁（成员 / 你 / 插件，和消息作者同一种写法；不是有效的 @ 给 null） */
+const WHO_DATA = pdlReads('who', { member: function () { return null; }, members: function () { return []; }, me: function () { return {}; }, plugins: function () { return {}; }, builtinConnector: function () { return false; }, health: function () { return null; }, live: null, handleWho: function () { return null; } });
 function avatar(m, size) { return whoAva(m, { size: size }); }   /* 身份统一走 whoAva */
 /* 可上传的头像（组件库唯一一个）：点头像本身就是上传，悬停出现上传提示；成员表单和对话框的头像字段都用它 */
 function avatarUp(lead, size, up, data) {
