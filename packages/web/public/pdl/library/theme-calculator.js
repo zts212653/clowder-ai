@@ -49,12 +49,13 @@ function calcTokens(P, dark) {
   T['d-hover'] = pc(P.dHover); T['d-btn'] = pc(P.dBtn); T['d-selected'] = pc(P.dSelected); T['d-inset'] = pc(P.dInset); T['d-code'] = pc(P.dCode); T['d-line'] = pc(P.dLine); T['d-line-strong'] = pc(P.dLineS);
   return T;
 }
-const CALC_PAIRS = [
+/* 对比度要检查的几对：文案在画的时候取（文案包在组件库之后加载） */
+function calcPairs() { return [
   [tc('themeCalc.contrastPairs.text'), 'fg-strong', 'bg-page', 4.5], [tc('themeCalc.contrastPairs.secondaryOnGroup'), 'fg', 'bg-group', 4.5], [tc('themeCalc.contrastPairs.descriptionOnGroup'), 'fg-muted', 'bg-group', 4.5], [tc('themeCalc.contrastPairs.placeholderOnInput'), 'fg-faint', 'bg-field', 3],
   [tc('themeCalc.contrastPairs.buttonOnAccent'), 'fg-on-accent', 'accent', 4.5], [tc('themeCalc.contrastPairs.linkOnPage'), 'accent-fg', 'bg-page', 4.5], [tc('themeCalc.contrastPairs.textOnBubble'), 'fg-strong', 'bg-bubble', 4.5],
   [tc('themeCalc.contrastPairs.memberOnPage'), 'NAMEMIN', 'bg-page', 3], [tc('themeCalc.contrastPairs.warningOnGroup'), 'warn', 'bg-group', 3], [tc('themeCalc.contrastPairs.dangerOnGroup'), 'danger', 'bg-group', 3],
   [tc('themeCalc.contrastPairs.groupOnPage'), 'bg-group', 'bg-page', 1.04]
-];
+]; }
 
 /* ── 面板 ── */
 S.calc = { open: false, P: null, mode: null, fold: {}, tab: 'colors', ct: null };   /* tab：配色 / 背景 / 结构；ct：结构页里选中的容器。拖动、×、Esc 都来自弹窗框架（PDL_POPUPS.calc） */
@@ -87,7 +88,7 @@ function calcReadouts() {
 function calcReadoutsRaw() {
   const cs = getComputedStyle(document.documentElement), g = function (k) { return cs.getPropertyValue('--' + k).trim(); };
   const box = document.getElementById('calc-contrast'); if (!box) return;
-  box.innerHTML = CALC_PAIRS.map(function (p) {
+  box.innerHTML = calcPairs().map(function (p) {
     let fgc = g(p[1]);
     if (p[1] === 'NAMEMIN') { fgc = [1, 2, 3, 4, 5, 6].map(function (i) { return g('name-' + i); }).sort(function (a, b) { return contrast(a, g(p[2])) - contrast(b, g(p[2])); })[0]; }
     const r = contrast(fgc, g(p[2])), layer = p[3] < 2, ok = r >= p[3];
