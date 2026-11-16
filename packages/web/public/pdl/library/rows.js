@@ -244,7 +244,7 @@ function threadRow(v, rn, root, movable) {
   const stamp = v.draft && !bdg ? '<span class="trow-draft">' + h(tc('common.status.draft')) + '</span>' : h(rn && rn.time ? pv(rn.time, v, root) : v.time || '');
   /* 一行对话就是一行 lrow：标题 · 第二行状态；行尾按行对齐（时间 / 计数），悬停的“更多”出现在时间的位置上（同一位置互斥）；置顶是左上角的标记 */
   return lrow({ layout: 'item', hook: 'cafe-trow' + (v.pinned ? ' pinned' : ''), rootAttrs: ' data-tid="' + h(v.id) + '"' + (movable ? ' data-edit="move" data-move-key="' + h(v.id) + '"' : ''), act: 'thread', data: ' data-id="' + h(v.id) + '"', headAttrs: ' data-tip="' + h(v.title) + '"',
-    cur: v.cur ? 'page' : false, title: h(v.title), sub: meta.length ? meta.join(' · ') : '', aside: [stamp, bdg], swap: true,
+    cur: v.cur ? 'page' : false, title: h(v.title), sub: meta.length ? meta.join(' · ') : '&#8203;', aside: [stamp, bdg], swap: true,   /* 状态行总在：没有状态时留空一行，所有对话行一样高 */
     actsHtml: rn && rn.more ? (rn.acts || []).map(function (c) { return pvControl(c, v, root); }).join('') + rowMore(menuLive(rowMenuItems(rn.more.items, v, root)), v.id, pv(rn.more.label, v, root)) : '',   /* 悬停时换上来的：声明的操作按钮（acts）+ 更多 */
     acts: rn && rn.more ? [] : [{ icon: 'more', label: tc('threadRow.more', v.title), act: 'menu', data: ' data-menu="' + (rn && rn.menu || '') + '" data-k="' + h(v.id) + '"' }],
     pre: v.pinned ? '<span data-tip="' + h(tc('threadRow.pinned')) + '" aria-label="' + h(tc('threadRow.pinned')) + '">' + icon('pin', 12) + '</span>' : '' });
