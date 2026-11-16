@@ -55,7 +55,7 @@ describe('arrange membership deltas', () => {
     );
     const layout = captureArrangeLayout(lists, lists);
     const after = [{ id: 'g', threadIds: action === 'move' ? ['a1', 'a2', 'b1'] : ['a1', 'b1'] }];
-    const next = moveArrangeThread(layout, 'b1', after, {}, live);
+    const next = moveArrangeThread(layout, 'b1', after, {}, live, new Set());
     const projected = projectArrangeLayout(next, live, buildAttentionClusters(live, after));
     const idsBySection = Object.fromEntries(
       Object.entries(projected).map(([key, items]) => [
@@ -81,11 +81,15 @@ describe('arrange membership deltas', () => {
       { id: 'destination', threadIds: ['a', 'b', 'e', 'incoming'] },
       { id: 'source', threadIds: ['d', 'c'] },
     ];
-    const result = moveArrangeThread(layout, 'incoming', groups, {}, rows);
+    const result = moveArrangeThread(layout, 'incoming', groups, {}, rows, new Set());
     expect(result['/A']).toEqual(layout['/A']);
     expect(result['/B']).toEqual([
       { kind: 'thread', id: 'd' },
-      { ...group(['incoming', 'e'], 2), anchor: 'group:destination' },
+      {
+        ...group(['incoming', 'e'], 2),
+        anchor: 'group:destination',
+        header: { presence: false, peekIds: [], more: false },
+      },
     ]);
   });
   it.each([
@@ -95,7 +99,7 @@ describe('arrange membership deltas', () => {
     const layout: ArrangeLayout = { recent: [group(), { kind: 'thread', id: 'incoming' }] };
     const snapshot = structuredClone(layout);
     const live = rows.map((item) => (item.id === 'incoming' ? { ...item, lastActiveAt: activity } : item));
-    const result = moveArrangeThread(layout, 'incoming', saved, {}, live);
+    const result = moveArrangeThread(layout, 'incoming', saved, {}, live, new Set());
     expect(layout).toEqual(snapshot);
     expect(result.recent?.[0]).toMatchObject({ visibleCount: count });
     const rendered = projectArrangeLayout(result, live, buildAttentionClusters(live, saved)).recent ?? [];
@@ -106,7 +110,8 @@ describe('arrange membership deltas', () => {
   it('keeps an incoming last row visible when the group had no remainder', () => {
     const layout: ArrangeLayout = { recent: [group(['a', 'b'], 2), { kind: 'thread', id: 'incoming' }] };
     expect(
-      moveArrangeThread(layout, 'incoming', [{ id: 'g', threadIds: ['a', 'b', 'incoming'] }], {}, rows).recent?.[0],
+      moveArrangeThread(layout, 'incoming', [{ id: 'g', threadIds: ['a', 'b', 'incoming'] }], {}, rows, new Set())
+        .recent?.[0],
     ).toMatchObject({ visibleCount: 3 });
   });
 
@@ -118,6 +123,7 @@ describe('arrange membership deltas', () => {
       [{ id: 'g', threadIds: ['c', 'a', 'b', 'incoming'] }],
       {},
       rows,
+      new Set(),
     );
     expect(result.recent?.[0]).toMatchObject({ expanded: false, memberIds: ['incoming', 'c', 'a', 'b'] });
   });
@@ -131,6 +137,7 @@ describe('arrange membership deltas', () => {
       [{ id: 'g', threadIds: ['b', 'a', 'c'] }],
       { 'group:g': 'manual' },
       live,
+      new Set(),
     );
     expect(ids(result)).toEqual(['b', 'a', 'c']);
     expect(result.recent?.[0]).toMatchObject({ visibleCount: 3 });
@@ -144,13 +151,74 @@ describe('arrange membership deltas', () => {
         { kind: 'thread', id: 'incoming' },
       ],
     };
-    const result = moveArrangeThread(layout, 'incoming', [{ id: 'g', threadIds: ['b', 'incoming'] }], {}, rows);
-    expect(result.recent).toEqual([{ kind: 'thread', id: 'a' }, group(['incoming', 'b'], 2)]);
+    const result = moveArrangeThread(
+      layout,
+      'incoming',
+      [{ id: 'g', threadIds: ['b', 'incoming'] }],
+      {},
+      rows,
+      new Set(),
+    );
+    expect(result.recent).toEqual([
+      { kind: 'thread', id: 'a' },
+      { ...group(['incoming', 'b'], 2), header: { presence: false, peekIds: [], more: false } },
+    ]);
+  });
+
+  it('captures only local header facts when a cross-project move first forms a local shell', () => {
+    const live = ['a1', 'a2', 'b1', 'b2'].map((id) => ({
+      ...row(id, 50),
+      projectPath: id.startsWith('a') ? '/A' : '/B',
+      unreadCount: id.startsWith('a') ? 7 : 0,
+      presence: { status: id.startsWith('a') ? ('working' as const) : ('idle' as const) },
+    }));
+    const layout: ArrangeLayout = {
+      '/A': [{ ...group(['a1', 'a2'], 2), header: { presence: true, peekIds: ['a1'], more: false } }],
+      '/B': [
+        { kind: 'thread', id: 'b1' },
+        { kind: 'thread', id: 'b2' },
+      ],
+    };
+    const result = moveArrangeThread(
+      layout,
+      'b1',
+      [{ id: 'g', threadIds: live.map((item) => item.id) }],
+      {},
+      live,
+      new Set(['a1']),
+    );
+    expect(result['/A']).toEqual(layout['/A']);
+    expect(result['/B']?.[0]).toMatchObject({
+      kind: 'group',
+      memberIds: ['b1', 'b2'],
+      header: { presence: false, peekIds: [], more: false },
+    });
+  });
+
+  it('captures current decisions at new-shell creation and keeps slots when more members join', () => {
+    const layout: ArrangeLayout = {
+      recent: [
+        { kind: 'thread', id: 'a' },
+        { kind: 'thread', id: 'b' },
+        { kind: 'thread', id: 'incoming' },
+      ],
+    };
+    const created = moveArrangeThread(layout, 'a', [{ id: 'g', threadIds: ['a', 'b'] }], {}, rows, new Set(['b']));
+    expect(created.recent?.[0]).toMatchObject({ header: { presence: false, peekIds: ['b'], more: false } });
+    const joined = moveArrangeThread(
+      created,
+      'incoming',
+      [{ id: 'g', threadIds: ['a', 'b', 'incoming'] }],
+      {},
+      rows,
+      new Set(['incoming']),
+    );
+    expect(joined.recent?.[0]).toMatchObject({ header: { presence: false, peekIds: ['b'], more: false } });
   });
 
   it('dissolves the source shell in place and removes to immediately after that block', () => {
     const layout: ArrangeLayout = { recent: [group(['a', 'b'], 2), { kind: 'thread', id: 'c' }] };
-    expect(moveArrangeThread(layout, 'a', [], {}, rows).recent).toEqual([
+    expect(moveArrangeThread(layout, 'a', [], {}, rows, new Set()).recent).toEqual([
       { kind: 'thread', id: 'b' },
       { kind: 'thread', id: 'a' },
       { kind: 'thread', id: 'c' },
@@ -165,7 +233,14 @@ describe('arrange membership deltas', () => {
         { ...group(['b', 'c'], 2), anchor: 'group:h' },
       ],
     };
-    const result = moveArrangeThread(layout, 'incoming', [{ id: 'h', threadIds: ['b', 'c', 'incoming'] }], {}, rows);
+    const result = moveArrangeThread(
+      layout,
+      'incoming',
+      [{ id: 'h', threadIds: ['b', 'c', 'incoming'] }],
+      {},
+      rows,
+      new Set(),
+    );
     expect(result.recent).toEqual([
       { kind: 'thread', id: 'a' },
       { kind: 'thread', id: 'e' },

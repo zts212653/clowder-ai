@@ -582,6 +582,7 @@ export function ThreadSidebar({ onClose, className, routeThreadId, activeDestina
     liveThreads,
     attentionClusters,
     attentionMemberSort,
+    groupDecisions.threadIds,
     attentionPlainView,
   );
   const attentionArrangeMode = isV2 ? arrangeSession.active : classicArrangeMode;

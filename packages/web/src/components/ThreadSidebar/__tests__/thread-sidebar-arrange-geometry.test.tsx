@@ -164,6 +164,53 @@ describe('Issue #1964 arrange group geometry', () => {
     const liveMarker = row()?.querySelector('[data-testid="arrange-signal-badge"]');
     if (!initial) expect(liveMarker).not.toBeNull();
   });
+  it.each(
+    kinds.flatMap((kind) => [false, true].map((initial) => ({ kind, initial }))),
+  )('captures newly created group slots for $kind from $initial', async ({ kind, initial }) => {
+    let created = false;
+    mockApiFetch.mockImplementation((path: string) => {
+      if (path === '/api/labels') return jsonOk([]);
+      if (path.endsWith('/groups')) created = true;
+      if (path.startsWith('/api/config/thread-attention'))
+        return jsonOk({
+          aliases: {},
+          open: { 'group:g': false },
+          groups: created ? [{ id: 'g', threadIds: ['member-a', 'outside'] }] : [],
+        });
+      return defaultSidebarApiMock(path);
+    });
+    await harness.render();
+    await enter();
+    // Capture facts at the explicit grouping action, rather than at arrange entry.
+    await facts(kind, initial);
+    const source = harness.container.querySelector('[data-attention-draggable-thread="outside"]');
+    const target = harness.container.querySelector('[data-attention-draggable-thread="member-a"]');
+    expect(source).not.toBeNull();
+    expect(target).not.toBeNull();
+    await act(async () => source?.dispatchEvent(new MouseEvent('dragstart', { bubbles: true })));
+    await act(async () => target?.dispatchEvent(new MouseEvent('dragover', { bubbles: true })));
+    await act(async () => target?.dispatchEvent(new MouseEvent('drop', { bubbles: true })));
+    await harness.flush();
+    const header = harness.container.querySelector('[data-attention-cluster="group:g"]');
+    expect(header?.getAttribute('data-expanded')).toBe('true');
+    await act(async () => header?.querySelector<HTMLButtonElement>('[aria-expanded="true"]')?.click());
+    await harness.flush();
+    expect(header?.getAttribute('data-expanded')).toBe('false');
+    const before = slots();
+    await facts(kind, !initial);
+    expect(slots()).toEqual(before);
+    if (kind === 'unread' || kind === 'mention' || kind === 'decision')
+      expect(Boolean(header?.querySelector('[data-testid="group-count"]'))).toBe(!initial);
+    await act(async () =>
+      [...harness.container.querySelectorAll<HTMLButtonElement>('[data-testid="attention-arrange-toolbar"] button')]
+        .find((button) => button.textContent === '完成')
+        ?.click(),
+    );
+    await harness.flush();
+    if (kind === 'unread' || kind === 'mention' || kind === 'decision')
+      expect(slots().peekIds).toEqual(initial ? [] : ['member-a']);
+    else expect(slots().presence).toBe(!initial);
+  });
   it('keeps captured peek identities and the more slot while live attention clears or moves to a hidden member', async () => {
     memberIds = ['member-a', 'member-b', 'member-c', 'member-d'];
     mockStore.threads = [

@@ -119,6 +119,7 @@ export function moveArrangeThread(
   savedGroups: readonly ThreadAttentionGroup[],
   modes: Readonly<Record<string, ThreadAttentionMemberSort>>,
   liveRows: readonly SidebarSnapshotRow[],
+  decisions: ReadonlySet<string>,
 ): ArrangeLayout {
   const savedAnchors = new Set(savedGroups.map((group) => `group:${group.id}`));
   const sourceList = Object.entries(layout).find(([, items]) =>
@@ -188,20 +189,23 @@ export function moveArrangeThread(
   // A newly created group replaces its target conversation, at that conversation's old location.
   const targetIndex = items.findIndex((item) => item.kind === 'thread' && destination.threadIds.includes(item.id));
   if (targetIndex < 0) return next;
-  const memberIds = orderGroupMemberIds(
-    destination.threadIds.flatMap((id) => {
-      const row = rowsById.get(id);
-      return row ? [row] : [];
-    }),
-    mode,
-    true,
-  );
+  const members = destination.threadIds.flatMap((id) => {
+    const row = rowsById.get(id);
+    return row ? [row] : [];
+  });
+  const memberIds = orderGroupMemberIds(members, mode, true);
+  const peek = collapsedGroupPeek(members, decisions);
   items.splice(targetIndex, 1, {
     kind: 'group',
     anchor: destinationAnchor,
     memberIds,
     visibleCount: memberIds.length,
     expanded: true,
+    header: {
+      presence: members.some((member) => member.presence.status !== 'idle'),
+      peekIds: peek.entries.map(({ member }) => member.id),
+      more: peek.total > peek.entries.length,
+    },
   });
   return next;
 }

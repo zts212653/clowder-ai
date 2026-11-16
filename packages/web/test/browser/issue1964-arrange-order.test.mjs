@@ -9,6 +9,7 @@ import { startSearchGroupBrowserFixture } from './f277-search-group-browser.harn
 import { verifyArrangeGeometry } from './issue1964-arrange-geometry.journey.mjs';
 import { verifyArrangeProjectMembership } from './issue1964-arrange-project.journey.mjs';
 import { verifyArrangeViewEntries } from './issue1964-arrange-views.journey.mjs';
+import { verifyCreatedGroupGeometry } from './issue1964-created-group.journey.mjs';
 
 const evidence = process.env.ISSUE1964_EVIDENCE_DIR ?? path.join(tmpdir(), 'cat-cafe-evidence', 'issue1964');
 const owner = 'f277-search-browser-owner';
@@ -296,6 +297,7 @@ test(
       }
       await verifyArrangeViewEntries(browser, fixture, evidence, errors, owner);
       await verifyArrangeGeometry(browser, fixture, evidence, errors, owner);
+      await verifyCreatedGroupGeometry(browser, fixture, evidence, errors, owner);
       assert.deepEqual(errors, []);
       await writeFile(
         path.join(evidence, 'result.json'),
