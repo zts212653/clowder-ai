@@ -44,13 +44,14 @@ afterEach(async () => {
   await act(async () => root.unmount());
   container.remove();
 });
-async function renderFlow() {
+async function renderFlow(proposedRepo?: string) {
   await act(async () =>
     root.render(
       <CommunityPublishFlow
         issueId="fi_1"
         title={draft.title}
         bodyMarkdown="Raw body"
+        proposedRepo={proposedRepo}
         status="confirmed"
         onStatusChange={vi.fn()}
       />,
@@ -93,8 +94,9 @@ test.each([
       ? response({ title: draft.title, bodyMarkdown: 'Safe body' })
       : response({ defaultRepo: '', repos: [] }, status),
   );
-  await renderFlow();
-  expect(container.textContent).toContain('尚未提交');
+  await renderFlow('suggested/repo');
+  expect(container.textContent).toContain('Issue 报告');
+  expect(container.querySelector('a')).toBeNull();
   expect(container.textContent).toContain('复制报告');
   expect(container.textContent).not.toContain('预览并提交');
   expect(container.querySelector('textarea')?.value).toBe('Safe body');
@@ -105,20 +107,52 @@ test.each([
   ).toBe(true);
 });
 
-test('a different target returned for an existing draft is shown as a conflict, never published', async () => {
+test('a proposed target outside the configured list never becomes a manual submission link', async () => {
+  await renderFlow('suggested/repo');
+  expect(container.querySelector('a')).toBeNull();
+  expect(container.textContent).not.toContain('预览并提交');
+});
+
+test('the native requestId content conflict offers an actionable message without publishing', async () => {
   vi.mocked(apiFetch).mockImplementation(async (url, init) =>
     String(url).endsWith('/report-preview')
       ? response({ title: draft.title, bodyMarkdown: draft.bodyMarkdown })
       : String(url).endsWith('/config')
         ? response({ defaultRepo: 'org/repo', repos: ['org/repo'] })
         : init?.method === 'POST'
-          ? response({ draft: { ...draft, targetRepo: 'previous/repo' } })
+          ? response({ error: 'draft requestId already has different content' }, 409)
           : response({ draft }),
   );
   await renderFlow();
   await click('预览并提交');
-  expect(container.textContent).toContain('已有草稿属于 previous/repo');
+  expect(container.textContent).toContain('请恢复创建时的仓库与报告内容');
+  expect(container.textContent).not.toContain('draft requestId already has different content');
   expect(vi.mocked(apiFetch).mock.calls.some(([url]) => String(url).includes('/by-id/'))).toBe(false);
+});
+
+test('remounting after publication does not claim the issue is unsubmitted and restores the same draft', async () => {
+  await renderFlow();
+  await click('预览并提交');
+  await click('Submit to GitHub');
+  const publishedDraft = {
+    ...draft,
+    status: 'published',
+    githubIssueNumber: 12,
+    githubIssueUrl: 'https://github.com/org/repo/issues/12',
+  };
+  vi.mocked(apiFetch).mockImplementation(async (url) =>
+    String(url).endsWith('/report-preview')
+      ? response({ title: draft.title, bodyMarkdown: draft.bodyMarkdown })
+      : String(url).endsWith('/config')
+        ? response({ defaultRepo: 'org/repo', repos: ['org/repo'] })
+        : response({ draft: publishedDraft }),
+  );
+  await act(async () => root.render(null));
+  await renderFlow();
+  expect(container.textContent).not.toContain('尚未提交');
+  expect(container.textContent).toContain('Issue 报告');
+  await click('预览并提交');
+  expect(container.querySelector('a')?.href).toBe(publishedDraft.githubIssueUrl);
 });
 
 test('changing the proposed repository A to allowed B previews and publishes B without a false target conflict', async () => {

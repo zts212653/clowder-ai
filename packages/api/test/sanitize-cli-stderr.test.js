@@ -105,6 +105,14 @@ test('redacts URL query string entirely', () => {
   assert.ok(!out.includes('sk-abc123def456ghijklmnop'), `token leaked via query: ${out}`);
 });
 
+test('keeps natural-language questions while redacting actual URL queries', () => {
+  const input = '为什么失败？我重试了三次。Why?Still failing. https://example.test/path?code=private-code';
+  assert.equal(
+    sanitizeCliStderr(input),
+    '为什么失败?我重试了三次。Why?Still failing. https://example.test/path?[QUERY_REDACTED]',
+  );
+});
+
 test('redacts URL userinfo credentials while retaining the destination host', () => {
   const input = 'ERR_PNPM_NO_OFFLINE_TARBALL https://alice:review-password@registry.example.test/pkg.tgz';
   const out = sanitizeCliStderr(input);

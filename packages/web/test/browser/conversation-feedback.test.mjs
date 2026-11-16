@@ -18,7 +18,7 @@ before(
 );
 after(async () => browser?.close());
 for (const entry of ['local', 'agent']) {
-  for (const scenario of ['ready', 'offline', 'empty', 'uncertain']) {
+  for (const scenario of ['ready', 'offline', 'empty', 'uncertain', 'conflict']) {
     test(
       `${entry}/${scenario}: real chat draft, confirmation, receipt and safe fallback`,
       { timeout: 30000 },
@@ -83,6 +83,7 @@ for (const entry of ['local', 'agent']) {
           if (pathname.includes('/by-id/')) return json({ draft });
           if (pathname.endsWith('/community-issue-drafts') && request.method() === 'POST') {
             const body = request.postDataJSON();
+            if (scenario === 'conflict') return json({ error: 'draft requestId already has different content' }, 409);
             if (entry === 'agent') {
               assert.equal(body.sourceType, 'cat_initiated');
               assert.equal(body.sourceId, 'issue-proposal');
@@ -117,15 +118,15 @@ for (const entry of ['local', 'agent']) {
         assert.equal(issuePosts, 0);
         if (scenario === 'offline' || scenario === 'empty') {
           assert.equal(await page.getByRole('button', { name: '预览并提交', exact: true }).count(), 0);
-          assert.match(await page.locator('main').innerText(), /尚未提交/);
+          assert.match(await page.locator('main').innerText(), /Issue 报告/);
           assert.equal(await page.getByRole('button', { name: '复制报告' }).isEnabled(), true);
-          if (entry === 'local' && scenario === 'empty')
-            assert.equal(await page.getByRole('link', { name: '打开 GitHub 手动提交' }).count(), 0);
-          if (entry === 'agent')
-            assert.equal(
-              await page.getByRole('link', { name: '打开 GitHub 手动提交' }).getAttribute('href'),
-              'https://github.com/fixture/repo/issues/new',
-            );
+          assert.equal(await page.getByRole('link', { name: '打开 GitHub 手动提交' }).count(), 0);
+        } else if (scenario === 'conflict') {
+          await page.getByRole('button', { name: '预览并提交', exact: true }).click();
+          await page.getByRole('alert').filter({ hasText: '请恢复创建时的仓库与报告内容' }).waitFor();
+          assert.equal(creates, 0);
+          assert.equal(issuePosts, 0);
+          assert.equal(await page.getByRole('button', { name: 'Submit to GitHub', exact: true }).count(), 0);
         } else {
           await page.getByRole('button', { name: '预览并提交', exact: true }).click();
           await page.getByRole('button', { name: 'Submit to GitHub', exact: true }).waitFor();
@@ -139,6 +140,7 @@ for (const entry of ['local', 'agent']) {
           await page.getByRole('link', { name: /#7/ }).waitFor();
           assert.equal(issuePosts, 1);
           await open();
+          assert.doesNotMatch(await page.locator('main').innerText(), /尚未提交/);
           await page.getByRole('button', { name: '预览并提交', exact: true }).click();
           await page.getByRole('link', { name: /#7/ }).waitFor();
           assert.equal(creates, 1);

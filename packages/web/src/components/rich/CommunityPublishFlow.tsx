@@ -107,11 +107,13 @@ export function CommunityPublishFlow({
         ),
       });
       const result = await response.json();
+      if (response.status === 409 && result.error === 'draft requestId already has different content')
+        throw new Error(
+          '同一来源已有不同仓库或内容的草稿。请恢复创建时的仓库与报告内容后重试，或从原草稿预览继续；不会创建替代草稿。',
+        );
       if (!response.ok && !(response.status === 409 && result.draft?.status === 'published'))
         throw new Error(result.error ?? '创建草稿失败');
       const draft = communityDraftSchema.parse(result.draft);
-      if (draft.status !== 'published' && draft.targetRepo.toLowerCase() !== selectedRepo.toLowerCase())
-        throw new Error(`已有草稿属于 ${draft.targetRepo}，请恢复该草稿并确认原目标，不能直接改仓库。`);
       setDraftId(draft.draftId);
       onStatusChange('draft_created');
     } catch (cause) {
@@ -122,11 +124,14 @@ export function CommunityPublishFlow({
     }
   };
   const ready = Boolean(!draftId && report && config?.repos.includes(selectedRepo));
-  // Only a configured/proposed repository becomes a manual link; report content stays out of URLs.
-  const manualUrl = repoPattern.test(selectedRepo) ? `https://github.com/${selectedRepo}/issues/new` : null;
+  // Manual submission uses only configured targets; report content stays out of URLs.
+  const manualUrl =
+    config?.repos.includes(selectedRepo) && repoPattern.test(selectedRepo)
+      ? `https://github.com/${selectedRepo}/issues/new`
+      : null;
   const reportForm = (
     <div className="mt-2 rounded-lg border border-cafe/20 bg-cafe-surface p-3 text-sm">
-      <p className="font-medium text-cafe-text">Issue 草稿 · 尚未提交</p>
+      <p className="font-medium text-cafe-text">Issue 报告</p>
       <p className="mt-1 text-xs text-cafe-muted">
         已过滤常见凭据和个人路径，仍请核对隐私；发布服务会再处理正文。预览不会创建远端
         Issue；继续预览后可编辑标题和正文。
