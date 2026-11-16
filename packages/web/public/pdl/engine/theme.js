@@ -125,12 +125,13 @@ function assetRaw(id) {
 /* 取一个素材的地址（没有就是空串） */
 function asset(id) { const a = assetRaw(id); return a ? a.src : ''; }
 /* 把素材交给 CSS：每个 id 一个变量 --asset-<id 里的点换成横线>，值是 url(…) */
-/* 字体素材（type: 'font'）登记成文档字体：同一个家族名只注册一次；加载失败就不管它——字体栈后面是系统字体，自然落过去 */
+/* 字体素材（type: 'font'）登记成文档字体：同一个家族名只注册一次；加载失败就不管它——字体栈后面是系统字体，自然落过去。
+   没写家族名（family）的字体素材不登记：那是主题包自己的组件样式按地址引用的文件 */
 const FONT_DONE = {};
 function applyFonts() {
   if (typeof FontFace === 'undefined' || !document.fonts) return;
   Object.keys(ASSETS).forEach(function (id) {
-    const a = assetRaw(id); if (!a || a.type !== 'font' || FONT_DONE[a.family + a.src.length]) return;
+    const a = assetRaw(id); if (!a || a.type !== 'font' || !a.family || FONT_DONE[a.family + a.src.length]) return;
     FONT_DONE[a.family + a.src.length] = true;
     try { const f = new FontFace(a.family, 'url("' + a.src + '")', { weight: a.weight || 'normal', display: 'swap' }); document.fonts.add(f); f.load().catch(function () { /* 落到系统字体 */ }); } catch (e) { /* 落到系统字体 */ }
   });
