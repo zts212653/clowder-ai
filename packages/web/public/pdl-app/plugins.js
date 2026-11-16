@@ -970,6 +970,13 @@ function bindPluginRequests() {
     if (typeof v !== 'string') return v;
     if (v.indexOf('state.') === 0) return (S.plug[pk] || {})[v.slice(6)];
     if (v === 'host.origin') return location.origin;
+    // a host source the plugin may read (host:currentThread.id): the read follows it like any other source
+    if (v.indexOf('host:') === 0) {
+      const path = v.slice(5).split('.');
+      return path.slice(1).reduce(function (o, k) {
+        return o == null ? o : o[k];
+      }, vmRead(HOST_DATA[path[0]]));
+    }
     if (v[0] === '@')
       return v
         .slice(1)
@@ -1096,16 +1103,20 @@ function bindPluginRequests() {
     }
     if (res && res.error) toast(res.error, null, 'danger');
     else if (res && res.message) toast(res.message);
-    // A write may hand back one public host action (e.g. insert into the input).
-    if (res && !res.error && res.act && PLUGIN_PUBLIC.acts.indexOf(res.act) >= 0) actFn(res.act)(res.args || {});
+    // A write may hand back public host actions (act / args, or a list in acts: open the new thread and the panel).
+    if (res && !res.error)
+      (res.act ? [{ act: res.act, args: res.args }] : []).concat(res.acts || []).forEach(function (a) {
+        if (PLUGIN_PUBLIC.acts.indexOf(a.act) >= 0) actFn(a.act)(a.args || {});
+      });
     if (r.method && r.method !== 'GET') await reread(pk);
     return res;
   }
   A.plugin = function (d) {
     return write(d.plugin, d.request, d);
   };
+  // also: other keys set in the same step (a project change resets the pick; locate also picks the tab)
   A.plugSet = function (d) {
-    (S.plug[d.plugin] = S.plug[d.plugin] || {})[d.k] = d.v;
+    Object.assign((S.plug[d.plugin] = S.plug[d.plugin] || {}), { [d.k]: d.v }, d.also);
     render(true);
     return reread(d.plugin);
   };

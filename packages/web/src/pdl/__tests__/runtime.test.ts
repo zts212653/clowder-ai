@@ -545,6 +545,36 @@ describe('unmodified runtime and project chat bindings', () => {
     }
   });
 
+  it('plugin requests read host sources, writes run every returned public action, plugSet writes also', async () => {
+    const { dom, w, port } = await boot();
+    try {
+      w.eval(
+        `PDL_PLUGIN_REQ['t-p']={save:{path:'save',method:'POST',query:{thread:'host:currentThread.id',pick:'state.pick',tab:'state.tab'}}};`,
+      );
+      const thread = w.eval('VM.chatHeader().id');
+      expect(thread).toBeTruthy();
+      w.eval("S.plug['t-p']={tab:'cards'}");
+      await w.eval("A.plugSet({plugin:'t-p',k:'pick',v:'obj:a',also:{tab:'version'}})");
+      expect(w.eval("S.plug['t-p']")).toEqual({ pick: 'obj:a', tab: 'version' });
+      port.post.mockResolvedValueOnce({
+        acts: [
+          { act: 'toast', args: { msg: 'one' } },
+          { act: 'notPublic', args: {} },
+          { act: 'toast', args: { msg: 'two' } },
+        ],
+      });
+      await w.eval("A.plugin({plugin:'t-p',request:'save'})");
+      expect(port.post.mock.calls.at(-1)![0]).toBe('/api/plugins/t-p/save');
+      expect(port.post.mock.calls.at(-1)![1]).toMatchObject({ thread, pick: 'obj:a', tab: 'version' });
+      expect(w.eval('TOAST_LOG.slice(-2)')).toEqual(['one', 'two']);
+      // a { t, args } in returned data is text in the plugin's packs, like one written in PDL; other objects stay data
+      expect(w.eval("pv('$.x', {}, { x: { t: 'common.viewError' } })")).toBe(w.eval("tc('common.viewError')"));
+      expect(w.eval("pv('$.x', {}, { x: { t: 'a', v: 1 } })")).toEqual({ t: 'a', v: 1 });
+    } finally {
+      dom.window.close();
+    }
+  });
+
   it('keeps guarded plugin frames open through slow or failed saves and confirms forced discard', async () => {
     const { dom, w, errors } = await boot();
     try {

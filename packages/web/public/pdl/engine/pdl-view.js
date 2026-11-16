@@ -258,10 +258,13 @@ function pv(v, sc, root) {
   if (v[0] === '@' || v.indexOf('$.') === 0) {
     const base = v[0] === '@' ? sc : root, path = v[0] === '@' ? v.slice(1) : v.slice(2);
     const got = path.split('.').reduce(function (o, k) { return o == null ? o : o[k]; }, base);
-    return got;
+    return pvSaid(got) ? pvSaidText(got) : got;
   }
   return v;
 }
+/* 数据里带来的文案（插件后端返回的 { t, args }，只有这两个键）：和写在 PDL 里的一样按当前语言翻译，参数里套着的也翻译；参数是数据，不再当路径解析 */
+function pvSaid(x) { return !!x && typeof x === 'object' && !Array.isArray(x) && typeof x.t === 'string' && Object.keys(x).every(function (k) { return k === 't' || k === 'args'; }); }
+function pvSaidText(x) { return tc.apply(null, [x.t].concat((x.args || []).map(function (a) { return pvSaid(a) ? pvSaidText(a) : a; }))); }
 function pvOk(w, sc, root) { if (w == null) return true; if (Array.isArray(w)) return w.every(function (x) { return pvOk(x, sc, root); });   /* 一组条件：都成立才算 */
   const neg = w[0] === '!', x = pv(neg ? w.slice(1) : w, sc, root); const ok = Array.isArray(x) ? x.length > 0 : !!x; return neg ? !ok : ok; }
 function pvArgs(args, sc, root) {
