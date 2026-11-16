@@ -171,13 +171,19 @@ test('redacts URL queries inside parentheses and after literal path parentheses'
       ['GET /api/Foo_(bar)', ' ok'],
       ['ERR ?(localhost:3002/x', ')'],
       ['Why?(localhost:3002/x', ')'],
+      ['ERR ?https://x.test/a', ''],
+      ['Why?https://x.test/a', ''],
+      ['ERR ??https://x.test/a', ''],
+      ['GET https://x.test/a(b(c))', ' ok'],
+      ['ERR ?(localhost:3002/x', ''],
+      ['https://x.test/a)', ''],
     ].forEach(([prefix, suffix]) => {
       assert.equal(sanitizeCliStderr(`${prefix}?${key}=abcd1234${suffix}`), `${prefix}?[QUERY_REDACTED]${suffix}`);
     });
   });
 });
 
-[':/', '(', '(/', '(a', 'a?', '?('].forEach((pattern) => {
+[':/', '(', '(/', '(a', 'a?', '?(', '?'].forEach((pattern) => {
   test(`URL query scanning stays bounded on long ${pattern} output`, () => {
     const input = pattern.repeat(65_536 / pattern.length);
     const startedAt = performance.now();
