@@ -36,7 +36,12 @@ describe('Issue #1964 arrange entry coverage', () => {
     resetThreadSidebarGlobals();
     vi.restoreAllMocks();
   });
-  async function setup(tab: 'project' | 'favorites' | 'system' | 'pinned', archived = false, grouped: string[] = []) {
+  async function setup(
+    tab: 'project' | 'favorites' | 'system' | 'pinned',
+    archived = false,
+    grouped: string[] = [],
+    mode: 'recent' | 'manual' | 'running-first' = 'recent',
+  ) {
     window.localStorage.setItem(SIDEBAR_TAB_STORAGE_KEY, tab);
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify(['/B']));
     const threads = ['a1', 'a2', 'b1'].map((id, index) => ({
@@ -60,6 +65,7 @@ describe('Issue #1964 arrange entry coverage', () => {
           groups: grouped.length ? [{ id: 'g', name: 'Group', threadIds: grouped }] : [],
           aliases: {},
           open: {},
+          memberSort: mode === 'recent' ? {} : { 'group:g': mode },
         });
       return defaultSidebarApiMock(path);
     });
@@ -170,6 +176,32 @@ describe('Issue #1964 arrange entry coverage', () => {
     const call = mockApiFetch.mock.calls.find(([path]) => path.endsWith('/groups'));
     expect(JSON.parse(String(call?.[1]?.body)).action).toBe(action);
     expect(harness.container.querySelector('[data-attention-cluster]')).toBeNull();
+    expect(order()).toEqual(before);
+    await done();
+    expect(order()).toEqual(before);
+  });
+
+  it.each([
+    'manual',
+    'recent',
+    'running-first',
+  ] as const)('does not offer hidden %s reordering between favorite rows', async (mode) => {
+    await setup('favorites', false, ['b1', 'a2', 'a1'], mode);
+    const before = order();
+    await enter();
+    const source = harness.container.querySelector('[data-attention-draggable-thread="a1"]');
+    const target = harness.container.querySelector('[data-attention-draggable-thread="a2"]');
+    await act(async () => source?.dispatchEvent(new MouseEvent('dragstart', { bubbles: true })));
+    await act(async () => target?.dispatchEvent(new MouseEvent('dragover', { bubbles: true, clientY: -1 })));
+    const insertion = target?.getAttribute('data-attention-insertion');
+    await act(async () => target?.dispatchEvent(new MouseEvent('drop', { bubbles: true })));
+    await harness.flush();
+    expect({ insertion, commands: mockApiFetch.mock.calls.filter(([path]) => path.endsWith('/groups')) }).toEqual({
+      insertion: null,
+      commands: [],
+    });
+    expect(harness.container.querySelector('[data-attention-cluster]')).toBeNull();
+    expect(harness.container.querySelector('[data-attention-arrange-hint]')).toBeNull();
     expect(order()).toEqual(before);
     await done();
     expect(order()).toEqual(before);

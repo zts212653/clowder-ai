@@ -25,7 +25,8 @@
 target-owned 归属；公开 checkout 未包含实际 source manifest，这个核验边界在 PR 明示。
 F277 恢复上游原文，源侧设计修订随既有导出链进入；本 PR 不再产生单独的公开 F277 差异。
 
-本轮合流后验收：11 个 Vitest 文件 97 项通过，API 构建、Web 类型与变更文件 Biome 检查通过。
+本轮合流后验收：作者首次 11 个 Vitest 文件 97 项通过，独立复审的 11 文件口径为 99 项通过；
+API 构建、Web 类型与变更文件 Biome 检查通过。
 canonical Chromium 旅程 1/1 通过（五种视口/视图组合及新增项目展开、收藏置顶路径，页面错误为零）。
 已查看[展开收起项目](assets/issue1964/300-project-expand-during-arrange.png)和
 [收藏置顶](assets/issue1964/300-favorites-pin-during-arrange.png)截图，并核对 240px 中英文提示不遮挡邻行。
@@ -36,6 +37,12 @@ fallback 扫描触发人工检查：统计包含视图布尔条件和可选偏�
 本次用独立 ID 布局表达整理生命周期；空布局、未设置成员模式与归档容器分别沿既有语义处理，
 没有新增服务端 fallback、重试或额外存储。全局 feature-truth 的 F276/F310 ROADMAP 缺项为既有基线，
 不记作通过；未运行全仓 gate、默认 AppShell、安装版或 200% 缩放验收。
+
+复审另发现 plain 收藏视图会显示隐藏手动组的插入线，却不移动当前行。已先复现有线且发送
+beforeThreadId 的 RED，再将 plain 同组拖放统一为无写入、无线、无提示；跨组成员命令照常保留，
+手动调序仍在有分组展示的视图可用。新增三种模式回归后，4 文件 46 项通过（入口文件现为 15 项）。
+该小改动复用已独立验证的浏览器 pin/project 旅程，不将其冒充新的 plain manual 原生浏览器验收。
+资产同步 guard 在公开 checkout 为 skip，当前 target-owned 登记仍需源侧确认。
 
 以下为前两轮的历史记录，不替代维护者本轮验收。
 

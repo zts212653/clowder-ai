@@ -576,11 +576,12 @@ export function ThreadSidebar({ onClose, className, routeThreadId, activeDestina
   } = useAttentionClusters(liveThreads, currentThreadId, normalizedQuery);
   const groupDecisions = useGroupDecisions(isV2);
   const [classicArrangeMode, setClassicArrangeMode] = useState(false);
+  const attentionPlainView = activeTab === 'favorites' || activeTab === 'system';
   const arrangeSession = useAttentionArrangeSession(
     liveThreads,
     attentionClusters,
     attentionMemberSort,
-    activeTab === 'favorites' || activeTab === 'system',
+    attentionPlainView,
   );
   const attentionArrangeMode = isV2 ? arrangeSession.active : classicArrangeMode;
   const [arrangeHint, setArrangeHint] = useState<{ threadId: string; text: string; summary: string } | null>(null);
@@ -629,6 +630,7 @@ export function ThreadSidebar({ onClose, className, routeThreadId, activeDestina
       const targetCluster = attentionClusterByThreadId.get(targetThreadId);
       if (targetCluster?.groupId) {
         const sameGroup = targetCluster.memberIds.includes(sourceThreadId);
+        if (isV2 && attentionPlainView && sameGroup) return;
         const mode = attentionMemberSort[targetCluster.anchor];
         if (isV2 && sameGroup && mode !== 'manual') {
           setArrangeHint({
@@ -657,7 +659,15 @@ export function ThreadSidebar({ onClose, className, routeThreadId, activeDestina
         if (result.ok) arrangeSession.apply(sourceThreadId, result.preferences.groups);
       });
     },
-    [attentionClusterByThreadId, mutateAttentionGroup, attentionMemberSort, isV2, rowCopy, arrangeSession.apply],
+    [
+      attentionClusterByThreadId,
+      mutateAttentionGroup,
+      attentionMemberSort,
+      attentionPlainView,
+      isV2,
+      rowCopy,
+      arrangeSession.apply,
+    ],
   );
   const commitAttentionClusterDrop = useCallback(
     (sourceThreadId: string, targetCluster: (typeof attentionClusters)[number]) => {
@@ -1499,6 +1509,7 @@ export function ThreadSidebar({ onClose, className, routeThreadId, activeDestina
           onEnterArrange={beginAttentionArrange}
           allowInsertion={Boolean(
             isV2 &&
+              !attentionPlainView &&
               attentionArrangeMode &&
               attentionMemberSort[attentionClusterByThreadId.get(thread.id)?.anchor ?? ''] === 'manual' &&
               attentionClusterByThreadId.get(thread.id)?.memberIds.includes(draggedAttentionThreadId ?? ''),
@@ -1554,6 +1565,7 @@ export function ThreadSidebar({ onClose, className, routeThreadId, activeDestina
       beginAttentionArrange,
       attentionClusterByThreadId,
       attentionMemberSort,
+      attentionPlainView,
       isV2,
       attentionLoadState,
       organizeThread,
