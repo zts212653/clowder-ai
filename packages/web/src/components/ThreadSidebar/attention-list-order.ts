@@ -52,7 +52,7 @@ function orderV2ByAttention(items: readonly AttentionRenderItem[]): AttentionRen
     .map(({ item }) => item);
 }
 
-function orderGroupMemberIds(
+export function orderGroupMemberIds(
   members: readonly SidebarSnapshotRow[],
   mode: OpenMemberOrder['mode'],
   v2: boolean,

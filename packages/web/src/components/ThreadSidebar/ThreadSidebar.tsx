@@ -52,7 +52,7 @@ import { SidebarGroupSegmentV2 } from './SidebarGroupSegmentV2';
 import { SidebarTabIcon } from './SidebarTabIcon';
 import { SidebarViewBarV2 } from './SidebarViewBarV2';
 import type { SearchGroupRequest } from './search-group-types';
-import { useSidebarRowHeight } from './sidebar-draft-decoration';
+import { useSidebarRowSignals } from './sidebar-draft-decoration';
 import { sidebarHeaderCopy } from './sidebar-header.shell-copy';
 import {
   createSidebarTabState,
@@ -63,6 +63,7 @@ import {
 import { ThreadDeleteConfirmDialog } from './ThreadDeleteConfirmDialog';
 import { ThreadItem } from './ThreadItem';
 import { ThreadOrganizerModal } from './ThreadOrganizerModal';
+import { type ArrangeSignalSlot, hasThreadRowSignals } from './ThreadRowSignals';
 import { ThreadSidebarV2Header } from './ThreadSidebarV2Header';
 import { openTheaterReplay } from './theater-navigation';
 import { pushThreadRouteWithHistory } from './thread-navigation';
@@ -81,6 +82,7 @@ import {
   type SidebarTabId,
   type ThreadGroup,
 } from './thread-utils';
+import { useAttentionArrangeSession } from './use-attention-arrange-session';
 import { useAttentionClusters } from './use-attention-clusters';
 import { sidebarReadingRowKey, useAttentionListOrder, useSidebarReadingSession } from './use-attention-list-order';
 import { useAttentionPreview } from './use-attention-preview';
@@ -574,16 +576,44 @@ export function ThreadSidebar({ onClose, className, routeThreadId, activeDestina
     toggleCollapsedPeek: toggleAttentionCollapsedPeek,
   } = useAttentionClusters(liveThreads, currentThreadId, normalizedQuery);
   const groupDecisions = useGroupDecisions(isV2);
-  const [attentionArrangeMode, setAttentionArrangeMode] = useState(false);
+  const [classicArrangeMode, setClassicArrangeMode] = useState(false);
+  const attentionPlainView = activeTab === 'favorites' || activeTab === 'system';
+  const arrangeSession = useAttentionArrangeSession(
+    liveThreads,
+    attentionClusters,
+    attentionMemberSort,
+    groupDecisions.threadIds,
+    attentionPlainView,
+  );
+  const attentionArrangeMode = isV2 ? arrangeSession.active : classicArrangeMode;
+  const [arrangeHint, setArrangeHint] = useState<{
+    threadId: string;
+    text: string;
+    summary: string;
+    feedback: string;
+  } | null>(null);
+  useEffect(() => {
+    if (!arrangeHint) return;
+    const timer = window.setTimeout(() => setArrangeHint(null), 4000);
+    return () => window.clearTimeout(timer);
+  }, [arrangeHint]);
+  const finishAttentionArrange = useCallback(() => {
+    arrangeSession.finish();
+    setClassicArrangeMode(false);
+    setArrangeHint(null);
+  }, [arrangeSession.finish]);
   const [searchGroupRequest, setSearchGroupRequest] = useState<SearchGroupRequest | null>(null);
   const searchGroupOperation = useRef(0);
   const [searchGroupSuccess, setSearchGroupSuccess] = useState<SearchGroupSuccess | null>(null);
   const [locateGroupId, setLocateGroupId] = useState<string | null>(null);
   const searchGroupTip = useSearchGroupTip();
-  const openSearchGroup = useCallback((request: SearchGroupRequest) => {
-    setAttentionArrangeMode(false);
-    setSearchGroupRequest(request);
-  }, []);
+  const openSearchGroup = useCallback(
+    (request: SearchGroupRequest) => {
+      finishAttentionArrange();
+      setSearchGroupRequest(request);
+    },
+    [finishAttentionArrange],
+  );
   const organizeThread = useCallback((threadId: string) => openSearchGroup({ query: '', threadId }), [openSearchGroup]);
   const searchGroupMatches = useMemo(
     () =>
@@ -602,50 +632,93 @@ export function ThreadSidebar({ onClose, className, routeThreadId, activeDestina
     return byThreadId;
   }, [attentionClusters]);
   const commitAttentionThreadDrop = useCallback(
-    (sourceThreadId: string, targetThreadId: string) => {
+    (sourceThreadId: string, targetThreadId: string, after = false) => {
       if (sourceThreadId === targetThreadId) return;
       const targetCluster = attentionClusterByThreadId.get(targetThreadId);
       if (targetCluster?.groupId) {
+        const sameGroup = targetCluster.memberIds.includes(sourceThreadId);
+        if (isV2 && attentionPlainView && sameGroup) return;
+        const mode = attentionMemberSort[targetCluster.anchor];
+        if (isV2 && sameGroup && mode !== 'manual') {
+          setArrangeHint({
+            threadId: sourceThreadId,
+            text: mode === 'running-first' ? rowCopy.arrangeRunningHint : rowCopy.arrangeRecentHint,
+            summary: mode === 'running-first' ? rowCopy.arrangeRunningSummary : rowCopy.arrangeRecentSummary,
+            feedback: mode === 'running-first' ? rowCopy.arrangeRunningFeedback : rowCopy.arrangeRecentFeedback,
+          });
+          return;
+        }
+        const members = targetCluster.memberIds.filter((id) => id !== sourceThreadId);
+        const beforeThreadId = after ? members[members.indexOf(targetThreadId) + 1] : targetThreadId;
         void mutateAttentionGroup({
           action: 'move',
           groupId: targetCluster.groupId,
           threadId: sourceThreadId,
-          beforeThreadId: targetThreadId,
+          ...(!isV2 || sameGroup ? { beforeThreadId } : {}),
+        }).then((result) => {
+          if (result.ok) arrangeSession.apply(sourceThreadId, result.preferences.groups);
         });
         return;
       }
       const threadIds = targetCluster
         ? [...new Set([...targetCluster.memberIds, sourceThreadId])]
         : [targetThreadId, sourceThreadId];
-      void mutateAttentionGroup({ action: 'create', threadIds });
+      void mutateAttentionGroup({ action: 'create', threadIds }).then((result) => {
+        if (result.ok) arrangeSession.apply(sourceThreadId, result.preferences.groups);
+      });
     },
-    [attentionClusterByThreadId, mutateAttentionGroup],
+    [
+      attentionClusterByThreadId,
+      mutateAttentionGroup,
+      attentionMemberSort,
+      attentionPlainView,
+      isV2,
+      rowCopy,
+      arrangeSession.apply,
+    ],
   );
   const commitAttentionClusterDrop = useCallback(
     (sourceThreadId: string, targetCluster: (typeof attentionClusters)[number]) => {
-      if (targetCluster.memberIds.includes(sourceThreadId)) return;
+      if (targetCluster.memberIds.includes(sourceThreadId)) {
+        const mode = attentionMemberSort[targetCluster.anchor];
+        if (isV2 && mode !== 'manual') {
+          setArrangeHint({
+            threadId: sourceThreadId,
+            text: mode === 'running-first' ? rowCopy.arrangeRunningHint : rowCopy.arrangeRecentHint,
+            summary: mode === 'running-first' ? rowCopy.arrangeRunningSummary : rowCopy.arrangeRecentSummary,
+            feedback: mode === 'running-first' ? rowCopy.arrangeRunningFeedback : rowCopy.arrangeRecentFeedback,
+          });
+        }
+        return;
+      }
       if (targetCluster.groupId) {
         void mutateAttentionGroup({
           action: 'move',
           groupId: targetCluster.groupId,
           threadId: sourceThreadId,
+        }).then((result) => {
+          if (result.ok) arrangeSession.apply(sourceThreadId, result.preferences.groups);
         });
         return;
       }
       void mutateAttentionGroup({
         action: 'create',
         threadIds: [...new Set([...targetCluster.memberIds, sourceThreadId])],
+      }).then((result) => {
+        if (result.ok) arrangeSession.apply(sourceThreadId, result.preferences.groups);
       });
     },
-    [mutateAttentionGroup],
+    [mutateAttentionGroup, arrangeSession.apply, attentionMemberSort, isV2, rowCopy],
   );
   const removeAttentionThreadFromGroup = useCallback(
     (threadId: string) => {
       const sourceCluster = attentionClusterByThreadId.get(threadId);
       if (!sourceCluster?.groupId) return;
-      void mutateAttentionGroup({ action: 'remove', groupId: sourceCluster.groupId, threadId });
+      void mutateAttentionGroup({ action: 'remove', groupId: sourceCluster.groupId, threadId }).then((result) => {
+        if (result.ok) arrangeSession.apply(threadId, result.preferences.groups);
+      });
     },
-    [attentionClusterByThreadId, mutateAttentionGroup],
+    [attentionClusterByThreadId, mutateAttentionGroup, arrangeSession.apply],
   );
   const filteredThreads = useMemo(
     () => liveThreads.filter((thread) => matchesThreadSearch(thread, normalizedQuery)),
@@ -1014,15 +1087,20 @@ export function ThreadSidebar({ onClose, className, routeThreadId, activeDestina
     }
     return lists;
   }, [activeTab, attentionClusters, flatAttentionItems, isCollapsed, projectThreadGroups]);
-  const readingScope = JSON.stringify([activeTab, normalizedQuery, labelFilter, attentionArrangeMode]);
-  const readingSession = useSidebarReadingSession(scrollContainerRef, isV2 && !attentionArrangeMode, readingScope);
+  const readingScope = JSON.stringify([activeTab, normalizedQuery, labelFilter]);
+  const arrangeScopeRef = useRef(readingScope);
+  useEffect(() => {
+    if (isV2 && arrangeScopeRef.current !== readingScope) finishAttentionArrange();
+    arrangeScopeRef.current = readingScope;
+  }, [readingScope, finishAttentionArrange, isV2]);
+  const readingSession = useSidebarReadingSession(scrollContainerRef, isV2, readingScope);
   const orderedAttentionRows = useAttentionListOrder(
     attentionLists,
     isAttentionClusterOpen,
     attentionMemberSort,
-    readingScope,
+    `${readingScope}:${attentionArrangeMode}`,
     normalizedQuery,
-    attentionArrangeMode,
+    isV2 ? false : attentionArrangeMode,
     readingSession.held,
   );
   const peekByAnchor = useMemo(() => {
@@ -1034,14 +1112,11 @@ export function ThreadSidebar({ onClose, className, routeThreadId, activeDestina
     return peeks;
   }, [orderedAttentionRows, groupDecisions.threadIds]);
   const {
-    lists: attentionListRows,
+    lists: normalAttentionListRows,
     reveal: revealAttentionPreview,
     projectRows: previewAttentionRows,
-  } = useAttentionPreview(
-    orderedAttentionRows,
-    currentConversationId,
-    isV2 && !normalizedQuery && !attentionArrangeMode,
-  );
+  } = useAttentionPreview(orderedAttentionRows, currentConversationId, isV2 && !normalizedQuery);
+  const attentionListRows = arrangeSession.project(normalAttentionListRows);
   const previewFocusRef = useRef<string | null>(null);
   // biome-ignore lint/correctness/useExhaustiveDependencies: Published preview rows determine when the new title exists in the DOM.
   useEffect(() => {
@@ -1065,14 +1140,113 @@ export function ThreadSidebar({ onClose, className, routeThreadId, activeDestina
       })),
     [activeTabContent.threads],
   );
-  const threadRowHeight = useSidebarRowHeight(liveThreads, currentConversationId, isV2, groupDecisions);
+  const rowSignals = useSidebarRowSignals(liveThreads, isV2, groupDecisions);
+  const threadRowHeight = useCallback(
+    (row: SidebarSnapshotRow) => (!isV2 ? 80 : hasThreadRowSignals(rowSignals(row)) ? 76 : 52),
+    [isV2, rowSignals],
+  );
+  const beginAttentionArrange = useCallback(() => {
+    if (!isV2) {
+      setClassicArrangeMode(true);
+      return;
+    }
+    if (arrangeSession.active) return;
+    const full = { ...orderedAttentionRows };
+    const visible = { ...normalAttentionListRows };
+    if (activeTabContent.kind === 'flat' && !full.flat) {
+      // Plain tabs keep their existing title order and do not acquire Group presentation.
+      full.flat = plainV2Rows;
+      visible.flat = plainV2Rows;
+    }
+    if (activeTab === 'project') {
+      // Capture hidden sections only at entry; everyday preview/reading consumers stay unchanged.
+      for (const section of projectThreadGroups.flatMap((group) => group.archivedGroups ?? [group])) {
+        const key = groupKeyForSection(section);
+        if (full[key]) continue;
+        const items = arrangeAttentionRows(section.threads, section.threads, attentionClusters, 'project');
+        full[key] = flattenAttentionRows(
+          orderAttentionList(items, isAttentionClusterOpen, attentionMemberSort, undefined, true).items,
+          isAttentionClusterOpen,
+          normalizedQuery,
+        );
+        visible[key] = normalizedQuery ? full[key] : previewAttentionRows(full[key]);
+      }
+    }
+    const mounted = new Map(
+      [
+        ...(scrollContainerRef.current?.querySelectorAll<HTMLElement>(
+          '[data-attention-draggable-thread] [data-thread-id]',
+        ) ?? []),
+      ].map((element) => [element.dataset.threadId, element]),
+    );
+    const signals = Object.fromEntries(
+      liveThreads.map((row) => {
+        const facts = rowSignals(row);
+        const line = mounted.get(row.id)?.querySelector<HTMLElement>('[data-testid="thread-row-signals"]');
+        const slot: ArrangeSignalSlot = {
+          height: line?.getBoundingClientRect().height || (hasThreadRowSignals(facts) ? 20 : 0),
+          rowHeight: mounted.get(row.id)?.getBoundingClientRect().height || undefined,
+          timeWidth:
+            mounted.get(row.id)?.querySelector('[data-testid="thread-row-time"]')?.getBoundingClientRect().width ||
+            undefined,
+          containerHeight:
+            mounted.get(row.id)?.closest('[data-sidebar-row-key]')?.getBoundingClientRect().height || undefined,
+          split: line?.dataset.signalSplit === 'true',
+          presence: facts.presence.status !== 'idle',
+          unread: facts.unreadCount > 0,
+          mention: facts.hasUserMention,
+          draft: facts.hasDraft,
+          decision: Boolean(facts.hasPendingDecision),
+          emphasized: facts.unreadCount > 0 || facts.hasUserMention || facts.presence.status === 'error',
+        };
+        return [row.id, slot];
+      }),
+    );
+    const headerHeights: Record<string, Record<string, number>> = {};
+    for (const element of scrollContainerRef.current?.querySelectorAll<HTMLElement>(
+      '[data-sidebar-list][data-sidebar-row-key]',
+    ) ?? []) {
+      const list = element.dataset.sidebarList ?? 'flat';
+      const header = element.querySelector<HTMLElement>('[data-attention-cluster][data-expanded="false"]');
+      if (header)
+        (headerHeights[list] ??= {})[`cluster:${header.dataset.attentionCluster}`] =
+          element.getBoundingClientRect().height;
+    }
+    arrangeSession.begin(full, visible, signals, groupDecisions.threadIds, headerHeights);
+  }, [
+    isV2,
+    orderedAttentionRows,
+    normalAttentionListRows,
+    activeTabContent.kind,
+    plainV2Rows,
+    activeTab,
+    projectThreadGroups,
+    attentionClusters,
+    isAttentionClusterOpen,
+    attentionMemberSort,
+    normalizedQuery,
+    previewAttentionRows,
+    arrangeSession.begin,
+    arrangeSession.active,
+    liveThreads,
+    rowSignals,
+    groupDecisions.threadIds,
+  ]);
   const attentionRowHeight = useCallback(
     (row: AttentionListRow) => {
       if (!isV2) return 80;
       const heldHeight = readingSession.heights[sidebarReadingRowKey(row)];
-      if (heldHeight !== undefined) return heldHeight;
+      if (!arrangeSession.active && heldHeight !== undefined) return heldHeight;
       // Include the Group's 4px outer spacing and 1px top/bottom border in initial virtual slots.
       if (row.kind === 'cluster-header') {
+        if (row.arrangeHeader) {
+          const header = row.arrangeHeader;
+          const extra =
+            attentionCollapsedPeek[row.cluster.anchor] !== false && (header.peekIds.length > 0 || header.more)
+              ? 4 + header.peekIds.length * 28 + Number(header.more) * 28
+              : 0;
+          return row.expanded ? 37 : Math.max(header.height ?? 0, 42 + Number(header.presence) * 24 + extra);
+        }
         const peek = peekByAnchor.get(row.cluster.anchor);
         const extra =
           attentionCollapsedPeek[row.cluster.anchor] !== false && peek && peek.total > 0
@@ -1082,12 +1256,23 @@ export function ThreadSidebar({ onClose, className, routeThreadId, activeDestina
         return row.expanded ? 37 : (hasPresence ? 66 : 42) + extra;
       }
       if (row.kind === 'cluster-remainder') return 37;
+      const thread = row.kind === 'thread' ? row.thread : row.member;
+      const slot = arrangeSession.signalSlots[thread.id];
+      if (slot?.containerHeight) return slot.containerHeight;
       return (
-        threadRowHeight(row.kind === 'thread' ? row.thread : row.member) +
+        (slot ? (slot.rowHeight ?? 52 + (slot.height ? slot.height + 4 : 0)) : threadRowHeight(thread)) +
         (row.kind === 'cluster-member' && row.isLast ? 5 : 0)
       );
     },
-    [isV2, threadRowHeight, peekByAnchor, attentionCollapsedPeek, readingSession.heights],
+    [
+      isV2,
+      threadRowHeight,
+      peekByAnchor,
+      attentionCollapsedPeek,
+      readingSession.heights,
+      arrangeSession.signalSlots,
+      arrangeSession.active,
+    ],
   );
 
   const filterKey =
@@ -1212,6 +1397,7 @@ export function ThreadSidebar({ onClose, className, routeThreadId, activeDestina
   const sidebarWidthClass = className === undefined ? 'w-60' : className;
 
   const scrollToActiveThread = useCallback(() => {
+    if (isV2) finishAttentionArrange();
     if (!currentThreadId || !scrollContainerRef.current) return;
     const activeThread = liveThreads.find((thread) => thread.id === currentThreadId);
     if (!activeThread) return;
@@ -1263,16 +1449,16 @@ export function ThreadSidebar({ onClose, className, routeThreadId, activeDestina
               orderAttentionList(
                 arrangeAttentionRows(targetFlatThreads, liveThreads, attentionClusters, targetTab),
                 isAttentionClusterOpen,
-                attentionArrangeMode ? {} : attentionMemberSort,
+                !isV2 && attentionArrangeMode ? {} : attentionMemberSort,
                 undefined,
-                isV2 && !attentionArrangeMode,
+                isV2,
               ).items,
               isAttentionClusterOpen,
               '',
             )
           : null;
     const targetAttentionRows =
-      isV2 && !attentionArrangeMode && targetFullAttentionRows
+      isV2 && targetFullAttentionRows
         ? previewAttentionRows(targetFullAttentionRows, currentThreadId)
         : targetFullAttentionRows;
     const needsTabSwitch = activeTab !== targetTab;
@@ -1317,6 +1503,7 @@ export function ThreadSidebar({ onClose, className, routeThreadId, activeDestina
     revealAttentionPreview,
     toggleAttentionCluster,
     activeTab,
+    finishAttentionArrange,
     attentionArrangeMode,
     attentionMemberSort,
     flatAttentionRows,
@@ -1394,9 +1581,19 @@ export function ThreadSidebar({ onClose, className, routeThreadId, activeDestina
           threadTitle={thread.title}
           groupable={groupable}
           arrangeMode={attentionArrangeMode}
+          animateArrange={!isV2}
           draggedThreadId={draggedAttentionThreadId}
-          onEnterArrange={() => setAttentionArrangeMode(true)}
+          onEnterArrange={beginAttentionArrange}
+          allowInsertion={Boolean(
+            isV2 &&
+              !attentionPlainView &&
+              attentionArrangeMode &&
+              attentionMemberSort[attentionClusterByThreadId.get(thread.id)?.anchor ?? ''] === 'manual' &&
+              attentionClusterByThreadId.get(thread.id)?.memberIds.includes(draggedAttentionThreadId ?? ''),
+          )}
+          dropHint={arrangeHint?.threadId === thread.id ? arrangeHint.text : undefined}
           onDragStartThread={(threadId) => {
+            setArrangeHint(null);
             setDraggedAttentionThreadId(thread.id);
             draggedAttentionThreadIdRef.current = threadId;
           }}
@@ -1410,6 +1607,7 @@ export function ThreadSidebar({ onClose, className, routeThreadId, activeDestina
           <ThreadItem
             id={thread.id}
             title={thread.title}
+            arrangeFeedback={arrangeHint?.threadId === thread.id ? arrangeHint.feedback : undefined}
             participants={thread.participants}
             lastActiveAt={thread.lastActiveAt}
             isActive={currentConversationId === thread.id}
@@ -1429,6 +1627,7 @@ export function ThreadSidebar({ onClose, className, routeThreadId, activeDestina
             unreadCount={thread.unreadCount}
             hasUserMention={thread.hasUserMention}
             hasPendingDecision={groupDecisions.status === 'ready' && groupDecisions.threadIds.has(thread.id)}
+            arrangeSignalSlot={isV2 ? arrangeSession.signalSlots[thread.id] : undefined}
             projectPath={thread.projectPath}
             indented={indented}
             preferredCats={thread.preferredCats}
@@ -1441,6 +1640,13 @@ export function ThreadSidebar({ onClose, className, routeThreadId, activeDestina
     },
     [
       attentionArrangeMode,
+      arrangeSession.signalSlots,
+      arrangeHint,
+      beginAttentionArrange,
+      attentionClusterByThreadId,
+      attentionMemberSort,
+      attentionPlainView,
+      isV2,
       attentionLoadState,
       organizeThread,
       commitAttentionThreadDrop,
@@ -1479,6 +1685,7 @@ export function ThreadSidebar({ onClose, className, routeThreadId, activeDestina
             style={{ color: 'var(--shell-muted)' }}
             onClick={() => {
               previewFocusRef.current = row.nextThreadId;
+              if (arrangeSession.active) arrangeSession.reveal(row.cluster.anchor);
               revealAttentionPreview(row.cluster.anchor);
             }}
           >
@@ -1535,10 +1742,13 @@ export function ThreadSidebar({ onClose, className, routeThreadId, activeDestina
             members={row.members}
             expanded={row.expanded}
             displayTitle={attentionClusterTitle(row.cluster)}
-            onToggle={() => toggleAttentionCluster(row.cluster)}
+            onToggle={() => {
+              if (arrangeSession.active) arrangeSession.toggle(row.cluster.anchor);
+              toggleAttentionCluster(row.cluster);
+            }}
             onRename={(alias) => renameAttentionCluster(row.cluster, alias)}
             onAdd={() => openSearchGroup({ query: '', groupId: row.cluster.groupId })}
-            memberSort={attentionArrangeMode ? 'manual' : attentionMemberSort[row.cluster.anchor]}
+            memberSort={!isV2 && attentionArrangeMode ? 'manual' : attentionMemberSort[row.cluster.anchor]}
             onMemberSort={(mode) => {
               void changeAttentionMemberSort(row.cluster, mode);
             }}
@@ -1549,6 +1759,8 @@ export function ThreadSidebar({ onClose, className, routeThreadId, activeDestina
               attentionArrangeMode || attentionLoadState !== 'ready' || attentionPendingSort.has(row.cluster.anchor)
             }
             peek={peekByAnchor.get(row.cluster.anchor)}
+            arrangeHeader={row.arrangeHeader}
+            decisionThreadIds={groupDecisions.threadIds}
             peekEnabled={attentionCollapsedPeek[row.cluster.anchor] !== false}
             decisionsConfirmed={groupDecisions.status === 'ready'}
             currentId={currentConversationId}
@@ -1568,9 +1780,11 @@ export function ThreadSidebar({ onClose, className, routeThreadId, activeDestina
       rowCopy,
       sidebarCopy,
       revealAttentionPreview,
+      arrangeSession.active,
+      arrangeSession.reveal,
+      arrangeSession.toggle,
       attentionArrangeMode,
       attentionMemberSort,
-      isV2,
       attentionPendingSort,
       attentionLoadState,
       changeAttentionMemberSort,
@@ -1592,19 +1806,30 @@ export function ThreadSidebar({ onClose, className, routeThreadId, activeDestina
   );
 
   const renderAttentionRow = useCallback(
-    (row: AttentionListRow) =>
-      isV2 ? (
+    (row: AttentionListRow, listKey = 'flat') => {
+      const thread = row.kind === 'thread' ? row.thread : row.kind === 'cluster-member' ? row.member : undefined;
+      const heldHeight =
+        row.kind === 'cluster-header'
+          ? !row.expanded
+            ? row.arrangeHeader?.height
+            : undefined
+          : thread
+            ? arrangeSession.signalSlots[thread.id]?.containerHeight
+            : undefined;
+      return isV2 ? (
         <div
           key={row.key}
           data-sidebar-row-key={sidebarReadingRowKey(row)}
-          style={{ minHeight: readingSession.heights[sidebarReadingRowKey(row)] }}
+          data-sidebar-list={listKey}
+          style={{ minHeight: heldHeight ?? readingSession.heights[sidebarReadingRowKey(row)] }}
         >
           {renderAttentionRowContent(row)}
         </div>
       ) : (
         renderAttentionRowContent(row)
-      ),
-    [isV2, readingSession.heights, renderAttentionRowContent],
+      );
+    },
+    [isV2, readingSession.heights, renderAttentionRowContent, arrangeSession.signalSlots],
   );
 
   const renderProjectSection = useCallback(
@@ -1628,7 +1853,7 @@ export function ThreadSidebar({ onClose, className, routeThreadId, activeDestina
           onRenameProject={forProjectPath(projectPath, (path) => (name: string) => handleRenameProject(path, name))}
           onArchiveThreads={forProjectPath(projectPath, (path) => () => handleArchiveThreads(path))}
         >
-          {attentionListRows[groupKey]?.map(renderAttentionRow)}
+          {attentionListRows[groupKey]?.map((row) => renderAttentionRow(row, groupKey))}
         </SectionGroup>
       );
     },
@@ -1669,6 +1894,26 @@ export function ThreadSidebar({ onClose, className, routeThreadId, activeDestina
     [isCollapsed, renderProjectSection, toggleGroup],
   );
 
+  const arrangeToolbar = (
+    <AttentionArrangeToolbar
+      compact={isV2}
+      hint={arrangeHint}
+      draggedThreadId={draggedAttentionThreadId}
+      canRemoveDragged={Boolean(
+        draggedAttentionThreadId && attentionClusterByThreadId.get(draggedAttentionThreadId)?.groupId,
+      )}
+      onRemoveDragged={(threadId) => {
+        removeAttentionThreadFromGroup(threadId);
+        draggedAttentionThreadIdRef.current = null;
+        setDraggedAttentionThreadId(null);
+      }}
+      onDone={() => {
+        draggedAttentionThreadIdRef.current = null;
+        setDraggedAttentionThreadId(null);
+        finishAttentionArrange();
+      }}
+    />
+  );
   return (
     <>
       <aside
@@ -1781,17 +2026,21 @@ export function ThreadSidebar({ onClose, className, routeThreadId, activeDestina
             <div className="text-center py-4 text-xs text-cafe-muted">{isV2 ? sidebarCopy.loading : '加载中...'}</div>
           )}
 
-          {showTabRow && isV2 && (
-            <SidebarViewBarV2
-              tabs={tabs}
-              activeTab={activeTab}
-              onSelectTab={handleSelectTab}
-              labels={labels}
-              labelFilter={labelFilter}
-              onLabelFilter={setLabelFilter}
-              uncategorizedCount={uncategorizedCount}
-            />
-          )}
+          {showTabRow &&
+            isV2 &&
+            (attentionArrangeMode ? (
+              arrangeToolbar
+            ) : (
+              <SidebarViewBarV2
+                tabs={tabs}
+                activeTab={activeTab}
+                onSelectTab={handleSelectTab}
+                labels={labels}
+                labelFilter={labelFilter}
+                onLabelFilter={setLabelFilter}
+                uncategorizedCount={uncategorizedCount}
+              />
+            ))}
           {showTabRow && !isV2 && (
             <div
               className="sticky top-0 z-10 flex items-stretch border-b border-cafe-subtle bg-[var(--console-panel-bg)] pt-2 px-2"
@@ -1915,24 +2164,7 @@ export function ThreadSidebar({ onClose, className, routeThreadId, activeDestina
               />
             ) : (
               <>
-                {attentionArrangeMode && (
-                  <AttentionArrangeToolbar
-                    draggedThreadId={draggedAttentionThreadId}
-                    canRemoveDragged={Boolean(
-                      draggedAttentionThreadId && attentionClusterByThreadId.get(draggedAttentionThreadId)?.groupId,
-                    )}
-                    onRemoveDragged={(threadId) => {
-                      removeAttentionThreadFromGroup(threadId);
-                      draggedAttentionThreadIdRef.current = null;
-                      setDraggedAttentionThreadId(null);
-                    }}
-                    onDone={() => {
-                      draggedAttentionThreadIdRef.current = null;
-                      setDraggedAttentionThreadId(null);
-                      setAttentionArrangeMode(false);
-                    }}
-                  />
-                )}
+                {attentionArrangeMode && !isV2 && arrangeToolbar}
                 {activeTabContent.kind === 'flat' && (
                   <>
                     <div
@@ -1987,7 +2219,7 @@ export function ThreadSidebar({ onClose, className, routeThreadId, activeDestina
                         />
                       )
                     ) : flatAttentionRows ? (
-                      flatAttentionRows.map(renderAttentionRow)
+                      flatAttentionRows.map((row) => renderAttentionRow(row))
                     ) : (
                       activeTabContent.threads.map((thread) => renderThreadItem(thread))
                     )}
