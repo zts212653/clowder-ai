@@ -162,7 +162,7 @@ function bindSidebar() {
         return a.id === t.id;
       }),
       presence = attention && attention.presence,
-      runs = data.executions.filter(function (e) {
+      runs = chatDataSnapshot.chat.executions.filter(function (e) {
         return e.threadId === t.id;
       }),
       lastWho = (attention && attention.lastWho) || '';
@@ -176,9 +176,13 @@ function bindSidebar() {
       time: t.lastActiveAt,
       participants: t.participants,
       renaming: !!S.renaming && S.renaming.entity === 'thread' && S.renaming.id === t.id,
-      running: presence ? presence.status === 'working' : runs.length > 0,
+      running: runs.length > 0 || (!!presence && presence.status === 'working'),
       failed: !!presence && presence.status === 'error',
-      who: presence && presence.status === 'working' ? presence.cats[0] || '' : runs.length ? runs[0].catId : '',
+      who: runs.length
+        ? runs[0].catId
+        : presence && presence.status === 'working'
+          ? (presence.cats || [])[0] || ''
+          : '',
       lastWho: lastWho,
       unread: attention ? attention.unreadCount : 0,
       at: !!attention && attention.hasUserMention,

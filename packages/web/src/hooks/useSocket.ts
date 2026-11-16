@@ -1052,7 +1052,6 @@ export function useSocket(
           }),
         );
       }
-      if (!needs('chat.messages', data.threadId)) return;
       const isDeliveryFailure = lifecycle?.kind === 'delivery_failure';
       const snapshot: import('../stores/chat-types').ChatMessage = {
         id: data.message.id,
@@ -1094,7 +1093,8 @@ export function useSocket(
         ...(data.message.origin ? { origin: data.message.origin } : {}),
         ...(data.message.replyTo ? { replyTo: data.message.replyTo } : {}),
       };
-      writeStoredSnapshot(data.threadId, snapshot);
+      // only the stored message waits for the stream; the terminal (sidebar re-read, background slot) and the execution refresh are for every thread
+      if (needs('chat.messages', data.threadId)) writeStoredSnapshot(data.threadId, snapshot);
       if (lifecycle)
         observeLifecycleSnapshot({
           threadId: data.threadId,

@@ -93,7 +93,8 @@ export function useAgentMessages(sourceNeeded: (source: string, threadId?: strin
       const eventThread = msg.threadId ?? store.currentThreadId;
       if (msg.isFinal || msg.type === 'done' || (msg.type === 'error' && !isRecoverableInFlightError(msg)))
         finishHeldStream(eventThread, msg.messageId, msg.invocationId);
-      if (!sourceNeeded('chat.messages', eventThread)) {
+      // the open thread's room is joined: its events always go in, so the stream position never gaps while the stream is off screen
+      if (eventThread !== store.currentThreadId && !sourceNeeded('chat.messages', eventThread)) {
         if (!msg.isFinal && msg.type !== 'done' && msg.type !== 'error')
           holdStreamEvent({ ...msg, threadId: eventThread, timestamp: msg.timestamp ?? Date.now() });
         return;
