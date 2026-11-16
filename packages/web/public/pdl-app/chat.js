@@ -712,7 +712,7 @@ window.clowderChat = {
       });
       return { older: list.parts.older, ticks: list.items };
     };
-    Object.assign(WHO_DATA, {
+    pdlReads('who', {
       members: function () {
         return chatRead('memberCatalog');
       },
@@ -897,7 +897,7 @@ window.clowderChat = {
         args: {
           text: entry.text,
           names: entry.to.map(function (id) {
-            return WHO_DATA.member(id).name;
+            return pdlReads('who').member(id).name;
           }),
         },
         on: function () {
@@ -1308,7 +1308,7 @@ window.clowderChat = {
       render(true);
     };
     A.mention = function (d) {
-      const member = WHO_DATA.member(d.who);
+      const member = pdlReads('who').member(d.who);
       CS.memberCard = null;
       render(true);
       A.insert({ into: 'chat-input', text: member.handle + ' ' });
@@ -1405,7 +1405,7 @@ window.clowderChat = {
       const x = chatRead('chatStream').items[+d.i];
       dialog({
         kind: 'messageRetry',
-        args: { name: WHO_DATA.member(x.who).name },
+        args: { name: pdlReads('who').member(x.who).name },
         on: function () {
           return chatAction('cafeMsgRetry', { mid: x.mid });
         },

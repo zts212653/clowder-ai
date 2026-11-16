@@ -7,8 +7,8 @@ function bindSetup() {
   A.guideReplay = function () {
     return chatAction('guideOpen', { language: S.lang });
   };
-  const member = WHO_DATA.member;
-  WHO_DATA.member = function (id, name) {
+  const member = pdlReads('who').member;
+  pdlReads('who').member = function (id, name) {
     const actors = projectData('replay') && replayGuideActors();
     return actors && actors[id] ? actors[id] : member(id, name);
   };

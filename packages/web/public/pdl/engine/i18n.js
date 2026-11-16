@@ -26,7 +26,7 @@ function tc(key) {
   if (typeof leaf === 'function') return leaf.apply(null, Array.prototype.slice.call(arguments, 1));
   if (leaf == null) return key;
   let args = Array.prototype.slice.call(arguments, 1);
-  if (leaf && typeof leaf === 'object' && args.length) { const v = leaf[String(args[0])]; if (v == null) return String(args[0]); leaf = v; args = args.slice(1); }   /* 枚举：第一个参数按值取下一级，其余参数填占位；没有这个值就显示值本身 */
+  if (leaf && typeof leaf === 'object' && args.length) { const v = leaf[String(args[0])]; if (v == null) return args[0] == null ? '' : String(args[0]); leaf = v; args = args.slice(1); }   /* 枚举：第一个参数按值取下一级，其余参数填占位；没有这个值就显示值本身；还没有值（数据没到）又没写这一项（"undefined"）就什么都不显示 */
   return typeof leaf === 'string' && args.length ? leaf.replace(/\{(\d+)\}/g, function (m, i) { const v = args[+i]; return v == null ? '' : String(v); }) : leaf;
 }
 /* 枚举的显示文字：tcOf('包.分组', 枚举值)——分组键是静态的（可检查），枚举值来自数据 */

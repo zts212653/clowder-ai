@@ -58,7 +58,10 @@ it('projects package descriptions, documentation and provided capabilities witho
     S: { route: 'extItem', param: plugin.pluginId },
     A: {},
     VM: {},
-    WHO_DATA: {},
+    pdlReads: (() => {
+      const who = {};
+      return () => who;
+    })(),
     PAGES: {},
     TITLES: {},
     INPUTS: {},

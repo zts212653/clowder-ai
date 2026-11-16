@@ -13,6 +13,7 @@ vm.createContext(ctx);
 const m = defOf(/const PDL_SCHEMA = \{[\s\S]*?\n\};\n/), mr = defOf(/const PDL_ROLES = \{[\s\S]*?\n\};\nfunction R\(k\) \{[^\n]*\n/);
 vm.runInContext(mr[0].replace('const PDL_ROLES', 'this.PDL_ROLES').replace('function R(k)', 'this.R = function (k)'), ctx);   /* 角色变体：契约的变体枚举从这里来 */
 vm.runInContext(m[0].replace('const PDL_SCHEMA', 'this.PDL_SCHEMA'), ctx);
+vm.runInContext(defOf(/Object\.assign\(PDL_SCHEMA, \{[\s\S]*?\n\}\);\n/)[0], ctx);   /* 每个块 / 控件的属性：组件库登记进同一张表 */
 /* 文案：视图里用 tr() 取的字在这里换成 't:键' 记号，这样能看出哪些字是文案键、哪些还是写死的字面量 */
 vm.runInContext("this.I18N = {}; this.defineI18nPack = function (ns, p) { this.I18N[ns] = p; return p; }; this.tc = function (k) { return 't:' + k; };", ctx);
 /* 主题的页面定义：每个主题的数据（构建从 pdl/*.yaml 合成的 pdl.js）里的视图、行模板、节点模板；片段引用（$frag）照加载时一样换成片段 */

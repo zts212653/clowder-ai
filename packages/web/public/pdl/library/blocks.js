@@ -1,8 +1,171 @@
 /* 边界：一个含义一个组件、不为接口定制、不按位置推导样式 */
 /* 视图块：PDL 块的画法（PDL_BLOCKS）、片段、控件、行、设置行、头、读取状态、节点模板、小节目录 */
 /* 视图块的画法（组件库）：片段、控件、行、设置行、头、列表、全部块（PDL_BLOCKS 的内容）、节点模板、读取状态、提示、小节目录。
-   视图引擎（取值、本地化、按块派发、视图的读取状态、下钻的返回、契约 PDL_SCHEMA）在 engine/pdl-view.js；这里只画，块只在这里登记（lint：pdl-block）。 */
+   视图引擎（取值、本地化、按块派发、视图的读取状态、下钻的返回）在 engine/pdl-view.js；这里画，块、块的属性契约（PDL_SCHEMA）和角色变体（PDL_ROLES）只在这里登记（lint：pdl-block）。 */
 'use strict';
+/* 组件的角色变体：一个组件只有一个默认样子；变体只表示真正不同的角色，每个变体的含义写在这里（契约的一部分，组件目录也从这里读）。
+   不在这张表里的变体不存在：墨色、字重、留白、对齐、所在位置都不是变体——组件的默认就是它们的样子。新增变体先在这里写清楚它是什么角色 */
+const PDL_ROLES = {   /* 每个角色的含义（组件目录显示的那句话）在文案包 catalog.role.<组件>.<角色>，这里的注释是同一句 */
+  box: [
+    'card',   /* 自成一体的一张卡片（消息里的决策卡、富内容块、评审表单） */
+    'group',   /* 一组并列项的分组底（项之间是分隔线） */
+    'composer',   /* 输入区：打字的范围，正文和它的工具条在里面 */
+    'log',   /* 跟随最新的滚动区（消息流、执行记录）：贴底，新内容出现在底部 */
+    'scroll',   /* 占满所在容器剩下高度的滚动区（收件箱、回放） */
+    'expand',   /* 一行或一项展开出来的详情区（缩进在它的主人下面） */
+    'inline',   /* 子块排成一行，放不下时换行 */
+    'columns',   /* 子容器并排：按声明的顺序从左到右，自带宽度的（目录）不伸缩，其余平分剩下的宽度 */
+    'viewport',   /* 内嵌的视口（页面预览）：占满可用高度，裁掉溢出 */
+    'hero',   /* 落地区：空页面的问候和开始方式 */
+    'dock'   /* 停靠在内容盒底部的一块（落地页预览作品时的输入框） */
+  ],
+  toolbar: [
+    'head',   /* 容器的标题行：一排格子，返回在最前面 */
+    'savebar',   /* 有未保存的改动时贴在底部的保存条 */
+    'selection',   /* 对选中项的批量操作条 */
+    'embed',   /* 嵌在正文里的一件东西（附件、小组件、音频、批注） */
+    'marker',   /* 流里居中的一条标记（更早的消息、已删除、导入来源） */
+    'float'   /* 浮在内容上面的一条（查找结果、语音建议） */
+  ],
+  head: [
+    'detail',   /* 下钻出来的详情或子层的头：眉题、副标题，取下钻的返回 */
+    'hero'   /* 落地区的问候 */
+  ],
+  pop: [
+    'card'   /* 非滚动的悬停摘要卡；与滚动弹出层共用浮层外壳 */
+  ],
+  text: [
+    'value',   /* 一项设置 / 字段的值（只读）：正文字号的次要墨色；mono / num 是值的种类 */
+    'para',   /* 一段正文 */
+    'meta',   /* 次要信息（时间、数量、来源、状态说明） */
+    'title',   /* 卡片的标题 */
+    'list'   /* 一列要点 */
+  ],
+  part: [
+    'meta',   /* 片段里的次要信息 */
+    'badge',   /* 短代码徽标（优先级、文件状态），颜色来自 tone */
+    'twisty'   /* 跟着所在按钮的展开状态转动的箭头 */
+  ],
+  button: [
+    'meta',   /* 次要信息那一行里的文字按钮（过程记录、召回、轨迹） */
+    'nav',   /* 页面目录里的一项（和侧栏导航同一种行） */
+    'cycle',   /* 点一下换到下一个状态的圆形标记（任务状态） */
+    'title',   /* 可点的标题（点了改名） */
+    'drawer',   /* 打开侧栏抽屉（只在侧栏收成抽屉时出现） */
+    'reveal'   /* 把收起的侧栏放回来（侧栏是抽屉时没有它） */
+  ],
+  check: [
+    'row'   /* 列表行前面的选择框（名字只给读屏） */
+  ],
+  more: [
+    'row'   /* 列表行尾的“更多”（带行的键） */
+  ],
+  choices: [
+    'multi'   /* 多选：一项一个勾选 */
+  ],
+  input: [
+    'title'   /* 就地改名的标题输入 */
+  ],
+  select: [
+    'member'   /* 选成员：带头像，可多选 */
+  ],
+  seg: [
+    'tabs'   /* 分类标签：一行轻量的分类（带数量） */
+  ],
+  split: [
+    'aside',   /* 主栏 + 侧栏（不是列表 → 详情） */
+    'compare'  /* 两个等价内容对照；窄容器自然换行 */
+  ],
+  stats: [
+    'counters'   /* 一行计数 + 操作（不是一格一格的数字） */
+  ],
+  steps: [
+    'checks',   /* 清单：做完的打勾 */
+    'flow',   /* 流程图：区域里的节点和箭头 */
+    'progress'   /* 阶段进度：做完 / 当前 / 未到；有动作时每一步可点 */
+  ]
+};
+function R(k) { return PDL_ROLES[k].slice(); }
+/* 每个块 / 控件声明自己接受的属性（组件契约）：1 = 任意值或数据绑定；数组 = 只能取这些枚举 / 档位（'$' 表示也可以是数据绑定）。
+   PDL 里出现没声明的属性、或者枚举外的字面值，结构检查（pdl-schema）就报错。新增属性先在这里声明 */
+Object.assign(PDL_SCHEMA, {
+  /* 行模板（列表的 row：PDL_ROWS 里的实体模板，或列表声明里就地写的字段映射）：layout 必填，取组件库的一种行布局（组件库 rows.js ROW_LAYOUTS；tree 只由树块用）；
+     其余是数据绑定。_rowNo：每种布局不接受的字段（单行没有副行，只有条目有竖排尾部，记录行不能再展开） */
+  _row: { layout: ['line', 'two', 'item', 'record'], key: 1, lead: 1, title: 1, inline: 1, sub: 1, meta: 1, cols: 1, acts: 1, tone: 1, color: 1, bar: 1, act: 1, args: 1, note: 1, expand: 1, more: 1, moreWhen: 1, moreAfter: 1, cur: 1, aside: 1, subLines: 1, label: 1, help: 1, when: 1 },
+  _rowNo: { line: ['sub', 'meta', 'aside', 'subLines'], two: ['aside', 'subLines'], item: [], record: ['sub', 'meta', 'aside', 'subLines', 'expand'] },
+  app: { demo: 1, name: ['entry', 'stripe', 'handle'], region: 1, when: 1 },
+  back: { act: 1, args: 1, label: 1, when: 1 },   /* 返回放在这里（引擎的返回）；act / args 是没有返回可回时的去处 */
+  box: { blocks: 1, faint: 1, fill: 1, follow: 1, note: 1, open: 1, tone: ['$', 'info', 'ok', 'warn', 'danger'], variant: R('box'), when: 1 },
+  jump: { act: 1, args: 1, icon: 1, label: 1, tip: 1, when: 1, hideWhileTyping: 1 },
+  notices: { items: 1, key: 1, when: 1, hideWhileTyping: 1 },
+  stack: { items: 1, when: 1 },
+  button: { act: 1, args: 1, aria: 1, busy: 1, danger: 1, disabled: 1, expanded: 1, items: 1, icon: 1, iconOnly: 1, label: 1, link: 1, menu: 1, note: 1, open: 1, parts: 1, pressed: 1, state: 1, submit: 1, tip: 1, current: 1, primary: 1, size: ['xs'], variant: R('button'), when: 1, who: 1 },
+  capsules: { act: 1, from: 1, label: 1 },
+  check: { act: 1, args: 1, label: 1, tint: 1, value: 1, variant: R('check'), when: 1 },
+  chip: { act: 1, args: 1, check: 1, ellip: 1, faint: 1, icon: 1, kind: 1, label: 1, pressed: 1, thumb: 1, tint: 1, tip: 1, tone: 1, when: 1, x: 1 },
+  choices: { act: 1, args: 1, from: 1, group: 1, value: 1, variant: R('choices'), when: 1 },
+  component: { props: 1, use: 1, when: 1 },
+  content: { annotations: 1, fold: 1, html: 1, note: 1, raw: 1, when: 1 },
+  result: { actions: 1, blocks: 1, key: 1, label: 1, status: ['$', 'approved', 'rejected', 'expired', 'withdrawn', 'closed', 'unconfirmed'], when: 1 },
+  tints: { act: 1, args: 1, value: 1, label: 1 },
+  toc: { note: 1, when: 1 },   /* 小节目录：条目来自同一视图里带 id 的小节标题（锚点），不另给数据 */
+  disclosure: { act: 1, args: 1, blocks: 1, count: 1, key: 1, note: 1, open: 1, sub: 1, title: 1, trail: 1, when: 1 },   /* act：开合由视图模型管（open 来自数据，点了执行 act，参数 k = key）；没写时开合是组件自己的状态 */
+  each: { blocks: 1, control: 1, from: 1, when: 1 },
+  empty: { action: 1, help: 1, icon: 1, text: 1, when: 1 },
+  fold: { blocks: 1, height: ['m', 's'], key: 1, more: { act: 1, args: 1, when: 1 }, shape: ['$', 'bottom'], when: 1 },
+  dialog: { pop: 1, title: 1, help: 1, wide: 1, layout: ['viewport', 'fill'], span: ['full'], form: 1, error: 1, actions: 1, footer: 1, blocks: 1, when: 1 },   /* footer：底部区域的块声明，与标题栏 actions 分开。 */
+  form: { args: 1, blocks: 1, from: 1, htmlId: 1, id: 1, note: 1, when: 1 },
+  frame: { html: 1, src: 1, message: 1, on: 1, icon: 1, note: 1, plugin: 1, tall: 1, title: 1, what: 1, when: 1 },   /* html 自动量内容；src 填满视口。on.message 把框内消息交给动作，origin 的判断属于应用。 */
+  grow: { when: 1 },
+  head: { actNote: 1, tools: 1, descAction: 1, actions: 1, close: 1, count: 1, desc: 1, eyebrow: 1, help: 1, label: 1, lead: 1, meta: 1, note: 1, sub: 1, title: 1, variant: R('head'), when: 1 },
+  input: { change: 1, complete: 1, grow: 1, disabled: 1, id: 1, input: 1, on: 1, label: 1, rows: 1, code: 1, lead: 1, listFrom: 1, reload: 1, max: 1, mono: 1, num: 1, placeholder: 1, post: 1, ro: 1, invalid: 1, secret: 1, value: 1, variant: R('input'), when: 1,
+    go: 1, args: 1, icon: 1, goLabel: 1, cancel: 1, more: 1, tint: 1, add: 1 },   /* go：回车 / 框里的图标提交到这个动作（组件库 goField）；cancel：Esc / 失焦；more：同一个框里的另几个输入；tint：框里的选色 { id, value, input, label }（组件库的取色器） */
+  kv: { actions: 1, from: 1, when: 1 },
+  label: { action: 1, count: 1, help: 1, text: 1, tip: 1, when: 1 },
+  lanes: { lanes: 1, when: 1 },   /* 每条道：{ share（不写 = 按内容定宽）, name, scroll, align: 'start' | 'center' | 'end', attach: 'above' | 'straddle', items } */
+  list: { actions: 1, count: 1, empty: 1, emptyAction: 1, expand: ['many'], from: 1, group: 1, groups: 1, id: 1, inline: 1, label: 1, next: 1, optional: ['true'], order: 1, partial: 1, reverse: ['true'], row: 1, rows: 1, scroll: 1, searchable: ['true'], when: 1 },   /* searchable：列表头里一个本地筛选框（只筛已经读到的项，不发请求） */
+    /* 列表总是画出来（没有数据时是组件库的空状态，文字是 empty）；label / count = 列表自己的组标签；optional = 只在有项时才有的子组：没有项时连组标签一起不画 */
+  markdown: { annotations: 1, clamp: 1, empty: 1, from: 1, more: 1, text: 1, when: 1 },
+  more: { args: 1, items: 1, k: 1, label: 1, menu: 1, size: ['s', 'm'], variant: R('more'), when: 1 },   /* items：菜单项在这里声明（pvMenu）；menu：老的按名字登记的菜单 */
+  notice: { action: 1, each: 1, from: 1, items: 1, note: 1, num: 1, parts: 1, strong: 1, text: 1, tone: ['$', 'info', 'ok', 'warn', 'danger'], when: 1 },
+  ordered: { blocks: 1, order: 1, when: 1 },
+  picker: { act: 1, args: 1, items: 1, auto: 1, autoTip: 1, check: 1, disabled: 1, icon: 1, label: 1, parts: 1, prefix: 1, tip: 1, when: 1, who: 1 },
+  pre: { annotations: 1, rows: 1, text: 1, when: 1 },
+  pop: { blocks: 1, page: 1, pos: 1, view: 1, label: 1, variant: R('pop'), when: 1 },
+  opts: { empty: 1, from: 1, when: 1 },
+  chatpage: { bar: 1, body: 1, dock: 1, head: 1, side: 1, top: 1 },   /* 子容器 stream / composer 的顺序由用户层的 order['main.chat'] 决定 */
+  ticks: { from: 1, older: 1, when: 1 },
+  threads: { from: 1, groups: 1, heads: 1, move: 1, note: 1, other: 1, rename: 1, when: 1 },
+  range: { args: 1, change: 1, id: 1, input: 1, label: 1, max: 1, min: 1, step: 1, unit: 1, value: 1, when: 1 },
+  reply: { ref: 1 },
+  search: { form: 1, id: 1, input: 1, on: 1, label: 1, note: 1, placeholder: 1, value: 1, when: 1, wide: 1 },
+  section: { actions: 1, blocks: 1, from: 1, help: 1, id: 1, keep: 1, key: 1, label: 1, note: 1, open: 1, row: 1, rows: 1, title: 1, when: 1 },
+  seg: { act: 1, args: 1, from: 1, options: 1, value: 1, variant: R('seg'), when: 1 },
+  select: { span: 1, act: 1, args: 1, change: 1, disabled: 1, from: 1, id: 1, invalid: 1, label: 1, multi: 1, none: 1, options: 1, prefix: 1, tip: 1, value: 1, variant: R('select'), when: 1 },
+  send: { args: 1, disabled: 1, stop: 1, stopping: 1, tip: 1 },
+  settings: { from: 1, plain: 1, row: 1, rows: 1, when: 1 },
+  slot: { ctx: 1, slot: 1 },
+  split: { back: 1, left: 1, picked: 1, right: 1, scroll: ['panes'], follow: ['left', 'right', 'both'], variant: R('split'), when: 1 },   /* follow：独立滚动的一侧跟随最新内容；picked：窄屏下钻的选中状态；back：选中是状态（不导航）时，收起后详情的返回。 */
+  stats: { actions: 1, from: 1, items: 1, variant: R('stats'), when: 1 },   /* 数字块只有两种：一格一格的数字（默认）、一行计数 + 操作（counters） */
+  status: { text: 1, tone: ['$', 'info', 'ok', 'warn', 'danger'], when: 1 },
+  steps: { act: 1, args: 1, from: 1, variant: R('steps'), when: 1 },
+  stream: { from: 1, id: 1 },   /* id：这条消息流的名字（同名的流里，新出现的消息走统一的“到达”动效；对话主流就是 chat.stream 视图） */
+  switch: { act: 1, args: 1, disabled: 1, label: 1, tip: 1, value: 1, when: 1 },   /* label 是名字（提示和读屏），开关旁边不写字 */
+  tabs: { act: 1, after: 1, args: 1, close: 1, from: 1, label: 1, parts: 1, selected: 1, tip: 1 },
+  text: { actions: 1, count: 1, faint: 1, for: 1, from: 1, help: 1, label: 1, mono: 1, num: 1, parts: 1, sep: 1, text: 1, tip: 1, tone: ['$', 'info', 'ok', 'warn', 'danger'], variant: R('text'), when: 1 },
+  tiles: { act: 1, from: 1 },
+  tags: { add: 1, empty: 1, from: 1, pick: 1, remove: 1, when: 1, id: 1, k: 1, kind: 1, label: 1, lock: 1, placeholder: 1, values: 1 },   /* values：一列字（别名、参数）的编辑器（id / k / kind / lock，增删走 chipAdd / chipDel） */   /* 标签编辑器（唯一一个）：一排标签（色调点 · 名字 · 对话数；pick 时可勾选，remove 时带 ×）+ 新建标签的输入 */
+  toolbar: { args: 1, form: 1, hidden: 1, id: 1, items: 1, left: 1, note: 1, parts: 1, right: 1, tone: ['$', 'warn'], variant: R('toolbar'), when: 1 },
+  tree: { divider: 1, fileAct: 1, fileArgs: 1, flat: 1, id: 1, nodes: 1, ready: 1, row: 1, select: 1, when: 1 },   /* divider：行之间画分隔线（缺省不画：文件树）；flat：只有一层（没有展开指示）；ready：子级随数据一起给出（不懒加载）；select：{ act, args } 点行是选中（有子级的行用展开指示开合） */
+  upload: { accept: 1, hidden: 1, multiple: 1, icon: 1, iconOnly: 1, id: 1, label: 1, msg: 1, args: 1 },
+  copy: { label: 1, mono: 1, tail: 1, tip: 1, v: 1, value: 1, when: 1 },   /* 可复制的值：值 + 复制图标（label 说复制的是什么，tip 是值的提示，v 是复制的内容，默认就是值） */
+  view: { id: 1, data: 1, when: 1 },
+  typed: { slot: 1, of: 1, data: 1, blocks: 1, when: 1 },   /* 按渲染类型画：of 是类型（容器.子类型），data 是这一项交给模板的数据，blocks 是没有模板时宿主的默认画法 */   /* data 显式给子视图的正文 VM；未声明时由子视图自己的 vm 取数。 */
+  /* 视图模型里直接给的控件（表单字段的 control） */
+  kvlist: { add: 1, del: 1, empty: 1, eye: 1, input: 1, key: 1, keyPh: 1, path: 1, ro: 1, rows: 1, single: 1 },
+  avatar: { args: 1, lead: 1, size: ['$', 'xs', 's', 'm', 'l', 'xl'], upload: 1 },
+  color: { id: 1, input: 1, label: 1, preview: 1, slots: ['name'], value: 1, when: 1 }
+});
 const RESULT_TONE = { approved: 'ok', rejected: 'danger' };
 /* 按钮的两个外壳角色（PDL_ROLES.button）：drawer = 打开侧栏抽屉（只在侧栏收成抽屉时出现）；reveal = 把收起的侧栏放回来（侧栏是抽屉时没有它）。出不出现由组件库的样式按容器决定 */
 const BTN_ROLE_CLS = { drawer: 'nav-toggle', reveal: 'cafe-expand' };   /* 决定结果的状态 → 色调（组件自己的表） */

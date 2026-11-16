@@ -131,7 +131,7 @@ function bindCapabilities() {
                 pluginId: item.pluginId,
                 transport: item.mcpServer && (item.mcpServer.transport || 'stdio'),
                 cats: Object.entries(item.cats).map(([id, on]) => ({
-                  name: WHO_DATA.member(id).name,
+                  name: pdlReads('who').member(id).name,
                   on,
                   key: item.id + '|' + id,
                 })),

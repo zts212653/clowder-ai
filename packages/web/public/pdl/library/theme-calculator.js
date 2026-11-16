@@ -4,6 +4,13 @@
    它只改“当前主题”，不管理主题（列表、复制、切换都在主题页）：当前是系统主题时，第一次改动先自动复制出自定义主题（带撤销提示），之后的改动直接写进它；每次改动都已保存，没有单独的保存按钮。
    改动写进当前主题 × 当前浅/深色的值（themeVals），和主题页的逐项编辑共用保存与恢复。 */
 'use strict';
+/* 主题能设的语义变量（引擎的 TOKENS / LAYER_DERIVED）：组件库的样式（css/core.css 顶部）读的就是这些；成员色 tint-* / name-* 各六档，层级推导的那几个主题只给叠多深 d-* */
+TOKENS.push('bg-rail', 'bg-nav', 'bg-page', 'bg-group', 'bg-field', 'bg-hover', 'bg-selected', 'bg-bubble', 'bg-raised', 'bg-code',
+  'fg-strong', 'fg', 'fg-muted', 'fg-faint', 'fg-on-accent', 'accent', 'accent-hover', 'accent-soft', 'accent-fg', 'focus', 'switch-on',
+  'ok', 'warn', 'warn-soft', 'danger', 'danger-soft', 'info', 'line', 'line-strong', 'font-display',
+  'd-hover', 'd-btn', 'd-selected', 'd-inset', 'd-code', 'd-line', 'd-line-strong');
+[1, 2, 3, 4, 5, 6].forEach(function (n) { TOKENS.push('tint-' + n, 'name-' + n); });
+LAYER_DERIVED.push('bg-hover', 'bg-selected', 'bg-field', 'bg-code', 'line', 'line-strong');
 
 /* ── 参数 ⇄ token ── */
 const CALC_GROUPS = [

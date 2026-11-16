@@ -3,18 +3,9 @@
    主题自己的声明（系统主题、配色、素材）在 theme/<主题>/；主题插件带来的配色、自建配色由应用登记来源（THEME_SRC）。 */
 'use strict';
 /* ───────────── 外观与语言：主题 = 给 core.css 顶部那组语义变量一套值 ───────────── */
-const TOKEN_GROUPS = [
-  [tc('theme.tokens.surfaces'), [['bg-rail', tc('theme.tokens.rail')], ['bg-nav', tc('theme.tokens.sidebar')], ['bg-page', tc('theme.tokens.page')], ['bg-group', tc('theme.tokens.group')], ['bg-field', tc('theme.tokens.input')], ['bg-hover', tc('theme.tokens.hover')], ['bg-selected', tc('theme.tokens.selected')], ['bg-bubble', tc('theme.tokens.messageBubble')], ['bg-raised', tc('theme.tokens.popup')]]],
-  [tc('theme.tokens.text'), [['fg-strong', tc('theme.tokens.emphasis')], ['fg', tc('wsSignals.body')], ['fg-muted', tc('theme.tokens.secondaryText')], ['fg-faint', tc('theme.tokens.faintText')], ['fg-on-accent', tc('theme.tokens.onAccentText')]]],
-  [tc('theme.tokens.accent'), [['accent', tc('theme.tokens.accent')], ['accent-hover', tc('theme.tokens.accentHover')], ['accent-soft', tc('theme.tokens.accentBackground')], ['accent-fg', tc('theme.tokens.accentText')], ['focus', tc('theme.tokens.focusRing')], ['switch-on', tc('theme.tokens.switchOn')]]],
-  [tc('theme.tokens.status'), [['ok', tc('theme.tokens.normal')], ['warn', tc('log.level.warn')], ['warn-soft', tc('theme.tokens.warningBackground')], ['danger', tc('theme.tokens.danger')], ['danger-soft', tc('theme.tokens.dangerBackground')], ['info', tc('theme.tokens.information')]]],
-  [tc('theme.tokens.lines'), [['line', tc('theme.tokens.divider')], ['line-strong', tc('theme.tokens.emphasisLine')]]],
-  [tc('theme.tokens.memberColor'), [1, 2, 3, 4, 5, 6].map(function (n) { return ['tint-' + n, tc('theme.tokens.tintN', n)]; })],
-  [tc('common.threads'), [['bg-code', tc('theme.tokens.inlineCodeBackground')]].concat([1, 2, 3, 4, 5, 6].map(function (n) { return ['name-' + n, tc('theme.tokens.nameN', n)]; }))]
-];
-/* 悬停、选中、内嵌、行内代码、分隔线由层级推导（叠在所在层上的墨色），主题只给叠多深 d-*；主题包里如果还带着这些的绝对值，不让它们覆盖推导 */
-const LAYER_DERIVED = ['bg-hover', 'bg-selected', 'bg-field', 'bg-code', 'line', 'line-strong'];
-const TOKENS = [].concat.apply([], TOKEN_GROUPS.map(function (g) { return g[1].map(function (t) { return t[0]; }); })).concat(['font-display', 'd-hover', 'd-btn', 'd-selected', 'd-inset', 'd-code', 'd-line', 'd-line-strong']);
+/* 主题能设的语义变量（组件库登记：组件库的样式读哪些变量，它就列哪些）。LAYER_DERIVED：其中由层级推导的那几个（叠在所在层上的墨色），主题只给叠多深 d-*；主题包里如果还带着这些的绝对值，不让它们覆盖推导 */
+const TOKENS = [];
+const LAYER_DERIVED = [];
 /* 内置配色（主题数据）：default 是没有 data-skin 的那一套（样式表的基础值），其余各自是一个 data-skin；accent 是它声明的强调色 */
 const BUILTIN_THEMES = [];   /* 内置配色：主题声明（theme/<主题>/palettes.js 登记）；default 是没有 data-skin 的那一套（样式表的基础值），其余各自是一个 data-skin；accent 是它声明的强调色 */
 /* 配色的来源（应用登记）：packs() 主题插件带来的配色 [{ id, values, … }]；own() 旧的自建配色 [{ id, values }]（改它自己）；saveOwn() 存旧的自建配色 */

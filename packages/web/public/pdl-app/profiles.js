@@ -44,7 +44,7 @@ function bindProfiles() {
             const p = cat.dossier,
               obs = observations[cat.catId] || [],
               sig = p && p.routingSignals,
-              member = WHO_DATA.member(cat.catId),
+              member = pdlReads('who').member(cat.catId),
               ev = ACCOUNT_STATE.evOpen[cat.catId];
             return {
               id: cat.catId,
@@ -76,7 +76,7 @@ function bindProfiles() {
   };
 
   A.profObs = function (d) {
-    const member = WHO_DATA.member(d.id);
+    const member = pdlReads('who').member(d.id);
     dialog({
       kind: 'profileObservation',
       args: { name: member.name, handle: member.handle },

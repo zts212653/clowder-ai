@@ -37,7 +37,7 @@ function bindPluginSpaces() {
   function opOf(plugin) {
     return ops[plugin.pluginId] || plugin.operation;
   }
-  WHO_DATA.plugins = function () {
+  pdlReads('who').plugins = function () {
     return Object.fromEntries(
       pluginRows().map(function (plugin) {
         return [plugin.pluginId, { name: plugin.displayName, icon: plugin.icon, instanceId: plugin.pluginInstanceId }];
@@ -1084,8 +1084,11 @@ function bindPluginRequests() {
       }
       const r = request(pk, name),
         row = {};
+      // Every parameter whose value is looked up (@input, host:source, state.) is part of the key:
+      // when the value changes the key changes, and the new key is read.
       Object.values(Object.assign({}, r.query, r.body)).forEach(function (v) {
-        if (typeof v === 'string' && v[0] === '@') row[v] = value(pk, v, input);
+        const x = value(pk, v, input);
+        if (x !== v) row[v] = x;
       });
       const key = 'plugin:' + pk + '/' + k + (Object.keys(row).length ? '|' + JSON.stringify(row) : '');
       if (!held[key]) held[key] = { plugin: pk, request: name, input: input };

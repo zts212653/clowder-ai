@@ -717,9 +717,11 @@ function pcfModel(inst, src) {
           value: f.multiple ? pcfList(pcfEffective(f, d)) || [] : pcfEffective(f, d),
           options:
             f.kind === 'member'
-              ? WHO_DATA.members().map(function (m) {
-                  return m.id;
-                })
+              ? pdlReads('who')
+                  .members()
+                  .map(function (m) {
+                    return m.id;
+                  })
               : sidebarData().threads.map(function (t) {
                   return { value: t.id, label: t.title };
                 }),
