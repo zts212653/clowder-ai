@@ -101,7 +101,7 @@ function popPush(k, open) {
   S.popOrder.push(k);
   POP_TRIG[k] = t ? anchorOf(t) : null;
   if (d.at === 'trigger' && t && !ANCHORED[k]) popAnchor(k, t);   /* 跟着触发它的元素（打开它的动作已经指定了锚点的除外：程序打开、锚在输入框上） */
-  if (t && t.dataset.spot && SPOTS[t.dataset.spot]) SPOTS[t.dataset.spot].pop = k;   /* 看不见的锚点（ui.js）：跟着用它的弹窗走 */
+  if (t && t.dataset.spot && SPOTS[t.dataset.spot]) SPOTS[t.dataset.spot].pop = k;   /* 看不见的锚点（anchor.js）：跟着用它的弹窗走 */
   if (d.state) { POP_OWNER[k] = { state: d.state }; return; }
   const host = t && t.closest(POP_SEL);
   if (host) {
@@ -112,7 +112,7 @@ function popPush(k, open) {
   const c = t && t.closest('[data-view], [data-okey]');
   POP_OWNER[k] = c ? { sel: c.dataset.view != null ? '[data-view="' + CSS.escape(c.dataset.view) + '"]' : '[data-okey="' + CSS.escape(c.dataset.okey) + '"]' } : null;
 }
-/* 弹窗锚在一个元素上（at: trigger）：引用那个元素的锚点名（ui.js 的锚定），元素重画后不在了就按声明的关法关掉 */
+/* 弹窗锚在一个元素上（at: trigger）：引用那个元素的锚点名（anchor.js 的锚定），元素重画后不在了就按声明的关法关掉 */
 function popAnchor(k, el) { return anchorTo(k, el, function () { if (S.popOrder.indexOf(k) >= 0) popClose(k, true); }); }
 /* 程序打开的浮窗（没有触发元素）：锚在第一个对得上的元素上；对不上就锚结构上的容器（窄栏、主区）。app 只给选择器，不碰页面 */
 function popAnchorAt(k, sel) { return popAnchor(k, document.querySelector(sel) || document.querySelector('.rail') || document.querySelector('.main-col') || document.body); }
@@ -605,7 +605,7 @@ function renderAll(keep) {
   } finally { READ_SCOPES.pop(); READ_OWN = null; }
   SHELL_READS = shellReads; SHELL_OWN = shellOwn;
   const keep0 = reuseNodes();   /* 节点复用：画之前记下现有的消息和孤岛（按树键） */
-  RENDERING = true;   /* 换掉整页时，正在编辑的输入框会失焦：这不是用户离开，失焦动作不该触发（见 ui.js） */
+  RENDERING = true;   /* 换掉整页时，正在编辑的输入框会失焦：这不是用户离开，失焦动作不该触发（见组件库 inputs.js） */
   mountShell(cls, style, pdlTree().key, pieces, ov);
   RENDERING = false;
   keptFill();
@@ -893,7 +893,7 @@ function rtCfg(r) { return (pdlLayout().regions[r] || {}).chrome || {}; }
 /* ───────── 标签式容器─────────
    会话状态只存一份（proj.js 的 NAV.tabs[r]：打开的项、固定、预览、并排）；当前项是容器 r 自己那一栈的栈顶，
    每一项有自己的栈（项里的下钻、返回 / 前进）；没显示的项留在 DOM 里（盖住、过期、露出来时重画）。
-   组件库（library/shell.js 的标签式容器组件）把同一份数据画成三种视图：标签条（rtChrome）、收起的竖条（rtStripe）、全部标签（rtOverflow），菜单 / 菜单条 / 把手的状态也在那里。
+   组件库（library/tabs.js 的标签式容器组件）把同一份数据画成三种视图：标签条（rtChrome）、收起的竖条（rtStripe）、全部标签（rtOverflow），菜单 / 菜单条 / 把手的状态也在那里。
    区域的拥有方只绑定面板、标题、图标、徽标（rtBind）。 */
 function rtHome(r) { return (rtCfg(r).home || {}).key; }
 function rtTabs(r) { return navTabs(r).list; }
@@ -959,7 +959,7 @@ function rtCloseMany(r, which, text) {
   undoShow({ text: text, undo: function () { ts.list.splice.apply(ts.list, [0, ts.list.length].concat(JSON.parse(before))); rtShow(r, cur); } });
 }
 /* 区域标签只有一个动作（tab）：op 是 TAB_OPS 里的名字。引擎这里只有通用的标签栈：show | close | pin | order；
-   标签式容器组件自己的操作（全部标签、并排、批量关闭、菜单的固定……）由组件库登记进同一张表（library/shell.js）。
+   标签式容器组件自己的操作（全部标签、并排、批量关闭、菜单的固定……）由组件库登记进同一张表（library/tabs.js）。
    变化本身就是反馈（标签出现、消失、图钉亮起），不弹提示；能撤回的给撤销提示 */
 const RT_CLOSED = [];   /* 关掉一项之后（组件登记 fn(区域)：比如标签关光了，自己的弹窗跟着收起） */
 const TAB_OPS = {

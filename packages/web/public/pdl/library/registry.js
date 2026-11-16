@@ -1,4 +1,5 @@
 /* 边界：一个含义一个组件、不为接口定制、不按位置推导样式 */
+/* 组件登记表：文字角色、动作的表现、工具类、零件清单，以及组件目录的登记表（LIB_CATALOG） */
 /* 组件清单（主题的源头）：页面上每个元素都要能追溯到这里的一项，样子只来自这里的定义，一个含义只对应一个组件 / 图标。
    这份清单是机器可查的，也是组件目录的数据。三张表：
    - LIB_TEXT    文字角色：每个角色一句含义 + 它的 token（颜色、字号、字重、行高）+ 演这个角色的部件（of）。
@@ -191,3 +192,6 @@ const LIB_PARTS = {
   page: { means: '页面：页头和小节', of: '.page, .page-head, .page-id, .section, .vw-view, .vw-page-split', v: {} },
   'proto': { means: '组件目录和说明页的外框（不属于产品界面；里面的示例和文字仍是组件库的）', of: '.proto-tab, .cat-entry, .cat-demo, .cat-head, .cat-row, .cat-flow, .cat-states, .cat-state, .cat-props, .cat-table, .cat-mx, .cat-mx-h, .cat-icons, .cat-st, .cat-scroll, .cat-stream, .cat-pop, .cat-rh, .spec-rule' }
 };
+/* 组件库原件的目录登记：每个原件在自己的定义旁边登记 { g 组, ex(样例数据) → 示例, via 哪些 PDL 用到它（用来数“当前主题使用 N 处”）,
+   tones(档, 样例) → 这一档的示例或 null（不支持这一档）, count(样例) → 计数形态, inline 示例是并排的小件 }。组件目录（catalog.js）只枚举，不另写清单 */
+const LIB_CATALOG = {};

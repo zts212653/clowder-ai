@@ -117,7 +117,7 @@ function ioSend(ev, payload) { if (IO.port) IO.port.send(ev, payload); }
 function ioOn(ev, fn) { if (IO.port) IO.port.on(ev, fn); else IO.subs.push([ev, fn]); }
 function ioNow() { return IO.port && IO.port.now ? IO.port.now() : Date.now(); }   /* 现在几点：数据层的时钟 */
 function ioFile(path) { return IO.port && IO.port.file ? IO.port.file(path) : ''; }
-/* 身份的数据（应用登记）：组件库的身份组件（who.js）、选成员、提及、徽标只经这里读数据，不认识应用的数据——
+/* 身份的数据（应用登记）：组件库的身份组件（identity.js）、选成员、提及、徽标只经这里读数据，不认识应用的数据——
    member(id) 成员（找不到给第一个）· members() 全部成员 · me() 你 · plugins() 插件（按 id）· builtinConnector(id) 宿主内置的连接器 ·
    health() 回调授权健康（没有就 null）· live(id, 回合) 执行状态 · handleId(句柄) 句柄是哪个成员 */
 const WHO_DATA = pdlReads('who', { member: function () { return null; }, members: function () { return []; }, me: function () { return {}; }, plugins: function () { return {}; }, builtinConnector: function () { return false; }, health: function () { return null; }, live: null, handleId: function () { return null; } });
@@ -273,7 +273,7 @@ function nodeId(n) {
 }
 function treeKey(el) { const ks = []; for (let n = el; n && n !== document.body; n = n.parentElement) { const k = nodeId(n); if (k) ks.unshift(k); } return ks.join('/'); }
 /* 节点的“版本”就是它的 HTML：相位（节拍、轮换起点）从不写进 HTML，由动画诞生时按时间原点对齐 */
-function streamVer(el) { return el.outerHTML.replace(/ data-aname="[^"]*"/g, ''); }   /* 锚点名（ui.js）是插进页面后按身份写上的，不算内容 */
+function streamVer(el) { return el.outerHTML.replace(/ data-aname="[^"]*"/g, ''); }   /* 锚点名（anchor.js）是插进页面后按身份写上的，不算内容 */
 /* 本地更新之后（只改了某个节点里的属性 / 一小块）：把所在消息节点、各层孤岛记下的版本更新成现在的样子，
    下次整页重画时它们照样被复用（前提：本地更新出来的 HTML 和重画出来的一样） */
 /* 组件在页面上写的测量结果（CSS 变量、data-foldable、按测量改的提示文字）不算内容：记版本前由各组件把副本还原成“刚画出来”的样子 */
@@ -835,7 +835,7 @@ document.addEventListener('keydown', function (e) {
   if (e.key === 'Escape') { keyDeclared(e); return; }   /* 弹窗的 Esc 在上面的 popEsc；控件自己声明的 esc（data-on-esc）在这里；别的（抽屉等）由各自登记在 KEY_FNS 里 */
   const el = e.target;
   if ((e.key === 'Enter' || e.key === ' ') && el.matches && el.matches('[role="button"][data-act], tr[data-act], .opt[data-act]')) { e.preventDefault(); el.click(); }
-  keyDeclared(e);   /* 控件自己声明的按键（data-on-enter 等，见 ui.js） */
+  keyDeclared(e);   /* 控件自己声明的按键（data-on-enter 等，见组件库 inputs.js） */
 });
 /* 把焦点放进一个（新出现的）输入框：唯一的一处。pos 是光标位置，'all' 全选。重绘时保住焦点和选区是 render() 自己的事，输入处理不用再补 */
 /* 表单里第一个标了错的字段：聚焦并滚进视口（错误标在外框上时聚焦它里面的输入框） */

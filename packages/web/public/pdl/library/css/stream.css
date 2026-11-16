@@ -1,0 +1,236 @@
+/* 边界：一个含义一个组件、不为接口定制、不按位置推导样式 */
+/* 消息流：跳转强调、到达、投递状态、弹窗框架的层 */
+/* ───────── 消息流（视图渲染）：跳转强调、投递状态、插件认领的工具结果 ───────── */
+.stream-inner > .vw-view { display: contents; }
+/* 跳转强调：强调消息卡片本身（猫的正文卡片、你的气泡、来信 / 提问 / 系统卡片），边框闪一圈主题色后淡出 */
+/* 强调贴着实际的卡片区域、用卡片圆角：猫的消息是竖线右侧的正文区（不压住竖线），气泡就是气泡，卡片就是卡片 */
+.cafe-m.emph :is(.cat-bubble, .bubble, .letter, .cafe-sysc, .vw-card) { position: relative; }
+.cafe-m.emph :is(.cat-bubble, .bubble, .letter, .cafe-sysc, .vw-card)::after, .emph-ring::after { content: ""; position: absolute; inset: var(--emph-inset, calc(-1 * var(--emph-off))); border-radius: var(--emph-r, var(--r-l)); box-shadow: 0 0 0 2px var(--fg-strong); pointer-events: none; opacity: 0; animation: msg-emph var(--dur-emph) ease-out 1; }
+/* 一次性强调环（定位到的消息、定位到的侧栏行）：同一个环、同一个动效；行贴着自己的边 */
+.emph-ring { position: relative; --emph-inset: 0; --emph-r: var(--r-s); }
+.cafe-m.emph .cat-bubble::after { inset: -4px -6px -4px 8px; }
+.cafe-m.emph .bubble::after { border-radius: calc(var(--r-xl) + var(--emph-off)); }
+/* 消息到达：新出现在流里的一条消息（对话里、回放剧场里都是这一个）淡入并稍微上浮；减少动态效果时只淡入 */
+.arrive { animation: arrive var(--dur-med) ease-out both; }
+@keyframes arrive { from { opacity: 0; transform: translateY(var(--sp-xs)); } to { opacity: 1; transform: none; } }
+/* 拖动过的弹窗框架（引擎给 --drag-x / --drag-y）：一般用 translate 挪；page 层的身（不是贴着触发点的）用相对定位挪——
+   框架带变换时，按视口铺的底图（下面的 fixed）会失效，退成整张图缩进框里 */
+.pop-host > [data-dragged] { translate: var(--drag-x) var(--drag-y); }
+.pop-body-page:not(.pop-trigger) > [data-dragged] { translate: none; position: relative; left: var(--drag-x); top: var(--drag-y); }
+/* 弹窗框架给内容的层：body: 'page' = 和对话流同一层（同一个页面底色；有背景图时图在下、半透明页面底色在上） */
+.pop-body-page > :first-child { background: var(--bg-page); }
+.pop-body-page.has-img > :first-child {
+  --glass-page: color-mix(in srgb, var(--bg-page) var(--bg-veil, 92%), transparent);
+  background: linear-gradient(var(--glass-page), var(--glass-page)), var(--page-img) center / cover fixed; }   /* 图按视口铺（fixed），和外壳那张同位置：窗口里看到的是它后面那块图，不是整张图缩进窗口里 */
+@keyframes msg-emph { 0%, 45% { opacity: 1; } 100% { opacity: 0; } }
+/* 投递状态：正文下面一排小胶囊（约 2/3 大小），收起只露头像，悬停展开“名字 · 待投递 / 已投递” */
+.msg-deliv { display: flex; gap: var(--sp-xs); margin-top: var(--sp-xs); }
+.user-msg > .msg-deliv { justify-content: flex-end; }
+/* 状态胶囊的两档：cap-sm 在消息下方（头像 s，不抢注意力），cap-m 在输入框上（头像 m）；胶囊 = 头像 + 2px 边 */
+.cap.cap-sm { --cap-h: calc(var(--av-s) + 4px); }
+.cap.cap-m { --cap-h: calc(var(--av-m) + 4px); }
+.cap.cap-sm, .cap.cap-m { width: var(--cap-h); height: var(--cap-h); border-radius: calc(var(--cap-h) / 2); }
+.cap-sm .cap-pill, .cap-m .cap-pill { height: var(--cap-h); padding: var(--sp-hair); border-radius: calc(var(--cap-h) / 2); }   /* 胶囊只有共用的面（secondary + 轻阴影），没有另外一圈白框 */
+.cap-m .cap-x { font-size: var(--fs-m); }
+/* 胶囊堆叠：静止时后一个压住前一个的一半、按正常排版占位；展开只有一种——沿所在一侧横向散开并排，悬停的那个打开文字。
+   展开的层在浮层层级，可以盖住旁边的元素（注意力在这里），不挤开邻居；end（你的消息下面）贴右边向左长，内部顺序不变 */
+.rstack { --cap-h: calc(var(--av-s) + 4px); position: relative; display: inline-block; flex: none; vertical-align: middle; height: var(--cap-h); width: calc(var(--cap-h) + (var(--n) - 1) * var(--cap-h) / 2); }
+.rstack.m { --cap-h: calc(var(--av-m) + 4px); }
+.rstack-in { position: absolute; top: 0; left: 0; display: flex; align-items: center; }
+.rstack.end .rstack-in { left: auto; right: 0; }
+/* 每一项占一个固定的位（头像那么宽），后一项压住前一项的一半；位置永远不因悬停改变。悬停的那项升到最上层，只有它自己的底向生长方向变长、盖住后面的项；
+   离开后停 --reveal-hold 收回，层级在收回之后才落回静止值；换到另一项时，上一项立刻收回（同一时刻只有一项展开） */
+.rstack-in > .cap { width: var(--cap-h); height: var(--cap-h); z-index: var(--z); transition: z-index 0s linear calc(var(--reveal-hold) + var(--dur-med)); }
+.rstack-in > .cap:hover, .rstack-in > .cap:focus-within, .rstack-in > .cap.tap-cap { z-index: calc(var(--z-pop) + 20); transition-delay: 0s; }
+.rstack-in > .cap + .cap { margin-left: calc(var(--cap-h) / -2); }
+/* 换到另一项：上一项照自己的停留时间收回（不被打断），但层级立刻落到正在悬停的那项下面——最后悬停的在最上层。
+   给它一个介于静止值和悬停值之间、又不同于静止值的层级，排好的“停一会儿再落”就按 0 延迟重新开始；悬停离开整组后再按停留时间回到静止值 */
+.rstack-in:has(> .cap:hover) > .cap:not(:hover) { z-index: calc(var(--z) + 15); transition-delay: 0s; }
+.rstack:hover, .rstack:focus-within, .rstack.tap-on { z-index: var(--z-pop); }
+.rstack-in > .cap:hover .cap-pill, .rstack-in > .cap:focus-within .cap-pill { transform: none; }
+.rstack.tap-on .cap.tap-cap .cap-x { max-width: calc(90 * var(--unit)); padding: 0 var(--sp-xs) 0 var(--sp-s); transition-delay: 0s, 0s; }
+.cap-sm .cap-x { font-size: var(--fs-xs); }
+.cap-sm.pending .cap-lead, .cap-sm.unknown .cap-lead { opacity: var(--op-disabled); }
+
+/* 身份形状：成员（人、猫）是圆的，插件 / 系统 / 定时任务是圆角方——唯一的区别，不加文字标识，插件没法冒充成员 */
+.avatar[data-shape="square"].av-s, .avatar[data-shape="square"].av-xs { border-radius: var(--r-s); }
+.avatar[data-shape="square"].av-xl { border-radius: var(--r-l); }
+/* chain 插槽认领后的卡片（如 GitHub 插件把 gh pr view 的结果画成 PR 卡片） */
+.vw-claim { display: flex; align-items: center; gap: var(--sp-s); font-size: var(--fs-m); color: var(--fg-strong); }
+.vw-claim .chip { font-size: var(--fs-s); }
+/* 通用片段：优先级标签、变更状态字母、能力标记、警示文字 */
+.vw-badge { display: inline-block; min-width: var(--ctl-xs); padding: 0 var(--sp-hair); font: 500 var(--fs-xs)/18px var(--font-mono, monospace); text-align: center; border-radius: var(--r-xs); color: var(--fg-muted); background: var(--bg-field); }   /* 短代码徽标（片段角色 badge）：颜色只来自 tone */
+.vw-badge.vw-t-danger { color: var(--danger); background: var(--danger-wash); } .vw-badge.vw-t-warn { color: var(--warn); background: var(--warn-wash); } .vw-badge.vw-t-ok { color: var(--ok); } .vw-badge.vw-t-info { color: var(--info); }
+
+.vw-w80 { max-width: calc(20 * var(--unit)); } .vw-w220 { max-width: calc(55 * var(--unit)); } .vw-11 { font-size: var(--fs-xs); }
+/* 片段的通用样式 */
+/* 滚动容器（组件库唯一的滚动原件）：组件里需要滚动的区域都带 .scroll（竖向）或 .scroll-x（横向），页面不自己写 overflow。
+   边缘渐隐跟着滚动位置自动出现：靠 CSS 滚动时间线（animation-timeline: scroll(self)）驱动两个变量——上面还有内容时顶边渐隐，下面还有内容时底边渐隐；
+   内容不够滚时时间线不生效，两边都不渐隐。不需要测量、不扫页面。滚动条用组件库的细滚动条 */
+@property --sf-t { syntax: '<length>'; inherits: false; initial-value: 0px; }
+@property --sf-b { syntax: '<length>'; inherits: false; initial-value: 0px; }
+.scroll { --sf-size: var(--sp-m); overflow-y: auto; overflow-anchor: none; scrollbar-width: thin; scrollbar-color: var(--line-strong) transparent; -webkit-mask-image: linear-gradient(to bottom, transparent 0, black var(--sf-t), black calc(100% - var(--sf-b)), transparent 100%); mask-image: linear-gradient(to bottom, transparent 0, black var(--sf-t), black calc(100% - var(--sf-b)), transparent 100%); animation: scroll-fade linear both; animation-timeline: scroll(self); }   /* overflow-anchor: none —— 滚动位置只有一个写入者：窗口的锚点由引擎按同一条规则保持，浏览器不另挪 */
+@keyframes scroll-fade { 0% { --sf-t: 0px; --sf-b: var(--sf-size); } 3% { --sf-t: var(--sf-size); } 97% { --sf-b: var(--sf-size); } 100% { --sf-t: var(--sf-size); --sf-b: 0px; } }
+/* 停在底部（组件库，唯一一份）：.scroll.stick-end 反向排列，原点在底部——内容增长、容器变矮（输入框变高）都自然贴底，
+   往上翻了由浏览器的滚动锚定停在原处；新画出来的节点本来就在底部。坐标随之反过来：scrollTop ≤ 0（0 = 底），滚动时间线 0% = 底。里面只放一个子元素 */
+.scroll.stick-end { display: flex; flex-direction: column-reverse; animation-name: scroll-fade-end; }
+.scroll.stick-end > * { flex: none; width: 100%; }   /* 横向照常铺满（子元素自己的 max-width + 左右 auto 外边距仍然居中；flex 里 auto 外边距会让它缩成内容宽） */
+.vw-code-rows { max-height: calc(var(--rows) * 1.6 * var(--fs-xs) + 2 * var(--sp-s) + var(--sp-xs)); border-radius: var(--r-m); }   /* 限行的原样文字（日志）：行数 × 原样文字的行高（加上框的内边距） */
+@keyframes scroll-fade-end { 0% { --sf-b: 0px; --sf-t: var(--sf-size); } 3% { --sf-b: var(--sf-size); } 97% { --sf-t: var(--sf-size); } 100% { --sf-b: var(--sf-size); --sf-t: 0px; } }
+/* 渐隐高度：默认一小段（不限行数的滚动区：边缘的普通渐隐，和行无关）；限行数的列表（和折叠同一条规则）= k 整行 + 1 整行渐隐到透明；弹出层、启动面板、弹窗正文按一行的一半 */
+.scroll[data-rows] { --sf-size: var(--row-step); max-height: calc((var(--rows) + 1) * var(--row-step)); box-sizing: content-box; }   /* 高度量的是行（内容区），容器自己的内边距另算，切口才落在整行上 */
+.pop, .ws-pop, .inbox { --sf-size: calc(var(--ctl-m) * .5); }
+/* 浮层 = 面 + 里面一层滚动（和对话框的 .dialog-body 同一个结构）：面画阴影和圆角、限高；滚动和边缘渐隐只在里面那层。
+   渐隐是遮罩，遮罩会把同一个元素的阴影裁掉，所以两者永远不在同一个元素上 */
+.menu, .pop, .ws-pop, .inbox { display: flex; flex-direction: column; }
+.float-body { --sf-size: inherit; flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; gap: inherit; }
+.float-body > * { flex: none; }
+.float-body > .vw-widget.tall { flex: 1 1 auto; height: calc(var(--row-h-1) * 14); min-height: calc(var(--row-h-1) * 6); }   /* 浮窗里的整页框（插件自己的页面，自己滚动）：给它一个固定的高度，窗口放不下时先让它变矮 */
+:is(.pop, .ws-pop, .inbox) { max-block-size: 100%; }   /* 浮层不超出它能放下的空间（定位区域的高度）：超出的由里面那层滚动 */   /* 里面的行不被压扁：面限高，超出的由这一层滚动（和 .scroll.stick-end 的子元素同理） */
+.scroll-x { overflow-x: auto; overflow-y: hidden; scrollbar-width: none; -webkit-mask-image: linear-gradient(to right, transparent 0, black var(--sf-l), black calc(100% - var(--sf-r)), transparent 100%); mask-image: linear-gradient(to right, transparent 0, black var(--sf-l), black calc(100% - var(--sf-r)), transparent 100%); animation: scroll-fade-x linear both; animation-timeline: scroll(self x); }
+@property --sf-l { syntax: '<length>'; inherits: false; initial-value: 0px; }
+@property --sf-r { syntax: '<length>'; inherits: false; initial-value: 0px; }
+@keyframes scroll-fade-x { 0% { --sf-l: 0px; --sf-r: 24px; } 3% { --sf-l: 24px; } 97% { --sf-r: 24px; } 100% { --sf-l: 24px; --sf-r: 0px; } }
+/* 分道的一行：几条道按份额分宽（--lanes 由 PDL 的 share 算出），每条道横向滚动、溢出那边渐隐；道里留出上下的余量，执行中的圈不被裁 */
+.lanes { display: grid; grid-template-columns: var(--lanes); gap: var(--sp-s); align-items: stretch; }
+.lane { min-width: 0; padding: var(--sp-xs); margin: calc(-1 * var(--sp-xs)); }
+.lane-in { display: flex; align-items: center; gap: var(--sp-xs); width: max-content; min-width: 100%; height: 100%; }
+.lane[data-align="center"] .lane-in { justify-content: center; }
+.lane[data-align="end"] .lane-in { justify-content: flex-end; }
+.lane:not(.scroll-x) .lane-in { width: 100%; min-width: 0; }
+/* 竖叠：底对齐的一列，居中；子项位置变化由组件做 FLIP 过渡 */
+.vstack { display: flex; flex-direction: column; align-items: center; justify-content: flex-end; gap: var(--sp-s); width: 100%; min-width: 0; }
+/* 一组提示：叠在同一格里，只露 .on 那条；换的时候淡入淡出 */
+.cnotes { display: grid; justify-items: center; max-width: 100%; min-width: 0; }
+/* 轮换（data-rot）：子项叠在同一格；--rot-t 随动画按 steps(n) 走，子项在 --rot-t = --i 时露出（也只有它接收点击）。
+   没有 data-rot（只有一项）时就是普通容器 */
+@property --rot-t { syntax: '<integer>'; inherits: true; initial-value: 0; }
+@keyframes rot { to { --rot-t: var(--n); } }
+[data-rot] { display: inline-grid; min-width: 0; animation: rot calc(var(--n) * 4 * var(--loop)) steps(var(--n)) infinite; }
+[data-rot]:hover { animation-play-state: paused; }
+[data-rot] > * { grid-area: 1 / 1; transition: opacity var(--dur-med); min-width: 0; --rot-d: min(1, max(var(--rot-t) - var(--i, 0), var(--i, 0) - var(--rot-t))); opacity: calc(1 - var(--rot-d)); z-index: calc(1 - var(--rot-d)); pointer-events: auto; }
+:root[data-motion="reduce"] [data-rot] > * { transition: none; }
+   /* 不滚动的道：内容不超过道宽（胶囊按自己的规则省略） */
+/* 道的附着方式（PDL 声明 attach）：above 整个在输入框上沿之上；straddle 往下移自身高度的一半，骑在上沿上（画在输入框表面之上） */
+.lane[data-attach="straddle"] { translate: 0 50%; z-index: var(--z-raised); }
+.composer:has(.lane[data-attach="straddle"]) > :nth-child(1 of :not(.lanes)) textarea { padding-top: calc(var(--sp-m) + var(--sp-xs)); }   /* 只有首个内容行避让骑在上沿的元素；附件行已经占位时，后面的输入行用正常边距。 */
+.composer > :not(.lanes) + .toolbar textarea { padding-top: var(--sp-xs); }   /* 同一编辑区里已有内容行：行间只留一个网格单位，不重复四周内边距。 */
+/* 悬停展开升到的浮层（顶层）：本身透明、不接指针；里面的展开层按原位置摆 */
+/* 横向滚动道里的胶囊：展开时胶囊本体是顶层的 popover，锚在自己的胶囊上（capsules.js 的 capLift）；节点不搬，向左展开的贴右边。
+   顶层里的元素悬停不传给 DOM 上的父元素，所以展开规则也认胶囊本体上的 data-hot（指针在上面时由 capLift 写上） */
+.scroll-x .cap { anchor-name: --cap, attr(data-aname type(<custom-ident>), --cap); anchor-scope: --cap; }   /* 结构锚点（胶囊本体锚在自己的胶囊上）+ 自己的锚点名（ui.js），两个并存 */
+.scroll-x .cap > .cap-pill:popover-open { position: fixed; position-anchor: --cap; inset: auto; top: anchor(top); left: anchor(left); margin: 0; border: 0; overflow: visible; color: inherit; }
+.scroll-x .cap.cap-left > .cap-pill:popover-open { left: auto; right: anchor(right); }
+.scroll-x .cap > .cap-pill[popover]:not(:popover-open) { display: flex; }   /* 带着 popover 属性但不在顶层（重画时被移出过文档）：照常显示在原位 */
+/* 注释：label（直接显示的短文字）；help 就是标题后的 ?（悬停看原生提示） */
+.vw-label { white-space: nowrap; }
+.vw-label.corner { margin-left: auto; }
+.vw-label.below { margin-top: var(--sp-hair); white-space: normal; overflow-wrap: anywhere; }
+/* 折叠组件：bottom（只留开头、底部渐隐、下方居中单个 V / ^）；middle 复用长回复的中间折叠（两侧渐隐、右侧双箭头） */
+/* 折叠组件（foldBox）：测量前、或内容不够长（data-foldable 不是 1）时就是完整内容，开关不出现 */
+.fold { position: relative; }
+.fold:not([data-foldable="1"]) > .fold-tg, .fold:not([data-foldable="1"]) > .fold-tail { display: none; }
+.fold[data-more] > .fold-tg { display: flex; }   /* 查看更多：内容短也有开关（后面还有没读的） */
+/* bottom：浏览器的行数截断（line-clamp，跨段落按行数）——整行切、不量；最后一行从上到下渐隐一行高（1lh）。档位 s 3 行 · m 5 行 · l 8 行（data-lines）；开关紧贴在下面，后面不留空 */
+/* bottom 折叠：档位 k = 收起时完整显示的单位数；收起 = k 个完整单位 + 第 k+1 个整单位渐隐到透明；多于 k+1 个单位才折。单位跟着内容走：
+   正文的单位是行——收起时截成 k+1 行，截断后还溢出（有东西被藏起来）才有开关，最后一行整行渐隐；列表的单位是项（data-unit="item"）——露 k 项 + 第 k+1 项整项渐隐，后面的项不画，折不折按项数画好 */
+[data-fold="bottom"]:not([data-unit="item"]):is([data-open="false"], [data-measure]) > .fold-in { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: var(--fold-n, 9); line-clamp: var(--fold-n, 9); overflow: hidden; }
+[data-fold="bottom"]:not([data-unit="item"])[data-foldable="1"][data-open="false"] > .fold-in { -webkit-mask-image: linear-gradient(black calc(100% - 1lh), transparent); mask-image: linear-gradient(black calc(100% - 1lh), transparent); }
+[data-fold="bottom"][data-unit="item"][data-foldable="1"][data-open="false"][data-lines="3"] > .fold-in > :nth-child(n+5), [data-fold="bottom"][data-unit="item"][data-foldable="1"][data-open="false"][data-lines="3"] > .fold-in > .lr-inline > :nth-child(n+5), [data-fold="bottom"][data-unit="item"][data-foldable="1"][data-open="false"][data-lines="5"] > .fold-in > :nth-child(n+7), [data-fold="bottom"][data-unit="item"][data-foldable="1"][data-open="false"][data-lines="5"] > .fold-in > .lr-inline > :nth-child(n+7), [data-fold="bottom"][data-unit="item"][data-foldable="1"][data-open="false"][data-lines="8"] > .fold-in > :nth-child(n+10), [data-fold="bottom"][data-unit="item"][data-foldable="1"][data-open="false"][data-lines="8"] > .fold-in > .lr-inline > :nth-child(n+10), [data-fold="bottom"][data-unit="item"][data-foldable="1"][data-open="false"][data-lines="3"] > .fold-in > .lr-list > :nth-child(n+5), [data-fold="bottom"][data-unit="item"][data-foldable="1"][data-open="false"][data-lines="5"] > .fold-in > .lr-list > :nth-child(n+7), [data-fold="bottom"][data-unit="item"][data-foldable="1"][data-open="false"][data-lines="8"] > .fold-in > .lr-list > :nth-child(n+10) { display: none; }
+[data-fold="bottom"][data-unit="item"][data-foldable="1"][data-open="false"][data-lines="3"] > .fold-in > :nth-child(4), [data-fold="bottom"][data-unit="item"][data-foldable="1"][data-open="false"][data-lines="3"] > .fold-in > .lr-inline > :nth-child(4), [data-fold="bottom"][data-unit="item"][data-foldable="1"][data-open="false"][data-lines="5"] > .fold-in > :nth-child(6), [data-fold="bottom"][data-unit="item"][data-foldable="1"][data-open="false"][data-lines="5"] > .fold-in > .lr-inline > :nth-child(6), [data-fold="bottom"][data-unit="item"][data-foldable="1"][data-open="false"][data-lines="8"] > .fold-in > :nth-child(9), [data-fold="bottom"][data-unit="item"][data-foldable="1"][data-open="false"][data-lines="8"] > .fold-in > .lr-inline > :nth-child(9), [data-fold="bottom"][data-unit="item"][data-foldable="1"][data-open="false"][data-lines="3"] > .fold-in > .lr-list > :nth-child(4), [data-fold="bottom"][data-unit="item"][data-foldable="1"][data-open="false"][data-lines="5"] > .fold-in > .lr-list > :nth-child(6), [data-fold="bottom"][data-unit="item"][data-foldable="1"][data-open="false"][data-lines="8"] > .fold-in > .lr-list > :nth-child(9) { -webkit-mask-image: linear-gradient(black, transparent); mask-image: linear-gradient(black, transparent); }
+[data-fold="bottom"][data-lines="3"] { --fold-n: 4; } [data-fold="bottom"][data-lines="5"] { --fold-n: 6; } [data-fold="bottom"][data-lines="8"] { --fold-n: 9; }   /* 截成 k+1 行（最后一行渐隐） */
+/* middle：开头到切口（整行），最后一行从上到下渐隐；结尾从切口起（整行），第一行从上到下渐显；两段渐变一样高（一行）、方向镜像 */
+[data-fold="middle"] { --fgap: 4px; }
+[data-fold="middle"][data-foldable="1"][data-open="false"] > .fold-head { max-height: var(--fh); overflow: hidden; -webkit-mask-image: linear-gradient(black calc(100% - var(--flh)), transparent); mask-image: linear-gradient(black calc(100% - var(--flh)), transparent); }
+[data-fold="middle"] > .fold-tail { height: var(--ft); margin-top: var(--fgap); overflow: hidden; -webkit-mask-image: linear-gradient(transparent, black var(--flh)); mask-image: linear-gradient(transparent, black var(--flh)); }
+.fold-tail-in { transform: translateY(calc(-1 * var(--fs))); }
+/* 开关在右侧：收起时竖直居中在两段渐隐行之间（切口 + 间隙的一半），展开时留在原来切口的位置 */
+[data-fold="middle"] > .fold-tg { position: absolute; right: calc(-1 * var(--sp-xs)); min-width: var(--ic-m); padding: 0; top: calc(var(--fh) + var(--fgap) / 2 - var(--ic-m) / 2); }
+@container style(--g-back: 1) { [data-fold="middle"] > .fold-tg { right: calc(-1 * var(--sp-xl) - var(--sp-s)); } }   /* 内容栏两边有空（容器网格推出，不按屏幕宽）才挂到正文右边的空白里；没空时贴在正文里，不伸出消息流 */
+[data-fold="middle"][data-open="true"] > .fold-tg { top: calc(var(--fh) - var(--ic-m) / 2); color: var(--fg-disabled); }
+.cafe-m:hover [data-fold="middle"][data-open="true"] > .fold-tg, [data-fold="middle"][data-open="true"] > .fold-tg:focus-visible { color: var(--fg-faint); }
+/* 折叠开关（唯一一个）：无杆尖角，悬停 / 聚焦变强调色；bottom 紧贴在渐隐行下面居中，middle 在右侧（见下）；排队“还有 N 条”也是它 */
+.fold-tg { display: flex; align-items: center; justify-content: center; gap: var(--sp-xs); min-width: var(--ctl-s); height: var(--ic-m); padding: 0 var(--sp-xs); border: 0; background: none; color: var(--fg-faint); font-size: var(--fs-s); cursor: pointer; border-radius: var(--r-s); }
+.fold-tg:hover, .fold-tg:focus-visible { color: var(--accent-fg); }
+[data-fold="bottom"] > .fold-tg, .qbox .fold-tg, .gsec-b > .fold-tg { margin: var(--sp-hair) auto 0; }
+/* 分组列表的一段（gsection）：表头和行一起滚动（组标签从不吸顶） */
+.gsec-b { --row-indent: var(--indent-child); }   /* 父子分组：父标题和子项同一左边；子项只有内容块（标题 + 副行）缩进一个段首距离，右侧的时间、徽标照旧贴右边；嵌套的分组逐层累加 */
+.gsec-b .gsec-b { --row-indent: calc(var(--indent-child) * 2); }
+.gsec > .gsec-h > * { margin-top: 0; padding-top: var(--sp-s); }
+/* 对话卡片模板（提议 / 审批、提问、简报）的外框；回执是一行，不用卡片 */
+.vw-card { display: flex; flex-direction: column; gap: var(--sp-s); padding: var(--sp-m) var(--sp-l); border-radius: var(--r-l); background: var(--bg-group); max-width: var(--span-10); }
+.vw-card-t { display: flex; align-items: center; gap: var(--sp-xs); flex-wrap: wrap; }
+/* 投递 / 接收胶囊 */
+.msg-deliv.end { justify-content: flex-end; }
+.msg-recv { display: inline-flex; gap: var(--sp-xs); margin-left: var(--sp-s); }
+/* 回复引用（replyRef）：一个行内元素——↩ + 头像（文字行高）+ 名字：内容；紧凑宽度，超出省略，不撑满一行。你的消息里按这一侧排在时间前面（只是位置镜像，内容仍从左往右） */
+.reply-ref { display: inline-flex; align-items: center; gap: var(--sp-xs); flex: 0 1 auto; min-width: 0; max-width: min(24em, 45%); font-size: var(--fs-s); line-height: 1.25; padding: var(--sp-hair) var(--sp-s); border: 0; border-radius: var(--r-s); background: var(--bg-field); color: var(--fg-muted); font-family: inherit; white-space: nowrap; }
+button.reply-ref { cursor: pointer; }
+button.reply-ref:hover { color: var(--fg-strong); }
+.reply-ref .reply-n { font-weight: 500; color: var(--fg-strong); flex: 0 1 auto; min-width: 0; overflow: clip; text-overflow: ellipsis; }   /* 行很窄时名字也省略（全文在引用的提示里） */
+.reply-ref .reply-t { min-width: 0; overflow: clip; text-overflow: ellipsis; }
+.reply-ref > svg { flex: none; }
+.msg.user-msg > .author-row > .reply-ref { order: -1; }
+/* 头像的 line 尺寸：和所在那行文字一样高（1.25em），字跟着缩小；在作者行里也不被放大 */
+/* 头像上的“执行中”：和胶囊同一个扩散圈动效、同一个节拍 */
+.avatar.run { position: relative; overflow: visible; }
+/* 执行圈画在头像外面（最大放到 1.5 倍）：直接装着它的容器为了省略文字而裁剪时（组件库里省略号的容器一律 overflow: clip），给圈留出裁剪余量 */
+:is(:has(> .avatar.run), :has(> * > .avatar.run)):not(html, body, .scroll, .scroll-x, .float-body) { overflow-clip-margin: var(--sp-s); }
+.scroll-x:has(.avatar.run) { margin-inline: calc(-1 * var(--sp-s)); padding-inline: var(--sp-s); }   /* 横向滚动条里有执行圈：两边留出圈的地方（内边距 + 等量负外边距，内容不挪） */   /* 这个属性不认 calc()：一格间距（8px）≥ 小 / 中头像的圈最大外扩 */
+/* 回调授权健康点：挂在头像右上角（名单类位置才有），黄 = 有失败，红 = 失败很多 */
+.av-wrap { position: relative; display: inline-flex; flex: none; }
+.av-health { position: absolute; top: calc(-1 * var(--sp-hair)); right: calc(-1 * var(--sp-hair)); width: var(--sp-s); height: var(--sp-s); border: 0; border-radius: 50%; padding: 0; background: var(--warn); box-shadow: 0 0 0 2px var(--surf-anchor); cursor: pointer; flex: none; }
+.av-health[data-health="broken"] { background: var(--danger); }
+/* 执行中的圈：按成员这一回合的状态（data-status，CatStatusType）查一张表——颜色和预设（预设自己定幅度和一个周期里脉冲几次）；所有位置的同一只猫一样
+   | 状态                | 颜色     | 预设（次/周期） | 幅度 |
+   | spawning / pending  | 成员色   | spawning 1      | 轻   |
+   | streaming           | 成员色   | streaming 1     | 满   |
+   | alive_but_silent    | warn     | silent 1        | 满   |
+   | suspected_stall     | warn     | stall 2         | 满   |
+   | error               | danger   | error 2         | 满   |（出错是“到终态就停”的例外：没处理的错误要人看，直到下一回合开始或被处理）
+   | done                | 无圈 |                                                                                */
+.avatar.run::after { content: ""; position: absolute; inset: 0; border-radius: inherit; box-shadow: 0 0 0 1.5px var(--c, var(--identity-fallback)); opacity: 0; pointer-events: none; animation: var(--mo-hold, var(--mo-ring, mo-streaming)) var(--loop) ease-out infinite backwards; }
+.avatar.run:is([data-status="pending"], [data-status="spawning"], [data-status="streaming"], [data-status="alive_but_silent"], [data-status="suspected_stall"]) { animation: mo-streaming var(--loop) ease-out infinite backwards; }   /* 这一回合没到终态（出队、启动、回复中、久没输出、疑似卡住）：整个头像（图、圈、柔光一起）呼吸——亮 → 半亮 → 亮；到终态（完成、出错）才停。圈和柔光本身不动（lang 2026-11-13） */
+[data-status="streaming"] { --mo-ring: mo-on; }   /* 圈常亮（还是一个预设：换状态时照样等这一圈放完） */
+@keyframes mo-on { 0%, 100% { opacity: 1; } }
+.avatar.run:is([data-status="pending"], [data-status="spawning"], [data-status="streaming"], [data-status="alive_but_silent"], [data-status="suspected_stall"])[data-img]::before { filter: drop-shadow(0 0 6px var(--c, var(--identity-fallback))); }
+/* 状态色调表（唯一的一份）：ok 绿、warn 琥珀、danger 深红、info 蓝。任何显示状态的组件都读它——状态光圈 / 圆点、告警卡片、行内提示、横幅、角标、投递状态、执行记录的失败数、轻提示。
+   带 data-tone 的元素得到 --tone-c；状态光圈的 data-status 也落到同样的 --warn / --danger 上 */
+[data-tone="ok"] { --tone-c: var(--ok); } [data-tone="warn"] { --tone-c: var(--warn); } [data-tone="danger"] { --tone-c: var(--danger); } [data-tone="info"] { --tone-c: var(--info); }
+[data-tone] { --tone-soft: color-mix(in oklab, var(--tone-c) var(--d-tone), var(--bg-page)); }
+/* 带色调的卡片（告警卡片）：底色仍是卡片自己的面（按角色），色调只画在左边一条和标题前的标记上 */
+.vw-card[data-tone] { box-shadow: inset var(--sp-xs) 0 0 var(--tone-c); }
+.vw-card[data-tone] .vw-card-t::before { content: ""; width: var(--sp-s); height: var(--sp-s); border-radius: var(--r-full); background: var(--tone-c); flex: none; }
+/* 这张表是共用的：任何带 data-status 的执行指示（头像的圈、侧栏一行的圆点）只从这里挑预设的名字（--mo-ring 圈、--mo-row 圆点）；颜色、幅度、次数都在预设里。
+   状态变了先放完这一圈（--mo-hold，见 motion.js 的全局节拍） */
+[data-status="spawning"], [data-status="pending"] { --mo-ring: mo-spawning; --mo-row: mo-row-light; }
+[data-status="alive_but_silent"] { --mo-ring: mo-silent; --mo-row: mo-row-silent; }
+[data-status="suspected_stall"] { --mo-ring: mo-stall; --mo-row: mo-row-stall; }
+[data-status="error"] { --mo-ring: mo-error; --mo-row: mo-row-error; }
+.cap-ex { display: block; max-width: calc(65 * var(--unit)); overflow: clip; text-overflow: ellipsis; white-space: nowrap; color: var(--fg-muted); font-size: var(--fs-xs); margin-left: var(--sp-xs); }
+.msg.cat .author-row .msg-recv { contain: inline-size; min-width: var(--ctl-xs); flex: 0 0 auto; position: relative; z-index: var(--z-raised); overflow: visible; margin-left: 0; }
+/* 插件 / 系统发来的消息：一次性、不流式，左对齐的中性气泡（所有插件同一种底）；身份色只在头像和名字上 */
+.msg.cat[data-act] > .cat-bubble { cursor: pointer; }
+/* 卡片模板 */
+.msg.cat > .vw-card { align-self: stretch; }
+/* 提示（纯提示，悬停才出现的文字）：一个全局浮层，悬停 --tip-delay 后出现在目标旁边，离开、按下、滚动立刻消失。
+   文字来自 data-tip；help 的 ? 也是它。不用原生 title（原生的延迟由系统决定，改不了） */
+.ui-tip { position: fixed; position-anchor: var(--u-anchor); position-visibility: always; position-area: bottom; margin-block: var(--sp-xs); position-try-fallbacks: flip-block, bottom span-right, bottom span-left, top span-right, top span-left; z-index: var(--z-tip); max-width: calc(80 * var(--unit)); padding: var(--sp-xs) var(--sp-s); border-radius: var(--r-s); background: var(--fg-strong); color: var(--bg-page); font-size: var(--fs-s); line-height: 1.5; white-space: pre-line; pointer-events: none; opacity: 0; visibility: hidden; box-shadow: var(--shadow-raised); }
+.ui-tip[popover] { inset: auto; margin-inline: 0; border: 0; }
+.ui-tip.side { position-area: left; margin: 0 var(--sp-s); position-try-fallbacks: flip-inline; }   /* 竖排提示组：先放左边，放不下翻到右边 */
+.ui-tip.on { opacity: 1; visibility: visible; }
+.edit-leaf { position: fixed; position-anchor: var(--u-anchor); position-visibility: always; position-area: bottom span-right; margin-block: var(--sp-xs); position-try-fallbacks: flip-block; z-index: var(--z-tip); display: flex; align-items: center; gap: var(--sp-xs); padding: var(--sp-xs) var(--sp-xs) var(--sp-xs) var(--sp-s); border-radius: var(--r-m); background: var(--surf-float); box-shadow: var(--shadow-float); }   /* 编辑布局：悬停叶子的名字和复制定位 */
+.edit-leaf[popover] { inset: auto; margin-inline: 0; border: 0; }
+/* 等待提示：正文位置的一行淡字，没有边框和底色；操作是行尾的文字链接 */
+/* 打字时让位：typing-scope 里正在输入时，标了 hideWhileTyping 的元素淡出、不可点；停下后淡回 */
+[data-htype] { transition: opacity var(--dur-med) ease, visibility 0s linear 0s; }
+.typing-scope[data-typing] [data-htype] { opacity: 0; visibility: hidden; pointer-events: none; transition: opacity var(--dur-med) ease, visibility 0s linear var(--dur-med); }
+/* 分组段：收起只露需要注意的那几行；多出的几行在 data-more 时才露（开关只改段上的属性） */
+.gsec[data-collapsed] > .gsec-b > .gsec-rows, .gsec:not([data-collapsed]) > .gsec-b > .gsec-peek, .gsec:not([data-more]) .gsec-x { display: none; }
+/* 中间折叠展开时，尾巴藏起来（结构一直在，开关只改 data-open） */
+[data-fold="middle"][data-open="true"] > .fold-tail { display: none; }
+/* 过程记录：一直画着，收起时藏；开关的箭头展开时转 90°（开关只改属性，不重画消息） */
+.vw-turn > .ic { transition: rotate var(--dur-fast); }
+[aria-expanded="true"] .vw-turn > .ic { rotate: 90deg; }
+/* 树：目录节点本地开合（data-open）：收起时子级藏起来，箭头转 90° */
+.lr-node[data-open="false"] > .lr-kids { display: none; }

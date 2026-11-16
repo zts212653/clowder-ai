@@ -1,0 +1,66 @@
+/* 边界：一个含义一个组件、不为接口定制、不按位置推导样式 */
+/* 缩略图单选 */
+/* ── 缩略图单选（组件库：choices variant thumb；外观的自动 / 浅色 / 深色）──
+   一个小窗口：窄栏 / 侧栏 / 页面（一张卡片 + 强调色的一笔）；颜色来自数据（--u-*）。自动 = 两个窗口各占一半。当前项是标准的选中环 */
+.thumbs { display: flex; flex-wrap: wrap; gap: var(--sp-l); }
+.thumb-opt { display: flex; flex-direction: column; align-items: center; gap: var(--sp-xs); padding: 0; border: 0; background: none; cursor: pointer; color: var(--fg-muted); font-size: var(--fs-m); }
+.thumb-opt[aria-checked="true"] { color: var(--fg-strong); }
+.thumb { display: flex; width: var(--thumb-w); height: var(--thumb-h); border-radius: var(--r-m); overflow: hidden; box-shadow: 0 0 0 var(--sp-hairline) var(--line); }
+.thumb-opt[aria-checked="true"] .thumb { box-shadow: 0 0 0 var(--sp-hair) var(--accent); }
+.thumb-opt:hover .thumb { box-shadow: 0 0 0 var(--sp-hairline) var(--line-strong); }
+.thumb-opt[aria-checked="true"]:hover .thumb { box-shadow: 0 0 0 var(--sp-hair) var(--accent); }
+.thumb-win { flex: 1 1 0; min-width: 0; display: grid; grid-template-columns: 14% 28% 1fr; }
+.thumb.split .thumb-win { grid-template-columns: 0 40% 1fr; }
+.tw-rail { background: var(--u-rail); } .tw-nav { background: var(--u-nav); }
+.tw-page { display: flex; flex-direction: column; justify-content: space-between; padding: 18% 14%; background: var(--u-page); }
+.tw-card { height: 40%; border-radius: var(--r-s); background: var(--u-group); }
+.tw-dot { align-self: flex-end; width: 42%; height: 16%; border-radius: var(--r-full); background: var(--u-accent); }
+
+/* 插件配置表单（pluginConfigForm）：操作的一列内容（按钮、状态、二维码、行结果）上下排开；二维码是一个方块面 */
+.pcf-op { display: flex; flex-direction: column; align-items: flex-start; gap: var(--sp-s); min-width: 0; }
+.pcf-op > .lr-list { align-self: stretch; }
+.pcf-acts { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-s); }
+/* 插件配置的 records 字段：每行一个小分组（标题 + 删除，下面是子字段），最后一排是添加和模板 */
+.pcf-recs { display: flex; flex-direction: column; gap: var(--sp-s); min-width: 0; flex: 1; }
+.pcf-rec-h { display: flex; align-items: center; gap: var(--sp-s); padding: var(--sp-xs) var(--sp-m); }
+.pcf-qr { display: grid; place-items: center; width: var(--qr-size); aspect-ratio: 1; border-radius: var(--r-m); background: var(--bg-raised); color: var(--fg); box-shadow: var(--shadow-low); }
+/* “到最新”：离底部超过 240px 才露出。消息流有一条命名的滚动时间线，按钮的显隐是这条时间线上的一段——
+   不监听滚动、不量尺寸；内容不够滚时时间线不激活，按钮保持隐藏。消息流是 stick-end（反向排列），时间线 0% 在底部，所以这一段是 240px → 100% */
+#stream { scroll-timeline: --chat-stream y; scrollbar-width: none; }   /* 消息流不画浏览器的滚动条：右边的消息导航就是它的滚动指示；别的滚动容器照常 */
+/* “到最新”自己的显隐（scale + 这条时间线上的一段）写在 parts.css 的 .cafe-latest 里；组件目录里一直露出：目录容器设 token（--jump-scale / --jump-anim），不按后代覆盖 */
+@keyframes jump-vis { from, to { scale: 1; } }   /* 显隐走 scale（缩到 0 就点不到），不碰 opacity / visibility：打字让位（data-htype）用的是那两个，动画会盖过它们 */
+
+/* 成员悬停卡（PDL_POPUPS.memberCard）：贴着悬停的头像 / 名字，放不下翻到另一边；表面和菜单同一个角色（float） */
+.member-card { position: fixed; z-index: var(--z-menu); position-anchor: var(--u-anchor); position-visibility: always; position-area: bottom span-right; margin-block: var(--sp-xs); position-try-fallbacks: flip-block, flip-inline, flip-block flip-inline; width: min(calc(75 * var(--unit)), calc(100vw - 2 * var(--sp-s))); display: flex; flex-direction: column; gap: var(--sp-xs); }
+.member-card > .vw-view > :not(.lr) { padding-inline: var(--lr-pad); }   /* 卡片里行以外的块（模型、职责、操作）和行的文字同一条左边 */
+/* 决定后的一行结果（result 块）：状态 + 文字 + 详情开关 + 操作；详情在下面 */
+.vw-result { display: flex; flex-direction: column; gap: var(--sp-s); min-width: 0; }
+.vw-result-row { display: flex; align-items: center; gap: var(--sp-s); flex-wrap: wrap; font-size: var(--fs-m); min-width: 0; }
+.vw-result-row > .grow { flex: 1; }
+.vw-result-row .status { white-space: normal; }
+.vw-result-d { display: flex; flex-direction: column; gap: var(--sp-s); }
+/* 被新提议替代的旧卡：内容变淡，结果行（带 ↓）保持原样 */
+.vw-card[data-faint] > :not(.vw-result) { opacity: var(--op-wash); }
+/* 勾选框的“部分选中”（一条消息只选了其中几张卡片） */
+[aria-checked="mixed"] > .box { background: var(--switch-on); box-shadow: none; }
+[aria-checked="mixed"] > .box::after { content: ""; width: calc(var(--ic-m) / 2); height: var(--sp-hair); border-radius: var(--sp-hair); background: var(--bg-group); }
+[aria-checked="mixed"] > .box .ic { display: none; }
+/* 引用胶囊（文件 / PR / 提交）：图标 + 名字；只有出问题时带色调 */
+.copyv { display: inline-flex; align-items: center; gap: var(--sp-xs); min-width: 0; max-width: 100%; vertical-align: middle; }   /* 可复制的值：值 + 复制图标 */
+.copyv-v { min-width: 0; overflow: clip; text-overflow: ellipsis; white-space: nowrap; }
+.copyv[data-tail] > .copyv-v { direction: rtl; text-align: left; }
+.ref-chip { display: inline-flex; align-items: center; gap: var(--sp-xs); max-width: 100%; vertical-align: baseline; padding: 0 var(--sp-s); border: 0; border-radius: var(--r-full); background: var(--bg-hover); color: var(--fg-strong); font: inherit; font-size: var(--fs-m); line-height: var(--ctl-xs); cursor: pointer; }
+.ref-chip:hover { background: var(--bg-selected); }
+.ref-chip[disabled] { cursor: default; }
+.ref-chip .ref-n { min-width: 0; overflow: clip; text-overflow: ellipsis; white-space: nowrap; }
+.ref-chip[data-tone] { color: var(--tone-c); }
+/* 已发布的 HTML 小组件：沙箱 iframe，整宽 */
+.vw-widget.tall { min-height: calc(var(--row-h) * 12); }
+.vw-widget { display: block; width: 100%; min-height: calc(var(--row-h) * 6); border: 0; border-radius: var(--r-l); background: var(--bg-group); }
+.vw-widget[data-frame-size] { min-height: 0; }
+.vw-widget[src] { flex: 1 1 0; min-height: 0; height: 100%; }
+/* 列表的“部分可用”：列表顶上一行 warn 色调 */
+.lr-partial { display: flex; align-items: center; gap: var(--sp-xs); padding: var(--sp-xs) var(--sp-s); font-size: var(--fs-m); color: var(--tone-c); }
+/* 菜单里停用的项（下拉里现在不能选的选项）：灰掉、没有悬停底色，原因在提示里 */
+.menu button[aria-disabled="true"] { color: var(--fg-disabled); cursor: default; }
+.menu button[aria-disabled="true"]:hover { background: none; color: var(--fg-disabled); }

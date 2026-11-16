@@ -1,0 +1,29 @@
+/* 边界：一个含义一个组件、不为接口定制、不按位置推导样式 */
+/* 投影：被盖住的层 */
+/* ── 投影：被盖住的层 ──────────
+   每个容器画它栈顶的那一层；被盖住的层留在 DOM 里，不排版、不画、不能交互（content-visibility: hidden + inert），重新露出来时原样回来。
+   看得见的层不加盒子（display: contents），布局和没有层时一样；覆盖一个容器的那一层是一个铺满的滚动区（.cover）。 */
+.app, .panel { position: relative; }
+.layer { display: contents; }
+.layer-covered, .layer.layer-covered { display: block; position: absolute; inset: 0; content-visibility: hidden; visibility: hidden; pointer-events: none; }
+.cover { min-width: 0; min-height: 0; height: 100%; position: relative; background: var(--bg-page); }
+.cover-in { height: 100%; position: relative; }   /* 覆盖层的滚动层：在面里面（渐隐透出面），也是容器网格的盒子 */
+.layer.occ { display: block; position: relative; min-height: 100%; }
+.app.occ-focus > .cover.occ, .app.occ-focus .layer.occ { z-index: var(--z-float-top); background: var(--bg-page); }
+.split[data-cols] { grid-template-columns: var(--split-cols); }
+/* 结构页里加的容器：一个盒子，方向来自声明；空的时候不占地方，编辑布局时画成虚线的落点 */
+.ct-box {
+  --glass-page: color-mix(in srgb, var(--bg-page) var(--bg-veil), transparent);
+  background: var(--bg-page); display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.app.bg-shell .ct-box { position: relative; background: var(--glass-page); }
+.ct-box[data-dir="row"] { flex-direction: row; }
+.ct-box .ct-slot { display: flex; flex-direction: inherit; align-items: center; gap: var(--sp-xs); padding: var(--sp-xs); }
+.ct-box .ct-slot:empty { padding: 0; }
+body.edit-layout .ct-box { min-width: var(--ctl-l); min-height: var(--ctl-l); outline: 1px dashed var(--line-strong); outline-offset: -2px; }
+/* 主题计算器：配色 / 结构两页；结构页是一棵容器树（缩进由深度推出），拖一行移动 */
+.calc-tabs { padding: 0 var(--sp-m) var(--sp-s); }
+.calc-tree .calc-ct.drop-before { box-shadow: 0 -2px 0 var(--accent); }
+.calc-tree .calc-ct.drop-end { box-shadow: 0 2px 0 var(--accent); }
+.calc-tree .calc-ct.pdl-over { background: var(--accent-soft); }
+/* 结构页选中的容器：页面上一圈强调色描边，锚定在容器上（theme-calculator.js ctRingSync），不挡点击；放在计算器的弹窗外壳里，画在计算器下面 */
+.ct-ring { position: fixed; position-anchor: var(--u-anchor); position-visibility: always; top: anchor(top); left: anchor(left); right: anchor(right); bottom: anchor(bottom); pointer-events: none; border-radius: var(--r-s); outline: var(--sp-hair) solid var(--accent); outline-offset: calc(-1 * var(--sp-hair)); }

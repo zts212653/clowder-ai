@@ -1,0 +1,21 @@
+/* 边界：一个含义一个组件、不为接口定制、不按位置推导样式 */
+/* 对话消息：作者行、气泡、过程记录 */
+/* ── 对话消息：作者行 · 气泡 · 过程记录（按 issue4 视觉稿） ── */
+.msg.cat { display: flex; flex-direction: column; align-items: stretch; width: fit-content; max-width: min(var(--span-10), 100%); }
+.msg.cat:not([data-surface="none"]) { width: var(--span-10); }
+.cat-bubble .msg-body code.cmd { background: var(--bg-code); padding: var(--sp-hairline) var(--sp-xs); border-radius: var(--r-xs); color: var(--fg-strong); }
+/* 过程记录贴近正文；组内连续发言之间留小一点的间隔 */
+.msg.cat > .msg-meta { grid-column: auto; justify-content: flex-start; margin-top: 0; padding-top: var(--sp-hair); }
+.cat-bubble .msg-body p:last-child { margin-bottom: 0; }
+/* 执行记录里的工具列表：最多露出 10.5 条，提示还能往下滚 */
+/* 同一组连续发言：竖线连成一条，像同一条消息的不同段落 */
+/* 消息悬停工具条放在右下（和过程记录同一行），不盖住右上角的引用 */
+.cafe-m > .cafe-acts { top: auto; bottom: -6px; right: calc(100% - var(--span-10)); }
+/* 中间折叠（第二版）：没有横线、不占正文；开头和结尾几乎贴在一起，靠上下渐变暗示中间收起了；开关在消息右侧 */
+.cat-bubble { background: none; border-left: 3px solid var(--c, var(--identity-fallback)); border-radius: 0; padding: var(--sp-hair) 0 var(--sp-hair) var(--sp-l); overflow-wrap: anywhere; min-width: 0; max-width: none; position: relative; }
+/* 折叠开关：小、无底色 */
+/* 图标按钮的统一悬停（按钮组件的在上面“只有图标”）：不加底色，线条从灰色变成主题色 */
+.nav-pin:hover,
+.cafe-acts .btn:hover,
+.msg-meta button:hover, .meta-btn:hover { background: none; color: var(--accent-fg); }
+.menu button.danger:hover { color: var(--danger); }

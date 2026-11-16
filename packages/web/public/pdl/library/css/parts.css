@@ -50,7 +50,7 @@
 /* from ws-items.css */ .tk-g { width: var(--ic-s); height: var(--ic-s); border-radius: var(--r-full); box-shadow: inset 0 0 0 1.5px var(--fg-faint); }
 /* from ws-items.css */ .tk-st:hover .tk-g { box-shadow: inset 0 0 0 1.5px var(--accent-fg); }
 /* from ws-items.css */ .hb-av { display: inline-flex; }
-/* ── 弹出层（组件库：PDL 块 pop / opts / well，选项见 lrow.js popEntry）。位置由锚定决定（--pop，见 ui.js），放不下翻边；高度不超过锚点那一侧的剩余空间 ── */
+/* ── 弹出层（组件库：PDL 块 pop / opts / well，选项见 rows.js popEntry）。位置由锚定决定（--pop，见 engine/anchor.js），放不下翻边；高度不超过锚点那一侧的剩余空间 ── */
 .pop { position: fixed; z-index: var(--z-menu); position-anchor: var(--u-anchor); position-visibility: always; position-area: bottom span-right; margin-block: var(--sp-xs); position-try-fallbacks: flip-inline, flip-block, flip-block flip-inline; width: var(--u-w, auto); max-width: calc(100vw - 2 * var(--sp-s)); max-height: round(down, min(11 * var(--row-h-1), 100%), var(--row-h-1)); gap: var(--sp-hairline); }
 .pop.up { position-area: top span-right; }
 .pop.fit { width: max-content; max-width: calc(100vw - 2 * var(--sp-s)); }   /* 工具条类的浮层按内容定宽 */

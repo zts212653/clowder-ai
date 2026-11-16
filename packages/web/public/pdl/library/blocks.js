@@ -1,4 +1,5 @@
 /* 边界：一个含义一个组件、不为接口定制、不按位置推导样式 */
+/* 视图块：PDL 块的画法（PDL_BLOCKS）、片段、控件、行、设置行、头、读取状态、节点模板、小节目录 */
 /* 视图块的画法（组件库）：片段、控件、行、设置行、头、列表、全部块（PDL_BLOCKS 的内容）、节点模板、读取状态、提示、小节目录。
    视图引擎（取值、本地化、按块派发、视图的读取状态、下钻的返回、契约 PDL_SCHEMA）在 engine/pdl-view.js；这里只画，块只在这里登记（lint：pdl-block）。 */
 'use strict';
@@ -258,7 +259,7 @@ function pvControl(c, sc, root) {
       if (val == null && !c.input && !c.lead) return cafeFld(id, null, pvText(c.placeholder, sc, root), { mono: !!P(c.mono), max: c.max, type: P(c.secret) ? 'password' : '' });   /* 没有绑定值：草稿留在本地（提问卡、新建表单） */
       const inp = '<input class="input' + (P(c.mono) ? ' mono' : '') + '" id="' + h(id) + '" value="' + h(val == null ? '' : val) + '" placeholder="' + pvText(c.placeholder, sc, root) + '"' + (c.input ? ' data-input="' + c.input + '"' : '') + (c.change ? ' data-change="' + c.change + '"' : '') + data + (P(c.num) ? ' inputmode="numeric"' : '') + (P(c.ro) ? ' readonly' : '') + (P(c.invalid) ? ' aria-invalid="true"' : '') + (P(c.secret) ? ' type="password"' : '') + (c.max ? ' maxlength="' + c.max + '"' : '') + (c.label || c.placeholder ? ' aria-label="' + pvText(c.label || c.placeholder, sc, root) + '"' : '') + (P(c.disabled) ? ' disabled' : '') + onAttrs(c.on) + '>' +
         (c.post ? ' <span class="vw-meta">' + pvText(c.post, sc, root) + '</span>' : '');   /* post：框后的单位 */
-      /* listFrom：候选（字符串，或 { v, label, sub }）——框尾一个下拉按钮，点开组件库的菜单，选中的写回框里（ui.js 的 comboOpen） */
+      /* listFrom：候选（字符串，或 { v, label, sub }）——框尾一个下拉按钮，点开组件库的菜单，选中的写回框里（inputs.js 的 comboOpen） */
       /* reload：候选是读来的，可以重读——框尾一直有一个刷新（{ act, args, busy, tip, why }，读的时候它自己转；why 有值 = 这次不能读，置灰、悬停说原因） */
       if (combo) { COMBO[id] = combo; return '<span class="combo">' + inp + btn(pvText(c.label || c.placeholder, sc, root), { iconOnly: true, sm: true, icon: 'updown', act: 'comboOpen', data: ' data-for="' + h(id) + '" aria-haspopup="menu"' }) + (c.reload ? btn(tc('common.refresh'), { iconOnly: true, sm: true, icon: 'refresh', act: c.reload.act, busy: !!P(c.reload.busy), tip: P(c.reload.tip), why: P(c.reload.why), data: argAttrs(pvArgsObj(c.reload.args || {}, sc, root)) }) : '') + '</span>'; }
       return c.lead ? '<label class="input-lead">' + pvParts(c.lead, sc, root) + inp + '</label>' : inp;   /* lead：框里最前面的状态（地址栏的连接点） */
@@ -413,30 +414,6 @@ function pvHead(b, sc, root) {
   const sub = (b.meta ? pvParts(b.meta, sc, root) : '') + (b.descAction ? pvControl(b.descAction, sc, root) : '');
   return pageHead({ back: bk, lead: b.lead ? pvJoin(b.lead, sc, root, '') : '', title: pvText(b.title, sc, root), status: hs.status, titleNote: b.note, help: pv(b.help, sc, root) || (b.desc ? pvText(b.desc, sc, root) : ''), sub: sub, label: pvAnnot(b.label, sc, root), actions: (b.tools ? pvControls(b.tools, sc, root) : '') + actions, actNote: b.actNote });
 }
-/* list / cards 共用续读尾标（唯一一个）：服务端的下一页（声明的 next）和本地的下一页（渐进显示）都是它。
-   还有下一批时末尾是一个 ⋯（悬停“查看更多”），点它就读下一批；滚到附近也会自动读（服务端的下一页、本地的下一页一样；节点重画不续读，离开附近再进入或向下滚轮才触发下一批） */
-const LIST_NEXT = {};
-function listNextHtml(decl, sc, root) {
-  const d = pv(decl, sc, root); if (!d) return '';
-  return listNextTail(pv(d.key, sc, root), { act: pv(d.act, sc, root), args: pvArgsObj(d.args, sc, root), enabled: pvOk(d.when, sc, root), busy: !!pv(d.busy, sc, root) });
-}
-function listNextTail(k, x) {
-  LIST_NEXT[k] = x;
-  return '<div class="list-next" data-list-next="' + h(k) + '" data-island="list-next:' + h(k) + '">' + (x.enabled && !x.busy ? btn(tc('list.loadMore'), { iconOnly: true, sm: true, icon: 'more', act: 'listNextGo', data: ' data-k="' + h(k) + '"' }) : '') + '</div>';
-}
-A.listNextGo = function (d) { const x = LIST_NEXT[d.k]; if (x && x.enabled && !x.busy) actFn(x.act)(x.args); };
-function listNextRead(el, near) {
-  const d = LIST_NEXT[el.dataset.listNext];
-  if (!near) { el._nextRead = false; return; }
-  if (!d.enabled || d.busy || el._nextRead || !el.checkVisibility()) return;
-  el._nextRead = true; actFn(d.act)(d.args, el);
-}
-nearView('[data-list-next]', listNextRead);
-document.addEventListener('wheel', function (e) {
-  if (e.deltaY <= 0) return;
-  const sc = e.target.closest('.scroll'); if (!sc) return;
-  sc.querySelectorAll('[data-list-next]').forEach(function (el) { if (el.closest('.scroll') === sc && el.__near && !LIST_NEXT[el.dataset.listNext].busy) { el._nextRead = false; listNextRead(el, true); } });
-}, { passive: true });
 function pvListBody(b, sc, root) {
   const tpl = typeof b.row === 'string' ? PDL_ROWS[b.row] : b.row;
   if (b.groups) {   /* 分组：组标题和行在同一个列表底里 */
@@ -641,7 +618,7 @@ Object.assign(PDL_BLOCKS, {
     const t = pvText(b.text, sc, root); if (!t) return '';
     return emptyState({ html: t, help: helpTip(pv(b.help || b.hint, sc, root)), acts: b.action ? pvControl(b.action, sc, root) : '', icon: b.icon });
   },
-  /* 弹出层（组件库）：贴着触发元素（锚定 --pop，见 ui.js）；pos 只有方向 up、宽度 span（窗口网格占几列，按内容需要声明：候选这类少几列）、按内容定宽 fit，
+  /* 弹出层（组件库）：贴着触发元素（锚定 --pop，见 engine/anchor.js）；pos 只有方向 up、宽度 span（窗口网格占几列，按内容需要声明：候选这类少几列）、按内容定宽 fit，
      at = 相对锚点的偏移（选中文字：锚在消息上，偏到选区处）。不写坐标，放不下由浏览器翻到另一边 */
   pop: function (b, sc, root) {
     const v = Array.isArray(b.pos) ? b.pos.find(function (x) { return pvOk(x.when, sc, root); }) || {} : pv(b.pos, sc, root) || {}, p = { up: pv(v.up, sc, root), span: pv(v.span, sc, root), fit: pv(v.fit, sc, root) }, up = !!p.up, card = b.variant === 'card';   /* pos：位置的几种情况（第一个 when 成立的），每种写 up / span / fit */
@@ -676,9 +653,9 @@ Object.assign(PDL_BLOCKS, {
     const field = ad ? pvControl({ type: 'input', add: true, id: ad.id, placeholder: ad.placeholder || 't:tagManager.tagName', label: ad.label || 't:tagManager.newTag', go: ad.act, args: ad.args, goLabel: 't:common.create', tint: ad.tint }, sc, root) : '';
     return tagEditor({ chips: chips, empty: b.empty ? pvText(b.empty, sc, root) : '', field: field });
   },
-  /* 对话列表：分组段 + 一个对话一行（数据形状见 lrow.js threadRow / threadSections） */
+  /* 对话列表：分组段 + 一个对话一行（数据形状见 rows.js threadRow / threadSections） */
   threads: function (b, sc, root) { const html = threadSections(pvList(b.from, sc, root), b, root), n = pv(b.note, sc, root); return n ? '<div data-note="' + h(n) + '">' + html + '</div>' : html; },
-  /* 弹出层里的一列选项（数据见 lrow.js 的 popEntry）；空的时候一行说明 */
+  /* 弹出层里的一列选项（数据见 rows.js 的 popEntry）；空的时候一行说明 */
   opts: function (b, sc, root) {
     const list = Array.isArray(b.from) ? b.from : pvList(b.from, sc, root), out = [];
     const one = function (it, data) {
@@ -816,132 +793,6 @@ document.addEventListener('scroll', function (e) {
   let cur = null; items.forEach(function (b, i) { const s = document.getElementById(b.dataset.id); if (s && (i === 0 || s.getBoundingClientRect().top - top < gap)) cur = b; });
   items.forEach(function (b) { if (b === cur) b.setAttribute('aria-current', 'true'); else b.removeAttribute('aria-current'); });
 }, true);
-/* 消息导航的键盘（组件库）：焦点在一格刻度上时，上下、Home / End、翻页在刻度之间移动焦点（同一个 keyStep） */
-KEY_FNS.push(function (e) {
-  const t = e.target; if (!t || !t.classList || !t.classList.contains('cafe-tick')) return false;
-  const ticks = Array.from(document.querySelectorAll('button.cafe-tick')), k = keyStep(e, ticks.indexOf(t), ticks.length, { page: true });
-  if (k == null) return false; e.preventDefault(); ticks[k].focus(); return true;
-});
-/* 消息导航的当前位置（组件库）：消息在消息流的视口里时，导航里对应的那一格带 data-vis（高亮）。由视口观察驱动，不在滚动事件里逐帧量；
-   观察器跟着消息流走：消息流、消息、刻度进了文档时由引擎的进树通知（treeMatch）接上。只改刻度上的一个属性，不重画 */
-const TICK_VIS = new Set(), TICK_IO = { io: null, root: null, inter: new Set() };
-function tickVisMark(mid) {
-  const on = Array.from(TICK_IO.inter).some(function (m) { return m.isConnected && m.dataset.mid === mid; });
-  if (on) TICK_VIS.add(mid); else TICK_VIS.delete(mid);
-  document.querySelectorAll('.cafe-tick[data-mid="' + CSS.escape(mid) + '"]').forEach(function (t) { t.toggleAttribute('data-vis', on); });
-}
-function tickVisRoot(s) {
-  if (!s || TICK_IO.root === s) return;
-  if (TICK_IO.io) TICK_IO.io.disconnect();
-  TICK_IO.root = s; TICK_IO.inter.clear(); TICK_VIS.clear();
-  TICK_IO.io = new IntersectionObserver(function (es) {
-    const mids = {};
-    es.forEach(function (e) { if (e.isIntersecting && e.target.isConnected) TICK_IO.inter.add(e.target); else TICK_IO.inter.delete(e.target); mids[e.target.dataset.mid] = 1; });
-    Object.keys(mids).forEach(tickVisMark);
-  }, { root: s });
-  s.querySelectorAll('[data-stream] > .cafe-m[data-mid]').forEach(function (m) { TICK_IO.io.observe(m); });
-}
-/* 重画之后按记下的可见消息重新标刻度：可见性只改这一个属性、不写进 HTML——写进去的话，切一个工作台标签让消息流变窄一格，
-   视口里的消息就换了，下一次画出来的刻度 HTML 和上一次不同，整块主区跟着重画，滚一下就冒滚动条 */
-PAINT_SYNC.push(function () { document.querySelectorAll('.cafe-tick[data-mid]').forEach(function (t) { t.toggleAttribute('data-vis', TICK_VIS.has(t.dataset.mid)); }); });
-treeMatch('#stream', tickVisRoot);
-treeMatch('#stream [data-stream] > .cafe-m[data-mid]', function (m) { const s = m.closest('#stream'); if (s !== TICK_IO.root) tickVisRoot(s); else TICK_IO.io.observe(m); });
-/* 视图引擎经组件库画的入口（PV_DRAW，见 engine/pdl-view.js） */
-/* 按身份管自己孩子的列表（组件库通用：消息流、消息导航……；块的根带 data-own="类型"）——每一项是一个单元：按键记下它上次的数据对象、
-   读到的页面级的值和界面状态、画出来的 HTML。数据没变由应用决定：没变的一项交来的还是上次那个对象（只比引用，不比内容）；
-   主题的 item 映射在单元里面做（PV.units 登记的块），只有要重画的那一项才映射。带变化来源的重画里，这三样都没变的单元只交一个壳（keptStub）；
-   DOM 上由 unitsOwn 按键对齐：没变的节点留在原位、变了的换掉、新的插进去、没了的拿掉 */
-const UNITS = {};
-/* 长列表一下子多出很多新的单元（第一次打开、换了对话）：先画最后（最新的）UNITS_FIRST 个，前面的先留着，原处是通用的读取中；
-   之后每一帧补一批（一批比一批多），补的那一下只重画这个列表（它读过 UNITS_HELD 里自己那一项）；补上来的不算新到达。跳到一条还没画的消息时先全画上 */
-const UNITS_FIRST = 12, UNITS_HELD = pdlTrack({}, 'UNITS');   /* 还没补上的：界面状态（读过它的列表在补上一批时重画） */
-let UNITS_FILLING = false;
-function unitsHeld(id, items, keyOf, was) {
-  const held = UNITS_HELD[id], keys = items.map(keyOf);
-  if (held) {   /* 只留开头那一段、而且后面还有画出来的：别的情况（同一个列表换了一组项）就全画 */
-    held.keys.forEach(function (k) { if (keys.indexOf(k) < 0) held.keys.delete(k); });
-    let lead = 0; while (lead < keys.length && held.keys.has(keys[lead])) lead++;
-    if (held.keys.size && lead === held.keys.size && lead < keys.length) return held.keys;
-    delete UNITS_HELD[id];
-  }
-  if (UNITS_FILLING) return null;   /* 补画（含全画上）的这一下不再留 */
-  let lead = 0; while (lead < keys.length && !was[keys[lead]]) lead++;
-  const n = Math.min(lead, keys.length - UNITS_FIRST); if (n <= UNITS_FIRST) return null;
-  UNITS_HELD[id] = { keys: new Set(keys.slice(0, n)), batch: UNITS_FIRST };
-  settleHold(new Promise(function (done) { unitsFill(id, done); }));
-  return UNITS_HELD[id].keys;
-}
-function unitsFill(id, done) {
-  requestAnimationFrame(function () {
-    const held = UNITS_HELD[id]; if (!held) { done(); return; }
-    const keys = Array.from(held.keys); held.batch *= 2;
-    keys.slice(Math.max(0, keys.length - held.batch)).forEach(function (k) { held.keys.delete(k); });   /* 先补挨着已画部分的那些 */
-    if (!held.keys.size) delete UNITS_HELD[id]; else held.left = held.keys.size;   /* 还剩几个：读过它的列表重画 */
-    UNITS_FILLING = true; try { render(true); } finally { UNITS_FILLING = false; }
-    if (UNITS_HELD[id]) unitsFill(id, done); else done();
-  });
-}
-ENGINE_PARTS.unitsAll = function () {
-  const ids = Object.keys(UNITS_HELD); if (!ids.length) return false;
-  ids.forEach(function (id) { delete UNITS_HELD[id]; });
-  UNITS_FILLING = true; try { render(true); } finally { UNITS_FILLING = false; }
-  return true;
-};
-function unitsHtml(id, items, keyOf, draw, root) {
-  const was = UNITS[id] || {}, now = {}, rootNow = {};   /* 页面级的值对每一项都一样：这一次只算一遍 */
-  const rootSame = function (r) { if (!(r[0] in rootNow)) rootNow[r[0]] = JSON.stringify(root[r[0]]); return rootNow[r[0]] === r[1]; };
-  const held = unitsHeld(id, items, keyOf, was);
-  let heldAt = false;
-  const html = items.map(function (it) {
-    const key = keyOf(it), u = was[key];
-    if (held && held.has(key)) { if (heldAt) return ''; heldAt = true; return '<div class="units-held" data-units-held>' + viewState('loading', { count: 3 }) + '</div>'; }
-    if (u && RENDER_CHANGED && u.gen === RENDER_GEN && (u.item === it || u.json === JSON.stringify(it)) && !readsHit(u.reads, RENDER_CHANGED) && u.rootReads.every(rootSame)) {   /* 这一项的数据：同一个对象，或者值一样 */
-      readsReplay(u.reads, true); now[key] = u; return u.html ? keptStub('unit:' + id + '|' + key, u.html) : '';
-    }
-    /* 交给这一项的根是一个会记读取的代理：读到根上哪个字段就记下它和它的值（嵌套子视图用它们自己的根，不在这里） */
-    const reads = new Set(), rootReads = [], seen = {}, at = new Proxy(root, { get: function (t, k) { if (typeof k === 'string' && !seen[k]) { seen[k] = 1; rootReads.push([k, JSON.stringify(t[k])]); } return t[k]; } });
-    READ_SCOPES.push(reads);
-    let out; try { out = draw(it, at); } finally { READ_SCOPES.pop(); }
-    reads.forEach(function (r) { for (let i = 0; i < READ_SCOPES.length; i++) READ_SCOPES[i].add(r); });
-    now[key] = { item: it, json: JSON.stringify(it), gen: RENDER_GEN, reads: reads, rootReads: rootReads, html: out }; return out;
-  }).join('');
-  UNITS[id] = now;
-  return html;
-}
-function unitsItem(b, it, root) { return b.item ? Object.assign({}, it, pvDeep(b.item, root, it)) : it; }
-/* DOM 上的对齐：nodeKey(节点) 给出它的键（没有键的按出现顺序和原来的比，一样就留着）；
-   hook 是组件自己在对齐时要做的（消息流的到达动效）：start(live, next, old) → 这一次的上下文，kept(原节点)，added(新节点, 同键的原节点, 上下文) */
-function unitsOwn(nodeKey, hook) {
-  return function (live, next) {
-    const old = new Map(), loose = [];
-    Array.prototype.forEach.call(live.childNodes, function (c) { const k = nodeKey(c); if (k) old.set(k, c); else loose.push(c); });
-    const ctx = hook ? hook.start(live, next, old) : null;
-    let li = 0;
-    const plan = Array.prototype.map.call(next.childNodes, function (n) {
-      const k = nodeKey(n), o = k ? old.get(k) : null;
-      if (o && (n.dataset.kept || NODE_HTML.get(o) === streamVer(n))) { if (hook) hook.kept(o); return o; }   /* 这一项没变（只交了壳，或画出来一样）：原节点留着 */
-      if (n.dataset && n.dataset.kept) return n;   /* 只交了壳、这里没有原节点：由 keptFill 换回完整的 */
-      if (!k) { const c = loose[li++]; if (c && c.isEqualNode(n)) return c; }
-      if (n.nodeType === 1) { NODE_HTML.set(n, streamVer(n)); if (hook) hook.added(n, o, ctx); }
-      return n;
-    });
-    placeKids(live, plan);
-  };
-}
-/* 消息流：单元的键——正在回复的占位按它的回合（data-run），其余按消息 id；新出现的消息有到达动效（这条流画之前就有、至少一条消息还在才算；正式消息接替占位不再到达） */
-function streamUnitKey(it) { return it.kind === 'typing' ? 'typing:' + it.mid : String(it.mid); }
-function streamNodeKey(n) { return n.nodeType === 1 ? (n.dataset.run ? 'typing:' + n.dataset.run : n.dataset.mid || null) : null; }
-OWN.stream = unitsOwn(streamNodeKey, {
-  start: function (live, next, old) {
-    return { hadTyping: old.has('typing') || Array.prototype.some.call(live.children, function (c) { return c.dataset.mid === 'typing'; }),
-      had: Array.prototype.some.call(next.children, function (n) { const k = streamNodeKey(n); return k && k.indexOf('typing:') !== 0 && old.has(k); }) };
-  },
-  kept: function (o) { o.classList.remove('arrive'); },
-  added: function (n, o, c) { if (!o && c.had && !UNITS_FILLING && (n.dataset.mid === 'typing' || !c.hadTyping)) n.classList.add('arrive'); }
-});
-/* 消息导航：一格一个单元，按消息 id */
-OWN.ticks = unitsOwn(function (n) { return n.nodeType === 1 ? n.dataset.mid || null : null; });
-Object.assign(PV.units, { stream: 1, ticks: 1 });
 /* 开进一个容器的东西：frame 节点（有视图画视图，只有地址画框）、页面；盖住容器时最前面是通用返回 */
 function pvOpened(l, key, cover) {
   const f = String(l.f), fr = navNodeOf(l), fk = fr ? f.slice(5) : null;
@@ -949,94 +800,3 @@ function pvOpened(l, key, cover) {
   return '<div class="opened" data-opened="' + h(key) + '">' + (cover ? engineBack({ act: 'back', data: ' data-c="' + h(key) + '"' }) : '') + body + '</div>';
 }
 Object.assign(PV_DRAW, { node: pvNode, control: pvControl, load: pvLoad, toc: pvWithToc, viewLoad: pvViewLoad, state: viewState, opened: pvOpened });
-
-/* 一次性发送：应用经引擎的既有登记点找指定的框；不保存消息，不在进树、重画或加载后重放。 */
-ENGINE_PARTS.framePost = function (key, data) {
-  const el = Array.from(document.querySelectorAll('iframe[data-frame-key]')).find(function (frame) { return frame.dataset.frameKey === key && !frame.closest('[inert]'); });
-  if (!el) return false;
-  el.contentWindow.postMessage(data, '*'); return true;
-};
-
-/* 独立 HTML 内容的通用数据绑定：属性变化只发消息，不重载 iframe。
-   消息含义由内容与应用约定，组件不认识页面或业务阶段。 */
-function frameMessage(el) {
-  const value = el.getAttribute('data-frame-message');
-  if (el._frameMessage === value) return;
-  el.contentWindow.postMessage(JSON.parse(value), '*'); el._frameMessage = value;
-}
-function frameMessages() { document.querySelectorAll('iframe[data-frame-message]').forEach(frameMessage); }
-onRender(frameMessages);
-/* 框看不看得见（clowder-frame-lifecycle）：画完、页面显隐变化、框说 ready 时告诉有名字的框；没变不重发 */
-function frameLifecycles(force) {
-  document.querySelectorAll('iframe[data-frame-key]').forEach(function (f) {
-    const v = !document.hidden && f.isConnected && !f.closest('[inert]');   /* 被盖住的层是 inert */
-    if (!force && f._frameVisible === v) return;
-    f._frameVisible = v; if (f.contentWindow) f.contentWindow.postMessage({ type: 'clowder-frame-lifecycle', visible: v }, '*');
-  });
-}
-function frameVisibility() { frameLifecycles(false); }
-onRender(frameVisibility);
-document.addEventListener('visibilitychange', frameVisibility);
-window.addEventListener('message', function (e) { if (e.data && e.data.type === 'clowder-frame-ready') frameLifecycles(true); });
-/* 只认消息来自哪个框；消息协议与可信 origin 均交给应用动作。 */
-window.addEventListener('message', function (e) {
-  const el = Array.from(document.querySelectorAll('iframe[data-frame-on-message]')).find(function (frame) { return frame.contentWindow === e.source; });
-  if (!el) return;
-  const fn = actFn(el.dataset.frameOnMessage); if (fn) fn(e.data, el, e);
-});
-document.addEventListener('load', function (e) {
-  if (e.target.matches && e.target.matches('iframe[data-frame-message]')) { e.target._frameMessage = null; frameMessage(e.target); }
-}, true);
-
-/* 沙箱只回报内容尺寸；父页按 source 找到自己的 iframe，不接受其他窗口的尺寸。 */
-function frameSizeScript() {
-  const report = function () {
-    const body = document.body; let bottom = 0, seen = false;
-    const include = function (rect) { if (rect.width > 0 || rect.height > 0) { seen = true; bottom = Math.max(bottom, rect.bottom + window.scrollY); } };
-    body.querySelectorAll('*').forEach(function (el) { Array.from(el.getClientRects()).forEach(include); });
-    const walker = document.createTreeWalker(body, NodeFilter.SHOW_TEXT); let node;
-    while ((node = walker.nextNode())) { if (!node.textContent.trim()) continue; const range = document.createRange(); range.selectNodeContents(node); Array.from(range.getClientRects()).forEach(include); range.detach(); }
-    if (!seen) return;   /* 内容还没排版（层刚露出来）：不报，免得先报一个只有边距的高度再长回去 */
-    /* 内容的后缘 + body / html 自己的下内边距、边框、外边距；只量内容不量盒子，所以 height:100% 的视口底不算进来，量出的高度也不随框当前的高度变 */
-    [body, document.documentElement].forEach(function (el) { const style = getComputedStyle(el); ['paddingBottom', 'borderBottomWidth', 'marginBottom'].forEach(function (key) { bottom += Math.max(0, parseFloat(style[key]) || 0); }); });
-    parent.postMessage({ type: 'clowder-frame-size', height: Math.max(1, Math.ceil(bottom)) }, '*');
-  };
-  const start = function () { const observer = new ResizeObserver(report); observer.observe(document.body); document.body.querySelectorAll('*').forEach(function (el) { observer.observe(el); }); window.addEventListener('load', report); report(); };
-  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start, { once: true }); else start();
-}
-const FRAME_SIZE_PENDING = new Set(), FRAME_SIZE_HEIGHTS = new Map();
-function frameSizeHold(el) {
-  const src = el.getAttribute('srcdoc');
-  if (el._frameSrc !== src) {
-    if (el._frameSizeDone) el._frameSizeDone();
-    el._frameSrc = src; el._frameSized = false; el._frameHeight = FRAME_SIZE_HEIGHTS.has(src) ? FRAME_SIZE_HEIGHTS.get(src) + 'px' : el._frameHeight; el._frameSizeDone = null;
-  }
-  if (el._frameHeight && el.style.height !== el._frameHeight) el.style.height = el._frameHeight;   /* 量过的高度进树时直接设上，不写进画出来的标记：重画时标记不变，节点和高度都留着 */
-  if (el._frameSized || el._frameSizeDone || !el.offsetWidth) return;   /* 藏着的框（被切走的层里）不等：它报来的高度不算数，露出来时再量 */
-  FRAME_SIZE_PENDING.add(el);
-  /* 静止前等它报一次高度；框在报之前被切走（报来时不占位）、被移除（onRender 里释放），或者等满两个慢动效的时长，也算等完，不会一直卡着 */
-  settleHold(new Promise(function (resolve) {
-    const done = function () { if (el._frameSizeDone !== done) return; el._frameSizeDone = null; FRAME_SIZE_PENDING.delete(el); resolve(); };
-    el._frameSizeDone = done; setTimeout(done, 2 * ms('--dur-slow'));
-  }));
-}
-treeMatch('iframe[data-frame-size]', frameSizeHold);
-window.addEventListener('message', function (e) {
-  if (!e.data || e.data.type !== 'clowder-frame-size' || !Number.isFinite(e.data.height) || e.data.height < 1) return;   /* 量到 0 = 框里还没排版（框被收起时发出的），不是内容的高度 */
-  const el = Array.from(document.querySelectorAll('iframe[data-frame-size]')).find(function (frame) { return frame.contentWindow === e.source; });
-  if (!el) return;
-  if (!el.offsetWidth) { if (el._frameSizeDone) el._frameSizeDone(); return; }   /* 框此刻不在页面上占位：高度不算数，但这次等待算结束 */
-  const measured = Math.max(1, e.data.height), height = measured + 'px';
-  FRAME_SIZE_HEIGHTS.set(el.getAttribute('srcdoc'), measured);
-  if (el.style.height !== height) { el.style.height = height; settleHold(Promise.resolve()); }
-  el._frameHeight = height; el._frameSized = true;
-  if (el._frameSizeDone) { el._frameSizeDone(); el._frameSizeDone = null; FRAME_SIZE_PENDING.delete(el); }
-});
-function frameSizePrune() {
-  document.querySelectorAll('iframe[data-frame-size]').forEach(function (el) { frameSizeHold(el); if (el._frameHeight) el.style.height = el._frameHeight; });
-  FRAME_SIZE_PENDING.forEach(function (el) { if (!el.isConnected) { el._frameSizeDone(); el._frameSizeDone = null; FRAME_SIZE_PENDING.delete(el); } });
-}
-onRender(frameSizePrune);
-LOCAL_NORM.push(function (root) {
-  (root.matches('iframe[data-frame-size]') ? [root] : Array.from(root.querySelectorAll('iframe[data-frame-size]'))).forEach(function (el) { el.style.removeProperty('height'); if (!el.getAttribute('style')) el.removeAttribute('style'); });
-});

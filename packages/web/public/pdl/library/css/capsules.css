@@ -1,0 +1,25 @@
+/* 边界：一个含义一个组件、不为接口定制、不按位置推导样式 */
+/* 胶囊、胶囊堆、数据和操作互斥 */
+/* ───────── 胶囊（capsule）：收起是一个圆，悬停展开成两端半圆的长条 ─────────
+   同一个底伸缩；展开浮在上层不挤开旁边；离开后停 --reveal-hold 再收回。 */
+.cap { position: relative; display: inline-block; width: var(--ctl-m); height: var(--ctl-s); flex: none; border-radius: var(--r-full); cursor: pointer; vertical-align: middle; }
+.cap-pill { position: absolute; left: 0; top: 0; height: var(--ctl-s); display: flex; align-items: center; padding: var(--sp-hair); border-radius: var(--r-full); background: none; white-space: nowrap; transition: transform var(--dur-fast) ease var(--reveal-hold), background 0s linear calc(var(--reveal-hold) + var(--dur-med)), box-shadow 0s linear calc(var(--reveal-hold) + var(--dur-med)), backdrop-filter 0s linear calc(var(--reveal-hold) + var(--dur-med)); }
+:is(.cap:hover, .cap:focus-within, .cap.tap-on) > .cap-pill, .cap-pill[data-hot], .cap-pill:popover-open { background: var(--surf-secondary); backdrop-filter: blur(var(--blur-soft)); -webkit-backdrop-filter: blur(var(--blur-soft)); box-shadow: var(--shadow-raised); }   /* 展开就有自己的面（不管在不在顶层；顶层只为了不被滚动道裁掉）；收起时只露前导，底和阴影保留到收起结束 */
+.cap-x { display: inline-flex; align-items: center; gap: var(--sp-xs); max-width: 0; padding: 0; overflow: hidden; font-size: var(--fs-s); color: var(--fg-strong); transition: max-width var(--dur-med) ease var(--reveal-hold), padding var(--dur-med) ease var(--reveal-hold); }
+.cap:hover, .cap:focus-within, .cap.tap-on { z-index: var(--z-pop); }
+.cap:hover .cap-x, .cap-pill[data-hot] .cap-x, .cap:focus-within .cap-x, .cap.tap-on .cap-x { max-width: calc(90 * var(--unit)); padding: 0 var(--sp-xs) 0 var(--sp-s); transition-delay: 0s, 0s; }
+.cap:hover .cap-pill, .cap-pill[data-hot], .cap:focus-within .cap-pill, .cap.tap-on .cap-pill { transform: translateY(-2px); transition-delay: 0s; }
+.cap-x b { font-weight: 600; color: var(--c, var(--identity-fallback)); }
+/* 向左展开（你的消息一侧）：布局镜像——底贴右边，头像在贴住的那一端（右），文字从头像左侧长出来；文字本身仍从左往右读 */
+.cap-left .cap-pill { left: auto; right: 0; }
+.cap-left .cap-lead { order: 1; }   /* 只把头像挪到贴住的那一端，内容的顺序和方向不动 */
+.cap-left:is(:hover, :focus-within, .tap-on) .cap-x, .cap-left > .cap-pill[data-hot] .cap-x { padding: 0 var(--sp-s) 0 var(--sp-xs); }
+/* 胶囊堆叠（capStack）：后一个压住前一个的一半；rows 时悬停整组散开成一列，每行展开，离开后停 --reveal-hold 再收回 */
+.cap-ic { display: grid; place-items: center; width: var(--ic-m); height: var(--ic-m); border-radius: 50%; color: var(--fg-muted); }
+/* 同一个位置的数据和操作互斥（data-swap 的容器里，.swap-d 是数据）：停 --reveal-delay 后操作出现、数据淡出，操作停 --reveal-hold 淡出后数据才回来；不会同时画出来 */
+.swap-d { transition: opacity var(--dur-fast) ease calc(var(--reveal-hold) + var(--reveal-fade)); }
+[data-swap]:hover .swap-d, [data-swap]:focus-within .swap-d, [data-swap].tap-on .swap-d { opacity: 0; transition-delay: var(--reveal-delay); }
+.cap:has(.avatar:is([data-status="alive_but_silent"], [data-status="suspected_stall"])) .cap-x { color: var(--warn); }
+.cap:has(.avatar[data-status="error"]) .cap-x { color: var(--danger); }
+.cap-who .cap-x { font-size: var(--fs-m); padding-right: 0; }
+.cap-who:hover .cap-x, .cap-who > .cap-pill[data-hot] .cap-x, .cap-who:focus-within .cap-x { padding: 0 var(--sp-s) 0 var(--sp-xs); }

@@ -1,4 +1,5 @@
 /* 边界：一个含义一个组件、不为接口定制、不按位置推导样式 */
+/* 身份：成员、用户、插件、系统的名字 / 头像 / 身份色，图标或图片的方块（glyph） */
 /* 身份：成员、用户、插件、系统都是同一个 from 结构 { kind, id }。
    对话消息、引用、队列、正在执行、工作台列表……所有位置都用这一份渲染；
    不同组件只是选不同的形态，决定显示到哪一级：
@@ -10,6 +11,18 @@
      line    头像 + 名字 + 句柄
      text    纯文字（提示、通知里用） */
 'use strict';
+function avatar(m, size) { return whoAva(m, { size: size }); }   /* 身份统一走 whoAva */
+/* 可上传的头像（组件库唯一一个）：点头像本身就是上传，悬停出现上传提示；成员表单和对话框的头像字段都用它 */
+function avatarUp(lead, size, up, data) {
+  return '<label class="ava-up" data-tip="' + h(up.label) + '">' + avatar(lead, size) + '<span class="ava-up-ic" aria-hidden="true">' + icon('upload', 16) + '</span><input type="file" accept="' + h(up.accept || '') + '" class="sr" aria-label="' + h(up.label) + '" data-filemsg="' + h(up.msg || '') + '"' + (data || '') + '></label>';
+}
+function glyphSrc(n) { return n && typeof n === 'object' ? n.src : /^(https?:|data:|blob:|\/|\.{1,2}\/)/.test(n) ? n : ''; }
+/* 图片图标：读到之前用骨架同一个节拍闪；读过的地址记住，重画时直接是读到的样子（不再闪） */
+const GLYPH_LOADED = new Set();
+function glyph(n, cls) { const src = glyphSrc(n); return '<span class="glyph' + (cls ? ' ' + cls : '') + '">' + (src ? '<img src="' + h(src) + '" alt=""' + (GLYPH_LOADED.has(src) ? ' data-loaded' : '') + '>' : icon(n, 18)) + '</span>'; }
+['load', 'error'].forEach(function (type) {
+  document.addEventListener(type, function (e) { const img = e.target; if (img.tagName !== 'IMG' || !img.parentNode || !img.parentNode.classList.contains('glyph')) return; GLYPH_LOADED.add(img.getAttribute('src')); img.setAttribute('data-loaded', ''); }, true);
+});
 /* 身份的数据经引擎的 WHO_DATA 读（应用登记：成员、你、插件的身份贡献、连接器、执行状态、回调授权健康） */
 
 /* from 和共用的 MessageFrom 一致：

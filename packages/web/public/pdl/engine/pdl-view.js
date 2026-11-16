@@ -14,7 +14,7 @@
      块    box head toolbar section list tree settings form kv stats text label notice tabs split each ordered fold
            steps disclosure frame empty view component pre markdown content search choices tags（整页 = 视图的 page: true + head）
      控件  button（角色 meta / nav / cycle / title）switch seg select search input（rows = 多行）check text（角色 value / meta）status more back chip grow component
-           行 = 行模板名或就地的 { layout, … }（五种行布局，见 lrow.js ROW_LAYOUTS）；控件也可以直接放在块的位置上
+           行 = 行模板名或就地的 { layout, … }（五种行布局，见组件库 rows.js ROW_LAYOUTS）；控件也可以直接放在块的位置上
      片段  文字（tone tip mono num strong mark variant） lit who icon glyph dot status chip chips（each：每项的片段）use control hint br roll */
 'use strict';
 const PDL_VIEWS = {};
@@ -129,7 +129,7 @@ const PDL_SCHEMA = {
      stay 在弹窗里点它不算“选了一项”（就地切换、多选），声明了 pick 的弹窗不关 */
   /* 弹窗的声明（PDL_POPUPS）：at、exit、drag 三项必填；exit 是 exit 枚举的一个子集 */
   _popup: { at: ['trigger', 'center', 'corner', 'top', 'fill'], within: 1, exit: ['outside', 'esc', 'x', 'pick', 'leave'], drag: ['true', 'false'], focus: ['true', 'false'], fixLayer: ['true'], view: 1, when: 1, state: 1, close: 1, closeArgs: 1, body: ['page'], demo: 1, via: 1 },   /* view 是内容视图，when 是既有 STATE_ROOTS 的状态路径；state 是主人，不作打开条件。 */
-  /* 行模板（列表的 row：PDL_ROWS 里的实体模板，或列表声明里就地写的字段映射）：layout 必填，取组件库的一种行布局（lrow.js ROW_LAYOUTS；tree 只由树块用）；
+  /* 行模板（列表的 row：PDL_ROWS 里的实体模板，或列表声明里就地写的字段映射）：layout 必填，取组件库的一种行布局（组件库 rows.js ROW_LAYOUTS；tree 只由树块用）；
      其余是数据绑定。_rowNo：每种布局不接受的字段（单行没有副行，只有条目有竖排尾部，记录行不能再展开） */
   _row: { layout: ['line', 'two', 'item', 'record'], key: 1, lead: 1, title: 1, inline: 1, sub: 1, meta: 1, cols: 1, acts: 1, tone: 1, color: 1, bar: 1, act: 1, args: 1, note: 1, expand: 1, more: 1, moreWhen: 1, moreAfter: 1, cur: 1, aside: 1, subLines: 1, label: 1, help: 1, when: 1 },
   _rowNo: { line: ['sub', 'meta', 'aside', 'subLines'], two: ['aside', 'subLines'], item: [], record: ['sub', 'meta', 'aside', 'subLines', 'expand'] },

@@ -1,0 +1,37 @@
+/* 边界：一个含义一个组件、不为接口定制、不按位置推导样式 */
+/* 设置行、分组、内嵌小面板、运行状态与排队、循环预设、卡片布局 */
+/* ── 设置行（Keeper 式）：左标签右控件；选择器显示当前值 + 上下箭头 ── */
+/* 分组：靠底色从页面里浮出来，不靠框线 */
+.group { background: var(--surf-group); padding: var(--sp-xs); border-radius: var(--r-l); }   /* 分组卡片：group 层（有背景图时半透明），不是锚点的亮白 */
+/* 消息里的内嵌小面板（执行记录展开、代码块、键值块、补充……）：表面从它所在的那一层推出来——当前表面上叠一层墨色（--d-inset），
+   有背景图时叠在玻璃面上同样成立；不用固定的“浮起白”。消息本身的主体面（卡片、来信、系统卡）还是原来的表面，它们里面的小面板同样按这一条推 */
+.msg * { --bg-group: var(--surf-inline); }   /* 消息里的面：消息自己决定（对话、回放剧场同一套） */
+.msg :is(.vw-card, .letter, .cafe-sysc) { --bg-group: var(--surf-float); }   /* 消息里的决策卡片：次要角色，和队列同一层（不透明、比页面略深），按钮强度不变 */
+.row.setting { min-height: var(--row-h-1); padding: var(--sp-s) var(--sp-m); }
+
+
+.help-q { display: inline-block; width: var(--av-s); height: var(--av-s); border-radius: 50%; border: 0; background: none; box-shadow: inset 0 0 0 1.3px var(--fg-faint); color: var(--fg-muted); font: 600 var(--fs-xs)/18px var(--font-text); text-align: center; padding: 0; cursor: pointer; vertical-align: 2px; margin-left: var(--sp-xs); cursor: help; }
+.help-q[aria-expanded="true"], .help-q:hover { box-shadow: inset 0 0 0 1.3px var(--fg-muted); color: var(--fg-strong); }
+/* 设置行里的下拉框：和“当前值 + 上下箭头”的选择器同一个样子 */
+/* 输入框上方的运行状态与排队：一行状态 + 轻量列表，操作都是图标 */
+/* 待发出的排队消息：在对话末尾，气泡变淡；操作悬停出现 */
+/* 设置导航：悬停出现图钉，固定后常亮 */
+.nav-row { position: relative; }
+.nav-row .nav-item { padding-right: var(--page-gap); }
+.nav-pin { position: absolute; right: 4px; top: 4px; opacity: 0; }
+.theme-dot { width: var(--ic-m); height: var(--ic-m); border-radius: 50%; flex-shrink: 0; box-shadow: inset 0 0 0 1px var(--line); }
+/* 运行中要让人看得出还在动：呼吸的圆点、走动的省略号 */
+/* 循环动效是一组预设：同一个周期 --loop（2 拍），每个预设在周期里各自脉冲固定的次数（1 或 2，不快于 1 拍一次），
+   幅度和形状写在预设自己的关键帧里。组件和状态表只挑预设的名字，不知道周期和次数；所有预设起点都在 2 拍的格子上，所以彼此同相位 */
+@keyframes mo-row { 0%, 70%, 100% { opacity: 1; transform: scale(1); } 35% { opacity: .35; transform: scale(.7); } }
+@keyframes mo-row-light { 0%, 70%, 100% { opacity: 1; transform: scale(1); } 35% { opacity: .8; transform: scale(.92); } }
+@keyframes mo-row-silent { 0%, 70%, 100% { opacity: 1; transform: scale(1); } 35% { opacity: .35; transform: scale(.7); } 0%, 100% { background: var(--warn); } }
+@keyframes mo-row-stall { 0%, 35%, 50%, 85%, 100% { opacity: 1; transform: scale(1); } 17.5%, 67.5% { opacity: .35; transform: scale(.7); } 0%, 100% { background: var(--warn); } }
+@keyframes mo-row-error { 0%, 35%, 50%, 85%, 100% { opacity: 1; transform: scale(1); } 17.5%, 67.5% { opacity: .35; transform: scale(.7); } 0%, 100% { background: var(--danger); } }
+@keyframes mo-rec { 0%, 35%, 50%, 85%, 100% { opacity: 1; } 17.5%, 67.5% { opacity: .35; } }
+@keyframes mo-skel { 0%, 100% { opacity: 1; animation-timing-function: cubic-bezier(.4, 0, .6, 1); } 50% { opacity: .4; animation-timing-function: cubic-bezier(.4, 0, .6, 1); } }
+@keyframes mo-caret { 0%, 50% { opacity: 1; } 25%, 75%, 100% { opacity: 0; } }
+/* 待发出托盘：在输入框正上方，和输入框贴在一起 */
+/* Skill / MCP 卡片布局 */
+.ltile { width: var(--ctl-l); height: var(--ctl-l); border-radius: var(--r-m); background: var(--bg-field); color: var(--fg-muted); display: grid; place-items: center; font-weight: 600; font-size: var(--fs-l); flex-shrink: 0; }
+/* 能力扩展：左右布局 */

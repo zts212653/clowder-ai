@@ -1,4 +1,4 @@
-/* 由 build.py 从 library/library.js 生成（文字角色 LIB_TEXT、文字色调 LIB_TEXT_TONE），不要手改：改清单再构建 */
+/* 由 build.py 从 library/registry.js 生成（文字角色 LIB_TEXT、文字色调 LIB_TEXT_TONE），不要手改：改清单再构建 */
 /* hero：落地区的问候（空页面上的一句大字） */
 h1.greet { color: var(--fg-strong); font-size: var(--fs-hero); font-weight: var(--fw-display); }
 /* heading：页面和对话框的标题 */
