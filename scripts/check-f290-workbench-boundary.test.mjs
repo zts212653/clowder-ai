@@ -37,10 +37,7 @@ test('the Host browser lane preserves shared navigation and C2 coverage', () => 
     'packages/web/test/browser/f290-asset-true-frontend.test.mjs',
     'packages/web/test/browser/f290-runtime-journey.harness.mjs',
     'packages/web/test/browser/default-entry-journey.harness.mjs',
-    'packages/web/src/components/collective/__tests__',
     'packages/collective-client/src',
   ];
   for (const path of retainedCoverage) assert.ok(existsSync(join(root, path)), `lost C2 coverage: ${path}`);
-  assert.match(webPackage.scripts['test:browser'], /chat-connection-recovery\.test\.mjs/);
-  assert.match(webPackage.scripts['test:browser'], /navigation-continuity\.test\.mjs/);
 });

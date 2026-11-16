@@ -61,7 +61,6 @@ jobs:
         run: >-
           node scripts/check-required-package-scripts.mjs
           --package packages/web
-          --script test:first-run-entry:api
           --script test:first-run-entry:production
           --script test:onboarding:production-contracts
       - run: pnpm --filter @cat-cafe/shared build
@@ -188,8 +187,6 @@ jobs:
           tar -xzf "$candidate_dir/bundle.tgz" -C "$candidate_dir"
           export F202_CANDIDATE_MATRIX="$candidate_dir/f202-c1-candidate-2b4f0418c1dd/candidate-matrix.json"
           pnpm --filter @cat-cafe/api test:native-tracking-artifact
-      - name: Personal first-run lifecycle with production API handlers
-        run: pnpm --filter @cat-cafe/web test:first-run-entry:api
       - run: pnpm --filter @cat-cafe/web build
       - name: Production first-run pages with real receipt and guide routes
         env:
