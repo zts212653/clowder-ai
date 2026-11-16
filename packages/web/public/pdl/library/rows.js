@@ -275,10 +275,10 @@ function threadSections(list, dc, root) {
   return (list || []).map(function (s) {
     const dflt = (groups || {})[String(s.key || '').split(':')[0]] || {};
     if (s.other) { const d = dc.other || {}; return secHead({ act: d.act, data: pvArgs(d.args, s.other, root), open: s.other.open, name: tc('threadRow.otherProjects'), n: s.other.n }) + (s.other.open ? threadSections(s.other.sections, dc, root) : ''); }
-    /* move（主题声明的动作）：对话能拖进别的分组、拖出到不分组的段；段是放下的容器（data-move-act + 它是哪一段） */
+    /* move（主题声明的动作）：对话能拖进别的分组、拖出到不分组的段；段是放下的容器（data-move-act + 它是哪一段）；rowDrop（段的数据）：放在这一段的行上是插进先后（insert）还是放到那一行上（onto） */
     const mvAct = dc.move ? pv(dc.move, root, root) : '', mv = !!mvAct;
     return gsection({ key: s.key, collapsed: s.collapsed, dflt: !!dflt.collapsed, step: dflt.limit, rows: s.rows.map(function (v) { return threadRow(v, dc.rename, root, mv); }), peek: (s.peek || []).map(function (v) { return threadRow(v, dc.rename, root, mv); }), empty: s.empty ? emptyState(tc('threadRow.empty', s.empty)) : '',
-      attrs: (s.gid ? ' data-gid="' + h(s.gid) + '"' : '') + (mv ? ' data-move="threads" data-move-act="' + h(mvAct) + '" data-to="' + h(s.gid || '') + '"' : ''), head: threadSecHead(Object.assign({ key: s.key, collapsed: s.collapsed != null ? s.collapsed : secCollapsed(s.key, !!dflt.collapsed), dflt: !!dflt.collapsed }, s.head), dc, root) });
+      attrs: (s.gid ? ' data-gid="' + h(s.gid) + '"' : '') + (mv ? ' data-move="threads" data-move-act="' + h(mvAct) + '" data-to="' + h(s.gid || '') + '"' + (s.rowDrop ? ' data-move-rows="' + h(s.rowDrop) + '"' : '') : ''), head: threadSecHead(Object.assign({ key: s.key, collapsed: s.collapsed != null ? s.collapsed : secCollapsed(s.key, !!dflt.collapsed), dflt: !!dflt.collapsed }, s.head), dc, root) });
   }).join('');
 }
 function gsection(o) {

@@ -313,7 +313,7 @@ function bindSidebar() {
     const r = S.renaming;
     if (r) return A.rename({ entity: r.entity, id: r.id, v: val('row-rename') });
   };
-  function normalNav() {
+  VM.navThreads = function () {
     const data = sidebarData();
     if (data.load) return { load: data.load };
     const model = Object.assign({}, baseNav(), { group: CS.group, route: S.route, tag: CS.tag }),
@@ -371,9 +371,7 @@ function bindSidebar() {
       rows: recent,
     });
     return Object.assign({}, model, { sections: sections });
-  }
-  // Arrange owns identities and slots only; facts always resolve from the live sidebar read.
-  let arrange = null;
+  };
   function orderMembers(rows, mode) {
     if (mode === 'manual') return rows;
     return rows.slice().sort(function (a, b) {
@@ -385,267 +383,11 @@ function bindSidebar() {
       );
     });
   }
-  function captureSection(section) {
-    const captured = Object.assign({}, section, {
-      ids: section.rows.map(function (r) {
-        return r.id;
-      }),
-      peekIds: (section.peek || []).map(function (r) {
-        return r.id;
-      }),
-      visibleCount: section.rows.length,
-    });
-    delete captured.rows;
-    delete captured.peek;
-    return captured;
-  }
-  function finishArrange() {
-    arrange = null;
-  }
-  VM.navThreads = function () {
-    const normal = normalNav();
-    if (arrange && (arrange.group !== CS.group || arrange.tag !== CS.tag)) finishArrange();
-    if (!arrange) return Object.assign({}, normal, { arranging: false });
-    const live = new Map(
-      sidebarData()
-        .threads.filter(function (t) {
-          return !t.deletedAt;
-        })
-        .map(function (t) {
-          return [t.id, row(t)];
-        }),
-    );
-    const byGroup = new Map(
-      groups().map(function (g) {
-        return [g.id, g];
-      }),
-    );
-    return Object.assign({}, normal, {
-      arranging: true,
-      empty: !arrange.sections.some(function (s) {
-        return s.ids.some(function (id) {
-          return live.has(id);
-        });
-      }),
-      arrangeHint: arrange.hint,
-      sections: arrange.sections.map(function (s) {
-        const g = byGroup.get(s.gid),
-          rows = s.ids
-            .filter(function (id) {
-              return live.has(id);
-            })
-            .map(function (id) {
-              return Object.assign({}, live.get(id), { arrange: arrange.slots[id] });
-            });
-        return Object.assign({}, s, {
-          rows: rows,
-          peek: s.peekIds
-            .filter(function (id) {
-              return live.has(id);
-            })
-            .map(function (id) {
-              return live.get(id);
-            }),
-          visibleCount: s.visibleCount,
-          arrange: true,
-          collapsed: g ? !g.open : s.head && s.head.kind === 'proj' ? !CS.projOpen[s.head.id] : s.collapsed,
-          head: s.head && Object.assign({}, s.head, g ? { name: g.name, n: rows.length, open: g.open } : {}),
-        });
-      }),
-    });
-  };
-  A.cafeArrangeBegin = function (d) {
-    if (arrange || CS.group === 'system' || !owner()) return;
-    const normal = normalNav(),
-      slots = {};
-    normal.sections.forEach(function (s) {
-      s.rows.forEach(function (r) {
-        slots[r.id] = {
-          meta: !!(r.fav || r.running || r.failed || r.lastWho),
-          draft: !!r.draft,
-          badge: !!(r.unread || r.at),
-        };
-      });
-    });
-    arrange = {
-      group: CS.group,
-      tag: CS.tag,
-      sections: normal.sections.map(captureSection),
-      slots: slots,
-      hint: null,
-    };
-    // The component supplies its visible range and measured slots in the begin event.
-    if (d && d.value) {
-      const captured = JSON.parse(d.value);
-      Object.assign(slots, captured.rows);
-      arrange.sections.forEach(function (s) {
-        if (captured.sections[s.key]) Object.assign(s, captured.sections[s.key]);
-      });
-    }
-  };
-  A.cafeArrangeDone = function () {
-    finishArrange();
-    navStale();
-    render(true);
-  };
-  A.cafeArrangeReveal = function (d) {
-    if (!arrange) return;
-    const section = arrange.sections.find(function (s) {
-      return s.key === d.key;
-    });
-    if (section) section.visibleCount = section.ids.length;
-  };
-  A.cafeArrangeHintClear = function () {
-    if (arrange) arrange.hint = null;
-  };
-  function applyArrange(sourceId) {
-    if (!arrange || arrange.group !== 'recent') return;
-    const sections = arrange.sections,
-      source = sections.find(function (s) {
-        return s.ids.includes(sourceId);
-      });
-    if (!source) return;
-    const fromIndex = sections.indexOf(source),
-      fromVisible = source.ids.indexOf(sourceId) < source.visibleCount,
-      destination = grouped(sourceId),
-      wasSame = destination && source.gid === destination.id;
-    source.ids = source.ids.filter(function (id) {
-      return id !== sourceId;
-    });
-    source.visibleCount -= Number(fromVisible);
-    source.peekIds = source.peekIds.filter(function (id) {
-      return id !== sourceId;
-    });
-    if (
-      source.gid &&
-      !wasSame &&
-      (!groups().some(function (g) {
-        return g.id === source.gid;
-      }) ||
-        source.ids.length < 2)
-    ) {
-      source.gid = null;
-      source.head = null;
-      source.collapsed = false;
-      source.visibleCount = source.ids.length;
-    }
-    if (!destination) {
-      sections.splice(
-        fromIndex + 1,
-        0,
-        captureSection({
-          key: 'arrange:' + sourceId,
-          head: null,
-          rows: [
-            row(
-              sidebarData().threads.find(function (t) {
-                return t.id === sourceId;
-              }),
-            ),
-          ],
-        }),
-      );
-      return;
-    }
-    const target = sections.find(function (s) {
-      return s.gid === destination.id;
-    });
-    if (target) {
-      const showAll = target.visibleCount === target.ids.length;
-      if (wasSame && destination.sort === 'manual') {
-        const admitted = new Set(target.ids.concat(sourceId));
-        target.ids = destination.ids.filter(function (id) {
-          return admitted.has(id);
-        });
-      } else {
-        const live = new Map(
-            sidebarData().threads.map(function (t) {
-              return [t.id, row(t)];
-            }),
-          ),
-          ranked = orderMembers(
-            target.ids.concat(sourceId).map(function (id) {
-              return live.get(id);
-            }),
-            destination.sort,
-          ).map(function (r) {
-            return r.id;
-          }),
-          rank = ranked.indexOf(sourceId),
-          insertion =
-            destination.sort === 'manual'
-              ? -1
-              : target.ids.findIndex(function (id) {
-                  return ranked.indexOf(id) > rank;
-                });
-        target.ids.splice(insertion < 0 ? target.ids.length : insertion, 0, sourceId);
-      }
-      if (showAll || target.ids.indexOf(sourceId) < target.visibleCount || (wasSame && fromVisible))
-        target.visibleCount++;
-      return;
-    }
-    const block = sections.find(function (s) {
-      return (
-        !s.gid &&
-        s.ids.some(function (id) {
-          return destination.ids.includes(id);
-        })
-      );
-    });
-    if (!block) return;
-    const index = block.ids.findIndex(function (id) {
-        return destination.ids.includes(id);
-      }),
-      targetId = block.ids[index],
-      live = new Map(
-        sidebarData().threads.map(function (t) {
-          return [t.id, row(t)];
-        }),
-      ),
-      members = orderMembers(
-        [targetId, sourceId].map(function (id) {
-          return live.get(id);
-        }),
-        destination.sort,
-      ),
-      group = captureSection({
-        key: 'grp:' + destination.id,
-        gid: destination.id,
-        collapsed: false,
-        rows: members,
-        peek: members.filter(function (r) {
-          return r.running || r.unread || r.at;
-        }),
-        head: {
-          kind: 'group',
-          id: destination.id,
-          name: destination.name,
-          n: members.length,
-          open: true,
-          sort: destination.sort,
-          peek: destination.peek,
-        },
-      });
-    (groupPrefs[destination.id] || (groupPrefs[destination.id] = {})).open = true;
-    const tail = Object.assign({}, block, {
-      key: block.key + ':after:' + destination.id,
-      head: null,
-      ids: block.ids.slice(index + 1),
-      visibleCount: Math.max(0, block.visibleCount - index - 1),
-      peekIds: [],
-    });
-    block.ids = block.ids.slice(0, index);
-    block.visibleCount = Math.min(block.visibleCount, index);
-    sections.splice(sections.indexOf(block) + 1, 0, group, tail);
-  }
   VM.cafeNavShell = function () {
-    if (arrange && (arrange.group !== CS.group || arrange.tag !== CS.tag)) finishArrange();
     const tag = labels().find(function (x) {
       return x.id === CS.tag;
     });
     return {
-      arranging: !!arrange,
-      arrangeHint: arrange && arrange.hint,
       findOpen: !!CS.navFind,
       tagName: tag ? tag.name : '',
       tag: CS.tag,
@@ -698,7 +440,6 @@ function bindSidebar() {
   };
 
   A.cafeOrgView = function () {
-    finishArrange();
     undoDrop();
     const group = groups().find(function (g) {
       return g.id === CS.lastGid;
@@ -721,7 +462,7 @@ function bindSidebar() {
       });
     return sidebarModalOpen({ v: 'org' });
   };
-  // Both row and section drops enter through this membership command boundary.
+  // a thread dropped on a section (to = group id, '' = no group) or on a row (target; after = below it in a manual group, onto an ungrouped row = a new group)
   A.cafeThreadMove = async function (d) {
     const from = grouped(d.id),
       target =
@@ -739,11 +480,7 @@ function bindSidebar() {
     if (d.target === d.id) return;
     if (destination && from && from.id === destination.id) {
       if (plain) return;
-      if (destination.sort !== 'manual') {
-        if (arrange) arrange.hint = { threadId: d.id, sort: destination.sort };
-        return;
-      }
-      if (!target) return;
+      if (destination.sort !== 'manual' || !target) return;
       const ids = destination.ids.filter(function (id) {
           return id !== d.id;
         }),
@@ -761,8 +498,6 @@ function bindSidebar() {
     } else if (from) {
       await command({ action: 'remove', groupId: from.id, threadId: d.id });
     } else return;
-    if (arrange) arrange.hint = null;
-    applyArrange(d.id);
     navStale();
     render(true);
   };
@@ -805,7 +540,6 @@ function bindSidebar() {
     render(true);
   };
   A.locate = function () {
-    finishArrange();
     const t = sidebarData().threads.find(function (t) {
       return t.id === sidebarData().threadId;
     });
@@ -836,7 +570,6 @@ function bindSidebar() {
       });
     },
     set: function (g, key, value) {
-      if (arrange && (key === 'sort' || key === 'peek')) return;
       const p = groupPrefs[g.id] || (groupPrefs[g.id] = {});
       p[key] = value;
       store.set('sidebar-groups', groupPrefs);

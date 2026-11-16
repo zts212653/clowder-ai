@@ -678,7 +678,7 @@ function dropTarget(e) {
   for (const k of kids) { const r = k.getBoundingClientRect(); if (horiz ? e.clientX < r.left + r.width / 2 : e.clientY < r.top + r.height / 2) { before = k; break; } }
   return { slot: slotEl.dataset.slot, el: slotEl, before: before };
 }
-function clearMarks() { document.querySelectorAll('.drop-before, .drop-end, .pdl-over').forEach(function (x) { x.classList.remove('drop-before', 'drop-end', 'pdl-over'); }); const c = document.getElementById('cell-drop'); if (c) c.remove(); }
+function clearMarks() { document.querySelectorAll('.drop-before, .drop-after, .drop-end, .pdl-over').forEach(function (x) { x.classList.remove('drop-before', 'drop-after', 'drop-end', 'pdl-over'); }); const c = document.getElementById('cell-drop'); if (c) c.remove(); }
 function endDrag() { DRAG.id = null; DRAG.from = null; DRAG.head = null; clearMarks(); document.body.classList.remove('pdl-dragging'); const b = document.getElementById('pdl-bin'); if (b) b.remove(); }
 /* 一次放下是否允许：返回拒绝的原因（文案键），允许返回 '' */
 function pdlDropWhy(id, from, to) {
@@ -781,12 +781,23 @@ EDGE_DRAG.push({
         end: function (e, moved) { const u = under(e, el); done(); if (moved) entryDrop(u); endDrag(); render(true); }
       };
     }
-    if (kind === 'move') {   /* 移到同一类的另一个容器（data-move 相同）：放下时交给目标容器声明的动作（data-move-act），参数 = 目标容器的 data + 被拖的 id；不排先后 */
+    if (kind === 'move') {   /* 移到同一类的容器（data-move 相同）：放下时交给目标容器声明的动作（data-move-act），参数 = 目标容器的 data + 被拖的 id。
+       容器还可以声明放在行上是什么意思（data-move-rows，数据给的）：insert = 插在那一行前 / 后（target + after，同一个容器里也行）；onto = 放到那一行上（target）；没声明就只认容器 */
       const from = el.closest('[data-move-act]'), family = from.dataset.move;
-      let to = null;
+      let to = null, at = null;
       return {
-        move: function (e) { follow(e); clearMarks(); const u = under(e, el), b = u.target.closest && u.target.closest('[data-move-act]'); to = b && b !== from && b.dataset.move === family ? b : null; if (to) to.classList.add('pdl-over'); },
-        end: function (e, moved) { done(); clearMarks(); if (moved && to && actFn(to.dataset.moveAct)) actFn(to.dataset.moveAct)(Object.assign(actionArgs(to), { id: el.dataset.moveKey })); render(true); }
+        move: function (e) {
+          follow(e); clearMarks(); at = null;
+          const u = under(e, el), b = u.target.closest && u.target.closest('[data-move-act]'), row = b && b.dataset.move === family && u.target.closest('[data-move-key]'), how = b && b.dataset.moveRows;
+          to = b && b.dataset.move === family ? b : null;
+          if (to && row && row !== el && how) {
+            const r = row.getBoundingClientRect(), after = e.clientY > r.top + r.height / 2;
+            at = how === 'insert' ? { target: row.dataset.moveKey, after: String(after) } : { target: row.dataset.moveKey };
+            row.classList.add(how === 'insert' ? (after ? 'drop-after' : 'drop-before') : 'pdl-over'); return;
+          }
+          if (to === from) to = null; if (to) to.classList.add('pdl-over');
+        },
+        end: function (e, moved) { done(); clearMarks(); if (moved && to && actFn(to.dataset.moveAct)) actFn(to.dataset.moveAct)(Object.assign(actionArgs(to), { id: el.dataset.moveKey }, at || {})); render(true); }
       };
     }
     if (kind === 'cell') {   /* 格子容器里的项：放到任意一格；移动范围（move）允许的话也能放进别的格子容器 */

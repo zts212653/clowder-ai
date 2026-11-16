@@ -2002,6 +2002,13 @@ views:
         item:
           key: "@key"
           rows: "@rows"
+          rowDrop:
+            of: "@key"
+            map:
+              recent: onto
+              _:
+                of: "@head.sort"
+                map: {manual: insert, _: ""}
           collapsed:
             of: "@head.kind"
             map:
