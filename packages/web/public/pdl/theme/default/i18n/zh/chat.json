@@ -1452,5 +1452,16 @@
     "change": "修改建议",
     "changePrompt": "请按修改建议重新提交这条记忆提案：",
     "changeBlocked": "原对话草稿暂未就绪，请稍后重试。"
+  },
+  "proposalRecovery": {
+    "uncertain": "批准结果尚未确认",
+    "retryable": "已确认仍待批准，可以重试",
+    "placement": "已批准，读取 Group 归属",
+    "writing": "正在提交",
+    "readback": "读取当前状态",
+    "blocked": "请先读取当前状态"
+  },
+  "inboxRefresh": {
+    "retained": "刷新尚未确认，保留内容仅供查看"
   }
 }

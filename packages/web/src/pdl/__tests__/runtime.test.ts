@@ -794,7 +794,7 @@ describe('unmodified runtime and project chat bindings', () => {
       expect(w.eval('VM.chatPage().messages.length')).toBe(0);
       expect(w.eval('VM.chatStream().items')).toEqual([]);
       expect(w.document.getElementById('chat-input')).not.toBeNull();
-      expect(w.eval('S.toast')).toBe(w.eval('tc("common.dataError")'));
+      expect(w.eval('TOAST_LOG.length')).toBe(0);
       expect(errors).toHaveBeenCalledTimes(1);
       port.get.mockClear();
       for (let i = 0; i < 10; i++) {
@@ -2586,7 +2586,25 @@ describe('unmodified runtime and project chat bindings', () => {
     }
   });
   it('submits the selected inbox decisions through their existing native writer without local history mutations', async () => {
-    const { dom, w, action, errors } = await boot();
+    const { dom, w, action, errors } = await boot(undefined, undefined, undefined, {}, (port) => {
+      const original = port.get;
+      port.get = async (path, params) =>
+        path === '/api/concierge/work/decisions'
+          ? {
+              status: 'available',
+              attentionCount: 2,
+              page: { hasMore: false },
+              items:
+                params?.mentionPeriod === 'handled'
+                  ? []
+                  : ['one', 'two'].map((id) => ({
+                      decisionRef: id,
+                      summary: id,
+                      originalApprovalCard: { cardRef: { threadId: 'source', messageId: id } },
+                    })),
+            }
+          : original(path, params);
+    });
     try {
       action.mockClear();
       w.eval('CS.ib.apPick={one:true,two:true};');
@@ -5046,7 +5064,7 @@ describe('unmodified runtime and project chat bindings', () => {
       dom.window.close();
     }
   });
-  it('uses r118 engine errors for an API error envelope, deduplicates and notifies again after recovery', async () => {
+  it('uses r118 engine errors for an API error envelope without a global toast, deduplicates and reports again after recovery', async () => {
     vi.mocked(apiFetch).mockImplementation(async () => new Response(JSON.stringify({ error: 'Owner unavailable' })));
     let result = await request('/api/owner').catch((error: Error) => error);
     const bench = fixtureWorkbenchSource();
@@ -5079,16 +5097,14 @@ describe('unmodified runtime and project chat bindings', () => {
     try {
       w.eval("ENGINE_PARTS.openTab('panel', 'tasks')");
       await w.__settled();
-      await vi.waitFor(() => expect(w.eval('TOAST_LOG.length')).toBe(1));
+      await vi.waitFor(() => expect(errors).toHaveBeenCalledTimes(1));
       expect(w.document.querySelector('textarea')).not.toBeNull();
       expect(w.document.body.textContent).toContain('Healthy owner task');
-      expect(w.document.querySelector('.toast[data-tone="danger"]')?.textContent).toBe(
-        w.eval("tc('common.dataError')"),
-      );
+      expect(w.eval('TOAST_LOG.length')).toBe(0);
       result = await request('/api/owner').catch((error: Error) => error);
       w.clowderChat.pushProject({ readFailures: { terminal: result } });
       await w.__settled();
-      expect(w.eval('TOAST_LOG.length')).toBe(1);
+      expect(w.eval('TOAST_LOG.length')).toBe(0);
       expect(errors).toHaveBeenCalledTimes(1);
       vi.mocked(apiFetch).mockImplementation(async () => new Response('{}'));
       result = await request('/api/owner');
@@ -5098,8 +5114,8 @@ describe('unmodified runtime and project chat bindings', () => {
       result = await request('/api/owner').catch((error: Error) => error);
       w.clowderChat.pushProject({ readFailures: { terminal: result } });
       await w.__settled();
-      await vi.waitFor(() => expect(w.eval('TOAST_LOG.length')).toBe(2));
-      expect(errors).toHaveBeenCalledTimes(2);
+      await vi.waitFor(() => expect(errors).toHaveBeenCalledTimes(2));
+      expect(w.eval('TOAST_LOG.length')).toBe(0);
     } finally {
       dom.window.close();
     }
@@ -5109,16 +5125,18 @@ describe('unmodified runtime and project chat bindings', () => {
     try {
       w.eval("VM.cafeWsOps = function () { throw new Error('ops projection'); }; ENGINE_PARTS.openTab('panel', 'ops')");
       await w.__settled();
-      await vi.waitFor(() => expect(w.eval('TOAST_LOG.length')).toBe(1));
+      await vi.waitFor(() =>
+        expect(w.document.querySelector('.panel-body')?.textContent).toContain(w.eval("tc('common.viewError')")),
+      );
       expect(w.document.querySelector('textarea')).not.toBeNull();
       w.eval("VM.cafeNavShell = function () { throw new Error('sidebar projection'); }; render(true)");
       await w.__settled();
-      await vi.waitFor(() => expect(w.eval('TOAST_LOG.length')).toBe(2));
+      expect(w.eval('TOAST_LOG.length')).toBe(0);
       expect(w.document.querySelector('textarea')).not.toBeNull();
       expect(errors).toHaveBeenCalled();
       w.clowderChat.update();
       await w.__settled();
-      expect(w.eval('TOAST_LOG.length')).toBe(2);
+      expect(w.eval('TOAST_LOG.length')).toBe(0);
     } finally {
       dom.window.close();
     }
@@ -5191,7 +5209,7 @@ describe('unmodified runtime and project chat bindings', () => {
     'ops',
     'replay',
     'evolution',
-  ])('keeps the shell and other owner data when the %s binding is absent, with one danger toast', async (panel) => {
+  ])('keeps the shell and other owner data when the %s binding is absent, without a global toast', async (panel) => {
     const failure = new Error('projection failure');
     const { dom, w } = await boot(
       undefined,
@@ -5222,10 +5240,10 @@ describe('unmodified runtime and project chat bindings', () => {
     try {
       w.eval(`ENGINE_PARTS.openTab('panel', '${panel}')`);
       await w.__settled();
-      await vi.waitFor(() => expect(w.eval('TOAST_LOG.length')).toBe(1));
-      expect(w.document.querySelector('.toast[data-tone="danger"]')?.textContent).toBe(
-        w.eval("tc('common.dataError')"),
-      );
+      expect(w.eval('TOAST_LOG.length')).toBe(0);
+      // The panel that read the failed owner says so in place (home's launcher reads no owner data).
+      if (panel !== 'home')
+        expect(w.document.querySelector('.panel-body')?.textContent).toContain(w.eval("tc('common.viewError')"));
       expect(w.document.querySelector('textarea')).not.toBeNull();
       expect(w.document.body.textContent).not.toContain('Application error');
       w.eval("ENGINE_PARTS.openTab('panel', 'tasks')");
@@ -5233,12 +5251,11 @@ describe('unmodified runtime and project chat bindings', () => {
       expect(w.document.body.textContent).toContain('Healthy owner task');
       w.clowderChat.pushProject({ readFailures: { [panel]: failure } });
       await w.__settled();
-      expect(w.eval('TOAST_LOG.length')).toBe(1);
       w.clowderChat.pushProject({ readFailures: {} });
       await w.__settled();
       w.clowderChat.pushProject({ readFailures: { [panel]: failure } });
       await w.__settled();
-      await vi.waitFor(() => expect(w.eval('TOAST_LOG.length')).toBe(2));
+      expect(w.eval('TOAST_LOG.length')).toBe(0);
     } finally {
       dom.window.close();
     }
@@ -7313,6 +7330,8 @@ it('reads inbox confirmations and uses native mention revision coordinates for r
             },
           ],
         };
+      if (path === '/api/concierge/work/mentions/last-handling')
+        return { receipt: { undoId: '938aefc1-3c5b-48e3-9764-80b217449048', remaining: 1 } };
       if (path === '/api/concierge/thread') return { threadId: 'concierge-owner' };
       return original(path, params);
     };

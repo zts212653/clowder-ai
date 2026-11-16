@@ -126,3 +126,107 @@ it('assigns existing label IDs and archives only the requested project owner thr
       .map(([path]) => path),
   ).toEqual(['/api/threads/pdl-test/restore', '/api/threads/second/restore']);
 });
+
+it('reads Group preferences on foreground/reconnect/proposal invalidations and ignores hidden visibility changes', async () => {
+  vi.mocked(apiFetch).mockImplementation(async (path) => Response.json(path === '/api/labels' ? [] : preferences));
+  const hook = renderHook(() => useSidebarBindings(fixtureData(), true));
+  await waitFor(() => expect(hook.result.current.data.owner).not.toBeNull());
+  const reads = () => vi.mocked(apiFetch).mock.calls.filter(([path]) => path === '/api/config/thread-attention').length;
+  for (const event of [
+    'focus',
+    'online',
+    'cat-cafe:socket-reconnected',
+    'cat-cafe:proposal-updated',
+    'cat-cafe:thread-attention-invalidated',
+  ]) {
+    const before = reads();
+    await act(() =>
+      window.dispatchEvent(
+        event === 'cat-cafe:proposal-updated'
+          ? new CustomEvent(event, { detail: { status: 'approved', createdThreadId: 'created' } })
+          : new Event(event),
+      ),
+    );
+    expect(reads()).toBe(before + 1);
+    expect(invalidateSidebarProjection).toHaveBeenCalled();
+  }
+  const beforeUnrelated = reads();
+  await act(() =>
+    window.dispatchEvent(new CustomEvent('cat-cafe:proposal-updated', { detail: { status: 'rejected' } })),
+  );
+  expect(reads()).toBe(beforeUnrelated);
+  Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'hidden' });
+  const before = reads();
+  await act(() => document.dispatchEvent(new Event('visibilitychange')));
+  expect(reads()).toBe(before);
+  Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' });
+  await act(() => document.dispatchEvent(new Event('visibilitychange')));
+  expect(reads()).toBe(before + 1);
+});
+
+it.each([0, 1, 4, 10])('lets invalidation win over an old Group read at microtask delay %i', async (delay) => {
+  let finishOld!: (value: Response) => void;
+  let finishNew!: (value: Response) => void;
+  let reads = 0;
+  vi.mocked(apiFetch).mockImplementation(async (path) => {
+    if (path === '/api/labels') return Response.json([]);
+    if (++reads === 1) return Response.json(preferences);
+    return new Promise((resolve) => {
+      if (reads === 2) finishOld = resolve;
+      else finishNew = resolve;
+    });
+  });
+  const hook = renderHook(() => useSidebarBindings(fixtureData(), true));
+  await waitFor(() => expect(hook.result.current.data.owner).not.toBeNull());
+  await act(() => window.dispatchEvent(new Event('focus')));
+  await act(() => window.dispatchEvent(new Event('cat-cafe:thread-attention-invalidated')));
+  const next = { ...preferences, groups: [{ ...preferences.groups[0], threadIds: ['created-thread'] }] };
+  await act(async () => {
+    finishOld(Response.json(preferences));
+    for (let n = 0; n < delay; n++) await Promise.resolve();
+    finishNew(Response.json(next));
+  });
+  expect(hook.result.current.data.owner?.preferences).toEqual(next);
+  expect(apiFetch).toHaveBeenCalledWith('/api/config/thread-attention', undefined, { afterCurrentGet: true });
+});
+
+it('does not install a stale response or failure after a newer Group read has already finished', async () => {
+  let failOld!: (error: Error) => void;
+  let reads = 0;
+  vi.mocked(apiFetch).mockImplementation(async (path) => {
+    if (path === '/api/labels') return Response.json([]);
+    if (++reads === 2)
+      return new Promise((_resolve, reject) => {
+        failOld = reject;
+      });
+    return Response.json({ ...preferences, groups: reads > 2 ? [] : preferences.groups });
+  });
+  const hook = renderHook(() => useSidebarBindings(fixtureData(), true));
+  await waitFor(() => expect(hook.result.current.data.owner).not.toBeNull());
+  await act(() => window.dispatchEvent(new Event('focus')));
+  await act(() => window.dispatchEvent(new Event('cat-cafe:thread-attention-invalidated')));
+  await act(() => failOld(new Error('obsolete failure')));
+  expect(hook.result.current.data.owner?.preferences.groups).toEqual([]);
+  expect(hook.result.current.error).toBeNull();
+});
+
+it.each([
+  'sidebarArchive',
+  'sidebarRestore',
+])('re-reads Group placement even after uncertain %s writes', async (action) => {
+  vi.mocked(apiFetch).mockImplementation(async (path, init) => {
+    if (init?.method) throw new Error('lost lifecycle response');
+    return Response.json(path === '/api/labels' ? [] : preferences);
+  });
+  const hook = renderHook(() => useSidebarBindings(fixtureData(), true));
+  await waitFor(() => expect(hook.result.current.data.owner).not.toBeNull());
+  const before = vi.mocked(apiFetch).mock.calls.filter(([path]) => path === '/api/config/thread-attention').length;
+  await act(async () => {
+    await expect(hook.result.current.action(action, { id: '/project', value: '["pdl-test"]' })).rejects.toThrow(
+      'lost lifecycle response',
+    );
+  });
+  expect(vi.mocked(apiFetch).mock.calls.filter(([path]) => path === '/api/config/thread-attention')).toHaveLength(
+    before + 1,
+  );
+});

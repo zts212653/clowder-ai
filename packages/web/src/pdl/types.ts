@@ -104,7 +104,7 @@ export interface ChatPort {
   action: (name: string, args: Record<string, string>, element?: HTMLElement) => unknown;
   richRender: (kind: string, source: string, inline?: boolean) => Promise<string>;
   terminal: typeof import('./platform').terminal;
-  get: (path: string, params?: Record<string, string>) => Promise<unknown>;
+  get: (path: string, params?: Record<string, string>, options?: { afterCurrentGet?: boolean }) => Promise<unknown>;
   post: (path: string, params: Record<string, string>, body: unknown) => Promise<unknown>;
   file: (path: string) => string;
   attach: (files: File[]) => void;

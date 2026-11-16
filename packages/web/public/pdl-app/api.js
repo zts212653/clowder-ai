@@ -10,7 +10,7 @@
 'use strict';
 const API = { impl: null, subs: [] };
 const api = {
-  get: function (path, params) { return API.impl.get(path, params); },
+  get: function (path, params, options) { return options === undefined ? API.impl.get(path, params) : API.impl.get(path, params, options); },
   post: function (path, params, body) { return API.impl.post(path, params, body); },
   file: function (path) { return API.impl.file(path); },
   on: function (ev, fn) { if (API.impl) API.impl.on(ev, fn); else API.subs.push([ev, fn]); },

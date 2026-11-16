@@ -322,6 +322,8 @@ export interface AgentMessage {
   catId: CatId;
   /** Text content (for 'text' and 'tool_result' types) */
   content?: string;
+  /** Provider-written summary of prose, readable but not an authored command. */
+  textSource?: 'provider_summary';
   /** Durable content blocks projected with an explicit callback message. */
   contentBlocks?: readonly MessageContent[];
   /** Machine-readable A2A target cat for 'a2a_handoff' events. */

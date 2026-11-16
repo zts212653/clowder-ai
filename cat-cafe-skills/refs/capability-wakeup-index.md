@@ -269,7 +269,7 @@ opus-47 原把 `workspace-navigator` / `rich-messaging` / `browser-preview` 一�
 
 ### 22. `capability-evolution` — F311 能力进化入口
 
-**坏直觉**：听到“你们能进化什么”只加载通用 `self-evolution` 讲理念；听到“我们来进化 X”或直接的 Agent / 业务结果，只给建议，不启动已经上线的 Program
+**坏直觉**：听到“你们能进化什么”只讲成长理念或总结旧教训；听到“我们来进化 X”或直接的 Agent / 业务结果，只给建议，不启动已经上线的 Program
 
 **场景 trigger**：
 
@@ -279,7 +279,7 @@ opus-47 原把 `workspace-navigator` / `rich-messaging` / `browser-preview` 一�
 
 **用法**：加载 `capability-evolution`；只有动作型才调用 `cat_cafe_start_evolution_program`，并用触发消息的 exact `sourceMessageId` 作为 `clientMessageId`；问句、显式延后或只讨论保持零写入。启动后在同一 invocation 继续 get / begin / submit / get，交出首轮正式准备
 
-**边界**：重复错误/SOP/知识沉淀走 `self-evolution`；确定性 bug 走 test/guard；运行健康走 F153 logs/metrics/traces；未知 owner 不猜投，用 F311 admission identity + typed blocker 保持诚实
+**边界**：家里已有答案却让 You 重说时走 `code-as-harness`；既往方法总结回原任务或现有方法文档，同类新活做到第二次、想沉淀成技能时用 `writing-skills`；确定性 bug 走 test/guard；运行健康走 F153 logs/metrics/traces；未知 owner 不猜投，用 F311 admission identity + typed blocker 保持诚实
 
 **历史 Eval 规则（自动评估已停用）**：`eval:capability-wakeup` 的机械规则只统计它能确定判别的显式具体目标；语义型直接目标留给 rubric judge，不能靠扩写 regex 偷渡进机械分母。当前 Tier 调整沿下方维护协议。
 

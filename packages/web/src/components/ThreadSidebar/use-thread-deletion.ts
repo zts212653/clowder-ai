@@ -8,6 +8,7 @@ import { useToastStore } from '@/stores/toastStore';
 import { apiFetch } from '@/utils/api-client';
 import { apiSessionIdentity } from '@/utils/api-session-identity';
 import { invalidateSidebarProjection } from '@/utils/sidebar-thread-snapshot';
+import { invalidateThreadAttentionPreferences } from '@/utils/thread-attention-invalidation';
 import { useShellCopy } from '../shell/shell-copy';
 import { threadDeletionCopy } from './thread-deletion.shell-copy';
 
@@ -56,6 +57,7 @@ export function useThreadDeletion({
             return;
           }
           if (thread.id === currentConversation.current) navigateToThread('default');
+          invalidateThreadAttentionPreferences();
           await invalidateSidebarProjection();
           if (controller.signal.aborted) return;
           if (showTrash) await loadTrash(true);
@@ -72,6 +74,7 @@ export function useThreadDeletion({
           useToastStore
             .getState()
             .addToast({ type: 'error', title: copy.failedTitle, message: copy.uncertainMessage, duration: 5000 });
+          invalidateThreadAttentionPreferences();
           void invalidateSidebarProjection();
         })
         .finally(() => {

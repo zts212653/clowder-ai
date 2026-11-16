@@ -1,13 +1,37 @@
-import { type MessageContent, serializeContextAttachmentsPrompt } from '@cat-cafe/shared';
+import { createHash } from 'node:crypto';
+import { type MessageContent, type RichBlock, serializeContextAttachmentsPrompt } from '@cat-cafe/shared';
 import type { IMessageStore } from '../domains/cats/services/stores/ports/MessageStore.js';
 import { canViewMessage, type Viewer } from '../domains/cats/services/stores/visibility.js';
+import { buildSearchableMessageContent } from '../domains/memory/message-search-content.js';
+import { messageSourceParts } from '../domains/memory/message-source-parts.js';
+
+/** Only a single persisted original owns citation coordinates; merged Queue text does not. */
+export function projectCallbackMessageCitation(message: Parameters<typeof projectCallbackMessageBody>[0]) {
+  const canonical = buildSearchableMessageContent({
+    content: message.content,
+    contentBlocks: message.contentBlocks,
+    richBlocks: message.extra?.rich?.blocks,
+  });
+  return {
+    contentRevision: createHash('sha256').update(canonical).digest('hex'),
+    sourceParts: messageSourceParts(message.content, message.contentBlocks).map(({ part, text }) => ({
+      part,
+      length: text.length,
+    })),
+  };
+}
 
 /** Reader projection of stored attachments; writer admission already owns validation.
  * Do not re-apply today's write budget to a historical source during a full drill. */
-export function projectCallbackMessageBody(message: { content: string; contentBlocks?: readonly MessageContent[] }): {
+export function projectCallbackMessageBody(message: {
+  content: string;
+  contentBlocks?: readonly MessageContent[];
+  extra?: { rich?: { blocks?: readonly RichBlock[] } };
+}): {
   content: string;
   contentLength: number;
   contentBlocks?: readonly MessageContent[];
+  richBlocks?: readonly RichBlock[];
 } {
   const attachments = message.contentBlocks?.flatMap((block) =>
     block.type === 'context_attachment' ? [block.attachment] : [],
@@ -15,10 +39,12 @@ export function projectCallbackMessageBody(message: { content: string; contentBl
   const content = attachments?.length
     ? [message.content, serializeContextAttachmentsPrompt(attachments)].filter(Boolean).join('\n')
     : message.content;
+  const richBlocks = message.extra?.rich?.blocks;
   return {
     content,
     contentLength: content.length,
     ...(message.contentBlocks?.length ? { contentBlocks: message.contentBlocks } : {}),
+    ...(richBlocks?.length ? { richBlocks } : {}),
   };
 }
 
@@ -52,9 +78,11 @@ export async function projectQueuedCallbackMessageBody(
       return { content: '', contentLength: 0, sourceUnavailableReason: 'queued_body_source_changed' };
     }
     const persisted = sources.filter((source): source is NonNullable<typeof source> => source !== null);
+    const richBlocks = persisted.flatMap((source) => (source.extra?.rich?.blocks ? source.extra.rich.blocks : []));
     return projectCallbackMessageBody({
       content: persisted.map((source) => source.content).join('\n\n'),
-      contentBlocks: persisted.flatMap((source) => source.contentBlocks ?? []),
+      contentBlocks: persisted.flatMap((source) => (source.contentBlocks ? source.contentBlocks : [])),
+      ...(richBlocks.length > 0 ? { extra: { rich: { blocks: richBlocks } } } : {}),
     });
   } catch (error) {
     scope.onSourceError?.(error);

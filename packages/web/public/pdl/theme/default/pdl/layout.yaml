@@ -708,6 +708,14 @@ slots:
           args: {res: accept}
         args: {id: id}
         need: canDecide
+      - id: ib.readback
+        scope: row
+        move: cafe.inbox.decide
+        title: t:proposalRecovery.readback
+        icon: refresh
+        open: {action: inboxReadback}
+        args: {id: proposalId}
+        need: canReadback
       - id: ib.jump
         scope: row
         move: cafe.inbox.decide
@@ -742,6 +750,7 @@ slots:
           action: cafeIbDone
           args: {kind: mention}
         args: {id: id, t: thread, mid: messageId, revision: expectedRevision}
+        need: canWrite
       - id: ibat.ignore
         scope: row
         move: cafe.inbox.at
@@ -751,6 +760,7 @@ slots:
           action: remove
           args: {entity: ibAt}
         args: {id: id}
+        need: canWrite
       - id: ibat.jump
         scope: row
         move: cafe.inbox.at

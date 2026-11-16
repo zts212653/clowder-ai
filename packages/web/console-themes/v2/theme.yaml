@@ -302,6 +302,7 @@ pdl:
                 args:
                   entity: ibIgnored
                   id: "@id"
+                disabled: "@writeDisabled"
               when: "@ignored"
             - type: component
               use: v2Action
@@ -311,6 +312,7 @@ pdl:
                 args:
                   entity: ibBack
                   id: "@id"
+                disabled: "@writeDisabled"
               when: "@handled"
             - type: component
               use: v2Action
@@ -7336,6 +7338,31 @@ pdl:
                 input: cafeField
         when: "@card.asking"
       - $frag: v2.bind.v2Toolbar.44
+      - type: component
+        use: v2Toolbar
+        props:
+          items:
+            - type: component
+              use: v2Status
+              props:
+                tone: warn
+                text:
+                  of: "@card.recovery"
+                  map:
+                    uncertain: t:proposalRecovery.uncertain
+                    retryable: t:proposalRecovery.retryable
+                    placement: t:proposalRecovery.placement
+                    writing: t:proposalRecovery.writing
+                    _: ""
+            - type: component
+              use: v2Action
+              props:
+                label: t:proposalRecovery.readback
+                act: proposalReadback
+                args: {mid: "@mid"}
+                disabled: "@card.recoveryReading"
+              when: "@card.canReadback"
+        when: "@card.recovery"
     v2.bind.fields.23:
       - $frag: v2.bind.v2Each.24
     v2.bind.v2Each.24:
@@ -11111,7 +11138,11 @@ pdl:
                                             t: workbench.flagName.true
                                             args:
                                               - "@name"
-                                          _: "@name"
+                                          _:
+                                            of: "@id"
+                                            map:
+                                              F200_CONSUMPTION_RERANK: t:memory.flagRerank
+                                              _: "@name"
                                       tip: "@id"
                                   trail:
                                     - text:
@@ -12058,6 +12089,22 @@ pdl:
             v: main
       blocks:
         - type: component
+          use: v2Toolbar
+          props:
+            items:
+              - type: component
+                use: v2Status
+                props:
+                  tone: warn
+                  text: t:inboxRefresh.retained
+              - type: component
+                use: v2Action
+                props:
+                  label: t:common.refresh
+                  act: refresh
+                  args: {k: ib-approvals}
+          when: $.displayOnly
+        - type: component
           use: v2PageHeader
           props:
             title: t:inbox.title
@@ -12095,6 +12142,7 @@ pdl:
                       act: modal
                       args:
                         v: ibIgnore
+                      disabled: $.displayOnly
             close: inbox
             role: detail
           when: $.main
@@ -30755,7 +30803,11 @@ pdl:
                                           t: workbench.flagName.true
                                           args:
                                             - "@name"
-                                        _: "@name"
+                                        _:
+                                          of: "@id"
+                                          map:
+                                            F200_CONSUMPTION_RERANK: t:memory.flagRerank
+                                            _: "@name"
                                     tip: "@id"
                                 trail:
                                   - text:
@@ -32181,7 +32233,11 @@ pdl:
                                     t: workbench.flagName.true
                                     args:
                                       - "@name"
-                                  _: "@name"
+                                  _:
+                                    of: "@id"
+                                    map:
+                                      F200_CONSUMPTION_RERANK: t:memory.flagRerank
+                                      _: "@name"
                               tip: "@id"
                           trail:
                             - text:

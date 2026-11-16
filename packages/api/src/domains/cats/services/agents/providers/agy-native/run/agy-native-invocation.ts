@@ -7,6 +7,7 @@ import type { createAgyNativeContinuityInput } from '../agy-native-continuity.js
 import type { AgyNativeLaunchPlan } from '../agy-native-launch.js';
 import { AgyNativeProgress } from '../agy-native-progress.js';
 import { type AgyNativeObservedTurn, observeAgyNativeTurn, projectAgyNativeTurn } from '../agy-native-turn.js';
+import { AgyNativeImagePublisher } from './agy-native-image-publisher.js';
 import { recoverAgyNativeMcpSpill } from './agy-native-mcp-spill.js';
 import { AgyNativeRunInput } from './agy-native-run-input.js';
 import { AgyNativeRunOutput } from './agy-native-run-output.js';
@@ -62,6 +63,13 @@ export async function* runAgyNativeInvocation(input: {
   const inputLifetime = new AbortController();
   const processLifetime = new AbortController();
   const multiTurn = Boolean(options?.activeRunDispatch && !compactionRequested && prompt.trim() !== '/compact');
+  const imagePublisher = new AgyNativeImagePublisher(
+    catId,
+    metadata,
+    launch.binding.profileHome,
+    launch.agentTools,
+    options?.uploadDir,
+  );
   let runInput: AgyNativeRunInput | undefined;
   if (multiTurn && options) runInput = new AgyNativeRunInput(options, () => inputLifetime.abort());
   try {
@@ -130,12 +138,14 @@ export async function* runAgyNativeInvocation(input: {
           );
         }
       } else if (observation.kind === 'result') {
+        const publication = await imagePublisher.settle(observation.observed);
+        yield* publication.messages;
         if (runInput && runOutput) {
-          const messages = runOutput.result(observation.observed);
+          const messages = runOutput.result(publication.observed);
           await runInput.result(runOutput.successful);
           if (!runOutput.successful) {
             processLifetime.abort();
-            observed = observation.observed;
+            observed = publication.observed;
             yield* messages;
             break;
           }
@@ -161,6 +171,9 @@ export async function* runAgyNativeInvocation(input: {
       } else observed = observation.observed;
     }
     if (!observed) throw new Error('AGY native stream ended without a terminal observation');
+    const publication = await imagePublisher.settle(observed);
+    observed = publication.observed;
+    yield* publication.messages;
     if (runInput && runOutput) {
       if (runInput.hasUnfinishedInput) {
         log.warn(

@@ -18,45 +18,68 @@ function bindInbox() {
     handled = null,
     confirmations = [],
     conciergeThread = null,
-    failure = null,
-    lastHandling = null;
+    lastHandling = null,
+    confirmed = false,
+    sequence = 0,
+    owner;
+  function requireCurrent() {
+    if (!confirmed) throw new Error(tc('inboxRefresh.retained'));
+  }
   async function load() {
-    failure = null;
+    const ticket = ++sequence;
+    confirmed = false;
+    chatDataRender();
     try {
       const values = await Promise.all([
-        api.get('/api/concierge/work/decisions', {
-          view: 'unified',
-          includeUserMentions: 'true',
-          mentionPeriod: CS.ib.time,
-          limit: 20,
-          offset: (CS.ib.page - 1) * 20,
-        }),
-        api.get('/api/concierge/work/decisions', {
-          view: 'unified',
-          includeUserMentions: 'true',
-          mentionPeriod: 'handled',
-          limit: 20,
-        }),
-        api.get('/api/concierge/confirmations'),
-        api.get('/api/concierge/thread'),
-        api.get('/api/concierge/work/mentions/last-handling'),
+        api.get(
+          '/api/concierge/work/decisions',
+          {
+            view: 'unified',
+            includeUserMentions: 'true',
+            mentionPeriod: CS.ib.time,
+            limit: 20,
+            offset: (CS.ib.page - 1) * 20,
+          },
+          { afterCurrentGet: true },
+        ),
+        api.get(
+          '/api/concierge/work/decisions',
+          {
+            view: 'unified',
+            includeUserMentions: 'true',
+            mentionPeriod: 'handled',
+            limit: 20,
+          },
+          { afterCurrentGet: true },
+        ),
+        api.get('/api/concierge/confirmations', undefined, { afterCurrentGet: true }),
+        api.get('/api/concierge/thread', undefined, { afterCurrentGet: true }),
+        api.get('/api/concierge/work/mentions/last-handling', undefined, { afterCurrentGet: true }),
       ]);
+      if (ticket !== sequence) return;
+      if (owner !== undefined && (values[0].identity.ownerUserId !== owner || values[1].identity.ownerUserId !== owner))
+        throw new Error(tc('inboxRefresh.retained'));
       const diff = { added: [], changed: [], removed: [], orderChanged: false, fields: [] };
       read = receiveProjectValue(read, values[0], 'inbox', diff);
       handled = receiveProjectValue(handled, values[1], 'inbox', diff);
       confirmations = receiveProjectValue(confirmations, values[2].confirmations, 'inbox.confirmations', diff);
       conciergeThread = values[3].threadId;
       lastHandling = values[4].receipt;
+      confirmed = true;
       dataOk('inbox');
     } catch (error) {
-      read = handled = null;
-      confirmations = [];
-      lastHandling = null;
-      failure = error;
+      if (ticket !== sequence) return;
       dataError('inbox', error);
     }
     await chatDataRender();
   }
+  api.on('session:changed', function (identity) {
+    owner = identity && identity.ownerUserId;
+    ++sequence;
+    confirmed = false;
+    chatDataRender();
+    if (heldNeeded.has('inbox')) return load();
+  });
   api.on('sources:needed', function (diff) {
     if (diff.added.indexOf('inbox') >= 0) settleHold(load());
   });
@@ -95,11 +118,19 @@ function bindInbox() {
   function coordinate(m) {
     return { threadId: m.threadId, messageId: m.messageId, expectedRevision: m.expectedRevision };
   }
+  function requireMention(m) {
+    requireCurrent();
+    const current = m && mention(m.messageId);
+    if (!current || !chatDataEqual(coordinate(current), coordinate(m))) throw new Error(tc('inboxRefresh.retained'));
+    return current;
+  }
   async function restore(m) {
+    requireMention(m);
     await api.post('/api/concierge/work/mentions/restore', {}, coordinate(m));
     await load();
   }
   async function ignore(m) {
+    requireMention(m);
     const receipt = await api.post('/api/concierge/work/mentions/handle', {}, { requests: [coordinate(m)] });
     await load();
     return async function () {
@@ -145,6 +176,8 @@ function bindInbox() {
   ENT.ibIgnored = { get: mention, remove: restore };
   ENT.ibBack = { get: mention, remove: restore };
   A.cafeIbUndo = async function (d) {
+    requireCurrent();
+    if (!lastHandling || lastHandling.undoId !== d.undoId) return false;
     await api.post('/api/concierge/work/mentions/undo', {}, { undoId: d.undoId });
     await load();
     return true;
@@ -165,7 +198,7 @@ function bindInbox() {
   };
   MODALS.ibIgnore = function (m) {
     const p = m.preview,
-      ready = p && p.coverage.state === 'complete' && p.consistency.state === 'verified';
+      ready = confirmed && p && p.coverage.state === 'complete' && p.consistency.state === 'verified';
     return {
       error: m.error,
       vm: {
@@ -176,11 +209,15 @@ function bindInbox() {
       },
       submitDisabled: !ready || !p.requests.length,
       submit: async function () {
+        requireCurrent();
+        const ticket = sequence;
         const fresh = await api.get('/api/concierge/work/mentions/handling-preview', {
           period: p.period,
           personalView: 'visible',
         });
         if (
+          !confirmed ||
+          ticket !== sequence ||
           fresh.coverage.state !== 'complete' ||
           fresh.consistency.state !== 'verified' ||
           fresh.personalView.preferenceRevision !== p.personalView.preferenceRevision ||
@@ -206,7 +243,24 @@ function bindInbox() {
       },
     };
   };
+  A.inboxReadback = async function (d) {
+    const binding = Object.values(chatDataSnapshot.chat.proposals || {}).find(function (b) {
+      return b.target.id === d.id;
+    });
+    if (binding) await chatAction('proposalReadback', { mid: binding.target.mid });
+    else await chatAction('inboxReadback', { id: d.id });
+    await load();
+  };
+  function recoveryFor(proposalId) {
+    const chat = projectionSource(chatDataSnapshot.chat, 'chat'),
+      source = projectionSource(projectData('sources'), 'project.sources'),
+      binding = Object.values(chat.proposals || {}).find(function (b) {
+        return b.target.id === proposalId;
+      });
+    return (binding && binding.recovery) || (source && source.inboxRecoveries && source.inboxRecoveries[proposalId]);
+  }
   A.cafeIbDone = async function (d) {
+    requireCurrent();
     const row =
       read &&
       read.items.find(function (r) {
@@ -217,23 +271,32 @@ function bindInbox() {
             : null;
         return d.id === (ref ? ref.messageId : r.decisionRef);
       });
-    if (d.kind === 'mention')
+    if (d.kind === 'mention') {
+      const current = requireMention({
+        threadId: d.t,
+        messageId: d.mid,
+        expectedRevision: Number(d.revision),
+      });
       await api.post(
-        '/api/concierge/work/mentions/' + encodeURIComponent(d.t) + '/resolve',
+        '/api/concierge/work/mentions/' + encodeURIComponent(current.threadId) + '/resolve',
         {},
-        { expectedMessageId: d.mid, expectedRevision: d.revision === undefined ? undefined : Number(d.revision) },
+        { expectedMessageId: current.messageId, expectedRevision: current.expectedRevision },
       );
-    else if (row && row.approval) {
+    } else if (row && row.approval) {
       const ok = await chatAction('inboxDecide', {
         id: row.approval.proposalId,
         owner: read.identity.ownerUserId,
         res: d.res,
       });
       if (ok === false) return false;
-    } else await chatPort.action('cardDecide', { mid: d.id, v: d.res === 'accept' ? 'ok' : 'no' });
+    } else {
+      if (!row) return false;
+      await chatPort.action('cardDecide', { mid: d.id, v: d.res === 'accept' ? 'ok' : 'no' });
+    }
     await load();
   };
   A.cafeIbBatch = async function (d) {
+    requireCurrent();
     const ids = Object.keys(CS.ib.apPick).filter(function (id) {
       return CS.ib.apPick[id];
     });
@@ -258,7 +321,14 @@ function bindInbox() {
       time: m.timestamp,
       timestamp: typeof m.timestamp === 'number',
       slot: 'cafe.inbox.at',
-      ctx: { id: m.messageId, thread: m.threadId, messageId: m.messageId, expectedRevision: m.expectedRevision },
+      ctx: {
+        id: m.messageId,
+        thread: m.threadId,
+        messageId: m.messageId,
+        expectedRevision: m.expectedRevision,
+        canWrite: confirmed,
+      },
+      writeDisabled: !confirmed,
       open: CS.ib.open === m.messageId,
       full: m.content,
     };
@@ -268,7 +338,6 @@ function bindInbox() {
   }
   VM.cafeInbox = function () {
     if (projectionNeeded) projectionNeeded.add('inbox');
-    if (failure) return null;
     const ignored = mentions(handled).filter(function (m) {
         return m.handledReason === 'ignored';
       }),
@@ -286,6 +355,8 @@ function bindInbox() {
                       ? r.approval.navigation.approvalCardRef
                       : null,
                 id = ref ? ref.messageId : r.decisionRef,
+                recovery = r.approval && recoveryFor(r.approval.proposalId),
+                writable = !recovery || (!recovery.reading && (!recovery.phase || recovery.phase === 'retryable')),
                 card = chatRead('chatStream').items.find(function (m) {
                   return m.mid === id;
                 });
@@ -312,12 +383,17 @@ function bindInbox() {
                   id: id,
                   thread: ref && ref.threadId,
                   noLoc: !ref,
-                  canDecide: r.approval
-                    ? r.approval.resolution === 'open' &&
-                      r.approval.inlineApprovable &&
-                      r.approval.decisionMode !== 'claim-select' &&
-                      !(r.approval.sourceFeatureId === 'F260' && r.approval.detail.conflict)
-                    : !!(card && card.card && (card.card.canApprove || card.card.canApproveSchedule)),
+                  proposalId: r.approval && r.approval.proposalId,
+                  canReadback: !!recovery && !!recovery.phase && recovery.phase !== 'writing' && !recovery.reading,
+                  canDecide:
+                    confirmed &&
+                    writable &&
+                    (r.approval
+                      ? r.approval.resolution === 'open' &&
+                        r.approval.inlineApprovable &&
+                        r.approval.decisionMode !== 'claim-select' &&
+                        !(r.approval.sourceFeatureId === 'F260' && r.approval.detail.conflict)
+                      : !!(card && card.card && (card.card.canApprove || card.card.canApproveSchedule))),
                   rejectRes: 'reject',
                   acceptRes: 'accept',
                   kView: 'view',
@@ -354,6 +430,7 @@ function bindInbox() {
         today = new Date(now).setHours(0, 0, 0, 0);
       return {
         sub: true,
+        displayOnly: !confirmed,
         ignored: {
           time: CS.ib.ignTime,
           items: ignored
@@ -373,6 +450,7 @@ function bindInbox() {
     if (CS.ib.view === 'handled')
       return {
         sub: true,
+        displayOnly: !confirmed,
         handled: {
           count: mentions(handled).length,
           items: mentions(handled)
@@ -387,6 +465,7 @@ function bindInbox() {
     if (CS.ib.view === 'approvals')
       return {
         sub: true,
+        displayOnly: !confirmed,
         ap: {
           tab: CS.ib.apTab,
           pendingCount: pending.length + confirmRows.length,
@@ -396,7 +475,7 @@ function bindInbox() {
           type: CS.ib.apType,
           res: CS.ib.apRes,
           pendingItems: CS.ib.apTab === 'pending' ? pending.concat(confirmRows) : [],
-          nonePicked: !picked.length,
+          nonePicked: !confirmed || !picked.length,
           histItems: confirmations
             .filter(function (c) {
               return (
@@ -409,8 +488,9 @@ function bindInbox() {
         },
       };
     return {
+      displayOnly: !confirmed,
       ignoredCount: ignored.length,
-      undoReceipt: lastHandling && lastHandling.remaining > 0 ? lastHandling : null,
+      undoReceipt: confirmed && lastHandling && lastHandling.remaining > 0 ? lastHandling : null,
       main: {
         me: chatRead('me').handle,
         time: CS.ib.time,

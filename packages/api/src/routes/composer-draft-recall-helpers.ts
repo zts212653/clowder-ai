@@ -1,8 +1,4 @@
-import {
-  CONTEXT_ATTACHMENT_MAX_COUNT,
-  ContextAttachmentContentSchema,
-  ContextAttachmentsSchema,
-} from '@cat-cafe/shared';
+import { ContextAttachmentContentSchema } from '@cat-cafe/shared';
 import { z } from 'zod';
 import type { IMessageStore } from '../domains/cats/services/stores/ports/MessageStore.js';
 
@@ -31,19 +27,11 @@ const composerDraftImageBlockSchema = z
 
 const composerDraftContentBlocksSchema = z
   .array(z.union([composerDraftImageBlockSchema, ContextAttachmentContentSchema]))
-  .max(5 + CONTEXT_ATTACHMENT_MAX_COUNT)
   .superRefine((blocks, ctx) => {
     if (blocks.filter((block) => block.type === 'image').length > 5) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         message: 'Composer drafts support at most 5 images',
-      });
-    }
-    const attachments = blocks.flatMap((block) => (block.type === 'context_attachment' ? [block.attachment] : []));
-    if (!ContextAttachmentsSchema.safeParse(attachments).success) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: 'Composer draft context attachments violate the shared aggregate contract',
       });
     }
   });

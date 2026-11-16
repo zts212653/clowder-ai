@@ -229,7 +229,7 @@
  },
  "list": {
   "filter": "筛选",
-  "loadMore": "读取更多",
+  "loadMore": "查看更多",
   "empty": "没有内容",
   "emptyFolder": "空文件夹",
   "emptyState": "这里还没有内容。",
@@ -246,6 +246,7 @@
   "jumpSource": "跳到原对话里的这条消息"
  },
  "fold": {
+  "viewMore": "查看更多",
   "collapseMiddle": "收起中间部分",
   "expandMiddle": "展开中间部分",
   "expandMiddleN": "展开中间约 {0} 行",

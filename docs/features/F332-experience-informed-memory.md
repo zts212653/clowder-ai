@@ -17,7 +17,7 @@ mcp_admission_claims:
     boundaryKind: side-effect-boundary
     decision: accepted
 created: 2026-10-23
-updated: 2026-11-13
+updated: 2026-11-15
 tips_exempt: "Renewed 2026-11-13: daily doc guard records PR #6483 profile/capsule revision invalidation and source/usage refresh fix in Timeline; existing memory-page, capsule, and watcher controls and tips are unchanged."
 description: 让共同经历在未见情境中帮助猫自主联想、核证与修正判断，并让人看见和纠正记忆。
 description_source: human

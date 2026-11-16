@@ -916,7 +916,7 @@ window.clowderChat = {
       return chatAction('thread', d);
     };
     A.threadOpen = A.thread;
-    ['cardDecide', 'cardAskToggle', 'cardAsk', 'entityResolve'].forEach(function (name) {
+    ['cardDecide', 'cardAskToggle', 'cardAsk', 'proposalReadback', 'entityResolve'].forEach(function (name) {
       A[name] = function (d) {
         return chatAction(name, d);
       };

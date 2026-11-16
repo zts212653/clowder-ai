@@ -1,13 +1,15 @@
 'use client';
 import type { ThreadAttentionGroup, ThreadAttentionPreferences } from '@cat-cafe/shared';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { GroupUndoReceipt } from '@/components/ThreadSidebar/search-group-types';
 import type { ThreadAttentionGroupCommand } from '@/components/ThreadSidebar/use-attention-clusters';
 import type { ThreadLabel } from '@/stores/label-store';
 import type { SidebarSnapshotRow } from '@/stores/sidebarProjectionStore';
 import { useSidebarProjectionStore } from '@/stores/sidebarProjectionStore';
+import { apiSessionIdentity } from '@/utils/api-session-identity';
 import { extractPendingLabelSuggestions, filterSuggestions, type PendingLabelSpec } from '@/utils/batch-apply-labels';
 import { invalidateSidebarProjection, refreshSidebarThreadSnapshot } from '@/utils/sidebar-thread-snapshot';
+import { THREAD_ATTENTION_INVALIDATED } from '@/utils/thread-attention-invalidation';
 import type { ChatData } from './chat-models';
 import { request, write } from './owner-api';
 
@@ -29,6 +31,7 @@ export interface SidebarSource {
 
 export function useSidebarBindings(data: ChatData, needed: boolean | number = false) {
   const projection = useSidebarProjectionStore((s) => s.rows);
+  const sequence = useRef(0);
   const read = useRef<{ owner: SidebarOwner | null; error: unknown }>({ owner: null, error: null });
   const [, changed] = useState(0);
   const classification = useRef<{
@@ -60,23 +63,54 @@ export function useSidebarBindings(data: ChatData, needed: boolean | number = fa
     read.current = { owner, error: null };
     publish();
   };
-  const load = async () => {
+  const load = useCallback(async (fresh = true) => {
+    const ticket = ++sequence.current;
+    const identity = apiSessionIdentity.getSnapshot();
     try {
       const [preferences, labels] = await Promise.all([
-        request<SidebarOwner['preferences']>('/api/config/thread-attention'),
-        request<ThreadLabel[]>('/api/labels'),
-        refreshSidebarThreadSnapshot(),
+        request<SidebarOwner['preferences']>('/api/config/thread-attention', undefined, { afterCurrentGet: true }),
+        request<ThreadLabel[]>('/api/labels', undefined, { afterCurrentGet: true }),
+        fresh ? invalidateSidebarProjection() : refreshSidebarThreadSnapshot(),
       ]);
-      accept({ preferences, labels });
+      if (ticket === sequence.current && identity === apiSessionIdentity.getSnapshot()) accept({ preferences, labels });
     } catch (error) {
+      if (ticket !== sequence.current || identity !== apiSessionIdentity.getSnapshot()) return;
       read.current = { owner: null, error };
       publish();
       throw error;
     }
-  };
+  }, []);
   useEffect(() => {
-    if (needed) void load().catch(() => {});
-  }, [needed]);
+    if (!needed) return;
+    const refresh = () => {
+      void load().catch(() => {});
+    };
+    const visible = () => {
+      if (document.visibilityState === 'visible') refresh();
+    };
+    void load(false).catch(() => {});
+    const events = [THREAD_ATTENTION_INVALIDATED, 'focus', 'online', 'cat-cafe:socket-reconnected'];
+    const approved = (event: Event) => {
+      const detail = (event as CustomEvent<{ status?: string; createdThreadId?: string }>).detail;
+      if (detail?.status === 'approved' && detail.createdThreadId) refresh();
+    };
+    window.addEventListener('cat-cafe:proposal-updated', approved);
+    events.forEach((event) => window.addEventListener(event, refresh));
+    document.addEventListener('visibilitychange', visible);
+    const releaseIdentity = apiSessionIdentity.subscribe(() => {
+      ++sequence.current;
+      read.current = { owner: null, error: null };
+      publish();
+      refresh();
+    });
+    return () => {
+      ++sequence.current;
+      events.forEach((event) => window.removeEventListener(event, refresh));
+      window.removeEventListener('cat-cafe:proposal-updated', approved);
+      document.removeEventListener('visibilitychange', visible);
+      releaseIdentity();
+    };
+  }, [needed, load]);
   const action = async (name: string, args: Record<string, string>) => {
     switch (name) {
       case 'clDismiss':
@@ -206,10 +240,18 @@ export function useSidebarBindings(data: ChatData, needed: boolean | number = fa
         return true;
       }
       case 'sidebarRestore':
-        await Promise.all(
-          (JSON.parse(args.value) as string[]).map((id) => write(`/api/threads/${encodeURIComponent(id)}/restore`, {})),
-        );
-        await Promise.all([load(), invalidateSidebarProjection()]);
+        try {
+          await Promise.allSettled(
+            (JSON.parse(args.value) as string[]).map((id) =>
+              write(`/api/threads/${encodeURIComponent(id)}/restore`, {}),
+            ),
+          ).then((results) => {
+            const failed = results.find((result) => result.status === 'rejected');
+            if (failed?.status === 'rejected') throw failed.reason;
+          });
+        } finally {
+          await Promise.all([load(), invalidateSidebarProjection()]);
+        }
         return true;
       case 'sidebarReveal':
         await write('/api/workspace/reveal-project', { projectPath: args.id });

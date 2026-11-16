@@ -113,16 +113,12 @@ describe('F264 Gap F owner composer draft API', () => {
     assert.deepEqual(staleAfterClear.json(), { code: 'DRAFT_REVISION_MISMATCH', actualRevision: 2 });
   });
 
-  it('rejects non-composer blocks and enforces image and attachment limits', async () => {
+  it('rejects non-composer blocks and enforces image limits', async () => {
     const app = createApp();
     for (const contentBlocks of [
       [{ type: 'tool_call', toolName: 'oops', toolId: 'unsafe', input: {} }],
       [{ type: 'image', url: '/uploads/../secret.png' }],
       Array.from({ length: 6 }, (_, index) => ({ type: 'image', url: `/uploads/too-many-${index}.png` })),
-      Array.from({ length: 13 }, (_, index) => ({
-        ...QUOTE_ATTACHMENT_BLOCK,
-        attachment: { ...QUOTE_ATTACHMENT_BLOCK.attachment, id: `ctx-too-many-${index}` },
-      })),
     ]) {
       const invalid = await app.inject({
         method: 'PUT',

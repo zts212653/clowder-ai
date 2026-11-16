@@ -405,6 +405,18 @@ path_policies:
     risk: P3
     reason: "Intake ledger tracks clowder-ai PR absorption; naturally contains cross-repo brand references (repo name, PR titles). pass-through exempts from brand guard (pre-commit) and intake classification (not a managed sync root — never reaches clowder-ai). F238 follow-up from #943/#944/#899."
 
+  - pattern: "docs/taste/index.md"
+    outbound: pass-through
+    inbound: pass-through
+    risk: P3
+    reason: "Home-only Taste index preserves approved memory scenes, including real public-brand references; sync-manifest excludes docs/taste/ from public export."
+
+  - pattern: "docs/taste/vignettes/*.md"
+    outbound: pass-through
+    inbound: pass-through
+    risk: P3
+    reason: "Approved Taste quotes and scenes must retain their original brand references; these home memories are excluded from public export, not product-brand surfaces."
+
   - pattern: "docs/**"
     outbound: sanitize
     inbound: manual-port

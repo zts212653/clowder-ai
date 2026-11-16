@@ -26,7 +26,6 @@ import { createConciergeMessageSearch } from '../../../../concierge/concierge-me
 import {
   buildConciergeActions,
   extractTriagePlanIdsFromActions,
-  projectConciergeStoredContent,
   stripTriagePlanMarkers,
   type TriagePlanExtractionDeps,
 } from '../../../../concierge/concierge-reply-validator.js';
@@ -124,11 +123,12 @@ import { commitCompletedRouteResponse } from './commit-completed-response.js';
 import { type ContextEvalInput, extractContextEvalSignals } from './context-eval.js';
 import { buildBriefingMessage } from './format-briefing.js';
 import { isDirectOwnerDispositionOrigin } from './human-disposition-invocation-origin.js';
-import { outputLayoutExtra, RoutingMessageOutputProjection } from './message-output-projection.js';
+import { draftOutputFields, outputLayoutExtra, RoutingMessageOutputProjection } from './message-output-projection.js';
 import { persistUserFacingSystemInfoNotices } from './persist-system-info-warnings.js';
 import { appendRemoteCancellationNotice, createRemoteCancellationObserver } from './remote-cancellation.js';
 import { recordStoppedRecallCalls, resolveResponseTerminal, stoppedByMemberTimeout } from './response-terminal.js';
-import { extractRichFromText, isValidRichBlock } from './rich-block-extract.js';
+import { prepareResponseText } from './response-text.js';
+import { isValidRichBlock } from './rich-block-extract.js';
 import type { RouteOptions, RouteStrategyDeps } from './route-helpers.js';
 import {
   assembleIncrementalContext,
@@ -148,7 +148,6 @@ import {
   mergePersistedPromptMessages,
   operationalKnowledgeCueSeeds,
   routeContentBlocksForCat,
-  sanitizeInjectedContent,
   shouldPersistContextBriefing,
   storedMessageTimestamp,
   subjectSeenCueSeeds,
@@ -1695,7 +1694,7 @@ async function* routeParallelPrepared(
               catId: effectiveMsg.catId as CatId,
               content: curText,
               ...(catMeta.get(effectiveMsg.catId) ? { metadata: catMeta.get(effectiveMsg.catId) } : {}),
-              extra: outputLayoutExtra(catOutputProjections.get(effectiveMsg.catId), curText),
+              ...draftOutputFields(catOutputProjections.get(effectiveMsg.catId), curText),
               ...(curTools && curToolLen > 0 ? { toolEvents: curTools } : {}),
               ...(curThinking && curThinking.length > 0 ? { thinking: renderThinkingChunks(curThinking) } : {}),
               updatedAt: now,
@@ -1722,7 +1721,7 @@ async function* routeParallelPrepared(
                 catId: effectiveMsg.catId as CatId,
                 content: curText,
                 ...(catMeta.get(effectiveMsg.catId) ? { metadata: catMeta.get(effectiveMsg.catId) } : {}),
-                extra: outputLayoutExtra(catOutputProjections.get(effectiveMsg.catId), curText),
+                ...draftOutputFields(catOutputProjections.get(effectiveMsg.catId), curText),
                 ...(curTools && curToolLen > 0 ? { toolEvents: curTools } : {}),
                 ...(curThinkingTool && curThinkingTool.length > 0
                   ? { thinking: renderThinkingChunks(curThinkingTool) }
@@ -1953,9 +1952,16 @@ async function* routeParallelPrepared(
       } else if (text) {
         catProducedOutput = true;
         const meta = catMeta.get(msg.catId);
-        const sanitized = sanitizeInjectedContent(text);
-        // F22: Extract cc_rich blocks from text + merge with buffered
-        let { cleanText: storedContent, blocks: textBlocks } = extractRichFromText(sanitized);
+        const preparedText = prepareResponseText(
+          text,
+          catOutputProjections.get(msg.catId),
+          Boolean(
+            'conciergeConfig' in conciergeCtx &&
+              conciergeContextForCat(conciergeCtx, msg.catId as string)?.conciergeConfig,
+          ),
+        );
+        const authoredContent = preparedText.authoredContent;
+        const { content: persistedContent, blocks: textBlocks, conciergeActionSourceContent } = preparedText;
         let allRichBlocks = [...bufferedBlocks, ...textBlocks, ...(catStreamRichBlocks.get(msg.catId) ?? [])];
         // F34-b: synthesize text-only audio blocks (voice messages)
         // F111: skip synthesis in voiceMode — frontend streams via /api/tts/stream
@@ -1970,18 +1976,6 @@ async function* routeParallelPrepared(
           }
         }
         const catTools = catToolEvents.get(msg.catId);
-        const conciergeActionSourceContent =
-          'conciergeConfig' in conciergeCtx &&
-          conciergeContextForCat(conciergeCtx, msg.catId as string)?.conciergeConfig &&
-          storedContent
-            ? storedContent
-            : undefined;
-        if (conciergeActionSourceContent) {
-          storedContent = stripTriagePlanMarkers(storedContent);
-        }
-        const persistedContent = conciergeActionSourceContent
-          ? projectConciergeStoredContent(storedContent)
-          : storedContent;
         persistedDoneContent = persistedContent;
         // F167 L2 AC-A5: parallel mode has no routing semantics, so persist mentions=[]
         // to keep parallel @ mentions out of MessageStore.getMentionsFor() / pending-mentions flow.
@@ -1989,7 +1983,7 @@ async function* routeParallelPrepared(
 
         // F079 Phase 2: Vote interception for parallel routing.
         // @all / multi-cat requests route here, so [VOTE:xxx] must be handled too.
-        const votedOption = extractVoteFromText(storedContent);
+        const votedOption = extractVoteFromText(authoredContent);
         if (votedOption && deps.invocationDeps.threadStore) {
           try {
             const voteState = await deps.invocationDeps.threadStore.getVotingState(threadId);
@@ -2134,7 +2128,7 @@ async function* routeParallelPrepared(
           const streamMessageInput: AppendMessageInput = {
             from: { kind: 'agent', catId: msg.catId as CatId },
             userId,
-            content: terminalFailureContent ? `${storedContent}\n\n${terminalFailureContent}` : storedContent,
+            content: terminalFailureContent ? `${persistedContent}\n\n${terminalFailureContent}` : persistedContent,
             mentions: [],
             origin: 'stream',
             timestamp: invocationStartedAt,

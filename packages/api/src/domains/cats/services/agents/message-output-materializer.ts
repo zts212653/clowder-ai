@@ -9,9 +9,10 @@ import {
   type MessageOutputSettlement,
 } from '@cat-cafe/shared';
 import { normalizeJsonUnicode } from '../../../../utils/json-unicode.js';
+import type { TextSourcePart } from '../text-provenance.js';
 import type { MessageOutputState, OutputTextRun } from './message-output-state.js';
 
-function separator(previous: string, next: string): string {
+export function messageOutputSeparator(previous: string, next: string): string {
   if (!previous || !next) return '';
   const trailing = /\n{0,2}$/.exec(previous)?.[0].length ?? 0;
   const leading = /^\n{0,2}/.exec(next)?.[0].length ?? 0;
@@ -20,6 +21,7 @@ function separator(previous: string, next: string): string {
 
 interface OutputProjection {
   content: string;
+  parts: TextSourcePart[];
   runs: MessageOutputRun[];
   order: MessageOutputOrderRef[];
   reason?: MessageOutputState['reason'];
@@ -27,9 +29,10 @@ interface OutputProjection {
 }
 
 function appendText(projection: OutputProjection, entry: OutputTextRun): void {
-  const glue = entry.paragraphBoundary ? separator(projection.content, entry.text) : '';
+  const glue = entry.paragraphBoundary ? messageOutputSeparator(projection.content, entry.text) : '';
   const start = projection.content.length;
   projection.content += glue + entry.text;
+  projection.parts.push({ content: glue + entry.text, ...(entry.textSource ? { textSource: entry.textSource } : {}) });
   if (!entry.identity || !entry.channel) projection.reason ??= 'unknown_output';
   else if (!entry.complete) projection.reason ??= 'incomplete';
   else if (projection.content.length > start) {
@@ -50,6 +53,7 @@ function appendText(projection: OutputProjection, entry: OutputTextRun): void {
 function projectEntries(state: MessageOutputState): OutputProjection {
   const projection: OutputProjection = {
     content: '',
+    parts: [],
     runs: [],
     order: [],
     ...(state.reason ? { reason: state.reason } : {}),
@@ -59,6 +63,7 @@ function projectEntries(state: MessageOutputState): OutputProjection {
     else if (entry.kind === 'host') {
       const start = projection.content.length;
       projection.content += entry.text;
+      projection.parts.push({ content: entry.text });
       projection.hostTail = {
         kind: entry.observation.kind,
         producer: entry.observation.producer,
@@ -77,6 +82,11 @@ function projectEntries(state: MessageOutputState): OutputProjection {
   return projection;
 }
 
+/** The same ordered body pieces, retaining authority until text consumers run. */
+export function messageOutputTextParts(state: MessageOutputState): readonly TextSourcePart[] {
+  return projectEntries(state).parts;
+}
+
 /** The event sequence proves a display boundary, without inventing native IDs or phases. */
 function toolBoundary(state: MessageOutputState, settlement: MessageOutputSettlement | undefined) {
   if (!settlement?.succeeded || settlement.nativePhases) return undefined;
@@ -91,7 +101,7 @@ function toolBoundary(state: MessageOutputState, settlement: MessageOutputSettle
       order.push({ kind: 'tool', toolEventId: entry.toolEventId, executionRef: entry.executionRef });
     } else {
       if (entry.kind !== 'text' || entry.identity || entry.channel) return undefined;
-      const glue = entry.paragraphBoundary ? separator(content, entry.text) : '';
+      const glue = entry.paragraphBoundary ? messageOutputSeparator(content, entry.text) : '';
       const start = content.length;
       content += glue + entry.text;
       if (content.length === start) continue;

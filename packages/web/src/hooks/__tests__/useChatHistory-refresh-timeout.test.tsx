@@ -164,7 +164,7 @@ describe('Settings refresh recovers one timed-out read inside its original owner
   it('does not start a retry after user input retired the first pending read', async () => {
     const state = await pendingRead();
     await act(async () => state.el.dispatchEvent(new WheelEvent('wheel', { deltaY: -1 })));
-    expect(state.bridge.getSnapshot()).toMatchObject({ returning: false, notice: 'interrupted' });
+    expect(state.bridge.getSnapshot()).toMatchObject({ returning: false, notice: null });
     await act(async () => {
       await vi.advanceTimersByTimeAsync(60_100);
     });

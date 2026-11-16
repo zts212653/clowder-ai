@@ -21,9 +21,9 @@ mcp_admission_claims:
 
 ## 入口与预算
 
-`search_evidence(resultUnit=message)` 原 GET 和 readonly 挂载保持只读；普通搜索保留 embedding/hybrid，以相关队列准入后作 relevance 或 K32 time 投影，不起生成式判官。显式写工具 `cat_cafe_prepare_message_search_answer` POST `/api/callbacks/search-evidence/answer`，新操作必须提交猫已读过的来源、当前 contentRevision、原句与选用理由。宿主核当前权限、版本、UTF-16 锚点及正文/引文/批注归属，不再搜索或判断原句是否支持结论。选择理由始终归认证猫，不能冒充系统 supported。
+`search_evidence(resultUnit=message)` 原 GET 和 readonly 挂载保持只读；普通搜索保留 embedding/hybrid，以相关队列准入后作 relevance 或 K32 time 投影，不起生成式判官。F332 归一首刀将专用 prepare 工具入口收进已有写入口：`create_rich_block(kind=sources)` 随 normal R 交卡，或 `post_message(searchAnswer={query,selections})` 随显式消息交卡。两者转原 POST `/api/callbacks/search-evidence/answer`，不新增发布器。新操作仍提交猫已读过的来源、当前 contentRevision、原句与选用理由；原消息 full 读取同时给版本和结构坐标。宿主核当前权限、版本、UTF-16 锚点及正文/引文/批注归属，不再搜索或判断原句是否支持结论。选择理由始终归认证猫，不能冒充系统 supported。顶部旧 MCP admission 留作历史边界记录，专用工具不再注册。
 
-原 query/filter/sort 参数保留为操作摘要和历史重试兼容；新卡以猫的选材顺序为准。独立工具仍使持久写副作用可被工具策略与 readonly 挂载准确拒绝，不暗藏于 GET。原 15s、publicReply、最终准入、取消及 24k 响应边界不变；检索候选池与向量参数不因判官退役改变。
+原 query/filter/sort 参数保留为操作摘要和历史重试兼容；新卡以猫的选材顺序为准。通用回复工具仍声明为写，且不在 readonly 挂载，服务端原权限守卫不变。sources 是作者输入，不是可伪造 Host 绑定的 RichBlock；核验失败不走 cc_rich fallback。原 15s、publicReply、最终准入、取消及 24k 响应边界不变；检索候选池与向量参数不因判官退役改变。
 
 Host 从认证取得 owner、producer；agent-key 明确提供目的 thread，搜索范围 threadId 不充当发布目的地。cloud-conversation 必须使用既有 exact-source return grant，准备时核验并释放该 grant，实际 post 仍走原 grant 提交。没有新授权、预算或重试。
 

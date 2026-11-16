@@ -12,6 +12,7 @@
 
 import { type CatId, readMessageOutputLayout } from '@cat-cafe/shared';
 import type { RedisClient } from '@cat-cafe/shared/utils';
+import { readTextProvenance } from '../../text-provenance.js';
 import type { DraftRecord, IDraftStore } from '../ports/DraftStore.js';
 import { DraftKeys } from '../redis-keys/draft-keys.js';
 import { safeParseMetadata } from './redis-message-parsers.js';
@@ -45,9 +46,11 @@ export class RedisDraftStore implements IDraftStore {
 
     if (draft.metadata) fields.metadata = JSON.stringify(draft.metadata);
     if (draft.extra?.outputLayout) fields.extra = JSON.stringify({ outputLayout: draft.extra.outputLayout });
+    if (draft.textProvenance !== undefined) fields.textProvenance = JSON.stringify(draft.textProvenance);
     const pipeline = this.redis.multi();
     if (!fields.extra) pipeline.hdel(detailKey, 'extra');
     if (!fields.metadata) pipeline.hdel(detailKey, 'metadata');
+    if (!fields.textProvenance) pipeline.hdel(detailKey, 'textProvenance');
     pipeline.hsetnx(detailKey, 'createdAt', createdAtForMissing);
     pipeline.hset(detailKey, fields);
     pipeline.sadd(indexKey, draft.invocationId);
@@ -148,6 +151,7 @@ export class RedisDraftStore implements IDraftStore {
       ...(toolEvents ? { toolEvents } : {}),
       ...(d.thinking ? { thinking: d.thinking } : {}),
       ...(metadata ? { metadata } : {}),
+      ...(d.textProvenance !== undefined ? { textProvenance: this.parseTextProvenance(d.textProvenance) } : {}),
       ...(outputLayout ? { extra: { outputLayout } } : {}),
     };
   }
@@ -158,6 +162,14 @@ export class RedisDraftStore implements IDraftStore {
       return readMessageOutputLayout(JSON.parse(raw)?.outputLayout);
     } catch {
       return undefined;
+    }
+  }
+
+  private parseTextProvenance(raw: string) {
+    try {
+      return readTextProvenance(JSON.parse(raw));
+    } catch {
+      return readTextProvenance(null);
     }
   }
 }

@@ -465,7 +465,7 @@ AC 全打勾 ≠ 完成（F041 教训：12 项 AC ✅ 但 UI 不可用）。回�
 
 **Step 0.5: 反思胶囊（F086 M3）🔴**
 
-有理解偏差、重复摩擦或值得复用的发现时，按 `self-evolution` 沉淀；反思胶囊是一种可选载体：
+家里已有答案却让 You 重说时，按 `code-as-harness` 当轮入错题本、查断点；其他值得复用的发现留在原任务或对应文档，反思胶囊是一种可选载体，不重复记同一笔错题：
 
 1. 从 `project-reflections/README.md` 复制模板
 2. 填 6 个固定章节（What Worked / What Failed / Trigger Missed / Doc Links / Rule Update Target）

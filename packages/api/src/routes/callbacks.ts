@@ -177,7 +177,13 @@ import {
   carrierRecoveryPendingResponse,
   resolveSafeWaitCarrier,
 } from './callback-action-carrier-resolution.js';
-import { anchorPendingMention, anchorThreadMessage, truncateHead } from './callback-anchor-helpers.js';
+import {
+  anchorPendingMention,
+  anchorThreadMessage,
+  callbackRichSearchText,
+  projectRichBlocksSummary,
+  truncateHead,
+} from './callback-anchor-helpers.js';
 import {
   extractCallbackCredentials,
   registerCallbackAuthHook,
@@ -202,7 +208,11 @@ import { registerCallbackImageRoutes } from './callback-image-routes.js';
 import { registerCallbackLimbRoutes } from './callback-limb-routes.js';
 import { type CallbackMemoryCueDeps, registerCallbackMemoryCueRoutes } from './callback-memory-cue-routes.js';
 import { registerCallbackMemoryRoutes } from './callback-memory-routes.js';
-import { projectCallbackMessageBody, projectQueuedCallbackMessageBody } from './callback-message-body.js';
+import {
+  projectCallbackMessageBody,
+  projectCallbackMessageCitation,
+  projectQueuedCallbackMessageBody,
+} from './callback-message-body.js';
 import { registerCallbackMessageReadRoutes } from './callback-message-read-routes.js';
 import {
   prepareCallbackSearchAnswer,
@@ -4002,6 +4012,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
               timestamp: item.timestamp,
               contentLength: body.contentLength,
               ...(body.contentBlocks ? { contentBlocks: body.contentBlocks } : {}),
+              ...(body.richBlocks ? { richBlocks: body.richBlocks } : {}),
               requiresDrill: false,
               ...(shouldIncludeAcked ? { acked: await isMentionAcked(item) } : {}),
             };
@@ -4262,7 +4273,9 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
     const getKeywordScore = (item: Awaited<ReturnType<typeof messageStore.getByThread>>[number]): number => {
       const cached = relevanceScores.get(item.id);
       if (cached !== undefined) return cached;
-      const score = scoreKeywordRelevance(item.content, keywordTerms);
+      const richText = callbackRichSearchText(item.extra?.rich?.blocks);
+      const searchableText = richText ? [item.content, richText].filter(Boolean).join('\n') : item.content;
+      const score = scoreKeywordRelevance(searchableText, keywordTerms);
       relevanceScores.set(item.id, score);
       return score;
     };
@@ -4648,6 +4661,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
           timestamp: item.timestamp,
           speaker: getMessageSpeakerName(item),
           ...projectedBody,
+          ...(isFullMode ? projectCallbackMessageCitation(item) : {}),
           truncated: false,
           ...queuedProjection,
           ...localReviewProjection,
@@ -4665,6 +4679,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
           truncated: true,
           oversized: true,
           drillDown: anchored.drillDown,
+          ...projectRichBlocksSummary(item.extra?.rich?.blocks),
           ...queuedProjection,
           ...localReviewProjection,
           ...(keywordTerms.length > 0 ? { relevanceScore: getKeywordScore(item) } : {}),
@@ -4686,6 +4701,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
             userId: principalUserId,
             catId: null,
             content: message.content,
+            ...(message.richBlocks ? { extra: { rich: { blocks: message.richBlocks } } } : {}),
             timestamp: message.timestamp,
           },
           { effectiveThreadId, speaker: message.speaker },
@@ -4715,6 +4731,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
                   : {
                       content: message.content,
                       ...(message.contentBlocks ? { contentBlocks: message.contentBlocks } : {}),
+                      ...(message.richBlocks ? { richBlocks: message.richBlocks } : {}),
                     }),
                 contentLength: message.contentLength,
                 truncated: Boolean(message.sourceUnavailableReason),
@@ -4729,6 +4746,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
             contentLength: message.content.length,
             oversized: true,
             truncated: true,
+            ...projectRichBlocksSummary(message.richBlocks),
             deliveryStatus: message.deliveryStatus,
             queueEntryId: message.queueEntryId,
             ...(message.id.startsWith('queued:')

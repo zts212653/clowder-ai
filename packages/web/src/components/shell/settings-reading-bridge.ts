@@ -264,6 +264,12 @@ export class SettingsReadingBridge {
       receipt = { status: 'unavailable' };
     }
     if (!this.current(operation) || this.reader?.port !== port) return;
+    if (receipt.status === 'interrupted' && receipt.reason === 'user-input') {
+      // The user owns the new reading position. Keep the source retryable without
+      // presenting normal takeover as a failed restoration or claiming success.
+      this.cancel(null, 'restore');
+      return;
+    }
     if (receipt.status !== 'settled' || !receipt.exact) {
       this.cancel(receipt.status === 'interrupted' ? 'interrupted' : 'unavailable', 'restore');
       return;

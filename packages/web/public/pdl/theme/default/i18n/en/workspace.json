@@ -49,6 +49,8 @@
   }
  },
  "wsRecall": {
+  "partial": "Partly read: some records or their replies cannot be read right now.",
+  "reread": "Read again",
   "result": {
    "error": "Search failed",
    "timeout": "Search timed out",

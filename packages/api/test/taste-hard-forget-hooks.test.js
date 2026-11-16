@@ -224,19 +224,33 @@ test('approve, correct and retire publish whitespace-heavy Taste text through th
   }
 });
 
-test('Markdown-only approval retains its no-Biome contract and the real inbound guard rejects illegal content', async () => {
+test('Markdown-only Taste retains brand quotes while the real inbound guard protects ordinary docs', async () => {
   const fixture = createRealHookFixture();
   try {
     assert.equal(existsSync(join(fixture.runtime, 'node_modules')), false);
     const writer = createVignetteWriter(fixture.runtime);
     const added = await writer(makeProposal({ id: 'proposal_hooks_md_abc456', tags: ['ordinary'] }));
     assert.match(remoteFile(fixture, added.path), /proposal_hooks_md_abc456/);
+    const branded = await assertPublicationCleanup(fixture, () =>
+      writer(makeProposal({ id: 'proposal_hooks_brand_abc457', tags: ['ordinary'], scene: 'Clowder AI' })),
+    );
+    assert.equal(
+      parse(
+        remoteFile(fixture, branded.path)
+          .replace(/^---\n/, '')
+          .split('\n---')[0],
+      ).scene,
+      'Clowder AI\n',
+    );
     const before = remoteHead(fixture);
-    await assertPublicationCleanup(fixture, () =>
-      assert.rejects(
-        writer(makeProposal({ id: 'proposal_hooks_bad_abc457', tags: ['ordinary'], scene: 'Clowder AI' })),
-        /contains public brand term 'Clowder AI'.*Inbound Guard failed/s,
-      ),
+    // Approved Taste scenes are pass-through. Use a protected sibling doc for
+    // this home-shaped hook fixture's foreign-brand negative control instead.
+    const protectedPath = 'docs/brand-guard-negative.md';
+    writeFileSync(join(fixture.runtime, protectedPath), 'Clowder AI\n');
+    git(fixture.runtime, ['add', '--', protectedPath]);
+    assert.throws(
+      () => git(fixture.runtime, ['commit', '-m', 'reject foreign brand in protected docs']),
+      /contains public brand term 'Clowder AI'.*Inbound Guard failed/s,
     );
     assert.equal(remoteHead(fixture), before);
   } finally {

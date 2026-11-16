@@ -17,7 +17,7 @@ vm.runInContext(m[0].replace('const PDL_SCHEMA', 'this.PDL_SCHEMA'), ctx);
 vm.runInContext("this.I18N = {}; this.defineI18nPack = function (ns, p) { this.I18N[ns] = p; return p; }; this.tc = function (k) { return 't:' + k; };", ctx);
 /* 主题的页面定义：每个主题的数据（构建从 pdl/*.yaml 合成的 pdl.js）里的视图、行模板、节点模板；片段引用（$frag）照加载时一样换成片段 */
 ctx.pdlThemeLoad = function (pdl) {
-  const expand = x => Array.isArray(x) ? x.map(expand) : !x || typeof x !== 'object' ? x : x.$frag ? expand(pdl.frags[x.$frag]) : Object.fromEntries(Object.entries(x).map(([k, v]) => [k, expand(v)]));
+  const expand = x => Array.isArray(x) ? x.flatMap(y => (y && y.$frag && Array.isArray(pdl.frags[y.$frag]) ? expand(pdl.frags[y.$frag]) : [expand(y)])) : !x || typeof x !== 'object' ? x : x.$frag ? expand(pdl.frags[x.$frag]) : Object.fromEntries(Object.entries(x).map(([k, v]) => [k, expand(v)]));
   ctx.PDL_POPUPS = Object.assign(ctx.PDL_POPUPS || {}, expand(pdl.popups || {}));
   Object.assign(ctx.PDL_VIEWS, expand(pdl.views || {})); Object.assign(ctx.PDL_ROWS, expand(pdl.rows || {})); Object.assign(ctx.PDL_NODES, expand(pdl.nodes || {}));
 };

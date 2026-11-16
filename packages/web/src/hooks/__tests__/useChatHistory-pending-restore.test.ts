@@ -220,7 +220,7 @@ describe('cached visual restore before authoritative history settlement', () => 
       );
       await flush(3);
       expect(top()).toBe(800);
-      expect(await receipt).toEqual({ status: 'interrupted' });
+      expect(await receipt).toEqual({ status: 'interrupted', reason: 'user-input' });
       expect(clicked.getBoundingClientRect().top).toBe(500);
       expect(readChatScrollState(threadId)).toMatchObject({
         top: 800,
@@ -240,7 +240,7 @@ describe('cached visual restore before authoritative history settlement', () => 
       });
       await flush(2);
       act(() => el.dispatchEvent(new WheelEvent('wheel', { deltaY: -1 })));
-      expect(await receipt).toEqual({ status: 'interrupted' });
+      expect(await receipt).toEqual({ status: 'interrupted', reason: 'user-input' });
       await settleHistory();
     });
     it(`retires queued ${source} restore writes at pointerdown, including stale RAF delivery`, async () => {
@@ -254,7 +254,7 @@ describe('cached visual restore before authoritative history settlement', () => 
       const beforePointerDown = top();
       const writes = vi.spyOn(el, 'scrollTop', 'set');
       act(() => el.dispatchEvent(new MouseEvent('pointerdown', { clientY: 150, bubbles: true })));
-      expect(await receipt).toEqual({ status: 'interrupted' });
+      expect(await receipt).toEqual({ status: 'interrupted', reason: 'user-input' });
       // A callback already queued for delivery must also lose its old ownership.
       act(() => {
         for (const callback of obsoleteFrames) callback(16);

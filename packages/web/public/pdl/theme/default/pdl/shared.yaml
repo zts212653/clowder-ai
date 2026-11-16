@@ -5731,6 +5731,166 @@ frags:
     letter: chat.node/cat
     wake: chat.node/cat
 
+  PROPOSAL_OPERATIONS:   # 一列块：引用处展开进那一列（卡片底栏是卡片的直接孩子）
+      - type: settings
+        when: "@card.editing"
+        from: "@card.editRows"
+        row:
+          label:
+            of: "@first"
+            map:
+              "true":
+                t: chat.proposalFirst
+                args: ["@label"]
+              "false": "@label"
+              _: "@label"
+          ctls:
+            - type: input
+              id: "@id"
+              value: "@value"
+              input: cafeField
+              label:
+                of: "@first"
+                map:
+                  "true":
+                    t: chat.proposalFirst
+                    args: ["@label"]
+                  "false": "@label"
+                  _: "@label"
+              when: "!@first"
+            - type: input
+              id: "@id"
+              value: "@value"
+              rows: 4
+              input: cafeField
+              label:
+                of: "@first"
+                map:
+                  "true":
+                    t: chat.proposalFirst
+                    args: ["@label"]
+                  "false": "@label"
+                  _: "@label"
+              when: "@first"
+      - type: toolbar
+        when: "@card.asking"
+        items:
+          - type: input
+            id: "@card.askId"
+            value: ""
+            go: cardAsk
+            args: {mid: "@mid"}
+            icon: send
+            goLabel: t:chatCards.proposal.askSend
+            placeholder: t:chatCards.proposal.askPh
+            label: t:chatCards.proposal.requestChange
+            input: cafeField
+      - type: toolbar
+        when: "!@card.result"
+        items:
+          - {$frag: CARD_STATUS}
+          - {type: grow}
+          - type: each
+            from: "@card.decisions"
+            control:
+              type: stack
+              items:
+                - type: button
+                  label:
+                    of: "@v"
+                    map:
+                      confirm: t:placement.frustrationConfirm
+                      false-positive: t:placement.falsePositive
+                      skip: t:chatCards.skip
+                      accept: t:common.accept
+                      refuse: t:common.reject
+                      _: "@v"
+                  act: proposalOwnerDecide
+                  args:
+                    mid: "@mid"
+                    op: "@v"
+                    offerId: "@offerId"
+                    sourceMessageRevision: "@sourceMessageRevision"
+                  when:
+                    of: "@v"
+                    map: {confirm: false, _: true}
+                - type: input
+                  add: true
+                  id: "@id"
+                  label:
+                    of: "@v"
+                    map:
+                      confirm: t:placement.frustrationConfirm
+                      false-positive: t:placement.falsePositive
+                      skip: t:chatCards.skip
+                      accept: t:common.accept
+                      refuse: t:common.reject
+                      _: "@v"
+                  placeholder: t:hub.importProject.description
+                  go: proposalOwnerDecide
+                  args: {mid: "@mid", op: "@v"}
+                  goLabel:
+                    of: "@v"
+                    map:
+                      confirm: t:placement.frustrationConfirm
+                      false-positive: t:placement.falsePositive
+                      skip: t:chatCards.skip
+                      accept: t:common.accept
+                      refuse: t:common.reject
+                      _: "@v"
+                  when:
+                    of: "@v"
+                    map: {confirm: true, _: false}
+          - {$frag: CARD_OWNER_REFRESH}
+          - type: button
+            label: t:common.reject
+            act: cardDecide
+            args: {mid: "@mid", v: no}
+            when: ["@card.rejectable", "!@card.conflict.busy"]
+          - type: button
+            label: t:chatCards.proposal.requestChange
+            act: cardAskToggle
+            args: {mid: "@mid"}
+            pressed: "@card.asking"
+            when: "@card.canRequestChange"
+          - type: button
+            label: t:chatCards.edit
+            act: cardDecide
+            args: {mid: "@mid", v: edit}
+            when: ["@card.canEditInPlace", "!@card.editing"]
+          - type: button
+            label: t:common.cancel
+            act: cardDecide
+            args: {mid: "@mid", v: editCancel}
+            when: "@card.editing"
+          - type: button
+            primary: true
+            label:
+              of: "@card.okLabel"
+              map: {"": t:common.approve, _: "@card.okLabel"}
+            act: cardDecide
+            args: {mid: "@mid", v: ok}
+            when: "@card.canApprove"
+      - type: toolbar
+        when: "@card.recovery"
+        items:
+          - type: status
+            tone: warn
+            text:
+              of: "@card.recovery"
+              map:
+                uncertain: t:proposalRecovery.uncertain
+                retryable: t:proposalRecovery.retryable
+                placement: t:proposalRecovery.placement
+                writing: t:proposalRecovery.writing
+                _: ""
+          - type: button
+            label: t:proposalRecovery.readback
+            act: proposalReadback
+            args: {mid: "@mid"}
+            disabled: "@card.recoveryReading"
+            when: "@card.canReadback"
+
 views:
   recovery.notice:
     blocks:

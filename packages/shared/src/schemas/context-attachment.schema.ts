@@ -6,7 +6,6 @@ import { projectScreeningContextAttachmentSchema } from '../types/video-project-
 export { MediaContextAttachmentSchema } from '../types/media-context-attachment.js';
 
 import {
-  CONTEXT_ATTACHMENT_MAX_COUNT,
   CONTEXT_ATTACHMENT_PROMPT_MAX_CHARS,
   CONTEXT_ATTACHMENT_VERSION,
   serializeContextAttachmentsPrompt,
@@ -79,18 +78,19 @@ export const ContextAttachmentSchema = z.union([
   projectScreeningContextAttachmentSchema,
 ]);
 
-export const ContextAttachmentsSchema = z
-  .array(ContextAttachmentSchema)
-  .max(CONTEXT_ATTACHMENT_MAX_COUNT)
-  .superRefine((attachments, ctx) => {
-    const projectedLength = serializeContextAttachmentsPrompt(attachments).length;
-    if (projectedLength > CONTEXT_ATTACHMENT_PROMPT_MAX_CHARS) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: `Context attachment prompt exceeds ${CONTEXT_ATTACHMENT_PROMPT_MAX_CHARS} characters`,
-      });
-    }
-  });
+/** Drafts preserve valid input even when the combined content is not ready to send. */
+export const ContextAttachmentDraftsSchema = z.array(ContextAttachmentSchema);
+
+/** Sending is bounded by the actual serialized payload, not the number of comments. */
+export const ContextAttachmentsSchema = ContextAttachmentDraftsSchema.superRefine((attachments, ctx) => {
+  const projectedLength = serializeContextAttachmentsPrompt(attachments).length;
+  if (projectedLength > CONTEXT_ATTACHMENT_PROMPT_MAX_CHARS) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: `Context attachment prompt exceeds ${CONTEXT_ATTACHMENT_PROMPT_MAX_CHARS} characters`,
+    });
+  }
+});
 
 /** New Cat-authored file references must name the F063 owner revision; the base schema remains legacy-readable. */
 export const VersionBoundContextAttachmentsSchema = ContextAttachmentsSchema.superRefine((attachments, ctx) => {

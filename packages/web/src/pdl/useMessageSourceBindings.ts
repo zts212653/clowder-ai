@@ -21,9 +21,17 @@ import { isPersonDetail, type PersonDetail } from '@/components/memory/page/peop
 import { isApprovalItemBatchDecidable } from '@/lib/approval-features';
 import { useApprovalHubStore } from '@/stores/approvalHubStore';
 import { useChatStore } from '@/stores/chatStore';
+import { apiSessionIdentity } from '@/utils/api-session-identity';
 import type { ChatData } from './chat-models';
 import { guessAndRenderCardType } from './message-cards';
 import { request, write } from './owner-api';
+import {
+  decideProposal,
+  type ProposalBinding,
+  proposalRecoveryState,
+  readProposal,
+  recheckProposal,
+} from './proposal-models';
 
 const groupSchema = z.object({
   v: z.literal(1),
@@ -163,6 +171,7 @@ export function useMessageSourceBindings(data: ChatData, needed: boolean | numbe
     holds?: Record<string, HoldRead>;
     memoryGroups?: Record<string, GroupRead>;
   }>({ evidence: {}, works: {}, generations: {}, holds: {} });
+  const inboxProposals = useRef<Record<string, ProposalBinding>>({});
   const failure = useRef<unknown>(null);
   const [groupRevision, refreshGroup] = useState(0);
   const [holdBusy, setHoldBusy] = useState<Record<string, boolean>>({});
@@ -175,7 +184,7 @@ export function useMessageSourceBindings(data: ChatData, needed: boolean | numbe
     ),
   ]);
 
-  const [, changed] = useState(0);
+  const [revision, changed] = useState(0);
   const sources = data.messages.flatMap((message) => [
     ...guessAndRenderCardType(message, data.threadId).flatMap<Source>((card) =>
       card.type === 'evidence'
@@ -356,9 +365,21 @@ export function useMessageSourceBindings(data: ChatData, needed: boolean | numbe
       document.removeEventListener('visibilitychange', poll);
     };
   }, [needed, holdIds, holdRevision]);
-  const rawData = useMemo<{ records: typeof records.current; error: unknown; holdBusy?: Record<string, boolean> }>(
-    () => ({ records: records.current, error: failure.current, holdBusy }),
-    [records.current, failure.current, holdBusy],
+  const rawData = useMemo<{
+    records: typeof records.current;
+    error: unknown;
+    holdBusy?: Record<string, boolean>;
+    inboxRecoveries?: Record<string, ProposalBinding['recovery']>;
+  }>(
+    () => ({
+      records: records.current,
+      error: failure.current,
+      holdBusy,
+      inboxRecoveries: Object.fromEntries(
+        Object.entries(inboxProposals.current).map(([id, binding]) => [id, proposalRecoveryState(binding.target)]),
+      ),
+    }),
+    [records.current, failure.current, holdBusy, revision],
   );
   return {
     data: rawData,
@@ -400,12 +421,45 @@ export function useMessageSourceBindings(data: ChatData, needed: boolean | numbe
           setHoldBusy((s) => ({ ...s, [args.taskId]: false }));
         }
       }
+      if (name === 'inboxReadback') {
+        const binding = inboxProposals.current[args.id];
+        if (!binding || binding.owner !== apiSessionIdentity.getSnapshot().ownerUserId)
+          throw new Error('proposalRecovery.blocked');
+        await recheckProposal(binding);
+        return true;
+      }
       if (name !== 'inboxDecide') return false;
       await useApprovalHubStore.getState().ensurePending(args.owner);
       const store = useApprovalHubStore.getState(),
         item = store.items.find((item) => item.proposalId === args.id);
       if (!item || item.ownerUserId !== args.owner || !isApprovalItemBatchDecidable(item))
         throw new Error('请重新读取提议');
+      if (item.sourceFeatureId === 'F128') {
+        if (item.navigation.state !== 'anchored' || item.ownerUserId !== apiSessionIdentity.getSnapshot().ownerUserId)
+          throw new Error('proposalRecovery.blocked');
+        const ref = item.navigation.approvalCardRef;
+        const target = {
+          feature: 'F128' as const,
+          id: item.proposalId,
+          threadId: ref.threadId,
+          mid: ref.messageId,
+          blockId: '',
+        };
+        const binding: ProposalBinding = {
+          target,
+          owner: item.ownerUserId,
+          current: true,
+          record: await readProposal(target, undefined, true),
+          refresh: async () => {
+            binding.record = await readProposal(target, undefined, true);
+            changed((n) => n + 1);
+          },
+          notify: () => changed((n) => n + 1),
+        };
+        inboxProposals.current[item.proposalId] = binding;
+        await decideProposal(binding, args.res === 'accept' ? 'approve' : 'reject');
+        return true;
+      }
       if (args.res === 'accept')
         await store.approveProposal(
           args.id,

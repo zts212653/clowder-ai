@@ -1,4 +1,4 @@
-import { type ContextAttachment, ContextAttachmentsSchema } from '@cat-cafe/shared';
+import { type ContextAttachment, ContextAttachmentDraftsSchema } from '@cat-cafe/shared';
 import { type DBSchema, type IDBPDatabase, openDB } from 'idb';
 import type { PendingNewConversationIntent } from './first-message-admission';
 
@@ -107,7 +107,7 @@ function abortError(): Error {
 }
 
 function normalizeValue(value: PersistedNewConversationIntent): PersistedNewConversationIntent {
-  const parsedContext = ContextAttachmentsSchema.safeParse(value.contextAttachments);
+  const parsedContext = ContextAttachmentDraftsSchema.safeParse(value.contextAttachments);
   return {
     ownerUserId: value.ownerUserId,
     intent: { ...value.intent, preferredCats: [...value.intent.preferredCats] },
@@ -296,7 +296,7 @@ export function loadNewConversationIntent(ownerUserId: string): Promise<Persiste
     const currentAfterRead = pendingSaves.get(ownerUserId);
     if (currentAfterRead && !currentAfterRead.clearing) return copyValue(currentAfterRead.value);
     if (!record || record.ownerUserId !== ownerUserId || !isIntent(record.intent)) return null;
-    const parsedContext = ContextAttachmentsSchema.safeParse(record.contextAttachments);
+    const parsedContext = ContextAttachmentDraftsSchema.safeParse(record.contextAttachments);
     return {
       ownerUserId,
       intent: {

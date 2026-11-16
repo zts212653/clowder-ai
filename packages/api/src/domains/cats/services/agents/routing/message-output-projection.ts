@@ -7,6 +7,7 @@ import {
 } from '@cat-cafe/shared';
 import { normalizeJsonUnicode } from '../../../../../utils/json-unicode.js';
 import type { StoredToolEvent } from '../../stores/ports/MessageStore.js';
+import { captureTextProvenance } from '../../text-provenance.js';
 import type { AgentMessage } from '../../types.js';
 import {
   accumulateMessageOutputText,
@@ -14,6 +15,8 @@ import {
   createMessageOutputState,
   materializeMessageOutput,
 } from '../message-output-accumulator.js';
+import { projectAuthoredTextParts } from '../message-output-authored-text.js';
+import { messageOutputTextParts } from '../message-output-materializer.js';
 import { nativeSignatureRemoval } from '../message-output-native-finalization.js';
 import type { MessageOutputState } from '../message-output-state.js';
 import type { OutputFragmentFacts } from '../message-output-stream-transform.js';
@@ -32,6 +35,7 @@ export class RoutingMessageOutputProjection {
     const callback = message.origin === 'callback' || message.extra?.isExplicitPost;
     this.state = accumulateMessageOutputText(this.state, {
       content: message.content ?? '',
+      ...(message.textSource ? { textSource: message.textSource } : {}),
       textMode: callback ? 'replace' : message.textMode,
       outputMessage: callback ? undefined : message.outputMessage,
       hostOutput: callback ? undefined : message.hostOutput,
@@ -60,6 +64,15 @@ export class RoutingMessageOutputProjection {
 
   tool(event: StoredToolEvent): void {
     this.state = accumulateMessageOutputTool(this.state, event.id, event.executionRef ?? '');
+  }
+
+  /** Readable summaries are never input to executable prose grammars. */
+  projectAuthoredText(transform: (content: string) => string): { content: string; authoredContent: string } {
+    return projectAuthoredTextParts(messageOutputTextParts(this.state), transform);
+  }
+
+  textProvenance() {
+    return captureTextProvenance(this.owner, messageOutputTextParts(this.state));
   }
 
   settle(settlement: MessageOutputSettlement): void {
@@ -93,4 +106,13 @@ export class RoutingMessageOutputProjection {
 
 export function outputLayoutExtra(projection: RoutingMessageOutputProjection | undefined, content?: string) {
   return projection ? { outputLayout: projection.snapshot(content).layout } : {};
+}
+
+/** All draft producers carry source authority along with the body and display layout. */
+export function draftOutputFields(projection: RoutingMessageOutputProjection | undefined, content: string) {
+  const textProvenance = projection?.textProvenance();
+  return {
+    extra: outputLayoutExtra(projection, content),
+    ...(textProvenance ? { textProvenance } : {}),
+  };
 }

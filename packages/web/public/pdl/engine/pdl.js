@@ -901,14 +901,14 @@ function pdlEffective() {
 
 /* ═════════════ 主题的 PDL 数据 ═════════════
    主题是纯数据（主题包的 pdl.json；内置主题由构建从 theme/<主题>/pdl/*.json 生成调用）。按原来的顺序填进各个登记表：
-   frags 是有名字的片段，别处写 { $frag: 名 } 引用（加载时换成同一个对象）；视图、行、节点模板里的文案在画的时候取，
+   frags 是有名字的片段，别处写 { $frag: 名 } 引用（加载时换成同一个对象；片段是一列块、引用写在一列里时，展开进这一列）；视图、行、节点模板里的文案在画的时候取，
    其余部分（入口、面板、分组、配色名……）在这里取一次；{ $panels: 容器 } 是那个标签式容器的工具入口（组件库按面板登记生成）；
    空间的 routesFrom 把这些插槽里入口打开的页面加进它的路由；nav 是空间 → 画第二栏的视图；modules 按内置模块登记 */
 const PDL_THEME = {};   /* 当前主题的清单：id、name、version、contractVersion（theme.yaml 去掉 pdl 段） */
 function pdlThemeLoad(pdl, manifest) {
   Object.assign(PDL_THEME, manifest);
   const frags = {}, expand = function (x) {
-    if (Array.isArray(x)) return x.map(expand);
+    if (Array.isArray(x)) return x.reduce(function (out, y) { const e = expand(y); if (y && y.$frag && Array.isArray(e)) out.push.apply(out, e); else out.push(e); return out; }, []);
     if (!x || typeof x !== 'object') return x;
     if (x.$t) return tc.apply(null, [x.$t].concat(x.args));   /* 带参数的文案：加载时取一次 */
     if (x.$frag) { if (!frags[x.$frag]) { frags[x.$frag] = {}; frags[x.$frag] = expand(pdl.frags[x.$frag]); } return frags[x.$frag]; }

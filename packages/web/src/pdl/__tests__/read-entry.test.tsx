@@ -5,12 +5,21 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { useApprovalStatus } from '@/components/rich/use-approval-status';
 import { readApprovalProducerBody } from '@/lib/approval-producer-read';
 import { approvalResultRead } from '@/lib/approval-result-read';
+import { useApprovalHubStore } from '@/stores/approvalHubStore';
+import { anchoredApprovalNavigation } from '@/test-support/approval-navigation';
 import { apiFetch } from '@/utils/api-client';
 import { observeApiSessionOwner } from '@/utils/api-session-identity';
 import { invalidateSidebarProjection } from '@/utils/sidebar-thread-snapshot';
 import { request } from '../owner-api';
 import { ProposalRecordBinding } from '../PdlAppHost';
-import { type ProposalBinding, type ProposalTarget, proposalView, readProposal } from '../proposal-models';
+import {
+  type ProposalBinding,
+  type ProposalTarget,
+  proposalView,
+  readProposal,
+  recheckProposal,
+} from '../proposal-models';
+import { useMessageSourceBindings } from '../useMessageSourceBindings';
 import { useRecallBindings } from '../useRecallBindings';
 import { useSidebarBindings } from '../useSidebarBindings';
 import { fixtureData } from './chat-fixture';
@@ -233,4 +242,106 @@ it('keeps the sidebar source through conversation changes and re-pulls it only o
   await act(invalidateSidebarProjection);
   expect(reads()).toHaveLength(2);
   expect(reads().every(([, init]) => init?.method === undefined || init.method === 'GET')).toBe(true);
+});
+
+it('shares uncertain approval and explicit readback between inbox and native cards, then reads back sidebar Group placement', async () => {
+  const target: ProposalTarget = {
+    feature: 'F128',
+    id: 'shared-proposal',
+    threadId: 'source',
+    mid: 'card',
+    blockId: 'block',
+  };
+  let approved = false,
+    attempts = 0;
+  const proposal = () => ({
+    proposalId: target.id,
+    status: approved ? 'approved' : 'pending',
+    sourceThreadId: target.threadId,
+    sourceCatId: 'codex',
+    cardMessageId: target.mid,
+    title: 'Task',
+    reason: 'Separate work',
+    parentThreadId: 'source',
+    preferredCats: ['codex'],
+    projectPath: '/project',
+    createdBy: 'owner',
+    createdAt: 1,
+    ...(approved ? { createdThreadId: 'created', attentionGroupId: 'group' } : {}),
+  });
+  vi.mocked(apiFetch).mockImplementation(async (path, init) => {
+    if (path.endsWith('/approve') && init?.method === 'POST') {
+      if (++attempts === 1) throw new Error('unknown result');
+      approved = true;
+      return Response.json({ status: 'approved', threadId: 'created' });
+    }
+    if (path === '/api/proposals/shared-proposal') return Response.json({ proposal: proposal() });
+    if (path === '/api/config/thread-attention')
+      return Response.json({ groups: approved ? [{ id: 'group', threadIds: ['created'] }] : [] });
+    if (path === '/api/labels') return Response.json([]);
+    return Response.json({ threads: [] });
+  });
+  const oldHub = useApprovalHubStore.getState();
+  useApprovalHubStore.setState({
+    ensurePending: vi.fn(async () => {}),
+    items: [
+      {
+        proposalId: target.id,
+        sourceFeatureId: 'F128',
+        requesterCatId: 'codex',
+        ownerUserId: 'owner',
+        summary: 'Task',
+        detail: {},
+        navigation: anchoredApprovalNavigation('source', { cardMessageId: 'card' }),
+        inlineApprovable: true,
+        resolution: 'open',
+        materialization: { state: 'not_started' },
+        createdAt: 1,
+      },
+    ],
+  });
+  try {
+    let native!: ProposalBinding;
+    const changed = (binding: ProposalBinding) => {
+      native = binding;
+    };
+    renderHook(
+      () => null,
+      () => <ProposalRecordBinding target={target} generation={1} changed={changed} />,
+    );
+    const inbox = renderHook(() => useMessageSourceBindings(fixtureData()));
+    const sidebar = renderHook(() => useSidebarBindings(fixtureData(), true));
+    await waitFor(() => expect(native?.record).toBeDefined());
+    await act(async () => {
+      await expect(
+        inbox.result.current.action('inboxDecide', { id: target.id, owner: 'owner', res: 'accept' }),
+      ).rejects.toThrow('unknown result');
+    });
+    expect(proposalView(native, false, false, {})).toMatchObject({ recovery: 'uncertain', canApprove: false });
+    await act(() => window.dispatchEvent(new Event('focus')));
+    expect(proposalView(native, false, false, {})).toMatchObject({ recovery: 'uncertain', canApprove: false });
+    await act(async () => {
+      await expect(
+        inbox.result.current.action('inboxDecide', { id: target.id, owner: 'owner', res: 'accept' }),
+      ).rejects.toThrow('proposalRecovery.blocked');
+    });
+    expect(attempts).toBe(1);
+    await act(() => recheckProposal(native));
+    expect(proposalView(native, false, false, {})?.canApprove).toBe(true);
+    await act(() => inbox.result.current.action('inboxDecide', { id: target.id, owner: 'owner', res: 'accept' }));
+    expect(attempts).toBe(2);
+    expect(proposalView(native, false, false, {})).toMatchObject({
+      recovery: 'placement',
+      canApprove: false,
+      openId: 'created',
+    });
+    expect(sidebar.result.current.data.owner?.preferences.groups).toMatchObject([
+      { id: 'group', threadIds: ['created'] },
+    ]);
+    expect(inbox.result.current.data.inboxRecoveries?.[target.id]?.phase).toBe('placement');
+    await act(() => inbox.result.current.action('inboxReadback', { id: target.id }));
+    expect(attempts).toBe(2);
+  } finally {
+    useApprovalHubStore.setState(oldHub);
+  }
 });

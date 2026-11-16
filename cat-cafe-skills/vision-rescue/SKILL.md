@@ -1,6 +1,6 @@
 ---
 name: vision-rescue
-tips_exempt: "2026-11-03: method for a cat stuck on its own task (check the environment and precedent before declaring defeat); it is triggered by the cat's own wording, not a capability the user opens, so it has no tip."
+tips_exempt: "2026-11-14：退役 self-evolution 后改接共享错题本与 code-as-harness，只改内部收尾路由，不新增用户操作。"
 description: >
   绝境反转方法论：当任务似乎没有希望、反复摆动、准备放弃愿景时的五步突破框架。
   Use when: 任务看起来无解、多次尝试失败后想放弃、输出投降修辞（"现状最优"/"没救了"/"接受现实"）、连续 3+ 轮在希望与绝望间摆动。
@@ -138,7 +138,7 @@ triggers:
 | `debugging` | debugging = 已知有 bug 怎么修。vision-rescue = 任务本身看起来不可能 |
 | `deep-research` | deep-research = 调研方法。vision-rescue 在绝境时可以调度 deep-research |
 | `collaborative-thinking` | Step 4 可以加载 collaborative-thinking 做多猫独立思考 |
-| `self-evolution` | vision-rescue 的案例通过 self-evolution 沉淀为 method/eval |
+| `code-as-harness` | 家里已有答案却让 You 重说时入错题本；大翻车另写长案例，其他方法总结留原文档 |
 | L0 纠偏词「自我效能」 | operator点名时，先按 L0 元方法那句查环境就够；出现摆动、投降信号才进本 skill |
 
 ## 教学案例

@@ -1,4 +1,7 @@
 {
+ "fold": {
+  "viewMore": "View more"
+ },
  "queue": {
   "targets": {
    "title": "Change recipients"

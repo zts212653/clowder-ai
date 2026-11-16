@@ -915,6 +915,7 @@
     "s"
    ],
    "key": "binding",
+   "more": "binding",
    "shape": [
     "$",
     "bottom"

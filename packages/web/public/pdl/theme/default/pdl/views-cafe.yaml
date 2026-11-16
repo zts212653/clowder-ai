@@ -1791,6 +1791,14 @@ views:
           k: view
           v: main
     blocks:
+      - type: toolbar
+        when: $.displayOnly
+        items:
+          - {type: status, tone: warn, text: t:inboxRefresh.retained}
+          - type: button
+            label: t:common.refresh
+            act: refresh
+            args: {k: ib-approvals}
       - type: head
         when: $.main
         variant: detail
@@ -1816,6 +1824,7 @@ views:
               - label: t:inbox.historyMenu.ignoreTimeSpan
                 act: modal
                 args: {v: ibIgnore}
+                disabled: $.displayOnly
         close: inbox
       - type: toolbar
         when: $.undoReceipt
@@ -2053,6 +2062,11 @@ views:
             variant: meta
         help: t:wsRecall.help
         when: $.replyCount
+      - type: text
+        parts:
+          - {text: t:wsRecall.partial, variant: meta}
+          - control: {type: button, link: true, label: t:wsRecall.reread, act: refresh, args: {k: recall}}
+        when: $.partial
       - type: list
         id: ws-recall
         groups: $.groups
@@ -4783,7 +4797,7 @@ views:
               of: [0, 1, 2]
               item:
                 of: "@"
-                map: {"0": $.detail.year, "1": /, "2": $.detail.time}
+                map: {"0": $.detail.year, "1": /, "2": {of: $.detail.at, fmt: stamp}}
               sep: ""
             num: true
         actions:
@@ -4831,15 +4845,12 @@ views:
                   label: t:common.addTag
           - type: section
             title: t:wsSignals.body
-            actions:
-              - type: button
-                iconOnly: true
-                icon: refresh
-                label: t:common.refresh
-                act: wsSigRefresh
-                args: {k: $.detail.id}
             blocks:
-              - {type: markdown, text: $.detail.body, more: $.detail.more}
+              - type: fold
+                key: $.detail.bodyKey
+                more: {act: wsSigRefresh, args: {k: $.detail.id}, when: "!$.detail.full"}   # 全文还没读：查看更多 = 读全文
+                blocks:
+                  - {type: markdown, text: $.detail.body, more: $.detail.more}
         right:
           - type: section
             title:
@@ -5688,11 +5699,13 @@ rows:
             label: t:inbox.tabs.recover
             act: remove
             args: {entity: ibIgnored, id: "@id"}
+            disabled: "@writeDisabled"
             when: "@ignored"
           - type: button
             label: t:inbox.tabs.returnToPending
             act: remove
             args: {entity: ibBack, id: "@id"}
+            disabled: "@writeDisabled"
             when: "@handled"
           - type: button
             label: t:inbox.tabs.handled

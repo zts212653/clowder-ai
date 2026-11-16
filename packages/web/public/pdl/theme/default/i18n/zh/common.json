@@ -12,7 +12,7 @@
   "resetDone": "已恢复默认",
   "copy": "复制",
   "import": "导入",
-  "dataError": "有一部分数据没读到，先按空的显示",
+  "viewError": "加载失败，重新打开或刷新重试",
   "restore": "恢复",
   "search": "搜索",
   "gotIt": "知道了",

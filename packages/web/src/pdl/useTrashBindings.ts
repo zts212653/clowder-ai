@@ -2,6 +2,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { type Thread, useChatStore } from '@/stores/chatStore';
 import { invalidateSidebarProjection } from '@/utils/sidebar-thread-snapshot';
+import { invalidateThreadAttentionPreferences } from '@/utils/thread-attention-invalidation';
 import { request } from './owner-api';
 
 export function useTrashBindings(needed: boolean | number = false) {
@@ -38,8 +39,12 @@ export function useTrashBindings(needed: boolean | number = false) {
         return true;
       }
       if (name !== 'trashRestore') return false;
-      await request<Thread>(`/api/threads/${encodeURIComponent(args.id)}/restore`, { method: 'POST' });
-      await Promise.all([load(), invalidateSidebarProjection()]);
+      try {
+        await request<Thread>(`/api/threads/${encodeURIComponent(args.id)}/restore`, { method: 'POST' });
+      } finally {
+        invalidateThreadAttentionPreferences();
+        await Promise.all([load(), invalidateSidebarProjection()]);
+      }
       return true;
     },
   };

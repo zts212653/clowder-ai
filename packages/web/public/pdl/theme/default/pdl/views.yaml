@@ -697,6 +697,7 @@ views:
             tone: warn
             text: $.sel.mutationError
             when: $.sel.mutationError
+          - {type: section, load: $.sel.detailLoad, blocks: [], when: $.sel}   # 插件详情还在读：详情位置画读取中（读完什么都不画）
           - type: section
             title: t:ext.intro
             when: $.sel.desc

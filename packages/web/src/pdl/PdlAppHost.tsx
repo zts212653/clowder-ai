@@ -103,6 +103,7 @@ import { API_URL, apiFetch } from '@/utils/api-client';
 import { apiSessionIdentity } from '@/utils/api-session-identity';
 import { notifyHandledMentionRead } from '@/utils/mention-read-receipt';
 import { invalidateSidebarProjection, refreshSidebarThreadSnapshot } from '@/utils/sidebar-thread-snapshot';
+import { invalidateThreadAttentionPreferences } from '@/utils/thread-attention-invalidation';
 import { composerInsertFromRecall, requestTrueRecall } from '@/utils/true-recall';
 import { getUserId } from '@/utils/userId';
 import { type ChatData, composerTrigger } from './chat-models';
@@ -154,6 +155,7 @@ import {
   proposalFromBody,
   proposalPath,
   proposalView,
+  recheckProposal,
   requestProposalRevision,
 } from './proposal-models';
 import { mountChat } from './runtime';
@@ -529,7 +531,10 @@ function ChatBinding({
   const proposalChanged = useCallback((binding: ProposalBinding) => {
     const key = `${binding.target.mid}:${binding.target.blockId}`;
     setProposals((previous) =>
-      previous[key]?.record === binding.record && previous[key]?.current === binding.current
+      previous[key]?.record === binding.record &&
+      previous[key]?.current === binding.current &&
+      previous[key]?.revision === binding.revision &&
+      previous[key]?.recovery === binding.recovery
         ? previous
         : { ...previous, [key]: binding },
     );
@@ -1215,8 +1220,12 @@ function ChatBinding({
         return;
       }
       case 'threadDelete':
-        await request(`/api/threads/${encodeURIComponent(args.id || threadId)}`, { method: 'DELETE' });
-        await refreshSidebarThreadSnapshot();
+        try {
+          await request(`/api/threads/${encodeURIComponent(args.id || threadId)}`, { method: 'DELETE' });
+        } finally {
+          invalidateThreadAttentionPreferences();
+          await refreshSidebarThreadSnapshot();
+        }
         if ((args.id || threadId) === threadId) pushThreadRouteWithHistory('default', window);
         return;
       case 'reply':
@@ -1480,6 +1489,11 @@ function ChatBinding({
         ui.current.asking ??= {};
         ui.current.asking[args.mid] = !ui.current.asking[args.mid];
         return;
+      case 'proposalReadback': {
+        const binding = Object.values(proposals).find((p) => p.target.mid === args.mid);
+        if (binding) await recheckProposal(binding);
+        return;
+      }
       case 'cardDecide':
       case 'cardAsk': {
         if (connection.isReadonly) throw new Error('当前连接或页面版本不允许提交');
@@ -1895,7 +1909,7 @@ function ChatBinding({
         // Commands remain on the host; unchanged records keep their raw data identity.
         /* eslint-disable @typescript-eslint/no-unused-vars -- host-only commands are excluded from data */
         questions: records('questions', questions, ({ refresh: _refresh, ...value }) => value),
-        proposals: records('proposals', proposals, ({ refresh: _refresh, ...value }) => value),
+        proposals: records('proposals', proposals, ({ refresh: _refresh, notify: _notify, ...value }) => value),
         schedules: records('schedules', schedules, ({ decide: _decide, ...value }) => value),
         memoryProposals: records('memoryProposals', memoryProposals, ({ refresh: _refresh, ...value }) => value),
         /* eslint-enable @typescript-eslint/no-unused-vars */
@@ -1960,12 +1974,12 @@ function ChatBinding({
       },
       richRender,
       terminal,
-      get: (path, params) =>
+      get: (path, params, options) =>
         path === '/api/plugin-manager/pdl'
           ? readPluginSpaces()
           : path.startsWith('/api/plugin-manager/pdl/')
             ? readPluginSubtree(decodeURIComponent(path.slice('/api/plugin-manager/pdl/'.length)))
-            : request(path + (params ? `?${new URLSearchParams(params)}` : '')),
+            : request(path + (params ? `?${new URLSearchParams(params)}` : ''), undefined, options),
       post: (path, params, body) => {
         const { method = 'POST', ...query } = params;
         return request(
@@ -2030,6 +2044,9 @@ function ChatBinding({
     const releaseSuggestions = hub.on('suggestion_updated', (value) =>
       window.clowderChat.emit('suggestion_updated', value),
     );
+    const releaseIdentity = apiSessionIdentity.subscribe(() =>
+      window.clowderChat.emit('session:changed', apiSessionIdentity.getSnapshot()),
+    );
     const release = registerIndexEventHandler((event, data) => window.clowderChat.emit(event, data));
     const events = [
       'cat-cafe:socket-reconnected',
@@ -2053,6 +2070,7 @@ function ChatBinding({
     events.forEach((event) => window.addEventListener(event, forward));
     return () => {
       release();
+      releaseIdentity();
       releaseSuggestions();
       events.forEach((event) => window.removeEventListener(event, forward));
     };
@@ -2131,6 +2149,7 @@ function ChatBinding({
               key={`${target.mid}:${target.blockId}`}
               target={target}
               generation={readGeneration}
+              previous={proposals[`${target.mid}:${target.blockId}`]}
               changed={proposalChanged}
             />
           ))
@@ -2267,10 +2286,12 @@ function RuntimeRecordBinding({
 export function ProposalRecordBinding({
   target,
   generation,
+  previous,
   changed,
 }: {
   target: ProposalTarget;
   generation: number;
+  previous?: ProposalBinding;
   changed: (binding: ProposalBinding) => void;
 }) {
   const source = useApprovalResult(
@@ -2286,6 +2307,22 @@ export function ProposalRecordBinding({
     undefined,
     false,
   );
+  const recoverySource = useApprovalResult<NonNullable<ProposalBinding['recovery']>>(
+    target.feature,
+    target.id,
+    'pdl-decision',
+    async () => ({ phase: '', reading: false }),
+    undefined,
+    false,
+  );
+  const [revision, notify] = useState(0);
+  const recovery = useMemo<NonNullable<ProposalBinding['recovery']>>(
+    () =>
+      recoverySource.value ??
+      (previous?.owner === source.ownerUserId && previous.recovery ? previous.recovery : { phase: '', reading: false }),
+    [target.id, source.ownerUserId, recoverySource.value],
+  );
+  const binding = useRef<ProposalBinding | null>(null);
   useEffect(() => {
     void source.refresh();
   }, [generation, source.refresh]);
@@ -2298,13 +2335,47 @@ export function ProposalRecordBinding({
     }
   }, [target, source.value]);
   useLayoutEffect(() => {
-    changed({
+    const value: ProposalBinding = {
       target,
+      owner: source.ownerUserId,
+      recovery,
+      revision,
+      notify: () => notify((n) => n + 1),
       record: record ?? undefined,
       current: record !== null && !source.failed && !source.stale && !source.reading,
       refresh: source.refresh,
-    });
-  }, [target, changed, record, source.failed, source.stale, source.reading, source.refresh]);
+    };
+    binding.current = value;
+    changed(value);
+  }, [
+    target,
+    changed,
+    record,
+    source.failed,
+    source.stale,
+    source.reading,
+    source.refresh,
+    source.ownerUserId,
+    recovery,
+    revision,
+  ]);
+  useEffect(() => {
+    const recover = () => {
+      const current = binding.current;
+      if (current && ['uncertain', 'placement'].includes(current.recovery?.phase ?? ''))
+        void recheckProposal(current, false).catch(() => {});
+    };
+    const visible = () => {
+      if (document.visibilityState === 'visible') recover();
+    };
+    for (const event of ['focus', 'online', 'cat-cafe:socket-reconnected']) window.addEventListener(event, recover);
+    document.addEventListener('visibilitychange', visible);
+    return () => {
+      for (const event of ['focus', 'online', 'cat-cafe:socket-reconnected'])
+        window.removeEventListener(event, recover);
+      document.removeEventListener('visibilitychange', visible);
+    };
+  }, []);
   return null;
 }
 

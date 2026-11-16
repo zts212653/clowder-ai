@@ -1,10 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { approvalResultRead } from '@/lib/approval-result-read';
 import { observeApiSessionOwner } from '@/utils/api-session-identity';
 import {
   decideProposal,
+  type ProposalBinding,
   proposalTarget,
   proposalView,
   readProposal,
+  recheckProposal,
   requestProposalRevision,
 } from '../proposal-models';
 
@@ -35,6 +38,7 @@ const record = () => ({
 });
 beforeEach(() => {
   vi.clearAllMocks();
+  approvalResultRead.clear();
   observeApiSessionOwner('owner-1');
   transport.read.mockResolvedValue({ proposal: record() });
   transport.post.mockResolvedValue({ ok: true, json: async () => ({ threadId: 'created-thread' }) });
@@ -143,5 +147,120 @@ describe('producer-specific proposal bindings', () => {
       'reject',
     );
     expect(transport.post.mock.calls[0][0]).toBe('/api/session-handoff/handoff-1/reject');
+  });
+});
+
+describe('uncertain proposal approval recovery', () => {
+  it.each([
+    'network',
+    'body',
+    'server',
+  ] as const)('blocks all hosts after an unknown %s response until explicit pending readback', async (loss) => {
+    const binding: ProposalBinding = { target, record: await readProposal(target), current: true, refresh: vi.fn() };
+    if (loss === 'network') transport.post.mockRejectedValueOnce(new Error('lost'));
+    else
+      transport.post.mockResolvedValueOnce({
+        ok: loss !== 'server',
+        json: async () => {
+          if (loss === 'body') throw new Error('lost body');
+          return { error: 'unknown commit' };
+        },
+      });
+    const invalidated = vi.fn();
+    window.addEventListener('cat-cafe:thread-attention-invalidated', invalidated);
+    try {
+      await expect(decideProposal(binding, 'approve')).rejects.toThrow();
+      expect(invalidated).toHaveBeenCalledOnce();
+      const otherHost: ProposalBinding = { target, record: binding.record, current: true, refresh: vi.fn() };
+      expect(proposalView(otherHost, true, true, {})).toMatchObject({
+        canApprove: false,
+        rejectable: false,
+        canRequestChange: false,
+        editing: false,
+        recovery: 'uncertain',
+        canReadback: true,
+      });
+      await expect(decideProposal(otherHost, 'approve')).rejects.toThrow('proposalRecovery.blocked');
+      await expect(requestProposalRevision(otherHost, 'change')).rejects.toThrow('proposalRecovery.blocked');
+      await recheckProposal(otherHost, false);
+      await expect(decideProposal(otherHost, 'approve')).rejects.toThrow('proposalRecovery.blocked');
+      expect(transport.post).toHaveBeenCalledOnce();
+      await recheckProposal(otherHost);
+      expect(proposalView(otherHost, false, false, {})).toMatchObject({ recovery: 'retryable', canApprove: true });
+      await decideProposal(otherHost, 'approve');
+      expect(transport.post).toHaveBeenCalledTimes(2);
+    } finally {
+      window.removeEventListener('cat-cafe:thread-attention-invalidated', invalidated);
+    }
+  });
+  it('keeps unknown/approving reads blocked and publishes canonical approved status, created thread and Group readback', async () => {
+    const binding: ProposalBinding = { target, record: await readProposal(target), current: true, refresh: vi.fn() };
+    transport.post.mockRejectedValueOnce(new Error('lost'));
+    await expect(decideProposal(binding, 'approve')).rejects.toThrow();
+    transport.read.mockResolvedValueOnce({ proposal: { ...record(), status: 'approving' } });
+    await recheckProposal(binding);
+    expect(proposalView(binding, false, false, {})?.canApprove).toBe(false);
+    const placement = vi.fn(),
+      update = vi.fn();
+    window.addEventListener('cat-cafe:proposal-updated', placement);
+    window.addEventListener('cat-cafe:proposal-updated', update);
+    try {
+      transport.read.mockResolvedValue({
+        proposal: { ...record(), status: 'approved', createdThreadId: 'created', attentionGroupId: 'group' },
+      });
+      await recheckProposal(binding);
+      expect(update.mock.calls[0][0].detail).toEqual({
+        proposalId: target.id,
+        status: 'approved',
+        createdThreadId: 'created',
+      });
+      expect(placement).toHaveBeenCalledOnce();
+      expect(proposalView(binding, false, false, {})).toMatchObject({
+        recovery: 'placement',
+        canApprove: false,
+        canReadback: true,
+      });
+      await recheckProposal(binding);
+      expect(placement).toHaveBeenCalledTimes(2);
+      expect(transport.post).toHaveBeenCalledOnce();
+    } finally {
+      window.removeEventListener('cat-cafe:proposal-updated', placement);
+      window.removeEventListener('cat-cafe:proposal-updated', update);
+    }
+  });
+  it('fences a readback that crosses identity changes and keeps writes blocked during the read', async () => {
+    const binding: ProposalBinding = { target, record: await readProposal(target), current: true, refresh: vi.fn() };
+    transport.post.mockRejectedValueOnce(new Error('lost'));
+    await expect(decideProposal(binding, 'approve')).rejects.toThrow();
+    let finish!: (value: unknown) => void;
+    transport.read.mockReturnValueOnce(
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+    );
+    const pending = recheckProposal(binding);
+    await expect(decideProposal(binding, 'approve')).rejects.toThrow('proposalRecovery.blocked');
+    observeApiSessionOwner('other-owner');
+    finish({ proposal: { ...record(), createdBy: 'other-owner' } });
+    await pending;
+    expect(binding.recovery?.phase).toBe('uncertain');
+    await expect(decideProposal(binding, 'approve')).rejects.toThrow('proposalRecovery.blocked');
+    expect(transport.post).toHaveBeenCalledOnce();
+  });
+  it('carries a successful approval into sidebar placement without requiring a second write', async () => {
+    const binding: ProposalBinding = { target, record: await readProposal(target), current: true, refresh: vi.fn() };
+    const update = vi.fn();
+    window.addEventListener('cat-cafe:proposal-updated', update);
+    try {
+      await decideProposal(binding, 'approve');
+      expect(update.mock.calls[0][0].detail).toEqual({
+        proposalId: target.id,
+        status: 'approved',
+        createdThreadId: 'created-thread',
+      });
+      expect(proposalView(binding, false, false, {})).toMatchObject({ recovery: 'placement', canApprove: false });
+    } finally {
+      window.removeEventListener('cat-cafe:proposal-updated', update);
+    }
   });
 });

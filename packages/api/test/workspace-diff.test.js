@@ -1,25 +1,35 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 
-const { parseWorkspaceChangedFiles } = await import('../dist/routes/workspace-diff.js');
+const { toWorkspaceChangedFile } = await import('../dist/routes/workspace-diff.js');
+const { createGitStatusParser } = await import('../dist/domains/workspace/git-status.js');
 
-describe('parseWorkspaceChangedFiles', () => {
-  test('preserves the leading porcelain status column on the first changed file', () => {
-    const changedFiles = parseWorkspaceChangedFiles(
-      [' M packages/api/test/first.test.js', 'M  packages/web/src/second.tsx', '?? docs/new.md', ''].join('\n'),
-    );
+function parseChunks(...chunks) {
+  const files = [];
+  const parser = createGitStatusParser((entry) => files.push(toWorkspaceChangedFile(entry)));
+  for (const chunk of chunks) parser.write(chunk);
+  parser.finish();
+  return files;
+}
 
-    assert.deepEqual(changedFiles, [
-      { status: 'M', path: 'packages/api/test/first.test.js' },
-      { status: 'M', path: 'packages/web/src/second.tsx' },
+describe('streamed workspace status framing', () => {
+  test('preserves the leading status column and filenames split across chunks', () => {
+    assert.deepEqual(parseChunks(' M packages/api/fi', 'rst.ts\0M  second.tsx\0?? docs/new.md\0'), [
+      { status: 'M', path: 'packages/api/first.ts' },
+      { status: 'M', path: 'second.tsx' },
       { status: '??', path: 'docs/new.md' },
     ]);
   });
 
-  test('normalizes rename output without changing ordinary filenames containing arrows', () => {
-    assert.deepEqual(parseWorkspaceChangedFiles('R  old.ts -> new.ts\n M docs/name -> literal.md\n'), [
-      { status: 'R', path: 'new.ts' },
-      { status: 'M', path: 'docs/name -> literal.md' },
+  test('consumes rename sources separately and preserves literal arrows and newlines', () => {
+    assert.deepEqual(parseChunks('R  新 -> 名\n.txt\0old', '.txt\0?? next -> name.txt\0'), [
+      { status: 'R', path: '新 -> 名\n.txt' },
+      { status: '??', path: 'next -> name.txt' },
     ]);
+  });
+
+  test('does not silently accept incomplete records or a missing rename source', () => {
+    assert.throws(() => parseChunks('?? partial'), /Incomplete/);
+    assert.throws(() => parseChunks('R  renamed.txt\0'), /Incomplete/);
   });
 });
