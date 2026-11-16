@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { PassThrough } from 'node:stream';
@@ -86,10 +86,28 @@ async function waitFor(predicate, description) {
   assert.fail(`timed out waiting for ${description}`);
 }
 
-function createOpenCodeRecoveryDb({ sessionId, messageId, text }) {
+function createOpenCodeRecoveryDb({ sessionId, messageId, text, storage = 'part' }) {
   const dir = mkdtempSync(join(tmpdir(), 'cat-cafe-opencode-db-'));
   const dbPath = join(dir, 'opencode.db');
   const db = new Database(dbPath);
+  if (storage === 'session_message') {
+    db.exec(`CREATE TABLE session_message (
+      id TEXT PRIMARY KEY, session_id TEXT NOT NULL, type TEXT NOT NULL,
+      seq INTEGER NOT NULL, time_created INTEGER NOT NULL,
+      time_updated INTEGER NOT NULL, data TEXT NOT NULL
+    )`);
+    db.prepare('INSERT INTO session_message VALUES (?, ?, ?, ?, ?, ?, ?)').run(
+      messageId,
+      sessionId,
+      'assistant',
+      5,
+      1780915410601,
+      1780915410687,
+      JSON.stringify({ content: [{ type: 'text', text }] }),
+    );
+    db.close();
+    return dbPath;
+  }
   db.exec(`
     CREATE TABLE part (
       id text PRIMARY KEY,
@@ -1073,6 +1091,96 @@ describe('OpenCodeAgentService', () => {
       !messages.some((m) => m.type === 'system_info' && m.metadata?.cliDiagnostics?.reasonCode === 'silent_completion'),
       'SQLite recovery supplies text, so silent_completion must not fire',
     );
+  });
+
+  // Injected lost-text streams; natural 2.0.28 captures are documented in fixtures/opencode-2.0.28.
+  // In particular, step_finish-only is a contract fixture, not an observed natural failure.
+  [
+    ['step_finish only', [STEP_FINISH], 'Recovered v2 answer.', false],
+    [
+      'reasoning only',
+      [{ ...STEP_FINISH, type: 'reasoning', part: { type: 'reasoning', text: 'thinking' } }],
+      'Recovered v2 answer.',
+      false,
+    ],
+    ['normal text', [TEXT_RESPONSE, STEP_FINISH], TEXT_RESPONSE.part.text, false],
+    ['provider error', [STEP_FINISH, _ERROR_EVENT], undefined, false],
+    ['missing message anchor', [{ type: 'step_finish', sessionID: 'ses_test123', part: {} }], undefined, true],
+  ].forEach(([label, events, expectedText, expectSilent]) => {
+    test(`OpenCode 2.x without step_start: ${label}`, async () => {
+      const proc = createMockProcess();
+      const spawnFn = mock.fn(() => proc);
+      const service = new OpenCodeAgentService({
+        catId: 'opencode',
+        spawnFn,
+        model: 'deepseek-chat',
+        opencodeDbPath: createOpenCodeRecoveryDb({
+          sessionId: 'ses_test123',
+          messageId: 'msg_1',
+          text: 'Recovered v2 answer.',
+          storage: 'session_message',
+        }),
+      });
+      const anchoredEvents = events.map((event) =>
+        label === 'missing message anchor'
+          ? event
+          : {
+              ...event,
+              part: { ...event.part, sessionID: 'ses_test123', messageID: 'msg_1' },
+            },
+      );
+      const promise = collect(service.invoke('Test v2 recovery'));
+      emitOpenCodeEvents(proc, anchoredEvents);
+      const messages = await promise;
+      assert.deepEqual(
+        messages.filter((message) => message.type === 'text').map((message) => message.content),
+        expectedText === undefined ? [] : [expectedText],
+      );
+      assert.equal(
+        messages.some((message) => message.metadata?.cliDiagnostics?.reasonCode === 'silent_completion'),
+        expectSilent,
+      );
+      if (label === 'provider error') assert.ok(messages.some((message) => message.type === 'error'));
+      assert.equal(spawnFn.mock.callCount(), 1, 'recovery must not rerun the turn');
+      assert.equal(messages.filter((message) => message.type === 'done').length, 1);
+    });
+  });
+
+  test('recovers a captured 2.0.28 reasoning stream with its text event deliberately dropped', async () => {
+    const capture = JSON.parse(
+      readFileSync(new URL('./fixtures/opencode-2.0.28/captured.json', import.meta.url), 'utf8'),
+    );
+    const run = capture.runs.find((entry) => entry.name === 'reasoning');
+    const row = run.messages[0];
+    const proc = createMockProcess();
+    const spawnFn = mock.fn(() => proc);
+    const service = new OpenCodeAgentService({
+      catId: 'opencode',
+      spawnFn,
+      model: 'mock/mock-model',
+      opencodeDbPath: createOpenCodeRecoveryDb({
+        sessionId: row.session_id,
+        messageId: row.id,
+        text: 'Hi',
+        storage: 'session_message',
+      }),
+    });
+    const promise = collect(service.invoke('Capture replay with text omitted'));
+    emitOpenCodeEvents(
+      proc,
+      run.events.filter((event) => event.type !== 'text'),
+    );
+    const messages = await promise;
+    assert.deepEqual(
+      messages.filter((message) => message.type === 'text').map((message) => message.content),
+      ['Hi'],
+    );
+    assert.ok(
+      !messages.some(
+        (message) => message.type === 'error' || message.metadata?.cliDiagnostics?.reasonCode === 'silent_completion',
+      ),
+    );
+    assert.equal(spawnFn.mock.callCount(), 1);
   });
 
   test('AC-G3: text event present → does NOT yield silent_completion (no false positive)', async () => {
