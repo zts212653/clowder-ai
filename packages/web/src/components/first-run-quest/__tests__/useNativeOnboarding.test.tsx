@@ -185,6 +185,96 @@ it('repairs a legacy detection draft when the member is no longer in the roster'
   expect(partner.creationRequestKey).not.toBe('acp-old-request');
 });
 
+it('preserves an ACP draft with edited launch arguments and nickname through rediscovery', async () => {
+  await act(async () => root.render(<Harness mode="members" />));
+  const before = setup.draft!.partners[2];
+  const form = { ...before.form, nickname: 'Custom partner', acpStartupArgs: 'dsh.js --profile "my profile"' };
+  await act(async () => setup.patchPartner(before.id, { form }));
+  await act(async () => setup.reload());
+  const restored = setup.draft!.partners.find((partner) => partner.id === before.id)!;
+  expect(restored.form).toEqual(form);
+  expect(restored.creationRequestKey).toBe(before.creationRequestKey);
+  expect(vi.mocked(apiFetch).mock.calls.every(([, init]) => !init?.method)).toBe(true);
+});
+
+it('retains the chosen lead when its ACP draft has custom launch arguments', async () => {
+  await act(async () => root.render(<Harness />));
+  const before = setup.draft!.partners[2];
+  await act(async () => {
+    setup.patchPartner(before.id, { form: { ...before.form, acpStartupArgs: 'custom.js' } });
+    setup.patch({ lead: before.id });
+  });
+  await act(async () => setup.reload());
+  expect(setup.draft!.lead).toBe(before.id);
+});
+
+it('prefers each exact ACP draft source when another draft points at its connection', async () => {
+  const original = vi.mocked(apiFetch).getMockImplementation()!;
+  const peers = ['first', 'second'].map((profile) => ({
+    ...runtimes[2],
+    id: `dsh-${profile}`,
+    acp: { command: 'dsh', startupArgs: ['--profile', profile] },
+  }));
+  vi.mocked(apiFetch).mockImplementation(async (path, init) =>
+    String(path).split('?')[0] === '/api/cats/native-runtimes' ? response({ runtimes: peers }) : original(path, init),
+  );
+  await act(async () => root.render(<Harness mode="members" />));
+  const [first, second] = setup.draft!.partners;
+  const firstForm = { ...first.form, nickname: 'First custom partner', acpStartupArgs: '--profile second' };
+  const secondForm = { ...second.form, nickname: 'Second custom partner' };
+  await act(async () => {
+    setup.patchPartner(first.id, { form: firstForm });
+    setup.patchPartner(second.id, { form: secondForm });
+  });
+  await act(async () => setup.reload());
+  expect(setup.draft!.partners.map((partner) => partner.form)).toEqual([firstForm, secondForm]);
+  expect(setup.draft!.partners.map((partner) => partner.creationRequestKey)).toEqual([
+    first.creationRequestKey,
+    second.creationRequestKey,
+  ]);
+});
+
+it('restores a confirmed custom ACP member without offering to create it again', async () => {
+  await act(async () => root.render(<Harness mode="members" />));
+  const before = setup.draft!.partners[2];
+  await act(async () => {
+    setup.patchPartner(setup.draft!.partners[0].id, { selected: false });
+    setup.patchPartner(setup.draft!.partners[1].id, { selected: false });
+    setup.patchPartner(before.id, {
+      form: { ...before.form, nickname: 'Custom saved partner', acpStartupArgs: 'custom.js' },
+    });
+  });
+  await act(async () => setup.start());
+  expect(setup.draft!.created[before.id].id).toBe(before.form.catId);
+  await act(async () => setup.reload());
+  const restored = setup.draft!.partners.find((partner) => partner.id === before.id)!;
+  expect(restored.existingId).toBe(before.form.catId);
+  expect(setup.draft!.created[restored.id].id).toBe(before.form.catId);
+  await act(async () => setup.start());
+  expect(
+    vi.mocked(apiFetch).mock.calls.filter(([p, init]) => p === '/api/cats' && init?.method === 'POST'),
+  ).toHaveLength(1);
+});
+
+it('does not confirm a created member whose connection no longer matches its saved draft', async () => {
+  await act(async () => root.render(<Harness mode="members" />));
+  const before = setup.draft!.partners[2];
+  await act(async () => setup.start());
+  catalog.cats = catalog.cats.map((cat) =>
+    cat.id === before.form.catId ? { ...cat, acp: { command: 'other-agent', startupArgs: [] } } : cat,
+  );
+  await act(async () => setup.reload());
+  const restored = setup.draft!.partners.find((partner) => partner.id === before.id)!;
+  expect(restored.existingId).toBeUndefined();
+  expect(setup.draft!.created[restored.id]).toBeUndefined();
+  expect(restored.creationRequestKey).not.toBe(before.creationRequestKey);
+  expect(restored.form.catId).toBe(before.form.catId);
+  expect(catalog.cats).toHaveLength(3);
+  expect(
+    vi.mocked(apiFetch).mock.calls.filter(([p, init]) => p === '/api/cats' && init?.method === 'POST'),
+  ).toHaveLength(3);
+});
+
 it('preserves a cleared DSH nickname when restoring a draft', async () => {
   await act(async () => root.render(<Harness mode="members" />));
   const before = setup.draft?.partners.find((partner) => partner.runtime.id === 'dsh');
