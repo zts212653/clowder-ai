@@ -143,6 +143,8 @@ test('keeps Chinese question boundaries while redacting the URL that follows', (
     ['为什么？https://x.test/a?token=1', '为什么？https://x.test/a?[QUERY_REDACTED]'],
     ['？localhost:3002/x?token=1', '？localhost:3002/x?[QUERY_REDACTED]'],
     ['为什么？api/v1/users?sid=deadbeef12', '为什么？api/v1/users?[QUERY_REDACTED]'],
+    ['(见)https://x.test/a?token=1', '(见)https://x.test/a?[QUERY_REDACTED]'],
+    ['为什么？https://x.test/a?token=1？后面', '为什么？https://x.test/a?[QUERY_REDACTED]？后面'],
     ['为什么？我重试?了', '为什么？我重试?了'],
   ].forEach(([input, expected]) => assert.equal(sanitizeCliStderr(input), expected));
 });
