@@ -76,7 +76,7 @@ function resolvedLabel(status: IssueStatus): string {
 function resolvedDotClass(status: IssueStatus): string {
   if (status === 'confirmed') return 'bg-[var(--semantic-success)]';
   if (status === 'false_positive') return 'bg-[var(--semantic-warning)]';
-  return 'bg-cafe-muted';
+  return 'bg-[var(--cafe-text-muted)]';
 }
 
 export function FrustrationIssueCard({ block }: FrustrationIssueCardProps) {

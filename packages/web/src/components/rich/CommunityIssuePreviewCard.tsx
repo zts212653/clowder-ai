@@ -160,7 +160,7 @@ export function CommunityIssuePreviewCard({
           <output className="flex flex-wrap items-center gap-2 text-sm">
             <span
               aria-hidden="true"
-              className={`h-2 w-2 shrink-0 rounded-full ${state === 'published' ? 'bg-[var(--semantic-success)]' : 'bg-cafe-muted'}`}
+              className={`h-2 w-2 shrink-0 rounded-full ${state === 'published' ? 'bg-[var(--semantic-success)]' : 'bg-[var(--cafe-text-muted)]'}`}
             />
             <span>{state === 'published' ? '已发布到 GitHub' : '已取消草稿 · 不可重新发布'}</span>
             {state === 'published' && (

@@ -142,7 +142,7 @@ export function CommunityPublishFlow({
   const reportForm = (
     <div className="min-w-0 space-y-3">
       <p className="flex items-center gap-2 text-xs text-cafe-muted">
-        <span aria-hidden="true" className="h-2 w-2 rounded-full bg-cafe-muted" />
+        <span aria-hidden="true" className="h-2 w-2 rounded-full bg-[var(--cafe-text-muted)]" />
         公开反馈报告 · 等待核对
       </p>
       <p className="mt-1 text-xs text-cafe-muted">
@@ -227,7 +227,7 @@ export function CommunityPublishFlow({
             href={manualUrl}
             target="_blank"
             rel="noopener noreferrer"
-            className="text-cocreator-primary hover:underline"
+            className="text-[var(--evolution-focus-text)] hover:underline"
           >
             打开 GitHub 手动提交
           </a>
@@ -239,7 +239,7 @@ export function CommunityPublishFlow({
         )}
       </div>
       {error && (
-        <p role="alert" className="mt-2 text-xs text-red-500">
+        <p role="alert" className="mt-2 text-xs text-[var(--semantic-critical)]">
           {error}
         </p>
       )}
