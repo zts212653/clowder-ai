@@ -567,9 +567,11 @@ Object.assign(PDL_BLOCKS, {
     }
     /* 容器树：分栏（split）下面两栏（pane-l 列表 / pane-r 详情）。并排时选中的详情打开在 pane-r（列表的兄弟）；收起时（窗口窄（VIEWPORT.narrow），或者画在窄的区域里（regionNarrow：没放大的工作台））
        分栏变成“列表 → 详情”，详情打开在两栏共同的父容器 split 里。打开到哪个容器写在 data-into 上，返回的判断只看容器树，在画之前从触发点定（见 core.js 的 go、proj.js 的 navOpen） */
-    const col = VIEWPORT.narrow || regionNarrow(PV.region), picked = !!pv(b.picked, sc, root);
+    const col = VIEWPORT.narrow || regionNarrow(PV.region), picked = b.picked != null && pvOk(b.picked, sc, root);   /* picked 是条件（可以写 !、一组） */
     /* 收起时选了一项：详情盖住了列表，详情的头先画（引擎的返回落在看得见的那一栏的头里） */
-    let L, Rr; if (col && picked) { Rr = pvBlocks(b.right, sc, root); L = pvBlocks(b.left, sc, root); } else { L = pvBlocks(b.left, sc, root); Rr = pvBlocks(b.right, sc, root); }
+    /* 选中是状态（不是导航压栈）的分栏自己声明返回（back: { act, args }）：只在收起并且选了一项时放进详情的返回槽，并排时没有 */
+    const back = col && picked && b.back ? { act: b.back.act, data: pvArgs(b.back.args, sc, root), label: b.back.label ? pvText(b.back.label, sc, root) : PV.ctTitle } : null;
+    let L, Rr; if (col && picked) { Rr = backIn('detail', back, function () { return pvBlocks(b.right, sc, root); }); L = pvBlocks(b.left, sc, root); } else { L = pvBlocks(b.left, sc, root); Rr = pvBlocks(b.right, sc, root); }
     /* 并排时两栏各自滚动（详情栏是自己的滚动容器，列表栏里的列表自己滚），滚详情不带着整页；收起时只有一栏，照常随页面滚 */
     return '<div class="vw-split" data-ct="split" data-into="' + (col ? 'split' : 'pane-r') + '" data-mode="' + (col ? 'collapsed' : 'side') + '"' + (picked ? ' data-picked' : '') + '><aside class="vw-split-l" data-ct="pane-l">' + L + '</aside><section class="vw-split-r' + (col ? '' : ' scroll') + '" data-ct="pane-r">' + Rr + '</section></div>';
   },

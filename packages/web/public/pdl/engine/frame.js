@@ -389,7 +389,7 @@ function kidPatch(o, n) {
   if (!o) return n;
   if (o.nodeType === 3 && n.nodeType === 3) { if (o.textContent !== n.textContent) o.textContent = n.textContent; return o; }
   if (o.nodeType === 1 && n.nodeType === 1 && o.tagName === n.tagName && !n.matches(REUSE_SEL) && patchEl(o, n)) return o;
-  return o.isEqualNode(n) ? o : n;
+  return o.isEqualNode(n) || (n.nodeType === 1 && NODE_HTML.get(o) === streamVer(n)) ? o : n;   /* 孤岛 / 消息：版本一样（运行时写上的节拍、会走的字不算）就留着原节点，不拿掉再换回来——拿掉一次正在跑的动画就从头来 */
 }
 function patchKids(live, next) {
   if (hasMark(next)) { patchSegs(live, next); return true; }

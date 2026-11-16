@@ -186,7 +186,7 @@ const PDL_SCHEMA = {
   send: { args: 1, disabled: 1, stop: 1, stopping: 1, tip: 1 },
   settings: { from: 1, plain: 1, row: 1, rows: 1, when: 1 },
   slot: { ctx: 1, slot: 1 },
-  split: { left: 1, picked: 1, right: 1, scroll: ['panes'], follow: ['left', 'right', 'both'], variant: R('split'), when: 1 },   /* follow：独立滚动的一侧跟随最新内容；picked：窄屏下钻的选中状态。 */
+  split: { back: 1, left: 1, picked: 1, right: 1, scroll: ['panes'], follow: ['left', 'right', 'both'], variant: R('split'), when: 1 },   /* follow：独立滚动的一侧跟随最新内容；picked：窄屏下钻的选中状态；back：选中是状态（不导航）时，收起后详情的返回。 */
   stats: { actions: 1, from: 1, items: 1, variant: R('stats'), when: 1 },   /* 数字块只有两种：一格一格的数字（默认）、一行计数 + 操作（counters） */
   status: { text: 1, tone: ['$', 'info', 'ok', 'warn', 'danger'], when: 1 },
   steps: { act: 1, args: 1, from: 1, variant: R('steps'), when: 1 },
