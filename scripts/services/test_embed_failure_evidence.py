@@ -10,7 +10,12 @@ import unittest
 import weakref
 from unittest.mock import patch
 
-import numpy as np
+try:
+    import numpy as np
+except ModuleNotFoundError as error:
+    if error.name != "numpy":
+        raise
+    np = None
 from embed_runtime_policy import MlxMemoryEnvelope
 
 
@@ -83,6 +88,7 @@ class FakeAllocator:
         return self.cache
 
 
+@unittest.skipIf(np is None, "Optional NumPy is not installed; endpoint failure-evidence probes were not executed")
 class FailureEvidenceTests(unittest.TestCase):
     def api(self):
         spec = importlib.util.spec_from_file_location(
