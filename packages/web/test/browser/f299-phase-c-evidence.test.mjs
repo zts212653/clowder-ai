@@ -1,11 +1,10 @@
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
-import { once } from 'node:events';
-import { createServer } from 'node:net';
 import path from 'node:path';
 import { after, before, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
+import { findFreePort, stopServer, waitForPage } from './_harness.mjs';
 import { createNextDevTestEnvironment } from './next-dev-test-environment.mjs';
 
 const WEB_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
@@ -48,37 +47,6 @@ const promptCapture = {
   promptBytes: 45,
   tokenEstimate: 12,
 };
-
-async function findFreePort() {
-  const socket = createServer();
-  socket.listen(0, '127.0.0.1');
-  await once(socket, 'listening');
-  const address = socket.address();
-  assert(address && typeof address !== 'string');
-  socket.close();
-  await once(socket, 'close');
-  return address.port;
-}
-
-async function waitForPage(url, server, output) {
-  const deadline = Date.now() + 180_000;
-  while (Date.now() < deadline) {
-    if (server.exitCode !== null) throw new Error(`Next.js exited before readiness:\n${output.join('')}`);
-    try {
-      const response = await fetch(url);
-      if (response.ok) return;
-    } catch {}
-    await new Promise((resolve) => setTimeout(resolve, 250));
-  }
-  throw new Error(`Timed out waiting for ${url}:\n${output.join('')}`);
-}
-
-async function stopServer(server) {
-  if (server.exitCode !== null) return;
-  server.kill('SIGTERM');
-  await Promise.race([once(server, 'exit'), new Promise((resolve) => setTimeout(resolve, 5_000))]);
-  if (server.exitCode === null) server.kill('SIGKILL');
-}
 
 function json(route, body, status = 200) {
   return route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });

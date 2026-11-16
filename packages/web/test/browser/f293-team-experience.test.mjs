@@ -1,13 +1,12 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { once } from 'node:events';
 import { mkdir } from 'node:fs/promises';
-import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { after, before, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
+import { findFreePort, stopServer, waitForPage } from './_harness.mjs';
 import { TEAM_AVATAR, TEAM_CATS, TEAM_DOSSIER_REVISION, teamRoutingReadModel } from './f293-team-fixtures.mjs';
 import { realSurfaceApiResponse, THREAD_ID } from './f307-real-surface-fixtures.mjs';
 import { ensureWorkspaceOpen } from './f307-workspace-open.mjs';
@@ -34,16 +33,6 @@ async function act_setFilter(page) {
   );
 }
 
-async function findFreePort() {
-  const socket = createServer();
-  socket.listen(0, '127.0.0.1');
-  await once(socket, 'listening');
-  const { port } = socket.address();
-  socket.close();
-  await once(socket, 'close');
-  return port;
-}
-
 before(async () => {
   await mkdir(EVIDENCE_DIR, { recursive: true });
   const port = await findFreePort();
@@ -57,27 +46,14 @@ before(async () => {
   server.stdout.on('data', (chunk) => output.push(chunk.toString()));
   server.stderr.on('data', (chunk) => output.push(chunk.toString()));
   baseUrl = `http://127.0.0.1:${port}/thread/${THREAD_ID}`;
-  const deadline = Date.now() + 180_000;
-  while (Date.now() < deadline) {
-    if (server.exitCode !== null) throw new Error(output.join(''));
-    try {
-      if ((await fetch(baseUrl)).ok) break;
-    } catch {
-      /* still compiling */
-    }
-    await new Promise((resolve) => setTimeout(resolve, 250));
-  }
+  await waitForPage(baseUrl, server, output);
   assert.equal((await fetch(baseUrl)).status, 200, output.join(''));
   browser = await chromium.launch({ headless: true });
 });
 
 after(async () => {
   await browser?.close();
-  if (server && server.exitCode === null) {
-    server.kill('SIGTERM');
-    await Promise.race([once(server, 'exit'), new Promise((resolve) => setTimeout(resolve, 5_000))]);
-    if (server.exitCode === null) server.kill('SIGKILL');
-  }
+  await stopServer(server);
   await environment?.cleanup();
 });
 
