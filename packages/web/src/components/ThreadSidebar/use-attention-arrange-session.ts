@@ -13,6 +13,7 @@ export function useAttentionArrangeSession(
   rows: readonly SidebarSnapshotRow[],
   clusters: readonly AttentionCluster[],
   modes: Readonly<Record<string, ThreadAttentionMemberSort>>,
+  plainView = false,
 ) {
   const [layout, setLayout] = useState<ArrangeLayout | null>(null);
   const finish = useCallback(() => setLayout(null), []);
@@ -63,8 +64,11 @@ export function useAttentionArrangeSession(
   );
   const apply = useCallback(
     (sourceId: string, groups: readonly ThreadAttentionGroup[]) =>
-      setLayout((current) => current && moveArrangeThread(current, sourceId, groups, modes, rows)),
-    [modes, rows],
+      // Plain tabs still persist membership commands, without introducing Group presentation.
+      setLayout((current) =>
+        !current || plainView ? current : moveArrangeThread(current, sourceId, groups, modes, rows),
+      ),
+    [modes, rows, plainView],
   );
   return {
     active: layout !== null,

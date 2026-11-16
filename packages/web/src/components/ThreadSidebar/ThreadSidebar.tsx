@@ -570,7 +570,12 @@ export function ThreadSidebar({ onClose, className, routeThreadId, activeDestina
   } = useAttentionClusters(liveThreads, currentThreadId, normalizedQuery);
   const groupDecisions = useGroupDecisions(isV2);
   const [classicArrangeMode, setClassicArrangeMode] = useState(false);
-  const arrangeSession = useAttentionArrangeSession(liveThreads, attentionClusters, attentionMemberSort);
+  const arrangeSession = useAttentionArrangeSession(
+    liveThreads,
+    attentionClusters,
+    attentionMemberSort,
+    activeTab === 'favorites' || activeTab === 'system',
+  );
   const attentionArrangeMode = isV2 ? arrangeSession.active : classicArrangeMode;
   const [arrangeHint, setArrangeHint] = useState<{ threadId: string; text: string; summary: string } | null>(null);
   useEffect(() => {
@@ -1110,6 +1115,48 @@ export function ThreadSidebar({ onClose, className, routeThreadId, activeDestina
       })),
     [activeTabContent.threads],
   );
+  const beginAttentionArrange = useCallback(() => {
+    if (!isV2) {
+      setClassicArrangeMode(true);
+      return;
+    }
+    const full = { ...orderedAttentionRows };
+    const visible = { ...normalAttentionListRows };
+    if (activeTabContent.kind === 'flat' && !full.flat) {
+      // Plain tabs keep their existing title order and do not acquire Group presentation.
+      full.flat = plainV2Rows;
+      visible.flat = plainV2Rows;
+    }
+    if (activeTab === 'project') {
+      // Capture hidden sections only at entry; everyday preview/reading consumers stay unchanged.
+      for (const section of projectThreadGroups.flatMap((group) => group.archivedGroups ?? [group])) {
+        const key = groupKeyForSection(section);
+        if (full[key]) continue;
+        const items = arrangeAttentionRows(section.threads, section.threads, attentionClusters, 'project');
+        full[key] = flattenAttentionRows(
+          orderAttentionList(items, isAttentionClusterOpen, attentionMemberSort, undefined, true).items,
+          isAttentionClusterOpen,
+          normalizedQuery,
+        );
+        visible[key] = normalizedQuery ? full[key] : previewAttentionRows(full[key]);
+      }
+    }
+    arrangeSession.begin(full, visible);
+  }, [
+    isV2,
+    orderedAttentionRows,
+    normalAttentionListRows,
+    activeTabContent.kind,
+    plainV2Rows,
+    activeTab,
+    projectThreadGroups,
+    attentionClusters,
+    isAttentionClusterOpen,
+    attentionMemberSort,
+    normalizedQuery,
+    previewAttentionRows,
+    arrangeSession.begin,
+  ]);
   const threadRowHeight = useSidebarRowHeight(liveThreads, currentConversationId, isV2, groupDecisions);
   const attentionRowHeight = useCallback(
     (row: AttentionListRow) => {
@@ -1443,9 +1490,7 @@ export function ThreadSidebar({ onClose, className, routeThreadId, activeDestina
           arrangeMode={attentionArrangeMode}
           animateArrange={!isV2}
           draggedThreadId={draggedAttentionThreadId}
-          onEnterArrange={() =>
-            isV2 ? arrangeSession.begin(orderedAttentionRows, normalAttentionListRows) : setClassicArrangeMode(true)
-          }
+          onEnterArrange={beginAttentionArrange}
           allowInsertion={Boolean(
             isV2 &&
               attentionArrangeMode &&
@@ -1500,9 +1545,7 @@ export function ThreadSidebar({ onClose, className, routeThreadId, activeDestina
     [
       attentionArrangeMode,
       arrangeHint,
-      arrangeSession.begin,
-      orderedAttentionRows,
-      normalAttentionListRows,
+      beginAttentionArrange,
       attentionClusterByThreadId,
       attentionMemberSort,
       isV2,

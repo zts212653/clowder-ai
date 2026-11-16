@@ -1,5 +1,32 @@
 # Issue #1964：整理期间保持可见布局
 
+## 维护者复核后的补齐（2026-11-16）
+
+[维护者审查](https://github.com/zts212653/clowder-ai/pull/1969#pullrequestreview-5869392296)
+及[收藏视图补充](https://github.com/zts212653/clowder-ai/pull/1969#issuecomment-6815211048)指出的缺口成立：
+捕获输入只包含已展开项目和 recent/pinned，遗漏了原本收起的项目与收藏单行列表。
+
+共同讨论后，保持日常投影不变，只在进入整理时补捕获：已显示列表复用阅读快照与预览，隐藏项目
+（含归档项目）按既有排序/预览规则计算一次，展开时显示已捕获成员，新会话仍等完成后出现。
+收藏按原有标题序捕获 plain 列表，实时状态和图钉更新，完成后恢复日常排序。系统会话沿用原有
+不可整理入口，不新增能力。保留 plain 视图原有 create/move/remove 命令；成功结果仍更新成员归属，
+布局 apply 保持单行和原序，不生成 Group 外壳、不新增工具条入口或存储。
+
+先有 4 项行为 RED，再补出收藏建组意外出现 Group 外壳的 RED。修复后新增入口文件的 12 项通过，
+覆盖 active/archived 项目展开、跨项目目标、新会话延后、收藏运行/置顶、create/move/remove、
+409/500、60 条额外收藏的真实虚拟入口、置顶页取消置顶及系统页入口边界。
+浏览器新增「A 长按 → 展开 B → 拖 A 到 B → 完成」和收藏原生置顶场景，最终结果以 PR 中的冻结提交验收为准。
+
+公开材料只保留公开审查链接，移除实例内部标识。旧的两份公开提交快照仍可访问；最终树清理
+不等于 GitHub 历史抹除。拟用 squash 合入，使目标 next 不带旧快照；历史残留及该处理方式请维护者确认。
+不擅自 force-push，也不声称改变 SHA 就清除了 PR 引用或缓存。
+
+7 张合成截图移至本计划下的 `assets/issue1964/`，复用仓库同步闭包守护声明的 `docs/plans/`
+target-owned 归属；公开 checkout 未包含实际 source manifest，这个核验边界在 PR 明示。
+F277 恢复上游原文，源侧设计修订随既有导出链进入；本 PR 不再产生单独的公开 F277 差异。
+
+以下为前两轮的历史记录，不替代维护者本轮验收。
+
 需求与验收真相源：[维护者定稿](https://github.com/zts212653/clowder-ai/issues/1964#issuecomment-6806861869)。
 初版按具名定稿执行；同步 2026-11-14 的 next 后，DESIGN.md 已包含「长按整理时，列表先不动」，
 以该设计入口和维护者后续审查为准，保留源文档与公开导出的对应关系。
@@ -56,10 +83,10 @@ tips_exempt: 沿用现有入口，不能调序时已提供来源行操作提示�
   首轮 250 条样本触发夹具淘汰旧组，与产品排序无关；纠正样本后完整旅程通过。
 - 最终采证未同时编辑源码。此前热更新中的 chunk 错误不计为通过，已用冻结源码重新完整运行。
 
-实物：[浏览](../features/assets/F277/issue1964/300-recent-01-browse.png) ·
-[整理](../features/assets/F277/issue1964/300-recent-02-arrange.png) ·
-[手动插入线](../features/assets/F277/issue1964/300-manual-insertion.png) ·
-[240px 深色提示](../features/assets/F277/issue1964/240-recent-03-recent-hint.png)。
+实物：[浏览](assets/issue1964/300-recent-01-browse.png) ·
+[整理](assets/issue1964/300-recent-02-arrange.png) ·
+[手动插入线](assets/issue1964/300-manual-insertion.png) ·
+[240px 深色提示](assets/issue1964/240-recent-03-recent-hint.png)。
 截图均为合成数据。浏览器、Next、临时 API 和临时构建目录由夹具 finally 关闭/清理；工位保留用于审查。
 
 验证裁量：本次只改现有侧栏表现与整理状态；完整 web 类型、受影响组件回归、数据边界守护及真实
@@ -86,7 +113,7 @@ Sidebar + writer 的保存/重进旅程覆盖该风险，不跑全仓 full gate�
 
 R1 修正后：8 文件 73 项 Vitest、web tsc、13 文件 Biome error 级检查通过；浏览器完整旅程 85.4秒
 通过，5 场景含 240px 英文，额外覆盖真实跨项目 move/create 与保存后留在原区，pageerror=0。
-[英文窄屏提示](../features/assets/F277/issue1964/240-recent-en-03-recent-hint.png) ·
-[跨项目入组](../features/assets/F277/issue1964/300-project-cross-move.png) ·
-[跨项目建组](../features/assets/F277/issue1964/300-project-cross-create.png)。临时服务与 lease 已关闭。
+[英文窄屏提示](assets/issue1964/240-recent-en-03-recent-hint.png) ·
+[跨项目入组](assets/issue1964/300-project-cross-move.png) ·
+[跨项目建组](assets/issue1964/300-project-cross-create.png)。临时服务与 lease 已关闭。
 最终修正 HEAD 仍须鲸鲸复审、CI 及 zts 正式批准，不将作者自检当作独立审查结论。

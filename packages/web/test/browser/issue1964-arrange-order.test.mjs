@@ -7,6 +7,7 @@ import { chromium } from 'playwright';
 import { startSearchGroupApi } from './f277-search-group.harness.mjs';
 import { startSearchGroupBrowserFixture } from './f277-search-group-browser.harness.mjs';
 import { verifyArrangeProjectMembership } from './issue1964-arrange-project.journey.mjs';
+import { verifyArrangeViewEntries } from './issue1964-arrange-views.journey.mjs';
 
 const evidence = process.env.ISSUE1964_EVIDENCE_DIR ?? path.join(tmpdir(), 'cat-cafe-evidence', 'issue1964');
 const owner = 'f277-search-browser-owner';
@@ -292,6 +293,7 @@ test(
         results.push({ width, dark, reducedMotion, tab, language, before, remainder, barHeight });
         await context.close();
       }
+      await verifyArrangeViewEntries(browser, fixture, evidence, errors, owner);
       assert.deepEqual(errors, []);
       await writeFile(
         path.join(evidence, 'result.json'),
