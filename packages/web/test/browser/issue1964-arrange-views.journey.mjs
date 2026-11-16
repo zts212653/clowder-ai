@@ -4,6 +4,7 @@ import path from 'node:path';
 /** Exercise the view entry points omitted from the original arrange journey. */
 export async function verifyArrangeViewEntries(browser, fixture, evidence, errors, owner) {
   const b = fixture.store.create(owner, 'ZZ collapsed project target', '/workspace/zz-closed');
+  await new Promise((resolve) => setTimeout(resolve, 2));
   const a = fixture.store.create(owner, 'AA arrange source', '/workspace/aa-open');
   const current = fixture.store.create(owner, 'BB arrange current', '/workspace/aa-open');
   for (const row of [a, b, current]) fixture.store.updateFavorite(row.id, true);
@@ -13,7 +14,7 @@ export async function verifyArrangeViewEntries(browser, fixture, evidence, error
   await page.addInitScript(() => {
     localStorage.setItem('cat-cafe:shell-presentation', 'v2');
     localStorage.setItem('cat-cafe:shell-language', 'zh');
-    localStorage.setItem('cat-cafe:sidebar:active-tab', 'project');
+    localStorage.setItem('cat-cafe:sidebar:active-tab', 'recent');
     localStorage.setItem('cat-cafe:sidebar:collapsed-groups', JSON.stringify(['/workspace/zz-closed']));
   });
   const ids = (locator) =>
@@ -21,27 +22,41 @@ export async function verifyArrangeViewEntries(browser, fixture, evidence, error
   const arrange = async () => {
     const source = page.locator(`[data-attention-draggable-thread="${a.id}"]`);
     await source.scrollIntoViewIfNeeded();
-    const box = await source.boundingBox();
-    assert.ok(box);
-    await page.mouse.move(box.x + 20, box.y + box.height / 2);
+    await source.hover();
     await page.mouse.down();
-    await page.waitForTimeout(500);
-    await page.mouse.up();
     await page.getByTestId('attention-arrange-toolbar').waitFor();
+    await page.mouse.up();
   };
   await page.goto(`${fixture.webUrl}/dev/f277-attention-preview/search`);
+  await page.waitForFunction(
+    () => document.querySelector('[data-testid="preview-current-thread"]')?.textContent !== 'default',
+  );
+  await page.getByTestId('sidebar-view-menu').click();
+  await page.getByTestId('sidebar-tab-project').click();
   const section = (projectPath) =>
     page.locator('[class~="group/section"]').filter({ has: page.locator(`[data-project-path="${projectPath}"]`) });
   const sourceSection = section('/workspace/aa-open');
   const targetSection = section('/workspace/zz-closed');
   await page.locator(`[data-thread-id="${a.id}"]`).waitFor();
+  await page.locator(`[data-thread-id="${a.id}"]`).scrollIntoViewIfNeeded();
   assert.deepEqual(await ids(targetSection), [], 'B starts collapsed');
   const sourceBefore = await ids(sourceSection);
+  const positions = () =>
+    sourceSection.locator('[data-thread-id]').evaluateAll((rows) =>
+      rows.map((row) => ({
+        id: row.dataset.threadId,
+        y: row.getBoundingClientRect().y,
+        height: row.getBoundingClientRect().height,
+      })),
+    );
+  const positionsBefore = await positions();
   await arrange();
+  assert.deepEqual(await positions(), positionsBefore, 'A does not move on entry');
   await page.locator('[data-project-path="/workspace/zz-closed"]').click();
   await page.locator(`[data-thread-id="${b.id}"]`).waitFor();
   assert.deepEqual(await ids(targetSection), [b.id], 'existing B members appear after an explicit expand');
   assert.deepEqual(await ids(sourceSection), sourceBefore);
+  assert.deepEqual(await positions(), positionsBefore, 'expanding B does not move the existing A rows');
   const [saved] = await Promise.all([
     page.waitForResponse(
       (response) =>

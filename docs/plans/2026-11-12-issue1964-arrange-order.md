@@ -25,6 +25,18 @@
 target-owned 归属；公开 checkout 未包含实际 source manifest，这个核验边界在 PR 明示。
 F277 恢复上游原文，源侧设计修订随既有导出链进入；本 PR 不再产生单独的公开 F277 差异。
 
+本轮合流后验收：11 个 Vitest 文件 97 项通过，API 构建、Web 类型与变更文件 Biome 检查通过。
+canonical Chromium 旅程 1/1 通过（五种视口/视图组合及新增项目展开、收藏置顶路径，页面错误为零）。
+已查看[展开收起项目](assets/issue1964/300-project-expand-during-arrange.png)和
+[收藏置顶](assets/issue1964/300-favorites-pin-during-arrange.png)截图，并核对 240px 中英文提示不遮挡邻行。
+新增浏览器手势最初落在图钉按钮，已改为从行主体操作；两次早期手动排序请求超时未定位稳定原因，
+后续诊断与无诊断完整旅程均通过，未据此增加产品计时器逻辑。保留此限制供独立复核。
+
+fallback 扫描触发人工检查：统计包含视图布尔条件和可选偏好的缺省值，并非串联的补救路径。
+本次用独立 ID 布局表达整理生命周期；空布局、未设置成员模式与归档容器分别沿既有语义处理，
+没有新增服务端 fallback、重试或额外存储。全局 feature-truth 的 F276/F310 ROADMAP 缺项为既有基线，
+不记作通过；未运行全仓 gate、默认 AppShell、安装版或 200% 缩放验收。
+
 以下为前两轮的历史记录，不替代维护者本轮验收。
 
 需求与验收真相源：[维护者定稿](https://github.com/zts212653/clowder-ai/issues/1964#issuecomment-6806861869)。
