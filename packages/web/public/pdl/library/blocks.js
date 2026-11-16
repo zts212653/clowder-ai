@@ -449,7 +449,7 @@ function pvListBody(b, sc, root) {
     const gh = function (g) { const t = b.group; if (!t) return g; const m = t.more && pvOk(t.more.when, g, root) ? { label: pv(t.more.label, g, root), act: t.more.act, args: pvArgsObj(t.more.args, g, root) } : null; return { title: pv(t.title, g, root), count: t.count != null ? pv(t.count, g, root) : null, act: pv(t.act, g, root), args: pvArgsObj(t.args, g, root), more: m, items: g.items }; };
     return '<div class="' + cls + '"' + lrCols([].concat.apply([], rows)) + '>' + gs.map(gh).map(function (g, gi) { return (g.title ? lrSection(g.title, g.more ? btn(g.more.label, { sm: true, act: g.more.act, data: argAttrs(g.more.args) }) : '', { html: g.act ? btn(g.title, { link: true, act: g.act, data: argAttrs(g.args) }) : null, count: g.count != null ? g.count : g.items.length }) : '') + rows[gi].map(lrow).join(''); }).join('') + '</div>';
   }
-  const id = pv(b.id, sc, root), found = listFind(pvList(b.from, sc, root), b.searchable ? LIST_Q[id] : '');
+  const id = pv(b.id, sc, root), all = pvList(b.from, sc, root), found = listFind(b.reverse ? all.slice().reverse() : all, b.searchable ? LIST_Q[id] : '');   /* reverse：数据按时间正序给，列表要最新的在上 */
   /* 渐进显示（列表自己的行为）：已经读到的行超过一页时先画一页，末尾“读取更多”每次多画一页。
      服务端分页的列表（next：滚到底读下一页）、限行滚动的（rows）、可拖动排序的、嵌在别处的紧凑列表不再本地分页 */
   const pageKey = id || PV.viewId + ':' + (typeof b.from === 'string' ? b.from : ''), items = b.order || b.inline || b.next || b.rows ? found : found.slice(0, LIST_PAGE[pageKey] || LIST_PAGE_N);

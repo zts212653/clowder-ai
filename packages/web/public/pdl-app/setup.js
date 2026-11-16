@@ -188,7 +188,9 @@ function bindSetup() {
   const popPage = A.popPage;
   A.popPage = function (d) {
     if (CS.pop && CS.pop.kind === 'projPick' && d.v === 'browse') {
+      // Turn the page now: a popup action that leaves the page unchanged counts as a pick and closes the popup.
       CS.pop.page = 'browse';
+      render(true);
       return startBrowse();
     }
     if (popPage) return popPage(d);

@@ -5364,6 +5364,7 @@ frags:
         blocks:
           - type: list
             inline: true
+            reverse: true   # 补充消息：最新的在上
             from: "@supp.items"
             row:
               layout: record

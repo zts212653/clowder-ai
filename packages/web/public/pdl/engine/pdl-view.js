@@ -164,7 +164,7 @@ const PDL_SCHEMA = {
   kv: { actions: 1, from: 1, when: 1 },
   label: { action: 1, count: 1, help: 1, text: 1, tip: 1, when: 1 },
   lanes: { lanes: 1, when: 1 },   /* 每条道：{ share（不写 = 按内容定宽）, name, scroll, align: 'start' | 'center' | 'end', attach: 'above' | 'straddle', items } */
-  list: { actions: 1, count: 1, empty: 1, emptyAction: 1, expand: ['many'], from: 1, group: 1, groups: 1, id: 1, inline: 1, label: 1, next: 1, optional: ['true'], order: 1, partial: 1, row: 1, rows: 1, scroll: 1, searchable: ['true'], when: 1 },   /* searchable：列表头里一个本地筛选框（只筛已经读到的项，不发请求） */
+  list: { actions: 1, count: 1, empty: 1, emptyAction: 1, expand: ['many'], from: 1, group: 1, groups: 1, id: 1, inline: 1, label: 1, next: 1, optional: ['true'], order: 1, partial: 1, reverse: ['true'], row: 1, rows: 1, scroll: 1, searchable: ['true'], when: 1 },   /* searchable：列表头里一个本地筛选框（只筛已经读到的项，不发请求） */
     /* 列表总是画出来（没有数据时是组件库的空状态，文字是 empty）；label / count = 列表自己的组标签；optional = 只在有项时才有的子组：没有项时连组标签一起不画 */
   markdown: { annotations: 1, clamp: 1, empty: 1, from: 1, more: 1, text: 1, when: 1 },
   more: { args: 1, items: 1, k: 1, label: 1, menu: 1, size: ['s', 'm'], variant: R('more'), when: 1 },   /* items：菜单项在这里声明（pvMenu）；menu：老的按名字登记的菜单 */

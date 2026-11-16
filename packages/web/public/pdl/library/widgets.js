@@ -485,16 +485,22 @@ PDL_COMPONENTS.pluginConfigForm.catalog = { g: 'structure', vm: 'pcfCatalog', pr
    grow：浏览器按内容定高度（CSS field-sizing: content，见 core.css），最少 --ta-rows-min 行、最多 --ta-rows-max 行，再多就在框里滚动；不量、不改 style。
    complete：候选里第一条以已输入内容开头的（至少输入了 2 个字、光标在末尾），剩下的部分淡色接在已输入的字后面（同一行）；
    Tab / → 采纳，接着打字就覆盖掉。都是组件自己的本地行为：打字不重画 */
-const TA_COMPLETE = {};
+const TA_COMPLETE = {}, TA_GHOST_CSS = {};
+/* 覆盖层和输入框同一套排版：已输入的字透明占位，只露出后面的淡色部分。排版抄成一条按输入框 id 的样式规则（组件自己的样式表），
+   不写在覆盖层的 style 上——重画会把元素的属性换回声明的样子；每次更新补全时重抄（输入框的内边距可能随状态变） */
+function taGhostStyle(ta) {
+  const cs = getComputedStyle(ta), pad = ['Top', 'Right', 'Bottom', 'Left'].map(function (d) { return (parseFloat(cs['padding' + d]) + parseFloat(cs['border' + d + 'Width'])) + 'px'; }).join(' ');   /* 覆盖层没有边框：输入框的边框宽度算进内边距 */
+  const rule = '.ta-wrap:has(> #' + CSS.escape(ta.id) + ') > .ta-ghost { font-family: ' + cs.fontFamily + '; font-size: ' + cs.fontSize + '; font-weight: ' + cs.fontWeight + '; font-style: ' + cs.fontStyle + '; line-height: ' + cs.lineHeight + '; letter-spacing: ' + cs.letterSpacing + '; text-indent: ' + cs.textIndent + '; white-space: ' + cs.whiteSpace + '; word-break: ' + cs.wordBreak + '; overflow-wrap: ' + cs.overflowWrap + '; padding: ' + pad + '; }';
+  if (TA_GHOST_CSS[ta.id] === rule) return;
+  TA_GHOST_CSS[ta.id] = rule;
+  let st = document.getElementById('ta-ghost-css'); if (!st) { st = document.createElement('style'); st.id = 'ta-ghost-css'; document.head.appendChild(st); }
+  st.textContent = Object.keys(TA_GHOST_CSS).map(function (k) { return TA_GHOST_CSS[k]; }).join('\n');
+}
 function taGhost(ta) {
   const g = ta.parentElement && ta.parentElement.querySelector(':scope > .ta-ghost'); if (!g) return;
   const list = TA_COMPLETE[ta.id] || [], v = ta.value, end = ta.selectionStart === v.length && ta.selectionEnd === v.length;
   const hit = v.length >= 2 && end ? list.find(function (x) { return typeof x === 'string' && x.indexOf(v) === 0 && x.length > v.length; }) || '' : '';
-  if (!g._styled) {   /* 覆盖层和输入框同一套排版（挂上时抄一次）：已输入的字透明占位，只露出后面的淡色部分 */
-    const cs = getComputedStyle(ta); g._styled = true;
-    ['font', 'lineHeight', 'letterSpacing', 'textIndent', 'whiteSpace', 'wordBreak', 'overflowWrap'].forEach(function (k) { g.style[k] = cs[k]; });
-    ['Top', 'Right', 'Bottom', 'Left'].forEach(function (d) { g.style['padding' + d] = (parseFloat(cs['padding' + d]) + parseFloat(cs['border' + d + 'Width'])) + 'px'; });   /* 覆盖层没有边框：输入框的边框宽度算进内边距，对齐不变 */
-  }
+  taGhostStyle(ta);
   g.children[0].textContent = v; g.children[1].textContent = hit ? hit.slice(v.length) : '';
   if (hit) ta.dataset.ghost = hit; else delete ta.dataset.ghost;   /* 滚动对齐交给下面的 scroll 监听：打字时不读 scrollTop（读它会让整页先排一次版） */
 }

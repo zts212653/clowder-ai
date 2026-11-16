@@ -33666,6 +33666,7 @@ pdl:
                       use: v2List
                       props:
                         inline: true
+                        reverse: true
                         from: "@supp.items"
                         row:
                           layout: record
@@ -34203,6 +34204,7 @@ pdl:
                       use: v2List
                       props:
                         inline: true
+                        reverse: true
                         from: "@supp.items"
                         row:
                           layout: record
@@ -34476,6 +34478,7 @@ pdl:
                       use: v2List
                       props:
                         inline: true
+                        reverse: true
                         from: "@supp.items"
                         row:
                           layout: record
@@ -36824,6 +36827,7 @@ pdl:
                       use: v2List
                       props:
                         inline: true
+                        reverse: true
                         from: "@supp.items"
                         row:
                           layout: record
@@ -37362,6 +37366,7 @@ pdl:
                       use: v2List
                       props:
                         inline: true
+                        reverse: true
                         from: "@supp.items"
                         row:
                           layout: record
