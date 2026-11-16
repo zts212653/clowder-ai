@@ -1620,9 +1620,6 @@ function bindProject() {
   A.wsSim = function (d) {
     return chatAction('refresh', { k: d.k });
   };
-  A.viewRetry = function (d) {
-    return d.v === 'cafe.memory' ? chatAction('cafeMemRetry') : A.wsSim(d);
-  };
   FORMS.wsSignal = function (form) {
     return chatAction('routingSignalMark', {
       subject: form.dataset.subj,

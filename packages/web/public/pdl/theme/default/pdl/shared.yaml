@@ -5411,6 +5411,7 @@ frags:
       - label: t:placement.relatedDisposition
         act: msgDisposition
         args: {mid: "@mid"}
+        when: "@paw"
       - label: t:chatMessage.menu.viewExecution
         act: traceOpen
         args: {i: "@i"}

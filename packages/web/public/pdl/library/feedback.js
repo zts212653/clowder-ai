@@ -30,11 +30,12 @@ function badge(n, o) {
 function undoBar(text, acts) { return toastHtml(text, acts, { cls: 'raised', attrs: ' data-undo' }); }   /* 撤销条就是轻提示（带操作），抬高一档让开底部的轻提示 */
 function progBar(pct, tone) { return '<span class="ws-prog' + (tone ? ' ' + tone : '') + '"><i style="--u-width:' + Math.max(0, Math.min(100, pct)) + '%" class="u-v-width"></i></span>'; }
 
-/* 视图和块的读取状态（组件库，唯一一处）：加载中 = 骨架（可带一行淡字）；出错 = 一行危险色调的提示 + 重试；
-   数据过期 = 一行留意色调的提示 + 重新读取（内容照常画在下面）；空 = 空状态。视图 / 块只声明文字（loading / error / stale / empty），重试是什么由引擎给 */
+/* 视图和块的读取状态（组件库，唯一一处）：加载中 = 骨架（可带一行淡字）；出错 = 一行危险色调的提示；
+   数据过期 = 一行留意色调的提示（内容照常画在下面）；空 = 空状态。视图 / 块声明文字（loading / error / stale / empty）；
+   只有声明了 retry 并且这个状态下有动作，才带一个重试（没有默认的原位重试） */
 function viewState(kind, o) {
   o = o || {};
-  const again = function (label) { return o.retry ? btn(label, { sm: true, act: o.retry.act, data: o.retry.data || '' }) : ''; };
+  const again = function (label) { return o.retry && o.retry.act ? btn(label, { sm: true, act: o.retry.act, data: o.retry.data || '' }) : ''; };
   if (kind === 'loading') return skel(o.count || 3, o.shape) + (o.text ? '<div class="vw-label below">' + h(o.text) + '</div>' : '');
   if (kind === 'error') return notice({ tone: 'danger', text: h(o.text || tc('frame.loadError')), action: again(tc('common.retry')) });
   if (kind === 'stale') return notice({ tone: 'warn', text: h(o.text || tc('frame.stale')), action: again(tc('frame.reload')) });

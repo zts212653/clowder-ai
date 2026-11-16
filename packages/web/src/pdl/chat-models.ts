@@ -836,6 +836,13 @@ export function chatModels(data: ChatData, ui: ChatUiState, input?: ChatProjecti
           i,
           copy: message.content,
           fromMember: from.kind === 'agent',
+          isCat: from.kind === 'agent',
+          // 相关处置 only on a finished member message carrying a [爪感差 signal in its own thread
+          paw:
+            !message.isStreaming &&
+            !!message.catId &&
+            message.content.includes('[爪感差') &&
+            !(message.extra?.crossPost?.sourceThreadId && message.extra.crossPost.sourceThreadId !== data.threadId),
           speaking: ui.speaking === message.id,
         },
         delivery: deliveryView(message, timeline, data.activeRuns ?? [], data.threadId).map((item) => {

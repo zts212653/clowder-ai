@@ -5214,7 +5214,7 @@ describe('unmodified runtime and project chat bindings', () => {
     }
   });
   it('retains the existing owner read-error component once without adding a toast', async () => {
-    const { dom, w, action } = await boot(undefined, undefined, undefined, {
+    const { dom, w } = await boot(undefined, undefined, undefined, {
       cafeWsOps: { load: 'error' },
     });
     try {
@@ -5222,13 +5222,8 @@ describe('unmodified runtime and project chat bindings', () => {
       await w.__settled();
       const error = w.eval("tc('wsOps.load.error')");
       expect(w.document.querySelector('[data-view="cafe.ws.ops"]')?.textContent).toContain(error);
-      const failure = new Error('Owner unavailable');
-      failure.name = 'PdlReadError';
-      action.mockRejectedValueOnce(failure);
-      w.document.querySelector('[data-act="viewRetry"]').click();
-      await vi.waitFor(() => expect(action).toHaveBeenCalledWith('refresh', { k: 'ops' }, undefined));
-      w.clowderChat.update();
-      await w.__settled();
+      // no in-place retry (the error text says reopen or refresh)
+      expect(w.document.querySelector('[data-act="viewRetry"]')).toBeNull();
       expect(w.eval('TOAST_LOG')).toEqual([]);
       expect(w.document.querySelectorAll('[data-view="cafe.ws.ops"]')).toHaveLength(1);
     } finally {

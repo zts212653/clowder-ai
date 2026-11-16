@@ -730,10 +730,10 @@ Object.assign(PDL_BLOCKS, {
 
   }
 });
-/* 一个节点（视图或块）在某个读取状态下的样子：文字是节点声明的，重试默认是数据层的重新读取（viewRetry，带上视图和工作台标签），也可以声明自己的 */
+/* 一个节点（视图或块）在某个读取状态下的样子：文字是节点声明的；只有节点自己声明了 retry 才有重试（没有默认的原位重试：出错的说明里写着重新打开或刷新） */
 const LOAD_SHAPE = { cards: 'card', component: 'card' };
 function pvLoad(b, st, sc, root) {
-  const r = b.retry ? { act: pv(b.retry.act, sc, root), data: pvArgs(b.retry.args, sc, root) } : { act: 'viewRetry', data: argAttrs({ v: PV.viewId, k: PV.tabKey }) };
+  const r = b.retry ? { act: pv(b.retry.act, sc, root), data: pvArgs(b.retry.args, sc, root) } : null;
   return viewState(st, { text: pvText(b[st] || (st === 'empty' ? b.empty : ''), sc, root), retry: r, shape: LOAD_SHAPE[b.type] });
 }
 /* 节点：按模板把字段绑到消息卡片组件（msgFrame）上；正文和卡片下方是块 */

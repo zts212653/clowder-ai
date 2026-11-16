@@ -412,7 +412,7 @@ views:
     retry:
       act:
         of: $.load
-        map: {error: worksRestart, _: viewRetry}
+        map: {error: worksRestart, _: ""}
       args: {v: ws.works, k: works-t}
     empty: t:wsItems.worksEmpty
     vm: works
