@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
@@ -9,6 +9,7 @@ import { InMemoryTurnExecutionStore } from '../dist/domains/cats/services/stores
 import {
   clearWindowsJobExecutionLink,
   recordWindowsJobExecutionLink,
+  resolveWindowsJobLinksDirectory,
 } from '../dist/utils/windows-job-execution-links.js';
 import { resolveWindowsJobDirectory, windowsControllerKey } from '../dist/utils/windows-job-owner.js';
 import { stopFixture, waitFor } from './helpers/stop-private-fixture.js';
@@ -18,7 +19,8 @@ import { stopFixture, waitFor } from './helpers/stop-private-fixture.js';
   { name: 'running writer', terminal: false, teardown: false, clearLink: false, blocked: true },
   { name: 'terminal without teardown proof', terminal: true, teardown: false, clearLink: false, blocked: true },
   { name: 'terminal with a remaining owner link', terminal: true, teardown: true, clearLink: false, blocked: true },
-].forEach(({ name, terminal, teardown, clearLink, blocked }) => {
+  { name: 'unreadable links', terminal: true, teardown: true, clearLink: true, unreadableLinks: true, blocked: true },
+].forEach(({ name, terminal, teardown, clearLink, unreadableLinks, blocked }) => {
   test(`#2008 owner query refresh: ${name}`, async (t) => {
     const dataDir = mkdtempSync(join(tmpdir(), 'issue2008-owner-'));
     t.after(() => rmSync(dataDir, { recursive: true, force: true }));
@@ -82,17 +84,23 @@ import { stopFixture, waitFor } from './helpers/stop-private-fixture.js';
     if (terminal)
       store.transitionTerminal('old-turn', { status: 'canceled', endedAt: 4, terminalReason: 'user_cancel' });
     if (clearLink) clearWindowsJobExecutionLink(link.path);
+    if (unreadableLinks) {
+      const linksDirectory = resolveWindowsJobLinksDirectory(dataDir);
+      rmdirSync(linksDirectory);
+      writeFileSync(linksDirectory, 'links directory is not readable');
+    }
     releaseQuery();
     assert.deepEqual(await probing, blocked ? { invocationId: 'old-turn' } : undefined);
   });
 });
 
 [
-  { finishesDuringRestore: false, restoreFails: false },
-  { finishesDuringRestore: true, restoreFails: false },
-  { finishesDuringRestore: false, restoreFails: true },
-].forEach(({ finishesDuringRestore, restoreFails }) => {
-  test(`#2008 stop-switch: finishes during restore=${finishesDuringRestore}, restore fails=${restoreFails}`, async (t) => {
+  { finishesDuringRestore: false, restoreFails: false, drainFails: false },
+  { finishesDuringRestore: true, restoreFails: false, drainFails: false },
+  { finishesDuringRestore: false, restoreFails: true, drainFails: false },
+  { finishesDuringRestore: false, restoreFails: false, drainFails: true },
+].forEach(({ finishesDuringRestore, restoreFails, drainFails }) => {
+  test(`#2008 stop-switch: finishes during restore=${finishesDuringRestore}, restore fails=${restoreFails}, drain fails=${drainFails}`, async (t) => {
     let finishTeardown;
     const teardown = new Promise((resolve) => {
       finishTeardown = resolve;
@@ -120,6 +128,12 @@ import { stopFixture, waitFor } from './helpers/stop-private-fixture.js';
       let restoreAttempts = 0;
       h.queue.restoreClaimedEntries = (...args) =>
         restoreAttempts++ === 0 ? Promise.resolve(false) : restore(...args);
+    }
+    if (drainFails) {
+      const drain = h.processor.requestDrain.bind(h.processor);
+      let drainAttempts = 0;
+      h.processor.requestDrain = (...args) =>
+        drainAttempts++ === 0 ? Promise.reject(new Error('injected wake failure')) : drain(...args);
     }
     const response = await h.app.inject({
       method: 'POST',

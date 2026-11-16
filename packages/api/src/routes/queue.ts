@@ -1727,7 +1727,14 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
           'steer_deferred_prior_turn',
         );
         // Completion can have drained while this exact source was still claimed.
-        await queueProcessor.requestDrain(threadId);
+        void queueProcessor
+          .requestDrain(threadId)
+          .catch((error) =>
+            request.log.warn(
+              { err: error, threadId, entryId },
+              'Deferred Steer source saved but immediate drain failed',
+            ),
+          );
         return {
           status: 200,
           result: { outcome: 'queued', targetCatId: steerCatId, effective: 'next_work', reason: 'prior_turn_stopping' },
