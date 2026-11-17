@@ -5,10 +5,11 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { useSendMessage } from '@/hooks/useSendMessage';
 import { useChatStore } from '@/stores/chatStore';
 import { withSendAttempts } from '@/stores/send-attempt-projection';
-import { useSendAttemptStore } from '@/stores/send-attempt-store';
+import { putSendAttempt, useSendAttemptStore } from '@/stores/send-attempt-store';
 import { observeApiSessionOwner } from '@/utils/api-session-identity';
 import * as attemptDb from '@/utils/send-attempt-db';
 import { ChatInput } from '../ChatInput';
+import { observeComposerDraft } from '../composer-draft-flush-registry';
 import { SendAttemptStatus } from '../SendAttemptStatus';
 import { syncDraftToStorage, threadImageDrafts } from '../thread-drafts';
 
@@ -31,10 +32,10 @@ let responses: ((response: Response) => void)[];
 let posts: FormData[];
 let cleaning = false;
 
-function Conversation() {
-  const { handleSend, uploadStatus, uploadError } = useSendMessage(threadId);
+function Conversation({ currentThread = threadId }) {
+  const { handleSend, uploadStatus, uploadError } = useSendMessage(currentThread);
   const attempts = useSendAttemptStore((state) => state.attempts);
-  const messages = withSendAttempts([], attempts, threadId);
+  const messages = withSendAttempts([], attempts, currentThread);
   return (
     <>
       {messages.map((message) => (
@@ -43,11 +44,11 @@ function Conversation() {
           {message.contentBlocks?.flatMap((block, index) =>
             block.type === 'image' ? <img key={index} src={block.url} alt={block.alt} /> : [],
           )}
-          {message.sendAttempt && <SendAttemptStatus attempt={message.sendAttempt} threadId={threadId} />}
+          {message.sendAttempt && <SendAttemptStatus attempt={message.sendAttempt} threadId={currentThread} />}
         </article>
       ))}
       <ChatInput
-        threadId={threadId}
+        threadId={currentThread}
         localSendFeedback
         uploadStatus={uploadStatus}
         uploadError={uploadError}
@@ -203,4 +204,73 @@ it('keeps an already transferred snapshot visible while retry persistence is pen
   });
   expect(posts[1]?.get('idempotencyKey')).toBe(posts[0]?.get('idempotencyKey'));
   expect(host.querySelectorAll('article')).toHaveLength(1);
+});
+
+it('restores a refused handoff only in its own composer without clearing the next thread', async () => {
+  const request = apiFetch.getMockImplementation()!;
+  apiFetch.mockImplementation((path: string, init?: RequestInit) =>
+    path === `/api/threads/${threadId}/composer-draft` && !init?.method
+      ? Promise.resolve(new Response(JSON.stringify({ draft: { text, revision: 1 }, revision: 1 })))
+      : request(path, init),
+  );
+  await act(async () => root.unmount());
+  root = createRoot(host);
+  await act(async () => root.render(<Conversation />));
+  await act(async () => vi.waitFor(() => expect(observeComposerDraft(threadId)?.revision).toBe(1)));
+  await act(async () =>
+    host.querySelector('textarea')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })),
+  );
+  const nextThread = 'next-handoff-thread';
+  await act(async () => {
+    syncDraftToStorage(nextThread, '另一会话的新草稿');
+    useChatStore.setState({ currentThreadId: nextThread });
+    root.render(<Conversation currentThread={nextThread} />);
+  });
+  await act(async () => {
+    releaseSave();
+    await pending;
+  });
+  expect(posts).toHaveLength(0);
+  expect(host.querySelector('textarea')?.value).toBe('另一会话的新草稿');
+  await act(async () => {
+    useChatStore.setState({ currentThreadId: threadId });
+    root.render(<Conversation />);
+  });
+  await act(async () => vi.waitFor(() => expect(observeComposerDraft(threadId)?.ready).toBe(true)));
+  expect(host.querySelector('textarea')?.value).toBe(text);
+  expect(host.querySelector('[aria-label="Remove original.png"]')).not.toBeNull();
+  expect(host.querySelector('article')?.textContent).not.toContain(text);
+  expect(host.querySelector('article img')).toBeNull();
+  expect(host.querySelector('article button')).toBeNull();
+  syncDraftToStorage(nextThread, undefined);
+});
+
+it('retires only the old preparation notice durably when the composer sends again', async () => {
+  await act(async () =>
+    host.querySelector('textarea')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })),
+  );
+  await act(async () => {
+    rejectSave(new Error('storage unavailable'));
+    await pending;
+  });
+  const failed = useSendAttemptStore.getState().attempts[0]!;
+  await attemptDb.saveSendAttempt(failed);
+  const held = { ...failed, id: 'bubble-owned-failure', content: '另一条已交接的失败消息', contentInComposer: false };
+  await act(async () => {
+    await attemptDb.saveSendAttempt(held);
+    putSendAttempt(held);
+  });
+  await act(async () => {
+    host.querySelector('textarea')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    await vi.waitFor(() => expect(posts).toHaveLength(1));
+    responses.shift()!(new Response('{"status":"queued","userMessageId":"resend-accepted"}', { status: 202 }));
+    await pending;
+    await vi.waitFor(() => expect(host.querySelectorAll('article')).toHaveLength(2));
+  });
+  expect(host.querySelector('textarea')?.value).toBe('');
+  expect(host.querySelectorAll('[data-send-status="failed"]')).toHaveLength(1);
+  expect(host.textContent).toContain(held.content);
+  const restored = await attemptDb.loadSendAttempts(failed.ownerUserId, threadId);
+  expect(restored.some((item) => item.id === failed.id)).toBe(false);
+  expect(restored.some((item) => item.id === held.id)).toBe(true);
 });

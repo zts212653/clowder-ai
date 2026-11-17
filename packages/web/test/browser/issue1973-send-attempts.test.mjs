@@ -264,6 +264,7 @@ for (const addedText of ['', '保存失败期间新增的输入']) {
       }
       await page.locator('textarea').press('Enter');
       await page.locator('[data-send-status="accepted"]').waitFor();
+      await page.waitForFunction(() => !document.querySelector('[data-send-status="failed"]'));
       assert.equal(posts.length, 1);
       assert.equal(await page.locator('textarea').inputValue(), '');
       const sentText = addedText ? `${text}\n\n${addedText}` : text;

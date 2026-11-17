@@ -19,6 +19,7 @@ import {
   findSendAttempt,
   patchSendAttempt,
   putSendAttempt,
+  retireSendAttempt,
   useSendAttemptStore,
 } from '@/stores/send-attempt-store';
 import { apiFetch } from '@/utils/api-client';
@@ -167,7 +168,24 @@ export function useSendMessage(activeThreadId?: string) {
             error: undefined,
           }
         : undefined;
-      if (attempt) putSendAttempt(attempt);
+      if (attempt) {
+        putSendAttempt(attempt);
+        if (admissionOptions?.onPrepared) {
+          useSendAttemptStore
+            .getState()
+            .attempts.filter(
+              (previous) =>
+                previous.id !== clientMessageId &&
+                previous.ownerUserId === ownerUserId &&
+                previous.threadId === threadId &&
+                previous.status === 'failed' &&
+                previous.contentInComposer,
+            )
+            .forEach((previous) => {
+              void retireSendAttempt(previous).catch(() => {});
+            });
+        }
+      }
       let submitted = false;
       let prepared = false;
       let rejected = false;
