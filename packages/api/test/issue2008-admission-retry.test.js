@@ -96,3 +96,90 @@ test('#2008 a failed source keeps its own retry while another member starts', as
   assert.equal(h.queue.list('thread', 'owner').length, 0);
   assert.equal(h.events.filter((event) => event.type === 'error').length, 0);
 });
+
+for (const legacy of [true, false]) {
+  for (const committed of [false, true]) {
+    test(`#2008 last wake after claim failure: legacy=${legacy}, committed=${committed}`, async (t) => {
+      const h = await stopFixture(t, { idle: true, retryDeferral: { baseDelayMs: 20 } });
+      let finishTeardown;
+      const teardown = new Promise((resolve) => {
+        finishTeardown = resolve;
+      });
+      t.after(() => finishTeardown());
+      const route = h.processor.deps.router.routeExecution;
+      h.processor.deps.router.routeExecution = async function* (...args) {
+        yield* route(...args);
+        if (args[1] === 'active') await teardown;
+      };
+      await h.send('active');
+      await h.processor.requestDrain('thread');
+      await waitFor(() => h.starts.length === 1);
+      let oldCompleted;
+      const completed = new Promise((resolve) => {
+        oldCompleted = resolve;
+      });
+      const complete = h.processor.onInvocationComplete.bind(h.processor);
+      h.processor.onInvocationComplete = async (...args) => {
+        await complete(...args);
+        oldCompleted();
+      };
+      const next = await h.send('new input');
+      const restore = h.queue.restoreClaimedEntries.bind(h.queue);
+      let restored = false;
+      h.queue.restoreClaimedEntries = async (...args) => {
+        finishTeardown();
+        await completed;
+        const result = await restore(...args);
+        restored = true;
+        return result;
+      };
+      const claim = h.ledger.claimPrefix.bind(h.ledger);
+      let attempts = 0;
+      let uncertainClaimId;
+      h.ledger.claimPrefix = async (...args) => {
+        if (restored && args[1].includes(next.entry.id)) {
+          attempts += 1;
+          if (attempts === 1) {
+            if (committed) {
+              const result = await claim(...args);
+              assert.equal(result.outcome, 'claimed');
+              uncertainClaimId = result.claimId;
+            }
+            throw new Error('temporary claim failure');
+          }
+        }
+        return claim(...args);
+      };
+      const response = await h.app.inject({
+        method: 'POST',
+        url: `/api/threads/thread/queue/${next.entry.id}/${legacy ? 'steer' : 'targets'}`,
+        headers: { 'x-cat-cafe-user': 'owner' },
+        payload: legacy
+          ? { mode: 'immediate' }
+          : {
+              sourceRecordId: next.message.id,
+              observedPendingTargetIds: ['opus'],
+              targets: [{ targetCatId: 'opus', strategy: 'interrupt_reply', membershipAtOpen: 'member' }],
+            },
+      });
+      assert.equal(response.statusCode, 200, response.body);
+      assert.equal(legacy ? response.json().outcome : response.json().targets[0].result.outcome, 'queued');
+      if (committed) {
+        // Observe beyond several retry intervals; a lost receipt cannot authorize
+        // restoring or executing a claim already held by the durable ledger.
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        const durable = await h.queue.getDurableEntry('thread', next.entry.id);
+        assert.equal(durable.status, 'claimed');
+        assert.equal(durable.claimId, uncertainClaimId, 'an unknown claim receipt cannot release its durable fence');
+        assert.deepEqual(durable.claimedTargetIds, ['opus']);
+        assert.deepEqual(h.starts, ['active']);
+      } else {
+        await waitFor(() => h.starts.includes('new input') && !h.processor.isThreadBusy('thread'));
+        assert.deepEqual(h.starts, ['active', 'new input']);
+        assert.equal(await h.queue.getDurableEntry('thread', next.entry.id), null);
+      }
+      assert.equal(h.messages.getById(next.message.id).content, 'new input');
+      assert.equal(h.events.filter((event) => event.type === 'error').length, 0);
+    });
+  }
+}
