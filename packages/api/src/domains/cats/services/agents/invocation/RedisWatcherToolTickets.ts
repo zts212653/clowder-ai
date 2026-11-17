@@ -17,6 +17,12 @@ if ARGV[1] == 'admit' then
   if #calls >= 6 then return {'exhausted'} end
   calls[#calls+1] = {id=ARGV[2], toolName=ARGV[3], route=ARGV[4]}
 elseif ARGV[1] == 'claim' then
+  if ticket and ticket.toolName == 'cat_cafe_read_memory' and not ticket.requestHash then
+    local allowed = false
+    for _, route in ipairs(cjson.decode(ARGV[5])) do if route == ARGV[3] then allowed = true end end
+    if not allowed then return {'denied'} end
+    ticket.route = ARGV[3]
+  end
   if not ticket or ticket.route ~= ARGV[3] then return {'denied'} end
   if ticket.requestHash and ticket.requestHash ~= ARGV[4] then return {'denied'} end
   if ticket.response then return {'completed', cjson.encode(ticket.response)} end
@@ -46,7 +52,14 @@ export class RedisWatcherToolTickets {
     return kind === 'accepted' || kind === 'replayed' ? kind : 'exhausted';
   }
   async claim(invocationId: string, callId: string, route: string, hash: string): Promise<WatcherTicketClaim> {
-    const [kind, raw] = await this.update(invocationId, 'claim', callId, route, hash);
+    const [kind, raw] = await this.update(
+      invocationId,
+      'claim',
+      callId,
+      route,
+      hash,
+      JSON.stringify(WATCHER_TOOL_ROUTES.cat_cafe_read_memory),
+    );
     if (kind === 'completed') return { kind, response: JSON.parse(raw!) as NonNullable<WatcherToolTicket['response']> };
     return { kind: kind === 'claimed' || kind === 'in_progress' ? kind : 'denied' };
   }

@@ -63,8 +63,15 @@ export async function readOwnerCueInvocation(
             matterId: read.page.matter.matterId,
             title: read.page.matter.title,
             messageCount: new Set(
-              read.page.entries.map((entry) => `${entry.source.threadId}:${entry.source.messageId}`),
+              read.page.entries.flatMap((entry) =>
+                entry.quote && 'messageId' in entry.source
+                  ? [`${entry.source.threadId}:${entry.source.messageId}`]
+                  : [],
+              ),
             ).size,
+            ...(read.page.entries.some((entry) => entry.summary)
+              ? { summaryCount: read.page.entries.filter((entry) => entry.summary).length }
+              : {}),
           }
         : read?.status === 'changed'
           ? { status: 'changed', matterId: cue.readDetails.matterId }

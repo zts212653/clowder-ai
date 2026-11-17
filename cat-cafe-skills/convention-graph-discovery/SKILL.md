@@ -38,7 +38,7 @@ LSP 看符号，grep 看文本；约定图看“这个 repo 的规矩”。每�
 不要用在：
 
 - 已经能用 LSP 精确跳转的普通函数调用。
-- 只想找文档或历史讨论（用 memory-navigation / memory-search-best-practices）。
+- 只想找文档或历史讨论（用 `cat_cafe_search_evidence`；覆盖类问题加 memory-search-best-practices）。
 - 想把 codegraph/GitNexus 当外部依赖直接接入。
 - 只是 cat-cafe 自家 extractor 的硬编码搬运。
 
@@ -108,7 +108,7 @@ pnpm convention-graph:code-consumers -- --repo . --domain skill-manifest --kind 
 
 - `tdd`：写 extractor 代码时仍要用；本 skill 负责“该画什么图、怎样定义 domain”。
 - `knowledge-engineering`：面向文档结构化；本 skill 面向代码约定层。
-- `memory-navigation`：找历史知识；本 skill 建当前 repo 的实时工作 artifact。
+- `cat_cafe_search_evidence` / `memory-search-best-practices`：找历史知识；本 skill 建当前 repo 的实时工作 artifact。
 - `open-source-teardown`：拆外部项目学习；本 skill 把学习结果落成自家 repo 的约定图方法。
 
 ## 下一步

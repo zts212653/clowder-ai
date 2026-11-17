@@ -452,6 +452,7 @@ export const evidenceRoutes: FastifyPluginAsync<EvidenceRoutesOptions> = async (
           ...(item.matchReason ? { matchReason: item.matchReason } : {}),
           ...(item.entityMatches ? { entityMatches: item.entityMatches } : {}),
           ...(drillDown ? { drillDown } : {}),
+          ...(item.readRef ? { readRef: item.readRef } : {}),
           ...(explain && item.rankingFactors ? { rankingFactors: item.rankingFactors } : {}),
           ...(suggestedAction ? { suggestedAction } : {}),
         };

@@ -93,7 +93,7 @@ for (const toolName of ['run_command', 'view_file', 'call_mcp_tool']) {
     start.step_update.tool_name = toolName;
     start.step_update.tool_info.parameters = {
       ServerName: 'cat-cafe-memory',
-      ToolName: 'cat_cafe_list_recent',
+      ToolName: 'cat_cafe_search_evidence',
       Arguments: {},
     };
     const { messages, metadata, turn } = await replay([start, completed()]);

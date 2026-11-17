@@ -8,8 +8,6 @@ export const TOOL_TEXT_RESPONSE_MAX_CHARS = 24_000;
 
 const PURE_READERS_WITH_SOURCE_BUDGET = new Set([
   'cat_cafe_search_evidence',
-  'cat_cafe_graph_resolve',
-  'cat_cafe_list_recent',
   'cat_cafe_read_file_slice',
   'cat_cafe_list_events',
   'cat_cafe_list_session_chain',

@@ -358,7 +358,7 @@ describe('MCP Server Tool Registration', () => {
       'cat_cafe_publish_verdict',
       'cat_cafe_record_eval_lifecycle',
       'cat_cafe_read_diary',
-      'cat_cafe_read_profile',
+      'cat_cafe_read_memory',
       'cat_cafe_read_entrusted_work',
       'cat_cafe_list_diaries',
       'cat_cafe_get_person_memory_proposal_status',
@@ -579,7 +579,7 @@ describe('F061 READONLY_ALLOWED_TOOLS whitelist', () => {
         !names.includes('cat_cafe_get_rich_block_rules') ||
         !names.includes('cat_cafe_search_evidence') ||
         !names.includes('cat_cafe_shell_exec') ||
-        !names.includes('cat_cafe_graph_resolve')
+        !names.includes('cat_cafe_read_memory')
       ) {
         console.error(JSON.stringify(names.sort()));
         process.exit(1);

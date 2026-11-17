@@ -248,6 +248,7 @@ export const eventsRoutes: FastifyPluginAsync<EventsRoutesOptions> = async (app,
     const snapshot = projectEventSnapshot(event);
     const detailProjection = {
       ...snapshot,
+      readRef: eventSourceRef(event),
       pendingCorrectionCount: correctionProposals.length,
       correctionProposals: correctionProposals.map(toEventMemoryCorrectionProposalView),
     };
@@ -258,7 +259,9 @@ export const eventsRoutes: FastifyPluginAsync<EventsRoutesOptions> = async (app,
     const slice = buildEventSlice(serialized, snapshot.revision, request.query);
     if (slice)
       return slice.statusCode === 200
-        ? finishEventRead(request, reply, opts.readEvidenceDb, slice.body, [snapshot])
+        ? finishEventRead(request, reply, opts.readEvidenceDb, { ...slice.body, readRef: eventSourceRef(event) }, [
+            snapshot,
+          ])
         : reply.status(slice.statusCode).send(slice.body);
     if (serialized.length <= EVENT_RESPONSE_MAX_CHARS)
       return finishEventRead(request, reply, opts.readEvidenceDb, detailProjection, [snapshot]);
@@ -270,6 +273,7 @@ export const eventsRoutes: FastifyPluginAsync<EventsRoutesOptions> = async (app,
       correctionProposals: detailProjection.correctionProposals,
       oversized: true,
       eventChars: serialized.length,
+      readRef: eventSourceRef(event),
       drillDown: eventDrillDown(event.eventId, 0, snapshot.revision),
     });
   });
@@ -384,6 +388,9 @@ function projectOwnerEvent(event: StoredEventMemoryLifecycle, pendingCorrectionC
 
 function projectEventSnapshot(event: StoredEventMemoryLifecycle) {
   return { ...event, revision: eventMemoryRevision(event) };
+}
+function eventSourceRef(event: StoredEventMemoryLifecycle) {
+  return { kind: 'message' as const, threadId: event.threadId, messageId: event.messageId };
 }
 
 async function listEventCorrections(

@@ -245,6 +245,25 @@ describe('F287 owner-authenticated memory cue callbacks', () => {
     });
   });
 
+  it('refuses a mismatched requested revision before reading or committing a drill', async () => {
+    const input = coordinate();
+    present(input);
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/memory-cues/drill',
+      payload: { handle: handles.issue(input), requestId: 'stale', expectedRevision: 'stale' },
+    });
+    assert.equal(response.statusCode, 409, response.body);
+    assert.equal(response.json().error, 'source_revision_changed');
+    assert.equal(readCalls.length, 0);
+    assert.equal(
+      episodeStore
+        .listByCue(OWNER_SCOPE.ownerUserId, input.cueId)
+        .filter((event) => event.consumptionOutcome === 'drilled').length,
+      0,
+    );
+  });
+
   it('drills only a currently valid canonical revision and appends a content-free outcome', async () => {
     const input = coordinate();
     present(input);
@@ -258,6 +277,7 @@ describe('F287 owner-authenticated memory cue callbacks', () => {
     assert.deepEqual(response.json(), {
       status: 'ok',
       payload: { kind: 'person_memory', anchor: 'person:alden', body: 'canonical owner-visible source' },
+      source: { family: input.family, revision: input.revision },
     });
     assert.deepEqual(readCalls, [
       {

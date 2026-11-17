@@ -214,7 +214,7 @@ export const HOW_TO_PATH_HINTS: Record<string, string[]> = {
   'external-runtime-sessions': ['capability-wakeup-index.md', 'F211-cross-runtime-session-transparency.md'],
   'cli-diagnostics': ['capability-wakeup-index.md', 'F212'],
   'eval-verdict': ['capability-wakeup-index.md', 'F192-socio-technical-harness-eval.md'],
-  'memory-drilldown': ['memory-navigation/SKILL.md', 'memory-search-best-practices/SKILL.md'],
+  'memory-drilldown': ['memory-routing-partial.md', 'memory-search-best-practices/SKILL.md'],
   'update-workflow': ['capability-wakeup-index.md', 'SopDefinition'],
 };
 
@@ -232,6 +232,7 @@ export const CAPABILITY_SKILL_IDS: Record<string, string[]> = {
   'external-runtime-sessions': [],
   'cli-diagnostics': [],
   'eval-verdict': ['quality-gate'],
+  // memory-navigation retired 2026-11-16 (F332 F2: one find entry); kept so earlier skill loads still count.
   'memory-drilldown': ['memory-navigation', 'memory-search-best-practices'],
   'update-workflow': [],
 };

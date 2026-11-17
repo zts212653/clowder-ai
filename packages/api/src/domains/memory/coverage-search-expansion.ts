@@ -130,6 +130,7 @@ function addIndirectItems(
       source,
       sourcePath: item.sourcePath,
       drillDown: item.drillDown,
+      ...(item.readRef ? { readRef: item.readRef } : {}),
       expansionProvenance: { source: expansionSource, via, edgeStrength: 'heuristic' },
     });
   }

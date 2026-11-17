@@ -202,6 +202,22 @@ describe('L0 Staging Protocol PR-B-impl (ADR-038)', () => {
       assert.ok(!loadStagingManifest().items.some((item) => item.id === 'four-quadrants-magic-word'));
     });
 
+    sourceOnlyTest('every family is told the shared notebook exists; what to write stays the cat’s own call', () => {
+      // F332: the "what goes where" checklist named profile and taste but not matters, so no cat thought of writing one.
+      // The row says what the notebook is for and leaves the judgment to the cat (no fixed "when/which" rule).
+      const row =
+        '**全家共用的记事本**：画像、品味之外，以后还用得上的事（比如刚定下的决定、分工、边界）→ 你觉得该记，就用 `cat_cafe_remember` 选 `matter` 记一句，连回这条对话。';
+      for (const catId of ['opus-47', 'codex', 'gemini25', 'sonnet', 'gpt52', 'opus']) {
+        assert.equal(buildStagingPrepend(catId).split(row).length - 1, 1, `${catId}: notebook row must appear once`);
+      }
+      const item = loadStagingManifest().items.find((entry) => entry.id === 'shared-notebook-matter');
+      assert.ok(item, 'manifest must declare the notebook row');
+      assert.ok(
+        Math.abs(item.estimated_tokens - tok(row)) <= 5,
+        `declared ${item.estimated_tokens} vs measured ${tok(row)}`,
+      );
+    });
+
     sourceOnlyTest('F302 renders one portable workspace reflex with runtime ports and repo truth', () => {
       const originalFrontendPort = process.env.FRONTEND_PORT;
       const originalApiPort = process.env.API_SERVER_PORT;

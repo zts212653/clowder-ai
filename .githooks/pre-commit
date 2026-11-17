@@ -32,6 +32,8 @@ VERDICT_GENERATED_PATH_REGEX=""
 
 run_biome_index_snapshot() {
   local snapshot_dir
+  local scoped_path
+  local scoped_paths=("$@")
   snapshot_dir="$(mktemp -d "${TMPDIR:-/tmp}/cat-cafe-precommit-index.XXXXXX")" || return 1
   (
     trap 'rm -rf "$snapshot_dir"' EXIT
@@ -39,7 +41,20 @@ run_biome_index_snapshot() {
       git checkout-index --all --ignore-skip-worktree-bits --prefix="$snapshot_dir/" &&
       pnpm run check:biome-version -- --lockfile "$snapshot_dir/pnpm-lock.yaml" &&
       cd "$snapshot_dir" &&
-      "$BIOME_BINARY_PATH" check . --diagnostic-level=error
+      if [ "${#scoped_paths[@]}" -eq 0 ]; then
+        "$BIOME_BINARY_PATH" check . --diagnostic-level=error
+      else
+        present_scoped_paths=()
+        for scoped_path in "${scoped_paths[@]}"; do
+          # A deleted configuration may have been its directory's last file.
+          if [ -e "$scoped_path" ] || [ -L "$scoped_path" ]; then
+            present_scoped_paths+=("$scoped_path")
+          fi
+        done
+        if [ "${#present_scoped_paths[@]}" -gt 0 ]; then
+          "$BIOME_BINARY_PATH" check --diagnostic-level=error -- "${present_scoped_paths[@]}"
+        fi
+      fi
   )
 }
 
@@ -222,18 +237,25 @@ else
   # verified live: "Checked 1 file"). Over-listing is harmless — the staged
   # scan runs with --files-ignore-unknown; under-listing is a real bypass
   # (Sol R1-P2: css canary escaped). Contract suite guards this list.
-  # R2-P1 (Sol): biome config is GLOBAL-scope — changing it (e.g. a rule
-  # warn→error) alters lint results for every file, so a per-file staged scan
-  # of just the config proves nothing. Config staged ⇒ full-index risk tier.
+  # Root config changes require a global scan. A nested config changes its
+  # entire subtree, not unrelated siblings. Both lanes retain the complete
+  # INDEX snapshot for config dependencies and cross-file lint rules; mixed
+  # commits also check every other staged lintable path.
   # Git's display names may be quoted/escaped. Preserve raw path boundaries
   # through classification and Biome argv, including whitespace and Unicode.
   BIOME_CONFIG_STAGED=""
+  BIOME_CONFIG_SUBTREES=()
   BIOME_LINTABLE_STAGED=()
   LOCKFILE_STAGED=""
   while IFS= read -r -d '' biome_status && IFS= read -r -d '' biome_path; do
     # Removing/renaming a config changes effective rules too; retain both sides.
     case "${biome_path##*/}" in
-      biome.json|biome.jsonc|.biome.json|.biome.jsonc) BIOME_CONFIG_STAGED=true ;;
+      biome.json|biome.jsonc|.biome.json|.biome.jsonc)
+        case "$biome_path" in
+          */*) BIOME_CONFIG_SUBTREES+=("${biome_path%/*}") ;;
+          *) BIOME_CONFIG_STAGED=true ;;
+        esac
+        ;;
     esac
     if [ "$biome_path" = "pnpm-lock.yaml" ]; then LOCKFILE_STAGED=true; fi
     if [ "$biome_status" != "D" ]; then
@@ -243,17 +265,30 @@ else
       esac
     fi
   done < <(git diff --cached --name-status --no-renames -z)
+  if [ -z "$BIOME_CONFIG_STAGED" ] && [ "${#BIOME_CONFIG_SUBTREES[@]}" -gt 0 ]; then
+    # A nested file can be imported by root/sibling configs. Only proven-local
+    # indexed inheritance may use subtree coverage; unknown graphs stay global.
+    if ! node "$(dirname "${BASH_SOURCE[0]}")/../scripts/biome-nested-config-scope.mjs"; then
+      BIOME_CONFIG_STAGED=true
+    fi
+  fi
   # pnpm-lock.yaml staged = Biome version may drift via dependency change —
   # version check must run even when no lintable source file is staged.
-  if [ -n "$BIOME_CONFIG_STAGED" ]; then
+  if [ -n "$BIOME_CONFIG_STAGED" ] || [ "${#BIOME_CONFIG_SUBTREES[@]}" -gt 0 ]; then
     if [ ! -f "$BIOME_PACKAGE_PATH" ]; then
       echo "" >&2
       echo "🚫 BIOME GUARD failed! biome config staged but no local Biome install (config changes need a full-index scan)." >&2
       echo "   Run: env -u NODE_ENV pnpm install --frozen-lockfile" >&2
       exit 1
     fi
-    echo "🧭 BIOME GUARD: biome config staged — global scope, running full Git index snapshot scan..." >&2
-    if ! run_biome_index_snapshot >&2; then
+    if [ -n "$BIOME_CONFIG_STAGED" ]; then
+      echo "🧭 BIOME GUARD: biome config staged — global scope, running full Git index snapshot scan..." >&2
+      BIOME_CONFIG_TARGETS=()
+    else
+      echo "🧭 BIOME GUARD: nested config staged — checking affected subtrees and staged paths from the full Git index..." >&2
+      BIOME_CONFIG_TARGETS=("${BIOME_CONFIG_SUBTREES[@]}" "${BIOME_LINTABLE_STAGED[@]}")
+    fi
+    if ! run_biome_index_snapshot "${BIOME_CONFIG_TARGETS[@]}" >&2; then
       echo "" >&2
       echo "🚫 BIOME GUARD failed! Staged biome config change breaks existing files — fix them in the same commit or split the config change." >&2
       exit 1

@@ -121,7 +121,7 @@ describe('RedisTurnExecutionStore', { skip: redisIsolationSkipReason(REDIS_URL) 
     const query = { userId: 'redis-user-1', threadId: 't-a', catId: 'kimi31-pro', startedAfter: 100 };
     assert.equal(await store.hasMemberTurnStartedAfter(query), false, 'watchers and other threads do not count');
     assert.deepEqual(
-      (await store.listOwedSleepContinuations()).map((record) => record.invocationId),
+      (await store.listOwedContinuations()).map((record) => record.invocationId),
       ['slept'],
     );
 
@@ -141,8 +141,39 @@ describe('RedisTurnExecutionStore', { skip: redisIsolationSkipReason(REDIS_URL) 
       endedAt: 600,
       terminalReason: 'provider_execution_failed',
     });
-    await store.settleOwedSleepContinuations(['slept']);
-    assert.deepEqual(await store.listOwedSleepContinuations(), []);
+    await store.settleOwedContinuations(['slept']);
+    assert.deepEqual(await store.listOwedContinuations(), []);
+  });
+
+  // Review R1 P1-1 (codex61-sol, PR #7102): the release being stopped writes its sleep debts to the
+  // physical set it knows; the release that starts next must read that same set.
+  test('F337: a debt the previous release wrote is still owed after the upgrade', async () => {
+    await store.createRunning(
+      runningInput({ invocationId: 'legacy', parentInvocationId: 'p-legacy', threadId: 't-l', catId: 'kimi31-pro' }),
+    );
+    await store.transitionTerminal('legacy', { status: 'failed', endedAt: 200, terminalReason: 'host_sleep' });
+    await store.settleOwedContinuations(['legacy']);
+    await redis.sadd('turnexec:sleep-continuation-owed', 'legacy');
+    assert.deepEqual(
+      (await store.listOwedContinuations()).map((record) => record.invocationId),
+      ['legacy'],
+    );
+  });
+
+  test('F337: a turn the runtime stop cut off is owed in the same terminal write; its repeat is not', async () => {
+    for (const [invocationId, terminalReason] of [
+      ['cut', 'restart_shutdown'],
+      ['cut-again', 'restart_shutdown_repeat'],
+    ]) {
+      await store.createRunning(
+        runningInput({ invocationId, parentInvocationId: `p-${invocationId}`, threadId: 't-r', catId: 'opus' }),
+      );
+      await store.transitionTerminal(invocationId, { status: 'failed', endedAt: 200, terminalReason });
+    }
+    assert.deepEqual(
+      (await store.listOwedContinuations()).map((record) => record.invocationId),
+      ['cut'],
+    );
   });
 
   test('response commit sequence survives restart and concurrent retries do not duplicate a wake', async () => {

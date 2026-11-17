@@ -44,7 +44,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleAckMentions",
-      "protectedImplementationDigest": "sha256:031ea25a027bcd4c47a9fba4b4318898838a0afd2929ee9b42046136a39d420c"
+      "protectedImplementationDigest": "sha256:8a7d7a91917d316c3fab27d1b7acd217591ba7b0f721c9cacf825c381e4c53c9"
     },
     {
       "name": "cat_cafe_act_artifact_review",
@@ -1318,7 +1318,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleAdmitEntrustedWork",
-      "protectedImplementationDigest": "sha256:031ea25a027bcd4c47a9fba4b4318898838a0afd2929ee9b42046136a39d420c"
+      "protectedImplementationDigest": "sha256:8a7d7a91917d316c3fab27d1b7acd217591ba7b0f721c9cacf825c381e4c53c9"
     },
     {
       "name": "cat_cafe_advance_evolution_program_change",
@@ -1982,7 +1982,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/event-memory-tools.js#handleBackfillEvents",
-      "protectedImplementationDigest": "sha256:462ce269e002b38d175948d5c1a228516d009890d6f365a0358b587aac7e7bca"
+      "protectedImplementationDigest": "sha256:b44ddcbd812af8daa58166168622e9265eb17c2d3c10b2049b9d83d761773613"
     },
     {
       "name": "cat_cafe_begin_evolution_preparation_work",
@@ -2186,7 +2186,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleBootcampEnvCheck",
-      "protectedImplementationDigest": "sha256:031ea25a027bcd4c47a9fba4b4318898838a0afd2929ee9b42046136a39d420c"
+      "protectedImplementationDigest": "sha256:8a7d7a91917d316c3fab27d1b7acd217591ba7b0f721c9cacf825c381e4c53c9"
     },
     {
       "name": "cat_cafe_bring_to_desk",
@@ -2937,7 +2937,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleCloseEntrustedWork",
-      "protectedImplementationDigest": "sha256:031ea25a027bcd4c47a9fba4b4318898838a0afd2929ee9b42046136a39d420c"
+      "protectedImplementationDigest": "sha256:8a7d7a91917d316c3fab27d1b7acd217591ba7b0f721c9cacf825c381e4c53c9"
     },
     {
       "name": "cat_cafe_constitute_evolution_program",
@@ -3155,7 +3155,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleContinueApprovedTask",
-      "protectedImplementationDigest": "sha256:031ea25a027bcd4c47a9fba4b4318898838a0afd2929ee9b42046136a39d420c"
+      "protectedImplementationDigest": "sha256:8a7d7a91917d316c3fab27d1b7acd217591ba7b0f721c9cacf825c381e4c53c9"
     },
     {
       "name": "cat_cafe_create_rich_block",
@@ -3285,7 +3285,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleCreateRichBlock",
-      "protectedImplementationDigest": "sha256:031ea25a027bcd4c47a9fba4b4318898838a0afd2929ee9b42046136a39d420c"
+      "protectedImplementationDigest": "sha256:8a7d7a91917d316c3fab27d1b7acd217591ba7b0f721c9cacf825c381e4c53c9"
     },
     {
       "name": "cat_cafe_create_task",
@@ -3379,7 +3379,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleCreateTask",
-      "protectedImplementationDigest": "sha256:031ea25a027bcd4c47a9fba4b4318898838a0afd2929ee9b42046136a39d420c"
+      "protectedImplementationDigest": "sha256:8a7d7a91917d316c3fab27d1b7acd217591ba7b0f721c9cacf825c381e4c53c9"
     },
     {
       "name": "cat_cafe_cross_post_message",
@@ -3715,7 +3715,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleCrossPostMessage",
-      "protectedImplementationDigest": "sha256:031ea25a027bcd4c47a9fba4b4318898838a0afd2929ee9b42046136a39d420c"
+      "protectedImplementationDigest": "sha256:8a7d7a91917d316c3fab27d1b7acd217591ba7b0f721c9cacf825c381e4c53c9"
     },
     {
       "name": "cat_cafe_development_return",
@@ -4386,76 +4386,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleDisposeDeferredPersonMemory",
-      "protectedImplementationDigest": "sha256:031ea25a027bcd4c47a9fba4b4318898838a0afd2929ee9b42046136a39d420c"
-    },
-    {
-      "name": "cat_cafe_drill_memory_cue",
-      "serverFamily": "collab",
-      "resourceFamily": "memory-cue",
-      "actions": [
-        "read"
-      ],
-      "activeState": "canonical",
-      "description": "Read the current canonical source behind an owner-authenticated CueEnvelope. Use when its bounded projection is insufficient, or to locate a heading/phrase and continue a long project document. Output: owner-visible payload; canonical project documents include sourcePath/sourceRevision, contentRange (UTF-16 code units, end exclusive), contentTruncated, nextOffset and location status. Use window.query for case-insensitive literal lookup, or window.offset=nextOffset to continue with the same handle; each page contains at most 4000 code units. A not_found lookup returns the initial window honestly; nextOffset=null means end. not_available if gone or revoked; retryable source_read_failed on reader failure or read_commit_failed when the receipt cannot persist. NOT for raw search, bulk recall, caller-supplied coordinates, or cross-thread replay. GOTCHA: window is supported only for canonical project document cues; omit it for other families. Owner/thread/invocation scope, visibility, expiry, and current source revision are revalidated for every page; restart, correction, or forget closes the handle.",
-      "descriptionDigest": "sha256:c8f23cb7e0ec593060ffe1bfe29ae4bdd47580a4719553de304b72c06ed8b98d",
-      "descriptionCharacters": 1110,
-      "descriptionTokensCl100kBase": 216,
-      "inputSchema": {
-        "$schema": "http://json-schema.org/draft-07/schema#",
-        "additionalProperties": false,
-        "properties": {
-          "clientRequestId": {
-            "description": "Optional stable retry key; generated when omitted.",
-            "maxLength": 200,
-            "minLength": 1,
-            "type": "string"
-          },
-          "handle": {
-            "description": "Opaque handle from a CueEnvelope in this authenticated invocation.",
-            "maxLength": 2000,
-            "minLength": 1,
-            "type": "string"
-          },
-          "window": {
-            "additionalProperties": false,
-            "description": "Canonical project documents only: locate a phrase with query, or continue with nextOffset as offset. Omit for the initial window. Never changes source or revision.",
-            "properties": {
-              "offset": {
-                "description": "Zero-based UTF-16 code-unit offset; use nextOffset from the previous page.",
-                "maximum": 9007199254740991,
-                "minimum": 0,
-                "type": "integer"
-              },
-              "query": {
-                "description": "Case-insensitive literal phrase or heading to locate in this document (1–200 characters).",
-                "maxLength": 200,
-                "minLength": 1,
-                "type": "string"
-              }
-            },
-            "type": "object"
-          }
-        },
-        "required": [
-          "handle"
-        ],
-        "type": "object"
-      },
-      "inputSchemaDigest": "sha256:6d45ae60fd5719dbabc4f424aaa4dbcceee2ae865b7b1da6f189130d30a26e70",
-      "annotations": {
-        "destructiveHint": false,
-        "openWorldHint": false,
-        "readOnlyHint": true
-      },
-      "runtimeProfiles": [
-        "full"
-      ],
-      "schemaDelivery": {
-        "evidenceRef": "file:packages/mcp-server/src/tools/memory-cue-tools.ts",
-        "policy": "host-default"
-      },
-      "implementationRef": "module:./tools/callback-tools.js#handleDrillMemoryCue",
-      "protectedImplementationDigest": "sha256:031ea25a027bcd4c47a9fba4b4318898838a0afd2929ee9b42046136a39d420c"
+      "protectedImplementationDigest": "sha256:8a7d7a91917d316c3fab27d1b7acd217591ba7b0f721c9cacf825c381e4c53c9"
     },
     {
       "name": "cat_cafe_drill_person_memory",
@@ -4552,7 +4483,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleDrillPersonMemory",
-      "protectedImplementationDigest": "sha256:031ea25a027bcd4c47a9fba4b4318898838a0afd2929ee9b42046136a39d420c"
+      "protectedImplementationDigest": "sha256:8a7d7a91917d316c3fab27d1b7acd217591ba7b0f721c9cacf825c381e4c53c9"
     },
     {
       "name": "cat_cafe_edit_office_document",
@@ -4742,7 +4673,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleFeatIndex",
-      "protectedImplementationDigest": "sha256:031ea25a027bcd4c47a9fba4b4318898838a0afd2929ee9b42046136a39d420c"
+      "protectedImplementationDigest": "sha256:8a7d7a91917d316c3fab27d1b7acd217591ba7b0f721c9cacf825c381e4c53c9"
     },
     {
       "name": "cat_cafe_finance_query",
@@ -4899,7 +4830,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleGenerateDocument",
-      "protectedImplementationDigest": "sha256:031ea25a027bcd4c47a9fba4b4318898838a0afd2929ee9b42046136a39d420c"
+      "protectedImplementationDigest": "sha256:8a7d7a91917d316c3fab27d1b7acd217591ba7b0f721c9cacf825c381e4c53c9"
     },
     {
       "name": "cat_cafe_get_available_guides",
@@ -4935,7 +4866,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleGetAvailableGuides",
-      "protectedImplementationDigest": "sha256:031ea25a027bcd4c47a9fba4b4318898838a0afd2929ee9b42046136a39d420c"
+      "protectedImplementationDigest": "sha256:8a7d7a91917d316c3fab27d1b7acd217591ba7b0f721c9cacf825c381e4c53c9"
     },
     {
       "name": "cat_cafe_get_custody_events",
@@ -4986,7 +4917,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleGetCustodyEvents",
-      "protectedImplementationDigest": "sha256:031ea25a027bcd4c47a9fba4b4318898838a0afd2929ee9b42046136a39d420c"
+      "protectedImplementationDigest": "sha256:8a7d7a91917d316c3fab27d1b7acd217591ba7b0f721c9cacf825c381e4c53c9"
     },
     {
       "name": "cat_cafe_get_evolution_program",
@@ -5125,7 +5056,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleGetHoldStatus",
-      "protectedImplementationDigest": "sha256:031ea25a027bcd4c47a9fba4b4318898838a0afd2929ee9b42046136a39d420c"
+      "protectedImplementationDigest": "sha256:8a7d7a91917d316c3fab27d1b7acd217591ba7b0f721c9cacf825c381e4c53c9"
     },
     {
       "name": "cat_cafe_get_message",
@@ -5191,7 +5122,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleGetMessage",
-      "protectedImplementationDigest": "sha256:031ea25a027bcd4c47a9fba4b4318898838a0afd2929ee9b42046136a39d420c"
+      "protectedImplementationDigest": "sha256:8a7d7a91917d316c3fab27d1b7acd217591ba7b0f721c9cacf825c381e4c53c9"
     },
     {
       "name": "cat_cafe_get_pending_decisions",
@@ -5240,7 +5171,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleGetPendingDecisions",
-      "protectedImplementationDigest": "sha256:031ea25a027bcd4c47a9fba4b4318898838a0afd2929ee9b42046136a39d420c"
+      "protectedImplementationDigest": "sha256:8a7d7a91917d316c3fab27d1b7acd217591ba7b0f721c9cacf825c381e4c53c9"
     },
     {
       "name": "cat_cafe_get_pending_mentions",
@@ -5287,7 +5218,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleGetPendingMentions",
-      "protectedImplementationDigest": "sha256:031ea25a027bcd4c47a9fba4b4318898838a0afd2929ee9b42046136a39d420c"
+      "protectedImplementationDigest": "sha256:8a7d7a91917d316c3fab27d1b7acd217591ba7b0f721c9cacf825c381e4c53c9"
     },
     {
       "name": "cat_cafe_get_person_memory_proposal_status",
@@ -5338,7 +5269,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleGetPersonMemoryProposalStatus",
-      "protectedImplementationDigest": "sha256:031ea25a027bcd4c47a9fba4b4318898838a0afd2929ee9b42046136a39d420c"
+      "protectedImplementationDigest": "sha256:8a7d7a91917d316c3fab27d1b7acd217591ba7b0f721c9cacf825c381e4c53c9"
     },
     {
       "name": "cat_cafe_get_recall_metrics",
@@ -5464,7 +5395,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleGetRunningWork",
-      "protectedImplementationDigest": "sha256:031ea25a027bcd4c47a9fba4b4318898838a0afd2929ee9b42046136a39d420c"
+      "protectedImplementationDigest": "sha256:8a7d7a91917d316c3fab27d1b7acd217591ba7b0f721c9cacf825c381e4c53c9"
     },
     {
       "name": "cat_cafe_get_thread_cats",
@@ -5521,7 +5452,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleGetThreadCats",
-      "protectedImplementationDigest": "sha256:031ea25a027bcd4c47a9fba4b4318898838a0afd2929ee9b42046136a39d420c"
+      "protectedImplementationDigest": "sha256:8a7d7a91917d316c3fab27d1b7acd217591ba7b0f721c9cacf825c381e4c53c9"
     },
     {
       "name": "cat_cafe_get_thread_context",
@@ -5627,7 +5558,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleGetThreadContext",
-      "protectedImplementationDigest": "sha256:031ea25a027bcd4c47a9fba4b4318898838a0afd2929ee9b42046136a39d420c"
+      "protectedImplementationDigest": "sha256:8a7d7a91917d316c3fab27d1b7acd217591ba7b0f721c9cacf825c381e4c53c9"
     },
     {
       "name": "cat_cafe_get_thread_metadata",
@@ -5661,7 +5592,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleGetThreadMetadata",
-      "protectedImplementationDigest": "sha256:031ea25a027bcd4c47a9fba4b4318898838a0afd2929ee9b42046136a39d420c"
+      "protectedImplementationDigest": "sha256:8a7d7a91917d316c3fab27d1b7acd217591ba7b0f721c9cacf825c381e4c53c9"
     },
     {
       "name": "cat_cafe_get_workflow_sop",
@@ -5710,73 +5641,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleGetWorkflowSop",
-      "protectedImplementationDigest": "sha256:031ea25a027bcd4c47a9fba4b4318898838a0afd2929ee9b42046136a39d420c"
-    },
-    {
-      "name": "cat_cafe_graph_resolve",
-      "serverFamily": "memory",
-      "resourceFamily": "evidence-navigation",
-      "actions": [
-        "read"
-      ],
-      "activeState": "migration-candidate",
-      "description": "Drill into the knowledge graph by anchor or fuzzy query.\nUse when: you have a precise anchor (F186) and want neighbors/edges, OR a fuzzy term and need candidate anchors.\nNot for: message IDs or threadId#messageId coordinates → use cat_cafe_get_message with the bare messageId and mode=full; known file paths → read_file_slice. Pure semantic search → search_evidence; recent activity → list_recent.\nDepth tip: depth>=2 without a relations filter can trigger hub fan-out around super-hubs (F102/F188). Prefer depth=1 first, or pass relations to narrow traversal.\n\nRANKING (F200 live): Edge weights incorporate consumption frequency — paths cats traverse more often rank higher in candidate ordering. Constitutional edges are immune to demotion.\n\nv1 limitation (KD-8): does NOT accept collection scoping params. Visibility is server-derived from agent identity. Future versions may add dimension/collections after server-side identity wiring lands.",
-      "descriptionDigest": "sha256:b33e67f6a924e1e59f29c2d0f12377a69d16877c10600dfa789c62507a640e4b",
-      "descriptionCharacters": 945,
-      "descriptionTokensCl100kBase": 198,
-      "inputSchema": {
-        "$schema": "http://json-schema.org/draft-07/schema#",
-        "additionalProperties": false,
-        "properties": {
-          "depth": {
-            "description": "Graph traversal depth (default 1, max 3 to avoid edge explosion)",
-            "maximum": 3,
-            "minimum": 1,
-            "type": "integer"
-          },
-          "query": {
-            "description": "Precise anchor (e.g. F186) or fuzzy term (e.g. harness). Exact anchor → graph drill-down; fuzzy → candidate list.",
-            "minLength": 1,
-            "type": "string"
-          },
-          "relations": {
-            "description": "Filter edges by relation type subset (wikilink / doc_link / feature_ref / related_to). Omit = all.",
-            "items": {
-              "enum": [
-                "wikilink",
-                "doc_link",
-                "feature_ref",
-                "related_to"
-              ],
-              "type": "string"
-            },
-            "type": "array"
-          }
-        },
-        "required": [
-          "query"
-        ],
-        "type": "object"
-      },
-      "inputSchemaDigest": "sha256:c56ecc7e021195afe710b053dbdc88c17795bde523cdfdd2635776702a3865a7",
-      "annotations": {
-        "destructiveHint": false,
-        "openWorldHint": false,
-        "readOnlyHint": true
-      },
-      "runtimeProfiles": [
-        "desktop:cloud-pro-phase0",
-        "desktop:fable-phase0",
-        "desktop:live-companion",
-        "full",
-        "readonly"
-      ],
-      "schemaDelivery": {
-        "evidenceRef": "file:packages/mcp-server/src/tools/graph-tools.ts",
-        "policy": "host-default"
-      },
-      "implementationRef": "module:./tools/graph-tools.js#handleGraphResolve",
-      "protectedImplementationDigest": "sha256:b23c37b725591902f5ad27a93e6ef19ada07690332784d078b36404cc7c3cfd0"
+      "protectedImplementationDigest": "sha256:8a7d7a91917d316c3fab27d1b7acd217591ba7b0f721c9cacf825c381e4c53c9"
     },
     {
       "name": "cat_cafe_guide_control",
@@ -5824,7 +5689,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleGuideControl",
-      "protectedImplementationDigest": "sha256:031ea25a027bcd4c47a9fba4b4318898838a0afd2929ee9b42046136a39d420c"
+      "protectedImplementationDigest": "sha256:8a7d7a91917d316c3fab27d1b7acd217591ba7b0f721c9cacf825c381e4c53c9"
     },
     {
       "name": "cat_cafe_hold_ball",
@@ -5972,7 +5837,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleHoldBall",
-      "protectedImplementationDigest": "sha256:031ea25a027bcd4c47a9fba4b4318898838a0afd2929ee9b42046136a39d420c"
+      "protectedImplementationDigest": "sha256:8a7d7a91917d316c3fab27d1b7acd217591ba7b0f721c9cacf825c381e4c53c9"
     },
     {
       "name": "cat_cafe_home_action",
@@ -6686,10 +6551,10 @@
         "read"
       ],
       "activeState": "canonical",
-      "description": "Query Event Memory — the timeline of cognitive-transition events (magic-word brakes, self-checks, aha). List mode: omit eventId; filter by trigger/cat/type/threadId/confidence/cognitiveTransition/since/until, limit (default 50, max 200), offset. Returns a complete-response-bounded newest-first page with meta.hasMore/nextOffset and source thread/message coordinates. Detail mode: pass eventId alone to read one owner-scoped record. For an oversized record, follow its drillDown with eventId, revision, and charOffset=0; repeat with the same revision and nextCharOffset until absent. A changed revision fails instead of mixing snapshots. List filters and detail mode are mutually exclusive. Read-only; foreign-owner ids return 404. Jump to a source message with cat_cafe_teleport.",
-      "descriptionDigest": "sha256:ba9fc9a343dc6c6e5fb94299fff5cb766672f72c95b7bb2ce673c4cda803a714",
-      "descriptionCharacters": 780,
-      "descriptionTokensCl100kBase": 164,
+      "description": "Query Event Memory — the timeline of cognitive-transition events (magic-word brakes, self-checks, aha). List mode: omit eventId; filter by trigger/cat/type/threadId/confidence/cognitiveTransition/since/until, limit (default 50, max 200), offset. Returns a complete-response-bounded newest-first page with meta.hasMore/nextOffset and full original-message readRef coordinates. A shared ownerUserId is carried once at page level; other Event data is retained. Pass a source ref to read_memory; Event detail paging keeps its original reader. Detail mode: pass eventId alone to read one owner-scoped record. For an oversized record, follow its drillDown with eventId, revision, and charOffset=0; repeat with the same revision and nextCharOffset until absent. A changed revision fails instead of mixing snapshots. List filters and detail mode are mutually exclusive. Read-only; foreign-owner ids return 404. Jump to a source message with cat_cafe_teleport.",
+      "descriptionDigest": "sha256:4d9f693e977faaef113e77427b88f65e47a4363f33be413431082723b28ecb90",
+      "descriptionCharacters": 951,
+      "descriptionTokensCl100kBase": 199,
       "inputSchema": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "additionalProperties": false,
@@ -6781,7 +6646,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/event-memory-tools.js#handleListEvents",
-      "protectedImplementationDigest": "sha256:462ce269e002b38d175948d5c1a228516d009890d6f365a0358b587aac7e7bca"
+      "protectedImplementationDigest": "sha256:b44ddcbd812af8daa58166168622e9265eb17c2d3c10b2049b9d83d761773613"
     },
     {
       "name": "cat_cafe_list_external_runtime_sessions",
@@ -6883,58 +6748,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleListLabels",
-      "protectedImplementationDigest": "sha256:031ea25a027bcd4c47a9fba4b4318898838a0afd2929ee9b42046136a39d420c"
-    },
-    {
-      "name": "cat_cafe_list_memory_matters",
-      "serverFamily": "memory",
-      "resourceFamily": "memory-matter",
-      "actions": [
-        "list"
-      ],
-      "activeState": "canonical",
-      "description": "Find shared memory pages about a matter (事情/跨线原话). Use when opening/resuming work, finding prior discussion or continuing an opening directory. NOT for proving a real read; use read_memory_matter. Output: currently readable titles, IDs, revisions, entry counts, source/summary status and nextCursor; no read receipt. Pages with active unchanged sources from this authenticated invocation thread come first, then updatedAt and stable ID. hasThreadSource means source location, not applicability or authorization. Reuse a cursor with the same reader, thread and query. The optional query matches titles/descriptions; empty does not prove no relevant history exists.",
-      "descriptionDigest": "sha256:3adfa7d1a625ca1953fcc6f3a7b7b6eb82fda0b8860fcd59969fc85907d34c48",
-      "descriptionCharacters": 663,
-      "descriptionTokensCl100kBase": 134,
-      "inputSchema": {
-        "$schema": "http://json-schema.org/draft-07/schema#",
-        "additionalProperties": false,
-        "properties": {
-          "cursor": {
-            "description": "Opaque nextCursor returned by the same catalogue or page.",
-            "maxLength": 2000,
-            "type": "string"
-          },
-          "limit": {
-            "description": "Maximum entries per page; default 12, maximum 30.",
-            "maximum": 30,
-            "minimum": 1,
-            "type": "integer"
-          },
-          "query": {
-            "description": "Literal title/description clue, e.g. 守望猫; omit to browse.",
-            "maxLength": 200,
-            "type": "string"
-          }
-        },
-        "type": "object"
-      },
-      "inputSchemaDigest": "sha256:df1b6ca1450e7f0cc48fbde498723e5445ac9cb8d76a2a40f0fc4ae331169d4a",
-      "annotations": {
-        "destructiveHint": false,
-        "openWorldHint": false,
-        "readOnlyHint": true
-      },
-      "runtimeProfiles": [
-        "full"
-      ],
-      "schemaDelivery": {
-        "evidenceRef": "file:packages/mcp-server/src/tools/matter-memory-tools.ts",
-        "policy": "host-default"
-      },
-      "implementationRef": "module:./tools/matter-memory-tools.js#handleListMemoryMatters",
-      "protectedImplementationDigest": "sha256:a4603d16c6a118db84a975a879f34aa366f916b3afcebea61b81d8964c091ed7"
+      "protectedImplementationDigest": "sha256:8a7d7a91917d316c3fab27d1b7acd217591ba7b0f721c9cacf825c381e4c53c9"
     },
     {
       "name": "cat_cafe_list_paw_feel_inbox",
@@ -7039,73 +6853,6 @@
       },
       "implementationRef": "module:./tools/paw-feel-disposition-tools.js#handleListPawFeelInbox",
       "protectedImplementationDigest": "sha256:e7d1c3e994e3c3d8b24d53ac40f3a1348f5b84cf8204859a165554ad173752c6"
-    },
-    {
-      "name": "cat_cafe_list_recent",
-      "serverFamily": "memory",
-      "resourceFamily": "evidence-navigation",
-      "actions": [
-        "read"
-      ],
-      "activeState": "migration-candidate",
-      "description": "Browse recent docs/threads by time window, including architecture maps. NO query needed — designed for cold-start \"我记得最近讨论过什么\" / \"压缩后扫一眼\" scenarios.\nUse when: zero prior knowledge of what to search for; want to scan latest activity.\nNot for: precise anchor lookup → graph_resolve. Semantic search → search_evidence.\nTimestamp semantics: for docs/memory entries, updatedAt is the source file mtime (content activity), not index rebuild time; trajectories use task trajectory updatedAt.\nScope/kinds tip: scope and kinds are intersected. If you ask for docs + discussion and get a scope/kinds nudge, try scope=threads or split the scan.\n\nv1 limitation (KD-8): does NOT accept collection scoping params. Sees public/internal collections only via server-side identity. Private collections excluded.",
-      "descriptionDigest": "sha256:a42bfe1593ac74a7d66603a22d9709cd8c1e6a755550029b8eda7fb125030e66",
-      "descriptionCharacters": 793,
-      "descriptionTokensCl100kBase": 183,
-      "inputSchema": {
-        "$schema": "http://json-schema.org/draft-07/schema#",
-        "additionalProperties": false,
-        "properties": {
-          "kinds": {
-            "description": "Filter by document kinds (feature / decision / architecture / lesson / plan / phase / discussion / research). Omit = all.",
-            "items": {
-              "type": "string"
-            },
-            "type": "array"
-          },
-          "limit": {
-            "description": "Max items (default 20, max 100)",
-            "maximum": 100,
-            "minimum": 1,
-            "type": "integer"
-          },
-          "scope": {
-            "description": "Surface to scan. docs/threads/memory/all = evidence_docs kind filter; trajectories = F200 Phase D task_trajectories (search chain + files read/modified + outcome verification).",
-            "enum": [
-              "docs",
-              "threads",
-              "memory",
-              "all",
-              "trajectories"
-            ],
-            "type": "string"
-          },
-          "since": {
-            "description": "Time window: \"7d\" / \"24h\" / ISO 8601 date (default \"7d\")",
-            "type": "string"
-          }
-        },
-        "type": "object"
-      },
-      "inputSchemaDigest": "sha256:5ec5fd5a3b624e1fbeace8a8c29c19e302ea458d5148c0da02c11b80d7bc22b4",
-      "annotations": {
-        "destructiveHint": false,
-        "openWorldHint": false,
-        "readOnlyHint": true
-      },
-      "runtimeProfiles": [
-        "desktop:cloud-pro-phase0",
-        "desktop:fable-phase0",
-        "desktop:live-companion",
-        "full",
-        "readonly"
-      ],
-      "schemaDelivery": {
-        "evidenceRef": "file:packages/mcp-server/src/tools/recent-tools.ts",
-        "policy": "host-default"
-      },
-      "implementationRef": "module:./tools/recent-tools.js#handleListRecent",
-      "protectedImplementationDigest": "sha256:daf55a3da5d12810d86c51ff8ab5a9f4209bf98a47925b3b9fa7e1f9adb170ad"
     },
     {
       "name": "cat_cafe_list_schedule_templates",
@@ -7284,7 +7031,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleListTasks",
-      "protectedImplementationDigest": "sha256:031ea25a027bcd4c47a9fba4b4318898838a0afd2929ee9b42046136a39d420c"
+      "protectedImplementationDigest": "sha256:8a7d7a91917d316c3fab27d1b7acd217591ba7b0f721c9cacf825c381e4c53c9"
     },
     {
       "name": "cat_cafe_list_threads",
@@ -7362,7 +7109,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleListThreads",
-      "protectedImplementationDigest": "sha256:031ea25a027bcd4c47a9fba4b4318898838a0afd2929ee9b42046136a39d420c"
+      "protectedImplementationDigest": "sha256:8a7d7a91917d316c3fab27d1b7acd217591ba7b0f721c9cacf825c381e4c53c9"
     },
     {
       "name": "cat_cafe_manage_conversation_decision",
@@ -7921,7 +7668,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleMultiMention",
-      "protectedImplementationDigest": "sha256:031ea25a027bcd4c47a9fba4b4318898838a0afd2929ee9b42046136a39d420c"
+      "protectedImplementationDigest": "sha256:8a7d7a91917d316c3fab27d1b7acd217591ba7b0f721c9cacf825c381e4c53c9"
     },
     {
       "name": "cat_cafe_offer_custody",
@@ -7981,7 +7728,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleOfferCustody",
-      "protectedImplementationDigest": "sha256:031ea25a027bcd4c47a9fba4b4318898838a0afd2929ee9b42046136a39d420c"
+      "protectedImplementationDigest": "sha256:8a7d7a91917d316c3fab27d1b7acd217591ba7b0f721c9cacf825c381e4c53c9"
     },
     {
       "name": "cat_cafe_offer_suggestion",
@@ -10140,7 +9887,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handlePostMessage",
-      "protectedImplementationDigest": "sha256:031ea25a027bcd4c47a9fba4b4318898838a0afd2929ee9b42046136a39d420c"
+      "protectedImplementationDigest": "sha256:8a7d7a91917d316c3fab27d1b7acd217591ba7b0f721c9cacf825c381e4c53c9"
     },
     {
       "name": "cat_cafe_prepare_artifact_review",
@@ -10276,7 +10023,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handlePrepareMemoryContext",
-      "protectedImplementationDigest": "sha256:031ea25a027bcd4c47a9fba4b4318898838a0afd2929ee9b42046136a39d420c"
+      "protectedImplementationDigest": "sha256:8a7d7a91917d316c3fab27d1b7acd217591ba7b0f721c9cacf825c381e4c53c9"
     },
     {
       "name": "cat_cafe_prepare_request_review_consumption",
@@ -10895,7 +10642,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleProposeSessionHandoff",
-      "protectedImplementationDigest": "sha256:031ea25a027bcd4c47a9fba4b4318898838a0afd2929ee9b42046136a39d420c"
+      "protectedImplementationDigest": "sha256:8a7d7a91917d316c3fab27d1b7acd217591ba7b0f721c9cacf825c381e4c53c9"
     },
     {
       "name": "cat_cafe_propose_thread",
@@ -11021,7 +10768,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleProposeThread",
-      "protectedImplementationDigest": "sha256:031ea25a027bcd4c47a9fba4b4318898838a0afd2929ee9b42046136a39d420c"
+      "protectedImplementationDigest": "sha256:8a7d7a91917d316c3fab27d1b7acd217591ba7b0f721c9cacf825c381e4c53c9"
     },
     {
       "name": "cat_cafe_publish_harness_history",
@@ -12616,7 +12363,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/file-tools.js#handleReadFileSlice",
-      "protectedImplementationDigest": "sha256:836bd8e3b1995afa3df5d3d5f93e631424440c02bf8e07bc29cf407223ce443e"
+      "protectedImplementationDigest": "sha256:85e5c0f1bde40414b4c8f3d6a867c41c75b40b436d6d2ece0979f976309d3862"
     },
     {
       "name": "cat_cafe_read_invocation_detail",
@@ -12682,109 +12429,247 @@
       "protectedImplementationDigest": "sha256:19513169bbfebc419d454a71be2e7f03a751eaf31be037cefa561199578c9730"
     },
     {
-      "name": "cat_cafe_read_memory_matter",
+      "name": "cat_cafe_read_memory",
       "serverFamily": "memory",
-      "resourceFamily": "memory-matter",
+      "resourceFamily": "memory-read",
       "actions": [
         "read"
       ],
       "activeState": "canonical",
-      "description": "Read one shared matter page: description is the cat-written contextual interpretation; entries provide exact raw quotes and sources. Use when a matter is relevant to this turn, including after resume or correction; reread its current version. NOT for granting execution authority or proving adoption. Output: interpretation, raw quotes, separate authors/quoted speakers, source coordinates, page/source revisions and pagination. Changed active sources mark the interpretation unverified (summaryStatus=sources_changed); do not treat it as a current conclusion or silently substitute new speech. A successful nonempty read records a durable explicit-read receipt for this invocation/cat. Directory, context hints, empty and failed reads do not count. Verify applicability from the full page; current user instructions take precedence within their scope.",
-      "descriptionDigest": "sha256:8ff7d3c9ed43a7e76bebc1d767617490990e44ddd2c48572c4637be0e408747d",
-      "descriptionCharacters": 852,
-      "descriptionTokensCl100kBase": 151,
-      "inputSchema": {
-        "$schema": "http://json-schema.org/draft-07/schema#",
-        "additionalProperties": false,
-        "properties": {
-          "cursor": {
-            "description": "Opaque nextCursor returned by the same catalogue or page.",
-            "maxLength": 2000,
-            "type": "string"
-          },
-          "history": {
-            "description": "Include superseded/retired entries, still subject to current source permissions.",
-            "type": "boolean"
-          },
-          "limit": {
-            "description": "Maximum entries per page; default 12, maximum 30.",
-            "maximum": 30,
-            "minimum": 1,
-            "type": "integer"
-          },
-          "matterId": {
-            "description": "Stable matterId from the directory or an earlier page.",
-            "maxLength": 200,
-            "minLength": 1,
-            "type": "string"
-          }
-        },
-        "required": [
-          "matterId"
-        ],
-        "type": "object"
-      },
-      "inputSchemaDigest": "sha256:d660847d0ffb6a8d5d9742e6a5f91ad91d10a226ad0a5cacb8ac96d5e676ba2f",
-      "annotations": {
-        "destructiveHint": false,
-        "openWorldHint": false,
-        "readOnlyHint": true
-      },
-      "runtimeProfiles": [
-        "full"
-      ],
-      "schemaDelivery": {
-        "evidenceRef": "file:packages/mcp-server/src/tools/matter-memory-tools.ts",
-        "policy": "host-default"
-      },
-      "implementationRef": "module:./tools/matter-memory-tools.js#handleReadMemoryMatter",
-      "protectedImplementationDigest": "sha256:a4603d16c6a118db84a975a879f34aa366f916b3afcebea61b81d8964c091ed7"
-    },
-    {
-      "name": "cat_cafe_read_profile",
-      "serverFamily": "collab",
-      "resourceFamily": "identity-proposal",
-      "actions": [
-        "read"
-      ],
-      "activeState": "canonical",
-      "description": "Read the profile of this connection's authenticated identity through the stable cat-cafe-profile:// URI. Supports primer (default, per-persona relationship), corpus (owner-wide shared facts), and capsule (the current opening portrait). Use when: L0 shows the profile URI, you are starting a session and need relationship or owner context, or you need to verify the currently effective content before proposing an update. NOT for: searching project knowledge or old threads (use search_evidence), reading arbitrary workspace files (use read_file_slice), or reading another user/cat/persona. Output: the current content + revision (sha256 hash); expectedRevision rejects changed snapshots without returning content. No profile change; successful reads retain content-free owner-scoped usage evidence. Reuse requestId when retrying. GOTCHA: for a runtime invocation, use the Clowder AI MCP bound to that invocation; a separately installed App with the same tool name is not a substitute. A missing profile on another connection does not establish absence here. The primer is approved current context, not proof of a historical first occurrence. For original message coordinates use cat_cafe_get_message(mode=\"full\", messageId=the bare ID after #), not graph_resolve. A revision mismatch requires a fresh read. An unavailable current layer is not permission to reconstruct a current agreement from old messages; describe history as history instead. Identity comes from authentication, never userId, catId, path or relationshipKey input.",
-      "descriptionDigest": "sha256:2d2eee2b4d05cfb696256190c3aea0a9ec28525113be523c49e1989251a2cc17",
-      "descriptionCharacters": 1532,
-      "descriptionTokensCl100kBase": 290,
+      "description": "Open an exact memory source with one typed ref. Use when a result, directory, cue, profile URI or source returns a reading coordinate; known coordinates work directly. NOT for finding sources, arbitrary tool execution, private person/time-window choices, raw sessions, pending-message delivery or adoption settlement. Output: original domain data, contentKind, actual version, complete sources and nextRef; pass nextRef unchanged to continue. Large JSON uses data.contentBlocks: concatenate those text blocks in this same response before parsing. Message contentRevision/sourceParts retain citation ownership; matter interpretation remains a cat summary and changed sources remain unverified. Read never publishes a card or records applied. GOTCHA: ref is an address, not authority. Each kind retains its original runtime/owner qualification. Profile cat-cafe-profile:// pointers use primer/corpus/capsule of this connection's authenticated identity; read the same layer before proposing replacement, reuse requestId on retry, and reread after revision conflict. Use the invocation-bound connection; a separate App cannot substitute. Cue handles retain owner/thread/invocation/expiry; retryRef preserves uncertain receipt keys. Unread/queued messages belong to get_thread_context.",
+      "descriptionDigest": "sha256:e1636d1679a70602885c33dee47ac6915050c84ea8400ac8b5c5db0751ef2f42",
+      "descriptionCharacters": 1280,
+      "descriptionTokensCl100kBase": 237,
       "inputSchema": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "additionalProperties": false,
         "properties": {
           "agentKeyCatId": {
-            "description": "Persistent-agent identity selector. Required for shared Antigravity MCP (antigravity or antig-opus) so agent-key auth uses the matching sidecar key; otherwise callback config fails closed. Ignored when full invocation credentials are present.",
+            "description": "Persistent-agent transport selector; ignored with invocation credentials. Never a target identity.",
             "minLength": 1,
             "type": "string"
           },
-          "expectedRevision": {
-            "description": "Optional revision from a prior profile snapshot. A changed revision returns no content; reread without it to obtain the current approved profile.",
-            "pattern": "^sha256:[a-f0-9]{64}$",
-            "type": "string"
-          },
-          "layer": {
-            "description": "Which profile layer to read: 'primer' (default) for this persona's relationship, 'corpus' for owner-wide shared facts, or 'capsule' for the owner's current opening portrait. All reads are scoped to the authenticated owner.",
-            "enum": [
-              "primer",
-              "corpus",
-              "capsule"
+          "ref": {
+            "anyOf": [
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "contextCount": {
+                    "maximum": 10,
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "expectedRevision": {
+                    "maxLength": 300,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "kind": {
+                    "const": "message",
+                    "type": "string"
+                  },
+                  "messageId": {
+                    "maxLength": 200,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "sourceSelection": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "attachmentId": {
+                        "$ref": "#/properties/ref/anyOf/0/properties/messageId"
+                      },
+                      "contentBlockIndex": {
+                        "minimum": 0,
+                        "type": "integer"
+                      },
+                      "end": {
+                        "exclusiveMinimum": 0,
+                        "type": "integer"
+                      },
+                      "expectedRevision": {
+                        "$ref": "#/properties/ref/anyOf/0/properties/expectedRevision"
+                      },
+                      "segment": {
+                        "enum": [
+                          "body",
+                          "quote_comment",
+                          "quote_text"
+                        ],
+                        "type": "string"
+                      },
+                      "start": {
+                        "minimum": 0,
+                        "type": "integer"
+                      }
+                    },
+                    "required": [
+                      "segment",
+                      "start",
+                      "end",
+                      "expectedRevision"
+                    ],
+                    "type": "object"
+                  },
+                  "threadId": {
+                    "$ref": "#/properties/ref/anyOf/0/properties/messageId"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "messageId"
+                ],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "cursor": {
+                    "maxLength": 2000,
+                    "type": "string"
+                  },
+                  "expectedRevision": {
+                    "exclusiveMinimum": 0,
+                    "type": "integer"
+                  },
+                  "history": {
+                    "type": "boolean"
+                  },
+                  "kind": {
+                    "const": "matter",
+                    "type": "string"
+                  },
+                  "limit": {
+                    "maximum": 30,
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "matterId": {
+                    "$ref": "#/properties/ref/anyOf/0/properties/messageId"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "matterId"
+                ],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "expectedRevision": {
+                    "pattern": "^sha256:[a-f0-9]{64}$",
+                    "type": "string"
+                  },
+                  "kind": {
+                    "const": "profile",
+                    "type": "string"
+                  },
+                  "layer": {
+                    "enum": [
+                      "primer",
+                      "corpus",
+                      "capsule"
+                    ],
+                    "type": "string"
+                  },
+                  "requestId": {
+                    "$ref": "#/properties/ref/anyOf/0/properties/messageId"
+                  }
+                },
+                "required": [
+                  "kind"
+                ],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "clientRequestId": {
+                    "$ref": "#/properties/ref/anyOf/0/properties/messageId"
+                  },
+                  "expectedRevision": {
+                    "$ref": "#/properties/ref/anyOf/0/properties/expectedRevision"
+                  },
+                  "handle": {
+                    "maxLength": 2000,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "kind": {
+                    "const": "cue",
+                    "type": "string"
+                  },
+                  "window": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "offset": {
+                        "description": "Zero-based UTF-16 code-unit offset; use nextOffset from the previous page.",
+                        "maximum": 9007199254740991,
+                        "minimum": 0,
+                        "type": "integer"
+                      },
+                      "query": {
+                        "description": "Case-insensitive literal phrase or heading to locate in this document (1–200 characters).",
+                        "maxLength": 200,
+                        "minLength": 1,
+                        "type": "string"
+                      }
+                    },
+                    "type": "object"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "handle"
+                ],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "charOffset": {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "endLine": {
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "expectedRevision": {
+                    "$ref": "#/properties/ref/anyOf/0/properties/expectedRevision"
+                  },
+                  "kind": {
+                    "const": "file",
+                    "type": "string"
+                  },
+                  "path": {
+                    "maxLength": 4096,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "startLine": {
+                    "minimum": 1,
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "path",
+                  "startLine"
+                ],
+                "type": "object"
+              }
             ],
-            "type": "string"
-          },
-          "requestId": {
-            "description": "Stable ID for this read. Reuse on retry to avoid counting twice; omit to generate one. A successful response includes readRequestId. Use a new ID for a new read or a changed profile.",
-            "maxLength": 200,
-            "minLength": 1,
-            "type": "string"
+            "description": "Complete typed reading coordinate from a result/source/nextRef, or an already known exact address. Pass it unchanged."
           }
         },
+        "required": [
+          "ref"
+        ],
         "type": "object"
       },
-      "inputSchemaDigest": "sha256:9604390effefeb20a41e44580dde46aa86a316a92b79787fc3f12873c7040c25",
+      "inputSchemaDigest": "sha256:352dc7d733c7f8505e677f6caa42e0ddf4654ca73a319d225b1dce033f927fe4",
       "annotations": {
         "destructiveHint": false,
         "openWorldHint": false,
@@ -12795,14 +12680,15 @@
         "desktop:cloud-pro-phase0",
         "desktop:fable-phase0",
         "desktop:live-companion",
-        "full"
+        "full",
+        "readonly"
       ],
       "schemaDelivery": {
-        "evidenceRef": "file:packages/mcp-server/src/tools/callback-tools.ts",
+        "evidenceRef": "file:packages/mcp-server/src/tools/read-memory-tools.ts",
         "policy": "host-default"
       },
-      "implementationRef": "module:./tools/callback-tools.js#handleReadProfile",
-      "protectedImplementationDigest": "sha256:031ea25a027bcd4c47a9fba4b4318898838a0afd2929ee9b42046136a39d420c"
+      "implementationRef": "module:./tools/read-memory-tools.js#handleReadMemory",
+      "protectedImplementationDigest": "sha256:fc79c370f5a0acfd2aa8c5c34ba0344089432169f64db517b2e23ec82b150343"
     },
     {
       "name": "cat_cafe_read_session_digest",
@@ -13209,7 +13095,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleRecallPersonRelationship",
-      "protectedImplementationDigest": "sha256:031ea25a027bcd4c47a9fba4b4318898838a0afd2929ee9b42046136a39d420c"
+      "protectedImplementationDigest": "sha256:8a7d7a91917d316c3fab27d1b7acd217591ba7b0f721c9cacf825c381e4c53c9"
     },
     {
       "name": "cat_cafe_record_eval_lifecycle",
@@ -13733,7 +13619,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleRecordMemoryCueOutcome",
-      "protectedImplementationDigest": "sha256:031ea25a027bcd4c47a9fba4b4318898838a0afd2929ee9b42046136a39d420c"
+      "protectedImplementationDigest": "sha256:8a7d7a91917d316c3fab27d1b7acd217591ba7b0f721c9cacf825c381e4c53c9"
     },
     {
       "name": "cat_cafe_record_request_review_consumption",
@@ -14229,7 +14115,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleRegisterDeploymentWait",
-      "protectedImplementationDigest": "sha256:031ea25a027bcd4c47a9fba4b4318898838a0afd2929ee9b42046136a39d420c"
+      "protectedImplementationDigest": "sha256:8a7d7a91917d316c3fab27d1b7acd217591ba7b0f721c9cacf825c381e4c53c9"
     },
     {
       "name": "cat_cafe_register_external_runtime_session",
@@ -14440,10 +14326,10 @@
         "write"
       ],
       "activeState": "canonical",
-      "description": "The write entry for memory: submit 1–4 items, each forwarded to its existing owner route. Choose target by semantic content (a correction, praise or Magic Word does not choose it): profile = facts about the person or this relationship; taste = reusable quality judgments; person = a named third party (F276); person_defer / person_abstain = quiet proactive-memory dispositions; entity = workspace name mappings; event_correction = fix an Event memory; matter = shared cross-thread quotes and decisions. NOT for repeated operational/tool/process rules (use code-as-harness), reading memory, approving proposals or forgetting data. Output: each original proposal/receipt or rejection plus a groupId; visible items share one Chat group card, quiet items post none. Approval, source checks, deduplication and direct-write rules still apply per item; one refusal does not undo another. Keep clientRequestId when retrying the same request.",
-      "descriptionDigest": "sha256:012223fac75a540a610b2572124525d5ca288eb9ce08463087814c7a0ac1efa0",
-      "descriptionCharacters": 933,
-      "descriptionTokensCl100kBase": 186,
+      "description": "The write entry for memory: submit 1–4 items, each forwarded to its existing owner route. Choose target by semantic content (a correction, praise or Magic Word does not choose it): profile = facts about the person or this relationship; taste = reusable quality judgments; person = a named third party (F276); person_defer / person_abstain = quiet proactive-memory dispositions; entity = workspace name mappings; event_correction = fix an Event memory; matter = shared cat summaries with return addresses and optional exact quotations. NOT for repeated operational/tool/process rules (use code-as-harness), reading memory, approving proposals or forgetting data. Output: each original proposal/receipt or rejection plus a groupId; visible items share one Chat group card, quiet items post none. Approval, source checks, deduplication and direct-write rules still apply per item; one refusal does not undo another. Keep clientRequestId when retrying the same request.",
+      "descriptionDigest": "sha256:8fde1ee48e53e2ebed976977bec30d9d9c21ba1410374ef58f41b522093bc4fe",
+      "descriptionCharacters": 965,
+      "descriptionTokensCl100kBase": 190,
       "inputSchema": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "additionalProperties": false,
@@ -14469,7 +14355,7 @@
                     },
                     "payload": {
                       "additionalProperties": false,
-                      "description": "Durable fact about the authenticated person or this persona-operator relationship: personal context, preferred address, a relationship-specific communication boundary. targetLayer primer (default) = this persona relationship; corpus = owner-wide facts every cat should know; capsule = the 1–300 character opening portrait. Read the same layer with cat_cafe_read_profile first; afterContent replaces the whole file. For names/roles, state the subject cat, current agreement and original message coordinates. Nothing is written until the owner approves.",
+                      "description": "Durable fact about the authenticated person or this persona-operator relationship: personal context, preferred address, a relationship-specific communication boundary. targetLayer primer (default) = this persona relationship; corpus = owner-wide facts every cat should know; capsule = the 1–300 character opening portrait. Read the same layer with cat_cafe_read_memory({ref:{kind:\"profile\",layer:targetLayer}}) first; afterContent replaces the whole file. For names/roles, state the subject cat, current agreement and original message coordinates. Nothing is written until the owner approves.",
                       "properties": {
                         "afterContent": {
                           "description": "The COMPLETE new content (whole-file replacement, not a patch). Capsule: 1–300 non-whitespace Unicode characters in capsule.md; primer: relationship/{relationshipKey}-primer.md; corpus: corpus/shared-facts.md. Private owner data only; include everything to keep. Nothing is written until owner confirmation. To select primer opening history, preserve the body and add YAML frontmatter opening: {asOf: \"YYYY-MM-DD\", excerpts: [{kind: \"relationship\" or \"model_capability\", text, source: {threadId, messageId}, model: \"exact model, required only for model_capability\"}]}. Use 1–2 sourced excerpts totaling at most 300 non-whitespace Unicode characters; missing or invalid selection remains on-demand.",
@@ -16143,69 +16029,97 @@
                               "type": "string"
                             },
                             "sources": {
+                              "description": "Optional thread/message return addresses or exact quotations. If omitted, the server binds this real invocation thread and any confirmed triggering message.",
                               "items": {
-                                "additionalProperties": false,
-                                "properties": {
-                                  "attachmentId": {
-                                    "$ref": "#/properties/items/items/anyOf/7/properties/payload/anyOf/0/properties/requestId",
-                                    "description": "Exact quote attachment ID; required for quote segments."
-                                  },
-                                  "contentBlockIndex": {
-                                    "description": "Zero-based contentBlocks index; required for quote segments or multiple text blocks.",
-                                    "minimum": 0,
-                                    "type": "integer"
-                                  },
-                                  "end": {
-                                    "description": "Exclusive raw UTF-16 offset, greater than start.",
-                                    "exclusiveMinimum": 0,
-                                    "type": "integer"
-                                  },
-                                  "messageId": {
-                                    "description": "Exact source message ID in that thread.",
-                                    "maxLength": 200,
-                                    "minLength": 1,
-                                    "type": "string"
-                                  },
-                                  "quote": {
-                                    "description": "Exact selected original text, preserving whitespace; maximum 8000 UTF-16 units.",
-                                    "maxLength": 8000,
-                                    "minLength": 1,
-                                    "type": "string"
-                                  },
-                                  "segment": {
-                                    "description": "Raw message body, the quoting author comment, or quoted text; never normalized search text.",
-                                    "enum": [
-                                      "body",
-                                      "quote_comment",
-                                      "quote_text"
+                                "anyOf": [
+                                  {
+                                    "additionalProperties": false,
+                                    "properties": {
+                                      "attachmentId": {
+                                        "description": "Exact quote attachment ID; required for quote segments.",
+                                        "maxLength": 200,
+                                        "minLength": 1,
+                                        "type": "string"
+                                      },
+                                      "contentBlockIndex": {
+                                        "description": "Zero-based contentBlocks index; required for quote segments or multiple text blocks.",
+                                        "minimum": 0,
+                                        "type": "integer"
+                                      },
+                                      "end": {
+                                        "description": "Exclusive raw UTF-16 offset, greater than start.",
+                                        "exclusiveMinimum": 0,
+                                        "type": "integer"
+                                      },
+                                      "messageId": {
+                                        "description": "Exact source message ID in that thread.",
+                                        "maxLength": 200,
+                                        "minLength": 1,
+                                        "type": "string"
+                                      },
+                                      "quote": {
+                                        "description": "Exact selected original text, preserving whitespace; maximum 8000 UTF-16 units.",
+                                        "maxLength": 8000,
+                                        "minLength": 1,
+                                        "type": "string"
+                                      },
+                                      "segment": {
+                                        "description": "Raw message body, the quoting author comment, or quoted text; never normalized search text.",
+                                        "enum": [
+                                          "body",
+                                          "quote_comment",
+                                          "quote_text"
+                                        ],
+                                        "type": "string"
+                                      },
+                                      "start": {
+                                        "description": "Inclusive raw UTF-16 offset within the selected segment.",
+                                        "minimum": 0,
+                                        "type": "integer"
+                                      },
+                                      "threadId": {
+                                        "description": "Exact source thread ID.",
+                                        "maxLength": 200,
+                                        "minLength": 1,
+                                        "type": "string"
+                                      }
+                                    },
+                                    "required": [
+                                      "threadId",
+                                      "messageId",
+                                      "segment",
+                                      "start",
+                                      "end",
+                                      "quote"
                                     ],
-                                    "type": "string"
+                                    "type": "object"
                                   },
-                                  "start": {
-                                    "description": "Inclusive raw UTF-16 offset within the selected segment.",
-                                    "minimum": 0,
-                                    "type": "integer"
-                                  },
-                                  "threadId": {
-                                    "description": "Exact source thread ID.",
-                                    "maxLength": 200,
-                                    "minLength": 1,
-                                    "type": "string"
+                                  {
+                                    "additionalProperties": false,
+                                    "properties": {
+                                      "messageId": {
+                                        "$ref": "#/properties/items/items/anyOf/7/properties/payload/anyOf/0/properties/sources/items/anyOf/0/properties/attachmentId"
+                                      },
+                                      "threadId": {
+                                        "$ref": "#/properties/items/items/anyOf/7/properties/payload/anyOf/0/properties/sources/items/anyOf/0/properties/attachmentId"
+                                      }
+                                    },
+                                    "required": [
+                                      "threadId"
+                                    ],
+                                    "type": "object"
                                   }
-                                },
-                                "required": [
-                                  "threadId",
-                                  "messageId",
-                                  "segment",
-                                  "start",
-                                  "end",
-                                  "quote"
-                                ],
-                                "type": "object"
+                                ]
                               },
                               "maxItems": 30,
                               "minItems": 1,
                               "type": "array"
+                            },
+                            "summary": {
+                              "description": "Your interpretation, not a verbatim quotation. The authenticated writer is recorded by the server.",
+                              "maxLength": 4000,
+                              "minLength": 1,
+                              "type": "string"
                             },
                             "title": {
                               "maxLength": 160,
@@ -16214,10 +16128,8 @@
                             }
                           },
                           "required": [
-                            "requestId",
                             "operation",
-                            "title",
-                            "sources"
+                            "title"
                           ],
                           "type": "object"
                         },
@@ -16229,7 +16141,7 @@
                               "type": "integer"
                             },
                             "matterId": {
-                              "$ref": "#/properties/items/items/anyOf/7/properties/payload/anyOf/0/properties/requestId"
+                              "$ref": "#/properties/items/items/anyOf/7/properties/payload/anyOf/0/properties/sources/items/anyOf/0/properties/attachmentId"
                             },
                             "operation": {
                               "const": "append",
@@ -16239,20 +16151,16 @@
                               "$ref": "#/properties/items/items/anyOf/7/properties/payload/anyOf/0/properties/requestId"
                             },
                             "sources": {
-                              "items": {
-                                "$ref": "#/properties/items/items/anyOf/7/properties/payload/anyOf/0/properties/sources/items"
-                              },
-                              "maxItems": 30,
-                              "minItems": 1,
-                              "type": "array"
+                              "$ref": "#/properties/items/items/anyOf/7/properties/payload/anyOf/0/properties/sources"
+                            },
+                            "summary": {
+                              "$ref": "#/properties/items/items/anyOf/7/properties/payload/anyOf/0/properties/summary"
                             }
                           },
                           "required": [
-                            "requestId",
                             "matterId",
                             "expectedRevision",
-                            "operation",
-                            "sources"
+                            "operation"
                           ],
                           "type": "object"
                         },
@@ -16267,7 +16175,7 @@
                               "$ref": "#/properties/items/items/anyOf/7/properties/payload/anyOf/1/properties/expectedRevision"
                             },
                             "matterId": {
-                              "$ref": "#/properties/items/items/anyOf/7/properties/payload/anyOf/0/properties/requestId"
+                              "$ref": "#/properties/items/items/anyOf/7/properties/payload/anyOf/0/properties/sources/items/anyOf/0/properties/attachmentId"
                             },
                             "operation": {
                               "const": "edit",
@@ -16283,7 +16191,6 @@
                             }
                           },
                           "required": [
-                            "requestId",
                             "matterId",
                             "expectedRevision",
                             "operation",
@@ -16296,13 +16203,13 @@
                           "additionalProperties": false,
                           "properties": {
                             "entryId": {
-                              "$ref": "#/properties/items/items/anyOf/7/properties/payload/anyOf/0/properties/requestId"
+                              "$ref": "#/properties/items/items/anyOf/7/properties/payload/anyOf/0/properties/sources/items/anyOf/0/properties/attachmentId"
                             },
                             "expectedRevision": {
                               "$ref": "#/properties/items/items/anyOf/7/properties/payload/anyOf/1/properties/expectedRevision"
                             },
                             "matterId": {
-                              "$ref": "#/properties/items/items/anyOf/7/properties/payload/anyOf/0/properties/requestId"
+                              "$ref": "#/properties/items/items/anyOf/7/properties/payload/anyOf/0/properties/sources/items/anyOf/0/properties/attachmentId"
                             },
                             "operation": {
                               "const": "correct",
@@ -16313,15 +16220,16 @@
                             },
                             "source": {
                               "$ref": "#/properties/items/items/anyOf/7/properties/payload/anyOf/0/properties/sources/items"
+                            },
+                            "summary": {
+                              "$ref": "#/properties/items/items/anyOf/7/properties/payload/anyOf/0/properties/summary"
                             }
                           },
                           "required": [
-                            "requestId",
                             "matterId",
                             "expectedRevision",
                             "operation",
-                            "entryId",
-                            "source"
+                            "entryId"
                           ],
                           "type": "object"
                         },
@@ -16329,13 +16237,13 @@
                           "additionalProperties": false,
                           "properties": {
                             "entryId": {
-                              "$ref": "#/properties/items/items/anyOf/7/properties/payload/anyOf/0/properties/requestId"
+                              "$ref": "#/properties/items/items/anyOf/7/properties/payload/anyOf/0/properties/sources/items/anyOf/0/properties/attachmentId"
                             },
                             "expectedRevision": {
                               "$ref": "#/properties/items/items/anyOf/7/properties/payload/anyOf/1/properties/expectedRevision"
                             },
                             "matterId": {
-                              "$ref": "#/properties/items/items/anyOf/7/properties/payload/anyOf/0/properties/requestId"
+                              "$ref": "#/properties/items/items/anyOf/7/properties/payload/anyOf/0/properties/sources/items/anyOf/0/properties/attachmentId"
                             },
                             "operation": {
                               "const": "retire_entry",
@@ -16346,7 +16254,6 @@
                             }
                           },
                           "required": [
-                            "requestId",
                             "matterId",
                             "expectedRevision",
                             "operation",
@@ -16361,7 +16268,7 @@
                               "$ref": "#/properties/items/items/anyOf/7/properties/payload/anyOf/1/properties/expectedRevision"
                             },
                             "matterId": {
-                              "$ref": "#/properties/items/items/anyOf/7/properties/payload/anyOf/0/properties/requestId"
+                              "$ref": "#/properties/items/items/anyOf/7/properties/payload/anyOf/0/properties/sources/items/anyOf/0/properties/attachmentId"
                             },
                             "operation": {
                               "const": "retire",
@@ -16372,7 +16279,6 @@
                             }
                           },
                           "required": [
-                            "requestId",
                             "matterId",
                             "expectedRevision",
                             "operation"
@@ -16380,7 +16286,7 @@
                           "type": "object"
                         }
                       ],
-                      "description": "Create, append to, correct or retire a shared matter page from exact original message selections (raw UTF-16 start/end, end exclusive). description is optional cat-written context and applicability; updates need expectedRevision from a fresh cat_cafe_read_memory_matter. Reuse requestId only for the exact same change."
+                      "description": "Create, append to, correct or retire a shared matter page. Give summary: your interpretation in one sentence or more; sources are optional threadId pointers, with messageId when known. Without sources the server binds this real invocation thread and any confirmed trigger, including a cat/system message; a pointer is not verified original speech. No quote, selected block, attachment or offsets are needed. The server records the actual summary writer. description is optional page context/applicability. Exact quotations remain optional and use their original raw UTF-16 selection fields. Updates need expectedRevision from cat_cafe_read_memory({ref:{kind:\"matter\",matterId}}). Reuse requestId only for the exact same change."
                     },
                     "target": {
                       "const": "matter",
@@ -16429,7 +16335,7 @@
         ],
         "type": "object"
       },
-      "inputSchemaDigest": "sha256:8e39de55a4d49f97298c65156945809fa96b7d17588b5487572c14c46a4c753a",
+      "inputSchemaDigest": "sha256:c5acba674f3bc81b35dc7db919b003ea029a70e74d03c9b97005355cbf3629bf",
       "annotations": {
         "destructiveHint": false,
         "openWorldHint": false,
@@ -16443,7 +16349,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/remember-tool.js#handleRemember",
-      "protectedImplementationDigest": "sha256:f59633774c8d118314c29240406754aaa5917903e2c487102a35f7eda5a57f52"
+      "protectedImplementationDigest": "sha256:4374bdf161365f8733aa3e7cb38ba86dfe8b5149ba428bb868c79371089bff6e"
     },
     {
       "name": "cat_cafe_remove_scheduled_task",
@@ -17267,7 +17173,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleRetryCustodyAdmission",
-      "protectedImplementationDigest": "sha256:031ea25a027bcd4c47a9fba4b4318898838a0afd2929ee9b42046136a39d420c"
+      "protectedImplementationDigest": "sha256:8a7d7a91917d316c3fab27d1b7acd217591ba7b0f721c9cacf825c381e4c53c9"
     },
     {
       "name": "cat_cafe_revise_person_memory",
@@ -17570,7 +17476,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleRevisePersonMemory",
-      "protectedImplementationDigest": "sha256:031ea25a027bcd4c47a9fba4b4318898838a0afd2929ee9b42046136a39d420c"
+      "protectedImplementationDigest": "sha256:8a7d7a91917d316c3fab27d1b7acd217591ba7b0f721c9cacf825c381e4c53c9"
     },
     {
       "name": "cat_cafe_run_perspective",
@@ -17618,7 +17524,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/perspective-tools.js#handleRunPerspective",
-      "protectedImplementationDigest": "sha256:1a900efc69e4a3a73a8f865ce6e09b6bbe07356158f893e19b71e55e422d4da6"
+      "protectedImplementationDigest": "sha256:92659dafdb43d1cdd5f2a303e1a8ad22c2dc40015f81173e296034453310b94c"
     },
     {
       "name": "cat_cafe_scan_paw_feel_inbox",
@@ -17693,10 +17599,10 @@
           ]
         }
       ],
-      "description": "Search project knowledge or distinct readable messages from earlier conversations. Use when: finding an earlier discussion (\"以前聊过 / 找回旧消息\", resultUnit=message), semantically finding project knowledge, tracing a topic across docs or threads, or building a bounded coverage/source map. NOT for: resolving a known exact anchor (use cat_cafe_graph_resolve), scanning recent items without a query (use cat_cafe_list_recent), or reading raw messages from a known thread (use get_thread_context). Output: document-mode evidence summaries, or message-mode canonical source snippets, thread/message coordinates and honest scope/degradation metadata; this is read-only and does not navigate. To answer with clickable original sources, read them in full, select exact quotations and your reasons, then attach them through the ordinary reply (create_rich_block kind:\"sources\", or post_message searchAnswer). Full original reads supply contentRevision and sourceParts. Host verifies provenance while your reasons remain your judgment. Ordinary recall never publishes a card or launches a generative judge. MESSAGE CONTRACT: resultUnit=message returns sources for the reader to judge, with matched query terms or semantic-retrieval evidence, not supported verdicts. messageSort=relevance (default) returns a relevance-ranked page and stops at the admitted page plus one witness; explicit messageSort=time orders the first 32 admitted relevance sources by canonical time. Incomplete time windows report actual coverage. It supports mode=hybrid (default); scope is threads, optional threadId means current conversation, omission means all readable project conversations. Authenticated invocation binds the exact question exclusion; caller-supplied user/source IDs are ignored. Limited results and unknown freshness do not prove the first occurrence or complete history. GOTCHA: rank/matchRank are position only, never relevance or trust; relevance states observed exact-anchor/title/phrase evidence or unknown; authority is document reliability, and broad coverage requires separate docs + threads searches instead of treating one all-scope query as exhaustive. Semantic/fuzzy find entry point for memory recall. For precise anchors (F186, ADR-019), prefer cat_cafe_graph_resolve; for zero-prior scanning, prefer cat_cafe_list_recent; when unsure, start here with mode=hybrid. Supports scope (docs/threads/all), mode (lexical/semantic/hybrid), and depth (summary/raw). QUERY CONTRACT: query has max 2,000 characters; overlong input fails validation instead of being truncated. THREAD FILTER CONTRACT: threadId is enforced at the final response boundary; results can only come from that thread, and empty responses state whether the filter was authoritative or degraded. Related-direction expansion is suppressed for exact thread searches. COVERAGE CONTRACT: caller scope is executed exactly; coverage limit has max 20; latency is bounded; serialized output has a declared budget with explicit truncation and a continuation drill pointer. TOPK CONTRACT: complete API/MCP output is bounded to 24k characters; omitted derived entity explanations report their count and lack a direct pager, while source anchors remain readable. At the 15s API deadline coverage returns an explicit partial/degraded result; the MCP HTTP caller cancels any request that outlives that boundary plus transport grace. SCOPE STRATEGY (decide first!): docs = 结论/真相源 (features, ADRs, architecture maps, plans, lessons). threads = 讨论过程 (who said what, original context). all = broad scan only — docs dominate due to higher BM25 density, so don't rely on all for finding threads. Rule of thumb: \"要结论 → docs, 要过程 → threads, 要全貌 → both separately\". MODE SELECTION: lexical (default) = BM25 keyword match, best for Feature IDs / exact terms (F042, Redis). hybrid = BM25 + vector NN + RRF fusion, RECOMMENDED for most searches — finds both exact AND semantic matches. semantic = pure vector nearest-neighbor, best for cross-language (English query → Chinese docs) or synonym matching. TIP: When unsure, use mode=hybrid. For broad surveys, add one semantic query as blind-spot insurance (hybrid misses cross-language synonyms). QUERY TIPS: Feature IDs (F102, F163) are strong anchors — use them when available. Mix Chinese + English keywords for better recall (记忆 + memory). Split broad topics into 2-3 targeted queries from different angles (e.g. \"how it was built\" vs \"how it is governed\"). Watch for antonym gaps: searching 记忆 misses 失忆/压缩/丢失 — search the opposite angle separately if needed. SEARCH TIPS — coverage/source-map tasks: this is not an exhaustive all-mentions entrypoint. If the user asks \"哪些 / 所有 / 历史上 / 提过 / 沉淀\", follow the memory-search-best-practices skill: expand terms yourself, search docs + threads separately, then drill into canonical docs/source threads and report coverage gaps. READING RESULTS: rank = position; matchRank is its legacy bucket. relevance = observed textual support, never confidence; unknown keeps alternate-entry hints. retrievalScore = method-specific score, authority = document reliability. sourceProjection reports the observed/indexed publication versions and pending/degraded state; do not infer absence from a stale index. Follow the returned drillDown path to read the same source hash; changed/forgotten sources are refused, never replaced by another quote. RANKING (F200 live): Results are consumption-weighted — docs that cats actually read/used after searching rank higher. Constitutional docs (ADR/lesson/canon) never get demoted. New docs have 14-day grace period. Near-duplicates are MMR-deduplicated for diversity. No action needed — ranking is automatic. DEPTH: Start with summary (default). Use depth=raw only after narrowing scope to drill into specific passages. BOUNDARY: Use this tool to FIND information across the project. For READING raw messages in a specific thread, use get_thread_context instead. F188 PHASE F 7-TOOL FAMILY (cross-reference, choose by scenario): precise anchor + relations → cat_cafe_graph_resolve; zero-prior / scan recent → cat_cafe_list_recent; this tool (search_evidence) = semantic/fuzzy find; session drill-down → list_session_chain / read_session_digest / read_session_events / read_invocation_detail. When this tool returns no results or no text-supported document candidates, payload appends a deterministic nudge pointing to graph_resolve/list_recent (KD-7).",
-      "descriptionDigest": "sha256:ed94b23cda99d7fa97955a306e0253b633213afa0ea5f79d02f3b841948a29d9",
-      "descriptionCharacters": 6410,
-      "descriptionTokensCl100kBase": 1360,
+      "description": "Find project knowledge, earlier messages, graph relations, matter pages or recent items from one clue. Use when: you have a sentence, term or exact anchor (F186, ADR-019) to look up (\"以前聊过 / 找回旧消息 / 有没有相关经验\"), want recent activity (omit query), or need a bounded coverage/source map. NOT for: opening a known source (pass its readRef to cat_cafe_read_memory), raw messages of a known thread (get_thread_context), or diaries/events/person cards (their own entries). Output: groups run in parallel on the same input, each with its own status (ok/no_results/not_covered/deferred/failed/timeout), range and continuation. With a query: docs = document and thread-digest evidence (mode lexical by default); messages = distinct canonical messages (hybrid by default) with their match evidence; graph = an exact anchor's subgraph (graphDepth 1-3, graphRelations) or candidate anchors with match reasons; matters = the whole query matched literally in matter titles/descriptions (up to 200 characters, never cut). Without a query: recent = the recent index by time (since, default 7d; scope with kinds; scope=trajectories) plus the matter directory. scope, dimension, threadId, dateFrom/dateTo/since and kinds narrow every group; a group that cannot keep one reports not_covered instead of widening. Explicit resultUnit=document|message keeps that one original search. Pass next.arguments (matterCursor or continueGroup) unchanged: they reopen one group alone. Read-only: no read receipt, card or preparation event. MESSAGE CONTRACT: resultUnit=message returns distinct canonical messages through authenticated callback access, with matched query terms or semantic-retrieval evidence, not supported verdicts. messageSort=relevance (default) returns a relevance-ranked page and stops at the admitted page plus one witness; explicit messageSort=time orders the first 32 admitted relevance sources by canonical time. Incomplete time windows report actual coverage. Caller-supplied user/source IDs are ignored. To answer with clickable original sources, read them in full, select exact quotations and reasons, then attach them through the ordinary reply (create_rich_block kind:\"sources\", or post_message searchAnswer). GOTCHA: rank/matchRank are position only, never relevance or trust; relevance states observed exact-anchor/title/phrase evidence or unknown; semantic similarity is not confirmation; recent items are ordered by time, not relevance. No result or a stale sourceProjection does not prove absence. One query is not exhaustive: for \"哪些/所有/历史上\" source maps use intent=coverage with docs + threads searched separately, following the memory-search-best-practices skill. CONTRACTS: query max 2,000 characters; overlong input fails validation instead of being truncated. threadId is enforced at the response boundary and empty results state whether the filter was authoritative or degraded. Coverage executes the caller scope exactly; coverage limit has max 20; latency is bounded (the 15s API deadline returns an explicit partial result); serialized output has a declared budget with explicit truncation and a coverage_offset continuation pointer. All groups together stay within 24k characters without dropping the docs page; omitted derived entity explanations report their count while source anchors remain readable. Docs cover features, ADRs, architecture maps, plans and lessons; scope=threads gives discussion process. Session drill-down: list_session_chain / read_session_digest / read_session_events / read_invocation_detail.",
+      "descriptionDigest": "sha256:d991bb977ab199392aad86a19b3318ff6bfe055978febaa2eacd73e294f1f3fc",
+      "descriptionCharacters": 3530,
+      "descriptionTokensCl100kBase": 728,
       "inputSchema": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "additionalProperties": false,
@@ -17715,6 +17621,16 @@
             "maximum": 5,
             "minimum": 1,
             "type": "integer"
+          },
+          "continueGroup": {
+            "description": "Only from a returned next.arguments: reopens that one group alone.",
+            "enum": [
+              "messages",
+              "graph",
+              "matters",
+              "recent"
+            ],
+            "type": "string"
           },
           "coverage_offset": {
             "description": "Continuation offset from a truncated coverage response drill pointer. Only effective with intent=coverage.",
@@ -17753,6 +17669,25 @@
             "description": "When true, include rankingFactors (bm25Score, consumptionPrior, mmrPenalty) on each result",
             "type": "boolean"
           },
+          "graphDepth": {
+            "description": "Graph group only: relation depth for an exact anchor (default 1).",
+            "maximum": 3,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "graphRelations": {
+            "description": "Graph group only: relation types to follow (wikilink/doc_link/feature_ref/related_to). Omit = all.",
+            "items": {
+              "enum": [
+                "wikilink",
+                "doc_link",
+                "feature_ref",
+                "related_to"
+              ],
+              "type": "string"
+            },
+            "type": "array"
+          },
           "include_expansion": {
             "description": "F256 Phase B: Include expansion hints (\"Related directions\") in topk results. Default true. Set false to suppress.",
             "type": "boolean"
@@ -17765,11 +17700,26 @@
             ],
             "type": "string"
           },
+          "kinds": {
+            "description": "Document kinds (feature/decision/architecture/lesson/plan/phase/discussion/research); intersected with scope.",
+            "items": {
+              "maxLength": 40,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 12,
+            "type": "array"
+          },
           "limit": {
-            "description": "Max results (default 5)",
-            "maximum": 20,
+            "description": "Max results per group, up to 100; each group applies its own maximum and says so (docs and messages 20, matters 30, recent 100).",
+            "maximum": 100,
             "minimum": 1,
             "type": "integer"
+          },
+          "matterCursor": {
+            "description": "Only from a returned matters next.arguments; continues that group without re-running the others.",
+            "maxLength": 2000,
+            "type": "string"
           },
           "messageSort": {
             "description": "Message mode only: relevance (default) returns a relevance-ranked page; explicit time orders the first 32 admitted relevance sources by canonical time. A partial time window reports its actual size. Neither proves the earliest occurrence in all history.",
@@ -17789,13 +17739,13 @@
             "type": "string"
           },
           "query": {
-            "description": "Search query for project knowledge (max 2,000 characters)",
+            "description": "The clue as you would say it (max 2,000 characters; never truncated). Omit to browse the matter directory.",
             "maxLength": 2000,
             "minLength": 1,
             "type": "string"
           },
           "resultUnit": {
-            "description": "Result unit: document (default) or distinct canonical messages for finding an earlier discussion. Message mode uses authenticated callback access.",
+            "description": "Omit for all groups. Explicit document = docs evidence only; message = distinct canonical messages for an earlier discussion (authenticated callback access).",
             "enum": [
               "document",
               "message"
@@ -17803,14 +17753,19 @@
             "type": "string"
           },
           "scope": {
-            "description": "Collection scope: docs (features/ADRs/plans/lessons), threads/sessions (chat history), all (everything)",
+            "description": "Source range: docs (features/ADRs/plans/lessons), threads (chat), memory, sessions, all. trajectories browses task trajectories (no query). Omitted = every group.",
             "enum": [
               "docs",
               "memory",
               "threads",
               "sessions",
-              "all"
+              "all",
+              "trajectories"
             ],
+            "type": "string"
+          },
+          "since": {
+            "description": "Lower time bound: 7d, 24h or an ISO date. Without a query it is the recent browse window (default 7d).",
             "type": "string"
           },
           "threadId": {
@@ -17818,12 +17773,9 @@
             "type": "string"
           }
         },
-        "required": [
-          "query"
-        ],
         "type": "object"
       },
-      "inputSchemaDigest": "sha256:28ad31c50d81b5693498fcf845e5ace301e1d0d0f703300c82c2f51db8ec8023",
+      "inputSchemaDigest": "sha256:7368d79a400f4f5ed19d9d525ee4467c6153764c38458ecb229ef6c49b8dec11",
       "annotations": {
         "destructiveHint": false,
         "openWorldHint": true,
@@ -17841,7 +17793,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/evidence-tools.js#handleSearchEvidence",
-      "protectedImplementationDigest": "sha256:4d1d229ccfb200bae0fe5a4112dd7666647e5caa45fc36a616b473ee26f27740"
+      "protectedImplementationDigest": "sha256:9e01bdce9e81caca0d9ac72945ab36a1f6d49175fecfd10a12ee158791df301f"
     },
     {
       "name": "cat_cafe_set_read_mode",
@@ -17888,7 +17840,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleSetReadMode",
-      "protectedImplementationDigest": "sha256:031ea25a027bcd4c47a9fba4b4318898838a0afd2929ee9b42046136a39d420c"
+      "protectedImplementationDigest": "sha256:8a7d7a91917d316c3fab27d1b7acd217591ba7b0f721c9cacf825c381e4c53c9"
     },
     {
       "name": "cat_cafe_set_thread_metadata",
@@ -18133,7 +18085,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleSetThreadMetadata",
-      "protectedImplementationDigest": "sha256:031ea25a027bcd4c47a9fba4b4318898838a0afd2929ee9b42046136a39d420c"
+      "protectedImplementationDigest": "sha256:8a7d7a91917d316c3fab27d1b7acd217591ba7b0f721c9cacf825c381e4c53c9"
     },
     {
       "name": "cat_cafe_settle_present_loop",
@@ -18835,7 +18787,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleStartGuide",
-      "protectedImplementationDigest": "sha256:031ea25a027bcd4c47a9fba4b4318898838a0afd2929ee9b42046136a39d420c"
+      "protectedImplementationDigest": "sha256:8a7d7a91917d316c3fab27d1b7acd217591ba7b0f721c9cacf825c381e4c53c9"
     },
     {
       "name": "cat_cafe_start_vote",
@@ -18913,7 +18865,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleStartVote",
-      "protectedImplementationDigest": "sha256:031ea25a027bcd4c47a9fba4b4318898838a0afd2929ee9b42046136a39d420c"
+      "protectedImplementationDigest": "sha256:8a7d7a91917d316c3fab27d1b7acd217591ba7b0f721c9cacf825c381e4c53c9"
     },
     {
       "name": "cat_cafe_submit_evolution_preparation",
@@ -20150,7 +20102,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/event-memory-tools.js#handleTeleport",
-      "protectedImplementationDigest": "sha256:462ce269e002b38d175948d5c1a228516d009890d6f365a0358b587aac7e7bca"
+      "protectedImplementationDigest": "sha256:b44ddcbd812af8daa58166168622e9265eb17c2d3c10b2049b9d83d761773613"
     },
     {
       "name": "cat_cafe_triage_paw_feel",
@@ -20651,7 +20603,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleUpdateBootcampState",
-      "protectedImplementationDigest": "sha256:031ea25a027bcd4c47a9fba4b4318898838a0afd2929ee9b42046136a39d420c"
+      "protectedImplementationDigest": "sha256:8a7d7a91917d316c3fab27d1b7acd217591ba7b0f721c9cacf825c381e4c53c9"
     },
     {
       "name": "cat_cafe_update_entrusted_work",
@@ -20836,7 +20788,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleUpdateEntrustedWork",
-      "protectedImplementationDigest": "sha256:031ea25a027bcd4c47a9fba4b4318898838a0afd2929ee9b42046136a39d420c"
+      "protectedImplementationDigest": "sha256:8a7d7a91917d316c3fab27d1b7acd217591ba7b0f721c9cacf825c381e4c53c9"
     },
     {
       "name": "cat_cafe_update_evolution_program",
@@ -21183,7 +21135,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleUpdateGuideState",
-      "protectedImplementationDigest": "sha256:031ea25a027bcd4c47a9fba4b4318898838a0afd2929ee9b42046136a39d420c"
+      "protectedImplementationDigest": "sha256:8a7d7a91917d316c3fab27d1b7acd217591ba7b0f721c9cacf825c381e4c53c9"
     },
     {
       "name": "cat_cafe_update_scheduled_task_params",
@@ -21336,7 +21288,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleUpdateTask",
-      "protectedImplementationDigest": "sha256:031ea25a027bcd4c47a9fba4b4318898838a0afd2929ee9b42046136a39d420c"
+      "protectedImplementationDigest": "sha256:8a7d7a91917d316c3fab27d1b7acd217591ba7b0f721c9cacf825c381e4c53c9"
     },
     {
       "name": "cat_cafe_update_workflow",
@@ -21486,7 +21438,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleUpdateWorkflow",
-      "protectedImplementationDigest": "sha256:031ea25a027bcd4c47a9fba4b4318898838a0afd2929ee9b42046136a39d420c"
+      "protectedImplementationDigest": "sha256:8a7d7a91917d316c3fab27d1b7acd217591ba7b0f721c9cacf825c381e4c53c9"
     },
     {
       "name": "cat_cafe_video_project_command",
@@ -22207,7 +22159,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleWithdrawThreadProposal",
-      "protectedImplementationDigest": "sha256:031ea25a027bcd4c47a9fba4b4318898838a0afd2929ee9b42046136a39d420c"
+      "protectedImplementationDigest": "sha256:8a7d7a91917d316c3fab27d1b7acd217591ba7b0f721c9cacf825c381e4c53c9"
     },
     {
       "name": "cat_cafe_work",

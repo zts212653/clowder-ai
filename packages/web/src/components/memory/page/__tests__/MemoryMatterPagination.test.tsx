@@ -68,6 +68,55 @@ async function click(label: string) {
   await act(async () => button(label).click());
 }
 
+it('shows the actual summary writer separately from source speakers and links thread-only notes to their real conversation', async () => {
+  request.mockResolvedValue(
+    response({
+      matter: {
+        ...matter('light'),
+        description: '全页背景',
+        descriptionAuthor: { kind: 'agent', catId: 'codex-astra' },
+      },
+      entries: [
+        {
+          entryId: 'note',
+          status: 'active',
+          sourceStatus: 'thread_only',
+          summary: '一条归纳，不是原话',
+          summaryAuthor: { kind: 'agent', catId: 'codex61-sol' },
+          attribution: 'author',
+          source: { kind: 'thread', threadId: 'thread-real', origin: 'invocation' },
+        },
+        {
+          entryId: 'old',
+          status: 'active',
+          sourceStatus: 'current',
+          summary: '旧归纳没有作者',
+          attribution: 'author',
+          source: {
+            kind: 'message',
+            threadId: 'thread-real',
+            messageId: 'original',
+            author: { kind: 'user', userId: 'owner' },
+            timestamp: 1,
+            origin: 'explicit',
+            sourceRevision: 'raw',
+            contentRevision: 'citation',
+          },
+        },
+      ],
+    }),
+  );
+  await act(async () => root.render(<MemoryMatterDetail matterId="light" />));
+  expect(host.textContent).toContain('codex-astra的归纳（非原话）');
+  expect(host.textContent).toContain('codex61-sol的归纳（非原话）');
+  expect(host.textContent).toContain('归纳作者未知（非原话）');
+  expect(host.textContent).toContain('仅定位到线程');
+  expect(host.querySelector('a[href="/thread/thread-real"]')?.textContent).toContain('查看原对话');
+  expect(host.querySelector('a[href="/thread/thread-real?message=original"]')).not.toBeNull();
+  expect(host.querySelectorAll('blockquote')).toHaveLength(0);
+  expect(host.innerHTML).not.toContain('message=undefined');
+});
+
 it('marks a current-page interpretation unverified after source change and clears the notice on a verified refresh', async () => {
   let revised = false;
   request.mockImplementation((_path: string, init?: RequestInit) => {

@@ -6,7 +6,8 @@ import { test } from 'node:test';
 import { RECALL_OPPORTUNITY_CATALOG_VERSION } from '@cat-cafe/shared';
 import Database from 'better-sqlite3';
 import Fastify from 'fastify';
-import { createMemoryCueTools } from '../../../mcp-server/dist/tools/memory-cue-tools.js';
+import { CANONICAL_TOOL_REGISTRY } from '../../../mcp-server/dist/canonical-server-tools.js';
+import { withInvocationCredentials } from '../../../mcp-server/dist/tools/invocation-auth.js';
 import { buildActionSuccessorFence } from '../../dist/domains/ball-custody/ActionSuccessorAdmissionContract.js';
 import { canonicalizeActionTerminalPredicate } from '../../dist/domains/ball-custody/ActionTerminalPredicateCatalog.js';
 import { claimActionSuccessor } from '../../dist/domains/ball-custody/action-successor-state-machine.js';
@@ -176,8 +177,12 @@ test('a fresh authorized Task presents and drills the same primer dismissed in t
   });
   assert.equal(attempt.admitted.length, 1, 'the final source fence must preserve a semantically identical Task proof');
   assert.doesNotMatch(attempt.effectivePrompt, /paper companion/);
-  const displayedHandle = attempt.effectivePrompt.match(/^Handle: (.+)$/m)?.[1];
-  assert.ok(displayedHandle);
+  const displayedLine = attempt.effectivePrompt.match(/^ReadRef: (.+)$/m)?.[1];
+  assert.ok(displayedLine);
+  const displayedRef = JSON.parse(displayedLine);
+  assert.equal(displayedRef.kind, 'cue');
+  assert.equal(displayedRef.expectedRevision, undefined);
+  assert.ok(!attempt.effectivePrompt.includes(revision), 'the pointer must not reveal the source revision');
   const receipt = mintDeliveryReceipt({
     promptGenerationId: attempt.promptGenerationId,
     providerReceivedAt: Date.now(),
@@ -213,14 +218,33 @@ test('a fresh authorized Task presents and drills the same primer dismissed in t
     now: Date.now,
   });
   const statuses = [];
-  const tools = createMemoryCueTools(async (url, payload) => {
-    const response = await app.inject({ method: 'POST', url, payload });
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    const response = await app.inject({ method: 'POST', url: new URL(url).pathname, payload: JSON.parse(init.body) });
     statuses.push(response.statusCode);
-    return { content: [{ type: 'text', text: response.body }] };
+    return new Response(response.body, { status: response.statusCode, headers: response.headers });
+  };
+  t.after(() => {
+    globalThis.fetch = originalFetch;
   });
-  const drilled = await tools.handleDrillMemoryCue({ handle: displayedHandle, clientRequestId: 'drill' });
-  assert.match(drilled.content[0].text, /paper companion/);
-  await tools.handleRecordMemoryCueOutcome({ handle: displayedHandle, outcome: 'applied', clientRequestId: 'outcome' });
+  const credentials = {
+    ...scope,
+    userId: 'owner',
+    catId: 'cat',
+    callbackToken: 'test',
+    apiUrl: 'http://memory-fixture',
+  };
+  const readTool = CANONICAL_TOOL_REGISTRY.find((tool) => tool.name === 'cat_cafe_read_memory');
+  const outcomeTool = CANONICAL_TOOL_REGISTRY.find((tool) => tool.name === 'cat_cafe_record_memory_cue_outcome');
+  assert.ok(readTool);
+  assert.ok(outcomeTool);
+  const drilled = await withInvocationCredentials(credentials, () => readTool.handler({ ref: displayedRef }));
+  const readResult = JSON.parse(drilled.content[0].text);
+  assert.equal(readResult.status, 'ok');
+  assert.match(readResult.data.payload.content, /paper companion/);
+  await withInvocationCredentials(credentials, () =>
+    outcomeTool.handler({ handle: displayedRef.handle, outcome: 'applied', clientRequestId: 'outcome' }),
+  );
   assert.deepEqual(statuses, [200, 200]);
   assert.deepEqual(
     episodes.listByCue('owner', resolved.deliveryReceipts[0].cueId).map((event) => event.consumptionOutcome),

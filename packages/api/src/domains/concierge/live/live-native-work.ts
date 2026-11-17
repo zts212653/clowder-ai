@@ -31,7 +31,7 @@ function workKind(item: Record<string, unknown>): WorkKind | null {
   if (item.type !== 'mcpToolCall') return null;
   if (item.server === 'cat-cafe-selected-screen' && item.tool === 'view_shared_screen') return 'screen_read';
   if (['cat-cafe-memory', 'cat-cafe-collab'].includes(String(item.server)) && typeof item.tool === 'string') {
-    if (/^cat_cafe_(?:get_|list_|read_|search_|graph_resolve$)/.test(item.tool)) return 'workspace_fetch';
+    if (/^cat_cafe_(?:get_|list_|read_|search_)/.test(item.tool)) return 'workspace_fetch';
     if (['cat_cafe_post_message', 'cat_cafe_cross_post_message'].includes(item.tool)) return 'workspace_dispatch';
   }
   return 'tool';

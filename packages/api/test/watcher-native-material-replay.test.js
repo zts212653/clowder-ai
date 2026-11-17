@@ -39,8 +39,13 @@ test(
             },
           ],
           outputs: [
-            [nativeCall('text(await tools.cat_cafe_list_memory_matters({limit:30}));', 1)],
-            [nativeCall('text(await tools.cat_cafe_read_memory_matter({matterId:"matter-context",limit:30}));', 2)],
+            [nativeCall('text(await tools.cat_cafe_search_evidence({limit:30}));', 1)],
+            [
+              nativeCall(
+                'text(await tools.cat_cafe_read_memory({ref:{kind:"matter",matterId:"matter-context",limit:30}}));',
+                2,
+              ),
+            ],
           ],
         };
     const w = await watcherWorld();

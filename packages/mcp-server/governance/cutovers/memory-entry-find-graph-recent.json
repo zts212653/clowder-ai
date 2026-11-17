@@ -1,0 +1,113 @@
+{
+  "resource": {
+    "kind": "family",
+    "resourceFamily": "evidence-navigation"
+  },
+  "retiredNames": ["cat_cafe_graph_resolve", "cat_cafe_list_recent"],
+  "canonicalNames": [],
+  "expectedProfiles": {},
+  "rollbackRevision": "a5cc70fe0e3e1660c7e3d0f6ebe5ca383560058d",
+  "layers": {
+    "mcp-definition": {
+      "status": "covered",
+      "consumers": [
+        "packages/mcp-server/src/tools/evidence-tools.ts",
+        "packages/mcp-server/src/tools/memory-find.ts",
+        "packages/mcp-server/src/tools/memory-find-graph.ts",
+        "packages/mcp-server/src/tools/memory-find-recent.ts",
+        "packages/mcp-server/src/tools/memory-find-messages.ts",
+        "packages/mcp-server/src/tools/memory-find-group.ts",
+        "packages/mcp-server/src/tools/memory-find-context.ts",
+        "packages/mcp-server/src/tools/index.ts",
+        "packages/mcp-server/src/canonical-server-tools.ts",
+        "packages/mcp-server/src/tool-response-budget.ts"
+      ]
+    },
+    "runtime-catalog-profile": {
+      "status": "covered",
+      "consumers": [
+        "packages/mcp-server/governance/mcp-surface-baseline.json",
+        "packages/mcp-server/src/server-toolsets.ts",
+        "desktop/companion-live/surface.mjs",
+        "packages/api/src/domains/concierge/live/live-native-work.ts"
+      ]
+    },
+    "prompt-l0": {
+      "status": "covered",
+      "consumers": [
+        "assets/prompt-templates/l5-mcp-tools-index.md",
+        ".claude/hooks/user-level/session-start-recall.sh",
+        "CLAUDE.md",
+        "AGENTS.md",
+        "GEMINI.md",
+        "OPENCODE.md",
+        "packages/api/src/domains/cats/services/agents/routing/context-transport.ts",
+        "packages/api/src/domains/concierge/ConciergePromptSection.ts",
+        "packages/api/src/domains/concierge/conversation-duty.ts",
+        "packages/api/src/routes/perspectives.ts"
+      ]
+    },
+    "skill-convention": {
+      "status": "covered",
+      "consumers": [
+        "cat-cafe-skills/refs/memory-routing-partial.md",
+        "cat-cafe-skills/memory-search-best-practices/SKILL.md",
+        "cat-cafe-skills/manifest.yaml",
+        "cat-cafe-skills/BOOTSTRAP.md",
+        "cat-cafe-skills/co-creation-storytelling/SKILL.md",
+        "cat-cafe-skills/convention-graph-discovery/SKILL.md",
+        "cat-cafe-skills/refs/shared-rules.md",
+        "cat-cafe-skills/refs/gpt-pro-custom-instructions.md",
+        "cat-cafe-skills/refs/chatgpt-cloud-onboarding-guide.md",
+        "packages/web/src/lib/capability-tips.seed.json"
+      ]
+    },
+    "fixture-test": {
+      "status": "covered",
+      "consumers": [
+        "packages/mcp-server/test/memory-find-groups.test.js",
+        "packages/mcp-server/test/memory-find.test.js",
+        "packages/mcp-server/test/evidence-tools-nudge.test.js",
+        "packages/mcp-server/test/evidence-tools.test.js",
+        "packages/mcp-server/test/desktop-mode.test.ts",
+        "packages/mcp-server/test/server-toolsets-annotations.test.ts",
+        "packages/mcp-server/test/tool-registration.test.js",
+        "packages/mcp-server/test/live-companion-profile.test.ts",
+        "packages/mcp-server/test/deployment-brand.test.js",
+        "packages/mcp-server/test/fixtures/f321-experience-tools-server.mjs",
+        "packages/api/test/l0-compiler.test.js",
+        "packages/api/test/f188-harness-consistency.test.js",
+        "packages/api/test/root-md-slim.test.js",
+        "packages/api/test/system-prompt-builder.test.js",
+        "packages/api/test/f317-live-native-work.test.ts",
+        "packages/api/test/agy-native-finish.test.js",
+        "packages/api/test/agy-native-progress.test.js",
+        "packages/api/test/memory/coverage-search.test.js",
+        "packages/api/test/fixtures/agy-stream-json/denied-mcp-turn.ndjson",
+        "packages/web/src/components/reply-layers/__tests__/tool-action.test.ts",
+        "packages/web/src/hooks/__tests__/useRecallEvents.test.ts",
+        "test/hooks/session-start-recall.test.sh",
+        "packages/api/source-tests/f188-cold-start-fixtures.test.js"
+      ]
+    },
+    "eval": {
+      "status": "covered",
+      "consumers": [
+        "packages/api/src/infrastructure/harness-eval/capability-wakeup/eval-capability-wakeup-types.ts",
+        "packages/api/src/infrastructure/harness-eval/capability-wakeup/eval-capability-wakeup-trace-normalizers.ts",
+        "docs/eval/f188-phase-f-cold-start-fixtures.md"
+      ]
+    },
+    "observability": {
+      "status": "covered",
+      "consumers": [
+        "packages/api/src/domains/cats/services/tool-usage/derive-result-summary.ts",
+        "packages/api/src/domains/cats/services/tool-usage/ToolEventLog.ts",
+        "packages/api/src/domains/memory/RecallEventCorrelator.ts",
+        "packages/api/src/domains/memory/ToolUsageMetricsAggregator.ts",
+        "packages/web/src/hooks/recall-tool-events.ts",
+        "packages/web/src/components/reply-layers/tool-action.ts"
+      ]
+    }
+  }
+}

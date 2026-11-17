@@ -48,7 +48,7 @@ redis.call('HSET', KEYS[1],
 if ARGV[5] and ARGV[5] ~= '' then redis.call('HSET', KEYS[1], 'providerTeardownAt', ARGV[5]) end
 redis.call('SREM', KEYS[2], ARGV[4])
 redis.call('SADD', KEYS[3], ARGV[4])
-if ARGV[1] == 'failed' and ARGV[3] == ARGV[6] then redis.call('SADD', KEYS[4], ARGV[4]) end
+if (ARGV[1] == 'failed' and ARGV[3] == ARGV[6]) or ARGV[3] == ARGV[7] then redis.call('SADD', KEYS[4], ARGV[4]) end
 return 1
 `;
 

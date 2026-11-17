@@ -128,6 +128,8 @@ interface AgentKeyOptions {
 
 interface CallbackGetOptions extends AgentKeyOptions {
   readBudget?: CallbackReadBudget;
+  /** Caller-owned cancellation (e.g. a shared find deadline); merged with the invocation signal. */
+  signal?: AbortSignal;
 }
 
 interface CallbackTransportOptions {
@@ -331,7 +333,10 @@ export async function callbackGet(
         response.status === 401 ? extractReasonTag(response.body) : '',
       );
     }
-    const response = await invocationFetch(url, { headers: buildAuthHeaders(config) });
+    const response = await invocationFetch(url, {
+      headers: buildAuthHeaders(config),
+      ...(options?.signal ? { signal: options.signal } : {}),
+    });
     if (!response.ok) {
       const text = await response.text();
       // F174 Phase A: tag structured reason from 401 callback_auth_failed body
@@ -1374,6 +1379,8 @@ export async function handleGetWorkflowSop(input: {
 /** #699: Look up a single message by ID with optional surrounding context. */
 export async function handleGetMessage(input: {
   messageId: string;
+  memoryRead?: boolean;
+  sourceSelection?: import('@cat-cafe/shared').MemoryMessageSelection;
   contextCount?: number | undefined;
   mode?: 'preview' | 'full' | undefined;
   agentKeyCatId?: string | undefined;
@@ -1382,6 +1389,8 @@ export async function handleGetMessage(input: {
     '/api/callbacks/get-message',
     {
       messageId: input.messageId,
+      ...(input.memoryRead ? { memoryRead: 'true' } : {}),
+      ...(input.sourceSelection ? { sourceSelection: JSON.stringify(input.sourceSelection) } : {}),
       ...(input.contextCount ? { contextCount: String(input.contextCount) } : {}),
       ...(input.mode ? { mode: input.mode } : {}),
     },
@@ -4339,32 +4348,6 @@ export const callbackTools = [
     },
   }),
   // F231 Phase E: Promoted to canonical — corpus layer widens input schema (targetLayer + layer)
-  defineCanonicalTool({
-    name: 'cat_cafe_read_profile',
-    description:
-      "Read the profile of this connection's authenticated identity through the stable cat-cafe-profile:// URI. " +
-      'Supports primer (default, per-persona relationship), corpus (owner-wide shared facts), and capsule (the current opening portrait). ' +
-      'Use when: L0 shows the profile URI, you are starting a session and need relationship or owner context, or you need to verify the currently effective content before proposing an update. ' +
-      'NOT for: searching project knowledge or old threads (use search_evidence), reading arbitrary workspace files (use read_file_slice), or reading another user/cat/persona. ' +
-      'Output: the current content + revision (sha256 hash); expectedRevision rejects changed snapshots without returning content. No profile change; successful reads retain content-free owner-scoped usage evidence. Reuse requestId when retrying. ' +
-      `GOTCHA: for a runtime invocation, use the ${deploymentDefaults.brand.displayName} MCP bound to that invocation; a separately installed App with the same tool name is not a substitute. A missing profile on another connection does not establish absence here. The primer is approved current context, not proof of a historical first occurrence. For original message coordinates use cat_cafe_get_message(mode="full", messageId=the bare ID after #), not graph_resolve. A revision mismatch requires a fresh read. An unavailable current layer is not permission to reconstruct a current agreement from old messages; describe history as history instead. Identity comes from authentication, never userId, catId, path or relationshipKey input.`,
-    inputSchema: readProfileInputSchema,
-    handler: handleReadProfile,
-    governance: {
-      implementationExport: 'handleReadProfile',
-      resourceFamily: 'identity-proposal',
-      action: 'read',
-      authority: 'callback-owner',
-      risk: { level: 'read', openWorld: false },
-      runtimeProfiles: [
-        'full',
-        'agent-key',
-        'desktop:fable-phase0',
-        'desktop:cloud-pro-phase0',
-        'desktop:live-companion',
-      ],
-    },
-  }),
 
   ...deferredPersonMemoryToolset.lifecycleTools,
   ...personMemoryLifecycleToolset.tools,

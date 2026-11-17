@@ -9,7 +9,10 @@ import {
 export const routingCapacityWindowV1Schema = z
   .object({
     poolId: routingIdentifierSchema,
-    poolKind: z.enum(['codex-main', 'codex-spark', 'codex-review', 'codex-overflow', 'unknown']),
+    poolKind: z.enum(['codex-main', 'codex-spark', 'codex-review', 'codex-overflow', 'claude-subscription', 'unknown']),
+    /** Provider's original window key, including future model-specific constraints. */
+    windowKey: z.string().optional(),
+    observedModel: z.string().min(1).max(200).optional(),
     // Account-owned observations do not prove an execution/model → provider limitId edge.
     // A future producer must supply exact frozen-binding evidence before this can become proven.
     applicability: z.literal('unknown'),

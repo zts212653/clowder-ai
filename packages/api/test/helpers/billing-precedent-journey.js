@@ -101,10 +101,11 @@ export async function assertBillingPrecedentJourney({ docsRoot, repoFullName, ex
   assert.doesNotMatch(resolution.promptSegment, /LL-098|runner_id|steps=|why-now/);
   assert.ok(!resolution.promptSegment.includes(expectedSourceText), 'the pointer must not preload source policy');
   assert.match(resolution.promptSegment, /^Family: evidence$/m);
-  const handle = resolution.promptSegment.match(/^Handle: (mch1\.[^\s]+)$/m)?.[1];
+  const readRef = JSON.parse(resolution.promptSegment.match(/^ReadRef: (.+)$/m)?.[1] ?? 'null');
+  const handle = readRef?.handle;
   assert.ok(handle, 'the pointer must expose a bare, directly copyable opaque handle');
-  assert.match(resolution.promptSegment, /cat_cafe_drill_memory_cue\(handle=Handle\)/);
-  assert.match(resolution.promptSegment, /cat_cafe_record_memory_cue_outcome\(handle=Handle,/);
+  assert.match(resolution.promptSegment, /cat_cafe_read_memory\(\{ref: ReadRef\}\)/);
+  assert.match(resolution.promptSegment, /cat_cafe_record_memory_cue_outcome\(handle=ReadRef\.handle,/);
   const receipt = resolution.deliveryReceipts[0];
   const cueId = receipt?.cueId;
   assert.ok(cueId);

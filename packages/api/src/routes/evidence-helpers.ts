@@ -37,6 +37,7 @@ export type EvidenceMatchRank = 'high' | 'mid' | 'low';
 export type EvidenceStatus = MemoryEvidenceStatus | 'draft' | 'pending' | 'published';
 
 export interface EvidenceResult {
+  readRef?: import('@cat-cafe/shared').ReadRef;
   title: string;
   anchor: string;
   snippet: string;
