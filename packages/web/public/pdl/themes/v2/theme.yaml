@@ -33742,6 +33742,26 @@ pdl:
                               args:
                                 mid: "@mid"
           when: "@supp"
+        - type: toolbar
+          when: "@hold"
+          items:
+            - type: component
+              use: v2Action
+              props:
+                label: t:holdNotice.open
+                act: holdOpen
+                args:
+                  k: "@hold.k"
+                  wait: "@hold.wait"
+            - type: component
+              use: v2Action
+              props:
+                label: t:holdNotice.cancel
+                act: holdCancel
+                args:
+                  k: "@hold.k"
+                  wait: "@hold.wait"
+              when: "@hold.cancelable"
       acts:
         slot: chat.message.actions
         ctx: "@actsCtx"
