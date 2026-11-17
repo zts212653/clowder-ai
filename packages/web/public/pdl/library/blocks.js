@@ -918,7 +918,8 @@ function pvNodeIn(t, sc, root) {
 }
 /* 提示胶囊（tone / text / tip / 可关掉）；n > 1 时带一个“第几条 / 共几条”的小标记 */
 function pvSingleItem(x, i, n) {
-  return '<div class="cnote" data-i="' + (i || 0) + '" data-tip="' + h((x.text || '') + (x.tip ? ' · ' + x.tip : '')) + '">' + status(x.tone || '', x.text || '') + (n > 1 ? qty((i + 1) + '/' + n) : '') + (x.dismiss ? btn(tc('notice.dismiss'), { iconOnly: true, icon: 'close', size: 'xs', act: x.dismiss, data: argAttrs(x.dismissArgs) }) : '') + '</div>';   /* × 只关这一条。 */
+  const body = status(x.tone || '', x.text || '');   /* 带 act 的提示：文字就是去处（点了打开），× 仍只关这一条 */
+  return '<div class="cnote" data-i="' + (i || 0) + '" data-tip="' + h((x.text || '') + (x.tip ? ' · ' + x.tip : '')) + '">' + (x.act ? '<button type="button" class="cnote-go"' + actAttrs(x.act, x.args) + '>' + body + '</button>' : body) + (n > 1 ? qty((i + 1) + '/' + n) : '') + (x.dismiss ? btn(tc('notice.dismiss'), { iconOnly: true, icon: 'close', size: 'xs', act: x.dismiss, data: argAttrs(x.dismissArgs) }) : '') + '</div>';   /* × 只关这一条。 */
 }
 /* 一组提示：同一时刻只露一条；多条时按节拍轮换（通用轮换 rotHtml），悬停暂停；关掉一条后下一条接上 */
 function noticeList(items, key, attrs) {

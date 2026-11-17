@@ -147,7 +147,7 @@ const ICONS = {
 /* 几个容易混的含义（reply 和 jump 是上下镜像的两个字形，16px 下要一眼分得开）：
    reply（Mac 回车键形：上面一小段、右边下去、底下一横、箭头在下朝左）是“在这条对话里回复”：输入框的发送键、+ 菜单的发送策略、消息工具条的回复 / 引用；
    send（纸飞机）只给排队的“现在发出”（把已经排好的消息推出去）；
-   jump（弯钩 ↩：箭头在上朝左、右边弧线往下）是应用内“回到原处”（待办的一项、补充消息的跳到原文、回复引用、回到来源对话 / 卡片），全站只有这一个动作和这一个字形；openExternal ↗ 只用于真正的外部网址（http / https）；
+   jump（弯钩：箭头在上朝左、右边弧线往下）是应用内“回到原处”（待办的一项、补充消息的跳到原文、回复引用、回到来源对话 / 卡片），全站只有这一个动作和这一个字形；openExternal（斜上箭头）只用于真正的外部网址（http / https）；
    latest 是“到最新” */
 const ICON_MEANING = {
   send: 'send2r', close: 'x', delete: 'trash', edit: 'pen', copy: 'copy', reply: 'macreturn', more: 'more', back: 'left', forward: 'forward', maximize: 'expand', zoomIn: 'expand', zoomOut: 'shrink', system: 'megaphone',

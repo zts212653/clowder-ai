@@ -792,6 +792,14 @@ function homeModels() {
     current = data.executions.find(function (x) {
       return x.executionId === ui.execDetail;
     }),
+    execRecovery =
+      job &&
+      recoveryModel(
+        [],
+        read,
+        ui.execDetail,
+        projectData('sources') && projectData('sources').holdBusy && projectData('sources').holdBusy[ui.execDetail],
+      ),
     activeLoad =
       source.hydration === 'error'
         ? 'error'
@@ -825,14 +833,9 @@ function homeModels() {
         ? { load: detail.id === ui.execDetail ? detail.load : 'loading' }
         : {
             id: ui.execDetail,
-            recovery: recoveryModel(
-              [],
-              read,
-              ui.execDetail,
-              projectData('sources') &&
-                projectData('sources').holdBusy &&
-                projectData('sources').holdBusy[ui.execDetail],
-            ),
+            recovery: execRecovery,
+            // Still holding the slot while recovery has stopped (recorded disposition, no next attempt): a stop cannot finish.
+            stuck: !!current && !!execRecovery && !execRecovery.pending,
             state: job.state,
             failed: ['failed', 'timed_out', 'lost'].includes(job.state),
             live: !!current,

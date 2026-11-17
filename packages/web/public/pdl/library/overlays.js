@@ -106,7 +106,7 @@ function dlgFootHtml(f) {
   const t = f.foot ? (f.footTone ? '<span class="' + f.footTone + '-t">' + h(f.foot) + '</span>' : h(f.foot)) : '';
   return t + (f.links || []).map(dlgLink).join('');
 }
-function dlgLink(l) { return l.href ? '<a class="btn btn-text" href="' + h(l.href) + '" target="_blank" rel="noopener">' + h(l.label) + ' ↗</a>' : btn(l.label, { link: true, act: l.act, data: l.msg ? ' data-msg="' + h(l.msg) + '"' : '' }); }
+function dlgLink(l) { return l.href ? '<a class="btn btn-text" href="' + h(l.href) + '" target="_blank" rel="noopener">' + h(l.label) + icon('openExternal', 12) + '</a>' : btn(l.label, { link: true, act: l.act, data: l.msg ? ' data-msg="' + h(l.msg) + '"' : '' }); }
 function dlgFoot(o) { return '<div class="field-foot">' + h(o.text || '') + (o.links || []).map(dlgLink).join('') + '</div>'; }
 function dlgPanes(p) { return '<div class="seg' + (p.locked ? ' u-disabled' : '') + '" role="group"' + (p.locked ? ' aria-disabled="true"' : '') + '>' + p.items.map(function (x) { return '<button type="button"' + (p.locked ? '' : ' data-act="set" data-path="s.dialog.panes.cur"') + ' data-v="' + h(x.v) + '" aria-pressed="' + (x.v === p.cur) + '">' + h(x.label) + '</button>'; }).join('') + '</div>'; }
 function dlgSpecial(f) {

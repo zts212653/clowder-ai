@@ -115,7 +115,7 @@
         "toast": "已恢复「{0}」"
       },
       "pinLabel": {
-        "true": "取消置顶"
+        "true": "取消置顶", "false": "置顶"
       }
     },
     "project": {
@@ -565,9 +565,9 @@
       "confirm": "确认改发"
     },
     "find": {
-      "works": "作品 ↗",
+      "works": "作品",
       "worksTip": "到作品里按名称搜「{0}」",
-      "memory": "记忆 ↗",
+      "memory": "记忆",
       "memoryTip": "到记忆页里搜「{0}」"
     }
   },

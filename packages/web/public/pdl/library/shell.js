@@ -19,7 +19,7 @@ onStart('boot', function () { KEY_FNS.push(function (e) { if (e.key !== 'Escape'
 APP_CLASS.push(function () { return S.layout === 'two' ? 'layout-two' : ''; });
 /* 区域是界面树里同级的节点：根元素带它的键（data-okey），放着设置入口的区域（受保护）固定（data-locked）。
    编辑布局时区域和其它可编辑的节点一样：边缘出现移动光标，按住拖到另一侧，区域里的东西跟着走（拖动机制见 core.js 的 EDGE_DRAG）。
-   平时区域的边是调宽度的（↔ 光标），编辑布局时调宽度关掉——两种模式靠模式和光标区分，同一个手势不会有两种意思 */
+   平时区域的边是调宽度的（左右调整光标），编辑布局时调宽度关掉——两种模式靠模式和光标区分，同一个手势不会有两种意思 */
 function regionAttrs(key) { return ' data-okey="' + key + '"' + (S.editLayout ? ' data-edit="region"' : ''); }
 function rail() {
   const sp = space();

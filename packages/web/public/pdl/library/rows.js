@@ -89,7 +89,7 @@ function lrow(o) {
   const aside = o.aside ? '<span class="lr-aside"><span class="lr-aside-d' + (o.swap ? ' swap-d' : '') + '">' + (o.aside[1] ? '<span class="lr-aside-b">' + o.aside[1] + '</span>' : '') + '<span class="lr-aside-t">' + (o.aside[0] || '') + '</span></span>' + (o.swap ? actsHtml : '') + '</span>' : '';
   const tone = (o.tone ? ' ' + o.tone : '') + (o.cur ? ' selected' : '');
   return '<div class="lr' + tone + (canOpen || o.act ? ' click' : '') + (o.disabled ? ' off' : '') + (o.hook ? ' ' + o.hook : '') + '"' + ' data-layout="' + L + '"' + (o.swap ? ' data-swap' : '') + (o.rootAttrs || '') + (o.orderable && o.key != null ? ' data-okey="' + h(o.key) + '" data-edit="order"' : '') + (canOpen ? ' data-open="' + !!o.open + '"' : '') + (o.note ? ' data-note="' + o.note + '"' : '') + ' style="--acts:' + (nActs && !o.swap && !cols.length ? 'calc(' + nActs + ' * var(--ctl-s) + var(--sp-s))' : '0px') + ';--c:' + (o.color || 'initial') + (o.depth != null ? ';--d:' + o.depth : '') + '">' +
-    (o.pre ? '<span class="lr-pre">' + o.pre + '</span>' : '') +
+    (o.pre ? '<span class="lr-pre' + (o.preLive ? ' live' : '') + '">' + o.pre + '</span>' : '') +
     '<div class="lr-head"' + click + (o.cur ? ' aria-current="' + (o.cur === true ? 'true' : o.cur) + '"' : '') + (o.sel ? ' aria-selected="true"' : '') + (o.disabled ? ' aria-disabled="true"' : '') + (o.headAttrs || '') + (o.twisty && o.twisty !== 'leaf' && !o.twAct ? ' aria-expanded="' + (o.twisty === 'open') + '"' : '') + '>' + (o.orderable ? '<span class="lr-grip" aria-hidden="true">' + icon('grip', 14) + '</span>' : '') + tw + (o.lead || o.leadSlot ? '<span class="lr-lead">' + o.lead + '</span>' : '') +
       '<span class="lr-main"><span class="lr-line"><span class="lr-title">' + o.title + '</span>' + (o.inline || '') + '</span>' + (o.sub ? '<span class="lr-sub' + (o.subLines ? ' clamp" style="--sub-lines:' + o.subLines : '') + '">' + o.sub + '</span>' : '') + (o.meta ? '<span class="lr-sub lr-meta">' + o.meta + '</span>' : '') + '</span>' +
       /* 尾部（行的通用排法：内容 · 空白 · 操作）：数据列（状态、元信息）→ 悬停才出现的操作（改名、删除、⋯：也支持，但少用）→ 常显的控件（开关、主操作：一定支持）在最右。
@@ -255,7 +255,10 @@ function threadRow(v, rn, root, movable) {
     cur: v.cur ? 'page' : false, title: h(v.title), sub: meta.length ? meta.join(' · ') : '&#8203;', aside: [stamp, bdg], swap: true,   /* 状态行总在：没有状态时留空一行，所有对话行一样高 */
     actsHtml: rn && rn.more ? (rn.acts || []).map(function (c) { return pvControl(c, v, root); }).join('') + rowMore(menuLive(rowMenuItems(rn.more.items, v, root)), v.id, pv(rn.more.label, v, root)) : '',   /* 悬停时换上来的：声明的操作按钮（acts）+ 更多 */
     acts: rn && rn.more ? [] : [{ icon: 'more', label: tc('threadRow.more', v.title), act: 'menu', data: ' data-menu="' + (rn && rn.menu || '') + '" data-k="' + h(v.id) + '"' }],
-    pre: v.pinned ? '<span data-tip="' + h(tc('threadRow.pinned')) + '" aria-label="' + h(tc('threadRow.pinned')) + '">' + icon('pin', 12) + '</span>' : '' });
+    /* 置顶是左上角的标记；主题声明了 pin 就是开关：置顶了一直在，没置顶时悬停这一行才出现，点一下切换（不占行尾的操作位，不挡标题） */
+    pre: rn && rn.pin ? '<button type="button" class="lr-pin"' + actAttrs(rn.pin.act, pvArgsObj(rn.pin.args, v, root)) + ' aria-pressed="' + !!v.pinned + '" data-tip="' + h(pv(rn.pin.label, v, root)) + '" aria-label="' + h(pv(rn.pin.label, v, root)) + '">' + icon('pin', 12) + '</button>'
+      : v.pinned ? '<span data-tip="' + h(tc('threadRow.pinned')) + '" aria-label="' + h(tc('threadRow.pinned')) + '">' + icon('pin', 12) + '</span>' : '',
+    preLive: !!(rn && rn.pin) });
 }
 /* 行 / 行内的更多按钮仍是同一个 rowMore；只把菜单项与插槽按声明展开。 */
 function rowMenuItems(items, data, root) { return items.flatMap(function (it) { return it.slot ? pdlMenuItems(it.slot, pvArgsObj(it.args, data, root)) : pvMenu([it], data, root); }); }

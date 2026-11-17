@@ -20,7 +20,7 @@ function msgRecv(list) {
   }), { label: tc('delivery.received') }) + threads.map(function (r) { return capThread(r, 'right', tc('delivery.from')); }).join('') + '</span>';
 }
 /* 回复引用（一个组件）：这条消息回应的是哪一条。你引用成员的消息、成员回复收到的消息、A2A 里 B 回应 A 的通知，都是同一个含义、同一个组件：
-   ↩ + 头像（共用头像组件，文字行高）+ 名字：内容。紧凑宽度（最多约 24em，且不超过作者行的 45%），超出省略，从不撑满一行。
+   回头箭头图标 + 头像（共用头像组件，文字行高）+ 名字：内容。紧凑宽度（最多约 24em，且不超过作者行的 45%），超出省略，从不撑满一行。
    r = { mid, from, text, state: 'received' | 'read', busy, time }：回应的是收到的那条时，接收状态就挂在这个头像上（处理中是扩散圈），不再另画接收胶囊。点了跳到原文 */
 function replyRef(r) {
   if (!r) return '';

@@ -2317,16 +2317,16 @@ describe('unmodified runtime and project chat bindings', () => {
     const { dom, w, action } = await boot(undefined, undefined, undefined, {}, undefined, {}, { board });
     try {
       w.eval(
-        "window.execDetailBase=VM.execDetail;VM.execDetail=function(){return {id:'job-owner',threadId:'thread-owner',state:'failed',failed:true,trace:[]}};",
+        "window.execDetailBase=VM.execDetail;VM.execDetail=function(){return {id:'job-owner',threadId:'thread-owner',state:'failed',failed:true,stuck:true,trace:[]}};",
       );
       const recovery = w.document.createElement('div');
       w.document.body.append(recovery);
       recovery.innerHTML = w.eval("pdlView('ws.execDetail')");
-      expect(declaredMenu(w, 'opForceReset')[0]).toMatchObject({
-        act: 'opForceReset',
-        danger: true,
-        data: { threadId: 'thread-owner' },
-      });
+      // One entry at a time: a task whose stop cannot finish offers only the force reset (danger), no more menu.
+      expect(recovery.querySelector('[data-menu]')).toBeNull();
+      w.forceButton = recovery.querySelector('[data-act="opForceReset"]');
+      expect(w.forceButton.classList.contains('danger')).toBe(true);
+      expect(w.eval('actionArgs(window.forceButton)')).toMatchObject({ act: 'opForceReset', threadId: 'thread-owner' });
       action.mockClear();
       w.eval("A.opForceReset({threadId:'thread-owner'})");
       expect(action).not.toHaveBeenCalled();

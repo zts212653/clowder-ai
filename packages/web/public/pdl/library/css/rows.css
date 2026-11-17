@@ -100,6 +100,10 @@
 .lr-grip { flex: none; display: grid; place-items: center; color: var(--fg-faint); cursor: grab; margin-inline-end: var(--sp-xs); }   /* 可以拖动排序的行：行首的把手（整行都能拖，把手只是表达） */
 .lr-pre { position: absolute; left: var(--sp-hair); top: var(--sp-hair); z-index: var(--z-raised); display: grid; place-items: center; pointer-events: none; color: var(--accent); }
 .lr-pre .ic { width: calc(2.5 * var(--unit)); height: calc(2.5 * var(--unit)); }
+.lr-pre.live { pointer-events: auto; }
+.lr-pin { display: grid; place-items: center; padding: 0; border: 0; background: none; color: inherit; cursor: pointer; }
+.lr-pin[aria-pressed="false"] { color: var(--fg-muted); opacity: 0; }
+.lr:hover .lr-pin, .lr:focus-within .lr-pin, .lr-pin:focus-visible { opacity: 1; }
 .lr-aside { position: relative; flex: none; align-self: stretch; display: flex; align-items: center; justify-content: flex-end; }
 .lr-head:has(.lr-sub) > .lr-aside { align-items: flex-start; }   /* 提示总和标题同一行：两行时在上面一行，选中多出副行也不跳 */
 .lr-aside-d { display: flex; align-items: center; justify-content: flex-end; column-gap: var(--sp-xs); min-height: 1lh; }

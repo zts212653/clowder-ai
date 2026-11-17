@@ -163,7 +163,7 @@
 /* 投递 / 接收胶囊 */
 .msg-deliv.end { justify-content: flex-end; }
 .msg-recv { display: inline-flex; gap: var(--sp-xs); margin-left: var(--sp-s); }
-/* 回复引用（replyRef）：一个行内元素——↩ + 头像（文字行高）+ 名字：内容；紧凑宽度，超出省略，不撑满一行。你的消息里按这一侧排在时间前面（只是位置镜像，内容仍从左往右） */
+/* 回复引用（replyRef）：一个行内元素——回头箭头图标 + 头像（文字行高）+ 名字：内容；紧凑宽度，超出省略，不撑满一行。你的消息里按这一侧排在时间前面（只是位置镜像，内容仍从左往右） */
 .reply-ref { display: inline-flex; align-items: center; gap: var(--sp-xs); flex: 0 1 auto; min-width: 0; max-width: min(24em, 45%); font-size: var(--fs-s); line-height: 1.25; padding: var(--sp-hair) var(--sp-s); border: 0; border-radius: var(--r-s); background: var(--bg-field); color: var(--fg-muted); font-family: inherit; white-space: nowrap; }
 button.reply-ref { cursor: pointer; }
 button.reply-ref:hover { color: var(--fg-strong); }

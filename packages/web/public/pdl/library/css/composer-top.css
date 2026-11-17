@@ -17,6 +17,8 @@
 .qto .avatar + .avatar { margin-left: calc(-1 * var(--sp-xs)); }
 .qto .avatar { box-shadow: 0 0 0 1.5px var(--bg-raised); }
 .cnote { display: inline-flex; align-items: center; gap: var(--sp-xs); height: var(--ctl-s); padding: 0 var(--sp-xs) 0 var(--sp-m); border-radius: var(--r-full); background: var(--surf-secondary); backdrop-filter: blur(var(--blur-soft)); -webkit-backdrop-filter: blur(var(--blur-soft)); box-shadow: var(--shadow-low); font-size: var(--fs-s); max-width: 100%; min-width: 0; white-space: nowrap; overflow: hidden; }
+.cnote-go { display: inline-flex; align-items: center; min-width: 0; padding: 0; border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.cnote-go:hover { text-decoration: underline; }
 /* 协作规则：生命周期循环图（区域靠底色，不用虚线框） */
 .lflow { display: flex; flex-direction: column; gap: var(--sp-s); }
 .lloop { background: var(--bg-group); border-radius: var(--r-l); padding: var(--sp-s) var(--sp-m) var(--sp-m); display: flex; flex-direction: column; gap: var(--sp-s); }

@@ -1457,7 +1457,7 @@
       "label": "状态：{0}",
       "updatedTip": "更新于 {0}",
       "created": "{0} 创建于 {1}",
-      "sourceMessage": "来源消息 ↗",
+      "sourceMessage": "来源消息",
       "owner": {
         "true": "负责：{0} {1}",
         "false": "未分配"
@@ -1870,7 +1870,7 @@
     "eventsError": "暂时读不到事件。",
     "loadMore": "读取更多",
     "confirmSentence": "确认这句",
-    "viewSource": "查看原消息 ↗",
+    "viewSource": "查看原消息",
     "recallLog": "所有对话的召回流水",
     "allSources": "全部来源",
     "catSearch": "猫发起的检索",

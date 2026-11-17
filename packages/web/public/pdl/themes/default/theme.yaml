@@ -18949,16 +18949,17 @@ pdl:
             time:
               of: "@time"
               fmt: ago
+            pin:
+              label:
+                of: "@pinned"
+                map:
+                  "true": t:chat.thread.pinLabel.true
+                  _: t:chat.thread.pinLabel.false
+              act: setStatus
+              args:
+                entity: pin
+                id: "@id"
             acts:
-              - type: button
-                iconOnly: true
-                icon: pin
-                label: t:chat.thread.pinLabel.true
-                act: setStatus
-                args:
-                  entity: pin
-                  id: "@id"
-                when: "@pinned"
               - type: button
                 iconOnly: true
                 icon: delete
@@ -29764,19 +29765,18 @@ pdl:
               act: opLiveStop
               args:
                 k: $.id
-              when: $.cancelable
-            - type: each
-              from:
-                - {}
-              when: $.threadId
-              control:
-                type: more
-                items:
-                  - label: t:execDetail.forceReset.title
-                    act: opForceReset
-                    args:
-                      threadId: $.threadId
-                    tone: danger
+              when:
+                - $.cancelable
+                - "!$.stuck"
+            - type: button
+              label: t:execDetail.forceReset.title
+              act: opForceReset
+              args:
+                threadId: $.threadId
+              danger: true
+              when:
+                - $.stuck
+                - $.threadId
             - type: button
               iconOnly: true
               icon: close
