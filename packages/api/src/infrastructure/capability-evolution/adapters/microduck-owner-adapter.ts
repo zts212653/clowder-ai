@@ -45,8 +45,8 @@ import {
   validSha256,
   verificationGate,
 } from './microduck-owner-validation.js';
-import { projectMicroduckShowManifest } from './microduck-show-manifest.js';
-import { resolveMicroduckShowMedia } from './microduck-show-media.js';
+import { projectMicroduckShowManifest } from './microduck-show/microduck-show-manifest.js';
+import { resolveMicroduckShowMedia } from './microduck-show/microduck-show-media.js';
 import { PROGRAM_ADAPTER_CAPABILITIES, type ProgramAdapterDescriptorV1 } from './program-adapter-registry.js';
 
 export { MICRODUCK_OWNER_FEATURE_ID } from './microduck-owner-contract.js';

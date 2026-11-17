@@ -32,7 +32,7 @@ export async function stopFixture(t, options = {}) {
       events.push(message);
     },
   };
-  const processor = new QueueProcessor({
+  const processorDeps = {
     queue,
     invocationTracker: tracker,
     messageStore: messages,
@@ -71,7 +71,8 @@ export async function stopFixture(t, options = {}) {
         for (const catId of targets) yield { type: 'done', catId, isFinal: true, timestamp: Date.now() };
       },
     },
-  });
+  };
+  const processor = new QueueProcessor(processorDeps, { retryDeferral: options.retryDeferral });
   const app = Fastify();
   await app.register(queueRoutes, {
     threadStore: { get: async (id) => ({ id, createdBy: 'owner', participants: ['opus', 'codex'] }) },

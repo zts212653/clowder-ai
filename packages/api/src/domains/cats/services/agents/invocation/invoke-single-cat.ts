@@ -1790,6 +1790,7 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
     callerSignal?.throwIfAborted();
     const running = await deps.turnExecutionStore.listRunningByUser(userId);
     const liveOwner = await findWindowsLiveOwner({
+      store: deps.turnExecutionStore,
       records: running.filter((record) => record.threadId === threadId && record.catId === catId),
     });
     if (liveOwner) {

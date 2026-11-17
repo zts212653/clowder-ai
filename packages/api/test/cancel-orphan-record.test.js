@@ -658,7 +658,7 @@ describe('#1838 cancel route: a dead API s started provider stops only with its 
         cliExecutionOwnerService: { listLive: async () => ({ complete: true, owners: [] }) },
         // index.ts wires exactly this on Windows; only the native job query is fixed here.
         stopUnconfirmedProvider: (record) => stopWithWindowsJobProof({ store: turns, record, dataDir, execute }),
-        findWindowsLiveOwner: (records) => findWindowsLiveOwner({ records, dataDir, execute }),
+        findWindowsLiveOwner: (records) => findWindowsLiveOwner({ records, store: turns, dataDir, execute }),
       },
     });
     const { url, payload } = ROUTES[route](parent);

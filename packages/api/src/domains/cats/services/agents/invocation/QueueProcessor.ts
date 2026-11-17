@@ -4249,7 +4249,19 @@ export class QueueProcessor {
         }
         if (this.deps.invocationTracker.has(threadId)) return { kind: 'barrier' };
       }
-      const targets = await this.resolveQueuedConversationTargets(entry);
+      const targets = await this.resolveQueuedConversationTargets(entry).catch((err: unknown) => {
+        // A restored source can outlive the producer's last completion wake.
+        // Retry source/target reads, while durable settlement errors still propagate.
+        if (!this.retryDeferrals.isDeferred(entry.id)) {
+          const retryAt = this.retryDeferrals.defer(threadId, entry.id);
+          this.deps.log.warn(
+            { err, threadId, entryId: entry.id, retryAt },
+            '[QueueProcessor] queued source/target resolution failed; the exact entry keeps its retry',
+          );
+        }
+        return null;
+      });
+      if (targets === null) return { kind: 'unresolved' };
       if (targets.length > 0) {
         return {
           kind: 'resolved',
@@ -4929,6 +4941,7 @@ export class QueueProcessor {
       targetCatIds: targetCats,
       isCanceled: isAdmittedTargetCanceled,
     });
+    let broadcastTerminalError: string | undefined;
     const routingRejectedTargets = new Set<string>();
     let responseText = '';
     // F122B B6: completion hooks are registered before drain; keep their
@@ -6603,6 +6616,9 @@ export class QueueProcessor {
           typeof msg.catId === 'string' ? lifecycleResponseMessageIdByCat.get(msg.catId) : undefined,
         );
         socketManager.broadcastAgentMessage(visibleMessage, threadId);
+        if (msg.type === 'error' && isTerminalDispositionEvent(msg)) {
+          broadcastTerminalError ??= terminalDispositions.getPrimaryTerminalError();
+        }
         // A target's done follows its response commit: publish that committed truth
         // now instead of when the whole entry (every sibling target) settles.
         const doneResponseMessageId =
@@ -6913,16 +6929,18 @@ export class QueueProcessor {
           });
         }
         if (exposeFailure) {
-          socketManager.broadcastAgentMessage(
-            {
-              type: 'error',
-              catId: targetCats[0] ?? 'system',
-              error: errMsg,
-              isFinal: true,
-              timestamp: Date.now(),
-            },
-            threadId,
-          );
+          if (broadcastTerminalError !== errMsg) {
+            socketManager.broadcastAgentMessage(
+              {
+                type: 'error',
+                catId: targetCats[0] ?? 'system',
+                error: errMsg,
+                isFinal: true,
+                timestamp: Date.now(),
+              },
+              threadId,
+            );
+          }
           if (entry.from.kind === 'user') {
             const pushService = this.deps.getPushService?.();
             if (pushService) {

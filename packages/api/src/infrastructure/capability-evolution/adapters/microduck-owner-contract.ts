@@ -4,9 +4,9 @@ import type {
   MicroduckShowMediaAsset,
   MicroduckShowMediaDescriptor,
   MicroduckShowState,
-} from './microduck-show-contract.js';
+} from './microduck-show/microduck-show-contract.js';
 
-export * from './microduck-show-contract.js';
+export * from './microduck-show/microduck-show-contract.js';
 
 export const MICRODUCK_OWNER_FEATURE_ID = 'microduck-owner';
 
