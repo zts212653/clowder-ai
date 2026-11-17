@@ -108,6 +108,62 @@ function bindAccounts() {
             : '',
     };
   }
+  // Mirrors claudeQuotaWindows (packages/shared/src/claude-quota.ts): five_hour and seven_day are account-wide and keep the
+  // newest reading; other windows stay per model. Left = (1 - utilization) * 100; a reading past its reset, 10 minutes old
+  // or from the future is stale. Named windows carry their key (the theme names them); others show key and model.
+  function claudeQuotaData(samples, fail) {
+    const latest = {},
+      now = api.now();
+    Object.keys(samples).forEach(function (model) {
+      const s = samples[model];
+      Object.keys(s.windows).forEach(function (key) {
+        const id = key === 'five_hour' || key === 'seven_day' ? key : model + ':' + key;
+        if (!latest[id] || latest[id].observedAt <= s.observedAt)
+          latest[id] = Object.assign({ key: key, model: model, observedAt: s.observedAt }, s.windows[key]);
+      });
+    });
+    const ws = Object.values(latest).filter(function (w) {
+      return w.utilization != null;
+    });
+    const named = function (w) {
+      return (
+        w.key === 'five_hour' ||
+        w.key === 'seven_day' ||
+        (w.key === 'seven_day_overage_included' && /fable/i.test(w.model))
+      );
+    };
+    const stale = ws.some(function (w) {
+      return (w.resetsAt != null && now >= w.resetsAt * 1000) || now - w.observedAt >= 600000 || w.observedAt > now;
+    });
+    const items = ws.map(function (w) {
+      return {
+        window: named(w) ? w.key : '',
+        label: w.key + ' (' + w.model + ')',
+        left: Math.round((1 - w.utilization) * 100),
+      };
+    });
+    return {
+      items: items,
+      resets: ws
+        .filter(function (w) {
+          return w.resetsAt != null;
+        })
+        .map(function (w) {
+          return { at: w.resetsAt * 1000 };
+        }),
+      at: Math.max.apply(
+        null,
+        ws.map(function (w) {
+          return w.observedAt;
+        }),
+      ),
+      hasAt: !!ws.length,
+      out: items.some(function (x) {
+        return x.left === 0;
+      }),
+      fail: fail || (stale ? 'stale' : ''),
+    };
+  }
   function quotaMatches(p, observation) {
     if (!p.managed && !(p.codex && p.codex.identity)) return true;
     const identity = p.codex && p.codex.identity,
@@ -130,11 +186,13 @@ function bindAccounts() {
           ? p.hasApiKey
             ? 'key'
             : 'nokey'
-          : attempt
-            ? attempt.state
-            : p.codex
-              ? p.codex.status
-              : p.codexLoginStatus || p.claudeTokenStatus || p.kind;
+          : p.clientId === 'anthropic' && p.builtin
+            ? 'cliManaged'
+            : attempt
+              ? attempt.state
+              : p.codex
+                ? p.codex.status
+                : p.codexLoginStatus || p.claudeTokenStatus || p.kind;
     const open = !!st.accOpen[p.id],
       busy = attempt && ['preparing', 'queued', 'waiting'].indexOf(attempt.state) >= 0,
       kind = p.authType === 'api_key' ? 'key' : p.authType;
@@ -185,13 +243,20 @@ function bindAccounts() {
       dir: p.codex && p.codex.credentialHome,
       open: open,
       quota:
-        p.clientId === 'openai' &&
         p.authType === 'oauth' &&
-        ((p.codex && p.codex.status === 'ready') || (p.quota && p.quota.status === 'unavailable') || st.quota[p.id]),
+        (p.clientId === 'anthropic'
+          ? !p.baseUrl
+          : p.clientId === 'openai' &&
+            ((p.codex && p.codex.status === 'ready') ||
+              (p.quota && p.quota.status === 'unavailable') ||
+              st.quota[p.id])),
       quotaBusy: !!(st.quota[p.id] && st.quota[p.id].busy),
       quotaIdentityChanged:
         !!(st.quota[p.id] && st.quota[p.id].identityChanged) || (!!p.quota && !quotaMatches(p, p.quota)),
       quotaData: (function () {
+        const fail = st.quota[p.id] && st.quota[p.id].fail;
+        if (p.clientId === 'anthropic')
+          return p.claudeQuota || fail ? claudeQuotaData(p.claudeQuota ? p.claudeQuota.samples : {}, fail) : null;
         const observation = (st.quota[p.id] && st.quota[p.id].observation) || p.quota;
         return observation && quotaMatches(p, observation) && !(st.quota[p.id] && st.quota[p.id].identityChanged)
           ? accountQuotaData(observation)
@@ -404,9 +469,29 @@ function bindAccounts() {
       },
     });
   };
+  // Claude: the account list carries the stored reading (claudeQuota); a failed read keeps it and names why.
+  async function claudeQuota(p) {
+    const state = (st.quota[p.id] = { busy: true });
+    render(true);
+    try {
+      await api.post('/api/accounts/' + encodeURIComponent(p.id) + '/claude/quota', {}, {});
+    } catch (error) {
+      state.identityChanged = error.status === 409;
+      state.fail =
+        error.status === 409
+          ? ''
+          : error.message === 'claude_quota_owner_unknown'
+            ? 'owner_unknown'
+            : 'service_unreachable';
+    }
+    await read();
+    state.busy = false;
+    render(true);
+  }
   A.accQuota = async function (d) {
-    const p = account(d.k),
-      signature = JSON.stringify(p.codex && p.codex.identity),
+    const p = account(d.k);
+    if (p.clientId === 'anthropic') return claudeQuota(p);
+    const signature = JSON.stringify(p.codex && p.codex.identity),
       previous = (st.quota[p.id] && st.quota[p.id].observation) || p.quota;
     const state = (st.quota[p.id] = { busy: true });
     render(true);
