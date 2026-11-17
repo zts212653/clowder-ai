@@ -53,6 +53,55 @@ diff --git a/packages/web/src/components/__tests__/fixture.test.tsx b/packages/w
   assert.deepEqual(findAddedUiPictographs(diff), []);
 });
 
+test('flags raw pictographs added to theme YAML, copy JSON and component JS under public/pdl', () => {
+  const diff = `diff --git a/packages/web/public/pdl/themes/default/theme.yaml b/packages/web/public/pdl/themes/default/theme.yaml
+--- a/packages/web/public/pdl/themes/default/theme.yaml
++++ b/packages/web/public/pdl/themes/default/theme.yaml
+@@ -640,0 +641 @@
++          title: 📊 消费账本
+diff --git a/packages/web/public/pdl/themes/default/i18n/zh/chat.json b/packages/web/public/pdl/themes/default/i18n/zh/chat.json
+--- a/packages/web/public/pdl/themes/default/i18n/zh/chat.json
++++ b/packages/web/public/pdl/themes/default/i18n/zh/chat.json
+@@ -12,0 +13 @@
++  "ledger": "👁 注意力成本",
+diff --git a/packages/web/public/pdl/library/rows.js b/packages/web/public/pdl/library/rows.js
+--- a/packages/web/public/pdl/library/rows.js
++++ b/packages/web/public/pdl/library/rows.js
+@@ -30,0 +31 @@
++  return '<span>🔒</span>' + h(title);
+`;
+
+  assert.deepEqual(
+    findAddedUiPictographs(diff).map(({ file, line, pictographs }) => ({ file, line, pictographs })),
+    [
+      { file: 'packages/web/public/pdl/themes/default/theme.yaml', line: 641, pictographs: ['📊'] },
+      { file: 'packages/web/public/pdl/themes/default/i18n/zh/chat.json', line: 13, pictographs: ['👁'] },
+      { file: 'packages/web/public/pdl/library/rows.js', line: 31, pictographs: ['🔒'] },
+    ],
+  );
+});
+
+test('ignores public/pdl tests and license text, and the app layer beside public/pdl', () => {
+  const diff = `diff --git a/packages/web/public/pdl/library/rows.test.js b/packages/web/public/pdl/library/rows.test.js
+--- a/packages/web/public/pdl/library/rows.test.js
++++ b/packages/web/public/pdl/library/rows.test.js
+@@ -0,0 +1 @@
++expect(html).toContain('📊');
+diff --git a/packages/web/public/pdl/themes/default/licenses/OFL-Inter.txt b/packages/web/public/pdl/themes/default/licenses/OFL-Inter.txt
+--- a/packages/web/public/pdl/themes/default/licenses/OFL-Inter.txt
++++ b/packages/web/public/pdl/themes/default/licenses/OFL-Inter.txt
+@@ -0,0 +1 @@
++Copyright © 2020 The Inter Project Authors
+diff --git a/packages/web/public/pdl-app/sidebar.js b/packages/web/public/pdl-app/sidebar.js
+--- a/packages/web/public/pdl-app/sidebar.js
++++ b/packages/web/public/pdl-app/sidebar.js
+@@ -0,0 +1 @@
++const cleaned = title.replace(/^📥 /u, '');
+`;
+
+  assert.deepEqual(findAddedUiPictographs(diff), []);
+});
+
 test('confines source-level pictograph parsing to non-TSX modules', () => {
   const nonRenderingParser = `diff --git a/packages/web/src/components/rich/legacy-parser.ts b/packages/web/src/components/rich/legacy-parser.ts
 --- a/packages/web/src/components/rich/legacy-parser.ts

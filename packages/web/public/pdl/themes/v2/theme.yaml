@@ -16747,7 +16747,6 @@ pdl:
                         act: popPage
                         args:
                           v: mode
-                        glyph: ↪
                   preferred:
                     - type: component
                       use: v2ComposerPreferredCats
