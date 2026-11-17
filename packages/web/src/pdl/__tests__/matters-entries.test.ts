@@ -134,7 +134,7 @@ it('takes a thread link with a summary, and needs a message link for a quote', a
 });
 
 it('keeps the original location when a correction leaves the link and quote unchanged', async () => {
-  const post = vi.fn(async (_path: string, _q: unknown, _body: unknown) => ({
+  const post = vi.fn<(path: string, q: unknown, body: unknown) => Promise<unknown>>(async () => ({
     outcome: 'applied',
     matter: { matterId: 'm1' },
   }));
