@@ -12,11 +12,12 @@ import path from 'node:path';
 const CATEGORIES = {
   swc: [/(?:^|\/)@next\/swc-[^/]+(?:\/|$)/],
   // Only the win32-x64 target is supported; every other platform build is dead weight there.
+  // `@img/sharp-wasm32` is intentionally kept: sharp 0.34.5 treats it as a cross-platform fallback.
   platform: [
-    /(?:^|\/)@esbuild\/(?:darwin|linux|freebsd|openbsd|netbsd|sunos|aix|android|win32-arm64|win32-ia32)-[^/]*(?:\/|$)/,
-    /(?:^|\/)@img\/sharp(?:-libvips)?-(?:darwin|linux|linuxmusl|win32-arm64|win32-ia32|wasm32)-[^/]*(?:\/|$)/,
+    /(?:^|\/)@esbuild\/(?:darwin|linux|freebsd|openbsd|netbsd|sunos|aix|android|win32-arm64|win32-ia32)(?:-[^/]+)?(?:\/|$)/,
+    /(?:^|\/)@img\/sharp(?:-libvips)?-(?:darwin|linux|linuxmusl|win32-arm64|win32-ia32)(?:-[^/]+)?(?:\/|$)/,
     /(?:^|\/)node-pty\/prebuilds\/(?:darwin|linux|win32-arm64|win32-ia32)(?:-[^/]+)?(?:\/|$)/,
-    /(?:^|\/)@anthropic-ai\/claude-agent-sdk-(?:darwin|linux)-[^/]*(?:\/|$)/,
+    /(?:^|\/)@anthropic-ai\/claude-agent-sdk-(?:darwin|linux)(?:-[^/]+)?(?:\/|$)/,
   ],
   maps: [/\.map$/],
 };

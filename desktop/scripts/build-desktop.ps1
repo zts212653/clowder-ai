@@ -193,20 +193,14 @@ if (-not $SkipBundleDeps) {
     # Each item is opt-in; the archive layer only compresses and records integrity.
     # An explicit caller value wins (e.g. CAT_CAFE_PRUNE_SWC=0 keeps SWC);
     # only unset knobs fall back to the release default.
-    $pruneEnv = @('CAT_CAFE_PRUNE_SWC', 'CAT_CAFE_PRUNE_PLATFORM', 'CAT_CAFE_PRUNE_MAPS')
-    $pruneSaved = @{}
-    foreach ($name in $pruneEnv) {
-        $pruneSaved[$name] = [Environment]::GetEnvironmentVariable($name, 'Process')
-        if ([string]::IsNullOrEmpty($pruneSaved[$name])) { Set-Item -Path "Env:$name" -Value '1' }
-    }
-    try {
+    . (Join-Path $ProjectRoot 'desktop/scripts/invoke-with-process-env.ps1')
+    Invoke-WithProcessEnv -Defaults @{
+        CAT_CAFE_PRUNE_SWC = '1'
+        CAT_CAFE_PRUNE_PLATFORM = '1'
+        CAT_CAFE_PRUNE_MAPS = '1'
+    } -Action {
         node (Join-Path $ProjectRoot "desktop/scripts/frozen-runtime-deploy.mjs") $ProjectRoot $nextDeploy
         if ($LASTEXITCODE -ne 0) { throw "Frozen runtime export failed" }
-    } finally {
-        foreach ($name in $pruneEnv) {
-            if ($null -eq $pruneSaved[$name]) { Remove-Item "Env:$name" -ErrorAction SilentlyContinue }
-            else { Set-Item -Path "Env:$name" -Value $pruneSaved[$name] }
-        }
     }
     if (Test-Path -LiteralPath $deployRoot) {
         Move-Item -LiteralPath $deployRoot -Destination (Join-Path $bundledDir "deploy-before-$stamp")
@@ -483,7 +477,9 @@ $archiveDir = Join-Path $bundledDir "archives"
 if (Test-Path $archiveDir) { Remove-Item $archiveDir -Recurse -Force }
 New-Item -ItemType Directory -Path $archiveDir -Force | Out-Null
 # Compression-only knob: identical file set, smaller archive, slower build.
-$env:RUNTIME_ARCHIVE_GZIP_LEVEL = '9'
+# Same scoping rule as the prune knobs: an explicit caller level wins.
+. (Join-Path $ProjectRoot 'desktop/scripts/invoke-with-process-env.ps1')
+Invoke-WithProcessEnv -Defaults @{ RUNTIME_ARCHIVE_GZIP_LEVEL = '9' } -Action {
 
 $archiveTargets = @(
     @{ Name = "deploy-dependencies"; Src = Join-Path $deployRoot "dependencies" },
@@ -553,7 +549,7 @@ foreach ($t in $archiveTargets) {
 }
 & node (Join-Path $ProjectRoot 'desktop/scripts/verify-runtime-archives.mjs') $ProjectRoot
 if ($LASTEXITCODE -ne 0) { throw 'Runtime archive gate failed; no installer may be compiled.' }
-Remove-Item Env:RUNTIME_ARCHIVE_GZIP_LEVEL -ErrorAction SilentlyContinue
+}
 Write-Ok "Archives ready under bundled/archives/"
 
 # Step 7: Compile Inno Setup installer
