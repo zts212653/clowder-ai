@@ -24,8 +24,8 @@ const SLOW_START_PROBE_TIMEOUT_MS = 7000;
 const CLOSE_TIMEOUT_MS = 300;
 const MIN_STEP_TIMEOUT_MS = 100;
 
-// uv accepts global options before its subcommand. Only value-taking options
-// need to consume the following token; everything else is a flag.
+// uv accepts global options before each nested subcommand. Only value-taking
+// options need to consume the following token; everything else is a flag.
 const UV_GLOBAL_VALUE_OPTIONS = new Set([
   '--cache-dir',
   '--color',
@@ -37,20 +37,41 @@ const UV_GLOBAL_VALUE_OPTIONS = new Set([
   '--python-preference',
 ]);
 
-function uvSubcommand(args: string[]): [string | undefined, string | undefined] {
-  let index = 0;
+const BUN_PRE_X_FLAGS = new Set(['-q', '--quiet', '--silent', '--verbose', '--smol']);
+const PIPX_PRE_RUN_FLAGS = new Set(['-q', '-qq', '--quiet', '--verbose', '-v', '-vv', '--global']);
+
+function nextPositional(args: string[], start: number, valueOptions: ReadonlySet<string>): number {
+  let index = start;
   while (index < args.length) {
     const arg = args[index];
-    if (arg === '--') {
-      index += 1;
-      break;
-    }
-    if (!arg.startsWith('-')) break;
+    if (arg === '--') return index + 1;
+    if (!arg.startsWith('-')) return index;
     const equals = arg.indexOf('=');
     const option = equals >= 0 ? arg.slice(0, equals) : arg;
-    index += equals < 0 && UV_GLOBAL_VALUE_OPTIONS.has(option) ? 2 : 1;
+    index += equals < 0 && valueOptions.has(option) ? 2 : 1;
   }
-  return [args[index], args[index + 1]];
+  return index;
+}
+
+function uvSubcommand(args: string[]): [string | undefined, string | undefined] {
+  const first = nextPositional(args, 0, UV_GLOBAL_VALUE_OPTIONS);
+  const name = args[first];
+  if (name !== 'tool') return [name, undefined];
+  const second = nextPositional(args, first + 1, UV_GLOBAL_VALUE_OPTIONS);
+  return [name, args[second]];
+}
+
+function bunInvokesPackageRunner(args: string[]): boolean {
+  let index = 0;
+  while (BUN_PRE_X_FLAGS.has(args[index])) index += 1;
+  // Bun argument names are case-sensitive: `bun X` is a local script, not bunx.
+  return args[index] === 'x';
+}
+
+function pipxInvokesRun(args: string[]): boolean {
+  let index = 0;
+  while (PIPX_PRE_RUN_FLAGS.has(args[index])) index += 1;
+  return args[index] === 'run';
 }
 
 function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
@@ -119,10 +140,9 @@ export function resolveProbeTimeoutMs(capability: CapabilityEntry, overrideTimeo
   // when the caller did not pass an explicit flag (unlike npx, where -y/dlx
   // is the useful signal).
   const isUvRun =
-    command === 'uv' &&
-    (uvSubcommandName === 'run' || (uvSubcommandName === 'tool' && uvSubcommandSecond === 'run'));
-  const isBunRun = command === 'bun' && argsLower[0] === 'x';
-  const isPipxRun = command === 'pipx' && argsLower[0] === 'run';
+    command === 'uv' && (uvSubcommandName === 'run' || (uvSubcommandName === 'tool' && uvSubcommandSecond === 'run'));
+  const isBunRun = command === 'bun' && bunInvokesPackageRunner(args);
+  const isPipxRun = command === 'pipx' && pipxInvokesRun(args);
   if (command === 'uvx' || command === 'bunx' || isUvRun || isBunRun || isPipxRun) {
     return SLOW_START_PROBE_TIMEOUT_MS;
   }
