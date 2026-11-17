@@ -245,6 +245,49 @@ function bindProject() {
     return { width: S.ws.width, launcherOpen: S.ws.pop === 'launcher', wide: !!S.panelWide, focus: !!S.ws.focus };
   };
   REGION_TABS.panel.visible = panelShown;
+  // Dividers: drag to resize, click to collapse, double-click to restore. The width limits are theme tokens
+  // (--ws-min / --ws-pair / --main-min); dragging only moves the variable, letting go stores the width.
+  const tokPx = function (n) {
+    const el = document.createElement('i');
+    el.style.width = 'var(' + n + ')';
+    document.body.appendChild(el);
+    const w = el.getBoundingClientRect().width;
+    el.remove();
+    return w;
+  };
+  REGION_TABS.panel.before = function () {
+    const de = document.documentElement;
+    if (S.ws.width) de.style.setProperty('--ws-w', S.ws.width + 'px');
+    else if (navTabs('panel').split) de.style.setProperty('--ws-w', 'var(--ws-pair)');
+    else de.style.removeProperty('--ws-w');
+  };
+  RESIZERS.panel = {
+    get min() {
+      return tokPx('--ws-min');
+    },
+    max: function () {
+      return document.querySelector('.split').getBoundingClientRect().width - tokPx('--main-min');
+    },
+    width: function () {
+      return document.querySelector('.panel.ws').getBoundingClientRect().width;
+    },
+    preview: function (w) {
+      document.documentElement.style.setProperty('--ws-w', w + 'px');
+    },
+    commit: function (w) {
+      S.ws.width = w;
+      render(true);
+    },
+    reset: function () {
+      S.ws.width = null;
+      render(true);
+    },
+    collapse: function () {
+      S.panel = null;
+      S.panelWide = false;
+      render(true);
+    },
+  };
   SET_AFTER['s.panel'] = function (value) {
     if (value == null) S.panelWide = false;
   };

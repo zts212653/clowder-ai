@@ -1485,7 +1485,13 @@ window.clowderChat = {
       CS.find.active = true;
       return chatAction('cafeFind');
     };
-    RESIZERS.nav = port.navResize;
+    // Dragging only moves the column variable; letting go stores the width (one store update, not one per move).
+    RESIZERS.nav = Object.assign({}, port.navResize, {
+      preview: function (w) {
+        S.navW = w;
+        document.querySelector('.app').style.setProperty('--nav-w', w + 'px');
+      },
+    });
     rtBind('panel', {
       view: function (key) {
         const draw = PANELS[key.indexOf('work:') === 0 ? 'work' : key];
