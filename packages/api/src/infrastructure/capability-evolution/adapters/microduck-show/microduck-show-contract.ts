@@ -1,6 +1,6 @@
 import type { OwnerTruthRefV1 } from '@cat-cafe/shared';
-import type { ExactAssetVersionRefV1 } from '../change/program-lineage.js';
-import type { MicroduckBlockCode } from './microduck-owner-contract.js';
+import type { ExactAssetVersionRefV1 } from '../../change/program-lineage.js';
+import type { MicroduckBlockCode } from '../microduck-owner-contract.js';
 import type { MicroduckShowMediaDescriptor } from './microduck-show-media-contract.js';
 
 export type {
