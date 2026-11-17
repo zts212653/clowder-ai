@@ -208,6 +208,7 @@ export function createChatProofApi(now = Date.now(), crowded = false, surface = 
       if (!thread) return reply({ error: 'Thread not found' }, 404);
       return reply({ targetCats: [cats[0].id], reason: { kind: 'recent_replier' } });
     }
+    if (url.pathname === '/api/plugin-conversations' && method === 'GET') return reply({ entries: [] });
     if (url.pathname === '/api/backlog/items' && method === 'GET') return reply({ items: [] });
     if (url.pathname === '/api/threads' && method === 'GET') return reply({ threads });
     if (url.pathname === '/api/config/thread-attention') {
