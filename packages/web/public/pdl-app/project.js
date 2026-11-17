@@ -476,12 +476,31 @@ function bindProject() {
       kind: 'opLiveStop',
       args: { name: run.actions.name, command: run.actions.cmd, activity: run.actions.activity },
       on: function () {
-        return chatAction('opLiveStop', d);
+        return chatAction('opLiveStop', { k: d.k, feedback: run.actions.cmd && ticked('stop-feedback') ? '1' : '' });
       },
     });
   };
+  // Cancelling a timer hold confirms first, with the option to tell the member why (same as stopping a command).
   A.cancelHoldWait = function (d) {
-    return chatAction('cancelHoldWait', d);
+    const wait = projectData('home').heldWaits.find(function (w) {
+      return w.waitId === d.waitId;
+    });
+    if (!wait || wait.cancelability.state !== 'cancelable') return false;
+    dialog({
+      kind: 'cancelHoldWait',
+      args: { name: pdlReads('who').member(wait.catId).name },
+      on: function () {
+        return chatAction('cancelHoldWait', { waitId: d.waitId, feedback: ticked('hold-feedback') ? '1' : '' });
+      },
+    });
+  };
+  A.holdOpen = function (d) {
+    if (!d.wait) return A.execOpen({ k: d.k });
+    if (S.ws.execDetail) chatAction('homeExecClose');
+    ENGINE_PARTS.openTab('panel', 'live');
+  };
+  A.holdCancel = function (d) {
+    return d.wait ? A.cancelHoldWait({ waitId: d.k }) : A.opLiveStop({ k: d.k });
   };
   PDL_GUARDS['live.stop'] = function (ctx) {
     return ctx.cancel && ctx.cancel.state !== 'cancelable' ? ctx.cancel.reason : '';

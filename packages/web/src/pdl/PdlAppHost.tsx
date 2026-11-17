@@ -1189,7 +1189,7 @@ function ChatBinding({
             (!args.executionId || e.executionId === args.executionId) &&
             e.cancelability.state === 'cancelable',
         );
-        await Promise.all(runs.map(cancelProjectedExecution));
+        await Promise.all(runs.map((run) => cancelProjectedExecution(run)));
         return;
       }
       case 'rename':

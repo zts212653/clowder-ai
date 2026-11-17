@@ -243,7 +243,9 @@ it('projects held-ball waits separately and cancels the original owner wait', as
     actions: { thread: 'other-thread', waitId: 'held-task', cancelable: true },
   });
   await act(() => hook.result.current.action('cancelHoldWait', { waitId: 'held-task' }));
-  expect(cancelHoldWait).toHaveBeenCalledWith(wait);
+  expect(cancelHoldWait).toHaveBeenCalledWith(wait, false);
+  await act(() => hook.result.current.action('cancelHoldWait', { waitId: 'held-task', feedback: '1' }));
+  expect(cancelHoldWait).toHaveBeenLastCalledWith(wait, true);
 });
 
 it.each([
@@ -289,8 +291,8 @@ it.each([
     exitCode,
     elapsed: exitCode === undefined ? expect.any(Number) : 0,
   });
-  await act(() => hook.result.current.action('opLiveStop', { k: 'managed' }));
-  expect(cancelProjectedExecution).toHaveBeenCalledWith(data.executions[0]);
+  await act(() => hook.result.current.action('opLiveStop', { k: 'managed', feedback: '1' }));
+  expect(cancelProjectedExecution).toHaveBeenCalledWith(data.executions[0], true);
   await act(() => useActiveExecutionStore.setState({ hydration: 'error' }));
   expect(hook.result.current.project().live.load).toBe('error');
   await act(() => useActiveExecutionStore.setState({ hydration: 'ready', unavailableProjectPaths: ['/project'] }));

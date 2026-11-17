@@ -84,7 +84,7 @@ export function useHomeBindings(data: ChatData, ui: { execDetail: string | null 
   }, [needed, selected, attempt]);
   const action = async (name: string, args: Record<string, string>) => {
     if (name === 'cancelHoldWait') {
-      return cancelHoldWait(heldWaits.find((wait) => wait.waitId === args.waitId)!);
+      return cancelHoldWait(heldWaits.find((wait) => wait.waitId === args.waitId)!, args.feedback === '1');
     }
     if (name === 'opForceReset') {
       await write(`/api/threads/${encodeURIComponent(args.threadId)}/force-reset`, {});
@@ -115,7 +115,7 @@ export function useHomeBindings(data: ChatData, ui: { execDetail: string | null 
     if (name === 'opLiveStop') {
       const execution = data.executions.find((e) => e.executionId === args.k);
       if (!execution) throw new Error('执行已变化，请重新读取');
-      await cancelProjectedExecution(execution);
+      await cancelProjectedExecution(execution, args.feedback === '1');
       return true;
     }
     return false;

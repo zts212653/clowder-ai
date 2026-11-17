@@ -281,8 +281,17 @@ function memoryGroupVM(block, read, threadId, key) {
     load: read ? (read.error ? 'error' : '') : 'loading',
     rows: read
       ? read.rows.map(function (entry) {
+          // A row with a write ref shows that write's receipt (fixed content); an older row shows the current page.
           const row = entry.row,
-            matter = entry.matter && entry.matter.matter,
+            ref = row.matterWriteRef,
+            write =
+              entry.write &&
+              !entry.write.error &&
+              entry.write.matter.revision === ref.revision &&
+              entry.write.operation === ref.operation
+                ? entry.write
+                : null,
+            matter = (entry.matter && entry.matter.matter) || (write && write.matter),
             person = entry.person;
           const claim =
               person &&
@@ -305,31 +314,42 @@ function memoryGroupVM(block, read, threadId, key) {
             state: row.statusCode >= 400 || row.error || entry.error ? 'refused' : row.status || 'completed',
             error: row.error || entry.error,
             unreadable:
-              (!!row.proposalId && !original) || (row.target === 'person_revision' && !!person && !claim && !event),
+              (!!row.proposalId && !original) ||
+              (row.target === 'person_revision' && !!person && !claim && !event) ||
+              (!!entry.write && !write),
             redacted: !!redacted,
-            body: redacted
-              ? ''
-              : matter
-                ? matter.description
-                : original
-                  ? original.block.bodyMarkdown
-                  : claim
-                    ? claim.approvedText ||
-                      claim.payload.statement ||
-                      (claim.payload.value === undefined ? '' : JSON.stringify(claim.payload.value))
-                    : event
-                      ? event.headline
-                      : '',
-            sources: entry.matter
-              ? entry.matter.entries.map(function (source) {
-                  return {
-                    quote: source.sourceStatus === 'current' ? source.quote : '',
-                    sourceChanged: source.sourceStatus !== 'current',
-                    threadId: source.source.threadId,
-                    messageId: source.source.messageId,
-                  };
-                })
-              : [],
+            body:
+              redacted || write
+                ? ''
+                : matter
+                  ? matter.description
+                  : original
+                    ? original.block.bodyMarkdown
+                    : claim
+                      ? claim.approvedText ||
+                        claim.payload.statement ||
+                        (claim.payload.value === undefined ? '' : JSON.stringify(claim.payload.value))
+                      : event
+                        ? event.headline
+                        : '',
+            sources: (write ? write.entries : entry.matter ? entry.matter.entries : []).map(function (e) {
+              return matterEntryVM(e, false);
+            }),
+            legacy: !!entry.matter,
+            write: write && {
+              op: write.operation,
+              revision: write.matter.revision,
+              at: write.recordedAt,
+              sourcesChanged: !!write.sourcesChanged,
+              title: write.titleChange ? matterDiff(write.titleChange.before, write.titleChange.after) : null,
+              description: write.descriptionChange
+                ? matterDiff(write.descriptionChange.before, write.descriptionChange.after)
+                : null,
+              previous: (write.previousEntries || []).map(function (e) {
+                return matterEntryVM(e, false);
+              }),
+              joined: write.operation === 'append' && !write.entries.length && !write.descriptionChange,
+            },
             original: original && original.coordinate,
             canChange: !!original,
             canOpen: !!original || !!matter || !!person,
@@ -347,6 +367,18 @@ function memoryGroupVM(block, read, threadId, key) {
     count: read ? read.rows.length : 0,
   };
 }
+// A hold notice keeps its actions while the hold is live: a timer wait in the held waits, a managed command in the
+// active executions. Once it ends the notice is only a notice.
+function holdLive(taskId) {
+  const wait = projectData('home').heldWaits.find(function (w) {
+    return w.cancelability.target && w.cancelability.target.taskId === taskId;
+  });
+  if (wait) return { k: wait.waitId, wait: true, cancelable: wait.cancelability.state === 'cancelable' };
+  const run = projectChatData().executions.find(function (e) {
+    return e.executionId === taskId;
+  });
+  return run ? { k: run.executionId, wait: false, cancelable: run.cancelability.state === 'cancelable' } : null;
+}
 function chatMessageVM(x) {
   const message = chatMessageIndex.get(x.mid),
     locator = message && message.source;
@@ -360,6 +392,7 @@ function chatMessageVM(x) {
         taskId,
         source && source.holdBusy && source.holdBusy[taskId],
       ),
+      hold: holdLive(taskId),
     });
   }
   if (x.embeds)

@@ -58,7 +58,27 @@ export async function refreshActiveExecutionProjection(
   }
 }
 
-export async function cancelProjectedExecution(execution: ActiveExecutionProjection): Promise<void> {
+/**
+ * DELETE a hold-ball task; withFeedback also tells the member why. When the task is already gone (404) and feedback
+ * was asked for, the feedback is posted on its own, as the hold card always did.
+ */
+async function deleteHold(taskId: string, owner: { threadId: string; catId: string }, withFeedback: boolean) {
+  const response = await apiFetch(
+    `/api/callbacks/hold-ball/${encodeURIComponent(taskId)}${withFeedback ? '?withFeedback=1' : ''}`,
+    { method: 'DELETE' },
+  );
+  if (response.status !== 404 || !withFeedback) return response;
+  return apiFetch('/api/callbacks/hold-ball/feedback', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ threadId: owner.threadId, taskId, catId: owner.catId }),
+  });
+}
+
+export async function cancelProjectedExecution(
+  execution: ActiveExecutionProjection,
+  withFeedback = false,
+): Promise<void> {
   if (execution.cancelability.state !== 'cancelable') {
     throw new Error('This execution is not cancelable');
   }
@@ -69,7 +89,7 @@ export async function cancelProjectedExecution(execution: ActiveExecutionProject
     const response =
       target.kind === 'live_invocation'
         ? await postLiveExecutionCancel(target)
-        : await apiFetch(`/api/callbacks/hold-ball/${encodeURIComponent(target.taskId)}`, { method: 'DELETE' });
+        : await deleteHold(target.taskId, execution, withFeedback);
     await requireCancelConvergence(response);
     useActiveExecutionStore.getState().settleCancellation(execution);
     const { anchorThreadId, projectPath } = useActiveExecutionStore.getState();
@@ -84,10 +104,9 @@ export async function cancelProjectedExecution(execution: ActiveExecutionProject
  * Cancel a held ball through the same DELETE the hold card uses. A 404 means the hold already ended (fired,
  * replaced or cancelled elsewhere), which is the state the user asked for. Returns whether the hold is gone.
  */
-export async function cancelHoldWait(wait: ActiveHoldWaitProjection): Promise<boolean> {
+export async function cancelHoldWait(wait: ActiveHoldWaitProjection, withFeedback = false): Promise<boolean> {
   if (wait.cancelability.state !== 'cancelable') return false;
-  const { taskId } = wait.cancelability.target;
-  const response = await apiFetch(`/api/callbacks/hold-ball/${encodeURIComponent(taskId)}`, { method: 'DELETE' });
+  const response = await deleteHold(wait.cancelability.target.taskId, wait, withFeedback);
   if (!response.ok && response.status !== 404) return false;
   const store = useActiveExecutionStore.getState();
   store.settleWaitCancellation(wait.waitId);

@@ -3,6 +3,52 @@ let matterData = { catalogs: {}, details: {} };
 function matterSourceKey(detail) {
   return 'matters:' + (detail ? 'detail:' + CS.m.matterId : 'catalog:' + (CS.m.matterQuery || ''));
 }
+// One matter entry (the matter page and a memory card's write receipt): the source is a quote coordinate or a
+// return pointer (thread only / thread + message); a summary is the writer's reading, not the original words.
+function matterEntryVM(e, editable) {
+  const src = e.source,
+    who = function (a) {
+      return !a ? '' : a.kind === 'agent' ? a.catId : a.kind === 'user' ? 'user' : 'system';
+    },
+    by = e.summary && e.summaryAuthor;
+  return {
+    entryId: e.entryId,
+    status: e.status,
+    quote: (e.sourceStatus === 'current' && e.quote) || '',
+    changed: e.sourceStatus === 'changed',
+    summary: e.summary || '',
+    summaryBy: !by
+      ? ''
+      : by.kind === 'agent'
+        ? pdlReads('who').member(by.catId).name
+        : by.kind === 'user'
+          ? pdlReads('who').me().name
+          : '',
+    speaker: who(src.author),
+    time: src.timestamp || e.recordedAt || null,
+    pointer: src.kind ? src.origin : '',
+    threadOnly: src.kind === 'thread',
+    attribution: e.attribution,
+    jump: { t: src.threadId, mid: src.messageId || '' },
+    editable: editable && e.status === 'active',
+  };
+}
+// A description or title change for the diff component: equal leading and trailing lines are left out.
+function matterDiff(before, after) {
+  const a = before ? before.split('\n') : [],
+    b = after ? after.split('\n') : [];
+  let i = 0,
+    j = 0;
+  while (i < a.length && i < b.length && a[i] === b[i]) i++;
+  while (j < a.length - i && j < b.length - i && a[a.length - 1 - j] === b[b.length - 1 - j]) j++;
+  const minus = a.slice(i, a.length - j).map(function (l) {
+      return ['-', l];
+    }),
+    plus = b.slice(i, b.length - j).map(function (l) {
+      return ['+', l];
+    });
+  return { mode: 'unified', hunks: [['', minus.concat(plus)]] };
+}
 function matterState(detail) {
   const raw = projectData('matters'),
     id = detail ? CS.m.matterId : CS.m.matterQuery || '';
@@ -65,14 +111,7 @@ VM.memoryMatters = function () {
     entries:
       detail && data
         ? data.entries.map(function (entry) {
-            return Object.assign({}, entry, {
-              speaker:
-                entry.source.author.kind === 'agent'
-                  ? entry.source.author.catId
-                  : entry.source.author.kind === 'user'
-                    ? 'user'
-                    : 'system',
-            });
+            return matterEntryVM(entry, true);
           })
         : [],
     summaryStatus: data && data.summaryStatus,
@@ -149,11 +188,31 @@ A.matterEdit = function () {
     },
   });
 };
+// Add or correct a source: a thread or message link, a summary and/or a quote (a quote needs a message link).
+// Correcting prefills the entry and keeps its original location when the link and quote are unchanged.
 A.matterSource = function (d) {
-  const matter = CS.m.matterId ? matterState(true).data.matter : null;
+  const page = CS.m.matterId ? matterState(true).data : null,
+    matter = page ? page.matter : null,
+    old =
+      d.entryId &&
+      page.entries.find(function (e) {
+        return e.entryId === d.entryId;
+      }),
+    oldLink = old
+      ? location.origin +
+        '/thread/' +
+        encodeURIComponent(old.source.threadId) +
+        (old.source.messageId ? '?message=' + encodeURIComponent(old.source.messageId) : '')
+      : '';
   dialog({
     kind: 'matterSource',
-    args: { create: !matter, title: d.v || '' },
+    args: {
+      create: !matter,
+      title: d.v || '',
+      link: oldLink,
+      summary: old ? old.summary || '' : '',
+      quote: old ? old.quote || '' : '',
+    },
     on: async function () {
       let link, threadId;
       try {
@@ -164,27 +223,40 @@ A.matterSource = function (d) {
         fieldErr('matter-link', tc('memoryOwners.matter.invalidLink'));
         return false;
       }
-      const messageId = link.searchParams.get('message');
-      if (!threadId || !messageId) {
+      const messageId = link.searchParams.get('message'),
+        summary = val('matter-summary').trim(),
+        quote = val('matter-quote');
+      if (!threadId) {
         fieldErr('matter-link', tc('memoryOwners.matter.invalidLink'));
         return false;
       }
-      let source;
-      try {
-        source = await api.post(
-          '/api/memory/matters/source',
-          {},
-          { threadId: threadId, messageId: messageId, quote: val('matter-quote') },
-        );
-      } catch (error) {
-        fieldErr('matter-quote', error.message);
+      if (!summary && !quote) {
+        fieldErr('matter-summary', tc('memoryOwners.matter.summaryOrQuote'));
         return false;
+      }
+      if (quote && !messageId) {
+        fieldErr('matter-link', tc('memoryOwners.matter.quoteNeedsMessage'));
+        return false;
+      }
+      let source = messageId ? { threadId: threadId, messageId: messageId } : { threadId: threadId };
+      if (quote) {
+        try {
+          source = (
+            await api.post('/api/memory/matters/source', {}, { threadId: threadId, messageId: messageId, quote: quote })
+          ).source;
+        } catch (error) {
+          fieldErr('matter-quote', error.message);
+          return false;
+        }
       }
       const command = matter
         ? { operation: d.entryId ? 'correct' : 'append', matterId: matter.matterId, expectedRevision: matter.revision }
         : { operation: 'create', title: val('matter-title'), description: val('matter-description') };
-      if (d.entryId) Object.assign(command, { entryId: d.entryId, source: source.source });
-      else command.sources = [source.source];
+      if (summary) command.summary = summary;
+      if (d.entryId) {
+        command.entryId = d.entryId;
+        if (val('matter-link') !== oldLink || quote !== (old.quote || '')) command.source = source;
+      } else command.sources = [source];
       return matterWrite(command);
     },
   });

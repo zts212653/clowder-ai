@@ -298,7 +298,7 @@ describe('F295 canonical execution hydration', () => {
       executions,
     });
 
-    await Promise.all(executions.map(cancelProjectedExecution));
+    await Promise.all(executions.map((execution) => cancelProjectedExecution(execution)));
 
     const cancels = mocks.apiFetch.mock.calls.filter(([, init]) => init?.method === 'POST');
     expect(cancels).toEqual(

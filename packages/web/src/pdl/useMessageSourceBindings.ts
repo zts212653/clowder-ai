@@ -2,8 +2,10 @@
 import {
   isValidRichBlock,
   type MatterPage,
+  type MatterWriteSnapshot,
   type MessageSearchAnswerView,
   type MessageSearchResponse,
+  matterWriteRefSchema,
   messageSearchAnswerRefSchema,
   messageSearchResponseSchema,
   REMEMBER_TARGETS,
@@ -48,6 +50,7 @@ const groupSchema = z.object({
         personId: z.string().optional(),
         status: z.string().optional(),
         error: z.string().optional(),
+        matterWriteRef: matterWriteRefSchema.optional(),
       }),
     )
     .min(1)
@@ -57,6 +60,7 @@ interface GroupRead {
   rows: {
     row: RememberGroupRow;
     matter?: MatterPage;
+    write?: MatterWriteSnapshot | { error: string };
     person?: PersonDetail;
     original?: { block: RichCardBlock; coordinate: { threadId: string; messageId: string; messageRevision: string } };
     error?: string;
@@ -123,6 +127,16 @@ async function readMemoryGroup(block: RichCardBlock, threadId: string): Promise<
       group.rows.map(async (row) => {
         if (row.statusCode >= 400 || row.error) return { row };
         try {
+          if (row.target === 'matter' && row.resultRef && row.matterWriteRef) {
+            const ref = new URLSearchParams({
+              actorKey: row.matterWriteRef.actorKey,
+              requestId: row.matterWriteRef.requestId,
+            });
+            const write = await request<MatterWriteSnapshot>(
+              `/api/memory/matters/${encodeURIComponent(row.resultRef)}/write-receipt?${ref}`,
+            ).catch((error: Error) => ({ error: error.message }));
+            return { row, write };
+          }
           if (row.target === 'matter' && row.resultRef) {
             const matter = await request<MatterPage>(
               `/api/memory/matters/${encodeURIComponent(row.resultRef)}?limit=3`,
