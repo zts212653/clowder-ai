@@ -7,6 +7,38 @@ import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 
 describe('InvocationRecordStore', () => {
+  test('create binds a pending source atomically without rebinding a duplicate', async () => {
+    const { InvocationRecordStore } = await import(
+      '../dist/domains/cats/services/stores/ports/InvocationRecordStore.js'
+    );
+    const store = new InvocationRecordStore();
+    const input = {
+      threadId: 'source-thread',
+      userId: 'source-owner',
+      targetCats: ['sonnet'],
+      intent: 'execute',
+      idempotencyKey: 'source-key',
+      actionLeaseCarrier: { kind: 'none' },
+      userMessageId: 'original-source',
+    };
+    const created = await store.create(input);
+    assert.equal((await store.get(created.invocationId)).userMessageId, 'original-source');
+    const duplicate = await store.create({ ...input, userMessageId: 'different-source' });
+    assert.equal(duplicate.outcome, 'duplicate');
+    assert.equal(duplicate.invocationId, created.invocationId);
+    assert.equal((await store.get(created.invocationId)).userMessageId, 'original-source');
+    assert.equal(
+      await store.update(created.invocationId, {
+        expectedStatus: 'queued',
+        expectedUserMessageId: null,
+        userMessageId: 'different-source',
+      }),
+      null,
+      'a stale binding snapshot must not overwrite an existing source',
+    );
+    assert.equal((await store.get(created.invocationId)).userMessageId, 'original-source');
+  });
+
   test('create() rejects an unclassified action-lease carrier', async () => {
     const { InvocationRecordStore } = await import(
       '../dist/domains/cats/services/stores/ports/InvocationRecordStore.js'

@@ -51,8 +51,8 @@ const IDEMPOTENCY_TTL_SECONDS = 300; // 5 minutes
  * Lua script for atomic idempotency check + record creation.
  * KEYS[1] = idempotency key (ioredis auto-prefixes)
  * KEYS[2] = invocation record key (ioredis auto-prefixes)
- * ARGV[1..9] = id, threadId, userId, targetCats(JSON), intent, idempotencyKey, now,
- *              actionLeaseCarrier(JSON), waitContinuationCarrier(JSON or empty)
+ * ARGV[1..10] = id, threadId, userId, targetCats(JSON), intent, idempotencyKey, now,
+ *              actionLeaseCarrier(JSON), waitContinuationCarrier(JSON or empty), userMessageId(or empty)
  */
 const CREATE_ATOMIC_LUA = `
 local existing = redis.call('GET', KEYS[1])
@@ -64,7 +64,7 @@ redis.call('HSET', KEYS[2],
   'id', ARGV[1], 'threadId', ARGV[2], 'userId', ARGV[3],
   'targetCats', ARGV[4], 'intent', ARGV[5],
   'idempotencyKey', ARGV[6], 'status', 'queued',
-  'userMessageId', '', 'error', '',
+  'userMessageId', ARGV[10], 'error', '',
   'actionLeaseCarrier', ARGV[8],
   'createdAt', ARGV[7], 'updatedAt', ARGV[7])
 if ARGV[9] ~= '' then
@@ -93,7 +93,8 @@ return {'created', ARGV[1]}
  * ARGV[3] = expectedThreadId (matches snapshot used to derive KEYS[2])
  * ARGV[4] = expectedUserId (matches snapshot used to derive KEYS[2])
  * ARGV[5] = expectedUsageByCatAbsent ("1" if usageByCat must be missing/empty)
- * ARGV[6..N] = field/value pairs to HSET (always includes updatedAt)
+ * ARGV[6] = expectedUserMessageId (JSON string/null, or empty for no binding guard)
+ * ARGV[7..N] = field/value pairs to HSET (always includes updatedAt)
  *
  * Returns:
  *   1  = success
@@ -116,6 +117,13 @@ local newStatus = ARGV[2]
 -- CAS check: if expectedStatus provided, current must match
 if expected ~= '' and current ~= expected then
   return 0
+end
+if ARGV[6] ~= '' then
+  local expectedSource = cjson.decode(ARGV[6])
+  local currentSource = redis.call('HGET', KEYS[1], 'userMessageId') or ''
+  if expectedSource == cjson.null then
+    if currentSource ~= '' then return 0 end
+  elseif currentSource ~= expectedSource then return 0 end
 end
 
 -- F194 Phase B (cloud R13 P1 #2): KEYS[2] is derived from JS-side snapshot of
@@ -155,7 +163,7 @@ end
 
 -- Apply field/value pairs
 local fields = {}
-for i = 6, #ARGV, 2 do
+for i = 7, #ARGV, 2 do
   fields[#fields + 1] = ARGV[i]
   fields[#fields + 1] = ARGV[i + 1]
 end
@@ -307,6 +315,7 @@ export class RedisInvocationRecordStore implements IInvocationRecordStore {
       now,
       JSON.stringify(requireInvocationActionLeaseCarrier(input.actionLeaseCarrier)),
       waitContinuationCarrier ? JSON.stringify(waitContinuationCarrier) : '',
+      input.userMessageId ?? '',
     )) as [string, string];
 
     return {
@@ -357,6 +366,7 @@ export class RedisInvocationRecordStore implements IInvocationRecordStore {
         before.threadId,
         before.userId,
         input.expectedUsageByCatAbsent === true ? '1' : '',
+        input.expectedUserMessageId === undefined ? '' : JSON.stringify(input.expectedUserMessageId),
         ...pairs,
       )) as number;
 
