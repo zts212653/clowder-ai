@@ -4203,6 +4203,14 @@ export class QueueProcessor {
           // Preserve this caller's error, then let the existing coordinator scan
           // independent targets while this exact source waits for its timer.
           state.dirty = true;
+          // The failed scan did not consume its completion's exact bypass.
+          // Keep newer queued signals; admission still checks the current epoch.
+          for (const [catId, epoch] of bypassSuppressionEpochByCatId) {
+            state.bypassSuppressionEpochByCatId ??= new Map();
+            if (!state.bypassSuppressionEpochByCatId.has(catId)) {
+              state.bypassSuppressionEpochByCatId.set(catId, epoch);
+            }
+          }
           this.deps.log.warn(
             { err: error, threadId, entryId: pending.id, retryAt },
             '[QueueProcessor] queued conversation admission failed; the exact entry keeps its retry',

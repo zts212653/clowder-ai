@@ -106,3 +106,56 @@ for (const phase of ['failure-history', 'source']) {
     assert.deepEqual(h.starts, ['unknown target', 'later explicit target']);
   });
 }
+
+for (const newerFence of [false, true]) {
+  test(`#2008 failed admission retains a completion's exact bypass: newer fence=${newerFence}`, async (t) => {
+    const h = await stopFixture(t, {
+      idle: true,
+      retryDeferral: { baseDelayMs: 1000 },
+      routes: {
+        threadStore: { get: async (id) => ({ id, createdBy: 'owner', participants: ['opus', 'codex', 'sonnet'] }) },
+      },
+    });
+    const blocked = await h.send('blocked multi-target', ['opus', 'codex']);
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    await h.send('independent after cancellation', ['sonnet']);
+    h.processor.suppressAutoResume('thread', 'sonnet', ['old-sonnet']);
+    t.after(() => h.processor.retryDeferrals.forget(blocked.entry.id));
+    const inspect = h.processor.firstTargetWithExistingReceiver.bind(h.processor);
+    let inspecting = false;
+    h.processor.firstTargetWithExistingReceiver = async (...args) => {
+      inspecting = args[0].some((entry) => entry.id === blocked.entry.id);
+      try {
+        return await inspect(...args);
+      } finally {
+        inspecting = false;
+      }
+    };
+    const read = h.messages.getById.bind(h.messages);
+    const failure = new Error('receiver lookup lost this drain');
+    let failed = false;
+    h.messages.getById = (id) => {
+      if (!failed && inspecting && id === blocked.message.id) {
+        failed = true;
+        if (newerFence) h.processor.suppressAutoResume('thread', 'sonnet', ['new-stop']);
+        throw failure;
+      }
+      return read(id);
+    };
+    // The real completion path supplies a bypass for a different execution,
+    // instead of forging a requestDrain option or mocking the coordinator.
+    await assert.rejects(
+      h.processor.onInvocationComplete('thread', 'sonnet', 'canceled_by_user', 'new-sonnet', []),
+      (error) => error === failure,
+    );
+    await new Promise((resolve) => setTimeout(resolve, 80));
+    assert.equal(failed, true);
+    assert.equal(h.processor.retryDeferrals.isDeferred(blocked.entry.id), true);
+    assert.equal(h.starts.includes('blocked multi-target'), false);
+    assert.equal(
+      h.starts.includes('independent after cancellation'),
+      !newerFence,
+      'the follow-up scan retains the old exact bypass, which cannot authorize a newer fence',
+    );
+  });
+}
