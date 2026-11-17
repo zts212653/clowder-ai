@@ -239,6 +239,15 @@ export function PdlAppHost() {
   const exportAddress = readThreadExportAddress(new URL(browserPath, 'https://pdl.invalid'));
   const threadId = exportAddress?.threadId ?? getThreadIdFromPathname(browserPath);
   const pendingJump = useRef<PendingThreadJump | null>(null);
+  // An address that names a message (/thread/:id?message=… — links in messages, matter sources) opens that thread at
+  // that message, through the same jump as an in-app link. Each address is taken once.
+  const addressJump = useRef('');
+  const addressQuery = new URL(browserPath, 'https://pdl.invalid').searchParams;
+  const addressMid = addressQuery.get('message') ?? addressQuery.get('messageId');
+  if (addressMid && addressJump.current !== browserPath) {
+    addressJump.current = browserPath;
+    pendingJump.current = { threadId, mid: addressMid };
+  }
   const [needed, setNeeded] = useState<ReadonlySet<string>>(new Set());
   return (
     <ThreadChatRuntimeProvider routeThreadId={threadId} neededSources={needed}>

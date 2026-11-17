@@ -100,10 +100,12 @@ function bgState(key) {
   });
   return { shell: shell, g: shell ? S.bg.homeTr : 100, veil: shell ? planes[key || ctPages()].value : 100, planes: planes };
 }
+/* 根上的属性只在值变了时写（每次重画都会走到这里；写同样的值也会让浏览器把整页样式重算一遍） */
+function rootAttr(name, v) { const de = document.documentElement; if (de.getAttribute(name) === v) return; if (v == null) de.removeAttribute(name); else de.setAttribute(name, v); }
 function applyTheme() {
-  const de = document.documentElement, t = S.tweaks;
-  if (t.theme === 'system') de.removeAttribute('data-theme'); else de.setAttribute('data-theme', t.theme);
-  const sk = skinAttr(t.skin); if (sk) de.setAttribute('data-skin', sk); else de.removeAttribute('data-skin');
+  const t = S.tweaks;
+  rootAttr('data-theme', t.theme === 'system' ? null : t.theme);
+  rootAttr('data-skin', skinAttr(t.skin) || null);
 }
 const ASSETS = {};   /* 素材登记（id → { type, mime, src, … }）：主题登记自己的素材（theme/<主题>/assets.js），组件和 CSS 只按 id 取 */
 const ASSET_LAYERS = { skins: {}, user: {} };   /* skins[皮肤] / user（当前自定义主题选的素材）：{ id: 素材 } */
