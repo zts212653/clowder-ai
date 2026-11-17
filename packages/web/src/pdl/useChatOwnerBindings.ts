@@ -16,6 +16,28 @@ interface ProposalOwner {
   sourceMessageRevision?: string;
   issue?: FrustrationIssue;
 }
+interface FeedbackReport {
+  title: string;
+  bodyMarkdown: string;
+}
+interface IssueDraft {
+  draftId: string;
+  status: 'draft' | 'publishing' | 'uncertain' | 'published' | 'cancelled';
+  targetRepo: string;
+  githubIssueNumber?: number;
+  githubIssueUrl?: string;
+}
+interface IssueConfig {
+  defaultRepo: string;
+  repos: string[];
+}
+/** A confirmed feedback: the host's public report, the GitHub plugin's repos and the draft it returned. */
+interface FeedbackOwner {
+  report: Read<FeedbackReport>;
+  config: Read<IssueConfig>;
+  draft?: IssueDraft;
+}
+const issueDrafts = '/api/plugins/official.github-operations/github/community-issue-drafts';
 interface QueueTargets {
   cats: {
     participants: { catId: string }[];
@@ -34,6 +56,7 @@ interface ChatOwnerData {
     value: { question: string; votes: Record<string, string>; voteCount?: number; status: 'active' | 'closed' } | null;
   };
   proposals: Record<string, Read<ProposalOwner>>;
+  feedback: Record<string, FeedbackOwner>;
   bundles: Record<string, Read<HydratedMessageBundle>>;
   queueTargets: Record<string, Read<QueueTargets>>;
   delivery: Record<string, Record<string, Read<{ status: string }>>>;
@@ -55,6 +78,7 @@ export function useChatOwnerBindings(
   const [read, setRead] = useState<ChatOwnerData>({
     vote: { threadId: data.threadId, value: null },
     proposals: {},
+    feedback: {},
     bundles: {},
     queueTargets: {},
     delivery: {},
@@ -104,6 +128,8 @@ export function useChatOwnerBindings(
           {
             mid: message.id,
             issueId: frustration?.type === 'frustration' ? frustration.issueId : null,
+            title: frustration?.type === 'frustration' ? (frustration.block.title ?? '') : '',
+            body: frustration?.type === 'frustration' ? (frustration.block.bodyMarkdown ?? '') : '',
             revision: custody?.type === 'custody' ? custody.revision : undefined,
           },
         ]
@@ -126,7 +152,37 @@ export function useChatOwnerBindings(
       result = { load: 'error', error: (error as Error).message };
     }
     setRead((s) => ({ ...s, proposals: { ...s.proposals, [mid]: result } }));
+    if (result.value?.issue?.status === 'confirmed') await loadFeedback(mid, result.value.issue);
   };
+  const settled = <T>(promise: Promise<T>): Promise<Read<T>> =>
+    promise.then(
+      (value) => ({ load: '', value }),
+      (error: Error) => ({ load: 'error', error: error.message }),
+    );
+  const loadFeedback = async (mid: string, issue: FrustrationIssue) => {
+    const target = proposalTargets.find((t) => t.mid === mid)!;
+    const [report, config] = await Promise.all([
+      settled(
+        write<FeedbackReport>('/api/feedback/report-preview', {
+          title: target.title,
+          bodyMarkdown: [target.body, issue.userDescription].filter(Boolean).join('\n\n'),
+        }),
+      ),
+      settled(request<IssueConfig>(`${issueDrafts}/config`)),
+    ]);
+    setRead((s) => ({ ...s, feedback: { ...s.feedback, [mid]: { ...s.feedback[mid], report, config } } }));
+  };
+  const setDraft = (mid: string, draft: IssueDraft | undefined, error: string) =>
+    setRead((s) => ({
+      ...s,
+      feedback: { ...s.feedback, [mid]: { ...s.feedback[mid], draft } },
+      proposalErrors: { ...s.proposalErrors, [mid]: error },
+    }));
+  const readDraft = (draft: IssueDraft) =>
+    request<{ draft: IssueDraft }>(`${issueDrafts}/by-id/${encodeURIComponent(draft.draftId)}`).then(
+      (r) => r.draft,
+      () => ({ ...draft, status: 'uncertain' as const }),
+    );
   useEffect(() => {
     if (!needed) return;
     const abort = new AbortController();
@@ -217,10 +273,43 @@ export function useChatOwnerBindings(
         setRead((s) => ({ ...s, bundles: { ...s.bundles, [args.id]: result } }));
         return true;
       }
-      case 'proposalOwnerRefresh':
+      case 'proposalOwnerRefresh': {
+        const draft = read.feedback[args.mid]?.draft;
         setRead((s) => ({ ...s, proposalErrors: { ...s.proposalErrors, [args.mid]: '' } }));
+        if (draft) setDraft(args.mid, await readDraft(draft), '');
         await loadProposal(args.mid);
         return true;
+      }
+      case 'feedbackPublish': {
+        // The same feedback has one draft (requestId); it is created from the prepared report and published with the edits.
+        const target = proposalTargets.find((t) => t.mid === args.mid)!,
+          f = read.feedback[args.mid];
+        let draft = f.draft;
+        try {
+          draft ??= (
+            await write<{ draft: IssueDraft }>(issueDrafts, {
+              requestId: `feedback:${target.issueId}`,
+              repo: args.repo,
+              title: f.report.value!.title,
+              bodyMarkdown: f.report.value!.bodyMarkdown,
+            })
+          ).draft;
+          if (draft.status !== 'published' && draft.status !== 'cancelled')
+            draft = (
+              await write<{ draft: IssueDraft }>(`${issueDrafts}/by-id/${encodeURIComponent(draft.draftId)}/publish`, {
+                title: args.title,
+                bodyMarkdown: args.bodyMarkdown,
+              })
+            ).draft;
+        } catch (error) {
+          // A failed publish may still have reached GitHub: the plugin's draft says which (still a draft = rejected).
+          draft = draft && (await readDraft(draft));
+          setDraft(args.mid, draft, !draft || draft.status === 'draft' ? (error as Error).message : '');
+          return { ok: false };
+        }
+        setDraft(args.mid, draft, '');
+        return { ok: true };
+      }
       case 'proposalOwnerDecide': {
         const target = proposalTargets.find((t) => t.mid === args.mid)!;
         try {
