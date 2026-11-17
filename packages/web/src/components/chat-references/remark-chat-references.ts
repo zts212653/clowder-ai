@@ -10,7 +10,8 @@ import { attachReferenceAffixes } from './chat-reference-affixes';
 const token =
   /(^|[\s（(「『【《，。；：、“‘])((?:https?:\/\/[^\s<>[\]）)」』】》，。；、“‘]+)|(?:[~.]?\/[^\s<>[\]）)」』】》，。；、“‘]+)|(?:[\p{L}\p{N}_@.-]+\/[^\s<>[\]）)」』】》，。；、“‘]*)|(?:[\p{L}\p{N}_@.-]+\.[a-zA-Z0-9]{1,12}(?::[1-9]\d*(?::[1-9]\d*)?)?)|(?:[a-fA-F0-9]{7,40}))(?=\[wt:|$|[\s）)」』】》，。；、“‘.,;:!?！？：])/gu;
 const candidate = (value: string) =>
-  /^https?:\/\//.test(value) || isChatPathCandidate(value) || isChatCommitCandidate(value);
+  !/^\/thread\/thread_[a-zA-Z0-9_-]+$/.test(value) &&
+  (/^https?:\/\//.test(value) || isChatPathCandidate(value) || isChatCommitCandidate(value));
 
 function localLinkReference(value: string): string {
   if (/^https?:\/\//.test(value)) return value;

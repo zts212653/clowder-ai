@@ -3,7 +3,7 @@ import { mkdtemp, realpath, rmdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
-import { ThreadStore } from '../src/domains/cats/services/stores/ports/ThreadStore.js';
+import { DEFAULT_THREAD_ID, ThreadStore } from '../src/domains/cats/services/stores/ports/ThreadStore.js';
 import {
   withPluginOwnerRequest,
   withPluginOwnerWebhook,
@@ -100,4 +100,89 @@ test('ordinary thread projectRef validates directories and preserves parent sema
   } finally {
     await rmdir(root);
   }
+});
+
+test('pinnedOnly paginates owner pins and excludes default/system/hub/foreign/deleted without changing page or candidates', async () => {
+  const store = new ThreadStore();
+  const host = createPluginThreadHost({
+    pluginId: 'dev.fixture',
+    ownerUserId: 'owner',
+    projectPath: '/default',
+    threadStore: store,
+    threadDeepLinkUrl: (id) => `https://local.test/thread/${id}`,
+  });
+  const pinnedIds: string[] = [];
+  for (let index = 0; index < 60; index += 1) {
+    const thread = store.create('owner', `pinned-${index}`, '/default');
+    store.updatePin(thread.id, true);
+    pinnedIds.push(thread.id);
+  }
+  const system = store.create('owner', 'system thread', '/default');
+  store.claimSystemKind(system.id, 'owner', 'memory_ops');
+  store.updatePin(system.id, true);
+  const evalDomain = store.create('owner', 'eval thread', '/default');
+  store.claimSystemKind(evalDomain.id, 'owner', 'eval_domain');
+  store.updatePin(evalDomain.id, true);
+  const hub = store.create('owner', 'hub thread', '/default');
+  store.claimSystemKind(hub.id, 'owner', 'connector_hub');
+  store.updatePin(hub.id, true);
+  const foreign = store.create('other', 'foreign thread', '/default');
+  store.updatePin(foreign.id, true);
+  const deleted = store.create('owner', 'deleted thread', '/default');
+  store.updatePin(deleted.id, true);
+  store.softDelete(deleted.id);
+  const defaultThread = store.get(DEFAULT_THREAD_ID);
+  if (!defaultThread) throw new Error('default thread unavailable');
+
+  const first = await host.list({ pinnedOnly: true, limit: 50 });
+  assert.equal(first.length, 50);
+  const last = first[first.length - 1]!;
+  const second = await host.list({
+    pinnedOnly: true,
+    limit: 50,
+    before: { lastActiveAt: last.lastActiveAt, id: last.id },
+  });
+  assert.equal(second.length, 10);
+  assert.equal(new Set([...first, ...second].map((thread) => thread.id)).size, 60);
+  assert.equal(
+    [...first, ...second].some((thread) =>
+      [system.id, evalDomain.id, hub.id, foreign.id, deleted.id, defaultThread.id].includes(thread.id),
+    ),
+    false,
+  );
+
+  const normalAll: Array<{ id: string }> = [];
+  let cursor: { lastActiveAt: number; id: string } | undefined;
+  for (;;) {
+    const page = await host.list({ limit: 50, ...(cursor ? { before: cursor } : {}) });
+    normalAll.push(...page);
+    if (page.length < 50) break;
+    const last = page[page.length - 1]!;
+    cursor = { lastActiveAt: last.lastActiveAt, id: last.id };
+  }
+  for (const id of [system.id, evalDomain.id, hub.id, defaultThread.id]) {
+    assert.equal(normalAll.some((thread) => thread.id === id), true);
+  }
+  for (const id of [foreign.id, deleted.id]) {
+    assert.equal(normalAll.some((thread) => thread.id === id), false);
+  }
+  assert.equal((await host.list({ threadIds: [system.id] })).length, 1);
+  assert.equal((await host.list({ threadIds: [hub.id] })).length, 1);
+  assert.equal((await host.list({ threadIds: [evalDomain.id] })).length, 1);
+  assert.equal((await host.get(system.id))?.id, system.id);
+  assert.equal((await host.get(DEFAULT_THREAD_ID))?.id, DEFAULT_THREAD_ID);
+
+  store.updatePin(pinnedIds[0]!, false);
+  const afterUnpin = await host.list({ pinnedOnly: true, limit: 50 });
+  assert.equal(afterUnpin.some((thread) => thread.id === pinnedIds[0]), false);
+
+  await assert.rejects(host.list({ pinnedOnly: true, threadIds: [pinnedIds[1]!] }), /pinnedOnly|threadIds/);
+
+  const beforeFirst = await host.list({
+    pinnedOnly: true,
+    limit: 50,
+    before: { lastActiveAt: first[0]!.lastActiveAt, id: first[0]!.id },
+  });
+  assert.equal(beforeFirst.length, 50);
+  assert.equal(beforeFirst.some((thread) => thread.id === first[0]!.id), false);
 });

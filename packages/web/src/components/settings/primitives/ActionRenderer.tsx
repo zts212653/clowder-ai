@@ -23,6 +23,7 @@ import {
 } from './actionConfirmation';
 import { LiveStatusActionRenderer } from './LiveStatusActionRenderer';
 import { OperationRowsRenderer } from './OperationRowsRenderer';
+import { ThreadPickerRenderer } from './ThreadPickerRenderer';
 import { useActionPollingSession } from './useActionPollingSession';
 
 export interface ActionRendererProps {
@@ -46,6 +47,8 @@ export function ActionRenderer(props: ActionRendererProps) {
   // F202 W2-3 h1: an operation that lists rows is rendered as a row list with per-row actions.
   const listAction = actions.find((action) => action.resultRender === 'rows');
   if (listAction) return <OperationRowsRenderer {...props} listAction={listAction} />;
+  const threadPickerAction = actions.find((action) => action.resultRender === 'thread-picker');
+  if (threadPickerAction) return <ThreadPickerRenderer {...props} listAction={threadPickerAction} />;
   const firstAction = actions[0];
   const revokeAction = actions.find(
     (action) => action.render === 'button' && action.next === firstAction?.id && firstAction.next === action.id,
