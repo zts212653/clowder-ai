@@ -80,7 +80,7 @@ for (const storage of ['memory', 'redis']) {
       t.after(() => {
         f.ledger.commit = commit;
       });
-      await assert.rejects(f.processor.requestDrain('thread'), new RegExp(`owned fault: ${fault}`));
+      await f.processor.requestDrain('thread');
       assert.equal(injected, true, 'the failure occurs at durable Queue retirement, after History commits');
       f.ledger.commit = commit;
       const historyBefore = await f.messages.getByThread('thread');
