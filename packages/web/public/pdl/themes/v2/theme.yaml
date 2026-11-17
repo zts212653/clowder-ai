@@ -6867,6 +6867,7 @@ pdl:
                   t: chat.proposalFirst
                   args:
                     - "@card.firstTitle"
+              when: "@card.firstTitle"
             - type: component
               use: v2Content
               props:
@@ -7058,6 +7059,7 @@ pdl:
                         t: chat.proposalFirst
                         args:
                           - "@card.result.firstTitle"
+                    when: "@card.result.firstTitle"
                   - type: component
                     use: v2Content
                     props:
@@ -9335,75 +9337,66 @@ pdl:
           from: "@card.decisions"
           control:
             type: component
-            use: v2Toolbar
+            use: v2Action
             props:
-              items:
-                - type: component
-                  use: v2Action
-                  props:
-                    label:
-                      of: "@v"
-                      map:
-                        confirm: t:placement.frustrationConfirm
-                        false-positive: t:placement.falsePositive
-                        skip: t:chatCards.skip
-                        accept: t:common.accept
-                        refuse: t:common.reject
-                        _: "@v"
-                    act: proposalOwnerDecide
-                    args:
-                      mid: "@mid"
-                      op: "@v"
-                      offerId: "@offerId"
-                      sourceMessageRevision: "@sourceMessageRevision"
-                  when:
-                    of: "@v"
-                    map:
-                      confirm: false
-                      _: true
-                - type: component
-                  use: v2Input
-                  props:
-                    add: true
-                    id: "@id"
-                    label:
-                      of: "@v"
-                      map:
-                        confirm: t:placement.frustrationConfirm
-                        false-positive: t:placement.falsePositive
-                        skip: t:chatCards.skip
-                        accept: t:common.accept
-                        refuse: t:common.reject
-                        _: "@v"
-                    placeholder: t:hub.importProject.description
-                    go: proposalOwnerDecide
-                    args:
-                      mid: "@mid"
-                      op: "@v"
-                    goLabel:
-                      of: "@v"
-                      map:
-                        confirm: t:placement.frustrationConfirm
-                        false-positive: t:placement.falsePositive
-                        skip: t:chatCards.skip
-                        accept: t:common.accept
-                        refuse: t:common.reject
-                        _: "@v"
-                  when:
-                    of: "@v"
-                    map:
-                      confirm: true
-                      _: false
+              label:
+                of: "@v"
+                map:
+                  confirm: t:placement.frustrationConfirm
+                  false-positive: t:placement.falsePositive
+                  skip: t:chatCards.skip
+                  accept: t:common.accept
+                  refuse: t:common.reject
+                  _: "@v"
+              act: proposalOwnerDecide
+              args:
+                mid: "@mid"
+                op: "@v"
+                offerId: "@offerId"
+                sourceMessageRevision: "@sourceMessageRevision"
+            when:
+              of: "@v"
+              map:
+                confirm: false
+                _: true
       - type: component
-        use: v2Action
+        use: v2Each
         props:
-          iconOnly: true
-          icon: refresh
-          label: t:common.refresh
-          act: proposalOwnerRefresh
-          args:
-            mid: "@mid"
-        when: "@card.ownerKind"
+          from: "@card.decisions"
+          control:
+            type: component
+            use: v2Input
+            props:
+              add: true
+              id: "@id"
+              label:
+                of: "@v"
+                map:
+                  confirm: t:placement.frustrationConfirm
+                  false-positive: t:placement.falsePositive
+                  skip: t:chatCards.skip
+                  accept: t:common.accept
+                  refuse: t:common.reject
+                  _: "@v"
+              placeholder: t:hub.importProject.description
+              go: proposalOwnerDecide
+              args:
+                mid: "@mid"
+                op: "@v"
+              goLabel:
+                of: "@v"
+                map:
+                  confirm: t:placement.frustrationConfirm
+                  false-positive: t:placement.falsePositive
+                  skip: t:chatCards.skip
+                  accept: t:common.accept
+                  refuse: t:common.reject
+                  _: "@v"
+            when:
+              of: "@v"
+              map:
+                confirm: true
+                _: false
       - type: component
         use: v2Action
         props:

@@ -8742,6 +8742,7 @@ pdl:
                 t: chat.proposalFirst
                 args:
                   - "@card.firstTitle"
+              when: "@card.firstTitle"
             - type: content
               html:
                 of: "@card.first"
@@ -8981,61 +8982,61 @@ pdl:
           - type: each
             from: "@card.decisions"
             control:
-              type: stack
-              items:
-                - type: button
-                  label:
-                    of: "@v"
-                    map:
-                      confirm: t:placement.frustrationConfirm
-                      false-positive: t:placement.falsePositive
-                      skip: t:chatCards.skip
-                      accept: t:common.accept
-                      refuse: t:common.reject
-                      _: "@v"
-                  act: proposalOwnerDecide
-                  args:
-                    mid: "@mid"
-                    op: "@v"
-                    offerId: "@offerId"
-                    sourceMessageRevision: "@sourceMessageRevision"
-                  when:
-                    of: "@v"
-                    map:
-                      confirm: false
-                      _: true
-                - type: input
-                  add: true
-                  id: "@id"
-                  label:
-                    of: "@v"
-                    map:
-                      confirm: t:placement.frustrationConfirm
-                      false-positive: t:placement.falsePositive
-                      skip: t:chatCards.skip
-                      accept: t:common.accept
-                      refuse: t:common.reject
-                      _: "@v"
-                  placeholder: t:hub.importProject.description
-                  go: proposalOwnerDecide
-                  args:
-                    mid: "@mid"
-                    op: "@v"
-                  goLabel:
-                    of: "@v"
-                    map:
-                      confirm: t:placement.frustrationConfirm
-                      false-positive: t:placement.falsePositive
-                      skip: t:chatCards.skip
-                      accept: t:common.accept
-                      refuse: t:common.reject
-                      _: "@v"
-                  when:
-                    of: "@v"
-                    map:
-                      confirm: true
-                      _: false
-          - $frag: CARD_OWNER_REFRESH
+              type: button
+              label:
+                of: "@v"
+                map:
+                  confirm: t:placement.frustrationConfirm
+                  false-positive: t:placement.falsePositive
+                  skip: t:chatCards.skip
+                  accept: t:common.accept
+                  refuse: t:common.reject
+                  _: "@v"
+              act: proposalOwnerDecide
+              args:
+                mid: "@mid"
+                op: "@v"
+                offerId: "@offerId"
+                sourceMessageRevision: "@sourceMessageRevision"
+              when:
+                of: "@v"
+                map:
+                  confirm: false
+                  _: true
+          - type: each
+            from: "@card.decisions"
+            control:
+              type: input
+              add: true
+              id: "@id"
+              label:
+                of: "@v"
+                map:
+                  confirm: t:placement.frustrationConfirm
+                  false-positive: t:placement.falsePositive
+                  skip: t:chatCards.skip
+                  accept: t:common.accept
+                  refuse: t:common.reject
+                  _: "@v"
+              placeholder: t:hub.importProject.description
+              go: proposalOwnerDecide
+              args:
+                mid: "@mid"
+                op: "@v"
+              goLabel:
+                of: "@v"
+                map:
+                  confirm: t:placement.frustrationConfirm
+                  false-positive: t:placement.falsePositive
+                  skip: t:chatCards.skip
+                  accept: t:common.accept
+                  refuse: t:common.reject
+                  _: "@v"
+              when:
+                of: "@v"
+                map:
+                  confirm: true
+                  _: false
           - type: button
             label: t:common.reject
             act: cardDecide
@@ -37373,6 +37374,7 @@ pdl:
                         t: chat.proposalFirst
                         args:
                           - "@card.result.firstTitle"
+                      when: "@card.result.firstTitle"
                     - type: content
                       html:
                         of: "@card.result.first"
