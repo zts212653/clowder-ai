@@ -1256,7 +1256,12 @@ function ChatBinding({
                   { idempotencyKey: attemptKey },
                 ),
           hold: (on) =>
-            setSendingThreads(({ [sentThread]: _, ...rest }) => (on ? { ...rest, [sentThread]: true } : rest)),
+            setSendingThreads((all) => {
+              const next = { ...all };
+              if (on) next[sentThread] = true;
+              else delete next[sentThread];
+              return next;
+            }),
           clear: () => clearSentDraft(sentThread),
         });
         return;
