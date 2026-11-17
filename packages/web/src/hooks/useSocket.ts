@@ -66,8 +66,8 @@ function refreshActiveExecutionForThread(threadId: string): void {
   const compatibilityProjectPath = useChatStore
     .getState()
     .threads?.find((thread) => thread.id === threadId)?.projectPath;
-  const projectPath = canonicalProjectPath ?? compatibilityProjectPath;
-  if (projectPath) void refreshActiveExecutionProjection(threadId, projectPath);
+  // The read covers every conversation, so one without a project is reread the same way.
+  void refreshActiveExecutionProjection(threadId, canonicalProjectPath ?? compatibilityProjectPath ?? null);
 }
 
 interface AgentMessage {
