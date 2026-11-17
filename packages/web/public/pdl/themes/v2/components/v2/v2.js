@@ -298,16 +298,19 @@ onStart('boot', function () { const style = document.createElement('style'); sty
 
 /* App-formatted rich objects keep the old rich-block surfaces. */
 PDL_COMPONENTS.v2Rich = function (p, sc, root) {
+  /* 和默认主题的富内容一样：正文、键值、清单、作品、音频、文件、小组件、改动各自有才画，并列在同一张卡里（音频可以带一段文字，卡片可以没有字段） */
   const q = pv(p.data, sc, root);
   const title = q.title ? '<h4>' + h(q.title) + '</h4>' : '';
-  if (q.markdown != null) return '<section class="cafe-rich-card">' + title + '<div class="markdown-content text-sm">' + mdHtml(q.markdown) + '</div><dl>' + q.kv.map(function (r) { return '<dt>' + h(r.k) + '</dt><dd>' + h(r.v) + '</dd>'; }).join('') + '</dl></section>';
-  if (q.checks) return '<section class="cafe-rich-checklist">' + title + q.checks.map(function (r) { return '<label><input type="checkbox" disabled' + (r.done ? ' checked' : '') + '>' + h(r.label) + '</label>'; }).join('') + '</section>';
-  if (q.cards) return '<div class="recent-works-grid">' + q.cards.items.map(function (r) { return '<button class="work-gallery-open"' + actAttrs(p.open.act,pvArgsObj(p.open.args,r,root)) + '><img src="' + h(r.src) + '" alt="' + h(r.alt) + '"><span>' + h(r.title) + '</span></button>'; }).join('') + '</div>';
-  if (q.audio) return '<div class="cafe-rich-card">' + title + '<audio controls src="' + h(q.audio.src) + '"></audio></div>';
-  if (q.file) return '<button class="cafe-rich-card flex items-center gap-2"' + actAttrs(p.open.act,pvArgsObj(p.open.args,q.file,root)) + '>' + v2Glyph('file') + h(q.file.name) + '</button>';
-  if (q.widget) return '<iframe class="cafe-rich-widget" sandbox="allow-scripts" srcdoc="' + h(q.widget.html) + '"></iframe>';
-  if (q.diff) return '<div class="cafe-rich-diff">' + title + '<pre>' + h(q.filePath) + '\n' + q.diff.hunks.map(function (r) { return h(r[0]) + '\n' + r[1].map(function (line) { return h(line[0] + line[1]); }).join('\n'); }).join('\n') + '</pre></div>';
-  return title;
+  const parts = [];
+  if (q.markdown != null) parts.push('<div class="markdown-content text-sm">' + mdHtml(q.markdown) + '</div>');
+  if (q.kv && q.kv.length) parts.push('<dl>' + q.kv.map(function (r) { return '<dt>' + h(r.k) + '</dt><dd>' + h(r.v) + '</dd>'; }).join('') + '</dl>');
+  if (q.checks) parts.push('<div class="cafe-rich-checklist">' + q.checks.map(function (r) { return '<label><input type="checkbox" disabled' + (r.done ? ' checked' : '') + '>' + h(r.label) + '</label>'; }).join('') + '</div>');
+  if (q.cards) parts.push('<div class="recent-works-grid">' + q.cards.items.map(function (r) { return '<button class="work-gallery-open"' + actAttrs(p.open.act,pvArgsObj(p.open.args,r,root)) + '><img src="' + h(r.src) + '" alt="' + h(r.alt) + '"><span>' + h(r.title) + '</span></button>'; }).join('') + '</div>');
+  if (q.audio) parts.push('<audio controls src="' + h(q.audio.src) + '"></audio>');
+  if (q.file) parts.push('<button class="flex items-center gap-2"' + actAttrs(p.open.act,pvArgsObj(p.open.args,q.file,root)) + '>' + v2Glyph('file') + h(q.file.name) + '</button>');
+  if (q.widget) parts.push('<iframe class="cafe-rich-widget" sandbox="allow-scripts" srcdoc="' + h(q.widget.html) + '"></iframe>');
+  if (q.diff) parts.push('<pre class="cafe-rich-diff">' + h(q.filePath) + '\n' + q.diff.hunks.map(function (r) { return h(r[0]) + '\n' + r[1].map(function (line) { return h(line[0] + line[1]); }).join('\n'); }).join('\n') + '</pre>');
+  return parts.length ? '<section class="cafe-rich-card">' + title + parts.join('') + '</section>' : title;
 };
 
 /* ComposerPopover / ConversationViewOptions / SidebarFilterMenuV2. */
