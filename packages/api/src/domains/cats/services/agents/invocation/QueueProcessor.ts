@@ -4139,7 +4139,18 @@ export class QueueProcessor {
         routingHeld.size > 0 && eligibleTargets.length > 0
           ? { ...candidate, targets: [eligibleTargets[0]!] }
           : candidate;
-      const admission = await this.resolveAdmissionTargets(threadId, candidateForAdmission);
+      const admission = await this.resolveAdmissionTargets(threadId, candidateForAdmission).catch((err: unknown) => {
+        // A restored source can outlive the producer's last completion wake.
+        // Keep retry ownership on the candidate that actually failed admission.
+        if (!this.retryDeferrals.isDeferred(candidate.id)) {
+          const retryAt = this.retryDeferrals.defer(threadId, candidate.id);
+          this.deps.log.warn(
+            { err, threadId, entryId: candidate.id, retryAt },
+            '[QueueProcessor] admission resolution failed; the exact entry keeps its retry',
+          );
+        }
+        return { kind: 'unresolved' } as const;
+      });
       if (admission.kind === 'settled') return admission.attempt;
       if (admission.kind === 'barrier') {
         this.emitContinuationDiagnostic(
