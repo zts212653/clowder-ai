@@ -495,7 +495,8 @@
       "reason": "{1}",
       "cat": "{2}",
       "time": "{0}",
-      "fallback": "兜底已成功"
+      "fallback": "兜底已成功",
+      "repo": "{0}"
     },
     "recallWarning": {
       "true": "偏好精确点名暂时读不到"
@@ -1235,7 +1236,16 @@
     },
     "issue": {
       "create": "创建草稿",
-      "publish": "发布"
+      "publish": "发布",
+      "manual": "在 GitHub 手动提交",
+      "editTitle": "编辑报告",
+      "title": "标题",
+      "body": "正文",
+      "publishTitle": "发布到 GitHub",
+      "publishText": "以当前标题和正文在 {0} 创建公开 issue。",
+      "unavailable": "GitHub 发布插件不可用：可复制报告手动提交",
+      "uncertain": "暂未确认 GitHub 是否已创建，刷新核对同一份草稿，不会重复提单",
+      "published": "已发布到 GitHub"
     },
     "entity": {
       "actions": {

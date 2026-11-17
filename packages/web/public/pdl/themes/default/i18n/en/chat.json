@@ -99,7 +99,20 @@
     "changeBlocked": "The original conversation draft is not ready. Please try again."
   },
   "chatCards": {
-    "originalQuotes": "Original text"
+    "originalQuotes": "Original text",
+    "issue": {
+      "create": "Create draft",
+      "publish": "Publish",
+      "manual": "Submit on GitHub",
+      "editTitle": "Edit report",
+      "title": "Title",
+      "body": "Body",
+      "publishTitle": "Publish to GitHub",
+      "publishText": "Create a public issue in {0} with this title and body.",
+      "unavailable": "GitHub publishing is not available: copy the report to submit it yourself",
+      "uncertain": "Not confirmed whether GitHub created it yet; refresh to check the same draft (no duplicate issue)",
+      "published": "Published to GitHub"
+    }
   },
   "memoryOwners": {
     "deferred": {

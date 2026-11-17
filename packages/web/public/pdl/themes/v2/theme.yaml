@@ -9127,7 +9127,11 @@ pdl:
       - type: component
         use: v2Status
         props:
-          tone: warn
+          tone:
+            of: "@card.report.state"
+            map:
+              published: ok
+              _: warn
           text:
             of:
               of: "@card.ownerKind"
@@ -9137,7 +9141,12 @@ pdl:
                   gte: 1
                   map:
                     "true": message
-                    _: ""
+                    _:
+                      of: "@card.report.state"
+                      map:
+                        "": ""
+                        undefined: ""
+                        _: feedback
                 custody:
                   of: "@card.noticeText.length"
                   gte: 1
@@ -9174,6 +9183,13 @@ pdl:
                             "true": message
                             _: ""
             map:
+              feedback:
+                of: "@card.report.state"
+                map:
+                  unavailable: t:chatCards.issue.unavailable
+                  uncertain: t:chatCards.issue.uncertain
+                  published: t:chatCards.issue.published
+                  cancelled: t:common.status.cancelled
               memory:
                 of: "@card.noticeState"
                 map:
@@ -9290,7 +9306,12 @@ pdl:
               gte: 1
               map:
                 "true": message
-                _: ""
+                _:
+                  of: "@card.report.state"
+                  map:
+                    "": ""
+                    undefined: ""
+                    _: feedback
             custody:
               of: "@card.noticeText.length"
               gte: 1
@@ -9404,6 +9425,56 @@ pdl:
           args:
             mid: "@mid"
         when: "@card.ownerKind"
+      - type: component
+        use: v2Select
+        props:
+          id: "@card.report.repoId"
+          value: "@card.report.repo"
+          label: t:chatCards.field.repo
+          options: "@card.report.repos"
+          change: cafeSel
+        when: "@card.report.repos"
+      - type: component
+        use: v2Action
+        props:
+          label: t:common.copy
+          act: copy
+          args:
+            v: "@card.report.text"
+        when: "@card.report"
+      - type: component
+        use: v2Action
+        props:
+          label: t:chatCards.issue.manual
+          act: openUrl
+          args:
+            url: "@card.report.manualUrl"
+        when: "@card.report.manualUrl"
+      - type: component
+        use: v2Action
+        props:
+          label: t:common.edit
+          act: feedbackEdit
+          args:
+            mid: "@mid"
+        when: "@card.report.canEdit"
+      - type: component
+        use: v2Action
+        props:
+          label: "@card.report.issue"
+          act: openUrl
+          args:
+            url: "@card.report.url"
+        when: "@card.report.url"
+      - type: component
+        use: v2Action
+        props:
+          primary: true
+          label: t:chatCards.issue.publish
+          act: feedbackPublish
+          args:
+            mid: "@mid"
+        when: "@card.report.canPublish"
       - type: component
         use: v2Action
         props:
@@ -11541,7 +11612,7 @@ pdl:
                   - type: component
                     use: v2ConciergeSettings
                     props:
-                      data: $.companion
+                      data: $.pluginConfig
                 panel: true
         v2.notify.page:
           route: v2-notify
@@ -20645,6 +20716,27 @@ pdl:
         - id: dlg-in
           label: t:v2h.literals.l019
       ok: t:workspaceOwners.projectSetup.clone
+    dlg.feedbackReport:
+      title: t:chatCards.issue.editTitle
+      ok: t:common.save
+      fields:
+        - id: feedback-title
+          label: t:chatCards.issue.title
+          value: $.title
+          req: true
+          max: 500
+        - id: feedback-body
+          label: t:chatCards.issue.body
+          value: $.bodyMarkdown
+          area: true
+          max: 64000
+    dlg.feedbackPublish:
+      title: t:chatCards.issue.publishTitle
+      text:
+        t: chatCards.issue.publishText
+        args:
+          - $.repo
+      ok: t:chatCards.issue.publish
     dlg.threadReveal:
       title: t:threadSettings.reveal.title
       ok: t:threadSettings.reveal.title
