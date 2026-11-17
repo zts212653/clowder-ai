@@ -3,8 +3,9 @@
 // Custom themes are kept in the owner's preferences on the host, so clearing the browser keeps them.
 THEME_DOCS = {
   read: function () {
+    // Nothing saved yet: start on 简约经典 (the v2 package), which is how the console looked before themes.
     return api.get('/api/config/console-themes').then(function (r) {
-      return r.themes;
+      return r.themes || { active: 'pkg:v2', customs: [] };
     });
   },
   write: function (themes) {

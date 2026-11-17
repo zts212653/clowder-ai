@@ -75,7 +75,7 @@ async function boot(
   const get = vi.fn<(name: string, params?: Record<string, unknown>) => Promise<unknown>>(async (name) => {
     if (name === '/api/config/env-summary?surface=system') return systemSummaryFixture();
     if (name === '/api/config/env-summary') return environmentSummaryFixture();
-    if (name === '/api/config/console-themes') return { themes: null };
+    if (name === '/api/config/console-themes') return { themes: { active: 'sys:1', customs: [] } };
     if (name === '/api/console-themes/packages') return { packages: await builtinThemes.list() };
     if (name.startsWith('/api/console-themes/packages/'))
       return builtinThemes.read(name.slice('/api/console-themes/packages/'.length));

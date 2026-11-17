@@ -383,7 +383,7 @@ async function boot(
                 : path === '/api/concierge/work/mentions/last-handling'
                   ? { receipt: null }
                   : path === '/api/config/console-themes'
-                    ? { themes: null }
+                    ? { themes: { active: 'sys:1', customs: [] } }
                     : path === '/api/console-themes/packages'
                       ? builtinThemes.list().then((packages) => ({ packages }))
                       : path.startsWith('/api/console-themes/packages/')
