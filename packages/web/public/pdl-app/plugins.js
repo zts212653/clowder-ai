@@ -447,8 +447,21 @@ function bindPluginSpaces() {
         'content-editor-provider': 'editor',
         'desktop-window': 'desktop',
       };
+    // Only what the owner can use, as the plugin page always listed: webhooks, identities, messaging, events,
+    // connectors and services are the plugin's own plumbing.
+    const shown = [
+      'skill',
+      'mcp',
+      'schedule',
+      'direct-tool',
+      'limb',
+      'content-editor-provider',
+      'external-request',
+      'desktop-window',
+    ];
     const groups = new Map();
     items.forEach(function (capability) {
+      if (!shown.includes(capability.kind)) return;
       if (active && projectionNeeded) projectionNeeded.add('pluginTools:' + plugin.pluginId);
       const kind = kinds[capability.kind] || capability.kind;
       if (!groups.has(kind)) groups.set(kind, { kind: kind, scheduler: kind === 'scheduler', items: [] });
