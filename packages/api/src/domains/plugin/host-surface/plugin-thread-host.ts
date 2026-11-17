@@ -48,10 +48,11 @@ export interface PluginThreadHost {
     readonly parentThreadId?: string;
     readonly projectRef?: string;
     readonly participants?: readonly string[];
+    readonly internal?: true;
   }): Promise<PluginThreadSummary>;
   update(
     threadId: string,
-    patch: { readonly title?: string; readonly preferredCats?: readonly string[] },
+    patch: { readonly title?: string; readonly preferredCats?: readonly string[]; readonly internal?: true },
   ): Promise<PluginThreadSummary>;
   addParticipants(input: {
     readonly threadId: string;
@@ -62,6 +63,9 @@ export interface PluginThreadHost {
 export interface PluginThreadHostDeps extends PluginThreadProjectionDeps {
   readonly threadDeepLinkUrl: (threadId: string) => string;
   readonly pluginId: string;
+  readonly pluginInstanceId?: string;
+  /** Legacy children may be claimed only under this instance's confirmed main. */
+  readonly isBoundMainThread?: (threadId: string) => Promise<boolean>;
   readonly ownerUserId: string;
   readonly projectPath: string;
   readonly threadStore: IThreadStore;
@@ -175,6 +179,13 @@ export function createPluginThreadHost(input: PluginThreadHostDeps): PluginThrea
     input.assertCurrent?.();
   };
 
+  const requireInternalParent = async (parent: Thread | undefined) => {
+    if (!input.pluginInstanceId || !parent) throw new TypeError('Internal threads require a plugin-owned parent');
+    const owned = parent.pluginOwnership?.pluginInstanceId === input.pluginInstanceId;
+    const bound = !parent.pluginOwnership && (await input.isBoundMainThread?.(parent.id));
+    if (!owned && !bound) throw new TypeError('Internal thread parent is not owned by this plugin instance');
+  };
+
   const readThread = async (id: string): Promise<Thread | null> => {
     const thread = await input.threadStore.get(threadId(id));
     input.assertCurrent?.();
@@ -200,12 +211,7 @@ export function createPluginThreadHost(input: PluginThreadHostDeps): PluginThrea
         if (accessible.length === request.limit) break;
         if (request.before && compareThreadPosition(thread, request.before) <= 0) continue;
         if (request.pinnedOnly) {
-          if (
-            thread.id === DEFAULT_THREAD_ID ||
-            thread.deletedAt ||
-            thread.systemKind ||
-            thread.connectorHubState
-          )
+          if (thread.id === DEFAULT_THREAD_ID || thread.deletedAt || thread.systemKind || thread.connectorHubState)
             continue;
           if (thread.pinned !== true) continue;
         } else if (thread.deletedAt) {
@@ -256,15 +262,21 @@ export function createPluginThreadHost(input: PluginThreadHostDeps): PluginThrea
         !value ||
         typeof value !== 'object' ||
         Array.isArray(value) ||
-        Object.keys(value).some((key) => !['title', 'parentThreadId', 'projectRef', 'participants'].includes(key))
+        Object.keys(value).some(
+          (key) => !['title', 'parentThreadId', 'projectRef', 'participants', 'internal'].includes(key),
+        )
       )
-        throw new TypeError('thread input must contain title, parentThreadId, projectRef or participants only');
+        throw new TypeError(
+          'thread input must contain title, parentThreadId, projectRef, participants or internal only',
+        );
+      if (value.internal !== undefined && value.internal !== true) throw new TypeError('internal must be true');
       if (value.parentThreadId !== undefined && value.projectRef !== undefined)
         throw new TypeError('Select parentThreadId or projectRef, not both');
       const requestedTitle = title(value.title);
       const participants =
         value.participants === undefined ? [] : validatePreferredCats(value.participants, input.cats);
       const parent = value.parentThreadId === undefined ? undefined : await requireThread(value.parentThreadId);
+      if (value.internal) await requireInternalParent(parent);
       let project: string | undefined;
       if (value.projectRef !== undefined) {
         const selected = await validateNewProjectPath(
@@ -281,6 +293,9 @@ export function createPluginThreadHost(input: PluginThreadHostDeps): PluginThrea
         parent?.projectPath ?? project ?? input.projectPath,
         parent?.id,
       );
+      if (input.pluginInstanceId)
+        await input.threadStore.updatePluginOwnership(thread.id, { v: 1, pluginInstanceId: input.pluginInstanceId });
+      if (value.internal) await input.threadStore.updateSystemKind(thread.id, 'plugin_internal');
       if (participants.length) await input.threadStore.addParticipants(thread.id, participants);
       const stored = await input.threadStore.get(thread.id);
       if (!stored) throw new ExternalPluginRuntimeError('DELIVERY_REJECTED', 'created thread disappeared');
@@ -291,13 +306,27 @@ export function createPluginThreadHost(input: PluginThreadHostDeps): PluginThrea
       if (!patch || typeof patch !== 'object' || Array.isArray(patch))
         throw new TypeError('thread patch must be an object');
       const keys = Object.keys(patch);
-      if (!keys.length || keys.some((key) => key !== 'title' && key !== 'preferredCats'))
-        throw new TypeError('thread patch must contain title or preferredCats only');
+      if (!keys.length || keys.some((key) => key !== 'title' && key !== 'preferredCats' && key !== 'internal'))
+        throw new TypeError('thread patch must contain title, preferredCats or internal only');
+      if (patch.internal !== undefined && patch.internal !== true) throw new TypeError('internal must be true');
       const owned = await requireThread(threadId(id));
+      if (patch.internal) {
+        if (
+          (owned.pluginOwnership && owned.pluginOwnership.pluginInstanceId !== input.pluginInstanceId) ||
+          (owned.systemKind && owned.systemKind !== 'plugin_internal')
+        )
+          throw new TypeError('Cannot hide another plugin or system thread');
+        await requireInternalParent(owned.parentThreadId ? await requireThread(owned.parentThreadId) : undefined);
+      }
       const nextTitle = Object.hasOwn(patch, 'title') ? title(patch.title) : undefined;
       const preferred = Object.hasOwn(patch, 'preferredCats')
         ? validatePreferredCats(patch.preferredCats, input.cats)
         : undefined;
+      if (patch.internal && owned.systemKind !== 'plugin_internal') {
+        input.assertCurrent?.();
+        await input.threadStore.updatePluginOwnership(owned.id, { v: 1, pluginInstanceId: input.pluginInstanceId! });
+        await input.threadStore.updateSystemKind(owned.id, 'plugin_internal');
+      }
       if (nextTitle !== undefined) await input.threadStore.updateTitle(owned.id, nextTitle);
       if (preferred !== undefined) await input.threadStore.updatePreferredCats(owned.id, preferred);
       const stored = await input.threadStore.get(owned.id);

@@ -98,6 +98,13 @@ function fixture(count = 8, onExec) {
   return { store: new RedisThreadStore(redis), ids, hashes, batches, pipelineBatches, reads, members };
 }
 
+test('plugin-internal kind survives Redis detail hydration', async () => {
+  const { store, hashes } = fixture(1);
+  hashes.get('thread:thread_0').systemKind = 'plugin_internal';
+  const rows = await store.list('alice');
+  assert.equal(rows.find((row) => row.id === 'thread_0')?.systemKind, 'plugin_internal');
+});
+
 test('2,048-thread navigation stays within a bounded Redis round-trip budget', async (t) => {
   const { store, ids, batches, reads } = fixture(2048);
   const threads = await store.list('alice');

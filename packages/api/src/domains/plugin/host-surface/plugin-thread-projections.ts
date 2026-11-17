@@ -16,6 +16,7 @@ export interface PluginThreadSummary {
   readonly lastActiveAt: number;
   readonly preferredCats: readonly string[];
   readonly featureRefs: readonly string[];
+  readonly internal?: true;
 }
 
 export interface PluginThreadMessage {
@@ -108,6 +109,7 @@ export async function projectThread(
     lastActiveAt: thread.lastActiveAt,
     preferredCats: [...(thread.preferredCats ?? [])],
     featureRefs,
+    ...(thread.systemKind === 'plugin_internal' ? { internal: true as const } : {}),
   };
 }
 

@@ -601,6 +601,16 @@ export function createDormantPluginRuntimeComposition(
       : {
           threads: {
             ...options.threadProjections,
+            isPluginMainThread: async (pluginInstanceId, threadId) => {
+              const instance = (await inventoryStore.snapshot()).instances.find(
+                (row) => row.pluginInstanceId === pluginInstanceId,
+              );
+              return (
+                instance?.conversationBindings?.some(
+                  (binding) => binding.ownerUserId === options.threadOwnerUserId && binding.threadId === threadId,
+                ) === true
+              );
+            },
             threadDeepLinkUrl:
               options.threadDeepLinkUrl ?? createThreadDeepLinkUrl(resolveFrontendBaseUrl(process.env)),
             messageStore: options.messageStore,

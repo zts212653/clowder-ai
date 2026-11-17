@@ -5,6 +5,7 @@ import { z } from 'zod';
 import { apiFetch } from '@/utils/api-client';
 import { HubIcon } from '../hub-icons';
 import { ShellGlyph } from '../shell/ShellIcons';
+import { ThreadSignalPills } from '../ThreadSidebar/ThreadRowSignals';
 
 const entriesSchema = z.object({
   entries: z.array(
@@ -16,7 +17,6 @@ const entriesSchema = z.object({
       threadId: z.string().nullable(),
       status: z.enum(['setup', 'disabled', 'starting', 'ready', 'listening', 'paused', 'error']),
       openable: z.boolean().default(false),
-      badgeCount: z.number().int().nonnegative().default(0),
       icon: z.union([z.string(), z.object({ type: z.enum(['svg', 'png']), src: z.string() })]).optional(),
       detail: z.string().optional(),
     }),
@@ -37,11 +37,13 @@ export function PluginConversationEntries({
   onSelect,
   currentThreadId,
   onThreadsChange,
+  unreadCounts,
   isV2 = false,
 }: {
   onSelect(threadId: string): void;
   currentThreadId?: string | null;
   onThreadsChange?(threadIds: string[]): void;
+  unreadCounts?: ReadonlyMap<string, number>;
   isV2?: boolean;
 }) {
   const [entries, setEntries] = useState<z.infer<typeof entriesSchema>['entries']>([]);
@@ -128,10 +130,7 @@ export function PluginConversationEntries({
               style={isV2 ? { color: 'var(--shell-muted)' } : undefined}
               aria-hidden="true"
             >
-              <HubIcon
-                name={typeof entry.icon === 'string' ? entry.icon : 'bot'}
-                className="h-4 w-4"
-              />
+              <HubIcon name={typeof entry.icon === 'string' ? entry.icon : 'bot'} className="h-4 w-4" />
             </span>
             <span className="min-w-0 flex-1 truncate">{entry.label}</span>
             {note ? (
@@ -142,15 +141,11 @@ export function PluginConversationEntries({
                 {note}
               </span>
             ) : null}
-            {entry.badgeCount > 0 && (
-              <span
-                className="rounded-full bg-[var(--surface-sunken)] px-1.5 text-[10px] tabular-nums"
-                role="status"
-                aria-label={`${entry.badgeCount} 项待处理`}
-              >
-                {entry.badgeCount}
-              </span>
-            )}
+            <ThreadSignalPills
+              unreadCount={entry.threadId ? (unreadCounts?.get(entry.threadId) ?? 0) : 0}
+              hasUserMention={false}
+              testIdPrefix="resident-entry"
+            />
           </>
         );
         const className = `flex h-8 min-w-0 flex-1 items-center rounded-lg px-2 text-left ${

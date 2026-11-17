@@ -255,6 +255,18 @@ test(
     assert.ok(selectedScope.excluded.every((id) => !selectedScope.selected.includes(id)));
     await operation('activity', 'enable', {}, true);
     const main = view.parse(await runtime.supervisor.invoke(instance, 'superagent.view', {}));
+    const internalThreads = (await threads.list(owner)).filter((thread) => thread.systemKind === 'plugin_internal');
+    assert.equal(
+      internalThreads.length,
+      1,
+      'the real installed package declares exactly one internal coordination thread',
+    );
+    assert.equal(internalThreads[0].parentThreadId, main.threadId);
+    assert.equal(
+      (await threads.get(main.threadId))?.systemKind,
+      undefined,
+      'main remains the user-facing conversation',
+    );
     assert.equal(main.status, 'listening');
     const bound = await openPluginConversation(
       { inventory: runtime.inventoryStore, runtime: runtime.supervisor, threads },

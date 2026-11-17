@@ -43,7 +43,7 @@ it('an installed setup entry leads to the original plugin settings', async () =>
   expect(container.textContent).toContain('未启用');
 });
 
-it('the live entry selects its existing conversation and displays only the supplied attention count', async () => {
+it('the live entry selects its existing conversation and displays canonical unread', async () => {
   apiFetch.mockResolvedValue(
     Response.json({
       entries: [
@@ -61,13 +61,72 @@ it('the live entry selects its existing conversation and displays only the suppl
     }),
   );
   const select = vi.fn();
-  await act(async () => root.render(<PluginConversationEntries onSelect={select} currentThreadId="bot-main" />));
+  await act(async () =>
+    root.render(
+      <PluginConversationEntries
+        onSelect={select}
+        currentThreadId="bot-main"
+        unreadCounts={new Map([['bot-main', 2]])}
+      />,
+    ),
+  );
   const button = container.querySelector('button');
   expect(button?.getAttribute('aria-current')).toBe('page');
   await act(async () => button?.click());
   expect(select).toHaveBeenCalledWith('bot-main');
-  expect(container.querySelector('[aria-label="2 项待处理"]')).not.toBeNull();
+  expect(container.querySelector('[aria-label="2 条未读"]')).not.toBeNull();
   expect(container.querySelector('[aria-label="我的助手设置"]')?.getAttribute('title')).toBe('我的助手设置');
+});
+
+it('shows live main-conversation unread without counting internal activity or outstanding questions', async () => {
+  apiFetch.mockResolvedValue(
+    Response.json({
+      entries: [
+        {
+          pluginId: 'dev.resident',
+          instanceId: 'installed',
+          commandId: 'main',
+          label: '我的助手',
+          threadId: 'bot-main',
+          status: 'ready',
+          badgeCount: 7,
+        },
+      ],
+    }),
+  );
+  const select = vi.fn();
+  await act(async () =>
+    root.render(
+      <PluginConversationEntries
+        onSelect={select}
+        unreadCounts={
+          new Map([
+            ['bot-main', 3],
+            ['bot-internal', 8],
+          ])
+        }
+      />,
+    ),
+  );
+  expect(container.querySelector('[aria-label="3 条未读"]')).not.toBeNull();
+  expect(container.querySelector('[aria-label="7 项待处理"]')).toBeNull();
+  await act(async () => container.querySelector('button')?.click());
+  expect(select).toHaveBeenCalledWith('bot-main');
+  await act(async () =>
+    root.render(
+      <PluginConversationEntries
+        onSelect={select}
+        unreadCounts={
+          new Map([
+            ['bot-main', 0],
+            ['bot-internal', 9],
+          ])
+        }
+      />,
+    ),
+  );
+  expect(container.querySelector('[aria-label="3 条未读"]')).toBeNull();
+  expect(apiFetch).toHaveBeenCalledTimes(1);
 });
 
 it('a temporary read failure preserves the previously confirmed native navigation', async () => {

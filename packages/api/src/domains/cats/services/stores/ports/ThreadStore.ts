@@ -50,7 +50,13 @@ export function deriveAutoThreadTitle(content: string): string | null {
 }
 
 /** System-owned thread surfaces that stay distinct from ordinary user conversations. */
-export type ThreadSystemKind = 'connector_hub' | 'eval_domain' | 'cat_bedroom' | 'memory_ops' | 'collective_channel';
+export type ThreadSystemKind =
+  | 'connector_hub'
+  | 'eval_domain'
+  | 'cat_bedroom'
+  | 'memory_ops'
+  | 'collective_channel'
+  | 'plugin_internal';
 
 /**
  * F032 Phase C: Participant activity data for reviewer matching.
