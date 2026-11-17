@@ -1130,7 +1130,7 @@ window.clowderChat = {
       streamScrollTo(null);
     };
     STREAM_OLDER.load = function (done) {
-      if (chatRead('chatPage').older) return false;
+      if (chatRead('chatPage').older !== 'idle') return false;
       chatAction('older').then(done);
     };
     A.streamOlder = function () {

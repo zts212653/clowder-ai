@@ -314,8 +314,8 @@ function pvJoin(ps, sc, root, sep) { return pvGlue((Array.isArray(ps) ? ps : [ps
 function pvGlue(xs, sep) { return xs.filter(Boolean).reduce(function (acc, x, k) { return k && !PV_GLUE.test(x) ? acc + sep + x : acc + x; }, ''); }
 /* 一处内容：写成路径时取视图模型的值（字符串原样当文字、数组 / 对象按片段画）；写成片段时按片段画 */
 function pvAny(x, sc, root) { return x == null ? '' : typeof x === 'string' ? pvLit(pv(x, sc, root), sc, root) : pvParts(x, sc, root); }
-/* 来自视图模型的内容：字符串原样当文字；数组 / 对象按片段画 */
-function pvLit(x, sc, root) { if (x == null) return ''; if (typeof x === 'string') return h(x); return (Array.isArray(x) ? x : [x]).map(function (p) { return typeof p === 'string' ? h(p) : pvPart(p, sc, root); }).filter(Boolean).reduce(function (acc, x, k) { const el = /^</.test(x) !== />$/.test(acc); return k && el && !/\s$/.test(acc) && !/^\s/.test(x) && !PV_GLUE.test(x) ? acc + ' ' + x : acc + x; }, ''); }   /* 文字和组件（状态、标签……）相邻时隔一个空格；视图模型自己带了空白或分隔的照旧 */
+/* 来自视图模型的内容：字符串、数字、布尔原样当文字；数组 / 对象按片段画 */
+function pvLit(x, sc, root) { if (x == null) return ''; if (typeof x !== 'object') return h(String(x)); return (Array.isArray(x) ? x : [x]).map(function (p) { return p == null || typeof p !== 'object' ? h(p == null ? '' : String(p)) : pvPart(p, sc, root); }).filter(Boolean).reduce(function (acc, x, k) { const el = /^</.test(x) !== />$/.test(acc); return k && el && !/\s$/.test(acc) && !/^\s/.test(x) && !PV_GLUE.test(x) ? acc + ' ' + x : acc + x; }, ''); }   /* 文字和组件（状态、标签……）相邻时隔一个空格；视图模型自己带了空白或分隔的照旧 */
 
 /* ───────── 控件 ───────── */
 function pvSegItems(c, sc, root) {

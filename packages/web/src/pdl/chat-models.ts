@@ -1235,7 +1235,7 @@ export function chatModels(data: ChatData, ui: ChatUiState, input?: ChatProjecti
         messages: pageItems.map((m) => ({ mid: m.id })),
         lobby: data.threadId === 'default',
         title: thread()?.title,
-        older: data.loading ? 'loading' : !data.hasMore ? 'done' : '',
+        older: data.loading ? 'loading' : !data.hasMore ? 'done' : 'idle',
         viewCat: viewCat() ? members().find((m) => m.id === viewCat()) : null,
         find: ui.find.active ? { q: ui.find.q, index: pop()?.i ?? 0, count: matches().length } : null,
       };
@@ -1243,7 +1243,7 @@ export function chatModels(data: ChatData, ui: ChatUiState, input?: ChatProjecti
     get chatTicksParts() {
       const rows = sourceMessages();
       return {
-        older: data.loading ? 'loading' : !data.hasMore ? 'done' : '',
+        older: data.loading ? 'loading' : !data.hasMore ? 'done' : 'idle',
         ids: rows.map((item) => item.id),
         item: (i: number) => {
           const item = rows[i];

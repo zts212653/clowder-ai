@@ -28,6 +28,14 @@ function listNextRead(el, near) {
   el._nextRead = true; actFn(d.act)(d.args, el);
 }
 nearView('[data-list-next]', listNextRead);
+/* 消息流的顶端（和列表的下一页同一个做法）：最早那条消息滚到附近就加载更早的（登记的 STREAM_OLDER；正在加载、已经没有更早的它会拒绝），
+   加载完还在附近就接着加载。看的是流里的第一条，不另加节点（流是带间距的 flex，多一个节点就多一段间距） */
+function streamOlderRead(el, near) {
+  if (!near || !STREAM_OLDER.load || el._olderBusy) return;
+  el._olderBusy = true;
+  if (STREAM_OLDER.load(function () { el._olderBusy = false; if (el.isConnected && el.__near) streamOlderRead(el, true); }) === false) el._olderBusy = false;
+}
+nearView('[data-own="stream"] > :first-child', streamOlderRead);
 document.addEventListener('wheel', function (e) {
   if (e.deltaY <= 0) return;
   const sc = e.target.closest('.scroll'); if (!sc) return;
