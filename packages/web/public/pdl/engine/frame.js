@@ -641,6 +641,8 @@ let PROJ_FOCUS = false;
    和这次画出的一块。渲染开头比出变了的（render），读过的变了的容器重画，没读过的交回上一次的一块——
    和上次一样的段 patchSegs 整段留着，节点（连同局部更新改过的内容）不碰。宿主的数据来源（pdlReadSet 登记的）也记在块名下：没重画的块读的照样算“还需要” */
 const CT_PIECE = {};
+const LEAF_ERR = {};   /* 画的时候出过错的块：键 → 错误（同一个错不重复报） */
+const LEAF_DIRTY = new Set();   /* 里面有块出错的外层：这次记下的不算画好，下次重画 */
 let RENDER_CHANGED = null, READ_SINK = null;
 /* 正在画的每一层都记下这次读取 */
 function readNote(key) { for (let i = 0; i < READ_SCOPES.length; i++) READ_SCOPES[i].add(key); if (READ_OWN) READ_OWN.add(key); }
@@ -687,13 +689,24 @@ function ctLeaf(k, sig, draw) {
   const reads = new Set(), own = new Set(), own0 = READ_OWN, focus0 = PROJ_FOCUS, up = CT_UP.slice(), ctx = { tab: PV.tabKey, region: PV.region, nav: NAV_CTX, back: { page: BACK.page, detail: BACK.detail, placed: BACK.placed } };
   READ_SCOPES.push(reads); READ_OWN = own; CT_UP.push(k);
   let x;
-  try { PROJ_FOCUS = false; x = draw(); } finally { READ_SCOPES.pop(); READ_OWN = own0; CT_UP.pop(); }
+  try { PROJ_FOCUS = false; x = draw(); delete LEAF_ERR[k]; }
+  catch (err) {   /* 这一块画的时候出错（插件这类外部声明和数据）：留着上一次画好的，第一次就出错则空着；同一个错只报一次；别的块照常画。
+                     记下的那一块不算画好：下次一定重画，错没了就回来 */
+    if (LEAF_ERR[k] !== err.message) { LEAF_ERR[k] = err.message; console.error(err); }
+    CT_UP.forEach(function (u) { LEAF_DIRTY.add(u); });
+    READ_SCOPES.pop(); READ_OWN = own0; CT_UP.pop(); PROJ_FOCUS = focus0;
+    reads.forEach(function (r) { for (let i = 0; i < READ_SCOPES.length; i++) READ_SCOPES[i].add(r); });
+    if (!was) return '';
+    was.sig = null;
+    return typeof was.piece === 'string' ? was.piece : Object.assign({}, was.piece);
+  }
+  READ_SCOPES.pop(); READ_OWN = own0; CT_UP.pop();
   if (typeof x === 'string' && k.indexOf('view:') === 0) x = x.replace(/^(<[a-zA-Z][^>]*)>/, '$1 data-pv="' + h(k) + '">');   /* 子视图的根带上自己的键：只重画它时按键找到它的节点（有的视图画出来没有视图的外框） */
   const focus = PROJ_FOCUS; PROJ_FOCUS = focus0 || focus;
   reads.forEach(function (r) { for (let i = 0; i < READ_SCOPES.length; i++) READ_SCOPES[i].add(r); });
   const took = ['page', 'detail'].filter(function (r) { return ctx.back[r] && !BACK[r]; });
   const full = typeof x === 'string' ? keptExpand(x) : x && Object.assign({}, x, { html: keptExpand(x.html) });   /* 记下的是完整的一块：里面没重画的子块交的是壳，换回它们的内容（下次整块交回时不缺） */
-  CT_PIECE[k] = x ? { sig: sig, back: back, took: took, reads: reads, own: own, up: up, ctx: ctx, draw: draw, focus: focus, piece: full } : null;
+  CT_PIECE[k] = x ? { sig: LEAF_DIRTY.delete(k) ? null : sig, back: back, took: took, reads: reads, own: own, up: up, ctx: ctx, draw: draw, focus: focus, piece: full } : null;
   /* 重画出来和上一次一模一样（按时间重算了、显示没变）：当作没变，原来的节点整个留着——不比对，本地展开、滚动这类运行时的状态不受影响 */
   if (RENDER_CHANGED && was && typeof x === 'string' && tickless(full) === tickless(was.piece) && /^<div class="vw-view/.test(full)) return keptStub(k, full);
   return x;
@@ -705,7 +718,7 @@ const CT_UP = [];
 function pieceOne(p) { if (p.one == null) { const t = document.createElement('template'); t.innerHTML = p.piece; p.one = t.content.childElementCount === 1; } return p.one; }
 let SHELL_READS = null, SHELL_OWN = null;
 function renderLocal(keep, changed) {
-  if (!keep || !SHELL_READS || readsHit(SHELL_OWN, changed)) return false;
+  if (!keep || !SHELL_READS || readsHit(SHELL_OWN, changed) || Object.keys(LEAF_ERR).length) return false;   /* 有块上次出错：走整页这一遍，它重画一次（没变的照样留着） */
   const hit = Object.keys(CT_PIECE).filter(function (k) { return CT_PIECE[k] && readsHit(CT_PIECE[k].own, changed); });
   const targets = [], pops = Object.keys(POP_READS).filter(function (k) { return readsHit(POP_READS[k], changed); });
   for (const k of hit) {
