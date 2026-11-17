@@ -3,7 +3,7 @@ import {
   PROGRAM_ADAPTER_MEDIA_CONTENT_TYPES,
   PROGRAM_ADAPTER_MEDIA_MAX_BYTES,
   type ProgramAdapterMediaContentType,
-} from './program-adapter-media-contract.js';
+} from '../program-adapter-media-contract.js';
 
 export type MicroduckShowMediaSource = 'real_capture' | 'faithful_replay';
 export type MicroduckShowMediaKind = 'image' | 'video';
