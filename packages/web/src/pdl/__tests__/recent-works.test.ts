@@ -63,3 +63,19 @@ it('uses the existing list error/retry state for both an error envelope and an i
   await act(() => hook.result.current.action('cafeRwRetry'));
   await waitFor(() => expect(hook.result.current.project().recentWorks.rw.load).toBe('empty'));
 });
+it('shows the works a bounded read found even when it could not reach the end of history', async () => {
+  const work = {
+    type: 'image',
+    name: 'found.png',
+    ref: 'content:found',
+    catId: 'codex',
+    createdAt: 1,
+    threadId: 'source',
+    sourceMessageId: 'source-message',
+    threadTitle: 'Source',
+  };
+  vi.mocked(apiFetch).mockResolvedValue(Response.json({ artifacts: [work], workLineage: 'resolved', complete: false }));
+  const hook = renderHook(() => useOwnerProjection('recentWorks', useRecentWorks(fixtureData(), true)));
+  await waitFor(() => expect(hook.result.current.project().recentWorks.rw.works.items[0]?.name).toBe('found.png'));
+  expect(hook.result.current.project().recentWorks.rw.load).toBe('');
+});

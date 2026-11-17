@@ -31,7 +31,8 @@ export function useRecentWorks(data: ChatData, needed: boolean | number = false)
         if (!abort.signal.aborted)
           setRead({
             projectId,
-            load: !result.complete ? 'error' : result.artifacts.length ? '' : 'empty',
+            // A bounded read that stopped early still shows what it found; only an empty one cannot claim "none".
+            load: result.artifacts.length ? '' : result.complete ? 'empty' : 'error',
             artifacts: result.artifacts.map((work) => ({ ...work, navigationId: workKey(work) })),
           });
       },
