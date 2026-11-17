@@ -191,13 +191,22 @@ if (-not $SkipBundleDeps) {
     # Packaging redundancy is removed in the export layer, so the installer
     # archive, the portable zip and startup profiling all share one file set.
     # Each item is opt-in; the archive layer only compresses and records integrity.
+    # An explicit caller value wins (e.g. CAT_CAFE_PRUNE_SWC=0 keeps SWC);
+    # only unset knobs fall back to the release default.
     $pruneEnv = @('CAT_CAFE_PRUNE_SWC', 'CAT_CAFE_PRUNE_PLATFORM', 'CAT_CAFE_PRUNE_MAPS')
-    foreach ($name in $pruneEnv) { Set-Item -Path "Env:$name" -Value '1' }
+    $pruneSaved = @{}
+    foreach ($name in $pruneEnv) {
+        $pruneSaved[$name] = [Environment]::GetEnvironmentVariable($name, 'Process')
+        if ([string]::IsNullOrEmpty($pruneSaved[$name])) { Set-Item -Path "Env:$name" -Value '1' }
+    }
     try {
         node (Join-Path $ProjectRoot "desktop/scripts/frozen-runtime-deploy.mjs") $ProjectRoot $nextDeploy
         if ($LASTEXITCODE -ne 0) { throw "Frozen runtime export failed" }
     } finally {
-        foreach ($name in $pruneEnv) { Remove-Item "Env:$name" -ErrorAction SilentlyContinue }
+        foreach ($name in $pruneEnv) {
+            if ($null -eq $pruneSaved[$name]) { Remove-Item "Env:$name" -ErrorAction SilentlyContinue }
+            else { Set-Item -Path "Env:$name" -Value $pruneSaved[$name] }
+        }
     }
     if (Test-Path -LiteralPath $deployRoot) {
         Move-Item -LiteralPath $deployRoot -Destination (Join-Path $bundledDir "deploy-before-$stamp")

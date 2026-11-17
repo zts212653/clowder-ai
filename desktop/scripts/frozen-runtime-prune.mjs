@@ -11,10 +11,11 @@ import path from 'node:path';
  */
 const CATEGORIES = {
   swc: [/(?:^|\/)@next\/swc-[^/]+(?:\/|$)/],
+  // Only the win32-x64 target is supported; every other platform build is dead weight there.
   platform: [
-    /(?:^|\/)@esbuild\/[^/]*-(?:darwin|linux|freebsd|android|win32-arm64|win32-ia32)-[^/]*(?:\/|$)/,
-    /(?:^|\/)@img\/sharp-(?:darwin|linux|linuxmusl|win32-arm64|wasm32)-[^/]*(?:\/|$)/,
-    /(?:^|\/)node-pty\/prebuilds\/(?:darwin|linux|win32-arm64|win32-ia32)-[^/]*(?:\/|$)/,
+    /(?:^|\/)@esbuild\/(?:darwin|linux|freebsd|openbsd|netbsd|sunos|aix|android|win32-arm64|win32-ia32)-[^/]*(?:\/|$)/,
+    /(?:^|\/)@img\/sharp(?:-libvips)?-(?:darwin|linux|linuxmusl|win32-arm64|win32-ia32|wasm32)-[^/]*(?:\/|$)/,
+    /(?:^|\/)node-pty\/prebuilds\/(?:darwin|linux|win32-arm64|win32-ia32)(?:-[^/]+)?(?:\/|$)/,
     /(?:^|\/)@anthropic-ai\/claude-agent-sdk-(?:darwin|linux)-[^/]*(?:\/|$)/,
   ],
   maps: [/\.map$/],
@@ -36,13 +37,14 @@ function walk(root, directory = root, output = []) {
 
 /**
  * @param {string} root frozen dependency tree (the materialized `node_modules`)
- * @param {{swc?: boolean, platform?: boolean, maps?: boolean, dryRun?: boolean}} options
+ * @param {{swc?: boolean, platform?: boolean, maps?: boolean, dryRun?: boolean, target?: 'win32-x64'}} options
  * @returns {{removedFiles: number, removedBytes: number, byCategory: Record<string, {files: number, bytes: number}>}}
  */
 export function pruneFrozenRuntimeRedundancy(
   root,
-  { swc = false, platform = false, maps = false, dryRun = false } = {},
+  { swc = false, platform = false, maps = false, dryRun = false, target = 'win32-x64' } = {},
 ) {
+  if (platform && target !== 'win32-x64') throw new Error(`Unsupported prune target: ${target}`);
   const enabled = Object.entries({ swc, platform, maps })
     .filter(([, value]) => value)
     .map(([name]) => name);
