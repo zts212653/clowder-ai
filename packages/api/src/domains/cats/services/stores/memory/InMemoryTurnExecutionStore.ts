@@ -27,6 +27,7 @@ import {
   type ITurnExecutionStore,
   type MemberTurnStartedAfterQuery,
   matchesTurnExecutionSource,
+  RESTART_SHUTDOWN_TERMINAL_REASON,
   type RecentSettledTurnQuery,
   serializeTurnExecutionIdentity,
   type TransitionTurnExecutionResult,
@@ -77,7 +78,7 @@ export class InMemoryTurnExecutionStore implements ITurnExecutionStore {
   }
 
   private readonly records = new Map<string, TurnExecutionRecord>();
-  private readonly owedSleepContinuations = new Set<string>();
+  private readonly owedContinuations = new Set<string>();
   private readonly immutableIdentities = new Map<string, string>();
   private readonly parentIndex = new Map<string, Set<string>>();
   private readonly responsePending = new Set<string>();
@@ -197,8 +198,11 @@ export class InMemoryTurnExecutionStore implements ITurnExecutionStore {
     if (input.terminalReason !== undefined) record.terminalReason = input.terminalReason;
     if (input.providerTeardownAt !== undefined) record.providerTeardownAt = input.providerTeardownAt;
     this.responsePending.add(invocationId);
-    if (input.status === 'failed' && input.terminalReason === HOST_SLEEP_TERMINAL_REASON) {
-      this.owedSleepContinuations.add(invocationId);
+    if (
+      (input.status === 'failed' && input.terminalReason === HOST_SLEEP_TERMINAL_REASON) ||
+      input.terminalReason === RESTART_SHUTDOWN_TERMINAL_REASON
+    ) {
+      this.owedContinuations.add(invocationId);
     }
     this.publishPending(record);
     return { outcome: 'transitioned', record: cloneTurnExecutionRecord(record) };
@@ -268,15 +272,15 @@ export class InMemoryTurnExecutionStore implements ITurnExecutionStore {
     return false;
   }
 
-  listOwedSleepContinuations(): TurnExecutionRecord[] {
-    return [...this.owedSleepContinuations]
+  listOwedContinuations(): TurnExecutionRecord[] {
+    return [...this.owedContinuations]
       .map((invocationId) => this.records.get(invocationId))
       .filter((record): record is TurnExecutionRecord => record !== undefined)
       .map(cloneTurnExecutionRecord);
   }
 
-  settleOwedSleepContinuations(invocationIds: readonly string[]): void {
-    for (const invocationId of invocationIds) this.owedSleepContinuations.delete(invocationId);
+  settleOwedContinuations(invocationIds: readonly string[]): void {
+    for (const invocationId of invocationIds) this.owedContinuations.delete(invocationId);
   }
 
   listRecentSettled(query: RecentSettledTurnQuery): TurnExecutionRecord[] {

@@ -10,8 +10,6 @@ const { createServer } = await import('../../dist/index.js');
 const { handleSetReadMode } = await import('../../dist/tools/callback-tools.js');
 const { handleAudioListSources } = await import('../../dist/tools/audio-tools.js');
 const { handleRealtimeCompanionStatus } = await import('../../dist/tools/realtime-companion-tools.js');
-const { handleGraphResolve } = await import('../../dist/tools/graph-tools.js');
-const { handleListRecent } = await import('../../dist/tools/recent-tools.js');
 
 // Clear inherited authentication, then prohibit actual network access. All
 // failure paths below are read-only; no callback or audio session is created.
@@ -22,9 +20,6 @@ for (const key of Object.keys(process.env)) {
 process.env.CAT_CAFE_READONLY = 'false';
 process.env.CAT_CAFE_CAT_ID = 'fixture-cat';
 globalThis.fetch = async (url) => {
-  if (String(url).includes('/api/library/graph/resolve'))
-    return new Response(JSON.stringify({ status: 'no_match', query: 'fixture', message: 'none', examples: [] }));
-  if (String(url).includes('/api/library/recent')) return new Response(JSON.stringify({ items: [] }));
   throw new Error('fixture offline');
 };
 
@@ -38,8 +33,6 @@ try {
     readMode: await handleSetReadMode({ mode: 'full' }),
     audio: await handleAudioListSources(),
     companion: await handleRealtimeCompanionStatus({ thread_id: 'fixture-thread' }),
-    graph: await handleGraphResolve({ query: 'fixture' }),
-    recent: await handleListRecent({}),
   };
   const tools = (await client.listTools()).tools;
   console.log(

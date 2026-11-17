@@ -14,7 +14,7 @@ test('preparation stays unknown until exact scoped original-source read; retries
   assert.ok(f.nativeReads.every((limit) => limit <= 20));
   assert.equal(f.opportunities.get(prep.opportunityId)?.occurredAt, 1000);
   const pointer = prep.pointers[0];
-  const handle = pointer.read.handle;
+  const handle = pointer.readRef.handle;
   assert.deepEqual(f.episodes.listByCue('owner', pointer.cueId), []);
   assert.equal((await f.post('outcome', { handle, requestId: 'out-0', outcome: 'applied' })).statusCode, 409);
   for (const headers of [
@@ -41,7 +41,7 @@ test('already read versions do not occupy the two-pointer budget; a new epoch or
   const f = fixture(t);
   const first = (await f.post('prepare', { activity: 'html', query: 'Rules  for HTML' })).json();
   for (const pointer of first.pointers)
-    assert.equal((await f.post('drill', { handle: pointer.read.handle, requestId: pointer.cueId })).statusCode, 200);
+    assert.equal((await f.post('drill', { handle: pointer.readRef.handle, requestId: pointer.cueId })).statusCode, 200);
   const second = (await f.post('prepare', { activity: 'html', query: 'rules for html' })).json();
   assert.deepEqual(
     second.pointers.map((p) => p.source.anchor),
@@ -65,14 +65,14 @@ test('corrected sources and revoked scope close prepared handles before any pres
   const prep = (await f.post('prepare', { activity: 'video', query: 'paper' })).json();
   const [a, b] = prep.pointers;
   f.state.revision = 'r2';
-  assert.equal((await f.post('drill', { handle: a.read.handle, requestId: 'changed' })).statusCode, 404);
+  assert.equal((await f.post('drill', { handle: a.readRef.handle, requestId: 'changed' })).statusCode, 404);
   assert.ok(f.episodes.listByCue('owner', a.cueId).every((event) => event.axis === 'invalidation'));
   f.state.current = false;
-  assert.equal((await f.post('drill', { handle: b.read.handle, requestId: 'revoked' })).statusCode, 404);
+  assert.equal((await f.post('drill', { handle: b.readRef.handle, requestId: 'revoked' })).statusCode, 404);
   assert.ok(f.episodes.listByCue('owner', b.cueId).every((event) => event.axis === 'invalidation'));
   f.state.current = true;
   f.state.revision = 'r1';
-  assert.equal((await f.post('drill', { handle: a.read.handle, requestId: 'retry-invalidated' })).statusCode, 409);
+  assert.equal((await f.post('drill', { handle: a.readRef.handle, requestId: 'retry-invalidated' })).statusCode, 409);
   assert.ok(f.episodes.listByCue('owner', a.cueId).every((event) => event.axis === 'invalidation'));
 });
 
@@ -147,12 +147,12 @@ test('a failed explicit-read receipt stays retryable and does not fabricate cons
   f.service.recordRead = () => {
     throw new Error('isolated receipt write unavailable');
   };
-  const failed = await f.post('drill', { handle: pointer.read.handle, requestId: 'commit-retry' });
+  const failed = await f.post('drill', { handle: pointer.readRef.handle, requestId: 'commit-retry' });
   assert.equal(failed.statusCode, 503);
   assert.equal(failed.json().retryable, true);
   assert.equal(failed.json().payload, undefined);
   assert.deepEqual(f.episodes.listByCue('owner', pointer.cueId), []);
   f.service.recordRead = recordRead;
-  assert.equal((await f.post('drill', { handle: pointer.read.handle, requestId: 'commit-retry' })).statusCode, 200);
+  assert.equal((await f.post('drill', { handle: pointer.readRef.handle, requestId: 'commit-retry' })).statusCode, 200);
   assert.equal(f.episodes.listByCue('owner', pointer.cueId).length, 2);
 });

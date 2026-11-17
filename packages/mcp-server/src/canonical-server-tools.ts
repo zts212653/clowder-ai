@@ -21,13 +21,11 @@ import {
   externalRuntimeSessionReadTools,
   fileSliceTools,
   financeTools,
-  graphTools,
   harnessHistoryTools,
   homeStateTools,
   hubActionTools,
   libraryLifecycleTools,
   limbTools,
-  matterMemoryTools,
   pawFeelDispositionTools,
   pawFeelInboxAuditScanTools,
   perspectiveTools,
@@ -35,7 +33,6 @@ import {
   publishVerdictTools,
   realtimeCompanionTools,
   recallMetricsTools,
-  recentTools,
   richBlockRulesTools,
   runtimeInteractionTools,
   scheduleTools,
@@ -50,6 +47,7 @@ import {
 import { liveMeetingTools } from './tools/live-meeting-tools.js';
 import { memberImageTools } from './tools/member-image-tools.js';
 import { pageActionTools } from './tools/page-action-tools.js';
+import { readMemoryTools } from './tools/read-memory-tools.js';
 import { rememberTools } from './tools/remember-tool.js';
 import { watcherTools } from './tools/watcher-tools.js';
 
@@ -91,16 +89,14 @@ export const CANONICAL_TOOL_SOURCES = {
     ...pluginManagementTools,
   ],
   memory: [
+    ...readMemoryTools,
     ...rememberTools,
     ...recallMetricsTools,
-    ...matterMemoryTools,
     ...evidenceTools,
     ...externalRuntimeSessionReadTools,
     ...fileSliceTools,
-    ...graphTools,
     ...libraryLifecycleTools,
     ...perspectiveTools,
-    ...recentTools,
     ...sessionChainTools,
   ],
   signals: [...signalsTools, ...signalStudyTools],

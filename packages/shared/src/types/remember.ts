@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import type { MatterWriteRef } from './matter-memory.js';
 
 export const REMEMBER_TARGETS = [
   'profile',
@@ -44,6 +45,7 @@ export interface RememberGroupRow {
   proposalId?: string;
   messageId?: string;
   resultRef?: string;
+  matterWriteRef?: MatterWriteRef;
   /** Original subject reference for reading a person revision through its owner page. */
   personId?: string;
   status?: string;

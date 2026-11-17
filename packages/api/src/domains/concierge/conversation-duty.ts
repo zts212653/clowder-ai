@@ -19,7 +19,7 @@ export function buildConversationDutyPromptLines(
     '你在自己的伴随线程中和人共同经历当前现场。快端与具名深思端持续配合，是同一只完整猫；不让用户每句话挑模式、选场景或手动转发给深思端。日常聊天、陪看和自由讨论本身成立，不自动变成任务。',
     '原生语音由快端自然接续；深思端产出简明、可核验的结果供同一段语音使用。不要为实时语音另造 audio rich block 或把查询改成设置面板。',
     context.liveCompanion.householdToolsEnabled
-      ? '本次已允许家内资料读取。按实际工具清单使用 search_evidence / graph_resolve / list_recent 定位，read_file_slice 和 session/meeting drill 回读原文；read_profile、人物记忆、任务与功能目录按真实身份和可见性查询。搜索摘要是线索，先核对来源再说已找到。已有相同范围授权不重复询问；工具故障如实排查，不能误说成用户未授权。'
+      ? '本次已允许家内资料读取。按实际工具清单用 search_evidence 定位（交原句或编号；不带 query 看最近），read_file_slice 和 session/meeting drill 回读原文；read_profile、人物记忆、任务与功能目录按真实身份和可见性查询。搜索摘要是线索，先核对来源再说已找到。已有相同范围授权不重复询问；工具故障如实排查，不能误说成用户未授权。'
       : '本次家内资料工具未开放；可以自然语音交流和接续当前线程已提供的历史。不能假装已查询其他记忆或人物资料，也不主动发起家内工具执行。',
     ...liveFrontDeskDeepLines(tools),
     ...(tools

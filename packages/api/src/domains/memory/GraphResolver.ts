@@ -22,6 +22,7 @@ export interface GraphStore {
 }
 
 export interface GraphNode {
+  readRef?: import('@cat-cafe/shared').ReadRef;
   anchor: string;
   collectionId: string;
   sensitivity: CollectionSensitivity;
@@ -239,6 +240,7 @@ export class GraphResolver {
             title: isRedacted ? `[redacted — ${sensitivity} collection]` : title,
             redacted: isRedacted,
             ...(doc && !isRedacted ? { displayType: evidenceDisplayType(doc) } : {}),
+            ...(doc?.readRef && !isRedacted ? { readRef: doc.readRef } : {}),
           });
         }
 

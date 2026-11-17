@@ -49,9 +49,8 @@ const EXCLUDED_REASON_CODES = new Set([
   // to the user, and the underlying decision is upstream policy (not our layer).
   'upstream_policy_reject',
   // A missing local CLI is user-environment state with a documented install command,
-  // not a defect in our spawn path. Unlike spawn_failed (a process we tried to start
-  // and lost), there is no process here. Keep it out of TRIGGERING_REASON_CODES so a
-  // fresh install does not file one project issue per provider.
+  // not a defect in our runtime. The existing F212 panel carries the next step;
+  // auto-filing against ourselves would only add noise (issue #1463 S3).
   'cli_not_found',
 ]);
 

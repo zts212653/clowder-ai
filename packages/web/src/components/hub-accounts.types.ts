@@ -1,4 +1,4 @@
-import type { AccountQuotaObservation, CodexManagedAccount } from '@cat-cafe/shared';
+import type { AccountQuotaObservation, ClaudeQuotaView, CodexManagedAccount } from '@cat-cafe/shared';
 
 export type ProfileMode = 'subscription' | 'api_key';
 export type ProfileAuthType = 'oauth' | 'api_key';
@@ -11,6 +11,7 @@ export interface ProfileItem {
   agyLoginCommand?: string;
   id: string;
   quota?: AccountQuotaObservation;
+  claudeQuota?: ClaudeQuotaView;
   /** Read-only canonical default-home readiness; this does not make the default managed. */
   codexLoginStatus?: 'ready' | 'not_logged_in' | 'unreadable';
   nativeLogin?: {

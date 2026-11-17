@@ -1,4 +1,5 @@
 import type { MessageAnswerSelection, MessageSourceSelection } from './message-search-selection.js';
+import type { ReadRef } from './types/memory-read.js';
 
 /** The same message search request/response serves cats, concierge and the human UI. */
 export interface MessageSearchInput {
@@ -42,6 +43,7 @@ export interface MessageNavigationAdmission {
 }
 
 export interface MessageSearchResult {
+  readRef?: ReadRef;
   threadId: string;
   messageId: string;
   threadTitle: string;

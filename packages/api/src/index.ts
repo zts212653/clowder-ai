@@ -135,7 +135,7 @@ import { createTaskProgressStore } from './domains/cats/services/agents/invocati
 import { createExitedCliExecutionRecovery } from './domains/cats/services/agents/invocation/ExitedCliExecutionRecovery.js';
 import {
   HostSleepContinuationScheduler,
-  recoverSleepContinuations,
+  recoverOwedContinuations,
 } from './domains/cats/services/agents/invocation/host-sleep/HostSleepContinuationScheduler.js';
 import { createHostSleepEvidenceReader } from './domains/cats/services/agents/invocation/host-sleep/HostSleepEvidence.js';
 import { InvocationOwnerReaper } from './domains/cats/services/agents/invocation/InvocationOwnerReaper.js';
@@ -1497,6 +1497,9 @@ async function main(): Promise<void> {
   const readDiagnostics = createSqliteReadDiagnostics({
     onSlowRead: (event) => app.log.warn({ module: 'sqlite-read', ...event }, 'Slow synchronous SQLite .all read'),
   });
+  // Every store's degraded vector search, in this process or reported by a read worker.
+  const { logVectorSearchDegradesTo } = await import('./domains/memory/vector-search-degrade-report.js');
+  logVectorSearchDegradesTo(app.log);
   // Resolve embed mode. Priority:
   //   1. If the user enabled the Embedding service in console (service.enabled=true),
   //      force the in-process mode to 'on' (or honor an explicit 'shadow' / 'on' env
@@ -2948,9 +2951,11 @@ async function main(): Promise<void> {
     : undefined;
   // F337: a turn a machine sleep cut off is told apart from a provider failure and continued after the lid opens.
   const hostSleepEvidence = createHostSleepEvidenceReader();
+  // F337: set as the runtime's stop begins; turns its provider kills end after this and are continued next boot.
+  const runtimeStop = { begun: false };
   const hostSleepContinuation = new HostSleepContinuationScheduler({
     readEvidence: hostSleepEvidence,
-    continueCats: (invocationIds) =>
+    continueCats: (invocationIds, kind) =>
       continueInterruptedCats(
         {
           turns: turnExecutionStore,
@@ -2960,9 +2965,9 @@ async function main(): Promise<void> {
           log: app.log,
         },
         invocationIds,
-        'host_sleep',
+        kind,
       ),
-    settleOwed: (invocationIds) => turnExecutionStore.settleOwedSleepContinuations(invocationIds),
+    settleOwed: (invocationIds) => turnExecutionStore.settleOwedContinuations(invocationIds),
     log: app.log,
   });
   router = new AgentRouter({
@@ -2972,6 +2977,7 @@ async function main(): Promise<void> {
       readEvidence: hostSleepEvidence,
       scheduleContinuation: (input) => hostSleepContinuation.schedule(input),
     },
+    isRuntimeShuttingDown: () => runtimeStop.begun,
     ordinaryTaskHandoffs,
     messageSearchAnswerService,
     ownedWaitStatusReader,
@@ -7986,9 +7992,10 @@ async function main(): Promise<void> {
           },
           childRecovery.invocationIds,
         );
-        // F337: a sleep continuation promised before this restart is still owed; recover it from the
-        // durable failed turns (delivery stays idempotent and skips cats that already ran again).
-        const sleepContinuation = await recoverSleepContinuations({
+        // F337: continuations still owed — sleeps promised before this restart, and turns the previous
+        // stop cut off — recovered from the durable owed set (delivery is idempotent and skips cats
+        // that already ran again).
+        const owedContinuation = await recoverOwedContinuations({
           turns: turnExecutionStore,
           scheduler: hostSleepContinuation,
           log: app.log,
@@ -7999,7 +8006,7 @@ async function main(): Promise<void> {
             childRecovery,
             startupRecovery,
             restartContinuation,
-            sleepContinuation,
+            owedContinuation,
             windowsJobRecovery: { released: windowsJobTeardowns.released, ...windowsJobEvidence },
           },
           '[api] F298 callback auth + TurnExecution + Queue/History startup recovery completed',
@@ -8614,6 +8621,7 @@ async function main(): Promise<void> {
       return;
     }
     shuttingDown = true;
+    runtimeStop.begun = true;
 
     let exitCode = 0;
     try {

@@ -4,11 +4,14 @@ import type { FileVectorReadWindowSnapshot } from './file-vector-read-window.js'
 import type { ChildMessage } from './memory-process-protocol.js';
 import { type MessageCandidateAuditSnapshot, safeCandidateAudit } from './message-candidate-audit-wire.js';
 import type { CjkReadSnapshot } from './message-cjk-read-diagnostics.js';
+import type { VectorSearchDegradeRecord } from './vector-search-degrade-report.js';
 
 export type MemoryReadDiagnostic =
   | { phase: 'database-initialization' }
   | { phase: 'cjk-read'; cjk: CjkReadSnapshot }
   | { phase: 'candidate-audit'; candidateAudit: MessageCandidateAuditSnapshot }
+  /** Published by the process pool on receipt; never part of a request's progress. */
+  | { phase: 'vector-degrade'; degrade: VectorSearchDegradeRecord }
   | {
       phase: 'sql-start';
       sql: Omit<SqliteReadDiagnostic, 'elapsedMs' | 'rows'>;

@@ -24,6 +24,7 @@ export * from './chat-background.js';
 export * from './chat-background-state.js';
 export * from './chat-references.js';
 export * from './chatgpt-cloud-presentation.js';
+export * from './claude-quota.js';
 // Export shared CLI effort helpers
 export * from './cli-effort.js';
 export * from './cli-tool-label.js';
@@ -99,6 +100,7 @@ export * from './provider-semantic-projection.js';
 export { RECALL_DISPLAY_DOC_KINDS } from './recall-display-contract.js';
 // Export recall-result sidecar contract (producer → parser → persistence → UI)
 export * from './recall-outcome.js';
+export * from './recent-since.js';
 // Dossier profile parser: import from '@cat-cafe/shared/dossier' (F208 KD-10)
 // NOT re-exported here — uses Node.js fs, same pattern as Redis utils.
 // Export registry (CatRegistry, catIdSchema, assertKnownCatId)
@@ -185,6 +187,7 @@ export * from './types/matter-memory.js';
 export * from './types/media-publication-source.js';
 // F287 bounded opportunity/cue contract (kept explicit for API/MCP consumers).
 export * from './types/memory-cue.js';
+export * from './types/memory-read.js';
 export * from './types/message-output-layout.js';
 export * from './types/message-publication-landing.js';
 export * from './types/message-stickers.js';

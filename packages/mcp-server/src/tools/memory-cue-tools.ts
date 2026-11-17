@@ -67,11 +67,13 @@ export function createMemoryCueTools(callbackPost: CallbackPost) {
   const handleDrillMemoryCue = (input: {
     handle: string;
     clientRequestId?: string;
+    expectedRevision?: string;
     window?: MemoryCueDocumentWindowRequest;
   }) =>
     callbackPost('/api/callbacks/memory-cues/drill', {
       handle: input.handle,
       requestId: input.clientRequestId ?? `memory-cue-drill-${randomUUID()}`,
+      ...(input.expectedRevision !== undefined ? { expectedRevision: input.expectedRevision } : {}),
       ...(input.window ? { window: input.window } : {}),
     });
 
@@ -108,25 +110,6 @@ export function createMemoryCueTools(callbackPost: CallbackPost) {
             admissionRef: 'file:docs/architecture/memory-cue-source-map.md',
           },
           implementationExport: 'handlePrepareMemoryContext',
-          action: 'read',
-          risk: { level: 'read', openWorld: false },
-          runtimeProfiles: ['full'],
-        },
-      }),
-      defineDocumentDrill({
-        name: 'cat_cafe_drill_memory_cue',
-        description:
-          'Read the current canonical source behind an owner-authenticated CueEnvelope. ' +
-          'Use when its bounded projection is insufficient, or to locate a heading/phrase and continue a long project document. ' +
-          'Output: owner-visible payload; canonical project documents include sourcePath/sourceRevision, contentRange (UTF-16 code units, end exclusive), contentTruncated, nextOffset and location status. ' +
-          'Use window.query for case-insensitive literal lookup, or window.offset=nextOffset to continue with the same handle; each page contains at most 4000 code units. A not_found lookup returns the initial window honestly; nextOffset=null means end. ' +
-          'not_available if gone or revoked; retryable source_read_failed on reader failure or read_commit_failed when the receipt cannot persist. ' +
-          'NOT for raw search, bulk recall, caller-supplied coordinates, or cross-thread replay. ' +
-          'GOTCHA: window is supported only for canonical project document cues; omit it for other families. Owner/thread/invocation scope, visibility, expiry, and current source revision are revalidated for every page; restart, correction, or forget closes the handle.',
-        inputSchema: drillMemoryCueInputSchema,
-        handler: handleDrillMemoryCue,
-        governance: {
-          implementationExport: 'handleDrillMemoryCue',
           action: 'read',
           risk: { level: 'read', openWorld: false },
           runtimeProfiles: ['full'],

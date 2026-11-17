@@ -2,7 +2,7 @@
 doc_kind: architecture
 feature_ids: [F332]
 created: 2026-11-11
-updated: 2026-11-14
+updated: 2026-11-16
 owner: codex-astra
 mcp_admission_status: accepted
 mcp_admission_ref: "file:docs/architecture/memory/remember-entry.md"
@@ -12,9 +12,23 @@ mcp_admission_claims:
 
 # remember 的入口绑定
 
+事情页当前写法：`items:[{itemId:"one",target:"matter",payload:{operation:"create",title:"讨论背景",summary:"猫的一句归纳"}}]`。
+不需要 quote/块号/附件/位置，也不先调用选句工具；sources 可省略，或只给 `[{threadId}]`，知道具体消息再带 messageId。
+默认出处由服务端绑定本次真实调用，不把归纳当原话；新归纳按实际写入主体留名。只更正出处时保留归纳原作者或未知，
+更正操作者另存于当次回执 writer；实际重写归纳才更新内容作者。追加/更正保留原 expectedRevision 等必要坐标。
+兼容的新建 description（未带 summary/sources）同时生成归纳与页说明，两者按真实条目关联；更正/停用条目会更新/清除该说明。
+明确同时填写的 description 与 summary 仍各自独立，不按文字相等建立关联；旧页不据此回填。
+逐字引用继续可选且原校验保留。requestId 可省，由既有批次转发按 item 生成稳定键；重试同一次 remember 仍保留 clientRequestId。
+完整边界见[事情页当前合同](../f332-matter-memory-contract.md#current-writing-contract-2026-11-16)。
+
 人类授权原件：`[thread-id]#private-source-id`。
 `cat_cafe_remember`接一次1–4项请求，逐项转给现有领域提交路由，返回原提案/结果/拒绝原因与groupId。
 分组用现有消息的`meta.memoryGroup`保存引用；决定和正文仍归原审批、存储及去重。
+事情写入行的 `matterWriteRef` 指向原请求表里固定的当次回执：动作、结果版本及实际改动由服务端同事务保存。
+卡片先核当前页及全部来源权限，再读这份回执；追加和改说明不会再都显示为最新整页归纳。
+分组消息不复制归纳/原话正文；遗忘会清除原请求回执里的内容。旧行没有当次回执时明确标成当前页预览，
+失败项使用“提交结果”标题，不称“记下的内容”。真实问题原件为主线程 Human1548 `private-source-id`，
+两张原卡 `private-source-id` / `private-source-id` 已完整回读。
 它不是读取、批准或遗忘入口，不授权新的writer，也不引入批次协调或效果证明。
 
 此绑定落实人类已点名的统一入口；不表示实现已review、合入或验收。

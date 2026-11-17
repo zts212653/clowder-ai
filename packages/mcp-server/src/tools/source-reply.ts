@@ -89,5 +89,15 @@ export async function prepareSourceReply(
         `Source card preparation did not produce an attachable result. Retry the same operation and selections. ${text ?? ''}`,
       ),
     };
-  return { ok: true, publicationRef: prepared.data.publicationRef, result };
+  const readRefs = parsed.data.selections?.map((selection) => ({
+    kind: 'message' as const,
+    threadId: selection.threadId,
+    messageId: selection.messageId,
+    expectedRevision: selection.contentRevision,
+  }));
+  const projected =
+    readRefs && receipt && typeof receipt === 'object'
+      ? { ...result, content: [{ type: 'text' as const, text: JSON.stringify({ ...receipt, readRefs }) }] }
+      : result;
+  return { ok: true, publicationRef: prepared.data.publicationRef, result: projected };
 }

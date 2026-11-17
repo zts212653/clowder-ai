@@ -1017,18 +1017,22 @@ export class AcpAgentService implements AgentService {
       // TS control-flow can't prove it across the if/else — assert for downstream usage.
       if (!sessionId) throw new Error('ACP invariant: sessionId must be set after session setup');
       const bindPermission = (providerSessionId: string) => {
+        const requiresHumanApproval =
+          this.executionApproval === 'ask_user' ||
+          (this.antigravity !== undefined && this.antigravity.profile.autoApprove !== true);
         const guard = agy
           ? createAgyAcpPermissionHandler({
               sessionId: providerSessionId,
               workspace: agy.binding.workspaceRoot,
               profileHome: agy.binding.profileHome,
               autoApprove: this.antigravity?.profile.autoApprove === true,
+              delegateApprovalToHost: requiresHumanApproval,
               readOnly: agy.readOnly,
               mcpServers: sessionMcpServers.map((server) => server.name),
               isActive: () => agyActive && promptPhase === 'active_unacknowledged' && !options?.signal?.aborted,
             })
           : undefined;
-        if (this.executionApproval === 'ask_user') {
+        if (requiresHumanApproval) {
           permissionLifetime?.abort('provider_cancelled');
           permissionLifetime = new AbortController();
           const audit = options?.auditContext;

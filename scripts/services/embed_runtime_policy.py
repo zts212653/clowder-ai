@@ -10,12 +10,24 @@ import asyncio
 import sys
 import time
 from contextlib import asynccontextmanager
-from typing import AsyncIterator, Awaitable, Callable, Protocol
+from typing import AsyncIterator, Awaitable, Callable, NamedTuple, Protocol
 
 from embed_process_footprint import read_process_footprint_bytes
 
 
 MIB = 1024 * 1024
+
+# The OS footprint sampled right after an encode can still count memory the
+# allocator no longer holds. Measured 2026-11-15 in an isolated process with the
+# g0 model: about 0.5 GiB over baseline after a batch of 8 x 512 tokens, in
+# some of those samples with MLX's own counters unchanged from baseline, and
+# back near baseline within 50-550 ms
+# (docs/evidence/2026-11-15-embed-envelope-transient/). Memory counts as
+# retained only if it is still over budget after this window. The window is a
+# mitigation for that measured lag; it does not explain the 2-3 GiB readings
+# logged on 2026-11-12 and 2026-11-14, whose source is still unknown.
+MEMORY_SETTLE_WINDOW_SECONDS = 2.0
+MEMORY_SETTLE_POLL_SECONDS = 0.025
 
 
 class AdmissionError(RuntimeError):
@@ -89,7 +101,12 @@ class EmbeddingAdmissionController:
         *,
         deadline_ms: int | None,
         is_disconnected: Callable[[], Awaitable[bool]] | None,
-    ) -> AsyncIterator[None]:
+    ) -> AsyncIterator[Callable[[], Awaitable[None]]]:
+        """Hold the encoder slot; yield a re-check of this same admission.
+
+        Work that waits after being admitted calls the yielded function before
+        it allocates. It tests the deadline computed here, not a fresh one.
+        """
         deadline_seconds = self._effective_deadline_seconds(deadline_ms)
         if deadline_seconds <= time.time():
             self._expired_count += 1
@@ -143,20 +160,24 @@ class EmbeddingAdmissionController:
             waiting = False
             self._in_flight = 1
 
-            if deadline_seconds <= time.time():
-                self._expired_count += 1
-                raise AdmissionError(
-                    408, "deadline_expired", "embedding request expired before encode"
-                )
-            if await self._client_disconnected(is_disconnected):
-                self._disconnected_count += 1
-                raise AdmissionError(
-                    499,
-                    "client_disconnected",
-                    "embedding client disconnected before encode",
-                )
+            async def assert_still_wanted() -> None:
+                if deadline_seconds <= time.time():
+                    self._expired_count += 1
+                    raise AdmissionError(
+                        408,
+                        "deadline_expired",
+                        "embedding request expired before encode",
+                    )
+                if await self._client_disconnected(is_disconnected):
+                    self._disconnected_count += 1
+                    raise AdmissionError(
+                        499,
+                        "client_disconnected",
+                        "embedding client disconnected before encode",
+                    )
 
-            yield
+            await assert_still_wanted()
+            yield assert_still_wanted
         finally:
             if waiting:
                 self._waiting_count -= 1
@@ -205,6 +226,8 @@ class MemoryBudgetExceeded(RuntimeError):
         mlx_cache_memory_bytes: int | None = None,
         os_footprint_bytes: int | None = None,
         baseline_os_footprint_bytes: int | None = None,
+        first_observed_bytes: int | None = None,
+        settle_ms: int | None = None,
     ) -> None:
         super().__init__(
             f"embedding memory budget exceeded: observed={observed_bytes} "
@@ -217,10 +240,32 @@ class MemoryBudgetExceeded(RuntimeError):
         self.mlx_cache_memory_bytes = mlx_cache_memory_bytes
         self.os_footprint_bytes = os_footprint_bytes
         self.baseline_os_footprint_bytes = baseline_os_footprint_bytes
+        self.first_observed_bytes = first_observed_bytes
+        self.settle_ms = settle_ms
 
 
 class MemoryMetricUnavailable(RuntimeError):
     pass
+
+
+class MemorySample(NamedTuple):
+    """One guard reading: allocator counters and OS footprint taken together."""
+
+    os_footprint_bytes: int | None
+    mlx_active_memory_bytes: int
+    mlx_cache_memory_bytes: int
+    footprint_delta_bytes: int
+    observed_bytes: int
+
+
+class TransientOvershoot(NamedTuple):
+    """A reading over budget that came back under it within the settle window."""
+
+    budget_bytes: int
+    first: MemorySample
+    settled: MemorySample
+    settle_ms: int
+    baseline_os_footprint_bytes: int | None
 
 
 class MlxMemoryEnvelope:
@@ -246,6 +291,8 @@ class MlxMemoryEnvelope:
         self._baseline_footprint_bytes: int | None = None
         self._last_footprint_bytes: int | None = None
         self._memory_budget_exceeded = False
+        self._transient_overshoot_count = 0
+        self._transient_overshoot_max_bytes = 0
 
     def configure_before_model_load(self) -> None:
         self._mlx.set_memory_limit(self._max_model_mem_bytes)
@@ -264,9 +311,7 @@ class MlxMemoryEnvelope:
             return self._max_model_mem_bytes
         return min(requested_max_model_mem_mb * MIB, self._max_model_mem_bytes)
 
-    def assert_within_budget(
-        self, requested_max_model_mem_mb: int | None = None
-    ) -> None:
+    def _sample(self) -> MemorySample:
         self._mlx.clear_cache()
         footprint = self._footprint_reader()
         self._last_footprint_bytes = footprint
@@ -276,26 +321,63 @@ class MlxMemoryEnvelope:
             )
         active_bytes = int(self._mlx.get_active_memory())
         cache_bytes = int(self._mlx.get_cache_memory())
-        allocator_bytes = active_bytes + cache_bytes
         baseline = self._baseline_footprint_bytes
         footprint_delta = (
             max(0, footprint - baseline)
             if footprint is not None and baseline is not None
             else 0
         )
-        observed_bytes = max(allocator_bytes, footprint_delta)
+        return MemorySample(
+            os_footprint_bytes=footprint,
+            mlx_active_memory_bytes=active_bytes,
+            mlx_cache_memory_bytes=cache_bytes,
+            footprint_delta_bytes=footprint_delta,
+            observed_bytes=max(active_bytes + cache_bytes, footprint_delta),
+        )
+
+    def assert_within_budget(
+        self, requested_max_model_mem_mb: int | None = None
+    ) -> TransientOvershoot | None:
+        """Raise only for memory that stays over budget.
+
+        Returns None for an ordinary reading, or the overshoot that the OS
+        reclaimed while the caller still held the encoder slot (so nothing new
+        was allocated in between). The caller logs it; it is not a failure.
+        """
         budget_bytes = self._effective_budget_bytes(requested_max_model_mem_mb)
-        if observed_bytes > budget_bytes:
-            self._memory_budget_exceeded = True
-            raise MemoryBudgetExceeded(
-                budget_bytes=budget_bytes,
-                footprint_delta_bytes=footprint_delta,
-                observed_bytes=observed_bytes,
-                mlx_active_memory_bytes=active_bytes,
-                mlx_cache_memory_bytes=cache_bytes,
-                os_footprint_bytes=footprint,
-                baseline_os_footprint_bytes=baseline,
-            )
+        first = self._sample()
+        if first.observed_bytes <= budget_bytes:
+            return None
+        started = time.monotonic()
+        deadline = started + MEMORY_SETTLE_WINDOW_SECONDS
+        sample = first
+        while (remaining := deadline - time.monotonic()) > 0:
+            time.sleep(min(MEMORY_SETTLE_POLL_SECONDS, remaining))
+            sample = self._sample()
+            if sample.observed_bytes <= budget_bytes:
+                self._transient_overshoot_count += 1
+                self._transient_overshoot_max_bytes = max(
+                    self._transient_overshoot_max_bytes, first.observed_bytes
+                )
+                return TransientOvershoot(
+                    budget_bytes=budget_bytes,
+                    first=first,
+                    settled=sample,
+                    settle_ms=round((time.monotonic() - started) * 1000),
+                    baseline_os_footprint_bytes=self._baseline_footprint_bytes,
+                )
+        self._memory_budget_exceeded = True
+        raise MemoryBudgetExceeded(
+            budget_bytes=budget_bytes,
+            footprint_delta_bytes=sample.footprint_delta_bytes,
+            observed_bytes=sample.observed_bytes,
+            mlx_active_memory_bytes=sample.mlx_active_memory_bytes,
+            mlx_cache_memory_bytes=sample.mlx_cache_memory_bytes,
+            os_footprint_bytes=sample.os_footprint_bytes,
+            baseline_os_footprint_bytes=self._baseline_footprint_bytes,
+            first_observed_bytes=first.observed_bytes,
+            settle_ms=round((time.monotonic() - started) * 1000),
+        )
 
     def snapshot(
         self, refresh_footprint: bool = False
@@ -325,4 +407,6 @@ class MlxMemoryEnvelope:
             "os_footprint_required": self._require_footprint,
             "os_footprint_available": self._last_footprint_bytes is not None,
             "memory_budget_exceeded": self._memory_budget_exceeded,
+            "transient_overshoot_count": self._transient_overshoot_count,
+            "transient_overshoot_max_bytes": self._transient_overshoot_max_bytes,
         }

@@ -4,7 +4,7 @@ related_features: [F020, F092, F099, F102, F111, F128, F155, F173, F183, F226, F
 topics: [concierge, desktop-pet, pet-skin, routing, small-model, voice, memory, ux, community]
 doc_kind: spec
 created: 2026-06-09
-updated: 2026-09-20
+updated: 2026-11-05
 community_issue: "clowder-ai#841"
 ---
 

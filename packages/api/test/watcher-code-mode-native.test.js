@@ -7,6 +7,78 @@ import { nativeWatcherAvailable, watcherNativeFixture } from './helpers/watcher-
 import { watcherWorld } from './helpers/watcher-world.js';
 
 test(
+  'native reasoning is retained verbatim while a verified append uses reported token accounting',
+  { timeout: 40000, skip: !nativeWatcherAvailable },
+  async () => {
+    const w = await watcherWorld();
+    const events = [];
+    const f = await watcherNativeFixture(w, {
+      model: 'gpt-6.1-sol',
+      respond({ reply }) {
+        const write = reply.raw.write.bind(reply.raw);
+        reply.raw.write = (chunk, ...args) => {
+          const wire = String(chunk)
+            .split('\n')
+            .map((line) => {
+              if (!line.startsWith('data: ')) return line;
+              const event = JSON.parse(line.slice(6));
+              if (event.item?.type === 'reasoning') event.item.summary = [];
+              for (const item of event.response?.output ?? []) if (item.type === 'reasoning') item.summary = [];
+              if (event.type === 'response.completed') {
+                event.response.usage = {
+                  ...event.response.usage,
+                  input_tokens: 10000,
+                  output_tokens: 2048,
+                  total_tokens: 12048,
+                  output_tokens_details: { reasoning_tokens: 1500 },
+                };
+              }
+              return 'data: ' + JSON.stringify(event);
+            })
+            .join('\n');
+          return write(wire, ...args);
+        };
+        return false;
+      },
+    });
+    const append = f.owners.transcript.appendDurableEvent.bind(f.owners.transcript);
+    f.owners.transcript.appendDurableEvent = async (...args) => {
+      await append(...args);
+      events.push(args[1]);
+    };
+    try {
+      const [source] = await w.work('RAW_INCREMENT_29 offline reasoning continuation');
+      f.state.tools = 1;
+      f.state.quiet = true;
+      // Ciphertext is deliberately large; visible summaries stay empty. Usage is a declared fixture,
+      // not a claim about the rendered size of any real provider's encrypted payload.
+      f.state.reasoningPadding = 'OPAQUE_FIXTURE '.repeat(6000);
+      const session = await f.run(source, AbortSignal.timeout(30000));
+      const rows = events.filter((event) => event.type === 'watcher_context_bound');
+      assert.ok(
+        rows.some((row) => row.accountingBasis === 'reported_continuation' && row.serializedRequestTokens > 25904),
+      );
+      assert.ok(rows.every((row) => row.workingContextUpperBound <= 30000 && row.maxOutputTokens === 4096));
+      assert.equal(
+        events.some((event) => event.type === 'watcher_request_budget_rejected'),
+        false,
+      );
+      assert.equal(f.requests.length, 2);
+      assert.ok(
+        f.requests[1].body.input.some((item) => item.type === 'reasoning' && item.encrypted_content.length > 50000),
+      );
+      assert.equal(session.watcherState.afterSequence, source.settledSequence);
+      assert.equal(f.enqueues.length, 0);
+      const wake = (await w.executions.listByParent(`watcher-source:codex:${source.invocationId}`))[0];
+      assert.equal(wake.status, 'succeeded');
+      assert.equal(wake.terminalReason, 'watcher_checkpoint_committed');
+    } finally {
+      await f.close();
+    }
+  },
+);
+
+test(
   'the native watcher can nudge through code mode without shell, host globals or delegation',
   { timeout: 45000, skip: !nativeWatcherAvailable },
   async () => {

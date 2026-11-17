@@ -1,5 +1,5 @@
 /** Read-only process observations. Invocation wrappers are not worktree consumers. */
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { basename } from 'node:path';
 
 const MAX_BUFFER = 256 * 1024 * 1024;
@@ -53,28 +53,54 @@ function invocationWrappers(table, observerPid) {
   return excluded;
 }
 
-function openFileTable(excluded) {
-  let out = '';
-  try {
-    out = execFileSync('lsof', ['-n', '-P', '-Fpftn'], {
-      encoding: 'utf8',
-      maxBuffer: MAX_BUFFER,
-      stdio: ['ignore', 'pipe', 'ignore'],
-    });
-  } catch (err) {
-    out = String(err.stdout ?? '');
-  }
+function lsofFiles(out, excluded) {
   let pid = null;
-  let type = null;
+  let file = null;
   const rows = [];
+  const flush = () => {
+    if (file && pid !== null && !excluded.has(pid)) rows.push({ pid, ...file });
+    file = null;
+  };
   for (const line of out.split('\n')) {
-    if (line.startsWith('p')) pid = Number(line.slice(1));
-    else if (line.startsWith('f')) type = null;
-    else if (line.startsWith('t')) type = line.slice(1);
-    else if (line.startsWith('n') && pid !== null && !excluded.has(pid) && ['REG', 'DIR'].includes(type))
-      rows.push({ pid, path: line.slice(1) });
+    const value = line.slice(1);
+    switch (line[0]) {
+      case 'p':
+        flush();
+        pid = Number(value);
+        break;
+      case 'f':
+        flush();
+        file = { fd: value };
+        break;
+      case 't':
+        if (file) file.type = value;
+        break;
+      case 'd':
+        if (file) file.pcb = value;
+        break;
+      case 'n':
+        if (file) file.path = value;
+        break;
+    }
   }
-  return rows.length ? rows : null;
+  flush();
+  return rows;
+}
+
+function openFileTable(excluded) {
+  const result = spawnSync('lsof', ['-n', '-P', '-Fpftnd'], {
+    encoding: 'utf8',
+    maxBuffer: MAX_BUFFER,
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  // Existing busy observations may use partial output; IPC quiescence requires complete descriptor observations.
+  const all = lsofFiles(String(result.stdout ?? ''), excluded);
+  const complete = !result.error && !result.signal && result.status === 0 && !result.stderr?.trim();
+  const reference = ({ pid, path }) => ({ pid, path });
+  const rows = all.filter((row) => ['REG', 'DIR'].includes(row.type) && row.path).map(reference);
+  const executables = all.filter((row) => row.type === 'REG' && row.fd === 'txt').map(reference);
+  const unixFiles = all.filter((row) => row.type === 'unix');
+  return rows.length ? { rows, complete, executables, unixFiles } : null;
 }
 
 /** Only wrapper argv is excluded; ancestors' cwd and actual consumer argv still protect the target. */
@@ -93,8 +119,11 @@ export function observeProcessRefs({ excludePids = [], observerPid, realpath }) 
     argv: argvProcesses.map((row) => row.command),
     cwdProcesses,
     argvProcesses,
-    openFiles: openFileProcesses.map((row) => row.path),
-    openFileProcesses,
+    openFiles: openFileProcesses.rows.map((row) => row.path),
+    openFileProcesses: openFileProcesses.rows,
+    openFilesComplete: openFileProcesses.complete,
+    executableProcesses: openFileProcesses.executables,
+    unixFiles: openFileProcesses.unixFiles,
   };
 }
 

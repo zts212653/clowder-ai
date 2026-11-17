@@ -109,7 +109,7 @@ test(
       f.state.codeMode = true;
       f.state.quiet = true;
       f.state.toolPlan = Array.from({ length: 3 }, () => ({
-        name: 'cat_cafe_list_memory_matters',
+        name: 'cat_cafe_search_evidence',
         args: async () => {
           const current = await w.sessions.get(session.id);
           if ((await w.registry.watcherToolCallCount(current.watcherState.attempt.invocationId)) >= 5) {

@@ -852,7 +852,12 @@ export async function* routeSerial(
               catId,
               providerId: executionBinding.catConfig?.provider?.trim() || executionBinding.catConfig?.clientId,
               ...(executionBinding.executionAccount
-                ? { accountRevision: executionBinding.executionAccount.accountRevision }
+                ? {
+                    accountRevision: executionBinding.executionAccount.accountRevision,
+                    ...(executionBinding.executionAccount.credentialVersion
+                      ? { credentialVersion: executionBinding.executionAccount.credentialVersion }
+                      : {}),
+                  }
                 : {}),
             },
           ],

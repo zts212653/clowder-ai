@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
-import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { PassThrough } from 'node:stream';
-import { describe, mock, test } from 'node:test';
+import { after, describe, mock, test } from 'node:test';
 import Database from 'better-sqlite3';
 import {
   OpenCodeAgentService,
@@ -86,8 +86,15 @@ async function waitFor(predicate, description) {
   assert.fail(`timed out waiting for ${description}`);
 }
 
+const recoveryDbRoots = new Set();
+
+after(() => {
+  for (const root of recoveryDbRoots) rmSync(root, { recursive: true, force: true });
+});
+
 function createOpenCodeRecoveryDb({ sessionId, messageId, text, storage = 'part' }) {
   const dir = mkdtempSync(join(tmpdir(), 'cat-cafe-opencode-db-'));
+  recoveryDbRoots.add(dir);
   const dbPath = join(dir, 'opencode.db');
   const db = new Database(dbPath);
   if (storage === 'session_message') {

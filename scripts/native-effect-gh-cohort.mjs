@@ -80,6 +80,9 @@ const PUBLISHED_6899_COHORT = '7bfcffb3257286345761350b492b776f7c97fed0301e26aa3
 // Reviewed #6988, merged d270a8529e. Scope inheritance changes the shared
 // walker; the deployed wrapper still proves this exact complete cohort.
 const PUBLISHED_6988_COHORT = '1f3f4ef41ccbe34810a6aed19a77d2482a45de18a85288e8ce045530d55aaab0';
+// Reviewed #7025, merged 1534161048: retain the deployed wrapper's complete
+// scanner identity while this guard upgrades its query argument grammar.
+const PUBLISHED_7025_COHORT = 'c0ed34b83f30656894d2aaea8d45189bb4167ca35381819fe1c7886d5dfaf7d4';
 const LEGACY_FILES = [
   ...GH_COHORT_FILES.filter((file) => file !== 'scripts/native-effect-gh-cohort.mjs'),
   'scripts/native-effect-invocation-targets.mjs',
@@ -142,7 +145,7 @@ export function verifiedGhCohort(entry, stage) {
   if (current) {
     if (GH_COHORT_FILES.every((file) => selected.get(file) === ownCohort.get(file))) return true;
     const published = cohortDigest(selected, GH_COHORT_FILES);
-    return published === PUBLISHED_6899_COHORT || published === PUBLISHED_6988_COHORT;
+    return [PUBLISHED_6899_COHORT, PUBLISHED_6988_COHORT, PUBLISHED_7025_COHORT].includes(published);
   }
   return cohortDigest(selected, LEGACY_FILES) === PREVIOUS_COHORT;
 }

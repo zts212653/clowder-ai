@@ -4,7 +4,7 @@ import { describe, test } from 'node:test';
 const { createHostSleepEvidenceReader, findSleepInterruption, isInFullWakeSince } = await import(
   '../dist/domains/cats/services/agents/invocation/host-sleep/HostSleepEvidence.js'
 );
-const { HostSleepContinuationScheduler, recoverSleepContinuations } = await import(
+const { HostSleepContinuationScheduler, recoverOwedContinuations } = await import(
   '../dist/domains/cats/services/agents/invocation/host-sleep/HostSleepContinuationScheduler.js'
 );
 const { parseMacSleepEvidence } = await import('../runtime/process-observation/mac-power-evidence.mjs');
@@ -326,14 +326,14 @@ describe('F337 continueInterruptedCats(host_sleep)', () => {
   });
 });
 
-describe('F337 recoverSleepContinuations', () => {
+describe('F337 recoverOwedContinuations', () => {
   test('re-registers the owed host_sleep failures after a restart', async () => {
     const turns = new InMemoryTurnExecutionStore();
     await endTurn(turns, 'inv-kimi', 'kimi31-pro', 'failed', KIMI_STARTED_AT, 'host_sleep');
     await endTurn(turns, 'inv-repeat', 'opus', 'failed', KIMI_STARTED_AT, 'host_sleep_repeat');
     await endTurn(turns, 'inv-plain', 'codex61-sol', 'failed', KIMI_STARTED_AT, 'provider_execution_failed');
     const scheduled = [];
-    const summary = await recoverSleepContinuations({
+    const summary = await recoverOwedContinuations({
       turns,
       scheduler: { schedule: (input) => scheduled.push(input) },
       log: { info() {} },
@@ -364,7 +364,7 @@ describe('F337 recoverSleepContinuations', () => {
       });
     }
     const scheduled = [];
-    await recoverSleepContinuations({
+    await recoverOwedContinuations({
       turns,
       scheduler: { schedule: (input) => scheduled.push(input) },
       log: { info() {} },
@@ -380,14 +380,14 @@ describe('F337 recoverSleepContinuations', () => {
     await endTurn(turns, 'inv-kimi', 'kimi31-pro', 'failed', KIMI_STARTED_AT, 'host_sleep');
     await endTurn(turns, 'inv-newer', 'kimi31-pro', 'succeeded', KIMI_STARTED_AT + 60_000);
     const scheduled = [];
-    const summary = await recoverSleepContinuations({
+    const summary = await recoverOwedContinuations({
       turns,
       scheduler: { schedule: (input) => scheduled.push(input) },
       log: { info() {} },
     });
     assert.deepEqual(scheduled, []);
     assert.deepEqual(summary, { owed: 1, scheduled: 0, cleared: 1 });
-    assert.deepEqual(await turns.listOwedSleepContinuations(), []);
+    assert.deepEqual(await turns.listOwedContinuations(), []);
   });
 });
 
@@ -435,7 +435,7 @@ describe('F337 sleep continuation stays owed until a definite outcome', () => {
     const scheduler = new HostSleepContinuationScheduler({
       readEvidence: async () => evidenceOf(SLEEP, DARK_WAKE, SLEEP_AGAIN, FULL_WAKE),
       continueCats: (ids) => continueInterruptedCats(home.deps, ids, 'host_sleep'),
-      settleOwed: (ids) => turns.settleOwedSleepContinuations(ids),
+      settleOwed: (ids) => turns.settleOwedContinuations(ids),
       log: { info() {}, warn() {} },
       now: () => now,
       setTimer: (fn) => {
@@ -450,7 +450,7 @@ describe('F337 sleep continuation stays owed until a definite outcome', () => {
     await timers.shift()();
     assert.equal(home.sent.length, 0);
     assert.deepEqual(
-      (await turns.listOwedSleepContinuations()).map((record) => record.invocationId),
+      (await turns.listOwedContinuations()).map((record) => record.invocationId),
       ['inv-kimi'],
       'still owed after the failed read',
     );
@@ -460,7 +460,7 @@ describe('F337 sleep continuation stays owed until a definite outcome', () => {
     await timers.shift()();
     await timers.shift()?.();
     assert.equal(home.sent.length, 1);
-    assert.deepEqual(await turns.listOwedSleepContinuations(), []);
+    assert.deepEqual(await turns.listOwedContinuations(), []);
   });
 
   test('an unexpected receipt shape concludes nothing', async () => {

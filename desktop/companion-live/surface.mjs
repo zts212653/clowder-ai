@@ -224,8 +224,6 @@ if (!window.live) {
     if (event.type === 'tool') {
       const names = {
         cat_cafe_search_evidence: '查家里的资料',
-        cat_cafe_graph_resolve: '查功能关联',
-        cat_cafe_list_recent: '看最近的记录',
         cat_cafe_read_file_slice: '读原文',
       };
       const label = names[event.name] || '查资料';

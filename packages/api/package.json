@@ -21,6 +21,7 @@
     "test:public:plan": "node ./scripts/plan-public-test-shards.mjs",
     "test:public:shard": "node ./scripts/with-test-home.mjs --env CAT_CAFE_DISABLE_SHARED_STATE_PREFLIGHT=1 node ./scripts/run-public-test-shard.mjs",
     "test:public:summary": "node ./scripts/summarize-public-test-shards.mjs",
+    "test:claude-quota-env-registry": "node ./scripts/with-test-home.mjs --env CAT_CAFE_DISABLE_SHARED_STATE_PREFLIGHT=1 node --import tsx --test --test-timeout=60000 test/f320-claude-quota-env-registry.test.ts",
     "test:prompt-budget": "node ./scripts/with-test-home.mjs --env CAT_CAFE_DISABLE_SHARED_STATE_PREFLIGHT=1 node --import ./test/helpers/setup-cat-registry.js --test --test-concurrency=1 test/system-prompt-builder.test.js",
     "smoke:f306-native-effect-guard": "pnpm run build && node dist/scripts/f306-native-effect-guard/live-fixture.js",
     "fixture:f281-bounded-reflow": "pnpm run build && node dist/scripts/f281-bounded-reflow-fixture.js",

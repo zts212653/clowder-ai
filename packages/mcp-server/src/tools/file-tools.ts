@@ -26,6 +26,7 @@ const defineTool = defineMcpCanonicalFactory('file-tools.ts', undefined, {
 export interface ToolResult {
   content: Array<{ type: 'text'; text: string }>;
   isError?: boolean;
+  structuredContent?: Record<string, unknown>;
 }
 
 /**
@@ -169,13 +170,17 @@ function resolveFileSlicePath(inputPath: string): { filePath: string; displayPat
  * cat_cafe_read_file_slice handler
  * Read a bounded, line-numbered file range for evidence drill-down.
  */
-export async function handleReadFileSlice(input: {
-  path: string;
-  startLine: number;
-  endLine?: number;
-  charOffset?: number;
-}): Promise<ToolResult> {
-  if (input.path.startsWith('cat-cafe://published/')) return handlePublishedFileSlice(input);
+export async function handleReadFileSlice(
+  input: {
+    path: string;
+    startLine: number;
+    endLine?: number;
+    charOffset?: number;
+    expectedRevision?: string;
+  },
+  authorityToolName = 'cat_cafe_read_file_slice',
+): Promise<ToolResult> {
+  if (input.path.startsWith('cat-cafe://published/')) return handlePublishedFileSlice(input, authorityToolName);
   const resolvedPath = resolveFileSlicePath(input.path);
   if ('error' in resolvedPath) {
     return errorResult(resolvedPath.error);
@@ -194,12 +199,17 @@ export async function handleReadFileSlice(input: {
   if (!isPathAllowed(filePath)) {
     return errorResult(`Access denied: ${filePath} is not within allowed directories`);
   }
-  await authorizeInvocationTool('cat_cafe_read_file_slice');
+  await authorizeInvocationTool(authorityToolName);
   if (!fs.existsSync(filePath)) {
     return errorResult(`File not found: ${filePath}`);
   }
 
   const stat = fs.statSync(filePath);
+  const versionOf = (value: fs.Stats) =>
+    `stat:${value.dev}:${value.ino}:${value.size}:${value.mtimeMs}:${value.ctimeMs}`;
+  const version = versionOf(stat);
+  if (input.expectedRevision !== undefined && input.expectedRevision !== version)
+    return errorResult('source_revision_changed; restart with a fresh file ref');
   if (!stat.isFile()) {
     return errorResult(`Not a file: ${filePath}`);
   }
@@ -279,8 +289,19 @@ export async function handleReadFileSlice(input: {
   if (text.length > FILE_SLICE_RESPONSE_MAX_CHARS) {
     return errorResult('File slice source path exceeds the bounded response budget; use a shorter permitted path');
   }
-  await authorizeInvocationTool('cat_cafe_read_file_slice');
-  return successResult(text);
+  await authorizeInvocationTool(authorityToolName);
+  const currentStat = fs.statSync(filePath, { throwIfNoEntry: false });
+  if (!currentStat || versionOf(currentStat) !== version) return errorResult('source_revision_changed during read');
+  return {
+    ...successResult(text),
+    structuredContent: {
+      version,
+      complete: !nextSlice,
+      ...(nextSlice
+        ? { nextRef: { kind: 'file', path: input.path, ...nextSlice, endLine: nextEndLine, expectedRevision: version } }
+        : {}),
+    },
+  };
 }
 
 /**

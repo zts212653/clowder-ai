@@ -1,3 +1,4 @@
+import { type ReadRef, readRefFromDrillDown } from '@cat-cafe/shared';
 import { invocationFetch } from './invocation-auth.js';
 /**
  * Evidence Search Tool
@@ -26,6 +27,9 @@ import { type CoverageToolData, renderCoverageToolResponse } from './evidence-co
 import type { ToolResult } from './file-tools.js';
 import { errorResult, successResult } from './file-tools.js';
 import { resolveInvocationEnv } from './invocation-auth.js';
+import { type DocsGroupOptions, runFind } from './memory-find.js';
+import { GRAPH_RELATION_TYPES } from './memory-find-graph.js';
+import type { GroupName } from './memory-find-group.js';
 import { messageSearchParams } from './message-search-transport.js';
 
 function resolveApiUrl(): string {
@@ -63,7 +67,7 @@ export const searchEvidenceInputSchema = {
     .enum(['document', 'message'])
     .optional()
     .describe(
-      'Result unit: document (default) or distinct canonical messages for finding an earlier discussion. Message mode uses authenticated callback access.',
+      'Omit for all groups. Explicit document = docs evidence only; message = distinct canonical messages for an earlier discussion (authenticated callback access).',
     ),
   messageSort: z
     .enum(['time', 'relevance'])
@@ -78,13 +82,33 @@ export const searchEvidenceInputSchema = {
     .describe(
       'Message mode: persistent-agent identity selector for shared Antigravity MCP. Ignored when full invocation credentials are present.',
     ),
-  query: z.string().min(1).max(2_000).describe('Search query for project knowledge (max 2,000 characters)'),
-  limit: z.number().int().min(1).max(20).optional().describe('Max results (default 5)'),
-  scope: z
-    .enum(['docs', 'memory', 'threads', 'sessions', 'all'])
+  query: z
+    .string()
+    .min(1)
+    .max(2_000)
     .optional()
     .describe(
-      'Collection scope: docs (features/ADRs/plans/lessons), threads/sessions (chat history), all (everything)',
+      'The clue as you would say it (max 2,000 characters; never truncated). Omit to browse the matter directory.',
+    ),
+  matterCursor: z
+    .string()
+    .max(2_000)
+    .optional()
+    .describe('Only from a returned matters next.arguments; continues that group without re-running the others.'),
+  limit: z
+    .number()
+    .int()
+    .min(1)
+    .max(100)
+    .optional()
+    .describe(
+      'Max results per group, up to 100; each group applies its own maximum and says so (docs and messages 20, matters 30, recent 100).',
+    ),
+  scope: z
+    .enum(['docs', 'memory', 'threads', 'sessions', 'all', 'trajectories'])
+    .optional()
+    .describe(
+      'Source range: docs (features/ADRs/plans/lessons), threads (chat), memory, sessions, all. trajectories browses task trajectories (no query). Omitted = every group.',
     ),
   mode: z
     .enum(['lexical', 'semantic', 'hybrid'])
@@ -118,6 +142,32 @@ export const searchEvidenceInputSchema = {
     .describe(
       'Comma-separated collection IDs to search (e.g. "world:lexander,global:methods"). Only effective with dimension=collection',
     ),
+  since: z
+    .string()
+    .optional()
+    .describe('Lower time bound: 7d, 24h or an ISO date. Without a query it is the recent browse window (default 7d).'),
+  kinds: z
+    .array(z.string().min(1).max(40))
+    .max(12)
+    .optional()
+    .describe(
+      'Document kinds (feature/decision/architecture/lesson/plan/phase/discussion/research); intersected with scope.',
+    ),
+  graphDepth: z
+    .number()
+    .int()
+    .min(1)
+    .max(3)
+    .optional()
+    .describe('Graph group only: relation depth for an exact anchor (default 1).'),
+  graphRelations: z
+    .array(z.enum(GRAPH_RELATION_TYPES))
+    .optional()
+    .describe('Graph group only: relation types to follow (wikilink/doc_link/feature_ref/related_to). Omit = all.'),
+  continueGroup: z
+    .enum(['messages', 'graph', 'matters', 'recent'])
+    .optional()
+    .describe('Only from a returned next.arguments: reopens that one group alone.'),
   explain: z
     .boolean()
     .optional()
@@ -149,28 +199,84 @@ export interface EvidenceToolCallExtra {
   signal?: AbortSignal;
 }
 
+type SearchEvidenceInput = {
+  query?: string | undefined;
+  matterCursor?: string | undefined;
+  continueGroup?: GroupName | undefined;
+  since?: string | undefined;
+  kinds?: string[] | undefined;
+  graphDepth?: number | undefined;
+  graphRelations?: string[] | undefined;
+} & Omit<DocsSearchInput, 'query'>;
+
+/** F332 find unification: docs, messages, graph, matters and recent groups behind the one find entry (memory-find.ts). */
 export async function handleSearchEvidence(
-  input: {
-    query: string;
-    resultUnit?: 'document' | 'message';
-    messageSort?: 'time' | 'relevance';
-    agentKeyCatId?: string;
-    limit?: number | undefined;
-    scope?: string | undefined;
-    mode?: string | undefined;
-    depth?: string | undefined;
-    dateFrom?: string | undefined;
-    dateTo?: string | undefined;
-    contextWindow?: number | undefined;
-    threadId?: string | undefined;
-    dimension?: string | undefined;
-    collections?: string | undefined;
-    explain?: boolean | undefined;
-    intent?: 'topk' | 'coverage' | undefined;
-    coverage_offset?: number | undefined;
-    include_expansion?: boolean | undefined;
-  },
+  input: SearchEvidenceInput,
   extra?: EvidenceToolCallExtra,
+): Promise<ToolResult> {
+  const defined = <T extends Record<string, unknown>>(value: T) =>
+    Object.fromEntries(Object.entries(value).filter(([, entry]) => entry !== undefined)) as Partial<T>;
+  return runFind(
+    defined({
+      query: input.query,
+      limit: input.limit,
+      scope: input.scope,
+      resultUnit: input.resultUnit,
+      dimension: input.dimension,
+      threadId: input.threadId,
+      dateFrom: input.dateFrom,
+      dateTo: input.dateTo,
+      since: input.since,
+      kinds: input.kinds,
+      coverage_offset: input.coverage_offset,
+      matterCursor: input.matterCursor,
+      continueGroup: input.continueGroup,
+      mode: input.mode,
+      messageSort: input.messageSort,
+      agentKeyCatId: input.agentKeyCatId,
+      graphDepth: input.graphDepth,
+      graphRelations: input.graphRelations,
+    }),
+    (query, options) =>
+      searchDocuments(
+        {
+          ...input,
+          query,
+          ...(options.limit !== undefined ? { limit: options.limit } : {}),
+          ...(options.dateFrom ? { dateFrom: options.dateFrom } : {}),
+        },
+        extra,
+        options,
+      ),
+    extra?.signal,
+  );
+}
+
+type DocsSearchInput = {
+  query: string;
+  resultUnit?: 'document' | 'message';
+  messageSort?: 'time' | 'relevance';
+  agentKeyCatId?: string;
+  limit?: number | undefined;
+  scope?: string | undefined;
+  mode?: string | undefined;
+  depth?: string | undefined;
+  dateFrom?: string | undefined;
+  dateTo?: string | undefined;
+  contextWindow?: number | undefined;
+  threadId?: string | undefined;
+  dimension?: string | undefined;
+  collections?: string | undefined;
+  explain?: boolean | undefined;
+  intent?: 'topk' | 'coverage' | undefined;
+  coverage_offset?: number | undefined;
+  include_expansion?: boolean | undefined;
+};
+
+async function searchDocuments(
+  input: DocsSearchInput,
+  extra: EvidenceToolCallExtra | undefined,
+  options: DocsGroupOptions,
 ): Promise<ToolResult> {
   if (input.resultUnit === 'message') {
     const params = messageSearchParams(input);
@@ -234,7 +340,8 @@ export async function handleSearchEvidence(
 
     // F200 HW-1: intent=coverage returns CoverageSearchResult (different shape from topk)
     if (input.intent === 'coverage') {
-      return renderCoverageToolResponse((await response.json()) as CoverageToolData, input, queryLabel);
+      const coverage = (await response.json()) as CoverageToolData;
+      return renderCoverageToolResponse(coverage, input, queryLabel, await options.charBudget());
     }
 
     const data = (await response.json()) as {
@@ -257,6 +364,7 @@ export async function handleSearchEvidence(
         entityMatchesDrillUnavailable?: string;
         passagesOmitted?: number;
         drillDown?: EvidenceDrillDown;
+        readRef?: ReadRef;
         sourcePath?: string;
         rankingFactors?: { bm25Score?: number; consumptionPrior?: number; mmrPenalty?: number };
         suggestedAction?: SuggestedCrossPostAction;
@@ -354,7 +462,8 @@ export async function handleSearchEvidence(
           degraded: data.degraded,
           ...(data.degradeReason ? { degradeReason: data.degradeReason } : {}),
           ...(data.expansionMeta ? { expansionFunnel: data.expansionMeta } : {}),
-          readNextHint: 'No search results were returned. Try graph_resolve/list_recent or broaden the query.',
+          readNextHint:
+            'No docs results. Rephrase or broaden, pass an exact anchor, or omit query to browse recent items.',
         }),
       ].filter(Boolean);
       return successResult(parts.join('\n\n'));
@@ -411,7 +520,8 @@ export async function handleSearchEvidence(
           `  entityMatches omitted: ${r.entityMatchesOmitted}; derived appendix is not pageable; open the source anchor for original evidence.`,
         );
       }
-      if (r.drillDown) {
+      if (r.readRef) lines.push(`  readRef: ${JSON.stringify(r.readRef)}`);
+      else if (r.drillDown) {
         lines.push(...formatDrillDownLines(r.drillDown));
       }
       if (r.suggestedAction) {
@@ -452,7 +562,9 @@ export async function handleSearchEvidence(
     // F188 Phase F AC-F3 + KD-7: deterministic nudge on low-hit (no high/mid doc anchors)
     const nudgeText = composeMemoryNavigationNudge(data);
 
-    // Hook F-1: Read reminder for high/mid match-rank doc anchors (F177 Phase F)
+    // Hook F-1: Read reminder for high/mid match-rank doc anchors (F177 Phase F). It repeats anchors already
+    // listed above, so a find response beside other groups may drop it before any result detail.
+    const reminderStart = lines.length;
     if (docHits.length > 0) {
       lines.push(`📌 有文本匹配依据的候选 ${docHits.length} 个（仍需读源核对）：`);
       for (const d of docHits) {
@@ -461,6 +573,7 @@ export async function handleSearchEvidence(
       lines.push('   建议：直接 Read，不要止步摘要。摘要是索引，不是答案。');
       lines.push('');
     }
+    const reminderEnd = lines.length;
 
     // F256 Phase B: expansion hints — "Related directions" block
     if (data.expansionHints && data.expansionHints.length > 0) {
@@ -501,18 +614,25 @@ export async function handleSearchEvidence(
         readNextHint:
           docHits.length > 0
             ? `Read text-supported candidates and verify applicability: ${docHits.map((d) => d.anchor).join(', ')}`
-            : 'Relevance is unknown; consider graph_resolve/list_recent or a narrower query.',
+            : 'Relevance is unknown; read candidate sources, pass an exact anchor, or narrow the query.',
         // F256 Wave 1b: expansion health funnel for telemetry correlation
         ...(data.expansionMeta ? { expansionFunnel: data.expansionMeta } : {}),
       }),
     );
 
     const rendered = lines.join('\n');
-    if (rendered.length <= TOPK_TOOL_RESPONSE_CHAR_BUDGET) return successResult(rendered);
+    const charBudget = Math.min(TOPK_TOOL_RESPONSE_CHAR_BUDGET, await options.charBudget());
+    if (rendered.length <= charBudget) return successResult(rendered);
+    // Beside other find groups: the page the docs-only budget returns keeps every result and its detail; only the
+    // duplicate anchor reminder gives way before the bounded projection is considered.
+    if (rendered.length <= TOPK_TOOL_RESPONSE_CHAR_BUDGET && reminderEnd > reminderStart) {
+      const lean = [...lines.slice(0, reminderStart), ...lines.slice(reminderEnd)].join('\n');
+      if (lean.length <= charBudget) return successResult(lean);
+    }
     return successResult(
       [
         sourceBanner,
-        renderCompactTopkResponse(data.results, queryLabel, data.degraded, (sourceBanner?.length ?? 0) + 1),
+        renderCompactTopkResponse(data.results, queryLabel, data.degraded, (sourceBanner?.length ?? 0) + 1, charBudget),
       ]
         .filter(Boolean)
         .join('\n'),
@@ -609,19 +729,17 @@ function composeMemoryNavigationNudge(data: {
 }): string | null {
   if (data.results.length === 0) {
     return [
-      '🧭 Memory navigation — no match, try a different entry:',
-      '  • 精确 anchor (F186 / ADR-019 等) → cat_cafe_graph_resolve',
-      '  • 零先验 / 扫一眼最近活动 → cat_cafe_list_recent(scope="all", since="7d")',
-      '  • 换切面/多刀搜 → 加载 memory-search-best-practices skill（8 种题型 recipe + 何时停）',
+      '🧭 Memory navigation — no docs match for this clue:',
+      '  • rephrase or broaden; an exact anchor (F186 / ADR-019) also returns its graph relations',
+      '  • omit query to browse recent items; many angles → memory-search-best-practices skill',
     ].join('\n');
   }
   const hasHighOrMidDocHit = data.results.some((r) => hasRelevanceEvidence(r) && DOC_SOURCE_TYPES.has(r.sourceType));
   if (!hasHighOrMidDocHit) {
     return [
-      '🧭 Memory navigation — relevance unknown, consider an alternate entry:',
-      '  • 看 anchor 周边关系 → cat_cafe_graph_resolve',
-      '  • 时间窗口扫描 → cat_cafe_list_recent',
-      '  • 换切面/多刀搜 → 加载 memory-search-best-practices skill（题型 recipe + 补刀策略）',
+      '🧭 Memory navigation — relevance unknown for these docs:',
+      '  • read a candidate source before relying on it; an exact anchor shows its graph relations',
+      '  • omit query to browse recent items; many angles → memory-search-best-practices skill',
     ].join('\n');
   }
   return null;
@@ -711,6 +829,7 @@ function renderCompactTopkResponse(
     updatedAt?: string;
     sourcePath?: string;
     drillDown?: EvidenceDrillDown;
+    readRef?: ReadRef;
     entityMatches?: EvidenceEntityMatch[];
     entityMatchesOmitted?: number;
     passages?: Array<unknown>;
@@ -719,10 +838,11 @@ function renderCompactTopkResponse(
   queryLabel: string,
   degraded: boolean,
   reservedChars = 0,
+  charBudget = TOPK_TOOL_RESPONSE_CHAR_BUDGET,
 ): string {
   const lines = [
     `${EVIDENCE_RESULT_MARKER} Found ${results.length} result(s) for ${boundTopkField(queryLabel, 220)} [bounded topk]:`,
-    '⚠️ Search detail exceeded the 24,000-character envelope; ranked source references remain visible.',
+    `⚠️ Search detail exceeded the ${charBudget.toLocaleString('en-US')}-character envelope; ranked source references remain visible.`,
     '',
   ];
   for (const result of results) {
@@ -735,7 +855,8 @@ function renderCompactTopkResponse(
     if (result.anchor.length > 300 || (result.sourcePath?.length ?? 0) > 300) {
       lines.push('  sourceReferenceTruncated: true; exact reference unavailable in this compact projection.');
     }
-    if (result.drillDown) {
+    if (result.readRef) lines.push(`  readRef: ${JSON.stringify(result.readRef)}`);
+    else if (result.drillDown) {
       const drill = JSON.stringify(result.drillDown);
       lines.push(
         drill.length <= 500
@@ -763,13 +884,15 @@ function renderCompactTopkResponse(
     }),
   );
   const text = lines.join('\n');
-  if (text.length + reservedChars > TOPK_TOOL_RESPONSE_CHAR_BUDGET) {
+  if (text.length + reservedChars > charBudget) {
     throw new Error('Topk source reference projection exceeds the declared response budget');
   }
   return text;
 }
 
 function formatDrillDownLines(drillDown: EvidenceDrillDown): string[] {
+  const ref = readRefFromDrillDown(drillDown);
+  if (ref) return [`  readRef: ${JSON.stringify(ref)}`];
   const params = Object.entries(drillDown.params ?? {})
     .map(([key, value]) => `${key}=${value}`)
     .join(', ');
@@ -785,44 +908,15 @@ export const evidenceTools = [
   defineMcpTool({
     name: 'cat_cafe_search_evidence',
     description:
-      'Search project knowledge or distinct readable messages from earlier conversations. ' +
-      'Use when: finding an earlier discussion ("以前聊过 / 找回旧消息", resultUnit=message), semantically finding project knowledge, tracing a topic across docs or threads, or building a bounded coverage/source map. ' +
-      'NOT for: resolving a known exact anchor (use cat_cafe_graph_resolve), scanning recent items without a query (use cat_cafe_list_recent), or reading raw messages from a known thread (use get_thread_context). ' +
-      'Output: document-mode evidence summaries, or message-mode canonical source snippets, thread/message coordinates and honest scope/degradation metadata; this is read-only and does not navigate. ' +
-      'To answer with clickable original sources, read them in full, select exact quotations and your reasons, then attach them through the ordinary reply (create_rich_block kind:"sources", or post_message searchAnswer). Full original reads supply contentRevision and sourceParts. Host verifies provenance while your reasons remain your judgment. Ordinary recall never publishes a card or launches a generative judge. ' +
-      'MESSAGE CONTRACT: resultUnit=message returns sources for the reader to judge, with matched query terms or semantic-retrieval evidence, not supported verdicts. messageSort=relevance (default) returns a relevance-ranked page and stops at the admitted page plus one witness; explicit messageSort=time orders the first 32 admitted relevance sources by canonical time. Incomplete time windows report actual coverage. It supports mode=hybrid (default); scope is threads, optional threadId means current conversation, omission means all readable project conversations. Authenticated invocation binds the exact question exclusion; caller-supplied user/source IDs are ignored. Limited results and unknown freshness do not prove the first occurrence or complete history. ' +
-      'GOTCHA: rank/matchRank are position only, never relevance or trust; relevance states observed exact-anchor/title/phrase evidence or unknown; authority is document reliability, and broad coverage requires separate docs + threads searches instead of treating one all-scope query as exhaustive. ' +
-      'Semantic/fuzzy find entry point for memory recall. For precise anchors (F186, ADR-019), prefer cat_cafe_graph_resolve; for zero-prior scanning, prefer cat_cafe_list_recent; when unsure, start here with mode=hybrid. ' +
-      'Supports scope (docs/threads/all), mode (lexical/semantic/hybrid), and depth (summary/raw). ' +
-      'QUERY CONTRACT: query has max 2,000 characters; overlong input fails validation instead of being truncated. ' +
-      'THREAD FILTER CONTRACT: threadId is enforced at the final response boundary; results can only come from that thread, and empty responses state whether the filter was authoritative or degraded. Related-direction expansion is suppressed for exact thread searches. ' +
-      'COVERAGE CONTRACT: caller scope is executed exactly; coverage limit has max 20; latency is bounded; serialized output has a declared budget with explicit truncation and a continuation drill pointer. ' +
-      'TOPK CONTRACT: complete API/MCP output is bounded to 24k characters; omitted derived entity explanations report their count and lack a direct pager, while source anchors remain readable. ' +
-      'At the 15s API deadline coverage returns an explicit partial/degraded result; the MCP HTTP caller cancels any request that outlives that boundary plus transport grace. ' +
-      'SCOPE STRATEGY (decide first!): ' +
-      'docs = 结论/真相源 (features, ADRs, architecture maps, plans, lessons). ' +
-      'threads = 讨论过程 (who said what, original context). ' +
-      "all = broad scan only — docs dominate due to higher BM25 density, so don't rely on all for finding threads. " +
-      'Rule of thumb: "要结论 → docs, 要过程 → threads, 要全貌 → both separately". ' +
-      'MODE SELECTION: lexical (default) = BM25 keyword match, best for Feature IDs / exact terms (F042, Redis). ' +
-      'hybrid = BM25 + vector NN + RRF fusion, RECOMMENDED for most searches — finds both exact AND semantic matches. ' +
-      'semantic = pure vector nearest-neighbor, best for cross-language (English query → Chinese docs) or synonym matching. ' +
-      'TIP: When unsure, use mode=hybrid. For broad surveys, add one semantic query as blind-spot insurance (hybrid misses cross-language synonyms). ' +
-      'QUERY TIPS: Feature IDs (F102, F163) are strong anchors — use them when available. ' +
-      'Mix Chinese + English keywords for better recall (记忆 + memory). ' +
-      'Split broad topics into 2-3 targeted queries from different angles (e.g. "how it was built" vs "how it is governed"). ' +
-      'Watch for antonym gaps: searching 记忆 misses 失忆/压缩/丢失 — search the opposite angle separately if needed. ' +
-      'SEARCH TIPS — coverage/source-map tasks: this is not an exhaustive all-mentions entrypoint. If the user asks "哪些 / 所有 / 历史上 / 提过 / 沉淀", follow the memory-search-best-practices skill: expand terms yourself, search docs + threads separately, then drill into canonical docs/source threads and report coverage gaps. ' +
-      'READING RESULTS: rank = position; matchRank is its legacy bucket. relevance = observed textual support, never confidence; unknown keeps alternate-entry hints. retrievalScore = method-specific score, authority = document reliability. sourceProjection reports the observed/indexed publication versions and pending/degraded state; do not infer absence from a stale index. Follow the returned drillDown path to read the same source hash; changed/forgotten sources are refused, never replaced by another quote. ' +
-      'RANKING (F200 live): Results are consumption-weighted — docs that cats actually read/used after searching rank higher. Constitutional docs (ADR/lesson/canon) never get demoted. New docs have 14-day grace period. Near-duplicates are MMR-deduplicated for diversity. No action needed — ranking is automatic. ' +
-      'DEPTH: Start with summary (default). Use depth=raw only after narrowing scope to drill into specific passages. ' +
-      'BOUNDARY: Use this tool to FIND information across the project. For READING raw messages in a specific thread, use get_thread_context instead. ' +
-      'F188 PHASE F 7-TOOL FAMILY (cross-reference, choose by scenario): ' +
-      'precise anchor + relations → cat_cafe_graph_resolve; ' +
-      'zero-prior / scan recent → cat_cafe_list_recent; ' +
-      'this tool (search_evidence) = semantic/fuzzy find; ' +
-      'session drill-down → list_session_chain / read_session_digest / read_session_events / read_invocation_detail. ' +
-      'When this tool returns no results or no text-supported document candidates, payload appends a deterministic nudge pointing to graph_resolve/list_recent (KD-7).',
+      'Find project knowledge, earlier messages, graph relations, matter pages or recent items from one clue. ' +
+      'Use when: you have a sentence, term or exact anchor (F186, ADR-019) to look up ("以前聊过 / 找回旧消息 / 有没有相关经验"), want recent activity (omit query), or need a bounded coverage/source map. ' +
+      'NOT for: opening a known source (pass its readRef to cat_cafe_read_memory), raw messages of a known thread (get_thread_context), or diaries/events/person cards (their own entries). ' +
+      "Output: groups run in parallel on the same input, each with its own status (ok/no_results/not_covered/deferred/failed/timeout), range and continuation. With a query: docs = document and thread-digest evidence (mode lexical by default); messages = distinct canonical messages (hybrid by default) with their match evidence; graph = an exact anchor's subgraph (graphDepth 1-3, graphRelations) or candidate anchors with match reasons; matters = the whole query matched literally in matter titles/descriptions (up to 200 characters, never cut). Without a query: recent = the recent index by time (since, default 7d; scope with kinds; scope=trajectories) plus the matter directory. scope, dimension, threadId, dateFrom/dateTo/since and kinds narrow every group; a group that cannot keep one reports not_covered instead of widening. Explicit resultUnit=document|message keeps that one original search. Pass next.arguments (matterCursor or continueGroup) unchanged: they reopen one group alone. Read-only: no read receipt, card or preparation event. " +
+      'MESSAGE CONTRACT: resultUnit=message returns distinct canonical messages through authenticated callback access, with matched query terms or semantic-retrieval evidence, not supported verdicts. messageSort=relevance (default) returns a relevance-ranked page and stops at the admitted page plus one witness; explicit messageSort=time orders the first 32 admitted relevance sources by canonical time. Incomplete time windows report actual coverage. Caller-supplied user/source IDs are ignored. ' +
+      'To answer with clickable original sources, read them in full, select exact quotations and reasons, then attach them through the ordinary reply (create_rich_block kind:"sources", or post_message searchAnswer). ' +
+      'GOTCHA: rank/matchRank are position only, never relevance or trust; relevance states observed exact-anchor/title/phrase evidence or unknown; semantic similarity is not confirmation; recent items are ordered by time, not relevance. No result or a stale sourceProjection does not prove absence. One query is not exhaustive: for "哪些/所有/历史上" source maps use intent=coverage with docs + threads searched separately, following the memory-search-best-practices skill. ' +
+      'CONTRACTS: query max 2,000 characters; overlong input fails validation instead of being truncated. threadId is enforced at the response boundary and empty results state whether the filter was authoritative or degraded. Coverage executes the caller scope exactly; coverage limit has max 20; latency is bounded (the 15s API deadline returns an explicit partial result); serialized output has a declared budget with explicit truncation and a coverage_offset continuation pointer. All groups together stay within 24k characters without dropping the docs page; omitted derived entity explanations report their count while source anchors remain readable. ' +
+      'Docs cover features, ADRs, architecture maps, plans and lessons; scope=threads gives discussion process. Session drill-down: list_session_chain / read_session_digest / read_session_events / read_invocation_detail.',
     operation: {
       kind: 'single',
       action: 'read',

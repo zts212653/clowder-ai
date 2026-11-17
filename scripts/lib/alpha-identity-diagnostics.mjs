@@ -3,14 +3,14 @@ import { createAlphaGitTrace } from './alpha-git-trace.mjs';
 
 const IDENTITY_FIELDS = ['cwd', 'ucomm', 'startedAt', 'startedAtEpochMs', 'startedAtFormat'];
 
-/** Observe one unchanged Git check. Never publish argv, paths, stdout or stderr. */
+/** Observe Git without starting a monitor. Never publish argv, paths, stdout or stderr. */
 export function observeAlphaGit(root, args, stage) {
   const timeoutMs = 5_000;
   const startedAt = new Date().toISOString();
   const startedMs = performance.now();
   const trace = createAlphaGitTrace();
   try {
-    return execFileSync('git', args, {
+    return execFileSync('git', ['-c', 'core.fsmonitor=false', ...args], {
       cwd: root,
       encoding: 'utf8',
       timeout: timeoutMs,

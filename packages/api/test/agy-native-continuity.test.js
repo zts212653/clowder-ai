@@ -101,21 +101,31 @@ test('Native continuity survives service reconstruction using the canonical sess
   }
 });
 
-test('Native exact resume refuses missing or changed binding before spawning', async () => {
+test('Native exact resume continues across L0 hash updates while refusing missing or incompatible bindings before spawning', async () => {
   const f = fixture();
   try {
     const first = await f.invoke(f.service());
     const init = first.find((message) => message.type === 'session_init');
+    const l0Updated = await f.invoke(f.service('# Identity\nUpdated instructions.'), {
+      sessionId: init.sessionId,
+      nativeSessionBinding: { ...init.nativeSessionBinding, l0Hash: 'changed' },
+      requireExactResume: true,
+    });
+    assert.equal(l0Updated.at(-1).errorCode, undefined, JSON.stringify(l0Updated));
+    const spawnsAfterValidResume = f.launches.length;
+    assert.equal(spawnsAfterValidResume, 2);
+
     for (const patch of [
       {},
-      { nativeSessionBinding: { ...init.nativeSessionBinding, l0Hash: 'changed' } },
+      { nativeSessionBinding: { ...init.nativeSessionBinding, carrier: 'agy_acp' } },
+      { nativeSessionBinding: { ...init.nativeSessionBinding, agentName: 'cat-cafe-host-other-cat' } },
       { nativeSessionBinding: { ...init.nativeSessionBinding, profileHome: '/another/profile' } },
       { nativeSessionBinding: { ...init.nativeSessionBinding, cliSessionId: 'another-session' } },
     ]) {
       const result = await f.invoke(f.service(), { sessionId: init.sessionId, requireExactResume: true, ...patch });
       assert.equal(result.at(-1).errorCode, 'AGY_NATIVE_RESUME_MISMATCH', JSON.stringify(result));
     }
-    assert.equal(f.launches.length, 1, 'no replacement may silently launch');
+    assert.equal(f.launches.length, spawnsAfterValidResume, 'no replacement may silently launch');
   } finally {
     f.cleanup();
   }

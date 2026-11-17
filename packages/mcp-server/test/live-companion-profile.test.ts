@@ -19,13 +19,11 @@ test('Live gets memory drilldown, coordination and its scoped Task lifecycle wit
   const names = new Set([...buildCollabTools(env), ...buildMemoryTools(env)].map((tool) => tool.name));
   for (const name of [
     'search_evidence',
-    'graph_resolve',
-    'list_recent',
     'read_file_slice',
     'get_thread_context',
     'get_message',
     'read_session_events',
-    'read_profile',
+    'read_memory',
     'recall_person_relationship',
     'list_tasks',
     'cross_post_message',

@@ -1,4 +1,6 @@
 /** Exact message drill facet; canonical QueueProcessor owns adoption, not this read surface. */
+
+import { type MemoryMessageSelection, memoryMessageSelectionSchema } from '@cat-cafe/shared';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { InvocationQueue } from '../domains/cats/services/agents/invocation/InvocationQueue.js';
@@ -24,6 +26,7 @@ import {
   isTimelinePublished,
   type Viewer,
 } from '../domains/cats/services/stores/visibility.js';
+import { matchesMatterSourceSelection } from '../domains/memory/matters/matter-source.js';
 import { getDefaultUploadDir } from '../utils/upload-paths.js';
 import { recordAnchorDrillEvent, recordAnchorPreviewEvent } from './anchor-event-log.js';
 import { recordAnchorFullDrill } from './anchor-telemetry.js';
@@ -54,6 +57,8 @@ export function registerCallbackMessageReadRoutes(app: FastifyInstance, opts: Ca
     contextCount: z.coerce.number().int().min(0).max(10).optional(),
     // F236 AC-B1: drill terminal is bounded — default preview, mode=full returns complete content.
     mode: z.enum(['preview', 'full']).optional(),
+    memoryRead: z.enum(['true']).optional(),
+    sourceSelection: z.string().max(4000).optional(),
   });
 
   app.get(
@@ -70,6 +75,16 @@ export function registerCallbackMessageReadRoutes(app: FastifyInstance, opts: Ca
 
       const { messageId, contextCount } = parsed.data;
       const isFullDrill = (parsed.data.mode ?? 'preview') === 'full';
+      const isMemoryRead = parsed.data.memoryRead === 'true';
+      let sourceSelection: MemoryMessageSelection | undefined;
+      if (parsed.data.sourceSelection) {
+        try {
+          if (!isMemoryRead) throw new Error('Source selections require memoryRead');
+          sourceSelection = memoryMessageSelectionSchema.parse(JSON.parse(parsed.data.sourceSelection));
+        } catch {
+          return reply.status(400).send({ error: 'invalid_source_selection' });
+        }
+      }
       const message = await messageStore.getById(messageId);
       if (!message || message.deletedAt) {
         reply.status(404);
@@ -105,6 +120,7 @@ export function registerCallbackMessageReadRoutes(app: FastifyInstance, opts: Ca
       const expectedParentInvocationId =
         principal.kind === 'invocation' ? (principal.parentInvocationId ?? principal.invocationId) : undefined;
       const queuedDrillEntry =
+        !isMemoryRead &&
         !isWatcherRead(request) &&
         isFullDrill &&
         principal.kind === 'invocation' &&
@@ -133,6 +149,8 @@ export function registerCallbackMessageReadRoutes(app: FastifyInstance, opts: Ca
         reply.status(404);
         return { error: 'Message not found' };
       }
+      if (sourceSelection && !matchesMatterSourceSelection(message, sourceSelection))
+        return reply.status(409).send({ error: 'source_revision_changed' });
       // A preview is not delivery evidence. Only this exact requested full body may
       // claim an ordinary pending target; typed wait/action/domain owners stay out.
       if (queuedDrillEntry && principal.kind === 'invocation') {
@@ -284,6 +302,7 @@ export function registerCallbackMessageReadRoutes(app: FastifyInstance, opts: Ca
 
       if (
         !isWatcherRead(request) &&
+        !isMemoryRead &&
         isFullDrill &&
         principal.kind === 'invocation' &&
         message.threadId === principal.threadId

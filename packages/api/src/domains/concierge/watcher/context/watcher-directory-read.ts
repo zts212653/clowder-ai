@@ -7,9 +7,11 @@ import { boundedWatcherResult } from './watcher-context-budget.js';
 type Bridge = Awaited<ReturnType<typeof createWatcherNativeBridge>>;
 type Result = Awaited<ReturnType<Bridge['call']>>;
 const hash = (text: string) => createHash('sha256').update(text).digest('hex');
+/** F332: the watcher reads its matter directory through the find entry, whose only watcher group is matters. */
+export const WATCHER_DIRECTORY_TOOL = 'cat_cafe_search_evidence';
 
 /** Directory metadata keeps every entry/cursor. Original descriptions remain in the durable receipt;
- * the model reads their actual page through read_memory_matter instead of repeatedly copying summaries. */
+ * the model reads their actual page through read_memory instead of repeatedly copying summaries. */
 export function compactWatcherDirectory(result: Result): Result {
   return {
     ...result,
@@ -68,8 +70,8 @@ export function watcherDirectoryReader(owners: WatcherInvocationOwners, run: Wat
     const read = async (): Promise<Result> => {
       signal.throwIfAborted();
       if (!args || typeof args !== 'object' || Array.isArray(args))
-        return bridge.call('cat_cafe_list_memory_matters', args, callId, signal);
-      // The canonical directory schema has flat query/cursor/limit fields, without nested filters.
+        return bridge.call(WATCHER_DIRECTORY_TOOL, args, callId, signal);
+      // The find entry's directory arguments are flat (query/matterCursor/limit), without nested filters.
       const key = hash(JSON.stringify(args, Object.keys(args as object).sort()));
       const prior = run.state.directoryReads?.find((entry) => entry.key === key);
       if (prior) {
@@ -82,14 +84,14 @@ export function watcherDirectoryReader(owners: WatcherInvocationOwners, run: Wat
           auth.threadId !== run.session.threadId ||
           auth.catId !== run.session.catId ||
           auth.toolExecutionPolicy?.mode !== 'watcher' ||
-          !auth.toolExecutionPolicy.allowedToolNames.includes('cat_cafe_list_memory_matters')
+          !auth.toolExecutionPolicy.allowedToolNames.includes(WATCHER_DIRECTORY_TOOL)
         )
           throw new Error('Watcher invocation no longer active');
-        if ((await owners.registry.consumeWatcherToolCall(id, callId, 'cat_cafe_list_memory_matters')) !== 'accepted')
+        if ((await owners.registry.consumeWatcherToolCall(id, callId, WATCHER_DIRECTORY_TOOL)) !== 'accepted')
           throw new Error('watcher_tool_budget_exhausted');
         return reuse(prior);
       }
-      const result = await bridge.call('cat_cafe_list_memory_matters', args, callId, signal);
+      const result = await bridge.call(WATCHER_DIRECTORY_TOOL, args, callId, signal);
       if (result.isError) return result;
       const projected = compactWatcherDirectory(result);
       const fingerprint = hash(JSON.stringify(projected.content));
