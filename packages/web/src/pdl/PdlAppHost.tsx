@@ -228,6 +228,46 @@ function subscribeDraftOwner(onChange: () => void): () => void {
   };
 }
 
+/** The last send attempt per conversation (its key and what was sent), kept with the draft across a reload. */
+type SendAttempt = { key: string; signature: string };
+const SEND_ATTEMPTS = 'pdl-send-attempts';
+function readSendAttempt(threadId: string): SendAttempt | undefined {
+  return (JSON.parse(sessionStorage.getItem(SEND_ATTEMPTS) || '{}') as Record<string, SendAttempt>)[threadId];
+}
+function writeSendAttempt(threadId: string, attempt: SendAttempt | null) {
+  const all = JSON.parse(sessionStorage.getItem(SEND_ATTEMPTS) || '{}') as Record<string, SendAttempt>;
+  if (attempt) all[threadId] = attempt;
+  else delete all[threadId];
+  sessionStorage.setItem(SEND_ATTEMPTS, JSON.stringify(all));
+}
+
+/**
+ * Sends one conversation's draft. The draft stays where it is until the server takes it: `hold` locks that
+ * conversation's input meanwhile, a refused or failed send changes nothing, and sending the same content
+ * again reuses the attempt key so the server recognises an attempt that did arrive. Only a taken send clears.
+ */
+export async function sendHeldDraft(input: {
+  threadId: string;
+  signature: string;
+  keyed: boolean;
+  send: (attemptKey: string) => Promise<unknown>;
+  hold: (on: boolean) => void;
+  clear: () => void;
+}): Promise<boolean> {
+  const prior = readSendAttempt(input.threadId);
+  const key = prior?.signature === input.signature ? prior.key : crypto.randomUUID();
+  if (input.keyed) writeSendAttempt(input.threadId, { key, signature: input.signature });
+  input.hold(true);
+  try {
+    if ((await input.send(key)) === false) return false;
+    writeSendAttempt(input.threadId, null);
+    input.clear();
+    return true;
+  } finally {
+    input.hold(false);
+  }
+}
+
 export function PdlAppHost() {
   const pathname = usePathname() || '/';
   const browserPath = useSyncExternalStore(subscribeLocation, browserLocation, () => pathname);
@@ -404,6 +444,14 @@ function ChatBinding({
   const drafting = exportMids === undefined;
   const [input, writeInput] = useState(() => (drafting ? getThreadDraft(threadId) : ''));
   const [images, setImages] = useState<File[]>(() => threadImageDrafts.get(threadId) ?? []);
+  const [replyNotices, setReplyNotices] = useState<ChatData['replyNotices']>([]);
+  const [sendingThreads, setSendingThreads] = useState<Record<string, true>>({});
+  // Opening a conversation answers its new-reply notice.
+  useEffect(() => {
+    setReplyNotices((list) =>
+      list.some((n) => n.threadId === threadId) ? list.filter((n) => n.threadId !== threadId) : list,
+    );
+  }, [threadId]);
   const [contexts, setContexts] = useState<ContextAttachment[]>(() =>
     drafting ? [...getContextAttachmentDraft(threadId)] : [],
   );
@@ -710,6 +758,8 @@ function ChatBinding({
       projectNames,
       uploadStatus,
       uploadError,
+      replyNotices,
+      sending: !!sendingThreads[threadId],
       queue,
       executions,
       activeRuns,
@@ -751,6 +801,8 @@ function ChatBinding({
       projectNames,
       uploadStatus,
       uploadError,
+      replyNotices,
+      sendingThreads,
       queue,
       executions,
       activeRuns,
@@ -783,6 +835,20 @@ function ChatBinding({
   replyCurrent.current = replyOutput;
   const current = useRef(data);
   current.current = data;
+  // A send the server took clears the draft of the conversation it came from, wherever the owner is now.
+  const clearSentDraft = (sent: string) => {
+    if (current.current.threadId === sent) {
+      setInput('');
+      setImages([]);
+      setContexts([]);
+      useChatStore.getState().clearReplyTo();
+      return;
+    }
+    syncDraftToStorage(sent, '');
+    threadImageDrafts.delete(sent);
+    syncContextAttachmentDraftToStorage(sent, []);
+    syncReplyDraftToStorage(sent, null);
+  };
   const playback = useRef({ state: speech.state, messageId: speech.activeMessageId });
   playback.current = useMemo(
     () => ({ state: speech.state, messageId: speech.activeMessageId }),
@@ -795,7 +861,12 @@ function ChatBinding({
     if (!engineMounted) return;
     const send = (items: ReturnType<typeof useToastStore.getState>['toasts']) => {
       for (const item of items) {
-        window.clowderChat.emit('notification:toast', item);
+        if (item.reply && item.threadId) {
+          // A finished reply elsewhere is a notice above the composer, not a popup with the whole reply.
+          const notice = { threadId: item.threadId, ...item.reply, preview: item.message };
+          if (notice.threadId !== current.current.threadId)
+            setReplyNotices((list) => [notice, ...list.filter((n) => n.threadId !== notice.threadId)].slice(0, 5));
+        } else window.clowderChat.emit('notification:toast', item);
         useToastStore.getState().removeToast(item.id);
       }
     };
@@ -1151,42 +1222,43 @@ function ChatBinding({
         if (threadId === 'default' && !admission?.ready) throw new Error('对话尚未就绪');
         if (!input.trim() && !images.length && !contexts.length) return;
         if (input.trim()) inputHistory.addEntry(input);
-        const snapshot = { text: input, images, contexts, reply: state.replyToMessage };
-        const pending =
-          threadId === 'default' && admission
-            ? admission.send({
-                content: input.trim(),
-                images,
-                contextAttachments: contexts,
-                ...(ui.current.target ? { explicitTargetCats: [ui.current.target] } : {}),
-                ...(ui.current.whisper ? { whisper: { visibility: 'whisper', whisperTo: ui.current.whisperTo } } : {}),
-              })
-            : handleSend(
-                input.trim(),
-                images.length ? images : undefined,
-                threadId,
-                ui.current.whisper ? { visibility: 'whisper', whisperTo: ui.current.whisperTo } : undefined,
-                state.replyToMessage?.id,
-                contexts.length ? contexts : undefined,
-                ui.current.target ? [ui.current.target] : undefined,
-              );
-        // Sending clears the draft; a send that fails puts it back into an input left empty meanwhile.
-        setInput('');
-        setImages([]);
-        setContexts([]);
-        state.clearReplyTo();
-        const restore = () => {
-          setInput((text) => text || snapshot.text);
-          setImages((all) => (all.length ? all : snapshot.images));
-          setContexts((all) => (all.length ? all : snapshot.contexts));
-          if (snapshot.reply && !useChatStore.getState().replyToMessage) state.setReplyTo(snapshot.reply);
-        };
-        try {
-          if ((await pending) === false) restore();
-        } catch (error) {
-          restore();
-          throw error;
-        }
+        const sentThread = threadId;
+        await sendHeldDraft({
+          threadId: sentThread,
+          signature: JSON.stringify([
+            input.trim(),
+            images.map((file) => [file.name, file.size, file.lastModified]),
+            contexts,
+            state.replyToMessage?.id ?? null,
+            ui.current.target,
+            ui.current.whisper ? ui.current.whisperTo : null,
+          ]),
+          keyed: sentThread !== 'default',
+          send: (attemptKey) =>
+            sentThread === 'default' && admission
+              ? admission.send({
+                  content: input.trim(),
+                  images,
+                  contextAttachments: contexts,
+                  ...(ui.current.target ? { explicitTargetCats: [ui.current.target] } : {}),
+                  ...(ui.current.whisper
+                    ? { whisper: { visibility: 'whisper', whisperTo: ui.current.whisperTo } }
+                    : {}),
+                })
+              : handleSend(
+                  input.trim(),
+                  images.length ? images : undefined,
+                  sentThread,
+                  ui.current.whisper ? { visibility: 'whisper', whisperTo: ui.current.whisperTo } : undefined,
+                  state.replyToMessage?.id,
+                  contexts.length ? contexts : undefined,
+                  ui.current.target ? [ui.current.target] : undefined,
+                  { idempotencyKey: attemptKey },
+                ),
+          hold: (on) =>
+            setSendingThreads(({ [sentThread]: _, ...rest }) => (on ? { ...rest, [sentThread]: true } : rest)),
+          clear: () => clearSentDraft(sentThread),
+        });
         return;
       }
       case 'stop':
@@ -1303,6 +1375,9 @@ function ChatBinding({
           body: JSON.stringify({ userId: getUserId(), mode: 'soft' }),
         });
         await reconcileThreadWithServer(threadId, () => false, 'PdlMessageDelete');
+        return;
+      case 'replyNoticeDismiss':
+        setReplyNotices((list) => list.filter((n) => n.threadId !== args.t));
         return;
       case 'runtimeReload':
         if (connection.updateRequired) {

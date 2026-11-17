@@ -152,6 +152,7 @@ export function fixtureData(): ChatData {
     connected: true,
     uploadStatus: 'idle',
     uploadError: null,
+    replyNotices: [],
     queue: [],
     executions: [],
     activeRuns: [],

@@ -80,6 +80,10 @@ export interface ChatData {
   updateRequired?: boolean;
   uploadStatus: string;
   uploadError: string | null;
+  /** Finished replies in conversations that are not open, newest first, one per conversation. */
+  replyNotices: { threadId: string; catId: string; messageId: string; preview: string }[];
+  /** This conversation's send is with the server: the input is held until it is taken or refused. */
+  sending?: boolean;
   queue: QueueEntry[];
   executions: ActiveExecutionProjection[];
   activeRuns?: readonly LifecycleActiveRun[];
@@ -954,9 +958,26 @@ export function chatModels(data: ChatData, ui: ChatUiState, input?: ChatProjecti
     return parts.ids.map((_, i) => parts.item(i));
   };
   const chosen = () => sourceMessages().filter((item) => ui.picked[item.id]);
-  const notices = () => (data.uploadError ? [{ id: 'upload', text: data.uploadError }] : []);
+  const notices = () => [
+    ...(data.uploadError ? [{ id: 'upload', text: data.uploadError }] : []),
+    // Another conversation's new reply: its name opens that message, hovering shows what was said.
+    ...data.replyNotices.map((n) => {
+      const thread = data.threads.find((t) => t.id === n.threadId);
+      const cat = data.cats.find((c) => c.id === n.catId);
+      return {
+        id: `reply:${n.threadId}`,
+        text: `${thread?.title || n.threadId} · ${cat?.displayName ?? n.catId} 有新回复`,
+        tip: n.preview.length > 280 ? `${n.preview.slice(0, 280)}…` : n.preview,
+        act: 'msgJump',
+        args: { t: n.threadId, mid: n.messageId },
+        dismiss: 'replyNoticeDismiss',
+        dismissArgs: { t: n.threadId },
+      };
+    }),
+  ];
   const locked = () =>
     !!data.readonly ||
+    !!data.sending ||
     data.preparingImages ||
     data.uploadStatus === 'uploading' ||
     (data.threadId === 'default' && !!input?.admission && (!input.admission.ready || !!input.admission.optionsLocked));

@@ -491,6 +491,9 @@ function bindProject() {
     });
   };
 
+  A.replyNoticeDismiss = function (d) {
+    return chatAction('replyNoticeDismiss', d);
+  };
   A.worksMore = function () {
     return chatAction('worksMore');
   };

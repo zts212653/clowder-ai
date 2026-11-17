@@ -601,3 +601,28 @@ it('retains routing warning identities and shares the canonical execution shape 
     who: 'codex',
   });
 });
+
+it('turns a finished reply elsewhere into one notice above the composer that opens that message', () => {
+  const data = fixtureData();
+  data.replyNotices = [
+    { threadId: 'pdl-test', catId: 'codex', messageId: 'reply-1', preview: '核对完了，结论在这里。' },
+  ];
+  expect(chatModels(data, fixtureUi()).chatComposer.notices).toEqual([
+    {
+      id: 'reply:pdl-test',
+      text: '对话绑定验收 · Codex 有新回复',
+      tip: '核对完了，结论在这里。',
+      act: 'msgJump',
+      args: { t: 'pdl-test', mid: 'reply-1' },
+      dismiss: 'replyNoticeDismiss',
+      dismissArgs: { t: 'pdl-test' },
+    },
+  ]);
+});
+
+it('holds the composer while its conversation is sending', () => {
+  const data = fixtureData();
+  expect(chatModels(data, fixtureUi()).chatComposer.locked).toBe(false);
+  data.sending = true;
+  expect(chatModels(data, fixtureUi()).chatComposer.locked).toBe(true);
+});
