@@ -7,7 +7,7 @@ import {
   MICRODUCK_SHOW_REJECTION_KINDS,
   type MicroduckShowState,
 } from './microduck-owner-contract.js';
-import { MICRODUCK_SHOW_MEDIA_CONTENT_TYPES } from './microduck-show-media-contract.js';
+import { MICRODUCK_SHOW_MEDIA_CONTENT_TYPES } from './microduck-show/microduck-show-media-contract.js';
 
 const timestamp = z.string().datetime({ offset: true });
 const sha256 = z.string().regex(/^[a-f0-9]{64}$/i);
