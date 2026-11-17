@@ -87,7 +87,7 @@ export function registerCallbackRememberRoutes(app: FastifyInstance, deps: Remem
               kind: 'card',
               v: 1,
               id: groupId,
-              title: '这次记下的内容',
+              title: '这次记忆提交结果',
               meta: { kind: 'memory_group', memoryGroup: group },
             },
           ],

@@ -12,6 +12,7 @@ import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
 import type { IFrustrationIssueStore } from '../domains/cats/services/stores/ports/FrustrationIssueStore.js';
 import { resolveUserId } from '../utils/request-identity.js';
+import { sanitizeCliStderr } from '../utils/sanitize-cli-stderr.js';
 
 export interface FrustrationIssueRoutesOptions {
   frustrationIssueStore: IFrustrationIssueStore;
@@ -20,6 +21,8 @@ export interface FrustrationIssueRoutesOptions {
 const issueParamsSchema = z.object({
   issueId: z.string().min(1).max(200),
 });
+
+const reportBodySchema = z.object({ title: z.string().max(500), bodyMarkdown: z.string().max(64000) }).strict();
 
 const confirmBodySchema = z
   .object({
@@ -30,6 +33,14 @@ const confirmBodySchema = z
 
 export const frustrationIssueRoutes: FastifyPluginAsync<FrustrationIssueRoutesOptions> = async (app, opts) => {
   const { frustrationIssueStore } = opts;
+
+  // Public report preparation works without any publishing plugin. No storage or external write.
+  app.post('/api/feedback/report-preview', async (request, reply) => {
+    if (!resolveUserId(request)) return reply.status(401).send({ error: 'Not authenticated' });
+    const input = reportBodySchema.safeParse(request.body);
+    if (!input.success) return reply.status(400).send({ error: 'Invalid report' });
+    return { title: sanitizeCliStderr(input.data.title), bodyMarkdown: sanitizeCliStderr(input.data.bodyMarkdown) };
+  });
 
   // ── GET /api/frustration-issues/:issueId/status ────────────
 

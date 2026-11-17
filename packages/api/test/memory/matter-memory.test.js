@@ -142,6 +142,89 @@ describe('F332 canonical matters: privacy, lossless sources and immutable read e
     assert.equal(evidence.getDb().prepare('SELECT COUNT(*) AS n FROM memory_matters').get().n, 0);
   });
 
+  it('persists lightweight summaries, detects message changes and keeps historical unknown authors through additive migration', async () => {
+    const legacy = await create([selection(messages.get('first'))], 'Existing quoted page');
+    const db = evidence.getDb();
+    // Recreate the deployed pre-summary columns, not a rewritten legacy page.
+    db.exec(`UPDATE memory_matter_requests SET result_json = json_remove(result_json, '$.writeRef', '$.snapshot');
+      ALTER TABLE memory_matters DROP COLUMN description_author_json;
+      ALTER TABLE memory_matters DROP COLUMN description_entry_id;
+      ALTER TABLE memory_matters DROP COLUMN access_guards_json;
+      ALTER TABLE memory_matter_entries DROP COLUMN summary;
+      ALTER TABLE memory_matter_entries DROP COLUMN summary_author_json;
+      DELETE FROM schema_version WHERE version = 84;`);
+    await evidence.close();
+    await reopen();
+    const old = await service.read(sol, legacy.matter.matterId);
+    assert.equal(old.matter.descriptionAuthor, undefined);
+    assert.equal(old.entries[0].summaryAuthor, undefined);
+    assert.equal(old.entries[0].quote, messages.get('first').content);
+    const input = {
+      operation: 'create',
+      requestId: 'summary-persist',
+      title: 'Light memory',
+      summary: '只是一句归纳。',
+      sources: [{ threadId: 'a', messageId: 'first' }],
+    };
+    const created = await service.write(astra, input);
+    messages.set(
+      'private-trigger',
+      message('private-trigger', 'A private trigger', {
+        visibility: 'whisper',
+        whisperTo: ['codex-astra'],
+      }),
+    );
+    const guarded = await service.write(
+      { ...astra, invocation: { threadId: 'a', triggerMessageId: 'private-trigger' } },
+      {
+        operation: 'create',
+        requestId: 'persist-privacy',
+        title: 'Private note',
+        summary: 'Private interpretation',
+        sources: [{ threadId: 'a' }],
+      },
+    );
+    await evidence.close();
+    await reopen();
+    await assert.rejects(service.read(sol, guarded.matter.matterId), /not_available/);
+    const guardedPage = await service.read(astra, guarded.matter.matterId);
+    assert.equal(guardedPage.entries[0].source.kind, 'thread');
+    assert.equal(JSON.stringify(guardedPage).includes('accessGuards'), false);
+    messages.get('private-trigger').recall = { recalledAt: 200 };
+    await assert.rejects(service.read(astra, guarded.matter.matterId), /not_available/);
+    assert.equal(
+      (await service.writeSnapshot(sol, created.matter.matterId, created.writeRef)).entries[0].summary,
+      input.summary,
+    );
+    assert.deepEqual(await service.write(astra, input), created);
+    const read = await service.readForInvocation(scope, 'codex61-sol', created.matter.matterId);
+    assert.equal(read.entries[0].summary, input.summary);
+    assert.deepEqual(read.entries[0].summaryAuthor, { kind: 'agent', catId: 'codex-astra' });
+    const details = new MemoryCueEpisodeStore(evidence.getDb()).listByInvocation('owner-a', 'b', 'read-b')[0]
+      .readDetails;
+    assert.equal((await service.readReceipt('owner-a', 'codex61-sol', details)).status, 'current');
+    messages.get('first').content += '  ';
+    const changed = await service.read(sol, created.matter.matterId);
+    assert.equal(
+      changed.entries[0].sourceStatus,
+      'changed',
+      'Even raw whitespace changes invalidate a message-level snapshot',
+    );
+    assert.equal(changed.summaryStatus, 'sources_changed');
+    assert.equal(changed.entries[0].summary, input.summary);
+    assert.equal((await service.readReceipt('owner-a', 'codex61-sol', details)).status, 'changed');
+    await service.write(owner, {
+      operation: 'forget',
+      requestId: 'forget-light',
+      matterId: created.matter.matterId,
+      expectedRevision: 1,
+    });
+    await evidence.close();
+    await reopen();
+    assert.equal((await service.write(astra, input)).outcome, 'forgotten');
+    await assert.rejects(service.read(sol, created.matter.matterId), /not_available/);
+  });
+
   it('preserves raw whitespace, block/attachment coordinates and the two speakers of a quote', async () => {
     messages.set(
       'quoted',

@@ -46,13 +46,13 @@ test('a missing entry path stays inert', () => {
   assert.equal(result.stderr, '');
 });
 
-test('Windows alias/junction path still reaches the unsupported branch', { skip: process.platform !== 'win32' }, () => {
+test('Windows alias/junction path reaches native enumeration', { skip: process.platform !== 'win32' }, () => {
   const fixture = aliasFixture();
   try {
     const result = spawnSync(process.execPath, [fixture.aliasScript], { encoding: 'utf8', timeout: 30_000 });
-    assert.equal(result.status, 1);
-    assert.match(result.stderr, /Windows process enumeration\/cleanup is not supported yet/);
-    assert.equal(result.stdout, '');
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(result.stdout, /\[stale-dev-processes\]/);
+    assert.doesNotMatch(result.stderr, /not supported yet/);
   } finally {
     rmSync(fixture.root, { recursive: true, force: true });
   }
@@ -77,15 +77,14 @@ test('POSIX alias path enters the real entrypoint', { skip: process.platform ===
 });
 
 test(
-  'Windows direct execution fails closed instead of silently succeeding',
+  'Windows direct execution enumerates instead of silently succeeding',
   { skip: process.platform !== 'win32' },
   () => {
-    for (const args of [[], ['--run']]) {
+    for (const args of [[], ['--run', '--pencil-only']]) {
       const result = run(args);
-      assert.equal(result.status, 1);
-      assert.match(result.stderr, /Windows process enumeration\/cleanup is not supported yet/);
-      assert.doesNotMatch(result.stderr, /no cleanup-safe stale/);
-      assert.equal(result.stdout, '');
+      assert.equal(result.status, 0, result.stderr);
+      assert.match(result.stdout, /\[stale-dev-processes\]/);
+      assert.doesNotMatch(result.stderr, /not supported yet/);
     }
   },
 );

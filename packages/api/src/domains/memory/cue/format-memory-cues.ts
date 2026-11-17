@@ -69,11 +69,16 @@ function threadOverviewAction(cue: CueEnvelopeV1): string[] {
   ];
 }
 
-function drillInstructions(cue: CueEnvelopeV1): string[] {
+function drillInstructions(cue: CueEnvelopeV1, options?: { contentFree?: boolean }): string[] {
+  const ref = {
+    kind: 'cue',
+    handle: cue.drill.handle,
+    ...(!options?.contentFree ? { expectedRevision: cue.source.revision } : {}),
+  };
   return [
     `Family: ${cue.drill.family}`,
-    `Handle: ${cue.drill.handle}`,
-    'Drill: cat_cafe_drill_memory_cue(handle=Handle); then cat_cafe_record_memory_cue_outcome(handle=Handle, outcome=applied|dismissed). Use the exact Handle value for both.',
+    `ReadRef: ${JSON.stringify(ref)}`,
+    'Read: cat_cafe_read_memory({ref: ReadRef}); then cat_cafe_record_memory_cue_outcome(handle=ReadRef.handle, outcome=applied|dismissed). Reading never settles adoption.',
   ];
 }
 
@@ -100,7 +105,7 @@ export function renderMemoryCue(cue: CueEnvelopeV1): string {
 export function renderMemoryCuePointer(cue: CueEnvelopeV1): string {
   return [
     `<recall-opportunity-pointer v="1" opportunity-id="${cue.opportunityId}">`,
-    ...drillInstructions(cue),
+    ...drillInstructions(cue, { contentFree: true }),
     ...explicitTasteAction(cue),
     ...profileAction(cue),
     ...eventAction(cue),

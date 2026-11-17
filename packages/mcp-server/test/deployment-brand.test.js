@@ -72,7 +72,7 @@ test('shared Dot contracts and system-command connector use the selected brand',
   assert.equal(configured.commandConnector.displayName, synthetic.displayName);
 });
 
-for (const key of ['callback', 'readMode', 'audio', 'companion', 'graph', 'recent']) {
+for (const key of ['callback', 'readMode', 'audio', 'companion']) {
   test(`actual ${key} execution output uses selected brand without a prior list requirement`, () => {
     assertBrandProjection(original.outputs[key], configured.outputs[key], key);
     assert.equal(configured.outputs[key].isError, original.outputs[key].isError);

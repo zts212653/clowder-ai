@@ -1,0 +1,24 @@
+.claude-quota {
+  display: grid;
+  gap: 8px;
+  justify-items: start;
+}
+.claude-quota > .account-quota-windows {
+  width: 100%;
+}
+.account-quota.claude-quota .account-quota-window {
+  display: grid;
+}
+.claude-quota .account-quota-label {
+  max-width: 160px;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.claude-quota-time {
+  display: block;
+  margin-top: 2px;
+  color: var(--shell-muted, var(--cafe-text-muted));
+}
+.claude-quota-reading[data-stale="true"] .account-quota-reset {
+  color: var(--semantic-warning);
+}

@@ -152,6 +152,9 @@ for (const invalid of ['ordinary', 'stale', 'valid']) {
         fs.mkdirSync(path.dirname(file), { recursive: true });
         fs.writeFileSync(file, '#!/bin/sh\nexit 42\n', { mode: 0o755 });
       }
+      fs.writeFileSync(path.join(path.dirname(node), 'corepack'), '#!/bin/sh\necho 0.34.0\n', {
+        mode: 0o755,
+      });
       for (const command of ['npm', 'npx', 'curl', 'make', 'codesign', 'hdiutil', 'sips', 'iconutil']) {
         fs.writeFileSync(
           path.join(f.bin, command),

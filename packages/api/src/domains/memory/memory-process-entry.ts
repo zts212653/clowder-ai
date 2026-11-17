@@ -24,6 +24,7 @@ import { lookupShadowRanking, SqliteEvidenceStore } from './SqliteEvidenceStore.
 import { readTastePullRecallRows } from './taste/taste-pull-recall-rows.js';
 import { readPendingVectorSources } from './vector-generation-pending.js';
 import { inspectVectorGeneration } from './vector-generation-readiness.js';
+import { describeVectorSearchFailure } from './vector-search-degrade-report.js';
 
 let rpcSequence = 0;
 const pending = new Map<number, { resolve(value: Extract<ParentMessage, { type: 'embedding-result' }>): void }>();
@@ -103,6 +104,7 @@ async function execute(
   if (readJob) report({ phase: 'database-initialization' });
   const store = new SqliteEvidenceStore(job.dbPath, undefined, {
     workerMode: 'read',
+    onVectorSearchDegrade: (degrade) => report({ phase: 'vector-degrade', degrade }),
     ...(job.kind === 'search' ? { sourceRoot: job.sourceRoot, sourceRef: job.sourceRef } : {}),
   });
   await store.initialize();
@@ -156,8 +158,15 @@ async function execute(
               vectorStore: backend.vectorStore,
               ...(job.embedding.passages ? { passageVectorStore: backend.passageVectorStore } : {}),
             });
-          } catch {
+          } catch (error) {
             // An absent, unknown or retired accelerator cannot suppress the canonical lexical read.
+            // A search that asked for vectors still gets to know why it did not get them.
+            const requested = job.options?.mode ?? (job.kind === 'message-search' ? 'hybrid' : 'lexical');
+            if (requested !== 'lexical')
+              report({
+                phase: 'vector-degrade',
+                degrade: describeVectorSearchFailure('vector_generation_open', error),
+              });
           }
         }
         if (job.kind === 'message-search')

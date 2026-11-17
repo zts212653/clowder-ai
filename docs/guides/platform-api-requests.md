@@ -23,6 +23,25 @@ CLI 只收请求文件及可选的 `--file-root DIR`、`--output-dir DIR`，不�
 
 在「猫猫团队 → 账户与登录」添加账号，选择 **Anthropic API**、**OpenAI Platform** 或 **Google API**，填写名称和 API Key 即可保存；地址和模型列表可留空。密钥由操作者自行填写，使用方选择本次请求的模型。
 
+**先查账号，再选一个用，不要把账号 ID 写死。** 账号会过期、会被删、会新加，文档、技能和脚本里都只写「怎么查」，不写具体是哪个号。
+
+1. 查当前能用的平台账号（只读，不返回密钥）：
+
+```bash
+curl -s -H 'X-Cat-Cafe-User: default-user' http://127.0.0.1:3004/api/accounts | python3 -c '
+import json, sys
+for r in json.load(sys.stdin)["providers"]:
+    client, auth = r.get("clientId"), r.get("authType")
+    openai_platform = client == "openai" and auth == "api_key" and r.get("hasApiKey")
+    google_vertex = client == "google" and (r["id"].startswith("google-cloud-") or r.get("hasApiKey"))
+    if openai_platform or google_vertex:
+        print(client, r["id"], r.get("displayName"))'
+```
+
+   打印出来的 `id` 就是请求里的 `accountRef`。`clientId` 为 `openai` 但 `authType` 是 `oauth` 的（`codex-…`）是 Codex 登录，不能发平台请求。也可以在「猫猫团队 → 账户与登录」页面看同一份列表。
+2. 选一个发请求。返回 401、403 或额度不足（如 `insufficient_quota`）时，换同一家的另一个号重试。
+3. 某个号失败了，告诉 You 是哪个 `accountRef`、带上收据里的 `callId`，由他决定续费、换 key 还是删号；不要替他改账号。
+
 平台 API Key 账号与 Claude、Codex、Gemini 的 OAuth/订阅登录分开。添加平台账号不会发起 CLI 登录或改变已有成员绑定；编辑时密钥留空保留原密钥。保存三家的平台账号不代表本页 CLI 已提供三家的请求传输：`platform:request` 发送 OpenAI 与 Google 的 HTTP API 请求，不发送 Anthropic 请求。
 
 ## JSON 请求
@@ -31,7 +50,7 @@ CLI 只收请求文件及可选的 `--file-root DIR`、`--output-dir DIR`，不�
 
 ```json
 {
-  "accountRef": "11",
+  "accountRef": "OPENAI_PLATFORM_ACCOUNT_ID",
   "timeoutMs": 300000,
   "request": {
     "method": "POST",
@@ -52,7 +71,7 @@ CLI 只收请求文件及可选的 `--file-root DIR`、`--output-dir DIR`，不�
 家里的 Google 平台账号指 **Vertex AI**（Google Cloud，按 Cloud 结算账号计费，Google Cloud 赠金可用），不是 AI Studio 的 Gemini API。有两种账号，请求格式相同：
 
 - **Google Cloud 登录（推荐，不用建 key）**：账号只记一个 Cloud 项目，不存任何密钥。发送时由宿主读取这台机器上主人的标准 Google Cloud 登录（`gcloud auth application-default login` 产生的 authorized-user 凭据；设置了 `GOOGLE_APPLICATION_CREDENTIALS` 时读它指向的同类文件），在 `oauth2.googleapis.com` 换一次只用于本次请求的访问令牌，再带 `x-goog-user-project` 发往 Vertex。路径必须写成 `projects/{账号的项目}/locations/{位置}/...`；位置不是 `global` 时自动发往 `{位置}-aiplatform.googleapis.com`。读模型清单 `GET /v1beta1/publishers/google/models` 不花钱，可以不带项目。登录失效时返回 `platform_account_unavailable`，请主人在终端重新运行 `gcloud auth application-default login`。猫不读这份登录凭据，也拿不到令牌。
-  家里现有账号：`google-cloud-f33686a9-f9f5-4b95-8dfe-7d97c36663df`（项目 `project-ac991cb0-18d1-4ab9-91d`，与配乐插件同一项目），`accountRef` 填它即可。
+  `accountRef` 用上面「先查账号」查到的、`id` 以 `google-cloud-` 开头的账号。
   创建方式（主人同意后由猫代办或在 API 里提交）：`POST /api/accounts`，body 为 `{"displayName": "Google Cloud", "authType": "oauth", "clientId": "google", "googleCloudProjectId": "项目 ID"}`。账号 ID 以 `google-cloud-` 开头，账号页显示为「Google Cloud（Vertex AI · 项目 ID）」；不会被当成 Gemini CLI 的登录。
 - **Vertex API key**：请求发往 `https://aiplatform.googleapis.com`（或账号登记的完整 HTTPS 地址，例如区域地址 `https://us-central1-aiplatform.googleapis.com`），宿主把 key 放进 `x-goog-api-key` 头，路径里带 `key=` 查询参数会被拒绝。key 要在 Google Cloud 控制台用 express mode 或绑定服务账号的方式创建；AI Studio 创建的 key 发往 Vertex 会得到 401 `API keys are not supported by this API`。
 
@@ -91,7 +110,7 @@ CLI 只收请求文件及可选的 `--file-root DIR`、`--output-dir DIR`，不�
 
 ```json
 {
-  "accountRef": "11",
+  "accountRef": "OPENAI_PLATFORM_ACCOUNT_ID",
   "timeoutMs": 300000,
   "request": {
     "method": "POST",

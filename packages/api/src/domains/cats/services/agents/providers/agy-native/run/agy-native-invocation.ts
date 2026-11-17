@@ -18,10 +18,11 @@ async function* archiveNativeStream(
   stream: AsyncIterable<unknown>,
   invocationId: string | undefined,
   archive: RawArchiveSink,
-  closeInput: () => void,
+  observeNativeEvent: (eventType: string) => void,
 ) {
   for await (const event of stream) {
-    if (event && typeof event === 'object' && 'event' in event && event.event === 'result') closeInput();
+    if (event && typeof event === 'object' && 'event' in event && typeof event.event === 'string')
+      observeNativeEvent(event.event);
     if (invocationId) {
       try {
         await archive.append(invocationId, sanitizeRawEvent(event));
@@ -93,12 +94,19 @@ export async function* runAgyNativeInvocation(input: {
     };
     const stream = options?.spawnCliOverride ? options.spawnCliOverride(cliOptions) : spawnCliFn(cliOptions);
     const progress = new AgyNativeProgress(catId, metadata);
+    let lastNativeEventType: string | undefined;
+    let lastNativeStep:
+      | { stepIndex: number; stepType: string; toolName: string | null; state: string; firstObservedAt: number }
+      | undefined;
     let runOutput: AgyNativeRunOutput | undefined;
     let observed: AgyNativeObservedTurn | undefined;
     for await (const observation of observeAgyNativeTurn(
-      archiveNativeStream(stream, options?.invocationId, rawArchive, () => {
-        if (runInput) runInput.resultBoundary();
-        else inputLifetime.abort();
+      archiveNativeStream(stream, options?.invocationId, rawArchive, (eventType) => {
+        lastNativeEventType = eventType;
+        if (eventType === 'result') {
+          if (runInput) runInput.resultBoundary();
+          else inputLifetime.abort();
+        }
       }),
       {
         agentName: launch.agentName,
@@ -127,6 +135,14 @@ export async function* runAgyNativeInvocation(input: {
           timestamp: Date.now(),
         };
       } else if (observation.kind === 'step') {
+        const event = observation.event;
+        lastNativeStep = {
+          stepIndex: event.stepIndex,
+          stepType: event.stepType,
+          toolName: event.toolName,
+          state: event.state,
+          firstObservedAt: lastNativeStep?.stepIndex === event.stepIndex ? lastNativeStep.firstObservedAt : Date.now(),
+        };
         await runInput?.step(observation.event);
         const messages = runOutput ? runOutput.step(observation.event) : progress.step(observation.event);
         for (const message of messages) {
@@ -152,12 +168,22 @@ export async function* runAgyNativeInvocation(input: {
           yield* messages;
         }
       } else if (observation.kind === 'liveness') {
+        const warning = lastNativeStep
+          ? {
+              ...observation.warning,
+              ...(lastNativeEventType === 'step_update' && observation.warning.lastEventType == null
+                ? { lastEventType: 'step_update' }
+                : {}),
+              lastNativeStep,
+            }
+          : observation.warning;
         log.warn(
           {
             catId: catId,
             invocationId: options?.invocationId,
             level: observation.warning.level,
             silenceMs: observation.warning.silenceDurationMs,
+            ...(lastNativeStep ? { lastNativeStep } : {}),
           },
           'Native AGY liveness warning',
         );
@@ -166,7 +192,7 @@ export async function* runAgyNativeInvocation(input: {
           catId: catId,
           metadata,
           timestamp: Date.now(),
-          content: JSON.stringify({ type: 'liveness_warning', ...observation.warning }),
+          content: JSON.stringify({ type: 'liveness_warning', ...warning }),
         };
       } else observed = observation.observed;
     }

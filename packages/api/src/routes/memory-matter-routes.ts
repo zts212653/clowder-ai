@@ -15,6 +15,7 @@ const catalogQuery = z
   })
   .strict();
 const readQuery = catalogQuery.omit({ query: true }).extend({
+  expectedRevision: z.coerce.number().int().positive().optional(),
   history: z
     .enum(['true', 'false'])
     .optional()
@@ -39,7 +40,11 @@ function failure(reply: FastifyReply, error: unknown) {
       invalid_cursor:
         'Restart from the directory or page; reuse nextCursor only with the same reader, query and page version.',
     };
-    return reply.status(status).send({ error: error.code, message: messages[error.code] });
+    return reply.status(status).send({
+      error: error.code,
+      message: error.detail?.hint ?? messages[error.code],
+      ...(error.detail ? { reason: error.detail.reason } : {}),
+    });
   }
   throw error;
 }
@@ -83,7 +88,14 @@ export function registerCallbackMatterMemoryRoutes(app: FastifyInstance, service
     try {
       const input = matterWriteInputSchema.parse(request.body);
       const result = await service.write(
-        { userId: record.userId, viewer: { type: 'cat', catId: record.catId } },
+        {
+          userId: record.userId,
+          viewer: { type: 'cat', catId: record.catId },
+          invocation: {
+            threadId: record.threadId,
+            triggerMessageId: record.originTriggerMessageId ?? record.a2aTriggerMessageId,
+          },
+        },
         input,
       );
       reply.status(input.operation === 'create' && result.outcome === 'applied' ? 201 : 200);
@@ -137,6 +149,20 @@ export const memoryMatterRoutes: FastifyPluginAsync<MatterRouteOptions> = async 
     if (!service) return reply.status(503).send({ error: 'matter_memory_unavailable' });
     try {
       return await service.read(owner, request.params.matterId, readQuery.parse(request.query));
+    } catch (error) {
+      return failure(reply, error);
+    }
+  });
+  app.get<{ Params: { matterId: string } }>('/api/memory/matters/:matterId/write-receipt', async (request, reply) => {
+    const owner = actor(request, reply);
+    if (!owner) return;
+    if (!service) return reply.status(503).send({ error: 'matter_memory_unavailable' });
+    try {
+      const ref = z
+        .object({ actorKey: z.string().min(1).max(200), requestId: z.string().min(1).max(200) })
+        .strict()
+        .parse(request.query);
+      return await service.writeSnapshot(owner, request.params.matterId, ref);
     } catch (error) {
       return failure(reply, error);
     }

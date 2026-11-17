@@ -494,7 +494,7 @@ describe('SystemPromptBuilder', () => {
     assert.ok(opencodeId.includes('出口一问'), 'OpenCode workflow should include exit check (出口一问)');
     assert.ok(opencodeId.includes('OMOC Sisyphus'), 'OpenCode workflow should keep golden-chinchilla governance');
     for (const prompt of [opusId, codexId, opencodeId, buildStaticIdentity('gemini25')]) {
-      assert.match(prompt, /常规 reviewer（缅因猫、Sonnet、kimi 或 gemini-argon；Argon 只审不写）/);
+      assert.match(prompt, /常规 reviewer（缅因猫、Sonnet、kimi、gemini-argon 或 gemini-carbon；Argon 只审不写）/);
     }
   });
 
@@ -2252,7 +2252,8 @@ describe('SystemPromptBuilder', () => {
       },
     });
     // Verify whitelist mentions from the岗位 section
-    assert.ok(result.includes('graph_resolve'), 'whitelist should include graph_resolve');
+    assert.ok(result.includes('search_evidence'), 'whitelist should include the find entry');
+    assert.equal(result.includes('graph_resolve'), false, 'whitelist no longer lists the retired graph tool');
     assert.ok(result.includes('feat_index'), 'whitelist should include feat_index');
     assert.ok(result.includes('teleport'), 'whitelist should include teleport');
     // Verify escalation protocol is mentioned

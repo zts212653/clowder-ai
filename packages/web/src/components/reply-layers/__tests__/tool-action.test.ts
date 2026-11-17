@@ -33,8 +33,9 @@ describe('describeToolAction', () => {
 
   it('memory tools win over the generic words inside their names (search_evidence is not "search")', () => {
     expect(kindOf('mcp__cat-cafe-memory__cat_cafe_search_evidence')).toBe('memory');
-    expect(kindOf('cat_cafe_graph_resolve')).toBe('memory');
-    expect(kindOf('mcp:cat-cafe-memory/cat_cafe_list_recent')).toBe('memory');
+    // Bare historical names stay classified: events recorded before F332 F2 retired them.
+    expect(kindOf('graph_resolve')).toBe('memory');
+    expect(kindOf('mcp:cat-cafe-memory/cat_cafe_read_memory')).toBe('memory');
   });
 
   it('strips the MCP server prefix before it names a tool it does not know', () => {

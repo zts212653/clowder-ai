@@ -8,7 +8,7 @@ description: "让 Clowder AI 持续消费 Codex App 的高价值原生能力，�
 description_source: human
 description_author: codex-sol
 description_updated_at: 2026-09-06T21:26:54-07:00
-tips_exempt: "Renewed 2026-09-14: retiring the blocking MCP question entry adds no user action; its compatibility response teaches the existing conversation/decision route. Subexecution isolation likewise adds no user action; F307 owns its visible presentation. Realtime and provider-native consent rollout retain their separate activation boundaries."
+tips_exempt: "Renewed 2026-09-14: retiring the blocking MCP question entry adds no user action; its compatibility response teaches the existing conversation/decision route. Subexecution isolation likewise adds no user action; F307 owns its visible presentation. Realtime and provider-native consent rollout retain their separate activation boundaries. 2026-11-15 renewal: restoring existing gh help/label queries adds no new user action or configuration."
 cvo_signoff: "2026-08-25 — sourceMessageId private-source-id：把‘Clowder AI 的 Codex 体验持续对齐 Codex App’确立为正式产品承诺；立一个很薄的 Codex App Capability Parity Feature，并统一复用 Codex App 与 Clowder AI 已有概念。"
 mcp_admission_status: accepted
 mcp_admission_ref: "file:docs/features/F306-codex-app-capability-parity.md"
@@ -70,6 +70,8 @@ operator experience：
 
 ## Current State / 现状基线
 
+当前非 D 护栏续修：#7117 已合入，等待 runtime 加载后核完整 wrapper 委派链；旧版本的拒绝结果与候选通过分开保留，原 Task3168 g14 接续验收。
+
 ### 非 D native guard 误拦修复（2026-11-09）
 
 PR [#6899](https://github.com/zts212653/clowder-ai/pull/6899)（`0f473c7f36`）已合入：普通 `cp` 从 runtime 向外导出、Git fetch 的引用方向、环境变量与程序路径、受管 `gh`、SQLite/HTTP/日志输出及 help/status 的目标归属得到修正；拒绝账本补充脱敏 cwd、触发子句与截断标记。保护目标、敏感程序环境、未知执行和 owner 依赖的停机边界继续拒绝。
@@ -77,6 +79,10 @@ PR [#6899](https://github.com/zts212653/clowder-ai/pull/6899)（`0f473c7f36`）�
 ### 非 D 自然查询续修（2026-11-11）
 
 ### 非 D AGY profile 消费者续修（2026-11-12）
+
+### 非 D gh 自然查询续修（2026-11-15）
+
+**加载与续办**：`main=landed:0d1bb86f2e`，`live=dormant:boot91`；原 Task3168 已登记 runtime g14，条件是包含该精确提交且 API ready。旧 wrapper 仍会拒绝新查询参数，身份兼容不会升级旧语法，部署后必须核实际选中的 wrapper、stage 与最终委派链。历史 label PATH 选择仍未证实，不把纯策略或假 delegate 代签为自然使用已全恢复。原 executionRef / blocked 不改，D/6263/OpenCode 保持暂停，Task与Feature不关闭。
 
 ### Codex root/subexecution isolation（2026-09-14）
 

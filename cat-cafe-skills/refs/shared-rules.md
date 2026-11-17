@@ -358,7 +358,7 @@ KK／KU／UK／UU 是帮助思考的工具，不是必填表。
 按问题与证据缺口决定检索范围。用于结论的关键证据应读原文；涉及覆盖、来源或“没有发生过”的判断，检查容易遗漏的措辞与来源。
 继续查证应针对会改变结论的具体缺口；证据足够，或剩余未知已能清楚说明时，就收敛交付。
 不按模型家族规定搜索轮次，不为凑次数重复搜索，也不要求通读未被采用的所有命中。
-具体检索入口与题型方法见 `memory-navigation` 和 `memory-search-best-practices`。
+查找统一用 `cat_cafe_search_evidence`，题型方法见 `memory-search-best-practices`。
 
 ### Maine Coon fallback 层数检测协议（F177 Phase D — 坐标系治理）
 

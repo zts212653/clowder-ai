@@ -1,6 +1,7 @@
 import { type AccountConfig, accountQuotaOwnerMatches, builtinAccountFamilyForRef } from '@cat-cafe/shared';
 import { readAccountStoreSnapshot } from '../config/account-store-snapshot.js';
 import { agyLoginCommand, inspectAgyLogin } from '../config/agy-account.js';
+import { readClaudeQuotaView } from '../config/claude-quota-store.js';
 import { claudeTokenStatus } from '../config/claude-token-account.js';
 import { codexManagedStatus } from '../config/codex-account-identity.js';
 import { readNativeCodexQuota } from '../config/native-codex-quota.js';
@@ -30,6 +31,10 @@ export function accountToView(
       : account.quota;
   const identity = account.codex?.identity ?? nativeView.nativeLogin?.identity;
   const ready = account.codex ? codexStatus === 'ready' : nativeView.codexLoginStatus === 'ready';
+  const claudeQuota =
+    projectRoot && clientId === 'anthropic' && account.authType === 'oauth'
+      ? readClaudeQuotaView(projectRoot, id)
+      : undefined;
   const quota =
     (account.codex || nativeDefault) &&
     (observed?.status === 'ok' || observed?.lastSuccess) &&
@@ -51,6 +56,7 @@ export function accountToView(
     ...nativeView,
     ...(!isBuiltin ? { displayName: account.displayName ?? id } : {}),
     authType: account.authType,
+    ...(claudeQuota ? { claudeQuota } : {}),
     builtin: isBuiltin,
     ...(quota
       ? {

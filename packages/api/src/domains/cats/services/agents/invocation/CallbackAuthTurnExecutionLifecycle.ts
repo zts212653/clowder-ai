@@ -126,12 +126,12 @@ export class CallbackAuthTurnExecutionLifecycle implements ITurnExecutionStore {
     return this.store.hasMemberTurnStartedAfter(...args);
   }
 
-  listOwedSleepContinuations() {
-    return this.store.listOwedSleepContinuations();
+  listOwedContinuations() {
+    return this.store.listOwedContinuations();
   }
 
-  settleOwedSleepContinuations(...args: Parameters<ITurnExecutionStore['settleOwedSleepContinuations']>) {
-    return this.store.settleOwedSleepContinuations(...args);
+  settleOwedContinuations(...args: Parameters<ITurnExecutionStore['settleOwedContinuations']>) {
+    return this.store.settleOwedContinuations(...args);
   }
 
   settleOutputFence(

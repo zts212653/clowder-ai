@@ -3,6 +3,36 @@ import type { EnvDefinition } from '../env-registry.js';
 
 export const ENV_DEFINITIONS_6: readonly EnvDefinition[] = [
   {
+    name: 'CLAUDE_SECURESTORAGE_CONFIG_DIR',
+    defaultValue: '',
+    description: 'Claude Code 原生安全存储目录覆盖；仅用于核对额度读数的凭据归属，不是平台设置',
+    category: 'cli',
+    sensitive: false,
+    hubVisible: false,
+    runtimeEditable: false,
+    exampleRecommended: false,
+  },
+  {
+    name: 'CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR',
+    defaultValue: '',
+    description: 'Claude Code 原生认证传输描述符；只检查存在以撤销不明确的额度归属证明，不读取描述符',
+    category: 'cli',
+    sensitive: true,
+    hubVisible: false,
+    runtimeEditable: false,
+    exampleRecommended: false,
+  },
+  {
+    name: 'CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST',
+    defaultValue: '',
+    description: 'Claude Code 宿主管理认证标记；无法核实真实凭据来源时额度保持未知，不是用户开关',
+    category: 'cli',
+    sensitive: false,
+    hubVisible: false,
+    runtimeEditable: false,
+    exampleRecommended: false,
+  },
+  {
     name: 'CLAUDE_CONFIG_DIR',
     defaultValue: '',
     description: 'Claude Code 本机会话与进程索引目录；未设置时使用用户目录下的 .claude',

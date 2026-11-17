@@ -23,6 +23,7 @@ export function addCoverageDirectHits(
       source,
       sourcePath: item.sourcePath,
       drillDown: item.drillDown,
+      ...(item.readRef ? { readRef: item.readRef } : {}),
     });
     added++;
   }

@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import asyncio
+import itertools
 import subprocess
 import sys
 import time
 import unittest
 from unittest.mock import patch
 
+import embed_runtime_policy
 from embed_runtime_policy import (
     AdmissionError,
     EmbeddingAdmissionController,
@@ -194,6 +196,63 @@ class EmbeddingAdmissionControllerTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(controller.snapshot()["in_flight"], 0)
         self.assertEqual(controller.snapshot()["queue_depth"], 0)
 
+    async def test_admitted_work_can_recheck_the_deadline_it_was_admitted_with(
+        self,
+    ) -> None:
+        # Work that waits after admission (the memory guard settling) must be
+        # able to ask again before it allocates for the request.
+        controller = EmbeddingAdmissionController(
+            max_queue_depth=0,
+            default_timeout_ms=500,
+            max_timeout_ms=1_000,
+            disconnect_poll_ms=5,
+        )
+        allocated = False
+
+        with self.assertRaises(AdmissionError) as expired:
+            async with controller.admit(
+                deadline_ms=int(time.time() * 1_000) + 25,
+                is_disconnected=None,
+            ) as assert_still_wanted:
+                await assert_still_wanted()
+                await asyncio.sleep(0.06)
+                await assert_still_wanted()
+                allocated = True
+        self.assertEqual(expired.exception.status_code, 408)
+        self.assertEqual(expired.exception.code, "deadline_expired")
+        self.assertFalse(allocated)
+        self.assertEqual(controller.snapshot()["expired_count"], 1)
+        self.assertEqual(controller.snapshot()["in_flight"], 0)
+
+    async def test_admitted_work_can_recheck_that_the_client_is_still_connected(
+        self,
+    ) -> None:
+        controller = EmbeddingAdmissionController(
+            max_queue_depth=0,
+            default_timeout_ms=500,
+            max_timeout_ms=1_000,
+            disconnect_poll_ms=5,
+        )
+        disconnected = False
+        allocated = False
+
+        async def is_disconnected() -> bool:
+            return disconnected
+
+        with self.assertRaises(AdmissionError) as rejected:
+            async with controller.admit(
+                deadline_ms=None, is_disconnected=is_disconnected
+            ) as assert_still_wanted:
+                await assert_still_wanted()
+                disconnected = True
+                await assert_still_wanted()
+                allocated = True
+        self.assertEqual(rejected.exception.status_code, 499)
+        self.assertEqual(rejected.exception.code, "client_disconnected")
+        self.assertFalse(allocated)
+        self.assertEqual(controller.snapshot()["disconnected_count"], 1)
+        self.assertEqual(controller.snapshot()["in_flight"], 0)
+
     async def test_cancelled_waiter_releases_its_queue_reservation(self) -> None:
         controller = EmbeddingAdmissionController(
             max_queue_depth=1,
@@ -222,6 +281,33 @@ class EmbeddingAdmissionControllerTest(unittest.IsolatedAsyncioTestCase):
 
         active_release.set()
         await active
+
+
+class FakeClock:
+    """Deterministic stand-in for the policy module's ``time``.
+
+    Settle polls advance the wall clock too, so a request's own deadline can
+    pass while the guard is waiting -- without the test sleeping for real.
+    """
+
+    def __init__(self) -> None:
+        self.now = 1000.0
+        self.sleeps: list[float] = []
+        self._wall_start = time.time()
+
+    @property
+    def elapsed(self) -> float:
+        return self.now - 1000.0
+
+    def monotonic(self) -> float:
+        return self.now
+
+    def sleep(self, seconds: float) -> None:
+        self.sleeps.append(seconds)
+        self.now += seconds
+
+    def time(self) -> float:
+        return self._wall_start + self.elapsed
 
 
 class FakeMlx:
@@ -266,8 +352,10 @@ class MlxMemoryEnvelopeTest(unittest.TestCase):
         self,
     ) -> None:
         mib = 1024 * 1024
-        footprints = iter([100 * mib, 100 * mib + 2 * mib])
+        # Baseline, then a footprint that never comes back down: retained memory.
+        footprints = itertools.chain([100 * mib], itertools.repeat(100 * mib + 2 * mib))
         mlx = FakeMlx()
+        clock = FakeClock()
         envelope = MlxMemoryEnvelope(
             max_model_mem_mb=1,
             mlx=mlx,
@@ -279,11 +367,78 @@ class MlxMemoryEnvelopeTest(unittest.TestCase):
 
         self.assertEqual(mlx.memory_limits, [mib])
         self.assertEqual(mlx.cache_limits, [0])
-        with self.assertRaises(MemoryBudgetExceeded) as exceeded:
-            envelope.assert_within_budget(requested_max_model_mem_mb=8)
+        with patch.object(embed_runtime_policy, "time", clock):
+            with self.assertRaises(MemoryBudgetExceeded) as exceeded:
+                envelope.assert_within_budget(requested_max_model_mem_mb=8)
+        self.assertTrue(clock.sleeps, "a first over-budget sample must be re-read before the sidecar is killed")
         self.assertEqual(exceeded.exception.budget_bytes, mib)
         self.assertEqual(exceeded.exception.footprint_delta_bytes, 2 * mib)
+        self.assertEqual(exceeded.exception.first_observed_bytes, 2 * mib)
+        self.assertEqual(
+            exceeded.exception.settle_ms,
+            round(embed_runtime_policy.MEMORY_SETTLE_WINDOW_SECONDS * 1000),
+            "retained memory is declared only after the whole settle window",
+        )
         self.assertTrue(envelope.snapshot()["memory_budget_exceeded"])
+
+    def test_reading_the_os_reclaims_within_the_settle_window_is_not_retained_memory(
+        self,
+    ) -> None:
+        # Synthetic trajectory, not a recording. The first sample borrows the
+        # size logged on 2026-11-12 (3134 MiB over baseline); that it then falls
+        # back is this test's assumption. Whether the production readings would
+        # have fallen back is unknown -- the old guard exited before re-reading.
+        mib = 1024 * 1024
+        base = 1000 * mib
+        footprints = iter([base, base + 3134 * mib, base + 900 * mib, base + 40 * mib])
+        clock = FakeClock()
+        envelope = MlxMemoryEnvelope(
+            max_model_mem_mb=800,
+            mlx=FakeMlx(),
+            footprint_reader=lambda: next(footprints),
+        )
+        envelope.capture_baseline()
+
+        with patch.object(embed_runtime_policy, "time", clock):
+            settled = envelope.assert_within_budget()
+
+        self.assertIsNotNone(settled, "a reclaimed overshoot must be reported, not hidden")
+        self.assertEqual(settled.budget_bytes, 800 * mib)
+        self.assertEqual(settled.first.observed_bytes, 3134 * mib)
+        self.assertEqual(settled.settled.observed_bytes, 40 * mib)
+        self.assertEqual(settled.settle_ms, 50)
+        snapshot = envelope.snapshot()
+        self.assertFalse(snapshot["memory_budget_exceeded"])
+        self.assertEqual(snapshot["transient_overshoot_count"], 1)
+        self.assertEqual(snapshot["transient_overshoot_max_bytes"], 3134 * mib)
+
+    def test_reading_within_budget_is_a_single_sample_with_no_wait(self) -> None:
+        footprints = iter([1234, 1234])
+        clock = FakeClock()
+        envelope = MlxMemoryEnvelope(
+            max_model_mem_mb=8,
+            mlx=FakeMlx(),
+            footprint_reader=lambda: next(footprints),
+        )
+        envelope.capture_baseline()
+        with patch.object(embed_runtime_policy, "time", clock):
+            self.assertIsNone(envelope.assert_within_budget())
+        self.assertEqual(clock.sleeps, [])
+        self.assertEqual(envelope.snapshot()["transient_overshoot_count"], 0)
+
+    def test_metric_lost_while_settling_still_fails_closed(self) -> None:
+        mib = 1024 * 1024
+        footprints = iter([100 * mib, 100 * mib + 2 * mib, None])
+        envelope = MlxMemoryEnvelope(
+            max_model_mem_mb=1,
+            mlx=FakeMlx(),
+            footprint_reader=lambda: next(footprints),
+            require_footprint=True,
+        )
+        envelope.capture_baseline()
+        with patch.object(embed_runtime_policy, "time", FakeClock()):
+            with self.assertRaises(MemoryMetricUnavailable):
+                envelope.assert_within_budget()
 
     def test_health_metrics_keep_allocator_and_os_scopes_distinct(self) -> None:
         mlx = FakeMlx()

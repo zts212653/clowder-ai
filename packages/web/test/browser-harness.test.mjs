@@ -95,6 +95,41 @@ test('scripts readiness requires script tags and retries until every script is a
   ]);
 });
 
+test('scripts readiness waits for every script body after its headers arrive', async (t) => {
+  const slowScript = Promise.withResolvers();
+  const headersReceived = Promise.withResolvers();
+  const { url } = await startHttpFixture(t, (request, response) => {
+    if (request.url === '/page') {
+      response.end('<script src="/ready.js"></script><script src="/slow.js"></script>');
+    } else if (request.url === '/slow.js') {
+      response.write('window.fixture =');
+      slowScript.resolve(response);
+    } else {
+      response.end('window.ready = true;');
+    }
+  });
+  const fetchPage = globalThis.fetch;
+  t.mock.method(globalThis, 'fetch', async (...args) => {
+    const response = await fetchPage(...args);
+    if (new URL(response.url).pathname === '/slow.js') headersReceived.resolve();
+    return response;
+  });
+  let ready = false;
+  const waiting = waitForPage(url, { exitCode: null }, [], { readiness: 'scripts', timeoutMs: 3_000 }).then(() => {
+    ready = true;
+  });
+  const response = await slowScript.promise;
+  await headersReceived.promise;
+  try {
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(ready, false, 'headers and the first complete script do not make the unfinished script ready');
+  } finally {
+    response.end(' true;');
+    await waiting;
+  }
+  assert.equal(ready, true);
+});
+
 test('readiness reports a server exit with captured diagnostics', async () => {
   const child = spawn(process.execPath, ['-e', 'process.exit(7)'], { env: createTestChildEnvironment() });
   await once(child, 'exit');
@@ -130,6 +165,38 @@ test('stopServer terminates its child and accepts an already completed child', a
   await stopServer(completed);
   await stopServer(undefined);
 });
+
+test(
+  'stopServer kills a child that ignores SIGTERM',
+  { skip: process.platform === 'win32' ? 'requires POSIX signal handlers' : false },
+  async (t) => {
+    const child = spawn(
+      process.execPath,
+      ['-e', "process.on('SIGTERM', () => {}); console.log('ready'); setInterval(() => {}, 1000)"],
+      { env: createTestChildEnvironment(), stdio: ['ignore', 'pipe', 'pipe'] },
+    );
+    const exited = once(child, 'exit');
+    t.after(async () => {
+      if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
+      await exited;
+    });
+    await once(child.stdout, 'data');
+    await stopServer(child);
+    // Observe the actual child exit without requiring stopServer to await its KILL.
+    let deadline;
+    try {
+      const [, signal] = await Promise.race([
+        exited,
+        new Promise((_, reject) => {
+          deadline = setTimeout(() => reject(new Error('TERM-ignoring child stayed alive after stopServer')), 2_000);
+        }),
+      ]);
+      assert.equal(signal, 'SIGKILL');
+    } finally {
+      clearTimeout(deadline);
+    }
+  },
+);
 
 test('child environments remove inherited and overridden test-runner state without mutating the parent', () => {
   const parentContext = process.env.NODE_TEST_CONTEXT;

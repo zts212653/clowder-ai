@@ -5,6 +5,8 @@ import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { requireNoDurableConsumers } from './lib/worktree-consumers.mjs';
 import { directReleaseReceipt, removeFinishedWorktree } from './lib/worktree-direct-release.mjs';
+import { quiesceFsmonitor } from './lib/worktree-fsmonitor.mjs';
+import { closeAdmissions } from './lib/worktree-fsmonitor-lifetime.mjs';
 import { requireVisibleWorktreeIndex } from './lib/worktree-light.mjs';
 import { parsePrSource, prBaseTrackingRef, readPrTruth } from './lib/worktree-pr.mjs';
 import { quarantineRoot, readQuarantineRecords } from './lib/worktree-quarantine.mjs';
@@ -151,17 +153,18 @@ function releaseProbe(entry, opts) {
     fail('retention source mismatch');
   const cwd = safeRealpath(process.cwd());
   if (cwd === entry.path || cwd.startsWith(`${entry.path}/`)) fail('busy: run finish from outside the target worktree');
-  const refs = opts.cwdProbe ? opts.cwdProbe() : processRefs({ excludePids: [process.pid], observerPid: process.pid });
+  requireNoDurableConsumers(opts);
+  requireVisibleWorktreeIndex(entry.path);
+  requireCleanTarget(entry.path);
+  requireMergedContent(entry, opts);
+  const observe = opts.cwdProbe ?? (() => processRefs({ excludePids: [process.pid], observerPid: process.pid }));
+  const refs = quiesceFsmonitor(entry, observe(), observe, opts.ipcAdmission);
   const busy = busyProcess(entry.path, refs);
   if (busy === null) fail('process state unknown');
   if (busy)
     fail(
       `busy worktree: ${busy.kind} pid=${busy.pid ?? 'unknown'}${busy.executable ? ` executable=${busy.executable}` : ''}`,
     );
-  requireNoDurableConsumers(opts);
-  requireVisibleWorktreeIndex(entry.path);
-  requireCleanTarget(entry.path);
-  requireMergedContent(entry, opts);
 }
 
 function retainWorktree(initial, opts) {
@@ -252,6 +255,15 @@ export function finishWorktree(input) {
   const initial = ownedWorktreeFacts(opts);
   if (opts.mode === 'check') return verifyRetention(initial, opts);
   if (opts.mode === 'retain') return retainWorktree(initial, opts);
+  opts.ipcAdmission = { guards: new Map() };
+  try {
+    return releaseOwnedWorktree(initial, opts);
+  } finally {
+    closeAdmissions(opts.ipcAdmission);
+  }
+}
+
+function releaseOwnedWorktree(initial, opts) {
   releaseProbe(initial, opts);
   const current = ownedWorktreeFacts(opts);
   releaseProbe(current, opts);

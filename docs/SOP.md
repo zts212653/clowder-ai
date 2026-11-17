@@ -69,7 +69,14 @@ Alpha Redis 使用 checkout 内的 `.cat-cafe/redis`；开发测试 Redis 仍为
 | 数据 | 生产数据、迁移、持久化语义 | 持久化 / 迁移验证 + 独立高风险 review；生产操作另走授权边界 |
 | 安全 | auth、权限、secret、注入、DoS / 资源边界 | 相关安全边界测试 + cloud/context-blind 安全扫描；需要家里语义时再叠 local |
 | 契约 | API / MCP schema / 事件格式 / 外部依赖 | 契约及受影响 consumer 测试 + 对应独立 review |
-| 不可逆 | 删除、force push、合第三方 PR、close feat、圣域 | 先拿 operator 授权；机器门禁仍照常 |
+| 不可逆 | 删除、force push、合第三方 PR、close feat、圣域 | 先核有效 operator 授权范围；已覆盖的动作不逐单重问，机器门禁仍照常 |
+
+**第三方 PR 先判实际行为，再适用授权。** 确认是需要修复、恢复已接受行为的纯 bug
+（尤其 Windows 兼容性问题），不涉及前端改造、猫猫使用方式或用户旅程改变时，operator 已授权
+原执行负责人在独立 APPROVE 与适用技术门禁满足后直接 merge 并完成 intake，无需逐单再问。
+涉及前端交互 / 用户旅程改变，或“bug”实际是新需求、默认行为或产品取舍时，先讲清前后行为，
+由 operator 判断；已有具体产品授权仍按其 scope 续做。`bug` 标签、路径、CI 或技术 approve
+都不代替这个判断，也不放宽安全、权限、生产操作和发布等既有边界。
 
 **元风险强制升档**：diff 触碰 `merge-gate`、风险 classifier、门禁脚本或 Harness Diet 公约自身时，直接进入 high-assurance，由非作者跨族 reviewer 覆盖最终实质内容（exact HEAD 或 continuityProof）。松绑机制不得静默松绑自己；在这条语义边界机器化前，如实标为 manual 守卫，不能由改门者自判 light。
 
@@ -306,11 +313,11 @@ PR-3 是 interim 方案 —— 仍开 per-run PR，只是 label + 猫自决 merg
 
 | 本轮要判断什么 | 选谁 |
 |---|---|
-| 测试能兜住的实现正确性 | 非作者Maine Coon、Sonnet、kimi 或 gemini-argon（只审不写代码），同族不同个体也行 |
+| 测试能兜住的实现正确性 | 非作者Maine Coon、Sonnet、kimi、gemini-argon（只审不写代码）或 gemini-carbon，同族不同个体也行 |
 | 方向和形状 | 创作位，一次给完；新界面/改版、架构模块或归属变化、做片子，动手前出稿 |
 | 安全、鉴权、生产数据、外部契约 | 优先 cloud；cloud 不可用时只换成一只本地 reviewer，不拆成两路 |
 
-在这几只里按派活时各家粮的实际情况和现行有效安排挑，已撤销或已过期的暂停、稀缺标签不作排除依据。2026-10-15 试行的 Sonnet 常规 review 暂停已于 2026-10-23 由 operator 撤销（见 dossier v0.13）。Siamese里只有 gemini-argon 参与常规 review，不扩大到其他Siamese。
+在这几只里按派活时各家粮的实际情况和现行有效安排挑，已撤销或已过期的暂停、稀缺标签不作排除依据。2026-10-15 试行的 Sonnet 常规 review 暂停已于 2026-10-23 由 operator 撤销（见 dossier v0.13）。Siamese里 gemini-argon 和 gemini-carbon 参与常规 review（Carbon 于 2026-11-15 加入候选，依据见 dossier v0.24），不自动扩大到其他Siamese；gemini-argon 仍只审不写代码。2026-11-15 operator：Claude 额度放宽后按能力分配；经验上Ragdoll写、Maine Coon审是好搭档。这两条是取舍，不是固定流水线，不覆盖非作者要求、风险路由和明确点名（见 dossier「全家派活取舍」）。
 
 只有两个风险面确实需要不同的人时才加第二只，并写明各自理由。迭代修复只请改动所在那一面的 reviewer 复审；稀缺席位不进迭代循环，按 dossier `engagementPolicy` 交付单次判断后退出。
 

@@ -3,7 +3,8 @@ import { test } from 'node:test';
 import { cueEnvelopeV1Schema, RECALL_OPPORTUNITY_CATALOG_VERSION } from '@cat-cafe/shared';
 import Database from 'better-sqlite3';
 import Fastify from 'fastify';
-import { createMemoryCueTools } from '../../../mcp-server/dist/tools/memory-cue-tools.js';
+import { CANONICAL_TOOL_REGISTRY } from '../../../mcp-server/dist/canonical-server-tools.js';
+import { withInvocationCredentials } from '../../../mcp-server/dist/tools/invocation-auth.js';
 import {
   formatMemoryCues,
   renderMemoryCue,
@@ -23,7 +24,7 @@ for (const [renderer, family] of [
   [renderMemoryCuePointer, 'profile'],
   [renderThreadOpeningClue, 'thread_overview'],
 ]) {
-  test(`${renderer.name}: copy the displayed handle unchanged through MCP drill and outcome`, async (t) => {
+  test(`${renderer.name}: copy the displayed ReadRef unchanged through MCP read and outcome`, async (t) => {
     const db = new Database(':memory:');
     t.after(() => db.close());
     applyMigrations(db);
@@ -76,10 +77,20 @@ for (const [renderer, family] of [
       invalidators: ['source_corrected', 'source_forgotten', 'scope_revoked', 'superseded', 'expired'],
     });
     const rendered = renderer(cue);
-    // Copy the complete labeled value, as the Alpha consumer did; never repair/split it here.
-    const handleLine = rendered.split('\n').find((line) => /^(?:Handle|Drill): /.test(line));
-    assert.ok(handleLine);
-    const copied = handleLine.slice(handleLine.indexOf(': ') + 2);
+    // Copy the whole displayed coordinate without rebuilding it or looking up a version.
+    const refLine = rendered.split('\n').find((line) => line.startsWith('ReadRef: '));
+    assert.ok(refLine);
+    const copied = JSON.parse(refLine.slice('ReadRef: '.length));
+    assert.equal(copied.kind, 'cue');
+    assert.equal(copied.handle, issued);
+    if (renderer === renderMemoryCuePointer) {
+      for (const privateValue of [cue.title, cue.summary, cue.whyNow, coordinate.anchor, coordinate.revision]) {
+        assert.ok(!rendered.includes(privateValue));
+      }
+      assert.equal(copied.expectedRevision, undefined);
+    } else {
+      assert.equal(copied.expectedRevision, coordinate.revision);
+    }
     const app = Fastify();
     t.after(() => app.close());
     app.decorateRequest('callbackAuth', undefined);
@@ -95,6 +106,7 @@ for (const [renderer, family] of [
       };
     });
     const reads = [];
+    let currentRevision = coordinate.revision;
     registerCallbackMemoryCueRoutes(app, {
       episodeStore: episodes,
       handles,
@@ -102,25 +114,51 @@ for (const [renderer, family] of [
       sourceReader: {
         async read(input) {
           reads.push(input);
+          if (input.expectedRevision !== currentRevision)
+            return { status: 'not_available', invalidationReason: 'source_corrected' };
           return { status: 'ok', payload: { body: 'canonical source' } };
         },
       },
     });
     const calls = [];
-    const mcp = createMemoryCueTools(async (path, body) => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async (url, init) => {
+      const path = new URL(url).pathname;
+      const body = JSON.parse(init.body);
       const response = await app.inject({ method: 'POST', url: path, payload: body });
       calls.push({ path, handle: body.handle, statusCode: response.statusCode });
-      return { content: [{ type: 'text', text: response.body }] };
+      return new Response(response.body, { status: response.statusCode, headers: response.headers });
+    };
+    t.after(() => {
+      globalThis.fetch = originalFetch;
     });
-    await mcp.handleDrillMemoryCue({ handle: copied, clientRequestId: 'drill' });
-    await mcp.handleRecordMemoryCueOutcome({ handle: copied, outcome: 'applied', clientRequestId: 'outcome' });
+    const credentials = {
+      ...scope,
+      userId: scope.ownerUserId,
+      catId: coordinate.consumerCatId,
+      callbackToken: 'isolated-test',
+      apiUrl: 'http://memory-fixture',
+    };
+    const readTool = CANONICAL_TOOL_REGISTRY.find((tool) => tool.name === 'cat_cafe_read_memory');
+    const outcomeTool = CANONICAL_TOOL_REGISTRY.find((tool) => tool.name === 'cat_cafe_record_memory_cue_outcome');
+    assert.ok(readTool);
+    assert.ok(outcomeTool);
+    const read = () => withInvocationCredentials(credentials, () => readTool.handler({ ref: copied }));
+    const result = await read();
+    const envelope = JSON.parse(result.content[0].text);
+    assert.equal(envelope.status, 'ok');
+    assert.equal(envelope.data.payload.body, 'canonical source');
+    assert.equal(envelope.version, coordinate.revision);
+    await withInvocationCredentials(credentials, () =>
+      outcomeTool.handler({ handle: copied.handle, outcome: 'applied', clientRequestId: 'outcome' }),
+    );
     assert.deepEqual(
       calls.map((call) => call.statusCode),
       [200, 200],
       JSON.stringify(calls),
     );
     assert.ok(calls.every((call) => call.handle === issued));
-    assert.match(rendered, /cat_cafe_drill_memory_cue/);
+    assert.match(rendered, /cat_cafe_read_memory/);
     assert.match(rendered, /cat_cafe_record_memory_cue_outcome/);
     assert.deepEqual(
       episodes.listByCue(scope.ownerUserId, 'cue').map((event) => event.consumptionOutcome),
@@ -128,9 +166,15 @@ for (const [renderer, family] of [
     );
     assert.ok(reads.every((read) => read.expectedRevision === coordinate.revision));
     if (renderer === renderMemoryCuePointer) {
-      for (const privateValue of [cue.title, cue.summary, cue.whyNow, coordinate.anchor, coordinate.revision]) {
-        assert.ok(!rendered.includes(privateValue));
-      }
+      currentRevision = 'corrected-revision';
+      const stale = JSON.parse((await read()).content[0].text);
+      assert.equal(stale.status, 'not_available');
+      assert.equal(stale.data, undefined);
+      assert.equal(reads.at(-1).expectedRevision, coordinate.revision, 'the original receipt still pins the version');
+      assert.equal(
+        episodes.listByCue(scope.ownerUserId, 'cue').filter((event) => event.consumptionOutcome === 'drilled').length,
+        1,
+      );
     }
     // The presentation fix must not weaken the strict authenticated-handle parser.
     assert.deepEqual(handles.verify(`${family} ${issued}`, scope, 2_000, coordinate.consumerCatId), {

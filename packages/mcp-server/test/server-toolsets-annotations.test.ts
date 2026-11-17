@@ -69,14 +69,12 @@ describe('F247 R8 P1-1: EXPLICIT_TOOL_ANNOTATIONS regression guard', () => {
       'cat_cafe_get_workflow_sop',
       'cat_cafe_get_message',
       'cat_cafe_list_threads',
-      // 5 memory
+      // 3 memory (graph and recent are search_evidence groups since F332 F2)
       'cat_cafe_search_evidence',
-      'cat_cafe_graph_resolve',
-      'cat_cafe_list_recent',
       'cat_cafe_list_session_chain',
       'cat_cafe_read_session_digest',
       // 1 authenticated current-persona profile
-      'cat_cafe_read_profile',
+      'cat_cafe_read_memory',
     ];
 
     for (const name of cloudProPhase0Whitelist) {
@@ -97,11 +95,9 @@ describe('F247 R8 P1-1: EXPLICIT_TOOL_ANNOTATIONS regression guard', () => {
         'cat_cafe_get_message',
         'cat_cafe_list_threads',
         'cat_cafe_search_evidence',
-        'cat_cafe_graph_resolve',
-        'cat_cafe_list_recent',
         'cat_cafe_list_session_chain',
         'cat_cafe_read_session_digest',
-        'cat_cafe_read_profile',
+        'cat_cafe_read_memory',
       ];
       for (const r of reads) {
         assert.equal(EXPLICIT_TOOL_ANNOTATIONS[r].readOnlyHint, true, `${r} must be readOnlyHint=true`);
@@ -121,13 +117,7 @@ describe('F247 R8 P1-1: EXPLICIT_TOOL_ANNOTATIONS regression guard', () => {
     });
 
     it('read tools NOT hitting remote are openWorld=false', () => {
-      for (const r of [
-        'cat_cafe_graph_resolve',
-        'cat_cafe_list_recent',
-        'cat_cafe_list_threads',
-        'cat_cafe_read_session_digest',
-        'cat_cafe_read_profile',
-      ]) {
+      for (const r of ['cat_cafe_list_threads', 'cat_cafe_read_session_digest', 'cat_cafe_read_memory']) {
         assert.equal(EXPLICIT_TOOL_ANNOTATIONS[r].openWorldHint, false, `${r} should not be openWorld`);
       }
     });

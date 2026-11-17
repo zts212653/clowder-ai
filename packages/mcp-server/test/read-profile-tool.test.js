@@ -1,13 +1,15 @@
 import assert from 'node:assert/strict';
 import { afterEach, beforeEach, describe, test } from 'node:test';
 
-describe('cat_cafe_read_profile MCP tool', () => {
+describe('original authenticated profile reader', () => {
   let originalEnv;
   let originalFetch;
 
   beforeEach(() => {
     originalEnv = { ...process.env };
     originalFetch = globalThis.fetch;
+    delete process.env.CAT_CAFE_CREDENTIAL_FILE;
+    delete process.env.CAT_CAFE_NATIVE_TURN_CREDENTIAL_FILE;
     process.env.CAT_CAFE_API_URL = 'http://127.0.0.1:1';
     process.env.CAT_CAFE_INVOCATION_ID = 'test-invocation';
     process.env.CAT_CAFE_CALLBACK_TOKEN = 'test-token';
@@ -51,21 +53,6 @@ describe('cat_cafe_read_profile MCP tool', () => {
     const { readProfileInputSchema } = await import('../dist/tools/callback-tools.js');
     const keys = Object.keys(readProfileInputSchema).sort();
     assert.deepEqual(keys, ['agentKeyCatId', 'expectedRevision', 'layer', 'requestId']);
-  });
-
-  test('registration description carries routing boundaries and URI trigger', async () => {
-    const { callbackTools } = await import('../dist/tools/callback-tools.js');
-    const tool = callbackTools.find((candidate) => candidate.name === 'cat_cafe_read_profile');
-    assert.ok(tool);
-    assert.match(tool.description, /cat-cafe-profile:\/\//);
-    assert.match(tool.description, /Use when:/);
-    assert.match(tool.description, /NOT for:/);
-    assert.match(tool.description, /Output:/);
-    assert.match(tool.description, /GOTCHA:/);
-    assert.match(tool.description, /this connection.s authenticated identity/i);
-    assert.match(tool.description, /bound to that invocation/i);
-    assert.match(tool.description, /separately installed App.*not a substitute/i);
-    assert.match(tool.description, /missing profile on another connection.*absence here/i);
   });
 
   // ──── Phase E: corpus layer read ────
@@ -191,12 +178,5 @@ describe('cat_cafe_read_profile MCP tool', () => {
     const unknown = await handleReadProfile({ requestId: 'preserve-me' });
     assert.equal(unknown.isError, true);
     assert.match(unknown.content.at(-1).text, /requestId: preserve-me/);
-  });
-
-  test('description mentions corpus layer', async () => {
-    const { callbackTools } = await import('../dist/tools/callback-tools.js');
-    const tool = callbackTools.find((candidate) => candidate.name === 'cat_cafe_read_profile');
-    assert.ok(tool);
-    assert.match(tool.description, /corpus/i, 'description must mention corpus');
   });
 });

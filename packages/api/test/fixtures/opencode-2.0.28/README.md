@@ -1,6 +1,9 @@
 # OpenCode 2.0.28 隔离事件与正文样本
 
-来源：Issue #1991 协作调查，2026-11-16，鲸鲸运行本机 OpenCode 2.0.28，
+本目录随 [clowder-ai#2003](https://github.com/zts212653/clowder-ai/pull/2003) 回流；
+原始捕获由该 PR 的协作者完成，家内验证使用这些公开样本做回放。
+
+来源：clowder-ai#1991 协作调查，2026-11-16，鲸鲸运行本机 OpenCode 2.0.28，
 使用独立 HOME/XDG 目录与本地 OpenAI-compatible mock provider。
 mock 返回 `Hi`，reasoning 场景另返回 `thinking about it`；没有调用真实模型 provider。
 砚砚从捕获的 NDJSON 和同一隔离 SQLite 只读提取本文件旁的 `captured.json`。

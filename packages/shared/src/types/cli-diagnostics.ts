@@ -28,7 +28,7 @@ export type CliErrorReasonCode =
   | 'stream_disconnected'
   | 'invalid_config'
   | 'spawn_failed'
-  /** The provider CLI is not installed on this machine. Distinct from `spawn_failed`
+  /** The current execution context could not resolve the provider CLI. Distinct from `spawn_failed`
    *  (we tried to start a process and lost it): there is no process, no exit code and
    *  no stderr to classify. Detection is spawn-free per LL-055; the install hint is
    *  the actionable next step. Excluded from F222 auto-issue triggering because a

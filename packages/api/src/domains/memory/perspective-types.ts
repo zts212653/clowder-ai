@@ -69,6 +69,7 @@ export interface LoadedPerspectivePlan {
 }
 
 export interface PerspectiveAnchorCandidate {
+  readRef?: import('@cat-cafe/shared').ReadRef;
   anchor: string;
   title: string;
   summary?: string;
@@ -79,6 +80,7 @@ export interface PerspectiveAnchorCandidate {
 }
 
 export interface PerspectiveOpenedAnchor {
+  readRef?: import('@cat-cafe/shared').ReadRef;
   anchor: string;
   status: 'route_identified' | 'opened' | 'unsupported' | 'error';
   sourceStepId?: string;

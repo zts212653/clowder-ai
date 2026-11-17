@@ -1,3 +1,4 @@
+import { type ReadRef, readRefFromDrillDown } from '@cat-cafe/shared';
 import { defineMcpMigrationFactory } from '../tool-governance-migration.js';
 import { invocationFetch } from './invocation-auth.js';
 
@@ -44,6 +45,7 @@ type PerspectiveRunResponse = {
     effectiveMode?: 'lexical' | 'semantic' | 'hybrid';
   }>;
   candidateAnchors: Array<{
+    readRef?: ReadRef;
     anchor: string;
     title?: string;
     sourceStepId?: string;
@@ -51,6 +53,7 @@ type PerspectiveRunResponse = {
     drillDown?: PerspectiveDrillDown;
   }>;
   openedAnchors: Array<{
+    readRef?: ReadRef;
     anchor: string;
     status: string;
     tool?: string;
@@ -162,13 +165,15 @@ function formatCandidateLines(candidate: PerspectiveRunResponse['candidateAnchor
   const prefix = candidate.rank != null ? `${candidate.rank}.` : '-';
   const lines = [`${prefix} ${candidate.anchor}${candidate.title ? ` — ${candidate.title}` : ''}`];
   if (candidate.sourceStepId) lines.push(`   sourceStepId: ${candidate.sourceStepId}`);
-  if (candidate.drillDown) lines.push(...formatDrillDownLines(candidate.drillDown));
+  if (candidate.readRef) lines.push(`   readRef: ${JSON.stringify(candidate.readRef)}`);
+  else if (candidate.drillDown) lines.push(...formatDrillDownLines(candidate.drillDown));
   return lines;
 }
 
 function formatOpenedAnchorLines(opened: PerspectiveRunResponse['openedAnchors'][number]): string[] {
   const label = opened.status === 'route_identified' ? 'route' : 'opened';
   const lines = [`- ${label}: ${opened.anchor} status=${opened.status}${opened.tool ? ` tool=${opened.tool}` : ''}`];
+  if (opened.readRef) lines.push(`   readRef: ${JSON.stringify(opened.readRef)}`);
   if (opened.content) lines.push(`  ${opened.status === 'route_identified' ? 'hint' : 'content'}: ${opened.content}`);
   if (opened.error) lines.push(`  error: ${opened.error}`);
   return lines;
@@ -179,6 +184,8 @@ function formatWarningLine(warning: PerspectiveRunResponse['warnings'][number]):
 }
 
 function formatDrillDownLines(drillDown: PerspectiveDrillDown): string[] {
+  const ref = readRefFromDrillDown(drillDown);
+  if (ref) return [`   readRef: ${JSON.stringify(ref)}`];
   const params = Object.entries(drillDown.params ?? {})
     .map(([key, value]) => `${key}=${value}`)
     .join(', ');

@@ -56,7 +56,7 @@ test('Host work snapshot keeps exact task IDs across polls and classifies only n
       id: 'graph',
       type: 'mcpToolCall',
       server: 'cat-cafe-collab',
-      tool: 'cat_cafe_graph_resolve',
+      tool: 'cat_cafe_search_evidence',
     }),
   );
   assert.equal(work.snapshot().active[0]?.kind, 'workspace_fetch');

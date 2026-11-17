@@ -3,6 +3,7 @@ import { after, before, test } from 'node:test';
 import { createRedisClient } from '@cat-cafe/shared/utils';
 import { InvocationRegistry } from '../dist/domains/cats/services/agents/invocation/InvocationRegistry.js';
 import { RedisAuthInvocationBackend } from '../dist/domains/cats/services/agents/invocation/RedisAuthInvocationBackend.js';
+import { WATCHER_TOOL_ROUTES } from '../dist/domains/cats/services/agents/invocation/WatcherToolTicket.js';
 import { clearAuthTestNamespace, createAuthTestNamespace } from './helpers/redis-auth-namespace.js';
 import { assertRedisIsolationOrThrow, redisIsolationSkipReason } from './helpers/redis-test-helpers.js';
 import { fixture } from './helpers/watcher-remember-fixture.js';
@@ -60,4 +61,36 @@ test('Redis reconstruction preserves an unknown batch result after the effects/r
   assert.equal(result.json().error, 'watcher_tool_result_pending');
   assert.equal(restored.calls.length, 0);
   assert.equal(await restored.registry.watcherToolCallCount(first.auth.invocationId), 1);
+});
+
+test('Redis unified read tickets bind one original branch and reconstruct its exact receipt', options, async () => {
+  const first = registry();
+  const auth = await first.create('reader-owner', 'codex61-sol', 'reader-line', undefined, undefined, {
+    mode: 'watcher',
+    maxToolCalls: 6,
+    allowedToolNames: ['cat_cafe_read_memory'],
+    allowedCallbackRoutes: WATCHER_TOOL_ROUTES.cat_cafe_read_memory,
+  });
+  for (const [index, route] of WATCHER_TOOL_ROUTES.cat_cafe_read_memory.entries()) {
+    const callId = `source-${index}`;
+    assert.equal(await first.consumeWatcherToolCall(auth.invocationId, callId, 'cat_cafe_read_memory'), 'accepted');
+    assert.equal(
+      (await first.claimWatcherToolCallback(auth.invocationId, callId, 'POST /api/callbacks/memory-cues/drill', 'hash'))
+        .kind,
+      'denied',
+    );
+    assert.equal((await first.claimWatcherToolCallback(auth.invocationId, callId, route, 'hash')).kind, 'claimed');
+    const different = WATCHER_TOOL_ROUTES.cat_cafe_read_memory.find((candidate) => candidate !== route);
+    assert.equal((await first.claimWatcherToolCallback(auth.invocationId, callId, different, 'hash')).kind, 'denied');
+    const response = { statusCode: 200, body: `original ${index}` };
+    await first.completeWatcherToolCallback(auth.invocationId, callId, response);
+    assert.deepEqual(await registry().claimWatcherToolCallback(auth.invocationId, callId, route, 'hash'), {
+      kind: 'completed',
+      response,
+    });
+    assert.equal(
+      (await registry().claimWatcherToolCallback(auth.invocationId, callId, route, 'changed')).kind,
+      'denied',
+    );
+  }
 });

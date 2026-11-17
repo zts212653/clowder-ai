@@ -602,7 +602,13 @@ describe('F287 MemoryCuePlaneService', () => {
       assert.equal(Object.hasOwn(result.cues[0], 'conclusion'), false);
       const pointer = result.presentationEnvelopes[0].segments.pointer;
       assert.match(pointer, /<recall-opportunity-pointer/);
-      assert.match(pointer, /Drill:/);
+      const refLine = pointer.split('\n').find((line) => line.startsWith('ReadRef: '));
+      assert.ok(refLine);
+      assert.deepEqual(JSON.parse(refLine.slice('ReadRef: '.length)), {
+        kind: 'cue',
+        handle: result.cues[0].drill.handle,
+      });
+      assert.match(pointer, /cat_cafe_read_memory/);
       if (expectedFamily === 'decision') {
         assert.match(
           pointer,

@@ -776,31 +776,6 @@ skills:
     sop_step: null
     merged_from: null
 
-  # ── 记忆系统三入口路由（F188 Phase F）──
-  memory-navigation:
-    category: "调研与知识"
-    description: >
-      记忆系统三入口路由（search_evidence / graph_resolve / list_recent）决策树 + 噪音控制 + 加载时机。F188 Phase F (AC-F6) 配套 skill。
-      Use when: 没先验、压缩后回顾、"我记得最近讨论过 X"、search_evidence 反复 low-hit。
-      Not for: 已有精确 anchor 直接 Read；代码符号查 Grep/LSP。
-      Output: 选定入口 + 噪音控制参数 + 进入对应 MCP 工具。
-    triggers:
-      - "没先验"
-      - "压缩后"
-      - "我记得讨论过"
-      - "最近讨论"
-      - "找不到 anchor"
-      - "cold start"
-      - "扫一眼最近"
-      - "memory navigation"
-    not_for:
-      - "已有精确 anchor"
-      - "代码符号查找"
-    output: "Entry choice + noise control params + downstream tool call"
-    next: ["feat-lifecycle", "debugging", "cross-cat-handoff"]
-    sop_step: null
-    merged_from: null
-
   # ── F282 Phase D：主动人物记忆语义判断 ──
   proactive-memory-judgment:
     category: "调研与知识"
@@ -832,9 +807,9 @@ skills:
     description: >
       按问题与证据缺口选择记忆检索范围（8 类题型参考）。
       Use when: "哪些地方提过 X" / source-map / absence check / delta / coverage 全集 / 冷启动 onboard / 召回任务搜了 1 刀觉得不够。
-      Not for: 只是选入口走第一刀（用 memory-navigation）/ 已知精确 anchor 直接 Read / 代码符号查 Grep/LSP / 新功能开发。
+      Not for: 一刀就能答的普通查找（直接 search_evidence 交原句）/ 已知坐标单读（read_memory）/ 代码符号查 Grep/LSP / 新功能开发。
       Output: 单一 owner 汇总原始证据、实际覆盖与未验证边界，一次交付。
-      GOTCHA: 和 memory-navigation 互补不重叠 — memory-navigation 决定第一刀工具，本 skill 处理证据缺口与覆盖边界，不按模型家族或固定轮次决定停止。
+      GOTCHA: 找入口只有一个，不用先选工具；本 skill 处理证据缺口与覆盖边界，不按模型家族或固定轮次决定停止。
     triggers:
       - "哪些 thread"
       - "哪些 md"
@@ -852,7 +827,7 @@ skills:
       - "coverage"
       - "全集"
     not_for:
-      - "选入口（用 memory-navigation）"
+      - "一刀就能答的普通查找（直接 search_evidence）"
       - "已知精确 anchor 直接 Read"
       - "代码符号查找"
       - "新功能开发"

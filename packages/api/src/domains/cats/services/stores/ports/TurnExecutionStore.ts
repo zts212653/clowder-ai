@@ -96,6 +96,8 @@ export type TurnExecutionSourceReadPort = Pick<ITurnExecutionStore, 'get'> &
 
 /** F337: terminal reason of a turn a machine sleep cut off; its continuation is owed until settled. */
 export const HOST_SLEEP_TERMINAL_REASON = 'host_sleep';
+/** F337: terminal reason of a turn the runtime's own shutdown cut off; continued after the restart. */
+export const RESTART_SHUTDOWN_TERMINAL_REASON = 'restart_shutdown';
 
 export interface MemberTurnStartedAfterQuery {
   readonly userId: string;
@@ -168,10 +170,13 @@ export interface ITurnExecutionStore {
   listRecentSettled(query: RecentSettledTurnQuery): TurnExecutionRecord[] | Promise<TurnExecutionRecord[]>;
   /** F337: exact — did this member start any non-watcher turn in this thread after `startedAfter`? */
   hasMemberTurnStartedAfter(query: MemberTurnStartedAfterQuery): boolean | Promise<boolean>;
-  /** F337: failed `host_sleep` turns whose continuation is still owed (recorded atomically at terminal). */
-  listOwedSleepContinuations(): TurnExecutionRecord[] | Promise<TurnExecutionRecord[]>;
+  /**
+   * F337: turns whose continuation is still owed, recorded atomically at terminal — failed `host_sleep`
+   * and `restart_shutdown` (any status). Read `terminalReason` to know which kind.
+   */
+  listOwedContinuations(): TurnExecutionRecord[] | Promise<TurnExecutionRecord[]>;
   /** F337: the continuation was delivered or is no longer owed (the member ran again). */
-  settleOwedSleepContinuations(invocationIds: readonly string[]): void | Promise<void>;
+  settleOwedContinuations(invocationIds: readonly string[]): void | Promise<void>;
   /**
    * F117 KD-21: records the action fence's verdict on a gated child's output, so every later
    * settlement reads it instead of a process-local decision. The fence only moves forward

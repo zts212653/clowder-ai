@@ -1,4 +1,4 @@
-import { ghOperation, ghOptionPolicy } from './secret-gh-options.mjs';
+import { ghOperation, ghOptionPolicy, isGhHelpRequest } from './secret-gh-options.mjs';
 import { sendArguments } from './secret-send-options.mjs';
 
 const DERIVED = new Set([
@@ -16,6 +16,7 @@ const DERIVED = new Set([
 ]);
 
 export async function prepareGhArgs(args, freeze) {
+  if (isGhHelpRequest(args)) return args;
   const operation = ghOperation(args);
   if (operation.action === 'new' && ['gist', 'release', 'pr', 'issue'].includes(operation.group))
     operation.action = 'create';
@@ -89,12 +90,11 @@ async function ghValue(name, value, operation, freeze) {
 
 function requireExplicitBody(operation, names, positional) {
   if (operation.group === 'gist' && operation.action === 'edit') {
-    if (positional < 2 && !['--add', '-a', '--desc', '-d', '--remove', '-r', '--help'].some((name) => names.has(name)))
+    if (positional < 2 && !['--add', '-a', '--desc', '-d', '--remove', '-r'].some((name) => names.has(name)))
       throw new Error('secret_send_implicit_content_unsupported');
     return;
   }
   if (!['pr', 'issue'].includes(operation.group)) return;
-  if (names.has('--help') || names.has('-h')) return;
   if (operation.action === 'edit' && [...names].every((name) => ['--repo', '-R', '--hostname'].includes(name)))
     throw new Error('secret_send_implicit_content_unsupported');
   if (

@@ -105,7 +105,7 @@ const REASON_TEXT: Record<CliErrorReasonCode, { summary: string; hint: string }>
   },
   cli_not_found: {
     summary: 'CLI 未找到',
-    hint: '请先安装对应的 CLI，再重试。',
+    hint: '请检查当前执行环境的 PATH 或 CLI 命令配置；若尚未安装，再安装对应 CLI 后重试。',
   },
   context_window_exceeded: {
     summary: '对话上下文超长',
@@ -690,11 +690,11 @@ export function buildSilentCompletionDiagnostic(input: {
 }
 
 /**
- * Structured diagnostic for a provider CLI that is not installed.
+ * Structured diagnostic when the current execution context cannot resolve a provider CLI.
  *
  * A missing binary is detected before any spawn, so this payload deliberately carries
  * no exit code and no `safeExcerpt`: inventing either would claim evidence that does
- * not exist. The install command is the actionable next step; the reasonCode is
+ * not exist. Check current-context resolution first; install only if absent. The reasonCode is
  * excluded from F222 auto-issue triggering (user-environment state, not our defect).
  *
  * `publicLabel` is only used for a custom wrapper and must be a fixed, path-safe
@@ -713,7 +713,7 @@ export function buildCliNotFoundDiagnostic(
     reasonCode: 'cli_not_found',
     publicSummary: `${label} 未找到`,
     publicHint: installHint
-      ? `请先运行 ${installHint} 安装，再重试。`
+      ? `请检查当前执行环境的 PATH 或该成员的 CLI 命令配置；若尚未安装，可运行 ${installHint} 安装后重试。`
       : '请检查该成员配置的自定义 CLI 命令或路径，确认可执行后重试。',
     debugRef: { command: knownCommand ? command : label, signal: null },
   };
