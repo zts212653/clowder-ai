@@ -3400,6 +3400,20 @@ export class QueueProcessor {
     this.processingSlots.delete(QueueProcessor.slotKey(threadId, catId));
   }
 
+  /** Current, queued and prestart-reserved attempts all own unconsumed Stop facts. */
+  private forEachUnstartedAdmission(threadId: string, visit: (admission: AutomaticAdmission) => void): void {
+    const state = this.threadDrains.get(threadId);
+    if (state?.admitting) visit(state.admitting);
+    if (state?.continuationAdmission) visit(state.continuationAdmission);
+    // Secondary targets do not have their own slot before tracker takeover.
+    // Aliased objects may be visited twice: the callers only add or clear Sets.
+    for (const [key, reservation] of this.processingSlots) {
+      if (QueueProcessor.slotMatchesThread(key, threadId) && reservation.automaticAdmission) {
+        visit(reservation.automaticAdmission);
+      }
+    }
+  }
+
   /**
    * Suppress automatic recovery while cancelAll/force-reset owns this slot.
    * Delayed recovery and connector admission observe the slot fence. A canceled
@@ -3407,16 +3421,10 @@ export class QueueProcessor {
    * cancel action that armed the fence. The TTL bounds missing-terminal cases.
    */
   suppressAutoResume(threadId: string, catId: string, executionIds: readonly string[] = []): void {
-    const stopAdmission = (admission?: AutomaticAdmission) => {
-      admission?.stoppedTargets.add(catId);
-      admission?.continuationStoppedTargets.add(catId);
-    };
-    stopAdmission(this.threadDrains.get(threadId)?.admitting);
-    // Secondary targets have no processing slot until tracker takeover. Mark every
-    // in-flight admission in this thread; its complete resolved target set decides relevance.
-    for (const [key, reservation] of this.processingSlots) {
-      if (QueueProcessor.slotMatchesThread(key, threadId)) stopAdmission(reservation.automaticAdmission);
-    }
+    this.forEachUnstartedAdmission(threadId, (admission) => {
+      admission.stoppedTargets.add(catId);
+      admission.continuationStoppedTargets.add(catId);
+    });
     const sk = QueueProcessor.slotKey(threadId, catId);
     const now = Date.now();
     const existing = this.suppressedAutoResume.get(sk);
@@ -3571,12 +3579,7 @@ export class QueueProcessor {
     if (!options?.continuationAdmission) {
       // A handoff can finish while an old attempt still awaits exact restore.
       // Remember that wake for its successor without reviving this attempt.
-      state.admitting?.continuationStoppedTargets.clear();
-      for (const [key, reservation] of this.processingSlots) {
-        if (QueueProcessor.slotMatchesThread(key, threadId)) {
-          reservation.automaticAdmission?.continuationStoppedTargets.clear();
-        }
-      }
+      this.forEachUnstartedAdmission(threadId, (admission) => admission.continuationStoppedTargets.clear());
     }
     if (!state.dirty || !options?.continuationAdmission) {
       state.continuationAdmission = options?.continuationAdmission;
