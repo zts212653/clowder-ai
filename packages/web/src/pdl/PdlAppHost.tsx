@@ -525,7 +525,6 @@ function ChatBinding({
     threadId,
     enabled: drafting && threadId !== 'default',
     draft: { text: input, contexts, ...(reply ? { replyTo: reply.id } : {}) },
-    composerEmpty: () => !input.trim() && !images.length && !contexts.length,
     restore: (saved) => {
       setInput(saved.text);
       setContexts(saved.contexts);
@@ -534,6 +533,7 @@ function ChatBinding({
         useChatStore
           .getState()
           .setReplyTo({ id: message.id, content: message.content, senderCatId: message.catId ?? null, threadId });
+      else useChatStore.getState().clearReplyTo();
     },
   });
   // Words, places and a quote handed to this conversation's input from elsewhere (a file, a work, a recall).
