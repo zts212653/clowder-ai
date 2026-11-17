@@ -92,10 +92,15 @@ it('maps a Claude OAuth account into the account quota row and shows the built-i
   expect(relayRow.quota).toBe(false);
   expect(row.quotaData).toEqual({
     items: [
-      { window: 'five_hour', label: 'five_hour (claude-haiku-4-5)', left: 75 },
-      { window: 'seven_day', label: 'seven_day (claude-fable-5-1)', left: 50 },
-      { window: 'seven_day_overage_included', label: 'seven_day_overage_included (claude-fable-5-1)', left: 10 },
-      { window: '', label: 'seven_day_opus (claude-fable-5-1)', left: 60 },
+      { window: 'five_hour', label: 'five_hour (claude-haiku-4-5)', left: 75, low: false },
+      { window: 'seven_day', label: 'seven_day (claude-fable-5-1)', left: 50, low: false },
+      {
+        window: 'seven_day_overage_included',
+        label: 'seven_day_overage_included (claude-fable-5-1)',
+        left: 10,
+        low: true,
+      },
+      { window: '', label: 'seven_day_opus (claude-fable-5-1)', left: 60, low: false },
     ],
     resets: [{ at: (SEC + 3600) * 1000 }, { at: (SEC + 86400) * 1000 }, { at: (SEC + 86400) * 1000 }],
     at: NOW - 30000,

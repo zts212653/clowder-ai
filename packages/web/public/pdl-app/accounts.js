@@ -78,6 +78,8 @@ function bindAccounts() {
           }))
     ).filter((m) => m.accountRef === p.id);
   }
+  // Remaining below this percentage is low (that item of the quota row is shown as a warning).
+  const QUOTA_LOW = 20;
   function accountQuotaData(o) {
     const items = o.status === 'ok' ? o.items : (o.lastSuccess || {}).items || [];
     const left = function (x) {
@@ -85,7 +87,7 @@ function bindAccounts() {
     };
     return {
       items: items.map(function (x) {
-        return { label: x.label, left: left(x) };
+        return { label: x.label, left: left(x), low: left(x) < QUOTA_LOW };
       }),
       resets: items
         .map(function (x) {
@@ -140,6 +142,7 @@ function bindAccounts() {
         window: named(w) ? w.key : '',
         label: w.key + ' (' + w.model + ')',
         left: Math.round((1 - w.utilization) * 100),
+        low: (1 - w.utilization) * 100 < QUOTA_LOW,
       };
     });
     return {
