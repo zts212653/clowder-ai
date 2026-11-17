@@ -8772,22 +8772,11 @@ pdl:
       when: "@card.ownerKind"
     CARD_STATUS:
       type: status
-      tone:
-        of: "@card.report.state"
-        map:
-          published: ok
-          _: warn
+      tone: warn
       text:
         of:
           $frag: CARD_NOTICE_KIND
         map:
-          feedback:
-            of: "@card.report.state"
-            map:
-              unavailable: t:chatCards.issue.unavailable
-              uncertain: t:chatCards.issue.uncertain
-              published: t:chatCards.issue.published
-              cancelled: t:common.status.cancelled
           memory:
             of: "@card.noticeState"
             map:
@@ -8864,12 +8853,7 @@ pdl:
           gte: 1
           map:
             "true": message
-            _:
-              of: "@card.report.state"
-              map:
-                "": ""
-                undefined: ""
-                _: feedback
+            _: ""
         custody:
           of: "@card.noticeText.length"
           gte: 1
@@ -9052,48 +9036,6 @@ pdl:
                       confirm: true
                       _: false
           - $frag: CARD_OWNER_REFRESH
-          - type: select
-            change: cafeSel
-            id: "@card.report.repoId"
-            value: "@card.report.repo"
-            label: t:chatCards.field.repo
-            options:
-              - from: "@card.report.repos"
-                item:
-                  v: "@"
-                  label: "@"
-            when: "@card.report.repos"
-          - type: button
-            label: t:common.copy
-            act: copy
-            args:
-              v: "@card.report.text"
-            when: "@card.report"
-          - type: button
-            label: t:chatCards.issue.manual
-            act: openUrl
-            args:
-              url: "@card.report.manualUrl"
-            when: "@card.report.manualUrl"
-          - type: button
-            label: t:common.edit
-            act: feedbackEdit
-            args:
-              mid: "@mid"
-            when: "@card.report.canEdit"
-          - type: button
-            label: "@card.report.issue"
-            act: openUrl
-            args:
-              url: "@card.report.url"
-            when: "@card.report.url"
-          - type: button
-            primary: true
-            label: t:chatCards.issue.publish
-            act: feedbackPublish
-            args:
-              mid: "@mid"
-            when: "@card.report.canPublish"
           - type: button
             label: t:common.reject
             act: cardDecide
@@ -22068,27 +22010,6 @@ pdl:
         - id: dlg-in
           label: URL
       ok: t:workspaceOwners.projectSetup.clone
-    dlg.feedbackReport:
-      title: t:chatCards.issue.editTitle
-      ok: t:common.save
-      fields:
-        - id: feedback-title
-          label: t:chatCards.issue.title
-          value: $.title
-          req: true
-          max: 500
-        - id: feedback-body
-          label: t:chatCards.issue.body
-          value: $.bodyMarkdown
-          area: true
-          max: 64000
-    dlg.feedbackPublish:
-      title: t:chatCards.issue.publishTitle
-      text:
-        t: chatCards.issue.publishText
-        args:
-          - $.repo
-      ok: t:chatCards.issue.publish
     dlg.threadReveal:
       title: t:threadSettings.reveal.title
       ok: t:threadSettings.reveal.title
