@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { bundleDesktopApi } from './bundle-desktop-api.mjs';
 import { bundleRuntimePackages } from './bundle-runtime-packages.mjs';
 import { exportFrozenRuntime } from './frozen-runtime-export.mjs';
+import { pruneFrozenRuntimeRedundancy } from './frozen-runtime-prune.mjs';
 import { readFrozenRuntimeInputs } from './frozen-runtime-inputs.mjs';
 import { profileDesktopStartup } from './profile-desktop-startup.mjs';
 import { rebuildFrozenDependencies } from './rebuild-frozen-dependencies.mjs';
@@ -57,6 +58,14 @@ const receipt = exportFrozenRuntime(workspace, out, packages, path.join(source, 
       ? (process.env.CAT_CAFE_BUILD_COMMIT ??
         execFileSync('git', ['rev-parse', 'HEAD'], { cwd: source }).toString().trim())
       : undefined,
+});
+// Packaging redundancy removal happens here, before startup profiling, so the
+// installer archive and the portable zip share one file set. Opt-in per item;
+// the archive layer only compresses and records integrity.
+receipt.frozenPrune = pruneFrozenRuntimeRedundancy(path.join(out, 'dependencies'), {
+  swc: process.env.CAT_CAFE_PRUNE_SWC === '1',
+  platform: process.env.CAT_CAFE_PRUNE_PLATFORM === '1',
+  maps: process.env.CAT_CAFE_PRUNE_MAPS === '1',
 });
 if (os.platform() === 'win32' && packages.includes('api')) {
   receipt.runtimePackages = await bundleRuntimePackages(out);

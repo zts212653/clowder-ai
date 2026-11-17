@@ -15,12 +15,13 @@ export async function createRuntimeArchive(source, file) {
     throw new Error('Claude native runtime must be external; rebuild the frozen deployment before packaging');
   const tar = createRequire(resolveNpmCli())('tar');
   const started = Date.now();
+  const level = Number(process.env.RUNTIME_ARCHIVE_GZIP_LEVEL ?? 1);
   await tar.c(
     {
       file,
       cwd: source,
       portable: true,
-      gzip: { level: 1 },
+      gzip: { level: Number.isFinite(level) ? level : 1 },
       jobs: 4,
       follow: false,
     },

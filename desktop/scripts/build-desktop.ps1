@@ -188,8 +188,17 @@ if (-not $SkipBundleDeps) {
     New-Item -ItemType Directory -Path $bundledDir -Force | Out-Null
     $stamp = [DateTime]::UtcNow.ToString('yyyyMMddHHmmssfff')
     $nextDeploy = Join-Path $bundledDir "deploy-$stamp"
-    node (Join-Path $ProjectRoot "desktop/scripts/frozen-runtime-deploy.mjs") $ProjectRoot $nextDeploy
-    if ($LASTEXITCODE -ne 0) { throw "Frozen runtime export failed" }
+    # Packaging redundancy is removed in the export layer, so the installer
+    # archive, the portable zip and startup profiling all share one file set.
+    # Each item is opt-in; the archive layer only compresses and records integrity.
+    $pruneEnv = @('CAT_CAFE_PRUNE_SWC', 'CAT_CAFE_PRUNE_PLATFORM', 'CAT_CAFE_PRUNE_MAPS')
+    foreach ($name in $pruneEnv) { Set-Item -Path "Env:$name" -Value '1' }
+    try {
+        node (Join-Path $ProjectRoot "desktop/scripts/frozen-runtime-deploy.mjs") $ProjectRoot $nextDeploy
+        if ($LASTEXITCODE -ne 0) { throw "Frozen runtime export failed" }
+    } finally {
+        foreach ($name in $pruneEnv) { Remove-Item "Env:$name" -ErrorAction SilentlyContinue }
+    }
     if (Test-Path -LiteralPath $deployRoot) {
         Move-Item -LiteralPath $deployRoot -Destination (Join-Path $bundledDir "deploy-before-$stamp")
     }
@@ -464,6 +473,8 @@ foreach ($stamp in @('api/dist/.build-commit', 'web/.next/.build-commit')) {
 $archiveDir = Join-Path $bundledDir "archives"
 if (Test-Path $archiveDir) { Remove-Item $archiveDir -Recurse -Force }
 New-Item -ItemType Directory -Path $archiveDir -Force | Out-Null
+# Compression-only knob: identical file set, smaller archive, slower build.
+$env:RUNTIME_ARCHIVE_GZIP_LEVEL = '9'
 
 $archiveTargets = @(
     @{ Name = "deploy-dependencies"; Src = Join-Path $deployRoot "dependencies" },
@@ -533,6 +544,7 @@ foreach ($t in $archiveTargets) {
 }
 & node (Join-Path $ProjectRoot 'desktop/scripts/verify-runtime-archives.mjs') $ProjectRoot
 if ($LASTEXITCODE -ne 0) { throw 'Runtime archive gate failed; no installer may be compiled.' }
+Remove-Item Env:RUNTIME_ARCHIVE_GZIP_LEVEL -ErrorAction SilentlyContinue
 Write-Ok "Archives ready under bundled/archives/"
 
 # Step 7: Compile Inno Setup installer
