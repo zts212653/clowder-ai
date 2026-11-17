@@ -237,6 +237,7 @@ export function useChatOwnerBindings(
             });
         } catch (error) {
           setRead((s) => ({ ...s, proposalErrors: { ...s.proposalErrors, [args.mid]: (error as Error).message } }));
+          await loadProposal(args.mid);
           return { ok: false };
         }
         setRead((s) => ({ ...s, proposalErrors: { ...s.proposalErrors, [args.mid]: '' } }));

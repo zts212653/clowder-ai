@@ -181,6 +181,39 @@ it('keeps a proposal failure on its own card and refreshes its authoritative own
   expect(hook.result.current.data.proposals['user-1'].value?.offer).toBeNull();
 });
 
+it('rereads a frustration issue that was already handled when its decision is refused', async () => {
+  const data = fixtureData();
+  data.messages[1].source = { connector: 'frustration-auto-issue', label: 'Issue', icon: 'alert' };
+  data.messages[1].extra = {
+    rich: {
+      v: 1,
+      blocks: [
+        {
+          v: 1,
+          id: 'issue-card',
+          kind: 'card',
+          title: 'Issue',
+          meta: { kind: 'frustration_auto_issue', issueId: 'issue' },
+        },
+      ],
+    },
+  };
+  let status = 'draft';
+  vi.mocked(apiFetch).mockImplementation(async (_path, init) => {
+    if (init?.method !== 'POST') return response({ issue: { issueId: 'issue', status } });
+    status = 'false_positive';
+    return response({ error: 'Issue is no longer a draft' }, 409);
+  });
+  const hook = renderHook(() => useChatOwnerBindings(data, true));
+  await waitFor(() => expect(hook.result.current.data.proposals['reply-1']?.value?.issue?.status).toBe('draft'));
+  await act(async () =>
+    expect(await hook.result.current.action('proposalOwnerDecide', { mid: 'reply-1', op: 'false-positive' })).toEqual({
+      ok: false,
+    }),
+  );
+  expect(hook.result.current.data.proposals['reply-1'].value?.issue?.status).toBe('false_positive');
+});
+
 it('reads exact queue targets, writes the selected mapping, reorders with PATCH and refreshes authoritative queue state', async () => {
   const value = {
     cats: {

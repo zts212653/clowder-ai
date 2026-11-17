@@ -43,7 +43,7 @@ function chatOwnerMessageVM(x) {
             return Object.assign({}, coordinates, { v: v, id: v === 'confirm' ? 'frustration-' + x.mid : '' });
           })
         : [],
-      noticeText: (data && data.proposalErrors[x.mid]) || (read && read.error) || '',
+      noticeText: (pending && data.proposalErrors[x.mid]) || (read && read.error) || '',
       result:
         status && !pending
           ? {
