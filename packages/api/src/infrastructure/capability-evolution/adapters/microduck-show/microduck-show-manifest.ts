@@ -1,5 +1,5 @@
 import type { OwnerTruthRefV1 } from '@cat-cafe/shared';
-import { proposalIdFromRef } from '../../harness-eval/eval-repair-evolution-owner-projection.js';
+import { proposalIdFromRef } from '../../../harness-eval/eval-repair-evolution-owner-projection.js';
 import {
   MICRODUCK_CONTROL_SHOW_CANDIDATE_SUBJECTS,
   MICRODUCK_SHOW_CANDIDATE_SUBJECTS,
@@ -12,12 +12,12 @@ import {
   type MicroduckShowManifestV1,
   type MicroduckShowMediaDescriptor,
   type MicroduckShowState,
-} from './microduck-owner-contract.js';
+} from '../microduck-owner-contract.js';
 import {
   microduckApprovalSchema,
   microduckProposalSchema,
   microduckShowStateSchema,
-} from './microduck-owner-schemas.js';
+} from '../microduck-owner-schemas.js';
 import {
   blocked,
   exactRef,
@@ -34,7 +34,7 @@ import {
   sameAssetSurface,
   sameRef,
   validSha256,
-} from './microduck-owner-validation.js';
+} from '../microduck-owner-validation.js';
 
 interface ShowManifestProjectorOptions {
   owner: Pick<MicroduckOwnerPort, 'resolveShowState'>;
