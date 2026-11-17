@@ -61,8 +61,11 @@ export async function socketFixture(t, h) {
   await new Promise((resolve, reject) =>
     socket.emit('join_room', 'thread:thread', (reply) => (reply.ok ? resolve() : reject(new Error('join failed')))),
   );
+  let stopSequence = 0;
   return async (cat, owner) => {
-    const controller = h.tracker.start('thread', cat, owner, [cat], 'new-stop');
+    const sequence = ++stopSequence;
+    const executionId = sequence === 1 ? 'new-stop' : `new-stop-${sequence}`;
+    const controller = h.tracker.start('thread', cat, owner, [cat], executionId);
     await new Promise((resolve) => {
       const cancelAll = h.tracker.cancelAll.bind(h.tracker);
       h.tracker.cancelAll = (...args) => {
@@ -74,7 +77,7 @@ export async function socketFixture(t, h) {
       socket.emit('cancel_invocation', {
         threadId: 'thread',
         origin: 'explicit_stop',
-        actionId: 'race-stop',
+        actionId: `race-stop-${sequence}`,
         clientInstanceId: 'race-client',
         sourceControl: 'chat_input_action',
         gesture: 'pointer',
@@ -102,7 +105,13 @@ export function gateAttempt(h, source, stage, loseReceipt) {
     await gate;
   };
   const failure = new Error('exact claim committed but acknowledgement lost');
-  if (stage.startsWith('claim')) {
+  if (stage === 'resolution') {
+    const resolve = h.processor.deps.router.resolveExplicitTargets;
+    h.processor.deps.router.resolveExplicitTargets = async (ids, ...args) => {
+      if (ids.length > 1) await pause();
+      return resolve(ids, ...args);
+    };
+  } else if (stage.startsWith('claim')) {
     const claim = h.ledger.claimPrefix.bind(h.ledger);
     h.ledger.claimPrefix = async (...args) => {
       if (!args[1].includes(source.entry.id)) return claim(...args);

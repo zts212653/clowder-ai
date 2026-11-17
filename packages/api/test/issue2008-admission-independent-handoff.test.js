@@ -32,9 +32,17 @@ test('#2008 Stop on an unreserved secondary revokes its admission and preserves 
     releaseB = resolve;
   });
   const entered = [];
+  const targetStarts = [];
+  const route = h.processor.deps.router.routeExecution;
+  h.processor.deps.router.routeExecution = async function* (...args) {
+    targetStarts.push([...args[4]]);
+    yield* route(...args);
+  };
+  let originalRecordId;
   const create = h.records.create.bind(h.records);
   h.records.create = async (input) => {
     const result = await create(input);
+    if (input.targetCats.length === 2) originalRecordId = result.invocationId;
     entered.push([...input.targetCats]);
     if (input.targetCats.includes('opus') && entered.length <= 2) await aGate;
     if (input.targetCats.includes('sonnet')) await bGate;
@@ -58,8 +66,19 @@ test('#2008 Stop on an unreserved secondary revokes its admission and preserves 
   await h.processor.onInvocationComplete('thread', 'codex', 'canceled_by_user', 'new-stop');
   releaseA();
   await waitFor(() => !h.processor.hasProcessingSlotReservation('thread', 'opus'));
-  assert.deepEqual(h.starts, []);
-  assert.equal((await h.queue.getDurableEntry('thread', source.entry.id)).status, 'queued');
+  await waitFor(() => h.starts.includes('multi A'));
+  assert.deepEqual(targetStarts[0], ['opus'], 'the untouched sibling progresses in a new subset');
+  assert.equal(
+    targetStarts.some((targets) => targets.length === 2),
+    false,
+    'the revoked full attempt never starts',
+  );
+  assert.equal((await h.records.get(originalRecordId)).status, 'queued');
+  assert.equal(
+    h.processor.hasProcessingSlotReservation('thread', 'sonnet'),
+    true,
+    'independent prestart B is retained',
+  );
   releaseB();
   await waitFor(() => h.starts.includes('independent B'));
 });
@@ -88,11 +107,13 @@ for (const targets of [['sonnet'], ['opus', 'codex']]) {
       bRelease = resolve;
     });
     const route = h.processor.deps.router.routeExecution;
+    const aTargetStarts = [];
     h.processor.deps.router.routeExecution = async function* (...args) {
       if (args[1] === 'active') {
         bEnter();
         await bGate;
       }
+      if (args[1] === 'restored A') aTargetStarts.push([...args[4]]);
       yield* route(...args);
     };
     t.after(() => bRelease());
@@ -106,13 +127,25 @@ for (const targets of [['sonnet'], ['opus', 'codex']]) {
     await drain;
     await bEntered;
     await waitFor(() => !h.processor.hasProcessingSlotReservation('thread', targets[0]));
-    assert.deepEqual(h.starts, [], 'the revoked attempt cannot use consumed Stop evidence');
-    assert.equal((await h.queue.getDurableEntry('thread', source.entry.id)).status, 'queued');
-    assert.equal(aCreates, 1);
+    if (targets.length === 1) {
+      assert.deepEqual(h.starts, [], 'the revoked target cannot use consumed Stop evidence');
+      assert.equal((await h.queue.getDurableEntry('thread', source.entry.id)).status, 'queued');
+      assert.equal(aCreates, 1);
+    } else {
+      await waitFor(() => aTargetStarts.length > 0);
+      assert.deepEqual(aTargetStarts[0], ['opus'], 'D4 does not pause the untouched sibling');
+    }
     bRelease();
     await waitFor(() => h.starts.includes('restored A') && h.starts.includes('active'));
-    assert.equal(aCreates, 2, 'B handoff starts a fresh admission of the pending source');
-    assert.deepEqual(h.starts, ['active', 'restored A']);
+    if (targets.length === 1) {
+      assert.equal(aCreates, 2, 'B handoff starts a fresh admission of the pending source');
+      assert.deepEqual(h.starts, ['active', 'restored A']);
+    }
+    assert.equal(
+      aTargetStarts.every((targets) => targets.length === 1),
+      true,
+      'no revoked full-target admission runs',
+    );
     assert.equal(h.tracker.has('thread', 'gemini'), true, 'B need not finish before independent A progresses');
   });
 }

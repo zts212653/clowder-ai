@@ -85,18 +85,18 @@ for (const scenario of cases) {
     gate.release();
     assert.equal(await outcome, scenario.loseReceipt ? gate.failure : undefined);
     await new Promise((resolve) => setTimeout(resolve, 100));
+    if (scenario.secondary) {
+      await waitFor(() => h.starts.length === 1 && !h.processor.hasProcessingSlotReservation('thread', 'sonnet'));
+      assert.deepEqual(startedTargets, [['sonnet']], 'the untouched recipient continues without a manual wake');
+      const pending = await h.queue.getDurableEntry('thread', source.entry.id);
+      assert.equal(pending.status, 'queued');
+      assert.deepEqual(pending.targets, ['gemini']);
+      return;
+    }
     const shouldStart = scenario.unrelated || scenario.foreignOwner;
     assert.deepEqual(h.starts, shouldStart ? ['pending source'] : []);
     if (!shouldStart) {
       await h.processor.requestDrain('thread');
-      if (scenario.secondary) {
-        await waitFor(() => h.starts.length === 1 && !h.processor.hasProcessingSlotReservation('thread', 'sonnet'));
-        assert.deepEqual(startedTargets, [['sonnet']], 'fresh admission may continue the unaffected recipient only');
-        const pending = await h.queue.getDurableEntry('thread', source.entry.id);
-        assert.equal(pending.status, 'queued');
-        assert.deepEqual(pending.targets, ['gemini']);
-        return;
-      }
       assert.deepEqual(h.starts, [], 'ordinary drain cannot renew the rejected pre-start grant');
       const entry = await h.queue.getDurableEntry('thread', source.entry.id);
       const remainsClaimed =

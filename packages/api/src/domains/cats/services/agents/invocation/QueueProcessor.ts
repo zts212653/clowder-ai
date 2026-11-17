@@ -321,6 +321,15 @@ interface QueueExecutionResult {
 /** Stop is an event for this unstarted attempt, even after its fence is consumed. */
 interface AutomaticAdmission {
   readonly stoppedTargets: Set<string>;
+  /** A genuine new wake may release these for the successor, never this in-flight attempt. */
+  readonly continuationStoppedTargets: Set<string>;
+}
+
+interface DrainRequestOptions {
+  bypassSuppressionForCatId?: string;
+  bypassSuppressionEpoch?: number;
+  /** Internal continuation of unstarted work; a real new wake does not inherit it. */
+  continuationAdmission?: AutomaticAdmission;
 }
 
 type ProcessingSlotReservation = PrestartRetirementReservation & { automaticAdmission?: AutomaticAdmission };
@@ -662,6 +671,7 @@ interface ThreadDrainState {
   dirty: boolean;
   owner?: Promise<void>;
   admitting?: AutomaticAdmission;
+  continuationAdmission?: AutomaticAdmission;
 }
 
 interface ConversationBatchResolution {
@@ -3397,11 +3407,15 @@ export class QueueProcessor {
    * cancel action that armed the fence. The TTL bounds missing-terminal cases.
    */
   suppressAutoResume(threadId: string, catId: string, executionIds: readonly string[] = []): void {
-    this.threadDrains.get(threadId)?.admitting?.stoppedTargets.add(catId);
+    const stopAdmission = (admission?: AutomaticAdmission) => {
+      admission?.stoppedTargets.add(catId);
+      admission?.continuationStoppedTargets.add(catId);
+    };
+    stopAdmission(this.threadDrains.get(threadId)?.admitting);
     // Secondary targets have no processing slot until tracker takeover. Mark every
     // in-flight admission in this thread; its complete resolved target set decides relevance.
     for (const [key, reservation] of this.processingSlots) {
-      if (QueueProcessor.slotMatchesThread(key, threadId)) reservation.automaticAdmission?.stoppedTargets.add(catId);
+      if (QueueProcessor.slotMatchesThread(key, threadId)) stopAdmission(reservation.automaticAdmission);
     }
     const sk = QueueProcessor.slotKey(threadId, catId);
     const now = Date.now();
@@ -3547,19 +3561,33 @@ export class QueueProcessor {
    * it is running only set dirty; the current owner must observe that bit before
    * it can retire, so enqueue/terminal/reorder races cannot lose the last wake.
    */
-  requestDrain(
-    threadId: string,
-    options?: { bypassSuppressionForCatId?: string; bypassSuppressionEpoch?: number },
-  ): Promise<void> {
+  requestDrain(threadId: string, options?: DrainRequestOptions): Promise<void> {
     return outsideRecoveryDeadline(() => this.requestOwnedDrain(threadId, options));
   }
 
-  private requestOwnedDrain(
-    threadId: string,
-    options?: { bypassSuppressionForCatId?: string; bypassSuppressionEpoch?: number },
-  ): Promise<void> {
+  private requestOwnedDrain(threadId: string, options?: DrainRequestOptions): Promise<void> {
     const state = this.threadDrains.get(threadId) ?? { dirty: false };
     this.threadDrains.set(threadId, state);
+    if (!options?.continuationAdmission) {
+      // A handoff can finish while an old attempt still awaits exact restore.
+      // Remember that wake for its successor without reviving this attempt.
+      state.admitting?.continuationStoppedTargets.clear();
+      for (const [key, reservation] of this.processingSlots) {
+        if (QueueProcessor.slotMatchesThread(key, threadId)) {
+          reservation.automaticAdmission?.continuationStoppedTargets.clear();
+        }
+      }
+    }
+    if (!state.dirty || !options?.continuationAdmission) {
+      state.continuationAdmission = options?.continuationAdmission;
+    } else if (state.continuationAdmission) {
+      for (const target of options.continuationAdmission.stoppedTargets) {
+        state.continuationAdmission.stoppedTargets.add(target);
+      }
+      for (const target of options.continuationAdmission.continuationStoppedTargets) {
+        state.continuationAdmission.continuationStoppedTargets.add(target);
+      }
+    }
     state.dirty = true;
     if (options?.bypassSuppressionForCatId && options.bypassSuppressionEpoch !== undefined) {
       this.captureCompletionResumeSources(threadId, options.bypassSuppressionForCatId, options.bypassSuppressionEpoch);
@@ -3568,8 +3596,8 @@ export class QueueProcessor {
       const owner = this.runDrain(threadId, state).finally(() => {
         if (state.owner === owner) state.owner = undefined;
         if (state.dirty) {
-          void this.requestDrain(threadId).catch((err: unknown) =>
-            this.deps.log.error({ err, threadId }, '[QueueProcessor] follow-up drain failed'),
+          void this.requestDrain(threadId, { continuationAdmission: state.continuationAdmission }).catch(
+            (err: unknown) => this.deps.log.error({ err, threadId }, '[QueueProcessor] follow-up drain failed'),
           );
         } else this.threadDrains.delete(threadId);
       });
@@ -3580,15 +3608,25 @@ export class QueueProcessor {
 
   private async runDrain(threadId: string, state: ThreadDrainState): Promise<void> {
     while (true) {
+      const admission = state.continuationAdmission ?? {
+        stoppedTargets: new Set<string>(),
+        continuationStoppedTargets: new Set<string>(),
+      };
+      state.continuationAdmission = undefined;
       state.dirty = false;
+      state.admitting = admission;
       void this.reconcileAppendDeliveries(threadId);
-      while (true) {
-        const result = await this.tryExecuteNextAcrossUsers(threadId, state);
-        // One drain owns one source entry. Its exact target set fans out as one
-        // admission unit; the durable handoff callback signals the next drain.
-        // This preserves source comparator order without waiting for providers
-        // to finish their work.
-        if (result.started || !result.progressed) break;
+      try {
+        while (true) {
+          const result = await this.tryExecuteNextAcrossUsers(threadId, state, admission);
+          // One drain owns one source entry. Its exact target set fans out as one
+          // admission unit; the durable handoff callback signals the next drain.
+          // This preserves source comparator order without waiting for providers
+          // to finish their work.
+          if (result.started || !result.progressed) break;
+        }
+      } finally {
+        if (state.admitting === admission) state.admitting = undefined;
       }
       if (!state.dirty) return;
     }
@@ -4096,7 +4134,11 @@ export class QueueProcessor {
    * input that waits for an idle thread holds back everything behind it: its target is not known yet.
    * The scan reads one snapshot and awaits target resolution, so the claim re-checks the order.
    */
-  private async tryExecuteNextAcrossUsers(threadId: string, state: ThreadDrainState): Promise<QueueAdmissionAttempt> {
+  private async tryExecuteNextAcrossUsers(
+    threadId: string,
+    state: ThreadDrainState,
+    automaticAdmission: AutomaticAdmission,
+  ): Promise<QueueAdmissionAttempt> {
     const candidates = this.deps.queue.listPendingAcrossUsers(threadId);
     if (candidates.length === 0) {
       this.emitContinuationDiagnostic(threadId, 'unknown', classifyContinuationOutcome(0), 0);
@@ -4109,8 +4151,6 @@ export class QueueProcessor {
     let waitingEntries = 0;
     let firstWaitingTarget: string | undefined;
     for (const candidate of candidates) {
-      const automaticAdmission: AutomaticAdmission = { stoppedTargets: new Set() };
-      state.admitting = automaticAdmission;
       try {
         if (candidate.status === 'claimed') {
           if (candidate.targets.length === 0) return { started: false };
@@ -4230,13 +4270,12 @@ export class QueueProcessor {
           return { started: false };
         }
         const targets = admission.kind === 'resolved' ? admission.targets : queueEntryTargetCats(candidate);
-        if (
-          admission.kind === 'resolved' &&
-          !targets.some((target) => automaticAdmission.stoppedTargets.has(target)) &&
-          !this.retryDeferrals.isDeferred(candidate.id)
-        ) {
+        if (admission.kind === 'resolved' && !this.retryDeferrals.isDeferred(candidate.id)) {
           const availableTargets = targets.filter(
-            (catId) => !heldTargets.has(catId) && this.isSlotAdmissible(threadId, catId, candidate),
+            (catId) =>
+              !heldTargets.has(catId) &&
+              !automaticAdmission.stoppedTargets.has(catId) &&
+              this.isSlotAdmissible(threadId, catId, candidate),
           );
           if (availableTargets.length > 0) {
             // The existing ledger claims one recipient or the whole row. A partial set advances
@@ -4270,6 +4309,7 @@ export class QueueProcessor {
           const retryAt = this.retryDeferrals.defer(threadId, pending.id);
           // Preserve this caller's error, then let the existing coordinator scan
           // independent targets while this exact source waits for its timer.
+          if (!state.dirty) state.continuationAdmission = automaticAdmission;
           state.dirty = true;
           this.deps.log.warn(
             { err: error, threadId, entryId: pending.id, retryAt },
@@ -4277,8 +4317,6 @@ export class QueueProcessor {
           );
         }
         throw error;
-      } finally {
-        if (state.admitting === automaticAdmission) state.admitting = undefined;
       }
     }
     this.emitContinuationDiagnostic(
@@ -4522,8 +4560,11 @@ export class QueueProcessor {
         const settled = await this.terminalizeUnavailableConversationEntry(entry, 'explicit', true);
         return QueueProcessor.terminalizedEntryAttempt(settled);
       }
-      if (entry.claimId) await this.deps.queue.rollbackProcessingDurable(threadId, entry.id, entry.claimId);
-      return null;
+      const restored =
+        entry.claimId && (await this.deps.queue.rollbackProcessingDurable(threadId, entry.id, entry.claimId));
+      return restored && selectedTargetCats.some((target) => automaticAdmission.stoppedTargets.has(target))
+        ? { started: false, progressed: true }
+        : null;
     }
 
     if (
@@ -4541,6 +4582,12 @@ export class QueueProcessor {
       ))
     ) {
       this.emitContinuationDiagnostic(threadId, entryCat, 'start_rejected', 0, entry.id);
+      if (
+        selectedTargetCats.some((target) => automaticAdmission.stoppedTargets.has(target)) &&
+        this.deps.queue.getEntrySnapshotAcrossUsers(threadId, entry.id)?.status === 'queued'
+      ) {
+        return { started: false, progressed: true };
+      }
       return selectedTargetCats.some((target) => !this.isSlotAdmissible(threadId, target, entry))
         ? null
         : { started: false };
@@ -5170,14 +5217,28 @@ export class QueueProcessor {
         prestartAdmissionDeferred = true;
         prestartClaimRestored = true;
         // Leave the queued record and every one-shot/owner consumer untouched.
-        // Its known claim fences the same targets while independent work scans.
-        // Even a rejected independent read must not skip this exact cleanup.
+        // Restore/release only this claimant, then continue the same revoked
+        // scan: untouched siblings may run, the stopped members may not. Real
+        // enqueue/handoff wakes still begin a fresh scan and take precedence.
         if (stillOwnsPrimaryReservation) {
           try {
-            await this.requestDrain(threadId);
-          } finally {
             if (!entry.claimId || !(await queue.rollbackProcessingDurable(threadId, entry.id, entry.claimId))) {
               throw new Error('unstarted admission could not restore its exact Queue claim');
+            }
+          } finally {
+            if (
+              processingReservation &&
+              this.releaseProcessingSlot(QueueProcessor.slotKey(threadId, primaryCat), processingReservation)
+            ) {
+              const remainingStops = automaticAdmission.continuationStoppedTargets;
+              await this.requestDrain(threadId, {
+                continuationAdmission: {
+                  stoppedTargets: new Set(remainingStops),
+                  continuationStoppedTargets: new Set(remainingStops),
+                },
+              }).catch((error: unknown) => {
+                log.warn({ err: error, threadId, entryId: entry.id }, 'Unstarted admission continuation scan failed');
+              });
             }
           }
         } else processingReservationReplaced = true;
