@@ -45,12 +45,15 @@ New feature:
 
 ## New Section Checklist
 
-1. Add an entry to `settings-nav-config.ts`.
-2. Add keywords in `SettingsNav.tsx`.
-3. Add a `SettingsContent.tsx` switch case.
-4. Put the section component under `components/settings/`.
-5. If the view is an ops subtab, add it to `ops-nav-config.ts`.
-6. Add focused tests for routing, isolation from sibling sections, and existing write-path invariants.
+A section is declared in the theme packages, gets its view model and actions from the app layer, and reaches the back end through the host. What each layer owns: [engine](../../packages/web/public/pdl/engine/README.md), [library](../../packages/web/public/pdl/library/README.md), [platform](../../packages/web/public/pdl/platform/README.md), [themes](../../packages/web/public/pdl/themes/README.md).
+
+1. Add the entry to the `nav.settings` slot (`pdl.slots`) in `packages/web/public/pdl/themes/default/theme.yaml`: `id`, `title` (a `t:` copy key), `icon` (a name in `packages/web/public/pdl/library/icons.js`) and `open: { page: <id> }`. Detail pages opened from the section go in its `also` list, so the section stays selected.
+2. Declare the page as the view `page.<id>` (`pdl.views`) in the same file: `vm`, `page: true` and `blocks` built from library components. An L3 view goes into the page of the section it belongs to, not into a new entry.
+3. Put each `t:` key in `packages/web/public/pdl/themes/<theme>/i18n/zh/*.json` and the same key in `i18n/en/` (a missing key falls back to zh).
+4. The v2 theme lists the settings entries in groups: add the id to the group lists next to each `slot: nav.settings` in `packages/web/public/pdl/themes/v2/theme.yaml`. If v2 draws the page with its own components (`themes/v2/components/`), declare its `page.<id>` there too.
+5. In `packages/web/public/pdl-app/`, register `PAGES.<id>` (returning `pdlView('page.<id>')`), the view model `VM.<name>` named by `vm`, which shapes back-end data into the blocks' item format, and `A.<name>` for the page's own actions (`act`). Read and write through the `api` facade (`api.get` / `api.post` with back-end paths); the view model marks its source as needed (`projectionNeeded`) and the read runs on `sources:needed`, not on mount.
+6. Host code in `packages/web/src/pdl` is only for what the app cannot do through `api`: host-held data in a `use*Bindings.ts` hook wired in `ProjectDataBinding.tsx`, and host-side writes in `settings-actions.ts`, which the app calls with `chatPort.action(name, args)` and `PdlAppHost.tsx` dispatches by name.
+7. Add focused tests in `packages/web/src/pdl/__tests__/` for routing, isolation from sibling sections, and existing write-path invariants. Run `pnpm --filter @cat-cafe/web test:smoke` (all of `src/pdl`) while working and `pnpm --filter @cat-cafe/web test` (unit, smoke and guards) before review, and check the page in both built-in themes.
 
 ## Deferred High-Risk Areas
 
