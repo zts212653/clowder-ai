@@ -303,6 +303,8 @@ interface TrackerLike {
 
 interface QueueExecutionResult {
   status: InvocationFinalStatus;
+  /** Rejected before tracker handoff: its record is not a new completion authority. */
+  automaticAdmissionCanceled?: true;
   invocationId?: string;
   /** Queue rows actually reserved into this attempt, including F175 batch siblings. */
   attemptedQueueEntryIds: string[];
@@ -1972,9 +1974,16 @@ export class QueueProcessor {
     primaryCat: string,
     reservation: ProcessingSlotReservation,
     invocationId: string,
+    automaticEntry?: QueueEntry,
   ): boolean {
     if (!this.ownsProcessingSlotInvocation(QueueProcessor.slotKey(threadId, primaryCat), reservation, invocationId)) {
       return false;
+    }
+
+    if (automaticEntry) {
+      return targetCats.every((catId) =>
+        this.isSlotAdmissible(threadId, catId, automaticEntry, catId === primaryCat ? reservation : undefined),
+      );
     }
 
     for (const catId of new Set(targetCats)) {
@@ -3296,6 +3305,7 @@ export class QueueProcessor {
       suppressAutomaticDrain?: boolean;
       attemptedQueueEntryIds?: readonly string[];
       suppressAutomaticFollowUp?: boolean;
+      suppressCompletionResume?: boolean;
       terminalInvocationIdByCatId?: Readonly<Record<string, string>>;
     } = {},
   ): Promise<void> {
@@ -3321,7 +3331,9 @@ export class QueueProcessor {
     } else {
       for (const entryId of attemptedQueueEntryIds) this.retryDeferrals.forget(entryId);
     }
-    const bypassSuppressionEpoch = this.autoResumeSuppressionEpochForDifferentExecution(sk, invocationId);
+    const bypassSuppressionEpoch = options.suppressCompletionResume
+      ? undefined
+      : this.autoResumeSuppressionEpochForDifferentExecution(sk, invocationId);
     if (
       this.hasDispatchableQueuedForThread(threadId) ||
       (bypassSuppressionEpoch !== undefined &&
@@ -3937,6 +3949,7 @@ export class QueueProcessor {
     claimedBatchMembers: readonly QueueEntry[] = [],
     reportAdmission?: (admitted: boolean) => void,
     routingOwnerRetryTarget?: string,
+    automaticAdmission = false,
   ): Promise<boolean> {
     const attemptedQueueEntryIds = [entry.id, ...claimedBatchMembers.map((candidate) => candidate.id)];
     const taskSourceId = entry.execution.a2aTriggerMessageId ?? entry.payload.messageId;
@@ -3968,6 +3981,13 @@ export class QueueProcessor {
       )
     ) {
       await this.deps.queue.restoreClaimedEntries(entry.threadId, attemptedQueueEntryIds);
+      return false;
+    }
+    if (
+      automaticAdmission &&
+      (executionTargetCats ?? entry.targets).some((target) => !this.isSlotAdmissible(entry.threadId, target, entry))
+    ) {
+      if (entry.claimId) await this.deps.queue.rollbackProcessingDurable(entry.threadId, entry.id, entry.claimId);
       return false;
     }
     const reservation = this.reserveProcessingSlot(slotKey, entry.id, queueEntryOwnerId(entry));
@@ -4003,6 +4023,7 @@ export class QueueProcessor {
       liveCall,
       reportAdmission,
       routingOwnerRetryTarget,
+      automaticAdmission,
     ).then(
       (result) => {
         reportAdmission?.(false);
@@ -4016,7 +4037,8 @@ export class QueueProcessor {
           return;
         }
         void this.onInvocationComplete(entry.threadId, catId, result.status, result.invocationId, [], {
-          suppressAutomaticDrain: result.primarySettlementIncomplete,
+          suppressAutomaticDrain: result.primarySettlementIncomplete && !result.automaticAdmissionCanceled,
+          suppressCompletionResume: result.automaticAdmissionCanceled,
           attemptedQueueEntryIds: result.attemptedQueueEntryIds,
           suppressAutomaticFollowUp,
           terminalInvocationIdByCatId: result.terminalInvocationIdByCatId,
@@ -4354,7 +4376,12 @@ export class QueueProcessor {
   }
 
   /** A slot may take new work: no execution holds it and no cancel fence suppresses it. */
-  private isSlotAdmissible(threadId: string, catId: string, entry?: QueueEntry): boolean {
+  private isSlotAdmissible(
+    threadId: string,
+    catId: string,
+    entry?: QueueEntry,
+    ownedReservation?: ProcessingSlotReservation,
+  ): boolean {
     const slotKey = QueueProcessor.slotKey(threadId, catId);
     const remainingMs = this.autoResumeSuppressionRemainingMs(slotKey);
     const suppression = remainingMs > 0 ? this.suppressedAutoResume.get(slotKey) : undefined;
@@ -4362,9 +4389,10 @@ export class QueueProcessor {
       entry !== undefined &&
       this.isCompletionResumeSource(entry, catId) &&
       suppression?.resumableEntryIds?.has(entry.id) === true;
+    const reservation = this.processingSlots.get(slotKey);
     return (
       (bypassesExactSuppression || remainingMs === 0) &&
-      !this.processingSlots.has(slotKey) &&
+      (!reservation || reservation === ownedReservation) &&
       !this.pendingPrivateInputStops.has(slotKey) &&
       !this.automaticAppendSlots.has(slotKey) &&
       !this.deps.invocationTracker.has(threadId, catId)
@@ -4456,12 +4484,12 @@ export class QueueProcessor {
     const entryCat = selectedTargetCats[0]!;
     const entrySk = QueueProcessor.slotKey(threadId, entryCat);
 
-    if (this.processingSlots.has(entrySk) || this.deps.invocationTracker.has(threadId, entryCat)) {
+    if (selectedTargetCats.some((target) => !this.isSlotAdmissible(threadId, target, entry))) {
       if (entry.execution.liveSessionId) {
         const settled = await this.terminalizeUnavailableConversationEntry(entry, 'explicit', true);
         return QueueProcessor.terminalizedEntryAttempt(settled);
       }
-      await this.deps.queue.rollbackProcessingDurable(threadId, entry.id);
+      if (entry.claimId) await this.deps.queue.rollbackProcessingDurable(threadId, entry.id, entry.claimId);
       return null;
     }
 
@@ -4474,10 +4502,15 @@ export class QueueProcessor {
         false,
         admission.conversationBatchResolution,
         [],
+        undefined,
+        undefined,
+        true,
       ))
     ) {
       this.emitContinuationDiagnostic(threadId, entryCat, 'start_rejected', 0, entry.id);
-      return { started: false };
+      return selectedTargetCats.some((target) => !this.isSlotAdmissible(threadId, target, entry))
+        ? null
+        : { started: false };
     }
 
     return { started: true, entry };
@@ -4838,6 +4871,7 @@ export class QueueProcessor {
     liveCall?: import('../../../../concierge/live/LiveCompanionCall.js').LiveCompanionCall,
     reportAdmission?: (admitted: boolean) => void,
     routingOwnerRetryTarget?: string,
+    automaticAdmission = false,
   ): Promise<QueueExecutionResult> {
     const { queue, invocationTracker, invocationRecordStore, router, socketManager, messageStore, log } = this.deps;
     const selectedTargets = executionTargetCats ?? queueEntryTargetCats(entry);
@@ -4936,6 +4970,7 @@ export class QueueProcessor {
     let finalStatus: InvocationFinalStatus = 'failed';
     let replayClaimLost = false;
     let processingReservationReplaced = false;
+    let automaticAdmissionCanceled = false;
     let prestartClaimRestored = false;
     let lifecycleTransferStarted = false;
     let lifecycleReceiverPersisted = false;
@@ -5042,6 +5077,7 @@ export class QueueProcessor {
       // body as the receipt witness.
       const result: QueueExecutionResult = {
         status,
+        ...(automaticAdmissionCanceled ? { automaticAdmissionCanceled: true } : {}),
         ...(invocationId ? { invocationId } : {}),
         attemptedQueueEntryIds: [entry.id, ...batchedEntryIds],
         terminalInvocationIdByCatId,
@@ -5087,6 +5123,7 @@ export class QueueProcessor {
     };
     const cancelPrestartTargetSetConflict = async (message: string): Promise<QueueExecutionResult> => {
       if (!invocationId) throw new Error('pre-start target-set conflict requires an invocation record');
+      automaticAdmissionCanceled = automaticAdmission;
       finalStatus = 'canceled';
       const stillOwnsPrimaryReservation = Boolean(
         processingReservation &&
@@ -5105,7 +5142,13 @@ export class QueueProcessor {
           });
           return executionResult('canceled');
         }
-        if (!(await queue.restoreClaimedEntries(threadId, [entry.id, ...batchedEntryIds]))) {
+        // The unstarted source remains with its exact claimant even if restore fails or loses its receipt.
+        // Finally must not turn that uncertain restoration into terminal consumption.
+        if (automaticAdmission) prestartClaimRestored = true;
+        const restored = automaticAdmission
+          ? !!entry.claimId && (await queue.rollbackProcessingDurable(threadId, entry.id, entry.claimId))
+          : await queue.restoreClaimedEntries(threadId, [entry.id, ...batchedEntryIds]);
+        if (!restored) {
           throw new Error('pre-start target-set conflict could not restore the exact Queue claim');
         }
         prestartClaimRestored = true;
@@ -5454,7 +5497,14 @@ export class QueueProcessor {
       // processing reservation after waiting for the guard to release.
       if (
         processingReservation &&
-        !this.canStartReservedTargetSet(threadId, targetCats, primaryCat, processingReservation, invocationId)
+        !this.canStartReservedTargetSet(
+          threadId,
+          targetCats,
+          primaryCat,
+          processingReservation,
+          invocationId,
+          automaticAdmission ? entry : undefined,
+        )
       ) {
         return cancelPrestartTargetSetConflict(
           '[QueueProcessor] canceled pre-start execution after its target-set fence changed',
@@ -5471,7 +5521,14 @@ export class QueueProcessor {
         await invocationTracker.waitForSessionSealRelease(threadId, targetCats);
         if (
           processingReservation &&
-          !this.canStartReservedTargetSet(threadId, targetCats, primaryCat, processingReservation, invocationId)
+          !this.canStartReservedTargetSet(
+            threadId,
+            targetCats,
+            primaryCat,
+            processingReservation,
+            invocationId,
+            automaticAdmission ? entry : undefined,
+          )
         ) {
           return cancelPrestartTargetSetConflict(
             '[QueueProcessor] canceled parked execution after its target-set fence changed',
