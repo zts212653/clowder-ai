@@ -8,9 +8,9 @@ import type {
   MicroduckProposalResolver,
   MicroduckShowMediaAsset,
   MicroduckShowMediaDescriptor,
-} from './microduck-owner-contract.js';
-import { microduckShowMediaSchema, microduckShowStateSchema } from './microduck-owner-schemas.js';
-import { blocked, microduckScope, ownerRef, parsedOwnerResponse, sameRef } from './microduck-owner-validation.js';
+} from '../microduck-owner-contract.js';
+import { microduckShowMediaSchema, microduckShowStateSchema } from '../microduck-owner-schemas.js';
+import { blocked, microduckScope, ownerRef, parsedOwnerResponse, sameRef } from '../microduck-owner-validation.js';
 import {
   canonicalMicroduckShowTruthMatches,
   validMicroduckObservationMedia,
