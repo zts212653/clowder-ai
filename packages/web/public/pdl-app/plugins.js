@@ -1074,6 +1074,8 @@ function bindPluginRequests() {
       settleHold(read(k));
     });
   });
+  // The last value read for each source (plugin / source name).
+  const last = {};
   VM.plugin = function (pk, sources, input) {
     const out = { state: S.plug[pk] || {}, load: '', pending: !!pending[pk] };
     Object.keys(sources).forEach(function (k) {
@@ -1093,9 +1095,13 @@ function bindPluginRequests() {
       const key = 'plugin:' + pk + '/' + k + (Object.keys(row).length ? '|' + JSON.stringify(row) : '');
       if (!held[key]) held[key] = { plugin: pk, request: name, input: input };
       if (projectionNeeded) projectionNeeded.add(key);
-      const s = projectData(key);
-      out[k] = s && s.value;
-      if (!s || s.load) out.load = s ? s.load : 'loading';
+      const s = projectData(key),
+        src = pk + '/' + k;
+      if (s && s.value !== undefined) last[src] = s.value;
+      // A source whose parameters changed (a new key) is read again: it keeps drawing its last value until the new
+      // read returns, so the view is not swapped for its loading state; only a source never read is loading.
+      out[k] = s && s.value !== undefined ? s.value : last[src];
+      if ((s && s.load === 'error') || ((!s || s.load) && last[src] === undefined)) out.load = s ? s.load : 'loading';
     });
     return out;
   };
