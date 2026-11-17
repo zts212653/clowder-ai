@@ -114,6 +114,7 @@ function recallGroups(events, data) {
         Object.assign(recallResultVM(event), {
           key: event.id,
           title: event.query,
+          matter: recallMatterVM(event.matterRead),
           source: event.source,
           tool: event.toolName,
           graph: event.toolName === 'cat_cafe_graph_resolve',
@@ -131,6 +132,19 @@ function recallGroups(events, data) {
   return Array.from(groups.values()).sort(function (a, b) {
     return b.at - a.at;
   });
+}
+// A matter a member read on purpose: how many summaries and excerpts it read; a page changed or gone since says so.
+function recallMatterVM(r) {
+  if (!r) return null;
+  if (r.status !== 'current')
+    return { kind: r.status === 'changed' ? 'changed' : 'gone', id: r.status === 'changed' ? r.matterId : '' };
+  return {
+    kind: r.summaryCount ? (r.messageCount ? 'both' : 'summaries') : 'messages',
+    title: r.title,
+    summaries: r.summaryCount || 0,
+    excerpts: r.messageCount,
+    id: r.matterId,
+  };
 }
 function fileTree(nodes, out = {}, parent = '') {
   out[parent] = nodes.map((node) => ({

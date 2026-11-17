@@ -728,6 +728,70 @@ it('loads the selected reply through event cursors without discarding other repl
   expect(apiFetch).toHaveBeenCalledTimes(2);
 });
 
+it("reads a matter the member read on purpose from that invocation's cues", async () => {
+  vi.mocked(apiFetch).mockClear();
+  const data = fixtureData();
+  const state = { recallFor: '', recallExpected: 0 };
+  vi.mocked(apiFetch).mockImplementation(async (path) => {
+    const url = new URL(String(path), 'https://api.test');
+    if (url.pathname.endsWith('/memory-cues')) {
+      expect(JSON.parse(url.searchParams.get('invocationIds')!)).toEqual(['inv-matter']);
+      return response({
+        invocations: [
+          {
+            invocationId: 'inv-matter',
+            status: 200,
+            cues: [
+              {
+                cueId: 'cue-1',
+                matterRead: { status: 'current', matterId: 'm1', title: '发布约定', messageCount: 1, summaryCount: 2 },
+              },
+            ],
+          },
+        ],
+      });
+    }
+    return response({
+      days: 0,
+      from: 0,
+      to: 100,
+      readStatus: 'ready',
+      records: [
+        {
+          threadId: data.threadId,
+          threadTitle: 'Thread',
+          event: {
+            id: 'matter-cue',
+            invocationId: 'inv-matter',
+            cueId: 'cue-1',
+            resolverFamily: 'matter',
+            source: 'pull',
+            cueStatus: 'drilled',
+            query: '',
+            catId: 'codex',
+            timestamp: 5,
+            results: [{ title: '', anchor: 'm1', sourceType: 'matter' }],
+          },
+        },
+      ],
+      replies: [],
+      nextCursor: null,
+    });
+  });
+  const hook = renderHook(() =>
+    useOwnerProjection('recall', useRecallBindings(data, state, true), { data, ws: state }),
+  );
+  await waitFor(() =>
+    expect(hook.result.current.project().cafeWsRecall.groups[0]?.items[0].matter).toEqual({
+      kind: 'both',
+      title: '发布约定',
+      summaries: 2,
+      excerpts: 1,
+      id: 'm1',
+    }),
+  );
+});
+
 it.each([
   'error',
   'timeout',

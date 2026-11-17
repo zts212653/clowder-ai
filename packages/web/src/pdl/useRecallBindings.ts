@@ -1,5 +1,5 @@
 'use client';
-import { RECALL_DISPLAY_DOC_KINDS } from '@cat-cafe/shared';
+import { type MatterReadSummary, RECALL_DISPLAY_DOC_KINDS } from '@cat-cafe/shared';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { MemoryRecallPageData } from '@/components/memory/page/recall-page-types';
 import { recallResultHref } from '@/hooks/recall-display';
@@ -59,6 +59,39 @@ export function useRecallBindings(
     };
   }, [needed, path, attempt]);
   const page = read.threadId === data.threadId ? read.page : null;
+  // A matter a member read on purpose: its summary (title, how many summaries / excerpts) lives on the invocation's
+  // cues, not on the recall page. Read those invocations once per page; the line falls back to the plain cue row.
+  const [matterReads, setMatterReads] = useState<Record<string, MatterReadSummary>>({});
+  const matterInvocations = [
+    ...new Set(
+      (page?.records ?? [])
+        .map((record) => record.event)
+        .filter((event) => event.resolverFamily === 'matter' && event.invocationId)
+        .map((event) => event.invocationId!),
+    ),
+  ];
+  const matterKey = JSON.stringify([data.threadId, matterInvocations]);
+  useEffect(() => {
+    if (!matterInvocations.length) return;
+    const abort = new AbortController();
+    void request<{
+      invocations?: { invocationId: string; cues?: { cueId: string; matterRead?: MatterReadSummary }[] }[];
+    }>(
+      `/api/threads/${encodeURIComponent(data.threadId)}/memory-cues?invocationIds=${encodeURIComponent(JSON.stringify(matterInvocations.slice(0, 100)))}`,
+      { signal: abort.signal },
+    ).then(
+      (body) => {
+        if (abort.signal.aborted) return;
+        const reads: Record<string, MatterReadSummary> = {};
+        for (const row of body.invocations ?? [])
+          for (const cue of row.cues ?? [])
+            if (cue.matterRead) reads[`${row.invocationId}:${cue.cueId}`] = cue.matterRead;
+        setMatterReads(reads);
+      },
+      () => {},
+    );
+    return () => abort.abort();
+  }, [matterKey]);
   const more = async () => {
     if (!page?.nextCursor) return;
     const threadId = data.threadId,
@@ -98,10 +131,16 @@ export function useRecallBindings(
         .map(recallReplyMessage)
         .filter((reply) => !data.messages.some((message) => message.id === reply.id)),
     ];
-    const events = deduplicateRecallEvents(live, page?.records.map((record) => record.event) ?? []);
+    const events = deduplicateRecallEvents(
+      live,
+      page?.records.map((record) => {
+        const matterRead = matterReads[`${record.event.invocationId}:${record.event.cueId}`];
+        return matterRead ? { ...record.event, matterRead } : record.event;
+      }) ?? [],
+    );
 
     return { events, replies };
-  }, [data.messages, page]);
+  }, [data.messages, page, matterReads]);
   useEffect(() => {
     if (!ui.recallFor || !page?.nextCursor || read.load) return;
     const target = data.messages.find((message) => message.id === ui.recallFor);
