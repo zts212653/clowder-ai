@@ -1,4 +1,6 @@
 import { createHash } from 'node:crypto';
+import { nativeClaudeQuotaSourceKnown } from '../../../../../config/claude-quota-source.js';
+import { observeClaudeQuotaMessage } from '../../../../../config/claude-quota-store.js';
 import { redactClaudeLaunchToken } from '../../../../../config/claude-token-account.js';
 import type {
   ContextSourceAdmission,
@@ -21,14 +23,7 @@ import {
 } from './native-auth-continuation.js';
 import { isContinuationMessage } from './restart-continuation/RestartContinuation.js';
 import { protectNativeProviderResult } from './secret-provider-result.js';
-import {
-  HOST_SLEEP_ERROR_CODE,
-  HOST_SLEEP_ERROR_NOTE,
-  HOST_SLEEP_REPEAT_ERROR_CODE,
-  HOST_SLEEP_REPEAT_ERROR_NOTE,
-  HOST_SLEEP_REPEAT_TERMINAL_REASON,
-  HOST_SLEEP_TERMINAL_REASON,
-} from './stop-reason-wording.js';
+import { HOST_CUT, HOST_SLEEP_TERMINAL_REASON, type HostCutKind } from './stop-reason-wording.js';
 /**
  * Single Cat Invocation
  * 单猫调用的核心逻辑，从 AgentRouter 提取。
@@ -1174,6 +1169,8 @@ export interface InvocationDeps {
     readonly readEvidence: import('./host-sleep/HostSleepEvidence.js').HostSleepEvidenceReader;
     readonly scheduleContinuation: (input: { readonly invocationId: string; readonly sleptAt: number }) => void;
   };
+  /** F337: true once the runtime's own stop began; turns ending after it are continued after the restart. */
+  readonly isRuntimeShuttingDown?: () => boolean;
   /** Scheduler system delivery used to wake a cat whose reply waited for an absent owner without a mention. */
   readonly ownerAskCorrectionDeliver?: (
     opts: import('../../../../../infrastructure/scheduler/types.js').DeliverOpts,
@@ -1898,45 +1895,70 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
   let turnExecutionCompletedSuccessfully = false;
   let routingDispatchFailureClass: RoutingDispatchFailureClass | undefined;
   let routingFailureObservedAt: number | undefined;
-  // F337: read once, at the first provider failure; null = no sleep evidence (or none readable).
-  let hostSleepInterruption: import('./host-sleep/HostSleepEvidence.js').SleepInterruption | null | undefined;
+  // F337: whether the host, not the provider, cut this turn off: the runtime's own stop (it kills provider
+  // children before the API exits) or a machine sleep. Read once, at the first failure; null = the
+  // provider's own failure, or no readable evidence.
+  type HostCut = { readonly kind: HostCutKind; readonly sleptAt?: number };
+  let hostCut: HostCut | null | undefined;
   // A turn that was itself a continuation is not woken again (loop guard), so it must not promise to be.
-  let hostSleepRepeat = false;
-  const noteProviderFailure = async (out: AgentMessage): Promise<void> => {
-    if (hostSleepInterruption === undefined) {
-      hostSleepInterruption = null;
-      if (deps.hostSleep) {
-        const failedAt = Date.now();
-        try {
-          const evidence = await deps.hostSleep.readEvidence({ from: executionStartedAt, to: failedAt });
-          hostSleepInterruption = findSleepInterruption(evidence, { turnStartedAt: executionStartedAt, failedAt });
-        } catch {
-          hostSleepInterruption = null;
-        }
-      }
-      const triggerMessageId = params.executionCausal?.triggerMessageId ?? params.a2aTriggerMessageId;
-      if (hostSleepInterruption && triggerMessageId) {
-        try {
-          hostSleepRepeat = isContinuationMessage(await deps.messageStore?.getById(triggerMessageId));
-        } catch {
-          // Unknown trigger: do not promise a wake the loop guard may refuse.
-          hostSleepRepeat = true;
-        }
+  let hostCutRepeat = false;
+  const resolveHostCut = async (): Promise<HostCut | null> => {
+    if (hostCut !== undefined) return hostCut;
+    hostCut = null;
+    if (deps.isRuntimeShuttingDown?.()) {
+      hostCut = { kind: 'restart_shutdown' };
+    } else if (deps.hostSleep) {
+      const failedAt = Date.now();
+      try {
+        const evidence = await deps.hostSleep.readEvidence({ from: executionStartedAt, to: failedAt });
+        const sleep = findSleepInterruption(evidence, { turnStartedAt: executionStartedAt, failedAt });
+        if (sleep) hostCut = { kind: 'host_sleep', sleptAt: sleep.sleptAt };
+      } catch {
+        hostCut = null;
       }
     }
-    if (!hostSleepInterruption) {
+    const triggerMessageId = params.executionCausal?.triggerMessageId ?? params.a2aTriggerMessageId;
+    if (hostCut && triggerMessageId) {
+      try {
+        hostCutRepeat = isContinuationMessage(await deps.messageStore?.getById(triggerMessageId));
+      } catch {
+        // Unknown trigger: do not promise a wake the loop guard may refuse.
+        hostCutRepeat = true;
+      }
+    }
+    return hostCut;
+  };
+  /** The host cut the turn off, the provider did not fail: no availability penalty. */
+  const clearDispatchFailure = (): void => {
+    routingDispatchFailureClass = undefined;
+    routingFailureObservedAt = undefined;
+  };
+  /**
+   * At a stop that is not a provider error event (an exception, a consumer that stopped reading): once
+   * the runtime's stop began, it is that cut. A cut seen earlier in the turn stands.
+   */
+  const cutAtStop = async (): Promise<(typeof HOST_CUT)[HostCutKind] | undefined> => {
+    const resolved = hostCut === undefined && deps.isRuntimeShuttingDown?.() ? await resolveHostCut() : hostCut;
+    if (!resolved) return undefined;
+    const cut = HOST_CUT[resolved.kind];
+    turnExecutionFailureReason = hostCutRepeat ? cut.repeatTerminalReason : cut.terminalReason;
+    clearDispatchFailure();
+    return cut;
+  };
+  const noteProviderFailure = async (out: AgentMessage): Promise<void> => {
+    const resolved = await resolveHostCut();
+    if (!resolved) {
       turnExecutionFailureReason ??= 'provider_execution_failed';
       return;
     }
-    // The machine slept, the provider did not fail: no availability penalty, and say so in the reply
-    // the owner and the waiting caller read.
-    turnExecutionFailureReason ??= hostSleepRepeat ? HOST_SLEEP_REPEAT_TERMINAL_REASON : HOST_SLEEP_TERMINAL_REASON;
-    routingDispatchFailureClass = undefined;
-    routingFailureObservedAt = undefined;
-    const note = hostSleepRepeat ? HOST_SLEEP_REPEAT_ERROR_NOTE : HOST_SLEEP_ERROR_NOTE;
+    const cut = HOST_CUT[resolved.kind];
+    turnExecutionFailureReason ??= hostCutRepeat ? cut.repeatTerminalReason : cut.terminalReason;
+    clearDispatchFailure();
+    // Say so in the reply the owner and the waiting caller read; the response reason comes from
+    // `done.errorCode`, so carry the cut there for receipts too.
+    const note = hostCutRepeat ? cut.repeatNote : cut.note;
     if (out.type === 'error') out.error = `${out.error ?? ''}${note}`.trim();
-    // The response reason comes from `done.errorCode`; carry the sleep there so receipts can say so.
-    if (out.type === 'done') out.errorCode = hostSleepRepeat ? HOST_SLEEP_REPEAT_ERROR_CODE : HOST_SLEEP_ERROR_CODE;
+    if (out.type === 'done') out.errorCode = hostCutRepeat ? cut.repeatErrorCode : cut.errorCode;
   };
   // F153: Record cat invocation count with trigger type
   const triggerType = params.a2aTriggerMessageId ? 'mention' : params.parentInvocationId ? 'routing' : 'default';
@@ -2030,7 +2052,9 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
     invocationPromptAdditions.length = 0;
     if (isScopedMember) return;
     if (deps.matterMemoryService && params.ownerAuthProvenance === 'strict') {
-      invocationPromptAdditions.push(await matterOpeningDirectory(deps.matterMemoryService, userId, catId, threadId));
+      invocationPromptAdditions.push(
+        await matterOpeningDirectory(deps.matterMemoryService, userId, catId, threadId, { invocationId }),
+      );
     }
     if (deps.runtimeInteractionPort && params.ownerAuthProvenance === 'strict') {
       try {
@@ -4374,6 +4398,21 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
             ...(msg.metadata.usage ? { usage: { ...msg.metadata.usage, executionAccount } } : {}),
           },
         };
+      if (provider === 'anthropic')
+        observeClaudeQuotaMessage(
+          frozenExecutionBinding.projectRoot,
+          executionAccount,
+          msg.metadata?.model ?? catConfig?.defaultModel ?? '',
+          msg,
+          resolvedAccount?.claude
+            ? undefined
+            : () =>
+                nativeClaudeQuotaSourceKnown(
+                  frozenExecutionBinding.workspace.workingProjectRoot ?? frozenExecutionBinding.projectRoot,
+                  catConfig?.cliConfigArgs ?? [],
+                  accountEnv,
+                ),
+        );
       const outputs: AgentMessage[] = [];
 
       // clowder#915 (cloud P1): F8/F24 usage + context_health block extracted so
@@ -5582,7 +5621,7 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
       if (!sourceMsg) return;
       const messageObservedAt = Date.now();
       for (const out of await processMessage(sourceMsg)) {
-        if (!hostSleepInterruption)
+        if (!hostCut)
           routingDispatchFailureClass ??= classifyRoutingDispatchFailure({
             ...(out.metadata?.cliDiagnostics?.reasonCode
               ? { cliReasonCode: out.metadata.cliDiagnostics.reasonCode }
@@ -5620,11 +5659,8 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
         }
         if (out.type === 'done') {
           if (hadError && out.errorCode === undefined) {
-            out.errorCode = hostSleepInterruption
-              ? hostSleepRepeat
-                ? HOST_SLEEP_REPEAT_ERROR_CODE
-                : HOST_SLEEP_ERROR_CODE
-              : 'PROVIDER_EXECUTION_FAILED';
+            const cut = hostCut ? HOST_CUT[hostCut.kind] : undefined;
+            out.errorCode = cut ? (hostCutRepeat ? cut.repeatErrorCode : cut.errorCode) : 'PROVIDER_EXECUTION_FAILED';
           }
           await finalizeTaskProgress();
           if (!out.tracing) {
@@ -6857,7 +6893,28 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
       turnExecutionFailureReason === undefined &&
       signal?.aborted !== true
     ) {
-      turnExecutionInterruptionReason = 'provider_ended_without_terminal_done';
+      if (deps.isRuntimeShuttingDown?.()) {
+        // F337: a provider the runtime's stop took down may just close its stream. End the turn the way
+        // its own failure would, so the reply and the caller's receipt say why (the same pipeline decides).
+        for await (const out of streamProcessedOutputs({
+          type: 'error' as const,
+          catId,
+          error: 'provider 在 runtime 停服时退出了',
+          timestamp: Date.now(),
+        })) {
+          yield out;
+        }
+        for await (const out of streamProcessedOutputs({
+          type: 'done' as const,
+          catId,
+          isFinal: isLastCat,
+          timestamp: Date.now(),
+        })) {
+          yield out;
+        }
+      } else {
+        turnExecutionInterruptionReason = 'provider_ended_without_terminal_done';
+      }
     }
     didComplete = true; // F118 AC-C5: Normal completion reached
   } catch (err) {
@@ -6898,6 +6955,9 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
 
     hadError = true;
     turnExecutionFailureReason ??= 'invocation_exception';
+    // F337: an exception once the runtime's stop began (or after a cut seen earlier) is that cut; the
+    // reply and the receipt carry it. A user stop or timeout stays what it is.
+    const cut = signal.aborted ? undefined : await cutAtStop();
     didWriteAudit = true; // F118 AC-C5: Catch block wrote audit, don't double-write in finally
     if (err instanceof SessionRolloverCommitError) {
       for (const lifecycleMessage of err.lifecycleMessages) {
@@ -6907,7 +6967,7 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
     yield {
       type: 'error' as const,
       catId,
-      error: err instanceof Error ? err.message : String(err),
+      error: `${err instanceof Error ? err.message : String(err)}${cut ? (hostCutRepeat ? cut.repeatNote : cut.note) : ''}`,
       timestamp: Date.now(),
     };
     await finalizeTaskProgress();
@@ -6918,6 +6978,7 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
       catId,
       isFinal: isLastCat,
       timestamp: Date.now(),
+      ...(cut ? { errorCode: hostCutRepeat ? cut.repeatErrorCode : cut.errorCode } : {}),
       tracing: { traceId: sc.traceId, spanId: sc.spanId, ...(parentSid ? { parentSpanId: parentSid } : {}) },
     };
   } finally {
@@ -6950,18 +7011,22 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
         terminal = { status: 'failed', endedAt: Date.now(), terminalReason: MEMBER_TIMEOUT_REASON };
       } else if (callerSignal?.aborted || hadProviderCancellation) {
         terminal = { status: 'canceled', endedAt: Date.now(), terminalReason: 'user_cancel' };
-      } else if (turnExecutionFailureReason !== undefined || hadError) {
-        terminal = {
-          status: 'failed',
-          endedAt: Date.now(),
-          terminalReason: turnExecutionFailureReason ?? 'provider_execution_failed',
-        };
       } else {
-        terminal = {
-          status: 'interrupted',
-          endedAt: Date.now(),
-          terminalReason: turnExecutionInterruptionReason ?? 'generator_returned_without_completion',
-        };
+        // F337: the stream and exception paths already said why; this covers a consumer that stopped
+        // reading after the runtime's stop began, which has no reply left to carry it.
+        if (turnExecutionFailureReason === undefined && !hadError && hostCut === undefined) await cutAtStop();
+        terminal =
+          turnExecutionFailureReason !== undefined || hadError
+            ? {
+                status: 'failed',
+                endedAt: Date.now(),
+                terminalReason: turnExecutionFailureReason ?? 'provider_execution_failed',
+              }
+            : {
+                status: 'interrupted',
+                endedAt: Date.now(),
+                terminalReason: turnExecutionInterruptionReason ?? 'generator_returned_without_completion',
+              };
       }
       try {
         // #1838: a host exit is not a stopped tree. A provider in host jobs is torn down only once
@@ -6971,12 +7036,14 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
           await deps.turnExecutionStore.recordProviderTeardown?.(invocationId, terminal.endedAt);
         }
         const result = await deps.turnExecutionStore.transitionTerminal(invocationId, terminal);
+        // A restart's cut turns are owed in the store and continued by the next boot.
         if (
-          hostSleepInterruption &&
+          hostCut?.kind === 'host_sleep' &&
+          hostCut.sleptAt !== undefined &&
           result.record?.status === 'failed' &&
           result.record.terminalReason === HOST_SLEEP_TERMINAL_REASON
         ) {
-          deps.hostSleep?.scheduleContinuation({ invocationId, sleptAt: hostSleepInterruption.sleptAt });
+          deps.hostSleep?.scheduleContinuation({ invocationId, sleptAt: hostCut.sleptAt });
         }
         if (result.outcome === 'not_found' || result.record === null) {
           log.error({ invocationId, terminal }, 'Turn execution disappeared before terminal transition');

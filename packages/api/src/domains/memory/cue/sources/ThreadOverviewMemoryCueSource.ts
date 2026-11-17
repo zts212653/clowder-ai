@@ -107,7 +107,7 @@ export class ThreadOverviewMemoryCueSource implements MemoryCueResolver {
       payload: {
         ...overview,
         caution:
-          '概况是历史线索。当前约定核 canonical 文档；工作进度核当前 Task/PR；逐条来源可用 get_thread_context 回读。',
+          '概况是历史线索。当前约定核 canonical 文档；工作进度核当前 Task/PR；逐条来源将 sources 的完整 ReadRef 原样交给 read_memory 回读。',
       },
     };
   }

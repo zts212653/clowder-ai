@@ -90,7 +90,14 @@ describe('registered MCP transport secret protection', () => {
     const client = await clientFor('memory');
     const result = await client.callTool({ name: 'cat_cafe_search_evidence', arguments: { query: credential() } });
     assert.equal(result.isError, undefined);
-    assert.equal(calls.mock.callCount(), 1);
+    // F332 find: the same query reaches docs, messages, graph and the owner's matter directory, once each.
+    const paths = calls.mock.calls.map((call) => new URL(String(call.arguments[0])).pathname).sort();
+    assert.deepEqual(paths, [
+      '/api/callbacks/memory-matters',
+      '/api/callbacks/search-evidence',
+      '/api/evidence/search',
+      '/api/library/graph/resolve',
+    ]);
   });
 
   it('returns redacted history and posts a credential-free notice to the same authenticated invocation', async () => {

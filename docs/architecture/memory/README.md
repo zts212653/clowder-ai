@@ -40,6 +40,9 @@ description_updated_at: 2026-08-29T10:03:49Z
 
 # Memory Architecture Atlas｜记忆系统多视图图谱
 
+读侧现行合同：[Memory read entry](read-entry.md)（共同坐标、原 reader、权限、版本、出处与续读）。
+找侧现行合同：[Memory find entry](find-entry.md)（一个找入口、各组资格与收窄、组级状态、续查参数与共同预算；F1 已含文档组与事情组）。
+
 > **这是 Clowder AI 记忆系统的唯一导航入口：迷路回这里。**
 >
 > 本文不复制各 feature 的运行状态，也不取代任何合同。它只负责把同一个系统压缩成可讲述、

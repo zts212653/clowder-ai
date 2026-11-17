@@ -40,7 +40,7 @@ const SUPPORTED_TYPED_READERS = new Set([
   'cat_cafe_read_session_events',
   'cat_cafe_read_invocation_detail',
   'cat_cafe_read_file_slice',
-  'cat_cafe_graph_resolve',
+  'cat_cafe_search_evidence',
 ]);
 const COLLECTION_URI_PREFIX = 'cat-cafe://collection/';
 const LOCAL_PROJECT_COLLECTION_ID = 'project:cat-cafe';
@@ -102,6 +102,7 @@ function mapGraphResolution(result: GraphQueryResolution): PerspectiveGraphResol
     return {
       status: 'graph',
       anchor: result.resolvedAnchor,
+      readRef: result.graph.nodes.find((node) => !node.redacted && node.anchor === result.resolvedAnchor)?.readRef,
       drillDown: drillDownFromGraphAnchor(result.resolvedAnchor, result.resolvedSource, result.resolvedCollectionId),
     };
   }
@@ -111,6 +112,7 @@ function mapGraphResolution(result: GraphQueryResolution): PerspectiveGraphResol
       candidates: result.candidates.map((candidate) => ({
         anchor: candidate.anchor,
         title: candidate.title,
+        ...(candidate.readRef ? { readRef: candidate.readRef } : {}),
         drillDown: drillDownFromGraphAnchor(candidate.anchor, candidate.source, candidate.collectionId),
       })),
     };
@@ -127,10 +129,11 @@ function drillDownFromGraphAnchor(anchor: string, sourcePath?: string, collectio
       hint: `打开文件切片：read_file_slice(path="${filePath}", startLine=1, endLine=120)`,
     };
   }
+  // F332 F2: an anchor without a file path reopens through the find entry's graph group.
   return {
-    tool: 'cat_cafe_graph_resolve',
-    params: { query: anchor, depth: '1' },
-    hint: `查看图谱节点：graph_resolve(query="${anchor}", depth=1)`,
+    tool: 'cat_cafe_search_evidence',
+    params: { query: anchor, continueGroup: 'graph', graphDepth: '1' },
+    hint: `查看图谱节点：search_evidence(query="${anchor}", continueGroup="graph", graphDepth=1)`,
   };
 }
 
@@ -153,6 +156,14 @@ function sourcePathFromAnchor(anchor: string): string | undefined {
 }
 
 function defaultOpenAnchor(candidate: PerspectiveAnchorCandidate): Promise<PerspectiveOpenedAnchor> {
+  if (candidate.readRef)
+    return Promise.resolve({
+      anchor: candidate.anchor,
+      status: 'route_identified',
+      tool: 'cat_cafe_read_memory',
+      readRef: candidate.readRef,
+      content: 'Pass the complete readRef to cat_cafe_read_memory; this route has not read its source.',
+    });
   const drillDown = candidate.drillDown;
   if (!drillDown) {
     throw new Error(`Unsupported anchor type: ${candidate.anchor} has no drillDown hint`);

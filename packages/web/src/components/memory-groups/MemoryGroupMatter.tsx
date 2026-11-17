@@ -2,12 +2,13 @@
 import type { MatterPage } from '@cat-cafe/shared';
 import Link from 'next/link';
 import { useState } from 'react';
+import { MatterEntryContent, MatterSummaryAuthor } from '../memory/page/MatterEntryContent';
 import { MemoryMatterActions } from '../memory/page/MemoryMatterActions';
 import { useMemoryRead } from '../memory/page/use-memory-read';
 import { useShellCopy } from '../shell/shell-copy';
 import { memoryGroupCopy } from './memory-group.shell-copy';
 
-/** Read the original owner page, including current source permissions; never keep a second content snapshot. */
+/** Historical cards have no per-write receipt. Label their live owner-page preview honestly. */
 export function MemoryGroupMatter({ matterId, threadId }: { matterId: string; threadId?: string }) {
   const t = useShellCopy(memoryGroupCopy);
   const read = useMemoryRead<MatterPage>(`/api/memory/matters/${encodeURIComponent(matterId)}?limit=3`);
@@ -30,6 +31,7 @@ export function MemoryGroupMatter({ matterId, threadId }: { matterId: string; th
     );
   return (
     <article className="space-y-3 break-words text-sm">
+      <p className="text-xs text-cafe-muted">{t.legacyMatterReceipt}</p>
       <p className="text-xs text-cafe-muted">
         {t.kinds.matter} · {matter.status === 'retired' ? t.retired : t.saved}
       </p>
@@ -40,7 +42,9 @@ export function MemoryGroupMatter({ matterId, threadId }: { matterId: string; th
       </h4>
       {matter.description && (
         <div className="space-y-1">
-          <p className="text-xs text-cafe-muted">{t.catDescription}</p>
+          <p className="text-xs text-cafe-muted">
+            {t.catDescription} · <MatterSummaryAuthor author={matter.descriptionAuthor} />
+          </p>
           <p className="whitespace-pre-wrap leading-relaxed">{matter.description}</p>
         </div>
       )}
@@ -49,20 +53,7 @@ export function MemoryGroupMatter({ matterId, threadId }: { matterId: string; th
         <summary className="shell-focusable cursor-pointer">{t.sources}</summary>
         {read.data?.entries.map((entry) => (
           <div key={entry.entryId} className="space-y-1">
-            <p>
-              {entry.attribution === 'author' && entry.source.author.kind === 'user' ? t.yourWords : t.sourceMessage}
-            </p>
-            {entry.sourceStatus === 'current' ? (
-              <blockquote className="whitespace-pre-wrap text-sm">{entry.quote}</blockquote>
-            ) : (
-              <p>{t.sourceChanged}</p>
-            )}
-            <Link
-              href={`/thread/${encodeURIComponent(entry.source.threadId)}?message=${encodeURIComponent(entry.source.messageId)}`}
-              className="shell-focusable inline-block py-1 text-cafe-accent underline"
-            >
-              {t.viewSource}
-            </Link>
+            <MatterEntryContent entry={entry} />
           </div>
         ))}
       </details>

@@ -1,6 +1,6 @@
 import { realpathSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { ghOperation } from './lib/secret-gh-options.mjs';
+import { ghOperation, isGhObservation } from './lib/secret-gh-options.mjs';
 import { executedInvocations } from './lib/shell-invocation.mjs';
 import { leadingShellControl, nativeBuiltinContext } from './lib/shell-program-tokens.mjs';
 import { constrainedGhApiOperation, managedGhOperation } from './native-effect-github-classifier.mjs';
@@ -58,7 +58,12 @@ function contextualInvocations(parts, contexts, builtinContexts) {
           builtinContext: builtinContexts[index] && index === end,
         }).pipelines.flat(),
       )
-      .map((call) => ({ ...call, namespaceStable: builtinContexts[index] && index === end }));
+      .map((call) => ({
+        ...call,
+        namespaceStable: builtinContexts[index] && index === end,
+        // A nested script owns its namespace; the outer pipeline cannot prove it.
+        programNamespaceStable: builtinContexts[index] && call.parameterScope === 0,
+      }));
     return calls;
   });
 }
@@ -112,6 +117,18 @@ function unguardedSender(invocation, program) {
 }
 
 function plainGhRead(invocation) {
+  const args = invocation.programOperands ?? invocation.operands;
+  const operation = ghOperation(args);
+  if (
+    invocation.programNamespaceStable &&
+    invocation.argvComplete &&
+    !invocation.environment?.length &&
+    !invocation.delegated &&
+    !invocation.wrappers?.length &&
+    isGhObservation(args) &&
+    (invocation.program === 'gh' || provedManagedGhInvocation(invocation))
+  )
+    return true;
   // Bare, payload-free API observations share the launcher's existing read
   // carrier (including readonly loops). This never certifies an explicit path.
   if (
@@ -121,12 +138,9 @@ function plainGhRead(invocation) {
     !invocation.delegated &&
     !invocation.wrappers?.length
   ) {
-    const query = ['gh', ...(invocation.programOperands ?? invocation.operands)]
-      .map((word) => `'${word.replaceAll("'", "'\\''")}'`)
-      .join(' ');
+    const query = ['gh', ...args].map((word) => `'${word.replaceAll("'", "'\\''")}'`).join(' ');
     if (constrainedGhApiOperation(query, { payloadFree: true })) return true;
   }
-  const operation = ghOperation(invocation.programOperands ?? invocation.operands);
   return (
     ['pr', 'issue', 'run', 'repo'].includes(operation.group) &&
     ['view', 'list', 'checks', 'status', 'diff'].includes(operation.action)

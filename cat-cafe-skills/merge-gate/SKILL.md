@@ -743,11 +743,11 @@ gh pr comment {PR_NUMBER} --body '@codex review'
 
 | 原 reviewer | 降级到 | 说明 |
 |-------------|--------|------|
-| 云端 Codex / 任一Maine Coon（OpenAI 池） | **另一 provider** 的在役非作者 reviewer：Sonnet、kimi 或 gemini-argon（只审不写代码）；按 dossier + F293 可用性选择 | **跨 provider family**：同一 provider 的额度不足时不在其内部换 model |
-| Ragdoll某个体 | 非作者Maine Coon、kimi 或 gemini-argon（只审不写代码） | 稀缺创作/判断席位不进迭代循环 |
+| 云端 Codex / 任一Maine Coon（OpenAI 池） | **另一 provider** 的在役非作者 reviewer：Sonnet、kimi、gemini-argon（只审不写代码）或 gemini-carbon；按 dossier + F293 可用性选择 | **跨 provider family**：同一 provider 的额度不足时不在其内部换 model |
+| Ragdoll某个体 | 非作者Maine Coon、kimi、gemini-argon（只审不写代码）或 gemini-carbon | 稀缺创作/判断席位不进迭代循环 |
 | **禁止** | 作者自己 | 同族不同个体可审，同一个体不能自审 |
 
-Sonnet 与Ragdoll共用 Anthropic 池，所以只作为 OpenAI 池额度不足时的跨 provider 降级选项，不作为Ragdoll个体的降级选项。Siamese里只有 gemini-argon 参与 review，其他Siamese不自动加入常规 reviewer，也不授权 Argon 写代码。
+Sonnet 与Ragdoll共用 Anthropic 池，所以只作为 OpenAI 池额度不足时的跨 provider 降级选项，不作为Ragdoll个体的降级选项。Siamese里 gemini-argon 与 gemini-carbon 参与 review（Carbon 于 2026-11-15 加入候选），其他Siamese不自动加入常规 reviewer，也不授权 Argon 写代码。
 
 **铁律：降级后仍须校验"reviewer ≠ 作者"**——降级表是建议顺序，不能覆盖 self-review 禁令。
 

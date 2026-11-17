@@ -1,0 +1,85 @@
+{
+  "resource": {
+    "kind": "tightly-coupled-group",
+    "groupName": "memory-read-entry",
+    "resourceFamilies": ["identity-proposal", "memory-matter", "memory-cue", "memory-read"],
+    "evidenceRef": "file:docs/architecture/memory/read-entry.md"
+  },
+  "retiredNames": ["cat_cafe_read_profile", "cat_cafe_read_memory_matter", "cat_cafe_drill_memory_cue"],
+  "canonicalNames": ["cat_cafe_read_memory"],
+  "expectedProfiles": {
+    "cat_cafe_read_memory": [
+      "full",
+      "readonly",
+      "agent-key",
+      "desktop:fable-phase0",
+      "desktop:cloud-pro-phase0",
+      "desktop:live-companion"
+    ]
+  },
+  "rollbackRevision": "cfdd0190e27d63ff3a4d38779f77283c15e0e217",
+  "layers": {
+    "mcp-definition": {
+      "status": "covered",
+      "consumers": [
+        "packages/mcp-server/src/tools/read-memory-tools.ts",
+        "packages/mcp-server/src/tools/memory-read-access.ts",
+        "packages/mcp-server/src/tools/callback-tools.ts",
+        "packages/mcp-server/src/tools/matter-memory-tools.ts",
+        "packages/mcp-server/src/tools/memory-cue-tools.ts",
+        "packages/mcp-server/src/tools/file-tools.ts"
+      ]
+    },
+    "runtime-catalog-profile": {
+      "status": "covered",
+      "consumers": [
+        "packages/mcp-server/src/canonical-server-tools.ts",
+        "packages/mcp-server/src/server-toolsets.ts",
+        "packages/mcp-server/governance/mcp-surface-baseline.json",
+        "packages/api/src/domains/cats/services/agents/invocation/WatcherToolTicket.ts",
+        "packages/api/src/domains/cats/services/agents/invocation/RedisWatcherToolTickets.ts"
+      ]
+    },
+    "prompt-l0": {
+      "status": "covered",
+      "consumers": [
+        "packages/shared/src/l0-input-capture.ts",
+        "packages/api/src/domains/memory/matters/matter-opening-directory.ts",
+        "packages/api/src/domains/memory/cue/format-memory-cues.ts",
+        "packages/api/src/domains/memory/cue/preparation/WorkPreparationService.ts"
+      ]
+    },
+    "skill-convention": {
+      "status": "covered",
+      "consumers": [
+        "cat-cafe-skills/memory-navigation/SKILL.md",
+        "cat-cafe-skills/memory-search-best-practices/SKILL.md",
+        "cat-cafe-skills/rich-messaging/SKILL.md",
+        "cat-cafe-skills/refs/memory-routing-partial.md",
+        "packages/mcp-server/src/tools/remember-tool.ts"
+      ]
+    },
+    "fixture-test": {
+      "status": "covered",
+      "consumers": [
+        "packages/mcp-server/test/read-memory-tools.test.js",
+        "packages/mcp-server/test/read-profile-tool.test.js",
+        "packages/mcp-server/test/matter-memory-tools.test.js",
+        "packages/mcp-server/test/memory-cue-tools.test.js",
+        "packages/api/test/memory-read-production.test.js",
+        "packages/api/test/watcher-tool-policy.test.js",
+        "scripts/compile-system-prompt-l0.test.mjs"
+      ]
+    },
+    "eval": {
+      "status": "not-applicable",
+      "rationale": "This read adapter changes no eval owner or outcome; original cue receipts and explicit applied/dismissed settlement remain with their original services.",
+      "absenceEvidence": ["cat_cafe_read_profile", "cat_cafe_read_memory_matter", "cat_cafe_drill_memory_cue"]
+    },
+    "observability": {
+      "status": "not-applicable",
+      "rationale": "The retired names have no telemetry dispatch consumer. Original callback instrumentation and content-free receipt ownership remain intact; the new MCP name is observed by the common tool event path.",
+      "absenceEvidence": ["cat_cafe_read_profile", "cat_cafe_read_memory_matter", "cat_cafe_drill_memory_cue"]
+    }
+  }
+}

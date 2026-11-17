@@ -84,9 +84,15 @@ import { getCatModel } from '../../../../../config/cat-models.js';
 import { type CodexCarrierMode, captureCodexLaunchPolicy } from '../../../../../config/codex-cli.js';
 import { estimateCostFromTokens } from '../../../../../config/model-pricing.js';
 import { createModuleLogger } from '../../../../../infrastructure/logger.js';
+import { buildCliNotFoundDiagnostic } from '../../../../../utils/cli-diagnostics.js';
 import { formatCliExitError } from '../../../../../utils/cli-format.js';
 import { CLI_EXECUTION_ID_ENV, CLI_EXECUTION_OWNER_BINDING_ENV } from '../../../../../utils/cli-process-ownership.js';
-import { formatCliNotFoundError, resolveCliCommand } from '../../../../../utils/cli-resolve.js';
+import {
+  formatCliNotFoundError,
+  formatCustomCliNotFoundError,
+  isKnownCliCommand,
+  resolveCliCommand,
+} from '../../../../../utils/cli-resolve.js';
 import {
   buildChildEnv,
   isCliError,
@@ -2338,11 +2344,20 @@ export class CodexAgentService implements AgentService {
 
       const codexCommand = verifiedNativeShellCommand ?? resolveCliCommand(this.cliCommand);
       if (!codexCommand) {
+        const knownCommand = isKnownCliCommand(this.cliCommand);
+        const publicLabel = knownCommand ? this.cliCommand : 'Codex CLI';
         yield {
           type: 'error' as const,
           catId: this.catId,
-          error: formatCliNotFoundError(this.cliCommand),
-          metadata,
+          error: knownCommand ? formatCliNotFoundError(this.cliCommand) : formatCustomCliNotFoundError(publicLabel),
+          metadata: {
+            ...metadata,
+            cliDiagnostics: buildCliNotFoundDiagnostic(
+              this.cliCommand,
+              process.platform,
+              knownCommand ? undefined : publicLabel,
+            ),
+          },
           timestamp: Date.now(),
         };
         yield { type: 'done' as const, catId: this.catId, metadata, timestamp: Date.now() };

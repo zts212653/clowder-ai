@@ -225,24 +225,54 @@ export function resolveCliCommandOrBare(command: string): string {
   return resolveCliCommand(command) ?? command;
 }
 
+type CliInstallHint = string | ((platform: NodeJS.Platform) => string);
+
+const CLI_INSTALL_HINTS: Readonly<Record<string, CliInstallHint>> = {
+  claude: 'npm install -g @anthropic-ai/claude-code',
+  codex: 'npm install -g @openai/codex',
+  gemini: 'npm install -g @google/gemini-cli',
+  agy: (platform) =>
+    platform === 'win32'
+      ? 'curl.exe -fsSL https://antigravity.google/cli/install.cmd -o install.cmd && install.cmd && del install.cmd'
+      : 'curl -fsSL https://antigravity.google/cli/install.sh | bash',
+  kimi: (platform) =>
+    platform === 'win32'
+      ? 'irm https://code.kimi.com/kimi-code/install.ps1 | iex'
+      : 'curl -fsSL https://code.kimi.com/kimi-code/install.sh | bash',
+  opencode: 'npm install -g opencode-ai',
+};
+
+/** Whether the command is one of the CLIs the shared install-hint table admits. */
+export function isKnownCliCommand(command: string): boolean {
+  return Object.hasOwn(CLI_INSTALL_HINTS, command);
+}
+
 /**
- * Format a user-friendly install hint for a missing CLI.
+ * Copy-pasteable install command for a missing CLI.
+ *
+ * Kept as the one install-hint table shared by the human-readable paragraph and the
+ * structured `cliDiagnostics.publicHint`, so the two surfaces cannot drift.
+ */
+export function cliInstallHint(command: string, platform: NodeJS.Platform = process.platform): string {
+  const hint = CLI_INSTALL_HINTS[command];
+  if (typeof hint === 'function') return hint(platform);
+  return hint ?? `install the "${command}" CLI`;
+}
+
+/**
+ * Guide current-context resolution first; installation is optional when the CLI is absent.
  */
 export function formatCliNotFoundError(command: string, platform: NodeJS.Platform = process.platform): string {
-  const installHints: Record<string, string> = {
-    claude: 'npm install -g @anthropic-ai/claude-code',
-    codex: 'npm install -g @openai/codex',
-    gemini: 'npm install -g @google/gemini-cli',
-    agy:
-      platform === 'win32'
-        ? 'curl.exe -fsSL https://antigravity.google/cli/install.cmd -o install.cmd && install.cmd && del install.cmd'
-        : 'curl -fsSL https://antigravity.google/cli/install.sh | bash',
-    kimi:
-      platform === 'win32'
-        ? 'irm https://code.kimi.com/kimi-code/install.ps1 | iex'
-        : 'curl -fsSL https://code.kimi.com/kimi-code/install.sh | bash',
-    opencode: 'npm install -g opencode-ai',
-  };
-  const hint = installHints[command] ?? `install the "${command}" CLI`;
-  return `${command} CLI 未找到。请先运行 \`${hint}\` 安装，再重试。`;
+  const hint = cliInstallHint(command, platform);
+  return `${command} CLI 未找到。请检查当前执行环境的 PATH 或该成员的 CLI 命令配置；若尚未安装，可运行 \`${hint}\` 安装后重试。`;
+}
+
+/**
+ * Format a missing custom CLI without echoing its configured path.
+ *
+ * `publicLabel` must be a fixed, path-safe description chosen by the caller
+ * (for example `Codex CLI`), never the user-configured executable path.
+ */
+export function formatCustomCliNotFoundError(publicLabel: string): string {
+  return `${publicLabel} 未找到。请检查该成员配置的自定义 CLI 命令或路径，确认可执行后重试。`;
 }

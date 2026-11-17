@@ -24,18 +24,31 @@ const payload = (text) => {
 };
 
 describe('F332 contextual directory and the same-version interpretation', () => {
-  let directory, evidence, service, messages, sequence;
+  let directory, evidence, service, messages, sequence, readDelayMs;
   beforeEach(async () => {
     directory = mkdtempSync(join(tmpdir(), 'f332-context-'));
     evidence = new SqliteEvidenceStore(join(directory, 'memory.sqlite'));
     await evidence.initialize();
     messages = new Map();
     sequence = 0;
+    readDelayMs = 0;
     service = new MatterMemoryService({
       db: evidence.getDb(),
       runWrite: (operation) => evidence.runExclusive(operation),
-      messageStore: { getById: (id) => messages.get(id) ?? null },
-      threadStore: { get: (id) => ({ id, createdBy: 'owner' }), list: () => [] },
+      messageStore: {
+        getById: async (id) => {
+          if (readDelayMs) await new Promise((resolve) => setTimeout(resolve, readDelayMs));
+          return messages.get(id) ?? null;
+        },
+      },
+      threadStore: {
+        get: async (id) => {
+          // RedisThreadStore.get awaits HGETALL and SMEMBERS before returning.
+          if (readDelayMs) await new Promise((resolve) => setTimeout(resolve, 2 * readDelayMs));
+          return { id, createdBy: 'owner' };
+        },
+        list: () => [],
+      },
     });
   });
   afterEach(async () => {
@@ -83,7 +96,7 @@ describe('F332 contextual directory and the same-version interpretation', () => 
     assert.deepEqual(
       body.groups.map(({ label, count }) => [label, count]),
       [
-        ['含本线程原话的事情', 1],
+        ['含本线程出处的事情', 1],
         ['其他线程最近更新的事情', 1],
       ],
     );
@@ -95,12 +108,16 @@ describe('F332 contextual directory and the same-version interpretation', () => 
     assert.equal(recentItem.matterId, recent.matterId);
     assert.equal(recentItem.contextHint, undefined);
     assert.match(recentItem.readHint, /归纳未附.*按.*ID.*读/);
-    assert.match(text, /事情页.*未按当前问题筛选/);
-    assert.match(text, /cat_cafe_list_memory_matters/);
-    assert.match(text, /项目资料.*历史讨论.*cat_cafe_search_evidence/);
-    assert.match(text, /当前画像用 cat_cafe_read_profile/);
-    assert.match(text, /当前人物关系用 cat_cafe_recall_person_relationship/);
-    assert.match(text, /不证明适用/);
+    // The opening says what the notebook is for and where to write, then gives the two addresses a cat cannot guess.
+    const opening = text.split('\n').slice(1, -2);
+    assert.equal(opening.length, 2);
+    assert.match(opening[0], /^这是全家共用的记事本：接手时先看相关的页/);
+    assert.match(opening[0], /记一句并连回这条对话（cat_cafe_remember 选 matter）/);
+    assert.match(opening[0], /标题和归纳是路标，不授执行权；用前打开原页，核原话、适用范围和版本。$/);
+    assert.match(opening[1], /readRef 交给 cat_cafe_read_memory/);
+    assert.match(opening[1], /没列出的页.*cat_cafe_search_evidence/);
+    assert.match(opening[1], /不带 query 是本目录.*nextCursor 原样作 matterCursor/);
+    assert.doesNotMatch(text, /cat_cafe_list_memory_matters/); // mcp-cutover-negative-reference: absence
     assert.ok(estimateTokens(text) <= 3072);
   });
 
@@ -124,8 +141,80 @@ describe('F332 contextual directory and the same-version interpretation', () => 
       'here',
     );
     assert.match(unavailable, /当前目录不可用/);
-    assert.match(unavailable, /cat_cafe_list_memory_matters/);
+    assert.match(unavailable, /cat_cafe_search_evidence（不带 query）重读/);
+    assert.doesNotMatch(unavailable, /cat_cafe_list_memory_matters/); // mcp-cutover-negative-reference: absence
     assert.doesNotMatch(unavailable, /"count":0/);
+  });
+
+  it('records the actual rejection and invocation coordinates when a directory is unavailable', async () => {
+    const warnings = [];
+    const err = new Error('source reader disconnected');
+    await matterOpeningDirectory(
+      {
+        catalog: async () => {
+          throw err;
+        },
+      },
+      'owner',
+      'codex61-sol',
+      'here',
+      { invocationId: 'opening-rejected', logger: { warn: (fields) => warnings.push(fields) } },
+    );
+    assert.equal(warnings.length, 1, 'an unavailable directory must leave a diagnostic');
+    assert.equal(warnings[0].err, err);
+    assert.equal(warnings[0].stopReason, 'reader_rejected');
+    assert.equal(warnings[0].invocationId, 'opening-rejected');
+    assert.equal(warnings[0].threadId, 'here');
+    assert.equal(warnings[0].catId, 'codex61-sol');
+    assert.ok(warnings[0].elapsedMs >= 0);
+    assert.ok(warnings[0].eventLoop.utilization >= 0 && warnings[0].eventLoop.utilization <= 1);
+    assert.ok(warnings[0].eventLoop.active >= 0 && warnings[0].eventLoop.idle >= 0);
+  });
+
+  it('distinguishes the real work-budget timer from reader rejection', async (t) => {
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    const warnings = [];
+    let signal;
+    const pending = matterOpeningDirectory(
+      {
+        catalog: async (_actor, options) => {
+          signal = options.signal;
+          return new Promise(() => {});
+        },
+      },
+      'owner',
+      'codex61-sol',
+      'here',
+      { invocationId: 'opening-timeout', logger: { warn: (fields) => warnings.push(fields) } },
+    );
+    await Promise.resolve();
+    t.mock.timers.tick(1500);
+    const unavailable = await pending;
+    assert.equal(signal.aborted, true);
+    assert.match(unavailable, /当前目录不可用/);
+    assert.equal(warnings.length, 1);
+    assert.equal(warnings[0].stopReason, 'source_work_budget');
+    assert.equal(warnings[0].invocationId, 'opening-timeout');
+  });
+
+  it('keeps the eleven-page, fifty-three-source directory available with modest store latency', async () => {
+    // Runtime's read-only 2026-11-16 census: 11 pages / 53 sources. No production data is copied.
+    const pageSizes = [14, 9, 7, 7, 5, 4, 3, 1, 1, 1, 1];
+    for (const [index, count] of pageSizes.entries()) {
+      const matter = await create(`thread-${index}`, 'Shared context', `Matter ${index}`);
+      if (count > 1)
+        await service.write(writer, {
+          operation: 'append',
+          requestId: `fill-${index}`,
+          matterId: matter.matterId,
+          expectedRevision: 1,
+          sources: Array.from({ length: count - 1 }, () => selection(source(`thread-${index}`))),
+        });
+    }
+    readDelayMs = 6;
+    const text = await matterOpeningDirectory(service, 'owner', 'codex61-sol', 'here');
+    assert.doesNotMatch(text, /当前目录不可用/, 'ordinary source latency must not erase the whole directory');
+    assert.equal(payload(text).items.length, pageSizes.length);
   });
 
   it('finds a current-thread page beyond the old first twelve, then pages all readable items in stable time/ID order', async () => {

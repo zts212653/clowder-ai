@@ -43,6 +43,7 @@ function compactResult(result: EvidenceResult): EvidenceResult {
     matchRank: result.matchRank,
     rank: result.rank,
     sourceHash: result.sourceHash,
+    ...(result.readRef ? { readRef: result.readRef } : {}),
     relevance: result.relevance,
     sourceType: result.sourceType,
     boostSource: result.boostSource.slice(0, 4),

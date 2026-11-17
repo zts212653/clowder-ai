@@ -46,6 +46,28 @@ function projectToolMessages(catId: CatId, metadata: MessageMetadata, turn: AgyS
   });
 }
 
+// These keys identify the hook wire protocol, not deployment copy. Keep emitted
+// and persisted refusals recognizable across deployment brand changes.
+const HOST_GUARD_REFUSAL_PREFIXES = Object.keys({
+  'Clowder AI native guard:': true,
+  'Clowder AI native guard could not validate this tool call': true,
+  'native_auth_mutation:': true,
+});
+
+const PRE_TOOL_HOOK_DENIAL_PREFIX = 'tool call denied by pre-tool hook: ';
+
+function isAttributablePreExecutionRefusal(call: AgyStreamJsonTurn['toolCalls'][number]): boolean {
+  if (call.state !== 'ERROR') return false;
+  if (call.completedOnce === true) return false;
+  if (call.output !== '') return false;
+  if (!call.errorMessage) return false;
+  const raw = call.errorMessage.trim();
+  const stripped = raw.startsWith(PRE_TOOL_HOOK_DENIAL_PREFIX) ? raw.slice(PRE_TOOL_HOOK_DENIAL_PREFIX.length) : raw;
+  if (HOST_GUARD_REFUSAL_PREFIXES.some((prefix) => stripped.startsWith(prefix))) return true;
+  if (raw.startsWith('JSON hook "jsonhook__cat-cafe-native-effect_PreToolUse_')) return true;
+  return raw === `unknown tool: ${JSON.stringify(call.toolName)} — check spelling`;
+}
+
 /** A missing file is a read observation, not evidence that another tool repaired a failure. */
 function isMissingFileObservation(call: AgyStreamJsonTurn['toolCalls'][number]): boolean {
   if (canonicalAgyNativeFileToolName(call.toolName) !== 'read_file' || call.errorMessage === null || call.output)
@@ -136,6 +158,9 @@ export function projectAgyNativeTurn(
       deniedActions: turn.deniedActions,
       sessionUsage: turn.usage,
       unknownEvents: turn.unknownEvents,
+      ...(observed.unrecognizedAdvertisedTools?.length
+        ? { unrecognizedAdvertisedTools: observed.unrecognizedAdvertisedTools }
+        : {}),
       ...(turn.unconfirmedStepIndices?.length ? { unconfirmedStepIndices: turn.unconfirmedStepIndices } : {}),
       ...(readObservations.length ? { readObservations } : {}),
     },
@@ -190,7 +215,13 @@ export function projectAgyNativeTurn(
       },
     });
   }
-  const unexpectedTool = turn.toolCalls.find((call) => !tools.has(canonicalAgyNativeFileToolName(call.toolName)));
+  // Only an attributable pre-execution guard/dispatcher refusal (terminal ERROR,
+  // never DONE, empty output, and explicit guard/unknown-tool refusal reason) is
+  // exempted as a handled non-execution; ordinary tool errors or DONE steps that
+  // retain an earlier errorMessage still fail closed with AGY_UNEXPECTED_TOOL.
+  const unexpectedTool = turn.toolCalls.find(
+    (call) => !tools.has(canonicalAgyNativeFileToolName(call.toolName)) && !isAttributablePreExecutionRefusal(call),
+  );
   if (turn.finalText) {
     messages.push({ type: 'text', catId, content: turn.finalText, metadata, timestamp: Date.now() });
   }

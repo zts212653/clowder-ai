@@ -20,6 +20,7 @@ import { prepareAgyNativeLaunch } from './agy-native-launch.js';
 import { assertAgyMemberAccount, captureAgyMemberOptions } from './agy-native-member.js';
 import { preflightAgyNativeWorkspace } from './agy-native-policy.js';
 import { AgyNativeProfileBusyError } from './agy-native-profile-turn.js';
+import { hostAgyNativeAgentName } from './launch/agy-session-compatibility.js';
 import { runAgyNativeInvocation } from './run/agy-native-invocation.js';
 
 export interface AgyNativeAgentServiceConfig {
@@ -192,7 +193,14 @@ export class AgyNativeAgentService implements AgentService {
       }
       if (!options?.workingDirectory) throw new Error('AGY native requires an explicit workingDirectory');
       const workspace = resolve(options.workingDirectory);
-      const workspacePreflight = preflightAgyNativeWorkspace(workspace);
+      const expectedAgentMode = member
+        ? 'member'
+        : options.toolExecutionPolicy?.mode === 'read_only'
+          ? 'readonly'
+          : 'normal';
+      const workspacePreflight = preflightAgyNativeWorkspace(workspace, {
+        hostAgentName: hostAgyNativeAgentName(this.catId, expectedAgentMode),
+      });
       if (!workspacePreflight.ok) {
         yield* failure(
           'AGY_WORKSPACE_CUSTOMIZATION',

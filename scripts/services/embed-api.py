@@ -29,6 +29,7 @@ from embed_runtime_policy import (
     MemoryBudgetExceeded,
     MemoryMetricUnavailable,
     MlxMemoryEnvelope,
+    TransientOvershoot,
 )
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -200,18 +201,35 @@ async def create_embeddings(req: EmbedRequest, request: Request):
         async with _admission.admit(
             deadline_ms=req.deadline_ms,
             is_disconnected=request.is_disconnected,
-        ):
+        ) as assert_still_wanted:
+            # Not handled: if this task were cancelled while a guard or encode
+            # thread is still running, the slot would be released early and
+            # the thread's verdict dropped. Nothing in the deployed stack
+            # cancels a request task while serving; see the task-cancellation
+            # section of docs/evidence/2026-11-15-embed-envelope-transient/README.md.
             if _memory_envelope is not None:
-                await asyncio.to_thread(
+                settled = await asyncio.to_thread(
                     _memory_envelope.assert_within_budget,
                     req.max_model_mem_mb,
                 )
+                _log_transient_overshoot(settled, guard_phase, memory_shape)
+                if settled is not None:
+                    # The settle wait ran after admission's last deadline and
+                    # disconnect check: do not allocate for a request nobody
+                    # is waiting for. Memory that stayed over budget has
+                    # already raised above; an expired or disconnected request
+                    # does not hide it.
+                    await assert_still_wanted()
             embeddings = await asyncio.to_thread(_encode, texts, memory_shape)
             guard_phase = "post"
             if _memory_envelope is not None:
-                await asyncio.to_thread(
-                    _memory_envelope.assert_within_budget,
-                    req.max_model_mem_mb,
+                _log_transient_overshoot(
+                    await asyncio.to_thread(
+                        _memory_envelope.assert_within_budget,
+                        req.max_model_mem_mb,
+                    ),
+                    guard_phase,
+                    memory_shape,
                 )
     except AdmissionError as error:
         raise HTTPException(
@@ -233,6 +251,8 @@ async def create_embeddings(req: EmbedRequest, request: Request):
                     "mlx_cache_memory_bytes": error.mlx_cache_memory_bytes,
                     "os_footprint_bytes": error.os_footprint_bytes,
                     "baseline_os_footprint_bytes": error.baseline_os_footprint_bytes,
+                    "first_observed_bytes": error.first_observed_bytes,
+                    "settle_ms": error.settle_ms,
                 },
                 separators=(",", ":"),
             ),
@@ -321,6 +341,37 @@ async def health():
         **admission_health,
         **memory_health,
     }
+
+
+def _log_transient_overshoot(
+    overshoot: TransientOvershoot | None, phase: str, memory_shape: dict
+) -> None:
+    """Record a reading that was over budget and came back under it in the window.
+
+    The sidecar keeps serving. The line carries the same sample and request
+    shape as the fatal one, so the reading leaves evidence either way.
+    """
+    if overshoot is None:
+        return
+    log.warning(
+        "Embedding memory reading settled: first_observed=%d settled_observed=%d "
+        "budget=%d settle_ms=%d; context=%s",
+        overshoot.first.observed_bytes,
+        overshoot.settled.observed_bytes,
+        overshoot.budget_bytes,
+        overshoot.settle_ms,
+        json.dumps(
+            {
+                **memory_shape,
+                "phase": phase,
+                "mlx_active_memory_bytes": overshoot.first.mlx_active_memory_bytes,
+                "mlx_cache_memory_bytes": overshoot.first.mlx_cache_memory_bytes,
+                "os_footprint_bytes": overshoot.first.os_footprint_bytes,
+                "baseline_os_footprint_bytes": overshoot.baseline_os_footprint_bytes,
+            },
+            separators=(",", ":"),
+        ),
+    )
 
 
 def _schedule_resource_exit() -> None:

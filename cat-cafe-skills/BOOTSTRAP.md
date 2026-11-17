@@ -45,7 +45,6 @@
 | `ttfund-skills` | 天天基金官方 Skills 网关：基金搜索/净值/持仓/经理/指数/黄金/债市/活期宝事实数据 | — |
 | `convention-graph-discovery` | 进入陌生 repo / F242 约定图工作：定义 domain、extractor、gap/freshness/provenance 报告 | — |
 | `knowledge-engineering` | 外部项目文档重构/冷启动知识注入 | — |
-| `memory-navigation` | 项目记忆三入口路由（graph / recent / search） | — |
 | `proactive-memory-judgment` | 单次 continuity-valued 人物线索的 F276 即时提案 / known-person defer / calibrated-abstention 判断 | — |
 | `memory-search-best-practices` | 记忆系统多刀检索 + recall coverage 策略（8 类题型 recipe） | — |
 | `writing-skills` | 写新 skill | — |

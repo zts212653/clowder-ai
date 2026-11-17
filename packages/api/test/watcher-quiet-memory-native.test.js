@@ -132,13 +132,12 @@ test(
             ],
           },
         },
-        { name: 'cat_cafe_list_memory_matters', args: {} },
+        { name: 'cat_cafe_search_evidence', args: {} },
         {
-          name: 'cat_cafe_read_memory_matter',
+          name: 'cat_cafe_read_memory',
           args: async () => ({
-            matterId:
-              (await matter.catalog({ userId: 'watcher-owner', viewer: { type: 'cat', catId: 'codex' } })).items[0]
-                ?.matterId ?? 'unavailable-test-matter',
+            ref: (await matter.catalog({ userId: 'watcher-owner', viewer: { type: 'cat', catId: 'codex' } })).items[0]
+              .readRef,
           }),
         },
       ];
@@ -162,6 +161,14 @@ test(
         pages.items[0].matterId,
       );
       assert.equal(page.entries[0].quote, original.content);
+      assert.equal(
+        evidence
+          .getDb()
+          .prepare("SELECT COUNT(*) AS n FROM memory_cue_events WHERE consumption_outcome='drilled'")
+          .get().n,
+        1,
+        'the native unified read must reach the original durable matter-read receipt',
+      );
     } finally {
       await f.close();
     }

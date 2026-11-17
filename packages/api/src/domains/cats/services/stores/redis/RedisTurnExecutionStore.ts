@@ -17,6 +17,7 @@ import {
   type ITurnExecutionStore,
   type MemberTurnStartedAfterQuery,
   matchesTurnExecutionSource,
+  RESTART_SHUTDOWN_TERMINAL_REASON,
   type RecentSettledTurnQuery,
   serializeTurnExecutionIdentity,
   type TransitionTurnExecutionResult,
@@ -275,13 +276,14 @@ export class RedisTurnExecutionStore implements ITurnExecutionStore {
         TurnExecutionKeys.record(invocationId),
         TurnExecutionKeys.running,
         TurnExecutionKeys.responsePending,
-        TurnExecutionKeys.sleepContinuationOwed,
+        TurnExecutionKeys.continuationOwed,
         input.status,
         String(input.endedAt),
         input.terminalReason ?? '',
         invocationId,
         input.providerTeardownAt === undefined ? '' : String(input.providerTeardownAt),
         HOST_SLEEP_TERMINAL_REASON,
+        RESTART_SHUTDOWN_TERMINAL_REASON,
       ),
     );
     if (result === -2) throw new Error('provider_teardown_unconfirmed');
@@ -377,14 +379,14 @@ export class RedisTurnExecutionStore implements ITurnExecutionStore {
     return later.length > 0;
   }
 
-  async listOwedSleepContinuations(): Promise<TurnExecutionRecord[]> {
-    const ids = await this.redis.smembers(TurnExecutionKeys.sleepContinuationOwed);
+  async listOwedContinuations(): Promise<TurnExecutionRecord[]> {
+    const ids = await this.redis.smembers(TurnExecutionKeys.continuationOwed);
     const records = await Promise.all(ids.map((id) => this.get(id)));
     return records.filter((record): record is TurnExecutionRecord => record !== null);
   }
 
-  async settleOwedSleepContinuations(invocationIds: readonly string[]): Promise<void> {
-    if (invocationIds.length > 0) await this.redis.srem(TurnExecutionKeys.sleepContinuationOwed, ...invocationIds);
+  async settleOwedContinuations(invocationIds: readonly string[]): Promise<void> {
+    if (invocationIds.length > 0) await this.redis.srem(TurnExecutionKeys.continuationOwed, ...invocationIds);
   }
 
   async listRecentSettled(query: RecentSettledTurnQuery): Promise<TurnExecutionRecord[]> {

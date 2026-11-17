@@ -1,4 +1,9 @@
-import type { RememberGroupRow, RememberItem, RememberRowResult } from '@cat-cafe/shared';
+import {
+  matterWriteRefSchema,
+  type RememberGroupRow,
+  type RememberItem,
+  type RememberRowResult,
+} from '@cat-cafe/shared';
 
 const paths = {
   profile: 'propose-profile-update',
@@ -55,6 +60,8 @@ export function rememberGroupRow(row: RememberRowResult, item?: RememberItem): R
           ? item.payload.personId
           : undefined))
       : undefined;
+  const matterWriteRef =
+    row.target === 'matter' && row.statusCode < 400 ? matterWriteRefSchema.safeParse(result.writeRef) : undefined;
   return {
     itemId: row.itemId,
     target: row.target,
@@ -62,6 +69,7 @@ export function rememberGroupRow(row: RememberRowResult, item?: RememberItem): R
     ...(proposalId ? { proposalId } : {}),
     ...(text('messageId') ? { messageId: text('messageId') } : {}),
     ...(resultRef ? { resultRef } : {}),
+    ...(matterWriteRef?.success ? { matterWriteRef: matterWriteRef.data } : {}),
     ...(personId ? { personId } : {}),
     ...(status ? { status } : {}),
     ...(text('error') ? { error: text('error')?.slice(0, 500) } : {}),

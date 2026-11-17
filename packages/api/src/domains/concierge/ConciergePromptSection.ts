@@ -35,7 +35,7 @@ export function buildConciergePromptLines(config: ConciergeConfig, _threadId?: s
     `**功能发现知识源（限定）：** cat_cafe_feat_index、${deploymentDefaults.roadmapPath}、docs/features/、release notes、guide catalog（cat_cafe_get_available_guides）。`,
     '',
     '**工具白名单（只许使用）：**',
-    '- search_evidence / graph_resolve / list_recent（记忆检索三入口）',
+    '- search_evidence（一个找入口：交原句或编号，精确编号同时得关系；不带 query 看最近）',
     '- get_thread_context（当前 thread 上下文）',
     '- feat_index（功能目录）',
     '- get_available_guides / start_guide（引导流程）',

@@ -340,6 +340,8 @@ describe('F212 CliDiagnosticsPanel (AC-B2/B3/B4)', () => {
       'quota_exceeded',
       'network_error',
       'spawn_failed',
+      // #1463 S3: a missing local CLI is its own reason, but shares the system tier.
+      'cli_not_found',
       'missing_rollout',
       'session_not_found',
       'context_window_exceeded',

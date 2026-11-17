@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { test } from 'node:test';
+import { after, test } from 'node:test';
 import Database from 'better-sqlite3';
 import {
   extractOpenCodeMessageRef,
@@ -10,9 +10,15 @@ import {
 } from '../dist/domains/cats/services/agents/providers/opencode-recovery.js';
 
 const capture = JSON.parse(readFileSync(new URL('./fixtures/opencode-2.0.28/captured.json', import.meta.url), 'utf8'));
+const recoveryDbRoots = new Set();
+
+after(() => {
+  for (const root of recoveryDbRoots) rmSync(root, { recursive: true, force: true });
+});
 
 function createMessageDb(rows) {
   const root = mkdtempSync(join(tmpdir(), 'cat-cafe-opencode-v2-'));
+  recoveryDbRoots.add(root);
   const dbPath = join(root, 'opencode.db');
   const db = new Database(dbPath);
   // OpenCode 2.0.28 session_message columns; no real session history is included.

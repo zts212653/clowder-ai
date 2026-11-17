@@ -82,7 +82,7 @@ export function bindMatterDiscoverySource(
       preference &&
         page.entries.some(
           (entry) =>
-            entry.status === 'active' && entry.sourceStatus === 'current' && entry.source.threadId === options.threadId,
+            entry.status === 'active' && entry.sourceStatus !== 'changed' && entry.source.threadId === options.threadId,
         ),
     );
     if (related !== candidate.related) return null;

@@ -48,6 +48,8 @@ export async function runNativeAuthContinuation(mode = 'confirmed', evidence = {
   const workspace = join(base, 'workspace');
   mkdirSync(workspace);
   const effect = join(workspace, 'effect.log');
+  const unrelatedWorkspace = join(base, 'unrelated-workspace');
+  mkdirSync(unrelatedWorkspace);
   const threadId = `auth-${mode}`;
   const chain = new SessionChainStore();
   const writer = new TranscriptWriter({ dataDir: join(base, 'transcripts') });
@@ -80,7 +82,7 @@ export async function runNativeAuthContinuation(mode = 'confirmed', evidence = {
       homeRoot: join(base, 'profiles'),
       model: 'gemini-3.8-flash-high',
     },
-    l0CompilerFn: async () => `# Identity\nFixture${mode === 'binding-drift' && calls > 1 ? ' changed' : ''}.\n`,
+    l0CompilerFn: async () => `# Identity\nFixture${mode === 'l0-drift' && calls > 1 ? ' changed' : ''}.\n`,
     rawArchive: { append: async () => {} },
   });
   const step = (index, fields) => ({
@@ -106,6 +108,7 @@ export async function runNativeAuthContinuation(mode = 'confirmed', evidence = {
     calls++;
     return actual(preflight, {
       ...options,
+      ...(mode === 'workspace-drift' && calls > 1 ? { workingDirectory: unrelatedWorkspace } : {}),
       spawnCliOverride: async function* (launch) {
         const attempt = launches.length + 1;
         launches.push(launch);

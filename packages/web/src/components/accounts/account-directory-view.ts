@@ -93,6 +93,7 @@ export function accountStatus(account: ProfileItem, t = accountsCopy.zh, languag
     };
   if (account.authType === 'api_key')
     return { label: account.hasApiKey ? t.keyReady : t.keyMissing, detail: '', ready: false };
+  if (account.clientId === 'anthropic' && account.builtin) return { label: t.cliManaged, detail: '', ready: false };
   const attempt = account.codex?.attempt;
   const ready = accountLoginReady(account);
   const waiting = ['preparing', 'queued', 'waiting'].includes(attempt?.state ?? '');

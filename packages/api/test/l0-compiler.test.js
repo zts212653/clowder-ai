@@ -439,10 +439,10 @@ test('L0 template includes limb tool quick index (via L5 segment)', () => {
 // and the S13 builder segment (loadMcpToolsSection injects this file). Its inventory must never shrink
 // silently: compress explanations, never delete a capability anchor. The set is the union of the
 // pre-dedupe L5 and S13 inventories; extend it when a canonical tool is added, never trim it to fit.
+// F332 F2 retired graph_resolve and list_recent through a governed cutover (their capability is the
+// search_evidence graph/recent groups); removing them here is that retirement, not a trim to fit.
 const REQUIRED_L5_TOOL_NAMES = [
   'cat_cafe_search_evidence',
-  'cat_cafe_graph_resolve',
-  'cat_cafe_list_recent',
   'cat_cafe_library_*',
   'cat_cafe_post_message',
   'cat_cafe_cross_post_message',
@@ -474,6 +474,13 @@ test('L5 tool index keeps every canonical tool name (inventory guard, #4686)', (
   const content = readFileSync(l5Path, 'utf8');
   const missing = REQUIRED_L5_TOOL_NAMES.filter((name) => !content.includes(name));
   assert.deepEqual(missing, [], `L5 dropped canonical tool names: ${missing.join(', ')}`);
+});
+
+test('L5 tool index no longer routes cats to the retired graph and recent tools (F332 F2)', () => {
+  const l5Path = resolve(import.meta.dirname, '../../../assets/prompt-templates/l5-mcp-tools-index.md');
+  const content = readFileSync(l5Path, 'utf8');
+  assert.equal(content.includes('cat_cafe_graph_resolve'), false); // mcp-cutover-negative-reference: absence
+  assert.equal(content.includes('cat_cafe_list_recent'), false); // mcp-cutover-negative-reference: absence
 });
 
 // --- AC-G10 (Phase G native L0 closure / KD-44): in-flight Promise dedup ---

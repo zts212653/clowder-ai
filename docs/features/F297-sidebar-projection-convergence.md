@@ -8,7 +8,7 @@ description: "把 Sidebar 收敛为服务端权威快照、前端单一 canonica
 description_source: human
 description_author: opus5
 description_updated_at: 2026-08-17T01:20:00-07:00
-tips_exempt: "Renewed 2026-10-02: F322 backlinks and the crowded-row closure record distinguish landed repairs from pending acceptance; the existing Sidebar entry and refresh workflow gain no new user operation."
+tips_exempt: "Renewed 2026-11-16 for Hub P9 (#6697/#6724/#6727/#6718): background-thread owner-room event routing, join_room stream replay, and foreground-only room subscription are internal transport/recovery convergence behind the existing Sidebar and thread view, adding no new user entry or configuration workflow. Prior 2026-10-02 F322 backlink and crowded-row exemption remains in effect."
 ---
 
 # F297: Sidebar Projection Convergence — 服务端权威快照，前端单一写入

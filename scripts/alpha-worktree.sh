@@ -103,23 +103,25 @@ abs_path() {
   printf '%s/%s\n' "${dir%/}" "${base%/}"
 }
 
+# Launcher-owned Git calls must not start monitors while preparing or inspecting Alpha.
+# Keep the checkout's configuration; disable fsmonitor for each operation only.
 require_git_repo() {
-  git -C "$PROJECT_DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1 \
+  git -c core.fsmonitor=false -C "$PROJECT_DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1 \
     || die "project dir is not a git repository: $PROJECT_DIR"
 }
 
 worktree_exists() {
   # Drain the registry: grep -q can SIGPIPE awk/git after a match under pipefail.
-  git -C "$PROJECT_DIR" worktree list --porcelain | awk '/^worktree / {print substr($0, 10)}' | grep -Fx "$ALPHA_DIR" >/dev/null
+  git -c core.fsmonitor=false -C "$PROJECT_DIR" worktree list --porcelain | awk '/^worktree / {print substr($0, 10)}' | grep -Fx "$ALPHA_DIR" >/dev/null
 }
 
 legacy_worktree_exists() {
   [ "$LEGACY_ALPHA_DIR" != "$ALPHA_DIR" ] || return 1
-  git -C "$PROJECT_DIR" worktree list --porcelain | awk '/^worktree / {print substr($0, 10)}' | grep -Fx "$LEGACY_ALPHA_DIR" >/dev/null
+  git -c core.fsmonitor=false -C "$PROJECT_DIR" worktree list --porcelain | awk '/^worktree / {print substr($0, 10)}' | grep -Fx "$LEGACY_ALPHA_DIR" >/dev/null
 }
 
 ensure_remote_exists() {
-  git -C "$PROJECT_DIR" remote get-url "$REMOTE_NAME" >/dev/null 2>&1 \
+  git -c core.fsmonitor=false -C "$PROJECT_DIR" remote get-url "$REMOTE_NAME" >/dev/null 2>&1 \
     || die "remote '$REMOTE_NAME' not found"
 }
 
@@ -145,7 +147,7 @@ is_api_running() {
 
 ensure_alpha_clean() {
   local dirty
-  dirty=$(git -C "$ALPHA_DIR" status --short -uno 2>/dev/null || true)
+  dirty=$(git -c core.fsmonitor=false -C "$ALPHA_DIR" status --short -uno 2>/dev/null || true)
   if [ -n "$dirty" ] && [ "$FORCE" != "true" ]; then
     die "alpha worktree has local changes. Commit/stash first, or re-run with --force."
   fi
@@ -154,30 +156,30 @@ ensure_alpha_clean() {
 ensure_alpha_branch() {
   local branch dirty
 
-  branch=$(git -C "$ALPHA_DIR" rev-parse --abbrev-ref HEAD)
+  branch=$(git -c core.fsmonitor=false -C "$ALPHA_DIR" rev-parse --abbrev-ref HEAD)
   if [ "$branch" = "$ALPHA_BRANCH" ]; then
     return 0
   fi
 
-  dirty=$(git -C "$ALPHA_DIR" status --short -uno 2>/dev/null || true)
+  dirty=$(git -c core.fsmonitor=false -C "$ALPHA_DIR" status --short -uno 2>/dev/null || true)
   if [ -n "$dirty" ] && [ "$FORCE" != "true" ]; then
     die "alpha worktree is on branch '$branch' with local changes. Commit/stash first, or re-run with --force."
   fi
 
-  git -C "$ALPHA_DIR" fetch "$REMOTE_NAME" main
+  git -c core.fsmonitor=false -C "$ALPHA_DIR" fetch "$REMOTE_NAME" main
 
-  if [ "$branch" = "$LEGACY_ALPHA_BRANCH" ] && ! git -C "$PROJECT_DIR" show-ref --verify --quiet "refs/heads/$ALPHA_BRANCH"; then
+  if [ "$branch" = "$LEGACY_ALPHA_BRANCH" ] && ! git -c core.fsmonitor=false -C "$PROJECT_DIR" show-ref --verify --quiet "refs/heads/$ALPHA_BRANCH"; then
     info "renaming legacy branch '$LEGACY_ALPHA_BRANCH' to '$ALPHA_BRANCH'"
-    git -C "$ALPHA_DIR" branch -m "$LEGACY_ALPHA_BRANCH" "$ALPHA_BRANCH"
-    git -C "$ALPHA_DIR" branch --set-upstream-to="$REMOTE_NAME/main" "$ALPHA_BRANCH" >/dev/null 2>&1 || true
+    git -c core.fsmonitor=false -C "$ALPHA_DIR" branch -m "$LEGACY_ALPHA_BRANCH" "$ALPHA_BRANCH"
+    git -c core.fsmonitor=false -C "$ALPHA_DIR" branch --set-upstream-to="$REMOTE_NAME/main" "$ALPHA_BRANCH" >/dev/null 2>&1 || true
     return 0
   fi
 
   info "repairing alpha worktree branch from '$branch' to '$ALPHA_BRANCH'"
-  if git -C "$PROJECT_DIR" show-ref --verify --quiet "refs/heads/$ALPHA_BRANCH"; then
-    git -C "$ALPHA_DIR" checkout "$ALPHA_BRANCH"
+  if git -c core.fsmonitor=false -C "$PROJECT_DIR" show-ref --verify --quiet "refs/heads/$ALPHA_BRANCH"; then
+    git -c core.fsmonitor=false -C "$ALPHA_DIR" checkout "$ALPHA_BRANCH"
   else
-    git -C "$ALPHA_DIR" checkout -B "$ALPHA_BRANCH" "$REMOTE_NAME/main"
+    git -c core.fsmonitor=false -C "$ALPHA_DIR" checkout -B "$ALPHA_BRANCH" "$REMOTE_NAME/main"
   fi
 }
 
@@ -322,7 +324,7 @@ migrate_legacy_alpha_worktree() {
   fi
 
   info "migrating legacy main-test worktree from $LEGACY_ALPHA_DIR to $ALPHA_DIR"
-  git -C "$PROJECT_DIR" worktree move "$LEGACY_ALPHA_DIR" "$ALPHA_DIR"
+  git -c core.fsmonitor=false -C "$PROJECT_DIR" worktree move "$LEGACY_ALPHA_DIR" "$ALPHA_DIR"
 }
 
 init_alpha_worktree() {
@@ -352,14 +354,14 @@ init_alpha_worktree() {
   fi
 
   info "fetching $REMOTE_NAME/main"
-  git -C "$PROJECT_DIR" fetch "$REMOTE_NAME" main
+  git -c core.fsmonitor=false -C "$PROJECT_DIR" fetch "$REMOTE_NAME" main
 
-  if git -C "$PROJECT_DIR" show-ref --verify --quiet "refs/heads/$ALPHA_BRANCH"; then
+  if git -c core.fsmonitor=false -C "$PROJECT_DIR" show-ref --verify --quiet "refs/heads/$ALPHA_BRANCH"; then
     info "adding existing branch '$ALPHA_BRANCH' to $ALPHA_DIR"
-    git -C "$PROJECT_DIR" worktree add "$ALPHA_DIR" "$ALPHA_BRANCH"
+    git -c core.fsmonitor=false -C "$PROJECT_DIR" worktree add "$ALPHA_DIR" "$ALPHA_BRANCH"
   else
     info "creating branch '$ALPHA_BRANCH' from $REMOTE_NAME/main"
-    git -C "$PROJECT_DIR" worktree add "$ALPHA_DIR" -b "$ALPHA_BRANCH" "$REMOTE_NAME/main"
+    git -c core.fsmonitor=false -C "$PROJECT_DIR" worktree add "$ALPHA_DIR" -b "$ALPHA_BRANCH" "$REMOTE_NAME/main"
   fi
 
   if [ "$RUN_INSTALL" = "true" ]; then
@@ -379,17 +381,17 @@ sync_alpha_worktree() {
   ensure_alpha_branch
 
   info "syncing alpha worktree with $REMOTE_NAME/main (ff-only)"
-  git -C "$ALPHA_DIR" fetch "$REMOTE_NAME" main
-  git -C "$ALPHA_DIR" merge --ff-only "$REMOTE_NAME/main"
+  git -c core.fsmonitor=false -C "$ALPHA_DIR" fetch "$REMOTE_NAME" main
+  git -c core.fsmonitor=false -C "$ALPHA_DIR" merge --ff-only "$REMOTE_NAME/main"
 
   if [ "$RUN_INSTALL" = "true" ]; then
     install_alpha_dependencies
 
     local lock_drift
-    lock_drift=$(git -C "$ALPHA_DIR" diff --name-only 2>/dev/null || true)
+    lock_drift=$(git -c core.fsmonitor=false -C "$ALPHA_DIR" diff --name-only 2>/dev/null || true)
     if [ "$lock_drift" = "pnpm-lock.yaml" ]; then
       info "lock drift detected — stashing instead of committing"
-      git -C "$ALPHA_DIR" stash push -m "alpha-lock-drift-auto-stash" -- pnpm-lock.yaml
+      git -c core.fsmonitor=false -C "$ALPHA_DIR" stash push -m "alpha-lock-drift-auto-stash" -- pnpm-lock.yaml
     fi
   fi
 
@@ -408,13 +410,13 @@ status_alpha_worktree() {
   fi
 
   local branch head dirty ahead behind api_running env_source_display resolved_env
-  branch=$(git -C "$ALPHA_DIR" rev-parse --abbrev-ref HEAD)
-  head=$(git -C "$ALPHA_DIR" rev-parse --short HEAD)
-  dirty=$(git -C "$ALPHA_DIR" status --short | wc -l | awk '{print $1}')
+  branch=$(git -c core.fsmonitor=false -C "$ALPHA_DIR" rev-parse --abbrev-ref HEAD)
+  head=$(git -c core.fsmonitor=false -C "$ALPHA_DIR" rev-parse --short HEAD)
+  dirty=$(git -c core.fsmonitor=false -C "$ALPHA_DIR" status --short | wc -l | awk '{print $1}')
 
-  git -C "$ALPHA_DIR" fetch "$REMOTE_NAME" main >/dev/null 2>&1 || true
-  ahead=$(git -C "$ALPHA_DIR" rev-list --count "$REMOTE_NAME/main..HEAD" 2>/dev/null || echo "0")
-  behind=$(git -C "$ALPHA_DIR" rev-list --count "HEAD..$REMOTE_NAME/main" 2>/dev/null || echo "0")
+  git -c core.fsmonitor=false -C "$ALPHA_DIR" fetch "$REMOTE_NAME" main >/dev/null 2>&1 || true
+  ahead=$(git -c core.fsmonitor=false -C "$ALPHA_DIR" rev-list --count "$REMOTE_NAME/main..HEAD" 2>/dev/null || echo "0")
+  behind=$(git -c core.fsmonitor=false -C "$ALPHA_DIR" rev-list --count "HEAD..$REMOTE_NAME/main" 2>/dev/null || echo "0")
   api_running="no"
   if is_api_running; then
     api_running="yes"
@@ -519,7 +521,7 @@ stop_alpha_daemon() {
 # quick-start for unchanged worktrees.
 build_alpha_stale_packages() {
   local head_commit
-  head_commit="$(git -C "$ALPHA_DIR" rev-parse HEAD 2>/dev/null || echo "")"
+  head_commit="$(git -c core.fsmonitor=false -C "$ALPHA_DIR" rev-parse HEAD 2>/dev/null || echo "")"
 
   # Order: shared first (api/mcp-server depend on it), then api, then mcp-server.
   if needs_rebuild "$ALPHA_DIR/packages/shared/dist/index.js" \

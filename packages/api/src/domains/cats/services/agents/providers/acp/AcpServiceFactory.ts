@@ -549,7 +549,10 @@ export async function createAcpServiceForConfig(
     // The factory rejects iCode members without it, so this is always defined.
     sessionModel: acpConfig.protocolAdapter === 'icode' ? icodeModelProfileId : spawn.sessionModel,
     protocolAdapter: acpConfig.protocolAdapter,
-    executionApproval: config.executionApproval ?? 'auto',
+    executionApproval:
+      spawn.antigravity && spawn.antigravity.profile.autoApprove !== true
+        ? 'ask_user'
+        : (config.executionApproval ?? 'auto'),
     defaultPermissionDecision:
       acpConfig.protocolAdapter === 'icode' || acpConfig.permissionPolicy === 'deny' ? 'reject' : 'allow',
     contextBinding: {

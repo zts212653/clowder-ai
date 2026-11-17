@@ -48,6 +48,9 @@ test('a full original read supplies the revision consumed by the real selected-s
     ],
   });
   assert.equal(prepared.status, 'prepared');
+  assert.deepEqual(prepared.readRefs, [
+    { kind: 'message', threadId: read.threadId, messageId: read.id, expectedRevision: read.contentRevision },
+  ]);
   assert.equal(prepared.response.results[0].selection.quote, read.content);
   assert.equal(f.searches(), 0);
 });

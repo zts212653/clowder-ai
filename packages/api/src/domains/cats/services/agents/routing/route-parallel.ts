@@ -335,6 +335,9 @@ async function* routeParallelPrepared(
           catId,
           providerId: binding?.catConfig?.provider?.trim() || binding?.catConfig?.clientId,
           ...(accountRevision ? { accountRevision } : {}),
+          ...(binding?.executionAccount?.credentialVersion
+            ? { credentialVersion: binding.executionAccount.credentialVersion }
+            : {}),
         };
       }),
       ...(isRoutingOwnerAttempt(options, targetCats.length === 1 ? targetCats[0] : undefined)
