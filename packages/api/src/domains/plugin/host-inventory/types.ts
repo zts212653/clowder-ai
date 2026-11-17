@@ -76,6 +76,13 @@ export interface PluginPackageRecord {
 export type ExecutablePluginPackageRecord = PluginPackageRecord & { readonly manifest: PluginManifest };
 
 export interface PluginInstanceRecord {
+  /** Host-confirmed native targets, written after an explicit owner open action. */
+  readonly conversationBindings?: readonly {
+    readonly role: 'main-conversation';
+    readonly ownerUserId: string;
+    readonly commandId: string;
+    readonly threadId: string;
+  }[];
   /** Host-owned presentation, independent of package configuration and activation. */
   readonly address?: { readonly alias: string; readonly revision: number; readonly icon?: string };
   readonly pluginInstanceId: string;
