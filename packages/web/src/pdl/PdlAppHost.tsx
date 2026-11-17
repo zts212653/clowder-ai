@@ -184,6 +184,7 @@ import type { ChatPort, ChatUiState, SidebarSnapshot } from './types';
 import { useConsoleCommandBindings } from './useConsoleCommandBindings';
 import { useBrakeBindings } from './useOpsBindings';
 import { useReplyBindings } from './useReplyBindings';
+import { useServerComposerDraft } from './useServerComposerDraft';
 
 const confirmRouting: RoutingConfirmation = (request) => window.clowderChat.confirm('routingRedirect', request);
 
@@ -519,6 +520,22 @@ function ChatBinding({
     syncContextAttachmentDraftToStorage(threadId, contexts);
     syncReplyDraftToStorage(threadId, reply);
   }, [drafting, threadId, input, contexts, reply]);
+  // The same draft is kept on the server, so a refresh or another device continues it.
+  const serverDraft = useServerComposerDraft({
+    threadId,
+    enabled: drafting && threadId !== 'default',
+    draft: { text: input, contexts, ...(reply ? { replyTo: reply.id } : {}) },
+    composerEmpty: () => !input.trim() && !images.length && !contexts.length,
+    restore: (saved) => {
+      setInput(saved.text);
+      setContexts(saved.contexts);
+      const message = saved.replyTo && useChatStore.getState().messages.find((m) => m.id === saved.replyTo);
+      if (message)
+        useChatStore
+          .getState()
+          .setReplyTo({ id: message.id, content: message.content, senderCatId: message.catId ?? null, threadId });
+    },
+  });
   // Words, places and a quote handed to this conversation's input from elsewhere (a file, a work, a recall).
   const pendingInsert = useChatStore((s) => s.pendingChatInsert);
   useEffect(() => {
@@ -845,6 +862,7 @@ function ChatBinding({
       return;
     }
     syncDraftToStorage(sent, '');
+    serverDraft.clear(sent);
     threadImageDrafts.delete(sent);
     syncContextAttachmentDraftToStorage(sent, []);
     syncReplyDraftToStorage(sent, null);
