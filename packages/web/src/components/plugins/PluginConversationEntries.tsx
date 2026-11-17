@@ -131,7 +131,6 @@ export function PluginConversationEntries({
               <HubIcon
                 name={typeof entry.icon === 'string' ? entry.icon : 'bot'}
                 className="h-4 w-4"
-                strokeWidth={1.75}
               />
             </span>
             <span className="min-w-0 flex-1 truncate">{entry.label}</span>
