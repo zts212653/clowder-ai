@@ -34,6 +34,7 @@ test('a retired target with lost acknowledgement still wakes an idle caller on t
     f,
     unavailable: true,
     busyCaller: false,
+    drainError: /retired target lost acknowledgement/,
   });
   assert.equal(injected, true, 'the durable failure committed before its acknowledgement was lost');
   assert.equal(await queue.getDurableEntry(threadId, entry.id), null);

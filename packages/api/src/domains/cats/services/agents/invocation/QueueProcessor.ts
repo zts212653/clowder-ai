@@ -4139,18 +4139,7 @@ export class QueueProcessor {
         routingHeld.size > 0 && eligibleTargets.length > 0
           ? { ...candidate, targets: [eligibleTargets[0]!] }
           : candidate;
-      const admission = await this.resolveAdmissionTargets(threadId, candidateForAdmission).catch((err: unknown) => {
-        // A restored source can outlive the producer's last completion wake.
-        // Keep retry ownership on the candidate that actually failed admission.
-        if (!this.retryDeferrals.isDeferred(candidate.id)) {
-          const retryAt = this.retryDeferrals.defer(threadId, candidate.id);
-          this.deps.log.warn(
-            { err, threadId, entryId: candidate.id, retryAt },
-            '[QueueProcessor] admission resolution failed; the exact entry keeps its retry',
-          );
-        }
-        return { kind: 'unresolved' } as const;
-      });
+      const admission = await this.resolveAdmissionTargets(threadId, candidateForAdmission);
       if (admission.kind === 'settled') return admission.attempt;
       if (admission.kind === 'barrier') {
         this.emitContinuationDiagnostic(
@@ -4260,7 +4249,19 @@ export class QueueProcessor {
         }
         if (this.deps.invocationTracker.has(threadId)) return { kind: 'barrier' };
       }
-      const targets = await this.resolveQueuedConversationTargets(entry);
+      const targets = await this.resolveQueuedConversationTargets(entry).catch((err: unknown) => {
+        // A restored source can outlive the producer's last completion wake.
+        // Retry source/target reads, while durable settlement errors still propagate.
+        if (!this.retryDeferrals.isDeferred(entry.id)) {
+          const retryAt = this.retryDeferrals.defer(threadId, entry.id);
+          this.deps.log.warn(
+            { err, threadId, entryId: entry.id, retryAt },
+            '[QueueProcessor] queued source/target resolution failed; the exact entry keeps its retry',
+          );
+        }
+        return null;
+      });
+      if (targets === null) return { kind: 'unresolved' };
       if (targets.length > 0) {
         return {
           kind: 'resolved',

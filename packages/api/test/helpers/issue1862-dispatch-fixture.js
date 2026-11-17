@@ -25,6 +25,7 @@ export async function runDispatch(
     cancel = false,
     unavailable = false,
     busyCaller = true,
+    drainError,
   } = {},
 ) {
   f ??= await queueHttpFixture(t);
@@ -120,7 +121,9 @@ export async function runDispatch(
     },
     { retryDeferral: { baseDelayMs: 60_000 } },
   );
-  await processor.requestDrain(threadId);
+  const drain = processor.requestDrain(threadId);
+  if (drainError) await assert.rejects(drain, drainError);
+  else await drain;
   await waitFor(() => !invocationTracker.getActiveSlots(threadId).some((slot) => targets.includes(slot.catId)));
   if (!unavailable)
     await waitFor(async () => (await records.listLatestTerminalByThreadIds([threadId], userId)).has(threadId));
