@@ -236,18 +236,36 @@ function liveOwnerLinks(resolution: WindowsJobStopResolution): WindowsJobExecuti
  */
 export async function findWindowsLiveOwner(options: {
   records: readonly TurnExecutionRecord[];
+  store: Pick<ITurnExecutionStore, 'get'>;
   dataDir?: string;
   execute?: WindowsJobQueryExecute;
 }): Promise<{ invocationId: string } | undefined> {
   const running = options.records.filter((record) => record.status === 'running');
   if (running.length === 0) return undefined;
   const live = liveOwnerLinks(await resolveWindowsJobStopEvidence(options));
-  const owner = running.find((record) =>
-    live.some(
-      (link) => link.execution.invocationId === record.invocationId && matchesLinkedExecution(record, link.execution),
+  const candidates = live.filter((link) =>
+    running.some(
+      (record) => link.execution.invocationId === record.invocationId && matchesLinkedExecution(record, link.execution),
     ),
   );
-  return owner ? { invocationId: owner.invocationId } : undefined;
+  const owners = await Promise.all(
+    candidates.map(async (link) => {
+      const { invocationId } = link.execution;
+      const current = await options.store.get(invocationId);
+      // The query can outlive a normal stop. Discard its snapshot only after
+      // the exact producer committed teardown and retired every job link.
+      if (
+        current &&
+        matchesLinkedExecution(current, link.execution) &&
+        current.status !== 'running' &&
+        current.providerTeardownAt !== undefined &&
+        readWindowsJobNamesLinkedTo(invocationId, options.dataDir)?.length === 0
+      )
+        return undefined;
+      return { invocationId };
+    }),
+  );
+  return owners.find((owner) => owner !== undefined);
 }
 
 /**
