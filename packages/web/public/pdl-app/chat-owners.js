@@ -58,6 +58,7 @@ function chatOwnerMessageVM(x) {
             }
           : null,
     };
+    if (status === 'confirmed') Object.assign(card, chatFeedbackCard(x.mid, data.feedback[x.mid]));
     x = Object.assign({}, x, { kind: 'proposal', card: card });
   }
   const cb = x.ownerCard && x.ownerCard.type === 'cbauth' ? ownerBlock : null;
@@ -93,6 +94,55 @@ function chatOwnerMessageVM(x) {
     });
   }
   return x;
+}
+/* A confirmed feedback card carries its public report to a GitHub issue: the host's report preview, the GitHub
+   plugin's repos and the draft it returned; only a same-repo issue link counts as published. */
+function chatFeedbackCard(mid, f) {
+  const preview = f && f.report && f.report.value,
+    error = f && ((f.report && f.report.error) || '');
+  if (!preview) return { noticeText: error, result: null };
+  const config = f.config.value,
+    repos = config ? config.repos : [],
+    d = f.draft,
+    report = CS.feedbackEdits[mid] || preview,
+    repoId = 'feedback-repo-' + mid,
+    repo = d ? d.targetRepo : CS.f[repoId] || (config && config.defaultRepo) || repos[0] || '',
+    published =
+      d &&
+      d.status === 'published' &&
+      String(d.githubIssueUrl).toLowerCase() ===
+        ('https://github.com/' + d.targetRepo + '/issues/' + d.githubIssueNumber).toLowerCase(),
+    state = published
+      ? 'published'
+      : d && d.status === 'cancelled'
+        ? 'cancelled'
+        : d && d.status !== 'draft'
+          ? 'uncertain'
+          : config
+            ? ''
+            : 'unavailable',
+    open = !published && state !== 'cancelled',
+    rejected = (chatOwnerData().proposalErrors[mid] || '') !== '';
+  return {
+    title: report.title,
+    first: report.bodyMarkdown,
+    result: null,
+    fields: repos.length === 1 ? [{ field: 'repo', v: repo }] : null,
+    report: {
+      state: state,
+      text: '# ' + report.title + '\n\n' + report.bodyMarkdown,
+      title: report.title,
+      bodyMarkdown: report.bodyMarkdown,
+      repoId: repoId,
+      repo: repo,
+      repos: !d && repos.length > 1 ? repos : null,
+      canEdit: open && state !== 'uncertain',
+      canPublish: open && repos.indexOf(repo) >= 0,
+      manualUrl: open && rejected && repos.indexOf(repo) >= 0 ? 'https://github.com/' + repo + '/issues/new' : '',
+      url: published ? d.githubIssueUrl : '',
+      issue: published ? d.targetRepo + '#' + d.githubIssueNumber : '',
+    },
+  };
 }
 let chatOnboardingSnapshot;
 function syncChatOwners() {
@@ -172,6 +222,42 @@ function bindChatOwners() {
   };
   A.proposalOwnerRefresh = function (d) {
     return chatAction('proposalOwnerRefresh', d);
+  };
+  CS.feedbackEdits = {};
+  const feedbackReport = function (mid) {
+    return chatFeedbackCard(mid, chatOwnerData().feedback[mid]).report;
+  };
+  A.feedbackEdit = function (d) {
+    const report = feedbackReport(d.mid);
+    dialog({
+      kind: 'feedbackReport',
+      args: { title: report.title, bodyMarkdown: report.bodyMarkdown },
+      on: function () {
+        const title = val('feedback-title');
+        if (!title) return fieldErr('feedback-title', tc('common.required'));
+        CS.feedbackEdits[d.mid] = { title: title, bodyMarkdown: val('feedback-body', true) };
+        render(true);
+        return true;
+      },
+    });
+  };
+  A.feedbackPublish = function (d) {
+    const report = feedbackReport(d.mid);
+    dialog({
+      kind: 'feedbackPublish',
+      args: { repo: report.repo },
+      on: async function () {
+        await chatAction('feedbackPublish', {
+          mid: d.mid,
+          repo: report.repo,
+          title: report.title,
+          bodyMarkdown: report.bodyMarkdown,
+        });
+        const done = feedbackReport(d.mid);
+        if (done.url) A.openUrl({ url: done.url });
+        return true;
+      },
+    });
   };
 
   A.queueTargets = async function (d) {
