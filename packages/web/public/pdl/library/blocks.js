@@ -254,6 +254,7 @@ const PART_ROLE = { meta: 'vw-meta', badge: 'vw-badge', twisty: 'vw-ic vw-turn' 
 function pvPart(p, sc, root) {
   if (p == null) return '';
   if (typeof p === 'string') return pvText(p, sc, root);
+  if (typeof p !== 'object') return h(String(p));   /* 数字、布尔（插件和接口的数据里常有）按文字画 */
   if (!pvOk(p.when, sc, root)) return '';
   if (p.lit != null) return h(String(p.lit));
   if ('of' in p) { const x = pv(p, sc, root); return x == null ? '' : typeof x === 'object' ? pvPart(x, sc, root) : h(String(x)); }   /* 值的写法 / 值映射当片段：取到字就转义，取到片段就照片段画 */
