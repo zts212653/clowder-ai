@@ -28,7 +28,8 @@ function walk(root, directory = root, output = []) {
   for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
     const absolute = path.join(directory, entry.name);
     if (entry.isDirectory()) walk(root, absolute, output);
-    else if (entry.isFile()) output.push({ absolute, relative: toPosix(path.relative(root, absolute)), bytes: fs.statSync(absolute).size });
+    else if (entry.isFile())
+      output.push({ absolute, relative: toPosix(path.relative(root, absolute)), bytes: fs.statSync(absolute).size });
   }
   return output;
 }
@@ -38,8 +39,13 @@ function walk(root, directory = root, output = []) {
  * @param {{swc?: boolean, platform?: boolean, maps?: boolean, dryRun?: boolean}} options
  * @returns {{removedFiles: number, removedBytes: number, byCategory: Record<string, {files: number, bytes: number}>}}
  */
-export function pruneFrozenRuntimeRedundancy(root, { swc = false, platform = false, maps = false, dryRun = false } = {}) {
-  const enabled = Object.entries({ swc, platform, maps }).filter(([, value]) => value).map(([name]) => name);
+export function pruneFrozenRuntimeRedundancy(
+  root,
+  { swc = false, platform = false, maps = false, dryRun = false } = {},
+) {
+  const enabled = Object.entries({ swc, platform, maps })
+    .filter(([, value]) => value)
+    .map(([name]) => name);
   const byCategory = Object.fromEntries(enabled.map((name) => [name, { files: 0, bytes: 0 }]));
   if (enabled.length === 0) return { removedFiles: 0, removedBytes: 0, byCategory };
 

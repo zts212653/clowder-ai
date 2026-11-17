@@ -6,8 +6,8 @@ import { fileURLToPath } from 'node:url';
 import { bundleDesktopApi } from './bundle-desktop-api.mjs';
 import { bundleRuntimePackages } from './bundle-runtime-packages.mjs';
 import { exportFrozenRuntime } from './frozen-runtime-export.mjs';
-import { pruneFrozenRuntimeRedundancy } from './frozen-runtime-prune.mjs';
 import { readFrozenRuntimeInputs } from './frozen-runtime-inputs.mjs';
+import { pruneFrozenRuntimeRedundancy } from './frozen-runtime-prune.mjs';
 import { profileDesktopStartup } from './profile-desktop-startup.mjs';
 import { rebuildFrozenDependencies } from './rebuild-frozen-dependencies.mjs';
 
