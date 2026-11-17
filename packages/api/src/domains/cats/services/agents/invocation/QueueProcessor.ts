@@ -3517,8 +3517,11 @@ export class QueueProcessor {
     if (!state.owner) {
       const owner = this.runDrain(threadId, state).finally(() => {
         if (state.owner === owner) state.owner = undefined;
-        if (state.dirty) void this.requestDrain(threadId);
-        else this.threadDrains.delete(threadId);
+        if (state.dirty) {
+          void this.requestDrain(threadId).catch((err: unknown) =>
+            this.deps.log.error({ err, threadId }, '[QueueProcessor] follow-up drain failed'),
+          );
+        } else this.threadDrains.delete(threadId);
       });
       state.owner = owner;
     }
@@ -3532,7 +3535,7 @@ export class QueueProcessor {
       const bypassSuppressionEpochByCatId = new Map(state.bypassSuppressionEpochByCatId);
       state.bypassSuppressionEpochByCatId?.clear();
       while (true) {
-        const result = await this.tryExecuteNextAcrossUsers(threadId, bypassSuppressionEpochByCatId);
+        const result = await this.tryExecuteNextAcrossUsers(threadId, state, bypassSuppressionEpochByCatId);
         // One drain owns one source entry. Its exact target set fans out as one
         // admission unit; the durable handoff callback signals the next drain.
         // This preserves source comparator order without waiting for providers
@@ -4028,6 +4031,7 @@ export class QueueProcessor {
    */
   private async tryExecuteNextAcrossUsers(
     threadId: string,
+    state: ThreadDrainState,
     bypassSuppressionEpochByCatId: ReadonlyMap<string, number> = new Map(),
   ): Promise<QueueAdmissionAttempt> {
     const candidates = this.deps.queue.listPendingAcrossUsers(threadId);
@@ -4061,6 +4065,7 @@ export class QueueProcessor {
           continue;
         }
         if (
+          !this.retryDeferrals.isDeferred(candidate.id) &&
           candidate.execution.liveSessionId &&
           candidate.targets.length === 1 &&
           (await this.claimGroupHasExistingReceiver([candidate], candidate.targets[0]!))
@@ -4074,6 +4079,7 @@ export class QueueProcessor {
           return { started: false, progressed: Boolean(claimed) };
         }
         if (
+          !this.retryDeferrals.isDeferred(candidate.id) &&
           candidate.execution.liveSessionId &&
           (candidate.targets.length !== 1 ||
             !candidate.targets.every(
@@ -4144,9 +4150,13 @@ export class QueueProcessor {
           routingHeld.size > 0 && eligibleTargets.length > 0
             ? { ...candidate, targets: [eligibleTargets[0]!] }
             : candidate;
-        const admission = await this.resolveAdmissionTargets(threadId, candidateForAdmission);
+        // A deferred source retains its requested targets without reading the same
+        // failing receiver again. Unknown recipients still fence the whole scan.
+        const admission = this.retryDeferrals.isDeferred(candidate.id)
+          ? { kind: 'unresolved' as const }
+          : await this.resolveAdmissionTargets(threadId, candidateForAdmission);
         if (admission.kind === 'settled') return admission.attempt;
-        if (admission.kind === 'barrier') {
+        if (admission.kind === 'barrier' || (admission.kind === 'unresolved' && candidate.targets.length === 0)) {
           this.emitContinuationDiagnostic(
             threadId,
             'targetless',
@@ -4190,6 +4200,9 @@ export class QueueProcessor {
           !this.retryDeferrals.isDeferred(pending.id)
         ) {
           const retryAt = this.retryDeferrals.defer(threadId, pending.id);
+          // Preserve this caller's error, then let the existing coordinator scan
+          // independent targets while this exact source waits for its timer.
+          state.dirty = true;
           this.deps.log.warn(
             { err: error, threadId, entryId: pending.id, retryAt },
             '[QueueProcessor] queued conversation admission failed; the exact entry keeps its retry',
