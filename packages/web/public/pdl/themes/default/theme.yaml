@@ -7797,21 +7797,15 @@ pdl:
                       - type: list
                         from: "@sources"
                         row: matter.entry
-                        when: "@sources"
+                        optional: true
                       - type: text
                         text: t:memoryGroup.noNew
                         when: "@write.joined"
-                      - type: fold
-                        when: "@write.previous"
-                        key: "@key"
-                        height: s
-                        blocks:
-                          - type: text
-                            text: t:memoryGroup.beforeCorrection
-                            variant: meta
-                          - type: list
-                            from: "@write.previous"
-                            row: matter.entry
+                      - type: list
+                        from: "@write.previous"
+                        row: matter.entry
+                        label: t:memoryGroup.beforeCorrection
+                        optional: true
             - type: steps
               variant: checks
               from: "@rich.checks"
