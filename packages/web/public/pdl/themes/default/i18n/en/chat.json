@@ -155,5 +155,10 @@
   },
   "inboxRefresh": {
     "retained": "Refresh unconfirmed; retained content is display-only"
+  },
+  "holdNotice": {
+    "open": "View in workbench",
+    "cancel": "Cancel hold",
+    "cancelTitle": "Cancel {0}'s hold?"
   }
 }

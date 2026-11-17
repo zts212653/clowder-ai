@@ -910,6 +910,14 @@
       "parser_miss": "工具已返回，结果未能解析",
       "result_unmerged": "这次检索的结果尚未记录",
       "unrecorded": "命中详情没有记录下来"
+    },
+    "matter": {
+      "both": "读了「{0}」的 {1} 条归纳及 {2} 条摘录",
+      "summaries": "读了「{0}」的 {1} 条归纳",
+      "messages": "参考了「{0}」的 {1} 条消息",
+      "changed": "参考资料已更正",
+      "gone": "参考资料已不可用",
+      "open": "打开事情页"
     }
   },
   "voiceReview": {

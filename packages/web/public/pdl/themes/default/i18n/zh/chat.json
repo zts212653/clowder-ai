@@ -812,7 +812,17 @@
       "confirmText": {
         "forget": "清除这页及其来源关联，原消息会保留。此操作无法撤销。",
         "retire": "停止用于新的回看，保留记录与来源。"
-      }
+      },
+      "threadSource": "对话出处",
+      "summary": "归纳",
+      "summaryBy": "{0}的归纳（非原话）",
+      "summaryUnknown": "归纳作者未知（非原话）",
+      "pointer": "回源指针，未核对原话",
+      "invocation": "记录发生处，未核对原话",
+      "summaryOrQuote": "归纳和原话至少填一个",
+      "quoteNeedsMessage": "填了原话就要用消息链接（原话在那条消息里定位）",
+      "linkTip": "对话链接或消息链接都可以；只有对话链接时，记下的是回到那个对话的指针",
+      "summaryTip": "你对这件事的理解，不是原话；会记成你的归纳"
     },
     "deferred": {
       "title": "暂存的人物线索",
@@ -1447,7 +1457,20 @@
     "source": "查看原话",
     "change": "修改建议",
     "changePrompt": "请按修改建议重新提交这条记忆提案：",
-    "changeBlocked": "原对话草稿暂未就绪，请稍后重试。"
+    "changeBlocked": "原对话草稿暂未就绪，请稍后重试。",
+    "legacyReceipt": "旧回执没有保存当次变更；以下是当前页面内容。",
+    "revision": "第 {0} 版",
+    "noNew": "已有记录，本次未新增",
+    "beforeCorrection": "更正前的内容",
+    "op": {
+      "create": "新建事情页",
+      "append": "追加",
+      "edit": "修改说明或标题",
+      "correct": "更正条目",
+      "retire_entry": "停用条目",
+      "retire": "停用事情页",
+      "forget": "遗忘事情页"
+    }
   },
   "proposalRecovery": {
     "uncertain": "批准结果尚未确认",
@@ -1459,5 +1482,10 @@
   },
   "inboxRefresh": {
     "retained": "刷新尚未确认，保留内容仅供查看"
+  },
+  "holdNotice": {
+    "open": "在工作台查看",
+    "cancel": "取消持球",
+    "cancelTitle": "取消{0}的持球？"
   }
 }

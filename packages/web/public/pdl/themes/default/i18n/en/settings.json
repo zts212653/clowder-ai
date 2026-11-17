@@ -18,7 +18,17 @@
       "noCommand": "Install the official agy CLI first",
       "refresh": "Refresh login status",
       "unavailable": "Requires AGY Native and a ready login file"
-    }
+    },
+    "quotaFailure": {
+      "owner_unknown": "Sign-in unverified",
+      "stale": "Last reading"
+    },
+    "quotaWindow": {
+      "five_hour": "5 hours",
+      "seven_day": "Week (all models)",
+      "fable": "Week (Fable)"
+    },
+    "quotaResets": "Resets {0}"
   },
   "pluginFrameClose": {
     "title": "Close plugin panel",
@@ -29,5 +39,12 @@
     "discardText": "The plugin has not finished saving. The latest unsaved changes in this window may be lost when it closes.",
     "discard": "Discard and close",
     "wait": "Keep waiting"
+  },
+  "settingsUi": {
+    "account": {
+      "normal": {
+        "cliManaged": "CLI-managed sign-in"
+      }
+    }
   }
 }

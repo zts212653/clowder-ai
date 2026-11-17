@@ -7751,26 +7751,67 @@ pdl:
                       - type: text
                         text: t:memoryGroup.forgotten
                         when: "@redacted"
+                      - type: text
+                        text: t:memoryGroup.legacyReceipt
+                        variant: meta
+                        when: "@legacy"
+                      - type: text
+                        variant: meta
+                        when: "@write"
+                        parts:
+                          - text:
+                              of: "@write.op"
+                              map:
+                                create: t:memoryGroup.op.create
+                                append: t:memoryGroup.op.append
+                                edit: t:memoryGroup.op.edit
+                                correct: t:memoryGroup.op.correct
+                                retire_entry: t:memoryGroup.op.retire_entry
+                                retire: t:memoryGroup.op.retire
+                                forget: t:memoryGroup.op.forget
+                                _: "@write.op"
+                          - lit: " · "
+                          - text:
+                              t: memoryGroup.revision
+                              args:
+                                - "@write.revision"
+                          - lit: " · "
+                          - text:
+                              of: "@write.at"
+                              fmt: stamp
+                      - type: notice
+                        tone: warn
+                        text: t:memoryGroup.sourceChanged
+                        when: "@write.sourcesChanged"
+                      - type: component
+                        use: diff
+                        props: "@write.title"
+                        when: "@write.title"
+                      - type: component
+                        use: diff
+                        props: "@write.description"
+                        when: "@write.description"
                       - type: markdown
                         text: "@body"
                         when: "@body"
-                      - type: each
+                      - type: list
                         from: "@sources"
+                        row: matter.entry
+                        when: "@sources"
+                      - type: text
+                        text: t:memoryGroup.noNew
+                        when: "@write.joined"
+                      - type: fold
+                        when: "@write.previous"
+                        key: "@key"
+                        height: s
                         blocks:
                           - type: text
-                            text: "@quote"
-                            when: "@quote"
-                          - type: notice
-                            tone: warn
-                            text: t:memoryGroup.sourceChanged
-                            when: "@sourceChanged"
-                          - type: button
-                            link: true
-                            label: t:memoryGroup.source
-                            act: msgJump
-                            args:
-                              t: "@threadId"
-                              mid: "@messageId"
+                            text: t:memoryGroup.beforeCorrection
+                            variant: meta
+                          - type: list
+                            from: "@write.previous"
+                            row: matter.entry
             - type: steps
               variant: checks
               from: "@rich.checks"
@@ -8119,6 +8160,22 @@ pdl:
         id: recovery.notice
         data: "@recovery"
         when: "@recovery"
+      - type: toolbar
+        when: "@hold"
+        items:
+          - type: button
+            label: t:holdNotice.open
+            act: holdOpen
+            args:
+              k: "@hold.k"
+              wait: "@hold.wait"
+          - type: button
+            label: t:holdNotice.cancel
+            act: holdCancel
+            args:
+              k: "@hold.k"
+              wait: "@hold.wait"
+            when: "@hold.cancelable"
       - type: text
         variant: meta
         parts:
@@ -11733,7 +11790,31 @@ pdl:
           row:
             layout: two
             key: "@key"
-            title: "@title"
+            title:
+              - text: "@title"
+                when: "!@matter"
+              - text:
+                  of: "@matter.kind"
+                  map:
+                    both:
+                      t: wsRecall.matter.both
+                      args:
+                        - "@matter.title"
+                        - "@matter.summaries"
+                        - "@matter.excerpts"
+                    summaries:
+                      t: wsRecall.matter.summaries
+                      args:
+                        - "@matter.title"
+                        - "@matter.summaries"
+                    messages:
+                      t: wsRecall.matter.messages
+                      args:
+                        - "@matter.title"
+                        - "@matter.excerpts"
+                    changed: t:wsRecall.matter.changed
+                    _: t:wsRecall.matter.gone
+                when: "@matter"
             sub:
               parts:
                 - parts:
@@ -11830,6 +11911,13 @@ pdl:
                       mid: "@mid"
                       t: "@thread"
                     when: "@canLocate"
+                  - type: button
+                    label: t:wsRecall.matter.open
+                    act: memoryGroupOpen
+                    args:
+                      target: matter
+                      id: "@matter.id"
+                    when: "@matter.id"
           empty: t:wsRecall.empty
         - type: toolbar
           when:
@@ -15961,65 +16049,7 @@ pdl:
           id: matter-entries
           when: $.matter
           from: $.entries
-          row:
-            layout: two
-            key: "@entryId"
-            title:
-              - text: "@quote"
-                when:
-                  of: "@sourceStatus"
-                  map:
-                    current: true
-                    _: false
-              - text: t:memoryOwners.matter.sourceChanged
-                when:
-                  of: "@sourceStatus"
-                  map:
-                    changed: true
-                    _: false
-            sub:
-              - who: "@speaker"
-                form: name
-              - text:
-                  of: "@source.timestamp"
-                  fmt: stamp
-              - text:
-                  of: "@attribution"
-                  map:
-                    quoted_in_message: t:memoryOwners.matter.quoted
-                    _: ""
-              - text:
-                  of: "@status"
-                  map:
-                    superseded: t:memoryOwners.matter.superseded
-                    retired: t:memoryOwners.matter.retiredEntry
-                    _: ""
-            act: msgJump
-            args:
-              t: "@source.threadId"
-              mid: "@source.messageId"
-            acts:
-              - label: t:memoryOwners.matter.replace
-                icon: edit
-                act: matterSource
-                args:
-                  entryId: "@entryId"
-                when:
-                  of: "@status"
-                  map:
-                    active: true
-                    _: false
-              - label: t:memoryOwners.matter.retireEntry
-                icon: archive
-                act: matterChange
-                args:
-                  operation: retire_entry
-                  entryId: "@entryId"
-                when:
-                  of: "@status"
-                  map:
-                    active: true
-                    _: false
+          row: matter.entry
           next:
             key: matter-entries
             act: matterRead
@@ -16076,12 +16106,20 @@ pdl:
           when: $.create
         - id: matter-link
           label: t:memoryOwners.matter.messageLink
+          value: $.link
           req: true
+          help: t:memoryOwners.matter.linkTip
+        - id: matter-summary
+          label: t:memoryOwners.matter.summary
+          value: $.summary
+          area: true
+          max: 4000
+          help: t:memoryOwners.matter.summaryTip
         - id: matter-quote
           label: t:memoryOwners.matter.quote
+          value: $.quote
           area: true
           max: 8000
-          req: true
     dlg.matterConfirm:
       title:
         t: memoryOwners.matter.confirmTitle
@@ -30393,6 +30431,16 @@ pdl:
         - id: stop-feedback
           check: t:execDetail.feedback
           when: $.command
+    dlg.cancelHoldWait:
+      title:
+        t: holdNotice.cancelTitle
+        args:
+          - $.name
+      ok: t:wsLive.hold.cancel
+      danger: true
+      fields:
+        - id: hold-feedback
+          check: t:execDetail.feedback
     dlg.opForceReset:
       title: t:execDetail.forceReset.title
       ok: t:execDetail.forceReset.title
@@ -32386,6 +32434,76 @@ pdl:
           --tint-5: "#3d3826"
           --tint-6: "#36332f"
   rows:
+    matter.entry:
+      layout: two
+      key: "@entryId"
+      title:
+        - text: "@summary"
+          when: "@summary"
+        - text: "@quote"
+          when:
+            - "!@summary"
+            - "@quote"
+        - text: t:memoryOwners.matter.sourceChanged
+          when: "@changed"
+      sub:
+        - who: "@speaker"
+          form: name
+          when: "@speaker"
+        - text: t:memoryOwners.matter.threadSource
+          when: "!@speaker"
+        - text:
+            of: "@time"
+            fmt: stamp
+          when: "@time"
+        - text:
+            t: memoryOwners.matter.summaryBy
+            args:
+              - "@summaryBy"
+          when: "@summaryBy"
+        - text: t:memoryOwners.matter.summaryUnknown
+          when:
+            - "@summary"
+            - "!@summaryBy"
+        - text:
+            of: "@pointer"
+            map:
+              explicit: t:memoryOwners.matter.pointer
+              invocation: t:memoryOwners.matter.invocation
+              _: ""
+        - text:
+            of: "@attribution"
+            map:
+              quoted_in_message: t:memoryOwners.matter.quoted
+              _: ""
+        - text:
+            of: "@status"
+            map:
+              superseded: t:memoryOwners.matter.superseded
+              retired: t:memoryOwners.matter.retiredEntry
+              _: ""
+      act: msgJump
+      args: "@jump"
+      acts:
+        - label: t:memoryOwners.matter.replace
+          icon: edit
+          act: matterSource
+          args:
+            entryId: "@entryId"
+          when: "@editable"
+        - label: t:memoryOwners.matter.retireEntry
+          icon: archive
+          act: matterChange
+          args:
+            operation: retire_entry
+            entryId: "@entryId"
+          when: "@editable"
+      expand:
+        - type: text
+          text: "@quote"
+          when:
+            - "@summary"
+            - "@quote"
     thread.row:
       layout: two
       key: "@id"
@@ -34373,6 +34491,7 @@ pdl:
               none: t:settingsUi.account.normal.none
               nokey: t:settingsUi.account.normal.nokey
               cancelled: t:settingsUi.account.normal.cancelled
+              cliManaged: t:settingsUi.account.normal.cliManaged
               expired: ""
               login: ""
               conflict: ""
@@ -34495,6 +34614,8 @@ pdl:
                     map:
                       renewal_required: warn
                       signin_required: warn
+                      owner_unknown: warn
+                      stale: warn
                       service_unreachable: danger
                       _: "@quotaData.fail"
                   text:
@@ -34515,7 +34636,13 @@ pdl:
                       sep: " · "
                       each:
                         parts:
-                          - text: "@label"
+                          - text:
+                              of: "@window"
+                              map:
+                                five_hour: t:accounts.quotaWindow.five_hour
+                                seven_day: t:accounts.quotaWindow.seven_day
+                                seven_day_overage_included: t:accounts.quotaWindow.fable
+                                _: "@label"
                           - text: " "
                           - text:
                               t: settings.quotaLeft
@@ -34523,6 +34650,16 @@ pdl:
                                 - "@left"
                   tip:
                     of: "@quotaData.resets"
+                    item:
+                      of: "@at"
+                      gte: 0
+                      map:
+                        "true":
+                          t: accounts.quotaResets
+                          args:
+                            - of: "@at"
+                              fmt: stamp
+                        _: "@"
                     sep: " · "
                   when: "@quotaData.items"
                 - type: text

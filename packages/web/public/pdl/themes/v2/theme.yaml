@@ -28180,6 +28180,16 @@ pdl:
         - id: stop-feedback
           check: t:execDetail.feedback
           when: $.command
+    dlg.cancelHoldWait:
+      title:
+        t: holdNotice.cancelTitle
+        args:
+          - $.name
+      ok: t:wsLive.hold.cancel
+      danger: true
+      fields:
+        - id: hold-feedback
+          check: t:execDetail.feedback
     dlg.opForceReset:
       title: t:execDetail.forceReset.title
       ok: t:execDetail.forceReset.title
