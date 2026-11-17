@@ -12,7 +12,7 @@
 .calendar-day[data-today="true"] > span:first-child { text-decoration: underline; text-underline-offset: var(--sp-xs); }
 .calendar-count { min-height: 1em; line-height: 1; }
 .tm { position: relative; flex: 1; min-height: calc(6 * var(--row-h-1)); display: flex; flex-direction: column; background: var(--term-bg); border-radius: 0 var(--r-m) var(--r-m) var(--r-m); }
-.tm-screen { flex: 1; min-height: 0; padding: var(--sp-s) var(--sp-m) var(--sp-m); font: var(--fs-s) var(--font-mono); color: var(--term-fg); }
+.tm-screen { flex: 1; min-height: 0; contain: size; padding: var(--sp-s) var(--sp-m) var(--sp-m); font: var(--fs-s) var(--font-mono); color: var(--term-fg); }
 .tm.ro .tm-screen { cursor: default; }
 .tm.off .tm-screen { opacity: var(--op-disabled); }
 /* 差异 */

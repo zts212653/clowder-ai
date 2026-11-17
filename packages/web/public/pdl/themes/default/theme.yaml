@@ -785,14 +785,6 @@ pdl:
             action: reply
           scope: page
           move: chat.message.actions
-        - id: msg.retry
-          title: t:entryLayout.actions.retryTurn
-          icon: refresh
-          open:
-            action: cafeMsgRetry
-          when: "@fromMember"
-          scope: page
-          move: chat.message.actions
         - id: msg.speak
           title: t:frame.speak
           icon: speaker
@@ -21907,13 +21899,6 @@ pdl:
                   label: t:common.confirm
                   act: queueTargetsSave
                   when: $.canSave
-    dlg.messageRetry:
-      title: t:chatMessage.retry.title
-      text:
-        t: chatMessage.retry.text
-        args:
-          - $.name
-      ok: t:common.retry
     dlg.tagDelete:
       title:
         t: tagManager.delete.title

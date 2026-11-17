@@ -20566,13 +20566,6 @@ pdl:
               - type: view
                 id: v2.queueTargets
       bare: true
-    dlg.messageRetry:
-      title: t:chatMessage.retry.title
-      text:
-        t: chatMessage.retry.text
-        args:
-          - $.name
-      ok: t:common.retry
     dlg.tagDelete:
       title:
         t: tagManager.delete.title

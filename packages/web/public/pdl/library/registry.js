@@ -79,7 +79,7 @@ const LIB_ACTIONS = {
 const LIB_ACT_OF = {
   close: 'close', back: function (d) { return d.exit === 'x' ? 'close' : 'back'; },   /* 层的 ✕ 退出也走 back（回到被盖住的那一层），含义是关闭；带标题的 ‹ 才是返回 */ forward: 'forward', copy: 'copy', refresh: 'refresh', rename: 'edit', send: 'reply', stop: 'stop',   /* 改名就是就地编辑（同一支笔）；⋯ 只由 moreBtn 画，菜单触发（下拉、目标选择）的图标画的是东西，不是动作 */
   add: 'add', chipDel: 'close', searchGo: 'search', openUrl: 'openExternal',
-  cafeMsgRetry: 'refresh', cafeQueueSend: 'send', cafeRunStop: 'stop', opLiveStop: 'stop', pdlThemeExport: 'download', cafeConnClose: 'close',   /* 重试一轮 = 再来一次（同一个 ↻） */
+  cafeQueueSend: 'send', cafeRunStop: 'stop', opLiveStop: 'stop', pdlThemeExport: 'download', cafeConnClose: 'close',
   open: function (d) { return { msg: 'jump', traceMsg: 'jump' }[d.kind] || ''; },   /* 回到原处（回复引用、跳到原文）：全站只有这一个动作和字形 */
   tab: function (d) { return { close: 'close', split: 'close' }[d.op] || ''; },   /* 关标签、结束并排（并排头上的 ×） */
   pcfOp: function (d) { return d.op === 'del' ? 'delete' : d.op === 'add' ? 'add' : ''; },

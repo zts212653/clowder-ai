@@ -825,7 +825,6 @@ window.clowderChat = {
       'send',
       'stop',
       'cafeRunStop',
-      'cafeMsgRetry',
       'cafeQueue',
       'cafeReadAll',
       'cafeWhisper',
@@ -1401,16 +1400,6 @@ window.clowderChat = {
         },
       };
     });
-    A.cafeMsgRetry = function (d) {
-      const x = chatRead('chatStream').items[+d.i];
-      dialog({
-        kind: 'messageRetry',
-        args: { name: pdlReads('who').member(x.who).name },
-        on: function () {
-          return chatAction('cafeMsgRetry', { mid: x.mid });
-        },
-      });
-    };
     A.cafeExecOpen = function (d) {
       return chatAction('cafeExecOpen', { mid: chatRead('chatStream').items[+d.i].mid });
     };

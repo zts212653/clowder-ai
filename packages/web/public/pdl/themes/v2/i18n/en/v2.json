@@ -4469,10 +4469,6 @@
   "chatMessage": {
     "deleted": "This message was deleted.",
     "deleteAnno": "Delete annotation",
-    "retry": {
-      "title": "Retry this turn?",
-      "text": "Have {0} reply again with the same input. The original reply stays below for comparison."
-    },
     "watcher": {
       "title": "Watcher cat",
       "thread": "Watch this conversation",

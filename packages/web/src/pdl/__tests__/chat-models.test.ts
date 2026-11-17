@@ -384,6 +384,22 @@ describe('chat contract projections', () => {
     expect(JSON.stringify(item.exec)).toContain('过程思考');
   });
 
+  it('names the thread a cross-posted message came from and jumps back to it', () => {
+    const data = fixtureData();
+    data.threads.push({ ...data.threads[0], id: 'source-thread', title: '来源对话' });
+    data.messages[1] = {
+      ...data.messages[1],
+      extra: { crossPost: { sourceThreadId: 'source-thread', sourceInvocationId: 'inv-1' } },
+    };
+    const item = chatModels(data, fixtureUi()).chatStream.items[1];
+    expect(item.relayed).toBe(true);
+    expect(item.recv).toEqual([
+      { thread: 'source-thread', title: '来源对话', mid: '', time: data.messages[1].timestamp },
+    ]);
+    expect(item.jump).toEqual({ thread: 'source-thread', mid: '' });
+    expect(chatModels(fixtureData(), fixtureUi()).chatStream.items[1].jump).toBeNull();
+  });
+
   it('keeps a stream-origin answer in the body when its output layout is unavailable', () => {
     const data = fixtureData(),
       content = 'Full answer. '.repeat(100);

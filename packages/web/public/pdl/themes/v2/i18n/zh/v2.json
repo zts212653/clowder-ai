@@ -4469,10 +4469,6 @@
   "chatMessage": {
     "deleted": "这条消息已删除。",
     "deleteAnno": "删除批注",
-    "retry": {
-      "title": "重试这一轮？",
-      "text": "让 {0} 用同样的输入重新回复。原回复保留在下面，方便对比。"
-    },
     "watcher": {
       "title": "守望猫",
       "thread": "守望这条对话",

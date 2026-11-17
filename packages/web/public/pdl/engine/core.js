@@ -206,12 +206,13 @@ const root = document.getElementById('app');
    悬停或键盘聚焦 --tip-delay（0.7s）后出现在目标下方（放不下就在上方），离开、按下、滚动、按键立刻消失 */
 const TIP = { el: null, t: 0, at: null };
 function tipHide() { clearTimeout(TIP.t); TIP.at = null; if (TIP.el) { TIP.el.classList.remove('on'); TIP.el.hidePopover(); } if (typeof ANCHORED !== 'undefined' && ANCHORED.tip) anchorTo('tip', null); }
-/* 被截断的字（单行省略、多行截断）悬停看全文：哪里都一样，不靠组件逐个标。从指到的元素往上看几层，第一个字被截断的就是它 */
+/* 被截断的字（单行省略、多行截断）悬停看全文：哪里都一样，不靠组件逐个标。从指到的元素往上看几层，第一个字被截断的就是它。
+   旁边有展开开关（aria-expanded，折叠的正文）的不算：看全文就是点开关 */
 function tipClipped(el) {
   for (let i = 0; el && i < 4 && el !== document.body; i++, el = el.parentElement) {
     if (el.matches('[data-tip], button, a, input, textarea, select')) return null;
     const cs = getComputedStyle(el);
-    if (cs.textOverflow === 'ellipsis' && el.scrollWidth > el.clientWidth + 1 || cs.webkitLineClamp !== 'none' && el.scrollHeight > el.clientHeight + 1) return el;
+    if (cs.textOverflow === 'ellipsis' && el.scrollWidth > el.clientWidth + 1 || cs.webkitLineClamp !== 'none' && el.scrollHeight > el.clientHeight + 1) return el.parentElement.querySelector(':scope > [aria-expanded]') ? null : el;
   }
   return null;
 }

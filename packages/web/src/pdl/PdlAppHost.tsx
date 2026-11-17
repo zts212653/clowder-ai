@@ -1406,34 +1406,6 @@ function ChatBinding({
         await reconcileThreadWithServer(threadId, () => false, 'PdlQueue');
         return;
       }
-      case 'cafeMsgRetry': {
-        if (connection.isReadonly) throw new Error('当前连接或页面版本不允许发送');
-        const index = current.current.messages.findIndex((m) => m.id === args.mid);
-        const response = current.current.messages[index];
-        const source = response?.replyTo
-          ? current.current.messages.find((m) => m.id === response.replyTo)
-          : current.current.messages
-              .slice(0, index)
-              .reverse()
-              .find((m) => m.type === 'user');
-        if (!source || !response?.catId) throw new Error('请先加载原问题');
-        if (source.extra?.recall) throw new Error('原问题已撤回');
-        const imageUrls = (source.contentBlocks ?? []).flatMap((b) => (b.type === 'image' ? [b.url] : []));
-        const sourceImages = await downloadImages(imageUrls);
-        const sourceContexts = (source.contentBlocks ?? []).flatMap((b) =>
-          b.type === 'context_attachment' ? [b.attachment] : [],
-        );
-        if (source.contentBlocks?.some((b) => b.type === 'file')) throw new Error('原问题含文件附件，尚未接入此类重试');
-        return handleSend(
-          source.content,
-          sourceImages.length ? sourceImages : undefined,
-          threadId,
-          source.visibility === 'whisper' ? { visibility: 'whisper', whisperTo: source.whisperTo ?? [] } : undefined,
-          source.id,
-          sourceContexts.length ? sourceContexts : undefined,
-          [response.catId],
-        );
-      }
       case 'forward': {
         if (connection.forwardingBlocked) throw new Error('当前连接或页面版本不允许转发');
         const targetCats = JSON.parse(args.cats) as string[];

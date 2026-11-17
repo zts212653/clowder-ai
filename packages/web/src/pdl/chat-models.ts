@@ -737,6 +737,16 @@ export function chatModels(data: ChatData, ui: ChatUiState, input?: ChatProjecti
         md: frame ? '' : md,
         bodyLength: frame ? 0 : md.length,
         relayed: !!message.extra?.crossPost,
+        ...(() => {
+          // A message another thread posted here: the capsule names that thread and the message jumps back to it.
+          const source = message.extra?.crossPost?.sourceThreadId;
+          if (!source || source === data.threadId) return { recv: [], jump: null };
+          const title = data.threads.find((t) => t.id === source)?.title || source;
+          return {
+            recv: [{ thread: source, title, mid: '', time: message.timestamp }],
+            jump: { thread: source, mid: '' },
+          };
+        })(),
         recalled: !!message.extra?.recall,
         card:
           evidenceCards?.[message.id] ??
