@@ -4042,138 +4042,161 @@ export class QueueProcessor {
     let waitingEntries = 0;
     let firstWaitingTarget: string | undefined;
     for (const candidate of candidates) {
-      if (candidate.status === 'claimed') {
-        if (candidate.targets.length === 0) return { started: false };
-        for (const target of candidate.targets) {
-          heldTargets.add(target);
-          heldGuidanceTargets.add(target);
-        }
-        passedOver.set(candidate.id, requestedTargetsKey(candidate));
-        waitingEntries += 1;
-        firstWaitingTarget ??= candidate.targets[0];
-        continue;
-      }
-      const routingHeld = new Set(candidate.delivery.routingHeldTargetIds ?? []);
-      const eligibleTargets = candidate.targets.filter((target) => !routingHeld.has(target));
-      if (candidate.targets.length > 0 && eligibleTargets.length === 0) {
-        passedOver.set(candidate.id, requestedTargetsKey(candidate));
-        continue;
-      }
-      if (
-        candidate.execution.liveSessionId &&
-        candidate.targets.length === 1 &&
-        (await this.claimGroupHasExistingReceiver([candidate], candidate.targets[0]!))
-      ) {
-        const claimed = await this.deps.queue.markProcessingByIdDurable(threadId, candidate.id, candidate.targets[0]!);
-        if (claimed) await this.reconcileClaimedGroupWithExistingReceiver([claimed], candidate.targets[0]!);
-        return { started: false, progressed: Boolean(claimed) };
-      }
-      if (
-        candidate.execution.liveSessionId &&
-        (candidate.targets.length !== 1 ||
-          !candidate.targets.every(
-            (catId) => !heldTargets.has(catId) && this.isSlotAdmissible(threadId, catId, new Map()),
-          ))
-      ) {
-        const settled = await this.terminalizeUnavailableConversationEntry(candidate, 'explicit');
-        return QueueProcessor.terminalizedEntryAttempt(settled);
-      }
-      // Every ingress signals this one owner after durable admission. Append
-      // and a fresh turn share Queue progress; the sender kind chooses neither.
-      let appended = false;
-      if (!this.retryDeferrals.isDeferred(candidate.id)) {
-        for (const targetCatId of eligibleTargets) {
-          if (
-            heldGuidanceTargets.has(targetCatId) ||
-            this.automaticAppendSlots.has(QueueProcessor.slotKey(threadId, targetCatId)) ||
-            this.isAutoResumeSuppressed(threadId, targetCatId)
-          )
-            continue;
-          if (!this.canAppendInCurrentQueueOrder(threadId, candidate.id, targetCatId)) {
-            return { started: false, progressed: true };
+      try {
+        if (candidate.status === 'claimed') {
+          if (candidate.targets.length === 0) return { started: false };
+          for (const target of candidate.targets) {
+            heldTargets.add(target);
+            heldGuidanceTargets.add(target);
           }
-          const beforeAppendRevision = this.deps.queue.snapshotRevision(threadId, queueEntryOwnerId(candidate));
-          const result = await this.appendFromDrain({
-            threadId,
-            userId: queueEntryOwnerId(candidate),
-            entryId: candidate.id,
-            targetCatId,
-          });
-          if (!result || result.outcome === 'appended') appended = true;
-          else if (
-            result.reason === 'state_changed' &&
-            this.deps.queue.snapshotRevision(threadId, queueEntryOwnerId(candidate)) !== beforeAppendRevision
-          ) {
-            // Reordering/claim races invalidate this scan, not the bound parent.
-            return { started: false, progressed: true };
-          } else if (
-            result.reason !== 'active_run_pending' &&
-            candidate.delivery.authorIntentByTarget?.[targetCatId]?.requested === 'continue_current'
-          ) {
-            await this.deps.queue.fallbackQueuedAuthorIntentDurable(
-              threadId,
-              queueEntryOwnerId(candidate),
-              candidate.id,
-              targetCatId,
-              'parent_terminal_before_exposure',
-            );
-          }
+          passedOver.set(candidate.id, requestedTargetsKey(candidate));
+          waitingEntries += 1;
+          firstWaitingTarget ??= candidate.targets[0];
+          continue;
         }
-      }
-      if (appended) return { started: false, progressed: true };
-      // An exact current-run input that cannot append yet must retain its place
-      // among guidance. Re-read after the attempt: a rejected/ended parent may
-      // already have changed this source to next-work through durable fallback.
-      const remaining = this.deps.queue.getEntrySnapshotAcrossUsers(threadId, candidate.id);
-      for (const targetId of eligibleTargets) {
-        const intent = remaining?.delivery.authorIntentByTarget?.[targetId];
+        const routingHeld = new Set(candidate.delivery.routingHeldTargetIds ?? []);
+        const eligibleTargets = candidate.targets.filter((target) => !routingHeld.has(target));
+        if (candidate.targets.length > 0 && eligibleTargets.length === 0) {
+          passedOver.set(candidate.id, requestedTargetsKey(candidate));
+          continue;
+        }
         if (
-          intent?.requested === 'continue_current' &&
-          intent.fallbackAt === undefined &&
-          intent.boundParentInvocationId === this.deps.invocationTracker.getExecutionId?.(threadId, targetId)
+          candidate.execution.liveSessionId &&
+          candidate.targets.length === 1 &&
+          (await this.claimGroupHasExistingReceiver([candidate], candidate.targets[0]!))
         ) {
-          heldGuidanceTargets.add(targetId);
-        }
-      }
-      const candidateForAdmission =
-        routingHeld.size > 0 && eligibleTargets.length > 0
-          ? { ...candidate, targets: [eligibleTargets[0]!] }
-          : candidate;
-      const admission = await this.resolveAdmissionTargets(threadId, candidateForAdmission);
-      if (admission.kind === 'settled') return admission.attempt;
-      if (admission.kind === 'barrier') {
-        this.emitContinuationDiagnostic(
-          threadId,
-          'targetless',
-          'all_candidate_slots_busy',
-          waitingEntries + 1,
-          candidate.id,
-        );
-        return { started: false };
-      }
-      const targets = admission.kind === 'resolved' ? admission.targets : queueEntryTargetCats(candidate);
-      if (admission.kind === 'resolved' && !this.retryDeferrals.isDeferred(candidate.id)) {
-        const availableTargets = targets.filter(
-          (catId) => !heldTargets.has(catId) && this.isSlotAdmissible(threadId, catId, bypassSuppressionEpochByCatId),
-        );
-        if (availableTargets.length > 0) {
-          // The existing ledger claims one recipient or the whole row. A partial set advances
-          // one member per durable handoff, which wakes the drain before that provider finishes.
-          const claimTargets =
-            availableTargets.length === candidate.targets.length ? availableTargets : availableTargets.slice(0, 1);
-          const attempt = await this.startSelectedEntry(
+          const claimed = await this.deps.queue.markProcessingByIdDurable(
             threadId,
-            candidate,
-            { ...admission, targets: claimTargets },
-            passedOver,
+            candidate.id,
+            candidate.targets[0]!,
           );
-          if (attempt) return attempt;
+          if (claimed) await this.reconcileClaimedGroupWithExistingReceiver([claimed], candidate.targets[0]!);
+          return { started: false, progressed: Boolean(claimed) };
         }
+        if (
+          candidate.execution.liveSessionId &&
+          (candidate.targets.length !== 1 ||
+            !candidate.targets.every(
+              (catId) => !heldTargets.has(catId) && this.isSlotAdmissible(threadId, catId, new Map()),
+            ))
+        ) {
+          const settled = await this.terminalizeUnavailableConversationEntry(candidate, 'explicit');
+          return QueueProcessor.terminalizedEntryAttempt(settled);
+        }
+        // Every ingress signals this one owner after durable admission. Append
+        // and a fresh turn share Queue progress; the sender kind chooses neither.
+        let appended = false;
+        if (!this.retryDeferrals.isDeferred(candidate.id)) {
+          for (const targetCatId of eligibleTargets) {
+            if (
+              heldGuidanceTargets.has(targetCatId) ||
+              this.automaticAppendSlots.has(QueueProcessor.slotKey(threadId, targetCatId)) ||
+              this.isAutoResumeSuppressed(threadId, targetCatId)
+            )
+              continue;
+            if (!this.canAppendInCurrentQueueOrder(threadId, candidate.id, targetCatId)) {
+              return { started: false, progressed: true };
+            }
+            const beforeAppendRevision = this.deps.queue.snapshotRevision(threadId, queueEntryOwnerId(candidate));
+            const result = await this.appendFromDrain({
+              threadId,
+              userId: queueEntryOwnerId(candidate),
+              entryId: candidate.id,
+              targetCatId,
+            });
+            if (!result || result.outcome === 'appended') appended = true;
+            else if (
+              result.reason === 'state_changed' &&
+              this.deps.queue.snapshotRevision(threadId, queueEntryOwnerId(candidate)) !== beforeAppendRevision
+            ) {
+              // Reordering/claim races invalidate this scan, not the bound parent.
+              return { started: false, progressed: true };
+            } else if (
+              result.reason !== 'active_run_pending' &&
+              candidate.delivery.authorIntentByTarget?.[targetCatId]?.requested === 'continue_current'
+            ) {
+              await this.deps.queue.fallbackQueuedAuthorIntentDurable(
+                threadId,
+                queueEntryOwnerId(candidate),
+                candidate.id,
+                targetCatId,
+                'parent_terminal_before_exposure',
+              );
+            }
+          }
+        }
+        if (appended) return { started: false, progressed: true };
+        // An exact current-run input that cannot append yet must retain its place
+        // among guidance. Re-read after the attempt: a rejected/ended parent may
+        // already have changed this source to next-work through durable fallback.
+        const remaining = this.deps.queue.getEntrySnapshotAcrossUsers(threadId, candidate.id);
+        for (const targetId of eligibleTargets) {
+          const intent = remaining?.delivery.authorIntentByTarget?.[targetId];
+          if (
+            intent?.requested === 'continue_current' &&
+            intent.fallbackAt === undefined &&
+            intent.boundParentInvocationId === this.deps.invocationTracker.getExecutionId?.(threadId, targetId)
+          ) {
+            heldGuidanceTargets.add(targetId);
+          }
+        }
+        const candidateForAdmission =
+          routingHeld.size > 0 && eligibleTargets.length > 0
+            ? { ...candidate, targets: [eligibleTargets[0]!] }
+            : candidate;
+        const admission = await this.resolveAdmissionTargets(threadId, candidateForAdmission);
+        if (admission.kind === 'settled') return admission.attempt;
+        if (admission.kind === 'barrier') {
+          this.emitContinuationDiagnostic(
+            threadId,
+            'targetless',
+            'all_candidate_slots_busy',
+            waitingEntries + 1,
+            candidate.id,
+          );
+          return { started: false };
+        }
+        const targets = admission.kind === 'resolved' ? admission.targets : queueEntryTargetCats(candidate);
+        if (admission.kind === 'resolved' && !this.retryDeferrals.isDeferred(candidate.id)) {
+          const availableTargets = targets.filter(
+            (catId) => !heldTargets.has(catId) && this.isSlotAdmissible(threadId, catId, bypassSuppressionEpochByCatId),
+          );
+          if (availableTargets.length > 0) {
+            // The existing ledger claims one recipient or the whole row. A partial set advances
+            // one member per durable handoff, which wakes the drain before that provider finishes.
+            const claimTargets =
+              availableTargets.length === candidate.targets.length ? availableTargets : availableTargets.slice(0, 1);
+            const attempt = await this.startSelectedEntry(
+              threadId,
+              candidate,
+              { ...admission, targets: claimTargets },
+              passedOver,
+            );
+            if (attempt) return attempt;
+          }
+        }
+        passedOver.set(candidate.id, requestedTargetsKey(candidate));
+        for (const catId of [...queueEntryTargetCats(candidate), ...targets]) heldTargets.add(catId);
+        waitingEntries += 1;
+        firstWaitingTarget ??= targets[0];
+      } catch (error: unknown) {
+        // Every admission read and reversible claim shares this source's wake.
+        // Recheck after failure: a claimed/processing source keeps its owner,
+        // and private consumers retain their original error/completion custody.
+        const pending = this.deps.queue.getEntrySnapshotAcrossUsers(threadId, candidate.id);
+        if (
+          pending?.kind === 'conversation_input' &&
+          pending.status === 'queued' &&
+          !this.retryDeferrals.isDeferred(pending.id)
+        ) {
+          const retryAt = this.retryDeferrals.defer(threadId, pending.id);
+          this.deps.log.warn(
+            { err: error, threadId, entryId: pending.id, retryAt },
+            '[QueueProcessor] queued conversation admission failed; the exact entry keeps its retry',
+          );
+        }
+        throw error;
       }
-      passedOver.set(candidate.id, requestedTargetsKey(candidate));
-      for (const catId of [...queueEntryTargetCats(candidate), ...targets]) heldTargets.add(catId);
-      waitingEntries += 1;
-      firstWaitingTarget ??= targets[0];
     }
     this.emitContinuationDiagnostic(
       threadId,
