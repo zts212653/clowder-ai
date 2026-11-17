@@ -3117,10 +3117,8 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
               '这条对话尚未起名。首次回话时，请调用 cat_cafe_set_thread_metadata 的 title，起一个概括这次任务的短名（不照抄用户原话）。';
           } else if (thread.titleSource === 'cat') {
             firstReplyNamingInstruction =
-              '这条对话由猫猫起名。工作重点或阶段实质变化时，可用 cat_cafe_set_thread_metadata 的 title 和 titleIntent=update 更新标题。';
+              '这条对话由猫猫起名。任务阶段、关联 issue/PR 或重点实质变化时，可用 cat_cafe_set_thread_metadata 的 title 和 titleIntent=update 更新标题。';
           }
-          firstReplyNamingInstruction +=
-            '用户明确要求改名时，用 cat_cafe_set_thread_metadata 的 title 和 titleIntent=user_requested 执行，保存后仍按用户命名保护；没有要求时不要自动覆盖用户标题。';
         }
         if (thread.createdAt) threadCreatedAt = thread.createdAt;
         // #836: Reborn session strategy — force new session every invocation.

@@ -266,6 +266,7 @@ type ExtraCarrierPersistenceClassification<
  * Every StoredMessage.extra key must be classified when it is introduced.
  */
 type ExtraCarrierPersistence = ExtraCarrierPersistenceClassification<{
+  userTitleRevisionAtRequest: 'parsed';
   watcher: 'parsed';
   cloudBridgeReturn: 'parsed';
   taskHandoff: 'parsed';
@@ -710,6 +711,14 @@ export function safeParseExtra(raw: string | undefined): StoredMessage['extra'] 
     }
     if (parsed.routingTargetSource === 'prose' || parsed.routingTargetSource === 'explicit') {
       result.routingTargetSource = parsed.routingTargetSource;
+      hasField = true;
+    }
+    if (
+      typeof parsed.userTitleRevisionAtRequest === 'number' &&
+      Number.isSafeInteger(parsed.userTitleRevisionAtRequest) &&
+      parsed.userTitleRevisionAtRequest >= 0
+    ) {
+      result.userTitleRevisionAtRequest = parsed.userTitleRevisionAtRequest;
       hasField = true;
     }
     const liveCompanion = parseLiveCompanionCarrier(parsed.liveCompanion);

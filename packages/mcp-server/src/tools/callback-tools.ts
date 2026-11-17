@@ -3453,7 +3453,7 @@ export const setThreadMetadataInputSchema = {
     .enum(['name', 'update', 'user_requested'])
     .optional()
     .describe(
-      'Requires title. Default name: name a temporary title once. update: revise a cat title as work progresses, preserving user titles. user_requested: only when the user explicitly asks to rename this conversation; may replace any title and saves it as user-chosen, protected from later automatic updates.',
+      'Requires title. Default name: name a temporary title once. update: revise a cat title only after a material change in task stage, issue/PR association or focus; preserve user titles. user_requested: only for the current user message explicitly requesting this rename. The server binds that message and its protected-title decision revision; a newer protected decision, including saving the same name, rejects the old request. Saves a protected user title. Do not retry a rejected old request with newly read state.',
     ),
   labels: z.array(z.string()).optional().describe('Update thread labels (replaces entire array)'),
   worktrees: z.array(z.string()).optional().describe('Worktree paths to add (append + dedupe)'),
@@ -4716,9 +4716,9 @@ export const callbackTools = [
       'notes MERGE (string sets, null deletes key). roadmap binds one original file or records a revocation tombstone, with expectedRevision concurrency protection. ' +
       'Notes limits: keys at most 100 and string values at most 2000 UTF-16 code units, without trimming; at most 50 keys per request including null deletions, and 200 surviving keys after merge. Oversize updates are rejected without truncation. ' +
       'Use when: naming or updating this conversation title, honoring a user rename request, recording an association, or explicitly choosing/revoking the original roadmap for a long work line. NOT for: automatic changes to user-chosen titles, taking over a Task or storing derived progress. ' +
-      'Output: updated metadata; roadmapBinding returns normalized persistent coordinates and revision, roadmap returns current file/version/as-of or revoked/invalid/unavailable. Later activity means needs checking, never automatically obsolete. File readers retain their own access checks. Title requests include titleApplied and titleSource. If titleApplied=false, report that the title was not changed. ' +
+      'Output: updated metadata; roadmapBinding returns normalized persistent coordinates and revision, roadmap returns current file/version/as-of or revoked/invalid/unavailable. Later activity means needs checking, never automatically obsolete. File readers retain their own access checks. Title requests include titleApplied, titleSource and titleReason. A newer protected decision returns titleApplied=false/newer_protected_title. An unbound user request or missing message snapshot returns 403/409. Report the actual result; do not silently retry an old rename. ' +
       'SCOPE: current thread only (no threadId param); cross-thread writes are impossible. ' +
-      'GOTCHA: supply titleIntent for later renames; user_requested requires an explicit user instruction. Check titleApplied before reporting success.',
+      'GOTCHA: supply titleIntent for later renames; user_requested requires a current direct user-message instruction and its server snapshot, not an A2A/automatic turn. No model-supplied revision is accepted. Check titleApplied before reporting success.',
     inputSchema: setThreadMetadataInputSchema,
     handler: handleSetThreadMetadata,
     governance: {

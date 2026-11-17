@@ -480,9 +480,11 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
     // streak on this thread's active worklist (no-op if none).
     resetStreak(resolvedThreadId);
 
+    let userTitleRevisionAtRequest: number | undefined;
     // Ensure thread exists and auto-title on first message
     if (resolvedThreadId !== 'default' && opts.threadStore) {
       const thread = await opts.threadStore.get(resolvedThreadId);
+      userTitleRevisionAtRequest = thread?.userTitleRevision ?? 0;
 
       if (!thread || thread.deletedAt) {
         // Thread doesn't exist or soft-deleted — reject to prevent orphaned messages (#21 + Phase D)
@@ -639,7 +641,11 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
     if (liveSessionId && targetCats.length !== 1)
       return reply.code(400).send({ error: 'Live requires one exact member', code: 'INVALID_LIVE_ADMISSION' });
     const resolvedIdempotencyKey = idempotencyKey ?? randomUUID();
+    const requestTitleRevision = replayedSource
+      ? replayedSource.extra?.userTitleRevisionAtRequest
+      : userTitleRevisionAtRequest;
     const sourcePayloadExtra: NonNullable<StoredMessage['extra']> = {
+      ...(requestTitleRevision !== undefined ? { userTitleRevisionAtRequest: requestTitleRevision } : {}),
       ...(routingResult.routing_warnings.length ? { routingWarnings: routingResult.routing_warnings } : {}),
       ...(!liveSessionId && !whisperVisibility && !admittedMessageBundle
         ? { routingTargetSource: explicitMentionTargetCats ? ('explicit' as const) : ('prose' as const) }

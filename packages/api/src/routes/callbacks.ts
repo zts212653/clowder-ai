@@ -5356,6 +5356,33 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
     }
 
     const { title, titleIntent, labels, roadmap, ...metadataFields } = parsed.data;
+    let expectedUserTitleRevision = 0;
+    if (titleIntent === 'user_requested') {
+      const auth = request.callbackAuth;
+      const source =
+        auth?.originTriggerMessageId && !auth.a2aTriggerMessageId
+          ? await messageStore?.getById(auth.originTriggerMessageId)
+          : undefined;
+      if (
+        !source ||
+        source.deletedAt ||
+        source.threadId !== effectiveThreadId ||
+        source.userId !== principal.userId ||
+        source.from?.kind !== 'user' ||
+        source.from.userId !== principal.userId
+      ) {
+        return reply
+          .code(403)
+          .send({ error: 'Rename requires a current user-message trigger', code: 'TITLE_REQUEST_NOT_USER_TRIGGERED' });
+      }
+      const revision = source.extra?.userTitleRevisionAtRequest;
+      if (revision === undefined) {
+        return reply
+          .code(409)
+          .send({ error: 'User message has no valid title decision snapshot', code: 'TITLE_REQUEST_SNAPSHOT_MISSING' });
+      }
+      expectedUserTitleRevision = revision;
+    }
     let roadmapMutation: Awaited<ReturnType<typeof prepareRoadmapMutation>> | undefined;
     if (roadmap) {
       try {
@@ -5416,8 +5443,24 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       }
     }
     let titleApplied: boolean | undefined;
+    let titleReason: 'applied' | 'protected' | 'newer_protected_title' | undefined;
     if (title !== undefined) {
-      titleApplied = await threadStore.setAutomaticTitle(effectiveThreadId, title, 'cat', principal.catId, titleIntent);
+      if (titleIntent === 'user_requested') {
+        const outcome = await threadStore.setUserRequestedTitle(effectiveThreadId, title, expectedUserTitleRevision);
+        if (outcome === 'not_found') return reply.code(404).send({ error: 'Thread not found' });
+        if (outcome === 'deleted') return reply.code(410).send({ error: 'Thread is deleted' });
+        titleApplied = outcome === 'applied';
+        titleReason = titleApplied ? 'applied' : 'newer_protected_title';
+      } else {
+        titleApplied = await threadStore.setAutomaticTitle(
+          effectiveThreadId,
+          title,
+          'cat',
+          principal.catId,
+          titleIntent,
+        );
+        titleReason = titleApplied ? 'applied' : 'protected';
+      }
       if (titleApplied)
         opts.socketManager.broadcastToRoom(`thread:${effectiveThreadId}`, 'thread_updated', {
           threadId: effectiveThreadId,
@@ -5442,7 +5485,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       threadId: effectiveThreadId,
       title: updated?.title ?? thread.title,
       ...(titleApplied !== undefined
-        ? { titleApplied, titleSource: updated?.titleSource ?? (thread.title ? 'user' : 'temporary') }
+        ? { titleApplied, titleReason, titleSource: updated?.titleSource ?? (thread.title ? 'user' : 'temporary') }
         : {}),
       labels: updated?.labels ?? thread.labels ?? [],
       ...(updated?.threadMetadata?.roadmap

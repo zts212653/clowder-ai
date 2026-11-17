@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import Fastify from 'fastify';
 import { InvocationRegistry } from '../src/domains/cats/services/agents/invocation/InvocationRegistry.js';
+import { MessageStore } from '../src/domains/cats/services/stores/ports/MessageStore.js';
 import { ThreadStore } from '../src/domains/cats/services/stores/ports/ThreadStore.js';
 import { callbacksRoutes } from '../src/routes/callbacks.js';
 
@@ -52,13 +53,24 @@ for (const source of ['user', 'cat'] as const) {
     const thread = threads.create('u', source === 'user' ? 'Chosen name' : undefined);
     if (source === 'cat') threads.setAutomaticTitle(thread.id, 'Chosen name', 'cat', 'sonnet');
     const registry = new InvocationRegistry();
-    const auth = await registry.create('u', 'codex', thread.id);
+    const messages = new MessageStore();
+    const request = messages.append({
+      from: { kind: 'user', userId: 'u' },
+      userId: 'u',
+      threadId: thread.id,
+      content: '改名',
+      mentions: [],
+      timestamp: Date.now(),
+      extra: { userTitleRevisionAtRequest: 0 },
+    });
+    const auth = await registry.create('u', 'codex', thread.id, undefined, undefined, undefined, request.id);
     const broadcasts: unknown[][] = [];
     const app = Fastify();
     t.after(() => app.close());
     await app.register(callbacksRoutes, {
       registry,
       threadStore: threads,
+      messageStore: messages,
       socketManager: { broadcastAgentMessage() {}, broadcastToRoom: (...args: unknown[]) => broadcasts.push(args) },
     });
     const title = 'issue#2006 PR#123 会话标题更新';

@@ -152,11 +152,10 @@ for (const system of ['default', 'system'] as const) {
 }
 
 (['cat', 'user'] as const).forEach((source) => {
-  test(`${source} title guidance explains progress updates and explicit user rename requests`, async () => {
+  test(`${source} title guidance only prompts autonomous progress for cat titles`, async () => {
     const result = await run(false, 'done', undefined, source);
     assert.equal(result.inputs.length, 1);
-    assert.ok(result.prompts.some((prompt) => prompt.includes('user_requested')));
-    assert.ok(result.prompts.some((prompt) => prompt.includes('titleIntent')));
+    assert.ok(result.prompts.every((prompt) => !prompt.includes('user_requested')));
     assert.ok(result.prompts.every((prompt) => !prompt.includes('猫只起一次名')));
     if (source === 'cat') assert.ok(result.prompts.some((prompt) => prompt.includes('update')));
   });
