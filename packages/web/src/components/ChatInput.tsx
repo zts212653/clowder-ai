@@ -1083,7 +1083,7 @@ export function ChatInput({
           附件处理中，完成后可发送
         </div>
       )}
-      {imageLifecycleStatus === 'uploading' && (
+      {!localSendFeedback && imageLifecycleStatus === 'uploading' && (
         <div className={`${attachmentFeedbackClassName} text-[var(--semantic-info)]`} role="status">
           附件上传中，请稍候...
         </div>
@@ -1111,14 +1111,14 @@ export function ChatInput({
       />
     </>
   );
-  // Batch feedback stays visible after sending optimistically clears the thumbnails.
+  // Local attempts show progress on their bubble; legacy upload feedback stays here.
   const hasComposerDraftExtras =
     whisperMode ||
     images.length > 0 ||
     shownContextAttachments.length > 0 ||
     replyToMessage !== null ||
     imageLifecycleStatus === 'preparing' ||
-    imageLifecycleStatus === 'uploading' ||
+    (!localSendFeedback && imageLifecycleStatus === 'uploading') ||
     (imageLifecycleStatus === 'failed' && Boolean(uploadError));
   const hasComposerHeader = shellV2 && composerHeader !== undefined && composerHeader !== null;
   const headerRowCount: 0 | 1 = hasComposerHeader ? 1 : 0;

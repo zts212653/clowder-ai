@@ -70,3 +70,21 @@ it.each([
   }
   expect(await loadSendAttempts(attempt.ownerUserId, attempt.threadId)).toEqual([]);
 });
+
+it('restores persisted preparation content in the bubble instead of waiting for a lost composer callback', async () => {
+  const attempt = {
+    id: 'prepared-reload',
+    ownerUserId: 'reload-owner',
+    threadId: 'reload-thread',
+    content: 'recover this snapshot',
+    files: [],
+    timestamp: 1,
+    status: 'preparing' as const,
+    contentInComposer: true,
+  };
+  await saveSendAttempt(attempt);
+  expect(await loadSendAttempts(attempt.ownerUserId, attempt.threadId)).toMatchObject([
+    { content: attempt.content, status: 'unknown', contentInComposer: false },
+  ]);
+  await deleteSendAttempt(attempt);
+});

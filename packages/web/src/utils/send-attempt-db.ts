@@ -28,6 +28,8 @@ export interface SendAttempt {
   composerDraftRevision?: number;
   /** Present only while a failed local save has left its snapshot in the native composer. */
   composerDraftText?: string;
+  /** Until handoff, the mounted composer is the only visible copy of this snapshot. */
+  contentInComposer?: boolean;
   confirmedTargetCats?: string[];
   serverMessageId?: string;
   contentBlocks?: MessageContent[];
@@ -88,6 +90,7 @@ export async function loadSendAttempts(ownerUserId: string, threadId: string): P
   const records = await (await db()).getAllFromIndex('attempts', 'thread', [ownerUserId, threadId]);
   return records.map((record) => ({
     ...record,
+    contentInComposer: false,
     status: ['preparing', 'sending', 'checking'].includes(record.status) ? 'unknown' : record.status,
     files: record.files.map(
       (file) => new File([file.bytes], file.name, { type: file.type, lastModified: file.lastModified }),
