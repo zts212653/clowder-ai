@@ -647,17 +647,13 @@ interface AutoResumeSuppression {
   epoch: number;
   executionIds: Set<string>;
   hasAnonymousFence: boolean;
+  /** Same-epoch recovery belongs only to the ordinary sources already pending. */
+  resumableEntryIds?: Set<string>;
 }
 
 interface ThreadDrainState {
   dirty: boolean;
   owner?: Promise<void>;
-  /**
-   * A newer, unrelated cancellation may finish while an older cancel-all
-   * identity is still waiting for its exact terminal. That old fence must stay
-   * consumable, but it must not strand work released by the newer invocation.
-   */
-  bypassSuppressionEpochByCatId?: Map<string, number>;
 }
 
 interface ConversationBatchResolution {
@@ -3325,8 +3321,12 @@ export class QueueProcessor {
     } else {
       for (const entryId of attemptedQueueEntryIds) this.retryDeferrals.forget(entryId);
     }
-    if (this.hasDispatchableQueuedForThread(threadId)) {
-      const bypassSuppressionEpoch = this.autoResumeSuppressionEpochForDifferentExecution(sk, invocationId);
+    const bypassSuppressionEpoch = this.autoResumeSuppressionEpochForDifferentExecution(sk, invocationId);
+    if (
+      this.hasDispatchableQueuedForThread(threadId) ||
+      (bypassSuppressionEpoch !== undefined &&
+        this.deps.queue.listPendingAcrossUsers(threadId).some((entry) => this.isCompletionResumeSource(entry, catId)))
+    ) {
       await this.requestDrain(
         threadId,
         bypassSuppressionEpoch === undefined ? undefined : { bypassSuppressionForCatId: catId, bypassSuppressionEpoch },
@@ -3446,6 +3446,35 @@ export class QueueProcessor {
       : undefined;
   }
 
+  /** Background and private carriers retain their own Stop/recovery custody. */
+  private isCompletionResumeSource(entry: QueueEntry, catId: string): boolean {
+    return (
+      entry.kind !== 'private_input' &&
+      (entry.from.kind === 'user' || entry.from.kind === 'agent') &&
+      entry.sourceCategory !== 'scheduled' &&
+      !entry.execution.waitContinuationCarrier &&
+      isOrdinaryQueueTargetEligible(entry, catId)
+    );
+  }
+
+  /** Capture once against the current fence, including sources held by a short claim. */
+  private captureCompletionResumeSources(threadId: string, catId: string, epoch: number): void {
+    const slotKey = QueueProcessor.slotKey(threadId, catId);
+    if (this.autoResumeSuppressionRemainingMs(slotKey) === 0) return;
+    const suppression = this.suppressedAutoResume.get(slotKey);
+    if (!suppression || suppression.epoch !== epoch || suppression.hasAnonymousFence) return;
+    const pending = this.deps.queue.listPendingAcrossUsers(threadId);
+    const pendingIds = new Set(pending.map((entry) => entry.id));
+    for (const id of suppression.resumableEntryIds ?? []) {
+      if (!pendingIds.has(id)) suppression.resumableEntryIds?.delete(id);
+    }
+    for (const entry of pending) {
+      if (!this.isCompletionResumeSource(entry, catId)) continue;
+      suppression.resumableEntryIds ??= new Set();
+      suppression.resumableEntryIds.add(entry.id);
+    }
+  }
+
   /**
    * User-level entry: co-creator manually triggers processing their next entry.
    */
@@ -3511,8 +3540,7 @@ export class QueueProcessor {
     this.threadDrains.set(threadId, state);
     state.dirty = true;
     if (options?.bypassSuppressionForCatId && options.bypassSuppressionEpoch !== undefined) {
-      if (!state.bypassSuppressionEpochByCatId) state.bypassSuppressionEpochByCatId = new Map();
-      state.bypassSuppressionEpochByCatId.set(options.bypassSuppressionForCatId, options.bypassSuppressionEpoch);
+      this.captureCompletionResumeSources(threadId, options.bypassSuppressionForCatId, options.bypassSuppressionEpoch);
     }
     if (!state.owner) {
       const owner = this.runDrain(threadId, state).finally(() => {
@@ -3532,10 +3560,8 @@ export class QueueProcessor {
     while (true) {
       state.dirty = false;
       void this.reconcileAppendDeliveries(threadId);
-      const bypassSuppressionEpochByCatId = new Map(state.bypassSuppressionEpochByCatId);
-      state.bypassSuppressionEpochByCatId?.clear();
       while (true) {
-        const result = await this.tryExecuteNextAcrossUsers(threadId, state, bypassSuppressionEpochByCatId);
+        const result = await this.tryExecuteNextAcrossUsers(threadId, state);
         // One drain owns one source entry. Its exact target set fans out as one
         // admission unit; the durable handoff callback signals the next drain.
         // This preserves source comparator order without waiting for providers
@@ -4029,11 +4055,7 @@ export class QueueProcessor {
    * input that waits for an idle thread holds back everything behind it: its target is not known yet.
    * The scan reads one snapshot and awaits target resolution, so the claim re-checks the order.
    */
-  private async tryExecuteNextAcrossUsers(
-    threadId: string,
-    state: ThreadDrainState,
-    bypassSuppressionEpochByCatId: ReadonlyMap<string, number> = new Map(),
-  ): Promise<QueueAdmissionAttempt> {
+  private async tryExecuteNextAcrossUsers(threadId: string, state: ThreadDrainState): Promise<QueueAdmissionAttempt> {
     const candidates = this.deps.queue.listPendingAcrossUsers(threadId);
     if (candidates.length === 0) {
       this.emitContinuationDiagnostic(threadId, 'unknown', classifyContinuationOutcome(0), 0);
@@ -4082,9 +4104,7 @@ export class QueueProcessor {
           !this.retryDeferrals.isDeferred(candidate.id) &&
           candidate.execution.liveSessionId &&
           (candidate.targets.length !== 1 ||
-            !candidate.targets.every(
-              (catId) => !heldTargets.has(catId) && this.isSlotAdmissible(threadId, catId, new Map()),
-            ))
+            !candidate.targets.every((catId) => !heldTargets.has(catId) && this.isSlotAdmissible(threadId, catId)))
         ) {
           const settled = await this.terminalizeUnavailableConversationEntry(candidate, 'explicit');
           return QueueProcessor.terminalizedEntryAttempt(settled);
@@ -4169,7 +4189,7 @@ export class QueueProcessor {
         const targets = admission.kind === 'resolved' ? admission.targets : queueEntryTargetCats(candidate);
         if (admission.kind === 'resolved' && !this.retryDeferrals.isDeferred(candidate.id)) {
           const availableTargets = targets.filter(
-            (catId) => !heldTargets.has(catId) && this.isSlotAdmissible(threadId, catId, bypassSuppressionEpochByCatId),
+            (catId) => !heldTargets.has(catId) && this.isSlotAdmissible(threadId, catId, candidate),
           );
           if (availableTargets.length > 0) {
             // The existing ledger claims one recipient or the whole row. A partial set advances
@@ -4203,14 +4223,6 @@ export class QueueProcessor {
           // Preserve this caller's error, then let the existing coordinator scan
           // independent targets while this exact source waits for its timer.
           state.dirty = true;
-          // The failed scan did not consume its completion's exact bypass.
-          // Keep newer queued signals; admission still checks the current epoch.
-          for (const [catId, epoch] of bypassSuppressionEpochByCatId) {
-            state.bypassSuppressionEpochByCatId ??= new Map();
-            if (!state.bypassSuppressionEpochByCatId.has(catId)) {
-              state.bypassSuppressionEpochByCatId.set(catId, epoch);
-            }
-          }
           this.deps.log.warn(
             { err: error, threadId, entryId: pending.id, retryAt },
             '[QueueProcessor] queued conversation admission failed; the exact entry keeps its retry',
@@ -4342,16 +4354,14 @@ export class QueueProcessor {
   }
 
   /** A slot may take new work: no execution holds it and no cancel fence suppresses it. */
-  private isSlotAdmissible(
-    threadId: string,
-    catId: string,
-    bypassSuppressionEpochByCatId: ReadonlyMap<string, number>,
-  ): boolean {
+  private isSlotAdmissible(threadId: string, catId: string, entry?: QueueEntry): boolean {
     const slotKey = QueueProcessor.slotKey(threadId, catId);
     const remainingMs = this.autoResumeSuppressionRemainingMs(slotKey);
     const suppression = remainingMs > 0 ? this.suppressedAutoResume.get(slotKey) : undefined;
-    const bypassEpoch = bypassSuppressionEpochByCatId.get(catId);
-    const bypassesExactSuppression = bypassEpoch !== undefined && suppression?.epoch === bypassEpoch;
+    const bypassesExactSuppression =
+      entry !== undefined &&
+      this.isCompletionResumeSource(entry, catId) &&
+      suppression?.resumableEntryIds?.has(entry.id) === true;
     return (
       (bypassesExactSuppression || remainingMs === 0) &&
       !this.processingSlots.has(slotKey) &&
