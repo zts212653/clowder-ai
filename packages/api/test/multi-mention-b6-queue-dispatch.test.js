@@ -1673,73 +1673,107 @@ describe('B6: QueueProcessor entryCompleteHook integration', () => {
     assert.equal(hookResult.status, 'canceled', 'Aborted entry should report canceled, not succeeded');
   });
 
-  test('R4-P1: duplicate invocation fires hook with succeeded, not failed', async () => {
-    const { InvocationQueue: IQ } = await import('../dist/domains/cats/services/agents/invocation/InvocationQueue.js');
-    const { QueueProcessor: QP } = await import('../dist/domains/cats/services/agents/invocation/QueueProcessor.js');
+  for (const recordReadable of [true, false]) {
+    test(`duplicate completion hook requires canonical terminal evidence: readable=${recordReadable}`, async () => {
+      const { InvocationQueue: IQ } = await import(
+        '../dist/domains/cats/services/agents/invocation/InvocationQueue.js'
+      );
+      const { QueueProcessor: QP } = await import('../dist/domains/cats/services/agents/invocation/QueueProcessor.js');
 
-    const queue = adaptInvocationQueue(new IQ());
-    let hookResult = null;
+      const { InvocationRecordStore } = await import(
+        '../dist/domains/cats/services/stores/ports/InvocationRecordStore.js'
+      );
+      const records = new InvocationRecordStore();
+      const queue = adaptInvocationQueue(new IQ());
+      let hookResult = null;
+      let routeCalls = 0;
 
-    const stubDeps = {
-      queue,
-      invocationTracker: {
-        start: () => new AbortController(),
-        startAll: () => new AbortController(),
-        tryStartThreadAll: () => new AbortController(),
-        complete: () => {},
-        completeAll: () => {},
-        has: () => false,
-      },
-      invocationRecordStore: {
-        create: () => ({ outcome: 'duplicate', invocationId: 'inv-dup' }),
-        update: () => {},
-      },
-      router: {
-        resolveExplicitTargets: async (requestedCatIds) => [...requestedCatIds],
-        resolveConversationTargetsAtAdmission: async (requestedCatIds) => [...requestedCatIds],
-        async *routeExecution() {
-          throw new Error('Should not be called for duplicate');
+      const stubDeps = {
+        queue,
+        invocationTracker: {
+          start: () => new AbortController(),
+          startAll: () => new AbortController(),
+          tryStartThreadAll: () => new AbortController(),
+          complete: () => {},
+          completeAll: () => {},
+          has: () => false,
         },
-        ackCollectedCursors: () => Promise.resolve(),
-      },
-      socketManager: {
-        broadcastAgentMessage: () => {},
-        broadcastToRoom: () => {},
-        emitToUser: () => {},
-      },
-      messageStore: {
-        markDelivered: () => null,
-        getById: () => null,
-      },
-      log: { info: () => {}, warn: () => {}, error: () => {} },
-    };
+        invocationRecordStore: {
+          create: (input) => records.create(input),
+          get: (id) => {
+            if (!recordReadable) throw new Error('duplicate record read unavailable');
+            return records.get(id);
+          },
+          update: (id, input) => records.update(id, input),
+        },
+        router: {
+          resolveExplicitTargets: async (requestedCatIds) => [...requestedCatIds],
+          resolveConversationTargetsAtAdmission: async (requestedCatIds) => [...requestedCatIds],
+          async *routeExecution() {
+            routeCalls++;
+            throw new Error('Should not be called for duplicate');
+          },
+          ackCollectedCursors: () => Promise.resolve(),
+        },
+        socketManager: {
+          broadcastAgentMessage: () => {},
+          broadcastToRoom: () => {},
+          emitToUser: () => {},
+        },
+        messageStore: {
+          markDelivered: () => null,
+          getById: () => null,
+        },
+        log: { info: () => {}, warn: () => {}, error: () => {} },
+      };
 
-    const qp = new QP(stubDeps);
+      const qp = new QP(stubDeps);
 
-    const result = queue.enqueue(
-      canonicalTestQueueInput({
-        ownerAuthProvenance: 'unknown',
+      const result = queue.enqueue(
+        canonicalTestQueueInput({
+          ownerAuthProvenance: 'unknown',
+          threadId: 'thread-1',
+          userId: 'user-1',
+          kind: 'private_input',
+          content: 'test-dup',
+          source: 'agent',
+          targetCats: ['codex'],
+          intent: 'execute',
+          autoExecute: true,
+        }),
+      );
+
+      // A duplicate acknowledgement alone cannot prove this source completed.
+      // Seed the canonical record used by the real source × target create key.
+      const previous = records.create({
         threadId: 'thread-1',
         userId: 'user-1',
-        kind: 'private_input',
-        content: 'test-dup',
-        source: 'agent',
         targetCats: ['codex'],
         intent: 'execute',
-        autoExecute: true,
-      }),
-    );
+        idempotencyKey: `queue-${result.entry.id}:codex`,
+        actionLeaseCarrier: { kind: 'none' },
+      });
+      assert.ok(records.update(previous.invocationId, { status: 'running' }));
+      assert.ok(records.update(previous.invocationId, { status: 'succeeded', successfulCatIds: ['codex'] }));
 
-    qp.registerEntryCompleteHook(result.entry.id, (entryId, status, responseText) => {
-      hookResult = { entryId, status, responseText };
+      qp.registerEntryCompleteHook(result.entry.id, (entryId, status, responseText) => {
+        hookResult = { entryId, status, responseText };
+      });
+
+      await qp.requestDrain('thread-1');
+      await new Promise((r) => setTimeout(r, 200));
+
+      assert.equal(routeCalls, 0, 'Neither terminal nor unknown duplicates may start a provider');
+      if (recordReadable) {
+        assert.equal(hookResult?.status, 'succeeded', 'A proven terminal duplicate completes its caller');
+        assert.equal(queue.listPendingAcrossUsers('thread-1').length, 0);
+      } else {
+        assert.equal(hookResult, null, 'Unknown duplicate evidence must preserve its one-shot caller');
+        assert.equal(queue.listPendingAcrossUsers('thread-1')[0]?.status, 'claimed');
+      }
+      assert.equal(records.get(previous.invocationId)?.status, 'succeeded');
     });
-
-    await qp.requestDrain('thread-1');
-    await new Promise((r) => setTimeout(r, 200));
-
-    assert.ok(hookResult, 'Hook should have been called for duplicate');
-    assert.equal(hookResult.status, 'succeeded', 'Duplicate should report succeeded, not failed');
-  });
+  }
 });
 
 describe('B6: canceled hook skips recordResponse in dispatchViaQueue', () => {
