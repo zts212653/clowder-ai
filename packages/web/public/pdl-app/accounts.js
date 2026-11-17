@@ -158,9 +158,8 @@ function bindAccounts() {
         }),
       ),
       hasAt: !!ws.length,
-      out: items.some(function (x) {
-        return x.left === 0;
-      }),
+      // No switch menu when it runs out: that menu lists Codex accounts only.
+      out: false,
       fail: fail || (stale ? 'stale' : ''),
     };
   }
