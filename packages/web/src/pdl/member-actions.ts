@@ -269,7 +269,7 @@ export type AgentAccessReadinessView = AgentAccessReadiness & { reason?: string 
 
 export interface AgentAccessDetectionResult {
   readiness: AgentAccessReadinessView;
-  candidates: NativePartner[];
+  candidates: ReturnType<typeof nativePartnersFrom>;
   partialFailures: string[];
 }
 
