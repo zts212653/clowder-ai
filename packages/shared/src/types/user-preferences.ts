@@ -32,6 +32,7 @@ export interface ThreadAttentionGroup {
   id: string;
   name?: string;
   threadIds: string[];
+  allowSingleton?: true;
 }
 
 /** F277: private presentation state keyed only by a stable Group anchor. */

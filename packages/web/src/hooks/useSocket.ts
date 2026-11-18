@@ -48,6 +48,7 @@ import { useThreadHistoryReconciliation } from './thread-history-watermark';
 
 export { reconcileThreadWithServer } from './queue-reconciliation';
 
+import { invalidateThreadAttentionPreferences } from '@/utils/thread-attention-invalidation';
 import { useSuggestionStore } from '../components/suggestions/suggestion-store';
 import { lifecycleCommitOf, observeLifecycleSnapshot } from './agent-messages/lifecycle-terminal';
 import { isThreadMessageAppendedHint, observeThreadMessageAppended } from './agent-messages/thread-message-appended';
@@ -615,8 +616,9 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string, foregro
     );
 
     // Edge payloads are invalidation hints, never Sidebar state truth.
-    socket.on('thread_created', () => {
+    socket.on('thread_created', (data: { attentionGroupChanged?: boolean }) => {
       void invalidateSidebarProjection();
+      if (data?.attentionGroupChanged) invalidateThreadAttentionPreferences();
     });
 
     // PR-3a: a stored message the owner may otherwise only hear about through its thread room.

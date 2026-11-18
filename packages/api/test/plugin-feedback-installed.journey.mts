@@ -143,6 +143,11 @@ try {
   await panel.getByText('查看将发送的脱敏材料', { exact: true }).click();
   await panel.getByLabel('脱敏分析材料').waitFor();
   const materials = await panel.getByLabel('脱敏分析材料').inputValue();
+  const [firstGroup, ...extraGroups] = await fixture.analysisGroups();
+  assert.deepEqual(extraGroups, []);
+  assert.equal(firstGroup?.name, '问题反馈');
+  assert.equal(firstGroup?.allowSingleton, true);
+  assert.deepEqual(firstGroup?.titles, ['问题反馈：分析反馈测试']);
   assert.ok(
     !materials.includes('log-secret-canary') &&
       !materials.includes('Alice') &&
@@ -152,6 +157,10 @@ try {
   await panel.getByRole('button', { name: '停止等待，保留草稿', exact: true }).click();
   await panel.getByRole('button', { name: '重新准备材料', exact: true }).click();
   await panel.getByRole('button', { name: '开始分析', exact: true }).click();
+  const analysisGroups = await fixture.analysisGroups();
+  assert.equal(analysisGroups.length, 1);
+  assert.equal(analysisGroups[0]?.id, firstGroup.id);
+  assert.deepEqual(analysisGroups[0]?.titles, ['问题反馈：分析反馈测试', '问题反馈：分析反馈测试']);
   const analysisFrame = await (await page.locator('iframe[title="问题反馈"]').elementHandle())!.contentFrame();
   assert.ok(analysisFrame);
   await analysisFrame.evaluate(() => {
@@ -270,6 +279,8 @@ try {
           'original download SHA256',
           'automatic screenshot upload + remote readback URL',
           'prepared sanitized Agent input',
+          'first analysis creates the named Group with a redacted short title',
+          'new analysis reuses the same Group',
           'post-analysis sanitization',
           'ordinary analysis survives panel reopen without another invocation',
           'stopping the wait exposes a working prepare-again action',
@@ -287,13 +298,14 @@ try {
         posts: fixture.posts(),
         archiveSha256: ledger.archiveSha256,
         browserErrors,
+        analysisGroups,
       },
       null,
       2,
     ),
   );
   assert.deepEqual(browserErrors, []);
-  process.stdout.write('PASS: 30 packed-plugin / Host browser journey checks\n');
+  process.stdout.write('PASS: 32 packed-plugin / Host browser journey checks\n');
 } catch (error) {
   if (currentPage) {
     await currentPage.screenshot({ path: join(artifactRoot, 'failure.png'), fullPage: true });

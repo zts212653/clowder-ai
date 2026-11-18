@@ -1,5 +1,9 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import type { ThreadAttentionGroup } from '@cat-cafe/shared';
+import {
+  resolveThreadAttentionPreferences,
+  saveThreadAttentionPreference,
+} from '../../config/user-preferences-thread-attention.js';
 import type {
   IThreadStore,
   Thread,
@@ -59,6 +63,11 @@ function compareMembers(left: ThreadMembershipRecord, right: ThreadMembershipRec
   return orderDelta || left.thread.createdAt - right.thread.createdAt || left.thread.id.localeCompare(right.thread.id);
 }
 
+const namedGroupPrefix = 'attention_named_';
+function minimumGroupSize(groupId: string): number {
+  return groupId.startsWith(namedGroupPrefix) ? 1 : 2;
+}
+
 function projectGroups(records: readonly ThreadMembershipRecord[]): ThreadAttentionGroup[] {
   const grouped = new Map<string, ThreadMembershipRecord[]>();
   for (const record of records) {
@@ -69,13 +78,44 @@ function projectGroups(records: readonly ThreadMembershipRecord[]): ThreadAttent
     grouped.set(groupId, members);
   }
   return [...grouped.entries()]
-    .map(([id, members]) => ({ id, threadIds: members.sort(compareMembers).map(({ thread }) => thread.id) }))
-    .filter((group) => group.threadIds.length >= 2)
+    .filter(([id, members]) => members.length >= minimumGroupSize(id))
+    .map(([id, members]) => ({
+      id,
+      threadIds: members.sort(compareMembers).map(({ thread }) => thread.id),
+      ...(minimumGroupSize(id) === 1 ? { allowSingleton: true as const } : {}),
+    }))
     .sort((left, right) => left.id.localeCompare(right.id));
 }
 
 export async function resolveThreadAttentionGroups(store: GroupStore, userId: string): Promise<ThreadAttentionGroup[]> {
   return projectGroups(await readMemberships(store, userId));
+}
+
+/** Plans placement before thread creation, so an unreadable Group store cannot leave a loose thread. */
+export async function planThreadAttentionGroupPlacement(
+  store: GroupStore,
+  userId: string,
+  projectRoot: string,
+  name: string,
+  assertCurrent: () => void,
+): Promise<ThreadAttentionGroupMembershipV1> {
+  const records = await readMemberships(store, userId);
+  const { aliases } = resolveThreadAttentionPreferences(projectRoot);
+  const existing = projectGroups(records).find(({ id }) => aliases[`group:${id}`] === name);
+  const groupId =
+    existing?.id ??
+    namedGroupPrefix +
+      createHash('sha256')
+        .update(JSON.stringify([userId, name]))
+        .digest('hex');
+  const anchor = `group:${groupId}`;
+  assertCurrent();
+  if (!aliases[anchor]) saveThreadAttentionPreference(projectRoot, { anchor, alias: name });
+  const order = records.reduce(
+    (next, { membership }) => (membership?.groupId === groupId ? Math.max(next, membership.order + 1) : next),
+    0,
+  );
+  return { v: 1, groupId, order };
 }
 
 function groupMemberIds(state: Map<string, Membership>, groupId: string): string[] {
@@ -86,7 +126,7 @@ function groupMemberIds(state: Map<string, Membership>, groupId: string): string
 }
 
 function normalizeGroup(state: Map<string, Membership>, groupId: string, threadIds: readonly string[]): void {
-  if (threadIds.length < 2) {
+  if (threadIds.length < minimumGroupSize(groupId)) {
     for (const threadId of threadIds) state.set(threadId, null);
     return;
   }
@@ -117,7 +157,7 @@ function moveThread(
   command: Extract<ThreadAttentionGroupCommand, { action: 'move' }>,
 ): void {
   const targetBeforeMove = groupMemberIds(state, command.groupId);
-  if (targetBeforeMove.length < 2) throw new Error('Conversation group not found');
+  if (targetBeforeMove.length < minimumGroupSize(command.groupId)) throw new Error('Conversation group not found');
   removeFromCurrentGroup(state, command.threadId);
   const target = targetBeforeMove.filter((id) => id !== command.threadId);
   const index = command.beforeThreadId ? target.indexOf(command.beforeThreadId) : -1;

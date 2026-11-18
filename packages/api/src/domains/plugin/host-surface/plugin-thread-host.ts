@@ -1,5 +1,6 @@
 import { validateNewProjectPath } from '../../../utils/persistent-project-path.js';
 import { DEFAULT_THREAD_ID, type IThreadStore, type Thread } from '../../cats/services/stores/ports/ThreadStore.js';
+import { planThreadAttentionGroupPlacement } from '../../thread-navigation/thread-attention-group-metadata.js';
 import { ExternalPluginRuntimeError } from '../external-runtime/types.js';
 import {
   boundedLimit,
@@ -34,6 +35,14 @@ export interface PluginThreadListOptions {
   readonly pinnedOnly?: boolean;
 }
 
+interface ThreadCreateInput {
+  readonly title: string;
+  readonly parentThreadId?: string;
+  readonly projectRef?: string;
+  readonly participants?: readonly string[];
+  readonly internal?: true;
+}
+
 export interface PluginThreadHost {
   get(threadId: string): Promise<PluginThreadSummary | null>;
   /** Live keyset pagination: pass the last row's coordinates; a short/empty page ends traversal. */
@@ -43,13 +52,10 @@ export interface PluginThreadHost {
     options: { readonly before?: { readonly timestamp: number; readonly id: string }; readonly limit: number },
   ): Promise<readonly PluginThreadMessage[]>;
   getCats(threadId: string): Promise<PluginThreadCats>;
-  create(input: {
-    readonly title: string;
-    readonly parentThreadId?: string;
-    readonly projectRef?: string;
-    readonly participants?: readonly string[];
-    readonly internal?: true;
-  }): Promise<PluginThreadSummary>;
+  create(input: ThreadCreateInput): Promise<PluginThreadSummary>;
+  createInGroup(
+    input: Omit<ThreadCreateInput, 'internal'> & { readonly groupName: string },
+  ): Promise<PluginThreadSummary>;
   update(
     threadId: string,
     patch: { readonly title?: string; readonly preferredCats?: readonly string[]; readonly internal?: true },
@@ -70,6 +76,7 @@ export interface PluginThreadHostDeps extends PluginThreadProjectionDeps {
   readonly projectPath: string;
   readonly threadStore: IThreadStore;
   readonly assertCurrent?: () => void;
+  readonly onGroupedThreadCreated?: (threadId: string) => void;
 }
 
 export function createUnavailablePluginThreadHost(): PluginThreadHost {
@@ -82,6 +89,7 @@ export function createUnavailablePluginThreadHost(): PluginThreadHost {
     readMessages: unavailable,
     getCats: unavailable,
     create: unavailable,
+    createInGroup: unavailable,
     update: unavailable,
     addParticipants: unavailable,
   };
@@ -197,6 +205,64 @@ export function createPluginThreadHost(input: PluginThreadHostDeps): PluginThrea
     return thread;
   };
 
+  const createThread = async (value: ThreadCreateInput & { readonly groupName?: string }, grouped = false) => {
+    requireService();
+    if (
+      !value ||
+      typeof value !== 'object' ||
+      Array.isArray(value) ||
+      Object.keys(value).some(
+        (key) =>
+          !['title', 'parentThreadId', 'projectRef', 'participants', 'internal'].includes(key) &&
+          !(grouped && key === 'groupName'),
+      )
+    )
+      throw new TypeError('thread input must contain title, parentThreadId, projectRef, participants or internal only');
+    if (value.internal !== undefined && value.internal !== true) throw new TypeError('internal must be true');
+    if (value.parentThreadId !== undefined && value.projectRef !== undefined)
+      throw new TypeError('Select parentThreadId or projectRef, not both');
+    const requestedTitle = title(value.title);
+    if (grouped && value.internal) throw new TypeError('Grouped threads must be ordinary conversations');
+    const groupName = grouped ? boundedString(value.groupName, 'groupName', 120) : undefined;
+    const participants = value.participants === undefined ? [] : validatePreferredCats(value.participants, input.cats);
+    const parent = value.parentThreadId === undefined ? undefined : await requireThread(value.parentThreadId);
+    if (value.internal) await requireInternalParent(parent);
+    let project: string | undefined;
+    if (value.projectRef !== undefined) {
+      const selected = await validateNewProjectPath(
+        boundedString(value.projectRef, 'projectRef', 4096),
+        'projectRef must be an existing directory allowed by Host project policy',
+      );
+      if (!selected.ok) throw new TypeError(selected.error);
+      project = selected.path;
+    }
+    const placement = groupName
+      ? await planThreadAttentionGroupPlacement(
+          input.threadStore,
+          input.ownerUserId,
+          input.projectPath,
+          groupName,
+          requireService,
+        )
+      : undefined;
+    input.assertCurrent?.();
+    const thread = await input.threadStore.create(
+      input.ownerUserId,
+      requestedTitle,
+      parent?.projectPath ?? project ?? input.projectPath,
+      parent?.id,
+    );
+    if (input.pluginInstanceId)
+      await input.threadStore.updatePluginOwnership(thread.id, { v: 1, pluginInstanceId: input.pluginInstanceId });
+    if (value.internal) await input.threadStore.updateSystemKind(thread.id, 'plugin_internal');
+    if (participants.length) await input.threadStore.addParticipants(thread.id, participants);
+    if (placement) await input.threadStore.atomicMergeThreadMetadata(thread.id, { attentionGroup: placement });
+    const stored = await input.threadStore.get(thread.id);
+    if (!stored) throw new ExternalPluginRuntimeError('DELIVERY_REJECTED', 'created thread disappeared');
+    if (placement) input.onGroupedThreadCreated?.(thread.id);
+    return summary(stored);
+  };
+
   return {
     async list(options = {}) {
       requireService();
@@ -256,51 +322,8 @@ export function createPluginThreadHost(input: PluginThreadHostDeps): PluginThrea
       const thread = await readThread(id);
       return thread ? summary(thread) : null;
     },
-    async create(value) {
-      requireService();
-      if (
-        !value ||
-        typeof value !== 'object' ||
-        Array.isArray(value) ||
-        Object.keys(value).some(
-          (key) => !['title', 'parentThreadId', 'projectRef', 'participants', 'internal'].includes(key),
-        )
-      )
-        throw new TypeError(
-          'thread input must contain title, parentThreadId, projectRef, participants or internal only',
-        );
-      if (value.internal !== undefined && value.internal !== true) throw new TypeError('internal must be true');
-      if (value.parentThreadId !== undefined && value.projectRef !== undefined)
-        throw new TypeError('Select parentThreadId or projectRef, not both');
-      const requestedTitle = title(value.title);
-      const participants =
-        value.participants === undefined ? [] : validatePreferredCats(value.participants, input.cats);
-      const parent = value.parentThreadId === undefined ? undefined : await requireThread(value.parentThreadId);
-      if (value.internal) await requireInternalParent(parent);
-      let project: string | undefined;
-      if (value.projectRef !== undefined) {
-        const selected = await validateNewProjectPath(
-          boundedString(value.projectRef, 'projectRef', 4096),
-          'projectRef must be an existing directory allowed by Host project policy',
-        );
-        if (!selected.ok) throw new TypeError(selected.error);
-        project = selected.path;
-      }
-      input.assertCurrent?.();
-      const thread = await input.threadStore.create(
-        input.ownerUserId,
-        requestedTitle,
-        parent?.projectPath ?? project ?? input.projectPath,
-        parent?.id,
-      );
-      if (input.pluginInstanceId)
-        await input.threadStore.updatePluginOwnership(thread.id, { v: 1, pluginInstanceId: input.pluginInstanceId });
-      if (value.internal) await input.threadStore.updateSystemKind(thread.id, 'plugin_internal');
-      if (participants.length) await input.threadStore.addParticipants(thread.id, participants);
-      const stored = await input.threadStore.get(thread.id);
-      if (!stored) throw new ExternalPluginRuntimeError('DELIVERY_REJECTED', 'created thread disappeared');
-      return summary(stored);
-    },
+    create: (value) => createThread(value),
+    createInGroup: (value) => createThread(value, true),
     async update(id, patch) {
       requireService();
       if (!patch || typeof patch !== 'object' || Array.isArray(patch))

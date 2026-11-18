@@ -8,12 +8,14 @@ import { pathToFileURL } from 'node:url';
 import { validateManifest } from '@clowder-ai/plugin-contract';
 import Fastify from 'fastify';
 import { parse } from 'yaml';
+import { resolveThreadAttentionPreferences } from '../../src/config/user-preferences-thread-attention.js';
 import { ThreadStore } from '../../src/domains/cats/services/stores/ports/ThreadStore.js';
 import { createModuleHostInvocation } from '../../src/domains/plugin/builtin-runtime/carriers/module-host-invocation.js';
 import type { PluginRuntimeAdmission } from '../../src/domains/plugin/carrier/runtime-carrier.js';
 import { DeclaredPluginUi } from '../../src/domains/plugin/declared/declared-plugin-ui.js';
 import { DeclaredRuntimeContributions } from '../../src/domains/plugin/declared/declared-runtime-contributions.js';
 import { createPluginThreadHost } from '../../src/domains/plugin/host-surface/plugin-thread-host.js';
+import { resolveThreadAttentionGroups } from '../../src/domains/thread-navigation/thread-attention-group-metadata.js';
 import { pluginUiRoutes } from '../../src/routes/plugin/plugin-ui-routes.js';
 import { pluginWebhookForwardingRoutes } from '../../src/routes/plugin/plugin-webhook-forwarding-routes.js';
 import { configuredFeedbackMember } from './feedback-member.mts';
@@ -287,6 +289,16 @@ export async function startInstalledFeedbackFixture(credentialProvider?: 'github
       failUploadAt = uploadAttempt + 2;
     },
     journals: async () => Object.values(await persistence.entries()).map((v) => v.value),
+    async analysisGroups() {
+      const { aliases } = resolveThreadAttentionPreferences(projectRoot);
+      const groups = await resolveThreadAttentionGroups(threadStore, 'fixture-owner');
+      const titles = new Map(threadStore.list('fixture-owner').map(({ id, title }) => [id, title]));
+      return groups.map((group) => ({
+        ...group,
+        name: aliases[`group:${group.id}`],
+        titles: group.threadIds.map((id) => titles.get(id)),
+      }));
+    },
     posts: () => posts,
     modelPrompt: memberFixture.modelPrompt,
     modelRuns: memberFixture.modelRuns,

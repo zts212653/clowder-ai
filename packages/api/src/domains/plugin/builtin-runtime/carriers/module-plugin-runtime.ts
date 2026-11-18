@@ -153,6 +153,7 @@ export interface ModulePluginRuntimeOptions {
     activationSignal?: AbortSignal,
   ) => Promise<PluginNeutralHost>;
   readonly threads?: PluginThreadProjectionDeps & {
+    readonly onGroupedThreadCreated?: (threadId: string) => void;
     readonly isPluginMainThread?: (pluginInstanceId: string, threadId: string) => Promise<boolean>;
     readonly threadDeepLinkUrl: (threadId: string) => string;
     readonly threadStore: IThreadStore;
