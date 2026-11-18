@@ -621,7 +621,12 @@ function bindMembers() {
         .map(function (row) {
           return { id: row.id, label: row.label };
         });
-    if (f.acpAgentProvider && !pluginRuntimes.some(function (row) { return row.id === f.acpAgentProvider; }))
+    if (
+      f.acpAgentProvider &&
+      !pluginRuntimes.some(function (row) {
+        return row.id === f.acpAgentProvider;
+      })
+    )
       pluginRuntimes.unshift({ id: f.acpAgentProvider, label: f.acpAgentProvider });
     pluginRuntimes.unshift({ id: '', label: tc('memberForm.fields.pluginClientNone') });
     const d = Object.fromEntries(
@@ -1472,8 +1477,7 @@ function bindMembers() {
           },
           adjusting: !!p.adjusting,
           loginCommand:
-            p.runtime.readiness && p.runtime.readiness.status !== 'configured' &&
-            p.runtime.readiness.loginCommand,
+            p.runtime.readiness && p.runtime.readiness.status !== 'configured' && p.runtime.readiness.loginCommand,
           get preferences() {
             return memberPreferences(p.form, runtimeCatalogState(p.form, '', p.runtime), p.runtime.acpMaxDefault);
           },
@@ -1610,7 +1614,12 @@ function bindMembers() {
       } catch (error) {
         toast(error.message, null, 'danger');
       }
-    } else if (setup && setup.partners.some(function (p) { return p.existingId; })) {
+    } else if (
+      setup &&
+      setup.partners.some(function (p) {
+        return p.existingId;
+      })
+    ) {
       try {
         await read();
       } catch (error) {

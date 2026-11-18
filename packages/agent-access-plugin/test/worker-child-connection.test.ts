@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
-import { describe, test } from 'node:test';
 import { Readable } from 'node:stream';
+import { describe, test } from 'node:test';
 import { attachWorkerChildConnection } from '../src/runtime/acp/worker-child-connection.ts';
 
 /** A controllable handle that behaves like the Host-side `WorkerAcpChildHandle` answer. */

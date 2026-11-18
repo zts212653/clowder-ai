@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
-import { describe, test } from 'node:test';
 import { Readable } from 'node:stream';
+import { describe, test } from 'node:test';
 import { MessageChannel } from 'node:worker_threads';
-import { attachWorkerChildConnection, type WorkerAcpChildHandle } from '../src/runtime/acp/worker-child-connection.ts';
-import { ExecutionRpcPeer } from '../../api/src/domains/plugin/execution-worker/rpc-peer.ts';
 import { RetainedRemoteValue } from '../../api/src/domains/plugin/execution-worker/protocol.ts';
+import { ExecutionRpcPeer } from '../../api/src/domains/plugin/execution-worker/rpc-peer.ts';
+import { attachWorkerChildConnection, type WorkerAcpChildHandle } from '../src/runtime/acp/worker-child-connection.ts';
 
 /**
  * Cross-boundary checks against the real execution RPC, not a fake: two in-process

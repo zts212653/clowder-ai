@@ -22,8 +22,8 @@ import { projectAssetVersions } from '@/components/capability-evolution/evolutio
 import { initial as artworkReviewFixture } from '@/components/content-review/__tests__/review-command.fixture';
 import { artifactRoundRequestSource } from '@/components/content-review/artifact-modification-source';
 import { CLIENT_OPTIONS, carrierOptionsForClient, initialState } from '@/components/hub-cat-editor.model';
-import { runtimeDefaults } from '@/components/settings/members/member-runtime-draft';
 import { model as teamModel } from '@/components/routing-context/__tests__/team-panel-fixtures';
+import { runtimeDefaults } from '@/components/settings/members/member-runtime-draft';
 import { apiFetch } from '@/utils/api-client';
 import { digest as filmDigest, project as filmDocument } from '../../../../shared/src/__tests__/video-project.fixtures';
 import { screening as filmScreening } from '../../../../shared/src/__tests__/video-project-screening.fixtures';
@@ -8850,7 +8850,9 @@ describe('member detect entry', () => {
       expect(w.document.body.textContent).toContain('需登录');
       expect(w.document.body.textContent).toContain('探测失败');
       w.eval('copyText = function (text) { window.copiedLoginCommand = text; }');
-      const login = w.document.querySelector('[data-act="nativeCopyLogin"][data-id="codex"]') as HTMLButtonElement | null;
+      const login = w.document.querySelector(
+        '[data-act="nativeCopyLogin"][data-id="codex"]',
+      ) as HTMLButtonElement | null;
       expect(login).not.toBeNull();
       login?.click();
       expect(w.eval('window.copiedLoginCommand')).toBe('codex login');
@@ -8891,10 +8893,7 @@ describe('declared plugin ACP runtime picker', () => {
 
   it('does not offer an unavailable declared ACP runtime for a new member', async () => {
     const meta = advancedMemberMetadata();
-    meta.runtimes = [
-      withForm(pluginRuntime('plugin:new/agent')),
-      withForm(pluginRuntime('plugin:off/agent', false)),
-    ];
+    meta.runtimes = [withForm(pluginRuntime('plugin:new/agent')), withForm(pluginRuntime('plugin:off/agent', false))];
     const { dom, w } = await boot(undefined, undefined, undefined, {}, (port) => {
       const previous = port.action;
       port.action = (name, args, element) => (name === 'membersRead' ? meta : previous(name, args, element));
@@ -8912,10 +8911,7 @@ describe('declared plugin ACP runtime picker', () => {
 
   it('keeps the current unavailable binding visible so it can be switched out', async () => {
     const meta = advancedMemberMetadata();
-    meta.runtimes = [
-      withForm(pluginRuntime('plugin:old/agent', false)),
-      withForm(pluginRuntime('plugin:new/agent')),
-    ];
+    meta.runtimes = [withForm(pluginRuntime('plugin:old/agent', false)), withForm(pluginRuntime('plugin:new/agent'))];
     const { dom, w } = await boot(
       undefined,
       (data) =>
@@ -9032,6 +9028,11 @@ describe('declared plugin ACP runtime picker', () => {
       picker!.dispatchEvent(new w.Event('change', { bubbles: true }));
       await w.__settled();
       expect(w.eval('VM.memberNew().form.fromPlugin')).toBe('plugin:acme/agent');
+      const handleInput = w.document.querySelector<HTMLInputElement>('#mc-aliases-in')!;
+      handleInput.value = 'declared-agent';
+      w.document.querySelector<HTMLButtonElement>('[data-for="mc-aliases"] [data-act="fieldGo"]')!.click();
+      await w.__settled();
+      expect(w.eval('VM.memberNew().form.d.aliases')).toContain('@declared-agent');
     } finally {
       dom.window.close();
     }
