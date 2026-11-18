@@ -196,7 +196,12 @@ function bindSidebar() {
           );
         })
         .map(function (r) {
-          return { who: r.catId, status: '', secs: r.since ? Math.max(0, (Date.now() - r.since) / 1000) : 0 };
+          // Whole minutes (the row shows minutes), so the row only changes when what it shows does.
+          return {
+            who: r.catId,
+            status: '',
+            secs: r.since ? Math.max(0, Math.floor((Date.now() - r.since) / 60000)) * 60 : 0,
+          };
         }),
       running: runs.length > 0 || (!!presence && presence.status === 'working'),
       failed: !!presence && presence.status === 'error',
