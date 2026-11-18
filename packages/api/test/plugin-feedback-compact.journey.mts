@@ -120,7 +120,7 @@ try {
   await panel.getByRole('button', { name: '跳过分析', exact: true }).click();
   await panel.getByLabel('报告正文预览').waitFor();
   assert.equal(
-    await panel.getByLabel('Issue 标题', { exact: true }).inputValue().startsWith('bug: '),
+    (await panel.getByLabel('Issue 标题', { exact: true }).inputValue()).startsWith('bug: '),
     true,
     'description supplies the initial title',
   );
