@@ -5,8 +5,8 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Readable } from 'node:stream';
-import { setTimeout as wait } from 'node:timers/promises';
 import { test } from 'node:test';
+import { setTimeout as wait } from 'node:timers/promises';
 import { roleConfigurationRevision } from '@clowder-ai/agent-access/roles/write-role';
 import { AGENT_ACCESS_OPERATIONS, OFFICIAL_AGENT_ACCESS_OPERATIONS } from '@clowder-ai/agent-contract';
 import { validateManifest } from '@clowder-ai/plugin-contract';
@@ -259,6 +259,84 @@ test('Agent access discovery executes the same standalone entrypoint from a Mana
   stopController.abort();
   await assert.rejects(parked, /abort/i);
   await providerEnded.promise;
+
+  const closeController = new AbortController();
+  const quiet = (async function* () {
+    yield { type: 'system', subtype: 'init', session_id: 'verified-session' };
+    await wait(60_000, undefined, { signal: closeController.signal });
+  })();
+  const closing = projectClaude(quiet, {
+    catId: 'verified-role',
+    signal: new AbortController().signal,
+    stop: () => closeController.abort(),
+    knownCredentials: [],
+  });
+  assert.equal((await closing.next()).done, false);
+  const stopped = assert.rejects(closing.next(), /abort/i);
+  await wait(25);
+  await Promise.all([stopped, closing.return()]);
+  assert.equal(closeController.signal.aborted, true);
+
+  const credential = 'fixture_opaque_agent_credential_value';
+  const projectedText = [];
+  const privateInput = (async function* () {
+    yield { type: 'stream_event', event: { type: 'message_start', message: { id: 'claude-secret' } } };
+    yield {
+      type: 'stream_event',
+      event: { type: 'content_block_delta', delta: { type: 'text_delta', text: 'before ' + credential.slice(0, 16) } },
+    };
+    yield { type: 'user', message: { content: 'host-only SDK message' }, session_id: 'verified-session' };
+    yield {
+      type: 'stream_event',
+      event: { type: 'content_block_delta', delta: { type: 'text_delta', text: credential.slice(16) + ' after' } },
+    };
+    yield {
+      type: 'assistant',
+      message: { id: 'claude-secret', content: [{ type: 'text', text: 'before ' + credential + ' after' }] },
+    };
+  })();
+  for await (const frame of projectClaude(privateInput, {
+    catId: 'verified-role',
+    signal: new AbortController().signal,
+    stop: () => {},
+    knownCredentials: [credential],
+  })) {
+    const messages = Array.isArray(frame.messages) ? frame.messages : [frame.messages];
+    projectedText.push(...messages.filter((message) => message?.type === 'text').map((message) => message.content));
+  }
+  assert.match(projectedText.join(''), /^before .*REDACTED.* after$/i);
+  assert.equal(projectedText.join('').includes(credential), false);
+
+  const forged = createAgentAccessClaudeOutput(runtime.inventoryStore, {
+    nativeActions: runtime.supervisor.nativeActions,
+    invoke: async (_id, _method, input) =>
+      (async function* () {
+        for await (const frame of input.source) {
+          assert.equal(frame.event, null, 'SDK user echo belongs to the Host');
+          yield {
+            sequence: frame.sequence,
+            messages: {
+              type: 'text',
+              catId: 'verified-role',
+              timestamp: 0,
+              contextCompaction: { eventSource: 'claude_compact_boundary' },
+            },
+          };
+        }
+      })(),
+  });
+  const user = (async function* () {
+    yield { type: 'user', message: { content: 'host-only SDK message' } };
+  })();
+  await assert.rejects(
+    forged(user, {
+      catId: 'verified-role',
+      signal: new AbortController().signal,
+      stop: () => {},
+      knownCredentials: [],
+    }).next(),
+    /invalid_claude_compaction_frame/,
+  );
 
   const selectModel = createAgentAccessAcpModelSelection(runtime.inventoryStore, runtime.supervisor);
   const modelOffer = {

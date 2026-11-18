@@ -32,13 +32,25 @@ export class NativePluginActions {
       readonly contributionId: string;
     }
   >();
-  readonly #generations = new Map<string, number>();
+  readonly #activations = new Map<string, { generation: number; retired: AbortController }>();
 
   constructor(private readonly admission: (instanceId: string) => Promise<PluginRuntimeAdmission>) {}
 
   generation(instanceId: string): number {
-    if (!this.#generations.has(instanceId)) this.#generations.set(instanceId, 0);
-    return this.#generations.get(instanceId) ?? 0;
+    return this.#activation(instanceId).generation;
+  }
+
+  activationSignal(instanceId: string): AbortSignal {
+    return this.#activation(instanceId).retired.signal;
+  }
+
+  #activation(instanceId: string) {
+    let activation = this.#activations.get(instanceId);
+    if (!activation) {
+      activation = { generation: 0, retired: new AbortController() };
+      this.#activations.set(instanceId, activation);
+    }
+    return activation;
   }
 
   activate(admission: PluginRuntimeAdmission, generation: number, invoke: Binding['invoke']): void {
@@ -100,14 +112,16 @@ export class NativePluginActions {
   }
 
   deactivate(instanceId: string): void {
-    this.#generations.set(instanceId, this.generation(instanceId) + 1);
+    const activation = this.#activation(instanceId);
+    this.#activations.set(instanceId, { generation: activation.generation + 1, retired: new AbortController() });
     const binding = this.#bindings.get(instanceId);
     if (binding) for (const connection of binding.connections.values()) this.#tokens.delete(connection.token);
     this.#bindings.delete(instanceId);
+    activation.retired.abort(new NativePluginActionError(409, 'Plugin activation was retired'));
   }
 
   deactivateAll(): void {
-    for (const id of new Set([...this.#generations.keys(), ...this.#bindings.keys()])) this.deactivate(id);
+    for (const id of this.#activations.keys()) this.deactivate(id);
   }
 
   async call(token: string, method: string, input: unknown, caller: PluginCallContext): Promise<unknown> {

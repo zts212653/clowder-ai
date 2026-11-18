@@ -12,7 +12,7 @@ export function createClaudeOutputProjection(catId: CatId) {
   };
   return (event: unknown) => {
     const data = event as Record<string, unknown> | null | undefined;
-    const usage = data?.type === 'result' && data.subtype === 'success' ? extractClaudeUsage(data) : undefined;
+    const usage = data?.type === 'result' ? extractClaudeUsage(data) : undefined;
     if (usage && state.lastTurnInputTokens !== undefined) usage.lastTurnInputTokens = state.lastTurnInputTokens;
     return { messages: transformClaudeEvent(event, catId, state), usage };
   };

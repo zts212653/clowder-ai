@@ -1025,7 +1025,8 @@ export class ClaudeAgentService implements AgentService {
         }
 
         // F8: Capture usage from result/success events before transform drops them
-        if (usage) metadata.usage = usage;
+        if (usage && typeof event === 'object' && event && 'subtype' in event && event.subtype === 'success')
+          metadata.usage = usage;
 
         const fromResultError = isResultErrorEvent(event);
         let result = messages;

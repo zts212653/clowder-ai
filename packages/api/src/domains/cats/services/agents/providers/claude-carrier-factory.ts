@@ -83,7 +83,7 @@ export function createCarrierByTier(
 ): AgentService {
   switch (tier) {
     case CARRIER_AGENT_SDK:
-      return new ClaudeSdkAgentService({ catId });
+      return new ClaudeSdkAgentService({ catId, projectOutput });
     case CARRIER_BG_DAEMON:
       return new ClaudeBgCarrierService({ catId });
     case CARRIER_INTERACTIVE_PTY:

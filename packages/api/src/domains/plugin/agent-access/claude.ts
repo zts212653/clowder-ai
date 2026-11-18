@@ -6,43 +6,57 @@ import {
   agentAccessClaudeProjectionSchema,
 } from '@clowder-ai/agent-contract/claude';
 import { isCliError, isCliTimeout, isLivenessWarning } from '../../../utils/cli-spawn.js';
-import { sanitizeRawEvent } from '../../cats/services/agents/providers/codex-audit-hooks.js';
 import type { PluginRuntimeCarrierRouter } from '../carrier/runtime-carrier.js';
 import type { PluginInventoryStore } from '../host-inventory/ports.js';
+import { createClaudeEventBoundary } from './claude-events.js';
 
 export function createAgentAccessClaudeOutput(
   inventory: Pick<PluginInventoryStore, 'readCurrentAuthority'>,
   runtime: Pick<PluginRuntimeCarrierRouter, 'invoke' | 'nativeActions'>,
 ) {
-  return async function* (
+  async function* project(
     events: AsyncIterable<unknown>,
     input: { catId: CatId; signal: AbortSignal; stop: () => void; knownCredentials: readonly string[] },
+    closed: AbortSignal,
   ) {
     const selected = (await inventory.readCurrentAuthority(AGENT_ACCESS_PLUGIN_ID))?.instance;
     if (!selected || selected.activationState !== 'enabled' || selected.runtimeState !== 'healthy')
       throw new Error('session_implementation_unavailable');
     const { pluginInstanceId } = selected;
-    const generation = runtime.nativeActions.generation(pluginInstanceId);
-    const assertCurrent = () => {
-      if (runtime.nativeActions.generation(pluginInstanceId) !== generation)
-        throw new Error('session_implementation_unavailable');
-    };
+    const retired = runtime.nativeActions.activationSignal(pluginInstanceId);
+    const signal = AbortSignal.any([retired, input.signal, closed]);
+    signal.throwIfAborted();
 
     const pending = new Map<number, unknown>();
     let inputEnded = false;
+    let stopped = false;
+    const stop = () => {
+      if (inputEnded || stopped) return;
+      stopped = true;
+      input.stop();
+    };
+    signal.addEventListener('abort', stop, { once: true });
+    const prepare = createClaudeEventBoundary(input.knownCredentials);
     const source = Readable.from(
       (async function* () {
         let sequence = 0;
-        assertCurrent();
-        input.signal.throwIfAborted();
+        signal.throwIfAborted();
         for await (const raw of events) {
           const hostEvent = isCliError(raw) || isCliTimeout(raw) || isLivenessWarning(raw);
-          const event = hostEvent ? raw : sanitizeRawEvent(raw, input.knownCredentials);
-          pending.set(sequence, event);
-          yield { sequence, event: hostEvent ? null : event };
-          sequence += 1;
+          const { before, host, projected } = prepare(hostEvent ? null : raw);
+          if (before) {
+            pending.set(sequence, before);
+            yield { sequence: sequence++, event: before };
+          }
+          pending.set(sequence, hostEvent ? raw : host);
+          yield { sequence: sequence++, event: projected };
         }
         inputEnded = true;
+        const { before } = prepare(null);
+        if (before) {
+          pending.set(sequence, before);
+          yield { sequence, event: before };
+        }
       })(),
       { objectMode: true, highWaterMark: 1 },
     );
@@ -51,15 +65,14 @@ export function createAgentAccessClaudeOutput(
       const frames = await runtime.invoke(pluginInstanceId, 'projectClaudeOutput', {
         catId: input.catId,
         source,
-        signal: input.signal,
+        signal,
       });
-      assertCurrent();
+      signal.throwIfAborted();
       if (!frames || typeof frames !== 'object' || !(Symbol.asyncIterator in frames))
         throw new Error('invalid_claude_output_stream');
       let nextSequence = 0;
       for await (const frame of frames as AsyncIterable<unknown>) {
-        assertCurrent();
-        input.signal.throwIfAborted();
+        signal.throwIfAborted();
         const { sequence, messages, usage } = agentAccessClaudeProjectionSchema.parse(frame);
         if (sequence !== nextSequence || !pending.has(sequence)) throw new Error('invalid_claude_output_sequence');
         nextSequence += 1;
@@ -68,21 +81,27 @@ export function createAgentAccessClaudeOutput(
         if ((isCliError(event) || isCliTimeout(event) || isLivenessWarning(event)) && (messages || usage))
           throw new Error('invalid_claude_host_event_projection');
         const raw = event as Record<string, unknown> | null | undefined;
-        if (usage && (raw?.type !== 'result' || raw.subtype !== 'success'))
-          throw new Error('invalid_claude_usage_frame');
+        if (usage && raw?.type !== 'result') throw new Error('invalid_claude_usage_frame');
+        let sawControl = false;
         const project = (message: AgentAccessClaudeWireMessage) => {
+          const session = message.type === 'session_init';
+          const compact = message.type === 'provider_signal';
+          if ((session || compact) && sawControl) throw new Error('duplicate_claude_control_frame');
+          sawControl ||= session || compact;
           if (
-            message.type === 'session_init' &&
-            (raw?.type !== 'system' || raw.subtype !== 'init' || raw.session_id !== message.sessionId)
+            session
+              ? raw?.type !== 'system' || raw.subtype !== 'init' || raw.session_id !== message.sessionId
+              : message.sessionId !== undefined
           )
             throw new Error('invalid_claude_session_frame');
           if (
-            message.type === 'provider_signal' &&
-            (raw?.type !== 'system' ||
-              raw.subtype !== 'compact_boundary' ||
-              !message.contextCompaction ||
-              message.contextCompaction.preTokens !==
-                (typeof raw.pre_tokens === 'number' ? raw.pre_tokens : undefined))
+            compact
+              ? raw?.type !== 'system' ||
+                raw.subtype !== 'compact_boundary' ||
+                !message.contextCompaction ||
+                message.contextCompaction.preTokens !==
+                  (typeof raw.pre_tokens === 'number' ? raw.pre_tokens : undefined)
+              : message.contextCompaction !== undefined
           )
             throw new Error('invalid_claude_compaction_frame');
           if (
@@ -100,9 +119,25 @@ export function createAgentAccessClaudeOutput(
       }
       if (!inputEnded || pending.size > 0) throw new Error('incomplete_claude_output_stream');
     } finally {
-      if (!inputEnded) input.stop();
+      signal.removeEventListener('abort', stop);
+      stop();
       source.destroy();
     }
+  }
+
+  return (events: Parameters<typeof project>[0], input: Parameters<typeof project>[1]) => {
+    const closing = new AbortController();
+    const iterator = project(events, input, closing.signal);
+    return {
+      [Symbol.asyncIterator]() {
+        return this;
+      },
+      next: () => iterator.next(),
+      return: () => {
+        closing.abort();
+        return iterator.return(undefined);
+      },
+    };
   };
 }
 

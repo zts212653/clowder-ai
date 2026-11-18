@@ -1,12 +1,15 @@
 import { randomUUID } from 'node:crypto';
 import { isAbsolute, resolve } from 'node:path';
 import type { Options as ClaudeSdkOptions, SDKUserMessage } from '@anthropic-ai/claude-agent-sdk';
+import { configuredCredentialValues } from '@cat-cafe/mcp-server/dist/secret-runtime.js';
 import { type CatId, createCatId } from '@cat-cafe/shared';
+import { createClaudeOutputProjection } from '@clowder-ai/agent-access/runtime/claude/project-claude-output';
 import { getCatModel } from '../../../../../config/cat-models.js';
 import { redactClaudeLaunchToken } from '../../../../../config/claude-token-account.js';
 import { createModuleLogger } from '../../../../../infrastructure/logger.js';
 import { buildCliDiagnostics } from '../../../../../utils/cli-diagnostics.js';
 import { sanitizeCliStderr } from '../../../../../utils/sanitize-cli-stderr.js';
+import type { AgentAccessClaudeOutput } from '../../../../plugin/agent-access/claude.js';
 import { CliRawArchive } from '../../session/CliRawArchive.js';
 import type {
   AgentClientActiveRunHandle,
@@ -19,7 +22,6 @@ import type {
 } from '../../types.js';
 import { resolveDefaultClaudeMcpServerPath } from './ClaudeAgentService.js';
 import { captureClaudeMcpConfig } from './claude-mcp-config.js';
-import { extractClaudeUsage, transformClaudeEvent } from './claude-ndjson-parser.js';
 import { captureClaudeMemberOptions } from './claude-scoped-native.js';
 import { sdkCompactionHooks } from './claude-sdk-compaction-hooks.js';
 import { prepareClaudeSdkLaunch } from './claude-sdk-launch.js';
@@ -46,6 +48,7 @@ interface ClaudeSdkAgentServiceOptions {
   runtimeResolver?: (signal?: AbortSignal) => ClaudeSdkRuntime | Promise<ClaudeSdkRuntime>;
   rawArchive?: RawArchiveSink;
   activeRunControlTimeoutMs?: number;
+  projectOutput?: AgentAccessClaudeOutput;
 }
 
 const DEFAULT_ACTIVE_RUN_CONTROL_TIMEOUT_MS = 15_000;
@@ -91,8 +94,10 @@ export class ClaudeSdkAgentService implements AgentService {
   private readonly runtimeResolver: NonNullable<ClaudeSdkAgentServiceOptions['runtimeResolver']>;
   private readonly rawArchive: RawArchiveSink;
   private readonly activeRunControlTimeoutMs: number;
+  private readonly projectOutput?: AgentAccessClaudeOutput;
 
   constructor(options?: ClaudeSdkAgentServiceOptions) {
+    this.projectOutput = options?.projectOutput;
     this.catId = options?.catId ?? createCatId('opus');
     this.model = options?.model ?? getCatModel(this.catId as string);
     this.l0CompilerFn = options?.l0CompilerFn ?? compileL0ViaSubprocess;
@@ -176,13 +181,16 @@ export class ClaudeSdkAgentService implements AgentService {
     let stderrBuffer = '';
     let activeSessionId = options?.sessionId ?? '';
     const metadata: MessageMetadata = { provider: 'anthropic', model: this.model };
-    const streamState = {
-      currentMessageId: undefined as string | undefined,
-      partialTextMessageIds: new Set<string>(),
-      lastTurnInputTokens: undefined as number | undefined,
-      thinkingBuffer: '',
-    };
     let query: ReturnType<ClaudeSdkQueryFn> | undefined;
+    const closeQuery = () => {
+      const activeQuery = query;
+      query = undefined;
+      try {
+        activeQuery?.close();
+      } catch (err) {
+        log.warn({ err }, 'SDK query cleanup failed');
+      }
+    };
     let terminal = false;
     let failed = false;
     let lastTransientError: string | undefined;
@@ -268,15 +276,32 @@ export class ClaudeSdkAgentService implements AgentService {
       sdkOptions.stderr = (data) => {
         stderrBuffer = sanitizeCliStderr(`${stderrBuffer}${data}`).slice(-MAX_SDK_STDERR_CHARS);
       };
-      await member?.pluginNativeLaunch?.assertCurrent();
-      query = queryFn({ prompt: turnInputs.input, options: sdkOptions });
-      turnInputs.push(createSdkUserMessage(prepared.prompt, activeSessionId, initialMessageId));
-      archive({ type: 'sdk_input', kind: 'primary', uuid: initialMessageId });
-      for await (const rawEvent of query) {
-        const event = redactClaudeLaunchToken(
-          rawEvent,
-          options?.claudeTokenAccount ? options.accountEnv?.CLAUDE_CODE_OAUTH_TOKEN : undefined,
-        );
+      const events = (async function* () {
+        await member?.pluginNativeLaunch?.assertCurrent();
+        abortController.signal.throwIfAborted();
+        query = queryFn({ prompt: turnInputs.input, options: sdkOptions });
+        turnInputs.push(createSdkUserMessage(prepared.prompt, activeSessionId, initialMessageId));
+        archive({ type: 'sdk_input', kind: 'primary', uuid: initialMessageId });
+        for await (const rawEvent of query) {
+          yield redactClaudeLaunchToken(
+            rawEvent,
+            options?.claudeTokenAccount ? options.accountEnv?.CLAUDE_CODE_OAUTH_TOKEN : undefined,
+          );
+        }
+      })();
+      const catId = this.catId;
+      const projected = this.projectOutput
+        ? this.projectOutput(events, {
+            catId,
+            signal: abortController.signal,
+            stop: closeQuery,
+            knownCredentials: configuredCredentialValues({ ...process.env, ...sdkOptions.env }),
+          })
+        : (async function* () {
+            const localProjection = createClaudeOutputProjection(catId);
+            for await (const event of events) yield { event, ...localProjection(event) };
+          })();
+      for await (const { event, messages: transformed, usage } of projected) {
         if (abortController.signal.aborted) break;
         if (typeof event !== 'object' || event === null) continue;
         const raw = event as Record<string, unknown>;
@@ -317,12 +342,8 @@ export class ClaudeSdkAgentService implements AgentService {
           // the provider started itself, such as a killed task's notification,
           // settles none of our inputs.
           turnInputs.settleResult(raw);
-          metadata.usage = extractClaudeUsage(raw);
-          if (streamState.lastTurnInputTokens != null && metadata.usage) {
-            metadata.usage.lastTurnInputTokens = streamState.lastTurnInputTokens;
-          }
+          metadata.usage = usage;
         }
-        const transformed = transformClaudeEvent(event, this.catId, streamState);
         if (transformed) {
           for (const message of Array.isArray(transformed) ? transformed : [transformed]) {
             if (message.type === 'error') {
@@ -345,7 +366,10 @@ export class ClaudeSdkAgentService implements AgentService {
         // native idle only after accepted inputs and background report turns
         // have drained. A result alone can precede queued reports. Breaking
         // performs AsyncIteratorClose (Query.return), terminating the SDK query.
-        if (!turnInputs.isAccepting) break;
+        if (!turnInputs.isAccepting) {
+          closeQuery();
+          break;
+        }
       }
       if ((!terminal || turnInputs.isAccepting) && !abortController.signal.aborted)
         throw new Error('claude_sdk_stream_ended_without_result');
@@ -372,11 +396,7 @@ export class ClaudeSdkAgentService implements AgentService {
       inputReadCallbacks.clear();
       inputReadInFlight.clear();
       turnInputs.close();
-      try {
-        query?.close();
-      } catch (err) {
-        log.warn({ err }, 'SDK query cleanup failed');
-      }
+      closeQuery();
       releaseDispatch?.();
       abortController.abort();
       options?.signal?.removeEventListener('abort', abort);
