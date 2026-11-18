@@ -7361,6 +7361,54 @@ it('waits for plugin update receipts and keeps offline installation inside the e
   }
 });
 
+it('requires explicit confirmation for archive replacement and resends the selected file and offered revision', async () => {
+  const replacement = {
+    confirmation: {
+      pluginId: 'official.agent-access',
+      pluginInstanceId: 'agent-access-instance',
+      currentPackageDigest: 'selected-digest',
+      candidatePackageDigest: 'replacement-digest',
+      expectedLifecycleRevision: 7,
+    },
+    displayName: 'Agent Access',
+    currentVersion: '1.0.0',
+    candidateVersion: '1.0.1',
+  };
+  const { dom, w, action } = await boot(undefined, undefined, undefined, {}, (port) => {
+    const original = port.action;
+    port.action = async (name, args, input) => {
+      if (name === 'pluginArchive' && !args.replacement) return { replacement };
+      return original(name, args, input);
+    };
+  });
+  try {
+    w.eval('A.installFile()');
+    await w.__settled();
+    const input = w.document.getElementById('cap-file');
+    Object.defineProperty(input, 'files', { value: [new w.File(['archive'], 'agent-access.tgz')] });
+    input.dispatchEvent(new w.Event('change', { bubbles: true }));
+    await w.eval('dialogSubmit()');
+    await w.__settled();
+    expect(w.eval('S.dialog?.kind')).toBe('pluginArchiveReplace');
+    expect(w.document.body.textContent).toContain('1.0.0');
+    expect(w.document.body.textContent).toContain('1.0.1');
+    expect(action).not.toHaveBeenCalledWith(
+      'pluginArchive',
+      { replacement: JSON.stringify(replacement.confirmation) },
+      input,
+    );
+    await w.eval('dialogSubmit()');
+    await w.__settled();
+    expect(action).toHaveBeenCalledWith(
+      'pluginArchive',
+      { replacement: JSON.stringify(replacement.confirmation) },
+      input,
+    );
+  } finally {
+    dom.window.close();
+  }
+});
+
 it('reads inbox confirmations and uses native mention revision coordinates for resolve, restore and undo', async () => {
   const calls: { path: string; body: unknown }[] = [];
   const mention = {

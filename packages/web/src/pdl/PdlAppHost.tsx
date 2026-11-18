@@ -5,6 +5,8 @@ import {
   type ContextAttachment,
   ContextAttachmentsSchema,
   type MessageContent,
+  PluginArchiveReplacementConfirmationSchema,
+  PluginArchiveReplacementOfferSchema,
   RichCardBlock,
   RuntimeInteractionRecord,
   RuntimeInteractionResponse,
@@ -1149,7 +1151,27 @@ function ChatBinding({
         if (!file) throw new Error('common.required');
         const form = new FormData();
         form.append('file', file);
-        return request('/api/plugin-manager/plugins/install/upload', { method: 'POST', body: form });
+        if (args.replacement) {
+          const confirmation = PluginArchiveReplacementConfirmationSchema.parse(JSON.parse(args.replacement));
+          form.append('replacement', JSON.stringify(confirmation));
+        }
+        const path = '/api/plugin-manager/plugins/install/upload';
+        const response = await apiFetch(path, { method: 'POST', body: form }, mutationRequestOptions(path));
+        const payload: unknown = await response.json();
+        if (response.ok) return payload;
+        if (payload && typeof payload === 'object') {
+          if (
+            response.status === 409 &&
+            !args.replacement &&
+            'code' in payload &&
+            payload.code === 'ARCHIVE_REPLACEMENT_CONFIRMATION_REQUIRED' &&
+            'replacement' in payload
+          ) {
+            return { replacement: PluginArchiveReplacementOfferSchema.parse(payload.replacement) };
+          }
+          if ('error' in payload && typeof payload.error === 'string') throw new Error(payload.error);
+        }
+        throw new Error(`请求失败 (${response.status})`);
       }
       case 'pluginOperation':
         return callPluginOperation(

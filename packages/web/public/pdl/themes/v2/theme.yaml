@@ -23248,6 +23248,16 @@ pdl:
           foot: $.error
           footTone: err
       ok: t:guide.next
+    dlg.pluginArchiveReplace:
+      title: t:archiveReplacement.title
+      text:
+        - t: archiveReplacement.version
+          args:
+            - $.displayName
+            - $.currentVersion
+            - $.candidateVersion
+        - t: archiveReplacement.retention
+      ok: t:archiveReplacement.confirm
     dlg.pluginFileInspect:
       bare: true
       title:

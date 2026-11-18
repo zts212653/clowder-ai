@@ -1,4 +1,5 @@
 {
+  "archiveReplacement": {"title": "替换已安装插件", "version": "{0}：{1} → {2}", "retention": "保留插件配置和数据。", "confirm": "确认替换"},
  "common": {
   "threads": "对话",
   "undo": "撤销",

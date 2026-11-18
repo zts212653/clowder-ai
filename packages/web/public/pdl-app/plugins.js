@@ -659,8 +659,19 @@ function bindPluginSpaces() {
     return dialog({
       kind: 'pluginFile',
       on: async function () {
-        await chatPort.action('pluginArchive', {}, input);
-        await read();
+        const selected = input;
+        const result = await chatPort.action('pluginArchive', {}, selected);
+        const offer = result && result.replacement;
+        if (!offer) return read();
+        if (S.dialog) return;
+        dialog({
+          kind: 'pluginArchiveReplace',
+          args: offer,
+          on: async function () {
+            await chatPort.action('pluginArchive', { replacement: JSON.stringify(offer.confirmation) }, selected);
+            await read();
+          },
+        });
       },
     });
   };
