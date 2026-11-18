@@ -49,6 +49,7 @@ test('Kimi native events cross with redaction and consume only the same active p
         assert.equal(input.event.content, 'Hello');
         assert.notEqual(input.event.apiKey, 'fixture-private-value');
         assert.ok(!input.event.thinking.includes('fixture-opaque-secret'));
+        assert.ok(!input.event.tool_calls[0].function.arguments.includes('fixture-other-private-value'));
         instance.lifecycleRevision += 1;
         return { kind: 'ignored' };
       },
@@ -56,7 +57,14 @@ test('Kimi native events cross with redaction and consume only the same active p
   )({ prompt: 'hello', imageAccessDirs: [] });
   await assert.rejects(
     plan.normalizeEvent(
-      { content: 'Hello', apiKey: 'fixture-private-value', thinking: 'trace fixture-opaque-secret' },
+      {
+        content: 'Hello',
+        apiKey: 'fixture-private-value',
+        thinking: 'trace fixture-opaque-secret',
+        tool_calls: [
+          { function: { arguments: JSON.stringify({ Authorization: 'Bearer fixture-other-private-value' }) } },
+        ],
+      },
       ['fixture-opaque-secret'],
     ),
     {

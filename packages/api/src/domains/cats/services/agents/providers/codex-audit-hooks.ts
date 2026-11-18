@@ -57,7 +57,9 @@ export function extractCommandExecutionLifecycle(event: unknown): CommandExecuti
  */
 export function sanitizeRawEvent(event: unknown, knownCredentials?: readonly string[]): unknown {
   try {
-    return redactSensitiveFields(inspectSecretValue(event, { knownCredentials }).value, 0);
+    const scan = inspectSecretValue(event).value;
+    const safe = knownCredentials?.length ? inspectSecretValue(scan, { knownCredentials }).value : scan;
+    return redactSensitiveFields(safe, 0);
   } catch {
     return { type: 'redacted_event', reason: 'secret_result_uninspectable' };
   }
