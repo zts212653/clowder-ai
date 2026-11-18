@@ -123,7 +123,7 @@ VM.watcherSettings = function () {
       error: raw ? raw.errors['watcher:settings'] || '' : '',
     };
   const muted = new Set(value.config.doNotDisturbLabelIds),
-    panel = value.config.panel || value.panelDefaults;
+    panel = watcherPanelOf(value);
   return Object.assign({}, value, {
     availableLabels: value.availableLabels.map(function (label) {
       return Object.assign({}, label, { muted: muted.has(label.id) });
@@ -131,6 +131,9 @@ VM.watcherSettings = function () {
     error: raw.errors['watcher:settings'] || '',
     panel: panel,
     panelOn: !!(value.config.panel && value.config.panel.enabled),
+    panelAvailable: value.members.some(function (m) {
+      return m.panelSupported;
+    }),
     panelLimits: Array.from({ length: 12 }, function (_, i) {
       return { v: i + 1, label: String(i + 1) };
     }),
@@ -154,8 +157,23 @@ VM.watcherSettings = function () {
   });
 };
 // The panel is sent back whole (the server takes a complete panel); the members it starts from are the defaults.
+// Without a saved panel it starts from the default members that can serve here, else the first that can.
+function watcherPanelOf(value) {
+  if (value.config.panel) return value.config.panel;
+  const ids = value.members
+      .filter(function (m) {
+        return m.panelSupported;
+      })
+      .map(function (m) {
+        return m.catId;
+      }),
+    kept = value.panelDefaults.members.filter(function (m) {
+      return ids.indexOf(m.catId) >= 0;
+    });
+  return Object.assign({}, value.panelDefaults, { members: kept.length || !ids.length ? kept : [{ catId: ids[0] }] });
+}
 function watcherPanel() {
-  return watcherData.settings.config.panel || watcherData.settings.panelDefaults;
+  return watcherPanelOf(watcherData.settings);
 }
 A.watcherPanelSet = function (d) {
   return A.watcherConfigSet({ field: 'panel', value: Object.assign({}, watcherPanel(), { [d.field]: d.value }) });

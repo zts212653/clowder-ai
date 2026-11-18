@@ -26932,6 +26932,7 @@ pdl:
                               "true": ""
                               _: "@capability.reason"
                 - label: t:chatMessage.watcher.panel
+                  when: $.panelAvailable
                   control:
                     type: switch
                     label: t:chatMessage.watcher.panel
