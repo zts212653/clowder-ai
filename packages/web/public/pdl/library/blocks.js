@@ -90,9 +90,9 @@ function R(k) { return PDL_ROLES[k].slice(); }
    PDL 里出现没声明的属性、或者枚举外的字面值，结构检查（pdl-schema）就报错。新增属性先在这里声明 */
 Object.assign(PDL_SCHEMA, {
   /* 行模板（列表的 row：PDL_ROWS 里的实体模板，或列表声明里就地写的字段映射）：layout 必填，取组件库的一种行布局（组件库 rows.js ROW_LAYOUTS；tree 只由树块用）；
-     其余是数据绑定。_rowNo：每种布局不接受的字段（单行没有副行，只有条目有竖排尾部，记录行不能再展开） */
+     其余是数据绑定。_rowNo：每种布局不接受的字段（单行没有副行，只有条目有竖排尾部；记录行声明了 expand 也能在原位展开，lang 2026-11-18） */
   _row: { layout: ['line', 'two', 'item', 'record'], key: 1, lead: 1, title: 1, inline: 1, sub: 1, meta: 1, cols: 1, acts: 1, tone: 1, color: 1, bar: 1, act: 1, args: 1, note: 1, expand: 1, more: 1, moreWhen: 1, moreAfter: 1, cur: 1, aside: 1, subLines: 1, label: 1, help: 1, when: 1 },
-  _rowNo: { line: ['sub', 'meta', 'aside', 'subLines'], two: ['aside', 'subLines'], item: [], record: ['sub', 'meta', 'aside', 'subLines', 'expand'] },
+  _rowNo: { line: ['sub', 'meta', 'aside', 'subLines'], two: ['aside', 'subLines'], item: [], record: ['sub', 'meta', 'aside', 'subLines'] },
   app: { demo: 1, name: ['entry', 'stripe', 'handle'], region: 1, when: 1 },
   back: { act: 1, args: 1, label: 1, when: 1 },   /* 返回放在这里（引擎的返回）；act / args 是没有返回可回时的去处 */
   box: { blocks: 1, faint: 1, fill: 1, follow: 1, note: 1, open: 1, tone: ['$', 'info', 'ok', 'warn', 'danger'], variant: R('box'), when: 1 },

@@ -446,9 +446,13 @@ function executionRun(run) {
     key: run.invocationId,
     who: run.catId,
     status: run.status,
-    messages: run.keyMessages,
-    statusEvents: run.statusEvents,
-    preview: run.firstAssistantOutputEvidence,
+    messages: run.messageCount,
+    statusEvents: run.statusEventCount,
+    // the first output has text only when the server marks it available; otherwise the theme says none is verified yet
+    preview:
+      run.firstAssistantOutputEvidence && run.firstAssistantOutputEvidence.status === 'available'
+        ? run.firstAssistantOutputEvidence.content
+        : '',
     tools: run.toolUseCount,
     errors: run.errorCount,
     dur: run.durationMs / 1000,
@@ -460,7 +464,11 @@ function executionEvent(row) {
   return Object.assign({}, row, {
     key: row.id,
     ts: row.timestamp,
+    text: row.content,
     ms: row.kind === 'tool' ? row.durationMs : undefined,
+    types: Object.keys(row.types || {}).map(function (type) {
+      return { type: type, count: row.types[type] };
+    }),
   });
 }
 function executionModel(query) {
@@ -661,16 +669,30 @@ function executionModel(query) {
       run: {
         id: sub,
         who: summary.catId,
-        title: summary.keyMessages[0] ?? sub,
+        // the message that started this run; else its first key message; else the run id
+        title:
+          (detail.promptInput &&
+            detail.promptInput.status === 'available' &&
+            (
+              detail.promptInput.messages.find(function (m) {
+                return m.status === 'available';
+              }) || {}
+            ).excerpt) ||
+          summary.keyMessages[0] ||
+          sub,
         seq: summary.sessionSeq,
         at: summary.startedAt,
-        sealed: summary.status === 'sealed',
-        name: summary.keyMessages[0],
+        sealed: summary.sessionStatus === 'sealed',
+        name: (
+          data.cats.find(function (c) {
+            return c.id === summary.catId;
+          }) || { displayName: summary.catId }
+        ).displayName,
         duration: summary.durationMs / 1000,
-        input: summary.inputTokens,
-        output: summary.outputTokens,
-        hasInput: summary.inputTokens !== undefined,
-        hasTokens: summary.inputTokens !== undefined || summary.outputTokens !== undefined,
+        input: summary.tokens && summary.tokens.input,
+        output: summary.tokens && summary.tokens.output,
+        hasInput: !!summary.tokens && summary.tokens.input !== undefined,
+        hasTokens: !!summary.tokens,
         state: summary.status,
         mode: state.tjMode,
         rawRecords: detail.events,

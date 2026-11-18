@@ -3,17 +3,19 @@
 'use strict';
 /* 时间和大小的写法（PDL 的 { of, fmt }）：接口给时间戳 / 字节数，这里按“你”的时区写成字。ago 侧栏的相对时间 · day 今天 / N月N日 · at 今天 hh:mm / 昨天 hh:mm / N 天前 / N月N日 hh:mm · hm 时:分 · stamp MM/DD hh:mm（对话和消息的时间，不分今天） · bytes GB / MB / KB（一位小数） */
 function fmtParts(ts) { const tz = WHO_DATA.me().timeZone, o = {}; new Intl.DateTimeFormat('en-US', { timeZone: tz || undefined, year: 'numeric', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).formatToParts(ts).forEach(function (p) { o[p.type] = p.value; }); return o; }
+/* 时间：毫秒数、数字串或 ISO 串都读成时间戳；读不出来是 NaN，各个时间写法一律写成空串 */
+function fmtTs(ts) { return typeof ts === 'number' ? ts : typeof ts === 'string' ? (/^\d+$/.test(ts) ? Number(ts) : Date.parse(ts)) : NaN; }
 function fmtDayNo(o) { return Date.UTC(+o.year, +o.month - 1, +o.day) / 864e5; }
 const FORMATS = {
-  ago: function (ts) { if (typeof ts === 'string') ts = /^\d+$/.test(ts) ? Number(ts) : Date.parse(ts); if (!isFinite(ts)) return ''; const s = Math.max(0, (ioNow() - ts) / 1000);   /* 时间可能是毫秒数、数字串或 ISO 串；读不出来就不写 */ return s < 60 ? tc('common.justNow') : s < 3600 ? tc('format.minutes', Math.round(s / 60)) : s < 86400 ? tc('format.hours', Math.round(s / 3600)) : tc('format.days', Math.round(s / 86400)); },
-  hm: function (ts) { const o = fmtParts(ts); return o.hour + ':' + o.minute; },
-  stamp: function (ts) { const o = fmtParts(ts); return ('0' + o.month).slice(-2) + '/' + ('0' + o.day).slice(-2) + ' ' + o.hour + ':' + o.minute; },
-  day: function (ts) { const o = fmtParts(ts); return fmtDayNo(o) === fmtDayNo(fmtParts(ioNow())) ? tc('format.today') : tc('format.date', +o.month, +o.day); },
-  at: function (ts) { const o = fmtParts(ts), d = fmtDayNo(fmtParts(ioNow())) - fmtDayNo(o), hm = o.hour + ':' + o.minute; return d <= 0 ? tc('format.todayAt', hm) : d === 1 ? tc('format.yesterdayAt', hm) : d < 7 ? tc('format.daysAgo', Math.round((ioNow() - ts) / 864e5)) : tc('format.date', +o.month, +o.day) + ' ' + hm; },
+  ago: function (ts) { ts = fmtTs(ts); if (!isFinite(ts)) return ''; const s = Math.max(0, (ioNow() - ts) / 1000);   /* 时间可能是毫秒数、数字串或 ISO 串；读不出来就不写 */ return s < 60 ? tc('common.justNow') : s < 3600 ? tc('format.minutes', Math.round(s / 60)) : s < 86400 ? tc('format.hours', Math.round(s / 3600)) : tc('format.days', Math.round(s / 86400)); },
+  hm: function (ts) { ts = fmtTs(ts); if (!isFinite(ts)) return ''; const o = fmtParts(ts); return o.hour + ':' + o.minute; },
+  stamp: function (ts) { ts = fmtTs(ts); if (!isFinite(ts)) return ''; const o = fmtParts(ts); return ('0' + o.month).slice(-2) + '/' + ('0' + o.day).slice(-2) + ' ' + o.hour + ':' + o.minute; },
+  day: function (ts) { ts = fmtTs(ts); if (!isFinite(ts)) return ''; const o = fmtParts(ts); return fmtDayNo(o) === fmtDayNo(fmtParts(ioNow())) ? tc('format.today') : tc('format.date', +o.month, +o.day); },
+  at: function (ts) { ts = fmtTs(ts); if (!isFinite(ts)) return ''; const o = fmtParts(ts), d = fmtDayNo(fmtParts(ioNow())) - fmtDayNo(o), hm = o.hour + ':' + o.minute; return d <= 0 ? tc('format.todayAt', hm) : d === 1 ? tc('format.yesterdayAt', hm) : d < 7 ? tc('format.daysAgo', Math.round((ioNow() - ts) / 864e5)) : tc('format.date', +o.month, +o.day) + ' ' + hm; },
   floorMinutes: function (seconds) { return Math.floor(seconds / 60); },
   num: function (n) { return Number(n).toLocaleString(); },
-  datetime: function (ts) { return new Date(ts).toLocaleString(undefined, { timeZone: WHO_DATA.me().timeZone || undefined }); },
-  date: function (ts) { return new Date(ts).toLocaleDateString(undefined, { timeZone: WHO_DATA.me().timeZone || undefined }); },
+  datetime: function (ts) { ts = fmtTs(ts); if (!isFinite(ts)) return ''; return new Date(ts).toLocaleString(undefined, { timeZone: WHO_DATA.me().timeZone || undefined }); },
+  date: function (ts) { ts = fmtTs(ts); if (!isFinite(ts)) return ''; return new Date(ts).toLocaleDateString(undefined, { timeZone: WHO_DATA.me().timeZone || undefined }); },
   duration: function (sec) { return ENGINE_PARTS.duration(sec); },
   clock: function (sec) { return clockText(sec); },
   clockH: function (sec) { return clockText(sec, true); },
@@ -24,6 +26,8 @@ const FORMATS = {
   localized: function (value) { if (typeof value === 'string') return value; const lang = S.lang || 'zh', t = value.translations || {}; return t[lang] || (lang === 'zh' ? t['zh-CN'] : '') || value.default; },
   jsonValue: function (value) { return typeof value === 'string' ? value : JSON.stringify(value); },
   json: function (value) { return JSON.stringify(value); },
+  /* 读的 JSON：对象 / JSON 串都分行缩进；不是 JSON 的字串原样 */
+  jsonPretty: function (value) { if (typeof value === 'string') { try { value = JSON.parse(value); } catch (e) { return value; } } return JSON.stringify(value, null, 2); },
   jsonLines: function (entries) { return entries.map(function (entry) { return JSON.stringify(entry); }).join('\n'); },
   noFinalPeriod: function (text) { return String(text).replace(/。$/, ''); },
   stem: function (name) { return String(name).replace(/\.[^.]+$/, ''); },

@@ -30614,7 +30614,8 @@ pdl:
           sub:
             parts:
               - parts:
-                  - $.run.at
+                  - of: $.run.at
+                    fmt: at
                   - " · "
                   - of: $.run.duration
                     fmt: duration
@@ -30715,6 +30716,7 @@ pdl:
               from: "@events"
               row:
                 layout: record
+                key: "@key"
                 lead:
                   - icon:
                       t: wsTrace.event.toolIcon
@@ -31033,7 +31035,8 @@ pdl:
                         "true":
                           t: wsTrace.event.toolTip.true
                           args:
-                            - "@input"
+                            - of: "@input"
+                              fmt: jsonValue
                             - t: wsTrace.event.result
                               args:
                                 - "@result"
@@ -31047,7 +31050,9 @@ pdl:
                       map:
                         tool: "@toolName"
                         _: "@text"
-                  - text: "@input"
+                  - text:
+                      of: "@input"
+                      fmt: jsonValue
                     variant: meta
                     when:
                       of: "@kind"
@@ -31062,10 +31067,10 @@ pdl:
                           - "@source"
                     w: id
                     when:
-                      of: "@kind"
+                      of: "@source"
                       map:
-                        pending: false
-                        _: true
+                        unknown: false
+                        _: "@source"
                   - v:
                       of: "@ms"
                       fmt: latency
@@ -31086,15 +31091,41 @@ pdl:
                         _: true
                   - v:
                       of: "@ts"
-                      slice:
-                        - 0
-                        - 5
+                      fmt: hm
                     w: num
                     when:
                       of: "@kind"
                       map:
                         pending: false
                         _: true
+                expand:
+                  - type: pre
+                    text:
+                      of: "@input"
+                      fmt: jsonPretty
+                    when: "@input"
+                  - type: pre
+                    text: "@result"
+                    when: "@result"
+                  - type: markdown
+                    text: "@text"
+                    when:
+                      - of: "@kind"
+                        map:
+                          message: true
+                          _: false
+                      - "@text"
+                  - type: pre
+                    text:
+                      of: "@text"
+                      fmt: jsonPretty
+                    when:
+                      - of: "@kind"
+                        map:
+                          message: false
+                          tool: false
+                          _: true
+                      - "@text"
         - type: toolbar
           when: $.externalBrowsing
           left:
@@ -35737,7 +35768,8 @@ pdl:
           tip:
             t: wsTrace.overview.durTip
             args:
-              - "@at"
+              - of: "@at"
+                fmt: at
       act: wsSub
       args:
         k: exec

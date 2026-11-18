@@ -71,7 +71,7 @@ function lrAct(a) {
 const ROW_LAYOUTS = ['line', 'two', 'item', 'tree', 'record'];
 function lrow(o) {
   const cols = o.cols || [], L = ROW_LAYOUTS.indexOf(o.layout) >= 0 ? o.layout : 'line', compact = L === 'record' || L === 'tree';
-  const canOpen = !compact && o.expand != null && o.list;
+  const canOpen = L !== 'tree' && o.expand != null && o.list;   /* 记录行声明了展开也能点开（执行轨迹的一步）；树行由树块自己开合 */
   const click = o.disabled ? '' : canOpen ? ' data-act="fold" data-f="row" data-l="' + h(o.list) + '" data-k="' + h(o.key) + '"' + (o.many ? ' data-many="1"' : '') + ' role="button" tabindex="0" aria-expanded="' + !!o.open + '"' : o.act ? ' data-act="' + o.act + '"' + (o.data || '') + ' role="button" tabindex="' + (o.disabled ? '-1' : '0') + '"' : '';
   const dataCols = cols.filter(function (c) { return c.w !== 'ctl'; }), ctlCols = cols.filter(function (c) { return c.w === 'ctl'; });
   const ctlHtml = ctlCols.map(function (c) { return '<span class="lr-col lr-ctl">' + (c.v || '') + '</span>'; }).join('');
