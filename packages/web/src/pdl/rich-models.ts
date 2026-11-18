@@ -10,6 +10,8 @@ export interface RichView {
   mid: string;
   block: RichBlock;
   markdown?: string;
+  /** Audio: why a fallback voice was used, when one was. */
+  voiceWarning?: string;
   checked?: number;
   count?: number;
   filePath?: string;
@@ -115,6 +117,8 @@ function kindView(
         rk: block.kind,
         title: block.title ?? '',
         markdown: block.text,
+        // a fallback voice (no own voice configured, reference missing…): the server says why, in words
+        voiceWarning: block.voiceSelection?.warnings.join(' ') ?? '',
         audio: {
           id: `${mid}:${block.id}`,
           kind: 'audio',

@@ -7837,6 +7837,10 @@ pdl:
               use: media
               props: "@rich.audio"
               when: "@rich.audio"
+            - type: text
+              tone: warn
+              text: "@rich.voiceWarning"
+              when: "@rich.voiceWarning"
             - type: toolbar
               when: "@rich.file"
               items:
