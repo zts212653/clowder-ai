@@ -6,6 +6,7 @@ import { createPortal } from 'react-dom';
 import { apiFetch } from '@/utils/api-client';
 import { ConfirmDialog } from '../ConfirmDialog';
 import { PluginVisual } from '../settings/plugin-manager/PluginVisual';
+import { FeedbackTokenDialog } from './FeedbackTokenDialog';
 import { copyPanelImage, pluginPanelChannel, sandboxedPanelHtml } from './plugin-panel-bridge';
 import { requestPluginHttp } from './plugin-panel-http';
 
@@ -26,6 +27,7 @@ export function PluginUiEntries() {
   const [error, setError] = useState('');
   const [closePhase, setClosePhase] = useState<'idle' | 'saving' | 'slow' | 'failed'>('idle');
   const [confirmDiscard, setConfirmDiscard] = useState(false);
+  const [tokenProvider, setTokenProvider] = useState<'github' | 'gitlab'>();
   const closing = closePhase === 'saving' || closePhase === 'slow';
   const discardButton = useRef<HTMLButtonElement>(null);
   const frame = useRef<HTMLIFrameElement>(null);
@@ -33,6 +35,13 @@ export function PluginUiEntries() {
   const nonce = useRef('');
   const lifetime = useRef<AbortController>();
   const closeGuard = useRef(false);
+  const generation = useRef('');
+  const tokenReply = useRef<(saved: boolean) => void>();
+  const finishTokenDialog = useCallback((saved: boolean) => {
+    tokenReply.current?.(saved);
+    tokenReply.current = undefined;
+    setTokenProvider(undefined);
+  }, []);
   const syncTheme = useCallback(() => {
     frame.current?.contentWindow?.postMessage(
       {
@@ -55,13 +64,16 @@ export function PluginUiEntries() {
     return () => clearTimeout(timer);
   }, [closePhase]);
   const refresh = useCallback(async () => {
+    if (tokenReply.current) return;
+    const previousGeneration = generation.current;
     try {
       const response = await apiFetch('/api/plugin-ui');
+      const value = response.ok ? await response.json() : undefined;
+      if (tokenReply.current || generation.current !== previousGeneration) return;
       if (!response.ok) {
         setEntries([]);
         return;
       }
-      const value = await response.json();
       setEntries(Array.isArray(value.entries) ? value.entries : []);
     } catch {
       /* Retry on focus and lifecycle polling. */
@@ -75,6 +87,7 @@ export function PluginUiEntries() {
       clearInterval(timer);
       window.removeEventListener('focus', refresh);
       lifetime.current?.abort();
+      tokenReply.current?.(false);
     };
   }, [refresh]);
   const close = useCallback(() => {
@@ -86,7 +99,8 @@ export function PluginUiEntries() {
     setClosePhase('idle');
     setConfirmDiscard(false);
     closeGuard.current = false;
-  }, []);
+    finishTokenDialog(false);
+  }, [finishTokenDialog]);
   const requestClose = () => {
     if (closing) return;
     if (!closeGuard.current) return close();
@@ -99,13 +113,14 @@ export function PluginUiEntries() {
   useEffect(() => {
     if (
       active &&
+      !tokenProvider &&
       !entries.some(
         (e) =>
-          e.instanceId === active.instanceId && e.commandId === active.commandId && e.generation === active.generation,
+          e.instanceId === active.instanceId && e.commandId === active.commandId && e.generation === generation.current,
       )
     )
       close();
-  }, [active, entries, close]);
+  }, [active, entries, close, tokenProvider]);
   useEffect(() => {
     if (!active) return;
     dialog.current?.showModal();
@@ -147,8 +162,25 @@ export function PluginUiEntries() {
         } else if (message.type === 'clipboard.image') {
           await copyPanelImage(message.value);
           result = true;
+        } else if (message.type === 'feedback.configureToken') {
+          const provider = message.value;
+          if (
+            active.pluginId !== 'official.feedback' ||
+            active.commandId !== 'feedback.open' ||
+            (provider !== 'github' && provider !== 'gitlab') ||
+            tokenReply.current
+          )
+            throw new Error('无法在此面板配置反馈令牌');
+          result = await new Promise<boolean>((resolve) => {
+            tokenReply.current = resolve;
+            setTokenProvider(provider);
+          });
         } else if (message.type === 'http')
-          result = await requestPluginHttp(active, message.request, lifetime.current?.signal);
+          result = await requestPluginHttp(
+            { ...active, generation: generation.current },
+            message.request,
+            lifetime.current?.signal,
+          );
         else throw new Error('不支持的插件面板请求');
         if (token === nonce.current && target === frame.current?.contentWindow)
           target?.postMessage({ channel: pluginPanelChannel, nonce: token, requestId, result }, '*');
@@ -175,6 +207,7 @@ export function PluginUiEntries() {
     const controller = new AbortController();
     lifetime.current = controller;
     nonce.current = crypto.randomUUID();
+    generation.current = entry.generation;
     closeGuard.current = false;
     setClosePhase('idle');
     setConfirmDiscard(false);
@@ -195,6 +228,24 @@ export function PluginUiEntries() {
       if (controller.signal.aborted || lifetime.current !== controller) return;
       setError(failure instanceof Error ? failure.message : '面板打开失败');
     }
+  }
+  async function resumeFeedback() {
+    if (!active || !tokenReply.current) return;
+    const controller = lifetime.current;
+    const response = await apiFetch('/api/plugin-ui', { signal: controller?.signal }, { afterCurrentGet: true });
+    if (controller?.signal.aborted || lifetime.current !== controller || !tokenReply.current) return;
+    if (!response.ok) throw new Error('无法重新连接反馈面板');
+    const value = (await response.json()) as { entries: Entry[] };
+    const entry = value.entries.find(
+      (candidate) =>
+        candidate.instanceId === active.instanceId &&
+        candidate.pluginId === active.pluginId &&
+        candidate.commandId === active.commandId,
+    );
+    if (!entry || !tokenReply.current) throw new Error('反馈插件尚未就绪');
+    generation.current = entry.generation;
+    setEntries(value.entries);
+    finishTokenDialog(true);
   }
   return (
     <>
@@ -281,6 +332,17 @@ export function PluginUiEntries() {
               onConfirm={close}
             />
           </dialog>,
+          document.body,
+        )}
+      {active &&
+        tokenProvider &&
+        createPortal(
+          <FeedbackTokenDialog
+            instanceId={active.instanceId}
+            provider={tokenProvider}
+            onCancel={() => finishTokenDialog(false)}
+            onResume={resumeFeedback}
+          />,
           document.body,
         )}
     </>

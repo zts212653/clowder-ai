@@ -20,9 +20,12 @@ import { configuredFeedbackMember } from './feedback-member.mts';
 import { feedbackStorageFixture } from './feedback-storage.mts';
 import { buildPluginPanelBrowser } from './plugin-panel-browser.mts';
 
-export async function startInstalledFeedbackFixture() {
+export async function startInstalledFeedbackFixture(credentialProvider?: 'github' | 'gitlab') {
   const archive = resolve(process.env.FEEDBACK_ARTIFACT ?? 'missing-feedback-artifact');
-  const artifactRoot = resolve(process.env.FEEDBACK_JOURNEY_ARTIFACTS ?? '../../artifacts/feedback-installed');
+  const artifactRoot = resolve(
+    process.env.FEEDBACK_JOURNEY_ARTIFACTS ?? '../../artifacts/feedback-installed',
+    credentialProvider ?? '',
+  );
   const consumer = join(
     artifactRoot,
     `consumer-${createHash('sha256')
@@ -63,17 +66,22 @@ export async function startInstalledFeedbackFixture() {
   let failRead = false;
   let failUploadAt = 0;
   let uploadAttempt = 0;
+  const github = credentialProvider === 'github';
+  const remote = github ? 'https://github.example.test' : 'https://gitlab.example.test';
+  const tokenKey = github ? 'githubToken' : 'gitlabToken';
+  let secret = credentialProvider ? undefined : 'synthetic-token';
+  let configurationRevision = 1;
   const targets = [
     {
       id: 'internal',
       label: '内部反馈',
       revision: 1,
-      provider: 'gitlab',
+      provider: github ? 'github' : 'gitlab',
       mode: 'both',
       project: 'team/clowder-ai',
-      apiBaseUrl: 'https://gitlab.example.test/api/v4',
-      issueCreateUrl: 'https://gitlab.example.test/team/clowder-ai/-/issues/new',
-      visibility: 'private',
+      apiBaseUrl: github ? remote : `${remote}/api/v4`,
+      issueCreateUrl: `${remote}/team/clowder-ai/${github ? 'issues/new' : '-/issues/new'}`,
+      visibility: github ? 'public' : 'private',
       attachmentOrigins: [],
     },
   ];
@@ -83,9 +91,13 @@ export async function startInstalledFeedbackFixture() {
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async (url, init) => {
     const address = String(url);
-    if (!address.startsWith('https://gitlab.example.test')) return originalFetch(url, init);
+    if (!address.startsWith(remote)) return originalFetch(url, init);
+    if (credentialProvider) {
+      const auth = new Headers(init?.headers).get(github ? 'authorization' : 'PRIVATE-TOKEN');
+      if (auth !== (github ? 'Bearer synthetic-token' : 'synthetic-token')) return new Response(null, { status: 401 });
+    }
     const json = (value: unknown) => new Response(JSON.stringify(value));
-    if (address.endsWith('/user')) return json({ username: 'fixture-owner' });
+    if (address.endsWith('/user')) return json({ username: 'fixture-owner', login: 'fixture-owner' });
     if (address.endsWith('/uploads') && init?.method === 'POST') {
       uploadAttempt++;
       if (failUploadAt && uploadAttempt === failUploadAt) throw new Error('synthetic upload outage');
@@ -100,9 +112,9 @@ export async function startInstalledFeedbackFixture() {
       const data = JSON.parse(String(init.body));
       const issue = {
         iid: posts,
-        web_url: `https://gitlab.example.test/team/clowder-ai/-/issues/${posts}`,
+        web_url: `${remote}/team/clowder-ai/${github ? 'issues' : '-/issues'}/${posts}`,
         title: data.title,
-        description: data.description,
+        description: data.description ?? data.body,
       };
       issues.set(String(posts), issue);
       return json(issue);
@@ -115,7 +127,11 @@ export async function startInstalledFeedbackFixture() {
       }
       return json(issues.get(id));
     }
-    return json({ path_with_namespace: 'team/clowder-ai', visibility: 'private', issues_enabled: true });
+    return json(
+      github
+        ? { full_name: 'team/clowder-ai', private: false, has_issues: true }
+        : { path_with_namespace: 'team/clowder-ai', visibility: 'private', issues_enabled: true },
+    );
   };
   const projectRoot = join(artifactRoot, 'diagnostic-project');
   const logDirectory = join(artifactRoot, 'diagnostic-logs');
@@ -146,7 +162,7 @@ export async function startInstalledFeedbackFixture() {
     pluginInstanceId: 'fixture',
     dataPath: join(artifactRoot, 'retained-data'),
     config: { get: async () => JSON.stringify(targets) },
-    secrets: { get: async () => 'synthetic-token' },
+    secrets: { get: async (key: string) => (key === tokenKey ? secret : undefined) },
     storage: {
       ...persistence.storage,
       compareAndSet: async (key: string, expected: number | null, value: unknown) => {
@@ -169,7 +185,7 @@ export async function startInstalledFeedbackFixture() {
     members: memberFixture.members,
     messaging: memberFixture.messaging,
   };
-  const activation = await module.default.create(manifest).start(host);
+  let activation = await module.default.create(manifest).start(host);
   const invocation = createModuleHostInvocation({ runtime: { actions: () => activation.actions } });
   const ui = new DeclaredPluginUi();
   const admission = {
@@ -197,6 +213,31 @@ export async function startInstalledFeedbackFixture() {
   app.get('/api/session', async () => ({ userId: 'fixture-owner', csrfToken: 'synthetic-csrf' }));
   await app.register(pluginUiRoutes, { ui });
   await app.register(pluginWebhookForwardingRoutes, { webhooks: contributions, ui });
+  if (credentialProvider) {
+    app.get('/api/plugin-manager/plugins/_local/official.feedback', async () => ({
+      plugin: {
+        pluginId: 'official.feedback',
+        pluginInstanceId: 'fixture',
+        artifact: 'installed',
+        lifecycleRevision: configurationRevision,
+        configFields: [{ key: tokenKey, kind: 'secret' }],
+      },
+    }));
+    app.post<{
+      Body: { expectedRevision: number; updates: { key: string; value: string }[] };
+    }>('/api/plugin-manager/plugins/official.feedback/contributions/configuration', async (request, reply) => {
+      const { expectedRevision, updates } = request.body;
+      if (expectedRevision !== configurationRevision || updates.length !== 1 || updates[0]?.key !== tokenKey)
+        return reply.status(409).send({ error: 'unexpected configuration' });
+      ui.deactivate('fixture');
+      await activation.stop({ reason: 'configuration_update' });
+      secret = updates[0].value;
+      configurationRevision++;
+      activation = await module.default.create(manifest).start(host);
+      ui.activate(admission);
+      return { pluginId: 'official.feedback', pluginInstanceId: 'fixture' };
+    });
+  }
   app.get('/api/plugin-manager/plugins/:pluginId/icon', async (_, reply) =>
     reply.type('image/svg+xml').send(await readFile(join(packageRoot, 'assets/icon.svg'))),
   );

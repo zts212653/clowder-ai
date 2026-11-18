@@ -9,7 +9,12 @@ export async function buildPluginPanelBrowser() {
   const require = createRequire(import.meta.url);
   const webRequire = createRequire(join(webRoot, 'package.json'));
   const esbuild = require(require.resolve('esbuild', { paths: [require.resolve('tsx')] }));
-  const components = ['plugins/PluginUiEntries.tsx', 'ConfirmDialog.tsx', 'settings/plugin-manager/PluginVisual.tsx'];
+  const components = [
+    'plugins/PluginUiEntries.tsx',
+    'plugins/FeedbackTokenDialog.tsx',
+    'ConfirmDialog.tsx',
+    'settings/plugin-manager/PluginVisual.tsx',
+  ];
   const bundle = await esbuild.build({
     absWorkingDir: webRoot,
     stdin: {
