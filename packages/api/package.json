@@ -8,7 +8,7 @@
     "#process-environment-snapshot": "./runtime/process-observation/ps-environment-snapshot.mjs"
   },
   "scripts": {
-    "dev": "pnpm --dir ../agent-contract build && pnpm --dir ../agent-access-plugin build && node --import tsx ./scripts/copy-bundled-plugin-packages.mjs --source && node scripts/dev-supervisor.mjs",
+    "dev": "pnpm --filter @clowder-ai/agent-access... build && node --import tsx ./scripts/copy-bundled-plugin-packages.mjs --source && node scripts/dev-supervisor.mjs",
     "verify:sigusr1": "node scripts/verify-sigusr1-guard.mjs",
     "build": "pnpm --dir ../shared build && pnpm --dir ../agent-contract build && pnpm --dir ../agent-access-plugin build && pnpm --dir ../finance build && pnpm --dir ../mcp-server build && tsc && node ./scripts/build-memory-read-window.mjs && node ./scripts/build-governance-metadata.mjs && node ./scripts/copy-bundled-plugin-packages.mjs && node ./scripts/copy-marketplace-catalog-data.mjs && node ../../scripts/check-provider-request-recorder.mjs",
     "gate:f202-artifacts": "node scripts/f202-connector-artifact-gate.mjs",

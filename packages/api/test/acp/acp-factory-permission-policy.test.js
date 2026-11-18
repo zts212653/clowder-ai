@@ -47,7 +47,7 @@ for (const transport of ['stdio', 'httpstream']) {
       const client = pools.get(id).clientFactory();
       const responses = [];
       if (transport === 'stdio') {
-        client.child = { stdin: { write: (line) => responses.push(JSON.parse(line)) } };
+        client.child = { isWritable: () => true, write: (line) => responses.push(JSON.parse(line)) };
         t.after(() => {
           client.child = null;
         });
