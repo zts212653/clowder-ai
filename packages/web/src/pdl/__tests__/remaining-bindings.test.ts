@@ -164,6 +164,10 @@ it('keeps the exact routing command on an ambiguous retry and exposes distinct r
   await waitFor(() =>
     expect(projectOwner('team', result.current, ui, fixtureData(), undefined).cafeWsTeam.load).toBe(''),
   );
+  // Each roster row says it is not degraded, so the theme's second line (breed, model, profile) is drawn.
+  const rosterVm = projectOwner('team', result.current, { ...ui, teamSub: '' }, fixtureData(), undefined).cafeWsTeam;
+  if (!('roster' in rosterVm) || !rosterVm.roster) throw new Error('Expected the roster');
+  expect(rosterVm.roster.items.every((item: { degraded?: boolean }) => item.degraded === false)).toBe(true);
   const modelVm = projectOwner('team', result.current, ui, fixtureData(), undefined).cafeWsTeam;
   if (!('detail' in modelVm)) throw new Error('Expected member detail');
   const detail = modelVm.detail;

@@ -1486,6 +1486,7 @@
     const row = (r) => ({
       ...member(r.identity.catId),
       who: r.identity.catId,
+      degraded: false,
       availability: r.availability.availability,
       hasProfile: r.capability.state === 'applied',
       good: r.capability.state === 'applied' ? r.capability.fitSignals[0] : '',

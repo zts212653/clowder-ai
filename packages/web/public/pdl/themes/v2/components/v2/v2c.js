@@ -21,7 +21,7 @@ function v2Part(p, sc, root) {
   if (p.from && p.item) return pvList(p.from,sc,root).map(function(x){return v2Part(p.item,x,root);}).join(p.sep||'');
   if (p.swatch) return '<span class="inline-block h-3 w-3 shrink-0 rounded-full" style="background:'+pvText(p.swatch,sc,root)+'"></span>';
   if (p.br) return '<br>';
-  if (p.who) return v2Avatar(pv(p.who, sc, root), 20);
+  if (p.who) return !p.form || p.form === 'avatar' ? v2Avatar(pv(p.who, sc, root), 20) : who(pv(p.who, sc, root), p.form);   /* 名字、点等其他形式交给组件库 */
   if (p.glyph) return '<span class="text-cafe-muted">'+pvText(p.glyph,sc,root)+'</span>';
   if (p.dot) return '<span class="inline-block h-1.5 w-1.5 rounded-full bg-cafe-accent"></span>';
   if (p.icon) return v2Glyph(pv(p.icon, sc, root));
