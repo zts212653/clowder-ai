@@ -1998,7 +1998,7 @@ pdl:
               fmt: clock
             "false": ""
             _: "@running"
-        watch: "@run.watch"
+        kind: "@run.kind"
       tone:
         of: "@running"
         map:
@@ -7133,6 +7133,16 @@ pdl:
                     tone: danger
                     when: $.form.invalid.ctxWin
                 help: t:memberForm.fields.contextWindowHelp
+              - label: t:memberForm.l0.label
+                ctls:
+                  - type: text
+                    variant: value
+                    text:
+                      t: memberForm.l0.value
+                      args:
+                        - of: $.form.l0
+                          fmt: compact
+                when: $.form.l0
               - kind: field
                 label: t:memberForm.fields.contextFullPolicy
                 id: f-ctxStrat
@@ -7859,10 +7869,6 @@ pdl:
               use: media
               props: "@rich.audio"
               when: "@rich.audio"
-            - type: text
-              tone: warn
-              text: "@rich.voiceWarning"
-              when: "@rich.voiceWarning"
             - type: toolbar
               when: "@rich.file"
               items:
@@ -23390,22 +23396,6 @@ pdl:
                       when: "@model"
                     - text: t:members.page.model
                       when: "!@model"
-                stat:
-                  lit:
-                    - text:
-                        t: members.page.l0
-                        args:
-                          - of: "@l0"
-                            fmt: compact
-                      variant: meta
-                      tip:
-                        t: members.page.l0Tip
-                        args:
-                          - of: "@l0"
-                            fmt: num
-                          - of: $.l0Reference
-                            fmt: num
-                      when: "@l0"
                 ctl:
                   lit:
                     - type: switch
@@ -34485,10 +34475,22 @@ pdl:
                 "false": false
                 _: true
         - parts: "@inline"
-        - icon: eye
+        - icon:
+            of: "@run.kind"
+            map:
+              watch: eye
+              _: ""
           size: xs
-          tip: t:chat.execWhat.watch
-          when: "@run.watch"
+          tip:
+            of: "@run.kind"
+            map:
+              watch: t:chat.execWhat.watch
+              _: ""
+          when:
+            of: "@run.kind"
+            map:
+              watch: true
+              _: false
         - dot: "@run.tone"
           tip: "@run.tip"
           when: "@run"
