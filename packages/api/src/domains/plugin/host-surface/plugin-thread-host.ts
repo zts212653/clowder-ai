@@ -1,5 +1,6 @@
 import { validateNewProjectPath } from '../../../utils/persistent-project-path.js';
-import type { IThreadStore, Thread } from '../../cats/services/stores/ports/ThreadStore.js';
+import { DEFAULT_THREAD_ID, type IThreadStore, type Thread } from '../../cats/services/stores/ports/ThreadStore.js';
+import { planThreadAttentionGroupPlacement } from '../../thread-navigation/thread-attention-group-metadata.js';
 import { ExternalPluginRuntimeError } from '../external-runtime/types.js';
 import {
   boundedLimit,
@@ -30,6 +31,16 @@ export interface PluginThreadListOptions {
   /** Exact owner-visible candidates. This mode is complete for the supplied ids
    * and must not be combined with directory pagination. */
   readonly threadIds?: readonly string[];
+  /** Owner-visible pinned threads only; page mode only. */
+  readonly pinnedOnly?: boolean;
+}
+
+interface ThreadCreateInput {
+  readonly title: string;
+  readonly parentThreadId?: string;
+  readonly projectRef?: string;
+  readonly participants?: readonly string[];
+  readonly internal?: true;
 }
 
 export interface PluginThreadHost {
@@ -41,15 +52,13 @@ export interface PluginThreadHost {
     options: { readonly before?: { readonly timestamp: number; readonly id: string }; readonly limit: number },
   ): Promise<readonly PluginThreadMessage[]>;
   getCats(threadId: string): Promise<PluginThreadCats>;
-  create(input: {
-    readonly title: string;
-    readonly parentThreadId?: string;
-    readonly projectRef?: string;
-    readonly participants?: readonly string[];
-  }): Promise<PluginThreadSummary>;
+  create(input: ThreadCreateInput): Promise<PluginThreadSummary>;
+  createInGroup(
+    input: Omit<ThreadCreateInput, 'internal'> & { readonly groupName: string },
+  ): Promise<PluginThreadSummary>;
   update(
     threadId: string,
-    patch: { readonly title?: string; readonly preferredCats?: readonly string[] },
+    patch: { readonly title?: string; readonly preferredCats?: readonly string[]; readonly internal?: true },
   ): Promise<PluginThreadSummary>;
   addParticipants(input: {
     readonly threadId: string;
@@ -60,10 +69,14 @@ export interface PluginThreadHost {
 export interface PluginThreadHostDeps extends PluginThreadProjectionDeps {
   readonly threadDeepLinkUrl: (threadId: string) => string;
   readonly pluginId: string;
+  readonly pluginInstanceId?: string;
+  /** Legacy children may be claimed only under this instance's confirmed main. */
+  readonly isBoundMainThread?: (threadId: string) => Promise<boolean>;
   readonly ownerUserId: string;
   readonly projectPath: string;
   readonly threadStore: IThreadStore;
   readonly assertCurrent?: () => void;
+  readonly onGroupedThreadCreated?: (threadId: string) => void;
 }
 
 export function createUnavailablePluginThreadHost(): PluginThreadHost {
@@ -76,6 +89,7 @@ export function createUnavailablePluginThreadHost(): PluginThreadHost {
     readMessages: unavailable,
     getCats: unavailable,
     create: unavailable,
+    createInGroup: unavailable,
     update: unavailable,
     addParticipants: unavailable,
   };
@@ -123,18 +137,27 @@ function listCursor(value: PluginThreadListCursor | undefined): PluginThreadList
 
 type ThreadListRequest =
   | { readonly kind: 'candidates'; readonly threadIds: readonly string[] }
-  | { readonly kind: 'page'; readonly limit: number; readonly before?: PluginThreadListCursor };
+  | {
+      readonly kind: 'page';
+      readonly limit: number;
+      readonly before?: PluginThreadListCursor;
+      readonly pinnedOnly: boolean;
+    };
 
 function threadListRequest(value: unknown): ThreadListRequest {
   if (!value || typeof value !== 'object' || Array.isArray(value))
     throw new TypeError('list options must be an object');
-  if (Object.keys(value).some((key) => key !== 'limit' && key !== 'before' && key !== 'threadIds'))
-    throw new TypeError('list options must contain limit, before or threadIds only');
+  if (
+    Object.keys(value).some((key) => key !== 'limit' && key !== 'before' && key !== 'threadIds' && key !== 'pinnedOnly')
+  )
+    throw new TypeError('list options must contain limit, before, threadIds or pinnedOnly only');
   const options = value as PluginThreadListOptions;
+  if (options.pinnedOnly !== undefined && typeof options.pinnedOnly !== 'boolean')
+    throw new TypeError('pinnedOnly must be a boolean');
   const threadIds = candidateThreadIds(options.threadIds);
   if (threadIds !== undefined) {
-    if (options.limit !== undefined || options.before !== undefined)
-      throw new TypeError('threadIds cannot be combined with limit or before');
+    if (options.limit !== undefined || options.before !== undefined || options.pinnedOnly !== undefined)
+      throw new TypeError('threadIds cannot be combined with limit, before or pinnedOnly');
     return { kind: 'candidates', threadIds };
   }
   const before = listCursor(options.before);
@@ -142,6 +165,7 @@ function threadListRequest(value: unknown): ThreadListRequest {
     kind: 'page',
     limit: boundedLimit(options.limit ?? 50, 50),
     ...(before ? { before } : {}),
+    pinnedOnly: options.pinnedOnly === true,
   };
 }
 
@@ -163,6 +187,13 @@ export function createPluginThreadHost(input: PluginThreadHostDeps): PluginThrea
     input.assertCurrent?.();
   };
 
+  const requireInternalParent = async (parent: Thread | undefined) => {
+    if (!input.pluginInstanceId || !parent) throw new TypeError('Internal threads require a plugin-owned parent');
+    const owned = parent.pluginOwnership?.pluginInstanceId === input.pluginInstanceId;
+    const bound = !parent.pluginOwnership && (await input.isBoundMainThread?.(parent.id));
+    if (!owned && !bound) throw new TypeError('Internal thread parent is not owned by this plugin instance');
+  };
+
   const readThread = async (id: string): Promise<Thread | null> => {
     const thread = await input.threadStore.get(threadId(id));
     input.assertCurrent?.();
@@ -172,6 +203,64 @@ export function createPluginThreadHost(input: PluginThreadHostDeps): PluginThrea
     const thread = await readThread(id);
     if (!thread) throw new ExternalPluginRuntimeError('DELIVERY_REJECTED', `thread ${id} does not exist`);
     return thread;
+  };
+
+  const createThread = async (value: ThreadCreateInput & { readonly groupName?: string }, grouped = false) => {
+    requireService();
+    if (
+      !value ||
+      typeof value !== 'object' ||
+      Array.isArray(value) ||
+      Object.keys(value).some(
+        (key) =>
+          !['title', 'parentThreadId', 'projectRef', 'participants', 'internal'].includes(key) &&
+          !(grouped && key === 'groupName'),
+      )
+    )
+      throw new TypeError('thread input must contain title, parentThreadId, projectRef, participants or internal only');
+    if (value.internal !== undefined && value.internal !== true) throw new TypeError('internal must be true');
+    if (value.parentThreadId !== undefined && value.projectRef !== undefined)
+      throw new TypeError('Select parentThreadId or projectRef, not both');
+    const requestedTitle = title(value.title);
+    if (grouped && value.internal) throw new TypeError('Grouped threads must be ordinary conversations');
+    const groupName = grouped ? boundedString(value.groupName, 'groupName', 120) : undefined;
+    const participants = value.participants === undefined ? [] : validatePreferredCats(value.participants, input.cats);
+    const parent = value.parentThreadId === undefined ? undefined : await requireThread(value.parentThreadId);
+    if (value.internal) await requireInternalParent(parent);
+    let project: string | undefined;
+    if (value.projectRef !== undefined) {
+      const selected = await validateNewProjectPath(
+        boundedString(value.projectRef, 'projectRef', 4096),
+        'projectRef must be an existing directory allowed by Host project policy',
+      );
+      if (!selected.ok) throw new TypeError(selected.error);
+      project = selected.path;
+    }
+    const placement = groupName
+      ? await planThreadAttentionGroupPlacement(
+          input.threadStore,
+          input.ownerUserId,
+          input.projectPath,
+          groupName,
+          requireService,
+        )
+      : undefined;
+    input.assertCurrent?.();
+    const thread = await input.threadStore.create(
+      input.ownerUserId,
+      requestedTitle,
+      parent?.projectPath ?? project ?? input.projectPath,
+      parent?.id,
+    );
+    if (input.pluginInstanceId)
+      await input.threadStore.updatePluginOwnership(thread.id, { v: 1, pluginInstanceId: input.pluginInstanceId });
+    if (value.internal) await input.threadStore.updateSystemKind(thread.id, 'plugin_internal');
+    if (participants.length) await input.threadStore.addParticipants(thread.id, participants);
+    if (placement) await input.threadStore.atomicMergeThreadMetadata(thread.id, { attentionGroup: placement });
+    const stored = await input.threadStore.get(thread.id);
+    if (!stored) throw new ExternalPluginRuntimeError('DELIVERY_REJECTED', 'created thread disappeared');
+    if (placement) input.onGroupedThreadCreated?.(thread.id);
+    return summary(stored);
   };
 
   return {
@@ -187,7 +276,14 @@ export function createPluginThreadHost(input: PluginThreadHostDeps): PluginThrea
       for (const thread of [...visible].sort(compareThreadPosition)) {
         if (accessible.length === request.limit) break;
         if (request.before && compareThreadPosition(thread, request.before) <= 0) continue;
-        if (!thread.deletedAt) accessible.push(thread);
+        if (request.pinnedOnly) {
+          if (thread.id === DEFAULT_THREAD_ID || thread.deletedAt || thread.systemKind || thread.connectorHubState)
+            continue;
+          if (thread.pinned !== true) continue;
+        } else if (thread.deletedAt) {
+          continue;
+        }
+        accessible.push(thread);
       }
       return Promise.all(accessible.map(summary));
     },
@@ -226,54 +322,34 @@ export function createPluginThreadHost(input: PluginThreadHostDeps): PluginThrea
       const thread = await readThread(id);
       return thread ? summary(thread) : null;
     },
-    async create(value) {
-      requireService();
-      if (
-        !value ||
-        typeof value !== 'object' ||
-        Array.isArray(value) ||
-        Object.keys(value).some((key) => !['title', 'parentThreadId', 'projectRef', 'participants'].includes(key))
-      )
-        throw new TypeError('thread input must contain title, parentThreadId, projectRef or participants only');
-      if (value.parentThreadId !== undefined && value.projectRef !== undefined)
-        throw new TypeError('Select parentThreadId or projectRef, not both');
-      const requestedTitle = title(value.title);
-      const participants =
-        value.participants === undefined ? [] : validatePreferredCats(value.participants, input.cats);
-      const parent = value.parentThreadId === undefined ? undefined : await requireThread(value.parentThreadId);
-      let project: string | undefined;
-      if (value.projectRef !== undefined) {
-        const selected = await validateNewProjectPath(
-          boundedString(value.projectRef, 'projectRef', 4096),
-          'projectRef must be an existing directory allowed by Host project policy',
-        );
-        if (!selected.ok) throw new TypeError(selected.error);
-        project = selected.path;
-      }
-      input.assertCurrent?.();
-      const thread = await input.threadStore.create(
-        input.ownerUserId,
-        requestedTitle,
-        parent?.projectPath ?? project ?? input.projectPath,
-        parent?.id,
-      );
-      if (participants.length) await input.threadStore.addParticipants(thread.id, participants);
-      const stored = await input.threadStore.get(thread.id);
-      if (!stored) throw new ExternalPluginRuntimeError('DELIVERY_REJECTED', 'created thread disappeared');
-      return summary(stored);
-    },
+    create: (value) => createThread(value),
+    createInGroup: (value) => createThread(value, true),
     async update(id, patch) {
       requireService();
       if (!patch || typeof patch !== 'object' || Array.isArray(patch))
         throw new TypeError('thread patch must be an object');
       const keys = Object.keys(patch);
-      if (!keys.length || keys.some((key) => key !== 'title' && key !== 'preferredCats'))
-        throw new TypeError('thread patch must contain title or preferredCats only');
+      if (!keys.length || keys.some((key) => key !== 'title' && key !== 'preferredCats' && key !== 'internal'))
+        throw new TypeError('thread patch must contain title, preferredCats or internal only');
+      if (patch.internal !== undefined && patch.internal !== true) throw new TypeError('internal must be true');
       const owned = await requireThread(threadId(id));
+      if (patch.internal) {
+        if (
+          (owned.pluginOwnership && owned.pluginOwnership.pluginInstanceId !== input.pluginInstanceId) ||
+          (owned.systemKind && owned.systemKind !== 'plugin_internal')
+        )
+          throw new TypeError('Cannot hide another plugin or system thread');
+        await requireInternalParent(owned.parentThreadId ? await requireThread(owned.parentThreadId) : undefined);
+      }
       const nextTitle = Object.hasOwn(patch, 'title') ? title(patch.title) : undefined;
       const preferred = Object.hasOwn(patch, 'preferredCats')
         ? validatePreferredCats(patch.preferredCats, input.cats)
         : undefined;
+      if (patch.internal && owned.systemKind !== 'plugin_internal') {
+        input.assertCurrent?.();
+        await input.threadStore.updatePluginOwnership(owned.id, { v: 1, pluginInstanceId: input.pluginInstanceId! });
+        await input.threadStore.updateSystemKind(owned.id, 'plugin_internal');
+      }
       if (nextTitle !== undefined) await input.threadStore.updateTitle(owned.id, nextTitle);
       if (preferred !== undefined) await input.threadStore.updatePreferredCats(owned.id, preferred);
       const stored = await input.threadStore.get(owned.id);

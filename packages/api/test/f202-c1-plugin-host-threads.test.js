@@ -1,9 +1,20 @@
 import assert from 'node:assert/strict';
+import { mkdtemp } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { test } from 'node:test';
+import {
+  resolveThreadAttentionPreferences,
+  saveThreadAttentionPreference,
+} from '../dist/config/user-preferences-thread-attention.js';
 import { ThreadStore } from '../dist/domains/cats/services/stores/ports/ThreadStore.js';
 import { createPluginThreadHost } from '../dist/domains/plugin/host-surface/plugin-thread-host.js';
+import {
+  applyThreadAttentionGroupCommand,
+  resolveThreadAttentionGroups,
+} from '../dist/domains/thread-navigation/thread-attention-group-metadata.js';
 
-function fixture() {
+function fixture(options = {}) {
   const store = new ThreadStore();
   let active = true;
   const host = createPluginThreadHost({
@@ -26,6 +37,7 @@ function fixture() {
       getCatAliases: (id) => [`@${id}`],
       getCatDisplayName: (id) => id,
     },
+    ...options,
   });
   return {
     host,
@@ -52,6 +64,44 @@ test('ordinary threads are usable without plugin ownership or a Host business bi
   assert.ok((await f.host.list()).some((t) => t.id === parent.id));
   for (const method of ['findByKey', 'ensureByKey', 'bind', 'unbind', 'listBindings', 'ensureSystemThread'])
     assert.equal(Object.hasOwn(f.host, method), false);
+});
+
+test('grouped create makes the first owner-visible thread a Group and reuses it after restart', async () => {
+  const projectPath = await mkdtemp(join(tmpdir(), 'plugin-grouped-threads-'));
+  const notices = [];
+  const f = fixture({ projectPath, onGroupedThreadCreated: (id) => notices.push(id) });
+  const first = await f.host.createInGroup({ title: '问题反馈：搜索失败', groupName: '问题反馈' });
+  const [group] = await resolveThreadAttentionGroups(f.store, 'owner');
+  assert.deepEqual(group, { id: group.id, threadIds: [first.id], allowSingleton: true });
+  assert.equal(resolveThreadAttentionPreferences(projectPath).aliases[`group:${group.id}`], '问题反馈');
+  const restarted = fixture({ projectPath, threadStore: f.store });
+  const second = await restarted.host.createInGroup({ title: '问题反馈：截图预览空白', groupName: '问题反馈' });
+  assert.deepEqual(await resolveThreadAttentionGroups(f.store, 'owner'), [
+    { ...group, threadIds: [first.id, second.id] },
+  ]);
+  assert.deepEqual(await resolveThreadAttentionGroups(f.store, 'someone-else'), []);
+  assert.deepEqual(notices, [first.id]);
+  await applyThreadAttentionGroupCommand(f.store, 'owner', { action: 'remove', groupId: group.id, threadId: first.id });
+  assert.deepEqual(await resolveThreadAttentionGroups(f.store, 'owner'), [{ ...group, threadIds: [second.id] }]);
+});
+
+test('grouped create joins an existing owner-named group without moving prior conversations', async () => {
+  const projectPath = await mkdtemp(join(tmpdir(), 'plugin-existing-group-'));
+  const f = fixture({ projectPath });
+  const unrelated = await f.host.create({ title: '问题反馈：旧会话' });
+  const a = await f.host.create({ title: 'Existing A' });
+  const b = await f.host.create({ title: 'Existing B' });
+  const [group] = await applyThreadAttentionGroupCommand(f.store, 'owner', {
+    action: 'create',
+    threadIds: [a.id, b.id],
+  });
+  saveThreadAttentionPreference(projectPath, { anchor: `group:${group.id}`, alias: '问题反馈' });
+  const fresh = await f.host.createInGroup({ title: '问题反馈：新会话', groupName: '问题反馈' });
+  assert.deepEqual(await resolveThreadAttentionGroups(f.store, 'owner'), [
+    { ...group, threadIds: [a.id, b.id, fresh.id] },
+  ]);
+  assert.equal((await f.store.getThreadMetadata(unrelated.id))?.attentionGroup, undefined);
+  await assert.rejects(f.host.createInGroup({ title: 'Invalid', groupName: ' ' }), /groupName/);
 });
 
 test('thread creation validates parent and participants before writing', async () => {

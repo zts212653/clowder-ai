@@ -23,6 +23,19 @@ function row(id: string, overrides: Partial<SidebarSnapshotRow> = {}): SidebarSn
 }
 
 describe('F277 attention cluster composition', () => {
+  it('renders an explicitly named auto-created group with its first member', () => {
+    const rows = [row('feedback'), row('regular')];
+    const groups = [
+      { id: 'attention_named_inbox', name: '问题反馈', threadIds: ['feedback'], allowSingleton: true as const },
+    ];
+    const clusters = buildAttentionClusters(rows, groups);
+    expect(arrangeAttentionRows(rows, rows, clusters, 'recent').map((item) => item.kind)).toEqual([
+      'cluster',
+      'thread',
+    ]);
+    expect(clusters[0]?.title).toBe('问题反馈');
+  });
+
   it('treats explicit conversation groups as the only visible membership truth', () => {
     const rows = [row('parent'), row('child'), row('manual-peer')];
     const clusters = buildAttentionClusters(rows, [

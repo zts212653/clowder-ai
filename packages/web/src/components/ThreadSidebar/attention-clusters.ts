@@ -9,6 +9,7 @@ export interface AttentionCluster {
   title: string;
   memberIds: string[];
   groupId: string;
+  allowSingleton?: true;
   /** Local search aid derived only after explicit membership exists; never drives membership. */
   searchText: string;
 }
@@ -67,12 +68,13 @@ export function buildAttentionClusters(
 
   for (const group of savedGroups) {
     const memberIds = group.threadIds.filter((threadId) => rowById.has(threadId));
-    if (memberIds.length < 2) continue;
+    if (memberIds.length < (group.allowSingleton ? 1 : 2)) continue;
     const rootThreadId = memberIds[0];
     if (!rootThreadId) continue;
     clusters.push({
       anchor: `group:${group.id}`,
       groupId: group.id,
+      ...(group.allowSingleton ? { allowSingleton: true as const } : {}),
       rootThreadId,
       title: group.name?.trim() || rowById.get(rootThreadId)?.title?.trim() || `${memberIds.length} 个对话`,
       memberIds,
@@ -125,7 +127,7 @@ export function arrangeAttentionRows(
     if (emitted.has(cluster.anchor)) continue;
     const members = resolveEligibleMembers(cluster, visibleIds, allRowById, tab);
     if (!members) continue;
-    if (members.length < 2) {
+    if (members.length < (cluster.allowSingleton ? 1 : 2)) {
       if (members[0]) result.push({ kind: 'thread', thread: members[0] });
       continue;
     }

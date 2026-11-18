@@ -43,9 +43,8 @@ try {
   const panel = page.frameLocator('iframe[title="问题反馈"]');
   const newFeedback = () => panel.locator('header').getByRole('button', { name: '新建反馈', exact: true }).click();
   const history = () => panel.locator('header').getByRole('button', { name: '反馈记录', exact: true }).click();
-  assert.equal(await panel.getByLabel('标题（选填）').inputValue(), '');
+  assert.equal(await panel.getByLabel('描述').inputValue(), '');
   assert.equal(await panel.getByText('请描述发生前的操作、实际现象与预期结果', { exact: false }).count(), 0);
-  await panel.getByLabel('标题（选填）').fill('未投递的 Bug');
   await panel.getByLabel('描述').fill('第一条还没有投递');
   await panel.getByRole('button', { name: '保存草稿', exact: true }).click();
   await panel.getByText('草稿已保存到反馈记录', { exact: true }).waitFor();
@@ -56,22 +55,21 @@ try {
   await history();
   await panel
     .locator('.history-item')
-    .filter({ hasText: 'bug: 未投递的 Bug' })
+    .filter({ hasText: 'bug: 第一条还没有投递' })
     .getByRole('button', { name: '继续填写' })
     .click();
   assert.equal(await panel.getByLabel('描述').inputValue(), '第一条还没有投递');
   await newFeedback();
   await panel.getByRole('radio', { name: '功能建议', exact: true }).check();
-  await panel.getByLabel('标题（选填）').fill('独立的功能建议');
   await panel.getByLabel('描述').fill('希望支持批量导出');
   await page.screenshot({ path: join(artifactRoot, 'new-feedback.png'), fullPage: true });
   await history();
-  await panel.locator('.history-item').filter({ hasText: 'feat: 独立的功能建议' }).waitFor();
+  await panel.locator('.history-item').filter({ hasText: 'feat: 希望支持批量导出' }).waitFor();
   assert.equal(await panel.locator('.history-item').count(), 2);
   await page.screenshot({ path: join(artifactRoot, 'feedback-history.png'), fullPage: true });
   await panel
     .locator('.history-item')
-    .filter({ hasText: 'bug: 未投递的 Bug' })
+    .filter({ hasText: 'bug: 第一条还没有投递' })
     .getByRole('button', { name: '继续填写' })
     .click();
   assert.equal(await panel.getByLabel('描述').inputValue(), '第一条还没有投递');
@@ -83,7 +81,7 @@ try {
   assert.equal(await panel.locator('.picture img').count(), 1);
   await newFeedback();
   await panel
-    .getByLabel('标题（选填）')
+    .getByLabel('描述')
     .fill('中文反馈测试')
     .catch(async (error) => {
       await page.screenshot({ path: join(artifactRoot, 'failure.png'), fullPage: true });
@@ -139,12 +137,17 @@ try {
   assert.match(issues.get('1')!.description, /https:\/\/gitlab.example.test\/team\/clowder-ai\/uploads\//);
   await page.screenshot({ path: join(artifactRoot, 'automatic-result.png'), fullPage: true });
   await panel.getByRole('button', { name: '继续反馈', exact: true }).click();
-  await panel.getByLabel('标题（选填）').fill('分析反馈测试');
-  await panel.getByLabel('描述').fill('api_key=analysis-user-secret');
+  await panel.getByLabel('描述').fill('分析反馈测试\napi_key=analysis-user-secret');
   await panel.getByRole('button', { name: '生成分析报告', exact: true }).click();
+  await panel.getByRole('button', { name: '准备分析材料', exact: true }).click();
   await panel.getByText('查看将发送的脱敏材料', { exact: true }).click();
   await panel.getByLabel('脱敏分析材料').waitFor();
   const materials = await panel.getByLabel('脱敏分析材料').inputValue();
+  const [firstGroup, ...extraGroups] = await fixture.analysisGroups();
+  assert.deepEqual(extraGroups, []);
+  assert.equal(firstGroup?.name, '问题反馈');
+  assert.equal(firstGroup?.allowSingleton, true);
+  assert.deepEqual(firstGroup?.titles, ['问题反馈：分析反馈测试']);
   assert.ok(
     !materials.includes('log-secret-canary') &&
       !materials.includes('Alice') &&
@@ -154,6 +157,10 @@ try {
   await panel.getByRole('button', { name: '停止等待，保留草稿', exact: true }).click();
   await panel.getByRole('button', { name: '重新准备材料', exact: true }).click();
   await panel.getByRole('button', { name: '开始分析', exact: true }).click();
+  const analysisGroups = await fixture.analysisGroups();
+  assert.equal(analysisGroups.length, 1);
+  assert.equal(analysisGroups[0]?.id, firstGroup.id);
+  assert.deepEqual(analysisGroups[0]?.titles, ['问题反馈：分析反馈测试', '问题反馈：分析反馈测试']);
   const analysisFrame = await (await page.locator('iframe[title="问题反馈"]').elementHandle())!.contentFrame();
   assert.ok(analysisFrame);
   await analysisFrame.evaluate(() => {
@@ -170,16 +177,15 @@ try {
   await page.getByRole('button', { name: '关闭插件面板', exact: true }).click();
   await page.getByRole('button', { name: '问题反馈', exact: true }).click();
   await newFeedback();
-  await panel.getByLabel('标题（选填）').waitFor();
-  assert.equal(await panel.getByLabel('标题（选填）').inputValue(), '', 'explicit new feedback stays independent');
-  await panel.getByLabel('标题（选填）').fill('分析同时的新问题');
+  await panel.getByLabel('描述').waitFor();
+  assert.equal(await panel.getByLabel('描述').inputValue(), '', 'explicit new feedback stays independent');
   await panel.getByLabel('描述').fill('另一条反馈独立保存');
   await history();
   const analysisRow = () => panel.locator('.history-item').filter({ hasText: 'bug: 分析反馈测试' });
   await analysisRow().getByText('分析完成 · 待投递', { exact: true }).waitFor();
   await panel
     .locator('.history-item')
-    .filter({ hasText: 'bug: 分析同时的新问题' })
+    .filter({ hasText: 'bug: 另一条反馈独立保存' })
     .getByRole('button', { name: '继续填写' })
     .click();
   assert.equal(await panel.getByLabel('描述').inputValue(), '另一条反馈独立保存');
@@ -194,7 +200,7 @@ try {
   await history();
   await panel
     .locator('.history-item')
-    .filter({ hasText: 'bug: 分析同时的新问题' })
+    .filter({ hasText: 'bug: 另一条反馈独立保存' })
     .getByRole('button', { name: '继续填写' })
     .click();
   assert.equal(await panel.getByRole('button', { name: '查看本条分析报告', exact: true }).count(), 0);
@@ -217,7 +223,6 @@ try {
   assert.equal(fixture.posts(), 2);
   await page.screenshot({ path: join(artifactRoot, 'created-pending-readback.png'), fullPage: true });
   await newFeedback();
-  await panel.getByLabel('标题（选填）').fill('待核对期间的新反馈');
   await panel.getByLabel('描述').fill('不会被旧投递锁住');
   await history();
   await panel
@@ -229,7 +234,6 @@ try {
   await panel.getByRole('link', { name: '打开 Issue', exact: true }).waitFor();
   assert.equal(fixture.posts(), 2, 'readback retry cannot create again');
   await panel.getByRole('button', { name: '继续反馈', exact: true }).click();
-  await panel.getByLabel('标题（选填）').fill('部分附件失败');
   await panel.getByLabel('描述').fill('retain receipts');
   await panel.locator('input[type=file]').setInputFiles([
     { name: 'one.png', mimeType: 'image/png', buffer: png },
@@ -252,7 +256,7 @@ try {
     ),
   );
   await panel.getByRole('button', { name: '保留回执，返回编辑', exact: true }).click();
-  await panel.getByLabel('标题（选填）').fill('恢复后可继续编辑');
+  await panel.getByLabel('描述').fill('恢复后可继续编辑');
   await writeFile(
     join(artifactRoot, 'receipt.json'),
     JSON.stringify(
@@ -275,6 +279,8 @@ try {
           'original download SHA256',
           'automatic screenshot upload + remote readback URL',
           'prepared sanitized Agent input',
+          'first analysis creates the named Group with a redacted short title',
+          'new analysis reuses the same Group',
           'post-analysis sanitization',
           'ordinary analysis survives panel reopen without another invocation',
           'stopping the wait exposes a working prepare-again action',
@@ -291,12 +297,15 @@ try {
         ],
         posts: fixture.posts(),
         archiveSha256: ledger.archiveSha256,
+        browserErrors,
+        analysisGroups,
       },
       null,
       2,
     ),
   );
-  process.stdout.write('PASS: 30 packed-plugin / Host browser journey checks\n');
+  assert.deepEqual(browserErrors, []);
+  process.stdout.write('PASS: 32 packed-plugin / Host browser journey checks\n');
 } catch (error) {
   if (currentPage) {
     await currentPage.screenshot({ path: join(artifactRoot, 'failure.png'), fullPage: true });

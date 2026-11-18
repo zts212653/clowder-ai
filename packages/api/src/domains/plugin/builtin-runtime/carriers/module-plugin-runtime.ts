@@ -153,6 +153,8 @@ export interface ModulePluginRuntimeOptions {
     activationSignal?: AbortSignal,
   ) => Promise<PluginNeutralHost>;
   readonly threads?: PluginThreadProjectionDeps & {
+    readonly onGroupedThreadCreated?: (threadId: string) => void;
+    readonly isPluginMainThread?: (pluginInstanceId: string, threadId: string) => Promise<boolean>;
     readonly threadDeepLinkUrl: (threadId: string) => string;
     readonly threadStore: IThreadStore;
     readonly ownerUserId: string;
@@ -348,14 +350,18 @@ export class ModulePluginRuntime implements BundledPluginRuntime {
         { ...this.options, variantMode: 'runtime' },
         async () => assertActivation(),
       );
-      const threads = this.options.threads
+      const threadServices = this.options.threads;
+      const threads = threadServices
         ? createPluginThreadHost({
-            ...this.options.threads,
+            ...threadServices,
             pluginId: packageRecord.pluginId,
-            ownerUserId: this.options.threads.ownerUserId,
-            projectPath: this.options.threads.projectPath,
+            pluginInstanceId,
+            isBoundMainThread: (threadId) =>
+              threadServices.isPluginMainThread?.(pluginInstanceId, threadId) ?? Promise.resolve(false),
+            ownerUserId: threadServices.ownerUserId,
+            projectPath: threadServices.projectPath,
             assertCurrent: assertActivation,
-            threadStore: this.options.threads.threadStore,
+            threadStore: threadServices.threadStore,
           })
         : createUnavailablePluginThreadHost();
       subscriptions = this.options.messaging

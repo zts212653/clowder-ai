@@ -45,8 +45,10 @@ describe('plugin sidebar panel isolation', () => {
     await act(async () => root.render(<PluginUiEntries />));
     const entry = container.querySelector('button');
     expect(entry?.getAttribute('aria-label')).toBe('问题反馈');
+    expect(entry?.getAttribute('aria-pressed')).toBe('false');
     await act(async () => entry?.click());
     const frame = document.querySelector('iframe');
+    expect(entry?.getAttribute('aria-pressed')).toBe('true');
     expect(frame).not.toBeNull();
     expect(frame!.getAttribute('sandbox')).not.toContain('allow-same-origin');
     expect(frame!.getAttribute('srcdoc')).toContain("connect-src 'none'");
@@ -63,6 +65,49 @@ describe('plugin sidebar panel isolation', () => {
         '<meta http-equiv="Content-Security-Policy" content="default-src \'none\'',
       ),
     ).toBe(true);
+  });
+  it('keeps the feedback token dialog unavailable to other plugin frames', async () => {
+    await act(async () => root.render(<PluginUiEntries />));
+    await act(async () => container.querySelector('button')?.click());
+    const frame = document.querySelector('iframe')!;
+    const post = vi.spyOn(frame.contentWindow!, 'postMessage');
+    await act(async () => {
+      window.dispatchEvent(
+        new MessageEvent('message', {
+          source: frame.contentWindow,
+          data: {
+            channel: 'clowder-plugin-ui/v1',
+            nonce: frame.name,
+            requestId: 1,
+            type: 'feedback.configureToken',
+            value: 'github',
+          },
+        }),
+      );
+    });
+    expect(document.querySelector('input[type=password]')).toBeNull();
+    expect(post).toHaveBeenCalledWith(
+      expect.objectContaining({ requestId: 1, error: '无法在此面板配置反馈令牌' }),
+      '*',
+    );
+    expect(apiFetch.mock.calls).toHaveLength(2);
+  });
+  it('provides the initial Host theme before package rendering and forwards later changes', async () => {
+    document.documentElement.dataset.theme = 'dark';
+    await act(async () => root.render(<PluginUiEntries />));
+    await act(async () => container.querySelector('button')?.click());
+    const frame = document.querySelector('iframe')!;
+    const html = frame.getAttribute('srcdoc')!;
+    expect(html.indexOf('dataset.theme="dark"')).toBeLessThan(html.indexOf('isolated package UI'));
+    const post = vi.spyOn(frame.contentWindow!, 'postMessage');
+    await act(async () => {
+      document.documentElement.dataset.theme = 'light';
+    });
+    expect(post).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'theme', value: 'light', nonce: frame.name }),
+      '*',
+    );
+    delete document.documentElement.dataset.theme;
   });
   it.each([
     'success',
