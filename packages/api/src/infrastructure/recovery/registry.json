@@ -12,7 +12,7 @@
         "packages/api/test/redis-action-successor-recovery-disposition.test.js",
         "packages/api/test/redis-action-successor-recovery-integration.test.js"
       ],
-      "sites": ["packages/api/src/index.ts#main.recovery:action-successor"]
+      "sites": ["packages/api/src/index.ts#initializeApi.recovery:action-successor"]
     },
     {
       "id": "ball-custody-probe",
@@ -486,14 +486,14 @@
       "owner": "packages/api/src/index.ts",
       "state": "exempt",
       "reason": "F150 tool-usage archival is telemetry maintenance, not wait/wake recovery.",
-      "sites": ["packages/api/src/index.ts#main.dailyTimer"]
+      "sites": ["packages/api/src/index.ts#initializeApi.dailyTimer"]
     },
     {
       "id": "exempt:main.dirtyFlushTimer",
       "owner": "packages/api/src/index.ts",
       "state": "exempt",
       "reason": "Flushes current memory-index dirty state; no recovery lifecycle.",
-      "sites": ["packages/api/src/index.ts#main.dirtyFlushTimer"]
+      "sites": ["packages/api/src/index.ts#initializeApi.dirtyFlushTimer"]
     },
     {
       "id": "exempt:routes/audio-controller-lease.ts",
@@ -570,7 +570,7 @@
         "packages/api/test/managed-job-legacy-census.test.js",
         "packages/api/test/managed-command-wait-due.test.js"
       ],
-      "sites": ["packages/api/src/index.ts#main.recovery:managed-command-wake"]
+      "sites": ["packages/api/src/index.ts#initializeApi.recovery:managed-command-wake"]
     },
     {
       "id": "runtime-session-seal",
@@ -590,7 +590,7 @@
       "owner": "identity-session",
       "state": "indexed",
       "reason": "Original session hashes own sealing status/timestamp and finite failure disposition. Native transitions, restore displacement and generic updates atomically publish the bounded due ZSET; cold census/rebuild is explicit.",
-      "sites": ["packages/api/src/index.ts#main.globalReaperTimer"],
+      "sites": ["packages/api/src/index.ts#initializeApi.globalReaperTimer"],
       "storeAudit": [
         "packages/api/test/redis-session-recovery-index.test.js",
         "packages/api/test/f1843-session-sealing-budget.test.js"
@@ -602,6 +602,32 @@
       "state": "exempt",
       "reason": "Shared process-local cadence selects no work or history. Each registerRecoveryLoop owner call is independently inventoried and must have its own owner registration/store audit. The factory owns only serialization, timing and one round observation.",
       "sites": ["packages/api/src/infrastructure/recovery/recovery-loop.ts#startRecoveryLoop.timer"]
+    },
+    {
+      "id": "exempt:domains/cats/services/agents/providers/agy-native/run/agy-native-version-probe.ts",
+      "owner": "packages/api/src/domains/cats/services/agents/providers/agy-native/run/agy-native-version-probe.ts",
+      "state": "exempt",
+      "reason": "Drains liveness warnings for one current --version child; finally joins that child and clears the timer/probe. No historical work discovery or replay.",
+      "sites": [
+        "packages/api/src/domains/cats/services/agents/providers/agy-native/run/agy-native-version-probe.ts#readAgyVersion.timer"
+      ]
+    },
+    {
+      "id": "exempt:infrastructure/telemetry/cpu/event-loop-tripwire-worker.ts",
+      "owner": "packages/api/src/infrastructure/telemetry/cpu/event-loop-tripwire-worker.ts",
+      "state": "exempt",
+      "reason": "Process-local event-loop/CPU observation heartbeat; shutdown clears its interval. Samples current process health without selecting or recovering durable work.",
+      "sites": ["packages/api/src/infrastructure/telemetry/cpu/event-loop-tripwire-worker.ts#<module>.timer"]
+    },
+    {
+      "id": "exempt:infrastructure/telemetry/cpu/event-loop-tripwire.ts",
+      "owner": "packages/api/src/infrastructure/telemetry/cpu/event-loop-tripwire.ts",
+      "state": "exempt",
+      "reason": "Main-thread heartbeat and bounded worker-readiness deadline for the current diagnostic observer. Cleanup clears both; neither timer discovers or replays historical work.",
+      "sites": [
+        "packages/api/src/infrastructure/telemetry/cpu/event-loop-tripwire.ts#install.timer",
+        "packages/api/src/infrastructure/telemetry/cpu/event-loop-tripwire.ts#install.checkReadyDeadline.readyTimeout"
+      ]
     }
   ]
 }

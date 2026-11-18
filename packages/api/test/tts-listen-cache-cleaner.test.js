@@ -106,4 +106,16 @@ describe('F279 retention-aware TTS cleaner', () => {
     await assert.rejects(cleanTtsCache(unavailableDir, undefined, now), /repository is required/i);
     await access(filePath);
   });
+
+  it('counts generation receipts toward capacity and removes them with their audio', async () => {
+    const receiptDir = await mkdtemp(path.join(tempDir, 'receipts-'));
+    const asset = path.join(receiptDir, `${'8'.repeat(64)}.wav`);
+    await writeFile(asset, 'audio');
+    await writeFile(`${asset}.voice.json`, 'generation-receipt');
+    const result = await cleanTtsCache(receiptDir, repository, Date.now(), { maxSizeBytes: 10, targetSizeBytes: 0 });
+    assert.equal(result.deleted, 1);
+    assert.equal(result.freedBytes, Buffer.byteLength('audiogeneration-receipt'));
+    await assert.rejects(access(asset));
+    await assert.rejects(access(`${asset}.voice.json`));
+  });
 });

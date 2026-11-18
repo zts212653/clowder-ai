@@ -21,9 +21,13 @@ test('a retired target with lost acknowledgement still wakes an idle caller on t
   const launches = [];
   f.agents.get('codex').invoke = observeReply('codex', launches);
   const commit = f.messages.commitLifecyclePreAdmissionFailure.bind(f.messages);
+  let injected = false;
   f.messages.commitLifecyclePreAdmissionFailure = (...args) => {
     const result = commit(...args);
-    if (result.kind === 'applied') throw new Error('fixture: retired target lost acknowledgement');
+    if (result.kind === 'applied') {
+      injected = true;
+      throw new Error('fixture: retired target lost acknowledgement');
+    }
     return result;
   };
   const { threadId, entry, queue, messages, invocationTracker } = await runDispatch(t, {
@@ -32,6 +36,7 @@ test('a retired target with lost acknowledgement still wakes an idle caller on t
     busyCaller: false,
     drainError: /retired target lost acknowledgement/,
   });
+  assert.equal(injected, true, 'the durable failure committed before its acknowledgement was lost');
   assert.equal(await queue.getDurableEntry(threadId, entry.id), null);
   await waitFor(() => launches.length === 1 && !invocationTracker.has(threadId, 'codex'));
   const history = await messages.getByThread(threadId);

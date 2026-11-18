@@ -1,8 +1,103 @@
+import { accessSync, constants } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { delimiter, isAbsolute, join } from 'node:path';
 import type { AgentServiceOptions } from '../../../../types.js';
 
-export function isolatedOAuthEnv(home: string): Record<string, string | null> {
+const FORBIDDEN_ACCOUNT_ENV_EXACT = new Set([
+  'GEMINI_API_KEY',
+  'GOOGLE_API_KEY',
+  'GOOGLE_GEMINI_BASE_URL',
+  'GOOGLE_APPLICATION_CREDENTIALS',
+  'GOOGLE_GENAI_USE_VERTEXAI',
+  'GOOGLE_CLOUD_PROJECT',
+  'GOOGLE_CLOUD_LOCATION',
+  'HOME',
+  'USERPROFILE',
+  'GEMINI_HOME',
+  'PATH',
+  'REDIS_URL',
+  'NODE_OPTIONS',
+  'LD_PRELOAD',
+  'LD_LIBRARY_PATH',
+  'BASH_ENV',
+  'ENV',
+  'ZDOTDIR',
+  'SSH_TTY',
+]);
+
+// Git's namespace controls executable helpers, config sources and repository
+// identity. Account settings cannot grant any of that host execution authority.
+const FORBIDDEN_ACCOUNT_ENV_PREFIX = /^(?:AGY_|CAT_CAFE_|XDG_|GIT_|BAICODE_|JETSKI_|DYLD_|ANTIGRAVITY_)/;
+const FORBIDDEN_ACCOUNT_ENV_PROXY = /^(?:HTTP|HTTPS|ALL|NO)_PROXY$/;
+
+export function assertSafeAgyAccountEnv(accountEnv?: Record<string, string>): Record<string, string> {
+  if (!accountEnv) return {};
+  const sanitized: Record<string, string> = {};
+  for (const [key, value] of Object.entries(accountEnv)) {
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(key) || typeof value !== 'string') {
+      throw new Error(`AGY accountEnv contains invalid entry: ${key}`);
+    }
+    const upper = key.toUpperCase();
+    if (
+      FORBIDDEN_ACCOUNT_ENV_EXACT.has(upper) ||
+      FORBIDDEN_ACCOUNT_ENV_PREFIX.test(upper) ||
+      FORBIDDEN_ACCOUNT_ENV_PROXY.test(upper)
+    ) {
+      throw new Error(`AGY accountEnv refuses credential, proxy, or runtime-reserved key: ${key}`);
+    }
+    sanitized[key] = value;
+  }
+  return sanitized;
+}
+
+function hasExecutableRg(dir: string): boolean {
+  try {
+    accessSync(join(dir, process.platform === 'win32' ? 'rg.exe' : 'rg'), constants.X_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function sanitizeAgyToolPath(rawPath?: string): string {
+  const seen = new Set<string>();
+  const segments: string[] = [];
+  for (const raw of (rawPath ?? '/usr/bin:/bin').split(delimiter)) {
+    const seg = raw.trim();
+    if (!seg || /[\r\n\0]/.test(raw) || !isAbsolute(seg) || seen.has(seg)) continue;
+    seen.add(seg);
+    segments.push(seg);
+  }
+  for (const base of ['/usr/bin', '/bin']) {
+    if (!seen.has(base)) {
+      seen.add(base);
+      segments.push(base);
+    }
+  }
+  if (!segments.some(hasExecutableRg)) {
+    const host = homedir();
+    const candidates = [
+      '/opt/homebrew/bin',
+      '/opt/homebrew/opt/ripgrep/bin',
+      '/usr/local/bin',
+      '/usr/local/opt/ripgrep/bin',
+      join(host, '.cargo', 'bin'),
+      join(host, '.local', 'bin'),
+      '/opt/homebrew/lib/node_modules/@openai/codex/node_modules/@openai/codex-darwin-arm64/vendor/aarch64-apple-darwin/codex-path',
+      '/opt/homebrew/lib/node_modules/@openai/codex/vendor/aarch64-apple-darwin/path',
+      '/opt/homebrew/lib/node_modules/@anthropic-ai/claude-code/vendor/ripgrep/arm64-darwin',
+    ];
+    const rgDir = candidates.find((candidate) => !seen.has(candidate) && hasExecutableRg(candidate));
+    if (rgDir) {
+      seen.add(rgDir);
+      segments.push(rgDir);
+    }
+  }
+  return segments.join(delimiter);
+}
+
+export function isolatedOAuthEnv(home: string, accountEnv?: Record<string, string>): Record<string, string | null> {
+  const safeAccountEnv = assertSafeAgyAccountEnv(accountEnv);
   // Tools share the operator's ordinary environment; provider identity and host
   // execution capabilities are rebuilt below rather than imported from the API.
   const inherited = Object.fromEntries(
@@ -24,8 +119,9 @@ export function isolatedOAuthEnv(home: string): Record<string, string | null> {
   if (!inherited.GH_CONFIG_DIR) inherited.GH_CONFIG_DIR = join(inherited.XDG_CONFIG_HOME, 'gh');
   const env: Record<string, string | null> = {
     ...inherited,
-    PATH: process.env.PATH ?? '/usr/bin:/bin',
-    LANG: process.env.LANG ?? 'en_US.UTF-8',
+    ...safeAccountEnv,
+    PATH: sanitizeAgyToolPath(process.env.PATH),
+    LANG: safeAccountEnv.LANG ?? process.env.LANG ?? 'en_US.UTF-8',
     TMPDIR: tmpdir(),
     TERM: 'dumb',
     // Managed invocations must not mutate the installed carrier in the background.

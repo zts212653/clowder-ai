@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, test } from 'node:test';
@@ -22,6 +22,7 @@ function fixture({
   wrongModel = false,
   mcpServers = [],
   onResume = () => {},
+  allowWorkspaceExecutableConfig = false,
 } = {}) {
   const root = mkdtempSync(join(tmpdir(), 'agy-acp-integration-'));
   roots.push(root);
@@ -92,7 +93,14 @@ function fixture({
     sessionModel: 'model',
     mcpServers,
     antigravity: {
-      profile: { carrier: 'acp', enabled: true, profileId: 'argon', model: 'model', autoApprove: true },
+      profile: {
+        carrier: 'acp',
+        enabled: true,
+        profileId: 'argon',
+        model: 'model',
+        autoApprove: true,
+        allowWorkspaceExecutableConfig,
+      },
       profileHome: home,
       l0CompilerFn: async () => 'CANONICAL-L0-NONCE',
     },
@@ -122,6 +130,49 @@ test('AGY ACP sends canonical L0 in native metadata and keeps the user body clea
     activeInvocationGuidance: 'unsupported',
   });
 });
+
+test('AGY ACP rejects an invocation environment it cannot apply before any session or prompt', async () => {
+  const f = fixture();
+  const events = await Array.fromAsync(
+    f.service.invoke('must not run under the wrong timezone', {
+      ...f.options,
+      accountEnv: { TZ: 'Asia/Tokyo' },
+    }),
+  );
+  assert.ok(events.some((event) => event.type === 'error' && /account.*environment.*overrid/i.test(event.error)));
+  assert.equal(
+    f.calls.some(([name]) => ['new', 'load', 'resume', 'prompt'].includes(name)),
+    false,
+  );
+});
+
+for (const file of ['hooks.json', 'mcp_config.json'])
+  test(`AGY ACP executable opt-in respects the current turn policy (${file})`, async () => {
+    const f = fixture({ allowWorkspaceExecutableConfig: true });
+    mkdirSync(join(f.workspace, '.agents'));
+    writeFileSync(join(f.workspace, '.agents', file), '{}');
+    const normal = await Array.fromAsync(f.service.invoke('authorized ordinary work', f.options));
+    assert.equal(
+      normal.some((event) => event.type === 'error'),
+      false,
+    );
+    assert.ok(
+      f.calls.some(([name]) => name === 'prompt'),
+      'the normal opt-in still permits admitted configuration',
+    );
+    f.calls.length = 0;
+    const readOnly = await Array.fromAsync(
+      f.service.invoke('read-only work', {
+        ...f.options,
+        toolExecutionPolicy: { mode: 'read_only' },
+      }),
+    );
+    assert.ok(readOnly.some((event) => event.type === 'error' && /workspace customization refused/.test(event.error)));
+    assert.equal(
+      f.calls.some(([name]) => ['new', 'load', 'resume', 'prompt'].includes(name)),
+      false,
+    );
+  });
 
 test('AGY ACP cold resumes the original id with identity metadata every time', async () => {
   const f = fixture();

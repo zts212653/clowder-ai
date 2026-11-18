@@ -81,7 +81,28 @@ static void test_report(sqlite3_context *ctx, int argc, sqlite3_value **argv) {
   sqlite3_result_text(ctx, out, -1, SQLITE_TRANSIENT);
 }
 
+static void test_preload_control(sqlite3_context *, int, sqlite3_value **);
+static void test_preload_report(sqlite3_context *, int, sqlite3_value **);
+static void test_preload_close_control(sqlite3_context *, int, sqlite3_value **);
+/* Invoked only by a separate probe process. Same-process fcntl would not
+ * observe the SQLite reader's advisory locks. Audited Unix SHARED range. */
+static void test_external_lock(sqlite3_context *ctx, int argc, sqlite3_value **argv) {
+  (void)argc;
+  const char *path = (const char *)sqlite3_value_text(argv[0]);
+  int fd = path ? open(path, O_RDWR | O_CLOEXEC) : -1;
+  if (fd < 0) { sqlite3_result_error(ctx, "lock probe could not open fixture", -1); return; }
+  struct flock lock = {.l_start = 1073741826, .l_len = 510, .l_whence = SEEK_SET, .l_type = F_WRLCK};
+  int rc = fcntl(fd, F_SETLK, &lock), error = errno;
+  close(fd);
+  if (rc == 0) sqlite3_result_int(ctx, 1);
+  else if (error == EACCES || error == EAGAIN) sqlite3_result_int(ctx, 0);
+  else sqlite3_result_error(ctx, "lock probe failed", -1);
+}
 static void register_test_functions(sqlite3 *db) {
+  sqlite3_create_function(db, "memory_read_preload_test_close_control", 1, SQLITE_UTF8, NULL, test_preload_close_control, NULL, NULL);
+  sqlite3_create_function(db, "memory_read_window_test_external_lock", 1, SQLITE_UTF8, NULL, test_external_lock, NULL, NULL);
+  sqlite3_create_function(db, "memory_read_preload_test_control", 3, SQLITE_UTF8, NULL, test_preload_control, NULL, NULL);
+  sqlite3_create_function(db, "memory_read_preload_test_stats", 0, SQLITE_UTF8, NULL, test_preload_report, NULL, NULL);
   sqlite3_create_function(db, "memory_read_window_test_probe_begin", 0, SQLITE_UTF8, NULL, test_probe_begin, NULL, NULL);
   sqlite3_create_function(db, "memory_read_window_test_probe_end", 0, SQLITE_UTF8, NULL, test_probe_end, NULL, NULL);
   sqlite3_create_function(db, "memory_read_window_test_control", 5, SQLITE_UTF8, NULL, test_control, NULL, NULL);

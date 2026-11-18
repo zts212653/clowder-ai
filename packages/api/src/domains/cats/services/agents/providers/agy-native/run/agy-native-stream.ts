@@ -31,6 +31,7 @@ export type AgyNativeStreamObservation =
   | { readonly kind: 'step'; readonly event: Extract<AgyStreamJsonEvent, { kind: 'step' }> }
   | { readonly kind: 'liveness'; readonly warning: LivenessWarningEvent }
   | { readonly kind: 'result'; readonly observed: AgyNativeObservedTurn }
+  | { readonly kind: 'turn_complete'; readonly observed: AgyNativeObservedTurn }
   | { readonly kind: 'complete'; readonly observed: AgyNativeObservedTurn };
 
 const MAX_AGY_NATIVE_STREAM_CHARS = 8 * 1024 * 1024;
@@ -95,6 +96,21 @@ export async function* observeAgyNativeTurn(
         if (record.event === 'result') throw new Error('AGY native one-turn process emitted multiple terminal results');
         throw new Error('AGY native step has no matching verified init or next user input');
       }
+      if (!sessionId) throw new Error('AGY native next input has no verified session');
+      // The next verified input closes the prior turn, including transport
+      // evidence received after its upstream result. No sample is committed at SUCCESS alone.
+      yield {
+        kind: 'turn_complete',
+        observed: {
+          sessionId,
+          turn: verifiedNativeTerminal(lines, sessionId, resultCount),
+          transportError,
+          ...(unrecognizedAdvertisedTools.length ? { unrecognizedAdvertisedTools } : {}),
+          ...(cliDiagnostics ? { cliDiagnostics } : {}),
+          ...(transportExit ? { transportExit } : {}),
+          cancelledBeforeTerminal: signal?.aborted === true && !resultSeenBeforeCancellation,
+        },
+      };
       lines.length = 0;
       resultCount = 0;
       resultSeenBeforeCancellation = false;

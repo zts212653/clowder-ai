@@ -8,7 +8,7 @@ import { materializeAssets } from './lib/worktree-light.mjs';
 import { createWorktree } from './worktree-new.mjs';
 
 function mediaFixture(t) {
-  const f = fixture();
+  const f = fixture({ checkoutOptions: { supportsClone: () => false } });
   t.after(() => rmSync(f.root, { recursive: true, force: true }));
   const name = 'docs/evidence/old/image.png';
   mkdirSync(join(f.repo, 'docs/evidence/old'), { recursive: true });
@@ -19,8 +19,8 @@ function mediaFixture(t) {
   return { ...f, name };
 }
 
-test('new worktrees omit historical media before checkout but keep code, metadata and consumed assets', () => {
-  const f = fixture();
+test('Git fallback omits historical media before checkout but keeps code, metadata and consumed assets', () => {
+  const f = fixture({ checkoutOptions: { supportsClone: () => false } });
   try {
     for (const dir of ['docs/evidence/old', 'docs/videos/demo', 'assets', 'packages/api/src'])
       mkdirSync(join(f.repo, dir), { recursive: true });

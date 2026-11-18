@@ -1,6 +1,6 @@
 ---
 name: worktree
-tips_exempt: "Renewed 2026-11-10: document exact-head successor PR binding and actual-target merged-checkout retirement on existing developer bind-pr/finish/retain commands. Ownership and cleanup authority are unchanged; no separate end-user Hub action."
+tips_exempt: "Renewed 2026-11-17: this cut documents APFS clone-backed full checkouts and the existing non-APFS/lazy-assets fallback. The same worktree:new/assets/finish commands and ownership boundaries remain; there is no additional user-facing operation or separate Hub action."
 description: "Use when: 创建代码/脚本/API工位或收尾。Not for: docs直推、代清其他owner。Output: 隔离worktree（Redis6398）、实际移除工位的released回执或具名retained回执。"
 triggers:
   - "开始开发"
@@ -124,10 +124,13 @@ pnpm check:skills   # skill surface
 pnpm test           # 仅在跨包行为 / high-assurance 需要全量 baseline 时
 ```
 
-新工位默认延后检出大型历史媒体，代码、文字、元数据及已识别的运行/测试素材照常保留。
-要查历史图片/视频时，在工位内用 `pnpm worktree:assets project-evidence/<目录>` 补齐；
+同一 APFS 卷上的新工位默认完整检出：与主仓同 blob 的普通文件克隆共享磁盘块，
+落地内容核验后保留；不同内容、转换文件和符号链接由 Git 检出。Alpha 使用同一创建逻辑。
+用 `realsize.py` 这类识别 APFS 克隆的工具量独占空间，`du` 会重复计算共享块。
+非 macOS、非 APFS 或跨卷时保留原 Git 检出：普通工位默认延后大型历史媒体，`--full` 完整检出。
+旧轻量工位和回退检出要查历史图片/视频时，在工位内用 `pnpm worktree:assets project-evidence/<目录>` 补齐；
 裸 `pnpm worktree:assets` 列出尚未检出的路径，`pnpm worktree:assets --all` 补齐全部。
-从创建起就需要完整素材的任务，在 `worktree:new` 加 `--full`。
+无论文件系统是否支持克隆，从创建起就需要完整素材的任务在 `worktree:new` 加 `--full`。
 补齐取当前工位分支，不能把 main 的资料目录或整个 `node_modules` 链过来。
 动态拼接的素材路径可能需要主动补齐；检查缺素材时先补本分支文件，不伪造替代图片。
 

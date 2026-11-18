@@ -1,4 +1,5 @@
 import type { SettingsReturnDiagnostic } from '@cat-cafe/shared';
+import { createBrowserUuid } from '@/utils/browser-uuid';
 import { readChatReadingRef, releaseChatReadingRef } from '@/utils/chat-scroll-memory';
 import { connectionDiagnosticId, recordConnectionDiagnostic } from '@/utils/connection-diagnostics';
 import { readingDiagnosticId } from '@/utils/reading-restore-diagnostics';
@@ -179,7 +180,7 @@ export class SettingsReadingBridge {
     const started = point.persisted
       ? startSettingsReadingSession(origin, this.scope)
       : {
-          session: { id: crypto.randomUUID(), ...origin },
+          session: { id: createBrowserUuid(), ...origin },
           persisted: false,
         };
     this.associationStored = started.persisted;

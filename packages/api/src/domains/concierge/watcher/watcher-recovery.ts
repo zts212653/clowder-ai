@@ -35,6 +35,8 @@ export async function reconcileWatcherRecovery(
     if (
       execution.userId !== userId ||
       execution.executionKind !== 'watcher' ||
+      // F335 panel runs own their settlement and never had a bounded watcher session.
+      execution.causal?.watcherPanelRoundId !== undefined ||
       activeThreads.has(execution.threadId) ||
       seen.has(execution.invocationId)
     )

@@ -18,6 +18,51 @@ export interface VoiceConfig {
   readonly temperature?: number; // generation temperature (0.3 recommended for consistency)
 }
 
+/** Read-side provenance; this is never a second saved voice configuration. */
+export interface CatVoiceResolution {
+  readonly catId: string;
+  readonly source: 'cat_config' | 'breed_default' | 'global_default' | 'unknown';
+  readonly breedId?: string;
+  readonly envOverride?: string;
+  readonly config: VoiceConfig;
+}
+
+export interface CatVoiceOption {
+  readonly id: string;
+  readonly label: string;
+  readonly familyId: string;
+  readonly familyName: string;
+  readonly sourceCatId: string;
+  readonly voiceConfig: VoiceConfig;
+  readonly available: boolean;
+  readonly referenceAvailability?: 'unknown';
+}
+
+/** Parameters used for this asset, including explicit fallback/uncertainty. */
+export interface TtsVoiceSelection extends Omit<CatVoiceResolution, 'config'> {
+  readonly provider: string;
+  readonly model: string;
+  readonly requested: VoiceConfig;
+  readonly effective: VoiceConfig;
+  readonly referenceStatus:
+    | 'sent'
+    | 'verified_cache'
+    | 'missing'
+    | 'unavailable'
+    | 'unsupported'
+    | 'unverified'
+    | 'not_requested';
+  readonly warnings: readonly string[];
+  readonly referenceSha256?: string;
+  readonly referenceInputSha256?: string;
+  readonly referenceTransport?: 'inline' | 'provider_path';
+}
+
+export interface TtsReferenceReceipt {
+  readonly status: 'used' | 'unavailable' | 'unverified';
+  readonly sha256?: string;
+}
+
 /** TTS synthesis request (passed to ITtsProvider) */
 export interface TtsSynthesizeRequest {
   readonly text: string;
@@ -27,6 +72,8 @@ export interface TtsSynthesizeRequest {
   readonly format?: 'wav' | 'mp3';
   // F066: Qwen3-TTS Base clone mode fields
   readonly refAudio?: string;
+  /** Captured authorized bytes; only sent to a reader advertising content-v1. */
+  readonly refAudioData?: { readonly base64: string; readonly sha256: string };
   readonly refText?: string;
   readonly instruct?: string;
   readonly temperature?: number;
@@ -37,6 +84,7 @@ export interface TtsSynthesizeResult {
   readonly audio: Uint8Array;
   readonly format: string;
   readonly durationSec?: number;
+  readonly referenceAudio?: TtsReferenceReceipt;
   readonly metadata: {
     readonly provider: string;
     readonly model: string;
@@ -51,6 +99,8 @@ export type TtsSynthesizeStreamEvent =
       readonly format: string;
       readonly durationSec?: number;
       readonly isFinalChunk: boolean;
+      readonly referenceAudio?: TtsReferenceReceipt;
+      readonly voiceSelection?: TtsVoiceSelection;
     }
   | {
       readonly type: 'final';
@@ -67,6 +117,13 @@ export interface ITtsProvider {
   readonly id: string;
   /** Model identifier — included in cache key to avoid stale hits across model swaps */
   readonly model: string;
+  /** Frozen from the actual adapter, never guessed from a model name. */
+  readonly referenceAudioSupport?: boolean;
+  readonly referenceAudioContentSupport?: boolean;
+  /** False when this adapter ignores preset IDs (e.g. Base reference-only generation). */
+  readonly voiceIdSupport?: boolean;
+  /** Offline snapshots may only reuse verified local assets. */
+  readonly cacheOnly?: boolean;
   /** Frozen endpoint and generation identity for content-addressed audio. */
   readonly cacheIdentity?: string;
   /** Freeze identity for cache lookup and multi-part synthesis; cacheDir may permit verified cache-only replay. */
@@ -96,6 +153,7 @@ export interface TtsStreamEvent {
   readonly durationSec?: number;
   readonly format?: string;
   readonly error?: string;
+  readonly voiceSelection?: TtsVoiceSelection;
 }
 
 // F111 Phase B + F112 Phase A: Real-time voice stream events (WebSocket)
@@ -104,6 +162,7 @@ export interface TtsStreamEvent {
 
 /** Sent when a cat starts generating voice for an invocation */
 export interface VoiceStreamStartEvent {
+  readonly voiceSelection?: TtsVoiceSelection;
   readonly type: 'voice_stream_start';
   readonly catId: string;
   readonly invocationId: string;
@@ -113,6 +172,7 @@ export interface VoiceStreamStartEvent {
 /** Sent for each synthesized audio chunk (one per sentence) */
 export interface VoiceChunkEvent {
   readonly type: 'voice_chunk';
+  readonly voiceSelection?: TtsVoiceSelection;
   readonly catId: string;
   readonly invocationId: string;
   readonly threadId: string;
@@ -125,6 +185,7 @@ export interface VoiceChunkEvent {
 
 /** Sent when the voice stream for an invocation ends. totalChunks=-1 means aborted. */
 export interface VoiceStreamEndEvent {
+  readonly voiceSelection?: TtsVoiceSelection;
   readonly type: 'voice_stream_end';
   readonly catId: string;
   readonly invocationId: string;

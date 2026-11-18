@@ -63,6 +63,9 @@ test('canonical matter description separates summaries, optional quotations and 
     .shape.items.element.options.find((item) => item.shape.target.value === 'matter').shape.payload.description;
   assert.match(description, /summary: your interpretation/i);
   assert.match(description, /sources are optional threadId pointers/i);
+  assert.match(description, /on create or append, omitting sources binds/i);
+  assert.match(description, /on correct, omitted summary or source preserves its current value/i);
+  assert.match(description, /pass source alone to refresh its version without resending summary/i);
   assert.match(description, /a pointer is not verified original speech/i);
   assert.match(description, /actual summary writer/i);
   assert.match(description, /description is optional.*context.*applicability/i);

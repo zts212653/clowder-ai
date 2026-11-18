@@ -3,7 +3,7 @@ feature_ids: [F203]
 related_features: [F086, F128, F167, F198, F210, F211, F061, F325]
 topics: [system-prompt, governance, prompt-engineering, compression-immunity, l0-injection]
 doc_kind: spec
-tips_exempt: "Renewed 2026-10-02: F325 successor ownership and the pending capability-wakeup measurement binding are internal L0/eval coordination; neither creates a user-facing command or an active Evolution Program."
+tips_exempt: "Renewed 2026-11-16: the live L0 estimate appears automatically in member settings and requires no separate discovery action; the optional CLI is an internal diagnostic."
 created: 2026-05-15
 updated: 2026-08-01
 ---
@@ -184,7 +184,7 @@ operator 2026-05-21 指令：先做 #747，再做 #749；#748 先讨论、暂不
 
 - [x] AC-B1: `assets/system-prompts/system-prompt-l0.md` 包含 14 项全部内容 ✅（branch `9105d184f`，测试 `14 L0 governance items coverage` 全覆盖）
 - [x] AC-B2: `scripts/compile-system-prompt-l0.mjs` 输出 per-cat 编译结果 ✅（6 catId 测试覆盖 + per-cat overlay 替换 + 36 测试全绿）
-- [x] AC-B3: 编译 token 总量 ≤ **6,000** ✅（**三次上移**：4,500→5,000 见 KD-9；5,000→5,500 见 KD-14；5,600→6,000 见决策漏斗注入 PR #2040——§17 决策漏斗投影 + §4 默认自决反射，四猫讨论收敛 2026-06-01。6,000 占 200k context 3%）
+- [x] AC-B3: 模板名册、空画像的编译 token 总量 ≤ **6,000** ✅（**三次上移**：4,500→5,000 见 KD-9；5,000→5,500 见 KD-14；5,600→6,000 见决策漏斗注入 PR #2040——§17 决策漏斗投影 + §4 默认自决反射，四猫讨论收敛 2026-06-01。6,000 占 200k context 3%）。实际名册与画像的只读审计及此线的适用范围见 ADR-038 的 2026-11-16 校准。
 - [x] AC-B4: per-breed cache key 稳定 ✅（same catId byte-identical 测试通过）
 
 ### Phase C（dual-path 落地）

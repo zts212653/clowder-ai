@@ -73,6 +73,7 @@ async function execute(
   started: () => void,
   report: (event: MemoryReadDiagnostic) => void,
   observeWindow: (snapshot: FileVectorReadWindowSnapshot) => void,
+  vectorStarted: () => Promise<void>,
 ): Promise<unknown> {
   if (job.kind === 'scan') {
     started();
@@ -105,6 +106,9 @@ async function execute(
   const store = new SqliteEvidenceStore(job.dbPath, undefined, {
     workerMode: 'read',
     onVectorSearchDegrade: (degrade) => report({ phase: 'vector-degrade', degrade }),
+    ...(job.kind === 'message-search' && (job.options.mode ?? 'hybrid') === 'hybrid'
+      ? { onMessageVectorStart: vectorStarted }
+      : {}),
     ...(job.kind === 'search' ? { sourceRoot: job.sourceRoot, sourceRef: job.sourceRef } : {}),
   });
   await store.initialize();
@@ -118,7 +122,14 @@ async function execute(
       observeWindow(snapshot);
     };
     if (job.kind === 'search' || job.kind === 'message-search')
-      recordWindow({ prepared: false, active: null, reason: 'not_configured', cleanup: null, counters: null });
+      recordWindow({
+        prepared: false,
+        active: null,
+        reason: 'not_configured',
+        cleanup: null,
+        counters: null,
+        preload: null,
+      });
     const readVectorQuery = prepareVectorReadQuery(job, db, recordWindow);
     // Register existing vec0 tables; this does not create/migrate or mutate them.
     try {
@@ -224,6 +235,13 @@ process.on('message', (message: ParentMessage) => {
     (snapshot) => {
       readWindow = snapshot;
     },
+    () =>
+      new Promise<void>((resolve, reject) => {
+        if (!process.connected) return reject(new Error('Message vector control channel disconnected'));
+        process.send?.({ type: 'message-vectors-started', id: message.id } satisfies ChildMessage, (error) =>
+          error ? reject(error) : resolve(),
+        );
+      }),
   ).then(
     (value) => finish({ type: 'result', id: message.id, value }),
     (error) => finish({ type: 'result', id: message.id, error: encodeProcessError(error) }),

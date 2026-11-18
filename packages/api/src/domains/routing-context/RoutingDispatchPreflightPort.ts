@@ -4,17 +4,24 @@ import {
   routingQueueAdmissionReceiptV1Schema,
 } from '@cat-cafe/shared';
 import type { RoutingExecutionBindingProof } from '../../config/account-routing-capacity.js';
+import type {
+  SessionCacheExecutionBinding,
+  SessionCacheReadPort,
+} from '../cats/services/session/cache/SessionCacheReadService.js';
 import type { RoutingCandidateCatalogSource } from './RoutingContextReadService.js';
 import type { RoutingPreflightService } from './RoutingPreflightService.js';
 
 export interface RoutingDispatchPreflightInput {
   ownerId: string;
+  /** Destination scope, not the caller's source thread. */
+  threadId?: string;
   targetCatIds: readonly string[];
   intent?: 'review' | 'architecture';
   /** Set only by trusted dispatch ingress, never by agent/user payload. */
   ownerRequestedAttempt?: boolean;
   /** Trusted frozen execution carrier, never caller-provided account identity. */
   executionBindings?: readonly RoutingExecutionBindingProof[];
+  cacheExecutionBindings?: readonly SessionCacheExecutionBinding[];
 }
 
 export interface RoutingDispatchPreflightPort {
@@ -81,6 +88,7 @@ export class RuntimeRoutingDispatchPreflight implements RoutingDispatchPreflight
     private readonly dependencies: {
       catalogSource: RoutingCandidateCatalogSource;
       preflightService: Pick<RoutingPreflightService, 'preflight'>;
+      sessionCache?: SessionCacheReadPort;
       now?: () => number;
     },
   ) {}
@@ -95,7 +103,7 @@ export class RuntimeRoutingDispatchPreflight implements RoutingDispatchPreflight
         observedAt,
         ...(input.executionBindings ? { executionBindings: input.executionBindings } : {}),
       });
-      return await this.dependencies.preflightService.preflight({
+      const decision = await this.dependencies.preflightService.preflight({
         ownerId: input.ownerId,
         observedAt,
         catalogRevision: catalog.catalogRevision,
@@ -105,8 +113,40 @@ export class RuntimeRoutingDispatchPreflight implements RoutingDispatchPreflight
         ...(input.ownerRequestedAttempt ? { ownerRequestedAttempt: true } : {}),
         ...(input.intent ? { intent: input.intent } : {}),
       });
+      return this.withSessionCache(decision, input);
     } catch {
-      return unavailableRoutingDispatchDecision(input, observedAt, 'catalog_error');
+      return this.withSessionCache(unavailableRoutingDispatchDecision(input, observedAt, 'catalog_error'), input);
+    }
+  }
+
+  private async withSessionCache(decision: RoutingPreflightDecisionV1, input: RoutingDispatchPreflightInput) {
+    const fallback = {
+      status: 'unknown',
+      estimated: true,
+      source: 'unavailable',
+      reason: 'thread_or_reader_unavailable',
+    } as const;
+    try {
+      const rows =
+        input.threadId && this.dependencies.sessionCache
+          ? await this.dependencies.sessionCache.read({
+              ownerId: input.ownerId,
+              threadId: input.threadId,
+              catIds: input.targetCatIds,
+              observedAt: decision.observedAt,
+              ...(input.cacheExecutionBindings ? { executionBindings: input.cacheExecutionBindings } : {}),
+            })
+          : [];
+      const byCat = new Map(rows.map((row) => [row.catId, row.warmth]));
+      return {
+        ...decision,
+        targets: decision.targets.map((target) => ({
+          ...target,
+          cacheWarmth: byCat.get(target.targetCatId) ?? fallback,
+        })),
+      };
+    } catch {
+      return { ...decision, targets: decision.targets.map((target) => ({ ...target, cacheWarmth: fallback })) };
     }
   }
 }
@@ -156,6 +196,7 @@ export async function observeRoutingQueueAdmission(
         target.disposition === 'allowed' ? 'available' : target.disposition === 'rejected' ? 'unavailable' : 'warned',
       reasons: target.reasons,
       ...(target.capacityFacts ? { capacityFacts: target.capacityFacts } : {}),
+      ...(target.cacheWarmth ? { cacheWarmth: target.cacheWarmth } : {}),
     })),
   });
 }

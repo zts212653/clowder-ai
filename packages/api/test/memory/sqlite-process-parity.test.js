@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 import * as sqliteVec from 'sqlite-vec';
 import { EntityConflictStaleError, EntitySurfaceConflictError } from '../../dist/domains/memory/EntityRegistry.js';
+import { MessageSearchService } from '../../dist/domains/memory/MessageSearchService.js';
 import { PassageVectorStore, passageVectorKey } from '../../dist/domains/memory/PassageVectorStore.js';
 import { lookupShadowRanking, SqliteEvidenceStore } from '../../dist/domains/memory/SqliteEvidenceStore.js';
 import { ensurePassageVectorTable, ensureVectorTable } from '../../dist/domains/memory/schema.js';
@@ -75,7 +76,7 @@ async function populate(store) {
     insert.run(
       'thread-fixture',
       `msg-${i}`,
-      `${i % 2 ? '读者甲 common ' : 'context '}${'memory '.repeat(i + 1)}`,
+      `${i % 2 ? '读者甲 common ' : 'context '}${'memory '.repeat(i + 1)}`.trimEnd(),
       'user',
       i,
       `2026-01-${String(i + 1).padStart(2, '0')}`,
@@ -167,6 +168,78 @@ test('semantic and hybrid embedding bridge preserves query vectors and passage r
         await stores[1].searchWithMeta('memory', { mode, depth, limit: 3 }),
       );
     }
+  const traces = [];
+  const thread = { id: 'fixture', createdBy: 'owner', title: 'Fixture common' };
+  const service = new MessageSearchService({
+    evidenceStore: stores[0],
+    threadStore: { list: () => [thread], get: () => thread },
+    messageStore: {
+      getById(id) {
+        const i = Number(id);
+        return {
+          id,
+          threadId: thread.id,
+          userId: 'owner',
+          catId: null,
+          content: `${i % 2 ? '读者甲 common ' : 'context '}${'memory '.repeat(i + 1)}`.trimEnd(),
+          timestamp: Date.parse(`2026-01-${String(i + 1).padStart(2, '0')}`),
+        };
+      },
+    },
+  });
+  const result = await service.search(
+    { query: 'memory', mode: 'hybrid', limit: 3 },
+    { userId: 'owner', viewer: { type: 'cat', catId: 'codex-astra' } },
+    { onTrace: (v) => traces.push(v) },
+  );
+  assert.ok(result.results.length > 0);
+  if (process.platform === 'darwin') {
+    const worker = traces.find((v) => v.phase === 'retrieval')?.workerReads[0];
+    assert.equal(worker.nativeVectorRead.event, 'sql-finish', 'actual worker KNN must complete');
+    assert.equal(worker.readWindow.cleanup, true);
+    const observed = worker.readWindow.preload;
+    assert.ok(observed, 'native → decoder → worker IPC → message phase trace keeps the completed observation');
+    assert.equal(typeof observed.attempted, 'boolean');
+    assert.equal(typeof observed.started, 'boolean');
+    assert.equal(observed.joined, observed.started);
+    assert.ok(Number.isSafeInteger(observed.logicalBytes));
+    assert.ok(Number.isSafeInteger(observed.readCalls));
+    assert.equal(observed.errorCode, 0);
+    const controller = new AbortController();
+    let started;
+    await assert.rejects(
+      stores[0].searchMessagePassages('memory', {
+        mode: 'semantic',
+        visibleThreadIds: ['fixture'],
+        signal: controller.signal,
+        onReadSnapshot(snapshot) {
+          if (snapshot.nativeVectorRead?.event !== 'sql-start' || controller.signal.aborted) return;
+          started = snapshot;
+          controller.abort(new DOMException('cancel before an end observation', 'AbortError'));
+        },
+      }),
+      (error) => {
+        assert.equal(error, controller.signal.reason);
+        assert.ok(started, 'cancel only after actual KNN start');
+        assert.equal(error.memoryProcess.executionId, started.executionId);
+        assert.equal(error.memoryProcess.readWindow.active, true);
+        assert.equal(error.memoryProcess.readWindow.cleanup, null);
+        assert.equal(error.memoryProcess.readWindow.preload, null);
+        return true;
+      },
+    );
+    let exited = false;
+    for (let i = 0; i < 50; i++) {
+      try {
+        process.kill(started.pid, 0);
+      } catch {
+        exited = true;
+        break;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    assert.equal(exited, true, 'cancelled native worker actually exited');
+  }
 });
 test('entity rename, alias deletion, rollback and conflict errors retain atomic revision semantics', async (t) => {
   const store = await makeStore(t);

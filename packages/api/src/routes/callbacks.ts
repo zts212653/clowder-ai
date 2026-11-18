@@ -255,8 +255,14 @@ import {
 import { prepareCallbackTaskHandoff } from './callback-task-handoff.js';
 import { registerCallbackTaskRoutes } from './callback-task-routes.js';
 import { registerCallbackThreadCatsRoutes } from './callback-thread-cats-routes.js';
+import {
+  filterCallbackMessages,
+  mergeCallbackMessageWindow,
+  readCallbackMessageWindow,
+} from './callback-visible-history.js';
 import { registerCallbackWithdrawThreadProposalRoutes } from './callback-withdraw-thread-proposal-routes.js';
 import { registerCallbackWorkflowSopRoutes } from './callback-workflow-sop-routes.js';
+import { isCatHiddenWatcherCallbackCard } from './canceled-watcher-callback.js';
 import { registerCompanionWorkReadRoutes } from './companion-work-read.js';
 import { resolveCrossThreadCoordination } from './cross-thread-coordination.js';
 import { verifyOutboundTerminalCoordinationBinding } from './cross-thread-coordination-outbound.js';
@@ -285,7 +291,7 @@ async function readBoundedUnreadContext(input: {
   readonly userId: string;
   readonly afterCursor: string | undefined;
   readonly requestedLimit: number;
-  readonly canInclude: (message: StoredMessage) => boolean;
+  readonly canInclude: (message: StoredMessage) => boolean | Promise<boolean>;
 }): Promise<{ readonly messages: StoredMessage[]; readonly hasMore: boolean }> {
   const unread: StoredMessage[] = [];
   const pageSize = Math.max(input.requestedLimit * 2, 50);
@@ -295,7 +301,7 @@ async function readBoundedUnreadContext(input: {
   while (unread.length < candidateTarget) {
     const batch = await input.messageStore.getByThreadAfter(input.threadId, scanAfter, pageSize, input.userId);
     if (batch.length === 0) break;
-    unread.push(...batch.filter(input.canInclude).slice(0, candidateTarget - unread.length));
+    unread.push(...(await filterCallbackMessages(batch, input.canInclude)).slice(0, candidateTarget - unread.length));
     const last = batch.at(-1);
     if (!last) break;
     const next = cursorFor(last);
@@ -4292,17 +4298,20 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       }
       return true;
     };
-    const canIncludeContextItemWithoutKeyword = (
+    const canIncludeContextItemWithoutKeyword = async (
       item: Awaited<ReturnType<typeof messageStore.getByThread>>[number],
-    ): boolean => {
+    ): Promise<boolean> => {
       if (item.deletedAt) return false;
       if (!isTimelinePublished(item)) return false;
       if (item.userId !== principalUserId && !isSystemUserMessage(item)) return false;
       if (!canViewMessage(item, viewer)) return false;
+      if (await isCatHiddenWatcherCallbackCard(item, opts.turnExecutionStore)) return false;
       return matchesExtraFilters(item);
     };
-    const canIncludeContextItem = (item: Awaited<ReturnType<typeof messageStore.getByThread>>[number]): boolean => {
-      if (!canIncludeContextItemWithoutKeyword(item)) return false;
+    const canIncludeContextItem = async (
+      item: Awaited<ReturnType<typeof messageStore.getByThread>>[number],
+    ): Promise<boolean> => {
+      if (!(await canIncludeContextItemWithoutKeyword(item))) return false;
       if (keywordTerms.length === 0) return true;
       return getKeywordScore(item) > 0;
     };
@@ -4341,37 +4350,28 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
 
     if (messageId) {
       const target = await messageStore.getById(messageId);
-      if (!target || target.threadId !== effectiveThreadId || !canIncludeContextItem(target)) {
+      if (!target || target.threadId !== effectiveThreadId || !(await canIncludeContextItem(target))) {
         reply.status(404);
         return { error: 'Message not found in thread context' };
       }
 
       const beforeCount = beforeWindow ?? 3;
       const afterCount = afterWindow ?? 3;
-      const beforeMessages =
-        beforeCount > 0
-          ? await messageStore.getByThreadBefore(
-              effectiveThreadId,
-              getTimelineOrderTime(target),
-              beforeCount,
-              target.id,
-              principalUserId,
-              exposureAwareThreadRead,
-            )
-          : [];
-      const afterMessages =
-        afterCount > 0
-          ? await messageStore.getByThreadAfter(
-              effectiveThreadId,
-              target.id,
-              afterCount,
-              principalUserId,
-              exposureAwareThreadRead,
-            )
-          : [];
-      filtered = [...beforeMessages, target, ...afterMessages]
-        .filter(canIncludeContextItem)
-        .sort((a, b) => a.timestamp - b.timestamp || a.id.localeCompare(b.id));
+      const window = {
+        store: messageStore,
+        threadId: effectiveThreadId,
+        userId: principalUserId,
+        anchor: target,
+        include: canIncludeContextItem,
+      };
+      const beforeMessages = await readCallbackMessageWindow({ ...window, direction: 'before', count: beforeCount });
+      const afterMessages = await readCallbackMessageWindow({ ...window, direction: 'after', count: afterCount });
+      filtered = mergeCallbackMessageWindow({
+        before: beforeMessages,
+        anchor: target,
+        after: afterMessages,
+        includeAnchor: true,
+      });
     } else if (keywordTerms.length > 0) {
       let cursorTimestamp = Number.MAX_SAFE_INTEGER;
       let cursorId: string | undefined;
@@ -4412,7 +4412,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
           userId: principalUserId,
           afterCursor,
           requestedLimit,
-          canInclude: (item) => canIncludeContextItemWithoutKeyword(item) && isFreshnessRelevant(item),
+          canInclude: async (item) => isFreshnessRelevant(item) && (await canIncludeContextItemWithoutKeyword(item)),
         });
 
       if (readIntent === 'unread' && deliveryCursorStore) {
@@ -4453,7 +4453,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
           if (batch.length === 0) break;
 
           for (const item of batch) {
-            if (!canIncludeContextItemWithoutKeyword(item)) continue;
+            if (!(await canIncludeContextItemWithoutKeyword(item))) continue;
             visible.push(item);
           }
 

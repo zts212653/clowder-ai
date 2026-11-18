@@ -53,6 +53,70 @@ async function buildApp({ registry, notifier }) {
 }
 
 describe('preHandler × CallbackAuthSystemMessageNotifier wiring (F174-D2b-1)', () => {
+  for (const mode of ['watcher', 'watcher_panel'])
+    it(`a canceled ${mode} callback stays rejected without a retryable thread card`, async () => {
+      const notifier = makeNotifierStub();
+      const registry = makeRegistry({
+        verifyResult: () => ({ ok: false, reason: 'canceled' }),
+        recordById: () => ({ ...RECORD, toolExecutionPolicy: { mode } }),
+      });
+      const app = await buildApp({ registry, notifier });
+      try {
+        const response = await app.inject({
+          url: '/api/callbacks/post-message',
+          headers: { 'x-invocation-id': 'inv-001', 'x-callback-token': 'tok-correct' },
+        });
+        assert.equal(response.statusCode, 401);
+        assert.equal(response.json().reason, 'canceled');
+        assert.equal(notifier.calls.length, 0);
+      } finally {
+        await app.close();
+      }
+    });
+
+  it('ordinary cancellation and invalid single-watcher tokens still surface', async () => {
+    for (const [policy, reason] of [
+      [undefined, 'canceled'],
+      [{ mode: 'watcher' }, 'invalid_token'],
+    ]) {
+      const notifier = makeNotifierStub();
+      const registry = makeRegistry({
+        verifyResult: () => ({ ok: false, reason }),
+        recordById: () => ({ ...RECORD, toolExecutionPolicy: policy }),
+      });
+      const app = await buildApp({ registry, notifier });
+      try {
+        const response = await app.inject({
+          url: '/api/callbacks/post-message',
+          headers: { 'x-invocation-id': 'inv-001', 'x-callback-token': 'tok' },
+        });
+        assert.equal(response.statusCode, 401);
+        assert.equal(notifier.calls.length, 1);
+      } finally {
+        await app.close();
+      }
+    }
+  });
+  for (const reason of ['invalid_token', 'interrupted', 'expired'])
+    it(`a panel ${reason} callback is rejected without publishing private member identity`, async () => {
+      const notifier = makeNotifierStub();
+      const registry = makeRegistry({
+        verifyResult: () => ({ ok: false, reason }),
+        recordById: () => ({ ...RECORD, toolExecutionPolicy: { mode: 'watcher_panel' } }),
+      });
+      const app = await buildApp({ registry, notifier });
+      try {
+        const response = await app.inject({
+          url: '/api/callbacks/post-message',
+          headers: { 'x-invocation-id': 'inv-001', 'x-callback-token': 'tok' },
+        });
+        assert.equal(response.statusCode, 401);
+        assert.equal(response.json().reason, reason);
+        assert.equal(notifier.calls.length, 0);
+      } finally {
+        await app.close();
+      }
+    });
   let notifier;
 
   beforeEach(() => {

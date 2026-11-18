@@ -1,9 +1,10 @@
 // @vitest-environment jsdom
 
-import type { ListenDocumentState } from '@cat-cafe/shared';
+import type { ListenDocumentState, TtsVoiceSelection } from '@cat-cafe/shared';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ListenDocumentDescriptor } from '@/stores/listenModeStore';
 import { listenDocumentCacheKey, useListenModeStore } from '@/stores/listenModeStore';
+import { useToastStore } from '@/stores/toastStore';
 import { useVoiceSessionStore } from '@/stores/voiceSessionStore';
 import { DocumentListenController } from '../DocumentListenController';
 import type { EnqueueUrlResult, PlaybackSnapshot } from '../PlaybackManager';
@@ -123,6 +124,113 @@ function harness(saved: ListenDocumentState | null = null) {
 }
 
 describe('DocumentListenController', () => {
+  it('plays nonreusable reference assets without linking or claiming cached document sentences', async () => {
+    const { api, controller, manager } = harness();
+    api.stream.mockImplementation(() =>
+      (async function* () {
+        yield {
+          type: 'asset' as const,
+          audioUrl: '/audio/reference.wav',
+          assetId: `${'a'.repeat(64)}.wav`,
+          cached: false,
+          bytes: 100,
+          reusable: false,
+        };
+      })(),
+    );
+    await controller.startDocument(descriptor());
+    await vi.waitFor(() => expect(manager.enqueueUrl).toHaveBeenCalled());
+    expect(api.linkAsset).not.toHaveBeenCalled();
+    expect(useListenModeStore.getState().session?.cachedAnchors).toEqual([]);
+    controller.stop();
+  });
+  it.each([
+    ['remote reference', 'unverified', ['a', 'b']],
+    ['missing intermediate receipt', 'unverified', ['a', undefined, 'b']],
+    ['clone becomes unavailable', 'sent', ['a', 'unavailable']],
+    ['verified reference', 'sent', ['a', 'b']],
+  ] as const)('stops %s changes before linking or enqueueing the next sentence', async (_label, status, receipts) => {
+    useToastStore.setState({ toasts: [] });
+    const f = harness();
+    const document = descriptor();
+    document.sentences = document.sentences.slice(0, receipts.length);
+    let call = 0;
+    f.api.stream.mockImplementation(() => {
+      const receipt = receipts[call++];
+      const voice = { voice: 'selected', langCode: 'zh', refAudio: '/reference.wav' };
+      const voiceSelection: TtsVoiceSelection = {
+        catId: 'opus',
+        source: 'cat_config',
+        provider: 'reader',
+        model: 'same-model',
+        requested: voice,
+        effective: voice,
+        referenceStatus: receipt === 'unavailable' ? 'unavailable' : status,
+        ...(receipt && receipt !== 'unavailable' ? { referenceSha256: receipt.repeat(64) } : {}),
+        warnings: [],
+      };
+      return (async function* () {
+        yield {
+          type: 'asset' as const,
+          audioUrl: `/audio/${call}.wav`,
+          assetId: `${String(call).repeat(64)}.wav`,
+          cached: false,
+          bytes: 100,
+          reusable: status === 'sent' && receipt !== 'unavailable',
+          voiceSelection,
+        };
+      })();
+    });
+    try {
+      await f.controller.startDocument(document);
+      await vi.waitFor(() => expect(useListenModeStore.getState().session?.phase).toBe('error'));
+      expect(f.manager.enqueueUrl).toHaveBeenCalledTimes(receipts.length - 1);
+      expect(f.api.linkAsset).toHaveBeenCalledTimes(status === 'sent' ? 1 : 0);
+      expect(f.manager.interrupt).toHaveBeenCalled();
+      expect(useListenModeStore.getState().session?.error).toMatch(/参考音频.*变化.*停止/);
+      expect(useToastStore.getState().toasts.some((toast) => /参考音频.*变化.*停止/.test(toast.message))).toBe(true);
+    } finally {
+      f.controller.stop();
+    }
+  });
+  it('starts a fresh reference sequence for a later playback session', async () => {
+    const f = harness();
+    const document = descriptor();
+    document.sentences = document.sentences.slice(0, 1);
+    let call = 0;
+    f.api.stream.mockImplementation(() => {
+      const digest = (++call === 1 ? 'a' : 'b').repeat(64);
+      const voice = { voice: 'selected', langCode: 'zh' };
+      const voiceSelection: TtsVoiceSelection = {
+        catId: 'opus',
+        source: 'cat_config',
+        provider: 'reader',
+        model: 'same-model',
+        requested: voice,
+        effective: voice,
+        referenceStatus: 'sent',
+        referenceSha256: digest,
+        warnings: [],
+      };
+      return (async function* () {
+        yield {
+          type: 'asset' as const,
+          audioUrl: `/audio/${digest}.wav`,
+          assetId: `${digest}.wav`,
+          cached: false,
+          bytes: 100,
+          voiceSelection,
+        };
+      })();
+    });
+    await f.controller.startDocument(document);
+    await vi.waitFor(() => expect(f.manager.enqueueUrl).toHaveBeenCalledTimes(1));
+    f.controller.stop();
+    await f.controller.startDocument(document);
+    await vi.waitFor(() => expect(f.manager.enqueueUrl).toHaveBeenCalledTimes(2));
+    expect(useListenModeStore.getState().session?.phase).toBe('playing');
+    f.controller.stop();
+  });
   beforeEach(() => useListenModeStore.setState({ session: null, cacheByDocument: {} }));
 
   it('queues one complete sentence asset and never exposes streamed WAV chunks as audible seams', async () => {
@@ -472,5 +580,107 @@ describe('DocumentListenController', () => {
       expect(event).not.toHaveProperty('projectPath');
       expect(event).not.toHaveProperty('relativePath');
     }
+  });
+  it('replays retained document recordings offline with their historical notice and no synthesis', async () => {
+    useToastStore.setState({ toasts: [] });
+    const f = harness();
+    const document = descriptor();
+    const id = 'a'.repeat(64) + '.wav';
+    const saved = {
+      identity: document.identity,
+      sentences: document.sentences.map((sentence) => ({ anchor: sentence.anchor, assetId: id })),
+      synthesisFingerprint: 'recording-v1',
+      position: { anchor: null, offsetSeconds: 0 },
+      playbackRate: 1,
+      retention: 'forever',
+      updatedAt: 1,
+      recordings: {
+        [id]: {
+          assetId: id,
+          audioUrl: '/api/tts/audio/' + id,
+          bytes: 100,
+          cached: true,
+          historical: true,
+          warnings: ['历史录音参考未经核验。'],
+        },
+      },
+    };
+    f.api.load.mockResolvedValue(saved);
+    f.api.save.mockResolvedValue(saved);
+    f.api.stream.mockImplementation(() => {
+      throw new Error('TTS is offline; existing recordings must still replay');
+    });
+    await f.controller.startDocument(document);
+    await vi.waitFor(() => expect(f.manager.enqueueUrl).toHaveBeenCalledTimes(4));
+    expect(f.api.stream).not.toHaveBeenCalled();
+    expect(f.api.linkAsset).not.toHaveBeenCalled();
+    expect(useToastStore.getState().toasts.some((toast) => toast.message === '历史录音参考未经核验。')).toBe(true);
+    f.controller.stop();
+  });
+  it.each([0, 1])('continues a protocol-upgraded document with %i historical recordings', async (historicalCount) => {
+    const f = harness();
+    const document = descriptor();
+    document.sentences = document.sentences.slice(0, 2);
+    const voice = { voice: 'selected', langCode: 'zh' };
+    const selection: TtsVoiceSelection = {
+      catId: 'opus',
+      source: 'cat_config',
+      provider: 'reader',
+      model: 'same-model',
+      requested: voice,
+      effective: voice,
+      referenceStatus: 'sent',
+      warnings: [],
+    };
+    const historicalId = `${'a'.repeat(64)}.wav`;
+    const saved = {
+      identity: document.identity,
+      sentences: document.sentences.map((s, index) => ({
+        anchor: s.anchor,
+        ...(index < historicalCount ? { assetId: historicalId } : {}),
+      })),
+      synthesisFingerprint: 'legacy',
+      position: { anchor: null, offsetSeconds: 0 },
+      playbackRate: 1,
+      retention: 'forever',
+      updatedAt: 1,
+      recordings: {
+        [historicalId]: {
+          assetId: historicalId,
+          audioUrl: '/audio/historical.wav',
+          bytes: 100,
+          cached: true,
+          historical: true,
+          voiceSelection: { ...selection, referenceSha256: 'a'.repeat(64) },
+          warnings: ['历史录音'],
+        },
+      },
+    };
+    f.api.load.mockResolvedValue(saved);
+    f.api.save.mockResolvedValue({ ...saved, synthesisFingerprint: 'current' });
+    f.api.stream.mockImplementation((text) =>
+      (async function* () {
+        yield {
+          type: 'asset' as const,
+          audioUrl: `/audio/current-${text}.wav`,
+          assetId: `${'b'.repeat(64)}.wav`,
+          bytes: 100,
+          cached: false,
+          reusable: true,
+          synthesisFingerprint: 'current',
+          voiceSelection: { ...selection, referenceSha256: 'b'.repeat(64) },
+        };
+      })(),
+    );
+    f.api.linkAsset.mockImplementation(async (_identity, _anchor, _assetId, fingerprint) => fingerprint === 'current');
+    await f.controller.startDocument(document);
+    await vi.waitFor(() => expect(f.manager.markDone).toHaveBeenCalled());
+    expect(f.api.stream).toHaveBeenCalledTimes(2 - historicalCount);
+    expect(f.manager.enqueueUrl).toHaveBeenCalledTimes(2);
+    expect(f.manager.enqueueUrl.mock.calls[0][0]).toBe(
+      historicalCount ? '/audio/historical.wav' : `/audio/current-${document.sentences[0].text}.wav`,
+    );
+    expect(f.manager.enqueueUrl.mock.calls[1][0]).toBe(`/audio/current-${document.sentences[1].text}.wav`);
+    f.controller.stop();
   });
 });

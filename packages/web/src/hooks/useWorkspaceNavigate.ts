@@ -7,7 +7,14 @@ import {
 import { pushThreadRouteWithHistory } from '@/components/ThreadSidebar/thread-navigation';
 import { useHubSocket } from '@/components/thread-chat/hub-socket-context';
 import { useChatStore } from '@/stores/chatStore';
-import { scrollToMessage } from '@/utils/scrollToMessage';
+import {
+  type EntrustedWorkMessageAction,
+  resumeMessageSource,
+  retainMessageSource,
+} from '@/utils/entrusted-message-source';
+
+export type { EntrustedWorkMessageAction } from '@/utils/entrusted-message-source';
+
 import { kickTeleportResolve, planTeleport } from '@/utils/teleport';
 import {
   areWorktreeIdsEquivalent,
@@ -34,13 +41,6 @@ export interface NavigateEvent {
 
 const OPEN_REVEAL_GRACE_MS = 2000;
 const WORKSPACE_NAVIGATION_ACK_ROOM = 'workspace:navigate:ack';
-const PENDING_ENTRUSTED_ACTION_KEY = 'cat-cafe:f310:pending-source-action:v1';
-
-export interface EntrustedWorkMessageAction {
-  threadId: string;
-  messageId: string;
-  blockId?: string;
-}
 
 export type EntrustedWorkActionTarget =
   | ({ kind: 'message' } & EntrustedWorkMessageAction)
@@ -83,76 +83,6 @@ export function resolveEntrustedWorkActionTarget(actionRef: string): EntrustedWo
     : (parseCollectiveWorkActionRef(actionRef) ?? resolveApprovalActionTarget(actionRef));
 }
 
-function findRichBlock(coordinate: EntrustedWorkMessageAction): HTMLElement | null {
-  const messages = document.querySelectorAll<HTMLElement>('[data-message-id]');
-  const message = Array.from(messages).find((candidate) => candidate.dataset.messageId === coordinate.messageId);
-  if (!message) return null;
-  if (!coordinate.blockId) return message;
-  return (
-    Array.from(message.querySelectorAll<HTMLElement>('[data-rich-block-id]')).find(
-      (candidate) => candidate.dataset.richBlockId === coordinate.blockId,
-    ) ?? null
-  );
-}
-
-function revealEntrustedAction(coordinate: EntrustedWorkMessageAction): () => void {
-  if (typeof document === 'undefined') return () => undefined;
-  let timeout: ReturnType<typeof setTimeout> | undefined;
-  let observer: MutationObserver | undefined;
-  const reveal = () => {
-    const target = findRichBlock(coordinate);
-    if (!target) return false;
-    target.scrollIntoView?.({ block: 'center' });
-    target.tabIndex = -1;
-    target.focus({ preventScroll: true });
-    try {
-      window.sessionStorage.removeItem(PENDING_ENTRUSTED_ACTION_KEY);
-    } catch {
-      // Session navigation remains best-effort when browser storage is unavailable.
-    }
-    observer?.disconnect();
-    if (timeout) clearTimeout(timeout);
-    return true;
-  };
-  if (!reveal()) {
-    observer = new MutationObserver(reveal);
-    observer.observe(document.body, { childList: true, subtree: true });
-    timeout = setTimeout(() => observer?.disconnect(), 15_000);
-  }
-  return () => {
-    observer?.disconnect();
-    if (timeout) clearTimeout(timeout);
-  };
-}
-
-function persistEntrustedAction(coordinate: EntrustedWorkMessageAction): void {
-  try {
-    window.sessionStorage.setItem(PENDING_ENTRUSTED_ACTION_KEY, JSON.stringify(coordinate));
-  } catch {
-    // The canonical action remains the source card; storage only preserves the navigation coordinate.
-  }
-}
-
-function readPendingEntrustedAction(threadId: string): EntrustedWorkMessageAction | null {
-  try {
-    const raw = window.sessionStorage.getItem(PENDING_ENTRUSTED_ACTION_KEY);
-    if (!raw) return null;
-    const parsed = parseEntrustedWorkMessageAction(
-      (() => {
-        const candidate = JSON.parse(raw) as Partial<EntrustedWorkMessageAction>;
-        return typeof candidate.threadId === 'string' && typeof candidate.messageId === 'string'
-          ? `message:${candidate.threadId}:${candidate.messageId}${
-              typeof candidate.blockId === 'string' ? `#${candidate.blockId}` : ''
-            }`
-          : '';
-      })(),
-    );
-    return parsed?.threadId === threadId ? parsed : null;
-  } catch {
-    return null;
-  }
-}
-
 /** Navigate only. The Needs Me projection never invokes the producer mutation itself. */
 export function navigateToEntrustedWorkAction(actionRef: string): boolean {
   if (typeof window === 'undefined') return false;
@@ -168,19 +98,15 @@ export function navigateToEntrustedWorkAction(actionRef: string): boolean {
   }
   if (target.kind !== 'message') return false;
   const coordinate: EntrustedWorkMessageAction = target;
-  persistEntrustedAction(coordinate);
+  const sourceAction = retainMessageSource(coordinate);
   const plan = planTeleport({
     threadId: coordinate.threadId,
     messageId: coordinate.messageId,
     currentThreadId: useChatStore.getState().currentThreadId,
+    sourceAction,
   });
-  if (plan.scrollNow) {
-    scrollToMessage(plan.scrollNow);
-    kickTeleportResolve();
-    revealEntrustedAction(coordinate);
-  } else if (plan.navigateTo) {
-    pushThreadRouteWithHistory(plan.navigateTo, window);
-  }
+  if (plan.navigateTo) pushThreadRouteWithHistory(plan.navigateTo, window);
+  kickTeleportResolve();
   return true;
 }
 
@@ -345,9 +271,7 @@ export function useWorkspaceNavigate(
 
   useEffect(() => {
     if (options.enabled === false || !options.isChatRoute || !threadId) return;
-    const pending = readPendingEntrustedAction(threadId);
-    if (!pending) return;
-    return revealEntrustedAction(pending);
+    resumeMessageSource(threadId);
   }, [options.enabled, options.isChatRoute, threadId]);
 
   useEffect(() => {

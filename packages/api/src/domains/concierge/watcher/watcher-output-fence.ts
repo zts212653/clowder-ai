@@ -21,10 +21,15 @@ export async function readWatcherOutputFence(
     readWatcherPreferences(owners.configs, owners.labels, userId),
     owners.threads.get(threadId),
   ]);
+  // The single watcher speaks as memberCatId; with the F335 panel on, every panel member is a watcher.
+  const watcher =
+    preferences.config.memberCatId === catId ||
+    (preferences.config.panel?.enabled === true &&
+      preferences.config.panel.members.some((member) => member.catId === catId));
   if (
     !thread ||
     thread.deletedAt ||
-    preferences.config.memberCatId !== catId ||
+    !watcher ||
     !effectiveWatcherState(preferences.config, thread, preferences.quietLabels).maySpeak
   )
     return null;

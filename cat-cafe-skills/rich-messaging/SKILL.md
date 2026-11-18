@@ -1,6 +1,6 @@
 ---
 name: rich-messaging
-tips_exempt: "Renewed 2026-11-16: unified memory readRef routing and the DOM-clobbering, hidden-frame and image-source examples only clarify how authors deliver existing rich/source blocks. Existing Chat discovery still applies; no new user command, setting or grant is introduced, and author-selected quotes and provenance checks remain required."
+tips_exempt: "Renewed 2026-11-17: Thread Issue draft discovery is already surfaced by feature-f235-conversation-issue. The added section routes agents through that existing review and owner-confirmation flow; it adds no separate user command or grant. Original-source quotation, memory routing and HTML safety guidance remain unchanged."
 description: >
   Use when: 找原话并带可点击出处，或在当前 Chat 交付可看、可听或可操作产物（语音、图片、截图、HTML/demo、卡片、清单、diff、交互选择），或保存、继续修改 HTML 图解/小工具，无需用户说“富文本”。
   Not for: 不附来源或媒体的普通文字回复、仅讨论 HTML 原理或修改仓库源码；复杂 localhost 应用用 browser-preview。

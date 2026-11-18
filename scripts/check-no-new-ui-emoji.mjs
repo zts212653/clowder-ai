@@ -15,6 +15,7 @@
 import { execFileSync } from 'node:child_process';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { findAddedMessageSourcePictographs } from './lib/message-source-icons.mjs';
 
 const SCRIPT_PATH = fileURLToPath(import.meta.url);
 const REPO_ROOT = resolve(dirname(SCRIPT_PATH), '..');
@@ -67,7 +68,7 @@ function consumeDiffContentLine(state, diffLine) {
   return { file: state.currentFile, line, text: diffLine.slice(1) };
 }
 
-export function findAddedUiPictographs(diffText) {
+export function findAddedUiPictographs(diffText, sourceOptions = {}) {
   const findings = [];
   const state = { currentFile: null, newLine: null };
 
@@ -83,7 +84,7 @@ export function findAddedUiPictographs(diffText) {
     }
   }
 
-  return findings;
+  return [...findings, ...findAddedMessageSourcePictographs(diffText, { root: REPO_ROOT, ...sourceOptions })];
 }
 
 // A long-lived branch diff easily exceeds Node's 1 MiB default and would fail closed as "unreadable".

@@ -15,12 +15,6 @@ import { discoverUnsynced, postGovernanceOperation } from '@/components/governan
 import type { AccountsResponse, ProfileItem } from '@/components/hub-accounts.types';
 import type { ClaudeRescueRunResult, ClaudeRescueSessionItem } from '@/components/hub-claude-rescue.types';
 import {
-  projectAccountQuota,
-  reconcileQuotaProfiles,
-  refreshAccountQuotaPools,
-  resolveConfiguredQuotaPlatforms,
-} from '@/components/hub-quota-refresh';
-import {
   type EnvVar,
   filterTelemetryEditable,
   type HealthData,
@@ -37,6 +31,12 @@ import type { Thread, ThreadRoutingPolicyV1 } from '@/stores/chat-types';
 import { apiFetch } from '@/utils/api-client';
 import type { ChatData } from './chat-models';
 import { failRead, request, write } from './owner-api';
+import {
+  projectAccountQuota,
+  reconcileQuotaProfiles,
+  refreshAccountQuotaPools,
+  resolveConfiguredQuotaPlatforms,
+} from './quota-refresh';
 
 interface OpsUi {
   opsView: string;

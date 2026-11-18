@@ -10,6 +10,7 @@ import {
   routingSummarySchema,
 } from './routing-context-common.js';
 import { capabilityProfileRevisionRefV1Schema, routingCandidateBindingV1Schema } from './routing-context-inputs.js';
+import { sessionCacheWarmthSchema } from './session-cache.js';
 
 export const routingReasonV1Schema = z
   .object({
@@ -104,6 +105,8 @@ const routingPreflightTargetV1Schema = z
     ownerAttempt: z.literal(true).optional(),
     automaticRetryAt: routingEpochMsSchema.optional(),
     capacityFacts: routingCapacityFactsV1Schema.optional(),
+    /** Informational destination-session estimate; never changes target admission. */
+    cacheWarmth: sessionCacheWarmthSchema.optional(),
     /** Reasons that causally explain this target's disposition. */
     reasons: z.array(routingReasonV1Schema).max(32),
     /**

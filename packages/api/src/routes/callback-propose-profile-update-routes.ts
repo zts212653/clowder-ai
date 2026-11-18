@@ -34,6 +34,7 @@ import { ProfileUpdateReservationLostError } from '../domains/cats/services/stor
 import { profileUpdateProposed } from '../infrastructure/telemetry/instruments.js';
 import type { SocketManager } from '../infrastructure/websocket/index.js';
 import { requireCallbackAuth } from './callback-auth-prehandler.js';
+import { summarizeProfileProposalDiff } from './profile-update-card-block.js';
 import { isEligibleProfileOrigin, profileUpdateInputSchema } from './profile-update-proposal-input.js';
 import {
   publishProfileUpdateApproval,
@@ -202,6 +203,7 @@ export function registerCallbackProposeProfileUpdateRoutes(app: FastifyInstance,
       proposalId: proposal.proposalId,
       status: proposal.status,
       messageId: envelope.approvalCardRef.messageId,
+      diff: summarizeProfileProposalDiff(proposal),
       ...(tasteAdvisory ? { routing_advisory: tasteAdvisory } : {}),
     };
   });

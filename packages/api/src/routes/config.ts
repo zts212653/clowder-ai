@@ -58,6 +58,7 @@ import { configLiveProjectRoutes } from './config-live-projects.js';
 import { configMessageDispositionRoutes } from './config-message-disposition.js';
 import { configOnboardingRoutes } from './config-onboarding.js';
 import { configProcessTalkRoutes } from './config-process-talk.js';
+import { configQuotaPinRoutes } from './config-quota-pin.js';
 import { configThreadAttentionRoutes } from './config-thread-attention.js';
 import { consoleThemePackageRoutes } from './console-theme-packages.js';
 
@@ -230,6 +231,7 @@ export async function configRoutes(app: FastifyInstance, opts: ConfigRoutesOptio
   await app.register(configProcessTalkRoutes, { projectRoot });
   await app.register(configMessageDispositionRoutes, { projectRoot });
   await app.register(configOnboardingRoutes, { projectRoot });
+  await app.register(configQuotaPinRoutes, { projectRoot });
   await app.register(configThreadAttentionRoutes, { projectRoot, threadStore: opts.threadStore });
 
   app.get('/api/config', async () => ({

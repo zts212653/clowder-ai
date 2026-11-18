@@ -40,16 +40,17 @@ export function syncAssetRetentions(db: Database.Database, assetIds: string[], f
   }
 }
 
-export function listAssetPolicies(db: Database.Database): ListenAssetPolicy[] {
+export function listAssetPolicies(db: Database.Database, assetId?: string): ListenAssetPolicy[] {
   const rows = db
     .prepare(
       `SELECT assets.asset_id, assets.last_used_at, assets.retention AS asset_retention, documents.retention
        FROM listen_assets assets
        LEFT JOIN listen_sentence_assets sentences ON sentences.asset_id = assets.asset_id
        LEFT JOIN listen_documents documents ON documents.id = sentences.document_id
+       ${assetId === undefined ? '' : 'WHERE assets.asset_id = ?'}
        ORDER BY assets.asset_id`,
     )
-    .all() as AssetRetentionRow[];
+    .all(...(assetId === undefined ? [] : [assetId])) as AssetRetentionRow[];
   const grouped = new Map<
     string,
     { lastUsedAt: number; assetRetention: ListenRetention; retentions: ListenRetention[] }

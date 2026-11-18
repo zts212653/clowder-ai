@@ -19,6 +19,7 @@ import {
   projectCallerDispatchObservations,
 } from './caller-dispatch-observation-projector.js';
 import { readCallerDispatchObservationLine } from './caller-dispatch-observation-reader.js';
+import { isCrossThreadSource } from './cross-thread-failure-return.js';
 
 export {
   type CallerDispatchObservationInclusion,
@@ -103,7 +104,7 @@ export class CallerDispatchObservationRegistry {
 
   registerInitialSource(source: StoredMessage, targetIds: readonly string[]): string[] {
     const from = messageFrom(source);
-    if (from.kind !== 'agent') return [];
+    if (from.kind !== 'agent' || isCrossThreadSource(source)) return [];
     return [...new Set(targetIds)].map((targetId) =>
       this.registerSelection(
         {
@@ -124,7 +125,7 @@ export class CallerDispatchObservationRegistry {
     changes: { readonly addedTargetIds: readonly string[]; readonly removedTargetIds: readonly string[] },
   ): string[] {
     const from = messageFrom(source);
-    if (from.kind !== 'agent') return [];
+    if (from.kind !== 'agent' || isCrossThreadSource(source)) return [];
     return this.registerSteerChangesByIdentity(
       {
         ownerId: source.userId,
@@ -203,7 +204,7 @@ export class CallerDispatchObservationRegistry {
 
   registerPersistedSource(source: StoredMessage, targetIds?: readonly string[]): string[] {
     const from = messageFrom(source);
-    if (from.kind !== 'agent') return [];
+    if (from.kind !== 'agent' || isCrossThreadSource(source)) return [];
     if (source.lifecycle?.kind !== 'input' && source.lifecycle?.kind !== 'response') return [];
     const allowedTargets = targetIds ? new Set(targetIds) : undefined;
     return (source.lifecycle.dispatchRefs ?? [])
@@ -251,6 +252,7 @@ export class CallerDispatchObservationRegistry {
     const key = callerDispatchObservationKey(pointer);
     const includedRevision = pointer.revision;
     const observation = await readCallerDispatchObservationLine(messageStore, pointer);
+    if (!observation) return null;
     const slotKey = callerDispatchObservationSlotKey(pointer);
     let current = this.observations.get(slotKey, key);
     // A committed Steer/update won the race while History was being read.

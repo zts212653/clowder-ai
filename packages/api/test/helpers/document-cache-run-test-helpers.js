@@ -5,6 +5,7 @@
  * hard cap while keeping repository / Fastify boilerplate in one place.
  */
 
+import assert from 'node:assert/strict';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -15,10 +16,19 @@ import { ttsRoutes } from '../../dist/routes/tts.js';
 
 export function deferred() {
   let resolve;
+  let resolved = false;
   const promise = new Promise((done) => {
-    resolve = done;
+    resolve = () => {
+      resolved = true;
+      done();
+    };
   });
-  return { promise, resolve };
+  return {
+    promise,
+    resolve,
+    // Producer gates stay manually controlled; test observations must fail promptly.
+    wait: (message) => waitFor(() => assert.equal(resolved, true, message)),
+  };
 }
 
 export async function waitFor(assertion, timeoutMs = 2_000) {
@@ -59,6 +69,8 @@ export async function createHarness(stream) {
   registry.register({
     id: 'test-tts',
     model: 'test-model',
+    // This preset-only fake never reads or acknowledges reference audio.
+    referenceAudioSupport: false,
     synthesize: async () => ({ audio: Buffer.from('unused'), format: 'wav', durationSec: 1 }),
     stream,
   });

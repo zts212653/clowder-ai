@@ -18,6 +18,12 @@
 // over its existing read-diagnostic IPC, and the parent publishes here. The
 // store, the worker and the process pool stay free of any logger; the API
 // subscribes once at its composition root.
+//
+// A search whose vectors were retired by a source write is read once more (see
+// SqliteEvidenceStore.runProjectionRead). Its records then carry `operationId`
+// and `attempt`, and a VectorReadRepeatRecord with the same id says how the
+// search ended. A record without `attempt` is still the final state of its
+// search. The id is random; it is not derived from the query or from any error.
 
 import { channel, subscribe, unsubscribe } from 'node:diagnostics_channel';
 
@@ -30,7 +36,9 @@ export type VectorSearchDegradeStage =
   | 'raw_passage_semantic'
   | 'raw_passage_hybrid'
   | 'message_passage_semantic'
-  | 'message_passage_hybrid';
+  | 'message_passage_hybrid'
+  /** The parent found the projection retired when the worker's vector result arrived. */
+  | 'projection_publication';
 
 export interface VectorSearchDegradeRecord {
   /** The catch that swallowed the failure: a coordinate chosen by our code, not read from the error. */
@@ -40,6 +48,36 @@ export interface VectorSearchDegradeRecord {
   /** A listed code, `other` for an unlisted one, or null when the error has none. */
   errorCode: string | null;
   errorCategory: string;
+  /** Present only on an attempt of a search that a source write retired. */
+  operationId?: string;
+  attempt?: 1 | 2;
+}
+
+/** Final search outcome after its one permitted repeat, including an enclosing budget's lexical read. */
+export type VectorReadRepeatOutcome =
+  /** The repeat returned vectors under a snapshot that was still current. */
+  | 'recovered'
+  /** The repeat lost its vectors too. */
+  | 'degraded_again'
+  /** The repeat ran out of its own time, or failed. */
+  | 'repeat_stopped'
+  /** Not attempted: less than three times the first attempt's duration was left. */
+  | 'skipped_budget'
+  /** Not attempted: the projection or its provider was no longer servable. */
+  | 'skipped_unavailable'
+  /** The caller cancelled, or the search's own deadline passed, before the final result. */
+  | 'cancelled'
+  /** The enclosing message vector budget expired and its final lexical read succeeded. */
+  | 'vector_budget_exhausted'
+  /** The final lexical read failed, so no degraded answer was returned. */
+  | 'lexical_failed';
+
+export interface VectorReadRepeatRecord {
+  operationId: string;
+  outcome: VectorReadRepeatOutcome;
+  firstAttemptMs: number;
+  /** Null when no repeat was started. */
+  repeatMs: number | null;
 }
 
 const ERROR_NAMES: ReadonlySet<string> = new Set([
@@ -154,9 +192,34 @@ export function onVectorSearchDegrade(listener: (record: VectorSearchDegradeReco
   };
 }
 
-/** The API's one subscription: a warning per degraded search on its own logger. */
+const REPEAT_CHANNEL = 'cat-cafe.memory-vector-read-repeat';
+const repeats = channel(REPEAT_CHANNEL);
+
+export function publishVectorReadRepeat(record: VectorReadRepeatRecord): void {
+  repeats.publish(record);
+}
+
+export function onVectorReadRepeat(listener: (record: VectorReadRepeatRecord) => void): () => void {
+  const onMessage = (record: unknown) => listener(record as VectorReadRepeatRecord);
+  subscribe(REPEAT_CHANNEL, onMessage);
+  return () => {
+    unsubscribe(REPEAT_CHANNEL, onMessage);
+  };
+}
+
+/** The API's one subscription: a warning per degraded search, per lost attempt, and per repeat outcome. */
 export function logVectorSearchDegradesTo(log: { warn(fields: object, message: string): void }): () => void {
-  return onVectorSearchDegrade((record) =>
-    log.warn({ module: 'memory-vector-search', ...record }, 'Vector search degraded to lexical'),
+  const stopDegrades = onVectorSearchDegrade((record) =>
+    log.warn(
+      { module: 'memory-vector-search', ...record },
+      record.attempt ? 'Vector search attempt lost its vectors to a source write' : 'Vector search degraded to lexical',
+    ),
   );
+  const stopRepeats = onVectorReadRepeat((record) =>
+    log.warn({ module: 'memory-vector-search', ...record }, 'Vector search was read again after a source write'),
+  );
+  return () => {
+    stopDegrades();
+    stopRepeats();
+  };
 }

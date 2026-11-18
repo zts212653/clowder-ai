@@ -65,7 +65,7 @@ export class ModificationTargetService {
       request: { resource: 'transcript', action: 'read' },
     });
     if (access.status !== 200) throw new ModificationTargetError('thread_unavailable');
-    const decision = await this.preflight(ownerUserId, [payload.targetCatId]);
+    const decision = await this.preflight(ownerUserId, [payload.targetCatId], payload.threadId);
     if (
       decision.targets.some((target) => target.targetCatId === payload.targetCatId && target.disposition === 'rejected')
     )
@@ -79,8 +79,8 @@ export class ModificationTargetService {
     await this.authorize(intent, intent.ownerUserId);
   }
 
-  private preflight(ownerId: string, targetCatIds: string[]) {
-    const input = { ownerId, targetCatIds };
+  private preflight(ownerId: string, targetCatIds: string[], threadId?: string) {
+    const input = { ownerId, targetCatIds, ...(threadId ? { threadId } : {}) };
     return this.deps.routing
       ? preflightRoutingDispatch(this.deps.routing, input)
       : Promise.resolve(unavailableRoutingDispatchDecision(input, Date.now(), 'runtime_absent'));

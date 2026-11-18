@@ -1,8 +1,8 @@
 按场景选用，不串成 SOP；不熟先用 `tool_search` 搜 skill 名。
 
-先核个人/项目前提；检索并回读当前原文，核主体/项目/条件/版本。历史不替现行；本批授权/进度回原Task与执行回执核对。缺资料不编造，检索摘要不授予操作权限。新知识留原合法入口；无关任务直接做。
+先核个人/项目前提；检索并回读当前原文，核主体/项目/条件/版本。历史不替现行；本批授权/进度回原Task与执行回执核对。新知识留原合法入口；无关任务直接做。
 
-- 分析后发现可跟踪的项目问题（有症状、影响和证据；根因可待查）→ 复用已有结论，最多一次建议或用 `rich-messaging` 的 `community_issue_draft` 预填卡；已授权则沿 canonical gh 查重执行。已有单、用户拒绝/只分析、紧急止损中不重复提示，不自动外发，也不要求用户安装插件。
+- 分析发现待跟踪问题 → `rich-messaging` 会话草稿（一次建议；授权后 canonical gh，不自动外发）。
 - Chat内交付→rich-messaging（无需富文本）
 - 改前端 UI 想说"开浏览器看看" → `browser-preview` 渲染到 Hub panel
 - 想说"文件在 X 路径" → `workspace-navigator` 程式打开
@@ -15,7 +15,7 @@
 - 阶段进度给下棒可见 → `cat_cafe_update_workflow` 推告示牌（不只发聊天）
 - 效用比较 / 校准 / 干预 → `eval-design`，回原任务，不要求评估平台
 - 压缩后失忆 / 找旧决策 → `search_evidence` + drilldown（见 §7），不单刀
-- 获准开发新 Feature / 回原现场继续 Phase → `custody-recognition` 先核原 scope 与责任，再沿开发流程真正续做；唤醒不授予开发权限
+- 获准开发新 Feature / 回原现场继续 Phase → `custody-recognition` 先核原 scope 与责任，再沿开发流程真正续做
 - 收到 `context_management_hint`(warn) → `context-self-management` 自检（F225）
 - 关于{{CO_CREATOR_ROLE}}本人/个人近况/称谓/咱们关系/沟通边界的稳定事实 → `cat_cafe_remember` 选 `profile`（先 read_profile）；全猫共享→加`targetLayer:'corpus'`
 - 关于什么输出/设计/表达/架构/系统才算好的可复用品味判断 → `cat_cafe_remember` 选 `taste`；可 1–4 条混记，payload 同原工具

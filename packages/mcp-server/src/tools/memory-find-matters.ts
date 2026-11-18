@@ -109,9 +109,15 @@ export function createMattersGroup(context: FindContext): FindGroup<MatterCatalo
     start: (signal) => (run ? fetchMatters(run, signal) : Promise.resolve({ status: 'timeout' })),
     counts: (catalog) => ({ count: catalog.items.length, hasNext: Boolean(catalog.nextCursor) }),
     emptyDetail: () => ({ match: run?.query ? MATCH_RULE : 'none (browse without query)', complete: true }),
+    // Reopen the page this run asked for: a later page keeps its own cursor. The first page reopens with
+    // continueGroup, or for the watcher (whose find contract accepts only query/matterCursor/limit) the F1 form.
     continueArguments: () => ({
       ...(run?.query ? { query: run.query } : {}),
-      continueGroup: 'matters',
+      ...(run?.cursor
+        ? { matterCursor: run.cursor }
+        : context.watcher
+          ? { matterCursor: MATTER_FIRST_PAGE }
+          : { continueGroup: 'matters' }),
       limit: run?.limit ?? MATTER_LIMIT_ALONE,
     }),
     pages: (outcome, options) => {

@@ -74,7 +74,7 @@ describe('F325 AGY CLI native policy', () => {
     }
   });
 
-  test('rejects every executable child alias regardless of node type', () => {
+  test('rejects unsafe executable child aliases while allowing benign empty dirs and in-workspace skills.json', () => {
     for (const child of ['HOOKS.JSON', 'AGENTS', 'PLUGINS', 'SKILLS.JSON', 'MCP_CONFIG.JSON']) {
       for (const kind of ['file', 'directory', 'dangling-link']) {
         const f = fixture();
@@ -82,14 +82,23 @@ describe('F325 AGY CLI native policy', () => {
           const agents = join(f.workspace, '.agents');
           mkdirSync(agents);
           const target = join(agents, child);
-          if (kind === 'file') writeFileSync(target, '{}');
-          else if (kind === 'directory') mkdirSync(target);
-          else symlinkSync(join(f.base, 'missing'), target);
-          assert.deepEqual(preflightAgyNativeWorkspace(f.workspace), {
-            ok: false,
-            reason: 'workspace_executable_customization',
-            path: join(realpathSync(agents), child),
-          });
+          const lower = child.toLowerCase();
+          if (kind === 'file') {
+            writeFileSync(target, lower === 'skills.json' ? '{"entries":[{"path":"../escape"}]}' : '{}');
+          } else if (kind === 'directory') {
+            mkdirSync(target);
+            if (lower === 'agents') {
+              mkdirSync(join(target, 'custom-subagent'));
+            } else if (lower === 'plugins') {
+              mkdirSync(join(target, 'active-plugin'));
+              writeFileSync(join(target, 'active-plugin', 'hooks.json'), '{}');
+            }
+          } else {
+            symlinkSync(join(f.base, 'missing'), target);
+          }
+          const result = preflightAgyNativeWorkspace(f.workspace);
+          assert.equal(result.ok, false, `${child} (${kind}) must be rejected`);
+          assert.equal(result.reason, 'workspace_executable_customization');
         } finally {
           f.cleanup();
         }

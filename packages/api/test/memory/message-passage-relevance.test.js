@@ -101,6 +101,7 @@ describe('mixed-language message relevance', () => {
     ensureVectorTable(db, 3);
     ensurePassageVectorTable(db, 3);
     vectors = new PassageVectorStore(db, 3);
+    new VectorStore(db, 3).initMeta({ modelId: 'fixture', modelRev: '1', dim: 3 });
     store.setEmbedDeps({
       mode: 'on',
       vectorStore: new VectorStore(db, 3),
@@ -129,6 +130,7 @@ describe('mixed-language message relevance', () => {
     ensureVectorTable(db, 3);
     ensurePassageVectorTable(db, 3);
     vectors = new PassageVectorStore(db, 3);
+    new VectorStore(db, 3).initMeta({ modelId: 'fixture', modelRev: '1', dim: 3 });
     store.setEmbedDeps({
       mode: 'on',
       vectorStore: new VectorStore(db, 3),
@@ -157,6 +159,7 @@ describe('mixed-language message relevance', () => {
     ensureVectorTable(db, 3);
     ensurePassageVectorTable(db, 3);
     vectors = new PassageVectorStore(db, 3);
+    new VectorStore(db, 3).initMeta({ modelId: 'fixture', modelRev: '1', dim: 3 });
     store.setEmbedDeps({
       mode: 'on',
       vectorStore: new VectorStore(db, 3),

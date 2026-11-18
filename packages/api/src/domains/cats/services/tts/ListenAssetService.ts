@@ -6,10 +6,14 @@ import type {
   TtsSynthesizeRequest,
   TtsSynthesizeResult,
   TtsSynthesizeStreamEvent,
+  TtsVoiceSelection,
 } from '@cat-cafe/shared';
-import { getCatVoice } from '../../../../config/cat-voices.js';
+import { cachedVoiceSelection, completeVoiceSelection, prepareCatVoice } from './cat-voice-synthesis.js';
 import { LISTEN_AUDIO_CACHE_VERSION, pcm16WavDurationSec, trimLeadingPcm16Wav } from './listen-audio-postprocess.js';
+import { independentAudioHash, referenceAudioCacheIdentity } from './reference-audio-cache.js';
 import type { TtsRegistry } from './TtsRegistry.js';
+import { inspectAudioFileSync } from './tts-asset-cleanup.js';
+import { canReuseVoiceAsset, writeAssetVoiceReceipt } from './tts-asset-provenance.js';
 
 const AUDIO_FORMATS = ['wav', 'mp3'] as const;
 
@@ -28,6 +32,8 @@ export interface ListenAsset {
   synthesisFingerprint: string;
   durationSec?: number;
   synthesisMs?: number;
+  voiceSelection?: TtsVoiceSelection;
+  reusable?: boolean;
 }
 
 export interface GetOrCreateListenAssetOptions {
@@ -42,6 +48,9 @@ export interface PreparedListenSynthesis {
   provider: ITtsProvider;
   request: Omit<TtsSynthesizeRequest, 'text'>;
   fingerprint: string;
+  voiceSelection: TtsVoiceSelection;
+  /** Pre-receipt document identity, for retaining existing recorded assets. */
+  legacyFingerprint?: string;
 }
 
 interface InFlightAsset {
@@ -55,6 +64,7 @@ function synthesisHash(
   provider: Pick<ITtsProvider, 'id' | 'model' | 'cacheIdentity'>,
   request: TtsSynthesizeRequest,
   variant?: string,
+  documentIdentity = false,
 ): string {
   const parts = [
     provider.id,
@@ -65,16 +75,22 @@ function synthesisHash(
     request.format ?? 'wav',
     request.text,
   ];
-  if (request.refAudio) parts.push(request.refAudio);
+  if (request.refAudio) {
+    parts.push(request.refAudio);
+    if (!documentIdentity || request.refAudioData)
+      parts.push(referenceAudioCacheIdentity(request.refAudio, request.refAudioData?.sha256));
+  }
   if (request.refText) parts.push(request.refText);
   if (request.instruct) parts.push(request.instruct);
   if (request.temperature != null) parts.push(String(request.temperature));
-  const baseHash = createHash('sha256').update(parts.join('|')).digest('hex');
+  const baseHash = createHash('sha256')
+    .update(request.refAudioData ? JSON.stringify(parts) : parts.join('|'))
+    .digest('hex');
   return variant ? createHash('sha256').update(`${baseHash}\0variant:${variant}`).digest('hex') : baseHash;
 }
 
 function fingerprintFor(provider: ITtsProvider, request: Omit<TtsSynthesizeRequest, 'text'>): string {
-  return synthesisHash(provider, { ...request, text: '' }, LISTEN_AUDIO_CACHE_VERSION);
+  return synthesisHash(provider, { ...request, text: '' }, LISTEN_AUDIO_CACHE_VERSION, true);
 }
 
 async function findCachedAudio(cacheDir: string, hash: string): Promise<{ assetId: string; bytes: number } | null> {
@@ -118,17 +134,23 @@ export class ListenAssetService {
     const synthesis = options.preparedSynthesis ?? (await this.prepareSynthesis(options.synthesis));
     const request = { ...synthesis.request, text };
     const hash = synthesisHash(synthesis.provider, request, LISTEN_AUDIO_CACHE_VERSION);
-    const cached = await findCachedAudio(this.cacheDir, hash);
+    const found = !request.refAudio || request.refAudioData ? await findCachedAudio(this.cacheDir, hash) : null;
+    const cached =
+      found && (await canReuseVoiceAsset(this.cacheDir, found.assetId, synthesis.voiceSelection)) ? found : null;
     // Cache probing yields to I/O. A disconnect in that window must return to
     // the caller before it can create an otherwise unowned producer.
     options.signal?.throwIfAborted();
     if (cached) {
+      if (!request.refAudio)
+        await writeAssetVoiceReceipt(this.cacheDir, cached.assetId, synthesis.voiceSelection, true);
       return {
         audioUrl: `/api/tts/audio/${cached.assetId}`,
         assetId: cached.assetId,
         cached: true,
         bytes: cached.bytes,
         synthesisFingerprint: synthesis.fingerprint,
+        voiceSelection: cachedVoiceSelection(synthesis.voiceSelection),
+        reusable: true,
       };
     }
 
@@ -139,7 +161,19 @@ export class ListenAssetService {
     }
     if (options.onChunk) flight.listeners.add(options.onChunk);
     try {
-      return await this.waitForFlight(flight, options.signal);
+      // A shared audio flight can serve different members; provenance belongs to this caller.
+      const asset = await this.waitForFlight(flight, options.signal);
+      const actual = asset.voiceSelection;
+      const receipt: TtsSynthesizeResult['referenceAudio'] =
+        actual?.referenceStatus === 'unavailable'
+          ? { status: 'unavailable' }
+          : actual?.referenceSha256
+            ? { status: 'used', sha256: actual.referenceSha256 }
+            : { status: 'unverified' };
+      return {
+        ...asset,
+        voiceSelection: completeVoiceSelection(synthesis.voiceSelection, receipt, synthesis.provider),
+      };
     } finally {
       if (options.onChunk) flight.listeners.delete(options.onChunk);
     }
@@ -153,21 +187,33 @@ export class ListenAssetService {
     await Promise.allSettled([...this.pendingPublications]);
   }
 
+  isAssetAvailable(assetId: string): boolean {
+    return (
+      /^[a-f0-9]{64}\.(wav|mp3)$/.test(assetId) &&
+      typeof inspectAudioFileSync(path.join(this.cacheDir, assetId)) !== 'string'
+    );
+  }
+
   async prepareSynthesis(options: ListenSynthesisOptions = {}): Promise<PreparedListenSynthesis> {
-    const catVoice = getCatVoice(options.catId ?? 'opus');
-    const request: Omit<TtsSynthesizeRequest, 'text'> = {
-      voice: options.voice ?? catVoice.voice,
-      langCode: options.langCode ?? catVoice.langCode,
-      speed: options.speed ?? catVoice.speed ?? 1,
-      format: 'wav',
-      ...(catVoice.refAudio ? { refAudio: catVoice.refAudio } : {}),
-      ...(catVoice.refText ? { refText: catVoice.refText } : {}),
-      ...(catVoice.instruct ? { instruct: catVoice.instruct } : {}),
-      ...(catVoice.temperature != null ? { temperature: catVoice.temperature } : {}),
-    };
     const selected = this.registry.getDefault();
     const provider = (await selected.snapshot?.({ cacheDir: this.cacheDir })) ?? selected;
-    return { provider, request, fingerprint: fingerprintFor(provider, request) };
+    const { request, voiceSelection } = prepareCatVoice(
+      options.catId ?? 'opus',
+      provider,
+      {
+        ...(options.voice !== undefined ? { voice: options.voice } : {}),
+        ...(options.langCode !== undefined ? { langCode: options.langCode } : {}),
+        ...(options.speed !== undefined ? { speed: options.speed } : {}),
+      },
+      this.cacheDir,
+    );
+    return {
+      provider,
+      request,
+      voiceSelection,
+      fingerprint: fingerprintFor(provider, request),
+      legacyFingerprint: fingerprintFor(provider, { ...voiceSelection.requested, format: 'wav' }),
+    };
   }
 
   private createFlight(hash: string, synthesis: PreparedListenSynthesis, request: TtsSynthesizeRequest): InFlightAsset {
@@ -196,10 +242,28 @@ export class ListenAssetService {
   ): Promise<ListenAsset> {
     const startedAt = Date.now();
     const result = await this.requestSynthesis(synthesis, request, flight);
+    const voiceSelection = completeVoiceSelection(synthesis.voiceSelection, result.referenceAudio, synthesis.provider);
     flight.controller.signal.throwIfAborted();
-    const asset = await this.trackPublication(this.publishAsset(hash, result, flight.controller.signal));
+    const asset = await this.trackPublication(
+      (async () => {
+        const published = await this.publishAsset(
+          request.refAudioData && voiceSelection.referenceStatus !== 'sent' ? independentAudioHash(hash) : hash,
+          result,
+          flight.controller.signal,
+        );
+        await writeAssetVoiceReceipt(
+          this.cacheDir,
+          published.assetId,
+          voiceSelection,
+          !request.refAudio || voiceSelection.referenceStatus === 'sent',
+        );
+        return published;
+      })(),
+    );
     return {
       ...asset,
+      voiceSelection,
+      reusable: !request.refAudio || voiceSelection.referenceStatus === 'sent',
       cached: false,
       synthesisFingerprint: synthesis.fingerprint,
       synthesisMs: Date.now() - startedAt,
@@ -214,7 +278,11 @@ export class ListenAssetService {
     if (!synthesis.provider.stream) return synthesis.provider.synthesize(request);
     let result: TtsSynthesizeResult | undefined;
     for await (const event of synthesis.provider.stream(request, { signal: flight.controller.signal })) {
-      if (event.type === 'chunk') this.notifyChunkListeners(flight, event);
+      if (event.type === 'chunk')
+        this.notifyChunkListeners(flight, {
+          ...event,
+          voiceSelection: completeVoiceSelection(synthesis.voiceSelection, event.referenceAudio, synthesis.provider),
+        });
       else result = event.result;
     }
     if (!result) throw new Error('TTS stream completed without a final cache asset');

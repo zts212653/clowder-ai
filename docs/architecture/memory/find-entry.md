@@ -45,8 +45,33 @@ stays with [the read entry](read-entry.md).
 | recent | no query: `since` (default 7d), `scope` ∩ `kinds`, `scope=trajectories`, `limit` ≤100 | `/api/library/recent` → RecentBrowseResolver | the tool's profiles, never a watcher; visibility server-derived (KD-8) |
 
 With a query: docs, messages, graph and matters. Without a query: recent and the matter directory. The groups run in
-parallel; a non-docs group has a 10s ceiling and at most 3s after docs settle, then reports `timeout` (not a no-results
-claim). A projection or route failure is that group's `failed` status, never another group's failure.
+parallel and are not cut when docs settle. They wait within one budget shared with the other groups, 16s (the watcher's
+query too, which had 10s). It bounds how long the find waits for those groups, not the whole call: docs has no budget
+of its own, and route deadlines are abort signals, not hard return bounds (the message route's 15s; graph resolve, the
+matter directory and the recent index have none). Plan owner's ruling on the accepted plan
+(`[thread-id]#private-source-id`): only a group that really outlasts the budget may report
+`timeout` with its complete `next`, and that continuation still counts in the journey — a controlled 17s graph answer
+takes the original tool one call and the usual find two. Within the budget nothing is cut early; a group that fails in
+the parallel find but succeeds alone is a defect to find, not this boundary. 16s is a candidate budget. In one bounded
+run on 2026-11-17 (six real message needs, three journeys at once, old explicit search / this find / the find with the
+old 3s wait after docs, plus a light message search started 3s and 9s into each wave) this find took one call for
+every need and every original opened, while the old wait needed a continuation for three; the light search took
+1.2–3.0s beside this find, 1.1–2.8s beside the old search and 1.1–3.1s beside the old wait, and both foreground readers queued in every arm. One run, at that
+concurrency, is not a bound for heavier load. The cost of waiting is latency: the usual find returns when docs and the
+slowest group within the budget do.
+A group still unanswered at the end of the budget reports `timeout` (not a no-results claim) with `cause` — `deadline`
+(the 16s budget) or `cancelled` (the caller cancelled the call or its own time limit, such as the watcher's, ended). Each stop
+source records its own cause and the first one wins; a cancellation is never reported as the budget. A projection or
+route failure is that group's `failed` status, never another group's failure. A `timeout` or `failed` group carries
+`next.arguments` in every rendering; passed unchanged they reopen that group alone. A group reopened alone has no
+shared ceiling: like the original tool it waits until its route answers or the caller stops it. `continueGroup` is also
+accepted on a first call: a caller that already knows only one group is needed reads it alone, with the same query and
+that group's parameters, under the same rule (plan owner's ruling `[thread-id]#private-source-id`
+item 3). The usual find needs no group choice, and the watcher's inputs stay `query`/`matterCursor`/`limit`. Route deadlines are not
+hard return bounds (the message route's 15s signals an abort that its thread reads do not observe; graph resolve has
+none); the caller's signal (for the watcher, its invocation deadline) is what ends a lone continuation (a later matter
+page reopens with its own `matterCursor`; a first page with `continueGroup:"matters"`, or for the watcher, whose
+contract accepts only `query`/`matterCursor`/`limit`, with `matterCursor:"first"`).
 
 ## Narrowing and group parameters
 
@@ -147,8 +172,8 @@ compact rows, the topk boundary, deferral and continuation, single-group errors,
 `packages/mcp-server/test/memory-find-groups.test.js` (messages, graph and recent groups, behaviour carried from the
 retired tools, since resolution, input errors, all groups beside a near-full page);
 `packages/mcp-server/test/memory-find-boundaries.test.js` (every row of the narrowing table with and without a query,
-explicit single-search errors, the since syntax, and each group's continuation reopening the same run, agent key
-included); `packages/api/test/watcher-directory-retry.test.js`
+explicit single-search errors, the since syntax, each group's continuation reopening the same run, agent key
+included, and unfinished groups keeping their cause and continuation down to the smallest rendering); `packages/api/test/watcher-directory-retry.test.js`
 and `packages/api/test/derive-result-summary-compact-coverage.test.js`; plus the watcher, harness-consistency, L0,
 hook and governance suites. Postmerge acceptance uses official Alpha and non-author natural work; no performance, cost
 or noise improvement is claimed without comparable evidence.

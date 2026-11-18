@@ -6,10 +6,11 @@
  * - LRU: if total size > 500MB, oldest files evicted until < 400MB
  */
 
-import { readdir, stat, unlink } from 'node:fs/promises';
+import { readdir, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { createModuleLogger } from '../../../../infrastructure/logger.js';
 import type { DocumentListenRepository, ListenAssetPolicy } from './DocumentListenRepository.js';
+import { deleteAudioFileSync, inspectAudioFileSync } from './tts-asset-cleanup.js';
 
 const log = createModuleLogger('tts-cache');
 
@@ -27,7 +28,11 @@ interface CacheFileEntry {
   name: string;
   fullPath: string;
   mtimeMs: number;
+  ctimeMs: number;
+  ino: number;
+  dev: number;
   size: number;
+  receiptBytes?: number;
 }
 
 interface CleanupResult {
@@ -48,7 +53,21 @@ async function listCacheAudio(cacheDir: string): Promise<CacheFileEntry[]> {
     const fullPath = path.join(cacheDir, name);
     try {
       const fileStat = await stat(fullPath);
-      if (fileStat.isFile()) files.push({ name, fullPath, mtimeMs: fileStat.mtimeMs, size: fileStat.size });
+      if (fileStat.isFile()) {
+        const receiptBytes = await stat(`${fullPath}.voice.json`)
+          .then((receipt) => receipt.size)
+          .catch(() => 0);
+        files.push({
+          name,
+          fullPath,
+          mtimeMs: fileStat.mtimeMs,
+          ctimeMs: fileStat.ctimeMs,
+          ino: fileStat.ino,
+          dev: fileStat.dev,
+          size: fileStat.size + receiptBytes,
+          receiptBytes,
+        });
+      }
     } catch {
       // File may have been deleted by another process.
     }
@@ -56,14 +75,31 @@ async function listCacheAudio(cacheDir: string): Promise<CacheFileEntry[]> {
   return files;
 }
 
-async function deleteCacheFile(
+function deleteCacheFile(
   file: CacheFileEntry,
   documentListenRepository: DocumentListenRepository,
-): Promise<CleanupResult> {
+  eligible: (policy: ListenAssetPolicy | undefined) => boolean,
+): CleanupResult {
+  const result = { deleted: 0, freedBytes: 0 };
   try {
-    await unlink(file.fullPath);
-    documentListenRepository.forgetAsset(file.name);
-    return { deleted: 1, freedBytes: file.size };
+    documentListenRepository.removeAssetWhen(file.name, (policy) => {
+      if (!eligible(policy)) return false;
+      const current = inspectAudioFileSync(file.fullPath);
+      if (
+        typeof current === 'string' ||
+        current.ino !== file.ino ||
+        current.dev !== file.dev ||
+        current.mtimeMs !== file.mtimeMs ||
+        current.ctimeMs !== file.ctimeMs
+      )
+        return false;
+      const removed = deleteAudioFileSync(file.fullPath);
+      if (!removed) return false;
+      result.deleted = removed.deleted ? 1 : 0;
+      result.freedBytes = removed.freedBytes;
+      return true;
+    });
+    return result;
   } catch {
     return { deleted: 0, freedBytes: 0 };
   }
@@ -96,7 +132,9 @@ export async function cleanTtsCache(
     const policy = policies.get(file.name);
     const expired = policy ? policy.expiresAt != null && now > policy.expiresAt : now - file.mtimeMs > SEVEN_DAYS_MS;
     if (expired) {
-      const deleted = await deleteCacheFile(file, documentListenRepository);
+      const deleted = deleteCacheFile(file, documentListenRepository, (current) =>
+        current ? current.expiresAt != null && now > current.expiresAt : now - file.mtimeMs > SEVEN_DAYS_MS,
+      );
       if (deleted.deleted > 0) removed.add(file.name);
       addCleanupResult(result, deleted);
     }
@@ -114,7 +152,7 @@ export async function cleanTtsCache(
       // A manifest retention is an availability promise. Size pressure may
       // evict legacy cache entries, never a live 7d/30d/forever listen asset.
       if (policies.has(file.name)) continue;
-      const deleted = await deleteCacheFile(file, documentListenRepository);
+      const deleted = deleteCacheFile(file, documentListenRepository, (current) => !current);
       addCleanupResult(result, deleted);
       totalSize -= deleted.freedBytes;
     }

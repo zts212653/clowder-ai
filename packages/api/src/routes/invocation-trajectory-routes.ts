@@ -1,6 +1,7 @@
 import type { InvocationTrajectorySummary } from '@cat-cafe/shared';
 import type { FastifyInstance } from 'fastify';
 import { resolveCanonicalInvocationTrajectory } from '../domains/cats/services/session/CanonicalInvocationTrajectoryResolver.js';
+import { catMayReadSession } from '../domains/cats/services/session/session-scope.js';
 import type { TranscriptEvent } from '../domains/cats/services/session/TranscriptReader.js';
 import {
   filterThreadRecords,
@@ -200,9 +201,7 @@ export function registerInvocationTrajectoryRoutes(
       await sessionChainStore.getChainByThread(request.params.threadId),
     );
     const callerCatId = request.headers['x-cat-id'] as string | undefined;
-    const scopedSessions = callerCatId
-      ? visibleSessions.filter((session) => session.catId === callerCatId)
-      : visibleSessions;
+    const scopedSessions = visibleSessions.filter((session) => catMayReadSession(callerCatId, session));
     const limitValue = request.query.limit === undefined ? 200 : strictParseTranscriptInteger(request.query.limit);
     if (Number.isNaN(limitValue) || limitValue < 1) {
       return reply.status(400).send({ error: 'Invalid limit: must be a positive integer' });

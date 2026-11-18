@@ -10,6 +10,40 @@ const beginReasons = [
   'file_unavailable',
 ] as const;
 const fallbacks = ['none', 'unsupported_range', 'map_limit', 'unmap_failed', 'map_failed'] as const;
+export interface FileVectorPreloadSnapshot {
+  attempted: boolean;
+  started: boolean;
+  joined: boolean;
+  /** Bytes returned by helper pread calls, not device I/O or filesystem-cache size. */
+  logicalBytes: number;
+  readCalls: number;
+  errorCode: number;
+}
+
+function preloadSnapshot(raw: unknown): FileVectorPreloadSnapshot | null {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+  const { attempted, started, joined, logicalBytes, readCalls, errorCode } = raw as Record<string, unknown>;
+  if (
+    typeof attempted !== 'boolean' ||
+    typeof started !== 'boolean' ||
+    typeof joined !== 'boolean' ||
+    ![logicalBytes, readCalls, errorCode].every((n) => typeof n === 'number' && Number.isSafeInteger(n) && n >= 0) ||
+    (errorCode as number) > 2147483647 ||
+    (started && (!attempted || !joined)) ||
+    (joined && !started) ||
+    (!started && (logicalBytes !== 0 || readCalls !== 0))
+  )
+    return null;
+  return {
+    attempted,
+    started,
+    joined,
+    logicalBytes: logicalBytes as number,
+    readCalls: readCalls as number,
+    errorCode: errorCode as number,
+  };
+}
+
 export interface FileVectorReadWindowSnapshot {
   prepared: boolean;
   /** Admission of this SELECT's scope, not live ownership after cleanup. */
@@ -24,6 +58,8 @@ export interface FileVectorReadWindowSnapshot {
     | 'not_attempted'
     | 'diagnostic_unavailable';
   cleanup: boolean | null;
+  /** Null until an end observation; an observed non-start is an explicit zero-valued object. */
+  preload: FileVectorPreloadSnapshot | null;
   counters: {
     mapCalls: number;
     mappedReads: number;
@@ -36,7 +72,7 @@ export interface FileVectorReadWindowSnapshot {
 
 export function decodeReadWindowNativeSnapshot(raw: unknown) {
   try {
-    if (typeof raw !== 'string' || raw.length > 256) return;
+    if (typeof raw !== 'string' || raw.length > 512) return;
     const value: Record<string, unknown> = JSON.parse(raw);
     const index = value.reason;
     if (typeof index !== 'number' || !Number.isInteger(index) || !beginReasons[index]) return;
@@ -50,9 +86,10 @@ export function decodeReadWindowNativeSnapshot(raw: unknown) {
       !Number.isInteger(fallback) ||
       !fallbacks[fallback]
     )
-      return { reason, counters: null };
+      return { reason, counters: null, preload: null };
     return {
       reason,
+      preload: preloadSnapshot(value.preload),
       counters: {
         mapCalls: counts[0] as number,
         mappedReads: counts[1] as number,
@@ -109,7 +146,14 @@ export function safeFileVectorReadWindowSnapshot(raw: unknown): FileVectorReadWi
           counterLimitReached: values.some((n) => n === 2147483647),
         };
     }
-    return { prepared, active, reason: reason as FileVectorReadWindowSnapshot['reason'], cleanup, counters };
+    return {
+      prepared,
+      active,
+      reason: reason as FileVectorReadWindowSnapshot['reason'],
+      cleanup,
+      counters,
+      preload: active && cleanup !== null ? preloadSnapshot(value.preload) : null,
+    };
   } catch {
     /* A malformed diagnostic cannot change a recall result. */
   }

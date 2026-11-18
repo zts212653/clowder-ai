@@ -25,6 +25,28 @@ describe('scrollToMessage', () => {
     document.body.innerHTML = '';
   });
 
+  it('does not replace a missing or hidden source card with its message boundary or a same-id card in another pane', () => {
+    const container = document.createElement('div');
+    container.getBoundingClientRect = () => ({ top: 0, bottom: 600 }) as DOMRect;
+    const source = document.createElement('div');
+    source.dataset.messageId = 'source';
+    source.getBoundingClientRect = () => ({ top: 0, bottom: 600 }) as DOMRect;
+    container.append(source);
+    const otherPane = document.createElement('div');
+    otherPane.innerHTML = '<div data-message-id="source"><div data-rich-block-id="card"></div></div>';
+    document.body.append(container, otherPane);
+    const anchor = { messageId: 'source', viewportOffsetPx: 0, richBlockId: 'card', richBlockViewportOffsetPx: 100 };
+    expect(restoreMessageScrollAnchor(container, anchor)).toBe(false);
+    expect(matchesMessageScrollAnchor(container, anchor)).toBe(false);
+    const hidden = document.createElement('div');
+    hidden.dataset.richBlockId = 'card';
+    hidden.getBoundingClientRect = () => ({ top: 100, bottom: 100, height: 0 }) as DOMRect;
+    source.append(hidden);
+    expect(restoreMessageScrollAnchor(container, anchor)).toBe(false);
+    expect(matchesMessageScrollAnchor(container, anchor)).toBe(false);
+    expect(container.scrollTop).toBe(0);
+  });
+
   it('captures the first visible message relative to the scroll viewport', () => {
     const container = document.createElement('div');
     container.getBoundingClientRect = () => ({ top: 100, bottom: 700 }) as DOMRect;

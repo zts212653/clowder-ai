@@ -8,6 +8,8 @@ import type {
   ContextSourceIngress,
 } from '../../../../memory/cue/ContextSourceAdmission.js';
 import { ContextSourceWorkBudget } from '../../../../memory/cue/ContextSourceWorkBudget.js';
+import { sessionCacheRuntimeKey } from '../../session/cache/session-cache-runtime.js';
+import { observeSessionCache } from '../../session/cache/session-cache-warmth.js';
 import { captureInvocationL0Input } from '../providers/l0-input-capture.js';
 import { agentServiceGeneration } from '../registry/AgentRegistry.js';
 import { ExecutionAdmissionConflict, StaleServiceSourceConflict } from '../registry/AgentServiceUnavailableError.js';
@@ -193,6 +195,7 @@ import {
 } from '../providers/opencode-config-writer.js';
 import { prepareSessionCredentialFile, releaseInvocationCredentialFile } from '../providers/session-credential-file.js';
 import { appendTranscriptPathHints } from '../providers/transcript-path-hints.js';
+import { applyVerifiedNativeModelToInvocationSnapshot } from './capacity/observed-context-capacity.js';
 import {
   continuityDispositionFromProviderEvidence,
   resolveContextContinuity,
@@ -1169,8 +1172,11 @@ export interface InvocationDeps {
     readonly readEvidence: import('./host-sleep/HostSleepEvidence.js').HostSleepEvidenceReader;
     readonly scheduleContinuation: (input: { readonly invocationId: string; readonly sleptAt: number }) => void;
   };
-  /** F337: true once the runtime's own stop began; turns ending after it are continued after the restart. */
-  readonly isRuntimeShuttingDown?: () => boolean;
+  /**
+   * F337: true once the runtime's own stop began (its stop record targets this process, or the API's
+   * SIGTERM arrived); turns ending after it are continued after the restart.
+   */
+  readonly isRuntimeShuttingDown?: () => boolean | Promise<boolean>;
   /** Scheduler system delivery used to wake a cat whose reply waited for an absent owner without a mention. */
   readonly ownerAskCorrectionDeliver?: (
     opts: import('../../../../../infrastructure/scheduler/types.js').DeliverOpts,
@@ -1790,6 +1796,7 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
     callerSignal?.throwIfAborted();
     const running = await deps.turnExecutionStore.listRunningByUser(userId);
     const liveOwner = await findWindowsLiveOwner({
+      store: deps.turnExecutionStore,
       records: running.filter((record) => record.threadId === threadId && record.catId === catId),
     });
     if (liveOwner) {
@@ -1905,7 +1912,7 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
   const resolveHostCut = async (): Promise<HostCut | null> => {
     if (hostCut !== undefined) return hostCut;
     hostCut = null;
-    if (deps.isRuntimeShuttingDown?.()) {
+    if (await deps.isRuntimeShuttingDown?.()) {
       hostCut = { kind: 'restart_shutdown' };
     } else if (deps.hostSleep) {
       const failedAt = Date.now();
@@ -1938,7 +1945,7 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
    * the runtime's stop began, it is that cut. A cut seen earlier in the turn stands.
    */
   const cutAtStop = async (): Promise<(typeof HOST_CUT)[HostCutKind] | undefined> => {
-    const resolved = hostCut === undefined && deps.isRuntimeShuttingDown?.() ? await resolveHostCut() : hostCut;
+    const resolved = hostCut === undefined && (await deps.isRuntimeShuttingDown?.()) ? await resolveHostCut() : hostCut;
     if (!resolved) return undefined;
     const cut = HOST_CUT[resolved.kind];
     turnExecutionFailureReason = hostCutRepeat ? cut.repeatTerminalReason : cut.terminalReason;
@@ -4505,6 +4512,7 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
               catId,
               capability: service.contextCapability?.() ?? invocationCapacitySnapshot.capability,
               reportedWindowSize: msg.metadata.usage.contextWindowSize,
+              observedWindow: msg.metadata.contextWindowObservation,
             });
             if (deps.sessionChainStore) {
               invocationCapacitySnapshot = await applyActiveSessionCapacityPin({
@@ -4588,13 +4596,29 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
               const activeRecord = await deps.sessionChainStore.getActive(catId, threadId, userId);
               if (activeRecord) {
                 const u = msg.metadata?.usage!;
+                const cacheRuntime = sessionCacheRuntimeKey(hostExecutionBoundary);
                 await deps.sessionChainStore.update(activeRecord.id, {
                   contextHealth: health,
                   lastUsage: {
                     ...(u.inputTokens != null ? { inputTokens: u.inputTokens } : {}),
                     ...(u.outputTokens != null ? { outputTokens: u.outputTokens } : {}),
                     ...(u.cacheReadTokens != null ? { cacheReadTokens: u.cacheReadTokens } : {}),
+                    ...(u.cacheCreation5mTokens != null ? { cacheCreation5mTokens: u.cacheCreation5mTokens } : {}),
+                    ...(u.cacheCreation1hTokens != null ? { cacheCreation1hTokens: u.cacheCreation1hTokens } : {}),
                     ...(u.costUsd != null ? { costUsd: u.costUsd } : {}),
+                    cacheObservation:
+                      !cacheRuntime || hadStreamError || msg.errorCode || signal?.aborted
+                        ? undefined
+                        : observeSessionCache({
+                            record: activeRecord,
+                            invocationId,
+                            runtime: cacheRuntime,
+                            model: msg.metadata?.model ?? frozenExecutionBinding.executionPreferences?.model ?? '',
+                            requestStartedAt: executionStartedAt,
+                            observedAt: health.measuredAt,
+                            contextTokens: usedTokens,
+                            usage: u,
+                          }),
                   },
                   updatedAt: Date.now(),
                 });
@@ -5256,6 +5280,14 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
           if (!committed?.nativeSessionBinding || committed.nativeSessionBinding.cliSessionId !== msg.sessionId) {
             throw new Error('Native continuity persistence failed before stream advancement');
           }
+        }
+
+        if (invocationCapacitySnapshot && msg.nativeSessionBinding) {
+          invocationCapacitySnapshot = applyVerifiedNativeModelToInvocationSnapshot(
+            invocationCapacitySnapshot,
+            msg.nativeSessionBinding,
+            msg.sessionId,
+          );
         }
 
         if (sessionRuntimeBindingAccepted) {
@@ -6891,7 +6923,7 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
       turnExecutionFailureReason === undefined &&
       signal?.aborted !== true
     ) {
-      if (deps.isRuntimeShuttingDown?.()) {
+      if (await deps.isRuntimeShuttingDown?.()) {
         // F337: a provider the runtime's stop took down may just close its stream. End the turn the way
         // its own failure would, so the reply and the caller's receipt say why (the same pipeline decides).
         for await (const out of streamProcessedOutputs({

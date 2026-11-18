@@ -1,6 +1,7 @@
 import type { CatConfig } from '@cat-cafe/shared';
 import { loadDossierProfiles } from '@cat-cafe/shared/dossier';
 import type { RedisClient } from '@cat-cafe/shared/utils';
+import type { SessionCacheReadPort } from '../cats/services/session/cache/SessionCacheReadService.js';
 import { AutomaticRoutingSignalService } from './AutomaticRoutingSignalService.js';
 import { DossierCapabilityProfileRevisionSource } from './DossierCapabilityProfileRevisionSource.js';
 import { F051QuotaRoutingSignalAdapter } from './F051QuotaRoutingSignalAdapter.js';
@@ -25,6 +26,7 @@ export interface CreateRoutingContextRuntimeOptions {
   redis: RedisClient;
   projectRoot: string;
   getConfigs: () => Record<string, CatConfig>;
+  sessionCache?: SessionCacheReadPort;
 }
 
 /** One production composition root shared by owner routes, prompt and dispatch consumers. */
@@ -80,7 +82,11 @@ export function createRoutingContextRuntime(options: CreateRoutingContextRuntime
     resolver,
     telemetry: new OpenTelemetryRoutingPreflightSink(),
   });
-  const dispatchPreflight = new RuntimeRoutingDispatchPreflight({ catalogSource, preflightService });
+  const dispatchPreflight = new RuntimeRoutingDispatchPreflight({
+    catalogSource,
+    preflightService,
+    sessionCache: options.sessionCache,
+  });
   return {
     signalStore,
     automaticSignalService,

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { after, before, describe, it } from 'node:test';
@@ -29,6 +29,8 @@ describe('F279 TTS listen routes', () => {
     registry.register({
       id: 'test-tts',
       model: 'test-model',
+      referenceAudioSupport: false,
+      voiceIdSupport: true,
       synthesize: async (request) => {
         synthesisRequests.push(request);
         return { audio: Buffer.from('audio'), format: 'wav', durationSec: 1 };
@@ -339,6 +341,8 @@ describe('F279 TTS listen routes', () => {
     registry.register({
       id: 'flaky-tts',
       model: 'test-model',
+      referenceAudioSupport: false,
+      voiceIdSupport: true,
       synthesize: async () => ({ audio: Buffer.from('unused'), format: 'wav' }),
     });
     const flakyApp = Fastify({ logger: false });
@@ -354,6 +358,22 @@ describe('F279 TTS listen routes', () => {
       updatedAt: 100,
     };
     const assetId = `${'e'.repeat(64)}.wav`;
+    await writeFile(
+      path.join(cacheDir, `${assetId}.voice.json`),
+      JSON.stringify({
+        reusable: true,
+        voiceSelection: {
+          catId: 'opus',
+          source: 'cat_config',
+          provider: 'flaky-tts',
+          model: 'test-model',
+          requested: { voice: 'preset' },
+          effective: { voice: 'preset' },
+          referenceStatus: 'not_requested',
+          warnings: [],
+        },
+      }),
+    );
     try {
       const initial = await flakyApp.inject({
         method: 'PUT',

@@ -6,6 +6,8 @@ import { threadMemberEffortRoutes } from '../../dist/routes/thread-member-effort
 
 const HEADERS = { 'x-cat-cafe-user': 'test-user', 'content-type': 'application/json' };
 const THREAD_ID = 'thread-effort-001';
+const GOOGLE_EFFORT_SUPPORTED = 'test-google-effort-supported';
+const GOOGLE_EFFORT_UNSUPPORTED = 'test-google-effort-unsupported';
 
 if (!catRegistry.has('codex-sol')) {
   const base = catRegistry.getOrThrow('codex').config;
@@ -14,6 +16,20 @@ if (!catRegistry.has('codex-sol')) {
     id: createCatId('codex-sol'),
     displayName: 'Sol',
     defaultModel: 'gpt-5.6-sol',
+  });
+}
+
+// Capability assertions use explicit models, not the catalog's changing Gemini default.
+for (const [catId, model] of [
+  [GOOGLE_EFFORT_SUPPORTED, 'gemini-4-carbon-high'],
+  [GOOGLE_EFFORT_UNSUPPORTED, 'gemini-2.5-pro'],
+]) {
+  catRegistry.register(catId, {
+    ...catRegistry.getOrThrow('gemini').config,
+    id: createCatId(catId),
+    clientId: 'google',
+    displayName: catId,
+    defaultModel: model,
   });
 }
 
@@ -100,37 +116,45 @@ describe('F262 thread member effort routes', () => {
     assert.notEqual(stale.effective, 'ultra');
 
     assert.equal(
-      body.members.some((row) => row.catId === 'gemini'),
+      body.members.some((row) => row.catId === GOOGLE_EFFORT_UNSUPPORTED),
       false,
     );
+    const google = body.members.find((row) => row.catId === GOOGLE_EFFORT_SUPPORTED);
+    assert.ok(google);
+    assert.deepEqual(google.options, ['low', 'medium', 'high']);
     const firstNonParticipant = body.members.findIndex((row) => !row.isParticipant);
     assert.ok(firstNonParticipant >= 0);
     assert.ok(body.members.slice(0, firstNonParticipant).every((row) => row.isParticipant));
   });
 
-  it('PATCH writes a valid override and null clears back to inheritance', async () => {
-    const setRes = await app.inject({
-      method: 'PATCH',
-      url: `/api/threads/${THREAD_ID}/members/codex-sol/effort`,
-      headers: HEADERS,
-      payload: { effort: 'ultra' },
-    });
-    assert.equal(setRes.statusCode, 200);
-    assert.equal(JSON.parse(setRes.payload).effective, 'ultra');
+  for (const [catId, effort] of [
+    ['codex-sol', 'ultra'],
+    [GOOGLE_EFFORT_SUPPORTED, 'high'],
+  ]) {
+    it(`PATCH ${catId} writes a valid override and null clears back to inheritance`, async () => {
+      const setRes = await app.inject({
+        method: 'PATCH',
+        url: `/api/threads/${THREAD_ID}/members/${catId}/effort`,
+        headers: HEADERS,
+        payload: { effort },
+      });
+      assert.equal(setRes.statusCode, 200);
+      assert.equal(JSON.parse(setRes.payload).effective, effort);
 
-    const clearRes = await app.inject({
-      method: 'PATCH',
-      url: `/api/threads/${THREAD_ID}/members/codex-sol/effort`,
-      headers: HEADERS,
-      payload: { effort: null },
+      const clearRes = await app.inject({
+        method: 'PATCH',
+        url: `/api/threads/${THREAD_ID}/members/${catId}/effort`,
+        headers: HEADERS,
+        payload: { effort: null },
+      });
+      assert.equal(clearRes.statusCode, 200);
+      const cleared = JSON.parse(clearRes.payload);
+      assert.equal(cleared.override, null);
+      assert.equal(cleared.source, 'inherited');
+      assert.equal(cleared.effective, cleared.inherited);
+      assert.equal(cleared.compatibility, 'compatible');
     });
-    assert.equal(clearRes.statusCode, 200);
-    const cleared = JSON.parse(clearRes.payload);
-    assert.equal(cleared.override, null);
-    assert.equal(cleared.source, 'inherited');
-    assert.equal(cleared.effective, cleared.inherited);
-    assert.equal(cleared.compatibility, 'compatible');
-  });
+  }
 
   it('offers and accepts GPT-6 model effort tiers through the thread API', async () => {
     const previousSolModel = process.env.CAT_CODEX_SOL_MODEL;
@@ -228,11 +252,12 @@ describe('F262 thread member effort routes', () => {
 
     const unsupported = await app.inject({
       method: 'PATCH',
-      url: `/api/threads/${THREAD_ID}/members/gemini/effort`,
+      url: `/api/threads/${THREAD_ID}/members/${GOOGLE_EFFORT_UNSUPPORTED}/effort`,
       headers: HEADERS,
       payload: { effort: 'high' },
     });
     assert.equal(unsupported.statusCode, 400);
+    assert.equal(JSON.parse(unsupported.payload).error, 'Cat does not support effort overrides');
 
     threadStore._addThread('default', 'system');
     const shared = await app.inject({ method: 'GET', url: '/api/threads/default/members/effort', headers: HEADERS });

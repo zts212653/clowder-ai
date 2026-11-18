@@ -106,12 +106,21 @@ export async function schedulerReadFixture(t) {
         ownerCatId: CAT,
       });
       await notifyAlphaRepair(options, { deliver }, task, CAT);
-    } else if (producer === 'reminder') {
-      const spec = reminderTemplate.createSpec(`dyn-synthetic-${messages.getByThread(thread.id).length}`, {
-        trigger: { type: 'once', fireAt: Date.now() },
-        params: { message: 'Ordinary owner reminder', triggerUserId: OWNER, targetCatId: CAT },
-        deliveryThreadId: thread.id,
-      });
+    } else if (producer === 'reminder' || producer === 'managed-hold') {
+      const managed = producer === 'managed-hold';
+      const spec = reminderTemplate.createSpec(
+        `${managed ? 'hold-ball' : 'dyn'}-synthetic-${messages.getByThread(thread.id).length}`,
+        {
+          trigger: { type: 'once', fireAt: Date.now() },
+          params: {
+            message: 'Ordinary owner reminder',
+            triggerUserId: OWNER,
+            targetCatId: CAT,
+            ...(managed ? { holdLifecycle: { mode: 'timer' } } : {}),
+          },
+          deliveryThreadId: thread.id,
+        },
+      );
       const admission = await spec.admission.gate({ taskId: spec.id, lastRunAt: null, tickCount: 1 });
       assert.equal(admission.run, true);
       await spec.run.execute(admission.workItems[0].signal, admission.workItems[0].subjectKey, {

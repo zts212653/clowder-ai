@@ -90,6 +90,8 @@ const agyProfileSchema = z
     homeRoot: z.string().min(1).optional(),
     model: z.string().min(1).optional(),
     autoApprove: z.boolean().optional(),
+    allowWorkspaceWrites: z.boolean().optional(),
+    allowWorkspaceExecutableConfig: z.boolean().optional(),
     trustedWorkspaces: z.array(z.string().min(1)).optional(),
   })
   .nullable()

@@ -9,9 +9,11 @@
  * broke cross-message playback mutex when each ChatMessage had its own hook.
  */
 
+import type { TtsVoiceSelection } from '@cat-cafe/shared';
 import { useCallback, useSyncExternalStore } from 'react';
 import { peekPlaybackManager } from '@/services/playbackRuntime';
 import { apiFetch } from '@/utils/api-client';
+import { showTtsVoiceWarning } from '@/utils/tts-voice-warning';
 
 export type TtsState = 'idle' | 'loading' | 'playing' | 'error';
 
@@ -41,16 +43,16 @@ function subscribe(cb: () => void): () => void {
   };
 }
 
-/** Per-message blob URL cache with LRU eviction + revoke */
+/** Content-addressed asset URLs may reuse blobs after the server resolves the current voice. */
 const URL_CACHE_MAX = 20;
 const urlCache = new Map<string, string>();
 
-function cacheBlobUrl(messageId: string, blobUrl: string): void {
+function cacheBlobUrl(assetUrl: string, blobUrl: string): void {
   // Revoke if overwriting existing entry
-  const existing = urlCache.get(messageId);
+  const existing = urlCache.get(assetUrl);
   if (existing) {
     URL.revokeObjectURL(existing);
-    urlCache.delete(messageId); // re-insert at end for LRU ordering
+    urlCache.delete(assetUrl); // re-insert at end for LRU ordering
   }
   // Evict oldest (first entry in Map) if at capacity
   if (urlCache.size >= URL_CACHE_MAX) {
@@ -61,7 +63,7 @@ function cacheBlobUrl(messageId: string, blobUrl: string): void {
       urlCache.delete(oldest);
     }
   }
-  urlCache.set(messageId, blobUrl);
+  urlCache.set(assetUrl, blobUrl);
 }
 
 /** Singleton audio element — guarantees only one playback at a time */
@@ -109,16 +111,11 @@ function synthesize(messageId: string, text: string, catId?: string): void {
   peekPlaybackManager()?.interrupt();
   stopPlayback();
 
-  const cached = urlCache.get(messageId);
-  if (cached) {
-    playAudio(cached, messageId);
-    return;
-  }
-
   // Synthesize via API
   emit({ state: 'loading', activeMessageId: messageId });
   const controller = new AbortController();
   currentAbort = controller;
+  const isCurrent = () => currentAbort === controller && !controller.signal.aborted;
 
   apiFetch('/api/tts/synthesize', {
     method: 'POST',
@@ -130,27 +127,33 @@ function synthesize(messageId: string, text: string, catId?: string): void {
       if (!res.ok) throw new Error(`TTS API ${res.status}`);
       return res.json();
     })
-    .then((data: { audioUrl: string }) => {
+    .then((data: { audioUrl: string; voiceSelection?: TtsVoiceSelection }) => {
       // Check if this request was superseded by another
-      if (store.activeMessageId !== messageId) return;
+      if (!isCurrent()) return;
+      showTtsVoiceWarning(data.voiceSelection);
+      const cached = urlCache.get(data.audioUrl);
+      if (cached) {
+        playAudio(cached, messageId);
+        return;
+      }
       // Fetch audio via apiFetch (carries auth header) → blob URL
-      return apiFetch(data.audioUrl)
+      return apiFetch(data.audioUrl, { signal: controller.signal })
         .then((audioRes) => {
           if (!audioRes.ok) throw new Error(`TTS audio ${audioRes.status}`);
-          if (store.activeMessageId !== messageId) return;
+          if (!isCurrent()) return;
           return audioRes.blob();
         })
         .then((blob) => {
-          if (!blob || store.activeMessageId !== messageId) return;
+          if (!blob || !isCurrent()) return;
           const blobUrl = URL.createObjectURL(blob);
-          cacheBlobUrl(messageId, blobUrl);
+          cacheBlobUrl(data.audioUrl, blobUrl);
           playAudio(blobUrl, messageId);
         });
     })
     .catch((err) => {
       if (err instanceof DOMException && err.name === 'AbortError') return;
       console.error('[useTts] synthesis failed:', err);
-      if (store.activeMessageId === messageId) {
+      if (isCurrent()) {
         emit({ state: 'error', activeMessageId: messageId });
       }
     });

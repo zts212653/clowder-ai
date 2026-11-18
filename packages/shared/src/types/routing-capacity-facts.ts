@@ -5,6 +5,7 @@ import {
   routingOwnerIdSchema,
   routingReferenceSchema,
 } from './routing-context-common.js';
+import { sessionCacheWarmthSchema } from './session-cache.js';
 
 export const routingCapacityWindowV1Schema = z
   .object({
@@ -100,6 +101,7 @@ export const routingQueueAdmissionReceiptV1Schema = z
               )
               .max(32),
             capacityFacts: routingCapacityFactsV1Schema.optional(),
+            cacheWarmth: sessionCacheWarmthSchema.optional(),
           })
           .strict(),
       )

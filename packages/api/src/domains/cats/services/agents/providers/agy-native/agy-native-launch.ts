@@ -1,11 +1,19 @@
-import { existsSync, lstatSync, mkdirSync, readdirSync, realpathSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync } from 'node:fs';
 import { isAbsolute, join } from 'node:path';
-import type { AgyProfileConfig, CatId, NativeSessionBinding } from '@cat-cafe/shared';
+import {
+  type AgyProfileConfig,
+  type CatId,
+  type CliEffortPreset,
+  type NativeSessionBinding,
+  resolveCliEffortOverride,
+} from '@cat-cafe/shared';
 import { inspectAgyLogin } from '../../../../../../config/agy-account.js';
 import { buildCliNotFoundDiagnostic } from '../../../../../../utils/cli-diagnostics.js';
 import { formatCliNotFoundError, resolveCliCommand } from '../../../../../../utils/cli-resolve.js';
 import type { CliSpawnOptions } from '../../../../../../utils/cli-types.js';
 import { findMonorepoRoot } from '../../../../../../utils/monorepo-root.js';
+import type { LivenessWarningEvent } from '../../../../../../utils/ProcessLivenessProbe.js';
+import { getDefaultUploadDir } from '../../../../../../utils/upload-paths.js';
 import type { AgentServiceOptions, PreparedProviderRequestV1 } from '../../../types.js';
 import { preflightAgyProfile, resolveAgyProfile, resolveAgySpawnCwd } from '../agy-profile-manager.js';
 import { encodeAgyStreamJsonUserMessage } from '../agy-stream-json-parser.js';
@@ -30,6 +38,8 @@ import {
   matchesCatAgyAgentName,
 } from './launch/agy-session-compatibility.js';
 import { acquireAgyNativeProfileTurnAsync } from './profile-turn/async.js';
+import { type AgyNativeApprovalBridge, startAgyNativeApprovalBridge } from './run/agy-native-approval-bridge.js';
+import { type AgyCapacityScope, resolveAgyCapacityScope } from './run/agy-native-capacity-store.js';
 
 export interface AgyNativeLaunchInput {
   readonly catId: CatId;
@@ -41,12 +51,16 @@ export interface AgyNativeLaunchInput {
   readonly command?: string;
   readonly options?: AgentServiceOptions;
   readonly controlOperation?: 'compact';
+  readonly onVersionWarning?: (warning: LivenessWarningEvent) => void;
 }
 
 export interface AgyNativeLaunchPlan {
   readonly cliOptions: CliSpawnOptions & { readonly cwd: string };
   readonly preparedRequest: PreparedProviderRequestV1;
   readonly agentName: string;
+  readonly effectiveModel: string;
+  readonly supplementalUploadDir?: string;
+  readonly capacityScope?: AgyCapacityScope;
   readonly volatileL0Context: string;
   readonly permissionMode: AgyNativePermissionMode;
   readonly agentTools: readonly string[];
@@ -54,6 +68,23 @@ export interface AgyNativeLaunchPlan {
   readonly resumeSessionId?: string;
   readonly bindSession: (sessionId: string) => void | Promise<void>;
   readonly disposeCredentials?: () => void | Promise<void>;
+}
+
+function isNoopProfileSkillsJson(filePath: string): boolean {
+  try {
+    const raw = readFileSync(filePath, 'utf8').trim();
+    if (!raw) return true;
+    const parsed = JSON.parse(raw) as unknown;
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return false;
+    const obj = parsed as Record<string, unknown>;
+    return (
+      Object.keys(obj).every((k) => k === 'entries' || k === 'inherits') &&
+      (obj.entries === undefined || (Array.isArray(obj.entries) && obj.entries.length === 0)) &&
+      (obj.inherits === undefined || (Array.isArray(obj.inherits) && obj.inherits.length === 0))
+    );
+  } catch {
+    return false;
+  }
 }
 
 function assertNoUntrustedProfilePrograms(home: string): void {
@@ -69,8 +100,27 @@ function assertNoUntrustedProfilePrograms(home: string): void {
     ) {
       continue;
     }
+    if (!stat.isSymbolicLink() && stat.isFile() && executable === 'skills.json' && isNoopProfileSkillsJson(candidate)) {
+      continue;
+    }
     throw new Error(`AGY native profile has unvalidated executable config: ${executable}`);
   }
+}
+
+function resolveAgyEffectiveModelAndEffort(
+  configuredModel: string,
+  override?: CliEffortPreset,
+): { readonly effectiveModel: string; readonly effortArg?: string } {
+  const suffixMatch = configuredModel.match(/-(low|medium|high|xhigh|max)$/i);
+  const inherited = suffixMatch?.[1]?.toLowerCase() ?? 'high';
+  const resolved = resolveCliEffortOverride('google', configuredModel, inherited, override);
+  if (resolved.source === 'thread_override' && resolved.compatibility === 'compatible' && resolved.effective) {
+    const rewrittenModel = suffixMatch
+      ? `${configuredModel.slice(0, -suffixMatch[0].length)}-${resolved.effective}`
+      : configuredModel;
+    return { effectiveModel: rewrittenModel, effortArg: resolved.effective };
+  }
+  return { effectiveModel: configuredModel };
 }
 
 function assertOperatorTrustedWorkspace(config: AgyProfileConfig, workspaceRoot: string): void {
@@ -95,10 +145,22 @@ export async function prepareAgyNativeLaunch(input: AgyNativeLaunchInput): Promi
   const options = input.options;
   const member = options?.pluginNativeLaunch;
   const readOnly = options?.toolExecutionPolicy?.mode === 'read_only';
+  const interactiveApproval =
+    input.profileConfig.autoApprove !== true &&
+    !readOnly &&
+    !member &&
+    Boolean(options?.runtimeInteractionPort && options?.auditContext);
+  const allowWorkspaceWrites = input.profileConfig.allowWorkspaceWrites === true && !readOnly && !member;
+  const { effectiveModel, effortArg } = resolveAgyEffectiveModelAndEffort(
+    input.model,
+    options?.reasoningEffortOverride,
+  );
   const policy = buildAgyNativePolicy({
     workspaceRoot: input.workspace,
     autoApprove: input.profileConfig.autoApprove,
     readOnly,
+    allowWorkspaceWrites,
+    interactiveApproval,
     ...(member ? { pluginServerName: member.server.name } : {}),
   });
   // A per-turn restriction narrows tools; it does not revoke the operator's workspace admission.
@@ -107,9 +169,9 @@ export async function prepareAgyNativeLaunch(input: AgyNativeLaunchInput): Promi
   const profile = resolveAgyProfile({
     materializeSettings: false,
     catId: input.catId,
-    expectedModel: input.model,
+    expectedModel: effectiveModel,
     workingDirectory: policy.workspaceRoot,
-    config: input.profileConfig,
+    config: { ...input.profileConfig, model: effectiveModel },
   });
   if (!profile) throw new Error('AGY native isolated profile is disabled');
   const home = realpathSync(profile.homePath);
@@ -122,6 +184,7 @@ export async function prepareAgyNativeLaunch(input: AgyNativeLaunchInput): Promi
     preparation: true,
   });
   let disposeCredentials: (() => void) | undefined;
+  let approvalBridge: AgyNativeApprovalBridge | undefined;
   let releaseSession: (() => Promise<void>) | undefined;
   let releaseStartup: (() => Promise<void>) | undefined;
   let releaseAccountStartup: (() => Promise<void>) | undefined;
@@ -131,18 +194,22 @@ export async function prepareAgyNativeLaunch(input: AgyNativeLaunchInput): Promi
       disposeCredentials?.();
     } finally {
       try {
-        runProfile?.dispose();
+        await approvalBridge?.dispose();
       } finally {
         try {
-          await releaseSession?.();
+          runProfile?.dispose();
         } finally {
           try {
-            await releaseStartup?.();
+            await releaseSession?.();
           } finally {
             try {
-              await releaseAccountStartup?.();
+              await releaseStartup?.();
             } finally {
-              await releaseProfile();
+              try {
+                await releaseAccountStartup?.();
+              } finally {
+                await releaseProfile();
+              }
             }
           }
         }
@@ -163,7 +230,7 @@ export async function prepareAgyNativeLaunch(input: AgyNativeLaunchInput): Promi
     if (!member) {
       materializeAgyNativeSettings({
         profileHome: home,
-        model: input.model,
+        model: effectiveModel,
         policy: buildAgyNativePolicy({ workspaceRoot: input.workspace }),
         retainTrustedWorkspaces: true,
         tolerateUnknownKeys: true,
@@ -176,7 +243,7 @@ export async function prepareAgyNativeLaunch(input: AgyNativeLaunchInput): Promi
     mkdirSync(join(configHome, '.gemini/antigravity-cli'), { mode: 0o700 });
     const runSettingsPath = materializeAgyNativeSettings({
       profileHome: configHome,
-      model: input.model,
+      model: effectiveModel,
       policy,
     });
     const agent = materializeAgyNativeAgentFile({
@@ -189,6 +256,16 @@ export async function prepareAgyNativeLaunch(input: AgyNativeLaunchInput): Promi
       scopedMember: Boolean(member),
       tools: policy.agentTools,
     });
+    if (interactiveApproval && options?.runtimeInteractionPort && options?.auditContext) {
+      approvalBridge = await startAgyNativeApprovalBridge({
+        runHome: configHome,
+        runtimeInteractionPort: options.runtimeInteractionPort,
+        auditContext: options.auditContext,
+        ...(options.signal ? { signal: options.signal } : {}),
+      });
+    }
+    const requireGuardApproval =
+      interactiveApproval || (input.profileConfig.autoApprove !== true && allowWorkspaceWrites);
     materializeAgyNativeEffectGuard({
       profileHome: configHome,
       accountHome: home,
@@ -197,6 +274,9 @@ export async function prepareAgyNativeLaunch(input: AgyNativeLaunchInput): Promi
       workspaceRoot: policy.workspaceRoot,
       readOnly,
       ...(member ? { pluginServerName: member.server.name } : {}),
+      ...(requireGuardApproval ? { requireApproval: true } : {}),
+      ...(allowWorkspaceWrites ? { allowWorkspaceWrites: true } : {}),
+      ...(approvalBridge ? { approvalBridgeFile: approvalBridge.bridgeFile } : {}),
     });
     const command = input.command ?? resolveCliCommand('agy');
     if (!command) throw missingAgyNativeCliError();
@@ -265,11 +345,29 @@ export async function prepareAgyNativeLaunch(input: AgyNativeLaunchInput): Promi
           runtimeRoot: findMonorepoRoot(process.cwd()),
           canonicalOnly: true,
         });
+    let canonicalUploadDir: string | undefined;
+    if (!member) {
+      try {
+        const candidateUpload = getDefaultUploadDir(options?.uploadDir ?? process.env.UPLOAD_DIR);
+        if (!existsSync(candidateUpload) && options?.activeRunDispatch)
+          mkdirSync(candidateUpload, { recursive: true, mode: 0o700 });
+        if (existsSync(candidateUpload) && lstatSync(candidateUpload).isDirectory()) {
+          canonicalUploadDir = realpathSync(candidateUpload);
+        }
+      } catch {
+        // Without an actual launch grant, supplemental external images must be rejected.
+      }
+    }
     const args = [
       `--gemini_dir=${runProfile.geminiDir}`,
       `--app_data_dir=${runProfile.appDataDir}`,
       ...(!member ? ['--add-dir', policy.workspaceRoot] : []),
       ...(!member ? nativeInput.accessDirectories.flatMap((directory) => ['--add-dir', directory]) : []),
+      ...(canonicalUploadDir &&
+      canonicalUploadDir !== policy.workspaceRoot &&
+      !nativeInput.accessDirectories.includes(canonicalUploadDir)
+        ? ['--add-dir', canonicalUploadDir]
+        : []),
       ...skillDirectories.flatMap((directory) => ['--add-dir', directory]),
       ...policy.cliArgs,
       ...(member ? ['--disable-slash-commands', '--new-project'] : []),
@@ -278,7 +376,8 @@ export async function prepareAgyNativeLaunch(input: AgyNativeLaunchInput): Promi
       '--agent',
       agent.agentName,
       '--model',
-      input.model,
+      effectiveModel,
+      ...(effortArg ? ['--effort', effortArg] : []),
       '--input-format',
       'stream-json',
       '--output-format',
@@ -297,13 +396,13 @@ export async function prepareAgyNativeLaunch(input: AgyNativeLaunchInput): Promi
       runtime: Object.freeze({
         provider: 'google',
         carrier: 'antigravity_cli',
-        model: input.model,
+        model: effectiveModel,
         protocol: 'stream-json',
       }),
       tools: Object.freeze({ finalSurface: 'unknown' as const }),
       providerNativeVisibility: 'unknown',
     });
-    const env = { ...isolatedOAuthEnv(home), ...executionOwnerEnv(options) };
+    const env = { ...isolatedOAuthEnv(home, options?.accountEnv), ...executionOwnerEnv(options) };
     if (account) env.SSH_TTY = 'cat-cafe-file-auth';
     const cliOptions: CliSpawnOptions & { readonly cwd: string } = {
       command,
@@ -320,6 +419,17 @@ export async function prepareAgyNativeLaunch(input: AgyNativeLaunchInput): Promi
       ...(options?.livenessProbe ? { livenessProbe: options.livenessProbe } : {}),
     };
     disposeCredentials = await materializeAgyLaunchMcp(configHome, input, options?.callbackEnv);
+    // Runtime discovery must not occupy a profile/account's short CLI-init critical section.
+    const capacityScope = await resolveAgyCapacityScope({
+      command,
+      profileHome: home,
+      credentialHome: account?.credentialHome,
+      model: effectiveModel,
+      signal: options?.signal,
+      invocationId: options?.invocationId,
+      livenessProbe: options?.livenessProbe,
+      onVersionWarning: input.onVersionWarning,
+    });
     releaseStartup = await waitForAgyNativeProfileTurn(home, ownerInvocationId, options?.signal, {
       runHome: configHome,
     });
@@ -333,6 +443,9 @@ export async function prepareAgyNativeLaunch(input: AgyNativeLaunchInput): Promi
       cliOptions,
       preparedRequest,
       agentName: agent.agentName,
+      effectiveModel,
+      supplementalUploadDir: canonicalUploadDir,
+      capacityScope,
       volatileL0Context: '',
       permissionMode: policy.permissionMode,
       agentTools: [
@@ -343,7 +456,7 @@ export async function prepareAgyNativeLaunch(input: AgyNativeLaunchInput): Promi
       binding: {
         v: 1,
         carrier: 'agy_stream_json',
-        model: input.model,
+        model: effectiveModel,
         profileHome: home,
         l0Hash: agent.l0Hash,
         workspaceRoot: policy.workspaceRoot,

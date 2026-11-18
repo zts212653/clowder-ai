@@ -1523,6 +1523,432 @@ describe('Kimi usage parsers', () => {
     );
   });
 
+  it('parses Kimi K3.1 Plan usage box with % used and unparenthesized reset durations', async () => {
+    const { parseKimiCliUsageOutput } = await import('../dist/routes/quota.js');
+    const observedAtMs = Date.UTC(2026, 10, 16, 12, 0, 0);
+    const items = parseKimiCliUsageOutput(
+      `
+   │ Plan usage                                                          │
+   │   5h limit      ██░░░░░░░░░░░░░░░░░░  9% used   resets in 1h 7m     │
+   │   Weekly limit  ████████░░░░░░░░░░░░  38% used  resets in 3d 15h 7m │
+   ╰─────────────────────────────────────────────────────────────────────╯
+`,
+      observedAtMs,
+    );
+    assert.deepEqual(
+      items.map((item) => [
+        item.label,
+        item.usedPercent,
+        item.percentKind,
+        item.poolId,
+        item.resetsText,
+        item.resetsAt,
+      ]),
+      [
+        [
+          '5小时使用限额',
+          9,
+          'used',
+          'kimi-rate-limit',
+          'Resets in 1h 7m',
+          new Date(observedAtMs + (60 + 7) * 60_000).toISOString(),
+        ],
+        [
+          '每周使用限额',
+          38,
+          'used',
+          'kimi-weekly',
+          'Resets in 3d 15h 7m',
+          new Date(observedAtMs + (3 * 86_400 + 15 * 3_600 + 7 * 60) * 1_000).toISOString(),
+        ],
+      ],
+    );
+  });
+
+  it('deduplicates PTY redraws of the same Kimi window and waits for both distinct pools before early exit', async () => {
+    const { parseKimiCliUsageOutput, probeKimiQuotaViaCli } = await import('../dist/routes/quota.js');
+    assert.equal(typeof probeKimiQuotaViaCli, 'function');
+    const observedAtMs = Date.UTC(2026, 10, 16, 12, 0, 0);
+    const deduped = parseKimiCliUsageOutput(
+      `
+   │   5h limit      ██░░░░░░░░░░░░░░░░░░  8% used   resets in 1m        │
+   │   5h limit      ██░░░░░░░░░░░░░░░░░░  9% used   resets in 1m        │
+   │   Weekly limit  ██████████████████░░  92% used  resets in 2d        │
+`,
+      observedAtMs,
+    );
+    assert.deepEqual(
+      deduped.map((item) => [item.poolId, item.usedPercent, item.resetsAt]),
+      [
+        ['kimi-rate-limit', 9, new Date(observedAtMs + 60_000).toISOString()],
+        ['kimi-weekly', 92, new Date(observedAtMs + 2 * 86_400_000).toISOString()],
+      ],
+    );
+
+    let killedEarly = false;
+    const writes = [];
+    const items = await probeKimiQuotaViaCli(
+      {},
+      {
+        cliCommand: '/mock/kimi',
+        observedAtMs,
+        sendDelayMs: 5,
+        submitDelayMs: 5,
+        idleSettleMs: 60,
+        probeTimeoutMs: 500,
+        spawnPty: () => {
+          let onDataCb = () => {};
+          let killed = false;
+          setTimeout(() => {
+            if (!killed) onDataCb('│ > ');
+          }, 2);
+          return {
+            onData(cb) {
+              onDataCb = cb;
+            },
+            onExit() {},
+            write(data) {
+              writes.push(data);
+              if (data === '\r') {
+                setTimeout(() => {
+                  if (!killed) onDataCb('│   5h limit  8% used   resets in 1h 7m │\r\n');
+                }, 5);
+                setTimeout(() => {
+                  if (!killed) onDataCb('│   5h limit  9% used   resets in 1h 7m │\r\n');
+                }, 10);
+                setTimeout(() => {
+                  if (killed) {
+                    killedEarly = true;
+                    return;
+                  }
+                  onDataCb('│   Weekly limit  94% used  resets in 2d │\r\n');
+                }, 25);
+              }
+            },
+            kill() {
+              killed = true;
+            },
+          };
+        },
+      },
+    );
+    assert.equal(killedEarly, false, 'duplicate 5h redraw must not kill PTY before Weekly limit arrives');
+    assert.deepEqual(writes, ['/usage', '\r']);
+    assert.deepEqual(
+      items.map((item) => [item.poolId, item.usedPercent]),
+      [
+        ['kimi-rate-limit', 9],
+        ['kimi-weekly', 94],
+      ],
+    );
+
+    // Single-window output (no Weekly limit) settles cleanly via idleSettleMs instead of timing out
+    const singleItems = await probeKimiQuotaViaCli(
+      {},
+      {
+        cliCommand: '/mock/kimi',
+        observedAtMs,
+        sendDelayMs: 5,
+        submitDelayMs: 5,
+        idleSettleMs: 25,
+        probeTimeoutMs: 500,
+        spawnPty: () => {
+          let onDataCb = () => {};
+          let killed = false;
+          setTimeout(() => {
+            if (!killed) onDataCb('│ > ');
+          }, 2);
+          return {
+            onData(cb) {
+              onDataCb = cb;
+            },
+            onExit() {},
+            write(data) {
+              if (data === '\r') {
+                setTimeout(() => {
+                  if (!killed) onDataCb('│   5h limit  15% used   resets in 2h │\r\n');
+                }, 5);
+              }
+            },
+            kill() {
+              killed = true;
+            },
+          };
+        },
+      },
+    );
+    assert.deepEqual(
+      singleItems.map((item) => [item.poolId, item.usedPercent, item.resetsAt]),
+      [['kimi-rate-limit', 15, new Date(observedAtMs + 2 * 3_600_000).toISOString()]],
+    );
+  });
+
+  it('preserves terminal row boundaries on newline-less CSI cursor positioning and CR in-place overwrites in probeKimiQuotaViaCli', async () => {
+    const { probeKimiQuotaViaCli } = await import('../dist/routes/quota.js');
+    const observedAtMs = Date.UTC(2026, 10, 16, 17, 0, 0);
+
+    // 1. pi-tui CSI cursor positioning (\x1b[row;1H\x1b[2K) without any CR/LF between rows
+    const csiItems = await probeKimiQuotaViaCli(
+      {},
+      {
+        cliCommand: '/mock/kimi',
+        observedAtMs,
+        sendDelayMs: 5,
+        submitDelayMs: 5,
+        idleSettleMs: 30,
+        probeTimeoutMs: 500,
+        spawnPty: () => {
+          let onDataCb = () => {};
+          let killed = false;
+          setTimeout(() => {
+            if (!killed) onDataCb('\x1b[1;1H│ > ');
+          }, 2);
+          return {
+            onData(cb) {
+              onDataCb = cb;
+            },
+            onExit() {},
+            write(data) {
+              if (data === '\r') {
+                setTimeout(() => {
+                  if (!killed) {
+                    onDataCb(
+                      '\x1b[?2026h\x1b[10;1H\x1b[2K│ 5h limit 8% used resets in 1h │\x1b[11;1H\x1b[2K│ Weekly limit 94% used resets in 2d │\x1b[?2026l',
+                    );
+                  }
+                }, 5);
+              }
+            },
+            kill() {
+              killed = true;
+            },
+          };
+        },
+      },
+    );
+    assert.deepEqual(
+      csiItems.map((item) => [item.poolId, item.usedPercent, item.resetsAt]),
+      [
+        ['kimi-rate-limit', 8, new Date(observedAtMs + 3_600_000).toISOString()],
+        ['kimi-weekly', 94, new Date(observedAtMs + 2 * 86_400_000).toISOString()],
+      ],
+    );
+
+    // 2. CR + CSI 2K in-place overwrite AND bare CR overwrite on a full 2-pool probe (must take latest 99%, never stale 8%)
+    const crOverwriteItems = await probeKimiQuotaViaCli(
+      {},
+      {
+        cliCommand: '/mock/kimi',
+        observedAtMs,
+        sendDelayMs: 5,
+        submitDelayMs: 5,
+        idleSettleMs: 25,
+        probeTimeoutMs: 500,
+        spawnPty: () => {
+          let onDataCb = () => {};
+          let killed = false;
+          setTimeout(() => {
+            if (!killed) onDataCb('│ > ');
+          }, 2);
+          return {
+            onData(cb) {
+              onDataCb = cb;
+            },
+            onExit() {},
+            write(data) {
+              if (data === '\r') {
+                setTimeout(() => {
+                  if (!killed) {
+                    onDataCb(
+                      '5h limit 8% used resets in 1h\r\x1b[2K5h limit 99% used resets in 1h\r\nWeekly limit 80% used\rWeekly limit 40% used resets in 2d\r\n',
+                    );
+                  }
+                }, 5);
+              }
+            },
+            kill() {
+              killed = true;
+            },
+          };
+        },
+      },
+    );
+    assert.deepEqual(
+      crOverwriteItems.map((item) => [item.poolId, item.usedPercent, item.resetsAt]),
+      [
+        ['kimi-rate-limit', 99, new Date(observedAtMs + 3_600_000).toISOString()],
+        ['kimi-weekly', 40, new Date(observedAtMs + 2 * 86_400_000).toISOString()],
+      ],
+    );
+
+    // 3. Synchronized TUI frame (\x1b[?2026h ... \x1b[?2026l) split across idleSettleMs threshold waits for frame close instead of publishing half-frame
+    let frameClosedSeen = false;
+    const splitSyncItems = await probeKimiQuotaViaCli(
+      {},
+      {
+        cliCommand: '/mock/kimi',
+        observedAtMs,
+        sendDelayMs: 5,
+        submitDelayMs: 5,
+        idleSettleMs: 20,
+        probeTimeoutMs: 500,
+        spawnPty: () => {
+          let onDataCb = () => {};
+          let killed = false;
+          setTimeout(() => {
+            if (!killed) onDataCb('│ > ');
+          }, 2);
+          return {
+            onData(cb) {
+              onDataCb = cb;
+            },
+            onExit() {},
+            write(data) {
+              if (data === '\r') {
+                setTimeout(() => {
+                  if (!killed) {
+                    onDataCb(
+                      '\x1b[?2026h\x1b[10;1H\x1b[2K│ 5h limit 8% used resets in 1h │\x1b[11;1H\x1b[2K│ Weekly limit 9',
+                    );
+                  }
+                }, 5);
+                setTimeout(() => {
+                  if (!killed) {
+                    frameClosedSeen = true;
+                    onDataCb('4% used resets in 2d │\x1b[?2026l');
+                  }
+                }, 50);
+              }
+            },
+            kill() {
+              killed = true;
+            },
+          };
+        },
+      },
+    );
+    assert.equal(frameClosedSeen, true, 'idleSettleMs must not kill PTY or publish while sync frame is still open');
+    assert.deepEqual(
+      splitSyncItems.map((item) => [item.poolId, item.usedPercent, item.resetsAt]),
+      [
+        ['kimi-rate-limit', 8, new Date(observedAtMs + 3_600_000).toISOString()],
+        ['kimi-weekly', 94, new Date(observedAtMs + 2 * 86_400_000).toISOString()],
+      ],
+    );
+
+    // 4. Process exiting mid-synchronized-frame (before \x1b[?2026l) must fail closed instead of publishing half-frame
+    await assert.rejects(
+      probeKimiQuotaViaCli(
+        {},
+        {
+          cliCommand: '/mock/kimi',
+          observedAtMs,
+          sendDelayMs: 5,
+          submitDelayMs: 5,
+          idleSettleMs: 30,
+          probeTimeoutMs: 500,
+          spawnPty: () => {
+            let onDataCb = () => {};
+            let onExitCb = () => {};
+            let killed = false;
+            setTimeout(() => {
+              if (!killed) onDataCb('│ > ');
+            }, 2);
+            return {
+              onData(cb) {
+                onDataCb = cb;
+              },
+              onExit(cb) {
+                onExitCb = cb;
+              },
+              write(data) {
+                if (data === '\r') {
+                  setTimeout(() => {
+                    if (!killed) {
+                      onDataCb(
+                        '\x1b[?2026h\x1b[10;1H\x1b[2K│ 5h limit 8% used resets in 1h │\x1b[11;1H\x1b[2K│ Weekly limit 9',
+                      );
+                    }
+                  }, 5);
+                  setTimeout(() => {
+                    if (!killed) onExitCb({ exitCode: 1 });
+                  }, 12);
+                }
+              },
+              kill() {
+                killed = true;
+              },
+            };
+          },
+        },
+      ),
+      /unclosed synchronized|exited before quota data/i,
+    );
+
+    // 5. Unclosed synchronized frame that never closes before probeTimeoutMs fails closed with timeout
+    await assert.rejects(
+      probeKimiQuotaViaCli(
+        {},
+        {
+          cliCommand: '/mock/kimi',
+          observedAtMs,
+          sendDelayMs: 5,
+          submitDelayMs: 5,
+          idleSettleMs: 15,
+          probeTimeoutMs: 60,
+          spawnPty: () => {
+            let onDataCb = () => {};
+            let killed = false;
+            setTimeout(() => {
+              if (!killed) onDataCb('│ > ');
+            }, 2);
+            return {
+              onData(cb) {
+                onDataCb = cb;
+              },
+              onExit() {},
+              write(data) {
+                if (data === '\r') {
+                  setTimeout(() => {
+                    if (!killed) {
+                      onDataCb(
+                        '\x1b[?2026h\x1b[10;1H\x1b[2K│ 5h limit 8% used resets in 1h │\x1b[11;1H\x1b[2K│ Weekly limit 9',
+                      );
+                    }
+                  }, 5);
+                }
+              },
+              kill() {
+                killed = true;
+              },
+            };
+          },
+        },
+      ),
+      /timed out/i,
+    );
+  });
+
+  it('marks Kimi Code 2.5.3 literal "reset" and zero-duration hints as already-expired timestamps at observedAtMs', async () => {
+    const { parseKimiCliUsageOutput } = await import('../dist/routes/quota.js');
+    const observedAtMs = Date.UTC(2026, 10, 16, 17, 0, 0);
+    const items = parseKimiCliUsageOutput(
+      [
+        '  Plan usage',
+        '  5h limit      ████████████████████  99% used  reset',
+        '  Weekly limit  ████████░░░░░░░░░░░░  40% used  resets in 2d',
+      ].join('\n'),
+      observedAtMs,
+    );
+    assert.deepEqual(
+      items.map((item) => [item.poolId, item.usedPercent, item.resetsText, item.resetsAt]),
+      [
+        ['kimi-rate-limit', 99, 'Reset', new Date(observedAtMs).toISOString()],
+        ['kimi-weekly', 40, 'Resets in 2d', new Date(observedAtMs + 2 * 86_400_000).toISOString()],
+      ],
+    );
+  });
+
   it('parses weekly and 5-hour windows from Kimi billing response', async () => {
     const { parseKimiOfficialUsageResponse } = await import('../dist/routes/quota.js');
     const items = parseKimiOfficialUsageResponse(MOCK_KIMI_USAGE_RESPONSE);

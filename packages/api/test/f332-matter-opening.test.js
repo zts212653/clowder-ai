@@ -8,6 +8,7 @@ import { invokeSingleCat } from '../dist/domains/cats/services/agents/invocation
 import { ContextEpochOwner } from '../dist/domains/cats/services/session/context/ContextEpochOwner.js';
 import { InMemoryContextEpochStore } from '../dist/domains/cats/services/stores/ports/ContextEpochStore.js';
 import { LOG_DIR_PATH, logger } from '../dist/infrastructure/logger.js';
+import { fixture } from './helpers/matter-opening-cache-fixture.js';
 
 for (const mode of ['cold', 'hot', 'rebuilt']) {
   test(`F332 ${mode}: the actual provider request receives a fresh directory independently of cold-only cues`, async () => {
@@ -140,3 +141,68 @@ for (const mode of ['cold', 'hot', 'rebuilt']) {
     }
   });
 }
+
+test('F332: the provider receives a revalidated aged directory and the refresh failure is persisted', async (t) => {
+  const f = await fixture(t);
+  await f.create('provider safe title', 'provider safe summary');
+  const hidden = await f.create('provider PRIVATE title', 'provider PRIVATE summary');
+  const prompts = [];
+  let invocation = 0;
+  const deps = {
+    registry: {
+      create: async () => ({ invocationId: `f332-cache-${++invocation}`, callbackToken: 'test-token' }),
+      verify: async () => ({ ok: false, reason: 'unknown_invocation' }),
+    },
+    sessionManager: {
+      get: async () => undefined,
+      getOrCreate: async () => ({}),
+      store: async () => {},
+      delete: async () => {},
+      resolveWorkingDirectory: () => '/tmp/test',
+    },
+    contextEpochOwner: new ContextEpochOwner(new InMemoryContextEpochStore()),
+    threadStore: null,
+    apiUrl: 'http://127.0.0.1:3004',
+    matterMemoryService: f.service,
+  };
+  const params = {
+    catId: 'opus',
+    service: {
+      async *invoke(prompt) {
+        prompts.push(prompt);
+        yield { type: 'done', catId: 'opus', timestamp: Date.now() };
+      },
+    },
+    prompt: 'Continue the accepted directory repair',
+    userId: 'owner',
+    threadId: 'here',
+    isLastCat: true,
+    ownerAuthProvenance: 'strict',
+    invocationOrigin: 'interactive',
+  };
+  for await (const _ of invokeSingleCat(deps, params)) {
+  }
+  assert.match(prompts[0], /provider PRIVATE summary/);
+  hidden.message.visibility = 'whisper';
+  hidden.message.whisperTo = ['codex61-sol'];
+  t.mock.method(f.service, 'catalog', async () => {
+    throw Error('opening-provider-cache-fault');
+  });
+  for await (const _ of invokeSingleCat(deps, params)) {
+  }
+  assert.match(prompts[1], /缓存目录/);
+  assert.match(prompts[1], /provider safe summary/);
+  assert.doesNotMatch(prompts[1], /provider PRIVATE/);
+  assert.ok(!prompts[1].includes(hidden.matterId));
+  logger[symbols.streamSym].flushSync();
+  const warning = readFileSync(join(LOG_DIR_PATH, 'api.log'), 'utf8')
+    .split('\n')
+    .filter(Boolean)
+    .map((line) => JSON.parse(line))
+    .find((line) => line.pid === process.pid && line.err?.message === 'opening-provider-cache-fault');
+  assert.ok(warning);
+  assert.equal(warning.invocationId, 'f332-cache-2');
+  assert.equal(warning.threadId, 'here');
+  assert.equal(warning.catId, 'opus');
+  assert.equal(warning.stopReason, 'reader_rejected');
+});

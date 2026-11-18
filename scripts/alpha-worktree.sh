@@ -358,10 +358,10 @@ init_alpha_worktree() {
 
   if git -c core.fsmonitor=false -C "$PROJECT_DIR" show-ref --verify --quiet "refs/heads/$ALPHA_BRANCH"; then
     info "adding existing branch '$ALPHA_BRANCH' to $ALPHA_DIR"
-    git -c core.fsmonitor=false -C "$PROJECT_DIR" worktree add "$ALPHA_DIR" "$ALPHA_BRANCH"
+    node "$SCRIPT_DIR/lib/worktree-checkout.mjs" "$PROJECT_DIR" "$ALPHA_DIR" "$ALPHA_BRANCH"
   else
     info "creating branch '$ALPHA_BRANCH' from $REMOTE_NAME/main"
-    git -c core.fsmonitor=false -C "$PROJECT_DIR" worktree add "$ALPHA_DIR" -b "$ALPHA_BRANCH" "$REMOTE_NAME/main"
+    node "$SCRIPT_DIR/lib/worktree-checkout.mjs" "$PROJECT_DIR" "$ALPHA_DIR" "$REMOTE_NAME/main" "$ALPHA_BRANCH"
   fi
 
   if [ "$RUN_INSTALL" = "true" ]; then

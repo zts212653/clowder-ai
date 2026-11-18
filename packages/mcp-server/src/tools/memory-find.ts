@@ -188,21 +188,16 @@ async function docsWithGroups(
   runs: GroupRun[],
 ): Promise<ToolResult> {
   const limit = cappedLimit('docs', context.limit);
-  const settle = () => {
-    for (const run of runs) run.othersSettled();
-  };
   // The docs page keeps the original budget less only the other groups' smallest honest forms for their actual
   // outcomes; a docs page that still does not fit changes representation, never rows (see the docs renderers).
   const docs = await searchDocs(query, {
     ...(limit.limit !== undefined ? { limit: limit.limit } : {}),
     ...(context.since && context.lowerBound ? { dateFrom: context.lowerBound } : {}),
     charBudget: async () => {
-      settle();
       const minima = await Promise.all(runs.map((run) => run.minimalChars()));
       return FIND_RESPONSE_CHAR_BUDGET - minima.reduce((sum, value) => sum + value, 0) - separators(runs.length + 3);
     },
   });
-  settle();
   const docsText = textOf(docs);
   const meta = extractAppendedRecallMetaBlock(docsText);
   const docsBody = stripAppendedRecallMetaBlock(docsText).trimEnd();
@@ -291,7 +286,9 @@ export async function runFind(
         : 'Find needs query text here: no group of this connection can browse without a query.',
     );
   }
-  const runs = groups.map((group) => new GroupRun(group, signal));
+  // A continuation reopens exactly one group: nothing else shares this response, so no shared ceiling applies.
+  const alone = context.mode === 'continue' && groups.length === 1;
+  const runs = groups.map((group) => new GroupRun(group, signal, { alone }));
   try {
     if (docs.kind === 'run') return await docsWithGroups(context.query as string, context, searchDocs, runs);
     return await groupsAlone(context, runs, docs.kind === 'not_covered' ? docs.reason : undefined);

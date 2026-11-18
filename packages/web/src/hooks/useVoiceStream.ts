@@ -5,6 +5,7 @@ import { useCallback, useEffect } from 'react';
 import { getPlaybackManager, peekPlaybackManager } from '@/services/playbackRuntime';
 import { useListenModeStore } from '@/stores/listenModeStore';
 import { useVoiceSessionStore } from '@/stores/voiceSessionStore';
+import { showTtsVoiceWarning } from '@/utils/tts-voice-warning';
 
 export { getPlaybackManager } from '@/services/playbackRuntime';
 
@@ -20,12 +21,14 @@ function matchesActiveSession(event: { threadId: string; catId: string }): boole
 
 export function handleVoiceStreamStart(event: VoiceStreamStartEvent): void {
   if (!matchesActiveSession(event)) return;
+  showTtsVoiceWarning(event.voiceSelection, event.threadId);
   useVoiceSessionStore.getState().setLiveStreamActive(true, event.invocationId);
   getPlaybackManager().handleStreamStart(event);
 }
 
 export function handleVoiceChunk(event: VoiceChunkEvent): void {
   if (!matchesActiveSession(event)) return;
+  if (event.voiceSelection) showTtsVoiceWarning(event.voiceSelection, event.threadId);
   const manager = getPlaybackManager();
   manager.handleChunk(event);
   useVoiceSessionStore.getState().confirmAutoplayUnlocked();
@@ -33,6 +36,7 @@ export function handleVoiceChunk(event: VoiceChunkEvent): void {
 
 export function handleVoiceStreamEnd(event: VoiceStreamEndEvent): void {
   if (!matchesActiveSession(event)) return;
+  showTtsVoiceWarning(event.voiceSelection, event.threadId);
   getPlaybackManager().handleStreamEnd(event);
   useVoiceSessionStore.getState().setLiveStreamActive(false);
 }

@@ -4,6 +4,13 @@ import { readFileSync } from 'node:fs';
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { commandTouchesAgyControl } from './agy-native-control-commands.mjs';
+import {
+  isPhysicalTargetWithinWorkspace,
+  recordApprovedAgyCommand,
+  recordPostToolUseAgyCommand,
+  requestAgyNativeApproval,
+  resolveBoundCommandTask,
+} from './agy-native-task-ledger.mjs';
 import { readSelfHostFacet } from './lib/self-host-facet.mjs';
 import { kernelPath } from './lib/shell-directory.mjs';
 import { appendNativeDenial, guardReason } from './native-effect-audit.mjs';
@@ -103,6 +110,10 @@ function controlPath(path, cwd, profileHome) {
 /** Never emit an empty allow: AGY treats a successful hook with empty stdout as permission. */
 export function decideAgyNativeHookPayload(payload, options = {}) {
   const deny = (reason) => ({ decision: 'deny', reason: `Clowder AI native guard: ${reason}` });
+  if (payload && typeof payload === 'object' && payload.hookEventName === 'PostToolUse') {
+    recordPostToolUseAgyCommand(payload, options);
+    return {};
+  }
   if (!payload || typeof payload !== 'object' || !payload.toolCall || typeof payload.toolCall !== 'object')
     return deny('invalid AGY tool payload');
   const { name, args } = payload.toolCall;
@@ -117,11 +128,57 @@ export function decideAgyNativeHookPayload(payload, options = {}) {
       ? { decision: 'allow' }
       : deny('member invocation permits only its issued MCP server');
   }
+  const isControl = (path, directory, profileHome) =>
+    controlPath(path, directory, profileHome) ||
+    (options.toolHome && controlPath(path, directory, options.toolHome)) ||
+    (options.credentialHome && controlPath(path, directory, options.credentialHome));
+
+  const isTaskInput =
+    options.workspaceRoot !== undefined &&
+    (name === 'send_command_input' || (name === 'manage_task' && args.Action === 'send_input'));
+  if (isTaskInput) {
+    if (options.readOnly) return deny('read-only invocation');
+    if (typeof options.workspaceRoot !== 'string' || !isAbsolute(options.workspaceRoot))
+      return deny('invalid host command workspace');
+    const taskId = name === 'send_command_input' ? (args.CommandId ?? args.TaskId) : args.TaskId;
+    const inputText = args.Input;
+    if (typeof inputText !== 'string') return deny('missing terminal input');
+    const bound = resolveBoundCommandTask(payload, taskId, options);
+    if (!bound.ok) return deny(bound.reason);
+    const boundCwd = bound.entry.cwd;
+    const taskSecretDenial = nativeSecretDenial({ tool_name: name, tool_input: args, cwd: boundCwd });
+    if (taskSecretDenial) return deny(taskSecretDenial);
+    if (
+      inputText &&
+      commandTouchesAgyControl(
+        inputText,
+        boundCwd,
+        options.profileHome,
+        isControl,
+        0,
+        options.toolHome ?? options.profileHome,
+      )
+    ) {
+      return deny('AGY executable control-plane command');
+    }
+    // A live interpreter retains partial lines, cwd, variables and aliases.
+    // Per-chunk shell checks cannot certify its eventual execution, including
+    // a newline that commits previously buffered code.
+    if (!bound.entry.dataInputContract && inputText.length > 0) {
+      return deny('terminal input has no unchanged approved data-input contract; start a new run_command instead');
+    }
+    if (options.requireApproval) {
+      return options.approvalBridgeFile
+        ? requestAgyNativeApproval(payload, { decision: 'allow' }, boundCwd, options, {
+            taskId,
+            command: bound.entry.command,
+          })
+        : deny('interactive approval is required for terminal input');
+    }
+    return { decision: 'allow' };
+  }
+
   const pinDirectory = COMMANDS.has(name) && options.workspaceRoot !== undefined;
-  // A terminal may have changed cwd after launch; model-supplied Cwd is not
-  // evidence of its current execution coordinate. This carrier has no binding.
-  if (pinDirectory && name === 'send_command_input')
-    return deny('terminal input directory is unverified; start a new run_command instead');
   if (pinDirectory && (typeof options.workspaceRoot !== 'string' || !isAbsolute(options.workspaceRoot)))
     return deny('invalid host command workspace');
   if (pinDirectory && args.Cwd !== undefined && typeof args.Cwd !== 'string')
@@ -141,25 +198,23 @@ export function decideAgyNativeHookPayload(payload, options = {}) {
   const secretDenial = nativeSecretDenial({ tool_name: secretTool, tool_input: secretInput, cwd });
   if (secretDenial) return deny(secretDenial);
   if (options.readOnly && !READERS.has(name)) return deny('read-only invocation');
-  const isControl = (path, directory, profileHome) =>
-    controlPath(path, directory, profileHome) ||
-    (options.toolHome && controlPath(path, directory, options.toolHome)) ||
-    (options.credentialHome && controlPath(path, directory, options.credentialHome));
 
   let toolName;
   let toolInput;
   let overwrite;
+  let fileTarget;
+  let commandText;
   if (FILE_WRITERS.has(name)) {
     // 1.5 file tools execute Path; a legacy field must never substitute a
     // different target for policy checks, even in a malformed mixed payload.
-    const target = name === 'write_file' || name === 'edit_file' ? args.Path : (args.TargetFile ?? args.NotebookPath);
-    if (typeof target !== 'string' || !target) return deny('missing file target');
-    if (isControl(target, cwd, options.profileHome)) return deny('AGY executable control-plane write');
+    fileTarget = name === 'write_file' || name === 'edit_file' ? args.Path : (args.TargetFile ?? args.NotebookPath);
+    if (typeof fileTarget !== 'string' || !fileTarget) return deny('missing file target');
+    if (isControl(fileTarget, cwd, options.profileHome)) return deny('AGY executable control-plane write');
     toolName = name === 'write_to_file' || name === 'write_file' ? 'Write' : 'Edit';
-    toolInput = { file_path: target };
+    toolInput = { file_path: fileTarget };
   } else if (COMMANDS.has(name)) {
     const quote = (value) => `'${value.replaceAll("'", `'"'"'`)}'`;
-    const command =
+    commandText =
       name === 'run_workflow'
         ? typeof args.Script === 'string'
           ? `python3 -c ${quote(args.Script)}`
@@ -167,20 +222,27 @@ export function decideAgyNativeHookPayload(payload, options = {}) {
             ? `python3 ${quote(args.ScriptPath)}`
             : undefined
         : (args.CommandLine ?? args.Input);
-    if (typeof command !== 'string' || !command) return deny('missing command');
+    if (typeof commandText !== 'string' || !commandText) return deny('missing command');
     // The CLI hot-loads these programs outside its terminal sandbox. Their
     // protection is carrier integrity, not another list of protected project files.
     if (
-      commandTouchesAgyControl(command, cwd, options.profileHome, isControl, 0, options.toolHome ?? options.profileHome)
+      commandTouchesAgyControl(
+        commandText,
+        cwd,
+        options.profileHome,
+        isControl,
+        0,
+        options.toolHome ?? options.profileHome,
+      )
     ) {
       return deny('AGY executable control-plane command');
     }
     toolName = 'Bash';
-    toolInput = { command };
+    toolInput = { command: commandText };
     if (pinDirectory) {
       // CLI 1.4.10 ignores run_command.Cwd, but its documented hook argument
       // overwrite executes CommandLine verbatim. Workflows still honor Cwd.
-      overwrite = commandOverwrite(name, args, command, cwd);
+      overwrite = commandOverwrite(name, args, commandText, cwd);
     }
   } else {
     // Browser, MCP and model-native interactions retain their canonical
@@ -190,9 +252,31 @@ export function decideAgyNativeHookPayload(payload, options = {}) {
   const projected = { tool_name: toolName, tool_input: toolInput, cwd };
   const verdict = decideNativeHookPayload(projected, options);
   options.onTargetDecision?.(projected, verdict);
-  return verdict.decision === 'allow'
-    ? { decision: 'allow', ...(overwrite ? { overwrite } : {}) }
-    : { decision: 'deny', reason: guardReason(verdict) };
+  if (verdict.decision !== 'allow') return { decision: 'deny', reason: guardReason(verdict) };
+
+  const allowedResult = { decision: 'allow', ...(overwrite ? { overwrite } : {}) };
+  if (options.requireApproval) {
+    if (
+      FILE_WRITERS.has(name) &&
+      options.allowWorkspaceWrites &&
+      isPhysicalTargetWithinWorkspace(fileTarget, cwd, options.workspaceRoot)
+    ) {
+      return allowedResult;
+    }
+    if (!options.approvalBridgeFile) {
+      return deny('request-review mode requires interactive approval or operator scope grant');
+    }
+    return requestAgyNativeApproval(payload, allowedResult, cwd, options).then((approved) => {
+      if (approved.decision === 'allow' && name === 'run_command' && commandText) {
+        recordApprovedAgyCommand(payload, cwd, commandText, options, overwrite?.CommandLine);
+      }
+      return approved;
+    });
+  }
+  if (name === 'run_command' && commandText) {
+    recordApprovedAgyCommand(payload, cwd, commandText, options, overwrite?.CommandLine);
+  }
+  return allowedResult;
 }
 
 async function main() {
@@ -208,14 +292,21 @@ async function main() {
     const profileHome = process.argv[4] || process.env.HOME;
     const toolHome = process.env.CAT_CAFE_NATIVE_TOOL_HOME || process.env.HOME;
     if (toolHome) process.env.HOME = toolHome;
-    const decision = decideAgyNativeHookPayload(JSON.parse(raw), {
+    const extraFlags = process.argv.slice(5);
+    const workspaceArg =
+      process.argv[5] !== undefined && !process.argv[5].startsWith('--') ? process.argv[5] : undefined;
+    const decision = await decideAgyNativeHookPayload(JSON.parse(raw), {
       profileHome,
       toolHome,
-      credentialHome: process.argv
-        .slice(5)
+      credentialHome: extraFlags
         .find((arg) => arg.startsWith('--credential-home='))
         ?.slice('--credential-home='.length),
-      ...(process.argv[5] !== undefined ? { workspaceRoot: process.argv[5] } : {}),
+      requireApproval: extraFlags.includes('--require-approval'),
+      allowWorkspaceWrites: extraFlags.includes('--allow-workspace-writes'),
+      approvalBridgeFile: extraFlags
+        .find((arg) => arg.startsWith('--approval-bridge-file='))
+        ?.slice('--approval-bridge-file='.length),
+      ...(workspaceArg !== undefined ? { workspaceRoot: workspaceArg } : {}),
       readOnly: process.argv[3] === 'read-only',
       ...(process.argv[3] === 'plugin-native' ? { pluginServerName: process.argv[6] ?? '' } : {}),
       selfHost: () => readSelfHostFacet({ ...(hostHome ? { homeDir: hostHome } : {}) }),

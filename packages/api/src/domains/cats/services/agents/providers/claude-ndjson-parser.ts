@@ -375,6 +375,14 @@ export function extractClaudeUsage(e: Record<string, unknown>): TokenUsage {
   if (typeof usage.output_tokens === 'number') result.outputTokens = usage.output_tokens;
   if (cacheRead > 0) result.cacheReadTokens = cacheRead;
   if (cacheCreate > 0) result.cacheCreationTokens = cacheCreate;
+  const creation = usage.cache_creation as Record<string, unknown> | undefined;
+  for (const [raw, normalized] of [
+    ['ephemeral_5m_input_tokens', 'cacheCreation5mTokens'],
+    ['ephemeral_1h_input_tokens', 'cacheCreation1hTokens'],
+  ] as const) {
+    const value = creation?.[raw];
+    if (typeof value === 'number' && Number.isSafeInteger(value) && value >= 0) result[normalized] = value;
+  }
   if (typeof e.total_cost_usd === 'number') result.costUsd = e.total_cost_usd;
   if (typeof e.duration_ms === 'number') result.durationMs = e.duration_ms;
   if (typeof e.duration_api_ms === 'number') result.durationApiMs = e.duration_api_ms;

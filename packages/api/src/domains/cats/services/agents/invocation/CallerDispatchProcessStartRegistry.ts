@@ -42,9 +42,7 @@ export class CallerDispatchProcessStartRegistry {
       prompt: [
         '[A2A Observation Scope]',
         `process_start processGeneration=${processGenerationId}`,
-        '当前进程内的 outbound dispatch observation 仅覆盖本 API 进程登记的 dispatch。',
-        '此前进程的 dispatch 结果仍保留在 canonical History；需要时按需读取 History，不能据此推断旧结果。',
-        '本说明不会创建任务、唤醒成员或清理当前进程内的 observation。',
+        '派发状态只含本次 API 进程启动后登记的派发；更早的派发结果在线程历史里。',
         '[/A2A Observation Scope]',
       ].join('\n'),
     };

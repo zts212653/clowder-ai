@@ -605,6 +605,7 @@ describe('F209 entity alias search', () => {
     sqliteVec.load(db);
     ensureVectorTable(db, 3);
     const vectorStore = new VectorStore(db, 3);
+    vectorStore.initMeta(createEmbedding(new Float32Array([1, 0, 0])).getModelInfo());
     vectorStore.upsert('entity-hit-one', new Float32Array([0, 1, 0]));
     vectorStore.upsert('entity-hit-two', new Float32Array([0, 0.9, 0]));
     vectorStore.upsert('semantic-vector-hit', new Float32Array([1, 0, 0]));
@@ -652,6 +653,7 @@ describe('F209 entity alias search', () => {
     sqliteVec.load(db);
     ensureVectorTable(db, 3);
     const vectorStore = new VectorStore(db, 3);
+    vectorStore.initMeta(createEmbedding(new Float32Array([1, 0, 0])).getModelInfo());
     vectorStore.upsert('superseded-entity-hit', new Float32Array([0, 1, 0]));
     vectorStore.upsert('active-vector-hit', new Float32Array([1, 0, 0]));
     store.setEmbedDeps({
