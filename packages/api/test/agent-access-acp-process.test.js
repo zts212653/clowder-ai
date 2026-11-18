@@ -62,6 +62,38 @@ test('ACP writes consume only the approved session, prompt reference and permiss
   assert.equal(writes.length, 1);
 });
 
+test('ACP expands only distinct MCP references in approved order', async () => {
+  const writes = [];
+  const gate = createAcpWriteApprovalPort(async (line) => writes.push(JSON.parse(line)));
+  const cwd = tmpdir();
+  const first = { name: 'first', command: 'fixture-first', args: [], env: [] };
+  const second = { name: 'second', command: 'fixture-second', args: [], env: [] };
+  gate.approve({
+    method: 'session/new',
+    params: { cwd },
+    mcp: new Map([
+      ['ref-one', first],
+      ['ref-two', second],
+    ]),
+  });
+  const send = (...names) =>
+    gate.writeApprovedLine(
+      JSON.stringify({
+        jsonrpc: '2.0',
+        id: 'fixture',
+        method: 'session/new',
+        params: { cwd, mcpServers: names.map((name) => ({ name })) },
+      }),
+    );
+  await assert.rejects(send('ref-one', 'ref-one'), /acp_worker_write_unapproved/);
+  await assert.rejects(send('ref-two', 'ref-one'), /acp_worker_write_unapproved/);
+  await send('ref-two');
+  assert.deepEqual(
+    writes.map(({ params }) => params.mcpServers),
+    [[second]],
+  );
+});
+
 test('native ACP permissions retain the Host session scope and never block another response', async () => {
   const actions = new AsyncLocalStorage();
   const expected = Promise.withResolvers();

@@ -28,7 +28,10 @@ import {
   AcpTimeoutError,
   launchAcpChild,
 } from '../../cats/services/agents/providers/acp/AcpClient.js';
-import { AcpSessionBindingError } from '../../cats/services/agents/providers/acp/active-session-cache.js';
+import {
+  AcpSessionBindingError,
+  acpSessionBindingSignature,
+} from '../../cats/services/agents/providers/acp/active-session-cache.js';
 import { sanitizeRawEvent } from '../../cats/services/agents/providers/codex-audit-hooks.js';
 import { createNativeAcpRequests } from './acp-native-requests.js';
 import type { AgentAccessAcpProcess, BoundSessionOperation } from './acp-process.js';
@@ -68,6 +71,10 @@ export class AgentAccessAcpRuntimeClient {
   readonly #cwd: AcpCwdIdentityTracker;
   readonly #unconfirmed = new Set<string>();
   readonly #finalResponses = new Set<string>();
+  readonly #cancelApprovals = new Map<
+    string,
+    { revoke: () => void; active: boolean; requested: boolean; sent: boolean }
+  >();
   readonly #capacityListeners = new Set<(signal: AcpCapacitySignal) => void>();
   #connection?: Awaited<ReturnType<AgentAccessAcpProcess>>;
   #child?: AcpChildConnection;
@@ -188,6 +195,8 @@ export class AgentAccessAcpRuntimeClient {
   }
 
   close() {
+    for (const approval of this.#cancelApprovals.values()) approval.revoke();
+    this.#cancelApprovals.clear();
     this.#closing ??=
       this.#connection?.close() ?? this.#child?.shutdown(ACP_CHILD_SHUTDOWN_GRACE_MS, false) ?? Promise.resolve();
     return this.#closing;
@@ -212,8 +221,10 @@ export class AgentAccessAcpRuntimeClient {
     sessionId?: string,
   ): Promise<AcpNewSessionResult> {
     const byReference = new Map(
-      servers.map((server) => [
-        createHmac('sha256', this.#opaqueKey).update(JSON.stringify(server)).digest('hex'),
+      servers.map((server, index) => [
+        createHmac('sha256', this.#opaqueKey)
+          .update(acpSessionBindingSignature(String(index), [server]))
+          .digest('hex'),
         server,
       ]),
     );
@@ -225,12 +236,19 @@ export class AgentAccessAcpRuntimeClient {
       operation === 'newSession'
         ? ({ operation, cwd, mcp } as const)
         : { operation, cwd, mcp, sessionId: sessionId ?? '' };
+    const resumeOnLoad =
+      operation === 'loadSession' &&
+      !this.#capabilities?.loadSession &&
+      Boolean(this.#capabilities?.sessionCapabilities?.resume);
+    const method =
+      operation === 'newSession'
+        ? ACP_METHODS.sessionNew
+        : operation === 'resumeSession' || resumeOnLoad
+          ? ACP_METHODS.sessionResume
+          : ACP_METHODS.sessionLoad;
     return sessionResultSchema.parse(
       await this.#command(request, {
-        method:
-          ACP_METHODS[
-            operation === 'newSession' ? 'sessionNew' : operation === 'loadSession' ? 'sessionLoad' : 'sessionResume'
-          ],
+        method,
         params: { cwd, ...(sessionId === undefined ? {} : { sessionId }) },
         mcp: byReference,
       }),
@@ -249,7 +267,7 @@ export class AgentAccessAcpRuntimeClient {
   async closeSession(sessionId: string) {
     await this.#command(
       { operation: 'closeSession', sessionId },
-      { method: ACP_METHODS.sessionClose, params: { sessionId } },
+      { method: ACP_METHODS.sessionClose, params: { sessionId: sessionId.trim() } },
     );
     this.#requests?.setSessionPermissionHandler(sessionId);
     this.#requests?.setSessionRequestHandler(sessionId);
@@ -259,7 +277,7 @@ export class AgentAccessAcpRuntimeClient {
   async setSessionModel(sessionId: string, modelId: string) {
     await this.#command(
       { operation: 'setModel', sessionId, modelId },
-      { method: ACP_METHODS.sessionSetModel, params: { sessionId, modelId } },
+      { method: ACP_METHODS.sessionSetModel, params: { sessionId: sessionId.trim(), modelId: modelId.trim() } },
     );
   }
   async setSessionConfigOption(sessionId: string, configId: string, value: string) {
@@ -267,7 +285,7 @@ export class AgentAccessAcpRuntimeClient {
       { operation: 'setConfig', sessionId, configId, value },
       {
         method: ACP_METHODS.sessionSetConfigOption,
-        params: { sessionId, configId, value },
+        params: { sessionId, configId: configId.trim(), value },
       },
     );
   }
@@ -281,9 +299,37 @@ export class AgentAccessAcpRuntimeClient {
   ) {
     this.#requests?.setSessionRequestHandler(...args);
   }
+  #allowCancel(wire: ReturnType<typeof createAcpWriteApprovalPort>, sessionId: string, active: boolean) {
+    const approval = {
+      active,
+      requested: false,
+      sent: false,
+      revoke: wire.approve({
+        method: ACP_METHODS.sessionCancel,
+        params: { sessionId },
+        onAccepted: () => {
+          approval.sent = true;
+          if (!approval.active) this.#cancelApprovals.delete(sessionId);
+          this.#requests?.setSessionPermissionHandler(sessionId, (_request, respond) => respond({ cancelled: true }));
+        },
+      }),
+    };
+    this.#cancelApprovals.set(sessionId, approval);
+    return approval;
+  }
+
   cancelSession(sessionId: string) {
     this.#requests?.setSessionPermissionHandler(sessionId, (_request, respond) => respond({ cancelled: true }));
-    void this.#command({ operation: 'cancel', sessionId }, { method: ACP_METHODS.sessionCancel, params: { sessionId } })
+    if (!this.#connection || !this.#wire || !this.isAlive) return;
+    const approval = this.#cancelApprovals.get(sessionId) ?? this.#allowCancel(this.#wire, sessionId, false);
+    if (approval.requested || approval.sent) return;
+    approval.requested = true;
+    void this.#connection
+      .session({ operation: 'cancel', sessionId })
+      .then((value) => {
+        const result = actionResultSchema.parse(value);
+        if (!result.ok) throw nativeError(result.failure);
+      })
       .catch(() => this.close())
       .catch(() => {});
   }
@@ -294,6 +340,10 @@ export class AgentAccessAcpRuntimeClient {
     limits?: { timeoutMs?: number; idleWarningMs?: number; idleStallMs?: number },
   ): AsyncGenerator<AcpSessionUpdate, AcpStopReason> {
     if (!this.#connection || !this.#wire) throw new Error('ACP provider process unavailable');
+    const pendingCancel = this.#cancelApprovals.get(sessionId);
+    if (pendingCancel?.active) throw new AcpProtocolError(-32600, 'ACP session already has an active prompt');
+    if (pendingCancel) throw new AcpSessionCancelledError(sessionId);
+    const cancel = this.#allowCancel(this.#wire, sessionId, true);
     const ref = randomUUID();
     this.#unconfirmed.add(sessionId);
     this.#finalResponses.delete(sessionId);
@@ -303,6 +353,7 @@ export class AgentAccessAcpRuntimeClient {
       prompt: { ref, content: typeof input === 'string' ? [{ type: 'text', text: input }] : input },
     });
     let ended = false;
+    let workerCancelled = false;
     try {
       const frames = await this.#connection.session({ operation: 'prompt', sessionId, contentRef: ref, limits });
       if (!frames || typeof frames !== 'object' || !(Symbol.asyncIterator in frames))
@@ -313,7 +364,11 @@ export class AgentAccessAcpRuntimeClient {
           ended = true;
           if (frame.finalResponse) this.#finalResponses.add(sessionId);
           if (frame.sessionReusable) this.#unconfirmed.delete(sessionId);
-          if ('failure' in frame.result) throw nativeError(frame.result.failure);
+          if ('failure' in frame.result) {
+            const failure = frame.result.failure;
+            workerCancelled = failure.kind === 'idle' || failure.kind === 'cancelled' || failure.kind === 'timeout';
+            throw nativeError(failure);
+          }
           return frame.result.stopReason;
         }
         if (frame.update.sessionId !== sessionId) throw new Error('invalid_acp_provider_update');
@@ -323,6 +378,13 @@ export class AgentAccessAcpRuntimeClient {
     } finally {
       revoke();
       if (!ended) this.cancelSession(sessionId);
+      cancel.active = false;
+      // The turn terminal and command are on separate streams. Keep the grant
+      // until the queued native cancel reaches stdin, including watchdog stops.
+      if (cancel.sent || !(cancel.requested || workerCancelled)) {
+        cancel.revoke();
+        this.#cancelApprovals.delete(sessionId);
+      }
     }
   }
 }

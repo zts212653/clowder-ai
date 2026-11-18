@@ -104,7 +104,7 @@ export function createAgentAccessAcpProcess(
     }
     return {
       initialize: () => invoke('initialize'),
-      session(operation: BoundSessionOperation) {
+      async session(operation: BoundSessionOperation) {
         signal.throwIfAborted();
         return runtime.invoke(pluginInstanceId, 'acpSession', { ...operation, processId });
       },

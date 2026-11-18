@@ -386,45 +386,87 @@ test('Agent access discovery executes the same standalone entrypoint from a Mana
   const acpCommands = [];
   const mcpSecret = 'fixture-host-held-mcp-value';
   const privatePrompt = 'Host-approved fixture prompt';
+  const heldWrite = Promise.withResolvers();
+  const finishWrite = Promise.withResolvers();
+  const workerCancelReturned = Promise.withResolvers();
+  const explicitCancelReceived = Promise.withResolvers();
+  const idleCancelReceived = Promise.withResolvers();
   const attachAcp = createAgentAccessAcpProcess(runtime.inventoryStore, {
     nativeActions: runtime.supervisor.nativeActions,
-    invoke(instanceId, method, input) {
+    async invoke(instanceId, method, input) {
       if (method === 'acpSession') {
         acpCommands.push(input.operation);
         const crossing = JSON.stringify(input);
         assert.equal(crossing.includes(mcpSecret), false);
         assert.equal(crossing.includes(privatePrompt), false);
       }
-      return runtime.supervisor.invoke(instanceId, method, input);
+      const result = await runtime.supervisor.invoke(instanceId, method, input);
+      if (method === 'acpSession' && input.operation === 'cancel') workerCancelReturned.resolve();
+      return result;
     },
   });
   const acp = new AgentAccessAcpRuntimeClient(
     {
       command: process.execPath,
       cwd: projectRoot,
+      spawnFn(command, args, options) {
+        const child = spawn(command, args, options);
+        const write = child.stdin.write.bind(child.stdin);
+        child.stderr.on('data', (chunk) => {
+          const diagnostics = chunk.toString();
+          if (diagnostics.includes('fixture-native-explicit-cancel')) explicitCancelReceived.resolve();
+          if (diagnostics.includes('fixture-native-idle-cancel')) idleCancelReceived.resolve();
+        });
+        child.stdin.write = (line, callback) => {
+          if (!line.includes('fixture-cancel-probe')) return write(line, callback);
+          return write(line, (error) => {
+            heldWrite.resolve();
+            void finishWrite.promise.then(() => callback(error));
+          });
+        };
+        return child;
+      },
       args: [
         '-e',
         `
-        let pending;
+        let permissionPending;
+        let peer;
         require('node:readline').createInterface({ input: process.stdin }).on('line', (line) => {
           const { id, method, params, result } = JSON.parse(line);
           const send = (message) => console.log(JSON.stringify({ jsonrpc: '2.0', ...message }));
-          if (method === 'initialize') send({ id, result: { protocolVersion: 1, agentCapabilities: { loadSession: true } } });
-          if (method === 'session/new' || method === 'session/load') {
+          if (method === 'initialize') send({ id, result: { protocolVersion: 1, agentCapabilities: { sessionCapabilities: { resume: {} } } } });
+          if (method === 'session/new' || method === 'session/resume') {
             if (params.mcpServers[0].env[0].value !== '${mcpSecret}') process.exit(2);
-            send({ id, result: { sessionId: 'same-acp-native' } });
+            send({ id, result: { sessionId: params.sessionId ?? 'same-acp-native' } });
           }
           if (method === 'session/prompt') {
+            if (['fixture-cancel-probe', 'fixture-idle-probe'].includes(params.prompt[0].text)) return;
+            if (params.prompt[0].text === 'fixture-peer-probe') {
+              peer = { id, sessionId: params.sessionId };
+              send({ method: 'session/update', params: { sessionId: peer.sessionId, update: {
+                sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'peer started' },
+              } } });
+              return;
+            }
             if (params.prompt[0].text !== '${privatePrompt}') process.exit(2);
-            pending = { id, sessionId: params.sessionId };
+            permissionPending = { id, sessionId: params.sessionId };
             send({ id: 0, method: 'session/request_permission', params: { sessionId: params.sessionId } });
           }
-          if (id === 0 && pending) {
+          if (id === 0 && permissionPending) {
             if (result?.outcome?.optionId !== 'fixture-approved') process.exit(2);
-            send({ method: 'session/update', params: { sessionId: pending.sessionId, update: {
+            send({ method: 'session/update', params: { sessionId: permissionPending.sessionId, update: {
               sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'duplex ACP reply' },
             } } });
-            send({ id: pending.id, result: { stopReason: 'end_turn' } });
+            send({ id: permissionPending.id, result: { stopReason: 'end_turn' } });
+            permissionPending = undefined;
+          }
+          if (method === 'session/cancel') {
+            console.error(params.sessionId === 'fixture-watchdog' ? 'fixture-native-idle-cancel' : 'fixture-native-explicit-cancel');
+            if (peer) {
+              if (params.sessionId === peer.sessionId) process.exit(3);
+              send({ id: peer.id, result: { stopReason: 'end_turn' } });
+              peer = undefined;
+            }
           }
         });
       `,
@@ -433,22 +475,80 @@ test('Agent access discovery executes the same standalone entrypoint from a Mana
     attachAcp,
   );
   try {
-    assert.deepEqual(await acp.initialize(), { protocolVersion: 1, agentCapabilities: { loadSession: true } });
-    const mcp = [{ name: 'actual-mcp', command: 'fixture', args: [], env: [{ name: 'TOKEN', value: mcpSecret }] }];
+    assert.deepEqual(await acp.initialize(), {
+      protocolVersion: 1,
+      agentCapabilities: { sessionCapabilities: { resume: {} } },
+    });
+    const mcp = [
+      {
+        name: 'cat-cafe-fixture',
+        command: 'fixture',
+        args: [],
+        env: [
+          { name: 'TOKEN', value: mcpSecret },
+          { name: 'CAT_CAFE_CREDENTIAL_FILE', value: join(projectRoot, 'fixture.json') },
+          { name: 'CAT_CAFE_CALLBACK_TOKEN', value: 'fixture-first-turn' },
+          { name: 'CAT_CAFE_INVOCATION_ID', value: 'fixture-first-invocation' },
+        ],
+      },
+    ];
     const { sessionId } = await acp.newSession(projectRoot, mcp);
     assert.equal(sessionId, 'same-acp-native');
-    assert.equal((await acp.loadSession(sessionId, projectRoot, mcp)).sessionId, sessionId);
-    acp.setSessionPermissionHandler(sessionId, (request, respond) => {
+    const historyId = 'fixture-existing-native-id-from-history';
+    assert.equal((await acp.loadSession(historyId, projectRoot, mcp)).sessionId, historyId);
+    const refreshedMcp = mcp.map((server) => ({
+      ...server,
+      env: server.env.map(({ name, value }) => ({
+        name,
+        value: ['CAT_CAFE_CALLBACK_TOKEN', 'CAT_CAFE_INVOCATION_ID'].includes(name) ? value + '-next' : value,
+      })),
+    }));
+    assert.equal((await acp.loadSession(historyId, projectRoot, refreshedMcp)).sessionId, historyId);
+    acp.setSessionPermissionHandler(historyId, (request, respond) => {
       assert.equal(request.id, 0);
       respond({ optionId: 'fixture-approved' });
     });
-    const turn = acp.promptStream(sessionId, privatePrompt);
+    const turn = acp.promptStream(historyId, privatePrompt);
     assert.deepEqual((await turn.next()).value.update.content, { type: 'text', text: 'duplex ACP reply' });
     assert.deepEqual(await turn.next(), { done: true, value: 'end_turn' });
-    assert.equal(acp.hasPromptFinalResponse(sessionId), true);
-    assert.equal(acp.isSessionSafeForReuse(sessionId), true);
-    assert.deepEqual(acpCommands, ['newSession', 'loadSession', 'prompt']);
+    assert.equal(acp.hasPromptFinalResponse(historyId), true);
+    assert.equal(acp.isSessionSafeForReuse(historyId), true);
+    assert.deepEqual(acpCommands, ['newSession', 'loadSession', 'loadSession', 'prompt']);
+    const peer = acp.promptStream(sessionId, 'fixture-peer-probe');
+    assert.equal((await peer.next()).value.update.content.text, 'peer started');
+    const peerDone = peer.next();
+    void peerDone.catch(() => {});
+    const parkedTurn = acp.promptStream(historyId, 'fixture-cancel-probe');
+    const parkedOutcome = parkedTurn.next().catch((error) => error);
+    await heldWrite.promise;
+    acp.cancelSession(historyId);
+    await workerCancelReturned.promise;
+    finishWrite.resolve();
+    await Promise.race([
+      explicitCancelReceived.promise,
+      wait(2_000).then(() => assert.fail('native cancel was not written')),
+    ]);
+    assert.equal((await parkedOutcome).name, 'AcpSessionCancelledError');
+    assert.deepEqual(await peerDone, { done: true, value: 'end_turn' });
+    const watchdogId = 'fixture-watchdog';
+    assert.equal((await acp.loadSession(watchdogId, projectRoot, mcp)).sessionId, watchdogId);
+    const idle = acp.promptStream(watchdogId, 'fixture-idle-probe', { idleWarningMs: 25, idleStallMs: 100 });
+    await assert.rejects(
+      async () => {
+        for await (const _ of idle) {
+          // The idle warning can precede the terminal.
+        }
+      },
+      { name: 'AcpStreamIdleError' },
+    );
+    await Promise.race([
+      idleCancelReceived.promise,
+      wait(2_000).then(() => assert.fail('idle cancel was not written')),
+    ]);
+    assert.equal(acp.isAlive, true);
+    assert.equal((await acp.newSession(projectRoot, mcp)).sessionId, sessionId);
   } finally {
+    finishWrite.resolve();
     await acp.close();
   }
 

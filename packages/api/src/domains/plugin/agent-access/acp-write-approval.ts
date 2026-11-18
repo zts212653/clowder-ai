@@ -16,6 +16,7 @@ export interface AcpWriteApproval {
   params: Readonly<Record<string, unknown>>;
   mcp?: ReadonlyMap<string, AcpMcpServer>;
   prompt?: { ref: string; content: readonly AcpContentBlock[] };
+  onAccepted?: () => void;
 }
 
 /** Resolve the actual provider arguments once, at the Host-owned stdin boundary. */
@@ -40,9 +41,23 @@ export function createAcpWriteApprovalPort(write: (line: string) => Promise<void
         );
       });
       if (!accepted) throw new Error('acp_worker_write_unapproved');
-      const servers = accepted.mcp && mcpRefsSchema.parse(mcpServers).map(({ name }) => accepted.mcp?.get(name));
-      if (servers?.some((server) => !server)) throw new Error('acp_worker_write_unapproved');
+      let servers: AcpMcpServer[] | undefined;
+      if (accepted.mcp) {
+        const references = mcpRefsSchema.parse(mcpServers).map(({ name }) => name);
+        const selected = new Set(references);
+        const approved = [...accepted.mcp].filter(([name]) => selected.has(name));
+        if (
+          !isDeepStrictEqual(
+            approved.map(([name]) => name),
+            references,
+          )
+        ) {
+          throw new Error('acp_worker_write_unapproved');
+        }
+        servers = approved.map(([, server]) => server);
+      }
       pending.delete(accepted);
+      accepted.onAccepted?.();
       await write(
         JSON.stringify({
           ...request,
