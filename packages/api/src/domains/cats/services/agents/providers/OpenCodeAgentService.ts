@@ -17,6 +17,7 @@
 import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { type CatId, createCatId } from '@cat-cafe/shared';
+import type { AgentAccessOpenCodeEvent } from '@clowder-ai/agent-contract';
 import { getCatModel } from '../../../../../config/cat-models.js';
 import { createModuleLogger } from '../../../../../infrastructure/logger.js';
 import {
@@ -56,6 +57,7 @@ import {
 } from './opencode-auto-approval.js';
 import { readOpenCodeError } from './opencode-error.js';
 import { transformOpenCodeEvent } from './opencode-event-transform.js';
+import { mapOpenCodeWireEvent } from './opencode-wire-mapper.js';
 import {
   buildOpenCodeNoToolFinalizerConfig,
   buildOpenCodePostToolFallbackText,
@@ -96,6 +98,35 @@ function readOpenCodeNativeInstructions(
   }
 }
 
+interface OpenCodeLaunchPlanInput {
+  prompt: string;
+  sessionId?: string;
+  model?: string;
+  readOnly?: boolean;
+  cliConfigArgs?: readonly string[];
+  /** Result of the Host's `run --help` probe; the package never runs it itself. */
+  approvalFlag?: string;
+  /** Transport args the Host resolved from user config and the probe. */
+  transportArgs?: readonly string[];
+  /** Host-owned agent name for a read-only run. */
+  readOnlyAgent: string;
+}
+
+type OpenCodeLaunchPlanner = (input: OpenCodeLaunchPlanInput) => Promise<{
+  args: string[];
+  managedArgvFlags: string[];
+  assertCurrent?: () => Promise<void>;
+  normalizeEvent?: (event: unknown) => Promise<unknown>;
+}>;
+
+type OpenCodeFinalizerPlanner = (input: {
+  prompt: string;
+  model: string;
+  finalizerAgent: string;
+  sessionId?: string;
+  transportArgs?: readonly string[];
+}) => Promise<{ args: string[]; managedArgvFlags: string[] }>;
+
 interface OpenCodeAgentServiceOptions {
   catId?: CatId;
   /** Model name (e.g. 'claude-sonnet-4-6' or 'openrouter/google/gemini-3-flash-preview') */
@@ -116,6 +147,15 @@ interface OpenCodeAgentServiceOptions {
   opencodeDbPath?: string;
   /** Test seam for managed OpenCode config precedence detection. */
   opencodeManagedConfigPaths?: readonly string[];
+  /**
+   * Plans argv through the active Agent Access package (public protocol). The Host
+   * still owns the binary, credentials, cwd, spawn and the `run --help` probe; its
+   * results are passed in as inputs. When absent, the in-process builder is used —
+   * that path exists only for tests and for a Host built without the integration.
+   */
+  planLaunch?: OpenCodeLaunchPlanner;
+  /** Plans the tool-free recovery run through the same package. */
+  planFinalizer?: OpenCodeFinalizerPlanner;
 }
 
 const OPENCODE_API_KEY_ENV = 'OPENCODE_API_KEY';
@@ -162,6 +202,8 @@ interface OpenCodePostToolFinalizerParams {
   textMode: 'append' | 'replace';
   transportArgs?: readonly string[];
   options?: AgentServiceOptions;
+  /** Package event reader from the launch plan, so both runs read output the same way. */
+  normalizeEvent?: (event: unknown) => Promise<unknown>;
 }
 
 function getOpenCodeStepFinishReason(event: unknown): string | undefined {
@@ -243,6 +285,8 @@ export class OpenCodeAgentService implements L0InjectableAgentService {
   private readonly autoApproveProbeFn: OpenCodeAutoApproveProbeFn | undefined;
   private readonly opencodeDbPath: string | undefined;
   private readonly opencodeManagedConfigPaths: readonly string[] | undefined;
+  private readonly planLaunch: OpenCodeLaunchPlanner | undefined;
+  private readonly planFinalizer: OpenCodeFinalizerPlanner | undefined;
   private readonly sessionSingleFlight = new SessionSingleFlight();
   private autoApproveProbe: Promise<OpenCodeAutoApproveProbeResult> | undefined;
 
@@ -257,6 +301,8 @@ export class OpenCodeAgentService implements L0InjectableAgentService {
     this.autoApproveProbeFn = options?.autoApproveProbeFn;
     this.opencodeDbPath = options?.opencodeDbPath;
     this.opencodeManagedConfigPaths = options?.opencodeManagedConfigPaths;
+    this.planLaunch = options?.planLaunch;
+    this.planFinalizer = options?.planFinalizer;
   }
 
   /**
@@ -367,15 +413,36 @@ export class OpenCodeAgentService implements L0InjectableAgentService {
         options?.cliConfigArgs,
         readOnly,
       );
-      const args = this.buildArgs(
-        prompt,
-        options?.sessionId,
-        effectiveModel,
-        readOnly ? undefined : options?.cliConfigArgs,
-        runDefaults.approvalFlag,
-        readOnly,
-        runDefaults.transportArgs,
-      );
+      // The package owns argv when the integration is present; its refusal must end
+      // the turn loudly rather than fall back to a second builder here.
+      let args: string[];
+      let plannedManagedFlags: readonly string[] | undefined;
+      let plannedNormalizeEvent: ((event: unknown) => Promise<unknown>) | undefined;
+      if (this.planLaunch) {
+        const plan = await this.planLaunch({
+          prompt,
+          ...(options?.sessionId ? { sessionId: options.sessionId } : {}),
+          model: effectiveModel,
+          ...(readOnly ? { readOnly } : {}),
+          ...(readOnly ? {} : options?.cliConfigArgs ? { cliConfigArgs: options.cliConfigArgs } : {}),
+          ...(runDefaults.approvalFlag ? { approvalFlag: runDefaults.approvalFlag } : {}),
+          ...(runDefaults.transportArgs.length > 0 ? { transportArgs: runDefaults.transportArgs } : {}),
+          readOnlyAgent: OPENCODE_READ_ONLY_AGENT,
+        });
+        args = plan.args;
+        plannedManagedFlags = plan.managedArgvFlags;
+        plannedNormalizeEvent = plan.normalizeEvent;
+      } else {
+        args = this.buildArgs(
+          prompt,
+          options?.sessionId,
+          effectiveModel,
+          readOnly ? undefined : options?.cliConfigArgs,
+          runDefaults.approvalFlag,
+          readOnly,
+          runDefaults.transportArgs,
+        );
+      }
 
       log.debug(
         {
@@ -427,6 +494,7 @@ export class OpenCodeAgentService implements L0InjectableAgentService {
         ...(cwd ? { cwd } : {}),
         env: childEnv,
         onSuccessfulExitStderr,
+        ...(plannedManagedFlags && plannedManagedFlags.length > 0 ? { managedArgvFlags: plannedManagedFlags } : {}),
         ...(options?.signal ? { signal: options.signal } : {}),
         ...(options?.invocationId ? { invocationId: options.invocationId } : {}),
         ...(options?.cliSessionId ? { cliSessionId: options.cliSessionId } : {}),
@@ -552,7 +620,9 @@ export class OpenCodeAgentService implements L0InjectableAgentService {
           continue;
         }
 
-        const result = transformOpenCodeEvent(event, this.catId);
+        const result = plannedNormalizeEvent
+          ? mapOpenCodeWireEvent((await plannedNormalizeEvent(event)) as AgentAccessOpenCodeEvent, this.catId)
+          : transformOpenCodeEvent(event, this.catId);
         if (result !== null) {
           let terminateAfterYield = false;
           if (result.type === 'text' && result.content?.trim()) {
@@ -705,6 +775,7 @@ export class OpenCodeAgentService implements L0InjectableAgentService {
           trace: lastToolTrace,
           textMode: 'replace',
           transportArgs: runDefaults.transportArgs,
+          ...(plannedNormalizeEvent ? { normalizeEvent: plannedNormalizeEvent } : {}),
           options,
         })) {
           if (finalizerMsg.type === 'text') textEventCount++;
@@ -810,13 +881,23 @@ export class OpenCodeAgentService implements L0InjectableAgentService {
       params.transportArgs ??
       (await this.resolveRunDefaults(params.command, params.cwd, params.childEnv, params.options?.cliConfigArgs, true))
         .transportArgs;
-    const finalizerArgs = this.buildNoToolFinalizerArgs(
-      finalizerPrompt,
-      params.sessionId,
-      params.effectiveModel,
-      finalizerAgent,
-      transportArgs,
-    );
+    const finalizerArgs = this.planFinalizer
+      ? (
+          await this.planFinalizer({
+            prompt: finalizerPrompt,
+            model: params.effectiveModel,
+            finalizerAgent,
+            ...(params.sessionId ? { sessionId: params.sessionId } : {}),
+            ...(transportArgs.length > 0 ? { transportArgs } : {}),
+          })
+        ).args
+      : this.buildNoToolFinalizerArgs(
+          finalizerPrompt,
+          params.sessionId,
+          params.effectiveModel,
+          finalizerAgent,
+          transportArgs,
+        );
     const finalizerEnv = this.buildNoToolFinalizerEnv(params.childEnv, finalizerAgent);
     const cliOpts = {
       command: params.command,
@@ -897,7 +978,9 @@ export class OpenCodeAgentService implements L0InjectableAgentService {
         continue;
       }
 
-      const result = transformOpenCodeEvent(event, this.catId);
+      const result = params.normalizeEvent
+        ? mapOpenCodeWireEvent((await params.normalizeEvent(event)) as AgentAccessOpenCodeEvent, this.catId)
+        : transformOpenCodeEvent(event, this.catId);
       if (result === null) continue;
       if (result.type === 'session_init') {
         if (result.sessionId) params.metadata.sessionId = result.sessionId;

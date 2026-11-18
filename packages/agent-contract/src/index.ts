@@ -78,11 +78,72 @@ export const agentAccessKimiLaunchRequestSchema = z.object({
   }),
 });
 export type AgentAccessKimiLaunch = z.infer<typeof agentAccessKimiLaunchRequestSchema>['launch'];
+
+/**
+ * OpenCode launches need two values only the Host can establish: the approval flag
+ * its `run --help` probe found, and the transport args it resolved. They travel as
+ * inputs so the package plans argv without ever spawning anything.
+ */
+export const agentAccessOpenCodeLaunchRequestSchema = z.object({
+  operation: z.literal('plan_native_launch'),
+  client: z.literal('opencode'),
+  launch: z.object({
+    prompt: z.string(),
+    sessionId: z.string().optional(),
+    model: z.string().optional(),
+    readOnly: z.boolean().optional(),
+    cliConfigArgs: z.array(z.string()).readonly().optional(),
+    approvalFlag: z.string().optional(),
+    transportArgs: z.array(z.string()).readonly().optional(),
+    /** Host-owned agent name for the read-only run; required so the package never guesses it. */
+    readOnlyAgent: z.string().min(1),
+  }),
+});
+export type AgentAccessOpenCodeLaunch = z.infer<typeof agentAccessOpenCodeLaunchRequestSchema>['launch'];
+
+/** One envelope per native client; the Host routes by the discriminant. */
+export const agentAccessNativeLaunchRequestSchema = z.discriminatedUnion('client', [
+  agentAccessKimiLaunchRequestSchema,
+  agentAccessOpenCodeLaunchRequestSchema,
+]);
+export type AgentAccessNativeLaunchRequest = z.infer<typeof agentAccessNativeLaunchRequestSchema>;
+
+/**
+ * The OpenCode recovery run: after the CLI stops on a tool call the Host asks for a
+ * final answer with a tool-free agent. It is a separate operation because its inputs
+ * are the Host's own continuation, not a member-editor launch.
+ */
+export const agentAccessOpenCodeFinalizerRequestSchema = z.object({
+  operation: z.literal('plan_native_finalizer'),
+  client: z.literal('opencode'),
+  launch: z.object({
+    prompt: z.string(),
+    model: z.string(),
+    finalizerAgent: z.string().min(1),
+    sessionId: z.string().optional(),
+    transportArgs: z.array(z.string()).readonly().optional(),
+  }),
+});
+export type AgentAccessOpenCodeFinalizer = z.infer<typeof agentAccessOpenCodeFinalizerRequestSchema>['launch'];
+
 export const agentAccessNativeLaunchArgumentsSchema = z.object({
   args: z.array(z.string()),
   managedArgvFlags: z.array(z.string()),
 });
 export type AgentAccessNativeLaunchArguments = z.infer<typeof agentAccessNativeLaunchArgumentsSchema>;
+
+/** Shared by every native client: the token fields the Host's usage contract reads. */
+export const agentAccessTokenUsageSchema = z.object({
+  totalTokens: z.number().optional(),
+  inputTokens: z.number().optional(),
+  outputTokens: z.number().optional(),
+  cacheReadTokens: z.number().optional(),
+  cacheCreationTokens: z.number().optional(),
+  lastTurnInputTokens: z.number().optional(),
+  contextWindowSize: z.number().optional(),
+  contextUsedTokens: z.number().optional(),
+  costUsd: z.number().optional(),
+});
 
 export const agentAccessKimiEventRequestSchema = z.object({
   client: z.literal('kimi'),
@@ -96,21 +157,46 @@ export const agentAccessKimiEventSchema = z.discriminatedUnion('kind', [
     sessionId: z.string().optional(),
     text: z.string().optional(),
     thinking: z.string().optional(),
-    usage: z
-      .object({
-        totalTokens: z.number().optional(),
-        inputTokens: z.number().optional(),
-        outputTokens: z.number().optional(),
-        cacheReadTokens: z.number().optional(),
-        lastTurnInputTokens: z.number().optional(),
-        contextWindowSize: z.number().optional(),
-        contextUsedTokens: z.number().optional(),
-      })
-      .optional(),
+    usage: agentAccessTokenUsageSchema.optional(),
     tools: z.array(z.object({ name: z.string(), input: z.record(z.unknown()) })),
   }),
 ]);
 export type AgentAccessKimiEvent = z.infer<typeof agentAccessKimiEventSchema>;
+
+/**
+ * OpenCode's wire event keeps the step timestamp the CLI reported, because the Host
+ * maps it 1:1 onto its own message and must not substitute a read-time clock.
+ */
+export const agentAccessOpenCodeEventRequestSchema = z.object({
+  client: z.literal('opencode'),
+  event: z.unknown(),
+});
+export const agentAccessOpenCodeEventSchema = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('ignored') }),
+  z.object({ kind: z.literal('session_init'), sessionId: z.string().min(1), timestamp: z.number() }),
+  z.object({ kind: z.literal('text'), text: z.string(), timestamp: z.number() }),
+  z.object({ kind: z.literal('thinking'), text: z.string(), timestamp: z.number() }),
+  z.object({
+    kind: z.literal('tool'),
+    name: z.string(),
+    input: z.record(z.unknown()).optional(),
+    timestamp: z.number(),
+  }),
+  z.object({ kind: z.literal('usage'), usage: agentAccessTokenUsageSchema, timestamp: z.number() }),
+  z.object({
+    kind: z.literal('error'),
+    message: z.string(),
+    statusCode: z.number().optional(),
+    timestamp: z.number(),
+  }),
+]);
+export type AgentAccessOpenCodeEvent = z.infer<typeof agentAccessOpenCodeEventSchema>;
+
+export const agentAccessNativeEventRequestSchema = z.discriminatedUnion('client', [
+  agentAccessKimiEventRequestSchema,
+  agentAccessOpenCodeEventRequestSchema,
+]);
+export type AgentAccessNativeEventRequest = z.infer<typeof agentAccessNativeEventRequestSchema>;
 
 export const agentAccessClientDirectorySchema = z.object({
   clients: z.array(z.object({ id: clientIdSchema, label: z.string() })),

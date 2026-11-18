@@ -5,9 +5,10 @@ import {
   type AgentAccessRoleMutation,
   type AgentAccessRoleStore,
   agentAccessDetectRequestSchema,
-  agentAccessKimiEventRequestSchema,
-  agentAccessKimiLaunchRequestSchema,
   agentAccessLoginRequestSchema,
+  agentAccessNativeEventRequestSchema,
+  agentAccessNativeLaunchRequestSchema,
+  agentAccessOpenCodeFinalizerRequestSchema,
 } from '@clowder-ai/agent-contract';
 import { type AgentAccessAcpChildHandle, agentAccessDshConnectionInputSchema } from '@clowder-ai/agent-contract/acp';
 import { builtInAgentClients, inspectNativeAccessCandidate } from './discovery/agent-client-catalog.js';
@@ -20,6 +21,11 @@ import { runA2ATurn } from './runtime/a2a-turn.js';
 import { checkDshConnectionInWorker } from './runtime/acp/dsh/connection-check.js';
 import { normalizeKimiEvent } from './runtime/kimi-event-parser.js';
 import { buildKimiLaunchArguments } from './runtime/kimi-launch-arguments.js';
+import { normalizeOpenCodeEvent } from './runtime/opencode-event-parser.js';
+import {
+  buildOpenCodeLaunchArguments,
+  buildOpenCodeNoToolFinalizerArguments,
+} from './runtime/opencode-launch-arguments.js';
 
 export default {
   create() {
@@ -31,13 +37,22 @@ export default {
           actions: {
             configure(input: unknown) {
               if (input && typeof input === 'object' && 'operation' in input) {
-                const { launch } = agentAccessKimiLaunchRequestSchema.parse(input);
-                return buildKimiLaunchArguments(launch);
+                const request = agentAccessNativeLaunchRequestSchema.parse(input);
+                return request.client === 'kimi'
+                  ? buildKimiLaunchArguments(request.launch)
+                  : buildOpenCodeLaunchArguments(request.launch);
               }
               return { clients: builtInAgentClients };
             },
+            planFinalizer(input: unknown) {
+              const { launch } = agentAccessOpenCodeFinalizerRequestSchema.parse(input);
+              return buildOpenCodeNoToolFinalizerArguments(launch);
+            },
             parseNativeEvent(input: unknown) {
-              return normalizeKimiEvent(agentAccessKimiEventRequestSchema.parse(input).event);
+              const request = agentAccessNativeEventRequestSchema.parse(input);
+              return request.client === 'kimi'
+                ? normalizeKimiEvent(request.event)
+                : normalizeOpenCodeEvent(request.event);
             },
             testDshConnection({ input, launch }: { input: unknown; launch: () => Promise<AgentAccessAcpChildHandle> }) {
               return checkDshConnectionInWorker(agentAccessDshConnectionInputSchema.parse(input), launch);

@@ -2379,7 +2379,13 @@ async function initializeApi(
                       });
                       return;
                     case 'opencode':
-                      service = new OpenCodeAgentService({ catId });
+                      // Deferred lambdas: the planners are created later in startup than
+                      // this registry sync runs, exactly like the Kimi case above.
+                      service = new OpenCodeAgentService({
+                        catId,
+                        planLaunch: (input) => agentAccessOpenCodeLaunch(input),
+                        planFinalizer: (input) => agentAccessOpenCodeFinalizer(input),
+                      });
                       break;
                     case 'catagent': {
                       const { CatAgentService } = await import(
@@ -6005,6 +6011,17 @@ async function initializeApi(
   const { registerAgentClientLibraryRoutes } = await import('./routes/agent-client-library-routes.js');
   const { createAgentAccessKimiLaunchPlanner } = await import('./domains/plugin/agent-access-kimi.js');
   const agentAccessKimiLaunch = createAgentAccessKimiLaunchPlanner(
+    pluginRuntime.inventoryStore,
+    pluginRuntime.supervisor,
+  );
+  const { createAgentAccessOpenCodeLaunchPlanner, createAgentAccessOpenCodeFinalizerPlanner } = await import(
+    './domains/plugin/agent-access-opencode.js'
+  );
+  const agentAccessOpenCodeLaunch = createAgentAccessOpenCodeLaunchPlanner(
+    pluginRuntime.inventoryStore,
+    pluginRuntime.supervisor,
+  );
+  const agentAccessOpenCodeFinalizer = createAgentAccessOpenCodeFinalizerPlanner(
     pluginRuntime.inventoryStore,
     pluginRuntime.supervisor,
   );
