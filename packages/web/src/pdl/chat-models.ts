@@ -428,7 +428,7 @@ export function activeExecutionRows(data: ChatData, ui: ChatUiState) {
       name: cat?.displayName ?? x.catId,
       handle: cat?.mentionPatterns[0] ?? '',
       command,
-      kind: command ? 'command' : 'reply',
+      kind: x.executionKind === 'watcher' ? 'watch' : command ? 'command' : 'reply',
       activity: x.activity,
       what: x.activity,
       cur: ui.target === x.catId,

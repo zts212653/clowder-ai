@@ -547,6 +547,7 @@ function executionModel(query) {
       contextWarn: !!ctx && ctx.fillRatio >= 0.8,
       run: {
         state: live ? 'streaming' : 'idle',
+        watch: !!live && live.executionKind === 'watcher',
         time: live ? (Date.now() - live.startedAt) / 1000 : 0,
         hasLast: false,
       },

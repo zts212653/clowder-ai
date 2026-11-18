@@ -540,7 +540,8 @@
       "true": " · 有出错"
     },
     "execWhat": {
-      "reply": "回复你的消息"
+      "reply": "回复你的消息",
+      "watch": "守望查看"
     },
     "magicWord": "{0} · {1} → {2}",
     "emptyValue": {

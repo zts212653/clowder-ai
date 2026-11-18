@@ -1998,6 +1998,7 @@ pdl:
               fmt: clock
             "false": ""
             _: "@running"
+        watch: "@run.watch"
       tone:
         of: "@running"
         map:
@@ -16333,6 +16334,7 @@ pdl:
                                               args:
                                                 - "@what"
                                         _: "@what"
+                                    watch: t:chat.execWhat.watch
                                     _: "@kind"
                                 when:
                                   - "!@error"
@@ -34441,6 +34443,10 @@ pdl:
                 "false": false
                 _: true
         - parts: "@inline"
+        - icon: eye
+          size: xs
+          tip: t:chat.execWhat.watch
+          when: "@run.watch"
         - dot: "@run.tone"
           tip: "@run.tip"
           when: "@run"
