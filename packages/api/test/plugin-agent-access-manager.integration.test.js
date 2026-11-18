@@ -395,6 +395,7 @@ test('Agent access discovery executes the same standalone entrypoint from a Mana
     caution: 'Template caution',
     restrictions: ['Template restriction'],
   });
+  inherited.breeds[0].variants[0].acp = declared.acp;
   await writeFile(template, JSON.stringify(inherited));
   const roles = await call('GET', '/api/cats');
   const card = roles.json().cats.find((cat) => cat.id === createdRole.id);
@@ -403,6 +404,12 @@ test('Agent access discovery executes the same standalone entrypoint from a Mana
   assert.equal(card.caution, 'Template caution');
   assert.deepEqual(card.restrictions, ['Template restriction']);
   const rolePath = '/api/cats/' + createdRole.id;
+  const unavailableInherited = await call('PATCH', rolePath, {
+    carrier: 'acp',
+    expectedRevision: createdRole.configurationRevision,
+  });
+  assert.equal(unavailableInherited.statusCode, 409, unavailableInherited.payload);
+  assert.equal(unavailableInherited.json().code, 'agent_provider_unavailable');
   const staleSelection = await call('PATCH', rolePath, {
     ...declared,
     expectedRevision: createdRole.configurationRevision,
@@ -410,15 +417,24 @@ test('Agent access discovery executes the same standalone entrypoint from a Mana
   assert.equal(staleSelection.statusCode, 409, staleSelection.payload);
   assert.equal(staleSelection.json().code, 'agent_provider_unavailable');
   availableProviders.add(selectedProvider);
+  const enabledInherited = await call('PATCH', rolePath, {
+    carrier: 'acp',
+    expectedRevision: createdRole.configurationRevision,
+  });
+  assert.equal(enabledInherited.statusCode, 200, enabledInherited.payload);
+  assert.equal(enabledInherited.json().cat.acp.agentProvider, selectedProvider);
   const distinctCreation = await call('POST', '/api/cats', collidingCreate, receipt);
   assert.equal(distinctCreation.statusCode, 201, distinctCreation.payload);
   const receiptRole = distinctCreation.json().cat;
   assert.notEqual(receiptRole.id, createdRole.id);
   assert.equal(receiptRole.acp.agentProvider, selectedProvider);
-  const bound = await call('PATCH', rolePath, { ...declared, expectedRevision: createdRole.configurationRevision });
+  availableProviders.delete(selectedProvider);
+  const bound = await call('PATCH', rolePath, {
+    ...declared,
+    expectedRevision: enabledInherited.json().cat.configurationRevision,
+  });
   assert.equal(bound.statusCode, 200, bound.payload);
   assert.equal(bound.json().cat.acp.agentProvider, selectedProvider);
-  availableProviders.delete(selectedProvider);
   const edited = await call('PATCH', rolePath, {
     displayName: 'Changed using the member API',
     expectedRevision: bound.json().cat.configurationRevision,

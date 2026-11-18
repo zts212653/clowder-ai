@@ -548,8 +548,11 @@ function removeUnavailableTemplateVariants(
 function mergeTemplateWithCatalog(templatePath: string, options: CatCatalogReadOptions = {}) {
   const projectRoot = dirname(templatePath);
   const catalogRaw = readCatCatalogRaw(projectRoot, options);
-  if (catalogRaw === null) return null;
+  return catalogRaw === null ? null : mergeRuntimeCatalogSnapshot(templatePath, catalogRaw);
+}
 
+/** Resolve an already captured catalog snapshot through the same merge used by routing. */
+export function mergeRuntimeCatalogSnapshot(templatePath: string, catalogRaw: string) {
   const baseRaw = readTemplate(templatePath);
   const baseJson = JSON.parse(baseRaw) as Record<string, unknown>;
   const catalogJson = JSON.parse(catalogRaw) as Record<string, unknown>;

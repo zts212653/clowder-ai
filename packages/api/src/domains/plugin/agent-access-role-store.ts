@@ -9,6 +9,7 @@ import { readCatCatalogRaw, resolveCatCatalogPath } from '../../config/cat-catal
 import {
   loadCatConfig,
   loadResolvedCatConfig,
+  mergeRuntimeCatalogSnapshot,
   parseRawCatConfig,
   toAllCatConfigs,
 } from '../../config/cat-config-loader.js';
@@ -94,14 +95,24 @@ export function createAgentAccessRoleStore(
         if (change.catId && (change.kind === 'create' || change.kind === 'update')) {
           const previous = change.kind === 'update' ? parseRawCatConfig(currentSource) : undefined;
           const next = parseRawCatConfig(source);
-          const selected = catalogProvider(next, change.catId);
-          const current = previous && catalogProvider(previous, change.catId);
-          if (
-            selected &&
-            (!current || sessionImplementationKey(selected) !== sessionImplementationKey(current)) &&
-            isDeclaredAgentProviderAvailable?.(selected) === false
-          )
-            throw new Error(AGENT_PROVIDER_UNAVAILABLE);
+          if (isDeclaredAgentProviderAvailable) {
+            const template = resolveProjectTemplatePath(projectRoot);
+            const selected = catalogProvider(
+              parseRawCatConfig(mergeRuntimeCatalogSnapshot(template, source).raw),
+              change.catId,
+            );
+            if (selected && !isDeclaredAgentProviderAvailable(selected)) {
+              const current =
+                previous &&
+                catalogProvider(
+                  parseRawCatConfig(mergeRuntimeCatalogSnapshot(template, currentSource).raw),
+                  change.catId,
+                );
+              if (!current || sessionImplementationKey(selected) !== sessionImplementationKey(current)) {
+                throw new Error(AGENT_PROVIDER_UNAVAILABLE);
+              }
+            }
+          }
           assertCodexMemberMutationReady(
             projectRoot,
             next,
