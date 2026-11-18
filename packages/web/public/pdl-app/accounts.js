@@ -54,12 +54,23 @@ function bindAccounts() {
     clearTimeout(timer);
     if (!document.hidden && heldNeeded.has('accounts')) settleHold(read());
   });
+  // The sidebar quota pin preference: read when a projection shows it (a theme that draws the quota bars).
+  let pin = null;
+  async function readPin() {
+    try {
+      pin = await api.get('/api/config/quota-pin');
+    } catch {
+      pin = null;
+    }
+    await chatDataRender();
+  }
   api.on('sources:needed', function (diff) {
     if (diff.removed.indexOf('accounts') >= 0) clearTimeout(timer);
     if (diff.added.indexOf('accounts') >= 0) {
       clearTimeout(timer);
       settleHold(read());
     }
+    if (diff.added.indexOf('quotaPin') >= 0) settleHold(readPin());
   });
   PAGES.accounts = function () {
     return pdlView('page.accounts');
@@ -499,6 +510,90 @@ function bindAccounts() {
     const p = account(memberAccountRef(id, own)),
       q = p && quotaDataOf(p);
     return q && q.items.length ? { account: p.displayName, items: q.items } : null;
+  };
+  // Quota pin: every signed-in account's reading (the same as its account row) and, per family, the least left among
+  // the selected accounts. Which accounts count is the owner's choice (null = all); drawing it is a theme's choice.
+  const QUOTA_FAMILIES = ['claude', 'codex', 'agy', 'kimi'];
+  function quotaFamily(p) {
+    if (p.authType !== 'oauth' || p.googleCloud) return '';
+    if (p.agy) return 'agy';
+    return { anthropic: p.baseUrl ? '' : 'claude', openai: 'codex', kimi: 'kimi' }[p.clientId] || '';
+  }
+  VM.quotaPin = function () {
+    if (projectionNeeded) {
+      projectionNeeded.add('accounts');
+      projectionNeeded.add('quotaPin');
+    }
+    if (!pin) return { pinned: false, bars: [], accounts: [], selected: [], count: 0 };
+    const all = providers.filter(quotaFamily).map(function (p) {
+      const q = quotaDataOf(p);
+      return {
+        id: p.id,
+        family: quotaFamily(p),
+        name: p.displayName,
+        inUse: accountUsers(p).length > 0,
+        items: q ? q.items : [],
+        canRefresh: !!storedQuota(p) || p.clientId === 'openai',
+      };
+    });
+    const chosen =
+      pin.selectedAccountRefs ||
+      all.map(function (a) {
+        return a.id;
+      });
+    all.forEach(function (a) {
+      a.selected = chosen.indexOf(a.id) >= 0;
+    });
+    const bars = QUOTA_FAMILIES.map(function (f) {
+      const left = all
+        .filter(function (a) {
+          return a.selected && a.family === f;
+        })
+        .reduce(function (m, a) {
+          return a.items.reduce(function (n, i) {
+            return n == null || i.left < n ? i.left : n;
+          }, m);
+        }, null);
+      return { family: f, left: left, has: left != null, low: left != null && left < QUOTA_LOW };
+    });
+    return {
+      pinned: pin.pinned,
+      bars: bars,
+      accounts: all,
+      selected: all.filter(function (a) {
+        return a.selected;
+      }),
+      choosing: !!CS.quotaChoosing,
+      count: chosen.length,
+    };
+  };
+  A.quotaPinSet = async function (d) {
+    pin = await api.post('/api/config/quota-pin', { method: 'PUT' }, d);
+    await chatDataRender();
+    return true;
+  };
+  A.quotaPinSelect = function (d) {
+    return A.quotaPinSet({
+      selectedAccountRefs: VM.quotaPin()
+        .accounts.filter(function (a) {
+          return a.selected !== (a.id === d.id);
+        })
+        .map(function (a) {
+          return a.id;
+        }),
+    });
+  };
+  A.quotaPinRefresh = async function () {
+    await Promise.all(
+      VM.quotaPin()
+        .selected.filter(function (a) {
+          return a.canRefresh;
+        })
+        .map(function (a) {
+          return A.accQuota({ k: a.id });
+        }),
+    );
+    return true;
   };
   // Claude, agy and kimi: the account list carries the stored reading; reading again stores a new one and the list is
   // read again. A failed read keeps the last reading and names why.

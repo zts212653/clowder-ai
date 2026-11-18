@@ -4479,7 +4479,13 @@
       "selected": "Only my selections",
       "dismissed": "Ignored",
       "undone": "Undone",
-      "dismiss": "Ignore"
+      "dismiss": "Ignore",
+      "panelTitle": "Watcher panel (experimental)",
+      "panelOn": "On",
+      "panelOff": "Off",
+      "panelOnHint": "The panel replaces the single watcher; the switch above still decides whether it runs.",
+      "panelOffHint": "The watcher panel is off. Turn it on, then choose members and accounts, and keep the switch above on.",
+      "panelNone": "No member can serve on the watcher panel."
     },
     "runtimeSlot": {
       "b": "{0} tools · {1} subagents",
@@ -4551,6 +4557,10 @@
     }
   },
   "chatRich": {
+    "profile": {
+      "before": "Current:",
+      "after": "Proposed:"
+    },
     "selection": {
       "fileSub": "{0} · Document",
       "picked": "I chose: {0}"
@@ -5304,5 +5314,22 @@
       "largeText": "Large text",
       "insufficient": "Insufficient"
     }
+  },
+  "quotaPin": {
+    "title": "Account usage",
+    "refresh": "Refresh",
+    "refreshHint": "Refresh only the selected accounts",
+    "chooseAccounts": "Choose accounts",
+    "doneChoosing": "Done",
+    "manageAccounts": "Manage accounts",
+    "unpin": "Hide icon",
+    "inUse": "In use",
+    "standby": "Standby",
+    "noReading": "No reading",
+    "noAccountsSelected": "No accounts selected",
+    "noOauthAccounts": "No accounts configured",
+    "barTitle": "Show usage in the sidebar",
+    "selectedCount": "{0} accounts selected",
+    "item": "{0} {1}% left"
   }
 }

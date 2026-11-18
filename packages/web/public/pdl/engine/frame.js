@@ -706,7 +706,8 @@ function ctLeaf(k, sig, draw) {
   reads.forEach(function (r) { for (let i = 0; i < READ_SCOPES.length; i++) READ_SCOPES[i].add(r); });
   const took = ['page', 'detail'].filter(function (r) { return ctx.back[r] && !BACK[r]; });
   const full = typeof x === 'string' ? keptExpand(x) : x && Object.assign({}, x, { html: keptExpand(x.html) });   /* 记下的是完整的一块：里面没重画的子块交的是壳，换回它们的内容（下次整块交回时不缺） */
-  CT_PIECE[k] = x ? { sig: LEAF_DIRTY.delete(k) ? null : sig, back: back, took: took, reads: reads, own: own, up: up, ctx: ctx, draw: draw, focus: focus, piece: full } : null;
+  CT_PIECE[k] = x != null ? { sig: LEAF_DIRTY.delete(k) ? null : sig, back: back, took: took, reads: reads, own: own, up: up, ctx: ctx, draw: draw, focus: focus, piece: full } : null;
+  /* 画出来是空的也照样记下（读过什么）：之后数据让它有了内容，命中它的那次变化才不会落空——页面上没有它的节点，局部重画就退回整页这一遍 */
   /* 重画出来和上一次一模一样（按时间重算了、显示没变）：当作没变，原来的节点整个留着——不比对，本地展开、滚动这类运行时的状态不受影响 */
   if (RENDER_CHANGED && was && typeof x === 'string' && tickless(full) === tickless(was.piece) && /^<div class="vw-view/.test(full)) return keptStub(k, full);
   return x;
@@ -740,7 +741,7 @@ function renderLocal(keep, changed) {
     try { t.x = ctLeaf(t.k, t.p.sig, t.p.draw); } finally { PV.tabKey = tab; PV.region = region; NAV_CTX = nav; Object.assign(BACK, back); CT_UP.length = 0; }
     t.tpl = document.createElement('template'); t.tpl.innerHTML = t.x || '';
   });
-  if (targets.some(function (t) { return t.tpl.content.childElementCount > 1; })) { RENDERING = false; return false; }   /* 重画出来不止一个根：换不进它原来那一个节点，走整页这一遍（这几块已经是新的，整页照样认它们变了） */
+  if (targets.some(function (t) { return t.tpl.content.childElementCount !== 1; })) { RENDERING = false; return false; }   /* 重画出来不是正好一个根（多了，或者空了）：换不进它原来那一个节点，走整页这一遍——空了也就地删掉的话，外层记下的那一块还是删之前的样子，之后它再出现时会被当成没变（这几块已经是新的，整页照样认它们变了） */
   const fields = popFieldsTake(), keep0 = reuseNodes();   /* 节点复用（孤岛、组件自己的节点）：和整页那一遍一样，画完内容没变就换回原节点 */
   if (ov) paintOverlays(SHELL.el, overlaysRead());
   targets.forEach(function (t) {

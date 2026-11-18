@@ -5467,6 +5467,26 @@ pdl:
         props: "@rich.diff"
         when: "@rich.diff"
       - type: component
+        use: v2Label
+        props:
+          text: t:chatRich.profile.before
+        when: "@rich.profile"
+      - type: component
+        use: v2Pre
+        props:
+          text: "@rich.profile.before"
+        when: "@rich.profile"
+      - type: component
+        use: v2Label
+        props:
+          text: t:chatRich.profile.after
+        when: "@rich.profile"
+      - type: component
+        use: v2Pre
+        props:
+          text: "@rich.profile.after"
+        when: "@rich.profile"
+      - type: component
         use: v2Media
         props: "@rich.audio"
         when: "@rich.audio"
@@ -11531,6 +11551,8 @@ pdl:
                     props:
                       title: t:v2f.copy.w548
                       sub: t:v2f.copy.w846
+                  - type: view
+                    id: settings.watcher
                   - type: component
                     use: v2ConciergeSettings
                     props:
@@ -11577,6 +11599,17 @@ pdl:
                   - $frag: V2_OPS_CONTENT
                 panel: true
   popups:
+    quotaPin:
+      view: v2.quotaPin.window
+      when: s.popOn.quotaPin
+      at: trigger
+      exit:
+        - outside
+        - esc
+      drag: false
+      close: close
+      closeArgs:
+        path: s.popOn.quotaPin
     v2.runtimeUpdateRequired:
       view: v2.runtimeUpdateRequired
       when: s.connection.updateRequired
@@ -11598,6 +11631,190 @@ pdl:
       closeArgs:
         path: cs.modal
   views:
+    v2.quotaPin.rail:
+      vm: quotaPin
+      bare: true
+      blocks:
+        - type: component
+          use: v2QuotaRail
+          props:
+            label: t:quotaPin.title
+            bars: $.bars
+            act: open
+            args:
+              node: v2.quotaPin.window
+              as: float
+          when: $.pinned
+    v2.quotaPin.window:
+      popup: quotaPin
+      vm: quotaPin
+      bare: true
+      blocks:
+        - type: component
+          use: v2Popover
+          props:
+            page: quota
+            blocks:
+              - type: component
+                use: v2Toolbar
+                props:
+                  items:
+                    - type: component
+                      use: v2Text
+                      props:
+                        text:
+                          of: $.choosing
+                          map:
+                            "true": t:quotaPin.chooseAccounts
+                            _: t:quotaPin.title
+                        role: title
+                  right:
+                    - type: component
+                      use: v2Action
+                      props:
+                        label: t:quotaPin.refresh
+                        tip: t:quotaPin.refreshHint
+                        link: true
+                        act: quotaPinRefresh
+                      when: "!$.choosing"
+                    - type: component
+                      use: v2Action
+                      props:
+                        label:
+                          of: $.choosing
+                          map:
+                            "true": t:quotaPin.doneChoosing
+                            _: t:quotaPin.chooseAccounts
+                        link: true
+                        act: toggle
+                        args:
+                          path: cs.quotaChoosing
+                        stay: true
+              - type: component
+                use: v2Each
+                props:
+                  from: $.accounts
+                  blocks:
+                    - type: component
+                      use: v2Check
+                      props:
+                        label: "@name"
+                        value: "@selected"
+                        act: quotaPinSelect
+                        args:
+                          id: "@id"
+                when: $.choosing
+              - type: component
+                use: v2Each
+                props:
+                  from: $.selected
+                  blocks:
+                    - type: component
+                      use: v2Box
+                      props:
+                        role: group
+                        blocks:
+                          - type: component
+                            use: v2Toolbar
+                            props:
+                              items:
+                                - type: component
+                                  use: v2Text
+                                  props:
+                                    text: "@name"
+                                - type: component
+                                  use: v2Text
+                                  props:
+                                    text:
+                                      of: "@inUse"
+                                      map:
+                                        "true": t:quotaPin.inUse
+                                        _: t:quotaPin.standby
+                                    role: meta
+                          - type: component
+                            use: v2Text
+                            props:
+                              from: "@items"
+                              parts:
+                                - t: quotaPin.item
+                                  args:
+                                    - of: "@window"
+                                      map:
+                                        five_hour: t:accounts.quotaWindow.five_hour
+                                        seven_day: t:accounts.quotaWindow.seven_day
+                                        seven_day_overage_included: t:accounts.quotaWindow.fable
+                                        _: "@label"
+                                    - "@left"
+                              sep: " · "
+                              role: meta
+                            when: "@items.length"
+                          - type: component
+                            use: v2Text
+                            props:
+                              text: t:quotaPin.noReading
+                              role: meta
+                            when: "!@items.length"
+                when: "!$.choosing"
+              - type: component
+                use: v2Text
+                props:
+                  text:
+                    of: $.accounts.length
+                    gte: 1
+                    map:
+                      "true": t:quotaPin.noAccountsSelected
+                      _: t:quotaPin.noOauthAccounts
+                  role: meta
+                when:
+                  - "!$.choosing"
+                  - "!$.selected.length"
+              - type: component
+                use: v2Toolbar
+                props:
+                  items:
+                    - type: component
+                      use: v2Action
+                      props:
+                        label: t:quotaPin.manageAccounts
+                        link: true
+                        act: open
+                        args:
+                          page: accounts
+                  right:
+                    - type: component
+                      use: v2Action
+                      props:
+                        label: t:quotaPin.unpin
+                        link: true
+                        act: quotaPinSet
+                        args:
+                          pinned: false
+    v2.quotaPin.bar:
+      vm: quotaPin
+      bare: true
+      blocks:
+        - type: component
+          use: v2SettingsFields
+          props:
+            rows:
+              - label: t:quotaPin.barTitle
+                foot:
+                  t: quotaPin.selectedCount
+                  args:
+                    - $.count
+                control:
+                  type: component
+                  use: v2Toggle
+                  props:
+                    label: t:quotaPin.barTitle
+                    value: $.pinned
+                    act: quotaPinSet
+                    args:
+                      pinned:
+                        of: $.pinned
+                        map:
+                          "true": false
+                          _: true
     works.recent:
       vm: recentWorks
       bare: true
@@ -16445,6 +16662,7 @@ pdl:
                   use: v2Nameplate
                   props:
                     from: "@from"
+                    source: "@source"
                     act: memberCard
               quote:
                 - type: component
@@ -16482,6 +16700,42 @@ pdl:
                           text: t:v2a.deleted
                           small: true
                         when: "@deleted"
+                      - type: component
+                        use: v2Action
+                        props:
+                          label: t:chatMessage.watcher.who
+                          link: true
+                          act: watcherRoundOpen
+                          args:
+                            id: "@round.id"
+                        when:
+                          - "@round"
+                          - "!@round.open"
+                      - type: component
+                        use: v2Box
+                        props:
+                          blocks:
+                            - type: component
+                              use: v2Text
+                              props:
+                                from: "@round.members"
+                                parts:
+                                  - "@label"
+                                  - ：
+                                  - t: chatMessage.watcher.roundMember
+                                    args:
+                                      - "@status"
+                                      - "@name"
+                                sep: " · "
+                                role: meta
+                        when: "@round.open"
+                        load: "@round.load"
+                        error: t:frame.loadError
+                        retry:
+                          act: watcherRoundOpen
+                          args:
+                            id: "@round.id"
+                            reload: true
                 - type: component
                   use: v2StatusText
                   props:
@@ -21977,6 +22231,8 @@ pdl:
                 use: v2PageHeader
                 props:
                   title: t:v2f.copy.w836
+              - type: view
+                id: v2.quotaPin.bar
               - type: component
                 use: v2Accounts
                 props:
@@ -24008,6 +24264,97 @@ pdl:
                                   map:
                                     "true": ""
                                     _: "@capability.reason"
+              - type: component
+                use: v2SettingsFields
+                props:
+                  rows:
+                    - label: t:chatMessage.watcher.panelTitle
+                      foot:
+                        of: $.panelOn
+                        map:
+                          "true": t:chatMessage.watcher.panelOnHint
+                          _: t:chatMessage.watcher.panelOffHint
+                      value:
+                        of: $.panelOn
+                        map:
+                          "true": t:chatMessage.watcher.panelOn
+                          _: t:chatMessage.watcher.panelOff
+                      control:
+                        type: component
+                        use: v2Toggle
+                        props:
+                          label: t:chatMessage.watcher.panelTitle
+                          value: $.panelOn
+                          act: watcherPanelSet
+                          args:
+                            field: enabled
+                            value:
+                              of: $.panelOn
+                              map:
+                                "true": false
+                                _: true
+              - type: component
+                use: v2Box
+                props:
+                  role: group
+                  blocks:
+                    - type: component
+                      use: v2Each
+                      props:
+                        from: $.panelMembers
+                        blocks:
+                          - type: component
+                            use: v2Toolbar
+                            props:
+                              items:
+                              - type: component
+                                use: v2Check
+                                props:
+                                  label: "@label"
+                                  value: "@active"
+                                  disabled: "@last"
+                                  act: watcherPanelMember
+                                  args:
+                                    id: "@catId"
+                              - type: component
+                                use: v2Select
+                                when: "@active"
+                                props:
+                                  id: "@fieldId"
+                                  value: "@account"
+                                  change: watcherPanelAccount
+                                  args:
+                                    id: "@catId"
+                                  options:
+                                    - v: ""
+                                      label: t:chatMessage.watcher.ownAccount
+                                    - from: $.panelAccounts
+                                      item:
+                                        v: "@id"
+                                        label: "@label"
+                    - type: component
+                      use: v2Text
+                      props:
+                        text: t:chatMessage.watcher.panelNone
+                        role: meta
+                      when: "!$.panelMembers.length"
+                when: $.panelOn
+              - type: component
+                use: v2SettingsFields
+                props:
+                  rows:
+                    - label: t:chatMessage.watcher.panelLimit
+                      control:
+                        type: component
+                        use: v2Select
+                        props:
+                          id: watcher-panel-limit
+                          value: $.panel.maxConcurrentRuns
+                          change: watcherPanel
+                          args:
+                            field: maxConcurrentRuns
+                          options: $.panelLimits
+                when: $.panelOn
               - type: component
                 use: v2Choices
                 props:
@@ -30438,6 +30785,8 @@ pdl:
               - type: slot
                 slot: rail.top
             bottom:
+              - type: view
+                id: v2.quotaPin.rail
               - type: slot
                 slot: rail.bottom
                 ctx: "@"

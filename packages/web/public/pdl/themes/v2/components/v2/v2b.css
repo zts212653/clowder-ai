@@ -45,3 +45,21 @@
 .v2-shell .ws-pane { display:flex; flex-direction:column; overflow:hidden; min-height:0; border:1px solid var(--shell-hairline); border-radius:8px; background:var(--console-card-bg); }
 .v2-shell .annotation-quote { color:inherit; background:var(--opus-bg); border-bottom:1px solid var(--opus-light); }
 .v2-shell .annotation-mark { vertical-align:middle; margin-left:4px; }
+
+/* F051 quota bars (shell/quota-pin): four cat-family anchors, same OKLCH ring derivation as upstream cat-persona-tokens.css */
+:root {
+  --family-ragdoll-ring: oklch(0.55 calc(0.105 * 1.1) 304.9);
+  --family-mainecoon-ring: oklch(0.55 calc(0.095 * 1.1) 143.9);
+  --family-siamese-ring: oklch(0.55 calc(0.11 * 1.1) 247.5);
+  --family-turkish-van-ring: oklch(0.58 calc(0.12 * 1.05) 59.6);
+  --quota-bar-danger: oklch(0.57 0.182 24.5);
+}
+[data-theme="dark"] {
+  --family-ragdoll-ring: oklch(0.7 0.105 304.9);
+  --family-mainecoon-ring: oklch(0.7 0.095 143.9);
+  --family-siamese-ring: oklch(0.7 0.11 247.5);
+  --family-turkish-van-ring: oklch(0.72 0.12 59.6);
+  --quota-bar-danger: oklch(0.7 0.175 24.5);
+}
+/* shell/quota-pin/QuotaRingPopover: w-[340px], content padded inside the shared popover shell */
+.v2-popover[data-page="quota"] { width:340px; padding:12px; gap:10px; }

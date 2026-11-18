@@ -144,7 +144,7 @@ PDL_COMPONENTS.v2RoutingPreview = function (p, sc, root) {
 
 /* ChatMessage / MessageBubble / CatNameplate / ReplyPill / ReplyLastLine. */
 PDL_COMPONENTS.v2Nameplate = function (p, sc, root) {
-  const q = pvDeep(p, root, sc), w = whoInfo(q.from), paint = v2IdentityPaint(w);
+  const q = pvDeep(p, root, sc), w = whoInfo(q.from, q.source), paint = v2IdentityPaint(w);   /* 连接器的消息用来源名（如「守望猫」），和上游一样 */
   return '<span data-testid="cat-nameplate" data-cat-id="' + h(w.id) + '" class="cafe-nameplate" style="background-image:linear-gradient(to bottom,' + paint.surface + ',transparent)"><span class="cafe-nameplate-avatar">' + v2Avatar(q.from, 32) + '</span><button class="cafe-nameplate-name" style="color:oklch(var(--cat-name-l,.15) var(--cat-name-c,.025) var(--cat-name-h,5))" data-hover="memberCard" data-who="' + h(w.id) + '"' + actAttrs(q.act, { who: w.id }) + '>' + h(w.name) + '</button></span>';
 };
 PDL_COMPONENTS.v2Quote = function (p, sc, root) {
@@ -167,8 +167,9 @@ PDL_COMPONENTS.v2ReplyLastLine = function (p, sc, root) {
 };
 PDL_COMPONENTS.v2InlineAction = function (p, sc, root) { return '<button class="inline-flex flex-none items-center gap-0.5 rounded hover:underline"' + actAttrs(p.act, pvArgsObj(p.args, sc, root)) + '>' + (p.icon ? v2Glyph(p.icon, 'h-3 w-3') : '') + pvText(p.label, sc, root) + '</button>'; };
 PDL_COMPONENTS.v2DotSeparator = function () { return '<span class="flex-none" style="opacity:.6">·</span>'; };
+/* 一条消息带卡片（搜索答案、提议、摘要……）时用它自己的节点模板画卡片；其余消息走统一的消息模板 */
 PDL_COMPONENTS.v2Stream = function (p, sc, root) {
-  return '<div data-stream="chat" data-own="stream">' + unitsHtml('stream:chat', pvList(p.from, sc, root), streamUnitKey, function (it, r) { if(p.item)return PDL_COMPONENTS.v2Message(p.item,it,r);const t=pdlTyped(p.slot||'chat.node',it.kind);return t?v2Node(t,it,r):''; }, root) + '</div>';
+  return '<div data-stream="chat" data-own="stream">' + unitsHtml('stream:chat', pvList(p.from, sc, root), streamUnitKey, function (it, r) { const t=pdlTyped(p.slot||'chat.node',it.kind);if(p.item&&!(it.card&&t))return PDL_COMPONENTS.v2Message(p.item,it,r);return t?v2Node(t,it,r):''; }, root) + '</div>';
 };
 PDL_COMPONENTS.v2Progress = function (p, sc, root) {
   const xs = pvList(p.from, sc, root);
@@ -310,6 +311,8 @@ PDL_COMPONENTS.v2Rich = function (p, sc, root) {
   if (q.file) parts.push('<button class="flex items-center gap-2"' + actAttrs(p.open.act,pvArgsObj(p.open.args,q.file,root)) + '>' + v2Glyph('file') + h(q.file.name) + '</button>');
   if (q.widget) parts.push('<iframe class="cafe-rich-widget" sandbox="allow-scripts" srcdoc="' + h(q.widget.html) + '"></iframe>');
   if (q.diff) parts.push('<pre class="cafe-rich-diff">' + h(q.filePath) + '\n' + q.diff.hunks.map(function (r) { return h(r[0]) + '\n' + r[1].map(function (line) { return h(line[0] + line[1]); }).join('\n'); }).join('\n') + '</pre>');
+  /* 画像更新提议：上游正文里的「当前内容 / 提议改为」两段，各是标签加代码块 */
+  if (q.profile) parts.push('<div class="markdown-content text-sm">' + ['before', 'after'].map(function (k) { return '<p class="mb-2"><strong>' + h(tc('chatRich.profile.' + k)) + '</strong></p><pre><code>' + h(q.profile[k]) + '</code></pre>'; }).join('') + '</div>');
   return parts.length ? '<section class="cafe-rich-card">' + title + parts.join('') + '</section>' : title;
 };
 
@@ -348,6 +351,17 @@ PDL_COMPONENTS.v2WorkspaceMenu = function (p, sc, root) { return '<div class="v2
 PDL_COMPONENTS.v2RailButton = function (p,sc,root) {
   const q=pvDeep(p,root,sc), cur=q.current!=null?q.current:q.entry&&pdlCur(q.entry);
   return '<button type="button" class="shell-rail-item shell-focusable relative flex h-9 w-9 flex-none items-center justify-center rounded-[9px] text-[var(--shell-muted)]"' + actAttrs(q.act,q.args) + (q.attrs || '') + (q.disabled?' disabled':'') + (q.entry?' data-entry="'+h(q.entry)+'"':'') + (cur?' aria-current="page" data-selected="true" style="background:var(--shell-selected);color:var(--shell-ink)"':'') + ' aria-label="'+h(q.label)+'" data-tip="'+h(q.label)+'">' + (q.asset?'<img src="'+h(asset(q.asset))+'"'+(q.asset2?' srcset="'+h(asset(q.asset))+' 1x, '+h(asset(q.asset2))+' 2x"':'')+' alt="" width="'+(q.size||24)+'" height="'+(q.size||24)+'">':'') + (q.avatar?v2Avatar(q.avatar,28,q.portrait,q.avatarName):'') + (q.icon?v2Glyph(q.icon,'h-5 w-5'):'') + (q.count?'<span class="absolute right-0 top-0 rounded-full bg-[var(--shell-primary)] px-1 text-micro text-[var(--shell-primary-on)]">'+h(q.count)+'</span>':'') + '</button>';
+};
+/* shell/QuotaRingButton + QuotaRingIcon: four family bars (布偶 · 缅因 · 暹罗 · 梵花); a family without a reading is an empty bar, never a fake 0%. */
+const V2_QUOTA_COLOR = { claude: 'var(--family-ragdoll-ring)', codex: 'var(--family-mainecoon-ring)', agy: 'var(--family-siamese-ring)', kimi: 'var(--family-turkish-van-ring)' };
+PDL_COMPONENTS.v2QuotaRail = function (p,sc,root) {
+  const q=pvDeep(p,root,sc), bars=(q.bars||[]).map(function (b,i) {
+    const x=(2.1+i*5.4).toFixed(2);
+    if (!b.has) return '<rect x="'+x+'" y="3" width="3.6" height="18" rx="1.2" fill="currentColor" fill-opacity="0.16"/>';
+    const c=b.low?'var(--quota-bar-danger, var(--shell-danger))':V2_QUOTA_COLOR[b.family], fh=Math.max(b.low?3.5:0,18*Math.max(0,Math.min(100,b.left))/100);
+    return '<rect x="'+x+'" y="3" width="3.6" height="18" rx="1.2" fill="'+c+'" fill-opacity="'+(b.low?0.55:0.2)+'"/>'+(fh>0?'<rect x="'+x+'" y="'+(21-fh).toFixed(2)+'" width="3.6" height="'+fh.toFixed(2)+'" rx="1.2" fill="'+c+'"/>':'');
+  }).join('');
+  return '<button type="button" class="shell-rail-item shell-focusable relative flex h-9 w-9 flex-none items-center justify-center rounded-[9px] text-[var(--shell-muted)]"'+actAttrs(q.act,q.args)+' aria-label="'+h(q.label)+'" data-tip="'+h(q.label)+'"><svg viewBox="0 0 24 24" fill="none" class="h-5 w-5" aria-hidden="true">'+bars+'</svg></button>';
 };
 PDL_COMPONENTS.v2SidebarIconButton = function (p,sc,root) {
   const q=pvDeep(p,root,sc), menu=p.menu?menuLive(rowMenuItems(p.menu,sc,root)):null;

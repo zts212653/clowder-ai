@@ -4479,7 +4479,13 @@
       "selected": "只看我选的",
       "dismissed": "已忽略",
       "undone": "已撤销",
-      "dismiss": "忽略"
+      "dismiss": "忽略",
+      "panelTitle": "多只守望（实验）",
+      "panelOn": "已开启",
+      "panelOff": "已关闭",
+      "panelOnHint": "多只守望替代单只守望，仍由上方总开关控制是否运行。",
+      "panelOffHint": "尚未启用多只守望。开启后再选择成员和账号，并保持上方总开关打开。",
+      "panelNone": "没有能担任多只守望的成员。"
     },
     "runtimeSlot": {
       "b": "{0} 次工具 · {1} 次子代理",
@@ -4551,6 +4557,10 @@
     }
   },
   "chatRich": {
+    "profile": {
+      "before": "当前内容：",
+      "after": "提议改为："
+    },
     "selection": {
       "fileSub": "{0} · 文档",
       "picked": "我选了：{0}"
@@ -5304,5 +5314,22 @@
       "largeText": "大字",
       "insufficient": "不够"
     }
+  },
+  "quotaPin": {
+    "title": "账号额度",
+    "refresh": "刷新",
+    "refreshHint": "仅刷新当前勾选账号的余量",
+    "chooseAccounts": "选择账号",
+    "doneChoosing": "完成",
+    "manageAccounts": "管理账号",
+    "unpin": "收起图标",
+    "inUse": "正在用",
+    "standby": "备用",
+    "noReading": "没有读数",
+    "noAccountsSelected": "尚未勾选要显示的账号",
+    "noOauthAccounts": "尚未添加账号",
+    "barTitle": "在左侧栏显示额度",
+    "selectedCount": "已选 {0} 个账号",
+    "item": "{0} 剩 {1}%"
   }
 }
