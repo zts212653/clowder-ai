@@ -117,22 +117,28 @@ export const agentAccessClientDirectorySchema = z.object({
 });
 export type AgentAccessClientDirectory = z.infer<typeof agentAccessClientDirectorySchema>;
 
+export const agentAccessRoleProfileSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  displayName: z.string(),
+  nickname: z.string().optional(),
+  banner: z.string().optional(),
+  color: z.object({ primary: z.string(), secondary: z.string() }),
+  mentionPatterns: z.array(z.string()),
+  roleDescription: z.string(),
+  personality: z.string().optional(),
+  teamStrengths: z.string().optional(),
+  caution: z.string().nullable().optional(),
+  restrictions: z.array(z.string()).optional(),
+  strengths: z.array(z.string()).optional(),
+});
+export type AgentAccessRoleProfile = z.infer<typeof agentAccessRoleProfileSchema>;
+
 export const agentAccessRoleCardsSchema = z.array(
-  z.object({
-    id: z.string(),
+  agentAccessRoleProfileSchema.extend({
     configurationRevision: z.string().optional(),
-    name: z.string(),
-    displayName: z.string(),
-    nickname: z.string().optional(),
-    banner: z.string().optional(),
-    color: z.object({ primary: z.string(), secondary: z.string() }),
-    mentionPatterns: z.array(z.string()),
-    roleDescription: z.string(),
-    personality: z.string().optional(),
-    teamStrengths: z.string().optional(),
-    caution: z.string().nullable().optional(),
+    effectiveProfile: z.literal(true).optional(),
     restrictions: z.array(z.string()),
-    strengths: z.array(z.string()).optional(),
     client: z.object({
       id: z.string(),
       label: z.string(),
@@ -338,7 +344,12 @@ export interface RuntimeCatUpdate {
 }
 
 export interface AgentAccessRoleStore {
-  readCatalog(): Promise<{ readonly source: string; readonly revision: string }>;
+  readCatalog(): Promise<{
+    readonly source: string;
+    readonly revision: string;
+    /** Public fields resolved by the Host's shared catalog loader for card reads. */
+    readonly profiles?: Readonly<Record<string, AgentAccessRoleProfile>>;
+  }>;
   commitCatalog(
     revision: string,
     source: string,
@@ -376,6 +387,19 @@ export interface AgentAccessA2ATurn {
   readonly catId: CatId;
   readonly taskId: string;
   readonly prompt: string;
+}
+
+/** F050 wire request for the exact turn previously admitted by the Host. */
+export function buildAgentAccessA2ARequest({ taskId, prompt }: Pick<AgentAccessA2ATurn, 'taskId' | 'prompt'>) {
+  return {
+    jsonrpc: '2.0',
+    id: taskId,
+    method: 'tasks/send',
+    params: {
+      id: taskId,
+      message: { role: 'user', parts: [{ type: 'text', text: prompt }] },
+    },
+  };
 }
 
 export interface AgentAccessA2AResponse {

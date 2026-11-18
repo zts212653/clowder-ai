@@ -1,5 +1,10 @@
 import type { A2AJsonRpcResponse } from '@cat-cafe/shared';
-import type { AgentAccessA2AEvent, AgentAccessA2ASubmit, AgentAccessA2ATurn } from '@clowder-ai/agent-contract';
+import {
+  type AgentAccessA2AEvent,
+  type AgentAccessA2ASubmit,
+  type AgentAccessA2ATurn,
+  buildAgentAccessA2ARequest,
+} from '@clowder-ai/agent-contract';
 import { transformA2ATaskToMessages } from './a2a-event-transform.js';
 
 export async function runA2ATurn(
@@ -13,15 +18,7 @@ export async function runA2ATurn(
     error: message,
     timestamp: Date.now(),
   });
-  const body = {
-    jsonrpc: '2.0',
-    id: input.taskId,
-    method: 'tasks/send',
-    params: {
-      id: input.taskId,
-      message: { role: 'user', parts: [{ type: 'text', text: input.prompt }] },
-    },
-  };
+  const body = buildAgentAccessA2ARequest(input);
   const response = await submit(JSON.stringify(body));
   if (response.status < 200 || response.status >= 300)
     return [error(`A2A request failed: ${response.status} ${response.statusText}`)];

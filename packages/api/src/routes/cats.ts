@@ -807,9 +807,11 @@ async function toCatResponse(
       const identityProfile = loadDossierProfiles(findMonorepoRoot()).get(cat.id);
       const revision = memberConfigurationRevision(projectRoot, cat.id);
       const projected = cards?.get(cat.id);
+      const exactProjection = projected?.configurationRevision === revision ? projected : undefined;
+      const { effectiveProfile, ...profile } = exactProjection ?? {};
       return {
         ...projectRoleCard(cat, metadata.roster, revision),
-        ...(projected?.configurationRevision === revision ? projected : undefined),
+        ...(effectiveProfile ? profile : exactProjection ? { client: exactProjection.client } : undefined),
         avatar: resolveNativeAvatar(cat.clientId, cat.avatar, acpConfig),
         accountRef: effectiveAccountRef,
         // Only the non-secret Desktop HOME binding is needed by the member draft.
@@ -968,12 +970,14 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opt
     resolvePluginMcpView: opts.resolvePluginMcpView,
   });
   app.get('/api/cats/native-runtimes', async (request, reply) => {
-    if (!resolveHeaderUserId(request)) return reply.code(401).send({ error: '需要登录后检查本机工具' });
+    const operator = resolveHeaderUserId(request);
+    if (!operator) return reply.code(401).send({ error: '需要登录后检查本机工具' });
     return (opts.nativeRuntimeDiscovery ?? discoverNativeRuntimesWithReadiness)(
       resolveProjectRoot(),
       (request.query as { refresh?: string }).refresh === '1',
       request,
       reply,
+      operator,
     );
   });
   // GET /api/cat-templates - 获取角色模板（纯灵魂层，不含 client/model 绑定）
@@ -1025,7 +1029,8 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opt
     const projectRoot = resolveProjectRoot();
     const resolveMetadata = buildCatResponseMetadataResolver(projectRoot);
     const resolveEffectiveAccountRef = buildEffectiveAccountRefResolver();
-    const cards = await opts.agentRoleRead?.(request, reply);
+    const operator = resolveHeaderUserId(request);
+    const cards = operator ? await opts.agentRoleRead?.(request, reply, operator) : undefined;
     return {
       cats: await Promise.all(
         Object.values(getResolvedCats(projectRoot)).map((cat) =>
@@ -1162,7 +1167,7 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opt
           const writeRole = opts.agentRoleWrite;
           const result = writeRole
             ? await (async () => {
-                const result = await writeRole(request, reply, {
+                const result = await writeRole(request, reply, operator, {
                   kind: 'create',
                   input: normalized,
                   receipt,
@@ -1859,7 +1864,7 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opt
         };
         if (opts.agentRoleWrite) {
           if (body.expectedRevision === undefined) throw new MemberConfigurationRevisionRequired();
-          await opts.agentRoleWrite(request, reply, {
+          await opts.agentRoleWrite(request, reply, operator, {
             kind: 'update',
             catId: request.params.id,
             expectedRevision: body.expectedRevision,
@@ -1935,7 +1940,7 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opt
         try {
           if (opts.agentRoleWrite) {
             if (parsed.data.expectedRevision === undefined) throw new MemberConfigurationRevisionRequired();
-            await opts.agentRoleWrite(request, reply, {
+            await opts.agentRoleWrite(request, reply, operator, {
               kind: 'delete',
               catId: request.params.id,
               expectedRevision: parsed.data.expectedRevision,

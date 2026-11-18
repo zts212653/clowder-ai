@@ -6,20 +6,22 @@ import { toAllCatConfigs } from './role-projection.js';
 import { roleConfigurationRevision } from './write-role.js';
 
 export async function readRoles(store: AgentAccessRoleStore) {
-  const { source } = await store.readCatalog();
+  const { source, profiles } = await store.readCatalog();
   const catalog = JSON.parse(source) as CatCafeConfig;
-  return Object.values(toAllCatConfigs(catalog)).map((cat) => ({
-    ...projectRoleCard(
-      cat,
-      catalog.version === 2 ? (catalog.roster[cat.id] ?? null) : null,
-      roleConfigurationRevision(catalog, cat.id, cat),
-    ),
-    client: {
-      id: cat.clientId,
-      label: builtInAgentClients.find((client) => client.id === cat.clientId)?.label ?? cat.clientId,
-      type: cat.agentProvider ? 'plugin' : cat.clientId === 'a2a' ? 'cloud' : 'legacy',
-    },
-  }));
+  return Object.values(toAllCatConfigs(catalog)).map((cat) => {
+    const profile = profiles?.[cat.id];
+    return {
+      ...(profile ?? projectRoleCard(cat, catalog.version === 2 ? (catalog.roster[cat.id] ?? null) : null)),
+      configurationRevision: roleConfigurationRevision(catalog, cat.id, cat),
+      ...(profile ? { effectiveProfile: true } : {}),
+      restrictions: [...((profile ?? cat).restrictions ?? [])],
+      client: {
+        id: cat.clientId,
+        label: builtInAgentClients.find((client) => client.id === cat.clientId)?.label ?? cat.clientId,
+        type: cat.agentProvider ? 'plugin' : cat.clientId === 'a2a' ? 'cloud' : 'legacy',
+      },
+    };
+  });
 }
 
 export function projectRoleCard(cat: CatConfig, roster: RosterEntry | null, revision?: string) {

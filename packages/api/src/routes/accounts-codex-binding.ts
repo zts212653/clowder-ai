@@ -48,7 +48,8 @@ export function registerCodexBindingRoutes(app: FastifyInstance, agentRoleWrite?
     });
     for (const action of ['preview', 'commit'] as const) {
       app.post(`/api/accounts/:profileId/${tool}/binding/${action}`, async (request, reply) => {
-        if (!resolveUserId(request)) return reply.code(401).send({ error: 'Identity required' });
+        const operator = resolveUserId(request);
+        if (!operator) return reply.code(401).send({ error: 'Identity required' });
         const parsed = schema.safeParse(request.body);
         if (!parsed.success) return reply.code(400).send({ error: 'Invalid binding request' });
         const root = await resolveAccountProjectRoot(parsed.data.projectPath);
@@ -91,7 +92,7 @@ export function registerCodexBindingRoutes(app: FastifyInstance, agentRoleWrite?
                       : planClaudeAccountBinding;
                 if (summarize(root, saved, selection).previewToken !== parsed.data.previewToken)
                   throw new Error('Binding preview changed; please review it again');
-                await agentRoleWrite(request, reply, {
+                await agentRoleWrite(request, reply, operator, {
                   kind: 'bind',
                   client,
                   scope: selection.scope,

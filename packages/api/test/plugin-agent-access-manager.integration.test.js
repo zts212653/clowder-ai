@@ -335,12 +335,29 @@ test('Agent access discovery executes the same standalone entrypoint from a Mana
     });
   const directory = await call('GET', '/api/agent-access/v1/clients');
   assert.ok(directory.json().clients.some((client) => client.id === 'kimi'));
+  const previousBindHost = process.env.API_SERVER_HOST;
+  t.after(() => {
+    if (previousBindHost === undefined) delete process.env.API_SERVER_HOST;
+    else process.env.API_SERVER_HOST = previousBindHost;
+  });
+  process.env.API_SERVER_HOST = '0.0.0.0';
   const create = await call('POST', '/api/cats', request.input);
   assert.equal(create.statusCode, 201, create.payload);
   const createdRole = create.json().cat;
   assert.equal(createdRole.id, request.input.catId);
+  const inherited = await readCatalog();
+  Object.assign(inherited.breeds[0], {
+    teamStrengths: 'Template collaboration strength',
+    caution: 'Template caution',
+    restrictions: ['Template restriction'],
+  });
+  await writeFile(template, JSON.stringify(inherited));
   const roles = await call('GET', '/api/cats');
-  assert.deepEqual(roles.json().cats[0].client, { id: 'kimi', label: 'Kimi', type: 'legacy' });
+  const card = roles.json().cats.find((cat) => cat.id === createdRole.id);
+  assert.deepEqual(card.client, { id: 'kimi', label: 'Kimi', type: 'legacy' });
+  assert.equal(card.teamStrengths, 'Template collaboration strength');
+  assert.equal(card.caution, 'Template caution');
+  assert.deepEqual(card.restrictions, ['Template restriction']);
   const rolePath = '/api/cats/' + createdRole.id;
   const edited = await call('PATCH', rolePath, {
     displayName: 'Changed using the member API',

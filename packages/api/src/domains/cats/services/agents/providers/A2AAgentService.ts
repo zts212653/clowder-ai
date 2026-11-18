@@ -8,10 +8,11 @@
  */
 
 import { randomUUID } from 'node:crypto';
+import { isDeepStrictEqual } from 'node:util';
 import type { A2AAgentConfig, CatId } from '@cat-cafe/shared';
 import { createCatId } from '@cat-cafe/shared';
 import { runA2ATurn } from '@clowder-ai/agent-access/runtime/a2a-turn';
-import type { AgentAccessA2ARunner } from '@clowder-ai/agent-contract';
+import { type AgentAccessA2ARunner, buildAgentAccessA2ARequest } from '@clowder-ai/agent-contract';
 import type { AgentMessage, AgentService, AgentServiceOptions, PreparedProviderRequestV1 } from '../../types.js';
 
 export interface A2AAgentServiceOptions {
@@ -64,6 +65,8 @@ export class A2AAgentService implements AgentService {
       providerNativeVisibility: 'unsupported' as const,
     });
     if (!('body' in preparedRequest.message)) throw new Error('a2a_prepared_message_not_exact');
+    const turn = { catId: this.catId, taskId, prompt: preparedRequest.message.body };
+    const approvedRequest = buildAgentAccessA2ARequest(turn);
 
     const headers: Record<string, string> = { 'Content-Type': 'application/json' };
     if (this.config.apiKey) {
@@ -80,11 +83,19 @@ export class A2AAgentService implements AgentService {
     try {
       await options?.beforeProviderLaunch?.(preparedRequest);
       if (signal?.aborted) throw signal.reason ?? new Error('aborted before send');
-      yield* await this.runTurn({ catId: this.catId, taskId, prompt: preparedRequest.message.body }, async (body) => {
+      yield* await this.runTurn(turn, async (body) => {
         signal?.throwIfAborted();
+        if (dispatched || !isDeepStrictEqual(JSON.parse(body), approvedRequest)) {
+          throw new Error('A2A request does not match the admitted turn');
+        }
         dispatched = true;
         options?.onRemoteExecutionDispatched?.({ kind: 'a2a_task', id: taskId });
-        const response = await this.fetchFn(this.config.url, { method: 'POST', headers, body, signal });
+        const response = await this.fetchFn(this.config.url, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify(approvedRequest),
+          signal,
+        });
         return {
           status: response.status,
           statusText: response.statusText,

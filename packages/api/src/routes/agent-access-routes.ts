@@ -97,10 +97,9 @@ export function registerAgentAccessRoutes(
     refresh: boolean,
     request: FastifyRequest,
     reply: FastifyReply,
+    operator: string,
   ) {
-    const access = requirePluginOwnerLocalAccess(request, 'read');
-    if ('error' in access) return pluginAccessError(reply, access);
-    const detected = await readDetection(request, reply, access.operator, { refresh });
+    const detected = await readDetection(request, reply, operator, { refresh });
     if (detected.readiness.state !== 'ready') {
       return reply.code(503).send({ error: 'Agent 插件未就绪', readiness: detected.readiness });
     }
@@ -131,27 +130,17 @@ function currentAgentAccess(
 export type AgentRoleRead = (
   request: FastifyRequest,
   reply: FastifyReply,
+  operator: string,
 ) => Promise<ReadonlyMap<string, AgentAccessRoleCard> | undefined>;
 
 export function createAgentRoleRead(
   inventory: Pick<PluginInventoryStore, 'readCurrentAuthority'>,
   runtime: Pick<PluginRuntimeCarrierRouter, 'attemptInvoke'>,
 ): AgentRoleRead {
-  return async (request, reply) => {
-    const access = requirePluginOwnerLocalAccess(request, 'read');
-    if ('error' in access) return;
+  return async (request, reply, operator) => {
     const instance = currentAgentAccess(await inventory.readCurrentAuthority(AGENT_ACCESS_PLUGIN_ID));
     if ('readiness' in instance) return;
-    const outcome = await invokeOwnerAgentAccess(
-      request,
-      reply,
-      instance,
-      access.operator,
-      'read',
-      'readRoles',
-      {},
-      runtime,
-    );
+    const outcome = await invokeOwnerAgentAccess(request, reply, instance, operator, 'read', 'readRoles', {}, runtime);
     if (outcome.status === 'failed') return;
     const cards = agentAccessRoleCardsSchema.safeParse(outcome.value);
     if (cards.success) return new Map(cards.data.map((card) => [card.id, card]));
@@ -161,6 +150,7 @@ export function createAgentRoleRead(
 export type AgentRoleWrite = (
   request: FastifyRequest,
   reply: FastifyReply,
+  operator: string,
   mutation: AgentAccessRoleMutation,
 ) => Promise<Extract<AgentAccessRoleMutationResult, { status: 'committed' | 'bound' }>>;
 
@@ -168,9 +158,7 @@ export function createAgentRoleWrite(
   inventory: Pick<PluginInventoryStore, 'readCurrentAuthority'>,
   runtime: Pick<PluginRuntimeCarrierRouter, 'attemptInvoke'>,
 ): AgentRoleWrite {
-  return async (request, reply, mutation) => {
-    const access = requirePluginOwnerLocalAccess(request, 'write');
-    if ('error' in access) throw Object.assign(new Error(access.error), { statusCode: access.status });
+  return async (request, reply, operator, mutation) => {
     const instance = currentAgentAccess(await inventory.readCurrentAuthority(AGENT_ACCESS_PLUGIN_ID));
     if ('readiness' in instance)
       throw Object.assign(new Error('Agent 插件未就绪，请在插件页检查状态后重试。'), { statusCode: 503 });
@@ -178,7 +166,7 @@ export function createAgentRoleWrite(
       request,
       reply,
       instance,
-      access.operator,
+      operator,
       'write',
       'writeRole',
       mutation,

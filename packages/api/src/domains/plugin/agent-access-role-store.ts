@@ -1,9 +1,19 @@
 import { createHash } from 'node:crypto';
 import { catRegistry } from '@cat-cafe/shared';
-import { AGENT_ACCESS_PLUGIN_ID, type AgentAccessRoleStore } from '@clowder-ai/agent-contract';
+import {
+  AGENT_ACCESS_PLUGIN_ID,
+  type AgentAccessRoleStore,
+  agentAccessRoleProfileSchema,
+} from '@clowder-ai/agent-contract';
 import { readCatCatalogRaw, resolveCatCatalogPath } from '../../config/cat-catalog-store.js';
-import { loadCatConfig, parseRawCatConfig, toAllCatConfigs } from '../../config/cat-config-loader.js';
+import {
+  loadCatConfig,
+  loadResolvedCatConfig,
+  parseRawCatConfig,
+  toAllCatConfigs,
+} from '../../config/cat-config-loader.js';
 import { assertCodexMemberMutationReady } from '../../config/codex-account-binding.js';
+import { resolveProjectTemplatePath } from '../../config/project-template-path.js';
 import {
   findTemplateVariantTombstoneInput,
   refreshRuntimeCatCatalogCaches,
@@ -31,6 +41,7 @@ export function createAgentAccessRoleStore(
       throw new Error('Agent role catalog requires an authenticated request');
     await owner.assertCurrent();
     assertActivation();
+    return owner;
   }
 
   function readCatalogSource() {
@@ -41,9 +52,15 @@ export function createAgentAccessRoleStore(
 
   return {
     async readCatalog() {
-      await authorize('read');
+      const owner = await authorize('read');
       const source = readCatalogSource();
-      return { source, revision: digest(source) };
+      const revision = digest(source);
+      if (owner.operation === 'write') return { source, revision };
+      const resolved = loadResolvedCatConfig(resolveProjectTemplatePath(projectRoot), { persistMigrations: false });
+      const profiles = Object.fromEntries(
+        Object.entries(toAllCatConfigs(resolved)).map(([id, cat]) => [id, agentAccessRoleProfileSchema.parse(cat)]),
+      );
+      return { source, revision, profiles };
     },
     async commitCatalog(revision, source, change) {
       return withRuntimeCatMutationLock(projectRoot, async () => {
