@@ -929,15 +929,6 @@ pdl:
           need:
             - "!cmd"
             - inv
-        - id: live.thread
-          scope: row
-          move: ws.live.run
-          title: t:entryLayout.rowSlot.openThread
-          icon: jump
-          open:
-            action: goThread
-          args:
-            k: thread
         - id: live.stop
           scope: row
           move: ws.live.run
