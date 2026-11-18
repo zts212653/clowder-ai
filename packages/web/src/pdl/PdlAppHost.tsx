@@ -677,6 +677,7 @@ function ChatBinding({
   const runtimeAnswerContext = useRef<string | null>(null);
   const interactiveAttempts = useRef(new Map<string, { signature: string; operationId: string }>());
   const runtimeAttempts = useRef(new Map<string, { signature: string; operationId: string }>());
+  const archiveFilesByInput = useRef(new WeakMap<HTMLInputElement, File>());
   const questionIds = useMemo(
     () => [...new Set(messageCards(surfaceMessages, threadId, 'ask').map((card) => card.interactionId))],
     [surfaceMessages, threadId],
@@ -1147,7 +1148,8 @@ function ChatBinding({
       case 'appearanceDeleteImage':
         return request(`/api/config/chat-background/images/${encodeURIComponent(args.id)}`, { method: 'DELETE' });
       case 'pluginArchive': {
-        const file = (element as HTMLInputElement).files?.[0];
+        const input = element as HTMLInputElement | undefined;
+        const file = input && (args.replacement ? archiveFilesByInput.current.get(input) : input.files?.[0]);
         if (!file) throw new Error('common.required');
         const form = new FormData();
         form.append('file', file);
@@ -1158,7 +1160,10 @@ function ChatBinding({
         const path = '/api/plugin-manager/plugins/install/upload';
         const response = await apiFetch(path, { method: 'POST', body: form }, mutationRequestOptions(path));
         const payload: unknown = await response.json();
-        if (response.ok) return payload;
+        if (response.ok) {
+          archiveFilesByInput.current.delete(input);
+          return payload;
+        }
         if (payload && typeof payload === 'object') {
           if (
             response.status === 409 &&
@@ -1167,7 +1172,9 @@ function ChatBinding({
             payload.code === 'ARCHIVE_REPLACEMENT_CONFIRMATION_REQUIRED' &&
             'replacement' in payload
           ) {
-            return { replacement: PluginArchiveReplacementOfferSchema.parse(payload.replacement) };
+            const replacement = PluginArchiveReplacementOfferSchema.parse(payload.replacement);
+            archiveFilesByInput.current.set(input, file);
+            return { replacement };
           }
           if ('error' in payload && typeof payload.error === 'string') throw new Error(payload.error);
         }
