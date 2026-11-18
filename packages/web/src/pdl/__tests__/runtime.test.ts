@@ -8801,7 +8801,7 @@ describe('member detect entry', () => {
       expect(w.document.body.textContent).toContain('需登录');
       expect(w.document.body.textContent).toContain('探测失败');
       w.eval('copyText = function (text) { window.copiedLoginCommand = text; }');
-      const login = w.document.querySelector<HTMLButtonElement>('[data-act="nativeCopyLogin"][data-id="codex"]');
+      const login = w.document.querySelector('[data-act="nativeCopyLogin"][data-id="codex"]') as HTMLButtonElement | null;
       expect(login).not.toBeNull();
       login?.click();
       expect(w.eval('window.copiedLoginCommand')).toBe('codex login');
