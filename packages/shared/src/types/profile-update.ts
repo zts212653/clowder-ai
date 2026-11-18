@@ -133,3 +133,15 @@ export interface ProfileUpdateProposal {
 export interface ProfileUpdateApproveOverrides {
   afterContent?: string;
 }
+
+/** Mechanical diff summary returned to proposing cats before owner approval. */
+export interface ProfileUpdateDiffSummary {
+  beforeRevision: string;
+  afterRevision: string;
+  identical: boolean;
+  initialWrite: boolean;
+  addedLineCount: number;
+  removedLineCount: number;
+  hunkCount: number;
+  unifiedDiff: string;
+}

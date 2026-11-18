@@ -1408,6 +1408,7 @@ export {
 export type {
   CollectionSignalKind,
   ProfileUpdateApproveOverrides,
+  ProfileUpdateDiffSummary,
   ProfileUpdateProposal,
   ProfileUpdateProposalStatus,
   ProfileUpdateSignalProvenance,
@@ -1603,6 +1604,8 @@ export type {
   SessionUsageSnapshot,
   StrategyAction,
 } from './session.js';
+export type { SessionCacheObservation, SessionCacheWarmth } from './session-cache.js';
+export { sessionCacheWarmthSchema } from './session-cache.js';
 // Session handoff proposal types (F225 Cat-Initiated Session Handoff)
 export type {
   CatHandoffNote,
@@ -1775,6 +1778,8 @@ export type {
 } from './thread-speed.js';
 // TTS types (F34 TTS Provider)
 export type {
+  CatVoiceOption,
+  CatVoiceResolution,
   ITtsProvider,
   TtsStreamEvent,
   TtsStreamRequest,
@@ -1782,6 +1787,7 @@ export type {
   TtsSynthesizeResult,
   TtsSynthesizeStreamEvent,
   TtsSynthesizeStreamOptions,
+  TtsVoiceSelection,
   VoiceChunkEvent,
   VoiceConfig,
   VoiceStreamEndEvent,
@@ -1836,6 +1842,7 @@ export {
   waitTerminationReasonSchema,
 } from './wait-termination.js';
 export * from './watcher.js';
+export * from './watcher-panel.js';
 export type {
   CheckStatus,
   ResumeCapsule,

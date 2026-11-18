@@ -110,11 +110,13 @@ export function MessageDecisionSummary({
   threadId,
   resolveSpeaker,
   beforeAction,
+  compact = false,
 }: {
   response: MessageSearchResponse;
   threadId: string;
   resolveSpeaker: (speaker: string) => string;
   beforeAction?: (result: MessageSearchResult, signal: AbortSignal) => Promise<boolean>;
+  compact?: boolean;
 }) {
   const facts = new Map<string, { fact: Decision; result: MessageSearchResult }>();
   for (const result of response.results)
@@ -124,11 +126,15 @@ export function MessageDecisionSummary({
       const previous = facts.get(key);
       if (!previous || fact.status === 'decided') facts.set(key, { fact, result });
     }
-  if (!facts.size) return null;
+  if (!facts.size || (compact && ![...facts.values()].some(({ fact }) => fact.status === 'decided'))) return null;
   return (
     <section
       aria-label="定下来的"
-      className="m-3 space-y-3 rounded-xl border border-[var(--console-border-soft)] bg-[var(--console-hover-bg)] p-3"
+      className={
+        compact
+          ? 'mb-2 space-y-2 border-b border-[var(--console-border-soft)] pb-2'
+          : 'm-3 space-y-3 rounded-xl border border-[var(--console-border-soft)] bg-[var(--console-hover-bg)] p-3'
+      }
     >
       <p className="text-xs font-medium text-cafe-secondary">定下来的</p>
       {[...facts].map(([key, entry]) => (

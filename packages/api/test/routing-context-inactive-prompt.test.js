@@ -78,7 +78,13 @@ function model(signalEvents, observedAt = NOW, profileDiagnostics = []) {
 }
 
 const projector = new RoutingContextPromptProjector();
-const payload = (readModel) => JSON.parse(projector.project(readModel).split('\n')[2]);
+function payload(readModel) {
+  const match = /^<runtime-routing-context>\s*([\s\S]*?)\s*<\/runtime-routing-context>$/.exec(
+    projector.project(readModel),
+  );
+  assert.ok(match, 'routing advisory must have its payload envelope');
+  return JSON.parse(match[1]);
+}
 
 test('retraction returns to no-signal projection and leaves the immutable presentation ledger intact', () => {
   for (const validUntil of [NOW, NOW + WEEK]) {

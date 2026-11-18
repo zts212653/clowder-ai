@@ -9,6 +9,8 @@ import { PASSAGE_PARENT_POLICY_FIELDS } from './vector-source-fields.js';
 
 const EPOCH = 'vector_invalidation_epoch';
 const QUARANTINE = 'vector_invalidation_quarantined';
+/** The epoch at which the last quarantine was lifted. */
+const RECOVERED_AT = 'vector_invalidation_recovered_epoch';
 export interface GenerationInvalidationState {
   epoch: string;
   quarantined: boolean;
@@ -38,6 +40,22 @@ export function generationInvalidationCurrent(
   } catch {
     return false;
   }
+}
+
+/**
+ * Whether a quarantine was lifted after `captured`. A quarantine and its recovery each advance the
+ * epoch, so an epoch that moved is not by itself evidence that only sources were written.
+ */
+export function quarantineRecoveredSince(
+  db: Database.Database,
+  input: VectorGenerationTables,
+  captured: GenerationInvalidationState,
+): boolean {
+  const tables = validateVectorGenerationTables(input);
+  const row = db.prepare(`SELECT value FROM ${tables.metadata} WHERE key=?`).get(RECOVERED_AT) as
+    | { value: string }
+    | undefined;
+  return row !== undefined && Number(row.value) > Number(captured.epoch);
 }
 
 function advanceEpoch(db: Database.Database, tables: VectorGenerationTables): void {
@@ -176,6 +194,9 @@ export function reconcileGenerationInvalidations(db: Database.Database, input: V
     if (generationInvalidationState(db, tables).quarantined) {
       advanceEpoch(db, tables);
       db.prepare(`DELETE FROM ${tables.metadata} WHERE key=?`).run(QUARANTINE);
+      db.prepare(
+        `INSERT INTO ${tables.metadata}(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value`,
+      ).run(RECOVERED_AT, generationInvalidationState(db, tables).epoch);
     }
   })();
 }

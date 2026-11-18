@@ -19,7 +19,7 @@ import { MemoryReadExecution, type MemoryReadSnapshot } from './memory-read-exec
 import { ReadStopError } from './read-stop-diagnostics.js';
 import type { VectorRepackResult } from './repack-passage-vectors.js';
 import type { TastePullRecallRow } from './taste/taste-pull-recall-rows.js';
-import { publishVectorSearchDegrade } from './vector-search-degrade-report.js';
+import { publishVectorSearchDegrade, type VectorSearchDegradeRecord } from './vector-search-degrade-report.js';
 
 function decodeError(error: ProcessError): Error {
   const details = error.details;
@@ -46,6 +46,11 @@ class MemoryProcess {
     return this.pending;
   }
 
+  /** A worker process is running: a job sent here does not wait for a fork. */
+  get warm(): boolean {
+    return this.child?.connected === true;
+  }
+
   run<T>(
     job: MemoryProcessJob,
     options?: {
@@ -53,6 +58,9 @@ class MemoryProcess {
       deadlineAt?: number;
       embedding?: IEmbeddingService;
       onReadSnapshot?: (snapshot: MemoryReadSnapshot) => void;
+      onVectorStart?: () => void;
+      /** Receives the worker's degrade reports instead of the shared channel; the caller then publishes them. */
+      onVectorDegrade?: (record: VectorSearchDegradeRecord) => void;
     },
   ): Promise<T> {
     if (this.pending >= 64) return Promise.reject(new Error('Memory process queue is full'));
@@ -129,9 +137,14 @@ class MemoryProcess {
             let nativeStartObserved = false;
             const onMessage = (message: ChildMessage) => {
               if (ownsNativeWrite && controller.signal.aborted) return;
+              if (message.type === 'message-vectors-started' && message.id === id) {
+                options?.onVectorStart?.();
+                return;
+              }
               // The worker's stderr is dropped on success, and a degraded search succeeds.
               if (message.type === 'read-diagnostic' && message.diagnostic.phase === 'vector-degrade') {
-                if (message.id === id) publishVectorSearchDegrade(message.diagnostic.degrade);
+                if (message.id === id)
+                  (options?.onVectorDegrade ?? publishVectorSearchDegrade)(message.diagnostic.degrade);
                 return;
               }
               if (execution?.onMessage(message, id)) {
@@ -256,7 +269,18 @@ export function runMemoryRead<T>(
   job: Extract<MemoryProcessJob, { kind: 'search' | 'message-search' }>,
   options?: Parameters<MemoryProcess['run']>[1],
 ): Promise<T> {
-  return (reads[0].load <= reads[1].load ? reads[0] : reads[1]).run<T>(job, options);
+  const [first, second] = reads;
+  // Fewer jobs first. With equal loads, the one whose worker is already running: the other may
+  // have been killed by a cancelled job, or never started, and would fork before it reads.
+  const idle =
+    first.load !== second.load
+      ? first.load < second.load
+        ? first
+        : second
+      : second.warm && !first.warm
+        ? second
+        : first;
+  return idle.run<T>(job, options);
 }
 export function runMemoryProjection<T>(job: Extract<MemoryProcessJob, { kind: 'project-mentions' }>): Promise<T> {
   return projections.run<T>(job);

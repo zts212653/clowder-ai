@@ -32,6 +32,14 @@ interface Options {
     targetCatId: string;
   }): Promise<unknown>;
   publish(message: Awaited<ReturnType<IMessageStore['append']>>): void;
+  /** F335 panel members hand their sentence to the round; it is delivered with the others, anonymously. */
+  panelNudge?(input: {
+    invocationId: string;
+    userId: string;
+    threadId: string;
+    sentence: string;
+    sourceMessageId: string;
+  }): Promise<import('../domains/concierge/watcher/panel/watcher-panel-runner.js').WatcherPanelNudgeReceipt>;
 }
 const admissionBody = z.object({ toolName: z.string().min(1).max(100), callId: z.string().min(1).max(200) }).strict();
 const nudgeBody = z
@@ -73,12 +81,39 @@ export const watcherCallbackRoutes: FastifyPluginAsync<Options> = async (app, de
   app.post('/api/callbacks/watcher-nudge', async (request, reply) => {
     const auth = requireCallbackAuth(request, reply);
     if (!auth) return;
-    if (auth.toolExecutionPolicy?.mode !== 'watcher') return reply.code(403).send({ error: 'Watcher role required' });
+    const panel = auth.toolExecutionPolicy?.mode === 'watcher_panel';
+    if (auth.toolExecutionPolicy?.mode !== 'watcher' && !panel)
+      return reply.code(403).send({ error: 'Watcher role required' });
     const parsed = nudgeBody.safeParse(request.body);
     if (!parsed.success)
       return reply
         .code(400)
         .send({ error: 'sentence must be 1–1200 characters and sourceMessageId must name the original source' });
+    if (panel) {
+      if (!deps.panelNudge) return reply.code(503).send({ error: 'Watcher panel unavailable' });
+      const receipt = await deps.panelNudge({
+        invocationId: auth.invocationId,
+        userId: auth.userId,
+        threadId: auth.threadId,
+        ...parsed.data,
+      });
+      if (!receipt.accepted)
+        return reply.code(receipt.reason === 'citation_outside_material' ? 400 : 409).send({
+          ...receipt,
+          error:
+            receipt.reason === 'citation_outside_material'
+              ? 'sourceMessageId 要是这条线程里、这一轮截止之前的原话'
+              : receipt.reason === 'already_spoke'
+                ? '这一轮你已经递过一句'
+                : '这一轮已经结束',
+        });
+      return {
+        ...receipt,
+        note: receipt.deliveryAfterRound
+          ? '已记下。等这一轮几只守望猫都看完，和别的守望猫的话合成一条，以「守望猫」的名义递出。'
+          : '已记下。这一轮只看不递，不会递出。',
+      };
+    }
     const session = await deps.sessions.getByChainKey(watcherSessionChainKey(auth.userId, auth.catId, auth.threadId));
     const attempt = session && parseWatcherSessionState(session.watcherState).attempt;
     if (!attempt || attempt.invocationId !== auth.invocationId || attempt.phase !== 'running')

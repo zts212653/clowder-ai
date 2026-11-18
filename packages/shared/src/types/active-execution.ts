@@ -1,6 +1,7 @@
 /** F295 canonical read projection shared by API and every running-work UI surface. */
 
 import type { LifecycleInputCapabilities } from './message-lifecycle.js';
+import type { TurnExecutionKind } from './turn-execution.js';
 
 export type ActiveExecutionKind = 'live_invocation' | 'managed_command';
 export type ManagedCommandActivity = 'full_gate' | 'test' | 'build' | 'lint' | 'check' | 'command';
@@ -40,6 +41,8 @@ export interface ActiveExecutionProjection {
   readonly projectPath?: string;
   readonly catId: string;
   readonly kind: ActiveExecutionKind;
+  /** Human running-work UI role from the exact durable child, never a display-name guess. */
+  readonly executionKind?: TurnExecutionKind;
   /** Allowlisted category only; raw managed-command text never crosses this boundary. */
   readonly activity?: ManagedCommandActivity;
   readonly startedAt: number;

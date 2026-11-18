@@ -7,6 +7,13 @@ import { deploymentDefaults } from '../deployment-defaults.js';
 import type { ConnectorDefinition } from './connector.js';
 
 export const CONNECTOR_DEFINITIONS: readonly ConnectorDefinition[] = [
+  {
+    id: 'watcher-panel',
+    displayName: '守望猫',
+    icon: { type: 'svg', iconId: 'watcher' },
+    themeColor: '#B45309',
+    description: '匿名守望提醒',
+  },
   // ── System connectors ──
   {
     id: 'vote-result',

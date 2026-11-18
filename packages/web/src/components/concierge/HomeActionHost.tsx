@@ -2,6 +2,7 @@
 import { useRouter } from 'next/navigation';
 import { useEffect, useRef } from 'react';
 import { apiFetch } from '@/utils/api-client';
+import { createBrowserUuid } from '@/utils/browser-uuid';
 import { useSettingsReadingEntry } from '../shell/useSettingsSourceReturn';
 import { useHubSocket } from '../thread-chat/hub-socket-context';
 import { applyHomeCommand, homeHubObservation } from './home-action-bridge';
@@ -20,7 +21,7 @@ export function HomeActionHost({ enabled = true }: { enabled?: boolean }) {
   useEffect(() => {
     if (!enabled) return;
     let disposed = false;
-    const clientId = crypto.randomUUID();
+    const clientId = createBrowserUuid();
     const pending = new Map<string, AbortController>();
     const consumed = new Map<string, number>();
     let windowLease: { clientToken: string; expiresAt: number } | undefined;

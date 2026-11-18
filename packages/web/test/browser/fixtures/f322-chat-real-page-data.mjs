@@ -118,6 +118,16 @@ export function createChatProofApi(now = Date.now(), crowded = false, surface = 
       threads.map((thread) => thread.id),
     );
     if (watcher) return watcher;
+    const quotaRingReadBodies = {
+      '/api/accounts': { projectPath: PROJECT_PATH, providers: [], unavailableAccounts: [] },
+      '/api/accounts/codex/members': { members: [], selection: { state: 'empty', members: [] } },
+      '/api/accounts/claude/members': { members: [], selection: { state: 'empty', members: [] } },
+      '/api/accounts/agy/members': { members: [], selection: { state: 'empty', members: [] } },
+      '/api/config/quota-pin': { pinned: true, selectedAccountRefs: null },
+    };
+    if (method === 'GET' && url.search === '' && Object.hasOwn(quotaRingReadBodies, url.pathname)) {
+      return reply(quotaRingReadBodies[url.pathname]);
+    }
     // The real HTTP client reports bounded timing facts after five seconds. Accept
     // only its authenticated diagnostic batch, never arbitrary POSTs or payloads.
     if (url.pathname === '/api/diagnostics/connection' && url.search === '' && method === 'POST') {

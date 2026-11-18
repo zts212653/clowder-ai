@@ -37,6 +37,7 @@ export function MemberSettingsPage({
   onBack,
   onDelete,
   onBeforeCreate,
+  budgetNotice,
 }: {
   cat: CatData | null;
   cats: CatData[];
@@ -44,6 +45,7 @@ export function MemberSettingsPage({
   onBack: () => void;
   onDelete?: () => Promise<void>;
   onBeforeCreate?: () => Promise<void>;
+  budgetNotice?: string | null;
 }) {
   const [runtimeValid, setRuntimeValid] = useState(true);
   const [uploading, setUploading] = useState(false);
@@ -310,6 +312,7 @@ export function MemberSettingsPage({
                 {editor.error}
               </div>
             )}
+            {budgetNotice && <output className="w-full text-xs text-cafe-text-muted">{budgetNotice}</output>}
             {draft.pendingWrite ? (
               <span className="text-sm" role="status">
                 {t(

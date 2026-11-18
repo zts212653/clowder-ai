@@ -6,6 +6,14 @@ import { generationInvalidationState } from './vector-generation-invalidation.js
 export interface PassageWarmupState {
   source: string;
   vectorCount: number;
+  /** Every passage row, embeddable or not. */
+  passageCount: number;
+}
+
+/** Rows inserted after `id`. Passage ids only grow, and a rewritten passage is a deleted row plus a new one. */
+export function countPassagesAfter(db: Database.Database, id: number): number {
+  return (db.prepare('SELECT count(*) AS count FROM evidence_passages WHERE id > ?').get(id) as { count: number })
+    .count;
 }
 
 /** A completed scan can be reused; unavailable evidence merely keeps the ordinary scan. */
@@ -32,7 +40,8 @@ export function readPassageWarmupState(
       const { count } = db.prepare(`SELECT count(*) AS count FROM ${vectors.tables.passages}_rowids`).get() as {
         count: number;
       };
-      return { source, vectorCount: count };
+      const passages = db.prepare('SELECT count(*) AS count FROM evidence_passages').get() as { count: number };
+      return { source, vectorCount: count, passageCount: passages.count };
     })();
   } catch {
     return;

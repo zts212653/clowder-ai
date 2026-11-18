@@ -458,22 +458,19 @@ describe('F194 Phase B — paired /messages + /queue canonical liveness consiste
         return null;
       },
     };
+    const child = {
+      invocationId: childId,
+      parentInvocationId: parentId,
+      threadId: THREAD_ID,
+      userId: USER_ID,
+      catId: 'fable5',
+      executionKind: 'ordinary',
+      startedAt: now - 5_000,
+      status: 'running',
+    };
     const turnExecutionStore = {
-      listByParent: async (requestedParentId) =>
-        requestedParentId === parentId
-          ? [
-              {
-                invocationId: childId,
-                parentInvocationId: parentId,
-                threadId: THREAD_ID,
-                userId: USER_ID,
-                catId: 'fable5',
-                executionKind: 'ordinary',
-                startedAt: now - 5_000,
-                status: 'running',
-              },
-            ]
-          : [],
+      get: async (requestedChildId) => (requestedChildId === childId ? child : null),
+      listByParent: async (requestedParentId) => (requestedParentId === parentId ? [child] : []),
     };
     const draftStore = new DraftStore();
     const tracker = makeTracker();
@@ -490,7 +487,7 @@ describe('F194 Phase B — paired /messages + /queue canonical liveness consiste
       assert.equal(updates.length, 0, '/messages must not reconcile a parent whose durable child is running');
 
       const queue = await injectQueue(app);
-      assert.equal(queue.statusCode, 200);
+      assert.equal(queue.statusCode, 200, JSON.stringify(queue.body));
       assert.deepEqual(queue.body.activeInvocations, [
         {
           catId: 'fable5',
@@ -505,8 +502,9 @@ describe('F194 Phase B — paired /messages + /queue canonical liveness consiste
         url: '/api/executions/active?projectPath=%2Fproject%2Fcafe',
         headers: { 'x-cat-cafe-user': USER_ID },
       });
-      assert.equal(active.statusCode, 200);
+      assert.equal(active.statusCode, 200, active.body);
       assert.equal(active.json().executions[0]?.executionId, parentId);
+      assert.equal(active.json().executions[0]?.executionKind, 'ordinary');
       assert.equal(
         active.json().executions[0]?.turnInvocationId,
         childId,
@@ -515,6 +513,7 @@ describe('F194 Phase B — paired /messages + /queue canonical liveness consiste
       await new Promise((resolve) => setTimeout(resolve, 25));
       assert.equal(updates.length, 0, '/queue must not reconcile a parent whose durable child is running');
       assert.equal(parent.status, 'running');
+      assert.equal(child.status, 'running');
     } finally {
       Date.now = origNow;
       if (app) await app.close();

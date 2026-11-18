@@ -13,6 +13,7 @@ import { CatAvatar } from '../CatAvatar';
 import { ForceResetDialog } from '../ForceResetDialog';
 import { QueueSteerDialog } from '../QueueSteerDialog';
 import { useShellCopy } from '../shell/shell-copy';
+import { SuggestionAvatar } from '../suggestions/SuggestionAvatar';
 import styles from './ExecutionRow.module.css';
 import { ExecutionRowActions } from './ExecutionRowActions';
 import { ExecutionRowPanel } from './ExecutionRowPanel';
@@ -42,7 +43,11 @@ function Avatars({ controller }: { controller: ExecutionRowController }) {
   if (model.single)
     return (
       <span data-testid="execution-row-avatars" className="flex-none">
-        <CatAvatar catId={model.single.catId} size={20} />
+        {model.single.executionKind === 'watcher' ? (
+          <SuggestionAvatar catId={model.single.catId} watcher />
+        ) : (
+          <CatAvatar catId={model.single.catId} size={20} />
+        )}
       </span>
     );
   const shown = executions.slice(0, 3);
@@ -51,7 +56,11 @@ function Avatars({ controller }: { controller: ExecutionRowController }) {
     <span data-testid="execution-row-avatars" className="flex items-center">
       {shown.map((execution, index) => (
         <span key={execution.executionId + execution.catId} className={index === 0 ? '' : '-ml-1.5'}>
-          <CatAvatar catId={execution.catId} size={18} />
+          {execution.executionKind === 'watcher' ? (
+            <SuggestionAvatar catId={execution.catId} watcher />
+          ) : (
+            <CatAvatar catId={execution.catId} size={18} />
+          )}
         </span>
       ))}
     </span>

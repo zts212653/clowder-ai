@@ -9,12 +9,14 @@ import { PassageVectorStore, passageVectorKey } from '../../dist/domains/memory/
 import { SqliteEvidenceStore } from '../../dist/domains/memory/SqliteEvidenceStore.js';
 import { ensurePassageVectorTable, ensureVectorTable } from '../../dist/domains/memory/schema.js';
 import { VectorStore } from '../../dist/domains/memory/VectorStore.js';
+import { nativeKnnWitness } from '../helpers/native-knn-witness.js';
 
 test(
   'file worker keeps completed KNN resources through hydration and start-only evidence through native cancellation',
   { timeout: 20000 },
   async (t) => {
     const root = mkdtempSync(join(tmpdir(), 'knn-worker-observation-'));
+    const witness = nativeKnnWitness(t, root);
     const store = new SqliteEvidenceStore(join(root, 'neutral.sqlite'));
     await store.initialize();
     t.after(() => {
@@ -35,11 +37,10 @@ test(
     ).run();
     const insert = db.prepare('INSERT INTO passage_vectors(passage_key,embedding) VALUES(?,?)');
     const vector = new Float32Array([0.25, 0.25, 0.25, 0.25]);
-    // Two MiB of neutral float values; large enough to observe actual native work before cancellation.
+    // Two MiB of neutral floats provide a real KNN workload for the completed-read witness.
     db.transaction(() => {
       for (let i = 0; i < 131072; i++) insert.run(passageVectorKey('thread-neutral', `msg-${i}`), vector);
     })();
-    let releaseNearDeadline;
     store.setEmbedDeps({
       mode: 'on',
       vectorStore,
@@ -48,10 +49,7 @@ test(
         isReady: () => true,
         reprobeIfNeeded: async () => {},
         getModelInfo: () => ({ modelId: 'neutral-fixture', modelRev: '1', dim: 4 }),
-        embed: async () => {
-          if (releaseNearDeadline) await releaseNearDeadline();
-          return [vector];
-        },
+        embed: async () => [vector],
       },
     });
     const options = { mode: 'hybrid', sort: 'relevance', visibleThreadIds: ['neutral'] };
@@ -72,31 +70,70 @@ test(
     assert.ok(snapshots.length <= 11);
     t.diagnostic(JSON.stringify({ kind: 'completed neutral KNN', observation: final.nativeVectorRead }));
 
+    const admissionSnapshots = [];
+    const budgetLimited = await store.searchMessagePassages('absentneutralterm', {
+      ...options,
+      deadlineAt: Date.now() + 1500,
+      onReadSnapshot: (s) => admissionSnapshots.push(s),
+    });
+    assert.equal(budgetLimited.meta.effectiveMode, 'lexical');
+    assert.equal(budgetLimited.meta.degraded, true);
+    assert.equal(budgetLimited.meta.degradeReason, 'passage_vector_admission_budget_insufficient');
+    assert.equal(budgetLimited.meta.semanticCandidatesLimited, false);
+    assert.ok(admissionSnapshots.length > 0);
+    assert.ok(admissionSnapshots.every((s) => s.nativeVectorRead === null));
+    t.diagnostic(
+      JSON.stringify({ kind: 'budget-limited hybrid', nativeStartObserved: false, meta: budgetLimited.meta }),
+    );
+
     for (const reason of ['AbortError', 'TimeoutError']) {
       await store.searchMessagePassages('absentneutralterm', { ...options, mode: 'lexical' });
       const control = new AbortController();
-      const deadlineAt = reason === 'TimeoutError' ? Date.now() + 1500 : undefined;
-      if (deadlineAt)
-        releaseNearDeadline = async () => {
-          await pause(Math.max(0, deadlineAt - Date.now() - 15));
-        };
+      const arm = witness.arm(reason);
+      const startedAt = Date.now();
+      const deadlineAt = reason === 'TimeoutError' ? startedAt + 1500 : undefined;
+      // Admission uses the original 15s caller budget. The unchanged 1.5s
+      // deadline expires while SQLite is held inside its first-row UDF.
+      const requestDeadlineAt = startedAt + 15_000;
       let observed;
+      let enteredVerifiedAt;
+      let witnessFailure;
+      const beforeDeadline = (time) => deadlineAt === undefined || time < deadlineAt;
+      const interrupt = setInterval(() => {
+        if (!observed || !witness.entered(arm)) return;
+        try {
+          witness.assertEntered(arm, observed);
+          const verifiedAt = Date.now();
+          if (!beforeDeadline(verifiedAt)) return;
+          enteredVerifiedAt = verifiedAt;
+          clearInterval(interrupt);
+          if (reason === 'AbortError') control.abort(new DOMException('native fixture cancellation', reason));
+        } catch (error) {
+          witnessFailure = error;
+          clearInterval(interrupt);
+          control.abort(error);
+        }
+      }, 1);
       const failSafe = setTimeout(() => control.abort(new Error('fixture fail-safe')), 4000);
       try {
         await assert.rejects(
           store.searchMessagePassages('absentneutralterm', {
             ...options,
             deadlineAt,
+            requestDeadlineAt,
             signal: control.signal,
             onReadSnapshot(s) {
               if (s.nativeVectorRead?.event === 'sql-start') {
                 observed = s;
-                if (reason === 'AbortError') control.abort(new DOMException('native fixture cancellation', reason));
               }
             },
           }),
           (error) => {
-            assert.ok(observed, 'must observe actual native KNN start before cancellation/deadline');
+            if (witnessFailure) throw witnessFailure;
+            assert.ok(enteredVerifiedAt !== undefined, 'SQLite witness must be verified before cancellation/deadline');
+            if (deadlineAt !== undefined) assert.ok(enteredVerifiedAt < deadlineAt);
+            assert.ok(observed, 'must retain the native SQL call-boundary observation');
+            witness.assertEntered(arm, observed);
             assert.equal(error.name, reason);
             if (reason === 'AbortError') assert.equal(error, control.signal.reason);
             const read = error.memoryProcess.nativeVectorRead;
@@ -116,7 +153,7 @@ test(
         );
       } finally {
         clearTimeout(failSafe);
-        releaseNearDeadline = undefined;
+        clearInterval(interrupt);
       }
       let gone = false;
       for (let i = 0; i < 100; i++) {
@@ -134,6 +171,9 @@ test(
           kind: 'interrupted neutral KNN',
           reason,
           nativeStartObserved: true,
+          sqliteCallEntered: true,
+          enteredVerifiedAt,
+          ...(deadlineAt !== undefined ? { deadlineAt } : {}),
           childExited: gone,
           resourcesAfterKnown: false,
           resourceDeltaKnown: false,
@@ -142,5 +182,6 @@ test(
       );
     }
     assert.doesNotMatch(JSON.stringify(snapshots), /body-canary|neutral-fixture|SELECT|bindings/);
+    assert.doesNotMatch(JSON.stringify(admissionSnapshots), /body-canary|neutral-fixture|SELECT|bindings/);
   },
 );

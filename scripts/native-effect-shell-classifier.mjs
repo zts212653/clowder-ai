@@ -1,5 +1,5 @@
 import { executedInvocations } from './lib/shell-invocation.mjs';
-import { shellSegments } from './lib/shell-lexical.mjs';
+import { shellSegments, shellSubstitutions } from './lib/shell-lexical.mjs';
 import { SUBSTITUTION } from './lib/shell-text.mjs';
 import { codexAuthenticationEffect } from './native-auth-effect.mjs';
 import { DELETE_PROGRAMS, findArgvDeletes, findExecutedCommands } from './native-effect-find-classifier.mjs';
@@ -203,16 +203,12 @@ export function shellExecutionEvidence(call, fallbackCwd) {
   }));
 }
 
-/** Split real pipelines and command lines without mistaking quoted or escaped separators for execution. */
 export function splitShellExecutionSegments(raw) {
   return splitShellSegments(raw, true).map((segment) => segment.text);
 }
-
-/** The same split, keeping the separator in front of each segment (`&&`, `||`, `;`, `&`, `|`, newline). */
 export function splitShellExecutionSegmentsWithSeparators(raw) {
   return splitShellSegments(raw, true);
 }
-
 export function splitPipelineSegments(raw) {
   return splitShellSegments(raw, false).map((segment) => segment.text);
 }
@@ -234,16 +230,19 @@ function isDeleteOperation(raw) {
   return /\s-(?:exec|execdir|ok|okdir)\b[^;&|\n]*(?:^|\s)(?:sudo\s+)?(?:rm|trash|unlink|rmdir)\b/i.test(raw);
 }
 
+function hasUnquotedRedirection(raw) {
+  const sub = shellSubstitutions(raw, SUBSTITUTION);
+  const check = (txt) => /(?:^|[^<])>{1,2}(?!=)|<>/.test(unquotedShellText(txt));
+  return !sub.readable ? check(raw) : check(sub.text) || sub.inner.some(hasUnquotedRedirection);
+}
 function isWriteOperation(raw) {
   return (
     fileProgramEffect(raw) === 'write' ||
     /(?:^|[;&|]\s*)\s*(?:touch|mkdir|cp|mv|tee|install)\b/i.test(raw) ||
-    // Quoted `>` is text (`stat -f '%N -> %Y'`, `rg 'a > b'`), not a redirection.
-    /(?:^|[^<])>{1,2}(?!=)|<>/.test(unquotedShellText(raw)) ||
+    hasUnquotedRedirection(raw) ||
     isGitWriteOperation(raw)
   );
 }
-
 function isReadOperation(raw) {
   const files = fileProgramAnalysis(raw);
   if (files.handled && files.effect !== 'read') return false;

@@ -40,7 +40,10 @@ function preference() {
 }
 
 function payload(projection) {
-  return projection ? JSON.parse(projection.split('\n')[2]) : { anomalies: [], activePreferences: [] };
+  if (!projection) return { anomalies: [], activePreferences: [] };
+  const match = /^<runtime-routing-context>\s*([\s\S]*?)\s*<\/runtime-routing-context>$/.exec(projection);
+  assert.ok(match, 'routing advisory must have its payload envelope');
+  return JSON.parse(match[1]);
 }
 
 test('invocation prompt reads decision sources without loading either audit ledger', async (t) => {

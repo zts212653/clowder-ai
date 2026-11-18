@@ -1,10 +1,12 @@
 // @vitest-environment jsdom
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ChatMessage } from '@/stores/chat-types';
 import {
   __resetChatScrollMemoryForTest,
+  captureChatReadingRef,
   describeChatReadingAnchor,
   findChatReadingSuccessor,
+  readChatReadingRef,
   readChatScrollState,
   resolveChatReadingAnchor,
   saveChatScrollState,
@@ -14,8 +16,47 @@ beforeEach(() => {
   localStorage.clear();
   __resetChatScrollMemoryForTest();
 });
+afterEach(() => {
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
+});
 
 describe('browser-local thread reading memory', () => {
+  it.each([false, true])('captures an HTTP reading ref without randomUUID, storage denied=%s', (denied) => {
+    vi.stubGlobal('crypto', { getRandomValues: crypto.getRandomValues.bind(crypto) });
+    if (denied)
+      vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+        throw new DOMException('Denied');
+      });
+    const original = {
+      threadId: 'http-source',
+      position: {
+        top: 320,
+        anchor: 'offset' as const,
+        messageAnchor: { messageId: 'exact-source', viewportOffsetPx: 42 },
+      },
+    };
+    const point = captureChatReadingRef(original);
+    expect(point?.persisted).toBe(!denied);
+    expect(point?.ref).toMatch(/^chat-reading:http-source:[0-9a-f-]{36}$/);
+    if (!point) throw new Error('Expected the original reading owner ref');
+    expect(readChatReadingRef(point.ref)).toEqual(original);
+  });
+  it('retains a specific source-card anchor through a fresh module cache instead of reducing it to its message', () => {
+    const saved = {
+      top: 800,
+      anchor: 'offset' as const,
+      messageAnchor: {
+        messageId: 'exact-source',
+        viewportOffsetPx: -400,
+        richBlockId: 'original-card',
+        richBlockViewportOffsetPx: 200,
+      },
+    };
+    saveChatScrollState('rich-source', saved);
+    __resetChatScrollMemoryForTest();
+    expect(readChatScrollState('rich-source')).toEqual(saved);
+  });
   it('chooses the next timeline survivor including equal-score ids, without carrying the deleted bubble key', () => {
     const point = (id: string, timestamp: number): ChatMessage => ({ id, timestamp, type: 'user', content: id });
     const anchor = { messageId: 'm2', viewportOffsetPx: -20, timelineOrderAt: 100, bubbleKey: 'deleted-bubble' };

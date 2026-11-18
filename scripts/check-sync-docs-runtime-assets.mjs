@@ -76,6 +76,13 @@ const COMMENT_LINE_RE = /^\s*(?:\/\/|\*|\/\*)/;
 //      sometimes without a trailing slash)
 export const IGNORE_PATHS = [
   {
+    exact: 'docs/discussions/2026-11-16-watcher-usefulness-experiment/watcher-instruction.md',
+    reason:
+      'F335 installation-owned experiment instruction (thread ids and the owner’s own words), not public method. ' +
+      'The watcher panel it feeds is off unless the owner enables it in Settings; without this file every panel ' +
+      'round fails closed with watcher_panel_instruction_unavailable instead of running on substitute text.',
+  },
+  {
     exact: 'docs/videos/f311-microduck-roadshow/pipeline/football',
     reason:
       'F311 optional installation-owned demonstration archive, excluded by the file-scoped public boundary in PR #4429. ' +

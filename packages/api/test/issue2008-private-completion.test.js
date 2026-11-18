@@ -32,7 +32,7 @@ test('#2008 private claim failures still reject the real podcast request without
     (error) => error === failure,
   );
   assert.ok(privateEntryId, 'the failure reaches the real private claim');
-  assert.equal(h.processor.retryDeferrals.isDeferred(privateEntryId), false);
+  assert.equal(h.processor.retryDeferrals.retryAt(privateEntryId), undefined);
   assert.deepEqual(h.starts, []);
 });
 

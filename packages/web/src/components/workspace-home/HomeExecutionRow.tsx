@@ -5,6 +5,7 @@ import { type ReactNode, useEffect, useRef, useState } from 'react';
 import { CatAvatar } from '@/components/CatAvatar';
 import { executionRowCopy } from '@/components/execution-row/execution-row.shell-copy';
 import { useShellCopy } from '@/components/shell/shell-copy';
+import { SuggestionAvatar } from '@/components/suggestions/SuggestionAvatar';
 import { ExecutionConversationLink } from './ExecutionConversationLink';
 import { requestExecutionDetail } from './execution-detail-request';
 import { formatElapsed, homeActivityLabel } from './format';
@@ -49,7 +50,11 @@ export function HomeExecutionRow({
   const isCommand = execution.kind === 'managed_command';
   const canInspect = isCommand || !!(onSelectExecution && execution.turnInvocationId);
   const activity = homeActivityLabel(execution.activity, rowWords.activity);
-  const status = isCommand ? rowWords.compact.managed(activity) : rowWords.compact.working;
+  const status = isCommand
+    ? rowWords.compact.managed(activity)
+    : execution.executionKind === 'watcher'
+      ? rowWords.compact.watching
+      : rowWords.compact.working;
   return (
     <article
       ref={row}
@@ -65,7 +70,11 @@ export function HomeExecutionRow({
         <span className="home-live-heading">
           <span role="img" aria-label={catName} className="flex-shrink-0">
             <span aria-hidden="true">
-              <CatAvatar catId={execution.catId} size={20} ring="none" />
+              {execution.executionKind === 'watcher' ? (
+                <SuggestionAvatar catId={execution.catId} watcher />
+              ) : (
+                <CatAvatar catId={execution.catId} size={20} ring="none" />
+              )}
             </span>
           </span>
           <span className="home-live-name text-compact">{catName}</span>

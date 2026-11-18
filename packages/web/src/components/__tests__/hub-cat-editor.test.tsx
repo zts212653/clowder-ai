@@ -105,6 +105,7 @@ async function flushEffects() {
 
 // Shared member forms read the household account selection, including from the Chat host.
 function accountSelectionRead(path: string, init?: RequestInit): Promise<Response> {
+  if (path === '/api/tts/voices' && !init?.method) return Promise.resolve(jsonResponse({ voices: [] }));
   if (path === '/api/accounts/codex/members' && !init?.method) {
     return Promise.resolve(jsonResponse({ selection: { state: 'empty', members: [] } }));
   }
@@ -2317,37 +2318,43 @@ describe('HubCatEditor', () => {
   });
 
   it('resets provider when switching account to prevent stale provider carry-over', async () => {
-    mockApiFetch.mockResolvedValue(
-      jsonResponse({
-        projectPath: '/tmp/project',
-        activeProfileId: null,
-        providers: [
-          {
-            id: 'maas-key',
-            provider: 'maas-key',
-            displayName: 'MaaS Key',
-            name: 'MaaS Key',
-            authType: 'api_key',
-            models: ['glm-5'],
-            hasApiKey: true,
-            baseUrl: 'https://maas.example',
-            createdAt: '',
-            updatedAt: '',
-          },
-          {
-            id: 'deepseek-key',
-            provider: 'deepseek-key',
-            displayName: 'DeepSeek Key',
-            name: 'DeepSeek Key',
-            authType: 'api_key',
-            models: ['deepseek-r2'],
-            hasApiKey: true,
-            baseUrl: 'https://deepseek.example',
-            createdAt: '',
-            updatedAt: '',
-          },
-        ],
-      }),
+    mockApiFetch.mockImplementation((path) =>
+      Promise.resolve(
+        jsonResponse(
+          path === '/api/tts/voices'
+            ? { voices: [] }
+            : {
+                projectPath: '/tmp/project',
+                activeProfileId: null,
+                providers: [
+                  {
+                    id: 'maas-key',
+                    provider: 'maas-key',
+                    displayName: 'MaaS Key',
+                    name: 'MaaS Key',
+                    authType: 'api_key',
+                    models: ['glm-5'],
+                    hasApiKey: true,
+                    baseUrl: 'https://maas.example',
+                    createdAt: '',
+                    updatedAt: '',
+                  },
+                  {
+                    id: 'deepseek-key',
+                    provider: 'deepseek-key',
+                    displayName: 'DeepSeek Key',
+                    name: 'DeepSeek Key',
+                    authType: 'api_key',
+                    models: ['deepseek-r2'],
+                    hasApiKey: true,
+                    baseUrl: 'https://deepseek.example',
+                    createdAt: '',
+                    updatedAt: '',
+                  },
+                ],
+              },
+        ),
+      ),
     );
 
     await act(async () => {

@@ -3,8 +3,13 @@ feature_ids: [F225]
 related_features: [F033, F065, F128, F211]
 topics: [session, handoff, session-chain, continuity, cat-initiated]
 doc_kind: spec
-tips_exempt: dogfood process note for session-boundary governance; no new user-facing capability
+tips_exempt: "Renewed 2026-11-17: daily doc guard records PR #6815 retirement of legacy seal-time Haiku generative digest generation while keeping existing catHandoffNote bootstrap injection and historical handoff file reads; dogfood process note for session-boundary governance with no new user-facing capability."
 created: 2026-06-05
+updated: 2026-11-17
+description: "猫在语义干净断点主动发起 session 接力，经operator确认后将五件套交接留言无条件注入新 session bootstrap。"
+description_source: human
+description_author: gemini-argon
+description_updated_at: 2026-11-17T14:27:00Z
 ---
 
 # F225: Cat-Initiated Session Handoff — 猫主导的 session 接力
@@ -34,7 +39,7 @@ Why: session 边界目前只能由 `shouldTakeAction`（context_health / 阈值�
 |------|------|------|
 | seal 机制 | ✅ 已有 `sessionSealer.requestSeal({sessionId, reason})` | `invoke-single-cat.ts:2096` |
 | 换 session 的 context 桥 | ✅ `buildSessionBootstrap` 注入上个 session digest + ThreadMemory | `SessionBootstrap.ts:68` |
-| handoff digest | ✅ seal 时生成（generative→extractive fallback） | `SessionSealer.ts:383` |
+| handoff digest | ✅ 2026-06-05 基线为 seal 时生成（generative→extractive fallback）；2026-11-08 [#6815](https://github.com/zts212653/clowder-ai/pull/6815)（`b8c8e7fa15`）已退役 seal-time Haiku 生成与 writer，`generative` 仅保留读取既有历史 handoff 文件 | `SessionSealer.ts` |
 | session 策略 | ✅ `shouldTakeAction` 支持 compress/handoff/hybrid | `session-strategy.ts:220` |
 | proposal 状态机 | ✅ create→claimForApproval(CAS)→finalizeApproval + 确认卡 | `callback-propose-thread-routes.ts:78` |
 

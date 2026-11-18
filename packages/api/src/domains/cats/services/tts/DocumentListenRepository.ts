@@ -13,6 +13,12 @@ export interface ListenDocumentKey {
 
 export type { ListenAssetPolicy } from './DocumentListenRetention.js';
 
+export class ListenAssetUnavailableError extends Error {
+  constructor() {
+    super('听读录音文件已失效，请重新生成后播放。');
+  }
+}
+
 export class DocumentListenRepository {
   private db: Database.Database | null = null;
 
@@ -30,7 +36,12 @@ export class DocumentListenRepository {
     this.db = null;
   }
 
-  saveDocument(key: ListenDocumentKey, state: ListenDocumentState): void {
+  saveDocument(
+    key: ListenDocumentKey,
+    state: ListenDocumentState,
+    compatibleLegacyFingerprint?: string,
+    assetAvailable?: (assetId: string) => boolean,
+  ): void {
     const db = this.ensureOpen();
     db.transaction(() => {
       const previousDocument = db
@@ -94,9 +105,19 @@ export class DocumentListenRepository {
         // A digest changes for any document edit. The manifest anchor encodes
         // normalized sentence text and occurrence, so a matching anchor plus
         // fingerprint is the safe content-addressed reuse identity.
-        const assetId =
-          sentence.assetId ?? (previous?.synthesisFingerprint === synthesisFingerprint ? previous.assetId : null);
-        insert.run(documentId, index, sentence.anchor, assetId, synthesisFingerprint);
+        const compatible =
+          previous &&
+          ((sameContent && state.synthesisFingerprint === undefined) ||
+            previous.synthesisFingerprint === synthesisFingerprint ||
+            previous.synthesisFingerprint === compatibleLegacyFingerprint);
+        const assetId = sentence.assetId ?? (compatible ? previous.assetId : null);
+        const recordingFingerprint =
+          assetId && assetId === previous?.assetId ? previous.synthesisFingerprint : synthesisFingerprint;
+        if (sentence.assetId && sentence.assetId !== previous?.assetId) {
+          if (assetAvailable && !assetAvailable(sentence.assetId)) throw new ListenAssetUnavailableError();
+          this.registerAsset(sentence.assetId, Date.now(), state.retention);
+        }
+        insert.run(documentId, index, sentence.anchor, assetId, recordingFingerprint);
       });
       syncAssetRetentions(db, [...new Set([...existing.values()].map(({ assetId }) => assetId))], state.retention);
     })();
@@ -126,9 +147,7 @@ export class DocumentListenRepository {
       ...(row.synthesis_fingerprint ? { synthesisFingerprint: row.synthesis_fingerprint } : {}),
       sentences: sentences.map((sentence) => ({
         anchor: sentence.anchor,
-        ...(sentence.asset_id && sentence.synthesis_fingerprint === row.synthesis_fingerprint
-          ? { assetId: sentence.asset_id }
-          : {}),
+        ...(sentence.asset_id ? { assetId: sentence.asset_id } : {}),
       })),
       position: { anchor: row.position_anchor, offsetSeconds: row.position_offset_seconds },
       playbackRate: row.playback_rate as ListenDocumentState['playbackRate'],
@@ -137,10 +156,17 @@ export class DocumentListenRepository {
     };
   }
 
-  setSentenceAsset(key: ListenDocumentKey, anchor: string, assetId: string, usedAt = Date.now()): void {
+  setSentenceAsset(
+    key: ListenDocumentKey,
+    anchor: string,
+    assetId: string,
+    usedAt = Date.now(),
+    assetAvailable?: (assetId: string) => boolean,
+  ): void {
     const db = this.ensureOpen();
     db.transaction(() => {
       const document = this.requireDocument(key);
+      if (assetAvailable && !assetAvailable(assetId)) throw new ListenAssetUnavailableError();
       const previous = db
         .prepare('SELECT asset_id FROM listen_sentence_assets WHERE document_id = ? AND anchor = ?')
         .get(document.id, anchor) as { asset_id: string | null } | undefined;
@@ -156,7 +182,7 @@ export class DocumentListenRepository {
         [...new Set([assetId, ...(previous?.asset_id ? [previous.asset_id] : [])])],
         document.retention,
       );
-    })();
+    }).immediate();
   }
 
   /**
@@ -185,21 +211,24 @@ export class DocumentListenRepository {
       ) {
         throw new Error('Listen sentence manifest no longer matches current document');
       }
-      if (document.synthesisFingerprint === synthesisFingerprint) return;
+      const staleSentence = db
+        .prepare('SELECT 1 FROM listen_sentence_assets WHERE document_id = ? AND synthesis_fingerprint <> ? LIMIT 1')
+        .get(document.id, synthesisFingerprint);
+      if (document.synthesisFingerprint === synthesisFingerprint && !staleSentence) return;
       const oldAssetIds = (
         db
           .prepare(
-            'SELECT DISTINCT asset_id FROM listen_sentence_assets WHERE document_id = ? AND asset_id IS NOT NULL',
+            'SELECT DISTINCT asset_id FROM listen_sentence_assets WHERE document_id = ? AND asset_id IS NOT NULL AND synthesis_fingerprint <> ?',
           )
-          .all(document.id) as Array<{ asset_id: string }>
+          .all(document.id, synthesisFingerprint) as Array<{ asset_id: string }>
       ).map(({ asset_id }) => asset_id);
       db.prepare('UPDATE listen_documents SET synthesis_fingerprint = ? WHERE id = ?').run(
         synthesisFingerprint,
         document.id,
       );
       db.prepare(
-        'UPDATE listen_sentence_assets SET asset_id = NULL, synthesis_fingerprint = ? WHERE document_id = ?',
-      ).run(synthesisFingerprint, document.id);
+        'UPDATE listen_sentence_assets SET asset_id = NULL, synthesis_fingerprint = ? WHERE document_id = ? AND synthesis_fingerprint <> ?',
+      ).run(synthesisFingerprint, document.id, synthesisFingerprint);
       syncAssetRetentions(db, oldAssetIds, document.retention);
     })();
   }
@@ -208,34 +237,38 @@ export class DocumentListenRepository {
   setSentenceAssetIfCurrent(
     key: ListenDocumentKey,
     input: { contentDigest: string; synthesisFingerprint: string; anchor: string; assetId: string; usedAt?: number },
+    assetAvailable?: (assetId: string) => boolean,
   ): boolean {
     const db = this.ensureOpen();
-    return db.transaction(() => {
-      const document = this.requireDocument(key);
-      if (
-        document.contentDigest !== input.contentDigest ||
-        document.synthesisFingerprint !== input.synthesisFingerprint
-      ) {
-        return false;
-      }
-      const previous = db
-        .prepare('SELECT asset_id FROM listen_sentence_assets WHERE document_id = ? AND anchor = ?')
-        .get(document.id, input.anchor) as { asset_id: string | null } | undefined;
-      if (!previous) return false;
-      this.registerAsset(input.assetId, input.usedAt, document.retention);
-      const result = db
-        .prepare(
-          'UPDATE listen_sentence_assets SET asset_id = ?, synthesis_fingerprint = ? WHERE document_id = ? AND anchor = ?',
-        )
-        .run(input.assetId, input.synthesisFingerprint, document.id, input.anchor);
-      if (result.changes !== 1) return false;
-      syncAssetRetentions(
-        db,
-        [...new Set([input.assetId, ...(previous.asset_id ? [previous.asset_id] : [])])],
-        document.retention,
-      );
-      return true;
-    })();
+    return db
+      .transaction(() => {
+        const document = this.requireDocument(key);
+        if (
+          document.contentDigest !== input.contentDigest ||
+          document.synthesisFingerprint !== input.synthesisFingerprint
+        ) {
+          return false;
+        }
+        const previous = db
+          .prepare('SELECT asset_id FROM listen_sentence_assets WHERE document_id = ? AND anchor = ?')
+          .get(document.id, input.anchor) as { asset_id: string | null } | undefined;
+        if (!previous) return false;
+        if (assetAvailable && !assetAvailable(input.assetId)) throw new ListenAssetUnavailableError();
+        this.registerAsset(input.assetId, input.usedAt, document.retention);
+        const result = db
+          .prepare(
+            'UPDATE listen_sentence_assets SET asset_id = ?, synthesis_fingerprint = ? WHERE document_id = ? AND anchor = ?',
+          )
+          .run(input.assetId, input.synthesisFingerprint, document.id, input.anchor);
+        if (result.changes !== 1) return false;
+        syncAssetRetentions(
+          db,
+          [...new Set([input.assetId, ...(previous.asset_id ? [previous.asset_id] : [])])],
+          document.retention,
+        );
+        return true;
+      })
+      .immediate();
   }
 
   registerAsset(assetId: string, usedAt = Date.now(), retention: ListenRetention = '7d'): void {
@@ -279,11 +312,20 @@ export class DocumentListenRepository {
   }
 
   forgetAsset(assetId: string): void {
+    this.removeAssetWhen(assetId, () => true);
+  }
+
+  /** Recheck current policy and perform filesystem removal without an async gap. */
+  removeAssetWhen(assetId: string, removeAudio: (policy: ListenAssetPolicy | undefined) => boolean): boolean {
     const db = this.ensureOpen();
-    db.transaction(() => {
-      db.prepare('UPDATE listen_sentence_assets SET asset_id = NULL WHERE asset_id = ?').run(assetId);
-      db.prepare('DELETE FROM listen_assets WHERE asset_id = ?').run(assetId);
-    })();
+    return db
+      .transaction(() => {
+        if (!removeAudio(listAssetPolicies(db, assetId)[0])) return false;
+        db.prepare('UPDATE listen_sentence_assets SET asset_id = NULL WHERE asset_id = ?').run(assetId);
+        db.prepare('DELETE FROM listen_assets WHERE asset_id = ?').run(assetId);
+        return true;
+      })
+      .immediate();
   }
 
   private requireDocument(key: ListenDocumentKey): {

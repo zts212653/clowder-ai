@@ -16,6 +16,7 @@ import { PluginUiEntries } from '../plugins/PluginUiEntries';
 import { type ResolvedPin, resolvePin } from '../settings/settings-ia';
 import { CollectiveWorldRailEntries } from './CollectiveWorldRailEntries';
 import { MailboxButton } from './MailboxButton';
+import { QuotaRingButton } from './QuotaRingButton';
 import { RailButton } from './RailButton';
 import { CatBallImage } from './ShellIcons';
 import { isSettingsRoute } from './settings-reading-bridge';
@@ -78,6 +79,7 @@ export function WorldRail() {
           <PinnedRailItems />
         </Suspense>
         <PresentationToggle />
+        <QuotaRingButton onOpenAccounts={() => go('/settings?s=accounts')} />
         <MailboxButton />
         <ConciergeButton />
         <div className="h-1" aria-hidden="true" />

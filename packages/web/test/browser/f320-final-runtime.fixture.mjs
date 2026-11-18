@@ -26,12 +26,14 @@ import {
   waitForPage,
 } from './f309-ordinary-workspace-journey-fixture.mjs';
 import { createFixtureLoginDriver } from './f320-native-login.fixture.mjs';
+import { disabledWatcherRead } from './fixtures/f322-watcher-read.mjs';
 import { createNextDevTestEnvironment } from './next-dev-test-environment.mjs';
 
 export async function startFinalAccountPreview({
   withOverrides = false,
   withClaude = false,
   withAgy = false,
+  agyQuotaSampler,
   routingSnapshot,
   withServicePreview = false,
   withStartupRecovery = false,
@@ -247,6 +249,7 @@ export async function startFinalAccountPreview({
   app.post('/api/auth/session', async () => ({ userId: 'fixture', csrfToken: 'fixture' }));
   await app.register(accountsRoutes, {
     loginDriver: nativeLogin.driver,
+    ...(agyQuotaSampler ? { agyQuotaSampler } : {}),
     quotaFetcher: async () =>
       quotaMode === 'body'
         ? Response.json({
@@ -304,6 +307,8 @@ export async function startFinalAccountPreview({
   }
   app.get('/*', async (request) => {
     const url = new URL(request.url, 'http://127.0.0.1');
+    const watcher = disabledWatcherRead({ method: () => request.method }, url, [THREAD_ID]);
+    if (watcher) return JSON.parse(watcher.body);
     if (url.pathname === '/api/session' || url.pathname === '/api/auth/session')
       return { userId: 'fixture', csrfToken: 'fixture' };
     if (url.pathname === '/api/debug/callback-auth')

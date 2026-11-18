@@ -6,6 +6,7 @@ import { SelectField, TextField } from './hub-cat-editor-fields';
 
 import { useEditorText, useMemberEditorPresentation } from './members/editor-presentation';
 import { MemberOperationFeedback } from './members/MemberOperationFeedback';
+import { MemberVoiceChoice } from './members/MemberVoiceChoice';
 
 type FormPatch = Partial<HubCatEditorFormState>;
 
@@ -112,6 +113,7 @@ export function VoiceConfigSection({
       )}
       {expanded && (
         <div className="space-y-2">
+          <MemberVoiceChoice form={form} onChange={onChange} />
           <SelectField
             label="Lang Code"
             ariaLabel="Voice Lang Code"

@@ -162,16 +162,6 @@ describe('F190 visual contract — no hard borders in card/panel components', ()
     expect(src).toContain('console-border-soft');
   });
 
-  it('HubQuotaBoardTab uses console-list-card shadow, no hub-* CSS vars', () => {
-    const src = readSrc('HubQuotaBoardTab.tsx');
-    expect(src).not.toMatch(/var\(--hub-/);
-    expect(src).not.toContain('field-success');
-    expect(src).toContain('console-list-card');
-    expect(src).toContain('text-cafe');
-    expect(src).toContain('cafe-accent');
-    expect(src).toContain('conn-red-ring');
-  });
-
   it('hub-cat-editor-advanced uses console-runtime-* tokens, no hub-* CSS vars', () => {
     const src = readSrc('hub-cat-editor-advanced.tsx');
     expect(src).not.toMatch(/var\(--hub-/);
@@ -958,13 +948,6 @@ describe('#723 round 5 — ops tab/button convergence guard', () => {
     expect(src).toContain('text-cafe-accent');
     expect(src).not.toMatch(/console-list-card rounded-2xl/);
   });
-
-  it('HubQuotaBoardTab 刷新全部 uses cafe-accent primary, not console-button-emphasis', () => {
-    const src = readSrc('HubQuotaBoardTab.tsx');
-    expect(src).not.toMatch(/bg-\[var\(--console-button-emphasis\)\][\s\S]*?刷新全部/);
-    expect(src).toContain('bg-cafe-accent');
-    expect(src).toContain('hover:bg-cafe-interactive');
-  });
 });
 
 describe('#723 round 6 — select/toggle/button primitive convergence', () => {
@@ -1367,12 +1350,6 @@ describe('#723 round 9 — install button, error suppression, breadcrumb, tab/ca
       modalOverlayCandidates(`${declaration}<div className={OVERLAY_CLASS.replace('backdrop-blur-sm', '')} />`),
     ).toEqual([{ className: overlayClass, exactConsumer: false }]);
     expect(modalOverlayCandidates(`${declaration}<div className="fixed inset-0" />`)).toEqual([]);
-  });
-
-  it('HubQuotaBoardTab: rounded-xl + standard shadow, no heavy shadow', () => {
-    const src = readSrc('HubQuotaBoardTab.tsx');
-    expect(src).not.toContain('rounded-2xl');
-    expect(src).not.toContain('0_12px_30px');
   });
 
   it('DailyUsageSection refresh: accent button (py-1.5 + transition-colors)', () => {

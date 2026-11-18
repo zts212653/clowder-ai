@@ -74,6 +74,7 @@ export interface ExecutionRowModel {
   visible: boolean;
   status: RowStatus;
   runningCount: number;
+  watcherCount: number;
   /** Visible entries still waiting. */
   queuedCount: number;
   /** Total entries in the visible Queue. */
@@ -176,6 +177,7 @@ export function deriveExecutionRow(input: ExecutionRowInput): ExecutionRowModel 
     visible: counts.running > 0 || counts.unverified || counts.confirming || visibleQueueCount > 0 || holds.length > 0,
     status,
     runningCount: counts.running,
+    watcherCount: executions.filter((execution) => execution.executionKind === 'watcher').length,
     queuedCount: queue.entries.filter((entry) => entry.status === 'queued').length,
     visibleQueueCount,
     single,
@@ -260,8 +262,11 @@ export function rowStatusText(
       return model.single?.kind === 'managed_command'
         ? copy.status.managed(who, copy.activity[model.single.activity ?? 'command'], clock, tail)
         : model.single
-          ? copy.status.working(who, clock, tail)
-          : copy.status.running(model.runningCount, tail);
+          ? model.single.executionKind === 'watcher'
+            ? copy.status.watching(who, clock, tail)
+            : copy.status.working(who, clock, tail)
+          : copy.status.running(model.runningCount, tail) +
+            (model.watcherCount ? copy.status.watcherTail(model.watcherCount) : '');
     case 'stopping':
       return copy.status.stopping(clock);
     case 'blocked':
@@ -284,6 +289,7 @@ export function rowCompactStatusText(model: ExecutionRowModel, copy: ExecutionRo
   switch (model.status) {
     case 'working':
     case 'blocked':
+      if (model.watcherCount > 0 && model.watcherCount === model.runningCount) return copy.compact.watching;
       return model.single?.kind === 'managed_command'
         ? copy.status.managed('', copy.activity[model.single.activity ?? 'command'], '', '').trim()
         : copy.compact.working;

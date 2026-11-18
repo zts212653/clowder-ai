@@ -53,6 +53,44 @@ describe('Settings bridge uses the remounted original reading owner', () => {
   afterEach(() => {
     bridge.dispose();
     vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+  });
+
+  it('captures and returns through the full HTTP ref/session chain without native UUID', async () => {
+    vi.stubGlobal('crypto', { getRandomValues: crypto.getRandomValues.bind(crypto) });
+    const { source } = enter();
+    expect(bridge.getSnapshot().persisted).toBe(true);
+    await bridge.returnToSource(source.id);
+    bridge.setRoute('/thread/origin', true);
+    const next = reader('new-http-owner');
+    bridge.registerReadingPort(next, () => 'Original HTTP source');
+    await tick();
+    expect(next.restoreReadingRef).toHaveBeenCalled();
+    expect(bridge.getSnapshot().source).toBeNull();
+  });
+
+  it('keeps a prepared HTTP ref document-local when persistence is unavailable', async () => {
+    bridge.dispose();
+    bridge = new SettingsReadingBridge(push, 'http-document', false);
+    bridge.setRoute('/thread/origin', true);
+    const old = reader();
+    const point = old.captureReadingRef();
+    if (!point) throw new Error('Expected an original reading ref');
+    old.captureReadingRef = vi.fn(() => ({ ...point, persisted: false }));
+    vi.stubGlobal('crypto', { getRandomValues: crypto.getRandomValues.bind(crypto) });
+    const unmount = bridge.registerReadingPort(old, () => 'HTTP document source');
+    bridge.captureBeforeSettings();
+    const source = bridge.getSnapshot().source;
+    expect(source?.readingRef).toBe(point.ref);
+    expect(bridge.getSnapshot().persisted).toBe(false);
+    if (!source) throw new Error('Expected the document-local association');
+    bridge.setRoute('/settings', true);
+    unmount();
+    await bridge.returnToSource(source.id);
+    bridge.setRoute('/thread/origin', true);
+    bridge.registerReadingPort(reader('http-return-owner'), () => 'HTTP document source');
+    await tick();
+    expect(bridge.getSnapshot().source).toBeNull();
   });
   function enter() {
     const old = reader();

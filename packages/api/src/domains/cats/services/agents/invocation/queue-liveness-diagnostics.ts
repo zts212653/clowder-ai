@@ -5,7 +5,16 @@
  * head remains pending.
  */
 
-export type ContinuationOutcome = 'no_dispatchable_candidate' | 'all_candidate_slots_busy' | 'start_rejected';
+export type ContinuationOutcome =
+  | 'no_dispatchable_candidate'
+  | 'all_candidate_slots_busy'
+  | 'waiting_for_retry'
+  | 'start_rejected';
+
+export interface ContinuationRetryWait {
+  readonly deferredForRetry: number;
+  readonly retryAt: number;
+}
 
 export const CONTINUATION_DIAGNOSTIC_MESSAGE = '[QueueProcessor] continuation started nothing while entries are queued';
 
@@ -16,6 +25,8 @@ export interface ContinuationDiagnostic {
     readonly outcome: ContinuationOutcome;
     readonly deferredForBusySlot: number;
     readonly entryId?: string;
+    readonly deferredForRetry?: number;
+    readonly retryAt?: number;
   };
   readonly message: string;
 }
@@ -36,6 +47,7 @@ export function describeContinuationOutcome(input: {
   deferredForBusySlot: number;
   entryId?: string;
   hasDispatchableQueued: boolean;
+  retryWait?: ContinuationRetryWait;
 }): ContinuationDiagnostic | null {
   if (!input.hasDispatchableQueued) return null;
   return {
@@ -45,12 +57,14 @@ export function describeContinuationOutcome(input: {
       outcome: input.outcome,
       deferredForBusySlot: input.deferredForBusySlot,
       ...(input.entryId ? { entryId: input.entryId } : {}),
+      ...input.retryWait,
     },
     message: CONTINUATION_DIAGNOSTIC_MESSAGE,
   };
 }
 
 /** Which of the three outcomes a scan that started nothing actually hit. */
-export function classifyContinuationOutcome(deferredForBusySlot: number): ContinuationOutcome {
+export function classifyContinuationOutcome(deferredForBusySlot: number, deferredForRetry = 0): ContinuationOutcome {
+  if (deferredForRetry > 0) return 'waiting_for_retry';
   return deferredForBusySlot > 0 ? 'all_candidate_slots_busy' : 'no_dispatchable_candidate';
 }

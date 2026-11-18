@@ -71,6 +71,7 @@ export type ParentMessage =
       error?: ProcessError;
     };
 export type ChildMessage =
+  | { type: 'message-vectors-started'; id: number }
   | { type: 'read-diagnostic'; id: number; diagnostic: MemoryReadDiagnostic }
   | { type: 'result'; id: number; value?: unknown; error?: ProcessError; readWindow?: FileVectorReadWindowSnapshot }
   | { type: 'started'; id: number; pid: number; readWindow?: FileVectorReadWindowSnapshot }

@@ -29,6 +29,8 @@ export class AgyNativeRunOutput {
   }
 
   result(observed: AgyNativeObservedTurn): AgentMessage[] {
+    if (this.metadata.contextWindowObservation)
+      this.turnMetadata.contextWindowObservation = this.metadata.contextWindowObservation;
     const messages = projectAgyNativeTurn(
       this.catId,
       this.turnMetadata,
@@ -54,6 +56,8 @@ export class AgyNativeRunOutput {
 
   finish(observed: AgyNativeObservedTurn): AgentMessage[] {
     const terminalMetadata = { ...(this.resultSeen && this.lastMetadata ? this.lastMetadata : this.turnMetadata) };
+    if (this.metadata.contextWindowObservation)
+      terminalMetadata.contextWindowObservation = this.metadata.contextWindowObservation;
     const messages = projectAgyNativeTurn(
       this.catId,
       terminalMetadata,

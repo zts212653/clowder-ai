@@ -54,6 +54,10 @@
       "import": "./dist/profile-contract.js",
       "types": "./dist/profile-contract.d.ts"
     },
+    "./profile-diff": {
+      "import": "./dist/profile-diff.js",
+      "types": "./dist/profile-diff.d.ts"
+    },
     "./profile-revision": {
       "import": "./dist/profile-revision.js",
       "types": "./dist/profile-revision.d.ts"

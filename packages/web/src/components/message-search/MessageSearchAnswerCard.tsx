@@ -101,27 +101,28 @@ export function MessageSearchAnswerCard({ messageId, blockId }: { messageId?: st
       response.meta.answerSelection ? a.index - b.index : rank(a.result) - rank(b.result) || a.index - b.index,
     )
     .slice(0, 3);
-  const resolveSpeaker = (id: string) => (id === 'user' ? 'co-creator' : getCatById(id)?.nickname || id);
+  const resolveSpeaker = (id: string) => {
+    if (id === 'user') return 'co-creator';
+    const cat = getCatById(id);
+    return cat?.nickname || cat?.displayName || id;
+  };
   return (
     <section
       data-message-search-answer
-      className="my-2 rounded-xl border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] text-cafe"
+      className="my-2 w-[620px] max-w-full rounded-xl border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] px-3.5 py-2.5 text-cafe [container-type:inline-size]"
     >
-      <p className="px-3 pt-3 text-xs text-cafe-muted">
-        {response.meta.answerSelection
-          ? `「${response.query}」 · 由 ${resolveSpeaker(response.meta.answerSelection.catId)} 选出 ${response.results.length} 处来源（系统已核原句与结构归属；是否支持结论由选材猫判断）`
-          : `「${response.query}」的查找来源`}
-      </p>
+      {!response.meta.answerSelection && <p className="mb-2 text-xs text-cafe-muted">「{response.query}」的查找来源</p>}
       <MessageDecisionSummary
+        compact
         response={response}
         threadId={threadId}
         resolveSpeaker={resolveSpeaker}
         beforeAction={beforeAction}
       />
       {(!!view.changedSources || view.decisionUpdated) && (
-        <p className="px-3 text-xs text-cafe-muted">有来源或已定事项已更新，旧正文与旧标签未沿用。</p>
+        <p className="mb-2 text-xs text-cafe-muted">有来源或已定事项已更新，旧正文与旧标签未沿用。</p>
       )}
-      <ol className="divide-y divide-[var(--console-border-soft)] px-3">
+      <ol className="divide-y divide-[var(--console-border-soft)]">
         {visible.map(({ result, index }) => (
           <MessageSearchResultRow
             key={`${result.threadId}:${result.messageId}:${result.contentRevision}:${JSON.stringify(result.decisionSources)}`}
@@ -131,6 +132,8 @@ export function MessageSearchAnswerCard({ messageId, blockId }: { messageId?: st
             currentThreadId={threadId}
             speaker={resolveSpeaker(result.speaker)}
             journey6
+            variant="answer-card"
+            showSelectionReason={visible.length > 1}
             readonly={false}
             onNavigate={(result) => void open(result)}
             resolveSpeaker={resolveSpeaker}
@@ -139,15 +142,17 @@ export function MessageSearchAnswerCard({ messageId, blockId }: { messageId?: st
         ))}
       </ol>
       {!visible.length && <p className="p-3 text-sm text-cafe-muted">这次没有找到可确认的来源。</p>}
-      <button
-        type="button"
-        className="m-3 text-xs text-[var(--accent-600)] hover:underline focus-visible:outline"
-        onClick={() => void open()}
-      >
-        在查找里看全部 ›
-      </button>
+      {(response.results.length > visible.length || (!response.meta.answerSelection && response.meta.hasMore)) && (
+        <button
+          type="button"
+          className="mt-2 text-xs text-[var(--accent-600)] hover:underline focus-visible:outline"
+          onClick={() => void open()}
+        >
+          在查找里看全部 ›
+        </button>
+      )}
       {notice && (
-        <p role="alert" className="px-3 pb-3 text-xs text-cafe-muted">
+        <p role="alert" className="mt-2 text-xs text-cafe-muted">
           {notice}
         </p>
       )}

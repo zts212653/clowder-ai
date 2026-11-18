@@ -108,7 +108,8 @@ const rememberItemInputSchema = z.discriminatedUnion('target', [
     'matter',
     matterAgentChangeSchema.describe(
       'Create, append to, correct or retire a shared matter page. Give summary: your interpretation in one sentence or more; sources are optional threadId pointers, with messageId when known. ' +
-        'Without sources the server binds this real invocation thread and any confirmed trigger, including a cat/system message; a pointer is not verified original speech. No quote, selected block, attachment or offsets are needed. ' +
+        'On create or append, omitting sources binds this real invocation thread and any confirmed trigger, including a cat/system message; a pointer is not verified original speech. No quote, selected block, attachment or offsets are needed. ' +
+        'On correct, omitted summary or source preserves its current value. A summary-only correction keeps the saved source version even if the referenced message changed; after reading that original, pass source alone to refresh its version without resending summary. ' +
         'The server records the actual summary writer. description is optional page context/applicability. Exact quotations remain optional and use their original raw UTF-16 selection fields. ' +
         'Updates need expectedRevision from cat_cafe_read_memory({ref:{kind:"matter",matterId}}). Reuse requestId only for the exact same change.',
     ),

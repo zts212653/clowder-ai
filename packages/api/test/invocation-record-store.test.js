@@ -38,7 +38,6 @@ describe('InvocationRecordStore', () => {
     );
     assert.equal((await store.get(created.invocationId)).userMessageId, 'original-source');
   });
-
   test('create() rejects an unclassified action-lease carrier', async () => {
     const { InvocationRecordStore } = await import(
       '../dist/domains/cats/services/stores/ports/InvocationRecordStore.js'

@@ -1,14 +1,18 @@
 import { act, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { expect, it } from 'vitest';
+import { expect, it, vi } from 'vitest';
+import { apiFetch } from '@/utils/api-client';
 import { initialState } from '../hub-cat-editor.model';
 import { MemberAdditionalFields } from '../settings/members/MemberAdditionalFields';
+
+vi.mock('@/utils/api-client', () => ({ apiFetch: vi.fn() }));
 
 it('can restore a custom voice language after selecting a preset', async () => {
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   const host = document.createElement('div');
   document.body.append(host);
   const root = createRoot(host);
+  vi.mocked(apiFetch).mockImplementation(async () => Response.json({ voices: [] }));
   function Form() {
     const [form, setForm] = useState({ ...initialState(), voiceLangCode: 'fr-custom' });
     return (
@@ -28,7 +32,7 @@ it('can restore a custom voice language after selecting a preset', async () => {
   }
   try {
     await act(async () => root.render(<Form />));
-    const preset = host.querySelector('select');
+    const preset = host.querySelector<HTMLSelectElement>('select[aria-label="语言"]');
     if (!preset) throw Error('language presets missing');
     await act(async () => {
       preset.value = 'zh';

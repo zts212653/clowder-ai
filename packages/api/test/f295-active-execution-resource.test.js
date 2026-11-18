@@ -214,6 +214,46 @@ describe('F295 user/project active execution resource', () => {
     assert.equal(deps.cancelExactLiveInvocation.mock.callCount(), 1);
   });
 
+  it('projects the canonical watcher role while retaining the same exact stop target', async () => {
+    deps.resolveLiveExecutions.mock.mockImplementation(async (threadId) =>
+      threadId === 'thread-a'
+        ? [
+            {
+              catId: 'codex-sol',
+              executionId: 'inv-a',
+              invocationId: 'watcher-child',
+              startedAt: 100,
+              ownerUserId: USER_ID,
+              controlSource: 'process_owner',
+            },
+          ]
+        : [],
+    );
+    deps.turnExecutions.get.mock.mockImplementation(async (id) => ({
+      invocationId: id,
+      parentInvocationId: 'inv-a',
+      threadId: 'thread-a',
+      userId: USER_ID,
+      catId: 'codex-sol',
+      executionKind: 'watcher',
+      status: 'running',
+    }));
+    const response = await app.inject({
+      url: '/api/executions/active?projectPath=%2Fproject%2Fcafe',
+      headers: { 'x-cat-cafe-user': USER_ID },
+    });
+    assert.equal(response.statusCode, 200);
+    const row = response.json().executions[0];
+    assert.equal(row.executionKind, 'watcher');
+    assert.equal(row.turnInvocationId, 'watcher-child');
+    assert.deepEqual(row.cancelability.target, {
+      kind: 'live_invocation',
+      threadId: 'thread-a',
+      catId: 'codex-sol',
+      executionId: 'inv-a',
+    });
+  });
+
   it('rechecks the tracker after an awaited canonical child read before sending any cancel', async () => {
     deps.resolveLiveExecutions.mock.mockImplementation(async () => [
       {

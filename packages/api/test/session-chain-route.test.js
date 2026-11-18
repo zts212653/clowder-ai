@@ -167,6 +167,53 @@ describe('Session Chain Routes', () => {
     assert.equal(JSON.parse(res.payload).sessions[0].hostExecutionBoundary, undefined);
   });
 
+  it('owner session endpoints expose the same estimated cache facts and keep legacy sessions unknown', async () => {
+    const store = await setup();
+    const { catRegistry } = await import('@cat-cafe/shared');
+    const config = catRegistry.tryGet('opus')?.config;
+    const record = store.create({ cliSessionId: 'warm-cli', threadId: 'thread-1', catId: 'opus', userId: 'user-1' });
+    const now = Date.now();
+    store.update(record.id, {
+      lastUsage: {
+        inputTokens: 200000,
+        cacheObservation: {
+          invocationId: 'warm-invoke',
+          nativeSessionId: 'warm-cli',
+          runtime: config ? `${config.clientId}:${config.carrier}` : 'claude:print_sdk',
+          model: config?.defaultModel ?? 'sonnet',
+          requestStartedAt: now - 10000,
+          timeSource: 'invocation_start_lower_bound',
+          observedAt: now,
+          contextTokens: 200000,
+          compressionCount: record.compressionCount,
+          retentionMs: 3600000,
+          retentionSource: 'usage_ttl',
+          confirmedWarmGapsMs: [],
+        },
+      },
+    });
+    const headers = { 'x-cat-cafe-user': 'user-1' };
+    const one = await app.inject({ method: 'GET', url: `/api/sessions/${record.id}`, headers });
+    const list = await app.inject({ method: 'GET', url: '/api/threads/thread-1/sessions', headers });
+    assert.equal(one.statusCode, 200);
+    assert.equal(list.statusCode, 200);
+    assert.deepEqual(one.json().cacheWarmth, list.json().sessions[0].cacheWarmth);
+    assert.equal(one.json().cacheWarmth.status, 'warm');
+    assert.equal(one.json().cacheWarmth.estimated, true);
+    assert.equal(one.json().cacheWarmth.bindingSource, 'catalog_default');
+    assert.equal(one.json().cacheWarmth.threadId, 'thread-1');
+    const denied = await app.inject({
+      method: 'GET',
+      url: `/api/sessions/${record.id}`,
+      headers: { 'x-cat-cafe-user': 'other-owner' },
+    });
+    assert.equal(denied.statusCode, 403);
+    assert.equal(denied.json().cacheWarmth, undefined);
+    store.update(record.id, { lastUsage: { inputTokens: 200000 } });
+    const legacy = await app.inject({ method: 'GET', url: `/api/sessions/${record.id}`, headers });
+    assert.equal(legacy.json().cacheWarmth.status, 'unknown');
+  });
+
   it('GET /api/threads/default/sessions filters default-thread sessions to the caller', async () => {
     const store = await setup(
       mockThreadStore({

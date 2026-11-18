@@ -48,5 +48,5 @@ export async function queueHttpFixture(t, { messageStore, threadStore, threadId,
     });
     threads.updateParticipantActivity(thread.id, catId, healthy);
   };
-  return { app, agents, router, queue, messages, threads, thread, reply };
+  return { app, agents, registry, router, queue, messages, threads, thread, reply };
 }

@@ -1,17 +1,21 @@
 'use client';
-import type { WatcherCapability, WatcherConfig, WatcherConfigPatch } from '@cat-cafe/shared';
+import type { WatcherCapability, WatcherConfig, WatcherConfigPatch, WatcherPanelConfig } from '@cat-cafe/shared';
 import { useEffect, useRef, useState } from 'react';
 import { apiFetch } from '@/utils/api-client';
 import { SettingsField, SettingsSection, SettingsText } from './primitives';
 import { WatcherDailyUsage } from './WatcherDailyUsage';
+import { WatcherPanelSettings } from './WatcherPanelSettings';
 import { WatcherQuietLabels } from './WatcherQuietLabels';
 
 interface Snapshot {
   config: WatcherConfig;
   quietLabels: string[];
   availableLabels: Array<{ id: string; name: string; color: string }>;
-  members: Array<{ catId: string; displayName: string; capability: WatcherCapability }>;
+  members: Array<{ catId: string; displayName: string; capability: WatcherCapability; panelSupported?: boolean }>;
   rolloutEnabled: boolean;
+  /** Absent from a runtime that predates the F335 panel. */
+  panelDefaults?: WatcherPanelConfig;
+  panelAccounts?: Array<{ id: string; label: string }>;
 }
 export function WatcherSettings() {
   const [state, setState] = useState<Snapshot | null>(null);
@@ -42,6 +46,8 @@ export function WatcherSettings() {
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ expectedRevision: state.config.revision, ...patch }),
       });
+      if (response.status === 422)
+        throw new Error(((await response.json()) as { error?: string }).error ?? '设置不可用');
       if (!response.ok) throw new Error(response.status === 409 ? '设置已改变，请刷新后重试' : '保存守望猫设置失败');
       setState(await response.json());
       window.dispatchEvent(new Event('watcher-settings-changed'));
@@ -120,6 +126,18 @@ export function WatcherSettings() {
                 onChange={(ids) => void save({ doNotDisturbLabelIds: ids })}
               />
             </SettingsField>
+            {state.panelDefaults && (
+              <WatcherPanelSettings
+                choices={{
+                  ...(state.config.panel ? { panel: state.config.panel } : {}),
+                  panelDefaults: state.panelDefaults,
+                  panelAccounts: state.panelAccounts ?? [],
+                  members: state.members,
+                }}
+                disabled={saving}
+                onSave={(patch) => void save(patch)}
+              />
+            )}
             <WatcherDailyUsage />
             {!state.rolloutEnabled && <SettingsText tone="muted">守望猫尚未开始查看。</SettingsText>}
           </div>

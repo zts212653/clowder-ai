@@ -19,7 +19,7 @@ import { fileURLToPath } from 'node:url';
 import {
   backlogStatusFinding,
   docCommitsForPr,
-  hasDocSyncLine,
+  docSyncLinesOf,
   latestChangeByFeature,
   linkPrToFeatures,
   parseBacklogRows,
@@ -27,6 +27,7 @@ import {
   prTouchesFeatureDoc,
 } from './lib/doc-sync-candidates.mjs';
 import {
+  formatLedgerJson,
   hasCandidates,
   nextOpenPrs,
   normalizeLedger,
@@ -47,6 +48,17 @@ const GENERATED_TITLE_RE = /^verdict\(/;
 
 function run(cmd, args) {
   return execFileSync(cmd, args, { cwd: repoRoot, encoding: 'utf8', maxBuffer: MAX_BUFFER });
+}
+
+// GitHub's API drops a connection now and then ("Post .../graphql: EOF"); one dropped call
+// used to end the whole daily run (11-14, 11-16). Retry a gh read once before giving up.
+function gh(args) {
+  try {
+    return run('gh', args);
+  } catch (error) {
+    if (!/EOF|timeout|connection|502|503|504/i.test(String(error.stderr ?? error.message))) throw error;
+    return run('gh', args);
+  }
 }
 
 /**
@@ -89,7 +101,7 @@ function readLedger() {
 }
 
 function writeLedger(ledger) {
-  writeFileSync(LEDGER, `${JSON.stringify(ledger, null, 2)}\n`);
+  writeFileSync(LEDGER, formatLedgerJson(ledger));
 }
 
 function featureDocs(ref) {
@@ -110,7 +122,7 @@ function listMerged(sinceMs, nowMs) {
   for (let day = new Date(sinceMs).setUTCHours(0, 0, 0, 0); day <= nowMs; day += 86400000) {
     const date = new Date(day).toISOString().slice(0, 10);
     const args = ['pr', 'list', '--state', 'merged', '--base', 'main', '--search', `merged:${date}`];
-    const chunk = JSON.parse(run('gh', [...args, '--limit', String(LIST_LIMIT), '--json', PR_FIELDS]));
+    const chunk = JSON.parse(gh([...args, '--limit', String(LIST_LIMIT), '--json', PR_FIELDS]));
     if (chunk.length >= LIST_LIMIT) truncatedDays.push(date);
     prs.push(...chunk);
   }
@@ -118,8 +130,25 @@ function listMerged(sinceMs, nowMs) {
   return { prs: fresh, truncatedDays };
 }
 
-function fetchPr(number) {
-  return JSON.parse(run('gh', ['pr', 'view', String(number), '--json', PR_FIELDS]));
+function repoName() {
+  return gh(['repo', 'view', '--json', 'nameWithOwner', '-q', '.nameWithOwner']).trim().split('/');
+}
+
+// One GraphQL read per 40 ledger PRs instead of one `gh pr view` each.
+function fetchPrs(numbers) {
+  if (numbers.length === 0) return [];
+  const [owner, name] = repoName();
+  const prs = [];
+  for (let i = 0; i < numbers.length; i += 40) {
+    const chunk = numbers.slice(i, i + 40);
+    const fields = chunk.map(
+      (n) => `p${n}: pullRequest(number: ${n}) { number title body headRefName mergedAt mergeCommit { oid } }`,
+    );
+    const query = `query { repository(owner: "${owner}", name: "${name}") { ${fields.join(' ')} } }`;
+    const repo = JSON.parse(gh(['api', 'graphql', '-f', `query=${query}`])).data.repository;
+    for (const n of chunk) if (repo[`p${n}`]) prs.push(repo[`p${n}`]);
+  }
+  return prs;
 }
 
 // Files the merge brought into main (works for squash and merge commits).
@@ -144,14 +173,12 @@ function docFollowUp(ref, pr, paths) {
 function prComments(numbers) {
   const comments = new Map();
   if (numbers.length === 0) return comments;
-  const [owner, name] = run('gh', ['repo', 'view', '--json', 'nameWithOwner', '-q', '.nameWithOwner'])
-    .trim()
-    .split('/');
+  const [owner, name] = repoName();
   for (let i = 0; i < numbers.length; i += 40) {
     const chunk = numbers.slice(i, i + 40);
     const fields = chunk.map((n) => `p${n}: pullRequest(number: ${n}) { comments(last: 50) { nodes { body } } }`);
     const query = `query { repository(owner: "${owner}", name: "${name}") { ${fields.join(' ')} } }`;
-    const repo = JSON.parse(run('gh', ['api', 'graphql', '-f', `query=${query}`])).data.repository;
+    const repo = JSON.parse(gh(['api', 'graphql', '-f', `query=${query}`])).data.repository;
     for (const n of chunk) comments.set(n, repo[`p${n}`]?.comments?.nodes ?? []);
   }
   return comments;
@@ -184,11 +211,66 @@ function openInfo(ledger, number) {
   return open ? { carried: true, firstSeenAt: open.firstSeenAt } : {};
 }
 
+// A `Doc-Sync: Fxxx - where` line holds only when `where` names a commit or PR that is on
+// `ref` and changed that feature's doc (11-12 #6568 cited a branch commit before merging).
+const holdMemo = new Map();
+
+// What the commit brought into main, compared with its first parent: covers squash and
+// normal merge commits alike (a merge's doc change comes from its second parent).
+function commitTouchesOnRef(ref, sha, paths) {
+  if (paths.length === 0) return false;
+  try {
+    run('git', ['merge-base', '--is-ancestor', sha, ref]);
+    return run('git', ['diff', '--name-only', `${sha}^1`, sha, '--', ...paths]).trim() !== '';
+  } catch {
+    return false;
+  }
+}
+
+function prCommitsOnRef(ref, number) {
+  const out = run('git', ['log', ref, '--since=180.days', '-F', `--grep=#${number}`, '--format=%H%x09%s']);
+  const subjectRe = new RegExp(`(?:\\(#${number}\\)|pull request #${number})(?!\\d)`);
+  return out
+    .split('\n')
+    .filter((row) => subjectRe.test(row.split('\t')[1] ?? ''))
+    .map((row) => row.split('\t')[0]);
+}
+
+function featureLineHolds(ref, line, featureId, docs) {
+  if (!line.features.includes(featureId)) return false;
+  const paths = docs.get(featureId) ?? [];
+  const shas = [...line.shas, ...line.prs.flatMap((n) => prCommitsOnRef(ref, n))];
+  return shas.some((sha) => {
+    const key = `${sha}:${featureId}`;
+    if (!holdMemo.has(key)) holdMemo.set(key, commitTouchesOnRef(ref, sha, paths));
+    return holdMemo.get(key);
+  });
+}
+
+function applyDocSync(ref, found, lines, docs) {
+  if (lines.some((line) => line.kind === 'none')) return { ...found, silent: [], open: false, unverified: [] };
+  const featureLines = lines.filter((line) => line.kind === 'feature');
+  const named = [...new Set(featureLines.flatMap((line) => line.features))];
+  const holds = (id) => featureLines.some((line) => featureLineHolds(ref, line, id, docs));
+  if (found.unlinked) {
+    return named.some(holds)
+      ? { ...found, unlinked: false, open: false, unverified: [] }
+      : { ...found, open: true, unverified: named };
+  }
+  const silent = found.silent.filter((id) => !holds(id));
+  return { ...found, silent, open: silent.length > 0, unverified: silent.filter((id) => named.includes(id)) };
+}
+
 function classifyPr(ref, pr, known, docs) {
   const link = linkPrToFeatures(pr, known);
-  if (hasDocSyncLine(pr)) return { link, found: { silent: [] }, open: false };
-  const found = link.source === 'none' ? unlinkedSilent(pr) : silentFeatures(ref, pr, link, docs);
-  return { link, found, open: Boolean(found.unlinked) || found.silent.length > 0 };
+  const bodyLines = docSyncLinesOf({ body: pr.body });
+  if (bodyLines.some((line) => line.kind === 'none')) return { link, bodyLines, found: { silent: [] }, open: false };
+  const base = link.source === 'none' ? unlinkedSilent(pr) : silentFeatures(ref, pr, link, docs);
+  return { link, bodyLines, base, ...applyDocSync(ref, base, bodyLines, docs), found: base };
+}
+
+function docSyncHint(unverified) {
+  return unverified.length ? `Doc-Sync ${unverified.join(',')} cites no main commit that changed that doc` : undefined;
 }
 
 function evaluatePrs(ref, prs, docs, ledger) {
@@ -197,23 +279,23 @@ function evaluatePrs(ref, prs, docs, ledger) {
   const pending = [];
   let linked = 0;
   for (const pr of prs) {
-    const { link, found, open } = classifyPr(ref, pr, known, docs);
-    if (link.source !== 'none') linked += 1;
-    evaluated.set(pr.number, { missing: open, features: found.silent });
-    if (open) pending.push({ pr, link, ...found });
+    const result = classifyPr(ref, pr, known, docs);
+    if (result.link.source !== 'none') linked += 1;
+    evaluated.set(pr.number, { missing: result.open, features: result.silent ?? [] });
+    if (result.open) pending.push({ pr, ...result });
   }
   const comments = prComments(pending.map((item) => item.pr.number));
   const missing = [];
   const unlinked = [];
   for (const item of pending) {
-    if (hasDocSyncLine({ comments: comments.get(item.pr.number) })) {
-      evaluated.set(item.pr.number, { missing: false, features: [] });
-      continue;
-    }
+    const lines = [...item.bodyLines, ...docSyncLinesOf({ comments: comments.get(item.pr.number) })];
+    const result = applyDocSync(ref, item.base, lines, docs);
+    evaluated.set(item.pr.number, { missing: result.open, features: result.silent ?? [] });
+    if (!result.open) continue;
     const { number, title, mergedAt } = item.pr;
-    const base = { number, title, mergedAt, ...openInfo(ledger, number) };
-    if (item.unlinked) unlinked.push(base);
-    else missing.push({ ...base, ...item.link, features: item.silent, otherDocCommits: item.otherDocCommits });
+    const base = { number, title, mergedAt, ...openInfo(ledger, number), docSyncHint: docSyncHint(result.unverified) };
+    if (result.unlinked) unlinked.push(base);
+    else missing.push({ ...base, ...item.link, features: result.silent, otherDocCommits: result.otherDocCommits });
   }
   return { linked, handled: linked - missing.length, missing, unlinked, evaluated };
 }
@@ -276,10 +358,10 @@ function main() {
   const sinceMs = scanStart(ledger, nowMs, opts.days);
   const window = listMerged(sinceMs, nowMs);
   const inWindow = new Set(window.prs.map((pr) => pr.number));
-  const carried = Object.keys(ledger.openPrs)
+  const carriedNumbers = Object.keys(ledger.openPrs)
     .map(Number)
-    .filter((n) => !inWindow.has(n))
-    .map(fetchPr);
+    .filter((n) => !inWindow.has(n));
+  const carried = fetchPrs(carriedNumbers);
   const prs = evaluatePrs(opts.ref, [...window.prs, ...carried], docs, ledger);
   const report = {
     ref: opts.ref,

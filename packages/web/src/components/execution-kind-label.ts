@@ -15,7 +15,10 @@ export function executionKindLabel(kind: ActiveExecutionKind): string {
 }
 
 /** The kind, plus what a managed command is running (托管命令 · 测试), for surfaces that show detail. */
-export function executionActivityLabel(execution: Pick<ActiveExecutionProjection, 'kind' | 'activity'>): string {
+export function executionActivityLabel(
+  execution: Pick<ActiveExecutionProjection, 'kind' | 'activity' | 'executionKind'>,
+): string {
+  if (execution.executionKind === 'watcher') return '守望查看';
   const kind = executionKindLabel(execution.kind);
   if (execution.kind !== 'managed_command') return kind;
   const activity = managedCommandActivityLabel(execution.activity);

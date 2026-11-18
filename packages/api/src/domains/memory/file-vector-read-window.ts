@@ -18,6 +18,7 @@ export function prepareFileVectorReadWindow(
     active: null,
     reason: 'not_attempted',
     counters: null,
+    preload: null,
     cleanup: null,
   };
   function notify() {
@@ -67,9 +68,12 @@ export function prepareFileVectorReadWindow(
   function finishSnapshot(queryFailed: boolean): void {
     let cleanup = false;
     let counters: FileVectorReadWindowSnapshot['counters'] = null;
+    let preload: FileVectorReadWindowSnapshot['preload'] = null;
     try {
       const result = end.get() as { released: number; snapshot: unknown };
-      counters = decodeReadWindowNativeSnapshot(result.snapshot)?.counters ?? null;
+      const observed = decodeReadWindowNativeSnapshot(result.snapshot);
+      counters = observed?.counters ?? null;
+      preload = observed?.preload ?? null;
       cleanup = Boolean(result.released);
       if (!cleanup) throw new Error('SQLite read-window cleanup failed');
     } catch (error) {
@@ -81,7 +85,7 @@ export function prepareFileVectorReadWindow(
       }
       if (!queryFailed) throw error;
     } finally {
-      snapshot = { ...snapshot, cleanup, counters };
+      snapshot = { ...snapshot, cleanup, counters, preload };
       notify();
     }
   }
@@ -95,6 +99,7 @@ export function prepareFileVectorReadWindow(
       active,
       reason: observed?.reason ?? 'diagnostic_unavailable',
       counters: null, // No completed counts exist if this SELECT is killed.
+      preload: null,
       cleanup: null,
     };
     notify();

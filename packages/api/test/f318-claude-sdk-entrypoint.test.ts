@@ -81,6 +81,40 @@ for (const [setting, expected] of [
   });
 }
 
+// 2026-11-17: the same platform key returned "Credit balance is too low" (billing_error)
+// under CLAUDE_CODE_ENTRYPOINT=cat-cafe and succeeded under sdk-ts / the CLI default.
+// The label is a subscription-metering experiment, so API-key accounts keep the SDK default.
+test('SDK entrypoint label stays off API-key accounts so platform billing keeps working', async (t) => {
+  const saved = [settingKey, 'CLAUDE_CODE_ENTRYPOINT'].map((key) => [key, process.env[key]] as const);
+  process.env[settingKey] = 'cat-cafe';
+  process.env.CLAUDE_CODE_ENTRYPOINT = 'cli';
+  t.after(() => {
+    for (const [key, value] of saved) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  });
+  const controller = new AbortController();
+  t.after(() => controller.abort());
+  const prepared = await prepareClaudeSdkLaunch({
+    runtime: claudeSdkRuntimeFixture(),
+    catId: createCatId('opus'),
+    model: 'claude-opus-4-6',
+    prompt: 'normal task',
+    l0CompilerFn: async () => 'native identity',
+    abortController: controller,
+    options: {
+      callbackEnv: {
+        CAT_CAFE_ANTHROPIC_PROFILE_MODE: 'api_key',
+        CAT_CAFE_ANTHROPIC_API_KEY: 'sk-ant-fixture',
+      },
+    },
+  });
+  const spawn = await captureSdkSpawn(prepared.sdkOptions);
+  assert.equal(spawn.env.CLAUDE_CODE_ENTRYPOINT, 'sdk-ts');
+  assert.equal(spawn.env.ANTHROPIC_API_KEY, 'sk-ant-fixture');
+});
+
 test('SDK entrypoint rejects unsupported labels before starting the provider', async (t) => {
   const saved = process.env[settingKey];
   t.after(() => {

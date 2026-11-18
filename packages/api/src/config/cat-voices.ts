@@ -17,7 +17,7 @@
 
 import { homedir } from 'node:os';
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
-import type { VoiceConfig } from '@cat-cafe/shared';
+import type { CatVoiceResolution, VoiceConfig } from '@cat-cafe/shared';
 import { catRegistry } from '@cat-cafe/shared';
 import { getDefaultUploadDir } from '../utils/upload-paths.js';
 import { resolveBreedId } from './breed-resolver.js';
@@ -43,7 +43,7 @@ function genshinVoiceDir(): string {
  * Priority: CHARACTER_VOICE_DIR > dirname(GENSHIN_VOICE_DIR) > hardcoded default.
  * This ensures backward compat: users who only set GENSHIN_VOICE_DIR still get correct paths.
  */
-function characterVoiceBaseDir(): string {
+export function characterVoiceBaseDir(): string {
   if (process.env.CHARACTER_VOICE_DIR) return process.env.CHARACTER_VOICE_DIR;
   if (process.env.GENSHIN_VOICE_DIR) return dirname(process.env.GENSHIN_VOICE_DIR);
   return join(homedir(), 'projects/relay-station/GPT-SoVITS/character-models');
@@ -137,6 +137,7 @@ function getDefaultVoices(): Record<string, VoiceConfig> {
 
 // Cache from resolved runtime cat config
 let cachedJsonVoices: Record<string, VoiceConfig> | null = null;
+let voiceConfigUnavailable = false;
 
 /**
  * F103: Load per-catId voices from all variants (not just breed defaults).
@@ -163,6 +164,7 @@ function loadVoicesFromJson(): Record<string, VoiceConfig> {
     }
     return cachedJsonVoices;
   } catch {
+    voiceConfigUnavailable = true;
     cachedJsonVoices = {};
     return cachedJsonVoices;
   }
@@ -173,24 +175,35 @@ function loadVoicesFromJson(): Record<string, VoiceConfig> {
  * Priority: env var override (voice only) > resolved runtime cat config > hardcoded defaults (by breedId)
  */
 export function getCatVoice(catName: string): VoiceConfig {
+  return resolveCatVoice(catName).config;
+}
+
+/** Same resolver as synthesis; a configured voice does not prove who chose it. */
+export function resolveCatVoice(catName: string): CatVoiceResolution {
   // 1. Get base voice from JSON or default (resolve breedId for DEFAULT_VOICES)
   const jsonVoices = loadVoicesFromJson();
   const breedId = resolveBreedId(catName);
   const defaults = getDefaultVoices();
   const baseVoice: VoiceConfig =
     jsonVoices[catName] ?? (breedId ? defaults[breedId] : undefined) ?? defaults[catName] ?? GLOBAL_FALLBACK_VOICE;
+  const source = voiceConfigUnavailable
+    ? 'unknown'
+    : jsonVoices[catName]
+      ? 'cat_config'
+      : (breedId && defaults[breedId]) || defaults[catName]
+        ? 'breed_default'
+        : 'global_default';
 
   // 2. Check for per-cat env var override (voice ID only)
   const perCatEnvKey = VOICE_ENV_KEYS[catName as keyof typeof VOICE_ENV_KEYS];
-  const perCatEnvValue = process.env[perCatEnvKey];
-  if (perCatEnvValue?.trim()) {
-    return {
-      ...baseVoice,
-      voice: perCatEnvValue.trim(),
-    };
-  }
-
-  return baseVoice;
+  const perCatEnvValue = perCatEnvKey ? process.env[perCatEnvKey]?.trim() : undefined;
+  return {
+    catId: catName,
+    source,
+    ...(breedId ? { breedId } : {}),
+    ...(perCatEnvValue ? { envOverride: perCatEnvKey } : {}),
+    config: perCatEnvValue ? { ...baseVoice, voice: perCatEnvValue } : baseVoice,
+  };
 }
 
 /**
@@ -211,4 +224,5 @@ export function getAllCatVoices(): Record<string, VoiceConfig> {
 export function clearVoiceCache(): void {
   cachedJsonVoices = null;
   defaultVoices = null;
+  voiceConfigUnavailable = false;
 }

@@ -82,6 +82,45 @@ describe('F293 routing preflight in callback tool responses', () => {
     return JSON.parse(result.content[0].text);
   }
 
+  it('returns destination-session estimates without reintroducing an availability decision', async () => {
+    const full = decision();
+    const warmth = {
+      status: 'warm',
+      estimated: true,
+      source: 'usage_ttl',
+      bindingSource: 'catalog_default',
+      threadId: 'destination-thread',
+      contextTokens: 200000,
+      expiresAt: 2000000,
+    };
+    full.targets[0].cacheWarmth = warmth;
+    const body = await send(full);
+    assert.equal(body.routing_preflight, undefined);
+    assert.deepEqual(body.session_cache, {
+      observedAt: full.observedAt,
+      stage: 'execution_preflight',
+      targets: [{ targetCatId: 'sol', warmth }],
+    });
+
+    response = {
+      messageId: 'message:queued',
+      routed: ['sol'],
+      routing_admission: {
+        v: 1,
+        stage: 'queue_admitted',
+        executionPreflight: 'pending',
+        ownerId: 'owner-1',
+        observedAt: 10000,
+        targets: [{ targetCatId: 'sol', availabilityObservation: 'available', reasons: [], cacheWarmth: warmth }],
+      },
+    };
+    const admitted = await callbackPost('/api/callbacks/post-message', { content: 'existing work' });
+    const ack = JSON.parse(admitted.content[0].text);
+    assert.equal(ack.routing_admission, undefined);
+    assert.equal(ack.session_cache.stage, 'queue_admitted');
+    assert.deepEqual(ack.session_cache.targets, [{ targetCatId: 'sol', warmth }]);
+  });
+
   it('acknowledges the send without post-send queue diagnostics or an execution verdict', async () => {
     const full = decision();
     const admission = {

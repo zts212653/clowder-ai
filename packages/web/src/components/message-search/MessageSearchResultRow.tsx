@@ -1,5 +1,6 @@
 import type { MessageSearchResponse, MessageSearchResult } from '@cat-cafe/shared';
 import { HighlightedMessageSnippet } from './HighlightedMessageSnippet';
+import { MessageAnswerSourceRow } from './MessageAnswerSourceRow';
 import { MessageResultSpeaker } from './MessageResultSpeaker';
 import { MessageSelectedSource } from './MessageSelectedSource';
 import { MessageSourceContext } from './MessageSourceContext';
@@ -22,6 +23,8 @@ export function MessageSearchResultRow({
   onNavigate,
   resolveSpeaker,
   beforeAction,
+  variant = 'search-panel',
+  showSelectionReason = true,
 }: {
   result: MessageSearchResult;
   response: MessageSearchResponse;
@@ -33,6 +36,8 @@ export function MessageSearchResultRow({
   onNavigate: (result: MessageSearchResult, response: MessageSearchResponse) => void;
   resolveSpeaker: (speaker: string) => string;
   beforeAction?: (signal: AbortSignal) => Promise<boolean>;
+  variant?: 'answer-card' | 'search-panel';
+  showSelectionReason?: boolean;
 }) {
   const validate =
     beforeAction ??
@@ -50,6 +55,21 @@ export function MessageSearchResultRow({
     response.meta.scope === 'global' ? (
       <span>{result.threadId === currentThreadId ? '当前对话' : result.threadTitle || '对话标题不可用'}</span>
     ) : null;
+  if (variant === 'answer-card')
+    return (
+      <MessageAnswerSourceRow
+        result={result}
+        response={response}
+        index={index}
+        currentThreadId={currentThreadId}
+        speaker={speaker}
+        readonly={readonly}
+        onNavigate={onNavigate}
+        resolveSpeaker={resolveSpeaker}
+        action={action}
+        showSelectionReason={showSelectionReason}
+      />
+    );
   return (
     <li data-message-search-result className={`flex gap-3 py-3 ${enhanced ? 'flex-col' : 'items-center'}`}>
       <div className="min-w-0 flex-1">
@@ -82,7 +102,22 @@ export function MessageSearchResultRow({
             ))}
           {index === 0 && response.meta.sort === 'time' && <span>本次结果中最早</span>}
         </div>
-        {enhanced ? (
+        {selected ? (
+          <div>
+            <MessageSelectedSource result={result} speaker={speaker} resolveSpeaker={resolveSpeaker} />
+            {enhanced && (
+              <button
+                type="button"
+                aria-label={`展开前后文：第${index + 1}处`}
+                aria-expanded={action.expanded}
+                onClick={() => void action.expand()}
+                className="mt-1 text-xs text-cafe-muted focus-visible:outline"
+              >
+                {action.expanded ? '收起' : '展开'}
+              </button>
+            )}
+          </div>
+        ) : enhanced ? (
           <button
             type="button"
             aria-label={`展开前后文：第${index + 1}处`}
@@ -91,11 +126,9 @@ export function MessageSearchResultRow({
             className="flex w-full items-start gap-2 rounded text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent-500)]"
           >
             <span
-              className={`${selected ? 'block' : sourceDecision ? 'flex' : 'line-clamp-2'} min-w-0 flex-1 break-words text-sm leading-6 text-cafe-secondary`}
+              className={`${sourceDecision ? 'flex' : 'line-clamp-2'} min-w-0 flex-1 break-words text-sm leading-6 text-cafe-secondary`}
             >
-              {selected ? (
-                <MessageSelectedSource result={result} speaker={speaker} resolveSpeaker={resolveSpeaker} />
-              ) : sourceDecision ? (
+              {sourceDecision ? (
                 <>
                   <span className="shrink-0">这是「</span>
                   <span className="truncate" title={sourceDecision.conclusion}>
@@ -113,11 +146,7 @@ export function MessageSearchResultRow({
           </button>
         ) : (
           <p className="break-words text-sm leading-6 text-cafe-secondary">
-            {selected ? (
-              <MessageSelectedSource result={result} speaker={speaker} resolveSpeaker={resolveSpeaker} />
-            ) : (
-              <HighlightedMessageSnippet result={result} />
-            )}
+            <HighlightedMessageSnippet result={result} />
           </p>
         )}
         {selected && selectingCat && (

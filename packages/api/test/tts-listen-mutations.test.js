@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { execFileSync } from 'node:child_process';
+import { mkdtemp, open, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
@@ -9,6 +10,7 @@ import { MlxAudioTtsProvider } from '../dist/domains/cats/services/tts/MlxAudioT
 import { TtsRegistry } from '../dist/domains/cats/services/tts/TtsRegistry.js';
 import { setServiceConfig } from '../dist/domains/services/service-config.js';
 import { ttsRoutes } from '../dist/routes/tts.js';
+import { configureReferenceFixture } from './helpers/tts-reference-fixture.js';
 
 const headers = { 'x-cat-cafe-user': 'operator', 'content-type': 'application/json' };
 const identity = { projectPath: '/repo', relativePath: 'paper.md', contentDigest: 'digest-a' };
@@ -28,6 +30,7 @@ async function fixture(t) {
     model: process.env.TTS_MODEL,
   };
   const root = await mkdtemp(join(tmpdir(), 'tts-listen-mutations-'));
+  const restoreReferences = configureReferenceFixture(root);
   process.env.CAT_CAFE_SERVICES_CONFIG = join(root, 'services.json');
   delete process.env.TTS_MODEL;
   setServiceConfig('mlx-tts', { installed: true, enabled: true });
@@ -44,7 +47,7 @@ async function fixture(t) {
       return Response.json({
         model: 'mlx-community/Qwen3-TTS-12Hz-1.7B-Base-bf16',
         backend: 'qwen3-clone',
-        capabilities: ['speech-stream-route-v1'],
+        capabilities: ['speech-stream-route-v1', 'reference-audio-content-v1'],
       });
     }
     assert.match(String(url), /speech\/stream$/);
@@ -73,6 +76,7 @@ async function fixture(t) {
   t.after(async () => {
     for (const gate of gates) gate.release.resolve();
     await app.close();
+    restoreReferences();
     repository.close();
     globalThis.fetch = original.fetch;
     for (const [key, value] of [
@@ -86,6 +90,7 @@ async function fixture(t) {
   });
   return {
     app,
+    root,
     repository,
     observeNextRequest() {
       nextArrival = Promise.withResolvers();
@@ -193,3 +198,68 @@ test('slow model discovery in one document does not block another document', asy
     await older;
   }
 });
+
+const fifoOptions = {
+  timeout: 10000,
+  skip: process.platform === 'win32' ? 'This real disk-I/O barrier requires a POSIX FIFO.' : false,
+};
+
+for (const action of ['save', 'link']) {
+  test(`receipt validation for ${action} enters the document queue before disk I/O`, fifoOptions, async (t) => {
+    const f = await fixture(t);
+    assert.equal((await f.put(state)).statusCode, 200);
+    const id = '7'.repeat(64) + '.wav';
+    await writeFile(join(f.root, id), 'audio');
+    const receipt = join(f.root, id + '.voice.json');
+    execFileSync('mkfifo', [receipt]);
+    const pending = f.app
+      .inject({
+        method: 'PUT',
+        url: action === 'save' ? '/api/tts/listen/document' : '/api/tts/listen/document/asset',
+        headers,
+        payload:
+          action === 'save'
+            ? { ...state, sentences: [{ anchor: 'sentence-a', assetId: id }] }
+            : { projectPath: '/repo', relativePath: 'paper.md', anchor: 'sentence-a', assetId: id },
+      })
+      .then((response) => response);
+    // Opening the writer completes only when the first operation is inside its
+    // actual receipt read. Keep it blocked while a later clear is admitted.
+    const writer = await open(receipt, 'w');
+    const arrived = f.observeNextRequest();
+    const clear = f.app
+      .inject({
+        method: 'DELETE',
+        url: '/api/tts/listen/document/audio',
+        headers,
+        payload: { projectPath: '/repo', relativePath: 'paper.md' },
+      })
+      .then((response) => response);
+    await arrived;
+    await new Promise(setImmediate);
+    await writer.writeFile(
+      JSON.stringify({
+        reusable: true,
+        voiceSelection: {
+          catId: 'opus',
+          source: 'cat_config',
+          provider: 'fixture',
+          model: 'fixture',
+          requested: { voice: 'preset' },
+          effective: { voice: 'preset' },
+          referenceStatus: 'not_requested',
+          warnings: [],
+        },
+      }),
+    );
+    await writer.close();
+    const [first, last] = await Promise.all([pending, clear]);
+    assert.equal(first.statusCode, 200, first.body);
+    assert.equal(last.statusCode, 200, last.body);
+    assert.equal(
+      f.repository.loadDocument({ userId: 'operator', ...identity }).sentences[0].assetId,
+      undefined,
+      'a later clear must remain last and cannot be undone by receipt I/O',
+    );
+  });
+}

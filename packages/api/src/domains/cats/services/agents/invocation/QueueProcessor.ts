@@ -168,7 +168,12 @@ import {
   preparePrestartRetirements,
   terminalizePreparedPrestartRetirements,
 } from './queue-prestart-group-retirement.js';
-import { type QueueRetryDeferralOptions, QueueRetryDeferrals } from './queue-retry-deferrals.js';
+import {
+  type QueueRetryDeferralOptions,
+  QueueRetryDeferrals,
+  type QueueRetryReason,
+  queueRetryReason,
+} from './queue-retry-deferrals.js';
 import { isOwnerRecoverableRoutingTarget } from './queue-routing-recovery-policy.js';
 import { requireInvocationRecordUpdate } from './require-invocation-record-update.js';
 import {
@@ -315,6 +320,8 @@ interface QueueExecutionResult {
    * be retried at once: each waits for its retry time while the rest of the thread keeps draining.
    */
   primarySettlementIncomplete?: boolean;
+  retryReason?: QueueRetryReason;
+  retryReasonsByTarget?: ReadonlyMap<string, QueueRetryReason>;
   providerTeardownUnconfirmed?: true;
 }
 
@@ -3323,6 +3330,8 @@ export class QueueProcessor {
       attemptedQueueEntryIds?: readonly string[];
       suppressAutomaticFollowUp?: boolean;
       terminalInvocationIdByCatId?: Readonly<Record<string, string>>;
+      retryReason?: QueueRetryReason;
+      retryReasonsByTarget?: ReadonlyMap<string, QueueRetryReason>;
     } = {},
   ): Promise<void> {
     const { suppressAutomaticDrain = false, attemptedQueueEntryIds = [], suppressAutomaticFollowUp = false } = options;
@@ -3343,7 +3352,14 @@ export class QueueProcessor {
     if (suppressAutomaticDrain) {
       // A backend attempt that failed before handoff leaves the exact source
       // queued with bounded backoff; other members continue draining.
-      this.deferFailedAttempt(threadId, catId, status, attemptedQueueEntryIds);
+      this.deferFailedAttempt(
+        threadId,
+        catId,
+        status,
+        attemptedQueueEntryIds,
+        options.retryReason,
+        options.retryReasonsByTarget,
+      );
     } else {
       for (const entryId of attemptedQueueEntryIds) this.retryDeferrals.forget(entryId);
     }
@@ -3364,7 +3380,14 @@ export class QueueProcessor {
    * Retry only entries left queued by an actual failed handoff, with the
    * existing bounded backend backoff. F293 policy holds wait for an explicit owner attempt.
    */
-  private deferFailedAttempt(threadId: string, catId: string, status: string, entryIds: readonly string[]): void {
+  private deferFailedAttempt(
+    threadId: string,
+    catId: string,
+    status: string,
+    entryIds: readonly string[],
+    fallbackRetryReason: QueueRetryReason = 'backend_failure',
+    retryReasonsByTarget?: ReadonlyMap<string, QueueRetryReason>,
+  ): void {
     for (const entryId of entryIds) {
       const entry = this.deps.queue.getEntrySnapshotAcrossUsers(threadId, entryId);
       if (!entry) {
@@ -3379,9 +3402,35 @@ export class QueueProcessor {
         this.retryDeferrals.forget(entryId);
         continue;
       }
-      const retryAt = this.retryDeferrals.defer(threadId, entryId);
+      const remainingAttemptedTargets = entry.targets.filter((target) => retryReasonsByTarget?.has(target));
+      if (retryReasonsByTarget && entry.targets.length > 0 && remainingAttemptedTargets.length === 0) {
+        // A batch sibling may retain only recipients this attempt did not select.
+        this.retryDeferrals.forget(entryId);
+        continue;
+      }
+      const remainingReasons =
+        entry.targets.length > 0
+          ? remainingAttemptedTargets.map((target) => retryReasonsByTarget?.get(target))
+          : [...(retryReasonsByTarget?.values() ?? [])];
+      const retryReason =
+        remainingReasons.length > 0
+          ? remainingReasons.every((reason) => reason === 'preflight_timeout')
+            ? 'preflight_timeout'
+            : 'backend_failure'
+          : fallbackRetryReason;
+      const retryAt = this.retryDeferrals.defer(threadId, entryId, undefined, retryReason);
       this.deps.log.warn(
-        { threadId, catId, status, entryId, retryAt, queued: entry.status === 'queued' },
+        {
+          threadId,
+          catId,
+          status,
+          entryId,
+          retryAt,
+          retryReason,
+          retryDelayMs: retryAt - Date.now(),
+          queueAgeMs: Date.now() - entry.enqueuedAt,
+          queued: entry.status === 'queued',
+        },
         '[QueueProcessor] an attempt left its entry in the Queue; the entry waits for its retry time',
       );
     }
@@ -4102,10 +4151,12 @@ export class QueueProcessor {
           attemptedQueueEntryIds: result.attemptedQueueEntryIds,
           suppressAutomaticFollowUp,
           terminalInvocationIdByCatId: result.terminalInvocationIdByCatId,
+          retryReason: result.retryReason,
+          retryReasonsByTarget: result.retryReasonsByTarget,
         }).catch(() => {});
         this.signalDeliveryBatchDone(entry.threadId, result.status, result.invocationId);
       },
-      () => {
+      (error: unknown) => {
         reportAdmission?.(false);
         if (!this.releaseProcessingSlot(slotKey, reservation)) {
           this.deps.log.info(
@@ -4122,6 +4173,7 @@ export class QueueProcessor {
           suppressAutomaticDrain: requeued,
           attemptedQueueEntryIds,
           suppressAutomaticFollowUp,
+          retryReason: queueRetryReason(error),
         }).catch(() => {});
         this.signalDeliveryBatchDone(entry.threadId, 'failed');
       },
@@ -4151,7 +4203,9 @@ export class QueueProcessor {
     const heldGuidanceTargets = new Set<string>();
     // The entries this scan passed over, each with the targets it asked for when it was passed over.
     const passedOver = new Map<string, string>();
-    let waitingEntries = 0;
+    let deferredForBusySlot = 0;
+    let deferredForRetry = 0;
+    let earliestRetryAt: number | undefined;
     let firstWaitingTarget: string | undefined;
     for (const candidate of candidates) {
       try {
@@ -4162,7 +4216,7 @@ export class QueueProcessor {
             heldGuidanceTargets.add(target);
           }
           passedOver.set(candidate.id, requestedTargetsKey(candidate));
-          waitingEntries += 1;
+          deferredForBusySlot += 1;
           firstWaitingTarget ??= candidate.targets[0];
           continue;
         }
@@ -4263,12 +4317,20 @@ export class QueueProcessor {
           : await this.resolveAdmissionTargets(threadId, candidateForAdmission);
         if (admission.kind === 'settled') return admission.attempt;
         if (admission.kind === 'barrier' || (admission.kind === 'unresolved' && candidate.targets.length === 0)) {
+          const retryAt = this.retryDeferrals.retryAt(candidate.id);
+          if (retryAt !== undefined) {
+            deferredForRetry += 1;
+            earliestRetryAt = Math.min(earliestRetryAt ?? retryAt, retryAt);
+          } else {
+            deferredForBusySlot += 1;
+          }
           this.emitContinuationDiagnostic(
             threadId,
             'targetless',
-            'all_candidate_slots_busy',
-            waitingEntries + 1,
+            classifyContinuationOutcome(deferredForBusySlot, deferredForRetry),
+            deferredForBusySlot,
             candidate.id,
+            earliestRetryAt === undefined ? undefined : { deferredForRetry, retryAt: earliestRetryAt },
           );
           return { started: false };
         }
@@ -4297,7 +4359,13 @@ export class QueueProcessor {
         }
         passedOver.set(candidate.id, requestedTargetsKey(candidate));
         for (const catId of [...queueEntryTargetCats(candidate), ...targets]) heldTargets.add(catId);
-        waitingEntries += 1;
+        const retryAt = this.retryDeferrals.retryAt(candidate.id);
+        if (retryAt !== undefined) {
+          deferredForRetry += 1;
+          earliestRetryAt = Math.min(earliestRetryAt ?? retryAt, retryAt);
+        } else if (targets.some((catId) => !this.isSlotAdmissible(threadId, catId, candidate))) {
+          deferredForBusySlot += 1;
+        }
         firstWaitingTarget ??= targets[0];
       } catch (error: unknown) {
         // Every admission read and reversible claim shares this source's wake.
@@ -4325,9 +4393,10 @@ export class QueueProcessor {
     this.emitContinuationDiagnostic(
       threadId,
       firstWaitingTarget ?? 'unknown',
-      'all_candidate_slots_busy',
-      waitingEntries,
+      classifyContinuationOutcome(deferredForBusySlot, deferredForRetry),
+      deferredForBusySlot,
       candidates[0]?.id,
+      earliestRetryAt === undefined ? undefined : { deferredForRetry, retryAt: earliestRetryAt },
     );
     return { started: false };
   }
@@ -4617,6 +4686,7 @@ export class QueueProcessor {
     outcome: ContinuationOutcome,
     deferredForBusySlot: number,
     entryId?: string,
+    retryWait?: { readonly deferredForRetry: number; readonly retryAt: number },
   ): void {
     const diagnostic = describeContinuationOutcome({
       threadId,
@@ -4625,6 +4695,7 @@ export class QueueProcessor {
       deferredForBusySlot,
       entryId,
       hasDispatchableQueued: this.hasDispatchableQueuedForThread(threadId),
+      retryWait,
     });
     if (diagnostic) this.deps.log.info(diagnostic.payload, diagnostic.message);
   }
@@ -5133,6 +5204,7 @@ export class QueueProcessor {
     let streamStartPromise: Promise<void> | undefined;
     let heartbeatInterval: ReturnType<typeof setInterval> | undefined;
     let executionError: unknown;
+    const observedRetryReasonsByTarget = new Map<string, QueueRetryReason>();
     let actionFencePreflightRejected = false;
     let retiredTaskAction = false;
     let actionFenceAggregateSucceeded = false;
@@ -5159,12 +5231,23 @@ export class QueueProcessor {
       // entry. A bodyless routing guard can own the terminal stream event, but
       // it must never replace the ordinary child that actually read the Queue
       // body as the receipt witness.
+      // Aggregation may succeed while unaccepted siblings still need recovery.
+      // A target error belongs only to that target; an unscoped exception is a
+      // fallback only when the route did not report any target-local errors.
+      const fallbackRetryReason =
+        observedRetryReasonsByTarget.size > 0 ? 'backend_failure' : queueRetryReason(executionError);
       const result: QueueExecutionResult = {
         status,
         ...(prestartAdmissionDeferred ? { prestartAdmissionDeferred: true } : {}),
         ...(invocationId ? { invocationId } : {}),
         attemptedQueueEntryIds: [entry.id, ...batchedEntryIds],
         terminalInvocationIdByCatId,
+        ...(executionError ? { retryReason: queueRetryReason(executionError) } : {}),
+        retryReasonsByTarget: new Map(
+          targetCats.map(
+            (target) => [target, observedRetryReasonsByTarget.get(target) ?? fallbackRetryReason] as const,
+          ),
+        ),
       };
       returnedExecutionResult = result;
       return result;
@@ -6756,6 +6839,9 @@ export class QueueProcessor {
               accumulateTextAggregate(hookResponseTextByTarget.get(msg.catId) ?? '', visibleNotice, 'append'),
             );
           }
+        }
+        if (msg.type === 'error' && msg.catId && targetCats.includes(msg.catId)) {
+          observedRetryReasonsByTarget.set(msg.catId, queueRetryReason(msg.error));
         }
         const continuationCapsule = extractContinuityCapsuleFromAgentMessage(msg);
         if (continuationCapsule) {

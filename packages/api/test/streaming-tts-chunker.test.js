@@ -1,4 +1,7 @@
 import assert from 'node:assert/strict';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, it } from 'node:test';
 import { StreamingTtsChunker } from '../dist/domains/cats/services/tts/StreamingTtsChunker.js';
 
@@ -39,7 +42,7 @@ const baseConfig = {
   catId: 'opus',
   invocationId: 'inv-001',
   threadId: 'thread-001',
-  voiceConfig: { voice: 'test-voice', langCode: 'zh', speed: 1.0 },
+  voiceResolution: { catId: 'opus', source: 'cat_config', config: { voice: 'test-voice', langCode: 'zh', speed: 1.0 } },
 };
 
 describe('StreamingTtsChunker', () => {
@@ -134,14 +137,19 @@ describe('StreamingTtsChunker', () => {
     assert.ok(totalChunks <= 1);
   });
 
-  it('includes voice config fields in synthesis request', async () => {
+  it('includes voice config fields in synthesis request', async (t) => {
     const registry = createMockTtsRegistry();
     const broadcaster = createMockBroadcaster();
+    const root = mkdtempSync(join(tmpdir(), 'live-voice-reference-'));
+    const refAudio = join(root, 'ref.wav');
+    writeFileSync(refAudio, 'fixture-reference');
+    t.after(() => rmSync(root, { recursive: true, force: true }));
 
     let capturedRequest = null;
     registry.getDefault = () => ({
       id: 'mock',
       model: 'mock',
+      referenceAudioSupport: true,
       async synthesize(req) {
         capturedRequest = req;
         return {
@@ -155,14 +163,17 @@ describe('StreamingTtsChunker', () => {
 
     const chunker = new StreamingTtsChunker({
       ...baseConfig,
-      voiceConfig: {
-        voice: 'custom',
-        langCode: 'en',
-        speed: 1.5,
-        refAudio: '/ref.wav',
-        refText: 'hello',
-        instruct: 'be happy',
-        temperature: 0.5,
+      voiceResolution: {
+        ...baseConfig.voiceResolution,
+        config: {
+          voice: 'custom',
+          langCode: 'en',
+          speed: 1.5,
+          refAudio,
+          refText: 'hello',
+          instruct: 'be happy',
+          temperature: 0.5,
+        },
       },
       broadcaster,
       ttsRegistry: registry,
@@ -174,10 +185,49 @@ describe('StreamingTtsChunker', () => {
     assert.equal(capturedRequest.voice, 'custom');
     assert.equal(capturedRequest.langCode, 'en');
     assert.equal(capturedRequest.speed, 1.5);
-    assert.equal(capturedRequest.refAudio, '/ref.wav');
+    assert.equal(capturedRequest.refAudio, refAudio);
+    assert.deepEqual(readFileSync(capturedRequest.refAudio), readFileSync(refAudio));
     assert.equal(capturedRequest.refText, 'hello');
     assert.equal(capturedRequest.instruct, 'be happy');
     assert.equal(capturedRequest.temperature, 0.5);
+  });
+
+  it('shares one provider snapshot and does not synthesize if aborted while it is pending', async () => {
+    let release;
+    let snapshots = 0;
+    let syntheses = 0;
+    const provider = {
+      id: 'mock',
+      model: 'mock',
+      referenceAudioSupport: true,
+      snapshot: () => {
+        snapshots++;
+        return new Promise((resolve) => {
+          release = () => resolve(provider);
+        });
+      },
+      synthesize: async () => {
+        syntheses++;
+        return {
+          audio: new Uint8Array(1),
+          format: 'wav',
+          metadata: { provider: 'mock', model: 'mock', voice: 'test' },
+        };
+      },
+    };
+    const broadcaster = createMockBroadcaster();
+    const chunker = new StreamingTtsChunker({
+      ...baseConfig,
+      broadcaster,
+      ttsRegistry: { getDefault: () => provider },
+    });
+    chunker.feed('第一句。第二句。');
+    chunker.abort();
+    release();
+    await chunker.flush();
+    assert.equal(snapshots, 1);
+    assert.equal(syntheses, 0);
+    assert.equal(broadcaster.events.length, 0);
   });
 
   it('broadcasts correct event shape', async () => {

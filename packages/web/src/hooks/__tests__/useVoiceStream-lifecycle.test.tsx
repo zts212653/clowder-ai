@@ -23,8 +23,9 @@ vi.mock('@/services/playbackRuntime', () => ({
 vi.mock('@/utils/api-client', () => ({ apiFetch: vi.fn(() => Promise.resolve(new Response())) }));
 
 import { useListenModeStore } from '@/stores/listenModeStore';
+import { useToastStore } from '@/stores/toastStore';
 import { useVoiceSessionStore } from '@/stores/voiceSessionStore';
-import { handleVoiceStreamStart, useVoiceStream } from '../useVoiceStream';
+import { handleVoiceStreamEnd, handleVoiceStreamStart, useVoiceStream } from '../useVoiceStream';
 
 function Harness() {
   useVoiceStream();
@@ -38,6 +39,7 @@ describe('F279 voice hook lifecycle', () => {
   beforeEach(() => {
     (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
     vi.clearAllMocks();
+    useToastStore.setState({ toasts: [] });
     useVoiceSessionStore.setState({
       session: {
         sessionId: 'voice-session',
@@ -120,5 +122,41 @@ describe('F279 voice hook lifecycle', () => {
     handleVoiceStreamStart({ threadId: 'thread-1', catId: 'opus', invocationId: 'voice-new' } as never);
 
     expect(manager.handleStreamStart).not.toHaveBeenCalled();
+  });
+
+  it('shows a fallback notice for the active live voice before playback, without notifying about other sessions', () => {
+    const event = {
+      type: 'voice_stream_start' as const,
+      threadId: 'thread-1',
+      catId: 'opus',
+      invocationId: 'live-proof',
+      voiceSelection: {
+        catId: 'opus',
+        source: 'global_default' as const,
+        provider: 'fixture',
+        model: 'fixture',
+        requested: { voice: 'test', langCode: 'zh' },
+        effective: { voice: 'test', langCode: 'zh' },
+        referenceStatus: 'not_requested' as const,
+        warnings: ['未配置本人声线，本次使用全局默认声音。'],
+      },
+    };
+    handleVoiceStreamStart({ ...event, threadId: 'other-thread' });
+    expect(useToastStore.getState().toasts).toHaveLength(0);
+    handleVoiceStreamStart(event);
+    expect(useToastStore.getState().toasts).toEqual([
+      expect.objectContaining({ message: event.voiceSelection.warnings[0], threadId: 'thread-1' }),
+    ]);
+    expect(manager.handleStreamStart).toHaveBeenCalledOnce();
+    useToastStore.setState({ toasts: [] });
+    const changedWarning = '参考音频在同一任务中发生变化，已停止后续语音。';
+    handleVoiceStreamEnd({
+      ...event,
+      type: 'voice_stream_end',
+      totalChunks: 1,
+      voiceSelection: { ...event.voiceSelection, referenceStatus: 'unverified', warnings: [changedWarning] },
+    });
+    expect(useToastStore.getState().toasts[0]?.message).toBe(changedWarning);
+    expect(manager.handleStreamEnd).toHaveBeenCalledOnce();
   });
 });

@@ -1,7 +1,8 @@
 /**
  * F117 soak: a transient backend/admission failure can leave its entry in the Queue.
  * Retrying immediately would loop on the same failure, so the bounded backoff doubles with each
- * consecutive failed attempt. Only that entry waits; the drain passes over it, and a timer drains
+ * consecutive failed attempt. Local preflight timeouts cap that wait at one minute. Only that entry
+ * waits; the drain passes over it, and a timer drains
  * its thread when the wait ends. F293 policy refusals instead persist an exact target hold in Queue
  * and need an explicit owner attempt; this process-local timer cannot release those holds.
  *
@@ -18,6 +19,15 @@ export interface QueueRetryDeferralOptions {
 /** Upstream #595 recovered a failed slot after 10 seconds. */
 const DEFAULT_BASE_DELAY_MS = 10_000;
 const DEFAULT_MAX_DELAY_MS = 60 * 60_000;
+// Admission has not reached a provider: probe again promptly after local preflight pressure clears.
+const PREFLIGHT_MAX_DELAY_MS = 60_000;
+
+export type QueueRetryReason = 'backend_failure' | 'preflight_timeout';
+
+export function queueRetryReason(error: unknown): QueueRetryReason {
+  const message = error instanceof Error ? error.message : typeof error === 'string' ? error : '';
+  return message.startsWith('preflight_timeout:') ? 'preflight_timeout' : 'backend_failure';
+}
 
 interface RetryDeferral {
   failures: number;
@@ -44,16 +54,23 @@ export class QueueRetryDeferrals {
    * Makes an entry whose attempt failed wait, and returns when it may be tried again: the later of
    * its backoff and `targetRetryAt`, never further out than the longest wait.
    */
-  defer(threadId: string, entryId: string, targetRetryAt?: number): number {
+  defer(
+    threadId: string,
+    entryId: string,
+    targetRetryAt?: number,
+    reason: QueueRetryReason = 'backend_failure',
+  ): number {
     this.pruneSettled();
     const now = this.now();
     const previous = this.deferrals.get(entryId);
     if (previous?.timer) clearTimeout(previous.timer);
     const failures = (previous?.failures ?? 0) + 1;
-    const backoff = Math.min(this.baseDelayMs * 2 ** (failures - 1), this.maxDelayMs);
+    const maxDelayMs =
+      reason === 'preflight_timeout' ? Math.min(this.maxDelayMs, PREFLIGHT_MAX_DELAY_MS) : this.maxDelayMs;
+    const backoff = Math.min(this.baseDelayMs * 2 ** (failures - 1), maxDelayMs);
     const targetWait = targetRetryAt !== undefined && Number.isFinite(targetRetryAt) ? targetRetryAt : 0;
     const wanted = Math.max(now + backoff, targetWait);
-    const until = Math.min(wanted, now + this.maxDelayMs);
+    const until = Math.min(wanted, now + maxDelayMs);
     const deferral: RetryDeferral = { failures, until };
     deferral.timer = setTimeout(() => {
       deferral.timer = undefined;
@@ -67,6 +84,11 @@ export class QueueRetryDeferrals {
   /** Whether the entry is still waiting for its retry time. */
   isDeferred(entryId: string): boolean {
     return this.deferrals.get(entryId)?.timer !== undefined;
+  }
+
+  /** Only an active wait blocks admission; elapsed waits retain their failure count alone. */
+  retryAt(entryId: string): number | undefined {
+    return this.isDeferred(entryId) ? this.deferrals.get(entryId)?.until : undefined;
   }
 
   /** The entry was handed off: a later failure starts again from the shortest wait. */

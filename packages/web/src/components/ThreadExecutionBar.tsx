@@ -14,6 +14,7 @@ import { ExecutionCancelButton } from './ExecutionCancelButton';
 import { useRowForceReset } from './execution-row/useRowForceReset';
 import { ForceResetDialog } from './ForceResetDialog';
 import { managedCommandActivityLabel } from './managed-command-activity-label';
+import { SuggestionAvatar } from './suggestions/SuggestionAvatar';
 import { useQueueActionConvergence } from './useQueueActionConvergence';
 
 const APP_SERVER_STAGE_LABELS: Record<AppServerLifecycleStage, string> = {
@@ -230,11 +231,19 @@ function CatStatusChip({
       className="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-cafe-surface/50"
       data-app-server-stalled={appServerStalled ? 'true' : undefined}
     >
-      <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ backgroundColor: color }} />
+      {execution.executionKind === 'watcher' ? (
+        <SuggestionAvatar catId={execution.catId} watcher />
+      ) : (
+        <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ backgroundColor: color }} />
+      )}
       <span className="text-cafe-secondary font-medium">{label}</span>
       <span className="text-cafe-muted" data-testid="execution-kind">
-        {execution.kind === 'managed_command' ? managedCommandActivityLabel(execution.activity) : '实时回合'} ·{' '}
-        {execution.threadTitle ?? execution.threadId}
+        {execution.kind === 'managed_command'
+          ? managedCommandActivityLabel(execution.activity)
+          : execution.executionKind === 'watcher'
+            ? '守望查看'
+            : '实时回合'}{' '}
+        · {execution.threadTitle ?? execution.threadId}
       </span>
       {lifecycle && (
         <span className={appServerStalled ? 'text-conn-amber-text' : 'text-cafe-muted'}>

@@ -1,3 +1,4 @@
+import { inspectCohortAdmission, isServableCohortTail } from './embedding-cohort-recovery.js';
 import { type EmbeddingDeployment, resolveRetainedG0Endpoint } from './embedding-generation-config.js';
 import type { EmbedConfig, EmbedModelInfo, IEmbeddingService } from './interfaces.js';
 import type { EmbeddingActivationFailure } from './MemoryEmbeddingLifecycle.js';
@@ -6,7 +7,6 @@ import type { SqliteEvidenceStore } from './SqliteEvidenceStore.js';
 import { vectorIdentityMatches } from './vector-generation-identity.js';
 import {
   type GenerationReadOptions,
-  inspectStoreVectorGeneration,
   reconcileStoreVectorGeneration,
   type VectorCoverageProof,
 } from './vector-generation-inspection.js';
@@ -76,6 +76,15 @@ export async function prepareLifecycleBindings(
 ): Promise<Map<SqliteEvidenceStore, VectorBackend> | undefined> {
   const bindings = new Map<SqliteEvidenceStore, VectorBackend>();
   const proofs = new Map<SqliteEvidenceStore, VectorCoverageProof>();
+  const inspect = (store: SqliteEvidenceStore): Promise<VectorCoverageProof> =>
+    store.runExclusive(() => inspectCohortAdmission(store, model, lifetime, isCurrent));
+  // Complete coverage, or the unembedded tail of a completed G0; both on a proof that is still current.
+  const admitted = (store: SqliteEvidenceStore): boolean => {
+    const proof = proofs.get(store);
+    return Boolean(
+      proof && ((proof.coverage.ready && proof.isCurrent()) || isServableCohortTail(store.getDb(), model, proof)),
+    );
+  };
   for (const store of stores) {
     if (typeof store.getDb === 'function')
       await store.runExclusive(async () => {
@@ -84,9 +93,8 @@ export async function prepareLifecycleBindings(
       });
     if (!isCurrent()) return;
     if (coverageRequired) {
-      const proof = await store.runExclusive(() => inspectStoreVectorGeneration(store, model, lifetime));
-      if (!proof.coverage.ready || !proof.isCurrent()) throw new VectorBackendUnavailableError('generation_not_ready');
-      proofs.set(store, proof);
+      proofs.set(store, await inspect(store));
+      if (!admitted(store)) throw new VectorBackendUnavailableError('generation_not_ready');
     }
     const backend = await initialize(store, model.dim, model, {
       ...lifetime,
@@ -94,20 +102,20 @@ export async function prepareLifecycleBindings(
     });
     if (!coverageRequired && !vectorIdentityMatches(store.getDb(), model)) backend.vectorStore.initMeta(model);
     bindings.set(store, backend);
-    if (coverageRequired && !proofs.get(store)?.isCurrent())
-      proofs.set(store, await store.runExclusive(() => inspectStoreVectorGeneration(store, model, lifetime)));
     if (!isCurrent()) return;
   }
+  // Binding a store takes long enough for commits to overtake every proof taken before it. Each is
+  // read again once all stores are bound; the decision below then runs without yielding.
+  if (coverageRequired)
+    for (const store of stores) {
+      if (proofs.get(store)?.isCurrent()) continue;
+      proofs.set(store, await inspect(store));
+      if (!isCurrent()) return;
+    }
   const current = enabledStores();
   if (current.length !== stores.length || current.some((store) => !bindings.has(store)))
     throw new VectorBackendUnavailableError('generation_not_ready');
-  if (
-    stores.some((store) =>
-      coverageRequired
-        ? !proofs.get(store)?.coverage.ready || !proofs.get(store)?.isCurrent()
-        : !vectorIdentityMatches(store.getDb(), model),
-    )
-  )
+  if (stores.some((store) => (coverageRequired ? !admitted(store) : !vectorIdentityMatches(store.getDb(), model))))
     throw new VectorBackendUnavailableError('generation_not_ready');
   return bindings;
 }

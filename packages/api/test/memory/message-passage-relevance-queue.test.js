@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { passageVectorKey } from '../../dist/domains/memory/PassageVectorStore.js';
 import { SqliteEvidenceStore } from '../../dist/domains/memory/SqliteEvidenceStore.js';
+import { VectorStore } from '../../dist/domains/memory/VectorStore.js';
 
 const options = { visibleThreadIds: ['visible'], mode: 'hybrid', candidateOrder: 'relevance' };
 const ids = (result) => result.passages.map((row) => row.messageId);
@@ -29,6 +30,7 @@ async function fixture(t, rows, nn = []) {
       insert.run(`thread-${row.thread ?? 'visible'}`, `msg-${row.id}`, row.content, i, row.date);
     });
   })();
+  new VectorStore(store.getDb(), 4).initMeta({ modelId: 'controlled-queue', modelRev: '1', dim: 4 });
   store.setEmbedDeps({
     mode: 'on',
     vectorStore: {},
@@ -126,7 +128,7 @@ test('queue lexical input uses relevance rather than age, with exact-source, sco
 
 test('queue mode keeps vector downgrade honest and rejects cancellation', async (t) => {
   const store = await fixture(t, [{ id: 'source', content: 'Cedar 取名', date: '2026-09-20' }]);
-  store.setEmbedDeps({ mode: 'off' });
+  store.setEmbedDeps(undefined);
   const result = await store.searchMessagePassages('Cedar 取名', { ...options, sort: 'time' });
   assert.deepEqual(ids(result), ['source']);
   assert.equal(result.meta.sort, 'relevance');

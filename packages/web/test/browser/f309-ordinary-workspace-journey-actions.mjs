@@ -8,9 +8,11 @@ import {
   REVIEW_ID,
   reviewView,
   SOURCE_REVISION,
+  THREAD_ID,
   WORKTREE_ID,
 } from './f309-ordinary-workspace-journey-fixture.mjs';
 import { mediaFixture } from './fixtures/f309-artifact-review-media.mjs';
+import { disabledWatcherRead } from './fixtures/f322-watcher-read.mjs';
 
 function applyAnnotation(state, payload) {
   state.revision += 1;
@@ -120,6 +122,8 @@ function searchTypeFor(request, url) {
 
 export async function fulfillFixtureApi(route, state, actionKinds) {
   const url = new URL(route.request().url());
+  const watcher = disabledWatcherRead(route.request(), url, [THREAD_ID]);
+  if (watcher) return route.fulfill(watcher);
   if (url.pathname === '/api/debug/callback-auth') {
     await json(route, { error: 'forbidden' }, 403);
     return;

@@ -1,15 +1,19 @@
-import { stat, unlink } from 'node:fs/promises';
+import type { Stats } from 'node:fs';
+import { stat } from 'node:fs/promises';
 import path from 'node:path';
 import type { ListenDocumentState } from '@cat-cafe/shared';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { DocumentCacheRunManager } from '../domains/cats/services/tts/DocumentCacheRunManager.js';
-import type {
-  DocumentListenRepository,
-  ListenDocumentKey,
+import {
+  type DocumentListenRepository,
+  ListenAssetUnavailableError,
+  type ListenDocumentKey,
 } from '../domains/cats/services/tts/DocumentListenRepository.js';
-import type { ListenAssetService } from '../domains/cats/services/tts/ListenAssetService.js';
+import type { ListenAssetService, PreparedListenSynthesis } from '../domains/cats/services/tts/ListenAssetService.js';
 import { ListenDocumentMutationQueue } from '../domains/cats/services/tts/ListenDocumentMutationQueue.js';
+import { deleteAudioFileSync, inspectAudioFileSync } from '../domains/cats/services/tts/tts-asset-cleanup.js';
+import { canLinkReusableAsset, readListenRecording } from '../domains/cats/services/tts/tts-asset-provenance.js';
 import { resolveStrictUserId, resolveUserId } from '../utils/request-identity.js';
 
 const AUDIO_ASSET_ID_RE = /^[0-9a-f]{64}\.(wav|mp3)$/;
@@ -88,12 +92,14 @@ async function deleteOrphanedAssets(
   for (const assetId of orphaned) {
     if (!AUDIO_ASSET_ID_RE.test(assetId)) continue;
     try {
-      await unlink(path.join(cacheDir, assetId));
-      deleted++;
-      repository.forgetAsset(assetId);
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') repository.forgetAsset(assetId);
-      else failed++;
+      repository.removeAssetWhen(assetId, (policy) => {
+        if (policy && policy.referenceCount > 0) return false;
+        const result = deleteAudioFileSync(path.join(cacheDir, assetId));
+        if (result?.deleted) deleted++;
+        return result !== undefined;
+      });
+    } catch {
+      failed++;
     }
   }
   return { deleted, failed };
@@ -106,14 +112,27 @@ async function reconcileDocumentCache(
 ) {
   const assetIds = [...new Set(state.sentences.flatMap(({ assetId }) => (assetId ? [assetId] : [])))];
   const availableSizes = new Map<string, number>();
+  const recordings: Record<string, Awaited<ReturnType<typeof readListenRecording>>> = {};
   for (const assetId of assetIds) {
     if (!AUDIO_ASSET_ID_RE.test(assetId)) continue;
+    const filePath = path.join(cacheDir, assetId);
+    let present: Stats | undefined;
+    let unavailable = false;
     try {
-      const fileStat = await stat(path.join(cacheDir, assetId));
-      if (fileStat.isFile()) availableSizes.set(assetId, fileStat.size);
-      else repository.forgetAsset(assetId);
+      const fileStat = await stat(filePath);
+      if (fileStat.isFile()) present = fileStat;
+      else unavailable = true;
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') repository.forgetAsset(assetId);
+      unavailable = (error as NodeJS.ErrnoException).code === 'ENOENT';
+    }
+    if (unavailable) {
+      repository.removeAssetWhen(assetId, () => inspectAudioFileSync(filePath) === 'missing');
+      const current = inspectAudioFileSync(filePath);
+      if (typeof current !== 'string') present = current;
+    }
+    if (present) {
+      availableSizes.set(assetId, present.size);
+      recordings[assetId] = await readListenRecording(cacheDir, assetId, present.size);
     }
   }
   const sentences = state.sentences.map(({ anchor, assetId }) => ({
@@ -121,7 +140,7 @@ async function reconcileDocumentCache(
     ...(assetId && availableSizes.has(assetId) ? { assetId } : {}),
   }));
   return {
-    state: { ...state, sentences },
+    state: { ...state, sentences, recordings },
     cache: {
       cachedSentences: sentences.filter(({ assetId }) => assetId).length,
       totalSentences: sentences.length,
@@ -170,6 +189,7 @@ async function startDocumentCacheRun(
 export function registerTtsListenRoutes(app: FastifyInstance, options: TtsListenRouteOptions): void {
   const { cacheDir, repository, assets, cacheRuns } = options;
   const mutations = new ListenDocumentMutationQueue();
+  const assetAvailable = (assetId: string) => assets.isAssetAvailable(assetId);
 
   app.get<{ Querystring: unknown }>('/api/tts/listen/document', async (request, reply) => {
     const userId = requireReadIdentity(request);
@@ -193,15 +213,30 @@ export function registerTtsListenRoutes(app: FastifyInstance, options: TtsListen
     if (!parsed.success) return reply.status(400).send({ error: 'Invalid request', details: parsed.error.issues });
     const key = documentKey(userId, parsed.data.identity);
     return mutations.run(key, async () => {
+      const previous = repository.loadDocument(key);
+      for (const sentence of parsed.data.sentences) {
+        const retained = previous?.sentences.some(
+          (old) => old.anchor === sentence.anchor && old.assetId === sentence.assetId,
+        );
+        if (sentence.assetId && !retained && !(await canLinkReusableAsset(cacheDir, sentence.assetId)))
+          return reply.status(409).send({ error: '本次资产缺少可复用声线回执；已有文档录音保持原关联。' });
+      }
       let synthesisFingerprint: string | undefined;
+      let synthesis: PreparedListenSynthesis | undefined;
       try {
-        synthesisFingerprint = await assets.getSynthesisFingerprint(parsed.data.synthesis);
+        synthesis = await assets.prepareSynthesis(parsed.data.synthesis);
+        synthesisFingerprint = synthesis.fingerprint;
       } catch {
         // Persist state even when the provider is temporarily unavailable.
       }
       const { synthesis: _synthesis, ...state } = parsed.data;
       const saved = { ...state, ...(synthesisFingerprint ? { synthesisFingerprint } : {}) };
-      repository.saveDocument(key, saved);
+      try {
+        repository.saveDocument(key, saved, synthesis?.legacyFingerprint, assetAvailable);
+      } catch (error) {
+        if (error instanceof ListenAssetUnavailableError) return reply.status(409).send({ error: error.message });
+        throw error;
+      }
       // Invalidate against the durable fingerprint, which saveDocument may
       // preserve while the current provider identity is temporarily unknown.
       const persisted = repository.loadDocument(key) ?? saved;
@@ -217,18 +252,29 @@ export function registerTtsListenRoutes(app: FastifyInstance, options: TtsListen
     if (!parsed.success) return reply.status(400).send({ error: 'Invalid request', details: parsed.error.issues });
     const { anchor, assetId, contentDigest, synthesisFingerprint } = parsed.data;
     const key = documentKey(userId, parsed.data);
-    return mutations.run(key, () => {
+    return mutations.run(key, async () => {
+      const retained = repository
+        .loadDocument(key)
+        ?.sentences.some((old) => old.anchor === anchor && old.assetId === assetId);
+      if (!retained && !(await canLinkReusableAsset(cacheDir, assetId)))
+        return reply.status(409).send({ error: '本次资产缺少可复用声线回执；已有文档录音保持原关联。' });
       try {
         if (contentDigest && synthesisFingerprint) {
           return {
             ok: true,
-            linked: repository.setSentenceAssetIfCurrent(key, { contentDigest, synthesisFingerprint, anchor, assetId }),
+            linked: repository.setSentenceAssetIfCurrent(
+              key,
+              { contentDigest, synthesisFingerprint, anchor, assetId },
+              assetAvailable,
+            ),
           };
         }
-        repository.setSentenceAsset(key, anchor, assetId);
+        repository.setSentenceAsset(key, anchor, assetId, Date.now(), assetAvailable);
         return { ok: true, linked: true };
       } catch (error) {
-        return reply.status(404).send({ error: error instanceof Error ? error.message : 'Listen sentence not found' });
+        return reply
+          .status(error instanceof ListenAssetUnavailableError ? 409 : 404)
+          .send({ error: error instanceof Error ? error.message : 'Listen sentence not found' });
       }
     });
   });

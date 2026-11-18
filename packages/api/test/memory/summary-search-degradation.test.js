@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { SqliteEvidenceStore } from '../../dist/domains/memory/SqliteEvidenceStore.js';
+import { VectorStore } from '../../dist/domains/memory/VectorStore.js';
+
+const model = { modelId: 'degradation-fixture', modelRev: '1', dim: 3 };
 
 for (const mode of ['semantic', 'hybrid']) {
   for (const failure of ['unavailable', 'vector-error']) {
@@ -17,11 +20,13 @@ for (const mode of ['semantic', 'hybrid']) {
             updatedAt: '2026-10-08T00:00:00Z',
           },
         ]);
-        if (failure === 'vector-error')
+        if (failure === 'vector-error') {
+          new VectorStore(store.getDb(), model.dim).initMeta(model);
           store.setEmbedDeps({
             mode: 'on',
             embedding: {
               isReady: () => true,
+              getModelInfo: () => model,
               reprobeIfNeeded: async () => {},
               embed: async () => {
                 throw new Error('vector offline');
@@ -29,6 +34,7 @@ for (const mode of ['semantic', 'hybrid']) {
             },
             vectorStore: { search: () => [] },
           });
+        }
         const result = await store.searchWithMeta('piano', { mode });
         assert.deepEqual(
           result.items.map((item) => item.anchor),

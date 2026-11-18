@@ -94,7 +94,7 @@ Ask: <本次约定的结果是否成立，以及需重点检查的风险> verdic
 ```
 
 Feature 以 canonical `docs/features/F*.md` + 该文件最后一次内容变更的完整 40/64 位 Git OID 为 anchor；消息 source 以
-`threadId#messageId` 自身为 revision。普通 local review 按这份 packet 请求，reviewer 一次发出 typed verdict，author 直接读取原消息的 `localReviewFact`；只传引用，不复制 source 正文。
+`Accepted-Source-Ref` 使用完整 `threadId#messageId`，`Accepted-Revision` 只填裸 `messageId`（例如 `private-source-id`）。普通 local review 按这份 packet 请求，reviewer 一次发出 typed verdict，author 直接读取原消息的 `localReviewFact`；只传引用，不复制 source 正文。
 
 只有 F100/F311 已指定要证明 `request-review` **某个 skill 版本在这次 review 中实际沿用**，才在发送请求前 prepare，并在 packet 追加 `Request-Review-Consumption-Handle`；具名 reviewer 可 bind，发出同一条 typed verdict 后 record。prepare/bind/record 是独立的使用测量，不能作为 verdict 送达、作者消费或 merge 的前置条件。handle 缺失、过期、bind/record 失败或结果 `unconfirmed` 时如实保留测量缺口；不得为补回执新建 handle、重发结论、重新唤醒 reviewer 或虚报 `applied`。不适用的已绑定实验可 dismiss；既有历史回执保持原样。
 

@@ -1,12 +1,18 @@
 /**
- * F231 Phase C: profile-update confirmation card.
+ * F231 Phase C: profile-update confirmation card + mechanical diff summary.
  *
  * Like the F128 thread-proposal card, this is the ONLY user-facing approval entry point — it
  * surfaces the before/after primer diff + the whitelist signal source (KD-9) the operator is about to
  * approve. Actions target the profile-update decision routes (`profile-update:approve|reject`).
  */
 
-import type { ProfileUpdateProposal, RichCardBlock } from '@cat-cafe/shared';
+import {
+  computeProfileLineDiff,
+  type ProfileUpdateDiffSummary,
+  type ProfileUpdateProposal,
+  type RichCardBlock,
+} from '@cat-cafe/shared';
+import { profileRevisionOf } from '@cat-cafe/shared/profile-revision';
 import { getCoCreatorDisplay } from '../config/co-creator-display.js';
 
 function signalKindLabel(kind: ProfileUpdateProposal['signalProvenance']['kind']): string {
@@ -20,6 +26,25 @@ function signalKindLabel(kind: ProfileUpdateProposal['signalProvenance']['kind']
     reaction: `reaction（${nickname}反馈/表情）`,
   };
   return labels[kind];
+}
+
+export function summarizeProfileProposalDiff(
+  proposal: Pick<ProfileUpdateProposal, 'beforeContent' | 'afterContent' | 'baseContentHash'>,
+): ProfileUpdateDiffSummary {
+  const diff = computeProfileLineDiff(proposal.beforeContent, proposal.afterContent, { contextLines: 1 });
+  const beforeRevision = proposal.baseContentHash
+    ? `sha256:${proposal.baseContentHash}`
+    : profileRevisionOf(proposal.beforeContent);
+  return {
+    beforeRevision,
+    afterRevision: profileRevisionOf(proposal.afterContent),
+    identical: diff.identical,
+    initialWrite: diff.initialWrite,
+    addedLineCount: diff.addedLineCount,
+    removedLineCount: diff.removedLineCount,
+    hunkCount: diff.hunks.length,
+    unifiedDiff: diff.unifiedDiff,
+  };
 }
 
 export function buildProfileUpdateCardBlock(proposal: ProfileUpdateProposal): RichCardBlock {
@@ -47,10 +72,18 @@ export function buildProfileUpdateCardBlock(proposal: ProfileUpdateProposal): Ri
 }
 
 function renderDiff(proposal: ProfileUpdateProposal): string {
+  const diff = computeProfileLineDiff(proposal.beforeContent, proposal.afterContent, { contextLines: 1 });
   const beforeContent = proposal.beforeContent || '（空 — 首次写入）';
   const fence = markdownFenceFor(beforeContent, proposal.afterContent);
+  const diffBody = diff.unifiedDiff || '（内容无逐行差异）';
+  const tildeFence = tildeFenceFor(diffBody);
   return [
     proposal.rationale,
+    '',
+    `**改动（+${diff.addedLineCount} / -${diff.removedLineCount} 行）：**`,
+    `${tildeFence}diff`,
+    diffBody,
+    tildeFence,
     '',
     '**当前内容：**',
     fence,
@@ -70,4 +103,12 @@ function markdownFenceFor(...contents: string[]): string {
     return Math.max(max, ...runs.map((run) => run.length));
   }, 0);
   return '`'.repeat(Math.max(3, longestFence + 1));
+}
+
+function tildeFenceFor(...contents: string[]): string {
+  const longestFence = contents.reduce((max, content) => {
+    const runs = content.match(/~+/g) ?? [];
+    return Math.max(max, ...runs.map((run) => run.length));
+  }, 0);
+  return '~'.repeat(Math.max(3, longestFence + 1));
 }

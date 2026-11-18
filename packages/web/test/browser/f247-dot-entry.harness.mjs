@@ -172,6 +172,19 @@ export async function openProof({
           body: custom.raw ?? JSON.stringify(custom.body),
         });
       }
+      const quotaRingReadBodies = {
+        '/api/accounts': { projectPath: '/work/fixture', providers: [], unavailableAccounts: [] },
+        '/api/accounts/codex/members': { members: [], selection: { state: 'empty', members: [] } },
+        '/api/accounts/claude/members': { members: [], selection: { state: 'empty', members: [] } },
+        '/api/accounts/agy/members': { members: [], selection: { state: 'empty', members: [] } },
+        '/api/config/quota-pin': { pinned: true, selectedAccountRefs: null },
+      };
+      if (request.method() === 'GET' && url.search === '' && Object.hasOwn(quotaRingReadBodies, url.pathname)) {
+        return handler.fulfill({
+          contentType: 'application/json',
+          body: JSON.stringify(quotaRingReadBodies[url.pathname]),
+        });
+      }
       const bodies = {
         '/api/session': session,
         '/api/approval-hub/pending': { items: [], count: 0 },

@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, unlinkSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, test } from 'node:test';
 import Database from 'better-sqlite3';
 import Fastify from 'fastify';
+import { clearVoiceCache } from '../dist/config/cat-voices.js';
 import { DocumentCacheRunManager } from '../dist/domains/cats/services/tts/DocumentCacheRunManager.js';
 import { ListenAssetService } from '../dist/domains/cats/services/tts/ListenAssetService.js';
 import { MlxAudioTtsProvider } from '../dist/domains/cats/services/tts/MlxAudioTtsProvider.js';
@@ -12,6 +13,7 @@ import { TtsRegistry } from '../dist/domains/cats/services/tts/TtsRegistry.js';
 import { VoiceBlockSynthesizer } from '../dist/domains/cats/services/tts/VoiceBlockSynthesizer.js';
 import { setServiceConfig } from '../dist/domains/services/service-config.js';
 import { ttsRoutes } from '../dist/routes/tts.js';
+import { configureReferenceFixture } from './helpers/tts-reference-fixture.js';
 
 const breeze = 'mlx-community/Breeze-TTS-2-mlx';
 const qwen = 'mlx-community/Qwen3-TTS-12Hz-1.7B-Base-bf16';
@@ -20,23 +22,31 @@ const originalFetch = globalThis.fetch;
 const originalConfig = process.env.CAT_CAFE_SERVICES_CONFIG;
 const originalUrl = process.env.TTS_URL;
 const originalModel = process.env.TTS_MODEL;
+const originalTemplate = process.env.CAT_TEMPLATE_PATH;
+const originalConfigRoot = process.env.CAT_CAFE_CONFIG_ROOT;
 const roots = [];
+const restores = [];
 afterEach(() => {
+  for (const restore of restores.splice(0)) restore();
   globalThis.fetch = originalFetch;
   for (const [key, value] of [
     ['CAT_CAFE_SERVICES_CONFIG', originalConfig],
     ['TTS_URL', originalUrl],
     ['TTS_MODEL', originalModel],
+    ['CAT_TEMPLATE_PATH', originalTemplate],
+    ['CAT_CAFE_CONFIG_ROOT', originalConfigRoot],
   ]) {
     if (value === undefined) delete process.env[key];
     else process.env[key] = value;
   }
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
+  clearVoiceCache();
 });
 
 function fixture(onSpeech = () => {}, protocol = {}) {
   const root = mkdtempSync(join(tmpdir(), 'tts-model-snapshot-'));
   roots.push(root);
+  restores.push(configureReferenceFixture(root));
   process.env.CAT_CAFE_SERVICES_CONFIG = join(root, 'services.json');
   delete process.env.TTS_URL;
   setServiceConfig('mlx-tts', { enabled: true, installed: true, selectedModel: breeze, port: 19889 });
@@ -51,7 +61,7 @@ function fixture(onSpeech = () => {}, protocol = {}) {
         status: 'ok',
         model,
         backend: protocol.backend ?? 'qwen3-clone',
-        capabilities: ['speech-stream-route-v1'],
+        capabilities: ['speech-stream-route-v1', 'reference-audio-content-v1'],
         ...(protocol.profile ? { generation_profile: protocol.profile } : {}),
       });
     const body = JSON.parse(String(init.body));
@@ -61,7 +71,12 @@ function fixture(onSpeech = () => {}, protocol = {}) {
     if (protocol.profile && body.generation_profile !== undefined && body.generation_profile !== protocol.profile) {
       return new Response('generation profile changed', { status: 409 });
     }
-    const headers = protocol.profile ? { 'x-tts-generation-profile': protocol.profile } : {};
+    const headers = {
+      ...(protocol.profile ? { 'x-tts-generation-profile': protocol.profile } : {}),
+      ...(body.ref_audio_base64
+        ? { 'x-tts-reference-status': 'used', 'x-tts-reference-sha256': body.ref_audio_sha256 }
+        : {}),
+    };
     const audio = Buffer.alloc(52);
     audio.write('RIFF');
     audio.writeUInt32LE(44, 4);
@@ -409,7 +424,7 @@ test('a delayed conflicting observation requires a live reconfirmation before of
       status: 'ok',
       model: breeze,
       backend: 'qwen3-clone',
-      capabilities: ['speech-stream-route-v1'],
+      capabilities: ['speech-stream-route-v1', 'reference-audio-content-v1'],
       generation_profile: policy,
     });
   await provider.snapshot({ cacheDir: root });

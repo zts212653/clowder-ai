@@ -5,6 +5,8 @@ import { captureTypedWaitSource } from './callback-typed-wait-source.js';
 import type { captureNativeCallbackCurrentness } from './plugin-native-action-currentness.js';
 import type { PluginNativeActionRouteOptions } from './plugin-native-action-routes.js';
 
+export const SHARED_PLUGIN_ACTION_DEADLINE_MS = 30_000;
+
 /** Same native action owner, source capture, fencing and redaction as the stdio client's HTTP route. */
 export function createSharedPluginActionClient(input: {
   record: InvocationRecord;
@@ -13,6 +15,7 @@ export function createSharedPluginActionClient(input: {
   assertCurrent(): Promise<void>;
   signal: AbortSignal;
   options: PluginNativeActionRouteOptions;
+  deadlineMs?: number;
 }): SharedMcpActionClient {
   return Object.freeze({
     async invoke(
@@ -20,11 +23,10 @@ export function createSharedPluginActionClient(input: {
       args: unknown,
       call: { readonly signal?: AbortSignal; readonly _meta?: unknown } = {},
     ) {
-      const signal = AbortSignal.any([
-        input.signal,
-        ...(call.signal ? [call.signal] : []),
-        AbortSignal.timeout(30_000),
-      ]);
+      const deadline = AbortSignal.timeout(input.deadlineMs ?? SHARED_PLUGIN_ACTION_DEADLINE_MS);
+      const signal = AbortSignal.any([input.signal, ...(call.signal ? [call.signal] : []), deadline]);
+      const stopped = () =>
+        deadline.aborted ? 'Plugin action exceeded the Host time limit' : 'Plugin action was cancelled';
       let rejectAbort: ((reason: Error) => void) | undefined;
       let effect: 'not_started' | 'unknown' = 'not_started';
       const failed = (message: string) =>
@@ -36,8 +38,8 @@ export function createSharedPluginActionClient(input: {
         rejectAbort = reject;
       });
       const onAbort = () => {
-        input.fence.close();
-        rejectAbort?.(failed('Plugin action was cancelled'));
+        input.fence.close(deadline.aborted ? 'deadline' : 'cancelled');
+        rejectAbort?.(failed(stopped()));
       };
       signal.addEventListener('abort', onAbort, { once: true });
       try {
@@ -59,7 +61,7 @@ export function createSharedPluginActionClient(input: {
         };
         return await Promise.race([execute(), aborted]);
       } catch (error) {
-        if (signal.aborted) throw failed('Plugin action was cancelled');
+        if (signal.aborted) throw failed(stopped());
         const status = error instanceof NativePluginActionError ? error.statusCode : 502;
         throw failed(`Plugin action failed (HTTP ${status})`);
       } finally {

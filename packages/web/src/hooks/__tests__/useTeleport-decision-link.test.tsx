@@ -35,7 +35,7 @@ it.each([
   'thread-owner',
   'default',
   'thread-other',
-])('a browser page remembering %s reveals the exact approval without a socket event', async (rememberedThread) => {
+])('a browser page remembering %s retains the exact approval for its reading owner without a socket event', async (rememberedThread) => {
   window.history.replaceState({}, '', '/thread/thread-owner?message=message-source&block=approval-card');
   useChatStore.setState({ currentThreadId: rememberedThread });
   const container = document.createElement('div');
@@ -43,9 +43,13 @@ it.each([
   const root = withHubSocket(createRoot(container));
   try {
     await act(async () => root.render(<CompanionShell />));
-    expect(peekPendingTeleport('thread-owner')).toEqual({ threadId: 'thread-owner', messageId: 'message-source' });
+    expect(peekPendingTeleport('thread-owner')).toMatchObject({
+      threadId: 'thread-owner',
+      messageId: 'message-source',
+      sourceAction: { blockId: 'approval-card' },
+    });
     expect(window.location.search).toBe('');
-    // The message arrives after page bootstrap / the authoritative history fetch.
+    // A mounted card alone is not a reading-owner arrival receipt.
     await act(async () => useChatStore.setState({ currentThreadId: 'thread-owner' }));
     const message = document.createElement('div');
     message.dataset.messageId = 'message-source';
@@ -53,7 +57,8 @@ it.each([
     card.dataset.richBlockId = 'approval-card';
     message.append(card);
     await act(async () => container.append(message));
-    await vi.waitFor(() => expect(document.activeElement).toBe(card));
+    expect(document.activeElement).not.toBe(card);
+    expect(sessionStorage.getItem('cat-cafe:f310:pending-source-action:v1')).not.toBeNull();
   } finally {
     await act(async () => root.unmount());
     container.remove();

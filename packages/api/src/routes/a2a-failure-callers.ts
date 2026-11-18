@@ -1,4 +1,5 @@
 import type { CatId } from '@cat-cafe/shared';
+import { isCrossThreadSource } from '../domains/cats/services/agents/invocation/cross-thread-failure-return.js';
 import {
   normalizeOwnerAuthProvenance,
   type OwnerAuthProvenance,
@@ -10,7 +11,7 @@ export async function resolveFailedResponseReturn(
   store: IMessageStore,
   response: StoredMessage,
   legacy?: { callerCatId?: CatId; ownerAuthProvenance: OwnerAuthProvenance },
-): Promise<{ targetCats: CatId[]; ownerAuthProvenance: OwnerAuthProvenance }> {
+): Promise<{ targetCats: CatId[]; crossThreadSources: StoredMessage[]; ownerAuthProvenance: OwnerAuthProvenance }> {
   const lifecycle = response.lifecycle;
   if (lifecycle?.kind !== 'response') throw new Error('failed response lifecycle identity missing');
   const receipts = [
@@ -21,10 +22,12 @@ export async function resolveFailedResponseReturn(
     if (!legacy) throw new Error('failed response requires durable admission provenance');
     return {
       targetCats: legacy.callerCatId ? [legacy.callerCatId] : [],
+      crossThreadSources: [],
       ownerAuthProvenance: normalizeOwnerAuthProvenance(legacy.ownerAuthProvenance),
     };
   }
   const callers = new Set<CatId>();
+  const crossThreadSources = new Map<string, StoredMessage>();
   for (const receipt of receipts) {
     const source = await store.getById(receipt.triggerMessageId);
     if (
@@ -41,7 +44,7 @@ export async function resolveFailedResponseReturn(
       throw new Error('failed response covered caller identity mismatch');
     if (
       receipt.isFailureReport ||
-      receipt.callerCatId === lifecycle.targetId ||
+      (!isCrossThreadSource(source) && receipt.callerCatId === lifecycle.targetId) ||
       source.visibility === 'whisper' ||
       source.deliveryStatus === 'canceled' ||
       source.recall ||
@@ -49,7 +52,8 @@ export async function resolveFailedResponseReturn(
       source.deletedAt
     )
       continue;
-    callers.add(receipt.callerCatId as CatId);
+    if (isCrossThreadSource(source)) crossThreadSources.set(source.id, source);
+    else callers.add(receipt.callerCatId as CatId);
   }
   const provenances = receipts.map((receipt) => normalizeOwnerAuthProvenance(receipt.ownerAuthProvenance));
   const ownerAuthProvenance = provenances.includes('unknown')
@@ -57,5 +61,5 @@ export async function resolveFailedResponseReturn(
     : provenances.includes('compatibility_fallback')
       ? 'compatibility_fallback'
       : 'strict';
-  return { targetCats: [...callers], ownerAuthProvenance };
+  return { targetCats: [...callers], crossThreadSources: [...crossThreadSources.values()], ownerAuthProvenance };
 }

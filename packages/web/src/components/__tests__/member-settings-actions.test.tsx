@@ -7,6 +7,7 @@ import type { ConfigData } from '../config-viewer-types';
 import { MemberSettingsHost } from '../settings/members/MemberSettingsHost';
 import { MemberSettingsPage } from '../settings/members/MemberSettingsPage';
 import { SettingsContent } from '../settings/SettingsContent';
+import { writeShellLanguage } from '../shell/shell-language';
 
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ replace: vi.fn(), push }),
@@ -62,14 +63,14 @@ afterEach(async () => {
   await act(async () => root.unmount());
   host.remove();
 });
-async function render(editorOpen: boolean, error: string | null = null) {
+async function render(editorOpen: boolean, error: string | null = null, members: CatData[] = [cat]) {
   await act(async () =>
     root.render(
       <MemberSettingsHost
         v2
         editorOpen={editorOpen}
         editingCat={editorOpen ? cat : null}
-        cats={[cat]}
+        cats={members}
         config={{ cats: {} } as ConfigData}
         configError={error}
         registryLoading={false}
@@ -89,6 +90,50 @@ async function render(editorOpen: boolean, error: string | null = null) {
     ),
   );
 }
+
+it('shows the current estimate and refreshes it when the roster changes', async () => {
+  let number = 6100;
+  const previous = vi.mocked(apiFetch).getMockImplementation();
+  if (!previous) throw new Error('API mock is unavailable');
+  vi.mocked(apiFetch).mockImplementation(async (path, init) => {
+    if (path === '/api/cats/l0-budget')
+      return new Response(
+        JSON.stringify({ referenceTokens: 6000, members: [{ catId: 'fixture-cat', tokens: number }] }),
+      );
+    return previous(path, init);
+  });
+  await render(false);
+  expect(host.textContent).toContain('6100 tokens');
+  expect(host.textContent).toContain('不是模型上限');
+  number = 6250;
+  await render(false, null, [cat, { ...cat, id: 'new-fixture' }]);
+  expect(host.textContent).toContain('6250 tokens');
+  await render(true);
+  expect(host.querySelector('[data-testid=member-save-bar]')?.textContent).toContain('6250 tokens');
+});
+
+it('translates an existing estimate without recalculating it', async () => {
+  let audits = 0;
+  const previous = vi.mocked(apiFetch).getMockImplementation();
+  if (!previous) throw new Error('API mock is unavailable');
+  vi.mocked(apiFetch).mockImplementation(async (path, init) => {
+    if (path === '/api/cats/l0-budget') {
+      audits++;
+      return new Response(JSON.stringify({ referenceTokens: 6000, members: [{ catId: 'fixture-cat', tokens: 6100 }] }));
+    }
+    return previous(path, init);
+  });
+  try {
+    await render(false);
+    expect(audits).toBe(1);
+    await act(async () => writeShellLanguage('en'));
+    expect(host.textContent).toContain('Estimated L0 fixed prompt');
+    expect(host.textContent).toContain('6100 tokens');
+    expect(audits).toBe(1);
+  } finally {
+    await act(async () => writeShellLanguage('zh'));
+  }
+});
 
 it('keeps the settings tool identity ACP when only its provider argument mentions DeepSeek', async () => {
   const custom = {

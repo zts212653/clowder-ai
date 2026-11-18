@@ -4,50 +4,19 @@ import type { SuggestionOpenTarget, SuggestionView } from '@cat-cafe/shared';
 import { type ReactNode, useState } from 'react';
 import { AppTooltip } from '@/components/AppTooltip';
 import { useWorkCardOpen } from '@/components/artifacts/useWorkCardOpen';
-import { useCatData } from '@/hooks/useCatData';
-import { resolveAvatarUrl } from '@/lib/avatar-url';
 import { useChatStore } from '@/stores/chatStore';
 import { useShellCopy } from '../shell/shell-copy';
+import { SuggestionAvatar } from './SuggestionAvatar';
 import { suggestionCopy } from './suggestion-copy';
 import { decideSuggestion, rowForMessage, type SuggestionDecision, useSuggestionStore } from './suggestion-store';
 
-const EyeIcon = () => (
-  <svg
-    viewBox="0 0 24 24"
-    fill="none"
-    stroke="currentColor"
-    strokeWidth="2.4"
-    strokeLinecap="round"
-    strokeLinejoin="round"
-    aria-hidden="true"
-  >
-    <path d="M2 12s3.6-6 10-6 10 6 10 6-3.6 6-10 6S2 12 2 12Z" />
-    <circle cx="12" cy="12" r="2.6" fill="currentColor" stroke="none" />
-  </svg>
-);
+export { SuggestionAvatar } from './SuggestionAvatar';
 
 const CloseIcon = () => (
   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
     <path d="M6 6l12 12M18 6L6 18" strokeLinecap="round" />
   </svg>
 );
-
-/** Who is speaking on the row: the cat's avatar; the watcher carries the eye badge (F335 4a 标识). */
-export function SuggestionAvatar({ catId, watcher }: { catId: string; watcher: boolean }) {
-  const { getCatById } = useCatData();
-  const src = resolveAvatarUrl(getCatById(catId)?.avatar || '/avatars/default.png');
-  return (
-    <span className="w-av" data-watcher={watcher ? 'true' : undefined}>
-      {/* biome-ignore lint/performance/noImgElement: 16px member avatar, same source as CatAvatar */}
-      <img src={src} width={16} height={16} alt="" />
-      {watcher ? (
-        <span className="eye">
-          <EyeIcon />
-        </span>
-      ) : null}
-    </span>
-  );
-}
 
 function useOpenTarget(target: SuggestionOpenTarget | undefined, messageId: string) {
   const work = target?.kind === 'work' ? target : undefined;

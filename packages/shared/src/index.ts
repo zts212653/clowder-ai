@@ -95,7 +95,9 @@ export * from './plugin-configuration-required.js';
 export * from './preview-gateway.js';
 export * from './preview-visible-page-admission.js';
 export * from './process-talk-preference.js';
+export * from './profile-diff.js';
 export * from './provider-semantic-projection.js';
+export * from './quota-pin-preference.js';
 export { RECALL_DISPLAY_DOC_KINDS } from './recall-display-contract.js';
 // Export recall-result sidecar contract (producer → parser → persistence → UI)
 export * from './recall-outcome.js';
@@ -202,5 +204,6 @@ export * from './utils/media-byte-range.js';
 export * from './utils/pull-request-changes-target.js';
 // Export subject key utilities (#320)
 export * from './utils/subject-key.js';
+export * from './voice-selection-sequence.js';
 export * from './watcher-daily.js';
 export * from './worktree-notice.js';

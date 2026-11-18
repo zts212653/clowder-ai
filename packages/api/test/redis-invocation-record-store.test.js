@@ -66,6 +66,20 @@ describe('RedisInvocationRecordStore', { skip: redisIsolationSkipReason(REDIS_UR
     );
   });
 
+  it('create() returns created outcome', async () => {
+    const result = await store.create({
+      threadId: 'thread-1',
+      userId: 'user-1',
+      targetCats: ['opus'],
+      intent: 'execute',
+      idempotencyKey: 'redis-key-1',
+      actionLeaseCarrier: { kind: 'none' },
+    });
+
+    assert.equal(result.outcome, 'created');
+    assert.ok(result.invocationId.length > 0);
+  });
+
   it('create binds a pending source atomically without rebinding a duplicate', async () => {
     const input = {
       threadId: 'source-thread',
@@ -92,20 +106,6 @@ describe('RedisInvocationRecordStore', { skip: redisIsolationSkipReason(REDIS_UR
       'a stale binding snapshot must not overwrite an existing source',
     );
     assert.equal((await store.get(created.invocationId)).userMessageId, 'original-source');
-  });
-
-  it('create() returns created outcome', async () => {
-    const result = await store.create({
-      threadId: 'thread-1',
-      userId: 'user-1',
-      targetCats: ['opus'],
-      intent: 'execute',
-      idempotencyKey: 'redis-key-1',
-      actionLeaseCarrier: { kind: 'none' },
-    });
-
-    assert.equal(result.outcome, 'created');
-    assert.ok(result.invocationId.length > 0);
   });
 
   it('create() record has correct initial state', async () => {

@@ -1,3 +1,4 @@
+import { sessionCacheRuntimeKey } from '../../session/cache/session-cache-runtime.js';
 import { InvocationServiceScope } from '../invocation/invocation-service-scope.js';
 import { isRoutingOwnerAttempt } from './routing-owner-attempt.js';
 import { routingPreflightNotice } from './routing-preflight-notice.js';
@@ -327,7 +328,16 @@ async function* routeParallelPrepared(
     const requestedTargetCats = [...targetCats];
     const routingPreflight = await preflightRoutingDispatch(deps.routingDispatchPreflight, {
       ownerId: userId,
+      threadId,
       targetCatIds: requestedTargetCats,
+      cacheExecutionBindings: requestedTargetCats.map((catId) => {
+        const binding = executionBindings.get(catId);
+        return {
+          catId,
+          runtime: sessionCacheRuntimeKey(binding?.hostExecutionBoundary) ?? '',
+          model: binding?.executionPreferences?.model ?? binding?.catConfig?.defaultModel ?? '',
+        };
+      }),
       executionBindings: requestedTargetCats.map((catId) => {
         const binding = executionBindings.get(catId);
         const accountRevision = binding?.executionAccount?.accountRevision;

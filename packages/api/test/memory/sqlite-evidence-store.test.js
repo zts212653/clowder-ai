@@ -1,5 +1,8 @@
 import assert from 'node:assert/strict';
 import { beforeEach, describe, it } from 'node:test';
+import { VectorStore } from '../../dist/domains/memory/VectorStore.js';
+
+const testModel = { modelId: 'test', modelRev: 'test', dim: 3 };
 
 describe('SqliteEvidenceStore', () => {
   let store;
@@ -367,12 +370,13 @@ describe('SqliteEvidenceStore', () => {
         updatedAt: '2026-06-01T00:00:00Z',
       },
     ]);
+    new VectorStore(store.getDb(), testModel.dim).initMeta(testModel);
     store.setEmbedDeps({
       embedding: {
         isReady: () => true,
         reprobeIfNeeded: async () => {},
         embed: async () => [new Float32Array([1, 0, 0])],
-        getModelInfo: () => ({ modelId: 'test', modelRev: 'test', dim: 3 }),
+        getModelInfo: () => testModel,
         load: async () => {},
         dispose: () => {},
       },
@@ -413,12 +417,13 @@ describe('SqliteEvidenceStore', () => {
           updatedAt: '2026-06-01T00:00:00Z',
         },
       ]);
+      new VectorStore(store.getDb(), testModel.dim).initMeta(testModel);
       store.setEmbedDeps({
         embedding: {
           isReady: () => true,
           reprobeIfNeeded: async () => {},
           embed: async () => [new Float32Array([1, 0, 0])],
-          getModelInfo: () => ({ modelId: 'test', modelRev: 'test', dim: 3 }),
+          getModelInfo: () => testModel,
           load: async () => {},
           dispose: () => {},
         },

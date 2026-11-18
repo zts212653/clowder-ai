@@ -24,9 +24,12 @@ describe('message-unit semantic admission', () => {
     ensureVectorTable(db, 3);
     ensurePassageVectorTable(db, 3);
     vectors = new PassageVectorStore(db, 3);
+    const model = { modelId: 'fixture', modelRev: '1', dim: 3 };
+    const vectorStore = new VectorStore(db, 3);
+    vectorStore.initMeta(model);
     store.setEmbedDeps({
       mode: 'on',
-      vectorStore: new VectorStore(db, 3),
+      vectorStore,
       passageVectorStore: vectors,
       embedding: {
         isReady: () => true,
@@ -39,7 +42,7 @@ describe('message-unit semantic admission', () => {
           if (fail) throw new Error('fixture provider unavailable');
           return [new Float32Array([1, 0, 0])];
         },
-        getModelInfo: () => ({ modelId: 'fixture', modelRev: '1', dim: 3 }),
+        getModelInfo: () => model,
       },
     });
     await store.upsert(

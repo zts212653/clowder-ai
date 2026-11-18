@@ -168,12 +168,15 @@ for (const generation of [0, 1])
 test('reopening an existing schema with an older fact trigger installs the current retirement behavior', (t) =>
   staleNativeRead(t, 0, 'passages', 'update', true));
 
-for (const mode of ['semantic', 'hybrid'])
-  test(`healthy real forget producer retires the in-flight ${mode} worker without cancelling its caller`, async (t) => {
+for (const mode of ['semantic', 'hybrid']) {
+  const forgetting = async (t, forgetOnCall) => {
     const f = await fixture(t),
       caller = new AbortController();
     let calls = 0;
     const builder = new IndexBuilder(f.writer, '/unused');
+    const flush = f.writer
+      .getDb()
+      .prepare('INSERT INTO evidence_passages(doc_anchor,passage_id,content,created_at) VALUES(?,?,?,?)');
     f.store.setEmbedDeps({
       ...f.backends[0],
       mode: 'on',
@@ -184,8 +187,10 @@ for (const mode of ['semantic', 'hybrid'])
         getModelInfo: () => f.models[0],
         embed: async (texts) => {
           calls++;
-          const lease = await builder.suppressMessagePassage('neutral', 'neutral');
-          await builder.finalizeMessagePassageSuppression(lease);
+          if (calls === forgetOnCall) {
+            const lease = await builder.suppressMessagePassage('neutral', 'neutral');
+            await builder.finalizeMessagePassageSuppression(lease);
+          } else if (calls === 1) flush.run(document.anchor, 'msg-later', 'Later passage', '2026-11-09');
           return texts.map(() => unit(4));
         },
       },
@@ -197,11 +202,25 @@ for (const mode of ['semantic', 'hybrid'])
       signal: caller.signal,
       deadlineAt: Date.now() + 10000,
     });
-    assert.equal(reply.meta.effectiveMode, 'lexical');
-    assert.equal(reply.meta.degraded, true);
-    assert.equal(reply.passages.length, 0);
-    assert.equal(calls, 1);
     assert.equal(caller.signal.aborted, false);
     for (const b of f.backends)
       assert.equal(generationInvalidationState(f.reader, b.vectorStore.tables).quarantined, false);
+    return { reply, calls: () => calls };
+  };
+
+  // A retired attempt is read once more under a new snapshot (SqliteEvidenceStore.runProjectionRead).
+  test(`healthy real forget producer retires the in-flight ${mode} worker without cancelling its caller`, async (t) => {
+    const { reply, calls } = await forgetting(t, 1);
+    assert.equal(reply.passages.length, 0, 'the forgotten message is in neither read');
+    assert.deepEqual([reply.meta.effectiveMode, reply.meta.degraded], [mode, false]);
+    assert.equal(calls(), 2, 'one repeat, and no model request after it');
   });
+
+  test(`a real forget during the ${mode} repeat leaves the message out of the answer that follows`, async (t) => {
+    // An ordinary flush retires the first attempt; the forget lands while the repeat embeds its query.
+    const { reply, calls } = await forgetting(t, 2);
+    assert.deepEqual([reply.meta.effectiveMode, reply.meta.degraded], ['lexical', true]);
+    assert.ok(reply.passages.every((passage) => passage.content !== 'Original passage'));
+    assert.equal(calls(), 2, 'no third attempt');
+  });
+}

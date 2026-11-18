@@ -16286,7 +16286,7 @@
                           "type": "object"
                         }
                       ],
-                      "description": "Create, append to, correct or retire a shared matter page. Give summary: your interpretation in one sentence or more; sources are optional threadId pointers, with messageId when known. Without sources the server binds this real invocation thread and any confirmed trigger, including a cat/system message; a pointer is not verified original speech. No quote, selected block, attachment or offsets are needed. The server records the actual summary writer. description is optional page context/applicability. Exact quotations remain optional and use their original raw UTF-16 selection fields. Updates need expectedRevision from cat_cafe_read_memory({ref:{kind:\"matter\",matterId}}). Reuse requestId only for the exact same change."
+                      "description": "Create, append to, correct or retire a shared matter page. Give summary: your interpretation in one sentence or more; sources are optional threadId pointers, with messageId when known. On create or append, omitting sources binds this real invocation thread and any confirmed trigger, including a cat/system message; a pointer is not verified original speech. No quote, selected block, attachment or offsets are needed. On correct, omitted summary or source preserves its current value. A summary-only correction keeps the saved source version even if the referenced message changed; after reading that original, pass source alone to refresh its version without resending summary. The server records the actual summary writer. description is optional page context/applicability. Exact quotations remain optional and use their original raw UTF-16 selection fields. Updates need expectedRevision from cat_cafe_read_memory({ref:{kind:\"matter\",matterId}}). Reuse requestId only for the exact same change."
                     },
                     "target": {
                       "const": "matter",
@@ -16335,7 +16335,7 @@
         ],
         "type": "object"
       },
-      "inputSchemaDigest": "sha256:c5acba674f3bc81b35dc7db919b003ea029a70e74d03c9b97005355cbf3629bf",
+      "inputSchemaDigest": "sha256:462fe7ac2c239aedeb24868ef81ca092d89ff599699e6cc6eda9f602c2524262",
       "annotations": {
         "destructiveHint": false,
         "openWorldHint": false,
@@ -16349,7 +16349,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/remember-tool.js#handleRemember",
-      "protectedImplementationDigest": "sha256:4374bdf161365f8733aa3e7cb38ba86dfe8b5149ba428bb868c79371089bff6e"
+      "protectedImplementationDigest": "sha256:81bdb6b53559681b20c0c11d40aafb7eaf102117facb024a96699f5c8015f34f"
     },
     {
       "name": "cat_cafe_remove_scheduled_task",
@@ -17599,10 +17599,10 @@
           ]
         }
       ],
-      "description": "Find project knowledge, earlier messages, graph relations, matter pages or recent items from one clue. Use when: you have a sentence, term or exact anchor (F186, ADR-019) to look up (\"以前聊过 / 找回旧消息 / 有没有相关经验\"), want recent activity (omit query), or need a bounded coverage/source map. NOT for: opening a known source (pass its readRef to cat_cafe_read_memory), raw messages of a known thread (get_thread_context), or diaries/events/person cards (their own entries). Output: groups run in parallel on the same input, each with its own status (ok/no_results/not_covered/deferred/failed/timeout), range and continuation. With a query: docs = document and thread-digest evidence (mode lexical by default); messages = distinct canonical messages (hybrid by default) with their match evidence; graph = an exact anchor's subgraph (graphDepth 1-3, graphRelations) or candidate anchors with match reasons; matters = the whole query matched literally in matter titles/descriptions (up to 200 characters, never cut). Without a query: recent = the recent index by time (since, default 7d; scope with kinds; scope=trajectories) plus the matter directory. scope, dimension, threadId, dateFrom/dateTo/since and kinds narrow every group; a group that cannot keep one reports not_covered instead of widening. Explicit resultUnit=document|message keeps that one original search. Pass next.arguments (matterCursor or continueGroup) unchanged: they reopen one group alone. Read-only: no read receipt, card or preparation event. MESSAGE CONTRACT: resultUnit=message returns distinct canonical messages through authenticated callback access, with matched query terms or semantic-retrieval evidence, not supported verdicts. messageSort=relevance (default) returns a relevance-ranked page and stops at the admitted page plus one witness; explicit messageSort=time orders the first 32 admitted relevance sources by canonical time. Incomplete time windows report actual coverage. Caller-supplied user/source IDs are ignored. To answer with clickable original sources, read them in full, select exact quotations and reasons, then attach them through the ordinary reply (create_rich_block kind:\"sources\", or post_message searchAnswer). GOTCHA: rank/matchRank are position only, never relevance or trust; relevance states observed exact-anchor/title/phrase evidence or unknown; semantic similarity is not confirmation; recent items are ordered by time, not relevance. No result or a stale sourceProjection does not prove absence. One query is not exhaustive: for \"哪些/所有/历史上\" source maps use intent=coverage with docs + threads searched separately, following the memory-search-best-practices skill. CONTRACTS: query max 2,000 characters; overlong input fails validation instead of being truncated. threadId is enforced at the response boundary and empty results state whether the filter was authoritative or degraded. Coverage executes the caller scope exactly; coverage limit has max 20; latency is bounded (the 15s API deadline returns an explicit partial result); serialized output has a declared budget with explicit truncation and a coverage_offset continuation pointer. All groups together stay within 24k characters without dropping the docs page; omitted derived entity explanations report their count while source anchors remain readable. Docs cover features, ADRs, architecture maps, plans and lessons; scope=threads gives discussion process. Session drill-down: list_session_chain / read_session_digest / read_session_events / read_invocation_detail.",
-      "descriptionDigest": "sha256:d991bb977ab199392aad86a19b3318ff6bfe055978febaa2eacd73e294f1f3fc",
-      "descriptionCharacters": 3530,
-      "descriptionTokensCl100kBase": 728,
+      "description": "Find project knowledge, earlier messages, graph relations, matter pages or recent items from one clue. Use when: you have a sentence, term or exact anchor (F186, ADR-019) to look up (\"以前聊过 / 找回旧消息 / 有没有相关经验\"), want recent activity (omit query), or need a bounded coverage/source map. NOT for: opening a known source (pass its readRef to cat_cafe_read_memory), raw messages of a known thread (get_thread_context), or diaries/events/person cards (their own entries). Output: groups run in parallel on the same input, each with its own status (ok/no_results/not_covered/deferred/failed/timeout), range and continuation. With a query: docs = document and thread-digest evidence (mode lexical by default); messages = distinct canonical messages (hybrid by default) with their match evidence; graph = an exact anchor's subgraph (graphDepth 1-3, graphRelations) or candidate anchors with match reasons; matters = the whole query matched literally in matter titles/descriptions (up to 200 characters, never cut). Without a query: recent = the recent index by time (since, default 7d; scope with kinds; scope=trajectories) plus the matter directory. scope, dimension, threadId, dateFrom/dateTo/since and kinds narrow every group; a group that cannot keep one reports not_covered instead of widening. Explicit resultUnit=document|message keeps that one original search. Pass next.arguments (matterCursor or continueGroup) unchanged: they reopen one group alone; continueGroup on a first call reads one already-known group alone. Read-only: no read receipt, card or preparation event. MESSAGE CONTRACT: resultUnit=message returns distinct canonical messages through authenticated callback access, with matched query terms or semantic-retrieval evidence, not supported verdicts. messageSort=relevance (default) returns a relevance-ranked page and stops at the admitted page plus one witness; explicit messageSort=time orders the first 32 admitted relevance sources by canonical time. Incomplete time windows report actual coverage. Caller-supplied user/source IDs are ignored. To answer with clickable original sources, read them in full, select exact quotations and reasons, then attach them through the ordinary reply (create_rich_block kind:\"sources\", or post_message searchAnswer). GOTCHA: rank/matchRank are position only, never relevance or trust; relevance states observed exact-anchor/title/phrase evidence or unknown; semantic similarity is not confirmation; recent items are ordered by time, not relevance. No result or a stale sourceProjection does not prove absence. One query is not exhaustive: for \"哪些/所有/历史上\" source maps use intent=coverage with docs + threads searched separately, following the memory-search-best-practices skill. CONTRACTS: query max 2,000 characters; overlong input fails validation instead of being truncated. threadId is enforced at the response boundary and empty results state whether the filter was authoritative or degraded. Coverage executes the caller scope exactly; coverage limit has max 20; latency is bounded (the 15s API deadline returns an explicit partial result); serialized output has a declared budget with explicit truncation and a coverage_offset continuation pointer. All groups together stay within 24k characters without dropping the docs page; omitted derived entity explanations report their count while source anchors remain readable. Docs cover features, ADRs, architecture maps, plans and lessons; scope=threads gives discussion process. Session drill-down: list_session_chain / read_session_digest / read_session_events / read_invocation_detail.",
+      "descriptionDigest": "sha256:ff5abc06a9168b4dd4f800a9c322bd571ebb46e1accb234c4242f9ea72604269",
+      "descriptionCharacters": 3597,
+      "descriptionTokensCl100kBase": 741,
       "inputSchema": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "additionalProperties": false,
@@ -17623,7 +17623,7 @@
             "type": "integer"
           },
           "continueGroup": {
-            "description": "Only from a returned next.arguments: reopens that one group alone.",
+            "description": "Reads this one group alone: no docs, no other group, no shared wait budget. Pass a returned next.arguments unchanged, or set it on a first call (same query and that group's parameters) when only this group is needed. Not needed for the usual find.",
             "enum": [
               "messages",
               "graph",
@@ -17775,7 +17775,7 @@
         },
         "type": "object"
       },
-      "inputSchemaDigest": "sha256:7368d79a400f4f5ed19d9d525ee4467c6153764c38458ecb229ef6c49b8dec11",
+      "inputSchemaDigest": "sha256:4776fcd2392ecab973174c226e9e7b060131577551040a6ee3b8597e95af52c2",
       "annotations": {
         "destructiveHint": false,
         "openWorldHint": true,
@@ -17793,7 +17793,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/evidence-tools.js#handleSearchEvidence",
-      "protectedImplementationDigest": "sha256:9e01bdce9e81caca0d9ac72945ab36a1f6d49175fecfd10a12ee158791df301f"
+      "protectedImplementationDigest": "sha256:e533818c05eeb82bb5fd9e44cfbb054f48754c329b49ea2330c123255c1155e7"
     },
     {
       "name": "cat_cafe_set_read_mode",

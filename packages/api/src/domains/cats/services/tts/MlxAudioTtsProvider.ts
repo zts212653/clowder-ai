@@ -28,6 +28,9 @@ export interface MlxAudioTtsProviderOptions {
   /** Internal immutable snapshot; null means the sidecar has no profile. */
   readonly generationProfile?: string | null;
   readonly cacheOnly?: boolean;
+  readonly referenceAudioSupport?: boolean;
+  readonly referenceAudioContentSupport?: boolean;
+  readonly voiceIdSupport?: boolean;
 }
 
 /**
@@ -107,6 +110,9 @@ function inferWavDurationSec(audio: Uint8Array): number | undefined {
 
 export class MlxAudioTtsProvider implements ITtsProvider {
   readonly id = 'mlx-audio';
+  readonly referenceAudioSupport: boolean | undefined;
+  readonly referenceAudioContentSupport: boolean | undefined;
+  readonly voiceIdSupport: boolean | undefined;
   private readonly modelOverride: string | undefined;
   // When the caller passes an explicit baseUrl (mostly tests, also legacy
   // hard-coded env wiring), freeze it. When omitted, leave undefined so
@@ -117,7 +123,7 @@ export class MlxAudioTtsProvider implements ITtsProvider {
   private readonly baseUrlOverride: string | undefined;
   private readonly timeoutMs: number;
   private readonly generationProfile: string | null | undefined;
-  private readonly cacheOnly: boolean;
+  readonly cacheOnly: boolean;
 
   constructor(options?: MlxAudioTtsProviderOptions) {
     this.baseUrlOverride = options?.baseUrl ? normalizeLoopbackUrl(options.baseUrl) : undefined;
@@ -125,6 +131,9 @@ export class MlxAudioTtsProvider implements ITtsProvider {
     this.timeoutMs = options?.timeoutMs ?? 30_000;
     this.generationProfile = options?.generationProfile;
     this.cacheOnly = options?.cacheOnly ?? false;
+    this.referenceAudioSupport = options?.referenceAudioSupport;
+    this.referenceAudioContentSupport = options?.referenceAudioContentSupport;
+    this.voiceIdSupport = options?.voiceIdSupport;
   }
 
   get model(): string {
@@ -155,6 +164,9 @@ export class MlxAudioTtsProvider implements ITtsProvider {
       timeoutMs: this.timeoutMs,
       generationProfile: identity.generationProfile,
       cacheOnly: identity.cacheOnly,
+      referenceAudioSupport: identity.referenceAudioSupport,
+      referenceAudioContentSupport: identity.referenceAudioContentSupport,
+      voiceIdSupport: identity.voiceIdSupport,
     });
   }
 
@@ -172,6 +184,9 @@ export class MlxAudioTtsProvider implements ITtsProvider {
       speed: request.speed ?? 1.0,
       lang_code: request.langCode ?? 'z',
       ...(request.refAudio ? { ref_audio: request.refAudio } : {}),
+      ...(request.refAudioData && this.referenceAudioContentSupport
+        ? { ref_audio_base64: request.refAudioData.base64, ref_audio_sha256: request.refAudioData.sha256 }
+        : {}),
       ...(request.refText ? { ref_text: request.refText } : {}),
       ...(request.instruct ? { instruct: request.instruct } : {}),
       ...(request.temperature != null ? { temperature: request.temperature } : {}),
@@ -208,6 +223,17 @@ export class MlxAudioTtsProvider implements ITtsProvider {
 
       if (!response.ok) {
         const detail = await response.text().catch(() => 'unknown');
+        if (request.refAudio && /reference audio (?:not found|unavailable)|permission denied|EACCES/i.test(detail)) {
+          const {
+            refAudio: _source,
+            refAudioData: _data,
+            refText: _text,
+            instruct: _instruct,
+            temperature: _temperature,
+            ...fallback
+          } = request;
+          return { ...(await this.synthesize(fallback)), referenceAudio: { status: 'unavailable' } };
+        }
         throw new Error(`TTS server returned ${response.status}: ${detail}`);
       }
 
@@ -224,6 +250,7 @@ export class MlxAudioTtsProvider implements ITtsProvider {
 
       return {
         audio,
+        ...(request.refAudio ? { referenceAudio: this.referenceReceipt(response) } : {}),
         format: actualFormat,
         ...(durationSec != null ? { durationSec } : {}),
         metadata: {
@@ -243,7 +270,36 @@ export class MlxAudioTtsProvider implements ITtsProvider {
   ): AsyncIterable<TtsSynthesizeStreamEvent> {
     const provider = this.generationProfile === undefined ? await this.snapshot() : this;
     if (provider.cacheOnly) throw new Error('TTS is offline; no matching verified cached audio');
-    yield* provider.streamForModel(request, options);
+    if (provider.referenceAudioSupport !== true || !request.refAudio || !request.refText?.trim()) {
+      yield { type: 'final', result: await provider.synthesize(request) };
+      return;
+    }
+    let emitted = false;
+    try {
+      for await (const event of provider.streamForModel(request, options)) {
+        emitted = true;
+        yield event;
+      }
+    } catch (error) {
+      if (
+        emitted ||
+        !request.refAudio ||
+        !/reference audio (?:not found|unavailable)|permission denied|EACCES/i.test(String(error))
+      )
+        throw error;
+      const {
+        refAudio: _source,
+        refAudioData: _data,
+        refText: _text,
+        instruct: _instruct,
+        temperature: _temperature,
+        ...fallback
+      } = request;
+      yield {
+        type: 'final',
+        result: { ...(await provider.synthesize(fallback)), referenceAudio: { status: 'unavailable' } },
+      };
+    }
   }
 
   private async *streamForModel(
@@ -272,6 +328,7 @@ export class MlxAudioTtsProvider implements ITtsProvider {
         throw new Error(`TTS stream server returned ${response.status}: ${detail}`);
       }
       await verifyTtsResponse(response, this.generationProfile ?? null);
+      const referenceAudio = request.refAudio ? this.referenceReceipt(response) : undefined;
       if (!response.body) throw new Error('TTS stream server returned no response body');
 
       reader = response.body.getReader();
@@ -289,7 +346,7 @@ export class MlxAudioTtsProvider implements ITtsProvider {
         }
         for (const line of lines) {
           if (!line.trim()) continue;
-          const event = this.parseStreamEvent(line, request, model);
+          const event = this.parseStreamEvent(line, request, model, referenceAudio);
           if (event.type === 'chunk') {
             if (pendingChunk) yield pendingChunk;
             if (event.isFinalChunk) {
@@ -316,7 +373,19 @@ export class MlxAudioTtsProvider implements ITtsProvider {
     }
   }
 
-  private parseStreamEvent(line: string, request: TtsSynthesizeRequest, model: string): TtsSynthesizeStreamEvent {
+  private referenceReceipt(response: Response): NonNullable<TtsSynthesizeResult['referenceAudio']> {
+    const status = response.headers.get('x-tts-reference-status');
+    const sha256 = response.headers.get('x-tts-reference-sha256');
+    if (status === 'used' && sha256 && /^[a-f0-9]{64}$/.test(sha256)) return { status: 'used', sha256 };
+    return { status: status === 'unavailable' ? 'unavailable' : 'unverified' };
+  }
+
+  private parseStreamEvent(
+    line: string,
+    request: TtsSynthesizeRequest,
+    model: string,
+    referenceAudio?: TtsSynthesizeResult['referenceAudio'],
+  ): TtsSynthesizeStreamEvent {
     const event = JSON.parse(line) as {
       type?: string;
       audio_base64?: string;
@@ -336,12 +405,14 @@ export class MlxAudioTtsProvider implements ITtsProvider {
         format: 'wav',
         ...(event.duration_sec != null ? { durationSec: event.duration_sec } : {}),
         isFinalChunk: event.final === true,
+        ...(referenceAudio ? { referenceAudio } : {}),
       };
     }
     return {
       type: 'final',
       result: {
         audio,
+        ...(referenceAudio ? { referenceAudio } : {}),
         format: 'wav',
         ...(event.duration_sec != null ? { durationSec: event.duration_sec } : {}),
         metadata: { provider: this.id, model, voice: request.voice },

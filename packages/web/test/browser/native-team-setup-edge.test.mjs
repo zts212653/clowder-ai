@@ -1,7 +1,34 @@
 import assert from 'node:assert/strict';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { test } from 'node:test';
+import { installSetupHttpBoundary } from './fixtures/native-team-setup-boundary.mjs';
 import { assertLivePageHealthy, observePageFaults } from './native-team-observers.mjs';
 import { create, runtimes, select, setup } from './native-team-setup.harness.mjs';
+
+test('L0 budget fixture permits its GET only and rejects unmodeled API requests', async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), 'native-setup-l0-boundary-'));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const unmodeled = [];
+  let handler;
+  await installSetupHttpBoundary({ route: async (_pattern, fn) => (handler = fn) }, dir, unmodeled);
+  const dispatch = (method, path) =>
+    handler({
+      request: () => ({ method: () => method, url: () => `http://127.0.0.1:1${path}` }),
+      fulfill: (response) => response,
+    });
+
+  const audit = await dispatch('GET', '/api/cats/l0-budget');
+  assert.equal(audit.status ?? 200, 200);
+  assert.deepEqual(audit.json, { referenceTokens: 6000, members: [] });
+  assert.equal((await dispatch('POST', '/api/cats/l0-budget')).status, 503);
+  assert.equal((await dispatch('GET', '/api/unknown-fixture')).status, 503);
+  assert.deepEqual(unmodeled, [
+    { method: 'POST', path: '/api/cats/l0-budget' },
+    { method: 'GET', path: '/api/unknown-fixture' },
+  ]);
+});
 
 test('console errors and failed HTTP requests cannot disappear from live acceptance', { timeout: 30000 }, async () => {
   const state = await setup();

@@ -36,7 +36,7 @@ import {
   type WatcherSurfaceRetirement,
   watcherSurfaceRetirementSchema,
 } from '@cat-cafe/shared';
-import { isHomeSession, watcherSessionChainKey } from '../../session/session-scope.js';
+import { isHomeSession, watcherPanelSessionChainKey, watcherSessionChainKey } from '../../session/session-scope.js';
 import type { SessionChainReadOptions } from './SessionChainReadOptions.js';
 import { throwIfStoreReadAborted } from './StoreReadOptions.js';
 import {
@@ -74,7 +74,9 @@ export function assertScopedSessionCreation(input: CreateSessionInput): void {
     throw new Error('invalid_session_purpose');
   if (
     input.sessionPurpose === 'watcher' &&
-    (input.scopedInvocation || input.chainKey !== watcherSessionChainKey(input.userId, input.catId, input.threadId))
+    (input.scopedInvocation ||
+      (input.chainKey !== watcherSessionChainKey(input.userId, input.catId, input.threadId) &&
+        input.chainKey !== watcherPanelSessionChainKey(input.userId, input.catId, input.threadId)))
   )
     throw new Error('watcher_session_chain_required');
   const scope = input.scopedInvocation;

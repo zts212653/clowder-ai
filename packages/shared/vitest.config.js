@@ -91,6 +91,7 @@ export default defineConfig({
       'test/markdown-readable-text.test.ts',
       'src/__tests__/html-inline-event-handlers.test.ts',
       'src/__tests__/profile-contract.test.ts',
+      'src/__tests__/profile-diff.test.ts',
       'src/__tests__/timeline-message-kind.test.ts',
       'src/__tests__/lifecycle-metadata-coercion.test.ts',
       'src/__tests__/hold-card-cancelability.test.ts',

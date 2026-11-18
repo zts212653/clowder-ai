@@ -18,10 +18,12 @@ export function vectorIdentityMatches(db: Database.Database, model: EmbedModelIn
   const tables = vectorGenerationTables(model.generationId ?? 'g0');
   if (!db.prepare('SELECT 1 FROM sqlite_master WHERE name=?').get(tables.metadata)) return false;
   const meta = Object.fromEntries(
-    (db.prepare(`SELECT key,value FROM ${tables.metadata}`).all() as Array<{ key: string; value: string }>).map((r) => [
-      r.key,
-      r.value,
-    ]),
+    (
+      db
+        .prepare(`SELECT key,value FROM ${tables.metadata}
+      WHERE key IN ('embedding_model_id','embedding_dim','embedding_representation_fingerprint')`)
+        .all() as Array<{ key: string; value: string }>
+    ).map((r) => [r.key, r.value]),
   );
   return (
     meta.embedding_model_id === model.modelId &&

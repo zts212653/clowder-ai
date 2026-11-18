@@ -82,6 +82,55 @@ export async function selectedAnswerBrowserFixture() {
       navigation[kind] = await f.search.resolveNavigationReference(selected, human);
       contexts[kind] = await f.search.resolveNavigationReference(selected, human, 3);
     }
+    for (const kind of ['compact', 'multiple']) {
+      const quotes =
+        kind === 'compact'
+          ? ['PR `#7166` 已合入 **main**，引用卡先只露重点。']
+          : ['PR `#7166` 已合入 **main**，引用卡先只露重点。', '引用卡保留 **原话归属**，前后文收进展开区。'];
+      const originals = quotes.map((quote, index) =>
+        f.messages.append({
+          from: { kind: 'agent', catId: index ? 'codex61-sol' : 'gemini-argon' },
+          userId: 'owner',
+          threadId: 'sources',
+          mentions: [],
+          content: `工具过程。${'这里是无关的前段日志。'.repeat(40)}\n\n核完了：${quote}未通过测试时，不要提前发布。\n\n后续过程。${'这里是无关的后段日志。'.repeat(40)}`,
+          timestamp: 1793900100000 + index * 1000,
+        }),
+      );
+      f.messages.append({
+        from: { kind: 'user', userId: 'owner' },
+        userId: 'owner',
+        threadId: 'sources',
+        mentions: [],
+        content: '**后续回复**：展开后可以接着读。',
+        timestamp: 1793900200000,
+      });
+      const producer = { kind: 'agent_key', id: `selected-${kind}`, catId: 'codex61-sol' };
+      const prepared = await f.service.prepare({
+        ...f.request,
+        producer,
+        targetThreadId: 'recall-controlled',
+        input: { query: '引用卡' },
+        selections: originals.map((message, index) => ({
+          threadId: message.threadId,
+          messageId: message.id,
+          contentRevision: createHash('sha256').update(buildSearchableMessageContent(message)).digest('hex'),
+          quote: quotes[index],
+          reason: index ? '这一条说明归属与展开方式。' : '这一条给出已合入的准确位置。',
+        })),
+      });
+      const result = await post(f, prepared, { threadId: 'recall-controlled', producer });
+      assert.ok(result.published);
+      const binding = result.published.extra.messageSearchAnswer;
+      views[kind] = await f.service.read(result.message.id, binding.blockId, human);
+      assert.equal(views[kind].status, 'available');
+      records[kind] = { ...result.published, type: 'assistant' };
+      sources[kind] = originals.map((message) => ({ ...message, type: 'assistant', catId: message.from.catId }));
+      for (const selected of views[kind].response.results) {
+        navigation[`${kind}:${selected.messageId}`] = await f.search.resolveNavigationReference(selected, human);
+        contexts[`${kind}:${selected.messageId}`] = await f.search.resolveNavigationReference(selected, human, 3);
+      }
+    }
     assert.equal(f.searches(), 0);
     assert.equal(f.calls(), 0);
     const producer = { kind: 'agent_key', id: 'legacy-card', catId: 'codex61-sol' };
@@ -102,6 +151,8 @@ export async function selectedAnswerBrowserFixture() {
       human,
     );
     assert.equal(views.withdrawn.status, 'unavailable');
+    navigation.origin = await f.search.resolveNavigationReference({ threadId: 'recall-controlled' }, human);
+    assert.equal(navigation.origin.status, 'available');
     return {
       views,
       records,

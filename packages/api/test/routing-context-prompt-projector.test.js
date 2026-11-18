@@ -1,12 +1,7 @@
 import assert from 'node:assert/strict';
-import { existsSync } from 'node:fs';
-import { resolve } from 'node:path';
 import { describe, it } from 'node:test';
-import { fileURLToPath } from 'node:url';
 import { getCoCreatorConfig } from '../dist/config/cat-config-loader.js';
 import { createRoutingDossierFixture } from './helpers/routing-dossier-fixture.js';
-
-const repositoryRoot = fileURLToPath(new URL('../../../', import.meta.url));
 
 function candidate(catId, overrides = {}) {
   return {
@@ -65,28 +60,6 @@ function preference(overrides = {}) {
 }
 
 describe('F293 RoutingContextPromptProjector', () => {
-  // The home manifest is not exported. A missing or malformed home dossier
-  // still fails this case; public contracts keep using the synthetic dossier.
-  if (existsSync(resolve(repositoryRoot, 'sync-manifest.yaml'))) {
-    it('projects the installed home dossier scarce policy without relying on the synthetic fixture', async () => {
-      const { RoutingContextPromptProjector } = await import(
-        '../dist/domains/routing-context/RoutingContextPromptProjector.js'
-      );
-      const { loadDossierProfiles } = await import('@cat-cafe/shared/dossier');
-      const profiles = loadDossierProfiles(repositoryRoot);
-      const policy = profiles.get('fable-5')?.engagementPolicy;
-      assert.equal(policy?.quota, 'weekly_subscription_scarce');
-      assert.equal(policy.defaultMode, 'one_shot_calibration');
-      assert.equal(policy.routineRepairReturn, 'author_then_routine_reviewer_if_needed');
-      assert.equal(policy.reentry, 'only_for_new_architecture_or_decision_judgment_or_explicit_cvo_request');
-      const projection = new RoutingContextPromptProjector({
-        getEngagementPolicy: (catId) => profiles.get(catId)?.engagementPolicy,
-      }).project(readModel([candidate('fable-5'), candidate('codex')]));
-      const payload = JSON.parse(projection.split('\n')[2]);
-      assert.deepEqual(payload.scarceSeats, [{ catId: 'fable-5', quotaPoolType: 'weekly_subscription_scarce' }]);
-    });
-  }
-
   it('projects scarce quota pool type and attributed cold-start cost even when availability is healthy', async (t) => {
     const { RoutingContextPromptProjector, ROUTING_CONTEXT_PROMPT_MAX_CHARS } = await import(
       '../dist/domains/routing-context/RoutingContextPromptProjector.js'
@@ -99,7 +72,7 @@ describe('F293 RoutingContextPromptProjector', () => {
       getEngagementPolicy: (catId) => profiles.get(catId)?.engagementPolicy,
     });
     const projection = projector.project(readModel([candidate('fable-5'), candidate('codex')]));
-    const payload = JSON.parse(projection.split('\n')[2]);
+    const payload = JSON.parse(projection.split('\n')[1]);
     assert.deepEqual(
       payload.scarceSeats.map((seat) => seat.catId),
       ['fable-5'],
@@ -265,6 +238,6 @@ describe('F293 RoutingContextPromptProjector', () => {
       ),
     );
     assert.match(projection, /"validUntil":20000/);
-    assert.doesNotMatch(projection.split('\n')[2], /<\/runtime-routing-context>/);
+    assert.doesNotMatch(projection.split('\n')[1], /<\/runtime-routing-context>/);
   });
 });

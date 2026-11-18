@@ -1,13 +1,24 @@
 'use client';
+import { useCatData } from '@/hooks/useCatData';
 import { useWatcher } from '@/hooks/useWatcher';
-import { SuggestionAvatar } from '../suggestions/SuggestionRow';
+import { SuggestionAvatar } from '../suggestions/SuggestionAvatar';
 
 function pauseTime(until: number) {
   return new Date(until).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false });
 }
 export function WatcherChip({ threadId }: { threadId: string }) {
   const { state, error } = useWatcher(threadId);
-  if (!state || error || !state.rolloutEnabled || !state.enabled || !state.capability.supported) return null;
+  const { getCatById } = useCatData();
+  const panel = state?.config.panel?.enabled ? state.config.panel : undefined;
+  if (!state || error || !state.rolloutEnabled || !state.enabled || (!panel && !state.capability.supported))
+    return null;
+  const members = panel?.members.map(({ catId }) => catId) ?? [state.config.memberCatId];
+  const names = members
+    .map((catId) => {
+      const cat = getCatById(catId);
+      return cat?.nickname ?? cat?.displayName ?? catId;
+    })
+    .join('、');
   const suffix = state.pausedUntil
     ? `已暂停至 ${pauseTime(state.pausedUntil)}`
     : state.labelMuted
@@ -16,9 +27,11 @@ export function WatcherChip({ threadId }: { threadId: string }) {
         ? '查看中'
         : '';
   return (
-    <span className="w-chip" role="status" data-testid="watcher-chip">
-      <SuggestionAvatar catId={state.config.memberCatId} watcher />
-      守望猫 · {state.memberName}
+    <span className="w-chip" role="status" data-testid="watcher-chip" title={panel ? names : undefined}>
+      {members.map((catId) => (
+        <SuggestionAvatar key={catId} catId={catId} watcher />
+      ))}
+      守望猫 · {panel ? `${members.length} 只` : state.memberName}
       {suffix && (
         <span className="inline-flex items-center gap-1.5 pl-0.5 text-cafe-secondary">
           {state.reviewing && !state.pausedUntil && !state.labelMuted && (
@@ -52,7 +65,10 @@ export function WatcherThreadCard({ threadId }: { threadId: string }) {
         <span aria-hidden="true" className={`watcher-switch ${selected ? 'is-on' : ''}`} />
       </button>
       <a href="/settings?s=concierge#watcher" className="mt-1 block text-xs text-cafe-secondary">
-        {state?.memberName ?? '加载中'} ›
+        {state?.config.panel?.enabled
+          ? `守望猫 · ${state.config.panel.members.length} 只`
+          : (state?.memberName ?? '加载中')}{' '}
+        ›
       </a>
       {state?.pausedUntil && (
         <button

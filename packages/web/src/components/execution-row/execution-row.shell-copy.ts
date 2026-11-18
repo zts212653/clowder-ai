@@ -5,6 +5,8 @@ export const executionRowCopy = defineShellCopy(
     zh: {
       status: {
         working: (who: string, clock: string, tail: string): string => `${who} 处理中${clock}${tail}`,
+        watching: (who: string, clock: string, tail: string): string => `${who} · 守望查看${clock}${tail}`,
+        watcherTail: (count: number): string => ` · ${count} 只守望`,
         running: (count: number, tail: string): string => `${count} 项运行中${tail}`,
         managed: (who: string, activity: string, clock: string, tail: string): string =>
           `${who} 在跑${activity}${clock}${tail}`,
@@ -26,6 +28,7 @@ export const executionRowCopy = defineShellCopy(
       },
       compact: {
         working: '处理中',
+        watching: '守望查看',
         managed: (activity: string): string => `在跑${activity}`,
         stopping: '正在停止',
         silent: '没动静',
@@ -73,6 +76,7 @@ export const executionRowCopy = defineShellCopy(
         running: (count: number): string => `在跑 ${count}`,
         queue: (count: number): string => `排队 ${count}`,
         realtime: '实时回合',
+        watcher: '守望查看',
         quiet: '没动静',
         waitActive: (name: string, elapsed: string): string =>
           `等待 ${name} 当前回合${elapsed ? `（已运行 ${elapsed}）` : ''}`,
@@ -85,6 +89,8 @@ export const executionRowCopy = defineShellCopy(
     en: {
       status: {
         working: (who: string, clock: string, tail: string): string => `${who} working${clock}${tail}`,
+        watching: (who: string, clock: string, tail: string): string => `${who} · Watching${clock}${tail}`,
+        watcherTail: (count: number): string => ` · ${count} watching`,
         running: (count: number, tail: string): string => `${count} running${tail}`,
         managed: (who: string, activity: string, clock: string, tail: string): string =>
           `${who} running ${activity.toLowerCase()}${clock}${tail}`,
@@ -106,6 +112,7 @@ export const executionRowCopy = defineShellCopy(
       },
       compact: {
         working: 'Working',
+        watching: 'Watching',
         managed: (activity: string): string => `Running ${activity.toLowerCase()}`,
         stopping: 'Stopping',
         silent: 'Quiet',
@@ -153,6 +160,7 @@ export const executionRowCopy = defineShellCopy(
         running: (count: number): string => `${count} running`,
         queue: (count: number): string => `${count} queued`,
         realtime: 'Live turn',
+        watcher: 'Watcher',
         quiet: 'No activity',
         waitActive: (name: string, elapsed: string): string =>
           `Waiting for ${name}’s current turn${elapsed ? ` (${elapsed} elapsed)` : ''}`,
@@ -169,6 +177,11 @@ export const executionRowCopy = defineShellCopy(
         ['Sol', ' 2:05', ''],
         ['Opus', ' 0:04', ' · 2 queued'],
       ],
+      'status.watching': [
+        ['Sol', ' 2:05', ''],
+        ['Opus', ' 0:04', ' · 2 watching'],
+      ],
+      'status.watcherTail': [[1], [12]],
       'status.running': [
         [2, ''],
         [4, ' · queue paused'],

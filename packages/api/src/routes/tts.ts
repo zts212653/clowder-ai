@@ -14,7 +14,15 @@ import path from 'node:path';
 import type { ITtsProvider, TtsStreamEvent, TtsSynthesizeRequest } from '@cat-cafe/shared';
 import type { FastifyInstance, FastifyPluginOptions, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
-import { getCatVoice } from '../config/cat-voices.js';
+import { getCatVoiceOptions } from '../config/cat-voice-options.js';
+import { resolveCatVoice } from '../config/cat-voices.js';
+import {
+  cachedVoiceSelection,
+  completeVoiceSelection,
+  prepareCatVoice,
+  ReferenceAudioChangedError,
+  VoiceSelectionSequence,
+} from '../domains/cats/services/tts/cat-voice-synthesis.js';
 import { DocumentCacheRunManager } from '../domains/cats/services/tts/DocumentCacheRunManager.js';
 import type { DocumentListenRepository } from '../domains/cats/services/tts/DocumentListenRepository.js';
 import {
@@ -22,9 +30,14 @@ import {
   ListenAssetService,
   type ListenSynthesisOptions,
 } from '../domains/cats/services/tts/ListenAssetService.js';
+import {
+  independentAudioHash,
+  referenceAudioCacheIdentity,
+} from '../domains/cats/services/tts/reference-audio-cache.js';
 import { ttsUnavailableResponse } from '../domains/cats/services/tts/TtsCacheIdentityError.js';
 import { chunkText } from '../domains/cats/services/tts/TtsChunker.js';
 import type { TtsRegistry } from '../domains/cats/services/tts/TtsRegistry.js';
+import { canReuseVoiceAsset, writeAssetVoiceReceipt } from '../domains/cats/services/tts/tts-asset-provenance.js';
 import { getVoiceBlockSynthesizer } from '../domains/cats/services/tts/VoiceBlockSynthesizer.js';
 import { applySecurityHeaders } from '../infrastructure/security-headers.js';
 import { resolveUserId } from '../utils/request-identity.js';
@@ -56,11 +69,14 @@ function synthesisHash(
     request.format ?? 'wav',
     request.text,
   ];
-  if (request.refAudio) parts.push(request.refAudio);
+  if (request.refAudio)
+    parts.push(request.refAudio, referenceAudioCacheIdentity(request.refAudio, request.refAudioData?.sha256));
   if (request.refText) parts.push(request.refText);
   if (request.instruct) parts.push(request.instruct);
   if (request.temperature != null) parts.push(String(request.temperature));
-  const baseHash = createHash('sha256').update(parts.join('|')).digest('hex');
+  const baseHash = createHash('sha256')
+    .update(request.refAudioData ? JSON.stringify(parts) : parts.join('|'))
+    .digest('hex');
   if (!variant) return baseHash;
   return createHash('sha256').update(`${baseHash}\0variant:${variant}`).digest('hex');
 }
@@ -162,6 +178,7 @@ async function streamListenAsset(options: {
           format: event.format,
           durationSec: event.durationSec,
           isFinalChunk: event.isFinalChunk,
+          voiceSelection: event.voiceSelection,
         });
       },
     });
@@ -222,6 +239,21 @@ export async function ttsRoutes(app: FastifyInstance, opts: TtsRouteOptions): Pr
   app.addHook('onClose', async () => {
     cacheRuns?.close();
     await listenAssets.close();
+  });
+
+  app.get('/api/tts/voices', async (request, reply) => {
+    if (!resolveUserId(request)) return reply.code(401).send({ error: 'Identity required' });
+    const query = z.object({ catId: z.string().min(1).max(64).optional() }).safeParse(request.query);
+    if (!query.success) return reply.code(400).send({ error: 'Invalid request' });
+    try {
+      return {
+        voices: getCatVoiceOptions(),
+        ...(query.data.catId ? { resolution: resolveCatVoice(query.data.catId) } : {}),
+      };
+    } catch (error) {
+      request.log.error({ err: error }, 'Voice choices unavailable');
+      return reply.code(503).send({ error: 'Voice choices unavailable' });
+    }
   });
 
   /**
@@ -285,17 +317,7 @@ export async function ttsRoutes(app: FastifyInstance, opts: TtsRouteOptions): Pr
       }
     }
 
-    // Resolve voice config: explicit params > per-cat defaults
-    const catVoice = catId ? getCatVoice(catId) : getCatVoice('opus');
-    const voice = voiceOverride ?? catVoice.voice;
-    const langCode = langCodeOverride ?? catVoice.langCode;
-    const speed = speedOverride ?? catVoice.speed ?? 1.0;
     const requestedFormat = 'wav';
-    // F066: Clone params from per-cat voice config
-    const refAudio = catVoice.refAudio;
-    const refText = catVoice.refText;
-    const instruct = catVoice.instruct;
-    const temperature = catVoice.temperature;
 
     // Get provider
     let provider: ITtsProvider;
@@ -307,24 +329,31 @@ export async function ttsRoutes(app: FastifyInstance, opts: TtsRouteOptions): Pr
       return ttsUnavailableResponse(error);
     }
 
-    const synthRequest: TtsSynthesizeRequest = {
-      text,
-      voice,
-      langCode,
-      speed,
-      format: requestedFormat,
-      ...(refAudio ? { refAudio } : {}),
-      ...(refText ? { refText } : {}),
-      ...(instruct ? { instruct } : {}),
-      ...(temperature != null ? { temperature } : {}),
-    };
+    const { request: voiceRequest, voiceSelection } = prepareCatVoice(
+      catId ?? 'opus',
+      provider,
+      {
+        ...(voiceOverride !== undefined ? { voice: voiceOverride } : {}),
+        ...(langCodeOverride !== undefined ? { langCode: langCodeOverride } : {}),
+        ...(speedOverride !== undefined ? { speed: speedOverride } : {}),
+      },
+      cacheDir,
+    );
+    const synthRequest: TtsSynthesizeRequest = { ...voiceRequest, text };
+    let actualVoiceSelection = voiceSelection;
+    if (voiceSelection.warnings.length) request.log.warn({ voiceSelection }, 'TTS voice fallback or uncertainty');
     const hash = synthesisHash(provider, synthRequest);
 
     // First try cache with requested format, then try with alternate format
     let filePath: string | undefined;
     let cached = false;
     let durationSec: number | undefined;
-    const cachedAudio = await findCachedAudio(cacheDir, hash, requestedFormat);
+    const found =
+      !synthRequest.refAudio || synthRequest.refAudioData
+        ? await findCachedAudio(cacheDir, hash, requestedFormat)
+        : null;
+    const cachedAudio =
+      found && (await canReuseVoiceAsset(cacheDir, path.basename(found.filePath), voiceSelection)) ? found : null;
     if (cachedAudio) {
       filePath = cachedAudio.filePath;
       cached = true;
@@ -334,15 +363,26 @@ export async function ttsRoutes(app: FastifyInstance, opts: TtsRouteOptions): Pr
       // Synthesize
       try {
         const result = await provider.synthesize(synthRequest);
+        actualVoiceSelection = completeVoiceSelection(voiceSelection, result.referenceAudio, provider);
         durationSec = result.durationSec;
         // Double-check: only allow known audio extensions (defense in depth)
         const allowedFormats = new Set(['wav', 'mp3']);
         const actualFormat = allowedFormats.has(result.format) ? result.format : requestedFormat;
-        const fname = `${hash}.${actualFormat}`;
+        const publishedHash =
+          synthRequest.refAudioData && actualVoiceSelection.referenceStatus !== 'sent'
+            ? independentAudioHash(hash)
+            : hash;
+        const fname = `${publishedHash}.${actualFormat}`;
         filePath = path.join(cacheDir, fname);
         await writeFile(filePath, result.audio);
+        await writeAssetVoiceReceipt(
+          cacheDir,
+          fname,
+          actualVoiceSelection,
+          !synthRequest.refAudio || actualVoiceSelection.referenceStatus === 'sent',
+        );
       } catch (err) {
-        request.log.error({ err, voice, langCode }, 'TTS synthesis failed');
+        request.log.error({ err, voiceSelection }, 'TTS synthesis failed');
         reply.status(502);
         return { error: 'TTS synthesis failed', detail: err instanceof Error ? err.message : 'unknown' };
       }
@@ -356,6 +396,7 @@ export async function ttsRoutes(app: FastifyInstance, opts: TtsRouteOptions): Pr
       assetId: resolvedFilename,
       cached,
       bytes: resolvedStat.size,
+      voiceSelection: cached ? cachedVoiceSelection(voiceSelection) : actualVoiceSelection,
       ...(durationSec != null ? { durationSec } : {}),
     };
   });
@@ -397,7 +438,7 @@ export async function ttsRoutes(app: FastifyInstance, opts: TtsRouteOptions): Pr
 
     try {
       const result = await synthesizer.resynthesize(parsed.data.text, parsed.data.catId);
-      return { audioUrl: result.audioUrl, durationSec: result.durationSec };
+      return { audioUrl: result.audioUrl, durationSec: result.durationSec, voiceSelection: result.voiceSelection };
     } catch (err) {
       request.log.error({ err }, 'TTS resynthesize failed');
       reply.status(502);
@@ -439,14 +480,16 @@ export async function ttsRoutes(app: FastifyInstance, opts: TtsRouteOptions): Pr
       return ttsUnavailableResponse(error);
     }
 
-    const catVoice = getCatVoice(catId ?? 'opus');
-    const voice = voiceOverride ?? catVoice.voice;
-    const langCode = langCodeOverride ?? catVoice.langCode;
-    const speed = speedOverride ?? catVoice.speed ?? 1.0;
-    const refAudio = catVoice.refAudio;
-    const refText = catVoice.refText;
-    const instruct = catVoice.instruct;
-    const temperature = catVoice.temperature;
+    const { request: voiceRequest, voiceSelection } = prepareCatVoice(
+      catId ?? 'opus',
+      provider,
+      {
+        ...(voiceOverride !== undefined ? { voice: voiceOverride } : {}),
+        ...(langCodeOverride !== undefined ? { langCode: langCodeOverride } : {}),
+        ...(speedOverride !== undefined ? { speed: speedOverride } : {}),
+      },
+      cacheDir,
+    );
 
     const chunks = chunkText(text);
     if (chunks.length === 0) {
@@ -462,6 +505,8 @@ export async function ttsRoutes(app: FastifyInstance, opts: TtsRouteOptions): Pr
 
     const startTime = Date.now();
     let successfulChunks = 0;
+    let completedSelection: import('@cat-cafe/shared').TtsVoiceSelection | undefined;
+    const sequence = new VoiceSelectionSequence();
 
     for (let i = 0; i < chunks.length; i++) {
       if (reply.raw.destroyed || reply.raw.writableEnded) {
@@ -471,20 +516,12 @@ export async function ttsRoutes(app: FastifyInstance, opts: TtsRouteOptions): Pr
 
       const chunk = chunks[i];
       try {
-        const synthRequest: TtsSynthesizeRequest = {
-          text: chunk.text,
-          voice,
-          langCode,
-          speed,
-          format: 'wav',
-          ...(refAudio ? { refAudio } : {}),
-          ...(refText ? { refText } : {}),
-          ...(instruct ? { instruct } : {}),
-          ...(temperature != null ? { temperature } : {}),
-        };
+        const synthRequest: TtsSynthesizeRequest = { ...voiceRequest, text: chunk.text };
 
         const chunkStart = Date.now();
         const result = await provider.synthesize(synthRequest);
+        const actualVoiceSelection = completeVoiceSelection(voiceSelection, result.referenceAudio, provider);
+        completedSelection = sequence.observe(actualVoiceSelection);
         const chunkMs = Date.now() - chunkStart;
 
         if (reply.raw.destroyed || reply.raw.writableEnded) {
@@ -512,9 +549,15 @@ export async function ttsRoutes(app: FastifyInstance, opts: TtsRouteOptions): Pr
           text: chunk.text,
           durationSec: result.durationSec,
           format: result.format,
+          voiceSelection: actualVoiceSelection,
         });
         successfulChunks++;
       } catch (err) {
+        if (err instanceof ReferenceAudioChangedError) {
+          sendEvent({ type: 'error', error: err.message });
+          reply.raw.end();
+          return;
+        }
         request.log.error({ err, index: i, total: chunks.length }, '[TTS-STREAM] chunk synthesis failed, skipping');
       }
     }
@@ -527,7 +570,7 @@ export async function ttsRoutes(app: FastifyInstance, opts: TtsRouteOptions): Pr
         { totalMs: Date.now() - startTime, chunks: chunks.length, successfulChunks },
         '[TTS-STREAM] complete',
       );
-      sendEvent({ type: 'done', total: successfulChunks });
+      sendEvent({ type: 'done', total: successfulChunks, voiceSelection: completedSelection ?? voiceSelection });
     }
     reply.raw.end();
   });

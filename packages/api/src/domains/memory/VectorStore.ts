@@ -89,7 +89,7 @@ export class VectorStore {
     this.db.exec(`DELETE FROM ${this.tables.documents}`);
     // Scanner bookkeeping shares this table but is independent of vector/model lifetime.
     this.db.exec(
-      `DELETE FROM ${this.tables.metadata} WHERE key NOT IN ('indexing_version', 'document_source_claims','vector_invalidation_epoch','vector_invalidation_quarantined')`,
+      `DELETE FROM ${this.tables.metadata} WHERE key NOT IN ('indexing_version', 'document_source_claims','vector_invalidation_epoch','vector_invalidation_quarantined','vector_invalidation_recovered_epoch')`,
     );
   }
 

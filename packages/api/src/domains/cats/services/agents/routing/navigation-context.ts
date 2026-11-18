@@ -1,3 +1,4 @@
+import type { SessionCacheWarmth } from '@cat-cafe/shared';
 import { getCoCreatorConfig } from '../../../../../config/cat-config-loader.js';
 import { getCoCreatorDisplay } from '../../../../../config/co-creator-display.js';
 import { getSenderName } from '../../context/ContextAssembler.js';
@@ -46,6 +47,7 @@ export interface NavigationContext {
   sources?: readonly InvocationSource[];
   tasks: TaskSummary[];
   executionSituation?: ThreadExecutionSituation;
+  sessionCache?: readonly { catId: string; warmth: SessionCacheWarmth }[];
   artifacts?: NavigationArtifact[];
   truthSource?: TruthSourceInfo | null;
   /** Explicit original roadmap pointer; never a directive or custody grant. */
@@ -86,7 +88,7 @@ function buildNavigationInner(ctx: NavigationContext, options?: NavigationFormat
   }
 
   if (ctx.sources?.length) {
-    lines.push('本轮输入来源（触发事实，不表示接责或新增授权）:');
+    lines.push('本轮输入来源:');
     for (const source of ctx.sources) lines.push(`  - ${formatInvocationSource(source)}`);
   }
 
@@ -120,6 +122,22 @@ function buildNavigationInner(ctx: NavigationContext, options?: NavigationFormat
   }
 
   lines.push(...recentStopLines(ctx, coCreatorTimeZone));
+  if (ctx.sessionCache) {
+    lines.push('本线程会话缓存（按时间窗口估计；依据目录默认模型，未校验前缀变化）:');
+    for (const { catId, warmth } of ctx.sessionCache) {
+      if (warmth.status === 'unknown') continue;
+      const state =
+        warmth.status === 'warm' && warmth.expiresAt !== undefined
+          ? `预计缓存保留至 ${formatPromptTime(warmth.expiresAt, { timeZone: coCreatorTimeZone })}`
+          : warmth.status === 'expired'
+            ? '缓存保留窗口已过'
+            : '冷热未知';
+      const size =
+        warmth.contextTokens !== undefined ? `，约 ${warmth.contextTokens.toLocaleString('en-US')} token` : '';
+      lines.push(`  - @${catId}: ${state}${size}`);
+    }
+    lines.push('  未列出的成员：冷热未知；没有记录不等于已经凉了。');
+  }
 
   if (ctx.artifacts && ctx.artifacts.length > 0) {
     lines.push('最近产物:');
