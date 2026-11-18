@@ -683,11 +683,13 @@ function executionModel(query) {
         seq: summary.sessionSeq,
         at: summary.startedAt,
         sealed: summary.sessionStatus === 'sealed',
-        name: (
+        name: (function (cat) {
+          return cat ? cat.nickname || cat.displayName : summary.catId;
+        })(
           data.cats.find(function (c) {
             return c.id === summary.catId;
-          }) || { displayName: summary.catId }
-        ).displayName,
+          }),
+        ),
         duration: summary.durationMs / 1000,
         input: summary.tokens && summary.tokens.input,
         output: summary.tokens && summary.tokens.output,
