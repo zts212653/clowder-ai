@@ -82,6 +82,11 @@ import { bindPluginMcpEnvironment } from '../../../../../config/capabilities/plu
 import { deriveAutoCompactTokenLimit, getCatEffort } from '../../../../../config/cat-config-loader.js';
 import { getCatModel } from '../../../../../config/cat-models.js';
 import { type CodexCarrierMode, captureCodexLaunchPolicy } from '../../../../../config/codex-cli.js';
+import {
+  createCodexPassiveQuotaTurnTracker,
+  observeCodexSessionQuota,
+  prepareCodexPassiveQuotaContext,
+} from '../../../../../config/codex-session-quota.js';
 import { estimateCostFromTokens } from '../../../../../config/model-pricing.js';
 import { createModuleLogger } from '../../../../../infrastructure/logger.js';
 import { buildCliNotFoundDiagnostic } from '../../../../../utils/cli-diagnostics.js';
@@ -149,6 +154,7 @@ import { type CodexNativeImageSource, codexImageOriginEnvelope } from '../provid
 import {
   type CodexSessionContextSnapshotResolver,
   createCodexSessionContextSnapshotResolver,
+  measureCodexSessionRolloutSize,
 } from '../providers/codex-session-context-snapshot.js';
 import { extractTrustedImagePaths } from '../providers/image-paths.js';
 import { collectCodexCapabilitySource } from './CodexAppServerCapabilitySource.js';
@@ -2565,6 +2571,28 @@ export class CodexAgentService implements AgentService {
         useAppServer && auditContext && auditContext.invocationId === options?.invocationId
           ? { invocationId: auditContext.invocationId, envelopes: imageEnvelopes }
           : undefined;
+      const passiveQuotaLaunch =
+        !native && useAppServer
+          ? prepareCodexPassiveQuotaContext({
+              accountLaunch,
+              executionAccount: options?.executionAccount,
+              authMode,
+              customBaseUrl,
+              customProvider,
+              env: codexEnv,
+              args: appServerArgs,
+              rpcConfig: appServerThreadConfig,
+              cwd: options?.workingDirectory ?? process.cwd(),
+            })
+          : null;
+      const passiveQuotaTracker =
+        passiveQuotaLaunch && finalAccountEnv.CODEX_HOME
+          ? createCodexPassiveQuotaTurnTracker({
+              context: passiveQuotaLaunch,
+              sessionsRoot: join(finalAccountEnv.CODEX_HOME, 'sessions'),
+              measureRolloutSize: measureCodexSessionRolloutSize,
+            })
+          : null;
       const events = useAppServer
         ? runCodexAppServerWithRecovery({
             ...(this.appServerStartupRecovery ? { startupRecovery: this.appServerStartupRecovery } : {}),
@@ -2696,6 +2724,7 @@ export class CodexAgentService implements AgentService {
             ...(options?.liveCompanion || watcher ? { modelCapacityRetryDelaysMs: [] } : {}),
             ...(options?.recoveryAnchor ? { recoveryAnchor: options.recoveryAnchor } : {}),
             clientDeps: {
+              ...(passiveQuotaTracker ? passiveQuotaTracker.appServerClientHooks : {}),
               onUnsupportedNotification: ({ method }) => {
                 log.warn(
                   {
@@ -3230,9 +3259,11 @@ export class CodexAgentService implements AgentService {
 
       if (!native && metadata.sessionId && finalAccountEnv.CODEX_HOME) {
         try {
+          const confirmedQuotaWindows = passiveQuotaTracker?.confirmedWindowsFor(metadata.sessionId) ?? [];
           const snapshot = await this.contextSnapshotResolver(
             metadata.sessionId,
             join(finalAccountEnv.CODEX_HOME, 'sessions'),
+            { rateLimitsTurnWindows: confirmedQuotaWindows },
           );
           if (snapshot) {
             const usage: TokenUsage = metadata.usage ? { ...metadata.usage } : {};
@@ -3262,6 +3293,17 @@ export class CodexAgentService implements AgentService {
             }
 
             metadata.usage = usage;
+            if (passiveQuotaLaunch && confirmedQuotaWindows.length > 0 && snapshot.rateLimits) {
+              observeCodexSessionQuota({
+                root: passiveQuotaLaunch.root,
+                accountRef: passiveQuotaLaunch.accountRef,
+                credentialHome: passiveQuotaLaunch.credentialHome,
+                managed: passiveQuotaLaunch.managed,
+                expectedIdentity: passiveQuotaLaunch.launchIdentity,
+                invocationStartedAt: confirmedQuotaWindows[0].startMs,
+                rateLimits: snapshot.rateLimits,
+              });
+            }
           }
         } catch (err) {
           log.warn(

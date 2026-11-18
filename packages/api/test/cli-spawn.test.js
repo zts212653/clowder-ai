@@ -867,6 +867,9 @@ test('API-only Jev credentials and page configuration do not reach an actual age
         ['CAT_CAFE_CALLBACK_TOKEN', 'synthetic-invocation-credential'],
         ['OPENAI_API_KEY', 'synthetic-selected-account-credential'],
       ]),
+      // This fixture owns the callback/account values. An invocation's shared
+      // credential-file transport must not replace its synthetic callback mode.
+      { inheritParentEnv: false },
     );
     const result = spawnSync(
       process.execPath,

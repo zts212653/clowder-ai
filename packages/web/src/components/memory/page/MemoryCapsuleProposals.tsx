@@ -2,6 +2,7 @@ import type { ProfileMemoryProposalView } from '@cat-cafe/shared';
 import { splitUserCapsule } from '@cat-cafe/shared/profile-contract';
 import { useRouter } from 'next/navigation';
 import { ExternalLinkIcon } from '@/components/HubConfigIcons';
+import { ProfileDiffView } from '@/components/rich/ProfileDiffView';
 import { useCatData } from '@/hooks/useCatData';
 import { handleTeleportEvent } from '@/hooks/useTeleport';
 import { scrollToMessage } from '@/utils/scrollToMessage';
@@ -100,6 +101,7 @@ export function MemoryCapsuleProposals({
               )}
             </div>
             <p className="text-compact text-cafe-muted">为什么改：{proposal.rationale}</p>
+            {profile ? <ProfileDiffView before={current} after={proposal.suggestedContent} /> : null}
             <div className="grid gap-3 xl:grid-cols-2">
               <div className="rounded-lg border border-cafe-subtle bg-[var(--console-card-bg)] p-3">
                 <h3 className="text-xs text-cafe-muted">现在的版本</h3>

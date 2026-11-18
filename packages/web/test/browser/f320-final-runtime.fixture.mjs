@@ -32,6 +32,7 @@ export async function startFinalAccountPreview({
   withOverrides = false,
   withClaude = false,
   withAgy = false,
+  agyQuotaSampler,
   routingSnapshot,
   withServicePreview = false,
   withStartupRecovery = false,
@@ -247,6 +248,7 @@ export async function startFinalAccountPreview({
   app.post('/api/auth/session', async () => ({ userId: 'fixture', csrfToken: 'fixture' }));
   await app.register(accountsRoutes, {
     loginDriver: nativeLogin.driver,
+    ...(agyQuotaSampler ? { agyQuotaSampler } : {}),
     quotaFetcher: async () =>
       quotaMode === 'body'
         ? Response.json({

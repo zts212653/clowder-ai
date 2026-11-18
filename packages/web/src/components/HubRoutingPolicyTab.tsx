@@ -1,11 +1,11 @@
 'use client';
 
+import { useRouter } from 'next/navigation';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import type { Thread, ThreadRoutingPolicyV1 } from '@/stores/chat-types';
 import { useChatStore } from '@/stores/chatStore';
 import { apiFetch } from '@/utils/api-client';
 import { DailyUsageSection } from './DailyUsageSection';
-import { HubQuotaBoardTab } from './HubQuotaBoardTab';
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
@@ -31,6 +31,7 @@ function buildPolicy(params: {
 }
 
 export function HubRoutingPolicyTab() {
+  const router = useRouter();
   const threadId = useChatStore((s) => s.currentThreadId);
   const [thread, setThread] = useState<Thread | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -98,7 +99,20 @@ export function HubRoutingPolicyTab() {
 
   return (
     <div className="space-y-4">
-      <HubQuotaBoardTab />
+      <Section title="账号额度">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <p className="text-xs text-cafe-secondary">
+            各账号的真实余量与左侧栏额度汇总圆环已收归「账户与登录」统一查看和管理。
+          </p>
+          <button
+            type="button"
+            onClick={() => router.push('/settings?s=accounts')}
+            className="px-3 py-1.5 text-xs rounded-lg bg-cafe-accent text-[var(--cafe-surface)] hover:bg-cafe-interactive transition-colors"
+          >
+            前往账户与登录
+          </button>
+        </div>
+      </Section>
 
       <Section title="路由策略（猫粮约束子模块）">
         <p className="text-xs text-cafe-secondary mb-3">

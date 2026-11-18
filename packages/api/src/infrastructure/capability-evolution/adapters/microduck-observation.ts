@@ -17,7 +17,7 @@ import {
   parsedOwnerResponse,
   sameAddress,
 } from './microduck-owner-validation.js';
-import { validMicroduckObservationMedia } from './microduck-show-manifest.js';
+import { validMicroduckObservationMedia } from './microduck-show/microduck-show-manifest.js';
 
 function validObservationEvidence(result: MicroduckObservation): boolean {
   const sceneMedia = validMicroduckObservationMedia(result);

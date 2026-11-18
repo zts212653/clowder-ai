@@ -16,7 +16,7 @@
  * declaration fails, the new worktree and branch are removed again so nothing half-created is left behind.
  */
 import { fileURLToPath } from 'node:url';
-import { deferredMedia, initializeLightCheckout } from './lib/worktree-light.mjs';
+import { createCheckout } from './lib/worktree-checkout.mjs';
 import { originFromEnvironment, validateOrigin } from './lib/worktree-origin.mjs';
 import { LIFECYCLE_POLICIES } from './lib/worktree-reaper-core.mjs';
 import { checkoutKind, git } from './lib/worktree-reaper-probes.mjs';
@@ -77,6 +77,7 @@ export function createWorktree({
   ttlDays,
   now,
   full = false,
+  checkoutOptions,
   declare = declareLifecycle,
   origin,
 }) {
@@ -88,22 +89,15 @@ export function createWorktree({
   if (!git(repo, ['rev-parse', '--verify', '--quiet', `${base}^{commit}`]).ok) {
     throw new Error(`invalid --base ${base}: not a commit in this repository (fetch it first?)`);
   }
-  const deferred = full ? null : deferredMedia(repo, base);
-  mustGit(
+  return createCheckout({
     repo,
-    ['worktree', 'add', ...(full ? [] : ['--no-checkout']), path, ...(branch ? ['-b', branch] : []), base],
-    'worktree add',
-  );
-  try {
-    if (deferred) initializeLightCheckout(path, deferred);
-    declare(path, { owner, policy, ttlDays, now, origin });
-  } catch (err) {
-    // Fresh and clean by construction: remove without --force (anything unexpected makes git refuse).
-    const removed = git(repo, ['worktree', 'remove', path]).ok;
-    if (removed && branch) git(repo, ['branch', '-D', branch]); // created just now by `-b`, holds no commits
-    err.message += removed ? ' (the new worktree was rolled back)' : ` (rollback failed: remove ${path} by hand)`;
-    throw err;
-  }
+    path,
+    branch,
+    base,
+    full,
+    checkoutOptions,
+    afterCheckout: () => declare(path, { owner, policy, ttlDays, now, origin }),
+  });
 }
 
 function main(argv) {
@@ -127,7 +121,7 @@ function main(argv) {
     declareLifecycle(path, decl);
   } else {
     const repo = mainRepoFrom(process.cwd());
-    createWorktree({
+    const checkout = createWorktree({
       repo,
       path,
       branch: flag(argv, '--branch'),
@@ -135,6 +129,7 @@ function main(argv) {
       full: argv.includes('--full'),
       ...decl,
     });
+    console.log(`[worktree-new] checkout ${JSON.stringify(checkout)}`);
   }
   console.log(`[worktree-new] ${path} declared owner=${decl.owner} policy=${decl.policy}`);
   return 0;

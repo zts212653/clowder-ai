@@ -20,8 +20,27 @@ function source(threadId = 'origin-a', label = 'Origin A') {
 describe('Settings navigation association behind the original reading owner', () => {
   beforeEach(() => window.localStorage.clear());
   afterEach(() => {
+    vi.unstubAllGlobals();
     vi.restoreAllMocks();
     window.history.replaceState(null, '', '/');
+  });
+
+  it.each([false, true])('starts a valid HTTP session without randomUUID, activation denied=%s', (denied) => {
+    const previous = startSettingsReadingSession(source(), 'http-tab');
+    const nextOrigin = source('http-next', 'Next HTTP source');
+    vi.stubGlobal('crypto', { getRandomValues: crypto.getRandomValues.bind(crypto) });
+    const nativeSet = Storage.prototype.setItem;
+    if (denied)
+      vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (this: Storage, key: string, value: string) {
+        if (this === localStorage && key === settingsReadingSessionKey('http-tab')) throw new DOMException('Denied');
+        nativeSet.call(this, key, value);
+      });
+    const next = startSettingsReadingSession(nextOrigin, 'http-tab');
+    expect(next.session.id).not.toBe(previous.session.id);
+    expect(next.persisted).toBe(!denied);
+    expect(readSettingsReadingSession('http-tab')).toEqual(denied ? previous.session : next.session);
+    expect(readChatReadingRef(nextOrigin.readingRef)?.threadId).toBe('http-next');
+    expect(readChatReadingRef(previous.session.readingRef) !== undefined).toBe(denied);
   });
 
   it('does not invent a source from a direct entry or its from parameter', () => {

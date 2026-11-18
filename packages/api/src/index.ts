@@ -138,6 +138,10 @@ import {
   recoverOwedContinuations,
 } from './domains/cats/services/agents/invocation/host-sleep/HostSleepContinuationScheduler.js';
 import { createHostSleepEvidenceReader } from './domains/cats/services/agents/invocation/host-sleep/HostSleepEvidence.js';
+import {
+  createRuntimeStopProbe,
+  runtimeStopRecordFile,
+} from './domains/cats/services/agents/invocation/host-sleep/RuntimeStopEvidence.js';
 import { InvocationOwnerReaper } from './domains/cats/services/agents/invocation/InvocationOwnerReaper.js';
 import { startSerializedInvocationOwnerReaperInterval } from './domains/cats/services/agents/invocation/InvocationOwnerReaperInterval.js';
 import {
@@ -456,6 +460,8 @@ import { runSchedulerReplyUserIdBackfill } from './infrastructure/scheduler/sche
 import { securityHeadersPlugin } from './infrastructure/security-headers.js';
 import { sessionAuthPlugin, sessionRoute } from './infrastructure/session-auth.js';
 import { startupMilestone } from './infrastructure/startup-diagnostics.js';
+import type { startEventLoopTripwire } from './infrastructure/telemetry/cpu/event-loop-tripwire.js';
+import { initializeWithEventLoopTripwire } from './infrastructure/telemetry/cpu/event-loop-tripwire-startup.js';
 import { startProcessCpuCapture } from './infrastructure/telemetry/cpu/process-cpu-capture.js';
 import { SocketManager } from './infrastructure/websocket/index.js';
 import { avatarsRoutes } from './routes/avatars.js';
@@ -669,11 +675,21 @@ function hasRuntimeSessionDrain(service: AgentService): service is AgentService 
 
 async function main(): Promise<void> {
   startupMilestone('module-graph-loaded');
+  const loggerContext = await import('./infrastructure/logger.js');
+  await initializeWithEventLoopTripwire(
+    { logger: loggerContext.logger, logDir: loggerContext.LOG_DIR_PATH },
+    (tripwire) => initializeApi(loggerContext, tripwire),
+  );
+}
+
+async function initializeApi(
+  { logger: customLogger, isDebugMode, LOG_DIR_PATH }: typeof import('./infrastructure/logger.js'),
+  eventLoopTripwire: ReturnType<typeof startEventLoopTripwire>,
+): Promise<void> {
   // #1838: the API itself stays outside every kernel job, so the background services and managed
   // jobs it starts survive its restart. Each covered Windows provider gets its own host job instead.
   const acpHostPolicy = resolveAcpHostPolicy();
   let managedCommandWakeRecovery: ManagedCommandWakeRecoverySweep | undefined;
-  const { logger: customLogger, isDebugMode, LOG_DIR_PATH } = await import('./infrastructure/logger.js');
   let sessionHookAuthenticationReady = (): boolean => false;
 
   // F152: Initialize OpenTelemetry SDK (must be early, before routes)
@@ -686,6 +702,7 @@ async function main(): Promise<void> {
   const { saveSpan } = await import('./utils/member-save-diagnostics.js');
 
   const app = createApiServer({ logger: customLogger as unknown as import('fastify').FastifyBaseLogger });
+  app.addHook('onClose', async () => eventLoopTripwire.close());
   reportAcpHostPolicy(app.log, acpHostPolicy);
   const messageReadDiagnostics = registerMessageReadDiagnostics(app);
   const privateUserId = (process.env.CAT_CAFE_USER_ID ?? 'default-user').trim();
@@ -931,6 +948,7 @@ async function main(): Promise<void> {
       });
       if (context) {
         runtimeDeploymentContext = context;
+        eventLoopTripwire.setBootId(context.bootId);
         runtimeDeploymentRevision = context.runningRevision;
         recordRuntimeStartupFailure = async (reason) => {
           await context.ledger.recordStartupFailure({
@@ -1997,11 +2015,18 @@ async function main(): Promise<void> {
 
   // F293 Phase B: one durable composition for owner API, cognition and every
   // dispatch preflight. No Redis means typed 503/degradation, never memory truth.
+  const { SessionCacheReadService } = await import('./domains/cats/services/session/cache/SessionCacheReadService.js');
+  const sessionCacheReadService = new SessionCacheReadService(
+    sessionChainStore,
+    100,
+    (catId) => catRegistry.getAllConfigs()[catId],
+  );
   const routingContextRuntime = redisClient
     ? createRoutingContextRuntime({
         redis: redisClient,
         projectRoot: resolveActiveProjectRoot(),
         getConfigs: () => catRegistry.getAllConfigs(),
+        sessionCache: sessionCacheReadService,
       })
     : undefined;
 
@@ -2949,8 +2974,19 @@ async function main(): Promise<void> {
     : undefined;
   // F337: a turn a machine sleep cut off is told apart from a provider failure and continued after the lid opens.
   const hostSleepEvidence = createHostSleepEvidenceReader();
-  // F337: set as the runtime's stop begins; turns its provider kills end after this and are continued next boot.
+  // F337: set when the API's own SIGTERM arrives (often after its providers already died; see the probe below).
   const runtimeStop = { begun: false };
+  // The launcher signals provider children before the API, so the stop record (written before any
+  // signal) is what tells a turn the stop began; the SIGTERM flag covers stops without a record.
+  const isRuntimeShuttingDown = createRuntimeStopProbe({
+    begun: () => runtimeStop.begun,
+    recordFile:
+      declaredRuntimeRoot && declaredDeploymentId
+        ? runtimeStopRecordFile({ projectRoot: declaredRuntimeRoot, deploymentId: declaredDeploymentId }).catch(
+            () => undefined,
+          )
+        : undefined,
+  });
   const hostSleepContinuation = new HostSleepContinuationScheduler({
     readEvidence: hostSleepEvidence,
     continueCats: (invocationIds, kind) =>
@@ -2975,7 +3011,7 @@ async function main(): Promise<void> {
       readEvidence: hostSleepEvidence,
       scheduleContinuation: (input) => hostSleepContinuation.schedule(input),
     },
-    isRuntimeShuttingDown: () => runtimeStop.begun,
+    isRuntimeShuttingDown,
     ordinaryTaskHandoffs,
     messageSearchAnswerService,
     ownedWaitStatusReader,
@@ -3473,6 +3509,7 @@ async function main(): Promise<void> {
 
   // Register routes (socketManager injected, no circular import)
   const messagesOpts = {
+    turnExecutionStore,
     onStoredProjectMessage: async (
       message: import('./domains/cats/services/stores/ports/MessageStore.js').StoredMessage,
     ) => projectMessageProducer?.(message),
@@ -3599,7 +3636,7 @@ async function main(): Promise<void> {
           stopUnconfirmedProvider: (record: TurnExecutionRecord) =>
             stopWithWindowsJobProof({ store: turnExecutionStore, record, dataDir: process.env.CAT_CAFE_DATA_DIR }),
           findWindowsLiveOwner: (records: readonly TurnExecutionRecord[]) =>
-            findWindowsLiveOwner({ records, dataDir: process.env.CAT_CAFE_DATA_DIR }),
+            findWindowsLiveOwner({ records, store: turnExecutionStore, dataDir: process.env.CAT_CAFE_DATA_DIR }),
         }
       : {}),
   });
@@ -4703,6 +4740,7 @@ async function main(): Promise<void> {
     queue: invocationQueue,
     maySpeak: watcherMaySpeak,
     outputFence: watcherOutputFence,
+    panelNudge: (input) => watcherPanel.acceptNudge(input),
     afterNudge: async (input) =>
       watcherReceipts?.nudge({
         ...input,
@@ -4728,9 +4766,49 @@ async function main(): Promise<void> {
         );
     },
   });
+  // F335 panel: off until the owner turns it on in Settings; the ledger is durable (TTL=0).
+  const { InMemoryWatcherPanelLedger, RedisWatcherPanelLedger } = await import(
+    './domains/concierge/watcher/panel/watcher-panel-ledger.js'
+  );
+  const watcherPanelLedger = redis ? new RedisWatcherPanelLedger(redis) : new InMemoryWatcherPanelLedger();
+  const { WatcherPanelRunner } = await import('./domains/concierge/watcher/panel/watcher-panel-runner.js');
+  const watcherPanel = new WatcherPanelRunner({
+    userId: privateUserId,
+    configs: conciergeConfigStoreShared,
+    labels: labelStore,
+    ledger: watcherPanelLedger,
+    registry,
+    executions: turnExecutionStore,
+    sessions: sessionChainStore,
+    messages: messageStore,
+    threads: threadStore,
+    transcript: transcriptWriter,
+    apiUrl: `http://127.0.0.1:${PORT}`,
+    service: (catId) => router.getStrategyDeps().services[catId],
+    queue: invocationQueue,
+    publish: (stored) =>
+      socketManager?.broadcastToRoom(`thread:${stored.threadId}`, 'connector_message', {
+        threadId: stored.threadId,
+        message: {
+          id: stored.id,
+          from: stored.from,
+          type: 'connector',
+          content: stored.content,
+          source: stored.source,
+          timestamp: stored.timestamp,
+        },
+      }),
+    report: (error, threadId) =>
+      app.log.warn({ err: error, threadId }, 'Watcher panel round failed; ordinary work remains independent'),
+  });
+  await app.register((await import('./routes/watcher-panel.js')).watcherPanelRoutes, {
+    ledger: watcherPanelLedger,
+    turnExecutionStore,
+  });
   // Always on: the settings switch (default: only threads the owner picks) decides what is watched.
   const { WatcherSupervisor } = await import('./domains/concierge/watcher/WatcherSupervisor.js');
   watcherSupervisor = new WatcherSupervisor({
+    panel: watcherPanel,
     maySpeak: watcherMaySpeak,
     userId: privateUserId,
     configs: conciergeConfigStoreShared,
@@ -6543,6 +6621,10 @@ async function main(): Promise<void> {
       },
       authorizeActor: async (actor, operation) => {
         const record = actor.invocationId ? await registry.peekRecord(actor.invocationId) : null;
+        if (record?.toolExecutionPolicy?.mode === 'watcher_panel')
+          return (
+            actor.byline === 'watcher' && (operation === 'facts' || (await watcherPanel.maySpeak(record.invocationId)))
+          );
         if (record?.toolExecutionPolicy?.mode !== 'watcher') return true;
         return (
           actor.byline === 'watcher' &&

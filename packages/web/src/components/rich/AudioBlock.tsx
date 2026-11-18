@@ -29,6 +29,7 @@ export function AudioBlock({ block, catId }: { block: RichAudioBlock; catId?: st
   const listenModeActive = useListenModeStore((state) => state.session !== null);
 
   const isVoiceMessage = !!block.text;
+  const voiceWarning = block.voiceSelection?.warnings.join(' ');
 
   // Fetch audio via apiFetch (carries auth header) → blob URL
   useEffect(() => {
@@ -208,6 +209,7 @@ export function AudioBlock({ block, catId }: { block: RichAudioBlock; catId?: st
         <div className="text-xs text-cafe-muted pl-1 max-w-[420px] whitespace-pre-wrap break-words leading-relaxed">
           {block.text}
         </div>
+        {voiceWarning && <p className="pl-1 text-xs text-cafe-secondary">{voiceWarning}</p>}
 
         {listenModeActive && (
           <div className="pl-1 text-micro text-cafe-secondary">听读中未自动播放 · 点此会先暂停正文</div>
@@ -241,6 +243,7 @@ export function AudioBlock({ block, catId }: { block: RichAudioBlock; catId?: st
 
       <div className="flex-1 min-w-0">
         {block.title && <div className="text-xs font-medium text-cafe-secondary truncate">{block.title}</div>}
+        {voiceWarning && <p className="text-xs text-cafe-secondary">{voiceWarning}</p>}
         <div className="mt-1 h-1 bg-cafe-surface rounded-full overflow-hidden">
           <div
             className="h-full bg-[var(--semantic-info)] rounded-full transition-[width] duration-200"

@@ -1,14 +1,17 @@
+import { performance } from 'node:perf_hooks';
 import type Database from 'better-sqlite3';
 import { MessageCandidateAudit } from './message-candidate-audit.js';
 import { messageLiteralRelevance } from './message-literal-relevance.js';
 import { lexicalMessagePassages } from './message-passage-lexical.js';
 import type { MessagePassageSearchExecution, MessagePassageSearchOptions } from './message-passage-search-types.js';
 import { readMessagePassageState } from './message-passage-state.js';
+import { MESSAGE_SEARCH_ADMISSION_RESERVE_MS, MESSAGE_VECTOR_BUDGET_MS } from './message-search-time-budgets.js';
 import type { PassageResult } from './SqliteEvidenceStore.js';
 import type { VectorSearchDegradeStage } from './vector-search-degrade-report.js';
 
 interface MessagePassageSearchDeps {
   db: Database.Database;
+  vectorStarted?(): void | Promise<void>;
   isEmbeddingAvailable(): Promise<boolean>;
   semanticSearch(limit: number, audit?: MessageCandidateAudit): Promise<PassageResult[]>;
   hybridSearch(
@@ -19,6 +22,12 @@ interface MessagePassageSearchDeps {
     audit?: MessageCandidateAudit,
   ): Promise<PassageResult[]>;
   reportVectorDegrade(stage: VectorSearchDegradeStage, error: unknown): void;
+}
+
+function checkReadLifetime(options: MessagePassageSearchOptions): void {
+  options.signal?.throwIfAborted();
+  if (options.deadlineAt !== undefined && Date.now() >= options.deadlineAt)
+    throw new DOMException('Message search deadline exceeded', 'TimeoutError');
 }
 
 function eligibleAnchors(options: MessagePassageSearchOptions): Set<string> {
@@ -54,6 +63,7 @@ function messageAdmission(
 async function retrieveVectors(
   query: string,
   lexical: PassageResult[],
+  lexicalMs: number,
   options: MessagePassageSearchOptions,
   deps: MessagePassageSearchDeps,
   meta: MessagePassageSearchExecution['meta'],
@@ -61,14 +71,35 @@ async function retrieveVectors(
   audit?: MessageCandidateAudit,
 ): Promise<PassageResult[]> {
   if (options.mode === 'lexical') return lexical;
-  if (!(await deps.isEmbeddingAvailable())) {
+  const requestDeadline = options.requestDeadlineAt ?? options.deadlineAt;
+  const budgetInsufficient = () =>
+    meta.effectiveMode === 'hybrid' &&
+    requestDeadline !== undefined &&
+    Number.isFinite(requestDeadline) &&
+    requestDeadline - Date.now() < MESSAGE_VECTOR_BUDGET_MS + lexicalMs + MESSAGE_SEARCH_ADMISSION_RESERVE_MS;
+  const lexicalForBudget = () => {
+    // Keep this still-live lexical read. Starting vectors here can consume the
+    // time needed to replace a cancelled worker and admit its fresh replay.
+    meta.degraded = true;
+    meta.degradeReason = 'passage_vector_admission_budget_insufficient';
+    meta.effectiveMode = 'lexical';
+    return lexical;
+  };
+  if (budgetInsufficient()) return lexicalForBudget();
+  const embeddingAvailable = await deps.isEmbeddingAvailable();
+  // Availability can await a provider probe. Re-evaluate the remaining request
+  // budget afterwards, while the execution window still owns cancellation.
+  checkReadLifetime(options);
+  if (!embeddingAvailable) {
     audit?.nativeUnavailable();
     meta.degraded = true;
     meta.degradeReason = 'passage_embedding_unavailable';
     meta.effectiveMode = 'lexical';
     return lexical;
   }
+  if (budgetInsufficient()) return lexicalForBudget();
   try {
+    await deps.vectorStarted?.();
     const passages =
       options.mode === 'semantic'
         ? await deps.semanticSearch(meta.candidateLimit, audit)
@@ -105,7 +136,7 @@ export async function searchMessagePassages(
 ): Promise<MessagePassageSearchExecution> {
   const pool = options.candidateLimit ?? 2000;
   if (!Number.isInteger(pool) || pool < 1 || pool > 2000) throw new Error('Invalid message candidate limit');
-  options.signal?.throwIfAborted();
+  checkReadLifetime(options);
   const audit = MessageCandidateAudit.create(options.candidateAudit, pool);
   const anchors = eligibleAnchors(options);
   // Ordinary-search consumers own canonical display sorting. Both display
@@ -124,11 +155,23 @@ export async function searchMessagePassages(
     effectiveMode: mode,
   };
   if (!query.trim() || anchors.size === 0) return { passages: [], meta };
+  const lexicalStarted = performance.now();
   const lexical = lexicalMessagePassages(deps.db, query, retrievalOptions, anchors, pool);
+  const lexicalMs = Math.max(0, performance.now() - lexicalStarted);
+  checkReadLifetime(options);
   audit?.order(1, lexical.slice(0, pool));
   meta.truncated = lexical.length > pool;
   const accept = messageAdmission(deps.db, anchors, options, audit);
-  const passages = await retrieveVectors(query, lexical.slice(0, pool), retrievalOptions, deps, meta, accept, audit);
+  const passages = await retrieveVectors(
+    query,
+    lexical.slice(0, pool),
+    lexicalMs,
+    retrievalOptions,
+    deps,
+    meta,
+    accept,
+    audit,
+  );
   options.signal?.throwIfAborted();
   const seen = new Set<string>();
   const eligible = passages.filter((passage) => {

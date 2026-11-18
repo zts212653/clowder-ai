@@ -2,6 +2,7 @@ import { captureCandidateIdSchema, isPersonMemoryProposalCardBlock } from '@cat-
 import type { IMessageStore, StoredMessage } from '../../cats/services/stores/ports/MessageStore.js';
 import type { PersonMemoryStore } from './PersonMemoryStore.js';
 import { normalizePrivateAlias } from './person-memory-keys.js';
+import { PERSON_MEMORY_PROPOSAL_STATUS_TOOL } from './person-memory-proposal-card-pointer.js';
 import { projectPersonMemoryProposalStatus } from './person-memory-proposal-status.js';
 
 const PROPOSAL_CONTEXT_LIMIT = 8;
@@ -65,10 +66,8 @@ function proposalReferencesFromMessages(messages: readonly StoredMessage[]): Pro
   return proposals;
 }
 
-function rankProposalReferences(
-  proposals: readonly ProposalReference[],
-  currentPrompt: string,
-): { selected: ProposalReference[]; matchedPrompt: boolean } {
+/** Proposals the prompt names come first, so the context cap never cuts them out. */
+function rankProposalReferences(proposals: readonly ProposalReference[], currentPrompt: string): ProposalReference[] {
   const normalizedPrompt = normalizePrivateAlias(currentPrompt);
   const requested = proposals
     .map((proposal) => {
@@ -85,18 +84,9 @@ function rankProposalReferences(
     .sort((left, right) => left.referenceIndex - right.referenceIndex)
     .map((entry) => entry.proposal);
   const requestedIds = new Set(requested.map((proposal) => proposal.candidateId));
-  return {
-    selected: [...requested, ...proposals.filter((proposal) => !requestedIds.has(proposal.candidateId))].slice(
-      0,
-      PROPOSAL_CONTEXT_LIMIT,
-    ),
-    matchedPrompt: requested.length > 0,
-  };
-}
-
-function looksLikeProposalStatusQuestion(prompt: string): boolean {
-  return /(?:状态|审批|待审批|撤回|拒绝|合入|通过|status|pending|approved|withdrawn|rejected|materialized)/iu.test(
-    prompt,
+  return [...requested, ...proposals.filter((proposal) => !requestedIds.has(proposal.candidateId))].slice(
+    0,
+    PROPOSAL_CONTEXT_LIMIT,
   );
 }
 
@@ -104,21 +94,7 @@ function subjectField(subjectDisplayName: string | undefined): string {
   return subjectDisplayName ? ` subject=${JSON.stringify(subjectDisplayName)}` : '';
 }
 
-function unavailableContext(
-  reason: 'message_history_unavailable' | 'candidate_unavailable',
-  candidateId?: string,
-): string {
-  const target = candidateId
-    ? `proposalId=${candidateId} liveStatus=not_available`
-    : 'proposal discovery=not_available';
-  return [
-    '## F276 权威提案状态（服务端实时投影）',
-    `- ${target}`,
-    `- reason=${reason}`,
-    '- 当前状态无法从权威 store 验证；不得从聊天记录、旧卡片或先前回复推断状态。',
-    '- 如用户询问状态，只能回答“当前无法验证”，或用精确 proposalId 调用实时只读状态工具。',
-  ].join('\n');
-}
+const HEADING = '## F276 权威提案状态（服务端实时投影）';
 
 /**
  * F276 status-answer guard.
@@ -126,6 +102,13 @@ function unavailableContext(
  * The resolver detects typed F276 cards from persisted message metadata and
  * reads their current owner-scoped candidates before every model invocation.
  * Historical card metadata is deliberately ignored after candidate discovery.
+ *
+ * What it says follows the cards it finds, never the wording of the prompt: no
+ * card in the window, no block. The per-turn history digest names the proposal
+ * and the live status tool on each card it renders
+ * (personMemoryProposalCardPointer). Not covered: card text already frozen in a
+ * live session (accepted by the owner on 2026-11-16), and cards that arrive
+ * through forwarded or quoted message bundles or message-read tools.
  */
 export class PersonMemoryProposalStatusContextResolver {
   constructor(
@@ -142,14 +125,12 @@ export class PersonMemoryProposalStatusContextResolver {
         artifactProjection: true,
       });
     } catch {
-      return unavailableContext('message_history_unavailable');
+      return `人物记忆提案：本轮没读到线程历史（reason=message_history_unavailable），这里给不出现状；要答这类提案的状态，用 proposalId 调 ${PERSON_MEMORY_PROPOSAL_STATUS_TOOL} 查。`;
     }
 
     const proposals = proposalReferencesFromMessages(messages);
-    if (proposals.length === 0) {
-      return looksLikeProposalStatusQuestion(currentPrompt) ? unavailableContext('candidate_unavailable') : '';
-    }
-    const { selected, matchedPrompt } = rankProposalReferences(proposals, currentPrompt);
+    if (proposals.length === 0) return '';
+    const selected = rankProposalReferences(proposals, currentPrompt);
 
     const lines = await Promise.all(
       selected.map(async ({ candidateId, subjectDisplayName }) => {
@@ -172,15 +153,10 @@ export class PersonMemoryProposalStatusContextResolver {
         }
       }),
     );
-    if (currentPrompt && !matchedPrompt && looksLikeProposalStatusQuestion(currentPrompt)) {
-      lines.unshift('- requestedProposal=not_available reason=no_deterministic_subject_match_in_bounded_discovery');
-    }
-
     return [
-      '## F276 权威提案状态（服务端实时投影）',
+      HEADING,
       ...lines,
-      '- 以上 liveStatus 来自本轮 invocation 前的 owner-private store，覆盖聊天卡片和历史回复里的旧状态。',
-      '- 历史卡片状态不得作为当前状态；未列出或 not_available 的提案不得从聊天记录推断。',
+      `- 以上是本轮刚读到的现状；聊天里的旧卡片、旧回复与它不一致时以这里为准。没列出或 not_available 的提案，用 proposalId 调 ${PERSON_MEMORY_PROPOSAL_STATUS_TOOL} 查。`,
     ].join('\n');
   }
 }

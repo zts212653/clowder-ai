@@ -1,7 +1,7 @@
 import { executedInvocations } from './lib/shell-invocation.mjs';
 import { leadingShellControl, nativeBuiltinContext } from './lib/shell-program-tokens.mjs';
 import { isExactNonRecursiveCopy } from './native-effect-media-classifier.mjs';
-import { segmentCommandText } from './native-effect-segment-locations.mjs';
+import { isShellStructure, segmentCommandText } from './native-effect-segment-locations.mjs';
 import { classifyShellSegment, splitShellExecutionSegmentsWithSeparators } from './native-effect-shell-classifier.mjs';
 import { isLocalProgramBinding, isShellBinding } from './native-effect-shell-expansion.mjs';
 import { shellInvocation } from './native-effect-shell-tokenizer.mjs';
@@ -31,18 +31,45 @@ export function copyNamespaceStability(units, initial = true, programContexts = 
   });
 }
 
+function unitPreservesProgramNamespace(segment, stable) {
+  if (isShellStructure(segment)) return true;
+  if (/^\s*(?:(?:do|then|else|elif)\s+)*(?:function\b|[A-Za-z_]\w*\s*\(\s*\))/.test(segment)) return false;
+  const control = leadingShellControl(segment);
+  if (control === 'for') return isLocalProgramBinding(segment);
+  if (control && !['do', 'then', 'else', 'elif'].includes(control)) return false;
+  const command = segmentCommandText(segment);
+  return (
+    isLocalProgramBinding(command) ||
+    (!isShellBinding(command) &&
+      (!command.trim() ||
+        (classifyShellSegment(command, { builtinContext: stable }) === 'read' &&
+          segmentPreservesCopyNamespace(command, stable))))
+  );
+}
+
 /** Filesystem topology and command environment are separate observations. */
 export function programNamespaceStability(units, initial = true) {
   let stable = nativeBuiltinContext(initial);
+  const firstLoopIndex = units.findIndex(({ segment }) =>
+    ['for', 'while', 'until'].includes(leadingShellControl(segment)),
+  );
+  if (firstLoopIndex >= 0) {
+    let loopStable = stable;
+    for (let i = firstLoopIndex; i < units.length; i++) {
+      loopStable &&= unitPreservesProgramNamespace(units[i].segment, loopStable);
+    }
+    if (!loopStable) {
+      return units.map(({ segment }, index) => {
+        if (index >= firstLoopIndex) return false;
+        const before = stable;
+        stable &&= unitPreservesProgramNamespace(segment, stable);
+        return before;
+      });
+    }
+  }
   return units.map(({ segment }) => {
     const before = stable;
-    stable &&=
-      !leadingShellControl(segment) &&
-      (isLocalProgramBinding(segment) ||
-        (!isShellBinding(segment) &&
-          (!segment.trim() ||
-            (classifyShellSegment(segment, { builtinContext: stable }) === 'read' &&
-              segmentPreservesCopyNamespace(segment, stable)))));
+    stable &&= unitPreservesProgramNamespace(segment, stable);
     return before;
   });
 }

@@ -172,6 +172,20 @@ describe('ExecutionRow (F322 original-B)', () => {
     expect($('execution-row-force-reset')).not.toBeNull();
   });
 
+  it('names a watcher run and shows the designed eye badge instead of ordinary work', async () => {
+    seed({ executions: [run('opus', { executionKind: 'watcher' })] });
+    await render();
+    expect($('execution-row-text')?.textContent).toContain('守望查看');
+    expect(container.querySelector('[data-watcher="true"] svg')).not.toBeNull();
+    expect(container.querySelector('[data-testid="execution-row-stop"]')).not.toBeNull();
+  });
+
+  it('keeps the watcher role in the compact row when all three members are observing', async () => {
+    seed({ executions: ['opus', 'sol', 'terra'].map((id) => run(id, { executionKind: 'watcher' })) });
+    await render();
+    expect($('execution-row-text-compact')?.textContent).toBe('守望查看');
+  });
+
   it('1  ■ stops the single live run through the same cancel endpoint and body, then re-reads executions', async () => {
     seed({ executions: [run('opus')] });
     await render();

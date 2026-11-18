@@ -64,7 +64,7 @@ async function fixture(t) {
         status: 'ok',
         model: state.model,
         backend: 'qwen3-clone',
-        capabilities: ['speech-stream-route-v1'],
+        capabilities: ['speech-stream-route-v1', 'reference-audio-content-v1'],
         ...(state.profile ? { generation_profile: state.profile } : {}),
       });
       if (state.delay && req.headers['x-tts-test-worker'] === 'slow-old') {
@@ -89,9 +89,14 @@ async function fixture(t) {
       return;
     }
     state.posts++;
-    req.resume();
+    const chunks = [];
+    for await (const chunk of req) chunks.push(chunk);
+    const input = JSON.parse(Buffer.concat(chunks).toString());
     res.writeHead(200, {
       'content-type': 'application/x-ndjson',
+      ...(input.ref_audio_base64
+        ? { 'x-tts-reference-status': 'used', 'x-tts-reference-sha256': input.ref_audio_sha256 }
+        : {}),
       ...(state.profile ? { 'x-tts-generation-profile': state.profile } : {}),
     });
     res.end(

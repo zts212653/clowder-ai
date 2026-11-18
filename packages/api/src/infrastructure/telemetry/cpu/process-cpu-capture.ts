@@ -1,5 +1,5 @@
 import type { FastifyBaseLogger } from 'fastify';
-import { tryAcquireCpuProfiler } from './cpu-profiler-lease.js';
+import { acquireCpuProfiler } from './cpu-profiler-lease.js';
 import { savePrivateCpuProfile } from './private-cpu-profile.js';
 import { projectProcessCpuProfile } from './process-cpu-profile.js';
 import {
@@ -52,6 +52,7 @@ function arm({ dataDir, logger }: Options): Handle {
   let highWindows = 0;
   let closed = false;
   let active: Promise<void> | undefined;
+  let acquiring = false;
   const shutdown = new AbortController();
   const timer = setInterval(() => {
     if (closed) return;
@@ -72,12 +73,20 @@ function arm({ dataDir, logger }: Options): Handle {
     const elu = activeMs + idleMs > 0 ? activeMs / (activeMs + idleMs) : 0;
     previous = current;
     highWindows = cpu >= 0.7 || elu >= 0.65 ? highWindows + 1 : 0;
-    if (highWindows < 2) return;
-    const release = tryAcquireCpuProfiler();
-    if (!release) return; // Leave an existing route profile alone; no second session or consumed recording.
-    closed = true;
-    clearInterval(timer);
-    active = capture(dataDir, logger, shutdown.signal, { cpuRatio: cpu, elu, highWindows }).finally(release);
+    if (highWindows < 2 || acquiring) return;
+    acquiring = true;
+    active = (async () => {
+      const release = await acquireCpuProfiler();
+      acquiring = false;
+      if (!release) return; // No second foreground session or consumed recording.
+      if (closed) {
+        release();
+        return;
+      }
+      closed = true;
+      clearInterval(timer);
+      await capture(dataDir, logger, shutdown.signal, { cpuRatio: cpu, elu, highWindows }).finally(release);
+    })();
   }, POLL_MS);
   timer.unref();
   emit(logger, { status: 'armed', armLimitMs: ARM_LIMIT_MS, requiredHighWindows: 2 });

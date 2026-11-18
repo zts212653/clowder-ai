@@ -1,5 +1,6 @@
 // F102: SQLite implementation of IEvidenceStore
 
+import { randomUUID } from 'node:crypto';
 import { basename, isAbsolute, relative, resolve } from 'node:path';
 import type { EntityConflictContext, EntityConflictResolutionRequest } from '@cat-cafe/shared';
 import { type ReadRef, readRefFromDrillDown } from '@cat-cafe/shared';
@@ -36,6 +37,7 @@ import { searchMessagePassages } from './message-passage-search.js';
 import type { MessagePassageSearchExecution, MessagePassageSearchOptions } from './message-passage-search-types.js';
 import { readMessagePassageState } from './message-passage-state.js';
 import { normalizeMessageSearchDates } from './message-search-dates.js';
+import { readWithMessageVectorBudget } from './message-vector-budget.js';
 import { applyMMR } from './mmr.js';
 import { type PassageVectorStore, parsePassageVectorKey, passageVectorKey } from './PassageVectorStore.js';
 import { withProjectionCheckpoints } from './projection-checkpoints.js';
@@ -46,10 +48,12 @@ import { repackPassageVectors, type VectorRepackResult } from './repack-passage-
 import { applyMigrations } from './schema.js';
 import { createSearchEmbeddingCapability, type SearchEmbeddingCapability } from './search-embedding-capability.js';
 import type { VectorStore } from './VectorStore.js';
+import { vectorIdentityMatches } from './vector-generation-identity.js';
 import {
   generationInvalidationCurrent,
   generationInvalidationState,
   prepareGenerationInvalidationConnection,
+  quarantineRecoveredSince,
 } from './vector-generation-invalidation.js';
 import {
   type VectorGenerationId,
@@ -59,7 +63,10 @@ import {
 import { createVectorInvalidator } from './vector-invalidation.js';
 import {
   describeVectorSearchFailure,
+  publishVectorReadRepeat,
   publishVectorSearchDegrade,
+  type VectorReadRepeatOutcome,
+  type VectorReadRepeatRecord,
   type VectorSearchDegradeRecord,
   type VectorSearchDegradeStage,
 } from './vector-search-degrade-report.js';
@@ -89,6 +96,56 @@ function applyTemporalStatusPenalty(results: EvidenceItem[]): void {
   if (results.length < 2) return;
   results.sort((a, b) => Number(hasTemporalPenalty(a)) - Number(hasTemporalPenalty(b)));
 }
+
+/**
+ * The least time a repeated vector read is given. A first attempt that failed before it read any
+ * vector can be over in milliseconds, and twice a few milliseconds is inside scheduling jitter: on
+ * the test fixture, on a loaded machine, 3 repeats of 8 on an already started worker took longer
+ * than twice their first attempt (90 against 29 ms, 199 against 16, 32 against 13). A repeat that
+ * its window stops also costs a read worker, which the next read has to start again.
+ */
+const REPEAT_FLOOR_MS = 1_000;
+
+/**
+ * The read pool counts a job as running until its completion has propagated, and sends the next
+ * job to the process with fewer. A read dispatched in the tick its predecessor settles would
+ * therefore go to the other process. One turn of the event loop lets the pool see the predecessor
+ * as finished. At equal load the pool prefers a running worker (MemoryProcess.runMemoryRead),
+ * usually the one that just served this search. A fork costs about 0.2 s on an idle machine and
+ * may use a whole repeat window on a busy one; lower load still takes priority over warmth.
+ */
+const readPoolSettled = () => new Promise<void>((resolve) => setImmediate(resolve));
+
+interface SearchProjectionLease {
+  embedding: SearchEmbeddingCapability;
+  /** The snapshot still describes the bound projection. Unlike the capability's own checks, asking leaves no trace. */
+  current(): boolean;
+  /**
+   * The capability refused a call made on behalf of the read: the fence itself took the vectors
+   * away. A worker that fell back for another reason, such as a provider error, never gets here.
+   */
+  rejectedByFence(): boolean;
+  /**
+   * The source epoch moved since the snapshot: canonical rows may have changed, so rows read
+   * before now may be stale. A projection that was only unbound or replaced leaves it alone.
+   */
+  sourceMoved(): boolean;
+  /**
+   * The same projection is still bound, was not quarantined at any point since the snapshot, and
+   * the source epoch moved. A quarantine and its recovery move the epoch too and are not this.
+   */
+  retiredBySourceWrite(): boolean;
+}
+type ProjectionReadJob = Extract<MemoryProcessJob, { kind: 'search' | 'message-search' }>;
+type ProjectionReadOptions = Pick<SearchOptions, 'signal' | 'deadlineAt'> &
+  Pick<MessagePassageSearchOptions, 'onReadSnapshot'>;
+type ProjectionReadAttempt<T> = {
+  /** The worker itself returned a lexical result. */
+  fellBack: boolean;
+  lease?: SearchProjectionLease;
+  degrades: VectorSearchDegradeRecord[];
+  elapsedMs: number;
+} & ({ value: T } | { error: unknown });
 
 function throwIfSearchCancelled(options?: SearchOptions): void {
   options?.signal?.throwIfAborted();
@@ -156,6 +213,8 @@ export interface SqliteEvidenceStoreOptions {
   readDiagnostics?: (db: Database.Database) => () => void;
   /** @internal The read worker forwards a degrade over its IPC; other stores publish it in-process. */
   onVectorSearchDegrade?: (record: VectorSearchDegradeRecord) => void;
+  /** @internal Read-worker control event, independent of optional SQL diagnostics. */
+  onMessageVectorStart?: () => void | Promise<void>;
 }
 
 interface SearchFilterContext {
@@ -190,6 +249,7 @@ export class SqliteEvidenceStore implements IEvidenceStore {
   private readonly workerMode?: 'read';
   private readonly readDiagnostics?: SqliteEvidenceStoreOptions['readDiagnostics'];
   private readonly onVectorSearchDegrade: (record: VectorSearchDegradeRecord) => void;
+  private readonly onMessageVectorStart?: SqliteEvidenceStoreOptions['onMessageVectorStart'];
   private detachReadDiagnostics?: () => void;
   private initialization?: Promise<void>;
   private sourceRoot?: string;
@@ -203,6 +263,7 @@ export class SqliteEvidenceStore implements IEvidenceStore {
     this.workerMode = options?.workerMode;
     this.readDiagnostics = options?.readDiagnostics;
     this.onVectorSearchDegrade = options?.onVectorSearchDegrade ?? publishVectorSearchDegrade;
+    this.onMessageVectorStart = options?.onMessageVectorStart;
     this.embedDeps = embedDeps;
     this.sourceRoot = options?.sourceRoot ? resolve(options.sourceRoot) : undefined;
     this.sourceRef = options?.sourceRoot ? options.sourceRef : undefined;
@@ -215,36 +276,82 @@ export class SqliteEvidenceStore implements IEvidenceStore {
 
   /** @internal Only the successful preparation transaction may publish its generation. */
   invalidateVectorProjection(): () => void {
-    const projection = { ready: false };
-    this.vectorProjection = projection;
-    return () => {
-      if (this.vectorProjection === projection) projection.ready = true;
+    const preparation = this.captureVectorProjectionPreparation();
+    preparation.invalidate();
+    return preparation.publish;
+  }
+
+  /** @internal No-op validation retains borrowed searches; mutation or failure retires them once. */
+  captureVectorProjectionPreparation(): { invalidate(): void; publish(): void } {
+    let projection = this.vectorProjection;
+    let invalidated = false;
+    return {
+      invalidate: () => {
+        // A queued, retired producer cannot withdraw a newer binding's publication.
+        if (invalidated || this.vectorProjection !== projection) return;
+        invalidated = true;
+        projection = { ready: false };
+        this.vectorProjection = projection;
+      },
+      publish: () => {
+        if (this.vectorProjection === projection) projection.ready = true;
+      },
+    };
+  }
+
+  /** One snapshot of the bound projection: the capability a search borrows, and why it stopped being current. */
+  private searchProjection(): SearchProjectionLease | undefined {
+    const deps = this.embedDeps;
+    if (!deps) return undefined;
+    const projection = this.vectorProjection;
+    const tables = deps.vectorStore.tables ?? vectorGenerationTables();
+    const captured = generationInvalidationState(this.getDb(), tables);
+    // A queued no-op preparation keeps this publication alive. The provider can still
+    // change while it waits: local searches need the same identity check as read workers.
+    const model = deps.embedding.getModelInfo();
+    const modelSignature = JSON.stringify(model);
+    const matchingModel = vectorIdentityMatches(this.getDb(), model);
+    const bound = () =>
+      this.embedDeps === deps &&
+      this.vectorProjection === projection &&
+      projection.ready &&
+      matchingModel &&
+      JSON.stringify(deps.embedding.getModelInfo()) === modelSignature;
+    const current = () => bound() && generationInvalidationCurrent(this.getDb(), tables, captured);
+    let rejected = false;
+    return {
+      embedding: createSearchEmbeddingCapability(deps.embedding, () => {
+        const ok = current();
+        if (!ok) rejected = true;
+        return ok;
+      }),
+      current,
+      rejectedByFence: () => rejected,
+      sourceMoved: () => {
+        try {
+          return generationInvalidationState(this.getDb(), tables).epoch !== captured.epoch;
+        } catch {
+          return true;
+        }
+      },
+      retiredBySourceWrite: () => {
+        if (!bound() || captured.quarantined) return false;
+        try {
+          const now = generationInvalidationState(this.getDb(), tables);
+          return (
+            !now.quarantined &&
+            now.epoch !== captured.epoch &&
+            !quarantineRecoveredSince(this.getDb(), tables, captured)
+          );
+        } catch {
+          return false;
+        }
+      },
     };
   }
 
   private searchEmbedding(): SearchEmbeddingCapability | undefined {
-    const deps = this.embedDeps;
-    const projection = this.vectorProjection;
-    const invalidation = deps
-      ? generationInvalidationState(this.getDb(), deps.vectorStore.tables ?? vectorGenerationTables())
-      : undefined;
-    return deps
-      ? createSearchEmbeddingCapability(
-          deps.embedding,
-          () =>
-            this.embedDeps === deps &&
-            this.vectorProjection === projection &&
-            projection.ready &&
-            Boolean(
-              invalidation &&
-                generationInvalidationCurrent(
-                  this.getDb(),
-                  deps.vectorStore.tables ?? vectorGenerationTables(),
-                  invalidation,
-                ),
-            ),
-        )
-      : undefined;
+    return this.searchProjection()?.embedding;
   }
 
   /** @internal Bind relative sourcePath values to the scanner/collection root that produced them. */
@@ -383,27 +490,54 @@ export class SqliteEvidenceStore implements IEvidenceStore {
     const normalized = normalizeMessageSearchDates(options);
     if (this.usesIsolatedProcesses()) {
       const {
-        signal,
+        signal: _signal,
         onReadSnapshot,
         onCjkRead: _onCjkRead,
         onCandidateAudit: _onCandidateAudit,
         ...serialized
       } = normalized;
-      serialized.deadlineAt ??= Date.now() + 15_000;
-      return this.runProjectionRead<MessagePassageSearchExecution>(
-        {
-          kind: 'message-search',
-          dbPath: this.dbPath,
-          query,
-          options: serialized,
-          flags: memorySearchFlags(),
-        },
-        { signal, deadlineAt: serialized.deadlineAt, onReadSnapshot },
-        (value) => value,
-      );
+      const deadlineAt = serialized.deadlineAt ?? Date.now() + 15_000;
+      serialized.deadlineAt = deadlineAt;
+      serialized.requestDeadlineAt ??= deadlineAt;
+      // The budget may cancel an inner repeat and then read lexically with the original caller
+      // signal. Only this outer owner knows whether the complete message search actually ended.
+      let repeatRecord: VectorReadRepeatRecord | undefined;
+      const publishFinalRepeat = (outcome?: VectorReadRepeatOutcome) => {
+        if (repeatRecord) publishVectorReadRepeat({ ...repeatRecord, outcome: outcome ?? repeatRecord.outcome });
+      };
+      try {
+        const execution = await readWithMessageVectorBudget(
+          { ...normalized, deadlineAt },
+          (mode, readSignal, vectorStarted, vectorFinished) =>
+            this.runProjectionRead<MessagePassageSearchExecution>(
+              {
+                kind: 'message-search',
+                dbPath: this.dbPath,
+                query,
+                options: { ...serialized, mode },
+                flags: memorySearchFlags(),
+              },
+              { signal: readSignal, deadlineAt, onReadSnapshot },
+              (value) => value,
+              vectorStarted,
+              vectorFinished,
+              (record) => {
+                repeatRecord = record;
+              },
+            ),
+        );
+        publishFinalRepeat(
+          execution.meta.degradeReason === 'passage_vector_budget_exhausted' ? 'vector_budget_exhausted' : undefined,
+        );
+        return execution;
+      } catch (error) {
+        publishFinalRepeat(normalized.signal?.aborted || Date.now() >= deadlineAt ? 'cancelled' : 'lexical_failed');
+        throw error;
+      }
     }
     return searchMessagePassages(query, normalized, {
       db: this.getDb(),
+      vectorStarted: this.onMessageVectorStart,
       isEmbeddingAvailable: () => this.isPassageEmbeddingAvailable(normalized),
       semanticSearch: (limit, audit) => this.semanticPassageNNSearch(query, limit, normalized, audit),
       hybridSearch: (lexical, limit, accept, compare, audit) =>
@@ -412,30 +546,182 @@ export class SqliteEvidenceStore implements IEvidenceStore {
     });
   }
 
-  /** The parent owns projection lifetime through final worker publication, not just RPC. */
+  /**
+   * The parent owns projection lifetime through final worker publication, not just RPC.
+   *
+   * One snapshot fences the whole read: any source write before publication retires it, because a
+   * worker result may pair old geometry with newly hydrated bodies, or hold a hit that was just
+   * withdrawn. That fence is unchanged. What changed is what follows a retirement caused by a
+   * source write alone: the search is read once more under a new snapshot. The repeat may take
+   * twice the first attempt's duration, but at least REPEAT_FLOOR_MS, and never runs past the
+   * caller's deadline; it starts only if that window plus one more first-attempt duration, kept
+   * for the lexical read, is still left. Every other outcome takes the lexical read below, which
+   * re-reads the store, so a result from before the repeat is never returned after it.
+   */
   private async runProjectionRead<T>(
-    job: Extract<MemoryProcessJob, { kind: 'search' | 'message-search' }>,
-    options: Pick<SearchOptions, 'signal' | 'deadlineAt'> & Pick<MessagePassageSearchOptions, 'onReadSnapshot'>,
+    job: ProjectionReadJob,
+    options: ProjectionReadOptions,
     executionOf: (value: T) => { meta: SearchExecutionMeta },
+    onVectorStart?: () => void,
+    onVectorFinish?: () => void,
+    reportRepeat?: typeof publishVectorReadRepeat,
   ): Promise<T> {
-    const snapshot = this.processEmbeddingSnapshot();
-    const embedding = snapshot ? this.searchEmbedding() : undefined;
-    const value = await runMemoryRead<T>({ ...job, embedding: snapshot }, { ...options, embedding });
-    const mode = job.options?.mode ?? (job.kind === 'message-search' ? 'hybrid' : 'lexical');
-    throwIfSearchCancelled(options);
-    // A worker that already fell back discarded vector candidates and ranking.
-    // Its lexical result does not borrow the retired geometry.
-    if (
-      mode === 'lexical' ||
-      executionOf(value).meta.effectiveMode === 'lexical' ||
-      !embedding ||
-      embedding.isCurrent()
-    )
-      return value;
+    try {
+      return await this.readProjection(job, options, executionOf, onVectorStart, onVectorFinish, reportRepeat);
+    } finally {
+      onVectorFinish?.();
+    }
+  }
 
-    // A retired worker result may contain old geometry with newly hydrated
-    // source bodies. Discard it and use the existing lexical consumer once,
-    // preserving the original absolute deadline, grants, filters and signal.
+  private async readProjection<T>(
+    job: ProjectionReadJob,
+    options: ProjectionReadOptions,
+    executionOf: (value: T) => { meta: SearchExecutionMeta },
+    onVectorStart?: () => void,
+    onVectorFinish?: () => void,
+    reportRepeat = publishVectorReadRepeat,
+  ): Promise<T> {
+    const mode = job.options?.mode ?? (job.kind === 'message-search' ? 'hybrid' : 'lexical');
+    // A message search's vector budget (message-vector-budget) spans every vector read of the
+    // search, the repeat included, and is closed before any lexical read starts.
+    const lexicalRead = async (degradeReason?: SearchExecutionMeta['degradeReason']) => {
+      onVectorFinish?.();
+      await readPoolSettled();
+      return this.lexicalProjectionRead(job, options, executionOf, degradeReason);
+    };
+    const report = (
+      attempt: ProjectionReadAttempt<T>,
+      tag?: Pick<VectorSearchDegradeRecord, 'operationId' | 'attempt'>,
+    ) => {
+      for (const record of attempt.degrades) this.onVectorSearchDegrade(tag ? { ...record, ...tag } : record);
+    };
+    const retiredAtPublication = (attempt: ProjectionReadAttempt<T>) =>
+      !attempt.fellBack && Boolean(attempt.lease) && !attempt.lease!.current();
+    const publicationRecord = () =>
+      describeVectorSearchFailure('projection_publication', new Error('Vector projection is not ready'));
+
+    const first = await this.attemptProjectionRead<T>(job, options, executionOf, onVectorStart);
+    if ('error' in first) {
+      report(first);
+      throw first.error;
+    }
+    // Lost to a source write means the fence took the vectors away, and nothing but a write moved
+    // it. The fence took them when it refused a call during the read, or refuses the result now.
+    const lostToSourceWrite =
+      mode !== 'lexical' &&
+      Boolean(first.lease?.retiredBySourceWrite()) &&
+      (retiredAtPublication(first) || (first.fellBack && first.lease!.rejectedByFence()));
+    if (!lostToSourceWrite) {
+      report(first);
+      throwIfSearchCancelled(options);
+      if (mode === 'lexical' || !first.lease) return first.value;
+      // A worker that already fell back discarded vector candidates and ranking; its lexical result
+      // borrows no retired geometry and is published as it is, unless sources were written while it
+      // read. Then its rows may predate the write: answer from a read that starts now, with the
+      // worker's own reason for degrading.
+      if (first.fellBack)
+        return first.lease.sourceMoved() ? lexicalRead(executionOf(first.value).meta.degradeReason) : first.value;
+      if (first.lease.current()) return first.value;
+      this.onVectorSearchDegrade(publicationRecord());
+      return lexicalRead();
+    }
+
+    const operationId = randomUUID();
+    report(first, { operationId, attempt: 1 });
+    if (!first.fellBack) this.onVectorSearchDegrade({ ...publicationRecord(), operationId, attempt: 1 });
+    const finish = (outcome: VectorReadRepeatOutcome, repeatMs: number | null = null) =>
+      reportRepeat({ operationId, outcome, firstAttemptMs: first.elapsedMs, repeatMs });
+    const finishWithLexicalRead = async (outcome: VectorReadRepeatOutcome, repeatMs: number | null = null) => {
+      try {
+        const value = await lexicalRead();
+        finish(outcome, repeatMs);
+        return value;
+      } catch (error) {
+        const cancelled = options.signal?.aborted || (options.deadlineAt != null && Date.now() >= options.deadlineAt);
+        finish(cancelled ? 'cancelled' : 'lexical_failed', repeatMs);
+        rethrowIfSearchCancelled(options, error);
+        throw error;
+      }
+    };
+    await readPoolSettled();
+    if (options.signal?.aborted || (options.deadlineAt != null && Date.now() >= options.deadlineAt)) {
+      finish('cancelled');
+      throwIfSearchCancelled(options);
+    }
+    const remainingMs = options.deadlineAt == null ? Number.POSITIVE_INFINITY : options.deadlineAt - Date.now();
+    const repeatWindowMs = Math.max(2 * first.elapsedMs, REPEAT_FLOOR_MS);
+    // Lifecycle and writer events can run while the pool settles. Eligibility belongs to the
+    // original lease; a newly healthy replacement cannot inherit its permission to repeat.
+    const skipped: VectorReadRepeatOutcome | undefined =
+      !first.lease?.retiredBySourceWrite() || !this.processEmbeddingSnapshot()?.ready
+        ? 'skipped_unavailable'
+        : remainingMs < repeatWindowMs + first.elapsedMs
+          ? 'skipped_budget'
+          : undefined;
+    if (skipped) {
+      return finishWithLexicalRead(skipped);
+    }
+
+    const softDeadline = Math.min(options.deadlineAt ?? Number.POSITIVE_INFINITY, Date.now() + repeatWindowMs);
+    const second = await this.attemptProjectionRead<T>(
+      { ...job, options: { ...job.options, deadlineAt: softDeadline } } as ProjectionReadJob,
+      { ...options, deadlineAt: softDeadline },
+      executionOf,
+      onVectorStart,
+    );
+    report(second, { operationId, attempt: 2 });
+    const stoppedByCaller = options.signal?.aborted || (options.deadlineAt != null && Date.now() >= options.deadlineAt);
+    if (stoppedByCaller) {
+      finish('cancelled', second.elapsedMs);
+      if ('error' in second) rethrowIfSearchCancelled(options, second.error);
+      throwIfSearchCancelled(options);
+    }
+    if ('error' in second) return finishWithLexicalRead('repeat_stopped', second.elapsedMs);
+    if (!second.fellBack && !retiredAtPublication(second)) {
+      finish('recovered', second.elapsedMs);
+      return second.value;
+    }
+    if (!second.fellBack) this.onVectorSearchDegrade({ ...publicationRecord(), operationId, attempt: 2 });
+    // Also when the repeat's worker fell back by itself: its lexical rows were read during the
+    // repeat, before whatever retired it. Only a read started now is returned.
+    return finishWithLexicalRead('degraded_again', second.elapsedMs);
+  }
+
+  /** One worker read under one projection snapshot. Degrade reports are held for the caller to publish. */
+  private async attemptProjectionRead<T>(
+    job: ProjectionReadJob,
+    options: ProjectionReadOptions,
+    executionOf: (value: T) => { meta: SearchExecutionMeta },
+    onVectorStart?: () => void,
+  ): Promise<ProjectionReadAttempt<T>> {
+    const snapshot = this.processEmbeddingSnapshot();
+    const lease = snapshot ? this.searchProjection() : undefined;
+    const degrades: VectorSearchDegradeRecord[] = [];
+    const startedAt = Date.now();
+    try {
+      const value = await runMemoryRead<T>(
+        { ...job, embedding: snapshot },
+        { ...options, embedding: lease?.embedding, onVectorStart, onVectorDegrade: (record) => degrades.push(record) },
+      );
+      return {
+        value,
+        fellBack: executionOf(value).meta.effectiveMode === 'lexical',
+        lease,
+        degrades,
+        elapsedMs: Date.now() - startedAt,
+      };
+    } catch (error) {
+      return { error, fellBack: false, lease, degrades, elapsedMs: Date.now() - startedAt };
+    }
+  }
+
+  /** The existing lexical consumer, once, under the original absolute deadline, grants, filters and signal. */
+  private async lexicalProjectionRead<T>(
+    job: ProjectionReadJob,
+    options: ProjectionReadOptions,
+    executionOf: (value: T) => { meta: SearchExecutionMeta },
+    degradeReason: SearchExecutionMeta['degradeReason'] = 'passage_embedding_unavailable',
+  ): Promise<T> {
     const lexicalJob: typeof job =
       job.kind === 'message-search'
         ? { ...job, options: { ...job.options, mode: 'lexical' }, embedding: undefined }
@@ -447,7 +733,7 @@ export class SqliteEvidenceStore implements IEvidenceStore {
       ...execution.meta,
       degraded: true,
       effectiveMode: 'lexical',
-      degradeReason: 'passage_embedding_unavailable',
+      degradeReason,
     };
     return fallback;
   }

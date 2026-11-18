@@ -4,6 +4,7 @@ import { activeExecutionKey } from '@/stores/activeExecutionStore';
 import { CatAvatar } from '../CatAvatar';
 import { ExecutionCancelButton } from '../ExecutionCancelButton';
 import { useShellCopy } from '../shell/shell-copy';
+import { SuggestionAvatar } from '../suggestions/SuggestionAvatar';
 import { type ExecutionRowWords, executionRowCopy } from './execution-row.shell-copy';
 /**
  * F322 original-B: what opens under the one row. It overlays the conversation (the caller positions it) and
@@ -44,7 +45,9 @@ function RunningSection({ controller, words }: { controller: ExecutionRowControl
           const what =
             execution.kind === 'managed_command'
               ? words.activity[execution.activity ?? 'command']
-              : words.panel.realtime;
+              : execution.executionKind === 'watcher'
+                ? words.panel.watcher
+                : words.panel.realtime;
           return (
             <li
               key={activeExecutionKey(execution)}
@@ -57,7 +60,11 @@ function RunningSection({ controller, words }: { controller: ExecutionRowControl
                 aria-label={`${words.actions.locate}: ${resolveCatName(execution.catId)} ${what}`}
                 className="shell-focusable flex min-w-0 flex-1 items-center gap-2 text-left"
               >
-                <CatAvatar catId={execution.catId} size={18} />
+                {execution.executionKind === 'watcher' ? (
+                  <SuggestionAvatar catId={execution.catId} watcher />
+                ) : (
+                  <CatAvatar catId={execution.catId} size={18} />
+                )}
                 <span className="truncate font-medium text-cafe-secondary">{resolveCatName(execution.catId)}</span>
                 <span className="text-cafe-muted">{what}</span>
                 {quiet ? <span className="text-conn-amber-text">{words.panel.quiet}</span> : null}

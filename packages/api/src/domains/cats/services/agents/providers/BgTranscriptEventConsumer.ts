@@ -126,6 +126,8 @@ export interface UsageAccumulator {
   outputTokens: number | undefined;
   cacheRead: number | undefined;
   cacheCreation: number | undefined;
+  cacheCreation5m?: number;
+  cacheCreation1h?: number;
   /** Total input observed on the most recent real assistant/API turn. */
   lastTurnInputTokens: number | undefined;
   assistantTurnCount: number;
@@ -189,6 +191,15 @@ export function accumulateUsageFromEntries(acc: UsageAccumulator, entries: unkno
           acc.cacheRead = (acc.cacheRead ?? 0) + usage.cache_read_input_tokens;
         if (typeof usage.cache_creation_input_tokens === 'number')
           acc.cacheCreation = (acc.cacheCreation ?? 0) + usage.cache_creation_input_tokens;
+        const creation = usage.cache_creation as Record<string, unknown> | undefined;
+        for (const [rawTier, field] of [
+          ['ephemeral_5m_input_tokens', 'cacheCreation5m'],
+          ['ephemeral_1h_input_tokens', 'cacheCreation1h'],
+        ] as const) {
+          const value = creation?.[rawTier];
+          if (typeof value === 'number' && Number.isSafeInteger(value) && value >= 0)
+            acc[field] = (acc[field] ?? 0) + value;
+        }
       }
       continue;
     }
@@ -213,11 +224,17 @@ export function finalizeTranscriptUsage(acc: UsageAccumulator, terminalMeta?: Te
   // Cloud codex round-14 P2: only include token fields when observed.
   // Synthetic event's `usage.output_tokens: 0` would be read by
   // extractClaudeUsage as real telemetry, skewing cost dashboards.
-  const usageField: Record<string, number> = {};
+  const usageField: Record<string, unknown> = {};
   if (acc.rawInput != null) usageField.input_tokens = acc.rawInput;
   if (acc.outputTokens != null) usageField.output_tokens = acc.outputTokens;
   if (acc.cacheRead != null) usageField.cache_read_input_tokens = acc.cacheRead;
   if (acc.cacheCreation != null) usageField.cache_creation_input_tokens = acc.cacheCreation;
+  if (acc.cacheCreation5m !== undefined || acc.cacheCreation1h !== undefined) {
+    usageField.cache_creation = {
+      ...(acc.cacheCreation5m !== undefined ? { ephemeral_5m_input_tokens: acc.cacheCreation5m } : {}),
+      ...(acc.cacheCreation1h !== undefined ? { ephemeral_1h_input_tokens: acc.cacheCreation1h } : {}),
+    };
+  }
   const syntheticResult: Record<string, unknown> = {
     type: 'result',
     subtype: 'success',

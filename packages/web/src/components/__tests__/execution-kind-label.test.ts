@@ -14,6 +14,11 @@ describe('execution kind labels shared by the execution bar and 正在发生', (
     expect(executionActivityLabel({ kind: 'managed_command', activity: 'full_gate' })).toBe('托管命令 · 全量门禁');
   });
 
+  it('names a canonical watcher turn separately from ordinary live work', () => {
+    expect(executionActivityLabel({ kind: 'live_invocation', executionKind: 'watcher' })).toBe('守望查看');
+    expect(executionActivityLabel({ kind: 'live_invocation', executionKind: 'ordinary' })).toBe('实时回合');
+  });
+
   it('does not repeat 托管命令 when the activity is the generic command or unknown', () => {
     expect(executionActivityLabel({ kind: 'managed_command', activity: 'command' })).toBe('托管命令');
     expect(executionActivityLabel({ kind: 'managed_command' })).toBe('托管命令');

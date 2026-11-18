@@ -43,6 +43,12 @@ export function isLocalProgramBinding(text, env = process.env) {
     return false;
   // Positional values are local data; setting them does not change program lookup.
   if (words[0].value === 'set' && words[1]?.value === '--') return true;
+  if (words[0].value === 'for' && words.length >= 4 && words[2]?.value === 'in') {
+    const loopVar = words[1]?.value ?? '';
+    return Boolean(
+      /^[A-Za-z_]\w*$/.test(loopVar) && !Object.hasOwn(env, loopVar) && !PROGRAM_ENVIRONMENT.test(loopVar),
+    );
+  }
   return words.every(({ value }) => {
     const name = value.match(/^([A-Za-z_]\w*)=/)?.[1];
     return Boolean(name && !Object.hasOwn(env, name) && !PROGRAM_ENVIRONMENT.test(name));
@@ -58,7 +64,7 @@ const PROGRAM_ENVIRONMENT =
  * an originally unquoted variable would remain one argument in the executing shell.
  */
 export function expandSegmentBindings(text, bindings, env = process.env) {
-  let variants = [{ text: '', argvPreserved: true, unresolvedBindings: [] }];
+  let variants = [{ text: '', argvPreserved: true, unresolvedBindings: [], chosen: new Map() }];
   let quote;
   const append = (part) => {
     variants = variants.map((variant) => ({ ...variant, text: variant.text + part }));
@@ -71,15 +77,16 @@ export function expandSegmentBindings(text, bindings, env = process.env) {
       continue;
     }
     quote = nextQuote(quote, char);
-    const variable = quote !== "'" && text.slice(index).match(/^\$(?:\{[A-Za-z_]\w*\}|[A-Za-z_]\w*)/);
+    const variable = quote !== "'" && text.slice(index).match(/^\$(?:\{([A-Za-z_]\w*)\}|([A-Za-z_]\w*))/);
     if (!variable) {
       append(char);
       index += 1;
       continue;
     }
+    const varName = variable[1] ?? variable[2];
     const values = expandAll(variable[0], bindings, env);
     if (values) {
-      variants = appendBindingViews(variants, values, quote, bindings, env);
+      variants = appendBindingViews(variants, varName, values, quote, bindings, env);
       if (variants.length > MAX_EXPANSIONS)
         return [{ text, argvPreserved: false, unresolvedBindings: unresolvedBindingEvidence(text, bindings) }];
     } else {
@@ -93,7 +100,11 @@ export function expandSegmentBindings(text, bindings, env = process.env) {
     }
     index += variable[0].length;
   }
-  return variants;
+  return variants.map(({ text: expandedText, argvPreserved, unresolvedBindings }) => ({
+    text: expandedText,
+    argvPreserved,
+    unresolvedBindings,
+  }));
 }
 
 function nextQuote(quote, char) {
@@ -101,14 +112,20 @@ function nextQuote(quote, char) {
   return !quote && (char === "'" || char === '"') ? char : quote;
 }
 
-function appendBindingViews(variants, values, quote, bindings, env) {
-  return variants.flatMap((prefix) =>
-    values.map((value) => ({
-      text: prefix.text + bindingTargetText(value, quote, bindings, env),
-      argvPreserved: prefix.argvPreserved && bindingPreservesArgv(value, quote, bindings, env),
-      unresolvedBindings: prefix.unresolvedBindings,
-    })),
-  );
+function appendBindingViews(variants, varName, values, quote, bindings, env) {
+  return variants.flatMap((prefix) => {
+    const candidateValues = prefix.chosen.has(varName) ? [prefix.chosen.get(varName)] : values;
+    return candidateValues.map((value) => {
+      const nextChosen = new Map(prefix.chosen);
+      nextChosen.set(varName, value);
+      return {
+        text: prefix.text + bindingTargetText(value, quote, bindings, env),
+        argvPreserved: prefix.argvPreserved && bindingPreservesArgv(value, quote, bindings, env),
+        unresolvedBindings: prefix.unresolvedBindings,
+        chosen: nextChosen,
+      };
+    });
+  });
 }
 
 function bindingPreservesArgv(value, quote, bindings, env) {

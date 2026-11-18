@@ -6,6 +6,11 @@ import { after, before, test } from 'node:test';
 import Database from 'better-sqlite3';
 import * as vec from 'sqlite-vec';
 import { prepareFileVectorReadWindow } from '../../dist/domains/memory/file-vector-read-window.js';
+import {
+  decodeReadWindowNativeSnapshot,
+  safeFileVectorReadWindowSnapshot,
+} from '../../dist/domains/memory/file-vector-read-window-diagnostics.js';
+import { safeMessageReadProgress } from '../../dist/domains/memory/message-search-lifetime.js';
 import { PassageVectorStore } from '../../dist/domains/memory/PassageVectorStore.js';
 import { buildMemoryReadWindow } from '../../scripts/build-memory-read-window.mjs';
 
@@ -158,6 +163,7 @@ test('a declined connection cannot consume another scope counts or poison its re
       assert.equal(otherFrames.at(-1).reason, 'scope_busy');
       assert.equal(otherFrames.at(-1).active, false);
       assert.equal(otherFrames.at(-1).counters, null);
+      assert.equal(otherFrames.at(-1).preload, null);
       return new PassageVectorStore(owner, 4).search(query, 1);
     });
     assert.equal(ownerFrames.at(-1).reason, 'active');
@@ -167,4 +173,66 @@ test('a declined connection cannot consume another scope counts or poison its re
     owner.close();
     other.close();
   }
+});
+
+test('preload progress distinguishes a completed non-start from missing or unfinished evidence', () => {
+  const window = { prepared: true, active: true, reason: 'active', counters: null, cleanup: true };
+  const noStart = { attempted: false, started: false, joined: false, logicalBytes: 0, readCalls: 0, errorCode: 0 };
+  assert.equal(safeFileVectorReadWindowSnapshot(window).preload, null, 'legacy missing field is unknown');
+  assert.deepEqual(safeFileVectorReadWindowSnapshot({ ...window, preload: noStart }).preload, noStart);
+  const completed = { attempted: true, started: true, joined: true, logicalBytes: 4194304, readCalls: 1, errorCode: 0 };
+  const large = { ...completed, logicalBytes: 5083238400, readCalls: 1212 };
+  const decoded = decodeReadWindowNativeSnapshot(
+    JSON.stringify({
+      reason: 0,
+      maps: 1,
+      mapped: 1,
+      main: 0,
+      nonMain: 0,
+      fallback: 0,
+      preload: large,
+    }),
+  );
+  assert.deepEqual(
+    safeFileVectorReadWindowSnapshot({ ...window, ...decoded }).preload,
+    large,
+    'logical byte counts larger than 4GiB survive native decoding and private IPC projection',
+  );
+  for (const cleanup of [null, undefined])
+    assert.equal(
+      safeFileVectorReadWindowSnapshot({ ...window, cleanup: cleanup ?? null, preload: completed }).preload,
+      null,
+    );
+  assert.equal(safeFileVectorReadWindowSnapshot({ ...window, active: false, preload: completed }).preload, null);
+  assert.equal(safeFileVectorReadWindowSnapshot({ ...window, preload: { ...completed, joined: false } }).preload, null);
+  for (const invalid of [
+    { ...completed, logicalBytes: Infinity },
+    { ...completed, logicalBytes: Number.MAX_SAFE_INTEGER + 1 },
+    { ...completed, readCalls: -1 },
+    { ...completed, errorCode: 'private-canary' },
+  ])
+    assert.equal(safeFileVectorReadWindowSnapshot({ ...window, preload: invalid }).preload, null);
+  const value = safeMessageReadProgress({
+    stage: 'retrieval',
+    state: 'fulfilled',
+    elapsedMs: 2,
+    native: {
+      phase: 'worker-processing',
+      outcome: 'fulfilled',
+      elapsedMs: 1,
+      readWindow: { ...window, preload: { ...completed, privatePath: 'private-canary' } },
+    },
+  });
+  assert.deepEqual(
+    value.native.readWindow.preload,
+    completed,
+    'the existing private progress projection carries the counters',
+  );
+  completed.logicalBytes = 1;
+  assert.equal(
+    value.native.readWindow.preload.logicalBytes,
+    4194304,
+    'projection does not retain mutable producer state',
+  );
+  assert.doesNotMatch(JSON.stringify(value), /private-canary|privatePath/);
 });

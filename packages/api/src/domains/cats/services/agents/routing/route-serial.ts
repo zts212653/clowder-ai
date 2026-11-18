@@ -1,4 +1,5 @@
 import type { RoutingPreflightDecisionV1 } from '@cat-cafe/shared';
+import { sessionCacheRuntimeKey } from '../../session/cache/session-cache-runtime.js';
 import { InvocationServiceScope } from '../invocation/invocation-service-scope.js';
 import { isRoutingOwnerAttempt } from './routing-owner-attempt.js';
 import { routingPreflightNotice } from './routing-preflight-notice.js';
@@ -23,7 +24,7 @@ import {
 } from '@cat-cafe/shared';
 import type { Span } from '@opentelemetry/api';
 import { context, trace } from '@opentelemetry/api';
-import { getCatVoice } from '../../../../../config/cat-voices.js';
+import { resolveCatVoice } from '../../../../../config/cat-voices.js';
 import {
   deriveHistoryContextTokenCeiling,
   resolvePromptInputCeilingTokens,
@@ -846,7 +847,15 @@ export async function* routeSerial(
       if (deps.routingDispatchPreflight) {
         routingDispatchPreflightDecision = await preflightRoutingDispatch(deps.routingDispatchPreflight, {
           ownerId: userId,
+          threadId,
           targetCatIds: [catId],
+          cacheExecutionBindings: [
+            {
+              catId,
+              runtime: sessionCacheRuntimeKey(executionBinding.hostExecutionBoundary) ?? '',
+              model: executionBinding.executionPreferences?.model ?? executionBinding.catConfig?.defaultModel ?? '',
+            },
+          ],
           executionBindings: [
             {
               catId,
@@ -1861,7 +1870,7 @@ export async function* routeSerial(
           catId: catId as string,
           invocationId,
           threadId,
-          voiceConfig: getCatVoice(catId as string),
+          voiceResolution: resolveCatVoice(catId as string),
           broadcaster: deps.socketManager,
           ttsRegistry,
           signal: catSignal,

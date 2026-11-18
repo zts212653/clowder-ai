@@ -581,6 +581,31 @@ describe('RedisSessionChainStore', { skip: redisIsolationSkipReason(REDIS_URL) }
     assert.deepEqual(updated.contextHealth, health);
   });
 
+  it('cache observations survive a fresh Redis store instance and active-session lookup', async () => {
+    const record = await store.create(BASE_INPUT);
+    const observation = {
+      invocationId: 'cache-invoke',
+      nativeSessionId: record.cliSessionId,
+      runtime: 'claude:print_sdk',
+      model: 'sonnet',
+      requestStartedAt: 1000000,
+      timeSource: 'invocation_start_lower_bound',
+      observedAt: 1000010,
+      contextTokens: 200000,
+      compressionCount: record.compressionCount,
+      retentionMs: 3600000,
+      retentionSource: 'usage_ttl',
+      confirmedWarmGapsMs: [1800000],
+    };
+    await store.update(record.id, { lastUsage: { inputTokens: 200000, cacheObservation: observation } });
+    const recovered = new RedisSessionChainStore(redis);
+    assert.deepEqual((await recovered.get(record.id)).lastUsage.cacheObservation, observation);
+    assert.deepEqual(
+      (await recovered.getActive(BASE_INPUT.catId, BASE_INPUT.threadId, BASE_INPUT.userId)).lastUsage.cacheObservation,
+      observation,
+    );
+  });
+
   it('update() persists nativeSessionBinding across restart and lookup paths', async () => {
     const record = await store.create(BASE_INPUT);
     const nativeSessionBinding = {

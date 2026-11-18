@@ -1,8 +1,10 @@
 import { ListenAssetService } from '../../dist/domains/cats/services/tts/ListenAssetService.js';
 import { MlxAudioTtsProvider } from '../../dist/domains/cats/services/tts/MlxAudioTtsProvider.js';
 import { TtsRegistry } from '../../dist/domains/cats/services/tts/TtsRegistry.js';
+import { configureReferenceFixture } from './tts-reference-fixture.js';
 
 const [cacheDir, baseUrl] = process.argv.slice(2);
+configureReferenceFixture(cacheDir);
 const fetch = globalThis.fetch;
 let active;
 globalThis.fetch = async (url, init) => {

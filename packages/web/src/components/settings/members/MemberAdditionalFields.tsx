@@ -7,6 +7,7 @@ import { resolveAvatarUrl } from '@/lib/avatar-url';
 import { uploadAvatarAsset, uploadRefAudioAsset } from '../../hub-cat-editor.client';
 import type { HubCatEditorFormState, StrategyFormState } from '../../hub-cat-editor.model';
 import { SelectField, TextAreaField, TextField } from '../../hub-cat-editor-fields';
+import { MemberVoiceChoice } from '../../members/MemberVoiceChoice';
 import { MemberAdvancedFields } from './MemberAdvancedFields';
 import { MemberBannerFields } from './MemberBannerFields';
 import { MemberCanonAvatar } from './MemberCanonAvatar';
@@ -166,6 +167,7 @@ export function MemberAdditionalFields({
             'Voice stays with this teammate when changing tools or models.',
           )}
         </p>
+        <MemberVoiceChoice form={form} onChange={patch} />
         <SelectField
           label={t('语言', 'Language')}
           value={form.voiceLangCode}

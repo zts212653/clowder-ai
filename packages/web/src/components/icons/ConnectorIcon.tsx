@@ -1,6 +1,7 @@
 import type { ConnectorIconSpec } from '@cat-cafe/shared';
 import type { ComponentType } from 'react';
 import { HubIcon } from '../hub-icons';
+import { SuggestionAvatar } from '../suggestions/SuggestionAvatar';
 import {
   AuthKeyIcon,
   ConnectorImage,
@@ -18,6 +19,7 @@ import { BallotIcon } from './VoteIcons';
 
 const SVG_ICON_MAP: Record<string, ComponentType<{ className?: string }>> = {
   github: GitHubIcon,
+  watcher: () => <SuggestionAvatar watcher />,
   ballot: BallotIcon,
   users: UsersIcon,
   scheduler: SchedulerIcon,

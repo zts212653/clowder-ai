@@ -5,6 +5,7 @@ import { activeExecutionKey } from '@/stores/activeExecutionStore';
 import { ExecutionCancelButton } from '../ExecutionCancelButton';
 import { executionActivityLabel } from '../execution-kind-label';
 import { managedCommandActivityLabel } from '../managed-command-activity-label';
+import { SuggestionAvatar } from '../suggestions/SuggestionAvatar';
 import { ThreadChatLink } from './ThreadChatLink';
 import type { RunningWork } from './workspace-running-work';
 
@@ -44,24 +45,29 @@ export function WorkspaceRunningWork({
 }) {
   const single = work.executions.length === 1 ? work.executions[0] : undefined;
   const hasLiveTurn = work.executions.some((execution) => execution.kind === 'live_invocation');
-  const status = hasLiveTurn ? '回复中' : '等待后台完成';
+  const watching = work.executions.every((execution) => execution.executionKind === 'watcher');
+  const status = watching ? '守望查看' : hasLiveTurn ? '回复中' : '等待后台完成';
 
   return (
     <article className="group py-3.5" data-testid="workspace-running-object">
       <div className="flex items-center gap-3">
         <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-cafe-accent/10 text-cafe-accent">
-          <svg
-            aria-hidden="true"
-            className="h-3.5 w-3.5"
-            viewBox="0 0 16 16"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="1.5"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          >
-            {hasLiveTurn ? <path d="m5.5 3 6 5-6 5V3Z" /> : <path d="M6 3v10M10 3v10" />}
-          </svg>
+          {watching ? (
+            <SuggestionAvatar catId={work.executions[0]?.catId} watcher />
+          ) : (
+            <svg
+              aria-hidden="true"
+              className="h-3.5 w-3.5"
+              viewBox="0 0 16 16"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.5"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              {hasLiveTurn ? <path d="m5.5 3 6 5-6 5V3Z" /> : <path d="M6 3v10M10 3v10" />}
+            </svg>
+          )}
         </span>
         <div className="min-w-0 flex-1">
           <div className="truncate text-xs font-semibold text-cafe-black">{catName}</div>

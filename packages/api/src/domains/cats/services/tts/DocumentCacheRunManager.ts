@@ -1,4 +1,5 @@
 import type { ListenDocumentIdentity, ListenDocumentState } from '@cat-cafe/shared';
+import { VoiceSelectionSequence } from './cat-voice-synthesis.js';
 import type { DocumentListenRepository, ListenDocumentKey } from './DocumentListenRepository.js';
 import type { ListenAssetService, PreparedListenSynthesis } from './ListenAssetService.js';
 
@@ -13,6 +14,7 @@ export interface DocumentCacheRunProjection {
 }
 
 interface ActiveRun {
+  selections: VoiceSelectionSequence;
   key: ListenDocumentKey;
   contentDigest: string;
   synthesisFingerprint: string;
@@ -44,6 +46,13 @@ export class DocumentCacheRunManager {
     startAnchor?: string;
   }): DocumentCacheRunProjection {
     const synthesisFingerprint = input.synthesis.fingerprint;
+    if (input.synthesis.request.refAudio && !input.synthesis.request.refAudioData) {
+      const documentKey = keyOf(input.key);
+      this.cancelByKey(documentKey);
+      const message = '参考内容尚不能核验，暂不能预制为当前声线缓存；已有文档录音仍可回放。';
+      this.errors.set(documentKey, { contentDigest: input.identity.contentDigest, synthesisFingerprint, message });
+      return { active: false, error: message };
+    }
     this.repository.prepareCacheRun(
       input.key,
       input.identity.contentDigest,
@@ -65,6 +74,7 @@ export class DocumentCacheRunManager {
     if (isComplete(state)) return { active: false };
 
     const run: ActiveRun = {
+      selections: new VoiceSelectionSequence(),
       key: input.key,
       contentDigest: input.identity.contentDigest,
       synthesisFingerprint,
@@ -161,12 +171,18 @@ export class DocumentCacheRunManager {
       signal: run.controller.signal,
     });
     if (!this.isCurrent(documentKey, run)) return false;
-    const linked = this.repository.setSentenceAssetIfCurrent(run.key, {
-      contentDigest: run.contentDigest,
-      synthesisFingerprint: run.synthesisFingerprint,
-      anchor: sentence.anchor,
-      assetId: asset.assetId,
-    });
+    if (asset.voiceSelection) run.selections.observe(asset.voiceSelection);
+    if (asset.reusable === false) throw new Error('读取端未确认本次参考内容，已完成缓存保留，本句未挂为当前声线缓存。');
+    const linked = this.repository.setSentenceAssetIfCurrent(
+      run.key,
+      {
+        contentDigest: run.contentDigest,
+        synthesisFingerprint: run.synthesisFingerprint,
+        anchor: sentence.anchor,
+        assetId: asset.assetId,
+      },
+      (assetId) => this.assets.isAssetAvailable(assetId),
+    );
     if (!linked) return false;
     // The provider's existing single worker arbitrates real synthesis. Yield at
     // a sentence boundary so a playback miss can join before another cache miss.

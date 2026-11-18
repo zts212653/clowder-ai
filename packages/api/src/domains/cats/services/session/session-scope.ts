@@ -9,6 +9,26 @@ export function watcherSessionChainKey(userId: string, catId: string, threadId: 
   return `watcher:${JSON.stringify([userId, catId, threadId])}`;
 }
 
+/** F335 panel role: same observer purpose, its own resumable native history per member and thread. */
+export function watcherPanelSessionChainKey(userId: string, catId: string, threadId: string): string {
+  return `watcher-panel:${JSON.stringify([userId, catId, threadId])}`;
+}
+
+export function isWatcherPanelSession(session: Pick<SessionRecord, 'sessionPurpose' | 'chainKey'>): boolean {
+  return session.sessionPurpose === 'watcher' && (session.chainKey?.startsWith('watcher-panel:') ?? false);
+}
+
+/**
+ * A cat reads only its own sessions, and never its F335 panel-watcher sessions: which member said what
+ * stays in the owner ledger. Without a caller cat (the person's own view) nothing is filtered here.
+ */
+export function catMayReadSession(
+  callerCatId: string | undefined,
+  session: Pick<SessionRecord, 'catId' | 'sessionPurpose' | 'chainKey'>,
+): boolean {
+  return !callerCatId || (session.catId === callerCatId && !isWatcherPanelSession(session));
+}
+
 export interface HomeSessionPosition {
   readonly ordinal: number;
   readonly count: number;

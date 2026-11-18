@@ -34,6 +34,12 @@ created: 2026-10-29
 
 页面沿现有 HTML 沙盒展示，允许自身脚本交互，不能读取主页面和登录信息。它不等于任意完整网站或多文件应用；外部资源是否可用取决于原来的链接和权限。自行绑定脚本事件，避免依赖内联 onclick 属性。
 
+## 从作品打开出处或本机完整版
+
+作品可向宿主请求显示一个打开操作；宿主会展示目标地址，需再点宿主的按钮才在新页打开。作品不能自行弹窗或导航主页面，沙箱权限保持不变。旧宿主没有此能力时，作品应明确提示，不将请求视作打开成功。
+
+脚本发送 `window.parent.postMessage({type:'cat-cafe:html-widget-navigation',v:1,href},'*')`。只接受该作品的当前 opaque iframe；目标限定为本站 `/thread/thread_…?message=…`、HTTPS OpenStreetMap 的 way/node/relation 对象，或非保留端口的 `http://127.0.0.1:PORT/` 本机页面（可带64位SHA的 `asset` 参数）。消息坐标须为1–200位字母、数字、下划线或连字符；兼容旧 `messageId` 请求，但宿主统一转换成普通对话页识别的 `message`。其他地址、任意路径和凭据均拒绝。宿主仅回 `cat-cafe:html-widget-navigation-ready`、`v:1` 表示打开按钮已准备；不会把主页面、登录信息或目标内容交回作品。旧作品若未接入请求协议，不会因此自动获得弹窗权限。
+
 ## 给猫的操作约定
 
 使用现有 `cat_cafe_work`：`create` 的 source 为 `{kind: "html", html: "完整源码"}`，`submit` 带原 `contentRef`、当前 `expectedOwnerRevision` 和完整新源码；保存成功后才用 `publish-reference` 附卡。

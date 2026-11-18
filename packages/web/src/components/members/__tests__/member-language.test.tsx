@@ -52,7 +52,9 @@ beforeEach(() => {
                   },
                 ],
               }
-            : {},
+            : url === '/api/tts/voices'
+              ? { voices: [] }
+              : {},
         ),
       ),
   );
@@ -169,7 +171,9 @@ it.each(['zh', 'en'] as const)('presents the same Codex member form from setting
                     codexExecution: { authMode: 'oauth' },
                   },
                 }
-              : {},
+              : url === '/api/tts/voices'
+                ? { voices: [] }
+                : {},
         ),
       ),
   );

@@ -7,6 +7,9 @@ import type {
 
 const MAX_REPLAY_DENIED_TOOL_NAMES = 32;
 const MAX_ALLOWED_CALLBACK_ROUTES = 32;
+const MAX_WATCHER_PANEL_ROUTES = 64;
+const CALLBACK_ROUTE_TEMPLATE =
+  /^(GET|POST) \/api\/callbacks\/(?:[a-z][a-z0-9-]*|:[a-zA-Z][a-zA-Z0-9]*)(?:\/(?:[a-z][a-z0-9-]*|:[a-zA-Z][a-zA-Z0-9]*))*$/;
 
 function nativeCoordinate(value: unknown): value is string {
   return typeof value === 'string' && value.length > 0 && value.length <= 256 && value.trim() === value;
@@ -83,6 +86,16 @@ export function normalizeToolExecutionPolicy(policy: ToolExecutionPolicy): ToolE
       allowedCallbackRoutes: [...new Set(policy.allowedCallbackRoutes)].sort(),
     };
   }
+  if (policy.mode === 'watcher_panel') {
+    if (
+      !Array.isArray(policy.allowedCallbackRoutes) ||
+      policy.allowedCallbackRoutes.length === 0 ||
+      policy.allowedCallbackRoutes.length > MAX_WATCHER_PANEL_ROUTES ||
+      !policy.allowedCallbackRoutes.every((route) => typeof route === 'string' && CALLBACK_ROUTE_TEMPLATE.test(route))
+    )
+      throw new Error('invalid watcher panel policy');
+    return { mode: 'watcher_panel', allowedCallbackRoutes: [...new Set(policy.allowedCallbackRoutes)].sort() };
+  }
   if (policy.mode === 'plugin_native') {
     if (!nativeCoordinate(policy.pluginInstanceId) || !nativeCoordinate(policy.contributionId))
       throw new Error('invalid plugin native policy');
@@ -116,7 +129,12 @@ export function normalizeToolExecutionPolicy(policy: ToolExecutionPolicy): ToolE
 
 export function parseToolExecutionPolicy(raw: string): ToolExecutionPolicy {
   const parsed = JSON.parse(raw) as Partial<ToolExecutionPolicy>;
-  if (parsed.mode === 'watcher' || parsed.mode === 'callback_allowlist' || parsed.mode === 'plugin_native')
+  if (
+    parsed.mode === 'watcher' ||
+    parsed.mode === 'watcher_panel' ||
+    parsed.mode === 'callback_allowlist' ||
+    parsed.mode === 'plugin_native'
+  )
     return normalizeToolExecutionPolicy(parsed as ToolExecutionPolicy);
   if (parsed.mode !== 'read_only' || !Array.isArray(parsed.replayDeniedToolNames)) {
     throw new Error('invalid persisted tool execution policy');
@@ -155,6 +173,13 @@ export function toolExecutionPolicyDenial(
       ? normalized.allowedCallbackRoutes.includes(rawToolName)
       : normalized.allowedToolNames.includes(toolName);
     return allowed ? null : { reason: 'callback_allowlist_tool_policy', toolName };
+  }
+  if (policy.mode === 'watcher_panel') {
+    const normalized = normalizeToolExecutionPolicy(policy);
+    if (normalized.mode !== 'watcher_panel') throw new Error('invalid watcher panel policy');
+    return normalized.allowedCallbackRoutes.includes(rawToolName)
+      ? null
+      : { reason: 'callback_allowlist_tool_policy', toolName: normalizeToolExecutionName(rawToolName) };
   }
   if (policy.mode === 'plugin_native') {
     const normalized = normalizeToolExecutionPolicy(policy);
@@ -201,6 +226,7 @@ export function toolExecutionPolicyAllowedToolNames(
       return normalized.allowedToolNames;
     case 'read_only':
     case 'callback_allowlist':
+    case 'watcher_panel':
     case 'plugin_native':
       return [];
   }

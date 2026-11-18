@@ -4,7 +4,7 @@ related_features: [F063, F066, F091, F111, F112, F153, F284]
 topics: [workspace, markdown, listen-mode, tts, audio, cache, accessibility]
 doc_kind: spec
 created: 2026-07-28
-updated: 2026-11-14
+updated: 2026-11-17
 description: "让用户在 Workspace Markdown 中从任意句开始听读，并以可见、可复用、可清理的本地音频缓存持续续听。"
 description_source: human
 description_author: codex-sol
@@ -40,7 +40,10 @@ Why: Workspace 是用户入口；F066/F111 继续拥有 TTS 合成与内容寻�
 
 家里已经分别拥有 Markdown 渲染、TTS 合成、流式分句和播放队列，却还没有把这些能力接成一个用户能直接使用的“听正文”旅程。F279 的目标不是再造 TTS，而是让operator在 Workspace 打开一篇 Markdown 后，**从任意句开始、按自己舒服的速度听下去；听过的内容可以立即重播，缓存何时清理一眼可见。**
 
-## Current State（updated 2026-08-23）
+## Current State（updated 2026-11-17）
+
+- #7199 / #7222 已合入声线来源与既有听读契约的兼容修复：当前可核参考与实际生成回执一致时保留确定性缓存/全文预制；旧录音、跨协议续播、进度与保留期继续可用。实时逐句听读和四条服务端多段入口共用参考序列检查，在下一段挂载/播放前阻断已观察到的换声。仅旧服务或当前参考无法核实时，保留明确的未知提示与独立资产，不把历史录音冒充当前已核生成。
+- 上述是原 Task484 的兼容收口，不把本文件剩余 Phase / UAT AC 宣称完成。main 合入、官方 Alpha 与正式采用的证据分开保留；本次两句样本没有覆盖 AC-B4b 的重启后跨 checkout 缓存验证，也未代签其余音频 UAT。
 
 - F063 已支持 Workspace Markdown 渲染、文本选择和媒体预览，但没有“听读”入口。
 - F066 提供本地 TTS；F111 提供流式分句；F112 提供 pause/resume/skip/interrupt 的共享 PlaybackManager。

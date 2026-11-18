@@ -51,8 +51,12 @@ function buildHomePathPattern(homePath: string): RegExp | null {
 export function sanitizeCliStderr(input: string, options: CliStderrSanitizerOptions = {}): string {
   if (!input) return '';
 
-  // 1. NFKC normalize (defeat fullwidth/homograph token bypass — e.g. U+FF53 ｓ → ASCII s)
-  let out = input.normalize('NFKC');
+  // 1. Normalize token homoglyphs (e.g. ｓ → s), retaining Chinese question punctuation.
+  // A prose ？ must not become a URL query delimiter; provider tokens do not use it.
+  let out = input
+    .split('？')
+    .map((segment) => segment.normalize('NFKC'))
+    .join('？');
 
   // 2. Control sequences (clean output noise, not security-critical but improves readability)
   out = out.replace(SANITIZER_PATTERNS.ansiCsi, '');
@@ -67,7 +71,27 @@ export function sanitizeCliStderr(input: string, options: CliStderrSanitizerOpti
 
   // 5. URL userinfo / query / fragment strings
   out = out.replace(SANITIZER_PATTERNS.urlUserinfo, '$1$2[CREDENTIALS_REDACTED]@');
-  out = out.replace(SANITIZER_PATTERNS.urlQuery, '$1[QUERY_REDACTED]');
+  out = out.replace(SANITIZER_PATTERNS.urlQuery, (candidate) => {
+    const parts = [];
+    let start = 0;
+    let question = candidate.indexOf('?');
+    while (question >= 0) {
+      const prefix = candidate.slice(start, question);
+      parts.push(candidate.slice(start, question + 1));
+      start = question + 1;
+      if (/[/.]/.test(prefix) || /:\d+$/.test(prefix) || /(?:^|[()])localhost$/i.test(prefix)) {
+        const closing = candidate.indexOf(')', start);
+        const end = closing < 0 ? candidate.length : closing;
+        if (end > start) {
+          parts.push('[QUERY_REDACTED]');
+          start = end;
+        }
+      }
+      question = candidate.indexOf('?', start);
+    }
+    parts.push(candidate.slice(start));
+    return parts.join('');
+  });
   out = out.replace(SANITIZER_PATTERNS.urlFragment, '$1[FRAGMENT_REDACTED]');
 
   // 6. Provider tokens (specific first to avoid generic pattern eating prefix)

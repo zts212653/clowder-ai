@@ -4,6 +4,7 @@ import { useCatData } from '@/hooks/useCatData';
 import { AccountAddMenu } from './accounts/AccountAddMenu';
 import { AccountDirectoryRow } from './accounts/AccountDirectoryRow';
 import { AccountSwitchConfirm } from './accounts/AccountSwitchConfirm';
+import { AccountsQuotaPinBar } from './accounts/AccountsQuotaPinBar';
 import { AgyAccountModal } from './accounts/AgyAccountModal';
 import {
   accountDisplayName,
@@ -127,6 +128,13 @@ export function HubAccountsTab({
   if (directory.loading && !directory.data) return <p>{t.loading}</p>;
   return (
     <div className="account-directory">
+      <AccountsQuotaPinBar
+        profiles={profiles}
+        cats={cats}
+        codexSelection={directory.selection}
+        claudeSelection={directory.claudeSelection}
+        agySelection={directory.agySelection}
+      />
       {toolLabel && (
         <p role="status">
           {language === 'zh'

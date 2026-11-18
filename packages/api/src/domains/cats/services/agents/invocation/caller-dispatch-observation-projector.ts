@@ -23,10 +23,7 @@ export async function projectCallerDispatchObservations(options: {
     .slice(0, MAX_READS_PER_PROJECTION);
   if (pointers.length === 0) return { prompt: '', included: [], truncated: false };
 
-  const header = [
-    '[Outbound Dispatch Status]',
-    '以下状态来自你先前提交的 source×target delivery lifecycle；不是新任务，也不会自动唤醒你。',
-  ];
+  const header = ['[Outbound Dispatch Status]', '你先前派出的消息，现在的投递状态：'];
   const observations: ProjectedObservation[] = [];
   for (const pointer of pointers) {
     const observation = await options.refresh(pointer);

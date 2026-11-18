@@ -306,6 +306,8 @@ export interface SearchOptions {
 
 export type SearchDegradeReason =
   | 'passage_embedding_unavailable'
+  | 'passage_vector_budget_exhausted'
+  | 'passage_vector_admission_budget_insufficient'
   | 'passage_vector_search_error'
   | 'evidence_store_error'
   | 'raw_lexical_only';

@@ -38,6 +38,13 @@ export function readApprovalDecisionReceipt(message: HostMessageCandidate): Appr
 export function catConsumableHostSpeaker(message: HostMessageCandidate): string | undefined {
   if (message.catId !== null) return undefined;
   const extra = record(message.extra);
+  // F335: the panel's anonymous delivery is addressed to the working cat; members stay unnamed.
+  if (
+    message.from?.kind === 'system' &&
+    message.from.service === 'watcher-panel' &&
+    record(message.source)?.connector === 'watcher-panel'
+  )
+    return '守望猫';
   if (
     (message.from ? message.from.kind === 'system' : message.userId === 'system') &&
     extra?.systemKind === 'content_modification_receipt' &&

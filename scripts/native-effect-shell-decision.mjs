@@ -37,11 +37,56 @@ import {
 } from './native-effect-shell-classifier.mjs';
 import { hasConcurrentShellExecution, pipelineChainStart } from './native-effect-shell-concurrency.mjs';
 import { expandSegmentBindings, isShellBinding } from './native-effect-shell-expansion.mjs';
+import { shellInvocation, stripHarmlessRedirections } from './native-effect-shell-tokenizer.mjs';
 import { classifyNativeTarget as classifyTarget, insideMainCheckout } from './native-effect-target-classifier.mjs';
 import { worktreeRemovalDecision } from './native-effect-worktree-removal.mjs';
 
 // Provenance: F306 AC-C7 -- how a shell command becomes candidates (per segment, per
 // directory it can run in), moved out of native-effect-target-guard.mjs (slice 2b, pure move).
+
+function projectProvenBoundLookupText(text, bindings) {
+  if (!bindings?.size) return text;
+  const varMatches = [...text.matchAll(/\$(?:\{([A-Za-z_]\w*)\}|([A-Za-z_]\w*))/g)];
+  if (!varMatches.length) return text;
+  const allSafeLiterals = varMatches.every((m) => {
+    const name = m[1] ?? m[2];
+    const vals = bindings.get(name);
+    return (
+      Array.isArray(vals) &&
+      vals.length > 0 &&
+      vals.every((v) => typeof v === 'string' && v.length > 0 && !v.startsWith('-') && !/[\s;&|<>()`$\\]/.test(v))
+    );
+  });
+  if (!allSafeLiterals) return text;
+  return text.replace(/\$(?:\{([A-Za-z_]\w*)\}|([A-Za-z_]\w*))/g, 'catcafe_bound_literal');
+}
+
+function isPureReadOnlyLookupConsumer(text, builtinContext, bindings) {
+  const cleaned = projectProvenBoundLookupText(stripHarmlessRedirections(text), bindings);
+  const inv = shellInvocation(cleaned);
+  if (!inv.complete || inv.redirections.length > 0 || inv.words.length === 0) return null;
+  const words = inv.words.map((w) => w.value);
+  const first = words[0];
+  if (first === 'echo' || first === 'printf') {
+    return !(first === 'printf' && (words[1]?.startsWith('-v') || (inv.words[1] && !inv.words[1].literal)))
+      ? cleaned
+      : null;
+  }
+  if (!builtinContext) return null;
+  if (first === 'command') {
+    const flags = words.slice(1).filter((w) => w.startsWith('-') && w !== '--');
+    return flags.length > 0 && flags.every((f) => /^-[vV]+$/.test(f)) ? cleaned : null;
+  }
+  if (first === 'which') {
+    const flags = words.slice(1).filter((w) => w.startsWith('-') && w !== '--');
+    return flags.every((f) => /^-[as]+$/.test(f)) ? cleaned : null;
+  }
+  if (first === 'type') {
+    const flags = words.slice(1).filter((w) => w.startsWith('-') && w !== '--');
+    return flags.every((f) => /^-[atpPf]+$/.test(f)) ? cleaned : null;
+  }
+  return null;
+}
 
 export function decideShellHookPayload(
   view,
@@ -50,6 +95,7 @@ export function decideShellHookPayload(
   depth = 0,
   initialCopyNamespaceStable = true,
   initialProgramNamespaceStable = true,
+  initialScope = {},
 ) {
   const lexical = scanShellText(view.judged);
   const raw = lexical.text;
@@ -76,7 +122,11 @@ export function decideShellHookPayload(
   // creator can run before an earlier delayed copy, so no snapshot in this shell is stable.
   // A separate pipeline does not run concurrently with its sequential predecessor.
   const sequentialRead =
-    !hasConcurrentShellExecution(lexical, raw, true) && parts.every((part, index) => part.text === unitTexts[index]);
+    !hasConcurrentShellExecution(lexical, raw, true) &&
+    parts.every(
+      (part, index) =>
+        part.text === unitTexts[index] || isShellStructure(part.text) || /^\s*(?:do|then|else|elif)\b/.test(part.text),
+    );
   const readProgramNamespaceStable = programNamespaceStability(
     parts.map((part) => ({ segment: part.text })),
     initialProgramNamespaceStable && (!hasConcurrentShellExecution(lexical, raw) || sequentialRead),
@@ -89,7 +139,7 @@ export function decideShellHookPayload(
     readProgramNamespaceStable.fill(false, start, end + 1);
     index = end;
   }
-  const contexts = segmentContexts(parts, cwd, process.env, readProgramNamespaceStable);
+  const contexts = segmentContexts(parts, cwd, process.env, readProgramNamespaceStable, initialScope);
   const units = unitTexts.map((segment, index) => ({
     segment,
     contexts: contexts[index] ?? [{ directory: cwd, bindings: new Map() }],
@@ -121,11 +171,11 @@ export function decideShellHookPayload(
           readProgramNamespaceStable[index] && parameters ? expandPositionalParameters(segment, parameters) : segment,
         ),
         bindings,
-      ).map((variant) => ({ ...variant, directory })),
+      ).map((variant) => ({ ...variant, directory, bindings, parameters })),
     ),
   );
   const candidates = expanded.flatMap((variants, index) =>
-    variants.flatMap(({ text, argvPreserved, unresolvedBindings = [], directory }) => {
+    variants.flatMap(({ text, argvPreserved, unresolvedBindings = [], directory, bindings, parameters }) => {
       const execution = shellSubstitutions(text, SUBSTITUTION);
       const nested = nestedSubstitutionDecisions(
         execution.inner,
@@ -134,24 +184,29 @@ export function decideShellHookPayload(
         depth,
         copyNamespaceStable[index],
         readProgramNamespaceStable[index],
+        { bindings, parameters },
       );
       // The substitution executes in a child shell; only its output is an outer operand.
-      // Echo/printf consume data. Other programs cannot certify generated argv as literal.
-      const dataConsumer = /^\s*(?:echo|printf)\b/.test(execution.text);
+      // Pure data/lookup builtins without file redirections consume data without executing generated argv.
+      const lookupSegment = isPureReadOnlyLookupConsumer(execution.text, readProgramNamespaceStable[index], bindings);
+      const dataConsumer = lookupSegment !== null;
       const preserved = dataConsumer || (argvPreserved && !execution.inner.length);
-      const targetEvidence = dataConsumer ? text : [text, ...unresolvedBindings].join(' ').replace(/\r?\n/g, ' ');
+      const candidateText = lookupSegment ?? execution.text;
+      const targetEvidence = dataConsumer
+        ? candidateText
+        : [text, ...unresolvedBindings].join(' ').replace(/\r?\n/g, ' ');
       return [
         ...nested,
         {
           ...segmentCandidate(
-            isShellBinding(execution.text) ? '' : execution.text,
+            isShellBinding(candidateText) ? '' : candidateText,
             directory,
             previewDecisions[index]?.operation,
             source,
             preserved,
             targetEvidence,
             !preserved && (execution.inner.length > 0 || unresolvedBindings.length > 0),
-            units[index].segment,
+            dataConsumer ? candidateText : units[index].segment,
             copyNamespaceStable[index],
             readProgramNamespaceStable[index],
           ),
@@ -196,6 +251,7 @@ function nestedSubstitutionDecisions(
   depth,
   initialCopyNamespaceStable,
   programNamespaceStable,
+  initialScope = {},
 ) {
   let stable = initialCopyNamespaceStable;
   return innerCommands.map((inner) => {
@@ -206,6 +262,7 @@ function nestedSubstitutionDecisions(
       depth + 1,
       stable,
       programNamespaceStable,
+      initialScope,
     );
     stable &&= shellTextPreservesCopyNamespace(inner, programNamespaceStable);
     return decision;
@@ -398,11 +455,22 @@ const generatedWord = (word) => word.includes(SUBSTITUTION) || /\$\w|\$\{/.test(
 function unprovedExecutionControl(command, generatedExecution, builtinContext) {
   const parsed = executedInvocations(command, { builtinContext });
   const calls = parsed.pipelines.flat();
-  if (calls.some(({ generatedCode }) => generatedCode)) return true;
+  if (
+    calls.some(({ name, operands, generatedCode }) => {
+      if (generatedCode || !name || generatedWord(name)) return true;
+      if (name === 'git') {
+        const args = gitSubcommandArgs(operands);
+        if (!args?.length || generatedWord(args[0])) return true;
+      }
+      return false;
+    })
+  ) {
+    return true;
+  }
   if (!generatedExecution) return false;
   if (!calls.length) return !parsed.complete;
   return calls.some(({ name, operands }) => {
-    if (!name) return true;
+    if (!name || generatedWord(name)) return true;
     if (name !== 'git') return false;
     const args = gitSubcommandArgs(operands);
     if (!args?.length || generatedWord(args[0])) return true;

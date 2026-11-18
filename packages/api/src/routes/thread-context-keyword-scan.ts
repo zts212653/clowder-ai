@@ -46,7 +46,7 @@ interface RankedThreadContextScanOptions<T> {
     storageRoundTrips: number;
     exhausted: boolean;
   }>;
-  canInclude: (item: T) => boolean;
+  canInclude: (item: T) => boolean | Promise<boolean>;
   score: (item: T) => number;
   getTimestamp: (item: T) => number;
 }
@@ -82,7 +82,7 @@ export async function scanRankedThreadContext<T>(
     scannedCount += fetched.scannedCount;
     const scoringStarted = performance.now();
     for (const item of batch) {
-      if (!options.canInclude(item)) continue;
+      if (!(await options.canInclude(item))) continue;
       const itemScore = options.score(item);
       if (itemScore > 0) matches.push({ item, score: itemScore });
     }

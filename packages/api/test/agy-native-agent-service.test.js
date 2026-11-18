@@ -217,12 +217,21 @@ describe('F325 one-turn native AGY carrier', () => {
     ['.Agents', 'MCP_CONFIG.JSON'],
   ]) {
     for (const withSensitiveFile of [false, true]) {
-      test(`autoApprove refuses ${directory}/${name}${withSensitiveFile ? ' alongside .env' : ''} before spawn`, async () => {
+      test(`autoApprove refuses unsafe ${directory}/${name}${withSensitiveFile ? ' alongside .env' : ''} before spawn`, async () => {
         const f = fixture(undefined, { autoApprove: true });
         const customization = join(f.workspace, directory, name);
         mkdirSync(join(f.workspace, directory));
-        if (['agents', 'plugins'].includes(name)) mkdirSync(customization);
-        else writeFileSync(customization, '{}');
+        if (name === 'agents') {
+          mkdirSync(join(customization, 'cat-cafe-host-gemini38'), { recursive: true });
+          writeFileSync(join(customization, 'cat-cafe-host-gemini38', 'agent.md'), 'SHADOW\n');
+        } else if (name === 'plugins') {
+          mkdirSync(join(customization, 'evil-plugin'), { recursive: true });
+          writeFileSync(join(customization, 'evil-plugin', 'hooks.json'), '{}');
+        } else if (name === 'skills.json') {
+          writeFileSync(customization, '{"entries":[{"path":"../outside"}]}');
+        } else {
+          writeFileSync(customization, '{}');
+        }
         if (withSensitiveFile) writeFileSync(join(f.workspace, '.env'), 'FIXTURE_ONLY=yes\n');
         let spawned = false;
         try {
@@ -247,6 +256,37 @@ describe('F325 one-turn native AGY carrier', () => {
       });
     }
   }
+
+  for (const readOnly of [false, true])
+    test(`operator executable-workspace opt-in stays within the current turn policy (readOnly=${readOnly})`, async () => {
+      const f = fixture(undefined, { autoApprove: true, allowWorkspaceExecutableConfig: true });
+      mkdirSync(join(f.workspace, '.agents'));
+      writeFileSync(join(f.workspace, '.agents/hooks.json'), '{}');
+      let spawned = false;
+      try {
+        const events = await collect(
+          f.service.invoke('Hello.', {
+            workingDirectory: f.workspace,
+            ...(readOnly ? { toolExecutionPolicy: { mode: 'read_only' } } : {}),
+            spawnCliOverride: async function* (launch) {
+              spawned = true;
+              const frames = fakeEvents(
+                launch.args[launch.args.indexOf('--agent') + 1],
+                launch.cwd,
+                'policy-bound-scope',
+                'Hello.',
+              );
+              frames[0].init.permission_mode = readOnly ? 'request-review' : 'always-proceed';
+              yield* frames;
+            },
+          }),
+        );
+        assert.equal(spawned, !readOnly, JSON.stringify(events));
+        assert.equal(events.at(-1).errorCode, readOnly ? 'AGY_WORKSPACE_CUSTOMIZATION' : undefined);
+      } finally {
+        f.cleanup();
+      }
+    });
 
   test('explicit autoApprove launches a normal repository with official bypass mode and native commands', async () => {
     const f = fixture(undefined, { autoApprove: true, trustedWorkspaces: [] });

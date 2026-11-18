@@ -1,3 +1,4 @@
+import { createBrowserUuid } from '@/utils/browser-uuid';
 import { readChatReadingRef, releaseChatReadingRef } from '@/utils/chat-scroll-memory';
 import { getSettingsReadingScope } from './settings-reading-scope';
 
@@ -44,7 +45,7 @@ export function startSettingsReadingSession(
   session: SettingsReadingSession;
   persisted: boolean;
 } {
-  const session = parseSession({ id: crypto.randomUUID(), ...source });
+  const session = parseSession({ id: createBrowserUuid(), ...source });
   if (!session) throw new Error('Invalid Settings reading source');
   const previous = readSettingsReadingSession(scope);
   let persisted = false;

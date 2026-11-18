@@ -41,6 +41,7 @@ describe('SqliteEvidenceStore — semantic rerank integration', () => {
       load: async () => {},
       getEmbedCallCount: () => embedCallCount,
     };
+    vectorStore.initMeta(mockEmbedding.getModelInfo());
   });
 
   it('mode=on reranks results by vector distance', async () => {

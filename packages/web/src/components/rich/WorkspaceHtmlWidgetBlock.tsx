@@ -1,17 +1,20 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { RichHtmlWidgetBlock } from '@/stores/chat-types';
+import { HtmlWidgetNavigationGate } from './HtmlWidgetNavigationGate';
 import { sanitizeWidgetHtml } from './sanitize-widget-html';
 
 export function WorkspaceHtmlWidgetBlock({ block }: { block: RichHtmlWidgetBlock }) {
   // 消毒依赖 DOM；挂载后再产出 srcDoc，避免 SSR 与客户端首帧不一致。
   const [browserReady, setBrowserReady] = useState(false);
+  const iframeRef = useRef<HTMLIFrameElement>(null);
   useEffect(() => setBrowserReady(true), []);
   const html = useMemo(() => (browserReady ? sanitizeWidgetHtml(block.html) : null), [block.html, browserReady]);
 
   return (
     <div className="flex min-h-0 flex-1 flex-col" data-artifact-widget-frame data-artifact-widget-block={block.id}>
+      <HtmlWidgetNavigationGate iframeRef={iframeRef} contentKey={block.html} />
       {html === null ? (
         <output
           aria-label={block.title ?? 'HTML 预览'}
@@ -21,6 +24,7 @@ export function WorkspaceHtmlWidgetBlock({ block }: { block: RichHtmlWidgetBlock
         </output>
       ) : (
         <iframe
+          ref={iframeRef}
           title={block.title ?? 'HTML 预览'}
           srcDoc={html}
           sandbox="allow-scripts"

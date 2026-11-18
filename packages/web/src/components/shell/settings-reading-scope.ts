@@ -1,3 +1,5 @@
+import { createBrowserUuid } from '@/utils/browser-uuid';
+
 /** sessionStorage holds a routing nonce; all association/ref payloads remain durable in localStorage. */
 const SCOPE_KEY = 'cat-cafe:settings-reading-scope:v1';
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -28,7 +30,7 @@ export function getSettingsReadingScope(): string {
   } catch {
     /* A document-only scope can still provide honest, isolated navigation. */
   }
-  return activate(crypto.randomUUID());
+  return activate(createBrowserUuid());
 }
 
 /** A copied nonce cannot claim another live tab's scope. Document teardown releases its native lock. */
@@ -48,10 +50,10 @@ export function claimSettingsReadingScope(): Promise<{ id: string; restorable: b
   claim = (async () => {
     try {
       if (await acquire(id)) return { id, restorable: routingStored };
-      const isolated = activate(crypto.randomUUID());
+      const isolated = activate(createBrowserUuid());
       return { id: isolated, restorable: (await acquire(isolated)) && routingStored };
     } catch {
-      return { id: activate(crypto.randomUUID()), restorable: false };
+      return { id: activate(createBrowserUuid()), restorable: false };
     }
   })();
   return claim;

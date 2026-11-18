@@ -186,6 +186,7 @@ describe('F322 conversation view control in the real v2 header', () => {
   it('shows a confirmed cat view after save and restores group without changing the message scope copy', async () => {
     state.apiFetch.mockImplementation(async (path: string, init?: RequestInit) => {
       if (path.includes('/active-pane')) return Response.json({ active: false });
+      if (!path.includes('/api/config/conversation-view')) throw new Error(`Unexpected request: ${path}`);
       if (init?.method === 'PUT') {
         const requested = JSON.parse(String(init.body)) as { view: { mode: 'group' | 'cat'; catId?: string } };
         return Response.json({ stored: requested.view, effective: requested.view, source: 'thread' });
@@ -239,6 +240,7 @@ describe('F322 conversation view control in the real v2 header', () => {
     const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {});
     state.apiFetch.mockImplementation(async (path: string, init?: RequestInit) => {
       if (path.includes('/active-pane')) return Response.json({ active: false });
+      if (!path.includes('/api/config/conversation-view')) throw new Error(`Unexpected request: ${path}`);
       if (init?.method === 'PUT') {
         return Response.json({ stored: { mode: 'group' }, effective: { mode: 'group' }, source: 'thread' });
       }
@@ -264,6 +266,7 @@ describe('F322 conversation view control in the real v2 header', () => {
     let putCount = 0;
     state.apiFetch.mockImplementation(async (path: string, init?: RequestInit) => {
       if (path.includes('/active-pane')) return Response.json({ active: false });
+      if (!path.includes('/api/config/conversation-view')) throw new Error(`Unexpected request: ${path}`);
       if (init?.method === 'PUT') {
         putCount += 1;
         if (putCount === 1) return new Response(JSON.stringify({ error: 'save failed' }), { status: 500 });

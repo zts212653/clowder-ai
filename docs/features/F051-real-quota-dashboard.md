@@ -1,11 +1,10 @@
 ---
 feature_ids: [F051]
-related_features: [F042]
+related_features: [F042, F320, F322]
 topics: [quota, dashboard, usage, scheduling, degradation, claudebar, gemini, antigravity]
 doc_kind: spec
-tips_exempt: existing quota refresh correctness and credential-boundary hardening; no new user action or discovery surface
 created: 2026-03-02
-updated: 2026-07-18
+updated: 2026-11-17
 ---
 
 # F051 — 猫粮看板（Quota Board）
@@ -356,3 +355,12 @@ v1（Phase 1-5，Maine Coon实现）的核心问题：
 - 吸收社区 PR `clowder-ai#145`，把按“日期 × 猫”聚合的日消耗能力带回家里
 - 后端新增 `GET /api/usage/daily`，支持 `days` / `catId` 过滤，`total.invocations` 按 record 计数，per-cat 用 `participations`
 - Hub 的猫粮看板新增“近 7 日猫粮消耗”区域，补齐 quota board 的日级钻取视角
+
+## 2026-11-16 现状更新 — 首页额度小圆环：自选账号、可钉可收的额度汇总
+
+随着 F320 多账号 OAuth 切换（`HubAccountsTab`）与 F322 新版工作台窄栏（`WorldRail`）成为日常主入口，额度查看收束到两个真实入口，不再保留无数据源的旧运维空壳：
+
+- **首页左侧栏四家额度竖条**（`QuotaRingButton` + `QuotaRingIcon` + `QuotaRingPopover`）：默认钉在 `WorldRail` 左下角头像上方（24×24 网格四根底对齐圆角竖条，从左到右依次代表 `布偶 Claude · 缅因 Codex · 暹罗 AGY · 梵花 Kimi`，家族色走主题 OKLCH 派生变量；每根只取该家族当前 `正在用` 账号尚未过期窗口中的最低剩余比例，其中暹罗竖条严格只取 `Gemini` 池（`agy-gemini`）非过期窗口，卡片内则将 `Gemini` 与印印使用的 `Claude / GPT`（`agy-claude-gpt`）两套窗口分行独立展示、绝不合并为一个数；低于 20% 整根切换危险红并保留最小 3.5 高红头，暂无读数或身份归属无法核实的账号渲染 `currentColor` 16% 灰空槽，绝不画假 0%）。鼠标悬停直接显示四家数字摘要；点开弹层按猫族分组，`正在用` 的账号排首行展示完整窗口进度，备用号一行一个展示剩余比例与重置时间。
+- **手动刷新、自选账号与收起恢复**：弹层内提供手动 `刷新`（按需查询已选 Codex / Claude / AGY / Kimi 账号对应接口：AGY 走官方无头 `agy --output-format json -p /usage` 的账号级 `POST /api/accounts/:profileId/agy/quota`，同时支持托管 `account.agy` 文件登录与在岗 `agyProfile` 单一身份一致的默认 `gemini` 账号，按 `(accountRef, credentialVersion)` 隔离持久化 `.cat-cafe/agy-quota.sqlite`、保留上游原样重置时间且绝不自行推算 7 天窗口；Kimi 走账号级 `POST /api/accounts/:profileId/kimi/quota` 持久化 `.cat-cafe/kimi-quota.sqlite`；点开弹层不自动刷新，不重启已停用的 Claude 官方探测，也不做任何后台轮询）、`选择账号` 勾选清单、`管理账号`（直达 `/settings?s=accounts`）与 `收起图标`。收起后可在「设置 → 账户与登录」顶部的 `在左侧栏显示额度` 开关随时重新开启或调整自选账号；偏好持久化于 `.cat-cafe/user-preferences.json`（`GET/PUT /api/config/quota-pin`，`TTL=0`，零新增环境变量，只展示不自动切号）。
+- **会话被动额度同步与同页事件驱动刷新**：`CodexAgentService` 在会话结束解析本地 rollout `token_count.rate_limits`，核验 `auth.json` JWT 身份与目录一致后被动更新对应 Codex 账号窗口；前端 `useQuotaRingData` 订阅会话终态完成事件，留在同一首页持续对话时无需切窗或轮询即可自动刷新左侧栏竖条与悬停读数。
+- **退役旧空壳看板**：移除「设置 → 系统 → 运维监控 → 使用统计」下已无真实数据源的旧 `HubQuotaBoardTab`（保留同页 `DailyUsageSection` 日级消耗，并将 `HubRoutingPolicyTab` 额度链接指向 `/settings?s=accounts`）。

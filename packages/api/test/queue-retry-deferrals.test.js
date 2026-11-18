@@ -18,6 +18,27 @@ function waitFor(predicate, timeoutMs = 2_000) {
 }
 
 describe('QueueRetryDeferrals', () => {
+  it('keeps repeated preflight timeouts within a minute without shortening backend backoff', () => {
+    const now = 1_000;
+    const deferrals = new QueueRetryDeferrals(
+      () => {},
+      {},
+      () => now,
+    );
+    try {
+      const preflight = Array.from(
+        { length: 8 },
+        () => deferrals.defer('thread-1', 'preflight', undefined, 'preflight_timeout') - now,
+      );
+      const backend = Array.from({ length: 8 }, () => deferrals.defer('thread-1', 'backend') - now);
+      assert.deepEqual(preflight, [10_000, 20_000, 40_000, 60_000, 60_000, 60_000, 60_000, 60_000]);
+      assert.equal(backend.at(-1), 1_280_000, 'provider/backend failures retain their existing backoff');
+    } finally {
+      deferrals.forget('preflight');
+      deferrals.forget('backend');
+    }
+  });
+
   it('doubles the wait with each consecutive failure up to the longest wait', () => {
     const clock = { now: 1_000 };
     const deferrals = new QueueRetryDeferrals(

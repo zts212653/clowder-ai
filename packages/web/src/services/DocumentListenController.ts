@@ -1,11 +1,23 @@
 'use client';
 
-import type { ListenDocumentState, ListenPlaybackRate, ListenRetention } from '@cat-cafe/shared';
+import {
+  type ListenDocumentState,
+  type ListenPlaybackRate,
+  type ListenRetention,
+  ReferenceAudioChangedError,
+  VoiceSelectionSequence,
+} from '@cat-cafe/shared';
 import type { ListenDocumentDescriptor, ListenModeSession } from '@/stores/listenModeStore';
 import { listenDocumentCacheKey, useListenModeStore } from '@/stores/listenModeStore';
 import { useVoiceSessionStore } from '@/stores/voiceSessionStore';
 import { apiFetch } from '@/utils/api-client';
-import { type ListenModeApi, type ListenSynthesisEvent, listenModeApi } from './listenModeApi';
+import { showTtsVoiceWarning } from '@/utils/tts-voice-warning';
+import {
+  type ListenModeApi,
+  type ListenSynthesisEvent,
+  listenModeApi,
+  type SynthesizedListenAsset,
+} from './listenModeApi';
 import type { PlaybackManager, PlaybackSnapshot } from './PlaybackManager';
 import { getPlaybackManager } from './playbackRuntime';
 
@@ -90,6 +102,8 @@ export class DocumentListenController {
   private underrunActive = false;
   private underrunCount = 0;
   private synthesisAbort: AbortController | null = null;
+  private recordings = new Map<string, SynthesizedListenAsset>();
+  private voiceSequence = new VoiceSelectionSequence();
 
   constructor(private readonly dependencies: ControllerDependencies = defaultDependencies) {}
 
@@ -99,6 +113,7 @@ export class DocumentListenController {
     this.abortSynthesis();
     this.detachManagerListeners();
     this.descriptor = descriptor;
+    this.recordings.clear();
     this.sessionStartedAt = this.dependencies.now();
     this.firstSegmentReady = false;
     this.firstAudioPlayed = false;
@@ -124,6 +139,12 @@ export class DocumentListenController {
       const saved = await this.dependencies.api.load(descriptor.identity);
       if (generation !== this.generation) return;
       const restored = restoredSession(descriptor, saved, explicitIndex);
+      if (saved?.recordings) {
+        for (const sentence of saved.sentences) {
+          const recording = sentence.assetId ? saved.recordings[sentence.assetId] : undefined;
+          if (recording) this.recordings.set(sentence.anchor, recording);
+        }
+      }
       this.updateSession(restored);
       await this.persist();
       if (generation !== this.generation) return;
@@ -189,6 +210,7 @@ export class DocumentListenController {
     const session = useListenModeStore.getState().session;
     if (!session) return;
     await this.dependencies.api.clearAudio(session.identity);
+    this.recordings.clear();
     this.updateSession({ cachedAnchors: [], cacheBytes: 0 });
   }
 
@@ -198,6 +220,7 @@ export class DocumentListenController {
     this.nextToPrepare = startIndex;
     this.desiredEnd = Math.min(startIndex + PREFETCH_AHEAD - 1, (this.descriptor?.sentences.length ?? 1) - 1);
     this.preparedCount = 0;
+    this.voiceSequence = new VoiceSelectionSequence();
     this.lastProgressKey = '';
     const session = useListenModeStore.getState().session;
     this.resumeOffset = session?.currentTime ?? 0;
@@ -230,17 +253,29 @@ export class DocumentListenController {
     const descriptor = this.descriptor;
     const sentence = descriptor?.sentences[this.nextToPrepare];
     if (!sentence) return false;
-    const asset = await this.consumeSynthesisStream(generation, sentence.text);
+    const asset =
+      this.recordings.get(sentence.anchor) ?? (await this.consumeSynthesisStream(generation, sentence.text));
     if (!asset || !this.isCurrent(generation)) return false;
-    const linked = await this.dependencies.api.linkAsset(
-      descriptor.identity,
-      sentence.anchor,
-      asset.assetId,
-      asset.synthesisFingerprint,
-    );
-    if (linked === false) return false;
-    if (!this.isCurrent(generation)) return false;
-    this.recordLinkedSentence(sentence.anchor, asset.bytes, asset.synthesisFingerprint);
+    if (!asset.historical && asset.voiceSelection) {
+      try {
+        this.voiceSequence.observe(asset.voiceSelection);
+      } catch (error) {
+        if (error instanceof ReferenceAudioChangedError) showTtsVoiceWarning({ warnings: [error.message] });
+        throw error;
+      }
+    }
+    showTtsVoiceWarning(asset.voiceSelection ?? { warnings: asset.warnings ?? [] });
+    if (!asset.historical && asset.reusable !== false) {
+      const linked = await this.dependencies.api.linkAsset(
+        descriptor.identity,
+        sentence.anchor,
+        asset.assetId,
+        asset.synthesisFingerprint,
+      );
+      if (linked === false) return false;
+      if (!this.isCurrent(generation)) return false;
+      this.recordLinkedSentence(sentence.anchor, asset.bytes, asset.synthesisFingerprint);
+    }
     const enqueueResult = await this.dependencies.getManager().enqueueUrl(asset.audioUrl, this.dependencies.fetchAudio);
     if (!this.isCurrent(generation)) return false;
     if (enqueueResult === 'cancelled') {
@@ -250,7 +285,7 @@ export class DocumentListenController {
     if (enqueueResult === 'failed') throw new Error('完整音频加载失败，请重试');
     this.applyResumeOffset();
     this.recordFirstSegmentReady();
-    this.recordPreparedSentence(sentence.anchor, asset.bytes);
+    this.recordPreparedSentence(sentence.anchor, asset.bytes, asset.historical || asset.reusable !== false);
     return true;
   }
 
@@ -293,13 +328,14 @@ export class DocumentListenController {
     this.resumeOffset = 0;
   }
 
-  private recordPreparedSentence(anchor: string, bytes: number): void {
+  private recordPreparedSentence(anchor: string, bytes: number, reusable = true): void {
     this.preparedCount++;
     this.nextToPrepare++;
     this.recordFirstSegmentReady();
     const snapshot = this.dependencies.getManager().getSnapshot();
     const bufferDepth = Math.max(0, this.preparedCount - snapshot.itemIndex - 1);
     this.emitMetric('prefetch_buffer_segments', bufferDepth);
+    if (!reusable) return;
     const session = useListenModeStore.getState().session;
     if (!session || session.cachedAnchors.includes(anchor)) return;
     this.updateSession({
@@ -404,7 +440,17 @@ export class DocumentListenController {
     if (!session) return;
     const state = documentState(session, this.dependencies.now());
     const operation = this.persistTail.then(async () => {
-      await this.dependencies.api.save(state);
+      const saved = await this.dependencies.api.save(state);
+      if (
+        saved &&
+        this.descriptor?.identity.projectPath === state.identity.projectPath &&
+        this.descriptor.identity.relativePath === state.identity.relativePath
+      ) {
+        const retained = new Map(saved.sentences.map((sentence) => [sentence.anchor, sentence.assetId]));
+        for (const [anchor, recording] of this.recordings) {
+          if (retained.get(anchor) !== recording.assetId) this.recordings.delete(anchor);
+        }
+      }
     });
     this.persistTail = operation.catch(() => undefined);
     await operation;

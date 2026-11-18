@@ -10,18 +10,19 @@ import { commitRecoveredFailedResponse } from '../../dist/routes/callback-a2a-tr
 /** Exact admitted source/response, production recovery and atomic failed-result ingress. */
 export async function failedResponseFixture(
   { messages, turns, ledger },
-  { status = 'failed', rejected = false, isFailureReport = false } = {},
+  { status = 'failed', rejected = false, isFailureReport = false, crossPost, callerCatId = 'codex' } = {},
 ) {
   const queue = new InvocationQueue(ledger);
   const drains = [];
   const preflightCalls = [];
   const input = await messages.append({
-    from: { kind: 'agent', catId: 'codex' },
+    from: { kind: 'agent', catId: callerCatId },
     userId: 'owner',
     threadId: 'thread',
     content: '@opus work',
     mentions: ['opus'],
     timestamp: 100,
+    ...(crossPost ? { extra: { crossPost } } : {}),
     lifecycle: { kind: 'input', orderKey: '100' },
   });
   const response = await messages.append({
@@ -36,7 +37,7 @@ export async function failedResponseFixture(
     extra: {
       a2aFailureReturn: {
         triggerMessageId: input.id,
-        callerCatId: 'codex',
+        callerCatId,
         ownerAuthProvenance: 'strict',
         parentInvocationId: 'parent',
         isFailureReport,

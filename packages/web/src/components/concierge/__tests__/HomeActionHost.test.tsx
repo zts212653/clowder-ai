@@ -55,6 +55,34 @@ async function mountHost() {
   };
 }
 
+it('registers distinct windows on the original page socket without secure-context randomUUID', async () => {
+  const descriptor = Object.getOwnPropertyDescriptor(crypto, 'randomUUID');
+  Object.defineProperty(crypto, 'randomUUID', { configurable: true, value: undefined });
+  grantLeases();
+  const socketId = fake.connect();
+  const containers = [document.createElement('div'), document.createElement('div')];
+  const roots = containers.map((container) => {
+    document.body.append(container);
+    return withHubSocket(createRoot(container), fake.hub);
+  });
+  try {
+    for (const root of roots) await act(async () => root.render(<HomeActionHost />));
+    const registered = registrations();
+    expect(registered.map((window) => window.socketId)).toEqual([socketId, socketId]);
+    expect(new Set(registered.map((window) => window.clientId)).size).toBe(2);
+    for (const window of registered)
+      expect(window.clientId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+  } finally {
+    act(() => {
+      for (const root of roots) root.unmount();
+    });
+    for (const container of containers) container.remove();
+    if (descriptor) Object.defineProperty(crypto, 'randomUUID', descriptor);
+    else Reflect.deleteProperty(crypto, 'randomUUID');
+  }
+  expect(releasedTokens()).toEqual(['owner-token-1', 'owner-token-2']);
+});
+
 for (const boundary of ['unmount', 'disconnect'] as const) {
   it(`releases a window capability returned after ${boundary}, instead of retaining an absent consumer`, async () => {
     let finishRegistration: (response: Response) => void = () => {

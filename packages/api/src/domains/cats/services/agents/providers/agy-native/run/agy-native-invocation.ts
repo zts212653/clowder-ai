@@ -7,6 +7,7 @@ import type { createAgyNativeContinuityInput } from '../agy-native-continuity.js
 import type { AgyNativeLaunchPlan } from '../agy-native-launch.js';
 import { AgyNativeProgress } from '../agy-native-progress.js';
 import { type AgyNativeObservedTurn, observeAgyNativeTurn, projectAgyNativeTurn } from '../agy-native-turn.js';
+import { AgyNativeCapacityObserver } from './agy-native-capacity-observer.js';
 import { AgyNativeImagePublisher } from './agy-native-image-publisher.js';
 import { recoverAgyNativeMcpSpill } from './agy-native-mcp-spill.js';
 import { AgyNativeRunInput } from './agy-native-run-input.js';
@@ -72,7 +73,17 @@ export async function* runAgyNativeInvocation(input: {
     options?.uploadDir,
   );
   let runInput: AgyNativeRunInput | undefined;
-  if (multiTurn && options) runInput = new AgyNativeRunInput(options, () => inputLifetime.abort());
+  let automaticCheckpoint = !compactionRequested && !/^\/compact(?:\s|$)/.test(prompt.trim());
+  if (multiTurn && options)
+    runInput = new AgyNativeRunInput(
+      options,
+      () => inputLifetime.abort(),
+      launch.binding.workspaceRoot,
+      (text) => {
+        automaticCheckpoint = !/^\/compact(?:\s|$)/.test(text.trim());
+      },
+      launch.supplementalUploadDir,
+    );
   try {
     const { stdinInput, ...deferredLaunchOptions } = launch.cliOptions;
     const cliOptions = {
@@ -100,6 +111,23 @@ export async function* runAgyNativeInvocation(input: {
       | undefined;
     let runOutput: AgyNativeRunOutput | undefined;
     let observed: AgyNativeObservedTurn | undefined;
+    let capacityObserver: AgyNativeCapacityObserver | undefined;
+    const successful = (messages: readonly AgentMessage[]) =>
+      messages.at(-1)?.type === 'done' && messages.at(-1)?.errorCode === undefined;
+    const settleCapacity = (turn: AgyNativeObservedTurn, hostSuccessful: boolean) => {
+      try {
+        const observation = capacityObserver?.commit(
+          automaticCheckpoint &&
+            hostSuccessful &&
+            turn.turn.stepsComplete &&
+            !turn.transportError &&
+            !turn.cancelledBeforeTerminal,
+        );
+        if (observation) metadata.contextWindowObservation = observation;
+      } catch (error) {
+        log.warn({ error }, 'Native AGY checkpoint capacity evidence could not be persisted');
+      }
+    };
     for await (const observation of observeAgyNativeTurn(
       archiveNativeStream(stream, options?.invocationId, rawArchive, (eventType) => {
         lastNativeEventType = eventType;
@@ -124,6 +152,11 @@ export async function* runAgyNativeInvocation(input: {
         await launch.bindSession(observation.sessionId);
         await continuityInput?.acceptVerifiedInit(observation.sessionId);
         metadata.sessionId = observation.sessionId;
+        metadata.model = model;
+        if (launch.capacityScope) {
+          capacityObserver = new AgyNativeCapacityObserver(launch.capacityScope, observation.sessionId);
+          metadata.contextWindowObservation = capacityObserver.current;
+        }
         if (runInput) runOutput = new AgyNativeRunOutput(catId, metadata, launch.agentTools);
         runInput?.register(observation.sessionId);
         yield {
@@ -136,6 +169,7 @@ export async function* runAgyNativeInvocation(input: {
         };
       } else if (observation.kind === 'step') {
         const event = observation.event;
+        capacityObserver?.step(event, automaticCheckpoint);
         lastNativeStep = {
           stepIndex: event.stepIndex,
           stepType: event.stepType,
@@ -154,11 +188,20 @@ export async function* runAgyNativeInvocation(input: {
           );
         }
       } else if (observation.kind === 'result') {
-        const publication = await imagePublisher.settle(observation.observed);
+        const resultObserved =
+          runInput?.hasUnconfirmedInput && observation.observed.turn.outcome === 'ok'
+            ? {
+                ...observation.observed,
+                transportError:
+                  observation.observed.transportError ??
+                  'AGY native result arrived before its user input was confirmed read',
+              }
+            : observation.observed;
+        const publication = await imagePublisher.settle(resultObserved);
         yield* publication.messages;
         if (runInput && runOutput) {
           const messages = runOutput.result(publication.observed);
-          await runInput.result(runOutput.successful);
+          runInput.observeResult(runOutput.successful);
           if (!runOutput.successful) {
             processLifetime.abort();
             observed = publication.observed;
@@ -166,6 +209,22 @@ export async function* runAgyNativeInvocation(input: {
             break;
           }
           yield* messages;
+        }
+      } else if (observation.kind === 'turn_complete') {
+        const projected = projectAgyNativeTurn(
+          catId,
+          { ...metadata },
+          observation.observed,
+          observation.observed.cancelledBeforeTerminal === true,
+          launch.agentTools,
+        );
+        const hostSuccessful = successful(projected);
+        await runInput?.completeTurn(hostSuccessful);
+        settleCapacity(observation.observed, hostSuccessful);
+        if (!hostSuccessful) {
+          observed = observation.observed;
+          processLifetime.abort();
+          break;
         }
       } else if (observation.kind === 'liveness') {
         const warning = lastNativeStep
@@ -194,7 +253,9 @@ export async function* runAgyNativeInvocation(input: {
           timestamp: Date.now(),
           content: JSON.stringify({ type: 'liveness_warning', ...warning }),
         };
-      } else observed = observation.observed;
+      } else {
+        observed = observation.observed;
+      }
     }
     if (!observed) throw new Error('AGY native stream ended without a terminal observation');
     const publication = await imagePublisher.settle(observed);
@@ -215,8 +276,13 @@ export async function* runAgyNativeInvocation(input: {
           cancelledBeforeTerminal: options?.signal?.aborted === true || observed.cancelledBeforeTerminal,
         };
       }
+      const messages = runOutput.finish(observed);
+      await runInput.completeTurn(successful(messages));
       await runInput.dispose();
-      yield* runOutput.finish(observed);
+      settleCapacity(observed, successful(messages));
+      for (const message of messages)
+        if (message.metadata) message.metadata.contextWindowObservation = metadata.contextWindowObservation;
+      yield* messages;
       return;
     }
     const messages = projectAgyNativeTurn(
@@ -227,6 +293,7 @@ export async function* runAgyNativeInvocation(input: {
       launch.agentTools,
       compactionRequested,
     );
+    settleCapacity(observed, successful(messages));
     yield* progress.final(messages);
   } finally {
     processLifetime.abort();

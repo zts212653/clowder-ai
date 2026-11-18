@@ -376,16 +376,18 @@ describe('F332 unified find: docs + matters groups', () => {
     assert.match(text(result), /Found 1 result/);
   });
 
-  test('a slow directory cannot hold docs: it times out shortly after docs settle', async () => {
+  test('a directory that never answers is bounded by the shared ceiling and never takes docs down', async (t) => {
+    t.mock.timers.enable({ apis: ['setTimeout'] });
     routes['/api/callbacks/memory-matters'] = (_params, init) =>
       new Promise((_resolve, reject) => init.signal.addEventListener('abort', () => reject(new Error('aborted'))));
     const { handleSearchEvidence } = await load();
-    const started = Date.now();
-    const result = await handleSearchEvidence({ query: '守望猫' });
-    const elapsed = Date.now() - started;
-    assert.ok(elapsed < 4_000, `elapsed ${elapsed}`);
+    const pending = handleSearchEvidence({ query: '守望猫' });
+    for (let i = 0; i < 20; i += 1) await new Promise((resolve) => setImmediate(resolve));
+    t.mock.timers.tick(16_000);
+    const result = await pending;
     const block = mattersBlock(result);
     assert.equal(block.status, 'timeout');
+    assert.equal(block.cause, 'deadline');
     assert.match(block.detail, /not a no-results claim/);
     assert.match(text(result), /Found 1 result/);
   });

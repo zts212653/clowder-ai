@@ -31,6 +31,7 @@ import { RichBlocks } from './rich/RichBlocks';
 import { SenderAvatar } from './SenderAvatar';
 import { useShellCopy } from './shell/shell-copy';
 import { useShellPresentation } from './shell/shell-presentation';
+import { WatcherPanelReveal } from './watcher/WatcherPanelReveal';
 import { WorktreeNoticeBody } from './worktrees/WorktreeNoticeBody';
 
 function formatTime(ts: number): string {
@@ -270,6 +271,9 @@ export function ConnectorBubble({
       )}
       {richBlocks && richBlocks.length > 0 && (
         <RichBlocks blocks={richBlocks} messageSource={message.source} publication={publication} />
+      )}
+      {source.connector === 'watcher-panel' && typeof source.meta?.roundId === 'string' && (
+        <WatcherPanelReveal roundId={source.meta.roundId} getCatById={getCatById} />
       )}
       {!informationalHold && !jobId && source.connector === 'hold-ball' && typeof source.meta?.taskId === 'string' && (
         <HoldBallCancelButton

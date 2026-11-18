@@ -11,12 +11,18 @@ export function readPassageEmbeddingPage(
   lastId: number,
   limit: number,
   docAnchors?: readonly string[],
-): { lastId: number; metadataRows: number; passages: PassageEmbeddingRow[] } | undefined {
+  /** Restricts the page to these row ids: rows an earlier walk found without a vector and could not embed. */
+  onlyIds?: readonly number[],
+): { lastId: number; metadataRows: number; passages: PassageEmbeddingRow[]; skippedIds: number[] } | undefined {
   const where = ['id > ?'];
   const params: unknown[] = [lastId];
   if (docAnchors?.length) {
     where.push(`doc_anchor IN (${docAnchors.map(() => '?').join(',')})`);
     params.push(...docAnchors);
+  }
+  if (onlyIds) {
+    where.push(`id IN (${onlyIds.map(() => '?').join(',')})`);
+    params.push(...onlyIds);
   }
   const rows = db
     .prepare(`SELECT id, doc_anchor AS docAnchor, passage_id AS passageId
@@ -33,5 +39,12 @@ export function readPassageEmbeddingPage(
         .all(...missing.map(({ id }) => id)) as PassageEmbeddingRow[])
     : [];
   for (const passage of passages) passage.sourceSnapshot = capturePassageVectorSource(db, passage);
-  return { lastId: last.id, metadataRows: rows.length, passages: passages.filter((passage) => passage.sourceSnapshot) };
+  const embeddable = passages.filter((passage) => passage.sourceSnapshot);
+  // Without a vector and not embeddable now: no parent document, or a withdrawn message. Such a row
+  // can become embeddable later without changing, so the caller keeps its id to look at it again.
+  const taken = new Set(embeddable.map((passage) => passageVectorKey(passage.docAnchor, passage.passageId)));
+  const skippedIds = missing
+    .filter((row) => !taken.has(passageVectorKey(row.docAnchor, row.passageId)))
+    .map((row) => row.id);
+  return { lastId: last.id, metadataRows: rows.length, passages: embeddable, skippedIds };
 }

@@ -14,6 +14,9 @@ export function materializeAgyNativeEffectGuard(input: {
   /** Host-admitted command directory; legacy hook callers can omit it. */
   workspaceRoot?: string;
   pluginServerName?: string;
+  requireApproval?: boolean;
+  allowWorkspaceWrites?: boolean;
+  approvalBridgeFile?: string;
 }): string {
   const script = realpathSync(secretRuntimeScript('agy-native-effect-guard.mjs'));
   const quote = (value: string) => `'${value.replaceAll("'", `'"'"'`)}'`;
@@ -28,12 +31,17 @@ export function materializeAgyNativeEffectGuard(input: {
     ...(input.workspaceRoot !== undefined ? [realpathSync(input.workspaceRoot)] : []),
     ...(input.pluginServerName !== undefined ? [input.pluginServerName] : []),
     ...(input.credentialHome !== undefined ? [`--credential-home=${input.credentialHome}`] : []),
+    ...(input.requireApproval ? ['--require-approval'] : []),
+    ...(input.allowWorkspaceWrites ? ['--allow-workspace-writes'] : []),
+    ...(input.approvalBridgeFile !== undefined ? [`--approval-bridge-file=${input.approvalBridgeFile}`] : []),
   ]
     .map(quote)
     .join(' ');
+  const preToolTimeout = input.approvalBridgeFile !== undefined ? 1800 : 5;
   const config = {
     'cat-cafe-native-effect': {
-      PreToolUse: [{ matcher: '*', hooks: [{ type: 'command', command, timeout: 5 }] }],
+      PreToolUse: [{ matcher: '*', hooks: [{ type: 'command', command, timeout: preToolTimeout }] }],
+      PostToolUse: [{ matcher: 'run_command', hooks: [{ type: 'command', command, timeout: 5 }] }],
     },
   };
   const path = join(input.profileHome, '.gemini/config/hooks.json');

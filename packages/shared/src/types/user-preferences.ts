@@ -8,6 +8,7 @@ import type { ChatBackgroundPreferences } from '../chat-background.js';
 import type { ConversationViewPreferences } from '../conversation-view-preference.js';
 import type { IgnoredItemPreferences } from '../ignored-item-preference.js';
 import type { ProcessTalkMode } from '../process-talk-preference.js';
+import type { QuotaPinPreference } from '../quota-pin-preference.js';
 import type { MessageWorkDisposition } from './queue-receipt.js';
 
 export type MessageDispositionPreferenceSource = 'thread' | 'global' | 'product';
@@ -80,4 +81,6 @@ export interface UserPreferences {
   bubbleDefaults?: BubbleDefaultPreferences;
   /** F322: owner-only per-thread conversation presentation. No TTL. */
   conversationViews?: ConversationViewPreferences;
+  /** F051: owner-only sidebar quota ring visibility and selected account refs. No TTL. */
+  quotaPin?: QuotaPinPreference;
 }

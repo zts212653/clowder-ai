@@ -10,7 +10,7 @@ interface DocumentEmbeddingDeps {
   passageVectorStore?: PassageVectorStore;
 }
 
-function prepareModel(db: Database.Database, deps: DocumentEmbeddingDeps) {
+function prepareModel(db: Database.Database, deps: DocumentEmbeddingDeps, invalidate: () => void) {
   const { embedding, vectorStore, passageVectorStore } = deps;
   const model = embedding.getModelInfo();
   const meta = vectorStore.getMeta();
@@ -19,6 +19,8 @@ function prepareModel(db: Database.Database, deps: DocumentEmbeddingDeps) {
   if (modelChanged && vectorStore.tables.generationId !== 'g0' && (hasVectors || meta.embedding_model_id)) {
     throw new Error('Cannot overwrite another generation representation');
   }
+  if (modelChanged || meta.embedding_model_id !== model.modelId || meta.embedding_model_rev !== model.modelRev)
+    invalidate();
   if (modelChanged) {
     vectorStore.clearAll();
     passageVectorStore?.clearAll();
@@ -33,6 +35,7 @@ function prepareSources(
   vectorStore: VectorStore,
   pendingAnchors: ReadonlySet<string>,
   force: boolean,
+  invalidate: () => void,
 ): string[] {
   // Preparation needs hashes and membership only. Summaries are hydrated
   // later for each small provider batch, never for the warm corpus here.
@@ -73,7 +76,10 @@ function prepareSources(
       stamp.run(row.anchor, row.vectorSourceHash);
     }
     const untrusted = sourcePending || row.vectorSourceHash !== sourceHash || row.revisionHash === 'invalidated';
-    if (untrusted && hasVector) vectorStore.delete(row.anchor);
+    if (untrusted && hasVector) {
+      invalidate();
+      vectorStore.delete(row.anchor);
+    }
     if (untrusted && row.vectorSourceHash !== null) unstamp.run(row.anchor);
     if (force || untrusted || !hasVector) pending.push(row.anchor);
   }
@@ -88,19 +94,32 @@ export function prepareDocumentVectors(
   isCurrent: () => boolean,
   force = false,
 ): Promise<string[]> {
-  const publishProjection = store.invalidateVectorProjection();
+  const submitted = store.captureVectorProjectionPreparation();
   return store.runExclusive(() => {
-    if (!isCurrent()) return [];
-    const db = store.getDb();
-    const pending = db.transaction(() => {
-      const model = prepareModel(db, deps);
-      const pending = prepareSources(db, deps.vectorStore, pendingAnchors, force);
-      // This records model ownership, not completed source coverage. It also
-      // keeps a later failed batch from resetting valid cold partial work.
-      deps.vectorStore.initMeta(model);
+    if (!isCurrent()) {
+      submitted.invalidate();
+      return [];
+    }
+    // Earlier queued preparations may have published or failed meanwhile. Validate the
+    // current binding here, keeping it available unless this transaction changes geometry.
+    const preparation = store.captureVectorProjectionPreparation();
+    try {
+      const db = store.getDb();
+      const pending = db.transaction(() => {
+        if (force) preparation.invalidate();
+        const model = prepareModel(db, deps, preparation.invalidate);
+        const pending = prepareSources(db, deps.vectorStore, pendingAnchors, force, preparation.invalidate);
+        // This records model ownership, not completed source coverage. It also
+        // keeps a later failed batch from resetting valid cold partial work.
+        deps.vectorStore.initMeta(model);
+        return pending;
+      })();
+      if (isCurrent()) preparation.publish();
+      else preparation.invalidate();
       return pending;
-    })();
-    if (isCurrent()) publishProjection();
-    return pending;
+    } catch (error) {
+      preparation.invalidate();
+      throw error;
+    }
   });
 }

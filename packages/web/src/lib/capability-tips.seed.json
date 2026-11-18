@@ -1,5 +1,61 @@
 [
   {
+    "id": "feature-f051-sidebar-quota-ring",
+    "kind": "feature",
+    "sourceRef": {
+      "path": "docs/features/F051-real-quota-dashboard.md",
+      "anchor": "首页额度小圆环：自选账号、可钉可收的额度汇总"
+    },
+    "structureSource": {
+      "path": "packages/web/src/components/shell/QuotaRingButton.tsx",
+      "anchor": "QuotaRingButton"
+    },
+    "bodySource": {
+      "path": "docs/features/F051-real-quota-dashboard.md",
+      "anchor": "在左侧栏显示额度"
+    },
+    "contexts": ["concierge_open", "thinking"],
+    "audience": ["cvo"],
+    "body": "悬停左下角小信箱上方的四色额度竖条即可速览布偶、缅因、暹罗、梵花当前在用号余量，点开可按家查看在用与备用号余量及重置时间；支持手动刷新和收起图标，收起后可在「设置 → 账户与登录」重新打开。",
+    "action": {
+      "type": "open_source",
+      "label": "查看首页侧栏额度说明",
+      "sourceRef": {
+        "path": "docs/features/F051-real-quota-dashboard.md",
+        "anchor": "首页额度小圆环：自选账号、可钉可收的额度汇总"
+      }
+    },
+    "owner": "gemini-carbon"
+  },
+  {
+    "id": "feature-f235-conversation-issue",
+    "kind": "feature",
+    "sourceRef": {
+      "path": "docs/features/F235-feedback-to-community-publisher.md",
+      "anchor": "会话里把问题整理成 Issue"
+    },
+    "structureSource": {
+      "path": "packages/web/src/components/rich/CommunityPublishFlow.tsx",
+      "anchor": "CommunityPublishFlow"
+    },
+    "bodySource": {
+      "path": "docs/features/F235-feedback-to-community-publisher.md",
+      "anchor": "会话里把问题整理成 Issue"
+    },
+    "contexts": ["concierge_open"],
+    "audience": ["cvo"],
+    "body": "发现项目问题时，可让猫把已有分析整理成会话 Issue 草稿。阅读报告并核对仓库，点「核对并继续」后可编辑，最后点「发布到 GitHub」才会外发；插件未配置时也能复制报告。出现真实 Issue 链接才算提交完成。",
+    "action": {
+      "type": "open_source",
+      "label": "查看会话提单用法",
+      "sourceRef": {
+        "path": "docs/features/F235-feedback-to-community-publisher.md",
+        "anchor": "会话里把问题整理成 Issue"
+      }
+    },
+    "owner": "codex"
+  },
+  {
     "id": "feature-f332-matter-recall",
     "kind": "feature",
     "sourceRef": {
@@ -1673,6 +1729,28 @@
       "draftPrompt": "请先帮我预览一只猫的私人时间作息和成本，等我确认后再写入；不要创建通用 Schedule 任务。"
     },
     "owner": "codex-sol"
+  },
+  {
+    "id": "feature-personal-voice-choice",
+    "kind": "feature",
+    "sourceRef": { "path": "docs/features/F103-per-cat-voice-identity.md", "anchor": "Architecture: 统一入口" },
+    "structureSource": {
+      "path": "packages/web/src/components/hub-cat-editor-voice.tsx",
+      "anchor": "VoiceConfigSection"
+    },
+    "bodySource": {
+      "path": "packages/web/src/components/members/MemberVoiceChoice.tsx",
+      "anchor": "MemberVoiceChoice"
+    },
+    "contexts": ["concierge_open", "feature_dev"],
+    "audience": ["all"],
+    "body": "新猫选自己的声线：在设置 → 猫猫团队 → 成员与运行时点开本人，在「语音」里选择并保存。配音仍用本人的 ID；合成结果会说明实际声音和降级原因，audioUrl 就是可取用的文件。",
+    "action": {
+      "type": "open_source",
+      "label": "查看语音设置来源",
+      "sourceRef": { "path": "packages/web/src/components/hub-cat-editor-voice.tsx", "anchor": "VoiceConfigSection" }
+    },
+    "owner": "codex61-sol"
   },
   {
     "id": "feature-voice-interaction",

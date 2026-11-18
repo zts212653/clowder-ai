@@ -23,6 +23,8 @@ export function captureInvocationL0Input(
         /** Existing compiler owner cwd, independent of the task working directory. */
         compilerCwd?: string;
         profileRepository?: Pick<FileProfileRepository, 'profileDir'>;
+        /** Diagnostic reads must not persist catalog migrations. */
+        readOnlyCatalog?: boolean;
         projection?: 'owner';
       }
   ),
@@ -43,7 +45,10 @@ export function captureInvocationL0Input(
       model: input.model,
       installRoot,
     });
-  const catalog = loadResolvedCatConfig(resolveProjectTemplatePath(resolveActiveProjectRoot()));
+  const catalog = loadResolvedCatConfig(
+    resolveProjectTemplatePath(resolveActiveProjectRoot()),
+    input.readOnlyCatalog ? { persistMigrations: false } : undefined,
+  );
   const configs = catRegistry.getAllConfigs();
   return captureFrozenL0Input({
     catId: input.catId,

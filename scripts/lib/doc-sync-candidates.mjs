@@ -4,10 +4,11 @@
 
 const FEATURE_RE = /(?<![A-Za-z0-9#])[Ff](\d{3})(?!\d)/g;
 // A disposition is its own line with a real reason: "Doc-Sync: none - reason", or
-// "Doc-Sync: F332 - recorded in <commit>" when the doc was updated without naming the PR.
-// An optional list bullet is allowed; quotes, inline examples and placeholders are not.
+// "Doc-Sync: F332 - recorded in <commit or #PR>" when the doc was updated without naming the PR.
+// The Fxxx form only counts once the cited commit/PR is on main and changed that doc
+// (checked by the caller with git). Quotes, inline examples and placeholders are not dispositions.
 const DOC_SYNC_LINE_RE =
-  /^\s*(?:[-*]\s+)?Doc-Sync:\s*(?:none|F\d{3}(?:\s*[,/]\s*F\d{3})*)\s*(?:\u2014|\u2013|-|:)+\s*(\S.*)$/i;
+  /^\s*(?:[-*]\s+)?Doc-Sync:\s*(none|F\d{3}(?:\s*[,/]\s*F\d{3})*)\s*(?:\u2014|\u2013|-|:)+\s*(\S.*)$/i;
 const WEAK_BODY_LINK_LIMIT = 3;
 
 export function extractFeatureIds(text, known) {
@@ -31,7 +32,17 @@ export function linkPrToFeatures(pr, known) {
   return { features: [], source: 'none', weak: false };
 }
 
-export function textHasDocSyncLine(text) {
+function citedRefs(reason) {
+  const prs = [...reason.matchAll(/(?:#|pull\/)(\d+)(?!\d)/g)].map((m) => Number(m[1]));
+  const shas = [...reason.matchAll(/(?<![0-9a-zA-Z])([0-9a-f]{7,40})(?![0-9a-zA-Z])/g)]
+    .map((m) => m[1])
+    .filter((sha) => /[a-f]/.test(sha));
+  return { prs: [...new Set(prs)], shas: [...new Set(shas)] };
+}
+
+// Disposition lines in one text: [{ kind: 'none' }] or [{ kind: 'feature', features, prs, shas }].
+export function parseDocSyncLines(text) {
+  const lines = [];
   let fenced = false;
   for (const line of String(text ?? '').split('\n')) {
     if (/^\s*(```|~~~)/.test(line)) {
@@ -39,15 +50,25 @@ export function textHasDocSyncLine(text) {
       continue;
     }
     if (fenced) continue;
-    const reason = DOC_SYNC_LINE_RE.exec(line)?.[1]?.trim() ?? '';
-    if (reason && !reason.startsWith('<')) return true;
+    const match = DOC_SYNC_LINE_RE.exec(line);
+    const reason = match?.[2]?.trim() ?? '';
+    if (!reason || reason.startsWith('<')) continue;
+    if (/^none$/i.test(match[1])) lines.push({ kind: 'none' });
+    else lines.push({ kind: 'feature', features: extractFeatureIds(match[1]), ...citedRefs(reason) });
   }
-  return false;
+  return lines;
+}
+
+export function textHasDocSyncLine(text) {
+  return parseDocSyncLines(text).length > 0;
+}
+
+export function docSyncLinesOf(pr) {
+  return [pr.body, ...(pr.comments ?? []).map((comment) => comment?.body)].flatMap(parseDocSyncLines);
 }
 
 export function hasDocSyncLine(pr) {
-  if (textHasDocSyncLine(pr.body)) return true;
-  return (pr.comments ?? []).some((comment) => textHasDocSyncLine(comment?.body));
+  return docSyncLinesOf(pr).length > 0;
 }
 
 export function prTouchesFeatureDoc(pr, featureId) {

@@ -1,6 +1,14 @@
 import { deploymentDefaults } from '@cat-cafe/shared';
 export const editorCopy = {
   zh: {
+    选择声线: '选择声线',
+    '正在读取声线…': '正在读取声线…',
+    保留当前设置: '保留当前设置',
+    参考音频不可用: '参考音频不可用',
+    参考音频待读取端确认: '参考音频待读取端确认',
+    声线列表暂时读不到: '声线列表暂时读不到',
+    '还没有可用的候选声线，可在下方填写。': '还没有可用的候选声线，可在下方填写。',
+    '未设置本人声线，合成时会使用默认声音。': '未设置本人声线，合成时会使用默认声音。',
     '正在读取成员配置…': '正在读取成员配置…',
     deleteTitle: '删除成员',
     deleteLabel: '删除',
@@ -125,6 +133,14 @@ export const editorCopy = {
     '── Codex 专属 (仅 Client=Codex 时显示) ──': 'Codex 设置',
   },
   en: {
+    选择声线: 'Choose a voice',
+    '正在读取声线…': 'Loading voices…',
+    保留当前设置: 'Keep current settings',
+    参考音频不可用: 'Reference audio unavailable',
+    参考音频待读取端确认: 'Reference awaits reader confirmation',
+    声线列表暂时读不到: 'Voice choices are unavailable',
+    '还没有可用的候选声线，可在下方填写。': 'No voice choices yet. You can enter settings below.',
+    '未设置本人声线，合成时会使用默认声音。': 'No personal voice configured. Synthesis will use a default voice.',
     '正在读取成员配置…': 'Loading member settings…',
     deleteTitle: 'Delete member',
     deleteLabel: 'Delete',

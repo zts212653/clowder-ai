@@ -1,5 +1,11 @@
-import type { TtsSynthesizeRequest, VoiceChunkEvent, VoiceConfig } from '@cat-cafe/shared';
+import type { CatVoiceResolution, ITtsProvider, TtsVoiceSelection, VoiceChunkEvent } from '@cat-cafe/shared';
 import { createModuleLogger } from '../../../../infrastructure/logger.js';
+import {
+  completeVoiceSelection,
+  prepareResolvedCatVoice,
+  ReferenceAudioChangedError,
+  VoiceSelectionSequence,
+} from './cat-voice-synthesis.js';
 import type { TtsRegistry } from './TtsRegistry.js';
 
 const log = createModuleLogger('streaming-tts');
@@ -19,7 +25,7 @@ export interface StreamingTtsChunkerConfig {
   readonly catId: string;
   readonly invocationId: string;
   readonly threadId: string;
-  readonly voiceConfig: VoiceConfig;
+  readonly voiceResolution: CatVoiceResolution;
   readonly broadcaster: Broadcaster;
   readonly ttsRegistry: TtsRegistry;
   readonly signal?: AbortSignal;
@@ -31,13 +37,27 @@ export class StreamingTtsChunker {
   private readonly pendingSyntheses: Promise<void>[] = [];
   private aborted = false;
   private startBroadcasted = false;
+  private referenceSequence = Promise.resolve();
+  private completedSelection?: TtsVoiceSelection;
+  private readonly selections = new VoiceSelectionSequence();
+  private sentChunks = 0;
   private readonly config: StreamingTtsChunkerConfig;
+  private preparation?: Promise<{ provider: ITtsProvider; voice: ReturnType<typeof prepareResolvedCatVoice> }>;
 
   constructor(config: StreamingTtsChunkerConfig) {
     this.config = config;
     config.signal?.addEventListener('abort', () => {
       this.aborted = true;
     });
+  }
+
+  private prepareSynthesis() {
+    this.preparation ??= (async () => {
+      const selected = this.config.ttsRegistry.getDefault();
+      const provider = (await selected.snapshot?.()) ?? selected;
+      return { provider, voice: prepareResolvedCatVoice(this.config.voiceResolution, provider) };
+    })();
+    return this.preparation;
   }
 
   feed(token: string): void {
@@ -68,38 +88,27 @@ export class StreamingTtsChunker {
     if (!text || this.aborted) return;
 
     const index = this.chunkIndex++;
-    const promise = this.synthesizeAndBroadcast(text, index);
+    // A reader-only path can change between requests. Observe each receipt
+    // before another reference chunk starts; inline input is also kept once/turn.
+    const promise = this.config.voiceResolution.config.refAudio
+      ? this.referenceSequence.then(() => this.synthesizeAndBroadcast(text, index))
+      : this.synthesizeAndBroadcast(text, index);
+    if (this.config.voiceResolution.config.refAudio) this.referenceSequence = promise;
     this.pendingSyntheses.push(promise);
   }
 
   private async synthesizeAndBroadcast(text: string, index: number): Promise<void> {
     if (this.aborted) return;
 
-    const { catId, invocationId, threadId, voiceConfig, broadcaster, ttsRegistry } = this.config;
-
-    let provider;
-    try {
-      provider = ttsRegistry.getDefault();
-    } catch {
-      log.error('[StreamingTtsChunker] No TTS provider available');
-      return;
-    }
-
-    const synthRequest: TtsSynthesizeRequest = {
-      text,
-      voice: voiceConfig.voice,
-      langCode: voiceConfig.langCode,
-      speed: voiceConfig.speed ?? 1.0,
-      format: 'wav',
-      ...(voiceConfig.refAudio ? { refAudio: voiceConfig.refAudio } : {}),
-      ...(voiceConfig.refText ? { refText: voiceConfig.refText } : {}),
-      ...(voiceConfig.instruct ? { instruct: voiceConfig.instruct } : {}),
-      ...(voiceConfig.temperature != null ? { temperature: voiceConfig.temperature } : {}),
-    };
+    const { catId, invocationId, threadId, broadcaster } = this.config;
 
     try {
-      const result = await provider.synthesize(synthRequest);
+      const { provider, voice } = await this.prepareSynthesis();
       if (this.aborted) return;
+      const result = await provider.synthesize({ ...voice.request, text });
+      const voiceSelection = completeVoiceSelection(voice.voiceSelection, result.referenceAudio, provider);
+      if (this.aborted) return;
+      this.completedSelection = this.selections.observe(voiceSelection);
 
       const audioBase64 = Buffer.from(result.audio).toString('base64');
 
@@ -113,6 +122,7 @@ export class StreamingTtsChunker {
         text,
         format: result.format,
         durationSec: result.durationSec,
+        voiceSelection,
       };
 
       if (!this.startBroadcasted) {
@@ -122,12 +132,29 @@ export class StreamingTtsChunker {
           catId,
           invocationId,
           threadId,
+          voiceSelection,
         });
         log.info({ catId, invocationId }, 'First chunk sent');
       }
 
       broadcaster.broadcastToRoom(`thread:${threadId}`, 'voice_chunk', event);
+      this.sentChunks++;
     } catch (err) {
+      if (err instanceof ReferenceAudioChangedError) {
+        this.aborted = true;
+        broadcaster.broadcastToRoom(`thread:${threadId}`, 'voice_stream_end', {
+          type: 'voice_stream_end',
+          catId,
+          invocationId,
+          threadId,
+          totalChunks: this.sentChunks,
+          voiceSelection: this.completedSelection && {
+            ...this.completedSelection,
+            referenceStatus: 'unverified',
+            warnings: [...this.completedSelection.warnings, err.message],
+          },
+        });
+      }
       log.error({ index, error: err }, 'Synthesis failed for chunk');
     }
   }

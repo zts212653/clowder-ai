@@ -14,6 +14,26 @@ function render(block: Parameters<typeof AudioBlock>[0]['block'], catId = 'codex
 
 // We test the data-driven logic, not React rendering (no jsdom needed)
 describe('AudioBlock voice message detection', () => {
+  it('shows fallback warnings next to a generated voice instead of silently impersonating the cat', () => {
+    const html = render({
+      id: 'fallback',
+      kind: 'audio',
+      v: 1,
+      url: '/api/tts/audio/abc.wav',
+      text: '你好',
+      voiceSelection: {
+        catId: 'new-cat',
+        source: 'global_default',
+        provider: 'fixture',
+        model: 'fixture',
+        requested: { voice: 'default', langCode: 'zh' },
+        effective: { voice: 'default', langCode: 'zh' },
+        referenceStatus: 'not_requested',
+        warnings: ['未配置本人声线，本次使用全局默认声音。'],
+      },
+    });
+    expect(html).toContain('未配置本人声线，本次使用全局默认声音。');
+  });
   it('voice transcript text wraps instead of truncating (regression)', () => {
     const html = render({
       id: 'v-wrap',

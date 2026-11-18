@@ -7,7 +7,7 @@ import assert from 'node:assert';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, describe, it } from 'node:test';
+import { after, afterEach, beforeEach, describe, it } from 'node:test';
 import { calculateTimeout, MlxAudioTtsProvider } from '../dist/domains/cats/services/tts/MlxAudioTtsProvider.js';
 import { setServiceConfig } from '../dist/domains/services/service-config.js';
 
@@ -50,6 +50,13 @@ describe('MlxAudioTtsProvider', () => {
   const originalFetch = globalThis.fetch;
   const originalServicesConfig = process.env.CAT_CAFE_SERVICES_CONFIG;
   const originalTtsUrl = process.env.TTS_URL;
+  const originalTtsModel = process.env.TTS_MODEL;
+  const isolatedConfig = mkdtempSync(join(tmpdir(), 'tts-provider-defaults-'));
+  beforeEach(() => {
+    process.env.CAT_CAFE_SERVICES_CONFIG = join(isolatedConfig, 'services.json');
+    delete process.env.TTS_MODEL;
+  });
+  after(() => rmSync(isolatedConfig, { recursive: true, force: true }));
 
   afterEach(() => {
     globalThis.fetch = originalFetch;
@@ -57,6 +64,8 @@ describe('MlxAudioTtsProvider', () => {
     else process.env.CAT_CAFE_SERVICES_CONFIG = originalServicesConfig;
     if (originalTtsUrl === undefined) delete process.env.TTS_URL;
     else process.env.TTS_URL = originalTtsUrl;
+    if (originalTtsModel === undefined) delete process.env.TTS_MODEL;
+    else process.env.TTS_MODEL = originalTtsModel;
   });
 
   it('has correct id and model', () => {
@@ -66,6 +75,15 @@ describe('MlxAudioTtsProvider', () => {
     });
     assert.strictEqual(p.id, 'mlx-audio');
     assert.strictEqual(p.model, 'mlx-community/Qwen3-TTS-12Hz-1.7B-Base-bf16');
+  });
+
+  it('freezes the real adapter capability: Base generation accepts references and ignores preset voice IDs', async () => {
+    globalThis.fetch = withHealth(async () => {
+      throw new Error('Capability discovery must not synthesize');
+    });
+    const frozen = await new MlxAudioTtsProvider({ baseUrl: 'http://test:9877' }).snapshot();
+    assert.equal(frozen.referenceAudioSupport, true);
+    assert.equal(frozen.voiceIdSupport, false);
   });
 
   it('sends correct request body to TTS server', async () => {
@@ -282,7 +300,12 @@ describe('MlxAudioTtsProvider', () => {
 
     const provider = new MlxAudioTtsProvider({ baseUrl: 'http://test:9877' });
     const events = [];
-    for await (const event of provider.stream({ text: '河床、水流与裁判', voice: 'wanderer' })) {
+    for await (const event of provider.stream({
+      text: '河床、水流与裁判',
+      voice: 'wanderer',
+      refAudio: '/voices/wanderer.wav',
+      refText: '参考转写',
+    })) {
       events.push(event);
     }
 

@@ -9,7 +9,15 @@ import { apiFetch } from '@/utils/api-client';
 
 vi.mock('@/utils/api-client', () => ({ apiFetch: vi.fn(), API_URL: 'http://local.test' }));
 vi.mock('@/hooks/useCatData', () => ({
-  useCatData: () => ({ cats: [], getCatById: () => undefined, hasFetched: true, isLoading: false }),
+  useCatData: () => ({
+    cats: [],
+    getCatById: (id: string) =>
+      id === 'known-member'
+        ? { id, displayName: '熟悉的名字', avatar: '', color: { primary: '#58885d', secondary: '#c7dbcb' } }
+        : undefined,
+    hasFetched: true,
+    isLoading: false,
+  }),
   formatCatName: () => '猫',
 }));
 const fact = {
@@ -65,6 +73,19 @@ const block = {
 };
 let host: HTMLDivElement, root: Root;
 
+it('uses the registry display name when a source speaker has no optional nickname', async () => {
+  vi.mocked(apiFetch).mockImplementation(async () =>
+    Response.json({
+      status: 'available',
+      publicationRef: `message-search-answer:${'a'.repeat(64)}`,
+      response: { ...response, results: [{ ...response.results[0], speaker: 'known-member' }] },
+    }),
+  );
+  await act(async () => root.render(<RichBlockRenderer block={block} messageId="actual-message" />));
+  expect(host.querySelector('[data-testid="cat-nameplate-name"]')?.textContent).toBe('熟悉的名字');
+  expect(host.textContent).not.toContain('known-member');
+});
+
 it('keeps quoted material, publisher comment and the selecting cat judgment visibly distinct', async () => {
   const text = '建议只在测试全部通过后，才下线判官。';
   const selected: MessageSearchResponse = {
@@ -112,17 +133,19 @@ it('keeps quoted material, publisher comment and the selecting cat judgment visi
     }),
   );
   await act(async () => root.render(<RichBlockRenderer block={block} messageId="actual-message" />));
-  expect(host.textContent).toContain('由 codex61-sol 选出 1 处来源');
-  expect(host.textContent).toContain('co-creator引用了材料');
+  expect(host.textContent).not.toContain('选出 1 处来源');
+  expect(host.textContent).not.toContain('是否支持结论');
+  expect(host.querySelector('[data-testid="message-result-human-nameplate"]')?.textContent).toBe('co-creator');
   expect(host.textContent).toContain('未核实原出处作者');
   expect(host.textContent).toContain('历史备选（未采用）');
   expect(host.textContent).toContain('建议只在测试全部通过后，才下线判官。');
   expect(host.textContent).toContain('co-creator 当条批注：「这版还不直接当合同。」');
-  expect(host.textContent).toContain('codex61-sol 选用理由：co-creator已拍板立即下线判官');
+  expect(host.textContent).not.toContain('选用理由');
+  expect(host.textContent).not.toContain('在查找里看全部');
   expect(host.querySelector('mark')?.textContent).toBe('下线判官');
   expect(host.querySelector('[aria-label="定下来的"]')).toBeNull();
   expect(host.textContent).not.toContain('本次结果中最早');
-  const quote = [...host.querySelectorAll('button')].find((button) => button.textContent === '引用到聊天');
+  const quote = host.querySelector<HTMLButtonElement>('[aria-label="引用到聊天"]');
   await act(async () => quote?.click());
   const attachment = useChatStore.getState().pendingChatInsert?.contextAttachments?.[0];
   expect(attachment?.kind).toBe('quote');
@@ -208,7 +231,7 @@ it('re-admits the original message binding before a quote action and drops a wit
   );
   await act(async () => root.render(<RichBlockRenderer block={block} messageId="actual-message" />));
   const row = host.querySelector('[data-message-search-result]');
-  const quote = [...(row?.querySelectorAll('button') ?? [])].find((button) => button.textContent === '引用到聊天');
+  const quote = row?.querySelector<HTMLButtonElement>('[aria-label="引用到聊天"]');
   expect(quote).toBeDefined();
   withdrawn = true;
   await act(async () => quote?.click());

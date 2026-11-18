@@ -21,6 +21,8 @@ import { useThreadMessages } from '@/hooks/useThreadScopedSelectors';
 import { useChatStore } from '@/stores/chatStore';
 
 const proofNavigation = new URLSearchParams(window.location.search).has('proofNavigation');
+// A source trip changes the route/query; the mounted Chat renderer stays the same on return.
+const proofAnswer = new URLSearchParams(window.location.search).has('proofAnswer');
 
 function ControlledReadingSurface() {
   const withWorkspace = new URLSearchParams(window.location.search).has('proofWorkspace');
@@ -33,7 +35,7 @@ function ControlledReadingSurface() {
   const threadId = routeThread === 'default' ? 'recall-controlled' : routeThread;
   useLayoutEffect(() => useChatStore.getState().setCurrentThread(threadId), [threadId]);
   const longMessage = new URLSearchParams(window.location.search).has('proofLong');
-  const answerCard = new URLSearchParams(window.location.search).has('proofAnswer');
+  const answerCard = proofAnswer;
   const queuedQuote = useChatStore((state) => state.pendingChatInsert);
   const history = useChatHistory(threadId);
   const messages = useThreadMessages(threadId);

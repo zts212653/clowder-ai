@@ -65,8 +65,19 @@ export function messageCjkPassageSource(
   // A required substring may lie beyond that boundary: visit every document
   // carrying such a token, then let the original full-body matcher decide.
   // Missing docsize rows likewise retain the existing literal recovery path.
-  return `(SELECT i.doc AS rowid FROM temp.message_cjk_terms v CROSS JOIN temp.message_cjk_instances i ON i.term=v.term
+  // MATCH returns document membership instead of every repeated position.
+  // A max-size token may end mid-UTF8 character; retokenizing it would lose its
+  // postings. Preserve the byte-exact instance lookup only for those tokens.
+  // Materialize just matching terms so the two paths do not scan vocabulary twice.
+  return `(WITH matching_terms AS MATERIALIZED (
+      SELECT v.term FROM temp.message_cjk_terms v
       WHERE (${terms}) OR length(CAST(v.term AS BLOB)) >= 32768
+    ) SELECT f.rowid FROM matching_terms v CROSS JOIN passage_fts f
+      WHERE length(CAST(v.term AS BLOB)) < 32768
+        AND passage_fts MATCH ('"' || replace(v.term,'"','""') || '"')
+    UNION
+    SELECT i.doc AS rowid FROM matching_terms v CROSS JOIN temp.message_cjk_instances i ON i.term=v.term
+      WHERE length(CAST(v.term AS BLOB)) >= 32768
     UNION
     SELECT missing.rowid FROM evidence_passages missing
       LEFT JOIN passage_fts_docsize size_row ON size_row.id=missing.rowid WHERE size_row.id IS NULL

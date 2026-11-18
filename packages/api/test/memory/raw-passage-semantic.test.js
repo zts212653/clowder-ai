@@ -107,8 +107,10 @@ describe('raw passage semantic and hybrid retrieval', () => {
     passageVectorStore.upsert(passageVectorKey('thread-thread_lexical', 'msg-lexical'), new Float32Array([0, 1, 0]));
     passageVectorStore.upsert(passageVectorKey('thread-thread_old', 'msg-old'), new Float32Array([0.95, 0.05, 0]));
 
+    const embedding = createEmbedding(new Float32Array([1, 0, 0]));
+    vectorStore.initMeta(embedding.getModelInfo());
     store.setEmbedDeps({
-      embedding: createEmbedding(new Float32Array([1, 0, 0])),
+      embedding,
       vectorStore,
       passageVectorStore,
       mode: 'on',

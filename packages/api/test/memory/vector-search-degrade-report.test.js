@@ -8,6 +8,7 @@ import {
   describeVectorSearchFailure,
   logVectorSearchDegradesTo,
   onVectorSearchDegrade,
+  publishVectorReadRepeat,
   publishVectorSearchDegrade,
 } from '../../dist/domains/memory/vector-search-degrade-report.js';
 
@@ -151,6 +152,7 @@ describe('a vector search that falls back to lexical says why (in-process store)
     ensureVectorTable(db, 3);
     ensurePassageVectorTable(db, 3);
     vectorStore = new VectorStore(db, 3);
+    vectorStore.initMeta(embedding().getModelInfo());
     await store.upsert([
       {
         anchor: 'repair-note',
@@ -272,5 +274,25 @@ describe('the API logs each published degrade once', () => {
     publishVectorSearchDegrade(record);
     assert.deepEqual(calls, [[{ module: 'memory-vector-search', ...record }, 'Vector search degraded to lexical']]);
     assert.equal(calls[0][0].errorCategory, 'vector_projection_not_ready');
+  });
+
+  it('logs a search that was read again as a lost attempt and an outcome, not as a degraded search', () => {
+    const calls = [];
+    const stop = logVectorSearchDegradesTo({ warn: (fields, message) => calls.push([fields, message]) });
+    const operationId = '00000000-0000-4000-8000-000000000000';
+    publishVectorSearchDegrade({ ...record, operationId, attempt: 1 });
+    publishVectorReadRepeat({ operationId, outcome: 'recovered', firstAttemptMs: 40, repeatMs: 55 });
+    stop();
+    publishVectorReadRepeat({ operationId, outcome: 'recovered', firstAttemptMs: 40, repeatMs: 55 });
+    assert.deepEqual(calls, [
+      [
+        { module: 'memory-vector-search', ...record, operationId, attempt: 1 },
+        'Vector search attempt lost its vectors to a source write',
+      ],
+      [
+        { module: 'memory-vector-search', operationId, outcome: 'recovered', firstAttemptMs: 40, repeatMs: 55 },
+        'Vector search was read again after a source write',
+      ],
+    ]);
   });
 });

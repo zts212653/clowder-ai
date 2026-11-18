@@ -4,6 +4,12 @@ related_features: [F024]
 topics: [session, chain, bootstrap, memory, continuity]
 doc_kind: spec
 created: 2026-03-05
+updated: 2026-11-17
+description: "Session 封印重生的上下文恢复桥：注入当前线程 Task 快照、线程级滚动记忆与历史交接摘要引导。"
+description_source: human
+description_author: gemini-argon
+description_updated_at: 2026-11-17T14:27:00Z
+tips_exempt: "Renewed 2026-11-17: daily doc guard records PR #6815 retirement of seal-time Haiku LLM handoff digest generation while keeping existing historical digest file reads, extractive digest, and Task snapshot bootstrap injection; internal session bootstrap mechanism with no new user-invoked Hub action."
 ---
 
 # F065: Session Continuity — 封印重生，记忆不断
@@ -46,10 +52,10 @@ operator明确的恢复哲学：**搜文件树那样搜 session chain → invoca
 2. Bootstrap 注入 ThreadMemory + last session digest
 3. 生成方式：先用规则提取（从 extractive digest 聚合），后续可升级为 LLM 生成
 
-### Phase C: Handoff Digest（可选增强）
+### Phase C: Handoff Digest（可选增强；2026-11-08 #6815 退役 seal-time 模型生成）
 
-1. `digest.handoff.md` — seal 后用便宜模型生成会议纪要
-2. Session 2 bootstrap 优先用 handoff digest，没有则降级用 extractive
+1. `digest.handoff.md` — 2026-03-06 初版在 seal 后用便宜模型生成会议纪要（2026-11-08 [PR #6815](https://github.com/zts212653/clowder-ai/pull/6815) `b8c8e7fa15` 已退役 seal-time Haiku 生成、凭据/配置接线与未使用的历史 digest writer；`generative` 现仅用于选择并读取已存在的历史 `digest.handoff.md` 文件）
+2. Session 2 bootstrap：仅显式配置 `bootstrapDepth='generative'` 时优先尝试读取既有历史 handoff，没有可用历史 handoff 时按原路径回退 extractive；未配置或 `extractive` 直接读取 extractive（Task 快照与 F225 typed `catHandoffNote` 注入保持不变）
 
 ## Acceptance Criteria
 

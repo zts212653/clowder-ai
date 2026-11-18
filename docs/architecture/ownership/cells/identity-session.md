@@ -2,8 +2,11 @@
 cell_id: identity-session
 title: Identity / Session
 summary: Agent identity、connector session binding、bubble identity、runtime session binding、context continuity、thread access policy 与 user profile 等 subcell 的边界。
-canonical_features: [F032, F088, F136, F171, F183, F211, F231, F262, F291, F296, F299, F320, F322]
+canonical_features: [F032, F088, F136, F171, F183, F211, F231, F262, F291, F296, F299, F320, F322, F338]
 code_anchors:
+  - packages/api/src/domains/cats/services/session/cache/session-cache-warmth.ts
+  - packages/api/src/domains/cats/services/session/cache/session-cache-runtime.ts
+  - packages/api/src/domains/cats/services/session/cache/SessionCacheReadService.ts
   - packages/api/src/routes/member-canon-response.ts
   - packages/api/src/routes/member-canon-routes.ts
   - packages/web/src/components/settings/members/MemberCanonAvatar.tsx
@@ -123,6 +126,7 @@ code_anchors:
   - packages/api/src/routes/callback-read-profile-routes.ts
   - packages/api/src/scripts/migrate-f231-profile.ts
 doc_anchors:
+  - docs/features/F338-session-cache-warmth.md
   - docs/census/issue-1704-pi-native-state.md
   - docs/features/F320-multi-oauth-account-switching.md
   - feature-specs/2026-10-06-f320-codex-backend.md
@@ -264,6 +268,10 @@ The measured first managed combination is macOS + official native Codex 0.159.0 
 Native uses the existing SessionManager/SessionChainStore for durable resume bindings, not an in-memory session authority. A verified preflight L0/cwd/permission mismatch can seal the old session and rebuild from canonical history before starting a new one; partial output and exact imported-resume requests cannot silently fall back. Profile serialization protects per-turn credential/config binding. Skills come from the existing mount resolver. Historical Antigravity session import/lifecycle remain readable; Gemini CLI, IDE bridge and SQLite polling are no longer execution carriers.
 
 Official CLI init is verified before stdin delivery; only then does the existing F296 preflight settle the final generation and F299 record its bytes. A prior unsupported scope adopts a newly observed runtime through one unconsumed cold epoch; it becomes hot only after actual generation consumption and another verified resume. Compaction checkpoints advance the existing epoch owner. The raw cumulative result/error and transport diagnostics remain separate from current-turn completion evidence.
+
+## Session cache observations
+
+F338 keeps provider-observed cache tiers, invocation-time lower bounds and matched session/model/runtime evidence in the existing SessionRecord.lastUsage. SessionCacheReadService reads owner × destination thread × cat and projects warm, expired-window or unknown estimates without creating a cache-state store. Navigation, the existing authenticated session API and routing preflight consume that projection; actual-send bindings invalidate a changed model/runtime. Missing or failed measurements do not become warmth, and routing retains authority over admission and the explicitly requested target. Cache retention maintenance and its private prefix snapshot are a separate, acceptance-gated extension of the provider invocation owner.
 
 ## Frozen L0 Input
 

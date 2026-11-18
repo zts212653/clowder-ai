@@ -2112,6 +2112,132 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     assert.equal(sessionChainStore.get(record.id).capacityPin, undefined);
   });
 
+  for (const [matchingModel, effectiveModel, verifiedInit] of [
+    [true, 'gemini-4-carbon-high', false],
+    [false, 'gemini-4-carbon-high', false],
+    [true, 'gemini-4-carbon-low', true],
+    [false, 'gemini-4-carbon-low', true],
+    [true, 'gemini-4-carbon-low', false],
+  ])
+    it(`F325 observed checkpoint capacity reaches the actual handoff consumer (matching=${matchingModel}, model=${effectiveModel}, init=${verifiedInit})`, async () => {
+      const { SessionChainStore } = await import('../dist/domains/cats/services/stores/ports/SessionChainStore.js');
+      const store = new SessionChainStore();
+      const threadId = `thread-observed-checkpoint-${matchingModel}-${effectiveModel}-${verifiedInit}`;
+      const record = store.create({
+        cliSessionId: 'cli-observed-checkpoint',
+        threadId,
+        catId: 'gemini',
+        userId: 'user1',
+      });
+      const capability = {
+        provider: 'google',
+        carrier: 'agy_stream_json',
+        reportsRuntimeWindow: false,
+        authoritativeUsage: true,
+        usageTelemetry: 'available',
+        nativeWindowControl: false,
+        nativeCompressionControl: true,
+        observesCompression: true,
+        reason: 'verified native fixture',
+      };
+      let seals = 0;
+      const service = {
+        l0CompilerFn: dummyL0CompilerFn,
+        contextCapability: () => capability,
+        async *invoke(_prompt, options) {
+          if (effectiveModel.endsWith('-low')) assert.equal(options.reasoningEffortOverride, 'low');
+          if (verifiedInit)
+            yield {
+              type: 'session_init',
+              catId: 'gemini',
+              sessionId: 'cli-observed-checkpoint',
+              timestamp: Date.now(),
+              nativeSessionBinding: {
+                v: 1,
+                carrier: 'agy_stream_json',
+                cliSessionId: 'cli-observed-checkpoint',
+                model: effectiveModel,
+                agentName: 'cat-cafe-gemini',
+                permissionMode: 'always-proceed',
+                workspaceRoot: process.cwd(),
+                profileHome: '/tmp/f325-capacity-profile',
+                l0Hash: 'fixture',
+              },
+            };
+          yield {
+            type: 'done',
+            catId: 'gemini',
+            timestamp: Date.now(),
+            metadata: {
+              provider: 'google',
+              model: effectiveModel,
+              usage: { lastTurnInputTokens: 480000, inputTokens: 480000 },
+              contextWindowObservation: {
+                provider: 'google',
+                carrier: 'agy_stream_json',
+                model: matchingModel ? effectiveModel : 'another-model',
+                cliVersion: '1.5.9',
+                scopeId: 'a'.repeat(64),
+                windowTokens: 511499,
+                observedAt: Date.now(),
+                evidenceRef: 'agy_native_checkpoint:fixture:1',
+              },
+            },
+          };
+        },
+      };
+      const messages = await collect(
+        invokeSingleCat(
+          {
+            ...makeDeps(),
+            sessionChainStore: store,
+            ...(effectiveModel.endsWith('-low')
+              ? {
+                  threadStore: { get: () => null, getMemberEffort: () => 'low' },
+                }
+              : {}),
+            sessionSealer: {
+              async requestSeal() {
+                seals++;
+                return { status: 'sealing' };
+              },
+              async finalize() {},
+            },
+          },
+          {
+            catId: 'gemini',
+            service,
+            capacitySnapshot: {
+              ...makeUnresolvedCapacitySnapshot('gemini'),
+              capability,
+              model: 'gemini-4-carbon-high',
+              memberWindowTokens: null,
+              nativeWindowTokens: null,
+            },
+            prompt: 'test',
+            userId: 'user1',
+            threadId,
+            isLastCat: true,
+            rebuildPromptAfterSessionSeal: async () => 'rebuilt',
+          },
+        ),
+      );
+      assert.equal(
+        messages.some((message) => message.type === 'error'),
+        false,
+        JSON.stringify(messages.filter((message) => message.type === 'error')),
+      );
+      const persisted = store.get(record.id);
+      const active = matchingModel && (effectiveModel === 'gemini-4-carbon-high' || verifiedInit);
+      assert.equal(persisted.appliedPolicy.execution.status, active ? 'active' : 'unavailable');
+      assert.equal(seals, active ? 1 : 0, 'only current verified model evidence can authorize automatic handoff');
+      if (active) {
+        assert.equal(persisted.capacityPin.source, 'observed');
+        assert.equal(persisted.capacityPin.windowTokens, 511499);
+        assert.equal(persisted.contextHealth.usedTokens, 480000);
+      } else assert.equal(persisted.capacityPin, undefined);
+    });
+
   it('F211 A2: repeated Antigravity cascade updates runtime metadata without creating a new SessionRecord', async () => {
     const { SessionChainStore } = await import('../dist/domains/cats/services/stores/ports/SessionChainStore.js');
     const { RuntimeSessionStore } = await import(
@@ -4465,10 +4591,17 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
 
   it('F24: updates SessionRecord contextHealth on done', async () => {
     const { SessionChainStore } = await import('../dist/domains/cats/services/stores/ports/SessionChainStore.js');
+    const { ClaudeAgentService } = await import('../dist/domains/cats/services/agents/providers/ClaudeAgentService.js');
+    const { SessionCacheReadService } = await import(
+      '../dist/domains/cats/services/session/cache/SessionCacheReadService.js'
+    );
     const sessionChainStore = new SessionChainStore();
+    const config = catRegistry.getAllConfigs().opus;
+    const native = new ClaudeAgentService({ catId: config.id, model: config.defaultModel });
 
     const service = {
       l0CompilerFn: dummyL0CompilerFn,
+      freshnessCarrierCapability: () => native.freshnessCarrierCapability(),
       async *invoke() {
         yield { type: 'session_init', catId: 'opus', sessionId: 'cli-update-health', timestamp: Date.now() };
         yield {
@@ -4483,6 +4616,9 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
               lastTurnInputTokens: 140000,
               outputTokens: 3000,
               contextWindowSize: 200000,
+              cacheReadTokens: 120000,
+              cacheCreation1hTokens: 20000,
+              numTurns: 1,
             },
           },
         };
@@ -4506,6 +4642,22 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     assert.ok(active.contextHealth, 'session record should have contextHealth');
     assert.equal(active.contextHealth.usedTokens, 140000);
     assert.equal(active.contextHealth.windowTokens, 200000);
+    const cache = active.lastUsage.cacheObservation;
+    assert.equal(cache.nativeSessionId, 'cli-update-health');
+    assert.equal(cache.model, 'claude-opus-4-6');
+    assert.equal(cache.contextTokens, 140000);
+    assert.equal(cache.retentionMs, 3600000);
+    assert.equal(cache.retentionSource, 'usage_ttl');
+    assert.equal(cache.timeSource, 'invocation_start_lower_bound');
+    assert.ok(cache.requestStartedAt <= cache.observedAt);
+    assert.equal(
+      cache.runtime,
+      `${config.clientId}:${config.carrier}`,
+      'real service and real catalog must use one runtime vocabulary',
+    );
+    const reader = new SessionCacheReadService(sessionChainStore, 100, () => config);
+    const [view] = await reader.read({ ownerId: 'user1', threadId: 'thread-f24-persist', catIds: ['opus'] });
+    assert.equal(view.warmth.status, 'warm', 'persisted provider observation must be usable by the real reader');
     // #1208 denominator fix: fillRatio = usedTokens / inputCeiling (not windowTokens)
     // inputCeiling = 200000 - 16000 (output reserve) = 184000
     // fillRatio = 140000 / 184000 ≈ 0.7609
@@ -4514,6 +4666,50 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
       Math.abs(active.contextHealth.fillRatio - expectedRatio) < 0.001,
       `fillRatio should be ~${expectedRatio.toFixed(4)}, got ${active.contextHealth.fillRatio}`,
     );
+  });
+
+  it('F338: a failed provider turn cannot manufacture warmth from terminal usage', async () => {
+    const { SessionChainStore } = await import('../dist/domains/cats/services/stores/ports/SessionChainStore.js');
+    const sessionChainStore = new SessionChainStore();
+    const service = {
+      l0CompilerFn: dummyL0CompilerFn,
+      async *invoke() {
+        yield { type: 'session_init', catId: 'opus', sessionId: 'cli-failed-cache', timestamp: Date.now() };
+        yield { type: 'error', catId: 'opus', error: 'provider connection interrupted', timestamp: Date.now() };
+        yield {
+          type: 'done',
+          catId: 'opus',
+          timestamp: Date.now(),
+          metadata: {
+            provider: 'anthropic',
+            model: 'claude-opus-4-6',
+            usage: {
+              inputTokens: 140000,
+              lastTurnInputTokens: 140000,
+              contextWindowSize: 200000,
+              cacheCreation1hTokens: 140000,
+              numTurns: 1,
+            },
+          },
+        };
+      },
+    };
+    await collect(
+      invokeSingleCat(
+        { ...makeDeps(), sessionChainStore },
+        {
+          catId: 'opus',
+          service,
+          prompt: 'test',
+          userId: 'user1',
+          threadId: 'thread-failed-cache',
+          isLastCat: true,
+        },
+      ),
+    );
+    const active = sessionChainStore.getActive('opus', 'thread-failed-cache');
+    assert.ok(active.lastUsage, 'ordinary usage accounting remains available');
+    assert.equal(active.lastUsage.cacheObservation, undefined);
   });
 
   it('F24-fix: prefers lastTurnInputTokens over aggregated inputTokens for context health', async () => {

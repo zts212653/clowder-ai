@@ -9,6 +9,7 @@ import {
   captureChatReadingBeforeLayoutChange,
   dispatchChatLayoutChanged,
 } from '@/utils/chat-layout-change';
+import { HtmlWidgetNavigationGate } from './HtmlWidgetNavigationGate';
 import { addHtmlWidgetHeightBridge } from './html-widget-height-bridge';
 import { useHtmlWidgetInputFence } from './html-widget-input-fence';
 import {
@@ -236,6 +237,7 @@ function ChatHtmlWidgetBlock({ block, disclosureKey }: { block: RichHtmlWidgetBl
           {block.title}
         </div>
       )}
+      <HtmlWidgetNavigationGate iframeRef={iframeRef} contentKey={block.html} />
       <div className="relative">
         {bridgedHtml === null ? (
           <output

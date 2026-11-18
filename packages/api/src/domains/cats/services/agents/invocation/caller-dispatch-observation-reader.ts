@@ -4,6 +4,7 @@ import { messageFrom } from '../../stores/message-from.js';
 import type { IMessageStore, StoredMessage } from '../../stores/ports/MessageStore.js';
 import { canViewMessage, isTimelinePublished } from '../../stores/visibility.js';
 import type { CallerDispatchObservationPointer, ObservationLine } from './caller-dispatch-observation-model.js';
+import { isCrossThreadSource } from './cross-thread-failure-return.js';
 import { describeStopReason } from './stop-reason-wording.js';
 
 const MAX_BODY_CHARS = 1_200;
@@ -146,11 +147,13 @@ function terminalObservationLine(
 export async function readCallerDispatchObservationLine(
   messageStore: Pick<IMessageStore, 'getById'>,
   pointer: CallerDispatchObservationPointer,
-): Promise<ObservationLine> {
+): Promise<ObservationLine | null> {
   const sourceRead = await readMessage(messageStore, pointer.sourceMessageId);
   if (sourceRead.failed) return unknownLine(pointer, 'History 读取失败');
   const source = sourceRead.message;
   if (!source) return unknownLine(pointer, 'source/scope 不可验证');
+  // Identity-only Steer/withdrawal registrations must not impersonate the remote sender either.
+  if (isCrossThreadSource(source)) return null;
   if (!sourceOwnsPointer(source, pointer) && !canceledSourceOwnsWithdrawnPointer(source, pointer)) {
     return unknownLine(pointer, 'source/scope 不可验证');
   }

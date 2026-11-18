@@ -1,5 +1,6 @@
 import type { MessageSearchResult } from '@cat-cafe/shared';
 import { useLayoutEffect, useRef } from 'react';
+import { MarkdownContent } from '../MarkdownContent';
 import { HighlightedMessageText } from './HighlightedMessageSnippet';
 import { excerptHitOffset, queryMatchRanges } from './message-query-presentation';
 import { type ReadSourceContext, sourceSpeakerLabel, sourceTime } from './message-source-read';
@@ -21,11 +22,13 @@ export function MessageSourceContext({
   query,
   result,
   resolveSpeaker,
+  markdown = false,
 }: {
   context: ReadSourceContext;
   query: string;
   result: MessageSearchResult;
   resolveSpeaker: (speaker: string) => string;
+  markdown?: boolean;
 }) {
   const original = useRef<HTMLDivElement>(null);
   const focusOffset = excerptHitOffset(context.message.content, result);
@@ -57,20 +60,27 @@ export function MessageSourceContext({
             · {result.selection ? '发布者：' : ''}
             {sourceSpeakerLabel(message, resolveSpeaker)} · {sourceTime(message.timestamp)}
           </p>
-          {index === 0 && result.selection && (
-            <p className="text-xs text-cafe-muted">引文与当条批注的归属以上方分栏为准。</p>
+          {markdown ? (
+            <MarkdownContent
+              content={message.content}
+              referenceThreadId={message.threadId}
+              providerCitations={false}
+              disableCommandPrefix
+              className="text-sm leading-[1.55] [&_p]:my-1 [&_ul]:my-0.5 [&_pre]:my-1"
+            />
+          ) : (
+            <p className="whitespace-pre-wrap break-words leading-6">
+              {paragraphs(message.content).map((part) => (
+                <span key={part.start} data-source-paragraph>
+                  <HighlightedMessageText
+                    text={part.content}
+                    ranges={focusOffset === undefined ? [] : queryMatchRanges(part.content, query)}
+                    focusOffset={index === 0 && focusOffset !== undefined ? focusOffset - part.start : undefined}
+                  />
+                </span>
+              ))}
+            </p>
           )}
-          <p className="whitespace-pre-wrap break-words leading-6">
-            {paragraphs(message.content).map((part) => (
-              <span key={part.start} data-source-paragraph>
-                <HighlightedMessageText
-                  text={part.content}
-                  ranges={focusOffset === undefined ? [] : queryMatchRanges(part.content, query)}
-                  focusOffset={index === 0 && focusOffset !== undefined ? focusOffset - part.start : undefined}
-                />
-              </span>
-            ))}
-          </p>
           {message.truncated && <p className="text-xs">原文较长，这里只展开开头；全文请去原处查看。</p>}
         </div>
       ))}
