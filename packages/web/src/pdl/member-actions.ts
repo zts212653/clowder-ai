@@ -1,5 +1,6 @@
 import {
   type AssetCanonItem,
+  type CatVoiceOption,
   type CharacterAssetBinding,
   defaultAcpPoolMaxProcesses,
   type MemberVisualAssets,
@@ -155,6 +156,11 @@ export async function saveMemberCanon(id: string, threadId: string, body: string
   else await write(path, { ...input, mode: 'set' });
   await refreshCatsNow();
   return readMemberCanon(id, threadId);
+}
+
+/** Voices a member can take whole (voice, language, speed, reference audio and text, tone, variation). */
+export async function readVoiceChoices() {
+  return (await request<{ voices: CatVoiceOption[] }>('/api/tts/voices')).voices;
 }
 
 export async function readMemberSettings() {

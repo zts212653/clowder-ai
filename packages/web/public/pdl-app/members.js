@@ -35,8 +35,16 @@ function bindMembers() {
       act('membersRead', {})
         .then(async function (data) {
           if (id && id !== 'new' && id !== 'list') {
-            const values = await Promise.all([act('settingsHooksRead', {}), act('memberCanonRead', { id: id })]);
-            data.canon = values[1];
+            const values = await Promise.all([
+              act('settingsHooksRead', {}),
+              // a voice list that can't be read only leaves the pick empty (with a retry), not the page
+              act('memberVoicesRead', {}).catch(function () {
+                return null;
+              }),
+              act('memberCanonRead', { id: id }),
+            ]);
+            data.voices = Array.isArray(values[1]) ? values[1] : null;
+            data.canon = values[2];
             data.savedCheck =
               data.dshMembers && data.dshMembers.includes(id)
                 ? await act('memberDshRead', { id: id, value: JSON.stringify(data.runtimes) })
@@ -535,6 +543,62 @@ function bindMembers() {
     vVar: 'voiceTemperature',
     executionApproval: 'executionApproval',
   };
+  // 选择声线: a choice fills the whole voice; the form matches a choice when every voice field equals it
+  const VOICE_FIELDS = {
+    voiceVoice: 'voice',
+    voiceLangCode: 'langCode',
+    voiceSpeed: 'speed',
+    voiceRefAudio: 'refAudio',
+    voiceRefText: 'refText',
+    voiceInstruct: 'instruct',
+    voiceTemperature: 'temperature',
+  };
+  function voiceForm(config) {
+    const out = {};
+    Object.keys(VOICE_FIELDS).forEach(function (k) {
+      const v = config[VOICE_FIELDS[k]];
+      out[k] = v == null ? '' : String(v);
+    });
+    return out;
+  }
+  function voiceChoices(f) {
+    const list = meta.voices || [],
+      x = function (c) {
+        const want = voiceForm(c.voiceConfig);
+        return Object.keys(want).every(function (k) {
+          return String(f[k] == null ? '' : f[k]) === want[k];
+        });
+      },
+      cur = list.find(x);
+    return {
+      error: meta.voices === null,
+      none: !!meta.voices && !list.length,
+      pick: cur ? cur.id : '',
+      defaultVoice: !f.voiceVoice && !f.voiceRefAudio,
+      options: [{ v: '', label: tc('memberForm.voicePick.keep') }].concat(
+        list.map(function (c) {
+          return {
+            v: c.id,
+            label: c.familyName + ' · ' + c.label,
+            why: c.available ? '' : tc('memberForm.voicePick.unavailable'),
+            sub: c.referenceAvailability === 'unknown' ? tc('memberForm.voicePick.unknown') : '',
+          };
+        }),
+      ),
+    };
+  }
+  CHANGES.memberVoice = function (e) {
+    const state = draft(),
+      c = (meta.voices || []).find(function (x) {
+        return x.id === e.target.value;
+      });
+    if (!state || !c || !c.available) return;
+    Object.assign(state.form, voiceForm(c.voiceConfig));
+    render(true);
+  };
+  A.memberVoicesRetry = function () {
+    return read();
+  };
   function form() {
     const state = draft();
     if (!state) return null;
@@ -608,6 +672,7 @@ function bindMembers() {
         })
       : [];
     return {
+      voices: voiceChoices(f),
       isNew: !state.id,
       existing: !!state.id,
       id: state.id,

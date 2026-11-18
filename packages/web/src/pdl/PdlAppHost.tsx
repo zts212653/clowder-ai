@@ -119,6 +119,7 @@ import {
   readMemberRuntimeModels,
   readMemberSettings,
   readNativeMembers,
+  readVoiceChoices,
   removeMember,
   runMemberProviderSetup,
   saveMember,
@@ -1044,6 +1045,8 @@ function ChatBinding({
           dshMembers: current.current.cats.filter((cat) => isDshMember(cat, meta.runtimes)).map((cat) => cat.id),
         };
       }
+      case 'memberVoicesRead':
+        return readVoiceChoices();
       case 'memberCanonRead':
         return readMemberCanon(args.id, threadId);
       case 'memberCanonSave':

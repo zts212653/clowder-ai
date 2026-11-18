@@ -6943,6 +6943,26 @@ pdl:
         blocks:
           - type: settings
             rows:
+              - label: t:memberForm.voicePick.label
+                ctls:
+                  - type: select
+                    id: f-vPick
+                    value: $.form.voices.pick
+                    options: $.form.voices.options
+                    change: memberVoice
+                    label: t:memberForm.voicePick.label
+                    when: "!$.form.voices.error"
+                  - type: text
+                    variant: meta
+                    text: t:memberForm.voicePick.error
+                    when: $.form.voices.error
+                  - type: button
+                    label: t:common.retry
+                    act: memberVoicesRetry
+                    when: $.form.voices.error
+                foot:
+                  - text: t:memberForm.voicePick.none
+                    when: $.form.voices.none
               - kind: field
                 label: t:memberForm.fields.language
                 id: f-vLang
@@ -6984,6 +7004,8 @@ pdl:
                   - text: t:memberForm.access.text
                     tone: danger
                     when: $.form.invalid.vVoice
+                  - text: t:memberForm.voicePick.defaultVoice
+                    when: $.form.voices.defaultVoice
               - kind: field
                 label: t:memberForm.fields.speechRate
                 id: f-vSpeed
