@@ -6174,6 +6174,20 @@ pdl:
                       items:
                         $frag: ADD_ACCOUNT_ITEMS
               - kind: field
+                label: t:memberForm.fields.pluginClient
+                id: f-runtime
+                control:
+                  type: select
+                  id: f-runtime
+                  value: $.form.runtimeChoice
+                  change: memberRuntime
+                  options:
+                    - from: $.form.pluginRuntimes
+                      item:
+                        v: "@id"
+                        label: "@label"
+                when: $.form.hasPluginRuntimes
+              - kind: field
                 label: t:common.source
                 control:
                   type: text

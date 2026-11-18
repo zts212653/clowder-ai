@@ -1,4 +1,4 @@
-{
+{"memberForm":{"fields":{"pluginClient":"Plugin client","pluginClientNone":"No plugin client"}},
   "nativeSetup": {"title":"Detect available clients","detect":"Detect again","create":"Create selected members","created":"Created","ready":"Available","adjust":"Adjust","createFailed":"Could not create {0} ({1}):","conflict":"A member with this name already exists","dshAuto":"Installed · Configured automatically when added","loginRequired":"Sign-in required","copyLogin": "Copy sign-in command","unsupported":"Unsupported","needsConfig":"Configuration required","partialFailure":"Detection failed","partialFailureCount":"{0} candidates failed detection","readiness":{"missing":"The agent-access plugin is not installed","disabled":"The agent-access plugin is disabled","starting":"The agent-access plugin is starting","failed":"The agent-access plugin failed to load","incompatible":"The agent-access plugin version is incompatible","install":"Install","enable":"Enable","retry":"Retry","repair":"Repair"}},
   "accounts": {
     "googleCloud": "Google Cloud (Vertex AI · {0})",

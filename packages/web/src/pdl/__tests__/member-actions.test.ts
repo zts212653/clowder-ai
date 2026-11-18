@@ -496,6 +496,46 @@ it('writes member changes with revision and account-derived service tier, withou
   expect(writes).toEqual([]);
 });
 
+it('preserves a declared ACP agentProvider in the member write payload', async () => {
+  const form = {
+    ...initialState(cats[0]),
+    catId: 'plugin-acp-member',
+    clientId: 'acp' as const,
+    carrier: 'acp' as const,
+    configurationSource: 'native_tool' as const,
+    acpAgentProvider: 'plugin:acme/agent',
+    acpCommand: 'plugin-agent',
+    acpStartupArgs: '',
+  };
+  await saveMember(form, null, undefined);
+  expect(writes.at(-1)?.body).toMatchObject({
+    catId: 'plugin-acp-member',
+    clientId: 'acp',
+    carrier: 'acp',
+    agentProvider: 'plugin:acme/agent',
+    acp: { command: 'plugin-agent', startupArgs: [] },
+  });
+});
+
+it('reads an old declared ACP binding and rebinds it to a new agentProvider', async () => {
+  const cat = {
+    ...cats[0],
+    clientId: 'acp' as const,
+    carrier: 'acp' as const,
+    agentProvider: 'plugin:old/agent',
+    acp: { agentProvider: 'plugin:old/agent', command: 'plugin-agent', startupArgs: [] },
+    configurationRevision: 'rev-old',
+  };
+  const form = initialState(cat);
+  expect(form.acpAgentProvider).toBe('plugin:old/agent');
+  form.acpAgentProvider = 'plugin:new/agent';
+  await saveMember(form, cat, 'rev-old');
+  expect(writes.at(-1)?.body).toMatchObject({
+    agentProvider: 'plugin:new/agent',
+    expectedRevision: 'rev-old',
+  });
+});
+
 it('does not advance the member revision when client settings fail, and does not rewrite the member for client-only changes', async () => {
   const cat = cats[0],
     form = initialState(cat);

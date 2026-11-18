@@ -7585,6 +7585,22 @@ pdl:
                       v: key
                   - scope: t:accounts.create.localLoginHelp
       - kind: field
+        label: t:memberForm.fields.pluginClient
+        id: f-runtime
+        control:
+          type: component
+          use: v2Select
+          props:
+            id: f-runtime
+            value: $.form.runtimeChoice
+            change: memberRuntime
+            options:
+              - from: $.form.pluginRuntimes
+                item:
+                  v: "@id"
+                  label: "@label"
+        when: $.form.hasPluginRuntimes
+      - kind: field
         label: t:common.source
         control:
           type: component

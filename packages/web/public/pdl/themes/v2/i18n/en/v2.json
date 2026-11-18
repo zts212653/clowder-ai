@@ -3101,6 +3101,8 @@
   "memberForm": {
     "fields": {
       "client": "Clients",
+    "pluginClient": "Plugin client",
+    "pluginClientNone": "No plugin client",
       "unsavedChanges": "{0} unsaved changes",
       "nickname": "Nickname",
       "roleDescription": "Role",

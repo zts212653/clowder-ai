@@ -3101,6 +3101,8 @@
   "memberForm": {
     "fields": {
       "client": "客户端",
+    "pluginClient": "插件客户端",
+    "pluginClientNone": "不使用插件客户端",
       "unsavedChanges": "{0} 处修改未保存",
       "nickname": "昵称",
       "roleDescription": "角色描述",

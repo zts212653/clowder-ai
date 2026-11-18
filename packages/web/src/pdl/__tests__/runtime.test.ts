@@ -22,6 +22,7 @@ import { projectAssetVersions } from '@/components/capability-evolution/evolutio
 import { initial as artworkReviewFixture } from '@/components/content-review/__tests__/review-command.fixture';
 import { artifactRoundRequestSource } from '@/components/content-review/artifact-modification-source';
 import { CLIENT_OPTIONS, carrierOptionsForClient, initialState } from '@/components/hub-cat-editor.model';
+import { runtimeDefaults } from '@/components/settings/members/member-runtime-draft';
 import { model as teamModel } from '@/components/routing-context/__tests__/team-panel-fixtures';
 import { apiFetch } from '@/utils/api-client';
 import { digest as filmDigest, project as filmDocument } from '../../../../shared/src/__tests__/video-project.fixtures';
@@ -8853,6 +8854,163 @@ describe('member detect entry', () => {
       expect(login).not.toBeNull();
       login?.click();
       expect(w.eval('window.copiedLoginCommand')).toBe('codex login');
+    } finally {
+      dom.window.close();
+    }
+  });
+});
+
+describe('declared plugin ACP runtime picker', () => {
+  const pluginRuntime = (ref: string) => ({
+    id: ref,
+    label: ref.includes('old') ? 'Old Agent' : 'Acme Agent',
+    clientId: 'acp',
+    installed: true,
+    models: [],
+    acp: { agentProvider: ref, command: 'plugin-agent', startupArgs: [] },
+  });
+  const withForm = (runtime: ReturnType<typeof pluginRuntime>) => ({
+    ...runtime,
+    form: runtimeDefaults(runtime as never),
+  });
+
+  it('does not show the picker when no declared ACP runtime exists', async () => {
+    const meta = advancedMemberMetadata();
+    const { dom, w } = await boot(undefined, undefined, undefined, {}, (port) => {
+      const previous = port.action;
+      port.action = (name, args, element) => (name === 'membersRead' ? meta : previous(name, args, element));
+    });
+    try {
+      w.eval('go("memberNew")');
+      await w.__settled();
+      expect(w.document.getElementById('f-runtime')).toBeNull();
+    } finally {
+      dom.window.close();
+    }
+  });
+
+  it('reads the old declared ACP binding and rebinds it through the same picker', async () => {
+    const meta = advancedMemberMetadata();
+    meta.runtimes = [withForm(pluginRuntime('plugin:old/agent')), withForm(pluginRuntime('plugin:new/agent'))];
+    const saves: Record<string, string>[] = [];
+    const { dom, w } = await boot(
+      undefined,
+      (data) =>
+        Object.assign(data.cats[0], {
+          clientId: 'acp',
+          carrier: 'acp',
+          agentProvider: 'plugin:old/agent',
+          acp: { agentProvider: 'plugin:old/agent', command: 'plugin-agent', startupArgs: [] },
+          configurationRevision: 'rev-old',
+        }),
+      undefined,
+      {},
+      (port) => {
+        const previous = port.action;
+        port.action = (name, args, element) => {
+          if (name === 'membersRead') return meta;
+          if (name === 'memberSave') {
+            saves.push(args);
+            return { ...fixtureData().cats[0], configurationRevision: 'rev-new' };
+          }
+          return previous(name, args, element);
+        };
+      },
+    );
+    try {
+      w.eval('go("member-codex")');
+      await w.__settled();
+      const picker = w.document.getElementById('f-runtime') as HTMLSelectElement | null;
+      expect(picker).not.toBeNull();
+      expect(picker!.value).toBe('plugin:old/agent');
+      picker!.value = 'plugin:new/agent';
+      picker!.dispatchEvent(new w.Event('change', { bubbles: true }));
+      await w.__settled();
+      expect(w.eval('VM.member().form.fromPlugin')).toBe('plugin:new/agent');
+      const save = w.document.querySelector('#savebar button[type="submit"]') as HTMLButtonElement | null;
+      expect(save).not.toBeNull();
+      save!.click();
+      await w.__settled();
+      const payload = JSON.parse(saves.at(-1)!.value);
+      expect(payload.acpAgentProvider).toBe('plugin:new/agent');
+      expect(saves.at(-1)!.expectedRevision).toBe('rev-old');
+    } finally {
+      dom.window.close();
+    }
+  });
+
+  it('offers the same declared ACP runtime picker in the simplified theme', async () => {
+    const meta = advancedMemberMetadata();
+    meta.runtimes = [withForm(pluginRuntime('plugin:acme/agent'))];
+    const { dom, w } = await boot(undefined, undefined, undefined, {}, (port) => {
+      const get = port.get;
+      port.get = async (path, params) => {
+        if (path === '/api/config/console-themes') return { themes: { active: 'pkg:v2', customs: [] } };
+        if (path === '/api/accounts') return { providers: [] };
+        if (path.startsWith('/api/accounts/') && path.endsWith('/members')) return { selection: { members: [] } };
+        return get(path, params);
+      };
+      const previous = port.action;
+      port.action = (name, args, element) => {
+        if (name === 'membersRead') return meta;
+        if (name === 'memberSave') return { id: 'acme', configurationRevision: 'rev-1' };
+        return previous(name, args, element);
+      };
+    });
+    try {
+      const v2 = (await builtinThemes.read('v2')) as { components: Record<string, { js: string[] }> };
+      for (const part of Object.values(v2.components)) {
+        for (const js of part.js) runInContext(js, dom.getInternalVMContext(), { filename: 'v2-component.js' });
+      }
+      w.eval('go("memberNew")');
+      await w.__settled();
+      expect(w.eval('PACK_LOADED')).toBe('v2');
+      const picker = w.document.getElementById('f-runtime') as HTMLSelectElement | null;
+      expect(picker).not.toBeNull();
+      expect(picker!.value).toBe('');
+      picker!.value = 'plugin:acme/agent';
+      picker!.dispatchEvent(new w.Event('change', { bubbles: true }));
+      await w.__settled();
+      expect(w.eval('VM.memberNew().form.fromPlugin')).toBe('plugin:acme/agent');
+    } finally {
+      dom.window.close();
+    }
+  });
+
+  it('offers a declared ACP runtime and saves its agentProvider', async () => {
+    const meta = advancedMemberMetadata();
+    meta.runtimes = [withForm(pluginRuntime('plugin:acme/agent'))];
+    const saves: Record<string, string>[] = [];
+    const { dom, w } = await boot(undefined, undefined, undefined, {}, (port) => {
+      const previous = port.action;
+      port.action = (name, args, element) => {
+        if (name === 'membersRead') return meta;
+        if (name === 'memberSave') {
+          saves.push(args);
+          return { id: 'acme', configurationRevision: 'rev-1' };
+        }
+        return previous(name, args, element);
+      };
+    });
+    try {
+      w.eval('go("memberNew")');
+      await w.__settled();
+      const picker = w.document.getElementById('f-runtime') as HTMLSelectElement | null;
+      expect(picker).not.toBeNull();
+      expect(picker!.value).toBe('');
+      picker!.value = 'plugin:acme/agent';
+      picker!.dispatchEvent(new w.Event('change', { bubbles: true }));
+      await w.__settled();
+      expect(w.eval('VM.memberNew().form.fromPlugin')).toBe('plugin:acme/agent');
+      const save = w.document.querySelector('#savebar button[type="submit"]') as HTMLButtonElement | null;
+      expect(save).not.toBeNull();
+      save!.click();
+      await w.__settled();
+      const payload = JSON.parse(saves.at(-1)!.value);
+      expect(payload.acpAgentProvider).toBe('plugin:acme/agent');
+      expect(payload.clientId).toBe('acp');
+      expect(payload.carrier).toBe('acp');
+      expect(payload.acpCommand).toBe('plugin-agent');
     } finally {
       dom.window.close();
     }
