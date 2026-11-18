@@ -1,6 +1,15 @@
 import type { Readable } from 'node:stream';
 import { z } from 'zod';
 
+/** Commands on the worker-to-Host side of the stdio connection. */
+export type AgentAccessAcpProcessCommand =
+  | { kind: 'write'; line: string }
+  | { kind: 'shutdown'; graceMs: number; endStdin: boolean };
+
+export type AgentAccessAcpProcessTermination =
+  | { kind: 'exit'; code: number | null; signal: NodeJS.Signals | null }
+  | { kind: 'error'; message: string };
+
 export const agentAccessAcpModelSelectionSchema = z.object({
   model: z.string().min(1),
   configOptions: z.unknown().optional(),

@@ -23,6 +23,7 @@ import { readRoles } from './roles/role-card.js';
 import { writeRole } from './roles/write-role.js';
 import { runA2ATurn } from './runtime/a2a-turn.js';
 import { checkDshConnectionInWorker } from './runtime/acp/dsh/connection-check.js';
+import { createAcpProcessActions } from './runtime/acp/process-connection.js';
 import { resolveSessionModelConfigOption } from './runtime/acp/session-configuration.js';
 import { projectClaudeOutput } from './runtime/claude/project-claude-output.js';
 import { normalizeKimiEvent } from './runtime/kimi-event-parser.js';
@@ -39,8 +40,10 @@ export default {
       start(host: { agentAccess?: AgentAccessDiscoveryHost; agentRoleStore?: AgentAccessRoleStore }) {
         const { agentAccess: discovery, agentRoleStore } = host;
         if (!discovery) throw new Error('Agent access Host discovery port is unavailable');
+        const acpProcesses = createAcpProcessActions();
         return {
           actions: {
+            acpProcess: acpProcesses.acpProcess,
             configure(input: unknown) {
               if (input && typeof input === 'object' && 'operation' in input) {
                 const request = agentAccessNativeLaunchRequestSchema.parse(input);
@@ -115,7 +118,7 @@ export default {
               };
             },
           },
-          stop() {},
+          stop: acpProcesses.stop,
         };
       },
     };

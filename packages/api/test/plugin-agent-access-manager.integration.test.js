@@ -12,10 +12,13 @@ import { AGENT_ACCESS_OPERATIONS, OFFICIAL_AGENT_ACCESS_OPERATIONS } from '@clow
 import { validateManifest } from '@clowder-ai/plugin-contract';
 import Fastify from 'fastify';
 import { A2AAgentService } from '../dist/domains/cats/services/agents/providers/A2AAgentService.js';
+import { launchAcpChild } from '../dist/domains/cats/services/agents/providers/acp/AcpClient.js';
+import { ClaudeSdkAgentService } from '../dist/domains/cats/services/agents/providers/ClaudeSdkAgentService.js';
 import { sessionImplementationKey } from '../dist/domains/cats/services/agents/session-contract/implementation-registry.js';
 import { MessageStore } from '../dist/domains/cats/services/stores/ports/MessageStore.js';
 import { createAgentAccessA2ARunner } from '../dist/domains/plugin/agent-access/a2a.js';
 import { createAgentAccessAcpModelSelection } from '../dist/domains/plugin/agent-access/acp.js';
+import { createAgentAccessAcpProcess } from '../dist/domains/plugin/agent-access/acp-process.js';
 import { createAgentAccessDshConnectionTest } from '../dist/domains/plugin/agent-access/dsh.js';
 import { createAgentAccessKimiLaunchPlanner } from '../dist/domains/plugin/agent-access/kimi.js';
 import {
@@ -34,6 +37,7 @@ import {
 import { catsRoutes } from '../dist/routes/cats.js';
 import { tarArchive } from '../scripts/bundled-plugin-artifacts.mjs';
 import { canonicalGzip } from '../scripts/canonical-gzip.mjs';
+import { claudeSdkRuntimeFixture } from './helpers/claude-sdk-runtime-fixture.js';
 
 test('Kimi native events cross with redaction and consume only the same active package generation', async () => {
   const instance = {
@@ -286,6 +290,7 @@ test('Agent access discovery executes the same standalone entrypoint from a Mana
       event: { type: 'content_block_delta', delta: { type: 'text_delta', text: 'before ' + credential.slice(0, 16) } },
     };
     yield { type: 'user', message: { content: 'host-only SDK message' }, session_id: 'verified-session' };
+    yield { __livenessWarning: true, level: 'warning', silenceDurationMs: 1000 };
     yield {
       type: 'stream_event',
       event: { type: 'content_block_delta', delta: { type: 'text_delta', text: credential.slice(16) + ' after' } },
@@ -337,6 +342,85 @@ test('Agent access discovery executes the same standalone entrypoint from a Mana
     }).next(),
     /invalid_claude_compaction_frame/,
   );
+
+  let sdkCloses = 0;
+  let readsAfterIdle = 0;
+  const sdk = new ClaudeSdkAgentService({
+    catId: 'verified-role',
+    model: 'claude-opus-4-6',
+    mcpServerPath: '',
+    runtimeResolver: claudeSdkRuntimeFixture,
+    l0CompilerFn: async () => 'fixture identity',
+    projectOutput: projectClaude,
+    queryFn: ({ prompt }) => ({
+      close: () => sdkCloses++,
+      async *[Symbol.asyncIterator]() {
+        const { value: first } = await prompt[Symbol.asyncIterator]().next();
+        yield { type: 'system', subtype: 'init', session_id: 'sdk-history' };
+        yield { type: 'system', subtype: 'session_state_changed', state: 'running' };
+        yield { type: 'assistant', message: { content: [{ type: 'text', text: 'sdk projected' }] } };
+        yield {
+          type: 'result',
+          subtype: 'success',
+          session_id: 'sdk-history',
+          queued_turn_count: 0,
+          user_message_uuids: [first.uuid],
+        };
+        yield { type: 'system', subtype: 'session_state_changed', state: 'idle' };
+        readsAfterIdle++;
+        throw Error('read beyond native idle');
+      },
+    }),
+  });
+  const sdkOutput = [];
+  for await (const event of sdk.invoke('fixture', { workingDirectory: projectRoot })) sdkOutput.push(event);
+  assert.deepEqual(
+    sdkOutput.map(({ type }) => type),
+    ['session_init', 'text', 'done'],
+    sdkOutput.find(({ type }) => type === 'error')?.error,
+  );
+  assert.equal(readsAfterIdle, 0);
+  assert.equal(sdkCloses, 1);
+  assert.equal(sdkOutput[1].content, 'sdk projected');
+
+  const attachAcp = createAgentAccessAcpProcess(runtime.inventoryStore, runtime.supervisor);
+  let initialized = 0;
+  const acp = await attachAcp(projectRoot, () => {
+    const native = launchAcpChild(
+      {
+        command: process.execPath,
+        cwd: projectRoot,
+        args: [
+          '-e',
+          `
+        require('node:readline').createInterface({ input: process.stdin }).on('line', (line) => {
+          const { id, method } = JSON.parse(line);
+          if (method === 'initialize') console.log(JSON.stringify({
+            jsonrpc: '2.0', id, result: { protocolVersion: 1, agentCapabilities: { loadSession: true } },
+          }));
+        });
+      `,
+        ],
+      },
+      () => {},
+    );
+    return {
+      child: native.child,
+      stdout: native.child.stdout,
+      stderr: native.child.stderr,
+      async writeApprovedLine(line) {
+        assert.equal(JSON.parse(line).method, 'initialize');
+        initialized++;
+        await native.writeLine(line);
+      },
+    };
+  });
+  try {
+    assert.deepEqual(await acp.initialize(), { protocolVersion: 1, agentCapabilities: { loadSession: true } });
+    assert.equal(initialized, 1);
+  } finally {
+    await acp.close();
+  }
 
   const selectModel = createAgentAccessAcpModelSelection(runtime.inventoryStore, runtime.supervisor);
   const modelOffer = {

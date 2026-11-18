@@ -116,6 +116,14 @@ export function launchAcpChild(config: AcpClientConfig, captureCwdIdentity: () =
   const nativeHomes = Object.fromEntries(NATIVE_HOME_ENV_KEYS.map((key) => [key, childEnv[key]]));
   return {
     child: connection,
+    writeLine: (line: string) =>
+      new Promise<void>((resolve, reject) => {
+        if (!child.stdin || child.stdin.destroyed) {
+          reject(new Error('ACP agent stdin is not writable'));
+          return;
+        }
+        child.stdin.write(line, (error) => (error ? reject(error) : resolve()));
+      }),
     childEnv: nativeHomes,
     spawnLog: buildAcpSpawnLogFields({
       command: providerCommand,

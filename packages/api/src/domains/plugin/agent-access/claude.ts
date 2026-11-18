@@ -42,8 +42,9 @@ export function createAgentAccessClaudeOutput(
         let sequence = 0;
         signal.throwIfAborted();
         for await (const raw of events) {
-          const hostEvent = isCliError(raw) || isCliTimeout(raw) || isLivenessWarning(raw);
-          const { before, host, projected } = prepare(hostEvent ? null : raw);
+          const liveness = isLivenessWarning(raw);
+          const hostEvent = liveness || isCliError(raw) || isCliTimeout(raw);
+          const { before, host, projected } = prepare(liveness ? undefined : hostEvent ? null : raw);
           if (before) {
             pending.set(sequence, before);
             yield { sequence: sequence++, event: before };
