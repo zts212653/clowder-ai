@@ -128,7 +128,7 @@ export function FeedbackTokenDialog({
           </button>
           <button
             type="submit"
-            className="shell-focusable rounded-lg bg-cafe-accent px-3 py-2 text-sm text-white disabled:opacity-50"
+            className="shell-focusable rounded-lg bg-cafe-accent px-3 py-2 text-sm text-[var(--cafe-accent-foreground)] hover:bg-cafe-accent-hover disabled:opacity-50"
             disabled={busy}
           >
             {busy ? (saved ? '正在返回…' : '正在保存…') : saved ? '重试返回报告' : '保存并继续'}
