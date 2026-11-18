@@ -58,7 +58,7 @@ for (const storage of ['memory', 'redis']) {
     };
   };
 
-  test(`${storage}: a pre-receiver failure retires only the claimed target`, async (t) => {
+  test(`${storage}: unknown record creation fences its claim and preserves the unclaimed sibling`, async (t) => {
     const h = await stopFixture(t, options());
     h.tracker.start('thread', 'opus', 'owner', ['opus'], 'busy-original');
     const shared = await h.send('shared', ['opus', 'codex']);
@@ -70,12 +70,14 @@ for (const storage of ['memory', 'redis']) {
     await h.processor.requestDrain('thread');
     await waitFor(() => failed && !h.processor.hasProcessingSlotReservation('thread', 'codex'));
     const remaining = await h.queue.getDurableEntry('thread', shared.entry.id);
-    assert.deepEqual(remaining?.targets, ['opus'], 'failure must preserve the recipient that was never attempted');
-    assert.equal(remaining.status, 'queued');
+    assert.deepEqual(remaining?.targets, ['opus', 'codex'], 'a lost create receipt cannot retire either recipient');
+    assert.equal(remaining.status, 'claimed');
+    assert.deepEqual(remaining.claimedTargetIds, ['codex']);
+    assert.ok(remaining.claimId, 'canonical recovery retains the original short claim');
     assert.deepEqual(h.starts, []);
   });
 
-  test(`${storage}: a later pre-receiver failure cannot clear the first sibling's live attempt`, async (t) => {
+  test(`${storage}: unknown later record creation cannot clear the first sibling's live attempt`, async (t) => {
     const h = await stopFixture(t, options());
     h.tracker.start('thread', 'opus', 'owner', ['opus'], 'busy-original');
     const shared = await h.send('active', ['opus', 'codex']);
@@ -89,11 +91,11 @@ for (const storage of ['memory', 'redis']) {
     h.tracker.complete('thread', 'opus');
     await h.processor.requestDrain('thread');
     await waitFor(() => failed && !h.processor.hasProcessingSlotReservation('thread', 'opus'));
-    assert.equal(
-      await h.queue.getDurableEntry('thread', shared.entry.id),
-      null,
-      'the failed target must release its short claim',
-    );
+    const uncertain = await h.queue.getDurableEntry('thread', shared.entry.id);
+    assert.equal(uncertain.status, 'claimed', 'unknown record creation retains its exact short claim');
+    assert.deepEqual(uncertain.targets, ['opus']);
+    assert.deepEqual(uncertain.claimedTargetIds, ['opus']);
+    assert.ok(uncertain.claimId);
     assert.equal(h.queue.findAdmittedEntriesForMessages('thread', [shared.message.id], 'owner', 'codex').length, 1);
     assert.equal(h.tracker.has('thread', 'codex'), true);
     h.finishMember('codex');

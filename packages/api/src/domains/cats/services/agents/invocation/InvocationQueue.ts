@@ -2193,9 +2193,9 @@ export class InvocationQueue {
     return { outcome: 'retired', rowStatus: reconciled.entry ? 'queued' : 'absent' };
   }
 
-  async rollbackProcessingDurable(threadId: string, entryId: string): Promise<boolean> {
+  async rollbackProcessingDurable(threadId: string, entryId: string, expectedClaimId?: string): Promise<boolean> {
     const claimId = this.ledgerClaimIds.get(entryId);
-    if (!claimId) return false;
+    if (!claimId || (expectedClaimId !== undefined && claimId !== expectedClaimId)) return false;
     const restored = await this.ledgerStore.restore(threadId, entryId, claimId);
     if (restored.outcome !== 'updated') return false;
     this.ledgerClaimIds.delete(entryId);
