@@ -13,6 +13,7 @@ import {
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { MemberConfigurationConflict } from '../config/member-config-revision.js';
 import { MemberCreateConflict } from '../config/member-create-receipt.js';
+import { AGENT_PROVIDER_UNAVAILABLE } from '../domains/plugin/agent-access-role-store.js';
 import {
   withPluginOwnerRequest,
   withPluginOwnerWebhook,
@@ -156,6 +157,12 @@ export type AgentRoleWrite = (
   mutation: AgentAccessRoleMutation,
 ) => Promise<Extract<AgentAccessRoleMutationResult, { status: 'committed' | 'bound' }>>;
 
+export class AgentProviderUnavailable extends Error {
+  constructor() {
+    super('选择的插件客户端已不可用，请重新选择。');
+  }
+}
+
 export function createAgentRoleWrite(
   inventory: Pick<PluginInventoryStore, 'readCurrentAuthority'>,
   runtime: Pick<PluginRuntimeCarrierRouter, 'attemptInvoke'>,
@@ -174,7 +181,11 @@ export function createAgentRoleWrite(
       mutation,
       runtime,
     );
-    if (result.status === 'failed') throw result.error;
+    if (result.status === 'failed') {
+      if (result.error instanceof Error && result.error.message === AGENT_PROVIDER_UNAVAILABLE)
+        throw new AgentProviderUnavailable();
+      throw result.error;
+    }
     const value = agentAccessRoleMutationResultSchema.parse(result.value);
     if (value.status === 'conflict') throw new MemberConfigurationConflict();
     if (value.status === 'invalid_dsh_profile')

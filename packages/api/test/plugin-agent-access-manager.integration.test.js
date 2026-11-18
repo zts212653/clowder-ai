@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -9,6 +10,7 @@ import { AGENT_ACCESS_OPERATIONS, OFFICIAL_AGENT_ACCESS_OPERATIONS } from '@clow
 import { validateManifest } from '@clowder-ai/plugin-contract';
 import Fastify from 'fastify';
 import { A2AAgentService } from '../dist/domains/cats/services/agents/providers/A2AAgentService.js';
+import { sessionImplementationKey } from '../dist/domains/cats/services/agents/session-contract/implementation-registry.js';
 import { MessageStore } from '../dist/domains/cats/services/stores/ports/MessageStore.js';
 import { createAgentAccessA2ARunner } from '../dist/domains/plugin/agent-access-a2a.js';
 import { createAgentAccessDshConnectionTest } from '../dist/domains/plugin/agent-access-dsh.js';
@@ -37,6 +39,7 @@ test('Agent access discovery executes the same standalone entrypoint from a Mana
   const previousRoot = process.env.CAT_CAFE_CONFIG_ROOT;
   const previousTemplate = process.env.CAT_TEMPLATE_PATH;
   const template = join(projectRoot, 'cat-template.json');
+  const availableProviders = new Set();
   await writeFile(template, JSON.stringify({ version: 1, breeds: [], roleTemplates: [] }));
   process.env.CAT_CAFE_CONFIG_ROOT = projectRoot;
   process.env.CAT_TEMPLATE_PATH = template;
@@ -44,6 +47,7 @@ test('Agent access discovery executes the same standalone entrypoint from a Mana
     projectRoot,
     messageStore: new MessageStore(),
     contract: { manifestContractRange: '0.4.0-candidate.0', validateManifest },
+    isDeclaredAgentProviderAvailable: (reference) => availableProviders.has(sessionImplementationKey(reference)),
   });
   t.after(async () => {
     if (previousRoot === undefined) delete process.env.CAT_CAFE_CONFIG_ROOT;
@@ -69,13 +73,11 @@ test('Agent access discovery executes the same standalone entrypoint from a Mana
       inventory: runtime.inventoryStore,
       runtime: runtime.supervisor,
     });
-  const availableProviders = new Set();
   await app.register(catsRoutes, {
     nativeRuntimeDiscovery,
     agentAccessDetection,
     agentRoleRead: createAgentRoleRead(runtime.inventoryStore, runtime.supervisor),
     agentRoleWrite: createAgentRoleWrite(runtime.inventoryStore, runtime.supervisor),
-    isDeclaredAgentProviderAvailable: (reference) => availableProviders.has(reference),
   });
   const scan = async () => {
     const result = await app.inject({
@@ -339,11 +341,11 @@ test('Agent access discovery executes the same standalone entrypoint from a Mana
   );
   assert.equal((await readCatalog()).breeds.length, 0);
 
-  const call = (method, path, payload) =>
+  const call = (method, path, payload, headers = {}) =>
     app.inject({
       method,
       url: path,
-      headers: { host: 'localhost:3004', origin: 'http://localhost:3003' },
+      headers: { host: 'localhost:3004', origin: 'http://localhost:3003', ...headers },
       remoteAddress: '127.0.0.1',
       payload,
     });
@@ -370,11 +372,23 @@ test('Agent access discovery executes the same standalone entrypoint from a Mana
   const unavailable = await call('POST', '/api/cats', { ...request.input, ...declared });
   assert.equal(unavailable.statusCode, 409, unavailable.payload);
   assert.equal(unavailable.json().code, 'agent_provider_unavailable');
+  const unavailableTopLevel = await call('POST', '/api/cats', { ...request.input, agentProvider: selectedProvider });
+  assert.equal(unavailableTopLevel.statusCode, 409, unavailableTopLevel.payload);
+  assert.equal(unavailableTopLevel.json().code, 'agent_provider_unavailable');
   assert.equal((await readCatalog()).breeds.length, 0);
   const create = await call('POST', '/api/cats', request.input);
   assert.equal(create.statusCode, 201, create.payload);
   const createdRole = create.json().cat;
   assert.equal(createdRole.id, request.input.catId);
+  const journey = randomUUID();
+  const receipt = {
+    'idempotency-key': `onboarding:${journey}:cat:${request.input.catId}`,
+    'x-cat-cafe-onboarding-journey': journey,
+  };
+  const collidingCreate = { ...request.input, ...declared, mentionPatterns: ['@separate-receipt-member'] };
+  const blockedCollision = await call('POST', '/api/cats', collidingCreate, receipt);
+  assert.equal(blockedCollision.statusCode, 409, blockedCollision.payload);
+  assert.equal(blockedCollision.json().code, 'agent_provider_unavailable');
   const inherited = await readCatalog();
   Object.assign(inherited.breeds[0], {
     teamStrengths: 'Template collaboration strength',
@@ -396,6 +410,11 @@ test('Agent access discovery executes the same standalone entrypoint from a Mana
   assert.equal(staleSelection.statusCode, 409, staleSelection.payload);
   assert.equal(staleSelection.json().code, 'agent_provider_unavailable');
   availableProviders.add(selectedProvider);
+  const distinctCreation = await call('POST', '/api/cats', collidingCreate, receipt);
+  assert.equal(distinctCreation.statusCode, 201, distinctCreation.payload);
+  const receiptRole = distinctCreation.json().cat;
+  assert.notEqual(receiptRole.id, createdRole.id);
+  assert.equal(receiptRole.acp.agentProvider, selectedProvider);
   const bound = await call('PATCH', rolePath, { ...declared, expectedRevision: createdRole.configurationRevision });
   assert.equal(bound.statusCode, 200, bound.payload);
   assert.equal(bound.json().cat.acp.agentProvider, selectedProvider);
@@ -409,5 +428,12 @@ test('Agent access discovery executes the same standalone entrypoint from a Mana
   assert.equal(edited.json().cat.acp.agentProvider, selectedProvider);
   const deleted = await call('DELETE', rolePath, { expectedRevision: edited.json().cat.configurationRevision });
   assert.equal(deleted.statusCode, 200, deleted.payload);
+  const replay = await call('POST', '/api/cats', collidingCreate, receipt);
+  assert.equal(replay.statusCode, 200, replay.payload);
+  assert.equal(replay.json().cat.id, receiptRole.id);
+  const removedReplay = await call('DELETE', '/api/cats/' + receiptRole.id, {
+    expectedRevision: replay.json().cat.configurationRevision,
+  });
+  assert.equal(removedReplay.statusCode, 200, removedReplay.payload);
   assert.equal((await readCatalog()).breeds.length, 0);
 });

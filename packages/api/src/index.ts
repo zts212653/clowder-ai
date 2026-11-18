@@ -7,10 +7,7 @@ import {
   SessionImplementationRegistry,
   sessionImplementationKey,
 } from './domains/cats/services/agents/session-contract/implementation-registry.js';
-import {
-  parsePluginAgentRef,
-  resolveMemberSessionRef,
-} from './domains/cats/services/agents/session-contract/plugin-agent-provider.js';
+import { resolveMemberSessionRef } from './domains/cats/services/agents/session-contract/plugin-agent-provider.js';
 import {
   RegisteredSessionAgentService,
   selectSessionAgentService,
@@ -3683,10 +3680,6 @@ async function initializeApi(
     agentRoleWrite: (...args) => agentRoleWrite(...args),
     nativeRuntimeDiscovery: (...args) => readLegacyNativeRuntimes(...args),
     agentAccessDetection: (...args) => readAgentAccessDetection(...args),
-    isDeclaredAgentProviderAvailable: (reference) => {
-      const ref = parsePluginAgentRef(reference);
-      return !!ref && sessionImplementations.has(ref);
-    },
     runDshConnection: (config, cwd, preferences) => agentAccessDshConnection(config, cwd, preferences),
     addressedPlugins: () => router.addressedPlugins,
     resolveContextCapacitySnapshot: (catId) => router.contextCapacitySnapshot(catId),
@@ -5551,6 +5544,7 @@ async function initializeApi(
   const collectiveArtifactOwnerHolder: import('./domains/plugin/host-surface/collective-artifact-owner.js').CollectiveArtifactOwnerHolder =
     {};
   const pluginRuntime = cloudConversations.createRuntime({
+    isDeclaredAgentProviderAvailable: (reference) => sessionImplementations.has(reference),
     agentSessionProviders: (packages, configuration) =>
       declaredAgentSessionProviders({
         configuration,

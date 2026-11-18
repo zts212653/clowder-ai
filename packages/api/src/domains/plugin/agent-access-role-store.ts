@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { catRegistry } from '@cat-cafe/shared';
+import { type CatCafeConfig, catRegistry } from '@cat-cafe/shared';
 import {
   AGENT_ACCESS_PLUGIN_ID,
   type AgentAccessRoleStore,
@@ -21,12 +21,36 @@ import {
 } from '../../config/runtime-cat-catalog.js';
 import { writeFileAtomic } from '../../config/write-file-atomic.js';
 import { resolveActiveProjectRoot } from '../../utils/active-project-root.js';
+import {
+  type SessionImplementationRef,
+  sessionImplementationKey,
+} from '../cats/services/agents/session-contract/implementation-registry.js';
+import { resolveMemberSessionRef } from '../cats/services/agents/session-contract/plugin-agent-provider.js';
 import { currentPluginOwnerRequestContext } from './carrier/plugin-call-context.js';
+
+export const AGENT_PROVIDER_UNAVAILABLE = 'agent_provider_unavailable';
+export type DeclaredAgentProviderAvailability = (reference: SessionImplementationRef) => boolean;
+
+function catalogProvider(catalog: CatCafeConfig, catId: string) {
+  const cat = toAllCatConfigs(catalog)[catId];
+  if (!cat) return;
+  if (cat.agentProvider !== undefined || cat.carrier !== 'acp')
+    return resolveMemberSessionRef(cat.agentProvider, undefined);
+  const variant = catalog.breeds
+    .flatMap((breed) => breed.variants.filter((item) => (item.catId ?? breed.catId) === catId))
+    .find((item) => 'acp' in item);
+  return resolveMemberSessionRef(
+    undefined,
+    undefined,
+    (variant as { acp?: { agentProvider?: string } } | undefined)?.acp?.agentProvider,
+  );
+}
 
 export function createAgentAccessRoleStore(
   pluginId: string,
   instanceId: string,
   assertActivation: () => void,
+  isDeclaredAgentProviderAvailable?: DeclaredAgentProviderAvailability,
 ): AgentAccessRoleStore | undefined {
   if (pluginId !== AGENT_ACCESS_PLUGIN_ID) return undefined;
 
@@ -69,9 +93,18 @@ export function createAgentAccessRoleStore(
         if (digest(currentSource) !== revision) return 'conflict';
         if (change.catId && (change.kind === 'create' || change.kind === 'update')) {
           const previous = change.kind === 'update' ? parseRawCatConfig(currentSource) : undefined;
+          const next = parseRawCatConfig(source);
+          const selected = catalogProvider(next, change.catId);
+          const current = previous && catalogProvider(previous, change.catId);
+          if (
+            selected &&
+            (!current || sessionImplementationKey(selected) !== sessionImplementationKey(current)) &&
+            isDeclaredAgentProviderAvailable?.(selected) === false
+          )
+            throw new Error(AGENT_PROVIDER_UNAVAILABLE);
           assertCodexMemberMutationReady(
             projectRoot,
-            parseRawCatConfig(source),
+            next,
             change.catId,
             previous
               ? {

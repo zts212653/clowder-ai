@@ -18,7 +18,7 @@ import type { EntrustedWorkChangeReason } from '../../../growing/EntrustedWorkLi
 import type { MessagingService } from '../../../messaging/messaging-service.js';
 import type { SubscriptionDelivery } from '../../../messaging/subscription-delivery.js';
 import { createAgentAccessDiscoveryHost } from '../../agent-access-discovery-host.js';
-import { createAgentAccessRoleStore } from '../../agent-access-role-store.js';
+import { createAgentAccessRoleStore, type DeclaredAgentProviderAvailability } from '../../agent-access-role-store.js';
 import { type PluginInvocationOutcome, settlePluginInvocation } from '../../carrier/host-invocation.js';
 import type { SharedMcpFactory } from '../../declared/shared-mcp-factory.js';
 import { type ModuleExecutionLease, ModuleExecutionWorker } from '../../execution-worker/client.js';
@@ -142,6 +142,7 @@ export interface PluginModuleDefinitionShape extends ModulePluginSettingsFactory
 }
 
 export interface ModulePluginRuntimeOptions {
+  readonly isDeclaredAgentProviderAvailable?: DeclaredAgentProviderAvailability;
   readonly taskArtifactReader?: import('../../../growing/ports/PreparedArtifactReader.js').PreparedArtifactReader;
   readonly onTaskDataChanged?: (task: import('@cat-cafe/shared').TaskItem, reason?: EntrustedWorkChangeReason) => void;
   readonly packages: VerifiedPluginPackageLocator;
@@ -411,7 +412,12 @@ export class ModulePluginRuntime implements BundledPluginRuntime {
       );
       assertActivation();
       const agentAccess = createAgentAccessDiscoveryHost(packageRecord.pluginId, pluginInstanceId, assertActivation);
-      const agentRoleStore = createAgentAccessRoleStore(packageRecord.pluginId, pluginInstanceId, assertActivation);
+      const agentRoleStore = createAgentAccessRoleStore(
+        packageRecord.pluginId,
+        pluginInstanceId,
+        assertActivation,
+        this.options.isDeclaredAgentProviderAvailable,
+      );
       const host: ModulePluginHostShape = {
         ...(agentRoleStore ? { agentRoleStore } : {}),
         ...(agentAccess ? { agentAccess } : {}),

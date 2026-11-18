@@ -203,6 +203,7 @@ export interface DormantPluginRuntimeCompositionOptions {
   /** Live Host registries consumed by package-declared runtime contributions. */
   readonly limbRegistry?: LimbRegistry;
   readonly cloudConversationHosts?: CloudConversationHostRegistry;
+  readonly isDeclaredAgentProviderAvailable?: import('./agent-access-role-store.js').DeclaredAgentProviderAvailability;
   readonly agentSessionProviders?: (
     packages: VerifiedPluginPackageLocator,
     configuration: PluginRuntimeConfigurationPort,
@@ -532,6 +533,7 @@ export function createDormantPluginRuntimeComposition(
       ? { threads: options.threadStore, ownerUserId: options.threadOwnerUserId }
       : undefined;
   const moduleRuntime = new ModulePluginRuntime({
+    isDeclaredAgentProviderAvailable: options.isDeclaredAgentProviderAvailable,
     ...(options.taskArtifactReader ? { taskArtifactReader: options.taskArtifactReader } : {}),
     ...(options.onTaskDataChanged ? { onTaskDataChanged: options.onTaskDataChanged } : {}),
     taskAdmission: (pluginInstanceId, packageDigest, assertActivation) =>

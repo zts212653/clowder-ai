@@ -3,7 +3,12 @@ import { projectRoleCard } from '@clowder-ai/agent-access/roles/role-card';
 import { auditL0Budget } from '../domains/cats/services/context/l0-budget-audit.js';
 import type { MemberCanonService } from '../domains/collaborative-content/asset-canon/member-service.js';
 import { withTargetAliasMutation } from '../domains/plugin/manager/addressing/target-alias-mutation.js';
-import type { AgentRoleRead, AgentRoleWrite, registerAgentAccessRoutes } from './agent-access-routes.js';
+import {
+  AgentProviderUnavailable,
+  type AgentRoleRead,
+  type AgentRoleWrite,
+  type registerAgentAccessRoutes,
+} from './agent-access-routes.js';
 import { registerDshSetupRoutes } from './dsh-setup-route.js';
 import type { RunDshConnection } from './dsh-setup-service.js';
 import { registerMemberCanonResponse } from './member-canon-response.js';
@@ -949,7 +954,6 @@ interface CatsRoutesOptions {
   runDshConnection?: RunDshConnection;
   nativeRuntimeDiscovery?: ReturnType<typeof registerAgentAccessRoutes>['readLegacyNativeRuntimes'];
   agentAccessDetection?: ReturnType<typeof registerAgentAccessRoutes>['readDetection'];
-  isDeclaredAgentProviderAvailable?: (reference: string) => boolean;
   resolveCarrierCapability?: (catId: CatId) => FreshnessCarrierCapability | undefined;
 }
 
@@ -1128,18 +1132,6 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opt
       }
       let replayed = false;
 
-      const selectedPlugin =
-        body.agentProvider !== undefined ? body.agentProvider : 'acp' in body ? body.acp?.agentProvider : undefined;
-      if (
-        requestedCarrier === 'acp' &&
-        selectedPlugin &&
-        !managedIdsBefore.has(body.catId) &&
-        opts.isDeclaredAgentProviderAvailable?.(selectedPlugin) === false
-      ) {
-        return reply
-          .code(409)
-          .send({ code: 'agent_provider_unavailable', error: '选择的插件客户端已不可用，请重新选择。' });
-      }
       if (!receipt && (managedIdsBefore.has(body.catId) || catRegistry.tryGet(body.catId)))
         return reply.code(409).send({
           code: 'member_creation_conflict',
@@ -1375,6 +1367,8 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opt
           return reply.code(409).send({ code: 'member_creation_conflict', error: message });
         if (err instanceof InvalidDshProfile)
           return reply.code(400).send({ code: 'acp_profile_invalid', error: message });
+        if (err instanceof AgentProviderUnavailable)
+          return reply.code(409).send({ code: 'agent_provider_unavailable', error: message });
         reply.status(
           err instanceof Error && 'statusCode' in err && typeof err.statusCode === 'number' ? err.statusCode : 400,
         );
@@ -1699,20 +1693,6 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opt
         reply.status(400);
         return { error: 'carrier "acp" requires an acp config (command + startupArgs)' };
       }
-      const previousPlugin =
-        currentCat.agentProvider !== undefined ? currentCat.agentProvider : currentAcpConfig?.agentProvider;
-      const savedPlugin = body.agentProvider !== undefined ? body.agentProvider : currentCat.agentProvider;
-      const selectedPlugin = savedPlugin !== undefined ? savedPlugin : effectiveAcpConfig?.agentProvider;
-      if (
-        usesAcpTransport &&
-        selectedPlugin &&
-        selectedPlugin !== previousPlugin &&
-        opts.isDeclaredAgentProviderAvailable?.(selectedPlugin) === false
-      ) {
-        return reply
-          .code(409)
-          .send({ code: 'agent_provider_unavailable', error: '选择的插件客户端已不可用，请重新选择。' });
-      }
 
       // The public Desktop binding exposes only DSH_HOME. Preparing a new HOME
       // must preserve other owner overrides which the editor cannot read back.
@@ -1927,6 +1907,8 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opt
         };
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
+        if (err instanceof AgentProviderUnavailable)
+          return reply.code(409).send({ code: 'agent_provider_unavailable', error: message });
         if (err instanceof Error && 'statusCode' in err && typeof err.statusCode === 'number') {
           reply.status(err.statusCode);
         } else if (/not found/i.test(message)) {
