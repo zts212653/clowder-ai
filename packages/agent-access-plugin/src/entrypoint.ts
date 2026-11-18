@@ -24,6 +24,7 @@ import { writeRole } from './roles/write-role.js';
 import { runA2ATurn } from './runtime/a2a-turn.js';
 import { checkDshConnectionInWorker } from './runtime/acp/dsh/connection-check.js';
 import { resolveSessionModelConfigOption } from './runtime/acp/session-configuration.js';
+import { projectClaudeOutput } from './runtime/claude/project-claude-output.js';
 import { normalizeKimiEvent } from './runtime/kimi-event-parser.js';
 import { buildKimiLaunchArguments } from './runtime/kimi-launch-arguments.js';
 import { normalizeOpenCodeEvent } from './runtime/opencode-event-parser.js';
@@ -63,6 +64,7 @@ export default {
               const request = agentAccessAcpModelSelectionSchema.parse(input);
               return resolveSessionModelConfigOption(request, request.model);
             },
+            projectClaudeOutput,
             testDshConnection({ input, launch }: { input: unknown; launch: () => Promise<AgentAccessAcpChildHandle> }) {
               return checkDshConnectionInWorker(agentAccessDshConnectionInputSchema.parse(input), launch);
             },

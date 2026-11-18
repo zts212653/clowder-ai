@@ -2345,7 +2345,9 @@ async function initializeApi(
                         const { createClaudeAgentServiceForCanary } = await import(
                           './domains/cats/services/agents/providers/claude-carrier-factory.js'
                         );
-                        service = createClaudeAgentServiceForCanary(catId);
+                        service = createClaudeAgentServiceForCanary(catId, process.env, (...args) =>
+                          agentAccessClaudeOutput(...args),
+                        );
                       }
                       break;
                     }
@@ -6011,6 +6013,8 @@ async function initializeApi(
   const { pluginManagerUploadRoutes, registerPluginManagerRoutes } = await import('./routes/plugin-manager-routes.js');
   const { registerPluginMarketplaceRoutes } = await import('./routes/plugin-marketplace-routes.js');
   const { registerAgentClientLibraryRoutes } = await import('./routes/agent-client-library-routes.js');
+  const { createAgentAccessClaudeOutput } = await import('./domains/plugin/agent-access/claude.js');
+  const agentAccessClaudeOutput = createAgentAccessClaudeOutput(pluginRuntime.inventoryStore, pluginRuntime.supervisor);
   const { createAgentAccessAcpModelSelection } = await import('./domains/plugin/agent-access/acp.js');
   const agentAccessAcpModelSelection = createAgentAccessAcpModelSelection(
     pluginRuntime.inventoryStore,

@@ -4,6 +4,8 @@ import { randomUUID } from 'node:crypto';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { Readable } from 'node:stream';
+import { setTimeout as wait } from 'node:timers/promises';
 import { test } from 'node:test';
 import { roleConfigurationRevision } from '@clowder-ai/agent-access/roles/write-role';
 import { AGENT_ACCESS_OPERATIONS, OFFICIAL_AGENT_ACCESS_OPERATIONS } from '@clowder-ai/agent-contract';
@@ -192,6 +194,71 @@ test('Agent access discovery executes the same standalone entrypoint from a Mana
   assert.ok(first.candidates.some((candidate) => candidate.id === 'codex'));
   assert.equal(first.candidates.find((candidate) => candidate.id === 'kimi')?.label, 'Kimi');
   assert.deepEqual((await setupRead()).json(), { error: 'dsh_setup_custom_startup' });
+
+  const controller = new AbortController();
+  const source = Readable.from([
+    {
+      sequence: 0,
+      event: {
+        type: 'stream_event',
+        event: { type: 'message_start', message: { id: 'claude-msg', usage: { input_tokens: 8 } } },
+      },
+    },
+    {
+      sequence: 1,
+      event: {
+        type: 'stream_event',
+        event: { type: 'content_block_delta', delta: { type: 'text_delta', text: 'shipped' } },
+      },
+    },
+    {
+      sequence: 2,
+      event: { type: 'assistant', message: { id: 'claude-msg', content: [{ type: 'text', text: 'shipped' }] } },
+    },
+    { sequence: 3, event: { type: 'result', subtype: 'success', usage: { input_tokens: 10, output_tokens: 2 } } },
+  ]);
+  const claude = await runtime.supervisor.invoke(installed.pluginInstanceId, 'projectClaudeOutput', {
+    catId: 'claude-fixture',
+    source,
+    signal: controller.signal,
+  });
+  const framed = [];
+  for await (const frame of claude) framed.push(frame);
+  assert.deepEqual(
+    framed.map(({ sequence }) => sequence),
+    [0, 1, 2, 3],
+  );
+  assert.deepEqual(
+    framed.flatMap(({ messages }) => messages ?? []).map(({ content }) => content),
+    ['shipped'],
+  );
+  assert.deepEqual(framed[3].usage, { inputTokens: 10, outputTokens: 2, lastTurnInputTokens: 8 });
+
+  const { createAgentAccessClaudeOutput } = await import('../dist/domains/plugin/agent-access/claude.js');
+  const projectClaude = createAgentAccessClaudeOutput(runtime.inventoryStore, runtime.supervisor);
+  const stopController = new AbortController();
+  const providerEnded = Promise.withResolvers();
+  const native = (async function* () {
+    try {
+      yield { type: 'system', subtype: 'init', session_id: 'verified-session' };
+      await wait(60_000, undefined, { signal: stopController.signal });
+    } finally {
+      providerEnded.resolve();
+    }
+  })();
+  const output = projectClaude(native, {
+    catId: 'verified-role',
+    signal: stopController.signal,
+    stop: () => stopController.abort(),
+    knownCredentials: [],
+  });
+  const opened = await output.next();
+  assert.equal(opened.value.messages.sessionId, 'verified-session');
+  assert.equal(opened.value.messages.catId, 'verified-role');
+  const parked = output.next();
+  stopController.abort();
+  await assert.rejects(parked, /abort/i);
+  await providerEnded.promise;
 
   const selectModel = createAgentAccessAcpModelSelection(runtime.inventoryStore, runtime.supervisor);
   const modelOffer = {

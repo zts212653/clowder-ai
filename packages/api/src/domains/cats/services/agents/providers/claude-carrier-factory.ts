@@ -17,7 +17,7 @@
  */
 import { type CatId, catRegistry } from '@cat-cafe/shared';
 import type { AgentMessage, AgentService, AgentServiceOptions, ToolExecutionPolicy } from '../../types.js';
-import { ClaudeAgentService } from './ClaudeAgentService.js';
+import { ClaudeAgentService, type ClaudeAgentServiceOptions } from './ClaudeAgentService.js';
 import { ClaudeBgCarrierService } from './ClaudeBgCarrierService.js';
 import { ClaudeInteractivePtyCarrierService } from './ClaudeInteractivePtyCarrierService.js';
 import { ClaudeSdkAgentService } from './ClaudeSdkAgentService.js';
@@ -76,7 +76,11 @@ export function _resetHealthStoreForTest(): void {
  * Both `print_sdk` and `api_key` use ClaudeAgentService — the billing difference
  * is in the auth/account layer, not the carrier code.
  */
-export function createCarrierByTier(tier: CarrierTier | string, catId: CatId): AgentService {
+export function createCarrierByTier(
+  tier: CarrierTier | string,
+  catId: CatId,
+  projectOutput?: ClaudeAgentServiceOptions['projectOutput'],
+): AgentService {
   switch (tier) {
     case CARRIER_AGENT_SDK:
       return new ClaudeSdkAgentService({ catId });
@@ -87,7 +91,7 @@ export function createCarrierByTier(tier: CarrierTier | string, catId: CatId): A
     case CARRIER_PRINT_SDK:
     case CARRIER_API_KEY:
     default:
-      return new ClaudeAgentService({ catId });
+      return new ClaudeAgentService({ catId, projectOutput });
   }
 }
 
@@ -122,15 +126,17 @@ function resolveTargetTier(env: Record<string, string | undefined>): CarrierTier
 export function createClaudeAgentServiceForCanary(
   catId: CatId,
   env: Record<string, string | undefined> = process.env,
+  projectOutput?: ClaudeAgentServiceOptions['projectOutput'],
 ): AgentService {
   // Explicit opt-in bypasses replaying fallbacks: an SDK query may already have tool effects.
   if (env[CARRIER_ENV_KEY]?.trim() === CARRIER_AGENT_SDK) return new ClaudeSdkAgentService({ catId });
   const store = getCarrierHealthStore();
   const targetTier = resolveTargetTier(env);
   const activeTier = selectFirstHealthyTier(targetTier, store) as CarrierTier;
-  const carrier = createCarrierByTier(activeTier, catId);
+  const createCarrier = (tier: CarrierTier | string, id: CatId) => createCarrierByTier(tier, id, projectOutput);
+  const carrier = createCarrier(activeTier, catId);
 
-  return new FallbackCarrierWrapper(carrier, catId, activeTier, targetTier, store);
+  return new FallbackCarrierWrapper(carrier, catId, activeTier, targetTier, store, createCarrier);
 }
 
 // ─── Fallback wrapper (D3, D4) ───

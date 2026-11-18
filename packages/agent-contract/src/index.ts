@@ -30,6 +30,7 @@ export const AGENT_ACCESS_OPERATIONS = [
 export const OFFICIAL_AGENT_ACCESS_OPERATIONS = [
   ...AGENT_ACCESS_OPERATIONS,
   'parseNativeEvent',
+  'projectClaudeOutput',
   'selectAcpModel',
   'testDshConnection',
 ] as const;

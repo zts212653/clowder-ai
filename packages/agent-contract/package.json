@@ -13,6 +13,10 @@
     "./acp": {
       "types": "./dist/acp.d.ts",
       "import": "./dist/acp.js"
+    },
+    "./claude": {
+      "types": "./dist/claude.d.ts",
+      "import": "./dist/claude.js"
     }
   },
   "scripts": {
