@@ -1,11 +1,13 @@
 import {
   AGENT_ACCESS_PLUGIN_ID,
   type AgentAccessReadiness,
+  type AgentAccessRoleCard,
   type AgentAccessRoleMutation,
   type AgentAccessRoleMutationResult,
   agentAccessClientDirectorySchema,
   agentAccessDetectionSchema,
   agentAccessDetectRequestSchema,
+  agentAccessRoleCardsSchema,
   agentAccessRoleMutationResultSchema,
 } from '@clowder-ai/agent-contract';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
@@ -101,6 +103,36 @@ function currentAgentAccess(
   if (instance.activationState !== 'enabled' || instance.runtimeState !== 'healthy')
     return { readiness: { state: 'starting' } };
   return instance;
+}
+
+export type AgentRoleRead = (
+  request: FastifyRequest,
+  reply: FastifyReply,
+) => Promise<ReadonlyMap<string, AgentAccessRoleCard> | undefined>;
+
+export function createAgentRoleRead(
+  inventory: Pick<PluginInventoryStore, 'readCurrentAuthority'>,
+  runtime: Pick<PluginRuntimeCarrierRouter, 'attemptInvoke'>,
+): AgentRoleRead {
+  return async (request, reply) => {
+    const access = requirePluginOwnerLocalAccess(request, 'read');
+    if ('error' in access) return;
+    const instance = currentAgentAccess(await inventory.readCurrentAuthority(AGENT_ACCESS_PLUGIN_ID));
+    if ('readiness' in instance) return;
+    const outcome = await invokeOwnerAgentAccess(
+      request,
+      reply,
+      instance,
+      access.operator,
+      'read',
+      'readRoles',
+      {},
+      runtime,
+    );
+    if (outcome.status === 'failed') return;
+    const cards = agentAccessRoleCardsSchema.safeParse(outcome.value);
+    if (cards.success) return new Map(cards.data.map((card) => [card.id, card]));
+  };
 }
 
 export type AgentRoleWrite = (

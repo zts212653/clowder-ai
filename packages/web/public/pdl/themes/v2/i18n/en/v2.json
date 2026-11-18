@@ -5293,6 +5293,7 @@
     "dshAuto": "Installed · Configured automatically when added",
     "conflict": "A member with this name already exists",
     "loginRequired": "Sign-in required",
+    "copyLogin": "Copy sign-in command",
     "unsupported": "Unsupported",
     "needsConfig": "Configuration required",
     "partialFailure": "Detection failed",

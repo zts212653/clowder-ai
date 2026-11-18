@@ -262,6 +262,14 @@ pdl:
                       - w: ctl
                         control:
                           type: button
+                          label: t:nativeSetup.copyLogin
+                          act: nativeCopyLogin
+                          args:
+                            id: "@id"
+                          when: "@loginCommand"
+                      - w: ctl
+                        control:
+                          type: button
                           label:
                             of: "@adjusting"
                             map:

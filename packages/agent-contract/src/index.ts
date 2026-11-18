@@ -62,6 +62,31 @@ export const agentAccessClientDirectorySchema = z.object({
 });
 export type AgentAccessClientDirectory = z.infer<typeof agentAccessClientDirectorySchema>;
 
+export const agentAccessRoleCardsSchema = z.array(
+  z.object({
+    id: z.string(),
+    configurationRevision: z.string().optional(),
+    name: z.string(),
+    displayName: z.string(),
+    nickname: z.string().optional(),
+    banner: z.string().optional(),
+    color: z.object({ primary: z.string(), secondary: z.string() }),
+    mentionPatterns: z.array(z.string()),
+    roleDescription: z.string(),
+    personality: z.string().optional(),
+    teamStrengths: z.string().optional(),
+    caution: z.string().nullable().optional(),
+    restrictions: z.array(z.string()),
+    strengths: z.array(z.string()).optional(),
+    client: z.object({
+      id: z.string(),
+      label: z.string(),
+      type: z.enum(['legacy', 'plugin', 'cloud']),
+    }),
+  }),
+);
+export type AgentAccessRoleCard = z.infer<typeof agentAccessRoleCardsSchema>[number];
+
 export const agentAccessDetectRequestSchema = z.object({ refresh: z.boolean().optional() }).strict();
 
 export const agentAccessDetectionSchema = z.object({

@@ -18,7 +18,11 @@ import {
   createDormantPluginRuntimeComposition,
   createPluginManagerRuntimeComposition,
 } from '../dist/domains/plugin/index.js';
-import { createAgentRoleWrite, registerAgentAccessRoutes } from '../dist/routes/agent-access-routes.js';
+import {
+  createAgentRoleRead,
+  createAgentRoleWrite,
+  registerAgentAccessRoutes,
+} from '../dist/routes/agent-access-routes.js';
 import { catsRoutes } from '../dist/routes/cats.js';
 import { tarArchive } from '../scripts/bundled-plugin-artifacts.mjs';
 import { canonicalGzip } from '../scripts/canonical-gzip.mjs';
@@ -59,6 +63,7 @@ test('Agent access discovery executes the same standalone entrypoint from a Mana
   });
   registerAgentAccessRoutes(app, { inventory: runtime.inventoryStore, runtime: runtime.supervisor });
   await app.register(catsRoutes, {
+    agentRoleRead: createAgentRoleRead(runtime.inventoryStore, runtime.supervisor),
     agentRoleWrite: createAgentRoleWrite(runtime.inventoryStore, runtime.supervisor),
   });
   const scan = async () => {
@@ -173,6 +178,7 @@ test('Agent access discovery executes the same standalone entrypoint from a Mana
       mentionPatterns: ['@isolated-role'],
       roleDescription: 'Plugin-owned role write',
       clientId: 'kimi',
+      configurationSource: 'native_tool',
       carrier: 'cli',
       defaultModel: 'fixture',
       mcpSupport: false,
@@ -263,9 +269,11 @@ test('Agent access discovery executes the same standalone entrypoint from a Mana
   const directory = await call('GET', '/api/agent-access/v1/clients');
   assert.ok(directory.json().clients.some((client) => client.id === 'kimi'));
   const create = await call('POST', '/api/cats', request.input);
-  assert.equal(create.statusCode, 200, create.payload);
+  assert.equal(create.statusCode, 201, create.payload);
   const createdRole = create.json().cat;
   assert.equal(createdRole.id, request.input.catId);
+  const roles = await call('GET', '/api/cats');
+  assert.deepEqual(roles.json().cats[0].client, { id: 'kimi', label: 'Kimi', type: 'legacy' });
   const rolePath = '/api/cats/' + createdRole.id;
   const edited = await call('PATCH', rolePath, {
     displayName: 'Changed using the member API',

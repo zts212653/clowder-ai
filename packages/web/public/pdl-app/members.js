@@ -1451,6 +1451,9 @@ function bindMembers() {
             effort: 'probe-' + p.id + '-effort',
           },
           adjusting: !!p.adjusting,
+          loginCommand:
+            p.runtime.readiness && p.runtime.readiness.status !== 'configured' &&
+            p.runtime.readiness.loginCommand,
           get preferences() {
             return memberPreferences(p.form, runtimeCatalogState(p.form, '', p.runtime), p.runtime.acpMaxDefault);
           },
@@ -1500,6 +1503,13 @@ function bindMembers() {
           : null,
       partialFailureCount: (g.partialFailures || []).length,
     };
+  };
+  A.nativeCopyLogin = function (data) {
+    const partner = S.nativeSetup.partners.find(function (row) {
+      return row.id === data.id;
+    });
+    const command = partner && partner.runtime.readiness && partner.runtime.readiness.loginCommand;
+    if (command) return copyText(command);
   };
   A.nativeSelect = function (data) {
     const setup = S.nativeSetup;

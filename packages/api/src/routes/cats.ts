@@ -3,7 +3,7 @@ import { projectRoleCard } from '@clowder-ai/agent-access/roles/role-card';
 import { auditL0Budget } from '../domains/cats/services/context/l0-budget-audit.js';
 import type { MemberCanonService } from '../domains/collaborative-content/asset-canon/member-service.js';
 import { withTargetAliasMutation } from '../domains/plugin/manager/addressing/target-alias-mutation.js';
-import type { AgentRoleWrite } from './agent-access-routes.js';
+import type { AgentRoleRead, AgentRoleWrite } from './agent-access-routes.js';
 import { registerDshSetupRoutes } from './dsh-setup-route.js';
 import { registerMemberCanonResponse } from './member-canon-response.js';
 import { registerDshMemberConnectionChecks } from './member-connection-check.js';
@@ -789,6 +789,7 @@ async function toCatResponse(
   resolveEffectiveAccountRef: (cat: CatConfig) => Promise<string | undefined>,
   resolveContextCapacitySnapshot?: (catId: CatId) => InvocationCapacitySnapshot | undefined,
   resolveCarrierCapability?: (catId: CatId) => FreshnessCarrierCapability | undefined,
+  cards?: Awaited<ReturnType<AgentRoleRead>>,
 ) {
   return saveSpan(
     'response.member',
@@ -803,8 +804,11 @@ async function toCatResponse(
         builtinCloudIdentityCandidate({ cat: persistedIdentityCat, accountRef: effectiveAccountRef, acp: acpConfig }),
       );
       const identityProfile = loadDossierProfiles(findMonorepoRoot()).get(cat.id);
+      const revision = memberConfigurationRevision(projectRoot, cat.id);
+      const projected = cards?.get(cat.id);
       return {
-        ...projectRoleCard(cat, metadata.roster, memberConfigurationRevision(projectRoot, cat.id)),
+        ...projectRoleCard(cat, metadata.roster, revision),
+        ...(projected?.configurationRevision === revision ? projected : undefined),
         avatar: resolveNativeAvatar(cat.clientId, cat.avatar, acpConfig),
         accountRef: effectiveAccountRef,
         // Only the non-secret Desktop HOME binding is needed by the member draft.
@@ -937,6 +941,7 @@ interface CatsRoutesOptions {
     | undefined;
   onCatalogChanged?: (cats: Record<string, CatConfig>) => Promise<void> | void;
   resolveContextCapacitySnapshot?: (catId: CatId) => InvocationCapacitySnapshot | undefined;
+  agentRoleRead?: AgentRoleRead;
   agentRoleWrite?: AgentRoleWrite;
   nativeRuntimeDiscovery?: typeof discoverNativeRuntimesWithReadiness;
   resolveCarrierCapability?: (catId: CatId) => FreshnessCarrierCapability | undefined;
@@ -1012,10 +1017,11 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opt
   });
 
   // GET /api/cats - 获取所有猫猫配置
-  app.get('/api/cats', async () => {
+  app.get('/api/cats', async (request, reply) => {
     const projectRoot = resolveProjectRoot();
     const resolveMetadata = buildCatResponseMetadataResolver(projectRoot);
     const resolveEffectiveAccountRef = buildEffectiveAccountRefResolver();
+    const cards = await opts.agentRoleRead?.(request, reply);
     return {
       cats: await Promise.all(
         Object.values(getResolvedCats(projectRoot)).map((cat) =>
@@ -1026,6 +1032,7 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opt
             resolveEffectiveAccountRef,
             opts.resolveContextCapacitySnapshot,
             opts.resolveCarrierCapability,
+            cards,
           ),
         ),
       ),

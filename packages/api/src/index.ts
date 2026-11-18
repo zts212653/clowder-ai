@@ -3676,6 +3676,7 @@ async function initializeApi(
     ...(redis ? { connectionCheckRedis: redis } : {}),
     resolvePluginMcpView: () => pluginRuntime.supervisor.resolveMemberMcpView(),
     memberAssets: () => memberCanonService,
+    agentRoleRead: (request, reply) => agentRoleRead(request, reply),
     agentRoleWrite: (request, reply, mutation) => agentRoleWrite(request, reply, mutation),
     addressedPlugins: () => router.addressedPlugins,
     resolveContextCapacitySnapshot: (catId) => router.contextCapacitySnapshot(catId),
@@ -6000,7 +6001,10 @@ async function initializeApi(
   const { registerAgentClientLibraryRoutes } = await import('./routes/agent-client-library-routes.js');
   const { createAgentAccessA2ARunner } = await import('./domains/plugin/agent-access-a2a.js');
   const agentAccessA2ARunner = createAgentAccessA2ARunner(pluginRuntime.inventoryStore, pluginRuntime.supervisor);
-  const { createAgentRoleWrite, registerAgentAccessRoutes } = await import('./routes/agent-access-routes.js');
+  const { createAgentRoleRead, createAgentRoleWrite, registerAgentAccessRoutes } = await import(
+    './routes/agent-access-routes.js'
+  );
+  const agentRoleRead = createAgentRoleRead(pluginRuntime.inventoryStore, pluginRuntime.supervisor);
   const agentRoleWrite = createAgentRoleWrite(pluginRuntime.inventoryStore, pluginRuntime.supervisor);
   registerAgentAccessRoutes(app, { inventory: pluginRuntime.inventoryStore, runtime: pluginRuntime.supervisor });
   registerAgentClientLibraryRoutes(app, {

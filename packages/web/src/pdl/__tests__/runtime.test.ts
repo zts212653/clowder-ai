@@ -8785,7 +8785,7 @@ describe('member detect entry', () => {
         clientId: 'openai',
         installed: true,
         models: [],
-        readiness: { status: 'login_required' },
+        readiness: { status: 'login_required', loginCommand: 'codex login' },
       },
       ...extra,
     });
@@ -8800,6 +8800,11 @@ describe('member detect entry', () => {
       await w.__settled();
       expect(w.document.body.textContent).toContain('需登录');
       expect(w.document.body.textContent).toContain('探测失败');
+      w.eval('copyText = function (text) { window.copiedLoginCommand = text; }');
+      const login = w.document.querySelector<HTMLButtonElement>('[data-act="nativeCopyLogin"][data-id="codex"]');
+      expect(login).not.toBeNull();
+      login?.click();
+      expect(w.eval('window.copiedLoginCommand')).toBe('codex login');
     } finally {
       dom.window.close();
     }

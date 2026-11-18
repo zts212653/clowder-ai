@@ -5293,6 +5293,7 @@
     "dshAuto": "已安装 · 添加时自动配置",
     "conflict": "已有同名成员",
     "loginRequired": "需登录",
+    "copyLogin": "复制登录命令",
     "unsupported": "不支持",
     "needsConfig": "需配置",
     "partialFailure": "探测失败",

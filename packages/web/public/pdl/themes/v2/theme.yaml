@@ -30534,6 +30534,16 @@ pdl:
                           type: component
                           use: v2Action
                           props:
+                            label: t:nativeSetup.copyLogin
+                            act: nativeCopyLogin
+                            args:
+                              id: "@id"
+                          when: "@loginCommand"
+                      - w: ctl
+                        control:
+                          type: component
+                          use: v2Action
+                          props:
                             label:
                               of: "@adjusting"
                               map:
