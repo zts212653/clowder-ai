@@ -441,23 +441,35 @@ function workbenchModels() {
   };
 }
 
-function executionRun(run) {
+function executionRun(run, messages) {
+  // what this turn said: the first output when the server can name it, else the turn's reply in this
+  // conversation, else its first key fragments; nothing when none is known (the theme says so)
+  const evidence = run.firstAssistantOutputEvidence,
+    reply = (messages || []).find(function (m) {
+      const stream = m.extra && m.extra.stream;
+      return !!stream && (stream.invocationId === run.invocationId || stream.turnInvocationId === run.invocationId);
+    });
   return {
     key: run.invocationId,
     who: run.catId,
     status: run.status,
     messages: run.messageCount,
     statusEvents: run.statusEventCount,
-    // the first output has text only when the server marks it available; otherwise the theme says none is verified yet
-    preview:
-      run.firstAssistantOutputEvidence && run.firstAssistantOutputEvidence.status === 'available'
-        ? run.firstAssistantOutputEvidence.content
-        : '',
+    preview: (evidence && evidence.status === 'available'
+      ? evidence.content
+      : reply && reply.content
+        ? reply.content
+        : run.keyMessages.join('')
+    )
+      .trim()
+      .slice(0, 200),
     tools: run.toolUseCount,
     errors: run.errorCount,
     dur: run.durationMs / 1000,
     at: run.startedAt,
     invocationId: run.invocationId,
+    // this turn's message in the conversation, when it is loaded here
+    mid: reply ? reply.id : undefined,
   };
 }
 function executionEvent(row) {
@@ -557,7 +569,9 @@ function executionModel(query) {
               .filter(function (r) {
                 return r.sessionId === s.id;
               })
-              .map(executionRun),
+              .map(function (r) {
+                return executionRun(r, data.messages);
+              }),
             canRestore: s.status === 'sealed' && !live,
           };
         }),
@@ -629,7 +643,7 @@ function executionModel(query) {
                 ),
                 session = rows.sessions.find((s) => s.id === hit.sessionId);
               return {
-                ...(run ? executionRun(run) : { who: session?.catId }),
+                ...(run ? executionRun(run, data.messages) : { who: session?.catId }),
                 key: JSON.stringify([hit.sessionId, hit.pointer.eventNo, hit.pointer.invocationId]),
                 preview: hit.snippet,
                 args: hit.pointer.invocationId

@@ -31099,6 +31099,37 @@ pdl:
                         pending: false
                         _: true
                 expand:
+                  - type: kv
+                    from:
+                      - k: t:wsTrace.step.source
+                        v:
+                          t: wsTrace.source
+                          args:
+                            - "@source"
+                        when:
+                          of: "@source"
+                          map:
+                            unknown: false
+                            _: "@source"
+                      - k: t:wsTrace.step.status
+                        v:
+                          t: wsTrace.step.result
+                          args:
+                            - "@resultStatus"
+                        when: "@resultStatus"
+                      - k: t:wsTrace.step.duration
+                        v:
+                          of: "@ms"
+                          fmt: latency
+                        when: "@ms"
+                      - k: t:wsTrace.step.time
+                        v:
+                          of: "@ts"
+                          fmt: datetime
+                      - from: "@types"
+                        item:
+                          k: "@type"
+                          v: "@count"
                   - type: pre
                     text:
                       of: "@input"
@@ -35770,6 +35801,16 @@ pdl:
             args:
               - of: "@at"
                 fmt: at
+        - control:
+            - type: button
+              iconOnly: true
+              icon: jump
+              label: t:reply.jump
+              act: traceMsg
+              args:
+                k: "@mid"
+          when: "@mid"
+          w: ctl
       act: wsSub
       args:
         k: exec

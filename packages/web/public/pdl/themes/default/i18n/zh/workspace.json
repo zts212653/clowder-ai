@@ -1290,6 +1290,18 @@
     },
     "messageJump": {
       "toast": "原消息不在当前视图里"
+    },
+    "step": {
+      "source": "来源",
+      "status": "状态",
+      "duration": "耗时",
+      "time": "时间",
+      "result": {
+        "ok": "成功",
+        "success": "成功",
+        "error": "出错",
+        "unknown": "未知"
+      }
     }
   },
   "wsReplay": {
