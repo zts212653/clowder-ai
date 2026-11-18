@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
-import { describe, mock, test } from 'node:test';
-import { PassThrough } from 'node:stream';
 import { EventEmitter } from 'node:events';
+import { PassThrough } from 'node:stream';
+import { describe, mock, test } from 'node:test';
 import { OpenCodeAgentService } from '../src/domains/cats/services/agents/providers/OpenCodeAgentService.js';
 
 /**
@@ -39,9 +39,7 @@ function createMockProcess(exitCode = 0) {
   };
   process.nextTick(() => {
     stdout.write(JSON.stringify({ type: 'step_start', sessionID: 'ses_1', timestamp: 1 }) + '\n');
-    stdout.write(
-      JSON.stringify({ type: 'text', part: { type: 'text', text: 'hi' }, timestamp: 2 }) + '\n',
-    );
+    stdout.write(JSON.stringify({ type: 'text', part: { type: 'text', text: 'hi' }, timestamp: 2 }) + '\n');
     stdout.end();
     process.nextTick(() => emitter.emit('exit', exitCode, null));
   });

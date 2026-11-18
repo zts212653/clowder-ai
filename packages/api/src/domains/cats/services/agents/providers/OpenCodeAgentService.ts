@@ -57,7 +57,6 @@ import {
 } from './opencode-auto-approval.js';
 import { readOpenCodeError } from './opencode-error.js';
 import { transformOpenCodeEvent } from './opencode-event-transform.js';
-import { mapOpenCodeWireEvent } from './opencode-wire-mapper.js';
 import {
   buildOpenCodeNoToolFinalizerConfig,
   buildOpenCodePostToolFallbackText,
@@ -75,6 +74,7 @@ import {
   recoverOpenCodeSilentCompletion,
   SessionSingleFlight,
 } from './opencode-recovery.js';
+import { mapOpenCodeWireEvent } from './opencode-wire-mapper.js';
 
 const log = createModuleLogger('opencode-agent');
 

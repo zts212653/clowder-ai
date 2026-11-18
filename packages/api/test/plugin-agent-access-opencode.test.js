@@ -31,10 +31,7 @@ function harness(options = {}) {
     options.onPlan?.(payload);
     return options.invokeResult ?? { args: ['run', '--', 'p'], managedArgvFlags: [] };
   };
-  return createAgentAccessOpenCodeLaunchPlanner(
-    { readCurrentAuthority },
-    { invoke },
-  );
+  return createAgentAccessOpenCodeLaunchPlanner({ readCurrentAuthority }, { invoke });
 }
 
 describe('OpenCode launch planner over the public protocol', () => {

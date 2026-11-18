@@ -72,11 +72,7 @@ describe('OpenCode launch arguments', () => {
       cliConfigArgs: ['-m user-model'],
     });
 
-    assert.equal(
-      args.filter((part) => part === '-m').length,
-      1,
-      'the user value must not coexist with the system one',
-    );
+    assert.equal(args.filter((part) => part === '-m').length, 1, 'the user value must not coexist with the system one');
     assert.equal(args[args.indexOf('-m') + 1], 'user-model');
     assert.ok(!args.includes('system-model'), 'the replaced system value is gone, not orphaned');
   });

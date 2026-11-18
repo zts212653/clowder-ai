@@ -2,8 +2,8 @@ import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 import {
   agentAccessKimiLaunchRequestSchema,
-  agentAccessNativeLaunchRequestSchema,
   agentAccessNativeEventRequestSchema,
+  agentAccessNativeLaunchRequestSchema,
 } from '../../agent-contract/src/index.ts';
 
 /**

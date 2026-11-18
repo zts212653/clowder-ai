@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
-import { normalizeOpenCodeEvent } from '../src/runtime/opencode-event-parser.ts';
 import { transformOpenCodeEvent } from '../../api/src/domains/cats/services/agents/providers/opencode-event-transform.ts';
+import { normalizeOpenCodeEvent } from '../src/runtime/opencode-event-parser.ts';
 
 /**
  * The event reading moved from the Host transformer into this package. Until the
