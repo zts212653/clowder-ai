@@ -31,13 +31,13 @@ export default {
           actions: {
             configure(input: unknown) {
               if (input && typeof input === 'object' && 'operation' in input) {
-                if (input.operation === 'parse_native_event') {
-                  return normalizeKimiEvent(agentAccessKimiEventRequestSchema.parse(input).event);
-                }
                 const { launch } = agentAccessKimiLaunchRequestSchema.parse(input);
                 return buildKimiLaunchArguments(launch);
               }
               return { clients: builtInAgentClients };
+            },
+            parseNativeEvent(input: unknown) {
+              return normalizeKimiEvent(agentAccessKimiEventRequestSchema.parse(input).event);
             },
             testDshConnection({ input, launch }: { input: unknown; launch: () => Promise<AgentAccessAcpChildHandle> }) {
               return checkDshConnectionInWorker(agentAccessDshConnectionInputSchema.parse(input), launch);

@@ -23,8 +23,10 @@ export function createAgentAccessDshConnectionTest(
     let connection: ReturnType<typeof launchAcpChild>['child'] | undefined;
     let shuttingDown: Promise<void> | undefined;
     let launched = false;
+    let finished = false;
     function shutdown(graceMs = ACP_CHILD_SHUTDOWN_GRACE_MS, endStdin = false) {
-      return (shuttingDown ??= connection?.shutdown(graceMs, endStdin) ?? Promise.resolve());
+      shuttingDown ??= connection?.shutdown(graceMs, endStdin) ?? Promise.resolve();
+      return shuttingDown;
     }
     try {
       const result = await runtime.invoke(selected.pluginInstanceId, 'testDshConnection', {
@@ -34,6 +36,7 @@ export function createAgentAccessDshConnectionTest(
           launched = true;
           const current = (await inventory.readCurrentAuthority(AGENT_ACCESS_PLUGIN_ID))?.instance;
           if (
+            finished ||
             current?.pluginInstanceId !== selected.pluginInstanceId ||
             current.packageDigest !== selected.packageDigest ||
             current.lifecycleRevision !== selected.lifecycleRevision ||
@@ -49,8 +52,12 @@ export function createAgentAccessDshConnectionTest(
             child.onExit((code, signal) => resolve({ kind: 'exit', code, signal }));
           });
           return {
-            ...child,
+            pid: child.pid,
             stdout: child.stdout,
+            stderr: child.stderr,
+            isWritable: child.isWritable,
+            isKilled: child.isKilled,
+            write: child.write,
             termination: () => terminated,
             shutdown,
           };
@@ -58,6 +65,7 @@ export function createAgentAccessDshConnectionTest(
       });
       return resultSchema.parse(result);
     } finally {
+      finished = true;
       if (connection) await shutdown();
     }
   };

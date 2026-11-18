@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { roleConfigurationRevision } from '@clowder-ai/agent-access/roles/write-role';
-import { AGENT_ACCESS_OPERATIONS } from '@clowder-ai/agent-contract';
+import { AGENT_ACCESS_OPERATIONS, OFFICIAL_AGENT_ACCESS_OPERATIONS } from '@clowder-ai/agent-contract';
 import { validateManifest } from '@clowder-ai/plugin-contract';
 import Fastify from 'fastify';
 import { A2AAgentService } from '../dist/domains/cats/services/agents/providers/A2AAgentService.js';
@@ -82,7 +82,11 @@ test('Agent access discovery executes the same standalone entrypoint from a Mana
   };
 
   const entrypoint = await readFile(new URL('../../agent-access-plugin/dist/plugin/entrypoint.mjs', import.meta.url));
-  async function archive(version, protocolVersion = 1) {
+  const nextModule = entrypoint
+    .toString()
+    .replace(/(id:\s*["']kimi["'],\s*label:\s*)(["'])Kimi\2/g, '$1$2Kimi vNext$2');
+  assert.notEqual(nextModule, entrypoint.toString());
+  async function archive(version, protocolVersion = 1, operations = OFFICIAL_AGENT_ACCESS_OPERATIONS) {
     const manifest = {
       pluginId,
       version,
@@ -100,11 +104,9 @@ test('Agent access discovery executes the same standalone entrypoint from a Mana
           { name: 'package/manifest.json', bytes: Buffer.from(JSON.stringify(manifest)) },
           {
             name: 'package/agent-access.json',
-            bytes: Buffer.from(
-              JSON.stringify({ protocolVersion, operations: AGENT_ACCESS_OPERATIONS, transports: ['a2a'] }),
-            ),
+            bytes: Buffer.from(JSON.stringify({ protocolVersion, operations, transports: ['a2a'] })),
           },
-          { name: 'package/entrypoint.mjs', bytes: entrypoint },
+          { name: 'package/entrypoint.mjs', bytes: version === '1.0.1' ? Buffer.from(nextModule) : entrypoint },
           {
             name: 'package/package.json',
             bytes: Buffer.from(JSON.stringify({ name: '@clowder-ai/agent-access', version, type: 'module' })),
@@ -117,6 +119,7 @@ test('Agent access discovery executes the same standalone entrypoint from a Mana
   const previous = await archive('1.0.0');
   const next = await archive('1.0.1');
   const incompatible = await archive('1.0.2', 2);
+  const obsolete = await archive('0.9.0', 1, AGENT_ACCESS_OPERATIONS);
   const install = (path) => manager.install({ source: { kind: 'local-archive', path } });
   assert.equal((await scan()).readiness.state, 'missing');
   const installed = await install(previous);
@@ -127,6 +130,7 @@ test('Agent access discovery executes the same standalone entrypoint from a Mana
   const first = await scan();
   assert.equal(first.readiness.state, 'ready', JSON.stringify(first.readiness));
   assert.ok(first.candidates.some((candidate) => candidate.id === 'codex'));
+  assert.equal(first.candidates.find((candidate) => candidate.id === 'kimi')?.label, 'Kimi');
 
   const remote = Fastify();
   t.after(() => remote.close());
@@ -217,6 +221,7 @@ test('Agent access discovery executes the same standalone entrypoint from a Mana
   const before = roleConfigurationRevision(await readCatalog(), request.input.catId);
 
   await assert.rejects(install(incompatible), /Agent access protocol version/);
+  await assert.rejects(install(obsolete), /missing operations parseNativeEvent, testDshConnection/);
   assert.equal((await manager.get(pluginId)).plugin.installedVersion, '1.0.0');
   assert.equal((await scan()).readiness.state, 'ready');
 
@@ -265,7 +270,9 @@ test('Agent access discovery executes the same standalone entrypoint from a Mana
   const latest = await install(next);
   await assert.rejects(launch.assertCurrent(), /session_implementation_unavailable/);
   assert.equal(latest.pluginInstanceId, installed.pluginInstanceId);
-  assert.equal((await scan()).readiness.state, 'ready');
+  const afterUpdate = await scan();
+  assert.equal(afterUpdate.readiness.state, 'ready');
+  assert.equal(afterUpdate.candidates.find((candidate) => candidate.id === 'kimi')?.label, 'Kimi vNext');
   assert.equal((await manager.get(pluginId)).plugin.installedVersion, '1.0.1');
   await invoke('after replacement');
 
@@ -289,7 +296,9 @@ test('Agent access discovery executes the same standalone entrypoint from a Mana
 
   await install(previous);
   assert.equal((await manager.get(pluginId)).plugin.installedVersion, '1.0.0');
-  assert.equal((await scan()).readiness.state, 'ready');
+  const afterRollback = await scan();
+  assert.equal(afterRollback.readiness.state, 'ready');
+  assert.equal(afterRollback.candidates.find((candidate) => candidate.id === 'kimi')?.label, 'Kimi');
   const restored = await readCatalog();
   assert.equal(restored.breeds[0].displayName, 'Renamed during upgrade');
   await invoke('after rollback');

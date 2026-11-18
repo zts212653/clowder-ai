@@ -26,6 +26,13 @@ export const AGENT_ACCESS_OPERATIONS = [
   'release',
 ] as const;
 
+/** Operations called by the Host's first-party Agent Access integration. */
+export const OFFICIAL_AGENT_ACCESS_OPERATIONS = [
+  ...AGENT_ACCESS_OPERATIONS,
+  'parseNativeEvent',
+  'testDshConnection',
+] as const;
+
 const declarationSchema = z.object({
   protocolVersion: z.literal(AGENT_ACCESS_PROTOCOL_VERSION),
   operations: z
@@ -78,7 +85,6 @@ export const agentAccessNativeLaunchArgumentsSchema = z.object({
 export type AgentAccessNativeLaunchArguments = z.infer<typeof agentAccessNativeLaunchArgumentsSchema>;
 
 export const agentAccessKimiEventRequestSchema = z.object({
-  operation: z.literal('parse_native_event'),
   client: z.literal('kimi'),
   event: z.unknown(),
 });

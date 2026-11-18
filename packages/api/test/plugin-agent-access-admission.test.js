@@ -32,6 +32,10 @@ test('Agent access capability is opt-in and accepts a compatible checked module'
   );
   await writeFile(join(root, 'agent-access.json'), JSON.stringify(declaration));
   assert.equal(await readPackageCapabilityRejection(managedModule, root), undefined);
+  assert.match(
+    await readPackageCapabilityRejection({ pluginId: 'official.agent-access', ...managedModule }, root),
+    /Agent access.*operations.*parseNativeEvent.*testDshConnection/i,
+  );
   assert.match(await readPackageCapabilityRejection({}, root), /Agent access.*module/i);
 });
 

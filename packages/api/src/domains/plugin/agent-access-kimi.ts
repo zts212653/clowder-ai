@@ -37,8 +37,7 @@ export function createAgentAccessKimiLaunchPlanner(
       async normalizeEvent(event: unknown) {
         await assertCurrent();
         return agentAccessKimiEventSchema.parse(
-          await runtime.invoke(instance.pluginInstanceId, 'configure', {
-            operation: 'parse_native_event',
+          await runtime.invoke(instance.pluginInstanceId, 'parseNativeEvent', {
             client: 'kimi',
             event,
           }),

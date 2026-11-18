@@ -1,8 +1,8 @@
 import {
-  AGENT_ACCESS_OPERATIONS,
   AGENT_ACCESS_PLUGIN_ID,
   type AgentAccessDiscoveryHost,
   type AgentAccessRoleStore,
+  OFFICIAL_AGENT_ACCESS_OPERATIONS,
 } from '@clowder-ai/agent-contract';
 import {
   isPluginDeliveryInput,
@@ -489,7 +489,7 @@ export class ModulePluginRuntime implements BundledPluginRuntime {
       }
       if (
         packageRecord.pluginId === AGENT_ACCESS_PLUGIN_ID &&
-        AGENT_ACCESS_OPERATIONS.some(
+        OFFICIAL_AGENT_ACCESS_OPERATIONS.some(
           (operation) => !Object.hasOwn(actions, operation) || typeof actions[operation] !== 'function',
         )
       ) {

@@ -1,5 +1,5 @@
 import { readFile, writeFile } from 'node:fs/promises';
-import { AGENT_ACCESS_OPERATIONS, AGENT_ACCESS_PROTOCOL_VERSION } from '@clowder-ai/agent-contract';
+import { AGENT_ACCESS_PROTOCOL_VERSION, OFFICIAL_AGENT_ACCESS_OPERATIONS } from '@clowder-ai/agent-contract';
 import { tarArchive } from '../../api/scripts/bundled-plugin-artifacts.mjs';
 import { canonicalGzip } from '../../api/scripts/canonical-gzip.mjs';
 
@@ -8,7 +8,7 @@ const manifest = await readFile(new URL('../manifest.json', import.meta.url));
 const { version } = JSON.parse(manifest);
 const declarations = {
   protocolVersion: AGENT_ACCESS_PROTOCOL_VERSION,
-  operations: [...AGENT_ACCESS_OPERATIONS, 'testDshConnection'],
+  operations: OFFICIAL_AGENT_ACCESS_OPERATIONS,
   transports: ['a2a'],
 };
 const files = [

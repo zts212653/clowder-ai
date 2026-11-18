@@ -1,4 +1,8 @@
-import { AGENT_ACCESS_PLUGIN_ID, parseAgentAccessDeclaration } from '@clowder-ai/agent-contract';
+import {
+  AGENT_ACCESS_PLUGIN_ID,
+  OFFICIAL_AGENT_ACCESS_OPERATIONS,
+  parseAgentAccessDeclaration,
+} from '@clowder-ai/agent-contract';
 import type { PluginManifest } from '@clowder-ai/plugin-contract';
 import { parseAgentProviderDeclaration } from '../cats/services/agents/session-contract/plugin-agent-provider.js';
 
@@ -24,6 +28,10 @@ export function packageCapabilityRejection(
     const fields = parsed.error.issues.map((issue) => issue.path.join('.'));
     if (fields.includes('protocolVersion')) return 'Invalid Agent access protocol version';
     return `Invalid Agent access declaration: ${fields.filter(Boolean).join(', ') || 'expected an object'}`;
+  }
+  if (manifest.pluginId === AGENT_ACCESS_PLUGIN_ID) {
+    const missing = OFFICIAL_AGENT_ACCESS_OPERATIONS.filter((operation) => !parsed.data.operations.includes(operation));
+    if (missing.length) return `Invalid Agent access declaration: missing operations ${missing.join(', ')}`;
   }
   if (manifest.runtime?.transport !== 'builtin' || !manifest.runtime.entrypoint)
     return 'Agent access requires an executable plugin module';
