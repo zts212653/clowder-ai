@@ -2854,7 +2854,7 @@ describe('unmodified runtime and project chat bindings', () => {
       port.data = {
         ...port.data,
         chat: {
-          ...port.data.chat,
+          ...(port.data.chat as object),
           executions: [
             {
               executionId: 'run-1',

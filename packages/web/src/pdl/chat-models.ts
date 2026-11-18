@@ -554,6 +554,12 @@ export function chatModels(data: ChatData, ui: ChatUiState, input?: ChatProjecti
     return rows;
   };
   const thread = () => data.threads.find((item) => item.id === data.threadId);
+  // This conversation's members: its participants, or the members who have spoken in it.
+  const conversationMembers = () => {
+    const participants = thread()?.participants ?? [];
+    if (participants.length) return participants;
+    return [...new Set(data.messages.flatMap((m) => (m.type === 'assistant' && m.catId ? [m.catId] : [])))];
+  };
   const recipients = () =>
     ui.whisper
       ? ui.whisperTo
@@ -574,18 +580,20 @@ export function chatModels(data: ChatData, ui: ChatUiState, input?: ChatProjecti
     isReadonly: !!data.readonly,
     forwardingBlocked: data.forwardingBlocked !== false,
   });
-  const memberItems = (selected: readonly string[]) =>
-    members().map((member) => {
-      const execution = data.executions.find((e) => e.catId === member.id && e.threadId === data.threadId);
-      return {
-        id: member.id,
-        name: member.name,
-        handle: member.handle,
-        executing: !!execution,
-        state: execution ? (execution.kind === 'live_invocation' ? 'reply' : 'command') : 'idle',
-        selected: selected.includes(member.id),
-      };
-    });
+  const memberItems = (selected: readonly string[], among?: readonly string[]) =>
+    members()
+      .filter((member) => !among || among.includes(member.id))
+      .map((member) => {
+        const execution = data.executions.find((e) => e.catId === member.id && e.threadId === data.threadId);
+        return {
+          id: member.id,
+          name: member.name,
+          handle: member.handle,
+          executing: !!execution,
+          state: execution ? (execution.kind === 'live_invocation' ? 'reply' : 'command') : 'idle',
+          selected: selected.includes(member.id),
+        };
+      });
   // A plugin's reply carrier is the reply's typing row until the reply arrives; a result without content shows nothing.
   const sourceMessages = (timeline = messages()) =>
     timeline
@@ -1503,6 +1511,8 @@ export function chatModels(data: ChatData, ui: ChatUiState, input?: ChatProjecti
                 : subpage === 'prefer'
                   ? preferredIds()
                   : recipients(),
+            // "View as" lists this conversation's members (its participants, or who has spoken here), not everyone.
+            kind === 'people' ? conversationMembers() : undefined,
           ),
         };
       if (kind === 'plus' && subpage === 'mode') return { ...base, sendScope: ui.sendScope, sendMode: ui.sendMode };

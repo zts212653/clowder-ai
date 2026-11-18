@@ -626,3 +626,14 @@ it('holds the composer while its conversation is sending', () => {
   data.sending = true;
   expect(chatModels(data, fixtureUi()).chatComposer.locked).toBe(true);
 });
+
+it('lists only this conversation members when viewing as one member, and everyone when choosing a target', () => {
+  const data = fixtureData(),
+    ui = fixtureUi();
+  data.cats.push({ ...data.cats[0], id: 'opencode-glm', displayName: 'GLM', mentionPatterns: ['@glm'] });
+  ui.pop = { kind: 'people' };
+  const ids = (pop: unknown) => (pop as { members: { id: string }[] }).members.map((m) => m.id);
+  expect(ids(chatModels(data, ui).chatPop)).toEqual(['codex']);
+  ui.pop = { kind: 'target' };
+  expect(ids(chatModels(data, ui).chatPop)).toContain('opencode-glm');
+});
