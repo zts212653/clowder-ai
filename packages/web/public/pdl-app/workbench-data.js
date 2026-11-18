@@ -323,7 +323,9 @@ function workbenchModels() {
               defaultApplication: info?.info?.defaultApplication,
             },
           }
-        : null;
+        : source.openFailed
+          ? { load: 'error' }
+          : null;
 
       return filePage;
     },

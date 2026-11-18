@@ -171,6 +171,8 @@ export function useWorkbenchBindings(
   const [opened, setOpened] = useState<{ worktreeId: string; file: FileData } | null>(null);
   const [fileTarget, setFileTarget] = useState<{ worktreeId: string; path: string } | null>(null);
   const [fileAttempt, reloadFile] = useState(0);
+  // The file asked for could not be read: the file view says so in place (its data carries load 'error').
+  const [openFailed, setOpenFailed] = useState(false);
   const openRequest = useRef(0);
   const fileEdits = useRef<Record<string, { content: string; original: string; baseSha256: string }>>({});
   const [, publishDrafts] = useState(0);
@@ -198,6 +200,7 @@ export function useWorkbenchBindings(
       ticket = ++openRequest.current,
       { worktreeId, path } = fileTarget;
     setOpened((current) => (current?.worktreeId === worktreeId && current.file.path === path ? current : null));
+    setOpenFailed(false);
     void request<FileData>(`/api/workspace/file?${new URLSearchParams({ worktreeId, path })}`, {
       signal: abort.signal,
     }).then(
@@ -210,6 +213,7 @@ export function useWorkbenchBindings(
       () => {
         if (abort.signal.aborted || ticket !== openRequest.current) return;
         setOpened(null);
+        setOpenFailed(true);
       },
     );
     return () => abort.abort();
@@ -657,6 +661,7 @@ export function useWorkbenchBindings(
     () => ({
       projectPicker: picker.current,
       opened,
+      openFailed,
       fileInfo,
       fileEdits: fileEdits.current,
       editing: {
@@ -684,6 +689,7 @@ export function useWorkbenchBindings(
     [
       picker.current,
       opened,
+      openFailed,
       fileInfo,
       fileEdits.current,
       editing.editMode,
