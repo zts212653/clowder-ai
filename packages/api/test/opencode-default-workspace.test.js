@@ -129,6 +129,23 @@ test('literal default lobby uses the existing persistent default workspace witho
   assert.ok(result.messages.some((message) => message.type === 'system_info' && message.content?.includes(workspace)));
 });
 
+test('a detected Kimi member can freeze the approved default workspace from an ordinary new conversation', async () => {
+  const { freezeExecutionWorkspace } = await import(
+    '../dist/domains/cats/services/agents/invocation/execution-workspace.js'
+  );
+  const store = new ThreadStore();
+  const thread = store.create('user-1');
+  const binding = await freezeExecutionWorkspace({
+    threadStore: store,
+    threadId: thread.id,
+    userId: 'user-1',
+    provider: 'kimi',
+  });
+  assert.equal(binding.workingDirectory, workspace);
+  assert.equal(binding.usesDefaultWorkspace, true);
+  assert.equal(store.get(thread.id).projectPath, thread.projectPath);
+});
+
 test('real messages route admits the literal default target and dispatch uses its canonical workspace', async () => {
   const { default: Fastify } = await import('fastify');
   const { messagesRoutes } = await import('../dist/routes/messages.js');
