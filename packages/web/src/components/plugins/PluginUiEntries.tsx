@@ -33,6 +33,22 @@ export function PluginUiEntries() {
   const nonce = useRef('');
   const lifetime = useRef<AbortController>();
   const closeGuard = useRef(false);
+  const syncTheme = useCallback(() => {
+    frame.current?.contentWindow?.postMessage(
+      {
+        channel: pluginPanelChannel,
+        nonce: nonce.current,
+        type: 'theme',
+        value: document.documentElement.dataset.theme === 'dark' ? 'dark' : 'light',
+      },
+      '*',
+    );
+  }, []);
+  useEffect(() => {
+    const observer = new MutationObserver(syncTheme);
+    observer.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+    return () => observer.disconnect();
+  }, [syncTheme]);
   useEffect(() => {
     if (closePhase !== 'saving') return;
     const timer = setTimeout(() => setClosePhase('slow'), 200);
@@ -188,10 +204,11 @@ export function PluginUiEntries() {
           type="button"
           title={entry.label}
           aria-label={entry.label}
+          aria-pressed={active?.instanceId === entry.instanceId && active.commandId === entry.commandId}
           onClick={() => void open(entry)}
-          className="flex h-10 w-10 items-center justify-center rounded-lg hover:bg-[var(--console-rail-item)]"
+          className="flex h-10 w-10 items-center justify-center rounded-lg hover:bg-[var(--console-rail-item)] aria-pressed:bg-[var(--console-rail-item)]"
         >
-          <PluginVisual icon={entry.icon ?? 'plug'} name={entry.label} />
+          <PluginVisual icon={entry.icon ?? 'plug'} name={entry.label} variant="rail" />
         </button>
       ))}
       {active &&
@@ -244,7 +261,8 @@ export function PluginUiEntries() {
                 sandbox="allow-scripts allow-downloads allow-popups allow-popups-to-escape-sandbox"
                 referrerPolicy="no-referrer"
                 srcDoc={html}
-                className="h-[calc(100%-2.5rem)] w-full border-0"
+                onLoad={syncTheme}
+                className="h-[calc(100%-2.5rem)] w-full border-0 [color-scheme:light] dark:[color-scheme:dark]"
               />
             ) : (
               <p role="status" className="p-8">

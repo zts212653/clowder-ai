@@ -25,7 +25,7 @@ export async function buildPluginPanelBrowser() {
     alias: { '@': join(webRoot, 'src') },
   });
   const globals = join(webRoot, 'src/app/globals.css');
-  const themeFiles = ['theme-tokens.css', 'theme-extras.css', 'console-tokens.css'];
+  const themeFiles = ['theme-tokens.css', 'theme-extras.css', 'connector-tokens.css', 'console-tokens.css'];
   const themes = await Promise.all(themeFiles.map((name) => readFile(join(webRoot, 'src/app', name), 'utf8')));
   const generated = await webRequire('postcss')([
     webRequire('tailwindcss')({
