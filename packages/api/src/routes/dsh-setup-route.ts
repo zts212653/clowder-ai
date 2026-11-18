@@ -9,7 +9,13 @@ import { isDirectLoopbackRequest } from '../utils/loopback-request.js';
 import { requirePrivilegedRouteOwner } from '../utils/privileged-route-guard.js';
 import { type DshDesktopSource, prepareDshDesktopSetup, readDshDesktopSetup } from './dsh-desktop-setup.js';
 import { type DshSetupLaunch, resolveDshSetupLaunch } from './dsh-setup-launch.js';
-import { type PreparedDshSetup, prepareDshSetup, readDshSetup, testDshSetup } from './dsh-setup-service.js';
+import {
+  type PreparedDshSetup,
+  prepareDshSetup,
+  type RunDshConnection,
+  readDshSetup,
+  testDshSetup,
+} from './dsh-setup-service.js';
 import { discoverNativeRuntimes } from './native-runtimes.js';
 
 const selection = z
@@ -55,6 +61,7 @@ interface DshSetupRouteOptions {
   resolveLaunch?: (id: string) => DshSetupLaunch | Promise<DshSetupLaunch>;
   resolveDesktopLaunch?: (id: string) => DshDesktopSource | Promise<DshDesktopSource>;
   audit?: (target: string, owner: string) => Promise<unknown>;
+  runConnection?: RunDshConnection;
 }
 export function registerDshSetupRoutes(app: FastifyInstance, options: DshSetupRouteOptions = {}) {
   const resolveLaunch = options.resolveLaunch ?? launchFor;
@@ -129,7 +136,7 @@ export function registerDshSetupRoutes(app: FastifyInstance, options: DshSetupRo
     const receipt = receipts.get(data.id);
     if (!receipt || receipt.owner !== owner) throw Error('dsh_setup_expired');
     await audit('dsh-acp-connection-test', owner);
-    await testDshSetup(receipt.value, { model: data.model, effort: data.effort });
+    await testDshSetup(receipt.value, { model: data.model, effort: data.effort }, options.runConnection);
     return { ok: true };
   });
 }

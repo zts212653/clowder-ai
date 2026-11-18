@@ -21,7 +21,7 @@ export * from '@clowder-ai/agent-access/runtime/acp/AcpClient';
 const log = createModuleLogger('acp-client');
 const IS_WINDOWS = process.platform === 'win32';
 
-function launch(config: AcpClientConfig, captureCwdIdentity: () => void) {
+export function launchAcpChild(config: AcpClientConfig, captureCwdIdentity: () => void) {
   const doSpawn = config.spawnFn ?? nodeSpawn;
 
   // Mirror cli-spawn.ts on Windows so ACP agents can bypass npm-global .cmd shims.
@@ -129,6 +129,6 @@ function launch(config: AcpClientConfig, captureCwdIdentity: () => void) {
 
 export class AcpClient extends ProtocolAcpClient {
   constructor(config: AcpClientConfig) {
-    super(config, { launch, log });
+    super(config, { launch: launchAcpChild, log });
   }
 }

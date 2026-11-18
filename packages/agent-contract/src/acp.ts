@@ -1,3 +1,6 @@
+import type { Readable } from 'node:stream';
+import { z } from 'zod';
+
 /**
  * ACP (Agent Client Protocol) type definitions
  *
@@ -276,3 +279,25 @@ export interface AcpTimingResult {
   warmPromptFirstChunkMs: number;
   warmPromptTotalMs: number;
 }
+export type AgentAccessAcpChildTermination =
+  | { readonly kind: 'exit'; readonly code: number | null; readonly signal: NodeJS.Signals | null }
+  | { readonly kind: 'error'; readonly error: Error };
+
+/** The Host launches exactly the process it admitted and transfers only its pipes and lifecycle. */
+export interface AgentAccessAcpChildHandle {
+  readonly pid?: number;
+  readonly stdout: Readable;
+  readonly stderr?: Readable | null;
+  isWritable(): boolean | Promise<boolean>;
+  isKilled(): boolean | Promise<boolean>;
+  write(line: string): void | Promise<void>;
+  termination(): Promise<AgentAccessAcpChildTermination>;
+  shutdown(graceMs: number, endStdin: boolean): Promise<void>;
+}
+
+export const agentAccessDshConnectionInputSchema = z.object({
+  cwd: z.string().min(1),
+  model: z.string().min(1).max(512).optional(),
+  effort: z.string().min(1).max(160).optional(),
+});
+export type AgentAccessDshConnectionInput = z.infer<typeof agentAccessDshConnectionInputSchema>;

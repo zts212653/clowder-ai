@@ -4,6 +4,7 @@
  * Extracts text, thinking content, tool calls, usage stats, and session IDs
  * from the Kimi CLI `--output-format stream-json` output.
  */
+import type { AgentAccessKimiEvent } from '@clowder-ai/agent-contract';
 
 export interface KimiPrintMessage {
   role?: string;
@@ -95,4 +96,38 @@ export function readSessionIdFromMessage(message: KimiPrintMessage): string | un
     if (typeof value === 'string' && value.trim().length > 0) return value;
   }
   return undefined;
+}
+
+function readToolCall(call: unknown) {
+  if (!call || typeof call !== 'object' || !('function' in call)) return [];
+  const fn = call.function;
+  if (!fn || typeof fn !== 'object' || !('name' in fn) || typeof fn.name !== 'string' || !fn.name) return [];
+  return [{ name: fn.name, input: parseToolArguments('arguments' in fn ? fn.arguments : undefined) }];
+}
+
+export function normalizeKimiEvent(raw: unknown): AgentAccessKimiEvent {
+  if (!raw || typeof raw !== 'object') return { kind: 'ignored' };
+  if ('line' in raw && typeof raw.line === 'string') {
+    const sessionId = /To resume this session:\s*kimi\s+-r\s+([a-z0-9-]+)/i.exec(raw.line)?.[1];
+    return sessionId ? { kind: 'resume', sessionId } : { kind: 'ignored' };
+  }
+  const message = raw as KimiPrintMessage & { type?: unknown };
+  if (message.role === 'meta') {
+    const sessionId = message.type === 'session.resume_hint' ? readSessionIdFromMessage(message) : undefined;
+    return sessionId ? { kind: 'resume', sessionId } : { kind: 'ignored' };
+  }
+  if (message.role !== 'assistant') return { kind: 'ignored' };
+  const tools = (Array.isArray(message.tool_calls) ? message.tool_calls : []).flatMap(readToolCall);
+  const sessionId = readSessionIdFromMessage(message);
+  const text = extractTextContent(message.content);
+  const thinking = extractThinkingContent(message);
+  const usage = parseUsage(message.usage) ?? parseUsage(message.stats);
+  return {
+    kind: 'assistant',
+    ...(sessionId ? { sessionId } : {}),
+    ...(text ? { text } : {}),
+    ...(thinking ? { thinking } : {}),
+    ...(usage ? { usage } : {}),
+    tools,
+  };
 }

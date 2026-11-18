@@ -9,8 +9,13 @@ import {
   getCliEffortOptionsForProvider,
   resolveCliEffortOverride,
 } from '@cat-cafe/shared';
+import { normalizeKimiEvent } from '@clowder-ai/agent-access/runtime/kimi-event-parser';
 import { buildKimiLaunchArguments } from '@clowder-ai/agent-access/runtime/kimi-launch-arguments';
-import type { AgentAccessKimiLaunch, AgentAccessNativeLaunchArguments } from '@clowder-ai/agent-contract';
+import type {
+  AgentAccessKimiEvent,
+  AgentAccessKimiLaunch,
+  AgentAccessNativeLaunchArguments,
+} from '@clowder-ai/agent-contract';
 import { getCatEffort } from '../../../../../config/cat-config-loader.js';
 import { getCatModel } from '../../../../../config/cat-models.js';
 import { estimateCostFromTokens } from '../../../../../config/model-pricing.js';
@@ -45,15 +50,7 @@ import {
   resolveKimiModelAlias,
   resolveKimiShareDir,
 } from './kimi-config.js';
-import {
-  buildKimiPrompt,
-  extractTextContent,
-  extractThinkingContent,
-  type KimiPrintMessage,
-  parseToolArguments,
-  parseUsage,
-  readSessionIdFromMessage,
-} from './kimi-event-parser.js';
+import { buildKimiPrompt } from './kimi-event-parser.js';
 import {
   buildKimiL0AgentFileContent,
   isKimiNativeL0ChannelAvailable,
@@ -109,9 +106,12 @@ interface KimiAgentServiceOptions {
   catId?: CatId;
   spawnFn?: SpawnFn;
   model?: string;
-  planLaunch?: (
-    input: AgentAccessKimiLaunch,
-  ) => Promise<AgentAccessNativeLaunchArguments & { assertCurrent?: () => Promise<void> }>;
+  planLaunch?: (input: AgentAccessKimiLaunch) => Promise<
+    AgentAccessNativeLaunchArguments & {
+      assertCurrent?: () => Promise<void>;
+      normalizeEvent?: (event: unknown) => Promise<AgentAccessKimiEvent>;
+    }
+  >;
   mcpServerPath?: string;
   /** #780: Raw NDJSON archive sink (default: CliRawArchive to disk) */
   rawArchive?: RawArchiveSink;
@@ -377,7 +377,7 @@ export class KimiAgentService implements AgentService {
     }
     let mcpLease: KimiMcpLease | undefined;
     try {
-      const { args, managedArgvFlags, assertCurrent } = await this.planLaunch({
+      const { args, managedArgvFlags, assertCurrent, normalizeEvent } = await this.planLaunch({
         prompt: effectivePrompt,
         imageAccessDirs,
         skillsDirectory: scopedProfile?.skillsDirectory,
@@ -569,66 +569,27 @@ export class KimiAgentService implements AgentService {
           continue;
         }
 
-        if (
-          event &&
-          typeof event === 'object' &&
-          'line' in event &&
-          typeof (event as { line?: unknown }).line === 'string' &&
-          !emittedSessionInit
-        ) {
-          const line = (event as { line: string }).line;
-          const match = line.match(/To resume this session:\s*kimi\s+-r\s+([a-z0-9-]+)/i);
-          // 第四发现点（Terra P2 复审）：非 JSON resume hint 同样不得让被拒 id
-          // 占槽/发布/落盘——native fresh-start 下这条 line 可能就是 sess-old。
-          if (match?.[1] && match[1] !== rejectedResumeSessionId) {
-            metadata.sessionId = match[1];
-            emittedSessionInit = true;
-            // 与 meta/assistant/kimi.json 三个发现点同契约：有效新 id 既然
-            // 信任到足以发布 session_init，就必须落盘指纹——否则下次 resume
-            // 必为 unverifiable，持续 fresh-start 丢连续性（Terra P2 第三轮）。
-            if (l0Fingerprint) {
-              recordKimiL0Fingerprint(kimiShareDir, this.catId as string, match[1], l0Fingerprint);
-            }
-            yield {
-              type: 'session_init',
-              catId: this.catId,
-              sessionId: match[1],
-              metadata: { ...metadata, sessionId: match[1] },
-              timestamp: Date.now(),
-            };
+        const parsed = normalizeEvent ? await normalizeEvent(event) : normalizeKimiEvent(event);
+        if (parsed.kind === 'ignored') continue;
+        if (parsed.kind === 'resume') {
+          if (emittedSessionInit || parsed.sessionId === rejectedResumeSessionId) continue;
+          metadata.sessionId = parsed.sessionId;
+          emittedSessionInit = true;
+          if (l0Fingerprint) {
+            recordKimiL0Fingerprint(kimiShareDir, this.catId as string, parsed.sessionId, l0Fingerprint);
           }
+          yield {
+            type: 'session_init',
+            catId: this.catId,
+            sessionId: parsed.sessionId,
+            metadata: { ...metadata, sessionId: parsed.sessionId },
+            timestamp: Date.now(),
+          };
           continue;
         }
 
-        const msg = event as KimiPrintMessage;
+        const { usage, sessionId: messageSessionId, thinking, text: content, tools } = parsed;
 
-        if (!(msg?.role === 'assistant' || msg?.role === 'meta')) continue;
-
-        if (msg?.role === 'meta') {
-          const metaMsg = msg as { role: string; type?: string; session_id?: string; content?: string };
-          if (
-            metaMsg.type === 'session.resume_hint' &&
-            metaMsg.session_id &&
-            metaMsg.session_id !== rejectedResumeSessionId &&
-            !emittedSessionInit
-          ) {
-            metadata.sessionId = metaMsg.session_id;
-            emittedSessionInit = true;
-            if (l0Fingerprint && metaMsg.session_id !== rejectedResumeSessionId) {
-              recordKimiL0Fingerprint(kimiShareDir, this.catId as string, metaMsg.session_id, l0Fingerprint);
-            }
-            yield {
-              type: 'session_init',
-              catId: this.catId,
-              sessionId: metaMsg.session_id,
-              metadata: { ...metadata, sessionId: metaMsg.session_id },
-              timestamp: Date.now(),
-            };
-          }
-          continue;
-        }
-
-        const usage = parseUsage(msg.usage) ?? parseUsage(msg.stats);
         if (usage) {
           metadata.usage = { ...(metadata.usage ?? {}), ...usage };
           // Capture the raw billable fields BEFORE any snapshot enrichment
@@ -641,7 +602,6 @@ export class KimiAgentService implements AgentService {
           };
         }
 
-        const messageSessionId = readSessionIdFromMessage(msg);
         if (messageSessionId && messageSessionId !== rejectedResumeSessionId) {
           metadata.sessionId = messageSessionId;
           if (!emittedSessionInit) {
@@ -659,7 +619,6 @@ export class KimiAgentService implements AgentService {
           }
         }
 
-        const thinking = extractThinkingContent(msg);
         if (thinking) {
           yield {
             type: 'system_info',
@@ -689,7 +648,6 @@ export class KimiAgentService implements AgentService {
           };
         }
 
-        const content = extractTextContent(msg.content);
         if (content) {
           if (content.trim()) sawModelOutput = true;
           yield {
@@ -701,21 +659,13 @@ export class KimiAgentService implements AgentService {
           };
         }
 
-        const toolCalls = Array.isArray(msg.tool_calls) ? msg.tool_calls : [];
-        for (const toolCall of toolCalls) {
-          if (!toolCall || typeof toolCall !== 'object') continue;
-          const call = toolCall as Record<string, unknown>;
-          const fn = call.function;
-          if (!fn || typeof fn !== 'object') continue;
-          const functionCall = fn as Record<string, unknown>;
-          const toolName = typeof functionCall.name === 'string' ? functionCall.name : null;
-          if (!toolName) continue;
+        for (const tool of tools) {
           sawModelOutput = true;
           yield {
             type: 'tool_use',
             catId: this.catId,
-            toolName,
-            toolInput: parseToolArguments(functionCall.arguments),
+            toolName: tool.name,
+            toolInput: tool.input,
             metadata,
             timestamp: Date.now(),
           };

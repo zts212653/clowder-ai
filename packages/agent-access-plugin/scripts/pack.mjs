@@ -8,7 +8,7 @@ const manifest = await readFile(new URL('../manifest.json', import.meta.url));
 const { version } = JSON.parse(manifest);
 const declarations = {
   protocolVersion: AGENT_ACCESS_PROTOCOL_VERSION,
-  operations: AGENT_ACCESS_OPERATIONS,
+  operations: [...AGENT_ACCESS_OPERATIONS, 'testDshConnection'],
   transports: ['a2a'],
 };
 const files = [

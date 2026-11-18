@@ -77,6 +77,35 @@ export const agentAccessNativeLaunchArgumentsSchema = z.object({
 });
 export type AgentAccessNativeLaunchArguments = z.infer<typeof agentAccessNativeLaunchArgumentsSchema>;
 
+export const agentAccessKimiEventRequestSchema = z.object({
+  operation: z.literal('parse_native_event'),
+  client: z.literal('kimi'),
+  event: z.unknown(),
+});
+export const agentAccessKimiEventSchema = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('ignored') }),
+  z.object({ kind: z.literal('resume'), sessionId: z.string().min(1) }),
+  z.object({
+    kind: z.literal('assistant'),
+    sessionId: z.string().optional(),
+    text: z.string().optional(),
+    thinking: z.string().optional(),
+    usage: z
+      .object({
+        totalTokens: z.number().optional(),
+        inputTokens: z.number().optional(),
+        outputTokens: z.number().optional(),
+        cacheReadTokens: z.number().optional(),
+        lastTurnInputTokens: z.number().optional(),
+        contextWindowSize: z.number().optional(),
+        contextUsedTokens: z.number().optional(),
+      })
+      .optional(),
+    tools: z.array(z.object({ name: z.string(), input: z.record(z.unknown()) })),
+  }),
+]);
+export type AgentAccessKimiEvent = z.infer<typeof agentAccessKimiEventSchema>;
+
 export const agentAccessClientDirectorySchema = z.object({
   clients: z.array(z.object({ id: clientIdSchema, label: z.string() })),
 });

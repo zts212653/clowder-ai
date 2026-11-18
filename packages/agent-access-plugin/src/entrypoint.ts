@@ -5,9 +5,11 @@ import {
   type AgentAccessRoleMutation,
   type AgentAccessRoleStore,
   agentAccessDetectRequestSchema,
+  agentAccessKimiEventRequestSchema,
   agentAccessKimiLaunchRequestSchema,
   agentAccessLoginRequestSchema,
 } from '@clowder-ai/agent-contract';
+import { type AgentAccessAcpChildHandle, agentAccessDshConnectionInputSchema } from '@clowder-ai/agent-contract/acp';
 import { builtInAgentClients, inspectNativeAccessCandidate } from './discovery/agent-client-catalog.js';
 import { nativeRuntimeReadiness } from './discovery/native-runtime-readiness.js';
 import { discoverNativeRuntimes } from './discovery/native-runtimes.js';
@@ -15,6 +17,8 @@ import { discoverNativeRuntimes } from './discovery/native-runtimes.js';
 import { readRoles } from './roles/role-card.js';
 import { writeRole } from './roles/write-role.js';
 import { runA2ATurn } from './runtime/a2a-turn.js';
+import { checkDshConnectionInWorker } from './runtime/acp/dsh/connection-check.js';
+import { normalizeKimiEvent } from './runtime/kimi-event-parser.js';
 import { buildKimiLaunchArguments } from './runtime/kimi-launch-arguments.js';
 
 export default {
@@ -27,10 +31,16 @@ export default {
           actions: {
             configure(input: unknown) {
               if (input && typeof input === 'object' && 'operation' in input) {
+                if (input.operation === 'parse_native_event') {
+                  return normalizeKimiEvent(agentAccessKimiEventRequestSchema.parse(input).event);
+                }
                 const { launch } = agentAccessKimiLaunchRequestSchema.parse(input);
                 return buildKimiLaunchArguments(launch);
               }
               return { clients: builtInAgentClients };
+            },
+            testDshConnection({ input, launch }: { input: unknown; launch: () => Promise<AgentAccessAcpChildHandle> }) {
+              return checkDshConnectionInWorker(agentAccessDshConnectionInputSchema.parse(input), launch);
             },
             async login(input: unknown) {
               const { id, refresh = false } = agentAccessLoginRequestSchema.parse(input);

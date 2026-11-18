@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { spawn } from 'node:child_process';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -10,6 +11,7 @@ import Fastify from 'fastify';
 import { A2AAgentService } from '../dist/domains/cats/services/agents/providers/A2AAgentService.js';
 import { MessageStore } from '../dist/domains/cats/services/stores/ports/MessageStore.js';
 import { createAgentAccessA2ARunner } from '../dist/domains/plugin/agent-access-a2a.js';
+import { createAgentAccessDshConnectionTest } from '../dist/domains/plugin/agent-access-dsh.js';
 import { createAgentAccessKimiLaunchPlanner } from '../dist/domains/plugin/agent-access-kimi.js';
 import {
   withPluginOwnerRequest,
@@ -227,6 +229,38 @@ test('Agent access discovery executes the same standalone entrypoint from a Mana
   });
   assert.deepEqual(launch.args, ['--session', 'history-id', '-p', 'fixture', '--output-format', 'stream-json']);
   await launch.assertCurrent();
+  assert.deepEqual(
+    await launch.normalizeEvent({ role: 'assistant', session_id: 'history-id', content: 'Kimi reply' }),
+    { kind: 'assistant', sessionId: 'history-id', text: 'Kimi reply', tools: [] },
+  );
+  const runConnectionTest = createAgentAccessDshConnectionTest(runtime.inventoryStore, runtime.supervisor);
+  const fixtureAcpServer = `
+    const readline = require('node:readline');
+    const lines = readline.createInterface({ input: process.stdin });
+    const send = (value) => console.log(JSON.stringify({ jsonrpc: '2.0', ...value }));
+    lines.on('line', (line) => {
+      const { method, id } = JSON.parse(line);
+      if (method === 'initialize') send({ id, result: { protocolVersion: 1 } });
+      if (method === 'session/new') send({ id, result: { sessionId: 'isolated-dsh' } });
+      if (method === 'session/prompt') {
+        send({
+          method: 'session/update',
+          params: { sessionId: 'isolated-dsh', update: {
+            sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'DSH_CONNECTION_OK' },
+          } },
+        });
+        send({ id, result: { stopReason: 'end_turn' } });
+      }
+    });
+  `;
+  assert.deepEqual(
+    await runConnectionTest(
+      { command: process.execPath, args: ['-e', fixtureAcpServer], cwd: projectRoot, spawnFn: spawn },
+      projectRoot,
+      {},
+    ),
+    { sessionId: 'isolated-dsh' },
+  );
 
   const latest = await install(next);
   await assert.rejects(launch.assertCurrent(), /session_implementation_unavailable/);

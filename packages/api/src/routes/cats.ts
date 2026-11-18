@@ -5,6 +5,7 @@ import type { MemberCanonService } from '../domains/collaborative-content/asset-
 import { withTargetAliasMutation } from '../domains/plugin/manager/addressing/target-alias-mutation.js';
 import type { AgentRoleRead, AgentRoleWrite } from './agent-access-routes.js';
 import { registerDshSetupRoutes } from './dsh-setup-route.js';
+import type { RunDshConnection } from './dsh-setup-service.js';
 import { registerMemberCanonResponse } from './member-canon-response.js';
 import { registerDshMemberConnectionChecks } from './member-connection-check.js';
 import { dshLauncherProfileState, InvalidDshProfile } from './native-dsh-profile.js';
@@ -943,6 +944,7 @@ interface CatsRoutesOptions {
   resolveContextCapacitySnapshot?: (catId: CatId) => InvocationCapacitySnapshot | undefined;
   agentRoleRead?: AgentRoleRead;
   agentRoleWrite?: AgentRoleWrite;
+  runDshConnection?: RunDshConnection;
   nativeRuntimeDiscovery?: typeof discoverNativeRuntimesWithReadiness;
   resolveCarrierCapability?: (catId: CatId) => FreshnessCarrierCapability | undefined;
 }
@@ -960,7 +962,7 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opt
   });
   if (opts.memberAssets) registerMemberCanonResponse(app, opts.memberAssets);
   registerRuntimeCatalogRoute(app);
-  registerDshSetupRoutes(app);
+  registerDshSetupRoutes(app, { runConnection: opts.runDshConnection });
   registerDshMemberConnectionChecks(app, {
     redis: opts.connectionCheckRedis,
     resolvePluginMcpView: opts.resolvePluginMcpView,
