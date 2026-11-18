@@ -159,10 +159,12 @@ function fileTree(nodes, out = {}, parent = '') {
 }
 function recoveryModel(incidents, read, taskId, busy) {
   const facts = read ? [read.recovery, read.job && read.job.recovery].filter(Boolean) : [];
+  // Recovering: a retry after an error (attempts > 0), a claim being worked, or a result being delivered. A healthy
+  // job also carries its routine next check (attempts 0); that is not recovery.
   const pending = facts.some(function (fact) {
     return (
       !fact.disposition &&
-      (typeof fact.nextAttemptAt === 'number' ||
+      ((fact.attempts > 0 && typeof fact.nextAttemptAt === 'number') ||
         fact.claim ||
         (fact.wakeIntent && fact.wakeIntent.status === 'pending'))
     );
@@ -875,11 +877,11 @@ function homeModels() {
             thread: source.selected && source.selected.threadTitle,
             threadId: source.selected && source.selected.threadId,
             command: job.command,
-            elapsed: (job.result ? job.result.durationMs : now - job.createdAt) / 1000,
+            elapsed: Math.max(0, Math.round((job.result ? job.result.durationMs : now - job.createdAt) / 1000)),
             cancelable: !!current && read.cancelable,
             tail: job.tail,
             trace: job.transitions.map(function (t) {
-              return { key: t.revision, state: t.state, time: t.at / 1000 };
+              return { key: t.revision, state: t.state, time: Math.round((now - t.at) / 1000) };
             }),
           },
   };

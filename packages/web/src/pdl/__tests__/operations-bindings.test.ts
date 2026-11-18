@@ -35,6 +35,7 @@ const response = (body: unknown, status = 200) => new Response(JSON.stringify(bo
 let backlog: BacklogItem[], writes: { path: string; body: Record<string, unknown> }[], rejectWrite: boolean;
 let summary: EvalHubSummary;
 let managedExitCode: number | null | undefined;
+let managedRecovery: Record<string, unknown> = { version: 1, attempts: 0, nextAttemptAt: 99 };
 beforeEach(() => {
   vi.clearAllMocks();
   window.clowderChat = { dataOk: vi.fn(), dataError: vi.fn() } as unknown as typeof window.clowderChat;
@@ -148,6 +149,7 @@ beforeEach(() => {
           command: 'pnpm test -- actual',
           tail: 'native output',
           result: managedExitCode === undefined ? undefined : { exitCode: managedExitCode, durationMs: 0 },
+          recovery: managedRecovery,
           transitions: [{ revision: 3, state: 'running', at: 5 }],
         },
       });
@@ -291,6 +293,15 @@ it.each([
     exitCode,
     elapsed: exitCode === undefined ? expect.any(Number) : 0,
   });
+  // A healthy job's routine next check is not recovery; times read as whole seconds, the trace as how long ago.
+  const detail = hook.result.current.project().execDetail;
+  expect(detail.recovery).toBeNull();
+  expect(Number.isInteger(detail.elapsed)).toBe(true);
+  expect(Math.abs(detail.trace[0].time - (Date.now() - 5) / 1000)).toBeLessThan(2);
+  managedRecovery = { version: 1, attempts: 2, nextAttemptAt: 99 };
+  await act(() => hook.result.current.action('refresh', { k: 'live' }));
+  await waitFor(() => expect(hook.result.current.project().execDetail.recovery).toMatchObject({ pending: true }));
+  managedRecovery = { version: 1, attempts: 0, nextAttemptAt: 99 };
   await act(() => hook.result.current.action('opLiveStop', { k: 'managed', feedback: '1' }));
   expect(cancelProjectedExecution).toHaveBeenCalledWith(data.executions[0], true);
   await act(() => useActiveExecutionStore.setState({ hydration: 'error' }));
