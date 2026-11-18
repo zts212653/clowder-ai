@@ -75,6 +75,7 @@
     "executionUnavailable": "This execution can no longer be located"
   },
   "chatRich": {
+    "profile": {"full": "Full content", "before": "Current", "after": "Proposed"},
     "saveFailed": "Submitted, but the selection could not be saved. Do not submit it again."
   },
   "memoryGroup": {

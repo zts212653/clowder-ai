@@ -7871,6 +7871,25 @@ pdl:
               use: diff
               props: "@rich.diff"
               when: "@rich.diff"
+            - type: disclosure
+              key: "@rich.profile.key"
+              title: t:chatRich.profile.full
+              when: "@rich.profile"
+              blocks:
+                - type: text
+                  variant: meta
+                  text: t:chatRich.profile.before
+                - type: content
+                  html:
+                    of: "@rich.profile.before"
+                    fmt: markdown
+                - type: text
+                  variant: meta
+                  text: t:chatRich.profile.after
+                - type: content
+                  html:
+                    of: "@rich.profile.after"
+                    fmt: markdown
             - type: component
               use: media
               props: "@rich.audio"

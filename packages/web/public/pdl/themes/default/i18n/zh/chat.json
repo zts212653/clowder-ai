@@ -985,6 +985,7 @@
     }
   },
   "chatRich": {
+    "profile": {"full": "完整内容", "before": "当前内容", "after": "提议改为"},
     "selection": {
       "cardTitle": "卡片 · {0}",
       "fileSub": "{0} · 文档",

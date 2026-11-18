@@ -86,6 +86,55 @@ describe('rich blocks projected into the existing component contract', () => {
   });
 });
 
+it('shows a profile update proposal as its rationale, the line diff and the full before/after', () => {
+  const body = [
+    '评审意见先结论。',
+    '',
+    '**改动（+1 / -1 行）：**',
+    '~~~diff',
+    '@@ -1,2 +1,2 @@',
+    ' # 开场',
+    '-先说进度。',
+    '+先写结论。',
+    '~~~',
+    '',
+    '**当前内容：**',
+    '```',
+    '# 开场\n先说进度。',
+    '```',
+    '',
+    '**提议改为：**',
+    '```',
+    '# 开场\n先写结论。',
+    '```',
+  ].join('\n');
+  const view = richBlockView(
+    { v: 1, id: 'p', kind: 'card', title: '提议更新开场简介', bodyMarkdown: body },
+    'm',
+    (s) => s,
+  );
+  expect(view).toMatchObject({
+    markdown: '评审意见先结论。',
+    diff: {
+      hunks: [
+        [
+          '@@ -1,2 +1,2 @@',
+          [
+            [' ', '# 开场'],
+            ['-', '先说进度。'],
+            ['+', '先写结论。'],
+          ],
+        ],
+      ],
+    },
+    profile: { key: 'm:p:full', before: '# 开场\n先说进度。', after: '# 开场\n先写结论。' },
+  });
+  const first = body.replace(/~~~diff[\s\S]*?~~~/, '~~~diff\n（内容无逐行差异）\n~~~');
+  expect(
+    richBlockView({ v: 1, id: 'p', kind: 'card', title: 't', bodyMarkdown: first }, 'm', (s) => s)?.diff,
+  ).toBeUndefined();
+});
+
 it('treats a Codex question group as submitted when a sibling has a saved answer', () => {
   const first = {
     id: 'first',

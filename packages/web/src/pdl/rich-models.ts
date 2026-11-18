@@ -16,6 +16,7 @@ export interface RichView {
   kv?: { k: string; v: string }[];
   checks?: { label: string; done: boolean }[];
   diff?: { mode: string; hunks: [string, [string, string][]][] };
+  profile?: { key: string; before: string; after: string };
   cards?: {
     items: {
       src: string;
@@ -43,6 +44,27 @@ export interface RichView {
   };
 }
 
+function diffHunks(diff: string, filePath?: string): [string, [string, string][]][] {
+  return parseUnifiedDiff(diff, filePath).flatMap((f) =>
+    f.hunks.map((h): [string, [string, string][]] => [
+      h.header,
+      h.lines
+        .filter((l) => l.type !== 'header')
+        .map((l) => [l.type === 'add' ? '+' : l.type === 'remove' ? '-' : ' ', l.content]),
+    ]),
+  );
+}
+
+/** A profile update proposal card body: rationale, optional unified diff, current content, proposed content. */
+function profileUpdate(body: string): { rationale: string; diff: string; before: string; after: string } | null {
+  const m = /^([\s\S]*)\n\n\*\*当前内容：\*\*\n(`{3,})\n([\s\S]*?)\n\2\n\n\*\*提议改为：\*\*\n\2\n([\s\S]*?)\n\2$/.exec(
+    body,
+  );
+  if (!m) return null;
+  const d = /^([\s\S]*)\n\n\*\*改动（[^*\n]+）：\*\*\n(~{3,})diff\n([\s\S]*?)\n\2$/.exec(m[1]);
+  return { rationale: d ? d[1] : m[1], diff: d?.[3].startsWith('@@') ? d[3] : '', before: m[3], after: m[4] };
+}
+
 /** Source block coordinates remain intact; rendering belongs to the copied components. */
 export function richBlockView(
   block: RichBlock,
@@ -64,13 +86,23 @@ function kindView(
   siblings: RichBlock[],
 ): Omit<RichView, 'type' | 'mid' | 'block'> | null {
   switch (block.kind) {
-    case 'card':
-      return {
+    case 'card': {
+      const view = {
         rk: block.kind,
         title: block.title,
         markdown: block.bodyMarkdown,
         kv: block.fields?.map((f) => ({ k: f.label, v: f.value })),
       };
+      const update = profileUpdate(block.bodyMarkdown ?? '');
+      return update
+        ? {
+            ...view,
+            markdown: update.rationale,
+            diff: update.diff ? { mode: 'unified', hunks: diffHunks(update.diff) } : undefined,
+            profile: { key: `${mid}:${block.id}:full`, before: update.before, after: update.after },
+          }
+        : view;
+    }
     case 'checklist':
       return {
         rk: block.kind,
@@ -84,17 +116,7 @@ function kindView(
         rk: block.kind,
         title: '',
         filePath: block.filePath,
-        diff: {
-          mode: 'unified',
-          hunks: parseUnifiedDiff(block.diff, block.filePath).flatMap((f) =>
-            f.hunks.map((h): [string, [string, string][]] => [
-              h.header,
-              h.lines
-                .filter((l) => l.type !== 'header')
-                .map((l) => [l.type === 'add' ? '+' : l.type === 'remove' ? '-' : ' ', l.content]),
-            ]),
-          ),
-        },
+        diff: { mode: 'unified', hunks: diffHunks(block.diff, block.filePath) },
       };
     case 'media_gallery':
       return {
