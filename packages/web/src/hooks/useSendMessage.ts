@@ -19,6 +19,7 @@ import {
   findSendAttempt,
   patchSendAttempt,
   putSendAttempt,
+  retireSendAttempt,
   useSendAttemptStore,
 } from '@/stores/send-attempt-store';
 import { apiFetch } from '@/utils/api-client';
@@ -160,11 +161,31 @@ export function useSendMessage(activeThreadId?: string) {
             whisper,
             messageDisposition,
             composerDraftRevision,
+            contentInComposer: existing
+              ? (existing.contentInComposer ?? existing.composerDraftText !== undefined)
+              : Boolean(admissionOptions?.onPrepared),
             previewUrls: existing?.previewUrls ?? (images ?? []).map((file) => URL.createObjectURL(file)),
             error: undefined,
           }
         : undefined;
-      if (attempt) putSendAttempt(attempt);
+      if (attempt) {
+        putSendAttempt(attempt);
+        if (admissionOptions?.onPrepared) {
+          useSendAttemptStore
+            .getState()
+            .attempts.filter(
+              (previous) =>
+                previous.id !== clientMessageId &&
+                previous.ownerUserId === ownerUserId &&
+                previous.threadId === threadId &&
+                previous.status === 'failed' &&
+                previous.contentInComposer,
+            )
+            .forEach((previous) => {
+              void retireSendAttempt(previous).catch(() => {});
+            });
+        }
+      }
       let submitted = false;
       let prepared = false;
       let rejected = false;
@@ -186,7 +207,7 @@ export function useSendMessage(activeThreadId?: string) {
           if (attempt.composerDraftText !== undefined) {
             if (!consumePreparedComposerDraft(attempt)) throw new Error('原输入框尚不可移交，内容已保留');
             prepared = true;
-            attempt = { ...attempt, composerDraftText: undefined };
+            attempt = { ...attempt, composerDraftText: undefined, contentInComposer: false };
             putSendAttempt(attempt);
             // Commit the completed handoff before any POST; an interrupted write
             // must not restore a pending handoff over newly typed input.
@@ -195,7 +216,7 @@ export function useSendMessage(activeThreadId?: string) {
             if (admissionOptions?.onPrepared?.(true) === false) throw new Error('原输入框尚不可移交，内容已保留');
             prepared = true;
           }
-          patchSendAttempt(attempt, { status: 'sending' });
+          patchSendAttempt(attempt, { status: 'sending', contentInComposer: false });
         }
         const submit = (confirmedTargetCats?: string[]) => {
           if (attempt && apiSessionIdentity.getSnapshot().ownerUserId !== attempt.ownerUserId)

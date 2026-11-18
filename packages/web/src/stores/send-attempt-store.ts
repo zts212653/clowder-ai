@@ -90,9 +90,11 @@ export function retireSendAttempt(attempt: SendAttempt) {
   if (pending) return pending;
   const retirement = (async () => {
     if (apiSessionIdentity.getSnapshot().ownerUserId !== attempt.ownerUserId) return;
+    // A failed preparation notice owns no content; its snapshot stays in the composer.
     if (
-      findSendAttempt(attempt.ownerUserId, attempt.threadId, attempt.id)?.status === 'recalled' ||
-      attempt.composerDraftRevision !== undefined
+      !(attempt.status === 'failed' && attempt.contentInComposer) &&
+      (findSendAttempt(attempt.ownerUserId, attempt.threadId, attempt.id)?.status === 'recalled' ||
+        attempt.composerDraftRevision !== undefined)
     ) {
       const current = await loadOwnerComposerDraft(attempt.threadId);
       if (apiSessionIdentity.getSnapshot().ownerUserId !== attempt.ownerUserId) return;

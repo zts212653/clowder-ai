@@ -201,7 +201,7 @@ async function localAttemptFiles(page) {
 }
 
 for (const addedText of ['', '保存失败期间新增的输入']) {
-  test(`a local persistence retry transfers only its original composer snapshot ${addedText ? 'with new typing' : 'without another POST'}`, async () => {
+  test(`a local preparation failure leaves one composer resend entry ${addedText ? 'with new typing' : 'without another POST'}`, async () => {
     const proof = await scene();
     const { page } = proof;
     const text = '本地配额恢复后只发送这条一次';
@@ -249,6 +249,7 @@ for (const addedText of ['', '保存失败期间新增的输入']) {
       await page.locator('[data-send-status="failed"]').waitFor();
       assert.equal(await page.locator('textarea').inputValue(), text);
       assert.equal(posts.length, 0);
+      assert.equal(await page.getByRole('button', { name: '重试发送这条消息' }).count(), 0);
       if (addedText) {
         await page.locator('textarea').fill(`${text}\n\n${addedText}`);
         await page.locator('input[type="file"]').setInputFiles({
@@ -261,24 +262,21 @@ for (const addedText of ['', '保存失败期间新增的输入']) {
         });
         await page.getByRole('button', { name: 'Remove retry-new.png', exact: true }).waitFor();
       }
-      await page.getByRole('button', { name: '重试发送这条消息' }).click();
+      await page.locator('textarea').press('Enter');
       await page.locator('[data-send-status="accepted"]').waitFor();
+      await page.waitForFunction(() => !document.querySelector('[data-send-status="failed"]'));
       assert.equal(posts.length, 1);
-      assert.equal(await page.locator('textarea').inputValue(), addedText ? `\n\n${addedText}` : '');
+      assert.equal(await page.locator('textarea').inputValue(), '');
+      const sentText = addedText ? `${text}\n\n${addedText}` : text;
+      assert.equal(posts[0].content.replace(/\r\n/g, '\n'), sentText);
       await page.locator('textarea').press('Enter');
       if (addedText) {
-        await page.waitForFunction(() => document.querySelector('textarea')?.value === '');
-        assert.equal(posts.length, 2);
-        assert.equal(posts[1].content, addedText);
-        assert.equal(posts[1].imageName, 'retry-new.png');
-        assert.equal(posts[1].imageBytes, 68);
-      } else {
-        await page.evaluate(
-          () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
-        );
-        assert.equal(posts.length, 1);
+        assert.equal(posts[0].imageName, 'retry-new.png');
+        assert.equal(posts[0].imageBytes, 68);
       }
-      assert.equal(posts.filter((post) => post.content === text).length, 1);
+      await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+      assert.equal(posts.length, 1);
+      assert.equal(posts.filter((post) => post.content.replace(/\r\n/g, '\n') === sentText).length, 1);
     } finally {
       await proof.finish();
     }

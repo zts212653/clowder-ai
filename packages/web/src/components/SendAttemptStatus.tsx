@@ -26,7 +26,7 @@ export function SendAttemptStatus({
   const checking = attempt.status === 'checking';
   const busy = attempt.status === 'preparing' || attempt.status === 'sending' || checking;
   const text = {
-    preparing: '发送中…',
+    preparing: '正在准备发送…',
     sending: '发送中…',
     accepted: '已发出 · 等待接收确认',
     delivered: '已投递 · 正在同步回执',
@@ -115,7 +115,7 @@ export function SendAttemptStatus({
         )}
       </svg>
       <span>{text}</span>
-      {stored && (failed || canceled || recalled || unknown || checking) ? (
+      {stored && !stored.contentInComposer && (failed || canceled || recalled || unknown || checking) ? (
         <button
           type="button"
           disabled={checking}

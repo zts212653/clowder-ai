@@ -35,40 +35,42 @@ export function withSendAttempts(
     ];
   });
   remaining.forEach((attempt) => {
+    const contentInComposer = attempt.contentInComposer === true;
     const entry = queue.find(
       (candidate) => candidate.clientMessageId === attempt.id || candidate.messageId === attempt.serverMessageId,
     );
-    const blocks =
-      attempt.contentBlocks ??
-      (attempt.files.length || attempt.contextAttachments?.length
-        ? [
-            ...(attempt.content ? [{ type: 'text' as const, text: attempt.content }] : []),
-            ...(attempt.contextAttachments ?? []).map((attachment) => ({
-              type: 'context_attachment' as const,
-              attachment,
-            })),
-            ...attempt.files.map((file, index) =>
-              file.type.startsWith('image/')
-                ? { type: 'image' as const, url: attempt.previewUrls?.[index] ?? '', alt: file.name }
-                : {
-                    type: 'file' as const,
-                    url: attempt.previewUrls?.[index] ?? '',
-                    fileName: file.name,
-                    mimeType: file.type || 'application/octet-stream',
-                    fileSize: file.size,
-                  },
-            ),
-          ]
-        : undefined);
+    const blocks = contentInComposer
+      ? undefined
+      : (attempt.contentBlocks ??
+        (attempt.files.length || attempt.contextAttachments?.length
+          ? [
+              ...(attempt.content ? [{ type: 'text' as const, text: attempt.content }] : []),
+              ...(attempt.contextAttachments ?? []).map((attachment) => ({
+                type: 'context_attachment' as const,
+                attachment,
+              })),
+              ...attempt.files.map((file, index) =>
+                file.type.startsWith('image/')
+                  ? { type: 'image' as const, url: attempt.previewUrls?.[index] ?? '', alt: file.name }
+                  : {
+                      type: 'file' as const,
+                      url: attempt.previewUrls?.[index] ?? '',
+                      fileName: file.name,
+                      mimeType: file.type || 'application/octet-stream',
+                      fileSize: file.size,
+                    },
+              ),
+            ]
+          : undefined));
     projected.push({
       id: entry?.messageId ?? attempt.serverMessageId ?? `send-attempt:${attempt.id}`,
       clientMessageId: attempt.id,
       from: { kind: 'user', userId: attempt.ownerUserId },
       type: 'user',
-      content: attempt.content,
+      content: contentInComposer ? '内容保留在输入框' : attempt.content,
       timestamp: attempt.timestamp,
       contentBlocks: blocks,
-      ...(attempt.replyTo ? { replyTo: attempt.replyTo } : {}),
+      ...(!contentInComposer && attempt.replyTo ? { replyTo: attempt.replyTo } : {}),
       ...(attempt.whisper ?? {}),
       ...(entry ? { queuedEntryId: entry.id } : {}),
       sendAttempt: {
