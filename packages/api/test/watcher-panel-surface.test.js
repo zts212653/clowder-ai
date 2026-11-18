@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { applyWatcherConfigPatch, parseWatcherConfig } from '@cat-cafe/shared';
@@ -20,6 +20,7 @@ import {
 import {
   extractWatcherPanelInstruction,
   loadWatcherPanelGuidance,
+  WATCHER_PANEL_INSTRUCTION_PATH,
   watcherPanelPrompt,
 } from '../dist/domains/concierge/watcher/panel/watcher-panel-prompt.js';
 import { readWatcherOutputFence } from '../dist/domains/concierge/watcher/watcher-output-fence.js';
@@ -117,9 +118,14 @@ test('members read the instruction word for word from its document, then only th
   assert.equal(extractWatcherPanelInstruction(doc), '你正在担任守望猫。\n\n第二段。');
   assert.throws(() => extractWatcherPanelInstruction('# 没有正文'), /watcher_panel_instruction_body_missing/);
   assert.throws(() => loadWatcherPanelGuidance(''), /watcher_panel_instruction_unavailable/);
-  const real = loadWatcherPanelGuidance();
-  assert.ok(real.text.startsWith('你正在担任守望猫。'), 'the runtime finds the watcher thread’s document');
-  assert.match(real.digest, /^sha256:[a-f0-9]{64}$/);
+  const instruction = new URL(`../../../${WATCHER_PANEL_INSTRUCTION_PATH}`, import.meta.url);
+  if (existsSync(instruction)) {
+    const real = loadWatcherPanelGuidance();
+    assert.ok(real.text.startsWith('你正在担任守望猫。'), 'the runtime finds the installation-owned document');
+    assert.match(real.digest, /^sha256:[a-f0-9]{64}$/);
+  } else {
+    assert.throws(() => loadWatcherPanelGuidance(), /watcher_panel_instruction_unavailable/);
+  }
   const prompt = watcherPanelPrompt({
     threadId: 'thread-1',
     threadTitle: '标题',

@@ -19,6 +19,12 @@ const { buildRoutingSignalDecisionProjection } = await import(
   '../dist/domains/routing-context/preflight/RoutingSignalDecisionProjection.js'
 );
 
+function payload(projection) {
+  const match = /^<runtime-routing-context>\s*([\s\S]*?)\s*<\/runtime-routing-context>$/.exec(projection);
+  assert.ok(match, 'routing advisory must have its payload envelope');
+  return JSON.parse(match[1]);
+}
+
 // Seed only this isolated client's keyspace, including replay/subject/sequence indexes.
 async function seedHistory(redis, events) {
   for (let offset = 0; offset < events.length; offset += 500) {
@@ -102,7 +108,7 @@ test(
     const previousConsumer = createRuntime();
     const auditStarted = performance.now();
     const audit = await previousConsumer.readService.read({ ownerId, observedAt: 50_000 });
-    const oldAdvisory = JSON.parse(previousConsumer.promptProjector.project(audit).split('\n')[2]);
+    const oldAdvisory = payload(previousConsumer.promptProjector.project(audit));
     const auditMs = performance.now() - auditStarted;
     assert.ok(commands.some((command) => command.name === 'mget' && command.args.length === events.length));
     assert.equal(oldAdvisory.anomalies[0].availability, 'scarce');
@@ -114,7 +120,7 @@ test(
     const coldStarted = performance.now();
     const projection = await runtime.promptProjection.resolve({ ownerId });
     const coldMs = performance.now() - coldStarted;
-    const advisory = JSON.parse(projection.split('\n')[2]);
+    const advisory = payload(projection);
     assert.equal(advisory.anomalies[0].validUntil, open.validUntil);
     assert.equal(advisory.anomalies[0].resetAt, open.resetAt);
     assert.ok(

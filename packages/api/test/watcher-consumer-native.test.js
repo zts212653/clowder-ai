@@ -69,13 +69,16 @@ test(
 );
 
 test(
-  'persistent budget pressure stays below 30k and records a skipped original instead of replaying it forever',
+  'unreported opaque budget pressure stays below 30k and records a skipped original instead of replaying it forever',
   { timeout: 40000, skip: !nativeWatcherAvailable },
   async () => {
     const w = await watcherWorld();
     const f = await watcherNativeFixture(w);
     try {
       const [source] = await w.work('RAW_INCREMENT_13 ' + 'current original '.repeat(300));
+      // Fixed 10/2 usage certifies the reported-continuation path. Omit it here
+      // to exercise conservative admission for the deliberately padded opaque output.
+      f.state.reportUsage = false;
       f.state.tools = 6;
       f.state.argumentPadding = '"\\\n'.repeat(180);
       f.state.reasoningPadding = 'long reasoning with concrete facts '.repeat(260);

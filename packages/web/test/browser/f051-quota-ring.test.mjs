@@ -157,9 +157,9 @@ before(async () => {
   writeCredential(claudeRef, { accessToken: ['sk-ant', 'oat01', 'fixture-main'].join('-') }, root);
   const claudeProfile = resolveByAccountRef(root, claudeRef);
   assert.ok(claudeProfile);
-  const claudeOwner = claudeExecutionAccountSnapshot(claudeProfile);
+  const claudeOwner = await claudeExecutionAccountSnapshot(claudeProfile);
   assert.equal(
-    recordClaudeQuota({
+    await recordClaudeQuota({
       root,
       account: claudeOwner,
       model: 'claude-fable-5-2',

@@ -27,7 +27,9 @@ test(
     await new Promise((resolve) => proxy.listen(0, '127.0.0.1', resolve));
     const endpoint = `http://127.0.0.1:${proxy.address().port}`;
     f.state.nativeEnv = {
-      OPENAI_BASE_URL: 'http://watcher-provider.invalid/v1',
+      // A separate loopback alias stays outside the native hop's exact NO_PROXY hosts.
+      // It is only the proxy request target; the owned proxy handles it.
+      OPENAI_BASE_URL: 'http://127.0.0.2:1/v1',
       HTTP_PROXY: endpoint,
       http_proxy: endpoint,
       HTTPS_PROXY: endpoint,
@@ -41,7 +43,7 @@ test(
       const [source] = await w.work('RAW_INCREMENT_14');
       const session = await f.run(source, AbortSignal.timeout(20000));
       assert.equal(session.watcherState.afterSequence, source.settledSequence);
-      assert.deepEqual(proxied, ['http://watcher-provider.invalid/v1/responses']);
+      assert.deepEqual(proxied, ['http://127.0.0.2:1/v1/responses']);
       assert.equal(f.requests.length, 1);
       assert.equal(
         Object.values(

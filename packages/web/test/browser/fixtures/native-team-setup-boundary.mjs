@@ -49,6 +49,7 @@ export async function installSetupHttpBoundary(context, evidence, unmodeled) {
       },
     },
     '/api/config/cat-order': { catOrder: [] },
+    '/api/cats/l0-budget': { referenceTokens: 6000, members: [] },
     '/api/accounts': { projectPath: '/author-native-fixture', providers: [] },
     '/api/debug/callback-auth': {
       reasonCounts: {},
