@@ -2155,7 +2155,8 @@ function bindProject() {
             push: true,
           });
       });
-    if (d.k === 'exec')
+    // A run or session of 执行 is read by the host first; a background task's sub-page shows the task homeExecOpen chose.
+    if (d.k === 'exec' && String(d.v).indexOf('task:') !== 0)
       return chatAction('execOpen', d).then(function (result) {
         if (result !== false) navOpen({ f: navTop(sk).f, a: { sub: d.v }, into: sk, push: true });
       });

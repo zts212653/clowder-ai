@@ -3765,6 +3765,8 @@ describe('unmodified runtime and project chat bindings', () => {
       expect(w.eval("rtCur('panel')")).toBe('exec');
       expect(w.eval("navArg('sub', navTabKey('panel','exec'))")).toBe('task:managed');
       expect(action).toHaveBeenCalledWith('homeExecOpen', { k: 'managed' }, undefined);
+      // The task homeExecOpen chose is the page: the host is not asked to open a run for it.
+      expect(action.mock.calls.filter(([name]) => name === 'execOpen')).toEqual([]);
       expect(errors).not.toHaveBeenCalled();
     } finally {
       dom.window.close();
