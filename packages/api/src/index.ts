@@ -2321,6 +2321,7 @@ async function initializeApi(
                       acpConfig,
                       resolveCurrentAcpConfig: () => getRegisteredAcpConfig(id, projectRoot),
                       selectSessionModel: (session, model) => agentAccessAcpModelSelection(session, model),
+                      createStdioClient: (config) => new AgentAccessAcpRuntimeClient(config, agentAccessAcpProcess),
                       poolRegistry: acpPoolRegistry,
                       log: app.log,
                       onUnavailable: (reason) => agentRegistry.markUnavailable(id, reason),
@@ -5579,6 +5580,7 @@ async function initializeApi(
                 effectiveModel: getCatModel(catId),
                 acpConfig: declaration.acp,
                 selectSessionModel: (session, model) => agentAccessAcpModelSelection(session, model),
+                createStdioClient: (config) => new AgentAccessAcpRuntimeClient(config, agentAccessAcpProcess),
                 poolRegistry,
                 log: app.log,
               });
@@ -6017,6 +6019,9 @@ async function initializeApi(
   const { createAgentAccessClaudeOutput } = await import('./domains/plugin/agent-access/claude.js');
   const agentAccessClaudeOutput = createAgentAccessClaudeOutput(pluginRuntime.inventoryStore, pluginRuntime.supervisor);
   const { createAgentAccessAcpModelSelection } = await import('./domains/plugin/agent-access/acp.js');
+  const { createAgentAccessAcpProcess } = await import('./domains/plugin/agent-access/acp-process.js');
+  const { AgentAccessAcpRuntimeClient } = await import('./domains/plugin/agent-access/acp-runtime-client.js');
+  const agentAccessAcpProcess = createAgentAccessAcpProcess(pluginRuntime.inventoryStore, pluginRuntime.supervisor);
   const agentAccessAcpModelSelection = createAgentAccessAcpModelSelection(
     pluginRuntime.inventoryStore,
     pluginRuntime.supervisor,

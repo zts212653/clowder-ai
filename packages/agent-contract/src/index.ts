@@ -29,6 +29,8 @@ export const AGENT_ACCESS_OPERATIONS = [
 /** Operations called by the Host's first-party Agent Access integration. */
 export const OFFICIAL_AGENT_ACCESS_OPERATIONS = [
   ...AGENT_ACCESS_OPERATIONS,
+  'acpProcess',
+  'acpSession',
   'parseNativeEvent',
   'planCodexExec',
   'projectClaudeOutput',

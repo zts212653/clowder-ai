@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { PassThrough, Readable } from 'node:stream';
 import { AGENT_ACCESS_PLUGIN_ID } from '@clowder-ai/agent-contract';
-import type { AgentAccessAcpProcessTermination } from '@clowder-ai/agent-contract/acp';
+import type { AgentAccessAcpProcessTermination, AgentAccessAcpSessionOperation } from '@clowder-ai/agent-contract/acp';
 import { z } from 'zod';
 import {
   ACP_CHILD_SHUTDOWN_GRACE_MS,
@@ -12,6 +12,7 @@ import type { PluginInventoryStore } from '../host-inventory/ports.js';
 
 const commandSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('write'), line: z.string() }),
+  z.object({ kind: z.literal('capacity'), message: z.string(), timestamp: z.number() }),
   z.object({
     kind: z.literal('shutdown'),
     graceMs: z.number().int().min(0).max(ACP_CHILD_SHUTDOWN_GRACE_MS),
@@ -19,6 +20,10 @@ const commandSchema = z.discriminatedUnion('kind', [
   }),
 ]);
 const openResultSchema = z.object({ commands: z.instanceof(Readable) });
+
+export type BoundSessionOperation<T = AgentAccessAcpSessionOperation> = T extends { processId: string }
+  ? Omit<T, 'processId'>
+  : never;
 
 export function createAgentAccessAcpProcess(
   inventory: Pick<PluginInventoryStore, 'readCurrentAuthority'>,
@@ -31,6 +36,7 @@ export function createAgentAccessAcpProcess(
       stdout: Readable;
       stderr?: Readable;
       writeApprovedLine: (line: string) => Promise<void>;
+      onCapacity?: (signal: { message: string; timestamp: number }) => void;
     },
   ) => {
     const selected = (await inventory.readCurrentAuthority(AGENT_ACCESS_PLUGIN_ID))?.instance;
@@ -40,7 +46,7 @@ export function createAgentAccessAcpProcess(
     const pluginInstanceId = selected.pluginInstanceId;
     const signal = runtime.nativeActions.activationSignal(pluginInstanceId);
     signal.throwIfAborted();
-    const { child, stdout, stderr, writeApprovedLine } = launch();
+    const { child, stdout, stderr, writeApprovedLine, onCapacity } = launch();
     const processId = randomUUID();
     const lifecycle = new PassThrough({ objectMode: true });
     let shutdown: Promise<void> | undefined;
@@ -83,7 +89,8 @@ export function createAgentAccessAcpProcess(
             signal.throwIfAborted();
             const command = commandSchema.parse(raw);
             if (command.kind === 'write') await writeApprovedLine(command.line);
-            else await stop(command.graceMs, command.endStdin);
+            else if (command.kind === 'shutdown') await stop(command.graceMs, command.endStdin);
+            else onCapacity?.({ message: command.message, timestamp: command.timestamp });
           }
         } finally {
           await stop();
@@ -97,6 +104,10 @@ export function createAgentAccessAcpProcess(
     }
     return {
       initialize: () => invoke('initialize'),
+      session(operation: BoundSessionOperation) {
+        signal.throwIfAborted();
+        return runtime.invoke(pluginInstanceId, 'acpSession', { ...operation, processId });
+      },
       async close() {
         try {
           if (!signal.aborted) await invoke('close');
@@ -108,3 +119,5 @@ export function createAgentAccessAcpProcess(
     };
   };
 }
+
+export type AgentAccessAcpProcess = ReturnType<typeof createAgentAccessAcpProcess>;

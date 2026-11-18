@@ -16,6 +16,7 @@ Windows 隔离实例使用对应提交打包出的 API、Web、Redis 和插件�
 | 取消 | 从对话点击停止，界面请求命中对应的原生或 ACP 角色，HTTP 返回 200，两个真实 Kimi 进程都在模型服务发出最终帧前关闭本轮连接。 | 打包提交 `6ed87d386`。脱敏记录为 `member-e2e-candidate-6ed87-c-cancellation-retry.json`。 |
 | OpenCode 原生 CLI 基准 | 在隔离打包环境添加 OpenCode 角色，从对话调用真实 OpenCode 2.0.28 获得产品内流式回复。 | 打包提交 `56ba3f047`，脱敏记录为 `member-e2e-candidate-56ba-opencode-v2-preflight.json`，验证的是切换前的 OpenCode 行为。 |
 | OpenCode 活动接入包 | 添加角色返回 201，对话调用返回 202，真实 OpenCode 2.0.28 经活动包的原生计划获得流式回复。 | 打包提交 `593dae159`，记录为 `member-e2e-candidate-593da-native-clients-1.json`。独立评审提出启动权限、换代及诊断边界问题，修正后需重跑。 |
+| Claude 普通 CLI | 使用隔离账号配置创建 Claude 角色，返回 201，从正常对话发送返回 202，真实 Claude Code 2.1.327 向本机模型服务发出流式请求，回复在对话内可见。 | 打包提交 `eb58807de`，记录为 `member-e2e-candidate-eb588-claude-1.json`。SDK 的真实客户端调用及后台、PTY 另待验证。 |
 | F050 HTTP A2A | 将原有外部 A2A 角色配置到隔离 HTTP 对端。在打包对话页通过 `@` 发起调用，对端实际收到 `tasks/send`，回复显示于同一对话。 | 打包提交 `593dae159`，脱敏记录为 `member-e2e-candidate-593da-f050-4.json`。对端为本机验收实例，实际启用的 Collective 伙伴路线仍需验证。 |
 | 手动添加 | 从简洁主题成员列表打开添加，选择 Kimi CLI，填写角色与 `@` 名称。名称标签和保存条均可见，点击后收到 201 并进入新角色编辑页。 | 打包提交 `593dae159`。脱敏记录为 `member-e2e-candidate-593da-manual-declared-2.json`。 |
 | 编辑、改绑、默认角色及停用恢复 | 手动 Kimi 角色改绑至 `kimi acp`，保存返回 200。角色 ID 保留，配置版本与角色卡更新。在成员列表停用和恢复均返回 200，默认角色设置在刷新后保留。 | 打包提交 `593dae159`，记录为 `member-e2e-candidate-593da-manual-declared-8.json`。 |
@@ -46,10 +47,12 @@ Windows 隔离实例使用对应提交打包出的 API、Web、Redis 和插件�
 
 补审验证了实际 Worker 的调用身份、取消后旧回调失效、权限调用域，以及人工构造多个进程等待时的额度。接入的放行条件还包括真实原生请求审批、续接和取消，反复进程回收，以及具备相同能力的两个归档在同一 Host 往返。缺少必需声明动作的包须在暂停旧包之前被拒绝。
 
-两阶段配对流已通过实际归档与隔离 Node stdio 进程的初始化和关闭测试。Host 先启动进程并传递输出及退出流，Worker 返回写入命令流，Host 接通 stdin 后初始化现有 `AcpClient`。这条契约测试使用合成 ACP 协议，正常成员调用仍走存量池。接入成员入口还需核对会话操作、授权与 MCP 描述符、池复用状态，以及真实客户端的并发、续接和停止。
+普通及声明 stdio ACP 的成员工厂已接入活动包。Host 先启动进程并传递输出及退出流，Worker 返回写入命令流，Host 接通 stdin 后初始化现有 `AcpClient`。实际归档与隔离 Node ACP 进程的定向测试 5/5，覆盖保持原生 ID 的加载、流式内容、终态、权限、退出和 EPIPE。MCP 凭据及提示正文经 Host 核对引用后才写入实际 stdin。真实客户端的新版打包实测，以及 DSH、Antigravity 和实验 HTTP stream 的切换仍待完成。
 
-Claude 普通流和 SDK 的独立评审复现了提前关闭、压缩字段伪造、拆分凭据和 SDK 原生 idle 预读。真实归档回归验证了提前 `return()` 结束静默原生流、不转发 SDK 用户回显、提示帧不冲刷拆分凭据、拒绝伪压缩，以及 SDK 再次拉取前关闭原生查询。Windows 的 SDK 全套测试 47/48，唯一失败在 `c9d179386` 的独立环境复现为相同的回调环境断言。真实 Claude 客户端仍待打包验证。
+Claude 普通流和 SDK 的独立评审复现了提前关闭、压缩字段伪造、拆分凭据和 SDK 原生 idle 预读。真实归档回归验证了提前 `return()` 结束静默原生流、不转发 SDK 用户回显、提示帧不冲刷拆分凭据、拒绝伪压缩，以及 SDK 再次拉取前关闭原生查询。Windows 的 SDK 全套测试 47/48，唯一失败在 `c9d179386` 的独立环境复现为相同的回调环境断言。普通 CLI 已实机验证，SDK 待对应打包验证。
 
 ## 检查与发布状态
+
+打包 `eb58807de` 复验一键添加和同一 Host 的 1.0.0 → 1.0.1 → 1.0.0。协议 2 返回 422，兼容替换各返回 201，既有 Kimi 角色继续回复，另一路真实 Kimi ACP 请求分别重叠两次替换。API 24792、Web 7548、Redis 40068 在替换前后相同。脱敏记录为 `member-e2e-candidate-eb588-upgrade-1.json`。
 
 `pnpm lint` 在 `259810fb0` 通过。`pnpm check` 在 Windows 遇到基线的 F290 产品文案测试路径分隔符断言。原构建测试的临时夹具漏带新增的独立归档，CI 分片红灯在本地复现；`75666dd47` 修复后 22 项 ACP、Dot 和构建闭包检查通过。PR CI 和完整切换的验收以最终提交及对应产物为准。

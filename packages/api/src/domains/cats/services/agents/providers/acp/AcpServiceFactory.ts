@@ -32,7 +32,7 @@ import { piBridgeStorageArgs } from '../pi/pi-bridge-launch.js';
 import { AcpAgentService, type AcpAgentServiceConfig } from './AcpAgentService.js';
 import { AcpClient, type AcpClientConfig } from './AcpClient.js';
 import { AcpHttpStreamClient } from './AcpHttpStreamClient.js';
-import { AcpProcessPool, DEFAULT_ACP_IDLE_TTL_MS } from './AcpProcessPool.js';
+import { type AcpPoolClient, AcpProcessPool, DEFAULT_ACP_IDLE_TTL_MS } from './AcpProcessPool.js';
 // resolveAcpMcpServers + resolveDisabledServerIds moved to AcpAgentService.invoke()
 // for invoke-time resolution (#712 P1-1).
 import { createAcpPoolSpawnSignature } from './acp-pool-signature.js';
@@ -74,6 +74,7 @@ export interface CreateAcpServiceForConfigInput {
   /** Catalog construction uses its existing accessor; plugin sources retain their registration fence. */
   resolveCurrentAcpConfig?(): AcpVariantConfig | undefined;
   selectSessionModel?: AcpAgentServiceConfig['selectSessionModel'];
+  createStdioClient?: (config: AcpClientConfig) => AcpPoolClient;
   poolRegistry: AcpPoolRegistry;
   log: Pick<FastifyBaseLogger, 'info' | 'warn'>;
   /** Tests supply an owned throwaway root; production uses the platform default. */
@@ -263,7 +264,7 @@ async function ensureAcpPool(
     cwd: bootstrap.cwd,
     bootstrapIsolation: bootstrap.isolation,
     environmentFingerprint: createHmac('sha256', environmentFingerprintKey)
-      .update(acpConstructionJson(construction))
+      .update(acpConstructionJson(input.createStdioClient ? { construction, driver: 'agent-access' } : construction))
       .digest('hex'),
     openCodeRuntimeConfig: spawn.openCodeRuntimeConfig,
     contextPolicy: spawn.contextPolicy,
@@ -314,7 +315,9 @@ async function ensureAcpPool(
           ? { inheritParentEnv: false, permissionHandler: denyAgyAcpPermission, antigravityDiagnostics: true }
           : {}),
       };
-      return acpConfig.transport === 'httpstream' ? new AcpHttpStreamClient(clientCfg) : new AcpClient(clientCfg);
+      return acpConfig.transport === 'httpstream'
+        ? new AcpHttpStreamClient(clientCfg)
+        : (input.createStdioClient?.(clientCfg) ?? new AcpClient(clientCfg));
     },
     spawnSignature,
     pendingAcpPoolRetirement(poolRegistry, profileId),
@@ -526,8 +529,12 @@ export async function createAcpServiceForConfig(
       throw new StaleServiceSourceConflict('ACP account source changed; refresh this member before admission.');
     environment.assertCurrent();
   };
+  const createStdioClient =
+    !nativeDsh && !turnPatch && !spawn.antigravity && acpConfig.transport !== 'httpstream'
+      ? input.createStdioClient
+      : undefined;
   const { pool, lease } = await saveSpan('acp.pool', () =>
-    ensureAcpPool(effectiveInput, verified, spawn, preparedEnv, preparedSpawn, construction),
+    ensureAcpPool({ ...effectiveInput, createStdioClient }, verified, spawn, preparedEnv, preparedSpawn, construction),
   );
 
   // #712 P1-1: pass whitelist — MCP resolution happens at invoke time in

@@ -96,6 +96,10 @@ export function launchAcpChild(config: AcpClientConfig, captureCwdIdentity: () =
   if (IS_WINDOWS && !config.spawnFn) config.verifyBootstrapCwd?.(command, args, childEnv);
   captureCwdIdentity();
   const child = doSpawn(command, args, spawnOpts);
+  let stdinError: Error | undefined;
+  child.stdin?.on('error', (error) => {
+    stdinError = error;
+  });
   const connection: AcpChildConnection = {
     pid: child.pid,
     stdout: child.stdout,
@@ -118,6 +122,10 @@ export function launchAcpChild(config: AcpClientConfig, captureCwdIdentity: () =
     child: connection,
     writeLine: (line: string) =>
       new Promise<void>((resolve, reject) => {
+        if (stdinError) {
+          reject(stdinError);
+          return;
+        }
         if (!child.stdin || child.stdin.destroyed) {
           reject(new Error('ACP agent stdin is not writable'));
           return;

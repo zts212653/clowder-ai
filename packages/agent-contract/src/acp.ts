@@ -4,11 +4,84 @@ import { z } from 'zod';
 /** Commands on the worker-to-Host side of the stdio connection. */
 export type AgentAccessAcpProcessCommand =
   | { kind: 'write'; line: string }
-  | { kind: 'shutdown'; graceMs: number; endStdin: boolean };
+  | { kind: 'shutdown'; graceMs: number; endStdin: boolean }
+  | { kind: 'capacity'; message: string; timestamp: number };
 
 export type AgentAccessAcpProcessTermination =
   | { kind: 'exit'; code: number | null; signal: NodeJS.Signals | null }
   | { kind: 'error'; message: string };
+
+const processId = z.string().uuid();
+const sessionId = z.string().min(1);
+const sessionRequest = {
+  processId,
+  cwd: z.string().min(1),
+  mcp: z.array(z.object({ ref: z.string().min(1), transport: z.enum(['stdio', 'http', 'sse']) })),
+};
+const limits = z.object({
+  timeoutMs: z.number().int().nonnegative().optional(),
+  idleWarningMs: z.number().int().nonnegative().optional(),
+  idleStallMs: z.number().int().nonnegative().optional(),
+});
+
+export const agentAccessAcpSessionOperationSchema = z.discriminatedUnion('operation', [
+  z.object({ operation: z.literal('newSession'), ...sessionRequest }),
+  z.object({ operation: z.literal('loadSession'), ...sessionRequest, sessionId }),
+  z.object({ operation: z.literal('resumeSession'), ...sessionRequest, sessionId }),
+  z.object({ operation: z.literal('closeSession'), processId, sessionId }),
+  z.object({ operation: z.literal('setModel'), processId, sessionId, modelId: z.string().min(1) }),
+  z.object({ operation: z.literal('setConfig'), processId, sessionId, configId: z.string().min(1), value: z.string() }),
+  z.object({ operation: z.literal('cancel'), processId, sessionId }),
+  z.object({
+    operation: z.literal('prompt'),
+    processId,
+    sessionId,
+    contentRef: z.string().min(1),
+    limits: limits.optional(),
+  }),
+]);
+
+export type AgentAccessAcpSessionOperation = z.infer<typeof agentAccessAcpSessionOperationSchema>;
+
+export const agentAccessAcpSessionFailureSchema = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('protocol'), code: z.number(), message: z.string(), data: z.unknown().optional() }),
+  z.object({ kind: z.literal('binding'), message: z.string() }),
+  z.object({ kind: z.literal('timeout'), method: z.string(), timeoutMs: z.number() }),
+  z.object({
+    kind: z.literal('idle'),
+    sessionId,
+    idleSinceMs: z.number(),
+    eventCount: z.number(),
+    configuredIdleStallMs: z.number().optional(),
+  }),
+  z.object({ kind: z.literal('cancelled'), sessionId }),
+  z.object({ kind: z.literal('other'), message: z.string() }),
+]);
+export type AgentAccessAcpSessionFailure = z.infer<typeof agentAccessAcpSessionFailureSchema>;
+
+export const agentAccessAcpTurnFrameSchema = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('update'), update: z.object({ sessionId, update: z.record(z.unknown()) }) }),
+  z.object({
+    kind: z.literal('terminal'),
+    finalResponse: z.boolean(),
+    sessionReusable: z.boolean(),
+    processReusable: z.boolean(),
+    result: z.union([
+      z.object({ stopReason: z.enum(['end_turn', 'max_tokens', 'max_turn_requests', 'refusal', 'cancelled']) }),
+      z.object({ failure: agentAccessAcpSessionFailureSchema }),
+    ]),
+  }),
+]);
+
+export type AgentAccessAcpTurnFrame =
+  | { kind: 'update'; update: AcpSessionUpdate }
+  | {
+      kind: 'terminal';
+      finalResponse: boolean;
+      sessionReusable: boolean;
+      processReusable: boolean;
+      result: { stopReason: AcpStopReason } | { failure: AgentAccessAcpSessionFailure };
+    };
 
 export const agentAccessAcpModelSelectionSchema = z.object({
   model: z.string().min(1),

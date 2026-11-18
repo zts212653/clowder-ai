@@ -1,0 +1,328 @@
+import { createHmac, randomBytes, randomUUID } from 'node:crypto';
+import { createInterface } from 'node:readline';
+import { Readable } from 'node:stream';
+import { configuredCredentialValues } from '@cat-cafe/mcp-server/dist/secret-runtime.js';
+import { AcpCwdIdentityTracker } from '@clowder-ai/agent-access/runtime/acp/acp-cwd-identity';
+import type { AcpPromptInput } from '@clowder-ai/agent-access/runtime/acp/acp-prompt-content';
+import {
+  ACP_METHODS,
+  type AcpInitializeResult,
+  type AcpMcpServer,
+  type AcpNewSessionResult,
+  type AcpPromptCapabilities,
+  type AcpSessionUpdate,
+  type AcpStopReason,
+  type AgentAccessAcpSessionFailure,
+  agentAccessAcpSessionFailureSchema,
+  agentAccessAcpTurnFrameSchema,
+} from '@clowder-ai/agent-contract/acp';
+import { z } from 'zod';
+import {
+  ACP_CHILD_SHUTDOWN_GRACE_MS,
+  type AcpCapacitySignal,
+  type AcpChildConnection,
+  type AcpClientConfig,
+  AcpProtocolError,
+  AcpSessionCancelledError,
+  AcpStreamIdleError,
+  AcpTimeoutError,
+  launchAcpChild,
+} from '../../cats/services/agents/providers/acp/AcpClient.js';
+import { AcpSessionBindingError } from '../../cats/services/agents/providers/acp/active-session-cache.js';
+import { sanitizeRawEvent } from '../../cats/services/agents/providers/codex-audit-hooks.js';
+import { createNativeAcpRequests } from './acp-native-requests.js';
+import type { AgentAccessAcpProcess, BoundSessionOperation } from './acp-process.js';
+import { type AcpWriteApproval, createAcpWriteApprovalPort } from './acp-write-approval.js';
+
+const sessionResultSchema = z.object({ sessionId: z.string().min(1) }).passthrough();
+const actionResultSchema = z.discriminatedUnion('ok', [
+  z.object({ ok: z.literal(true), result: z.unknown().optional() }),
+  z.object({ ok: z.literal(false), failure: agentAccessAcpSessionFailureSchema }),
+]);
+
+function nativeError(failure: AgentAccessAcpSessionFailure): Error {
+  switch (failure.kind) {
+    case 'protocol':
+      return new AcpProtocolError(failure.code, failure.message, failure.data);
+    case 'binding':
+      return new AcpSessionBindingError(failure.message);
+    case 'timeout':
+      return new AcpTimeoutError(failure.method, failure.timeoutMs);
+    case 'idle':
+      return new AcpStreamIdleError(
+        failure.sessionId,
+        failure.idleSinceMs,
+        failure.eventCount,
+        failure.configuredIdleStallMs,
+      );
+    case 'cancelled':
+      return new AcpSessionCancelledError(failure.sessionId);
+    default:
+      return new Error(failure.message);
+  }
+}
+
+/** The pool keeps synchronous Host facts while the activated package drives ACP. */
+export class AgentAccessAcpRuntimeClient {
+  readonly #opaqueKey = randomBytes(32);
+  readonly #cwd: AcpCwdIdentityTracker;
+  readonly #unconfirmed = new Set<string>();
+  readonly #finalResponses = new Set<string>();
+  readonly #capacityListeners = new Set<(signal: AcpCapacitySignal) => void>();
+  #connection?: Awaited<ReturnType<AgentAccessAcpProcess>>;
+  #child?: AcpChildConnection;
+  #exited = false;
+  #closing?: Promise<void>;
+  #nativeEnv: NodeJS.ProcessEnv = {};
+  #wire?: ReturnType<typeof createAcpWriteApprovalPort>;
+  #requests?: ReturnType<typeof createNativeAcpRequests>;
+  #capabilities?: AcpInitializeResult['agentCapabilities'];
+  #recentCapacity: AcpCapacitySignal | null = null;
+
+  constructor(
+    private readonly config: AcpClientConfig,
+    private readonly open: AgentAccessAcpProcess,
+  ) {
+    this.#cwd = new AcpCwdIdentityTracker(config.cwd);
+  }
+
+  get spawnContext() {
+    return { cwd: this.config.cwd, env: this.#nativeEnv };
+  }
+  get pid() {
+    return this.#child?.pid;
+  }
+  get hasExited() {
+    return this.#exited;
+  }
+  get isAlive() {
+    return !this.#closing && !this.#exited && this.#child?.isWritable() === true;
+  }
+  get isCwdIntact() {
+    return this.#cwd.isIntact;
+  }
+  get agentCapabilities() {
+    return this.#capabilities;
+  }
+  get promptCapabilities(): Readonly<AcpPromptCapabilities> | undefined {
+    return this.#capabilities && { ...this.#capabilities.promptCapabilities };
+  }
+  get isSafeForSingleFlightReuse() {
+    return this.#unconfirmed.size === 0;
+  }
+  isSessionSafeForReuse(sessionId: string) {
+    return !this.#unconfirmed.has(sessionId);
+  }
+  hasPromptFinalResponse(sessionId: string) {
+    return this.#finalResponses.has(sessionId);
+  }
+  get recentCapacitySignal() {
+    return this.#recentCapacity;
+  }
+  clearRecentCapacitySignal() {
+    this.#recentCapacity = null;
+  }
+  onCapacity(listener: (signal: AcpCapacitySignal) => void) {
+    this.#capacityListeners.add(listener);
+  }
+  offCapacity(listener: (signal: AcpCapacitySignal) => void) {
+    this.#capacityListeners.delete(listener);
+  }
+
+  async initialize() {
+    this.#connection = await this.open(this.config.cwd, () => {
+      const native = launchAcpChild(this.config, () => this.#cwd.capture());
+      this.#child = native.child;
+      this.#nativeEnv = native.childEnv;
+      native.child.onExit(() => {
+        this.#exited = true;
+      });
+      this.#wire = createAcpWriteApprovalPort(native.writeLine);
+      const knownCredentials = configuredCredentialValues({
+        ...process.env,
+        ...this.config.preparedEnv,
+        ...this.config.env,
+      });
+      this.#requests = createNativeAcpRequests({
+        defaultDecision: this.config.defaultPermissionDecision,
+        defaultHandler: this.config.permissionHandler,
+        knownCredentials,
+        write: native.writeLine,
+        onWriteError: () => {
+          void this.close().catch(() => {});
+        },
+      });
+      if (!native.child.stdout) throw new Error('ACP provider stdout unavailable');
+      const stderr = native.child.stderr;
+      return {
+        child: native.child,
+        stdout: this.#requests.project(native.child.stdout),
+        stderr: stderr
+          ? Readable.from(
+              (async function* () {
+                const lines = createInterface({ input: stderr, crlfDelay: Infinity });
+                try {
+                  for await (const line of lines) yield String(sanitizeRawEvent(line, knownCredentials)) + '\n';
+                } finally {
+                  lines.close();
+                }
+              })(),
+              { objectMode: false },
+            )
+          : undefined,
+        writeApprovedLine: this.#wire.writeApprovedLine,
+        onCapacity: (signal: AcpCapacitySignal) => {
+          this.#recentCapacity = signal;
+          for (const listener of this.#capacityListeners) listener(signal);
+        },
+      };
+    });
+    const revoke = this.#wire?.approve({ method: ACP_METHODS.initialize, params: { protocolVersion: 1 } });
+    try {
+      const result = (await this.#connection.initialize()) as AcpInitializeResult;
+      this.#capabilities = result.agentCapabilities;
+      return result;
+    } finally {
+      revoke?.();
+    }
+  }
+
+  close() {
+    this.#closing ??=
+      this.#connection?.close() ?? this.#child?.shutdown(ACP_CHILD_SHUTDOWN_GRACE_MS, false) ?? Promise.resolve();
+    return this.#closing;
+  }
+
+  async #command(operation: BoundSessionOperation, approval: AcpWriteApproval) {
+    if (!this.#connection || !this.#wire) throw new Error('ACP provider process unavailable');
+    const revoke = this.#wire.approve(approval);
+    try {
+      const result = actionResultSchema.parse(await this.#connection.session(operation));
+      if (!result.ok) throw nativeError(result.failure);
+      return result.result;
+    } finally {
+      revoke();
+    }
+  }
+
+  async #openSession(
+    operation: 'newSession' | 'loadSession' | 'resumeSession',
+    cwd: string,
+    servers: AcpMcpServer[],
+    sessionId?: string,
+  ): Promise<AcpNewSessionResult> {
+    const byReference = new Map(
+      servers.map((server) => [
+        createHmac('sha256', this.#opaqueKey).update(JSON.stringify(server)).digest('hex'),
+        server,
+      ]),
+    );
+    const mcp = [...byReference].map(([ref, server]) => ({
+      ref,
+      transport: 'type' in server ? server.type : ('stdio' as const),
+    }));
+    const request =
+      operation === 'newSession'
+        ? ({ operation, cwd, mcp } as const)
+        : { operation, cwd, mcp, sessionId: sessionId ?? '' };
+    return sessionResultSchema.parse(
+      await this.#command(request, {
+        method:
+          ACP_METHODS[
+            operation === 'newSession' ? 'sessionNew' : operation === 'loadSession' ? 'sessionLoad' : 'sessionResume'
+          ],
+        params: { cwd, ...(sessionId === undefined ? {} : { sessionId }) },
+        mcp: byReference,
+      }),
+    );
+  }
+
+  newSession(cwd = this.config.cwd, servers: AcpMcpServer[] = []) {
+    return this.#openSession('newSession', cwd, servers);
+  }
+  loadSession(sessionId: string, cwd = this.config.cwd, servers: AcpMcpServer[] = []) {
+    return this.#openSession('loadSession', cwd, servers, sessionId);
+  }
+  resumeSession(sessionId: string, cwd = this.config.cwd, servers: AcpMcpServer[] = []) {
+    return this.#openSession('resumeSession', cwd, servers, sessionId);
+  }
+  async closeSession(sessionId: string) {
+    await this.#command(
+      { operation: 'closeSession', sessionId },
+      { method: ACP_METHODS.sessionClose, params: { sessionId } },
+    );
+    this.#requests?.setSessionPermissionHandler(sessionId);
+    this.#requests?.setSessionRequestHandler(sessionId);
+    this.#unconfirmed.delete(sessionId);
+    this.#finalResponses.delete(sessionId);
+  }
+  async setSessionModel(sessionId: string, modelId: string) {
+    await this.#command(
+      { operation: 'setModel', sessionId, modelId },
+      { method: ACP_METHODS.sessionSetModel, params: { sessionId, modelId } },
+    );
+  }
+  async setSessionConfigOption(sessionId: string, configId: string, value: string) {
+    await this.#command(
+      { operation: 'setConfig', sessionId, configId, value },
+      {
+        method: ACP_METHODS.sessionSetConfigOption,
+        params: { sessionId, configId, value },
+      },
+    );
+  }
+  setSessionPermissionHandler(
+    ...args: Parameters<ReturnType<typeof createNativeAcpRequests>['setSessionPermissionHandler']>
+  ) {
+    this.#requests?.setSessionPermissionHandler(...args);
+  }
+  setSessionRequestHandler(
+    ...args: Parameters<ReturnType<typeof createNativeAcpRequests>['setSessionRequestHandler']>
+  ) {
+    this.#requests?.setSessionRequestHandler(...args);
+  }
+  cancelSession(sessionId: string) {
+    this.#requests?.setSessionPermissionHandler(sessionId, (_request, respond) => respond({ cancelled: true }));
+    void this.#command({ operation: 'cancel', sessionId }, { method: ACP_METHODS.sessionCancel, params: { sessionId } })
+      .catch(() => this.close())
+      .catch(() => {});
+  }
+
+  async *promptStream(
+    sessionId: string,
+    input: AcpPromptInput,
+    limits?: { timeoutMs?: number; idleWarningMs?: number; idleStallMs?: number },
+  ): AsyncGenerator<AcpSessionUpdate, AcpStopReason> {
+    if (!this.#connection || !this.#wire) throw new Error('ACP provider process unavailable');
+    const ref = randomUUID();
+    this.#unconfirmed.add(sessionId);
+    this.#finalResponses.delete(sessionId);
+    const revoke = this.#wire.approve({
+      method: ACP_METHODS.sessionPrompt,
+      params: { sessionId },
+      prompt: { ref, content: typeof input === 'string' ? [{ type: 'text', text: input }] : input },
+    });
+    let ended = false;
+    try {
+      const frames = await this.#connection.session({ operation: 'prompt', sessionId, contentRef: ref, limits });
+      if (!frames || typeof frames !== 'object' || !(Symbol.asyncIterator in frames))
+        throw new Error('invalid_acp_provider_stream');
+      for await (const raw of frames as AsyncIterable<unknown>) {
+        const frame = agentAccessAcpTurnFrameSchema.parse(raw);
+        if (frame.kind === 'terminal') {
+          ended = true;
+          if (frame.finalResponse) this.#finalResponses.add(sessionId);
+          if (frame.sessionReusable) this.#unconfirmed.delete(sessionId);
+          if ('failure' in frame.result) throw nativeError(frame.result.failure);
+          return frame.result.stopReason;
+        }
+        if (frame.update.sessionId !== sessionId) throw new Error('invalid_acp_provider_update');
+        yield frame.update as AcpSessionUpdate;
+      }
+      throw new Error('incomplete_acp_provider_stream');
+    } finally {
+      revoke();
+      if (!ended) this.cancelSession(sessionId);
+    }
+  }
+}

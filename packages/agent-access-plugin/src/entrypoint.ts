@@ -46,6 +46,7 @@ export default {
         return {
           actions: {
             acpProcess: acpProcesses.acpProcess,
+            acpSession: acpProcesses.acpSession,
             configure(input: unknown) {
               if (input && typeof input === 'object' && 'operation' in input) {
                 const request = agentAccessNativeLaunchRequestSchema.parse(input);

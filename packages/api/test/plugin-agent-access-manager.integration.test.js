@@ -12,13 +12,13 @@ import { AGENT_ACCESS_OPERATIONS, OFFICIAL_AGENT_ACCESS_OPERATIONS } from '@clow
 import { validateManifest } from '@clowder-ai/plugin-contract';
 import Fastify from 'fastify';
 import { A2AAgentService } from '../dist/domains/cats/services/agents/providers/A2AAgentService.js';
-import { launchAcpChild } from '../dist/domains/cats/services/agents/providers/acp/AcpClient.js';
 import { ClaudeSdkAgentService } from '../dist/domains/cats/services/agents/providers/ClaudeSdkAgentService.js';
 import { sessionImplementationKey } from '../dist/domains/cats/services/agents/session-contract/implementation-registry.js';
 import { MessageStore } from '../dist/domains/cats/services/stores/ports/MessageStore.js';
 import { createAgentAccessA2ARunner } from '../dist/domains/plugin/agent-access/a2a.js';
 import { createAgentAccessAcpModelSelection } from '../dist/domains/plugin/agent-access/acp.js';
 import { createAgentAccessAcpProcess } from '../dist/domains/plugin/agent-access/acp-process.js';
+import { AgentAccessAcpRuntimeClient } from '../dist/domains/plugin/agent-access/acp-runtime-client.js';
 import { createAgentAccessDshConnectionTest } from '../dist/domains/plugin/agent-access/dsh.js';
 import { createAgentAccessKimiLaunchPlanner } from '../dist/domains/plugin/agent-access/kimi.js';
 import {
@@ -383,41 +383,71 @@ test('Agent access discovery executes the same standalone entrypoint from a Mana
   assert.equal(sdkCloses, 1);
   assert.equal(sdkOutput[1].content, 'sdk projected');
 
-  const attachAcp = createAgentAccessAcpProcess(runtime.inventoryStore, runtime.supervisor);
-  let initialized = 0;
-  const acp = await attachAcp(projectRoot, () => {
-    const native = launchAcpChild(
-      {
-        command: process.execPath,
-        cwd: projectRoot,
-        args: [
-          '-e',
-          `
+  const acpCommands = [];
+  const mcpSecret = 'fixture-host-held-mcp-value';
+  const privatePrompt = 'Host-approved fixture prompt';
+  const attachAcp = createAgentAccessAcpProcess(runtime.inventoryStore, {
+    nativeActions: runtime.supervisor.nativeActions,
+    invoke(instanceId, method, input) {
+      if (method === 'acpSession') {
+        acpCommands.push(input.operation);
+        const crossing = JSON.stringify(input);
+        assert.equal(crossing.includes(mcpSecret), false);
+        assert.equal(crossing.includes(privatePrompt), false);
+      }
+      return runtime.supervisor.invoke(instanceId, method, input);
+    },
+  });
+  const acp = new AgentAccessAcpRuntimeClient(
+    {
+      command: process.execPath,
+      cwd: projectRoot,
+      args: [
+        '-e',
+        `
+        let pending;
         require('node:readline').createInterface({ input: process.stdin }).on('line', (line) => {
-          const { id, method } = JSON.parse(line);
-          if (method === 'initialize') console.log(JSON.stringify({
-            jsonrpc: '2.0', id, result: { protocolVersion: 1, agentCapabilities: { loadSession: true } },
-          }));
+          const { id, method, params, result } = JSON.parse(line);
+          const send = (message) => console.log(JSON.stringify({ jsonrpc: '2.0', ...message }));
+          if (method === 'initialize') send({ id, result: { protocolVersion: 1, agentCapabilities: { loadSession: true } } });
+          if (method === 'session/new' || method === 'session/load') {
+            if (params.mcpServers[0].env[0].value !== '${mcpSecret}') process.exit(2);
+            send({ id, result: { sessionId: 'same-acp-native' } });
+          }
+          if (method === 'session/prompt') {
+            if (params.prompt[0].text !== '${privatePrompt}') process.exit(2);
+            pending = { id, sessionId: params.sessionId };
+            send({ id: 0, method: 'session/request_permission', params: { sessionId: params.sessionId } });
+          }
+          if (id === 0 && pending) {
+            if (result?.outcome?.optionId !== 'fixture-approved') process.exit(2);
+            send({ method: 'session/update', params: { sessionId: pending.sessionId, update: {
+              sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'duplex ACP reply' },
+            } } });
+            send({ id: pending.id, result: { stopReason: 'end_turn' } });
+          }
         });
       `,
-        ],
-      },
-      () => {},
-    );
-    return {
-      child: native.child,
-      stdout: native.child.stdout,
-      stderr: native.child.stderr,
-      async writeApprovedLine(line) {
-        assert.equal(JSON.parse(line).method, 'initialize');
-        initialized++;
-        await native.writeLine(line);
-      },
-    };
-  });
+      ],
+    },
+    attachAcp,
+  );
   try {
     assert.deepEqual(await acp.initialize(), { protocolVersion: 1, agentCapabilities: { loadSession: true } });
-    assert.equal(initialized, 1);
+    const mcp = [{ name: 'actual-mcp', command: 'fixture', args: [], env: [{ name: 'TOKEN', value: mcpSecret }] }];
+    const { sessionId } = await acp.newSession(projectRoot, mcp);
+    assert.equal(sessionId, 'same-acp-native');
+    assert.equal((await acp.loadSession(sessionId, projectRoot, mcp)).sessionId, sessionId);
+    acp.setSessionPermissionHandler(sessionId, (request, respond) => {
+      assert.equal(request.id, 0);
+      respond({ optionId: 'fixture-approved' });
+    });
+    const turn = acp.promptStream(sessionId, privatePrompt);
+    assert.deepEqual((await turn.next()).value.update.content, { type: 'text', text: 'duplex ACP reply' });
+    assert.deepEqual(await turn.next(), { done: true, value: 'end_turn' });
+    assert.equal(acp.hasPromptFinalResponse(sessionId), true);
+    assert.equal(acp.isSessionSafeForReuse(sessionId), true);
+    assert.deepEqual(acpCommands, ['newSession', 'loadSession', 'prompt']);
   } finally {
     await acp.close();
   }

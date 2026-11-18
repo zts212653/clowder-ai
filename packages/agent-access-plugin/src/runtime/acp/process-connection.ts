@@ -1,7 +1,23 @@
 import { PassThrough, Readable } from 'node:stream';
-import type { AgentAccessAcpProcessCommand, AgentAccessAcpProcessTermination } from '@clowder-ai/agent-contract/acp';
+import {
+  type AcpMcpServer,
+  type AgentAccessAcpProcessCommand,
+  type AgentAccessAcpProcessTermination,
+  type AgentAccessAcpSessionFailure,
+  type AgentAccessAcpSessionOperation,
+  type AgentAccessAcpTurnFrame,
+  agentAccessAcpSessionOperationSchema,
+} from '@clowder-ai/agent-contract/acp';
 import { z } from 'zod';
-import { type AcpChildConnection, AcpClient } from './AcpClient.js';
+import {
+  type AcpChildConnection,
+  AcpClient,
+  AcpProtocolError,
+  AcpSessionCancelledError,
+  AcpStreamIdleError,
+  AcpTimeoutError,
+} from './AcpClient.js';
+import { AcpSessionBindingError } from './active-session-cache.js';
 
 /** Join a Host-started process to the plugin ACP driver without retaining callable authority. */
 export function attachAcpProcessConnection(input: {
@@ -87,6 +103,57 @@ const processRequest = z.discriminatedUnion('operation', [
   z.object({ operation: z.literal('close'), processId }),
 ]);
 
+function describeFailure(error: unknown): AgentAccessAcpSessionFailure {
+  if (error instanceof AcpSessionBindingError) return { kind: 'binding', message: error.message };
+  if (error instanceof AcpProtocolError)
+    return {
+      kind: 'protocol',
+      code: error.code,
+      message: error.message.slice(`ACP error ${error.code}: `.length),
+      data: error.data,
+    };
+  if (error instanceof AcpTimeoutError) return { kind: 'timeout', method: error.method, timeoutMs: error.timeoutMs };
+  if (error instanceof AcpStreamIdleError)
+    return {
+      kind: 'idle',
+      sessionId: error.sessionId,
+      idleSinceMs: error.idleSinceMs,
+      eventCount: error.eventCount,
+      configuredIdleStallMs: error.configuredIdleStallMs,
+    };
+  if (error instanceof AcpSessionCancelledError) return { kind: 'cancelled', sessionId: error.sessionId };
+  return { kind: 'other', message: error instanceof Error ? error.message : String(error) };
+}
+
+async function* promptAcpProcess(
+  client: AcpClient,
+  request: Extract<AgentAccessAcpSessionOperation, { operation: 'prompt' }>,
+): AsyncGenerator<AgentAccessAcpTurnFrame> {
+  const { sessionId, contentRef, limits } = request;
+  const turn = client.promptStream(sessionId, contentRef, limits);
+  let result: Extract<AgentAccessAcpTurnFrame, { kind: 'terminal' }>['result'];
+  try {
+    for (let next = await turn.next(); ; next = await turn.next()) {
+      if (next.done) {
+        result = { stopReason: next.value };
+        break;
+      }
+      yield { kind: 'update', update: next.value };
+    }
+  } catch (error) {
+    result = { failure: describeFailure(error) };
+  } finally {
+    await turn.return('cancelled');
+  }
+  yield {
+    kind: 'terminal',
+    finalResponse: client.hasPromptFinalResponse(sessionId),
+    sessionReusable: client.isSessionSafeForReuse(sessionId),
+    processReusable: client.isSafeForSingleFlightReuse,
+    result,
+  };
+}
+
 /** One protocol driver per process admitted by this activation's Host. */
 export function createAcpProcessActions() {
   const drivers = new Map<
@@ -116,6 +183,9 @@ export function createAcpProcessActions() {
               },
             },
           );
+          client.onCapacity((signal) => {
+            if (!commands.destroyed) commands.write({ kind: 'capacity', ...signal });
+          });
           drivers.set(request.processId, { client, commands });
           commands.once('close', () => drivers.delete(request.processId));
           return { commands };
@@ -126,6 +196,48 @@ export function createAcpProcessActions() {
           return current.initialization;
         case 'close':
           return current?.client.close();
+      }
+    },
+    async acpSession(input: unknown) {
+      const request = agentAccessAcpSessionOperationSchema.parse(input);
+      const current = drivers.get(request.processId);
+      if (!current?.initialization) throw new Error('ACP process is unavailable in this activation');
+      await current.initialization;
+      const client = current.client;
+      if (request.operation === 'prompt') return promptAcpProcess(client, request);
+      try {
+        switch (request.operation) {
+          case 'newSession':
+          case 'loadSession':
+          case 'resumeSession': {
+            const mcp = request.mcp.map(
+              ({ ref, transport }): AcpMcpServer =>
+                transport === 'stdio'
+                  ? { name: ref, command: 'host-stdio-reference', args: [], env: [] }
+                  : { type: transport, name: ref, url: 'http://host-mcp-reference.invalid', headers: [] },
+            );
+            const result =
+              request.operation === 'newSession'
+                ? await client.newSession(request.cwd, mcp)
+                : await client[request.operation](request.sessionId, request.cwd, mcp);
+            return { ok: true, result };
+          }
+          case 'closeSession':
+            await client.closeSession(request.sessionId);
+            break;
+          case 'setModel':
+            await client.setSessionModel(request.sessionId, request.modelId);
+            break;
+          case 'setConfig':
+            await client.setSessionConfigOption(request.sessionId, request.configId, request.value);
+            break;
+          case 'cancel':
+            client.cancelSession(request.sessionId);
+            break;
+        }
+        return { ok: true };
+      } catch (error) {
+        return { ok: false, failure: describeFailure(error) };
       }
     },
     stop() {
