@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
-import { createAgentAccessOpenCodeLaunchPlanner } from '../dist/domains/plugin/agent-access/opencode.js';
+import {
+  createAgentAccessOpenCodeFinalizerPlanner,
+  createAgentAccessOpenCodeLaunchPlanner,
+} from '../dist/domains/plugin/agent-access/opencode.js';
 
 /**
  * The Host no longer builds OpenCode argv itself: the active package planes it, and
@@ -93,5 +96,80 @@ describe('OpenCode launch planner over the public protocol', () => {
       () => plan({ prompt: 'p', readOnlyAgent: 'a' }),
       'a malformed package answer must not reach the CLI',
     );
+  });
+});
+
+/**
+ * Old-generation packages were installed before `planFinalizer` existed. They pass
+ * admission (the declaration was complete for their era) and report healthy, so the
+ * only way to know is to ask the package what it exposes. Planning a finalizer
+ * against one must say so — never invoke an action that is not there, and never let
+ * the Host quietly build its own argv instead.
+ */
+describe('OpenCode finalizer planner against an older package', () => {
+  const finalizerInput = { prompt: 'p', model: 'm', finalizerAgent: 'a' };
+
+  function finalizerHarness(options = {}) {
+    const readCurrentAuthority = async () => ('authority' in options ? options.authority : authority());
+    const exposesAction = async () => options.exposes ?? true;
+    const invoke = async (_instanceId, _operation, payload) => {
+      options.onInvoke?.(payload);
+      return options.invokeResult ?? { args: ['run', '--pure', '--agent', 'a', '--', 'p'], managedArgvFlags: [] };
+    };
+    return createAgentAccessOpenCodeFinalizerPlanner({ readCurrentAuthority }, { invoke, exposesAction });
+  }
+
+  test('asks the package whether it exposes the finalizer action', async () => {
+    let asked;
+    const readCurrentAuthority = async () => authority();
+    const plan = createAgentAccessOpenCodeFinalizerPlanner(
+      { readCurrentAuthority },
+      {
+        invoke: async () => ({ args: [], managedArgvFlags: [] }),
+        exposesAction: async (_instanceId, method) => {
+          asked = method;
+          return true;
+        },
+      },
+    );
+
+    await plan(finalizerInput);
+
+    assert.equal(asked, 'planFinalizer', 'the decision must come from the package, not an assumption');
+  });
+
+  test('refuses to plan against a package that does not expose the finalizer action', async () => {
+    let invoked = false;
+    const plan = finalizerHarness({
+      exposes: false,
+      onInvoke: () => {
+        invoked = true;
+      },
+    });
+
+    await assert.rejects(
+      () => plan(finalizerInput),
+      /session_implementation_unavailable/,
+      'an older package must be reported as unavailable, not invoked blind',
+    );
+    assert.equal(invoked, false, 'no invocation may be attempted for an action the package lacks');
+  });
+
+  test('still plans normally when the package does expose the action', async () => {
+    const plan = finalizerHarness({ exposes: true });
+
+    const result = await plan(finalizerInput);
+
+    assert.deepEqual(result.args.slice(0, 3), ['run', '--pure', '--agent']);
+  });
+
+  test('a router without exposesAction is treated as not exposing it', async () => {
+    const readCurrentAuthority = async () => authority();
+    const plan = createAgentAccessOpenCodeFinalizerPlanner(
+      { readCurrentAuthority },
+      { invoke: async () => ({ args: [], managedArgvFlags: [] }) },
+    );
+
+    await assert.rejects(() => plan(finalizerInput), /session_implementation_unavailable/);
   });
 });

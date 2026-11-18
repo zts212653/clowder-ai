@@ -46,6 +46,7 @@ export const OFFICIAL_AGENT_ACCESS_OPERATIONS = [
   'projectClaudeOutput',
   'selectAcpModel',
   'testDshConnection',
+  'planFinalizer',
 ] as const;
 
 // Managed OAuth may use this login command in a Host-owned attempt directory.

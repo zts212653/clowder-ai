@@ -6,23 +6,55 @@ import {
 } from '../src/runtime/opencode-launch-arguments.ts';
 
 /**
- * The Host's `buildArgs` / `buildNoToolFinalizerArgs` are private methods, so they
- * cannot be called directly for comparison. Their documented contract is instead
- * restated here as input/output pairs taken from the Host source, and the package
- * must reproduce each one exactly. Any drift in the move shows up as a failure
- * here rather than as a different argv reaching a real CLI.
+ * Where this package agrees with the Host's `buildArgs` / `buildNoToolFinalizerArgs`,
+ * and the one place it deliberately does not.
+ *
+ * Those Host methods are private, so their contract is restated here as input/output
+ * pairs. Everything below must match the Host exactly — except `--pure`, which the
+ * Host injected unconditionally and which this package only sends when the Host's
+ * `run --help` probe found it. That single difference is intentional and pinned by
+ * `opencode-pure-probe.test.ts`; if any *other* difference appears here, the move
+ * changed behaviour and this test is what says so.
  */
 const READ_ONLY_AGENT = 'cat-cafe-read-only';
 const FINALIZER_AGENT = 'cat-cafe-no-tool-finalizer';
 
-describe('OpenCode argv parity with the Host contract', () => {
-  test('plain run', () => {
+describe('OpenCode argv against the Host contract (same, except --pure)', () => {
+  test('plain run is unchanged', () => {
     const { args } = buildOpenCodeLaunchArguments({ prompt: 'p', readOnlyAgent: READ_ONLY_AGENT });
 
     assert.deepEqual(args, ['run', '--format', 'json', '--', 'p']);
   });
 
-  test('read-only run puts the agent pair before session/model', () => {
+  test('read-only run keeps the Host order when the probe supports --pure', () => {
+    const { args } = buildOpenCodeLaunchArguments({
+      prompt: 'p',
+      readOnly: true,
+      readOnlyAgent: READ_ONLY_AGENT,
+      sessionId: 's',
+      model: 'm',
+      approvalFlag: '--auto',
+      pureSupported: true,
+    });
+
+    assert.deepEqual(args, [
+      'run',
+      '--pure',
+      '--agent',
+      READ_ONLY_AGENT,
+      '--session',
+      's',
+      '-m',
+      'm',
+      '--format',
+      'json',
+      '--auto',
+      '--',
+      'p',
+    ]);
+  });
+
+  test('read-only run differs from the Host only by the absent --pure', () => {
     const { args } = buildOpenCodeLaunchArguments({
       prompt: 'p',
       readOnly: true,
@@ -34,7 +66,6 @@ describe('OpenCode argv parity with the Host contract', () => {
 
     assert.deepEqual(args, [
       'run',
-      '--pure',
       '--agent',
       READ_ONLY_AGENT,
       '--session',
@@ -71,13 +102,14 @@ describe('OpenCode argv parity with the Host contract', () => {
     assert.ok(args.includes('--yolo'));
   });
 
-  test('finalizer argv matches the Host shape exactly', () => {
+  test('finalizer argv matches the Host shape when --pure is supported', () => {
     const withSession = buildOpenCodeNoToolFinalizerArguments({
       prompt: 'q',
       model: 'm',
       finalizerAgent: FINALIZER_AGENT,
       sessionId: 's',
       transportArgs: ['--standalone'],
+      pureSupported: true,
     });
 
     assert.deepEqual(withSession.args, [
@@ -96,12 +128,40 @@ describe('OpenCode argv parity with the Host contract', () => {
       'q',
     ]);
 
-    const bare = buildOpenCodeNoToolFinalizerArguments({ prompt: 'q', model: 'm', finalizerAgent: FINALIZER_AGENT });
+    const bare = buildOpenCodeNoToolFinalizerArguments({
+      prompt: 'q',
+      model: 'm',
+      finalizerAgent: FINALIZER_AGENT,
+      pureSupported: true,
+    });
     assert.deepEqual(bare.args, [
       'run',
       '--pure',
       '--agent',
       FINALIZER_AGENT,
+      '-m',
+      'm',
+      '--format',
+      'json',
+      '--',
+      'q',
+    ]);
+  });
+
+  test('finalizer differs from the Host only by the absent --pure', () => {
+    const { args } = buildOpenCodeNoToolFinalizerArguments({
+      prompt: 'q',
+      model: 'm',
+      finalizerAgent: FINALIZER_AGENT,
+      sessionId: 's',
+    });
+
+    assert.deepEqual(args, [
+      'run',
+      '--agent',
+      FINALIZER_AGENT,
+      '--session',
+      's',
       '-m',
       'm',
       '--format',

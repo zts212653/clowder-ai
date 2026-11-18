@@ -10,15 +10,14 @@ import { buildOpenCodeNoToolFinalizerArguments } from '../src/runtime/opencode-l
  * without text.
  */
 describe('OpenCode no-tool finalizer arguments', () => {
-  test('pins the pure agent pair and the json format', () => {
+  test('pins the agent and the json format, with --pure only when supported', () => {
     const { args } = buildOpenCodeNoToolFinalizerArguments({
       prompt: 'summarise',
       model: 'maas/glm-5',
       finalizerAgent: 'cat-cafe-no-tool-finalizer',
     });
 
-    assert.deepEqual(args.slice(0, 3), ['run', '--pure', '--agent']);
-    assert.equal(args[args.indexOf('--agent') + 1], 'cat-cafe-no-tool-finalizer');
+    assert.deepEqual(args.slice(0, 3), ['run', '--agent', 'cat-cafe-no-tool-finalizer']);
     assert.equal(args[args.indexOf('--format') + 1], 'json');
   });
 
@@ -39,12 +38,13 @@ describe('OpenCode no-tool finalizer arguments', () => {
     assert.ok(!args.includes('--session'), 'an absent session must not become an empty --session');
   });
 
-  test('keeps transport args right after run, ahead of the pure agent pair', () => {
+  test('keeps transport args right after run, ahead of the agent selection', () => {
     const { args } = buildOpenCodeNoToolFinalizerArguments({
       prompt: 'p',
       model: 'm',
       finalizerAgent: 'a',
       transportArgs: ['--standalone'],
+      pureSupported: true,
     });
 
     assert.deepEqual(args.slice(0, 4), ['run', '--standalone', '--pure', '--agent']);
@@ -65,9 +65,13 @@ describe('OpenCode no-tool finalizer arguments', () => {
       prompt: 'p',
       model: 'm',
       finalizerAgent: 'a',
+      pureSupported: true,
     });
 
     assert.ok(managedArgvFlags.includes('--pure'));
     assert.ok(managedArgvFlags.includes('--agent'));
+
+    const withoutPure = buildOpenCodeNoToolFinalizerArguments({ prompt: 'p', model: 'm', finalizerAgent: 'a' });
+    assert.ok(!withoutPure.managedArgvFlags.includes('--pure'), 'unsent flags must not be reported');
   });
 });

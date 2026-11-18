@@ -1,0 +1,129 @@
+import assert from 'node:assert/strict';
+import { describe, mock, test } from 'node:test';
+import { Readable } from 'node:stream';
+import { EventEmitter } from 'node:events';
+import { OpenCodeAgentService } from '../src/domains/cats/services/agents/providers/OpenCodeAgentService.js';
+
+/**
+ * When the package cannot plan the recovery run, the turn must still end the way it
+ * did before the cutover: with the post-tool fallback text, not an error.
+ *
+ * The planner is reached from inside the finalizer path, which already has a graceful
+ * boundary-failure exit. Letting a planning refusal escape as an exception would turn
+ * "this package is a bit old" into "your answer is lost", which is worse than the
+ * baseline and would only show up on CLI builds that reach the finalizer at all.
+ */
+function toolOnlyProcess() {
+  const stdout = new PassThroughLike();
+  const stderr = new PassThroughLike();
+  const emitter = new EventEmitter();
+  const originalEmit = emitter.emit.bind(emitter);
+  emitter.emit = (event, ...args) => {
+    const emitted = originalEmit(event, ...args);
+    if (event === 'exit') process.nextTick(() => originalEmit('close', ...args));
+    return emitted;
+  };
+  process.nextTick(() => {
+    // The finalizer is only reached when text arrived FIRST and a tool call followed
+    // it — `textEventCount > 0 && lastToolEventIndex > lastTextEventIndex`. Without
+    // the leading text this fixture would never touch the finalizer at all, and a
+    // "no error" assertion would pass while testing nothing.
+    stdout.write(
+      JSON.stringify({ type: 'step_start', sessionID: 'ses_tool_only', timestamp: 1 }) + '\n',
+    );
+    stdout.write(
+      JSON.stringify({
+        type: 'text',
+        sessionID: 'ses_tool_only',
+        part: { type: 'text', text: 'let me look' },
+        timestamp: 2,
+      }) + '\n',
+    );
+    stdout.write(
+      JSON.stringify({
+        type: 'tool_use',
+        sessionID: 'ses_tool_only',
+        part: { tool: 'bash', state: { status: 'completed', input: { cmd: 'ls' }, output: 'a\n' } },
+        timestamp: 3,
+      }) + '\n',
+    );
+    stdout.write(
+      JSON.stringify({ type: 'step_finish', sessionID: 'ses_tool_only', part: { reason: 'tool-calls' }, timestamp: 4 }) + '\n',
+    );
+    stdout.end();
+    process.nextTick(() => emitter.emit('exit', 0, null));
+  });
+  return {
+    stdout,
+    stderr,
+    pid: 111,
+    kill: mock.fn(() => {
+      process.nextTick(() => {
+        if (!stdout.destroyed) stdout.end();
+        emitter.emit('exit', 0, null);
+      });
+    }),
+    on: emitter.on.bind(emitter),
+    once: emitter.once.bind(emitter),
+    off: emitter.off.bind(emitter),
+    removeListener: emitter.removeListener.bind(emitter),
+  };
+}
+
+/** Minimal PassThrough stand-in: the service only writes to it in this scenario. */
+class PassThroughLike extends Readable {
+  constructor() {
+    super({ read() {} });
+    this.chunks = [];
+  }
+  write(chunk) {
+    this.push(chunk);
+    return true;
+  }
+  end() {
+    this.push(null);
+  }
+}
+
+async function collect(iterable) {
+  const out = [];
+  for await (const message of iterable) out.push(message);
+  return out;
+}
+
+describe('finalizer planning refusal degrades gracefully', () => {
+  test('an unavailable package still produces fallback text, not an error', async () => {
+    const proc = toolOnlyProcess();
+    const spawnFn = mock.fn(() => proc);
+    const planLaunch = async () => ({
+      args: ['run', '--format', 'json', '--', 'p'],
+      managedArgvFlags: [],
+      assertCurrent: async () => {},
+    });
+    let planned = 0;
+    const planFinalizer = async () => {
+      planned++;
+      throw new Error('session_implementation_unavailable');
+    };
+
+    const service = new OpenCodeAgentService({
+      catId: 'opencode',
+      spawnFn,
+      model: 'm',
+      planLaunch,
+      planFinalizer,
+    });
+
+    const messages = await collect(service.invoke('p'));
+
+    assert.equal(planned, 1, 'the fixture must actually reach the finalizer, or this test proves nothing');
+    assert.ok(
+      !messages.some((message) => message.type === 'error'),
+      'a planning refusal must not surface as a turn error',
+    );
+    assert.ok(
+      messages.some((message) => message.type === 'done'),
+      'the turn must still terminate cleanly',
+    );
+  });
+});

@@ -35,7 +35,13 @@ describe('OpenCode launch arguments', () => {
     const writable = buildOpenCodeLaunchArguments({ prompt: 'p', readOnlyAgent });
     const readOnly = buildOpenCodeLaunchArguments({ prompt: 'p', readOnly: true, readOnlyAgent });
 
-    assert.ok(!writable.args.includes('--pure'), 'a writable run must not force --pure');
+    assert.ok(!writable.args.includes('--agent'), 'a writable run must not select the read-only agent');
+    assert.deepEqual(readOnly.args.slice(0, 3), ['run', '--agent', readOnlyAgent]);
+  });
+
+  test('adds --pure ahead of the agent pair when the probe supports it', () => {
+    const readOnly = buildOpenCodeLaunchArguments({ prompt: 'p', readOnly: true, readOnlyAgent, pureSupported: true });
+
     assert.deepEqual(readOnly.args.slice(0, 4), ['run', '--pure', '--agent', readOnlyAgent]);
   });
 
@@ -92,6 +98,7 @@ describe('OpenCode launch arguments', () => {
       prompt: 'p',
       readOnly: true,
       readOnlyAgent,
+      pureSupported: true,
     });
 
     assert.ok(managedArgvFlags.includes('--pure'), 'a host-managed flag must be declared for diagnostics');

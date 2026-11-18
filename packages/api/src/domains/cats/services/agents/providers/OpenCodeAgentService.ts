@@ -108,6 +108,8 @@ interface OpenCodeLaunchPlanInput {
   approvalFlag?: string;
   /** Transport args the Host resolved from user config and the probe. */
   transportArgs?: readonly string[];
+  /** Whether this CLI advertises `--pure`; unset when no probe answered. */
+  pureSupported?: boolean;
   /** Host-owned agent name for a read-only run. */
   readOnlyAgent: string;
 }
@@ -125,6 +127,7 @@ type OpenCodeFinalizerPlanner = (input: {
   finalizerAgent: string;
   sessionId?: string;
   transportArgs?: readonly string[];
+  pureSupported?: boolean;
 }) => Promise<{ args: string[]; managedArgvFlags: string[] }>;
 
 interface OpenCodeAgentServiceOptions {
@@ -204,6 +207,12 @@ interface OpenCodePostToolFinalizerParams {
   options?: AgentServiceOptions;
   /** Package event reader from the launch plan, so both runs read output the same way. */
   normalizeEvent?: (event: unknown) => Promise<unknown>;
+  /**
+   * `--pure` capability from the launch probe. The finalizer resolves transport args
+   * separately, but this one comes from the same help result, so it is passed rather
+   * than probed twice.
+   */
+  pureSupported?: boolean;
 }
 
 function getOpenCodeStepFinishReason(event: unknown): string | undefined {
@@ -428,6 +437,7 @@ export class OpenCodeAgentService implements L0InjectableAgentService {
           ...(readOnly ? {} : options?.cliConfigArgs ? { cliConfigArgs: options.cliConfigArgs } : {}),
           ...(runDefaults.approvalFlag ? { approvalFlag: runDefaults.approvalFlag } : {}),
           ...(runDefaults.transportArgs.length > 0 ? { transportArgs: runDefaults.transportArgs } : {}),
+          ...(runDefaults.pure !== undefined ? { pureSupported: runDefaults.pure } : {}),
           readOnlyAgent: OPENCODE_READ_ONLY_AGENT,
         });
         args = plan.args;
@@ -443,6 +453,7 @@ export class OpenCodeAgentService implements L0InjectableAgentService {
           runDefaults.approvalFlag,
           readOnly,
           runDefaults.transportArgs,
+          runDefaults.pure === true,
         );
       }
 
@@ -779,6 +790,7 @@ export class OpenCodeAgentService implements L0InjectableAgentService {
           trace: lastToolTrace,
           textMode: 'replace',
           transportArgs: runDefaults.transportArgs,
+          ...(runDefaults.pure !== undefined ? { pureSupported: runDefaults.pure } : {}),
           ...(plannedNormalizeEvent ? { normalizeEvent: plannedNormalizeEvent } : {}),
           options,
         })) {
@@ -885,23 +897,49 @@ export class OpenCodeAgentService implements L0InjectableAgentService {
       params.transportArgs ??
       (await this.resolveRunDefaults(params.command, params.cwd, params.childEnv, params.options?.cliConfigArgs, true))
         .transportArgs;
-    const finalizerArgs = this.planFinalizer
-      ? (
+    let plannedFinalizerArgs: string[] | undefined;
+    if (this.planFinalizer) {
+      try {
+        plannedFinalizerArgs = (
           await this.planFinalizer({
             prompt: finalizerPrompt,
             model: params.effectiveModel,
             finalizerAgent,
             ...(params.sessionId ? { sessionId: params.sessionId } : {}),
             ...(transportArgs.length > 0 ? { transportArgs } : {}),
+            ...(params.pureSupported !== undefined ? { pureSupported: params.pureSupported } : {}),
           })
-        ).args
-      : this.buildNoToolFinalizerArgs(
-          finalizerPrompt,
-          params.sessionId,
-          params.effectiveModel,
-          finalizerAgent,
-          transportArgs,
+        ).args;
+      } catch (err) {
+        // The package could not plan the recovery run (for example an older package
+        // that predates the operation). The turn still has the post-tool fallback
+        // text to end on, so degrade there instead of failing an otherwise complete
+        // turn — the same exit a boundary failure takes just above.
+        log.warn(
+          { catId: this.catId, invocationId: params.options?.invocationId, err },
+          'OpenCode no-tool finalizer could not be planned; using fallback text',
         );
+        yield {
+          type: 'text',
+          catId: this.catId,
+          content: buildOpenCodePostToolFallbackText(params.trace, 'finalizer_unavailable'),
+          textMode: params.textMode,
+          metadata: params.metadata,
+          timestamp: Date.now(),
+        };
+        return;
+      }
+    }
+    const finalizerArgs =
+      plannedFinalizerArgs ??
+      this.buildNoToolFinalizerArgs(
+        finalizerPrompt,
+        params.sessionId,
+        params.effectiveModel,
+        finalizerAgent,
+        transportArgs,
+        params.pureSupported === true,
+      );
     const finalizerEnv = this.buildNoToolFinalizerEnv(params.childEnv, finalizerAgent);
     const cliOpts = {
       command: params.command,
@@ -1090,8 +1128,11 @@ export class OpenCodeAgentService implements L0InjectableAgentService {
     model: string,
     finalizerAgent = OPENCODE_NO_TOOL_FINALIZER_AGENT,
     transportArgs: readonly string[] = [],
+    pureSupported = false,
   ): string[] {
-    const args = ['run', ...transportArgs, '--pure', '--agent', finalizerAgent];
+    const args = ['run', ...transportArgs];
+    if (pureSupported) args.push('--pure');
+    args.push('--agent', finalizerAgent);
     if (sessionId) args.push('--session', sessionId);
     if (model) args.push('-m', model);
     args.push('--format', 'json', '--', prompt);
@@ -1124,10 +1165,14 @@ export class OpenCodeAgentService implements L0InjectableAgentService {
     defaultAutoApproveFlag?: string,
     readOnly = false,
     transportArgs: readonly string[] = [],
+    pureSupported = false,
   ): string[] {
     const args = ['run', ...transportArgs];
 
-    if (readOnly) args.push('--pure', '--agent', OPENCODE_READ_ONLY_AGENT);
+    if (readOnly) {
+      if (pureSupported) args.push('--pure');
+      args.push('--agent', OPENCODE_READ_ONLY_AGENT);
+    }
 
     // Session resume
     if (sessionId) {
@@ -1178,12 +1223,15 @@ export class OpenCodeAgentService implements L0InjectableAgentService {
     env?: Record<string, string | null>,
     cliConfigArgs?: readonly string[],
     readOnly = false,
-  ): Promise<{ approvalFlag: string | undefined; transportArgs: string[] }> {
+  ): Promise<{ approvalFlag: string | undefined; transportArgs: string[]; pure: boolean | undefined }> {
     const userParts = parseOpenCodeCliConfigArgs(cliConfigArgs);
     const userFlags = new Set(userParts.map(getCliFlagName).filter((flag): flag is string => flag !== null));
     const transportArgs = getOpenCodeTransportArgs(cliConfigArgs);
     const needsApproval = !readOnly && !userControlsOpenCodeAutoApprove(userFlags);
-    if (!needsApproval && transportArgs.length > 0) return { approvalFlag: undefined, transportArgs };
+    // No probe in this path, so `--pure` support is unknown. Unknown is not support:
+    // the caller leaves it out rather than sending a flag this CLI may reject.
+    if (!needsApproval && transportArgs.length > 0)
+      return { approvalFlag: undefined, transportArgs, pure: undefined };
 
     // One help result supplies both capabilities. A transient failure is retried
     // by the next invocation, never by a second probe in this invocation.
@@ -1197,6 +1245,7 @@ export class OpenCodeAgentService implements L0InjectableAgentService {
     return {
       approvalFlag: needsApproval ? result.approvalFlag : undefined,
       transportArgs: transportArgs.length > 0 ? transportArgs : result.standalone ? [OPENCODE_STANDALONE_FLAG] : [],
+      pure: result.pure,
     };
   }
 

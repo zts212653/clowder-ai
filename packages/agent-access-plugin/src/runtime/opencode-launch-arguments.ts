@@ -52,6 +52,13 @@ export interface OpenCodeLaunchPlanInput {
   transportArgs?: readonly string[];
   /** Agent name for the read-only run; the Host owns this constant. */
   readOnlyAgent: string;
+  /**
+   * Whether this installed CLI advertises `--pure`. Older/newer builds differ: v2.0.28
+   * does not list it and answers with help when it is passed, so this must come from
+   * the Host's probe and default to absent. The no-tool guarantee does not rest on
+   * this flag — it comes from the config channels the Host injects.
+   */
+  pureSupported?: boolean;
 }
 
 export function buildOpenCodeLaunchArguments(input: OpenCodeLaunchPlanInput) {
@@ -59,8 +66,11 @@ export function buildOpenCodeLaunchArguments(input: OpenCodeLaunchPlanInput) {
   const managedArgvFlags: string[] = [];
 
   if (input.readOnly) {
-    args.push('--pure', '--agent', input.readOnlyAgent);
-    managedArgvFlags.push('--pure');
+    if (input.pureSupported) {
+      args.push('--pure');
+      managedArgvFlags.push('--pure');
+    }
+    args.push('--agent', input.readOnlyAgent);
   }
 
   if (input.sessionId) args.push('--session', input.sessionId);
@@ -102,6 +112,8 @@ export interface OpenCodeNoToolFinalizerPlanInput {
   finalizerAgent: string;
   sessionId?: string;
   transportArgs?: readonly string[];
+  /** See `OpenCodeLaunchPlanInput.pureSupported` — same probe, same default. */
+  pureSupported?: boolean;
 }
 
 /**
@@ -110,10 +122,16 @@ export interface OpenCodeNoToolFinalizerPlanInput {
  * the Host's own continuation, so nothing here comes from the member editor.
  */
 export function buildOpenCodeNoToolFinalizerArguments(input: OpenCodeNoToolFinalizerPlanInput) {
-  const args: string[] = ['run', ...(input.transportArgs ?? []), '--pure', '--agent', input.finalizerAgent];
+  const args: string[] = ['run', ...(input.transportArgs ?? [])];
+  const managedArgvFlags: string[] = ['--agent'];
+  if (input.pureSupported) {
+    args.push('--pure');
+    managedArgvFlags.push('--pure');
+  }
+  args.push('--agent', input.finalizerAgent);
   if (input.sessionId) args.push('--session', input.sessionId);
   if (input.model) args.push('-m', input.model);
   args.push('--format', 'json', '--', input.prompt);
 
-  return { args, managedArgvFlags: ['--pure', '--agent'] };
+  return { args, managedArgvFlags };
 }

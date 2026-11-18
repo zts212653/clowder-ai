@@ -62,12 +62,18 @@ export function createAgentAccessOpenCodeLaunchPlanner(
 /** The tool-free recovery run: Host-owned continuation, planned by the same package. */
 export function createAgentAccessOpenCodeFinalizerPlanner(
   inventory: Pick<PluginInventoryStore, 'readCurrentAuthority'>,
-  runtime: Pick<PluginRuntimeCarrierRouter, 'invoke'>,
+  runtime: Pick<PluginRuntimeCarrierRouter, 'invoke'> & Partial<Pick<PluginRuntimeCarrierRouter, 'exposesAction'>>,
 ) {
   return async (launch: AgentAccessOpenCodeFinalizer) => {
     const instance = (await inventory.readCurrentAuthority(AGENT_ACCESS_PLUGIN_ID))?.instance;
     if (!instance || instance.activationState !== 'enabled' || instance.runtimeState !== 'healthy')
       throw new Error('session_implementation_unavailable');
+
+    // A package installed before this operation existed still reports healthy, so the
+    // declaration cannot answer this — the package itself must. Invoking blind would
+    // turn a recoverable "old package" into a failed rescue at the worst moment.
+    const exposes = await runtime.exposesAction?.(instance.pluginInstanceId, 'planFinalizer');
+    if (!exposes) throw new Error('session_implementation_unavailable');
 
     const result = await runtime.invoke(instance.pluginInstanceId, 'planFinalizer', {
       operation: 'plan_native_finalizer',
