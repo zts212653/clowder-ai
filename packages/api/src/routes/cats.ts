@@ -1,7 +1,9 @@
 import type { RedisClient } from '@cat-cafe/shared/utils';
+import { projectRoleCard } from '@clowder-ai/agent-access/roles/role-card';
 import { auditL0Budget } from '../domains/cats/services/context/l0-budget-audit.js';
 import type { MemberCanonService } from '../domains/collaborative-content/asset-canon/member-service.js';
 import { withTargetAliasMutation } from '../domains/plugin/manager/addressing/target-alias-mutation.js';
+import type { AgentRoleWrite } from './agent-access-routes.js';
 import { registerDshSetupRoutes } from './dsh-setup-route.js';
 import { registerMemberCanonResponse } from './member-canon-response.js';
 import { registerDshMemberConnectionChecks } from './member-connection-check.js';
@@ -82,7 +84,6 @@ import { getConfiguredMemberWindowSetting, resolveContextCapacity } from '../con
 import { readLocalAccountSelection } from '../config/local-account-selection.js';
 import {
   assertMemberConfigurationRevision,
-  MemberConfigurationConflict,
   MemberConfigurationRevisionRequired,
   memberConfigurationRevision,
   updateMemberWithRevision,
@@ -95,6 +96,7 @@ import { getResolvedCats } from '../config/resolved-cats.js';
 import {
   createRuntimeCat,
   deleteRuntimeCat,
+  type RuntimeCatUpdate,
   readRuntimeAccountMembers,
   readRuntimeCatCatalog,
   withRuntimeCatMutationLock,
@@ -802,33 +804,15 @@ async function toCatResponse(
       );
       const identityProfile = loadDossierProfiles(findMonorepoRoot()).get(cat.id);
       return {
-        id: cat.id,
-        name: cat.name,
-        displayName: cat.displayName,
-        nickname: cat.nickname,
-        // Preserve the identity asset selected by onboarding/manual editing.
-        // Omitting this field makes every refreshed native member fall back to
-        // the gray default avatar even though the catalog contains the asset.
+        ...projectRoleCard(cat, metadata.roster, memberConfigurationRevision(projectRoot, cat.id)),
         avatar: resolveNativeAvatar(cat.clientId, cat.avatar, acpConfig),
-        ...(cat.banner ? { banner: cat.banner } : {}),
-        color: cat.color,
-        mentionPatterns: cat.mentionPatterns,
-        breedId: cat.breedId,
-        relationshipKey: cat.relationshipKey,
         accountRef: effectiveAccountRef,
-        accountBindingMode: cat.accountBindingMode,
-        configurationSource: cat.configurationSource,
         // Only the non-secret Desktop HOME binding is needed by the member draft.
         ...(cat.env?.DSH_HOME ? { env: { DSH_HOME: cat.env.DSH_HOME } } : {}),
-        agentProvider: cat.agentProvider,
-        configurationRevision: memberConfigurationRevision(projectRoot, cat.id),
-        clientId: cat.clientId,
-        defaultModel: cat.defaultModel,
         isDefaultResponder: cat.id === getDefaultCatId(),
         messageDeliveryCapabilities: {
           guideReply: supportsActiveInvocationGuidance(carrierCapability),
         },
-        carrier: cat.carrier,
         cli: cat.cli,
         contextWindow: getConfiguredMemberWindowSetting(cat),
         // #1208 Items 4+6: resolved context window info + client capability for Hub display.
@@ -860,9 +844,6 @@ async function toCatResponse(
               }
             : capabilityInfo;
         })(),
-        roleDescription: cat.roleDescription,
-        personality: cat.personality,
-        identitySources: cat.identitySources,
         identityProfile: identityProfile
           ? {
               entityId: identityProfile.entityId,
@@ -870,32 +851,11 @@ async function toCatResponse(
               l0RoutingNote: identityProfile.l0RoutingNote,
             }
           : null,
-        teamStrengths: cat.teamStrengths,
-        caution: cat.caution,
-        restrictions: cat.restrictions ? [...cat.restrictions] : [],
-        strengths: cat.strengths,
-        sessionChain: cat.sessionChain,
-        voiceConfig: cat.voiceConfig,
         commandArgs: cat.commandArgs,
         cliConfigArgs: cat.cliConfigArgs,
-        provider: cat.provider,
-        variantLabel: cat.variantLabel ?? undefined,
-        isDefaultVariant: cat.isDefaultVariant ?? undefined,
-        breedDisplayName: cat.breedDisplayName ?? undefined,
-        executionApproval: cat.executionApproval,
-        mcpSupport: cat.mcpSupport,
         ...(acpConfig ? { acp: acpConfig } : {}),
         ...(cat.agyProfile ? { agyProfile: publicAgyProfile(cat.agyProfile) } : {}),
         ...(identityProtection ? { identityProtection } : {}),
-        roster: metadata.roster
-          ? {
-              family: metadata.roster.family,
-              roles: [...metadata.roster.roles],
-              lead: metadata.roster.lead,
-              available: metadata.roster.available,
-              evaluation: metadata.roster.evaluation,
-            }
-          : null,
       };
     },
     { catId: cat.id },
@@ -977,6 +937,7 @@ interface CatsRoutesOptions {
     | undefined;
   onCatalogChanged?: (cats: Record<string, CatConfig>) => Promise<void> | void;
   resolveContextCapacitySnapshot?: (catId: CatId) => InvocationCapacitySnapshot | undefined;
+  agentRoleWrite?: AgentRoleWrite;
   nativeRuntimeDiscovery?: typeof discoverNativeRuntimesWithReadiness;
   resolveCarrierCapability?: (catId: CatId) => FreshnessCarrierCapability | undefined;
 }
@@ -1176,18 +1137,31 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opt
       const accountRef = resolveAccountRef(body);
       try {
         const createRuntimeCatSerialized = async (input: Parameters<typeof createRuntimeCat>[1]) => {
-          const result = await withRuntimeCatMutationLock(projectRoot, () =>
-            createOwnedRuntimeCat(projectRoot, { ...input, agentProvider: body.agentProvider }, receipt, () => {
-              if (
-                body.configurationSource === 'native_tool' &&
-                'acp' in body &&
-                body.acp &&
-                dshLauncherProfileState(body.acp.command, body.acp.startupArgs, projectRoot, body.env?.DSH_HOME) ===
-                  'acp_profile_invalid'
-              )
-                throw new InvalidDshProfile('DSH 的现有 ACP profile 无效，请先在客户端修复配置。');
-            }),
-          );
+          const normalized = { ...input, agentProvider: body.agentProvider };
+          const validateNew = () => {
+            if (
+              body.configurationSource === 'native_tool' &&
+              'acp' in body &&
+              body.acp &&
+              dshLauncherProfileState(body.acp.command, body.acp.startupArgs, projectRoot, body.env?.DSH_HOME) ===
+                'acp_profile_invalid'
+            )
+              throw new InvalidDshProfile('DSH 的现有 ACP profile 无效，请先在客户端修复配置。');
+          };
+          const writeRole = opts.agentRoleWrite;
+          const result = writeRole
+            ? await (async () => {
+                const result = await writeRole(request, reply, {
+                  kind: 'create',
+                  input: normalized,
+                  receipt,
+                });
+                if (result.status !== 'committed') throw new Error('Agent plugin did not create the requested role');
+                return { id: result.catId, replayed: result.replayed === true };
+              })()
+            : await withRuntimeCatMutationLock(projectRoot, () =>
+                createOwnedRuntimeCat(projectRoot, normalized, receipt, validateNew),
+              );
           body.catId = result.id;
           replayed = result.replayed;
           managedIdsBefore.delete(result.id);
@@ -1367,7 +1341,9 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opt
           return reply.code(409).send({ code: 'member_creation_conflict', error: message });
         if (err instanceof InvalidDshProfile)
           return reply.code(400).send({ code: 'acp_profile_invalid', error: message });
-        reply.status(400);
+        reply.status(
+          err instanceof Error && 'statusCode' in err && typeof err.statusCode === 'number' ? err.statusCode : 400,
+        );
         return { error: message };
       }
 
@@ -1658,7 +1634,9 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opt
         );
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
-        reply.status(400);
+        reply.status(
+          err instanceof Error && 'statusCode' in err && typeof err.statusCode === 'number' ? err.statusCode : 400,
+        );
         return { error: message };
       }
 
@@ -1777,7 +1755,7 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opt
           return base as unknown as CliConfig;
         })();
 
-        await updateMemberWithRevision(projectRoot, request.params.id, body.expectedRevision, {
+        const patch: RuntimeCatUpdate = {
           ...(agyProfilePatch !== undefined ? { agyProfile: agyProfilePatch } : {}),
           ...(body.breedId !== undefined ? { breedId: body.breedId } : {}),
           ...(body.name !== undefined ? { name: body.name } : {}),
@@ -1867,7 +1845,18 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opt
                 ),
               }
             : {}),
-        });
+        };
+        if (opts.agentRoleWrite) {
+          if (body.expectedRevision === undefined) throw new MemberConfigurationRevisionRequired();
+          await opts.agentRoleWrite(request, reply, {
+            kind: 'update',
+            catId: request.params.id,
+            expectedRevision: body.expectedRevision,
+            patch,
+          });
+        } else {
+          await updateMemberWithRevision(projectRoot, request.params.id, body.expectedRevision, patch);
+        }
         const resolved = await reconcileCatRegistry(projectRoot, managedIdsBefore);
         await configEventBus.emitChangeAsync({
           source: 'cat-config',
@@ -1890,7 +1879,7 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opt
         };
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
-        if (err instanceof MemberConfigurationConflict || err instanceof MemberConfigurationRevisionRequired) {
+        if (err instanceof Error && 'statusCode' in err && typeof err.statusCode === 'number') {
           reply.status(err.statusCode);
         } else if (/not found/i.test(message)) {
           reply.status(404);
@@ -1933,7 +1922,14 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opt
         const overrideRevision = getRuntimeOverrideRevision(request.params.id);
         await deleteRuntimeOverride(request.params.id, overrideRevision);
         try {
-          deleteRuntimeCat(projectRoot, request.params.id);
+          if (opts.agentRoleWrite) {
+            if (parsed.data.expectedRevision === undefined) throw new MemberConfigurationRevisionRequired();
+            await opts.agentRoleWrite(request, reply, {
+              kind: 'delete',
+              catId: request.params.id,
+              expectedRevision: parsed.data.expectedRevision,
+            });
+          } else deleteRuntimeCat(projectRoot, request.params.id);
         } catch (err) {
           if (overrideBackup) await setRuntimeOverride(request.params.id, overrideBackup, 'none');
           throw err;
@@ -1954,7 +1950,7 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opt
       return { deleted: true, id: request.params.id, updatedBy: operator };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      if (err instanceof MemberConfigurationConflict || err instanceof MemberConfigurationRevisionRequired) {
+      if (err instanceof Error && 'statusCode' in err && typeof err.statusCode === 'number') {
         reply.status(err.statusCode);
       } else if (/not found/i.test(message)) {
         reply.status(404);

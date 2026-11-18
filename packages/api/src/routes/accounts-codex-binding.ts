@@ -12,10 +12,12 @@ import {
   bindRuntimeClaudeAccounts,
   bindRuntimeCodexAccounts,
   readRuntimeAccountMembers,
+  withRuntimeCatMutationLock,
 } from '../config/runtime-cat-catalog.js';
 import { resolveActiveProjectRoot } from '../utils/active-project-root.js';
 import { resolveUserId } from '../utils/request-identity.js';
 import { resolveAccountProjectRoot } from './accounts-project-root.js';
+import type { AgentRoleWrite } from './agent-access-routes.js';
 
 const schema = z
   .object({
@@ -29,7 +31,7 @@ const schema = z
       .optional(),
   })
   .strict();
-export function registerCodexBindingRoutes(app: FastifyInstance): void {
+export function registerCodexBindingRoutes(app: FastifyInstance, agentRoleWrite?: AgentRoleWrite): void {
   for (const tool of ['codex', 'claude', 'agy'] as const) {
     const client = tool === 'codex' ? 'openai' : tool === 'agy' ? 'google' : 'anthropic';
     app.get(`/api/accounts/${tool}/members`, async (request, reply) => {
@@ -76,7 +78,28 @@ export function registerCodexBindingRoutes(app: FastifyInstance): void {
                 : tool === 'agy'
                   ? bindRuntimeAgyAccounts
                   : bindRuntimeClaudeAccounts;
-            bind(memberRoot, selection, parsed.data.previewToken, root);
+            if (agentRoleWrite) {
+              if (parsed.data.previewToken !== preview.previewToken)
+                return reply.code(409).send({ error: 'Binding preview changed; please review it again' });
+              await withRuntimeCatMutationLock(memberRoot, async () => {
+                const saved = readRuntimeAccountMembers(memberRoot);
+                const summarize =
+                  tool === 'codex'
+                    ? planCodexAccountBinding
+                    : tool === 'agy'
+                      ? planAgyAccountBinding
+                      : planClaudeAccountBinding;
+                if (summarize(root, saved, selection).previewToken !== parsed.data.previewToken)
+                  throw new Error('Binding preview changed; please review it again');
+                await agentRoleWrite(request, reply, {
+                  kind: 'bind',
+                  client,
+                  scope: selection.scope,
+                  accountRef: selection.accountRef,
+                  targetIds: preview.targets.map((target) => target.catId),
+                });
+              });
+            } else bind(memberRoot, selection, parsed.data.previewToken, root);
             reconcileCatRegistry(memberRoot, new Set(Object.keys(toAllCatConfigs(catalog))));
             await configEventBus.emitChangeAsync({
               source: 'cat-config',
@@ -95,7 +118,11 @@ export function registerCodexBindingRoutes(app: FastifyInstance): void {
               : {}),
           };
         } catch (error) {
-          return reply.code(409).send({ error: error instanceof Error ? error.message : 'Binding unavailable' });
+          const status =
+            error instanceof Error && 'statusCode' in error && typeof error.statusCode === 'number'
+              ? error.statusCode
+              : 409;
+          return reply.code(status).send({ error: error instanceof Error ? error.message : 'Binding unavailable' });
         }
       });
     }

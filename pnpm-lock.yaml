@@ -486,6 +486,9 @@ importers:
       '@cat-cafe/ui':
         specifier: workspace:*
         version: link:../ui
+      '@clowder-ai/agent-contract':
+        specifier: workspace:*
+        version: link:../agent-contract
       '@clowder-ai/plugin-contract':
         specifier: file:../api/vendor/clowder-ai-plugin-contract-0.3.1-candidate.0-f327-3edd45d1c7ba.tgz
         version: file:packages/api/vendor/clowder-ai-plugin-contract-0.3.1-candidate.0-f327-3edd45d1c7ba.tgz

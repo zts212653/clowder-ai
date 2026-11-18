@@ -1,3 +1,4 @@
+import type { AgentRoleWrite } from './agent-access-routes.js';
 /**
  * Accounts API Routes — F136 Phase 4d → clowder-ai#340 renamed
  *
@@ -65,6 +66,7 @@ function findBoundCatIds(projectRoot: string, accountRef: string): string[] | Er
 }
 
 export const accountsRoutes: FastifyPluginAsync<{
+  agentRoleWrite?: AgentRoleWrite;
   loginDriver?: CodexLoginDriver;
   quotaFetcher?: typeof fetch;
   kimiQuotaSampler?: KimiAccountQuotaSampler;
@@ -76,7 +78,7 @@ export const accountsRoutes: FastifyPluginAsync<{
     ? { agyKeychainIdentityInspector: options.agyKeychainIdentityInspector }
     : undefined;
   registerCodexLoginRoutes(app, loginManager);
-  registerCodexBindingRoutes(app);
+  registerCodexBindingRoutes(app, options.agentRoleWrite);
   registerCodexQuotaRoutes(app, options.quotaFetcher);
   registerClaudeQuotaRoutes(app);
   registerKimiQuotaRoutes(app, options.kimiQuotaSampler);

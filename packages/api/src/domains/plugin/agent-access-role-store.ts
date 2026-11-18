@@ -1,7 +1,9 @@
 import { createHash } from 'node:crypto';
+import { catRegistry } from '@cat-cafe/shared';
 import { AGENT_ACCESS_PLUGIN_ID, type AgentAccessRoleStore } from '@clowder-ai/agent-contract';
 import { readCatCatalogRaw, resolveCatCatalogPath } from '../../config/cat-catalog-store.js';
-import { loadCatConfig } from '../../config/cat-config-loader.js';
+import { loadCatConfig, parseRawCatConfig, toAllCatConfigs } from '../../config/cat-config-loader.js';
+import { assertCodexMemberMutationReady } from '../../config/codex-account-binding.js';
 import {
   findTemplateVariantTombstoneInput,
   refreshRuntimeCatCatalogCaches,
@@ -22,10 +24,11 @@ export function createAgentAccessRoleStore(
   const path = resolveCatCatalogPath(projectRoot);
   const digest = (source: string) => createHash('sha256').update(source).digest('hex');
 
-  async function authorizeWrite() {
+  async function authorize(operation: 'read' | 'write') {
     assertActivation();
     const owner = currentPluginOwnerRequestContext(instanceId);
-    if (owner?.operation !== 'write') throw new Error('Agent role catalog requires an authenticated write request');
+    if (!owner || (operation === 'write' && owner.operation !== 'write'))
+      throw new Error('Agent role catalog requires an authenticated request');
     await owner.assertCurrent();
     assertActivation();
   }
@@ -38,21 +41,41 @@ export function createAgentAccessRoleStore(
 
   return {
     async readCatalog() {
-      await authorizeWrite();
+      await authorize('read');
       const source = readCatalogSource();
       return { source, revision: digest(source) };
     },
-    async commitCatalog(revision, source) {
+    async commitCatalog(revision, source, change) {
       return withRuntimeCatMutationLock(projectRoot, async () => {
-        await authorizeWrite();
-        if (digest(readCatalogSource()) !== revision) return 'conflict';
+        await authorize('write');
+        const currentSource = readCatalogSource();
+        if (digest(currentSource) !== revision) return 'conflict';
+        if (change.catId && (change.kind === 'create' || change.kind === 'update')) {
+          const previous = change.kind === 'update' ? parseRawCatConfig(currentSource) : undefined;
+          assertCodexMemberMutationReady(
+            projectRoot,
+            parseRawCatConfig(source),
+            change.catId,
+            previous
+              ? {
+                  cat: toAllCatConfigs(previous)[change.catId],
+                  available: previous.version !== 2 || previous.roster[change.catId]?.available !== false,
+                }
+              : undefined,
+            change.requireAccountCheck,
+          );
+        }
         writeFileAtomic(path, source, { verify: (candidate) => loadCatConfig(candidate) });
         refreshRuntimeCatCatalogCaches();
         return 'committed';
       });
     },
+    async readRegisteredAliases() {
+      await authorize('write');
+      return Object.values(catRegistry.getAllConfigs()).map(({ id, mentionPatterns }) => ({ id, mentionPatterns }));
+    },
     async readTemplateTombstone(catId) {
-      await authorizeWrite();
+      await authorize('write');
       return findTemplateVariantTombstoneInput(projectRoot, catId);
     },
   };

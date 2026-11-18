@@ -1,13 +1,19 @@
 import {
+  type AgentAccessA2ASubmit,
+  type AgentAccessA2ATurn,
   type AgentAccessDiscoveryHost,
   type AgentAccessRoleMutation,
   type AgentAccessRoleStore,
   agentAccessDetectRequestSchema,
+  agentAccessLoginRequestSchema,
 } from '@clowder-ai/agent-contract';
+import { builtInAgentClients, inspectNativeAccessCandidate } from './discovery/agent-client-catalog.js';
 import { nativeRuntimeReadiness } from './discovery/native-runtime-readiness.js';
 import { discoverNativeRuntimes } from './discovery/native-runtimes.js';
 
+import { readRoles } from './roles/role-card.js';
 import { writeRole } from './roles/write-role.js';
+import { runA2ATurn } from './runtime/a2a-turn.js';
 
 export default {
   create() {
@@ -17,8 +23,32 @@ export default {
         if (!discovery) throw new Error('Agent access Host discovery port is unavailable');
         return {
           actions: {
+            configure() {
+              return { clients: builtInAgentClients };
+            },
+            async login(input: unknown) {
+              const { id, refresh = false } = agentAccessLoginRequestSchema.parse(input);
+              return inspectNativeAccessCandidate(discovery, id, refresh);
+            },
+            openSession(input: { resume?: { onUnavailable: 'fail' | 'start_new' } }) {
+              return input.resume?.onUnavailable === 'fail'
+                ? { ok: false, code: 'resume_unavailable', reason: 'remote A2A does not expose resumable sessions' }
+                : { ok: true, binding: { state: 'pending_first_input' } };
+            },
+            cancel() {
+              return { ok: false, code: 'unsupported' };
+            },
+            release() {
+              return { ok: true };
+            },
+            startTurn({ input, submit }: { input: AgentAccessA2ATurn; submit: AgentAccessA2ASubmit }) {
+              return runA2ATurn(input, submit);
+            },
             ...(agentRoleStore
-              ? { writeRole: (request: AgentAccessRoleMutation) => writeRole(agentRoleStore, request) }
+              ? {
+                  readRoles: () => readRoles(agentRoleStore),
+                  writeRole: (request: AgentAccessRoleMutation) => writeRole(agentRoleStore, discovery, request),
+                }
               : {}),
             async detect(input: unknown) {
               const { refresh } = agentAccessDetectRequestSchema.parse(input);

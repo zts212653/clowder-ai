@@ -26,6 +26,10 @@ test('Agent access capability is opt-in and accepts a compatible checked module'
   const root = await mkdtemp(join(tmpdir(), 'clowder-agent-access-admission-'));
   t.after(() => rm(root, { recursive: true, force: true }));
   assert.equal(await readPackageCapabilityRejection({}, root), undefined);
+  assert.match(
+    await readPackageCapabilityRejection({ pluginId: 'official.agent-access', ...managedModule }, root),
+    /declaration is missing/,
+  );
   await writeFile(join(root, 'agent-access.json'), JSON.stringify(declaration));
   assert.equal(await readPackageCapabilityRejection(managedModule, root), undefined);
   assert.match(await readPackageCapabilityRejection({}, root), /Agent access.*module/i);

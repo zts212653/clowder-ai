@@ -2398,7 +2398,11 @@ async function initializeApi(
                         app.log.warn(`[api] A2A cat "${id}" missing ${envKey} env var. It will not be routable.`);
                         return;
                       }
-                      service = new A2AAgentService({ catId, config: { url: a2aUrl } });
+                      service = new A2AAgentService({
+                        catId,
+                        config: { url: a2aUrl },
+                        runTurn: (input, submit) => agentAccessA2ARunner(input, submit),
+                      });
                       break;
                     }
                     default:
@@ -3672,6 +3676,7 @@ async function initializeApi(
     ...(redis ? { connectionCheckRedis: redis } : {}),
     resolvePluginMcpView: () => pluginRuntime.supervisor.resolveMemberMcpView(),
     memberAssets: () => memberCanonService,
+    agentRoleWrite: (request, reply, mutation) => agentRoleWrite(request, reply, mutation),
     addressedPlugins: () => router.addressedPlugins,
     resolveContextCapacitySnapshot: (catId) => router.contextCapacitySnapshot(catId),
     resolveCarrierCapability: (catId) => router.freshnessCarrierCapability(catId),
@@ -5803,7 +5808,9 @@ async function initializeApi(
     const failures = results.filter((result) => result.status === 'rejected').map((result) => result.reason);
     if (failures.length) throw new AggregateError(failures, 'Initial plugin shutdown failed');
   });
-  const { OFFICIAL_BUNDLED_MANIFESTS } = await import('./domains/plugin/official-catalog.js');
+  const { OFFICIAL_BUNDLED_CATALOG_ENTRIES, OFFICIAL_BUNDLED_MANIFESTS } = await import(
+    './domains/plugin/official-catalog.js'
+  );
   const { createHostOfficialPluginCatalog } = await import('./domains/plugin/manager/host-official-catalog.js');
   const { GitMarketplaceRepository } = await import(
     './domains/plugin/manager/marketplace/git-marketplace-repository.js'
@@ -5979,6 +5986,7 @@ async function initializeApi(
     runtime: pluginRuntime,
     managerRuntime: pluginManagerRuntime,
     catalog: pluginManagerCatalog,
+    bundledDefaults: OFFICIAL_BUNDLED_CATALOG_ENTRIES.filter((entry) => entry.catalogId === 'agent-access'),
     onFailure: (pluginId, error) => app.log.warn({ pluginId, err: error }, '[api] Initial plugin setup pending'),
   })
     .then((prepared) => prepared.activate())
@@ -5990,7 +5998,10 @@ async function initializeApi(
   const { pluginManagerUploadRoutes, registerPluginManagerRoutes } = await import('./routes/plugin-manager-routes.js');
   const { registerPluginMarketplaceRoutes } = await import('./routes/plugin-marketplace-routes.js');
   const { registerAgentClientLibraryRoutes } = await import('./routes/agent-client-library-routes.js');
-  const { registerAgentAccessRoutes } = await import('./routes/agent-access-routes.js');
+  const { createAgentAccessA2ARunner } = await import('./domains/plugin/agent-access-a2a.js');
+  const agentAccessA2ARunner = createAgentAccessA2ARunner(pluginRuntime.inventoryStore, pluginRuntime.supervisor);
+  const { createAgentRoleWrite, registerAgentAccessRoutes } = await import('./routes/agent-access-routes.js');
+  const agentRoleWrite = createAgentRoleWrite(pluginRuntime.inventoryStore, pluginRuntime.supervisor);
   registerAgentAccessRoutes(app, { inventory: pluginRuntime.inventoryStore, runtime: pluginRuntime.supervisor });
   registerAgentClientLibraryRoutes(app, {
     inventory: pluginRuntime.inventoryStore,
@@ -7308,7 +7319,7 @@ async function initializeApi(
     },
   });
   await app.register(featureDocDetailRoutes);
-  await app.register(accountsRoutes);
+  await app.register(accountsRoutes, { agentRoleWrite });
   await app.register(claudeRescueRoutes);
   await app.register(auditRoutes, { threadStore });
   await app.register(capabilitiesRoutes, {

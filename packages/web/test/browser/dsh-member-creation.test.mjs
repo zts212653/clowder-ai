@@ -33,10 +33,11 @@ for (const width of [1920, 1024, 390])
     };
     try {
       await page.route('**/api/agent-providers', (route) => route.fulfill({ json: { libraries: [] } }));
-      await page.route('**/api/cats/native-runtimes*', (route) =>
+      await page.route('**/api/agent-access/v1/detect*', (route) =>
         route.fulfill({
           json: {
-            runtimes:
+            readiness: { state: 'ready' },
+            candidates:
               width === 1024 && discoveryReads++ === 0
                 ? []
                 : [
@@ -171,7 +172,7 @@ for (const width of [1920, 1024, 390])
       if (width === 390) await inspecting;
       const freshDiscovery =
         width === 390
-          ? page.waitForResponse((response) => new URL(response.url()).pathname === '/api/cats/native-runtimes')
+          ? page.waitForResponse((response) => new URL(response.url()).pathname === '/api/agent-access/v1/detect')
           : undefined;
       await editor.getByRole('button', { name: '添加伙伴', exact: true }).click();
       if (freshDiscovery) {

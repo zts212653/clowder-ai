@@ -1,10 +1,10 @@
-import { parseAgentAccessDeclaration } from '@clowder-ai/agent-contract';
+import { AGENT_ACCESS_PLUGIN_ID, parseAgentAccessDeclaration } from '@clowder-ai/agent-contract';
 import type { PluginManifest } from '@clowder-ai/plugin-contract';
 import { parseAgentProviderDeclaration } from '../cats/services/agents/session-contract/plugin-agent-provider.js';
 
 /** Capability admission is independent of catalog, bundled or owner upload provenance. */
 export function packageCapabilityRejection(
-  manifest: Pick<PluginManifest, 'runtime'>,
+  manifest: Pick<PluginManifest, 'runtime'> & Partial<Pick<PluginManifest, 'pluginId'>>,
   agentProvider: unknown,
   packageRoot: string,
   agentAccess?: unknown,
@@ -16,7 +16,8 @@ export function packageCapabilityRejection(
     const result = parseAgentProviderDeclaration(agentProvider, { packageRoot });
     if (!result.ok) return `Invalid ACP declaration: ${result.reason}`;
   }
-  if (agentAccess === undefined) return undefined;
+  if (agentAccess === undefined)
+    return manifest.pluginId === AGENT_ACCESS_PLUGIN_ID ? 'Agent access protocol declaration is missing' : undefined;
 
   const parsed = parseAgentAccessDeclaration(agentAccess);
   if (!parsed.success) {

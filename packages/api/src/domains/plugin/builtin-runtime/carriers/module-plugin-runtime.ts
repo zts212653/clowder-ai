@@ -1,4 +1,9 @@
-import type { AgentAccessDiscoveryHost, AgentAccessRoleStore } from '@clowder-ai/agent-contract';
+import {
+  AGENT_ACCESS_OPERATIONS,
+  AGENT_ACCESS_PLUGIN_ID,
+  type AgentAccessDiscoveryHost,
+  type AgentAccessRoleStore,
+} from '@clowder-ai/agent-contract';
 import {
   isPluginDeliveryInput,
   isPluginDeliveryReceipt,
@@ -460,6 +465,7 @@ export class ModulePluginRuntime implements BundledPluginRuntime {
           `${packageRecord.pluginId} start() must return an actions table and stop()`,
         );
       }
+      activation = candidate;
       if (packageRecord.manifest.call !== undefined && typeof deliver !== 'function') {
         throw new ExternalPluginRuntimeError(
           'INVALID_ENTRYPOINT',
@@ -481,7 +487,17 @@ export class ModulePluginRuntime implements BundledPluginRuntime {
           `${packageRecord.pluginId} exposes webhook without a fixed webhook declaration`,
         );
       }
-      activation = candidate;
+      if (
+        packageRecord.pluginId === AGENT_ACCESS_PLUGIN_ID &&
+        AGENT_ACCESS_OPERATIONS.some(
+          (operation) => !Object.hasOwn(actions, operation) || typeof actions[operation] !== 'function',
+        )
+      ) {
+        throw new ExternalPluginRuntimeError(
+          'INVALID_ENTRYPOINT',
+          'Agent access package lacks a required protocol operation',
+        );
+      }
       assertActivation();
       this.#loaded.set(pluginInstanceId, {
         packageRecord,

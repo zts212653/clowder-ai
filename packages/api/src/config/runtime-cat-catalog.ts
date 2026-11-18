@@ -1,7 +1,9 @@
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { closeSync, mkdirSync, openSync, readFileSync, statSync, unlinkSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import type { CatCafeConfig, CatColor, ClientId, CoCreatorConfig } from '@cat-cafe/shared';
 import { backgroundImageUrlSchema } from '@cat-cafe/shared';
+import { planRoleAccountBinding } from '@clowder-ai/agent-access/roles/role-account-binding';
 import {
   assertUniqueMentionAliases,
   planRoleCreation,
@@ -23,17 +25,21 @@ import {
   type CodexBindingSelection,
   planCodexAccountBinding,
 } from './codex-account-binding.js';
-import { readLocalAccountSelection } from './local-account-selection.js';
+
 import { resolveProjectTemplatePath } from './project-template-path.js';
 import type { TemplateVariantTombstoneInput } from './template-variant-tombstones.js';
 import { writeFileAtomic } from './write-file-atomic.js';
 
 export type { RuntimeCatInput, RuntimeCatUpdate };
 
+const runtimeCatMutationOwner = new AsyncLocalStorage<{ projectRoot: string; active: boolean }>();
 const runtimeCatMutationTails = new Map<string, Promise<void>>();
 
 /** Serialize catalog mutations within this API process so retried first-run writes cannot lose a member. */
 export async function withRuntimeCatMutationLock<T>(projectRoot: string, operation: () => T): Promise<T> {
+  const owner = runtimeCatMutationOwner.getStore();
+  if (owner?.active && owner.projectRoot === projectRoot) return operation();
+  const scope = { projectRoot, active: true };
   const previous = runtimeCatMutationTails.get(projectRoot) ?? Promise.resolve();
   let release!: () => void;
   const current = new Promise<void>((resolve) => {
@@ -62,8 +68,9 @@ export async function withRuntimeCatMutationLock<T>(projectRoot: string, operati
       }
       if (lockFd === undefined) throw new Error('Timed out waiting for runtime cat catalog lock');
     });
-    return await saveSpan('catalog.write', operation);
+    return await saveSpan('catalog.write', () => runtimeCatMutationOwner.run(scope, operation));
   } finally {
+    scope.active = false;
     if (lockFd !== undefined) {
       closeSync(lockFd);
       try {
@@ -223,40 +230,12 @@ function bindRuntimeLocalAccounts(
         ? planAgyAccountBinding(accountProjectRoot, current, selection)
         : planClaudeAccountBinding(accountProjectRoot, current, selection);
   if (plan.previewToken !== previewToken) throw new Error('Binding preview changed; please review it again');
-  const targets = new Set(plan.targets.map((target) => target.catId));
-  const previous = readLocalAccountSelection(current, client);
-  const selectedRef =
-    selection.scope === 'local' ? selection.accountRef : readLocalAccountSelection(current, client).accountRef;
-  const next = {
-    ...current,
-    ...(selectedRef
-      ? {
-          selectedAccountRefs: { ...current.selectedAccountRefs, [client]: selectedRef },
-        }
-      : {}),
-    breeds: current.breeds.map((breed) => ({
-      ...breed,
-      variants: breed.variants.map((variant) => {
-        const id = variant.catId ?? breed.catId ?? '';
-        if (targets.has(id))
-          return {
-            ...variant,
-            accountRef: selection.accountRef,
-            accountBindingMode: selection.accountRef === selectedRef ? ('follow' as const) : ('override' as const),
-          };
-        if (selection.scope === 'local') {
-          const member = previous.members.find((m) => m.id === id);
-          if (member)
-            return {
-              ...variant,
-              // Inactive members keep their effective ref but retain explicit intent for re-enable.
-              accountBindingMode: member.bindingMode === 'follow' ? ('follow' as const) : ('override' as const),
-            };
-        }
-        return variant;
-      }),
-    })),
-  };
+  const next = planRoleAccountBinding(current, {
+    ...selection,
+    kind: 'bind',
+    client,
+    targetIds: plan.targets.map((target) => target.catId),
+  });
   return writeAndValidateCatalog(projectRoot, next);
 }
 

@@ -112,13 +112,13 @@ import { readThreadExportAddress } from './export-route';
 import { submitInteractiveGroup } from './interactive-actions';
 import {
   createNativeMember,
+  detectNativeMembers,
   pickMemberTemplate,
   prepareNativePartner,
   readMemberCanon,
   readMemberClientSettings,
   readMemberRuntimeModels,
   readMemberSettings,
-  readNativeMembers,
   readVoiceChoices,
   removeMember,
   runMemberProviderSetup,
@@ -1052,7 +1052,7 @@ function ChatBinding({
       case 'memberCanonSave':
         return saveMemberCanon(args.id, threadId, args.value, (element as unknown as File | null) ?? undefined);
       case 'nativeDetect':
-        return readNativeMembers(args.journeyId, args.refresh === 'true');
+        return detectNativeMembers(args.journeyId, args.refresh === 'true');
       case 'nativePrepare':
         return prepareNativePartner(JSON.parse(args.value));
       case 'nativeCreate':

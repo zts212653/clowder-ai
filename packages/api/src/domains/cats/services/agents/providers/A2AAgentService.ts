@@ -8,16 +8,18 @@
  */
 
 import { randomUUID } from 'node:crypto';
-import type { A2AAgentConfig, A2AJsonRpcResponse, CatId } from '@cat-cafe/shared';
+import type { A2AAgentConfig, CatId } from '@cat-cafe/shared';
 import { createCatId } from '@cat-cafe/shared';
+import { runA2ATurn } from '@clowder-ai/agent-access/runtime/a2a-turn';
+import type { AgentAccessA2ARunner } from '@clowder-ai/agent-contract';
 import type { AgentMessage, AgentService, AgentServiceOptions, PreparedProviderRequestV1 } from '../../types.js';
-import { transformA2ATaskToMessages } from './a2a-event-transform.js';
 
 export interface A2AAgentServiceOptions {
   catId?: CatId;
   config: A2AAgentConfig;
   /** Inject custom fetch for testing */
   fetchFn?: typeof fetch;
+  runTurn?: AgentAccessA2ARunner;
 }
 
 function agentMsg(type: AgentMessage['type'], catId: CatId, content?: string): AgentMessage {
@@ -41,11 +43,13 @@ export class A2AAgentService implements AgentService {
   private readonly catId: CatId;
   private readonly config: A2AAgentConfig;
   private readonly fetchFn: typeof fetch;
+  private readonly runTurn: AgentAccessA2ARunner;
 
   constructor(options: A2AAgentServiceOptions) {
     this.catId = options.catId ?? createCatId('a2a-agent');
     this.config = options.config;
     this.fetchFn = options.fetchFn ?? globalThis.fetch;
+    this.runTurn = options.runTurn ?? runA2ATurn;
   }
 
   async *invoke(prompt: string, options?: AgentServiceOptions): AsyncIterable<AgentMessage> {
@@ -60,19 +64,6 @@ export class A2AAgentService implements AgentService {
       providerNativeVisibility: 'unsupported' as const,
     });
     if (!('body' in preparedRequest.message)) throw new Error('a2a_prepared_message_not_exact');
-
-    const body = {
-      jsonrpc: '2.0' as const,
-      id: taskId,
-      method: 'tasks/send',
-      params: {
-        id: taskId,
-        message: {
-          role: 'user' as const,
-          parts: [{ type: 'text' as const, text: preparedRequest.message.body }],
-        },
-      },
-    };
 
     const headers: Record<string, string> = { 'Content-Type': 'application/json' };
     if (this.config.apiKey) {
@@ -89,48 +80,17 @@ export class A2AAgentService implements AgentService {
     try {
       await options?.beforeProviderLaunch?.(preparedRequest);
       if (signal?.aborted) throw signal.reason ?? new Error('aborted before send');
-      dispatched = true;
-      options?.onRemoteExecutionDispatched?.({ kind: 'a2a_task', id: taskId });
-      const response = await this.fetchFn(this.config.url, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify(body),
-        signal,
+      yield* await this.runTurn({ catId: this.catId, taskId, prompt: preparedRequest.message.body }, async (body) => {
+        signal?.throwIfAborted();
+        dispatched = true;
+        options?.onRemoteExecutionDispatched?.({ kind: 'a2a_task', id: taskId });
+        const response = await this.fetchFn(this.config.url, { method: 'POST', headers, body, signal });
+        return {
+          status: response.status,
+          statusText: response.statusText,
+          payload: response.ok ? await response.json() : undefined,
+        };
       });
-
-      if (!response.ok) {
-        yield agentMsg('error', this.catId, `A2A request failed: ${response.status} ${response.statusText}`);
-        return;
-      }
-
-      const rpcResponse = (await response.json()) as A2AJsonRpcResponse;
-
-      if (rpcResponse.error) {
-        yield agentMsg(
-          'error',
-          this.catId,
-          `A2A RPC error: ${rpcResponse.error.message} (code: ${rpcResponse.error.code})`,
-        );
-        return;
-      }
-
-      if (!rpcResponse.result) {
-        yield agentMsg('error', this.catId, 'A2A response missing result');
-        return;
-      }
-
-      const messages = transformA2ATaskToMessages(rpcResponse.result, this.catId);
-      for (const m of messages) {
-        yield m;
-      }
-
-      if (!messages.some((message) => message.type === 'done' || message.type === 'error')) {
-        yield agentMsg(
-          'error',
-          this.catId,
-          `A2A task status ${rpcResponse.result.status} does not confirm successful completion; remote task termination is unconfirmed`,
-        );
-      }
     } catch (err) {
       // Aborting fetch only ends our local wait. The remote task may still be
       // running; without an acknowledged tasks/cancel, never report success.

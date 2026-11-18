@@ -5292,6 +5292,22 @@
     "ready": "Available",
     "dshAuto": "Installed · Configured automatically when added",
     "conflict": "A member with this name already exists",
+    "loginRequired": "Sign-in required",
+    "unsupported": "Unsupported",
+    "needsConfig": "Configuration required",
+    "partialFailure": "Detection failed",
+    "partialFailureCount": "{0} candidates failed detection",
+    "readiness": {
+      "missing": "The agent-access plugin is not installed",
+      "disabled": "The agent-access plugin is disabled",
+      "starting": "The agent-access plugin is starting",
+      "failed": "The agent-access plugin failed to load",
+      "incompatible": "The agent-access plugin version is incompatible",
+      "install": "Install",
+      "enable": "Enable",
+      "retry": "Retry",
+      "repair": "Repair"
+    },
     "adjust": "Adjust",
     "createFailed": "Could not create {0} ({1}):"
   },

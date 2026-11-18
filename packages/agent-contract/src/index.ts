@@ -2,6 +2,7 @@ import type {
   AgyProfileConfig,
   CatCarrier,
   CatColor,
+  CatId,
   CatVariant,
   CliConfig,
   ClientId,
@@ -54,6 +55,13 @@ export const agentAccessReadinessSchema = z.discriminatedUnion('state', [
 
 export type AgentAccessReadiness = z.infer<typeof agentAccessReadinessSchema>;
 
+const clientIdSchema = z.enum(['anthropic', 'openai', 'google', 'kimi', 'antigravity', 'opencode', 'catagent', 'acp']);
+
+export const agentAccessClientDirectorySchema = z.object({
+  clients: z.array(z.object({ id: clientIdSchema, label: z.string() })),
+});
+export type AgentAccessClientDirectory = z.infer<typeof agentAccessClientDirectorySchema>;
+
 export const agentAccessDetectRequestSchema = z.object({ refresh: z.boolean().optional() }).strict();
 
 export const agentAccessDetectionSchema = z.object({
@@ -61,7 +69,7 @@ export const agentAccessDetectionSchema = z.object({
     z.object({
       id: z.string(),
       label: z.string(),
-      clientId: z.string(),
+      clientId: clientIdSchema,
       installed: z.boolean(),
       models: z.array(z.string()),
       command: z.string().optional(),
@@ -240,15 +248,83 @@ export interface RuntimeCatUpdate {
 
 export interface AgentAccessRoleStore {
   readCatalog(): Promise<{ readonly source: string; readonly revision: string }>;
-  commitCatalog(revision: string, source: string): Promise<'committed' | 'conflict'>;
+  commitCatalog(
+    revision: string,
+    source: string,
+    change: { kind: AgentAccessRoleMutation['kind']; catId?: string; requireAccountCheck?: boolean },
+  ): Promise<'committed' | 'conflict'>;
+  readRegisteredAliases(): Promise<readonly { id: string; mentionPatterns: readonly string[] }[]>;
   readTemplateTombstone(
     catId: string,
   ): Promise<{ readonly breedId: string; readonly variantId: string; readonly catId: string } | null>;
 }
 
 export type AgentAccessRoleMutation =
-  | { kind: 'create'; input: RuntimeCatInput }
+  | { kind: 'create'; input: RuntimeCatInput; receipt?: RuntimeCatInput['creationReceipt'] }
   | { kind: 'update'; catId: string; expectedRevision: string; patch: RuntimeCatUpdate }
-  | { kind: 'delete'; catId: string; expectedRevision: string };
+  | { kind: 'delete'; catId: string; expectedRevision: string }
+  | {
+      kind: 'bind';
+      client: 'openai' | 'anthropic' | 'google';
+      scope: 'cat' | 'family' | 'local';
+      accountRef: string;
+      targetIds: readonly string[];
+    };
 
-export type AgentAccessRoleMutationResult = { status: 'committed'; catId: string } | { status: 'conflict' };
+export const agentAccessRoleMutationResultSchema = z.discriminatedUnion('status', [
+  z.object({ status: z.literal('committed'), catId: z.string(), replayed: z.literal(true).optional() }),
+  z.object({ status: z.literal('conflict') }),
+  z.object({ status: z.literal('invalid_dsh_profile') }),
+  z.object({ status: z.literal('bound'), catIds: z.array(z.string()) }),
+  z.object({ status: z.literal('creation_conflict'), message: z.string() }),
+]);
+
+export type AgentAccessRoleMutationResult = z.infer<typeof agentAccessRoleMutationResultSchema>;
+
+export interface AgentAccessA2ATurn {
+  readonly catId: CatId;
+  readonly taskId: string;
+  readonly prompt: string;
+}
+
+export interface AgentAccessA2AResponse {
+  readonly status: number;
+  readonly statusText: string;
+  readonly payload?: unknown;
+}
+
+export type AgentAccessA2ASubmit = (body: string) => Promise<AgentAccessA2AResponse>;
+
+export type AgentAccessA2AEvent = {
+  readonly type: 'text' | 'done' | 'error' | 'system_info';
+  readonly catId: CatId;
+  readonly content?: string;
+  readonly error?: string;
+  readonly timestamp: number;
+};
+
+export const agentAccessA2AEventsSchema = z.array(
+  z.object({
+    type: z.enum(['text', 'done', 'error', 'system_info']),
+    catId: z.string(),
+    content: z.string().optional(),
+    error: z.string().optional(),
+    timestamp: z.number(),
+  }),
+);
+
+export type AgentAccessA2ARunner = (
+  input: AgentAccessA2ATurn,
+  submit: AgentAccessA2ASubmit,
+) => Promise<readonly AgentAccessA2AEvent[]>;
+
+export const agentAccessLoginRequestSchema = z
+  .object({ id: z.string().min(1).max(256), refresh: z.boolean().optional() })
+  .strict();
+export const agentAccessClientSchema = z.object({
+  id: z.string(),
+  label: z.string(),
+  type: z.enum(['plugin', 'legacy', 'cloud']),
+  pluginName: z.string().optional(),
+  why: z.string().optional(),
+});

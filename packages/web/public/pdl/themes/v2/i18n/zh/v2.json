@@ -5292,6 +5292,22 @@
     "ready": "可用",
     "dshAuto": "已安装 · 添加时自动配置",
     "conflict": "已有同名成员",
+    "loginRequired": "需登录",
+    "unsupported": "不支持",
+    "needsConfig": "需配置",
+    "partialFailure": "探测失败",
+    "partialFailureCount": "部分候选探测失败（{0}）",
+    "readiness": {
+      "missing": "还没有安装接入插件",
+      "disabled": "接入插件已停用",
+      "starting": "接入插件正在准备",
+      "failed": "接入插件加载失败",
+      "incompatible": "接入插件版本不兼容",
+      "install": "去安装",
+      "enable": "去启用",
+      "retry": "重试",
+      "repair": "修复"
+    },
     "adjust": "调整",
     "createFailed": "{0}（{1}）创建失败："
   },

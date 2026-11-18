@@ -22178,6 +22178,8 @@ pdl:
                         args:
                           page: memberNew
                         role: member
+                    - type: component
+                      use: v2MemberActions
                   defaults:
                     - type: component
                       use: v2MemberDefaultCat
@@ -30420,10 +30422,75 @@ pdl:
               - type: component
                 use: v2Action
                 props:
+                  label: t:nativeSetup.readiness.install
+                  act: nativeReadinessAction
+                  args:
+                    action: install
+                when: $.readiness.canInstall
+              - type: component
+                use: v2Action
+                props:
+                  label: t:nativeSetup.readiness.enable
+                  act: nativeReadinessAction
+                  args:
+                    action: enable
+                when: $.readiness.canEnable
+              - type: component
+                use: v2Action
+                props:
+                  label: t:nativeSetup.readiness.retry
+                  act: nativeReadinessAction
+                  args:
+                    action: retry
+                when: $.readiness.canRetry
+              - type: component
+                use: v2Action
+                props:
+                  label: t:nativeSetup.readiness.repair
+                  act: nativeReadinessAction
+                  args:
+                    action: repair
+                when: $.readiness.canRepair
+              - type: component
+                use: v2Action
+                props:
                   label: t:common.done
-                  act: guideEntryComplete
+                  act: nativeSetupDone
                 when: $.hasMembers
             blocks:
+              - type: component
+                use: v2Notice
+                props:
+                  tone: warn
+                  parts:
+                    - text:
+                        of: $.readiness.state
+                        map:
+                          missing: t:nativeSetup.readiness.missing
+                          disabled: t:nativeSetup.readiness.disabled
+                          starting: t:nativeSetup.readiness.starting
+                          failed: t:nativeSetup.readiness.failed
+                          incompatible: t:nativeSetup.readiness.incompatible
+                when: $.readiness
+              - type: component
+                use: v2Notice
+                props:
+                  tone: danger
+                  parts:
+                    - text:
+                        t: nativeSetup.partialFailureCount
+                        args:
+                          - $.partialFailureCount
+                when: $.partialFailureCount
+              - type: component
+                use: v2Notice
+                props:
+                  tone: danger
+                  parts:
+                    - text: $.readiness.reason
+                when:
+                  - $.readiness
+                  - $.readiness.reason
               - type: component
                 use: v2List
                 props:
@@ -30456,6 +30523,10 @@ pdl:
                               dshAuto: t:nativeSetup.dshAuto
                               unavailable: t:common.status.notInstalled
                               conflict: t:nativeSetup.conflict
+                              loginRequired: t:nativeSetup.loginRequired
+                              unsupported: t:nativeSetup.unsupported
+                              needsConfig: t:nativeSetup.needsConfig
+                              partialFailure: t:nativeSetup.partialFailure
                               _: "@state"
                         w: auto
                       - w: ctl

@@ -8502,3 +8502,306 @@ describe('console sidebar thread drops', () => {
     }
   });
 });
+
+describe('member detect entry', () => {
+  it('keeps the built-in members.detect entry visible in the simplified theme', async () => {
+    const { dom, w } = await boot(undefined, undefined, undefined, {}, (port) => {
+      const get = port.get;
+      port.get = async (path, params) => {
+        if (path === '/api/config/console-themes') return { themes: { active: 'pkg:v2', customs: [] } };
+        if (path === '/api/accounts') return { providers: [] };
+        if (path.startsWith('/api/accounts/') && path.endsWith('/members')) return { selection: { members: [] } };
+        return get(path, params);
+      };
+      const action = port.action;
+      port.action = (name, args, element) => {
+        if (name === 'membersRead') return advancedMemberMetadata();
+        if (name === 'nativeDetect') return [];
+        return action(name, args, element);
+      };
+    });
+    try {
+      // Theme component scripts are appended as inline <script> by pdlPackApply; jsdom's
+      // outside-only context does not run them, so evaluate the v2 package here.
+      const v2 = (await builtinThemes.read('v2')) as { components: Record<string, { js: string[] }> };
+      for (const part of Object.values(v2.components)) {
+        for (const js of part.js) runInContext(js, dom.getInternalVMContext(), { filename: 'v2-component.js' });
+      }
+      w.eval('go("members")');
+      await w.__settled();
+      expect(w.eval('PACK_LOADED')).toBe('v2');
+      expect(w.document.querySelector('[data-entry="members.detect"]')).not.toBeNull();
+      expect(w.document.body.textContent).toContain('探测可用 Client');
+    } finally {
+      dom.window.close();
+    }
+  });
+
+  async function detectBoot(
+    nativeDetect: (args: { journeyId: string; refresh: string }) => unknown,
+    theme = 'sys:1',
+    emptyRoster = false,
+  ) {
+    return boot(
+      undefined,
+      emptyRoster
+        ? (data) => {
+            data.cats = [];
+          }
+        : undefined,
+      undefined,
+      {},
+      (port) => {
+        const get = port.get;
+        port.get = async (path, params) => {
+          if (path === '/api/config/console-themes') return { themes: { active: theme, customs: [] } };
+          if (path === '/api/accounts') return { providers: [] };
+          if (path.startsWith('/api/accounts/') && path.endsWith('/members')) return { selection: { members: [] } };
+          return get(path, params);
+        };
+        const action = port.action;
+        port.action = (name, args, element) => {
+          if (name === 'membersRead') return advancedMemberMetadata();
+          if (name === 'nativeDetect') return nativeDetect(args as { journeyId: string; refresh: string });
+          return action(name, args, element);
+        };
+      },
+    );
+  }
+
+  it('finishes from the member page without writing the first-run receipt', async () => {
+    const { dom, w, action } = await detectBoot(() => []);
+    try {
+      w.eval('go("members")');
+      await w.__settled();
+      w.eval('A.open({ref:"members.detect"})');
+      await w.__settled();
+      const done = w.document.querySelector('[data-act="nativeSetupDone"]');
+      expect(done).not.toBeNull();
+      done!.dispatchEvent(new w.MouseEvent('click', { bubbles: true }));
+      await w.__settled();
+      expect(action.mock.calls.some(([name]) => name === 'guideEntryComplete')).toBe(false);
+      expect(action.mock.calls.some(([name]) => name === 'guideEntryDismiss')).toBe(false);
+      expect(w.eval('S.popOn.nativeSetup')).toBe(false);
+    } finally {
+      dom.window.close();
+    }
+  });
+
+  it('finishes from the member page on the default theme without writing the receipt', async () => {
+    const { dom, w, action } = await detectBoot(() => [], 'sys:1');
+    try {
+      w.eval('go("members")');
+      await w.__settled();
+      expect(w.eval('PACK_LOADED')).toBeNull();
+      w.eval('A.open({ref:"members.detect"})');
+      await w.__settled();
+      const done = w.document.querySelector('[data-act="nativeSetupDone"]');
+      expect(done).not.toBeNull();
+      done!.dispatchEvent(new w.MouseEvent('click', { bubbles: true }));
+      await w.__settled();
+      expect(action.mock.calls.some(([name]) => name === 'guideEntryComplete')).toBe(false);
+      expect(action.mock.calls.some(([name]) => name === 'guideEntryDismiss')).toBe(false);
+    } finally {
+      dom.window.close();
+    }
+  });
+
+  it('writes the dismissed receipt only when the first-run popup closes', async () => {
+    const { dom, w, action } = await detectBoot(() => []);
+    try {
+      w.eval('go("members")');
+      await w.__settled();
+      w.eval(
+        'S.nativeSetupFrom="guide";S.popOn.nativeSetup=true;S.nativeSetup={journeyId:"guide-journey",partners:[],busy:false,submitError:"",failedPartner:null};render(true)',
+      );
+      await w.__settled();
+      w.eval('popClose("nativeSetup")');
+      await w.__settled();
+      expect(action.mock.calls.some(([name]) => name === 'guideEntryDismiss')).toBe(true);
+      expect(action.mock.calls.some(([name]) => name === 'guideEntryComplete')).toBe(false);
+    } finally {
+      dom.window.close();
+    }
+  });
+
+  it('renders the agent-access readiness state and its install action', async () => {
+    const { dom, w } = await detectBoot(() => ({
+      readiness: { state: 'missing', action: 'install' },
+      candidates: [],
+    }));
+    try {
+      w.eval('go("members")');
+      await w.__settled();
+      w.eval('A.open({ref:"members.detect"})');
+      await w.__settled();
+      expect(w.document.body.textContent).toContain('还没有安装接入插件');
+      const install = w.document.querySelector('[data-act="nativeReadinessAction"]');
+      expect(install).not.toBeNull();
+      install!.dispatchEvent(new w.MouseEvent('click', { bubbles: true }));
+      await w.__settled();
+      expect(w.eval('S.route')).toBe('ext');
+    } finally {
+      dom.window.close();
+    }
+  });
+
+  it('uses the host readiness action for a failed plugin state', async () => {
+    const { dom, w } = await detectBoot(() => ({
+      readiness: { state: 'failed', action: 'repair' },
+      candidates: [],
+    }));
+    try {
+      w.eval('go("members")');
+      await w.__settled();
+      w.eval('A.open({ref:"members.detect"})');
+      await w.__settled();
+      const action = w.document.querySelector('[data-act="nativeReadinessAction"]');
+      expect(action?.textContent).toContain('修复');
+      expect(w.document.body.textContent).not.toContain('重试');
+    } finally {
+      dom.window.close();
+    }
+  });
+
+  it('does not render a readiness warning when the plugin is ready', async () => {
+    const { dom, w } = await detectBoot(() => ({ readiness: { state: 'ready' }, candidates: [] }));
+    try {
+      w.eval('go("members")');
+      await w.__settled();
+      w.eval('A.open({ref:"members.detect"})');
+      await w.__settled();
+      expect(w.document.body.textContent).not.toContain('还没有安装接入插件');
+      expect(w.document.querySelector('[data-act="nativeReadinessAction"]')).toBeNull();
+    } finally {
+      dom.window.close();
+    }
+  });
+
+  it('shows partial candidate failures without hiding the ready state', async () => {
+    const { dom, w } = await detectBoot(() => ({
+      readiness: { state: 'ready' },
+      candidates: [],
+      partialFailures: [{ id: 'broken' }],
+    }));
+    try {
+      w.eval('go("members")');
+      await w.__settled();
+      w.eval('A.open({ref:"members.detect"})');
+      await w.__settled();
+      expect(w.document.body.textContent).toContain('部分候选探测失败（1）');
+      expect(w.document.body.textContent).not.toContain('还没有安装接入插件');
+    } finally {
+      dom.window.close();
+    }
+  });
+
+  it('keeps the detect entry on the default theme for an empty and an existing roster', async () => {
+    for (const empty of [true, false]) {
+      const { dom, w } = await detectBoot(() => [], 'sys:1', empty);
+      try {
+        w.eval('go("members")');
+        await w.__settled();
+        expect(w.eval('PACK_LOADED')).toBeNull();
+        expect(w.document.querySelector('[data-entry="members.detect"]')).not.toBeNull();
+        expect(w.document.body.textContent).toContain('探测可用 Client');
+      } finally {
+        dom.window.close();
+      }
+    }
+  });
+
+  it('keeps the detect entry on the simplified theme for an empty roster too', async () => {
+    const { dom, w } = await boot(
+      undefined,
+      (data) => {
+        data.cats = [];
+      },
+      undefined,
+      {},
+      (port) => {
+        const get = port.get;
+        port.get = async (path, params) => {
+          if (path === '/api/config/console-themes') return { themes: { active: 'pkg:v2', customs: [] } };
+          if (path === '/api/accounts') return { providers: [] };
+          if (path.startsWith('/api/accounts/') && path.endsWith('/members')) return { selection: { members: [] } };
+          return get(path, params);
+        };
+        const action = port.action;
+        port.action = (name, args, element) =>
+          name === 'membersRead'
+            ? advancedMemberMetadata()
+            : name === 'nativeDetect'
+              ? []
+              : action(name, args, element);
+      },
+    );
+    try {
+      const v2 = (await builtinThemes.read('v2')) as { components: Record<string, { js: string[] }> };
+      for (const part of Object.values(v2.components)) {
+        for (const js of part.js) runInContext(js, dom.getInternalVMContext(), { filename: 'v2-component.js' });
+      }
+      w.eval('go("members")');
+      await w.__settled();
+      expect(w.eval('PACK_LOADED')).toBe('v2');
+      expect(w.document.querySelector('[data-entry="members.detect"]')).not.toBeNull();
+    } finally {
+      dom.window.close();
+    }
+  });
+
+  it('renders the readiness action in the simplified theme too', async () => {
+    const { dom, w } = await detectBoot(
+      () => ({ readiness: { state: 'missing', action: 'install' }, candidates: [], partialFailures: [] }),
+      'pkg:v2',
+    );
+    try {
+      const v2 = (await builtinThemes.read('v2')) as { components: Record<string, { js: string[] }> };
+      for (const part of Object.values(v2.components)) {
+        for (const js of part.js) runInContext(js, dom.getInternalVMContext(), { filename: 'v2-component.js' });
+      }
+      w.eval('go("members")');
+      await w.__settled();
+      expect(w.eval('PACK_LOADED')).toBe('v2');
+      w.eval('A.open({ref:"members.detect"})');
+      await w.__settled();
+      expect(w.document.body.textContent).toContain('还没有安装接入插件');
+      expect(w.document.querySelector('[data-act="nativeReadinessAction"]')).not.toBeNull();
+    } finally {
+      dom.window.close();
+    }
+  });
+
+  it('shows sign-in-required and failed candidates instead of a single unavailable state', async () => {
+    const base = initialState();
+    const partner = (id: string, extra: Record<string, unknown>) => ({
+      id,
+      selected: false,
+      selectable: false,
+      form: { ...base, displayName: id },
+      runtime: {
+        id,
+        label: id,
+        clientId: 'openai',
+        installed: true,
+        models: [],
+        readiness: { status: 'login_required' },
+      },
+      ...extra,
+    });
+    const { dom, w } = await detectBoot(() => ({
+      readiness: { state: 'ready' },
+      candidates: [partner('codex', {}), partner('broken', { state: 'failed' })],
+    }));
+    try {
+      w.eval('go("members")');
+      await w.__settled();
+      w.eval('A.open({ref:"members.detect"})');
+      await w.__settled();
+      expect(w.document.body.textContent).toContain('需登录');
+      expect(w.document.body.textContent).toContain('探测失败');
+    } finally {
+      dom.window.close();
+    }
+  });
+});

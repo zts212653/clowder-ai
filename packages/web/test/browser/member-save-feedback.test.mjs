@@ -21,10 +21,13 @@ for (const options of [[{ value: 'duplicate' }, { value: 'duplicate' }], []])
       const session = { configOptions: [{ id: 'model', currentValue: 'duplicate', options }] };
       const catalog = parseAcpCatalog(session, session);
       assert.equal(catalog.defaultModelStatus, 'unavailable');
-      await page.route('**/api/cats/native-runtimes', (route) =>
+      await page.route('**/api/agent-access/v1/detect', (route) =>
         route.fulfill({
           json: {
-            runtimes: [{ id: 'acp:fixture', label: 'Fixture ACP', clientId: 'acp', installed: true, models: [], acp }],
+            readiness: { state: 'ready' },
+            candidates: [
+              { id: 'acp:fixture', label: 'Fixture ACP', clientId: 'acp', installed: true, models: [], acp },
+            ],
           },
         }),
       );
