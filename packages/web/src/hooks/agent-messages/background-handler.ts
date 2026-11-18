@@ -7,8 +7,7 @@ import {
   writeToolEvent,
 } from '@/hooks/named-message-writer';
 import { admitStreamEvent } from '@/hooks/stream-position';
-import type { CatStatusType, ChatMessage } from '@/stores/chat-types';
-import { useChatStore } from '@/stores/chatStore';
+import type { CatStatusType } from '@/stores/chat-types';
 import { invocationErrorRowId, isRecoverableInFlightError, upsertErrorRow } from './error-rows';
 import { isStaleTerminalEvent, markThreadInvocationActive, markThreadInvocationComplete } from './invocation-slots';
 import {
