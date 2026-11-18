@@ -8298,6 +8298,8 @@ it('reads watcher sources only in the projection and writes configuration and nu
     },
     members: [],
     availableLabels: [{ id: 'quiet', name: 'Owner label' }],
+    panelDefaults: { enabled: false, members: [{ catId: 'codex' }], maxConcurrentRuns: 6 },
+    panelAccounts: [],
   };
   let suggestion = {
     id: 'suggestion',
