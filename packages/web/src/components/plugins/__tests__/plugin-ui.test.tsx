@@ -64,6 +64,23 @@ describe('plugin sidebar panel isolation', () => {
       ),
     ).toBe(true);
   });
+  it('provides the initial Host theme before package rendering and forwards later changes', async () => {
+    document.documentElement.dataset.theme = 'dark';
+    await act(async () => root.render(<PluginUiEntries />));
+    await act(async () => container.querySelector('button')?.click());
+    const frame = document.querySelector('iframe')!;
+    const html = frame.getAttribute('srcdoc')!;
+    expect(html.indexOf('dataset.theme="dark"')).toBeLessThan(html.indexOf('isolated package UI'));
+    const post = vi.spyOn(frame.contentWindow!, 'postMessage');
+    await act(async () => {
+      document.documentElement.dataset.theme = 'light';
+    });
+    expect(post).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'theme', value: 'light', nonce: frame.name }),
+      '*',
+    );
+    delete document.documentElement.dataset.theme;
+  });
   it.each([
     'success',
     'failure',

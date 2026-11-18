@@ -1,9 +1,9 @@
 export const pluginPanelChannel = 'clowder-plugin-ui/v1';
 const csp =
   "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; connect-src 'none'; form-action 'none'; base-uri 'none'; frame-src 'none'; object-src 'none'";
-export function sandboxedPanelHtml(value: unknown): string {
+export function sandboxedPanelHtml(value: unknown, theme: 'light' | 'dark' = 'light'): string {
   if (typeof value !== 'string' || value.length > 2_000_000) throw new Error('插件面板内容无效');
-  return `<meta http-equiv="Content-Security-Policy" content="${csp}"><meta name="referrer" content="no-referrer">${value}`;
+  return `<meta http-equiv="Content-Security-Policy" content="${csp}"><meta name="referrer" content="no-referrer"><script>document.documentElement.dataset.theme=${JSON.stringify(theme)}</script>${value}`;
 }
 export async function copyPanelImage(value: unknown): Promise<void> {
   if (typeof value !== 'string' || value.length > 10_700_000 || !/^[A-Za-z0-9+/]*={0,2}$/.test(value))

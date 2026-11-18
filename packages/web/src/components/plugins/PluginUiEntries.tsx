@@ -190,7 +190,7 @@ export function PluginUiEntries() {
         resource.headers['content-type']?.split(';', 1)[0]?.trim().toLowerCase() !== 'text/html'
       )
         throw new Error('插件页面加载失败，请检查插件状态');
-      setHtml(sandboxedPanelHtml(resource.body));
+      setHtml(sandboxedPanelHtml(resource.body, document.documentElement.dataset.theme === 'dark' ? 'dark' : 'light'));
     } catch (failure) {
       if (controller.signal.aborted || lifetime.current !== controller) return;
       setError(failure instanceof Error ? failure.message : '面板打开失败');
