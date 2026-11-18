@@ -1,5 +1,5 @@
 {
-  "archiveReplacement": {"title": "Replace installed plugin", "version": "{0}: {1} → {2}", "retention": "Plugin settings and data are kept.", "confirm": "Replace plugin"},
+  "archiveReplacement": {"title": "Replace installed plugin", "version": "{0}: {1} → {2}. ", "retention": "Plugin settings and data are kept.", "confirm": "Replace plugin"},
   "v2": {
     "settings": "Settings & management",
     "team": "Cat team",

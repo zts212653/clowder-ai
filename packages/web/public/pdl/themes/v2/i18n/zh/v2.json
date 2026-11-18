@@ -1,5 +1,5 @@
 {
-  "archiveReplacement": {"title": "替换已安装插件", "version": "{0}：{1} → {2}", "retention": "保留插件配置和数据。", "confirm": "确认替换"},
+  "archiveReplacement": {"title": "替换已安装插件", "version": "{0}：{1} → {2}。", "retention": "保留插件配置和数据。", "confirm": "确认替换"},
   "v2": {
     "settings": "设置与管理",
     "team": "猫猫团队",
