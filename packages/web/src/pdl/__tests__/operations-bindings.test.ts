@@ -494,7 +494,7 @@ it("stops all of one member's cancellable background tasks in this conversation 
     task('elsewhere', { threadId: 'other-thread' }),
     task('locked', { cancelability: { state: 'not_cancelable', reason: 'foreign_principal' } }),
   ];
-  vi.mocked(cancelProjectedExecution).mockReset().mockResolvedValue(true);
+  vi.mocked(cancelProjectedExecution).mockReset().mockResolvedValue(undefined);
   const { result } = renderHook(() => useHomeBindings(data, { execDetail: null }, true));
   await act(() => result.current.action('execStopAll', { who: 'codex' }));
   expect(vi.mocked(cancelProjectedExecution).mock.calls.map(([e]) => e.executionId)).toEqual(['a', 'b']);
