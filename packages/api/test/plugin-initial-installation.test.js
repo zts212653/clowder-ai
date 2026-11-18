@@ -323,6 +323,8 @@ test('bundled defaults activate before remote selection and downloads start', as
   assert.deepEqual(f.installed, ['first']);
   assert.equal(f.activated.length, 0);
   await ready.activate();
+  await ready.activate();
+  await (await prepareInitialPluginInstallation(f.options)).activate();
   assert.deepEqual(f.errors, []);
   assert.deepEqual(f.installed, ['first', 'second']);
   assert.deepEqual(

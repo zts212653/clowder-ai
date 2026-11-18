@@ -266,7 +266,7 @@ export async function prepareInitialPluginInstallation(options: InitialPluginIns
 
   async function prepareRemote() {
     let catalogSnapshot: OfficialPluginCatalogSnapshot | undefined;
-    if (selectRemote) {
+    if (bundled.length ? journal.remoteSelectionPending : selectRemote) {
       catalogSnapshot = await selectInitialRemotePlugins(options, journal, bundledIds).catch((error: unknown) => {
         options.signal?.throwIfAborted();
         if (!bundled.length) throw error;
