@@ -7142,6 +7142,12 @@ pdl:
                       args:
                         - of: $.form.l0
                           fmt: compact
+                  - type: button
+                    link: true
+                    label: t:rules.title
+                    act: open
+                    args:
+                      page: rules
                 when: $.form.l0
               - kind: field
                 label: t:memberForm.fields.contextFullPolicy
