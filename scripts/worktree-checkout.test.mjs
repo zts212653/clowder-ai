@@ -210,9 +210,13 @@ test('a full post-checkout hook failure preserves work committed by the hook', (
   const f = setup(t);
   const hooks = join(f.root, 'hooks');
   mkdirSync(hooks);
-  writeFileSync(join(hooks, 'post-checkout'), '#!/bin/sh\ngit commit --allow-empty -qm "hook work"\nexit 1\n', {
-    mode: 0o755,
-  });
+  writeFileSync(
+    join(hooks, 'post-checkout'),
+    '#!/bin/sh\ngit -c user.name=fixture -c user.email=fixture@example.invalid commit --allow-empty -qm "hook work"\nexit 1\n',
+    {
+      mode: 0o755,
+    },
+  );
   git(f.repo, 'config', 'core.hooksPath', hooks);
   assert.throws(() => f.create({ full: true }));
   assert.equal(existsSync(f.path), true);

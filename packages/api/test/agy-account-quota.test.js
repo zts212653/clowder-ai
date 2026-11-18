@@ -224,12 +224,23 @@ describe('Account-scoped AGY quota route (/api/accounts/:profileId/agy/quota)', 
     const configRoot = join(sandbox, 'config-root');
     mkdirSync(join(configRoot, '.cat-cafe'), { recursive: true });
 
-    const envKeys = ['CAT_CAFE_GLOBAL_CONFIG_ROOT', 'HOME', 'GOOGLE_API_KEY', 'GEMINI_API_KEY'];
+    const envKeys = [
+      'CAT_CAFE_GLOBAL_CONFIG_ROOT',
+      'HOME',
+      'GOOGLE_API_KEY',
+      'GEMINI_API_KEY',
+      'SSH_TTY',
+      'SSH_CLIENT',
+      'SSH_CONNECTION',
+    ];
     const savedEnv = Object.fromEntries(envKeys.map((k) => [k, process.env[k]]));
     process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT = configRoot;
     process.env.HOME = sandbox;
     delete process.env.GOOGLE_API_KEY;
     delete process.env.GEMINI_API_KEY;
+    delete process.env.SSH_TTY;
+    delete process.env.SSH_CLIENT;
+    delete process.env.SSH_CONNECTION;
 
     t.after(() => {
       for (const key of envKeys) {
@@ -412,14 +423,28 @@ describe('Account-scoped AGY quota route (/api/accounts/:profileId/agy/quota)', 
     const profilesRoot = join(sandbox, 'agy-profiles');
     mkdirSync(profilesRoot, { recursive: true });
 
-    const envKeys = ['CAT_CAFE_GLOBAL_CONFIG_ROOT', 'HOME', 'GOOGLE_API_KEY', 'GEMINI_API_KEY'];
+    const envKeys = [
+      'CAT_CAFE_GLOBAL_CONFIG_ROOT',
+      'HOME',
+      'GOOGLE_API_KEY',
+      'GEMINI_API_KEY',
+      'SSH_TTY',
+      'SSH_CLIENT',
+      'SSH_CONNECTION',
+    ];
     const savedEnv = Object.fromEntries(envKeys.map((k) => [k, process.env[k]]));
+    const origPlatformDesc = Object.getOwnPropertyDescriptor(process, 'platform');
+    Object.defineProperty(process, 'platform', { value: 'darwin', configurable: true });
     process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT = configRoot;
     process.env.HOME = sandbox;
     delete process.env.GOOGLE_API_KEY;
     delete process.env.GEMINI_API_KEY;
+    delete process.env.SSH_TTY;
+    delete process.env.SSH_CLIENT;
+    delete process.env.SSH_CONNECTION;
 
     t.after(() => {
+      if (origPlatformDesc) Object.defineProperty(process, 'platform', origPlatformDesc);
       for (const key of envKeys) {
         if (savedEnv[key] === undefined) delete process.env[key];
         else process.env[key] = savedEnv[key];
@@ -641,7 +666,26 @@ describe('Account-scoped AGY quota route (/api/accounts/:profileId/agy/quota)', 
         true,
         'production split topology must read active AGY members from runtime root instead of stale workspace cat-catalog.json',
       );
+
+      // Case E: Non-Darwin desktop host without SSH still fails closed at the HTTP route layer even when keychain inspector is wired
+      Object.defineProperty(process, 'platform', { value: 'linux', configurable: true });
+      const linuxList = await app.inject({
+        method: 'GET',
+        url: '/api/accounts',
+        headers: { 'x-cat-cafe-user': 'dev' },
+      });
+      const linuxGemini = linuxList.json().providers.find((p) => p.id === 'gemini');
+      assert.equal(linuxGemini?.agyQuotaReady, false);
+      assert.equal(linuxGemini?.agyQuota, undefined);
+      const linuxRefresh = await app.inject({
+        method: 'POST',
+        url: '/api/accounts/gemini/agy/quota',
+        headers: { 'x-cat-cafe-user': 'dev' },
+      });
+      assert.equal(linuxRefresh.statusCode, 503);
+      assert.equal(linuxRefresh.json().error, 'agy_quota_owner_unknown');
     } finally {
+      Object.defineProperty(process, 'platform', { value: 'darwin', configurable: true });
       if (prevWs === undefined) delete process.env.CAT_CAFE_WORKSPACE_ROOT;
       else process.env.CAT_CAFE_WORKSPACE_ROOT = prevWs;
       if (prevRt === undefined) delete process.env.CAT_CAFE_RUNTIME_ROOT;
@@ -1393,6 +1437,8 @@ describe('Account-scoped AGY quota route (/api/accounts/:profileId/agy/quota)', 
       'SSH_CONNECTION',
     ];
     const savedEnv = Object.fromEntries(envKeys.map((k) => [k, process.env[k]]));
+    const origPlatformDesc = Object.getOwnPropertyDescriptor(process, 'platform');
+    Object.defineProperty(process, 'platform', { value: 'darwin', configurable: true });
     process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT = configRoot;
     process.env.CAT_CAFE_CONFIG_ROOT = configRoot;
     process.env.CAT_CAFE_WORKSPACE_ROOT = configRoot;
@@ -1473,6 +1519,7 @@ describe('Account-scoped AGY quota route (/api/accounts/:profileId/agy/quota)', 
 
     t.after(async () => {
       Map.prototype.get = origMapGet;
+      if (origPlatformDesc) Object.defineProperty(process, 'platform', origPlatformDesc);
       await app.close();
       for (const key of envKeys) {
         if (savedEnv[key] === undefined) delete process.env[key];
@@ -1481,13 +1528,18 @@ describe('Account-scoped AGY quota route (/api/accounts/:profileId/agy/quota)', 
       rmSync(sandbox, { recursive: true, force: true });
     });
 
+    const failIfSettledEarly = (label, promise) =>
+      promise.then((res) => {
+        throw new Error(`${label} settled early with ${res.statusCode}: ${res.body}`);
+      });
+
     const post1Promise = app.inject({
       method: 'POST',
       url: '/api/accounts/gemini/agy/quota',
       headers: { 'x-cat-cafe-user': 'dev' },
       payload: { projectPath: configRoot },
     });
-    await post1EnteredPostVerify;
+    await Promise.race([post1EnteredPostVerify, failIfSettledEarly('POST-1', post1Promise)]);
 
     // Login switches from A to B while POST-1 is awaiting its post-sample verification return
     currentLogin = 'acct-post-login-b';
@@ -1502,7 +1554,7 @@ describe('Account-scoped AGY quota route (/api/accounts/:profileId/agy/quota)', 
     await Promise.race([
       post2JoinedPendingLookup,
       post2EnteredOwnInspection,
-      new Promise((resolve) => setTimeout(resolve, 50)),
+      failIfSettledEarly('POST-2', post2Promise),
     ]);
 
     releasePost1PostVerify();
@@ -1603,7 +1655,7 @@ describe('Account-scoped AGY quota route (/api/accounts/:profileId/agy/quota)', 
       headers: { 'x-cat-cafe-user': 'dev' },
       payload: { projectPath: configRoot },
     });
-    await olderSampleEntered;
+    await Promise.race([olderSampleEntered, failIfSettledEarly('olderPost', olderPostPromise)]);
 
     const newerPostRes = await appSameLogin.inject({
       method: 'POST',

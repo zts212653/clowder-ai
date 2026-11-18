@@ -624,11 +624,14 @@ describe('F325 AGY Work Parity Slice 2 — Contracts', () => {
         /account.*environment.*overrid/i,
       );
 
-      // PATH strips multiline npm bin error text and exposes rg
+      // Discover a real fixture executable, without requiring rg to be installed on the host.
+      const toolBin = join(root, 'tools');
+      mkdirSync(toolBin);
+      const rgFixture = join(toolBin, 'rg');
+      writeFileSync(rgFixture, "#!/bin/sh\nprintf '%s\\n' 'fixture-rg'\n", { mode: 0o755 });
       const prevPath = process.env.PATH;
       try {
-        process.env.PATH =
-          '/usr/bin:/bin:Unknown command: "bin"\n\nTo see a list of supported npm commands, run:\n  npm help';
+        process.env.PATH = `${toolBin}:/usr/bin:/bin:Unknown command: "bin"\n\nTo see a list of supported npm commands, run:\n  npm help`;
         const env = isolatedOAuthEnv(homeRoot);
         assert.ok(!env.PATH.includes('Unknown command'), `corrupted segment remained in PATH: ${env.PATH}`);
         assert.ok(!env.PATH.includes('\n'), 'PATH must not contain newlines');
@@ -636,7 +639,8 @@ describe('F325 AGY Work Parity Slice 2 — Contracts', () => {
           env: { PATH: env.PATH },
           encoding: 'utf8',
         }).trim();
-        assert.ok(rgCheck.endsWith('/rg'), `expected rg on sanitized PATH, got: ${rgCheck}`);
+        assert.equal(rgCheck, rgFixture, 'sanitized PATH must retain the supplied executable');
+        assert.equal(execFileSync('rg', ['--version'], { env: { PATH: env.PATH }, encoding: 'utf8' }), 'fixture-rg\n');
       } finally {
         process.env.PATH = prevPath;
       }

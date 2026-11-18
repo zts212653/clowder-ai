@@ -91,11 +91,19 @@ for (const producer of ['repair', 'reminder']) {
       assert.equal(res.statusCode, 403, res.body);
       assert.equal(f.stats.reads, 0);
       assert.equal(f.stats.adoptions, 0);
-      f.messages.getByThreadBefore = () => [altered];
+      let corruptWindowReads = 0;
+      f.messages.getByThreadBeforeBounded = () => {
+        corruptWindowReads++;
+        return { messages: [altered], scannedCount: 1, storageRoundTrips: 0, exhausted: true };
+      };
       f.messages.getByThreadAfter = () => [];
-      const neighbors = await f.read(f.answer, 'full', '&contextCount=1');
-      assert.equal(neighbors.statusCode, 200, neighbors.body);
-      assert.deepEqual(neighbors.json().context, []);
+      for (const mode of ['preview', 'full']) {
+        const readsBefore = corruptWindowReads;
+        const neighbors = await f.read(f.answer, mode, '&contextCount=1');
+        assert.equal(neighbors.statusCode, 200, neighbors.body);
+        assert.equal(corruptWindowReads, readsBefore + 1, `context must consume corrupt projection: ${label}/${mode}`);
+        assert.deepEqual(neighbors.json().context, []);
+      }
     });
   }
 }

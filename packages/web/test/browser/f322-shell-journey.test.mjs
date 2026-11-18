@@ -253,6 +253,19 @@ async function openProof({
       }
       const watcher = disabledWatcherRead(request, url, ['thread-return', 'thread-other', 'thread-created']);
       if (watcher) return handler.fulfill(watcher);
+      const quotaRingReadBodies = {
+        '/api/accounts': { projectPath: '/work/fixture', providers: [], unavailableAccounts: [] },
+        '/api/accounts/codex/members': { members: [], selection: { state: 'empty', members: [] } },
+        '/api/accounts/claude/members': { members: [], selection: { state: 'empty', members: [] } },
+        '/api/accounts/agy/members': { members: [], selection: { state: 'empty', members: [] } },
+        '/api/config/quota-pin': { pinned: true, selectedAccountRefs: null },
+      };
+      if (request.method() === 'GET' && url.search === '' && Object.hasOwn(quotaRingReadBodies, url.pathname)) {
+        return handler.fulfill({
+          contentType: 'application/json',
+          body: JSON.stringify(quotaRingReadBodies[url.pathname]),
+        });
+      }
       // Non-mention scenarios have no handling receipt. Real-owner journeys override
       // this exact GET via `api`; every other unknown endpoint still fails closeProof.
       if (request.method() === 'GET' && url.pathname === '/api/config/ignored-items') {
