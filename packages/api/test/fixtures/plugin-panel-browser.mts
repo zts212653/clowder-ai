@@ -27,17 +27,18 @@ export async function buildPluginPanelBrowser() {
   const globals = join(webRoot, 'src/app/globals.css');
   const themeFiles = ['theme-tokens.css', 'theme-extras.css', 'connector-tokens.css', 'console-tokens.css'];
   const themes = await Promise.all(themeFiles.map((name) => readFile(join(webRoot, 'src/app', name), 'utf8')));
+  const shellCss = await readFile(join(webRoot, '../ui/src/styles.css'), 'utf8');
   const generated = await webRequire('postcss')([
     webRequire('tailwindcss')({
       ...webRequire(join(webRoot, 'tailwind.config.js')),
       content: components.map((name) => join(webRoot, 'src/components', name)),
     }),
   ]).process(await readFile(globals, 'utf8'), { from: globals });
-  const css = [...themes, generated.css].join('\n');
+  const css = [...themes, shellCss, generated.css].join('\n');
   return {
     script: bundle.outputFiles[0].text as string,
     css,
     cssSha256: createHash('sha256').update(css).digest('hex'),
-    cssSources: ['globals.css', ...themeFiles],
+    cssSources: ['globals.css', ...themeFiles, '../ui/src/styles.css'],
   };
 }

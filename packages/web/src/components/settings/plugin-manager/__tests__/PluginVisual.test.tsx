@@ -11,7 +11,7 @@ it('uses a theme-colored SVG mask without an avatar tile in the rail, keeping se
   const rail = container.querySelector<HTMLElement>('[data-plugin-icon]')!;
   expect(rail.style.backgroundColor).toBe('transparent');
   expect(rail.classList.contains('settings-resource-avatar')).toBe(false);
-  expect(rail.style.color).toBe('var(--cafe-text-secondary)');
+  expect(rail.style.color).toBe('inherit');
   expect(rail.querySelector('img')).toBeNull();
   expect(rail.querySelector<HTMLElement>('[aria-hidden]')!.style.mask).toContain(icon.src);
   act(() => root.render(<PluginVisual icon={icon} name="反馈" iconBg="#ffffff" />));

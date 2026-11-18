@@ -206,7 +206,7 @@ export function PluginUiEntries() {
           aria-label={entry.label}
           aria-pressed={active?.instanceId === entry.instanceId && active.commandId === entry.commandId}
           onClick={() => void open(entry)}
-          className="flex h-10 w-10 items-center justify-center rounded-lg hover:bg-[var(--console-rail-item)] aria-pressed:bg-[var(--console-rail-item)]"
+          className="shell-focusable flex h-10 w-10 items-center justify-center rounded-lg text-[var(--shell-muted,var(--cafe-text-secondary))] hover:bg-[var(--console-rail-item)] aria-pressed:bg-[var(--shell-selected,var(--console-rail-item))] aria-pressed:text-[var(--shell-ink,var(--cafe-text))]"
         >
           <PluginVisual icon={entry.icon ?? 'plug'} name={entry.label} variant="rail" />
         </button>

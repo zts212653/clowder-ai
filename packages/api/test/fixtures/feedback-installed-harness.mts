@@ -204,7 +204,7 @@ export async function startInstalledFeedbackFixture() {
     reply
       .type('text/html')
       .send(
-        `<!doctype html><html data-theme="light"><style>${css}</style><body style="margin:0;background:#f8f7f5"><aside id="rail" style="position:fixed;inset:0 auto 0 0;width:56px;display:flex;flex-direction:column;justify-content:flex-end;padding-bottom:20px"></aside><main id="workspace"></main><script>document.documentElement.setAttribute('data-cat-cafe-api-origin',location.origin);${script}</script></body></html>`,
+        `<!doctype html><html data-theme="light" data-shell="v2"><style>${css}</style><body style="margin:0;background:#f8f7f5"><aside id="rail" style="position:fixed;inset:0 auto 0 0;width:56px;display:flex;flex-direction:column;justify-content:flex-end;padding-bottom:20px"></aside><main id="workspace"></main><script>document.documentElement.setAttribute('data-cat-cafe-api-origin',location.origin);${script}</script></body></html>`,
       ),
   );
   await app.listen({ host: '127.0.0.1', port: 0 });

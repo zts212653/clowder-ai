@@ -21,7 +21,7 @@ export function PluginVisual({
   const rail = variant === 'rail';
   const glyphClassName = rail || size === 'large' ? 'h-5 w-5' : 'h-4.5 w-4.5';
   const imageIcon = typeof icon !== 'string';
-  const foreground = !rail && iconBg ? 'var(--cafe-image-foreground)' : 'var(--cafe-text-secondary)';
+  const foreground = rail ? 'inherit' : iconBg ? 'var(--cafe-image-foreground)' : 'var(--cafe-text-secondary)';
   return (
     <span
       data-plugin-icon={typeof icon === 'string' ? icon : icon.src}
