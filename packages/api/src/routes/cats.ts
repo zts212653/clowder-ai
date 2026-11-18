@@ -3,7 +3,7 @@ import { projectRoleCard } from '@clowder-ai/agent-access/roles/role-card';
 import { auditL0Budget } from '../domains/cats/services/context/l0-budget-audit.js';
 import type { MemberCanonService } from '../domains/collaborative-content/asset-canon/member-service.js';
 import { withTargetAliasMutation } from '../domains/plugin/manager/addressing/target-alias-mutation.js';
-import type { AgentRoleRead, AgentRoleWrite } from './agent-access-routes.js';
+import type { AgentRoleRead, AgentRoleWrite, registerAgentAccessRoutes } from './agent-access-routes.js';
 import { registerDshSetupRoutes } from './dsh-setup-route.js';
 import type { RunDshConnection } from './dsh-setup-service.js';
 import { registerMemberCanonResponse } from './member-canon-response.js';
@@ -945,7 +945,7 @@ interface CatsRoutesOptions {
   agentRoleRead?: AgentRoleRead;
   agentRoleWrite?: AgentRoleWrite;
   runDshConnection?: RunDshConnection;
-  nativeRuntimeDiscovery?: typeof discoverNativeRuntimesWithReadiness;
+  nativeRuntimeDiscovery?: ReturnType<typeof registerAgentAccessRoutes>;
   resolveCarrierCapability?: (catId: CatId) => FreshnessCarrierCapability | undefined;
 }
 
@@ -972,6 +972,8 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opt
     return (opts.nativeRuntimeDiscovery ?? discoverNativeRuntimesWithReadiness)(
       resolveProjectRoot(),
       (request.query as { refresh?: string }).refresh === '1',
+      request,
+      reply,
     );
   });
   // GET /api/cat-templates - 获取角色模板（纯灵魂层，不含 client/model 绑定）

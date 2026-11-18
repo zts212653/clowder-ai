@@ -174,6 +174,17 @@ export const agentAccessDetectionSchema = z.object({
       modelSource: z.enum(['tool_config', 'tool_recent']).optional(),
       defaultsStatus: z.enum(['configured_only', 'unconfigured', 'session_only']).optional(),
       configuredEffort: z.string().optional(),
+      configuredThinkingEnabled: z.boolean().optional(),
+      modelCatalog: z
+        .array(
+          z.object({
+            value: z.string(),
+            label: z.string(),
+            defaultEffort: z.string().optional(),
+            efforts: z.array(z.object({ value: z.string(), label: z.string() })),
+          }),
+        )
+        .optional(),
       acp: z
         .object({
           agentProvider: z.string().optional(),

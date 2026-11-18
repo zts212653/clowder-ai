@@ -33,7 +33,7 @@ export function registerAgentAccessRoutes(
     inventory: Pick<PluginInventoryStore, 'readCurrentAuthority'>;
     runtime: Pick<PluginRuntimeCarrierRouter, 'attemptInvoke'>;
   },
-): void {
+) {
   app.get('/api/agent-access/v1/clients', async (request, reply) => {
     const access = requirePluginOwnerLocalAccess(request, 'read');
     if ('error' in access) return pluginAccessError(reply, access);
@@ -51,14 +51,22 @@ export function registerAgentAccessRoutes(
     const parsed = agentAccessDetectRequestSchema.safeParse(request.body ?? {});
     if (!parsed.success) return reply.code(400).send({ error: 'Invalid Agent access detection request' });
 
-    const unavailable = (readiness: AgentAccessReadiness) => ({ readiness, candidates: [] });
-    const result = await readAgentAccess(request, reply, access.operator, 'detect', parsed.data);
-    if ('readiness' in result) return unavailable(result.readiness);
+    return readDetection(request, reply, access.operator, parsed.data);
+  });
+
+  async function readDetection(
+    request: FastifyRequest,
+    reply: FastifyReply,
+    operator: string,
+    input: { refresh?: boolean },
+  ) {
+    const result = await readAgentAccess(request, reply, operator, 'detect', input);
+    if ('readiness' in result) return { readiness: result.readiness, candidates: [] };
     const detection = agentAccessDetectionSchema.safeParse(result.value);
     return detection.success
-      ? { readiness: { state: 'ready' }, ...detection.data }
-      : unavailable({ state: 'failed', action: 'retry' });
-  });
+      ? { readiness: { state: 'ready' } as const, ...detection.data }
+      : { readiness: { state: 'failed', action: 'retry' } as const, candidates: [] };
+  }
 
   async function readAgentAccess(
     request: FastifyRequest,
@@ -83,6 +91,21 @@ export function registerAgentAccessRoutes(
     request.log.warn({ pluginInstanceId, packageDigest, method }, 'Agent access read failed');
     return { readiness: { state: 'failed', action: 'retry' } };
   }
+
+  return async function readLegacyNativeRuntimes(
+    _projectRoot: string,
+    refresh: boolean,
+    request: FastifyRequest,
+    reply: FastifyReply,
+  ) {
+    const access = requirePluginOwnerLocalAccess(request, 'read');
+    if ('error' in access) return pluginAccessError(reply, access);
+    const detected = await readDetection(request, reply, access.operator, { refresh });
+    if (detected.readiness.state !== 'ready') {
+      return reply.code(503).send({ error: 'Agent 插件未就绪', readiness: detected.readiness });
+    }
+    return { runtimes: detected.candidates, authenticationStatus: 'local_checked' };
+  };
 }
 
 function currentAgentAccess(

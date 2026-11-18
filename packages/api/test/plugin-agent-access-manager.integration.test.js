@@ -64,8 +64,12 @@ test('Agent access discovery executes the same standalone entrypoint from a Mana
   app.addHook('preHandler', async (request) => {
     request.sessionUserId = owner;
   });
-  registerAgentAccessRoutes(app, { inventory: runtime.inventoryStore, runtime: runtime.supervisor });
+  const nativeRuntimeDiscovery = registerAgentAccessRoutes(app, {
+    inventory: runtime.inventoryStore,
+    runtime: runtime.supervisor,
+  });
   await app.register(catsRoutes, {
+    nativeRuntimeDiscovery,
     agentRoleRead: createAgentRoleRead(runtime.inventoryStore, runtime.supervisor),
     agentRoleWrite: createAgentRoleWrite(runtime.inventoryStore, runtime.supervisor),
   });
@@ -273,6 +277,14 @@ test('Agent access discovery executes the same standalone entrypoint from a Mana
   const afterUpdate = await scan();
   assert.equal(afterUpdate.readiness.state, 'ready');
   assert.equal(afterUpdate.candidates.find((candidate) => candidate.id === 'kimi')?.label, 'Kimi vNext');
+  const legacyScan = await app.inject({
+    method: 'GET',
+    url: '/api/cats/native-runtimes?refresh=1',
+    headers: { host: 'localhost:3004', 'X-Cat-Cafe-User': owner },
+    remoteAddress: '127.0.0.1',
+  });
+  assert.equal(legacyScan.statusCode, 200, legacyScan.payload);
+  assert.equal(legacyScan.json().runtimes.find((candidate) => candidate.id === 'kimi')?.label, 'Kimi vNext');
   assert.equal((await manager.get(pluginId)).plugin.installedVersion, '1.0.1');
   await invoke('after replacement');
 

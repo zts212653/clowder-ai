@@ -3678,6 +3678,7 @@ async function initializeApi(
     memberAssets: () => memberCanonService,
     agentRoleRead: (request, reply) => agentRoleRead(request, reply),
     agentRoleWrite: (request, reply, mutation) => agentRoleWrite(request, reply, mutation),
+    nativeRuntimeDiscovery: (...args) => readLegacyNativeRuntimes(...args),
     runDshConnection: (config, cwd, preferences) => agentAccessDshConnection(config, cwd, preferences),
     addressedPlugins: () => router.addressedPlugins,
     resolveContextCapacitySnapshot: (catId) => router.contextCapacitySnapshot(catId),
@@ -6017,7 +6018,10 @@ async function initializeApi(
   );
   const agentRoleRead = createAgentRoleRead(pluginRuntime.inventoryStore, pluginRuntime.supervisor);
   const agentRoleWrite = createAgentRoleWrite(pluginRuntime.inventoryStore, pluginRuntime.supervisor);
-  registerAgentAccessRoutes(app, { inventory: pluginRuntime.inventoryStore, runtime: pluginRuntime.supervisor });
+  const readLegacyNativeRuntimes = registerAgentAccessRoutes(app, {
+    inventory: pluginRuntime.inventoryStore,
+    runtime: pluginRuntime.supervisor,
+  });
   registerAgentClientLibraryRoutes(app, {
     inventory: pluginRuntime.inventoryStore,
     packages: pluginRuntime.packages,
