@@ -28,7 +28,6 @@ import { useToastStore } from '@/stores/toastStore';
 import { API_URL, refreshApiSession } from '@/utils/api-client';
 import { invalidateSidebarProjection } from '@/utils/sidebar-thread-snapshot';
 import { getUserId } from '@/utils/userId';
-import { finishHeldStream } from './agent-messages/background-handler';
 import { MEMORY_CHANGED } from './memory-changed';
 import { writeStoredSnapshot } from './named-message-writer';
 import {
@@ -47,6 +46,7 @@ import { useSuggestionStore } from '../components/suggestions/suggestion-store';
 import { lifecycleCommitOf, observeLifecycleSnapshot } from './agent-messages/lifecycle-terminal';
 import { isThreadMessageAppendedHint, observeThreadMessageAppended } from './agent-messages/thread-message-appended';
 import { isRunningResponse } from './response-stream-replay';
+import { STREAM_GAP_EVENT } from './stream-position';
 import { refreshActiveExecutionProjection } from './useActiveExecutionProjection';
 // F173 Phase E: isInvocationReplaced 检查已下沉到 useAgentMessages.handleAgentMessage
 // dispatch entry，useSocket 不再做 active path drop guard。
@@ -847,12 +847,10 @@ export function useSocket(
     });
 
     socket.on('message_deleted', (data: { messageId: string; threadId: string; deletedBy: string }) => {
-      finishHeldStream(data.threadId, data.messageId);
       if (!needs('chat.messages', data.threadId)) return;
       callbacksRef.current.onMessageDeleted?.(data);
     });
     socket.on('message_hard_deleted', (data: { messageId: string; threadId: string; deletedBy: string }) => {
-      finishHeldStream(data.threadId, data.messageId);
       if (!needs('chat.messages', data.threadId)) return;
       callbacksRef.current.onMessageDeleted?.(data);
     });
@@ -1044,7 +1042,6 @@ export function useSocket(
       const lifecycle = isLifecycleStoredMessageMetadata(data.message.lifecycle) ? data.message.lifecycle : undefined;
       if (data.message.lifecycle !== undefined && !lifecycle) return;
       if (lifecycle?.kind === 'response' && lifecycle.status !== 'processing') {
-        finishHeldStream(data.threadId, data.message.id);
         // any thread's reply reaching its terminal, for flows waiting on a thread that is not open
         window.dispatchEvent(
           new CustomEvent('cat-cafe:response-settled', {
@@ -1353,6 +1350,18 @@ export function useSocket(
     },
     [forgetRoom],
   );
+
+  // A reply whose stream this page lost part of: join its room again; the join's replay rebuilds it.
+  useEffect(() => {
+    const onGap = (event: Event) => {
+      const gapThread = (event as CustomEvent<{ threadId: string }>).detail.threadId;
+      if (!joinedRoomsRef.current.has(`${THREAD_ROOM_PREFIX}${gapThread}`)) return;
+      leaveRoom(gapThread);
+      joinRoom(gapThread);
+    };
+    window.addEventListener(STREAM_GAP_EVENT, onGap);
+    return () => window.removeEventListener(STREAM_GAP_EVENT, onGap);
+  }, [joinRoom, leaveRoom]);
 
   /**
    * Joined thread rooms are exactly the foreground threads. A thread leaves its room the moment it

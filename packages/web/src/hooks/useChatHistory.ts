@@ -101,7 +101,6 @@ import {
   shouldLoadOlderForTeleport,
   TELEPORT_RESOLVE_EVENT,
 } from '@/utils/teleport';
-import { resumeHeldStreams } from './agent-messages/background-handler';
 import { hydrateQueueActiveInvocationSlots, type QueueActiveInvocationSlot } from './queue-active-invocation-hydration';
 import { acknowledgeThreadHistoryWatermark, readThreadHistoryWatermark } from './thread-history-watermark';
 import { useViewportMessageTimeline } from './useViewportMessageTimeline';
@@ -1781,7 +1780,6 @@ export function useChatHistory(
           // AC-C10: server GET 是 authoritative，IDB snapshot 必须被 GET
           // 响应覆盖而不是合并。
           hydrateThread(fetchForThread, mergedMsgs, data.hasMore ?? false, issue.localWriteSeq);
-          resumeHeldStreams(fetchForThread);
           restoreActiveFromDrafts(fetchForThread, data.messages ?? []);
           // The page boundary follows what stays loaded: a read that unloaded the older pages (a
           // recovery round, an IndexedDB copy) restarts it at this page, while older pages the merge

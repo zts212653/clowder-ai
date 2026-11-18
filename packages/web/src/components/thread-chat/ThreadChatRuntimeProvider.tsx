@@ -69,7 +69,7 @@ export function ThreadChatRuntimeProvider({ children, routeThreadId, neededSourc
         [...neededNow.current].some((key) => key === source || key.startsWith(source + '.'))),
     [],
   );
-  const { handleAgentMessage } = useAgentMessages(sourceNeeded);
+  const { handleAgentMessage } = useAgentMessages();
 
   useLayoutEffect(() => {
     runtimeMountedRef.current = true;
