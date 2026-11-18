@@ -9034,6 +9034,9 @@ describe('declared plugin ACP runtime picker', () => {
       await w.__settled();
       expect(w.eval('VM.memberNew().form.d.aliases')).toContain('@declared-agent');
       expect(w.document.querySelector('#ms-handles')?.textContent).toContain('@declared-agent');
+      const save = w.document.querySelector<HTMLButtonElement>('#mform #savebar button[type="submit"]');
+      expect(save).not.toBeNull();
+      expect(Boolean(save!.closest('[hidden]'))).toBe(false);
     } finally {
       dom.window.close();
     }
