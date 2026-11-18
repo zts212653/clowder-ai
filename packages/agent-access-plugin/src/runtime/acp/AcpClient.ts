@@ -9,9 +9,10 @@
  *   - Phase B GeminiAcpAdapter (production)
  */
 
-import type { ChildProcess, spawn as nodeSpawn } from 'node:child_process';
+import type { spawn as nodeSpawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { createInterface, type Interface as ReadlineInterface } from 'node:readline';
+import type { Readable } from 'node:stream';
 import { AcpCwdIdentityTracker } from './acp-cwd-identity.js';
 import { type AcpPromptInput, toAcpPromptContent } from './acp-prompt-content.js';
 import { AcpSessionBindingError, ActiveSessionCache } from './active-session-cache.js';
@@ -112,13 +113,27 @@ export interface AcpClientConfig {
   defaultPermissionDecision?: 'allow' | 'reject';
 }
 
+export interface AcpChildConnection {
+  readonly pid?: number;
+  readonly stdout?: Readable | null;
+  readonly stderr?: Readable | null;
+  isWritable(): boolean;
+  isKilled(): boolean;
+  write(line: string): void;
+  onError(listener: (error: Error) => void): void;
+  onExit(listener: (code: number | null, signal: NodeJS.Signals | null) => void): void;
+  shutdown(graceMs: number, endStdin: boolean): Promise<void>;
+}
+
+interface AcpChildLaunch {
+  child: AcpChildConnection;
+  childEnv: NodeJS.ProcessEnv;
+  spawnLog: AcpSpawnLogFields;
+}
+
 interface AcpClientPlatform {
   log: Pick<Console, 'info' | 'warn' | 'error' | 'debug'>;
-  launch(
-    config: AcpClientConfig,
-    captureCwdIdentity: () => void,
-  ): { child: ChildProcess; childEnv: NodeJS.ProcessEnv; providerCommand: string; providerArgs: string[] };
-  shutdown(child: ChildProcess, graceMs: number, endStdin: boolean): Promise<void>;
+  launch(config: AcpClientConfig, captureCwdIdentity: () => void): AcpChildLaunch | Promise<AcpChildLaunch>;
 }
 
 export interface AcpSpawnLogFields {
@@ -210,7 +225,7 @@ interface PendingAcpRequest {
 }
 
 /** Only these keys may cross into host-side native-home resolution; never the whole child env. */
-const NATIVE_HOME_ENV_KEYS = ['HOME', 'USERPROFILE', 'KIMI_CODE_HOME'] as const;
+export const NATIVE_HOME_ENV_KEYS = ['HOME', 'USERPROFILE', 'KIMI_CODE_HOME'] as const;
 
 export class AcpClient {
   private providerDiagnosticTail = '';
@@ -276,7 +291,7 @@ export class AcpClient {
     else this.sessionPermissionHandlers.delete(sessionId);
   }
   private readonly liveSessions = new ActiveSessionCache();
-  private child: ChildProcess | null = null;
+  private child: AcpChildConnection | null = null;
   /**
    * Exact environment the child received, captured at spawn. Host-side provider
    * evidence readers must resolve the same native home the CLI used — never the
@@ -351,9 +366,8 @@ export class AcpClient {
 
   async initialize(): Promise<AcpInitializeResult> {
     this.liveSessions.clear();
-    const { child, childEnv, providerCommand, providerArgs } = this.platform.launch(this.config, () =>
-      this.cwdIdentityTracker.capture(),
-    );
+    const launched = this.platform.launch(this.config, () => this.cwdIdentityTracker.capture());
+    const { child, childEnv, spawnLog } = launched instanceof Promise ? await launched : launched;
     this.child = child;
     this.childEnv = childEnv;
 
@@ -379,13 +393,13 @@ export class AcpClient {
       }
     });
 
-    this.child.on('error', (err) => {
+    this.child.onError((err) => {
       this.platform.log.error('ACP process error: %s', err.message);
       this.closed = true;
       this.rejectAllPending(err);
     });
 
-    this.child.on('exit', (code, signal) => {
+    this.child.onExit((code, signal) => {
       this.platform.log.info('ACP process exited: code=%s signal=%s', code, signal);
       this.exited = true;
       this.rejectAllPending(new Error(`ACP process exited: code=${code} signal=${signal}`));
@@ -393,16 +407,7 @@ export class AcpClient {
 
     this.startReading();
 
-    this.platform.log.info(
-      buildAcpSpawnLogFields({
-        command: providerCommand,
-        args: providerArgs,
-        cwd: this.config.cwd,
-        pid: this.child.pid,
-        env: this.config.env,
-      }),
-      'ACP initialize: process spawned, sending initialize request',
-    );
+    this.platform.log.info(spawnLog, 'ACP initialize: process spawned, sending initialize request');
     const resp = await this.sendRequest(ACP_METHODS.initialize, { protocolVersion: 1 });
     this.initResult = resp.result as unknown as AcpInitializeResult;
     this.negotiatedPromptCapabilities = Object.freeze({ ...this.initResult.agentCapabilities?.promptCapabilities });
@@ -1021,9 +1026,9 @@ export class AcpClient {
     const promptReqId = this.sessionPromptPendingIds.get(sessionId);
     const cb = this.sessionCancelCallbacks.get(sessionId);
 
-    if (this.child?.stdin?.writable) {
+    if (this.child?.isWritable()) {
       const msg = { jsonrpc: '2.0', method: ACP_METHODS.sessionCancel, params: { sessionId } };
-      this.child.stdin.write(`${JSON.stringify(msg)}\n`);
+      this.child.write(`${JSON.stringify(msg)}\n`);
       this.platform.log.info('Sent session/cancel for %s', sessionId);
     }
     // Settle the local prompt stream immediately
@@ -1060,11 +1065,7 @@ export class AcpClient {
     this.rl?.close();
     this.rejectAllPending(new Error('ACP client closed'));
     if (this.child?.pid !== undefined && !this.exited)
-      await this.platform.shutdown(
-        this.child,
-        ACP_CHILD_SHUTDOWN_GRACE_MS,
-        this.initResult?.agentInfo?.name === PI_BRIDGE_NAME,
-      );
+      await this.child.shutdown(ACP_CHILD_SHUTDOWN_GRACE_MS, this.initResult?.agentInfo?.name === PI_BRIDGE_NAME);
   }
 
   get pid(): number | undefined {
@@ -1072,7 +1073,7 @@ export class AcpClient {
   }
 
   get isAlive(): boolean {
-    return this.child !== null && !this.child.killed && !this.closed && !this.exited;
+    return this.child !== null && !this.child.isKilled() && !this.closed && !this.exited;
   }
 
   /**
@@ -1270,8 +1271,7 @@ export class AcpClient {
     quiet = false,
   ): Promise<AcpResponse> {
     const child = this.child;
-    const stdin = child?.stdin;
-    if (!child || !stdin?.writable) {
+    if (!child?.isWritable()) {
       return Promise.reject(new Error('ACP process stdin not writable'));
     }
 
@@ -1346,7 +1346,7 @@ export class AcpClient {
       };
       this.pending.set(id, pendingRequest);
       armTimeout();
-      stdin.write(`${payload}\n`);
+      child.write(`${payload}\n`);
     });
   }
 
@@ -1358,7 +1358,7 @@ export class AcpClient {
         handler: this.sessionPermissionHandlers.get(sessionId) ?? this.config.permissionHandler,
         defaultDecision: this.config.defaultPermissionDecision,
         write: (response) => {
-          this.child?.stdin?.write(`${JSON.stringify(response)}\n`);
+          this.child?.write(`${JSON.stringify(response)}\n`);
         },
       }).catch((error: unknown) => this.platform.log.warn({ error }, 'ACP permission response failed'));
     } else if (req.method === ACP_METHODS.chrysRequestInput) {
@@ -1371,21 +1371,20 @@ export class AcpClient {
         id: req.id,
         error: { code: -32601, message: `Client does not handle ${req.method}` },
       };
-      this.child?.stdin?.write(JSON.stringify(response) + '\n');
+      this.child?.write(JSON.stringify(response) + '\n');
     }
   }
 
   /** Write a JSON-RPC response to the agent, tolerating a dead/destroyed pipe. */
   private writeAgentResponse(response: Record<string, unknown>): void {
-    const stdin = this.child?.stdin;
-    if (!stdin || stdin.destroyed || !stdin.writable) {
+    if (!this.child?.isWritable()) {
       this.platform.log.warn(
         { id: response['id'] },
         'ACP client dropped a response: agent stdin is no longer writable',
       );
       return;
     }
-    stdin.write(JSON.stringify(response) + '\n');
+    this.child.write(JSON.stringify(response) + '\n');
   }
 
   /** Dispatch `_chrys/request_input` to the session-scoped handler, if any. */

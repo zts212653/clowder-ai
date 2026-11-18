@@ -1,1 +1,1 @@
-export * from '@clowder-ai/agent-access/runtime/acp/types';
+export * from '@clowder-ai/agent-contract/acp';

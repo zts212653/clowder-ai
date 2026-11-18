@@ -3,7 +3,10 @@ import { mkdirSync } from 'node:fs';
 import { dirname, isAbsolute } from 'node:path';
 import {
   ACP_CHILD_SHUTDOWN_GRACE_MS,
+  type AcpChildConnection,
   type AcpClientConfig,
+  buildAcpSpawnLogFields,
+  NATIVE_HOME_ENV_KEYS,
   AcpClient as ProtocolAcpClient,
 } from '@clowder-ai/agent-access/runtime/acp/AcpClient';
 import { createModuleLogger } from '../../../../../../infrastructure/logger.js';
@@ -93,11 +96,39 @@ function launch(config: AcpClientConfig, captureCwdIdentity: () => void) {
   if (IS_WINDOWS && !config.spawnFn) config.verifyBootstrapCwd?.(command, args, childEnv);
   captureCwdIdentity();
   const child = doSpawn(command, args, spawnOpts);
-  return { child, childEnv, providerCommand, providerArgs };
+  const connection: AcpChildConnection = {
+    pid: child.pid,
+    stdout: child.stdout,
+    stderr: child.stderr,
+    isWritable: () => Boolean(child.stdin?.writable && !child.stdin.destroyed),
+    isKilled: () => child.killed,
+    write: (line) => {
+      child.stdin?.write(line);
+    },
+    onError: (listener) => {
+      child.on('error', listener);
+    },
+    onExit: (listener) => {
+      child.on('exit', listener);
+    },
+    shutdown: (graceMs, endStdin) => shutdownAcpChild(child, graceMs, endStdin),
+  };
+  const nativeHomes = Object.fromEntries(NATIVE_HOME_ENV_KEYS.map((key) => [key, childEnv[key]]));
+  return {
+    child: connection,
+    childEnv: nativeHomes,
+    spawnLog: buildAcpSpawnLogFields({
+      command: providerCommand,
+      args: providerArgs,
+      cwd: config.cwd,
+      pid: child.pid,
+      env: config.env,
+    }),
+  };
 }
 
 export class AcpClient extends ProtocolAcpClient {
   constructor(config: AcpClientConfig) {
-    super(config, { launch, shutdown: shutdownAcpChild, log });
+    super(config, { launch, log });
   }
 }
