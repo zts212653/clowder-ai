@@ -49,10 +49,14 @@ export function PluginArchiveInstallButton({
       const formData = new FormData();
       formData.append('file', file);
       if (offer) formData.append('replacement', JSON.stringify(offer.confirmation));
-      const res = await apiFetch(endpoint, {
-        method: 'POST',
-        body: formData,
-      });
+      const res = await apiFetch(
+        endpoint,
+        {
+          method: 'POST',
+          body: formData,
+        },
+        { mutationTimeoutMs: 120000 },
+      );
       const data = await res.json();
       if (res.ok) {
         setMessage({ type: 'success', text: `安装成功: ${data.pluginId}` });

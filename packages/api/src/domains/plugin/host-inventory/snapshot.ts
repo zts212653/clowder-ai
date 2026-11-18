@@ -1,3 +1,4 @@
+import { z } from 'zod';
 import { agentClientMetadataSchema } from './agent-client-metadata.js';
 import { DEFAULT_PLUGIN_CONTRACT_RUNTIME, isManifestContractSupported } from './contract-policy.js';
 import type { PackageAdmissionContractRuntime } from './manifest-verifier.js';
@@ -246,7 +247,24 @@ export function parsePackage(
 
 export function parseInstance(value: unknown, index: number): PluginInstanceRecord {
   const raw = object(value, `instances[${index}]`);
+  const bindings =
+    raw.conversationBindings === undefined
+      ? undefined
+      : z
+          .array(
+            z
+              .object({
+                role: z.literal('main-conversation'),
+                ownerUserId: z.string().min(1),
+                commandId: z.string().min(1),
+                threadId: z.string().min(1).max(512),
+              })
+              .strict(),
+          )
+          .safeParse(raw.conversationBindings);
+  if (bindings && !bindings.success) corrupt(`instances[${index}].conversationBindings is invalid`);
   const record: PluginInstanceRecord = {
+    ...(bindings?.success ? { conversationBindings: bindings.data } : {}),
     pluginInstanceId: string(raw.pluginInstanceId, `instances[${index}].pluginInstanceId`),
     pluginId: string(raw.pluginId, `instances[${index}].pluginId`),
     packageDigest: string(raw.packageDigest, `instances[${index}].packageDigest`),
