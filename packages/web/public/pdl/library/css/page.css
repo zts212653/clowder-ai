@@ -49,10 +49,10 @@ body, [data-grid] > *, .chat > .stream { --g-w: min(100cqi - var(--g-pad) - max(
 .row.off .row-title, .row.off .row-sub { color: var(--fg-faint); }
 /* 分组内的分隔线：在底色里面、两端缩进，只帮眼睛横向对齐一行 */
 /* 分隔线：全站只有一种画法——后一项顶边的 ::before 发丝线（不占位）。位置只由变量给：--hl-in 两端缩进、--hl-c 颜色档（--line，声明处用 --line-strong）。
-   横线：分组里相邻两项、排了线的列表、表格相邻两行、正文里的分隔（.divider）、补充消息块、对话框里的手风琴项、组件目录的条目；
+   横线：分组里相邻两项、排了线的列表、表格相邻两行、正文里的分隔（.divider）、补充消息块、对话框里的手风琴项、组件目录的条目、胶囊里成员的各次运行；
    竖线：.divider.v（页签之间）和左右对照差异的右栏。别处不再用边框 / 内阴影 / hr 画线 */
-:is(.group > * + *, .lr-list.lined > * + *, .lr-tree.lined .lr-kids > *, tbody tr + tr > td, :is(.msg-body, .md) tbody tr:first-child > td, .divider, .cafe-supps, .cat-entry + .cat-entry, .wc-sl:nth-child(even)) { position: relative; }
-:is(.group > * + *, .lr-list.lined > * + *, .lr-tree.lined .lr-kids > *, tbody tr + tr > td, :is(.msg-body, .md) tbody tr:first-child > td, .divider, .cafe-supps, .cat-entry + .cat-entry)::before { content: ""; position: absolute; left: var(--hl-in, 0); right: var(--hl-in, 0); top: 0; height: 1px; background: var(--hl-c, var(--line)); pointer-events: none; }
+:is(.group > * + *, .lr-list.lined > * + *, .lr-tree.lined .lr-kids > *, tbody tr + tr > td, :is(.msg-body, .md) tbody tr:first-child > td, .divider, .cafe-supps, .cat-entry + .cat-entry, .cap-rows > * + *, .wc-sl:nth-child(even)) { position: relative; }
+:is(.group > * + *, .lr-list.lined > * + *, .lr-tree.lined .lr-kids > *, tbody tr + tr > td, :is(.msg-body, .md) tbody tr:first-child > td, .divider, .cafe-supps, .cat-entry + .cat-entry, .cap-rows > * + *)::before { content: ""; position: absolute; left: var(--hl-in, 0); right: var(--hl-in, 0); top: 0; height: 1px; background: var(--hl-c, var(--line)); pointer-events: none; }
 :is(.divider.v, .wc-sl:nth-child(even))::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: var(--sp-hairline); background: var(--hl-c, var(--line)); pointer-events: none; }
 .group > * + *, .lr-tree.lined .lr-kids > * { --hl-in: 12px; }
 .divider { display: block; height: 1px; margin: var(--sp-xs) 0; }

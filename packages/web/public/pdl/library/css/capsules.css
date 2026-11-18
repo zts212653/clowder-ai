@@ -19,10 +19,9 @@
 .cap-multi:is(:hover, :focus-within, .tap-on) .cap-x, .cap-multi .cap-pill[data-hot] .cap-x { max-height: calc(60 * var(--unit)); transition-delay: 0s, 0s, 0s; }
 .cap-rows { display: flex; flex-direction: column; align-items: stretch; padding: var(--sp-xs) 0 0; color: var(--fg-strong); }
 .cap-line { display: flex; align-items: center; gap: var(--sp-xs); padding: var(--sp-hair) 0; }
-.cap-line + .cap-line { box-shadow: inset 0 1px 0 var(--line); }
 .cap-row { flex: 1; min-width: 0; padding: var(--sp-hair) var(--sp-xs); border: 0; border-radius: var(--r-s); background: none; color: var(--fg-strong); font: inherit; text-align: left; white-space: nowrap; cursor: pointer; }
 .cap-row:hover { background: var(--hover); }
-.cap-row-who { display: flex; align-items: center; gap: var(--sp-xs); min-height: var(--ctl-s); padding: 0 var(--sp-xs); box-shadow: inset 0 1px 0 var(--line); }
+.cap-row-who { display: flex; align-items: center; gap: var(--sp-xs); min-height: var(--ctl-s); padding: 0 var(--sp-xs); }
 /* 向左展开（你的消息一侧）：布局镜像——底贴右边，头像在贴住的那一端（右），文字从头像左侧长出来；文字本身仍从左往右读 */
 .cap-left .cap-pill { left: auto; right: 0; }
 .cap-left .cap-lead { order: 1; }   /* 只把头像挪到贴住的那一端，内容的顺序和方向不动 */
