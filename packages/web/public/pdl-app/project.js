@@ -1858,6 +1858,16 @@ function bindProject() {
   FORMS.pvGo = function () {
     return chatAction('pvGo', { v: val('pv-url') });
   };
+  // An HTML widget's destination (the library checked it): a message is jumped to, a local page opens in
+  // 页面预览, a map place goes to the platform (the system browser in the desktop app).
+  A.widgetNav = function (d) {
+    if (d.kind === 'message') return A.msgJump({ t: d.t, mid: d.mid });
+    if (d.kind === 'local') {
+      A.wsTool({ k: 'preview' });
+      return chatAction('pvGo', { v: d.url });
+    }
+    return A.openUrl({ url: d.url });
+  };
   A.pvRetry = function () {
     return chatAction('pvRetry');
   };

@@ -86,8 +86,8 @@ window.addEventListener('message', function (e) {
   el._frameHeight = height; el._frameSized = true;
   if (el._frameSizeDone) { el._frameSizeDone(); el._frameSizeDone = null; FRAME_SIZE_PENDING.delete(el); }
 });
-/* HTML 作品请求跳转（cat-cafe:html-widget-navigation，v 1）：请求本身不跳。只认三种去处——本站某条对话里的某条消息、
-   OpenStreetMap 上的一个地点、本机 127.0.0.1 上的页面（避开宿主自己的端口）；认得的弹一条提示，用户亲手点“打开”才打开 */
+/* HTML 作品请求跳转（cat-cafe:html-widget-navigation，v 1）：只认三种去处——本站某条对话里的某条消息、
+   OpenStreetMap 上的一个地点、本机 127.0.0.1 上的页面（避开宿主自己的端口）；认得的交给动作 widgetNav 去开（去哪开是应用的事），其余不理 */
 const WIDGET_NAV_RESERVED = [3001, 3002, 3003, 3004, 6397, 6398, 6399, 18888, 19999, 9876, 9877, 9878, 9879, 9880, 9881];
 function widgetNavTarget(value) {
   if (typeof value !== 'string' || value.length > 2048 || /[\s\\]/.test(value)) return null;
@@ -95,17 +95,17 @@ function widgetNavTarget(value) {
   if (url.username || url.password || url.hash) return null;
   const q = Array.from(url.searchParams), port = Number(url.port), thread = /^\/thread\/(thread_[A-Za-z0-9_-]{1,193})$/.exec(url.pathname);
   if (value.indexOf('/thread/') === 0 && url.origin === location.origin && thread && q.length === 1 && (q[0][0] === 'message' || q[0][0] === 'messageId') && /^[A-Za-z0-9_-]{1,200}$/.test(q[0][1]))
-    return { href: url.href, act: 'msgJump', data: { t: thread[1], mid: q[0][1] } };
-  if (url.origin === 'https://www.openstreetmap.org' && /^\/(way|node|relation)\/\d+$/.test(url.pathname) && !q.length) return { href: url.href, act: 'openUrl', data: { url: url.href } };
+    return { kind: 'message', t: thread[1], mid: q[0][1] };
+  if (url.origin === 'https://www.openstreetmap.org' && /^\/(way|node|relation)\/\d+$/.test(url.pathname) && !q.length) return { kind: 'map', url: url.href };
   if (url.protocol === 'http:' && url.hostname === '127.0.0.1' && url.pathname === '/' && port >= 1024 && port <= 65535 && WIDGET_NAV_RESERVED.indexOf(port) < 0 &&
-    (!q.length || (q.length === 1 && q[0][0] === 'asset' && /^[a-f0-9]{64}$/.test(q[0][1])))) return { href: url.href, act: 'openUrl', data: { url: url.href } };
+    (!q.length || (q.length === 1 && q[0][0] === 'asset' && /^[a-f0-9]{64}$/.test(q[0][1])))) return { kind: 'local', url: url.href };
   return null;
 }
 window.addEventListener('message', function (e) {
   if (!e.data || e.data.type !== 'cat-cafe:html-widget-navigation' || e.data.v !== 1 || e.origin !== 'null') return;
   const el = Array.from(document.querySelectorAll('iframe.vw-widget[srcdoc]')).find(function (frame) { return frame.contentWindow === e.source; });
-  const to = el && widgetNavTarget(e.data.href); if (!to) return;
-  toast(tc('frame.widgetNav', to.href), { label: tc('common.open'), act: to.act, data: to.data });
+  const to = el && widgetNavTarget(e.data.href), open = to && actFn('widgetNav'); if (!open) return;
+  open(to);
   e.source.postMessage({ type: 'cat-cafe:html-widget-navigation-ready', v: 1 }, '*');
 });
 function frameSizePrune() {

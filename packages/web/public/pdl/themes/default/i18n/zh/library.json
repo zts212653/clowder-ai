@@ -225,8 +225,7 @@
   "speak": "朗读",
   "stopRecording": "停止录音",
   "toolTodo": "这个工具还没做。",
-  "unpin": "取消固定",
-  "widgetNav": "这个作品请求打开：{0}"
+  "unpin": "取消固定"
  },
  "list": {
   "filter": "筛选",
