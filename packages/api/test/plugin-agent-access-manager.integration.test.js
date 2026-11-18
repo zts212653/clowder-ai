@@ -10,6 +10,7 @@ import Fastify from 'fastify';
 import { A2AAgentService } from '../dist/domains/cats/services/agents/providers/A2AAgentService.js';
 import { MessageStore } from '../dist/domains/cats/services/stores/ports/MessageStore.js';
 import { createAgentAccessA2ARunner } from '../dist/domains/plugin/agent-access-a2a.js';
+import { createAgentAccessKimiLaunchPlanner } from '../dist/domains/plugin/agent-access-kimi.js';
 import {
   withPluginOwnerRequest,
   withPluginOwnerWebhook,
@@ -217,7 +218,18 @@ test('Agent access discovery executes the same standalone entrypoint from a Mana
   assert.equal((await manager.get(pluginId)).plugin.installedVersion, '1.0.0');
   assert.equal((await scan()).readiness.state, 'ready');
 
+  const planLaunch = createAgentAccessKimiLaunchPlanner(runtime.inventoryStore, runtime.supervisor);
+  const launch = await planLaunch({
+    prompt: 'fixture',
+    imageAccessDirs: [],
+    resumeSessionId: 'history-id',
+    cliConfigArgs: ['--session unsolicited --output-format stream-json'],
+  });
+  assert.deepEqual(launch.args, ['--session', 'history-id', '-p', 'fixture', '--output-format', 'stream-json']);
+  await launch.assertCurrent();
+
   const latest = await install(next);
+  await assert.rejects(launch.assertCurrent(), /session_implementation_unavailable/);
   assert.equal(latest.pluginInstanceId, installed.pluginInstanceId);
   assert.equal((await scan()).readiness.state, 'ready');
   assert.equal((await manager.get(pluginId)).plugin.installedVersion, '1.0.1');

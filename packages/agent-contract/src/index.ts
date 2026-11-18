@@ -57,6 +57,26 @@ export type AgentAccessReadiness = z.infer<typeof agentAccessReadinessSchema>;
 
 const clientIdSchema = z.enum(['anthropic', 'openai', 'google', 'kimi', 'antigravity', 'opencode', 'catagent', 'acp']);
 
+export const agentAccessKimiLaunchRequestSchema = z.object({
+  operation: z.literal('plan_native_launch'),
+  client: z.literal('kimi'),
+  launch: z.object({
+    prompt: z.string(),
+    agentFile: z.string().optional(),
+    resumeSessionId: z.string().optional(),
+    skillsDirectory: z.string().optional(),
+    model: z.string().optional(),
+    imageAccessDirs: z.array(z.string()).readonly(),
+    cliConfigArgs: z.array(z.string()).readonly().optional(),
+  }),
+});
+export type AgentAccessKimiLaunch = z.infer<typeof agentAccessKimiLaunchRequestSchema>['launch'];
+export const agentAccessNativeLaunchArgumentsSchema = z.object({
+  args: z.array(z.string()),
+  managedArgvFlags: z.array(z.string()),
+});
+export type AgentAccessNativeLaunchArguments = z.infer<typeof agentAccessNativeLaunchArgumentsSchema>;
+
 export const agentAccessClientDirectorySchema = z.object({
   clients: z.array(z.object({ id: clientIdSchema, label: z.string() })),
 });

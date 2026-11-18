@@ -2369,7 +2369,7 @@ async function initializeApi(
                       }
                       break;
                     case 'kimi':
-                      service = new KimiAgentService({ catId });
+                      service = new KimiAgentService({ catId, planLaunch: (input) => agentAccessKimiLaunch(input) });
                       break;
                     case 'antigravity':
                       agentRegistry.markUnavailable(id, {
@@ -5999,6 +5999,11 @@ async function initializeApi(
   const { pluginManagerUploadRoutes, registerPluginManagerRoutes } = await import('./routes/plugin-manager-routes.js');
   const { registerPluginMarketplaceRoutes } = await import('./routes/plugin-marketplace-routes.js');
   const { registerAgentClientLibraryRoutes } = await import('./routes/agent-client-library-routes.js');
+  const { createAgentAccessKimiLaunchPlanner } = await import('./domains/plugin/agent-access-kimi.js');
+  const agentAccessKimiLaunch = createAgentAccessKimiLaunchPlanner(
+    pluginRuntime.inventoryStore,
+    pluginRuntime.supervisor,
+  );
   const { createAgentAccessA2ARunner } = await import('./domains/plugin/agent-access-a2a.js');
   const agentAccessA2ARunner = createAgentAccessA2ARunner(pluginRuntime.inventoryStore, pluginRuntime.supervisor);
   const { createAgentRoleRead, createAgentRoleWrite, registerAgentAccessRoutes } = await import(

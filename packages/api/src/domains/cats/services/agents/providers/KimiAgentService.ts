@@ -9,6 +9,8 @@ import {
   getCliEffortOptionsForProvider,
   resolveCliEffortOverride,
 } from '@cat-cafe/shared';
+import { buildKimiLaunchArguments } from '@clowder-ai/agent-access/runtime/kimi-launch-arguments';
+import type { AgentAccessKimiLaunch, AgentAccessNativeLaunchArguments } from '@clowder-ai/agent-contract';
 import { getCatEffort } from '../../../../../config/cat-config-loader.js';
 import { getCatModel } from '../../../../../config/cat-models.js';
 import { estimateCostFromTokens } from '../../../../../config/model-pricing.js';
@@ -57,7 +59,6 @@ import {
   isKimiNativeL0ChannelAvailable,
   KIMI_V2_ENGINE_ENV_KEY,
   removeKimiL0AgentFileDir,
-  stripReservedKimiSystemArgs,
   writeKimiL0AgentFile,
 } from './kimi-l0-agent-file.js';
 import {
@@ -108,6 +109,9 @@ interface KimiAgentServiceOptions {
   catId?: CatId;
   spawnFn?: SpawnFn;
   model?: string;
+  planLaunch?: (
+    input: AgentAccessKimiLaunch,
+  ) => Promise<AgentAccessNativeLaunchArguments & { assertCurrent?: () => Promise<void> }>;
   mcpServerPath?: string;
   /** #780: Raw NDJSON archive sink (default: CliRawArchive to disk) */
   rawArchive?: RawArchiveSink;
@@ -124,6 +128,7 @@ export class KimiAgentService implements AgentService {
     return this.spawnFn === undefined;
   }
   private readonly model: string;
+  private readonly planLaunch: NonNullable<KimiAgentServiceOptions['planLaunch']>;
   /** #780: Raw NDJSON archive for post-mortem diagnostics */
   private readonly rawArchive: RawArchiveSink;
   private readonly l0CompilerFn: typeof compileL0ViaSubprocess;
@@ -132,6 +137,7 @@ export class KimiAgentService implements AgentService {
   constructor(options?: KimiAgentServiceOptions) {
     this.catId = options?.catId ?? createCatId('kimi');
     this.spawnFn = options?.spawnFn;
+    this.planLaunch = options?.planLaunch ?? (async (input) => buildKimiLaunchArguments(input));
     this.mcpServerPath = options?.mcpServerPath ?? process.env.CAT_CAFE_MCP_SERVER_PATH;
     this.model = options?.model ?? getCatModel(this.catId as string);
     this.rawArchive = options?.rawArchive ?? new CliRawArchive();
@@ -359,11 +365,7 @@ export class KimiAgentService implements AgentService {
       return;
     }
 
-    const args: string[] = ['--output-format', 'stream-json'];
-    if (scopedProfile) args.push('--skills-dir', scopedProfile.skillsDirectory);
-    const managedArgvFlags: string[] = [];
     if (effectiveResumeSessionId) {
-      args.push('--session', effectiveResumeSessionId);
       metadata.sessionId = effectiveResumeSessionId;
       yield {
         type: 'session_init',
@@ -373,39 +375,18 @@ export class KimiAgentService implements AgentService {
         timestamp: Date.now(),
       };
     }
-    for (const dir of imageAccessDirs) args.push('--add-dir', dir);
-    if (!scoped && !apiKeyEnv && effectiveModel) {
-      args.push('--model', effectiveModel);
-    }
-    if (l0AgentFilePath) {
-      args.push('--agent-file', l0AgentFilePath);
-      managedArgvFlags.push('--agent-file');
-    }
-    args.push('-p', effectivePrompt);
-
-    // User-defined CLI args from the member editor (#567).
-    // `--agent-file` / `--agent` are reserved (they carry the compression-immune
-    // L0) and stripped from user parts before the dedup pass.
-    const userParts: string[] = scoped
-      ? []
-      : stripReservedKimiSystemArgs(options?.cliConfigArgs?.flatMap((arg) => arg.trim().split(/\s+/)) ?? []);
-    if (userParts.length > 0) {
-      const accumulativeFlags = new Set(['--add-dir']);
-      const userFlags = new Set(userParts.filter((p) => p.startsWith('-')));
-      const deduped: string[] = [];
-      for (let i = 0; i < args.length; i++) {
-        if (args[i].startsWith('-') && userFlags.has(args[i]) && !accumulativeFlags.has(args[i])) {
-          if (i + 1 < args.length && !args[i + 1].startsWith('-')) i++;
-          continue;
-        }
-        deduped.push(args[i]);
-      }
-      args.length = 0;
-      args.push(...deduped, ...userParts);
-    }
-
     let mcpLease: KimiMcpLease | undefined;
     try {
+      const { args, managedArgvFlags, assertCurrent } = await this.planLaunch({
+        prompt: effectivePrompt,
+        imageAccessDirs,
+        skillsDirectory: scopedProfile?.skillsDirectory,
+        resumeSessionId: effectiveResumeSessionId,
+        model: !scoped && !apiKeyEnv ? effectiveModel : undefined,
+        agentFile: l0AgentFilePath,
+        cliConfigArgs: scoped ? undefined : options?.cliConfigArgs,
+      });
+
       if (scopedProfile) {
         mcpLease = { env: scopedProfile.env, dispose: scopedProfile.dispose };
       } else {
@@ -510,6 +491,7 @@ export class KimiAgentService implements AgentService {
           : {}),
       };
       await scoped?.pluginNativeLaunch?.assertCurrent();
+      await assertCurrent?.();
       const events = options?.spawnCliOverride
         ? options.spawnCliOverride(cliOpts)
         : spawnCli(cliOpts, this.spawnFn ? { spawnFn: this.spawnFn } : undefined);

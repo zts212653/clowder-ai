@@ -5,6 +5,7 @@ import {
   type AgentAccessRoleMutation,
   type AgentAccessRoleStore,
   agentAccessDetectRequestSchema,
+  agentAccessKimiLaunchRequestSchema,
   agentAccessLoginRequestSchema,
 } from '@clowder-ai/agent-contract';
 import { builtInAgentClients, inspectNativeAccessCandidate } from './discovery/agent-client-catalog.js';
@@ -14,6 +15,7 @@ import { discoverNativeRuntimes } from './discovery/native-runtimes.js';
 import { readRoles } from './roles/role-card.js';
 import { writeRole } from './roles/write-role.js';
 import { runA2ATurn } from './runtime/a2a-turn.js';
+import { buildKimiLaunchArguments } from './runtime/kimi-launch-arguments.js';
 
 export default {
   create() {
@@ -23,7 +25,11 @@ export default {
         if (!discovery) throw new Error('Agent access Host discovery port is unavailable');
         return {
           actions: {
-            configure() {
+            configure(input: unknown) {
+              if (input && typeof input === 'object' && 'operation' in input) {
+                const { launch } = agentAccessKimiLaunchRequestSchema.parse(input);
+                return buildKimiLaunchArguments(launch);
+              }
               return { clients: builtInAgentClients };
             },
             async login(input: unknown) {
