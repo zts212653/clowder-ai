@@ -523,7 +523,11 @@ function executionModel(query) {
       context: ctx ? { used: ctx.usedTokens, ceiling: ctx.windowTokens, source: ctx.source } : null,
       contextPercent: ctx ? ctx.fillRatio * 100 : 0,
       contextWarn: !!ctx && ctx.fillRatio >= 0.8,
-      run: { time: live ? (Date.now() - live.startedAt) / 1000 : 0, hasLast: false },
+      run: {
+        state: live ? 'streaming' : 'idle',
+        time: live ? (Date.now() - live.startedAt) / 1000 : 0,
+        hasLast: false,
+      },
       sessions: sessions
         .slice()
         .sort(function (a, b) {
