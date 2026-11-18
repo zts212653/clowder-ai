@@ -5,9 +5,9 @@ import {
   ACP_CHILD_SHUTDOWN_GRACE_MS,
   type AcpClientConfig,
   launchAcpChild,
-} from '../cats/services/agents/providers/acp/AcpClient.js';
-import type { PluginRuntimeCarrierRouter } from './carrier/runtime-carrier.js';
-import type { PluginInventoryStore } from './host-inventory/ports.js';
+} from '../../cats/services/agents/providers/acp/AcpClient.js';
+import type { PluginRuntimeCarrierRouter } from '../carrier/runtime-carrier.js';
+import type { PluginInventoryStore } from '../host-inventory/ports.js';
 
 const resultSchema = z.object({ sessionId: z.string().min(1) });
 

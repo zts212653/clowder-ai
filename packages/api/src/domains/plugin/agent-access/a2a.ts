@@ -3,8 +3,8 @@ import {
   type AgentAccessA2ARunner,
   agentAccessA2AEventsSchema,
 } from '@clowder-ai/agent-contract';
-import type { PluginRuntimeCarrierRouter } from './carrier/runtime-carrier.js';
-import type { PluginInventoryStore } from './host-inventory/ports.js';
+import type { PluginRuntimeCarrierRouter } from '../carrier/runtime-carrier.js';
+import type { PluginInventoryStore } from '../host-inventory/ports.js';
 
 export function createAgentAccessA2ARunner(
   inventory: Pick<PluginInventoryStore, 'readCurrentAuthority'>,

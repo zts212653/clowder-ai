@@ -12,9 +12,9 @@ import Fastify from 'fastify';
 import { A2AAgentService } from '../dist/domains/cats/services/agents/providers/A2AAgentService.js';
 import { sessionImplementationKey } from '../dist/domains/cats/services/agents/session-contract/implementation-registry.js';
 import { MessageStore } from '../dist/domains/cats/services/stores/ports/MessageStore.js';
-import { createAgentAccessA2ARunner } from '../dist/domains/plugin/agent-access-a2a.js';
-import { createAgentAccessDshConnectionTest } from '../dist/domains/plugin/agent-access-dsh.js';
-import { createAgentAccessKimiLaunchPlanner } from '../dist/domains/plugin/agent-access-kimi.js';
+import { createAgentAccessA2ARunner } from '../dist/domains/plugin/agent-access/a2a.js';
+import { createAgentAccessDshConnectionTest } from '../dist/domains/plugin/agent-access/dsh.js';
+import { createAgentAccessKimiLaunchPlanner } from '../dist/domains/plugin/agent-access/kimi.js';
 import {
   withPluginOwnerRequest,
   withPluginOwnerWebhook,

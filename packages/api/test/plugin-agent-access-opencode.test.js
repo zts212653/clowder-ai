@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
-import { createAgentAccessOpenCodeLaunchPlanner } from '../src/domains/plugin/agent-access-opencode.js';
+import { createAgentAccessOpenCodeLaunchPlanner } from '../src/domains/plugin/agent-access/opencode.js';
 
 /**
  * The Host no longer builds OpenCode argv itself: the active package planes it, and

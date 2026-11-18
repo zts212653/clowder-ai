@@ -5,8 +5,8 @@ import {
   agentAccessNativeLaunchArgumentsSchema,
   agentAccessOpenCodeEventSchema,
 } from '@clowder-ai/agent-contract';
-import type { PluginRuntimeCarrierRouter } from './carrier/runtime-carrier.js';
-import type { PluginInventoryStore } from './host-inventory/ports.js';
+import type { PluginRuntimeCarrierRouter } from '../carrier/runtime-carrier.js';
+import type { PluginInventoryStore } from '../host-inventory/ports.js';
 
 /**
  * Host-side seam for the OpenCode native runtime.

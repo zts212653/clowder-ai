@@ -1,9 +1,9 @@
 import { AGENT_ACCESS_PLUGIN_ID, type AgentAccessDiscoveryHost } from '@clowder-ai/agent-contract';
-import { inspectNativeLogin } from '../../routes/native-runtime-readiness.js';
-import { nativeRuntimeDetectionContext } from '../../routes/native-runtimes.js';
-import { resolveActiveProjectRoot } from '../../utils/active-project-root.js';
-import { resolveCliCommand } from '../../utils/cli-resolve.js';
-import { currentPluginOwnerRequestContext } from './carrier/plugin-call-context.js';
+import { inspectNativeLogin } from '../../../routes/native-runtime-readiness.js';
+import { nativeRuntimeDetectionContext } from '../../../routes/native-runtimes.js';
+import { resolveActiveProjectRoot } from '../../../utils/active-project-root.js';
+import { resolveCliCommand } from '../../../utils/cli-resolve.js';
+import { currentPluginOwnerRequestContext } from '../carrier/plugin-call-context.js';
 
 export function createAgentAccessDiscoveryHost(
   pluginId: string,

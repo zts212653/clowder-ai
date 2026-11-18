@@ -13,7 +13,7 @@ import {
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { MemberConfigurationConflict } from '../config/member-config-revision.js';
 import { MemberCreateConflict } from '../config/member-create-receipt.js';
-import { AGENT_PROVIDER_UNAVAILABLE } from '../domains/plugin/agent-access-role-store.js';
+import { AGENT_PROVIDER_UNAVAILABLE } from '../domains/plugin/agent-access/role-store.js';
 import {
   withPluginOwnerRequest,
   withPluginOwnerWebhook,

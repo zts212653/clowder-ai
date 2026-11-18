@@ -4,8 +4,8 @@ import {
   agentAccessKimiEventSchema,
   agentAccessNativeLaunchArgumentsSchema,
 } from '@clowder-ai/agent-contract';
-import type { PluginRuntimeCarrierRouter } from './carrier/runtime-carrier.js';
-import type { PluginInventoryStore } from './host-inventory/ports.js';
+import type { PluginRuntimeCarrierRouter } from '../carrier/runtime-carrier.js';
+import type { PluginInventoryStore } from '../host-inventory/ports.js';
 
 export function createAgentAccessKimiLaunchPlanner(
   inventory: Pick<PluginInventoryStore, 'readCurrentAuthority'>,

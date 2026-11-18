@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { createAgentAccessDshConnectionTest } from '../dist/domains/plugin/agent-access-dsh.js';
+import { createAgentAccessDshConnectionTest } from '../dist/domains/plugin/agent-access/dsh.js';
 
 test('closing the worker during launch admission prevents spawning the DSH process', async () => {
   const ref = {

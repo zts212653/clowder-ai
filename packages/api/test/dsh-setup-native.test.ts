@@ -113,7 +113,7 @@ test(
       { createDormantPluginRuntimeComposition, createPluginManagerRuntimeComposition },
     ] = await Promise.all([
       import('../dist/domains/cats/services/stores/ports/MessageStore.js'),
-      import('../dist/domains/plugin/agent-access-dsh.js'),
+      import('../dist/domains/plugin/agent-access/dsh.js'),
       import('../dist/domains/plugin/index.js'),
     ]);
     const runtime = createDormantPluginRuntimeComposition({

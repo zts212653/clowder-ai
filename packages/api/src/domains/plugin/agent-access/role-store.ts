@@ -5,29 +5,29 @@ import {
   type AgentAccessRoleStore,
   agentAccessRoleProfileSchema,
 } from '@clowder-ai/agent-contract';
-import { readCatCatalogRaw, resolveCatCatalogPath } from '../../config/cat-catalog-store.js';
+import { readCatCatalogRaw, resolveCatCatalogPath } from '../../../config/cat-catalog-store.js';
 import {
   loadCatConfig,
   loadResolvedCatConfig,
   mergeRuntimeCatalogSnapshot,
   parseRawCatConfig,
   toAllCatConfigs,
-} from '../../config/cat-config-loader.js';
-import { assertCodexMemberMutationReady } from '../../config/codex-account-binding.js';
-import { resolveProjectTemplatePath } from '../../config/project-template-path.js';
+} from '../../../config/cat-config-loader.js';
+import { assertCodexMemberMutationReady } from '../../../config/codex-account-binding.js';
+import { resolveProjectTemplatePath } from '../../../config/project-template-path.js';
 import {
   findTemplateVariantTombstoneInput,
   refreshRuntimeCatCatalogCaches,
   withRuntimeCatMutationLock,
-} from '../../config/runtime-cat-catalog.js';
-import { writeFileAtomic } from '../../config/write-file-atomic.js';
-import { resolveActiveProjectRoot } from '../../utils/active-project-root.js';
+} from '../../../config/runtime-cat-catalog.js';
+import { writeFileAtomic } from '../../../config/write-file-atomic.js';
+import { resolveActiveProjectRoot } from '../../../utils/active-project-root.js';
 import {
   type SessionImplementationRef,
   sessionImplementationKey,
-} from '../cats/services/agents/session-contract/implementation-registry.js';
-import { resolveMemberSessionRef } from '../cats/services/agents/session-contract/plugin-agent-provider.js';
-import { currentPluginOwnerRequestContext } from './carrier/plugin-call-context.js';
+} from '../../cats/services/agents/session-contract/implementation-registry.js';
+import { resolveMemberSessionRef } from '../../cats/services/agents/session-contract/plugin-agent-provider.js';
+import { currentPluginOwnerRequestContext } from '../carrier/plugin-call-context.js';
 
 export const AGENT_PROVIDER_UNAVAILABLE = 'agent_provider_unavailable';
 export type DeclaredAgentProviderAvailability = (reference: SessionImplementationRef) => boolean;

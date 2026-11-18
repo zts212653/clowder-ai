@@ -6009,13 +6009,13 @@ async function initializeApi(
   const { pluginManagerUploadRoutes, registerPluginManagerRoutes } = await import('./routes/plugin-manager-routes.js');
   const { registerPluginMarketplaceRoutes } = await import('./routes/plugin-marketplace-routes.js');
   const { registerAgentClientLibraryRoutes } = await import('./routes/agent-client-library-routes.js');
-  const { createAgentAccessKimiLaunchPlanner } = await import('./domains/plugin/agent-access-kimi.js');
+  const { createAgentAccessKimiLaunchPlanner } = await import('./domains/plugin/agent-access/kimi.js');
   const agentAccessKimiLaunch = createAgentAccessKimiLaunchPlanner(
     pluginRuntime.inventoryStore,
     pluginRuntime.supervisor,
   );
   const { createAgentAccessOpenCodeLaunchPlanner, createAgentAccessOpenCodeFinalizerPlanner } = await import(
-    './domains/plugin/agent-access-opencode.js'
+    './domains/plugin/agent-access/opencode.js'
   );
   const agentAccessOpenCodeLaunch = createAgentAccessOpenCodeLaunchPlanner(
     pluginRuntime.inventoryStore,
@@ -6025,9 +6025,9 @@ async function initializeApi(
     pluginRuntime.inventoryStore,
     pluginRuntime.supervisor,
   );
-  const { createAgentAccessA2ARunner } = await import('./domains/plugin/agent-access-a2a.js');
+  const { createAgentAccessA2ARunner } = await import('./domains/plugin/agent-access/a2a.js');
   const agentAccessA2ARunner = createAgentAccessA2ARunner(pluginRuntime.inventoryStore, pluginRuntime.supervisor);
-  const { createAgentAccessDshConnectionTest } = await import('./domains/plugin/agent-access-dsh.js');
+  const { createAgentAccessDshConnectionTest } = await import('./domains/plugin/agent-access/dsh.js');
   const agentAccessDshConnection = createAgentAccessDshConnectionTest(
     pluginRuntime.inventoryStore,
     pluginRuntime.supervisor,
