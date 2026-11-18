@@ -125,12 +125,37 @@ function describeFailure(error: unknown): AgentAccessAcpSessionFailure {
   return { kind: 'other', message: error instanceof Error ? error.message : String(error) };
 }
 
+interface ProcessTurn {
+  contentRef: string;
+  phase: 'waiting' | 'active' | 'cancelled' | 'settled';
+}
+
 async function* promptAcpProcess(
   client: AcpClient,
   request: Extract<AgentAccessAcpSessionOperation, { operation: 'prompt' }>,
+  state: ProcessTurn,
 ): AsyncGenerator<AgentAccessAcpTurnFrame> {
   const { sessionId, contentRef, limits } = request;
-  const turn = client.promptStream(sessionId, contentRef, limits);
+  if (state.phase === 'cancelled') {
+    state.phase = 'settled';
+    yield {
+      kind: 'terminal',
+      finalResponse: false,
+      cancelQueued: false,
+      sessionReusable: true,
+      processReusable: client.isSafeForSingleFlightReuse,
+      result: { failure: { kind: 'cancelled', sessionId } },
+    };
+    return;
+  }
+  state.phase = 'active';
+  let cancelQueued = false;
+  const turn = client.promptStream(sessionId, contentRef, {
+    ...limits,
+    onCancelQueued: () => {
+      cancelQueued = true;
+    },
+  });
   let result: Extract<AgentAccessAcpTurnFrame, { kind: 'terminal' }>['result'];
   try {
     for (let next = await turn.next(); ; next = await turn.next()) {
@@ -144,10 +169,12 @@ async function* promptAcpProcess(
     result = { failure: describeFailure(error) };
   } finally {
     await turn.return('cancelled');
+    state.phase = 'settled';
   }
   yield {
     kind: 'terminal',
     finalResponse: client.hasPromptFinalResponse(sessionId),
+    cancelQueued,
     sessionReusable: client.isSessionSafeForReuse(sessionId),
     processReusable: client.isSafeForSingleFlightReuse,
     result,
@@ -158,7 +185,12 @@ async function* promptAcpProcess(
 export function createAcpProcessActions() {
   const drivers = new Map<
     string,
-    { client: AcpClient; commands: Readable; initialization?: ReturnType<AcpClient['initialize']> }
+    {
+      client: AcpClient;
+      commands: Readable;
+      turns: Map<string, ProcessTurn>;
+      initialization?: ReturnType<AcpClient['initialize']>;
+    }
   >();
 
   return {
@@ -186,7 +218,7 @@ export function createAcpProcessActions() {
           client.onCapacity((signal) => {
             if (!commands.destroyed) commands.write({ kind: 'capacity', ...signal });
           });
-          drivers.set(request.processId, { client, commands });
+          drivers.set(request.processId, { client, commands, turns: new Map() });
           commands.once('close', () => drivers.delete(request.processId));
           return { commands };
         }
@@ -204,7 +236,16 @@ export function createAcpProcessActions() {
       if (!current?.initialization) throw new Error('ACP process is unavailable in this activation');
       await current.initialization;
       const client = current.client;
-      if (request.operation === 'prompt') return promptAcpProcess(client, request);
+      if (request.operation === 'prompt') {
+        const previous = current.turns.get(request.sessionId);
+        const turn: ProcessTurn = {
+          contentRef: request.contentRef,
+          phase:
+            previous?.contentRef === request.contentRef && previous.phase === 'cancelled' ? 'cancelled' : 'waiting',
+        };
+        current.turns.set(request.sessionId, turn);
+        return promptAcpProcess(client, request, turn);
+      }
       try {
         switch (request.operation) {
           case 'newSession':
@@ -224,6 +265,7 @@ export function createAcpProcessActions() {
           }
           case 'closeSession':
             await client.closeSession(request.sessionId);
+            current.turns.delete(request.sessionId);
             break;
           case 'setModel':
             await client.setSessionModel(request.sessionId, request.modelId);
@@ -231,9 +273,16 @@ export function createAcpProcessActions() {
           case 'setConfig':
             await client.setSessionConfigOption(request.sessionId, request.configId, request.value);
             break;
-          case 'cancel':
-            client.cancelSession(request.sessionId);
-            break;
+          case 'cancel': {
+            const turn = current.turns.get(request.sessionId);
+            if (turn?.contentRef === request.contentRef) {
+              if (turn.phase === 'active') return { ok: true, result: client.cancelSession(request.sessionId, true) };
+              if (turn.phase === 'waiting') turn.phase = 'cancelled';
+            } else if (!turn || turn.phase === 'settled') {
+              current.turns.set(request.sessionId, { contentRef: request.contentRef, phase: 'cancelled' });
+            }
+            return { ok: true, result: false };
+          }
         }
         return { ok: true };
       } catch (error) {

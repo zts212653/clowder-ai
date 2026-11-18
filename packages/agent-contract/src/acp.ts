@@ -31,7 +31,7 @@ export const agentAccessAcpSessionOperationSchema = z.discriminatedUnion('operat
   z.object({ operation: z.literal('closeSession'), processId, sessionId }),
   z.object({ operation: z.literal('setModel'), processId, sessionId, modelId: z.string().min(1) }),
   z.object({ operation: z.literal('setConfig'), processId, sessionId, configId: z.string().min(1), value: z.string() }),
-  z.object({ operation: z.literal('cancel'), processId, sessionId }),
+  z.object({ operation: z.literal('cancel'), processId, sessionId, contentRef: z.string().min(1) }),
   z.object({
     operation: z.literal('prompt'),
     processId,
@@ -64,6 +64,7 @@ export const agentAccessAcpTurnFrameSchema = z.discriminatedUnion('kind', [
   z.object({
     kind: z.literal('terminal'),
     finalResponse: z.boolean(),
+    cancelQueued: z.boolean(),
     sessionReusable: z.boolean(),
     processReusable: z.boolean(),
     result: z.union([
@@ -78,6 +79,7 @@ export type AgentAccessAcpTurnFrame =
   | {
       kind: 'terminal';
       finalResponse: boolean;
+      cancelQueued: boolean;
       sessionReusable: boolean;
       processReusable: boolean;
       result: { stopReason: AcpStopReason } | { failure: AgentAccessAcpSessionFailure };

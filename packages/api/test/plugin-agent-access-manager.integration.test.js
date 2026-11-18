@@ -388,6 +388,11 @@ test('Agent access discovery executes the same standalone entrypoint from a Mana
   const privatePrompt = 'Host-approved fixture prompt';
   const heldWrite = Promise.withResolvers();
   const finishWrite = Promise.withResolvers();
+  const heldIdleWrite = Promise.withResolvers();
+  const finishIdleWrite = Promise.withResolvers();
+  const heldPromptAdmission = Promise.withResolvers();
+  const finishPromptAdmission = Promise.withResolvers();
+  const earlyCancelReturned = Promise.withResolvers();
   const workerCancelReturned = Promise.withResolvers();
   const explicitCancelReceived = Promise.withResolvers();
   const idleCancelReceived = Promise.withResolvers();
@@ -399,9 +404,16 @@ test('Agent access discovery executes the same standalone entrypoint from a Mana
         const crossing = JSON.stringify(input);
         assert.equal(crossing.includes(mcpSecret), false);
         assert.equal(crossing.includes(privatePrompt), false);
+        if (input.operation === 'prompt' && input.sessionId === 'fixture-early-stop') {
+          heldPromptAdmission.resolve();
+          await finishPromptAdmission.promise;
+        }
       }
       const result = await runtime.supervisor.invoke(instanceId, method, input);
       if (method === 'acpSession' && input.operation === 'cancel') workerCancelReturned.resolve();
+      if (method === 'acpSession' && input.operation === 'cancel' && input.sessionId === 'fixture-early-stop') {
+        earlyCancelReturned.resolve();
+      }
       return result;
     },
   });
@@ -418,6 +430,12 @@ test('Agent access discovery executes the same standalone entrypoint from a Mana
           if (diagnostics.includes('fixture-native-idle-cancel')) idleCancelReceived.resolve();
         });
         child.stdin.write = (line, callback) => {
+          if (line.includes('fixture-idle-probe')) {
+            return write(line, (error) => {
+              heldIdleWrite.resolve();
+              void finishIdleWrite.promise.then(() => callback(error));
+            });
+          }
           if (!line.includes('fixture-cancel-probe')) return write(line, callback);
           return write(line, (error) => {
             heldWrite.resolve();
@@ -434,12 +452,13 @@ test('Agent access discovery executes the same standalone entrypoint from a Mana
         require('node:readline').createInterface({ input: process.stdin }).on('line', (line) => {
           const { id, method, params, result } = JSON.parse(line);
           const send = (message) => console.log(JSON.stringify({ jsonrpc: '2.0', ...message }));
-          if (method === 'initialize') send({ id, result: { protocolVersion: 1, agentCapabilities: { sessionCapabilities: { resume: {} } } } });
+          if (method === 'initialize') send({ id, result: { protocolVersion: 1, agentCapabilities: { sessionCapabilities: { resume: {} }, mcpCapabilities: {} } } });
           if (method === 'session/new' || method === 'session/resume') {
             if (params.mcpServers[0].env[0].value !== '${mcpSecret}') process.exit(2);
             send({ id, result: { sessionId: params.sessionId ?? 'same-acp-native' } });
           }
           if (method === 'session/prompt') {
+            if (params.sessionId === 'fixture-early-stop') process.exit(4);
             if (['fixture-cancel-probe', 'fixture-idle-probe'].includes(params.prompt[0].text)) return;
             if (params.prompt[0].text === 'fixture-peer-probe') {
               peer = { id, sessionId: params.sessionId };
@@ -461,6 +480,7 @@ test('Agent access discovery executes the same standalone entrypoint from a Mana
             permissionPending = undefined;
           }
           if (method === 'session/cancel') {
+            if (params.sessionId === 'fixture-early-stop') process.exit(5);
             console.error(params.sessionId === 'fixture-watchdog' ? 'fixture-native-idle-cancel' : 'fixture-native-explicit-cancel');
             if (peer) {
               if (params.sessionId === peer.sessionId) process.exit(3);
@@ -477,7 +497,7 @@ test('Agent access discovery executes the same standalone entrypoint from a Mana
   try {
     assert.deepEqual(await acp.initialize(), {
       protocolVersion: 1,
-      agentCapabilities: { sessionCapabilities: { resume: {} } },
+      agentCapabilities: { sessionCapabilities: { resume: {} }, mcpCapabilities: {} },
     });
     const mcp = [
       {
@@ -503,7 +523,8 @@ test('Agent access discovery executes the same standalone entrypoint from a Mana
         value: ['CAT_CAFE_CALLBACK_TOKEN', 'CAT_CAFE_INVOCATION_ID'].includes(name) ? value + '-next' : value,
       })),
     }));
-    assert.equal((await acp.loadSession(historyId, projectRoot, refreshedMcp)).sessionId, historyId);
+    const unsupported = { type: 'http', name: 'unsupported-http', url: 'http://127.0.0.1:1/mcp', headers: [] };
+    assert.equal((await acp.loadSession(historyId, projectRoot, [unsupported, ...refreshedMcp])).sessionId, historyId);
     acp.setSessionPermissionHandler(historyId, (request, respond) => {
       assert.equal(request.id, 0);
       respond({ optionId: 'fixture-approved' });
@@ -533,7 +554,7 @@ test('Agent access discovery executes the same standalone entrypoint from a Mana
     const watchdogId = 'fixture-watchdog';
     assert.equal((await acp.loadSession(watchdogId, projectRoot, mcp)).sessionId, watchdogId);
     const idle = acp.promptStream(watchdogId, 'fixture-idle-probe', { idleWarningMs: 25, idleStallMs: 100 });
-    await assert.rejects(
+    const idleFailure = assert.rejects(
       async () => {
         for await (const _ of idle) {
           // The idle warning can precede the terminal.
@@ -541,14 +562,31 @@ test('Agent access discovery executes the same standalone entrypoint from a Mana
       },
       { name: 'AcpStreamIdleError' },
     );
+    await heldIdleWrite.promise;
+    await idleFailure;
+    acp.cancelSession(watchdogId);
+    finishIdleWrite.resolve();
     await Promise.race([
       idleCancelReceived.promise,
       wait(2_000).then(() => assert.fail('idle cancel was not written')),
     ]);
     assert.equal(acp.isAlive, true);
     assert.equal((await acp.newSession(projectRoot, mcp)).sessionId, sessionId);
+    const earlyId = 'fixture-early-stop';
+    assert.equal((await acp.loadSession(earlyId, projectRoot, mcp)).sessionId, earlyId);
+    const early = acp.promptStream(earlyId, 'fixture must not reach stdin');
+    const earlyFailure = assert.rejects(early.next(), { name: 'AcpSessionCancelledError' });
+    await heldPromptAdmission.promise;
+    acp.cancelSession(earlyId);
+    await earlyCancelReturned.promise;
+    finishPromptAdmission.resolve();
+    await earlyFailure;
+    assert.equal(acp.isAlive, true);
+    assert.equal((await acp.newSession(projectRoot, mcp)).sessionId, sessionId);
   } finally {
     finishWrite.resolve();
+    finishIdleWrite.resolve();
+    finishPromptAdmission.resolve();
     await acp.close();
   }
 

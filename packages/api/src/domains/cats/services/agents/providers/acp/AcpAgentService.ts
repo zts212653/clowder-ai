@@ -444,6 +444,7 @@ export class AcpAgentService implements AgentService {
     for (let attempt = 0; ; attempt++) {
       let yieldedEvents = 0;
       await hooks?.beforeAttempt?.(attempt);
+      signal?.throwIfAborted();
       hooks?.onAttemptStart?.();
       try {
         const stream = client.promptStream(sessionId, prompt, opts);
@@ -1198,7 +1199,6 @@ export class AcpAgentService implements AgentService {
         if (bridgeSteerAvailable && options?.activeRunDispatch)
           dshTurn = new DshTurnInput(dshClient, sessionId, options);
       }
-      promptPhase = 'active_unacknowledged';
       for await (const event of this.promptStreamWithBusyRetry(
         client,
         sessionId,

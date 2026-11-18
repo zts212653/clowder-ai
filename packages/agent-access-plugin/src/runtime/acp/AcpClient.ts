@@ -320,7 +320,7 @@ export class AcpClient {
    * blocks until the provider cooperates or the idle watchdog fires, leaving
    * the lease pinned for the full TTL.
    */
-  private readonly sessionCancelCallbacks = new Map<string, () => void>();
+  private readonly sessionCancelCallbacks = new Map<string, (queued: boolean) => void>();
   /**
    * #1186 P1: Track the pending request ID for each session's prompt so that
    * cancelSession() can settle (reject) the underlying sendRequest promise.
@@ -711,7 +711,7 @@ export class AcpClient {
   async *promptStream(
     sessionId: string,
     input: AcpPromptInput,
-    options?: { timeoutMs?: number; idleWarningMs?: number; idleStallMs?: number },
+    options?: { timeoutMs?: number; idleWarningMs?: number; idleStallMs?: number; onCancelQueued?: () => void },
   ): AsyncGenerator<AcpSessionUpdate, AcpStopReason> {
     if (this.sessionPromptPendingIds.has(sessionId)) {
       throw new AcpProtocolError(-32600, 'ACP session already has an active prompt');
@@ -916,7 +916,8 @@ export class AcpClient {
 
     // #1186 P1: Register cancel callback so cancelSession() settles this stream
     // immediately instead of waiting for the provider or idle watchdog.
-    const cancelCb = () => {
+    const cancelCb = (queued: boolean) => {
+      if (queued) options?.onCancelQueued?.();
       if (done) return;
       // The local stream can settle before the provider acknowledges prompt
       // termination. The pool uses this only for single-flight retirement.
@@ -1022,17 +1023,23 @@ export class AcpClient {
    * the carrier unsafe for single-flight reuse; the pool retires non-multiplexed
    * clients while leaving multiplexed clients available to unrelated sessions.
    */
-  cancelSession(sessionId: string): void {
+  cancelSession(sessionId: string, onlyActivePrompt = false): boolean {
     const promptReqId = this.sessionPromptPendingIds.get(sessionId);
     const cb = this.sessionCancelCallbacks.get(sessionId);
+    if (onlyActivePrompt && !cb) return false;
+    const child = this.child;
+    const queued = child?.isWritable() === true;
 
-    if (this.child?.isWritable()) {
+    if (child && queued) {
       const msg = { jsonrpc: '2.0', method: ACP_METHODS.sessionCancel, params: { sessionId } };
-      this.child.write(`${JSON.stringify(msg)}\n`);
+      child.write(`${JSON.stringify(msg)}\n`);
       this.platform.log.info('Sent session/cancel for %s', sessionId);
     }
     // Settle the local prompt stream immediately
-    if (cb) cb();
+    if (cb) {
+      this.sessionCancelCallbacks.delete(sessionId);
+      cb(queued);
+    }
     // #1186 P1: Settle the pending sendRequest promise for this session's prompt.
     // The cancel callback above exits the generator, which releases the lease.
     // But without settling the underlying request, the sendRequest promise stays
@@ -1049,6 +1056,7 @@ export class AcpClient {
       }
       this.sessionPromptPendingIds.delete(sessionId);
     }
+    return queued;
   }
 
   close(): Promise<void> {
