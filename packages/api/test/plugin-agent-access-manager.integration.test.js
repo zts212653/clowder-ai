@@ -48,14 +48,21 @@ test('Kimi native events cross with redaction and consume only the same active p
         if (method === 'configure') return { args: [], managedArgvFlags: [] };
         assert.equal(input.event.content, 'Hello');
         assert.notEqual(input.event.apiKey, 'fixture-private-value');
+        assert.ok(!input.event.thinking.includes('fixture-opaque-secret'));
         instance.lifecycleRevision += 1;
         return { kind: 'ignored' };
       },
     },
   )({ prompt: 'hello', imageAccessDirs: [] });
-  await assert.rejects(plan.normalizeEvent({ content: 'Hello', apiKey: 'fixture-private-value' }), {
-    message: 'session_implementation_unavailable',
-  });
+  await assert.rejects(
+    plan.normalizeEvent(
+      { content: 'Hello', apiKey: 'fixture-private-value', thinking: 'trace fixture-opaque-secret' },
+      ['fixture-opaque-secret'],
+    ),
+    {
+      message: 'session_implementation_unavailable',
+    },
+  );
 });
 
 test('Agent access discovery executes the same standalone entrypoint from a Manager archive across replacement and rollback', async (t) => {
@@ -190,6 +197,29 @@ test('Agent access discovery executes the same standalone entrypoint from a Mana
     invoke: async () => ({ configId: 'approval' }),
   });
   await assert.rejects(invalidPlan(modelOffer, 'fixture/model'), /unapproved_acp_model_option/);
+  const unavailableModelPicker = createAgentAccessAcpModelSelection(
+    { readCurrentAuthority: async () => undefined },
+    {
+      invoke: async () => assert.fail('model selection should not reach an inactive package'),
+    },
+  );
+  assert.equal(await unavailableModelPicker({}, 'fixture/model'), null);
+  assert.equal(await unavailableModelPicker(modelOffer, 'unlisted-model'), null);
+  const projected = createAgentAccessAcpModelSelection(runtime.inventoryStore, {
+    invoke: async (_id, _method, input) => {
+      assert.deepEqual(input.configOptions, modelOffer.configOptions);
+      return { configId: 'vendor-model' };
+    },
+  });
+  await projected(
+    {
+      configOptions: [
+        { id: 'approval', category: 'tool', currentValue: 'fixture-private-extra' },
+        { ...modelOffer.configOptions[0], extra: { fixture: 'ignore' } },
+      ],
+    },
+    'fixture/model',
+  );
 
   const remote = Fastify();
   t.after(() => remote.close());

@@ -8,10 +8,40 @@ export function createAgentAccessAcpModelSelection(
   runtime: Pick<PluginRuntimeCarrierRouter, 'invoke'>,
 ) {
   return async ({ configOptions }: { configOptions?: unknown }, model: string) => {
+    const offer = Array.isArray(configOptions)
+      ? configOptions.find(
+          (option: unknown): option is Record<string, unknown> =>
+            option !== null &&
+            typeof option === 'object' &&
+            (('id' in option && option.id === 'model') || ('category' in option && option.category === 'model')),
+        )
+      : undefined;
+    const configId = typeof offer?.id === 'string' ? offer.id.trim() : '';
+    if (!configId || offer?.currentValue === model) return null;
+    const choices = Array.isArray(offer?.options)
+      ? offer.options.flatMap((option: unknown) => {
+          const value =
+            option !== null && typeof option === 'object' && 'value' in option && typeof option.value === 'string'
+              ? option.value.trim()
+              : '';
+          return value ? [{ value }] : [];
+        })
+      : [];
+    if (choices.length > 0 && !choices.some(({ value }) => value === model)) return null;
     const selected = (await inventory.readCurrentAuthority(AGENT_ACCESS_PLUGIN_ID))?.instance;
     if (!selected || selected.activationState !== 'enabled' || selected.runtimeState !== 'healthy')
       throw new Error('session_implementation_unavailable');
-    const result = await runtime.invoke(selected.pluginInstanceId, 'selectAcpModel', { model, configOptions });
+    const result = await runtime.invoke(selected.pluginInstanceId, 'selectAcpModel', {
+      model,
+      configOptions: [
+        {
+          id: configId,
+          category: 'model',
+          ...(typeof offer?.currentValue === 'string' ? { currentValue: offer.currentValue } : {}),
+          options: choices,
+        },
+      ],
+    });
     const current = (await inventory.readCurrentAuthority(AGENT_ACCESS_PLUGIN_ID))?.instance;
     if (
       current?.pluginInstanceId !== selected.pluginInstanceId ||
@@ -21,22 +51,7 @@ export function createAgentAccessAcpModelSelection(
     )
       throw new Error('session_implementation_unavailable');
     const selection = agentAccessAcpModelSelectionResultSchema.parse(result);
-    if (
-      selection &&
-      !(
-        Array.isArray(configOptions) &&
-        configOptions.some(
-          (option: unknown) =>
-            option !== null &&
-            typeof option === 'object' &&
-            'id' in option &&
-            typeof option.id === 'string' &&
-            option.id.trim() === selection.configId &&
-            (option.id === 'model' || ('category' in option && option.category === 'model')),
-        )
-      )
-    )
-      throw new Error('unapproved_acp_model_option');
+    if (selection && selection.configId !== configId) throw new Error('unapproved_acp_model_option');
     return selection;
   };
 }

@@ -1008,7 +1008,7 @@ export class AcpAgentService implements AgentService {
         } else {
           const modelConfig =
             !agy && !nativeTool && sessionModel ? await this.selectSessionModel(session, sessionModel) : null;
-          if (modelConfig && sessionModel) {
+          if (modelConfig && sessionModel && !options?.signal?.aborted) {
             try {
               await client.setSessionConfigOption(sessionId, modelConfig.configId, sessionModel);
               log.info({ ...ctx, sessionId, model: this.sessionModel }, 'ACP session model selected');
@@ -1387,7 +1387,7 @@ export class AcpAgentService implements AgentService {
           } else {
             const modelConfig =
               !nativeTool && sessionModel ? await this.selectSessionModel(freshSession, sessionModel) : null;
-            if (modelConfig && sessionModel) {
+            if (modelConfig && sessionModel && !options?.signal?.aborted) {
               try {
                 await client.setSessionConfigOption(freshSessionId, modelConfig.configId, sessionModel);
               } catch {

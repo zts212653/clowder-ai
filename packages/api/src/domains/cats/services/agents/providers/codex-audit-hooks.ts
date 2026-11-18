@@ -55,9 +55,9 @@ export function extractCommandExecutionLifecycle(event: unknown): CommandExecuti
  * Redacts known credential keys within object graphs.
  * We intentionally bound recursion depth for M1 to keep this best-effort and predictable.
  */
-export function sanitizeRawEvent(event: unknown): unknown {
+export function sanitizeRawEvent(event: unknown, knownCredentials?: readonly string[]): unknown {
   try {
-    return redactSensitiveFields(inspectSecretValue(event).value, 0);
+    return redactSensitiveFields(inspectSecretValue(event, { knownCredentials }).value, 0);
   } catch {
     return { type: 'redacted_event', reason: 'secret_result_uninspectable' };
   }

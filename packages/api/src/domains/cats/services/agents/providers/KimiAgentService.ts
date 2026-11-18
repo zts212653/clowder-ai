@@ -1,6 +1,7 @@
 /** Kimi Code service — native identity channel and stream-json replies. */
 
 import { readFileSync } from 'node:fs';
+import { configuredCredentialValues } from '@cat-cafe/mcp-server/dist/secret-runtime.js';
 import {
   type CatId,
   type CliEffortPreset,
@@ -109,7 +110,7 @@ interface KimiAgentServiceOptions {
   planLaunch?: (input: AgentAccessKimiLaunch) => Promise<
     AgentAccessNativeLaunchArguments & {
       assertCurrent?: () => Promise<void>;
-      normalizeEvent?: (event: unknown) => Promise<AgentAccessKimiEvent>;
+      normalizeEvent?: (event: unknown, knownCredentials?: readonly string[]) => Promise<AgentAccessKimiEvent>;
     }
   >;
   mcpServerPath?: string;
@@ -492,6 +493,9 @@ export class KimiAgentService implements AgentService {
       };
       await scoped?.pluginNativeLaunch?.assertCurrent();
       await assertCurrent?.();
+      const knownCredentials = normalizeEvent
+        ? configuredCredentialValues({ ...process.env, ...options?.callbackEnv, ...apiKeyEnv, ...options?.accountEnv })
+        : undefined;
       const events = options?.spawnCliOverride
         ? options.spawnCliOverride(cliOpts)
         : spawnCli(cliOpts, this.spawnFn ? { spawnFn: this.spawnFn } : undefined);
@@ -569,7 +573,7 @@ export class KimiAgentService implements AgentService {
           continue;
         }
 
-        const parsed = normalizeEvent ? await normalizeEvent(event) : normalizeKimiEvent(event);
+        const parsed = normalizeEvent ? await normalizeEvent(event, knownCredentials) : normalizeKimiEvent(event);
         if (parsed.kind === 'ignored') continue;
         if (parsed.kind === 'resume') {
           if (emittedSessionInit || parsed.sessionId === rejectedResumeSessionId) continue;
