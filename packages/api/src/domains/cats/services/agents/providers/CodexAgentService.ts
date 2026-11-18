@@ -2891,12 +2891,16 @@ export class CodexAgentService implements AgentService {
             return (async function* () {
               const preparedRequest = prepareProviderRequest(execStdinInput, 'exec_json');
               await options?.beforeProviderLaunch?.(preparedRequest);
-              if (native) await native.assertCurrent();
-              // Last admission check: a package replaced while the Host awaited
-              // beforeProviderLaunch must not start argv planned by the old one.
-              await plannedAssertCurrent?.();
               if (!('body' in preparedRequest.message)) throw new Error('codex_prepared_message_not_exact');
-              const spawnOpts = { ...cliOpts, stdinInput: preparedRequest.message.body };
+              const assertLaunchCurrent =
+                native || plannedAssertCurrent
+                  ? async () => {
+                      if (native) await native.assertCurrent();
+                      await plannedAssertCurrent?.();
+                    }
+                  : undefined;
+              const spawnOpts = { ...cliOpts, stdinInput: preparedRequest.message.body, assertLaunchCurrent };
+              if (options?.spawnCliOverride) await assertLaunchCurrent?.();
               const spawned = options?.spawnCliOverride
                 ? options.spawnCliOverride(spawnOpts)
                 : spawnCli(spawnOpts, serviceSpawnFn ? { spawnFn: serviceSpawnFn } : undefined);

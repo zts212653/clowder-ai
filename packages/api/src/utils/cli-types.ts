@@ -33,6 +33,8 @@ export interface CliSpawnOptions {
   timeoutMs?: number;
   /** AbortSignal to cancel the process externally */
   signal?: AbortSignal;
+  /** Recheck the Host's package activation after acquiring the process owner. */
+  assertLaunchCurrent?: () => void | Promise<void>;
   /** Environment overrides. `null` means delete inherited var from child env. */
   env?: Record<string, string | null>;
   /** Start from only env overrides, never the API process environment. Defaults to inheritance for existing providers. */

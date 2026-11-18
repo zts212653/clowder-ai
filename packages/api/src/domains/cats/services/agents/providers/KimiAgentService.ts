@@ -441,7 +441,15 @@ export class KimiAgentService implements AgentService {
       await options?.beforeProviderLaunch?.(preparedRequest);
       if (!('body' in preparedRequest.message)) throw new Error('kimi_prepared_message_not_exact');
       args[promptIndex + 1] = preparedRequest.message.body;
+      const assertLaunchCurrent =
+        scoped?.pluginNativeLaunch || assertCurrent
+          ? async () => {
+              await scoped?.pluginNativeLaunch?.assertCurrent();
+              await assertCurrent?.();
+            }
+          : undefined;
       const cliOpts = {
+        assertLaunchCurrent,
         command: kimiCommand,
         ...(scoped ? { inheritParentEnv: false } : {}),
         args,
@@ -491,11 +499,10 @@ export class KimiAgentService implements AgentService {
           ? { rawArchivePath: this.rawArchive.getPath(options.invocationId) }
           : {}),
       };
-      await scoped?.pluginNativeLaunch?.assertCurrent();
-      await assertCurrent?.();
       const knownCredentials = normalizeEvent
         ? configuredCredentialValues({ ...process.env, ...options?.callbackEnv, ...apiKeyEnv, ...options?.accountEnv })
         : undefined;
+      if (options?.spawnCliOverride) await assertLaunchCurrent?.();
       const events = options?.spawnCliOverride
         ? options.spawnCliOverride(cliOpts)
         : spawnCli(cliOpts, this.spawnFn ? { spawnFn: this.spawnFn } : undefined);

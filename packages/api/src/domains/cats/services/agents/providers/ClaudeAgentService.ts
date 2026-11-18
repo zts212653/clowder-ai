@@ -846,7 +846,9 @@ export class ClaudeAgentService implements AgentService {
         providerStop && options?.signal
           ? AbortSignal.any([providerStop.signal, options.signal])
           : (providerStop?.signal ?? options?.signal);
+      const nativeLaunch = member?.pluginNativeLaunch;
       const cliOpts = {
+        assertLaunchCurrent: nativeLaunch ? () => nativeLaunch.assertCurrent() : undefined,
         command: claudeCommand,
         args,
         // #840 R2: main prompt moves off argv to stdin (see args comment above).
@@ -866,7 +868,7 @@ export class ClaudeAgentService implements AgentService {
       applyClaudeTokenAccountEnv(envOverrides, options?.claudeTokenAccount);
       const overrides = this.spawnFn ? { spawnFn: this.spawnFn } : undefined;
       const events = (async function* () {
-        await member?.pluginNativeLaunch?.assertCurrent();
+        if (options?.spawnCliOverride) await cliOpts.assertLaunchCurrent?.();
         const providerEvents = options?.spawnCliOverride
           ? options.spawnCliOverride(cliOpts)
           : spawnCli(cliOpts, overrides);

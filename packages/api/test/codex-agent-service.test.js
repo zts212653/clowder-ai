@@ -13,6 +13,7 @@ import { describe, mock, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { catRegistry } from '@cat-cafe/shared';
 import { buildCodexExecLaunchArguments } from '../../agent-access-plugin/src/runtime/codex-exec-launch-arguments.ts';
+import { bindWindowsProviderHostScope } from '../dist/utils/windows-provider-host.js';
 import { upstreamMcpServersFromArgs } from './helpers/direct-mcp-contract.js';
 import { assertSelectedApiAccount, installAmbientCodexAccount } from './helpers/f320-auth-environment.js';
 import { fakeL0Compiler } from './helpers/fake-l0-compiler.js';
@@ -2117,6 +2118,59 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
     assert.deepEqual(await run(planned), await run(undefined));
     assert.deepEqual(await run(planned, 'existing-thread'), await run(undefined, 'existing-thread'));
   });
+
+  test(
+    'rejects a retired Codex plan after the Windows provider host becomes ready',
+    {
+      skip: process.platform !== 'win32',
+      timeout: 10_000,
+    },
+    async () => {
+      const invocationId = 'codex-fixture-stale-windows-host';
+      const entered = Promise.withResolvers();
+      const available = Promise.withResolvers();
+      let current = true;
+      let launches = 0;
+      let closes = 0;
+      const service = new CodexAgentService({
+        l0CompilerFn: fakeL0Compiler,
+        model: 'gpt-5.3-codex',
+        planLaunch: async (input) => ({
+          ...buildCodexExecLaunchArguments(input),
+          async assertCurrent() {
+            if (!current) throw Error('session_implementation_unavailable');
+          },
+        }),
+      });
+      const bound = bindWindowsProviderHostScope(
+        () => service.invoke('fixture', { invocationId })[Symbol.asyncIterator](),
+        {
+          execution: { invocationId },
+          take() {
+            entered.resolve();
+            return available.promise;
+          },
+        },
+      );
+      const collecting = collect({ [Symbol.asyncIterator]: () => bound });
+      await entered.promise;
+      current = false;
+      available.resolve({
+        launch() {
+          launches++;
+          throw Error('unexpected stale provider launch');
+        },
+        async close() {
+          closes++;
+          return { verdict: 'absent' };
+        },
+      });
+      const events = await collecting;
+      assert.equal(launches, 0);
+      assert.equal(closes, 1);
+      assert.match(events.find((event) => event.type === 'error')?.error ?? '', /session_implementation_unavailable/);
+    },
+  );
 
   test('unavailable approval surface keeps Apps writes gated and injects the audited GitHub route', async () => {
     const proc = createMockProcess();

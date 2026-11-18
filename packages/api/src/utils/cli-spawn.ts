@@ -414,8 +414,16 @@ export async function* spawnCli(
   // #1838: inside its execution's host scope, a Windows provider starts in a linked host whose own
   // kernel job owns the whole tree. Same spawn plan as defaultSpawn; only the parent changes.
   const hostScope = !deps?.spawnFn && IS_WINDOWS ? windowsProviderHostScopeFor(options.invocationId) : undefined;
-  const child = hostScope
-    ? launchInWindowsHost(await hostScope.take(), options.command, options.args, {
+  const windowsHost = hostScope ? await hostScope.take() : undefined;
+  try {
+    if (options.assertLaunchCurrent) await options.assertLaunchCurrent();
+    options.signal?.throwIfAborted();
+  } catch (error) {
+    if (windowsHost) await windowsHost.close();
+    throw error;
+  }
+  const child = windowsHost
+    ? launchInWindowsHost(windowsHost, options.command, options.args, {
         cwd: options.cwd,
         env: childEnv,
         stdin,

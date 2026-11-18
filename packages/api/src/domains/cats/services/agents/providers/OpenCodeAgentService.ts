@@ -418,6 +418,7 @@ export class OpenCodeAgentService implements L0InjectableAgentService {
       let args: string[];
       let plannedManagedFlags: readonly string[] | undefined;
       let plannedNormalizeEvent: ((event: unknown) => Promise<unknown>) | undefined;
+      let assertLaunchCurrent: (() => Promise<void>) | undefined;
       if (this.planLaunch) {
         const plan = await this.planLaunch({
           prompt,
@@ -432,6 +433,7 @@ export class OpenCodeAgentService implements L0InjectableAgentService {
         args = plan.args;
         plannedManagedFlags = plan.managedArgvFlags;
         plannedNormalizeEvent = plan.normalizeEvent;
+        assertLaunchCurrent = plan.assertCurrent;
       } else {
         args = this.buildArgs(
           prompt,
@@ -489,6 +491,7 @@ export class OpenCodeAgentService implements L0InjectableAgentService {
       args[args.length - 1] = preparedRequest.message.body;
 
       const cliOpts = {
+        assertLaunchCurrent,
         command: opencodeCommand,
         args,
         ...(cwd ? { cwd } : {}),
@@ -504,6 +507,7 @@ export class OpenCodeAgentService implements L0InjectableAgentService {
           ? { rawArchivePath: this.rawArchive.getPath(options.invocationId) }
           : {}),
       };
+      if (options?.spawnCliOverride) await assertLaunchCurrent?.();
       const events = options?.spawnCliOverride
         ? options.spawnCliOverride(cliOpts)
         : spawnCli(cliOpts, this.spawnFn ? { spawnFn: this.spawnFn } : undefined);
