@@ -113,7 +113,7 @@ Object.assign(PDL_SCHEMA, {
   each: { blocks: 1, control: 1, from: 1, when: 1 },
   empty: { action: 1, help: 1, icon: 1, text: 1, when: 1 },
   fold: { blocks: 1, height: ['m', 's'], key: 1, more: { act: 1, args: 1, when: 1 }, shape: ['$', 'bottom'], when: 1 },
-  dialog: { pop: 1, title: 1, help: 1, wide: 1, layout: ['viewport', 'fill'], span: ['full'], form: 1, error: 1, actions: 1, footer: 1, blocks: 1, when: 1 },   /* footer：底部区域的块声明，与标题栏 actions 分开。 */
+  dialog: { pop: 1, title: 1, help: 1, wide: 1, layout: ['viewport', 'fill'], span: ['full'], rows: 1, form: 1, error: 1, actions: 1, footer: 1, blocks: 1, when: 1 },   /* footer：底部区域的块声明，与标题栏 actions 分开。 */
   form: { args: 1, blocks: 1, from: 1, htmlId: 1, id: 1, note: 1, when: 1 },
   frame: { html: 1, src: 1, message: 1, on: 1, icon: 1, note: 1, plugin: 1, tall: 1, title: 1, what: 1, when: 1 },   /* html 自动量内容；src 填满视口。on.message 把框内消息交给动作，origin 的判断属于应用。 */
   grow: { when: 1 },
@@ -857,7 +857,7 @@ Object.assign(PDL_BLOCKS, {
   },
   component: function (b, sc, root) { const f = PDL_COMPONENTS[b.use]; return f ? f(pv(b.props, sc, root), sc, root) : ''; },
   /* 容器：给一组块套组件库里的一种角色（见 PDL_ROLES.box）；里面什么都没有就不画。tone：带状态色调的容器（告警卡片）；faint：被新的取代了（旧提议） */
-  dialog: function (b, sc, root) { return dialogHtml({ key: pv(b.pop, sc, root), title: pv(b.title, sc, root), help: pv(b.help, sc, root), wide: pv(b.wide, sc, root), layout: pv(b.layout, sc, root), span: pv(b.span, sc, root), form: pv(b.form, sc, root), error: pv(b.error, sc, root), actions: pvControls(b.actions, sc, root), body: pvBlocks(b.blocks, sc, root), acts: pvBlocks(b.footer, sc, root) }); },
+  dialog: function (b, sc, root) { return dialogHtml({ key: pv(b.pop, sc, root), title: pv(b.title, sc, root), help: pv(b.help, sc, root), wide: pv(b.wide, sc, root), rows: pv(b.rows, sc, root), layout: pv(b.layout, sc, root), span: pv(b.span, sc, root), form: pv(b.form, sc, root), error: pv(b.error, sc, root), actions: pvControls(b.actions, sc, root), body: pvBlocks(b.blocks, sc, root), acts: pvBlocks(b.footer, sc, root) }); },
   box: function (b, sc, root) { const body = pvBlocks(b.blocks, sc, root), cls = BOX[b.variant || ''] + (pv(b.follow, sc, root) ? ' scroll stick-end' : ''); if (!body) return ''; const tone = pv(b.tone, sc, root); return '<div class="' + cls + '"' + (b.key ? ' data-key="' + h(pv(b.key, sc, root)) + '"' : '') + (tone ? ' data-tone="' + h(tone) + '"' : '') + (pv(b.faint, sc, root) ? ' data-faint' : '') + (b.open != null ? ' data-open="' + !!pv(b.open, sc, root) + '"' : '') + (pv(b.fill, sc, root) ? ' data-fill' : '') + pvNote(pv(b.note, sc, root)) + '>' + (/\bstick-end\b/.test(cls) ? '<div>' + body + '</div>' : body) + '</div>'; },   /* 停在底部的容器（stick-end）里只放一个子元素 */
   pre: function (b, sc, root) {   /* 原样的文字（代码、日志、原始记录）：一个样子；默认不在里面限高滚动——它在的页面 / 详情铺满容器，由页面滚动。
      rows：持续追加的文字（日志）在页面里只占几行，框里自己滚动，停在最新的一行（stick-end） */

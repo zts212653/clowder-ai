@@ -151,10 +151,10 @@ function pvDeep(x, root, sc) {
     const o = {}; Object.keys(x).forEach(function (k) { if (k !== 'when') o[k] = pvDeep(x[k], root, sc); }); return o; }
   return x;
 }
-/* 对话框的字和表单在主题里声明：PDL_VIEWS['dlg.<kind>'] 的 title / help / text / ok / danger / focus / fields / doc / panes / foot / ack / sync / wide / noFieldFocus，
+/* 对话框的字和表单在主题里声明：PDL_VIEWS['dlg.<kind>'] 的 title / help / text / ok / danger / focus / fields / doc / panes / foot / ack / sync / wide / layout / span / rows / noFieldFocus（大小和对话框块一样：wide 加宽，layout viewport 更高 / fill 占满，span full 整宽，rows 正文最多几行；渲染时都不超出页面），
    数据 = 视图的 VM + 打开时的参数（args）；有 blocks 时正文就是这个视图。打开时解析成完整的描述放进 S.dialog（确定、字段同步、分栏都照常走），
    声明里没写的项用打开时给的；确定之后做什么（on）仍由打开它的动作给 */
-const DIALOG_KEYS = ['title', 'help', 'text', 'ok', 'danger', 'focus', 'fields', 'doc', 'panes', 'foot', 'ack', 'sync', 'wide', 'noFieldFocus'];
+const DIALOG_KEYS = ['title', 'help', 'text', 'ok', 'danger', 'focus', 'fields', 'doc', 'panes', 'foot', 'ack', 'sync', 'wide', 'layout', 'span', 'rows', 'noFieldFocus'];
 function dialogOf(d) {
   const v = d.kind && pdlLoc(PDL_VIEWS['dlg.' + d.kind]); if (!v) return d;
   const root = Object.assign({}, v.vm ? vmRead(v.vm) || {} : {}, d.args || {}), out = Object.assign({}, d);
@@ -995,7 +995,7 @@ function keyEvName(e, el) {
   if (e.ctrlKey && (e.key || '').toLowerCase() === 'r') return 'onCtrlR';
   return null;
 }
-/* 限行数的列表最大高度直接声明成 (k + 1) × 行高，最后那一整行渐隐——不测量。scrollRows(k, 行高 token) 给列表；对话框正文按 --dlg-rows × 一档行高 */
+/* 限行数的列表最大高度直接声明成 (k + 1) × 行高，最后那一整行渐隐——不测量。scrollRows(k, 行高 token) 给列表；对话框正文高度跟内容走，只按页面可见高度封顶（整行取整）*/
 function onDeclared(name, el, e) { const act = el && el.dataset && el.dataset[name]; if (!act || !actFn(act)) return false; return actFn(act)(actionArgs(el), el, e) !== false; }
 function keyDeclared(e) { const el = e.target, k = el && el.dataset ? keyEvName(e, el) : null; if (k && onDeclared(k, el, e)) { e.preventDefault(); return true; } return false; }
 document.addEventListener('focusout', function (e) { if (!RENDERING) onDeclared('onBlur', e.target, e); });

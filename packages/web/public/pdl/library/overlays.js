@@ -58,13 +58,14 @@ function dialogSync(d) {
   });
 }
 function dialogHtml(d) {
+  /* rows：正文最多几行（容器自己声明；超出在正文里滚），不写就跟内容走；两种都不超出页面 */
   /* noFieldFocus：正文里有自己的一套输入（比如“挂载规则”底部的添加框），刚打开时不要把焦点丢进去、把正文滚到底 */
   /* key：画在哪个弹窗里（缺省是通用对话框 dialog；未保存确认 confirm、对话区的模态窗、主题计算器也是这个组件）；alert：要你先回答才能继续（alertdialog）；acts：底部按钮的声明（btnsHtml），代替 ok / 取消；
      actions：标题行里 × 前面的操作（头：标题 · 空白 · 操作 · ×）；modal: false 不是模态（没有遮罩的工具窗）；form：表单名（通用对话框有 ok 提交时默认为 dialog）；工具内容只用同一外壳，不隐式成为表单 */
   const k = d.key || 'dialog', tid = 'dlg-t' + (d.key ? '-' + String(d.key).replace(/\W/g, '-') : ''), form = d.form || (!d.key && d.ok ? 'dialog' : ''), tag = form ? 'form' : 'section';
   const body = typeof d.body === 'object' ? pvBlocks([d.body], d, d) : d.body;
   const text = d.text && typeof d.text === 'object' ? pvParts(d.text.parts, d.text.data, d.text.data) : d.text;   /* 写成片段的正文先画出来：画出来是空的就和没有正文一样 */   /* 声明的 PDL 正文每次按当前 VM 画，不在打开弹窗时存成一份旧 HTML。 */
-  return '<' + tag + ' class="dialog' + (d.wide ? ' dialog-wide' : '') + (d.layout === 'viewport' ? ' dialog-viewport' : d.layout === 'fill' ? ' dialog-fill' : '') + (d.span === 'full' ? ' dialog-full' : '') + '"' + (d.noFieldFocus ? ' data-no-field-focus' : '') + toneAttr(d.tone || (d.danger ? 'danger' : '')) + ' role="' + (d.alert ? 'alertdialog' : 'dialog') + '"' + (d.modal === false ? '' : ' aria-modal="true"') + ' aria-labelledby="' + tid + '"' + (form ? ' data-form="' + form + '"' : '') + '><div class="dlg-head"><h3 id="' + tid + '">' + h(d.title) + helpTip(d.help) + '</h3>' + (d.actions || '') + popX(k) + '</div>' +
+  return '<' + tag + ' class="dialog' + (d.wide ? ' dialog-wide' : '') + (d.layout === 'viewport' ? ' dialog-viewport' : d.layout === 'fill' ? ' dialog-fill' : '') + (d.span === 'full' ? ' dialog-full' : '') + '"' + (d.rows ? ' style="--dlg-rows: ' + Number(d.rows) + '"' : '') + (d.noFieldFocus ? ' data-no-field-focus' : '') + toneAttr(d.tone || (d.danger ? 'danger' : '')) + ' role="' + (d.alert ? 'alertdialog' : 'dialog') + '"' + (d.modal === false ? '' : ' aria-modal="true"') + ' aria-labelledby="' + tid + '"' + (form ? ' data-form="' + form + '"' : '') + '><div class="dlg-head"><h3 id="' + tid + '">' + h(d.title) + helpTip(d.help) + '</h3>' + (d.actions || '') + popX(k) + '</div>' +
     (text || body || d.fields || d.doc || d.error ? '<div class="dialog-body scroll">' + (d.error ? '<p class="ws-danger">' + h(d.error) + '</p>' : '') + (text ? '<p>' + text + '</p>' : '') + (d.panes ? dlgPanes(d.panes) : '') + (d.fields ? d.fields.filter(function (f) { return !f.pane || !d.panes || f.pane === d.panes.cur; }).map(dlgField).join('') : '') + (d.foot ? dlgFoot(d.foot) : '') + (d.doc ? docBody(d.doc) : '') + (body || '') + '</div>' : '') + (d.acts ? '<div class="acts">' + btnsHtml(d.acts) + '</div>' : d.ok ? '<div class="acts">' + (d.ack ? '' : popCancel(k, d.focus)) + btn(d.ok, { primary: true, danger: !!d.danger, submit: true, data: d.focus === 'confirm' || d.ack ? ' data-autofocus="1"' : '' }) + '</div>' : '') + '</' + tag + '>';
 }
 /* 对话框里的字段：数据描述 { id, label, value, placeholder, mono, max, req, area: true（多行）, rows, options: [...]（下拉）, check: '文字'（勾选） } */
