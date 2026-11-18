@@ -132,7 +132,7 @@ it('keeps unopened owners idle through boot and a conversation switch, then read
     '/api/backlog/items',
     '/api/external-projects',
   ]);
-  window.clowderChat = { dataOk: vi.fn(), dataError: vi.fn() } as unknown as typeof window.clowderChat;
+  window.clowderChat = {} as unknown as typeof window.clowderChat;
   needed = new Set(['project.board.items', 'project.board.docs.F001.value']);
   await act(commit);
   await waitFor(() => expect(apiFetch).toHaveBeenCalledTimes(3));

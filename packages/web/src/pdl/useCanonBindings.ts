@@ -95,23 +95,15 @@ export function useCanonBindings(
   reader.current = read;
   useEffect(() => {
     if (!needed || !selection) return;
-    let active = true;
     const update = () => {
       if (!document.hidden)
-        void reader.current(selection.indexedVersionRef).then(
-          () => {
-            if (active) window.clowderChat.dataOk('canon');
-          },
-          (error) => {
-            if (active) window.clowderChat.dataError('canon', error);
-          },
-        );
+        // A read that fails keeps the last canon; the next tick reads again.
+        void reader.current(selection.indexedVersionRef).catch((error) => console.error(error));
     };
     update();
     const timer = setInterval(update, 30_000);
     document.addEventListener('visibilitychange', update);
     return () => {
-      active = false;
       ++readEpoch.current;
       clearInterval(timer);
       document.removeEventListener('visibilitychange', update);

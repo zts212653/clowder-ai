@@ -98,10 +98,6 @@ let chatOnboardingSnapshot;
 function syncChatOwners() {
   const data = chatOwnerData(),
     onboarding = data && data.onboarding;
-  if (data && data.queue) {
-    if (data.queue.error) dataError('queue', data.queue.error);
-    else dataOk('queue');
-  }
   if (!onboarding || chatDataEqual(onboarding, chatOnboardingSnapshot)) return;
   chatOnboardingSnapshot = onboarding;
   S.popOn.guide = !!onboarding.demo.autoEligible && onboarding.demo.status === 'not_started';

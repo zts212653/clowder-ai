@@ -25,8 +25,6 @@ function bindAccounts(providers: unknown[], post: (path: string) => Promise<unkn
     },
     setTimeout,
     clearTimeout,
-    dataOk: vi.fn(),
-    dataError: vi.fn(),
     chatDataRender: async () => {},
     document: { addEventListener: vi.fn(), hidden: false },
     api: {

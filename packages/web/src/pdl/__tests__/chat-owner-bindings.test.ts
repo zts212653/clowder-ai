@@ -17,7 +17,7 @@ const revision = `sha256:${'1'.repeat(64)}`;
 
 it('pulls the visible vote once, refreshes on vote events, holds its base on reappear and ends through its owner', async () => {
   const data = fixtureData();
-  window.clowderChat = { dataOk: vi.fn(), dataError: vi.fn() } as unknown as typeof window.clowderChat;
+  window.clowderChat = {} as unknown as typeof window.clowderChat;
   let needed: boolean | number = false,
     commit!: () => void;
   let vote = { question: 'Owner question', status: 'active', votes: { owner: 'yes' } };

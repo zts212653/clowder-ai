@@ -38,7 +38,7 @@ let managedExitCode: number | null | undefined;
 let managedRecovery: Record<string, unknown> = { version: 1, attempts: 0, nextAttemptAt: 99 };
 beforeEach(() => {
   vi.clearAllMocks();
-  window.clowderChat = { dataOk: vi.fn(), dataError: vi.fn() } as unknown as typeof window.clowderChat;
+  window.clowderChat = {} as unknown as typeof window.clowderChat;
   vi.mocked(refreshActiveExecutionProjection).mockReset().mockResolvedValue(undefined);
   rejectWrite = false;
   managedExitCode = undefined;

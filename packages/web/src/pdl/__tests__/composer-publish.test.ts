@@ -40,7 +40,7 @@ it('keeps host draft edits out of published sources and still pushes changed sou
     transpileModule(publishBody, { compilerOptions: { target: ScriptTarget.ES2022 } }).outputText,
   );
   const update = vi.fn();
-  window.clowderChat = { update, dataOk: vi.fn(), dataError: vi.fn() } as unknown as typeof window.clowderChat;
+  window.clowderChat = { update } as unknown as typeof window.clowderChat;
   const lastSidebar = {};
   for (const char of 'hello world') {
     current.current = { ...current.current, input: current.current.input + char };

@@ -150,11 +150,9 @@ function receiveProjectValue(previous, next, path, diff) {
   diff.fields.push(path);
   return next;
 }
-function projectReadState(value) {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return '';
-  if (value.load === 'error' || value.load === 'stale') return 'error';
-  const states = Object.values(value).map(projectReadState);
-  return states.includes('error') ? 'error' : value.load === 'loading' || states.includes('loading') ? 'loading' : '';
+// The host could not read this owner: a view with nothing of it to show says so in place (load 'error').
+function ownerFailed(owner) {
+  return !!(projectHeldData.readFailures || {})[owner];
 }
 function receiveProjectData(next) {
   const previous = projectHeldData,
@@ -169,27 +167,10 @@ function receiveProjectData(next) {
       diff[key] = Array.from(new Set(diff[key]));
     });
     diffs[owner] = diff;
-    if (['sources', 'general', 'trash', 'desktop'].includes(owner) && held[owner] !== previous[owner]) {
-      const error = next[owner].error || next[owner].viewError;
-      if (error) dataError(owner, error);
-      else dataOk(owner);
-    }
   });
   if (changed) {
     projectHeldData = held;
     chatDataSnapshot = projectionSource(Object.assign({}, chatDataSnapshot, { project: held }), '');
-    const beforeFailures = previous.readFailures || {},
-      failures = held.readFailures || {};
-    Object.keys(Object.assign({}, beforeFailures, failures)).forEach(function (owner) {
-      const failure = failures[owner],
-        state = projectReadState(held[owner]);
-      if (held[owner] === previous[owner] && failure === beforeFailures[owner]) return;
-      // Existing read-error/retry components own this failure. Otherwise the failure is named by its read path, so the
-      // views that read this owner draw their error state in place.
-      if (state === 'error') return;
-      if (!failure || projectReadState(previous[owner]) === 'error') dataOk(`project.${owner}`);
-      else if (beforeFailures[owner] !== failure) dataError(`project.${owner}`, failure);
-    });
     syncWorkspace();
     syncChatOwners();
   }

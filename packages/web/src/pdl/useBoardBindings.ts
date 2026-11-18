@@ -70,13 +70,11 @@ function BoardFeatureBinding({
         (value) => {
           if (!abort.signal.aborted) {
             changed({ id, load: '', value });
-            window.clowderChat.dataOk('board.doc.' + id);
           }
         },
         (error: Error) => {
           if (!abort.signal.aborted) {
             changed({ id, load: 'error', error: error.message });
-            window.clowderChat.dataError('board.doc.' + id, error);
           }
         },
       );

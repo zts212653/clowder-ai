@@ -206,12 +206,10 @@ export function useWorkbenchBindings(
         setOpened({ worktreeId, file });
         editing.setEditMode(!!fileEdits.current[JSON.stringify([worktreeId, file.path])]);
         editing.setSaveError(null);
-        window.clowderChat.dataOk('workbench.file');
       },
-      (error: Error) => {
+      () => {
         if (abort.signal.aborted || ticket !== openRequest.current) return;
         setOpened(null);
-        window.clowderChat.dataError('workbench.file', error);
       },
     );
     return () => abort.abort();

@@ -142,7 +142,7 @@ export function createOwnerConsole(options: ProjectionOptions = {}) {
     Date,
     Intl,
     window: { location: { origin: 'https://pdl.test' } },
-    VM: {},
+    VM: { memberQuota: () => null },
     A: {},
     projectChat: chatModels,
     workKey: (work: { navigationId: string }) => work.navigationId,
@@ -155,8 +155,6 @@ export function createOwnerConsole(options: ProjectionOptions = {}) {
     },
     settleHold: <T>(work: Promise<T>) => work,
     navStale: () => {},
-    dataError: () => {},
-    dataOk: () => {},
     syncChatOwners: () => {},
   });
   runInContext(chatSnapshotCode, context);

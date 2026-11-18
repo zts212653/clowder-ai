@@ -53,10 +53,8 @@ function bindAppearance() {
   async function readLegacy() {
     try {
       legacy = await api.get('/api/config/chat-background');
-      dataOk('chatBackgrounds');
-    } catch (error) {
+    } catch {
       legacy = null;
-      dataError('chatBackgrounds', error);
     }
     render(true);
   }
@@ -66,10 +64,8 @@ function bindAppearance() {
   onStart('data', async function () {
     try {
       images = (await api.get('/api/config/chat-background/images')).images;
-      dataOk('backgroundImages');
-    } catch (error) {
+    } catch {
       images = [];
-      dataError('backgroundImages', error);
     }
   });
   VM.chatBackgrounds = function () {

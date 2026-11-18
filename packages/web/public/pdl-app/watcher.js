@@ -36,14 +36,12 @@ async function watcherRead(key) {
       { errors: Object.assign({}, watcherData.errors, { [key]: '' }) },
       kind === 'settings' ? { settings: value } : { [field]: Object.assign({}, watcherData[field], { [id]: value }) },
     );
-    dataOk(key);
     watcherPublish();
   } catch (error) {
     if (!heldNeeded.has(key)) return;
     watcherData = Object.assign({}, watcherData, {
       errors: Object.assign({}, watcherData.errors, { [key]: error.message }),
     });
-    if (kind === 'suggestions') dataError(key, error);
     watcherPublish();
   }
 }

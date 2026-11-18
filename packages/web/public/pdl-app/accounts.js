@@ -20,21 +20,22 @@ function bindAccounts() {
     });
   };
   async function read() {
-    try {
-      const values = await Promise.all([
-        api.get('/api/accounts'),
-        api.get('/api/accounts/codex/members'),
-        api.get('/api/accounts/claude/members'),
-        api.get('/api/accounts/agy/members'),
-      ]);
-      providers = values[0].providers;
-      selections = { codex: values[1].selection, claude: values[2].selection, agy: values[3].selection };
-      load = '';
-      dataOk('accounts');
-    } catch (error) {
-      load = 'error';
-      dataError('accounts', error);
-    }
+    // The directory and each family's selection are read on their own; a selection that fails only leaves its
+    // members unknown (the last one read, or none).
+    const tools = ['codex', 'claude', 'agy'],
+      values = await Promise.allSettled(
+        [api.get('/api/accounts')].concat(
+          tools.map(function (tool) {
+            return api.get('/api/accounts/' + tool + '/members');
+          }),
+        ),
+      );
+    if (values[0].status === 'fulfilled') providers = values[0].value.providers;
+    tools.forEach(function (tool, i) {
+      const v = values[i + 1];
+      selections[tool] = v.status === 'fulfilled' ? v.value.selection : selections[tool] || { members: [] };
+    });
+    load = values[0].status === 'fulfilled' || load === '' ? '' : 'error';
     arm();
     await chatDataRender();
   }
@@ -256,23 +257,7 @@ function bindAccounts() {
       quotaBusy: !!(st.quota[p.id] && st.quota[p.id].busy),
       quotaIdentityChanged:
         !!(st.quota[p.id] && st.quota[p.id].identityChanged) || (!!p.quota && !quotaMatches(p, p.quota)),
-      quotaData: (function () {
-        const fail = st.quota[p.id] && st.quota[p.id].fail;
-        if (p.clientId === 'anthropic')
-          return p.claudeQuota || fail ? claudeQuotaData(p.claudeQuota ? p.claudeQuota.samples : {}, fail) : null;
-        if (storedQuota(p)) {
-          const reading = p.agyQuota || p.kimiQuota;
-          return reading
-            ? Object.assign(accountQuotaData(reading), fail ? { fail: fail } : {})
-            : fail
-              ? { items: [], resets: [], fail: fail }
-              : null;
-        }
-        const observation = (st.quota[p.id] && st.quota[p.id].observation) || p.quota;
-        return observation && quotaMatches(p, observation) && !(st.quota[p.id] && st.quota[p.id].identityChanged)
-          ? accountQuotaData(observation)
-          : null;
-      })(),
+      quotaData: quotaDataOf(p),
       canSwitch:
         (p.clientId === 'openai' ||
           p.clientId === 'anthropic' ||
@@ -480,6 +465,41 @@ function bindAccounts() {
       },
     });
   };
+  // The quota an account row shows; 执行 shows the same reading for the account a member uses.
+  function quotaDataOf(p) {
+    const fail = st.quota[p.id] && st.quota[p.id].fail;
+    if (p.clientId === 'anthropic')
+      return p.claudeQuota || fail ? claudeQuotaData(p.claudeQuota ? p.claudeQuota.samples : {}, fail) : null;
+    if (storedQuota(p)) {
+      const reading = p.agyQuota || p.kimiQuota;
+      return reading
+        ? Object.assign(accountQuotaData(reading), fail ? { fail: fail } : {})
+        : fail
+          ? { items: [], resets: [], fail: fail }
+          : null;
+    }
+    const observation = (st.quota[p.id] && st.quota[p.id].observation) || p.quota;
+    return observation && quotaMatches(p, observation) && !(st.quota[p.id] && st.quota[p.id].identityChanged)
+      ? accountQuotaData(observation)
+      : null;
+  }
+  // Members on a built-in login use the account its selection names; others the account set on the member.
+  function memberAccountRef(id, own) {
+    const picked = Object.values(selections)
+      .flatMap(function (sel) {
+        return sel.members;
+      })
+      .find(function (m) {
+        return m.id === id;
+      });
+    return (picked && picked.accountRef) || own;
+  }
+  VM.memberQuota = function (id, own) {
+    if (projectionNeeded) projectionNeeded.add('accounts');
+    const p = account(memberAccountRef(id, own)),
+      q = p && quotaDataOf(p);
+    return q && q.items.length ? { account: p.displayName, items: q.items } : null;
+  };
   // Claude, agy and kimi: the account list carries the stored reading; reading again stores a new one and the list is
   // read again. A failed read keeps the last reading and names why.
   function storedQuota(p) {
@@ -561,9 +581,7 @@ function bindAccounts() {
         op === 'start' ? (terminal ? { terminal: true } : {}) : { attemptId: p.codex.attempt.id },
       );
       await read();
-    } catch (error) {
-      dataError('accounts', error);
-    }
+    } catch {}
   }
   A.accRelogin = function (d) {
     return login(account(d.id), 'start');
@@ -605,10 +623,8 @@ function bindAccounts() {
         { scope: 'local', includeOverrides: overrides },
       );
       state.load = '';
-      dataOk('accounts.switch');
-    } catch (error) {
+    } catch {
       state.load = 'error';
-      dataError('accounts.switch', error);
     }
     render(true);
   }

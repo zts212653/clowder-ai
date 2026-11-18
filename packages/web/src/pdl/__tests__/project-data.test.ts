@@ -12,29 +12,23 @@ afterEach(async () => {
   vi.resetAllMocks();
 });
 
-it('holds each raw binding independently and reports the same failed source only after recovery', () => {
-  const engine = { dataError: vi.fn(), dataOk: vi.fn() };
+it('holds each raw binding independently; a failed source is only missing and the others stay', () => {
   const console = createOwnerConsole();
-  Object.assign(console.context, engine);
   const healthy = { items: ['owner data'] };
   const failure = new Error('source unavailable');
   console.push({ healthy, broken: null, readFailures: { broken: failure } });
   const held = console.read("projectData('healthy')");
   expect(held).toEqual(healthy);
   expect(console.read("projectData('broken')")).toBeNull();
-  expect(engine.dataError).toHaveBeenCalledOnce();
   console.push({
     healthy,
     broken: null,
     readFailures: { broken: failure },
   });
   expect(console.read("projectData('healthy')")).toBe(held);
-  expect(engine.dataError).toHaveBeenCalledOnce();
   console.push({ broken: { items: [] }, readFailures: {} });
   expect(console.read("projectData('broken').items")).toEqual([]);
-  expect(engine.dataOk).toHaveBeenCalledWith('project.broken');
   console.push({ broken: null, readFailures: { broken: new Error('source unavailable') } });
-  expect(engine.dataError).toHaveBeenCalledTimes(2);
   expect(console.read("projectData('healthy')")).toBe(held);
 });
 
@@ -42,17 +36,12 @@ it('routes an unpresented API error envelope through the held boundary and never
   vi.mocked(apiFetch).mockResolvedValue(new Response(JSON.stringify({ error: 'owner unavailable' })));
   const failedRead = await request('/api/owner').catch((error: Error) => error);
   expect(failedRead).toMatchObject({ name: 'PdlReadError', message: 'owner unavailable' });
-  const engine = { dataError: vi.fn(), dataOk: vi.fn() };
   const console = createOwnerConsole();
-  Object.assign(console.context, engine);
   const input = { owner: null, healthy: { title: 'Owner record' }, readFailures: { owner: failedRead } };
   console.push(input);
   expect(console.read("projectData('owner')")).toBeNull();
   expect(console.read("projectData('healthy')")).toEqual({ title: 'Owner record' });
   console.push(input);
-  expect(engine.dataError).toHaveBeenCalledOnce();
-  expect(engine.dataError).toHaveBeenLastCalledWith('project.owner', failedRead);
-  expect(engine.dataOk).not.toHaveBeenCalledWith('project.owner');
 });
 
 it('keeps the existing error/retry state for a real owner read and adds no duplicate toast', async () => {
@@ -68,9 +57,7 @@ it('keeps the existing error/retry state for a real owner read and adds no dupli
     rpArch: false,
   };
   const { result } = renderHook(() => useOpsBindings(fixtureData(), ui, true));
-  const engine = { dataError: vi.fn(), dataOk: vi.fn() };
   const console = createOwnerConsole({ ws: ui });
-  Object.assign(console.context, engine);
   const read = () => {
     console.push({ ops: result.current.data, healthy: { title: 'Other owner' } });
     return {
@@ -81,6 +68,4 @@ it('keeps the existing error/retry state for a real owner read and adds no dupli
   await waitFor(() => expect(read().ops.cafeWsOps.load).toBe('error'));
   expect(read()).toMatchObject({ ops: { cafeWsOps: { load: 'error' } }, healthy: { title: 'Other owner' } });
   read();
-  expect(engine.dataError).not.toHaveBeenCalled();
-  expect(engine.dataOk).not.toHaveBeenCalledWith('project.ops');
 });

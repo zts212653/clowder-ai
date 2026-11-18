@@ -212,7 +212,7 @@ function pdlView(id) {
   const v = pdlLoc(PDL_VIEWS[id]); if (!v) return '';
   if (v.plugin) { pdlPluginNeed(v.plugin); if (!v.blocks && v.type !== 'frame') return ''; }   /* 插件的视图：第一次画时取回它的子树（延迟加载）；还没取回时只有节点声明，先画空 */
   const root = v.sources ? pdlSourceOf(v, NAV_CTX ? NAV_CTX.a : {}) : v.plugin && !v.vm ? {} : vmRead(v.vm);   /* 插件视图：数据来自它登记的请求（应用的通用 VM.plugin 去读） */
-  if (v.vm && vmFailed(v.vm)) return PV_DRAW.state('error', { text: tc('common.viewError') });   /* 视图模型或它读的数据出错：在这个视图的位置说 */
+  if (v.vm && vmFailed(v.vm)) return PV_DRAW.state('error', { text: tc('common.viewError') });   /* 视图模型自己抛错：在这个视图的位置说 */
   if (!root) return v.empty ? PV_DRAW.state('empty', { text: pvText(v.empty, {}, {}) }) : '';
   if (v.type === 'frame') { const prev = PV.viewId; PV.viewId = id; try { return pvBlocks([Object.assign({}, v, { sources: null })], root, root); } finally { PV.viewId = prev; } }
   const placed = backPlaced(v.blocks, root);   /* 视图自己声明了返回放在哪（back 控件）：标题行不取返回 */

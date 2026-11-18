@@ -76,13 +76,12 @@ export function useConsoleCommandBindings(enabled: boolean) {
             return;
           }
           lease = value;
-          window.clowderChat.dataOk('home');
           return value;
         })
         .finally(() => {
           if (registering === reading) registering = undefined;
           if (active && !suspended && hub.connectedSocketId() && generation !== epoch)
-            void register().catch((error) => window.clowderChat.dataError('home', error));
+            void register().catch((error) => console.error(error));
         });
       registering = reading;
       return reading;
@@ -96,7 +95,7 @@ export function useConsoleCommandBindings(enabled: boolean) {
     };
     releases.push(
       hub.onConnected(() => {
-        void register().catch((error) => window.clowderChat.dataError('home', error));
+        void register().catch((error) => console.error(error));
       }),
     );
     listen('disconnect', disconnected);
@@ -165,7 +164,7 @@ export function useConsoleCommandBindings(enabled: boolean) {
       );
     });
     const recover = () => {
-      void register().catch((error) => window.clowderChat.dataError('home', error));
+      void register().catch((error) => console.error(error));
     };
     const hide = () => {
       suspended = true;

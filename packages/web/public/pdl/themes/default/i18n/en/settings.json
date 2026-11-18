@@ -23,6 +23,7 @@
       "owner_unknown": "Sign-in unverified",
       "stale": "Last reading"
     },
+    "quotaItem": "{0} {1}% left",
     "quotaWindow": {
       "five_hour": "5 hours",
       "seven_day": "Week (all models)",

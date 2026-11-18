@@ -1888,6 +1888,13 @@ pdl:
     MAIN:
       anchor: main
       as: cover
+    QUOTA_WINDOW:
+      of: "@window"
+      map:
+        five_hour: t:accounts.quotaWindow.five_hour
+        seven_day: t:accounts.quotaWindow.seven_day
+        seven_day_overage_included: t:accounts.quotaWindow.fable
+        _: "@label"
     EXEC_MEMBER_ITEM:
       overview:
         - kind: usage
@@ -1908,6 +1915,17 @@ pdl:
           when: "@currentSession.runtime"
           runtimeKind: "@currentSession.runtime.kind"
           life: "@currentSession.runtime.life"
+        - kind: quota
+          when: "@quota"
+          account: "@quota.account"
+          windows:
+            of: "@quota.items"
+            item:
+              t: accounts.quotaItem
+              args:
+                - $frag: QUOTA_WINDOW
+                - "@left"
+            sep: " · "
         - kind: started
           when: "@currentSession"
           created: "@currentSession.created"
@@ -2048,6 +2066,7 @@ pdl:
                 usage: t:wsSessions.member.overviewLabel.usage
                 context: t:memberForm.context
                 runtime: t:wsSessions.runtime
+                quota: t:accounts.quota
                 started: t:wsSessions.started
                 _: "@kind"
           cols:
@@ -2115,6 +2134,12 @@ pdl:
                           - "@runtimeKind"
                           - " · "
                           - "@life"
+                        sep: ""
+                      quota:
+                        parts:
+                          - "@account"
+                          - " · "
+                          - "@windows"
                         sep: ""
                       started:
                         t: wsSessions.member.overviewValue.started
@@ -20336,6 +20361,7 @@ pdl:
                 path: cs.modal.open
                 v: goal
               key: goal
+              when: $.goalRead
               open:
                 of: $.open
                 map:
@@ -20387,6 +20413,7 @@ pdl:
                 path: cs.modal.open
                 v: runtime
               key: runtime
+              when: $.runtime
               open:
                 of: $.open
                 map:
@@ -34846,12 +34873,7 @@ pdl:
                             _: ""
                         parts:
                           - text:
-                              of: "@window"
-                              map:
-                                five_hour: t:accounts.quotaWindow.five_hour
-                                seven_day: t:accounts.quotaWindow.seven_day
-                                seven_day_overage_included: t:accounts.quotaWindow.fable
-                                _: "@label"
+                              $frag: QUOTA_WINDOW
                           - text: " "
                           - text:
                               t: settings.quotaLeft

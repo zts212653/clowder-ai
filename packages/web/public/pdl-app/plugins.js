@@ -44,12 +44,14 @@ function bindPluginSpaces() {
       }),
     );
   };
+  // A detail that can't be read is just missing; its place says so (detailLoad) instead of loading forever.
+  const detailFailed = {};
   async function readDetail(id) {
     try {
       await chatPort.action('settingsPluginDetailRead', { id: id });
-      dataOk('plugin:' + id);
-    } catch (error) {
-      dataError('plugin:' + id, error);
+      delete detailFailed[id];
+    } catch {
+      detailFailed[id] = true;
     }
     await chatDataRender();
   }
@@ -67,7 +69,7 @@ function bindPluginSpaces() {
   A.companionRead = async function () {
     try {
       companion = Object.assign({ load: '' }, await api.get('/api/concierge/desktop'));
-    } catch (error) {
+    } catch {
       companion = { load: 'error' };
     }
     await chatDataRender();
@@ -92,7 +94,7 @@ function bindPluginSpaces() {
         return;
       }
       companion = Object.assign({ load: '' }, receipt);
-    } catch (error) {
+    } catch {
       companion.load = 'error';
     } finally {
       render(true);
@@ -161,13 +163,11 @@ function bindPluginSpaces() {
       loaded = true;
       load = '';
       if (started && register()) render();
-      dataOk('plugins');
-    } catch (error) {
+    } catch {
       fragments = {};
       S.plugins = {};
       loaded = false;
       load = 'error';
-      dataError('plugins', error);
     }
   }
   onStart('data', read);
@@ -328,7 +328,11 @@ function bindPluginSpaces() {
       sel: chosen
         ? Object.assign({}, selected, {
             key: chosen.pluginId,
-            detailLoad: placementData().pluginDetails[chosen.pluginId] ? '' : 'loading',
+            detailLoad: placementData().pluginDetails[chosen.pluginId]
+              ? ''
+              : detailFailed[chosen.pluginId]
+                ? 'error'
+                : 'loading',
             name: chosen.displayName,
             icon: chosen.icon,
             publisher: chosen.publisher,

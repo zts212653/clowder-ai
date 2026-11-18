@@ -306,7 +306,7 @@ function bindProject() {
   ].forEach(function (binding) {
     binding[2].forEach(function (name) {
       VM[name] = function () {
-        return projectData(binding[0]) ? binding[1]()[name] : null;
+        return projectData(binding[0]) ? binding[1]()[name] : ownerFailed(binding[0]) ? { load: 'error' } : null;
       };
     });
   });
@@ -1069,10 +1069,10 @@ function bindProject() {
     };
   });
   VM.cafeWsOps = function () {
-    return projectOps().cafeWsOps;
+    return ownerFailed('ops') ? { load: 'error' } : projectOps().cafeWsOps;
   };
   VM.theater = function () {
-    if (!projectData('replay')) return null;
+    if (!projectData('replay')) return ownerFailed('replay') ? { load: 'error' } : null;
     const m = replayModels().theater;
     if (!m) return null;
     return Object.assign({}, m, { items: m.items.map(chatMessageVM) });
@@ -1439,6 +1439,7 @@ function bindProject() {
     return d;
   }
   VM.cafeWsEvo = function () {
+    if (ownerFailed('evolution')) return { load: 'error' };
     const models = projectEvolution(),
       m = models.cafeWsEvo;
     if (!m) return null;
@@ -1498,7 +1499,8 @@ function bindProject() {
     return chatAction('rpPlay');
   };
   VM.replay = function () {
-    if (!projectData('replay')) return { load: 'loading', sources: [], source: 'thread', player: null };
+    if (!projectData('replay'))
+      return { load: ownerFailed('replay') ? 'error' : 'loading', sources: [], source: 'thread', player: null };
     const model = replayModels();
     return Object.assign({}, model.theater.rp, { load: model.theater.load, player: model.theater.player });
   };

@@ -76,13 +76,9 @@ export function useChatOwnerBindings(
         );
         if (!abort.signal.aborted) {
           setRead((current) => ({ ...current, vote: { threadId, value: result.vote } }));
-          window.clowderChat.dataOk('vote');
         }
-      } catch (error) {
-        if (!abort.signal.aborted) {
-          setRead((current) => ({ ...current, vote: { threadId, value: null } }));
-          window.clowderChat.dataError('vote', error);
-        }
+      } catch {
+        if (!abort.signal.aborted) setRead((current) => ({ ...current, vote: { threadId, value: null } }));
       }
     };
     void load();

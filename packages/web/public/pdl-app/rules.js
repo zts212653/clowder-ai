@@ -14,10 +14,8 @@ function bindRules() {
       manifest = values[1].segments;
       files = source.sharedRules.concat(source.providerGuides, [source.l0Prompts.template]);
       load = '';
-      dataOk('rules');
-    } catch (error) {
+    } catch {
       load = 'error';
-      dataError('rules', error);
     }
     await chatDataRender();
   }

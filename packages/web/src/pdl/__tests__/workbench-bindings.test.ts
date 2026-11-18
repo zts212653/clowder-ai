@@ -33,7 +33,7 @@ const workspace = {
   fetchSubtree: vi.fn(),
 } as unknown as ReturnType<typeof useWorkspace>;
 beforeEach(() => {
-  window.clowderChat = { dataOk: vi.fn(), dataError: vi.fn() } as unknown as typeof window.clowderChat;
+  window.clowderChat = {} as unknown as typeof window.clowderChat;
   recallNext = null;
   recallMoreFailed = false;
   writes = [];

@@ -141,15 +141,14 @@ it('does not mutate confirmed settings through the theme state and retains them 
   expect(projectOwner('desktop', hook.result.current, {}).desktopSystem?.desktopAuto).toBe(true);
 });
 
-it('passes read errors to the common model boundary and does not invent a current version', async () => {
+it('holds a read error as the desktop data and does not invent a current version', async () => {
   const failure = new Error('native settings unavailable');
   vi.mocked(bridge.getUpdateSettings).mockRejectedValue(failure);
   const hook = renderHook(() => useDesktopUpdateBindings());
   await waitFor(() => expect(hook.result.current.data.error).toBe(failure));
   const console = ownerConsole();
-  console.dataError = vi.fn();
   console.receiveProjectData({ desktop: hook.result.current.data });
-  expect(console.dataError).toHaveBeenCalledWith('desktop', failure);
+  expect(console.projectData('desktop').error).toBe(failure);
   await cleanup();
   window.history.replaceState({}, '', '/');
   ownerPrompt = null;

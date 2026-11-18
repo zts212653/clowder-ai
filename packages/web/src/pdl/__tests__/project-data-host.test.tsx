@@ -95,7 +95,6 @@ vi.mock('../useDocumentBindings', () => ({
   DocumentOwnerBinding: () => null,
 }));
 let binding: ProjectBindings;
-const engine = { dataError: vi.fn(), dataOk: vi.fn() };
 beforeEach(() => {
   for (const owner of Object.values(owners)) {
     owner.models.mockReset().mockImplementation(() => {
@@ -124,9 +123,7 @@ beforeEach(() => {
     },
   });
   vi.mocked(apiFetch).mockReset();
-  engine.dataError.mockClear();
-  engine.dataOk.mockClear();
-  Object.defineProperty(window, 'clowderChat', { configurable: true, value: engine });
+  Object.defineProperty(window, 'clowderChat', { configurable: true, value: {} });
   const data = fixtureData(),
     ui = fixtureUi();
   renderHook(
@@ -258,23 +255,18 @@ it('passes trash read errors and recovery through the existing per-binding data 
   const hook = renderHook(() => useTrashBindings(true));
   await waitFor(() => expect(hook.result.current.data.error).toMatchObject({ message: 'Trash owner unavailable' }));
   const console = ownerConsole();
-  console.dataError = engine.dataError;
-  console.dataOk = engine.dataOk;
   const read = () => {
     console.receiveProjectData({ trash: hook.result.current.data });
     return console.projectTrash();
   };
   read();
-  expect(engine.dataError).toHaveBeenLastCalledWith('trash', expect.objectContaining({ name: 'PdlReadError' }));
   vi.mocked(apiFetch).mockResolvedValue(response({ threads: [] }));
   await act(() => hook.result.current.action('refresh', { k: 'trash' }));
   expect(read()).toHaveProperty('cafeTrash.items', []);
-  expect(engine.dataOk).toHaveBeenCalledWith('trash');
 });
 
 it('attributes an API action failure to its raw owner and delegates notification to the held receiver', async () => {
   const console = createOwnerConsole();
-  Object.assign(console.context, engine);
   const receive = () => console.push(binding.data);
   receive();
   owners.workbench.models.mockImplementation(() => {
@@ -297,11 +289,6 @@ it('attributes an API action failure to its raw owner and delegates notification
   expect(binding.data.readFailures).toHaveProperty('workbench', expect.objectContaining({ name: 'PdlReadError' }));
   expect(binding.data).toHaveProperty('home.waits.projection.items.0.taskTitle', 'Healthy owner data');
   receive();
-  expect(engine.dataError).toHaveBeenLastCalledWith(
-    'project.workbench',
-    expect.objectContaining({ name: 'PdlReadError' }),
-  );
-  const notifications = engine.dataError.mock.calls.length;
   await fail();
   expect(receive()).toEqual(
     Object.fromEntries(
@@ -317,27 +304,20 @@ it('attributes an API action failure to its raw owner and delegates notification
       ]),
     ),
   );
-  expect(engine.dataError).toHaveBeenCalledTimes(notifications + 1);
   vi.mocked(apiFetch).mockImplementation(async () => new Response('{}'));
   await act(() => binding.action('refresh', {}));
   expect(binding.data.readFailures).not.toHaveProperty('workbench');
   expect(binding.data).toHaveProperty('workbench.workspace.worktreeId', 'owner');
   receive();
-  expect(engine.dataOk).toHaveBeenCalledWith('project.workbench');
   vi.mocked(apiFetch).mockImplementation(async () => new Response(JSON.stringify({ error: 'Owner unavailable' })));
   await fail();
   receive();
-  expect(engine.dataError).toHaveBeenLastCalledWith(
-    'project.workbench',
-    expect.objectContaining({ name: 'PdlReadError' }),
-  );
   expect(owners.workbench.models).not.toHaveBeenCalled();
   expect(owners.home.models).not.toHaveBeenCalled();
 });
 
 it('keeps an existing error/retry component on refresh failure and detects its later background recovery', async () => {
   const console = createOwnerConsole();
-  Object.assign(console.context, engine);
   const read = () => {
     console.push(binding.data);
     return console.read("projectData('ops').read");
@@ -361,12 +341,9 @@ it('keeps an existing error/retry component on refresh failure and detects its l
   });
   expect(read()).toHaveProperty('load', 'error');
   expect(owners.ops.models).not.toHaveBeenCalled();
-  expect(engine.dataError).not.toHaveBeenCalled();
   Object.assign(owners.ops, { data: { read: { load: 'loading' } } });
   expect(read()).toHaveProperty('load', 'loading');
   Object.assign(owners.ops, { data: { read: { load: '', title: 'Recovered owner' } } });
   expect(read()).toHaveProperty('title', 'Recovered owner');
-  expect(engine.dataError).not.toHaveBeenCalled();
-  expect(engine.dataOk).toHaveBeenCalledWith('project.ops');
   expect(owners.ops.models).not.toHaveBeenCalled();
 });

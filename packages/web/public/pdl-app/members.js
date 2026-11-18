@@ -2,6 +2,7 @@
 'use strict';
 function bindMembers() {
   let meta = null,
+    failed = false, // the member list could not be read: its place says so instead of loading forever
     pending = null,
     page = '',
     editor = null,
@@ -20,7 +21,7 @@ function bindMembers() {
     } catch (error) {
       if (error.name === 'PdlReadError' && name !== 'memberSave') {
         meta = null;
-        dataError('members', error);
+        failed = true;
       }
       if (['runtime.readError', 'members.loadError', 'memberNew.templatesError'].indexOf(error.message) >= 0)
         throw new Error(tc(error.message));
@@ -36,12 +37,16 @@ function bindMembers() {
         .then(async function (data) {
           if (id && id !== 'new' && id !== 'list') {
             const values = await Promise.all([
-              act('settingsHooksRead', {}),
+              act('settingsHooksRead', {}).catch(function () {
+                return null;
+              }),
               // a voice list that can't be read only leaves the pick empty (with a retry), not the page
               act('memberVoicesRead', {}).catch(function () {
                 return null;
               }),
-              act('memberCanonRead', { id: id }),
+              act('memberCanonRead', { id: id }).catch(function () {
+                return null;
+              }),
             ]);
             data.voices = Array.isArray(values[1]) ? values[1] : null;
             data.canon = values[2];
@@ -52,12 +57,12 @@ function bindMembers() {
           }
           if (target === page) {
             meta = data;
-            dataOk('members');
+            failed = false;
           }
         })
-        .catch(function (error) {
+        .catch(function () {
           meta = null;
-          if (error.name !== 'PdlReadError') dataError('members', error);
+          failed = true;
         })
         .finally(function () {
           pending = null;
@@ -181,7 +186,7 @@ function bindMembers() {
       onOpts: on.map(function (c) {
         return c.id;
       }),
-      load: meta ? '' : 'loading',
+      load: meta ? '' : failed ? 'error' : 'loading',
       defaultCatOptions: on.map(function (c) {
         return {
           id: c.id,
@@ -376,11 +381,9 @@ function bindMembers() {
                 if (!heldNeeded.has(key)) return;
                 state.value = value;
                 state.load = '';
-                dataOk(key);
               },
-              function (error) {
+              function () {
                 state.load = 'error';
-                dataError(key, error);
               },
             )
             .finally(chatDataRender),

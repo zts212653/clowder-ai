@@ -73,8 +73,6 @@ it('projects package descriptions, documentation and provided capabilities witho
     chatPort: { action: vi.fn() },
     projectionNeeded: new Set(),
     placementData: () => owner,
-    dataOk: vi.fn(),
-    dataError: vi.fn(),
     pcfState: () => ({}),
     pcfDirty: () => false,
     pcfModel: () => ({}),

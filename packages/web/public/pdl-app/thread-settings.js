@@ -35,43 +35,44 @@ function bindThreadSettings() {
   A.threadSettings = async function (d) {
     const id = d.id || chatPort.threadId,
       path = '/api/threads/' + encodeURIComponent(id);
-    try {
-      const values = await Promise.all([
+    // Each part is read on its own; one that fails is just not there (its section isn't shown, its rows are empty).
+    const [goal, native, efforts, speeds] = (
+      await Promise.allSettled([
         api.get(path + '/goal'),
         api.get(path + '/native-status'),
         api.get(path + '/members/effort'),
         api.get(path + '/members/speed'),
-      ]);
-      CS.modal = {
-        kind: 'tset',
-        id: id,
-        open: d.v2 || 'goal',
-        goal: values[0],
-        goalCatId: values[0].nativeTargets.length ? values[0].nativeTargets[0].catId : '',
-        native: values[1],
-        efforts: values[2].members,
-        speeds: values[3].members,
-        sel: {},
-        error: '',
-      };
-      CS.f['ts-goal'] = values[0].goal ? values[0].goal.objective : '';
-      (
-        sidebarData().threads.find(function (t) {
-          return t.id === id;
-        }).labels || []
-      ).forEach(function (label) {
-        CS.modal.sel[label] = true;
-      });
-      render(true);
-    } catch (error) {
-      dataError('thread-settings', error);
-    }
+      ])
+    ).map(function (r) {
+      return r.status === 'fulfilled' ? r.value : null;
+    });
+    CS.modal = {
+      kind: 'tset',
+      id: id,
+      open: d.v2 || 'goal',
+      goal: goal,
+      goalCatId: goal && goal.nativeTargets.length ? goal.nativeTargets[0].catId : '',
+      native: native,
+      efforts: efforts ? efforts.members : [],
+      speeds: speeds ? speeds.members : [],
+      sel: {},
+      error: '',
+    };
+    CS.f['ts-goal'] = goal && goal.goal ? goal.goal.objective : '';
+    (
+      sidebarData().threads.find(function (t) {
+        return t.id === id;
+      }).labels || []
+    ).forEach(function (label) {
+      CS.modal.sel[label] = true;
+    });
+    render(true);
   };
   MODALS.tset = function (m) {
     const t = sidebarData().threads.find(function (t) {
         return t.id === m.id;
       }),
-      goal = m.goal.goal,
+      goal = m.goal && m.goal.goal,
       owner = sidebarOwner(),
       labels = owner ? owner.labels : [];
     return {
@@ -85,9 +86,12 @@ function bindThreadSettings() {
         disp: { id: m.id, record: 'follow' },
         open: m.open,
         goal: CS.f['ts-goal'],
-        targets: m.goal.nativeTargets.map(function (r) {
-          return r.catId;
-        }),
+        goalRead: !!m.goal,
+        targets: m.goal
+          ? m.goal.nativeTargets.map(function (r) {
+              return r.catId;
+            })
+          : [],
         goalCatId: m.goalCatId,
         goalSub: goal ? goal.objective : '',
         goalSynced:

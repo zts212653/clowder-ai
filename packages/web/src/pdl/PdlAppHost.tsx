@@ -2116,8 +2116,6 @@ function ChatBinding({
     if (!sameSidebar) port.current.sidebarData = sidebar;
     // The console accepts data during startup; the engine waits until boot to render.
     if (!window.clowderChat) return;
-    if (project.current?.sidebarError) window.clowderChat.dataError('sidebar', project.current.sidebarError);
-    else window.clowderChat.dataOk('sidebar');
     window.clowderChat.update(port.current);
   }, []);
   dataPublisher.current = publishData;

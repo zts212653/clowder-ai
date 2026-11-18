@@ -556,8 +556,6 @@ window.clowderChat = {
   pushSidebar: pushSidebar,
   pushProject: pushProjectData,
   pushChat: pushChat,
-  dataError: dataError,
-  dataOk: dataOk,
   emit: function (event, data) {
     let result;
     (chatEvents[event] || []).forEach(function (fn) {

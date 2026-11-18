@@ -126,8 +126,6 @@ declare global {
       pushSidebar: (data: SidebarSnapshot) => SidebarDiff;
       pushProject: (data: Record<string, unknown>) => Record<string, SidebarDiff>;
       pushChat: (data: Record<string, unknown>) => ChatDiff;
-      dataError: (source: string, error: unknown) => void;
-      dataOk: (source: string) => void;
       confirm: (kind: string, args: Record<string, unknown>) => Promise<boolean>;
       emit: (event: string, data: unknown) => unknown;
     };

@@ -36,26 +36,21 @@ function bindCapabilities() {
   }
   async function read() {
     load = 'loading';
-    try {
-      const values = await Promise.all([
-        api.get('/api/capabilities', query()),
-        api.get('/api/skills', query()),
-        api.get('/api/mount-rules', Object.assign({}, query(), isDef() ? { scope: 'default' } : {})),
-      ]);
-      board = values[0];
-      skills = values[1].skills;
-      rules = values[2].rules;
-      load = '';
-      dataOk('capabilities');
-      await Promise.all(
-        Object.keys(syncReads)
-          .filter((key) => heldNeeded.has(key))
-          .map((key) => readSync(key)),
-      );
-    } catch (error) {
-      load = 'error';
-      dataError('capabilities', error);
-    }
+    // Each list is read on its own: one that fails is only missing; the page fails only without its board.
+    const [b, s, r] = await Promise.allSettled([
+      api.get('/api/capabilities', query()),
+      api.get('/api/skills', query()),
+      api.get('/api/mount-rules', Object.assign({}, query(), isDef() ? { scope: 'default' } : {})),
+    ]);
+    if (b.status === 'fulfilled') board = b.value;
+    if (s.status === 'fulfilled') skills = s.value.skills;
+    if (r.status === 'fulfilled') rules = r.value.rules;
+    load = board ? '' : 'error';
+    await Promise.all(
+      Object.keys(syncReads)
+        .filter((key) => heldNeeded.has(key))
+        .map((key) => readSync(key)),
+    );
     await chatDataRender();
   }
   api.on('sources:needed', function (diff) {
@@ -194,10 +189,8 @@ function bindCapabilities() {
     try {
       const results = await checkDrift(kind, scope);
       syncReads[key] = { load: '', results, model: driftModel(kind, scope, results) };
-      dataOk(key);
-    } catch (error) {
+    } catch {
       syncReads[key] = { load: 'error' };
-      dataError(key, error);
     }
     await chatDataRender();
   }
@@ -540,7 +533,8 @@ function bindCapabilities() {
   A.capSync = function (d) {
     return settleHold(
       drift(d).catch(function (error) {
-        dataError('capabilities', error);
+        toast(error.message, null, 'danger');
+        return false;
       }),
     );
   };

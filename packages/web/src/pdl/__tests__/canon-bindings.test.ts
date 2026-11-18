@@ -11,7 +11,7 @@ const response = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
 let current: typeof item, writes: Record<string, unknown>[], fail: boolean, notices: (typeof update)[];
 beforeEach(() => {
-  window.clowderChat = { dataOk: vi.fn(), dataError: vi.fn() } as unknown as typeof window.clowderChat;
+  window.clowderChat = {} as unknown as typeof window.clowderChat;
   current = structuredClone(item);
   writes = [];
   fail = false;

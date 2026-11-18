@@ -96,10 +96,8 @@ function bindNotifications() {
       snapshot = values[0];
       client = values[1];
       load = '';
-      dataOk('push');
-    } catch (error) {
+    } catch {
       load = 'error';
-      dataError('push', error);
     }
     await chatDataRender();
   }

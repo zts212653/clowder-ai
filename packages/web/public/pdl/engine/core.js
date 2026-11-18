@@ -1055,26 +1055,15 @@ function msgMd(x) { if (x && x.md != null && x.html == null) x.html = ENGINE_PAR
 /* 经组件库得到的两样文字和一个节点（ENGINE_PARTS 登记）：应用、视图模型只经这里取，不认识组件 */
 function whoSync() { ENGINE_PARTS.whoSync(); }
 function whoText(x, o) { return ENGINE_PARTS.whoText(x, o); }
-/* 数据出错：不弹全局提示；读它的视图 / 块在自己的位置画出错状态（vmFailed）。来源按读取的名字记（视图模型出错是 vm:名字，宿主的一份数据是它被读的路径），
-   视图模型读到的来源里有出错的（同名或在它下面）就算这个视图读取出错。同一个错误只往控制台打一次，dataOk 之后再出错会再打 */
-const DATA_ERR = {};
-function dataError(source, e) {
-  const m = String((e && e.message) || e);
-  if (DATA_ERR[source] === m) return;
-  console.error(e);
-  DATA_ERR[source] = m;
-}
-function dataOk(source) { delete DATA_ERR[source]; }
-function vmFailed(name) {
-  if (DATA_ERR['vm:' + name]) return true;
-  const e = VM_SEEN.get('~vm:vm:' + name), bad = Object.keys(DATA_ERR);
-  return !!e && bad.length > 0 && Array.from(e.src).some(function (r) { return bad.some(function (k) { return r === k || r.indexOf(k + '.') === 0; }); });
-}
-/* 读一份视图模型：读出错给 null，读它的视图 / 块画出错状态（vmFailed），别处按空画 */
+/* 视图模型自己算的时候抛错：这一个视图 / 块在自己的位置画出错状态，不连累别处。数据读没读到不归引擎管——
+   读失败就是那一项没有，要在哪说读取失败由应用在那一项的数据里给 load，主题在那个位置声明。同一个错误只往控制台打一次 */
+const VM_ERR = {};
+function vmFailed(name) { return !!VM_ERR[name]; }
+/* 读一份视图模型：抛错给 null，读它的视图 / 块画出错状态（vmFailed），别处按空画 */
 function vmRead(name, arg) {   /* arg：按渲染类型取到的模板，它的视图模型收到这一项的数据（见组件库的 typed 块） */
   if (!VM[name]) return null;
-  try { const r = VM[name](arg); dataOk('vm:' + name); return r; }
-  catch (e) { dataError('vm:' + name, e); return null; }
+  try { const r = VM[name](arg); delete VM_ERR[name]; return r; }
+  catch (e) { const m = String((e && e.message) || e); if (VM_ERR[name] !== m) console.error(e); VM_ERR[name] = m; return null; }
 }
 function framePost(key, data) { return ENGINE_PARTS.framePost(key, data); }   /* 往指定的框发一条命令，只发一次（组件按 key 找框，见 blocks.js） */   /* 身份的显示文字（名字，o.handle 时带句柄） */
 function mdHtml(src) { return ENGINE_PARTS.md(src); }          /* Markdown → HTML */

@@ -544,6 +544,7 @@ function executionModel(query) {
       hasContext: !!ctx,
       context: ctx ? { used: ctx.usedTokens, ceiling: ctx.windowTokens, source: ctx.source } : null,
       contextPercent: ctx ? ctx.fillRatio * 100 : 0,
+      quota: VM.memberQuota(id, cat && cat.accountRef),
       contextWarn: !!ctx && ctx.fillRatio >= 0.8,
       run: {
         state: live ? 'streaming' : 'idle',

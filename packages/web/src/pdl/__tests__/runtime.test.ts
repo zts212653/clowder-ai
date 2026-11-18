@@ -58,7 +58,7 @@ function declaredMenu(w: any, action: string, scope = '') {
 }
 const { JSDOM } = createRequire(import.meta.url)('jsdom');
 vi.mock('@/utils/api-client', () => ({ apiFetch: vi.fn(), API_URL: 'https://api.test' }));
-type EngineData = Pick<Window['clowderChat'], 'dataError' | 'dataOk'>;
+type EngineData = Window['clowderChat'];
 type FixtureApi = {
   get: (path: string, params?: Record<string, string>) => Promise<unknown>;
   post: (path: string, params: Record<string, string>, body: unknown) => Promise<unknown>;
@@ -841,7 +841,7 @@ describe('unmodified runtime and project chat bindings', () => {
       dom.window.close();
     }
   });
-  it('keeps an empty conversation usable when its reader preference is rejected and reports the source once', async () => {
+  it('keeps an empty conversation usable when its reader preference is rejected and does not read it again', async () => {
     const { dom, w, port, errors } = await boot(undefined, (data) => {
       data.messages = [];
     });
@@ -854,7 +854,7 @@ describe('unmodified runtime and project chat bindings', () => {
       expect(w.eval('VM.chatStream().items')).toEqual([]);
       expect(w.document.getElementById('chat-input')).not.toBeNull();
       expect(w.eval('TOAST_LOG.length')).toBe(0);
-      expect(errors).toHaveBeenCalledTimes(1);
+      expect(errors).not.toHaveBeenCalled();
       port.get.mockClear();
       for (let i = 0; i < 10; i++) {
         w.clowderChat.pushProject({ general: source });
@@ -862,7 +862,7 @@ describe('unmodified runtime and project chat bindings', () => {
       }
       await w.__settled();
       expect(port.get).not.toHaveBeenCalled();
-      expect(errors).toHaveBeenCalledTimes(1);
+      expect(errors).not.toHaveBeenCalled();
     } finally {
       await w.__settled();
       dom.window.close();
@@ -5146,7 +5146,7 @@ describe('unmodified runtime and project chat bindings', () => {
       dom.window.close();
     }
   });
-  it('uses r118 engine errors for an API error envelope without a global toast, deduplicates and reports again after recovery', async () => {
+  it('keeps the other panels and shows no toast while an owner read fails with an API error envelope, before and after recovery', async () => {
     vi.mocked(apiFetch).mockImplementation(async () => new Response(JSON.stringify({ error: 'Owner unavailable' })));
     let result = await request('/api/owner').catch((error: Error) => error);
     const bench = fixtureWorkbenchSource();
@@ -5179,7 +5179,6 @@ describe('unmodified runtime and project chat bindings', () => {
     try {
       w.eval("ENGINE_PARTS.openTab('panel', 'tasks')");
       await w.__settled();
-      await vi.waitFor(() => expect(errors).toHaveBeenCalledTimes(1));
       expect(w.document.querySelector('textarea')).not.toBeNull();
       expect(w.document.body.textContent).toContain('Healthy owner task');
       expect(w.eval('TOAST_LOG.length')).toBe(0);
@@ -5187,7 +5186,6 @@ describe('unmodified runtime and project chat bindings', () => {
       w.clowderChat.pushProject({ readFailures: { terminal: result } });
       await w.__settled();
       expect(w.eval('TOAST_LOG.length')).toBe(0);
-      expect(errors).toHaveBeenCalledTimes(1);
       vi.mocked(apiFetch).mockImplementation(async () => new Response('{}'));
       result = await request('/api/owner');
       w.clowderChat.pushProject({ readFailures: {} });
@@ -5196,7 +5194,7 @@ describe('unmodified runtime and project chat bindings', () => {
       result = await request('/api/owner').catch((error: Error) => error);
       w.clowderChat.pushProject({ readFailures: { terminal: result } });
       await w.__settled();
-      await vi.waitFor(() => expect(errors).toHaveBeenCalledTimes(2));
+      expect(errors).not.toHaveBeenCalled();
       expect(w.eval('TOAST_LOG.length')).toBe(0);
     } finally {
       dom.window.close();
@@ -5318,9 +5316,10 @@ describe('unmodified runtime and project chat bindings', () => {
       w.eval(`ENGINE_PARTS.openTab('panel', '${panel}')`);
       await w.__settled();
       expect(w.eval('TOAST_LOG.length')).toBe(0);
-      // The panel that read the failed owner says so in place (home's launcher reads no owner data).
-      if (panel !== 'home')
-        expect(w.document.querySelector('.panel-body')?.textContent).toContain(w.eval("tc('common.viewError')"));
+      // The panel that read the failed owner says so in place with its own error (home's launcher reads no owner data).
+      const own = { ops: 'wsOps', replay: 'wsReplay', evolution: 'wsEvolution' }[panel];
+      if (own)
+        expect(w.document.querySelector('.panel-body')?.textContent).toContain(w.eval(`tc('${own}.load.error')`));
       expect(w.document.querySelector('textarea')).not.toBeNull();
       expect(w.document.body.textContent).not.toContain('Application error');
       w.eval("ENGINE_PARTS.openTab('panel', 'tasks')");

@@ -29,48 +29,47 @@ function bindInbox() {
     const ticket = ++sequence;
     confirmed = false;
     chatDataRender();
-    try {
-      const values = await Promise.all([
-        api.get(
-          '/api/concierge/work/decisions',
-          {
-            view: 'unified',
-            includeUserMentions: 'true',
-            mentionPeriod: CS.ib.time,
-            limit: 20,
-            offset: (CS.ib.page - 1) * 20,
-          },
-          { afterCurrentGet: true },
-        ),
-        api.get(
-          '/api/concierge/work/decisions',
-          {
-            view: 'unified',
-            includeUserMentions: 'true',
-            mentionPeriod: 'handled',
-            limit: 20,
-          },
-          { afterCurrentGet: true },
-        ),
-        api.get('/api/concierge/confirmations', undefined, { afterCurrentGet: true }),
-        api.get('/api/concierge/thread', undefined, { afterCurrentGet: true }),
-        api.get('/api/concierge/work/mentions/last-handling', undefined, { afterCurrentGet: true }),
+    const opt = { afterCurrentGet: true },
+      // The two decision pages are checked together (same owner); the rest are read on their own and a failure there
+      // only leaves that item missing.
+      [decisions, extra, thread, last] = await Promise.allSettled([
+        Promise.all([
+          api.get(
+            '/api/concierge/work/decisions',
+            {
+              view: 'unified',
+              includeUserMentions: 'true',
+              mentionPeriod: CS.ib.time,
+              limit: 20,
+              offset: (CS.ib.page - 1) * 20,
+            },
+            opt,
+          ),
+          api.get(
+            '/api/concierge/work/decisions',
+            { view: 'unified', includeUserMentions: 'true', mentionPeriod: 'handled', limit: 20 },
+            opt,
+          ),
+        ]),
+        api.get('/api/concierge/confirmations', undefined, opt),
+        api.get('/api/concierge/thread', undefined, opt),
+        api.get('/api/concierge/work/mentions/last-handling', undefined, opt),
       ]);
-      if (ticket !== sequence) return;
-      if (owner !== undefined && (values[0].identity.ownerUserId !== owner || values[1].identity.ownerUserId !== owner))
-        throw new Error(tc('inboxRefresh.retained'));
-      const diff = { added: [], changed: [], removed: [], orderChanged: false, fields: [] };
-      read = receiveProjectValue(read, values[0], 'inbox', diff);
-      handled = receiveProjectValue(handled, values[1], 'inbox', diff);
-      confirmations = receiveProjectValue(confirmations, values[2].confirmations, 'inbox.confirmations', diff);
-      conciergeThread = values[3].threadId;
-      lastHandling = values[4].receipt;
+    if (ticket !== sequence) return;
+    const diff = { added: [], changed: [], removed: [], orderChanged: false, fields: [] },
+      pages = decisions.status === 'fulfilled' ? decisions.value : null;
+    if (
+      pages &&
+      (owner === undefined || (pages[0].identity.ownerUserId === owner && pages[1].identity.ownerUserId === owner))
+    ) {
+      read = receiveProjectValue(read, pages[0], 'inbox', diff);
+      handled = receiveProjectValue(handled, pages[1], 'inbox', diff);
       confirmed = true;
-      dataOk('inbox');
-    } catch (error) {
-      if (ticket !== sequence) return;
-      dataError('inbox', error);
     }
+    if (extra.status === 'fulfilled')
+      confirmations = receiveProjectValue(confirmations, extra.value.confirmations, 'inbox.confirmations', diff);
+    if (thread.status === 'fulfilled') conciergeThread = thread.value.threadId;
+    if (last.status === 'fulfilled') lastHandling = last.value.receipt;
     await chatDataRender();
   }
   api.on('session:changed', function (identity) {

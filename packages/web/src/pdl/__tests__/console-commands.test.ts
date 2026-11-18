@@ -70,7 +70,7 @@ beforeEach(() => {
   wire.socket.connected = false;
   vi.clearAllMocks();
   emit = vi.fn((event: string) => (event === 'home:inspect' ? observed : true));
-  window.clowderChat = { emit, dataOk: vi.fn(), dataError: vi.fn() } as unknown as typeof window.clowderChat;
+  window.clowderChat = { emit } as unknown as typeof window.clowderChat;
   vi.mocked(apiFetch).mockImplementation(async (path, init) => {
     if (path === '/api/concierge/home/clients') {
       clientId = JSON.parse(String(init!.body)).clientId;

@@ -4,16 +4,11 @@ function bindProfiles() {
     observations = {},
     load = 'loading';
   async function read() {
-    try {
-      const values = await Promise.all([api.get('/api/dossier'), api.get('/api/dossier/observations')]);
-      source = values[0];
-      observations = values[1].observations;
-      load = '';
-      dataOk('profiles');
-    } catch (error) {
-      load = 'error';
-      dataError('profiles', error);
-    }
+    // The dossier and its observations are read on their own; observations that fail are only missing.
+    const [dossier, seen] = await Promise.allSettled([api.get('/api/dossier'), api.get('/api/dossier/observations')]);
+    if (dossier.status === 'fulfilled') source = dossier.value;
+    if (seen.status === 'fulfilled') observations = seen.value.observations;
+    load = source ? '' : 'error';
     await chatDataRender();
   }
   api.on('sources:needed', function (diff) {
