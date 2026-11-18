@@ -26913,6 +26913,7 @@ pdl:
                       - v: selected
                         label: t:chatMessage.watcher.selected
                 - label: t:member.title
+                  when: "!$.panelOn"
                   control:
                     type: select
                     id: watcher-member
@@ -26930,6 +26931,56 @@ pdl:
                             map:
                               "true": ""
                               _: "@capability.reason"
+                - label: t:chatMessage.watcher.panel
+                  control:
+                    type: switch
+                    label: t:chatMessage.watcher.panel
+                    value: $.panelOn
+                    act: watcherPanelSet
+                    args:
+                      field: enabled
+                      value:
+                        of: $.panelOn
+                        map:
+                          "true": false
+                          _: true
+                - label: t:chatMessage.watcher.panelLimit
+                  when: $.panelOn
+                  control:
+                    type: select
+                    id: watcher-panel-limit
+                    value: $.panel.maxConcurrentRuns
+                    change: watcherPanel
+                    args:
+                      field: maxConcurrentRuns
+                    options: $.panelLimits
+            - type: settings
+              when: $.panelOn
+              from: $.panelMembers
+              row:
+                label: "@label"
+                ctls:
+                  - type: select
+                    when: "@active"
+                    id: "@fieldId"
+                    value: "@account"
+                    change: watcherPanelAccount
+                    args:
+                      id: "@catId"
+                    options:
+                      - v: ""
+                        label: t:chatMessage.watcher.ownAccount
+                      - from: $.panelAccounts
+                        item:
+                          v: "@id"
+                          label: "@label"
+                  - type: switch
+                    label: "@label"
+                    value: "@active"
+                    disabled: "@last"
+                    act: watcherPanelMember
+                    args:
+                      id: "@catId"
             - type: choices
               variant: multi
               from: $.availableLabels
@@ -36548,6 +36599,37 @@ pdl:
                           variant: meta
                           text: "@comment"
                           when: "@comment"
+            - type: box
+              when: "@round"
+              blocks:
+                - type: toolbar
+                  items:
+                    - type: chip
+                      label: t:chatMessage.watcher.who
+                      icon: users
+                      pressed: "@round.open"
+                      act: watcherRoundOpen
+                      args:
+                        id: "@round.id"
+                - type: box
+                  when: "@round.open"
+                  load: "@round.load"
+                  error: t:frame.loadError
+                  retry:
+                    act: watcherRoundOpen
+                    args:
+                      id: "@round.id"
+                      reload: true
+                  blocks:
+                    - type: kv
+                      from: "@round.members"
+                      item:
+                        k: "@label"
+                        v:
+                          t: chatMessage.watcher.roundMember
+                          args:
+                            - "@status"
+                            - "@name"
             - type: toolbar
               variant: marker
               when: "@deleted"

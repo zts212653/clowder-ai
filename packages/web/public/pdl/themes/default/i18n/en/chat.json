@@ -62,7 +62,12 @@
   "chatMessage": {
     "watcher": {
       "target": "→ {0}",
-      "original": "Original message"
+      "original": "Original message",
+      "panel": "Watcher panel",
+      "panelLimit": "Watching at once",
+      "ownAccount": "Member's own account",
+      "who": "Who said it",
+      "roundMember": {"pending": "{0} (not started)", "running": "{0} (watching)", "spoke": "{0} (spoke)", "quiet": "{0} (quiet)", "failed": "{0} (failed)", "interrupted": "{0} (interrupted)"}
     },
     "routing": {
       "mention": "@{0}",

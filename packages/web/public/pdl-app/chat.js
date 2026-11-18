@@ -424,6 +424,7 @@ function chatMessageVM(x) {
     Object.assign({}, x, {
       html: body.html,
       suggestions: x.watcher ? watcherSuggestions(chatDataSnapshot.chat.threadId, x.mid) : [],
+      embeds: x.embeds && x.embeds.concat(watcherRoundEmbed(x)),
     }),
   );
 }

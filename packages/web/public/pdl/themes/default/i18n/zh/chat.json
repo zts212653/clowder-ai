@@ -897,7 +897,12 @@
       "dismissed": "已忽略",
       "undone": "已撤销",
       "target": "→ {0}",
-      "original": "原话"
+      "original": "原话",
+      "panel": "多只守望",
+      "panelLimit": "同时在看的上限",
+      "ownAccount": "成员自己的账号",
+      "who": "看是谁",
+      "roundMember": {"pending": "{0}（没轮到）", "running": "{0}（还在看）", "spoke": "{0}（说了）", "quiet": "{0}（没说）", "failed": "{0}（没跑成）", "interrupted": "{0}（中断了）"}
     },
     "routing": {
       "mention": "@{0}",
