@@ -80,8 +80,10 @@ function bindAccounts() {
   }
   // Remaining below this percentage is low (that item of the quota row is shown as a warning).
   const QUOTA_LOW = 20;
+  // One reading shape for every family: { observedAt, items } (agy / kimi store just that; Codex adds a status).
   function accountQuotaData(o) {
-    const items = o.status === 'ok' ? o.items : (o.lastSuccess || {}).items || [];
+    const ok = !o.status || o.status === 'ok',
+      items = ok ? o.items : (o.lastSuccess || {}).items || [];
     const left = function (x) {
       return Math.max(0, Math.min(100, x.percentKind === 'remaining' ? x.usedPercent : 100 - x.usedPercent));
     };
@@ -97,7 +99,7 @@ function bindAccounts() {
       at: o.lastSuccess ? o.lastSuccess.observedAt : o.observedAt,
       hasAt: true,
       out:
-        o.status === 'ok' &&
+        ok &&
         items.some(function (x) {
           return left(x) === 0;
         }),
@@ -245,13 +247,12 @@ function bindAccounts() {
       dir: p.codex && p.codex.credentialHome,
       open: open,
       quota:
-        p.authType === 'oauth' &&
-        (p.clientId === 'anthropic'
-          ? !p.baseUrl
-          : p.clientId === 'openai' &&
-            ((p.codex && p.codex.status === 'ready') ||
-              (p.quota && p.quota.status === 'unavailable') ||
-              st.quota[p.id])),
+        !!storedQuota(p) ||
+        (p.authType === 'oauth' &&
+          p.clientId === 'openai' &&
+          ((p.codex && p.codex.status === 'ready') ||
+            (p.quota && p.quota.status === 'unavailable') ||
+            !!st.quota[p.id])),
       quotaBusy: !!(st.quota[p.id] && st.quota[p.id].busy),
       quotaIdentityChanged:
         !!(st.quota[p.id] && st.quota[p.id].identityChanged) || (!!p.quota && !quotaMatches(p, p.quota)),
@@ -259,6 +260,14 @@ function bindAccounts() {
         const fail = st.quota[p.id] && st.quota[p.id].fail;
         if (p.clientId === 'anthropic')
           return p.claudeQuota || fail ? claudeQuotaData(p.claudeQuota ? p.claudeQuota.samples : {}, fail) : null;
+        if (storedQuota(p)) {
+          const reading = p.agyQuota || p.kimiQuota;
+          return reading
+            ? Object.assign(accountQuotaData(reading), fail ? { fail: fail } : {})
+            : fail
+              ? { items: [], resets: [], fail: fail }
+              : null;
+        }
         const observation = (st.quota[p.id] && st.quota[p.id].observation) || p.quota;
         return observation && quotaMatches(p, observation) && !(st.quota[p.id] && st.quota[p.id].identityChanged)
           ? accountQuotaData(observation)
@@ -471,12 +480,24 @@ function bindAccounts() {
       },
     });
   };
-  // Claude: the account list carries the stored reading (claudeQuota); a failed read keeps it and names why.
-  async function claudeQuota(p) {
+  // Claude, agy and kimi: the account list carries the stored reading; reading again stores a new one and the list is
+  // read again. A failed read keeps the last reading and names why.
+  function storedQuota(p) {
+    return p.clientId === 'anthropic'
+      ? p.authType === 'oauth' && !p.baseUrl
+        ? 'claude'
+        : ''
+      : p.agyQuotaReady
+        ? 'agy'
+        : p.kimiLoginReady
+          ? 'kimi'
+          : '';
+  }
+  async function readStoredQuota(p) {
     const state = (st.quota[p.id] = { busy: true });
     render(true);
     try {
-      await api.post('/api/accounts/' + encodeURIComponent(p.id) + '/claude/quota', {}, {});
+      await api.post('/api/accounts/' + encodeURIComponent(p.id) + '/' + storedQuota(p) + '/quota', {}, {});
     } catch (error) {
       state.identityChanged = error.status === 409;
       state.fail =
@@ -492,7 +513,7 @@ function bindAccounts() {
   }
   A.accQuota = async function (d) {
     const p = account(d.k);
-    if (p.clientId === 'anthropic') return claudeQuota(p);
+    if (storedQuota(p)) return readStoredQuota(p);
     const signature = JSON.stringify(p.codex && p.codex.identity),
       previous = (st.quota[p.id] && st.quota[p.id].observation) || p.quota;
     const state = (st.quota[p.id] = { busy: true });
