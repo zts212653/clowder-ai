@@ -158,16 +158,21 @@ export async function saveMemberCanon(id: string, threadId: string, body: string
 }
 
 export async function readMemberSettings() {
-  const [accounts, templates, snapshot, strategies, discovered, libraries] = await Promise.all([
+  const [accounts, templates, snapshot, strategies, discovered, libraries, l0] = await Promise.all([
     request<AccountsResponse>('/api/accounts'),
     request<{ templates: TemplateCard[] }>('/api/cat-templates'),
     request<{ config: ConfigData }>('/api/config'),
     request<{ cats: CatStrategyEntry[] }>('/api/config/session-strategy'),
     request<{ runtimes: RuntimeChoice[] }>('/api/cats/native-runtimes'),
     request<{ libraries: AgentClientLibrary[] }>('/api/agent-providers'),
+    // The fixed-prompt (L0) estimate may be unavailable (503): the page then shows no estimate.
+    request<{ referenceTokens: number; members: { catId: string; tokens: number }[] }>('/api/cats/l0-budget').catch(
+      () => null,
+    ),
   ]);
   return {
     accounts: accounts.providers,
+    l0,
     templates: templates.templates,
     blank: initialState(),
     codex: toCodexRuntimeSettings(snapshot.config),

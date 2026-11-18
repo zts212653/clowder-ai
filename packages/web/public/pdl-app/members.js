@@ -216,6 +216,7 @@ function bindMembers() {
       filter: S.memberFilter,
       owner: { name: source.owner.name, tags: source.owner.mentionPatterns },
       prefsCount: prefs.length,
+      l0Reference: meta && meta.l0 ? meta.l0.referenceTokens : null,
       access: access,
       stale: prefs.filter(function (p) {
         return p.reviewAfter != null && p.reviewAfter <= Date.now();
@@ -234,8 +235,15 @@ function bindMembers() {
               meta.accounts.find(function (a) {
                 return a.id === c.accountRef;
               });
+          const l0 =
+            meta &&
+            meta.l0 &&
+            meta.l0.members.find(function (m) {
+              return m.catId === c.id;
+            });
           return {
             id: c.id,
+            l0: l0 ? l0.tokens : null,
             breed: c.breedDisplayName,
             client: c.clientId,
             via: c.carrier,
@@ -277,7 +285,8 @@ function bindMembers() {
       return cat.id === data.id;
     });
     const next = data.v == null ? !!cat.roster && !cat.roster.available : data.v === true || data.v === 'true';
-    return chatAction('memberAvailable', { id: data.id, v: String(next) });
+    // who is available changes the fixed-prompt estimate: read the settings again
+    return chatAction('memberAvailable', { id: data.id, v: String(next) }).then(read);
   };
 
   function selectedRuntime(form) {

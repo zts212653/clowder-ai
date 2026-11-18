@@ -23368,6 +23368,22 @@ pdl:
                       when: "@model"
                     - text: t:members.page.model
                       when: "!@model"
+                stat:
+                  lit:
+                    - text:
+                        t: members.page.l0
+                        args:
+                          - of: "@l0"
+                            fmt: compact
+                      variant: meta
+                      tip:
+                        t: members.page.l0Tip
+                        args:
+                          - of: "@l0"
+                            fmt: num
+                          - of: $.l0Reference
+                            fmt: num
+                      when: "@l0"
                 ctl:
                   lit:
                     - type: switch
