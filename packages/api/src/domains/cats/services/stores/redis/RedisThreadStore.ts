@@ -1748,7 +1748,8 @@ export class RedisThreadStore implements IThreadStore {
         data.systemKind === 'eval_domain' ||
         data.systemKind === 'cat_bedroom' ||
         data.systemKind === 'memory_ops' ||
-        data.systemKind === 'collective_channel')
+        data.systemKind === 'collective_channel' ||
+        data.systemKind === 'plugin_internal')
     ) {
       result.systemKind = data.systemKind as ThreadSystemKind;
     }

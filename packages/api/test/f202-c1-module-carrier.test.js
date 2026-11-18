@@ -726,7 +726,10 @@ test('start receives the caller-bound Host thread surface', async () => {
   assert.equal(entry.call, 'threads');
   assert.notEqual(entry.systemThreadId, entry.externalThreadId);
   assert.equal(await bindingStore.getByExternal('dev.clowder.module-fixture', 'group-42'), null);
-  assert.equal((await threadStore.get(entry.systemThreadId)).pluginOwnership, undefined);
+  assert.deepEqual((await threadStore.get(entry.systemThreadId)).pluginOwnership, {
+    v: 1,
+    pluginInstanceId: 'instance-0',
+  });
   assert.equal((await threadStore.get(entry.systemThreadId)).createdBy, 'owner-1');
   assert.equal((await threadStore.get(entry.systemThreadId)).projectPath, '/workspace/clowder-ai');
 });

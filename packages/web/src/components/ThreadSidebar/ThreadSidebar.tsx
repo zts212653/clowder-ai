@@ -21,6 +21,7 @@ import {
 import { invalidateThreadAttentionPreferences } from '@/utils/thread-attention-invalidation';
 import { BootcampListModal } from '../BootcampListModal';
 import { BootcampIcon } from '../icons/BootcampIcon';
+import { PluginConversationEntries } from '../plugins/PluginConversationEntries';
 import { resolveShellCopy, useShellCopy } from '../shell/shell-copy';
 import { readShellLanguage } from '../shell/shell-language';
 import type { ShellDestination } from '../shell/shell-navigation';
@@ -181,7 +182,16 @@ export function ThreadSidebar({ onClose, className, routeThreadId, activeDestina
       refreshing: state.refreshing,
     })),
   );
-  const threads = useMemo(() => projectSidebarRows({ rows, pendingThreadCommands }), [pendingThreadCommands, rows]);
+  const [residentThreadIds, setResidentThreadIds] = useState<string[]>([]);
+  const allThreads = useMemo(
+    () => projectSidebarRows({ rows, pendingThreadCommands }).filter((row) => row.systemKind !== 'plugin_internal'),
+    [pendingThreadCommands, rows],
+  );
+  const threads = useMemo(
+    () => allThreads.filter((row) => !residentThreadIds.includes(row.id)),
+    [allThreads, residentThreadIds],
+  );
+  const residentUnreadCounts = useMemo(() => new Map(allThreads.map((row) => [row.id, row.unreadCount])), [allThreads]);
   const isLoadingThreads = refreshing;
   const [creationPhase, setCreationPhase] = useState<'idle' | 'submitting' | 'reconciling'>('idle');
   const isCreating = creationPhase !== 'idle';
@@ -992,7 +1002,7 @@ export function ThreadSidebar({ onClose, className, routeThreadId, activeDestina
   const [isMarkingAllRead, setIsMarkingAllRead] = useState(false);
   const handleMarkAllRead = useCallback(async () => {
     setIsMarkingAllRead(true);
-    const commandIds = threads
+    const commandIds = allThreads
       .filter((thread) => thread.unreadCount > 0 || thread.hasUserMention)
       .map((thread) =>
         useSidebarProjectionStore.getState().beginSidebarCommand(thread.id, 'attention', {
@@ -1016,7 +1026,7 @@ export function ThreadSidebar({ onClose, className, routeThreadId, activeDestina
     } finally {
       setIsMarkingAllRead(false);
     }
-  }, [threads]);
+  }, [allThreads]);
 
   // V9 sidebar tabs: keep grouping derived from filtered thread data.
   const { pinnedProjects, toggleProjectPin } = useProjectPins();
@@ -2016,6 +2026,13 @@ export function ThreadSidebar({ onClose, className, routeThreadId, activeDestina
           </>
         )}
 
+        <PluginConversationEntries
+          isV2={isV2}
+          onSelect={handleSelect}
+          currentThreadId={currentConversationId}
+          onThreadsChange={setResidentThreadIds}
+          unreadCounts={residentUnreadCounts}
+        />
         <div
           ref={scrollContainerRef}
           data-testid="sidebar-thread-list"

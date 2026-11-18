@@ -1086,6 +1086,8 @@ export const threadsRoutes: FastifyPluginAsync<ThreadsRoutesOptions> = async (ap
     let threads = projectPathMatches
       ? [...new Map(projectPathMatches.flat().map((thread) => [thread.id, thread] as const)).values()]
       : await threadStore.list(userId);
+    // Background plugin records remain directly readable, outside personal navigation and unread totals.
+    threads = threads.filter((thread) => thread.systemKind !== 'plugin_internal');
     sidebarTiming?.mark('listMs');
     if (canonicalConciergeId && !threads.some((thread) => thread.id === canonicalConciergeId)) {
       const canonical = await threadStore.get(canonicalConciergeId);

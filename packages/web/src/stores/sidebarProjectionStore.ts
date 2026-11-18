@@ -3,7 +3,13 @@ import { saveSidebarSnapshot } from '@/utils/offline-store';
 import { recordSidebarClientApply } from '@/utils/sidebar-projection-observability';
 
 export type SidebarPresenceStatus = 'idle' | 'working' | 'done' | 'error';
-export type SidebarSystemKind = 'connector_hub' | 'eval_domain' | 'cat_bedroom' | 'memory_ops' | 'collective_channel';
+export type SidebarSystemKind =
+  | 'connector_hub'
+  | 'eval_domain'
+  | 'cat_bedroom'
+  | 'memory_ops'
+  | 'collective_channel'
+  | 'plugin_internal';
 
 export interface SidebarPresence {
   readonly status: SidebarPresenceStatus;
@@ -272,9 +278,14 @@ export function parseSidebarSnapshotRows(value: unknown): SidebarSnapshotRow[] {
     const status = ['idle', 'working', 'done', 'error'].includes(String(rawPresence.status))
       ? (rawPresence.status as SidebarPresenceStatus)
       : 'idle';
-    const systemKind = ['connector_hub', 'eval_domain', 'cat_bedroom', 'memory_ops', 'collective_channel'].includes(
-      String(raw.systemKind),
-    )
+    const systemKind = [
+      'connector_hub',
+      'eval_domain',
+      'cat_bedroom',
+      'memory_ops',
+      'collective_channel',
+      'plugin_internal',
+    ].includes(String(raw.systemKind))
       ? (raw.systemKind as SidebarSystemKind)
       : null;
     rows.push({

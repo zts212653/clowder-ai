@@ -116,6 +116,11 @@ describe('sidebarProjectionStore authority boundary', () => {
     expect(collective.isHubThread).toBe(false);
   });
 
+  it('retains the plugin-internal role so cached internal rows cannot become ordinary conversations', () => {
+    const [internal] = parseSidebarSnapshotRows([{ ...row('thread-plugin-internal'), systemKind: 'plugin_internal' }]);
+    expect(internal.systemKind).toBe('plugin_internal');
+  });
+
   it('rejects an older HTTP generation after a newer snapshot was applied', () => {
     const store = useSidebarProjectionStore.getState();
 
