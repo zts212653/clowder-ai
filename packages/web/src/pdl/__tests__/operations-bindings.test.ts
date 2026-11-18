@@ -462,3 +462,29 @@ it('deduplicates current Work identities and uses actual start/deadline dates, l
   expect(new Date(model.next).getDate()).toBe(28);
   expect(model.partial).not.toBe('');
 });
+
+it("stops all of one member's cancellable background tasks in this conversation through the single stop", async () => {
+  const data = fixtureData();
+  const task = (executionId: string, over: Record<string, unknown>) =>
+    ({
+      executionId,
+      threadId: data.threadId,
+      catId: 'codex',
+      kind: 'managed_command',
+      startedAt: 1,
+      cancelability: { state: 'cancelable' },
+      ...over,
+    }) as unknown as (typeof data.executions)[number];
+  data.executions = [
+    task('a', {}),
+    task('b', {}),
+    task('reply', { kind: 'live_invocation' }),
+    task('other-member', { catId: 'opus' }),
+    task('elsewhere', { threadId: 'other-thread' }),
+    task('locked', { cancelability: { state: 'not_cancelable', reason: 'foreign_principal' } }),
+  ];
+  vi.mocked(cancelProjectedExecution).mockReset().mockResolvedValue(true);
+  const { result } = renderHook(() => useHomeBindings(data, { execDetail: null }, true));
+  await act(() => result.current.action('execStopAll', { who: 'codex' }));
+  expect(vi.mocked(cancelProjectedExecution).mock.calls.map(([e]) => e.executionId)).toEqual(['a', 'b']);
+});

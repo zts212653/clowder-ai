@@ -2322,11 +2322,9 @@ describe('unmodified runtime and project chat bindings', () => {
       const recovery = w.document.createElement('div');
       w.document.body.append(recovery);
       recovery.innerHTML = w.eval("pdlView('ws.execDetail')");
-      // One entry at a time: a task whose stop cannot finish offers only the force reset (danger), no more menu.
+      // The task detail stops only its own task: the whole-conversation force reset lives in the header's more menu.
       expect(recovery.querySelector('[data-menu]')).toBeNull();
-      w.forceButton = recovery.querySelector('[data-act="opForceReset"]');
-      expect(w.forceButton.classList.contains('danger')).toBe(true);
-      expect(w.eval('actionArgs(window.forceButton)')).toMatchObject({ act: 'opForceReset', threadId: 'thread-owner' });
+      expect(recovery.querySelector('[data-act="opForceReset"]')).toBeNull();
       action.mockClear();
       w.eval("A.opForceReset({threadId:'thread-owner'})");
       expect(action).not.toHaveBeenCalled();
@@ -3734,7 +3732,7 @@ describe('unmodified runtime and project chat bindings', () => {
       dom.window.close();
     }
   });
-  it('uses the shared recent-work view below component-owned recent tabs and opens command details in live', async () => {
+  it('uses the shared recent-work view below component-owned recent tabs and opens command details in exec', async () => {
     const source = {
       home: fixtureHomeSource(),
       recentWorks: {
@@ -3764,7 +3762,8 @@ describe('unmodified runtime and project chat bindings', () => {
       expect(JSON.parse(w.localStorage.getItem('clowder-proto3:rtMenu')).panel.pins).toContain('preview');
       await w.eval("A.execOpen({k:'managed'})");
       await w.__settled();
-      expect(w.eval("rtCur('panel')")).toBe('live');
+      expect(w.eval("rtCur('panel')")).toBe('exec');
+      expect(w.eval("navArg('sub', navTabKey('panel','exec'))")).toBe('task:managed');
       expect(action).toHaveBeenCalledWith('homeExecOpen', { k: 'managed' }, undefined);
       expect(errors).not.toHaveBeenCalled();
     } finally {

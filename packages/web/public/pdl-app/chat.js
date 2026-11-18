@@ -718,6 +718,12 @@ window.clowderChat = {
           const source = projectData('reviews');
           return source && source.artifacts.complete ? source.artifacts.total : undefined;
         },
+        // Someone runs in this conversation: the header's more menu offers stopping the whole conversation.
+        get running() {
+          return chatDataSnapshot.chat.executions.some(function (e) {
+            return e.threadId === chatPort.threadId;
+          });
+        },
       };
     };
     VM.chatComposer = function () {

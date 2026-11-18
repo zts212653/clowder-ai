@@ -1431,6 +1431,8 @@ pdl:
           stripe:
             label: t:frame.menuStripe
             pinned: true
+            pins:
+              - exec
             itemAct: wsTool
             when:
               - $.menuPinned
@@ -1641,12 +1643,6 @@ pdl:
       - thread
       - thread
       - t:workbench.panels.threadTasks
-    live:
-      - t:schedule.doing
-      - live
-      - ""
-      - act
-      - t:workbench.panels.activeWork
     recall:
       - t:workbench.panels.recall
       - bookmark
@@ -2186,6 +2182,37 @@ pdl:
                     _: "@session.compressed"
         tone: warn
         when: "@session.ctxWarn"
+      - type: list
+        id: "@tasksId"
+        from: "@taskGroup"
+        optional: true
+        row:
+          layout: line
+          key: "@key"
+          title:
+            text: t:wsExec.tasks
+          inline:
+            - text: "@n"
+              variant: meta
+          cols:
+            - control:
+                - type: button
+                  label: t:wsExec.stopAll
+                  act: execStopAll
+                  args:
+                    who: "@who"
+              when: "@anyStop"
+              w: ctl
+          expand:
+            - type: list
+              inline: true
+              from: "@tasks"
+              row: exec.task
+      - type: list
+        label: t:wsLive.waits
+        from: "@waits"
+        row: live.wait
+        optional: true
       - type: list
         label: t:wsSessions.plan
         count:
@@ -15930,6 +15957,12 @@ pdl:
                   - slot: chat.thread.more
                     args:
                       id: $.id
+                  - label: t:execDetail.forceReset.title
+                    act: opForceReset
+                    args:
+                      threadId: $.id
+                    tone: danger
+                    when: $.running
                   - label: t:chat.thread.menu.moveToTrash
                     act: remove
                     args:
@@ -16244,7 +16277,6 @@ pdl:
               lanes:
                 - share: 2
                   name: run
-                  scroll: true
                   attach: straddle
                   items:
                     - type: capsules
@@ -16263,12 +16295,14 @@ pdl:
                                     - "@handle"
                             state:
                               - text: t:composer.actions.state
+                                tone: danger
                                 when: "@error"
                               - text:
                                   t: composer.actions.silentMinutes
                                   args:
                                     - of: "@seconds"
                                       fmt: floorMinutes
+                                tone: warn
                                 when:
                                   - "!@error"
                                   - "@quiet"
@@ -16314,6 +16348,7 @@ pdl:
                                     "true": false
                                     _: true
                             ticking: "@ticking"
+                            entries: "@entries"
                             open:
                               - act: executionLocate
                                 args:
@@ -29756,18 +29791,7 @@ pdl:
               act: opLiveStop
               args:
                 k: $.id
-              when:
-                - $.cancelable
-                - "!$.stuck"
-            - type: button
-              label: t:execDetail.forceReset.title
-              act: opForceReset
-              args:
-                threadId: $.threadId
-              danger: true
-              when:
-                - $.stuck
-                - $.threadId
+              when: $.cancelable
             - type: button
               iconOnly: true
               icon: close
@@ -29775,6 +29799,7 @@ pdl:
               act: close
               args:
                 path: ws.execDetail
+              when: "!$.inExec"
           blocks:
             - type: view
               id: recovery.notice
@@ -29813,7 +29838,7 @@ pdl:
                       _: $.blocked
                   warn: true
                   when: $.blocked
-            - type: disclosure
+            - type: section
               key: exec-log
               title: t:execDetail.log
               blocks:
@@ -30427,8 +30452,18 @@ pdl:
       fields:
         - id: hold-feedback
           check: t:execDetail.feedback
+    dlg.execStopAll:
+      title: t:wsExec.stopAll
+      text:
+        t: wsExec.stopAllText
+        args:
+          - $.name
+          - $.n
+      ok: t:wsExec.stopAll
+      danger: true
     dlg.opForceReset:
       title: t:execDetail.forceReset.title
+      text: t:execDetail.forceReset.body
       ok: t:execDetail.forceReset.title
       danger: true
     page.marketSources:
@@ -30505,6 +30540,9 @@ pdl:
       vm: exec
       empty: t:wsSessions.empty
       blocks:
+        - type: view
+          id: ws.execDetail
+          when: $.task
         - type: head
           title: $.externalDetail.title
           when: $.externalDetail
@@ -35123,6 +35161,32 @@ pdl:
       args: "@args"
       expand: "@expand"
       cur: "@cur"
+    exec.task:
+      layout: line
+      key: "@key"
+      title:
+        text:
+          t: wsLive.activity
+          args:
+            - "@what"
+      cols:
+        - v:
+            of: "@time"
+            fmt: clock
+          w: num
+        - control:
+            - type: button
+              iconOnly: true
+              icon: stop
+              label: t:execDetail.stop
+              act: opLiveStop
+              args:
+                k: "@key"
+          when: "@actions.cancel"
+          w: ctl
+      act: execOpen
+      args:
+        k: "@key"
     live.run:
       layout: two
       key: "@key"
@@ -35133,12 +35197,8 @@ pdl:
         who: "@who"
         form: title
       inline:
-        - dot:
-            of: "@command"
-            map:
-              "true": warn
-              "false": info
-              _: "@command"
+        - dot: run
+          member: "@who"
           tip:
             t: wsLive.status.state
             args:

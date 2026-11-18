@@ -40,7 +40,7 @@
       "voiceHelp": "语音转写、会议记录",
       "clips": "片子",
       "filmsHelp": "已有视频项目与制作",
-      "team": "成员状态",
+      "team": "成员",
       "teamHelp": "成员能力、可用性与路由",
       "evolutionHelp": "正在改进的能力与项目",
       "signalsHelp": "浏览、筛选和研读信号文章",
@@ -1334,7 +1334,7 @@
   "execDetail": {
     "task": "后台任务",
     "close": "关闭详情",
-    "stop": "停止任务",
+    "stop": "停止",
     "log": "输出与执行记录",
     "noOutput": "暂时没有输出",
     "state": {
@@ -1347,7 +1347,8 @@
     },
     "feedback": "同时告诉它结束原因",
     "forceReset": {
-      "title": "强制清除执行槽"
+      "title": "停止整条对话",
+      "body": "会停止这条对话里所有成员正在进行的执行，不会自动恢复。"
     }
   },
   "workspaceOwners": {
@@ -1921,6 +1922,9 @@
     "flagRerank": "记忆搜索结果自动重排序"
   },
   "wsExec": {
+    "tasks": "后台任务",
+    "stopAll": "全部停止",
+    "stopAllText": "停止 {0} 在这条对话里的 {1} 个后台任务？",
     "title": "执行",
     "loading": "正在读取执行记录…",
     "error": "执行记录暂时不可读。",

@@ -290,7 +290,7 @@ function pvPart(p, sc, root) {
     return p.variant || tone || tip || t ? '<span class="' + cls + '"' + (tip ? ' data-tip="' + h(tip) + '"' : '') + '>' + ic + t + '</span>' : ic;
   }
   if (p.glyph) return glyph(pv(p.glyph, sc, root), p.size === 'xl' ? 'glyph-xl' : '');   /* xl：页头里的大图标，和成员头像 xl 一样大 */
-  if (p.dot != null) return lrDot(pv(p.dot, sc, root), pv(p.tip, sc, root));
+  if (p.dot != null) return lrDot(pv(p.dot, sc, root), pv(p.tip, sc, root), p.member != null ? whoInfo(pv(p.member, sc, root)).color : '');   /* member：点用这位成员的主题色（执行中的点） */
   if (p.status) { const st = pv(p.status, sc, root); return st ? status(st.tone, st.text, st.strong) : ''; }
   if (p.chip != null) { const t = pv(p.mono, sc, root) ? '<span class="mono">' + pvText(p.chip, sc, root) + '</span>' : pvText(p.chip, sc, root), act = pv(p.act, sc, root); return chipItem(t, act, act ? pvArgs(p.args, sc, root) : ''); }   /* act 可以是绑定（每项模板里 '@act'） */
   if (p.chips) { const xs = pvList(p.chips, sc, root); return chipList(xs.length ? xs.map(function (x) { return pvPart(p.each || x, x, root); }) : p.empty ? ['<span class="faint">' + pvText(p.empty, sc, root) + '</span>'] : []); }   /* each：每一项怎么画（片段，@ 是这一项的数据）；没写时每一项本身就是片段 */
@@ -380,8 +380,17 @@ function pvControl(c, sc, root) {
         const st = state + (showClock ? ' · <span class="num"' + (ticking ? ' data-tick="run"' : '') + '>' + h(time) + '</span>' : ''), id = t ? pv(t.who, x, root) : x.who;
         const cap = capWho({ who: id }, st, (t ? pv(t.cur, x, root) : x.cur) ? 'cur' : '', true, 'm');
         const opens = t ? t.open : x.open ? [x.open] : [], open = opens.find(function (o) { return pvOk(o.when, x, root); }) || {};
+        /* 一位成员有几条在跑（回复 + 后台命令）：展开时胶囊往上长高——底下一行是头像 + 名字，上面一条一行（同一个状态模板、各自的去向、各自的 @ / 停止）；只有一条照旧横着展开 */
+        const rows = t && t.entries ? pvList(t.entries, x, root) : [], acts = function (e) { return (t ? t.actions : x.actions || []).filter(function (a) { return pvOk(a.when, e, root); }).map(function (a) { return btn(pv(a.label, e, root), { iconOnly: true, icon: a.icon, sm: true, act: a.act, data: pvArgs(a.args, e, root) }); }).join(''); };
+        const multi = rows.length > 1;
+        if (multi) {
+          const line = function (e) { const o = (t.open || []).find(function (q) { return pvOk(q.when, e, root); }) || {}, sp = pvParts(t.state, e, root), clk = pv(t.clockWhen, e, root);
+            return '<span class="cap-line"><button type="button" class="cap-row" data-act="' + h(o.act || c.act || '') + '"' + argAttrs(Object.assign({ id: id }, pvArgsObj(o.args, e, root))) + '>' + sp + (clk ? ' · <span class="num"' + (pv(t.ticking, e, root) ? ' data-tick="run"' : '') + '>' + h(clockText(pv(t.seconds, e, root))) + '</span>' : '') + '</button>' + acts(e) + '</span>'; };
+          const w = whoInfo(id);
+          cap.body = '<span class="cap-rows">' + rows.map(line).join('') + '<span class="cap-row-who"><b>' + h(w.name) + '</b>' + (w.handle ? ' <span class="faint">' + h(w.handle) + '</span>' : '') + '</span></span>'; cap.cls = (cap.cls ? cap.cls + ' ' : '') + 'cap-multi';
+        }
         return Object.assign(cap, { act: open.act || c.act, data: argAttrs(Object.assign({ id: id }, pvArgsObj(open.args, x, root))), tip: t ? pv(t.tip, x, root) : x.tip,
-          body: cap.body + (t ? t.actions : x.actions || []).filter(function (a) { return pvOk(a.when, x, root); }).map(function (a) { return btn(pv(a.label, x, root), { iconOnly: true, icon: a.icon, sm: true, act: a.act, data: pvArgs(a.args, x, root) }); }).join('') });
+          body: cap.body + (multi ? '' : acts(x)) });
       };
       if (Array.isArray(c.from)) c.from.forEach(function (entry) { if (entry.from) pvList(entry.from, sc, root).forEach(function (x) { xs.push(draw(x, entry.item)); }); else xs.push(draw(entry)); });
       else pvList(c.from, sc, root).forEach(function (x) { xs.push(draw(x)); });

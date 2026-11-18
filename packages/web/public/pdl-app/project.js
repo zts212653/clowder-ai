@@ -310,6 +310,14 @@ function bindProject() {
       };
     });
   });
+  // A task's detail shown as 执行's sub-page: its generic back replaces the detail's own close.
+  const execDetailModel = VM.execDetail;
+  VM.execDetail = function () {
+    const detail = execDetailModel();
+    return detail && detail.id
+      ? Object.assign({}, detail, { inExec: String(navArg('sub') || '').indexOf('task:') === 0 })
+      : detail;
+  };
   STATE_ROOTS.ws = function () {
     return S.ws;
   };
@@ -471,9 +479,25 @@ function bindProject() {
       if (r === 'unavailable') toast(tc('chatMessage.executionUnavailable'));
     });
   };
+  // A background task's detail is a sub-page of 执行, reached like a session's detail (generic back).
   A.execOpen = function (d) {
     return chatAction('homeExecOpen', d).then(function (result) {
-      if (result !== false) ENGINE_PARTS.openTab('panel', 'live');
+      if (result === false) return;
+      ENGINE_PARTS.openTab('panel', 'exec');
+      return A.wsSub({ k: 'exec', v: 'task:' + d.k });
+    });
+  };
+  // Stops all of one member's background tasks in this conversation, after one confirmation.
+  A.execStopAll = function (d) {
+    const n = homeModels().live.runs.filter(function (r) {
+      return r.who === d.who && r.command && r.actions.thread === chatPort.threadId;
+    }).length;
+    dialog({
+      kind: 'execStopAll',
+      args: { name: member(d.who).name, n: n },
+      on: function () {
+        return chatAction('execStopAll', { who: d.who });
+      },
     });
   };
 
@@ -543,7 +567,7 @@ function bindProject() {
   A.holdOpen = function (d) {
     if (!d.wait) return A.execOpen({ k: d.k });
     if (S.ws.execDetail) chatAction('homeExecClose');
-    ENGINE_PARTS.openTab('panel', 'live');
+    ENGINE_PARTS.openTab('panel', 'exec');
   };
   A.holdCancel = function (d) {
     return d.wait ? A.cancelHoldWait({ waitId: d.k }) : A.opLiveStop({ k: d.k });
@@ -1726,6 +1750,7 @@ function bindProject() {
     const model = workbenchModels().exec;
     if (!model) return null;
     const sub = navArg('sub');
+    if (sub && sub.indexOf('task:') === 0) return { task: true };
     if (sub && model.externalDetail && model.externalDetail.sessionId === sub)
       return { load: model.load, externalDetail: model.externalDetail };
     if (sub) return model.run && model.run.id === sub ? { load: model.load, run: model.run } : { load: 'loading' };

@@ -170,7 +170,7 @@ RT_CLOSED.push(function (r) { rtSplitSync(r); if (!rtTabs(r).length) navTabs(r).
    其余按分组、组里按名字；分组按组名排，主题声明的最后一组是“其他”，永远在最后。菜单和菜单条是同一个顺序。
    菜单状态是用户的偏好（这台设备上记着）：{ 区域: { off: 菜单没固定, pins: [固定的项，按固定的先后], recent: [最近打开的项] } }；默认固不固定由布局声明（chrome.stripe.pinned） */
 S.rtMenu = store.get('rtMenu', {});
-function rtMenuSt(r) { return S.rtMenu[r] || (S.rtMenu[r] = { off: (rtCfg(r).stripe || {}).pinned === false, pins: [], recent: [] }); }   /* 固定哪几项是用户在这台设备上的偏好（本地记着），不是主题数据 */
+function rtMenuSt(r) { const sc = rtCfg(r).stripe || {}; return S.rtMenu[r] || (S.rtMenu[r] = { off: sc.pinned === false, pins: (sc.pins || []).slice(), recent: [] }); }   /* 默认固定哪几项由主题给（stripe.pins），之后就是用户自己的 */   /* 固定哪几项是用户在这台设备上的偏好（本地记着），不是主题数据 */
 function rtMenuPinned(r) { return !rtMenuSt(r).off; }
 function rtItemPinned(r, k) { return rtMenuSt(r).pins.indexOf(k) >= 0; }
 /* 记下最近打开的一项（组件自己的本地偏好，和固定放在一起）：画工作台时当前项换了就记 */

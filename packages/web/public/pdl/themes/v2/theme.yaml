@@ -27440,6 +27440,7 @@ pdl:
                   act: close
                   args:
                     path: ws.execDetail
+                when: "!$.inExec"
             blocks:
               - type: component
                 use: v2Pre
@@ -28204,6 +28205,9 @@ pdl:
       vm: exec
       empty: t:wsSessions.empty
       blocks:
+        - type: view
+          id: ws.execDetail
+          when: $.task
         - type: component
           use: v2PageHeader
           props:

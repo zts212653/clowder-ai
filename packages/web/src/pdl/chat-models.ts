@@ -454,6 +454,16 @@ export function activeExecutionRows(data: ChatData, ui: ChatUiState) {
     };
   });
 }
+/** One composer capsule per member: the reply when there is one; with several runs (a reply and background
+ * commands) the capsule carries them all as entries, one row each when it expands. */
+export function memberRunners(rows: ReturnType<typeof activeExecutionRows>) {
+  const byMember = new Map<string, typeof rows>();
+  for (const row of rows) byMember.set(row.who, [...(byMember.get(row.who) ?? []), row]);
+  return [...byMember.values()].map((runs) => {
+    const ordered = [...runs.filter((r) => !r.command), ...runs.filter((r) => r.command)];
+    return { ...ordered[0], entries: ordered.length > 1 ? ordered : null };
+  });
+}
 export function chatModels(data: ChatData, ui: ChatUiState, input?: ChatProjectionInput) {
   const raw = data,
     project = input?.project;
@@ -1310,7 +1320,7 @@ export function chatModels(data: ChatData, ui: ChatUiState, input?: ChatProjecti
         locked: locked(),
         top: true,
         notices: notices(),
-        runners: activeExecutionRows(data, ui).filter((x) => x.actions.thread === data.threadId),
+        runners: memberRunners(activeExecutionRows(data, ui).filter((x) => x.actions.thread === data.threadId)),
         queue: data.queue.length
           ? {
               key: data.threadId,

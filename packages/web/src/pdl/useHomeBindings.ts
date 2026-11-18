@@ -112,6 +112,18 @@ export function useHomeBindings(data: ChatData, ui: { execDetail: string | null 
       setSelected(null);
       return true;
     }
+    if (name === 'execStopAll') {
+      // Each of the member's cancellable background tasks in this conversation goes through the single stop.
+      const tasks = data.executions.filter(
+        (e) =>
+          e.threadId === data.threadId &&
+          e.catId === args.who &&
+          e.kind === 'managed_command' &&
+          e.cancelability.state === 'cancelable',
+      );
+      for (const task of tasks) await cancelProjectedExecution(task, false);
+      return true;
+    }
     if (name === 'opLiveStop') {
       const execution = data.executions.find((e) => e.executionId === args.k);
       if (!execution) throw new Error('执行已变化，请重新读取');

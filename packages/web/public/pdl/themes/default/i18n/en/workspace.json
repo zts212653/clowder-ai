@@ -8,7 +8,8 @@
  "execDetail": {
   "feedback": "Also tell the cat why it ended",
   "forceReset": {
-   "title": "Force clear execution slots"
+   "title": "Stop the whole conversation",
+      "body": "Stops every member running in this conversation; nothing resumes automatically."
   }
  },
  "workspaceOwners": {

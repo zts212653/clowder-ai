@@ -474,6 +474,8 @@ function executionModel(query) {
       ...data.executions.filter((e) => e.threadId === data.threadId).map((e) => e.catId),
     ]),
   ];
+  // A member's background tasks and waits in this conversation sit under that member (the live rows, filtered).
+  const homeLive = projectData('home') ? homeModels().live : null;
   const members = cats.map(function (id) {
     const cat = data.cats.find(function (c) {
         return c.id === id;
@@ -546,6 +548,32 @@ function executionModel(query) {
           };
         }),
       runsId: 'sessions-' + id,
+      tasksId: 'tasks-' + id,
+      taskGroup: (function () {
+        const tasks = homeLive
+          ? homeLive.runs.filter(function (r) {
+              return r.who === id && r.command && r.actions.thread === data.threadId;
+            })
+          : [];
+        return tasks.length
+          ? [
+              {
+                key: 'tasks-' + id,
+                who: id,
+                n: tasks.length,
+                tasks: tasks,
+                anyStop: tasks.some(function (t) {
+                  return t.actions.cancel && t.actions.cancel.state === 'cancelable';
+                }),
+              },
+            ]
+          : [];
+      })(),
+      waits: homeLive
+        ? homeLive.waits.items.filter(function (w) {
+            return w.owner === id && w.actions && w.actions.thread === data.threadId;
+          })
+        : [],
       plan: plan
         ? {
             doneCount: plan.tasks.filter(function (t) {

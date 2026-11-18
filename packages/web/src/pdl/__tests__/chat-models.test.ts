@@ -1,7 +1,7 @@
 import { createCatId, type ProviderSubexecutionSemanticEvent } from '@cat-cafe/shared';
 import { describe, expect, it } from 'vitest';
 import type { QueueEntry } from '@/stores/chat-types';
-import { chatModels, composerTrigger } from '../chat-models';
+import { chatModels, composerTrigger, memberRunners } from '../chat-models';
 import { fixtureData, fixtureUi } from './chat-fixture';
 
 describe('chat contract projections', () => {
@@ -636,4 +636,18 @@ it('lists only this conversation members when viewing as one member, and everyon
   expect(ids(chatModels(data, ui).chatPop)).toEqual(['codex']);
   ui.pop = { kind: 'target' };
   expect(ids(chatModels(data, ui).chatPop)).toContain('opencode-glm');
+});
+
+it('gives one composer capsule per member, carrying every run as an entry when there are several', () => {
+  const rows = [
+    { who: 'sol', command: true, key: 'cmd-1' },
+    { who: 'codex', command: true, key: 'cmd-2' },
+    { who: 'sol', command: false, key: 'reply' },
+    { who: 'sol', command: true, key: 'cmd-3' },
+  ] as unknown as Parameters<typeof memberRunners>[0];
+  const capsules = memberRunners(rows);
+  expect(capsules.map((c) => [c.who, c.key, c.entries?.map((e) => e.key) ?? null])).toEqual([
+    ['sol', 'reply', ['reply', 'cmd-1', 'cmd-3']],
+    ['codex', 'cmd-2', null],
+  ]);
 });
