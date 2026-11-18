@@ -341,6 +341,12 @@ test('Agent access discovery executes the same standalone entrypoint from a Mana
     else process.env.API_SERVER_HOST = previousBindHost;
   });
   process.env.API_SERVER_HOST = '0.0.0.0';
+  const lanDetection = await call('POST', '/api/agent-access/v1/detect', { refresh: true });
+  assert.equal(lanDetection.statusCode, 200, lanDetection.payload);
+  assert.ok(lanDetection.json().candidates.some((client) => client.id === 'kimi'));
+  const lanDirectory = await call('GET', '/api/agent-access/v1/clients');
+  assert.equal(lanDirectory.statusCode, 200, lanDirectory.payload);
+  assert.ok(lanDirectory.json().clients.some((client) => client.id === 'kimi'));
   const create = await call('POST', '/api/cats', request.input);
   assert.equal(create.statusCode, 201, create.payload);
   const createdRole = create.json().cat;

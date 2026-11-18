@@ -22,7 +22,7 @@ import type { InventoryAuthority, PluginInventoryStore } from '../domains/plugin
 import type { PluginInstanceRecord } from '../domains/plugin/host-inventory/types.js';
 import { InvalidDshProfile } from './native-dsh-profile.js';
 import { requestLifetime } from './plugin/plugin-webhook-forwarding-routes.js';
-import { pluginAccessError, requirePluginOwnerLocalAccess } from './plugin-access-guards.js';
+import { pluginAccessError, requirePluginReadAccess } from './plugin-access-guards.js';
 
 export function registerAgentAccessRoutes(
   app: FastifyInstance,
@@ -35,7 +35,7 @@ export function registerAgentAccessRoutes(
   },
 ) {
   app.get('/api/agent-access/v1/clients', async (request, reply) => {
-    const access = requirePluginOwnerLocalAccess(request, 'read');
+    const access = requirePluginReadAccess(request);
     if ('error' in access) return pluginAccessError(reply, access);
     const result = await readAgentAccess(request, reply, access.operator, 'configure', {});
     if ('readiness' in result) return { readiness: result.readiness, clients: [] };
@@ -46,7 +46,7 @@ export function registerAgentAccessRoutes(
   });
 
   app.post('/api/agent-access/v1/detect', async (request, reply) => {
-    const access = requirePluginOwnerLocalAccess(request, 'read');
+    const access = requirePluginReadAccess(request);
     if ('error' in access) return pluginAccessError(reply, access);
     const parsed = agentAccessDetectRequestSchema.safeParse(request.body ?? {});
     if (!parsed.success) return reply.code(400).send({ error: 'Invalid Agent access detection request' });
