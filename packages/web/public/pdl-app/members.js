@@ -616,14 +616,14 @@ function bindMembers() {
       shared = clientSettingsState(),
       pluginRuntimes = meta.runtimes
         .filter(function (row) {
-          return row.acp && row.acp.agentProvider;
+          return row.acp && row.acp.agentProvider && row.installed;
         })
         .map(function (row) {
-          return { id: row.id, label: row.label, disabled: !row.installed };
+          return { id: row.id, label: row.label };
         });
     if (f.acpAgentProvider && !pluginRuntimes.some(function (row) { return row.id === f.acpAgentProvider; }))
-      pluginRuntimes.unshift({ id: f.acpAgentProvider, label: f.acpAgentProvider, disabled: false });
-    pluginRuntimes.unshift({ id: '', label: tc('memberForm.fields.pluginClientNone'), disabled: false });
+      pluginRuntimes.unshift({ id: f.acpAgentProvider, label: f.acpAgentProvider });
+    pluginRuntimes.unshift({ id: '', label: tc('memberForm.fields.pluginClientNone') });
     const d = Object.fromEntries(
       Object.keys(memberFields).map(function (key) {
         return [key, f[memberFields[key]]];

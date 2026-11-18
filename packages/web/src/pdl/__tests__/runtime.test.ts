@@ -8861,11 +8861,11 @@ describe('member detect entry', () => {
 });
 
 describe('declared plugin ACP runtime picker', () => {
-  const pluginRuntime = (ref: string) => ({
+  const pluginRuntime = (ref: string, installed = true) => ({
     id: ref,
     label: ref.includes('old') ? 'Old Agent' : 'Acme Agent',
     clientId: 'acp',
-    installed: true,
+    installed,
     models: [],
     acp: { agentProvider: ref, command: 'plugin-agent', startupArgs: [] },
   });
@@ -8884,6 +8884,66 @@ describe('declared plugin ACP runtime picker', () => {
       w.eval('go("memberNew")');
       await w.__settled();
       expect(w.document.getElementById('f-runtime')).toBeNull();
+    } finally {
+      dom.window.close();
+    }
+  });
+
+  it('does not offer an unavailable declared ACP runtime for a new member', async () => {
+    const meta = advancedMemberMetadata();
+    meta.runtimes = [
+      withForm(pluginRuntime('plugin:new/agent')),
+      withForm(pluginRuntime('plugin:off/agent', false)),
+    ];
+    const { dom, w } = await boot(undefined, undefined, undefined, {}, (port) => {
+      const previous = port.action;
+      port.action = (name, args, element) => (name === 'membersRead' ? meta : previous(name, args, element));
+    });
+    try {
+      w.eval('go("memberNew")');
+      await w.__settled();
+      const picker = w.document.getElementById('f-runtime') as HTMLSelectElement | null;
+      expect(picker).not.toBeNull();
+      expect(Array.from(picker!.options).map((option) => option.value)).toEqual(['', 'plugin:new/agent']);
+    } finally {
+      dom.window.close();
+    }
+  });
+
+  it('keeps the current unavailable binding visible so it can be switched out', async () => {
+    const meta = advancedMemberMetadata();
+    meta.runtimes = [
+      withForm(pluginRuntime('plugin:old/agent', false)),
+      withForm(pluginRuntime('plugin:new/agent')),
+    ];
+    const { dom, w } = await boot(
+      undefined,
+      (data) =>
+        Object.assign(data.cats[0], {
+          clientId: 'acp',
+          carrier: 'acp',
+          agentProvider: 'plugin:old/agent',
+          acp: { agentProvider: 'plugin:old/agent', command: 'plugin-agent', startupArgs: [] },
+          configurationRevision: 'rev-old',
+        }),
+      undefined,
+      {},
+      (port) => {
+        const previous = port.action;
+        port.action = (name, args, element) => (name === 'membersRead' ? meta : previous(name, args, element));
+      },
+    );
+    try {
+      w.eval('go("member-codex")');
+      await w.__settled();
+      const picker = w.document.getElementById('f-runtime') as HTMLSelectElement | null;
+      expect(picker).not.toBeNull();
+      expect(picker!.value).toBe('plugin:old/agent');
+      expect(Array.from(picker!.options).map((option) => option.value)).toEqual([
+        '',
+        'plugin:old/agent',
+        'plugin:new/agent',
+      ]);
     } finally {
       dom.window.close();
     }
