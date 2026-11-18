@@ -9033,6 +9033,7 @@ describe('declared plugin ACP runtime picker', () => {
       w.document.querySelector<HTMLButtonElement>('[data-for="mc-aliases"] [data-act="fieldGo"]')!.click();
       await w.__settled();
       expect(w.eval('VM.memberNew().form.d.aliases')).toContain('@declared-agent');
+      expect(w.document.querySelector('#ms-handles')?.textContent).toContain('@declared-agent');
     } finally {
       dom.window.close();
     }
