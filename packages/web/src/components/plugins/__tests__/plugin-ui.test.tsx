@@ -45,8 +45,10 @@ describe('plugin sidebar panel isolation', () => {
     await act(async () => root.render(<PluginUiEntries />));
     const entry = container.querySelector('button');
     expect(entry?.getAttribute('aria-label')).toBe('问题反馈');
+    expect(entry?.getAttribute('aria-pressed')).toBe('false');
     await act(async () => entry?.click());
     const frame = document.querySelector('iframe');
+    expect(entry?.getAttribute('aria-pressed')).toBe('true');
     expect(frame).not.toBeNull();
     expect(frame!.getAttribute('sandbox')).not.toContain('allow-same-origin');
     expect(frame!.getAttribute('srcdoc')).toContain("connect-src 'none'");

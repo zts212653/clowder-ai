@@ -120,6 +120,22 @@ try {
   await panel.getByRole('button', { name: '跳过分析', exact: true }).click();
   await panel.getByLabel('报告正文预览').waitFor();
   assert.equal(
+    await panel.getByRole('checkbox', { name: '我已检查完整报告和所有图片' }).evaluate((element: Element) => {
+      const box = element.getBoundingClientRect();
+      return box.top >= 0 && box.bottom <= innerHeight;
+    }),
+    true,
+    'consent is visible beside submission actions',
+  );
+  assert.equal(
+    await panel.getByText(/^目标：/).evaluate((element: Element) => {
+      const box = element.getBoundingClientRect();
+      return box.top >= 0 && box.bottom <= innerHeight;
+    }),
+    true,
+    'destination is visible before the report',
+  );
+  assert.equal(
     (await panel.getByLabel('Issue 标题', { exact: true }).inputValue()).startsWith('bug: '),
     true,
     'description supplies the initial title',
