@@ -46,6 +46,12 @@ tips_exempt: spec-only — plugin framework not yet implemented, no user-facing 
 
 拿 `clowder-code` 做 reference plugin 证明扩展点：被 @ → 进 thread → 流式回复 → session chain 可见 → audit / cancel / timeout 可控 → callback/MCP 注入守 agent-key 边界 → cwd/sandbox host 控制 → Hub provider 配置走统一 renderer 无硬编码 UI。
 
+## User Journey
+
+**范围**覆盖成员设置、插件管理和对话。首次进入空成员列表，用户从「一键检测并添加伙伴」查看本机客户端和登录状态，选择可用客户端后保存角色。成员列表显示新角色及角色卡，回到对话使用 `@` 发起调用。在成员设置里可再次检测，手动添加或编辑成员，为同一角色更换客户端。
+
+使用额外的 ACP 客户端时，用户通过插件管理入口安装已声明客户端的归档，再回成员设置选择对应客户端。已有角色的身份和会话在重新启动后可继续使用。维护者通过插件管理入口替换或恢复兼容归档，并从成员设置和对话验证结果。开发与验证范围见 [Agent 接入切换方案](../plans/2026-11-18-agent-plugin-cutover.md) 和 [验收记录](../plans/2026-11-18-agent-plugin-cutover-validation.md)。
+
 ## Acceptance Criteria
 
 <!-- 立项愿景硬度自检（F216→F219）：每条 AC 必须 ① trace 回 Why（外部 agent 不改 core 接入 + 安全边界 host-owned）② 非作者可复核（命令/数字/截图）。 -->

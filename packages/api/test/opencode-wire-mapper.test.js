@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
-import { mapOpenCodeWireEvent } from '../src/domains/cats/services/agents/providers/opencode-wire-mapper.js';
+import { mapOpenCodeWireEvent } from '../dist/domains/cats/services/agents/providers/opencode-wire-mapper.js';
 
 /**
  * The package reads the raw CLI event into a provider-neutral wire shape; the Host

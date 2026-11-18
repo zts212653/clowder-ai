@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
 import { describe, mock, test } from 'node:test';
-import { OpenCodeAgentService } from '../src/domains/cats/services/agents/providers/OpenCodeAgentService.js';
+import { OpenCodeAgentService } from '../dist/domains/cats/services/agents/providers/OpenCodeAgentService.js';
 
 /**
  * The native role-construction path must go through the public protocol.
