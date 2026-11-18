@@ -2320,6 +2320,7 @@ async function initializeApi(
                       effectiveModel: getCatModel(id),
                       acpConfig,
                       resolveCurrentAcpConfig: () => getRegisteredAcpConfig(id, projectRoot),
+                      selectSessionModel: (session, model) => agentAccessAcpModelSelection(session, model),
                       poolRegistry: acpPoolRegistry,
                       log: app.log,
                       onUnavailable: (reason) => agentRegistry.markUnavailable(id, reason),
@@ -5574,6 +5575,7 @@ async function initializeApi(
                 config,
                 effectiveModel: getCatModel(catId),
                 acpConfig: declaration.acp,
+                selectSessionModel: (session, model) => agentAccessAcpModelSelection(session, model),
                 poolRegistry,
                 log: app.log,
               });
@@ -6009,6 +6011,11 @@ async function initializeApi(
   const { pluginManagerUploadRoutes, registerPluginManagerRoutes } = await import('./routes/plugin-manager-routes.js');
   const { registerPluginMarketplaceRoutes } = await import('./routes/plugin-marketplace-routes.js');
   const { registerAgentClientLibraryRoutes } = await import('./routes/agent-client-library-routes.js');
+  const { createAgentAccessAcpModelSelection } = await import('./domains/plugin/agent-access/acp.js');
+  const agentAccessAcpModelSelection = createAgentAccessAcpModelSelection(
+    pluginRuntime.inventoryStore,
+    pluginRuntime.supervisor,
+  );
   const { createAgentAccessKimiLaunchPlanner } = await import('./domains/plugin/agent-access/kimi.js');
   const agentAccessKimiLaunch = createAgentAccessKimiLaunchPlanner(
     pluginRuntime.inventoryStore,

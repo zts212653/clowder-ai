@@ -10,7 +10,11 @@ import {
   agentAccessNativeLaunchRequestSchema,
   agentAccessOpenCodeFinalizerRequestSchema,
 } from '@clowder-ai/agent-contract';
-import { type AgentAccessAcpChildHandle, agentAccessDshConnectionInputSchema } from '@clowder-ai/agent-contract/acp';
+import {
+  type AgentAccessAcpChildHandle,
+  agentAccessAcpModelSelectionSchema,
+  agentAccessDshConnectionInputSchema,
+} from '@clowder-ai/agent-contract/acp';
 import { builtInAgentClients, inspectNativeAccessCandidate } from './discovery/agent-client-catalog.js';
 import { nativeRuntimeReadiness } from './discovery/native-runtime-readiness.js';
 import { discoverNativeRuntimes } from './discovery/native-runtimes.js';
@@ -19,6 +23,7 @@ import { readRoles } from './roles/role-card.js';
 import { writeRole } from './roles/write-role.js';
 import { runA2ATurn } from './runtime/a2a-turn.js';
 import { checkDshConnectionInWorker } from './runtime/acp/dsh/connection-check.js';
+import { resolveSessionModelConfigOption } from './runtime/acp/session-configuration.js';
 import { normalizeKimiEvent } from './runtime/kimi-event-parser.js';
 import { buildKimiLaunchArguments } from './runtime/kimi-launch-arguments.js';
 import { normalizeOpenCodeEvent } from './runtime/opencode-event-parser.js';
@@ -53,6 +58,10 @@ export default {
               return request.client === 'kimi'
                 ? normalizeKimiEvent(request.event)
                 : normalizeOpenCodeEvent(request.event);
+            },
+            selectAcpModel(input: unknown) {
+              const request = agentAccessAcpModelSelectionSchema.parse(input);
+              return resolveSessionModelConfigOption(request, request.model);
             },
             testDshConnection({ input, launch }: { input: unknown; launch: () => Promise<AgentAccessAcpChildHandle> }) {
               return checkDshConnectionInWorker(agentAccessDshConnectionInputSchema.parse(input), launch);

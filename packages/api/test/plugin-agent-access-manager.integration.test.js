@@ -13,6 +13,7 @@ import { A2AAgentService } from '../dist/domains/cats/services/agents/providers/
 import { sessionImplementationKey } from '../dist/domains/cats/services/agents/session-contract/implementation-registry.js';
 import { MessageStore } from '../dist/domains/cats/services/stores/ports/MessageStore.js';
 import { createAgentAccessA2ARunner } from '../dist/domains/plugin/agent-access/a2a.js';
+import { createAgentAccessAcpModelSelection } from '../dist/domains/plugin/agent-access/acp.js';
 import { createAgentAccessDshConnectionTest } from '../dist/domains/plugin/agent-access/dsh.js';
 import { createAgentAccessKimiLaunchPlanner } from '../dist/domains/plugin/agent-access/kimi.js';
 import {
@@ -31,6 +32,31 @@ import {
 import { catsRoutes } from '../dist/routes/cats.js';
 import { tarArchive } from '../scripts/bundled-plugin-artifacts.mjs';
 import { canonicalGzip } from '../scripts/canonical-gzip.mjs';
+
+test('Kimi native events cross with redaction and consume only the same active package generation', async () => {
+  const instance = {
+    pluginInstanceId: 'kimi-event-test',
+    packageDigest: 'digest-one',
+    lifecycleRevision: 1,
+    activationState: 'enabled',
+    runtimeState: 'healthy',
+  };
+  const plan = await createAgentAccessKimiLaunchPlanner(
+    { readCurrentAuthority: async () => ({ instance }) },
+    {
+      invoke: async (_instanceId, method, input) => {
+        if (method === 'configure') return { args: [], managedArgvFlags: [] };
+        assert.equal(input.event.content, 'Hello');
+        assert.notEqual(input.event.apiKey, 'fixture-private-value');
+        instance.lifecycleRevision += 1;
+        return { kind: 'ignored' };
+      },
+    },
+  )({ prompt: 'hello', imageAccessDirs: [] });
+  await assert.rejects(plan.normalizeEvent({ content: 'Hello', apiKey: 'fixture-private-value' }), {
+    message: 'session_implementation_unavailable',
+  });
+});
 
 test('Agent access discovery executes the same standalone entrypoint from a Manager archive across replacement and rollback', async (t) => {
   const pluginId = 'official.agent-access';
@@ -152,6 +178,19 @@ test('Agent access discovery executes the same standalone entrypoint from a Mana
   assert.equal(first.candidates.find((candidate) => candidate.id === 'kimi')?.label, 'Kimi');
   assert.deepEqual((await setupRead()).json(), { error: 'dsh_setup_custom_startup' });
 
+  const selectModel = createAgentAccessAcpModelSelection(runtime.inventoryStore, runtime.supervisor);
+  const modelOffer = {
+    configOptions: [
+      { id: 'vendor-model', category: 'model', currentValue: 'other', options: [{ value: 'fixture/model' }] },
+    ],
+  };
+  assert.deepEqual(await selectModel(modelOffer, 'fixture/model'), { configId: 'vendor-model' });
+  assert.equal(await selectModel(modelOffer, 'not-advertised'), null);
+  const invalidPlan = createAgentAccessAcpModelSelection(runtime.inventoryStore, {
+    invoke: async () => ({ configId: 'approval' }),
+  });
+  await assert.rejects(invalidPlan(modelOffer, 'fixture/model'), /unapproved_acp_model_option/);
+
   const remote = Fastify();
   t.after(() => remote.close());
   const dispatched = [];
@@ -241,7 +280,7 @@ test('Agent access discovery executes the same standalone entrypoint from a Mana
   const before = roleConfigurationRevision(await readCatalog(), request.input.catId);
 
   await assert.rejects(install(incompatible), /Agent access protocol version/);
-  await assert.rejects(install(obsolete), /missing operations parseNativeEvent, testDshConnection/);
+  await assert.rejects(install(obsolete), /missing operations .*selectAcpModel/);
   assert.equal((await manager.get(pluginId)).plugin.installedVersion, '1.0.0');
   assert.equal((await scan()).readiness.state, 'ready');
 

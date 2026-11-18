@@ -87,7 +87,11 @@ import {
   resolveKimiShareDir,
 } from './kimi/kimi-turn-outcome.js';
 import { captureNativeDefaults, defaultsForNativeResume } from './native-session-defaults.js';
-import { applySessionConfiguration, reportedSessionModel } from './session-configuration.js';
+import {
+  applySessionConfiguration,
+  reportedSessionModel,
+  resolveSessionModelConfigOption,
+} from './session-configuration.js';
 import type {
   AcpInitializeResult,
   AcpMcpServer,
@@ -190,6 +194,10 @@ export interface AcpAgentServiceConfig {
   modelName?: string;
   /** ACP session model override sent via session/set_config_option when the agent exposes model selection. */
   sessionModel?: string;
+  selectSessionModel?: (
+    session: { configOptions?: unknown },
+    model: string,
+  ) => { configId: string } | null | Promise<{ configId: string } | null>;
   /**
    * Protocol adapter selection. 'icode' switches the service onto iCode's ACP
    * dialect: model selection via standard session/set_model (fail-loud), no
@@ -251,6 +259,7 @@ export class AcpAgentService implements AgentService {
    */
   private modelName: string;
   private readonly sessionModel?: string;
+  private readonly selectSessionModel: NonNullable<AcpAgentServiceConfig['selectSessionModel']>;
   readonly protocolAdapter: 'icode' | undefined;
   private readonly executionApproval: 'auto' | 'ask_user';
   private readonly defaultPermissionDecision?: 'allow' | 'reject';
@@ -286,6 +295,7 @@ export class AcpAgentService implements AgentService {
     this.providerName = config.providerName ?? 'acp';
     this.modelName = config.modelName ?? config.sessionModel ?? 'acp';
     this.sessionModel = config.sessionModel?.trim() || undefined;
+    this.selectSessionModel = config.selectSessionModel ?? resolveSessionModelConfigOption;
     this.protocolAdapter = config.protocolAdapter;
     this.executionApproval = config.executionApproval ?? 'auto';
     this.defaultPermissionDecision = config.defaultPermissionDecision;
@@ -996,8 +1006,9 @@ export class AcpAgentService implements AgentService {
             return;
           }
         } else {
-          const modelConfig = !agy && sessionModel ? resolveSessionModelConfigOption(session, sessionModel) : null;
-          if (!nativeTool && modelConfig && sessionModel) {
+          const modelConfig =
+            !agy && !nativeTool && sessionModel ? await this.selectSessionModel(session, sessionModel) : null;
+          if (modelConfig && sessionModel) {
             try {
               await client.setSessionConfigOption(sessionId, modelConfig.configId, sessionModel);
               log.info({ ...ctx, sessionId, model: this.sessionModel }, 'ACP session model selected');
@@ -1374,8 +1385,9 @@ export class AcpAgentService implements AgentService {
               return;
             }
           } else {
-            const modelConfig = sessionModel ? resolveSessionModelConfigOption(freshSession, sessionModel) : null;
-            if (!nativeTool && modelConfig && sessionModel) {
+            const modelConfig =
+              !nativeTool && sessionModel ? await this.selectSessionModel(freshSession, sessionModel) : null;
+            if (modelConfig && sessionModel) {
               try {
                 await client.setSessionConfigOption(freshSessionId, modelConfig.configId, sessionModel);
               } catch {
@@ -1692,32 +1704,6 @@ export class AcpAgentService implements AgentService {
 export const GeminiAcpAdapter = AcpAgentService;
 /** @deprecated Use AcpAgentServiceConfig. */
 export type { AcpAgentServiceConfig as GeminiAcpAdapterConfig_Deprecated };
-
-function resolveSessionModelConfigOption(
-  session: { configOptions?: unknown },
-  modelId: string,
-): { configId: string } | null {
-  const configOptions = session.configOptions;
-  if (!Array.isArray(configOptions)) return null;
-  const modelOption = configOptions.find(
-    (option) => isRecord(option) && (option.id === 'model' || option.category === 'model'),
-  );
-  if (!isRecord(modelOption)) return null;
-  const configId = typeof modelOption.id === 'string' ? modelOption.id.trim() : '';
-  if (!configId) return null;
-  if (modelOption.currentValue === modelId) return null;
-  const optionValues = Array.isArray(modelOption.options)
-    ? modelOption.options
-        .map((option) => (isRecord(option) && typeof option.value === 'string' ? option.value.trim() : ''))
-        .filter(Boolean)
-    : [];
-  if (optionValues.length > 0 && !optionValues.includes(modelId)) return null;
-  return { configId };
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null;
-}
 
 /** F149: Build a provider_signal warning for realtime capacity display. */
 function makeCapacityWarning(

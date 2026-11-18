@@ -6,6 +6,24 @@ export interface SessionConfigurationClient {
 function record(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object';
 }
+
+/** Standard ACP clients can advertise an option id distinct from the profile model. */
+export function resolveSessionModelConfigOption(session: { configOptions?: unknown }, model: string) {
+  if (!Array.isArray(session.configOptions)) return null;
+  const descriptor = session.configOptions.find(
+    (option) => record(option) && (option.id === 'model' || option.category === 'model'),
+  );
+  if (!record(descriptor) || typeof descriptor.id !== 'string' || !descriptor.id.trim()) return null;
+  if (descriptor.currentValue === model) return null;
+  const choices = Array.isArray(descriptor.options)
+    ? descriptor.options.flatMap((option) => {
+        const value = record(option) && typeof option.value === 'string' ? option.value.trim() : '';
+        return value ? [value] : [];
+      })
+    : [];
+  if (choices.length > 0 && !choices.includes(model)) return null;
+  return { configId: descriptor.id.trim() };
+}
 function isUnknownModel(value: string): boolean {
   if (value.trim().toLowerCase() === 'unknown') return true;
   try {

@@ -4,6 +4,7 @@ import {
   agentAccessKimiEventSchema,
   agentAccessNativeLaunchArgumentsSchema,
 } from '@clowder-ai/agent-contract';
+import { sanitizeRawEvent } from '../../cats/services/agents/providers/codex-audit-hooks.js';
 import type { PluginRuntimeCarrierRouter } from '../carrier/runtime-carrier.js';
 import type { PluginInventoryStore } from '../host-inventory/ports.js';
 
@@ -36,12 +37,12 @@ export function createAgentAccessKimiLaunchPlanner(
       assertCurrent,
       async normalizeEvent(event: unknown) {
         await assertCurrent();
-        return agentAccessKimiEventSchema.parse(
-          await runtime.invoke(instance.pluginInstanceId, 'parseNativeEvent', {
-            client: 'kimi',
-            event,
-          }),
-        );
+        const response = await runtime.invoke(instance.pluginInstanceId, 'parseNativeEvent', {
+          client: 'kimi',
+          event: sanitizeRawEvent(event),
+        });
+        await assertCurrent();
+        return agentAccessKimiEventSchema.parse(response);
       },
     };
   };

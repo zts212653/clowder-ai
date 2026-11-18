@@ -29,7 +29,7 @@ import { prepareDshSecretPatch, verifyDshSecretPatch } from '../dsh-secret-patch
 import { ensureKimiSecretHooks } from '../kimi-secret-hooks.js';
 import { prepareOpenCodeAcpSpawnConfig } from '../opencode-acp-spawn-config.js';
 import { piBridgeStorageArgs } from '../pi/pi-bridge-launch.js';
-import { AcpAgentService } from './AcpAgentService.js';
+import { AcpAgentService, type AcpAgentServiceConfig } from './AcpAgentService.js';
 import { AcpClient, type AcpClientConfig } from './AcpClient.js';
 import { AcpHttpStreamClient } from './AcpHttpStreamClient.js';
 import { AcpProcessPool, DEFAULT_ACP_IDLE_TTL_MS } from './AcpProcessPool.js';
@@ -73,6 +73,7 @@ export interface CreateAcpServiceForConfigInput {
   acpConfig: AcpVariantConfig;
   /** Catalog construction uses its existing accessor; plugin sources retain their registration fence. */
   resolveCurrentAcpConfig?(): AcpVariantConfig | undefined;
+  selectSessionModel?: AcpAgentServiceConfig['selectSessionModel'];
   poolRegistry: AcpPoolRegistry;
   log: Pick<FastifyBaseLogger, 'info' | 'warn'>;
   /** Tests supply an owned throwaway root; production uses the platform default. */
@@ -548,6 +549,7 @@ export async function createAcpServiceForConfig(
     // configuration id), distinct from defaultModel (display/audit model name).
     // The factory rejects iCode members without it, so this is always defined.
     sessionModel: acpConfig.protocolAdapter === 'icode' ? icodeModelProfileId : spawn.sessionModel,
+    selectSessionModel: input.selectSessionModel,
     protocolAdapter: acpConfig.protocolAdapter,
     executionApproval:
       spawn.antigravity && spawn.antigravity.profile.autoApprove !== true

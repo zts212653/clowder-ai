@@ -1,6 +1,13 @@
 import type { Readable } from 'node:stream';
 import { z } from 'zod';
 
+export const agentAccessAcpModelSelectionSchema = z.object({
+  model: z.string().min(1),
+  configOptions: z.unknown().optional(),
+});
+
+export const agentAccessAcpModelSelectionResultSchema = z.object({ configId: z.string().min(1) }).nullable();
+
 /**
  * ACP (Agent Client Protocol) type definitions
  *

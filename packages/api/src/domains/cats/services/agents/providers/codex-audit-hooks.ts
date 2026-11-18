@@ -52,7 +52,7 @@ export function extractCommandExecutionLifecycle(event: unknown): CommandExecuti
 }
 
 /**
- * Redacts known callback token keys within object graphs.
+ * Redacts known credential keys within object graphs.
  * We intentionally bound recursion depth for M1 to keep this best-effort and predictable.
  */
 export function sanitizeRawEvent(event: unknown): unknown {
@@ -89,7 +89,8 @@ function redactSensitiveFields(value: unknown, depth: number): unknown {
 
 function isSensitiveTokenKey(key: string): boolean {
   const lowered = key.toLowerCase();
-  if (lowered === 'callbacktoken') return true;
+  if (lowered === 'callbacktoken' || lowered === 'apikey' || lowered === 'api_key' || lowered === 'authorization')
+    return true;
   if (lowered.endsWith('_token')) return true;
   return lowered.includes('callback_token');
 }
