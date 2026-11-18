@@ -20714,7 +20714,7 @@ pdl:
         t: runtime.accountSwitch
         args:
           - $.name
-      ok: t:common.cancel
+      ok: t:accounts.confirmSwitch
       blocks:
         - type: view
           id: accounts.switch
@@ -22944,19 +22944,6 @@ pdl:
                       act: toggle
                       args:
                         path: ss.accountSwitch.includeOverrides
-        - type: component
-          use: v2Toolbar
-          props:
-            items:
-              - type: component
-                use: v2Action
-                props:
-                  primary: true
-                  label: t:accounts.confirmSwitch
-                  act: accSwitchOk
-                  args:
-                    k: $.id
-                  disabled: "!$.canCommit"
       bare: true
     dlg.mcpUninstall:
       title: t:mcp.uninstall.title

@@ -887,7 +887,8 @@ describe('r136 setting owners through copied views', () => {
       );
       await w.eval("A.toggle({path:'ss.accountSwitch.includeOverrides'})");
       expect(w.eval('VM.accountSwitch().includeOverrides')).toBe(true);
-      await w.eval("A.accSwitchOk({k:'oauth-one'})");
+      await w.eval('dialogSubmit()');
+      await w.__settled();
       expect(post).toHaveBeenLastCalledWith(
         '/api/accounts/oauth-one/codex/binding/commit',
         {},

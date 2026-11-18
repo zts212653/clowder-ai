@@ -569,7 +569,14 @@ function bindAccounts() {
       load: 'loading',
       busy: false,
     });
-    dialog({ kind: 'runtimeAccountSwitch', args: { name: p.displayName }, on: function () {} });
+    // The dialog's OK commits this preview; a failed commit reopens it with the reason.
+    dialog({
+      kind: 'runtimeAccountSwitch',
+      args: { name: p.displayName },
+      on: function () {
+        return commit(state);
+      },
+    });
     try {
       state.preview = await api.post(
         '/api/accounts/' + encodeURIComponent(id) + '/' + tool + '/binding/preview',
@@ -611,24 +618,19 @@ function bindAccounts() {
       }),
     };
   };
-  A.accSwitchOk = async function (d) {
-    const s = st.accountSwitch;
+  async function commit(s) {
+    if (s !== st.accountSwitch || s.load || !s.preview.previewToken) return false;
     s.busy = true;
-    render(true);
     try {
       await api.post(
-        '/api/accounts/' + encodeURIComponent(d.k) + '/' + s.tool + '/binding/commit',
+        '/api/accounts/' + encodeURIComponent(s.id) + '/' + s.tool + '/binding/commit',
         {},
         { scope: 'local', includeOverrides: s.includeOverrides, previewToken: s.preview.previewToken },
       );
       await chatPort.action('membersRead', {});
       await read();
-      S.dialog = null;
-    } catch (error) {
-      S.dialog.error = error.message;
     } finally {
       s.busy = false;
-      render(true);
     }
-  };
+  }
 }
