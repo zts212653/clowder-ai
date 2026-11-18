@@ -374,3 +374,23 @@ test('failed concrete Host preparation rejects activation and unregisters the de
   assert.equal(h.registry.has(ref), false);
   assert.equal(h.service.contextCapability?.(), undefined);
 });
+
+test('each declared ACP activation owns fresh pools while retired providers are disposed', async (t) => {
+  const scopes = [];
+  const disposed = [];
+  const h = await lifecycle(t, declaration, 'plugin', (_declaration, { poolRegistry }) => {
+    scopes.push(poolRegistry);
+    const provider = new FakeSessionProvider();
+    provider.disposeHostService = async () => disposed.push(poolRegistry);
+    return provider;
+  });
+  await h.runtime.activate(h.admission, () => assert.fail('plugin code invoked'));
+  await collect(h.service.invoke('before', options({ hostSessionId: 'host' })));
+  assert.ok(scopes[0] instanceof Map);
+  await h.runtime.refreshAgentSessionProviders(h.admission);
+  await collect(h.service.invoke('after', options({ hostSessionId: 'host' })));
+  assert.notEqual(scopes[0], scopes[1]);
+  assert.deepEqual(disposed, [scopes[0]]);
+  await h.runtime.deactivateAll();
+  assert.deepEqual(disposed, scopes);
+});

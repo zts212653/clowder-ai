@@ -1,0 +1,36 @@
+{
+  "name": "@clowder-ai/agent-access",
+  "version": "1.0.0",
+  "type": "module",
+  "private": true,
+  "exports": {
+    "./discovery/*": {
+      "types": "./dist/discovery/*.d.ts",
+      "import": "./dist/discovery/*.js"
+    },
+    "./roles/*": {
+      "types": "./dist/roles/*.d.ts",
+      "import": "./dist/roles/*.js"
+    },
+    "./workstation/*": {
+      "types": "./dist/workstation/*.d.ts",
+      "import": "./dist/workstation/*.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc && node scripts/bundle.mjs",
+    "lint": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@cat-cafe/shared": "workspace:*",
+    "@clowder-ai/agent-contract": "workspace:*",
+    "smol-toml": "^1.6.0",
+    "yaml": "^2.8.1",
+    "zod": "^3.22.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "esbuild": "0.27.2",
+    "typescript": "^5.3.3"
+  }
+}

@@ -1,0 +1,26 @@
+{
+  "name": "@clowder-ai/agent-contract",
+  "version": "1.0.0",
+  "type": "module",
+  "files": [
+    "dist"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+
+    "lint": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@cat-cafe/shared": "workspace:*",
+    "zod": "^3.22.4"
+  },
+  "devDependencies": {
+    "typescript": "^5.3.3"
+  }
+}

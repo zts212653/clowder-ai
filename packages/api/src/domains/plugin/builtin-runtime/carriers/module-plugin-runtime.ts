@@ -1,3 +1,4 @@
+import type { AgentAccessDiscoveryHost, AgentAccessRoleStore } from '@clowder-ai/agent-contract';
 import {
   isPluginDeliveryInput,
   isPluginDeliveryReceipt,
@@ -11,6 +12,8 @@ import type { IThreadStore } from '../../../cats/services/stores/ports/ThreadSto
 import type { EntrustedWorkChangeReason } from '../../../growing/EntrustedWorkLifecycleService.js';
 import type { MessagingService } from '../../../messaging/messaging-service.js';
 import type { SubscriptionDelivery } from '../../../messaging/subscription-delivery.js';
+import { createAgentAccessDiscoveryHost } from '../../agent-access-discovery-host.js';
+import { createAgentAccessRoleStore } from '../../agent-access-role-store.js';
 import { type PluginInvocationOutcome, settlePluginInvocation } from '../../carrier/host-invocation.js';
 import type { SharedMcpFactory } from '../../declared/shared-mcp-factory.js';
 import { type ModuleExecutionLease, ModuleExecutionWorker } from '../../execution-worker/client.js';
@@ -88,6 +91,8 @@ export interface PluginModuleEntrypointShape {
 export type ModulePluginLogLevel = 'debug' | 'info' | 'warn' | 'error';
 
 export interface ModulePluginHostShape {
+  readonly agentAccess?: AgentAccessDiscoveryHost;
+  readonly agentRoleStore?: AgentAccessRoleStore;
   /** Installation identity for attribution; Host operations retain their own identity and lifecycle checks. */
   readonly pluginInstanceId: string;
   readonly config: { get(key: string): Promise<unknown> };
@@ -400,7 +405,11 @@ export class ModulePluginRuntime implements BundledPluginRuntime {
         assertActivation,
       );
       assertActivation();
+      const agentAccess = createAgentAccessDiscoveryHost(packageRecord.pluginId, pluginInstanceId, assertActivation);
+      const agentRoleStore = createAgentAccessRoleStore(packageRecord.pluginId, pluginInstanceId, assertActivation);
       const host: ModulePluginHostShape = {
+        ...(agentRoleStore ? { agentRoleStore } : {}),
+        ...(agentAccess ? { agentAccess } : {}),
         ...neutral,
         pluginInstanceId,
         config: settingsHost.config,

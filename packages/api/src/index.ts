@@ -2233,6 +2233,7 @@ async function initializeApi(
 
   // ── F149 Phase C: ACP process pool registry (variantId → AcpProcessPool) ──
   const acpPoolRegistry: AcpPoolRegistry = new Map();
+  const declaredAcpPools = new Set<AcpPoolRegistry>();
   const sessionContractSettings = readSessionContractSettings(process.env);
   for (const warning of sessionContractSettings.warnings) app.log.warn(warning);
   const sessionImplementations = new SessionImplementationRegistry();
@@ -3691,10 +3692,10 @@ async function initializeApi(
       return reply.code(403).send({ error: 'Diagnostics disabled' });
     }
     const pools: Record<string, unknown> = {};
-    for (const [variantId, pool] of acpPoolRegistry) {
-      pools[variantId] = pool.getMetrics();
+    for (const registry of [acpPoolRegistry, ...declaredAcpPools]) {
+      for (const [variantId, pool] of registry) pools[variantId] = pool.getMetrics();
     }
-    return { pools, poolCount: acpPoolRegistry.size };
+    return { pools, poolCount: Object.keys(pools).length };
   });
 
   await app.register(quotaRoutes, {
@@ -5542,10 +5543,11 @@ async function initializeApi(
         packages,
         registry: sessionImplementations,
         services: registeredSessionServices,
-        createProvider: (declaration, { catId }) =>
+        poolDiagnostics: declaredAcpPools,
+        createProvider: (declaration, { catId, poolRegistry }) =>
           createRefreshingAcpSessionProvider({
             catId,
-            scope: acpPoolRegistry,
+            scope: poolRegistry,
             revision: () => sessionConfigurationRevision,
             createService: () => {
               const config = catRegistry.getAllConfigs()[catId];
@@ -5556,7 +5558,7 @@ async function initializeApi(
                 config,
                 effectiveModel: getCatModel(catId),
                 acpConfig: declaration.acp,
-                poolRegistry: acpPoolRegistry,
+                poolRegistry,
                 log: app.log,
               });
             },
@@ -5988,6 +5990,8 @@ async function initializeApi(
   const { pluginManagerUploadRoutes, registerPluginManagerRoutes } = await import('./routes/plugin-manager-routes.js');
   const { registerPluginMarketplaceRoutes } = await import('./routes/plugin-marketplace-routes.js');
   const { registerAgentClientLibraryRoutes } = await import('./routes/agent-client-library-routes.js');
+  const { registerAgentAccessRoutes } = await import('./routes/agent-access-routes.js');
+  registerAgentAccessRoutes(app, { inventory: pluginRuntime.inventoryStore, runtime: pluginRuntime.supervisor });
   registerAgentClientLibraryRoutes(app, {
     inventory: pluginRuntime.inventoryStore,
     packages: pluginRuntime.packages,
