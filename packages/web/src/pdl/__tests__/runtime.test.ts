@@ -2849,6 +2849,28 @@ describe('unmodified runtime and project chat bindings', () => {
       expect(w.eval('VM.navThreads().sections.find(g=>g.gid==="attention_default").head.open')).toBe(true);
       expect(w.eval('VM.navThreads().sections.find(g=>g.gid==="attention_closed").collapsed')).toBe(true);
       expect(w.document.querySelectorAll('.cafe-trow[data-tid]').length).toBeGreaterThan(0);
+      // A member running in a conversation shows on its row as "name 执行中 · n 分" with the member's run dot.
+      const tid = w.eval('document.querySelector(".cafe-trow[data-tid]").dataset.tid');
+      port.data = {
+        ...port.data,
+        chat: {
+          ...port.data.chat,
+          executions: [
+            {
+              executionId: 'run-1',
+              threadId: tid,
+              catId: 'codex',
+              kind: 'live_invocation',
+              startedAt: Date.now() - 120000,
+            },
+          ],
+        },
+      };
+      w.clowderChat.update(port);
+      await w.__settled();
+      const row = w.document.querySelector(`.cafe-trow[data-tid="${tid}"]`);
+      expect(row.textContent).toContain('执行中');
+      expect(row.querySelector('.dot[data-tone="run"][data-live="codex"]')).not.toBeNull();
       expect(errors).not.toHaveBeenCalled();
       expect(buildModels).not.toHaveBeenCalled();
     } finally {
