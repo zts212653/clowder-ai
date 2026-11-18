@@ -92,7 +92,7 @@ export function registerAgentAccessRoutes(
     return { readiness: { state: 'failed', action: 'retry' } };
   }
 
-  return async function readLegacyNativeRuntimes(
+  async function readLegacyNativeRuntimes(
     _projectRoot: string,
     refresh: boolean,
     request: FastifyRequest,
@@ -104,7 +104,9 @@ export function registerAgentAccessRoutes(
       return reply.code(503).send({ error: 'Agent 插件未就绪', readiness: detected.readiness });
     }
     return { runtimes: detected.candidates, authenticationStatus: 'local_checked' };
-  };
+  }
+
+  return { readLegacyNativeRuntimes, readDetection };
 }
 
 function currentAgentAccess(

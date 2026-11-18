@@ -4,6 +4,8 @@ import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
+import { fileURLToPath } from 'node:url';
+import { validateManifest } from '@clowder-ai/plugin-contract';
 import Fastify from 'fastify';
 import { stringify } from 'yaml';
 import { AcpClient } from '../src/domains/cats/services/agents/providers/acp/AcpClient.js';
@@ -105,7 +107,39 @@ test(
     const app = Fastify();
     const audit: string[] = [];
     app.decorateRequest('sessionUserId', 'fixture-owner');
+    const [
+      { MessageStore },
+      { createAgentAccessDshConnectionTest },
+      { createDormantPluginRuntimeComposition, createPluginManagerRuntimeComposition },
+    ] = await Promise.all([
+      import('../dist/domains/cats/services/stores/ports/MessageStore.js'),
+      import('../dist/domains/plugin/agent-access-dsh.js'),
+      import('../dist/domains/plugin/index.js'),
+    ]);
+    const runtime = createDormantPluginRuntimeComposition({
+      projectRoot: host,
+      messageStore: new MessageStore(),
+      contract: { manifestContractRange: '0.4.0-candidate.0', validateManifest },
+    });
+    t.after(() => runtime.shutdown());
+    const { manager } = createPluginManagerRuntimeComposition({
+      runtime,
+      catalogManifests: [],
+      catalogProvider: { snapshot: async () => ({ entries: [], status: 'fresh', checkedAt: 0 }) },
+    });
+    await manager.install({
+      source: {
+        kind: 'local-archive',
+        path: fileURLToPath(new URL('../../agent-access-plugin/dist/plugin/package.tgz', import.meta.url)),
+      },
+    });
+    const pluginId = 'official.agent-access';
+    await manager.setEnabled(pluginId, {
+      enabled: true,
+      expectedRevision: (await manager.get(pluginId)).plugin.lifecycleRevision,
+    });
     registerDshSetupRoutes(app, {
+      runConnection: createAgentAccessDshConnectionTest(runtime.inventoryStore, runtime.supervisor),
       resolveLaunch: (id) => {
         assert.equal(id, 'dsh');
         return launch;

@@ -947,7 +947,9 @@ interface CatsRoutesOptions {
   agentRoleRead?: AgentRoleRead;
   agentRoleWrite?: AgentRoleWrite;
   runDshConnection?: RunDshConnection;
-  nativeRuntimeDiscovery?: ReturnType<typeof registerAgentAccessRoutes>;
+  nativeRuntimeDiscovery?: ReturnType<typeof registerAgentAccessRoutes>['readLegacyNativeRuntimes'];
+  agentAccessDetection?: ReturnType<typeof registerAgentAccessRoutes>['readDetection'];
+  isDeclaredAgentProviderAvailable?: (reference: string) => boolean;
   resolveCarrierCapability?: (catId: CatId) => FreshnessCarrierCapability | undefined;
 }
 
@@ -964,7 +966,10 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opt
   });
   if (opts.memberAssets) registerMemberCanonResponse(app, opts.memberAssets);
   registerRuntimeCatalogRoute(app);
-  registerDshSetupRoutes(app, { runConnection: opts.runDshConnection });
+  registerDshSetupRoutes(app, {
+    runConnection: opts.runDshConnection,
+    readDetection: opts.agentAccessDetection,
+  });
   registerDshMemberConnectionChecks(app, {
     redis: opts.connectionCheckRedis,
     resolvePluginMcpView: opts.resolvePluginMcpView,
@@ -1122,6 +1127,19 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opt
         });
       }
       let replayed = false;
+
+      const selectedPlugin =
+        body.agentProvider !== undefined ? body.agentProvider : 'acp' in body ? body.acp?.agentProvider : undefined;
+      if (
+        requestedCarrier === 'acp' &&
+        selectedPlugin &&
+        !managedIdsBefore.has(body.catId) &&
+        opts.isDeclaredAgentProviderAvailable?.(selectedPlugin) === false
+      ) {
+        return reply
+          .code(409)
+          .send({ code: 'agent_provider_unavailable', error: '选择的插件客户端已不可用，请重新选择。' });
+      }
       if (!receipt && (managedIdsBefore.has(body.catId) || catRegistry.tryGet(body.catId)))
         return reply.code(409).send({
           code: 'member_creation_conflict',
@@ -1680,6 +1698,20 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opt
       if (usesAcpTransport && !effectiveAcpConfig) {
         reply.status(400);
         return { error: 'carrier "acp" requires an acp config (command + startupArgs)' };
+      }
+      const previousPlugin =
+        currentCat.agentProvider !== undefined ? currentCat.agentProvider : currentAcpConfig?.agentProvider;
+      const savedPlugin = body.agentProvider !== undefined ? body.agentProvider : currentCat.agentProvider;
+      const selectedPlugin = savedPlugin !== undefined ? savedPlugin : effectiveAcpConfig?.agentProvider;
+      if (
+        usesAcpTransport &&
+        selectedPlugin &&
+        selectedPlugin !== previousPlugin &&
+        opts.isDeclaredAgentProviderAvailable?.(selectedPlugin) === false
+      ) {
+        return reply
+          .code(409)
+          .send({ code: 'agent_provider_unavailable', error: '选择的插件客户端已不可用，请重新选择。' });
       }
 
       // The public Desktop binding exposes only DSH_HOME. Preparing a new HOME

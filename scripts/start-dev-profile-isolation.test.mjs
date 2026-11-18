@@ -669,7 +669,7 @@ describe('cross-platform pnpm-start profile propagation (#421)', () => {
 
     // Official AGY profiles may also opt out of inheriting the parent env (#5792); stripping still applies.
     const scopedChildEnv =
-      /buildChildEnv\(this\.config\.env, \{\s*workingDirectory: this\.config\.cwd,?\s*(?:inheritParentEnv: this\.config\.inheritParentEnv,?\s*)?\}\)/;
+      /buildChildEnv\((?:this\.)?config\.env, \{\s*workingDirectory: (?:this\.)?config\.cwd,?\s*(?:inheritParentEnv: (?:this\.)?config\.inheritParentEnv,?\s*)?\}\)/;
     assert.match(acpClient, scopedChildEnv);
     assert.match(acpHttpClient, scopedChildEnv);
     // One list, owned by one module…

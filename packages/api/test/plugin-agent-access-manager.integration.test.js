@@ -64,14 +64,18 @@ test('Agent access discovery executes the same standalone entrypoint from a Mana
   app.addHook('preHandler', async (request) => {
     request.sessionUserId = owner;
   });
-  const nativeRuntimeDiscovery = registerAgentAccessRoutes(app, {
-    inventory: runtime.inventoryStore,
-    runtime: runtime.supervisor,
-  });
+  const { readLegacyNativeRuntimes: nativeRuntimeDiscovery, readDetection: agentAccessDetection } =
+    registerAgentAccessRoutes(app, {
+      inventory: runtime.inventoryStore,
+      runtime: runtime.supervisor,
+    });
+  const availableProviders = new Set();
   await app.register(catsRoutes, {
     nativeRuntimeDiscovery,
+    agentAccessDetection,
     agentRoleRead: createAgentRoleRead(runtime.inventoryStore, runtime.supervisor),
     agentRoleWrite: createAgentRoleWrite(runtime.inventoryStore, runtime.supervisor),
+    isDeclaredAgentProviderAvailable: (reference) => availableProviders.has(reference),
   });
   const scan = async () => {
     const result = await app.inject({
@@ -126,6 +130,15 @@ test('Agent access discovery executes the same standalone entrypoint from a Mana
   const obsolete = await archive('0.9.0', 1, AGENT_ACCESS_OPERATIONS);
   const install = (path) => manager.install({ source: { kind: 'local-archive', path } });
   assert.equal((await scan()).readiness.state, 'missing');
+  const setupRead = () =>
+    app.inject({
+      method: 'POST',
+      url: '/api/cats/dsh-setup/inspect',
+      headers: { host: 'localhost:3004' },
+      remoteAddress: '127.0.0.1',
+      payload: { runtimeId: 'unregistered-test-runtime', sourceProfile: 'acp' },
+    });
+  assert.deepEqual((await setupRead()).json(), { error: 'dsh_setup_unavailable' });
   const installed = await install(previous);
   await manager.setEnabled(pluginId, {
     enabled: true,
@@ -135,6 +148,7 @@ test('Agent access discovery executes the same standalone entrypoint from a Mana
   assert.equal(first.readiness.state, 'ready', JSON.stringify(first.readiness));
   assert.ok(first.candidates.some((candidate) => candidate.id === 'codex'));
   assert.equal(first.candidates.find((candidate) => candidate.id === 'kimi')?.label, 'Kimi');
+  assert.deepEqual((await setupRead()).json(), { error: 'dsh_setup_custom_startup' });
 
   const remote = Fastify();
   t.after(() => remote.close());
@@ -347,6 +361,16 @@ test('Agent access discovery executes the same standalone entrypoint from a Mana
   const lanDirectory = await call('GET', '/api/agent-access/v1/clients');
   assert.equal(lanDirectory.statusCode, 200, lanDirectory.payload);
   assert.ok(lanDirectory.json().clients.some((client) => client.id === 'kimi'));
+  const selectedProvider = 'plugin:local.agent-access-test/kimi';
+  const declared = {
+    clientId: 'acp',
+    carrier: 'acp',
+    acp: { command: 'plugin-agent', startupArgs: [], agentProvider: selectedProvider },
+  };
+  const unavailable = await call('POST', '/api/cats', { ...request.input, ...declared });
+  assert.equal(unavailable.statusCode, 409, unavailable.payload);
+  assert.equal(unavailable.json().code, 'agent_provider_unavailable');
+  assert.equal((await readCatalog()).breeds.length, 0);
   const create = await call('POST', '/api/cats', request.input);
   assert.equal(create.statusCode, 201, create.payload);
   const createdRole = create.json().cat;
@@ -365,12 +389,24 @@ test('Agent access discovery executes the same standalone entrypoint from a Mana
   assert.equal(card.caution, 'Template caution');
   assert.deepEqual(card.restrictions, ['Template restriction']);
   const rolePath = '/api/cats/' + createdRole.id;
+  const staleSelection = await call('PATCH', rolePath, {
+    ...declared,
+    expectedRevision: createdRole.configurationRevision,
+  });
+  assert.equal(staleSelection.statusCode, 409, staleSelection.payload);
+  assert.equal(staleSelection.json().code, 'agent_provider_unavailable');
+  availableProviders.add(selectedProvider);
+  const bound = await call('PATCH', rolePath, { ...declared, expectedRevision: createdRole.configurationRevision });
+  assert.equal(bound.statusCode, 200, bound.payload);
+  assert.equal(bound.json().cat.acp.agentProvider, selectedProvider);
+  availableProviders.delete(selectedProvider);
   const edited = await call('PATCH', rolePath, {
     displayName: 'Changed using the member API',
-    expectedRevision: createdRole.configurationRevision,
+    expectedRevision: bound.json().cat.configurationRevision,
   });
   assert.equal(edited.statusCode, 200, edited.payload);
   assert.equal(edited.json().cat.displayName, 'Changed using the member API');
+  assert.equal(edited.json().cat.acp.agentProvider, selectedProvider);
   const deleted = await call('DELETE', rolePath, { expectedRevision: edited.json().cat.configurationRevision });
   assert.equal(deleted.statusCode, 200, deleted.payload);
   assert.equal((await readCatalog()).breeds.length, 0);
