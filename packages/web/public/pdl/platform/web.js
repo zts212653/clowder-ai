@@ -76,5 +76,13 @@ platformProvide({
   pickFiles: function (accept, fn) { const i = document.createElement('input'); i.type = 'file'; i.multiple = true; if (accept) i.accept = accept; i.addEventListener('change', function () { if (i.files && i.files.length) fn(Array.from(i.files)); }); i.click(); },
   pickFile: function (accept, fn) { const i = document.createElement('input'); i.type = 'file'; if (accept) i.accept = accept; i.addEventListener('change', function () { if (i.files && i.files[0]) fn(i.files[0]); }); i.click(); },
   notify: function (title, body) { try { if (typeof Notification !== 'undefined' && Notification.permission === 'granted') new Notification(title, { body: body }); } catch (e) { /* 通知不可用时忽略 */ } },
+  /* 用 HTTP 局域网地址打开时没有 crypto.randomUUID（只在安全来源里有）：用随机字节拼一个 v4 */
+  uuid: function () {
+    if (typeof crypto.randomUUID === 'function') return crypto.randomUUID();
+    const b = crypto.getRandomValues(new Uint8Array(16));
+    b[6] = (b[6] & 0x0f) | 0x40; b[8] = (b[8] & 0x3f) | 0x80;
+    const x = Array.from(b, function (n) { return n.toString(16).padStart(2, '0'); }).join('');
+    return x.slice(0, 8) + '-' + x.slice(8, 12) + '-' + x.slice(12, 16) + '-' + x.slice(16, 20) + '-' + x.slice(20);
+  },
   window: function () { /* 网页里没有窗口控制 */ }
 });

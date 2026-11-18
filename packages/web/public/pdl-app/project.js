@@ -1479,7 +1479,7 @@ function bindProject() {
   A.wsEvoNew = function () {
     const threadId = S.route === 'chat' ? S.thread : null;
     if (!threadId) return;
-    const operationId = crypto.randomUUID();
+    const operationId = PLATFORM.uuid();
     const form = {
       kind: 'wsEvoNew',
       on: function () {
@@ -1809,7 +1809,7 @@ function bindProject() {
         toast(tc('films.invalidFile'));
         return;
       }
-      return chatAction('filmImport', { document: document, operationId: crypto.randomUUID() });
+      return chatAction('filmImport', { document: document, operationId: PLATFORM.uuid() });
     });
   };
   let filmRegistrationDraft = null;
@@ -1824,7 +1824,7 @@ function bindProject() {
     }
   };
   A.filmRegister = function () {
-    filmRegistrationDraft = { mapping: null, error: '', attempt: crypto.randomUUID() };
+    filmRegistrationDraft = { mapping: null, error: '', attempt: PLATFORM.uuid() };
     dialog({ kind: 'filmRegister' });
   };
   VM.filmRegisterForm = function () {
@@ -2982,7 +2982,7 @@ function bindProject() {
         project: data.filmOwner.contentRef,
         revision: data.filmReviewRevision,
         id: d.id,
-        operationId: crypto.randomUUID(),
+        operationId: PLATFORM.uuid(),
       };
     dialog({
       kind: 'filmReopen',

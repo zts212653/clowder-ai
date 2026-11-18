@@ -9,6 +9,7 @@
      notify(标题, 正文)      系统通知
      richRender(kind, 源文本, inline)  正文里的公式（math）/ Mermaid 图（mermaid）画成 HTML，返回 Promise（没登记时拒绝：正文显示源文本）
      terminal(节点, 选项)    在节点里开一个终端（终端仿真由平台的终端库做），返回 Promise<终端>：write(数据) / reset() / set(选项) / fit() / onData(fn) / onResize(fn) / dispose()（没登记时拒绝）
+     uuid()                 一个 UUIDv4（网页：用 HTTP 局域网地址打开时也能生成）
      window(动作)           窗口（安装包：最小化、全屏……；网页：无）
  */
 'use strict';

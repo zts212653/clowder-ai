@@ -1163,7 +1163,7 @@ function bindPluginRequests() {
       raw = data.frame,
       v = typeof raw === 'string' ? { html: raw } : raw;
     if (!v) return { load: data.load };
-    nonces[node] = nonces[node] || crypto.randomUUID();
+    nonces[node] = nonces[node] || PLATFORM.uuid();
     return v.html != null
       ? {
           name: nonces[node],

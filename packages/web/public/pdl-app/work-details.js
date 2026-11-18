@@ -192,7 +192,7 @@ A.workCoverSave = async function (d) {
     state.operation = {
       action: 'set-cover',
       reference: state.reference,
-      operationId: crypto.randomUUID(),
+      operationId: PLATFORM.uuid(),
       expectedCoverRevision: state.cover.coverRevision,
       choice: choice,
     };

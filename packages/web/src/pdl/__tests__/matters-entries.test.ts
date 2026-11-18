@@ -52,7 +52,7 @@ function bindMatters(post = vi.fn(async (_path: string, _q: unknown, body: unkno
     CS: { m: { matterId: 'm1' } },
     URL,
     location: { origin: 'http://localhost', href: 'http://localhost/memory' },
-    crypto: { randomUUID: () => 'req-1' },
+    PLATFORM: { uuid: () => 'req-1' },
     render: vi.fn(),
     tc: (k: string) => k,
     val: (id: string) => fields[id] ?? '',

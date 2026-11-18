@@ -1058,7 +1058,7 @@ function bindMembers() {
       });
       const profile = preset
         ? pdlClone(preset)
-        : { id: 'client-' + crypto.randomUUID(), name: '', command: '', startupArgs: [] };
+        : { id: 'client-' + PLATFORM.uuid(), name: '', command: '', startupArgs: [] };
       let id = profile.id,
         n = 2;
       while (
@@ -1318,7 +1318,7 @@ function bindMembers() {
     const previous = S.nativeSetup;
     if (previous && previous.busy) return;
     const setup = (S.nativeSetup = {
-      journeyId: previous ? previous.journeyId : crypto.randomUUID(),
+      journeyId: previous ? previous.journeyId : PLATFORM.uuid(),
       partners: [],
       busy: true,
       submitError: '',
@@ -1479,7 +1479,7 @@ function bindMembers() {
       return v.id === data.version;
     });
     if (!file && !selected) throw new Error(tc('common.select'));
-    const body = { operationId: crypto.randomUUID(), reason: reason, expectedBindingRevision: c.bindingRevision };
+    const body = { operationId: PLATFORM.uuid(), reason: reason, expectedBindingRevision: c.bindingRevision };
     if (!file) {
       body.indexedVersionRef = selected.id;
       body.expectedAssetRevision = selected.assetRevision;

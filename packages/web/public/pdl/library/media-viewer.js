@@ -80,7 +80,7 @@ INPUTS.mediaMarkupText = function (e) { mediaMarkupState(mediaMarkupHost(e.targe
 A.mediaMarkupCancel = function (d, el) { const host = mediaMarkupHost(el), state = mediaMarkupState(host); state.anchor = null; state.mode = 'select'; mediaMarkupPaint(host); };
 function mediaMarkupNew(native, kind, shape) {
   const host = native.closest('.media-content'), scale = host.querySelector('svg').viewBox.baseVal.width / native.getBoundingClientRect().width;
-  const mark = Object.assign({ id: crypto.randomUUID(), kind: kind, color: getComputedStyle(host).getPropertyValue('--media-mark-ink').trim(), strokeWidth: Math.min(1024, Math.max(1, Math.round(2 * scale))) }, shape);
+  const mark = Object.assign({ id: PLATFORM.uuid(), kind: kind, color: getComputedStyle(host).getPropertyValue('--media-mark-ink').trim(), strokeWidth: Math.min(1024, Math.max(1, Math.round(2 * scale))) }, shape);
   if (kind === 'text') mark.fontSize = Math.min(2048, Math.max(1, Math.round(16 * scale)));
   if (native.tagName === 'VIDEO') { mark.time = native.currentTime; mark.until = mark.time + +host.dataset.frameStep; }
   return mark;

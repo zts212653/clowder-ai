@@ -137,7 +137,7 @@ A.matterRead = function (d) {
 };
 async function matterWrite(command) {
   const state = CS.m;
-  if (!state.matterPending) state.matterPending = Object.assign({ requestId: crypto.randomUUID() }, command);
+  if (!state.matterPending) state.matterPending = Object.assign({ requestId: PLATFORM.uuid() }, command);
   try {
     const receipt = await api.post('/api/memory/matters/write', {}, state.matterPending);
     state.matterPending = null;
