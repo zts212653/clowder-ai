@@ -30,6 +30,7 @@ export const AGENT_ACCESS_OPERATIONS = [
 export const OFFICIAL_AGENT_ACCESS_OPERATIONS = [
   ...AGENT_ACCESS_OPERATIONS,
   'parseNativeEvent',
+  'planCodexExec',
   'projectClaudeOutput',
   'selectAcpModel',
   'testDshConnection',
@@ -102,6 +103,36 @@ export const agentAccessOpenCodeLaunchRequestSchema = z.object({
   }),
 });
 export type AgentAccessOpenCodeLaunch = z.infer<typeof agentAccessOpenCodeLaunchRequestSchema>['launch'];
+
+/**
+ * Codex exec launches are assembled from Host-resolved groups: credentials, L0,
+ * MCP, images and the model catalog stay Host-owned, while the package owns the
+ * exec/resume envelope, flag order, user-override precedence and the stdin prompt
+ * marker. App-server launches are deliberately not part of this contract.
+ */
+export const agentAccessCodexExecLaunchRequestSchema = z.object({
+  operation: z.literal('plan_native_launch'),
+  client: z.literal('codex'),
+  launch: z.object({
+    sessionId: z.string().optional(),
+    readOnly: z.boolean(),
+    /**
+     * Opaque Host-held groups. The package only orders these tokens; it never
+     * receives their contents, so it cannot remove or re-key L0, MCP, sandbox
+     * or approval values.
+     */
+    groups: z.object({
+      readOnly: z.string().optional(),
+      beforeSandbox: z.string().optional(),
+      sandbox: z.string().optional(),
+      afterSandbox: z.string().optional(),
+      serviceTier: z.string().optional(),
+      user: z.string().optional(),
+      tail: z.string().optional(),
+    }),
+  }),
+});
+export type AgentAccessCodexExecLaunch = z.infer<typeof agentAccessCodexExecLaunchRequestSchema>['launch'];
 
 /** One envelope per native client; the Host routes by the discriminant. */
 export const agentAccessNativeLaunchRequestSchema = z.discriminatedUnion('client', [

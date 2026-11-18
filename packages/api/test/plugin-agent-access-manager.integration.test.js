@@ -423,6 +423,12 @@ test('Agent access discovery executes the same standalone entrypoint from a Mana
   }
 
   const selectModel = createAgentAccessAcpModelSelection(runtime.inventoryStore, runtime.supervisor);
+  const codexLaunch = await runtime.supervisor.invoke(installed.pluginInstanceId, 'planCodexExec', {
+    operation: 'plan_native_launch',
+    client: 'codex',
+    launch: { sessionId: 'codex-history', readOnly: true, groups: { sandbox: 'opaque-sandbox-group' } },
+  });
+  assert.deepEqual(codexLaunch.args, ['exec', 'resume', 'codex-history', '--json', 'opaque-sandbox-group', '--', '-']);
   const modelOffer = {
     configOptions: [
       { id: 'vendor-model', category: 'model', currentValue: 'other', options: [{ value: 'fixture/model' }] },

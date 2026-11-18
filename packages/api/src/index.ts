@@ -2359,6 +2359,7 @@ async function initializeApi(
                         appServerHostPool,
                         carrierMode: config.carrier === 'app_server' ? 'app_server' : 'exec_json',
                         nativeRealtimeCompanionEnabled,
+                        planLaunch: (input) => agentAccessCodexExecLaunch(input),
                       });
                       break;
                     }
@@ -6033,6 +6034,11 @@ async function initializeApi(
     pluginRuntime.supervisor,
   );
   const agentAccessOpenCodeFinalizer = createAgentAccessOpenCodeFinalizerPlanner(
+    pluginRuntime.inventoryStore,
+    pluginRuntime.supervisor,
+  );
+  const { createAgentAccessCodexExecLaunchPlanner } = await import('./domains/plugin/agent-access/codex.js');
+  const agentAccessCodexExecLaunch = createAgentAccessCodexExecLaunchPlanner(
     pluginRuntime.inventoryStore,
     pluginRuntime.supervisor,
   );

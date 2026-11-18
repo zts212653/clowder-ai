@@ -4,6 +4,7 @@ import {
   type AgentAccessDiscoveryHost,
   type AgentAccessRoleMutation,
   type AgentAccessRoleStore,
+  agentAccessCodexExecLaunchRequestSchema,
   agentAccessDetectRequestSchema,
   agentAccessLoginRequestSchema,
   agentAccessNativeEventRequestSchema,
@@ -26,6 +27,7 @@ import { checkDshConnectionInWorker } from './runtime/acp/dsh/connection-check.j
 import { createAcpProcessActions } from './runtime/acp/process-connection.js';
 import { resolveSessionModelConfigOption } from './runtime/acp/session-configuration.js';
 import { projectClaudeOutput } from './runtime/claude/project-claude-output.js';
+import { buildCodexExecLaunchArguments } from './runtime/codex-exec-launch-arguments.js';
 import { normalizeKimiEvent } from './runtime/kimi-event-parser.js';
 import { buildKimiLaunchArguments } from './runtime/kimi-launch-arguments.js';
 import { normalizeOpenCodeEvent } from './runtime/opencode-event-parser.js';
@@ -52,6 +54,10 @@ export default {
                   : buildOpenCodeLaunchArguments(request.launch);
               }
               return { clients: builtInAgentClients };
+            },
+            planCodexExec(input: unknown) {
+              const { launch } = agentAccessCodexExecLaunchRequestSchema.parse(input);
+              return buildCodexExecLaunchArguments(launch);
             },
             planFinalizer(input: unknown) {
               const { launch } = agentAccessOpenCodeFinalizerRequestSchema.parse(input);

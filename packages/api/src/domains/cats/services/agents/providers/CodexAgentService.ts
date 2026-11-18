@@ -1,3 +1,4 @@
+import type { AgentAccessCodexExecLaunch, AgentAccessNativeLaunchArguments } from '@clowder-ai/agent-contract';
 import type { RuntimeProviderProfile } from '../../../../../config/account-resolver.js';
 import { findCodexProjectMcpConflict } from '../../../../../config/capabilities/codex-project-mcp-compatibility.js';
 import { usesNativeToolConfiguration } from '../../../../../config/cat-account-binding.js';
@@ -450,6 +451,10 @@ export function resolveCodexApiKeyIsolationRoot(
   return join(env.XDG_CACHE_HOME || join(userHome, '.cache'), 'clowder-ai', 'codex-api-key-homes');
 }
 
+type CodexExecLaunchPlanner = (
+  input: AgentAccessCodexExecLaunch,
+) => Promise<AgentAccessNativeLaunchArguments & { assertCurrent?: () => Promise<void> }>;
+
 /**
  * Options for constructing CodexAgentService (dependency injection)
  * F32-b: catId and model are constructor parameters
@@ -483,6 +488,8 @@ interface CodexAgentServiceOptions {
   appServerStartupRecovery?: import('./codex-startup-recovery.js').CodexStartupRecoveryOptions;
   /** Server-owned Alpha admission for Codex Realtime conversation support. */
   nativeRealtimeCompanionEnabled?: boolean;
+  /** Active Agent Access package owns exec argv; omitted keeps the legacy builder. */
+  planLaunch?: CodexExecLaunchPlanner;
 }
 
 type CodexAuthMode = 'oauth' | 'api_key' | 'auto';
@@ -554,6 +561,69 @@ function withRecentDiagnostics(base: string, recentErrors: string[]): string {
 // FORBIDDEN_PATTERNS — that guard runs in `pnpm check` and MUST fail if anyone
 // re-introduces them in this provider file. Do not name the deleted symbols here;
 // point curious readers at the guard instead so the allowlist can stay tight.
+
+/**
+ * The package may order groups, but it may not drop, duplicate, reorder, split
+ * or invent one. The literal sequence is fixed as well, so a plan cannot add any
+ * real argument beyond exec/resume/--json and the stdin marker.
+ */
+export function assertCodexExecPlanShape(
+  args: readonly string[],
+  expectedGroups: readonly string[],
+  sessionId?: string,
+): void {
+  const fail = (): never => {
+    throw Object.assign(new Error('codex_exec_plan_policy_violation'), {
+      code: 'CODEX_EXEC_PLAN_POLICY_VIOLATION',
+    });
+  };
+  // One vector, not two filtered lists: a config group must not cross --json.
+  const expected = ['exec', ...(sessionId ? ['resume', sessionId] : []), '--json', ...expectedGroups, '--', '-'];
+  if (args.length !== expected.length || args.some((arg, i) => arg !== expected[i])) fail();
+}
+
+interface CodexExecPlanPolicy {
+  readOnly: boolean;
+  sessionId?: string;
+}
+
+/**
+ * The package plans argv, but the Host still owns the authority boundary. Check
+ * the shape and the read-only policy before any spawn so a compromised or merely
+ * buggy compatible worker cannot widen tools with an extra flag.
+ */
+export function assertCodexExecPlanSafe(input: CodexExecPlanPolicy, args: readonly string[]): void {
+  const fail = (): never => {
+    throw Object.assign(new Error('codex_exec_plan_policy_violation'), {
+      code: 'CODEX_EXEC_PLAN_POLICY_VIOLATION',
+    });
+  };
+  if (args[0] !== 'exec' || !args.includes('--json')) fail();
+  if (args.at(-2) !== '--' || args.at(-1) !== '-') fail();
+  if (input.sessionId) {
+    if (args[1] !== 'resume' || args[2] !== input.sessionId) fail();
+  } else if (args[1] === 'resume') {
+    fail();
+  }
+  if (!input.readOnly) return;
+
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i]!;
+    if (arg === '--add-dir') fail();
+    if (arg === '--sandbox' && args[i + 1] !== 'read-only') fail();
+    if (arg === '--no-sandbox' || arg === '--full-auto' || arg === '--yolo') fail();
+    if (arg.startsWith('--dangerously-')) fail();
+    if (arg !== '--config') continue;
+    const expression = args[i + 1] ?? '';
+    const equals = expression.indexOf('=');
+    if (equals <= 0) continue;
+    const key = expression.slice(0, equals);
+    const value = expression.slice(equals + 1);
+    if (key === 'sandbox_mode' && value !== '"read-only"') fail();
+    if (key === 'approval_policy' && value !== '"never"') fail();
+    if (key === 'mcp_servers' && value !== '{}') fail();
+  }
+}
 
 function toTomlString(value: string): string {
   const escaped = value.replace(/[\u0000-\u001f\u007f"\\]/g, (char) => {
@@ -1109,6 +1179,7 @@ export class CodexAgentService implements AgentService {
   private readonly cliCommand: string;
   private readonly nativeShellSafetyCheck: boolean;
   private readonly carrierMode: CodexCarrierMode;
+  private readonly planLaunch: CodexExecLaunchPlanner | undefined;
   private readonly approvalSurface: CodexApprovalSurface;
   private readonly appServerHostPool: CodexAppServerHostPool | undefined;
   private readonly appServerStartupRecovery:
@@ -1130,6 +1201,7 @@ export class CodexAgentService implements AgentService {
     this.cliCommand = options?.cliCommand ?? 'codex';
     this.nativeShellSafetyCheck = options?.nativeShellSafetyCheck ?? false;
     this.carrierMode = options?.carrierMode ?? 'exec_json';
+    this.planLaunch = options?.planLaunch;
     // Clowder AI currently has no synchronous approval request/response surface.
     // Keep this explicit so a future interactive bridge changes provenance rather
     // than relying on transport names or timing heuristics.
@@ -2075,56 +2147,99 @@ export class CodexAgentService implements AgentService {
       return out;
     };
 
-    const args: string[] = options?.sessionId
-      ? [
-          'exec',
-          'resume',
-          options.sessionId,
-          '--json',
-          ...readOnlyArgs,
-          ...dedup(modelArgs),
-          ...dedup(reasoningArgs),
-          ...dedup(contextWindowArgs),
-          ...dedup(modelCatalogArgs),
-          ...dedup(sandboxConfigArgs),
-          ...dedup(approvalArgs),
-          ...dedup(appsWriteApprovalArgs),
-          ...dedup(developerInstructionsArgs),
-          ...dedup(providerArgs),
-          ...serviceTierArgs,
-          ...userConfigArgs,
-          ...desktopIsolationArgs,
-          ...nativeEffectGuardArgs,
-          ...gitRepoArgs,
-          ...catCafeMcpArgs,
-          ...imageArgs,
-          ...(native?.args ?? []),
-          ...promptArgs,
-        ]
-      : [
-          'exec',
-          '--json',
-          ...readOnlyArgs,
-          ...dedup(modelArgs),
-          ...dedup(reasoningArgs),
-          ...dedup(contextWindowArgs),
-          ...dedup(modelCatalogArgs),
-          ...['--sandbox', sandboxMode],
-          ...(readOnly || native ? [] : ['--add-dir', '.git']),
-          ...dedup(approvalArgs),
-          ...dedup(appsWriteApprovalArgs),
-          ...dedup(developerInstructionsArgs),
-          ...dedup(providerArgs),
-          ...serviceTierArgs,
-          ...userConfigArgs,
-          ...desktopIsolationArgs,
-          ...nativeEffectGuardArgs,
-          ...gitRepoArgs,
-          ...catCafeMcpArgs,
-          ...imageArgs,
-          ...(native?.args ?? []),
-          ...promptArgs,
-        ];
+    const beforeSandboxArgs = [...modelArgs, ...reasoningArgs, ...contextWindowArgs, ...modelCatalogArgs];
+    const afterSandboxArgs = [...approvalArgs, ...appsWriteApprovalArgs, ...developerInstructionsArgs, ...providerArgs];
+    const tailArgs = [
+      ...desktopIsolationArgs,
+      ...nativeEffectGuardArgs,
+      ...gitRepoArgs,
+      ...catCafeMcpArgs,
+      ...imageArgs,
+      ...(native?.args ?? []),
+    ];
+    let plannedAssertCurrent: (() => Promise<void>) | undefined;
+    let args: string[];
+    if (carrierMode === 'exec_json' && this.planLaunch) {
+      // Protected groups stay inside the Host. The package sees only opaque
+      // tokens and must place each exactly once in the established order.
+      const groupRefs = new Map<string, string[]>();
+      const groupToken = (role: string, values: string[]): string | undefined => {
+        if (values.length === 0) return undefined;
+        const token = `__CAT_CAFE_CODEX_GROUP_${role}__`;
+        groupRefs.set(token, values);
+        return token;
+      };
+      const readOnlyGroup = groupToken('readOnly', readOnlyArgs);
+      const beforeSandboxGroup = groupToken('beforeSandbox', dedup(beforeSandboxArgs));
+      const sandboxGroup = groupToken(
+        'sandbox',
+        options?.sessionId
+          ? dedup(sandboxConfigArgs)
+          : ['--sandbox', sandboxMode, ...(readOnly || native ? [] : ['--add-dir', '.git'])],
+      );
+      const afterSandboxGroup = groupToken('afterSandbox', dedup(afterSandboxArgs));
+      const serviceTierGroup = groupToken('serviceTier', serviceTierArgs);
+      const userGroup = groupToken('user', userConfigArgs);
+      const tailGroup = groupToken('tail', tailArgs);
+      const groups: AgentAccessCodexExecLaunch['groups'] = {
+        ...(readOnlyGroup ? { readOnly: readOnlyGroup } : {}),
+        ...(beforeSandboxGroup ? { beforeSandbox: beforeSandboxGroup } : {}),
+        ...(sandboxGroup ? { sandbox: sandboxGroup } : {}),
+        ...(afterSandboxGroup ? { afterSandbox: afterSandboxGroup } : {}),
+        ...(serviceTierGroup ? { serviceTier: serviceTierGroup } : {}),
+        ...(userGroup ? { user: userGroup } : {}),
+        ...(tailGroup ? { tail: tailGroup } : {}),
+      };
+      const plan = await this.planLaunch({
+        ...(options?.sessionId ? { sessionId: options.sessionId } : {}),
+        readOnly,
+        groups,
+      });
+      const expectedGroups = [
+        groups.readOnly,
+        groups.beforeSandbox,
+        groups.sandbox,
+        groups.afterSandbox,
+        groups.serviceTier,
+        groups.user,
+        groups.tail,
+      ].filter((token): token is string => token !== undefined);
+      assertCodexExecPlanShape(plan.args, expectedGroups, options?.sessionId);
+      const expanded = plan.args.flatMap((arg) => groupRefs.get(arg) ?? [arg]);
+      assertCodexExecPlanSafe({ readOnly, sessionId: options?.sessionId }, expanded);
+      plannedAssertCurrent = plan.assertCurrent;
+      args = expanded;
+    } else {
+      const argsWithPrompt: string[] = options?.sessionId
+        ? [
+            'exec',
+            'resume',
+            options.sessionId,
+            '--json',
+            ...readOnlyArgs,
+            ...dedup(beforeSandboxArgs),
+            ...dedup(sandboxConfigArgs),
+            ...dedup(afterSandboxArgs),
+            ...serviceTierArgs,
+            ...userConfigArgs,
+            ...tailArgs,
+            ...promptArgs,
+          ]
+        : [
+            'exec',
+            '--json',
+            ...readOnlyArgs,
+            ...dedup(beforeSandboxArgs),
+            ...['--sandbox', sandboxMode],
+            ...(readOnly || native ? [] : ['--add-dir', '.git']),
+            ...dedup(afterSandboxArgs),
+            ...serviceTierArgs,
+            ...userConfigArgs,
+            ...tailArgs,
+            ...promptArgs,
+          ];
+      args = argsWithPrompt;
+    }
     const privateMcpRpc = carrierMode === 'app_server' && mcpCallbackEnv?.CAT_CAFE_MCP_TRANSPORT === 'shared';
     const appServerArgs =
       carrierMode === 'app_server'
@@ -2777,6 +2892,9 @@ export class CodexAgentService implements AgentService {
               const preparedRequest = prepareProviderRequest(execStdinInput, 'exec_json');
               await options?.beforeProviderLaunch?.(preparedRequest);
               if (native) await native.assertCurrent();
+              // Last admission check: a package replaced while the Host awaited
+              // beforeProviderLaunch must not start argv planned by the old one.
+              await plannedAssertCurrent?.();
               if (!('body' in preparedRequest.message)) throw new Error('codex_prepared_message_not_exact');
               const spawnOpts = { ...cliOpts, stdinInput: preparedRequest.message.body };
               const spawned = options?.spawnCliOverride

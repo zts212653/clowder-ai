@@ -51,6 +51,24 @@ describe('package entrypoint routing', () => {
     assert.deepEqual(result.args.slice(-2), ['--', 'hi']);
   });
 
+  test('plans Codex exec arguments through an explicit capability', () => {
+    const result = actions().planCodexExec({
+      operation: 'plan_native_launch',
+      client: 'codex',
+      launch: {
+        readOnly: false,
+        groups: {
+          sandbox: '__CAT_CAFE_CODEX_GROUP_sandbox__',
+          beforeSandbox: '__CAT_CAFE_CODEX_GROUP_beforeSandbox__',
+        },
+      },
+    }) as { args: string[] };
+
+    assert.deepEqual(result.args.slice(0, 2), ['exec', '--json']);
+    assert.deepEqual(result.args.slice(-2), ['--', '-']);
+    assert.ok(result.args.includes('__CAT_CAFE_CODEX_GROUP_sandbox__'));
+  });
+
   test('planFinalizer serves the OpenCode recovery run as its own operation', () => {
     const result = actions().planFinalizer({
       operation: 'plan_native_finalizer',
