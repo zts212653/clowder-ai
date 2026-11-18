@@ -231,7 +231,7 @@ function desktop() {
   };
 }
 function sources() {
-  const card = (id: string, query: string) => ({ blockId: id, view: { response: { query, results: [] } } });
+  const card = (id: string, query: string) => ({ blockId: id, view: { response: { query, results: [], meta: {} } } });
   const before = {
     ...ownerData().sources,
     records: { ...ownerData().sources.records, evidence: { a: card('a', 'before'), b: card('b', 'keep') } },

@@ -1,7 +1,7 @@
 import { createCatId, type ProviderSubexecutionSemanticEvent } from '@cat-cafe/shared';
 import { describe, expect, it } from 'vitest';
 import type { QueueEntry } from '@/stores/chat-types';
-import { chatModels, composerTrigger, memberRunners } from '../chat-models';
+import { chatModels, composerTrigger, evidenceMessageCards, memberRunners } from '../chat-models';
 import { fixtureData, fixtureUi } from './chat-fixture';
 
 describe('chat contract projections', () => {
@@ -600,6 +600,42 @@ it('retains routing warning identities and shares the canonical execution shape 
     thread: data.threadId,
     who: 'codex',
   });
+});
+
+it('shows a search answer as source rows: a picked quote, why it was picked among several, and only decided facts', () => {
+  const row = (id: string, extra: object) => ({
+    threadId: 't',
+    threadTitle: 'Thread',
+    messageId: id,
+    speaker: 'codex',
+    speakerLabel: 'Codex',
+    snippet: { text: 'snippet ' + id },
+    ...extra,
+  });
+  const response = {
+    query: 'q',
+    results: [
+      row('a', {
+        selection: { quote: 'quoted a', reason: 'states the rule' },
+        decisionSources: [
+          { status: 'decided', documentPath: 'F1.md', conclusion: 'yes' },
+          { status: 'not-adopted', documentPath: 'F2.md', conclusion: 'no' },
+        ],
+      }),
+      row('b', {}),
+    ],
+    meta: { answerSelection: { v: 1, catId: 'codex', requested: 2 } },
+  };
+  const cards = evidenceMessageCards(
+    { records: { evidence: { m: { blockId: 'b', view: { response } } } } } as never,
+    (id) => (id === 'codex' ? 'Codex' : id),
+  );
+  expect(cards.m.fields).toEqual([
+    { k: 'Thread', v: 'Codex: quoted a', act: 'msgJump', args: { t: 't', mid: 'a' } },
+    { k: 'Codex', v: 'states the rule' },
+    { k: 'F1.md', v: 'yes' },
+    { k: 'Thread', v: 'Codex: snippet b', act: 'msgJump', args: { t: 't', mid: 'b' } },
+  ]);
 });
 
 it('turns a finished reply elsewhere into one notice above the composer that opens that message', () => {

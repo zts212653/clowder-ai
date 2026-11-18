@@ -340,26 +340,37 @@ export interface ChatProjectionInput {
     items?: readonly import('@cat-cafe/shared').ResolvedMessageSelectionItem[];
   };
 }
-export function evidenceMessageCards(source: NonNullable<ChatProjectionInput['project']>['sources']) {
+/** A search answer: each source row opens its message; a member's pick shows the quoted passage and, among several, why it was picked. */
+export function evidenceMessageCards(
+  source: NonNullable<ChatProjectionInput['project']>['sources'],
+  name: (catId: string) => string,
+) {
   if (source?.error) return {};
   return Object.fromEntries(
-    Object.entries(source?.records.evidence ?? {}).map(([mid, { blockId, view }]) => [
-      mid,
-      {
-        blockId,
-        title: view.response.query,
-        foldStyle: 'middle',
-        fields: view.response.results.flatMap((row) => [
-          {
-            k: row.threadTitle,
-            v: `${row.speakerLabel ?? row.speaker}: ${row.snippet.text}`,
-            act: 'msgJump',
-            args: { t: row.threadId, mid: row.messageId },
-          },
-          ...(row.decisionSources ?? []).map((decision) => ({ k: decision.documentPath, v: decision.conclusion })),
-        ]),
-      },
-    ]),
+    Object.entries(source?.records.evidence ?? {}).map(([mid, { blockId, view }]) => {
+      const { results, meta } = view.response,
+        picker = meta.answerSelection && results.length > 1 ? name(meta.answerSelection.catId) : '';
+      return [
+        mid,
+        {
+          blockId,
+          title: view.response.query,
+          foldStyle: 'middle',
+          fields: results.flatMap((row) => [
+            {
+              k: row.threadTitle,
+              v: `${row.speakerLabel ?? row.speaker}: ${row.selection?.quote ?? row.snippet.text}`,
+              act: 'msgJump',
+              args: { t: row.threadId, mid: row.messageId },
+            },
+            ...(picker && row.selection ? [{ k: picker, v: row.selection.reason }] : []),
+            ...(row.decisionSources ?? [])
+              .filter((decision) => decision.status === 'decided')
+              .map((decision) => ({ k: decision.documentPath, v: decision.conclusion })),
+          ]),
+        },
+      ];
+    }),
   );
 }
 function messageRecallCounts(data: ChatData, source: NonNullable<ChatProjectionInput['project']>['workbench']) {
@@ -477,7 +488,10 @@ export function chatModels(data: ChatData, ui: ChatUiState, input?: ChatProjecti
   };
   const related = {
     get evidenceCards() {
-      return evidenceMessageCards(project?.sources);
+      return evidenceMessageCards(project?.sources, (id) => {
+        const cat = data.cats.find((c) => c.id === id);
+        return cat?.nickname || cat?.displayName || id;
+      });
     },
     get messageWorks() {
       return project?.sources?.records.works;

@@ -169,7 +169,7 @@ export function createOwnerConsole(options: ProjectionOptions = {}) {
       : {
           messageWorks: raw.records.works,
           generations: raw.records.generations,
-          evidenceCards: evidenceMessageCards(raw),
+          evidenceCards: evidenceMessageCards(raw, (id) => id),
         };
   const push = (owners: Record<string, unknown>) => {
     context.__incoming = owners;
