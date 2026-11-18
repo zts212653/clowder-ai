@@ -10,6 +10,10 @@ const api = process.env.CAT_CAFE_TEST_API_BUILD_ROOT ?? resolve(import.meta.dirn
 export async function copyBundledBuildDependencies(root, fromSource = false) {
   const mode = fromSource ? 'src' : 'dist';
   const extension = fromSource ? 'ts' : 'js';
+  const agentAccessArchive = '../agent-access-plugin/dist/plugin/package.tgz';
+  const archiveTarget = join(root, agentAccessArchive);
+  await mkdir(dirname(archiveTarget), { recursive: true });
+  await cp(resolve(api, agentAccessArchive), archiveTarget);
   await mkdir(join(root, mode, 'domains/plugin'), { recursive: true });
   for (const name of ['bundled-plugin-definitions', 'package-capability-admission']) {
     await cp(
