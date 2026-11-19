@@ -416,8 +416,10 @@ export async function* spawnCli(
   const hostScope = !deps?.spawnFn && IS_WINDOWS ? windowsProviderHostScopeFor(options.invocationId) : undefined;
   const windowsHost = hostScope ? await hostScope.take() : undefined;
   try {
-    if (options.assertLaunchCurrent) await options.assertLaunchCurrent();
-    options.signal?.throwIfAborted();
+    if (options.assertLaunchCurrent) {
+      await options.assertLaunchCurrent();
+      options.signal?.throwIfAborted();
+    }
   } catch (error) {
     if (windowsHost) await windowsHost.close();
     throw error;
