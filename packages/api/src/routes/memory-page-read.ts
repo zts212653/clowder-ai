@@ -12,7 +12,7 @@ import { defaultMemoryLibraryTarget } from './memory-library-default.js';
 import { memoryLibraryFeed, visibleMemoryCollections } from './memory-library-read.js';
 import { type RecallPageSourceReaders, readMemoryRecallPage } from './memory-recall-page.js';
 import { recallPageCursors, recallPageQuery } from './memory-recall-query.js';
-import { readMemoryRecallStats } from './memory-recall-stats.js';
+import { type RecallStatsReader, readMemoryRecallStats } from './memory-recall-stats.js';
 import { registerMemorySearchRoutes } from './memory-search.js';
 import type { MemorySearchSources } from './memory-search-types.js';
 
@@ -26,6 +26,7 @@ export interface MemoryPageReadOptions {
   docsRoot?: string;
   brakeSources?: BrakeSourceReaders;
   recallSources?: RecallPageSourceReaders;
+  readRecallStats?: RecallStatsReader;
   searchSources?: MemorySearchSources;
 }
 
@@ -74,6 +75,7 @@ export const memoryPageReadRoutes: FastifyPluginAsync<MemoryPageReadOptions> = a
         opts.ownerUserId,
         opts.recallSources.threadStore,
         Number(parsed.data.days),
+        opts.readRecallStats,
       );
     } catch {
       return reply.code(503).send({ error: 'Recall reader unavailable' });

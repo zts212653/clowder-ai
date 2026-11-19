@@ -10,6 +10,7 @@ import {
 } from '@clowder-ai/plugin-memory-contract/maintenance';
 import { type MatterDispatchInput, matterOutputSchemas } from '@clowder-ai/plugin-memory-contract/matter';
 import { type ProfileDispatchInput, profileOutputSchemas } from '@clowder-ai/plugin-memory-contract/profile';
+import { type MemoryRecallStatsRequest, memoryRecallStatsResult } from '@clowder-ai/plugin-memory-contract/recall';
 import { type TasteBrowseDispatchInput, tasteBrowseOutputSchemas } from '@clowder-ai/plugin-memory-contract/taste';
 import type { z } from 'zod';
 import {
@@ -52,6 +53,7 @@ type MemoryDispatch =
   | MemoryProjectIndexRequest
   | MatterDispatchInput
   | ProfileDispatchInput
+  | MemoryRecallStatsRequest
   | TasteBrowseDispatchInput;
 
 export async function callMemoryOwner<T>(
@@ -146,6 +148,10 @@ export class MemoryPluginHost {
 
   readIndexStatus(generationId: MemoryIndexStatusRequest['input']['generationId'], userId: string) {
     return callMemoryOwner(this, { operation: 'index.status', input: { generationId } }, memoryIndexStatusResult, userId);
+  }
+
+  readRecallStats(input: MemoryRecallStatsRequest['input'], userId: string) {
+    return callMemoryOwner(this, { operation: 'recall.stats', input }, memoryRecallStatsResult, userId);
   }
 
   attempt(

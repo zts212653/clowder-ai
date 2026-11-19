@@ -7776,6 +7776,7 @@ async function initializeApi(
       },
       evidenceDb: memoryServices.store.getDb(),
       markerQueue: memoryServices.markerQueue,
+      readRecallStats: (input) => memoryProvider.readRecallStats(input, privateUserId),
       repoRoot,
       docsRoot,
     });

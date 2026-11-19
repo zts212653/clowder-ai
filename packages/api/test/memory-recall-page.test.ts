@@ -1,6 +1,30 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import type { RecallStatsReader } from '../src/routes/memory-recall-stats.js';
 import { recallFixture } from './memory-recall-fixture.js';
+
+test('recall stats passes only revalidated owner thread IDs to the plugin', async () => {
+  const queries: Parameters<RecallStatsReader>[0][] = [];
+  const stats = [{ source: 'pull', surface: 'search', presented: 4, inspected: 2, used: 1 }];
+  const f = await recallFixture(undefined, async (input) => {
+    queries.push(input);
+    return stats;
+  });
+  try {
+    f.indexed.push('other', 'deleted', 'missing', 'system', 'own');
+    const url = '/api/memory/recall/stats?days=14';
+    assert.equal((await f.app.inject({ url, headers: { 'x-test-session': 'other-owner' } })).statusCode, 403);
+    assert.deepEqual(queries, []);
+    const res = await f.app.inject({ url, headers: { 'x-test-session': 'owner' } });
+    assert.equal(res.statusCode, 200, res.body);
+    const { from, to, rows } = res.json();
+    assert.deepEqual(rows, stats);
+    assert.equal(to - from, 14 * 86400000);
+    assert.deepEqual(queries, [{ from, to, threadIds: ['own', 'system'] }]);
+  } finally {
+    await f.close();
+  }
+});
 
 test('selected window, source and cat use real ledger rows with both time bounds', async () => {
   const f = await recallFixture();
