@@ -700,6 +700,20 @@ it('replays an unknown person maintenance result after remount with the same sto
   }
 });
 
+it('turns a memory_unavailable read into the retryable page error and recovers on cafeMemRetry', async () => {
+  const original = vi.mocked(apiFetch).getMockImplementation()!;
+  vi.mocked(apiFetch).mockImplementation(async () => response({ error: 'memory_unavailable' }, 503));
+  const hook = renderHook(() => useMemoryBindings(() => true));
+  await waitFor(() =>
+    expect(projectOwner('memory', hook.result.current, {}, undefined, undefined).cafeMemory.all.load).toBe('error'),
+  );
+  vi.mocked(apiFetch).mockImplementation(original);
+  await act(() => hook.result.current.action('cafeMemRetry', {}));
+  await waitFor(() =>
+    expect(projectOwner('memory', hook.result.current, {}, undefined, undefined).cafeMemory.all.load).toBe(''),
+  );
+});
+
 it('keeps the person locator in the maintenance journal and sends only the redaction command to its owner', async () => {
   observeApiSessionOwner('maintenance-owner');
   const revision = 'sha256:' + 'b'.repeat(64),

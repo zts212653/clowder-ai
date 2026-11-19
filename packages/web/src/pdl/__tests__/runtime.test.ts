@@ -4312,6 +4312,31 @@ describe('unmodified runtime and project chat bindings', () => {
       dom.window.close();
     }
   });
+  it('draws the existing memory page unavailable state and retries through cafeMemRetry', async () => {
+    const project = {
+      memoryState: { view: 'all', cat: 'profile', q: '', limits: { profile: 20 } },
+      cafeMemory: {
+        view: 'all',
+        all: { cat: 'profile', load: 'error', cats: [], items: [], more: false, allLoaded: true },
+        detail: null,
+      },
+    };
+    const { dom, w, action, errors } = await boot(undefined, undefined, undefined, project);
+    try {
+      w.eval("go('memory')");
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      const page = w.document.querySelector('[data-view="cafe.memory"]');
+      expect(page?.textContent).toContain(w.eval("tc('memory.eventsError')"));
+      const retry = page?.querySelector('[data-act="cafeMemRetry"]');
+      expect(retry).not.toBeNull();
+      retry?.click();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(action).toHaveBeenCalledWith('cafeMemRetry', expect.objectContaining({ v: 'eventsErr' }), undefined);
+      expect(errors).not.toHaveBeenCalled();
+    } finally {
+      dom.window.close();
+    }
+  });
   it('renders only the declared restore action and waits for its owner before removing a trash row', async () => {
     const project = {
       cafeTrash: {
