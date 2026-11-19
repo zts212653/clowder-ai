@@ -191,6 +191,7 @@ export type PluginManagerCapabilityKind =
   | 'service'
   | 'ui'
   | 'content-editor-provider'
+  | 'content-preview-provider'
   | 'media-source'
   | 'cloud-conversation-host'
   | 'external-request'

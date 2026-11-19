@@ -449,10 +449,13 @@ describe('F202 terminal Plugin Manager Design Gate', () => {
     expect(plugin.contributions).toHaveLength(39);
   });
 
-  it('labels content editor provider contributions from the manifest without Host-specific copy', async () => {
+  it('labels content editor and preview providers from the manifest without Host-specific copy', async () => {
     const editor = {
       ...PLUGIN_MANAGER_DESIGN_FIXTURES[0],
-      contributions: [{ id: 'docx-editor', kind: 'content-editor-provider' as const, name: 'docx-editor' }],
+      contributions: [
+        { id: 'docx-editor', kind: 'content-editor-provider' as const, name: 'docx-editor' },
+        { id: 'office-preview', kind: 'content-preview-provider' as const, name: 'office-preview' },
+      ],
     };
 
     await act(async () => root.render(<PluginManagerContent fixtures={[editor]} />));
@@ -462,6 +465,10 @@ describe('F202 terminal Plugin Manager Design Gate', () => {
       'Content Editor',
     );
     expect(detail?.textContent).toContain('docx-editor');
+    expect(detail?.querySelector('[data-contribution-kind="content-preview-provider"]')?.textContent).toContain(
+      'File Preview',
+    );
+    expect(detail?.textContent).toContain('office-preview');
   });
 
   it('does not relabel permission grants as exposed tools before package admission', async () => {
