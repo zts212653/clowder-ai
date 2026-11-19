@@ -49,6 +49,7 @@ interface DshSetupRouteOptions {
   resolveDesktopLaunch?: (id: string) => DshDesktopSource | Promise<DshDesktopSource>;
   audit?: (target: string, owner: string) => Promise<unknown>;
   runConnection?: RunDshConnection;
+  isAvailable?: () => Promise<boolean>;
   readDetection?: ReturnType<typeof registerAgentAccessRoutes>['readDetection'];
 }
 export function registerDshSetupRoutes(app: FastifyInstance, options: DshSetupRouteOptions = {}) {
@@ -99,6 +100,7 @@ export function registerDshSetupRoutes(app: FastifyInstance, options: DshSetupRo
       if (busy) return reply.code(409).send({ error: 'dsh_setup_busy' });
       busy = true;
       try {
+        if (options.isAvailable && !(await options.isAvailable())) throw Error('dsh_setup_unavailable');
         for (const [id, receipt] of receipts) if (Date.now() - receipt.at > 10 * 60_000) receipts.delete(id);
         return await handler(parsed.data, { request, reply, operator: owner.userId });
       } catch (error) {

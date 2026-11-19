@@ -116,7 +116,7 @@ async function resolveDshConnectionTarget(
       let timedOut = false;
       const deadline = setTimeout(() => {
         timedOut = true;
-        void client?.close();
+        void client?.close().catch(() => {});
       }, 60_000);
       try {
         const args = await prepareDshSecretPatch(
@@ -167,7 +167,7 @@ async function resolveDshConnectionTarget(
         return { outcome: 'failed', reasonCode: dshConnectionFailureReason(error) };
       } finally {
         clearTimeout(deadline);
-        await client?.close();
+        await client?.close().catch(() => {});
         isolated.close();
       }
     },

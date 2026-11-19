@@ -975,6 +975,9 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opt
   registerDshSetupRoutes(app, {
     runConnection: opts.runDshConnection,
     readDetection: opts.agentAccessDetection,
+    ...(opts.resolveDshMemberConnectionClient
+      ? { isAvailable: async () => Boolean(await opts.resolveDshMemberConnectionClient?.()) }
+      : {}),
   });
   registerDshMemberConnectionChecks(app, {
     redis: opts.connectionCheckRedis,

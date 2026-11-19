@@ -128,9 +128,14 @@ import { registerDshSetupRoutes } from '../src/routes/dsh-setup-route.js';
       Object.entries(files).forEach(([path, text]) => writeFileSync(path, text, { mode: 0o600 }));
       const app = Fastify();
       app.decorateRequest('sessionUserId', 'fixture-owner');
+      let available = true;
+      const auditEvents: string[] = [];
       registerDshSetupRoutes(app, {
         resolveDesktopLaunch: () => ({ command, cwd, nativeHome: home, nativeCwd: desktop }),
-        audit: async () => {},
+        isAvailable: async () => available,
+        audit: async (target) => {
+          auditEvents.push(target);
+        },
       });
       t.after(() => app.close());
       const inspection = await app.inject({
@@ -179,6 +184,20 @@ import { registerDshSetupRoutes } from '../src/routes/dsh-setup-route.js';
       assert.ok(prepared.env.DSH_HOME);
       assert.notEqual(prepared.env.DSH_HOME, home);
       assert.equal(JSON.stringify(prepared).includes('fixture-custom-key'), false, 'no secret enters the member draft');
+      if (authentication === 'stored') {
+        available = false;
+        const disabled = await app.inject({
+          method: 'POST',
+          url: '/api/cats/dsh-setup/test',
+          payload: { id: prepared.id },
+        });
+        assert.equal(disabled.statusCode, 422);
+        assert.deepEqual(disabled.json(), { error: 'dsh_setup_unavailable' });
+        assert.deepEqual(auditEvents, ['dsh-acp-preparation'], 'the receipt is rejected before Desktop inspection');
+        assert.equal(customRequests.length, 0);
+        assert.equal(officialRequests, 0);
+        available = true;
+      }
       const verified = await app.inject({
         method: 'POST',
         url: '/api/cats/dsh-setup/test',
