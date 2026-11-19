@@ -1,4 +1,4 @@
-import { contentFileMime } from '@cat-cafe/shared';
+import { contentFileMime, fileContentKind } from '@cat-cafe/shared';
 /**
  * Memory-bounded workspace file reading (F063 OOM fix).
  *
@@ -11,7 +11,7 @@ import { contentFileMime } from '@cat-cafe/shared';
  *
  * Both the route and the watcher now go through these helpers, which:
  *  - never read more than `maxBytes` into memory, regardless of real file size;
- *  - classify binary files IDENTICALLY — first by extension/MIME (known media),
+ *  - classify binary files IDENTICALLY — first by extension/MIME (known media and Office formats),
  *    then by content (NUL byte) — so the route and the watcher never disagree;
  *  - return an empty sha256 for binary/oversized files so the route and watcher
  *    agree (otherwise small media files would spuriously report "externally
@@ -29,17 +29,10 @@ export function guessMime(filepath: string): string {
   return contentFileMime(filepath);
 }
 
-function isMediaMime(mime: string): boolean {
-  return mime.startsWith('image/') || mime.startsWith('audio/') || mime.startsWith('video/');
-}
-
-/**
- * True when the file's extension maps to a media (image/audio/video) MIME type.
- * This is the SHARED known-binary predicate — both the route and the watcher
- * must use it so they classify the same file the same way.
- */
+/** Both the preview reader and the file watcher classify known binary files here. */
 export function isKnownBinaryPath(absPath: string): boolean {
-  return isMediaMime(guessMime(absPath));
+  const kind = fileContentKind(absPath);
+  return kind === 'image' || kind === 'audio' || kind === 'video' || kind === 'office';
 }
 
 export interface WorkspaceFilePreview {
@@ -55,7 +48,7 @@ export interface WorkspaceFilePreview {
   size: number;
   /** True when `size` exceeds `maxBytes` (content is a bounded prefix). */
   truncated: boolean;
-  /** True when the file is detected as binary (known media MIME or NUL bytes). */
+  /** True when the file is detected as binary (known media, Office formats, or NUL bytes). */
   binary: boolean;
   /** Guessed MIME type from the file extension ('text/plain' when unknown). */
   mime: string;
@@ -111,7 +104,7 @@ export async function readWorkspaceFilePreview(
   const { size } = await stat(absPath);
   const mime = guessMime(absPath);
 
-  if (isMediaMime(mime)) {
+  if (isKnownBinaryPath(absPath)) {
     return { content: '', sha256: '', size, truncated: false, binary: true, mime };
   }
 
@@ -136,12 +129,12 @@ export async function readWorkspaceFilePreview(
 /**
  * Change-detection signature for the file-watcher. Returns:
  *  - the full-content sha256 for small text files,
- *  - `''` for known-media, binary, or oversized files (not tracked — they
+ *  - `''` for known binary, binary-sniffed, or oversized files (not tracked — they
  *    aren't editable),
  *  - `null` on read error (caller treats as "no signature").
  *
- * Uses the SAME binary predicate as {@link readWorkspaceFilePreview} (known-media
- * extension first, then NUL-byte sniff), so the route and the watcher always
+ * Uses the SAME binary predicate as {@link readWorkspaceFilePreview} (known format
+ * first, then NUL-byte sniff), so the route and the watcher always
  * agree on a file's hash and small media files don't fire spurious change events.
  * Bounded the same way too, so the watcher can never OOM on a watched large file
  * even though it polls every second.

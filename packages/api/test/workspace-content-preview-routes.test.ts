@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 import Fastify from 'fastify';
+import { computeWorkspaceFileSha256, readWorkspaceFilePreview } from '../src/domains/workspace/workspace-file-read.js';
 import { readWorkspacePreviewSnapshot } from '../src/domains/workspace/workspace-preview-snapshot.js';
 import { registerWorktrees } from '../src/domains/workspace/workspace-security.js';
 import { registerWorkspaceContentPreviewRoutes } from '../src/routes/workspace-content-preview-routes.js';
@@ -57,8 +58,10 @@ test('file snapshot reads a registered source and rejects paths outside that roo
   const worktreeId = 'preview-fixture-' + randomUUID();
   registerWorktrees([{ id: worktreeId, root, head: 'fixture', branch: 'fixture' }]);
   const file = join(root, 'sample.pdf');
-  const bytes = Buffer.from([37, 80, 68, 70, 10, 0, 255]);
+  const bytes = Buffer.from('%PDF-1.4\n1 0 obj\n<< /Type /Catalog >>\nendobj\n%%EOF\n');
   await writeFile(file, bytes);
+  assert.equal((await readWorkspaceFilePreview(file)).binary, true);
+  assert.equal(await computeWorkspaceFileSha256(file), '');
   assert.deepEqual(await readWorkspacePreviewSnapshot(worktreeId, 'sample.pdf'), bytes);
   await assert.rejects(readWorkspacePreviewSnapshot(worktreeId, '../sample.pdf'), { code: 'TRAVERSAL' });
 
