@@ -3,6 +3,9 @@ import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
 import { describe, mock, test } from 'node:test';
 import { OpenCodeAgentService } from '../dist/domains/cats/services/agents/providers/OpenCodeAgentService.js';
+import { ensureFakeCliOnPath } from './helpers/fake-cli-path.js';
+
+ensureFakeCliOnPath('opencode');
 
 /**
  * The Host owns the `run --help` probe, so it is the only layer that can tell the
@@ -53,8 +56,8 @@ async function collect(iterable) {
 function runWithProbe(probeResult) {
   const proc = createMockProcess();
   const spawnFn = mock.fn(() => proc);
-  const planLaunch = mock.fn(async () => ({
-    args: ['run', '--', 'p'],
+  const planLaunch = mock.fn(async ({ transportArgs = [] }) => ({
+    args: ['run', ...transportArgs, '--format', 'json', '--', 'p'],
     managedArgvFlags: [],
     assertCurrent: async () => {},
   }));

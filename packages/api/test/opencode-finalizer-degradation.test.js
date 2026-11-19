@@ -8,6 +8,9 @@ import {
   buildOpenCodeNoToolFinalizerArguments,
 } from '@clowder-ai/agent-access/runtime/opencode-launch-arguments';
 import { OpenCodeAgentService } from '../dist/domains/cats/services/agents/providers/OpenCodeAgentService.js';
+import { ensureFakeCliOnPath } from './helpers/fake-cli-path.js';
+
+ensureFakeCliOnPath('opencode');
 
 /**
  * When the package cannot plan the recovery run, the turn must still end the way it
@@ -118,6 +121,7 @@ describe('finalizer planning refusal degrades gracefully', () => {
       catId: 'opencode',
       spawnFn,
       model: 'm',
+      autoApproveProbeFn: async () => ({ standalone: false, pure: false }),
       planLaunch,
       planFinalizer,
     });
@@ -179,6 +183,7 @@ describe('the recovery run is rechecked against package generation', () => {
       catId: 'opencode',
       spawnFn,
       model: 'm',
+      autoApproveProbeFn: async () => ({ standalone: false, pure: false }),
       planLaunch,
       planFinalizer,
     });
