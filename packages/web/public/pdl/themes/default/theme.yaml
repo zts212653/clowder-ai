@@ -7564,7 +7564,7 @@ pdl:
           open: "@open"
     CHAT_RICH:
       type: box
-      key: rich
+      key: "@key"
       when: "@rich"
       blocks:
         - type: view

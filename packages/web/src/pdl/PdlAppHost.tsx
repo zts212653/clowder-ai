@@ -200,7 +200,7 @@ function subscribeLocation(changed: () => void) {
 const browserLocation = () => window.location.pathname + window.location.search + window.location.hash;
 // The server render has no address after #; the console starts once the browser's full address (an export page) is known.
 const subscribeNever = () => () => {};
-type PendingThreadJump = { threadId: string; mid: string; catId?: string };
+type PendingThreadJump = { threadId: string; mid: string; catId?: string; block?: string };
 
 /** The upload address of an image the input got back from a saved draft: the draft keeps it by that address. */
 const draftImageUrl = new WeakMap<File, string>();
@@ -284,14 +284,16 @@ export function PdlAppHost() {
   const exportAddress = readThreadExportAddress(new URL(browserPath, 'https://pdl.invalid'));
   const threadId = exportAddress?.threadId ?? getThreadIdFromPathname(browserPath);
   const pendingJump = useRef<PendingThreadJump | null>(null);
-  // An address that names a message (/thread/:id?message=… — links in messages, matter sources) opens that thread at
-  // that message, through the same jump as an in-app link. Each address is taken once.
+  // An address that names a message (/thread/:id?message=…&block=… — links in messages, matter sources) opens that
+  // thread at that message, and at that card part when it names one, through the same jump as an in-app link. Each
+  // address is taken once.
   const addressJump = useRef('');
   const addressQuery = new URL(browserPath, 'https://pdl.invalid').searchParams;
   const addressMid = addressQuery.get('message') ?? addressQuery.get('messageId');
+  const addressBlock = addressQuery.get('block');
   if (addressMid && addressJump.current !== browserPath) {
     addressJump.current = browserPath;
-    pendingJump.current = { threadId, mid: addressMid };
+    pendingJump.current = { threadId, mid: addressMid, ...(addressBlock ? { block: addressBlock } : {}) };
   }
   // Where the reader is: once the conversation stops scrolling, the address names the message at the top of the view
   // (?message=…), or nothing at the latest. A refresh reopens there through the same address jump; writing the
@@ -311,6 +313,7 @@ export function PdlAppHost() {
             ].find((m) => m.getBoundingClientRect().bottom > top);
       const mid = message?.dataset.mid ?? message?.dataset.messageId;
       url.searchParams.delete('messageId');
+      url.searchParams.delete('block');
       if (mid) url.searchParams.set('message', mid);
       else url.searchParams.delete('message');
       const next = url.pathname + url.search + url.hash;
@@ -974,6 +977,7 @@ function ChatBinding({
     if (own.messages.some((m) => m.id === target.mid)) {
       pendingJump.current = null;
       ui.current.pendingMid = target.mid;
+      ui.current.pendingBlock = target.block;
       if (engineMounted) window.clowderChat.update();
     } else if (own.hasMore) {
       void loadEarlier();
@@ -1915,7 +1919,7 @@ function ChatBinding({
       }
       case 'jump': {
         if (args.thread && args.thread !== threadId) {
-          pendingJump.current = { threadId: args.thread, mid: args.mid };
+          pendingJump.current = { threadId: args.thread, mid: args.mid, ...(args.block ? { block: args.block } : {}) };
           pushThreadRouteWithHistory(args.thread, window);
           return;
         }
@@ -1926,6 +1930,7 @@ function ChatBinding({
           if ((await loadEarlier()) !== true) break;
         }
         ui.current.pendingMid = args.mid;
+        ui.current.pendingBlock = args.block;
         return;
       }
       case 'themePackExport':

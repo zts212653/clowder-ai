@@ -5234,12 +5234,17 @@ pdl:
                 role: embed
       - $frag: v2.bind.v2Typed.2
     v2.bind.v2Typed.2:
-      type: typed
-      slot: chat.rich
-      of: "@rich.type"
-      data: "@rich"
-      blocks:
-        $frag: v2.bind.fields.3
+      type: component
+      use: v2Box
+      props:
+        key: "@key"
+        blocks:
+          - type: typed
+            slot: chat.rich
+            of: "@rich.type"
+            data: "@rich"
+            blocks:
+              $frag: v2.bind.fields.3
       when: "@rich"
     v2.bind.fields.3:
       - $frag: v2.bind.v2Box.4
@@ -5247,7 +5252,6 @@ pdl:
       type: component
       use: v2Box
       props:
-        key: rich
         blocks:
           $frag: v2.bind.fields.5
       when: "@rich"
@@ -16710,19 +16714,24 @@ pdl:
                   props:
                     from: "@embeds"
                     blocks:
-                      - type: typed
-                        slot: chat.rich
-                        of: "@rich.type"
-                        data: "@rich"
-                        blocks:
-                          - type: component
-                            use: v2Rich
-                            props:
+                      - type: component
+                        use: v2Box
+                        props:
+                          key: "@key"
+                          blocks:
+                            - type: typed
+                              slot: chat.rich
+                              of: "@rich.type"
                               data: "@rich"
-                              open:
-                                act: workOpen
-                                args:
-                                  i: "@work"
+                              blocks:
+                                - type: component
+                                  use: v2Rich
+                                  props:
+                                    data: "@rich"
+                                    open:
+                                      act: workOpen
+                                      args:
+                                        i: "@work"
                         when: "@rich"
                       - type: component
                         use: v2StatusText

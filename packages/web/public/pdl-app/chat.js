@@ -1526,11 +1526,16 @@ window.clowderChat = {
     });
     onRender(function () {
       if (CS.pendingMid) {
-        const mid = CS.pendingMid;
+        const mid = CS.pendingMid,
+          block = CS.pendingBlock;
         delete CS.pendingMid;
+        delete CS.pendingBlock;
         // Start after the draw restores the previous reading anchor.
         queueMicrotask(function () {
-          scrollToMessage(mid);
+          // A jump that names a card lands on that card part of the message.
+          scrollToMessage(mid, function (ok) {
+            if (ok && block) locateNode('key', mid + ':' + block);
+          });
         });
       }
     });
