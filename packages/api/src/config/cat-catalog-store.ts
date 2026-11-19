@@ -61,7 +61,12 @@ export function readRoleCatalogSnapshot(projectRoot: string, templatePath: strin
   // Read access may publish compatibility additions once their inherited MCP blocks are in effect.
   if (
     purpose === 'read' &&
-    inheritFullyBlockedMcpCapabilitiesForNewCatsSync(projectRoot, proposed.backfilledCatIds, proposed.existingCatIds, 'preview')
+    inheritFullyBlockedMcpCapabilitiesForNewCatsSync(
+      projectRoot,
+      proposed.backfilledCatIds,
+      proposed.existingCatIds,
+      'preview',
+    )
   ) {
     return { stored, ...projectRoleCatalog(source, template, false) };
   }
