@@ -798,8 +798,10 @@ async function initializeApi(
   // F152: Readiness check — verifies dependencies are reachable.
   const { MemoryPluginHost } = await import('./domains/plugin/host-surface/memory-plugin-host.js');
   const { createEventMemoryProvider } = await import('./domains/plugin/host-surface/event-memory-provider.js');
+  const { createProfileMemoryProvider } = await import('./domains/plugin/host-surface/profile-memory-provider.js');
   const memoryProvider = new MemoryPluginHost(app.log);
   const eventMemoryStore = createEventMemoryProvider(memoryProvider);
+  const profileMemory = createProfileMemoryProvider(memoryProvider);
   // The scheduler readiness probe is set before the server listens.
   let checkSchedulerDb: (() => boolean) | undefined;
   async function checkReadiness(): Promise<{
@@ -1614,7 +1616,7 @@ async function initializeApi(
   });
   const profileMemorySourceReaders = { threadStore, messageStore };
   const profileMemoryLifecycleService = new ProfileMemoryLifecycleService({
-    store: profileMemoryLifecycleStore,
+    store: { ...profileMemory, lockKey: (owner, memoryId) => profileMemoryLifecycleStore.lockKey(owner, memoryId) },
     coordinator: ownerMemoryActionCoordinator,
     targetLock: profileUpdateLock,
     invalidateDerived: async ({ ownerUserId }) => {
@@ -3824,9 +3826,8 @@ async function initializeApi(
     sourceReaders: entityMemorySourceReaders,
   });
   await app.register(profileMemoryOwnerRoutes, {
-    evidenceDb: memoryServices.store.getDb(),
     ownerUserId: privateUserId,
-    store: profileMemoryLifecycleStore,
+    store: profileMemory,
     lifecycle: profileMemoryLifecycleService,
     proposalStore: profileUpdateProposalStore,
     sourceReaders: profileMemorySourceReaders,

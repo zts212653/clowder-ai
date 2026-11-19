@@ -2,6 +2,7 @@ import type { DispatchInput } from '@clowder-ai/plugin-memory-contract';
 import { explainDescriptor, isCompatibleDescriptor } from '@clowder-ai/plugin-memory-contract';
 import type { EventDispatchInput } from '@clowder-ai/plugin-memory-contract/event';
 import type { MatterDispatchInput } from '@clowder-ai/plugin-memory-contract/matter';
+import type { ProfileDispatchInput } from '@clowder-ai/plugin-memory-contract/profile';
 import {
   invocationNotStarted,
   type PluginInvocationEffect,
@@ -91,7 +92,7 @@ export class MemoryPluginHost {
   }
 
   attempt(
-    request: DispatchInput | MatterDispatchInput | EventDispatchInput,
+    request: DispatchInput | MatterDispatchInput | EventDispatchInput | ProfileDispatchInput,
     caller: PluginCallContext,
   ): Promise<PluginInvocationOutcome> {
     const binding = this.#binding;
