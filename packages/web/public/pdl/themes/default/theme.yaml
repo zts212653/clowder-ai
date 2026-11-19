@@ -16524,7 +16524,6 @@ pdl:
                             slot: chat.composer.notice
                             from: $.notices
                           when: $.top
-                          hideWhileTyping: true
                 - share: 2
                   name: queue
                   align: end
