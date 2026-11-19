@@ -472,7 +472,8 @@ function scrollToMessage(mid, done, tries) {
   const again = function () { if (!live) return; live = false; JUMP_WAIT = null; scrollToMessage(mid, done, tries); };
   /* 已经在位（或滚不动）时不会有 scrollend：读一下目标和当前的差（只读，不用来定位）。
      之前的滚动留下的 scrollend 可能晚一拍才到：到了还没在位、也还滚得动，就接着等下一个 */
-  const away = function () { const sr = s.getBoundingClientRect(), r = el.getBoundingClientRect(), d = (r.top + r.height / 2) - (sr.top + sr.height / 2), room = d > 0 ? -s.scrollTop : s.scrollHeight - s.clientHeight + s.scrollTop;   /* stick-end：往下（朝底）还能滚 -scrollTop，往上还能滚到 -(sh - ch) */ return Math.abs(d) >= 2 && room >= 2; };
+  /* 居中算的是连同滚动外边距（scroll-margin）的那一块：浏览器就是这样居中的，不算的话带外边距的消息永远差几像素“不在位” */
+  const away = function () { const sr = s.getBoundingClientRect(), r = el.getBoundingClientRect(), m = getComputedStyle(el), d = (r.top - parseFloat(m.scrollMarginTop) + r.bottom + parseFloat(m.scrollMarginBottom)) / 2 - (sr.top + sr.height / 2), room = d > 0 ? -s.scrollTop : s.scrollHeight - s.clientHeight + s.scrollTop;   /* stick-end：往下（朝底）还能滚 -scrollTop，往上还能滚到 -(sh - ch) */ return Math.abs(d) >= 2 && room >= 2; };
   if (!away() || motionOff()) { el.scrollIntoView({ block: 'center', behavior: 'instant' }); fin(); return; }
   if (JUMP_WAIT) JUMP_WAIT.drop();   /* 新的跳转接替旧的 */
   JUMP_WAIT = { check: function () { if (!s.isConnected || !el.isConnected) again(); }, drop: function () { live = false; } };

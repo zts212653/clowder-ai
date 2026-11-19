@@ -9718,6 +9718,34 @@ pdl:
             props:
               rows:
                 - kind: field
+                  label: t:memberForm.voicePick.label
+                  id: f-vPick
+                  ctls:
+                    - type: component
+                      use: v2Select
+                      props:
+                        id: f-vPick
+                        value: $.form.voices.pick
+                        options: $.form.voices.options
+                        change: memberVoice
+                        label: t:memberForm.voicePick.label
+                      when: "!$.form.voices.error"
+                    - type: component
+                      use: v2Text
+                      props:
+                        text: t:memberForm.voicePick.error
+                        role: meta
+                      when: $.form.voices.error
+                    - type: component
+                      use: v2Action
+                      props:
+                        label: t:common.retry
+                        act: memberVoicesRetry
+                      when: $.form.voices.error
+                  foot:
+                    - text: t:memberForm.voicePick.none
+                      when: $.form.voices.none
+                - kind: field
                   label: t:memberForm.fields.language
                   id: f-vLang
                   control:
@@ -9762,6 +9790,8 @@ pdl:
                     - text: t:memberForm.access.text
                       tone: danger
                       when: $.form.invalid.vVoice
+                    - text: t:memberForm.voicePick.defaultVoice
+                      when: $.form.voices.defaultVoice
                 - kind: field
                   label: t:memberForm.fields.speechRate
                   id: f-vSpeed

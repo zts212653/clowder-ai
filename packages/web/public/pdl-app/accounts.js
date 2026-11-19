@@ -93,22 +93,47 @@ function bindAccounts() {
   // Remaining below this percentage is low (that item of the quota row is shown as a warning).
   const QUOTA_LOW = 20;
   // One reading shape for every family: { observedAt, items } (agy / kimi store just that; Codex adds a status).
+  // When a window resets: its time; otherwise "Resets in 2h 5m" counted from the reading; "reset" has already reset.
+  const QUOTA_UNIT = { d: 864e5, h: 36e5, m: 6e4, s: 1e3 };
+  function quotaResetAt(x, at) {
+    const text = (x.resetsText || '').trim(),
+      t = Date.parse(x.resetsAt || '');
+    if (/^reset$/i.test(text)) return at;
+    if (Number.isFinite(t)) return t;
+    let ms = 0,
+      n = 0;
+    const rest = text
+      .replace(/^resets\s+in\s+/i, '')
+      .replace(/(\d+(?:\.\d+)?)\s*(d|days?|h|hrs?|hours?|m|mins?|minutes?|s|secs?|seconds?)\b/gi, function (all, v, u) {
+        ms += parseFloat(v) * QUOTA_UNIT[u[0].toLowerCase()];
+        n++;
+        return '';
+      });
+    return n && !rest.replace(/[\s,]+/g, '') && at ? at + ms : null;
+  }
   function accountQuotaData(o) {
     const ok = !o.status || o.status === 'ok',
-      items = ok ? o.items : (o.lastSuccess || {}).items || [];
+      items = ok ? o.items : (o.lastSuccess || {}).items || [],
+      at = o.lastSuccess ? o.lastSuccess.observedAt : o.observedAt;
     const left = function (x) {
       return Math.max(0, Math.min(100, x.percentKind === 'remaining' ? x.usedPercent : 100 - x.usedPercent));
     };
     return {
       items: items.map(function (x) {
-        return { label: x.label, left: left(x), low: left(x) < QUOTA_LOW };
+        return {
+          label: x.label,
+          left: left(x),
+          low: left(x) < QUOTA_LOW,
+          pool: x.poolId || '',
+          resetAt: quotaResetAt(x, at),
+        };
       }),
       resets: items
         .map(function (x) {
           return x.resetsText || x.resetsAt;
         })
         .filter(Boolean),
-      at: o.lastSuccess ? o.lastSuccess.observedAt : o.observedAt,
+      at: at,
       hasAt: true,
       out:
         ok &&
@@ -157,6 +182,7 @@ function bindAccounts() {
         label: w.key + ' (' + w.model + ')',
         left: Math.round((1 - w.utilization) * 100),
         low: (1 - w.utilization) * 100 < QUOTA_LOW,
+        resetAt: w.resetsAt != null ? w.resetsAt * 1000 : null,
       };
     });
     return {
@@ -544,15 +570,22 @@ function bindAccounts() {
     all.forEach(function (a) {
       a.selected = chosen.indexOf(a.id) >= 0;
     });
+    // A family's bar: the least left among its selected accounts in use, over windows that haven't reset yet; AGY's
+    // bar is its Gemini pool (the other pool serves other models).
+    const now = api.now();
     const bars = QUOTA_FAMILIES.map(function (f) {
       const left = all
         .filter(function (a) {
-          return a.selected && a.family === f;
+          return a.selected && a.inUse && a.family === f;
         })
         .reduce(function (m, a) {
-          return a.items.reduce(function (n, i) {
-            return n == null || i.left < n ? i.left : n;
-          }, m);
+          return a.items
+            .filter(function (i) {
+              return !(i.resetAt != null && i.resetAt <= now) && (f !== 'agy' || i.pool === 'agy-gemini');
+            })
+            .reduce(function (n, i) {
+              return n == null || i.left < n ? i.left : n;
+            }, m);
         }, null);
       return { family: f, left: left, has: left != null, low: left != null && left < QUOTA_LOW };
     });

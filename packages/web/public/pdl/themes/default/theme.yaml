@@ -8453,6 +8453,12 @@ pdl:
           row:
             layout: two
             key: "@key"
+            titleWrap:
+              of: "@kind"
+              map:
+                commentary: open
+                thinking: open
+                _: auto
             lead:
               glyph:
                 of: "@kind"

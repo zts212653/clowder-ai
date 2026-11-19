@@ -91,7 +91,7 @@ function R(k) { return PDL_ROLES[k].slice(); }
 Object.assign(PDL_SCHEMA, {
   /* 行模板（列表的 row：PDL_ROWS 里的实体模板，或列表声明里就地写的字段映射）：layout 必填，取组件库的一种行布局（组件库 rows.js ROW_LAYOUTS；tree 只由树块用）；
      其余是数据绑定。_rowNo：每种布局不接受的字段（单行没有副行，只有条目有竖排尾部；记录行声明了 expand 也能在原位展开，lang 2026-11-18） */
-  _row: { layout: ['line', 'two', 'item', 'record'], key: 1, lead: 1, title: 1, inline: 1, sub: 1, meta: 1, cols: 1, acts: 1, tone: 1, color: 1, bar: 1, act: 1, args: 1, note: 1, expand: 1, more: 1, moreWhen: 1, moreAfter: 1, cur: 1, aside: 1, subLines: 1, label: 1, help: 1, when: 1 },
+  _row: { layout: ['line', 'two', 'item', 'record'], key: 1, lead: 1, title: 1, inline: 1, sub: 1, meta: 1, cols: 1, acts: 1, tone: 1, color: 1, bar: 1, act: 1, args: 1, note: 1, expand: 1, titleWrap: ['$', 'auto', 'open'], more: 1, moreWhen: 1, moreAfter: 1, cur: 1, aside: 1, subLines: 1, label: 1, help: 1, when: 1 },
   _rowNo: { line: ['sub', 'meta', 'aside', 'subLines'], two: ['aside', 'subLines'], item: [], record: ['sub', 'meta', 'aside', 'subLines'] },
   app: { demo: 1, name: ['entry', 'stripe', 'handle'], region: 1, when: 1 },
   back: { act: 1, args: 1, label: 1, when: 1 },   /* 返回放在这里（引擎的返回）；act / args 是没有返回可回时的去处 */
@@ -520,6 +520,7 @@ function pvRow(t, sc, root, listId) {
   if (t.note) o.note = pv(t.note, sc, root);
   if (t.aside) { const as = t.aside.map(function (x) { return x ? pvJoin(x, sc, root, '') : ''; }); if (as[0] || as[1]) o.aside = as; }   /* 行尾上下两格：上面一格、下面一格，各自右对齐 */
   if (t.subLines) o.subLines = t.subLines;   /* 副行最多几行（超出省略） */
+  if (t.titleWrap) o.titleWrap = pv(t.titleWrap, sc, root);   /* 打开时标题怎么排：auto（默认：展开区有内容时保持一行）、open（打开就换行看全） */
   if (t.more && pvOk(t.moreWhen, sc, root) && !t.moreAfter) o.more = pvRowMore(t, sc, root);   /* 模板在行的作用域里画，内部 each 保留自己的作用域 */
   return o;
 }

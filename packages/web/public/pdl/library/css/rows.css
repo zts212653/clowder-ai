@@ -82,7 +82,7 @@
 .lr.done .lr-lead > .ic { color: var(--ok); }
 /* 行内标记可以收缩；标题至少留 4 个字 */
 .lr-title { overflow: clip; white-space: nowrap; text-overflow: ellipsis; flex: 0 1 auto; min-width: 4em; }
-.lr[data-open="true"]:not(:has(> .lr-exp)) > .lr-head > .lr-main > .lr-line > .lr-title { white-space: normal; text-overflow: clip; overflow-wrap: anywhere; }   /* 打开只为看全标题时才换行；展开区有内容时标题保持一行，详情在展开区（lang 2026-11-18） */
+.lr[data-open="true"]:is(:not(:has(> .lr-exp)), [data-title-wrap="open"]) > .lr-head > .lr-main > .lr-line > .lr-title { white-space: normal; text-overflow: clip; overflow-wrap: anywhere; }   /* 打开时标题换行看全：默认只在只为看全标题时（展开区有内容时标题保持一行，详情在展开区）；行声明 titleWrap: open 时打开就换行（展开区接着标题往下写的，比如思考） */
 .lr-line > :not(.lr-title):not(.dot) { flex: 0 1 auto; min-width: 0; overflow: clip; white-space: nowrap; text-overflow: ellipsis; }
 /* 当前对话之类的“这里”：比普通行高一层底色 */
 .lr.here { background: var(--accent-wash); }

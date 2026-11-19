@@ -202,6 +202,9 @@ const browserLocation = () => window.location.pathname + window.location.search 
 const subscribeNever = () => () => {};
 type PendingThreadJump = { threadId: string; mid: string; catId?: string };
 
+/** The upload address of an image the input got back from a saved draft: the draft keeps it by that address. */
+const draftImageUrl = new WeakMap<File, string>();
+
 /** Message images as files again, for a retry or a recalled message going back into the input. */
 async function downloadImages(urls: readonly string[], blocks: readonly MessageContent[] = []): Promise<File[]> {
   return Promise.all(
@@ -525,7 +528,12 @@ function ChatBinding({
   const serverDraft = useServerComposerDraft({
     threadId,
     enabled: drafting && threadId !== 'default',
-    draft: { text: input, contexts, ...(reply ? { replyTo: reply.id } : {}) },
+    draft: {
+      text: input,
+      images: images.flatMap((file) => draftImageUrl.get(file) ?? []),
+      contexts,
+      ...(reply ? { replyTo: reply.id } : {}),
+    },
     restore: (saved) => {
       setInput(saved.text);
       setContexts(saved.contexts);
@@ -535,6 +543,10 @@ function ChatBinding({
           .getState()
           .setReplyTo({ id: message.id, content: message.content, senderCatId: message.catId ?? null, threadId });
       else useChatStore.getState().clearReplyTo();
+      return downloadImages(saved.images).then((files) => {
+        files.forEach((file, i) => draftImageUrl.set(file, saved.images[i]));
+        setImages(files);
+      });
     },
   });
   // Words, places and a quote handed to this conversation's input from elsewhere (a file, a work, a recall).
@@ -926,12 +938,15 @@ function ChatBinding({
       pendingJump.current = null;
       return;
     }
-    if (history.isLoadingHistory) return;
-    if (history.messages.some((m) => m.id === target.mid)) {
+    // Judged on the opened thread's own history: right after a switch the hook's fields can still be the previous
+    // thread's, and until its first page is read there is nothing to judge.
+    const own = useChatStore.getState().getThreadState(threadId);
+    if (own.isLoadingHistory || !own.messages.length) return;
+    if (own.messages.some((m) => m.id === target.mid)) {
       pendingJump.current = null;
       ui.current.pendingMid = target.mid;
       if (engineMounted) window.clowderChat.update();
-    } else if (history.hasMore) {
+    } else if (own.hasMore) {
       void loadEarlier();
     } else {
       pendingJump.current = null;
