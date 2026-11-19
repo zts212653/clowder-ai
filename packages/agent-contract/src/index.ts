@@ -38,6 +38,8 @@ export const OFFICIAL_AGENT_ACCESS_OPERATIONS = [
   'projectAgyOutput',
   'summarizeAgyTurn',
   'planCodexExec',
+  'planCodexAppServerThread',
+  'planCodexAppServerTurn',
   'planCodexLogin',
   'projectCatAgentOutput',
   'projectClaudeBatch',
@@ -152,6 +154,60 @@ export const agentAccessCodexExecLaunchRequestSchema = z.object({
   }),
 });
 export type AgentAccessCodexExecLaunch = z.infer<typeof agentAccessCodexExecLaunchRequestSchema>['launch'];
+
+const codexAppServerSandboxSchema = z.enum(['read-only', 'workspace-write', 'danger-full-access']);
+const codexAppServerApprovalSchema = z.enum(['untrusted', 'on-failure', 'on-request', 'never']);
+const codexAppServerReviewerSchema = z.enum(['user', 'auto_review', 'guardian_subagent']);
+
+const codexAppServerThreadGroupsSchema = z.object({
+  threadId: z.string().optional(),
+  model: z.string().optional(),
+  cwd: z.string().optional(),
+  developerInstructions: z.string().optional(),
+  config: z.string().optional(),
+});
+
+/**
+ * App-server thread params. The package owns the JSON-RPC parameter shape, but
+ * every sensitive value is an opaque Host group token; the Host validates the
+ * token at its expected slot and fills it in only after planning.
+ */
+export const agentAccessCodexAppServerThreadRequestSchema = z.object({
+  operation: z.literal('plan_app_server_thread'),
+  client: z.literal('codex'),
+  kind: z.enum(['start', 'resume']),
+  groups: codexAppServerThreadGroupsSchema,
+  options: z.object({
+    sandbox: codexAppServerSandboxSchema.optional(),
+    approvalPolicy: codexAppServerApprovalSchema.optional(),
+    serviceTier: z.string().nullable().optional(),
+    approvalsReviewer: codexAppServerReviewerSchema.optional(),
+  }),
+});
+export type AgentAccessCodexAppServerThreadRequest = z.infer<typeof agentAccessCodexAppServerThreadRequestSchema>;
+export const agentAccessCodexAppServerThreadPlanSchema = z.object({
+  params: z.record(z.unknown()),
+  startParams: z.record(z.unknown()).optional(),
+});
+
+/** App-server turn/start params. Same opaque-group boundary as the thread plan. */
+export const agentAccessCodexAppServerTurnRequestSchema = z.object({
+  operation: z.literal('plan_app_server_turn'),
+  client: z.literal('codex'),
+  groups: z.object({
+    threadId: z.string(),
+    clientUserMessageId: z.string().optional(),
+    prompt: z.string().optional(),
+    images: z.array(z.string()).readonly().optional(),
+    recoveryContext: z.string().optional(),
+    outputSchema: z.string().optional(),
+    collaborationMode: z.string().optional(),
+  }),
+});
+export type AgentAccessCodexAppServerTurnRequest = z.infer<typeof agentAccessCodexAppServerTurnRequestSchema>;
+export const agentAccessCodexAppServerTurnPlanSchema = z.object({
+  params: z.record(z.unknown()),
+});
 
 /** One envelope per native client; the Host routes by the discriminant. */
 export const agentAccessNativeLaunchRequestSchema = z.discriminatedUnion('client', [

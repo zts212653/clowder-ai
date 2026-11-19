@@ -9,6 +9,10 @@ import {
   agentAccessCodexExecLaunchRequestSchema,
   agentAccessDetectRequestSchema,
   agentAccessLoginRequestSchema,
+  agentAccessCodexAppServerThreadPlanSchema,
+  agentAccessCodexAppServerThreadRequestSchema,
+  agentAccessCodexAppServerTurnPlanSchema,
+  agentAccessCodexAppServerTurnRequestSchema,
   agentAccessNativeEventRequestSchema,
   agentAccessNativeLaunchRequestSchema,
   agentAccessOpenCodeFinalizerRequestSchema,
@@ -33,6 +37,7 @@ import { projectAgyOutput, summarizeAgyTurn } from './runtime/agy/agy-output.js'
 import { projectCatAgentOutput } from './runtime/catagent-events.js';
 import { projectClaudeBatch } from './runtime/claude/project-claude-batch.js';
 import { projectClaudeOutput } from './runtime/claude/project-claude-output.js';
+import { buildCodexAppServerThreadParams, buildCodexAppServerTurnParams } from './runtime/codex-appserver-params.js';
 import { buildCodexExecLaunchArguments } from './runtime/codex-exec-launch-arguments.js';
 import { normalizeKimiEvent } from './runtime/kimi-event-parser.js';
 import { buildKimiLaunchArguments } from './runtime/kimi-launch-arguments.js';
@@ -72,6 +77,14 @@ export default {
             },
             planCodexLogin() {
               return codexManagedLoginArgs;
+            },
+            planCodexAppServerThread(input: unknown) {
+              const request = agentAccessCodexAppServerThreadRequestSchema.parse(input);
+              return agentAccessCodexAppServerThreadPlanSchema.parse(buildCodexAppServerThreadParams(request));
+            },
+            planCodexAppServerTurn(input: unknown) {
+              const request = agentAccessCodexAppServerTurnRequestSchema.parse(input);
+              return agentAccessCodexAppServerTurnPlanSchema.parse(buildCodexAppServerTurnParams(request));
             },
             planFinalizer(input: unknown) {
               const { launch } = agentAccessOpenCodeFinalizerRequestSchema.parse(input);

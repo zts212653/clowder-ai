@@ -57,6 +57,12 @@ import {
   CodexAppServerTurnStartTimeoutError,
 } from './codex-app-server-rpc-error.js';
 import { mergeCodexConfig } from './codex-config-overrides.js';
+import {
+  type CodexAppServerThreadPlanner,
+  type CodexAppServerTurnPlanner,
+  planCodexAppServerThread,
+  planCodexAppServerTurn,
+} from './codex-app-server-param-plan.js';
 import { inspectCodexInput, readCodexTurnMetadata } from './codex-history-reader.js';
 
 export type {
@@ -171,6 +177,9 @@ export interface CodexAppServerRunInput {
 
 export interface CodexAppServerClientDeps {
   wire: AgentCarrierSession;
+  /** Active Agent Access package plans thread/turn params; absent keeps the Host builder. */
+  planThreadParams?: CodexAppServerThreadPlanner;
+  planTurnParams?: CodexAppServerTurnPlanner;
   onEnvelope?: (direction: 'inbound' | 'outbound', envelope: JsonObject) => void | Promise<void>;
   onUnsupportedNotification?: (observation: { method: string }) => void | Promise<void>;
   onLifecycle?: (snapshot: CodexAppServerLifecycleSnapshot) => void;
@@ -422,13 +431,33 @@ export class CodexAppServerClient {
       }
 
       if (input.thread.kind === 'resume') this.completeTurnBaselines.delete(input.thread.threadId);
+      const plannedThread = input.boundedWatcher
+        ? undefined
+        : await planCodexAppServerThread(
+            {
+              kind: input.thread.kind,
+              ...(input.thread.kind === 'resume' ? { threadId: input.thread.threadId } : {}),
+              ...(input.model ? { model: input.model } : {}),
+              ...(input.cwd ? { cwd: input.cwd } : {}),
+              ...(input.sandbox ? { sandbox: input.sandbox } : {}),
+              ...(input.approvalPolicy ? { approvalPolicy: input.approvalPolicy } : {}),
+              ...(input.developerInstructions ? { developerInstructions: input.developerInstructions } : {}),
+              ...(input.config ? { config: input.config } : {}),
+              ...(Object.hasOwn(input, 'serviceTier') ? { serviceTier: input.serviceTier ?? null } : {}),
+              ...(input.approvalsReviewer ? { approvalsReviewer: input.approvalsReviewer } : {}),
+            },
+            this.deps.planThreadParams,
+          );
+      await plannedThread?.assertCurrent?.();
       const verdict = await resolveCodexAppServerThread({
         thread: input.thread,
-        params: buildCodexAppServerThreadParams(
-          input,
-          input.thread.kind === 'resume' ? { threadId: input.thread.threadId, excludeTurns: true } : undefined,
-        ),
-        startParams: buildCodexAppServerThreadParams(input),
+        params:
+          plannedThread?.params ??
+          buildCodexAppServerThreadParams(
+            input,
+            input.thread.kind === 'resume' ? { threadId: input.thread.threadId, excludeTurns: true } : undefined,
+          ),
+        startParams: plannedThread?.startParams ?? buildCodexAppServerThreadParams(input),
         requireExactResume: input.requireExactResume || Boolean(recoveryInstruction),
         ...(input.resumeReplacement ? { resumeReplacement: input.resumeReplacement } : {}),
         // A reused affinity host reaches this point only after its local lease
@@ -551,32 +580,48 @@ export class CodexAppServerClient {
         resolveInitialInputRead = resolve;
       });
       const initialClientId = input.activeRunDispatch && !isRecoveryTurn ? randomUUID() : undefined;
-      await this.deps.onBeforeTurnStart?.({ threadId });
-      this.lifecycle.patch({ turnStartSent: true });
-      const turnResult = asCodexAppServerRecord(
-        await this.request('turn/start', {
+      const plannedTurn = await planCodexAppServerTurn(
+        {
           threadId,
           ...(initialClientId ? { clientUserMessageId: initialClientId } : {}),
-          input: isRecoveryTurn
-            ? []
-            : [
-                { type: 'text', text: submittedPrompt },
-                ...(input.imagePaths ?? []).map((path) => ({ type: 'localImage', path })),
-              ],
-          ...(isRecoveryTurn && recoveryInstruction
-            ? {
-                additionalContext: {
-                  'cat-cafe.capacity-recovery': {
-                    kind: 'application',
-                    value: recoveryInstruction,
-                  },
-                },
-              }
+          ...(!isRecoveryTurn ? { prompt: submittedPrompt } : {}),
+          ...(!isRecoveryTurn && input.imagePaths && input.imagePaths.length > 0
+            ? { imagePaths: input.imagePaths }
             : {}),
+          ...(isRecoveryTurn && recoveryInstruction ? { recoveryContext: recoveryInstruction } : {}),
           ...(input.outputSchema ? { outputSchema: input.outputSchema } : {}),
           ...(input.collaborationMode ? { collaborationMode: input.collaborationMode } : {}),
-        }),
+        },
+        this.deps.planTurnParams,
       );
+      await this.deps.onBeforeTurnStart?.({ threadId });
+      // The package may have been replaced while Host hooks ran; check at the
+      // last point before the provider-visible turn/start.
+      await plannedTurn?.assertCurrent?.();
+      this.lifecycle.patch({ turnStartSent: true });
+      const turnParams = plannedTurn?.params ?? {
+        threadId,
+        ...(initialClientId ? { clientUserMessageId: initialClientId } : {}),
+        input: isRecoveryTurn
+          ? []
+          : [
+              { type: 'text', text: submittedPrompt },
+              ...(input.imagePaths ?? []).map((path) => ({ type: 'localImage', path })),
+            ],
+        ...(isRecoveryTurn && recoveryInstruction
+          ? {
+              additionalContext: {
+                'cat-cafe.capacity-recovery': {
+                  kind: 'application',
+                  value: recoveryInstruction,
+                },
+              },
+            }
+          : {}),
+        ...(input.outputSchema ? { outputSchema: input.outputSchema } : {}),
+        ...(input.collaborationMode ? { collaborationMode: input.collaborationMode } : {}),
+      };
+      const turnResult = asCodexAppServerRecord(await this.request('turn/start', turnParams));
       const turn = asCodexAppServerRecord(turnResult?.turn);
       if (typeof turn?.id !== 'string') throw new Error('Codex app-server did not return a turn id');
       activeTurnId = turn.id;

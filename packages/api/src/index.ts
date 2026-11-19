@@ -2368,6 +2368,8 @@ async function initializeApi(
                         carrierMode: config.carrier === 'app_server' ? 'app_server' : 'exec_json',
                         nativeRealtimeCompanionEnabled,
                         planLaunch: (input) => agentAccessCodexExecLaunch(input),
+                        planAppServerThread: (input) => agentAccessCodexAppServerThread(input),
+                        planAppServerTurn: (input) => agentAccessCodexAppServerTurn(input),
                       });
                       break;
                     }
@@ -6066,6 +6068,17 @@ async function initializeApi(
   );
   const { createAgentAccessCodexExecLaunchPlanner } = await import('./domains/plugin/agent-access/codex.js');
   const agentAccessCodexExecLaunch = createAgentAccessCodexExecLaunchPlanner(
+    pluginRuntime.inventoryStore,
+    pluginRuntime.supervisor,
+  );
+  const { createAgentAccessCodexAppServerThreadPlanner, createAgentAccessCodexAppServerTurnPlanner } = await import(
+    './domains/plugin/agent-access/codex-appserver.js'
+  );
+  const agentAccessCodexAppServerThread = createAgentAccessCodexAppServerThreadPlanner(
+    pluginRuntime.inventoryStore,
+    pluginRuntime.supervisor,
+  );
+  const agentAccessCodexAppServerTurn = createAgentAccessCodexAppServerTurnPlanner(
     pluginRuntime.inventoryStore,
     pluginRuntime.supervisor,
   );

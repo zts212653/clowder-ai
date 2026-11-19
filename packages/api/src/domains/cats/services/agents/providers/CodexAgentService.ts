@@ -175,6 +175,10 @@ import {
   type CodexAppServerRecoveryEvent,
   runCodexAppServerWithRecovery,
 } from './CodexAppServerRunner.js';
+import type {
+  CodexAppServerThreadPlanner,
+  CodexAppServerTurnPlanner,
+} from './codex-app-server-param-plan.js';
 import { requestCodexAppServerCompaction } from './CodexAppServerSessionControl.js';
 import { requestCodexAppServerFork, requestCodexAppServerStatus } from './CodexAppServerStatusControl.js';
 import { CodexLiveStartupCancelledError } from './CodexLiveRunPort.js';
@@ -490,6 +494,10 @@ interface CodexAgentServiceOptions {
   nativeRealtimeCompanionEnabled?: boolean;
   /** Active Agent Access package owns exec argv; omitted keeps the legacy builder. */
   planLaunch?: CodexExecLaunchPlanner;
+  /** Active Agent Access package owns app-server thread params; omitted keeps the Host builder. */
+  planAppServerThread?: CodexAppServerThreadPlanner;
+  /** Active Agent Access package owns app-server turn params; omitted keeps the Host builder. */
+  planAppServerTurn?: CodexAppServerTurnPlanner;
 }
 
 type CodexAuthMode = 'oauth' | 'api_key' | 'auto';
@@ -1180,6 +1188,8 @@ export class CodexAgentService implements AgentService {
   private readonly nativeShellSafetyCheck: boolean;
   private readonly carrierMode: CodexCarrierMode;
   private readonly planLaunch: CodexExecLaunchPlanner | undefined;
+  private readonly planAppServerThread: CodexAppServerThreadPlanner | undefined;
+  private readonly planAppServerTurn: CodexAppServerTurnPlanner | undefined;
   private readonly approvalSurface: CodexApprovalSurface;
   private readonly appServerHostPool: CodexAppServerHostPool | undefined;
   private readonly appServerStartupRecovery:
@@ -1202,6 +1212,8 @@ export class CodexAgentService implements AgentService {
     this.nativeShellSafetyCheck = options?.nativeShellSafetyCheck ?? false;
     this.carrierMode = options?.carrierMode ?? 'exec_json';
     this.planLaunch = options?.planLaunch;
+    this.planAppServerThread = options?.planAppServerThread;
+    this.planAppServerTurn = options?.planAppServerTurn;
     // Clowder AI currently has no synchronous approval request/response surface.
     // Keep this explicit so a future interactive bridge changes provenance rather
     // than relying on transport names or timing heuristics.
@@ -2839,6 +2851,8 @@ export class CodexAgentService implements AgentService {
             ...(options?.liveCompanion || watcher ? { modelCapacityRetryDelaysMs: [] } : {}),
             ...(options?.recoveryAnchor ? { recoveryAnchor: options.recoveryAnchor } : {}),
             clientDeps: {
+              ...(this.planAppServerThread ? { planThreadParams: this.planAppServerThread } : {}),
+              ...(this.planAppServerTurn ? { planTurnParams: this.planAppServerTurn } : {}),
               ...(passiveQuotaTracker ? passiveQuotaTracker.appServerClientHooks : {}),
               onUnsupportedNotification: ({ method }) => {
                 log.warn(

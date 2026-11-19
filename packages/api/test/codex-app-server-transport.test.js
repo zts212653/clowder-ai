@@ -6,6 +6,10 @@ import { runCodexAppServerWithRecovery } from '../dist/domains/cats/services/age
 import { CodexAppServerRpcError } from '../dist/domains/cats/services/agents/providers/codex-app-server-rpc-error.js';
 import { createDirectAgentCarrierSession } from '../dist/domains/cats/services/agents/providers/DirectAgentCarrierSession.js';
 import { captureCodexActiveWriterDetection } from '../dist/domains/cats/services/runtime-session/CodexSessionReplacementProvenance.js';
+import {
+  buildCodexAppServerThreadParams,
+  buildCodexAppServerTurnParams,
+} from '../../agent-access-plugin/src/runtime/codex-appserver-params.ts';
 
 async function collect(iterable) {
   const values = [];
@@ -185,6 +189,115 @@ class ProtocolWire {
     this.inbox.close();
   }
 }
+
+test('plans app-server thread/turn params through the active package without leaking values', async () => {
+  const wire = new ProtocolWire();
+  const write = wire.write.bind(wire);
+  wire.write = async (message) => {
+    await write(message);
+    if (message.method === 'turn/start') {
+      wire.inbox.push({
+        method: 'turn/completed',
+        params: { threadId: 'thread-1', turn: { id: 'turn-1', status: 'completed' } },
+      });
+    }
+  };
+  let threadRequest;
+  let turnRequest;
+  let currentChecks = 0;
+  let beforeTurnStart = false;
+  let turnAssertSawBefore = false;
+  const client = new CodexAppServerClient({
+    wire,
+    onBeforeTurnStart: async () => {
+      beforeTurnStart = true;
+    },
+    planThreadParams: async (request) => {
+      threadRequest = request;
+      return {
+        ...buildCodexAppServerThreadParams(request),
+        assertCurrent: async () => {
+          currentChecks++;
+        },
+      };
+    },
+    planTurnParams: async (request) => {
+      turnRequest = request;
+      return {
+        ...buildCodexAppServerTurnParams(request),
+        assertCurrent: async () => {
+          currentChecks++;
+          turnAssertSawBefore = beforeTurnStart;
+        },
+      };
+    },
+  });
+
+  await collect(
+    client.run({
+      prompt: frozenPrompt('secret prompt'),
+      thread: { kind: 'start' },
+      model: 'secret-model',
+      cwd: '/secret/workspace',
+      sandbox: 'read-only',
+      approvalPolicy: 'never',
+      developerInstructions: 'L0 SECRET',
+      config: { mcp_servers: { secret: { command: '/secret/mcp' } } },
+      approvalsReviewer: 'auto_review',
+    }),
+  );
+
+  const threadWrite = wire.writes.find((message) => message.method === 'thread/start');
+  const turnWrite = wire.writes.find((message) => message.method === 'turn/start');
+  assert.equal(threadWrite.params.model, 'secret-model');
+  assert.equal(threadWrite.params.cwd, '/secret/workspace');
+  assert.equal(threadWrite.params.developerInstructions, 'L0 SECRET');
+  assert.deepEqual(threadWrite.params.config, { mcp_servers: { secret: { command: '/secret/mcp' } } });
+  assert.deepEqual(turnWrite.params.input, [{ type: 'text', text: 'secret prompt' }]);
+  assert.ok(currentChecks >= 2, 'thread and turn plans both recheck generation');
+  assert.equal(turnAssertSawBefore, true, 'turn recheck happens after onBeforeTurnStart');
+  assert.ok(!JSON.stringify(threadRequest).includes('secret-model'));
+  assert.ok(!JSON.stringify(threadRequest).includes('L0 SECRET'));
+  assert.ok(!JSON.stringify(turnRequest).includes('secret prompt'));
+});
+
+test('resume uses the package thread plan and keeps startParams thread-free', async () => {
+  const wire = new ProtocolWire();
+  const write = wire.write.bind(wire);
+  wire.write = async (message) => {
+    await write(message);
+    if (message.method === 'turn/start') {
+      wire.inbox.push({
+        method: 'turn/completed',
+        params: { threadId: 'thread-1', turn: { id: 'turn-1', status: 'completed' } },
+      });
+    }
+  };
+  let threadRequest;
+  const client = new CodexAppServerClient({
+    wire,
+    planThreadParams: async (request) => {
+      threadRequest = request;
+      return buildCodexAppServerThreadParams(request);
+    },
+    planTurnParams: async (request) => buildCodexAppServerTurnParams(request),
+  });
+
+  await collect(
+    client.run({
+      prompt: frozenPrompt('resume prompt'),
+      thread: { kind: 'resume', threadId: 'thread-1' },
+      model: 'gpt-test',
+      sandbox: 'workspace-write',
+    }),
+  );
+
+  const resume = wire.writes.find((message) => message.method === 'thread/resume');
+  assert.equal(resume.params.threadId, 'thread-1');
+  assert.equal(resume.params.excludeTurns, true);
+  assert.equal(resume.params.model, 'gpt-test');
+  assert.equal(threadRequest.kind, 'resume');
+});
 
 test('app-server rejects unpaired surrogates before sending any malformed request', async () => {
   for (const overrides of [

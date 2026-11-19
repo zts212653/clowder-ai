@@ -69,6 +69,29 @@ describe('package entrypoint routing', () => {
     assert.ok(result.args.includes('__CAT_CAFE_CODEX_GROUP_sandbox__'));
   });
 
+  test('planCodexAppServerThread routes thread params through the public action', () => {
+    const result = actions().planCodexAppServerThread({
+      operation: 'plan_app_server_thread',
+      client: 'codex',
+      kind: 'start',
+      groups: { model: '__CAT_CAFE_CODEX_AS_model__' },
+      options: { sandbox: 'read-only' },
+    }) as { params: Record<string, unknown> };
+
+    assert.equal(result.params.model, '__CAT_CAFE_CODEX_AS_model__');
+    assert.equal(result.params.sandbox, 'read-only');
+  });
+
+  test('planCodexAppServerTurn routes turn params through the public action', () => {
+    const result = actions().planCodexAppServerTurn({
+      operation: 'plan_app_server_turn',
+      client: 'codex',
+      groups: { threadId: '__CAT_CAFE_CODEX_AS_thread__', prompt: '__CAT_CAFE_CODEX_AS_prompt__' },
+    }) as { params: { input: Array<{ text?: string }> } };
+
+    assert.equal(result.params.input[0]?.text, '__CAT_CAFE_CODEX_AS_prompt__');
+  });
+
   test('planFinalizer serves the OpenCode recovery run as its own operation', () => {
     const result = actions().planFinalizer({
       operation: 'plan_native_finalizer',
