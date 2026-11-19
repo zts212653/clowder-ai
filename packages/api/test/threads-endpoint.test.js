@@ -1265,21 +1265,22 @@ describe('Thread soft-delete preserves data (Phase D)', () => {
     const { ThreadStore } = await import('../dist/domains/cats/services/stores/ports/ThreadStore.js');
     const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
     const { TaskStore } = await import('../dist/domains/cats/services/stores/ports/TaskStore.js');
-    const { MemoryStore } = await import('../dist/domains/cats/services/stores/ports/MemoryStore.js');
+    const { createThreadMemoryFixture } = await import('./helpers/thread-memory-fixture.js');
+    const { memoryRoutes } = await import('../dist/routes/memory.js');
     const { threadsRoutes } = await import('../dist/routes/threads.js');
 
     threadStore = new ThreadStore();
     messageStore = new MessageStore();
     taskStore = new TaskStore();
-    memoryStore = new MemoryStore();
+    memoryStore = createThreadMemoryFixture();
 
     app = Fastify();
     await app.register(threadsRoutes, {
       threadStore,
       messageStore,
       taskStore,
-      memoryStore,
     });
+    await app.register(memoryRoutes, { memoryStore: () => memoryStore, threadStore });
     await app.ready();
   });
 
@@ -1322,17 +1323,18 @@ describe('Thread soft-delete preserves data (Phase D)', () => {
     });
 
     // Add memory
-    memoryStore.set({
-      threadId,
-      key: 'test-key',
-      value: 'test-value',
-      updatedBy: 'user',
+    const written = await app.inject({
+      method: 'POST',
+      url: '/api/memory',
+      headers: { 'x-cat-cafe-user': 'alice' },
+      payload: { threadId, key: 'test-key', value: 'test-value', updatedBy: 'user' },
     });
+    assert.equal(written.statusCode, 201);
 
     // Verify data exists
     assert.equal(messageStore.getByThread(threadId).length, 2);
     assert.equal(taskStore.listByThread(threadId).length, 1);
-    assert.equal(memoryStore.list(threadId).length, 1);
+    assert.equal((await memoryStore.list(threadId)).length, 1);
 
     // Soft-delete thread
     const res = await app.inject({
@@ -1349,7 +1351,7 @@ describe('Thread soft-delete preserves data (Phase D)', () => {
     // Data preserved for potential restore
     assert.equal(messageStore.getByThread(threadId).length, 2);
     assert.equal(taskStore.listByThread(threadId).length, 1);
-    assert.equal(memoryStore.list(threadId).length, 1);
+    assert.equal((await memoryStore.list(threadId)).length, 1);
   });
 });
 

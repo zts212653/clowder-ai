@@ -17,6 +17,7 @@ import { sessionAuthPlugin, sessionRoute } from '../dist/infrastructure/session-
 import { registerCallbackAuthHook } from '../dist/routes/callback-auth-prehandler.js';
 import { registerCallbackReadProfileRoutes } from '../dist/routes/callback-read-profile-routes.js';
 import { profileMemoryOwnerRoutes } from '../dist/routes/profile-memory-owner.js';
+import { profileOwnerFixture } from './helpers/profile-owner-fixture.js';
 
 let app;
 let db;
@@ -65,8 +66,7 @@ beforeEach(async () => {
   });
   const options = {
     ownerUserId: 'alice',
-    evidenceDb: db,
-    store: new ProfileMemoryLifecycleStore({ db, repository }),
+    store: profileOwnerFixture(db, new ProfileMemoryLifecycleStore({ db, repository })),
     proposalStore: { listByTarget: async () => [] },
     sourceReaders: {
       threadStore: { get: async () => null, list: async () => [] },

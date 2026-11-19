@@ -1,10 +1,7 @@
 import type { IMessageStore } from '../../../cats/services/stores/ports/MessageStore.js';
 import { isDelivered } from '../../../cats/services/stores/ports/MessageStore.js';
-import {
-  eventMemoryRevision,
-  type IEventMemoryStore,
-  type StoredEventMemoryLifecycle,
-} from '../../EventMemoryStore.js';
+import { eventMemoryRevision, type StoredEventMemoryLifecycle } from '../../EventMemoryStore.js';
+import type { EventMemoryPort } from '../../event/event-memory-port.js';
 import type { MemoryCueEpisodeStore } from '../MemoryCueEpisodeStore.js';
 import type { MemoryCueOpportunitySeed } from '../MemoryCueInvocationPromptService.js';
 import type { MemoryCueSourceProjection } from '../MemoryCueResolverRegistry.js';
@@ -42,7 +39,7 @@ export class EventMemoryCueSource implements EventCueSource {
   constructor(
     private readonly deps: {
       ownerUserId: string;
-      eventStore: Pick<IEventMemoryStore, 'listEvents' | 'getEvent'>;
+      eventStore: Pick<EventMemoryPort, 'listEvents' | 'getEvent'>;
       messageStore: Pick<IMessageStore, 'getById'>;
       episodeStore: Pick<MemoryCueEpisodeStore, 'hasTerminalConsumptionForSource'>;
       now?: () => number;
@@ -55,14 +52,14 @@ export class EventMemoryCueSource implements EventCueSource {
     occurredAt: number;
   }): Promise<Extract<MemoryCueOpportunitySeed, { kind: 'recent_event_available' }> | null> {
     if (input.ownerUserId !== this.deps.ownerUserId) return null;
-    const candidate = this.deps.eventStore.listEvents({
+    const [candidate] = await this.deps.eventStore.listEvents({
       ownerUserId: input.ownerUserId,
       threadId: input.threadId,
       confidence: 'high',
       since: input.occurredAt - EVENT_CUE_WINDOW_MS,
       until: input.occurredAt,
       limit: 1,
-    })[0];
+    });
     if (!candidate || candidate.status !== 'active' || (await this.visibilityFailure(candidate))) return null;
     const revision = eventMemoryRevision(candidate);
     const anchor = `${EVENT_MEMORY_ANCHOR_PREFIX}${candidate.eventId}`;
@@ -122,7 +119,7 @@ export class EventMemoryCueSource implements EventCueSource {
       return { status: 'not_available', invalidationReason: 'source_forgotten' };
     }
     const eventId = input.anchor.slice(EVENT_MEMORY_ANCHOR_PREFIX.length);
-    const event = this.deps.eventStore.getEvent(eventId);
+    const event = await this.deps.eventStore.getEvent(eventId, input.ownerUserId);
     if (!event) return { status: 'not_available', invalidationReason: 'source_forgotten' };
     if (event.ownerUserId !== input.ownerUserId || event.threadId !== input.threadId) {
       return { status: 'not_available', invalidationReason: 'scope_revoked' };
@@ -156,7 +153,7 @@ export class EventMemoryCueSource implements EventCueSource {
     ownerUserId: string,
     threadId: string,
   ): Promise<StoredEventMemoryLifecycle | null> {
-    const event = this.deps.eventStore.getEvent(eventId);
+    const event = await this.deps.eventStore.getEvent(eventId, ownerUserId);
     if (!event || event.status !== 'active' || event.ownerUserId !== ownerUserId || event.threadId !== threadId) {
       return null;
     }

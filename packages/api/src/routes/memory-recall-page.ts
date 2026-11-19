@@ -1,11 +1,16 @@
 import type Database from 'better-sqlite3';
-import { MemoryCueEpisodeStore } from '../domains/memory/cue/MemoryCueEpisodeStore.js';
-import { projectInvocationCues } from '../domains/memory/cue/project-invocation-cues.js';
+import { type CueInvocationReader, createInvocationCueReader } from '../domains/memory/cue/project-invocation-cues.js';
 import { type MemoryInvocationReaders, memoryInvocationAccess } from './memory-invocation-access.js';
-import { projectRecallPageEvent, readRecallPageEvent, recallCandidates } from './memory-recall-events.js';
+import {
+  projectRecallPageEvent,
+  type RecallEventReader,
+  readRecallPageEvent,
+  recallCandidates,
+} from './memory-recall-events.js';
 import {
   type RecallPageCursor,
   type RecallPageQuery,
+  type RecallTimelineReader,
   type RecallTimelineRow,
   recallTimeline,
   visibleRecallThreads,
@@ -19,6 +24,7 @@ import { recallCueViewReader } from './recall-cue-view.js';
 import { nextRecallReplyCursor, projectRecallReplies, type RecallReplyMessageStore } from './recall-reply-index.js';
 
 export interface RecallPageSourceReaders extends RecallSourceReaders, MemoryInvocationReaders {
+  readInvocationCues?: CueInvocationReader;
   messageStore?: RecallReplyMessageStore;
 }
 interface ProjectionContext {
@@ -26,17 +32,18 @@ interface ProjectionContext {
   owner: string;
   readers: RecallPageSourceReaders;
   readCandidate: ReturnType<typeof recallCandidateViewReader>;
-  episodes: MemoryCueEpisodeStore;
-  cues: Map<string, ReturnType<typeof projectInvocationCues>>;
+  readCues: CueInvocationReader;
+  cues: Map<string, Awaited<ReturnType<CueInvocationReader>>>;
+  readEvent?: RecallEventReader;
 }
 async function readCueRow(row: RecallTimelineRow, context: ProjectionContext) {
-  const { owner, readers, cues, episodes, readCandidate } = context;
+  const { owner, readers, cues, readCues, readCandidate } = context;
   const key = JSON.stringify([row.thread_id, row.invocation_id]);
   let invocation = cues.get(key);
   if (!invocation) {
     const access = await memoryInvocationAccess(readers, owner, row.thread_id, row.invocation_id);
     if (access.status !== 200) return null;
-    invocation = projectInvocationCues(episodes.listByInvocation(owner, row.thread_id, row.invocation_id));
+    invocation = await readCues(owner, row.thread_id, row.invocation_id);
     cues.set(key, invocation);
   }
   const cue = invocation.find((item) => item.cueId === row.cue_id);
@@ -87,7 +94,9 @@ async function readCueRow(row: RecallTimelineRow, context: ProjectionContext) {
 }
 async function readSearchRow(row: RecallTimelineRow, context: ProjectionContext) {
   if (!row.recall_id) return null;
-  const event = readRecallPageEvent(context.db, row.recall_id);
+  const event = context.readEvent
+    ? await context.readEvent({ recallId: row.recall_id, threadId: row.thread_id })
+    : readRecallPageEvent(context.db, row.recall_id, row.thread_id);
   if (!event) return null;
   const views = new Map<string, RecallCandidateView>();
   const candidates = recallCandidates(event);
@@ -138,19 +147,34 @@ export async function readMemoryRecallPage(
   readers: RecallPageSourceReaders,
   query: RecallPageQuery,
   cursor: RecallPageCursor | null,
+  readTimeline?: RecallTimelineReader,
+  readEvent?: RecallEventReader,
 ) {
   if (!readers.threadStore) throw new Error('Thread store unavailable');
   const threads = await visibleRecallThreads(owner, readers.threadStore);
   const to = cursor?.to ?? Date.now();
-  const rows = recallTimeline(db, owner, [...threads.keys()], query, cursor, to);
+  const from = query.days === '0' ? 0 : to - Number(query.days) * 86400000;
+  const threadIds = [...threads.keys()];
+  const rows = readTimeline
+    ? await readTimeline({
+        threadIds,
+        from,
+        to,
+        source: query.source,
+        catId: query.catId,
+        limit: query.limit,
+        ...(cursor ? { before: { at: cursor.at, key: cursor.key } } : {}),
+      })
+    : recallTimeline(db, owner, threadIds, query, cursor, to);
   const page = rows.slice(0, query.limit);
   const context: ProjectionContext = {
     db,
     owner,
     readers,
     readCandidate: recallCandidateViewReader(db, owner, readers),
-    episodes: new MemoryCueEpisodeStore(db),
+    readCues: readers.readInvocationCues ?? createInvocationCueReader(db),
     cues: new Map(),
+    readEvent,
   };
   const records = [];
   let partial = false;
@@ -171,7 +195,7 @@ export async function readMemoryRecallPage(
   const last = page.at(-1);
   return {
     days: Number(query.days),
-    from: to - Number(query.days) * 86400000,
+    from,
     to,
     readStatus: partial || replies.partial ? 'partial' : 'ready',
     records,

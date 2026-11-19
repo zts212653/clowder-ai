@@ -45,7 +45,7 @@ test(
         const sockets = { emitToUser() {}, broadcastToRoom() {} };
         await app.register(async (scope) => {
           registerCallbackAuthHook(scope, w.registry);
-          registerCallbackMatterMemoryRoutes(scope, matter);
+          registerCallbackMatterMemoryRoutes(scope, () => matter);
           registerCallbackRememberRoutes(scope, {
             registry: w.registry,
             messageStore: w.messages,

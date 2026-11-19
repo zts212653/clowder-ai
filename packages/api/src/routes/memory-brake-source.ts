@@ -2,17 +2,17 @@ import type { IMessageStore } from '../domains/cats/services/stores/ports/Messag
 import type { IThreadStore } from '../domains/cats/services/stores/ports/ThreadStore.js';
 import { resolveThreadMessageVisibility } from '../domains/cats/services/stores/visibility.js';
 import { canAccessThread } from '../domains/guides/guide-state-access.js';
-import type { IEventMemoryStore } from '../domains/memory/EventMemoryStore.js';
+import type { EventMemoryPort } from '../domains/memory/event/event-memory-port.js';
 
 export interface BrakeSourceReaders {
-  eventMemoryStore: Pick<IEventMemoryStore, 'getEvent'>;
+  eventMemoryStore: Pick<EventMemoryPort, 'getEvent'>;
   threadStore: Pick<IThreadStore, 'get' | 'list'>;
   messageStore: Pick<IMessageStore, 'getById'>;
 }
 
 export async function readBrakeSource(eventId: string, owner: string, readers: BrakeSourceReaders) {
   const absent = { title: null, canOpen: false };
-  const event = readers.eventMemoryStore.getEvent(eventId);
+  const event = await readers.eventMemoryStore.getEvent(eventId, owner);
   if (!event || event.ownerUserId !== owner || event.trigger !== 'human_brake' || event.confidence === 'low')
     return absent;
   const thread = await readers.threadStore.get(event.threadId);

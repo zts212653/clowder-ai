@@ -1,4 +1,5 @@
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
+import type { MemoryRecallTimelineRequest, MemoryRecallTimelineResult } from '@clowder-ai/plugin-memory-contract/recall';
 import type Database from 'better-sqlite3';
 import { z } from 'zod';
 import { canAccessThread } from '../domains/guides/guide-state-access.js';
@@ -18,6 +19,7 @@ const cursorSchema = z
   .object({ to: z.number().int().nonnegative(), at: z.number().int().nonnegative(), key: z.string().min(1).max(4000) })
   .strict();
 export type RecallPageCursor = z.infer<typeof cursorSchema>;
+export type RecallTimelineReader = (input: MemoryRecallTimelineRequest['input']) => Promise<MemoryRecallTimelineResult>;
 
 /** A cursor is bound to its owner and filters, and freezes the upper time boundary. */
 export function recallPageCursors() {

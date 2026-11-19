@@ -1,9 +1,8 @@
 import type { CatId, MatterReadSummary } from '@cat-cafe/shared';
 import { canAccessThread } from '../domains/guides/guide-state-access.js';
-import type { MemoryCueEpisodeStore } from '../domains/memory/cue/MemoryCueEpisodeStore.js';
-import {
-  type MemoryCueInvocationCueEntry,
-  projectInvocationCues,
+import type {
+  CueInvocationReader,
+  MemoryCueInvocationCueEntry,
 } from '../domains/memory/cue/project-invocation-cues.js';
 import type { MemoryCueInvocationReadOptions } from './memory-cue-invocation-read.js';
 import { memoryInvocationAccess } from './memory-invocation-access.js';
@@ -39,7 +38,7 @@ async function invocationCats(opts: MemoryCueInvocationReadOptions, invocationId
 /** The same owner projection backs the legacy single read and the bounded batch. */
 export async function readOwnerCueInvocation(
   opts: MemoryCueInvocationReadOptions,
-  episodes: MemoryCueEpisodeStore,
+  readCues: CueInvocationReader,
   userId: string,
   threadId: string,
   invocationId: string,
@@ -48,8 +47,14 @@ export async function readOwnerCueInvocation(
   const access = await memoryInvocationAccess(opts, userId, threadId, invocationId);
   if (access.status !== 200) return access;
   const cats = await invocationCats(opts, invocationId);
+  let entries: Awaited<ReturnType<CueInvocationReader>>;
+  try {
+    entries = await readCues(userId, threadId, invocationId);
+  } catch {
+    return { status: 503, error: 'Cue source unavailable' };
+  }
   const cues: OwnerCue[] = [];
-  for (const cue of projectInvocationCues(episodes.listByInvocation(userId, threadId, invocationId))) {
+  for (const cue of entries) {
     if (cue.resolverFamily !== 'matter') {
       cues.push(cue);
       continue;

@@ -158,6 +158,7 @@ export interface RouteStrategyDeps {
   toolUsageCounter?: import('../../tool-usage/ToolUsageCounter.js').ToolUsageCounter;
   /** F188 Phase F AC-F10: Tool event log (append-only sequence, fire-and-forget) */
   toolEventLog?: import('../../tool-usage/ToolEventLog.js').ToolEventLog;
+  persistRecallEvents?: import('../../../../memory/recall-correlation-hook.js').PersistRecallEvents;
   /** F188 Phase F AC-F10 (AS-4): Skill load event log (fire-and-forget on Skill tool_use) */
   skillLoadEventLog?: import('../../tool-usage/SkillLoadEventLog.js').SkillLoadEventLog;
   /** F148 Phase F: Task store for navigation context (optional, fail-open) */

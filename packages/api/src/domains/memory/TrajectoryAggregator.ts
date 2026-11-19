@@ -15,6 +15,44 @@ interface MinimalEvent {
   summary: Record<string, unknown>;
 }
 
+export function trajectoryActivity(events: MinimalEvent[]) {
+  const filesRead: string[] = [];
+  const filesModified: string[] = [];
+  const seenRead = new Set<string>();
+  const seenModified = new Set<string>();
+
+  for (const e of events) {
+    // F200 HW-4 根因②c: Codex shell-reads (sed/nl/cat/rg) are logged as
+    // command_execution — reuse the same parser as RecallEventCorrelator
+    // (single source of truth) so trajectory filesRead matches consumption.
+    if (e.toolName === 'command_execution') {
+      const cmd = typeof e.summary?.command === 'string' ? e.summary.command : '';
+      for (const p of parseShellReadPaths(cmd)) {
+        if (!seenRead.has(p)) {
+          filesRead.push(p);
+          seenRead.add(p);
+        }
+      }
+      continue;
+    }
+    const filePath = e.summary?.file_path ?? e.summary?.path;
+    if (typeof filePath !== 'string' || !filePath) continue;
+
+    if (FILE_TOOLS_READ.has(e.toolName) && !seenRead.has(filePath)) {
+      filesRead.push(filePath);
+      seenRead.add(filePath);
+    }
+    if (FILE_TOOLS_MODIFY.has(e.toolName) && !seenModified.has(filePath)) {
+      filesModified.push(filePath);
+      seenModified.add(filePath);
+    }
+  }
+
+  const timestamps = events.map((e) => e.timestamp).filter((t) => t > 0);
+  const duration = timestamps.length >= 2 ? Math.max(...timestamps) - Math.min(...timestamps) : 0;
+  return { filesRead, filesModified, duration };
+}
+
 export class TrajectoryAggregator {
   private readonly queryRecallEvents: ReturnType<Database.Database['prepare']>;
   private readonly insertTrajectory: ReturnType<Database.Database['prepare']>;
@@ -47,40 +85,7 @@ export class TrajectoryAggregator {
     const queries = [...new Set(recallRows.map((r) => r.query).filter(Boolean))];
     const taskContext = queries.length > 0 ? queries.join(' → ') : null;
 
-    const filesRead: string[] = [];
-    const filesModified: string[] = [];
-    const seenRead = new Set<string>();
-    const seenModified = new Set<string>();
-
-    for (const e of events) {
-      // F200 HW-4 根因②c: Codex shell-reads (sed/nl/cat/rg) are logged as
-      // command_execution — reuse the same parser as RecallEventCorrelator
-      // (single source of truth) so trajectory filesRead matches consumption.
-      if (e.toolName === 'command_execution') {
-        const cmd = typeof e.summary?.command === 'string' ? e.summary.command : '';
-        for (const p of parseShellReadPaths(cmd)) {
-          if (!seenRead.has(p)) {
-            filesRead.push(p);
-            seenRead.add(p);
-          }
-        }
-        continue;
-      }
-      const filePath = (e.summary?.file_path as string) ?? (e.summary?.path as string) ?? null;
-      if (!filePath) continue;
-
-      if (FILE_TOOLS_READ.has(e.toolName) && !seenRead.has(filePath)) {
-        filesRead.push(filePath);
-        seenRead.add(filePath);
-      }
-      if (FILE_TOOLS_MODIFY.has(e.toolName) && !seenModified.has(filePath)) {
-        filesModified.push(filePath);
-        seenModified.add(filePath);
-      }
-    }
-
-    const timestamps = events.map((e) => e.timestamp).filter((t) => t > 0);
-    const duration = timestamps.length >= 2 ? Math.max(...timestamps) - Math.min(...timestamps) : 0;
+    const { filesRead, filesModified, duration } = trajectoryActivity(events);
     const now = Date.now();
 
     return {

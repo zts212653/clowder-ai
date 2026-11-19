@@ -8,12 +8,20 @@ export interface IndexStateRow {
   fingerprint: string;
   last_scan_at: string | null;
   snoozed_until: string | null;
-  docs_indexed: number;
-  docs_total: number;
+  docs_indexed: number | null;
+  docs_total: number | null;
   error_message: string | null;
   summary_json: string | null;
   created_at: string;
   updated_at: string;
+}
+
+export interface ProjectIndexStatePort {
+  getState(projectPath: string, fingerprint: string | undefined, ownerUserId: string): IndexStateRow | Promise<IndexStateRow>;
+  claim(projectPath: string, fingerprint: string, ownerUserId: string): boolean | Promise<boolean>;
+  markReady(projectPath: string, docsIndexed: number, summaryJson: string, ownerUserId: string): void | Promise<void>;
+  markFailed(projectPath: string, error: string, ownerUserId: string): void | Promise<void>;
+  snoozeForOwner(projectPath: string, ownerUserId: string): string | null | Promise<string | null>;
 }
 
 const MISSING_STATE: IndexStateRow = {
@@ -57,6 +65,12 @@ export class IndexStateManager {
 
     const state = this.getState(projectPath, fingerprint);
     return state.status === 'missing' || state.status === 'stale' || state.status === 'failed';
+  }
+
+  claim(projectPath: string, fingerprint: string): boolean {
+    if (!this.shouldBootstrap(projectPath, fingerprint)) return false;
+    this.startBuilding(projectPath, fingerprint);
+    return true;
   }
 
   startBuilding(projectPath: string, fingerprint: string): void {
@@ -108,6 +122,11 @@ export class IndexStateManager {
            updated_at = excluded.updated_at`,
       )
       .run(id, projectPath, snoozedUntil, nowIso, nowIso);
+  }
+
+  snoozeForOwner(projectPath: string): string | null {
+    this.snooze(projectPath);
+    return this.getState(projectPath).snoozed_until;
   }
 
   isSnoozed(projectPath: string): boolean {

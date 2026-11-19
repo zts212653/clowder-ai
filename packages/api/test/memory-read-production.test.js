@@ -57,7 +57,7 @@ async function fixture(t) {
   const registry = new InvocationRegistry();
   const auth = await registry.create('owner', 'codex61-sol', target.id);
   registerCallbackAuthHook(app, registry);
-  registerCallbackMatterMemoryRoutes(app, matters);
+  registerCallbackMatterMemoryRoutes(app, () => matters);
   registerCallbackMessageReadRoutes(app, { messageStore: messages, threadStore: threads });
   const originalFetch = globalThis.fetch;
   let calls = 0;
