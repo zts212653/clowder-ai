@@ -164,7 +164,10 @@ test('a failed legacy migration can resume without replacing the original backup
   const interrupted = new Database(dbPath, { fileMustExist: true });
   try {
     assert.equal(interrupted.prepare('SELECT MAX(version) FROM schema_version').pluck().get(), 69);
-    assert.throws(() => interrupted.prepare('SELECT tool_execution_policy_json FROM dynamic_task_defs'), /no such column/);
+    assert.throws(
+      () => interrupted.prepare('SELECT tool_execution_policy_json FROM dynamic_task_defs'),
+      /no such column/,
+    );
     interrupted.exec('DROP TRIGGER abort_v70');
   } finally {
     interrupted.close();

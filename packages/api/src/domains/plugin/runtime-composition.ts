@@ -216,6 +216,7 @@ export interface DormantPluginRuntimeCompositionOptions {
     readonly evidenceDbPath: string;
     readonly data?: MemoryDataLocations;
     readonly ephemeral?: boolean;
+    readonly onMatterChanged?: (ownerUserId: string) => void;
     readonly indexSources?: (
       assertActivation: () => void,
     ) => ReturnType<typeof import('../cats/services/session/memory-index-sources.js').createMemoryIndexSources>;
@@ -567,6 +568,7 @@ export function createDormantPluginRuntimeComposition(
                 pluginInstanceId,
                 messageStore: options.messageStore,
                 threadStore: ownerChatSource.threads,
+                onMatterChanged: options.memory.onMatterChanged,
                 assertActivation,
               }),
             }

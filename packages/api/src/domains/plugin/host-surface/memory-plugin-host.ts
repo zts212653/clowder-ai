@@ -1,5 +1,6 @@
 import type { DispatchInput } from '@clowder-ai/plugin-memory-contract';
 import { explainDescriptor, isCompatibleDescriptor } from '@clowder-ai/plugin-memory-contract';
+import type { MatterDispatchInput } from '@clowder-ai/plugin-memory-contract/matter';
 import { invocationNotStarted, type PluginInvocationOutcome } from '../carrier/host-invocation.js';
 import {
   type PluginCallContext,
@@ -78,7 +79,7 @@ export class MemoryPluginHost {
     return this.#binding?.ready === true;
   }
 
-  attempt(request: DispatchInput, caller: PluginCallContext): Promise<PluginInvocationOutcome> {
+  attempt(request: DispatchInput | MatterDispatchInput, caller: PluginCallContext): Promise<PluginInvocationOutcome> {
     const binding = this.#binding;
     if (!binding?.ready) return Promise.resolve(invocationNotStarted(new Error('memory_unavailable')));
     const { pluginInstanceId } = binding.identity;

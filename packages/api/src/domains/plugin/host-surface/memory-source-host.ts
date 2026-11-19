@@ -18,6 +18,7 @@ export function createMemorySourceHost(
   options: MemorySourceReaders & {
     pluginInstanceId: string;
     assertActivation(): void;
+    onMatterChanged?(ownerUserId: string): void;
   },
 ) {
   async function withinCall<T>(work: (actor: MemorySourceActor, caller: PluginCallContext) => Promise<T>) {
@@ -39,6 +40,22 @@ export function createMemorySourceHost(
   }
 
   return {
+    async caller() {
+      return withinCall(async ({ userId, viewer, publicReply }, caller) => ({
+        userId,
+        viewer,
+        publicReply,
+        threadId: caller.threadId,
+        invocationId: caller.invocationId,
+        triggerMessageId: caller.originTriggerMessageId,
+      }));
+    },
+    async assertCurrent() {
+      await withinCall(async () => undefined);
+    },
+    async publishMatterChange() {
+      await withinCall(async ({ userId }) => options.onMatterChanged?.(userId));
+    },
     async canReadThread(threadId: string) {
       const ref = sourceRef.parse(threadId);
       return withinCall((actor) => canReadMemorySourceThread(options, actor, ref));

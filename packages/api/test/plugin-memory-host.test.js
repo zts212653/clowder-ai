@@ -9,6 +9,8 @@ import { currentPluginCallContext, withPluginCallContext } from '../dist/domains
 import { MemoryPluginHost } from '../dist/domains/plugin/host-surface/memory-plugin-host.js';
 import { createMemorySourceHost } from '../dist/domains/plugin/host-surface/memory-source-host.js';
 import { memoryRoutes } from '../dist/routes/memory.js';
+import { createMatterRouteProvider, readMatterOpeningPrompt } from '../dist/routes/memory-matter-provider.js';
+import { registerCallbackMatterMemoryRoutes } from '../dist/routes/memory-matter-routes.js';
 import { createMemoryRouteProvider } from '../dist/routes/memory-route-provider.js';
 
 const pluginInstanceId = 'approved-memory-instance';
@@ -83,6 +85,64 @@ test('memory admission probes replacements on the same installation and rejects 
     ),
     /verified official package/,
   );
+});
+
+test('Matter uses the verified callback actor and validates plugin replies at the Host boundary', async (t) => {
+  const app = Fastify();
+  t.after(() => app.close());
+  const provider = new MemoryPluginHost();
+  const actor = {
+    userId: 'owner',
+    catId: 'opus',
+    threadId: 'thread',
+    invocationId: 'verified-invocation',
+    originTriggerMessageId: 'trigger',
+    assertCurrent: async () => {},
+  };
+  app.addHook('preHandler', async (request) => {
+    if (request.headers['x-test-verified'] === 'yes') request.callbackAuth = actor;
+  });
+  registerCallbackMatterMemoryRoutes(app, createMatterRouteProvider(provider));
+  const headers = { 'x-test-verified': 'yes', 'x-cat-cafe-user': 'spoofed-owner' };
+  const catalog = () => app.inject({ url: '/api/callbacks/memory-matters?limit=2', headers });
+  assert.deepEqual((await catalog()).json(), { error: 'matter_memory_unavailable', effect: 'not_started' });
+  assert.match(await readMatterOpeningPrompt(provider, actor), /当前目录不可用/);
+
+  const history = [];
+  await provider.admit(admission, {
+    exposes: async () => true,
+    async attempt(instanceId, method, request) {
+      if (method === 'memory.describe') return { status: 'returned', value: memoryDescriptor() };
+      const caller = currentPluginCallContext(instanceId);
+      assert.equal(caller.userId, 'owner');
+      assert.equal(caller.catId, 'opus');
+      assert.equal(caller.originTriggerMessageId, 'trigger');
+      await caller.assertCurrent();
+      history.push(request.operation);
+      const value = {
+        'matter.catalog': { items: [], unexpected: 'stripped' },
+        'matter.read_for_invocation': { status: 'rejected', code: 'stale_revision' },
+        'matter.write': { outcome: 'applied' },
+        'matter.opening': 'Directory from the memory plugin',
+      }[request.operation];
+      return { status: 'returned', value };
+    },
+  });
+  provider.markReady(pluginInstanceId);
+  assert.deepEqual((await catalog()).json(), { items: [] });
+  const stale = await app.inject({ url: '/api/callbacks/memory-matters/matter-1', headers });
+  assert.equal(stale.statusCode, 409);
+  assert.equal(stale.json().error, 'stale_revision');
+  const write = await app.inject({
+    method: 'POST',
+    url: '/api/callbacks/memory-matters/write',
+    headers,
+    payload: { operation: 'create', requestId: 'new-request', title: 'New matter', summary: 'Test data' },
+  });
+  assert.equal(write.statusCode, 503);
+  assert.deepEqual(write.json(), { error: 'matter_memory_unavailable', effect: 'unknown' });
+  assert.equal(await readMatterOpeningPrompt(provider, actor), 'Directory from the memory plugin');
+  assert.deepEqual(history, ['matter.catalog', 'matter.read_for_invocation', 'matter.write', 'matter.opening']);
 });
 
 test('an action can detect replacement of the same instance while its request is in flight', async () => {

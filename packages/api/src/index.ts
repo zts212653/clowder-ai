@@ -1678,12 +1678,13 @@ async function initializeApi(
   );
   const memoryCueEpisodeStore = new MemoryCueEpisodeStore(memoryServices.store.getDb());
   const { MatterMemoryService } = await import('./domains/memory/matters/MatterMemoryService.js');
+  const { createMatterRouteProvider, readMatterOpeningPrompt } = await import('./routes/memory-matter-provider.js');
+  const matterRouteProvider = createMatterRouteProvider(memoryProvider);
   const matterMemoryService = new MatterMemoryService({
     db: memoryServices.store.getDb(),
     messageStore,
     threadStore,
     runWrite: (operation) => memoryServices.store.runExclusive(operation),
-    onChanged: (ownerUserId) => socketManager?.emitToUser(ownerUserId, 'memory_matter_changed', {}),
   });
   const { WorkPreparationOpportunityStore } = await import(
     './domains/memory/cue/preparation/WorkPreparationOpportunityStore.js'
@@ -3072,7 +3073,7 @@ async function initializeApi(
     ),
     contextSourceAdmission: memoryCueRuntime.contextSourceAdmission,
     memoryCuePromptService: memoryCueRuntime.promptService,
-    matterMemoryService,
+    matterOpeningPrompt: (caller) => readMatterOpeningPrompt(memoryProvider, caller),
     profileCueOpportunitySource: memoryCueRuntime.profileOpportunitySource,
     eventCueOpportunitySource: memoryCueRuntime.eventOpportunitySource,
     threadOverviewOpportunitySource: memoryCueRuntime.threadOverviewOpportunitySource,
@@ -3767,7 +3768,7 @@ async function initializeApi(
   });
   const { memoryCueInvocationReadRoutes } = await import('./routes/memory-cue-invocation-read.js');
   const { memoryMatterRoutes } = await import('./routes/memory-matter-routes.js');
-  await app.register(memoryMatterRoutes, { service: matterMemoryService });
+  await app.register(memoryMatterRoutes, { provider: matterRouteProvider });
   await app.register(memoryCueInvocationReadRoutes, {
     matterMemoryService,
     evidenceDb: memoryServices.store.getDb(),
@@ -5207,7 +5208,7 @@ async function initializeApi(
         }
       : {}),
     memoryCueDeps,
-    matterMemoryService,
+    matterRouteProvider,
     skillConsumptionDeps: {
       receipts: skillConsumptionReceipts,
       ...(requestReviewUseReceipts ? { requestReviewReceipts: requestReviewUseReceipts } : {}),
@@ -5534,6 +5535,7 @@ async function initializeApi(
       evidenceDbPath,
       data: memoryData,
       ephemeral: process.env.MEMORY_STORE === '1',
+      onMatterChanged: (ownerUserId) => socketManager?.emitToUser(ownerUserId, 'memory_matter_changed', {}),
       indexSources: makeMemoryIndexSources,
     },
     agentSessionProviders: (packages, configuration) =>
