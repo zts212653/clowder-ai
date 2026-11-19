@@ -295,22 +295,23 @@ export function PdlAppHost() {
     addressJump.current = browserPath;
     pendingJump.current = { threadId, mid: addressMid, ...(addressBlock ? { block: addressBlock } : {}) };
   }
-  // Where the reader is: once the conversation stops scrolling, the address names the message at the top of the view
-  // (?message=…), or nothing at the latest. A refresh reopens there through the same address jump; writing the
-  // address is not itself a jump.
+  // Where the reader is: once the conversation stops scrolling, the address names the message at the middle of the
+  // view (?message=…), or nothing at the latest. A refresh reopens there through the same address jump, which puts
+  // that message in the middle again, so the record stays put; writing the address is not itself a jump.
   useEffect(() => {
     const settle = (event: Event) => {
       const stream = event.target;
       if (!(stream instanceof HTMLElement) || stream.id !== 'stream') return;
       const url = new URL(window.location.href);
       if (!url.pathname.startsWith('/thread/')) return;
-      const top = stream.getBoundingClientRect().top;
+      const view = stream.getBoundingClientRect(),
+        middle = (view.top + view.bottom) / 2;
       const message =
         -stream.scrollTop <= 2
           ? undefined
           : [
               ...stream.querySelectorAll<HTMLElement>('[data-stream] > [data-mid], [data-stream] > [data-message-id]'),
-            ].find((m) => m.getBoundingClientRect().bottom > top);
+            ].find((m) => m.getBoundingClientRect().bottom >= middle);
       const mid = message?.dataset.mid ?? message?.dataset.messageId;
       url.searchParams.delete('messageId');
       url.searchParams.delete('block');
