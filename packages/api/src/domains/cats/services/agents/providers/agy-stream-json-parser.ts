@@ -8,6 +8,6 @@ export function agyTerminalPolicyRejected(error: string): boolean {
   return reason === 'auth_failed' || reason === 'upstream_policy_reject';
 }
 
-export function summarizeAgyStreamJsonTurn(lines: Iterable<string>) {
-  return summarize(lines, agyTerminalPolicyRejected);
+export function summarizeAgyStreamJsonTurn(lines: Iterable<string>, terminalPolicyRejected?: boolean) {
+  return summarize(lines, terminalPolicyRejected ?? agyTerminalPolicyRejected);
 }

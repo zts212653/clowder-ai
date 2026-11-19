@@ -1,3 +1,4 @@
+import { isDeepStrictEqual } from 'node:util';
 import type { CliDiagnostics } from '@cat-cafe/shared';
 import { isCliError, isCliTimeout, isLivenessWarning } from '../../../../../../../utils/cli-spawn.js';
 import type { LivenessWarningEvent } from '../../../../../../../utils/ProcessLivenessProbe.js';
@@ -56,11 +57,45 @@ export async function* observeAgyNativeTurn(
   let resultCount = 0;
   let resultSeenBeforeCancellation = false;
   let terminalPolicyRejected = false;
+  let nativeStatus: string | null = null;
+  let nativeHasResponse = false;
+  let nativeHasTool = false;
+  let nativeHasDenials = false;
   let streamChars = 0;
   const terminal = async (verifiedSessionId: string): Promise<AgyStreamJsonTurn> => {
     const turn = adapter ? await adapter.summarize(lines, terminalPolicyRejected) : summarizeAgyStreamJsonTurn(lines);
     if (turn.conversationId && turn.conversationId !== verifiedSessionId)
       throw new Error('AGY native terminal conversation ID disagrees with init');
+    if (!adapter) return turn;
+    if (
+      turn.upstreamStatus !== nativeStatus ||
+      (turn.outcome === 'ok' && (nativeStatus !== 'SUCCESS' || !nativeHasResponse)) ||
+      (turn.outcome === 'unconfirmed' && !nativeHasResponse) ||
+      (nativeStatus === null && turn.outcome !== 'incomplete' && turn.outcome !== 'protocol_error')
+    )
+      throw new Error('invalid_agy_native_terminal_evidence');
+    if (
+      nativeStatus !== 'SUCCESS' ||
+      nativeHasTool ||
+      nativeHasDenials ||
+      turn.toolCalls.length ||
+      turn.completedCompactionStep !== null
+    ) {
+      // These fields can admit native recovery or publication. Verify them against the original carrier evidence.
+      const native = summarizeAgyStreamJsonTurn(lines, terminalPolicyRejected);
+      const evidence = (result: AgyStreamJsonTurn) => ({
+        outcome: result.outcome,
+        toolCalls: result.toolCalls,
+        deniedActions: result.deniedActions,
+        completedResponseStep: result.completedResponseStep,
+        completedCompactionStep: result.completedCompactionStep,
+        recoveredErrorSteps: result.recoveredErrorSteps,
+        stepsComplete: result.stepsComplete,
+        sessionTurnCount: result.sessionTurnCount,
+        unknownEvents: result.unknownEvents,
+      });
+      if (!isDeepStrictEqual(evidence(turn), evidence(native))) throw new Error('invalid_agy_native_terminal_evidence');
+    }
     return turn;
   };
   const debugRef = (): CliDiagnostics['debugRef'] => ({
@@ -122,14 +157,26 @@ export async function* observeAgyNativeTurn(
       lines.length = 0;
       resultCount = 0;
       terminalPolicyRejected = false;
+      nativeStatus = null;
+      nativeHasResponse = false;
+      nativeHasTool = false;
+      nativeHasDenials = false;
       resultSeenBeforeCancellation = false;
     }
     if (record.event === 'result') {
       if (sessionId) verifyAgyNativeResult(record, sessionId);
-      const error = asRecord(record.result)?.error;
+      const result = asRecord(record.result);
+      const error = result?.error;
+      nativeStatus = typeof result?.status === 'string' ? result.status : 'UNKNOWN';
+      nativeHasResponse = typeof result?.response === 'string';
+      nativeHasDenials = result?.denied_actions !== undefined;
       terminalPolicyRejected = typeof error === 'string' && agyTerminalPolicyRejected(error);
       resultCount++;
       if (!signal?.aborted) resultSeenBeforeCancellation = true;
+    }
+    if (record.event === 'step_update') {
+      const rawStep = asRecord(record.step_update);
+      nativeHasTool ||= Boolean(rawStep?.tool_name || rawStep?.step_type === 'tool' || rawStep?.step_type === 'finish');
     }
     streamChars += line.length;
     if (streamChars > MAX_AGY_NATIVE_STREAM_CHARS)

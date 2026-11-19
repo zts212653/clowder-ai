@@ -68,6 +68,13 @@ export async function* runAgyNativeInvocation(input: {
   } = input;
   const inputLifetime = new AbortController();
   const processLifetime = new AbortController();
+  const assertCurrent = () => adapter?.lifetime.throwIfAborted();
+  function* currentMessages(messages: Iterable<AgentMessage>) {
+    for (const message of messages) {
+      assertCurrent();
+      yield message;
+    }
+  }
   const multiTurn = Boolean(options?.activeRunDispatch && !compactionRequested && prompt.trim() !== '/compact');
   const imagePublisher = new AgyNativeImagePublisher(
     catId,
@@ -112,7 +119,7 @@ export async function* runAgyNativeInvocation(input: {
       assertLaunchCurrent: adapter
         ? async () => {
             await deferredLaunchOptions.assertLaunchCurrent?.();
-            adapter.lifetime.throwIfAborted();
+            assertCurrent();
           }
         : deferredLaunchOptions.assertLaunchCurrent,
       stdinCloseSignal: inputLifetime.signal,
@@ -163,11 +170,22 @@ export async function* runAgyNativeInvocation(input: {
       options?.signal,
       multiTurn,
       adapter,
-      adapter ? configuredCredentialValues({ ...process.env, ...launch.cliOptions.env }) : [],
+      adapter
+        ? configuredCredentialValues(
+            Object.fromEntries(
+              Object.entries({ ...process.env, ...launch.cliOptions.env }).map(([key, value]) => [
+                key,
+                value ?? undefined,
+              ]),
+            ),
+          )
+        : [],
     )) {
       if (observation.kind === 'init') {
         await launch.bindSession(observation.sessionId);
+        assertCurrent();
         await continuityInput?.acceptVerifiedInit(observation.sessionId);
+        assertCurrent();
         metadata.sessionId = observation.sessionId;
         metadata.model = model;
         if (launch.capacityScope) {
@@ -195,14 +213,18 @@ export async function* runAgyNativeInvocation(input: {
           firstObservedAt: lastNativeStep?.stepIndex === event.stepIndex ? lastNativeStep.firstObservedAt : Date.now(),
         };
         await runInput?.step(observation.event);
+        assertCurrent();
         const messages = runOutput ? runOutput.step(observation.event) : progress.step(observation.event);
         for (const message of messages) {
-          yield await recoverAgyNativeMcpSpill(
+          assertCurrent();
+          const output = await recoverAgyNativeMcpSpill(
             message,
             observation.event,
             launch.binding.profileHome,
             launch.agentTools,
           );
+          assertCurrent();
+          yield output;
         }
       } else if (observation.kind === 'result') {
         const resultObserved =
@@ -215,17 +237,18 @@ export async function* runAgyNativeInvocation(input: {
               }
             : observation.observed;
         const publication = await imagePublisher.settle(resultObserved);
-        yield* publication.messages;
+        yield* currentMessages(publication.messages);
+        assertCurrent();
         if (runInput && runOutput) {
           const messages = runOutput.result(publication.observed);
           runInput.observeResult(runOutput.successful);
           if (!runOutput.successful) {
             processLifetime.abort();
             observed = publication.observed;
-            yield* messages;
+            yield* currentMessages(messages);
             break;
           }
-          yield* messages;
+          yield* currentMessages(messages);
         }
       } else if (observation.kind === 'turn_complete') {
         const projected = projectAgyNativeTurn(
@@ -237,6 +260,7 @@ export async function* runAgyNativeInvocation(input: {
         );
         const hostSuccessful = successful(projected);
         await runInput?.completeTurn(hostSuccessful);
+        assertCurrent();
         settleCapacity(observation.observed, hostSuccessful);
         if (!hostSuccessful) {
           observed = observation.observed;
@@ -275,9 +299,11 @@ export async function* runAgyNativeInvocation(input: {
       }
     }
     if (!observed) throw new Error('AGY native stream ended without a terminal observation');
+    assertCurrent();
     const publication = await imagePublisher.settle(observed);
     observed = publication.observed;
-    yield* publication.messages;
+    yield* currentMessages(publication.messages);
+    assertCurrent();
     if (runInput && runOutput) {
       if (runInput.hasUnfinishedInput) {
         log.warn(
@@ -296,10 +322,11 @@ export async function* runAgyNativeInvocation(input: {
       const messages = runOutput.finish(observed);
       await runInput.completeTurn(successful(messages));
       await runInput.dispose();
+      assertCurrent();
       settleCapacity(observed, successful(messages));
       for (const message of messages)
         if (message.metadata) message.metadata.contextWindowObservation = metadata.contextWindowObservation;
-      yield* messages;
+      yield* currentMessages(messages);
       return;
     }
     const messages = projectAgyNativeTurn(
@@ -311,7 +338,7 @@ export async function* runAgyNativeInvocation(input: {
       compactionRequested,
     );
     settleCapacity(observed, successful(messages));
-    yield* progress.final(messages);
+    yield* currentMessages(progress.final(messages));
   } finally {
     processLifetime.abort();
     await runInput?.dispose();

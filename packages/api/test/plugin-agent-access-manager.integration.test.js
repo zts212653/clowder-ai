@@ -16,6 +16,7 @@ import {
 import { validateManifest } from '@clowder-ai/plugin-contract';
 import Fastify from 'fastify';
 import { A2AAgentService } from '../dist/domains/cats/services/agents/providers/A2AAgentService.js';
+import { observeAgyNativeTurn } from '../dist/domains/cats/services/agents/providers/agy-native/agy-native-turn.js';
 import { ClaudeSdkAgentService } from '../dist/domains/cats/services/agents/providers/ClaudeSdkAgentService.js';
 import { sessionImplementationKey } from '../dist/domains/cats/services/agents/session-contract/implementation-registry.js';
 import { MessageStore } from '../dist/domains/cats/services/stores/ports/MessageStore.js';
@@ -23,6 +24,7 @@ import { createAgentAccessA2ARunner } from '../dist/domains/plugin/agent-access/
 import { createAgentAccessAcpModelSelection } from '../dist/domains/plugin/agent-access/acp.js';
 import { createAgentAccessAcpProcess } from '../dist/domains/plugin/agent-access/acp-process.js';
 import { AgentAccessAcpRuntimeClient } from '../dist/domains/plugin/agent-access/acp-runtime-client.js';
+import { createAgentAccessAgyOutput } from '../dist/domains/plugin/agent-access/agy.js';
 import { createAgentAccessCatAgentOutput } from '../dist/domains/plugin/agent-access/catagent.js';
 import { createAgentAccessClaudeBatch } from '../dist/domains/plugin/agent-access/claude-batch.js';
 import { createAgentAccessDshConnectionTest } from '../dist/domains/plugin/agent-access/dsh.js';
@@ -476,6 +478,85 @@ test('Agent access discovery executes the same standalone entrypoint from a Mana
   assert.equal(catAgentEvents[3].block.text, 'direct API [credential redacted]');
   assert.deepEqual(catAgentEvents[4].block.input, { query: '[credential redacted]', name: 'preserved' });
   assert.equal(catAgentEvents[6].stopReason, 'end_turn');
+
+  const openAgyOutput = createAgentAccessAgyOutput(runtime.inventoryStore, runtime.supervisor);
+  const agy = await openAgyOutput();
+  const agyRecorded = (
+    await readFile(new URL('./fixtures/agy-stream-json/followup-default.ndjson', import.meta.url), 'utf8')
+  )
+    .trim()
+    .split('\n')
+    .map((line) => JSON.parse(line))
+    .filter((event) => event.event);
+  const agyInit = agyRecorded[0].init;
+  const agyExpected = {
+    agentName: agyInit.agent,
+    spawnCwd: agyInit.cwd,
+    model: agyInit.model,
+    permissionMode: agyInit.permission_mode,
+  };
+  const agyEvents = () =>
+    (async function* () {
+      yield* agyRecorded;
+    })();
+  const observedAgy = await Array.fromAsync(observeAgyNativeTurn(agyEvents(), agyExpected, undefined, true, agy));
+  const agyTurns = observedAgy.filter(({ kind }) => kind === 'result').map(({ observed }) => observed.turn);
+  assert.deepEqual(
+    agyTurns.map(({ outcome }) => outcome),
+    ['ok', 'ok'],
+  );
+  assert.match(agyTurns[0].finalText, /A_DONE NONE/);
+  assert.match(agyTurns[1].finalText, /A_DONE PAPAYA/);
+  assert.equal(agyTurns[1].toolCalls.length, 0);
+  await assert.rejects(
+    Array.fromAsync(
+      observeAgyNativeTurn(agyEvents(), { ...agyExpected, sessionId: 'different-id' }, undefined, true, agy),
+    ),
+    /replaced the requested conversation/,
+  );
+  let forgeTerminal = false;
+  const forgedAgy = await createAgentAccessAgyOutput(runtime.inventoryStore, {
+    nativeActions: runtime.supervisor.nativeActions,
+    async invoke(instanceId, method, input) {
+      const output = await runtime.supervisor.invoke(instanceId, method, input);
+      if (forgeTerminal) {
+        return method === 'summarizeAgyTurn' ? { ...output, outcome: 'ok', upstreamStatus: 'SUCCESS' } : output;
+      }
+      if (method !== 'projectAgyOutput') return output;
+      return (async function* () {
+        for await (const frame of output) {
+          yield frame.step?.stepType === 'agent_response'
+            ? { ...frame, step: { ...frame.step, stepType: 'user_input' } }
+            : frame;
+        }
+      })();
+    },
+  })();
+  await assert.rejects(
+    Array.fromAsync(observeAgyNativeTurn(agyEvents(), agyExpected, undefined, true, forgedAgy)),
+    /invalid_agy_step_evidence/,
+  );
+  forgeTerminal = true;
+  await assert.rejects(
+    Array.fromAsync(
+      observeAgyNativeTurn(
+        (async function* () {
+          for (const event of agyRecorded) {
+            if (event.event !== 'result') yield event;
+            else {
+              yield { ...event, result: { ...event.result, status: 'ERROR' } };
+              return;
+            }
+          }
+        })(),
+        agyExpected,
+        undefined,
+        true,
+        forgedAgy,
+      ),
+    ),
+    /invalid_agy_native_terminal_evidence/,
+  );
 
   const acpCommands = [];
   const mcpSecret = 'fixture-host-held-mcp-value';
