@@ -27,8 +27,9 @@ export function useServerComposerDraft(input: {
   threadId: string;
   enabled: boolean;
   draft: ComposerDraft;
-  /** Shows a saved draft in the input; what it returns settles once the input shows all of it (images are read back). */
-  restore: (draft: ComposerDraft) => void | Promise<unknown>;
+  /** Shows a saved draft in the input; what it returns settles once the input shows all of it (images are read back).
+   *  `current` says whether the input still belongs to that conversation: what arrives after a switch is dropped. */
+  restore: (draft: ComposerDraft, current: () => boolean) => void | Promise<unknown>;
 }) {
   const known = useRef<Known>(new Map());
   const pending = useRef<{ threadId: string; draft: ComposerDraft } | null>(null);
@@ -62,7 +63,7 @@ export function useServerComposerDraft(input: {
         else if (now !== JSON.stringify(saved)) {
           restoring.current = threadId;
           // A draft whose images can't be read back is as unknown as an unreachable one: nothing overwrites it.
-          await Promise.resolve(latest.current.restore(saved)).catch(() => known.current.delete(threadId));
+          await Promise.resolve(latest.current.restore(saved, () => live)).catch(() => known.current.delete(threadId));
           if (restoring.current === threadId) restoring.current = null;
         }
       })

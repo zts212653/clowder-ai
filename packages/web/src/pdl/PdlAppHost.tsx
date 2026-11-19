@@ -534,7 +534,7 @@ function ChatBinding({
       contexts,
       ...(reply ? { replyTo: reply.id } : {}),
     },
-    restore: (saved) => {
+    restore: (saved, current) => {
       setInput(saved.text);
       setContexts(saved.contexts);
       const message = saved.replyTo && useChatStore.getState().messages.find((m) => m.id === saved.replyTo);
@@ -544,6 +544,7 @@ function ChatBinding({
           .setReplyTo({ id: message.id, content: message.content, senderCatId: message.catId ?? null, threadId });
       else useChatStore.getState().clearReplyTo();
       return downloadImages(saved.images).then((files) => {
+        if (!current()) return;
         files.forEach((file, i) => draftImageUrl.set(file, saved.images[i]));
         setImages(files);
       });

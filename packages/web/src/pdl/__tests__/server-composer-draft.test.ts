@@ -44,7 +44,10 @@ it('shows the draft the server keeps when the conversation opens, without writin
   );
   const { restore } = mount({ text: '', images: [], contexts: [] });
   await waitFor(() =>
-    expect(restore).toHaveBeenCalledWith({ text: '写到一半', images: [], contexts: [quote], replyTo: 'm1' }),
+    expect(restore).toHaveBeenCalledWith(
+      { text: '写到一半', images: [], contexts: [quote], replyTo: 'm1' },
+      expect.any(Function),
+    ),
   );
   await flushed(700);
   expect(writes()).toEqual([]);
@@ -53,7 +56,9 @@ it('shows the draft the server keeps when the conversation opens, without writin
 it('empties what this browser kept when the draft was sent or cleared elsewhere', async () => {
   vi.mocked(apiFetch).mockResolvedValue(Response.json({ draft: null, revision: 4 }));
   const { restore } = mount({ text: 'stale words', images: [], contexts: [] });
-  await waitFor(() => expect(restore).toHaveBeenCalledWith({ text: '', images: [], contexts: [] }));
+  await waitFor(() =>
+    expect(restore).toHaveBeenCalledWith({ text: '', images: [], contexts: [] }, expect.any(Function)),
+  );
   await flushed(700);
   expect(writes()).toEqual([]);
 });
@@ -166,7 +171,10 @@ it('puts back the images of a saved draft, writes nothing while they are read, a
   const hook = renderHook(() => useServerComposerDraft({ threadId: 't1', enabled: true, draft: state.draft, restore }));
   host.rerender = hook.rerender;
   await waitFor(() =>
-    expect(restore).toHaveBeenCalledWith({ text: 'see this', images: ['/uploads/a.png'], contexts: [] }),
+    expect(restore).toHaveBeenCalledWith(
+      { text: 'see this', images: ['/uploads/a.png'], contexts: [] },
+      expect.any(Function),
+    ),
   );
   await flushed(700);
   expect(writes()).toEqual([]);
@@ -210,4 +218,51 @@ it('leaves a saved draft whose images cannot be read back as the server keeps it
   hook.rerender();
   await flushed(700);
   expect(writes()).toEqual([]);
+});
+
+it('keeps images read back for one conversation out of the conversation opened meanwhile', async () => {
+  vi.mocked(apiFetch).mockImplementation(async (path, init) =>
+    init?.method === 'PUT'
+      ? Response.json({ draft: { revision: 9 } })
+      : String(path).includes('/t1/')
+        ? Response.json({
+            draft: { text: 'A', contentBlocks: [{ type: 'image', url: '/uploads/a.png' }] },
+            revision: 1,
+          })
+        : Response.json({ draft: { text: 'B' }, revision: 2 }),
+  );
+  const state = { draft: { text: '', images: [], contexts: [] } as ComposerDraft, threadId: 't1' };
+  const host: { rerender?: () => void } = {};
+  let readBack: () => void = () => {};
+  const restore = vi.fn((saved: ComposerDraft, current: () => boolean) => {
+    // Like the host: words at once, images once they are read back, and only into the conversation that asked.
+    state.draft = { ...saved, images: [] };
+    host.rerender?.();
+    return new Promise<void>((resolve) => {
+      const done = () => {
+        if (current()) {
+          state.draft = { ...state.draft, images: saved.images };
+          host.rerender?.();
+        }
+        resolve();
+      };
+      if (saved.images.length) readBack = done;
+      else done();
+    });
+  });
+  const hook = renderHook(() =>
+    useServerComposerDraft({ threadId: state.threadId, enabled: true, draft: state.draft, restore }),
+  );
+  host.rerender = hook.rerender;
+  await waitFor(() => expect(restore).toHaveBeenCalledTimes(1));
+  state.threadId = 't2';
+  hook.rerender();
+  await waitFor(() => expect(restore).toHaveBeenCalledTimes(2));
+  await flushed();
+  readBack();
+  await flushed(700);
+  expect(state.draft).toEqual({ text: 'B', images: [], contexts: [] });
+  expect(writes().filter(([, path, body]) => String(path).includes('/t2/') && String(body).includes('a.png'))).toEqual(
+    [],
+  );
 });
