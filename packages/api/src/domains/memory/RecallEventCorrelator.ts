@@ -40,20 +40,7 @@ export interface RawEvent {
 }
 
 export class RecallEventCorrelator {
-  private readonly insertStmt: ReturnType<Database.Database['prepare']>;
-
-  constructor(private readonly db: Database.Database) {
-    this.insertStmt = db.prepare(`
-      INSERT OR IGNORE INTO recall_events
-        (recall_id, cat_id, invocation_id, tool_name, query, mode, scope,
-         candidates_json, result_count, result_status, consumed_json, reformulated, fell_back_to_grep,
-         abandoned, next_graph_resolve_after_read, token_cost, timestamp,
-         shadow_ranking_json, result_set_id, attribution_clarity, thread_id,
-         source, push_surface, presented, inspected, outcome, source_event_id,
-         expansion_funnel_json)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `);
-  }
+  constructor(private readonly db: Database.Database) {}
 
   correlateWindow(events: RawEvent[]): RecallEvent[] {
     const results: RecallEvent[] = [];
@@ -218,6 +205,16 @@ export class RecallEventCorrelator {
   }
 
   persistBatch(batch: RecallEvent[]): void {
+    const insertStmt = this.db.prepare(`
+      INSERT OR IGNORE INTO recall_events
+        (recall_id, cat_id, invocation_id, tool_name, query, mode, scope,
+         candidates_json, result_count, result_status, consumed_json, reformulated, fell_back_to_grep,
+         abandoned, next_graph_resolve_after_read, token_cost, timestamp,
+         shadow_ranking_json, result_set_id, attribution_clarity, thread_id,
+         source, push_surface, presented, inspected, outcome, source_event_id,
+         expansion_funnel_json)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
     const tx = this.db.transaction((items: RecallEvent[]) => {
       for (const e of items) {
         const params = [
@@ -250,7 +247,7 @@ export class RecallEventCorrelator {
           e.sourceEventId ?? null,
           e.expansionFunnel ? JSON.stringify(e.expansionFunnel) : null,
         ];
-        this.insertStmt.run(params);
+        insertStmt.run(params);
       }
     });
     tx(batch);

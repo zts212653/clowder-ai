@@ -19,6 +19,7 @@ import {
   type MemoryCueInvocationRequest,
   type MemoryRecallCandidateRequest,
   type MemoryRecallEventRequest,
+  type MemoryRecallPersistRequest,
   type MemoryRecallStatsRequest,
   type MemoryRecallTimelineRequest,
   memoryCueInvocationResult,
@@ -28,7 +29,8 @@ import {
   memoryRecallTimelineResult,
 } from '@clowder-ai/plugin-memory-contract/recall';
 import { type TasteBrowseDispatchInput, tasteBrowseOutputSchemas } from '@clowder-ai/plugin-memory-contract/taste';
-import type { z } from 'zod';
+import { z } from 'zod';
+import type { PersistRecallEvents } from '../../memory/recall-correlation-hook.js';
 import {
   invocationNotStarted,
   type PluginInvocationEffect,
@@ -72,6 +74,7 @@ type MemoryDispatch =
   | MemoryCueInvocationRequest
   | MemoryRecallCandidateRequest
   | MemoryRecallEventRequest
+  | MemoryRecallPersistRequest
   | MemoryRecallStatsRequest
   | MemoryRecallTimelineRequest
   | TasteBrowseDispatchInput;
@@ -81,14 +84,14 @@ export async function callMemoryOwner<T>(
   request: MemoryDispatch,
   schema: z.ZodType<T>,
   userId: string,
-  scope: { threadId?: string; privateOwnerAccess?: boolean } = {},
+  scope: { threadId?: string; invocationId?: string; privateOwnerAccess?: boolean } = {},
 ): Promise<T> {
   const outcome = await provider.attempt(request, {
     catId: 'user',
     userId,
     threadId: scope.threadId ?? 'default',
     memoryPrivateOwnerAccess: scope.privateOwnerAccess,
-    invocationId: randomUUID(),
+    invocationId: scope.invocationId ?? randomUUID(),
     assertCurrent: async () => {},
   });
   if (outcome.status === 'failed') throw new MemoryProviderCallError(outcome.effect);
@@ -215,6 +218,26 @@ export class MemoryPluginHost {
     const visible = new Set(input.threadIds);
     if (rows.some((row) => !visible.has(row.thread_id))) throw new MemoryProviderCallError('unknown');
     return rows;
+  }
+
+  async persistRecallEvents(scope: Parameters<PersistRecallEvents>[0], events: Parameters<PersistRecallEvents>[1]) {
+    await callMemoryOwner(
+      this,
+      {
+        operation: 'recall.persist',
+        input: {
+          events: events.map((event) => ({
+            ...event,
+            threadId: scope.threadId,
+            candidates: event.candidates.map((candidate) => ({ ...candidate })),
+            consumed: event.consumed.map((consumption) => ({ ...consumption })),
+          })),
+        },
+      },
+      z.null(),
+      scope.userId,
+      scope,
+    );
   }
 
   readRecallEvent(input: MemoryRecallEventRequest['input'], userId: string) {

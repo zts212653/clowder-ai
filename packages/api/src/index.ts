@@ -3050,6 +3050,7 @@ async function initializeApi(
     ...(agentPaneRegistry ? { agentPaneRegistry } : {}),
     packStore,
     evidenceStore: memoryServices.evidenceStore,
+    persistRecallEvents: memoryProvider.persistRecallEvents.bind(memoryProvider),
     ...(proactiveMemoryNudgeService ? { proactiveMemoryNudgeService } : {}),
     ...(humanDispositionFeedbackContextService ? { humanDispositionFeedbackContextService } : {}),
     ...(toolUsageCounter ? { toolUsageCounter } : {}),

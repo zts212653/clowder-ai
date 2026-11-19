@@ -4037,7 +4037,13 @@ export async function* routeSerial(
                 catId,
                 threadId,
               );
-              triggerRecallCorrelation(evidenceDb, withPush, invId, catId).catch(() => {});
+              void triggerRecallCorrelation(
+                evidenceDb,
+                withPush,
+                invId,
+                catId,
+                deps.persistRecallEvents ? { userId, threadId, persist: deps.persistRecallEvents } : undefined,
+              ).catch(() => {});
             }
           })
           .catch(() => {});

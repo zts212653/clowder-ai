@@ -1,6 +1,6 @@
 import type Database from 'better-sqlite3';
 import { recordEdgeTraversals } from './edge-traversal.js';
-import type { PushRecallPresentation } from './f200-types.js';
+import type { PushRecallPresentation, RecallEvent } from './f200-types.js';
 import { collectLifecycleTraces } from './f263-lifecycle-collector.js';
 import { LifecycleTraceStore } from './LifecycleTraceStore.js';
 import { type RawEvent, RecallEventCorrelator } from './RecallEventCorrelator.js';
@@ -9,6 +9,11 @@ import { lookupShadowRanking } from './SqliteEvidenceStore.js';
 import { TrajectoryAggregator } from './TrajectoryAggregator.js';
 
 const MEMORY_TOOLS = new Set(['search_evidence', 'graph_resolve', 'list_recent', 'session_bootstrap', 'cold_context']);
+
+export type PersistRecallEvents = (
+  scope: { userId: string; threadId: string; invocationId: string },
+  events: readonly RecallEvent[],
+) => Promise<void>;
 
 type CorrelationInputEvent = Array<
   Partial<RawEvent> & Pick<RawEvent, 'invocationId' | 'catId' | 'toolName' | 'timestamp'>
@@ -46,6 +51,7 @@ export async function triggerRecallCorrelation(
   events: Array<Partial<RawEvent> & Pick<RawEvent, 'invocationId' | 'catId' | 'toolName' | 'timestamp'>>,
   invocationId: string,
   catId: string,
+  writer?: { userId: string; threadId: string; persist: PersistRecallEvents },
 ): Promise<void> {
   const invEvents = events.filter((e) => e.invocationId === invocationId && e.catId === catId);
   const rawMemoryEvents = invEvents.filter((e) => MEMORY_TOOLS.has(e.toolName));
@@ -76,7 +82,7 @@ export async function triggerRecallCorrelation(
   const recallEvents = correlator.correlateWindow(fullEvents);
   if (recallEvents.length > 0) {
     // F102 bugfix: attach threadId so RecallFeed can query history by thread
-    const threadId = fullEvents.find((e) => e.threadId)?.threadId ?? '';
+    const threadId = writer?.threadId ?? fullEvents.find((e) => e.threadId)?.threadId ?? '';
     const candidateAnchorsPerSearch: string[][] = [];
     for (const e of memoryEvents) {
       const summary = e.summary as Record<string, unknown> | undefined;
@@ -97,7 +103,11 @@ export async function triggerRecallCorrelation(
         recallEvents[i].shadowRankingJson = null;
       }
     }
-    correlator.persistBatch(recallEvents);
+    if (writer) {
+      await writer.persist({ userId: writer.userId, threadId, invocationId }, recallEvents);
+    } else {
+      correlator.persistBatch(recallEvents);
+    }
 
     // F263 Phase C: collect lifecycle traces (unmet demand + verification)
     try {
