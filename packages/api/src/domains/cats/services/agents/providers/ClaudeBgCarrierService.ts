@@ -648,8 +648,35 @@ export class ClaudeBgCarrierService implements AgentService {
     // codex round-8 P2: receive effective model from startJob so metadata
     // reflects what was actually spawned (not this.model fallback when
     // callbackEnv MODEL_OVERRIDE_KEY or api_key env routing changes the run).
-    const { shortId, consumer, effectiveModel, owner } = await this.startJob(prompt, options);
+    const job = await this.startJob(prompt, options);
+    let stopped = false;
+    const stop = () => {
+      if (stopped) return;
+      stopped = true;
+      this.bestEffortStop(job.shortId, job.owner);
+    };
+    let finished = false;
+    batch?.signal.addEventListener('abort', stop, { once: true });
+    if (batch?.signal.aborted) stop();
+    try {
+      for await (const message of this.observeJob(job, startedAt, options, batch, stop)) {
+        batch?.signal.throwIfAborted();
+        if (message.type === 'done') finished = true;
+        yield message;
+      }
+    } finally {
+      batch?.signal.removeEventListener('abort', stop);
+      if (batch && !finished) stop();
+    }
+  }
 
+  private async *observeJob(
+    { shortId, consumer, effectiveModel, owner }: StartJobResult,
+    startedAt: number,
+    options: AgentServiceOptions | undefined,
+    batch: Awaited<ReturnType<AgentAccessClaudeBatch>> | undefined,
+    stop: () => void,
+  ): AsyncGenerator<AgentMessage> {
     yield {
       type: 'session_init',
       catId: this.catId,
@@ -692,6 +719,7 @@ export class ClaudeBgCarrierService implements AgentService {
     const yieldFromTranscript = async function* (
       this: ClaudeBgCarrierService,
       entries: unknown[],
+      sessionId?: string,
     ): AsyncGenerator<AgentMessage> {
       for (const raw of entries) {
         if (typeof raw === 'object' && raw !== null) {
@@ -718,11 +746,11 @@ export class ClaudeBgCarrierService implements AgentService {
       }
       if (batch) {
         const projected = await batch.project(entries, textBoundaryState.lastTextMessageId).catch((error: unknown) => {
-          this.bestEffortStop(shortId, owner);
+          stop();
           throw error;
         });
         textBoundaryState.lastTextMessageId = projected.lastTextMessageId;
-        yield* projected.messages;
+        for (const message of projected.messages) yield sessionId ? { ...message, sessionId } : message;
       } else {
         yield* transcriptEntriesToAgentMessages(entries, { catId: this.catId, textBoundaryState });
       }
@@ -730,7 +758,7 @@ export class ClaudeBgCarrierService implements AgentService {
 
     while (true) {
       if (options?.signal?.aborted) {
-        this.bestEffortStop(shortId, owner);
+        stop();
         throw new Error(`ClaudeBgCarrierService.invoke: aborted for ${shortId}`);
       }
 
@@ -785,7 +813,7 @@ export class ClaudeBgCarrierService implements AgentService {
             tailer = undefined;
           } else {
             // Incomplete turn — consumer can't recover, prevent quota leak.
-            this.bestEffortStop(shortId, owner);
+            stop();
             throw new Error(
               `ClaudeBgCarrierService.invoke: transcript read failed for ${shortId}: ${(err as Error).message}`,
             );
@@ -843,13 +871,14 @@ export class ClaudeBgCarrierService implements AgentService {
         if (state?.state === 'done' && typeof resultText === 'string' && resultText.trim().length > 0) {
           const transcriptCoversResult = lastAssistantText.trim() === resultText.trim();
           if (!transcriptCoversResult) {
-            yield {
-              type: 'text',
-              catId: this.catId,
-              sessionId: shortId,
-              content: resultText,
-              timestamp: Date.now(),
-            };
+            if (batch) {
+              yield* yieldFromTranscript(
+                [{ type: 'assistant', message: { content: [{ type: 'text', text: resultText }] } }],
+                shortId,
+              );
+            } else {
+              yield { type: 'text', catId: this.catId, sessionId: shortId, content: resultText, timestamp: Date.now() };
+            }
           }
         }
 

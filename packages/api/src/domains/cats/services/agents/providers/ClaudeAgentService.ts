@@ -848,7 +848,13 @@ export class ClaudeAgentService implements AgentService {
           : (providerStop?.signal ?? options?.signal);
       const nativeLaunch = member?.pluginNativeLaunch;
       const cliOpts = {
-        assertLaunchCurrent: nativeLaunch ? () => nativeLaunch.assertCurrent() : undefined,
+        assertLaunchCurrent:
+          nativeLaunch || providerStop
+            ? async () => {
+                await nativeLaunch?.assertCurrent();
+                providerSignal?.throwIfAborted();
+              }
+            : undefined,
         command: claudeCommand,
         args,
         // #840 R2: main prompt moves off argv to stdin (see args comment above).
@@ -897,7 +903,7 @@ export class ClaudeAgentService implements AgentService {
             })
           : (async function* () {
               const localProjection = createClaudeOutputProjection(catId);
-              for await (const event of events) yield { event, ...localProjection(event) };
+              for await (const event of events) yield { event, activation: undefined, ...localProjection(event) };
             })();
 
       let eventCount = 0;
@@ -921,7 +927,8 @@ export class ClaudeAgentService implements AgentService {
       let hasAssistantEvent = false;
       let lastAssistantHasToolUseBlock = false;
       let lastAssistantHasTextBlock = false;
-      for await (const { event, messages, usage } of projectedEvents) {
+      for await (const { event, messages, usage, activation } of projectedEvents) {
+        activation?.throwIfAborted();
         eventCount++;
         // #780: Archive raw event for post-mortem diagnostics (fire-and-forget)
         if (options?.invocationId) {
@@ -1039,6 +1046,7 @@ export class ClaudeAgentService implements AgentService {
 
         if (Array.isArray(result)) {
           for (const msg of result) {
+            activation?.throwIfAborted();
             if (msg.type === 'text') {
               textEventCount++;
             }

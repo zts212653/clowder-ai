@@ -446,6 +446,7 @@ export class ClaudeInteractivePtyCarrierService implements AgentService {
           entries = await tailer.readNew({ includeTrailingPartial: true });
         }
         if (entries.length > 0) {
+          batch?.signal.throwIfAborted();
           // Extract hook session_id and propagate to session_init (R2 P1-3)
           if (!hookSessionId) {
             hookSessionId = extractSessionIdFromHookEntries(entries);
@@ -468,6 +469,7 @@ export class ClaudeInteractivePtyCarrierService implements AgentService {
             ? (await batch.project(entries)).messages
             : hookEntriesToAgentMessages(entries, { catId });
           for (const msg of messages) {
+            batch?.signal.throwIfAborted();
             yield msg;
           }
 
@@ -491,6 +493,7 @@ export class ClaudeInteractivePtyCarrierService implements AgentService {
 
       // F236 Phase E: final drain — catch eval events from the last hook call
       if (evalTailer) await ingestEvalEntries(evalTailer, { includeTrailingPartial: true });
+      batch?.signal.throwIfAborted();
 
       // Fallback: yield session_init if loop ended without finding hookSessionId
       if (!sessionInitYielded) {
@@ -499,6 +502,7 @@ export class ClaudeInteractivePtyCarrierService implements AgentService {
 
       // ─── done + usage (degraded: hooks carry no token data) ──────────────────
       const usage: TokenUsage = {};
+      batch?.signal.throwIfAborted();
       yield {
         type: 'done',
         catId,

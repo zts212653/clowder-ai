@@ -334,18 +334,24 @@ export class ClaudeSdkAgentService implements AgentService {
         ? this.projectOutput(events, {
             catId,
             signal: abortController.signal,
-            stop: closeQuery,
+            stop: () => {
+              abortController.abort();
+              closeQuery();
+            },
             knownCredentials: configuredCredentialValues({ ...process.env, ...sdkOptions.env }),
           })
         : (async function* () {
             const localProjection = createClaudeOutputProjection(catId);
-            for await (const event of events) yield { event, ...localProjection(event) };
+            for await (const event of events) yield { event, activation: undefined, ...localProjection(event) };
           })();
-      for await (const { messages: transformed, usage } of projected) {
+      for await (const { messages: transformed, usage, activation } of projected) {
+        activation?.throwIfAborted();
         if (abortController.signal.aborted) break;
         if (usage) metadata.usage = usage;
         if (transformed) {
           for (const message of Array.isArray(transformed) ? transformed : [transformed]) {
+            activation?.throwIfAborted();
+            if (abortController.signal.aborted) break;
             if (message.type === 'error') {
               if (message.errorDisposition === 'transient') {
                 lastTransientError = message.error;

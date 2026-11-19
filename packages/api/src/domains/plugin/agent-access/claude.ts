@@ -114,6 +114,7 @@ export function createAgentAccessClaudeOutput(
         };
         yield {
           event,
+          activation: retired,
           messages: Array.isArray(messages) ? messages.map(project) : messages && project(messages),
           usage,
         };
