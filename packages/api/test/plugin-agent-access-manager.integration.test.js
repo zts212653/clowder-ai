@@ -7,6 +7,7 @@ import { join } from 'node:path';
 import { Readable } from 'node:stream';
 import { test } from 'node:test';
 import { setTimeout as wait } from 'node:timers/promises';
+import { catRegistry } from '@cat-cafe/shared';
 import { roleConfigurationRevision } from '@clowder-ai/agent-access/roles/write-role';
 import {
   AGENT_ACCESS_ACP_SESSION_ACTION,
@@ -94,6 +95,8 @@ test('Agent access discovery executes the same standalone entrypoint from a Mana
   const pluginId = 'official.agent-access';
   const projectRoot = await mkdtemp(join(tmpdir(), 'agent-access-manager-'));
   const app = Fastify();
+  const previousCats = catRegistry.getAllConfigs();
+  catRegistry.reset();
   const previousRoot = process.env.CAT_CAFE_CONFIG_ROOT;
   const previousTemplate = process.env.CAT_TEMPLATE_PATH;
   const template = join(projectRoot, 'cat-template.json');
@@ -108,6 +111,8 @@ test('Agent access discovery executes the same standalone entrypoint from a Mana
     isDeclaredAgentProviderAvailable: (reference) => availableProviders.has(sessionImplementationKey(reference)),
   });
   t.after(async () => {
+    catRegistry.reset();
+    for (const [id, config] of Object.entries(previousCats)) catRegistry.register(id, config);
     if (previousRoot === undefined) delete process.env.CAT_CAFE_CONFIG_ROOT;
     else process.env.CAT_CAFE_CONFIG_ROOT = previousRoot;
     if (previousTemplate === undefined) delete process.env.CAT_TEMPLATE_PATH;
