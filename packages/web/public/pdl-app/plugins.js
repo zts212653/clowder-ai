@@ -37,19 +37,20 @@ function bindPluginSpaces() {
   function opOf(plugin) {
     return ops[plugin.pluginId] || plugin.operation;
   }
-  // A package icon is read from the installed package; a plugin that isn't installed shows the plain plugin icon
-  // (reading its icon would make the server fetch and verify the catalog package).
-  function packageIcon(plugin) {
-    return plugin.artifact === 'installed' ? plugin.icon : undefined;
-  }
+  // Only installed plugins are known senders: a plugin that isn't installed has no identity anywhere outside the
+  // plugin page, so its messages fall back to their source name / id like any unknown sender.
   pdlReads('who').plugins = function () {
     return Object.fromEntries(
-      pluginRows().map(function (plugin) {
-        return [
-          plugin.pluginId,
-          { name: plugin.displayName, icon: packageIcon(plugin), instanceId: plugin.pluginInstanceId },
-        ];
-      }),
+      pluginRows()
+        .filter(function (plugin) {
+          return plugin.artifact === 'installed';
+        })
+        .map(function (plugin) {
+          return [
+            plugin.pluginId,
+            { name: plugin.displayName, icon: plugin.icon, instanceId: plugin.pluginInstanceId },
+          ];
+        }),
     );
   };
   // A detail that can't be read is just missing; its place says so (detailLoad) instead of loading forever.
@@ -342,7 +343,7 @@ function bindPluginSpaces() {
                 ? 'error'
                 : 'loading',
             name: chosen.displayName,
-            icon: packageIcon(chosen),
+            icon: chosen.icon,
             publisher: chosen.publisher,
             repositoryName:
               chosen.source.kind === 'git' && chosen.source.marketplace ? chosen.source.marketplace.sourceId : '',
@@ -552,7 +553,7 @@ function bindPluginSpaces() {
       update: need === 'update',
       needStatus: !!need && need !== 'update',
       key: plugin.pluginId,
-      icon: packageIcon(plugin),
+      icon: plugin.icon,
       name: plugin.displayName,
       desc: description(plugin),
       pub: plugin.publisher,
