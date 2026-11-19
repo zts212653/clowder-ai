@@ -713,7 +713,7 @@ function bindMembers() {
         }),
       preferences: cloud
         ? null
-        : memberPreferences(f, catalogState, runtime ? runtime.acpMaxDefault : client.acpMaxDefault),
+        : memberPreferences(f, catalogState, runtime ? runtime.acpMaxDefault : client && client.acpMaxDefault),
       identityProtection: cat && cat.identityProtection,
       follow: f.accountBindingMode === 'follow',
       overrideAccount: f.accountBindingMode === 'override',
