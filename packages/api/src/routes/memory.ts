@@ -6,16 +6,23 @@
  */
 
 import { catIdSchema, createCatId } from '@cat-cafe/shared';
-import type { FastifyPluginAsync, FastifyReply } from 'fastify';
+import type { FastifyPluginAsync, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import type { IMemoryStore } from '../domains/cats/services/stores/ports/MemoryStore.js';
 import type { IThreadStore } from '../domains/cats/services/stores/ports/ThreadStore.js';
 import { resolveUserId } from '../utils/request-identity.js';
+import { MemoryProviderCallError } from './memory-route-provider.js';
 
 export interface MemoryRoutesOptions {
-  memoryStore: IMemoryStore;
+  memoryStore(scope: {
+    userId: string;
+    threadId: string;
+    request: FastifyRequest;
+    reply: FastifyReply;
+  }): Pick<IMemoryStore, 'get' | 'set' | 'list' | 'delete'>;
   /** Optional thread ownership guard (enabled in production wiring). */
   threadStore?: IThreadStore;
+  deploymentOwnerUserId?: string;
 }
 
 const writeSchema = z.object({
@@ -36,8 +43,20 @@ const deleteSchema = z.object({
 });
 
 export const memoryRoutes: FastifyPluginAsync<MemoryRoutesOptions> = async (app, opts) => {
+  app.setErrorHandler((error, _request, reply) => {
+    if (error instanceof MemoryProviderCallError) {
+      void reply.code(503).send({ error: error.message, effect: error.effect });
+      return;
+    }
+    throw error;
+  });
   async function authorizeThread(threadId: string, userId: string, reply: FastifyReply): Promise<boolean> {
-    if (!opts.threadStore || threadId === 'default') return true;
+    if (threadId === 'default') {
+      if (opts.deploymentOwnerUserId === undefined || opts.deploymentOwnerUserId === userId) return true;
+      reply.status(403);
+      return false;
+    }
+    if (!opts.threadStore) return true;
     const thread = await opts.threadStore.get(threadId);
     if (!thread) {
       reply.status(404);
@@ -72,7 +91,8 @@ export const memoryRoutes: FastifyPluginAsync<MemoryRoutesOptions> = async (app,
     }
 
     const resolvedUpdatedBy = updatedBy === 'user' ? ('user' as const) : createCatId(updatedBy);
-    const entry = await opts.memoryStore.set({ threadId, key, value, updatedBy: resolvedUpdatedBy });
+    const store = opts.memoryStore({ userId, threadId, request, reply });
+    const entry = await store.set({ threadId, key, value, updatedBy: resolvedUpdatedBy });
 
     reply.status(201);
     return entry;
@@ -99,9 +119,10 @@ export const memoryRoutes: FastifyPluginAsync<MemoryRoutesOptions> = async (app,
       return { error: 'Access denied' };
     }
 
+    const store = opts.memoryStore({ userId, threadId, request, reply });
     if (key) {
       // Single key lookup
-      const entry = await opts.memoryStore.get(threadId, key);
+      const entry = await store.get(threadId, key);
       if (!entry) {
         reply.status(404);
         return { error: 'Memory entry not found' };
@@ -110,7 +131,7 @@ export const memoryRoutes: FastifyPluginAsync<MemoryRoutesOptions> = async (app,
     }
 
     // List all keys for thread
-    const entries = await opts.memoryStore.list(threadId);
+    const entries = await store.list(threadId);
     return { entries };
   });
 
@@ -135,7 +156,7 @@ export const memoryRoutes: FastifyPluginAsync<MemoryRoutesOptions> = async (app,
       return { error: 'Access denied' };
     }
 
-    const deleted = await opts.memoryStore.delete(threadId, key);
+    const deleted = await opts.memoryStore({ userId, threadId, request, reply }).delete(threadId, key);
 
     if (!deleted) {
       reply.status(404);

@@ -249,7 +249,6 @@ import { TranscriptWriter } from './domains/cats/services/session/TranscriptWrit
 import { createBacklogStore } from './domains/cats/services/stores/factories/BacklogStoreFactory.js';
 import { createFrustrationIssueStore } from './domains/cats/services/stores/factories/FrustrationIssueStoreFactory.js';
 import { createLabelStore } from './domains/cats/services/stores/factories/LabelStoreFactory.js';
-import { createMemoryStore } from './domains/cats/services/stores/factories/MemoryStoreFactory.js';
 import { createMessageStore } from './domains/cats/services/stores/factories/MessageStoreFactory.js';
 import { createProfileUpdateProposalStore } from './domains/cats/services/stores/factories/ProfileUpdateProposalStoreFactory.js';
 import { createProposalStore } from './domains/cats/services/stores/factories/ProposalStoreFactory.js';
@@ -797,11 +796,14 @@ async function initializeApi(
   app.get('/api/health', healthHandler);
 
   // F152: Readiness check — verifies dependencies are reachable.
-  // evidenceStoreRef is set after memoryServices init; handler runs at request time.
-  let evidenceStoreRef: { health(): Promise<boolean> } | null = null;
+  const { MemoryPluginHost } = await import('./domains/plugin/host-surface/memory-plugin-host.js');
+  const memoryProvider = new MemoryPluginHost(app.log);
+  // The scheduler readiness probe is set before the server listens.
+  let checkSchedulerDb: (() => boolean) | undefined;
   async function checkReadiness(): Promise<{
     status: 'ready' | 'degraded';
     checks: Record<string, { ok: boolean; ms: number; error?: string }>;
+    memory: { status: 'ready' | 'unavailable' };
   }> {
     const checks: Record<string, { ok: boolean; ms: number; error?: string }> = {};
     if (redisClient) {
@@ -815,10 +817,10 @@ async function initializeApi(
     } else {
       checks.redis = { ok: true, ms: 0 };
     }
-    if (evidenceStoreRef) {
+    if (checkSchedulerDb) {
       const t0 = Date.now();
       try {
-        const ok = await evidenceStoreRef.health();
+        const ok = checkSchedulerDb();
         checks.sqlite = { ok, ms: Date.now() - t0, ...(ok ? {} : { error: 'SELECT 1 failed' }) };
       } catch (err) {
         checks.sqlite = { ok: false, ms: Date.now() - t0, error: String(err) };
@@ -826,7 +828,11 @@ async function initializeApi(
     }
     checks.sessionHooks = { ok: sessionHookAuthenticationReady(), ms: 0 };
     const allOk = Object.values(checks).every((c) => c.ok);
-    return { status: allOk ? 'ready' : 'degraded', checks };
+    return {
+      status: allOk ? 'ready' : 'degraded',
+      checks,
+      memory: { status: memoryProvider.isReady() ? 'ready' : 'unavailable' },
+    };
   }
   const readyHandler = async (_request: unknown, reply: FastifyReply) => {
     const result = await checkReadiness();
@@ -1433,7 +1439,6 @@ async function initializeApi(
   const backlogStore = createBacklogStore(redis);
   const workflowSopStore = createWorkflowSopStore(redis);
   const summaryStore = createSummaryStore(redis);
-  const memoryStore = createMemoryStore(redis);
   const taskProgressStore = createTaskProgressStore(redis);
   const draftStore = createDraftStore(redis);
   const readStateStore = createReadStateStore(redis);
@@ -1515,6 +1520,16 @@ async function initializeApi(
   const readDiagnostics = createSqliteReadDiagnostics({
     onSlowRead: (event) => app.log.warn({ module: 'sqlite-read', ...event }, 'Slow synchronous SQLite .all read'),
   });
+  const configuredEvidenceDbPath = process.env.EVIDENCE_DB ?? resolve(repoRoot, 'evidence.sqlite');
+  const evidenceDbPath = configuredEvidenceDbPath === ':memory:' ? ':memory:' : resolve(configuredEvidenceDbPath);
+  const { openHostSchedulerDatabase } = await import('./infrastructure/scheduler/host-scheduler-database.js');
+  const schedulerDb = await openHostSchedulerDatabase(evidenceDbPath);
+  checkSchedulerDb = () => schedulerDb.prepare('SELECT 1').pluck().get() === 1;
+  const detachSchedulerReadDiagnostics = readDiagnostics(schedulerDb);
+  app.addHook('onClose', async () => {
+    detachSchedulerReadDiagnostics();
+    schedulerDb.close();
+  });
   // Every store's degraded vector search, in this process or reported by a read worker.
   const { logVectorSearchDegradesTo } = await import('./domains/memory/vector-search-degrade-report.js');
   logVectorSearchDegradesTo(app.log);
@@ -1543,7 +1558,7 @@ async function initializeApi(
   const memoryServices = await createMemoryServices({
     type: 'sqlite',
     readDiagnostics,
-    sqlitePath: process.env.EVIDENCE_DB ?? resolve(repoRoot, 'evidence.sqlite'),
+    sqlitePath: evidenceDbPath,
     publishedProjectRoot: !process.env.DOCS_ROOT && existsSync(join(knowledgeRoot, '.git')) ? knowledgeRoot : undefined,
     docsRoot,
     markersDir,
@@ -1706,7 +1721,6 @@ async function initializeApi(
     },
   };
   // F152: Wire evidence store into /ready probe
-  evidenceStoreRef = memoryServices.evidenceStore;
   app.log.info('[api] F102: SQLite memory services initialized');
   startupMilestone('memory-services-ready');
 
@@ -1922,7 +1936,6 @@ async function initializeApi(
   const { createActorResolver } = await import('./infrastructure/scheduler/ActorResolver.js');
   const { getRoster } = await import('./config/cat-config-loader.js');
   const { loadDossierProfiles } = await import('@cat-cafe/shared/dossier');
-  const schedulerDb = memoryServices.store.getDb();
   const runLedger = new RunLedger(schedulerDb);
   const dossierProfiles = loadDossierProfiles(resolveActiveProjectRoot());
   const actorResolver = createActorResolver(getRoster, {
@@ -5350,7 +5363,6 @@ async function initializeApi(
     presenceSource: sidebarPresenceSource,
     messageStore,
     taskStore,
-    memoryStore,
     sessionChainStore,
     transcriptWriter,
     artifactWorkLineage: artifactWorkLineageHolder,
@@ -5534,6 +5546,7 @@ async function initializeApi(
   const collectiveArtifactOwnerHolder: import('./domains/plugin/host-surface/collective-artifact-owner.js').CollectiveArtifactOwnerHolder =
     {};
   const pluginRuntime = cloudConversations.createRuntime({
+    memory: { provider: memoryProvider, evidenceDbPath, ephemeral: process.env.MEMORY_STORE === '1' },
     agentSessionProviders: (packages, configuration) =>
       declaredAgentSessionProviders({
         configuration,
@@ -6790,7 +6803,7 @@ async function initializeApi(
   let custodyOpportunityRuntime: InstanceType<typeof CustodyOpportunityRuntime> | null = null;
   try {
     custodyOpportunityRuntime = new CustodyOpportunityRuntime({
-      cohorts: new CustodyOpportunityCohortStore(memoryServices.store.getDb()),
+      cohorts: new CustodyOpportunityCohortStore(schedulerDb),
       messages: messageStore,
       tasks: taskStore,
       policyVersion: await custodyRecognitionPolicyVersion(repoRoot),
@@ -7398,7 +7411,12 @@ async function initializeApi(
   await app.register((await import('./routes/skills-drift.js')).skillsDriftRoutes);
   await app.register((await import('./routes/mcp-drift.js')).mcpDriftRoutes);
   await app.register((await import('./routes/drift.js')).unifiedDriftRoutes);
-  await app.register(memoryRoutes, { memoryStore, threadStore });
+  const { createMemoryRouteProvider } = await import('./routes/memory-route-provider.js');
+  await app.register(memoryRoutes, {
+    memoryStore: createMemoryRouteProvider(memoryProvider),
+    threadStore,
+    deploymentOwnerUserId: privateUserId,
+  });
 
   const resolveLocalCodexReader = (catId: string) => {
     const catConfig = catRegistry.tryGet(catId)?.config;

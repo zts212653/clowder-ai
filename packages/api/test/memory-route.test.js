@@ -23,7 +23,7 @@ describe('Memory API Routes', () => {
     threadStore = new ThreadStore();
     ownThreadId = threadStore.create('test-user', 'Own thread').id;
     otherThreadId = threadStore.create('other-user', 'Other thread').id;
-    await app.register(memoryRoutes, { memoryStore, threadStore });
+    await app.register(memoryRoutes, { memoryStore: () => memoryStore, threadStore });
     await app.ready();
   });
 

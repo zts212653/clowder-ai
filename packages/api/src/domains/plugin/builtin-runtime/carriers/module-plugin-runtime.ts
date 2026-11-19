@@ -98,6 +98,8 @@ export interface ModulePluginHostShape {
   readonly memberSessions?: PluginNeutralHost['memberSessions'];
   readonly collectiveArtifactOwner?: PluginNeutralHost['collectiveArtifactOwner'];
   readonly collectiveMaterialSource?: PluginNeutralHost['collectiveMaterialSource'];
+  readonly memoryDatabase?: { readonly canonicalPath: string; readonly storageFormat: 1 };
+  readonly memoryThreadKv?: import('../../host-surface/memory-thread-kv.js').MemoryThreadKvPort;
   readonly threads: PluginThreadHost;
   readonly messaging: PluginMessagingHost;
   readonly streams: PluginStreams;
@@ -138,6 +140,11 @@ export interface ModulePluginRuntimeOptions {
   readonly materializer?: BuiltinPluginPackageMaterializer;
   readonly configuration: PluginRuntimeConfigurationPort;
   readonly storage?: PluginPrivateStoragePort;
+  readonly memoryHost?: (
+    packageRecord: ExecutablePluginPackageRecord,
+    pluginInstanceId: string,
+    assertActivation: () => void,
+  ) => Pick<ModulePluginHostShape, 'memoryDatabase' | 'memoryThreadKv'> | undefined;
   readonly taskStore?: ITaskStore;
   readonly taskOwnerUserId?: string;
   readonly taskThreadStore?: Pick<IThreadStore, 'get'> & Partial<Pick<IThreadStore, 'ensureOwnedThread'>>;
@@ -402,6 +409,7 @@ export class ModulePluginRuntime implements BundledPluginRuntime {
       assertActivation();
       const host: ModulePluginHostShape = {
         ...neutral,
+        ...this.options.memoryHost?.(packageRecord, pluginInstanceId, assertActivation),
         pluginInstanceId,
         config: settingsHost.config,
         secrets: settingsHost.secrets,
