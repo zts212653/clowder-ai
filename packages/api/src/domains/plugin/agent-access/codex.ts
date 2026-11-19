@@ -1,7 +1,7 @@
 import {
   AGENT_ACCESS_PLUGIN_ID,
   type AgentAccessCodexExecLaunch,
-  agentAccessNativeLaunchArgumentsSchema,
+  agentAccessCodexExecPlanSchema,
 } from '@clowder-ai/agent-contract';
 import type { PluginRuntimeCarrierRouter } from '../carrier/runtime-carrier.js';
 import type { PluginInventoryStore } from '../host-inventory/ports.js';
@@ -11,8 +11,8 @@ import type { PluginInventoryStore } from '../host-inventory/ports.js';
  *
  * Symmetric with the Kimi/OpenCode planners: the Host keeps the executable,
  * credentials, workspace, L0/MCP/image resolution and the spawn. The active
- * package owns exec/resume argv and user-override precedence. App-server is a
- * separate, long-lived carrier and is not planned here.
+ * package owns exec/resume argv, user-override precedence and display fields.
+ * App-server has its own long-lived carrier.
  */
 export function createAgentAccessCodexExecLaunchPlanner(
   inventory: Pick<PluginInventoryStore, 'readCurrentAuthority'>,
@@ -42,7 +42,7 @@ export function createAgentAccessCodexExecLaunchPlanner(
     }
 
     return {
-      ...agentAccessNativeLaunchArgumentsSchema.parse(result),
+      ...agentAccessCodexExecPlanSchema.parse(result),
       assertCurrent,
     };
   };

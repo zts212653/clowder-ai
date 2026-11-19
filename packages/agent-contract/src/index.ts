@@ -257,6 +257,25 @@ export const agentAccessNativeLaunchArgumentsSchema = z.object({
 });
 export type AgentAccessNativeLaunchArguments = z.infer<typeof agentAccessNativeLaunchArgumentsSchema>;
 
+// Codex exec display selectors only read payload fields on already classified
+// native events. Session/item identity, approval and terminal fields are fixed.
+const codexExecTextField = z.enum(['text', 'content']);
+const agentAccessCodexExecOutputSchema = z
+  .object({
+    delta: z.enum(['delta', 'text', 'content']),
+    message: codexExecTextField,
+    reasoningParts: z.enum(['summary', 'parts']),
+    reasoningText: z.tuple([codexExecTextField, codexExecTextField]),
+  })
+  .strict();
+export type AgentAccessCodexExecOutput = z.infer<typeof agentAccessCodexExecOutputSchema>;
+
+// Optional for older Agent Access archives still compatible with this Host.
+export const agentAccessCodexExecPlanSchema = agentAccessNativeLaunchArgumentsSchema.extend({
+  output: agentAccessCodexExecOutputSchema.optional(),
+});
+export type AgentAccessCodexExecPlan = z.infer<typeof agentAccessCodexExecPlanSchema>;
+
 /** Shared by every native client: the token fields the Host's usage contract reads. */
 export const agentAccessTokenUsageSchema = z.object({
   totalTokens: z.number().optional(),

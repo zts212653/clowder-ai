@@ -1,4 +1,8 @@
-import type { AgentAccessCodexExecLaunch, AgentAccessNativeLaunchArguments } from '@clowder-ai/agent-contract';
+import type {
+  AgentAccessCodexExecLaunch,
+  AgentAccessCodexExecOutput,
+  AgentAccessCodexExecPlan,
+} from '@clowder-ai/agent-contract';
 import type { RuntimeProviderProfile } from '../../../../../config/account-resolver.js';
 import { findCodexProjectMcpConflict } from '../../../../../config/capabilities/codex-project-mcp-compatibility.js';
 import { usesNativeToolConfiguration } from '../../../../../config/cat-account-binding.js';
@@ -454,7 +458,7 @@ export function resolveCodexApiKeyIsolationRoot(
 
 type CodexExecLaunchPlanner = (
   input: AgentAccessCodexExecLaunch,
-) => Promise<AgentAccessNativeLaunchArguments & { assertCurrent?: () => Promise<void> }>;
+) => Promise<AgentAccessCodexExecPlan & { assertCurrent?: () => Promise<void> }>;
 
 /**
  * Options for constructing CodexAgentService (dependency injection)
@@ -2177,6 +2181,7 @@ export class CodexAgentService implements AgentService {
       ...(native?.args ?? []),
     ];
     let plannedAssertCurrent: (() => Promise<void>) | undefined;
+    let plannedExecOutput: AgentAccessCodexExecOutput | undefined;
     let args: string[];
     if (carrierMode === 'exec_json' && this.planLaunch) {
       // Protected groups stay inside the Host. The package sees only opaque
@@ -2227,6 +2232,7 @@ export class CodexAgentService implements AgentService {
       const expanded = plan.args.flatMap((arg) => groupRefs.get(arg) ?? [arg]);
       assertCodexExecPlanSafe({ readOnly, sessionId: options?.sessionId }, expanded);
       plannedAssertCurrent = plan.assertCurrent;
+      plannedExecOutput = plan.output;
       args = expanded;
     } else {
       const argsWithPrompt: string[] = options?.sessionId
@@ -3278,6 +3284,7 @@ export class CodexAgentService implements AgentService {
 
         const result = transformCodexEvent(event, this.catId, codexStreamState, {
           approvalSurface: invocationApprovalSurface,
+          ...(plannedExecOutput ? { execOutput: plannedExecOutput } : {}),
         });
         if (result !== null) {
           if (Array.isArray(result)) {

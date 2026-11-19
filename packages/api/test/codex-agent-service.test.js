@@ -2097,6 +2097,33 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
     assert.equal(assertionSawBefore, true);
   });
 
+  test('uses the exec archive display fields on the ordinary carrier without changing session identity', async () => {
+    const proc = createMockProcess();
+    const service = new CodexAgentService({
+      l0CompilerFn: fakeL0Compiler,
+      spawnFn: createMockSpawnFn(proc),
+      model: 'gpt-5.3-codex',
+      planLaunch: async (input) => ({
+        ...buildCodexExecLaunchArguments(input),
+        output: { delta: 'delta', message: 'content', reasoningParts: 'summary', reasoningText: ['text', 'content'] },
+      }),
+    });
+
+    const promise = collect(service.invoke('hello'));
+    emitCodexEvents(proc, [
+      { type: 'thread.started', thread_id: 'native-thread' },
+      {
+        type: 'item.completed',
+        item: { type: 'agent_message', id: 'm1', text: 'old field', content: 'selected field' },
+      },
+      { type: 'turn.completed', usage: { input_tokens: 12, output_tokens: 4 } },
+    ]);
+    const messages = await promise;
+    assert.equal(messages.find((msg) => msg.type === 'session_init')?.sessionId, 'native-thread');
+    assert.equal(messages.find((msg) => msg.type === 'text')?.content, 'selected field');
+    assert.equal(messages.find((msg) => msg.type === 'done')?.metadata?.usage?.outputTokens, 4);
+  });
+
   test('access planner argv matches the Host fallback for fresh and resume', async () => {
     async function run(planLaunch, sessionId) {
       const proc = createMockProcess();

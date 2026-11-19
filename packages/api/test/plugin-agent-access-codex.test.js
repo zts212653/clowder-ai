@@ -51,6 +51,18 @@ describe('Codex exec launch planner over the public protocol', () => {
     await assert.rejects(() => plan(launch), /session_implementation_unavailable/);
   });
 
+  test('pins the active package display fields while accepting older plans', async () => {
+    const output = { delta: 'text', message: 'content', reasoningParts: 'parts', reasoningText: ['content', 'text'] };
+    const oldPlan = await harness()(launch);
+    const newPlan = await harness({ invokeResult: { args: oldPlan.args, managedArgvFlags: [], output } })(launch);
+    assert.equal(oldPlan.output, undefined);
+    assert.deepEqual(newPlan.output, output);
+    const badPlan = harness({
+      invokeResult: { args: oldPlan.args, managedArgvFlags: [], output: { ...output, delta: 'thread_id' } },
+    });
+    await assert.rejects(() => badPlan(launch), /invalid/i);
+  });
+
   test('assertCurrent refuses a replaced package generation', async () => {
     let current = authority();
     const plan = createAgentAccessCodexExecLaunchPlanner(

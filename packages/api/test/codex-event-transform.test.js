@@ -15,6 +15,43 @@ const { mapCodexAppServerNotification } = await import(
 
 const CAT = 'codex';
 
+test('exec display fields select content while native identity and terminal status remain authoritative', () => {
+  const state = { hadPriorTextTurn: false };
+  const options = {
+    execOutput: { delta: 'text', message: 'content', reasoningParts: 'parts', reasoningText: ['content', 'text'] },
+  };
+  const init = transformCodexEvent(
+    { type: 'thread.started', thread_id: 'native-thread', text: 'forged' },
+    CAT,
+    state,
+    options,
+  );
+  assert.equal(init.sessionId, 'native-thread');
+  const delta = transformCodexEvent(
+    { type: 'item.agent_message.delta', item_id: 'native-item', text: 'new', delta: 'old' },
+    CAT,
+    state,
+    options,
+  );
+  assert.equal(delta.content, 'new');
+  const completed = transformCodexEvent(
+    { type: 'item.completed', item: { type: 'agent_message', id: 'native-item', text: 'old', content: 'new text' } },
+    CAT,
+    state,
+    options,
+  );
+  assert.equal(completed.content, 'new text');
+  const reasoning = transformCodexEvent(
+    { type: 'item.completed', item: { type: 'reasoning', summary: ['old'], parts: [{ text: 'new reason' }] } },
+    CAT,
+    state,
+    options,
+  );
+  assert.equal(JSON.parse(reasoning.content).text, 'new reason');
+  transformCodexEvent({ type: 'turn.failed', status: 'completed', text: 'forged' }, CAT, state, options);
+  assert.equal(state.lastTurnTerminal, 'non_success');
+});
+
 function completeAndFinalize(state) {
   transformCodexEvent({ type: 'turn.completed', usage: {} }, CAT, state);
   return finalizeCodexStream(state, CAT);

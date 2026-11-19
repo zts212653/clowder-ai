@@ -18,6 +18,7 @@ import Fastify from 'fastify';
 import { A2AAgentService } from '../dist/domains/cats/services/agents/providers/A2AAgentService.js';
 import { observeAgyNativeTurn } from '../dist/domains/cats/services/agents/providers/agy-native/agy-native-turn.js';
 import { ClaudeSdkAgentService } from '../dist/domains/cats/services/agents/providers/ClaudeSdkAgentService.js';
+import { transformCodexEvent } from '../dist/domains/cats/services/agents/providers/codex-event-transform.js';
 import { sessionImplementationKey } from '../dist/domains/cats/services/agents/session-contract/implementation-registry.js';
 import { MessageStore } from '../dist/domains/cats/services/stores/ports/MessageStore.js';
 import { createAgentAccessA2ARunner } from '../dist/domains/plugin/agent-access/a2a.js';
@@ -27,6 +28,7 @@ import { AgentAccessAcpRuntimeClient } from '../dist/domains/plugin/agent-access
 import { createAgentAccessAgyOutput } from '../dist/domains/plugin/agent-access/agy.js';
 import { createAgentAccessCatAgentOutput } from '../dist/domains/plugin/agent-access/catagent.js';
 import { createAgentAccessClaudeBatch } from '../dist/domains/plugin/agent-access/claude-batch.js';
+import { createAgentAccessCodexExecLaunchPlanner } from '../dist/domains/plugin/agent-access/codex.js';
 import { createAgentAccessCodexAppServerNotificationProjection } from '../dist/domains/plugin/agent-access/codex-appserver.js';
 import { createAgentAccessDshConnectionTest } from '../dist/domains/plugin/agent-access/dsh.js';
 import { createAgentAccessKimiLaunchPlanner } from '../dist/domains/plugin/agent-access/kimi.js';
@@ -151,6 +153,10 @@ test('Agent access discovery executes the same standalone entrypoint from a Mana
   const nextModule = entrypoint
     .toString()
     .replace(/(id:\s*["']kimi["'],\s*label:\s*)(["'])Kimi\2/g, '$1$2Kimi vNext$2')
+    .replace(
+      /(reasoningParts:\s*["']summary["'],\s*reasoningText:\s*\[)(["'])text\2,\s*(["'])content\3/,
+      '$1$2content$2, $3text$3',
+    )
     .replace('remoteControl/status/changed', 'transport/debug/ignored');
   assert.notEqual(nextModule, entrypoint.toString());
   async function archive(version, protocolVersion = 1, operations = OFFICIAL_AGENT_ACCESS_OPERATIONS) {
@@ -917,12 +923,18 @@ test('Agent access discovery executes the same standalone entrypoint from a Mana
   }
 
   const selectModel = createAgentAccessAcpModelSelection(runtime.inventoryStore, runtime.supervisor);
-  const codexLaunch = await runtime.supervisor.invoke(installed.pluginInstanceId, 'planCodexExec', {
-    operation: 'plan_native_launch',
-    client: 'codex',
-    launch: { sessionId: 'codex-history', readOnly: true, groups: { sandbox: 'opaque-sandbox-group' } },
-  });
+  const planCodexExec = createAgentAccessCodexExecLaunchPlanner(runtime.inventoryStore, runtime.supervisor);
+  const codexRequest = { sessionId: 'codex-history', readOnly: true, groups: { sandbox: 'opaque-sandbox-group' } };
+  const codexLaunch = await planCodexExec(codexRequest);
   assert.deepEqual(codexLaunch.args, ['exec', 'resume', 'codex-history', '--json', 'opaque-sandbox-group', '--', '-']);
+  const reasoning = {
+    type: 'item.completed',
+    item: { type: 'reasoning', text: 'legacy summary', content: 'new summary' },
+  };
+  assert.equal(
+    JSON.parse(transformCodexEvent(reasoning, 'codex', undefined, { execOutput: codexLaunch.output }).content).text,
+    'legacy summary',
+  );
   assert.deepEqual(await runtime.supervisor.invoke(installed.pluginInstanceId, 'planCodexLogin', {}), [
     '-c',
     'cli_auth_credentials_store="file"',
@@ -1108,6 +1120,7 @@ test('Agent access discovery executes the same standalone entrypoint from a Mana
 
   const latest = await install(next);
   await assert.rejects(launch.assertCurrent(), /session_implementation_unavailable/);
+  await assert.rejects(codexLaunch.assertCurrent(), /session_implementation_unavailable/);
   assert.equal(latest.pluginInstanceId, installed.pluginInstanceId);
   const afterUpdate = await scan();
   assert.equal(afterUpdate.readiness.state, 'ready');
@@ -1116,6 +1129,13 @@ test('Agent access discovery executes the same standalone entrypoint from a Mana
   const updatedProjection = await loadNotificationProjection();
   assert.ok(updatedProjection?.ignoredMethods.has('transport/debug/ignored'));
   assert.equal(updatedProjection?.ignoredMethods.has('remoteControl/status/changed'), false);
+  const updatedCodexLaunch = await planCodexExec(codexRequest);
+  assert.deepEqual(updatedCodexLaunch.args, codexLaunch.args);
+  assert.equal(
+    JSON.parse(transformCodexEvent(reasoning, 'codex', undefined, { execOutput: updatedCodexLaunch.output }).content)
+      .text,
+    'new summary',
+  );
   const legacyScan = await app.inject({
     method: 'GET',
     url: '/api/cats/native-runtimes?refresh=1',
@@ -1151,6 +1171,8 @@ test('Agent access discovery executes the same standalone entrypoint from a Mana
   await install(previous);
   assert.equal((await manager.get(pluginId)).plugin.installedVersion, '1.0.0');
   assert.ok((await loadNotificationProjection())?.ignoredMethods.has('remoteControl/status/changed'));
+  const restoredCodexLaunch = await planCodexExec(codexRequest);
+  assert.deepEqual(restoredCodexLaunch.output, codexLaunch.output);
   const afterRollback = await scan();
   assert.equal(afterRollback.readiness.state, 'ready');
   assert.equal(afterRollback.candidates.find((candidate) => candidate.id === 'kimi')?.label, 'Kimi');
