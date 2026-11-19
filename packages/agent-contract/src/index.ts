@@ -219,7 +219,7 @@ export const agentAccessCodexAppServerNotificationProjectionSchema = z.object({
   version: z.literal(1),
   methods: z.array(z.string().min(1).max(200)).readonly(),
   ignoredMethods: z.array(z.string().min(1).max(200)).readonly().default([]),
-  /** Display-only aliases: provider method -> an existing non-terminal mapper method. */
+  /** Version 1 aliases project agent text deltas from native envelopes with matching thread and turn IDs. */
   aliases: z.record(z.string().min(1).max(200), z.string().min(1).max(200)).readonly().default({}),
 });
 export type AgentAccessCodexAppServerNotificationProjection = z.infer<

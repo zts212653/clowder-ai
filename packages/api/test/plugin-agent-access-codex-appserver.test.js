@@ -128,17 +128,20 @@ describe('Codex app-server static notification projection', () => {
     assert.equal(await load(), undefined);
   });
 
-  test('rejects a terminal display alias', async () => {
-    const load = createAgentAccessCodexAppServerNotificationProjection(
-      { readCurrentAuthority: async () => authority() },
-      {
-        exposesAction: async () => true,
-        invoke: async () => ({
-          ...table,
-          aliases: { 'turn/finished': 'turn/completed' },
-        }),
-      },
-    );
-    await assert.rejects(() => load(), /codex_notification_alias_terminal_forbidden/);
+  test('display aliases cannot produce native terminal, goal or error events', async () => {
+    for (const target of ['turn/completed', 'thread/goal/updated', 'thread/goal/cleared', 'error']) {
+      const load = createAgentAccessCodexAppServerNotificationProjection(
+        { readCurrentAuthority: async () => authority() },
+        {
+          exposesAction: async () => true,
+          invoke: async () => ({
+            ...table,
+            methods: [...new Set([...table.methods, target])],
+            aliases: { 'provider/notification': target },
+          }),
+        },
+      );
+      await assert.rejects(() => load(), /codex_notification_alias_.*forbidden/, target);
+    }
   });
 });

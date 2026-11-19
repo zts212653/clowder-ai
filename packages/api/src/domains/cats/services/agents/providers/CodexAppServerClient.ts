@@ -259,6 +259,7 @@ export class CodexAppServerClient {
 
   async *run(input: CodexAppServerRunInput): AsyncGenerator<unknown> {
     if (this.deps.wire.hostAcquisitionMode) input.live?.observeHostAcquisition?.(this.deps.wire.hostAcquisitionMode);
+    const notificationProjection = input.boundedWatcher ? undefined : this.deps.notificationProjection;
     const runtimeInteraction = createCodexRuntimeInteractionRunState(input.runtimeInteraction, input.approvalsReviewer);
     this.pumpPromise = this.pump(runtimeInteraction, input.boundedWatcher);
     // Pending requests / notifications propagate the same failure; attach immediately
@@ -450,7 +451,10 @@ export class CodexAppServerClient {
             },
             this.deps.planThreadParams,
           );
-      await plannedThread?.assertCurrent?.();
+      const assertThreadPlanCurrent = async () => {
+        await notificationProjection?.assertCurrent?.();
+        await plannedThread?.assertCurrent?.();
+      };
       const verdict = await resolveCodexAppServerThread({
         thread: input.thread,
         params:
@@ -460,7 +464,9 @@ export class CodexAppServerClient {
             input.thread.kind === 'resume' ? { threadId: input.thread.threadId, excludeTurns: true } : undefined,
           ),
         startParams: plannedThread?.startParams ?? buildCodexAppServerThreadParams(input),
-        ...(plannedThread?.assertCurrent ? { assertCurrent: plannedThread.assertCurrent } : {}),
+        ...(notificationProjection?.assertCurrent || plannedThread?.assertCurrent
+          ? { assertCurrent: assertThreadPlanCurrent }
+          : {}),
         requireExactResume: input.requireExactResume || Boolean(recoveryInstruction),
         ...(input.resumeReplacement ? { resumeReplacement: input.resumeReplacement } : {}),
         // A reused affinity host reaches this point only after its local lease
@@ -603,7 +609,7 @@ export class CodexAppServerClient {
       // The package may have been replaced while Host hooks ran. Recheck the
       // thread plan too: a turn must never be planned by a different active
       // generation than the thread that this invocation started/resumed.
-      await plannedThread?.assertCurrent?.();
+      await assertThreadPlanCurrent();
       await plannedTurn?.assertCurrent?.();
       this.lifecycle.patch({ turnStartSent: true });
       const turnParams = plannedTurn?.params ?? {
@@ -911,11 +917,16 @@ export class CodexAppServerClient {
           }
         }
 
-        const notificationProjection = input.boundedWatcher ? undefined : this.deps.notificationProjection;
         const method = record?.method;
+        const nativeCompletion =
+          !!activeTurnId && isExactCodexRootTurnCompletion(envelope, { threadId, turnId: activeTurnId });
         const matchesActiveRoot = codexAppServerNotificationMatchesActiveRoot(record, threadId, activeTurnId);
         const aliasMethod =
-          notificationProjection && typeof method === 'string'
+          notificationProjection &&
+          typeof method === 'string' &&
+          activeTurnId &&
+          params?.threadId === threadId &&
+          params?.turnId === activeTurnId
             ? notificationProjection.aliases.get(method)
             : undefined;
         const projected =
@@ -925,28 +936,22 @@ export class CodexAppServerClient {
           (notificationProjection.methods.has(method) || aliasMethod !== undefined);
         const ignored =
           notificationProjection && typeof method === 'string' && notificationProjection.ignoredMethods.has(method);
-        const mapped =
-          !matchesActiveRoot || (notificationProjection && !projected)
+        const nativeState =
+          nativeCompletion ||
+          (matchesActiveRoot &&
+            (method === 'turn/started' ||
+              method === 'thread/goal/updated' ||
+              method === 'thread/goal/cleared' ||
+              method === 'error'));
+        const mapped = nativeState
+          ? mapCodexAppServerNotification(envelope)
+          : !matchesActiveRoot || (notificationProjection && (!projected || method === 'turn/completed'))
             ? null
             : mapCodexAppServerNotification(aliasMethod ? { ...record, method: aliasMethod } : envelope);
         if (!ignored && !projected) await this.observeUnsupportedNotification(envelope);
         if (mapped?.type === 'turn.completed' && latestUsage) mapped.usage = latestUsage;
         if (mapped && !(input.live && isLiveDraftEvent(mapped))) yield mapped;
-        if (
-          activeTurnId &&
-          isExactCodexRootTurnCompletion(envelope, { threadId, turnId: activeTurnId }) &&
-          mapped?.type !== 'turn.completed' &&
-          mapped?.type !== 'turn.failed'
-        ) {
-          const completedTurn = asCodexAppServerRecord(params?.turn);
-          if (completedTurn?.status === 'completed')
-            yield {
-              type: 'turn.completed',
-              status: 'completed',
-              ...(latestUsage ? { usage: latestUsage } : {}),
-            };
-        }
-        if (activeTurnId && isExactCodexRootTurnCompletion(envelope, { threadId, turnId: activeTurnId })) {
+        if (activeTurnId && nativeCompletion) {
           if (input.boundedWatcher) {
             const completed = asCodexAppServerRecord(params?.turn);
             if (completed?.status !== 'completed')

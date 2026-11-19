@@ -93,8 +93,7 @@ export function createAgentAccessCodexAppServerNotificationProjection(
   return async (): Promise<CodexAppServerNotificationProjection | undefined> => {
     const authority = await inventory.readCurrentAuthority(AGENT_ACCESS_PLUGIN_ID);
     const instance = authority?.instance;
-    if (!instance || instance.activationState !== 'enabled' || instance.runtimeState !== 'healthy')
-      return undefined;
+    if (!instance || instance.activationState !== 'enabled' || instance.runtimeState !== 'healthy') return undefined;
     const key = [instance.pluginInstanceId, instance.packageDigest, instance.lifecycleRevision].join(':');
     if (cached && cachedKey === key) return cached;
 
@@ -111,8 +110,7 @@ export function createAgentAccessCodexAppServerNotificationProjection(
       }
       for (const [alias, target] of Object.entries(parsed.aliases)) {
         if (parsed.methods.includes(alias)) throw new Error('codex_notification_alias_shadows_method');
-        if (target === 'turn/completed' || target === 'turn/failed')
-          throw new Error('codex_notification_alias_terminal_forbidden');
+        if (target !== 'item/agentMessage/delta') throw new Error('codex_notification_alias_target_forbidden');
         if (!parsed.methods.includes(target)) throw new Error('codex_notification_alias_target_unknown');
       }
       return {
@@ -125,6 +123,7 @@ export function createAgentAccessCodexAppServerNotificationProjection(
             current?.pluginInstanceId !== pluginInstanceId ||
             current.packageDigest !== packageDigest ||
             current.lifecycleRevision !== lifecycleRevision ||
+            current.activationState !== 'enabled' ||
             current.runtimeState !== 'healthy'
           )
             throw new Error('session_implementation_unavailable');

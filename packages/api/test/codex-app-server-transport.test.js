@@ -466,6 +466,64 @@ for (const projectionCase of [
   });
 }
 
+test('the native failed terminal is shown even if the package omits it', async () => {
+  const wire = new ProtocolWire();
+  const write = wire.write.bind(wire);
+  wire.write = async (message) => {
+    await write(message);
+    if (message.method === 'turn/start')
+      wire.inbox.push({
+        method: 'turn/completed',
+        params: {
+          threadId: 'thread-1',
+          turn: { id: 'turn-1', status: 'failed', error: { message: 'native failure' } },
+        },
+      });
+  };
+  const client = new CodexAppServerClient({
+    wire,
+    notificationProjection: { methods: new Set(), ignoredMethods: new Set(), aliases: new Map() },
+  });
+  const messages = [];
+  await assert.rejects(async () => {
+    for await (const message of client.run({ prompt: frozenPrompt('terminal'), thread: { kind: 'start' } }))
+      messages.push(message);
+  }, /native failure/);
+  assert.ok(messages.some((message) => message.type === 'turn.failed' && message.turn_id === 'turn-1'));
+});
+
+test('a retired notification table cannot start a thread under a new activation', async () => {
+  const wire = new ProtocolWire();
+  const write = wire.write.bind(wire);
+  wire.write = async (message) => {
+    await write(message);
+    if (message.method === 'turn/start')
+      wire.inbox.push({
+        method: 'turn/completed',
+        params: { threadId: 'thread-1', turn: { id: 'turn-1', status: 'completed' } },
+      });
+  };
+  const client = new CodexAppServerClient({
+    wire,
+    notificationProjection: {
+      methods: new Set(['turn/completed']),
+      ignoredMethods: new Set(),
+      aliases: new Map(),
+      assertCurrent: async () => {
+        throw new Error('session_implementation_unavailable');
+      },
+    },
+  });
+  await assert.rejects(
+    () => collect(client.run({ prompt: frozenPrompt('new generation'), thread: { kind: 'start' } })),
+    /session_implementation_unavailable/,
+  );
+  assert.equal(
+    wire.writes.some((message) => ['thread/start', 'turn/start'].includes(message.method)),
+    false,
+  );
+});
+
 test('display alias maps to an existing kind without becoming terminal evidence', async () => {
   const wire = new ProtocolWire();
   const write = wire.write.bind(wire);
@@ -473,7 +531,11 @@ test('display alias maps to an existing kind without becoming terminal evidence'
     await write(message);
     if (message.method !== 'turn/start') return;
     wire.inbox.push({
-      method: 'item/agent_message_delta',
+      method: 'fixture/agent_message_delta',
+      params: { threadId: 'thread-1', itemId: 'item-unbound', delta: 'unbound alias' },
+    });
+    wire.inbox.push({
+      method: 'fixture/agent_message_delta',
       params: { threadId: 'thread-1', turnId: 'turn-1', itemId: 'item-1', delta: 'aliased' },
     });
     wire.inbox.push({
@@ -486,12 +548,14 @@ test('display alias maps to an existing kind without becoming terminal evidence'
     notificationProjection: {
       methods: new Set(['item/agentMessage/delta', 'turn/completed']),
       ignoredMethods: new Set(),
-      aliases: new Map([['item/agent_message_delta', 'item/agentMessage/delta']]),
+      aliases: new Map([['fixture/agent_message_delta', 'item/agentMessage/delta']]),
     },
   });
 
   const messages = await collect(client.run({ prompt: frozenPrompt('alias'), thread: { kind: 'start' } }));
-  const alias = messages.find((message) => message.type === 'item.agent_message.delta');
+  const aliases = messages.filter((message) => message.type === 'item.agent_message.delta');
+  assert.equal(aliases.length, 1);
+  const [alias] = aliases;
   assert.equal(alias.delta, 'aliased');
   assert.equal(alias.item_id, 'item-1');
 });

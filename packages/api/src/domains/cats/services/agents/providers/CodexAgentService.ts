@@ -2727,15 +2727,7 @@ export class CodexAgentService implements AgentService {
               measureRolloutSize: measureCodexSessionRolloutSize,
             })
           : null;
-      const notificationProjection = useAppServer && !watcher
-        ? await this.loadNotificationProjection?.().catch((error) => {
-            log.warn(
-              { catId: this.catId, invocationId: auditContext?.invocationId ?? options?.invocationId, error },
-              'Codex app-server notification projection unavailable; keeping Host default',
-            );
-            return undefined;
-          })
-        : undefined;
+      const notificationProjection = useAppServer && !watcher ? await this.loadNotificationProjection?.() : undefined;
       const events = useAppServer
         ? runCodexAppServerWithRecovery({
             ...(this.appServerStartupRecovery ? { startupRecovery: this.appServerStartupRecovery } : {}),
