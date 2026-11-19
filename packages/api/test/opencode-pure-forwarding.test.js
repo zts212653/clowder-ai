@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, mock, test } from 'node:test';
 import { PassThrough } from 'node:stream';
 import { EventEmitter } from 'node:events';
-import { OpenCodeAgentService } from '../src/domains/cats/services/agents/providers/OpenCodeAgentService.js';
+import { OpenCodeAgentService } from '../dist/domains/cats/services/agents/providers/OpenCodeAgentService.js';
 
 /**
  * The Host owns the `run --help` probe, so it is the only layer that can tell the

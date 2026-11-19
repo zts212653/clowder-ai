@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, mock, test } from 'node:test';
 import { Readable } from 'node:stream';
 import { EventEmitter } from 'node:events';
-import { OpenCodeAgentService } from '../src/domains/cats/services/agents/providers/OpenCodeAgentService.js';
+import { OpenCodeAgentService } from '../dist/domains/cats/services/agents/providers/OpenCodeAgentService.js';
 
 /**
  * When the package cannot plan the recovery run, the turn must still end the way it
@@ -124,6 +124,45 @@ describe('finalizer planning refusal degrades gracefully', () => {
     assert.ok(
       messages.some((message) => message.type === 'done'),
       'the turn must still terminate cleanly',
+    );
+  });
+});
+
+describe('the recovery run is rechecked against package generation', () => {
+  /**
+   * The finalizer plans from the same package activation as the main run. Between
+   * planning and the Host handing the process owner over, a package can be replaced —
+   * so the recovery run must recheck the generation immediately before spawn, exactly
+   * like the main run does. Otherwise a turn could finish on a package the Host has
+   * already stopped trusting.
+   */
+  test('a replaced package stops the finalizer before spawn', async () => {
+    // Each spawn gets its own process: the finalizer launches a second CLI run, and a
+    // single shared fixture would leave that run waiting on a stream nobody ends.
+    const spawnFn = mock.fn(() => toolOnlyProcess());
+    let assertCalls = 0;
+    const planLaunch = async () => ({
+      args: ['run', '--format', 'json', '--', 'p'],
+      managedArgvFlags: [],
+      assertCurrent: async () => {
+        assertCalls++;
+      },
+    });
+    const planFinalizer = async () => ({ args: ['run', '--pure', '--', 'q'], managedArgvFlags: [] });
+
+    const service = new OpenCodeAgentService({
+      catId: 'opencode',
+      spawnFn,
+      model: 'm',
+      planLaunch,
+      planFinalizer,
+    });
+
+    await collect(service.invoke('p'));
+
+    assert.ok(
+      assertCalls >= 2,
+      `the generation must be rechecked for both the main run and the recovery run, saw ${assertCalls}`,
     );
   });
 });

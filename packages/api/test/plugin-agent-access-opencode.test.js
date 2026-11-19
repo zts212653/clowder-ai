@@ -173,3 +173,39 @@ describe('OpenCode finalizer planner against an older package', () => {
     await assert.rejects(() => plan(finalizerInput), /session_implementation_unavailable/);
   });
 });
+
+describe('OpenCode raw events sent to the package', () => {
+  /**
+   * The package runs in a Worker owned by a third-party archive. Anything the Host
+   * ships into it leaves the Host's trust boundary, so a credential that arrived
+   * nested inside a provider error must be redacted before the call — the same rule
+   * the Kimi planner already applies at its parseNativeEvent seam.
+   */
+  test('a credential nested in a raw error never reaches the worker', async () => {
+    let workerPayload;
+    const plan = createAgentAccessOpenCodeLaunchPlanner(
+      { readCurrentAuthority: async () => authority() },
+      {
+        invoke: async (_id, operation, payload) => {
+          if (operation === 'parseNativeEvent') {
+            workerPayload = payload;
+            return { kind: 'error', message: 'boom', timestamp: 1 };
+          }
+          return { args: ['run', '--format', 'json', '--', 'p'], managedArgvFlags: [] };
+        },
+      },
+    );
+
+    const planned = await plan({ prompt: 'p', readOnlyAgent: 'a' });
+    await planned.normalizeEvent({
+      type: 'error',
+      error: { data: { message: 'boom', apiKey: 'sk-live-should-not-cross' } },
+    });
+
+    assert.ok(workerPayload, 'the fixture must actually call the worker');
+    assert.ok(
+      !JSON.stringify(workerPayload).includes('sk-live-should-not-cross'),
+      'a credential inside a raw error must not cross into the package worker',
+    );
+  });
+});

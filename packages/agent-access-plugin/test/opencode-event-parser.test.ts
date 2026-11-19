@@ -76,6 +76,35 @@ describe('OpenCode event normalisation', () => {
     assert.equal(parsed.usage.costUsd, 0.02);
   });
 
+  test('a non-numeric cost is dropped while the token telemetry still lands', () => {
+    // The CLI reports cost:'unknown' on steps it could not price. The Host contract
+    // types costUsd as a number, so passing the string straight through fails contract
+    // validation and ends a turn that had a perfectly good answer. The baseline dropped
+    // the unusable cost and kept the tokens; so must this.
+    const parsed = normalizeOpenCodeEvent({
+      type: 'step_finish',
+      part: { tokens: { input: 10, output: 5, total: 15 }, cost: 'unknown' },
+      timestamp: 11,
+    });
+
+    assert.equal(parsed.kind, 'usage');
+    assert.equal(parsed.usage.inputTokens, 10);
+    assert.equal(parsed.usage.outputTokens, 5);
+    assert.equal(parsed.usage.costUsd, undefined);
+  });
+
+  test('a numeric-string cost is not invented into a number', () => {
+    // Keeping the baseline's strictness: only real numbers are trusted cost evidence.
+    const parsed = normalizeOpenCodeEvent({
+      type: 'step_finish',
+      part: { tokens: { input: 10, output: 5 }, cost: '0.02' },
+      timestamp: 12,
+    });
+
+    assert.equal(parsed.kind, 'usage');
+    assert.equal(parsed.usage.costUsd, undefined);
+  });
+
   test('step_finish with no telemetry at all produces nothing', () => {
     const parsed = normalizeOpenCodeEvent({ type: 'step_finish', part: {}, timestamp: 10 });
 

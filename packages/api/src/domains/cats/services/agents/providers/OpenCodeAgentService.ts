@@ -19,6 +19,7 @@ import { readFileSync } from 'node:fs';
 import { type CatId, createCatId } from '@cat-cafe/shared';
 import type { AgentAccessOpenCodeEvent } from '@clowder-ai/agent-contract';
 import { getCatModel } from '../../../../../config/cat-models.js';
+import { configuredCredentialValues } from '@cat-cafe/mcp-server/dist/secret-runtime.js';
 import { createModuleLogger } from '../../../../../infrastructure/logger.js';
 import {
   buildCliDiagnostics,
@@ -118,7 +119,7 @@ type OpenCodeLaunchPlanner = (input: OpenCodeLaunchPlanInput) => Promise<{
   args: string[];
   managedArgvFlags: string[];
   assertCurrent?: () => Promise<void>;
-  normalizeEvent?: (event: unknown) => Promise<unknown>;
+  normalizeEvent?: (event: unknown, knownCredentials?: readonly string[]) => Promise<unknown>;
 }>;
 
 type OpenCodeFinalizerPlanner = (input: {
@@ -206,13 +207,19 @@ interface OpenCodePostToolFinalizerParams {
   transportArgs?: readonly string[];
   options?: AgentServiceOptions;
   /** Package event reader from the launch plan, so both runs read output the same way. */
-  normalizeEvent?: (event: unknown) => Promise<unknown>;
+  normalizeEvent?: (event: unknown, knownCredentials?: readonly string[]) => Promise<unknown>;
   /**
    * `--pure` capability from the launch probe. The finalizer resolves transport args
    * separately, but this one comes from the same help result, so it is passed rather
    * than probed twice.
    */
   pureSupported?: boolean;
+  /**
+   * Generation check from the main launch plan. The recovery run is a second physical
+   * spawn in the same turn, so it must recheck the package activation it planned
+   * against instead of trusting a plan the Host may already have retired.
+   */
+  assertCurrent?: () => Promise<void>;
 }
 
 function getOpenCodeStepFinishReason(event: unknown): string | undefined {
@@ -240,6 +247,16 @@ function isPermanentOpenCodeProviderFailure(event: unknown, reasonCode: string |
     statusCode === 402 ||
     statusCode === 403 ||
     statusCode === 404
+  );
+}
+
+/**
+ * `callbackEnv` uses `null` to mean "delete this variable", so those entries carry no
+ * value to redact. `configuredCredentialValues` only accepts real strings.
+ */
+function withoutClearedValues(values?: Record<string, string | null>): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(values ?? {}).filter((entry): entry is [string, string] => typeof entry[1] === 'string'),
   );
 }
 
@@ -426,7 +443,7 @@ export class OpenCodeAgentService implements L0InjectableAgentService {
       // the turn loudly rather than fall back to a second builder here.
       let args: string[];
       let plannedManagedFlags: readonly string[] | undefined;
-      let plannedNormalizeEvent: ((event: unknown) => Promise<unknown>) | undefined;
+      let plannedNormalizeEvent: ((event: unknown, knownCredentials?: readonly string[]) => Promise<unknown>) | undefined;
       let assertLaunchCurrent: (() => Promise<void>) | undefined;
       if (this.planLaunch) {
         const plan = await this.planLaunch({
@@ -456,6 +473,13 @@ export class OpenCodeAgentService implements L0InjectableAgentService {
           runDefaults.pure === true,
         );
       }
+
+      // Which values count as secrets when redacting raw events bound for the package
+      // worker. Kimi derives the same set the same way; shape alone would miss a
+      // provider-issued key nested inside a raw error.
+      const normalizeEventCredentials = plannedNormalizeEvent
+        ? configuredCredentialValues({ ...process.env, ...withoutClearedValues(options?.callbackEnv) })
+        : undefined;
 
       log.debug(
         {
@@ -636,7 +660,10 @@ export class OpenCodeAgentService implements L0InjectableAgentService {
         }
 
         const result = plannedNormalizeEvent
-          ? mapOpenCodeWireEvent((await plannedNormalizeEvent(event)) as AgentAccessOpenCodeEvent, this.catId)
+          ? mapOpenCodeWireEvent(
+              (await plannedNormalizeEvent(event, normalizeEventCredentials)) as AgentAccessOpenCodeEvent,
+              this.catId,
+            )
           : transformOpenCodeEvent(event, this.catId);
         if (result !== null) {
           let terminateAfterYield = false;
@@ -792,6 +819,7 @@ export class OpenCodeAgentService implements L0InjectableAgentService {
           transportArgs: runDefaults.transportArgs,
           ...(runDefaults.pure !== undefined ? { pureSupported: runDefaults.pure } : {}),
           ...(plannedNormalizeEvent ? { normalizeEvent: plannedNormalizeEvent } : {}),
+          ...(assertLaunchCurrent ? { assertCurrent: assertLaunchCurrent } : {}),
           options,
         })) {
           if (finalizerMsg.type === 'text') textEventCount++;
@@ -944,6 +972,7 @@ export class OpenCodeAgentService implements L0InjectableAgentService {
     const cliOpts = {
       command: params.command,
       args: finalizerArgs,
+      ...(params.assertCurrent ? { assertLaunchCurrent: params.assertCurrent } : {}),
       ...(params.cwd ? { cwd: params.cwd } : {}),
       env: finalizerEnv,
       ...(params.options?.signal ? { signal: params.options.signal } : {}),
@@ -973,10 +1002,17 @@ export class OpenCodeAgentService implements L0InjectableAgentService {
     await params.options?.beforeProviderLaunch?.(preparedRequest);
     if (!('body' in preparedRequest.message)) throw new Error('opencode_finalizer_message_not_exact');
     finalizerArgs[finalizerArgs.length - 1] = preparedRequest.message.body;
+    if (params.options?.spawnCliOverride) await params.assertCurrent?.();
 
     const events = params.options?.spawnCliOverride
       ? params.options.spawnCliOverride(cliOpts)
       : spawnCli(cliOpts, this.spawnFn ? { spawnFn: this.spawnFn } : undefined);
+
+    // Same redaction rule as the main run: the recovery run reads the same CLI output
+    // through the same package worker, so it needs the same credential set.
+    const normalizeEventCredentials = params.normalizeEvent
+      ? configuredCredentialValues({ ...process.env, ...withoutClearedValues(params.childEnv) })
+      : undefined;
 
     const finalizerTextBuffer: AgentMessage[] = [];
     let finalizerPoisoned = false;
@@ -1021,7 +1057,10 @@ export class OpenCodeAgentService implements L0InjectableAgentService {
       }
 
       const result = params.normalizeEvent
-        ? mapOpenCodeWireEvent((await params.normalizeEvent(event)) as AgentAccessOpenCodeEvent, this.catId)
+        ? mapOpenCodeWireEvent(
+            (await params.normalizeEvent(event, normalizeEventCredentials)) as AgentAccessOpenCodeEvent,
+            this.catId,
+          )
         : transformOpenCodeEvent(event, this.catId);
       if (result === null) continue;
       if (result.type === 'session_init') {

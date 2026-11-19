@@ -5,6 +5,7 @@ import {
   agentAccessNativeLaunchArgumentsSchema,
   agentAccessOpenCodeEventSchema,
 } from '@clowder-ai/agent-contract';
+import { sanitizeRawEvent } from '../../cats/services/agents/providers/codex-audit-hooks.js';
 import type { PluginRuntimeCarrierRouter } from '../carrier/runtime-carrier.js';
 import type { PluginInventoryStore } from '../host-inventory/ports.js';
 
@@ -49,11 +50,17 @@ export function createAgentAccessOpenCodeLaunchPlanner(
     return {
       ...agentAccessNativeLaunchArgumentsSchema.parse(result),
       assertCurrent,
-      async normalizeEvent(event: unknown) {
+      async normalizeEvent(event: unknown, knownCredentials?: readonly string[]) {
         await assertCurrent();
-        return agentAccessOpenCodeEventSchema.parse(
-          await runtime.invoke(pluginInstanceId, 'parseNativeEvent', { client: 'opencode', event }),
-        );
+        // A raw provider error can carry a credential nested in its payload, and the
+        // package runs in a worker owned by a third-party archive. Redact at the
+        // boundary, exactly as the Kimi planner does, so nothing sensitive leaves the
+        // Host — while the parse result keeps whatever error classification came back.
+        const response = await runtime.invoke(pluginInstanceId, 'parseNativeEvent', {
+          client: 'opencode',
+          event: sanitizeRawEvent(event, knownCredentials),
+        });
+        return agentAccessOpenCodeEventSchema.parse(response);
       },
     };
   };

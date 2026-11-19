@@ -82,7 +82,11 @@ function readUsage(event: OpenCodeRawEvent): OpenCodeUsage | null {
   const cacheWrite = tokens?.cache?.write;
   const output = tokens?.output;
   const total = tokens?.total;
-  const cost = event.part?.cost;
+  // Steps the CLI could not price report something other than a number (v2.0.28 sends
+  // the string 'unknown'). The Host contract types costUsd as a number, so an unchecked
+  // pass-through fails contract validation and ends a turn whose tokens were fine —
+  // the baseline dropped the unusable cost and kept the telemetry.
+  const cost = typeof event.part?.cost === 'number' ? event.part.cost : undefined;
 
   const hasInput = freshInput != null || cacheRead != null || cacheWrite != null;
   const totalInput = hasInput ? (freshInput ?? 0) + (cacheRead ?? 0) + (cacheWrite ?? 0) : undefined;
