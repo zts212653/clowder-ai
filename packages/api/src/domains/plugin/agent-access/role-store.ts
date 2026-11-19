@@ -1,14 +1,21 @@
 import { createHash } from 'node:crypto';
 import { type CatCafeConfig, catRegistry } from '@cat-cafe/shared';
+import { projectRoleCatalog } from '@clowder-ai/agent-access/roles/role-catalog-projection';
 import {
   AGENT_ACCESS_PLUGIN_ID,
   type AgentAccessRoleStore,
   agentAccessRoleProfileSchema,
 } from '@clowder-ai/agent-contract';
-import { readCatCatalogRaw, resolveCatCatalogPath } from '../../../config/cat-catalog-store.js';
+import { inheritFullyBlockedMcpCapabilitiesForNewCatsSync } from '../../../config/capabilities/capability-orchestrator.js';
+import {
+  readRoleCatalogSnapshot,
+  readRoleCatalogTemplate,
+  readStoredCatCatalog,
+  resolveCatCatalogPath,
+} from '../../../config/cat-catalog-store.js';
 import {
   loadCatConfig,
-  loadResolvedCatConfig,
+  loadRuntimeCatConfig,
   mergeRuntimeCatalogSnapshot,
   parseRawCatConfig,
   toAllCatConfigs,
@@ -57,7 +64,10 @@ export function createAgentAccessRoleStore(
 
   const projectRoot = resolveActiveProjectRoot();
   const path = resolveCatCatalogPath(projectRoot);
-  const digest = (source: string) => createHash('sha256').update(source).digest('hex');
+  const digest = (stored: Buffer | null) => {
+    const hash = createHash('sha256');
+    return (stored === null ? hash.update('missing') : hash.update('present\0').update(stored)).digest('hex');
+  };
 
   async function authorize(operation: 'read' | 'write') {
     assertActivation();
@@ -69,19 +79,14 @@ export function createAgentAccessRoleStore(
     return owner;
   }
 
-  function readCatalogSource() {
-    const current = readCatCatalogRaw(projectRoot, { persistMigrations: false });
-    if (current === null) throw new Error('Agent role catalog is not initialized');
-    return current;
-  }
-
   return {
     async readCatalog() {
       const owner = await authorize('read');
-      const source = readCatalogSource();
-      const revision = digest(source);
+      const template = resolveProjectTemplatePath(projectRoot);
+      const { source, stored } = readRoleCatalogSnapshot(projectRoot, template, owner.operation === 'write');
+      const revision = digest(stored);
       if (owner.operation === 'write') return { source, revision };
-      const resolved = loadResolvedCatConfig(resolveProjectTemplatePath(projectRoot), { persistMigrations: false });
+      const resolved = loadRuntimeCatConfig(template);
       const profiles = Object.fromEntries(
         Object.entries(toAllCatConfigs(resolved)).map(([id, cat]) => [id, agentAccessRoleProfileSchema.parse(cat)]),
       );
@@ -90,13 +95,15 @@ export function createAgentAccessRoleStore(
     async commitCatalog(revision, source, change) {
       return withRuntimeCatMutationLock(projectRoot, async () => {
         await authorize('write');
-        const currentSource = readCatalogSource();
-        if (digest(currentSource) !== revision) return 'conflict';
+        const stored = readStoredCatCatalog(projectRoot);
+        if (digest(stored) !== revision) return 'conflict';
+        const template = resolveProjectTemplatePath(projectRoot);
+        const current = projectRoleCatalog(stored?.toString('utf8') ?? null, readRoleCatalogTemplate(template), true);
+        const currentSource = current.source;
+        const next = parseRawCatConfig(source);
         if (change.catId && (change.kind === 'create' || change.kind === 'update')) {
           const previous = change.kind === 'update' ? parseRawCatConfig(currentSource) : undefined;
-          const next = parseRawCatConfig(source);
           if (isDeclaredAgentProviderAvailable) {
-            const template = resolveProjectTemplatePath(projectRoot);
             const selected = catalogProvider(
               parseRawCatConfig(mergeRuntimeCatalogSnapshot(template, source).raw),
               change.catId,
@@ -126,6 +133,12 @@ export function createAgentAccessRoleStore(
             change.requireAccountCheck,
           );
         }
+        const nextCats = toAllCatConfigs(next);
+        inheritFullyBlockedMcpCapabilitiesForNewCatsSync(
+          projectRoot,
+          current.backfilledCatIds.filter((id) => Object.hasOwn(nextCats, id)),
+          current.existingCatIds,
+        );
         writeFileAtomic(path, source, { verify: (candidate) => loadCatConfig(candidate) });
         refreshRuntimeCatCatalogCaches();
         return 'committed';

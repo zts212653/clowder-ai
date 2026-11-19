@@ -15,7 +15,7 @@ import {
 import { saveSpan } from '../utils/member-save-diagnostics.js';
 import { planAgyAccountBinding } from './agy-account-binding.js';
 import { clearBudgetCache } from './cat-budgets.js';
-import { bootstrapCatCatalog, readCatCatalog, resolveCatCatalogPath } from './cat-catalog-store.js';
+import { readPublishedRoleCatalogSource, readStoredCatCatalog, resolveCatCatalogPath } from './cat-catalog-store.js';
 import { _resetCachedConfig, loadCatConfig, parseRawCatConfig, toAllCatConfigs } from './cat-config-loader.js';
 import { clearVoiceCache } from './cat-voices.js';
 import { planClaudeAccountBinding } from './claude-account-binding.js';
@@ -145,16 +145,6 @@ export function findTemplateVariantTombstoneInput(
   return null;
 }
 
-function readOrBootstrapCatalog(projectRoot: string): CatCafeConfig {
-  const templatePath = resolveProjectTemplatePath(projectRoot);
-  bootstrapCatCatalog(projectRoot, templatePath);
-  const catalog = readCatCatalog(projectRoot);
-  if (!catalog) {
-    throw new Error(`Runtime cat catalog missing at ${projectRoot}`);
-  }
-  return catalog;
-}
-
 function invalidateRuntimeCatalogCaches(): void {
   _resetCachedConfig();
   clearBudgetCache();
@@ -182,12 +172,15 @@ function cloneCatalog(catalog: CatCafeConfig): Record<string, any> {
 }
 
 export function readRuntimeCatCatalog(projectRoot: string): CatCafeConfig {
-  return readOrBootstrapCatalog(projectRoot);
+  return JSON.parse(
+    readPublishedRoleCatalogSource(projectRoot, resolveProjectTemplatePath(projectRoot)),
+  ) as CatCafeConfig;
 }
 
 /** Account previews must not bootstrap or normalize the member owner as a read side effect. */
 export function readRuntimeAccountMembers(projectRoot: string): CatCafeConfig {
-  return parseRawCatConfig(readFileSync(resolveCatCatalogPath(projectRoot), 'utf8'));
+  const source = readStoredCatCatalog(projectRoot);
+  return source === null ? readRuntimeCatCatalog(projectRoot) : parseRawCatConfig(source.toString('utf8'));
 }
 
 /** One synchronous catalog commit for the complete confirmed selection, never a per-member PATCH loop. */
@@ -240,14 +233,13 @@ function bindRuntimeLocalAccounts(
 }
 
 export function createRuntimeCat(projectRoot: string, input: RuntimeCatInput): CatCafeConfig {
-  // The existing catalog reader may persist migrations. Validate the requested change first.
-  const catalog = planRoleCreation(() => readOrBootstrapCatalog(projectRoot), input);
+  const catalog = planRoleCreation(() => readRuntimeCatCatalog(projectRoot), input);
   assertCodexMemberMutationReady(projectRoot, catalog, input.catId);
   return writeAndValidateCatalog(projectRoot, catalog);
 }
 
 export function updateRuntimeCat(projectRoot: string, catId: string, patch: RuntimeCatUpdate): CatCafeConfig {
-  const { catalog, previous } = planRoleUpdate(() => readOrBootstrapCatalog(projectRoot), catId, patch);
+  const { catalog, previous } = planRoleUpdate(() => readRuntimeCatCatalog(projectRoot), catId, patch);
   assertCodexMemberMutationReady(
     projectRoot,
     catalog,
@@ -259,7 +251,7 @@ export function updateRuntimeCat(projectRoot: string, catId: string, patch: Runt
 }
 
 export function updateRuntimeCoCreator(projectRoot: string, patch: RuntimeCoCreatorUpdate): CatCafeConfig {
-  const catalog = cloneCatalog(readOrBootstrapCatalog(projectRoot));
+  const catalog = cloneCatalog(readRuntimeCatCatalog(projectRoot));
   if (catalog.version !== 2) {
     throw new Error('Owner config requires a version 2 runtime catalog');
   }
@@ -329,7 +321,7 @@ export function updateRuntimeCoCreator(projectRoot: string, patch: RuntimeCoCrea
 }
 
 export function deleteRuntimeCat(projectRoot: string, catId: string): CatCafeConfig {
-  const catalog = readOrBootstrapCatalog(projectRoot);
+  const catalog = readRuntimeCatCatalog(projectRoot);
   const templateTombstone = findTemplateVariantTombstoneInput(projectRoot, catId);
   return writeAndValidateCatalog(projectRoot, planRoleDeletion(catalog, catId, templateTombstone));
 }

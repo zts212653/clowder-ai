@@ -71,14 +71,13 @@ import {
   removeDeletedCatFromBlockedMcps,
 } from '../config/capabilities/capability-orchestrator.js';
 import { resolveBoundAccountRefForCat } from '../config/cat-account-binding.js';
-import { bootstrapCatCatalog } from '../config/cat-catalog-store.js';
 import {
   getAcpConfig,
   getDefaultCatId,
   getRegisteredAcpConfig,
   getRoster,
   loadCatConfig,
-  loadResolvedCatConfig,
+  loadRuntimeCatConfig,
   readResolvedTemplateSource,
   resolveCatCarrier,
   toAllCatConfigs,
@@ -513,8 +512,7 @@ function buildCatResponseMetadataResolver(projectRoot: string) {
   let roster: Record<string, RosterEntry> = {};
   try {
     const templatePath = resolveProjectTemplatePath(projectRoot);
-    bootstrapCatCatalog(projectRoot, templatePath);
-    roster = getRoster(loadResolvedCatConfig(templatePath));
+    roster = getRoster(loadRuntimeCatConfig(templatePath));
   } catch {
     roster = {};
   }
@@ -876,7 +874,7 @@ async function toCatResponse(
 
 function getManagedCatalogIds(projectRoot: string): Set<string> {
   try {
-    return new Set(Object.keys(toAllCatConfigs(loadResolvedCatConfig(resolveProjectTemplatePath(projectRoot)))));
+    return new Set(Object.keys(toAllCatConfigs(loadRuntimeCatConfig(resolveProjectTemplatePath(projectRoot)))));
   } catch {
     return new Set();
   }

@@ -1,7 +1,7 @@
 import { isDeepStrictEqual } from 'node:util';
 import { type CatCafeConfig, type CatConfig, catRegistry } from '@cat-cafe/shared';
 import { saveSpan } from '../utils/member-save-diagnostics.js';
-import { loadResolvedCatConfig, toAllCatConfigs } from './cat-config-loader.js';
+import { loadRuntimeCatConfig, toAllCatConfigs } from './cat-config-loader.js';
 import { resolveProjectTemplatePath } from './project-template-path.js';
 
 // Publication provenance only. The resolver remains the catalog owner; nothing is persisted here.
@@ -32,14 +32,10 @@ export function isPublishedCatalogSnapshotCurrent(config: CatConfig | undefined)
 export function reconcileCatRegistry(projectRoot: string, managedIdsBefore: ReadonlySet<string>) {
   return saveSpan('catalog.reconcile', () => {
     const templatePath = resolveProjectTemplatePath(projectRoot);
-    const runtimeCats = toAllCatConfigs(loadResolvedCatConfig(templatePath));
+    const runtimeCats = toAllCatConfigs(loadRuntimeCatConfig(templatePath));
     const extraCats = catRegistry.getAllIds().map((id) => [id, catRegistry.getOrThrow(id)] as const);
     catRegistry.reset();
-    registerCatalogSnapshot(
-      runtimeCats,
-      () => loadResolvedCatConfig(templatePath, { persistMigrations: false }),
-      templatePath,
-    );
+    registerCatalogSnapshot(runtimeCats, () => loadRuntimeCatConfig(templatePath), templatePath);
     for (const [id, entry] of extraCats) {
       if (!runtimeCats[id] && !managedIdsBefore.has(id))
         catRegistry.register(

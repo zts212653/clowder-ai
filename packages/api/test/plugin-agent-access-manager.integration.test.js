@@ -1013,8 +1013,6 @@ test('Agent access discovery executes the same standalone entrypoint from a Mana
   await invoke('before replacement');
 
   const catalogPath = join(projectRoot, '.cat-cafe', 'cat-catalog.json');
-  await mkdir(join(projectRoot, '.cat-cafe'), { recursive: true });
-  await writeFile(catalogPath, JSON.stringify({ version: 1, breeds: [] }));
   const readCatalog = async () => JSON.parse(await readFile(catalogPath, 'utf8'));
   const request = {
     kind: 'create',
@@ -1036,7 +1034,7 @@ test('Agent access discovery executes the same standalone entrypoint from a Mana
     },
   };
   await assert.rejects(runtime.supervisor.invoke(installed.pluginInstanceId, 'writeRole', request));
-  assert.equal((await readCatalog()).breeds.length, 0);
+  await assert.rejects(readFile(catalogPath), { code: 'ENOENT' });
 
   const mutate = (input) =>
     withPluginOwnerRequest(
@@ -1061,6 +1059,7 @@ test('Agent access discovery executes the same standalone entrypoint from a Mana
   assert.deepEqual(await mutate(request), { status: 'committed', catId: request.input.catId, replayed: true });
   assert.equal((await readCatalog()).breeds.length, 1);
   assert.equal((await readCatalog()).breeds[0].catId, request.input.catId);
+  assert.equal((await readCatalog()).memberInitialization, 'user_selected_v1');
   const before = roleConfigurationRevision(await readCatalog(), request.input.catId);
 
   await assert.rejects(install(incompatible), /Agent access protocol version/);

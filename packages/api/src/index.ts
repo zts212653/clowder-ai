@@ -61,13 +61,12 @@ import { resolveInvokeCapabilityRoot } from './config/capabilities/invoke-capabi
 import { migrateStartupCodexMcpConfig, regenerateStartupCliConfigs } from './config/capabilities/startup-cli-config.js';
 import { usesNativeToolConfiguration } from './config/cat-account-binding.js';
 import {
-  bootstrapDefaultCatCatalog,
   getCoCreatorConfig,
   getConfigSessionStrategy,
   getDefaultCatId,
   getRegisteredAcpConfig,
   isCatAvailable,
-  loadResolvedCatConfig,
+  loadRuntimeCatConfig,
   resolveRuntimeCatTemplatePath,
   toAllCatConfigs,
 } from './config/cat-config-loader.js';
@@ -2001,12 +2000,8 @@ async function initializeApi(
   // so registry population must precede auto-dream bootstrap as well as AgentRouter construction.
   try {
     const templatePath = resolveRuntimeCatTemplatePath();
-    const catConfig = bootstrapDefaultCatCatalog(templatePath);
-    registerCatalogSnapshot(
-      toAllCatConfigs(catConfig),
-      () => loadResolvedCatConfig(templatePath, { persistMigrations: false }),
-      templatePath,
-    );
+    const catConfig = loadRuntimeCatConfig(templatePath);
+    registerCatalogSnapshot(toAllCatConfigs(catConfig), () => loadRuntimeCatConfig(templatePath), templatePath);
     app.log.info(`[api] CatRegistry initialized: ${catRegistry.getAllIds().join(', ')}`);
   } catch (err) {
     app.log.error(`[api] Failed to load cat catalog — .cat-cafe/cat-catalog.json is required: ${String(err)}`);
@@ -7269,7 +7264,7 @@ async function initializeApi(
   const { buildCatIdentityAliases } = await import('./domains/story/content-sanitizer.js');
   const exportStore = new StoryExportStore(annotationDataDir); // shares data/stories/ root
   // Build identity alias map from breeds config for Class D redaction coverage
-  const exportCatConfig = bootstrapDefaultCatCatalog();
+  const exportCatConfig = loadRuntimeCatConfig();
   const catIdentityAliases = buildCatIdentityAliases(
     exportCatConfig.breeds.map((b) => ({
       catId: b.catId,

@@ -35,7 +35,12 @@ import type { AcpVariantConfig } from '@clowder-ai/agent-contract';
 import { z } from 'zod';
 import { createModuleLogger } from '../infrastructure/logger.js';
 import { isUserSelectedCatalog } from './cat-catalog-initialization.js';
-import { bootstrapCatCatalog, type CatCatalogReadOptions, readCatCatalogRaw } from './cat-catalog-store.js';
+import {
+  bootstrapCatCatalog,
+  type CatCatalogReadOptions,
+  readCatCatalogRaw,
+  readPublishedRoleCatalogSource,
+} from './cat-catalog-store.js';
 import { memberEnvironmentSchema } from './member-environment.js';
 import { captureMemberIdentitySources } from './member-identity-sources.js';
 import { resolveProjectTemplatePath } from './project-template-path.js';
@@ -489,6 +494,7 @@ function removeUnavailableTemplateVariants(
   merged: Record<string, unknown>,
   catalogJson: Record<string, unknown>,
   catalogBreeds: BreedWithResolvedCatIds[],
+  runtimeRolesOnly: boolean,
 ): Set<string> {
   const removedCatIds = new Set<string>();
   if (!Array.isArray(merged.breeds)) return removedCatIds;
@@ -532,7 +538,7 @@ function removeUnavailableTemplateVariants(
       }
       const hasOccupiedCatId = occupancy.catIds.has(catId);
       const hasOccupiedAlias = hasOccupiedMentionAlias(input.mentionPatterns, occupancy.mentionAliases);
-      let keep = isTemplateVariantBackfillAllowed(input, occupancy);
+      let keep = !runtimeRolesOnly && isTemplateVariantBackfillAllowed(input, occupancy);
       if (!keep && ownedByCatalogRoster && !hasOccupiedCatId && !hasOccupiedAlias) keep = true;
       if (!keep) removedCatIds.add(catId);
       return keep;
@@ -547,12 +553,14 @@ function removeUnavailableTemplateVariants(
  */
 function mergeTemplateWithCatalog(templatePath: string, options: CatCatalogReadOptions = {}) {
   const projectRoot = dirname(templatePath);
-  const catalogRaw = readCatCatalogRaw(projectRoot, options);
-  return catalogRaw === null ? null : mergeRuntimeCatalogSnapshot(templatePath, catalogRaw);
+  const catalogRaw = options.runtimeRolesOnly
+    ? readPublishedRoleCatalogSource(projectRoot, templatePath)
+    : readCatCatalogRaw(projectRoot, options);
+  return catalogRaw === null ? null : mergeRuntimeCatalogSnapshot(templatePath, catalogRaw, options.runtimeRolesOnly);
 }
 
 /** Resolve an already captured catalog snapshot through the same merge used by routing. */
-export function mergeRuntimeCatalogSnapshot(templatePath: string, catalogRaw: string) {
+export function mergeRuntimeCatalogSnapshot(templatePath: string, catalogRaw: string, runtimeRolesOnly = false) {
   const baseRaw = readTemplate(templatePath);
   const baseJson = JSON.parse(baseRaw) as Record<string, unknown>;
   const catalogJson = JSON.parse(catalogRaw) as Record<string, unknown>;
@@ -577,7 +585,12 @@ export function mergeRuntimeCatalogSnapshot(templatePath: string, catalogRaw: st
   if (Array.isArray(merged.breeds)) {
     merged.breeds = (merged.breeds as BreedWithResolvedCatIds[]).filter((breed) => catalogBreedIds.has(breed.id));
   }
-  const unavailableTemplateVariantCatIds = removeUnavailableTemplateVariants(merged, catalogJson, catalogBreeds);
+  const unavailableTemplateVariantCatIds = removeUnavailableTemplateVariants(
+    merged,
+    catalogJson,
+    catalogBreeds,
+    runtimeRolesOnly,
+  );
   const runtimeCatIds = Array.isArray(merged.breeds)
     ? collectResolvedCatIds(merged.breeds as BreedWithResolvedCatIds[])
     : new Set<string>();
@@ -685,11 +698,15 @@ export function loadCatConfig(filePath?: string): CatCafeConfig {
   return loadResolvedCatConfig();
 }
 
+export function loadRuntimeCatConfig(templatePath?: string): CatCafeConfig {
+  return loadResolvedCatConfig(templatePath, { runtimeRolesOnly: true });
+}
+
+/** Explicit disk repair for catalog maintenance callers. Runtime startup uses loadRuntimeCatConfig. */
 export function bootstrapDefaultCatCatalog(templatePath?: string): CatCafeConfig {
-  const resolvedTemplatePath = templatePath ?? process.env.CAT_TEMPLATE_PATH ?? DEFAULT_CAT_TEMPLATE_PATH;
-  const projectRoot = dirname(resolvedTemplatePath);
-  bootstrapCatCatalog(projectRoot, resolvedTemplatePath);
-  return loadResolvedCatConfig(resolvedTemplatePath);
+  const path = templatePath ?? process.env.CAT_TEMPLATE_PATH ?? DEFAULT_CAT_TEMPLATE_PATH;
+  bootstrapCatCatalog(dirname(path), path);
+  return loadRuntimeCatConfig(path);
 }
 
 /** Get the default variant for a breed */

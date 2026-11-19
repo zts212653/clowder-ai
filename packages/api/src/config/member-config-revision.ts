@@ -1,7 +1,8 @@
 import type { CatCafeConfig } from '@cat-cafe/shared';
 import { roleConfigurationRevision } from '@clowder-ai/agent-access/roles/write-role';
 import { saveSpan } from '../utils/member-save-diagnostics.js';
-import { readCatCatalogRaw } from './cat-catalog-store.js';
+import { readRoleCatalogSnapshot } from './cat-catalog-store.js';
+import { resolveProjectTemplatePath } from './project-template-path.js';
 
 import { type RuntimeCatUpdate, updateRuntimeCat, withRuntimeCatMutationLock } from './runtime-cat-catalog.js';
 
@@ -21,9 +22,8 @@ export class MemberConfigurationRevisionRequired extends Error {
 
 /** A member-scoped validator read from disk, never from a stale registry cache. */
 export function memberConfigurationRevision(projectRoot: string, catId: string): string | undefined {
-  const raw = readCatCatalogRaw(projectRoot, { persistMigrations: false });
-  if (!raw) return undefined;
-  return roleConfigurationRevision(JSON.parse(raw) as CatCafeConfig, catId);
+  const { source } = readRoleCatalogSnapshot(projectRoot, resolveProjectTemplatePath(projectRoot), true);
+  return roleConfigurationRevision(JSON.parse(source) as CatCafeConfig, catId);
 }
 
 /** The caller holds the existing catalog mutation lock through its complete mutation. */
