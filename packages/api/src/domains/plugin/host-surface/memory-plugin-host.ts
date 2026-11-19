@@ -1,7 +1,11 @@
 import type { DispatchInput } from '@clowder-ai/plugin-memory-contract';
 import { explainDescriptor, isCompatibleDescriptor } from '@clowder-ai/plugin-memory-contract';
 import { invocationNotStarted, type PluginInvocationOutcome } from '../carrier/host-invocation.js';
-import { type PluginCallContext, withPluginCallContext } from '../carrier/plugin-call-context.js';
+import {
+  type PluginCallContext,
+  withoutPluginCallContext,
+  withPluginCallContext,
+} from '../carrier/plugin-call-context.js';
 import type { PluginRuntimeAdmission } from '../carrier/runtime-carrier.js';
 import type { DeclaredActionSurface } from '../declared/declared-cloud-conversation-hosts.js';
 import { ExternalPluginRuntimeError } from '../external-runtime/types.js';
@@ -40,7 +44,7 @@ export class MemoryPluginHost {
     if (!actions || !(await actions.exposes(instanceId, 'memory.dispatch'))) {
       throw new ExternalPluginRuntimeError('PROTOCOL_VIOLATION', 'Memory package does not expose memory.dispatch');
     }
-    const descriptor = await actions.attempt(instanceId, 'memory.describe', {});
+    const descriptor = await withoutPluginCallContext(() => actions.attempt(instanceId, 'memory.describe', {}));
     if (descriptor.status === 'failed') {
       throw new ExternalPluginRuntimeError('PROTOCOL_VIOLATION', 'Memory package could not describe its capabilities');
     }
@@ -78,7 +82,18 @@ export class MemoryPluginHost {
     const binding = this.#binding;
     if (!binding?.ready) return Promise.resolve(invocationNotStarted(new Error('memory_unavailable')));
     const { pluginInstanceId } = binding.identity;
-    return withPluginCallContext(pluginInstanceId, caller, async () => {
+    const assertActivation = () => {
+      if (this.#binding !== binding) throw new Error('memory_activation_changed');
+    };
+    const scopedCaller: PluginCallContext = {
+      ...caller,
+      assertCurrent: async () => {
+        assertActivation();
+        await caller.assertCurrent();
+        assertActivation();
+      },
+    };
+    return withPluginCallContext(pluginInstanceId, scopedCaller, async () => {
       const outcome = await binding.actions.attempt(pluginInstanceId, 'memory.dispatch', request);
       this.logger?.debug(
         {

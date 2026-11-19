@@ -80,6 +80,7 @@ import type { PackageAdmissionContractRuntime } from './host-inventory/manifest-
 import { PLUGIN_HOST_ENTRIES, pluginHostRoot } from './host-inventory/plugin-host-layout.js';
 import type { PluginInstanceRecord, PluginInventorySnapshot } from './host-inventory/types.js';
 import { isAdmittedMemoryPackage, type MemoryPluginHost } from './host-surface/memory-plugin-host.js';
+import { createMemorySourceHost } from './host-surface/memory-source-host.js';
 import {
   createMemoryThreadKvPort,
   redisMemoryThreadKvBacking,
@@ -554,6 +555,16 @@ export function createDormantPluginRuntimeComposition(
       if (!options.memory || !isAdmittedMemoryPackage(record)) return undefined;
       return {
         memoryDatabase: { canonicalPath: options.memory.evidenceDbPath, storageFormat: 1 },
+        ...(options.threadStore
+          ? {
+              memorySource: createMemorySourceHost({
+                pluginInstanceId,
+                messageStore: options.messageStore,
+                threadStore: options.threadStore,
+                assertActivation,
+              }),
+            }
+          : {}),
         ...(memoryKvBacking && ownerChatSource
           ? {
               memoryThreadKv: createMemoryThreadKvPort({

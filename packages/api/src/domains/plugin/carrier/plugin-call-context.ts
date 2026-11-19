@@ -12,6 +12,8 @@ export interface PluginCallContext {
   readonly threadId: string;
   readonly userId: string;
   readonly invocationId: string;
+  /** Source projections for a public reply must exclude scoped content. */
+  readonly memoryPublicReply?: boolean;
   /** Issued per admitted native action by Host; never accepted from tool input. */
   readonly nativeAction?: { readonly id: string; readonly contributionId: string; readonly method: string };
   /** Set only inside the Host's admitted project-output dispatcher. */

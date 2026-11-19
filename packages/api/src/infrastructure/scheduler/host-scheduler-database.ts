@@ -35,6 +35,10 @@ export async function openHostSchedulerDatabase(dbPath: string): Promise<Databas
       prepareGenerationInvalidationConnection(db);
       applyMigrations(db);
     }
+    // Verify the shared layout before either owner opens a production connection.
+    db.prepare('SELECT anchor, kind, source_path FROM evidence_docs LIMIT 0');
+    db.prepare('SELECT id, task_id, subject_key, outcome FROM task_run_ledger LIMIT 0');
+    db.prepare('SELECT task_id, total, delivered, failed, skipped FROM task_run_stats LIMIT 0');
     return db;
   } catch (error) {
     db.close();

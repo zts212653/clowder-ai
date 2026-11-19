@@ -84,6 +84,18 @@ test('Host scheduler refuses a future legacy database without applying migration
   }
 });
 
+test('a current marker does not hide an incomplete shared layout', async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), 'host-scheduler-incomplete-db-'));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const dbPath = join(dir, 'evidence.sqlite');
+  const seed = new Database(dbPath);
+  seed.exec('CREATE TABLE schema_version (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL)');
+  seed.prepare('INSERT INTO schema_version VALUES (?, ?)').run(CURRENT_SCHEMA_VERSION, '2026-11-18T00:00:00.000Z');
+  seed.close();
+
+  await assert.rejects(openHostSchedulerDatabase(dbPath), /no such table: evidence_docs/);
+});
+
 test('legacy preparation backs up the original schema and records before migrating', async (t) => {
   const dir = await mkdtemp(join(tmpdir(), 'host-scheduler-legacy-db-'));
   t.after(() => rm(dir, { recursive: true, force: true }));
