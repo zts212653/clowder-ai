@@ -302,3 +302,62 @@ it('leaves a saved image draft as it is when the owner leaves and comes back whi
   await flushed(700);
   expect(writes().filter(([, path]) => String(path).includes('/t1/'))).toEqual([]);
 });
+
+it('keeps saving a newer opening when the image read of an older opening of the same conversation fails late', async () => {
+  let aReads = 0;
+  vi.mocked(apiFetch).mockImplementation(async (path, init) => {
+    if (init?.method === 'PUT') return Response.json({ draft: { revision: 9 } });
+    if (!String(path).includes('/t1/')) return Response.json({ draft: { text: 'B' }, revision: 2 });
+    aReads += 1;
+    // Another tab replaced A's image between the two openings.
+    return aReads === 1
+      ? Response.json({
+          draft: { text: 'A', contentBlocks: [{ type: 'image', url: '/uploads/old.png' }] },
+          revision: 1,
+        })
+      : Response.json({
+          draft: { text: 'A', contentBlocks: [{ type: 'image', url: '/uploads/new.png' }] },
+          revision: 3,
+        });
+  });
+  const state = { draft: { text: '', images: [], contexts: [] } as ComposerDraft, threadId: 't1' };
+  const host: { rerender?: () => void } = {};
+  let failOld: () => void = () => {};
+  const restore = vi.fn((saved: ComposerDraft) => {
+    state.draft = { ...saved, images: [] };
+    host.rerender?.();
+    if (!saved.images.length) return undefined;
+    if (saved.images[0] === '/uploads/old.png')
+      return new Promise<void>((_, reject) => {
+        failOld = () => reject(new Error('503'));
+      });
+    state.draft = saved;
+    host.rerender?.();
+    return Promise.resolve();
+  });
+  const hook = renderHook(() =>
+    useServerComposerDraft({ threadId: state.threadId, enabled: true, draft: state.draft, restore }),
+  );
+  host.rerender = hook.rerender;
+  await waitFor(() => expect(restore).toHaveBeenCalledTimes(1));
+  state.threadId = 't2';
+  hook.rerender();
+  await waitFor(() => expect(restore).toHaveBeenCalledTimes(2));
+  state.threadId = 't1';
+  state.draft = { text: 'A', images: [], contexts: [] };
+  hook.rerender();
+  await waitFor(() => expect(restore).toHaveBeenCalledTimes(3));
+  await flushed();
+  failOld();
+  await flushed();
+  state.draft = { ...state.draft, text: 'A, continued' };
+  hook.rerender();
+  await flushed(700);
+  const toA = writes().filter(([, path]) => String(path).includes('/t1/'));
+  expect(toA).toHaveLength(1);
+  expect(JSON.parse(String(toA[0][2]))).toMatchObject({
+    expectedRevision: 3,
+    text: 'A, continued',
+    contentBlocks: [{ type: 'image', url: '/uploads/new.png' }],
+  });
+});

@@ -68,8 +68,9 @@ export function useServerComposerDraft(input: {
             () => true,
             () => false,
           );
+          // Only this opening's own failure counts: a later opening may already have read a newer draft.
           if (!ok) {
-            known.current.delete(threadId);
+            if (live) known.current.delete(threadId);
             return;
           }
         }
