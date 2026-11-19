@@ -16901,6 +16901,32 @@ pdl:
                 when: $.home
             field:
               - type: component
+                use: v2Box
+                props:
+                  role: inline
+                  blocks:
+                    - type: component
+                      use: v2Each
+                      props:
+                        from: $.input.draft.att
+                        control:
+                          type: component
+                          use: v2Chip
+                          props:
+                            icon:
+                              of: "@kind"
+                              map: {image: image, _: file}
+                            label: "@name"
+                            act:
+                              of: "@kind"
+                              map: {image: draftAttachment, _: ""}
+                            args: "@preview"
+                            x:
+                              act: listOp
+                              args: {path: cs.att, op: del, i: "@index"}
+                              label: t:common.remove
+                when: $.input.draft.att
+              - type: component
                 use: v2ComposeField
                 props:
                   id: $.input.id

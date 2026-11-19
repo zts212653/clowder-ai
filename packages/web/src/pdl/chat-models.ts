@@ -1038,7 +1038,7 @@ export function chatModels(data: ChatData, ui: ChatUiState, input?: ChatProjecti
     data.images.map((file, index) => ({
       index,
       name: file.name,
-      kind: 'image',
+      kind: file.type.startsWith('image/') ? 'image' : 'file',
       size: file.size,
       state: data.uploadStatus === 'uploading' ? 'up' : '',
       source: draftSource(file),
