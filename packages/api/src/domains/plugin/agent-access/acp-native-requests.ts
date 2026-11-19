@@ -21,20 +21,32 @@ const agentRequestSchema = z.object({
   id: z.union([z.string(), z.number()]).nullable().optional(),
   params: z.record(z.unknown()).default({}),
 });
+const nativeResultSchema = z.object({
+  jsonrpc: z.literal('2.0'),
+  id: z.union([z.string(), z.number()]),
+  method: z.undefined().optional(),
+  error: z.undefined().optional(),
+  result: z.unknown(),
+});
 
 /** Agent-initiated requests execute on the Host under the registered session's authority. */
 export function createNativeAcpRequests(input: {
   defaultDecision?: 'allow' | 'reject';
   defaultHandler?: AcpPermissionHandler;
-  write: (line: string) => Promise<void>;
-  onWriteError: (error: unknown) => void;
+  write: (line: string, replySessionId?: string) => Promise<void>;
+  promptSignal?: (sessionId: string) => AbortSignal | undefined;
+  onWriteError: (error: unknown, sessionId: string) => void;
   knownCredentials: readonly string[];
   onDshTurnEvent?: (event: DshTurnBridgeEvent) => void;
 }) {
   const permissions = new Map<string, AcpPermissionHandler>();
   const requests = new Map<string, AcpSessionRequestHandler>();
-  const write = (value: unknown) => input.write(JSON.stringify(value) + '\n');
+  const receipts = new Map<string | number, (result: unknown) => void>();
   return {
+    observeReceipt(id: string | number, receive: (result: unknown) => void) {
+      receipts.set(id, receive);
+      return () => receipts.delete(id);
+    },
     setSessionPermissionHandler(sessionId: string, handler?: AcpPermissionHandler) {
       if (!handler) {
         permissions.delete(sessionId);
@@ -70,6 +82,16 @@ export function createNativeAcpRequests(input: {
                 continue;
               }
               const message = agentRequestSchema.safeParse(decoded);
+              if (!message.success && receipts.size) {
+                const result = nativeResultSchema.safeParse(decoded);
+                if (result.success && Object.hasOwn(result.data, 'result')) {
+                  const receive = receipts.get(result.data.id);
+                  if (receive) {
+                    receipts.delete(result.data.id);
+                    receive(result.data.result);
+                  }
+                }
+              }
               if (message.success && message.data.id == null && message.data.method === DSH_TURN_METHODS.event) {
                 const event = parseDshTurnBridgeEvent(message.data.params);
                 if (event) input.onDshTurnEvent?.(event);
@@ -84,6 +106,10 @@ export function createNativeAcpRequests(input: {
               }
               const { method, params, id } = message.data;
               const sessionId = typeof params.sessionId === 'string' ? params.sessionId : '';
+              const promptSignal = input.promptSignal?.(sessionId);
+              const write = (value: unknown) =>
+                promptSignal?.aborted ? Promise.resolve() : input.write(JSON.stringify(value) + '\n', sessionId);
+              const onWriteError = (error: unknown) => input.onWriteError(error, sessionId);
               if (method === ACP_METHODS.requestPermission) {
                 const request = { ...message.data, id: id ?? `synth-perm-${Date.now()}` } as AcpAgentRequest;
                 const handler = permissions.get(sessionId);
@@ -91,6 +117,7 @@ export function createNativeAcpRequests(input: {
                   request,
                   handler: handler ?? input.defaultHandler,
                   defaultDecision: input.defaultDecision,
+                  signal: promptSignal,
                   write(response) {
                     return write(
                       permissions.get(sessionId) === handler
@@ -98,14 +125,14 @@ export function createNativeAcpRequests(input: {
                         : { jsonrpc: '2.0', id: request.id, result: { outcome: { outcome: 'cancelled' } } },
                     );
                   },
-                }).catch(input.onWriteError);
-                if (id == null) {
+                }).catch(onWriteError);
+                if (id == null || framed) {
                   yield {
                     kind: 'line',
                     line: JSON.stringify({
                       jsonrpc: '2.0',
                       method: ACP_METHODS.sessionUpdate,
-                      params: { sessionId, sessionUpdate: 'permission_pending' },
+                      params: { sessionId, update: { sessionUpdate: 'permission_pending' } },
                     }),
                   };
                 }
@@ -127,13 +154,13 @@ export function createNativeAcpRequests(input: {
                         },
                       }),
                   )
-                  .catch(input.onWriteError);
+                  .catch(onWriteError);
               } else {
                 const error =
                   method === ACP_METHODS.chrysRequestInput
                     ? { code: -32603, message: `No request handler for session ${sessionId || '<missing>'}` }
                     : { code: -32601, message: `Client does not handle ${method}` };
-                void write({ jsonrpc: '2.0', id, error }).catch(input.onWriteError);
+                void write({ jsonrpc: '2.0', id, error }).catch(onWriteError);
               }
             }
           } finally {

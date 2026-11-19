@@ -36,12 +36,22 @@ export const OFFICIAL_AGENT_ACCESS_OPERATIONS = [
   AGENT_ACCESS_ACP_SESSION_ACTION,
   'parseNativeEvent',
   'planCodexExec',
+  'planCodexLogin',
   'projectCatAgentOutput',
   'projectClaudeBatch',
   'projectClaudeOutput',
   'selectAcpModel',
   'testDshConnection',
 ] as const;
+
+// Managed OAuth may use this login command in a Host-owned attempt directory.
+// Other Codex commands and configuration are outside the credential grant.
+export const codexManagedLoginArgs = ['-c', 'cli_auth_credentials_store="file"', 'login'] as const;
+export const agentAccessCodexLoginArgsSchema = z.tuple([
+  z.literal(codexManagedLoginArgs[0]),
+  z.literal(codexManagedLoginArgs[1]),
+  z.literal(codexManagedLoginArgs[2]),
+]);
 
 const declarationSchema = z.object({
   protocolVersion: z.literal(AGENT_ACCESS_PROTOCOL_VERSION),

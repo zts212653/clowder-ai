@@ -1,13 +1,12 @@
 import { Readable } from 'node:stream';
 import {
   type AnthropicUsage,
+  CAT_AGENT_MAX_TOOL_INPUT_BYTES,
   type CatAgentSseFrame,
   type CatAgentStreamEvent,
   catAgentSseFrameSchema,
 } from '@clowder-ai/agent-contract/catagent';
 import { z } from 'zod';
-
-const MAX_TOOL_INPUT_BYTES = 65_536;
 
 const outputRequest = z.object({ source: z.instanceof(Readable), signal: z.instanceof(AbortSignal) });
 
@@ -112,7 +111,7 @@ function* handleSSEEvent(
     } else if (delta?.type === 'input_json_delta' && typeof delta.partial_json === 'string') {
       const chunk = delta.partial_json;
       block.toolInputBytes += Buffer.byteLength(chunk);
-      if (block.toolInputBytes <= MAX_TOOL_INPUT_BYTES) {
+      if (block.toolInputBytes <= CAT_AGENT_MAX_TOOL_INPUT_BYTES) {
         block.toolInputJson += chunk;
       }
     }
@@ -129,7 +128,7 @@ function* handleSSEEvent(
       yield { type: 'content_block_complete', block: { type: 'text', text: block.text }, blockIndex: index };
     } else {
       let input: Record<string, unknown> = {};
-      if (block.toolInputBytes > MAX_TOOL_INPUT_BYTES) {
+      if (block.toolInputBytes > CAT_AGENT_MAX_TOOL_INPUT_BYTES) {
         input = { _error: 'Tool input exceeded size limit' };
       } else {
         try {

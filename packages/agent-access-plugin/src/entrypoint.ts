@@ -12,6 +12,7 @@ import {
   agentAccessNativeEventRequestSchema,
   agentAccessNativeLaunchRequestSchema,
   agentAccessOpenCodeFinalizerRequestSchema,
+  codexManagedLoginArgs,
 } from '@clowder-ai/agent-contract';
 import {
   type AgentAccessAcpChildHandle,
@@ -65,6 +66,9 @@ export default {
             planCodexExec(input: unknown) {
               const { launch } = agentAccessCodexExecLaunchRequestSchema.parse(input);
               return buildCodexExecLaunchArguments(launch);
+            },
+            planCodexLogin() {
+              return codexManagedLoginArgs;
             },
             planFinalizer(input: unknown) {
               const { launch } = agentAccessOpenCodeFinalizerRequestSchema.parse(input);

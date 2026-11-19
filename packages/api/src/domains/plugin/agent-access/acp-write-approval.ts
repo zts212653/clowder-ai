@@ -17,7 +17,7 @@ export interface AcpWriteApproval {
   mcp?: ReadonlyMap<string, AcpMcpServer>;
   prompt?: { ref: string; content: readonly AcpContentBlock[] };
   text?: { ref: string; content: string };
-  onAccepted?: () => void;
+  onAccepted?: (requestId: string | number | undefined) => void;
 }
 
 /** Resolve the actual provider arguments once, at the Host-owned stdin boundary. */
@@ -59,7 +59,7 @@ export function createAcpWriteApprovalPort(write: (line: string) => Promise<void
         servers = approved.map(([, server]) => server);
       }
       pending.delete(accepted);
-      accepted.onAccepted?.();
+      accepted.onAccepted?.(request.id);
       await write(
         JSON.stringify({
           ...request,

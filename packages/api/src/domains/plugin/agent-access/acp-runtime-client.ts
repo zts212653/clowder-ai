@@ -1,6 +1,7 @@
 import { createHmac, randomBytes, randomUUID } from 'node:crypto';
 import { createInterface } from 'node:readline';
 import { Readable } from 'node:stream';
+import { isDeepStrictEqual } from 'node:util';
 import { configuredCredentialValues } from '@cat-cafe/mcp-server/dist/secret-runtime.js';
 import { AcpCwdIdentityTracker } from '@clowder-ai/agent-access/runtime/acp/acp-cwd-identity';
 import type { AcpPromptInput } from '@clowder-ai/agent-access/runtime/acp/acp-prompt-content';
@@ -17,6 +18,7 @@ import {
   agentAccessAcpTurnFrameSchema,
 } from '@clowder-ai/agent-contract/acp';
 import {
+  type AgentAccessDshTurnOperation,
   DSH_TURN_METHODS,
   DSH_TURN_PROTOCOL,
   type DshTurnBridgeEvent,
@@ -179,11 +181,13 @@ export class AgentAccessAcpRuntimeClient {
         defaultHandler: this.config.permissionHandler,
         knownCredentials,
         write: writeLine,
+        promptSignal: http?.promptSignal,
         onDshTurnEvent: (event) => {
           for (const listener of this.#dshTurnListeners) listener(event);
         },
-        onWriteError: () => {
-          void this.close().catch(() => {});
+        onWriteError: (error, sessionId) => {
+          if (http) http.failPrompt(sessionId, error);
+          else void this.close().catch(() => {});
         },
       });
       const stdout = http?.stdout ?? native.child.stdout;
@@ -252,39 +256,65 @@ export class AgentAccessAcpRuntimeClient {
     return this.#withApproval(approval, (connection) => connection.session(operation));
   }
 
+  async #dshCommand<T>(
+    operation: BoundSessionOperation<AgentAccessDshTurnOperation>,
+    approval: AcpWriteApproval,
+    parse: (value: unknown) => T | null,
+  ) {
+    let forgetReceipt: (() => void) | undefined;
+    const received: { value: T | null } = { value: null };
+    try {
+      const projected = await this.#withApproval(
+        {
+          ...approval,
+          onAccepted: (id) => {
+            if (id === undefined) throw new Error('DSH turn request requires a native response ID');
+            forgetReceipt = this.#requests?.observeReceipt(id, (receipt) => {
+              received.value = parse(receipt);
+            });
+          },
+        },
+        (connection) => connection.dshTurn(operation),
+      );
+      if (!isDeepStrictEqual(received.value, parse(projected)))
+        throw new Error('DSH turn response disagrees with native receipt');
+      return received.value;
+    } finally {
+      forgetReceipt?.();
+    }
+  }
+
   async probeTurnBridge() {
-    return parseDshTurnBridgeCapability(
-      await this.#withApproval(
-        { method: DSH_TURN_METHODS.hello, params: { protocol: DSH_TURN_PROTOCOL } },
-        (connection) => connection.dshTurn({ operation: 'probe' }),
-      ),
+    return this.#dshCommand(
+      { operation: 'probe' },
+      { method: DSH_TURN_METHODS.hello, params: { protocol: DSH_TURN_PROTOCOL } },
+      parseDshTurnBridgeCapability,
     );
   }
 
   async steerTurn({ sessionId, deliveryId, text, expectedTurn }: DshTurnSteerRequest) {
     const textRef = randomUUID();
     const coordinates = { sessionId, deliveryId, ...(expectedTurn === undefined ? {} : { expectedTurn }) };
-    const result = parseDshTurnSteerResult(
-      await this.#withApproval(
-        {
-          method: DSH_TURN_METHODS.steer,
-          params: coordinates,
-          text: { ref: textRef, content: text },
-        },
-        (connection) => connection.dshTurn({ operation: 'steer', ...coordinates, textRef }),
-      ),
+    const result = await this.#dshCommand(
+      { operation: 'steer', ...coordinates, textRef },
+      { method: DSH_TURN_METHODS.steer, params: coordinates, text: { ref: textRef, content: text } },
+      parseDshTurnSteerResult,
     );
-    if (!result || (result.accepted && result.deliveryId !== coordinates.deliveryId))
+    if (
+      !result ||
+      (result.accepted &&
+        (result.deliveryId !== deliveryId || (expectedTurn !== undefined && result.nativeTurnId !== expectedTurn)))
+    )
       throw new Error('DSH turn steer response is invalid');
     return result;
   }
 
   async inspectTurnInput(sessionId: string, deliveryId: string) {
     const coordinates = { sessionId, deliveryId };
-    const result = parseDshTurnInputState(
-      await this.#withApproval({ method: DSH_TURN_METHODS.status, params: coordinates }, (connection) =>
-        connection.dshTurn({ operation: 'status', ...coordinates }),
-      ),
+    const result = await this.#dshCommand(
+      { operation: 'status', ...coordinates },
+      { method: DSH_TURN_METHODS.status, params: coordinates },
+      parseDshTurnInputState,
     );
     if (!result) throw new Error('DSH turn status response is invalid');
     return result;

@@ -1,4 +1,4 @@
-import { sanitizeRawEvent } from '../../cats/services/agents/providers/codex-audit-hooks.js';
+import { sanitizeRawEvent, sanitizeStreamingDelta } from '../../cats/services/agents/providers/codex-audit-hooks.js';
 
 const record = (value: unknown) =>
   value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
@@ -48,20 +48,10 @@ export function createClaudeEventBoundary(knownCredentials: readonly string[]) {
       case 'stream_event': {
         let event: unknown;
         if (typeof chunk === 'string' && field && typeof delta.type === 'string') {
-          const joined = sanitizeRawEvent(tail + chunk, knownCredentials);
-          let safe = typeof joined === 'string' ? joined : '[REDACTED]';
-          let pending = 0;
-          for (const credential of knownCredentials) {
-            for (let length = Math.min(credential.length - 1, safe.length); length > pending; length -= 1) {
-              if (!safe.endsWith(credential.slice(0, length))) continue;
-              pending = length;
-              break;
-            }
-          }
-          tail = pending ? safe.slice(-pending) : '';
-          if (pending) safe = safe.slice(0, -pending);
+          const safe = sanitizeStreamingDelta(tail + chunk, knownCredentials);
+          tail = safe.tail;
           previous = { type: delta.type, field };
-          event = { type: stream.type, delta: { type: delta.type, [field]: safe } };
+          event = { type: stream.type, delta: { type: delta.type, [field]: safe.text } };
           host = { ...provider, event };
         } else if (stream.type === 'message_start') {
           event = {

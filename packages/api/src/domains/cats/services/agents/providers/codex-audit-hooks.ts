@@ -65,6 +65,22 @@ export function sanitizeRawEvent(event: unknown, knownCredentials?: readonly str
   }
 }
 
+/** Retain a possible credential prefix until the next contiguous provider delta. */
+export function sanitizeStreamingDelta(value: string, knownCredentials: readonly string[]) {
+  const cleaned = sanitizeRawEvent(value, knownCredentials);
+  const safe = typeof cleaned === 'string' ? cleaned : '[redacted]';
+  let pending = 0;
+  for (const credential of knownCredentials) {
+    for (let length = Math.min(credential.length - 1, safe.length); length > pending; length -= 1) {
+      if (!safe.endsWith(credential.slice(0, length))) continue;
+      pending = length;
+      break;
+    }
+  }
+  const end = safe.length - pending;
+  return { text: safe.slice(0, end), tail: safe.slice(end) };
+}
+
 function redactSensitiveFields(value: unknown, depth: number): unknown {
   if (depth > MAX_REDACT_DEPTH) return REDACTED;
 

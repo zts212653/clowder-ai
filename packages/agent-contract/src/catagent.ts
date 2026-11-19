@@ -1,5 +1,7 @@
 import { z } from 'zod';
 
+export const CAT_AGENT_MAX_TOOL_INPUT_BYTES = 65_536;
+
 const usage = z.object({
   input_tokens: z.number().optional(),
   output_tokens: z.number().optional(),

@@ -126,7 +126,7 @@ test('native ACP permissions retain the Host session scope and never block anoth
   for await (const frame of router.project(Readable.from(input))) observed.push(JSON.parse(frame.line));
   await immediate();
   assert.deepEqual(
-    observed.map(({ id, params }) => id ?? params.sessionUpdate),
+    observed.map(({ id, params }) => id ?? params.update.sessionUpdate),
     ['unrelated', 'permission_pending'],
   );
   assert.ok(replies.some(({ id, error }) => id === 2 && error.code === -32601));

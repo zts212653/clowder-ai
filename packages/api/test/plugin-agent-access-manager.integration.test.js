@@ -434,8 +434,25 @@ test('Agent access discovery executes the same standalone entrypoint from a Mana
   const providerEvents = [
     { type: 'message_start', message: { usage: { input_tokens: 4 } } },
     { type: 'content_block_start', index: 0, content_block: { type: 'text' } },
-    { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'direct API ' + catAgentCredential } },
+    {
+      type: 'content_block_delta',
+      index: 0,
+      delta: { type: 'text_delta', text: 'direct API ' + catAgentCredential.slice(0, 17) },
+    },
+    { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: catAgentCredential.slice(17) } },
     { type: 'content_block_stop', index: 0 },
+    { type: 'content_block_start', index: 1, content_block: { type: 'tool_use', id: 'fixture-read', name: 'read' } },
+    {
+      type: 'content_block_delta',
+      index: 1,
+      delta: { type: 'input_json_delta', partial_json: '{"query":"\\u0066' + catAgentCredential.slice(1, 17) },
+    },
+    {
+      type: 'content_block_delta',
+      index: 1,
+      delta: { type: 'input_json_delta', partial_json: catAgentCredential.slice(17) + '","name":"preserved"}' },
+    },
+    { type: 'content_block_stop', index: 1 },
     { type: 'message_delta', delta: { stop_reason: 'end_turn' }, usage: { output_tokens: 2 } },
     { type: 'message_stop' },
   ];
@@ -443,12 +460,22 @@ test('Agent access discovery executes the same standalone entrypoint from a Mana
   const catAgentEvents = await Array.fromAsync(catAgentOutput.read(providerBody.body));
   assert.deepEqual(
     catAgentEvents.map(({ type }) => type),
-    ['usage_update', 'text_delta', 'content_block_complete', 'usage_update', 'stop'],
+    [
+      'usage_update',
+      'text_delta',
+      'text_delta',
+      'content_block_complete',
+      'content_block_complete',
+      'usage_update',
+      'stop',
+    ],
   );
   assert.equal(catAgentEvents[0].inputUsage.input_tokens, 4);
   assert.match(catAgentEvents[1].text, /^direct API /);
   assert.equal(JSON.stringify(catAgentEvents).includes(catAgentCredential), false);
-  assert.equal(catAgentEvents[4].stopReason, 'end_turn');
+  assert.equal(catAgentEvents[3].block.text, 'direct API [credential redacted]');
+  assert.deepEqual(catAgentEvents[4].block.input, { query: '[credential redacted]', name: 'preserved' });
+  assert.equal(catAgentEvents[6].stopReason, 'end_turn');
 
   const acpCommands = [];
   const mcpSecret = 'fixture-host-held-mcp-value';
@@ -467,7 +494,18 @@ test('Agent access discovery executes the same standalone entrypoint from a Mana
   const attachAcp = createAgentAccessAcpProcess(runtime.inventoryStore, {
     nativeActions: runtime.supervisor.nativeActions,
     async invoke(instanceId, method, input) {
-      if (method === 'acpDshTurn') assert.equal(JSON.stringify(input).includes(privateDshInput), false);
+      if (method === 'acpDshTurn') {
+        assert.equal(JSON.stringify(input).includes(privateDshInput), false);
+        if (input.deliveryId === 'fabricated') {
+          return {
+            ok: true,
+            result:
+              input.operation === 'steer'
+                ? { accepted: true, deliveryId: input.deliveryId, nativeTurnId: 12 }
+                : { state: 'read', nativeTurnId: 12 },
+          };
+        }
+      }
       if (method === AGENT_ACCESS_ACP_SESSION_ACTION) {
         acpCommands.push(input.operation);
         const crossing = JSON.stringify(input);
@@ -635,6 +673,11 @@ test('Agent access discovery executes the same standalone entrypoint from a Mana
       { sessionId: historyId, deliveryId: 'follow-up', nativeTurnId: 12, type: 'input_read' },
     ]);
     assert.deepEqual(await acp.inspectTurnInput(historyId, 'follow-up'), { state: 'read', nativeTurnId: 12 });
+    await assert.rejects(
+      acp.steerTurn({ sessionId: historyId, deliveryId: 'fabricated', text: privateDshInput, expectedTurn: 12 }),
+      /disagrees with native receipt/,
+    );
+    await assert.rejects(acp.inspectTurnInput(historyId, 'fabricated'), /disagrees with native receipt/);
     unsubscribeDsh();
     const peer = acp.promptStream(sessionId, 'fixture-peer-probe');
     assert.equal((await peer.next()).value.update.content.text, 'peer started');
@@ -701,11 +744,14 @@ test('Agent access discovery executes the same standalone entrypoint from a Mana
         '-e',
         `
         let session = 0;
+        let unrelatedResponseId;
+        let parked;
         const server = require('node:http').createServer(async (req, res) => {
           const parts = [];
           for await (const part of req) parts.push(part);
           const { method, id, params } = JSON.parse(Buffer.concat(parts).toString('utf8'));
           const reply = (data) => JSON.stringify({ jsonrpc: '2.0', ...data }) + '\\n';
+          if (!method && id === 'fixture-http-permission') return res.writeHead(500).end();
           if (method === 'initialize') return res.end(reply({ id, result: { protocolVersion: 1 } }));
           if (method === 'session/new') return res.end(reply({ id, result: { sessionId: 'loopback-http-' + (++session) } }));
           if (method === 'session/cancel') return res.end();
@@ -715,7 +761,33 @@ test('Agent access discovery executes the same standalone entrypoint from a Mana
               sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'loopback ACP HTTP response' },
             } },
           }));
-          if (params.prompt[0].text === 'close without final response') return res.end();
+          if (params.prompt[0].text === 'permission callback fails') {
+            res.write(reply({
+              method: 'session/request_permission', id: 'fixture-http-permission',
+              params: { sessionId: params.sessionId, toolCall: { toolCallId: 'http-fixture' },
+                options: [{ optionId: 'deny', kind: 'reject_once', name: 'Deny' }] },
+            }));
+            res.end(reply({ id, result: { stopReason: 'end_turn' } }));
+            return;
+          }
+          if (params.prompt[0].text === 'close without final response') {
+            unrelatedResponseId = id;
+            parked = res;
+            return;
+          }
+          if (params.prompt[0].text === 'completed') {
+            const inject = () => {
+              if (!parked) return setTimeout(inject, 5);
+              res.write(reply({ id: unrelatedResponseId, result: { stopReason: 'end_turn' } }));
+              res.write(reply({ method: 'session/update', params: {
+                sessionId: 'loopback-http-2', update: {
+                  sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'unrelated stream injection' },
+                },
+              } }));
+              parked.end();
+            };
+            inject();
+          }
           setTimeout(() => res.end(reply({ id, result: { stopReason: 'end_turn' } })), 100);
         });
         server.listen(0, '127.0.0.1', () => console.log(JSON.stringify({ port: server.address().port })));
@@ -739,6 +811,13 @@ test('Agent access discovery executes the same standalone entrypoint from a Mana
     assert.equal(httpAcp.isSessionSafeForReuse(failedId), false);
     assert.deepEqual(await good.next(), { done: true, value: 'end_turn' });
     assert.equal(httpAcp.hasPromptFinalResponse(goodId), true);
+    const rejectPermission = httpAcp.promptStream(failedId, 'permission callback fails');
+    const unaffected = httpAcp.promptStream(goodId, 'second concurrent success');
+    assert.equal((await rejectPermission.next()).value.update.content.text, 'loopback ACP HTTP response');
+    assert.equal((await unaffected.next()).value.update.content.text, 'loopback ACP HTTP response');
+    assert.equal((await rejectPermission.next()).value.update.sessionUpdate, 'permission_pending');
+    await assert.rejects(rejectPermission.next(), /ACP HTTP returned status 500/);
+    assert.deepEqual(await unaffected.next(), { done: true, value: 'end_turn' });
     assert.equal(httpAcp.isAlive, true);
   } finally {
     await httpAcp.close();
@@ -751,6 +830,11 @@ test('Agent access discovery executes the same standalone entrypoint from a Mana
     launch: { sessionId: 'codex-history', readOnly: true, groups: { sandbox: 'opaque-sandbox-group' } },
   });
   assert.deepEqual(codexLaunch.args, ['exec', 'resume', 'codex-history', '--json', 'opaque-sandbox-group', '--', '-']);
+  assert.deepEqual(await runtime.supervisor.invoke(installed.pluginInstanceId, 'planCodexLogin', {}), [
+    '-c',
+    'cli_auth_credentials_store="file"',
+    'login',
+  ]);
   const modelOffer = {
     configOptions: [
       { id: 'vendor-model', category: 'model', currentValue: 'other', options: [{ value: 'fixture/model' }] },

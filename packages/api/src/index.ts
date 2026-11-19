@@ -7399,7 +7399,11 @@ async function initializeApi(
     },
   });
   await app.register(featureDocDetailRoutes);
-  await app.register(accountsRoutes, { agentRoleWrite });
+  const { createAgentAccessCodexLoginDriver } = await import('./domains/plugin/agent-access/codex-login.js');
+  await app.register(accountsRoutes, {
+    agentRoleWrite,
+    loginDriver: createAgentAccessCodexLoginDriver(pluginRuntime.inventoryStore, pluginRuntime.supervisor),
+  });
   await app.register(claudeRescueRoutes);
   await app.register(auditRoutes, { threadStore });
   await app.register(capabilitiesRoutes, {
