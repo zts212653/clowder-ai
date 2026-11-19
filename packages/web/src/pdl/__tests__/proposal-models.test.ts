@@ -131,16 +131,8 @@ describe('producer-specific proposal bindings', () => {
     };
     const handoff = proposalTarget(block, 'thread-1', 'message-1')!;
     transport.read.mockResolvedValue({
-      proposal: {
-        proposalId: 'handoff-1',
-        kind: 'session_handoff',
-        sourceThreadId: 'thread-1',
-        cardMessageId: 'message-1',
-        userId: 'owner-1',
-        status: 'pending',
-        note: {},
-        createdAt: 1,
-      },
+      // What GET /api/session-handoff/:proposalId returns.
+      proposal: { proposalId: 'handoff-1', status: 'pending', sealedSessionId: 'session-1' },
     });
     await decideProposal(
       { target: handoff, record: await readProposal(handoff), current: true, refresh: vi.fn() },

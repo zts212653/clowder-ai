@@ -59,16 +59,16 @@ export function proposalFromBody(target: ProposalTarget, raw: unknown) {
   const owner = apiSessionIdentity.getSnapshot().ownerUserId;
   const body = raw as { proposal?: ThreadProposal | SessionHandoffProposal | ProfileUpdateProposal } | undefined;
   const proposal = body?.proposal;
+  // A session handoff read answers only the proposal's owner and returns its status; the card carries the content.
   if (
     !proposal ||
     proposal.proposalId !== target.id ||
-    proposal.sourceThreadId !== target.threadId ||
-    (proposal.cardMessageId !== undefined && proposal.cardMessageId !== target.mid) ||
-    (target.feature !== 'F225'
-      ? !('createdBy' in proposal) ||
+    (target.feature !== 'F225' &&
+      (proposal.sourceThreadId !== target.threadId ||
+        (proposal.cardMessageId !== undefined && proposal.cardMessageId !== target.mid) ||
+        !('createdBy' in proposal) ||
         proposal.createdBy !== owner ||
-        (target.feature === 'F128' && !readableProposedFields(proposal as unknown as Record<string, unknown>))
-      : !('userId' in proposal) || proposal.userId !== owner || proposal.kind !== 'session_handoff')
+        (target.feature === 'F128' && !readableProposedFields(proposal as unknown as Record<string, unknown>))))
   )
     throw new Error('提议来源不可用');
   const publication = proposal.publication;
@@ -243,9 +243,7 @@ export function proposalView(
           { field: 'target', v: profile.targetPath },
           { field: 'reason', v: profile.rationale },
         ]
-      : Object.entries((p as SessionHandoffProposal).note)
-          .filter(([, v]) => typeof v === 'string')
-          .map(([field, v]) => ({ field, v }));
+      : [];
   const rows = thread
     ? (
         [
