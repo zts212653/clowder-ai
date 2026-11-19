@@ -977,7 +977,10 @@ export function chatModels(data: ChatData, ui: ChatUiState, input?: ChatProjecti
               Object.assign(rich, {
                 sel: { on: !!ui.picked[message.id]?.blocks[block.id], mid: message.id, b: block.id },
               });
-            return rich ? [{ key: `${message.id}:${block.id}`, blockId: block.id, rich }] : [];
+            // A card names the conversation it is drawn in: a plugin card template reads it with the card.
+            return rich
+              ? [{ key: `${message.id}:${block.id}`, blockId: block.id, rich: { ...rich, threadId: data.threadId } }]
+              : [];
           }),
         sel: ui.multi ? { on: !!ui.picked[message.id]?.text, mid: message.id } : null,
       };

@@ -51,6 +51,7 @@ function chatOwnerMessageVM(x) {
           ? {
               type: 'card.community_issue_preview',
               mid: x.mid,
+              threadId: S.thread,
               title: r.report.title,
               block: {
                 id: frustration.id,
