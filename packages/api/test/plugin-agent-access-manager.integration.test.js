@@ -629,6 +629,8 @@ test('Agent access discovery executes the same standalone entrypoint from a Mana
     await earlyCancelReturned.promise;
     finishPromptAdmission.resolve();
     await earlyFailure;
+    assert.equal(acp.hasUnconfirmedPrompt(earlyId), false);
+    assert.equal(acp.isSessionSafeForReuse(earlyId), true);
     assert.equal(acp.isAlive, true);
     assert.equal((await acp.newSession(projectRoot, mcp)).sessionId, sessionId);
   } finally {

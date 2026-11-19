@@ -123,6 +123,9 @@ export class AgentAccessAcpRuntimeClient {
   hasPromptFinalResponse(sessionId: string) {
     return this.#finalResponses.has(sessionId);
   }
+  hasUnconfirmedPrompt(sessionId: string) {
+    return this.#unconfirmed.has(sessionId);
+  }
   get recentCapacitySignal() {
     return this.#recentCapacity;
   }
@@ -364,12 +367,14 @@ export class AgentAccessAcpRuntimeClient {
     if (pendingCancel?.active) throw new AcpProtocolError(-32600, 'ACP session already has an active prompt');
     if (pendingCancel) throw new AcpSessionCancelledError(sessionId);
     const ref = randomUUID();
-    this.#unconfirmed.add(sessionId);
     this.#finalResponses.delete(sessionId);
     const revokePrompt = this.#wire.approve({
       method: ACP_METHODS.sessionPrompt,
       params: { sessionId },
       prompt: { ref, content: typeof input === 'string' ? [{ type: 'text', text: input }] : input },
+      onAccepted: () => {
+        this.#unconfirmed.add(sessionId);
+      },
     });
     const cancel = this.#allowCancel(this.#wire, sessionId, ref, revokePrompt);
     let ended = false;
@@ -384,6 +389,7 @@ export class AgentAccessAcpRuntimeClient {
           cancel.queued ||= frame.cancelQueued;
           if (frame.finalResponse) this.#finalResponses.add(sessionId);
           if (frame.sessionReusable) this.#unconfirmed.delete(sessionId);
+          else if (frame.cancelQueued) this.#unconfirmed.add(sessionId);
           if ('failure' in frame.result) throw nativeError(frame.result.failure);
           return frame.result.stopReason;
         }

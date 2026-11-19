@@ -681,6 +681,8 @@ export class AcpAgentService implements AgentService {
       close?(): Promise<void>;
       /** True when the latest prompt received a final RPC response, including a provider error. */
       hasPromptFinalResponse?(sessionId: string): boolean;
+      /** Agent Access Host-side evidence of a prompt that can still reach the native client. */
+      hasUnconfirmedPrompt?(sessionId: string): boolean;
       readonly promptCapabilities?: AcpPromptCapabilities;
     };
     const cwd = options?.workingDirectory ?? this.projectRoot;
@@ -727,14 +729,16 @@ export class AcpAgentService implements AgentService {
     const requiresProviderShutdown = () => promptPhase === 'locally_terminated_unacknowledged';
 
     const sealActivePromptSession = (activeSessionId: string): boolean => {
-      if (promptPhase !== 'active_unacknowledged') return false;
+      if (promptPhase !== 'active_unacknowledged' || client.hasUnconfirmedPrompt?.(activeSessionId) === false)
+        return false;
       promptPhase = 'locally_terminated_unacknowledged';
       const sessionIds = new Set([activeSessionId, options?.sessionId].filter((id): id is string => Boolean(id)));
       for (const id of sessionIds) this.pool.sealSession?.(this.poolKey, id);
       return true;
     };
     const cancelActivePromptSession = (activeSessionId: string): boolean => {
-      if (!sealActivePromptSession(activeSessionId)) return false;
+      if (promptPhase !== 'active_unacknowledged') return false;
+      sealActivePromptSession(activeSessionId);
       client.cancelSession(activeSessionId);
       return true;
     };
@@ -746,7 +750,8 @@ export class AcpAgentService implements AgentService {
     // notification; lease release and iterator return are not stop receipts), so the Host must
     // keep the physical stop unknown. A prompt that never left the Host owns no writer.
     const promptStopUnconfirmed = () =>
-      promptPhase === 'active_unacknowledged' || promptPhase === 'locally_terminated_unacknowledged';
+      promptPhase === 'locally_terminated_unacknowledged' ||
+      (promptPhase === 'active_unacknowledged' && !!sessionId && client.hasUnconfirmedPrompt?.(sessionId) !== false);
 
     // Per-invoke capacity listener — covers the entire invoke lifecycle (newSession + prompt + grace).
     // This is intentionally invoke-level, not prompt-level: capacity is a provider-level property
