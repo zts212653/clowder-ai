@@ -133,8 +133,10 @@ export function useSettingsBindings() {
     data.current = { ...data.current, pluginFragments: pdl.fragments };
   };
   const readPlugin = async (id: string) => {
+    // Only an installed plugin has a detail beyond its list row (config, permissions, tools, docs), and it is local:
+    // read it without checking the online catalog.
     const { plugin } = await request<PluginManagerDetailResponse>(
-      `/api/plugin-manager/plugins/${encodeURIComponent(id)}`,
+      `/api/plugin-manager/plugins/_local/${encodeURIComponent(id)}`,
     );
     const documentation =
       plugin.artifact === 'installed'

@@ -111,7 +111,7 @@ it('projects package descriptions, documentation and provided capabilities witho
   expect(updated.counts.attention).toBe(1);
   expect(updated.browserGroups[0].items).toHaveLength(1);
   expect(updated.browserGroups[1].items).toHaveLength(0);
-  const companion = { ...plugin, pluginId: 'official.companion', artifact: 'absent' };
+  const companion = { ...plugin, pluginId: 'official.companion', artifact: 'installed' };
   owner.plugins.plugins = [companion];
   owner.pluginDetails[companion.pluginId] = companion;
   context.navArg = () => 'companion';
@@ -125,7 +125,7 @@ it('projects package descriptions, documentation and provided capabilities witho
   expect(concierge.sel.key).toBe('official.companion');
   expect(concierge.companion).toMatchObject({
     p: 'official.companion',
-    installed: false,
+    installed: true,
     partners: [{ id: 'codex', name: 'Owner member', on: true }],
   });
 });

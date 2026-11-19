@@ -33,13 +33,13 @@ it('reads package documentation with its detail and contribution tools only when
   expect(result.current.data.pluginDetails['fixture.plugin']).toEqual(plugin);
   expect(result.current.data.pluginDocumentation['fixture.plugin']).toEqual(documentation);
   expect(vi.mocked(apiFetch).mock.calls.map(([path]) => path)).toEqual([
-    '/api/plugin-manager/plugins/fixture.plugin',
+    '/api/plugin-manager/plugins/_local/fixture.plugin',
     '/api/plugin-manager/plugins/fixture.plugin/documentation',
   ]);
   await act(() => result.current.action('settingsPluginToolsRead', { id: 'fixture.plugin' }));
   expect(result.current.data.pluginTools['fixture.plugin']).toEqual(tools);
   expect(vi.mocked(apiFetch).mock.calls.map(([path]) => path)).toEqual([
-    '/api/plugin-manager/plugins/fixture.plugin',
+    '/api/plugin-manager/plugins/_local/fixture.plugin',
     '/api/plugin-manager/plugins/fixture.plugin/documentation',
     '/api/plugin-manager/plugins/fixture.plugin/contributions/tools',
   ]);
@@ -65,7 +65,7 @@ it('reads inactive package details without requesting active-runtime contributio
   expect(result.current.data.pluginDetails[plugin.pluginId]).toEqual(plugin);
   expect(result.current.data.pluginDocumentation[plugin.pluginId]).toEqual({ readmeMarkdown: '# Inactive package' });
   expect(vi.mocked(apiFetch).mock.calls.map(([path]) => path)).toEqual([
-    '/api/plugin-manager/plugins/fixture.inactive',
+    '/api/plugin-manager/plugins/_local/fixture.inactive',
     '/api/plugin-manager/plugins/fixture.inactive/documentation',
   ]);
 });

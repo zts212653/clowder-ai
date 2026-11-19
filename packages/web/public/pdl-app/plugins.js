@@ -116,7 +116,9 @@ function bindPluginSpaces() {
       if (name.indexOf('pluginTools:') === 0) settleHold(chatAction('settingsPluginToolsRead', { id: name.slice(12) }));
     });
   });
+  // A plugin that isn't installed shows only its list row; only an installed plugin has a detail to read.
   function config(plugin) {
+    if (plugin.artifact !== 'installed') return null;
     if (projectionNeeded) projectionNeeded.add('pluginDetail:' + plugin.pluginId);
     const detail = placementData().pluginDetails[plugin.pluginId],
       inst = plugin.pluginId;
@@ -337,11 +339,12 @@ function bindPluginSpaces() {
       sel: chosen
         ? Object.assign({}, selected, {
             key: chosen.pluginId,
-            detailLoad: placementData().pluginDetails[chosen.pluginId]
-              ? ''
-              : detailFailed[chosen.pluginId]
-                ? 'error'
-                : 'loading',
+            detailLoad:
+              chosen.artifact !== 'installed' || placementData().pluginDetails[chosen.pluginId]
+                ? ''
+                : detailFailed[chosen.pluginId]
+                  ? 'error'
+                  : 'loading',
             name: chosen.displayName,
             icon: chosen.icon,
             publisher: chosen.publisher,
