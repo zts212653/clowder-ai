@@ -42,7 +42,7 @@ import {
 import { type RuntimeChoice, runtimeDefaults } from '@/components/settings/members/member-runtime-draft';
 import { memberRuntimeTools } from '@/components/settings/members/member-runtime-tools';
 import { saveMemberExtras } from '@/components/settings/members/member-save-extras';
-import { saveMemberRecord } from '@/components/settings/members/member-save-record';
+import { MEMBER_WRITE_TIMEOUT_MS, saveMemberRecord } from '@/components/settings/members/member-save-record';
 import { prepareNativeMember } from '@/components/settings/members/prepare-native-member';
 import type { MemberCatalog } from '@/components/settings/members/useRuntimeCatalog';
 import { agentClientConfigurationError } from '@/components/settings/plugin-manager/PluginAgentClientsField';
@@ -293,15 +293,19 @@ export function prepareNativePartner(partner: NativePartner) {
 }
 
 export async function createNativeMember(partner: NativePartner, journeyId: string) {
-  const receipt = await request<{ cat: CatData }>('/api/cats', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'X-Cat-Cafe-Onboarding-Journey': journeyId,
-      'Idempotency-Key': `onboarding:${journeyId}:cat:${partner.creationRequestKey}`,
+  const receipt = await request<{ cat: CatData }>(
+    '/api/cats',
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Cat-Cafe-Onboarding-Journey': journeyId,
+        'Idempotency-Key': `onboarding:${journeyId}:cat:${partner.creationRequestKey}`,
+      },
+      body: JSON.stringify(buildNativeCreationPayload(partner.creationForm ?? partner.form)),
     },
-    body: JSON.stringify(buildNativeCreationPayload(partner.creationForm ?? partner.form)),
-  });
+    { mutationTimeoutMs: MEMBER_WRITE_TIMEOUT_MS },
+  );
   await refreshCatsNow();
   return receipt.cat;
 }

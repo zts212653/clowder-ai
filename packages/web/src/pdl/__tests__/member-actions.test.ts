@@ -323,6 +323,7 @@ it('uses native readiness and preserves the original create body and idempotency
     .mocked(apiFetch)
     .mock.calls.filter(([path, init]) => path === '/api/cats' && init?.method === 'POST');
   expect(calls[1]).toEqual(calls[0]);
+  expect(calls[1][2]).toEqual({ mutationTimeoutMs: 90_000 });
   expect(calls[1][1]?.headers).toMatchObject({
     'Idempotency-Key': `onboarding:journey-member-settings:cat:${partner.creationRequestKey}`,
   });
