@@ -77,6 +77,9 @@ importers:
       '@clowder-ai/plugin-contract-beta29':
         specifier: npm:@clowder-ai/plugin-contract@0.1.0-beta.29
         version: '@clowder-ai/plugin-contract@0.1.0-beta.29'
+      '@clowder-ai/plugin-memory-contract':
+        specifier: file:vendor/clowder-ai-plugin-memory-contract-0.1.0-candidate.19.tgz
+        version: file:packages/api/vendor/clowder-ai-plugin-memory-contract-0.1.0-candidate.19.tgz
       '@clowder-ai/plugin-sdk':
         specifier: file:vendor/clowder-ai-plugin-sdk-0.3.0-beta.2-candidate.12.tgz
         version: file:packages/api/vendor/clowder-ai-plugin-sdk-0.3.0-beta.2-candidate.12.tgz
@@ -1293,6 +1296,11 @@ packages:
   '@clowder-ai/plugin-contract@file:packages/api/vendor/clowder-ai-plugin-contract-0.3.3-candidate.1-f202-2c14f0f2fda7.tgz':
     resolution: {integrity: sha512-3q7ydtREX9jeMwm6rBWBqUgpRVcNwF60+TiiAzIJc9GGCf6oqrBb3+0ap0lJmCz5I/7jvEvibmkTtcdO/P85uQ==, tarball: file:packages/api/vendor/clowder-ai-plugin-contract-0.3.3-candidate.1-f202-2c14f0f2fda7.tgz}
     version: 0.3.3-candidate.1
+    engines: {node: '>=20.0.0'}
+
+  '@clowder-ai/plugin-memory-contract@file:packages/api/vendor/clowder-ai-plugin-memory-contract-0.1.0-candidate.19.tgz':
+    resolution: {integrity: sha512-SxKvMnZI0w78tpvQeZKYRZLfFF1TCyePVozJy5YvU1iVfqmdD7ZbQidDIaEJS393bPdm55Drc8QQfmAkeIYDJQ==, tarball: file:packages/api/vendor/clowder-ai-plugin-memory-contract-0.1.0-candidate.19.tgz}
+    version: 0.1.0-candidate.19
     engines: {node: '>=20.0.0'}
 
   '@clowder-ai/plugin-sdk@0.1.0-beta.23':
@@ -7812,6 +7820,10 @@ snapshots:
     dependencies:
       ajv: 8.17.1
       ajv-formats: 3.0.1(ajv@8.17.1)
+
+  '@clowder-ai/plugin-memory-contract@file:packages/api/vendor/clowder-ai-plugin-memory-contract-0.1.0-candidate.19.tgz':
+    dependencies:
+      zod: 3.25.76
 
   '@clowder-ai/plugin-sdk@0.1.0-beta.23':
     dependencies:

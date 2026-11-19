@@ -8,6 +8,7 @@ import { fileBasedMcpIO, type McpConfigIO } from '../../config/capabilities/capa
 import { allowsImplicitCapabilityWrites } from '../../config/capabilities/startup-cli-config.js';
 import { getCoCreatorMentionPatterns } from '../../config/cat-config-loader.js';
 import { createThreadDeepLinkUrl, resolveFrontendBaseUrl } from '../../config/frontend-origin.js';
+import type { MemoryDataLocations } from '../../config/memory-data-locations.js';
 import type { IConnectorThreadBindingStore } from '../../infrastructure/connectors/ConnectorThreadBindingStore.js';
 import { WhisperSttProvider } from '../../infrastructure/connectors/media/WhisperSttProvider.js';
 import { createModuleLogger } from '../../infrastructure/logger.js';
@@ -17,6 +18,7 @@ import type { ITaskStore } from '../cats/services/stores/ports/TaskStore.js';
 import type { IThreadStore } from '../cats/services/stores/ports/ThreadStore.js';
 import type { EntrustedWorkChangeReason } from '../growing/EntrustedWorkLifecycleService.js';
 import type { LimbRegistry } from '../limb/LimbRegistry.js';
+import type { IEmbeddingService } from '../memory/interfaces.js';
 import { MessagingLedger } from '../messaging/ledger.js';
 import {
   buildDeliveryPresentation,
@@ -79,6 +81,14 @@ import { HostInventoryControlPlane } from './host-inventory/control-plane.js';
 import type { PackageAdmissionContractRuntime } from './host-inventory/manifest-verifier.js';
 import { PLUGIN_HOST_ENTRIES, pluginHostRoot } from './host-inventory/plugin-host-layout.js';
 import type { PluginInstanceRecord, PluginInventorySnapshot } from './host-inventory/types.js';
+import { createMemoryEmbeddingHost } from './host-surface/memory-embedding-host.js';
+import { isAdmittedMemoryPackage, type MemoryPluginHost } from './host-surface/memory-plugin-host.js';
+import { createMemorySourceHost } from './host-surface/memory-source-host.js';
+import {
+  createMemoryThreadKvPort,
+  redisMemoryThreadKvBacking,
+  transientMemoryThreadKvBacking,
+} from './host-surface/memory-thread-kv.js';
 import { pluginDataDirectoryParent } from './host-surface/plugin-data-directory.js';
 import { PluginMediaReadService } from './host-surface/plugin-media-host.js';
 import type { PluginMembersServices } from './host-surface/plugin-members-host.js';
@@ -203,6 +213,17 @@ export interface DormantPluginRuntimeCompositionOptions {
   /** Live Host registries consumed by package-declared runtime contributions. */
   readonly limbRegistry?: LimbRegistry;
   readonly cloudConversationHosts?: CloudConversationHostRegistry;
+  readonly memory?: {
+    readonly provider: MemoryPluginHost;
+    readonly evidenceDbPath: string;
+    readonly getSearchEmbedding?: () => IEmbeddingService | undefined;
+    readonly data?: MemoryDataLocations;
+    readonly ephemeral?: boolean;
+    readonly onMatterChanged?: (ownerUserId: string) => void;
+    readonly indexSources?: (
+      assertActivation: () => void,
+    ) => ReturnType<typeof import('../cats/services/session/memory-index-sources.js').createMemoryIndexSources>;
+  };
   readonly agentSessionProviders?: (
     packages: VerifiedPluginPackageLocator,
     configuration: PluginRuntimeConfigurationPort,
@@ -531,7 +552,53 @@ export function createDormantPluginRuntimeComposition(
     options.threadStore && options.threadOwnerUserId
       ? { threads: options.threadStore, ownerUserId: options.threadOwnerUserId }
       : undefined;
+  const memoryKvBacking = options.memory
+    ? options.redis
+      ? redisMemoryThreadKvBacking(options.redis)
+      : options.memory.ephemeral
+        ? transientMemoryThreadKvBacking()
+        : undefined
+    : undefined;
   const moduleRuntime = new ModulePluginRuntime({
+    memoryHost: (record, pluginInstanceId, assertActivation) => {
+      if (!options.memory || !isAdmittedMemoryPackage(record)) return undefined;
+      return {
+        memoryDatabase: { canonicalPath: options.memory.evidenceDbPath, storageFormat: 1 },
+        memoryData: options.memory.data,
+        ...(options.memory.getSearchEmbedding
+          ? {
+              memoryEmbedding: createMemoryEmbeddingHost({
+                pluginInstanceId,
+                assertActivation,
+                getEmbedding: options.memory.getSearchEmbedding,
+              }),
+            }
+          : {}),
+        ...(ownerChatSource
+          ? {
+              memorySource: createMemorySourceHost({
+                pluginInstanceId,
+                messageStore: options.messageStore,
+                threadStore: ownerChatSource.threads,
+                onMatterChanged: options.memory.onMatterChanged,
+                assertActivation,
+              }),
+            }
+          : {}),
+        memoryIndexSources: options.memory.indexSources?.(assertActivation),
+        ...(memoryKvBacking && ownerChatSource
+          ? {
+              memoryThreadKv: createMemoryThreadKvPort({
+                pluginInstanceId,
+                ownerUserId: ownerChatSource.ownerUserId,
+                threads: ownerChatSource.threads,
+                backing: memoryKvBacking,
+                assertActivation,
+              }),
+            }
+          : {}),
+      };
+    },
     ...(options.taskArtifactReader ? { taskArtifactReader: options.taskArtifactReader } : {}),
     ...(options.onTaskDataChanged ? { onTaskDataChanged: options.onTaskDataChanged } : {}),
     taskAdmission: (pluginInstanceId, packageDigest, assertActivation) =>
@@ -659,6 +726,7 @@ export function createDormantPluginRuntimeComposition(
       packages,
       configuration,
       agentSessionProviders: options.agentSessionProviders?.(packages, configuration),
+      ...(options.memory ? { memoryProvider: options.memory.provider } : {}),
       ...(options.cloudConversationHosts === undefined
         ? {}
         : { cloudConversationHosts: options.cloudConversationHosts }),
@@ -667,6 +735,7 @@ export function createDormantPluginRuntimeComposition(
       ...(options.redis === undefined ? {} : { redis: options.redis }),
     },
     async (instanceId, reason) => {
+      options.memory?.provider.deactivate(instanceId);
       if (reason === PLUGIN_OWNER_UNINSTALLED_REASON) {
         await externalAccessStore.revoke(instanceId);
         await mediaPending.uninstall(instanceId);
@@ -682,7 +751,10 @@ export function createDormantPluginRuntimeComposition(
       ledger: mediaLedger,
       ...(options.threadStore ? { threads: options.threadStore } : {}),
     }),
-    (instanceId) => subscriptionDelivery.activateInstance(instanceId),
+    (instanceId) => {
+      subscriptionDelivery.activateInstance(instanceId);
+      options.memory?.provider.markReady(instanceId);
+    },
     (instanceId) => subscriptionDelivery.beginInstance(instanceId),
   );
   deliveryTarget.current = supervisor;

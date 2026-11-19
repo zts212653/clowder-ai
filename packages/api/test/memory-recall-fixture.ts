@@ -3,13 +3,16 @@ import type { IInvocationRecordStore } from '../src/domains/cats/services/stores
 import type { ITurnExecutionStore } from '../src/domains/cats/services/stores/ports/TurnExecutionStore.js';
 import { MemoryCueEpisodeStore } from '../src/domains/memory/cue/MemoryCueEpisodeStore.js';
 import { SqliteEvidenceStore } from '../src/domains/memory/SqliteEvidenceStore.js';
-import { memoryPageReadRoutes } from '../src/routes/memory-page-read.js';
+import { type MemoryPageReadOptions, memoryPageReadRoutes } from '../src/routes/memory-page-read.js';
 import type { RecallPageSourceReaders } from '../src/routes/memory-recall-page.js';
 import type { RecallReplyMessage } from '../src/routes/recall-reply-index.js';
 
 type Invocation = NonNullable<Awaited<ReturnType<IInvocationRecordStore['get']>>>;
 type Turn = NonNullable<Awaited<ReturnType<ITurnExecutionStore['get']>>>;
-export async function recallFixture(mutate?: (readers: RecallPageSourceReaders) => void) {
+export async function recallFixture(
+  mutate?: (readers: RecallPageSourceReaders) => void,
+  provider: Pick<MemoryPageReadOptions, 'readRecallStats' | 'readRecallTimeline' | 'readRecallEvent'> = {},
+) {
   const evidence = new SqliteEvidenceStore(':memory:');
   await evidence.initialize();
   const db = evidence.getDb();
@@ -80,6 +83,7 @@ export async function recallFixture(mutate?: (readers: RecallPageSourceReaders) 
     evidenceDb: db,
     markerQueue: { list: async () => [] },
     recallSources: readers,
+    ...provider,
   });
   await app.ready();
   return {

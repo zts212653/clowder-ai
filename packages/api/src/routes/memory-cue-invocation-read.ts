@@ -5,8 +5,7 @@ import type { IInvocationRecordStore } from '../domains/cats/services/stores/por
 import type { IThreadStore } from '../domains/cats/services/stores/ports/ThreadStore.js';
 import type { ITurnExecutionStore } from '../domains/cats/services/stores/ports/TurnExecutionStore.js';
 import { canAccessThread } from '../domains/guides/guide-state-access.js';
-import { MemoryCueEpisodeStore } from '../domains/memory/cue/MemoryCueEpisodeStore.js';
-import { projectInvocationCues } from '../domains/memory/cue/project-invocation-cues.js';
+import { type CueInvocationReader, createInvocationCueReader } from '../domains/memory/cue/project-invocation-cues.js';
 import type { MatterMemoryService } from '../domains/memory/matters/MatterMemoryService.js';
 import { resolveHeaderUserId, resolveSessionUserId } from '../utils/request-identity.js';
 import { parseCueInvocationBatch, readOwnerCueBatch } from './memory-cue-batch-read.js';
@@ -17,6 +16,7 @@ import { withRecallMetricsSignal } from './recall-metrics-request.js';
 export interface MemoryCueInvocationReadOptions {
   matterMemoryService?: MatterMemoryService;
   evidenceDb: Database.Database;
+  readInvocationCues?: CueInvocationReader;
   threadStore?: Pick<IThreadStore, 'get' | 'list'>;
   invocationRecordStore?: Pick<IInvocationRecordStore, 'get'>;
   turnExecutionStore?: Pick<ITurnExecutionStore, 'get'>;
@@ -24,7 +24,7 @@ export interface MemoryCueInvocationReadOptions {
 
 /** F321 A1: owner-readable projection over F287's content-free event ledger. */
 export const memoryCueInvocationReadRoutes: FastifyPluginAsync<MemoryCueInvocationReadOptions> = async (app, opts) => {
-  const episodeStore = new MemoryCueEpisodeStore(opts.evidenceDb);
+  const readCues = opts.readInvocationCues ?? createInvocationCueReader(opts.evidenceDb);
   app.get<{
     Params: { threadId: string; invocationId: string };
   }>('/api/threads/:threadId/invocations/:invocationId/memory-cues', async (request, reply) => {
@@ -39,7 +39,7 @@ export const memoryCueInvocationReadRoutes: FastifyPluginAsync<MemoryCueInvocati
     if (threadAccess) return reply.status(threadAccess.status).send({ error: threadAccess.error });
     const result = await readOwnerCueInvocation(
       opts,
-      episodeStore,
+      readCues,
       userId,
       threadId,
       invocationId,
@@ -65,7 +65,7 @@ export const memoryCueInvocationReadRoutes: FastifyPluginAsync<MemoryCueInvocati
         return await withRecallMetricsSignal(request, reply, async (signal) => {
           const invocations = await readOwnerCueBatch(
             opts,
-            episodeStore,
+            readCues,
             userId,
             threadId,
             ids,
@@ -101,7 +101,13 @@ export const memoryCueInvocationReadRoutes: FastifyPluginAsync<MemoryCueInvocati
       const cats = parent?.targetCats ?? (child ? [child.catId] : []);
       const catId = request.query.catId;
       if (!catId || !cats.includes(catId as CatId)) return reply.status(404).send({ error: 'not_available' });
-      const cue = projectInvocationCues(episodeStore.listByInvocation(userId, threadId, invocationId)).find(
+      let cues: Awaited<ReturnType<CueInvocationReader>>;
+      try {
+        cues = await readCues(userId, threadId, invocationId);
+      } catch {
+        return reply.status(503).send({ error: 'Cue source unavailable' });
+      }
+      const cue = cues.find(
         (entry) => entry.cueId === cueId && entry.consumerCatId === catId && entry.resolverFamily === 'matter',
       );
       if (!cue?.readDetails || !opts.matterMemoryService) return reply.status(404).send({ error: 'not_available' });

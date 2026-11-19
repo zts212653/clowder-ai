@@ -1,4 +1,5 @@
 import { type PersonIdentity, type ProfileMemoryOwnerEntry, RECALL_DISPLAY_DOC_KINDS } from '@cat-cafe/shared';
+import type { MemoryRecallCandidate } from '@clowder-ai/plugin-memory-contract/recall';
 import type Database from 'better-sqlite3';
 import type { Thread } from '../domains/cats/services/stores/ports/ThreadStore.js';
 import { canAccessThread } from '../domains/guides/guide-state-access.js';
@@ -7,6 +8,7 @@ import { type RecallCueCoordinate, type RecallSourceView, recallCueViewReader } 
 import type { RecallOwnerMessageSources } from './recall-owner-message-view.js';
 
 export interface RecallSourceReaders extends RecallOwnerMessageSources {
+  readDocumentCandidate?: (anchor: string) => Promise<MemoryRecallCandidate | null>;
   cueSourceReader?: MemoryCueSourceReader;
   profileMemoryStore?: {
     get(
@@ -43,9 +45,11 @@ export interface RecallCandidateView {
 
 /** Display metadata only. Private names go through the existing owner-scoped reader. */
 export function recallCandidateViewReader(db: Database.Database, userId: string, readers: RecallSourceReaders = {}) {
-  const statement = db.prepare(`SELECT title, kind FROM evidence_docs WHERE anchor = ?
-    AND collection_id IS NULL AND world_id IS NULL
-    AND kind IN (${RECALL_DISPLAY_DOC_KINDS.map(() => '?').join(',')})`);
+  const statement = readers.readDocumentCandidate
+    ? undefined
+    : db.prepare<[string, ...string[]], MemoryRecallCandidate>(`SELECT title, kind FROM evidence_docs WHERE anchor = ?
+        AND collection_id IS NULL AND world_id IS NULL
+        AND kind IN (${RECALL_DISPLAY_DOC_KINDS.map(() => '?').join(',')})`);
   const cache = new Map<string, Promise<RecallCandidateView>>();
   let visibleThreads: Promise<Set<string>> | undefined;
   const readThread = async (id: string): Promise<RecallCandidateView> => {
@@ -76,7 +80,9 @@ export function recallCandidateViewReader(db: Database.Database, userId: string,
   const resolve = async (anchor: string): Promise<RecallCandidateView> => {
     if (anchor.startsWith('thread-')) return readThread(anchor.slice(7));
     if (anchor.startsWith('person-memory:')) return readPerson(anchor.slice('person-memory:'.length));
-    const doc = statement.get(anchor, ...RECALL_DISPLAY_DOC_KINDS) as { title: string; kind: string } | undefined;
+    const doc = readers.readDocumentCandidate
+      ? await readers.readDocumentCandidate(anchor)
+      : statement?.get(anchor, ...RECALL_DISPLAY_DOC_KINDS);
     return doc?.title.trim() ? { ...doc, href: `/memory/search?q=${encodeURIComponent(anchor)}` } : { href: null };
   };
   return (anchor: string) => {

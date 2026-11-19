@@ -1,6 +1,5 @@
 import type { ApprovalCardRef, ProfileMemoryProposalView, ProfileUpdateProposal } from '@cat-cafe/shared';
 import type { IProfileUpdateProposalStore } from '../domains/cats/services/stores/ports/ProfileUpdateProposalStore.js';
-import type { StoredProfileMemoryEntry } from '../domains/memory/profile/ProfileMemoryLifecycleStore.js';
 
 export type ProfileMemoryProposalReader = Pick<IProfileUpdateProposalStore, 'listByTarget'>;
 
@@ -13,12 +12,12 @@ function approvalCardRef(proposal: ProfileUpdateProposal): ApprovalCardRef | und
 
 export async function readProfileMemoryProposals(
   ownerUserId: string,
-  entry: Pick<StoredProfileMemoryEntry, 'targetPath'>,
+  targetPath: string,
   store: ProfileMemoryProposalReader,
 ): Promise<ProfileMemoryProposalView[]> {
-  const proposals = await store.listByTarget(ownerUserId, entry.targetPath, 100);
+  const proposals = await store.listByTarget(ownerUserId, targetPath, 100);
   return proposals
-    .filter((proposal) => proposal.createdBy === ownerUserId && proposal.targetPath === entry.targetPath)
+    .filter((proposal) => proposal.createdBy === ownerUserId && proposal.targetPath === targetPath)
     .map((proposal) => {
       const cardRef = approvalCardRef(proposal);
       return {

@@ -1,9 +1,10 @@
 import { type EntityMemoryOwnerAction, entityMemoryOwnerActionSchema } from '@cat-cafe/shared';
+import type { EntityMemoryRecord } from '@clowder-ai/plugin-memory-contract/entity';
 import type { FastifyPluginAsync } from 'fastify';
 import type { IEntityProposalStore } from '../domains/approval-hub/stores/ports/IEntityProposalStore.js';
-import { entitySourceRevision, type StoredEntityRecord } from '../domains/memory/EntityRegistry.js';
 import type { EntityMemoryLifecycleService } from '../domains/memory/entity/EntityMemoryLifecycleService.js';
-import type { EntityMemoryLifecycleStore } from '../domains/memory/entity/EntityMemoryLifecycleStore.js';
+import type { createEntityMemoryProvider } from '../domains/plugin/host-surface/entity-memory-provider.js';
+import { MemoryProviderCallError } from '../domains/plugin/host-surface/memory-plugin-host.js';
 import { resolveSessionUserId } from '../utils/request-identity.js';
 import { readEntityMemoryProposals } from './entity-memory-proposals.js';
 import { type EntityMemorySourceReaders, readEntityMemorySource } from './entity-memory-source.js';
@@ -11,23 +12,28 @@ import { authorizeOwnerBrowserAction, ownerMemoryActionHttpStatus } from './owne
 
 export interface EntityMemoryOwnerRoutesOptions {
   ownerUserId: string;
-  store: Pick<EntityMemoryLifecycleStore, 'get' | 'list'>;
+  store: Pick<ReturnType<typeof createEntityMemoryProvider>, 'get' | 'list'>;
   lifecycle?: Pick<EntityMemoryLifecycleService, 'executeOwnerAction'>;
   proposalStore: Pick<IEntityProposalStore, 'listByTarget'>;
   sourceReaders: EntityMemorySourceReaders;
 }
 
 export const entityMemoryOwnerRoutes: FastifyPluginAsync<EntityMemoryOwnerRoutesOptions> = async (app, opts) => {
+  app.setErrorHandler((error, _request, reply) => {
+    if (error instanceof MemoryProviderCallError) return reply.status(503).send({ error: 'memory_unavailable' });
+    return reply.send(error);
+  });
+
   app.get('/api/memory/entities', async (request, reply) => {
     const owner = authorizeRead(request, reply, opts.ownerUserId);
     if (!owner) return;
-    return { readStatus: 'ready', entries: opts.store.list().map(projectEntityEntry) };
+    return { readStatus: 'ready', entries: (await opts.store.list(owner)).map(projectEntityEntry) };
   });
 
   app.get<{ Params: { entityId: string } }>('/api/memory/entities/:entityId', async (request, reply) => {
     const owner = authorizeRead(request, reply, opts.ownerUserId);
     if (!owner) return;
-    const entity = opts.store.get(request.params.entityId);
+    const entity = await opts.store.get(owner, request.params.entityId);
     if (!entity) return reply.status(404).send({ error: 'Entity not found' });
     return {
       ...projectEntityEntry(entity),
@@ -42,9 +48,9 @@ export const entityMemoryOwnerRoutes: FastifyPluginAsync<EntityMemoryOwnerRoutes
       const owner = authorizeRead(request, reply, opts.ownerUserId);
       if (!owner) return;
       if (!request.query.revision) return reply.status(400).send({ error: 'Revision required' });
-      const entity = opts.store.get(request.params.entityId);
+      const entity = await opts.store.get(owner, request.params.entityId);
       if (!entity) return reply.status(404).send({ error: 'Entity not found' });
-      if (entitySourceRevision(entity) !== request.query.revision) {
+      if (entity.revision !== request.query.revision) {
         return reply.status(409).send({ error: 'Revision changed' });
       }
       return readEntityMemorySource(entity, owner, opts.sourceReaders);
@@ -89,11 +95,11 @@ function authorizeRead(
   return owner;
 }
 
-function projectEntityEntry(entity: StoredEntityRecord) {
+function projectEntityEntry(entity: EntityMemoryRecord) {
   return {
     id: entity.entityId,
     type: 'entity' as const,
-    revision: entitySourceRevision(entity),
+    revision: entity.revision,
     status: entity.status as 'active' | 'retired',
     entityType: entity.type,
     canonicalName: entity.canonicalName,

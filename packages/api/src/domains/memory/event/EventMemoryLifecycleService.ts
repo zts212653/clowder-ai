@@ -4,17 +4,18 @@ import type {
   MemoryOwnerActionError,
   MemoryOwnerActionReceipt,
 } from '@cat-cafe/shared';
-import type { EventMemoryMutationResult, IEventMemoryStore, StoredEventMemoryLifecycle } from '../EventMemoryStore.js';
+import type { EventMemoryMutationResult, StoredEventMemoryLifecycle } from '../EventMemoryStore.js';
 import { eventMemoryRevision } from '../EventMemoryStore.js';
 import type { OwnerMemoryActionCoordinator } from '../owner/OwnerMemoryActionCoordinator.js';
+import type { EventMemoryPort } from './event-memory-port.js';
 
 export class EventMemoryLifecycleService {
   private readonly now: () => number;
 
   constructor(
     private readonly deps: {
-      store: Pick<IEventMemoryStore, 'getEvent' | 'correctEvent' | 'retireEvent' | 'hardForgetEvent'> &
-        Partial<Pick<IEventMemoryStore, 'getOwnerActionEvidence'>>;
+      store: Pick<EventMemoryPort, 'getEvent' | 'correctEvent' | 'retireEvent' | 'hardForgetEvent'> &
+        Partial<Pick<EventMemoryPort, 'getOwnerActionEvidence'>>;
       coordinator: OwnerMemoryActionCoordinator;
       sourceAvailable: (event: StoredEventMemoryLifecycle) => Promise<boolean>;
       now?: () => number;
@@ -59,7 +60,7 @@ export class EventMemoryLifecycleService {
   ): Promise<
     { status: 'applied'; receipt: MemoryOwnerActionReceipt } | { status: 'rejected'; error: MemoryOwnerActionError }
   > {
-    const current = this.ownedEvent(ownerUserId, eventId);
+    const current = await this.ownedEvent(ownerUserId, eventId);
     if (!current) return { status: 'rejected', error: 'not_available' };
     if (eventMemoryRevision(current) !== command.expectedRevision) {
       return { status: 'rejected', error: 'stale_revision' };
@@ -68,7 +69,7 @@ export class EventMemoryLifecycleService {
       return { status: 'rejected', error: 'source_unavailable' };
     }
 
-    const mutation = this.applyStoreMutation(ownerUserId, eventId, command);
+    const mutation = await this.applyStoreMutation(ownerUserId, eventId, command);
     const projected = this.projectMutation(command.action, eventId, mutation);
     return 'error' in projected
       ? { status: 'rejected', error: projected.error }
@@ -79,7 +80,7 @@ export class EventMemoryLifecycleService {
     ownerUserId: string,
     eventId: string,
     command: EventMemoryOwnerAction,
-  ): EventMemoryMutationResult {
+  ): EventMemoryMutationResult | Promise<EventMemoryMutationResult> {
     if (command.action === 'correct') {
       return this.deps.store.correctEvent({
         eventId,
@@ -112,7 +113,7 @@ export class EventMemoryLifecycleService {
     eventId: string,
     command: EventMemoryOwnerAction,
   ): Promise<MemoryOwnerActionReceipt | null> {
-    const evidence = this.deps.store.getOwnerActionEvidence?.(eventId, ownerUserId, command.requestId);
+    const evidence = await this.deps.store.getOwnerActionEvidence?.(eventId, ownerUserId, command.requestId);
     if (!evidence || evidence.action !== command.action) return null;
     if (evidence.action === 'hard_forget') return forgottenReceipt(eventId);
     if (!evidence.revision || !evidence.status) return null;
@@ -125,8 +126,8 @@ export class EventMemoryLifecycleService {
     };
   }
 
-  private ownedEvent(ownerUserId: string, eventId: string): StoredEventMemoryLifecycle | null {
-    const event = this.deps.store.getEvent(eventId);
+  private async ownedEvent(ownerUserId: string, eventId: string): Promise<StoredEventMemoryLifecycle | null> {
+    const event = await this.deps.store.getEvent(eventId, ownerUserId);
     return event?.ownerUserId === ownerUserId ? event : null;
   }
 

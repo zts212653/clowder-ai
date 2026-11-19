@@ -160,10 +160,21 @@ export class EventMemoryStore implements IEventMemoryStore {
   }
   async initialize(): Promise<void> {
     const db = new Database(this.dbPath);
-    db.pragma('journal_mode = WAL');
-    db.pragma('busy_timeout = 5000');
-    this.migrate(db);
+    try {
+      db.pragma('journal_mode = WAL');
+      db.pragma('busy_timeout = 5000');
+      this.migrate(db);
+    } catch (error) {
+      db.close();
+      throw error;
+    }
+    this.close();
     this.db = db;
+  }
+
+  close(): void {
+    this.db?.close();
+    this.db = undefined;
   }
 
   private migrate(db: InstanceType<typeof Database>): void {

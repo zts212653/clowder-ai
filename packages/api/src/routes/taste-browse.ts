@@ -4,24 +4,22 @@ import {
   type TasteProposal,
   tasteMemoryOwnerActionSchema,
 } from '@cat-cafe/shared';
+import type { TasteBrowseEntry } from '@clowder-ai/plugin-memory-contract/taste';
 import type { FastifyPluginAsync, FastifyReply, FastifyRequest } from 'fastify';
 import type { TasteMemoryLifecycleService } from '../domains/memory/taste/TasteMemoryLifecycleService.js';
-import type { TasteMemoryLifecycleStore } from '../domains/memory/taste/TasteMemoryLifecycleStore.js';
 import type { TasteMemoryReadResult } from '../domains/memory/taste/TasteMemoryReader.js';
 import type { TasteObservatorySnapshot } from '../domains/memory/taste/TasteObservatoryReader.js';
 import { tasteSourceAnchor } from '../domains/memory/taste/taste-memory-identity.js';
-import type { TasteRepository } from '../domains/taste/services/TasteRepository.js';
+import type { createTasteBrowseProvider } from '../domains/plugin/host-surface/taste-browse-provider.js';
 import { resolveDirectLocalAuthorizationUserId, resolveSessionUserId } from '../utils/request-identity.js';
 import { authorizeOwnerBrowserAction, ownerMemoryActionHttpStatus } from './owner-memory-browser-auth.js';
 import { projectTasteContext, readTasteApproval } from './taste-browse-context.js';
-import { projectTasteMemory, projectTasteRecall, tasteMemoryId, visibleTasteMemories } from './taste-browse-model.js';
-import { readTasteMemoryById } from './taste-browse-reader.js';
+import { projectTasteMemory, projectTasteRecall } from './taste-browse-model.js';
 import { readTasteSource, type TasteSourceReaders } from './taste-browse-source.js';
 
 export interface TasteBrowseOptions extends TasteSourceReaders {
   ownerUserId: string;
-  tasteRepository: TasteRepository;
-  lifecycleStore?: Pick<TasteMemoryLifecycleStore, 'candidateFor' | 'isReadable' | 'sourcePathForMemoryId'>;
+  browse: ReturnType<typeof createTasteBrowseProvider>;
   lifecycleService?: Pick<TasteMemoryLifecycleService, 'executeOwnerAction'>;
   readObservatory: (owner: string, includePrivate: boolean) => Promise<TasteObservatorySnapshot>;
 }
@@ -38,12 +36,7 @@ export const tasteBrowseRoutes: FastifyPluginAsync<TasteBrowseOptions> = async (
   app.get('/api/memory/taste', async (request, reply) => {
     try {
       const privateAccess = resolveDirectLocalAuthorizationUserId(request) === opts.ownerUserId;
-      const memories = await visibleTasteMemories(
-        opts.tasteRepository,
-        opts.ownerUserId,
-        privateAccess,
-        opts.lifecycleStore,
-      );
+      const memories = await opts.browse.list(opts.ownerUserId, privateAccess);
       let stats: TasteObservatorySnapshot | null = null;
       try {
         stats = await opts.readObservatory(opts.ownerUserId, privateAccess);
@@ -59,8 +52,7 @@ export const tasteBrowseRoutes: FastifyPluginAsync<TasteBrowseOptions> = async (
             const corrections = await readTasteCorrections(memory.sourcePath, opts.ownerUserId, opts);
             return {
               ...projectTasteMemory(memory, null, {
-                takeawayCandidate:
-                  opts.lifecycleStore?.candidateFor(opts.ownerUserId, memory.sourcePath, memory.revision) ?? null,
+                takeawayCandidate: memory.takeawayCandidate,
                 pendingCorrectionCount: corrections.length,
               }),
               approval: await readTasteApproval(memory, opts.ownerUserId, opts),
@@ -103,8 +95,7 @@ async function serveBoundTasteMemory(
     const corrections = await readTasteCorrections(memory.sourcePath, opts.ownerUserId, opts);
     return {
       ...projectTasteMemory(memory, null, {
-        takeawayCandidate:
-          opts.lifecycleStore?.candidateFor(opts.ownerUserId, memory.sourcePath, memory.revision) ?? null,
+        takeawayCandidate: memory.takeawayCandidate,
         pendingCorrectionCount: corrections.length,
         correctionProposals: corrections,
       }),
@@ -138,7 +129,7 @@ async function resolveBoundTasteMemory(
   reply: FastifyReply,
   opts: TasteBrowseOptions,
   source: boolean,
-): Promise<TasteMemoryReadResult | null> {
+): Promise<TasteBrowseEntry | null> {
   if (!/^taste-[0-9a-f]{24}$/.test(request.params.memoryId)) {
     reply.code(404).send({ error: 'Unavailable' });
     return null;
@@ -150,12 +141,10 @@ async function resolveBoundTasteMemory(
     reply.code(400).send({ error: 'Revision required' });
     return null;
   }
-  const memory = await readTasteMemoryById(
-    opts.tasteRepository,
+  const memory = await opts.browse.get(
     opts.ownerUserId,
-    resolveDirectLocalAuthorizationUserId(request) === opts.ownerUserId,
     request.params.memoryId,
-    opts.lifecycleStore,
+    resolveDirectLocalAuthorizationUserId(request) === opts.ownerUserId,
   );
   if (!memory) {
     reply.code(404).send({ error: 'Unavailable' });
@@ -174,13 +163,20 @@ async function serveTasteOwnerAction(
   opts: TasteBrowseOptions,
 ) {
   if (!authorizeOwnerBrowserAction(request)) return reply.code(403).send({ error: 'invalid_action' });
-  if (!opts.lifecycleStore || !opts.lifecycleService) {
+  if (!opts.lifecycleService) {
     return reply.code(503).send({ error: 'mutation_unavailable' });
   }
   const body = tasteMemoryOwnerActionSchema.safeParse(request.body);
   if (!body.success) return reply.code(400).send({ error: 'invalid_request', details: body.error.issues });
+  if (!/^taste-[0-9a-f]{24}$/.test(request.params.memoryId)) {
+    return reply.code(404).send({ error: 'not_available' });
+  }
   try {
-    const sourcePath = await resolveTasteActionSourcePath(request, opts, opts.lifecycleStore);
+    const sourcePath = await opts.browse.actionSource(
+      opts.ownerUserId,
+      request.params.memoryId,
+      resolveDirectLocalAuthorizationUserId(request) === opts.ownerUserId,
+    );
     if (!sourcePath) return reply.code(404).send({ error: 'not_available' });
     const result = await opts.lifecycleService.executeOwnerAction(
       opts.ownerUserId,
@@ -193,22 +189,6 @@ async function serveTasteOwnerAction(
     request.log.warn({ err: error }, '[F321] Owner Taste mutation unavailable');
     return reply.code(503).send({ error: 'mutation_unavailable' });
   }
-}
-
-async function resolveTasteActionSourcePath(
-  request: FastifyRequest<ActionMemory>,
-  opts: TasteBrowseOptions,
-  lifecycleStore: NonNullable<TasteBrowseOptions['lifecycleStore']>,
-): Promise<string | null> {
-  const known = lifecycleStore.sourcePathForMemoryId(opts.ownerUserId, request.params.memoryId);
-  if (known) return known;
-  const memories = await visibleTasteMemories(
-    opts.tasteRepository,
-    opts.ownerUserId,
-    resolveDirectLocalAuthorizationUserId(request) === opts.ownerUserId,
-    lifecycleStore,
-  );
-  return memories.find((memory) => tasteMemoryId(memory.sourcePath) === request.params.memoryId)?.sourcePath ?? null;
 }
 
 async function readTasteCorrections(
