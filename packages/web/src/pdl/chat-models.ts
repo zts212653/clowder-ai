@@ -1039,8 +1039,12 @@ export function chatModels(data: ChatData, ui: ChatUiState, input?: ChatProjecti
       index,
       name: file.name,
       kind: file.type.startsWith('image/') ? 'image' : 'file',
-      size: file.size,
-      state: data.uploadStatus === 'uploading' ? 'up' : '',
+      clipboard: false,
+      size:
+        file.size < 1024 * 1024
+          ? `${Math.max(1, Math.round(file.size / 1024))} KB`
+          : `${(file.size / 1024 / 1024).toFixed(1)} MB`,
+      state: data.uploadStatus === 'uploading' ? 'up' : 'ok',
       source: draftSource(file),
       preview: { kind: 'draftAttachment', i: index },
     }));
