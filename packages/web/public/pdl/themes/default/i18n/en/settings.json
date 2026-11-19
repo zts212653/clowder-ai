@@ -29,7 +29,7 @@
       "seven_day": "Week (all models)",
       "fable": "Week (Fable)"
     },
-    "quotaResets": "Resets {0}"
+    "quotaResets": "Resets {0}", "quotaRefreshAll": "Refresh all usage"
   },
   "pluginFrameClose": {
     "title": "Close plugin panel",

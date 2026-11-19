@@ -659,6 +659,18 @@ function bindAccounts() {
     state.busy = false;
     render(true);
   }
+  // The account list's one refresh: every account whose usage can be read is read again.
+  A.accQuotaAll = function () {
+    return Promise.all(
+      providers
+        .filter(function (p) {
+          return row(p).quota;
+        })
+        .map(function (p) {
+          return A.accQuota({ k: p.id });
+        }),
+    );
+  };
   A.accQuota = async function (d) {
     const p = account(d.k);
     if (storedQuota(p)) return readStoredQuota(p);

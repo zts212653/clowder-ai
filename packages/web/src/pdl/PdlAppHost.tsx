@@ -293,6 +293,34 @@ export function PdlAppHost() {
     addressJump.current = browserPath;
     pendingJump.current = { threadId, mid: addressMid };
   }
+  // Where the reader is: once the conversation stops scrolling, the address names the message at the top of the view
+  // (?message=…), or nothing at the latest. A refresh reopens there through the same address jump; writing the
+  // address is not itself a jump.
+  useEffect(() => {
+    const settle = (event: Event) => {
+      const stream = event.target;
+      if (!(stream instanceof HTMLElement) || stream.id !== 'stream') return;
+      const url = new URL(window.location.href);
+      if (!url.pathname.startsWith('/thread/')) return;
+      const top = stream.getBoundingClientRect().top;
+      const message =
+        -stream.scrollTop <= 2
+          ? undefined
+          : [
+              ...stream.querySelectorAll<HTMLElement>('[data-stream] > [data-mid], [data-stream] > [data-message-id]'),
+            ].find((m) => m.getBoundingClientRect().bottom > top);
+      const mid = message?.dataset.mid ?? message?.dataset.messageId;
+      url.searchParams.delete('messageId');
+      if (mid) url.searchParams.set('message', mid);
+      else url.searchParams.delete('message');
+      const next = url.pathname + url.search + url.hash;
+      if (next === browserLocation()) return;
+      addressJump.current = next;
+      window.history.replaceState(window.history.state, '', next);
+    };
+    document.addEventListener('scrollend', settle, true);
+    return () => document.removeEventListener('scrollend', settle, true);
+  }, []);
   const [needed, setNeeded] = useState<ReadonlySet<string>>(new Set());
   return (
     <ThreadChatRuntimeProvider routeThreadId={threadId} neededSources={needed}>
