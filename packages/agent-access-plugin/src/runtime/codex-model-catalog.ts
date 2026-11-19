@@ -1,7 +1,4 @@
-import type {
-  AgentAccessCodexModelCatalogRequest,
-  AgentAccessModelCatalog,
-} from '@clowder-ai/agent-contract';
+import type { AgentAccessModelCatalog, AgentAccessModelCatalogRequest } from '@clowder-ai/agent-contract';
 
 type LaunchResult = { stdout: string; stderr?: string; code?: number | string | null };
 
@@ -11,7 +8,7 @@ type LaunchResult = { stdout: string; stderr?: string; code?: number | string | 
  * crosses back.
  */
 export async function discoverCodexModelCatalog(
-  input: AgentAccessCodexModelCatalogRequest['input'],
+  input: AgentAccessModelCatalogRequest['input'],
   launch: (request: { args: string[]; cwd?: string }) => Promise<LaunchResult>,
 ): Promise<AgentAccessModelCatalog> {
   const result = await launch({ args: ['debug', 'models'], ...(input.cwd ? { cwd: input.cwd } : {}) });

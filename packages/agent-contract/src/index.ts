@@ -226,32 +226,67 @@ export type AgentAccessCodexAppServerNotificationProjection = z.infer<
   typeof agentAccessCodexAppServerNotificationProjectionSchema
 >;
 
-/** Minimal model catalog returned by a provider-discovery action. */
+const agentAccessCatalogOptionSchema = z.object({
+  value: z.string(),
+  label: z.string(),
+  description: z.string().optional(),
+  group: z.string().optional(),
+});
+const agentAccessCatalogSource = z.enum(['tool_config', 'client_report', 'account_config']);
+
+/** Selectable capabilities and defaults returned by a provider-discovery action. */
 export const agentAccessModelCatalogSchema = z.object({
   status: z.enum(['live', 'configured', 'unavailable']),
   models: z.array(
-    z.object({
-      value: z.string(),
-      label: z.string(),
-      description: z.string().optional(),
-      group: z.string().optional(),
+    agentAccessCatalogOptionSchema.extend({
+      resolvedModel: z.string().optional(),
       defaultEffort: z.string().optional(),
-      efforts: z.array(z.object({ value: z.string(), label: z.string(), description: z.string().optional() })).optional(),
+      efforts: z.array(agentAccessCatalogOptionSchema).optional(),
     }),
   ),
+  thinkingEnabled: z.boolean().optional(),
+  defaultModel: z.string().optional(),
+  defaultModelLabel: z.string().optional(),
+  defaultModelStatus: z.enum(['reported', 'unreported', 'unavailable']).optional(),
+  defaultEffort: z.string().optional(),
+  defaultEffortLabel: z.string().optional(),
+  defaultModelSource: agentAccessCatalogSource.optional(),
+  defaultEffortSource: agentAccessCatalogSource.optional(),
+  selectedModel: z.string().optional(),
+  selectedEffort: z.string().optional(),
+  selectedEffortLabel: z.string().optional(),
+  selectedEffortSource: agentAccessCatalogSource.optional(),
+  effortOptions: z.array(agentAccessCatalogOptionSchema).optional(),
   message: z.string().optional(),
 });
 export type AgentAccessModelCatalog = z.infer<typeof agentAccessModelCatalogSchema>;
+export type AgentAccessCatalogModel = AgentAccessModelCatalog['models'][number];
+export type AgentAccessCatalogOption = z.infer<typeof agentAccessCatalogOptionSchema>;
+export type AgentAccessCatalogSource = z.infer<typeof agentAccessCatalogSource>;
 
-export const agentAccessCodexModelCatalogRequestSchema = z.object({
+export const agentAccessModelCatalogRequestSchema = z.object({
   operation: z.literal('discover_model_catalog'),
-  client: z.literal('codex'),
+  client: z.enum(['codex', 'claude', 'acp']),
   input: z.object({
     cwd: z.string().optional(),
     model: z.string().max(512).optional(),
   }),
 });
-export type AgentAccessCodexModelCatalogRequest = z.infer<typeof agentAccessCodexModelCatalogRequestSchema>;
+export type AgentAccessModelCatalogRequest = z.infer<typeof agentAccessModelCatalogRequestSchema>;
+
+/** Read-only fields that a Host may project out of a local Claude configuration. */
+export interface AgentAccessClaudeCatalogSettings {
+  model?: string;
+  effortLevel?: string;
+  env?: { ANTHROPIC_MODEL?: string | undefined; CLAUDE_CODE_EFFORT_LEVEL?: string | undefined };
+  modelSettings?: Record<string, { effortLevel?: string | undefined }>;
+}
+
+export interface AgentAccessClaudeCatalogSnapshot {
+  models: unknown;
+  settings?: AgentAccessClaudeCatalogSettings;
+  env?: AgentAccessClaudeCatalogSettings['env'];
+}
 
 /** One envelope per native client; the Host routes by the discriminant. */
 export const agentAccessNativeLaunchRequestSchema = z.discriminatedUnion('client', [

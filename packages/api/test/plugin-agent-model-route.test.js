@@ -82,6 +82,35 @@ test('plugin model discovery resolves only verified enabled owner packages and i
   assert.equal(ready.json().defaultModel, 'model-a');
   assert.equal(ready.json().contextDelivery, 'prompt_compatibility');
   assert.equal(calls[0].command, 'codeagent');
+
+  const withoutAgentAccess = Fastify();
+  t.after(() => withoutAgentAccess.close());
+  withoutAgentAccess.addHook('preHandler', async (request) => {
+    request.sessionUserId = request.headers['x-test-session-user'];
+  });
+  let inactiveCalls = 0;
+  registerAgentClientLibraryRoutes(withoutAgentAccess, {
+    inventory: store,
+    packages: new FilesystemVerifiedPluginPackageLocator(packagesRoot),
+    registry,
+    configuration: { readConfig: async () => config },
+    runtime: {
+      invoke: async () => {
+        inactiveCalls++;
+        throw new Error('Agent Access is not active');
+      },
+    },
+  });
+  const inactive = await withoutAgentAccess.inject({
+    method: 'POST',
+    url: '/api/agent-providers/models',
+    headers,
+    payload,
+  });
+  assert.equal(inactive.statusCode, 200);
+  assert.equal(inactive.json().message, 'plugin_unavailable');
+  assert.equal(inactiveCalls, 0);
+
   await request();
   assert.equal(calls.length, 1, 'same admitted source uses bounded cached discovery');
   config = JSON.stringify({ command: process.execPath, startupArgs: ['--different'] });

@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import Fastify from 'fastify';
-import { registerRuntimeCatalogRoute } from '../dist/routes/runtime-catalog-route.js';
 import {
-  createAgentAccessCodexModelCatalogDiscovery,
-  createAgentAccessCodexModelCatalogGeneration,
-} from '../dist/domains/plugin/agent-access/codex-model-catalog.js';
+  createAgentAccessModelCatalogDiscovery,
+  createAgentAccessModelCatalogGeneration,
+} from '../dist/domains/plugin/agent-access/model-catalog.js';
+import { registerRuntimeCatalogRoute } from '../dist/routes/runtime-catalog-route.js';
 
 function authority(overrides = {}) {
   return {
@@ -22,13 +22,13 @@ function authority(overrides = {}) {
 
 test('disabled package does not probe and has no generation', async () => {
   let calls = 0;
-  const load = createAgentAccessCodexModelCatalogDiscovery(
+  const load = createAgentAccessModelCatalogDiscovery(
     { readCurrentAuthority: async () => authority({ activationState: 'disabled' }) },
     { invoke: async () => (calls++, {}) },
   );
-  assert.equal(await load({ command: 'codex', cwd: '/workspace' }), undefined);
+  assert.equal(await load({ kind: 'codex', command: 'codex', args: [], cwd: '/workspace' }), undefined);
   assert.equal(calls, 0);
-  const generation = createAgentAccessCodexModelCatalogGeneration({
+  const generation = createAgentAccessModelCatalogGeneration({
     readCurrentAuthority: async () => authority({ activationState: 'disabled' }),
   });
   assert.equal(await generation(), undefined);
@@ -36,19 +36,20 @@ test('disabled package does not probe and has no generation', async () => {
 
 test('active package receives the discovery request and Host rejects unapproved argv', async () => {
   let seen;
-  const discovery = createAgentAccessCodexModelCatalogDiscovery(
+  const discovery = createAgentAccessModelCatalogDiscovery(
     { readCurrentAuthority: async () => authority() },
     {
       invoke: async (_id, method, payload) => {
         seen = { method, payload };
         await assert.rejects(() => payload.launch({ args: ['run', 'anything'] }), /not_approved/);
+        await assert.rejects(() => payload.launch({ args: ['debug', 'models'], cwd: '/other' }), /not_approved/);
         return { status: 'live', models: [{ value: 'a', label: 'A' }] };
       },
     },
   );
-  const result = await discovery({ command: 'codex', cwd: '/workspace', model: 'a' });
+  const result = await discovery({ kind: 'codex', command: 'codex', args: [], cwd: '/workspace', model: 'a' });
   assert.equal(seen.method, 'discoverModelCatalog');
-  assert.deepEqual(seen.payload.input, { cwd: '/workspace', model: 'a' });
+  assert.deepEqual(seen.payload.input, { operation: 'discover_model_catalog', client: 'codex', input: { model: 'a' } });
   assert.equal(result.status, 'live');
   assert.equal(result.models[0].value, 'a');
 });
@@ -64,11 +65,17 @@ function runtimeFixture() {
   };
 }
 
-test('runtime-models does not probe codex when the package is unavailable', async () => {
+test('runtime-models does not launch Codex, Claude or ACP probes when the package is unavailable', async () => {
   let probes = 0;
   const app = Fastify();
   registerRuntimeCatalogRoute(app, {
-    discoverRuntimes: async () => ({ runtimes: [runtimeFixture()] }),
+    discoverRuntimes: async () => ({
+      runtimes: [
+        runtimeFixture(),
+        { ...runtimeFixture(), id: 'claude', command: 'clowder-test-never-launch' },
+        { ...runtimeFixture(), id: 'test-acp', command: 'clowder-test-never-launch' },
+      ],
+    }),
     modelCatalogGeneration: async () => undefined,
     discoverModelCatalog: async () => {
       probes++;
@@ -76,16 +83,18 @@ test('runtime-models does not probe codex when the package is unavailable', asyn
     },
   });
   try {
-    const response = await app.inject({
-      method: 'POST',
-      url: '/api/cats/runtime-models',
-      headers: { 'x-cat-cafe-user': 'test' },
-      payload: { runtimeId: 'codex' },
-    });
-    assert.equal(response.statusCode, 200);
+    for (const runtimeId of ['codex', 'claude', 'test-acp']) {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/api/cats/runtime-models',
+        headers: { 'x-cat-cafe-user': 'test' },
+        payload: { runtimeId },
+      });
+      assert.equal(response.statusCode, 200);
+      assert.equal(response.json().message, 'plugin_unavailable');
+      assert.deepEqual(response.json().models, [{ value: 'configured-a', label: 'configured-a' }]);
+    }
     assert.equal(probes, 0);
-    assert.equal(response.json().message, 'plugin_unavailable');
-    assert.deepEqual(response.json().models, [{ value: 'configured-a', label: 'configured-a' }]);
   } finally {
     await app.close();
   }
@@ -124,7 +133,7 @@ test('runtime-models uses active package discovery and keys cache by generation'
 
 test('generation changes with the active instance revision', async () => {
   let current = authority();
-  const generation = createAgentAccessCodexModelCatalogGeneration({
+  const generation = createAgentAccessModelCatalogGeneration({
     readCurrentAuthority: async () => current,
   });
   const first = await generation();
@@ -132,4 +141,22 @@ test('generation changes with the active instance revision', async () => {
   const second = await generation();
   assert.notEqual(first, second);
   assert.match(first, /inst-1:digest-1:1/);
+});
+
+test('stale model catalog requests cannot start a native inspection or publish old models', async () => {
+  let current = authority();
+  const discover = createAgentAccessModelCatalogDiscovery(
+    { readCurrentAuthority: async () => current },
+    {
+      invoke: async (_instanceId, _action, payload) => {
+        current = authority({ lifecycleRevision: 2 });
+        await assert.rejects(() => payload.readClaude(), /session_implementation_unavailable/);
+        return { status: 'live', models: [{ value: 'obsolete', label: 'Obsolete' }] };
+      },
+    },
+  );
+  await assert.rejects(
+    discover({ kind: 'claude', command: 'never-launch', args: [], cwd: '/workspace' }),
+    /session_implementation_unavailable/,
+  );
 });

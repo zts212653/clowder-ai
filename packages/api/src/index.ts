@@ -3708,8 +3708,8 @@ async function initializeApi(
     agentAccessDetection: (...args) => readAgentAccessDetection(...args),
     runDshConnection: (config, cwd, preferences) => agentAccessDshConnection(config, cwd, preferences),
     runtimeCatalog: {
-      modelCatalogGeneration: () => agentAccessCodexModelCatalogGeneration(),
-      discoverModelCatalog: (target) => agentAccessCodexModelCatalog(target),
+      modelCatalogGeneration: () => agentAccessModelCatalogGeneration(),
+      discoverModelCatalog: (target) => agentAccessModelCatalog(target),
     },
     async resolveDshMemberConnectionClient() {
       const { AGENT_ACCESS_PLUGIN_ID } = await import('@clowder-ai/agent-contract');
@@ -6100,13 +6100,11 @@ async function initializeApi(
     pluginRuntime.inventoryStore,
     pluginRuntime.supervisor,
   );
-  const { createAgentAccessCodexModelCatalogDiscovery, createAgentAccessCodexModelCatalogGeneration } = await import(
-    './domains/plugin/agent-access/codex-model-catalog.js'
+  const { createAgentAccessModelCatalogDiscovery, createAgentAccessModelCatalogGeneration } = await import(
+    './domains/plugin/agent-access/model-catalog.js'
   );
-  const agentAccessCodexModelCatalogGeneration = createAgentAccessCodexModelCatalogGeneration(
-    pluginRuntime.inventoryStore,
-  );
-  const agentAccessCodexModelCatalog = createAgentAccessCodexModelCatalogDiscovery(
+  const agentAccessModelCatalogGeneration = createAgentAccessModelCatalogGeneration(pluginRuntime.inventoryStore);
+  const agentAccessModelCatalog = createAgentAccessModelCatalogDiscovery(
     pluginRuntime.inventoryStore,
     pluginRuntime.supervisor,
   );
@@ -6131,6 +6129,7 @@ async function initializeApi(
     packages: pluginRuntime.packages,
     registry: sessionImplementations,
     configuration: pluginRuntime.configuration,
+    runtime: pluginRuntime.supervisor,
   });
   registerPluginMarketplaceRoutes(app, marketplaceSources);
   const { PluginManagerBindings } = await import('./domains/plugin/manager/plugin-manager-bindings.js');
