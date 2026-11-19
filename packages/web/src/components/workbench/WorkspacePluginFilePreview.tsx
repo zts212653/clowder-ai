@@ -1,6 +1,7 @@
 'use client';
 
 import { type ReactNode, useEffect, useRef, useState } from 'react';
+import { FileActions } from '@/components/content-review/FileActions';
 import type { WorkspaceFileNavigationOrigin } from '@/stores/chat-types';
 import { apiFetch } from '@/utils/api-client';
 import { ContentLandingHeader } from './content-review/ContentLandingHeader';
@@ -144,7 +145,14 @@ export function WorkspacePluginFilePreview({
   const title = path.split('/').at(-1) || path;
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <ContentLandingHeader title={title} navigationOrigin={navigationOrigin} onBack={onBack} />
+      <ContentLandingHeader
+        title={title}
+        navigationOrigin={navigationOrigin}
+        onBack={onBack}
+        leadingAction={
+          <FileActions source={{ kind: 'workspace', worktreeId, path }} filename={title} appearance="toolbar" />
+        }
+      />
       {state === 'loading' ? (
         <output className="p-4 text-xs text-cafe-muted">正在打开预览…</output>
       ) : (
