@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 import { memoryDescriptor } from '@clowder-ai/plugin-memory-contract';
 import Fastify from 'fastify';
+import { resolveMemoryDataLocations } from '../dist/config/memory-data-locations.js';
 import { MessageStore } from '../dist/domains/cats/services/stores/ports/MessageStore.js';
 import { ThreadStore } from '../dist/domains/cats/services/stores/ports/ThreadStore.js';
 import { MemoryPluginHost } from '../dist/domains/plugin/host-surface/memory-plugin-host.js';
@@ -26,12 +27,13 @@ test('the Manager updates a memory worker and restores the previous worker with 
   const provider = new MemoryPluginHost();
   const threads = new ThreadStore();
   const evidenceDbPath = join(projectRoot, 'evidence.sqlite');
+  const memoryData = resolveMemoryDataLocations({ sqlitePath: evidenceDbPath, dataDir: join(projectRoot, 'data') });
   const runtime = createDormantPluginRuntimeComposition({
     projectRoot,
     messageStore: new MessageStore(),
     threadStore: threads,
     threadOwnerUserId: 'owner',
-    memory: { provider, evidenceDbPath, ephemeral: true },
+    memory: { provider, evidenceDbPath, data: memoryData, ephemeral: true },
   });
   t.after(async () => {
     await app.close();
@@ -54,7 +56,7 @@ test('the Manager updates a memory worker and restores the previous worker with 
         name: 'Memory',
         signals: undefined,
         features: [{ id: 'memory', name: 'Memory', resources: [], capabilities: [] }],
-        runtime: { transport: 'builtin', entrypoint: 'dist/entrypoint.js' },
+        runtime: { transport: 'builtin', entrypoint: 'dist/entrypoint.js', dataDirectory: 'memory' },
       }),
       includeSchema: false,
       extraFiles: {
@@ -62,6 +64,9 @@ test('the Manager updates a memory worker and restores the previous worker with 
         'dist/entrypoint.js': `
           export default {create() {return {async start(host) {
             if (host.memoryDatabase.canonicalPath !== ${JSON.stringify(evidenceDbPath)}) throw Error('wrong database');
+            if (host.memoryData.eventDbPath !== ${JSON.stringify(memoryData.eventDbPath)}) throw Error('wrong event store');
+            if (host.memoryData.globalDbPath !== ${JSON.stringify(memoryData.globalDbPath)}) throw Error('wrong global store');
+            if (!host.dataPath || host.memoryData.dataDir === host.dataPath) throw Error('deployment paths must stay canonical');
             return {actions: {
               'memory.describe'() { return ${JSON.stringify({ ...memoryDescriptor(), storageFormat })}; },
               async 'memory.dispatch'({operation, input}) {

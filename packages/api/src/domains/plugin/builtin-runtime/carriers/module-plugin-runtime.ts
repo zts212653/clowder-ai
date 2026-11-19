@@ -99,6 +99,7 @@ export interface ModulePluginHostShape {
   readonly collectiveArtifactOwner?: PluginNeutralHost['collectiveArtifactOwner'];
   readonly collectiveMaterialSource?: PluginNeutralHost['collectiveMaterialSource'];
   readonly memoryDatabase?: { readonly canonicalPath: string; readonly storageFormat: 1 };
+  readonly memoryData?: import('../../../../config/memory-data-locations.js').MemoryDataLocations;
   readonly memoryThreadKv?: import('../../host-surface/memory-thread-kv.js').MemoryThreadKvPort;
   readonly memorySource?: ReturnType<typeof import('../../host-surface/memory-source-host.js').createMemorySourceHost>;
   readonly memoryIndexSources?: ReturnType<
@@ -149,7 +150,10 @@ export interface ModulePluginRuntimeOptions {
     pluginInstanceId: string,
     assertActivation: () => void,
   ) =>
-    | Pick<ModulePluginHostShape, 'memoryDatabase' | 'memoryThreadKv' | 'memorySource' | 'memoryIndexSources'>
+    | Pick<
+        ModulePluginHostShape,
+        'memoryDatabase' | 'memoryThreadKv' | 'memorySource' | 'memoryIndexSources' | 'memoryData'
+      >
     | undefined;
   readonly taskStore?: ITaskStore;
   readonly taskOwnerUserId?: string;

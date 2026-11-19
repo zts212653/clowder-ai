@@ -8,6 +8,7 @@ import { fileBasedMcpIO, type McpConfigIO } from '../../config/capabilities/capa
 import { allowsImplicitCapabilityWrites } from '../../config/capabilities/startup-cli-config.js';
 import { getCoCreatorMentionPatterns } from '../../config/cat-config-loader.js';
 import { createThreadDeepLinkUrl, resolveFrontendBaseUrl } from '../../config/frontend-origin.js';
+import type { MemoryDataLocations } from '../../config/memory-data-locations.js';
 import type { IConnectorThreadBindingStore } from '../../infrastructure/connectors/ConnectorThreadBindingStore.js';
 import { WhisperSttProvider } from '../../infrastructure/connectors/media/WhisperSttProvider.js';
 import { createModuleLogger } from '../../infrastructure/logger.js';
@@ -213,6 +214,7 @@ export interface DormantPluginRuntimeCompositionOptions {
   readonly memory?: {
     readonly provider: MemoryPluginHost;
     readonly evidenceDbPath: string;
+    readonly data?: MemoryDataLocations;
     readonly ephemeral?: boolean;
     readonly indexSources?: (
       assertActivation: () => void,
@@ -558,6 +560,7 @@ export function createDormantPluginRuntimeComposition(
       if (!options.memory || !isAdmittedMemoryPackage(record)) return undefined;
       return {
         memoryDatabase: { canonicalPath: options.memory.evidenceDbPath, storageFormat: 1 },
+        memoryData: options.memory.data,
         ...(ownerChatSource
           ? {
               memorySource: createMemorySourceHost({

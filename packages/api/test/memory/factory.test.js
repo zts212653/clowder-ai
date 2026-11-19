@@ -119,6 +119,7 @@ describe('createMemoryServices', () => {
     const dataDir = mkdtempSync(join(tmpdir(), 'f209-factory-data-'));
     const root = mkdtempSync(join(tmpdir(), 'f209-collection-root-'));
     const docsRoot = mkdtempSync(join(tmpdir(), 'f209-docs-root-'));
+    let services;
     try {
       const manifest = {
         id: 'world:durable-root',
@@ -152,7 +153,7 @@ describe('createMemoryServices', () => {
       ]);
       seedStore.close();
 
-      const services = await createMemoryServices({
+      services = await createMemoryServices({
         type: 'sqlite',
         sqlitePath: join(dataDir, 'project.sqlite'),
         docsRoot,
@@ -170,6 +171,7 @@ describe('createMemoryServices', () => {
       assert.equal(docResult.drillDown.params.path, 'cat-cafe://collection/world%3Adurable-root/docs/source.md');
       assert.ok(!docResult.drillDown.params.path.includes(root), 'drillDown path must not leak host source root');
     } finally {
+      await services?.close();
       rmSync(dataDir, { recursive: true, force: true });
       rmSync(root, { recursive: true, force: true });
       rmSync(docsRoot, { recursive: true, force: true });
@@ -182,6 +184,7 @@ describe('createMemoryServices', () => {
     const dataDir = mkdtempSync(join(tmpdir(), 'f263-private-external-data-'));
     const root = mkdtempSync(join(tmpdir(), 'f263-private-external-root-'));
     const docsRoot = mkdtempSync(join(tmpdir(), 'f263-private-external-docs-'));
+    let services;
     try {
       saveExternalCollection(dataDir, {
         id: 'domain:legacy-private',
@@ -197,7 +200,7 @@ describe('createMemoryServices', () => {
         updatedAt: '2026-05-22T00:00:00.000Z',
       });
 
-      const services = await createMemoryServices({
+      services = await createMemoryServices({
         type: 'sqlite',
         sqlitePath: join(dataDir, 'project.sqlite'),
         globalDbPath: join(dataDir, 'global.sqlite'),
@@ -213,6 +216,7 @@ describe('createMemoryServices', () => {
         1,
       );
     } finally {
+      await services?.close();
       rmSync(dataDir, { recursive: true, force: true });
       rmSync(root, { recursive: true, force: true });
       rmSync(docsRoot, { recursive: true, force: true });
@@ -224,6 +228,7 @@ describe('createMemoryServices', () => {
     const dataDir = mkdtempSync(join(tmpdir(), 'f263-private-data-'));
     const docsRoot = mkdtempSync(join(tmpdir(), 'f263-private-docs-'));
     const memoryRoot = mkdtempSync(join(tmpdir(), 'f263-private-memory-'));
+    let services;
     try {
       const profileRoot = join(dataDir, 'profiles', 'owner-1', 'relationship');
       mkdirSync(profileRoot, { recursive: true });
@@ -238,7 +243,7 @@ describe('createMemoryServices', () => {
         '---\nname: Synthetic preference\ntype: user\n---\nSYNTHETIC_PERSONAL_MEMORY_TOKEN',
       );
 
-      const services = await createMemoryServices({
+      services = await createMemoryServices({
         type: 'sqlite',
         sqlitePath: join(dataDir, 'project.sqlite'),
         globalDbPath: join(dataDir, 'global.sqlite'),
@@ -277,6 +282,7 @@ describe('createMemoryServices', () => {
         'default/expedition context excludes private profile scope',
       );
     } finally {
+      await services?.close();
       rmSync(dataDir, { recursive: true, force: true });
       rmSync(docsRoot, { recursive: true, force: true });
       rmSync(memoryRoot, { recursive: true, force: true });

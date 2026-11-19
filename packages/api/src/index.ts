@@ -1522,6 +1522,8 @@ async function initializeApi(
   });
   const configuredEvidenceDbPath = process.env.EVIDENCE_DB ?? resolve(repoRoot, 'evidence.sqlite');
   const evidenceDbPath = configuredEvidenceDbPath === ':memory:' ? ':memory:' : resolve(configuredEvidenceDbPath);
+  const { resolveMemoryDataLocations } = await import('./config/memory-data-locations.js');
+  const memoryData = resolveMemoryDataLocations({ sqlitePath: evidenceDbPath, dataDir: process.env.CAT_CAFE_DATA_DIR });
   const { openHostSchedulerDatabase } = await import('./infrastructure/scheduler/host-scheduler-database.js');
   const schedulerDb = await openHostSchedulerDatabase(evidenceDbPath);
   checkSchedulerDb = () => schedulerDb.prepare('SELECT 1').pluck().get() === 1;
@@ -1566,7 +1568,7 @@ async function initializeApi(
     publishedProjectRoot: !process.env.DOCS_ROOT && existsSync(join(knowledgeRoot, '.git')) ? knowledgeRoot : undefined,
     docsRoot,
     markersDir,
-    dataDir: process.env.CAT_CAFE_DATA_DIR,
+    dataLocations: memoryData,
     transcriptDataDir, // reuse the same resolved path as Writer/Reader (line 282)
     embed: { embedMode: resolvedEmbedMode },
     privateUserId,
@@ -1574,6 +1576,7 @@ async function initializeApi(
     threadListFn: memoryIndexSources.listThreads,
     excludeThreadIdsFn: async () => new Set(await memoryIndexSources.listExcludedThreadIds()),
   });
+  app.addHook('onClose', () => memoryServices.close());
   const { MessageSearchService } = await import('./domains/memory/MessageSearchService.js');
   const { MessageSearchAnswerPublicationStore } = await import(
     './domains/memory/MessageSearchAnswerPublicationStore.js'
@@ -1816,7 +1819,6 @@ async function initializeApi(
       memoryServices.embeddingLifecycle.catchUpAfterReady(),
     );
   }
-  app.addHook('onClose', async () => memoryServices.embeddingLifecycle.deactivate());
 
   // F-4: Global knowledge rebuild (Skills + MEMORY.md → global_knowledge.sqlite)
   if (memoryServices.globalIndexBuilder) {
@@ -1845,7 +1847,6 @@ async function initializeApi(
           app.log.warn({ err: error }, '[memory] published document vector catch-up pending');
         });
       });
-      app.addHook('onClose', async () => memoryServices.publishedDocuments!.stop());
     }
   }
 
@@ -5531,6 +5532,7 @@ async function initializeApi(
     memory: {
       provider: memoryProvider,
       evidenceDbPath,
+      data: memoryData,
       ephemeral: process.env.MEMORY_STORE === '1',
       indexSources: makeMemoryIndexSources,
     },
