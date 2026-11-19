@@ -84,16 +84,20 @@ describe('F200 recall correlation integration', () => {
         timestamp: now,
       },
     ];
-    await triggerRecallCorrelation(db, events, 'inv-1', 'opus', {
+    await triggerRecallCorrelation(undefined, events, 'inv-1', 'opus', {
       userId: 'owner',
       threadId: 'authorized-thread',
-      persist: async (scope, records) => {
-        written.push({ scope, records });
+      persist: async (scope, records, projections) => {
+        written.push({ scope, records, projections });
       },
     });
     assert.equal(db.prepare('SELECT count(*) AS count FROM recall_events').get().count, 0);
     assert.equal(written.length, 1);
     assert.deepEqual(written[0].scope, { userId: 'owner', threadId: 'authorized-thread', invocationId: 'inv-1' });
+    assert.deepEqual(written[0].projections, {
+      trajectory: { filesRead: [], filesModified: [], duration: 0 },
+      traversals: [],
+    });
     assert.deepEqual(
       written[0].records.map(({ threadId, sourceEventId, query }) => ({ threadId, sourceEventId, query })),
       [{ threadId: 'authorized-thread', sourceEventId: 'inv-1:opus:search-1', query: 'normal result' }],

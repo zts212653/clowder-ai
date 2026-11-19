@@ -40,7 +40,7 @@ export interface RawEvent {
 }
 
 export class RecallEventCorrelator {
-  constructor(private readonly db: Database.Database) {}
+  constructor(private readonly db?: Database.Database) {}
 
   correlateWindow(events: RawEvent[]): RecallEvent[] {
     const results: RecallEvent[] = [];
@@ -205,7 +205,9 @@ export class RecallEventCorrelator {
   }
 
   persistBatch(batch: RecallEvent[]): void {
-    const insertStmt = this.db.prepare(`
+    const db = this.db;
+    if (!db) throw new Error('Recall ledger is unavailable');
+    const insertStmt = db.prepare(`
       INSERT OR IGNORE INTO recall_events
         (recall_id, cat_id, invocation_id, tool_name, query, mode, scope,
          candidates_json, result_count, result_status, consumed_json, reformulated, fell_back_to_grep,
@@ -215,7 +217,7 @@ export class RecallEventCorrelator {
          expansion_funnel_json)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
-    const tx = this.db.transaction((items: RecallEvent[]) => {
+    const tx = db.transaction((items: RecallEvent[]) => {
       for (const e of items) {
         const params = [
           e.recallId,

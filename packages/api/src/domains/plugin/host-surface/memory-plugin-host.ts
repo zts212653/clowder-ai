@@ -234,12 +234,17 @@ export class MemoryPluginHost {
     await callMemoryOwner(this, { operation: 'recall.anchors.refresh', input: {} }, z.null(), userId);
   }
 
-  async persistRecallEvents(scope: Parameters<PersistRecallEvents>[0], events: Parameters<PersistRecallEvents>[1]) {
+  async persistRecallEvents(
+    scope: Parameters<PersistRecallEvents>[0],
+    events: Parameters<PersistRecallEvents>[1],
+    projections?: Parameters<PersistRecallEvents>[2],
+  ) {
     await callMemoryOwner(
       this,
       {
         operation: 'recall.persist',
         input: {
+          ...projections,
           events: events.map((event) => ({
             ...event,
             threadId: scope.threadId,

@@ -1,3 +1,4 @@
+import type { MemoryRecallPersistRequest } from '@clowder-ai/plugin-memory-contract/recall';
 import type Database from 'better-sqlite3';
 import { recordEdgeTraversals } from './edge-traversal.js';
 import type { PushRecallPresentation, RecallEvent } from './f200-types.js';
@@ -6,13 +7,14 @@ import { LifecycleTraceStore } from './LifecycleTraceStore.js';
 import { type RawEvent, RecallEventCorrelator } from './RecallEventCorrelator.js';
 import { RecallMetricsComputer } from './RecallMetricsComputer.js';
 import { lookupShadowRanking } from './SqliteEvidenceStore.js';
-import { TrajectoryAggregator } from './TrajectoryAggregator.js';
+import { TrajectoryAggregator, trajectoryActivity } from './TrajectoryAggregator.js';
 
 const MEMORY_TOOLS = new Set(['search_evidence', 'graph_resolve', 'list_recent', 'session_bootstrap', 'cold_context']);
 
 export type PersistRecallEvents = (
   scope: { userId: string; threadId: string; invocationId: string },
   events: readonly RecallEvent[],
+  projections?: Omit<MemoryRecallPersistRequest['input'], 'events'>,
 ) => Promise<void>;
 
 type CorrelationInputEvent = Array<
@@ -47,7 +49,7 @@ export function mergePushRecallPresentations(
 }
 
 export async function triggerRecallCorrelation(
-  db: Database.Database,
+  db: Database.Database | undefined,
   events: Array<Partial<RawEvent> & Pick<RawEvent, 'invocationId' | 'catId' | 'toolName' | 'timestamp'>>,
   invocationId: string,
   catId: string,
@@ -80,66 +82,49 @@ export async function triggerRecallCorrelation(
 
   const correlator = new RecallEventCorrelator(db);
   const recallEvents = correlator.correlateWindow(fullEvents);
-  if (recallEvents.length > 0) {
-    // F102 bugfix: attach threadId so RecallFeed can query history by thread
-    const threadId = writer?.threadId ?? fullEvents.find((e) => e.threadId)?.threadId ?? '';
-    const candidateAnchorsPerSearch: string[][] = [];
-    for (const e of memoryEvents) {
-      const summary = e.summary as Record<string, unknown> | undefined;
-      const cands = summary?._f200Candidates as Array<{ anchor: string }> | undefined;
-      if (cands && cands.length > 0) {
-        candidateAnchorsPerSearch.push(cands.map((c) => c.anchor));
-      } else {
-        candidateAnchorsPerSearch.push([]);
-      }
-    }
-    for (let i = 0; i < recallEvents.length; i++) {
-      recallEvents[i].threadId = threadId;
-      const anchors = candidateAnchorsPerSearch[i];
-      if (anchors && anchors.length > 0) {
-        const shadowRanking = lookupShadowRanking(anchors);
-        recallEvents[i].shadowRankingJson = shadowRanking ? JSON.stringify(shadowRanking) : null;
-      } else {
-        recallEvents[i].shadowRankingJson = null;
-      }
-    }
-    if (writer) {
-      await writer.persist({ userId: writer.userId, threadId, invocationId }, recallEvents);
-    } else {
-      correlator.persistBatch(recallEvents);
-    }
+  if (!recallEvents.length) return;
 
-    // F263 Phase C: collect lifecycle traces (unmet demand + verification)
-    try {
-      const traceStore = new LifecycleTraceStore(db);
-      collectLifecycleTraces(traceStore, recallEvents);
-    } catch {
-      // Fail-open: lifecycle trace collection must not break recall correlation.
-      // V33 migration may not have been applied yet in tests or migrations-in-progress.
-    }
+  // The production router supplies the completed invocation's canonical thread.
+  const threadId = writer?.threadId ?? fullEvents.find((event) => event.threadId)?.threadId ?? '';
+  const candidateAnchorsPerSearch = memoryEvents.map((event) => {
+    const candidates = event.summary?._f200Candidates as Array<{ anchor: string }> | undefined;
+    return Array.isArray(candidates) ? candidates.map((candidate) => candidate.anchor) : [];
+  });
+  recallEvents.forEach((event, index) => {
+    event.threadId = threadId;
+    const anchors = candidateAnchorsPerSearch[index];
+    const shadow = anchors?.length ? lookupShadowRanking(anchors) : null;
+    event.shadowRankingJson = shadow ? JSON.stringify(shadow) : null;
+  });
 
-    if (!writer) {
-      const metricsComputer = new RecallMetricsComputer(db);
-      metricsComputer.refreshAnchorMetrics();
-      metricsComputer.refreshGlobalCtrBaseline();
-    }
+  const consumed = new Set(recallEvents.flatMap((event) => event.consumed.map((entry) => entry.anchor)));
+  const traversals = correlationEvents.flatMap((event) => {
+    const edges = event.summary?._f200Edges as Array<{ from: string; to: string; relation: string }> | undefined;
+    return Array.isArray(edges) ? edges.filter((edge) => consumed.has(edge.to)) : [];
+  });
 
-    if (threadId && !hasPrivateHits) {
-      const aggregator = new TrajectoryAggregator(db);
-      const trajectory = aggregator.aggregate(invocationId, threadId, catId, fullEvents);
-      if (trajectory) aggregator.persist(trajectory);
-    }
+  if (writer) {
+    await writer.persist({ userId: writer.userId, threadId, invocationId }, recallEvents, {
+      ...(!hasPrivateHits ? { trajectory: trajectoryActivity(fullEvents) } : {}),
+      traversals,
+    });
+    return;
   }
 
-  const consumedAnchors = new Set(recallEvents.flatMap((re) => re.consumed.map((c) => c.anchor)));
-  if (consumedAnchors.size === 0) return;
-
-  for (const e of correlationEvents) {
-    const summary = e.summary as Record<string, unknown> | undefined;
-    const edges = summary?._f200Edges as Array<{ from: string; to: string; relation: string }> | undefined;
-    if (edges && edges.length > 0) {
-      const consumedEdges = edges.filter((edge) => consumedAnchors.has(edge.to));
-      if (consumedEdges.length > 0) recordEdgeTraversals(db, consumedEdges);
-    }
+  if (!db) return;
+  correlator.persistBatch(recallEvents);
+  try {
+    collectLifecycleTraces(new LifecycleTraceStore(db), recallEvents);
+  } catch {
+    // Migrations-in-progress and standalone callers can still lack the V33 ledger.
   }
+  const metricsComputer = new RecallMetricsComputer(db);
+  metricsComputer.refreshAnchorMetrics();
+  metricsComputer.refreshGlobalCtrBaseline();
+  if (threadId && !hasPrivateHits) {
+    const aggregator = new TrajectoryAggregator(db);
+    const trajectory = aggregator.aggregate(invocationId, threadId, catId, fullEvents);
+    if (trajectory) aggregator.persist(trajectory);
+  }
+  recordEdgeTraversals(db, traversals);
 }
