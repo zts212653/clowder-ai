@@ -50,6 +50,8 @@ const SECRETS_PATTERNS = [/^\.env/, /\.key$/, /\.pem$/, /^credentials/i, /^secre
 const SKIP_DIRS = new Set(['.git', 'node_modules', '.next', 'dist', 'build', '.cache', 'coverage']);
 
 export class ExpeditionBootstrapService {
+  readonly #runningProjects = new Set<string>();
+
   constructor(
     private stateManager: ProjectIndexStatePort,
     private deps: BootstrapDeps,
@@ -58,6 +60,16 @@ export class ExpeditionBootstrapService {
   async bootstrap(projectPath: string, options: BootstrapOptions = {}): Promise<BootstrapResult> {
     const ownerUserId = options.ownerUserId?.trim();
     if (!ownerUserId) throw new Error('project_bootstrap_identity_required');
+    if (this.#runningProjects.has(projectPath)) return { status: 'skipped', durationMs: 0 };
+    this.#runningProjects.add(projectPath);
+    try {
+      return await this.#runBootstrap(projectPath, ownerUserId, options);
+    } finally {
+      this.#runningProjects.delete(projectPath);
+    }
+  }
+
+  async #runBootstrap(projectPath: string, ownerUserId: string, options: BootstrapOptions): Promise<BootstrapResult> {
     const startTime = Date.now();
     const elapsed = () => Date.now() - startTime;
     const fp = this.deps.getFingerprint(projectPath);
