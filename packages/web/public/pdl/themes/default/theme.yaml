@@ -37856,6 +37856,11 @@ pdl:
                   args:
                     mid: "@mid"
             - $frag: PROPOSAL_OPERATIONS
+        - type: typed
+          slot: chat.rich
+          of: "@card.publish.type"
+          data: "@card.publish"
+          when: "@card.publish"
     card.ask: &a2
       frame: msg
       who: "@who"

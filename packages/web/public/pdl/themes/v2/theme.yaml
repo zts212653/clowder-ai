@@ -6802,6 +6802,11 @@ pdl:
       when: $.form.isNew
     v2.bind.fields.20:
       - $frag: v2.bind.v2Box.21
+      - type: typed
+        slot: chat.rich
+        of: "@card.publish.type"
+        data: "@card.publish"
+        when: "@card.publish"
     v2.bind.v2Box.21:
       type: component
       use: v2Box
