@@ -3,6 +3,7 @@ import type { DispatchInput } from '@clowder-ai/plugin-memory-contract';
 import { explainDescriptor, isCompatibleDescriptor, MEMORY_REQUIRED_OPERATIONS } from '@clowder-ai/plugin-memory-contract';
 import { type EntityDispatchInput, entityOutputSchemas } from '@clowder-ai/plugin-memory-contract/entity';
 import { type EventDispatchInput, eventOutputSchemas } from '@clowder-ai/plugin-memory-contract/event';
+import { type MemoryIndexStatusRequest, memoryIndexStatusResult } from '@clowder-ai/plugin-memory-contract/maintenance';
 import { type MatterDispatchInput, matterOutputSchemas } from '@clowder-ai/plugin-memory-contract/matter';
 import { type ProfileDispatchInput, profileOutputSchemas } from '@clowder-ai/plugin-memory-contract/profile';
 import { type TasteBrowseDispatchInput, tasteBrowseOutputSchemas } from '@clowder-ai/plugin-memory-contract/taste';
@@ -43,6 +44,7 @@ type MemoryDispatch =
   | DispatchInput
   | EntityDispatchInput
   | EventDispatchInput
+  | MemoryIndexStatusRequest
   | MatterDispatchInput
   | ProfileDispatchInput
   | TasteBrowseDispatchInput;
@@ -137,9 +139,14 @@ export class MemoryPluginHost {
     return this.#binding?.ready === true;
   }
 
+  readIndexStatus(generationId: MemoryIndexStatusRequest['input']['generationId'], userId: string) {
+    return callMemoryOwner(this, { operation: 'index.status', input: { generationId } }, memoryIndexStatusResult, userId);
+  }
+
   attempt(
     request: MemoryDispatch,
     caller: PluginCallContext,
+    searchSignal?: AbortSignal,
   ): Promise<PluginInvocationOutcome> {
     const binding = this.#binding;
     if (!binding?.ready) return Promise.resolve(invocationNotStarted(new Error('memory_unavailable')));
@@ -149,6 +156,8 @@ export class MemoryPluginHost {
     };
     const scopedCaller: PluginCallContext = {
       ...caller,
+      memorySearch:
+        request.operation === 'search.query' ? { query: request.input.query.trim(), signal: searchSignal } : undefined,
       assertCurrent: async () => {
         assertActivation();
         await caller.assertCurrent();

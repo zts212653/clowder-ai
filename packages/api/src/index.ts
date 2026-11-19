@@ -5536,6 +5536,8 @@ async function initializeApi(
       ephemeral: process.env.MEMORY_STORE === '1',
       onMatterChanged: (ownerUserId) => socketManager?.emitToUser(ownerUserId, 'memory_matter_changed', {}),
       indexSources: makeMemoryIndexSources,
+      getSearchEmbedding: () =>
+        memoryServices.embeddingLifecycle.getMode() === 'on' ? memoryServices.embeddingLifecycle.getService() : undefined,
     },
     agentSessionProviders: (packages, configuration) =>
       declaredAgentSessionProviders({
@@ -7652,6 +7654,8 @@ async function initializeApi(
     publishedOwnerUserId: privateUserId,
     evidenceStore: memoryServices.evidenceStore,
     messageSearchService,
+    readIndexStatus: () =>
+      memoryProvider.readIndexStatus(memoryServices.store.getVectorGenerationTables().generationId, privateUserId),
     getEmbeddingService: () => memoryServices.embeddingLifecycle.getService(),
     getEmbeddingGenerationStatus: () => memoryServices.embeddingLifecycle.getGenerationStatus(),
     indexBuilder: memoryServices.indexBuilder,

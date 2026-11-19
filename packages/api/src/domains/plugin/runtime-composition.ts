@@ -18,6 +18,7 @@ import type { ITaskStore } from '../cats/services/stores/ports/TaskStore.js';
 import type { IThreadStore } from '../cats/services/stores/ports/ThreadStore.js';
 import type { EntrustedWorkChangeReason } from '../growing/EntrustedWorkLifecycleService.js';
 import type { LimbRegistry } from '../limb/LimbRegistry.js';
+import type { IEmbeddingService } from '../memory/interfaces.js';
 import { MessagingLedger } from '../messaging/ledger.js';
 import {
   buildDeliveryPresentation,
@@ -80,6 +81,7 @@ import { HostInventoryControlPlane } from './host-inventory/control-plane.js';
 import type { PackageAdmissionContractRuntime } from './host-inventory/manifest-verifier.js';
 import { PLUGIN_HOST_ENTRIES, pluginHostRoot } from './host-inventory/plugin-host-layout.js';
 import type { PluginInstanceRecord, PluginInventorySnapshot } from './host-inventory/types.js';
+import { createMemoryEmbeddingHost } from './host-surface/memory-embedding-host.js';
 import { isAdmittedMemoryPackage, type MemoryPluginHost } from './host-surface/memory-plugin-host.js';
 import { createMemorySourceHost } from './host-surface/memory-source-host.js';
 import {
@@ -214,6 +216,7 @@ export interface DormantPluginRuntimeCompositionOptions {
   readonly memory?: {
     readonly provider: MemoryPluginHost;
     readonly evidenceDbPath: string;
+    readonly getSearchEmbedding?: () => IEmbeddingService | undefined;
     readonly data?: MemoryDataLocations;
     readonly ephemeral?: boolean;
     readonly onMatterChanged?: (ownerUserId: string) => void;
@@ -562,6 +565,15 @@ export function createDormantPluginRuntimeComposition(
       return {
         memoryDatabase: { canonicalPath: options.memory.evidenceDbPath, storageFormat: 1 },
         memoryData: options.memory.data,
+        ...(options.memory.getSearchEmbedding
+          ? {
+              memoryEmbedding: createMemoryEmbeddingHost({
+                pluginInstanceId,
+                assertActivation,
+                getEmbedding: options.memory.getSearchEmbedding,
+              }),
+            }
+          : {}),
         ...(ownerChatSource
           ? {
               memorySource: createMemorySourceHost({

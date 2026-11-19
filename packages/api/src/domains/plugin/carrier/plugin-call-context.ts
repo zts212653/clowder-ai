@@ -16,6 +16,8 @@ export interface PluginCallContext {
   readonly memoryPublicReply?: boolean;
   /** Authenticated direct-local owner access to private memory files. */
   readonly memoryPrivateOwnerAccess?: boolean;
+  /** Exact normalized query and cancellation bound by a Host memory search caller. */
+  readonly memorySearch?: { readonly query: string; readonly signal?: AbortSignal };
   /** Issued per admitted native action by Host; never accepted from tool input. */
   readonly nativeAction?: { readonly id: string; readonly contributionId: string; readonly method: string };
   /** Set only inside the Host's admitted project-output dispatcher. */

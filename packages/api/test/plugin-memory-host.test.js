@@ -10,6 +10,7 @@ import { createEventMemoryProvider } from '../dist/domains/plugin/host-surface/e
 import { MEMORY_HOST_REQUIRED_OPERATIONS, MemoryPluginHost } from '../dist/domains/plugin/host-surface/memory-plugin-host.js';
 import { createMemorySourceHost } from '../dist/domains/plugin/host-surface/memory-source-host.js';
 import { eventsRoutes } from '../dist/routes/events.js';
+import { evidenceRoutes } from '../dist/routes/evidence.js';
 import { memoryRoutes } from '../dist/routes/memory.js';
 import { createMatterRouteProvider, readMatterOpeningPrompt } from '../dist/routes/memory-matter-provider.js';
 import { registerCallbackMatterMemoryRoutes } from '../dist/routes/memory-matter-routes.js';
@@ -24,6 +25,55 @@ const admission = {
     provenance: { kind: 'catalog', catalogId: 'official.memory', packageName: '@clowder-ai/memory-plugin' },
   },
 };
+
+test('evidence status uses the current plugin projection and reports a disabled provider', async (t) => {
+  const app = Fastify();
+  t.after(() => app.close());
+  const provider = new MemoryPluginHost();
+  const counts = {
+    docs_count: 3,
+    threads_count: 1,
+    passages_count: 5,
+    edges_count: 2,
+    vectors_count: 2,
+    passage_vectors_count: 4,
+    last_rebuild_at: '2026-11-17',
+    last_document_updated_at: '2026-11-19',
+    embedding_model: 'active-model',
+  };
+  await app.register(evidenceRoutes, {
+    evidenceStore: { getDb: () => assert.fail('status fell back to the Host database') },
+    getEmbeddingService: () => ({ isReady: () => true }),
+    readIndexStatus: () => provider.readIndexStatus('g1', 'owner'),
+  });
+  const status = () => app.inject('/api/evidence/status');
+  const disabled = await status();
+  assert.equal(disabled.statusCode, 503);
+  assert.equal(disabled.json().error, 'memory_unavailable');
+  await provider.admit(admission, {
+    exposes: async () => true,
+    async attempt(_id, method, request) {
+      if (method === 'memory.describe') return { status: 'returned', value: supportedDescriptor() };
+      assert.deepEqual(request, { operation: 'index.status', input: { generationId: 'g1' } });
+      return {
+        status: 'returned',
+        value: { ...counts, passageVectorsReadable: true, generationQuarantined: true },
+      };
+    },
+  });
+  provider.markReady(pluginInstanceId);
+  const ready = await status();
+  assert.equal(ready.statusCode, 200);
+  const body = ready.json();
+  assert.equal(body.healthy, true);
+  assert.equal(body.passage_vectors_count, 4);
+  assert.equal(body.passage_vectors_supported, false);
+  assert.equal(body.last_rebuild_at, counts.last_rebuild_at);
+  assert.equal(body.last_document_updated_at, counts.last_document_updated_at);
+  assert.equal('generationQuarantined' in body, false);
+  provider.deactivate(pluginInstanceId);
+  assert.equal((await status()).statusCode, 503);
+});
 
 test('memory route only invokes a ready compatible provider and preserves the action effect boundary', async (t) => {
   const app = Fastify();
@@ -275,4 +325,30 @@ test('background indexing receives the configured owner’s canonical thread evi
   );
   assert.deepEqual(await source.listMessages(other.id), []);
   assert.deepEqual(await source.listMessages(game.id), []);
+});
+
+test('memory dispatch binds embedding to the dispatched search and its Host cancellation signal', async () => {
+  const provider = new MemoryPluginHost();
+  const observed = [];
+  await provider.admit(admission, {
+    exposes: async () => true,
+    async attempt(instanceId, method) {
+      if (method === 'memory.describe') return { status: 'returned', value: supportedDescriptor() };
+      observed.push(currentPluginCallContext(instanceId)?.memorySearch);
+      return { status: 'returned', value: null };
+    },
+  });
+  provider.markReady(pluginInstanceId);
+  const caller = {
+    userId: 'owner',
+    catId: 'user',
+    threadId: 'thread',
+    invocationId: 'search',
+    assertCurrent: async () => {},
+    memorySearch: { query: 'an unrelated query' },
+  };
+  const { signal } = new AbortController();
+  await provider.attempt({ operation: 'search.query', input: { query: '  evidence query  ', options: {} } }, caller, signal);
+  await provider.attempt({ operation: 'kv.get', input: { threadRef: 'thread', key: 'one' } }, caller);
+  assert.deepEqual(observed, [{ query: 'evidence query', signal }, undefined]);
 });
