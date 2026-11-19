@@ -1,7 +1,12 @@
 import type { DispatchInput } from '@clowder-ai/plugin-memory-contract';
 import { explainDescriptor, isCompatibleDescriptor } from '@clowder-ai/plugin-memory-contract';
+import type { EventDispatchInput } from '@clowder-ai/plugin-memory-contract/event';
 import type { MatterDispatchInput } from '@clowder-ai/plugin-memory-contract/matter';
-import { invocationNotStarted, type PluginInvocationOutcome } from '../carrier/host-invocation.js';
+import {
+  invocationNotStarted,
+  type PluginInvocationEffect,
+  type PluginInvocationOutcome,
+} from '../carrier/host-invocation.js';
 import {
   type PluginCallContext,
   withoutPluginCallContext,
@@ -14,6 +19,12 @@ import type { PluginPackageRecord } from '../host-inventory/types.js';
 
 export const MEMORY_PLUGIN_ID = 'official.memory';
 export const MEMORY_PACKAGE_NAME = '@clowder-ai/memory-plugin';
+
+export class MemoryProviderCallError extends Error {
+  constructor(readonly effect: PluginInvocationEffect) {
+    super('memory_unavailable');
+  }
+}
 
 export function isAdmittedMemoryPackage(record: PluginPackageRecord): boolean {
   const origin = record.provenance;
@@ -79,7 +90,10 @@ export class MemoryPluginHost {
     return this.#binding?.ready === true;
   }
 
-  attempt(request: DispatchInput | MatterDispatchInput, caller: PluginCallContext): Promise<PluginInvocationOutcome> {
+  attempt(
+    request: DispatchInput | MatterDispatchInput | EventDispatchInput,
+    caller: PluginCallContext,
+  ): Promise<PluginInvocationOutcome> {
     const binding = this.#binding;
     if (!binding?.ready) return Promise.resolve(invocationNotStarted(new Error('memory_unavailable')));
     const { pluginInstanceId } = binding.identity;

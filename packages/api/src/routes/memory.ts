@@ -9,8 +9,8 @@ import { catIdSchema, createCatId, type MemoryEntry, type MemoryInput } from '@c
 import type { FastifyPluginAsync, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import type { IThreadStore } from '../domains/cats/services/stores/ports/ThreadStore.js';
+import { MemoryProviderCallError } from '../domains/plugin/host-surface/memory-plugin-host.js';
 import { resolveUserId } from '../utils/request-identity.js';
-import { MemoryProviderCallError } from './memory-route-provider.js';
 
 export interface MemoryRoutesOptions {
   memoryStore(scope: { userId: string; threadId: string; request: FastifyRequest; reply: FastifyReply }): {

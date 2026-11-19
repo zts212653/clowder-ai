@@ -797,7 +797,9 @@ async function initializeApi(
 
   // F152: Readiness check — verifies dependencies are reachable.
   const { MemoryPluginHost } = await import('./domains/plugin/host-surface/memory-plugin-host.js');
+  const { createEventMemoryProvider } = await import('./domains/plugin/host-surface/event-memory-provider.js');
   const memoryProvider = new MemoryPluginHost(app.log);
+  const eventMemoryStore = createEventMemoryProvider(memoryProvider);
   // The scheduler readiness probe is set before the server listens.
   let checkSchedulerDb: (() => boolean) | undefined;
   async function checkReadiness(): Promise<{
@@ -1627,7 +1629,7 @@ async function initializeApi(
   });
   const eventMemorySourceReaders = { threadStore, messageStore };
   const eventMemoryLifecycleService = new EventMemoryLifecycleService({
-    store: memoryServices.eventMemoryStore,
+    store: eventMemoryStore,
     coordinator: ownerMemoryActionCoordinator,
     sourceAvailable: async (event) =>
       (await readEventMemorySource(event, event.ownerUserId, eventMemorySourceReaders)).status === 'ready',
@@ -2862,7 +2864,7 @@ async function initializeApi(
     handles: memoryCueHandles,
     evidenceStore: memoryServices.evidenceStore,
     messageStore,
-    eventStore: memoryServices.eventMemoryStore,
+    eventStore: eventMemoryStore,
     entityRegistry: new EntityRegistryStore(memoryServices.store.getDb()),
     ...(personMemoryRecallService ? { personRecall: personMemoryRecallService } : {}),
     tasteRepository,
@@ -3527,7 +3529,7 @@ async function initializeApi(
     holdBallCancelDeps: { dynamicTaskStore, taskRunner: taskRunnerV2, messageStore, socketManager },
     // F192 Phase G AC-G12 / F227 归一: magic word → Event Memory (single truth
     // source) + a lightweight episode ref for F192's a2 projection.
-    onMagicWordDetected: (
+    onMagicWordDetected: async (
       hits: Array<{ word: string }>,
       threadId: string,
       catId: string | null,
@@ -3553,19 +3555,13 @@ async function initializeApi(
         };
         let eventId: string;
         try {
-          const marked = memoryServices.eventMemoryStore.markEvent(record, ownerUserId);
+          const marked = await eventMemoryStore.markEvent(record, ownerUserId);
           if (marked.suppressed) continue;
           eventId = marked.event.eventId;
         } catch (err) {
-          // P1-3 (砚砚): dead-letter so the event is recoverable, not lost.
-          try {
-            memoryServices.eventMemoryStore.appendDeadLetter(record, ownerUserId, String(err));
-          } catch (dlErr) {
-            app.log.error({ dlErr, threadId, word: hit.word }, '[F227] dead-letter append ALSO failed');
-          }
           app.log.error(
-            { err, threadId, word: hit.word },
-            '[F227] Event Memory write failed — dead-lettered for replay',
+            { err, threadId, messageId, word: hit.word },
+            '[F227] Event Memory write could not be confirmed',
           );
           continue; // no orphan episode ref without a backing event
         }
@@ -3755,7 +3751,7 @@ async function initializeApi(
       lifecycle: tasteMemoryLifecycleStore,
       sourceReaders: { proposalStore: tasteProposalStore, threadStore, messageStore },
     },
-    eventSources: { store: memoryServices.eventMemoryStore, sourceReaders: eventMemorySourceReaders },
+    eventSources: { store: eventMemoryStore, sourceReaders: eventMemorySourceReaders },
   };
   await app.register(recallMetricsRoutes, {
     evidenceDb: memoryServices.store.getDb(),
@@ -6935,7 +6931,7 @@ async function initializeApi(
   });
   await app.register(callbackProposeEventMemoryCorrectionRoutes, {
     registry,
-    eventMemoryStore: memoryServices.eventMemoryStore,
+    eventMemoryStore,
     proposalStore: eventMemoryCorrectionProposalStore,
     approvalIngress,
     sourceReaders: eventMemorySourceReaders,
@@ -7663,7 +7659,7 @@ async function initializeApi(
   });
   // F227: Event Memory query route (GET /api/memory/events)
   await app.register(eventsRoutes, {
-    eventMemoryStore: memoryServices.eventMemoryStore,
+    eventMemoryStore,
     readEvidenceDb: memoryServices.store.getDb(),
     lifecycleService: eventMemoryLifecycleService,
     correctionProposalStore: eventMemoryCorrectionProposalStore,
@@ -7759,7 +7755,7 @@ async function initializeApi(
       catalog: memoryServices.catalog,
       stores: libraryStores,
       searchSources: { tasteRepository, messageSearchService },
-      brakeSources: { eventMemoryStore: memoryServices.eventMemoryStore, threadStore, messageStore },
+      brakeSources: { eventMemoryStore, threadStore, messageStore },
       recallSources: {
         ...recallOwnerMessageSources,
         threadStore,

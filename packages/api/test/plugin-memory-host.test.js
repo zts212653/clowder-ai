@@ -6,8 +6,10 @@ import { createMemoryIndexSources } from '../dist/domains/cats/services/session/
 import { MessageStore } from '../dist/domains/cats/services/stores/ports/MessageStore.js';
 import { ThreadStore } from '../dist/domains/cats/services/stores/ports/ThreadStore.js';
 import { currentPluginCallContext, withPluginCallContext } from '../dist/domains/plugin/carrier/plugin-call-context.js';
+import { createEventMemoryProvider } from '../dist/domains/plugin/host-surface/event-memory-provider.js';
 import { MemoryPluginHost } from '../dist/domains/plugin/host-surface/memory-plugin-host.js';
 import { createMemorySourceHost } from '../dist/domains/plugin/host-surface/memory-source-host.js';
+import { eventsRoutes } from '../dist/routes/events.js';
 import { memoryRoutes } from '../dist/routes/memory.js';
 import { createMatterRouteProvider, readMatterOpeningPrompt } from '../dist/routes/memory-matter-provider.js';
 import { registerCallbackMatterMemoryRoutes } from '../dist/routes/memory-matter-routes.js';
@@ -166,6 +168,36 @@ test('an action can detect replacement of the same instance while its request is
     { userId: 'owner', catId: 'user', threadId: 'thread', invocationId: 'call', assertCurrent: async () => {} },
   );
   assert.equal(result.effect, 'unknown');
+});
+
+test('Event routes await the admitted provider under authenticated owner scope', async (t) => {
+  const app = Fastify();
+  t.after(() => app.close());
+  app.addHook('onRequest', async (request) => {
+    if (request.headers['x-test-session'] === 'verified') request.sessionUserId = 'event-owner';
+  });
+  const provider = new MemoryPluginHost();
+  await app.register(eventsRoutes, { eventMemoryStore: createEventMemoryProvider(provider) });
+  const url = '/api/memory/events?limit=1&ownerUserId=spoofed';
+  const headers = { 'x-test-session': 'verified' };
+  assert.equal((await app.inject({ url })).statusCode, 401);
+  assert.deepEqual((await app.inject({ url, headers })).json(), { error: 'memory_unavailable', effect: 'not_started' });
+
+  await provider.admit(admission, {
+    exposes: async () => true,
+    async attempt(instanceId, method, request) {
+      if (method === 'memory.describe') return { status: 'returned', value: memoryDescriptor() };
+      assert.equal(currentPluginCallContext(instanceId)?.userId, 'event-owner');
+      assert.equal(request.operation, 'event.list');
+      assert.equal(request.input.limit, 2);
+      assert.ok(!('ownerUserId' in request.input));
+      return { status: 'returned', value: [] };
+    },
+  });
+  provider.markReady(pluginInstanceId);
+  const result = await app.inject({ url, headers });
+  assert.equal(result.statusCode, 200, result.body);
+  assert.deepEqual(result.json(), { events: [], meta: { count: 0, limit: 1, offset: 0, hasMore: false } });
 });
 
 test('memory source coordinates and public reply policy are bound to the current Host call', async () => {

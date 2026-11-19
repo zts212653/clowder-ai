@@ -7,9 +7,8 @@ import {
 import type { z } from 'zod';
 import { MatterMemoryError } from '../domains/memory/matters/matter-source.js';
 import type { PluginCallContext } from '../domains/plugin/carrier/plugin-call-context.js';
-import type { MemoryPluginHost } from '../domains/plugin/host-surface/memory-plugin-host.js';
+import { type MemoryPluginHost, MemoryProviderCallError } from '../domains/plugin/host-surface/memory-plugin-host.js';
 import type { MatterRouteProvider } from './memory-matter-routes.js';
-import { MemoryProviderCallError } from './memory-route-provider.js';
 
 export async function readMatterOpeningPrompt(provider: MemoryPluginHost, caller: PluginCallContext) {
   const outcome = await provider.attempt({ operation: 'matter.opening', input: {} }, caller);

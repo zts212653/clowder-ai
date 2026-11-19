@@ -1,7 +1,6 @@
 import type { DispatchInput } from '@clowder-ai/plugin-memory-contract';
 import { z } from 'zod';
-import type { PluginInvocationEffect } from '../domains/plugin/carrier/host-invocation.js';
-import type { MemoryPluginHost } from '../domains/plugin/host-surface/memory-plugin-host.js';
+import { type MemoryPluginHost, MemoryProviderCallError } from '../domains/plugin/host-surface/memory-plugin-host.js';
 import type { MemoryRoutesOptions } from './memory.js';
 
 const memoryEntry = z.object({
@@ -11,12 +10,6 @@ const memoryEntry = z.object({
   updatedBy: z.custom<import('@cat-cafe/shared').MemoryEntry['updatedBy']>((value) => typeof value === 'string'),
   updatedAt: z.number(),
 });
-
-export class MemoryProviderCallError extends Error {
-  constructor(readonly effect: PluginInvocationEffect) {
-    super('memory_unavailable');
-  }
-}
 
 export function createMemoryRouteProvider(provider: MemoryPluginHost): MemoryRoutesOptions['memoryStore'] {
   return ({ userId, threadId, request, reply }) => {

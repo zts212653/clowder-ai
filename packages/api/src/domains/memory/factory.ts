@@ -6,8 +6,6 @@ import { mkdirSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join, relative, resolve } from 'node:path';
 import { type MemoryDataLocations, resolveMemoryDataLocations } from '../../config/memory-data-locations.js';
-import type { IEventMemoryStore } from './EventMemoryStore.js';
-import { EventMemoryStore } from './EventMemoryStore.js';
 import { loadEntitySeeds, shouldSkipProposalEntity } from './entity-seeds.js';
 import { loadExternalCollections } from './external-collections.js';
 import { GlobalIndexBuilder } from './GlobalIndexBuilder.js';
@@ -44,7 +42,6 @@ export interface MemoryServices {
   /** Phase G: direct store access for summary compaction task (getDb()) */
   store: SqliteEvidenceStore;
   /** F227: typed event index (magic-word / cognitive-transition events). */
-  eventMemoryStore: IEventMemoryStore;
   /** Resolved runtime event-memory DB path (trusted config, may be absolute). */
   eventMemoryDbPath: string;
   markerQueue: IMarkerQueue;
@@ -119,19 +116,6 @@ export function computeChildExcludes(parentRoot: string, children: Array<{ root:
     }
   }
   return excludes;
-}
-
-/**
- * F227: build the typed Event Memory store. Separated from createMemoryServices to
- * keep that factory's cognitive complexity bounded. :memory: passes through (tests).
- */
-async function buildEventMemoryStore(path: string): Promise<EventMemoryStore> {
-  if (path !== ':memory:') {
-    mkdirSync(dirname(path), { recursive: true });
-  }
-  const store = new EventMemoryStore(path);
-  await store.initialize();
-  return store;
 }
 
 export async function createMemoryServices(config: MemoryConfig): Promise<MemoryServices> {
@@ -302,8 +286,6 @@ export async function createMemoryServices(config: MemoryConfig): Promise<Memory
 
   const knowledgeResolver = new KnowledgeResolver({ projectStore: store, globalStore, catalog, stores });
 
-  // F227: typed Event Memory store (magic-word truth source, LL-048 fail-loud).
-  const eventMemoryStore = await buildEventMemoryStore(eventMemoryDbPath);
   let shutdown: Promise<void> | undefined;
 
   return {
@@ -316,13 +298,11 @@ export async function createMemoryServices(config: MemoryConfig): Promise<Memory
             .filter((store): store is SqliteEvidenceStore => store instanceof SqliteEvidenceStore)
             .map((store) => store.runExclusive(() => store.close())),
         );
-        eventMemoryStore.close();
       })());
     },
     evidenceStore: store,
     publishedDocuments,
     store,
-    eventMemoryStore,
     eventMemoryDbPath,
     markerQueue,
     reflectionService,
