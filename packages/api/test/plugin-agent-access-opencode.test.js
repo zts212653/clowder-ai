@@ -278,8 +278,7 @@ describe('the recovery plan runs under the main run activation lease', () => {
     generation = 2;
 
     await assert.rejects(
-      () =>
-        planRecovery({ prompt: 'q', model: 'm', finalizerAgent: 'f' }, { assertCurrent: pinned }),
+      () => planRecovery({ prompt: 'q', model: 'm', finalizerAgent: 'f' }, { assertCurrent: pinned }),
       /session_implementation_unavailable/,
       'the recovery must not be planned by a package outside the main lease',
     );

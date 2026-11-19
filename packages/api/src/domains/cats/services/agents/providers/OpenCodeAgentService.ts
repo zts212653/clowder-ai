@@ -16,10 +16,10 @@
 
 import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
+import { configuredCredentialValues } from '@cat-cafe/mcp-server/dist/secret-runtime.js';
 import { type CatId, createCatId } from '@cat-cafe/shared';
 import type { AgentAccessOpenCodeEvent } from '@clowder-ai/agent-contract';
 import { getCatModel } from '../../../../../config/cat-models.js';
-import { configuredCredentialValues } from '@cat-cafe/mcp-server/dist/secret-runtime.js';
 import { createModuleLogger } from '../../../../../infrastructure/logger.js';
 import {
   buildCliDiagnostics,
@@ -47,6 +47,7 @@ import {
   cacheOpenCodeAutoApproveProbe,
   getCliFlagName,
   getOpenCodeTransportArgs,
+  getOpenCodeTransportArgv,
   OPENCODE_AUTO_APPROVE_FLAG,
   OPENCODE_STANDALONE_FLAG,
   type OpenCodeAutoApproveProbeFn,
@@ -265,36 +266,22 @@ function findOpenCodePlanAuthorizationViolation(
   args: readonly string[],
   approved: { readOnly: boolean; readOnlyAgent: string; transportArgs: readonly string[] },
 ): string | null {
-  const agentIndex = args.findIndex((arg) => arg === '--agent' || arg.startsWith('--agent='));
-  const agentValue =
-    agentIndex >= 0
-      ? args[agentIndex].includes('=')
-        ? args[agentIndex].split('=')[1]
-        : args[agentIndex + 1]
-      : undefined;
-  const serverIndex = args.findIndex((arg) => arg === '--server' || arg.startsWith('--server='));
+  const transport = getOpenCodeTransportArgv(args);
+  if (
+    transport.length !== approved.transportArgs.length ||
+    transport.some((arg, i) => arg !== approved.transportArgs[i])
+  )
+    return 'unapproved_server_transport';
+  if (!approved.readOnly) return null;
 
-  if (approved.readOnly) {
-    // The read-only agent is the whole enforcement mechanism for this policy; a plan
-    // that names another agent or omits it is running a different policy than approved.
-    if (agentValue !== approved.readOnlyAgent) return 'read_only_agent_substituted';
-    // A shared server was already refused before planning; reaching one here means the
-    // plan added a transport the Host never resolved.
-    if (serverIndex >= 0) return 'unapproved_server_transport';
-    return null;
-  }
-
-  // Outside the read-only policy the agent is not a Host fact, but a plan still must not
-  // invent a server the user never configured.
-  const approvedServers = new Set(
-    approved.transportArgs.flatMap((part, index, all) =>
-      getCliFlagName(part) === '--server' ? [part.includes('=') ? part.split('=')[1] : all[index + 1]] : [],
-    ),
+  const delimiter = args.indexOf('--');
+  const flags = delimiter < 0 ? args : args.slice(0, delimiter);
+  const agents = flags.flatMap((part, index) =>
+    getCliFlagName(part) === '--agent' ? [part === '--agent' ? flags[index + 1] : part.slice('--agent='.length)] : [],
   );
-  if (serverIndex >= 0) {
-    const planned = args[serverIndex].includes('=') ? args[serverIndex].split('=')[1] : args[serverIndex + 1];
-    if (planned === undefined || !approvedServers.has(planned)) return 'unapproved_server_transport';
-  }
+  if (agents.length !== 1 || agents[0] !== approved.readOnlyAgent) return 'read_only_agent_substituted';
+  if (userControlsOpenCodeAutoApprove(new Set(flags.flatMap((part) => getCliFlagName(part) ?? []))))
+    return 'unapproved_permission_option';
   return null;
 }
 
@@ -491,7 +478,9 @@ export class OpenCodeAgentService implements L0InjectableAgentService {
       // the turn loudly rather than fall back to a second builder here.
       let args: string[];
       let plannedManagedFlags: readonly string[] | undefined;
-      let plannedNormalizeEvent: ((event: unknown, knownCredentials?: readonly string[]) => Promise<unknown>) | undefined;
+      let plannedNormalizeEvent:
+        | ((event: unknown, knownCredentials?: readonly string[]) => Promise<unknown>)
+        | undefined;
       let assertLaunchCurrent: (() => Promise<void>) | undefined;
       if (this.planLaunch) {
         const plan = await this.planLaunch({
@@ -997,6 +986,12 @@ export class OpenCodeAgentService implements L0InjectableAgentService {
             { assertCurrent: params.assertCurrent },
           )
         ).args;
+        const violation = findOpenCodePlanAuthorizationViolation(plannedFinalizerArgs, {
+          readOnly: true,
+          readOnlyAgent: finalizerAgent,
+          transportArgs,
+        });
+        if (violation) throw new Error(`opencode_plan_authorization_violation:${violation}`);
       } catch (err) {
         // The package could not plan the recovery run (for example an older package
         // that predates the operation). The turn still has the post-tool fallback
@@ -1328,8 +1323,7 @@ export class OpenCodeAgentService implements L0InjectableAgentService {
     const needsApproval = !readOnly && !userControlsOpenCodeAutoApprove(userFlags);
     // No probe in this path, so `--pure` support is unknown. Unknown is not support:
     // the caller leaves it out rather than sending a flag this CLI may reject.
-    if (!needsApproval && transportArgs.length > 0)
-      return { approvalFlag: undefined, transportArgs, pure: undefined };
+    if (!needsApproval && transportArgs.length > 0) return { approvalFlag: undefined, transportArgs, pure: undefined };
 
     // One help result supplies both capabilities. A transient failure is retried
     // by the next invocation, never by a second probe in this invocation.

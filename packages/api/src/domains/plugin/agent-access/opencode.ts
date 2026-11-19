@@ -75,10 +75,7 @@ export function createAgentAccessOpenCodeFinalizerPlanner(
   inventory: Pick<PluginInventoryStore, 'readCurrentAuthority'>,
   runtime: Pick<PluginRuntimeCarrierRouter, 'invoke'> & Partial<Pick<PluginRuntimeCarrierRouter, 'exposesAction'>>,
 ) {
-  return async (
-    launch: AgentAccessOpenCodeFinalizer,
-    lease?: { assertCurrent?: () => Promise<void> },
-  ) => {
+  return async (launch: AgentAccessOpenCodeFinalizer, lease?: { assertCurrent?: () => Promise<void> }) => {
     // The recovery run belongs to the turn the main plan was built for. Re-reading
     // "whatever is active now" would let a replacement that landed mid-turn plan the
     // recovery, while the turn's main run is still pinned to the earlier package.

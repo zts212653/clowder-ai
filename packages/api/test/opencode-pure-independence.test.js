@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
-import { describe, test } from 'node:test';
 import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
+import { describe, test } from 'node:test';
+import { fileURLToPath } from 'node:url';
 
 /**
  * `--pure` is not a universal OpenCode flag: v2.0.28 advertises `--standalone`,
@@ -42,11 +42,7 @@ describe('no-tool safety does not depend on --pure', () => {
   test('the finalizer config disables every tool and pins the agent', () => {
     assert.match(recoverySource, /default_agent:\s*finalizerAgent/, 'the config pins the finalizer agent');
     for (const tool of ['bash', 'edit', 'write', 'apply_patch']) {
-      assert.match(
-        recoverySource,
-        new RegExp(`${tool}:\\s*false`),
-        `${tool} must be disabled in the tools block`,
-      );
+      assert.match(recoverySource, new RegExp(`${tool}:\\s*false`), `${tool} must be disabled in the tools block`);
     }
   });
 

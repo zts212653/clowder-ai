@@ -3,8 +3,8 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
+import { AGENT_ACCESS_OPERATIONS, OFFICIAL_AGENT_ACCESS_OPERATIONS } from '@clowder-ai/agent-contract';
 import { readPackageCapabilityRejection } from '../dist/domains/plugin/read-package-capabilities.js';
-import { OFFICIAL_AGENT_ACCESS_OPERATIONS, AGENT_ACCESS_OPERATIONS } from '@clowder-ai/agent-contract';
 
 const managedModule = { runtime: { transport: 'builtin', entrypoint: 'dist/index.js' } };
 const officialPlugin = { pluginId: 'official.agent-access', ...managedModule };

@@ -81,10 +81,7 @@ describe('--pure is probe-driven', () => {
       readOnlyAgent: READ_ONLY_AGENT,
       pureSupported: false,
     });
-    assert.ok(
-      !unsupported.managedArgvFlags.includes('--pure'),
-      'diagnostics must not claim a flag that was not sent',
-    );
+    assert.ok(!unsupported.managedArgvFlags.includes('--pure'), 'diagnostics must not claim a flag that was not sent');
 
     const supported = buildOpenCodeLaunchArguments({
       prompt: 'p',

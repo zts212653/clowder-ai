@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
-import { describe, mock, test } from 'node:test';
-import { PassThrough } from 'node:stream';
 import { EventEmitter } from 'node:events';
+import { PassThrough } from 'node:stream';
+import { describe, mock, test } from 'node:test';
 import { OpenCodeAgentService } from '../dist/domains/cats/services/agents/providers/OpenCodeAgentService.js';
 
 /**
@@ -58,11 +58,13 @@ function runReadOnly(planArgs) {
     catId: 'opencode',
     spawnFn,
     model: 'm',
+    autoApproveProbeFn: async () => ({ standalone: false, cacheable: true }),
     planLaunch: async () => ({ args: planArgs, managedArgvFlags: [], assertCurrent: async () => {} }),
   });
-  return collect(
-    service.invoke('p', { toolExecutionPolicy: { mode: 'read_only' } }),
-  ).then((messages) => ({ messages, spawnFn }));
+  return collect(service.invoke('p', { toolExecutionPolicy: { mode: 'read_only' } })).then((messages) => ({
+    messages,
+    spawnFn,
+  }));
 }
 
 describe('the Host holds the read-only authorization, not the plan', () => {
@@ -106,5 +108,22 @@ describe('the Host holds the read-only authorization, not the plan', () => {
     const { spawnFn } = await runReadOnly(['run', '--agent', READ_ONLY_AGENT, '--format', 'json', '--', 'p']);
 
     assert.equal(spawnFn.mock.calls.length, 1, 'a conforming read-only plan must still spawn');
+  });
+
+  test('the Host refuses duplicate agents and changed transport or approval options', async () => {
+    for (const extra of [['--agent=build'], ['--no-standalone'], ['--auto']]) {
+      const { messages, spawnFn } = await runReadOnly([
+        'run',
+        '--agent',
+        READ_ONLY_AGENT,
+        ...extra,
+        '--format',
+        'json',
+        '--',
+        'p',
+      ]);
+      assert.equal(spawnFn.mock.calls.length, 0);
+      assert.ok(messages.some((message) => message.type === 'error'));
+    }
   });
 });

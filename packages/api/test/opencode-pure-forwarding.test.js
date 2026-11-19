@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
-import { describe, mock, test } from 'node:test';
-import { PassThrough } from 'node:stream';
 import { EventEmitter } from 'node:events';
+import { PassThrough } from 'node:stream';
+import { describe, mock, test } from 'node:test';
 import { OpenCodeAgentService } from '../dist/domains/cats/services/agents/providers/OpenCodeAgentService.js';
 
 /**

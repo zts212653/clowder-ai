@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
-import { describe, mock, test } from 'node:test';
-import { Readable } from 'node:stream';
 import { EventEmitter } from 'node:events';
+import { Readable } from 'node:stream';
+import { describe, mock, test } from 'node:test';
 import { OpenCodeAgentService } from '../dist/domains/cats/services/agents/providers/OpenCodeAgentService.js';
 
 /**
@@ -28,9 +28,7 @@ function toolOnlyProcess() {
     // it — `textEventCount > 0 && lastToolEventIndex > lastTextEventIndex`. Without
     // the leading text this fixture would never touch the finalizer at all, and a
     // "no error" assertion would pass while testing nothing.
-    stdout.write(
-      JSON.stringify({ type: 'step_start', sessionID: 'ses_tool_only', timestamp: 1 }) + '\n',
-    );
+    stdout.write(JSON.stringify({ type: 'step_start', sessionID: 'ses_tool_only', timestamp: 1 }) + '\n');
     stdout.write(
       JSON.stringify({
         type: 'text',
@@ -48,7 +46,12 @@ function toolOnlyProcess() {
       }) + '\n',
     );
     stdout.write(
-      JSON.stringify({ type: 'step_finish', sessionID: 'ses_tool_only', part: { reason: 'tool-calls' }, timestamp: 4 }) + '\n',
+      JSON.stringify({
+        type: 'step_finish',
+        sessionID: 'ses_tool_only',
+        part: { reason: 'tool-calls' },
+        timestamp: 4,
+      }) + '\n',
     );
     stdout.end();
     process.nextTick(() => emitter.emit('exit', 0, null));
@@ -146,9 +149,13 @@ describe('the recovery run is rechecked against package generation', () => {
       managedArgvFlags: [],
       assertCurrent: async () => {
         assertCalls++;
+        if (assertCalls === 2) throw new Error('package_replaced');
       },
     });
-    const planFinalizer = async () => ({ args: ['run', '--pure', '--', 'q'], managedArgvFlags: [] });
+    const planFinalizer = async ({ prompt, finalizerAgent, transportArgs = [] }) => ({
+      args: ['run', ...transportArgs, '--agent', finalizerAgent, '--format', 'json', '--', prompt],
+      managedArgvFlags: ['--agent'],
+    });
 
     const service = new OpenCodeAgentService({
       catId: 'opencode',
@@ -160,9 +167,7 @@ describe('the recovery run is rechecked against package generation', () => {
 
     await collect(service.invoke('p'));
 
-    assert.ok(
-      assertCalls >= 2,
-      `the generation must be rechecked for both the main run and the recovery run, saw ${assertCalls}`,
-    );
+    assert.equal(assertCalls, 2, 'both main and recovery runs must recheck the generation');
+    assert.equal(spawnFn.mock.callCount(), 1, 'the replaced generation cannot start the recovery process');
   });
 });

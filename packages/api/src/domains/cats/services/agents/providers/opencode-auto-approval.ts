@@ -66,7 +66,10 @@ function hasStandaloneBooleanValue(flag: string, value = ''): boolean {
 
 /** Transport alone may cross the read-only/finalizer argument boundary. */
 export function getOpenCodeTransportArgs(cliConfigArgs?: readonly string[]): string[] {
-  const userParts = parseOpenCodeCliConfigArgs(cliConfigArgs);
+  return getOpenCodeTransportArgv(parseOpenCodeCliConfigArgs(cliConfigArgs));
+}
+
+export function getOpenCodeTransportArgv(userParts: readonly string[]): string[] {
   const transport: string[] = [];
   for (let i = 0; i < userParts.length && userParts[i] !== '--'; i++) {
     const name = getCliFlagName(userParts[i]);
