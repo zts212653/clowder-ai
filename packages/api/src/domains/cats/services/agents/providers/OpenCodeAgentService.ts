@@ -634,9 +634,11 @@ export class OpenCodeAgentService implements L0InjectableAgentService {
         eventCount++;
         // #780: Archive raw event for post-mortem diagnostics (fire-and-forget)
         if (options?.invocationId) {
-          this.rawArchive.append(options.invocationId, sanitizeRawEvent(event)).catch((err) => {
-            log.warn({ catId: this.catId, invocationId: options.invocationId, err }, 'Raw archive write failed');
-          });
+          this.rawArchive
+            .append(options.invocationId, sanitizeRawEvent(event, normalizeEventCredentials))
+            .catch((err) => {
+              log.warn({ catId: this.catId, invocationId: options.invocationId, err }, 'Raw archive write failed');
+            });
         }
         const evtType =
           typeof event === 'object' && event !== null && 'type' in event
@@ -720,33 +722,38 @@ export class OpenCodeAgentService implements L0InjectableAgentService {
           continue;
         }
 
-        const result = plannedNormalizeEvent
+        if (evtType === 'tool_use') {
+          toolUseEmitted = true;
+          lastToolEventIndex = eventCount;
+          const trace = extractOpenCodeToolTrace(sanitizeRawEvent(event, normalizeEventCredentials));
+          if (trace) {
+            lastToolTrace = trace;
+            if (trace.toolName === 'delegate-task') delegateTaskEmitted = true;
+          }
+        }
+        const reportEvent = evtType === 'error' ? sanitizeRawEvent(event, normalizeEventCredentials) : event;
+        const projected = plannedNormalizeEvent
           ? mapOpenCodeWireEvent(
               (await plannedNormalizeEvent(event, normalizeEventCredentials)) as AgentAccessOpenCodeEvent,
               this.catId,
             )
-          : transformOpenCodeEvent(event, this.catId);
+          : transformOpenCodeEvent(reportEvent, this.catId);
+        const result =
+          evtType === 'error' && projected?.type !== 'error'
+            ? transformOpenCodeEvent(reportEvent, this.catId)
+            : projected;
         if (result !== null) {
           let terminateAfterYield = false;
           if (result.type === 'text' && result.content?.trim()) {
             textEventCount++;
             lastTextEventIndex = eventCount;
           }
-          if (result.type === 'tool_use') {
-            toolUseEmitted = true;
-            lastToolEventIndex = eventCount;
-            const toolTrace = extractOpenCodeToolTrace(sanitizeRawEvent(event, normalizeEventCredentials));
-            if (toolTrace !== null) {
-              lastToolTrace = toolTrace;
-              if (toolTrace.toolName === 'delegate-task') delegateTaskEmitted = true;
-            }
-          }
           // F212 Phase A AC-A8: enrich stream `error` event yield with cliDiagnostics so
           // frontend folded panel (Phase B) sees reasonCode / safeExcerpt / publicHint
           // even when CLI never exits non-zero (some providers emit error events then exit 0).
           let yieldMetadata: MessageMetadata = metadata;
           if (result.type === 'error') {
-            const rawError = readOpenCodeError(event);
+            const rawError = readOpenCodeError(reportEvent);
             log.warn(
               {
                 catId: this.catId,
@@ -1106,12 +1113,14 @@ export class OpenCodeAgentService implements L0InjectableAgentService {
 
     for await (const event of events) {
       if (params.options?.invocationId) {
-        this.rawArchive.append(params.options.invocationId, sanitizeRawEvent(event)).catch((err) => {
-          log.warn(
-            { catId: this.catId, invocationId: params.options?.invocationId, err },
-            'Post-tool finalizer raw archive write failed',
-          );
-        });
+        this.rawArchive
+          .append(params.options.invocationId, sanitizeRawEvent(event, normalizeEventCredentials))
+          .catch((err) => {
+            log.warn(
+              { catId: this.catId, invocationId: params.options?.invocationId, err },
+              'Post-tool finalizer raw archive write failed',
+            );
+          });
       }
       const evtType =
         typeof event === 'object' && event !== null && 'type' in event

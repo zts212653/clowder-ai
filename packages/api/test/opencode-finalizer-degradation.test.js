@@ -213,7 +213,7 @@ test('native session, tool and error evidence survives an incomplete plugin proj
           yield session;
           if (launches++ === 0) {
             yield { type: 'text', part: { text: 'Inspecting' } };
-            yield { type: 'tool_use', part: { tool: 'read' } };
+            yield { type: 'tool_use', part: { tool: 'read' }, fixtureHidden: true };
           } else {
             yield { type: 'text', part: { text: 'Untrusted recovery text' } };
             yield { type: native, fixtureHidden: true };
