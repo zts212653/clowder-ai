@@ -121,6 +121,7 @@ export interface AcpChildConnection {
   isKilled(): boolean;
   write(line: string): void;
   onError(listener: (error: Error) => void): void;
+  onRequestError?(listener: (id: string, error: Error) => void): void;
   onExit(listener: (code: number | null, signal: NodeJS.Signals | null) => void): void;
   shutdown(graceMs: number, endStdin: boolean): Promise<void>;
 }
@@ -397,6 +398,15 @@ export class AcpClient {
       this.platform.log.error('ACP process error: %s', err.message);
       this.closed = true;
       this.rejectAllPending(err);
+    });
+    this.child.onRequestError?.((id, error) => {
+      const pending = this.pending.get(id);
+      if (!pending) return;
+      this.pending.delete(id);
+      for (const [sessionId, promptId] of this.sessionPromptPendingIds) {
+        if (promptId === id) this.unquiescedSessionIds.add(sessionId);
+      }
+      pending.reject(error);
     });
 
     this.child.onExit((code, signal) => {

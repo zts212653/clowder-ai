@@ -10,6 +10,7 @@ import type { CatConfig, CatId } from '@cat-cafe/shared';
 import { getCatModel } from '../../../../../../config/cat-models.js';
 import { buildProviderEndpoint } from '../../../../../../config/provider-endpoint.js';
 import { createModuleLogger } from '../../../../../../infrastructure/logger.js';
+import type { AgentAccessCatAgentOutput } from '../../../../../plugin/agent-access/catagent.js';
 import type {
   AgentMessage,
   AgentService,
@@ -40,6 +41,7 @@ interface CatAgentServiceOptions {
   catId: CatId;
   projectRoot: string;
   catConfig: CatConfig | null;
+  projectOutput?: AgentAccessCatAgentOutput;
 }
 
 /** Per-turn result accumulated from stream events. */
@@ -112,11 +114,13 @@ export class CatAgentService implements AgentService {
   readonly catId: CatId;
   private readonly projectRoot: string;
   private readonly catConfig: CatConfig | null;
+  private readonly projectOutput?: AgentAccessCatAgentOutput;
 
   constructor(options: CatAgentServiceOptions) {
     this.catId = options.catId;
     this.projectRoot = options.projectRoot;
     this.catConfig = options.catConfig;
+    this.projectOutput = options.projectOutput;
   }
 
   contextCapability(): import('../../../types.js').AgentContextCapability {
@@ -159,9 +163,17 @@ export class CatAgentService implements AgentService {
       return;
     }
     const sessionId = `catagent-${now}-${Math.random().toString(36).slice(2, 8)}`;
+    const projection = await this.projectOutput?.(options?.signal, [credentials.apiKey]);
     const metadata: MessageMetadata = { provider: 'catagent', model, sessionId };
     yield { type: 'session_init', catId: this.catId, sessionId, metadata, timestamp: now };
-    yield* this.agenticLoop(prompt, model, metadata, credentials, options);
+    yield* this.agenticLoop(
+      prompt,
+      model,
+      metadata,
+      credentials,
+      projection ? { ...options, signal: projection.signal } : options,
+      projection?.read,
+    );
   }
 
   /** Agentic loop: stream API → yield text deltas → execute tools → repeat. */
@@ -170,7 +182,8 @@ export class CatAgentService implements AgentService {
     model: string,
     metadata: MessageMetadata,
     credentials: { apiKey: string; baseURL?: string },
-    options?: AgentServiceOptions,
+    options: AgentServiceOptions | undefined,
+    project?: (body: ReadableStream<Uint8Array>) => AsyncIterable<CatAgentStreamEvent>,
   ): AsyncIterable<AgentMessage> {
     const workDir = options?.workingDirectory;
     const tools = workDir ? await buildToolRegistry(workDir) : [];
@@ -187,7 +200,7 @@ export class CatAgentService implements AgentService {
         return;
       }
 
-      const result = yield* this.consumeTurn(resp, metadata, options?.signal);
+      const result = yield* this.consumeTurn(resp, metadata, options?.signal, project);
       totalUsage = mergeObservedTurnUsage(totalUsage, result.turnUsage);
 
       if (result.hadStreamError) {
@@ -270,6 +283,7 @@ export class CatAgentService implements AgentService {
     resp: Response,
     metadata: MessageMetadata,
     signal?: AbortSignal,
+    project?: (body: ReadableStream<Uint8Array>) => AsyncIterable<CatAgentStreamEvent>,
   ): AsyncGenerator<AgentMessage, TurnResult> {
     const contentBlocks: AnthropicContentBlock[] = [];
     const blocksByIndex = new Map<number, AnthropicContentBlock>();
@@ -283,7 +297,7 @@ export class CatAgentService implements AgentService {
       return { contentBlocks, stopReason, turnUsage: inputUsage, hadStreamError: true };
     }
 
-    for await (const evt of parseAnthropicSSE(resp.body, signal)) {
+    for await (const evt of project ? project(resp.body) : parseAnthropicSSE(resp.body, signal)) {
       yield* this.mapStreamEvent(evt, metadata, blocksByIndex);
 
       if (evt.type === 'usage_update') {

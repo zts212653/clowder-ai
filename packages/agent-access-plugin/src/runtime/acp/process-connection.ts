@@ -1,6 +1,8 @@
+import { once } from 'node:events';
 import { PassThrough, Readable } from 'node:stream';
 import {
   type AcpMcpServer,
+  type AgentAccessAcpOutputFrame,
   type AgentAccessAcpProcessCommand,
   type AgentAccessAcpProcessTermination,
   type AgentAccessAcpSessionFailure,
@@ -8,6 +10,7 @@ import {
   type AgentAccessAcpTurnFrame,
   agentAccessAcpSessionOperationSchema,
 } from '@clowder-ai/agent-contract/acp';
+import { agentAccessDshTurnOperationSchema } from '@clowder-ai/agent-contract/dsh-turn';
 import { z } from 'zod';
 import {
   type AcpChildConnection,
@@ -27,6 +30,7 @@ export function attachAcpProcessConnection(input: {
   lifecycle: Readable;
 }) {
   const commands = new PassThrough({ objectMode: true });
+  const stdout = new PassThrough();
   let complete!: () => void;
   const completion = new Promise<void>((resolve) => {
     complete = resolve;
@@ -34,6 +38,7 @@ export function attachAcpProcessConnection(input: {
   let outcome: AgentAccessAcpProcessTermination | undefined;
   let closeRequested = false;
   const errorListeners: Array<(error: Error) => void> = [];
+  const requestErrorListeners: Array<(requestId: string, error: Error) => void> = [];
   const exitListeners: Array<(code: number | null, signal: NodeJS.Signals | null) => void> = [];
   const settle = (result: AgentAccessAcpProcessTermination) => {
     if (outcome) return;
@@ -55,13 +60,26 @@ export function attachAcpProcessConnection(input: {
   })().catch((error: unknown) =>
     settle({ kind: 'error', message: error instanceof Error ? error.message : 'ACP process lifecycle failed' }),
   );
+  void (async () => {
+    for await (const frame of input.stdout as AsyncIterable<AgentAccessAcpOutputFrame>) {
+      if (frame.kind === 'line') {
+        if (!stdout.write(frame.line + '\n')) await once(stdout, 'drain');
+      } else {
+        for (const listener of requestErrorListeners) listener(frame.requestId, new Error(frame.message));
+      }
+    }
+    stdout.end();
+  })().catch(() => {
+    stdout.end();
+    settle({ kind: 'error', message: 'ACP provider output failed' });
+  });
 
   function send(command: AgentAccessAcpProcessCommand) {
     commands.write(command);
   }
   const child: AcpChildConnection = {
     pid: input.pid,
-    stdout: input.stdout,
+    stdout,
     stderr: input.stderr,
     isWritable: () => !closeRequested && !outcome && !commands.destroyed,
     isKilled: () => closeRequested || outcome !== undefined,
@@ -72,6 +90,9 @@ export function attachAcpProcessConnection(input: {
     onError(listener) {
       errorListeners.push(listener);
       if (outcome?.kind === 'error') listener(new Error(outcome.message));
+    },
+    onRequestError(listener) {
+      requestErrorListeners.push(listener);
     },
     onExit(listener) {
       exitListeners.push(listener);
@@ -95,6 +116,7 @@ const processRequest = z.discriminatedUnion('operation', [
     processId,
     pid: z.number().int().positive().optional(),
     cwd: z.string().min(1),
+    antigravityDiagnostics: z.boolean().optional(),
     stdout: z.instanceof(Readable),
     stderr: z.instanceof(Readable).optional(),
     lifecycle: z.instanceof(Readable),
@@ -202,7 +224,13 @@ export function createAcpProcessActions() {
           if (current) throw new Error('ACP process is already open');
           const { child, commands } = attachAcpProcessConnection(request);
           const client = new AcpClient(
-            { command: 'attached-acp', args: [], cwd: request.cwd, defaultPermissionDecision: 'reject' },
+            {
+              command: 'attached-acp',
+              args: [],
+              cwd: request.cwd,
+              antigravityDiagnostics: request.antigravityDiagnostics,
+              defaultPermissionDecision: 'reject',
+            },
             {
               log: console,
               launch(config, captureCwdIdentity) {
@@ -285,6 +313,29 @@ export function createAcpProcessActions() {
           }
         }
         return { ok: true };
+      } catch (error) {
+        return { ok: false, failure: describeFailure(error) };
+      }
+    },
+    async acpDshTurn(input: unknown) {
+      const request = agentAccessDshTurnOperationSchema.parse(input);
+      const driver = drivers.get(request.processId);
+      if (!driver?.initialization) throw new Error('ACP process is unavailable in this activation');
+      await driver.initialization;
+      const client = driver.client;
+      try {
+        const result =
+          request.operation === 'probe'
+            ? await client.probeTurnBridge()
+            : request.operation === 'status'
+              ? await client.inspectTurnInput(request.sessionId, request.deliveryId)
+              : await client.steerTurn({
+                  sessionId: request.sessionId,
+                  deliveryId: request.deliveryId,
+                  text: request.textRef,
+                  expectedTurn: request.expectedTurn,
+                });
+        return { ok: true, result };
       } catch (error) {
         return { ok: false, failure: describeFailure(error) };
       }

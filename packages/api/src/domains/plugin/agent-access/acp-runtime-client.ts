@@ -16,6 +16,15 @@ import {
   agentAccessAcpSessionFailureSchema,
   agentAccessAcpTurnFrameSchema,
 } from '@clowder-ai/agent-contract/acp';
+import {
+  DSH_TURN_METHODS,
+  DSH_TURN_PROTOCOL,
+  type DshTurnBridgeEvent,
+  type DshTurnSteerRequest,
+  parseDshTurnBridgeCapability,
+  parseDshTurnInputState,
+  parseDshTurnSteerResult,
+} from '@clowder-ai/agent-contract/dsh-turn';
 import { z } from 'zod';
 import {
   ACP_CHILD_SHUTDOWN_GRACE_MS,
@@ -33,6 +42,7 @@ import {
   acpSessionBindingSignature,
 } from '../../cats/services/agents/providers/acp/active-session-cache.js';
 import { sanitizeRawEvent } from '../../cats/services/agents/providers/codex-audit-hooks.js';
+import { createAcpHttpTransport } from './acp-http-transport.js';
 import { createNativeAcpRequests } from './acp-native-requests.js';
 import type { AgentAccessAcpProcess, BoundSessionOperation } from './acp-process.js';
 import { type AcpWriteApproval, createAcpWriteApprovalPort } from './acp-write-approval.js';
@@ -76,6 +86,7 @@ export class AgentAccessAcpRuntimeClient {
     { contentRef: string; revoke: () => void; active: boolean; requested: boolean; queued: boolean; sent: boolean }
   >();
   readonly #capacityListeners = new Set<(signal: AcpCapacitySignal) => void>();
+  readonly #dshTurnListeners = new Set<(event: DshTurnBridgeEvent) => void>();
   #connection?: Awaited<ReturnType<AgentAccessAcpProcess>>;
   #child?: AcpChildConnection;
   #exited = false;
@@ -89,6 +100,7 @@ export class AgentAccessAcpRuntimeClient {
   constructor(
     private readonly config: AcpClientConfig,
     private readonly open: AgentAccessAcpProcess,
+    private readonly transport: 'stdio' | 'httpstream' = 'stdio',
   ) {
     this.#cwd = new AcpCwdIdentityTracker(config.cwd);
   }
@@ -103,7 +115,9 @@ export class AgentAccessAcpRuntimeClient {
     return this.#exited;
   }
   get isAlive() {
-    return !this.#closing && !this.#exited && this.#child?.isWritable() === true;
+    return (
+      !this.#closing && !this.#exited && !!this.#child && (this.transport === 'httpstream' || this.#child.isWritable())
+    );
   }
   get isCwdIntact() {
     return this.#cwd.isIntact;
@@ -138,16 +152,23 @@ export class AgentAccessAcpRuntimeClient {
   offCapacity(listener: (signal: AcpCapacitySignal) => void) {
     this.#capacityListeners.delete(listener);
   }
+  onTurnBridgeEvent(listener: (event: DshTurnBridgeEvent) => void) {
+    this.#dshTurnListeners.add(listener);
+    return () => this.#dshTurnListeners.delete(listener);
+  }
 
   async initialize() {
     this.#connection = await this.open(this.config.cwd, () => {
+      if (this.#closing) throw new Error('ACP provider process closed');
       const native = launchAcpChild(this.config, () => this.#cwd.capture());
       this.#child = native.child;
       this.#nativeEnv = native.childEnv;
       native.child.onExit(() => {
         this.#exited = true;
       });
-      this.#wire = createAcpWriteApprovalPort(native.writeLine);
+      const http = this.transport === 'httpstream' ? createAcpHttpTransport(native.child) : undefined;
+      const writeLine = http?.writeLine ?? native.writeLine;
+      this.#wire = createAcpWriteApprovalPort(writeLine);
       const knownCredentials = configuredCredentialValues({
         ...process.env,
         ...this.config.preparedEnv,
@@ -157,16 +178,22 @@ export class AgentAccessAcpRuntimeClient {
         defaultDecision: this.config.defaultPermissionDecision,
         defaultHandler: this.config.permissionHandler,
         knownCredentials,
-        write: native.writeLine,
+        write: writeLine,
+        onDshTurnEvent: (event) => {
+          for (const listener of this.#dshTurnListeners) listener(event);
+        },
         onWriteError: () => {
           void this.close().catch(() => {});
         },
       });
-      if (!native.child.stdout) throw new Error('ACP provider stdout unavailable');
+      const stdout = http?.stdout ?? native.child.stdout;
+      if (!stdout) throw new Error('ACP provider stdout unavailable');
       const stderr = native.child.stderr;
       return {
         child: native.child,
-        stdout: this.#requests.project(native.child.stdout),
+        ready: http?.ready,
+        antigravityDiagnostics: this.config.antigravityDiagnostics,
+        stdout: this.#requests.project(stdout, http !== undefined),
         stderr: stderr
           ? Readable.from(
               (async function* () {
@@ -198,6 +225,7 @@ export class AgentAccessAcpRuntimeClient {
   }
 
   close() {
+    this.#dshTurnListeners.clear();
     for (const approval of this.#cancelApprovals.values()) approval.revoke();
     this.#cancelApprovals.clear();
     this.#closing ??=
@@ -205,16 +233,61 @@ export class AgentAccessAcpRuntimeClient {
     return this.#closing;
   }
 
-  async #command(operation: BoundSessionOperation, approval: AcpWriteApproval) {
+  async #withApproval(
+    approval: AcpWriteApproval,
+    invoke: (connection: Awaited<ReturnType<AgentAccessAcpProcess>>) => Promise<unknown>,
+  ) {
     if (!this.#connection || !this.#wire) throw new Error('ACP provider process unavailable');
     const revoke = this.#wire.approve(approval);
     try {
-      const result = actionResultSchema.parse(await this.#connection.session(operation));
+      const result = actionResultSchema.parse(await invoke(this.#connection));
       if (!result.ok) throw nativeError(result.failure);
       return result.result;
     } finally {
       revoke();
     }
+  }
+
+  #command(operation: BoundSessionOperation, approval: AcpWriteApproval) {
+    return this.#withApproval(approval, (connection) => connection.session(operation));
+  }
+
+  async probeTurnBridge() {
+    return parseDshTurnBridgeCapability(
+      await this.#withApproval(
+        { method: DSH_TURN_METHODS.hello, params: { protocol: DSH_TURN_PROTOCOL } },
+        (connection) => connection.dshTurn({ operation: 'probe' }),
+      ),
+    );
+  }
+
+  async steerTurn({ sessionId, deliveryId, text, expectedTurn }: DshTurnSteerRequest) {
+    const textRef = randomUUID();
+    const coordinates = { sessionId, deliveryId, ...(expectedTurn === undefined ? {} : { expectedTurn }) };
+    const result = parseDshTurnSteerResult(
+      await this.#withApproval(
+        {
+          method: DSH_TURN_METHODS.steer,
+          params: coordinates,
+          text: { ref: textRef, content: text },
+        },
+        (connection) => connection.dshTurn({ operation: 'steer', ...coordinates, textRef }),
+      ),
+    );
+    if (!result || (result.accepted && result.deliveryId !== coordinates.deliveryId))
+      throw new Error('DSH turn steer response is invalid');
+    return result;
+  }
+
+  async inspectTurnInput(sessionId: string, deliveryId: string) {
+    const coordinates = { sessionId, deliveryId };
+    const result = parseDshTurnInputState(
+      await this.#withApproval({ method: DSH_TURN_METHODS.status, params: coordinates }, (connection) =>
+        connection.dshTurn({ operation: 'status', ...coordinates }),
+      ),
+    );
+    if (!result) throw new Error('DSH turn status response is invalid');
+    return result;
   }
 
   async #openSession(

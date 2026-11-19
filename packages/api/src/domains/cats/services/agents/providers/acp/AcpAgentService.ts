@@ -46,13 +46,20 @@ import { agentServiceGeneration } from '../../registry/AgentRegistry.js';
 import {
   type AcpCapacitySignal,
   type AcpClient,
+  type AcpClientConfig,
   type AcpPermissionHandler,
   AcpProtocolError,
   AcpSessionCancelledError,
   AcpStreamIdleError,
   AcpTimeoutError,
 } from './AcpClient.js';
-import { type AcpLease, type AcpProcessPool, DEFAULT_ACP_IDLE_TTL_MS, type PoolKey } from './AcpProcessPool.js';
+import {
+  type AcpLease,
+  type AcpPoolClient,
+  type AcpProcessPool,
+  DEFAULT_ACP_IDLE_TTL_MS,
+  type PoolKey,
+} from './AcpProcessPool.js';
 import {
   bindSessionCredentialFile,
   type PreparedCredentialEnv,
@@ -164,6 +171,14 @@ type PromptPhase =
    */
   | 'busy_backoff';
 
+export type CreateAcpMemberClient = (
+  config: AcpClientConfig,
+  transport?: 'stdio' | 'httpstream',
+) => AcpPoolClient &
+  Pick<AcpClient, 'newSession' | 'promptStream' | 'setSessionModel'> & {
+    cancelSession(sessionId: string): void;
+  };
+
 export interface AcpAgentServiceConfig {
   /** Factory admitted the reviewed Desktop turn bridge for this pooled carrier. */
   dshTurnInput?: boolean;
@@ -171,6 +186,7 @@ export interface AcpAgentServiceConfig {
   defaultPermissionDecision?: 'allow' | 'reject';
   /** Factory-verified installed native DSH, separate from ordinary pooled sessions. */
   nativeDsh?: DshNativeLaunch;
+  createStdioClient?: CreateAcpMemberClient;
   nativeKimi?: KimiNativeLaunch;
   antigravity?: AgyAcpConfig;
   catId: CatId;
@@ -238,6 +254,7 @@ export class AcpAgentService implements AgentService {
    */
   readonly windowsProviderHosts = false;
   private readonly nativeDsh?: DshNativeLaunch;
+  private readonly createStdioClient?: CreateAcpMemberClient;
   private readonly dshTurnInput: boolean;
   private readonly nativeKimi?: KimiNativeLaunch;
   private readonly antigravity?: AgyAcpConfig;
@@ -283,6 +300,7 @@ export class AcpAgentService implements AgentService {
   constructor(config: AcpAgentServiceConfig) {
     this.dshTurnInput = config.dshTurnInput === true;
     this.nativeDsh = config.nativeDsh;
+    this.createStdioClient = config.createStdioClient;
     this.nativeKimi = config.nativeKimi;
     this.antigravity = config.antigravity;
     this.catId = config.catId;
@@ -533,6 +551,7 @@ export class AcpAgentService implements AgentService {
         catId: this.catId,
         modelSelection: this.sessionModel ?? this.modelName,
         native: this.nativeKimi,
+        createClient: this.createStdioClient,
         prompt,
         options,
       });
@@ -543,6 +562,7 @@ export class AcpAgentService implements AgentService {
         catId: this.catId,
         modelSelection: this.sessionModel ?? this.modelName,
         native: this.nativeDsh,
+        createClient: this.createStdioClient,
         prompt,
         options,
       });

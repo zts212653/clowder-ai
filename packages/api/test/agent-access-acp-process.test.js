@@ -2,7 +2,6 @@ import assert from 'node:assert/strict';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { EventEmitter } from 'node:events';
 import { tmpdir } from 'node:os';
-import { createInterface } from 'node:readline';
 import { Readable, Writable } from 'node:stream';
 import { test } from 'node:test';
 import { setImmediate as immediate } from 'node:timers/promises';
@@ -124,8 +123,7 @@ test('native ACP permissions retain the Host session scope and never block anoth
     { method: 'fs/read_text_file', id: 2, params: {} },
   ].map((value) => JSON.stringify({ jsonrpc: '2.0', ...value }) + '\n');
   const observed = [];
-  for await (const line of createInterface({ input: router.project(Readable.from(input)) }))
-    observed.push(JSON.parse(line));
+  for await (const frame of router.project(Readable.from(input))) observed.push(JSON.parse(frame.line));
   await immediate();
   assert.deepEqual(
     observed.map(({ id, params }) => id ?? params.sessionUpdate),

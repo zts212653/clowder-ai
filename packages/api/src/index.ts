@@ -2321,7 +2321,8 @@ async function initializeApi(
                       acpConfig,
                       resolveCurrentAcpConfig: () => getRegisteredAcpConfig(id, projectRoot),
                       selectSessionModel: (session, model) => agentAccessAcpModelSelection(session, model),
-                      createStdioClient: (config) => new AgentAccessAcpRuntimeClient(config, agentAccessAcpProcess),
+                      createClient: (config, transport) =>
+                        new AgentAccessAcpRuntimeClient(config, agentAccessAcpProcess, transport),
                       poolRegistry: acpPoolRegistry,
                       log: app.log,
                       onUnavailable: (reason) => agentRegistry.markUnavailable(id, reason),
@@ -2402,7 +2403,12 @@ async function initializeApi(
                       const { CatAgentService } = await import(
                         './domains/cats/services/agents/providers/catagent/CatAgentService.js'
                       );
-                      service = new CatAgentService({ catId, projectRoot: findMonorepoRoot(), catConfig: config });
+                      service = new CatAgentService({
+                        catId,
+                        projectRoot: findMonorepoRoot(),
+                        catConfig: config,
+                        projectOutput: (...args) => agentAccessCatAgentOutput(...args),
+                      });
                       break;
                     }
                     case 'a2a': {
@@ -5586,7 +5592,8 @@ async function initializeApi(
                 effectiveModel: getCatModel(catId),
                 acpConfig: declaration.acp,
                 selectSessionModel: (session, model) => agentAccessAcpModelSelection(session, model),
-                createStdioClient: (config) => new AgentAccessAcpRuntimeClient(config, agentAccessAcpProcess),
+                createClient: (config, transport) =>
+                  new AgentAccessAcpRuntimeClient(config, agentAccessAcpProcess, transport),
                 poolRegistry,
                 log: app.log,
               });
@@ -6026,6 +6033,11 @@ async function initializeApi(
   const agentAccessClaudeOutput = createAgentAccessClaudeOutput(pluginRuntime.inventoryStore, pluginRuntime.supervisor);
   const { createAgentAccessClaudeBatch } = await import('./domains/plugin/agent-access/claude-batch.js');
   const agentAccessClaudeBatch = createAgentAccessClaudeBatch(pluginRuntime.inventoryStore, pluginRuntime.supervisor);
+  const { createAgentAccessCatAgentOutput } = await import('./domains/plugin/agent-access/catagent.js');
+  const agentAccessCatAgentOutput = createAgentAccessCatAgentOutput(
+    pluginRuntime.inventoryStore,
+    pluginRuntime.supervisor,
+  );
   const { createAgentAccessAcpModelSelection } = await import('./domains/plugin/agent-access/acp.js');
   const { createAgentAccessAcpProcess } = await import('./domains/plugin/agent-access/acp-process.js');
   const { AgentAccessAcpRuntimeClient } = await import('./domains/plugin/agent-access/acp-runtime-client.js');

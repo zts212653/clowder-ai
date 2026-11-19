@@ -11,6 +11,10 @@ export type AgentAccessAcpProcessTermination =
   | { kind: 'exit'; code: number | null; signal: NodeJS.Signals | null }
   | { kind: 'error'; message: string };
 
+export type AgentAccessAcpOutputFrame =
+  | { kind: 'line'; line: string }
+  | { kind: 'request_error'; requestId: string; message: string };
+
 const processId = z.string().uuid();
 const sessionId = z.string().min(1);
 const sessionRequest = {

@@ -1,4 +1,5 @@
 import {
+  AGENT_ACCESS_ACP_PROCESS_ACTION,
   AGENT_ACCESS_ACP_SESSION_ACTION,
   type AgentAccessA2ASubmit,
   type AgentAccessA2ATurn,
@@ -27,6 +28,7 @@ import { runA2ATurn } from './runtime/a2a-turn.js';
 import { checkDshConnectionInWorker } from './runtime/acp/dsh/connection-check.js';
 import { createAcpProcessActions } from './runtime/acp/process-connection.js';
 import { resolveSessionModelConfigOption } from './runtime/acp/session-configuration.js';
+import { projectCatAgentOutput } from './runtime/catagent-events.js';
 import { projectClaudeBatch } from './runtime/claude/project-claude-batch.js';
 import { projectClaudeOutput } from './runtime/claude/project-claude-output.js';
 import { buildCodexExecLaunchArguments } from './runtime/codex-exec-launch-arguments.js';
@@ -47,8 +49,10 @@ export default {
         const acpProcesses = createAcpProcessActions();
         return {
           actions: {
-            acpProcess: acpProcesses.acpProcess,
+            acpDshTurn: acpProcesses.acpDshTurn,
+            [AGENT_ACCESS_ACP_PROCESS_ACTION]: acpProcesses.acpProcess,
             [AGENT_ACCESS_ACP_SESSION_ACTION]: acpProcesses.acpSession,
+            projectCatAgentOutput,
             configure(input: unknown) {
               if (input && typeof input === 'object' && 'operation' in input) {
                 const request = agentAccessNativeLaunchRequestSchema.parse(input);

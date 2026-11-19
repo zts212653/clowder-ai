@@ -13,6 +13,7 @@ import { z } from 'zod';
 export const AGENT_ACCESS_PLUGIN_ID = 'official.agent-access';
 export const AGENT_ACCESS_DECLARATION_FILE = 'agent-access.json';
 export const AGENT_ACCESS_PROTOCOL_VERSION = 1;
+export const AGENT_ACCESS_ACP_PROCESS_ACTION = 'acpProcessV2';
 export const AGENT_ACCESS_ACP_SESSION_ACTION = 'acpSessionV2';
 
 export const AGENT_ACCESS_OPERATIONS = [
@@ -30,10 +31,12 @@ export const AGENT_ACCESS_OPERATIONS = [
 /** Operations called by the Host's first-party Agent Access integration. */
 export const OFFICIAL_AGENT_ACCESS_OPERATIONS = [
   ...AGENT_ACCESS_OPERATIONS,
-  'acpProcess',
+  'acpDshTurn',
+  AGENT_ACCESS_ACP_PROCESS_ACTION,
   AGENT_ACCESS_ACP_SESSION_ACTION,
   'parseNativeEvent',
   'planCodexExec',
+  'projectCatAgentOutput',
   'projectClaudeBatch',
   'projectClaudeOutput',
   'selectAcpModel',

@@ -23,6 +23,7 @@ import { createAgentAccessA2ARunner } from '../dist/domains/plugin/agent-access/
 import { createAgentAccessAcpModelSelection } from '../dist/domains/plugin/agent-access/acp.js';
 import { createAgentAccessAcpProcess } from '../dist/domains/plugin/agent-access/acp-process.js';
 import { AgentAccessAcpRuntimeClient } from '../dist/domains/plugin/agent-access/acp-runtime-client.js';
+import { createAgentAccessCatAgentOutput } from '../dist/domains/plugin/agent-access/catagent.js';
 import { createAgentAccessClaudeBatch } from '../dist/domains/plugin/agent-access/claude-batch.js';
 import { createAgentAccessDshConnectionTest } from '../dist/domains/plugin/agent-access/dsh.js';
 import { createAgentAccessKimiLaunchPlanner } from '../dist/domains/plugin/agent-access/kimi.js';
@@ -427,9 +428,32 @@ test('Agent access discovery executes the same standalone entrypoint from a Mana
   assert.equal(hookFrame.messages[0].fileResultEvidence.absolutePath, hookEvidencePath);
   assert.equal(hookFrame.messages[1].content, 'interactive text');
 
+  const catAgentCredential = 'fixture-catagent-isolated-credential';
+  const openCatAgentOutput = createAgentAccessCatAgentOutput(runtime.inventoryStore, runtime.supervisor);
+  const catAgentOutput = await openCatAgentOutput(undefined, [catAgentCredential]);
+  const providerEvents = [
+    { type: 'message_start', message: { usage: { input_tokens: 4 } } },
+    { type: 'content_block_start', index: 0, content_block: { type: 'text' } },
+    { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'direct API ' + catAgentCredential } },
+    { type: 'content_block_stop', index: 0 },
+    { type: 'message_delta', delta: { stop_reason: 'end_turn' }, usage: { output_tokens: 2 } },
+    { type: 'message_stop' },
+  ];
+  const providerBody = new Response(providerEvents.map((event) => 'data: ' + JSON.stringify(event) + '\n\n').join(''));
+  const catAgentEvents = await Array.fromAsync(catAgentOutput.read(providerBody.body));
+  assert.deepEqual(
+    catAgentEvents.map(({ type }) => type),
+    ['usage_update', 'text_delta', 'content_block_complete', 'usage_update', 'stop'],
+  );
+  assert.equal(catAgentEvents[0].inputUsage.input_tokens, 4);
+  assert.match(catAgentEvents[1].text, /^direct API /);
+  assert.equal(JSON.stringify(catAgentEvents).includes(catAgentCredential), false);
+  assert.equal(catAgentEvents[4].stopReason, 'end_turn');
+
   const acpCommands = [];
   const mcpSecret = 'fixture-host-held-mcp-value';
   const privatePrompt = 'Host-approved fixture prompt';
+  const privateDshInput = 'Host-approved DSH follow-up';
   const heldWrite = Promise.withResolvers();
   const finishWrite = Promise.withResolvers();
   const heldIdleWrite = Promise.withResolvers();
@@ -443,6 +467,7 @@ test('Agent access discovery executes the same standalone entrypoint from a Mana
   const attachAcp = createAgentAccessAcpProcess(runtime.inventoryStore, {
     nativeActions: runtime.supervisor.nativeActions,
     async invoke(instanceId, method, input) {
+      if (method === 'acpDshTurn') assert.equal(JSON.stringify(input).includes(privateDshInput), false);
       if (method === AGENT_ACCESS_ACP_SESSION_ACTION) {
         acpCommands.push(input.operation);
         const crossing = JSON.stringify(input);
@@ -501,6 +526,17 @@ test('Agent access discovery executes the same standalone entrypoint from a Mana
           const { id, method, params, result } = JSON.parse(line);
           const send = (message) => console.log(JSON.stringify({ jsonrpc: '2.0', ...message }));
           if (method === 'initialize') send({ id, result: { protocolVersion: 1, agentCapabilities: { sessionCapabilities: { resume: {} }, mcpCapabilities: {} } } });
+          if (method === '_clowder/hello') {
+            if (params.protocol !== 1) process.exit(6);
+            send({ id, result: { protocol: 1, bridge: 'cat-cafe-dsh-turn', steer: true, nativeTurns: true } });
+          }
+          if (method === '_clowder/turn/steer') {
+            if (params.text !== '${privateDshInput}' || params.expectedTurn !== 12) process.exit(7);
+            const event = { sessionId: params.sessionId, deliveryId: params.deliveryId, nativeTurnId: 12 };
+            send({ method: '_clowder/turn', params: { ...event, type: 'input_read' } });
+            send({ id, result: { accepted: true, deliveryId: params.deliveryId, nativeTurnId: 12 } });
+          }
+          if (method === '_clowder/turn/status') send({ id, result: { state: 'read', nativeTurnId: 12 } });
           if (method === 'session/new' || method === 'session/resume') {
             if (params.mcpServers[0].env[0].value !== '${mcpSecret}') process.exit(2);
             send({ id, result: { sessionId: params.sessionId ?? 'same-acp-native' } });
@@ -583,6 +619,23 @@ test('Agent access discovery executes the same standalone entrypoint from a Mana
     assert.equal(acp.hasPromptFinalResponse(historyId), true);
     assert.equal(acp.isSessionSafeForReuse(historyId), true);
     assert.deepEqual(acpCommands, ['newSession', 'loadSession', 'loadSession', 'prompt']);
+    assert.deepEqual(await acp.probeTurnBridge(), {
+      protocol: 1,
+      bridge: 'cat-cafe-dsh-turn',
+      steer: true,
+      nativeTurns: true,
+    });
+    const dshReceipts = [];
+    const unsubscribeDsh = acp.onTurnBridgeEvent((event) => dshReceipts.push(event));
+    assert.deepEqual(
+      await acp.steerTurn({ sessionId: historyId, deliveryId: 'follow-up', text: privateDshInput, expectedTurn: 12 }),
+      { accepted: true, deliveryId: 'follow-up', nativeTurnId: 12 },
+    );
+    assert.deepEqual(dshReceipts, [
+      { sessionId: historyId, deliveryId: 'follow-up', nativeTurnId: 12, type: 'input_read' },
+    ]);
+    assert.deepEqual(await acp.inspectTurnInput(historyId, 'follow-up'), { state: 'read', nativeTurnId: 12 });
+    unsubscribeDsh();
     const peer = acp.promptStream(sessionId, 'fixture-peer-probe');
     assert.equal((await peer.next()).value.update.content.text, 'peer started');
     const peerDone = peer.next();
@@ -638,6 +691,57 @@ test('Agent access discovery executes the same standalone entrypoint from a Mana
     finishIdleWrite.resolve();
     finishPromptAdmission.resolve();
     await acp.close();
+  }
+
+  const httpAcp = new AgentAccessAcpRuntimeClient(
+    {
+      command: process.execPath,
+      cwd: projectRoot,
+      args: [
+        '-e',
+        `
+        let session = 0;
+        const server = require('node:http').createServer(async (req, res) => {
+          const parts = [];
+          for await (const part of req) parts.push(part);
+          const { method, id, params } = JSON.parse(Buffer.concat(parts).toString('utf8'));
+          const reply = (data) => JSON.stringify({ jsonrpc: '2.0', ...data }) + '\\n';
+          if (method === 'initialize') return res.end(reply({ id, result: { protocolVersion: 1 } }));
+          if (method === 'session/new') return res.end(reply({ id, result: { sessionId: 'loopback-http-' + (++session) } }));
+          if (method === 'session/cancel') return res.end();
+          if (method !== 'session/prompt') return res.writeHead(404).end();
+          res.write(reply({
+            method: 'session/update', params: { sessionId: params.sessionId, update: {
+              sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'loopback ACP HTTP response' },
+            } },
+          }));
+          if (params.prompt[0].text === 'close without final response') return res.end();
+          setTimeout(() => res.end(reply({ id, result: { stopReason: 'end_turn' } })), 100);
+        });
+        server.listen(0, '127.0.0.1', () => console.log(JSON.stringify({ port: server.address().port })));
+      `,
+      ],
+    },
+    attachAcp,
+    'httpstream',
+  );
+  try {
+    assert.equal((await httpAcp.initialize()).protocolVersion, 1);
+    const { sessionId: goodId } = await httpAcp.newSession();
+    const { sessionId: failedId } = await httpAcp.newSession();
+    const good = httpAcp.promptStream(goodId, 'completed');
+    const failed = httpAcp.promptStream(failedId, 'close without final response');
+    const [goodText, failedText] = await Promise.all([good.next(), failed.next()]);
+    assert.equal(goodText.value.update.content.text, 'loopback ACP HTTP response');
+    assert.equal(failedText.value.update.content.text, 'loopback ACP HTTP response');
+    await assert.rejects(failed.next(), /ACP HTTP stream closed before the final prompt response/);
+    assert.equal(httpAcp.hasPromptFinalResponse(failedId), false);
+    assert.equal(httpAcp.isSessionSafeForReuse(failedId), false);
+    assert.deepEqual(await good.next(), { done: true, value: 'end_turn' });
+    assert.equal(httpAcp.hasPromptFinalResponse(goodId), true);
+    assert.equal(httpAcp.isAlive, true);
+  } finally {
+    await httpAcp.close();
   }
 
   const selectModel = createAgentAccessAcpModelSelection(runtime.inventoryStore, runtime.supervisor);
@@ -843,6 +947,7 @@ test('Agent access discovery executes the same standalone entrypoint from a Mana
   await invoke('after replacement');
   assert.equal(transcript.signal.aborted, true);
   await assert.rejects(transcript.project([]));
+  await assert.rejects(Array.fromAsync(catAgentOutput.read(new Response('').body)));
 
   assert.deepEqual(
     await mutate({

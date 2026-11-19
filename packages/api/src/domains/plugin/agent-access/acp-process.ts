@@ -1,7 +1,12 @@
 import { randomUUID } from 'node:crypto';
 import { PassThrough, Readable } from 'node:stream';
-import { AGENT_ACCESS_ACP_SESSION_ACTION, AGENT_ACCESS_PLUGIN_ID } from '@clowder-ai/agent-contract';
+import {
+  AGENT_ACCESS_ACP_PROCESS_ACTION,
+  AGENT_ACCESS_ACP_SESSION_ACTION,
+  AGENT_ACCESS_PLUGIN_ID,
+} from '@clowder-ai/agent-contract';
 import type { AgentAccessAcpProcessTermination, AgentAccessAcpSessionOperation } from '@clowder-ai/agent-contract/acp';
+import type { AgentAccessDshTurnOperation } from '@clowder-ai/agent-contract/dsh-turn';
 import { z } from 'zod';
 import {
   ACP_CHILD_SHUTDOWN_GRACE_MS,
@@ -33,6 +38,8 @@ export function createAgentAccessAcpProcess(
     cwd: string,
     launch: () => {
       child: AcpChildConnection;
+      ready?: Promise<void>;
+      antigravityDiagnostics?: boolean;
       stdout: Readable;
       stderr?: Readable;
       writeApprovedLine: (line: string) => Promise<void>;
@@ -46,7 +53,7 @@ export function createAgentAccessAcpProcess(
     const pluginInstanceId = selected.pluginInstanceId;
     const signal = runtime.nativeActions.activationSignal(pluginInstanceId);
     signal.throwIfAborted();
-    const { child, stdout, stderr, writeApprovedLine, onCapacity } = launch();
+    const { child, ready, stdout, stderr, writeApprovedLine, onCapacity, antigravityDiagnostics } = launch();
     const processId = randomUUID();
     const lifecycle = new PassThrough({ objectMode: true });
     let shutdown: Promise<void> | undefined;
@@ -69,14 +76,17 @@ export function createAgentAccessAcpProcess(
 
     const invoke = (operation: 'initialize' | 'close') => {
       signal.throwIfAborted();
-      return runtime.invoke(pluginInstanceId, 'acpProcess', { operation, processId });
+      return runtime.invoke(pluginInstanceId, AGENT_ACCESS_ACP_PROCESS_ACTION, { operation, processId });
     };
     try {
-      const returned = await runtime.invoke(pluginInstanceId, 'acpProcess', {
+      if (ready) await ready;
+      signal.throwIfAborted();
+      const returned = await runtime.invoke(pluginInstanceId, AGENT_ACCESS_ACP_PROCESS_ACTION, {
         operation: 'open',
         processId,
         pid: child.pid,
         cwd,
+        antigravityDiagnostics,
         stdout,
         stderr,
         lifecycle,
@@ -107,6 +117,10 @@ export function createAgentAccessAcpProcess(
       async session(operation: BoundSessionOperation) {
         signal.throwIfAborted();
         return runtime.invoke(pluginInstanceId, AGENT_ACCESS_ACP_SESSION_ACTION, { ...operation, processId });
+      },
+      async dshTurn(operation: BoundSessionOperation<AgentAccessDshTurnOperation>) {
+        signal.throwIfAborted();
+        return runtime.invoke(pluginInstanceId, 'acpDshTurn', { ...operation, processId });
       },
       async close() {
         try {

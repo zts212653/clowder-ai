@@ -16,6 +16,7 @@ export interface AcpWriteApproval {
   params: Readonly<Record<string, unknown>>;
   mcp?: ReadonlyMap<string, AcpMcpServer>;
   prompt?: { ref: string; content: readonly AcpContentBlock[] };
+  text?: { ref: string; content: string };
   onAccepted?: () => void;
 }
 
@@ -31,10 +32,11 @@ export function createAcpWriteApprovalPort(write: (line: string) => Promise<void
     },
     async writeApprovedLine(line: string) {
       const request = requestSchema.parse(JSON.parse(line));
-      const { mcpServers, prompt, ...coordinates } = request.params;
+      const { mcpServers, prompt, text, ...coordinates } = request.params;
       const accepted = [...pending].find((approval) => {
         if (approval.method !== request.method || !isDeepStrictEqual(approval.params, coordinates)) return false;
         if (approval.prompt && !isDeepStrictEqual(prompt, [{ type: 'text', text: approval.prompt.ref }])) return false;
+        if (approval.text ? text !== approval.text.ref : text !== undefined) return false;
         return (
           (approval.mcp !== undefined) === (mcpServers !== undefined) &&
           (approval.prompt !== undefined) === (prompt !== undefined)
@@ -65,6 +67,7 @@ export function createAcpWriteApprovalPort(write: (line: string) => Promise<void
             ...accepted.params,
             ...(servers ? { mcpServers: servers } : {}),
             ...(accepted.prompt ? { prompt: accepted.prompt.content } : {}),
+            ...(accepted.text ? { text: accepted.text.content } : {}),
           },
         }) + '\n',
       );
