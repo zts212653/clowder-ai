@@ -37,10 +37,18 @@ function bindPluginSpaces() {
   function opOf(plugin) {
     return ops[plugin.pluginId] || plugin.operation;
   }
+  // A package icon is read from the installed package; a plugin that isn't installed shows the plain plugin icon
+  // (reading its icon would make the server fetch and verify the catalog package).
+  function packageIcon(plugin) {
+    return plugin.artifact === 'installed' ? plugin.icon : undefined;
+  }
   pdlReads('who').plugins = function () {
     return Object.fromEntries(
       pluginRows().map(function (plugin) {
-        return [plugin.pluginId, { name: plugin.displayName, icon: plugin.icon, instanceId: plugin.pluginInstanceId }];
+        return [
+          plugin.pluginId,
+          { name: plugin.displayName, icon: packageIcon(plugin), instanceId: plugin.pluginInstanceId },
+        ];
       }),
     );
   };
@@ -334,7 +342,7 @@ function bindPluginSpaces() {
                 ? 'error'
                 : 'loading',
             name: chosen.displayName,
-            icon: chosen.icon,
+            icon: packageIcon(chosen),
             publisher: chosen.publisher,
             repositoryName:
               chosen.source.kind === 'git' && chosen.source.marketplace ? chosen.source.marketplace.sourceId : '',
@@ -544,7 +552,7 @@ function bindPluginSpaces() {
       update: need === 'update',
       needStatus: !!need && need !== 'update',
       key: plugin.pluginId,
-      icon: plugin.icon,
+      icon: packageIcon(plugin),
       name: plugin.displayName,
       desc: description(plugin),
       pub: plugin.publisher,
