@@ -214,6 +214,9 @@ export interface DormantPluginRuntimeCompositionOptions {
     readonly provider: MemoryPluginHost;
     readonly evidenceDbPath: string;
     readonly ephemeral?: boolean;
+    readonly indexSources?: (
+      assertActivation: () => void,
+    ) => ReturnType<typeof import('../cats/services/session/memory-index-sources.js').createMemoryIndexSources>;
   };
   readonly agentSessionProviders?: (
     packages: VerifiedPluginPackageLocator,
@@ -555,16 +558,17 @@ export function createDormantPluginRuntimeComposition(
       if (!options.memory || !isAdmittedMemoryPackage(record)) return undefined;
       return {
         memoryDatabase: { canonicalPath: options.memory.evidenceDbPath, storageFormat: 1 },
-        ...(options.threadStore
+        ...(ownerChatSource
           ? {
               memorySource: createMemorySourceHost({
                 pluginInstanceId,
                 messageStore: options.messageStore,
-                threadStore: options.threadStore,
+                threadStore: ownerChatSource.threads,
                 assertActivation,
               }),
             }
           : {}),
+        memoryIndexSources: options.memory.indexSources?.(assertActivation),
         ...(memoryKvBacking && ownerChatSource
           ? {
               memoryThreadKv: createMemoryThreadKvPort({

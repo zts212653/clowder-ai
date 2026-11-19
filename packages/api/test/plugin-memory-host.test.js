@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { memoryDescriptor } from '@clowder-ai/plugin-memory-contract';
 import Fastify from 'fastify';
+import { createMemoryIndexSources } from '../dist/domains/cats/services/session/memory-index-sources.js';
 import { MessageStore } from '../dist/domains/cats/services/stores/ports/MessageStore.js';
 import { ThreadStore } from '../dist/domains/cats/services/stores/ports/ThreadStore.js';
 import { currentPluginCallContext, withPluginCallContext } from '../dist/domains/plugin/carrier/plugin-call-context.js';
@@ -148,4 +149,32 @@ test('memory source coordinates and public reply policy are bound to the current
   assert.equal(source.message?.content, 'A source for memory');
   assert.equal(source.message?.metadata, undefined);
   assert.deepEqual(source.trigger, { status: 'scoped', messageId: message.id, threadId: thread.id });
+});
+
+test('background indexing receives the configured owner’s canonical thread evidence', async () => {
+  const messageStore = new MessageStore();
+  const threadStore = new ThreadStore();
+  const thread = threadStore.create('custom-owner', 'Owned project');
+  const game = threadStore.create('custom-owner', 'Game', 'games/example');
+  const other = threadStore.create('default-user', 'Other owner');
+  const seen = messageStore.append({
+    from: { kind: 'user', userId: 'custom-owner' },
+    userId: 'custom-owner',
+    threadId: thread.id,
+    content: 'Published source',
+    mentions: [],
+    timestamp: 100,
+  });
+  const source = createMemoryIndexSources({ messageStore, threadStore, ownerUserId: 'custom-owner' });
+  assert.deepEqual(
+    (await source.listThreads()).map(({ id }) => id),
+    [thread.id],
+  );
+  assert.deepEqual(await source.listExcludedThreadIds(), [game.id]);
+  assert.deepEqual(
+    (await source.listMessages(thread.id)).map(({ id }) => id),
+    [seen.id],
+  );
+  assert.deepEqual(await source.listMessages(other.id), []);
+  assert.deepEqual(await source.listMessages(game.id), []);
 });

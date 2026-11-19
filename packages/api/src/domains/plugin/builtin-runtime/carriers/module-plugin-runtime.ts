@@ -101,6 +101,9 @@ export interface ModulePluginHostShape {
   readonly memoryDatabase?: { readonly canonicalPath: string; readonly storageFormat: 1 };
   readonly memoryThreadKv?: import('../../host-surface/memory-thread-kv.js').MemoryThreadKvPort;
   readonly memorySource?: ReturnType<typeof import('../../host-surface/memory-source-host.js').createMemorySourceHost>;
+  readonly memoryIndexSources?: ReturnType<
+    typeof import('../../../cats/services/session/memory-index-sources.js').createMemoryIndexSources
+  >;
   readonly threads: PluginThreadHost;
   readonly messaging: PluginMessagingHost;
   readonly streams: PluginStreams;
@@ -145,7 +148,9 @@ export interface ModulePluginRuntimeOptions {
     packageRecord: ExecutablePluginPackageRecord,
     pluginInstanceId: string,
     assertActivation: () => void,
-  ) => Pick<ModulePluginHostShape, 'memoryDatabase' | 'memoryThreadKv' | 'memorySource'> | undefined;
+  ) =>
+    | Pick<ModulePluginHostShape, 'memoryDatabase' | 'memoryThreadKv' | 'memorySource' | 'memoryIndexSources'>
+    | undefined;
   readonly taskStore?: ITaskStore;
   readonly taskOwnerUserId?: string;
   readonly taskThreadStore?: Pick<IThreadStore, 'get'> & Partial<Pick<IThreadStore, 'ensureOwnedThread'>>;

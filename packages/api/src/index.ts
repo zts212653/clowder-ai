@@ -1555,6 +1555,10 @@ async function initializeApi(
   app.log.info(
     `[api] F102: embed mode = ${resolvedEmbedMode} (EMBED_MODE=${process.env.EMBED_MODE ?? '(unset)'}, service.enabled=${embedSvcEnabled})`,
   );
+  const { createMemoryIndexSources } = await import('./domains/cats/services/session/memory-index-sources.js');
+  const makeMemoryIndexSources = (assertActivation?: () => void) =>
+    createMemoryIndexSources({ messageStore, threadStore, ownerUserId: privateUserId, assertActivation });
+  const memoryIndexSources = makeMemoryIndexSources();
   const memoryServices = await createMemoryServices({
     type: 'sqlite',
     readDiagnostics,
@@ -1566,31 +1570,9 @@ async function initializeApi(
     transcriptDataDir, // reuse the same resolved path as Writer/Reader (line 282)
     embed: { embedMode: resolvedEmbedMode },
     privateUserId,
-    // Phase E-2: message passage indexing — provide a callback that reads thread messages
-    messageListFn: (threadId: string, limit?: number) =>
-      messageStore.getThreadEvidenceProjection(threadId, limit ?? 2000, privateUserId),
-    // Phase E-1: thread summary indexing — provide a callback that lists all threads
-    threadListFn: async () => {
-      const threads = await threadStore.list('default-user');
-      return threads
-        .filter((t) => !t.projectPath.startsWith('games/'))
-        .map((t) => ({
-          id: t.id,
-          title: t.title,
-          participants: t.participants as string[],
-          threadMemory: t.threadMemory ? { summary: t.threadMemory.summary } : null,
-          lastActiveAt: t.lastActiveAt,
-          featureIds: t.backlogItemId ? [t.backlogItemId] : undefined,
-        }));
-    },
-    excludeThreadIdsFn: async () => {
-      const allThreads = await threadStore.list('default-user');
-      const excluded = new Set<string>();
-      for (const t of allThreads) {
-        if (t.projectPath.startsWith('games/')) excluded.add(t.id);
-      }
-      return excluded;
-    },
+    messageListFn: memoryIndexSources.listMessages,
+    threadListFn: memoryIndexSources.listThreads,
+    excludeThreadIdsFn: async () => new Set(await memoryIndexSources.listExcludedThreadIds()),
   });
   const { MessageSearchService } = await import('./domains/memory/MessageSearchService.js');
   const { MessageSearchAnswerPublicationStore } = await import(
@@ -5546,7 +5528,12 @@ async function initializeApi(
   const collectiveArtifactOwnerHolder: import('./domains/plugin/host-surface/collective-artifact-owner.js').CollectiveArtifactOwnerHolder =
     {};
   const pluginRuntime = cloudConversations.createRuntime({
-    memory: { provider: memoryProvider, evidenceDbPath, ephemeral: process.env.MEMORY_STORE === '1' },
+    memory: {
+      provider: memoryProvider,
+      evidenceDbPath,
+      ephemeral: process.env.MEMORY_STORE === '1',
+      indexSources: makeMemoryIndexSources,
+    },
     agentSessionProviders: (packages, configuration) =>
       declaredAgentSessionProviders({
         configuration,

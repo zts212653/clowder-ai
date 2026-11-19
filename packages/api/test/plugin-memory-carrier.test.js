@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
@@ -88,6 +88,7 @@ test('the Manager updates a memory worker and restores the previous worker with 
       archiveUrl,
       presentation: { displayName: 'Memory', publisher: 'Clowder AI' },
     });
+    return archive;
   }
   const catalog = { snapshot: async () => ({ entries: [published], status: 'fresh', checkedAt: 100 }) };
   const managerRuntime = createPluginManagerRuntimeComposition({
@@ -117,7 +118,7 @@ test('the Manager updates a memory worker and restores the previous worker with 
     assert.equal(response.statusCode, 201, response.body);
   };
 
-  await publish('0.1.0');
+  const a = await publish('0.1.0');
   const first = await prepareHostInitialPlugins({
     runtime,
     managerRuntime,
@@ -152,4 +153,23 @@ test('the Manager updates a memory worker and restores the previous worker with 
   assert.equal(restored.installedVersion, '0.2.0');
   assert.equal(restored.live, 'running');
   assert.equal(await read('after'), 'B');
+
+  const path = join(projectRoot, 'verified-a.tgz');
+  await writeFile(path, a.bytes);
+  const source = { kind: 'local-archive', path };
+  let replacement;
+  await assert.rejects(manager.install({ source }), (error) => {
+    assert.equal(error.code, 'ARCHIVE_REPLACEMENT_CONFIRMATION_REQUIRED');
+    replacement = error.replacement.confirmation;
+    assert.equal(replacement.candidatePackageDigest, a.integrity);
+    assert.equal(replacement.pluginInstanceId, installed.pluginInstanceId);
+    return true;
+  });
+  await manager.install({ source, replacement });
+  const rolledBack = (await manager.get(pluginId)).plugin;
+  assert.equal(rolledBack.installedVersion, '0.1.0');
+  assert.equal(rolledBack.live, 'running');
+  assert.equal(await read('before'), 'A');
+  assert.equal(await read('after'), 'B');
+  await write('after-rollback', 'A again');
 });
