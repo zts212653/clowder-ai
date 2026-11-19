@@ -64,6 +64,8 @@ const ALLOWLIST = new Map([
   ['INIT_CWD', 'Package-manager metadata injected by npm/pnpm; original invocation directory'],
   ['COGVIDEO_API_KEY', 'F139 MediaHub CogVideoX provider — mcp-server-local credential'],
   ['CLAUDE_BIN', 'F254 developer-only live fixture executable override; not a runtime setting'],
+  ['ANTHROPIC_MODEL', 'Claude Code model default inherited by the read-only model catalog probe'],
+  ['CLAUDE_CODE_EFFORT_LEVEL', 'Claude Code effort default inherited by the read-only model catalog probe'],
   ['CODEX_BIN', 'F254 developer-only live fixture executable override; not a runtime setting'],
   ['F254_CLAUDE_MODEL', 'F254 developer-only Claude capability fixture model override; not a runtime setting'],
   ['F254_CODEX_TRANSPORT', 'F254 developer-only Codex fixture transport selector; not a runtime setting'],

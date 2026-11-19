@@ -79,6 +79,8 @@ test('role commit compares physical legacy bytes and inherits MCP blocks before 
   const breed = legacy.breeds.find((entry) => entry.id === 'maine-coon');
   breed.variants = breed.variants.filter((entry) => entry.id === breed.defaultVariantId);
   breed.variants[0].source = 'legacy';
+  const promoted = template.breeds.find((entry) => entry.id === 'opus-47');
+  breed.variants.push({ ...promoted.variants[0], id: 'legacy-opus-47' });
   legacy.breeds = [breed];
   legacy.roster = { codex: legacy.roster.codex };
   const catalogPath = writeCatCatalog(root, legacy);

@@ -742,9 +742,7 @@ export function projectRoleCatalog(storedSource: string | null, template: CatCaf
     dirty = true;
   }
   dirty = ensureOwnerInRoster(catalog) || dirty;
-  const existingCatIds = collectRuntimeIdentityOccupancy(
-    original.breeds as unknown as Record<string, unknown>[],
-  ).catIds;
+  const existingCatIds = collectRuntimeIdentityOccupancy(catalog.breeds as unknown as Record<string, unknown>[]).catIds;
   const backfilledCatIds: string[] = [];
   if (template && !isUserSelectedCatalog(catalog)) {
     if (backfill) backfilledCatIds.push(...addTemplateBreeds(catalog, template));
