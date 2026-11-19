@@ -65,7 +65,7 @@ export async function openReviewPanel(page, panel) {
 /** Read the real composer's persisted attachment; no test-side source/coordinate reconstruction. */
 export async function imageChatAttachment(page) {
   return page.evaluate(() => {
-    const entries = JSON.parse(sessionStorage.getItem('cat-cafe:thread-context-attachment-drafts') || '[]');
+    const entries = JSON.parse(localStorage.getItem('cat-cafe:thread-context-attachment-drafts') || '[]');
     return entries.flatMap(([, attachments]) => attachments).find((item) => item.kind === 'media') ?? null;
   });
 }
@@ -73,7 +73,7 @@ export async function imageChatAttachment(page) {
 /** Legacy discussion is fixture history, not a replacement for the current image-to-Chat user action. */
 export async function seedRetainedImageAnnotation(page, host, reviewId, body, annotationId = 'retained-image-comment') {
   await page.waitForFunction(() => {
-    const entries = JSON.parse(sessionStorage.getItem('cat-cafe:thread-context-attachment-drafts') || '[]');
+    const entries = JSON.parse(localStorage.getItem('cat-cafe:thread-context-attachment-drafts') || '[]');
     return entries
       .flatMap(([, attachments]) => attachments)
       .some((item) => item.kind === 'media' && item.selections.length > 0);

@@ -1,0 +1,65 @@
+/* Host coordinates only; the old compiled stylesheet remains in v2.css. */
+.v2-shell:has([data-console-panel="settings-nav"]) { --nav-w0:232px; }
+.v2-shell .v2-settings-sidebar { min-height:0; height:100%; }
+.v2-shell .v2-settings-content { height:100%; }
+.v2-shell .v2-memory-page, .v2-shell .v2-memory-catalog, .v2-shell .v2-signals, .v2-shell .v2-mission { min-width:0; height:100%; }
+.v2-shell .v2-settings-sidebar .group > * + *::before { content:none; }
+.v2-shell .v2-settings-content .group > * + *::before { content:none; }
+.v2-collection-overview { display:block; }
+.v2-shell details.v2-collection > summary { list-style:none; }
+.v2-shell details.v2-collection > summary::-webkit-details-marker { display:none; }
+.v2-shell details.v2-collection:not([open]) > .v2-collection-overview { display:block; }
+.v2-shell .v2-confirm-dialog { display:block; position:relative; width:100%; max-width:384px; margin:0 16px; padding:24px; border:0; border-radius:12px; color:var(--cafe-text); background:var(--cafe-surface); box-shadow:0 20px 25px -5px rgb(0 0 0 / .1),0 8px 10px -6px rgb(0 0 0 / .1); gap:0; }
+.v2-shell .v2-confirm-dialog.v2-dialog-wide { max-width:768px; }
+.v2-shell .v2-confirm-dialog > .v2-dialog-body { display:block; padding:0; margin:0; max-height:70vh; overflow-y:auto; }
+.v2-shell .v2-confirm-dialog > .acts { display:flex; justify-content:flex-end; gap:8px; padding:0; margin-top:16px; border:0; }
+.v2-shell .v2-confirm-dialog input, .v2-shell .v2-confirm-dialog select, .v2-shell .v2-confirm-dialog textarea { box-sizing:border-box; }
+.v2-help { display:inline-flex; width:24px; height:24px; align-items:center; justify-content:center; border:1px solid var(--shell-hairline); border-radius:50%; font-size:12px; font-weight:400; color:var(--shell-muted); }
+.v2-shell .v2-toast { display:block; background:var(--cafe-surface); padding:10px 12px; border:1px solid var(--cafe-border-subtle); border-left-width:4px; border-left-color:var(--semantic-warning); border-radius:8px; }
+.v2-shell .v2-mission summary, .v2-shell .v2-memory-catalog summary { list-style:none; }
+.v2-shell .v2-mission summary::-webkit-details-marker, .v2-shell .v2-memory-catalog summary::-webkit-details-marker { display:none; }
+/* CollectionCatalog keeps its overview/actions visible while only documents fold. */
+.v2-shell .v2-collection-card { display:flex; flex-direction:column; }
+.v2-shell .v2-collection-card details.v2-collection { display:contents; }
+.v2-shell .v2-collection-card details.v2-collection > summary { order:0; }
+.v2-shell .v2-collection-card > .v2-collection-overview { order:1; }
+.v2-shell .v2-collection-card > .v2-collection-actions { order:2; }
+.v2-shell .v2-collection-card .v2-collection-documents { order:3; }
+.v2-shell details.v2-collection[open] .v2-collection-arrow { transform:rotate(90deg); }
+.v2-shell .v2-confirm-dialog.v2-dialog-viewport { height:calc(100dvh - 48px); max-width:calc(100vw - 48px); }
+.v2-shell .v2-confirm-dialog.v2-dialog-fill, .v2-shell .v2-confirm-dialog.v2-dialog-full { width:calc(100vw - 48px); max-width:calc(100vw - 48px); }
+.v2-shell .v2-confirm-dialog.v2-dialog-viewport > .v2-dialog-body { height:calc(100% - 48px); max-height:none; }
+.v2-shell .v2-confirm-dialog > header { flex:none; padding:0; border:0; }
+[data-shell="v2"] #scrim { background:var(--console-overlay-backdrop); backdrop-filter:blur(4px); }
+[data-shell="v2"] .ui-tip { border:1px solid var(--shell-hairline); border-radius:12px; background:var(--shell-popover-bg); color:var(--shell-ink); padding:12px; font-size:12px; line-height:1.6; box-shadow:0 10px 30px rgba(43,33,26,.12); }
+.v2-shell .v2-config-color { width:36px; height:28px; border:0; padding:0; background:transparent; }
+.v2-shell .v2-dependency-stage { background-image:radial-gradient(var(--console-border-soft) 1px, transparent 1px); background-size:20px 20px; }
+.v2-shell .v2-confirm-dialog .v2-dialog-body > :last-child { margin-bottom:0; }
+/* ArtworkPreviewMedia / ReviewCanvasAnnotations; coordinates remain media pixels. */
+.v2-shell .media-content { position:relative; display:flex; align-items:center; justify-content:center; overflow:hidden; min-width:0; min-height:0; }
+.v2-shell .media-content > :is(img,video,audio) { max-width:100%; max-height:100%; object-fit:contain; }
+.v2-shell .media-content .media-marks { position:absolute; inset:0; width:100%; height:100%; fill:none; stroke:var(--cafe-accent); stroke-width:2; pointer-events:none; }
+.v2-shell .media-content .media-mark { position:absolute; left:calc(var(--mark-x) * var(--media-scale-x,1px)); top:calc(var(--mark-y) * var(--media-scale-y,1px)); transform:translate(-50%,-50%); }
+.v2-shell .lr-node[data-open="false"] > .lr-kids { display:none; }
+.v2-shell .ws-split { display:grid; min-height:0; flex:1; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:8px; }
+.v2-shell .ws-pane { display:flex; flex-direction:column; overflow:hidden; min-height:0; border:1px solid var(--shell-hairline); border-radius:8px; background:var(--console-card-bg); }
+.v2-shell .annotation-quote { color:inherit; background:var(--opus-bg); border-bottom:1px solid var(--opus-light); }
+.v2-shell .annotation-mark { vertical-align:middle; margin-left:4px; }
+
+/* F051 quota bars (shell/quota-pin): four cat-family anchors, same OKLCH ring derivation as upstream cat-persona-tokens.css */
+:root {
+  --family-ragdoll-ring: oklch(0.55 calc(0.105 * 1.1) 304.9);
+  --family-mainecoon-ring: oklch(0.55 calc(0.095 * 1.1) 143.9);
+  --family-siamese-ring: oklch(0.55 calc(0.11 * 1.1) 247.5);
+  --family-turkish-van-ring: oklch(0.58 calc(0.12 * 1.05) 59.6);
+  --quota-bar-danger: oklch(0.57 0.182 24.5);
+}
+[data-theme="dark"] {
+  --family-ragdoll-ring: oklch(0.7 0.105 304.9);
+  --family-mainecoon-ring: oklch(0.7 0.095 143.9);
+  --family-siamese-ring: oklch(0.7 0.11 247.5);
+  --family-turkish-van-ring: oklch(0.72 0.12 59.6);
+  --quota-bar-danger: oklch(0.7 0.175 24.5);
+}
+/* shell/quota-pin/QuotaRingPopover: w-[340px], content padded inside the shared popover shell */
+.v2-popover[data-page="quota"] { width:340px; padding:12px; gap:10px; }

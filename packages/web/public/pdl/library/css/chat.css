@@ -1,0 +1,86 @@
+/* 边界：一个含义一个组件、不为接口定制、不按位置推导样式 */
+/* 对话：消息导航、消息流间距、正文、表格、输入框 */
+/* ── Chat ──────────────────────────────── */
+.chat-head { height: var(--row-h); flex-shrink: 0; display: flex; align-items: center; gap: var(--sp-s); --cells-pad: var(--gutter-panel); }   /* 区域标题行的内边距和侧栏、工作台的标题行同一个 token（--gutter-panel）；它是一排格子，内边距只走 --cells-pad */
+.chat-title { flex: 1; min-width: 0; overflow: clip; white-space: nowrap; text-overflow: ellipsis; }
+.stream { flex: 1; min-height: 0; }
+/* 消息导航（刻度条）占对话主窗口最右的一个网格单位：它在的时候，消息流右边的边距至少是一个单位（--g-edge），内容不伸进这一格（刻度不压住胶囊）。
+   消息流在自己身上按容器宽重算网格（见上面的容器网格）；内容放得下就居中（--g-r = 两边各剩的一半），放不下时右边留出这一格、左边是容器的边距 */
+.chat:has(> .cafe-mini, > .vw-view > .cafe-mini) > .stream { --g-edge: var(--g-mod); }
+.chat:has(> .rt-stripe) > .stream { --g-edge: calc(3 * var(--g-mod)); }   /* 固定的菜单条（工作台收起时）占右侧两列 + 消息导航一列：正文按同一网格边距让位，不伸到条下面 */
+.stream-inner { --g-r: max(var(--g-pad), var(--g-edge, 0px), (100cqi - var(--g-w)) / 2); padding: var(--sp-l) var(--g-r) var(--msg-gap) calc(100cqi - var(--g-w) - var(--g-r)); display: flex; flex-direction: column; gap: var(--msg-gap); }
+/* 消息流：消息之间的间距属于流本身，不管画在对话区还是剧场 */
+.stream-list { display: flex; flex-direction: column; gap: var(--msg-gap); }
+.day { text-align: center; }
+.msg { display: grid; grid-template-columns: var(--av-m) minmax(0, 1fr); column-gap: var(--sp-m); row-gap: var(--sp-xs); anchor-scope: --msg-body; }   /* 每条消息一个锚点作用域：消息工具条锚在自己的正文上（parts.css） */
+.msg-head { grid-column: 2; display: flex; align-items: baseline; gap: var(--sp-s); flex-wrap: wrap; }
+.msg-head b { font-weight: 500; color: var(--fg-strong); }
+.msg > .avatar { grid-row: 1 / span 4; }
+.msg-body { grid-column: 2; }
+:is(.msg-body, .md) p { margin: 0 0 var(--sp-s); }
+:is(.msg-body, .md) p:last-child { margin-bottom: 0; }
+:is(.msg-body, .md) code { font-family: var(--font-mono); font-size: .88em; color: var(--fg-strong); }
+.msg-body .cmd { background: var(--bg-field); padding: var(--sp-hairline) var(--sp-xs); border-radius: var(--r-xs); }
+/* .md：Markdown 正文（组件库一种）：消息正文和作品阅读、说明都用这一套；文字的样子是文字角色 prose（js/library.js） */
+:is(.msg-body, .md) h3 { font-size: var(--fs-xl); font-weight: 600; margin: var(--sp-l) 0 var(--sp-xs); color: var(--fg-strong); }
+:is(.msg-body, .md) h4 { font-size: var(--fs-xl); font-weight: 500; margin: var(--sp-m) 0 var(--sp-xs); color: var(--fg-strong); }
+:is(.msg-body, .md) h3:first-child, :is(.msg-body, .md) h4:first-child { margin-top: 0; }
+:is(.msg-body, .md) ul, :is(.msg-body, .md) ol { margin: 0 0 var(--sp-s); padding-left: var(--sp-xl); }
+:is(.msg-body, .md) li { margin: var(--sp-hair) 0; }
+:is(.msg-body, .md) li > ul, :is(.msg-body, .md) li > ol { margin: var(--sp-hair) 0 0; }
+:is(.msg-body, .md) li::marker { color: var(--fg-faint); }
+:is(.msg-body, .md) pre { margin: 0 0 var(--sp-m); padding: var(--sp-s) var(--sp-m); border-radius: var(--r-m); background: var(--bg-group); overflow-x: auto; font: var(--fs-m)/1.65 var(--font-mono); color: var(--fg-strong); }
+:is(.msg-body, .md) pre code { font-size: inherit; color: inherit; }
+:is(.msg-body, .md) pre .k { color: var(--accent-fg); }
+:is(.msg-body, .md) pre .s { color: var(--ok); }
+:is(.msg-body, .md) pre .c { color: var(--fg-faint); }
+/* 消息里的表格是内容：占满正文宽度，单元格换行，不横向溢出、不被裁掉 */
+:is(.msg-body, .md) table { display: table; table-layout: auto; min-width: 0; width: 100%; border-collapse: collapse; margin: 0 0 var(--sp-m); font-size: var(--fs-l); }
+:is(.msg-body, .md) th, :is(.msg-body, .md) td, :is(.msg-body, .md) tbody tr td { height: auto; padding: var(--sp-xs) var(--sp-l) var(--sp-xs) 0; text-align: left; vertical-align: top; white-space: normal; overflow-wrap: anywhere; border-radius: 0; }
+:is(.msg-body, .md) tbody tr { cursor: default; }
+:is(.msg-body, .md) tbody tr:hover td { background: none; }
+:is(.msg-body, .md) blockquote { margin: 0 0 var(--sp-m); padding: var(--sp-hair) 0 var(--sp-hair) var(--sp-m); box-shadow: inset 2px 0 var(--line-strong); color: var(--fg-muted); }
+:is(.msg-body, .md) a, .mention { color: var(--mention-c, var(--accent-fg)); text-decoration: none; font-weight: 500; }   /* 有效的 @ 带着那个成员的身份色（--mention-c 只写在 @ 上），链接没有 */
+.msg-meta { grid-column: 2; display: flex; align-items: center; gap: var(--sp-xs); min-width: 0; }
+.msg-meta-start { display: block; min-width: 0; overflow: clip; white-space: nowrap; text-overflow: ellipsis; }
+.msg-meta-start > .sep { margin-inline: var(--sp-xs); }
+.msg-meta-end { display: inline-flex; align-items: center; gap: var(--sp-xs); flex: none; white-space: nowrap; }
+.msg-meta > .grow { flex: 1; min-width: var(--sp-s); }   /* 这一行：左边原地展开，右边打开工作台 */
+.meta-btn { border: 0; background: none; padding: var(--sp-hair) 0; border-radius: var(--r-xs); cursor: pointer; display: inline-block; vertical-align: middle; max-width: 100%; overflow: clip; text-overflow: ellipsis; white-space: nowrap; }
+.meta-btn > :is(.ic, .vw-ic) { display: inline-block; vertical-align: middle; margin-inline-start: var(--sp-xs); }
+.meta-btn > :is(.ic, .vw-ic):first-child { margin-inline-start: 0; margin-inline-end: var(--sp-xs); }
+.msg-meta .err { color: var(--warn); }
+.bubble { background: var(--bg-bubble); border-radius: var(--r-xl); padding: var(--sp-s) var(--sp-m); max-width: min(var(--span-8), 85%); min-width: 0; overflow-wrap: anywhere; }   /* 长链接、长 hash 在字符间折行，不伸出气泡（和 .cat-bubble 一样） */
+.letter { grid-column: 2; background: var(--bg-group); border-radius: var(--r-l); padding: var(--sp-m) var(--sp-l); display: flex; flex-direction: column; gap: var(--sp-s); }
+.clamp { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.brief { align-self: center; width: var(--span-9); }
+.brief > button { width: 100%; border: 0; background: none; display: flex; align-items: center; gap: var(--sp-s); color: var(--fg-muted); font-size: var(--fs-s); cursor: pointer; padding: var(--sp-xs) var(--sp-s); border-radius: var(--r-s); justify-content: center; }
+.brief > button:hover { background: var(--bg-hover); color: var(--fg-strong); }
+.brief dl { margin: var(--sp-xs) 0 0; background: var(--bg-group); border-radius: var(--r-l); padding: var(--sp-m) var(--sp-l); display: grid; grid-template-columns: calc(16 * var(--unit)) minmax(0, 1fr); gap: var(--sp-xs) var(--sp-m); font-size: var(--fs-m); }
+.brief dt { color: var(--fg-muted); }
+.brief dd { margin: 0; color: var(--fg-strong); overflow-wrap: anywhere; }
+.typing { color: var(--fg-muted); font-size: var(--fs-l); }
+.composer:has(input:focus, textarea:focus) { box-shadow: 0 0 0 2px var(--focus); }
+.composer textarea { width: 100%; border: 0; background: none; resize: none; font: var(--fs-xl)/1.6 var(--font-text); color: var(--fg-strong); padding: var(--sp-m) var(--sp-xs) var(--sp-xs); min-height: var(--row-h); outline: none; }
+.composer textarea::placeholder { color: var(--fg-faint); }
+/* 按内容长高的输入框（grow）：浏览器按内容定高度，最少 / 最多几行只算内容区（内边距各处不同，不算进行数），再多就在框里滚动 */
+textarea[data-grow] { field-sizing: content; box-sizing: content-box; width: -webkit-fill-available; width: stretch; min-height: calc(var(--ta-rows-min) * 1lh); max-height: calc(var(--ta-rows-max) * 1lh); }
+.ta-wrap { position: relative; flex: 1 1 auto; min-width: 0; width: 100%; }   /* 包着输入框的一层：和原来的输入框一样占满所在的那一排 */
+.ta-wrap > textarea { position: relative; z-index: var(--z-raised); display: block; }
+.ta-ghost { position: absolute; inset: 0; overflow: hidden; pointer-events: none; color: var(--fg-faint); }   /* 同行补全：和输入框同一套排版的覆盖层 */
+.ta-ghost > .ta-typed { color: transparent; }
+[data-pops] .ta-ghost { visibility: hidden; }   /* 开着弹层时不显示补全：Tab 归弹层（引擎在根上标 data-pops） */
+.composer textarea:focus { outline: none; }   /* 输入区随输入控件聚焦画环，正文不再画一圈 */
+.target { display: inline-flex; align-items: center; gap: var(--sp-xs); height: var(--ctl-s); padding: 0 var(--sp-s); border: 0; background: none; border-radius: var(--r-s); cursor: pointer; }
+.target:hover { background: var(--bg-hover); }
+.send { width: var(--ctl-m); height: var(--ctl-m); flex-shrink: 0; border-radius: 50%; border: 0; display: grid; place-items: center; cursor: pointer; background: var(--accent); color: var(--fg-on-accent); }
+.send[disabled] { background: var(--bg-field); color: var(--fg-faint); cursor: default; }
+.send.stop { background: var(--fg-strong); color: var(--bg-group); }
+.greet { font-family: var(--font-display); line-height: 1.3; margin: 0; text-align: center; text-wrap: balance; }
+/* 伴随对话（插件） */
+.plugin-float { position: fixed; left: 68px; bottom: 16px; width: min(var(--span-5), calc(100vw - calc(21 * var(--unit)))); z-index: var(--z-float); background: var(--bg-raised); border-radius: var(--r-xl); box-shadow: var(--shadow-raised); display: flex; flex-direction: column; max-height: round(down, min(10 * var(--row-h-1), 100% - 2 * var(--sp-l)), var(--row-h-1)); }
+.plugin-float > .float-head { gap: var(--sp-s); padding: var(--sp-m) var(--sp-m) var(--sp-s) var(--sp-l); }   /* 插件小窗（面上不留边的那种）：头自己带内边距 */
+.float-head > .grow { flex: 1; }
+.plugin-float form { display: flex; gap: var(--sp-xs); padding: var(--sp-s); }
+.inbox { position: fixed; position-anchor: var(--u-anchor); position-visibility: always; position-area: right span-top; margin-inline-start: var(--sp-m); position-try-fallbacks: flip-block; z-index: var(--z-float); width: min(var(--span-5), calc(100vw - calc(21 * var(--unit)))); background: var(--bg-raised); border-radius: var(--r-xl); padding: var(--sp-s); }
+.inbox h4 { margin: var(--sp-xs) var(--sp-s) var(--sp-xs); font-size: var(--fs-m); font-weight: 500; color: var(--fg-muted); }

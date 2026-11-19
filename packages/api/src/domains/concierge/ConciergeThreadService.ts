@@ -19,7 +19,7 @@
 import type { CatId } from '@cat-cafe/shared';
 import type { RedisClient } from '@cat-cafe/shared/utils';
 import type { IThreadStore } from '../cats/services/stores/ports/ThreadStore.js';
-import type { IConciergeConfigStore } from './ConciergeConfigStore.js';
+import type { ReadCompanionSettings } from './companion-settings.js';
 import { ConciergeKeys } from './concierge-keys.js';
 
 export const CONCIERGE_THREAD_TITLE = '猫猫球 · 伴随对话';
@@ -33,11 +33,11 @@ export interface ConciergeThreadServiceDeps {
   /** Production: Redis client for per-user threadId persistence */
   redis?: RedisClient;
   /**
-   * F229 P1 routing fix: load ConciergeConfig to sync thread.preferredCats = [dutyCatProfileId].
+   * F229 P1 routing fix: read 猫猫球's settings to sync thread.preferredCats = [dutyCatProfileId].
    * When provided, getOrCreate() calls updatePreferredCats so routing targets the duty cat
    * on threads with no @mentions (standard AgentRouter preferredCats fallback path).
    */
-  conciergeConfigStore?: IConciergeConfigStore;
+  companionSettings?: ReadCompanionSettings;
 }
 
 export class ConciergeThreadService {
@@ -47,12 +47,12 @@ export class ConciergeThreadService {
   private readonly memIndex = new Map<string, string>();
   /** In-flight deduplication: concurrent getOrCreate for same userId share one Promise */
   private readonly inFlight = new Map<string, Promise<string>>();
-  private readonly conciergeConfigStore?: IConciergeConfigStore;
+  private readonly companionSettings?: ReadCompanionSettings;
 
   constructor(deps: ConciergeThreadServiceDeps) {
     this.threadStore = deps.threadStore;
     this.redis = deps.redis;
-    this.conciergeConfigStore = deps.conciergeConfigStore;
+    this.companionSettings = deps.companionSettings;
   }
 
   /**
@@ -128,11 +128,9 @@ export class ConciergeThreadService {
     // F229 P1 routing fix: sync preferredCats = [dutyCatProfileId] so routing targets the
     // duty cat on messages without @mention (standard AgentRouter preferredCats fallback path).
     // Called on every getOrCreate so config changes stay in sync.
-    if (this.conciergeConfigStore) {
-      const config = await this.conciergeConfigStore.get(userId);
-      if (config.dutyCatProfileId) {
-        await this.threadStore.updatePreferredCats(threadId, [config.dutyCatProfileId as CatId]);
-      }
+    if (this.companionSettings) {
+      const { dutyCatProfileId } = await this.companionSettings();
+      await this.threadStore.updatePreferredCats(threadId, [dutyCatProfileId as CatId]);
     }
 
     return threadId;
@@ -190,21 +188,6 @@ export class ConciergeThreadService {
     // including a user-chosen "未命名对话", belong to the existing conversation.
     if (current && (!current.title?.trim() || current.title === `前台猫·${userId}`))
       await this.threadStore.updateTitle(threadId, CONCIERGE_THREAD_TITLE);
-  }
-
-  /**
-   * Sync routing preference immediately after a duty-cat config change (P2 cloud fix).
-   * Without this, preferredCats on the thread stays stale until the next getOrCreate call,
-   * so the old cat answers without the concierge duty prompt after a dutyCatProfileId update.
-   * No-op when the thread does not exist yet — getOrCreate will sync on first call.
-   */
-  async syncPreferredCats(userId: string, dutyCatProfileId: CatId): Promise<void> {
-    const stored = await this.getStoredThreadId(userId);
-    if (!stored) return;
-    const thread = await this.threadStore.get(stored);
-    // Skip soft-deleted threads — routing sync is only meaningful on live threads
-    if (!thread || thread.deletedAt) return;
-    await this.threadStore.updatePreferredCats(stored, [dutyCatProfileId]);
   }
 
   // ---------------------------------------------------------------------------

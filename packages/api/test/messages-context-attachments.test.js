@@ -15,6 +15,40 @@ const attachment = {
 };
 
 describe('messages ContextAttachment request contract', () => {
+  it('retains a fixed work version and an execution leaf through the normal send and model projection', async () => {
+    const { serializeContextAttachmentsForPrompt } = await import(
+      '../dist/domains/cats/services/agents/routing/context-attachment-prompt.js'
+    );
+    const references = [
+      { v: 1, id: 'work-1', kind: 'work', workId: 'work:owner', version: 2, title: 'Owner work' },
+      {
+        v: 1,
+        id: 'cli-1',
+        kind: 'quote',
+        text: 'owner output',
+        selectionStart: 4,
+        selectionEnd: 16,
+        source: {
+          kind: 'cli_output',
+          threadId: 'thread-1',
+          messageId: 'reply-1',
+          toolUseId: 'call-1',
+          executionRef: 'run-1',
+          part: 'result',
+        },
+      },
+    ];
+    const input = sendMessageSchema.parse({ content: '', contextAttachments: JSON.stringify(references) });
+    const blocks = buildMessageContentBlocks(input.content, input.contextAttachments);
+    assert.deepEqual(
+      JSON.parse(JSON.stringify(blocks)).map((block) => block.attachment),
+      references,
+    );
+    assert.equal(
+      serializeContextAttachmentsForPrompt(blocks),
+      `<context_attachments>${JSON.stringify(references)}</context_attachments>`,
+    );
+  });
   it('accepts attachment-only sends and rejects a completely empty send', () => {
     const attachmentOnly = sendMessageSchema.safeParse({ content: '', contextAttachments: [attachment] });
     assert.equal(attachmentOnly.success, true);

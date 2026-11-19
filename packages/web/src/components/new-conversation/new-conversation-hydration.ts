@@ -1,8 +1,10 @@
 import type { ContextAttachment } from '@cat-cafe/shared';
 import { apiFetch } from '@/utils/api-client';
+import { getContextAttachmentDraft, threadImageDrafts } from '../thread-drafts';
 import type { PendingNewConversationIntent } from './first-message-admission';
 import { loadNewConversationIntent } from './new-conversation-intent-store';
 
+const DRAFT_THREAD_ID = 'default';
 function randomUuid(): string {
   if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
   const hex = (length: number) => Array.from({ length }, () => Math.floor(Math.random() * 16).toString(16)).join('');
@@ -28,17 +30,6 @@ async function readOwner(signal: AbortSignal): Promise<string> {
   return body.userId;
 }
 
-async function readCwd(signal: AbortSignal): Promise<string | undefined> {
-  try {
-    const response = await apiFetch('/api/projects/cwd', { signal });
-    if (!response.ok) return undefined;
-    const body = (await response.json()) as { path?: unknown };
-    return typeof body.path === 'string' && body.path.trim() ? body.path : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
 export interface HydratedAdmissionState {
   ownerUserId: string;
   intent: PendingNewConversationIntent;
@@ -47,12 +38,12 @@ export interface HydratedAdmissionState {
 }
 
 export async function hydrateAdmissionState(signal: AbortSignal): Promise<HydratedAdmissionState> {
-  const [ownerUserId, cwd] = await Promise.all([readOwner(signal), readCwd(signal)]);
+  const ownerUserId = await readOwner(signal);
   const stored = await loadNewConversationIntent(ownerUserId);
   return {
     ownerUserId,
-    intent: stored?.intent ?? freshIntent(cwd),
-    files: stored?.files ?? [],
-    contextAttachments: stored?.contextAttachments ?? [],
+    intent: stored?.intent ?? freshIntent(),
+    files: stored?.files ?? threadImageDrafts.get(DRAFT_THREAD_ID) ?? [],
+    contextAttachments: stored?.contextAttachments ?? [...getContextAttachmentDraft(DRAFT_THREAD_ID)],
   };
 }

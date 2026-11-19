@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import type { ContextAttachment, ProjectScreeningContextAttachment } from '@cat-cafe/shared';
 import { afterEach, beforeEach, expect, it } from 'vitest';
 import { useChatStore } from '@/stores/chatStore';

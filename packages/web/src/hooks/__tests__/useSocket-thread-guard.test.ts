@@ -56,7 +56,7 @@ const mockSetThreadTargetCats = vi.fn();
 const mockReplaceThreadTargetCats = vi.fn();
 const mockUpdateThreadCatStatus = vi.fn();
 const mockClearThreadActiveInvocation = vi.fn();
-const mockSetPendingPreviewAutoOpen = vi.fn();
+const mockSetWorkspacePreview = vi.fn();
 const mockQueueThreadPreview = vi.fn();
 const mockUpsertLifecycleMessage = vi.fn();
 const mockSetLastSeq = vi.fn();
@@ -140,7 +140,7 @@ vi.mock('@/stores/chatStore', () => {
     setCatStatus: mockSetCatStatus,
     activeInvocations: mockActiveInvocations,
     getThreadState: mockGetThreadState,
-    setPendingPreviewAutoOpen: mockSetPendingPreviewAutoOpen,
+    setWorkspacePreview: mockSetWorkspacePreview,
     queueThreadPreview: mockQueueThreadPreview,
     upsertLifecycleMessage: mockUpsertLifecycleMessage,
     setLastSeq: mockSetLastSeq,
@@ -183,14 +183,7 @@ vi.mock('@/utils/offline-store', () => ({
 import { configureDebug, invocationDebugConstants } from '@/debug/invocationEventDebug';
 import { previewVisiblePageAdmissionController } from '@/lib/preview-visible-page-admission-controller';
 // ── Import useSocket after mocks ──
-import { type OrchestrationFlow, useGuideStore } from '@/stores/guideStore';
 import { type SocketCallbacks, useSocket } from '../useSocket';
-
-const GUIDE_FLOW: OrchestrationFlow = {
-  id: 'add-member',
-  name: 'Add Member',
-  steps: [{ id: 'step-1', target: 'cats.add-member', tips: 'Add member', advance: 'click' }],
-};
 
 /**
  * Minimal wrapper component to mount the useSocket hook with controlled threadId.
@@ -218,6 +211,10 @@ type WindowDebugApi = {
   dump: (options?: { rawThreadId?: boolean }) => string;
 };
 
+const openPreview = (event: Event) => {
+  (event as CustomEvent<{ ran: boolean }>).detail.ran = true;
+};
+
 describe('useSocket thread guard (P1 regression: cross-thread event leakage)', () => {
   let container: HTMLDivElement;
   let root: Root;
@@ -233,6 +230,7 @@ describe('useSocket thread guard (P1 regression: cross-thread event leakage)', (
   });
 
   beforeEach(() => {
+    window.addEventListener('preview:auto-open', openPreview);
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
@@ -267,7 +265,7 @@ describe('useSocket thread guard (P1 regression: cross-thread event leakage)', (
     mockReplaceThreadTargetCats.mockClear();
     mockUpdateThreadCatStatus.mockClear();
     mockClearThreadActiveInvocation.mockClear();
-    mockSetPendingPreviewAutoOpen.mockClear();
+    mockSetWorkspacePreview.mockClear();
     mockQueueThreadPreview.mockClear();
     mockUpsertLifecycleMessage.mockClear();
     mockAddActiveInvocation.mockClear();
@@ -296,12 +294,12 @@ describe('useSocket thread guard (P1 regression: cross-thread event leakage)', (
     mockApiFetch.mockReset();
     mockApiFetch.mockRejectedValue(new Error('canonical queue unavailable in default fixture'));
     mockSaveThreadActiveState.mockClear();
-    useGuideStore.setState({ session: null, completionPersisted: false, completionFailed: false, pendingStart: null });
     // Clear all socket listeners from previous tests
     mockSocket.removeAllListeners();
   });
 
   afterEach(() => {
+    window.removeEventListener('preview:auto-open', openPreview);
     act(() => {
       root.unmount();
     });
@@ -309,7 +307,6 @@ describe('useSocket thread guard (P1 regression: cross-thread event leakage)', (
     window.sessionStorage.removeItem(invocationDebugConstants.STORAGE_KEY);
     configureDebug({ enabled: false });
     delete (window as typeof window & { __catCafeDebug?: unknown }).__catCafeDebug;
-    useGuideStore.setState({ session: null, completionPersisted: false, completionFailed: false, pendingStart: null });
     latestSocketControls = null;
   });
 
@@ -494,7 +491,7 @@ describe('useSocket thread guard (P1 regression: cross-thread event leakage)', (
       );
     });
     expect(firstAck).toHaveBeenCalledWith({ status: 'applied', eventId: 'preview-1' });
-    expect(mockSetPendingPreviewAutoOpen).toHaveBeenCalledWith({ port: 5196, path: '/first' });
+    expect(mockSetWorkspacePreview).toHaveBeenCalledWith({ port: 5196, path: '/first' });
 
     const disconnectCount = (mockSocket.disconnect as ReturnType<typeof vi.fn>).mock.calls.length;
     mockStoreCurrentThreadId = 'thread-B';
@@ -519,7 +516,7 @@ describe('useSocket thread guard (P1 regression: cross-thread event leakage)', (
     expect((mockSocket.disconnect as ReturnType<typeof vi.fn>).mock.calls.length).toBe(disconnectCount);
   });
 
-  it('queues an off-thread preview through the stable chat socket and acknowledges custody', () => {
+  it('answers not visible for an off-thread preview without saving it for a later switch', () => {
     mockStoreCurrentThreadId = 'thread-A';
     act(() => {
       root.render(
@@ -539,11 +536,12 @@ describe('useSocket thread guard (P1 regression: cross-thread event leakage)', (
       );
     });
 
-    expect(mockQueueThreadPreview).toHaveBeenCalledWith('thread-B', { port: 5196, path: '/queued' });
+    expect(mockQueueThreadPreview).not.toHaveBeenCalled();
+    expect(mockSetWorkspacePreview).not.toHaveBeenCalled();
     expect(acknowledge).toHaveBeenCalledWith({
-      status: 'queued',
+      status: 'skipped',
       eventId: 'preview-queued',
-      reason: 'thread_inactive',
+      reason: 'client_inactive',
     });
   });
 
@@ -646,105 +644,6 @@ describe('useSocket thread guard (P1 regression: cross-thread event leakage)', (
     expect(mockSetThreadHasActiveInvocation).toHaveBeenCalledWith('thread-A', true);
     expect(mockSetThreadIntentMode).toHaveBeenCalledWith('thread-A', 'execute');
     expect(mockSetThreadTargetCats).toHaveBeenCalledWith('thread-A', ['opus']);
-  });
-
-  it('guide_complete from active thread is reduced into guide store state', () => {
-    mockStoreCurrentThreadId = 'thread-A';
-    const callbacks: SocketCallbacks = {
-      onMessage: vi.fn(),
-    };
-    useGuideStore.setState({
-      session: {
-        flow: GUIDE_FLOW,
-        sessionId: 'guide-add-member-1',
-        threadId: 'thread-A',
-        currentStepIndex: 0,
-        phase: 'active',
-        startedAt: Date.now(),
-      },
-    });
-
-    act(() => {
-      root.render(React.createElement(HookWrapper, { callbacks, threadId: 'thread-A' }));
-    });
-
-    act(() => {
-      simulateServerEvent('guide_complete', {
-        guideId: 'add-member',
-        threadId: 'thread-A',
-        timestamp: Date.now(),
-      });
-    });
-
-    expect(useGuideStore.getState().session?.phase).toBe('complete');
-  });
-
-  it('replays a dropped guide_start into pendingStart when that thread becomes active again', () => {
-    const callbacks: SocketCallbacks = {
-      onMessage: vi.fn(),
-    };
-
-    mockStoreCurrentThreadId = 'thread-B';
-    act(() => {
-      root.render(React.createElement(HookWrapper, { callbacks, threadId: 'thread-B' }));
-    });
-
-    act(() => {
-      simulateServerEvent('guide_start', {
-        guideId: 'add-member',
-        threadId: 'thread-A',
-        timestamp: 123,
-      });
-    });
-
-    expect(useGuideStore.getState().pendingStart).toBeNull();
-
-    mockStoreCurrentThreadId = 'thread-A';
-    act(() => {
-      root.render(React.createElement(HookWrapper, { callbacks, threadId: 'thread-A' }));
-    });
-
-    expect(useGuideStore.getState().pendingStart).toEqual({
-      guideId: 'add-member',
-      threadId: 'thread-A',
-    });
-  });
-
-  it('does not replay a queued guide_start after off-thread exit control clears it', () => {
-    const callbacks: SocketCallbacks = {
-      onMessage: vi.fn(),
-    };
-
-    mockStoreCurrentThreadId = 'thread-B';
-    act(() => {
-      root.render(React.createElement(HookWrapper, { callbacks, threadId: 'thread-B' }));
-    });
-
-    act(() => {
-      simulateServerEvent('guide_start', {
-        guideId: 'add-member',
-        threadId: 'thread-A',
-        timestamp: 123,
-      });
-    });
-
-    expect(useGuideStore.getState().pendingStart).toBeNull();
-
-    act(() => {
-      simulateServerEvent('guide_control', {
-        action: 'exit',
-        guideId: 'add-member',
-        threadId: 'thread-A',
-        timestamp: 124,
-      });
-    });
-
-    mockStoreCurrentThreadId = 'thread-A';
-    act(() => {
-      root.render(React.createElement(HookWrapper, { callbacks, threadId: 'thread-A' }));
-    });
-
-    expect(useGuideStore.getState().pendingStart).toBeNull();
   });
 
   it('intent_mode for switched-away thread routes to background after thread change', () => {

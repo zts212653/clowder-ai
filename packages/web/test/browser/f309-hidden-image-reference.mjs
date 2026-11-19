@@ -19,7 +19,7 @@ export async function forwardHiddenImageOwner(request, url, composer, calls) {
 }
 
 /** Real visible document + retained Task image + explicit chip removal; no store or storage mutation. */
-export async function verifyHiddenImageRemoval({ page, composer, owner, evidence, calls }) {
+export async function verifyHiddenImageRemoval({ page, owner, evidence, calls }) {
   // Opening a work no longer inserts an unsolicited draft reference. Make a real
   // selection before testing whether its acknowledged removal survives reload.
   await page.getByRole('button', { name: '圈选', exact: true }).click();
@@ -43,18 +43,19 @@ export async function verifyHiddenImageRemoval({ page, composer, owner, evidence
   const document = page.getByTestId('workspace-content-review-text').filter({ visible: true });
   await document.waitFor();
   assert.equal(await page.locator('[data-testid="artifact-review-surface"]:visible').count(), 0);
-  const cleared = page.waitForResponse(
-    (response) =>
-      response.request().method() === 'PUT' &&
-      new URL(response.url()).pathname === `/api/threads/${owner.thread.id}/composer-draft` &&
-      !response.request().postDataJSON().contentBlocks?.length,
-  );
+  const readDraft = () =>
+    page.evaluate((id) => {
+      const entry = (key) => new Map(JSON.parse(localStorage.getItem(key) || '[]')).get(id);
+      return {
+        text: entry('cat-cafe:thread-drafts'),
+        contextAttachments: entry('cat-cafe:thread-context-attachment-drafts'),
+      };
+    }, owner.thread.id);
   await media.getByRole('button', { name: /^移除上下文/ }).click();
-  const acknowledgment = await cleared;
-  assert.equal(acknowledgment.status(), 200);
-  const before = (await acknowledgment.json()).draft;
+  await media.waitFor({ state: 'detached' });
+  const before = await readDraft();
   assert.equal(before.text, '原Chat未发送的说明');
-  assert.ok(!before.contentBlocks?.length);
+  assert.ok(!before.contextAttachments?.length);
   const callStart = calls.length;
   await page.reload({ waitUntil: 'domcontentloaded' });
   await document.waitFor();
@@ -65,24 +66,19 @@ export async function verifyHiddenImageRemoval({ page, composer, owner, evidence
   const end = Date.now() + 1500;
   // A bounded late-write observation after BOTH real owners restored, not an early DOMContentLoaded snapshot.
   while (Date.now() < end) {
-    const draft = await composer.readTaskDraft();
+    const draft = await readDraft();
     assert.equal(draft.text, before.text);
-    assert.ok(!draft.contentBlocks?.length, 'the removed image must stay absent from the real owner draft');
-    observed.push({ at: Date.now(), revision: draft.revision, contentBlocks: draft.contentBlocks });
+    assert.ok(!draft.contextAttachments?.length, 'the removed image must stay absent from the draft');
+    observed.push({ at: Date.now(), contextAttachments: draft.contextAttachments });
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
-  const after = await composer.readTaskDraft();
+  const after = await readDraft();
   assert.equal(await page.locator('[data-context-kind="media"]:visible').count(), 0);
   assert.equal(await page.locator('[data-testid="artifact-review-surface"]:visible').count(), 0);
   assert.equal(await page.getByLabel('消息输入框').inputValue(), before.text);
-  assert.ok(!calls.slice(callStart).some((call) => call.method === 'PUT' && call.body?.draft?.contentBlocks?.length));
   await page.screenshot({ path: `${evidence}/hidden-image-cleared-after-reload.png` });
   await writeFile(
     `${evidence}/hidden-image-cleared-after-reload.json`,
-    JSON.stringify(
-      { url: page.url(), draftApi: composer.api, mediaId, before, after, observed, calls: calls.slice(callStart) },
-      null,
-      2,
-    ),
+    JSON.stringify({ url: page.url(), mediaId, before, after, observed, calls: calls.slice(callStart) }, null, 2),
   );
 }

@@ -43,7 +43,10 @@ type Target =
     }
   | { evolution: EvolutionMediaLocator; worktreeId?: never; path?: never; publication?: never; retained?: never };
 
-export function useWorkspaceContentReview({ worktreeId, path, publication, evolution, retained }: Target) {
+export function useWorkspaceContentReview(
+  { worktreeId, path, publication, evolution, retained }: Target,
+  readGeneration = 1,
+) {
   const contentRef = publication?.contentRef,
     ownerRevision = publication?.ownerRevision;
   const retainedId = retained?.reviewId,
@@ -133,15 +136,20 @@ export function useWorkspaceContentReview({ worktreeId, path, publication, evolu
     ],
   );
 
+  const previousSource = useRef<typeof load | null>(null);
   useEffect(() => {
     const stamp = ++generation.current;
-    setView(null);
+    const sourceChanged = previousSource.current !== load;
+    previousSource.current = load;
+    if (sourceChanged) {
+      setView(null);
+      setBusy(false);
+      reset();
+      prepareOperationId.current = null;
+    }
     setError(null);
     setOpeningRefusal(null);
-    setBusy(false);
-    reset();
-    prepareOperationId.current = null;
-    void load().catch((failure) => {
+    void load(sourceChanged ? undefined : view?.review.reviewId).catch((failure) => {
       if (stamp === generation.current) {
         setError(openFailureMessage(failure));
         setOpeningRefusal(failure instanceof ModificationHttpError ? failure.code : null);
@@ -150,7 +158,7 @@ export function useWorkspaceContentReview({ worktreeId, path, publication, evolu
     return () => {
       generation.current++;
     };
-  }, [load, reset]);
+  }, [load, reset, readGeneration]);
   useWorkspaceReviewOwnerUpdates(view?.review.reviewId ?? null, load, setError);
   const legacyText = useLegacyTextNotes({ view, draft: state, load, base });
 

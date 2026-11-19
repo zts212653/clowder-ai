@@ -6,8 +6,8 @@ import { isCatAvailable } from '../config/cat-config-loader.js';
 import type { InvocationQueue } from '../domains/cats/services/agents/invocation/InvocationQueue.js';
 import type { IMessageStore, StoredMessage } from '../domains/cats/services/stores/ports/MessageStore.js';
 import type { ISessionChainStore } from '../domains/cats/services/stores/ports/SessionChainStore.js';
-import type { IConciergeConfigStore } from '../domains/concierge/ConciergeConfigStore.js';
 import type { ConciergeThreadService } from '../domains/concierge/ConciergeThreadService.js';
+import type { ReadCompanionSettings } from '../domains/concierge/companion-settings.js';
 import type { OwnerPageActionService } from '../domains/concierge/live/host/owner-page-action-service.js';
 import { MessageLiveInboxSource } from '../domains/concierge/live/inbox/MessageLiveInboxSource.js';
 import {
@@ -27,7 +27,7 @@ import { requirePluginOwnerLocalAccess } from './plugin-access-guards.js';
 
 interface Options {
   ownerUserId: string;
-  configStore: Pick<IConciergeConfigStore, 'get'> & Partial<Pick<IConciergeConfigStore, 'getSaved'>>;
+  companionSettings: ReadCompanionSettings;
   sessions: LiveCompanionSessions;
   threadService: Pick<ConciergeThreadService, 'getOrCreate' | 'isCurrent'>;
   sessionChainStore: Pick<ISessionChainStore, 'getActive'>;
@@ -85,11 +85,8 @@ export const conciergeLiveRoutes: FastifyPluginAsync<Options> = async (app, opti
     threads: options.threadService,
     sessions: options.sessions,
   });
-  const resolveSelection = async (userId: string, expectedDutyCatProfileId?: string) => {
-    const config = await (expectedDutyCatProfileId
-      ? options.configStore.getSaved?.(userId)
-      : options.configStore.get(userId));
-    if (!config) throw new Error('Saved selection unavailable');
+  const resolveSelection = async (expectedDutyCatProfileId?: string) => {
+    const config = await options.companionSettings();
     if (expectedDutyCatProfileId && config.dutyCatProfileId !== expectedDutyCatProfileId)
       throw new LiveCompanionSelectionError('live_duty_unavailable');
     const cats = Object.values(catRegistry.getAllConfigs()).filter(
@@ -121,7 +118,7 @@ export const conciergeLiveRoutes: FastifyPluginAsync<Options> = async (app, opti
   });
   app.get('/api/concierge/live/identity', async (request, reply) => {
     try {
-      const companion = await resolveSelection(resolveSessionUserId(request)!);
+      const companion = await resolveSelection();
       return {
         status: 'selected',
         identity: createCompanionIdentitySnapshot({
@@ -145,7 +142,7 @@ export const conciergeLiveRoutes: FastifyPluginAsync<Options> = async (app, opti
     const userId = resolveSessionUserId(request)!;
     let companion;
     try {
-      companion = await resolveSelection(userId, parsed.data.expectedDutyCatProfileId);
+      companion = await resolveSelection(parsed.data.expectedDutyCatProfileId);
     } catch (error) {
       if (error instanceof LiveCompanionSelectionError)
         return reply.code(409).send({ code: error.code, error: 'Live companion identity unavailable' });
@@ -174,10 +171,7 @@ export const conciergeLiveRoutes: FastifyPluginAsync<Options> = async (app, opti
         }),
         verifyCompanion: async () => {
           try {
-            return sameLiveExecutionSelection(
-              companion,
-              await resolveSelection(userId, parsed.data.expectedDutyCatProfileId),
-            );
+            return sameLiveExecutionSelection(companion, await resolveSelection(parsed.data.expectedDutyCatProfileId));
           } catch (error) {
             if (error instanceof LiveCompanionSelectionError) return false;
             throw error;

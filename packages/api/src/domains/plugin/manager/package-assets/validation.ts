@@ -1,9 +1,10 @@
 import { createHash } from 'node:crypto';
 import { constants as fsConstants } from 'node:fs';
-import { open, realpath } from 'node:fs/promises';
+import { open, readdir, realpath } from 'node:fs/promises';
 import { isAbsolute, relative, resolve, sep } from 'node:path';
-import type { PluginIconSpec } from '@cat-cafe/shared';
+import { type PluginIconSpec, type PluginPdlFragment, pluginPdlSchema } from '@cat-cafe/shared';
 import { XMLParser, XMLValidator } from 'fast-xml-parser';
+import { parse as parseYaml } from 'yaml';
 import type { VerifiedPluginPackage } from '../../external-runtime/types.js';
 import type { PluginPackageRecord } from '../../host-inventory/types.js';
 import { type PluginManagerPackageAsset, PluginManagerPackageAssetError } from './contract.js';
@@ -213,6 +214,49 @@ export async function readVerifiedReadme(
   } catch {
     throw new PluginManagerPackageAssetError('INVALID_ASSET', 'plugin README is not valid UTF-8');
   }
+}
+
+const MAX_PLUGIN_CONSOLE_BYTES = 512 * 1024;
+/** A package's console: console/pdl.yaml, console/i18n/<language>.yaml and optional console/components (js, css). */
+export async function readVerifiedConsole(
+  located: VerifiedPluginPackage,
+  expected: PackageIdentity,
+): Promise<{ pdl?: PluginPdlFragment } & Pick<PluginPdlFragment, 'components' | 'i18n'>> {
+  if (!packageIdentityMatches(located.manifest, expected)) {
+    throw new PluginManagerPackageAssetError('INVALID_ASSET', 'package console identity does not match Host truth');
+  }
+  await located.verifyIntegrity();
+  const dir = resolve(located.rootDir, 'console');
+  const text = async (file: string) => {
+    const full = resolve(dir, file);
+    if (!pathInside(located.rootDir, full))
+      throw new PluginManagerPackageAssetError('INVALID_ASSET', 'console path escapes');
+    return new TextDecoder('utf-8', { fatal: true }).decode(
+      await readBoundedStableFile(full, MAX_PLUGIN_CONSOLE_BYTES),
+    );
+  };
+  const names = await readdir(dir).catch(() => [] as string[]);
+  const out: { pdl?: PluginPdlFragment } & Pick<PluginPdlFragment, 'components' | 'i18n'> = {};
+  // The console is the host's: console/pdl.yaml, never the manifest the plugin's own runtime validates.
+  if (names.includes('pdl.yaml')) {
+    const parsed = pluginPdlSchema.safeParse(parseYaml(await text('pdl.yaml')));
+    if (!parsed.success) throw new PluginManagerPackageAssetError('INVALID_ASSET', 'console pdl.yaml is invalid');
+    out.pdl = parsed.data;
+  }
+  if (names.includes('components')) {
+    const files = (await readdir(resolve(dir, 'components'))).sort();
+    const of = (ext: string) =>
+      Promise.all(files.filter((name) => name.endsWith(ext)).map((name) => text('components/' + name)));
+    out.components = { js: await of('.js'), css: await of('.css') };
+  }
+  if (names.includes('i18n')) {
+    const files = (await readdir(resolve(dir, 'i18n'))).filter((name) => name.endsWith('.yaml'));
+    out.i18n = Object.fromEntries(
+      await Promise.all(files.map(async (name) => [name.slice(0, -5), parseYaml(await text('i18n/' + name))])),
+    );
+  }
+  await located.verifyIntegrity();
+  return out;
 }
 
 export function inventoryIdentity(record: PluginPackageRecord): PackageIdentity {

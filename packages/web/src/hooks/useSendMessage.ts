@@ -1,29 +1,11 @@
 'use client';
 
 import type { ContextAttachment, MessageWorkDisposition } from '@cat-cafe/shared';
-import { FileContentSchema, ImageContentSchema, TextContentSchema } from '@cat-cafe/shared';
 import { routingConfirmationRequiredSchema } from '@cat-cafe/shared/routing-preview';
 import { useCallback, useState } from 'react';
-import { z } from 'zod';
-import {
-  acknowledgeSendComposerDraftConsumption,
-  type ComposerDraftConsumption,
-  consumePreparedComposerDraft,
-} from '@/components/composer-draft-consumption';
-import { observeComposerDraft } from '@/components/composer-draft-flush-registry';
-import { useOptionalConfirm } from '@/components/useConfirm';
 import { useChatCommands } from '@/hooks/useChatCommands';
 import { type ChatMessage as ChatMessageData, useChatStore } from '@/stores/chatStore';
-import {
-  checkSendAttempt,
-  findSendAttempt,
-  patchSendAttempt,
-  putSendAttempt,
-  useSendAttemptStore,
-} from '@/stores/send-attempt-store';
 import { apiFetch } from '@/utils/api-client';
-import { apiSessionIdentity } from '@/utils/api-session-identity';
-import { type SendAttempt, saveSendAttempt } from '@/utils/send-attempt-db';
 import { reconcileThreadWithServer } from './queue-reconciliation';
 
 export type UploadStatus = 'idle' | 'uploading' | 'failed';
@@ -36,35 +18,24 @@ export interface WhisperOptions {
 export interface SendMessageAdmissionOptions {
   /** A recoverable first-message owner supplies the same key on every retry. */
   idempotencyKey?: string;
-  /** Set by the ChatInput admission adapter; domain/interactive sends preserve the mounted draft. */
-  consumeComposerDraft?: boolean;
   messageDisposition?: MessageWorkDisposition;
-  /** Ordinary conversation composer only; other admission owners retain their existing recovery. */
-  localAttempt?: boolean;
-  onPrepared?: (localDurableAttempt: boolean) => void | boolean;
 }
 
 interface MessageAdmissionResponse {
   status?: string;
   gameThreadId?: string;
-  composerDraftConsumption?: ComposerDraftConsumption;
-  userMessageId?: string;
-  userMessage?: unknown;
 }
-
-const storedReceiptSchema = z.object({
-  id: z.string().min(1),
-  timestamp: z.number(),
-  contentBlocks: z.array(z.union([TextContentSchema, ImageContentSchema, FileContentSchema])).optional(),
-});
 
 /**
  * Submit one durable Queue input. History and active-invocation UI are projected
  * exclusively from lifecycle events after server admission; this hook never creates
  * an optimistic History bubble or a client-owned invocation.
  */
-export function useSendMessage(activeThreadId?: string) {
-  const confirm = useOptionalConfirm();
+export type RoutingConfirmation = (
+  request: ReturnType<typeof routingConfirmationRequiredSchema.parse>,
+) => Promise<boolean>;
+
+export function useSendMessage(activeThreadId?: string, confirm?: RoutingConfirmation) {
   const addMessageToThread = useChatStore((state) => state.addMessageToThread);
   const { processCommand } = useChatCommands();
   const [uploadStatus, setUploadStatus] = useState<UploadStatus>('idle');
@@ -111,108 +82,27 @@ export function useSendMessage(activeThreadId?: string) {
       admissionOptions?: SendMessageAdmissionOptions,
     ) => {
       const threadId = overrideThreadId ?? activeThreadId ?? useChatStore.getState().currentThreadId;
-      const localAttempt = admissionOptions?.localAttempt === true;
-      const ownerUserId = apiSessionIdentity.getSnapshot().ownerUserId ?? '';
-      const existing =
-        localAttempt && admissionOptions?.idempotencyKey
-          ? findSendAttempt(ownerUserId, threadId, admissionOptions.idempotencyKey)
-          : undefined;
-      if (existing && existing.status !== 'failed') return false;
-      if (existing) {
-        content = existing.content;
-        images = existing.files;
-        whisper = existing.whisper;
-        replyToId = existing.replyTo;
-        contextAttachments = existing.contextAttachments;
-        explicitTargetCats = existing.explicitTargetCats;
-      }
-      const composerDraftRevision =
-        existing?.composerDraftRevision ??
-        (admissionOptions?.consumeComposerDraft ? observeComposerDraft(threadId)?.revision : undefined);
-      const heldComposerText =
-        existing?.composerDraftText ??
-        (admissionOptions?.onPrepared ? (observeComposerDraft(threadId)?.text ?? content) : undefined);
-      const messageDisposition = existing?.messageDisposition ?? admissionOptions?.messageDisposition;
       const hasImages = Boolean(images?.length);
       setUploadError(null);
       setUploadStatus(hasImages ? 'uploading' : 'idle');
 
-      const wasCommand = !existing && (await processCommand(content, threadId));
-      if (wasCommand) {
-        admissionOptions?.onPrepared?.(false);
-        return false;
-      }
+      const wasCommand = await processCommand(content, threadId);
+      if (wasCommand) return false;
 
       const clientMessageId = admissionOptions?.idempotencyKey ?? createClientId();
-      let attempt: SendAttempt | undefined = localAttempt
-        ? {
-            ...existing,
-            id: clientMessageId,
-            ownerUserId,
-            threadId,
-            content,
-            files: images ?? [],
-            timestamp: existing?.timestamp ?? Date.now(),
-            status: 'preparing',
-            replyTo: replyToId,
-            contextAttachments,
-            explicitTargetCats,
-            whisper,
-            messageDisposition,
-            composerDraftRevision,
-            previewUrls: existing?.previewUrls ?? (images ?? []).map((file) => URL.createObjectURL(file)),
-            error: undefined,
-          }
-        : undefined;
-      if (attempt) putSendAttempt(attempt);
-      let submitted = false;
-      let prepared = false;
-      let rejected = false;
-      let retryable = true;
 
       try {
-        if (attempt) {
-          if (!attempt.ownerUserId) {
-            await apiFetch('/api/session');
-            const verifiedOwner = apiSessionIdentity.getSnapshot().ownerUserId;
-            if (!verifiedOwner) throw new Error('身份尚未确认，内容已保留');
-            useSendAttemptStore.setState((state) => ({ attempts: state.attempts.filter((item) => item !== attempt) }));
-            attempt = { ...attempt, ownerUserId: verifiedOwner };
-            putSendAttempt(attempt);
-          }
-          await saveSendAttempt(attempt);
-          if (apiSessionIdentity.getSnapshot().ownerUserId !== attempt.ownerUserId)
-            throw new Error('身份已变更，内容已保留');
-          if (attempt.composerDraftText !== undefined) {
-            if (!consumePreparedComposerDraft(attempt)) throw new Error('原输入框尚不可移交，内容已保留');
-            prepared = true;
-            attempt = { ...attempt, composerDraftText: undefined };
-            putSendAttempt(attempt);
-            // Commit the completed handoff before any POST; an interrupted write
-            // must not restore a pending handoff over newly typed input.
-            await saveSendAttempt(attempt);
-          } else {
-            if (admissionOptions?.onPrepared?.(true) === false) throw new Error('原输入框尚不可移交，内容已保留');
-            prepared = true;
-          }
-          patchSendAttempt(attempt, { status: 'sending' });
-        }
         const submit = (confirmedTargetCats?: string[]) => {
-          if (attempt && apiSessionIdentity.getSnapshot().ownerUserId !== attempt.ownerUserId)
-            throw new Error('身份已变更，内容已保留');
-          submitted = true;
           if (hasImages) {
             const formData = new FormData();
             formData.append('content', content);
             formData.append('threadId', threadId);
             formData.append('idempotencyKey', clientMessageId);
-            if (messageDisposition) {
-              formData.append('messageDisposition', messageDisposition);
+            if (admissionOptions?.messageDisposition) {
+              formData.append('messageDisposition', admissionOptions.messageDisposition);
             }
             for (const catId of explicitTargetCats ?? []) formData.append('mentions', catId);
             for (const catId of confirmedTargetCats ?? []) formData.append('confirmedTargetCats', catId);
-            if (composerDraftRevision !== undefined)
-              formData.append('composerDraftRevision', String(composerDraftRevision));
             if (whisper) {
               formData.append('visibility', whisper.visibility);
               for (const catId of whisper.whisperTo) formData.append('whisperTo', catId);
@@ -231,8 +121,9 @@ export function useSendMessage(activeThreadId?: string) {
                 content,
                 threadId,
                 idempotencyKey: clientMessageId,
-                ...(messageDisposition ? { messageDisposition } : {}),
-                ...(composerDraftRevision !== undefined ? { composerDraftRevision } : {}),
+                ...(admissionOptions?.messageDisposition
+                  ? { messageDisposition: admissionOptions.messageDisposition }
+                  : {}),
                 ...(whisper ? { visibility: whisper.visibility, whisperTo: whisper.whisperTo } : {}),
                 ...(replyToId ? { replyTo: replyToId } : {}),
                 ...(explicitTargetCats?.length ? { mentions: explicitTargetCats } : {}),
@@ -242,9 +133,7 @@ export function useSendMessage(activeThreadId?: string) {
             });
           }
         };
-        let response = await submit(existing?.confirmedTargetCats);
-        if (attempt && apiSessionIdentity.getSnapshot().ownerUserId !== attempt.ownerUserId)
-          throw new Error('Send attempt owner changed');
+        let response = await submit();
         if (response.status === 409) {
           const payload: unknown = await response
             .clone()
@@ -252,57 +141,24 @@ export function useSendMessage(activeThreadId?: string) {
             .catch(() => null);
           const redirect = routingConfirmationRequiredSchema.safeParse(payload);
           if (redirect.success) {
-            rejected = true;
-            if (!confirm) {
-              retryable = false;
-              throw new Error('需要在聊天页面确认实际接收者后才能改发。');
-            }
-            const unavailable = redirect.data.unavailable.map((member) => member.displayName).join('、');
-            const targets = redirect.data.targets.map((member) => member.displayName).join('、');
-            const accepted = await confirm({
-              title: '确认改发角色',
-              message: `${unavailable}当前不可用。是否将这条消息改发给${targets}？`,
-              confirmLabel: `改发给${targets}`,
-              cancelLabel: '取消发送',
-            });
+            if (!confirm) throw new Error('需要在聊天页面确认实际接收者后才能改发。');
+            const accepted = await confirm(redirect.data);
             if (!accepted) {
               setUploadStatus('idle');
-              if (attempt)
-                await patchSendAttempt(attempt, { status: 'failed', error: '已取消，未发出', retryable: true });
               return false;
             }
-            if (attempt)
-              patchSendAttempt(attempt, { confirmedTargetCats: redirect.data.targets.map((member) => member.catId) });
-            rejected = false;
             response = await submit(redirect.data.targets.map((member) => member.catId));
           }
         }
 
-        if (attempt && apiSessionIdentity.getSnapshot().ownerUserId !== attempt.ownerUserId)
-          throw new Error('Send attempt owner changed');
         if (!response.ok) {
-          rejected = response.status >= 400 && response.status < 500 && response.status !== 408;
-          retryable = response.status === 429;
           const body = await response.json().catch(() => null);
           throw new Error(body?.detail ?? body?.error ?? `Server error: ${response.status}`);
         }
 
         const admission = (await response.json().catch(() => null)) as MessageAdmissionResponse | null;
-        if (attempt && apiSessionIdentity.getSnapshot().ownerUserId !== attempt.ownerUserId)
-          throw new Error('Send attempt owner changed');
         if (admission?.status !== 'game_started' && admission?.status !== 'queued') {
           throw new Error('Server did not return a canonical Queue admission');
-        }
-        acknowledgeSendComposerDraftConsumption(threadId, admission);
-        if (attempt && apiSessionIdentity.getSnapshot().ownerUserId === attempt.ownerUserId) {
-          const receipt = storedReceiptSchema.safeParse(admission.userMessage);
-          const serverMessageId = receipt.success ? receipt.data.id : admission.userMessageId;
-          patchSendAttempt(attempt, {
-            status: serverMessageId ? 'accepted' : 'unknown',
-            ...(serverMessageId ? { serverMessageId } : {}),
-            ...(receipt.success && receipt.data.contentBlocks ? { contentBlocks: receipt.data.contentBlocks } : {}),
-          });
-          if (!serverMessageId) void checkSendAttempt(attempt);
         }
         // A successful send must remain visible even if its Queue socket event was
         // missed. Reuse the same fenced server snapshot as reconnect, not a local bubble.
@@ -313,26 +169,6 @@ export function useSendMessage(activeThreadId?: string) {
         return true;
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-        if (attempt) {
-          const abandoned = submitted && apiSessionIdentity.getSnapshot().ownerUserId !== attempt.ownerUserId;
-          await patchSendAttempt(attempt, {
-            ...(!prepared && heldComposerText !== undefined ? { composerDraftText: heldComposerText } : {}),
-            status: abandoned ? 'unknown' : !submitted || rejected ? 'failed' : 'unknown',
-            error: abandoned
-              ? undefined
-              : !submitted
-                ? prepared
-                  ? '未能更新恢复记录，内容已保留在气泡'
-                  : '未能安全保存，内容仍在输入框'
-                : rejected
-                  ? errorMessage
-                  : undefined,
-            retryable,
-          });
-          setUploadStatus('idle');
-          if (submitted && !rejected) void checkSendAttempt(attempt);
-          return false;
-        }
         if (hasImages) {
           setUploadStatus('failed');
           setUploadError(errorMessage);

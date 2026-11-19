@@ -9,8 +9,8 @@
  * - docs/features/F229-cat-ball-concierge.md KD-7 / KD-10
  */
 
-import type { ConciergeConfig } from '@cat-cafe/shared';
 import { deploymentDefaults } from '@cat-cafe/shared';
+import type { CompanionSettings } from './companion-settings.js';
 
 // ---------------------------------------------------------------------------
 // Public API
@@ -22,7 +22,10 @@ import { deploymentDefaults } from '@cat-cafe/shared';
  *
  * 包含：岗位名/性格基调、anchor-first 指令、工具白名单、escalation 转接协议、禁止项。
  */
-export function buildConciergePromptLines(config: ConciergeConfig, _threadId?: string): string[] {
+export function buildConciergePromptLines(
+  config: Pick<CompanionSettings, 'displayName' | 'personaTone'>,
+  _threadId?: string,
+): string[] {
   const { displayName, personaTone } = config;
 
   return [

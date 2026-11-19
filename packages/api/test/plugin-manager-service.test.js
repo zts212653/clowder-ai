@@ -257,6 +257,28 @@ describe('F202 terminal Plugin Manager service', () => {
     assert.deepEqual(lifecycleCalls, [['instance:github', false, 1]]);
   });
 
+  it('lists an uninstall that is still running and tells the Host when it starts and ends', async () => {
+    let finish;
+    const changes = [];
+    const manager = new PluginManagerService({
+      catalog: { snapshot: async () => ({ candidates: [], status: 'fresh', refreshedAt: 2_000 }) },
+      inventory: { snapshot: async () => emptyInventory },
+      installedPackages: { list: async () => [bundledGithub] },
+      lifecycle: { uninstall: () => new Promise((resolve) => (finish = resolve)) },
+      operationChanged: (pluginId) => changes.push(pluginId),
+    });
+
+    const uninstall = manager.uninstall('github', { expectedRevision: 1 });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.equal((await manager.list()).plugins[0].operation, 'uninstall');
+    assert.equal((await manager.get('github')).plugin.operation, 'uninstall');
+    assert.deepEqual(changes, ['github']);
+    finish();
+    await uninstall;
+    assert.equal((await manager.list()).plugins[0].operation, undefined);
+    assert.deepEqual(changes, ['github', 'github']);
+  });
+
   it('applies the live state projection to local installed rows before authorizing lifecycle writes', async () => {
     let projectionCalls = 0;
     const lifecycleCalls = [];

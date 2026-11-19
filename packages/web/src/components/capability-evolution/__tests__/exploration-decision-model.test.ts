@@ -1,12 +1,12 @@
 import { refIdentity } from '@cat-cafe/shared';
 import { describe, expect, it } from 'vitest';
-import { mockExploration } from '../../../../test/browser/f311-duck-exploration.data.mjs';
 import { compareExplorationRecords } from '../exploration/exploration-comparison';
 import {
   suggestedComparison,
   suggestedExperiment,
   summarizePairChanges,
 } from '../exploration/exploration-decision-model';
+import { mockExploration } from './fixtures/exploration-data';
 
 describe('comparison reading defaults and outcome slices', () => {
   const catalog = mockExploration();

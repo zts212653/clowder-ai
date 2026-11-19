@@ -141,7 +141,7 @@ function getProfileUpdateProposalId(block: RichCardBlock): string {
   return stampedProposalId(block);
 }
 
-async function postProfileUpdateDecision(
+export async function postProfileUpdateDecision(
   proposalId: string,
   decision: ProfileUpdateDecision,
   reportEvidence?: (evidence: { outcome: 'settled' | 'http-error'; status: number }) => void,

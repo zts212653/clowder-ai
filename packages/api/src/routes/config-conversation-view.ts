@@ -39,13 +39,14 @@ export async function configConversationViewRoutes(
   app: FastifyInstance,
   opts: ConversationViewRoutesOptions,
 ): Promise<void> {
-  const resolveOwnedThread = async (threadId: string, userId: string, reply: FastifyReply) => {
+  // The owner gate already admits only the owner; any thread they can open has a view preference (system threads too).
+  const resolveThread = async (threadId: string, reply: FastifyReply) => {
     if (!opts.threadStore) {
       reply.status(503);
       return null;
     }
     const thread = await opts.threadStore.get(threadId);
-    if (!thread || thread.createdBy !== userId) {
+    if (!thread) {
       reply.status(404);
       return null;
     }
@@ -60,7 +61,7 @@ export async function configConversationViewRoutes(
       reply.status(400);
       return { error: 'Invalid request', details: parsed.error.issues };
     }
-    const thread = await resolveOwnedThread(parsed.data.threadId, userId, reply);
+    const thread = await resolveThread(parsed.data.threadId, reply);
     if (!thread) return { error: reply.statusCode === 503 ? 'Thread store unavailable' : 'Thread not found' };
     return resolveConversationViewPreference(opts.projectRoot, thread.id, thread.participants);
   });
@@ -73,7 +74,7 @@ export async function configConversationViewRoutes(
       reply.status(400);
       return { error: 'Invalid request', details: parsed.error.issues };
     }
-    const thread = await resolveOwnedThread(parsed.data.threadId, userId, reply);
+    const thread = await resolveThread(parsed.data.threadId, reply);
     if (!thread) return { error: reply.statusCode === 503 ? 'Thread store unavailable' : 'Thread not found' };
     const view: ConversationViewPreference = parsed.data.view;
     if (view.mode === 'cat' && !thread.participants.some((catId) => catId === view.catId)) {

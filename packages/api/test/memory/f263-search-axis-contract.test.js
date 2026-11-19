@@ -24,8 +24,6 @@ describe('F263 evidence search axis contract', () => {
     const recall = await read('../shared/src/recall-outcome.ts');
     const mcpTopk = await read('../mcp-server/src/tools/evidence-tools.ts');
     const mcpCoverage = await read('../mcp-server/src/tools/evidence-coverage-response.ts');
-    const webCard = await read('../web/src/components/EvidenceCard.tsx');
-    const webSearch = await read('../web/src/components/memory/EvidenceSearch.tsx');
     const recallFeedParser = await read('../web/src/hooks/recall-result-parser.ts');
 
     const scopedContracts = [
@@ -36,8 +34,6 @@ describe('F263 evidence search axis contract', () => {
       coverage,
       mcpTopk,
       mcpCoverage,
-      interfaceBody(webCard, 'EvidenceResult'),
-      webSearch,
       recallFeedParser,
     ];
     for (const source of scopedContracts) {
@@ -49,9 +45,6 @@ describe('F263 evidence search axis contract', () => {
     const recall = await read('../shared/src/recall-outcome.ts');
     const mcpCoverage = await read('../mcp-server/src/tools/evidence-coverage-response.ts');
     const recallFeedParser = await read('../web/src/hooks/recall-result-parser.ts');
-
-    const recallHook = await read('../web/src/hooks/useRecallEvents.ts');
-    assert.match(recallHook, /export \{ parseTextResults \} from '\.\/recall-result-parser';/);
 
     assert.match(recall, /matchRank\?: RecallMatchRank;/);
     assert.match(recall, /matchType\?: RecallMatchType;/);

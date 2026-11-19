@@ -1,0 +1,5341 @@
+{
+  "v2": {
+    "settings": "Settings & management",
+    "team": "Cat team",
+    "connect": "Connections & extensions",
+    "hits": "Recalled {0} times",
+    "sessions": "Status & sessions",
+    "thisConversation": "This conversation"
+  },
+  "v2a": {
+    "rail": "Navigation",
+    "cafe": "My Café",
+    "plusWorld": "Join or create a space",
+    "concierge": "Concierge",
+    "headerTitle": "New conversation",
+    "headline": "What shall we ",
+    "headlineRest": "make together today?",
+    "subtitle": "Keep working with your teammates in cat-cafe.",
+    "titleField": "Conversation name (optional)",
+    "homePlaceholder": "Describe what to do, or @ a teammate…",
+    "chatPlaceholder": "Message… (@ a teammate · /thread to quote a conversation)",
+    "group": "Group",
+    "labels": "Labels",
+    "count": "{0} conversations",
+    "groupChat": "Group chat",
+    "pin": "Pin after creating",
+    "sendTo": "To",
+    "works": "Works",
+    "tasks": "Yarn balls",
+    "watch": "See how the team works",
+    "create": "Create my cats",
+    "recentWorks": "Recent works",
+    "noWorks": "No works yet",
+    "worksError": "Recent works could not be read.",
+    "worksLoading": "Reading recent works…",
+    "happening": "Happening now",
+    "allRunning": "All conversations · {0} running",
+    "noRunning": "Nothing running now",
+    "thisThread": "This conversation",
+    "sessions": "Status & sessions",
+    "idle": "Not running",
+    "working": "Working",
+    "segment": "Session {0}",
+    "noSession": "No session record yet",
+    "workCount": "{0} works",
+    "replied": "Replied",
+    "unread": "{0} unread",
+    "recall": "Recall {0}",
+    "tools": "{0} tool calls",
+    "errors": "{0} errors",
+    "record": "Activity record",
+    "trajectory": "Trajectory",
+    "home": "Home",
+    "all": "All ›",
+    "panel": "Open / close workspace",
+    "loading": "Loading…",
+    "error": "Could not read this",
+    "retry": "Retry",
+    "trash": "Trash",
+    "search": "Search",
+    "more": "More",
+    "collapse": "Collapse sidebar",
+    "locate": "Locate current conversation",
+    "emptyThread": "Start this conversation",
+    "source": "Quoted source",
+    "add": "Add",
+    "voice": "Voice input",
+    "send": "Send",
+    "project": "Project",
+    "groupRecent": "Recent",
+    "groupProject": "Project",
+    "groupSystem": "System",
+    "groupFavorites": "Starred",
+    "file": "File",
+    "deleted": "Message deleted",
+    "position": "{0} · {1}"
+  },
+  "v2b": {
+    "w0": "You",
+    "w1": "Cat team",
+    "w2": "Connections & extensions",
+    "w3": "System",
+    "w4": "Theme",
+    "w5": "Cat planet",
+    "w6": "Mission Hub",
+    "w7": "Signals",
+    "w8": "Back to conversation",
+    "w9": "All memories",
+    "w10": "Recall log",
+    "w11": "Brake log",
+    "w12": "Library",
+    "w13": "Search memories, documents and conversations",
+    "w14": "Events",
+    "w15": "Available",
+    "w16": "Meetings",
+    "w17": "Not connected",
+    "w18": "Profiles",
+    "w19": "Tastes",
+    "w20": "People",
+    "w21": "Entities",
+    "w22": "Load more",
+    "w23": "Pending",
+    "w24": "Processed",
+    "w25": "Collections",
+    "w26": "Accept",
+    "w27": "Ignore",
+    "w28": "Undo",
+    "w29": "Knowledge activity",
+    "w30": "Search",
+    "w31": "Index status",
+    "w32": "Health",
+    "w33": "Knowledge graph",
+    "w34": "+ New collection",
+    "w35": "Rebuild index",
+    "w36": "Add member",
+    "w37": "Open cat team",
+    "w38": "Sources",
+    "w39": "Read",
+    "w40": "Archive",
+    "w41": "Add tag",
+    "w42": "Delete",
+    "w43": "Clear",
+    "w44": "Fetch"
+  },
+  "v2c": {
+    "c0": "You",
+    "c1": "Companion",
+    "c2": "Notifications & push",
+    "c3": "Operations",
+    "c4": "Companion",
+    "e0": "Requirements",
+    "e1": "Governance health",
+    "e2": "Features",
+    "e3": "Dispatch progress",
+    "e4": "Risk alerts",
+    "e5": "Clarifications",
+    "e6": "Slices",
+    "e7": "Experience reflux"
+  },
+  "v2f": {
+    "pluginManagedHint": "To enable or disable this tool, go to plugin integrations.",
+    "unavailableSuffix": " — unavailable",
+    "pluginManaged": "Managed by plugin {0}",
+    "mountCount": "{0}/{1} mounted",
+    "allProjectsMatch": "All projects match",
+    "someProjectsMatch": "Partially matching {0}/{1}",
+    "pluginGroup": {
+      "attention": "Needs attention",
+      "installed": "Installed",
+      "available": "Available to install"
+    },
+    "copy": {
+      "w001": "ᓚᘏᗢ",
+      "w002": "Workspace",
+      "w005": "Search",
+      "w019": "Retry",
+      "w041": "Library",
+      "w043": "Pending",
+      "w094": "Signals",
+      "w096": "Signal statistics",
+      "w101": "Inbox",
+      "w102": "Starred",
+      "w103": "Read",
+      "w104": "Archive",
+      "w105": "Tier",
+      "w117": "Add",
+      "w120": "KEY",
+      "w121": "value",
+      "w122": "Mission Hub",
+      "w128": "tags: redis,ui",
+      "w129": "P0",
+      "w130": "P1",
+      "w131": "P2",
+      "w132": "P3",
+      "w140": "Recall log",
+      "w157": "Brake log",
+      "w183": "You",
+      "w211": "Why",
+      "w212": "Plan",
+      "w216": "Skill",
+      "w226": "s",
+      "w253": "Knowledge graph",
+      "w256": "Suggestion Detail",
+      "w258": "Why：",
+      "w259": "Plan：",
+      "w285": "Labels",
+      "w286": "Add tag",
+      "w292": "Delete",
+      "w306": "Intent Cards",
+      "w307": "untriaged",
+      "w310": "Intent Card",
+      "w311": "Source",
+      "w312": "Triage",
+      "w314": "Cards",
+      "w315": "Build Now",
+      "w316": "Unresolved",
+      "w318": "Triage Distribution",
+      "w319": "Source Tag Distribution",
+      "w323": "blocked",
+      "w324": "Risk alerts",
+      "w326": "Clarifications",
+      "w328": "Slices",
+      "w329": "Add Slice",
+      "w331": "Experience reflux",
+      "w332": "Capture Insight",
+      "w333": "HEX",
+      "w335": "Size Band",
+      "w339": "Claude",
+      "w340": "Codex",
+      "w341": "OpenClaw",
+      "w342": "Antigravity",
+      "w356": "Project",
+      "w362": "alias (e.g. opencode)",
+      "w363": ".opencode/skills",
+      "w378": "All projects match",
+      "w384": "skills",
+      "w454": "Needs attention",
+      "w455": "Installed",
+      "w456": "Available to install",
+      "w506": "npx web-push generate-vapid-keys",
+      "w528": "Theme",
+      "w531": "Light",
+      "w532": "Dark",
+      "w548": "Companion",
+      "w567": "px",
+      "w578": "Rules navigation",
+      "w597": "L0",
+      "w719": "30 min",
+      "w720": "240 min",
+      "w745": "Cat Leaderboard",
+      "w749": "Who is the most beloved feline?",
+      "w750": "times mentioned",
+      "w762": "Lv.",
+      "w771": "Antigravity Desktop",
+      "w924": "System",
+      "w927": "Notifications & push",
+      "w928": "Operations",
+      "w942": "English",
+      "w962": "Tastes",
+      "w963": "Profiles",
+      "w964": "People",
+      "w965": "Entities",
+      "w966": "Events",
+      "w967": "Meetings",
+      "w003": "Page tabs",
+      "w004": "Memory",
+      "w006": "Main Star Study",
+      "w007": "Collapse dome",
+      "w008": "Expand dome",
+      "w009": "Memory",
+      "w010": "entries",
+      "w011": "Meetings · not connected yet",
+      "w012": "Summary candidate · open the entry to review",
+      "w013": "Taste order",
+      "w014": "Recent records",
+      "w015": "Most search hits",
+      "w016": "Reading",
+      "w017": "Temporarily unavailable",
+      "w018": "None yet",
+      "w020": "Cat summary · hypothesis · awaiting your confirmation",
+      "w021": "Cat summary · hypothesis",
+      "w022": "Not summarized yet · original words",
+      "w023": "Original words were not recorded",
+      "w024": "At the time:",
+      "w025": "Recording cat not recorded",
+      "w026": "Recorded on",
+      "w027": "· Proposed on",
+      "w028": "Not recorded",
+      "w029": "Only visible to you",
+      "w030": "correction suggestions",
+      "w031": "Recall history is temporarily unavailable",
+      "w032": "Search hits",
+      "w033": "times",
+      "w034": "Targeted delivery",
+      "w035": "current judgments ·",
+      "w036": "shared experiences",
+      "w037": "· Only visible to you",
+      "w038": "No longer used",
+      "w039": "Current record",
+      "w040": "· Long record; click to read in full",
+      "w042": "Sources cats can search: project documents, conversations, lessons, and external sources you connect.",
+      "w044": "＋ New library",
+      "w045": "All libraries",
+      "w046": "items",
+      "w047": "Manage libraries",
+      "w048": "Name",
+      "w049": "Type / visibility",
+      "w050": "Documents",
+      "w051": "Last document update",
+      "w052": "documents",
+      "w053": "Index and maintenance status",
+      "w054": "Passages",
+      "w055": "Relations",
+      "w056": "View knowledge emergence, retrieval evidence, and index health",
+      "w057": "collections",
+      "w058": "documents",
+      "w059": "Popular:",
+      "w060": "Last indexed:",
+      "w061": "Never",
+      "w062": "Adding this expands its visibility",
+      "w063": "· Indexed",
+      "w064": "Members and runtimes",
+      "w065": "Default cat",
+      "w066": "Assignment preferences",
+      "w067": "Current rule",
+      "w068": "Preferred over",
+      "w069": "Review required",
+      "w070": "Reason and evidence",
+      "w071": "Version",
+      "w072": "No routing preferences",
+      "w073": "Filter members",
+      "w074": "All",
+      "w075": "Enabled",
+      "w076": "Disabled",
+      "w077": "Filter connection types",
+      "w078": "Connection type",
+      "w079": "Cloud",
+      "w080": "Member",
+      "w081": "Model",
+      "w082": "Account",
+      "w083": "Now",
+      "w084": "@ Names",
+      "w085": "Enable",
+      "w086": "Owner",
+      "w087": "Not set",
+      "w088": "Account information unconfirmed",
+      "w089": "Available",
+      "w090": "Unverified",
+      "w091": "Unavailable",
+      "w092": "Restricted",
+      "w093": "Quota running low",
+      "w095": "Browse, filter, and study signal articles",
+      "w097": "New signals today",
+      "w098": "Unread",
+      "w099": "Last 7 days",
+      "w100": "Search signals...",
+      "w106": "All sources",
+      "w107": "Selected",
+      "w108": "Total",
+      "w109": "No matching signals",
+      "w110": "Study",
+      "w111": "Inbox",
+      "w112": "Study timeline",
+      "w113": "days",
+      "w114": "Podcast",
+      "w115": "Research report",
+      "w116": "Remove",
+      "w118": "Avatar uploaded",
+      "w119": "Environment variables",
+      "w123": "Awaiting approval",
+      "w124": "In progress",
+      "w125": "Completed",
+      "w126": "Task title",
+      "w127": "Describe the task's value in one sentence",
+      "w133": "Create",
+      "w134": "Awaiting suggestion",
+      "w135": "Approved",
+      "w136": "Task progress",
+      "w137": "Import backlog",
+      "w138": "Stage 0: Frame — six framing questions",
+      "w139": "Requirements audit",
+      "w141": "Last",
+      "w142": "Recall statistics",
+      "w143": "Cat initiated searches",
+      "w144": "General context delivery",
+      "w145": "Exact taste targeting",
+      "w146": "Harmful consumption",
+      "w147": "Unmet demand lower bound",
+      "w148": "Attention cost",
+      "w149": "Statistics temporarily unavailable",
+      "w150": "Recall history across conversations",
+      "w151": "Cat search",
+      "w152": "Context delivery",
+      "w153": "All members",
+      "w154": "Back to reply",
+      "w155": "Recalled",
+      "w156": "Read earlier records",
+      "w158": "Last 7 days",
+      "w159": "Last 30 days",
+      "w160": "Last 90 days",
+      "w161": "All time",
+      "w162": "Filter brake phrases",
+      "w163": "Selected brake details",
+      "w164": "Brake details",
+      "w165": "Back to conversation",
+      "w166": "Read more records",
+      "w167": "Memory search results",
+      "w168": "” search results",
+      "w169": "Search memories, documents, and conversations together; open the relation graph from each result's “⋯” menu.",
+      "w170": "Back to all memories",
+      "w171": "Observed",
+      "w172": "Candidate",
+      "w173": "Verified",
+      "w174": "Constitutional",
+      "w175": "Time not recorded",
+      "w176": "Open",
+      "w177": "Original text temporarily unavailable",
+      "w178": "View relation graph",
+      "w179": "The graph is not connected for this result type yet",
+      "w180": "Archived",
+      "w181": "Vectors",
+      "w182": "Passage vectors",
+      "w184": "Profile",
+      "w185": "How the cats see you",
+      "w186": "Change avatar",
+      "w187": "You are notified when cats mention these names in replies",
+      "w188": "Color",
+      "w189": "Primary",
+      "w190": "Light",
+      "w191": "Your speech bubbles use this color",
+      "w192": "Save",
+      "w193": "Conversation background",
+      "w194": "Default background for all conversations",
+      "w195": "Evolution",
+      "w196": "Blocker",
+      "w197": "Related",
+      "w198": "Dependencies only",
+      "w199": "Active",
+      "w200": "features /",
+      "w201": "dependencies",
+      "w202": "── Evolution",
+      "w203": "- - Blocker",
+      "w204": "··· Related",
+      "w205": "Close",
+      "w206": "Evolved from",
+      "w207": "Blocked by",
+      "w208": "Feature dependency graph",
+      "w209": "No features with dependencies match this filter — switch to All or refresh dependencies",
+      "w210": "Suggested cat",
+      "w213": "Submit assignment suggestion",
+      "w214": "SOP board",
+      "w215": "Handoff cat",
+      "w217": "Current focus",
+      "w218": "Update",
+      "w219": "No SOP board data",
+      "w220": "Thread status",
+      "w221": "Execution status of dispatched items",
+      "w222": "Matched by title",
+      "w223": "Last active:",
+      "w224": "Open thread",
+      "w225": "No linked thread",
+      "w227": "Configuration",
+      "w228": "Mon",
+      "w229": "Tue",
+      "w230": "Wed",
+      "w231": "Thu",
+      "w232": "Fri",
+      "w233": "Sat",
+      "w234": "Sun",
+      "w235": "Taste details",
+      "w236": "Back to tastes",
+      "w237": "Original words",
+      "w238": "Profile details",
+      "w239": "Back to profiles",
+      "w240": "Shared with everyone",
+      "w241": "Used in new conversations",
+      "w242": "Revisit on demand",
+      "w243": "Person details",
+      "w244": "Back to people",
+      "w245": "Only visible to you · recorded on",
+      "w246": "· Also known as",
+      "w247": "Event details",
+      "w248": "Back to events",
+      "w249": "Entity details",
+      "w250": "Back to entities",
+      "w251": "Search anchor",
+      "w252": "Query",
+      "w254": "nodes ·",
+      "w255": "relations",
+      "w257": "Status:",
+      "w260": "Lease",
+      "w261": "Expires",
+      "w262": "Heartbeat",
+      "w263": "Study ·",
+      "w264": "Start studying",
+      "w265": "Discuss in conversation",
+      "w266": "Multi-cat research",
+      "w267": "Linked conversation",
+      "w268": "Enter a thread ID to link...",
+      "w269": "Study notes",
+      "w270": "Generate quick listen",
+      "w271": "Generate deep discussion",
+      "w272": "minutes ·",
+      "w273": "segments",
+      "w274": "Stop",
+      "w275": "Play all",
+      "w276": "Study collection",
+      "w277": "Add to collection...",
+      "w278": "New collection...",
+      "w279": "Select an article to view its details.",
+      "w280": "Article deleted",
+      "w281": "Open original",
+      "w282": "AI summary",
+      "w283": "Body",
+      "w284": "Expand reading",
+      "w287": "Notes",
+      "w288": "Write your notes...",
+      "w289": "Saved",
+      "w290": "Move to Inbox",
+      "w291": "Mark as read",
+      "w293": "Visit",
+      "w294": "Fetching...",
+      "w295": "Fetch",
+      "w296": "On",
+      "w297": "Index",
+      "w298": "Healthy",
+      "w299": "Temporarily unavailable",
+      "w300": "items need maintenance",
+      "w301": "documents need verification",
+      "w302": "Enable all",
+      "w303": "Disable all",
+      "w304": "documents, added",
+      "w305": "documents, deduplicated",
+      "w308": "+ New intent card",
+      "w309": "Client's original words",
+      "w313": "Not evaluated",
+      "w317": "Confirmation needed",
+      "w320": "Document coverage",
+      "w321": "Stale; needs confirmation",
+      "w322": "No features",
+      "w325": "Runtime risk detection",
+      "w327": "Answer / reject",
+      "w330": "Edit",
+      "w334": "Triage evaluation",
+      "w336": "Save evaluation",
+      "w337": "Disable",
+      "w338": "Search capabilities...",
+      "w343": "Trust:",
+      "w344": "Official",
+      "w345": "Community",
+      "w346": "Failed to load capabilities",
+      "w347": "Found",
+      "w348": "results",
+      "w349": "capabilities",
+      "w350": "View details",
+      "w351": "No capabilities matching “",
+      "w352": "”",
+      "w353": "Search to discover capabilities",
+      "w354": "Supports Claude · Codex · OpenClaw · Antigravity",
+      "w355": "Select project",
+      "w357": "Mount rules",
+      "w358": "(default for all projects)",
+      "w359": "Standard mount points",
+      "w360": "Custom paths (ACP / A2A / unknown client)",
+      "w361": "None — add one using the form below",
+      "w364": "Detected",
+      "w365": "locations",
+      "w366": "Issues",
+      "w367": "All",
+      "w368": "In sync",
+      "w369": "Failed to load data",
+      "w370": "Loading...",
+      "w371": "No matching skills",
+      "w372": "No installed MCP servers",
+      "w373": "Adjust the category or search and try again.",
+      "w374": "Use the button above to add an MCP configuration",
+      "w375": "Per-cat access",
+      "w376": "Mount point disabled",
+      "w377": "Mount issue",
+      "w379": "Some projects match",
+      "w380": "Pending sync 0/",
+      "w381": "No projects found",
+      "w382": "All mounts correct",
+      "w383": "Some mounts missing",
+      "w385": "Registration consistent",
+      "w386": "Registration inconsistent",
+      "w387": "Reading accounts…",
+      "w388": "Search accounts or members",
+      "w389": "Filter accounts",
+      "w390": "OAuth login",
+      "w391": "API keys",
+      "w392": "Loading accounts...",
+      "w393": "Failed to load accounts",
+      "w394": "accounts in use by different members:",
+      "w395": "members)",
+      "w396": "Account directory",
+      "w397": "Provider",
+      "w398": "Account",
+      "w399": "Status",
+      "w400": "Quota",
+      "w401": "Used by",
+      "w402": "Actions",
+      "w403": "Signed in",
+      "w404": "Key entered",
+      "w405": "Configured",
+      "w406": "Awaiting login",
+      "w407": "Expired",
+      "w408": "Not signed in",
+      "w409": "Checking…",
+      "w410": "Check quota",
+      "w411": "Provider balance",
+      "w412": "Unsupported",
+      "w413": "In use",
+      "w414": "members",
+      "w415": "Switch to this",
+      "w416": "Account details",
+      "w417": "Following members:",
+      "w418": "None",
+      "w419": "Login directory",
+      "w420": "No matching accounts.",
+      "w421": "No accounts of this type.",
+      "w422": "Unavailable account",
+      "w423": "Failed to load profiles",
+      "w424": "No profile data",
+      "w425": "Add a structured profile block to cat-dossier.md first.",
+      "w426": "Grouped by model",
+      "w427": "Profiles describe a model's capabilities; each cat is an instance of that model.",
+      "w428": "cats have profile data",
+      "w429": "L0 capability summary:",
+      "w430": "▾ Routing signals",
+      "w431": "Good at",
+      "w432": "Avoid assigning",
+      "w433": "Owner observations",
+      "w434": "+ Add observation",
+      "w435": "▾ Recent evidence",
+      "w436": "No relevant evidence",
+      "w437": "Profile coverage",
+      "w438": "cats ·",
+      "w439": "models",
+      "w440": "Processing…",
+      "w441": "Configure",
+      "w442": "Repair",
+      "w443": "Install",
+      "w444": "Plugin integrations",
+      "w445": "Plugin status, external integrations, and installation results.",
+      "w446": "Plugin list unavailable; plugins cannot be displayed",
+      "w447": "Search all plugins",
+      "w448": "Plugin catalog ·",
+      "w449": "Check for updates",
+      "w450": "Unknown source",
+      "w451": "No matching plugins",
+      "w452": "Back to plugin list",
+      "w453": "Select a plugin to view its details",
+      "w457": "Developer docs",
+      "w458": "Install plugin ⌄",
+      "w459": "Install from package",
+      "w460": "Plugin repository",
+      "w461": "Plugin catalog",
+      "w462": "Built into the app",
+      "w463": "Local source",
+      "w464": "Diagnostic details",
+      "w465": "Check the installation requirements in the package and plugin documentation.",
+      "w466": "Try repairing first; if the issue persists, check the configuration and diagnostics below.",
+      "w467": "Check the configuration and plugin documentation, then use the plugin's available actions.",
+      "w468": "Update available",
+      "w469": "Update to",
+      "w470": "About",
+      "w471": "· Available version:",
+      "w472": "Remove plugin…",
+      "w473": "Uninstall plugin…",
+      "w474": "Voice services",
+      "w475": "Not installed",
+      "w476": "Running",
+      "w477": "Stopped",
+      "w478": "Installing",
+      "w479": "Change port or model",
+      "w480": "Uninstall",
+      "w481": "Custom terminology corrections",
+      "w482": "Add your own correction rules. Custom rules take priority over the built-in dictionary.",
+      "w483": "No custom rules",
+      "w484": "Recognized text",
+      "w485": "Correct term",
+      "w486": "Built-in dictionary",
+      "w487": "View",
+      "w488": "built-in rules",
+      "w489": "Language settings",
+      "w490": "Transcription language",
+      "w491": "Chinese",
+      "w492": "Auto detect",
+      "w493": "Whisper context prompt",
+      "w494": "Use default prompt",
+      "w495": "Customize the context prompt sent to Whisper. The model favors terms in the prompt. Leave blank to use the default.",
+      "w496": "Reset all settings",
+      "w497": "Notification channels",
+      "w498": "This browser does not support push notifications.",
+      "w499": "iPhone/iPad: add to your home screen before enabling notifications.",
+      "w500": "Browser push",
+      "w501": "Subscribed · delivered to notification center",
+      "w502": "Not subscribed",
+      "w503": "Push service not configured",
+      "w504": "Send test notification",
+      "w505": "Browser push needs a server key pair to identify the sender. Run in a terminal",
+      "w507": "Enter the generated keys below.",
+      "w508": "In-app notifications",
+      "w509": "In-page alerts, always on",
+      "w510": "Enabled",
+      "w511": "Notification preferences",
+      "w512": "Choose which events send notifications",
+      "w513": "Cat messages",
+      "w514": "AI replies and proactive messages",
+      "w515": "Permission requests",
+      "w516": "Notify when cats need authorization",
+      "w517": "@ Mentions",
+      "w518": "When collaborators mention you",
+      "w519": "Scheduled tasks",
+      "w520": "Scheduled task results",
+      "w521": "Signal updates",
+      "w522": "New signal alerts",
+      "w523": "Desktop updates",
+      "w524": "Manage automatic version checks. Manual checking is always available.",
+      "w525": "Check for updates automatically",
+      "w526": "On by default; checks at startup and every 24 hours while running. Turning this off does not interrupt a check or download in progress.",
+      "w527": "Off",
+      "w529": "UI packages, language, and colors are stored in this browser; reply display follows your account.",
+      "w530": "Colors",
+      "w533": "In use",
+      "w534": "New theme",
+      "w535": "Companion entry",
+      "w536": "The cat icon on the left recalls the desktop cat or opens the companion conversation.",
+      "w537": "View desktop plugin status and recovery",
+      "w538": "Skin",
+      "w539": "Changes animation only; your chosen companion and avatar stay the same.",
+      "w540": "Yanyan v1",
+      "w541": "Nine-state animated sprite sheet for Yanyan.",
+      "w542": "Xianxian v1",
+      "w543": "Nine-state animated sprite sheet for Xianxian, extracted from video. (Default)",
+      "w544": "Identity and persona",
+      "w545": "The companion entry name is fixed; its personality can still be adjusted.",
+      "w546": "Companion entry name",
+      "w547": "Cat Ball is the fixed companion entry name.",
+      "w549": "Persona tone",
+      "w550": "Describe the personality in one sentence, injected into the duty cat's prompt. Up to 200 characters.",
+      "w551": "Companion",
+      "w552": "Choose the cat that appears with you and handles front-desk replies; the avatar follows this choice.",
+      "w553": "Current companion",
+      "w554": "This cat handles front-desk conversations; changing the skin alone does not change the companion.",
+      "w555": "Proactivity policy",
+      "w556": "Adjust desktop companion behavior and notification preferences.",
+      "w557": "Autonomous cat activity",
+      "w558": "Allow the cat to jump, wave, and wander while idle.",
+      "w559": "Ambient only",
+      "w560": "Completely quiet; no proactive text popups.",
+      "w561": "Quiet badge",
+      "w562": "Low-priority events show a dot; hover for text. (Default)",
+      "w563": "Cat Ball size",
+      "w564": "Adjust the desktop companion's size.",
+      "w565": "Size",
+      "w566": "Range 43–192px, default 72px.",
+      "w568": "Reset size",
+      "w569": "Session creation",
+      "w570": "Session initialization",
+      "w571": "Turn construction",
+      "w572": "Client invocation",
+      "w573": "Turn end",
+      "w574": "Session end",
+      "w575": "Hook events",
+      "w576": "Editable",
+      "w577": "Read only",
+      "w579": "Lifecycle and injection",
+      "w580": "Agent rules",
+      "w581": "Failed to load rules",
+      "w582": "Session lifecycle",
+      "w583": "Cat execution pipeline. Select a stage for injection details; highlighted = injection point, pale = affected scope.",
+      "w584": "↻ Session loop — seal the session on context overflow or compression; the next invocation creates a session",
+      "w585": "↻ Turn loop — each message interaction is a turn",
+      "w586": "Event driven (outside the main pipeline)",
+      "w587": "Affected scope:",
+      "w588": "Injection point:",
+      "w589": "No injected segments at this structural stage",
+      "w590": "Select a stage above to view injection details",
+      "w591": "Model guides",
+      "w592": "File missing",
+      "w593": "Consumption chain:",
+      "w594": "lines",
+      "w595": "L0 system prompt template",
+      "w596": "Source template for the injected segments below. The compiler substitutes identity, teammates, and workflow triggers for each cat to create the system prompt.",
+      "w598": "L0 template (with placeholders)",
+      "w599": "Automatic installation unavailable",
+      "w600": "Add the MCP configuration manually",
+      "w601": "Copy CLI command",
+      "w602": "Paste into a terminal to install",
+      "w603": "Copy configuration file",
+      "w604": "Paste into the appropriate configuration file",
+      "w605": "Open settings",
+      "w606": "Configure in the platform's settings",
+      "w607": "Back",
+      "w608": "Installation details",
+      "w609": "One-click install",
+      "w610": "CLI install",
+      "w611": "Manual configuration",
+      "w612": "Installation configuration",
+      "w613": "Transport protocol",
+      "w614": "Launch command",
+      "w615": "Arguments",
+      "w616": "Installation method",
+      "w617": "Environment variables (optional)",
+      "w618": "Manual steps",
+      "w619": "Official service maintained by the platform",
+      "w620": "Community verified service, reviewed",
+      "w621": "Community contributed service; review before use",
+      "w622": "VAPID push keys",
+      "w623": "— Saved to runtime .env; leave key fields blank to preserve existing values.",
+      "w624": "Push public key",
+      "w625": "Configured; leave blank to keep",
+      "w626": "Push private key",
+      "w627": "Contact information",
+      "w628": "Push configuration saved; key fields cleared.",
+      "w629": "New keys generated; save to apply.",
+      "w630": "Generate VAPID keys",
+      "w631": "Save push configuration",
+      "w632": "Granted",
+      "w633": "Denied",
+      "w634": "Not chosen",
+      "w635": "Permission",
+      "w636": "Push service",
+      "w637": "Disabled",
+      "w638": "Devices",
+      "w639": "devices",
+      "w640": "Not configured",
+      "w641": "▸ Diagnostics",
+      "w642": "Linked devices",
+      "w643": "Last delivery:",
+      "w644": "Failed",
+      "w645": "Not tested",
+      "w646": "iPhone/iPad: PWA Web Push requires adding to the home screen first; regular Safari tabs are not supported.",
+      "w647": "+ Add account",
+      "w648": "Official login",
+      "w649": "Add Codex login",
+      "w650": "Add Claude token",
+      "w651": "No duplicate credentials needed when using an existing client configuration.",
+      "w652": "Add API key",
+      "w653": "Connect an API provider or custom gateway",
+      "w654": "Native login managed by the client",
+      "w655": "Edit note",
+      "w656": "Sign in again",
+      "w657": "Replace token",
+      "w658": "members use this account",
+      "w659": "SKILL.md missing",
+      "w660": "Leave blank to keep existing arguments",
+      "w661": "Key",
+      "w662": "Value",
+      "w663": "Leave blank to keep; enter a value to replace",
+      "w664": "Hide",
+      "w665": "Show",
+      "w666": "Not probed",
+      "w667": "Probing",
+      "w668": "Connected",
+      "w669": "Connection error",
+      "w670": "Connection timeout",
+      "w671": "New MCP",
+      "w672": "Managed MCP is a read-only preview; sensitive values show only their keys.",
+      "w673": "Preview CLI configuration changes before confirming installation.",
+      "w674": "Sensitive values are masked; unchanged fields keep their existing values.",
+      "w675": "MCP server name",
+      "w676": "Transport",
+      "w677": "Streaming HTTP",
+      "w678": "Resolver",
+      "w679": "Leave blank to keep the URL",
+      "w680": "Headers",
+      "w681": "e.g. npx",
+      "w682": "Leave blank to keep the command",
+      "w683": "Tools",
+      "w684": "Probe tool list",
+      "w685": "Probing tools…",
+      "w686": "No tools found; use refresh to probe",
+      "w687": "Installation preview",
+      "w688": "Identifier:",
+      "w689": "Will update: ~/.claude/mcp.json, ~/.codex/config.toml, ~/.gemini/settings.json, ~/.kimi/mcp.json",
+      "w690": "Connection is probed after installation",
+      "w691": "Restore global configuration",
+      "w692": "Cancel",
+      "w693": "Preview",
+      "w694": "Confirm installation",
+      "w695": "System configuration › Environment & files",
+      "w696": "Environment variables and data directories.",
+      "w697": "Data directories",
+      "w698": "(default:",
+      "w699": "Set (leave blank to keep)",
+      "w700": "Enter secret",
+      "w701": "Read only (credentials / startup only)",
+      "w702": "Protected",
+      "w703": "Capabilities",
+      "w704": "View docs",
+      "w705": "Operations sections",
+      "w706": "Background daemon sessions",
+      "w707": "Refresh",
+      "w708": "Take over",
+      "w709": "Copy",
+      "w710": "No background sessions found (~/.claude/jobs/ is empty)",
+      "w711": "Index and recall",
+      "w712": "Maintain retrieval: indexes, embedding services, feature switches, and tool usage observations.",
+      "w713": "Back to library",
+      "w714": "Health guard",
+      "w715": "The cats remind you to rest after continuous work",
+      "w716": "Enable health guard",
+      "w717": "Reminder interval",
+      "w718": "minutes",
+      "w721": "Reminder mode",
+      "w722": "Gentle",
+      "w723": "Hardcore",
+      "w724": "Requires a reason to continue; emergency skips are limited",
+      "w725": "A regular reminder you can dismiss",
+      "w726": "Night mode (23:00–06:00) is automatic — gentler reminders and softer colors",
+      "w727": "Package quarantined",
+      "w728": "Installation incomplete",
+      "w729": "Version incompatible with the host; disabled",
+      "w730": "Runtime error",
+      "w731": "Invalid configuration",
+      "w732": "Configuration incomplete",
+      "w733": "Authorization expired",
+      "w734": "Authorization failed",
+      "w735": "Runtime restricted",
+      "w736": "Authorization not connected",
+      "w737": "Awaiting authorization",
+      "w738": "Enabled, but not running",
+      "w739": "Slash commands",
+      "w740": "Keyboard shortcuts",
+      "w741": "Global",
+      "w742": "No data",
+      "w743": "Consecutive",
+      "w744": "days (longest",
+      "w746": "7 days",
+      "w747": "30 days",
+      "w748": "Star of the week",
+      "w751": "Work rankings",
+      "w752": "Night owl",
+      "w753": "late-night mentions",
+      "w754": "Chattiest",
+      "w755": "messages",
+      "w756": "Daily streak",
+      "w757": "Mishaps",
+      "w758": "No mishaps recorded",
+      "w759": "Achievement wall",
+      "w760": "No achievements unlocked",
+      "w761": "Owner capability level",
+      "w763": "To “",
+      "w764": "” still need",
+      "w765": "owner achievements",
+      "w766": "No level data",
+      "w767": "Game arena",
+      "w768": "Cat Kill wins",
+      "w769": "Who's the Spy embarrassments",
+      "w770": "Embarrassment champion",
+      "w772": "Runtime sessions (Café dispatched + IDE direct)",
+      "w773": "Active",
+      "w774": "Archived",
+      "w775": "Attention",
+      "w776": "Active",
+      "w777": "Sealing",
+      "w778": "Conflict",
+      "w779": "Sealed",
+      "w780": "Session identifiers",
+      "w781": "Runtime session ID:",
+      "w782": "Runtime conversation ID:",
+      "w783": "Policy",
+      "w784": "No runtime sessions",
+      "w785": "External project governance",
+      "w786": "Dispatch does not write into projects automatically; you explicitly start configuration, preview, and rollback.",
+      "w787": "Project path",
+      "w788": "Last sync",
+      "w789": "Actions",
+      "w790": "Older version",
+      "w791": "Installation incomplete",
+      "w792": "No external project governance records",
+      "w793": "Dispatch does not write into projects automatically; install here when needed.",
+      "w794": "Claude rescue center",
+      "w795": "Scanning...",
+      "w796": "Scan again",
+      "w797": "Repairs broken thinking signatures in Claude sessions. Backs up transcripts first and removes only thinking-only assistant turns.",
+      "w798": "Scan scope: ~/.claude/projects/**/*.jsonl on this machine",
+      "w799": "Just rescued",
+      "w800": "Claude sessions",
+      "w801": "No broken Claude sessions found",
+      "w802": "Claude sessions need rescue",
+      "w803": "Select sessions first, then run rescue.",
+      "w804": "Thinking-only turns:",
+      "w805": "Matched rescue rules",
+      "w806": "Rescue now",
+      "w807": "Native tools",
+      "w808": "MCP bridge",
+      "w809": "Skill calls",
+      "w810": "Tool usage log",
+      "w811": "Daily tool usage by cats",
+      "w812": "All cats",
+      "w813": "All types",
+      "w814": "Last 14 days",
+      "w815": "Last 30 days",
+      "w816": "Last 90 days",
+      "w817": "Brewing...",
+      "w818": "Failed to retrieve tool usage",
+      "w819": "No tool usage records yet",
+      "w820": "Data appears here once cats start working",
+      "w821": "Total calls",
+      "w822": "Daily usage trend",
+      "w823": "Tool usage by cat",
+      "w824": "Cat food usage over 7 days",
+      "w825": "No usage records",
+      "w826": "Calls count daily invocations; per-cat counts are participations. Multi-cat invocations mean cat totals can exceed the invocation total.",
+      "w827": "calls",
+      "w828": "Current default model:",
+      "w829": ". Historical totals are grouped by catId, without distinguishing model versions.",
+      "w830": "Input tokens",
+      "w831": "In",
+      "w832": "Output tokens",
+      "w833": "Out",
+      "w834": "7-day total",
+      "w835": "Total",
+      "w836": "Accounts and login",
+      "w837": "Capability profile sources",
+      "w838": "Capability market",
+      "w839": "Skill management",
+      "w840": "MCP management",
+      "w841": "System configuration",
+      "w842": "Collaboration and rules",
+      "w843": "Voice management",
+      "w844": "Notifications",
+      "w845": "Operations monitoring",
+      "w846": "Cat Ball appearance, persona, duty cat, and proactivity policy.",
+      "w847": "Push subscriptions, notification policies, and device integration.",
+      "w848": "Service health, command tools, and runtime observations.",
+      "w849": "Usage statistics",
+      "w850": "Leaderboard",
+      "w851": "Monitoring",
+      "w852": "Background sessions",
+      "w853": "Runtime sessions",
+      "w854": "Governance and brakes",
+      "w855": "Command reference",
+      "w856": "Emergency rescue",
+      "w857": "General",
+      "w858": "Open feature reference",
+      "w859": "Open system configuration",
+      "w860": "Hot reload runtime configuration",
+      "w861": "Save conversation memory",
+      "w862": "View conversation memories (all when no key is given)",
+      "w863": "Approve pending memory entries",
+      "w864": "Archive published memory entries",
+      "w865": "Knowledge base",
+      "w866": "Search project knowledge (Hindsight)",
+      "w867": "AI reflection on project knowledge",
+      "w868": "View today's Signal inbox",
+      "w869": "Search Signal articles",
+      "w870": "View / toggle signal sources",
+      "w871": "View Signal statistics",
+      "w872": "Tasks",
+      "w873": "Extract tasks from conversation",
+      "w874": "Polls",
+      "w875": "Open poll configuration",
+      "w876": "View current poll status",
+      "w877": "/vote cast <option>",
+      "w878": "Vote for an option",
+      "w879": "Close poll and show results",
+      "w880": "Cross-platform",
+      "w881": "List available slash commands",
+      "w882": "View the currently linked thread",
+      "w883": "/new [title]",
+      "w884": "Create and switch to a new thread",
+      "w885": "List recent threads",
+      "w886": "/use <feature|number|keyword>",
+      "w887": "Switch to a thread",
+      "w888": "Switch to a thread and send a message",
+      "w889": "View cats in this thread",
+      "w890": "Thread overview (title, time, cats)",
+      "w891": "View the last N turns in this thread (default 1, maximum 5)",
+      "w892": "Unlink this group's thread",
+      "w893": "Allow this group to use the bot",
+      "w894": "Prevent this group from using the bot",
+      "w895": "/focus [cat|clear]",
+      "w896": "View / set the preferred cat for this thread",
+      "w897": "/ask <cat> <message>",
+      "w898": "Send this message to a specific cat without changing the preferred cat",
+      "w899": "Toggle voice input",
+      "w900": "Toggle single / split screen",
+      "w901": "Select split pane",
+      "w902": "Split-screen mode",
+      "w903": "View current configuration and defaults.",
+      "w904": "Default execution record display",
+      "w905": "Choose whether execution records start collapsed or expanded. Conversations and individual replies can override this.",
+      "w906": "Collapsed",
+      "w907": "Show tool calls and duration summary first",
+      "w908": "Expanded",
+      "w909": "Show full execution record immediately",
+      "w910": "Default sending policy",
+      "w911": "While a cat works, queue new messages or steer the current reply. Override per conversation from the composer's + menu.",
+      "w912": "Queue",
+      "w913": "Start after the current turn ends",
+      "w914": "Steer current reply",
+      "w915": "Append to the current reply when supported and available; otherwise queue",
+      "w916": "Network",
+      "w917": "Storage",
+      "w918": "Lifecycle",
+      "w919": "Automatic cleanup periods. Set 0 to keep forever (recommended)",
+      "w920": "Runtime",
+      "w921": "Security",
+      "w922": "Market",
+      "w923": "Plugins and integrations",
+      "w925": "Rules and prompts",
+      "w926": "Voice",
+      "w929": "Member capabilities and routing status",
+      "w930": "Cat profiles",
+      "w931": "Model capability profiles, routing signals, and provenance",
+      "w932": "Session lifecycle, injection system, collaboration rules, and model guides.",
+      "w933": "Select member",
+      "w934": "House rules (shared by all cats)",
+      "w935": "Ragdoll (Claude)",
+      "w936": "Maine Coon (Codex)",
+      "w937": "Siamese (Gemini)",
+      "w938": "Configure voice input, voices, terminology, and view service status.",
+      "w939": "Interface language",
+      "w940": "Changes interface text only. Conversations, files, drafts, reading positions, and running work are unaffected.",
+      "w941": "Chinese (Simplified)",
+      "w943": "· English",
+      "w944": "Process talk in replies",
+      "w945": "Show in full",
+      "w946": "Move into execution record",
+      "w947": "Used when the cat does not separate process from answer. Changes only your view; original text remains expandable.",
+      "w948": "Settings temporarily unavailable; showing replies in full.",
+      "w949": "Read again",
+      "w950": "Click a card to preview / edit",
+      "w951": "All skills",
+      "w952": "Project skills",
+      "w953": "Toggle all filtered skills",
+      "w954": "Filter skills",
+      "w955": "Follow mount rules",
+      "w956": "MCP services, tool directories, and browser automation dependencies.",
+      "w957": "All MCP servers",
+      "w958": "Project MCP servers",
+      "w959": "Sync system configuration",
+      "w960": "Uninstall this MCP",
+      "w961": "Search and install MCP, skills, plugins, and other capabilities",
+      "w968": "Unarchive",
+      "w969": "Audit logs",
+      "w970": "EventAuditLog output",
+      "w971": "Runtime logs",
+      "w972": "Pino structured runtime logs",
+      "w973": "CLI archive",
+      "w974": "Raw CLI output archive",
+      "w975": "Redis development sandbox",
+      "w976": "Development Redis data",
+      "w977": "Uploads",
+      "w978": "File upload storage"
+    },
+    "currentDefault": "Current default",
+    "avatarUrl": "Avatar URL",
+    "marketInstall": "Install",
+    "trust": {
+      "official": "Official",
+      "verified": "Verified",
+      "community": "Community"
+    },
+    "port": {
+      "routeTitle": "Routing policy (budget constraints)",
+      "routeHelp": "Cats route autonomously by default. Only explicit hard constraints, such as budget, belong here. Explicit @ mentions always take priority.",
+      "reviewTitle": "Review scope",
+      "reviewHelp": "Applies to review, merge, and PR scenarios",
+      "architectureTitle": "Architecture scope",
+      "architectureHelp": "Applies to architecture, design, and tradeoff scenarios",
+      "monitorFailed": "Failed to load monitoring data",
+      "uptime": "Uptime",
+      "errorRate": "Error rate",
+      "otel": "OpenTelemetry",
+      "readiness": "Readiness checks",
+      "storage": "Storage",
+      "storageCounts": "{0} rows · {1} bytes",
+      "failures24h": "Failures in 24 hours",
+      "allFailures": "All failures",
+      "affectedCats": "Affected members",
+      "failureReasons": "Failure reasons",
+      "failingTools": "Failing tools",
+      "recentSamples": "Recent samples",
+      "telemetryOff": "OpenTelemetry is disabled",
+      "successfulCalls": "Successful calls in 30 minutes",
+      "failedCalls": "Failed calls",
+      "activeCalls": "Active calls",
+      "snapshots": "Snapshots",
+      "featureFlags": "Feature switches",
+      "capture": "Context capture",
+      "configReference": "Configuration reference (environment)",
+      "sessionViewer": "Session events viewer",
+      "runtimeTab": {
+        "chat": "Chat",
+        "handoff": "Handoff",
+        "raw": "Raw"
+      },
+      "page": "Page {0} / {1}",
+      "previous": "Previous",
+      "next": "Next",
+      "optionalGovernance": "Optional project governance",
+      "governanceHelp": "Cats can already work in this project. Preview exact changes before confirming; existing files will not be overwritten.",
+      "governOption": {
+        "guide": "Project guide",
+        "claude": "CLAUDE.md entry",
+        "gemini": "GEMINI.md entry",
+        "skills": "Project skills",
+        "sk": "Skill IDs",
+        "providers": "Clients",
+        "docs": "Document lifecycle"
+      },
+      "previewChanges": "Preview changes",
+      "previewRollback": "Preview rollback",
+      "paletteEditor": "OKLCH palette editor",
+      "interfacePackages": "Interface theme packages",
+      "catalogInstall": "Install from plugin catalog"
+    },
+    "defaultCatHelp": "This cat replies when no cat is @ mentioned in a new conversation",
+    "routingHelp": "Assignment preferences currently in effect",
+    "enablePrefix": "Enable",
+    "selectPrefix": "Select",
+    "colorPrefix": "Color",
+    "morePrefix": "More actions:",
+    "moreSuffix": "More actions",
+    "providerStatus": "{0} provider · {1}",
+    "availability": {
+      "degraded": "degraded",
+      "unavailable": "unavailable",
+      "live": "live"
+    },
+    "calc": {
+      "group": {
+        "accent": "Global accent (buttons / links / highlights / brand)",
+        "layers": "Surface elevation",
+        "bubble": "Bubbles / insets",
+        "text": "Text and lines",
+        "names": "Member colors",
+        "status": "Semantic status colors"
+      },
+      "field": {
+        "aH": "H",
+        "aC": "C",
+        "aL": "L",
+        "nH": "H",
+        "nC": "C",
+        "rail": "Rail",
+        "nav": "Sidebar",
+        "page": "Page",
+        "group": "Group",
+        "dHover": "Hover overlay",
+        "dSelected": "Selection overlay",
+        "dInset": "Input overlay",
+        "uH": "Bubble H",
+        "uC": "Bubble C",
+        "uL": "Bubble L",
+        "dCode": "Code overlay",
+        "tC": "Text C",
+        "strong": "Primary text",
+        "fg": "Secondary text",
+        "muted": "Notes",
+        "faint": "Placeholder / disabled",
+        "dLine": "Divider",
+        "dLineS": "Emphasis line",
+        "mL": "Name L",
+        "mC": "Name C",
+        "tL": "Avatar L",
+        "tTC": "Avatar C",
+        "sL": "L",
+        "sC": "C",
+        "okH": "Success H",
+        "warnH": "Warning H",
+        "dangerH": "Danger H",
+        "dangerL": "Danger L",
+        "infoH": "Info H",
+        "softL": "Notice background L"
+      },
+      "contrast": "Contrast"
+    },
+    "eval": {
+      "tab": "Eval",
+      "total": "Total verdicts",
+      "actionable": "Actionable",
+      "observing": "Keep observing",
+      "stale": "Needs reevaluation",
+      "ledger": "Periodic ledger",
+      "events": "Verdicts and reports",
+      "evalCat": "Evaluation cat",
+      "run": "Run evaluation",
+      "conclude": "Generate verdict"
+    },
+    "terms": {
+      "w001": "Actor",
+      "w002": "Context",
+      "w003": "Goal",
+      "w004": "Object State",
+      "w005": "Success Signal",
+      "w006": "Non-goal",
+      "w007": "Build Now",
+      "w008": "Clarify First",
+      "w009": "Validate First",
+      "w010": "Challenge",
+      "w011": "Later",
+      "w012": "Custom Terms",
+      "w013": "Dictionary",
+      "w014": "Language",
+      "w015": "Advanced",
+      "w016": "VAPID public key",
+      "w017": "VAPID private key",
+      "w018": "STDIO",
+      "w019": "Scheduler",
+      "w020": "Limb",
+      "w021": "Commits",
+      "w022": "Reviews",
+      "w023": "Bug Fixes"
+    },
+    "names": {
+      "Claude": "Claude",
+      "Codex": "Codex",
+      "OpenClaw": "OpenClaw",
+      "Antigravity": "Antigravity",
+      "Skill": "Skill",
+      "MCP": "MCP",
+      "English": "English",
+      "UI": "UI"
+    }
+  },
+  "v2g": {
+    "works": {
+      "title": "Works",
+      "thread": "This conversation",
+      "global": "All conversations",
+      "search": "Search work names…",
+      "type": "Work type",
+      "allTypes": "All types",
+      "loadMore": "Load more works",
+      "totalLatest": "{0} works · Newest first",
+      "empty": "No works match these filters",
+      "retry": "Retry",
+      "incomplete": "Work sources or versions are incomplete; the count is not confirmed yet",
+      "original": "Open in original conversation",
+      "coverCode": "Code",
+      "untitledImage": "Image",
+      "loading": "Loading works…",
+      "unavailable": "Works are temporarily unavailable",
+      "display": "View",
+      "cards": "Cards",
+      "list": "List",
+      "filters": {
+        "image": "Images",
+        "file": "Documents",
+        "codepr": "Code and PRs",
+        "audio": "Audio",
+        "video": "Videos",
+        "widget": "Pages"
+      },
+      "allWorks": "All works",
+      "more": "More artwork actions",
+      "copyFilename": "Copy full filename",
+      "copyLink": "Copy link",
+      "download": "Download",
+      "cover": "Work cover",
+      "unknownAuthor": "Unknown author"
+    },
+    "trash": {
+      "title": "Trash",
+      "empty": "Trash is empty",
+      "loading": "Loading...",
+      "untitled": "Untitled conversation",
+      "restore": "Restore"
+    },
+    "mission": {
+      "importProject": "+ Import project"
+    }
+  },
+  "v2h": {
+    "composer": {
+      "addContent": "Add content",
+      "add": "Add",
+      "context": "Reference a conversation or file",
+      "contextHint": "Include existing content in this message",
+      "upload": "Upload attachments",
+      "uploadHint": "Images, documents or archives, up to 5 files",
+      "whisper": "Whisper",
+      "whisperHint": "Visible only to the cats you select",
+      "whisperActiveHint": "On; select cats or click to turn off",
+      "preferredHeading": "This conversation · first choice without @",
+      "preferredNote": "Used only before any cat has replied",
+      "preferredDefault": "System default",
+      "preferredCount": "Preferred cats · {0}",
+      "modeLabel": "Send mode: {0}",
+      "modeNote": "Choose for this thread or as the default",
+      "steer": "Steer the current reply",
+      "queue": "Wait in queue",
+      "back": "Back to add menu",
+      "modeHeading": "Send mode",
+      "appliesTo": "Applies to",
+      "scope": {
+        "thread": "This thread",
+        "global": "Default for all"
+      },
+      "queueNote": "Start a new reply once the cat is free",
+      "steerNote": "Join the current reply when possible; otherwise wait in the queue"
+    },
+    "dialog": {
+      "processing": "Processing…",
+      "importing": "Importing...",
+      "importTitle": "Import project",
+      "importNamePlaceholder": "e.g. studio-flow",
+      "importPathPlaceholder": "/home/user/projects/studio-flow",
+      "forceTitle": "Force-reset this conversation?",
+      "forceDoes": "What it does: ",
+      "forceDoesText": "Cancel all cats running in this conversation and clear the stuck reply state.",
+      "forceKeeps": "What it keeps: ",
+      "forceKeepsText": "All messages and history are preserved; only runtime state is cleared.",
+      "forceWhen": "When to use: ",
+      "forceWhenText": "A last resort when a cat is stuck and Stop has no effect.",
+      "tokenTitle": "Claude · Long-lived token",
+      "tokenSetup": "Run claude setup-token in your own terminal and complete the official login. Paste the resulting token here, never in chat.",
+      "tokenScope": "For model requests and local MCP. Remote Control and claude.ai connectors are unavailable with this token.",
+      "tokenAccount": "Saving does not switch members. Account identity, expiry and quota cannot be verified from this token.",
+      "tokenDocs": "Official instructions",
+      "compiledLegend": "──── Separators are preview annotations marking injection boundaries; they are not included in the injected content.",
+      "historyShortcut": "Ctrl+R",
+      "historyPlaceholder": "Search history...",
+      "escape": "Esc",
+      "historyEmpty": "No matches",
+      "historyKeys": "↑↓ Select · Enter Confirm · Esc Close",
+      "brakeTitle1": "Time for a break!",
+      "brakeTitle2": "The cats are a little worried!",
+      "brakeTitle3": "Three-cat emergency intervention!",
+      "brakeDuration": "Focused for {0} minutes",
+      "brakeRest": "Take a break (5 minutes)",
+      "brakeWrap": "Wrap up (10 minutes)",
+      "brakeEmergency": "I have an emergency (reason required)",
+      "brakeReason": "Why do you need to continue? (required)",
+      "brakeContinue": "Confirm and continue",
+      "brakeLimit": "Emergency bypass limit reached (3 times in 4 hours). Take a break or wrap up.",
+      "brakeFooter": "A little pause helps you get going again~",
+      "voteTitle": "Start a vote",
+      "voteOption": "Option {0}",
+      "voteRemove": "Remove option {0}",
+      "voteAdd": "+ Add option",
+      "voteCats": "Voting cats",
+      "voteCatsUnavailable": "The vote action does not support selecting cats yet",
+      "voteStart": "Start vote",
+      "minutes": "{0} minutes",
+      "libraryNamePlaceholder": "notes",
+      "libraryNameHint": "Use lowercase letters, digits or hyphens",
+      "libraryDisplayPlaceholder": "Study notes",
+      "libraryRootHint": "Leave empty for managed storage",
+      "libraryRootPlaceholder": "Local directory to connect",
+      "libraryScan": "Scan preview",
+      "libraryScanCount": "{0} files ({1} Markdown)",
+      "librarySecrets": "Detected {0} sensitive findings. Review them before creating.",
+      "updateTitle": "This page has been updated",
+      "updateDescription": "This page is from a previous version. Sending and forwarding are paused to prevent incompatible submissions. Refresh to continue.",
+      "updateReload": "Refresh page",
+      "memberClose": "Close member window",
+      "steerTitle": "Handle this queued message",
+      "steerUnavailable": "Current handling state is unavailable. Close and retry.",
+      "steerGuide": "Join the current reply",
+      "steerInterrupt": "Interrupt and send",
+      "steerGuideUnavailable": "This cat cannot currently join an ongoing reply",
+      "steerMemberUnavailable": "Unavailable",
+      "steerEmpty": "No members are available in this conversation",
+      "steerMemberMode": "Message disposition for {0}",
+      "steerChooseMode": "Choose a disposition for each selected member",
+      "steerConfirm": "Confirm send",
+      "steerCount": " ({0})",
+      "organizerTitle": "Organize unlabeled threads",
+      "organizerLoading": "Analyzing...",
+      "organizerSuggest": "Suggest all",
+      "organizerAddLabel": "Add label",
+      "organizerDeleteLabel": "Delete label {0}",
+      "organizerNoLabels": "No labels yet",
+      "organizerLabelName": "Label name",
+      "organizerSearch": "Search conversations, projects, or IDs...",
+      "organizerNoProject": "No linked project",
+      "organizerNoAvailableLabels": "No labels available",
+      "organizerEmpty": "No unlabeled threads",
+      "organizerNoMatch": "No matching threads",
+      "organizerSelected": "{0} threads selected",
+      "organizerPick": "Click a label to classify a thread",
+      "organizerApply": "Apply to all ({0})",
+      "organizerNoBatchAction": "The current app saves individual labels and has no batch apply action"
+    },
+    "memory": {
+      "title": "Memory",
+      "subtitle": "Explore knowledge, search evidence and check index health",
+      "navigation": "Memory navigation",
+      "tabs": {
+        "feed": "Knowledge feed",
+        "search": "Search",
+        "status": "Index status",
+        "health": "Health",
+        "catalog": "Library",
+        "graph": "Knowledge graph"
+      },
+      "visibility": {
+        "public": "Public",
+        "internal": "Internal",
+        "private": "Private",
+        "restricted": "Restricted"
+      },
+      "collectionStatus": {
+        "active": "Active",
+        "archived": "Archived",
+        "ready": "Ready",
+        "registered": "Registered",
+        "indexing": "Indexing",
+        "indexed": "Indexed",
+        "error": "Error",
+        "empty": "Empty",
+        "unknown": "Unknown status"
+      },
+      "kind": {
+        "project": "Project",
+        "world": "World",
+        "domain": "Domain",
+        "research": "Research",
+        "global": "Global",
+        "other": "Other"
+      },
+      "docCount": "{0} documents",
+      "topKinds": "Top:",
+      "lastIndex": "Last indexed: {0}",
+      "never": "Never",
+      "loadMore": "Load more",
+      "createCollection": "+ New collection",
+      "searchPlaceholder": "Search project knowledge...",
+      "search": "Search",
+      "searchMeta": "match:{0} · authority:{1} · updated:{2}",
+      "unknown": "Unknown",
+      "open": "Open",
+      "graph": "Knowledge graph",
+      "mode": "Search mode",
+      "hybrid": "Hybrid search",
+      "lexical": "Exact search",
+      "semantic": "Semantic search",
+      "scope": "Scope",
+      "allScopes": "All scopes",
+      "documents": "Documents",
+      "conversations": "Conversations",
+      "sessions": "Sessions",
+      "depth": "Depth",
+      "summary": "Summary",
+      "raw": "Messages",
+      "dimension": "Dimension",
+      "allDimensions": "All dimensions",
+      "projectDimension": "Project",
+      "globalDimension": "Global",
+      "degraded": "Degraded configuration",
+      "healthy": "Healthy",
+      "unhealthy": "Unhealthy",
+      "backend": "Backend",
+      "threads": "Threads",
+      "passages": "Passages",
+      "passageVectors": "Passage vectors",
+      "edges": "Edges",
+      "embeddingModel": "Embedding model",
+      "lastRebuild": "Last rebuild",
+      "flags": "Feature flags",
+      "config": "Configuration reference",
+      "configNote": "These values are for reference. Manage them in the relevant feature settings or startup configuration.",
+      "rebuild": "Rebuild index",
+      "refreshStatus": "Refresh status",
+      "refresh": "Refresh",
+      "noSource": "This data is not yet exposed by the application.",
+      "recallFlags": "Recall feature flags",
+      "healthReport": "Health report",
+      "toolMetrics": "Tool usage metrics",
+      "evalHub": "Eval Hub",
+      "recallHeading": "Memory the cats used in this conversation",
+      "live": "Live",
+      "openMemory": "Open in Memory",
+      "pullCount": "Cat retrieved {0} items",
+      "pushCount": "System delivered {0} items",
+      "locateReply": "Locate reply",
+      "all": "All",
+      "pull": "Cat retrievals",
+      "push": "System deliveries",
+      "allCats": "All cats",
+      "ledger": "Consumption ledger",
+      "window": "Window",
+      "days": "{0}d",
+      "presented": "Presented",
+      "inspected": "Inspected",
+      "used": "Used",
+      "utilization": "Utilization",
+      "graphPlaceholder": "Search knowledge or enter an anchor (e.g. F186, harness)",
+      "graphFetch": "View graph",
+      "recallType": "Recall type",
+      "eventCount": "{0} recalls",
+      "resultCount": "{0} results",
+      "noResultDetails": "Result details were not recorded",
+      "afterRead": "Read afterwards",
+      "noObservedRead": "No later read observed",
+      "needsConfirmation": "Needs confirmation",
+      "confirmed": "Confirmed",
+      "frequent": "Frequent",
+      "upgrade": "Upgrade",
+      "noPendingKnowledge": "No knowledge awaiting confirmation",
+      "noKnowledge": "No data",
+      "frequentEmpty": "Frequent-hit statistics coming soon",
+      "upgradeEmpty": "Knowledge upgrades coming soon",
+      "approve": "Approve",
+      "dismiss": "Dismiss",
+      "undo": "Undo",
+      "knowledgeKind": {
+        "decision": "decision",
+        "lesson": "lesson",
+        "method": "method"
+      },
+      "recallFailed": "Recall failed",
+      "noHits": "No matches",
+      "resultsUnrecorded": "Results were not recorded",
+      "recallHits": "{0} matches · {1}",
+      "readCount": "Read {0} afterward",
+      "titleUnrecorded": "{0} · Title was not recorded",
+      "contextDelivery": "General context delivery",
+      "recentMemory": "Recent memories",
+      "queryUnrecorded": "Query was not recorded",
+      "namedDelivery": "Named delivery · {0}",
+      "moreUnrecorded": "Details for {0} more results were not recorded",
+      "retrievalCount": "{0} cat retrievals",
+      "among": "; ",
+      "readEvents": "{0} followed by reading the results",
+      "deliveryCount": "{0} system deliveries",
+      "recallEmpty": "This conversation has no recall records yet. Cat retrievals and system deliveries will appear here.",
+      "recallNoType": "No records of this type.",
+      "readObservation": "“Read afterward” observes subsequent reads by the same cat in the same invocation. Reads count within 20 tool calls or 5 minutes; observation stops once both limits are exceeded.",
+      "replyAt": "Reply at {0}",
+      "recallTypes": {
+        "person_entity": "Person",
+        "operational_precedent": "Operational precedent",
+        "taste": "Taste",
+        "profile": "Profile",
+        "event": "Event",
+        "decision": "Decision",
+        "project_knowledge": "Feature",
+        "cat_owned_seed": "Cat-owned seed",
+        "thread_overview": "Thread overview",
+        "feature": "Feature",
+        "architecture": "Architecture",
+        "lesson": "Lesson",
+        "feedback": "Feedback",
+        "research": "Research",
+        "discussion": "Discussion",
+        "phase": "Phase",
+        "plan": "Plan",
+        "spec": "Spec",
+        "adr": "Decision",
+        "knowledge": "Knowledge",
+        "thread": "Conversation",
+        "session": "Session",
+        "person": "Person",
+        "entity": "Entity",
+        "commit": "Commit"
+      },
+      "cueStates": {
+        "presented_unreported": "Delivered · Unreported",
+        "drilled": "Inspected",
+        "applied": "Applied",
+        "dismissed": "Dismissed",
+        "invalidated": "Delivery invalidated"
+      },
+      "recallKind": {
+        "search": "Search",
+        "graph": "Graph lookup",
+        "delivery": "Delivery"
+      },
+      "recallCounts": {
+        "search": "Search {0}",
+        "graph": "Graph {0}",
+        "delivery": "Delivery {0}"
+      }
+    },
+    "literals": {
+      "l001": "tdd, worktree",
+      "l002": "Skill ID",
+      "l004": "--flag value",
+      "l006": "--flag value",
+      "l007": "deepseek",
+      "l008": "gemini38",
+      "l009": "~/.cat-cafe/agy-profiles",
+      "l010": "kimi",
+      "l011": "acp",
+      "l012": "/avatars/xxx.png",
+      "l013": "/avatars/xxx.png",
+      "l014": "zm_yunjian",
+      "l015": "Feature",
+      "l016": "PR",
+      "l017": "HEAD",
+      "l018": "Failed",
+      "l019": "URL",
+      "l022": "Skill scope",
+      "l023": ".opencode/skills",
+      "l024": "MCP scope",
+      "l025": "API Key",
+      "l026": "API Key",
+      "l027": "sk-ant-oat01-…",
+      "l028": "org/model-name",
+      "l029": "SOP",
+      "l030": "origin/main",
+      "l031": "localhost:5173",
+      "l032": "media/output.mp4",
+      "l033": "72h+",
+      "l034": "72h+",
+      "tier": "Tier {0}",
+      "guides": "guides",
+      "files": "files"
+    },
+    "threadSettings": {
+      "title": "Conversation settings",
+      "close": "Close conversation settings",
+      "goalGroup": "Goal",
+      "executionGroup": "Replies",
+      "organizationGroup": "Organization",
+      "goal": "Conversation goal",
+      "goalDescription": "Save, restore and sync the intended outcome",
+      "cats": "Default cats",
+      "catsDescription": "Choose who replies when no cat is explicitly mentioned",
+      "effort": "Reasoning effort",
+      "effortDescription": "Override each cat’s reasoning depth for this conversation",
+      "speed": "Speed tier",
+      "speedDescription": "Choose Standard / Fast for Codex OAuth cats",
+      "status": "Codex runtime status",
+      "statusDescription": "Live capabilities, permissions, accounts and quotas",
+      "labels": "Labels",
+      "labelsDescription": "Organize and filter this conversation",
+      "feature": "Linked Feature",
+      "featureDescription": "Link this conversation to a Feature",
+      "pin": "Pin",
+      "pinned": "Pinned",
+      "background": "Chat background",
+      "backgroundUnavailable": "The current app has no per-conversation background action or data"
+    },
+    "marketplaces": {
+      "title": "Plugin repositories",
+      "close": "Close plugin repositories",
+      "official": "Official plugin repository",
+      "default": "Default",
+      "environment": "Deployment preset",
+      "defaultBranch": "Default branch",
+      "removeSource": "Remove {0} · {1}",
+      "branch": "Branch: {0}",
+      "synced": "Synced · {0} plugins",
+      "pending": "Waiting to sync",
+      "addSource": "Add plugin repository",
+      "sourceUrl": "Plugin repository URL",
+      "urlPlaceholder": "https://git.example.com/team/plugins.git",
+      "branchName": "Branch name",
+      "branchPlaceholder": "Branch (optional)",
+      "retry": "Retry sync",
+      "removeConfirm": "Remove this repository? Its uninstalled plugins will no longer be listed. Installed plugins are unaffected.",
+      "remove": "Remove repository"
+    },
+    "mailbox": {
+      "ignoreDialog": "Confirm ignore requests",
+      "ignoreExplanation": "Hide {0} @you requests from {1} in your to-do. Original items stay unchanged and can be restored in Ignored.",
+      "ignoreConfirm": "Confirm ignoring {0} items",
+      "periods": {
+        "today": "today",
+        "week": "the last seven days",
+        "earlier": "earlier",
+        "all": "all time"
+      }
+    }
+  },
+  "chat": {
+    "projectPath": {
+      "": "No project"
+    },
+    "inboxTitle": {
+      "undefined": "{0}",
+      "decision": "{1} · {0}",
+      "message": "{1}：{0}"
+    },
+    "inboxMeta": {
+      "write": "Write permission · {0}",
+      "thread": "New conversation · {0}",
+      "command": "Run command · {0}",
+      "ask": "Answer needed · {0}",
+      "proposal": "Proposal · {0}",
+      "memory": "Memory proposal · {0}"
+    },
+    "freePlaceholder": {
+      "true": "Sent only to this cat; not retained"
+    },
+    "freePlain": {
+      "true": "Other answer",
+      "false": "Write your answer"
+    },
+    "inboxCard": "{0} · {1} · {2}",
+    "workType": {
+      "true": "Page"
+    },
+    "openingLabel": {
+      "true": "Companionship and relationships",
+      "false": "Historical capability assessment · {0}"
+    },
+    "cardTitle": {
+      "undefined": "{0}",
+      "": "{0}",
+      "cbauth": "Callback authorization failed",
+      "cloudRecovery": "Restore cloud connection"
+    },
+    "cardLabel": {
+      "undefined": "{0}",
+      "": "{0}",
+      "workref": "Version {1}"
+    },
+    "fieldValue": {
+      "undefined": "{0}",
+      "reason": "{1}",
+      "cat": "{2}",
+      "time": "{0}",
+      "fallback": "Fallback succeeded"
+    },
+    "answer": {
+      "undefined": "{0}",
+      "picked": "{0}",
+      "answered": "Answered",
+      "unanswered": "Unanswered"
+    },
+    "memberName": "{0} {1}",
+    "proposalFirst": {
+      "": "First message to this conversation"
+    },
+    "rawTitle": {
+      "": "{0}",
+      "undefined": "{0}"
+    },
+    "resultState": {
+      "superseded": "Superseded",
+      "unknown": "Result not yet confirmed",
+      "ok": "Approved",
+      "not_now": "Defer recording",
+      "partially_materialized": "Partially recorded",
+      "materialized": "Recorded",
+      "confirmed": "Recorded",
+      "accepted": "Accepted",
+      "declined": "Rejected"
+    },
+    "emptyValue": {
+      "undefined": "—",
+      "null": "—",
+      "": "—"
+    },
+    "richDefaultTitle": {
+      "checklist": "Checklist · {0}/{1} complete",
+      "html_widget": "Page widget"
+    },
+    "richTitle": {
+      "audio": "Voice · {1}",
+      "diff": "Changes · {2}"
+    },
+    "cloudState": {
+      "failed": "Delivery failed",
+      "unknown": "Delivery unconfirmed"
+    },
+    "cardNotice": {
+      "approval": "Awaiting your approval · Handle in Inbox"
+    },
+    "bundleTitle": "{0} · {1}",
+    "commands": {
+      "group": {
+        "signals": "Signals"
+      },
+      "emptyMemory": {
+        "": "Empty",
+        "undefined": "Empty"
+      },
+      "title": {
+        "vote": "Start a vote",
+        "help": "Command /help",
+        "voteStatus": "{0}: {1} votes",
+        "noVote": "No vote in progress",
+        "remember": "Remembered: {0}",
+        "recall": "Recall {0}",
+        "configSet": "Set: {0}",
+        "config": "Conversation configuration",
+        "tasks": "Extracted 2 tasks from the conversation",
+        "evidence": "Evidence: {0}",
+        "reflect": "Sol started reflecting; results will be recorded in memory",
+        "approve": "Memory confirmed",
+        "archive": "Memory archived",
+        "unknown": "Unknown command. Type / to see available commands",
+        "game": "Start Werewolf",
+        "undefined": "{2}"
+      },
+      "query": {
+        "help": "{0}",
+        "vote": "{0}",
+        "voteStatus": "{0}",
+        "noVote": "{0}",
+        "remember": "{2}",
+        "recall": "{1}",
+        "configSet": "{0}",
+        "config": "{0}",
+        "tasks": "{0}",
+        "evidence": "{0}",
+        "reflect": "{0}",
+        "approve": "{0}",
+        "archive": "{0}",
+        "unknown": "{0}",
+        "game": "{0}",
+        "undefined": "{0}"
+      },
+      "emptyQuery": {
+        "": "All",
+        "undefined": "All"
+      },
+      "description": {
+        "/help": "List available commands",
+        "/config": "View conversation configuration",
+        "/config set": "Change a setting, for example /config set thinking high",
+        "/remember": "Ask a cat to remember something",
+        "/recall": "Recall memory by keyword",
+        "/approve": "Confirm a pending memory",
+        "/archive": "Archive a memory",
+        "/evidence": "Search evidence",
+        "/reflect": "Ask a cat to reflect",
+        "/tasks extract": "Extract tasks from the conversation",
+        "/vote": "Start a vote; /vote status · cast · end",
+        "/thread": "Reference a conversation",
+        "/file": "Reference a workspace file"
+      },
+      "body": {
+        "recall": "Found {1} memories.",
+        "config": "- Default cat: Sol @sol\n- Send mode: {2}\n- Reasoning effort: default",
+        "evidence": "3 evidence items; highest match 0.82.",
+        "game": "{3} · {4}{5}, {1} cats participate. Opus @opus is the judge."
+      }
+    },
+    "thread": {
+      "pinLabel": {
+        "true": "Unpin"
+      },
+      "menu": {
+        "settings": "Conversation settings",
+        "organize": "Organize into a group…",
+        "exportPng": "Export image (PNG)",
+        "downloadMarkdown": "Download chat history (Markdown)",
+        "downloadText": "Download chat history (plain text)",
+        "moveToTrash": "Move to trash…",
+        "removeFromGroup": "Remove from group"
+      },
+      "branch": {
+        "title": "Branch from here",
+        "desc": "Create a conversation with context up to this message. You can edit the first message.",
+        "foot": "Create branch"
+      }
+    },
+    "projectEmpty": {
+      "true": "Lobby (no project)"
+    },
+    "notifications": {
+      "submission": {
+        "title": "Branch {0}",
+        "note": "Branched from “{0}”",
+        "importedThreadTitle": "Attached session",
+        "sessionAttached": "Attached {0}",
+        "importFailed": "Could not attach the original session: its file could not be read. Try again later or choose another session."
+      }
+    },
+    "featureName": "{0} {1}",
+    "forward": {
+      "multi": "Forward {0} selected messages",
+      "msg": "Forward this message",
+      "sel": "Forward selected text",
+      "block": "Forward this block"
+    },
+    "scanLabel": {
+      "false": "Preview scan"
+    },
+    "indexStatus": {
+      "indexing": "Index status · Indexing",
+      "ready": "Index status · Ready"
+    },
+    "removeGroup": {
+      "false": "Delete group"
+    },
+    "memberLabel": "{0} @{1}",
+    "verifyFailure": {
+      "running": "This session is running in {0}",
+      "bound": "This session is already attached to a conversation.",
+      "missing": "Only the configured owner can attach this session."
+    },
+    "workFrom": {
+      "true": " · From “{0}”"
+    },
+    "contextKind": {
+      "review": "Content review",
+      "quote": "Quote"
+    },
+    "modificationState": {
+      "failed": "The update failed.",
+      "interrupted": "Interrupted",
+      "unknown": "Result unconfirmed",
+      "withdrawn_running": "Still running after withdrawal"
+    },
+    "threadNote": {
+      "true": "Recovered"
+    },
+    "rebuildTarget": {
+      "true": "all indexes",
+      "false": "the index for “{0}”"
+    },
+    "forgetTitle": {
+      "false": "Forget…"
+    },
+    "sidebar": {
+      "menu": {
+        "label": "Let cats classify ({0} unclassified)",
+        "classifyManually": "Classify manually in bulk…",
+        "markAllRead": "Mark all as read ({0})",
+        "collapseSidebar": "Collapse sidebar"
+      }
+    },
+    "project": {
+      "rename": {
+        "title": "Change display name"
+      }
+    },
+    "group": {
+      "rename": {
+        "title": "Rename group"
+      }
+    },
+    "queueRecallAppend": {
+      "title": "Recall and edit",
+      "text": "Append the recalled content to the current draft?"
+    },
+    "deliveryState": {
+      "failed": "Failed"
+    },
+    "routingRedirect": {
+      "title": "Confirm redirection",
+      "unavailable": "Unavailable: {0}.",
+      "targets": "Redirect to: {0}.",
+      "confirm": "Confirm redirection"
+    },
+    "externalSub": "{0} · {1}",
+    "executionGroup": {
+      "thinking": "Thinking",
+      "subagents": "Agents",
+      "tools": "Tool calls"
+    },
+    "executionProgress": {
+      "true": "Reading conversation context"
+    },
+    "workContext": "{0} · Version {1}",
+    "selectionLabel": {
+      "true": "{0} · {1}",
+      "false": "Message excerpt · {1}"
+    },
+    "revealed": {
+      "true": " · Revealed"
+    },
+    "helpLine": "- `{0}` {1}",
+    "gameVoice": {
+      "true": "Voice"
+    }
+  },
+  "organize": {
+    "dialog": {
+      "inGroup": "In “{0}”",
+      "title": "Organize into a group"
+    },
+    "submitLabel": {
+      "true": "Create group · {0} conversations",
+      "false": "Join group · {0} conversations"
+    },
+    "organizeInto": "Organize into",
+    "newGroup": "New group",
+    "groupName": "Conversation group name",
+    "searchPlaceholder": "Search conversations to add",
+    "pickUngrouped": "Select ungrouped",
+    "clearSelection": "Clear selection",
+    "pickTwo": "Select at least 2 conversations"
+  },
+  "memoryOwners": {
+    "search": {
+      "rank": "Rank {0}",
+      "relevance": {
+        "exact_anchor": "Exact anchor match",
+        "exact_title": "Exact title match",
+        "phrase": "Source phrase match",
+        "unknown": "Relevance not yet determined"
+      }
+    },
+    "stateNote": {
+      "unavailable": "Temporarily unavailable",
+      "pending_approval": "Awaiting decision",
+      "not_now": "Deferred",
+      "partially_materialized": "Partially accepted",
+      "materialized": "Accepted",
+      "withdrawn": "Retracted",
+      "active": "",
+      "current": "",
+      "retired": "Retired",
+      "pending": "Awaiting decision",
+      "approving": "Working",
+      "approved": "Approved",
+      "rejected": "Denied",
+      "applied": "Applied",
+      "replayed": "Confirmed",
+      "undefined": ""
+    },
+    "layer": {
+      "primer": "Profiles",
+      "corpus": "Shared facts",
+      "capsule": "Opening summary"
+    },
+    "field": {
+      "occurredAt": "Occurred at",
+      "duration": "Duration",
+      "asOf": "Reference as of",
+      "brakeAction": "Next similar task",
+      "brakeRule": "Recorded rule",
+      "why": "Why",
+      "advice": "Suggestion",
+      "goal": "Goal"
+    },
+    "topic": "Topic and significance",
+    "uncertain": "Uncertain",
+    "aliases": "Aliases",
+    "openingMode": "Opening reference",
+    "stance": "Stance",
+    "takeaway": "Takeaway",
+    "quotes": "Original words",
+    "sourceMissing": "Original source not recorded",
+    "proposal": "Revision proposal",
+    "state": {
+      "active": "Current record",
+      "current": "Current assessment"
+    },
+    "claims": "Facts and assessments",
+    "interactions": "Shared experiences",
+    "redacted": "This content was forgotten",
+    "retireClaim": "No longer valid",
+    "proposals": "Profile proposals",
+    "noProposals": "No proposals",
+    "corrections": "Correction proposals",
+    "category": {
+      "taste": "Preferences",
+      "person": "People",
+      "entity": "Entities",
+      "meeting": "Meetings · not connected yet"
+    },
+    "mode": {
+      "onDemand": "Revisit on demand"
+    },
+    "fieldValue": {
+      "brakeAction": "Not connected"
+    },
+    "usage": "Context inclusion and read history",
+    "metric": {
+      "currentOpening": "Current version included",
+      "currentRead": "Current version read",
+      "allOpening": "All versions included",
+      "allRead": "All versions read",
+      "backend": "Backend",
+      "threads": "Threads",
+      "passages": "Passages",
+      "vectors": "Embedded passages",
+      "relations": "Edges",
+      "rebuilt": "Last rebuild",
+      "totalDocs": "Total documents",
+      "contradictions": "Contradictions",
+      "stale": "Stale · Unverified"
+    },
+    "usageKind": {
+      "opening": "Included at opening",
+      "read": "Read"
+    },
+    "curation": "Memory curation",
+    "curatedBy": "Curated by {0}",
+    "service": {
+      "state": {
+        "starting": "starting"
+      }
+    },
+    "metricValue": {
+      "rebuilt": "{0} ago"
+    },
+    "health": {
+      "knowledgeDistribution": "Knowledge distribution",
+      "libraryHealth": "Library health",
+      "searchQuality": "Search quality",
+      "replayDrift": "Replay drift",
+      "label": "Broken links",
+      "distributionShare": "{0} {1}%",
+      "brokenLinks": "{0} broken links",
+      "librarySummary": "{0} collections, {1} archived",
+      "hitRateWindow": "Hit rate {0} · {1} days",
+      "value": "{0} searches · {1} reflections / {2} days"
+    },
+    "categories": {
+      "meeting": "Meetings"
+    },
+    "matter": {
+      "readError": "This matter is temporarily unavailable.",
+      "search": "Find a matter",
+      "stale": "Content changed. Read again.",
+      "unavailable": "Source unavailable. Read again.",
+      "empty": "No matters recorded yet.",
+      "edit": "Edit description",
+      "addSource": "Add source",
+      "sourcesChanged": "The source was corrected; the summary has not been reviewed. Check the original words and update the description.",
+      "sourceChanged": "The original message was corrected. Select the source again.",
+      "quoted": "Referenced material",
+      "superseded": "Replaced",
+      "retiredEntry": "No longer applicable",
+      "replace": "Replace source",
+      "retireEntry": "Mark no longer applicable",
+      "retire": "Retired",
+      "forget": "Forget this matter",
+      "description": "Cat's description",
+      "messageLink": "Message link",
+      "quote": "Quoted text",
+      "confirmTitle": {
+        "forget": "Forget “{0}”?",
+        "retire": "Stop using “{0}”?"
+      },
+      "confirmText": {
+        "forget": "Delete this page and its source links. Original messages are preserved. This cannot be undone.",
+        "retire": "Stop using it in future reviews; preserve the record and sources."
+      }
+    },
+    "candidate": {
+      "title": "Expand visibility?",
+      "ok": "Include and expand visibility"
+    },
+    "widen": "Visibility expands: {0} → {1}",
+    "rebuild": {
+      "title": "Rebuild {0}?",
+      "text": "Recall will be slower during rebuilding, which takes about {0} minutes.",
+      "ok": "Rebuild index"
+    },
+    "forget": "Permanently forget person",
+    "forgetDialog": {
+      "consequences": "After forgetting, cats will no longer recall this item, and it will be removed from recall history.",
+      "check": "I understand this cannot be undone"
+    },
+    "predicate": "Fact name",
+    "value": "Fact value",
+    "statement": "Assessment",
+    "endorsed": "Endorsed",
+    "rejected": "Not endorsed",
+    "headline": "Experience",
+    "scene": "Scene at the time"
+  },
+  "memory": {
+    "recallCount": "Recall count",
+    "confidence": "Confidence",
+    "semanticService": "Semantic search service",
+    "refreshStatus": "Refresh status",
+    "rebuildIndex": "Rebuild index",
+    "serviceActions": "Service actions",
+    "runLog": "Runtime logs",
+    "noLogs": "No logs yet",
+    "warmupPending": "Index pending",
+    "continueWarmup": "Continue indexing",
+    "flagsHelp": "Three modes: observe in shadow mode before enabling.",
+    "health": "Health",
+    "evaluate": "Eval",
+    "newLibrary": "New collection",
+    "reread": "Read again",
+    "loadMore": "Read more",
+    "confirmSentence": "Confirm this statement"
+  },
+  "common": {
+    "status": {
+      "error": "Error",
+      "running": "Running",
+      "notInstalled": "Not installed",
+      "completed": "Completed",
+      "cancelled": "Cancelled",
+      "connected": "Connected",
+      "disabled": "Disabled",
+      "disconnected": "Disconnected",
+      "notConfigured": "Not configured",
+      "permissionDenied": "Denied"
+    },
+    "effectRestart": "Restart required",
+    "justNow": "just now",
+    "type": "Type",
+    "accept": "Accepted",
+    "reject": "Rejected",
+    "source": "Source",
+    "view": "View",
+    "you": "You",
+    "save": "Save",
+    "cancel": "Cancel",
+    "retry": "Retry",
+    "edit": "Edit",
+    "remove": "Remove",
+    "artType": {
+      "image": "Image",
+      "file": "Documents",
+      "code": "Code",
+      "pr": "PR",
+      "audio": "Voice",
+      "video": "Videos",
+      "widget": "Widget"
+    },
+    "install": "Install",
+    "restore": "Restore",
+    "name": "Name",
+    "add": "Add",
+    "download": "Download",
+    "moreActions": "More actions",
+    "refresh": "Refresh",
+    "open": "Open",
+    "cat": "Cat",
+    "time": "Time",
+    "loading": "Loading…",
+    "confirm": "Confirm",
+    "tags": "Labels",
+    "details": "Details",
+    "approve": "Approve",
+    "stop": "Stop",
+    "all": "All",
+    "viewMode": {
+      "list": "List",
+      "cards": "Cards"
+    },
+    "rename": "Rename",
+    "send": "Send",
+    "state": "Status",
+    "note": "About this filter",
+    "optional": "Optional",
+    "messages": "Messages",
+    "create": "Create",
+    "identifier": "ID",
+    "currentThread": "This conversation",
+    "done": "Completed",
+    "delete": "Delete",
+    "expand": "Expanded",
+    "collapse": "Collapsed",
+    "clear": "Clear",
+    "back": "Back",
+    "threads": "Chat",
+    "none": "None",
+    "select": "Select",
+    "memory": "Memory",
+    "import": "Import",
+    "export": "Export",
+    "uninstall": "Uninstall",
+    "gotIt": "Got it",
+    "close": "Close",
+    "undo": "Undo",
+    "works": "Works",
+    "search": "Search",
+    "copy": "Copy",
+    "reset": "Reset"
+  },
+  "ext": {
+    "need": {
+      "config": "Incomplete configuration",
+      "update": "Update available"
+    },
+    "needAct": {
+      "update": "Update"
+    },
+    "connection": "Connection",
+    "testConn": "Test connection",
+    "installing": "Installing",
+    "version": "Version",
+    "offlineInstall": "Offline installation",
+    "address": {
+      "title": "In conversations",
+      "help": "Use @alias to address this plugin in chat. Its avatar appears on messages and recipients. Changes apply immediately without restarting; sent and queued messages still reach it.",
+      "alias": "Aliases",
+      "icon": "Avatar",
+      "iconReset": "Restore plugin icon",
+      "off": "Plugin disabled. @{0} remains reserved for it; enable it to receive messages."
+    },
+    "unsaved": "Unsaved configuration",
+    "discard": "Discard changes",
+    "saveConfig": "Save configuration",
+    "settings": "Settings ›"
+  },
+  "inbox": {
+    "tabs": {
+      "recover": "Restore",
+      "returnToPending": "Return to to-do",
+      "handled": "Processed",
+      "viewNamed": "View {0}",
+      "approvalCard": "Approval card",
+      "origin": "Original trigger",
+      "count": "{0} items in this scope",
+      "pending": "Pending approvals",
+      "approvalHistory": "Approval history",
+      "acceptLabel": "Approve {0} items"
+    },
+    "submitAnswer": "Submit answer",
+    "title": "To-do",
+    "viewSchedule": "View schedule",
+    "historyMenu": {
+      "label": "Ignored · {0}",
+      "ignoreTimeSpan": "Ignore all messages mentioning you in this time range"
+    },
+    "handledMentions": "Handled mentions",
+    "approvals": "Approval records",
+    "decide": "To decide",
+    "decideEmpty": "Nothing is waiting for your decision.",
+    "error": {
+      "partial": "Some sources are temporarily unavailable"
+    },
+    "review": "To review",
+    "span": {
+      "week": "Past seven days"
+    },
+    "mentionEmpty": "No messages mentioned {0} in this time range.",
+    "other": "Other pending work",
+    "ignored": "Ignored",
+    "ignoredHelp": "Ignored items stop notifying you and do not count toward the badge. Cats may still mention them in chat. Restoring returns them to their original list.",
+    "ignoredEmpty": "No ignored items yet",
+    "handledEmpty": "No handled mentions.",
+    "approvalsEmpty": "No approvals awaiting your action.",
+    "batchReject": "Reject selected",
+    "allTypes": "All types",
+    "writePerm": "Write permission",
+    "newThread": "New conversation",
+    "runCommand": "Run command",
+    "noMatch": "No matching records."
+  },
+  "chatCards": {
+    "skip": "Skip",
+    "ask": {
+      "selected": "Chose “{0}”",
+      "ended": {
+        "superseded": "Question replaced",
+        "defaulted": "Continued with the default",
+        "confirmation_unavailable": "Cannot confirm",
+        "host_restarted": "Host restarted",
+        "transport_lost": "Connection lost",
+        "provider_cancelled": "Cancelled by runtime",
+        "surface_publication_failed": "Original card publication failed"
+      }
+    },
+    "field": {
+      "attempt": "Attempt",
+      "nextRetry": "Next retry",
+      "target": "Delivery target",
+      "conversation": "Cloud conversation",
+      "repo": "Repo",
+      "reason": "Reason",
+      "cat": "Cat",
+      "time": "Time",
+      "fallback": "Fallback",
+      "incoming": "Incoming",
+      "candidate": "Candidate",
+      "issueId": "draftId",
+      "undefined": "{0}"
+    },
+    "proposal": {
+      "toNewer": "View newer proposal",
+      "askSend": "Send to this cat",
+      "askPh": "Revision feedback",
+      "requestChange": "Request member revision"
+    },
+    "schedule": {
+      "before": "Before change",
+      "after": "After change",
+      "applied": "Schedule updated",
+      "effectUnknown": "Approved; effect not yet confirmed",
+      "applying": "Applying schedule changes…",
+      "approve": {
+        "create": "Approve creation",
+        "update": "Approve update",
+        "delete": "Approve deletion"
+      }
+    },
+    "entity": {
+      "actions": {
+        "merge-aliases": "Merge aliases",
+        "replace": "Explicitly replace",
+        "correct": "Correct canonical name",
+        "transfer": "Transfer ownership",
+        "polysemy": "Keep distinct meanings"
+      }
+    },
+    "edit": "Modified",
+    "work": {
+      "latest": "View latest (version {0})",
+      "view": "View this version"
+    },
+    "conclusions": "Verdict",
+    "openQuestions": "To discuss"
+  },
+  "skill": {
+    "content": "Text",
+    "file": "File"
+  },
+  "voice": {
+    "techDetails": "Technical details",
+    "title": "Voice",
+    "langZh": "Chinese (zh)",
+    "options": {
+      "installing": "Installing",
+      "tip": "Installation failed"
+    },
+    "loadError": "Could not read voice service.",
+    "uninstall": {
+      "title": "Uninstall {0}",
+      "text": "Deletes the model and virtual environment (about {0}). Voice input or speech using it will stop working."
+    },
+    "installation": {
+      "kv": "System",
+      "memory": "Memory:",
+      "availableDisk": "Available disk:",
+      "nativeArchitecture": "{0} (native)",
+      "help": "Leave empty to use the available port found by the scan. {0}",
+      "foot": "Available port {0}",
+      "offlineGuide": "Offline installation guide"
+    }
+  },
+  "evolutionFlow": {
+    "choiceSource": "Decision source",
+    "use": {
+      "applied": "Used",
+      "dismissed": "Not used this time",
+      "unconfirmed": "Use awaiting confirmation"
+    },
+    "evidenceInsufficient": "Insufficient evidence",
+    "decision": {
+      "keep": "Adopt this improvement",
+      "tune": "Keep refining",
+      "rollback": "Roll back version",
+      "sunset": "Stop this evolution"
+    },
+    "stage": {
+      "constituting": "Preparing",
+      "instrumenting": "Connecting",
+      "observing": "Observing",
+      "evaluating": "Eval",
+      "attributing": "Attributing",
+      "awaiting_intervention": "Intervening",
+      "awaiting_approval": "Approval",
+      "writing_back": "Writing back",
+      "revalidating": "Revalidating",
+      "deciding": "Deciding"
+    },
+    "choice": {
+      "explore": "Include in exploration",
+      "fixed": "Keep fixed",
+      "excluded": "Exclude this round"
+    },
+    "reason": "Based on",
+    "summary": "Summary",
+    "progress": "Ask a member to continue",
+    "remind": "Follow up again",
+    "thisRound": "This round",
+    "objects": "Object scope",
+    "preparationUnavailable": "Preparation materials not yet available",
+    "success": "Success criteria",
+    "measurement": "Measurement plan",
+    "baseline": "Baseline diagnosis",
+    "exploration": "Exploration results",
+    "explorationUnavailable": "Exploration records not yet available",
+    "reading": "Reading target",
+    "experiment": "Experiment records",
+    "comparison": "Comparison records",
+    "noComparison": "No comparison",
+    "publicationChanged": "Published exploration records changed",
+    "readCurrent": "Read current source",
+    "noCases": "No case records yet",
+    "pairedSubset": "Compare only the {0} paired samples",
+    "request": "Request",
+    "intent": {
+      "explore": "Continue exploring",
+      "adopt": "Request adoption of this version"
+    },
+    "requestIntent": {
+      "retest": "Retest this version"
+    },
+    "requestPlaceholder": "What would you like to check next?",
+    "change": {
+      "pending": "Awaiting approval",
+      "approved": "Approved; awaiting effect receipt",
+      "changed": "Executed; awaiting revalidation",
+      "no_change": "Executor confirmed no change",
+      "outcome": "Revalidation records received",
+      "superseded": "Superseded",
+      "target_drift": "Target changed"
+    },
+    "sourceThread": "View original conversation",
+    "sync": "Sync execution and revalidation results",
+    "rollbackSource": "View rollback evidence",
+    "preparationHistory": "Preparation materials"
+  },
+  "workbench": {
+    "evoEvidenceTitle": {
+      "false": "Evaluation evidence"
+    },
+    "evoVersion": {
+      "false": "Recorded version"
+    },
+    "evoName": {
+      "false": "Capability evolution"
+    },
+    "evoState": {
+      "paused": "Paused",
+      "terminal": "Closed",
+      "needs_expert": "Waiting for owner",
+      "needs_update": "Update needed",
+      "source_unavailable": "Source unavailable",
+      "source_invalid": "Invalid source",
+      "materializing": "Organizing",
+      "invalid": "Invalid record"
+    },
+    "evoField": {
+      "boundary": "Change boundary",
+      "choiceReason": "Decision evidence",
+      "observationUnit": "Observation unit",
+      "estimator": "Measurement method",
+      "counterexample": "Counterexample",
+      "validity": "Applicable scope",
+      "collection": "Collection method",
+      "missing": "Gap",
+      "variable": "Primary variable",
+      "controls": "Keep unchanged",
+      "holdout": "Independent holdout",
+      "repeatability": "Retest method",
+      "confidence": "Evidence confidence",
+      "comparability": "Comparable conditions"
+    },
+    "point": "{0} · {1}",
+    "percent": "{0}%",
+    "quota": {
+      "sub": "Current default",
+      "tokenUsageSuffix": " · Input {0} / output {1} tokens",
+      "invocationCount": "{0} times",
+      "nativeMcpBreakdown": "Native tools: {0} · MCP: {1}",
+      "refreshAll": "Refresh all"
+    },
+    "leaderboardCount": {
+      "chatty": "{0} messages",
+      "streak": "{0}-day streak (longest {1})"
+    },
+    "observe": {
+      "fails": "{0} failures",
+      "pseudonymizationHelp": "Pseudonymizes telemetry IDs; required in production",
+      "callbackAuthorization": "Callback authorization",
+      "uptime": "Elapsed"
+    },
+    "envDescription": {
+      "cfg3": "Set to 1 to skip pseudonymization",
+      "cfg4": "Uses only Prometheus when unset",
+      "cfg5": "Enabled when unset"
+    },
+    "daemon": {
+      "sub": " · Created Oct 19 00:12 · Updated 01:50"
+    },
+    "runtime": {
+      "sub": "Event {0}",
+      "sessionSummary": "{0} · {1} · Last observed {2} · Context policy {3}"
+    },
+    "runtimeOrigin": {
+      "true": "{0} · Archive reason: {1}"
+    },
+    "runtimeState": {
+      "sealing": "Sealing",
+      "conflict": "Conflict requires attention"
+    },
+    "governOption": {
+      "guide": "Project guide",
+      "skills": "Project skills",
+      "docs": "Document lifecycle templates",
+      "claude": "CLAUDE.md entry",
+      "gemini": "GEMINI.md entry",
+      "sk": "Skill ID"
+    },
+    "governOptionSub": {
+      "guide": "Generate a standard AGENTS.md",
+      "skills": "Link only the named skills and clients",
+      "docs": "SOP, BACKLOG and feature templates; not generated by default"
+    },
+    "govern": {
+      "existingClaudeFile": "CLAUDE.md (already exists)",
+      "skipped": "Skipped",
+      "lastSynced": "Version {0} · Last synced {1}"
+    },
+    "governOperation": {
+      "remove": "Will delete",
+      "write": "Will create",
+      "install": "Will link"
+    },
+    "homePath": "~/{0}",
+    "governState": {
+      "outdated": "Older version"
+    },
+    "rescue": {
+      "sub": "Thinking-only turns: {0}"
+    },
+    "profileKind": {
+      "good": "Suitable tasks · {0}",
+      "care": "Collaboration notes · {0}"
+    },
+    "profileEmpty": "No records",
+    "assertState": {
+      "true": "Expired (awaiting confirmation)"
+    },
+    "reason": {
+      "owner-constraint": "Your temporary restriction",
+      "owner-maintenance": "Under maintenance",
+      "quota-window": "Quota window restriction",
+      "quota_exhausted": "Quota exhausted",
+      "authentication_rejected": "Authentication rejected",
+      "provider_unreachable": "Service temporarily unreachable",
+      "provider_timeout": "Service timed out"
+    },
+    "providerName": {
+      "true": "All {0} members"
+    },
+    "identity": "{0} {1}",
+    "notifications": {
+      "due": "In {0}",
+      "retired": "Retired"
+    },
+    "unknownSuffix": {
+      "true": " · {0} with unknown status"
+    },
+    "providerMeta": {
+      "true": "{0} with unknown status"
+    },
+    "providerSubKey": "p:{0}",
+    "eventName": {
+      "true": "{0} service"
+    },
+    "eventUntil": {
+      "true": "Until {0} from now"
+    },
+    "versionTitle": {
+      "true": "Replaced · v1 · @opus preferred over @codex",
+      "false": "{0} · v{1} · {2} preferred over {3}"
+    },
+    "versionSub": {
+      "true": "Initial version · ",
+      "false": "{0} · Evidence: {1} · "
+    },
+    "signalState": {
+      "archived": "Archive"
+    },
+    "star": {
+      "true": "Unstar"
+    },
+    "busyFetch": {
+      "true": "Fetching...",
+      "false": "Fetch"
+    },
+    "timelineAct": "{0} · {1}",
+    "planProgress": "{0}/{1}",
+    "workCardSub": "{0} · {1}",
+    "governApply": {
+      "true": "Confirm reverting {0} items",
+      "false": "Confirm writing {0} items"
+    },
+    "brake": {
+      "label": "Enable break reminders",
+      "interval": "Reminder interval",
+      "unit": " minutes",
+      "mode": "Reminder mode",
+      "gentle": "Gentle",
+      "strict": "Strict"
+    },
+    "brakeHelp": {
+      "gentle": "A gentle reminder that can be dismissed with one click.",
+      "hard": "A reason is required to continue; emergency bypasses are limited."
+    },
+    "flagName": {
+      "true": "Run the curator cat automatically"
+    },
+    "flagRestart": {
+      "true": "Takes effect after restart"
+    },
+    "flagLocked": {
+      "true": "Can only be changed in the configuration file"
+    },
+    "panels": {
+      "board": "Feature board: progress, claiming and assignment"
+    },
+    "empty": {
+      "emptyState": "No evolution records yet."
+    },
+    "evoHeaderName": {
+      "true": "Evolution records temporarily unavailable"
+    },
+    "evoLifecycleLabel": {
+      "true": "Pause project",
+      "false": "Resume project"
+    },
+    "evoNotice": {
+      "conflict": "The project changed. Review it and retry.",
+      "waiting": "The executor is still working",
+      "blocked": "The executor has not finished",
+      "writeFailed": "Operation unconfirmed; read again",
+      "requestTargetChanged": "The project or original request target changed. Review it and retry.",
+      "requestDelivered": "Request delivered",
+      "requestUnconfirmed": "Delivery is unconfirmed; you can retry the same request"
+    },
+    "evoComparison": {
+      "comparisonUnavailable": "Comparison records not yet available",
+      "sameExperiment": "Choose another experiment round for comparison",
+      "conditionsDiffer": "Conditions differ; these results cannot establish comparative effects",
+      "incompleteRecords": "Records are incomplete or not bound to the current conditions",
+      "differentSamples": "Samples are not fully paired; review the original records separately"
+    },
+    "rest": {
+      "confirm": {
+        "title": "Time for a break!",
+        "text": "You have been focused for {0} minutes.",
+        "rest": "Take a break",
+        "wrap": "Wrap up, then stop",
+        "go": "Continue",
+        "goSub": "An emergency requires a reason"
+      }
+    },
+    "brakeLevel": {
+      "1": "The cats remind you to drink some water.",
+      "2": "The cats are a little worried!",
+      "3": "Three-cat emergency intervention!"
+    },
+    "routingEvidence": {
+      "unknown": "provider_timeout expired without recovery evidence · routing-signal:a1a5… · turn-execution:8082…"
+    },
+    "affectedPrefix": "Affects {0} members:",
+    "rosterSub": {
+      "true": "{0} · {1} · Routing status and capability evidence temporarily incomplete",
+      "false": "{0} · {1} · {2}"
+    },
+    "rosterProfile": {
+      "true": "Specialties: {0}",
+      "false": "Capability profile incomplete"
+    },
+    "memberRef": "m:{0}",
+    "replaySource": {
+      "feature": "{0} {1}"
+    },
+    "liveActionWhat": {
+      "false": "Reply"
+    },
+    "fileInfoField": {
+      "size": "Size",
+      "modified": "Modified",
+      "pages": "Pages",
+      "slides": "Slides",
+      "sheets": "Sheets"
+    },
+    "file": {
+      "openProject": "Open project file",
+      "openLocal": "Open with default application",
+      "noPreview": "This file type cannot be previewed here"
+    },
+    "pageActionState": {
+      "ready": "Ready to inspect",
+      "inspecting": "Inspecting",
+      "awaiting_consent": "Awaiting consent"
+    },
+    "pageName": "{0} · {1}",
+    "pageActionField": {
+      "page": "Page",
+      "field": "Goal",
+      "operation": "Action",
+      "expires": "Expires",
+      "result": "Result"
+    },
+    "pageActionResult": {
+      "applied": "Applied",
+      "no_effect": "No effect",
+      "denied": "Denied"
+    },
+    "route": {
+      "new": "New conversation"
+    },
+    "fileBody": {
+      "false": "(empty file)"
+    },
+    "hubView": {
+      "list": "Features",
+      "deps": "Dependency overview"
+    },
+    "diffEmpty": {
+      "??": "New untracked file; no diff available yet.",
+      "M": "No text differences."
+    },
+    "commitTip": "{0} {1} · {2}",
+    "fsDelete": {
+      "true": "The {0} folders inside will also be deleted."
+    },
+    "memberName": "{0} {1}",
+    "tabs": {
+      "menu": {
+        "focus": "Focus",
+        "focusHelp": "Keep only this tool open and collapse other tabs; chat remains alongside",
+        "splitHorizontal": "Side by side",
+        "closeOthers": "Close other tabs",
+        "closeUnpinned": "Close all unpinned tabs"
+      }
+    },
+    "nativeReviewTarget": {
+      "label": "Choose reviewer"
+    },
+    "execField": {
+      "elapsed": "Duration",
+      "exit": "Exit code",
+      "thread": "Source conversation",
+      "blocked": "Stop"
+    },
+    "statusGroupPrefix": "{0} status events · ",
+    "runTip": {
+      "idle": "Idle {1}",
+      "spawning": "Starting · Running for {0}",
+      "streaming": "Running · Elapsed {0}",
+      "alive_but_silent": "Silent wait · Running for {0}",
+      "suspected_stall": "Possibly stalled · Running for {0}",
+      "error": "Error · Running for {0}"
+    },
+    "previousRun": {
+      "true": "Last run {0}"
+    },
+    "sessionNumber": "#{0}",
+    "commands": {
+      "startWerewolf": "Start a Werewolf game"
+    }
+  },
+  "reviewDetail": {
+    "round": "Round {0}",
+    "historyKind": {
+      "add_visual_marks": "Add visual marks",
+      "delete_visual_mark": "Remove visual marks",
+      "annotate": "Add annotation",
+      "edit": "Edit annotation",
+      "set_annotation_state": "Change annotation status",
+      "judge_response": "Judge modification result",
+      "prepare": "Start review"
+    },
+    "canon": "Canonical assets",
+    "ratio": "Aspect ratio",
+    "canonical": "Canonical",
+    "experimental": "Experimental",
+    "keep": "Keep this version",
+    "nextVersion": "Use in the next version",
+    "useNext": "Use the new canonical asset in the next version: {0}. {1}"
+  },
+  "wsEvolution": {
+    "detail": {
+      "keepCurrent": "Keep current state",
+      "changeHistory": "Change history",
+      "versionSource": "Version source",
+      "goal": "Goal"
+    },
+    "load": {
+      "loading": "Loading capability evolution records…",
+      "error": "Evolution records temporarily unavailable.",
+      "stale": "One record is temporarily unavailable; the original is preserved. Completed records are incomplete, so confirmation is unavailable."
+    },
+    "evalAttribution": "Evaluation and attribution",
+    "evidenceOn": "Supporting evidence",
+    "competing": "Competing explanations",
+    "stillMissing": "What is still missing",
+    "eyesAttached": "Evaluation sources",
+    "approveRun": "Approval, execution and revalidation",
+    "submitDecision": "Submit decision",
+    "adopted": "Adopted and candidate versions",
+    "changesKept": "Changes retained",
+    "roundResults": "Results by round",
+    "newGoal": "New goal",
+    "inProgress": "In progress",
+    "recentDone": "Recently completed",
+    "doneHelp": "Completed, stopped and abandoned items remain here with their reasons.",
+    "list": {
+      "noFinishedItems": "No completed or stopped projects yet."
+    },
+    "create": {
+      "title": "New evolution goal",
+      "label": "Which capability should keep improving?",
+      "ok": "Bring to this conversation"
+    }
+  },
+  "mcp": {
+    "scope": "Scope",
+    "uninstall": {
+      "title": "Uninstall MCP",
+      "text": "Uninstall MCP {0}? Its configuration will be removed from all projects and CLI configurations. This cannot be undone."
+    },
+    "systemSync": {
+      "title": "Sync from system configuration",
+      "ok": "Start sync"
+    }
+  },
+  "guide": {
+    "next": "Next step",
+    "replay": "Watch again",
+    "demoStep": "Collaboration demo",
+    "memberStep": "Create member",
+    "preview": "Work preview"
+  },
+  "wsOps": {
+    "mcpBridge": "MCP bridge",
+    "nativeTools": "Native tools",
+    "lastRefresh": "Last refreshed {0}",
+    "previewReminder": "Preview reminder",
+    "commitment": "Strict mode:",
+    "skipLimit": "Two emergency bypasses per four hours; reminders persist from the third attempt.",
+    "nightSoft": "Gentler reminders at night",
+    "nightSoftHelp": "Quieter reminders and softer colors from 23:00 to 06:00.",
+    "featureFlags": "Feature switches",
+    "toolUsage": "Tool usage",
+    "load": {
+      "loading": "Loading operations data…",
+      "error": "Backend connection error: no response received.",
+      "stale": "Quota data failed to load; the data below may be outdated.",
+      "empty": "No tool usage records yet"
+    },
+    "metricDirection": {
+      "higher": "Higher is better",
+      "lower": "Lower is better",
+      "neutral": "Observation"
+    },
+    "eval": {
+      "noAct": "No evaluation events need action",
+      "settled": {
+        "true": "Recently resolved and observing",
+        "false": "Recent observations"
+      }
+    }
+  },
+  "pcf": {
+    "unset": "Not set",
+    "choose": "Please select",
+    "failed": "The operation failed.",
+    "noRows": "No content yet",
+    "checking": "Checking authorization…"
+  },
+  "importSession": {
+    "pastePlaceholder": "Session ID",
+    "notifications": {
+      "title": "Connect an existing session",
+      "foot": "Connect and open",
+      "boundSub": "Attached to “{0}”",
+      "bound": "Bound"
+    },
+    "sessionFrom": "Session source",
+    "assignTo": "Which cat takes over",
+    "noMembersForTool": "No member uses this tool yet",
+    "addCat": "Add a cat",
+    "recentSessions": "Recent sessions",
+    "refreshList": "Refresh list",
+    "sessionsEmpty": "No recent sessions found",
+    "noMatch": "No matching recent sessions; verify by ID",
+    "verify": "Check session",
+    "sessionsError": "Recent sessions temporarily unavailable.",
+    "pinAfter": "Pin after creating"
+  },
+  "wsSessions": {
+    "sealed": "Sealed",
+    "member": {
+      "overviewLabel": {
+        "usage": "Usage"
+      },
+      "overviewValue": {
+        "usage": "Input {0} · Output {1} · Cache hit {2}% · Cost ${3}",
+        "started": "{7} · {8} messages · {9}"
+      },
+      "ctxWarn": "Near the limit; next turn will {0}",
+      "compressNext": {
+        "true": "compact automatically"
+      },
+      "sessionAt": {
+        "false": "Archived {0}"
+      },
+      "ctxTip": "Context {0}",
+      "noCurrentSession": "No current session"
+    },
+    "runtime": "Runtime",
+    "started": "Start",
+    "context": {
+      "tip": {
+        "value": {
+          "true": "{0} / {1} (input limit) · {2}",
+          "false": "Limit unknown"
+        },
+        "source": {
+          "exact": "Measured",
+          "approx": "Estimated",
+          "undefined": "Estimated"
+        }
+      }
+    },
+    "compression": {
+      "value": {
+        "false": "Compaction count unknown"
+      },
+      "known": {
+        "true": "Compacted {0} times",
+        "false": "No compactions"
+      },
+      "title": "Compact {0}'s context?",
+      "compressionHelp": "Summarize the earlier content of this session without changing its ID. Current usage: {0}.",
+      "ok": "Compactions"
+    },
+    "plan": "Plan",
+    "sessions": "Sessions",
+    "sealReason": {
+      "budget_exhausted": "Context budget exhausted",
+      "cat_initiated_handoff": "Cat-initiated handoff",
+      "threshold": "Compaction threshold reached",
+      "cli_session_replaced": "CLI session replaced",
+      "manual": "Manually archived",
+      "oversized_retire": "Session retired due to size"
+    },
+    "copyThreadId": "Copy thread ID",
+    "record": "Activity record",
+    "showThinking": "Show reasoning",
+    "showWhisper": "Show whispers",
+    "empty": "No cat has spoken in this conversation yet, so there are no sessions.",
+    "pastMembers": "Past members"
+  },
+  "memberForm": {
+    "fields": {
+      "client": "Clients",
+      "unsavedChanges": "{0} unsaved changes",
+      "nickname": "Nickname",
+      "roleDescription": "Role",
+      "account": "Account",
+      "providerName": "Provider name",
+      "launchArguments": "Launch arguments",
+      "strong": "Cloud identity protected",
+      "text": "Managed by the Personal ChatGPT Pro plugin",
+      "noAccounts": "No accounts available",
+      "newOrLoginAccount": "Create or sign in",
+      "value": "ChatGPT Pro cloud",
+      "modelIdentity": "Model identity",
+      "returnTool": "Return tool",
+      "remoteMcpEnabled": "Remote MCP enabled",
+      "manageInPlugin": "Manage in plugin",
+      "sandbox": "Sandbox",
+      "approvalMode": "Approval policy",
+      "handleHelp": "Use these names to address this member in chat; they must be unique.",
+      "handleRequired": "Add at least one @ name.",
+      "noHandles": "No @ names yet",
+      "reasoningEffort": "Reasoning effort",
+      "clientDefault": "Client default",
+      "extraCliArguments": "Extra CLI arguments",
+      "extraCliArgumentsHelp": "Appended at startup; the fields above take precedence over duplicates.",
+      "noExtraArguments": "No extra arguments",
+      "help": "Changing clients resets the connection method, reasoning effort and provider.",
+      "acpExperimental": "ACP experimental",
+      "clientOwn": "Use the current {0} configuration",
+      "err": "Choose an account",
+      "followCodexAccount": "Follow the active Codex account",
+      "dedicatedAccount": "Assign this account only to this cat",
+      "foot": "Follow the household account",
+      "addOrLoginAccount": "Add or sign in to an account",
+      "providerProtocolHelp": "Determines the protocol type.",
+      "enableNative": "Enable Native",
+      "nativeChannelHelp": "Turning this off pauses this cat's native channel.",
+      "isolatedProfileId": "Isolated Profile ID",
+      "profileRoot": "Profile root directory",
+      "approvedWorkspaces": "Approved workspaces",
+      "absolutePath": "Absolute path",
+      "argumentSyntaxHelp": "Separate with spaces, for example acp --pure. Quote values containing spaces.",
+      "maxProcesses": "Maximum processes",
+      "idleTimeout": "Idle timeout",
+      "post": "minutes",
+      "collaborationTools": "Collaboration tools",
+      "collaborationHelp": "Messaging, memory search and more. When disabled, this cat can reply but cannot collaborate with other cats.",
+      "memberId": "Member ID",
+      "displaySuffix": "Display suffix",
+      "suffixPlaceholder": "Suffix",
+      "rolePlaceholder": "Role",
+      "avatarPath": "Avatar path",
+      "identityColor": "Identity color",
+      "identityColorHelp": "Used only for the avatar; automatically adapts to light and dark themes.",
+      "specialties": "Strengths",
+      "specialtiesPlaceholder": "Specialties",
+      "personality": "Personality",
+      "precautions": "Notes",
+      "specialtyTags": "Strength tags",
+      "addSpecialty": "Add specialty tag",
+      "language": "Language",
+      "voice": "Voice",
+      "speechRate": "Speed",
+      "referenceAudio": "Reference audio",
+      "referenceUploaded": "Reference audio uploaded",
+      "referenceTranscript": "Reference transcript",
+      "referenceTranscriptPlaceholder": "Reference audio transcript",
+      "voiceInstructions": "Style instruction",
+      "voiceInstructionsPlaceholder": "Tone",
+      "voiceVariation": "Variation",
+      "contextWindow": "Context window",
+      "contextWindowHelp": "Enter a positive integer for the context window; leave empty or use 0 for runtime detection.",
+      "contextFullPolicy": "When context is full",
+      "reminderThreshold": "Warning line",
+      "reminderThresholdHelp": "Remind the cat to wrap up when usage reaches this threshold.",
+      "maxCompressions": "Max compressions",
+      "maxCompressionsHelp": "Switch to a handoff after this many compactions.",
+      "executionStatus": "Run status: ",
+      "pendingSettings": "Draft unconfirmed; takes effect after saving",
+      "savedSettings": "Uses the saved settings"
+    },
+    "context": "Context",
+    "contextPolicy": {
+      "ctxStrat": "Hand off to a new session",
+      "sandbox": "Read-only",
+      "writableWorkspace": "Workspace write (workspace-write)",
+      "fullAccess": "Full access (danger-full-access)",
+      "approval": "Ask for untrusted commands (untrusted)",
+      "approvalOnFailure": "Ask after a failure (on-failure)",
+      "approvalOnRequest": "Ask when needed (on-request)",
+      "approvalNever": "Never ask (never)",
+      "speed": "Inherit Codex settings",
+      "speedStandard": "Standard",
+      "speedFast": "Fast",
+      "agyPerm": "Approve by workspace",
+      "fullTrust": "Full trust",
+      "englishUs": "English（en-us）",
+      "japanese": "Japanese (ja)",
+      "compressInPlace": "Compress in place",
+      "compressThenHandoff": "Compress, then hand off"
+    },
+    "handle": "@ Names",
+    "save": {
+      "saving": "Saving…",
+      "checking": "Checking the previous save…",
+      "continue": "Check and continue saving",
+      "recoveredDraft": "Recovered the previously saved member. Your new draft is preserved; review it and save again.",
+      "changed": "Member configuration changed. Your draft is preserved; please review it.",
+      "idChanged": "The previous creation is unconfirmed. Check the original member ID first.",
+      "missing": "This member no longer exists. Your draft is preserved.",
+      "unconfirmed": "The previous save is unconfirmed. Your draft is preserved.",
+      "unavailable": "The save service is temporarily unavailable. Your draft is preserved."
+    },
+    "modelAccess": "Model & connection",
+    "runtime": {
+      "restoreIdentity": "Restore built-in cloud identity",
+      "source": {
+        "member": "Member settings",
+        "client_report": "Client report",
+        "tool_config": "Local configuration",
+        "account_config": "Connection configuration"
+      },
+      "follow": "Follow tool settings",
+      "inherited": "{0}：{1}",
+      "invalidEffort": "The current model does not support this effort level. Choose another level or follow the tool.",
+      "executionApproval": "ACP execution approval",
+      "auto": "Automatic (default)",
+      "ask_user": "Ask user",
+      "executionApprovalHelp": "When asking the user, client permission requests appear as approval cards in chat. Existing denials, isolation and native permission limits still apply.",
+      "identitySources": "Identity sources and activation timing",
+      "identitySource": {
+        "variant": "Current member configuration",
+        "breed": "Breed inheritance",
+        "dossier": "Legacy dossier"
+      },
+      "suppressed": "Disabled content that could override the current identity:",
+      "preferenceRequired": "Choose a model and an available reasoning effort level first."
+    },
+    "clientShared": "Shared settings for {0}",
+    "clientSharedTip": "Affects all members using {0}; saved with the member profile",
+    "access": {
+      "text": "This field is required"
+    },
+    "advanced": "Advanced",
+    "route": "Routing",
+    "recordId": "Record ID: ",
+    "basis": "Evidence: ",
+    "routeEmpty": "No routing records for this member yet.",
+    "routeError": "Could not read routing records.",
+    "viewInStatus": "View in member status",
+    "catalogRefresh": "Refresh model list",
+    "catalogUnsupported": "This connection method cannot retrieve model lists",
+    "identity": "Identity",
+    "voiceHelp": "Install and enable the voice service in Voice settings before configuring a member's voice.",
+    "voicePick": {
+      "label": "Voice",
+      "error": "Couldn't read the voice list",
+      "none": "No candidate voices yet; you can fill one in below.",
+      "defaultVoice": "No voice of your own is set; speech uses the default voice."
+    }
+  },
+  "market": {
+    "installed": "Installed",
+    "trustLevel": {
+      "official": "Official",
+      "verified": "Verified"
+    },
+    "detail": {
+      "launchCommand": "Launch command"
+    }
+  },
+  "wsTeam": {
+    "signal": {
+      "untilSuffix": " · Until {0}",
+      "label": "Confirm recovery",
+      "withdraw": "Undo"
+    },
+    "detail": {
+      "memberCount": "{0} members use this service",
+      "memberIdentity": "Member identifier",
+      "profileVersion": "Profile version",
+      "evidencePrefix": "Evidence",
+      "noAppliedProfiles": "No applied profile versions yet",
+      "statusEvidence": "Status evidence"
+    },
+    "list": {
+      "text": "{0} need attention{1}",
+      "preferenceSummary": "{0} preferred over {1} · {2} · v{3}",
+      "active": "Active",
+      "by": "Source: {0}",
+      "preferences": "Collaboration preferences",
+      "assignmentHistory": "Dispatch history",
+      "noPreferences": "No collaboration preferences yet.",
+      "evDesc": "{0} records",
+      "degradedText": " Affected members: {0}, {1}.",
+      "needsAttention": "Needs attention",
+      "missingProfile": "Profile incomplete",
+      "noMatchingMembers": "No matching members found."
+    },
+    "preference": {
+      "menu": {
+        "retirePreference": "Retire this preference"
+      }
+    },
+    "eventType": {
+      "asserted": "Marked restricted",
+      "recovered": "Recovered",
+      "retracted": "Retracted"
+    },
+    "source": {
+      "quota_probe": "Quota probe",
+      "provider_error": "Provider error",
+      "health_probe": "Health probe",
+      "dispatch_success": "Dispatch succeeded"
+    },
+    "load": {
+      "loading": "Loading members…",
+      "error": "Could not load members.",
+      "stale": "The latest read failed. The last successful data is shown below and may be outdated.",
+      "text": "No members are available in this directory."
+    },
+    "editInSettings": "Edit in settings",
+    "abilities": "Capabilities",
+    "profileMissing": "Capability profile needs details.",
+    "evidenceDetails": "Evidence and technical details",
+    "routeSignals": "Routing signals",
+    "signalsHelp": "Registered signals affect future dispatch decisions only. They do not cancel running executions or automatically change existing targets.",
+    "noSignals": "No active signals.",
+    "throttle": "Throttled",
+    "degraded": "Capability degraded",
+    "validFor": "Validity period",
+    "hours1": "1 hour",
+    "hours4": "4 hours",
+    "hours24": "24 hours",
+    "reasonHelp": "You can enter a reason code, such as owner-maintenance.",
+    "registerSignal": "Register signal",
+    "byService": "By service",
+    "refreshLedger": "Refresh dispatch history",
+    "signalEvents": "Signal events",
+    "preferenceVersions": "Preference versions",
+    "settingsMembers": "Manage members in settings",
+    "routeIncomplete": "Routing information is incomplete. Existing members and targets will not be silently reassigned.",
+    "searchPlaceholder": "Search cats or specialties",
+    "memberFilter": "Filter members"
+  },
+  "wsSignals": {
+    "list": {
+      "selectNamed": "Select {0}",
+      "sub": " · Has note",
+      "studyCountSuffix": " · Studied {0} times",
+      "enableNamed": "Enable {0}"
+    },
+    "tier": "Tier",
+    "inbox": "Inbox",
+    "read": "Read",
+    "markRead": "Mark as read",
+    "starred": "Starred",
+    "archive": "Archive",
+    "detail": {
+      "sub": "Linked to {0}",
+      "label": "Unlink",
+      "downloadAudio": "Download audio",
+      "msg": "Audio downloaded (demo)"
+    },
+    "batchTag": {
+      "ok": "OK",
+      "title": "Tag {0} articles",
+      "label": "Tag name"
+    },
+    "threadId": "Conversation ID",
+    "body": "Body",
+    "memo": "Notes",
+    "discuss": "Discussion",
+    "batchDelete": {
+      "title": "Delete {0} articles?",
+      "text": "Cannot be restored after deletion. Study records are also deleted."
+    },
+    "delete": {
+      "title": "Delete this article?"
+    }
+  },
+  "threadRow": {
+    "section": {
+      "favorites": "Starred"
+    },
+    "name": "Conversation name"
+  },
+  "wsCommunity": {
+    "openThread": "Open conversation",
+    "sync": "Sync",
+    "closed": "Off",
+    "resolved": "Resolved",
+    "evidence": "Evidence"
+  },
+  "player": {
+    "pause": "Paused",
+    "play": "Play"
+  },
+  "member": {
+    "availability": {
+      "label": {
+        "available": "Available for tasks",
+        "limited": "Runtime restricted",
+        "unknown": "Status unverified"
+      }
+    },
+    "title": "Member"
+  },
+  "members": {
+    "routing": {
+      "quotaTight": "Quota running low",
+      "unavailable": "Unavailable"
+    },
+    "carriers": "Connection type",
+    "ownerForm": {
+      "addHandle": "Add @ name",
+      "placeholder": "Owner display name",
+      "addAlias": "Add alias",
+      "help": "Keep at least one name for cats to @mention you."
+    },
+    "avatarCorrection": {
+      "open": "Canonical avatar",
+      "upload": "Upload new version"
+    },
+    "defaults": "(default:",
+    "menu": {
+      "label": "View in member status",
+      "protectedMember": "Protected members cannot be deleted."
+    },
+    "delete": {
+      "ok": "Delete member",
+      "title": "Delete {0} {1}?",
+      "text": "Its configuration will be deleted; conversation history is preserved. This cannot be undone. Disable it if you only want to stop using it temporarily."
+    },
+    "add": "Add member"
+  },
+  "accounts": {
+    "editNote": "Edit account note",
+    "detail": {
+      "label": "Cats using this account",
+      "loginIdentity": "Login identity",
+      "endpoint": "Address",
+      "loginDirectory": "Login directory"
+    },
+    "form": {
+      "availableModels": "Available models",
+      "oauth": "Create and start login",
+      "label": "Account login",
+      "noteName": "Note name",
+      "help": "Optional.",
+      "vendor": "Provider",
+      "codexLoginHelp": "After creation, a terminal opens to run the official codex login. Complete authorization in your browser; retry here if it fails. Adding an account does not change cat bindings.",
+      "accountName": "Account name",
+      "apiKeyOwnership": "API key provider",
+      "apiEndpoint": "API endpoint",
+      "addModel": "Add model",
+      "empty": "No models yet",
+      "environmentHelp": "Environment variables injected into the child process at startup. The CAT_CAFE_ prefix is reserved."
+    },
+    "quota": "Quota",
+    "quotaFailure": {
+      "renewal_required": "Renewal required",
+      "signin_required": "Sign in required",
+      "service_unreachable": "Unavailable"
+    },
+    "switchAway": "Switch",
+    "codex": {
+      "group": "Use as the active Codex account"
+    },
+    "switch": {
+      "toast": "“{0}” is already the active account"
+    },
+    "switchTo": "Switch to this",
+    "resolve": "Resolve",
+    "deleteEntry": "Delete this entry",
+    "keep": "Keep for now",
+    "menu": {
+      "group": "This account is managed by the official tool",
+      "label": "Sign out or switch accounts in the original tool",
+      "editNote": "Rename note",
+      "loginAgain": "Sign in again",
+      "updateToken": "Replace token",
+      "deleteUsedRegistration": "Remove registration ({0} cats still use it)"
+    },
+    "delete": {
+      "toast": "Still used by {0} cats",
+      "ok": "Remove registration",
+      "title": "Delete {0}",
+      "text": "Removes only this registration; the official account remains."
+    },
+    "create": {
+      "group": "Sign in with an official tool (OAuth)",
+      "label": "Codex · Sign in to another account",
+      "addClaudeToken": "Claude · Add a long-lived token",
+      "enterApiKey": "Add an API key",
+      "localLoginHelp": "The default local login does not need to be added"
+    },
+    "add": "Add account",
+    "confirmSwitch": "Confirm switch",
+    "token": {
+      "longLivedToken": "Long-lived token",
+      "title": "Claude · Long-lived token",
+      "ok": "Save token",
+      "label": "Account note",
+      "help": "Run claude setup-token in your own terminal and complete the official login. Paste the token here, never in chat.",
+      "officialDocs": "Official instructions"
+    }
+  },
+  "settingsUi": {
+    "account": {
+      "vendor": {
+        "true": "{0} · In use"
+      },
+      "exception": {
+        "none": "No login detected · Used by cats",
+        "nokey": "No key entered · Used by cats",
+        "expired": "Token expired",
+        "login": "The terminal is open. Complete authorization there.",
+        "cancelled": "This login was canceled",
+        "conflict": "Confirm the identity from this login"
+      },
+      "normal": {
+        "ok": "Signed in",
+        "key": "Key entered",
+        "token": "Token saved",
+        "none": "No login detected",
+        "nokey": "No key saved",
+        "cancelled": "Login cancelled"
+      },
+      "usersTip": {
+        "true": "Used by {0} cats",
+        "false": "Not used by any cats"
+      },
+      "switchLabel": {
+        "true": "{0} · {1} cats (in use)",
+        "false": "{0} · {1} cats"
+      },
+      "quotaLabel": {
+        "true": "Querying…",
+        "false": "Query"
+      },
+      "actionsLabel": {
+        "true": "Managed by the official tool. Sign out or switch accounts there.",
+        "false": "Actions"
+      },
+      "defaults": {
+        "loginName": "Codex account {0}",
+        "customVendor": "Custom endpoint"
+      },
+      "dialogTitle": {
+        "true": "Edit account"
+      }
+    },
+    "mcp": {
+      "tag": {
+        "project": "Configured for this project",
+        "default": "Built-in modified",
+        "builtin": "Built-in",
+        "readonly": "Read only"
+      },
+      "switch": {
+        "true": "Disable {0}"
+      },
+      "issueLabel": {
+        "xproj": "{1} projects not synced"
+      },
+      "importText": {
+        "default": "Scan project and user configurations for each CLI and import only new IDs. Existing MCP servers are neither updated nor deleted. Imported entries are written back to each CLI.",
+        "project": "Scan project and user configurations for each CLI and import only new IDs. Existing MCP servers are neither updated nor deleted. Imported entries are written back to each CLI. Project configuration is read from {0}."
+      },
+      "importTitle": {
+        "true": "Synced {0} MCP servers",
+        "false": "No new MCP servers found"
+      },
+      "importResultText": {
+        "true": "Added: {0}. Existing entries are unchanged.",
+        "false": "All MCP servers in system configuration are already listed. Existing entries are not updated."
+      },
+      "probeError": {
+        "auth_required": "Connection error: 401; sign in again",
+        "command_not_found": "Connection error: executable not found",
+        "missing_target": "Enter a command or URL first"
+      }
+    },
+    "project": {
+      "scope": {
+        "true": "Global (default for all projects)"
+      },
+      "label": {
+        "true": "{0} · {1}"
+      }
+    },
+    "drift": {
+      "itemText": "{0} · {1}",
+      "kind": {
+        "skill": "Skill issues",
+        "mcp": "MCP issues"
+      },
+      "title": {
+        "false": "All projects · {1}"
+      },
+      "ok": {
+        "true": "Sync now",
+        "false": "Sync all"
+      }
+    },
+    "member": {
+      "missingLead": "{0} more items required to add:",
+      "hooks": {
+        "unsupported": "Unsupported"
+      },
+      "speedHelp": {
+        "true": "This model does not support Fast."
+      },
+      "routing": {
+        "true": "Last dispatched {0}",
+        "false": "Disabled; will not receive tasks"
+      },
+      "last": {
+        "null": "—",
+        "undefined": "—",
+        "": "—"
+      },
+      "clientName": {
+        "plugin": "{0} · {1}",
+        "legacy": "Antigravity IDE (retired)"
+      },
+      "clientWhy": {
+        "absent": "{0} is not installed",
+        "off": "{0} is disabled"
+      },
+      "accountName": {
+        "builtin": "{0} · Built-in login",
+        "oauth": "{0} · Account login (OAuth)",
+        "token": "{0} · Long-lived token",
+        "key": "{0} · API key"
+      },
+      "ctxLine": {
+        "compress": "Log line",
+        "hybrid": "Hand-off line"
+      },
+      "ctxHelp": {
+        "compress": "Record key details at this threshold, then compact in place.",
+        "hybrid": "Hand off to a new session at this threshold and archive the old one."
+      },
+      "modelPh": {
+        "": "Model ID"
+      }
+    },
+    "contribution": {
+      "kind": {
+        "events": "Events"
+      }
+    },
+    "starry": "Cat planet",
+    "system": {
+      "pushLabel": {
+        "error": "Error",
+        "vapid": "Push public key",
+        "http": "HTTP"
+      }
+    },
+    "theme": {
+      "source": {
+        "custom": "Based on v{1}"
+      }
+    },
+    "plugin": {
+      "uninstallTitle": "Uninstall {0}",
+      "uninstallEffect": {
+        "caps_entry": "Its skills and MCP servers will also be removed. The “{0}” entry on the left will disappear.",
+        "caps": "Its skills and MCP servers will also be removed.",
+        "entry": "The “{0}” entry on the left will disappear.",
+        "none": "Its settings will be deleted."
+      },
+      "connectorValue": {
+        "true": "Message channels and sender identity",
+        "false": "1 MCP server"
+      }
+    },
+    "env": {
+      "secretPlaceholder": {
+        "true": "Set (leave blank to keep)",
+        "false": "Enter secret"
+      },
+      "help": {
+        "port": "{0} An integer from 1 to 65535.",
+        "enum": "{0} Allowed values: {1}.",
+        "json": "{0} JSON, usually written automatically by the Appearance page.",
+        "cats": "{0} Comma-separated member IDs, for example opus,sol.",
+        "secret": "{0} Leave empty to keep the current value."
+      },
+      "foot": {
+        "true": "Takes effect immediately after saving",
+        "false": "Restart the relevant services after saving"
+      }
+    },
+    "canon": {
+      "version": {
+        "true": "{0} · Superseded: {1}"
+      }
+    },
+    "rules": {
+      "segmentMeta": {
+        "true": "Variables: {{catName}}, {{catId}}, {{teammates}} · Takes effect in the next session after saving",
+        "false": "Variables: {{catName}}, {{catId}}, {{teammates}} · Read-only"
+      },
+      "resetAction": {
+        "true": "Restore previous version"
+      }
+    },
+    "voice": {
+      "installTitle": {
+        "true": "Reconfigure {0}",
+        "false": "Install {0}"
+      },
+      "installHelp": {
+        "true": "Changes do not rebuild the virtual environment. Port changes apply at the next start. Changing models downloads the model again without reinstalling dependencies."
+      },
+      "installOk": {
+        "true": "Save changes",
+        "false": "Start installation"
+      },
+      "modelSub": {
+        "custom": "Custom model"
+      },
+      "installFoot": {
+        "false": "Estimated 3–8 minutes"
+      }
+    },
+    "capGroup": {
+      "recommended": "Suggested"
+    },
+    "confirm": {
+      "fileOverwrite": {
+        "title": "Overwrite file?",
+        "text": "{0} already exists. Overwrite it?"
+      },
+      "routingPreferenceRetire": "Disable collaboration preference?"
+    }
+  },
+  "chip": {
+    "empty": "None yet"
+  },
+  "settings": {
+    "quotaOut": "Exhausted",
+    "quotaLeft": "{0}% left",
+    "notifications": {
+      "pushSaved": "Push configuration saved; key input cleared."
+    }
+  },
+  "capabilities": {
+    "skill": {
+      "mark": "Mount point disabled",
+      "text": "Mount issue",
+      "mountSw": {
+        "true": "Disable {0} mount",
+        "false": "Enable {0} mount"
+      }
+    },
+    "drift": {
+      "kind": {
+        "detect_failed": "Check failed",
+        "conflict": "Conflict",
+        "stale_mount": "Stale mount",
+        "unregistered": "Unregistered",
+        "mount_missing": "Missing mount",
+        "new_config": "New configuration",
+        "config_residue": "Leftover configuration",
+        "ghost": "Ghost",
+        "global_added": "Added globally",
+        "config_mismatch": "Configuration mismatch",
+        "residual_config": "Residual configuration"
+      },
+      "details": {
+        "count": "{0} issues",
+        "syncUnavailable": "Cannot sync",
+        "tip": "Project has custom configuration",
+        "emptyState": "No issues; {0} match their sources.",
+        "currentProject": "this project",
+        "allProjects": "all projects"
+      },
+      "sync": {
+        "title": "Sync will remove {0} MCP servers",
+        "text": "These MCP servers no longer exist globally and will be removed from the project during sync: {0}.",
+        "ok": "Remove and sync"
+      }
+    },
+    "connectionIssue": {
+      "deps": "Missing dependencies · {0} MCP servers",
+      "disconnected": "Not connected"
+    },
+    "issue": {
+      "label": {
+        "xproj": "{0} projects not synced"
+      }
+    },
+    "ov": {
+      "reset": {
+        "project": "Restore inheritance",
+        "default": "Restore built-in"
+      }
+    },
+    "mcp": {
+      "manageInExtensions": "Manage in extensions"
+    },
+    "fileError": {
+      "label": "Plugin package",
+      "help": ".tar.gz or .tgz"
+    },
+    "notifications": {
+      "unverifiedLocalFile": "{0} · Local file, not verified by the catalog. Confirm the source is trusted before installing.",
+      "provides": "Provides",
+      "push": "Copied from the capability center",
+      "sub": "No configuration found",
+      "importSummary": "Found {0} · Added {1} · Skipped {2}"
+    }
+  },
+  "skills": {
+    "mount": {
+      "sw": {
+        "true": "Disable the {0} mount point",
+        "false": "Enable the {0} mount point"
+      }
+    },
+    "clearFilter": "Clear filters",
+    "mountRules": {
+      "heading": {
+        "global": "Global default mount rules",
+        "project": "Mount rules · {0}"
+      },
+      "hint": {
+        "global": "Default for all projects; individual projects can override it.",
+        "project": "Skill sync directory for this project."
+      }
+    },
+    "customName": "Custom path name",
+    "customPath": "Custom path",
+    "mountList": {
+      "text": "Mount points for this skill."
+    }
+  },
+  "works": {
+    "item": {
+      "staleTip": "Older version: v{0}; v{1} is available"
+    },
+    "cover": {
+      "title": "Choose cover",
+      "readError": "Cover temporarily unavailable.",
+      "failed": "Could not change cover: {0}",
+      "reason": {
+        "unreadable": "This image is no longer available",
+        "forbidden": "You do not currently have permission to change this work",
+        "conflict": "Someone changed this version's cover. It has been refreshed; choose again.",
+        "other": "Save failed"
+      },
+      "source": {
+        "work-asset": "Work asset",
+        "thread-image": "Conversation image",
+        "upload": "Uploaded original"
+      },
+      "empty": "No images available.",
+      "upload": "Upload cover image",
+      "frame": "Restore video frame"
+    },
+    "pr": {
+      "changes": "View changes",
+      "loading": "Loading PR changes…",
+      "base": "Base revision",
+      "head": "Target version",
+      "session": "Source session",
+      "partial": "Only loaded file changes are shown.",
+      "error": "PR changes temporarily unavailable."
+    },
+    "load": {
+      "loading": "Loading works…"
+    }
+  },
+  "films": {
+    "opinionState": {
+      "modified": "Modified",
+      "open": "Pending"
+    },
+    "sourceChanged": "Source changed",
+    "loading": "Loading video projects…",
+    "error": "Video projects temporarily unavailable",
+    "import": "Import project",
+    "noProjects": "No video projects yet",
+    "summary": "{0} shots · {1} film versions",
+    "inputVersion": "Input version {0}",
+    "register": "Register film",
+    "archived": "Project archived",
+    "syncPending": "{0} review comments have not been imported (original messages are preserved).",
+    "syncRetry": "Import remaining",
+    "current": "Current version",
+    "noCompare": "No comparison",
+    "compare": "Compare versions",
+    "noScreening": "No film registered yet",
+    "story": "Storyboard",
+    "assets": "Assets",
+    "review": "Review",
+    "noStory": "No storyboard",
+    "locate": "Locate",
+    "generated": "Generate frame",
+    "noAssets": "No assets",
+    "version": "Version {0}",
+    "reference": "Reference version",
+    "noUses": "Not referenced in this version",
+    "noOpinions": "No review comments",
+    "historyKind": {
+      "unchanged": "Unchanged",
+      "resolved": "Off",
+      "created": "Proposed",
+      "replied": "Replied",
+      "reopened": "Reopened"
+    },
+    "compareResult": "Compare with the new film",
+    "source": "Locate source",
+    "reopen": "Reopen",
+    "history": "History",
+    "filmTitle": "Film name",
+    "output": "Film",
+    "path": "File path",
+    "mapping": "Timing map file"
+  },
+  "wsChanges": {
+    "fileState": {
+      "label": {
+        "A": "Added",
+        "D": "Deleted",
+        "R": "Rename"
+      }
+    },
+    "commit": "Commit",
+    "review": "Review changes",
+    "unified": "Unified",
+    "split": "Side by side",
+    "reviewTarget": "Review target",
+    "runMode": "Execution mode",
+    "baseBranch": "Base branch",
+    "commitSha": "Commit SHA",
+    "notePlaceholder": "Specify review scope and risks",
+    "startReview": "Start review",
+    "recentResults": "Recent results",
+    "noReviews": "No review records yet"
+  },
+  "wsCode": {
+    "git": {
+      "group": {
+        "untracked": "Untracked",
+        "staged": "Staged"
+      },
+      "health": "Healthy",
+      "branchTip": "Branch {0}",
+      "driftHint": {
+        "true": "runtime ahead of main by {0} · behind by {1}\nruntime {2} · main {3}",
+        "false": "Unknown how far runtime is from main"
+      },
+      "label": "Changes",
+      "listId": {
+        "staged": "wcGit-staged",
+        "modified": "wcGit-modified",
+        "untracked": "wcGit-untracked"
+      },
+      "worktreeState": {
+        "true": "Orphaned"
+      }
+    },
+    "files": {
+      "line": "L{0}",
+      "lineTip": "Line {0}",
+      "filename": "File name"
+    },
+    "changes": {
+      "targets": "Uncommitted changes",
+      "baseBranch": "Relative to branch",
+      "specificCommit": "Specific commit",
+      "customDescription": "Custom description",
+      "modes": "Current session",
+      "separateCodexThread": "Separate Codex thread",
+      "state": {
+        "running": "Reviewing",
+        "failed": "Could not complete"
+      },
+      "sub": "Reviewing…"
+    },
+    "terminal": {
+      "roTip": "Read-only: this terminal belongs to {0}",
+      "paneTip": {
+        "true": "My terminal · {2}",
+        "undefined": "{0} {1} · {2} · {3}",
+        "false": "{0} {1} · {2} · {3}"
+      },
+      "state": {
+        "connecting": "Connecting…",
+        "disconnected": "Disconnected",
+        "crashed": "Crashed"
+      }
+    },
+    "preview": {
+      "title": "New tab",
+      "connectionTip": {
+        "unreachable": "localhost:{0} is not responding — the preview target has stopped or can't be reached",
+        "hmr": "Hot reload connected · localhost:{0}",
+        "disconnected": "Hot reload disconnected."
+      },
+      "down": "localhost:{0} has stopped or can't be reached"
+    }
+  },
+  "wsLive": {
+    "status": {
+      "state": {
+        "true": "Running {0}",
+        "false": "Replying"
+      }
+    },
+    "activity": {
+      "full_gate": "Full check",
+      "test": "Tests",
+      "build": "Build",
+      "lint": "Code checks",
+      "check": "Focused check",
+      "command": "Command"
+    },
+    "entry": {
+      "timeTip": "Running for {0}"
+    },
+    "hold": {
+      "label": "Waiting to wake",
+      "wakeAt": "Expected to resume at {0}"
+    },
+    "wait": {
+      "state": {
+        "label": {
+          "ready_to_return": "Ready to resume",
+          "unknown": "Not yet determined",
+          "waiting_for_update": "Waiting for update"
+        }
+      },
+      "condition": {
+        "prefix": {
+          "true": "Running version includes",
+          "false": "Waiting for running version to include"
+        },
+        "servicePrefix": {
+          "true": "Restarted; {0} ready",
+          "false": "Waiting for a restart and {0} to be ready"
+        },
+        "postfix": {
+          "true": "; {0} is ready",
+          "false": "; {0} ready"
+        }
+      },
+      "item": {
+        "ownerLabel": {
+          "false": "Owner not confirmed"
+        },
+        "nextPrefix": {
+          "true": "Can continue:",
+          "false": "After resuming"
+        },
+        "nextText": {
+          "null": "Confirm the next step in the original task",
+          "undefined": "Confirm the next step in the original task",
+          "": "Confirm the next step in the original task"
+        }
+      },
+      "reason": {
+        "label": {
+          "deployment_evidence_unavailable": "Can't read run status right now; this item stays.",
+          "deployment_evidence_incomplete": "Runtime information is insufficient to confirm that the condition is met",
+          "deployment_match_pending_recheck": "Looks ready; rechecking before the original cat resumes."
+        },
+        "fallback": {
+          "unknown": "Can't tell yet whether the condition is met"
+        }
+      },
+      "list": {
+        "rest": "· As of {0} · {1} conditions expected to be met",
+        "more": "{0} more items to confirm"
+      }
+    },
+    "live": "In progress",
+    "load": {
+      "loading": "Syncing project runtime state…",
+      "error": "Cannot currently verify project runtime state.",
+      "stale": "Couldn't sync. Showing the last verified status."
+    },
+    "liveEmpty": "Nothing running now",
+    "waits": "Waiting",
+    "blocked": {
+      "control_plane_unavailable": "Control plane unavailable; cannot stop safely",
+      "terminalizing": "Finishing and can no longer be stopped",
+      "foreign_principal": "Started by a schedule; you are not the initiator"
+    },
+    "stop": {
+      "title": "Stop {0}'s {1}?",
+      "stopConsequences": "Stops only this execution. Work in progress may not be able to continue."
+    }
+  },
+  "wsTasks": {
+    "item": {
+      "owner": {
+        "true": "Owner: {0} {1}",
+        "false": "Unassigned"
+      },
+      "tip": "Change to {1}",
+      "label": "Status: {0}",
+      "kindSubject": {
+        "true": " · {0}"
+      },
+      "updatedTip": "Updated at {0}",
+      "created": "{0} created at {1}",
+      "sourceMessage": "Source message"
+    },
+    "create": {
+      "assignee": "Assignee",
+      "value": "Sol @sol"
+    },
+    "load": {
+      "loading": "Loading tasks…",
+      "error": "Tasks temporarily unavailable.",
+      "empty": "No tasks in this conversation yet."
+    },
+    "state": {
+      "blocked": "Blocked",
+      "todo": "To-do"
+    },
+    "newTask": "New task",
+    "kind": {
+      "tip": {
+        "pr_tracking": "PR tracking{0}",
+        "issue_tracking": "Issue tracking{0}"
+      }
+    },
+    "list": {
+      "emptyState": {
+        "true": "No tasks with status {0}."
+      }
+    }
+  },
+  "schedule": {
+    "unknown": "Work goal needed",
+    "todo": "Not started",
+    "doing": "Active",
+    "blocked": "Blocked",
+    "actual_start": "Actual start",
+    "business_deadline": "Due",
+    "monthTitle": "{0}-{1}",
+    "partial": "Some schedule data is temporarily unavailable"
+  },
+  "workspaceOwners": {
+    "severity": {
+      "critical": "Critical"
+    },
+    "originalCard": "Open original card",
+    "configure": "Reconfigure",
+    "earlierEvents": "Earlier",
+    "world": "World",
+    "domain": "Domain",
+    "research": "Research",
+    "totalFiles": "Total files",
+    "markdownFiles": "Markdown files",
+    "secretFindings": "Sensitive findings",
+    "safe": "Security",
+    "unsafe": "At risk",
+    "source": "Playback source",
+    "projectSetup": {
+      "clone": "Clone from URL"
+    },
+    "port": "Port",
+    "overwrite": "Overwrite anyway",
+    "actor": "Actor",
+    "contextTrigger": "Context and trigger",
+    "objectState": "Object and state",
+    "successSignal": "Success signal",
+    "sourceDetail": "Source details",
+    "decisionOwner": "Decision owner",
+    "confidence": "Confidence",
+    "originalText": "Original requirement",
+    "triage": "Triage",
+    "clarity": "Clarity",
+    "necessity": "Necessity",
+    "coupling": "Coupling",
+    "sizeBand": "Size",
+    "category": "Category",
+    "methodology": "Methodology",
+    "risk_pattern": "Risk pattern",
+    "resolution_strategy": "Resolution strategy",
+    "insight": "Lesson",
+    "clarification": "Clarification",
+    "answer": "Answer",
+    "escalate": "Escalate",
+    "editSlice": "Update slice",
+    "newSlice": "New slice",
+    "workflow": "Workflow",
+    "verifiableOutcome": "Verifiable outcome",
+    "cardIds": "Requirement cards",
+    "sliceType": "Slice type",
+    "learning": "Exploration",
+    "value": "Value",
+    "hardening": "Hardening",
+    "delivered": "Delivered",
+    "depth": "Depth",
+    "raw": "Original text",
+    "limit": "Limit"
+  },
+  "wsEval": {
+    "attention": "Needs attention",
+    "life": {
+      "observing": "Keep observing",
+      "unavailable": "Action records unavailable",
+      "open": "Awaiting acceptance",
+      "acknowledged": "Accepted",
+      "action_planned": "Repair planned",
+      "fix_landed": "Repair landed",
+      "main_landed": "Landed on main",
+      "live_active": "Active in the runtime",
+      "monitoring": "Monitoring",
+      "reeval_pending": "Awaiting reevaluation",
+      "resolved": "Verified resolved",
+      "suppressed_with_reason": "Declined with a reason",
+      "escalated": "Overdue and escalated"
+    },
+    "verdict": {
+      "fix": "Needs repair",
+      "build": "Build a new capability",
+      "delete_sunset": "Can sunset",
+      "": "Awaiting first evaluation"
+    },
+    "expiredSuffix": "Expired",
+    "kind": {
+      "label": {
+        "needs_decision": "Needs a decision",
+        "needs_action": "Needs attention",
+        "awaiting_reeval": "Awaiting reevaluation"
+      }
+    },
+    "continuation": {
+      "observe": "Observing",
+      "verified_outcome": "Verified",
+      "review_required": "Awaiting review",
+      "route_pending": "Awaiting assignment",
+      "repair_active": "Repair in progress",
+      "duplicate_following": "Following original issue",
+      "no_action": "No action needed"
+    },
+    "nowDo": "Action now",
+    "nextLook": "Next check",
+    "event": {
+      "nextAt": "· Originally scheduled for {0}",
+      "escalation": "{0} · Original deadline {1}"
+    },
+    "escalation": {
+      "acknowledgement": "Owner acceptance overdue",
+      "reevaluation": "Reevaluation overdue"
+    },
+    "progress": "Resolution progress",
+    "owner": {
+      "not_required": "No response required",
+      "unavailable": "Acceptance status unavailable",
+      "not_started": "Awaiting the responsible cat",
+      "acknowledged": "Accepted by the responsible cat"
+    },
+    "followUp": "Follow-up",
+    "reevaluation": {
+      "not_required": "No reevaluation required",
+      "unavailable": "Reevaluation unavailable",
+      "not_requested": "Reevaluation not submitted",
+      "passed": "Reevaluation passed",
+      "failed": "Reevaluation failed; repair reopened"
+    },
+    "reeval": "Reevaluation status",
+    "ownerTask": "Responsibility task",
+    "conclusion": "Verdict file",
+    "snapshot": "Snapshot bundle",
+    "attribution": "Attribution bundle",
+    "fixTrace": "View fix evidence in execution",
+    "ledger": {
+      "verdict": {
+        "true": "Expired"
+      },
+      "backup": "Unassigned",
+      "next": {
+        "true": "Next {0}",
+        "false": "Automatic scheduling stopped"
+      },
+      "last": {
+        "true": "Last result: {0}"
+      }
+    },
+    "overview": "Overview",
+    "load": {
+      "loading": "Loading evaluation events...",
+      "error": "Evaluations are temporarily unavailable",
+      "empty": "No evaluation data yet."
+    },
+    "closedObserving": "Resolved / observing",
+    "expired": "Stale",
+    "dutySettings": "On-call settings",
+    "onCallHelp": "The primary remains responsible; the backup takes over only after an explicit handoff",
+    "primary": "Primary",
+    "backup": "Backup",
+    "domains": "Evaluations",
+    "metrics": "Metrics",
+    "noMetrics": "No metric descriptions yet",
+    "metricField": "Field name:",
+    "metricDescription": "About this filter",
+    "evalCat": "Evaluation cat",
+    "runNow": "Evaluate now",
+    "concludeNow": "Generate verdict",
+    "pending": "Pending",
+    "handled": "Handled",
+    "report": {
+      "state": {
+        "open": "Issue still open{0}",
+        "resolved": "Issue resolved{0}"
+      },
+      "overdue": {
+        "true": " · 72h+"
+      },
+      "count": "{0}{1}",
+      "unseen": {
+        "true": " · Unseen {0}"
+      },
+      "age": {
+        "true": "Action duration"
+      },
+      "basisLine": "Context group: {0}"
+    },
+    "responsibility": {
+      "unreviewed": "No business outcome path yet",
+      "bound_in_repair": "Repair ownership assigned",
+      "signature_waiting": "Awaiting independent signature",
+      "blocked": "Structured blocker present",
+      "terminal": "Terminated"
+    },
+    "basis": {
+      "message": "Same message",
+      "turn_invocation": "Same invocation",
+      "legacy_invocation": "Historical invocation",
+      "single_signal": "Single report"
+    },
+    "rawReport": "Original report",
+    "sourceMessage": "Source messages",
+    "noReports": "No reports match the current filter.",
+    "needsAttention": "Needs attention"
+  },
+  "log": {
+    "level": {
+      "info": "Info",
+      "warn": "Warnings",
+      "error": "Error"
+    }
+  },
+  "wsTrace": {
+    "status": {
+      "label": {
+        "timeout": "Timed out"
+      }
+    },
+    "overview": {
+      "preview": "No verifiable first output yet",
+      "toolsTip": "{0} tools · {1} messages · {2} status events",
+      "errorTip": {
+        "true": "{0} errors"
+      },
+      "durTip": "Started at {0}",
+      "sealed": {
+        "true": "Sealed"
+      },
+      "tokens": {
+        "true": "Input {0} · output {1}",
+        "false": "Tokens not reported"
+      },
+      "output": {
+        "null": "Not reported"
+      }
+    },
+    "notFound": "Not found.",
+    "event": {
+      "result": {
+        "": "Result unknown",
+        "undefined": "Result unknown",
+        "null": "Result unknown"
+      },
+      "kindLabel": {
+        "terminal": "Terminal",
+        "system": "System",
+        "error": "Error",
+        "subexecution": "Subagent",
+        "pending": "Still in progress…"
+      },
+      "toolIcon": {
+        "error": "alert",
+        "success": "wrench",
+        "ok": "wrench",
+        "undefined": "wrench"
+      },
+      "channelLabel": {
+        "final": "Final reply",
+        "analysis": "Progress",
+        "commentary": "Progress",
+        "undefined": "Progress"
+      },
+      "roleLabel": {
+        "status": "Status"
+      },
+      "toolTip": {
+        "true": "Input: {0}\nResult: {1}"
+      },
+      "msTone": {
+        "error": "danger",
+        "success": "",
+        "ok": "",
+        "undefined": ""
+      },
+      "msTip": {
+        "error": "{0}",
+        "success": "",
+        "ok": "",
+        "undefined": ""
+      }
+    },
+    "messageJump": {
+      "toast": "The original message is not in the current view"
+    },
+    "timeline": "Trajectory",
+    "raw": "Raw",
+    "source": {
+      "host_cli": "Local",
+      "unknown": "Unknown source",
+      "mcp": "MCP",
+      "plugin_connector": "Plugin",
+      "undefined": ""
+    },
+    "searchPlaceholder": "Invocation ID, session ID or content"
+  },
+  "list": {
+    "noDesc": "No description"
+  },
+  "wsExec": {
+    "session": "Session #{0}",
+    "current": "Current",
+    "loading": "Loading execution records…",
+    "error": "Execution records temporarily unavailable.",
+    "copyRunId": "Copy run ID"
+  },
+  "wsStatus": {
+    "copySessionId": "Copy session ID",
+    "sessions": {
+      "warn": "{0} has multiple current sessions"
+    }
+  },
+  "work": {
+    "openInChat": "Open in conversation",
+    "noSource": "This work has no content source.",
+    "annotate": "Write annotation",
+    "view": {
+      "meta": "{0} · By {1} · Version {2} · {3}{4}",
+      "copyLink": "Copy link",
+      "rendered": "Rendered",
+      "source": "Source",
+      "previewExample": "Page preview (demo)"
+    },
+    "openNewTab": "Open in new tab",
+    "restoring": "Restoring work from the original conversation…",
+    "copyContent": "Copy contents",
+    "widgetGone": "This widget is no longer available",
+    "widgetFailed": "Could not load widget",
+    "openGithub": "Open on GitHub",
+    "noPreview": "This file type cannot be previewed here."
+  },
+  "chatMessage": {
+    "deleted": "This message was deleted.",
+    "deleteAnno": "Delete annotation",
+    "watcher": {
+      "title": "Watcher cat",
+      "thread": "Watch this conversation",
+      "paused": "Paused until",
+      "globalOff": "Master switch is off",
+      "enabled": "Enable watcher cat",
+      "scope": "Conversations to watch",
+      "selected": "Only my selections",
+      "dismissed": "Ignored",
+      "undone": "Undone",
+      "dismiss": "Ignore",
+      "panelTitle": "Watcher panel (experimental)",
+      "panelOn": "On",
+      "panelOff": "Off",
+      "panelOnHint": "The panel replaces the single watcher; the switch above still decides whether it runs.",
+      "panelOffHint": "The watcher panel is off. Turn it on, then choose members and accounts, and keep the switch above on.",
+      "panelNone": "No member can serve on the watcher panel."
+    },
+    "runtimeSlot": {
+      "b": "{0} tools · {1} subagents",
+      "now": "Stopping…",
+      "hint": "Tip"
+    },
+    "process": {
+      "sum": "Tool calls: {0} succeeded · ",
+      "text": "{0} failed",
+      "subagentCountSuffix": "Subagents {0}",
+      "processCount": "{0} process segments"
+    },
+    "execution": {
+      "sub": "Latest progress: {0}",
+      "detailLabel": "Final report"
+    },
+    "supplement": {
+      "title": "Additional messages · {0}",
+      "status": "All read"
+    },
+    "menu": {
+      "label": "Copy message ID",
+      "viewExecution": "View this turn in execution",
+      "revealWhisper": "Reveal this whisper",
+      "branchHere": "Branch from here",
+      "deleteMenu": "Delete"
+    },
+    "delivery": {
+      "text": "Whisper → {0}{1}"
+    }
+  },
+  "runtime": {
+    "model": "Model",
+    "dshProvider": "DSH model provider",
+    "sourceProfile": "Configuration source",
+    "provider": "Provider",
+    "tested": "Check passed",
+    "inspect": "Read configuration",
+    "prepare": "Generate member configuration",
+    "test": "Check connection",
+    "hooks": {
+      "label": "Agent hooks",
+      "missing": "Missing",
+      "stale": "Changed",
+      "sync": "Sync Agent hooks"
+    },
+    "connectionFailed": "Connection failed",
+    "readError": "Read failed. Refresh and review.",
+    "noConversationSource": "No cloud conversation source available",
+    "viewReply": "View reply",
+    "sourceUnavailable": "Original message unavailable",
+    "sourceReplied": "The original message has a reply; this delivery is still unconfirmed",
+    "replied": "Reply received",
+    "customInput": "Additional content",
+    "openAuthorization": "Open authorization page",
+    "answerInChat": "Answer in composer",
+    "installTitle": "Install desktop update",
+    "installConfirm": "Install {0}",
+    "accountSwitch": "Switch to “{0}”",
+    "companionLost": "Desktop companion connection lost",
+    "companionRestore": "Reopen desktop companion",
+    "affected": "Members to switch",
+    "exceptions": "Members keeping their original accounts",
+    "includeOverrides": "Include members with dedicated accounts",
+    "externalSessions": "External runtime sessions",
+    "sessionState": {
+      "runtime_seal_pending": "Awaiting archive",
+      "runtime_conflict_pending": "Session conflict"
+    }
+  },
+  "chatRich": {
+    "profile": {
+      "before": "Current:",
+      "after": "Proposed:"
+    },
+    "selection": {
+      "fileSub": "{0} · Document",
+      "picked": "I chose: {0}"
+    },
+    "openWork": "Open work",
+    "randomPick": "Pick randomly",
+    "confirmPick": "Confirm selection"
+  },
+  "composer": {
+    "cancelQuote": "Cancel reference",
+    "pin": "Pinned",
+    "forward": "Forward",
+    "stopping": "Stopping",
+    "actions": {
+      "silentMinutes": "No activity for {0} min"
+    },
+    "sendMode": {
+      "queue": "Queue"
+    }
+  },
+  "threadSettings": {
+    "synced": "Synced",
+    "speed": "Service tier",
+    "permission": "Permission",
+    "noTags": "No tags yet",
+    "reveal": {
+      "title": "Reveal private messages"
+    },
+    "feature": "Linked Feature",
+    "featureDialog": {
+      "desc": "Linking makes this conversation appear under the corresponding feature board entry."
+    },
+    "dialog": {
+      "text": "No linked Feature",
+      "title": "Conversation settings",
+      "path": "No project (lobby)"
+    },
+    "project": "Project",
+    "pinThread": "Pin this conversation",
+    "goal": "Conversation goal",
+    "goalPlaceholder": "What should this conversation achieve?",
+    "restoreSaved": "Restore last saved",
+    "saveAndSync": "Save and sync to cats",
+    "runtimeTitle": "{0} runtime status",
+    "liveAbility": "Live capabilities",
+    "account": "Execution account",
+    "quotaSource": "Quota source",
+    "defaultCat": "Default cats",
+    "thinking": "Reasoning effort",
+    "followDefault": "Use default",
+    "saveTags": "Save tags"
+  },
+  "mcpForm": {
+    "fields": {
+      "add": "Add argument"
+    }
+  },
+  "cbauth": {
+    "reasons": {
+      "expired": "expired · Token expired",
+      "invalid_token": "invalid_token · Token mismatch",
+      "unknown_invocation": "unknown_invocation · Record cleared",
+      "stale_invocation": "stale_invocation · Replaced by a newer invocation",
+      "missing_creds": "missing_creds · Missing credentials"
+    }
+  },
+  "placement": {
+    "falsePositive": "False positive",
+    "hideSimilar": "Hide similar",
+    "frustrationConfirm": "Confirm submission",
+    "messageBundle": "Message bundle",
+    "previewCount": "Process {0} items",
+    "excludedCount": "Exclude {0} items",
+    "strategy": "Context policy",
+    "resume": "Resume session",
+    "reborn": "New session",
+    "question": "Issues",
+    "options": "Options",
+    "anonymous": "Anonymous",
+    "timeout": "Timeout (seconds)",
+    "audit": "Change log",
+    "disconnect": "Disconnect",
+    "sources": "Marketplace sources",
+    "branch": "Branch",
+    "relatedDisposition": "Related action"
+  },
+  "control": {
+    "enable": "Enable",
+    "upload": "Upload",
+    "avatarUploaded": "Avatar uploaded",
+    "reveal": "Reveal in Finder",
+    "color": "Color",
+    "envToggle": "Advanced settings (optional)"
+  },
+  "newLibrary": {
+    "displayName": "Display name",
+    "rootPath": "Root path",
+    "visibility": "Visibility",
+    "private": "Private",
+    "internal": "Internal",
+    "public": "Public"
+  },
+  "structure": {
+    "name": "@ Names",
+    "tabColors": "Colors",
+    "tab": "Structure",
+    "add": "Add child container",
+    "whyNoKids": "This container contains built-in content and cannot contain additional containers",
+    "props": "Properties",
+    "dir": "Direction",
+    "span": "Share",
+    "spanOptions": {
+      "1": "1×",
+      "2": "2×",
+      "3": "3×",
+      "fit": "Fit"
+    },
+    "hideEmpty": "Hide when empty",
+    "openTo": "Open in",
+    "openPolicy": "Open policy",
+    "openUnset": "Unspecified (main window)",
+    "force": "Force",
+    "whyForced": "The parent container sets a shared destination",
+    "followContainer": "Follow container",
+    "dirRow": "Horizontal",
+    "dirCol": "Vertical",
+    "surface": {
+      "label": "Surface",
+      "relative": "Relative overlay",
+      "absolute": "Absolute value",
+      "help": "A relative overlay of 0% uses the parent container’s opacity. Higher values add another layer. Absolute values are independent of the parent. These controls affect surfaces; text and controls keep their appearance."
+    }
+  },
+  "memberNew": {
+    "avatar": "Avatar",
+    "desc": "Start with a cat from our family: bring their name, personality and colors, then make them your own.",
+    "notifications": {
+      "title": "Start from scratch"
+    },
+    "fromHome": "Template:",
+    "templatesError": "Couldn't load templates"
+  },
+  "hub": {
+    "importProject": {
+      "description": "Description",
+      "placeholder": "Project name",
+      "projectPath": "Project path",
+      "backlogPath": "Backlog path",
+      "descriptionPlaceholder": "Brief description"
+    },
+    "detail": {
+      "reason": "Reason: ",
+      "label": "Suggestion details",
+      "threadStatus": "Thread status",
+      "claimScope": {
+        "disabled": "Disable",
+        "once": "Once only"
+      },
+      "stage": "Phase",
+      "suggestedMember": "Suggested cat"
+    },
+    "create": {
+      "placeholder": "Title",
+      "title": "New backlog item",
+      "valueSummary": "Value in one sentence",
+      "priority": "Priority"
+    },
+    "add": "New folder",
+    "summary": {
+      "policy": "Claim blocked: this cat already has an active claim. Release or reclaim it first."
+    },
+    "approveDispatch": "Approve and assign",
+    "rejection": {
+      "label": "Note (optional)",
+      "title": "Reject this suggestion?",
+      "ok": "Reject and return to suggestions"
+    },
+    "takeLease": "Claim",
+    "renewLease": "Renew",
+    "releaseLease": "Release claim",
+    "reclaimLease": "Reclaim",
+    "selfClaimPolicy": "Self-claim policy",
+    "suggestion": {
+      "title": "Suggest claiming: {0}",
+      "value": "Opus @opus",
+      "ok": "Submit suggestion"
+    },
+    "requirement": {
+      "title": "Requirements audit · Six questions",
+      "audience": "Who is it for?",
+      "problem": "What problem does it solve?",
+      "currentApproach": "How is it done now?",
+      "urgency": "Why now?",
+      "successCriteria": "What counts as success?",
+      "exclusions": "What is out of scope?"
+    },
+    "newIntent": "New requirement card",
+    "recordLesson": "Record a lesson",
+    "importBacklogDialog": {
+      "title": "Import active features from documents?",
+      "text": "Read docs/ROADMAP.md and docs/features/ and add unregistered active features to the backlog. Existing entries are not duplicated."
+    }
+  },
+  "format": {
+    "duration": {
+      "seconds": "{0}s"
+    },
+    "today": "Today"
+  },
+  "system": {
+    "config": {
+      "milliseconds": "{0}ms"
+    },
+    "pushConfiguration": {
+      "service": {
+        "true": "Enabled",
+        "false": "Disabled"
+      },
+      "listLabel": "VAPID push keys",
+      "generated": "Generated · Not saved",
+      "permissionLabel": "Notification permission",
+      "pushService": "Push service",
+      "serviceConfig": "Service configuration",
+      "boundDevices": "Linked devices",
+      "lastDelivery": "Last delivery:",
+      "deliveryTime": "Delivery time",
+      "permission": {
+        "granted": "Granted",
+        "default": "Not chosen"
+      },
+      "configured": {
+        "true": "Configured"
+      },
+      "delivery": {
+        "ok": "Succeeded",
+        "not_attempted": "Not tested"
+      },
+      "hints": {
+        "push_vapid_key_missing": "Missing VAPID public key",
+        "push_not_configured": "Push service not configured",
+        "push_subscription_missing": "No subscribed devices",
+        "push_last_delivery_failed": "Latest delivery failed"
+      },
+      "subscribe": "Subscribe",
+      "unsubscribe": "Unsubscribe",
+      "sendTest": "Send test notification",
+      "privateKeyHelp": "Leave empty to keep the current value; saved to .env.",
+      "pushPrivateKey": "Push private key",
+      "contactInfo": "Contact information",
+      "generateKey": "Generate new key"
+    },
+    "days7": "7 days",
+    "systemDefault": "System default",
+    "loadError": "Could not read system configuration.",
+    "pushDiag": "Push diagnostics",
+    "owner": "Owner",
+    "serverPort": "Service port"
+  },
+  "mediaReview": {
+    "conflict": "The version changed. Review it before submitting again.",
+    "annotation": {
+      "foot": "Save annotation",
+      "placeholder": "Comment"
+    },
+    "annotations": "Annotations",
+    "lightbox": {
+      "previousImage": "Previous image",
+      "nextImage": "Next image",
+      "sub": "{0} · Version {1} · {2}{3}"
+    },
+    "choose": "Choose review task",
+    "empty": "No review tasks available",
+    "markHelp": "Click to mark a point or drag to select an area; video pauses at the selected frame.",
+    "locate": "Locate frame",
+    "from": "Start (seconds)",
+    "to": "End (seconds)",
+    "body": "Write an annotation",
+    "screeningContext": "{0} · {1}"
+  },
+  "frame": {
+    "loadError": "Temporarily unavailable",
+    "stopRecording": "Stop recording",
+    "reload": "Read again",
+    "rail": "Global",
+    "speak": "Read aloud",
+    "toolTodo": "This tool is not available yet.",
+    "exitFocus": "Exit focus",
+    "workbench": "Workbench",
+    "focusSuffix": "· Focus",
+    "exitWide": "Exit full window",
+    "menuStripe": "Workbench menu",
+    "pinRail": "Pin to rail",
+    "backTo": "Back to {0}",
+    "chooseSplit": "Choose tabs to show side by side",
+    "closeNamed": "Close {0}",
+    "unpinRail": "Unpin from the rail",
+    "unpinNamed": "Unpin {0}",
+    "pinNamed": "Pin {0}"
+  },
+  "modeThumb": {
+    "label": {
+      "system": "Automatic"
+    }
+  },
+  "serviceState": {
+    "stopping": "Stopping…",
+    "uninstalling": "Uninstalling"
+  },
+  "execDetail": {
+    "state": {
+      "cancelled": "Stopped",
+      "queued": "Queued",
+      "running": "Running",
+      "failed": "Failed",
+      "timed_out": "Timed out",
+      "lost": "Execution interrupted; not replayed"
+    },
+    "task": "Background task",
+    "stop": "Stop task",
+    "forceReset": {
+      "title": "Force clear execution slots"
+    },
+    "close": "Close details",
+    "log": "Output and execution history",
+    "noOutput": "No output yet",
+    "feedback": "Also tell the cat why it ended"
+  },
+  "mcpPreview": {
+    "start": "Start"
+  },
+  "env": {
+    "system": {
+      "count": "{0}"
+    },
+    "envVars": "Environment variables",
+    "form": {
+      "title": "Edit environment variable",
+      "ok": "Write to .env"
+    }
+  },
+  "home": {
+    "importSession": "Attach an existing Claude Code or Codex session",
+    "reconnect": "Reconnect",
+    "guide": "Collaboration guide"
+  },
+  "memberCard": {
+    "at": "@ Mention"
+  },
+  "voiceReview": {
+    "recording": {
+      "startRecording": "Start recording"
+    },
+    "advisory": {
+      "mode": "Advisory mode",
+      "passive": "Passive",
+      "active": "Active",
+      "dnd": "Do not disturb"
+    },
+    "shareMeeting": "Share meeting transcript",
+    "pageAction": {
+      "title": "Current page",
+      "inspect": "Inspect"
+    }
+  },
+  "cafeRows": {
+    "bringToChat": "Bring to conversation"
+  },
+  "media": {
+    "preview": "Preview",
+    "group": {
+      "play": "Play together",
+      "pause": "Pause together",
+      "point": "Align to point"
+    },
+    "markup": {
+      "stroke": "Stroke",
+      "arrow": "Arrow",
+      "text": "Text"
+    }
+  },
+  "mediaMarks": {
+    "located": "Located"
+  },
+  "calendar": {
+    "count": "{0} items"
+  },
+  "theater": {
+    "label": "Replay theater",
+    "empty": "No replay records yet"
+  },
+  "chatHeader": {
+    "findMessages": "Find messages"
+  },
+  "wsMem": {
+    "allMemory": "All memories"
+  },
+  "composerPop": {
+    "heading": {
+      "browse": "Browse folders"
+    },
+    "newFolder": "Create folder",
+    "folderCreation": {
+      "text": "Create under {0}."
+    },
+    "copyPath": "Copy path",
+    "forwardMore": "Forward"
+  },
+  "chatPage": {
+    "loadEarlier": "Load earlier messages"
+  },
+  "chatWelcome": {
+    "title": "Welcome to Clowder AI",
+    "describe": "Describe what you want to do",
+    "mentionCat": "@ a cat",
+    "quoteContext": "Reference context"
+  },
+  "historyPicker": {
+    "dialog": {
+      "title": "Search message history"
+    },
+    "placeholder": "Search your sent messages",
+    "empty": "No matching message history."
+  },
+  "gameLobby": {
+    "dialog": {
+      "title": "Werewolf · {0}",
+      "foot": "Start game · {0} cats",
+      "board": "{0}-player game"
+    },
+    "mode": {
+      "player": "Player mode"
+    },
+    "board": "Game setup",
+    "players": "Participating cats",
+    "voiceMode": "Voice mode"
+  },
+  "wsReplay": {
+    "controls": {
+      "playLabel": {
+        "true": "Pause replay"
+      },
+      "stoppedLabel": {
+        "true": "Play again",
+        "false": "Play replay"
+      },
+      "label": "Playback speed",
+      "skipIdle": "Skip idle time",
+      "tip": "Skip long idle periods and slow down during handoffs; playback speed is unchanged",
+      "modeTip": {
+        "true": "Faithful: show reasoning and tools",
+        "false": "Cinematic: conversation only"
+      },
+      "navigateEvents": "Previous / next event or chapter"
+    },
+    "speed": {
+      "text": "Fastest"
+    },
+    "menu": {
+      "label": "Previous event",
+      "nextEvent": "Next event",
+      "chapter": "{0} · {1}"
+    },
+    "chapter": {
+      "session_start": "Start",
+      "invocation": "New turn",
+      "pass_ball": "Handoff",
+      "post_idle": "Resumed after idle",
+      "session_end": "Stop"
+    },
+    "load": {
+      "loading": "Loading replay…",
+      "error": "Replay temporarily unavailable."
+    },
+    "empty": "No replay records yet."
+  },
+  "tagManager": {
+    "dialog": {
+      "title": "Manage tags",
+      "desc": "Tags organize and filter conversations."
+    },
+    "empty": "No tags yet.",
+    "delete": {
+      "title": "Delete tag “{0}”?",
+      "text": "Remove this tag from all conversations; the conversations are preserved."
+    }
+  },
+  "classify": {
+    "deleteTag": "Delete tag",
+    "dialog": {
+      "title": "Organize unclassified conversations",
+      "desc": "{0} conversations have no tags. Click a tag to add or remove it."
+    },
+    "suggest": "Generate suggestions",
+    "acceptAll": "Apply all suggestions",
+    "searchPlaceholder": "Search conversations, projects or ID…",
+    "review": "Review",
+    "noMatch": "No matching conversations"
+  },
+  "kv": {
+    "value": "Value",
+    "hide": "Hide value",
+    "show": "Show value"
+  },
+  "queue": {
+    "targets": {
+      "title": "Change recipients"
+    },
+    "send": {
+      "steerReply": "Steer current reply",
+      "interruptAndSend": "Interrupt and send",
+      "title": "Send this now?",
+      "sub": "Join the reply {0} is writing",
+      "interruptHelp": "Stop this turn and start a new one immediately",
+      "ok": "Send"
+    }
+  },
+  "delivery": {
+    "delivered": "Delivered",
+    "read": "Read",
+    "received": "Received",
+    "unknown": "Delivery result unknown"
+  },
+  "app": {
+    "purge": {
+      "title": "Permanently delete “{0}”?",
+      "text": "Cannot be restored after deletion."
+    },
+    "emptyTrash": {
+      "title": "Empty trash?",
+      "text": "{0} conversations will be permanently deleted and cannot be restored."
+    }
+  },
+  "trash": {
+    "deleteForever": "Delete permanently"
+  },
+  "wsPreview": {
+    "clear": "Clear",
+    "load": {
+      "loading": "Loading preview…",
+      "error": "Preview gateway unavailable",
+      "empty": "No preview"
+    },
+    "storybook": "Storybook",
+    "closeTab": "Close tab",
+    "newTab": "New tab",
+    "back": "Back",
+    "forward": "Forward",
+    "address": "Preview URL",
+    "screenshot": "Screenshot",
+    "console": "Console",
+    "navigate": {
+      "text": "This appears to be a Clowder AI Hub page. Page preview is intended for development servers such as Vite or Next.js."
+    },
+    "discovered": "Discovered services",
+    "addressHint": "No open pages"
+  },
+  "rules": {
+    "loadError": "Could not read rules.",
+    "edit": {
+      "text": "{0} does not exist. Fix its path or delete this rule from ⋯.",
+      "title": "Edit {0}",
+      "meta": "Takes effect in the next session after saving",
+      "label": "Rule content"
+    },
+    "l0Title": "L0 system prompt template",
+    "previewMeta": {
+      "meta": "{0} lines · Read-only"
+    }
+  },
+  "themeBackground": {
+    "none": "No background",
+    "preset": {
+      "duskCafe": "Cat cafe · Dusk",
+      "nightCafe": "Cat cafe · Night"
+    },
+    "image": "Background",
+    "pickImage": "Add background",
+    "limit": "Add up to 20 custom images.",
+    "opacity": "Opacity",
+    "unsupportedImage": "The browser cannot display this image. Choose a supported format.",
+    "tooLarge": "Each image must be no larger than 20 MB. Choose another.",
+    "saveFailed": "Could not save the image locally in the browser. Choose a smaller image.",
+    "readFailed": "Could not read this image. Choose another."
+  },
+  "theme": {
+    "calculator": "Theme calculator",
+    "reset": "Reset to default",
+    "inUse": "In use",
+    "tokens": {
+      "rail": "Rail"
+    }
+  },
+  "pdlDoc": {
+    "sysName": "System theme {0}",
+    "sysSub": "Updates with releases",
+    "inUse": "In use",
+    "dup": "Duplicate as new theme",
+    "archivedTitle": "Old layout (based on v{0})",
+    "archivedFails": "Still cannot apply: the layout is incomplete or contains unknown entries",
+    "archivedSub": "This layout could not merge into the current version. Select it to retry.",
+    "hiddenNotShown": "Not shown in the current theme",
+    "skipReason": {
+      "missing": "This position is absent from the current theme",
+      "host": "Plugins cannot modify built-in host content",
+      "depth": "Plugin UI exceeds 256 levels and was not loaded",
+      "nodes": "Plugin UI exceeds 65536 nodes and was not loaded"
+    },
+    "copyUnique": "Copy locator (unique)",
+    "copyPlain": "Copy locator (all matching names)",
+    "editing": "Edit layout"
+  },
+  "pluginPage": {
+    "desc": "A plugin-provided interface. Disabling the plugin in Settings › Extensions removes this entry.",
+    "settings": "Plugin settings",
+    "toggle": {
+      "title": "Enable {0}"
+    },
+    "detail": {
+      "blocked": "{0} is required before enabling. Complete and save the configuration below."
+    }
+  },
+  "profiles": {
+    "observation": {
+      "title": "Add an observation for {0} {1}",
+      "placeholder": "Observing",
+      "help": "Written to the profile only after review."
+    },
+    "compiled": {
+      "title": "Injected content received by {0}",
+      "label": "Timing",
+      "firstMessage": "First message",
+      "laterTurns": "Later turns",
+      "afterHandoff": "After handoff",
+      "position": "Position",
+      "systemPrompt": "System prompt",
+      "userMessage": "User message"
+    },
+    "segment": {
+      "copy": {
+        "text": "{0} lines · {1} characters"
+      }
+    }
+  },
+  "entryLayout": {
+    "rowSlot": {
+      "quoteInChat": "Reference in chat"
+    },
+    "shell": {
+      "collapseWorkbench": "Collapse workbench",
+      "labelWindow": "Window",
+      "labelShell": "Shell",
+      "labelBody": "Body",
+      "sidebar": "Sidebar",
+      "mainWindow": "Main window"
+    },
+    "slot": {
+      "conversationSidebar": "Conversation sidebar"
+    }
+  },
+  "wsItems": {
+    "notifications": {
+      "unmarked": "Untagged",
+      "phase": "Coding"
+    }
+  },
+  "wsGit": {
+    "worktree": {
+      "tip": "Worktree: {0} · {1} @ {2}",
+      "option": "{0} · {1}"
+    },
+    "worktrees": "Worktree",
+    "readOnlyHelp": "Read-only: no commit, push or PR here",
+    "clean": "Working tree clean",
+    "behindMain": "Commits behind main",
+    "mergedBranches": "Merged branches",
+    "orphan": "Orphaned: directory remains, but no branch uses it"
+  },
+  "wsFiles": {
+    "newUpload": "New or upload",
+    "create": {
+      "fields": {
+        "title": {
+          "file": "New file"
+        }
+      },
+      "uploadFile": "Upload file"
+    },
+    "searchPlaceholder": "Search files",
+    "noMatch": "No matching files found.",
+    "delete": {
+      "title": "Delete {0}",
+      "confirm": {
+        "true": "The folder's {0} files will also be deleted. Deletions appear in Changes and can be restored before committing.",
+        "false": "Deletions appear in Changes and can be restored before committing."
+      }
+    }
+  },
+  "wsTerminal": {
+    "load": {
+      "loading": "Connecting to terminal…",
+      "error": "Terminal service unavailable.",
+      "empty": "No terminals in this worktree yet."
+    },
+    "closeTerminal": "End terminal",
+    "mine": "My terminal",
+    "close": {
+      "title": "Close my terminal?",
+      "text": "Stops commands running in this terminal. Cat terminals are unaffected."
+    }
+  },
+  "wsSchedule": {
+    "loading": "Loading schedule…",
+    "error": "Schedule temporarily unavailable.",
+    "previous": "Previous period",
+    "next": "Next period",
+    "month": "Month",
+    "week": "Week",
+    "empty": "Nothing scheduled for this day",
+    "undated": "Unscheduled"
+  },
+  "reply": {
+    "jump": "Jump to original"
+  },
+  "nativeSetup": {
+    "title": "Detect available clients",
+    "detect": "Detect again",
+    "create": "Create selected members",
+    "created": "Created",
+    "ready": "Available",
+    "dshAuto": "Installed · Configured automatically when added",
+    "conflict": "A member with this name already exists",
+    "adjust": "Adjust",
+    "createFailed": "Could not create {0} ({1}):"
+  },
+  "wsRecall": {
+    "summary": {
+      "count": "Recall {0}"
+    }
+  },
+  "notice": {
+    "dismiss": "Dismiss this item"
+  },
+  "themeCalc": {
+    "controls": {
+      "switchLight": "Switch to light",
+      "switchDark": "Switch to dark"
+    },
+    "readouts": {
+      "noticeable": "Distinct",
+      "tooClose": "Too close",
+      "largeText": "Large text",
+      "insufficient": "Insufficient"
+    }
+  },
+  "quotaPin": {
+    "title": "Account usage",
+    "refresh": "Refresh",
+    "refreshHint": "Refresh only the selected accounts",
+    "chooseAccounts": "Choose accounts",
+    "doneChoosing": "Done",
+    "manageAccounts": "Manage accounts",
+    "unpin": "Hide icon",
+    "inUse": "In use",
+    "standby": "Standby",
+    "noReading": "No reading",
+    "noAccountsSelected": "No accounts selected",
+    "noOauthAccounts": "No accounts configured",
+    "barTitle": "Show usage in the sidebar",
+    "selectedCount": "{0} accounts selected",
+    "item": "{0} {1}% left"
+  }
+}

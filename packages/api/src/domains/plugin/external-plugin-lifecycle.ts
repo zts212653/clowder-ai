@@ -1,6 +1,7 @@
 import { hasRetainedDesktopLoss } from './desktop-window-runtime/desktop-loss.js';
 import {
   logPluginStartFailure,
+  logPluginStopFailure,
   type PluginStartPhase,
   pluginStartFailureReport,
   startFailureRecord,
@@ -135,7 +136,12 @@ export class ExternalPluginLifecycleService {
       const current = await this.readCurrent(instanceId);
       assertRevision(current, expectedRevision);
       const disabling = await this.advance(instanceId, expectedRevision, { activationState: 'disabling' });
-      await this.stopOrFail(instanceId, disabling.lifecycleRevision, PLUGIN_OWNER_UNINSTALLED_REASON);
+      // The owner's removal goes through even when the plugin's own stop cannot run (e.g. its module no longer loads).
+      try {
+        await this.options.supervisor.stop(instanceId, PLUGIN_OWNER_UNINSTALLED_REASON);
+      } catch (error) {
+        logPluginStopFailure(instanceId, PLUGIN_OWNER_UNINSTALLED_REASON, error);
+      }
       return this.advance(instanceId, disabling.lifecycleRevision, {
         lifecycleState: 'retired',
         activationState: 'disabled',
@@ -475,7 +481,8 @@ export class ExternalPluginLifecycleService {
   private async stopOrFail(instanceId: string, revision: number, reason: string): Promise<void> {
     try {
       await this.options.supervisor.stop(instanceId, reason);
-    } catch {
+    } catch (error) {
+      logPluginStopFailure(instanceId, reason, error);
       await this.advance(instanceId, revision, { activationState: 'error' });
       throw new PluginLifecycleError('STOP_FAILED', 'official plugin runtime failed to stop');
     }

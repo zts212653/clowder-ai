@@ -24,9 +24,9 @@ for (const adapter of ['memory', 'redis']) {
     assert.equal(claims.filter((v) => v === 'already_claimed').length, 11);
     await Promise.all([
       store.patch('owner', { appAssistEnabled: false }),
-      store.patch('owner', { personaTone: 'Fixture' }),
+      store.patch('owner', { householdReadsAllowed: false }),
     ]);
-    assert.equal((await store.getSaved('owner')).appAssistEnabled, false);
+    assert.equal((await store.get('owner')).appAssistEnabled, false);
     assert.equal(await store.claimAppAssistDay('owner', key(2), '2030-01-02'), 'disabled');
     await store.patch('owner', { appAssistEnabled: true });
     assert.equal(await store.claimAppAssistDay('owner', key(1), '2030-01-02'), 'already_claimed');
@@ -36,8 +36,6 @@ for (const adapter of ['memory', 'redis']) {
     assert.equal(await store.claimAppAssistDay('owner', key(1), '2030-01-01'), 'clock_rollback');
     assert.equal(await store.claimAppAssistDay('owner', key(1), '2030-01-03'), 'claimed');
     assert.equal(await store.claimAppAssistDay('other', key(1), '2030-01-03'), 'disabled');
-    await store.patch('owner', { muted: true });
-    assert.equal(await store.claimAppAssistDay('owner', key(2), '2030-01-03'), 'disabled');
     await assert.rejects(store.claimAppAssistDay('owner', 'org.fixture.raw', '2030-01-03'));
     if (client) {
       const saved = JSON.parse(await client.get(ConciergeKeys.appAssistDay('owner')));
@@ -45,7 +43,7 @@ for (const adapter of ['memory', 'redis']) {
       assert.equal(await client.ttl(ConciergeKeys.config('owner')), -1);
       assert.equal(await client.ttl(ConciergeKeys.appAssistDay('owner')), -1);
       const restarted = new RedisConciergeConfigStore(fixture.client('day:'));
-      await restarted.patch('owner', { muted: false });
+      await restarted.patch('owner', { householdReadsAllowed: true });
       assert.equal(await restarted.claimAppAssistDay('owner', key(1), '2030-01-03'), 'already_claimed');
       assert.deepEqual((await client.keys('day:*')).sort(), [
         'day:concierge:app-assist-day:owner',
