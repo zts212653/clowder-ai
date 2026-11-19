@@ -1,6 +1,6 @@
 import { existsSync, readdirSync, readFileSync, realpathSync, statSync } from 'node:fs';
-import { basename, join, relative } from 'node:path';
-import type { IndexStateManager } from './IndexStateManager.js';
+import { basename, isAbsolute, join, relative, sep } from 'node:path';
+import type { ProjectIndexStatePort } from './IndexStateManager.js';
 
 export interface ProjectSummary {
   projectName: string;
@@ -51,7 +51,7 @@ const SKIP_DIRS = new Set(['.git', 'node_modules', '.next', 'dist', 'build', '.c
 
 export class ExpeditionBootstrapService {
   constructor(
-    private stateManager: IndexStateManager,
+    private stateManager: ProjectIndexStatePort,
     private deps: BootstrapDeps,
   ) {}
 
@@ -62,12 +62,11 @@ export class ExpeditionBootstrapService {
     const elapsed = () => Date.now() - startTime;
     const fp = this.deps.getFingerprint(projectPath);
 
-    if (!this.stateManager.shouldBootstrap(projectPath, fp)) {
+    if (!(await this.stateManager.claim(projectPath, fp, ownerUserId))) {
       return { status: 'skipped', durationMs: elapsed() };
     }
 
-    this.stateManager.startBuilding(projectPath, fp);
-
+    let completed: { summary: ProjectSummary; docsIndexed: number };
     try {
       const emit = (phase: BootstrapProgress['phase'], idx: number, processed = 0, total = 0) =>
         options.onProgress?.({
@@ -106,14 +105,14 @@ export class ExpeditionBootstrapService {
       }
 
       emit('summarizing', 3, finalDocsIndexed, summary.docsList.length);
-      this.stateManager.markReady(projectPath, finalDocsIndexed, JSON.stringify(summary));
-
-      return { status: 'ready', summary, docsIndexed: finalDocsIndexed, durationMs: elapsed() };
+      completed = { summary, docsIndexed: finalDocsIndexed };
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : String(err);
-      this.stateManager.markFailed(projectPath, errorMsg);
+      await this.stateManager.markFailed(projectPath, errorMsg, ownerUserId);
       return { status: 'failed', durationMs: elapsed(), error: errorMsg };
     }
+    await this.stateManager.markReady(projectPath, completed.docsIndexed, JSON.stringify(completed.summary), ownerUserId);
+    return { status: 'ready', ...completed, durationMs: elapsed() };
   }
 }
 
@@ -146,7 +145,8 @@ function isInsideProject(filePath: string, projectRoot: string): boolean {
   try {
     const real = realpathSync(filePath);
     const realRoot = realpathSync(projectRoot);
-    return real.startsWith(realRoot + '/') || real === realRoot;
+    const within = relative(realRoot, real);
+    return !isAbsolute(within) && within !== '..' && !within.startsWith(`..${sep}`);
   } catch {
     return false;
   }
@@ -193,7 +193,7 @@ function walkDocs(
     if (stat.isDirectory()) {
       results.push(...walkDocs(full, projectRoot, budget, depth + 1));
     } else if (stat.isFile()) {
-      const relPath = relative(projectRoot, full);
+      const relPath = relative(projectRoot, full).split(sep).join('/');
       const tier = classifyDoc(relPath);
       if (tier) {
         results.push({ path: relPath, tier });

@@ -9,6 +9,7 @@ import { currentPluginCallContext, withPluginCallContext } from '../dist/domains
 import { createEventMemoryProvider } from '../dist/domains/plugin/host-surface/event-memory-provider.js';
 import { MEMORY_HOST_REQUIRED_OPERATIONS, MemoryPluginHost } from '../dist/domains/plugin/host-surface/memory-plugin-host.js';
 import { createMemorySourceHost } from '../dist/domains/plugin/host-surface/memory-source-host.js';
+import { createProjectIndexProvider } from '../dist/domains/plugin/host-surface/project-index-provider.js';
 import { eventsRoutes } from '../dist/routes/events.js';
 import { evidenceRoutes } from '../dist/routes/evidence.js';
 import { memoryRoutes } from '../dist/routes/memory.js';
@@ -25,6 +26,29 @@ const admission = {
     provenance: { kind: 'catalog', catalogId: 'official.memory', packageName: '@clowder-ai/memory-plugin' },
   },
 };
+
+test('project index writes run as the owner that authorized the Host operation', async () => {
+  const provider = new MemoryPluginHost();
+  const state = createProjectIndexProvider(provider);
+  const writes = [];
+  await provider.admit(admission, {
+    exposes: async () => true,
+    async attempt(instanceId, method, request) {
+      if (method === 'memory.describe') return { status: 'returned', value: supportedDescriptor() };
+      assert.equal(currentPluginCallContext(instanceId)?.userId, 'project-owner');
+      writes.push(request);
+      return { status: 'returned', value: request.operation === 'index.project.claim' ? true : null };
+    },
+  });
+  provider.markReady(pluginInstanceId);
+  const projectPath = '/fixture-project';
+  assert.equal(await state.claim(projectPath, 'revision-a', 'project-owner'), true);
+  await state.markReady(projectPath, 5, '{}', 'project-owner');
+  assert.deepEqual(writes, [
+    { operation: 'index.project.claim', input: { projectPath, fingerprint: 'revision-a' } },
+    { operation: 'index.project.settle', input: { projectPath, status: 'ready', docsIndexed: 5, summaryJson: '{}' } },
+  ]);
+});
 
 test('evidence status uses the current plugin projection and reports a disabled provider', async (t) => {
   const app = Fastify();

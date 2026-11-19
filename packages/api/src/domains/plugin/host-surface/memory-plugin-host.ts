@@ -3,7 +3,11 @@ import type { DispatchInput } from '@clowder-ai/plugin-memory-contract';
 import { explainDescriptor, isCompatibleDescriptor, MEMORY_REQUIRED_OPERATIONS } from '@clowder-ai/plugin-memory-contract';
 import { type EntityDispatchInput, entityOutputSchemas } from '@clowder-ai/plugin-memory-contract/entity';
 import { type EventDispatchInput, eventOutputSchemas } from '@clowder-ai/plugin-memory-contract/event';
-import { type MemoryIndexStatusRequest, memoryIndexStatusResult } from '@clowder-ai/plugin-memory-contract/maintenance';
+import {
+  type MemoryIndexStatusRequest,
+  type MemoryProjectIndexRequest,
+  memoryIndexStatusResult,
+} from '@clowder-ai/plugin-memory-contract/maintenance';
 import { type MatterDispatchInput, matterOutputSchemas } from '@clowder-ai/plugin-memory-contract/matter';
 import { type ProfileDispatchInput, profileOutputSchemas } from '@clowder-ai/plugin-memory-contract/profile';
 import { type TasteBrowseDispatchInput, tasteBrowseOutputSchemas } from '@clowder-ai/plugin-memory-contract/taste';
@@ -45,6 +49,7 @@ type MemoryDispatch =
   | EntityDispatchInput
   | EventDispatchInput
   | MemoryIndexStatusRequest
+  | MemoryProjectIndexRequest
   | MatterDispatchInput
   | ProfileDispatchInput
   | TasteBrowseDispatchInput;

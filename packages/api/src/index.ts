@@ -1733,9 +1733,9 @@ async function initializeApi(
   }
 
   // F152 Phase B: Expedition Bootstrap — state manager + service
-  const { IndexStateManager } = await import('./domains/memory/IndexStateManager.js');
+  const { createProjectIndexProvider } = await import('./domains/plugin/host-surface/project-index-provider.js');
   const { ExpeditionBootstrapService } = await import('./domains/memory/ExpeditionBootstrapService.js');
-  const indexStateManager = new IndexStateManager(memoryServices.store.getDb());
+  const indexStateManager = createProjectIndexProvider(memoryProvider);
   const { execFileSync } = await import('node:child_process');
   const getFingerprint = (projectPath: string) => {
     try {
@@ -7244,6 +7244,7 @@ async function initializeApi(
   await app.register(projectsBootstrapRoutes, {
     stateManager: indexStateManager,
     bootstrapService: expeditionBootstrapService,
+    isMemoryReady: () => memoryProvider.isReady(),
     socketManager: socketManager!,
     getFingerprint,
   });
