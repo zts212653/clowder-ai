@@ -1,3 +1,4 @@
+import { createTasteBrowseFixture } from './helpers/taste-browse-fixture.js';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -22,7 +23,7 @@ test('a single revision-bound source reads only its target instead of every appr
   });
   await app.register(tasteBrowseRoutes, {
     ownerUserId: 'owner',
-    tasteRepository: {
+    browse: createTasteBrowseFixture({
       canonicalRoot: () => '/unused-published-fixture',
       approvalLockKey: () => 'unused',
       publishedSnapshot: async () => ({
@@ -32,7 +33,7 @@ test('a single revision-bound source reads only its target instead of every appr
           return contents.get(path) ?? null;
         },
       }),
-    },
+    }),
     readObservatory: async () => ({ entries: [], coverage: { totalUnverified: 0 } }),
     proposalStore: {
       get: async () => ({
@@ -80,10 +81,8 @@ test('a single revision-bound source reads only its target instead of every appr
 
 test('published browse reads a corpus without starting a Git process for every vignette', async () => {
   const root = mkdtempSync(join(tmpdir(), 'f321-taste-cost-'));
-  const oldPath = process.env.PATH;
-  const realGit = execFileSync('which', ['git'], { encoding: 'utf8' }).trim();
-  const git = (...args) => execFileSync(realGit, args, { cwd: root, stdio: 'pipe' });
-  const quote = (value) => `'${value.replaceAll("'", "'\\''")}'`;
+  const previousTrace = process.env.GIT_TRACE2_EVENT;
+  const git = (...args) => execFileSync('git', args, { cwd: root, stdio: 'pipe' });
   try {
     git('init', '-b', 'main');
     git('config', 'user.name', 'Synthetic fixture');
@@ -95,16 +94,16 @@ test('published browse reads a corpus without starting a Git process for every v
     git('add', '.');
     git('commit', '-m', 'synthetic Taste fixture');
     git('update-ref', 'refs/remotes/origin/main', 'HEAD');
-    const bin = join(root, 'bin'),
-      log = join(root, 'commands');
-    mkdirSync(bin);
-    writeFileSync(join(bin, 'git'), `#!/bin/sh\nprintf '%s\\n' "$1" >> ${quote(log)}\nexec ${quote(realGit)} "$@"\n`, {
-      mode: 0o755,
-    });
-    process.env.PATH = `${bin}:${oldPath}`;
+    const trace = join(root, 'git-trace.jsonl');
+    process.env.GIT_TRACE2_EVENT = trace;
     const memories = await visibleTasteMemories(new FileTasteRepository(root), 'owner', false);
     assert.equal(memories.length, paths.length);
-    const commands = readFileSync(log, 'utf8').trim().split('\n');
+    const commands = readFileSync(trace, 'utf8')
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line))
+      .filter((event) => event.event === 'start')
+      .map((event) => event.argv[1]);
     assert.equal(commands.filter((name) => name === 'cat-file').length, 1, commands.join(', '));
     assert.ok(commands.length <= 9, `corpus spawned ${commands.length} Git processes`);
     console.log(
@@ -117,7 +116,8 @@ test('published browse reads a corpus without starting a Git process for every v
       }),
     );
   } finally {
-    process.env.PATH = oldPath;
+    if (previousTrace === undefined) delete process.env.GIT_TRACE2_EVENT;
+    else process.env.GIT_TRACE2_EVENT = previousTrace;
     rmSync(root, { recursive: true, force: true });
   }
 });

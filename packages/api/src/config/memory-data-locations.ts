@@ -5,6 +5,7 @@ export interface MemoryDataLocations {
   readonly dataDir: string;
   readonly eventDbPath: string;
   readonly globalDbPath: string;
+  readonly tasteProjectRoot?: string;
 }
 
 export function resolveMemoryDataLocations(config: {

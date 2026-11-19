@@ -1,3 +1,4 @@
+import { createTasteBrowseFixture } from './helpers/taste-browse-fixture.js';
 import assert from 'node:assert/strict';
 import { channel } from 'node:diagnostics_channel';
 import { mkdirSync, mkdtempSync, renameSync, rmSync, writeFileSync } from 'node:fs';
@@ -146,7 +147,7 @@ it('serves authenticated list/detail fanout with one child read and keeps source
   });
   await app.register(tasteBrowseRoutes, {
     ownerUserId: 'owner',
-    tasteRepository: { canonicalRoot: () => root, approvalLockKey: () => 'unused' },
+    browse: createTasteBrowseFixture({ canonicalRoot: () => root, approvalLockKey: () => 'unused' }),
     readObservatory: (owner, includePrivate) => statistics.read(owner, { includePrivate }),
     proposalStore: {
       get: async () => ({

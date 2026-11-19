@@ -45,6 +45,7 @@ export function createMemorySourceHost(
         userId,
         viewer,
         publicReply,
+        privateOwnerAccess: caller.memoryPrivateOwnerAccess === true,
         threadId: caller.threadId,
         invocationId: caller.invocationId,
         triggerMessageId: caller.originTriggerMessageId,

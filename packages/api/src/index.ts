@@ -1262,7 +1262,8 @@ async function initializeApi(
   // F221 Phase B: taste proposal store (InMemory now; Redis in Task 3)
   const tasteProposalStore = createTasteProposalStore(redis);
   const eventMemoryCorrectionProposalStore = createEventMemoryCorrectionProposalStore(redis);
-  const tasteRepository = new FileTasteRepository(findMonorepoRoot(process.cwd()));
+  const tasteProjectRoot = findMonorepoRoot(process.cwd());
+  const tasteRepository = new FileTasteRepository(tasteProjectRoot);
   const tasteApprovalCoordinator = {
     lock: new SessionMutex(),
     lockKey: () => tasteRepository.approvalLockKey(),
@@ -3797,11 +3798,12 @@ async function initializeApi(
     tasteMemoryLifecycleStore,
   );
   const { tasteBrowseRoutes } = await import('./routes/taste-browse.js');
+  const { createTasteBrowseProvider } = await import('./domains/plugin/host-surface/taste-browse-provider.js');
+  const tasteBrowse = createTasteBrowseProvider(memoryProvider);
   await app.register(tasteBrowseRoutes, {
     ownerUserId: privateUserId,
-    tasteRepository,
+    browse: tasteBrowse,
     proposalStore: tasteProposalStore,
-    lifecycleStore: tasteMemoryLifecycleStore,
     lifecycleService: tasteMemoryLifecycleService,
     threadStore,
     messageStore,
@@ -5530,7 +5532,7 @@ async function initializeApi(
     memory: {
       provider: memoryProvider,
       evidenceDbPath,
-      data: memoryData,
+      data: { ...memoryData, tasteProjectRoot },
       ephemeral: process.env.MEMORY_STORE === '1',
       onMatterChanged: (ownerUserId) => socketManager?.emitToUser(ownerUserId, 'memory_matter_changed', {}),
       indexSources: makeMemoryIndexSources,
@@ -7755,7 +7757,7 @@ async function initializeApi(
       ownerUserId: privateUserId,
       catalog: memoryServices.catalog,
       stores: libraryStores,
-      searchSources: { tasteRepository, messageSearchService },
+      searchSources: { tasteBrowse, messageSearchService },
       brakeSources: { eventMemoryStore, threadStore, messageStore },
       recallSources: {
         ...recallOwnerMessageSources,

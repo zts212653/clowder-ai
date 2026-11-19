@@ -14,6 +14,8 @@ export interface PluginCallContext {
   readonly invocationId: string;
   /** Source projections for a public reply must exclude scoped content. */
   readonly memoryPublicReply?: boolean;
+  /** Authenticated direct-local owner access to private memory files. */
+  readonly memoryPrivateOwnerAccess?: boolean;
   /** Issued per admitted native action by Host; never accepted from tool input. */
   readonly nativeAction?: { readonly id: string; readonly contributionId: string; readonly method: string };
   /** Set only inside the Host's admitted project-output dispatcher. */

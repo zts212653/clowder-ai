@@ -7,7 +7,7 @@ import { MessageStore } from '../dist/domains/cats/services/stores/ports/Message
 import { ThreadStore } from '../dist/domains/cats/services/stores/ports/ThreadStore.js';
 import { currentPluginCallContext, withPluginCallContext } from '../dist/domains/plugin/carrier/plugin-call-context.js';
 import { createEventMemoryProvider } from '../dist/domains/plugin/host-surface/event-memory-provider.js';
-import { MemoryPluginHost } from '../dist/domains/plugin/host-surface/memory-plugin-host.js';
+import { MEMORY_HOST_REQUIRED_OPERATIONS, MemoryPluginHost } from '../dist/domains/plugin/host-surface/memory-plugin-host.js';
 import { createMemorySourceHost } from '../dist/domains/plugin/host-surface/memory-source-host.js';
 import { eventsRoutes } from '../dist/routes/events.js';
 import { memoryRoutes } from '../dist/routes/memory.js';
@@ -15,6 +15,7 @@ import { createMatterRouteProvider, readMatterOpeningPrompt } from '../dist/rout
 import { registerCallbackMatterMemoryRoutes } from '../dist/routes/memory-matter-routes.js';
 import { createMemoryRouteProvider } from '../dist/routes/memory-route-provider.js';
 
+const supportedDescriptor = () => ({ ...memoryDescriptor(), operations: [...MEMORY_HOST_REQUIRED_OPERATIONS] });
 const pluginInstanceId = 'approved-memory-instance';
 const admission = {
   instance: { pluginInstanceId },
@@ -33,7 +34,7 @@ test('memory route only invokes a ready compatible provider and preserves the ac
     exposes: async () => true,
     async attempt(instanceId, method, params) {
       history.push({ method, params });
-      if (method === 'memory.describe') return { status: 'returned', value: memoryDescriptor() };
+      if (method === 'memory.describe') return { status: 'returned', value: supportedDescriptor() };
       const context = currentPluginCallContext(instanceId);
       assert.equal(context?.userId, 'owner');
       assert.equal(context?.threadId, 'default');
@@ -70,7 +71,7 @@ test('memory route only invokes a ready compatible provider and preserves the ac
 
 test('memory admission probes replacements on the same installation and rejects unverified archives', async () => {
   const provider = new MemoryPluginHost();
-  let offered = memoryDescriptor();
+  let offered = supportedDescriptor();
   const actions = {
     exposes: async () => true,
     attempt: async () => ({ status: 'returned', value: offered }),
@@ -80,6 +81,11 @@ test('memory admission probes replacements on the same installation and rejects 
   provider.deactivate(pluginInstanceId);
   offered = { ...offered, storageFormat: 2 };
   await assert.rejects(provider.admit(admission, actions), /storageFormat 2/);
+  const complete = supportedDescriptor();
+  offered = { ...complete, operations: complete.operations.filter((operation) => operation !== 'profile.get') };
+  await assert.rejects(provider.admit(admission, actions), /missing operations: profile.get/);
+  provider.markReady(pluginInstanceId);
+  assert.equal(provider.isReady(), false);
   await assert.rejects(
     provider.admit(
       { ...admission, packageRecord: { ...admission.packageRecord, provenance: { kind: 'local-archive' } } },
@@ -114,7 +120,7 @@ test('Matter uses the verified callback actor and validates plugin replies at th
   await provider.admit(admission, {
     exposes: async () => true,
     async attempt(instanceId, method, request) {
-      if (method === 'memory.describe') return { status: 'returned', value: memoryDescriptor() };
+      if (method === 'memory.describe') return { status: 'returned', value: supportedDescriptor() };
       const caller = currentPluginCallContext(instanceId);
       assert.equal(caller.userId, 'owner');
       assert.equal(caller.catId, 'opus');
@@ -152,7 +158,7 @@ test('an action can detect replacement of the same instance while its request is
   const actions = {
     exposes: async () => true,
     async attempt(instanceId, method) {
-      if (method === 'memory.describe') return { status: 'returned', value: memoryDescriptor() };
+      if (method === 'memory.describe') return { status: 'returned', value: supportedDescriptor() };
       const original = currentPluginCallContext(instanceId);
       provider.deactivate(instanceId);
       await provider.admit(admission, actions);
@@ -186,7 +192,7 @@ test('Event routes await the admitted provider under authenticated owner scope',
   await provider.admit(admission, {
     exposes: async () => true,
     async attempt(instanceId, method, request) {
-      if (method === 'memory.describe') return { status: 'returned', value: memoryDescriptor() };
+      if (method === 'memory.describe') return { status: 'returned', value: supportedDescriptor() };
       assert.equal(currentPluginCallContext(instanceId)?.userId, 'event-owner');
       assert.equal(request.operation, 'event.list');
       assert.equal(request.input.limit, 2);

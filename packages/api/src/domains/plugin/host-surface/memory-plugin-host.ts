@@ -1,10 +1,11 @@
 import { randomUUID } from 'node:crypto';
 import type { DispatchInput } from '@clowder-ai/plugin-memory-contract';
-import { explainDescriptor, isCompatibleDescriptor } from '@clowder-ai/plugin-memory-contract';
-import type { EntityDispatchInput } from '@clowder-ai/plugin-memory-contract/entity';
-import type { EventDispatchInput } from '@clowder-ai/plugin-memory-contract/event';
-import type { MatterDispatchInput } from '@clowder-ai/plugin-memory-contract/matter';
-import type { ProfileDispatchInput } from '@clowder-ai/plugin-memory-contract/profile';
+import { explainDescriptor, isCompatibleDescriptor, MEMORY_REQUIRED_OPERATIONS } from '@clowder-ai/plugin-memory-contract';
+import { type EntityDispatchInput, entityOutputSchemas } from '@clowder-ai/plugin-memory-contract/entity';
+import { type EventDispatchInput, eventOutputSchemas } from '@clowder-ai/plugin-memory-contract/event';
+import { type MatterDispatchInput, matterOutputSchemas } from '@clowder-ai/plugin-memory-contract/matter';
+import { type ProfileDispatchInput, profileOutputSchemas } from '@clowder-ai/plugin-memory-contract/profile';
+import { type TasteBrowseDispatchInput, tasteBrowseOutputSchemas } from '@clowder-ai/plugin-memory-contract/taste';
 import type { z } from 'zod';
 import {
   invocationNotStarted,
@@ -23,6 +24,14 @@ import type { PluginPackageRecord } from '../host-inventory/types.js';
 
 export const MEMORY_PLUGIN_ID = 'official.memory';
 export const MEMORY_PACKAGE_NAME = '@clowder-ai/memory-plugin';
+export const MEMORY_HOST_REQUIRED_OPERATIONS = [
+  ...MEMORY_REQUIRED_OPERATIONS,
+  ...Object.keys(matterOutputSchemas),
+  ...Object.keys(eventOutputSchemas),
+  ...Object.keys(profileOutputSchemas),
+  ...Object.keys(entityOutputSchemas),
+  ...Object.keys(tasteBrowseOutputSchemas),
+];
 
 export class MemoryProviderCallError extends Error {
   constructor(readonly effect: PluginInvocationEffect) {
@@ -30,19 +39,26 @@ export class MemoryProviderCallError extends Error {
   }
 }
 
-type MemoryDispatch = DispatchInput | EntityDispatchInput | EventDispatchInput | MatterDispatchInput | ProfileDispatchInput;
+type MemoryDispatch =
+  | DispatchInput
+  | EntityDispatchInput
+  | EventDispatchInput
+  | MatterDispatchInput
+  | ProfileDispatchInput
+  | TasteBrowseDispatchInput;
 
 export async function callMemoryOwner<T>(
   provider: MemoryPluginHost,
   request: MemoryDispatch,
   schema: z.ZodType<T>,
   userId: string,
-  threadId = 'default',
+  scope: { threadId?: string; privateOwnerAccess?: boolean } = {},
 ): Promise<T> {
   const outcome = await provider.attempt(request, {
     catId: 'user',
     userId,
-    threadId,
+    threadId: scope.threadId ?? 'default',
+    memoryPrivateOwnerAccess: scope.privateOwnerAccess,
     invocationId: randomUUID(),
     assertCurrent: async () => {},
   });
@@ -86,8 +102,13 @@ export class MemoryPluginHost {
     if (descriptor.status === 'failed') {
       throw new ExternalPluginRuntimeError('PROTOCOL_VIOLATION', 'Memory package could not describe its capabilities');
     }
-    if (!isCompatibleDescriptor(descriptor.value)) {
-      throw new ExternalPluginRuntimeError('PROTOCOL_VIOLATION', explainDescriptor(descriptor.value));
+    const offered = descriptor.value;
+    if (!isCompatibleDescriptor(offered)) {
+      throw new ExternalPluginRuntimeError('PROTOCOL_VIOLATION', explainDescriptor(offered));
+    }
+    const missing = MEMORY_HOST_REQUIRED_OPERATIONS.filter((operation) => !offered.operations.includes(operation));
+    if (missing.length) {
+      throw new ExternalPluginRuntimeError('PROTOCOL_VIOLATION', `Memory package is missing operations: ${missing.join(', ')}`);
     }
     this.#binding = {
       identity: {

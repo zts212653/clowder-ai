@@ -7,16 +7,20 @@ export function createEventMemoryProvider(provider: MemoryPluginHost): EventMemo
     getEvent: (eventId, owner) =>
       callMemoryOwner(provider, { operation: 'event.get', input: { eventId } }, eventOutputSchemas['event.get'], owner),
     listEvents: ({ ownerUserId, ...input }) =>
-      callMemoryOwner(provider, { operation: 'event.list', input }, eventOutputSchemas['event.list'], ownerUserId, input.threadId),
+      callMemoryOwner(provider, { operation: 'event.list', input }, eventOutputSchemas['event.list'], ownerUserId, {
+        threadId: input.threadId,
+      }),
     getByCoord: (threadId, messageId, owner) =>
       callMemoryOwner(provider,
         { operation: 'event.by_coordinate', input: { threadId, messageId } },
         eventOutputSchemas['event.by_coordinate'],
         owner,
-        threadId,
+        { threadId },
       ),
     markEvent: (input, owner) =>
-      callMemoryOwner(provider, { operation: 'event.mark', input }, eventOutputSchemas['event.mark'], owner, input.threadId),
+      callMemoryOwner(provider, { operation: 'event.mark', input }, eventOutputSchemas['event.mark'], owner, {
+        threadId: input.threadId,
+      }),
     correctEvent: ({ ownerUserId, ...input }) =>
       callMemoryOwner(provider, { operation: 'event.correct', input }, eventOutputSchemas['event.correct'], ownerUserId),
     retireEvent: ({ ownerUserId, ...input }) =>
