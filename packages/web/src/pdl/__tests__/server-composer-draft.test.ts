@@ -266,3 +266,39 @@ it('keeps images read back for one conversation out of the conversation opened m
     [],
   );
 });
+
+it('leaves a saved image draft as it is when the owner leaves and comes back while its images are still being read', async () => {
+  vi.mocked(apiFetch).mockImplementation(async (path, init) =>
+    init?.method === 'PUT'
+      ? Response.json({ draft: { revision: 9 } })
+      : String(path).includes('/t1/')
+        ? Response.json({
+            draft: { text: 'A', contentBlocks: [{ type: 'image', url: '/uploads/a.png' }] },
+            revision: 1,
+          })
+        : Response.json({ draft: { text: 'B' }, revision: 2 }),
+  );
+  const state = { draft: { text: '', images: [], contexts: [] } as ComposerDraft, threadId: 't1' };
+  const host: { rerender?: () => void } = {};
+  // Like the host: words at once; the images of A are never read back during this test.
+  const restore = vi.fn((saved: ComposerDraft) => {
+    state.draft = { ...saved, images: [] };
+    host.rerender?.();
+    return saved.images.length ? new Promise<void>(() => {}) : undefined;
+  });
+  const hook = renderHook(() =>
+    useServerComposerDraft({ threadId: state.threadId, enabled: true, draft: state.draft, restore }),
+  );
+  host.rerender = hook.rerender;
+  await waitFor(() => expect(restore).toHaveBeenCalledTimes(1));
+  state.threadId = 't2';
+  hook.rerender();
+  await waitFor(() => expect(restore).toHaveBeenCalledTimes(2));
+  // Back to A: the input shows A's words again, its images not yet.
+  state.threadId = 't1';
+  state.draft = { text: 'A', images: [], contexts: [] };
+  hook.rerender();
+  await waitFor(() => expect(restore).toHaveBeenCalledTimes(3));
+  await flushed(700);
+  expect(writes().filter(([, path]) => String(path).includes('/t1/'))).toEqual([]);
+});

@@ -33,8 +33,9 @@ export function useServerComposerDraft(input: {
 }) {
   const known = useRef<Known>(new Map());
   const pending = useRef<{ threadId: string; draft: ComposerDraft } | null>(null);
-  // While a saved draft is being put back, the input is not yet what the owner left: nothing is written meanwhile.
-  const restoring = useRef<string | null>(null);
+  // The conversation whose server draft the input shows in full (images read back). Until then nothing is written:
+  // the input is not yet what the owner left. Each opening starts unshown; a restore after a switch never counts.
+  const shown = useRef<string | null>(null);
   const latest = useRef(input);
   latest.current = input;
   const { threadId, enabled } = input;
@@ -42,6 +43,7 @@ export function useServerComposerDraft(input: {
   useEffect(() => {
     if (!enabled) return;
     let live = true;
+    shown.current = null;
     const opened = JSON.stringify(latest.current.draft);
     void apiFetch(draftPath(threadId))
       .then(async (response) => {
@@ -61,11 +63,17 @@ export function useServerComposerDraft(input: {
         const now = JSON.stringify(latest.current.draft);
         if (now !== opened) await writeDraft(threadId, latest.current.draft, known.current);
         else if (now !== JSON.stringify(saved)) {
-          restoring.current = threadId;
           // A draft whose images can't be read back is as unknown as an unreachable one: nothing overwrites it.
-          await Promise.resolve(latest.current.restore(saved, () => live)).catch(() => known.current.delete(threadId));
-          if (restoring.current === threadId) restoring.current = null;
+          const ok = await Promise.resolve(latest.current.restore(saved, () => live)).then(
+            () => true,
+            () => false,
+          );
+          if (!ok) {
+            known.current.delete(threadId);
+            return;
+          }
         }
+        if (live) shown.current = threadId;
       })
       // An unreachable draft leaves this tab's composer as it is; the next edit writes again.
       .catch(() => undefined);
@@ -76,7 +84,7 @@ export function useServerComposerDraft(input: {
   useEffect(() => {
     const server = known.current.get(threadId);
     // Nothing to write until the server's draft is known and shown, or while the composer shows exactly that draft.
-    if (!enabled || !server || restoring.current === threadId) return;
+    if (!enabled || !server || shown.current !== threadId) return;
     if (server.signature === signature) {
       pending.current = null;
       return;
