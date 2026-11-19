@@ -1,5 +1,6 @@
 'use client';
 
+import { contentFileExtension } from '@cat-cafe/shared';
 import { type ReactNode, useEffect, useRef, useState } from 'react';
 import { FileActions } from '@/components/content-review/FileActions';
 import type { WorkspaceFileNavigationOrigin } from '@/stores/chat-types';
@@ -14,7 +15,20 @@ type Preview = {
   mediaType: string;
   bytesBase64: string;
 };
-type PreviewState = 'loading' | 'unavailable' | 'failed' | { preview: Omit<Preview, 'bytesBase64'>; nonce: string };
+type PreviewState =
+  | 'loading'
+  | 'unavailable'
+  | 'too-large'
+  | 'failed'
+  | { preview: Omit<Preview, 'bytesBase64'>; nonce: string };
+
+const SYSTEM_APP_OFFICE_FORMATS = new Set(['doc', 'ppt', 'xls', 'xlsx']);
+const PREVIEW_RESPONSE_STATE = { 204: 'unavailable', 413: 'too-large' } as const;
+const PREVIEW_FALLBACK_MESSAGE = {
+  'too-large': '文件超过 32 MiB，暂不支持预览。可用默认应用打开。',
+  failed: '无法加载文件预览。可用默认应用打开。',
+  unavailable: '暂无可用的预览插件。可用默认应用打开。',
+} as const;
 
 function parsePreview(input: unknown): Preview {
   if (!input || typeof input !== 'object') throw new Error('invalid preview response');
@@ -61,14 +75,18 @@ export function WorkspacePluginFilePreview({
       signal: controller.signal,
     })
       .then(async (response) => {
-        if (response.status === 204) {
-          if (!controller.signal.aborted) setState('unavailable');
+        if (controller.signal.aborted) return;
+        if (response.status === 204 || response.status === 413) {
+          setState(PREVIEW_RESPONSE_STATE[response.status]);
           return;
         }
         if (!response.ok) throw new Error('preview unavailable');
         const { bytesBase64, ...preview } = parsePreview(await response.json());
         if (controller.signal.aborted) return;
-        payload.current = Uint8Array.from(atob(bytesBase64), (character) => character.charCodeAt(0)).buffer;
+        const decoded = atob(bytesBase64);
+        const bytes = new Uint8Array(decoded.length);
+        for (let i = 0; i < bytes.length; i++) bytes[i] = decoded.charCodeAt(i);
+        payload.current = bytes.buffer;
         const nonce = Array.from(crypto.getRandomValues(new Uint8Array(16)), (value) =>
           value.toString(16).padStart(2, '0'),
         ).join('');
@@ -133,13 +151,15 @@ export function WorkspacePluginFilePreview({
     };
   }, [state]);
 
-  if (state === 'unavailable' || state === 'failed') {
+  if (state === 'unavailable' || state === 'too-large' || state === 'failed') {
     if (!showPluginSettings && state === 'unavailable') return fallback;
+    const unsupported = state === 'unavailable' && SYSTEM_APP_OFFICE_FORMATS.has(contentFileExtension(path));
+    const message = unsupported ? '此格式暂不支持预览。可用默认应用打开。' : PREVIEW_FALLBACK_MESSAGE[state];
     return (
       <div className="flex min-h-0 flex-1 flex-col">
         <output className="shrink-0 px-3 py-2 text-xs text-cafe-muted">
-          {state === 'failed' ? '无法加载文件预览。可用默认应用打开。' : '暂无可用的预览插件。可用默认应用打开。'}
-          {showPluginSettings && (
+          {message}
+          {showPluginSettings && !unsupported && state !== 'too-large' && (
             <a className="ml-2 text-cafe-accent hover:underline" href="/settings?s=plugins">
               插件设置
             </a>

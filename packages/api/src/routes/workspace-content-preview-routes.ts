@@ -4,6 +4,7 @@ import {
   WorkspacePreviewSelectionError,
   type WorkspacePreviewService,
 } from '../domains/collaborative-content/workspace-preview-service.js';
+import { WorkspacePreviewReadError } from '../domains/workspace/workspace-preview-snapshot.js';
 import { WorkspaceSecurityError } from '../domains/workspace/workspace-security.js';
 import { resolveDirectLocalAuthorizationUserId } from '../utils/request-identity.js';
 
@@ -26,6 +27,9 @@ export function registerWorkspaceContentPreviewRoutes(
     } catch (error) {
       if (error instanceof WorkspacePreviewSelectionError)
         return reply.status(409).send({ error: { code: 'preview_provider_selection_required' } });
+      if (error instanceof WorkspacePreviewReadError) {
+        return reply.status(error.code === 'preview_file_too_large' ? 413 : 409).send({ error: { code: error.code } });
+      }
       if (error instanceof WorkspaceSecurityError)
         return reply.status(error.code === 'NOT_FOUND' ? 404 : 403).send({ error: { code: 'document_unavailable' } });
       request.log.error({ err: error }, 'Workspace content preview could not open');

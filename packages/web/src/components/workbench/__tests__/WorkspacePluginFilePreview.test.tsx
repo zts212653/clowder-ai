@@ -48,17 +48,21 @@ describe('WorkspacePluginFilePreview', () => {
     vi.resetAllMocks();
   });
 
-  async function open() {
+  async function renderPreview(path = 'docs/sample.pdf') {
     await act(async () => {
       root.render(
         <WorkspacePluginFilePreview
-          target={{ worktreeId: 'project', path: 'docs/sample.pdf' }}
+          target={{ worktreeId: 'project', path }}
           onBack={() => undefined}
           showPluginSettings
           fallback={<p>System application fallback</p>}
         />,
       );
     });
+  }
+
+  async function open() {
+    await renderPreview();
     const frame = container.querySelector('iframe');
     if (!frame?.contentWindow) throw new Error('Renderer iframe missing');
     const source = frame.contentWindow;
@@ -102,5 +106,29 @@ describe('WorkspacePluginFilePreview', () => {
     expect(port1.postMessage).not.toHaveBeenCalled();
     expect(container.querySelector('iframe')).toBeNull();
     expect(container.textContent).toContain('System application fallback');
+  });
+
+  it('shows the preview limit with a system application fallback', async () => {
+    vi.mocked(apiFetch).mockResolvedValueOnce(new Response(null, { status: 413 }));
+    await renderPreview();
+    expect(container.textContent).toContain('32 MiB');
+    expect(container.textContent).toContain('System application fallback');
+    expect(container.querySelector('iframe')).toBeNull();
+  });
+
+  it('explains unsupported spreadsheets without suggesting a plugin install', async () => {
+    vi.mocked(apiFetch).mockResolvedValueOnce(new Response(null, { status: 204 }));
+    await renderPreview('docs/report.XLSX');
+    expect(container.textContent).toContain('此格式暂不支持预览');
+    expect(container.textContent).toContain('System application fallback');
+    expect(container.querySelector('a[href="/settings?s=plugins"]')).toBeNull();
+  });
+
+  it('discards ready after the workspace preview has closed', async () => {
+    const { ready, postMessage } = await open();
+    act(() => root.render(null));
+    ready('1.0.0');
+    expect(postMessage).not.toHaveBeenCalled();
+    expect(port1.postMessage).not.toHaveBeenCalled();
   });
 });
