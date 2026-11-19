@@ -5,21 +5,20 @@
  * DELETE /api/memory - Delete memory entry
  */
 
-import { catIdSchema, createCatId } from '@cat-cafe/shared';
+import { catIdSchema, createCatId, type MemoryEntry, type MemoryInput } from '@cat-cafe/shared';
 import type { FastifyPluginAsync, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
-import type { IMemoryStore } from '../domains/cats/services/stores/ports/MemoryStore.js';
 import type { IThreadStore } from '../domains/cats/services/stores/ports/ThreadStore.js';
 import { resolveUserId } from '../utils/request-identity.js';
 import { MemoryProviderCallError } from './memory-route-provider.js';
 
 export interface MemoryRoutesOptions {
-  memoryStore(scope: {
-    userId: string;
-    threadId: string;
-    request: FastifyRequest;
-    reply: FastifyReply;
-  }): Pick<IMemoryStore, 'get' | 'set' | 'list' | 'delete'>;
+  memoryStore(scope: { userId: string; threadId: string; request: FastifyRequest; reply: FastifyReply }): {
+    set(input: MemoryInput): Promise<MemoryEntry>;
+    get(threadId: string, key: string): Promise<MemoryEntry | null>;
+    list(threadId: string): Promise<MemoryEntry[]>;
+    delete(threadId: string, key: string): Promise<boolean>;
+  };
   /** Optional thread ownership guard (enabled in production wiring). */
   threadStore?: IThreadStore;
   deploymentOwnerUserId?: string;

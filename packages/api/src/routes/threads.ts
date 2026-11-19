@@ -42,7 +42,6 @@ import { gateForDurableSlot } from '../domains/cats/services/stores/cursor-activ
 import type { IBacklogStore } from '../domains/cats/services/stores/ports/BacklogStore.js';
 import type { DeliveryCursorStore } from '../domains/cats/services/stores/ports/DeliveryCursorStore.js';
 import type { IDraftStore } from '../domains/cats/services/stores/ports/DraftStore.js';
-import type { IMemoryStore } from '../domains/cats/services/stores/ports/MemoryStore.js';
 import type { IMessageStore } from '../domains/cats/services/stores/ports/MessageStore.js';
 import type { ISessionChainStore } from '../domains/cats/services/stores/ports/SessionChainStore.js';
 import type { ITaskStore } from '../domains/cats/services/stores/ports/TaskStore.js';
@@ -500,7 +499,6 @@ export interface ThreadsRoutesOptions {
   /** Optional: cascade delete tasks when thread is deleted */
   taskStore?: ITaskStore;
   /** Optional: cascade delete memory when thread is deleted */
-  memoryStore?: IMemoryStore;
   /** Optional: cascade delete delivery cursors when thread is deleted */
   deliveryCursorStore?: DeliveryCursorStore;
   /** F254 Phase E: cascade persistent catch responsibility with thread deletion. */
