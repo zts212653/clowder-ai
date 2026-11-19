@@ -2384,7 +2384,7 @@
     "decide": "To decide",
     "decideEmpty": "Nothing is waiting for your decision.",
     "error": {
-      "partial": "Schedule source temporarily unavailable"
+      "partial": "Some sources are temporarily unavailable"
     },
     "review": "To review",
     "span": {

@@ -2384,7 +2384,7 @@
     "decide": "等你决定",
     "decideEmpty": "暂时没有等你决定的事。",
     "error": {
-      "partial": "日程来源暂时读不到"
+      "partial": "部分来源暂时读不到"
     },
     "review": "待查看",
     "span": {

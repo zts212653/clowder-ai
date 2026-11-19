@@ -43,7 +43,7 @@
    "approvalCard": "审批卡"
   },
   "error": {
-   "partial": "日程来源暂时读不到"
+   "partial": "部分来源暂时读不到"
   },
   "muteMention": "不再提醒",
   "submitAnswer": "提交回答",

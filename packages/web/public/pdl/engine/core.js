@@ -540,7 +540,7 @@ function pagesOpen(route, a, t, o) {
   const pane = t && t.closest && tc0.lc && t.closest('[data-ct="pane-l"]'), split = pane && pane.closest('[data-ct="split"]');
   if (split) { if (split.dataset.into === 'split') navOpen({ f: route, a: a, into: '.' }, t); else { navReplace(tc0.lc, route, a); navAfter(); } after(); return; }
   if (tc0.lc && !navIsPage(route)) { navOpen({ f: route, a: a }, t); after(); return; }
-  const sp = o.address && rs !== space() ? rs : null;   /* 按地址进来：地址里的路由（页面或详情）属于哪个空间就是哪个空间（离开的空间隐藏着留下）；入口打开页面只换主区，不换第二栏 */
+  const sp = (o.address || PDL_SPACES[rs].threadView === route) && rs !== space() ? rs : null;   /* 按地址进来、或者去一个对话（空间声明的对话页）：路由属于哪个空间就是哪个空间（离开的空间隐藏着留下）；入口打开别的页面只换主区，不换第二栏 */
   if (!t && !navIsPage(route) && !sp) { navReplace(navFocusC(), route, a); navAfter(); after(); return; }
   /* 从内容里（主区、工作台里的链接和按钮）打开页面（对话里点“记忆”、点插件去它的设置页）：和打开内容一样开到触发处的默认覆盖层级（触发处的祖先，返回规则），
      压在原来的内容上，返回回去；从内容外面的入口（窄栏、设置菜单）切换照旧 */
