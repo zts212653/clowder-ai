@@ -299,6 +299,133 @@ test('resume uses the package thread plan and keeps startParams thread-free', as
   assert.equal(threadRequest.kind, 'resume');
 });
 
+test('a package replacement between thread and turn exits before turn/start', async () => {
+  let current = 'A';
+  const wire = new ProtocolWire();
+  const write = wire.write.bind(wire);
+  wire.write = async (message) => {
+    await write(message);
+    if (message.method === 'thread/start') current = 'B';
+  };
+  const client = new CodexAppServerClient({
+    wire,
+    planThreadParams: async (request) => ({
+      ...buildCodexAppServerThreadParams(request),
+      assertCurrent: async () => {
+        if (current !== 'A') throw new Error('stale_generation');
+      },
+    }),
+    planTurnParams: async (request) => ({
+      ...buildCodexAppServerTurnParams(request),
+      assertCurrent: async () => {
+        if (current !== 'B') throw new Error('unexpected_generation');
+      },
+    }),
+  });
+
+  await assert.rejects(
+    collect(client.run({ prompt: frozenPrompt('generation'), thread: { kind: 'start' } })),
+    /stale_generation/,
+  );
+  assert.equal(wire.writes.filter((message) => message.method === 'turn/start').length, 0);
+});
+
+test('resume fallback rechecks generation at the actual thread/start send point', async () => {
+  let current = 'A';
+  const wire = new ProtocolWire();
+  const write = wire.write.bind(wire);
+  wire.write = async (message) => {
+    if (message.method === 'thread/resume') {
+      wire.writes.push(message);
+      current = 'B';
+      wire.inbox.push({ id: message.id, error: { code: -32600, message: 'no rollout found for thread id thread-1' } });
+      return;
+    }
+    await write(message);
+  };
+  const client = new CodexAppServerClient({
+    wire,
+    planThreadParams: async (request) => ({
+      ...buildCodexAppServerThreadParams(request),
+      assertCurrent: async () => {
+        if (current !== 'A') throw new Error('stale_generation');
+      },
+    }),
+  });
+
+  await assert.rejects(
+    collect(client.run({ prompt: frozenPrompt('fallback'), thread: { kind: 'resume', threadId: 'thread-1' } })),
+    /stale_generation/,
+  );
+  assert.equal(wire.writes.filter((message) => message.method === 'thread/start').length, 0);
+});
+
+test('boundedWatcher keeps the Host-only path and still starts its production turn', async () => {
+  const wire = new ProtocolWire();
+  const write = wire.write.bind(wire);
+  wire.write = async (message) => {
+    if (message.method === 'config/read') {
+      wire.writes.push(message);
+      wire.inbox.push({ id: message.id, result: { config: {} } });
+      return;
+    }
+    if (message.method === 'account/read') {
+      wire.writes.push(message);
+      wire.inbox.push({ id: message.id, result: { account: {} } });
+      return;
+    }
+    await write(message);
+    if (message.method === 'turn/start') {
+      wire.inbox.push({
+        method: 'turn/completed',
+        params: { threadId: 'thread-1', turn: { id: 'turn-1', status: 'completed' } },
+      });
+    }
+  };
+  let plannerCalls = 0;
+  const client = new CodexAppServerClient({
+    wire,
+    planThreadParams: async () => {
+      plannerCalls++;
+      throw new Error('watcher must not use the package thread planner');
+    },
+    planTurnParams: async () => {
+      plannerCalls++;
+      throw new Error('watcher must not use the package turn planner');
+    },
+  });
+
+  await collect(
+    client.run({
+      prompt: frozenPrompt(''),
+      thread: { kind: 'start' },
+      boundedWatcher: {
+        instructions: 'read-only watcher',
+        tools: [],
+        async configureProvider() {
+          return {};
+        },
+        async beforeTurn() {
+          return true;
+        },
+        async accepted() {},
+        async completed() {},
+        async callTool() {
+          throw new Error('fixture does not call tools');
+        },
+      },
+    }),
+  );
+
+  const threadStart = wire.writes.find((message) => message.method === 'thread/start');
+  assert.equal(plannerCalls, 0);
+  assert.equal(wire.writes.filter((message) => message.method === 'thread/start').length, 1);
+  assert.equal(wire.writes.filter((message) => message.method === 'turn/start').length, 1);
+  assert.equal(threadStart.params.baseInstructions, 'read-only watcher');
+  assert.equal(threadStart.params.developerInstructions, '');
+  assert.deepEqual(threadStart.params.dynamicTools, []);
+});
+
 test('app-server rejects unpaired surrogates before sending any malformed request', async () => {
   for (const overrides of [
     { prompt: frozenPrompt('dispatch summary ends with \ud83d…') },

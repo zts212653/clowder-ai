@@ -458,6 +458,7 @@ export class CodexAppServerClient {
             input.thread.kind === 'resume' ? { threadId: input.thread.threadId, excludeTurns: true } : undefined,
           ),
         startParams: plannedThread?.startParams ?? buildCodexAppServerThreadParams(input),
+        ...(plannedThread?.assertCurrent ? { assertCurrent: plannedThread.assertCurrent } : {}),
         requireExactResume: input.requireExactResume || Boolean(recoveryInstruction),
         ...(input.resumeReplacement ? { resumeReplacement: input.resumeReplacement } : {}),
         // A reused affinity host reaches this point only after its local lease
@@ -580,23 +581,27 @@ export class CodexAppServerClient {
         resolveInitialInputRead = resolve;
       });
       const initialClientId = input.activeRunDispatch && !isRecoveryTurn ? randomUUID() : undefined;
-      const plannedTurn = await planCodexAppServerTurn(
-        {
-          threadId,
-          ...(initialClientId ? { clientUserMessageId: initialClientId } : {}),
-          ...(!isRecoveryTurn ? { prompt: submittedPrompt } : {}),
-          ...(!isRecoveryTurn && input.imagePaths && input.imagePaths.length > 0
-            ? { imagePaths: input.imagePaths }
-            : {}),
-          ...(isRecoveryTurn && recoveryInstruction ? { recoveryContext: recoveryInstruction } : {}),
-          ...(input.outputSchema ? { outputSchema: input.outputSchema } : {}),
-          ...(input.collaborationMode ? { collaborationMode: input.collaborationMode } : {}),
-        },
-        this.deps.planTurnParams,
-      );
+      const plannedTurn = input.boundedWatcher
+        ? undefined
+        : await planCodexAppServerTurn(
+            {
+              threadId,
+              ...(initialClientId ? { clientUserMessageId: initialClientId } : {}),
+              ...(!isRecoveryTurn ? { prompt: submittedPrompt } : {}),
+              ...(!isRecoveryTurn && input.imagePaths && input.imagePaths.length > 0
+                ? { imagePaths: input.imagePaths }
+                : {}),
+              ...(isRecoveryTurn && recoveryInstruction ? { recoveryContext: recoveryInstruction } : {}),
+              ...(input.outputSchema ? { outputSchema: input.outputSchema } : {}),
+              ...(input.collaborationMode ? { collaborationMode: input.collaborationMode } : {}),
+            },
+            this.deps.planTurnParams,
+          );
       await this.deps.onBeforeTurnStart?.({ threadId });
-      // The package may have been replaced while Host hooks ran; check at the
-      // last point before the provider-visible turn/start.
+      // The package may have been replaced while Host hooks ran. Recheck the
+      // thread plan too: a turn must never be planned by a different active
+      // generation than the thread that this invocation started/resumed.
+      await plannedThread?.assertCurrent?.();
       await plannedTurn?.assertCurrent?.();
       this.lifecycle.patch({ turnStartSent: true });
       const turnParams = plannedTurn?.params ?? {

@@ -102,6 +102,8 @@ export async function resolveCodexAppServerThread(input: {
   requireExactResume?: boolean;
   localLiveLease: boolean;
   request: (method: string, params: Record<string, unknown>) => Promise<unknown>;
+  /** Recheck the same active package generation immediately before a provider send. */
+  assertCurrent?: () => Promise<void>;
   now: () => number;
   /** Read the historical turn coordinates before accepting notification-only receipts. */
   onResumeMetadata?: (threadId: string) => Promise<void>;
@@ -109,6 +111,7 @@ export async function resolveCodexAppServerThread(input: {
   if (input.thread.kind === 'start') {
     if (input.requireExactResume)
       throw new CodexAppServerExactResumeRequiredError('Capacity recovery requires a resume');
+    await input.assertCurrent?.();
     const raw = await input.request('thread/start', input.params);
     const threadId = threadIdOf(raw);
     if (input.resumeReplacement) {
@@ -126,6 +129,7 @@ export async function resolveCodexAppServerThread(input: {
   const requestedThreadId = input.thread.threadId;
   let raw: unknown;
   try {
+    await input.assertCurrent?.();
     raw = await input.request('thread/resume', input.params);
   } catch (error) {
     const failure = error instanceof Error ? error : new Error(String(error));
@@ -169,6 +173,9 @@ export async function resolveCodexAppServerThread(input: {
       if (rejection === 'rollout_not_found') throw failure;
       throw new CodexAppServerCarrierReplacementRequiredError(failure.message, replacement);
     }
+    // The resume verdict may have taken long enough for the active package to
+    // be replaced. Recheck before the fallback actually starts a new thread.
+    await input.assertCurrent?.();
     const fallback = await input.request('thread/start', input.startParams ?? {});
     return {
       kind: 'replaced',
