@@ -210,6 +210,22 @@ export const agentAccessCodexAppServerTurnPlanSchema = z.object({
   params: z.record(z.unknown()),
 });
 
+/**
+ * Static provider notification projection. This is a method table, not a field
+ * path DSL: the Host keeps its existing envelope mapping, thread/turn checks,
+ * terminal handling and approval/cancel authority.
+ */
+export const agentAccessCodexAppServerNotificationProjectionSchema = z.object({
+  version: z.literal(1),
+  methods: z.array(z.string().min(1).max(200)).readonly(),
+  ignoredMethods: z.array(z.string().min(1).max(200)).readonly().default([]),
+  /** Display-only aliases: provider method -> an existing non-terminal mapper method. */
+  aliases: z.record(z.string().min(1).max(200), z.string().min(1).max(200)).readonly().default({}),
+});
+export type AgentAccessCodexAppServerNotificationProjection = z.infer<
+  typeof agentAccessCodexAppServerNotificationProjectionSchema
+>;
+
 /** One envelope per native client; the Host routes by the discriminant. */
 export const agentAccessNativeLaunchRequestSchema = z.discriminatedUnion('client', [
   agentAccessKimiLaunchRequestSchema,

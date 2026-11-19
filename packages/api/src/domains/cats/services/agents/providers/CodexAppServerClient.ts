@@ -180,6 +180,8 @@ export interface CodexAppServerClientDeps {
   /** Active Agent Access package plans thread/turn params; absent keeps the Host builder. */
   planThreadParams?: CodexAppServerThreadPlanner;
   planTurnParams?: CodexAppServerTurnPlanner;
+  /** Static method table loaded once per activation; absent keeps the Host default mapping. */
+  notificationProjection?: import('./codex-app-server-notification-projection.js').CodexAppServerNotificationProjection;
   onEnvelope?: (direction: 'inbound' | 'outbound', envelope: JsonObject) => void | Promise<void>;
   onUnsupportedNotification?: (observation: { method: string }) => void | Promise<void>;
   onLifecycle?: (snapshot: CodexAppServerLifecycleSnapshot) => void;
@@ -909,10 +911,41 @@ export class CodexAppServerClient {
           }
         }
 
-        const mapped = mapCodexAppServerNotification(envelope);
-        await this.observeUnsupportedNotification(envelope);
+        const notificationProjection = input.boundedWatcher ? undefined : this.deps.notificationProjection;
+        const method = record?.method;
+        const matchesActiveRoot = codexAppServerNotificationMatchesActiveRoot(record, threadId, activeTurnId);
+        const aliasMethod =
+          notificationProjection && typeof method === 'string'
+            ? notificationProjection.aliases.get(method)
+            : undefined;
+        const projected =
+          matchesActiveRoot &&
+          notificationProjection &&
+          typeof method === 'string' &&
+          (notificationProjection.methods.has(method) || aliasMethod !== undefined);
+        const ignored =
+          notificationProjection && typeof method === 'string' && notificationProjection.ignoredMethods.has(method);
+        const mapped =
+          !matchesActiveRoot || (notificationProjection && !projected)
+            ? null
+            : mapCodexAppServerNotification(aliasMethod ? { ...record, method: aliasMethod } : envelope);
+        if (!ignored && !projected) await this.observeUnsupportedNotification(envelope);
         if (mapped?.type === 'turn.completed' && latestUsage) mapped.usage = latestUsage;
         if (mapped && !(input.live && isLiveDraftEvent(mapped))) yield mapped;
+        if (
+          activeTurnId &&
+          isExactCodexRootTurnCompletion(envelope, { threadId, turnId: activeTurnId }) &&
+          mapped?.type !== 'turn.completed' &&
+          mapped?.type !== 'turn.failed'
+        ) {
+          const completedTurn = asCodexAppServerRecord(params?.turn);
+          if (completedTurn?.status === 'completed')
+            yield {
+              type: 'turn.completed',
+              status: 'completed',
+              ...(latestUsage ? { usage: latestUsage } : {}),
+            };
+        }
         if (activeTurnId && isExactCodexRootTurnCompletion(envelope, { threadId, turnId: activeTurnId })) {
           if (input.boundedWatcher) {
             const completed = asCodexAppServerRecord(params?.turn);
@@ -1240,6 +1273,24 @@ export class CodexAppServerClient {
     for (const pending of this.pending.values()) pending.reject(error);
     this.pending.clear();
   }
+}
+
+/**
+ * A root notification is projected only when its real envelope belongs to the
+ * bound thread (and, when present, the accepted turn). Child/foreign
+ * notifications are handled by the subexecution tracker or dropped.
+ */
+function codexAppServerNotificationMatchesActiveRoot(
+  record: JsonObject | null,
+  threadId: string,
+  activeTurnId: string | null,
+): boolean {
+  const params = asCodexAppServerRecord(record?.params);
+  if (typeof params?.threadId === 'string' && params.threadId !== threadId) return false;
+  const turn = asCodexAppServerRecord(params?.turn);
+  const turnId = typeof turn?.id === 'string' ? turn.id : params?.turnId;
+  if (typeof turnId === 'string' && activeTurnId && turnId !== activeTurnId) return false;
+  return true;
 }
 
 import {

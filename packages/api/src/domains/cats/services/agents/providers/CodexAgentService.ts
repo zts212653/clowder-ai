@@ -495,6 +495,10 @@ interface CodexAgentServiceOptions {
   planAppServerThread?: CodexAppServerThreadPlanner;
   /** Active Agent Access package owns app-server turn params; omitted keeps the Host builder. */
   planAppServerTurn?: CodexAppServerTurnPlanner;
+  /** Loads the static notification method table once per activation. */
+  loadNotificationProjection?: () => Promise<
+    import('./codex-app-server-notification-projection.js').CodexAppServerNotificationProjection | undefined
+  >;
 }
 
 type CodexAuthMode = 'oauth' | 'api_key' | 'auto';
@@ -1187,6 +1191,11 @@ export class CodexAgentService implements AgentService {
   private readonly planLaunch: CodexExecLaunchPlanner | undefined;
   private readonly planAppServerThread: CodexAppServerThreadPlanner | undefined;
   private readonly planAppServerTurn: CodexAppServerTurnPlanner | undefined;
+  private readonly loadNotificationProjection:
+    | (() => Promise<
+        import('./codex-app-server-notification-projection.js').CodexAppServerNotificationProjection | undefined
+      >)
+    | undefined;
   private readonly approvalSurface: CodexApprovalSurface;
   private readonly appServerHostPool: CodexAppServerHostPool | undefined;
   private readonly appServerStartupRecovery:
@@ -1211,6 +1220,7 @@ export class CodexAgentService implements AgentService {
     this.planLaunch = options?.planLaunch;
     this.planAppServerThread = options?.planAppServerThread;
     this.planAppServerTurn = options?.planAppServerTurn;
+    this.loadNotificationProjection = options?.loadNotificationProjection;
     // Clowder AI currently has no synchronous approval request/response surface.
     // Keep this explicit so a future interactive bridge changes provenance rather
     // than relying on transport names or timing heuristics.
@@ -2717,6 +2727,15 @@ export class CodexAgentService implements AgentService {
               measureRolloutSize: measureCodexSessionRolloutSize,
             })
           : null;
+      const notificationProjection = useAppServer && !watcher
+        ? await this.loadNotificationProjection?.().catch((error) => {
+            log.warn(
+              { catId: this.catId, invocationId: auditContext?.invocationId ?? options?.invocationId, error },
+              'Codex app-server notification projection unavailable; keeping Host default',
+            );
+            return undefined;
+          })
+        : undefined;
       const events = useAppServer
         ? runCodexAppServerWithRecovery({
             ...(this.appServerStartupRecovery ? { startupRecovery: this.appServerStartupRecovery } : {}),
@@ -2850,6 +2869,7 @@ export class CodexAgentService implements AgentService {
             clientDeps: {
               ...(this.planAppServerThread ? { planThreadParams: this.planAppServerThread } : {}),
               ...(this.planAppServerTurn ? { planTurnParams: this.planAppServerTurn } : {}),
+              ...(notificationProjection ? { notificationProjection } : {}),
               ...(passiveQuotaTracker ? passiveQuotaTracker.appServerClientHooks : {}),
               onUnsupportedNotification: ({ method }) => {
                 log.warn(

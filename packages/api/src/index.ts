@@ -2370,6 +2370,7 @@ async function initializeApi(
                         planLaunch: (input) => agentAccessCodexExecLaunch(input),
                         planAppServerThread: (input) => agentAccessCodexAppServerThread(input),
                         planAppServerTurn: (input) => agentAccessCodexAppServerTurn(input),
+                        loadNotificationProjection: () => agentAccessCodexAppServerNotifications(),
                       });
                       break;
                     }
@@ -6071,14 +6072,20 @@ async function initializeApi(
     pluginRuntime.inventoryStore,
     pluginRuntime.supervisor,
   );
-  const { createAgentAccessCodexAppServerThreadPlanner, createAgentAccessCodexAppServerTurnPlanner } = await import(
-    './domains/plugin/agent-access/codex-appserver.js'
-  );
+  const {
+    createAgentAccessCodexAppServerNotificationProjection,
+    createAgentAccessCodexAppServerThreadPlanner,
+    createAgentAccessCodexAppServerTurnPlanner,
+  } = await import('./domains/plugin/agent-access/codex-appserver.js');
   const agentAccessCodexAppServerThread = createAgentAccessCodexAppServerThreadPlanner(
     pluginRuntime.inventoryStore,
     pluginRuntime.supervisor,
   );
   const agentAccessCodexAppServerTurn = createAgentAccessCodexAppServerTurnPlanner(
+    pluginRuntime.inventoryStore,
+    pluginRuntime.supervisor,
+  );
+  const agentAccessCodexAppServerNotifications = createAgentAccessCodexAppServerNotificationProjection(
     pluginRuntime.inventoryStore,
     pluginRuntime.supervisor,
   );

@@ -92,6 +92,17 @@ describe('package entrypoint routing', () => {
     assert.equal(result.params.input[0]?.text, '__CAT_CAFE_CODEX_AS_prompt__');
   });
 
+  test('projectNotifications exposes the static method table and display-only alias', () => {
+    const projection = actions().projectNotifications({}) as {
+      methods: string[];
+      ignoredMethods: string[];
+      aliases: Record<string, string>;
+    };
+    assert.ok(projection.methods.includes('turn/completed'));
+    assert.ok(projection.ignoredMethods.includes('thread/started'));
+    assert.equal(projection.aliases['item/agent_message_delta'], 'item/agentMessage/delta');
+  });
+
   test('planFinalizer serves the OpenCode recovery run as its own operation', () => {
     const result = actions().planFinalizer({
       operation: 'plan_native_finalizer',

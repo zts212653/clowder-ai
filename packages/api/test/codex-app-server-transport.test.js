@@ -426,6 +426,108 @@ test('boundedWatcher keeps the Host-only path and still starts its production tu
   assert.deepEqual(threadStart.params.dynamicTools, []);
 });
 
+for (const projectionCase of [
+  { name: 'omits turn/completed', ignored: [] },
+  { name: 'ignores turn/completed', ignored: ['turn/completed'] },
+]) {
+  test(`native turn/completed keeps Host terminal and usage when the package table ${projectionCase.name}`, async () => {
+    const wire = new ProtocolWire();
+    const write = wire.write.bind(wire);
+    wire.write = async (message) => {
+      await write(message);
+      if (message.method !== 'turn/start') return;
+      wire.inbox.push({
+        method: 'thread/tokenUsage/updated',
+        params: {
+          threadId: 'thread-1',
+          turnId: 'turn-1',
+          tokenUsage: { last: { inputTokens: 7, outputTokens: 3 } },
+        },
+      });
+      wire.inbox.push({
+        method: 'turn/completed',
+        params: { threadId: 'thread-1', turn: { id: 'turn-1', status: 'completed' } },
+      });
+    };
+    const client = new CodexAppServerClient({
+      wire,
+      notificationProjection: {
+        methods: new Set(['turn/started']),
+        ignoredMethods: new Set(projectionCase.ignored),
+        aliases: new Map(),
+      },
+    });
+
+    const messages = await collect(client.run({ prompt: frozenPrompt('terminal'), thread: { kind: 'start' } }));
+    const terminal = messages.find((message) => message.type === 'turn.completed' && message.usage);
+    assert.ok(terminal, 'Host must emit a terminal with usage despite the package table');
+    assert.equal(terminal.usage.input_tokens, 7);
+    assert.equal(terminal.usage.output_tokens, 3);
+  });
+}
+
+test('display alias maps to an existing kind without becoming terminal evidence', async () => {
+  const wire = new ProtocolWire();
+  const write = wire.write.bind(wire);
+  wire.write = async (message) => {
+    await write(message);
+    if (message.method !== 'turn/start') return;
+    wire.inbox.push({
+      method: 'item/agent_message_delta',
+      params: { threadId: 'thread-1', turnId: 'turn-1', itemId: 'item-1', delta: 'aliased' },
+    });
+    wire.inbox.push({
+      method: 'turn/completed',
+      params: { threadId: 'thread-1', turn: { id: 'turn-1', status: 'completed' } },
+    });
+  };
+  const client = new CodexAppServerClient({
+    wire,
+    notificationProjection: {
+      methods: new Set(['item/agentMessage/delta', 'turn/completed']),
+      ignoredMethods: new Set(),
+      aliases: new Map([['item/agent_message_delta', 'item/agentMessage/delta']]),
+    },
+  });
+
+  const messages = await collect(client.run({ prompt: frozenPrompt('alias'), thread: { kind: 'start' } }));
+  const alias = messages.find((message) => message.type === 'item.agent_message.delta');
+  assert.equal(alias.delta, 'aliased');
+  assert.equal(alias.item_id, 'item-1');
+});
+
+test('foreign thread turn/completed is not projected as a terminal', async () => {
+  const wire = new ProtocolWire();
+  const write = wire.write.bind(wire);
+  wire.write = async (message) => {
+    await write(message);
+    if (message.method !== 'turn/start') return;
+    wire.inbox.push({
+      method: 'turn/completed',
+      params: { threadId: 'other-thread', turn: { id: 'turn-1', status: 'completed' } },
+    });
+    wire.inbox.push({
+      method: 'turn/completed',
+      params: { threadId: 'thread-1', turn: { id: 'turn-1', status: 'completed' } },
+    });
+  };
+  const client = new CodexAppServerClient({
+    wire,
+    notificationProjection: {
+      methods: new Set(['turn/completed']),
+      ignoredMethods: new Set(),
+      aliases: new Map(),
+    },
+  });
+
+  const messages = await collect(client.run({ prompt: frozenPrompt('foreign'), thread: { kind: 'start' } }));
+  assert.equal(
+    messages.some((message) => message.type === 'turn.completed' && message.thread_id === 'other-thread'),
+    false,
+  );
+  assert.ok(messages.some((message) => message.type === 'turn.completed' && message.thread_id === 'thread-1'));
+});
+
 test('app-server rejects unpaired surrogates before sending any malformed request', async () => {
   for (const overrides of [
     { prompt: frozenPrompt('dispatch summary ends with \ud83d…') },

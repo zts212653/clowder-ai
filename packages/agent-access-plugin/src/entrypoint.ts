@@ -37,6 +37,7 @@ import { projectAgyOutput, summarizeAgyTurn } from './runtime/agy/agy-output.js'
 import { projectCatAgentOutput } from './runtime/catagent-events.js';
 import { projectClaudeBatch } from './runtime/claude/project-claude-batch.js';
 import { projectClaudeOutput } from './runtime/claude/project-claude-output.js';
+import { CODEX_APP_SERVER_NOTIFICATION_PROJECTION } from './runtime/codex-appserver-notifications.js';
 import { buildCodexAppServerThreadParams, buildCodexAppServerTurnParams } from './runtime/codex-appserver-params.js';
 import { buildCodexExecLaunchArguments } from './runtime/codex-exec-launch-arguments.js';
 import { normalizeKimiEvent } from './runtime/kimi-event-parser.js';
@@ -85,6 +86,9 @@ export default {
             planCodexAppServerTurn(input: unknown) {
               const request = agentAccessCodexAppServerTurnRequestSchema.parse(input);
               return agentAccessCodexAppServerTurnPlanSchema.parse(buildCodexAppServerTurnParams(request));
+            },
+            projectNotifications(_input: unknown) {
+              return CODEX_APP_SERVER_NOTIFICATION_PROJECTION;
             },
             planFinalizer(input: unknown) {
               const { launch } = agentAccessOpenCodeFinalizerRequestSchema.parse(input);

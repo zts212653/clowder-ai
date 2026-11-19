@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 import {
+  createAgentAccessCodexAppServerNotificationProjection,
   createAgentAccessCodexAppServerThreadPlanner,
   createAgentAccessCodexAppServerTurnPlanner,
 } from '../dist/domains/plugin/agent-access/codex-appserver.js';
@@ -83,5 +84,61 @@ describe('Codex app-server planners over the public protocol', () => {
     const result = await plan(threadRequest);
     current = authority({ lifecycleRevision: 4 });
     await assert.rejects(() => result.assertCurrent(), /session_implementation_unavailable/);
+  });
+});
+
+describe('Codex app-server static notification projection', () => {
+  const table = {
+    version: 1,
+    methods: ['item/agentMessage/delta', 'turn/completed'],
+    ignoredMethods: ['thread/started'],
+    aliases: { 'item/agent_message_delta': 'item/agentMessage/delta' },
+  };
+
+  test('loads once per activation and reloads after replacement', async () => {
+    let current = authority();
+    let invokes = 0;
+    const load = createAgentAccessCodexAppServerNotificationProjection(
+      { readCurrentAuthority: async () => current },
+      {
+        exposesAction: async () => true,
+        invoke: async () => {
+          invokes++;
+          return table;
+        },
+      },
+    );
+    const first = await load();
+    await load();
+    assert.equal(invokes, 1);
+    assert.equal(first.aliases.get('item/agent_message_delta'), 'item/agentMessage/delta');
+    assert.equal(first.ignoredMethods.has('thread/started'), true);
+
+    current = authority({ lifecycleRevision: 4 });
+    await assert.rejects(() => first.assertCurrent(), /session_implementation_unavailable/);
+    await load();
+    assert.equal(invokes, 2);
+  });
+
+  test('returns undefined for an older package without the action', async () => {
+    const load = createAgentAccessCodexAppServerNotificationProjection(
+      { readCurrentAuthority: async () => authority() },
+      { exposesAction: async () => false, invoke: async () => table },
+    );
+    assert.equal(await load(), undefined);
+  });
+
+  test('rejects a terminal display alias', async () => {
+    const load = createAgentAccessCodexAppServerNotificationProjection(
+      { readCurrentAuthority: async () => authority() },
+      {
+        exposesAction: async () => true,
+        invoke: async () => ({
+          ...table,
+          aliases: { 'turn/finished': 'turn/completed' },
+        }),
+      },
+    );
+    await assert.rejects(() => load(), /codex_notification_alias_terminal_forbidden/);
   });
 });
