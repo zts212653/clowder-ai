@@ -20,7 +20,7 @@ import type { PluginInventoryStore } from '../host-inventory/ports.js';
  */
 export function createAgentAccessOpenCodeLaunchPlanner(
   inventory: Pick<PluginInventoryStore, 'readCurrentAuthority'>,
-  runtime: Pick<PluginRuntimeCarrierRouter, 'invoke'>,
+  runtime: Pick<PluginRuntimeCarrierRouter, 'invoke'> & Partial<Pick<PluginRuntimeCarrierRouter, 'nativeActions'>>,
 ) {
   return async (launch: AgentAccessOpenCodeLaunch) => {
     const instance = (await inventory.readCurrentAuthority(AGENT_ACCESS_PLUGIN_ID))?.instance;
@@ -28,6 +28,8 @@ export function createAgentAccessOpenCodeLaunchPlanner(
       throw new Error('session_implementation_unavailable');
 
     const { pluginInstanceId, packageDigest, lifecycleRevision } = instance;
+    const lifetime = runtime.nativeActions?.activationSignal(pluginInstanceId);
+    lifetime?.throwIfAborted();
     const result = await runtime.invoke(pluginInstanceId, 'configure', {
       operation: 'plan_native_launch',
       client: 'opencode',
@@ -37,11 +39,13 @@ export function createAgentAccessOpenCodeLaunchPlanner(
     // Re-read before every step the Host takes with this plan: a package replaced
     // mid-turn must not keep serving that turn.
     async function assertCurrent() {
+      lifetime?.throwIfAborted();
       const current = (await inventory.readCurrentAuthority(AGENT_ACCESS_PLUGIN_ID))?.instance;
       if (
         current?.pluginInstanceId !== pluginInstanceId ||
         current.packageDigest !== packageDigest ||
         current.lifecycleRevision !== lifecycleRevision ||
+        current.activationState !== 'enabled' ||
         current.runtimeState !== 'healthy'
       )
         throw new Error('session_implementation_unavailable');
@@ -49,6 +53,7 @@ export function createAgentAccessOpenCodeLaunchPlanner(
 
     return {
       ...agentAccessNativeLaunchArgumentsSchema.parse(result),
+      lifetime,
       assertCurrent,
       async normalizeEvent(event: unknown, knownCredentials?: readonly string[]) {
         await assertCurrent();

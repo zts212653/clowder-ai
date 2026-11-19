@@ -120,6 +120,7 @@ type OpenCodeLaunchPlanner = (input: OpenCodeLaunchPlanInput) => Promise<{
   args: string[];
   managedArgvFlags: string[];
   assertCurrent?: () => Promise<void>;
+  lifetime?: AbortSignal;
   normalizeEvent?: (event: unknown, knownCredentials?: readonly string[]) => Promise<unknown>;
 }>;
 
@@ -264,7 +265,7 @@ function isPermanentOpenCodeProviderFailure(event: unknown, reasonCode: string |
  */
 function findOpenCodePlanAuthorizationViolation(
   args: readonly string[],
-  approved: { readOnly: boolean; readOnlyAgent: string; transportArgs: readonly string[] },
+  approved: { transportArgs: readonly string[]; restrictedArgs?: readonly string[] },
 ): string | null {
   const transport = getOpenCodeTransportArgv(args);
   if (
@@ -272,16 +273,13 @@ function findOpenCodePlanAuthorizationViolation(
     transport.some((arg, i) => arg !== approved.transportArgs[i])
   )
     return 'unapproved_server_transport';
-  if (!approved.readOnly) return null;
-
-  const delimiter = args.indexOf('--');
-  const flags = delimiter < 0 ? args : args.slice(0, delimiter);
-  const agents = flags.flatMap((part, index) =>
-    getCliFlagName(part) === '--agent' ? [part === '--agent' ? flags[index + 1] : part.slice('--agent='.length)] : [],
-  );
-  if (agents.length !== 1 || agents[0] !== approved.readOnlyAgent) return 'read_only_agent_substituted';
-  if (userControlsOpenCodeAutoApprove(new Set(flags.flatMap((part) => getCliFlagName(part) ?? []))))
-    return 'unapproved_permission_option';
+  // Restricted runs have a closed option surface. An additional file, session
+  // selector or flag changes the scope that the Host reported to the caller.
+  if (
+    approved.restrictedArgs &&
+    (approved.restrictedArgs.length !== args.length || approved.restrictedArgs.some((arg, i) => arg !== args[i]))
+  )
+    return 'restricted_argv_changed';
   return null;
 }
 
@@ -482,6 +480,7 @@ export class OpenCodeAgentService implements L0InjectableAgentService {
         | ((event: unknown, knownCredentials?: readonly string[]) => Promise<unknown>)
         | undefined;
       let assertLaunchCurrent: (() => Promise<void>) | undefined;
+      let launchSignal = options?.signal;
       if (this.planLaunch) {
         const plan = await this.planLaunch({
           prompt,
@@ -497,15 +496,28 @@ export class OpenCodeAgentService implements L0InjectableAgentService {
         // Judge the plan against the facts this Host already approved before anything
         // downstream trusts it: the read-only agent identity and the resolved transport.
         const violation = findOpenCodePlanAuthorizationViolation(plan.args, {
-          readOnly,
-          readOnlyAgent: OPENCODE_READ_ONLY_AGENT,
           transportArgs: runDefaults.transportArgs,
+          ...(readOnly || options?.requireExactResume
+            ? {
+                restrictedArgs: this.buildArgs(
+                  prompt,
+                  options?.sessionId,
+                  effectiveModel,
+                  readOnly ? undefined : options?.cliConfigArgs,
+                  runDefaults.approvalFlag,
+                  readOnly,
+                  runDefaults.transportArgs,
+                  runDefaults.pure === true,
+                ),
+              }
+            : {}),
         });
         if (violation) throw new Error(`opencode_plan_authorization_violation:${violation}`);
         args = plan.args;
         plannedManagedFlags = plan.managedArgvFlags;
         plannedNormalizeEvent = plan.normalizeEvent;
         assertLaunchCurrent = plan.assertCurrent;
+        if (plan.lifetime) launchSignal = launchSignal ? AbortSignal.any([launchSignal, plan.lifetime]) : plan.lifetime;
       } else {
         args = this.buildArgs(
           prompt,
@@ -523,7 +535,7 @@ export class OpenCodeAgentService implements L0InjectableAgentService {
       // worker. Kimi derives the same set the same way; shape alone would miss a
       // provider-issued key nested inside a raw error.
       const normalizeEventCredentials = plannedNormalizeEvent
-        ? configuredCredentialValues({ ...process.env, ...withoutClearedValues(options?.callbackEnv) })
+        ? configuredCredentialValues({ ...process.env, ...withoutClearedValues(childEnv) })
         : undefined;
 
       log.debug(
@@ -578,7 +590,7 @@ export class OpenCodeAgentService implements L0InjectableAgentService {
         env: childEnv,
         onSuccessfulExitStderr,
         ...(plannedManagedFlags && plannedManagedFlags.length > 0 ? { managedArgvFlags: plannedManagedFlags } : {}),
-        ...(options?.signal ? { signal: options.signal } : {}),
+        ...(launchSignal ? { signal: launchSignal } : {}),
         ...(options?.invocationId ? { invocationId: options.invocationId } : {}),
         ...(options?.cliSessionId ? { cliSessionId: options.cliSessionId } : {}),
         ...(options?.livenessProbe ? { livenessProbe: options.livenessProbe } : {}),
@@ -637,7 +649,11 @@ export class OpenCodeAgentService implements L0InjectableAgentService {
           // A contradictory current event must not revive a previously captured recovery anchor.
           lastAssistantMessageId = undefined;
         } else {
-          if (messageRef?.sessionId) metadata.sessionId = messageRef.sessionId;
+          if (messageRef?.sessionId) {
+            if (options?.requireExactResume && messageRef.sessionId !== options.sessionId)
+              throw new Error('opencode_session_mismatch');
+            metadata.sessionId = messageRef.sessionId;
+          }
           if (messageRef?.messageId) lastAssistantMessageId = messageRef.messageId;
         }
         log.debug({ catId: this.catId, eventIndex: eventCount, type: evtType }, 'CLI event received');
@@ -719,7 +735,7 @@ export class OpenCodeAgentService implements L0InjectableAgentService {
           if (result.type === 'tool_use') {
             toolUseEmitted = true;
             lastToolEventIndex = eventCount;
-            const toolTrace = extractOpenCodeToolTrace(event);
+            const toolTrace = extractOpenCodeToolTrace(sanitizeRawEvent(event, normalizeEventCredentials));
             if (toolTrace !== null) {
               lastToolTrace = toolTrace;
               if (toolTrace.toolName === 'delegate-task') delegateTaskEmitted = true;
@@ -767,9 +783,16 @@ export class OpenCodeAgentService implements L0InjectableAgentService {
           // P2-1: Only emit the first session_init; subsequent step_start events
           // in multi-step runs are silently dropped to avoid duplicate session metrics.
           if (result.type === 'session_init') {
-            if (sessionInitEmitted) continue;
+            if (
+              sessionInitEmitted ||
+              evtType !== 'step_start' ||
+              messageRef === OPENCODE_MESSAGE_REF_CONFLICT ||
+              !messageRef?.sessionId
+            )
+              continue;
             sessionInitEmitted = true;
-            if (result.sessionId) metadata.sessionId = result.sessionId;
+            yield { ...result, sessionId: messageRef.sessionId, metadata };
+            continue;
           }
           // clowder#915 R1 P1 (砚砚): transformer may carry `metadata.usage`
           // (from step_finish). The naive `metadata: yieldMetadata` below would
@@ -865,7 +888,7 @@ export class OpenCodeAgentService implements L0InjectableAgentService {
           ...(runDefaults.pure !== undefined ? { pureSupported: runDefaults.pure } : {}),
           ...(plannedNormalizeEvent ? { normalizeEvent: plannedNormalizeEvent } : {}),
           ...(assertLaunchCurrent ? { assertCurrent: assertLaunchCurrent } : {}),
-          options,
+          options: launchSignal ? { ...options, signal: launchSignal } : options,
         })) {
           if (finalizerMsg.type === 'text') textEventCount++;
           if (finalizerMsg.metadata?.usage != null && resolveCurrentContextUsage(finalizerMsg.metadata.usage) != null) {
@@ -972,11 +995,13 @@ export class OpenCodeAgentService implements L0InjectableAgentService {
         .transportArgs;
     let plannedFinalizerArgs: string[] | undefined;
     if (this.planFinalizer) {
+      // The private recovery context is filled after the package has planned argv.
+      const promptSlot = 'host-finalizer-prompt';
       try {
         plannedFinalizerArgs = (
           await this.planFinalizer(
             {
-              prompt: finalizerPrompt,
+              prompt: promptSlot,
               model: params.effectiveModel,
               finalizerAgent,
               ...(params.sessionId ? { sessionId: params.sessionId } : {}),
@@ -987,9 +1012,15 @@ export class OpenCodeAgentService implements L0InjectableAgentService {
           )
         ).args;
         const violation = findOpenCodePlanAuthorizationViolation(plannedFinalizerArgs, {
-          readOnly: true,
-          readOnlyAgent: finalizerAgent,
           transportArgs,
+          restrictedArgs: this.buildNoToolArgs(
+            promptSlot,
+            params.sessionId,
+            params.effectiveModel,
+            finalizerAgent,
+            transportArgs,
+            params.pureSupported === true,
+          ),
         });
         if (violation) throw new Error(`opencode_plan_authorization_violation:${violation}`);
       } catch (err) {
@@ -1014,7 +1045,7 @@ export class OpenCodeAgentService implements L0InjectableAgentService {
     }
     const finalizerArgs =
       plannedFinalizerArgs ??
-      this.buildNoToolFinalizerArgs(
+      this.buildNoToolArgs(
         finalizerPrompt,
         params.sessionId,
         params.effectiveModel,
@@ -1087,6 +1118,29 @@ export class OpenCodeAgentService implements L0InjectableAgentService {
           ? String((event as Record<string, unknown>).type)
           : '__unknown';
       finalizerEventTypes.add(evtType);
+      const messageRef = extractOpenCodeMessageRef(event);
+      if (
+        messageRef === OPENCODE_MESSAGE_REF_CONFLICT ||
+        (messageRef?.sessionId && params.sessionId && messageRef.sessionId !== params.sessionId)
+      ) {
+        finalizerPoisoned = true;
+        finalizerErrorReason = 'session_mismatch';
+        continue;
+      }
+      if (messageRef?.sessionId) params.metadata.sessionId = messageRef.sessionId;
+      if (evtType === 'error') {
+        finalizerPoisoned = true;
+        finalizerErrorReason = 'provider_error';
+      }
+      if (evtType === 'tool_use') {
+        finalizerPoisoned = true;
+        finalizerErrorReason = 'tool_use_blocked';
+        log.warn(
+          { catId: this.catId, invocationId: params.options?.invocationId },
+          'OpenCode no-tool finalizer attempted to use a tool',
+        );
+        continue;
+      }
 
       if (isCliTimeout(event)) {
         finalizerPoisoned = true;
@@ -1117,10 +1171,7 @@ export class OpenCodeAgentService implements L0InjectableAgentService {
           )
         : transformOpenCodeEvent(event, this.catId);
       if (result === null) continue;
-      if (result.type === 'session_init') {
-        if (result.sessionId) params.metadata.sessionId = result.sessionId;
-        continue;
-      }
+      if (result.type === 'session_init') continue;
       if (result.type === 'tool_use') {
         finalizerPoisoned = true;
         finalizerErrorReason = 'tool_use_blocked';
@@ -1167,6 +1218,7 @@ export class OpenCodeAgentService implements L0InjectableAgentService {
     const hasFinalizerText = finalizerTextBuffer.some((message) => message.content?.trim());
     if (!finalizerPoisoned && hasFinalizerText) {
       for (const finalizerText of finalizerTextBuffer) {
+        await params.assertCurrent?.();
         yield finalizerText;
       }
       return;
@@ -1215,7 +1267,7 @@ export class OpenCodeAgentService implements L0InjectableAgentService {
     return recovered.text;
   }
 
-  private buildNoToolFinalizerArgs(
+  private buildNoToolArgs(
     prompt: string,
     sessionId: string | undefined,
     model: string,

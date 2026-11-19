@@ -2,6 +2,11 @@ import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 import { Readable } from 'node:stream';
 import { describe, mock, test } from 'node:test';
+import { normalizeOpenCodeEvent } from '@clowder-ai/agent-access/runtime/opencode-event-parser';
+import {
+  buildOpenCodeLaunchArguments,
+  buildOpenCodeNoToolFinalizerArguments,
+} from '@clowder-ai/agent-access/runtime/opencode-launch-arguments';
 import { OpenCodeAgentService } from '../dist/domains/cats/services/agents/providers/OpenCodeAgentService.js';
 
 /**
@@ -152,8 +157,21 @@ describe('the recovery run is rechecked against package generation', () => {
         if (assertCalls === 2) throw new Error('package_replaced');
       },
     });
-    const planFinalizer = async ({ prompt, finalizerAgent, transportArgs = [] }) => ({
-      args: ['run', ...transportArgs, '--agent', finalizerAgent, '--format', 'json', '--', prompt],
+    const planFinalizer = async ({ prompt, finalizerAgent, transportArgs = [], sessionId, model }) => ({
+      args: [
+        'run',
+        ...transportArgs,
+        '--agent',
+        finalizerAgent,
+        '--session',
+        sessionId,
+        '-m',
+        model,
+        '--format',
+        'json',
+        '--',
+        prompt,
+      ],
       managedArgvFlags: ['--agent'],
     });
 
@@ -170,4 +188,41 @@ describe('the recovery run is rechecked against package generation', () => {
     assert.equal(assertCalls, 2, 'both main and recovery runs must recheck the generation');
     assert.equal(spawnFn.mock.callCount(), 1, 'the replaced generation cannot start the recovery process');
   });
+});
+
+test('native session, tool and error evidence survives an incomplete plugin projection', async () => {
+  for (const native of ['tool_use', 'error']) {
+    let launches = 0;
+    const session = { type: 'step_start', sessionID: 'ses_native' };
+    const normalized = (event) =>
+      event.type === 'step_start'
+        ? { kind: 'session_init', sessionId: 'ses_unrelated' }
+        : event.fixtureHidden
+          ? { kind: 'ignored' }
+          : normalizeOpenCodeEvent(event);
+    const service = new OpenCodeAgentService({
+      catId: 'opencode',
+      model: 'm',
+      autoApproveProbeFn: async () => ({ standalone: false, pure: false }),
+      planLaunch: async (input) => ({ ...buildOpenCodeLaunchArguments(input), normalizeEvent: normalized }),
+      planFinalizer: async (input) => buildOpenCodeNoToolFinalizerArguments(input),
+    });
+    const messages = await collect(
+      service.invoke('p', {
+        async *spawnCliOverride() {
+          yield session;
+          if (launches++ === 0) {
+            yield { type: 'text', part: { text: 'Inspecting' } };
+            yield { type: 'tool_use', part: { tool: 'read' } };
+          } else {
+            yield { type: 'text', part: { text: 'Untrusted recovery text' } };
+            yield { type: native, fixtureHidden: true };
+          }
+        },
+      }),
+    );
+    assert.equal(launches, 2, 'the recovery process was exercised');
+    assert.equal(messages.find((message) => message.type === 'session_init')?.sessionId, 'ses_native');
+    assert.ok(!messages.some((message) => message.content === 'Untrusted recovery text'));
+  }
 });

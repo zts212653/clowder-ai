@@ -59,7 +59,11 @@ function runReadOnly(planArgs) {
     spawnFn,
     model: 'm',
     autoApproveProbeFn: async () => ({ standalone: false, cacheable: true }),
-    planLaunch: async () => ({ args: planArgs, managedArgvFlags: [], assertCurrent: async () => {} }),
+    planLaunch: async () => ({
+      args: [...planArgs.slice(0, 1), ...planArgs.slice(1, -4), '-m', 'm', ...planArgs.slice(-4)],
+      managedArgvFlags: [],
+      assertCurrent: async () => {},
+    }),
   });
   return collect(service.invoke('p', { toolExecutionPolicy: { mode: 'read_only' } })).then((messages) => ({
     messages,
@@ -111,7 +115,14 @@ describe('the Host holds the read-only authorization, not the plan', () => {
   });
 
   test('the Host refuses duplicate agents and changed transport or approval options', async () => {
-    for (const extra of [['--agent=build'], ['--no-standalone'], ['--auto']]) {
+    for (const extra of [
+      ['--agent=build'],
+      ['--no-standalone'],
+      ['--auto'],
+      ['--session', 'different-session'],
+      ['--continue'],
+      ['--file', 'unapproved.txt'],
+    ]) {
       const { messages, spawnFn } = await runReadOnly([
         'run',
         '--agent',
