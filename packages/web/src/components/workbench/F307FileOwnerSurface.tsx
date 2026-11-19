@@ -1,5 +1,6 @@
 'use client';
 
+import { fileContentKind } from '@cat-cafe/shared';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { mediaChatMime } from '@/components/content-review/media-chat-selection';
 import { modificationFocusStanding, usePendingModificationFocus } from '@/components/content-review/modification-focus';
@@ -20,6 +21,7 @@ import { WorkspaceContentReviewSurface } from './content-review/WorkspaceContent
 import { useF307ExperienceWorkbenchStore } from './experience-workbench-store';
 import { createFilesSurface, resolveFileTarget } from './real-surface-adapters';
 import { useWorkspaceFileViewport } from './useWorkspaceFileViewport';
+import { WorkspacePluginFilePreview } from './WorkspacePluginFilePreview';
 import { promoteWorkspacePreview } from './WorkspacePreviewIntent';
 import { useWorkspaceSurfaceVisibility } from './WorkspaceSurfaceVisibility';
 
@@ -261,6 +263,17 @@ function ResolvedFileOwnerSurface({
         onBack={onBack}
       />
     );
+  if (file.binary && !onOfficeEdit && !/^(audio|image|video)\//.test(file.mime)) {
+    return (
+      <WorkspacePluginFilePreview
+        target={target}
+        navigationOrigin={navigationOrigin}
+        onBack={onBack}
+        showPluginSettings={fileContentKind(target.path, file.mime) === 'office'}
+        fallback={fileReader()}
+      />
+    );
+  }
   return fileReader();
 }
 
