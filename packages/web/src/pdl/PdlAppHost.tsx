@@ -581,7 +581,8 @@ function ChatBinding({
       ).then((files) => {
         if (!current()) return;
         files.forEach((file, i) => draftFile.set(file, saved.images[i]));
-        setImages(files);
+        // Files picked here and not yet uploaded are not in any saved draft: they stay beside it.
+        setImages((all) => [...files, ...all.filter((file) => !draftFile.has(file))].slice(0, 5));
       });
     },
   });
