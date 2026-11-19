@@ -39,6 +39,7 @@ export class WorkspacePreviewService {
     return {
       rendererOrigin: surface.rendererOrigin,
       entrypointPath: surface.entrypointPath,
+      bridgeVersion: surface.contribution.bridgeVersion,
       fileName: path.split('/').at(-1) || path,
       mediaType: format.mediaType,
       bytesBase64: bytes.toString('base64'),

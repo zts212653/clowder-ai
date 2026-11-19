@@ -9,6 +9,7 @@ import { ContentLandingHeader } from './content-review/ContentLandingHeader';
 type Preview = {
   rendererOrigin: string;
   entrypointPath: string;
+  bridgeVersion: '1.0.0';
   fileName: string;
   mediaType: string;
   bytesBase64: string;
@@ -18,19 +19,20 @@ type PreviewState = 'loading' | 'unavailable' | 'failed' | { preview: Omit<Previ
 function parsePreview(input: unknown): Preview {
   if (!input || typeof input !== 'object') throw new Error('invalid preview response');
   const record = input as Record<string, unknown>;
-  const { rendererOrigin, entrypointPath, fileName, mediaType, bytesBase64 } = record;
+  const { rendererOrigin, entrypointPath, bridgeVersion, fileName, mediaType, bytesBase64 } = record;
   if (
     typeof rendererOrigin !== 'string' ||
     !/^http:\/\/editor-[a-f0-9]{32}\.localhost:[0-9]+$/.test(rendererOrigin) ||
     typeof entrypointPath !== 'string' ||
     !/^\/packages\/[a-f0-9-]+\/assets\/[A-Za-z0-9._~/-]+\.html$/.test(entrypointPath) ||
+    bridgeVersion !== '1.0.0' ||
     typeof fileName !== 'string' ||
     typeof mediaType !== 'string' ||
     typeof bytesBase64 !== 'string'
   ) {
     throw new Error('invalid preview response');
   }
-  return { rendererOrigin, entrypointPath, fileName, mediaType, bytesBase64 };
+  return { rendererOrigin, entrypointPath, bridgeVersion, fileName, mediaType, bytesBase64 };
 }
 
 export function WorkspacePluginFilePreview({
@@ -92,12 +94,17 @@ export function WorkspacePluginFilePreview({
       if (typeof message !== 'object' || message === null) return;
       const ready = message as Record<string, unknown>;
       if (ready.v !== 1 || ready.kind !== 'cat-cafe-content-preview-ready' || ready.handshakeNonce !== nonce) return;
+      if (ready.bridgeVersion !== preview.bridgeVersion) {
+        payload.current = null;
+        setState('failed');
+        return;
+      }
 
       const bytes = payload.current;
       payload.current = null;
       const { port1, port2 } = new MessageChannel();
       recipient.postMessage(
-        { v: 1, kind: 'cat-cafe-content-preview-connect', handshakeNonce: nonce },
+        { v: 1, kind: 'cat-cafe-content-preview-connect', bridgeVersion: preview.bridgeVersion, handshakeNonce: nonce },
         preview.rendererOrigin,
         [port2],
       );

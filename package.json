@@ -181,7 +181,7 @@
   },
   "pnpm": {
     "overrides": {
-      "@clowder-ai/plugin-sdk@0.3.0-beta.2-candidate.12>@clowder-ai/plugin-contract": "file:packages/api/vendor/clowder-ai-plugin-contract-0.3.3-candidate.2-f309-4ae529644b62.tgz"
+      "@clowder-ai/plugin-sdk@0.3.0-beta.2-candidate.12>@clowder-ai/plugin-contract": "file:packages/api/vendor/clowder-ai-plugin-contract-0.3.3-candidate.2-f309-8006a9f8361a.tgz"
     }
   }
 }

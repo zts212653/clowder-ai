@@ -17,6 +17,7 @@ test('preview route requires the direct local owner before opening a workspace s
     rendererOrigin: 'http://editor-00000000000000000000000000000000.localhost:56123',
     entrypointPath: '/packages/seed/assets/preview/index.html',
     mediaType: 'application/pdf',
+    bridgeVersion: '1.0.0' as const,
     fileName: 'source.pdf',
     bytesBase64: Buffer.from('snapshot').toString('base64'),
   };

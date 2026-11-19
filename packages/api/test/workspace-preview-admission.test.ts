@@ -124,6 +124,7 @@ test('dispatches a plugin-declared extension to a single read-only snapshot', as
   assert.deepEqual(await service.open({ worktreeId: 'project', path: 'presentations/sample.DECK' }), {
     rendererOrigin: 'http://editor-00000000000000000000000000000000.localhost:56123',
     entrypointPath: '/packages/seed/assets/preview/index.html',
+    bridgeVersion: '1.0.0',
     fileName: 'sample.DECK',
     mediaType: 'application/x-example-deck',
     bytesBase64: Buffer.from('snapshot').toString('base64'),
