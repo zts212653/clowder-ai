@@ -1,10 +1,9 @@
 import type Database from 'better-sqlite3';
-import { MemoryCueEpisodeStore } from '../domains/memory/cue/MemoryCueEpisodeStore.js';
-import { projectInvocationCues } from '../domains/memory/cue/project-invocation-cues.js';
+import { type CueInvocationReader, createInvocationCueReader } from '../domains/memory/cue/project-invocation-cues.js';
 import { type MemoryInvocationReaders, memoryInvocationAccess } from './memory-invocation-access.js';
 import {
-  type RecallEventReader,
   projectRecallPageEvent,
+  type RecallEventReader,
   readRecallPageEvent,
   recallCandidates,
 } from './memory-recall-events.js';
@@ -25,6 +24,7 @@ import { recallCueViewReader } from './recall-cue-view.js';
 import { nextRecallReplyCursor, projectRecallReplies, type RecallReplyMessageStore } from './recall-reply-index.js';
 
 export interface RecallPageSourceReaders extends RecallSourceReaders, MemoryInvocationReaders {
+  readInvocationCues?: CueInvocationReader;
   messageStore?: RecallReplyMessageStore;
 }
 interface ProjectionContext {
@@ -32,18 +32,18 @@ interface ProjectionContext {
   owner: string;
   readers: RecallPageSourceReaders;
   readCandidate: ReturnType<typeof recallCandidateViewReader>;
-  episodes: MemoryCueEpisodeStore;
-  cues: Map<string, ReturnType<typeof projectInvocationCues>>;
+  readCues: CueInvocationReader;
+  cues: Map<string, Awaited<ReturnType<CueInvocationReader>>>;
   readEvent?: RecallEventReader;
 }
 async function readCueRow(row: RecallTimelineRow, context: ProjectionContext) {
-  const { owner, readers, cues, episodes, readCandidate } = context;
+  const { owner, readers, cues, readCues, readCandidate } = context;
   const key = JSON.stringify([row.thread_id, row.invocation_id]);
   let invocation = cues.get(key);
   if (!invocation) {
     const access = await memoryInvocationAccess(readers, owner, row.thread_id, row.invocation_id);
     if (access.status !== 200) return null;
-    invocation = projectInvocationCues(episodes.listByInvocation(owner, row.thread_id, row.invocation_id));
+    invocation = await readCues(owner, row.thread_id, row.invocation_id);
     cues.set(key, invocation);
   }
   const cue = invocation.find((item) => item.cueId === row.cue_id);
@@ -173,7 +173,7 @@ export async function readMemoryRecallPage(
     owner,
     readers,
     readCandidate: recallCandidateViewReader(db, owner, readers),
-    episodes: new MemoryCueEpisodeStore(db),
+    readCues: readers.readInvocationCues ?? createInvocationCueReader(db),
     cues: new Map(),
     readEvent,
   };

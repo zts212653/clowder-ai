@@ -16,10 +16,12 @@ import {
 import { type MatterDispatchInput, matterOutputSchemas } from '@clowder-ai/plugin-memory-contract/matter';
 import { type ProfileDispatchInput, profileOutputSchemas } from '@clowder-ai/plugin-memory-contract/profile';
 import {
+  type MemoryCueInvocationRequest,
   type MemoryRecallCandidateRequest,
   type MemoryRecallEventRequest,
   type MemoryRecallStatsRequest,
   type MemoryRecallTimelineRequest,
+  memoryCueInvocationResult,
   memoryRecallCandidateResult,
   memoryRecallEventResult,
   memoryRecallStatsResult,
@@ -67,6 +69,7 @@ type MemoryDispatch =
   | MemoryProjectIndexRequest
   | MatterDispatchInput
   | ProfileDispatchInput
+  | MemoryCueInvocationRequest
   | MemoryRecallCandidateRequest
   | MemoryRecallEventRequest
   | MemoryRecallStatsRequest
@@ -172,6 +175,16 @@ export class MemoryPluginHost {
       { operation: 'index.status', input: { generationId } },
       memoryIndexStatusResult,
       userId,
+    );
+  }
+
+  readInvocationCues(userId: string, threadId: string, invocationId: string) {
+    return callMemoryOwner(
+      this,
+      { operation: 'cue.invocation', input: { threadId, invocationId } },
+      memoryCueInvocationResult,
+      userId,
+      { threadId },
     );
   }
 

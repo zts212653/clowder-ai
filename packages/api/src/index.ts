@@ -3769,8 +3769,10 @@ async function initializeApi(
   const { memoryCueInvocationReadRoutes } = await import('./routes/memory-cue-invocation-read.js');
   const { memoryMatterRoutes } = await import('./routes/memory-matter-routes.js');
   await app.register(memoryMatterRoutes, { provider: matterRouteProvider });
+  const readInvocationCues = memoryProvider.readInvocationCues.bind(memoryProvider);
   await app.register(memoryCueInvocationReadRoutes, {
     matterMemoryService,
+    readInvocationCues,
     evidenceDb: memoryServices.store.getDb(),
     threadStore,
     invocationRecordStore,
@@ -7768,6 +7770,7 @@ async function initializeApi(
       recallSources: {
         ...recallOwnerMessageSources,
         readDocumentCandidate: (anchor) => memoryProvider.readRecallCandidate(anchor, privateUserId),
+        readInvocationCues,
         threadStore,
         messageStore,
         invocationRecordStore,
