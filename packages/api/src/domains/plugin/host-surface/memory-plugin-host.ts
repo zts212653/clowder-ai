@@ -1,8 +1,11 @@
+import { randomUUID } from 'node:crypto';
 import type { DispatchInput } from '@clowder-ai/plugin-memory-contract';
 import { explainDescriptor, isCompatibleDescriptor } from '@clowder-ai/plugin-memory-contract';
+import type { EntityDispatchInput } from '@clowder-ai/plugin-memory-contract/entity';
 import type { EventDispatchInput } from '@clowder-ai/plugin-memory-contract/event';
 import type { MatterDispatchInput } from '@clowder-ai/plugin-memory-contract/matter';
 import type { ProfileDispatchInput } from '@clowder-ai/plugin-memory-contract/profile';
+import type { z } from 'zod';
 import {
   invocationNotStarted,
   type PluginInvocationEffect,
@@ -25,6 +28,28 @@ export class MemoryProviderCallError extends Error {
   constructor(readonly effect: PluginInvocationEffect) {
     super('memory_unavailable');
   }
+}
+
+type MemoryDispatch = DispatchInput | EntityDispatchInput | EventDispatchInput | MatterDispatchInput | ProfileDispatchInput;
+
+export async function callMemoryOwner<T>(
+  provider: MemoryPluginHost,
+  request: MemoryDispatch,
+  schema: z.ZodType<T>,
+  userId: string,
+  threadId = 'default',
+): Promise<T> {
+  const outcome = await provider.attempt(request, {
+    catId: 'user',
+    userId,
+    threadId,
+    invocationId: randomUUID(),
+    assertCurrent: async () => {},
+  });
+  if (outcome.status === 'failed') throw new MemoryProviderCallError(outcome.effect);
+  const response = schema.safeParse(outcome.value);
+  if (!response.success) throw new MemoryProviderCallError('unknown');
+  return response.data;
 }
 
 export function isAdmittedMemoryPackage(record: PluginPackageRecord): boolean {
@@ -92,7 +117,7 @@ export class MemoryPluginHost {
   }
 
   attempt(
-    request: DispatchInput | MatterDispatchInput | EventDispatchInput | ProfileDispatchInput,
+    request: MemoryDispatch,
     caller: PluginCallContext,
   ): Promise<PluginInvocationOutcome> {
     const binding = this.#binding;

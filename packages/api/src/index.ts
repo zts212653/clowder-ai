@@ -301,7 +301,6 @@ import { HumanDispositionLedger } from './domains/human-disposition/HumanDisposi
 import { createDeferredPersonMemoryDailyTaskSpec } from './domains/memory/DeferredPersonMemoryDailyTaskSpec.js';
 import { EntityRegistryStore } from './domains/memory/EntityRegistry.js';
 import { EntityMemoryLifecycleService } from './domains/memory/entity/EntityMemoryLifecycleService.js';
-import { EntityMemoryLifecycleStore } from './domains/memory/entity/EntityMemoryLifecycleStore.js';
 import { sharedProactiveCandidateNudgeReceiptStore } from './domains/memory/entity-nudge-state.js';
 import { createEventMemoryCorrectionProposalStore } from './domains/memory/event/createEventMemoryCorrectionProposalStore.js';
 import { EventMemoryLifecycleService } from './domains/memory/event/EventMemoryLifecycleService.js';
@@ -797,9 +796,11 @@ async function initializeApi(
 
   // F152: Readiness check — verifies dependencies are reachable.
   const { MemoryPluginHost } = await import('./domains/plugin/host-surface/memory-plugin-host.js');
+  const { createEntityMemoryProvider } = await import('./domains/plugin/host-surface/entity-memory-provider.js');
   const { createEventMemoryProvider } = await import('./domains/plugin/host-surface/event-memory-provider.js');
   const { createProfileMemoryProvider } = await import('./domains/plugin/host-surface/profile-memory-provider.js');
   const memoryProvider = new MemoryPluginHost(app.log);
+  const entityMemory = createEntityMemoryProvider(memoryProvider);
   const eventMemoryStore = createEventMemoryProvider(memoryProvider);
   const profileMemory = createProfileMemoryProvider(memoryProvider);
   // The scheduler readiness probe is set before the server listens.
@@ -1636,10 +1637,9 @@ async function initializeApi(
     sourceAvailable: async (event) =>
       (await readEventMemorySource(event, event.ownerUserId, eventMemorySourceReaders)).status === 'ready',
   });
-  const entityMemoryLifecycleStore = new EntityMemoryLifecycleStore(memoryServices.store.getDb());
   const entityMemorySourceReaders = { threadStore, messageStore };
   const entityMemoryLifecycleService = new EntityMemoryLifecycleService({
-    store: entityMemoryLifecycleStore,
+    store: entityMemory,
     coordinator: ownerMemoryActionCoordinator,
     sourceAvailable: async (entity) =>
       (await readEntityMemorySource(entity, privateUserId, entityMemorySourceReaders)).status === 'ready',
@@ -3820,7 +3820,7 @@ async function initializeApi(
   });
   await app.register(entityMemoryOwnerRoutes, {
     ownerUserId: privateUserId,
-    store: entityMemoryLifecycleStore,
+    store: entityMemory,
     lifecycle: entityMemoryLifecycleService,
     proposalStore: entityProposalStore,
     sourceReaders: entityMemorySourceReaders,
