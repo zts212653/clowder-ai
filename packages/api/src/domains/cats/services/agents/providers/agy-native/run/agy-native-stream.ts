@@ -59,6 +59,7 @@ export async function* observeAgyNativeTurn(
   let terminalPolicyRejected = false;
   let nativeStatus: string | null = null;
   let nativeHasResponse = false;
+  let nativeHasResultError = false;
   let nativeHasTool = false;
   let nativeHasDenials = false;
   let streamChars = 0;
@@ -69,13 +70,14 @@ export async function* observeAgyNativeTurn(
     if (!adapter) return turn;
     if (
       turn.upstreamStatus !== nativeStatus ||
-      (turn.outcome === 'ok' && (nativeStatus !== 'SUCCESS' || !nativeHasResponse)) ||
+      (turn.outcome === 'ok' && (nativeStatus !== 'SUCCESS' || !nativeHasResponse || nativeHasResultError)) ||
       (turn.outcome === 'unconfirmed' && !nativeHasResponse) ||
       (nativeStatus === null && turn.outcome !== 'incomplete' && turn.outcome !== 'protocol_error')
     )
       throw new Error('invalid_agy_native_terminal_evidence');
     if (
       nativeStatus !== 'SUCCESS' ||
+      nativeHasResultError ||
       nativeHasTool ||
       nativeHasDenials ||
       turn.toolCalls.length ||
@@ -100,7 +102,13 @@ export async function* observeAgyNativeTurn(
         stepsComplete: result.stepsComplete,
         sessionTurnCount: result.sessionTurnCount,
         unknownEvents: result.unknownEvents.length,
-        authoritativeOutcome: result.outcome === 'denied' || nativeStatus !== 'SUCCESS' ? result.outcome : undefined,
+        authoritativeOutcome:
+          result.outcome === 'denied' ||
+          result.outcome === 'protocol_error' ||
+          nativeStatus !== 'SUCCESS' ||
+          nativeHasResultError
+            ? result.outcome
+            : undefined,
       });
       if (!isDeepStrictEqual(evidence(turn), evidence(native))) throw new Error('invalid_agy_native_terminal_evidence');
     }
@@ -167,6 +175,7 @@ export async function* observeAgyNativeTurn(
       terminalPolicyRejected = false;
       nativeStatus = null;
       nativeHasResponse = false;
+      nativeHasResultError = false;
       nativeHasTool = false;
       nativeHasDenials = false;
       resultSeenBeforeCancellation = false;
@@ -177,6 +186,7 @@ export async function* observeAgyNativeTurn(
       const error = result?.error;
       nativeStatus = typeof result?.status === 'string' ? result.status : 'UNKNOWN';
       nativeHasResponse = typeof result?.response === 'string' && result.response.trim().length > 0;
+      nativeHasResultError = error != null && error !== '';
       nativeHasDenials = result?.denied_actions !== undefined;
       terminalPolicyRejected = typeof error === 'string' && agyTerminalPolicyRejected(error);
       resultCount++;

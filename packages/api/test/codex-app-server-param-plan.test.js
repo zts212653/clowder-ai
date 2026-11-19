@@ -126,4 +126,44 @@ describe('Host validation for app-server params', () => {
       /codex_app_server_plan_policy_violation/,
     );
   });
+
+  test('turn preserves empty prompt and image order and rejects additional nested coordinates', async () => {
+    const input = { threadId: 'thread-1', prompt: '', imagePaths: ['/one.png', '/two.png'] };
+    const correct = (groups) => [
+      { type: 'text', text: groups.prompt },
+      ...groups.images.map((path) => ({ type: 'localImage', path })),
+    ];
+    const accepted = await planCodexAppServerTurn(input, async ({ groups }) => ({
+      params: { threadId: groups.threadId, input: correct(groups) },
+    }));
+    assert.deepEqual(accepted.params.input, [
+      { type: 'text', text: '' },
+      { type: 'localImage', path: '/one.png' },
+      { type: 'localImage', path: '/two.png' },
+    ]);
+    for (const adjust of [
+      ([text, first, second]) => [text, second, first],
+      ([text, ...images]) => [{ ...text, unapproved: true }, ...images],
+    ]) {
+      await assert.rejects(
+        planCodexAppServerTurn(input, async ({ groups }) => ({
+          params: { threadId: groups.threadId, input: adjust(correct(groups)) },
+        })),
+        /codex_app_server_plan_policy_violation/,
+      );
+    }
+    await assert.rejects(
+      planCodexAppServerTurn({ threadId: 'thread-1', recoveryContext: 'private context' }, async ({ groups }) => ({
+        params: {
+          threadId: groups.threadId,
+          input: [],
+          additionalContext: {
+            'cat-cafe.capacity-recovery': { kind: 'application', value: groups.recoveryContext },
+            'extra-context': { kind: 'application', value: 'unapproved' },
+          },
+        },
+      })),
+      /codex_app_server_plan_policy_violation/,
+    );
+  });
 });

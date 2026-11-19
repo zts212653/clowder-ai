@@ -15,10 +15,7 @@ import type { PluginInventoryStore } from '../host-inventory/ports.js';
  * process, credentials, native thread/turn identity validation, approvals,
  * cancellation and host-pool authority.
  */
-function createPlanner<
-  Request extends { operation: string },
-  Plan,
->(
+function createPlanner<Request extends { operation: string }, Plan>(
   inventory: Pick<PluginInventoryStore, 'readCurrentAuthority'>,
   runtime: Pick<PluginRuntimeCarrierRouter, 'invoke'>,
   action: 'planCodexAppServerThread' | 'planCodexAppServerTurn',

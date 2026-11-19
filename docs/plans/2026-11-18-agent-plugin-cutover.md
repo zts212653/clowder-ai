@@ -7,11 +7,12 @@ created: 2026-11-18
 
 # Agent 接入插件化完整切换
 
-状态：设计修订稿，等待独立复审。源于当前线程的交付委托和 PR #1982 底座补充。设计获独立批准后开始实现。验收以一个发往 `zts212653/clowder-ai:next` 的完整迁移 PR 为目标。
+设计于实施前获鲸鲸独立批准，评审回执 `0001795021847001-000066-0ea3eb17`，所审设计 SHA256 为 `9b479654535104befb644b72b280d97f26ace6a0d6985be81d69b19bc5da5ae3`。验收落在发往 `zts212653/clowder-ai:next` 的 [PR #2030](https://github.com/zts212653/clowder-ai/pull/2030)。
 
 ## 基线和复查坐标
 
 - Clowder `upstream/next` 为 `8e3462f60ee306925f956bed4e4f96e6f87210fd`。仍开放的 [PR #1982](https://github.com/zts212653/clowder-ai/pull/1982) 的真实 head `d38110948d4a522bc61ea247ae02ff5e8c4cc635` 已包含该提交，与 GitHub 试合并 `9bcede9187b78c2a9d590099695eb8d08403e001` 同树。调研原产品入口用前者，改动和实机验收用后者。PR #1982 进入 next 以前，两份 PR 会共享其基线差异。迁移审查以 `d38110948...HEAD` 看本次变化，向 next 开 PR 时回读真实远端合并关系。
+- 实施期间 `next` 保持原 SHA，PR #1982 新增 `d0f0c45504982a84dfef899f9d0e4a47b2055d67`。合入提交 `c509b5e943513911d6a7d6f10e7f4461ade230f7` 保留聊天列表槽位、本迁移的成员入口及双方翻译。最终审查可使用 `d0f0c455...HEAD`。
 - F202 的包校验、声明、实例维护、worker 与 owner route 是既有装配骨架。#1982 固定的 `@clowder-ai/plugin-contract` 为 `0.4.0-candidate.0`，#1982 的 Host 能读取插件随包的 `console/pdl.yaml` 并投影到既有控制台。成员流程复用 Host PDL 入口，无须新建插件控制台。猫猫球配置迁移只作为单一 owner 的对照。
 - F241 期望新增 runtime 无需 Host 增加分支，保留 Host 的工作区、进程权限、凭据签发及审计。当前 `declaredAgentSessionProviders` 在 activation 读 `agent-provider.json`，通过 Agent Client Library 展开 ACP 配置，经 `registerPluginAgentProvider` 注册到 `SessionImplementationRegistry`。创建者仍是 `index.ts` 注入的 `createRefreshingAcpSessionProvider` / `createAcpServiceForConfig`。未绑定的 ACP 以及原生、HTTP A2A 走另一条 Host 构造分支，`CAT_CAFE_AGENT_SESSION_CONTRACT` 缺省为 `plugin`，只有显式关闭或非法值会落到 `off`。该声明能力本身无法完成接入和角色管理。
 - F050 记载已交付的 CLI L1 和待独立实机确认的 L2。当前 `index.ts` 能按环境中既有角色 ID 解析 A2A URL，`A2AAgentService` 实际使用同步 `tasks/send`，取消本地等待时会把远端终止标为未确认。产品内 `@角色` A2A、HTTP runtime、经插件寻址的 Collective 和 Dot 使用的路由各自核对。HTTP A2A 以源码路径和经脱敏确认的实启角色为准。本机当前产品目录的 v2 catalog 中无 HTTP A2A 角色绑定。按只读 inventory 查询，`official.collective-connector` 已启用且 runtime=healthy，Dot 当前无已安装实例。配置与进程健康不能证明目标路由已真实调用。独立环境分别验证 HTTP A2A、Collective 和 Dot。

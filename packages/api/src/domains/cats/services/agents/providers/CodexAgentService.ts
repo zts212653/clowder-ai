@@ -175,10 +175,6 @@ import {
   type CodexAppServerRecoveryEvent,
   runCodexAppServerWithRecovery,
 } from './CodexAppServerRunner.js';
-import type {
-  CodexAppServerThreadPlanner,
-  CodexAppServerTurnPlanner,
-} from './codex-app-server-param-plan.js';
 import { requestCodexAppServerCompaction } from './CodexAppServerSessionControl.js';
 import { requestCodexAppServerFork, requestCodexAppServerStatus } from './CodexAppServerStatusControl.js';
 import { CodexLiveStartupCancelledError } from './CodexLiveRunPort.js';
@@ -205,6 +201,7 @@ import {
   bindCodexAppServerControlOptions,
   resolveCodexAppServerControlOptions,
 } from './codex-app-server-control-options.js';
+import type { CodexAppServerThreadPlanner, CodexAppServerTurnPlanner } from './codex-app-server-param-plan.js';
 import { buildCodexCapacityRecoveryCardMessage } from './codex-capacity-recovery-card.js';
 import { CodexErrorEvidence } from './codex-error-evidence.js';
 import { CODEX_LIVE_DISABLED_FEATURES, CODEX_LIVE_POLICY_ARGS } from './codex-live-policy.js';

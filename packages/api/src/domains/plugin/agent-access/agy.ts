@@ -24,7 +24,7 @@ export function createAgentAccessAgyOutput(
       async *project(events: AsyncIterable<unknown>, credentials: readonly string[]) {
         const pending = new Map<number, { raw: unknown; line?: string }>();
         let inputEnded = false;
-        const tails = new Map<number, string>();
+        let tail = '';
         const source = Readable.from(
           (async function* () {
             let sequence = 0;
@@ -37,19 +37,12 @@ export function createAgentAccessAgyOutput(
                 if (step?.step_type === 'user_input') {
                   delete step.text_delta;
                   delete step.tool_info;
-                } else if (step && typeof step.step_index === 'number') {
-                  const index = step.step_index;
-                  const tail = tails.get(index) ?? '';
-                  if (typeof step.text_delta === 'string' || (tail && step.state === 'DONE')) {
-                    const redacted = sanitizeStreamingDelta(
-                      tail + (typeof step.text_delta === 'string' ? step.text_delta : ''),
-                      credentials,
-                    );
-                    if (step.state === 'DONE') tails.delete(index);
-                    else tails.set(index, redacted.tail);
-                    step.text_delta = redacted.text + (step.state === 'DONE' ? redacted.tail : '');
-                  }
-                } else if (safe.event === 'result') tails.clear();
+                } else if (typeof step?.text_delta === 'string') {
+                  // The AGY parser joins text across completed response steps, even with tools in between.
+                  const redacted = sanitizeStreamingDelta(tail + step.text_delta, credentials);
+                  tail = redacted.tail;
+                  step.text_delta = redacted.text;
+                } else if (safe.event === 'result') tail = '';
                 if (safe.event === 'init') safe.init = {};
                 line = JSON.stringify(safe);
               }

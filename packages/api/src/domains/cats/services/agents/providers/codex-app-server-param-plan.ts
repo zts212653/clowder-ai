@@ -1,3 +1,4 @@
+import { isDeepStrictEqual } from 'node:util';
 import type {
   AgentAccessCodexAppServerThreadRequest,
   AgentAccessCodexAppServerTurnRequest,
@@ -55,7 +56,8 @@ function buildThreadRequest(source: CodexAppServerThreadSource): {
   if (source.kind === 'resume' && source.threadId) groups.threadId = addRef(refs, 'threadId', source.threadId);
   if (source.model) groups.model = addRef(refs, 'model', source.model);
   if (source.cwd) groups.cwd = addRef(refs, 'cwd', source.cwd);
-  if (source.developerInstructions) groups.developerInstructions = addRef(refs, 'developerInstructions', source.developerInstructions);
+  if (source.developerInstructions)
+    groups.developerInstructions = addRef(refs, 'developerInstructions', source.developerInstructions);
   if (source.config) groups.config = addRef(refs, 'config', source.config);
   return {
     request: {
@@ -82,8 +84,9 @@ function buildTurnRequest(source: CodexAppServerTurnSource): {
   const groups: AgentAccessCodexAppServerTurnRequest['groups'] = {
     threadId: addRef(refs, 'threadId', source.threadId),
   };
-  if (source.clientUserMessageId) groups.clientUserMessageId = addRef(refs, 'clientUserMessageId', source.clientUserMessageId);
-  if (source.prompt) groups.prompt = addRef(refs, 'prompt', source.prompt);
+  if (source.clientUserMessageId)
+    groups.clientUserMessageId = addRef(refs, 'clientUserMessageId', source.clientUserMessageId);
+  if (source.prompt !== undefined) groups.prompt = addRef(refs, 'prompt', source.prompt);
   if (source.imagePaths && source.imagePaths.length > 0)
     groups.images = source.imagePaths.map((path) => addRef(refs, 'image', path));
   if (source.recoveryContext) groups.recoveryContext = addRef(refs, 'recoveryContext', source.recoveryContext);
@@ -121,20 +124,6 @@ function tokenAt(params: JsonObject, key: string, token: string | undefined): vo
     if (params[key] !== token) fail();
   } else if (Object.hasOwn(params, key)) {
     fail();
-  }
-}
-
-function assertNoUnknownTokens(value: unknown, refs: GroupRefs): void {
-  if (typeof value === 'string') {
-    if (value.startsWith(TOKEN_PREFIX) && !refs.has(value)) fail();
-    return;
-  }
-  if (Array.isArray(value)) {
-    for (const item of value) assertNoUnknownTokens(item, refs);
-    return;
-  }
-  if (value && typeof value === 'object') {
-    for (const item of Object.values(value as JsonObject)) assertNoUnknownTokens(item, refs);
   }
 }
 
@@ -194,27 +183,13 @@ export async function planCodexAppServerThread(
   if (!planner) return undefined;
   const { request, refs } = buildThreadRequest(source);
   const plan = await planner(request);
-  assertNoUnknownTokens(plan.params, refs);
   assertThreadParams(plan.params, request, { resumeStart: false });
   if (request.kind === 'start') {
     if (plan.startParams) fail();
   } else {
     if (!plan.startParams) fail();
-    assertNoUnknownTokens(plan.startParams, refs);
     assertThreadParams(plan.startParams, request, { resumeStart: true });
   }
-  const used = new Set<string>();
-  const mark = (value: unknown): void => {
-    if (typeof value === 'string') {
-      if (refs.has(value)) used.add(value);
-      return;
-    }
-    if (Array.isArray(value)) return value.forEach(mark);
-    if (value && typeof value === 'object') Object.values(value as JsonObject).forEach(mark);
-  };
-  mark(plan.params);
-  mark(plan.startParams);
-  for (const token of refs.keys()) if (!used.has(token)) fail();
 
   return {
     params: expand(plan.params, refs) as JsonObject,
@@ -231,57 +206,31 @@ export async function planCodexAppServerTurn(
   const { request, refs } = buildTurnRequest(source);
   const plan = await planner(request);
   const params = plan.params;
-  assertNoUnknownTokens(params, refs);
-  assertTopLevelKeys(params, ['threadId', 'clientUserMessageId', 'input', 'additionalContext', 'outputSchema', 'collaborationMode']);
-  tokenAt(params, 'threadId', groupsThreadId(request));
-  tokenAt(params, 'clientUserMessageId', request.groups.clientUserMessageId);
-  if (request.groups.outputSchema) tokenAt(params, 'outputSchema', request.groups.outputSchema);
-  else if (Object.hasOwn(params, 'outputSchema')) fail();
-  if (request.groups.collaborationMode) tokenAt(params, 'collaborationMode', request.groups.collaborationMode);
-  else if (Object.hasOwn(params, 'collaborationMode')) fail();
-
-  const input = params.input;
-  if (!Array.isArray(input)) fail();
-  const text = input.filter((item) => (item as JsonObject)?.type === 'text');
-  const images = input.filter((item) => (item as JsonObject)?.type === 'localImage');
-  const expectedInputLength = (request.groups.prompt ? 1 : 0) + (request.groups.images?.length ?? 0);
-  if (input.length !== expectedInputLength) fail();
-  if (request.groups.prompt) {
-    if (text.length !== 1 || (text[0] as JsonObject).text !== request.groups.prompt) fail();
-  } else if (text.length !== 0) fail();
-  if ((request.groups.images ?? []).length !== images.length) fail();
-  if (request.groups.images) {
-    const imageTokens = new Set(request.groups.images);
-    for (const item of images) {
-      const path = (item as JsonObject).path;
-      if (typeof path !== 'string' || !imageTokens.has(path)) fail();
-      imageTokens.delete(path);
-    }
-    if (imageTokens.size !== 0) fail();
-  }
-  if (request.groups.recoveryContext) {
-    const value = (params.additionalContext as JsonObject | undefined)?.['cat-cafe.capacity-recovery'] as JsonObject | undefined;
-    if (value?.value !== request.groups.recoveryContext) fail();
+  assertTopLevelKeys(params, [
+    'threadId',
+    'clientUserMessageId',
+    'input',
+    'additionalContext',
+    'outputSchema',
+    'collaborationMode',
+  ]);
+  const { groups } = request;
+  tokenAt(params, 'threadId', groups.threadId);
+  tokenAt(params, 'clientUserMessageId', groups.clientUserMessageId);
+  tokenAt(params, 'outputSchema', groups.outputSchema);
+  tokenAt(params, 'collaborationMode', groups.collaborationMode);
+  const expectedInput = [
+    ...(groups.prompt ? [{ type: 'text', text: groups.prompt }] : []),
+    ...(groups.images?.map((path) => ({ type: 'localImage', path })) ?? []),
+  ];
+  if (!isDeepStrictEqual(params.input, expectedInput)) fail();
+  if (groups.recoveryContext) {
+    const expectedContext = { 'cat-cafe.capacity-recovery': { kind: 'application', value: groups.recoveryContext } };
+    if (!isDeepStrictEqual(params.additionalContext, expectedContext)) fail();
   } else if (Object.hasOwn(params, 'additionalContext')) fail();
-
-  const used = new Set<string>();
-  const mark = (value: unknown): void => {
-    if (typeof value === 'string') {
-      if (refs.has(value)) used.add(value);
-      return;
-    }
-    if (Array.isArray(value)) return value.forEach(mark);
-    if (value && typeof value === 'object') Object.values(value as JsonObject).forEach(mark);
-  };
-  mark(params);
-  for (const token of refs.keys()) if (!used.has(token)) fail();
 
   return {
     params: expand(params, refs) as JsonObject,
     ...(plan.assertCurrent ? { assertCurrent: plan.assertCurrent } : {}),
   };
-}
-
-function groupsThreadId(request: AgentAccessCodexAppServerTurnRequest): string {
-  return request.groups.threadId;
 }

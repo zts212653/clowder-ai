@@ -19,9 +19,11 @@ function authority(overrides = {}) {
 }
 
 function harness(action, options = {}) {
-  return (action === 'planCodexAppServerThread'
-    ? createAgentAccessCodexAppServerThreadPlanner
-    : createAgentAccessCodexAppServerTurnPlanner)(
+  return (
+    action === 'planCodexAppServerThread'
+      ? createAgentAccessCodexAppServerThreadPlanner
+      : createAgentAccessCodexAppServerTurnPlanner
+  )(
     { readCurrentAuthority: async () => ('authority' in options ? options.authority : authority()) },
     {
       invoke: async (_id, name, payload) => {
