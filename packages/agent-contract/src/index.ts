@@ -226,6 +226,33 @@ export type AgentAccessCodexAppServerNotificationProjection = z.infer<
   typeof agentAccessCodexAppServerNotificationProjectionSchema
 >;
 
+/** Minimal model catalog returned by a provider-discovery action. */
+export const agentAccessModelCatalogSchema = z.object({
+  status: z.enum(['live', 'configured', 'unavailable']),
+  models: z.array(
+    z.object({
+      value: z.string(),
+      label: z.string(),
+      description: z.string().optional(),
+      group: z.string().optional(),
+      defaultEffort: z.string().optional(),
+      efforts: z.array(z.object({ value: z.string(), label: z.string(), description: z.string().optional() })).optional(),
+    }),
+  ),
+  message: z.string().optional(),
+});
+export type AgentAccessModelCatalog = z.infer<typeof agentAccessModelCatalogSchema>;
+
+export const agentAccessCodexModelCatalogRequestSchema = z.object({
+  operation: z.literal('discover_model_catalog'),
+  client: z.literal('codex'),
+  input: z.object({
+    cwd: z.string().optional(),
+    model: z.string().max(512).optional(),
+  }),
+});
+export type AgentAccessCodexModelCatalogRequest = z.infer<typeof agentAccessCodexModelCatalogRequestSchema>;
+
 /** One envelope per native client; the Host routes by the discriminant. */
 export const agentAccessNativeLaunchRequestSchema = z.discriminatedUnion('client', [
   agentAccessKimiLaunchRequestSchema,

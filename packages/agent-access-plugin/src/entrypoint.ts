@@ -10,6 +10,7 @@ import {
   agentAccessCodexAppServerThreadRequestSchema,
   agentAccessCodexAppServerTurnPlanSchema,
   agentAccessCodexAppServerTurnRequestSchema,
+  agentAccessCodexModelCatalogRequestSchema,
   agentAccessCodexExecLaunchRequestSchema,
   agentAccessDetectRequestSchema,
   agentAccessLoginRequestSchema,
@@ -39,6 +40,7 @@ import { projectClaudeBatch } from './runtime/claude/project-claude-batch.js';
 import { projectClaudeOutput } from './runtime/claude/project-claude-output.js';
 import { CODEX_APP_SERVER_NOTIFICATION_PROJECTION } from './runtime/codex-appserver-notifications.js';
 import { buildCodexAppServerThreadParams, buildCodexAppServerTurnParams } from './runtime/codex-appserver-params.js';
+import { discoverCodexModelCatalog } from './runtime/codex-model-catalog.js';
 import { buildCodexExecLaunchArguments } from './runtime/codex-exec-launch-arguments.js';
 import { normalizeKimiEvent } from './runtime/kimi-event-parser.js';
 import { buildKimiLaunchArguments } from './runtime/kimi-launch-arguments.js';
@@ -86,6 +88,20 @@ export default {
             planCodexAppServerTurn(input: unknown) {
               const request = agentAccessCodexAppServerTurnRequestSchema.parse(input);
               return agentAccessCodexAppServerTurnPlanSchema.parse(buildCodexAppServerTurnParams(request));
+            },
+            discoverModelCatalog({
+              input,
+              launch,
+            }: {
+              input: unknown;
+              launch: (request: { args: string[]; cwd?: string }) => Promise<{
+                stdout: string;
+                stderr?: string;
+                code?: number | string | null;
+              }>;
+            }) {
+              const request = agentAccessCodexModelCatalogRequestSchema.parse(input);
+              return discoverCodexModelCatalog(request.input, launch);
             },
             projectNotifications(_input: unknown) {
               return CODEX_APP_SERVER_NOTIFICATION_PROJECTION;

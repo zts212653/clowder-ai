@@ -25,6 +25,18 @@ const inputSchema = z
   })
   .strict();
 const ttl = 5 * 60_000;
+export interface RuntimeCatalogRouteOptions {
+  /** Active package generation; undefined means the package is not available. */
+  modelCatalogGeneration?: () => Promise<string | undefined>;
+  /** Active-package Codex discovery; Host still executes the trusted command. */
+  discoverModelCatalog?: (target: {
+    command: string;
+    cwd: string;
+    model?: string;
+  }) => Promise<RuntimeModelCatalog | undefined>;
+  /** Test seam; production keeps the existing native discovery. */
+  discoverRuntimes?: typeof discoverNativeRuntimes;
+}
 export function createCatalogCache(probe: typeof probeRuntimeCatalog = probeRuntimeCatalog, now = Date.now) {
   const values = new Map<string, { at: number; value: RuntimeModelCatalog }>();
   const inflight = new Map<string, Promise<RuntimeModelCatalog>>();
@@ -76,15 +88,28 @@ function modified(path: string) {
     return 0;
   }
 }
-export function registerRuntimeCatalogRoute(app: FastifyInstance) {
+export function registerRuntimeCatalogRoute(app: FastifyInstance, options: RuntimeCatalogRouteOptions = {}) {
   const cached = createCatalogCache();
+  const pluginCached = options.discoverModelCatalog
+    ? createCatalogCache(async (target) => {
+        const value = await options.discoverModelCatalog!({
+          command: target.command,
+          cwd: target.cwd,
+          ...(target.model ? { model: target.model } : {}),
+        });
+        if (!value) throw new Error('model_catalog_unavailable');
+        return value;
+      })
+    : undefined;
   app.post('/api/cats/runtime-models', async (request, reply) => {
     if (!resolveHeaderUserId(request)) return reply.code(401).send({ error: '需要登录后读取工具模型' });
     const parsed = inputSchema.safeParse(request.body);
     if (!parsed.success) return reply.code(400).send({ error: '模型查询参数无效' });
     const data = parsed.data,
       root = resolveActiveProjectRoot();
-    const runtime = (await discoverNativeRuntimes(root)).runtimes.find((item) => item.id === data.runtimeId);
+    const runtime = (await (options.discoverRuntimes ?? discoverNativeRuntimes)(root)).runtimes.find(
+      (item) => item.id === data.runtimeId,
+    );
     if (!runtime) return reply.code(404).send({ error: '运行工具不存在，请重新探测' });
     const fallback: RuntimeModelCatalog = {
       status: 'configured',
@@ -183,6 +208,26 @@ export function registerRuntimeCatalogRoute(app: FastifyInstance) {
       modified(join(root, '.claude/settings.json')),
       modified(join(root, '.claude/settings.local.json')),
     ]);
+    if (runtime.id === 'codex' && options.modelCatalogGeneration && pluginCached) {
+      const generation = await options.modelCatalogGeneration();
+      if (!generation) return { ...fallback, message: 'plugin_unavailable' };
+      const result = await pluginCached(`${key}:${generation}`, target, data.refresh);
+      return {
+        ...fallback,
+        ...('configuredModel' in runtime
+          ? {
+              defaultModel: runtime.configuredModel,
+              defaultEffort: 'configuredEffort' in runtime ? runtime.configuredEffort : undefined,
+              defaultModelSource: 'tool_config' as const,
+              defaultEffortSource: 'tool_config' as const,
+            }
+          : {}),
+        ...result,
+        status: result.status === 'unavailable' ? 'configured' : result.status,
+        ...(result.status === 'unavailable' ? { message: 'plugin_discovery_unavailable' } : {}),
+        models: result.models.length ? result.models : fallback.models,
+      };
+    }
     const result = await cached(key, target, data.refresh);
     return {
       ...fallback,

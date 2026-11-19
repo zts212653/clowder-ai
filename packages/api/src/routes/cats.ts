@@ -15,7 +15,7 @@ import { registerMemberCanonResponse } from './member-canon-response.js';
 import { registerDshMemberConnectionChecks } from './member-connection-check.js';
 import { dshLauncherProfileState, InvalidDshProfile } from './native-dsh-profile.js';
 import { discoverNativeRuntimesWithReadiness } from './native-runtimes.js';
-import { registerRuntimeCatalogRoute } from './runtime-catalog-route.js';
+import { registerRuntimeCatalogRoute, type RuntimeCatalogRouteOptions } from './runtime-catalog-route.js';
 /**
  * Cats API Routes
  * GET /api/cats - 获取所有猫猫信息
@@ -955,6 +955,7 @@ interface CatsRoutesOptions {
   nativeRuntimeDiscovery?: ReturnType<typeof registerAgentAccessRoutes>['readLegacyNativeRuntimes'];
   agentAccessDetection?: ReturnType<typeof registerAgentAccessRoutes>['readDetection'];
   resolveCarrierCapability?: (catId: CatId) => FreshnessCarrierCapability | undefined;
+  runtimeCatalog?: RuntimeCatalogRouteOptions;
 }
 
 export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opts) => {
@@ -969,7 +970,7 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opt
     }
   });
   if (opts.memberAssets) registerMemberCanonResponse(app, opts.memberAssets);
-  registerRuntimeCatalogRoute(app);
+  registerRuntimeCatalogRoute(app, opts.runtimeCatalog);
   registerDshSetupRoutes(app, {
     runConnection: opts.runDshConnection,
     readDetection: opts.agentAccessDetection,

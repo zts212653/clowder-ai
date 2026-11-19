@@ -3707,6 +3707,10 @@ async function initializeApi(
     nativeRuntimeDiscovery: (...args) => readLegacyNativeRuntimes(...args),
     agentAccessDetection: (...args) => readAgentAccessDetection(...args),
     runDshConnection: (config, cwd, preferences) => agentAccessDshConnection(config, cwd, preferences),
+    runtimeCatalog: {
+      modelCatalogGeneration: () => agentAccessCodexModelCatalogGeneration(),
+      discoverModelCatalog: (target) => agentAccessCodexModelCatalog(target),
+    },
     addressedPlugins: () => router.addressedPlugins,
     resolveContextCapacitySnapshot: (catId) => router.contextCapacitySnapshot(catId),
     resolveCarrierCapability: (catId) => router.freshnessCarrierCapability(catId),
@@ -6086,6 +6090,16 @@ async function initializeApi(
     pluginRuntime.supervisor,
   );
   const agentAccessCodexAppServerNotifications = createAgentAccessCodexAppServerNotificationProjection(
+    pluginRuntime.inventoryStore,
+    pluginRuntime.supervisor,
+  );
+  const { createAgentAccessCodexModelCatalogDiscovery, createAgentAccessCodexModelCatalogGeneration } = await import(
+    './domains/plugin/agent-access/codex-model-catalog.js'
+  );
+  const agentAccessCodexModelCatalogGeneration = createAgentAccessCodexModelCatalogGeneration(
+    pluginRuntime.inventoryStore,
+  );
+  const agentAccessCodexModelCatalog = createAgentAccessCodexModelCatalogDiscovery(
     pluginRuntime.inventoryStore,
     pluginRuntime.supervisor,
   );
