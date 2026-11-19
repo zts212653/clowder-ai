@@ -29,6 +29,10 @@ export interface RecallMetricsRoutesOptions {
   personMemoryStore?: RecallSourceReaders['personMemoryStore'];
   personDeliveryReader?: RecallSourceReaders['personDeliveryReader'];
   cueSourceReader?: RecallSourceReaders['cueSourceReader'];
+  readDocumentCandidate?: (
+    anchor: string,
+    userId: string,
+  ) => ReturnType<NonNullable<RecallSourceReaders['readDocumentCandidate']>>;
   profileMemoryStore?: RecallSourceReaders['profileMemoryStore'];
   tasteSources?: RecallSourceReaders['tasteSources'];
   eventSources?: RecallSourceReaders['eventSources'];
@@ -269,13 +273,17 @@ export const recallMetricsRoutes: FastifyPluginAsync<RecallMetricsRoutesOptions>
         )
         .all(userId, threadId, includeMatter ? 1 : 0) as Array<{ invocation_id: string }>
     ).map((row) => row.invocation_id);
+    const { readDocumentCandidate } = opts;
     const sourceViews = await readRecallSourceViews(
       opts.evidenceDb,
       userId,
       threadId,
       rows,
       cueInvocationIds,
-      opts,
+      {
+        ...opts,
+        readDocumentCandidate: readDocumentCandidate ? (anchor) => readDocumentCandidate(anchor, userId) : undefined,
+      },
       includeMatter,
     );
     const views = new Map(sourceViews.filter((view) => !view.cueId).map((view) => [view.anchor, view]));

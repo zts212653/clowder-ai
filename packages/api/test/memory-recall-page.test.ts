@@ -65,6 +65,32 @@ test('recall pagination delegates only the authorized thread and freezes the cur
   }
 });
 
+test('recall document titles use the provider and thread labels retain owner checks', async () => {
+  const anchors: string[] = [];
+  const f = await recallFixture((readers) => {
+    readers.readDocumentCandidate = async (anchor) => {
+      anchors.push(anchor);
+      return anchor === 'F042' ? { title: 'Public feature from plugin', kind: 'feature' } : null;
+    };
+  });
+  try {
+    const candidates = ['F042', 'thread-own', 'thread-other', 'private-collection'].map((anchor) => ({ anchor }));
+    f.recall('docs', { candidates: JSON.stringify(candidates) });
+    const response = await f.get();
+    assert.equal(response.statusCode, 200, response.body);
+    const results = response.json().records[0].event.results;
+    assert.deepEqual(results.map(({ title, href }: { title: string; href: string | null }) => [title, href]), [
+      ['Public feature from plugin', '/memory/search?q=F042'],
+      ['真实对话', '/thread/own'],
+      ['', null],
+      ['', null],
+    ]);
+    assert.deepEqual(anchors, ['F042', 'private-collection']);
+  } finally {
+    await f.close();
+  }
+});
+
 test('selected window, source and cat use real ledger rows with both time bounds', async () => {
   const f = await recallFixture();
   try {

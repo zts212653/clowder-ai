@@ -1,6 +1,11 @@
 import { randomUUID } from 'node:crypto';
+import { RECALL_DISPLAY_DOC_KINDS } from '@cat-cafe/shared';
 import type { DispatchInput } from '@clowder-ai/plugin-memory-contract';
-import { explainDescriptor, isCompatibleDescriptor, MEMORY_REQUIRED_OPERATIONS } from '@clowder-ai/plugin-memory-contract';
+import {
+  explainDescriptor,
+  isCompatibleDescriptor,
+  MEMORY_REQUIRED_OPERATIONS,
+} from '@clowder-ai/plugin-memory-contract';
 import { type EntityDispatchInput, entityOutputSchemas } from '@clowder-ai/plugin-memory-contract/entity';
 import { type EventDispatchInput, eventOutputSchemas } from '@clowder-ai/plugin-memory-contract/event';
 import {
@@ -11,9 +16,11 @@ import {
 import { type MatterDispatchInput, matterOutputSchemas } from '@clowder-ai/plugin-memory-contract/matter';
 import { type ProfileDispatchInput, profileOutputSchemas } from '@clowder-ai/plugin-memory-contract/profile';
 import {
+  type MemoryRecallCandidateRequest,
   type MemoryRecallEventRequest,
   type MemoryRecallStatsRequest,
   type MemoryRecallTimelineRequest,
+  memoryRecallCandidateResult,
   memoryRecallEventResult,
   memoryRecallStatsResult,
   memoryRecallTimelineResult,
@@ -60,6 +67,7 @@ type MemoryDispatch =
   | MemoryProjectIndexRequest
   | MatterDispatchInput
   | ProfileDispatchInput
+  | MemoryRecallCandidateRequest
   | MemoryRecallEventRequest
   | MemoryRecallStatsRequest
   | MemoryRecallTimelineRequest
@@ -126,7 +134,10 @@ export class MemoryPluginHost {
     }
     const missing = MEMORY_HOST_REQUIRED_OPERATIONS.filter((operation) => !offered.operations.includes(operation));
     if (missing.length) {
-      throw new ExternalPluginRuntimeError('PROTOCOL_VIOLATION', `Memory package is missing operations: ${missing.join(', ')}`);
+      throw new ExternalPluginRuntimeError(
+        'PROTOCOL_VIOLATION',
+        `Memory package is missing operations: ${missing.join(', ')}`,
+      );
     }
     this.#binding = {
       identity: {
@@ -156,7 +167,25 @@ export class MemoryPluginHost {
   }
 
   readIndexStatus(generationId: MemoryIndexStatusRequest['input']['generationId'], userId: string) {
-    return callMemoryOwner(this, { operation: 'index.status', input: { generationId } }, memoryIndexStatusResult, userId);
+    return callMemoryOwner(
+      this,
+      { operation: 'index.status', input: { generationId } },
+      memoryIndexStatusResult,
+      userId,
+    );
+  }
+
+  async readRecallCandidate(anchor: string, userId: string) {
+    const candidate = await callMemoryOwner(
+      this,
+      { operation: 'recall.candidate', input: { anchor, kinds: [...RECALL_DISPLAY_DOC_KINDS] } },
+      memoryRecallCandidateResult,
+      userId,
+    );
+    if (candidate && !RECALL_DISPLAY_DOC_KINDS.some((kind) => kind === candidate.kind)) {
+      throw new MemoryProviderCallError('unknown');
+    }
+    return candidate;
   }
 
   readRecallStats(input: MemoryRecallStatsRequest['input'], userId: string) {
@@ -164,7 +193,12 @@ export class MemoryPluginHost {
   }
 
   async readRecallTimeline(input: MemoryRecallTimelineRequest['input'], userId: string) {
-    const rows = await callMemoryOwner(this, { operation: 'recall.timeline', input }, memoryRecallTimelineResult, userId);
+    const rows = await callMemoryOwner(
+      this,
+      { operation: 'recall.timeline', input },
+      memoryRecallTimelineResult,
+      userId,
+    );
     const visible = new Set(input.threadIds);
     if (rows.some((row) => !visible.has(row.thread_id))) throw new MemoryProviderCallError('unknown');
     return rows;

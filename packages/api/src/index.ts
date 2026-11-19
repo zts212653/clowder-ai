@@ -3764,6 +3764,7 @@ async function initializeApi(
     cueSourceReader: memoryCueRuntime.sourceReader,
     profileMemoryStore: profileMemoryLifecycleStore,
     ...recallOwnerMessageSources,
+    readDocumentCandidate: (anchor, userId) => memoryProvider.readRecallCandidate(anchor, userId),
   });
   const { memoryCueInvocationReadRoutes } = await import('./routes/memory-cue-invocation-read.js');
   const { memoryMatterRoutes } = await import('./routes/memory-matter-routes.js');
@@ -7766,6 +7767,7 @@ async function initializeApi(
       brakeSources: { eventMemoryStore, threadStore, messageStore },
       recallSources: {
         ...recallOwnerMessageSources,
+        readDocumentCandidate: (anchor) => memoryProvider.readRecallCandidate(anchor, privateUserId),
         threadStore,
         messageStore,
         invocationRecordStore,
