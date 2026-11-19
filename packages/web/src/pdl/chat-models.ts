@@ -1504,7 +1504,11 @@ export function chatModels(data: ChatData, ui: ChatUiState, input?: ChatProjecti
           ref: { i: pop()!.i },
         };
       }
-      if (kind === 'mention') return { ...base, mentions: mentionItems() };
+      if (kind === 'mention') {
+        // `mention` is what a picker registered in the chat.pop.list slot reads: the query, the selected row, the rows.
+        const mentions = mentionItems();
+        return { ...base, mentions, mention: { q: pop()?.q ?? '', i: pop()?.i ?? 0, items: mentions } };
+      }
       if (kind === 'ctx') {
         const contexts = contextItems();
         return {

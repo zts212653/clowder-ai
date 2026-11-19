@@ -890,6 +890,10 @@ pdl:
       cardinality: keyed
       label: t:entryLayout.slot.messageNodes
       scope: page
+    chat.pop.list:
+      cardinality: keyed
+      label: t:entryLayout.slot.popLists
+      scope: page
     chat.tool.result:
       cardinality: chain
       label: t:entryLayout.slot.toolResults
@@ -17930,813 +17934,818 @@ pdl:
                             - 0
                             - 40
               blocks:
-                - type: opts
-                  from:
-                    - lead:
-                        glyph: users
-                      title: t:composerPop.options.groupChat
-                      sub: t:composerPop.options.sub
-                      cur: $.groupSelected
-                      act: set
-                      args:
-                        path: cs.viewCat
-                        v: ""
-                        cast: "null"
-                      when:
-                        of: $.kind
-                        map:
-                          people: true
-                          _: false
-                    - from: $.members
-                      item:
-                        lead:
-                          who: "@id"
-                        title: "@name"
-                        handle: "@handle"
-                        sub:
-                          of: "@state"
-                          map:
-                            reply:
-                              t: chat.peopleState.reply
-                              args:
-                                - of: "@state"
-                                  map:
-                                    reply:
-                                      of: "@what"
-                                      slice:
-                                        - 0
-                                        - 14
-                                    command:
-                                      t: wsLive.status.state
-                                      args:
-                                        - true
-                                        - t: wsLive.activity
-                                          args:
-                                            - "@what"
-                                    _: "@what"
-                            command:
-                              of: "@state"
-                              map:
-                                reply:
-                                  of: "@what"
-                                  slice:
-                                    - 0
-                                    - 14
-                                command:
-                                  t: wsLive.status.state
-                                  args:
-                                    - true
-                                    - t: wsLive.activity
-                                      args:
-                                        - "@what"
-                                _: "@what"
-                            presence:
-                              of: "@state"
-                              map:
-                                reply:
-                                  of: "@what"
-                                  slice:
-                                    - 0
-                                    - 14
-                                command:
-                                  t: wsLive.status.state
-                                  args:
-                                    - true
-                                    - t: wsLive.activity
-                                      args:
-                                        - "@what"
-                                _: "@what"
-                            idle:
-                              t: chat.peopleState.idle
-                              args:
-                                - of: "@state"
-                                  map:
-                                    reply:
-                                      of: "@what"
-                                      slice:
-                                        - 0
-                                        - 14
-                                    command:
-                                      t: wsLive.status.state
-                                      args:
-                                        - true
-                                        - t: wsLive.activity
-                                          args:
-                                            - "@what"
-                                    _: "@what"
-                            _: "@state"
-                        subTone:
-                          of: "@executing"
-                          map:
-                            "true": run
-                            "false": "@presenceTone"
-                            _: "@executing"
-                        cur: "@selected"
-                        act: set
-                        args:
-                          path: cs.viewCat
-                          v: "@id"
-                        when:
-                          of: $.kind
-                          map:
-                            people: true
-                            _: false
-                    - sep: 1
-                      when:
-                        - $.daemon
-                        - of: $.kind
-                          map:
-                            people: true
-                            _: false
-                    - lead:
-                        icon: pulse
-                      title:
-                        t: composerPop.options.backgroundRunning
-                        args:
-                          - $.daemon
-                      sub: t:composerPop.options.viewOperations
-                      act: wsTool
-                      args:
-                        k: ops
-                        view: daemon
-                      when:
-                        - $.daemon
-                        - of: $.kind
-                          map:
-                            people: true
-                            _: false
-                    - sec:
-                        t: composerPop.options.sec
-                        args:
-                          - $.find.count
-                      when:
-                        - $.find.done
-                        - $.find
-                        - $.results
-                    - from: "@results"
-                      item:
-                        title: "@snippet"
-                        sub:
-                          of: "@data.allThreads"
-                          map:
-                            "true":
-                              t: chat.findMessageMeta.true
-                              args:
-                                - "@data.name"
-                                - of: "@data.time"
-                                  fmt: hm
-                                - "@data.threadTitle"
-                            "false":
-                              t: chat.findMessageMeta.false
-                              args:
-                                - "@data.name"
-                                - of: "@data.time"
-                                  fmt: hm
-                                - "@data.threadTitle"
-                            _: "@data.allThreads"
-                        act: findOpen
-                        args:
-                          i: "@data.index"
-                        when: $.find
-                    - note:
-                        t: composerPop.options.noSearchMatch
-                        args:
-                          - $.find.q
-                      when:
-                        - - $.find.done
-                          - "!$.results"
-                        - $.find.q
-                    - from: "@sendModes"
-                      item:
-                        title:
-                          of: "@mode"
-                          map:
-                            queue: t:composer.sendMode.queue
-                            steer: t:queue.send.steerReply
-                            _: "@mode"
-                        sub:
-                          t: composer.sendModeHelp
+                - type: typed
+                  slot: chat.pop.list
+                  of: $.kind
+                  data: $.mention
+                  blocks:
+                    - type: opts
+                      from:
+                        - lead:
+                            glyph: users
+                          title: t:composerPop.options.groupChat
+                          sub: t:composerPop.options.sub
+                          cur: $.groupSelected
+                          act: set
                           args:
-                            - "@mode"
-                        cur: "@selected"
-                        act: set
-                        args:
-                          path: cs.sendMode
-                          v: "@mode"
-                        when:
-                          - of: $.kind
+                            path: cs.viewCat
+                            v: ""
+                            cast: "null"
+                          when:
+                            of: $.kind
                             map:
-                              plus: true
+                              people: true
                               _: false
-                          - of: $.subpage
-                            map:
-                              mode: true
-                              _: false
-                    - title: t:system.systemDefault
-                      cur: $.systemSelected
-                      act: pick
-                      args:
-                        path: cs.prefer
-                        none: "1"
-                      stay: true
-                      when:
-                        - of: $.kind
-                          map:
-                            plus: true
-                            _: false
-                        - of: $.subpage
-                          map:
-                            prefer: true
-                            _: false
-                    - from: $.members
-                      item:
-                        lead:
-                          who: "@id"
-                        title:
-                          of: "@id"
-                          fmt: identityHandle
-                        cur: "@selected"
-                        act: pick
-                        args:
-                          path: cs.prefer
-                          id: "@id"
-                        stay: true
-                        when:
-                          - of: $.kind
-                            map:
-                              plus: true
-                              _: false
-                          - of: $.subpage
-                            map:
-                              prefer: true
-                              _: false
-                    - from: $.members
-                      item:
-                        lead:
-                          who: "@id"
-                        title:
-                          of: "@id"
-                          fmt: identityHandle
-                        cur: "@selected"
-                        act: pick
-                        args:
-                          path: cs.whisperTo
-                          id: "@id"
-                        stay: true
-                        disabled: "@busy"
-                        why:
-                          of: "@busy"
-                          map:
-                            "true": t:chat.whisperWhy.true
-                            "false": ""
-                            _: "@busy"
-                        when:
-                          - of: $.kind
-                            map:
-                              plus: true
-                              _: false
-                          - of: $.subpage
-                            map:
-                              whisper: true
-                              _: false
-                    - lead:
-                        icon: game
-                        big: true
-                      title: t:composerPop.options.werewolf
-                      sub: t:composerPop.options.werewolfDescription
-                      chev: true
-                      act: popPage
-                      args:
-                        v: gameMode
-                      when:
-                        - of: $.kind
-                          map:
-                            plus: true
-                            _: false
-                        - of: $.subpage
-                          map:
-                            game: true
-                            _: false
-                    - title: t:gameLobby.mode.player
-                      act: modal
-                      args:
-                        v: lobby
-                        id: player
-                      when:
-                        - of: $.kind
-                          map:
-                            plus: true
-                            _: false
-                        - of: $.subpage
-                          map:
-                            gameMode: true
-                            _: false
-                    - title: t:composerPop.options.spectatorMode
-                      act: modal
-                      args:
-                        v: lobby
-                        id: t:composerPop.options.spectatorMode
-                      when:
-                        - of: $.kind
-                          map:
-                            plus: true
-                            _: false
-                        - of: $.subpage
-                          map:
-                            gameMode: true
-                            _: false
-                    - title: t:composerPop.options.deductionMode
-                      act: modal
-                      args:
-                        v: lobby
-                        id: t:composerPop.options.deductionMode
-                      when:
-                        - of: $.kind
-                          map:
-                            plus: true
-                            _: false
-                        - of: $.subpage
-                          map:
-                            gameMode: true
-                            _: false
-                    - title: t:composerPop.options.playerVoiceMode
-                      act: modal
-                      args:
-                        v: lobby
-                        id: t:composerPop.options.playerVoiceMode
-                      when:
-                        - of: $.kind
-                          map:
-                            plus: true
-                            _: false
-                        - of: $.subpage
-                          map:
-                            gameMode: true
-                            _: false
-                    - title: t:composerPop.options.spectatorVoiceMode
-                      act: modal
-                      args:
-                        v: lobby
-                        id: t:composerPop.options.spectatorVoiceMode
-                      when:
-                        - of: $.kind
-                          map:
-                            plus: true
-                            _: false
-                        - of: $.subpage
-                          map:
-                            gameMode: true
-                            _: false
-                    - lead:
-                        icon: file
-                        big: true
-                      title:
-                        t: composerPop.options.uploadAttachment
-                        args:
-                          - of: $.attachmentFull
-                            map:
-                              "true": t:chat.attachmentFull.true
-                              "false": ""
-                              _: $.attachmentFull
-                      act: cafeAttach
-                      disabled: $.attachmentFull
-                      when:
-                        - of: $.kind
-                          map:
-                            plus: true
-                            _: false
-                        - of: $.subpage
-                          map:
-                            main: true
-                            _: false
-                    - lead:
-                        icon: whisper
-                        big: true
-                      title: t:chat.inputPlaceholder.true
-                      act: cafeWhisper
-                      args:
-                        v: toggle
-                      cur: $.whisperOn
-                      when:
-                        - of: $.kind
-                          map:
-                            plus: true
-                            _: false
-                        - of: $.subpage
-                          map:
-                            main: true
-                            _: false
-                    - lead:
-                        icon: link
-                        big: true
-                      title: t:chatWelcome.quoteContext
-                      act: ctxPop
-                      when:
-                        - of: $.kind
-                          map:
-                            plus: true
-                            _: false
-                        - of: $.subpage
-                          map:
-                            main: true
-                            _: false
-                    - sep: 1
-                      when:
-                        - of: $.kind
-                          map:
-                            plus: true
-                            _: false
-                        - of: $.subpage
-                          map:
-                            main: true
-                            _: false
-                    - lead:
-                        icon: cat
-                        big: true
-                      title: t:composerPop.heading.defaultRecipients
-                      value:
-                        of:
-                          of: $.preferNames
-                          sep: 、
-                        map:
-                          "": t:system.systemDefault
-                          _:
-                            of: $.preferNames
-                            sep: 、
-                      chev: true
-                      act: popPage
-                      args:
-                        v: prefer
-                      when:
-                        - of: $.kind
-                          map:
-                            plus: true
-                            _: false
-                        - of: $.subpage
-                          map:
-                            main: true
-                            _: false
-                    - lead:
-                        icon: reply
-                        big: true
-                      title: t:composerPop.heading.sendMode
-                      value:
-                        of: $.sendMode
-                        map:
-                          queue: t:composer.sendMode.queue
-                          steer: t:queue.send.steerReply
-                          _: $.sendMode
-                      chev: true
-                      act: popPage
-                      args:
-                        v: mode
-                      when:
-                        - of: $.kind
-                          map:
-                            plus: true
-                            _: false
-                        - of: $.subpage
-                          map:
-                            main: true
-                            _: false
-                    - sep: 1
-                      when:
-                        - of: $.kind
-                          map:
-                            plus: true
-                            _: false
-                        - of: $.subpage
-                          map:
-                            main: true
-                            _: false
-                    - lead:
-                        icon: game
-                        big: true
-                      title: t:workbench.commands.games
-                      chev: true
-                      act: popPage
-                      args:
-                        v: game
-                      when:
-                        - of: $.kind
-                          map:
-                            plus: true
-                            _: false
-                        - of: $.subpage
-                          map:
-                            main: true
-                            _: false
-                    - from: $.members
-                      item:
-                        lead:
-                          who: "@id"
-                        title:
-                          of: "@id"
-                          fmt: identityHandle
-                        cur: "@selected"
-                        act: set
-                        args:
-                          path: cs.target
-                          v: "@id"
-                        when:
-                          of: $.kind
-                          map:
-                            target: true
-                            _: false
-                    - from: $.mentions
-                      item:
-                        lead:
-                          - who: "@who"
-                            when: "@who"
-                          - glyph: users
-                        title:
-                          of: "@kind"
-                          map:
-                            member: "@name"
-                            thread: "@name"
-                            all: "@name"
-                            breed:
-                              t: chat.mentionTitle.breed
-                              args:
-                                - "@name"
-                                - "@breed"
-                            _: "@kind"
-                        handle: "@handle"
-                        tag: "@carrier"
-                        sub:
-                          of: "@kind"
-                          map:
-                            thread:
-                              t: chat.mentionSub.thread
-                              args:
-                                - "@count"
-                                - "@breed"
-                                - "@model"
-                            all:
-                              t: chat.mentionSub.all
-                              args:
-                                - "@count"
-                                - "@breed"
-                                - "@model"
-                            breed:
-                              t: chat.mentionSub.breed
-                              args:
-                                - "@count"
-                                - "@breed"
-                                - "@model"
-                            member:
-                              of: "@meta"
-                              sep: " · "
-                            _: "@kind"
-                        sel: "@selected"
-                        act: cafeTypedPick
-                        args:
-                          i: "@index"
-                          text:
-                            of: "@kind"
-                            map:
-                              member: "@ins"
-                              thread: "@ins"
-                              all: "@ins"
-                              breed:
-                                t: chat.mentionTitle.breed
-                                args:
-                                  - "@ins"
-                                  - "@breed"
-                              _: "@kind"
-                        when:
-                          of: $.kind
-                          map:
-                            mention: true
-                            _: false
-                    - from: $.contexts
-                      item:
-                        - sec:
-                            of:
-                              of: "@section"
+                        - from: $.members
+                          item:
+                            lead:
+                              who: "@id"
+                            title: "@name"
+                            handle: "@handle"
+                            sub:
+                              of: "@state"
                               map:
-                                FILE:
-                                  of: $.query.length
-                                  gte: 1
+                                reply:
+                                  t: chat.peopleState.reply
+                                  args:
+                                    - of: "@state"
+                                      map:
+                                        reply:
+                                          of: "@what"
+                                          slice:
+                                            - 0
+                                            - 14
+                                        command:
+                                          t: wsLive.status.state
+                                          args:
+                                            - true
+                                            - t: wsLive.activity
+                                              args:
+                                                - "@what"
+                                        _: "@what"
+                                command:
+                                  of: "@state"
                                   map:
-                                    "true": FILE
-                                    _:
-                                      of: $.contextFilter.length
+                                    reply:
+                                      of: "@what"
+                                      slice:
+                                        - 0
+                                        - 14
+                                    command:
+                                      t: wsLive.status.state
+                                      args:
+                                        - true
+                                        - t: wsLive.activity
+                                          args:
+                                            - "@what"
+                                    _: "@what"
+                                presence:
+                                  of: "@state"
+                                  map:
+                                    reply:
+                                      of: "@what"
+                                      slice:
+                                        - 0
+                                        - 14
+                                    command:
+                                      t: wsLive.status.state
+                                      args:
+                                        - true
+                                        - t: wsLive.activity
+                                          args:
+                                            - "@what"
+                                    _: "@what"
+                                idle:
+                                  t: chat.peopleState.idle
+                                  args:
+                                    - of: "@state"
+                                      map:
+                                        reply:
+                                          of: "@what"
+                                          slice:
+                                            - 0
+                                            - 14
+                                        command:
+                                          t: wsLive.status.state
+                                          args:
+                                            - true
+                                            - t: wsLive.activity
+                                              args:
+                                                - "@what"
+                                        _: "@what"
+                                _: "@state"
+                            subTone:
+                              of: "@executing"
+                              map:
+                                "true": run
+                                "false": "@presenceTone"
+                                _: "@executing"
+                            cur: "@selected"
+                            act: set
+                            args:
+                              path: cs.viewCat
+                              v: "@id"
+                            when:
+                              of: $.kind
+                              map:
+                                people: true
+                                _: false
+                        - sep: 1
+                          when:
+                            - $.daemon
+                            - of: $.kind
+                              map:
+                                people: true
+                                _: false
+                        - lead:
+                            icon: pulse
+                          title:
+                            t: composerPop.options.backgroundRunning
+                            args:
+                              - $.daemon
+                          sub: t:composerPop.options.viewOperations
+                          act: wsTool
+                          args:
+                            k: ops
+                            view: daemon
+                          when:
+                            - $.daemon
+                            - of: $.kind
+                              map:
+                                people: true
+                                _: false
+                        - sec:
+                            t: composerPop.options.sec
+                            args:
+                              - $.find.count
+                          when:
+                            - $.find.done
+                            - $.find
+                            - $.results
+                        - from: "@results"
+                          item:
+                            title: "@snippet"
+                            sub:
+                              of: "@data.allThreads"
+                              map:
+                                "true":
+                                  t: chat.findMessageMeta.true
+                                  args:
+                                    - "@data.name"
+                                    - of: "@data.time"
+                                      fmt: hm
+                                    - "@data.threadTitle"
+                                "false":
+                                  t: chat.findMessageMeta.false
+                                  args:
+                                    - "@data.name"
+                                    - of: "@data.time"
+                                      fmt: hm
+                                    - "@data.threadTitle"
+                                _: "@data.allThreads"
+                            act: findOpen
+                            args:
+                              i: "@data.index"
+                            when: $.find
+                        - note:
+                            t: composerPop.options.noSearchMatch
+                            args:
+                              - $.find.q
+                          when:
+                            - - $.find.done
+                              - "!$.results"
+                            - $.find.q
+                        - from: "@sendModes"
+                          item:
+                            title:
+                              of: "@mode"
+                              map:
+                                queue: t:composer.sendMode.queue
+                                steer: t:queue.send.steerReply
+                                _: "@mode"
+                            sub:
+                              t: composer.sendModeHelp
+                              args:
+                                - "@mode"
+                            cur: "@selected"
+                            act: set
+                            args:
+                              path: cs.sendMode
+                              v: "@mode"
+                            when:
+                              - of: $.kind
+                                map:
+                                  plus: true
+                                  _: false
+                              - of: $.subpage
+                                map:
+                                  mode: true
+                                  _: false
+                        - title: t:system.systemDefault
+                          cur: $.systemSelected
+                          act: pick
+                          args:
+                            path: cs.prefer
+                            none: "1"
+                          stay: true
+                          when:
+                            - of: $.kind
+                              map:
+                                plus: true
+                                _: false
+                            - of: $.subpage
+                              map:
+                                prefer: true
+                                _: false
+                        - from: $.members
+                          item:
+                            lead:
+                              who: "@id"
+                            title:
+                              of: "@id"
+                              fmt: identityHandle
+                            cur: "@selected"
+                            act: pick
+                            args:
+                              path: cs.prefer
+                              id: "@id"
+                            stay: true
+                            when:
+                              - of: $.kind
+                                map:
+                                  plus: true
+                                  _: false
+                              - of: $.subpage
+                                map:
+                                  prefer: true
+                                  _: false
+                        - from: $.members
+                          item:
+                            lead:
+                              who: "@id"
+                            title:
+                              of: "@id"
+                              fmt: identityHandle
+                            cur: "@selected"
+                            act: pick
+                            args:
+                              path: cs.whisperTo
+                              id: "@id"
+                            stay: true
+                            disabled: "@busy"
+                            why:
+                              of: "@busy"
+                              map:
+                                "true": t:chat.whisperWhy.true
+                                "false": ""
+                                _: "@busy"
+                            when:
+                              - of: $.kind
+                                map:
+                                  plus: true
+                                  _: false
+                              - of: $.subpage
+                                map:
+                                  whisper: true
+                                  _: false
+                        - lead:
+                            icon: game
+                            big: true
+                          title: t:composerPop.options.werewolf
+                          sub: t:composerPop.options.werewolfDescription
+                          chev: true
+                          act: popPage
+                          args:
+                            v: gameMode
+                          when:
+                            - of: $.kind
+                              map:
+                                plus: true
+                                _: false
+                            - of: $.subpage
+                              map:
+                                game: true
+                                _: false
+                        - title: t:gameLobby.mode.player
+                          act: modal
+                          args:
+                            v: lobby
+                            id: player
+                          when:
+                            - of: $.kind
+                              map:
+                                plus: true
+                                _: false
+                            - of: $.subpage
+                              map:
+                                gameMode: true
+                                _: false
+                        - title: t:composerPop.options.spectatorMode
+                          act: modal
+                          args:
+                            v: lobby
+                            id: t:composerPop.options.spectatorMode
+                          when:
+                            - of: $.kind
+                              map:
+                                plus: true
+                                _: false
+                            - of: $.subpage
+                              map:
+                                gameMode: true
+                                _: false
+                        - title: t:composerPop.options.deductionMode
+                          act: modal
+                          args:
+                            v: lobby
+                            id: t:composerPop.options.deductionMode
+                          when:
+                            - of: $.kind
+                              map:
+                                plus: true
+                                _: false
+                            - of: $.subpage
+                              map:
+                                gameMode: true
+                                _: false
+                        - title: t:composerPop.options.playerVoiceMode
+                          act: modal
+                          args:
+                            v: lobby
+                            id: t:composerPop.options.playerVoiceMode
+                          when:
+                            - of: $.kind
+                              map:
+                                plus: true
+                                _: false
+                            - of: $.subpage
+                              map:
+                                gameMode: true
+                                _: false
+                        - title: t:composerPop.options.spectatorVoiceMode
+                          act: modal
+                          args:
+                            v: lobby
+                            id: t:composerPop.options.spectatorVoiceMode
+                          when:
+                            - of: $.kind
+                              map:
+                                plus: true
+                                _: false
+                            - of: $.subpage
+                              map:
+                                gameMode: true
+                                _: false
+                        - lead:
+                            icon: file
+                            big: true
+                          title:
+                            t: composerPop.options.uploadAttachment
+                            args:
+                              - of: $.attachmentFull
+                                map:
+                                  "true": t:chat.attachmentFull.true
+                                  "false": ""
+                                  _: $.attachmentFull
+                          act: cafeAttach
+                          disabled: $.attachmentFull
+                          when:
+                            - of: $.kind
+                              map:
+                                plus: true
+                                _: false
+                            - of: $.subpage
+                              map:
+                                main: true
+                                _: false
+                        - lead:
+                            icon: whisper
+                            big: true
+                          title: t:chat.inputPlaceholder.true
+                          act: cafeWhisper
+                          args:
+                            v: toggle
+                          cur: $.whisperOn
+                          when:
+                            - of: $.kind
+                              map:
+                                plus: true
+                                _: false
+                            - of: $.subpage
+                              map:
+                                main: true
+                                _: false
+                        - lead:
+                            icon: link
+                            big: true
+                          title: t:chatWelcome.quoteContext
+                          act: ctxPop
+                          when:
+                            - of: $.kind
+                              map:
+                                plus: true
+                                _: false
+                            - of: $.subpage
+                              map:
+                                main: true
+                                _: false
+                        - sep: 1
+                          when:
+                            - of: $.kind
+                              map:
+                                plus: true
+                                _: false
+                            - of: $.subpage
+                              map:
+                                main: true
+                                _: false
+                        - lead:
+                            icon: cat
+                            big: true
+                          title: t:composerPop.heading.defaultRecipients
+                          value:
+                            of:
+                              of: $.preferNames
+                              sep: 、
+                            map:
+                              "": t:system.systemDefault
+                              _:
+                                of: $.preferNames
+                                sep: 、
+                          chev: true
+                          act: popPage
+                          args:
+                            v: prefer
+                          when:
+                            - of: $.kind
+                              map:
+                                plus: true
+                                _: false
+                            - of: $.subpage
+                              map:
+                                main: true
+                                _: false
+                        - lead:
+                            icon: reply
+                            big: true
+                          title: t:composerPop.heading.sendMode
+                          value:
+                            of: $.sendMode
+                            map:
+                              queue: t:composer.sendMode.queue
+                              steer: t:queue.send.steerReply
+                              _: $.sendMode
+                          chev: true
+                          act: popPage
+                          args:
+                            v: mode
+                          when:
+                            - of: $.kind
+                              map:
+                                plus: true
+                                _: false
+                            - of: $.subpage
+                              map:
+                                main: true
+                                _: false
+                        - sep: 1
+                          when:
+                            - of: $.kind
+                              map:
+                                plus: true
+                                _: false
+                            - of: $.subpage
+                              map:
+                                main: true
+                                _: false
+                        - lead:
+                            icon: game
+                            big: true
+                          title: t:workbench.commands.games
+                          chev: true
+                          act: popPage
+                          args:
+                            v: game
+                          when:
+                            - of: $.kind
+                              map:
+                                plus: true
+                                _: false
+                            - of: $.subpage
+                              map:
+                                main: true
+                                _: false
+                        - from: $.members
+                          item:
+                            lead:
+                              who: "@id"
+                            title:
+                              of: "@id"
+                              fmt: identityHandle
+                            cur: "@selected"
+                            act: set
+                            args:
+                              path: cs.target
+                              v: "@id"
+                            when:
+                              of: $.kind
+                              map:
+                                target: true
+                                _: false
+                        - from: $.mentions
+                          item:
+                            lead:
+                              - who: "@who"
+                                when: "@who"
+                              - glyph: users
+                            title:
+                              of: "@kind"
+                              map:
+                                member: "@name"
+                                thread: "@name"
+                                all: "@name"
+                                breed:
+                                  t: chat.mentionTitle.breed
+                                  args:
+                                    - "@name"
+                                    - "@breed"
+                                _: "@kind"
+                            handle: "@handle"
+                            tag: "@carrier"
+                            sub:
+                              of: "@kind"
+                              map:
+                                thread:
+                                  t: chat.mentionSub.thread
+                                  args:
+                                    - "@count"
+                                    - "@breed"
+                                    - "@model"
+                                all:
+                                  t: chat.mentionSub.all
+                                  args:
+                                    - "@count"
+                                    - "@breed"
+                                    - "@model"
+                                breed:
+                                  t: chat.mentionSub.breed
+                                  args:
+                                    - "@count"
+                                    - "@breed"
+                                    - "@model"
+                                member:
+                                  of: "@meta"
+                                  sep: " · "
+                                _: "@kind"
+                            sel: "@selected"
+                            act: cafeTypedPick
+                            args:
+                              i: "@index"
+                              text:
+                                of: "@kind"
+                                map:
+                                  member: "@ins"
+                                  thread: "@ins"
+                                  all: "@ins"
+                                  breed:
+                                    t: chat.mentionTitle.breed
+                                    args:
+                                      - "@ins"
+                                      - "@breed"
+                                  _: "@kind"
+                            when:
+                              of: $.kind
+                              map:
+                                mention: true
+                                _: false
+                        - from: $.contexts
+                          item:
+                            - sec:
+                                of:
+                                  of: "@section"
+                                  map:
+                                    FILE:
+                                      of: $.query.length
                                       gte: 1
                                       map:
                                         "true": FILE
-                                        _: currentFiles
-                                _: "@section"
-                            map:
-                              THREAD: t:common.threads
-                              FILE: t:chat.contextSection.FILE
-                              work: t:common.works
-                              currentFiles: t:composerPop.options.openFiles
-                              _:
-                                of: "@section"
+                                        _:
+                                          of: $.contextFilter.length
+                                          gte: 1
+                                          map:
+                                            "true": FILE
+                                            _: currentFiles
+                                    _: "@section"
                                 map:
-                                  FILE:
-                                    of: $.query.length
-                                    gte: 1
+                                  THREAD: t:common.threads
+                                  FILE: t:chat.contextSection.FILE
+                                  work: t:common.works
+                                  currentFiles: t:composerPop.options.openFiles
+                                  _:
+                                    of: "@section"
                                     map:
-                                      "true": FILE
-                                      _:
-                                        of: $.contextFilter.length
+                                      FILE:
+                                        of: $.query.length
                                         gte: 1
                                         map:
                                           "true": FILE
-                                          _: currentFiles
-                                  _: "@section"
-                          when:
-                            - "@section"
-                            - of: $.kind
-                              map:
-                                ctx: true
-                                _: false
-                        - lead:
-                            - icon: chat
+                                          _:
+                                            of: $.contextFilter.length
+                                            gte: 1
+                                            map:
+                                              "true": FILE
+                                              _: currentFiles
+                                      _: "@section"
                               when:
+                                - "@section"
+                                - of: $.kind
+                                  map:
+                                    ctx: true
+                                    _: false
+                            - lead:
+                                - icon: chat
+                                  when:
+                                    of: "@kind"
+                                    map:
+                                      THREAD: true
+                                      _: false
+                                - icon: file
+                              title:
                                 of: "@kind"
                                 map:
-                                  THREAD: true
-                                  _: false
-                            - icon: file
-                          title:
-                            of: "@kind"
-                            map:
-                              FILE:
-                                of: "@title"
-                                fmt: basename
-                              _: "@title"
-                          sub:
-                            of: "@kind"
-                            map:
-                              THREAD:
-                                of: "@kind"
-                                map:
-                                  THREAD:
-                                    t: chat.threadRef
-                                    args:
-                                      - "@sub"
-                                  _: "@sub"
-                              FILE:
+                                  FILE:
+                                    of: "@title"
+                                    fmt: basename
+                                  _: "@title"
+                              sub:
                                 of: "@kind"
                                 map:
                                   THREAD:
-                                    t: chat.threadRef
-                                    args:
-                                      - "@sub"
-                                  _: "@sub"
-                              work:
-                                t: chat.cardLabel.workref
-                                args:
-                                  - of: "@kind"
+                                    of: "@kind"
                                     map:
                                       THREAD:
                                         t: chat.threadRef
                                         args:
                                           - "@sub"
                                       _: "@sub"
-                                  - "@version"
-                              _: "@kind"
-                          subMono: "@sub"
-                          sel: "@selected"
-                          act: cafeTypedPick
-                          args:
-                            i: "@index"
-                          when:
-                            of: $.kind
-                            map:
-                              ctx: true
-                              _: false
-                    - from: $.commands
-                      item:
-                        - sec:
-                            of:
-                              of: "@section"
-                              map:
-                                FILE:
-                                  of: $.query.length
-                                  gte: 1
+                                  FILE:
+                                    of: "@kind"
+                                    map:
+                                      THREAD:
+                                        t: chat.threadRef
+                                        args:
+                                          - "@sub"
+                                      _: "@sub"
+                                  work:
+                                    t: chat.cardLabel.workref
+                                    args:
+                                      - of: "@kind"
+                                        map:
+                                          THREAD:
+                                            t: chat.threadRef
+                                            args:
+                                              - "@sub"
+                                          _: "@sub"
+                                      - "@version"
+                                  _: "@kind"
+                              subMono: "@sub"
+                              sel: "@selected"
+                              act: cafeTypedPick
+                              args:
+                                i: "@index"
+                              when:
+                                of: $.kind
+                                map:
+                                  ctx: true
+                                  _: false
+                        - from: $.commands
+                          item:
+                            - sec:
+                                of:
+                                  of: "@section"
                                   map:
-                                    "true": FILE
-                                    _:
-                                      of: $.contextFilter.length
+                                    FILE:
+                                      of: $.query.length
                                       gte: 1
                                       map:
                                         "true": FILE
-                                        _: currentFiles
-                                _: "@section"
-                            map:
-                              general: t:system.general
-                              memory: t:common.memory
-                              knowledge: t:workbench.commands.knowledgeLibrary
-                              signals: t:chat.commands.group.signals
-                              tasks: t:system.tasks
-                              vote: t:workbench.commands.vote
-                              game: t:workbench.commands.games
-                              quote: t:composerPop.quote
-                              _:
-                                of: "@section"
+                                        _:
+                                          of: $.contextFilter.length
+                                          gte: 1
+                                          map:
+                                            "true": FILE
+                                            _: currentFiles
+                                    _: "@section"
                                 map:
-                                  FILE:
-                                    of: $.query.length
-                                    gte: 1
+                                  general: t:system.general
+                                  memory: t:common.memory
+                                  knowledge: t:workbench.commands.knowledgeLibrary
+                                  signals: t:chat.commands.group.signals
+                                  tasks: t:system.tasks
+                                  vote: t:workbench.commands.vote
+                                  game: t:workbench.commands.games
+                                  quote: t:composerPop.quote
+                                  _:
+                                    of: "@section"
                                     map:
-                                      "true": FILE
-                                      _:
-                                        of: $.contextFilter.length
+                                      FILE:
+                                        of: $.query.length
                                         gte: 1
                                         map:
                                           "true": FILE
-                                          _: currentFiles
-                                  _: "@section"
+                                          _:
+                                            of: $.contextFilter.length
+                                            gte: 1
+                                            map:
+                                              "true": FILE
+                                              _: currentFiles
+                                      _: "@section"
+                              when:
+                                - "@section"
+                                - of: $.kind
+                                  map:
+                                    slash: true
+                                    _: false
+                            - title: "@command"
+                              mono: true
+                              sub:
+                                of: "@command"
+                                map:
+                                  /help: t:chat.commands.description./help
+                                  /config: t:chat.commands.description./config
+                                  /config set: t:chat.commands.description./config set
+                                  /remember: t:chat.commands.description./remember
+                                  /recall: t:chat.commands.description./recall
+                                  /approve: t:chat.commands.description./approve
+                                  /archive: t:chat.commands.description./archive
+                                  /evidence: t:chat.commands.description./evidence
+                                  /reflect: t:chat.commands.description./reflect
+                                  /tasks extract: t:chat.commands.description./tasks extract
+                                  /vote: t:chat.commands.description./vote
+                                  /game werewolf: t:workbench.commands.startWerewolf
+                                  /signals: inbox · search · sources · stats
+                                  /thread: t:chat.commands.description./thread
+                                  /file: t:chat.commands.description./file
+                                  _: "@command"
+                              sel: "@selected"
+                              act: cafeTypedPick
+                              args:
+                                i: "@index"
+                              when:
+                                of: $.kind
+                                map:
+                                  slash: true
+                                  _: false
+                        - from: $.paths
+                          item:
+                            lead:
+                              icon: folder
+                            title: "@path"
+                            mono: true
+                            sel: "@selected"
+                            act: cafeTypedPick
+                            args:
+                              i: "@index"
+                            when:
+                              of: $.kind
+                              map:
+                                path: true
+                                _: false
+                        - note:
+                            t: composerPop.options.annotation
+                            args:
+                              - $.comment
                           when:
-                            - "@section"
+                            - $.comment
                             - of: $.kind
                               map:
-                                slash: true
+                                ref: true
                                 _: false
-                        - title: "@command"
-                          mono: true
-                          sub:
-                            of: "@command"
-                            map:
-                              /help: t:chat.commands.description./help
-                              /config: t:chat.commands.description./config
-                              /config set: t:chat.commands.description./config set
-                              /remember: t:chat.commands.description./remember
-                              /recall: t:chat.commands.description./recall
-                              /approve: t:chat.commands.description./approve
-                              /archive: t:chat.commands.description./archive
-                              /evidence: t:chat.commands.description./evidence
-                              /reflect: t:chat.commands.description./reflect
-                              /tasks extract: t:chat.commands.description./tasks extract
-                              /vote: t:chat.commands.description./vote
-                              /game werewolf: t:workbench.commands.startWerewolf
-                              /signals: inbox · search · sources · stats
-                              /thread: t:chat.commands.description./thread
-                              /file: t:chat.commands.description./file
-                              _: "@command"
-                          sel: "@selected"
-                          act: cafeTypedPick
-                          args:
-                            i: "@index"
-                          when:
-                            of: $.kind
-                            map:
-                              slash: true
-                              _: false
-                    - from: $.paths
-                      item:
-                        lead:
-                          icon: folder
-                        title: "@path"
-                        mono: true
-                        sel: "@selected"
-                        act: cafeTypedPick
-                        args:
-                          i: "@index"
-                        when:
-                          of: $.kind
-                          map:
-                            path: true
-                            _: false
-                    - note:
-                        t: composerPop.options.annotation
-                        args:
-                          - $.comment
-                      when:
-                        - $.comment
-                        - of: $.kind
-                          map:
-                            ref: true
-                            _: false
-                  empty:
-                    of: $.kind
-                    map:
-                      people: ""
-                      find: ""
-                      plus: ""
-                      target: ""
-                      ref: ""
-                      projPick: ""
-                      projView: ""
-                      textsel: ""
-                      voice: ""
-                      delivery: ""
-                      mention: t:chat.popEmpty.mention
-                      ctx: t:chat.popEmpty.ctx
-                      slash: t:chat.popEmpty.slash
-                      path: t:chat.popEmpty.path
-                      plus.main: t:composer.addContent
-                      plus.mode: t:composerPop.heading.sendMode
-                      plus.prefer: t:composerPop.heading.defaultRecipients
-                      plus.whisper: t:composerPop.heading.whisperTarget
-                      plus.game: t:workbench.commands.games
-                      plus.gameMode: t:composerPop.heading.participationMode
-                      projPick.browse: t:composerPop.heading.browse
-                      _: $.kind
+                      empty:
+                        of: $.kind
+                        map:
+                          people: ""
+                          find: ""
+                          plus: ""
+                          target: ""
+                          ref: ""
+                          projPick: ""
+                          projView: ""
+                          textsel: ""
+                          voice: ""
+                          delivery: ""
+                          mention: t:chat.popEmpty.mention
+                          ctx: t:chat.popEmpty.ctx
+                          slash: t:chat.popEmpty.slash
+                          path: t:chat.popEmpty.path
+                          plus.main: t:composer.addContent
+                          plus.mode: t:composerPop.heading.sendMode
+                          plus.prefer: t:composerPop.heading.defaultRecipients
+                          plus.whisper: t:composerPop.heading.whisperTarget
+                          plus.game: t:workbench.commands.games
+                          plus.gameMode: t:composerPop.heading.participationMode
+                          projPick.browse: t:composerPop.heading.browse
+                          _: $.kind
             - type: toolbar
               when: $.whisper
               items:

@@ -339,17 +339,20 @@ export function useMessageSourceBindings(data: ChatData, needed: boolean | numbe
     const read = async () => {
       clearTimeout(timer);
       if (document.hidden) return;
-      const values = await Promise.all(
-        ids.map(
-          async (id) =>
-            [
-              id,
-              await request<HoldRead>(`/api/callbacks/hold-ball/${encodeURIComponent(id)}/status`, {
-                signal: abort.signal,
-              }),
-            ] as const,
-        ),
-      );
+      // Each hold is read on its own: a task the server no longer has (404) is only missing, the others still show.
+      const values = (
+        await Promise.allSettled(
+          ids.map(
+            async (id) =>
+              [
+                id,
+                await request<HoldRead>(`/api/callbacks/hold-ball/${encodeURIComponent(id)}/status`, {
+                  signal: abort.signal,
+                }),
+              ] as const,
+          ),
+        )
+      ).flatMap((r) => (r.status === 'fulfilled' ? [r.value] : []));
       if (abort.signal.aborted) return;
       records.current = { ...records.current, holds: Object.fromEntries(values) };
       changed((n) => n + 1);

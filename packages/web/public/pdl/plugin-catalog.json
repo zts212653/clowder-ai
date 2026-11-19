@@ -137,6 +137,13 @@
    "scope": "page"
   },
   {
+   "id": "chat.pop.list",
+   "parent": null,
+   "accepts": "*",
+   "display": null,
+   "scope": "page"
+  },
+  {
    "id": "chat.tool.result",
    "parent": null,
    "accepts": "*",
@@ -934,6 +941,7 @@
    "span": [
     "full"
    ],
+   "rows": "binding",
    "form": "binding",
    "error": "binding",
    "actions": "binding",
@@ -1061,6 +1069,9 @@
    ],
    "order": "binding",
    "partial": "binding",
+   "reverse": [
+    "true"
+   ],
    "row": "binding",
    "rows": "binding",
    "scroll": "binding",
@@ -1273,6 +1284,7 @@
    "slot": "binding"
   },
   "split": {
+   "back": "binding",
    "left": "binding",
    "picked": "binding",
    "right": "binding",
