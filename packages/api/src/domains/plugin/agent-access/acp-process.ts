@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { PassThrough, Readable } from 'node:stream';
-import { AGENT_ACCESS_PLUGIN_ID } from '@clowder-ai/agent-contract';
+import { AGENT_ACCESS_ACP_SESSION_ACTION, AGENT_ACCESS_PLUGIN_ID } from '@clowder-ai/agent-contract';
 import type { AgentAccessAcpProcessTermination, AgentAccessAcpSessionOperation } from '@clowder-ai/agent-contract/acp';
 import { z } from 'zod';
 import {
@@ -106,7 +106,7 @@ export function createAgentAccessAcpProcess(
       initialize: () => invoke('initialize'),
       async session(operation: BoundSessionOperation) {
         signal.throwIfAborted();
-        return runtime.invoke(pluginInstanceId, 'acpSession', { ...operation, processId });
+        return runtime.invoke(pluginInstanceId, AGENT_ACCESS_ACP_SESSION_ACTION, { ...operation, processId });
       },
       async close() {
         try {

@@ -1,4 +1,5 @@
 import {
+  AGENT_ACCESS_ACP_SESSION_ACTION,
   type AgentAccessA2ASubmit,
   type AgentAccessA2ATurn,
   type AgentAccessDiscoveryHost,
@@ -47,7 +48,7 @@ export default {
         return {
           actions: {
             acpProcess: acpProcesses.acpProcess,
-            acpSession: acpProcesses.acpSession,
+            [AGENT_ACCESS_ACP_SESSION_ACTION]: acpProcesses.acpSession,
             configure(input: unknown) {
               if (input && typeof input === 'object' && 'operation' in input) {
                 const request = agentAccessNativeLaunchRequestSchema.parse(input);

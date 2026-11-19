@@ -8,7 +8,11 @@ import { Readable } from 'node:stream';
 import { test } from 'node:test';
 import { setTimeout as wait } from 'node:timers/promises';
 import { roleConfigurationRevision } from '@clowder-ai/agent-access/roles/write-role';
-import { AGENT_ACCESS_OPERATIONS, OFFICIAL_AGENT_ACCESS_OPERATIONS } from '@clowder-ai/agent-contract';
+import {
+  AGENT_ACCESS_ACP_SESSION_ACTION,
+  AGENT_ACCESS_OPERATIONS,
+  OFFICIAL_AGENT_ACCESS_OPERATIONS,
+} from '@clowder-ai/agent-contract';
 import { validateManifest } from '@clowder-ai/plugin-contract';
 import Fastify from 'fastify';
 import { A2AAgentService } from '../dist/domains/cats/services/agents/providers/A2AAgentService.js';
@@ -439,7 +443,7 @@ test('Agent access discovery executes the same standalone entrypoint from a Mana
   const attachAcp = createAgentAccessAcpProcess(runtime.inventoryStore, {
     nativeActions: runtime.supervisor.nativeActions,
     async invoke(instanceId, method, input) {
-      if (method === 'acpSession') {
+      if (method === AGENT_ACCESS_ACP_SESSION_ACTION) {
         acpCommands.push(input.operation);
         const crossing = JSON.stringify(input);
         assert.equal(crossing.includes(mcpSecret), false);
@@ -450,8 +454,12 @@ test('Agent access discovery executes the same standalone entrypoint from a Mana
         }
       }
       const result = await runtime.supervisor.invoke(instanceId, method, input);
-      if (method === 'acpSession' && input.operation === 'cancel') workerCancelReturned.resolve();
-      if (method === 'acpSession' && input.operation === 'cancel' && input.sessionId === 'fixture-early-stop') {
+      if (method === AGENT_ACCESS_ACP_SESSION_ACTION && input.operation === 'cancel') workerCancelReturned.resolve();
+      if (
+        method === AGENT_ACCESS_ACP_SESSION_ACTION &&
+        input.operation === 'cancel' &&
+        input.sessionId === 'fixture-early-stop'
+      ) {
         earlyCancelReturned.resolve();
       }
       return result;
@@ -762,6 +770,14 @@ test('Agent access discovery executes the same standalone entrypoint from a Mana
 
   await assert.rejects(install(incompatible), /Agent access protocol version/);
   await assert.rejects(install(obsolete), /missing operations .*selectAcpModel/);
+  const previousAcpWire = await archive(
+    '1.0.6',
+    1,
+    OFFICIAL_AGENT_ACCESS_OPERATIONS.map((method) =>
+      method === AGENT_ACCESS_ACP_SESSION_ACTION ? 'acpSession' : method,
+    ),
+  );
+  await assert.rejects(install(previousAcpWire), /missing operations .*acpSessionV2/);
   assert.equal((await manager.get(pluginId)).plugin.installedVersion, '1.0.0');
   assert.equal((await scan()).readiness.state, 'ready');
 
