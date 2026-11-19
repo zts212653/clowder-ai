@@ -84,15 +84,23 @@ export async function* observeAgyNativeTurn(
       // These fields can admit native recovery or publication. Verify them against the original carrier evidence.
       const native = summarizeAgyStreamJsonTurn(lines, terminalPolicyRejected);
       const evidence = (result: AgyStreamJsonTurn) => ({
-        outcome: result.outcome,
-        toolCalls: result.toolCalls,
-        deniedActions: result.deniedActions,
+        deniedActions: result.deniedActions.map(({ action }) => action),
+        tools: result.toolCalls.map((call) => ({
+          stepIndex: call.stepIndex,
+          toolName: call.toolName,
+          state: call.state,
+          completedOnce: call.completedOnce,
+          failure: call.errorMessage,
+          failedWithOutput: call.errorMessage !== null && call.output !== '',
+          imageName: call.toolName === 'generate_image' ? call.parameters.ImageName : undefined,
+        })),
         completedResponseStep: result.completedResponseStep,
         completedCompactionStep: result.completedCompactionStep,
         recoveredErrorSteps: result.recoveredErrorSteps,
         stepsComplete: result.stepsComplete,
         sessionTurnCount: result.sessionTurnCount,
-        unknownEvents: result.unknownEvents,
+        unknownEvents: result.unknownEvents.length,
+        authoritativeOutcome: result.outcome === 'denied' || nativeStatus !== 'SUCCESS' ? result.outcome : undefined,
       });
       if (!isDeepStrictEqual(evidence(turn), evidence(native))) throw new Error('invalid_agy_native_terminal_evidence');
     }
@@ -168,7 +176,7 @@ export async function* observeAgyNativeTurn(
       const result = asRecord(record.result);
       const error = result?.error;
       nativeStatus = typeof result?.status === 'string' ? result.status : 'UNKNOWN';
-      nativeHasResponse = typeof result?.response === 'string';
+      nativeHasResponse = typeof result?.response === 'string' && result.response.trim().length > 0;
       nativeHasDenials = result?.denied_actions !== undefined;
       terminalPolicyRejected = typeof error === 'string' && agyTerminalPolicyRejected(error);
       resultCount++;
