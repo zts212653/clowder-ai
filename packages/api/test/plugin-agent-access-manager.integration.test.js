@@ -137,6 +137,16 @@ test('Agent access discovery executes the same standalone entrypoint from a Mana
     agentRoleRead: createAgentRoleRead(runtime.inventoryStore, runtime.supervisor),
     agentRoleWrite: createAgentRoleWrite(runtime.inventoryStore, runtime.supervisor),
   });
+  const catalogPath = join(projectRoot, '.cat-cafe', 'cat-catalog.json');
+  const coldMembers = await app.inject({
+    method: 'GET',
+    url: '/api/cats',
+    headers: { host: 'localhost:3004', 'X-Cat-Cafe-User': owner },
+    remoteAddress: '127.0.0.1',
+  });
+  assert.equal(coldMembers.statusCode, 200, coldMembers.payload);
+  assert.deepEqual(coldMembers.json().cats, []);
+  await assert.rejects(readFile(catalogPath), { code: 'ENOENT' });
   const scan = async () => {
     const result = await app.inject({
       method: 'POST',
@@ -1012,7 +1022,6 @@ test('Agent access discovery executes the same standalone entrypoint from a Mana
   };
   await invoke('before replacement');
 
-  const catalogPath = join(projectRoot, '.cat-cafe', 'cat-catalog.json');
   const readCatalog = async () => JSON.parse(await readFile(catalogPath, 'utf8'));
   const request = {
     kind: 'create',

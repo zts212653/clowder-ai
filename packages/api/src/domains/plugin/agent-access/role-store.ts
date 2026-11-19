@@ -83,7 +83,11 @@ export function createAgentAccessRoleStore(
     async readCatalog() {
       const owner = await authorize('read');
       const template = resolveProjectTemplatePath(projectRoot);
-      const { source, stored } = readRoleCatalogSnapshot(projectRoot, template, owner.operation === 'write');
+      const { source, stored } = readRoleCatalogSnapshot(
+        projectRoot,
+        template,
+        owner.operation === 'write' ? 'write' : 'read',
+      );
       const revision = digest(stored);
       if (owner.operation === 'write') return { source, revision };
       const resolved = loadRuntimeCatConfig(template);
@@ -98,14 +102,16 @@ export function createAgentAccessRoleStore(
         const stored = readStoredCatCatalog(projectRoot);
         if (digest(stored) !== revision) return 'conflict';
         const template = resolveProjectTemplatePath(projectRoot);
-        const current = projectRoleCatalog(stored?.toString('utf8') ?? null, readRoleCatalogTemplate(template), true);
+        const roleTemplate = readRoleCatalogTemplate(template);
+        const current = projectRoleCatalog(stored?.toString('utf8') ?? null, roleTemplate, true);
         const currentSource = current.source;
-        const next = parseRawCatConfig(source);
+        const nextSource = projectRoleCatalog(source, roleTemplate, false).source;
+        const next = parseRawCatConfig(nextSource);
         if (change.catId && (change.kind === 'create' || change.kind === 'update')) {
           const previous = change.kind === 'update' ? parseRawCatConfig(currentSource) : undefined;
           if (isDeclaredAgentProviderAvailable) {
             const selected = catalogProvider(
-              parseRawCatConfig(mergeRuntimeCatalogSnapshot(template, source).raw),
+              parseRawCatConfig(mergeRuntimeCatalogSnapshot(template, nextSource).raw),
               change.catId,
             );
             if (selected && !isDeclaredAgentProviderAvailable(selected)) {
@@ -139,7 +145,7 @@ export function createAgentAccessRoleStore(
           current.backfilledCatIds.filter((id) => Object.hasOwn(nextCats, id)),
           current.existingCatIds,
         );
-        writeFileAtomic(path, source, { verify: (candidate) => loadCatConfig(candidate) });
+        writeFileAtomic(path, nextSource, { verify: (candidate) => loadCatConfig(candidate) });
         refreshRuntimeCatCatalogCaches();
         return 'committed';
       });

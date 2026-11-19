@@ -53,32 +53,29 @@ export function readCatCatalog(projectRoot: string): CatCafeConfig | null {
   return raw === null ? null : (JSON.parse(raw) as CatCafeConfig);
 }
 
-export function readRoleCatalogSnapshot(projectRoot: string, templatePath: string, backfill = false) {
+export function readRoleCatalogSnapshot(projectRoot: string, templatePath: string, purpose: 'read' | 'write') {
   const stored = readStoredCatCatalog(projectRoot);
-  return {
-    stored,
-    ...projectRoleCatalog(stored?.toString('utf8') ?? null, readRoleCatalogTemplate(templatePath), backfill),
-  };
+  const template = readRoleCatalogTemplate(templatePath);
+  const source = stored?.toString('utf8') ?? null;
+  const proposed = projectRoleCatalog(source, template, true);
+  // Read access may publish compatibility additions once their inherited MCP blocks are in effect.
+  if (
+    purpose === 'read' &&
+    inheritFullyBlockedMcpCapabilitiesForNewCatsSync(projectRoot, proposed.backfilledCatIds, proposed.existingCatIds, 'preview')
+  ) {
+    return { stored, ...projectRoleCatalog(source, template, false) };
+  }
+  return { stored, ...proposed };
 }
 
-/** Publish compatibility additions only after their inherited MCP blocks are in effect. */
 export function readPublishedRoleCatalogSource(projectRoot: string, templatePath: string): string {
-  const template = readRoleCatalogTemplate(templatePath);
-  const stored = readStoredCatCatalog(projectRoot)?.toString('utf8') ?? null;
-  const proposed = projectRoleCatalog(stored, template, true);
-  const inheritsBlocks = inheritFullyBlockedMcpCapabilitiesForNewCatsSync(
-    projectRoot,
-    proposed.backfilledCatIds,
-    proposed.existingCatIds,
-    'preview',
-  );
-  return inheritsBlocks ? projectRoleCatalog(stored, template, false).source : proposed.source;
+  return readRoleCatalogSnapshot(projectRoot, templatePath, 'read').source;
 }
 
 /** Explicit repair for legacy catalog maintenance. Product reads use the pure projection. */
 export function bootstrapCatCatalog(projectRoot: string, templatePath: string): string {
   const catalogPath = resolveCatCatalogPath(projectRoot);
-  const next = readRoleCatalogSnapshot(projectRoot, templatePath, true);
+  const next = readRoleCatalogSnapshot(projectRoot, templatePath, 'write');
   if (next.stored?.toString('utf8') !== next.source) {
     mkdirSync(dirname(catalogPath), { recursive: true });
     inheritFullyBlockedMcpCapabilitiesForNewCatsSync(projectRoot, next.backfilledCatIds, next.existingCatIds);

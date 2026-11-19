@@ -22,7 +22,7 @@ export class MemberConfigurationRevisionRequired extends Error {
 
 /** A member-scoped validator read from disk, never from a stale registry cache. */
 export function memberConfigurationRevision(projectRoot: string, catId: string): string | undefined {
-  const { source } = readRoleCatalogSnapshot(projectRoot, resolveProjectTemplatePath(projectRoot), true);
+  const { source } = readRoleCatalogSnapshot(projectRoot, resolveProjectTemplatePath(projectRoot), 'write');
   return roleConfigurationRevision(JSON.parse(source) as CatCafeConfig, catId);
 }
 
