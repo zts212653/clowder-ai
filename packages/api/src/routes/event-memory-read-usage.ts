@@ -47,7 +47,7 @@ export function registerEventMemoryUsage(app: FastifyInstance, opts: EventsRoute
       const revision = request.query.revision;
       if (!revision || !/^sha256:[a-f0-9]{64}$/.test(revision))
         return reply.code(400).send({ error: 'Revision required' });
-      const event = opts.eventMemoryStore.getEvent(request.params.eventId);
+      const event = await opts.eventMemoryStore.getEvent(request.params.eventId, owner);
       if (!event || event.ownerUserId !== owner) return reply.code(404).send({ error: 'not_available' });
       if (eventMemoryRevision(event) !== revision) return reply.code(409).send({ error: 'Revision changed' });
       if (!opts.readEvidenceDb) return reply.code(503).send({ error: 'usage_unavailable' });

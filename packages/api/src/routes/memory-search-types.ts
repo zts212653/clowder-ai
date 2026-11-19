@@ -1,6 +1,6 @@
 import type { CollectionManifest, IEvidenceStore, SearchOptions } from '../domains/memory/interfaces.js';
 import type { MessageSearchService } from '../domains/memory/MessageSearchService.js';
-import type { TasteRepository } from '../domains/taste/services/TasteRepository.js';
+import type { createTasteBrowseProvider } from '../domains/plugin/host-surface/taste-browse-provider.js';
 
 export type MemorySearchType = 'memory' | 'documents' | 'conversations';
 export interface MemorySearchQuery {
@@ -10,7 +10,7 @@ export interface MemorySearchQuery {
   limit: number;
 }
 export interface MemorySearchSources {
-  tasteRepository?: TasteRepository;
+  tasteBrowse?: Pick<ReturnType<typeof createTasteBrowseProvider>, 'list'>;
   messageSearchService?: Pick<MessageSearchService, 'search'>;
 }
 export interface MemorySearchOptions extends MemorySearchSources {

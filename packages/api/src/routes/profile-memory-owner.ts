@@ -3,50 +3,51 @@ import {
   type ProfileMemoryOwnerEntry,
   profileMemoryOwnerActionSchema,
 } from '@cat-cafe/shared';
-import { PROFILE_CAPSULE_RELATIVE_PATH } from '@cat-cafe/shared/profile-contract';
+import {
+  PROFILE_CAPSULE_RELATIVE_PATH,
+  PROFILE_CORPUS_RELATIVE_PATH,
+  relationshipPrimerRelativePath,
+} from '@cat-cafe/shared/profile-contract';
 import { profileRevisionOf } from '@cat-cafe/shared/profile-revision';
-import type Database from 'better-sqlite3';
+import type { ProfileMemoryEntry } from '@clowder-ai/plugin-memory-contract/profile';
 import type { FastifyPluginAsync } from 'fastify';
 import type { IProfileUpdateProposalStore } from '../domains/cats/services/stores/ports/ProfileUpdateProposalStore.js';
 import { canAccessThread } from '../domains/guides/guide-state-access.js';
 import type { ProfileMemoryLifecycleService } from '../domains/memory/profile/ProfileMemoryLifecycleService.js';
-import type {
-  ProfileMemoryLifecycleStore,
-  StoredProfileMemoryEntry,
-} from '../domains/memory/profile/ProfileMemoryLifecycleStore.js';
-import { readProfileUsage } from '../domains/memory/profile/ProfileUsageReader.js';
+import { MemoryProviderCallError } from '../domains/plugin/host-surface/memory-plugin-host.js';
+import type { createProfileMemoryProvider } from '../domains/plugin/host-surface/profile-memory-provider.js';
 import { resolveSessionUserId } from '../utils/request-identity.js';
 import { authorizeOwnerBrowserAction, ownerMemoryActionHttpStatus } from './owner-memory-browser-auth.js';
 import { readProfileMemoryProposals } from './profile-memory-proposals.js';
-import { type ProfileMemorySourceReaders, readProfileMemorySource } from './profile-memory-source.js';
+import { type ProfileMemorySourceReaders, projectProfileMemorySource } from './profile-memory-source.js';
 
 export interface ProfileMemoryOwnerRoutesOptions {
   ownerUserId: string;
-  evidenceDb?: Database.Database;
-  store: Pick<ProfileMemoryLifecycleStore, 'get' | 'list'>;
+  store: Pick<ReturnType<typeof createProfileMemoryProvider>, 'list' | 'get' | 'provenance' | 'usage'>;
   lifecycle?: Pick<ProfileMemoryLifecycleService, 'executeOwnerAction'>;
   proposalStore: Pick<IProfileUpdateProposalStore, 'listByTarget'>;
   sourceReaders: ProfileMemorySourceReaders;
 }
 
 export const profileMemoryOwnerRoutes: FastifyPluginAsync<ProfileMemoryOwnerRoutesOptions> = async (app, opts) => {
+  app.setErrorHandler((error, _request, reply) => {
+    if (error instanceof MemoryProviderCallError) return reply.status(503).send({ error: 'memory_unavailable' });
+    return reply.send(error);
+  });
+
   app.get('/api/memory/profile', async (request, reply) => {
     const owner = authorizeRead(request, reply, opts.ownerUserId);
     if (!owner) return;
     const entries = await Promise.all(
-      opts.store
-        .list(owner)
-        .map(async (entry) => projectEntry(entry, await readProfileMemoryProposals(owner, entry, opts.proposalStore))),
+      (await opts.store.list(owner)).map(async (entry) =>
+        projectEntry(entry, await readProfileMemoryProposals(owner, proposalTarget(entry), opts.proposalStore)),
+      ),
     );
     const capsuleSetup = entries.some((entry) => entry.id === 'capsule')
       ? undefined
       : {
           revision: profileRevisionOf(''),
-          proposals: await readProfileMemoryProposals(
-            owner,
-            { targetPath: PROFILE_CAPSULE_RELATIVE_PATH },
-            opts.proposalStore,
-          ),
+          proposals: await readProfileMemoryProposals(owner, PROFILE_CAPSULE_RELATIVE_PATH, opts.proposalStore),
         };
     return { readStatus: 'ready', entries, ...(capsuleSetup ? { capsuleSetup } : {}) };
   });
@@ -57,10 +58,10 @@ export const profileMemoryOwnerRoutes: FastifyPluginAsync<ProfileMemoryOwnerRout
       const owner = authorizeRead(request, reply, opts.ownerUserId);
       if (!owner) return;
       if (!request.query.revision) return reply.status(400).send({ error: 'Revision required' });
-      const entry = opts.store.get(owner, request.params.memoryId);
+      const entry = await opts.store.get(owner, request.params.memoryId);
       if (!entry) return reply.status(404).send({ error: 'Profile memory not found' });
       if (entry.revision !== request.query.revision) return reply.status(409).send({ error: 'Revision changed' });
-      return projectEntry(entry, await readProfileMemoryProposals(owner, entry, opts.proposalStore));
+      return projectEntry(entry, await readProfileMemoryProposals(owner, proposalTarget(entry), opts.proposalStore));
     },
   );
 
@@ -70,10 +71,13 @@ export const profileMemoryOwnerRoutes: FastifyPluginAsync<ProfileMemoryOwnerRout
       const owner = authorizeRead(request, reply, opts.ownerUserId);
       if (!owner) return;
       if (!request.query.revision) return reply.status(400).send({ error: 'Revision required' });
-      const entry = opts.store.get(owner, request.params.memoryId);
+      const entry = await opts.store.get(owner, request.params.memoryId);
       if (!entry) return reply.status(404).send({ error: 'Profile memory not found' });
       if (entry.revision !== request.query.revision) return reply.status(409).send({ error: 'Revision changed' });
-      return readProfileMemorySource(entry, owner, opts.sourceReaders);
+      const source = await opts.store.provenance(owner, entry.id, entry.revision);
+      if (source.outcome === 'not_available') return reply.status(404).send({ error: 'Profile memory not found' });
+      if (source.outcome !== 'found') return reply.status(409).send({ error: 'Revision changed' });
+      return projectProfileMemorySource(source.coordinates, owner, opts.sourceReaders);
     },
   );
 
@@ -84,12 +88,14 @@ export const profileMemoryOwnerRoutes: FastifyPluginAsync<ProfileMemoryOwnerRout
       const owner = authorizeRead(request, reply, opts.ownerUserId);
       if (!owner) return;
       if (!request.query.revision) return reply.status(400).send({ error: 'Revision required' });
-      const entry = opts.store.get(owner, request.params.memoryId);
+      const entry = await opts.store.get(owner, request.params.memoryId);
       if (!entry) return reply.status(404).send({ error: 'Profile memory not found' });
       if (entry.revision !== request.query.revision) return reply.status(409).send({ error: 'Revision changed' });
-      if (!opts.evidenceDb) return reply.status(503).send({ error: 'Usage recording unavailable' });
       try {
-        const usage = readProfileUsage(opts.evidenceDb, owner, entry);
+        const result = await opts.store.usage(owner, entry.id, entry.revision);
+        if (result.outcome === 'not_available') return reply.status(404).send({ error: 'Profile memory not found' });
+        if (result.outcome !== 'found') return reply.status(409).send({ error: 'Revision changed' });
+        const { usage } = result;
         usage.recent = await Promise.all(
           usage.recent.map(async (item) => {
             if (!item.threadId) return item;
@@ -150,7 +156,7 @@ function authorizeRead(
 }
 
 function projectEntry(
-  entry: StoredProfileMemoryEntry,
+  entry: ProfileMemoryEntry,
   proposals: ProfileMemoryOwnerEntry['proposals'],
 ): ProfileMemoryOwnerEntry {
   return {
@@ -166,4 +172,11 @@ function projectEntry(
     ...(entry.updatedAt !== undefined ? { updatedAt: entry.updatedAt } : {}),
     proposals,
   };
+}
+
+function proposalTarget(entry: ProfileMemoryEntry): string {
+  if (entry.layer === 'capsule') return PROFILE_CAPSULE_RELATIVE_PATH;
+  if (entry.layer === 'corpus') return PROFILE_CORPUS_RELATIVE_PATH;
+  if (!entry.relationshipKey) throw new Error('Profile relationship identity unavailable');
+  return relationshipPrimerRelativePath(entry.relationshipKey);
 }

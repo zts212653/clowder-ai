@@ -1,14 +1,15 @@
 import type { MemoryOwnerActionError, MemoryOwnerActionReceipt, ProfileMemoryOwnerAction } from '@cat-cafe/shared';
-import { renderUserCapsuleSection } from '@cat-cafe/shared/profile-contract';
+import type { ProfileMemoryMutation, ProfileMemoryRecovery } from '@clowder-ai/plugin-memory-contract/profile';
 import type { SessionMutex } from '../../cats/services/agents/invocation/SessionMutex.js';
 import type { OwnerMemoryActionCoordinator } from '../owner/OwnerMemoryActionCoordinator.js';
-import type { ProfileMemoryLifecycleStore, ProfileMemoryMutationResult } from './ProfileMemoryLifecycleStore.js';
 
-type ProfileLifecycleStore = Pick<
-  ProfileMemoryLifecycleStore,
-  'get' | 'replaceContent' | 'hardForget' | 'getOwnerActionEvidence' | 'commandDigest' | 'finishHardForgetCleanup'
-> &
-  Partial<Pick<ProfileMemoryLifecycleStore, 'lockKey'>>;
+type ProfileActionInput = [owner: string, memoryId: string, command: ProfileMemoryOwnerAction];
+
+interface ProfileLifecycleStore {
+  mutate: (...input: ProfileActionInput) => Promise<ProfileMemoryMutation>;
+  recover: (...input: ProfileActionInput) => Promise<ProfileMemoryRecovery>;
+  lockKey?(ownerUserId: string, memoryId: string): string | null;
+}
 
 export interface ProfileMemoryDerivedInvalidation {
   ownerUserId: string;
@@ -31,13 +32,6 @@ export class ProfileMemoryLifecycleService {
     memoryId: string,
     command: ProfileMemoryOwnerAction,
   ): Promise<MemoryOwnerActionReceipt | { error: MemoryOwnerActionError }> {
-    if (memoryId === 'capsule' && command.action === 'replace_content') {
-      try {
-        if (!renderUserCapsuleSection(command.content)) return Promise.resolve({ error: 'invalid_content' });
-      } catch {
-        return Promise.resolve({ error: 'invalid_content' });
-      }
-    }
     return this.deps.coordinator.execute(
       { ownerUserId, lane: 'profile', memoryId, requestId: command.requestId, command },
       {
@@ -48,20 +42,10 @@ export class ProfileMemoryLifecycleService {
   }
 
   private async run(ownerUserId: string, memoryId: string, command: ProfileMemoryOwnerAction) {
-    const projected = await this.withTargetLock(ownerUserId, memoryId, () => {
-      const evidence = this.deps.store.getOwnerActionEvidence(ownerUserId, memoryId, command.requestId);
-      const current = this.deps.store.get(ownerUserId, memoryId);
-      const creatingCapsule = memoryId === 'capsule' && command.action === 'replace_content';
-      if (!current && !evidence && !creatingCapsule) return { error: 'not_available' as const };
-      if (current && current.revision !== command.expectedRevision && !evidence) {
-        return { error: 'stale_revision' as const };
-      }
-      const result =
-        command.action === 'replace_content'
-          ? this.deps.store.replaceContent({ ownerUserId, memoryId, command })
-          : this.deps.store.hardForget({ ownerUserId, memoryId, command });
-      return projectMutation(command.action, memoryId, result);
-    });
+    const result = await this.withTargetLock(ownerUserId, memoryId, () =>
+      this.deps.store.mutate(ownerUserId, memoryId, command),
+    );
+    const projected = projectMutation(command.action, memoryId, result);
     if ('error' in projected) return rejected(projected.error);
     await this.invalidate(ownerUserId, memoryId, command.action);
     return { status: 'applied' as const, receipt: projected };
@@ -72,24 +56,14 @@ export class ProfileMemoryLifecycleService {
     memoryId: string,
     command: ProfileMemoryOwnerAction,
   ): Promise<MemoryOwnerActionReceipt | null> {
-    const evidence = this.deps.store.getOwnerActionEvidence(ownerUserId, memoryId, command.requestId);
-    if (
-      !evidence?.applied ||
-      evidence.action !== command.action ||
-      evidence.commandDigest !== this.deps.store.commandDigest(command)
-    ) {
-      return null;
-    }
-    if (command.action === 'hard_forget') {
-      await this.withTargetLock(ownerUserId, memoryId, () => {
-        this.deps.store.finishHardForgetCleanup(ownerUserId, memoryId, command.requestId);
-      });
-    }
+    const evidence = await this.withTargetLock(ownerUserId, memoryId, () =>
+      this.deps.store.recover(ownerUserId, memoryId, command),
+    );
+    if (!evidence || evidence.action !== command.action) return null;
     await this.invalidate(ownerUserId, memoryId, command.action);
-    if (command.action === 'replace_content') {
-      if (!evidence.revision) return null;
+    if (evidence.action === 'replace_content') {
       return {
-        action: command.action,
+        action: evidence.action,
         outcome: 'applied',
         memoryId,
         revision: evidence.revision,
@@ -118,12 +92,13 @@ export class ProfileMemoryLifecycleService {
 function projectMutation(
   action: ProfileMemoryOwnerAction['action'],
   memoryId: string,
-  result: ProfileMemoryMutationResult,
+  result: ProfileMemoryMutation,
 ): Omit<MemoryOwnerActionReceipt, 'outcome'> | { error: MemoryOwnerActionError } {
   if (
     result.outcome === 'not_available' ||
     result.outcome === 'stale_revision' ||
-    result.outcome === 'idempotency_conflict'
+    result.outcome === 'idempotency_conflict' ||
+    result.outcome === 'invalid_content'
   ) {
     return { error: result.outcome };
   }

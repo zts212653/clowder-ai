@@ -1,6 +1,7 @@
 import type { FastifyPluginAsync } from 'fastify';
 import type { BootstrapProgress, ExpeditionBootstrapService } from '../domains/memory/ExpeditionBootstrapService.js';
-import type { IndexStateManager } from '../domains/memory/IndexStateManager.js';
+import type { ProjectIndexStatePort } from '../domains/memory/IndexStateManager.js';
+import { MemoryProviderCallError } from '../domains/plugin/host-surface/memory-plugin-host.js';
 import { resolvePersistentProjectPath } from '../utils/persistent-project-path.js';
 import { resolveDirectLocalAuthorizationUserId, resolveHeaderUserId } from '../utils/request-identity.js';
 
@@ -9,8 +10,9 @@ interface SocketManagerLike {
 }
 
 export interface BootstrapRoutesOptions {
-  stateManager: IndexStateManager;
+  stateManager: ProjectIndexStatePort;
   bootstrapService: { bootstrap: ExpeditionBootstrapService['bootstrap'] };
+  isMemoryReady?: () => boolean;
   socketManager: SocketManagerLike;
   getFingerprint?: (projectPath: string) => string;
 }
@@ -40,7 +42,12 @@ export const projectsBootstrapRoutes: FastifyPluginAsync<BootstrapRoutesOptions>
       }
 
       const fingerprint = request.query.fingerprint ?? opts.getFingerprint?.(validated);
-      return stateManager.getState(validated, fingerprint);
+      try {
+        return await stateManager.getState(validated, fingerprint, userId);
+      } catch (error) {
+        if (!(error instanceof MemoryProviderCallError)) throw error;
+        return reply.code(503).send({ error: 'memory_unavailable' });
+      }
     },
   );
 
@@ -62,6 +69,7 @@ export const projectsBootstrapRoutes: FastifyPluginAsync<BootstrapRoutesOptions>
       reply.status(403);
       return { error: 'Project path not allowed' };
     }
+    if (opts.isMemoryReady?.() === false) return reply.code(503).send({ error: 'memory_unavailable' });
 
     // Fire-and-forget: respond immediately, bootstrap runs async
     bootstrapService
@@ -87,6 +95,9 @@ export const projectsBootstrapRoutes: FastifyPluginAsync<BootstrapRoutesOptions>
       })
       .catch((err) => {
         app.log.warn({ err, projectPath: validated }, 'Memory bootstrap failed (non-blocking)');
+        if (err instanceof MemoryProviderCallError) {
+          socketManager.emitToUser(userId, 'index:failed', { projectPath: validated, error: 'memory_unavailable' });
+        }
       });
 
     reply.status(202);
@@ -112,8 +123,11 @@ export const projectsBootstrapRoutes: FastifyPluginAsync<BootstrapRoutesOptions>
       return { error: 'Project path not allowed' };
     }
 
-    stateManager.snooze(validated);
-    const state = stateManager.getState(validated);
-    return { snoozedUntil: state.snoozed_until };
+    try {
+      return { snoozedUntil: await stateManager.snoozeForOwner(validated, userId) };
+    } catch (error) {
+      if (!(error instanceof MemoryProviderCallError)) throw error;
+      return reply.code(503).send({ error: 'memory_unavailable' });
+    }
   });
 };

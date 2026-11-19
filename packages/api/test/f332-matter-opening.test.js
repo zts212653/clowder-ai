@@ -7,6 +7,7 @@ import './helpers/setup-cat-registry.js';
 import { invokeSingleCat } from '../dist/domains/cats/services/agents/invocation/invoke-single-cat.js';
 import { ContextEpochOwner } from '../dist/domains/cats/services/session/context/ContextEpochOwner.js';
 import { InMemoryContextEpochStore } from '../dist/domains/cats/services/stores/ports/ContextEpochStore.js';
+import { matterOpeningDirectory } from '../dist/domains/memory/matters/matter-opening-directory.js';
 import { LOG_DIR_PATH, logger } from '../dist/infrastructure/logger.js';
 import { fixture } from './helpers/matter-opening-cache-fixture.js';
 
@@ -50,6 +51,8 @@ for (const mode of ['cold', 'hot', 'rebuilt']) {
         },
       },
     };
+    deps.matterOpeningPrompt = ({ userId, catId, threadId, invocationId }) =>
+      matterOpeningDirectory(deps.matterMemoryService, userId, catId, threadId, { invocationId });
     const service = {
       async *invoke(prompt, options) {
         prompts.push({ prompt, sessionId: options?.sessionId });
@@ -163,7 +166,8 @@ test('F332: the provider receives a revalidated aged directory and the refresh f
     contextEpochOwner: new ContextEpochOwner(new InMemoryContextEpochStore()),
     threadStore: null,
     apiUrl: 'http://127.0.0.1:3004',
-    matterMemoryService: f.service,
+    matterOpeningPrompt: ({ userId, catId, threadId, invocationId }) =>
+      matterOpeningDirectory(f.service, userId, catId, threadId, { invocationId }),
   };
   const params = {
     catId: 'opus',
