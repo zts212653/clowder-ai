@@ -493,7 +493,7 @@ function bindInbox() {
       main: {
         me: chatRead('me').handle,
         time: CS.ib.time,
-        partial: !!read && (read.status !== 'available' || read.page.hasMore),
+        partial: !!read && read.status !== 'available',
         decide: pending.concat(confirmRows),
         review: [],
         at: mentions(read).map(mentionRow),

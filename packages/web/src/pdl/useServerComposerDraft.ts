@@ -2,15 +2,17 @@ import type { ContextAttachment } from '@cat-cafe/shared';
 import { useEffect, useRef } from 'react';
 import { apiFetch } from '@/utils/api-client';
 
-export type ComposerDraft = { text: string; contexts: ContextAttachment[]; replyTo?: string };
+/** images: the uploaded images in the input (their addresses); a picked image is uploaded only when it is sent. */
+export type ComposerDraft = { text: string; images: string[]; contexts: ContextAttachment[]; replyTo?: string };
 type SavedDraft = {
   text?: string;
   replyTo?: string;
-  contentBlocks?: { type: string; attachment?: ContextAttachment }[];
+  contentBlocks?: { type: string; url?: string; attachment?: ContextAttachment }[];
 };
 
 const draftPath = (threadId: string) => `/api/threads/${encodeURIComponent(threadId)}/composer-draft`;
-const isEmpty = (draft: ComposerDraft) => !draft.text.trim() && !draft.contexts.length && !draft.replyTo;
+const isEmpty = (draft: ComposerDraft) =>
+  !draft.text.trim() && !draft.images.length && !draft.contexts.length && !draft.replyTo;
 /** What the server holds for a conversation, as far as this tab knows: its revision and the draft it saved. */
 type Known = Map<string, { revision: number; signature: string }>;
 
@@ -25,10 +27,15 @@ export function useServerComposerDraft(input: {
   threadId: string;
   enabled: boolean;
   draft: ComposerDraft;
-  restore: (draft: ComposerDraft) => void;
+  /** Shows a saved draft in the input; what it returns settles once the input shows all of it (images are read back).
+   *  `current` says whether the input still belongs to that conversation: what arrives after a switch is dropped. */
+  restore: (draft: ComposerDraft, current: () => boolean) => void | Promise<unknown>;
 }) {
   const known = useRef<Known>(new Map());
   const pending = useRef<{ threadId: string; draft: ComposerDraft } | null>(null);
+  // The conversation whose server draft the input shows in full (images read back). Until then nothing is written:
+  // the input is not yet what the owner left. Each opening starts unshown; a restore after a switch never counts.
+  const shown = useRef<string | null>(null);
   const latest = useRef(input);
   latest.current = input;
   const { threadId, enabled } = input;
@@ -36,15 +43,18 @@ export function useServerComposerDraft(input: {
   useEffect(() => {
     if (!enabled) return;
     let live = true;
+    shown.current = null;
     const opened = JSON.stringify(latest.current.draft);
     void apiFetch(draftPath(threadId))
       .then(async (response) => {
         if (!response.ok) return;
         const body = (await response.json()) as { draft: SavedDraft | null; revision: number };
         if (!live) return;
+        const blocks = body.draft?.contentBlocks ?? [];
         const saved: ComposerDraft = {
           text: body.draft?.text ?? '',
-          contexts: (body.draft?.contentBlocks ?? []).flatMap((block) =>
+          images: blocks.flatMap((block) => (block.type === 'image' && block.url ? [block.url] : [])),
+          contexts: blocks.flatMap((block) =>
             block.type === 'context_attachment' && block.attachment ? [block.attachment] : [],
           ),
           ...(body.draft?.replyTo ? { replyTo: body.draft.replyTo } : {}),
@@ -52,7 +62,19 @@ export function useServerComposerDraft(input: {
         known.current.set(threadId, { revision: body.revision, signature: JSON.stringify(saved) });
         const now = JSON.stringify(latest.current.draft);
         if (now !== opened) await writeDraft(threadId, latest.current.draft, known.current);
-        else if (now !== JSON.stringify(saved)) latest.current.restore(saved);
+        else if (now !== JSON.stringify(saved)) {
+          // A draft whose images can't be read back is as unknown as an unreachable one: nothing overwrites it.
+          const ok = await Promise.resolve(latest.current.restore(saved, () => live)).then(
+            () => true,
+            () => false,
+          );
+          // Only this opening's own failure counts: a later opening may already have read a newer draft.
+          if (!ok) {
+            if (live) known.current.delete(threadId);
+            return;
+          }
+        }
+        if (live) shown.current = threadId;
       })
       // An unreachable draft leaves this tab's composer as it is; the next edit writes again.
       .catch(() => undefined);
@@ -62,8 +84,8 @@ export function useServerComposerDraft(input: {
   }, [threadId, enabled]);
   useEffect(() => {
     const server = known.current.get(threadId);
-    // Nothing to write until the server's draft is known, or while the composer shows exactly that draft.
-    if (!enabled || !server) return;
+    // Nothing to write until the server's draft is known and shown, or while the composer shows exactly that draft.
+    if (!enabled || !server || shown.current !== threadId) return;
     if (server.signature === signature) {
       pending.current = null;
       return;
@@ -80,7 +102,8 @@ export function useServerComposerDraft(input: {
   }, []);
   return {
     /** A send the server took: that conversation's saved draft is gone too. */
-    clear: (sent: string) => void writeDraft(sent, { text: '', contexts: [] }, known.current).catch(() => undefined),
+    clear: (sent: string) =>
+      void writeDraft(sent, { text: '', images: [], contexts: [] }, known.current).catch(() => undefined),
   };
 }
 
@@ -113,8 +136,13 @@ async function writeDraft(
         : {
             expectedRevision,
             text: draft.text,
-            ...(draft.contexts.length
-              ? { contentBlocks: draft.contexts.map((attachment) => ({ type: 'context_attachment', attachment })) }
+            ...(draft.images.length || draft.contexts.length
+              ? {
+                  contentBlocks: [
+                    ...draft.images.map((url) => ({ type: 'image', url })),
+                    ...draft.contexts.map((attachment) => ({ type: 'context_attachment', attachment })),
+                  ],
+                }
               : {}),
             ...(draft.replyTo ? { replyTo: draft.replyTo } : {}),
           },

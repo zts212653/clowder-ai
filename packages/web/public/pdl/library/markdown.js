@@ -18,10 +18,12 @@ function mdInline(t) {
   return s.replace(/\u0000(\d+)\u0000/g, function (m, i) { return keep[+i]; });
 }
 /* 链接 [文字](地址)：地址按括号配对扫描（路径里可以有括号，可以带 :行号）。
-   http(s) 在外部打开；thread:id 跳到对话；file:路径、绝对 / 相对路径（/ ./ ../ ~/ 或带扩展名）打开文件预览；其它保持原文 */
+   http(s) 在外部打开；thread:id 和控制台自己的对话地址 /thread/id（?message= 带上消息就跳到那条，&block= 再落到消息里的那张卡片）跳到对话；
+   file:路径、绝对 / 相对路径（/ ./ ../ ~/ 或带扩展名）打开文件预览；其它保持原文 */
 function mdLinkTarget(u) {
   const m = /^(file|thread):(.+)$/.exec(u);
   if (m) return { k: m[1], v: m[2] };
+  if (/^\/thread\/[^/?#]+\/?([?#]|$)/.test(u)) { const a = new URL(u, 'https://pdl.invalid'); return { k: 'thread', v: decodeURIComponent(a.pathname.split('/')[2]), mid: a.searchParams.get('message') || a.searchParams.get('messageId') || '', block: a.searchParams.get('block') || '' }; }
   if (/^https?:\/\//.test(u)) return { k: 'url', v: u };
   if (/^(\/|\.{1,2}\/|~\/)/.test(u) || /^[\w.@-]+(\/[\w.@()-]+)*\.\w+(:\d+(-\d+)?)?$/.test(u)) return { k: 'file', v: u };
   return null;
@@ -41,7 +43,7 @@ function mdLinks(s, ph) {
     out += s.slice(i, a);
     const chip = mdRef(url); if (chip) { out += ph(chip); i = j; continue; }
     out += t.k === 'url' ? ph('<a class="md-ext" href="' + url + '" target="_blank" rel="noopener noreferrer">') + tx + ph('</a>')
-      : ph(t.k === 'file' ? '<button type="button" class="cafe-link" data-act="fileOpen" data-v="' + t.v + '" data-tip="' + t.v + '">' : '<button type="button" class="cafe-link mono" data-act="thread" data-id="' + t.v + '">') + tx + ph('</button>');
+      : ph(t.k === 'file' ? '<button type="button" class="cafe-link" data-act="fileOpen" data-v="' + t.v + '" data-tip="' + t.v + '">' : t.mid ? '<button type="button" class="cafe-link mono" data-act="msgJump"' + argAttrs(Object.assign({ t: t.v, mid: t.mid }, t.block ? { block: t.block } : {})) + '>' : '<button type="button" class="cafe-link mono" data-act="thread" data-id="' + t.v + '">') + tx + ph('</button>');
     i = j;
   }
   return out + s.slice(i);

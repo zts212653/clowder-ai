@@ -79,6 +79,15 @@ function bindMembers() {
       read();
     });
   });
+  // A comma list on the member form (the @ names, the specialty tags) as its items.
+  function splitList(text) {
+    return String(text || '')
+      .split(',')
+      .map(function (v) {
+        return v.trim();
+      })
+      .filter(Boolean);
+  }
   function draft() {
     if (!meta) return null;
     const id = S.route === 'memberNew' ? '' : S.param,
@@ -634,13 +643,8 @@ function bindMembers() {
         return [key, f[memberFields[key]]];
       }),
     );
-    d.aliases = f.mentionPatterns
-      .split(',')
-      .map(function (v) {
-        return v.trim();
-      })
-      .filter(Boolean);
-    d.tags = d.aliases;
+    d.aliases = splitList(f.mentionPatterns);
+    d.tags = splitList(f.strengths);
     d.color = { primary: f.colorPrimary, secondary: f.colorSecondary };
     if (state.strategy)
       Object.assign(d, {
@@ -727,7 +731,7 @@ function bindMembers() {
         }),
       preferences: cloud
         ? null
-        : memberPreferences(f, catalogState, runtime ? runtime.acpMaxDefault : client.acpMaxDefault),
+        : memberPreferences(f, catalogState, runtime ? runtime.acpMaxDefault : client && client.acpMaxDefault),
       identityProtection: cat && cat.identityProtection,
       follow: f.accountBindingMode === 'follow',
       overrideAccount: f.accountBindingMode === 'override',
@@ -1220,16 +1224,13 @@ function bindMembers() {
           S.dialog.error = '';
         },
       };
-    if (editor && data.k === 'aliases')
+    // The @ names and the specialty tags are each a comma list on the member form.
+    const list = editor && { aliases: 'mentionPatterns', tags: 'strengths' }[data.k];
+    if (list)
       return {
-        values: editor.form.mentionPatterns
-          .split(',')
-          .map(function (v) {
-            return v.trim();
-          })
-          .filter(Boolean),
+        values: splitList(editor.form[list]),
         put: function (values) {
-          editor.form.mentionPatterns = values.join(', ');
+          editor.form[list] = values.join(', ');
         },
       };
     return null;

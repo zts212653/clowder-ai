@@ -149,7 +149,7 @@ function bindProject() {
   api.on('terminal:output', receiveTerminalOutput);
   api.on('thread:teleport', function (event) {
     if (event.threadId === chatPort.threadId) go('chat');
-    return A.msgJump({ t: event.threadId, mid: event.messageId });
+    return A.msgJump({ t: event.threadId, mid: event.messageId, block: event.blockId });
   });
   api.on('notification:toast', function (event) {
     toast(

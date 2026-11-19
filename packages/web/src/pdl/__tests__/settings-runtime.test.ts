@@ -2555,3 +2555,34 @@ it('projects E/F appearance preferences and environment paths from their held ow
     dom.window.close();
   }
 });
+
+it('opens a member whose client is no longer offered (a legacy antigravity member)', async () => {
+  const { w, action, data, port, errors } = await boot();
+  const metadata = {
+    accounts: [],
+    templates: [],
+    blank: initialState(),
+    codex: { sandboxMode: 'workspace-write', approvalPolicy: 'on-request' },
+    strategies: [],
+    libraries: [],
+    runtimes: [],
+    clients: CLIENT_OPTIONS.map((client) => ({
+      id: client.value,
+      label: client.label,
+      carriers: carrierOptionsForClient(client.value).map((row) => [row.value, row.label]),
+      accounts: [],
+    })),
+  };
+  Object.assign(data.cats[0], { clientId: 'antigravity', carrier: 'cli', defaultModel: 'gemini-3.1-pro' });
+  port.data = { ...port.data, chat: fixtureInput(data).chat };
+  w.clowderChat.update(port);
+  action.mockImplementation(async (name) => {
+    if (name === 'membersRead') return metadata;
+    if (name === 'memberCanonRead') return { bound: false, versions: [] };
+    return null;
+  });
+  w.eval(`go('member-${data.cats[0].id}')`);
+  await w.__settled();
+  expect(w.eval('VM.member().form.d.model')).toBe('gemini-3.1-pro');
+  expect(errors).not.toHaveBeenCalled();
+});

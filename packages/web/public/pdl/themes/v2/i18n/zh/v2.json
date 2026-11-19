@@ -2385,7 +2385,7 @@
     "decide": "等你决定",
     "decideEmpty": "暂时没有等你决定的事。",
     "error": {
-      "partial": "日程来源暂时读不到"
+      "partial": "部分来源暂时读不到"
     },
     "review": "待查看",
     "span": {
@@ -3255,7 +3255,13 @@
     "catalogRefresh": "刷新获取模型列表",
     "catalogUnsupported": "当前接入方式不支持读取模型列表",
     "identity": "身份",
-    "voiceHelp": "请先在设置的语音页面安装并启用语音服务，再为成员配置声音。"
+    "voiceHelp": "请先在设置的语音页面安装并启用语音服务，再为成员配置声音。",
+    "voicePick": {
+      "label": "选择声线",
+      "error": "声线列表暂时读不到",
+      "none": "还没有可用的候选声线，可在下面直接填写。",
+      "defaultVoice": "未设置本人声线，合成时会使用默认声音。"
+    }
   },
   "market": {
     "installed": "已安装",

@@ -175,20 +175,33 @@ PDL_COMPONENTS.v2Progress = function (p, sc, root) {
   const xs = pvList(p.from, sc, root);
   return '<div class="absolute right-0.5 top-2 bottom-2 z-10 w-6 outline-none ' + (xs.length ? 'cursor-pointer' : 'invisible pointer-events-none') + '" data-message-navigator data-message-piano data-v2-progress>' + xs.map(function (it, i) {
     const q = pvDeep(p.item, root, it), w = whoInfo(q.from);
-    return '<button class="absolute right-2 z-10" style="top:' + (i / xs.length * 100) + '%;height:calc(' + (100 / xs.length) + '% - 2px);width:6px;background:' + (q.error ? 'var(--semantic-critical)' : w.kind === 'member' ? v2IdentityPaint(w).primary : 'var(--cafe-text-muted)') + '" data-message-piano-key="' + h(q.mid) + '"' + actAttrs(q.act, { mid: q.mid }) + ' data-tip="' + h(q.label) + '"></button>';
+    return '<button class="absolute right-2 z-10" style="top:' + (i / xs.length * 100) + '%;height:' + (100 / xs.length) + '%;width:6px;background:' + (q.error ? 'var(--semantic-critical)' : w.kind === 'member' ? v2IdentityPaint(w).primary : 'var(--cafe-text-muted)') + '" data-message-piano-key="' + h(q.mid) + '"' + actAttrs(q.act, { mid: q.mid }) + ' data-tip="' + h(q.label) + '"></button>';
   }).join('') + '<div data-message-piano-thumb class="absolute right-0.5 z-20 cursor-grab touch-none border border-[var(--cafe-text)] rounded-sm"></div></div>';
 };
 /* Geometry is painted from the existing stream; no page-specific reads or app state. */
 onRender(function () {
   const stream = document.getElementById('stream'), track = document.querySelector('[data-v2-progress]');
   if (!stream || !track) return;
-  const keys = track.querySelectorAll('[data-message-piano-key]'), messages = stream.querySelectorAll('[data-message-id]');
-  const paint = function () {
-    const total = stream.scrollHeight, height = track.clientHeight, top = stream.getBoundingClientRect().top, offset = total - stream.clientHeight + stream.scrollTop;
-    keys.forEach(function (key) { const msg = Array.from(messages).find(function (m) { return m.dataset.messageId === key.dataset.messagePianoKey; }); if (!msg) return; key.style.top = (msg.getBoundingClientRect().top - top + offset) / total * height + 'px'; key.style.height = Math.max(2, msg.offsetHeight / total * height - 2) + 'px'; });
-    const thumb = track.querySelector('[data-message-piano-thumb]'); thumb.style.top = offset / total * height + 'px'; thumb.style.height = Math.max(18, stream.clientHeight / total * height) + 'px'; thumb.style.width = '16px';
+  const keys = track.querySelectorAll('[data-message-piano-key]'), byId = {};
+  stream.querySelectorAll('[data-stream] > [data-message-id]').forEach(function (m) { byId[m.dataset.messageId] = m; });   /* messages only: a quote inside a message carries the quoted id too */
+  const offset = function () { return stream.scrollHeight - stream.clientHeight + stream.scrollTop; };
+  /* The viewport box: centred on what is in view, kept inside the track (upstream piano geometry). */
+  const thumb = function () {
+    const total = stream.scrollHeight, height = track.clientHeight, box = track.querySelector('[data-message-piano-thumb]'), th = Math.min(height, Math.max(18, stream.clientHeight / total * height)), center = (offset() + stream.clientHeight / 2) / total * height;
+    box.style.top = Math.max(0, Math.min(center - th / 2, height - th)) + 'px'; box.style.height = th + 'px'; box.style.width = '16px';
   };
-  stream.onscroll = paint;
+  /* Keys tile the track in content proportion: each reaches the next message, so none overlaps; ink keeps a 1px gap once a key is 3px tall. */
+  const paint = function () {
+    const total = stream.scrollHeight, height = track.clientHeight, top = stream.getBoundingClientRect().top - offset();
+    /* A message the stream has not drawn yet (a long list fills in batches) has no place yet: its key waits hidden. */
+    const rows = Array.from(keys).map(function (key) { const m = byId[key.dataset.messagePianoKey]; key.style.visibility = m ? '' : 'hidden'; return m && { key: key, top: m.getBoundingClientRect().top - top, bottom: m.getBoundingClientRect().bottom - top }; }).filter(Boolean);
+    rows.forEach(function (r, i) {
+      const end = Math.min(total, Math.max(r.bottom, i + 1 < rows.length ? rows[i + 1].top : r.bottom)), kh = (end - r.top) / total * height, gap = kh >= 3 ? 1 : 0;
+      r.key.style.top = r.top / total * height + 'px'; r.key.style.height = kh + 'px'; r.key.style.borderBlock = gap / 2 + 'px solid transparent'; r.key.style.backgroundClip = 'padding-box';
+    });
+    thumb();
+  };
+  stream.onscroll = thumb;
   track.onpointerdown = function (e) {
     if (!e.target.closest('[data-message-piano-thumb]')) return;
     e.preventDefault(); const start=e.clientY, offset=stream.scrollTop, range=stream.scrollHeight-stream.clientHeight;

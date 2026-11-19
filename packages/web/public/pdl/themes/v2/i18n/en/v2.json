@@ -2385,7 +2385,7 @@
     "decide": "To decide",
     "decideEmpty": "Nothing is waiting for your decision.",
     "error": {
-      "partial": "Schedule source temporarily unavailable"
+      "partial": "Some sources are temporarily unavailable"
     },
     "review": "To review",
     "span": {
@@ -3255,7 +3255,13 @@
     "catalogRefresh": "Refresh model list",
     "catalogUnsupported": "This connection method cannot retrieve model lists",
     "identity": "Identity",
-    "voiceHelp": "Install and enable the voice service in Voice settings before configuring a member's voice."
+    "voiceHelp": "Install and enable the voice service in Voice settings before configuring a member's voice.",
+    "voicePick": {
+      "label": "Voice",
+      "error": "Couldn't read the voice list",
+      "none": "No candidate voices yet; you can fill one in below.",
+      "defaultVoice": "No voice of your own is set; speech uses the default voice."
+    }
   },
   "market": {
     "installed": "Installed",

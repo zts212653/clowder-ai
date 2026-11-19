@@ -202,7 +202,10 @@ function subscribeLocation(changed: () => void) {
 const browserLocation = () => window.location.pathname + window.location.search + window.location.hash;
 // The server render has no address after #; the console starts once the browser's full address (an export page) is known.
 const subscribeNever = () => () => {};
-type PendingThreadJump = { threadId: string; mid: string; catId?: string };
+type PendingThreadJump = { threadId: string; mid: string; catId?: string; block?: string };
+
+/** The upload address of an image the input got back from a saved draft: the draft keeps it by that address. */
+const draftImageUrl = new WeakMap<File, string>();
 
 /** Message images as files again, for a retry or a recalled message going back into the input. */
 async function downloadImages(urls: readonly string[], blocks: readonly MessageContent[] = []): Promise<File[]> {
@@ -283,15 +286,47 @@ export function PdlAppHost() {
   const exportAddress = readThreadExportAddress(new URL(browserPath, 'https://pdl.invalid'));
   const threadId = exportAddress?.threadId ?? getThreadIdFromPathname(browserPath);
   const pendingJump = useRef<PendingThreadJump | null>(null);
-  // An address that names a message (/thread/:id?message=… — links in messages, matter sources) opens that thread at
-  // that message, through the same jump as an in-app link. Each address is taken once.
+  // An address that names a message (/thread/:id?message=…&block=… — links in messages, matter sources) opens that
+  // thread at that message, and at that card part when it names one, through the same jump as an in-app link. Each
+  // address is taken once.
   const addressJump = useRef('');
   const addressQuery = new URL(browserPath, 'https://pdl.invalid').searchParams;
   const addressMid = addressQuery.get('message') ?? addressQuery.get('messageId');
+  const addressBlock = addressQuery.get('block');
   if (addressMid && addressJump.current !== browserPath) {
     addressJump.current = browserPath;
-    pendingJump.current = { threadId, mid: addressMid };
+    pendingJump.current = { threadId, mid: addressMid, ...(addressBlock ? { block: addressBlock } : {}) };
   }
+  // Where the reader is: once the conversation stops scrolling, the address names the message at the middle of the
+  // view (?message=…), or nothing at the latest. A refresh reopens there through the same address jump, which puts
+  // that message in the middle again, so the record stays put; writing the address is not itself a jump.
+  useEffect(() => {
+    const settle = (event: Event) => {
+      const stream = event.target;
+      if (!(stream instanceof HTMLElement) || stream.id !== 'stream') return;
+      const url = new URL(window.location.href);
+      if (!url.pathname.startsWith('/thread/')) return;
+      const view = stream.getBoundingClientRect(),
+        middle = (view.top + view.bottom) / 2;
+      const message =
+        -stream.scrollTop <= 2
+          ? undefined
+          : [
+              ...stream.querySelectorAll<HTMLElement>('[data-stream] > [data-mid], [data-stream] > [data-message-id]'),
+            ].find((m) => m.getBoundingClientRect().bottom >= middle);
+      const mid = message?.dataset.mid ?? message?.dataset.messageId;
+      url.searchParams.delete('messageId');
+      url.searchParams.delete('block');
+      if (mid) url.searchParams.set('message', mid);
+      else url.searchParams.delete('message');
+      const next = url.pathname + url.search + url.hash;
+      if (next === browserLocation()) return;
+      addressJump.current = next;
+      window.history.replaceState(window.history.state, '', next);
+    };
+    document.addEventListener('scrollend', settle, true);
+    return () => document.removeEventListener('scrollend', settle, true);
+  }, []);
   const [needed, setNeeded] = useState<ReadonlySet<string>>(new Set());
   return (
     <ThreadChatRuntimeProvider routeThreadId={threadId} neededSources={needed}>
@@ -527,8 +562,13 @@ function ChatBinding({
   const serverDraft = useServerComposerDraft({
     threadId,
     enabled: drafting && threadId !== 'default',
-    draft: { text: input, contexts, ...(reply ? { replyTo: reply.id } : {}) },
-    restore: (saved) => {
+    draft: {
+      text: input,
+      images: images.flatMap((file) => draftImageUrl.get(file) ?? []),
+      contexts,
+      ...(reply ? { replyTo: reply.id } : {}),
+    },
+    restore: (saved, current) => {
       setInput(saved.text);
       setContexts(saved.contexts);
       const message = saved.replyTo && useChatStore.getState().messages.find((m) => m.id === saved.replyTo);
@@ -537,6 +577,11 @@ function ChatBinding({
           .getState()
           .setReplyTo({ id: message.id, content: message.content, senderCatId: message.catId ?? null, threadId });
       else useChatStore.getState().clearReplyTo();
+      return downloadImages(saved.images).then((files) => {
+        if (!current()) return;
+        files.forEach((file, i) => draftImageUrl.set(file, saved.images[i]));
+        setImages(files);
+      });
     },
   });
   // Words, places and a quote handed to this conversation's input from elsewhere (a file, a work, a recall).
@@ -929,12 +974,16 @@ function ChatBinding({
       pendingJump.current = null;
       return;
     }
-    if (history.isLoadingHistory) return;
-    if (history.messages.some((m) => m.id === target.mid)) {
+    // Judged on the opened thread's own history: right after a switch the hook's fields can still be the previous
+    // thread's, and until its first page is read there is nothing to judge.
+    const own = useChatStore.getState().getThreadState(threadId);
+    if (own.isLoadingHistory || !own.messages.length) return;
+    if (own.messages.some((m) => m.id === target.mid)) {
       pendingJump.current = null;
       ui.current.pendingMid = target.mid;
+      ui.current.pendingBlock = target.block;
       if (engineMounted) window.clowderChat.update();
-    } else if (history.hasMore) {
+    } else if (own.hasMore) {
       void loadEarlier();
     } else {
       pendingJump.current = null;
@@ -1900,7 +1949,7 @@ function ChatBinding({
       }
       case 'jump': {
         if (args.thread && args.thread !== threadId) {
-          pendingJump.current = { threadId: args.thread, mid: args.mid };
+          pendingJump.current = { threadId: args.thread, mid: args.mid, ...(args.block ? { block: args.block } : {}) };
           pushThreadRouteWithHistory(args.thread, window);
           return;
         }
@@ -1911,6 +1960,7 @@ function ChatBinding({
           if ((await loadEarlier()) !== true) break;
         }
         ui.current.pendingMid = args.mid;
+        ui.current.pendingBlock = args.block;
         return;
       }
       case 'themePackExport':

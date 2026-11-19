@@ -5234,12 +5234,17 @@ pdl:
                 role: embed
       - $frag: v2.bind.v2Typed.2
     v2.bind.v2Typed.2:
-      type: typed
-      slot: chat.rich
-      of: "@rich.type"
-      data: "@rich"
-      blocks:
-        $frag: v2.bind.fields.3
+      type: component
+      use: v2Box
+      props:
+        key: "@key"
+        blocks:
+          - type: typed
+            slot: chat.rich
+            of: "@rich.type"
+            data: "@rich"
+            blocks:
+              $frag: v2.bind.fields.3
       when: "@rich"
     v2.bind.fields.3:
       - $frag: v2.bind.v2Box.4
@@ -5247,7 +5252,6 @@ pdl:
       type: component
       use: v2Box
       props:
-        key: rich
         blocks:
           $frag: v2.bind.fields.5
       when: "@rich"
@@ -9734,6 +9738,34 @@ pdl:
             props:
               rows:
                 - kind: field
+                  label: t:memberForm.voicePick.label
+                  id: f-vPick
+                  ctls:
+                    - type: component
+                      use: v2Select
+                      props:
+                        id: f-vPick
+                        value: $.form.voices.pick
+                        options: $.form.voices.options
+                        change: memberVoice
+                        label: t:memberForm.voicePick.label
+                      when: "!$.form.voices.error"
+                    - type: component
+                      use: v2Text
+                      props:
+                        text: t:memberForm.voicePick.error
+                        role: meta
+                      when: $.form.voices.error
+                    - type: component
+                      use: v2Action
+                      props:
+                        label: t:common.retry
+                        act: memberVoicesRetry
+                      when: $.form.voices.error
+                  foot:
+                    - text: t:memberForm.voicePick.none
+                      when: $.form.voices.none
+                - kind: field
                   label: t:memberForm.fields.language
                   id: f-vLang
                   control:
@@ -9778,6 +9810,8 @@ pdl:
                     - text: t:memberForm.access.text
                       tone: danger
                       when: $.form.invalid.vVoice
+                    - text: t:memberForm.voicePick.defaultVoice
+                      when: $.form.voices.defaultVoice
                 - kind: field
                   label: t:memberForm.fields.speechRate
                   id: f-vSpeed
@@ -16696,19 +16730,24 @@ pdl:
                   props:
                     from: "@embeds"
                     blocks:
-                      - type: typed
-                        slot: chat.rich
-                        of: "@rich.type"
-                        data: "@rich"
-                        blocks:
-                          - type: component
-                            use: v2Rich
-                            props:
+                      - type: component
+                        use: v2Box
+                        props:
+                          key: "@key"
+                          blocks:
+                            - type: typed
+                              slot: chat.rich
+                              of: "@rich.type"
                               data: "@rich"
-                              open:
-                                act: workOpen
-                                args:
-                                  i: "@work"
+                              blocks:
+                                - type: component
+                                  use: v2Rich
+                                  props:
+                                    data: "@rich"
+                                    open:
+                                      act: workOpen
+                                      args:
+                                        i: "@work"
                         when: "@rich"
                       - type: component
                         use: v2StatusText

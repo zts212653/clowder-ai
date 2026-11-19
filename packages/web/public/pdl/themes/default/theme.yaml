@@ -1961,6 +1961,40 @@ pdl:
         seven_day: t:accounts.quotaWindow.seven_day
         seven_day_overage_included: t:accounts.quotaWindow.fable
         _: "@label"
+    ACCOUNT_QUOTA:
+      type: text
+      variant: value
+      parts:
+        - parts: "@quotaData.items"
+          sep: " · "
+          each:
+            tone:
+              of: "@low"
+              map:
+                "true": warn
+                _: ""
+            parts:
+              - text:
+                  $frag: QUOTA_WINDOW
+              - text: " "
+              - text:
+                  t: settings.quotaLeft
+                  args:
+                    - "@left"
+      tip:
+        of: "@quotaData.resets"
+        item:
+          of: "@at"
+          gte: 0
+          map:
+            "true":
+              t: accounts.quotaResets
+              args:
+                - of: "@at"
+                  fmt: stamp
+            _: "@"
+        sep: " · "
+      when: "@quotaData.items"
     EXEC_MEMBER_ITEM:
       overview:
         - kind: usage
@@ -7606,7 +7640,7 @@ pdl:
           open: "@open"
     CHAT_RICH:
       type: box
-      key: rich
+      key: "@key"
       when: "@rich"
       blocks:
         - type: view
@@ -8529,6 +8563,12 @@ pdl:
           row:
             layout: two
             key: "@key"
+            titleWrap:
+              of: "@kind"
+              map:
+                commentary: open
+                thinking: open
+                _: auto
             lead:
               glyph:
                 of: "@kind"
@@ -23625,6 +23665,11 @@ pdl:
               placeholder: t:accounts.searchPlaceholder
               value: $.q
               input: accQ
+            - type: button
+              iconOnly: true
+              icon: refresh
+              label: t:accounts.quotaRefreshAll
+              act: accQuotaAll
         - type: section
           title:
             t: settingsUi.account.groupTitle.login
@@ -34760,6 +34805,8 @@ pdl:
           variant: meta
           when: "!@renaming"
       sub:
+        - control:
+            $frag: ACCOUNT_QUOTA
         - text:
             of: "@agyState"
             map:
@@ -34955,39 +35002,7 @@ pdl:
                   when:
                     - "@quotaData.out"
                     - "!@quotaData.fail"
-                - type: text
-                  variant: value
-                  parts:
-                    - parts: "@quotaData.items"
-                      sep: " · "
-                      each:
-                        tone:
-                          of: "@low"
-                          map:
-                            "true": warn
-                            _: ""
-                        parts:
-                          - text:
-                              $frag: QUOTA_WINDOW
-                          - text: " "
-                          - text:
-                              t: settings.quotaLeft
-                              args:
-                                - "@left"
-                  tip:
-                    of: "@quotaData.resets"
-                    item:
-                      of: "@at"
-                      gte: 0
-                      map:
-                        "true":
-                          t: accounts.quotaResets
-                          args:
-                            - of: "@at"
-                              fmt: stamp
-                        _: "@"
-                    sep: " · "
-                  when: "@quotaData.items"
+                - $frag: ACCOUNT_QUOTA
                 - type: text
                   variant: value
                   text:

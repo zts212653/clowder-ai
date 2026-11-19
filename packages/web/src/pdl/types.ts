@@ -48,6 +48,7 @@ export interface ChatUiState {
   queueOpen: boolean;
   clock: number; // the half-minute clock: text that changes with time (the replying line) reads it
   pendingMid?: string;
+  pendingBlock?: string;
   lb?: {
     mid: string;
     block: string;

@@ -215,14 +215,15 @@ form.search { margin: 0; }
 /* from cafe.css */ .cafe-acts { position: absolute; top: -18px; right: 0; display: flex; gap: 0; padding: var(--sp-hair); border-radius: var(--r-m); background: var(--bg-raised); box-shadow: var(--shadow-raised); opacity: 0; z-index: var(--z-raised); }
 /* from cafe.css */ @media (hover: none) { .cafe-acts { position: static; opacity: 1; box-shadow: none; background: none; align-self: flex-end; } .cafe-m { flex-wrap: wrap; } }
 /* from cafe.css */ .cafe-sysc > .ic { margin-top: var(--sp-hair); color: var(--fg-muted); }
-.cafe-tick { position: relative; flex: none; display: grid; place-items: center; height: calc(3px + var(--sp-xs)); width: var(--ic-m); margin-inline: auto; border: 0; padding: 0; background: none; cursor: pointer; --tick-w: calc(2 * var(--unit)); }
-.cafe-tick::before { content: ""; width: var(--tick-w); height: 3px; border-radius: var(--r-xs); background: var(--c, var(--identity-fallback)); filter: grayscale(var(--tick-veil)); opacity: var(--op-wash); transition: width var(--dur-fast), filter var(--dur-fast), opacity var(--dur-fast); pointer-events: none; }
+/* 一条消息一格：放得下时每格一样高、整列居中；消息多到放不下时每格一起变矮，整列正好是导航的高度（不伸出去，格子不叠） */
+.cafe-tick { position: relative; flex: 0 1 calc(3px + var(--sp-xs)); min-height: 0; display: grid; place-items: center; width: var(--ic-m); margin-inline: auto; border: 0; padding: 0; background: none; cursor: pointer; --tick-w: calc(2 * var(--unit)); }
+.cafe-tick::before { content: ""; width: var(--tick-w); height: min(3px, 100%); border-radius: var(--r-xs); background: var(--c, var(--identity-fallback)); filter: grayscale(var(--tick-veil)); opacity: var(--op-wash); transition: width var(--dur-fast), filter var(--dur-fast), opacity var(--dur-fast); pointer-events: none; }
 .cafe-tick:has(+ .cafe-tick:hover), .cafe-tick:hover + .cafe-tick { --tick-w: calc(3 * var(--unit)); }
 .cafe-tick:hover, .cafe-tick:focus-visible { --tick-w: calc(4 * var(--unit)); }
 .cafe-tick:is([data-vis], :hover, :focus-visible)::before { filter: none; opacity: 1; }   /* 视口外：成员色上蒙一层灰（还看得出是谁），视口里和悬停时是原色 */
-.cafe-tick.s::before { height: 2px; }
+.cafe-tick.s::before { height: min(2px, 100%); }
 .cafe-tick.older { cursor: default; }
-.cafe-tick.older::before { height: 2px; background: repeating-linear-gradient(90deg, var(--line-strong) 0 4px, transparent 4px 7px); }
+.cafe-tick.older::before { height: min(2px, 100%); background: repeating-linear-gradient(90deg, var(--line-strong) 0 4px, transparent 4px 7px); }
 /* from cafe.css */ .composer-wrap { padding: 0 var(--gutter-main) var(--sp-l); flex-shrink: 0; position: relative; }
 /* from cafe.css */ .cafe-latest { position: relative; z-index: var(--z-raised); height: var(--ctl-s); padding: 0 var(--sp-m); border: 0; border-radius: var(--r-full); background: var(--surf-secondary); backdrop-filter: blur(var(--blur-soft)); -webkit-backdrop-filter: blur(var(--blur-soft)); box-shadow: var(--shadow-low); color: var(--fg-strong); font-size: var(--fs-s); display: inline-flex; align-items: center; gap: var(--sp-xs); cursor: pointer; flex: none; scale: var(--jump-scale, 0); animation: var(--jump-anim, jump-vis linear forwards);   /* forwards：滚到最顶（时间线 100%）时仍然露出——100% 正好是区间的终点 */ animation-timeline: --chat-stream; animation-range: 240px 100% }
 /* from cafe.css */ .composer textarea[disabled], .composer .input-title[disabled] { opacity: var(--op-disabled); }
