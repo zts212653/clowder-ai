@@ -61,7 +61,19 @@ test('DSH discovery, creation and both model catalog paths never initialize an a
   });
   syncBuiltinESMExports();
   const app = Fastify();
-  await app.register(catsRoutes);
+  let generation: string | undefined = 'fixture-dsh:1';
+  let pluginProbes = 0;
+  await app.register(catsRoutes, {
+    runtimeCatalog: {
+      modelCatalogGeneration: async () => generation,
+      discoverModelCatalog: async (target) => {
+        pluginProbes++;
+        assert.equal(target.kind, 'acp');
+        assert.deepEqual(target.args, [entry, '--profile', 'acp']);
+        return { status: 'live', models: [{ value: 'fixture-dsh', label: 'Fixture DSH' }] };
+      },
+    },
+  });
   const headers = { 'x-cat-cafe-user': 'test' };
   const profile = join(home, 'profiles/acp/package.json');
   const query = (runtimeId: string) =>
@@ -199,11 +211,25 @@ test('DSH discovery, creation and both model catalog paths never initialize an a
     assert.equal(replay.json().cat.id, created.json().cat.id);
     assert.equal(readFileSync(profile, 'utf8'), '{broken');
     assert.equal(spawns, 0, 'recovery must return the persisted member without starting DSH');
+    assert.equal(
+      pluginProbes,
+      0,
+      'invalid and absent profiles are rejected before the active plugin is asked to probe',
+    );
     writeFileSync(profile, JSON.stringify({ dsh: { profile: { bundles: ['@deepseek-ai/dsh-acp-app'] } } }));
+    generation = undefined;
+    const disabled = await query('acp:dsh-boundary-fixture');
+    assert.equal(disabled.json().message, 'plugin_unavailable', disabled.body);
+    assert.equal(pluginProbes, 0);
+    assert.equal(spawns, 0);
+
+    generation = 'fixture-dsh:2';
     const configured = await query('acp:dsh-boundary-fixture');
-    assert.equal(configured.statusCode, 200);
-    assert.ok(spawns > 0, 'a valid profile must reach the guarded probe, proving the gate is not unconditional');
-    assert.equal(configured.json().message, 'discovery_failed');
+    assert.equal(configured.statusCode, 200, configured.body);
+    assert.equal(configured.json().status, 'live', configured.body);
+    assert.equal(configured.json().models[0].value, 'fixture-dsh');
+    assert.equal(pluginProbes, 1, 'a valid profile reaches the active plugin exactly once');
+    assert.equal(spawns, 0, 'the route cannot launch a DSH model probe directly');
   } finally {
     await app.close();
     mock.restoreAll();
