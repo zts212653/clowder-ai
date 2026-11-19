@@ -10,7 +10,7 @@ import {
 } from '../src/domains/plugin/host-inventory/contract-policy.js';
 import { MemoryPluginInventoryStore } from '../src/domains/plugin/host-inventory/stores.js';
 
-const currentContract = '0.3.3-candidate.1';
+const currentContract = '0.3.3-candidate.2';
 
 test('source policy matches the exact locked contract and rejects the next candidate', async () => {
   const packageJson = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8')) as {
@@ -18,26 +18,27 @@ test('source policy matches the exact locked contract and rejects the next candi
   };
   assert.equal(
     packageJson.dependencies['@clowder-ai/plugin-contract'],
-    'file:vendor/clowder-ai-plugin-contract-0.3.3-candidate.1-f202-2c14f0f2fda7.tgz',
+    'file:vendor/clowder-ai-plugin-contract-0.3.3-candidate.2-f309-4ae529644b62.tgz',
   );
   const archive = await readFile(
-    new URL('../vendor/clowder-ai-plugin-contract-0.3.3-candidate.1-f202-2c14f0f2fda7.tgz', import.meta.url),
+    new URL('../vendor/clowder-ai-plugin-contract-0.3.3-candidate.2-f309-4ae529644b62.tgz', import.meta.url),
   );
   assert.equal(
     createHash('sha256').update(archive).digest('hex'),
-    'd8793602f937e5d52cf34bf7fdd2de90f2d5c3ec7efe9f770f3cea004c069204',
+    '9a43d41964560a96d7f76eb73a19c53b43da4baefdba00cdc537dbaeffaae8a1',
   );
   assert.equal(PLUGIN_CONTRACT_PACKAGE_VERSION, currentContract);
+  assert.equal(isManifestContractSupported('0.3.3-candidate.1', PLUGIN_MANIFEST_CONTRACT_RANGE), true);
   assert.equal(isManifestContractSupported(currentContract, PLUGIN_MANIFEST_CONTRACT_RANGE), true);
-  assert.equal(isManifestContractSupported('0.3.3-candidate.2', PLUGIN_MANIFEST_CONTRACT_RANGE), false);
+  assert.equal(isManifestContractSupported('0.3.3-candidate.3', PLUGIN_MANIFEST_CONTRACT_RANGE), false);
 });
 
 test('snapshot recovery applies the same current contract policy', async () => {
   const manifest = {
-    pluginId: 'dev.clowder.candidate1',
+    pluginId: 'dev.clowder.candidate2',
     version: '1.0.0',
     contractVersion: currentContract,
-    name: 'Candidate 1 fixture',
+    name: 'Candidate 2 fixture',
     features: [{ id: 'messaging', name: 'Messaging', resources: [] }],
     runtime: { transport: 'builtin' as const },
   };
@@ -46,7 +47,7 @@ test('snapshot recovery applies the same current contract policy', async () => {
       schemaVersion: 1,
       packages: [
         {
-          packageDigest: `sha512-${createHash('sha512').update('candidate-1').digest('base64')}`,
+          packageDigest: `sha512-${createHash('sha512').update('candidate-2').digest('base64')}`,
           pluginId: manifest.pluginId,
           version: manifest.version,
           contractVersion: manifest.contractVersion,
