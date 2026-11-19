@@ -5,6 +5,7 @@ import { nativeKimiLoginCommand } from './native-kimi-login.js';
 export type NativeReadiness = {
   status: 'login_required' | 'configured' | 'unknown' | 'not_installed';
   checkedAt: number;
+  probeFailed?: true;
   loginCommand?: string;
   loginShell?: 'powershell' | 'sh';
 };
@@ -66,9 +67,11 @@ export async function nativeRuntimeReadiness(
   const promise = inspectNativeLogin(target.id, target.command)
     .catch(() => null)
     .then((observed) => {
+      const status = nativeAuthenticationStatus(target.id, observed);
       const value: NativeReadiness = {
-        status: nativeAuthenticationStatus(target.id, observed),
+        status,
         checkedAt: Date.now(),
+        ...(status === 'unknown' ? { probeFailed: true } : {}),
         loginCommand: target.id === 'claude' ? 'claude auth login' : 'codex login',
       };
       const oldestKey = cache.keys().next().value;

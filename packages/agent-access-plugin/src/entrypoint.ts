@@ -147,7 +147,9 @@ export default {
               return {
                 candidates: observations.flatMap((result) => (result.status === 'fulfilled' ? [result.value] : [])),
                 partialFailures: observations.flatMap((result, index) =>
-                  result.status === 'rejected' ? [{ id: runtimes[index].id }] : [],
+                  result.status === 'rejected' || result.value.readiness.probeFailed
+                    ? [{ id: runtimes[index].id }]
+                    : [],
                 ),
               };
             },

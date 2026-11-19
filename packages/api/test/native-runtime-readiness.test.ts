@@ -30,6 +30,10 @@ test('login probe honors the shell required by a Windows fallback spawn plan', a
     const result = await nativeRuntimeReadiness({ id: 'claude', installed: true, command }, root);
     assert.equal(result.status, 'configured');
     assert.deepEqual(JSON.parse(readFileSync(marker, 'utf8')), ['auth', 'status', '--json']);
+    writeFileSync(script, 'process.exitCode = 2;');
+    const unavailable = await nativeRuntimeReadiness({ id: 'claude', installed: true, command }, root, true);
+    assert.equal(unavailable.status, 'unknown');
+    assert.equal(unavailable.probeFailed, true);
   } finally {
     for (const [key, value] of Object.entries(original)) {
       if (value === undefined) delete process.env[key];
