@@ -1,0 +1,186 @@
+import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import test from 'node:test';
+import { findScheduledRun, prepareDesktop, stageNightlyReport } from './nightly-desktop.mjs';
+
+test('the Codex scheduled entry selects only the current Shanghai calendar day', () => {
+  const repository = 'zts212653/clowder-ai';
+  const now = new Date('2026-11-06T16:10:00Z');
+  const yesterday = { id: 100, event: 'schedule', created_at: '2026-11-05T16:08:00Z' };
+  const today = { id: 101, event: 'schedule', created_at: '2026-11-06T16:08:00Z' };
+  const gh = (workflow_runs) => (args) => {
+    assert.deepEqual(args, [
+      'api',
+      `repos/${repository}/actions/workflows/desktop-nightly.yml/runs?event=schedule&per_page=10`,
+    ]);
+    return JSON.stringify({ workflow_runs });
+  };
+  assert.equal(findScheduledRun(repository, now, gh([today, yesterday])), '101');
+  assert.throws(() => findScheduledRun(repository, now, gh([yesterday])), /2026-11-07/);
+});
+
+test('desktop preparation stages the same attempt and rejects different installer bytes', async (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'desktop-prepare-test-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const repo = 'zts212653/clowder-ai';
+  const source = 'a'.repeat(40);
+  const catalogRevision = 'b'.repeat(40);
+  const platform = 'windows-x64';
+  const digest = createHash('sha256').update('candidate bytes').digest('hex');
+  const report = {
+    runId: '123',
+    attempt: '2',
+    source,
+    catalogRevision,
+    packageVersion: '1.14.0',
+    platforms: [platform],
+    cases: [{ id: 'DESKTOP-ONBOARDING', platform, executor: 'computer-use' }],
+  };
+  const gh =
+    (bytes, reportHasHash = false, extraCases = [], publishedHash) =>
+    (args) => {
+      if (args[0] === 'api') {
+        return JSON.stringify({
+          status: 'completed',
+          path: '.github/workflows/desktop-nightly.yml',
+          head_sha: catalogRevision,
+          run_attempt: 2,
+        });
+      }
+      const [artifact, , destination] = args.slice(-3);
+      fs.mkdirSync(destination, { recursive: true });
+      if (artifact === 'desktop-nightly-report-attempt-2') {
+        fs.writeFileSync(
+          path.join(destination, 'report.json'),
+          JSON.stringify({
+            ...report,
+            cases: [...report.cases, ...extraCases],
+            packageHashes: publishedHash ? { [platform]: publishedHash } : undefined,
+          }),
+        );
+        if (reportHasHash) {
+          const installer = path.join(destination, 'desktop-evidence-windows-x64-attempt-2', 'installer');
+          fs.mkdirSync(installer, { recursive: true });
+          fs.writeFileSync(path.join(installer, 'distribution-sha256.json'), JSON.stringify({ Hash: digest }));
+        }
+      } else if (artifact === 'desktop-evidence-windows-x64-attempt-2') {
+        assert.equal(reportHasHash, false, 'Do not download over checksums already staged by the report');
+        assert.equal(publishedHash, undefined, 'A build hash must work without native verifier evidence');
+        fs.mkdirSync(path.join(destination, 'installer'));
+        fs.writeFileSync(
+          path.join(destination, 'installer', 'distribution-sha256.json'),
+          JSON.stringify({ Hash: digest.toUpperCase() }),
+        );
+      } else {
+        assert.equal(artifact, 'windows-installer-1.14.0-attempt-2');
+        fs.writeFileSync(path.join(destination, 'ClowderAI-Setup-1.14.0.exe'), bytes);
+      }
+      return '';
+    };
+
+  const coordinator = path.join(root, 'coordinator');
+  const calls = [];
+  const staged = stageNightlyReport(repo, '123', coordinator, (args) => {
+    calls.push(args);
+    return gh('unused', true)(args);
+  });
+  assert.equal(staged.report.attempt, '2');
+  assert.deepEqual(
+    calls.filter(([cmd]) => cmd === 'run').map((args) => args.at(-3)),
+    ['desktop-nightly-report-attempt-2'],
+  );
+  assert.equal(fs.existsSync(path.join(coordinator, 'package')), false);
+  const stagedWorker = await prepareDesktop(
+    repo,
+    '123',
+    platform,
+    path.join(root, 'staged-worker'),
+    gh('candidate bytes', true),
+  );
+  assert.equal(stagedWorker.packageSha256, digest);
+  const builderOnly = await prepareDesktop(
+    repo,
+    '123',
+    platform,
+    path.join(root, 'builder-only'),
+    gh('candidate bytes', false, [], digest),
+  );
+  assert.equal(builderOnly.packageSha256, digest);
+  await assert.rejects(
+    prepareDesktop(
+      repo,
+      '123',
+      platform,
+      path.join(root, 'conflicting-hashes'),
+      gh('candidate bytes', true, [], 'd'.repeat(64)),
+    ),
+    /build and native verifier hashes disagree/,
+  );
+  assert.equal(fs.existsSync(path.join(root, 'conflicting-hashes', 'package')), false);
+
+  const ready = await prepareDesktop(repo, '123', platform, path.join(root, 'ready'), gh('candidate bytes'));
+  assert.equal(ready.packageSha256, digest);
+  assert.equal(ready.source, source);
+  assert.equal(ready.attempt, '2');
+  assert.deepEqual(
+    ready.cases.map(({ id }) => id),
+    ['DESKTOP-ONBOARDING'],
+  );
+  const full = await prepareDesktop(
+    repo,
+    '123',
+    platform,
+    path.join(root, 'full'),
+    gh('candidate bytes', true, [
+      { id: 'DESKTOP-WORKS-PAGINATION', platform, executor: 'manual' },
+      { id: 'WIN-CLEAN-INSTALL', platform, executor: 'windows-installer' },
+      { id: 'DESKTOP-UPGRADE', platform: 'macos-arm64', executor: 'manual' },
+    ]),
+  );
+  assert.deepEqual(
+    full.cases.map(({ id }) => id),
+    ['DESKTOP-ONBOARDING', 'DESKTOP-WORKS-PAGINATION'],
+  );
+  await assert.rejects(
+    prepareDesktop(repo, '123', platform, path.join(root, 'wrong'), gh('other bytes')),
+    /Candidate package hash mismatch/,
+  );
+  assert.equal(fs.existsSync(path.join(root, 'wrong', 'desktop-plan.json')), false);
+
+  const blocked = { ...report, source: null, packageVersion: undefined, blocker: 'candidate-source-unavailable' };
+  const blockedGh = (args) => {
+    if (args[0] === 'api') return gh('unused')(args);
+    assert.equal(args.at(-3), 'desktop-nightly-report-attempt-2');
+    fs.writeFileSync(path.join(args.at(-1), 'report.json'), JSON.stringify(blocked));
+    return '';
+  };
+  assert.equal(stageNightlyReport(repo, '123', path.join(root, 'blocked-report'), blockedGh).report.source, null);
+  await assert.rejects(
+    prepareDesktop(repo, '123', platform, path.join(root, 'blocked-worker'), blockedGh),
+    /candidate-source-unavailable/,
+  );
+  assert.equal(fs.existsSync(path.join(root, 'blocked-worker', 'package')), false);
+  const identity = { platform, code: 'windows-installed-identity' };
+  await assert.rejects(
+    prepareDesktop(
+      repo,
+      '123',
+      platform,
+      path.join(root, 'wrong-identity'),
+      gh('candidate bytes', true, [{ ...identity, executor: 'windows-installer' }]),
+    ),
+    /platform verifier rejected the installed candidate identity/,
+  );
+  assert.equal(fs.existsSync(path.join(root, 'wrong-identity', 'package')), false);
+  const portableFailed = await prepareDesktop(
+    repo,
+    '123',
+    platform,
+    path.join(root, 'portable-rejected'),
+    gh('candidate bytes', true, [{ ...identity, executor: 'windows-portable' }]),
+  );
+  assert.equal(portableFailed.packageSha256, digest);
+});

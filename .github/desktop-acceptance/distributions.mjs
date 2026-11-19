@@ -25,14 +25,14 @@ export function cleanupConfirmed(receipt, kind, attemptId) {
   );
 }
 
-export async function verifyDistributions(root, execute) {
+export async function verifyDistributions(root, execute, kinds = ['installer', 'portable']) {
   const evidence = path.join(root, 'evidence');
   fs.mkdirSync(evidence, { recursive: true });
   const output = path.join(evidence, 'distribution-results.json');
   const attempts = new Map();
   const project = (checks) => checks.map((check) => ({ ...check, attemptId: attempts.get(check.name) }));
   const result = await collectChecks(
-    ['installer', 'portable'],
+    kinds,
     async (kind) => {
       const attemptId = randomUUID();
       attempts.set(kind, attemptId);
@@ -65,17 +65,27 @@ export async function verifyDistributions(root, execute) {
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const root = candidateRoot(process.env.CANDIDATE_ROOT, process.env.RUNNER_TEMP);
-  await verifyDistributions(root, async (kind, attemptId) => {
-    const script = fileURLToPath(new URL('./windows.ps1', import.meta.url));
-    const child = spawnSync(
-      'pwsh',
-      ['-NoProfile', '-NonInteractive', '-File', script, '-Distribution', kind, '-AttemptId', attemptId],
-      {
-        stdio: 'inherit',
-        shell: false,
-      },
-    );
-    if (child.error) throw child.error;
-    assert.equal(child.status, 0, `Native ${kind} verification failed`);
-  });
+  const kinds = process.argv.slice(2);
+  assert.ok(
+    kinds.every((kind) => ['installer', 'portable'].includes(kind)),
+    'Invalid distribution',
+  );
+  assert.equal(new Set(kinds).size, kinds.length, 'Duplicate distribution');
+  await verifyDistributions(
+    root,
+    async (kind, attemptId) => {
+      const script = fileURLToPath(new URL('./windows.ps1', import.meta.url));
+      const child = spawnSync(
+        'pwsh',
+        ['-NoProfile', '-NonInteractive', '-File', script, '-Distribution', kind, '-AttemptId', attemptId],
+        {
+          stdio: 'inherit',
+          shell: false,
+        },
+      );
+      if (child.error) throw child.error;
+      assert.equal(child.status, 0, `Native ${kind} verification failed`);
+    },
+    kinds.length ? kinds : undefined,
+  );
 }
