@@ -122,14 +122,18 @@ type OpenCodeLaunchPlanner = (input: OpenCodeLaunchPlanInput) => Promise<{
   normalizeEvent?: (event: unknown, knownCredentials?: readonly string[]) => Promise<unknown>;
 }>;
 
-type OpenCodeFinalizerPlanner = (input: {
-  prompt: string;
-  model: string;
-  finalizerAgent: string;
-  sessionId?: string;
-  transportArgs?: readonly string[];
-  pureSupported?: boolean;
-}) => Promise<{ args: string[]; managedArgvFlags: string[] }>;
+type OpenCodeFinalizerPlanner = (
+  input: {
+    prompt: string;
+    model: string;
+    finalizerAgent: string;
+    sessionId?: string;
+    transportArgs?: readonly string[];
+    pureSupported?: boolean;
+  },
+  /** The main run's activation lease; the recovery plan must live under the same one. */
+  lease?: { assertCurrent?: () => Promise<void> },
+) => Promise<{ args: string[]; managedArgvFlags: string[] }>;
 
 interface OpenCodeAgentServiceOptions {
   catId?: CatId;
@@ -248,6 +252,50 @@ function isPermanentOpenCodeProviderFailure(event: unknown, reasonCode: string |
     statusCode === 403 ||
     statusCode === 404
   );
+}
+
+/**
+ * The plan owns argv shape, but the Host owns the authorization facts behind it: which
+ * agent a read-only run may use, and which server it may talk to. A plan that returns
+ * different values is not a style variation — it would escalate a read-only turn into a
+ * writable one, or reach a server the Host never approved. Returns the reason to refuse,
+ * or null when the plan consumed the Host's facts as given.
+ */
+function findOpenCodePlanAuthorizationViolation(
+  args: readonly string[],
+  approved: { readOnly: boolean; readOnlyAgent: string; transportArgs: readonly string[] },
+): string | null {
+  const agentIndex = args.findIndex((arg) => arg === '--agent' || arg.startsWith('--agent='));
+  const agentValue =
+    agentIndex >= 0
+      ? args[agentIndex].includes('=')
+        ? args[agentIndex].split('=')[1]
+        : args[agentIndex + 1]
+      : undefined;
+  const serverIndex = args.findIndex((arg) => arg === '--server' || arg.startsWith('--server='));
+
+  if (approved.readOnly) {
+    // The read-only agent is the whole enforcement mechanism for this policy; a plan
+    // that names another agent or omits it is running a different policy than approved.
+    if (agentValue !== approved.readOnlyAgent) return 'read_only_agent_substituted';
+    // A shared server was already refused before planning; reaching one here means the
+    // plan added a transport the Host never resolved.
+    if (serverIndex >= 0) return 'unapproved_server_transport';
+    return null;
+  }
+
+  // Outside the read-only policy the agent is not a Host fact, but a plan still must not
+  // invent a server the user never configured.
+  const approvedServers = new Set(
+    approved.transportArgs.flatMap((part, index, all) =>
+      getCliFlagName(part) === '--server' ? [part.includes('=') ? part.split('=')[1] : all[index + 1]] : [],
+    ),
+  );
+  if (serverIndex >= 0) {
+    const planned = args[serverIndex].includes('=') ? args[serverIndex].split('=')[1] : args[serverIndex + 1];
+    if (planned === undefined || !approvedServers.has(planned)) return 'unapproved_server_transport';
+  }
+  return null;
 }
 
 /**
@@ -457,6 +505,14 @@ export class OpenCodeAgentService implements L0InjectableAgentService {
           ...(runDefaults.pure !== undefined ? { pureSupported: runDefaults.pure } : {}),
           readOnlyAgent: OPENCODE_READ_ONLY_AGENT,
         });
+        // Judge the plan against the facts this Host already approved before anything
+        // downstream trusts it: the read-only agent identity and the resolved transport.
+        const violation = findOpenCodePlanAuthorizationViolation(plan.args, {
+          readOnly,
+          readOnlyAgent: OPENCODE_READ_ONLY_AGENT,
+          transportArgs: runDefaults.transportArgs,
+        });
+        if (violation) throw new Error(`opencode_plan_authorization_violation:${violation}`);
         args = plan.args;
         plannedManagedFlags = plan.managedArgvFlags;
         plannedNormalizeEvent = plan.normalizeEvent;
@@ -929,14 +985,17 @@ export class OpenCodeAgentService implements L0InjectableAgentService {
     if (this.planFinalizer) {
       try {
         plannedFinalizerArgs = (
-          await this.planFinalizer({
-            prompt: finalizerPrompt,
-            model: params.effectiveModel,
-            finalizerAgent,
-            ...(params.sessionId ? { sessionId: params.sessionId } : {}),
-            ...(transportArgs.length > 0 ? { transportArgs } : {}),
-            ...(params.pureSupported !== undefined ? { pureSupported: params.pureSupported } : {}),
-          })
+          await this.planFinalizer(
+            {
+              prompt: finalizerPrompt,
+              model: params.effectiveModel,
+              finalizerAgent,
+              ...(params.sessionId ? { sessionId: params.sessionId } : {}),
+              ...(transportArgs.length > 0 ? { transportArgs } : {}),
+              ...(params.pureSupported !== undefined ? { pureSupported: params.pureSupported } : {}),
+            },
+            { assertCurrent: params.assertCurrent },
+          )
         ).args;
       } catch (err) {
         // The package could not plan the recovery run (for example an older package

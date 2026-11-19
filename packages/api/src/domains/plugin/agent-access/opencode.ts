@@ -60,6 +60,10 @@ export function createAgentAccessOpenCodeLaunchPlanner(
           client: 'opencode',
           event: sanitizeRawEvent(event, knownCredentials),
         });
+        // Re-read after the await: the worker round trip is a suspension point, and a
+        // package replaced during it must not keep describing the turn. Kimi checks on
+        // both sides of its call for the same reason.
+        await assertCurrent();
         return agentAccessOpenCodeEventSchema.parse(response);
       },
     };
@@ -71,7 +75,15 @@ export function createAgentAccessOpenCodeFinalizerPlanner(
   inventory: Pick<PluginInventoryStore, 'readCurrentAuthority'>,
   runtime: Pick<PluginRuntimeCarrierRouter, 'invoke'> & Partial<Pick<PluginRuntimeCarrierRouter, 'exposesAction'>>,
 ) {
-  return async (launch: AgentAccessOpenCodeFinalizer) => {
+  return async (
+    launch: AgentAccessOpenCodeFinalizer,
+    lease?: { assertCurrent?: () => Promise<void> },
+  ) => {
+    // The recovery run belongs to the turn the main plan was built for. Re-reading
+    // "whatever is active now" would let a replacement that landed mid-turn plan the
+    // recovery, while the turn's main run is still pinned to the earlier package.
+    await lease?.assertCurrent?.();
+
     const instance = (await inventory.readCurrentAuthority(AGENT_ACCESS_PLUGIN_ID))?.instance;
     if (!instance || instance.activationState !== 'enabled' || instance.runtimeState !== 'healthy')
       throw new Error('session_implementation_unavailable');
@@ -82,6 +94,9 @@ export function createAgentAccessOpenCodeFinalizerPlanner(
     const exposes = await runtime.exposesAction?.(instance.pluginInstanceId, 'planFinalizer');
     if (!exposes) throw new Error('session_implementation_unavailable');
 
+    // Same lease, checked again across the invoke: the worker round trip is a
+    // suspension point like any other.
+    await lease?.assertCurrent?.();
     const result = await runtime.invoke(instance.pluginInstanceId, 'planFinalizer', {
       operation: 'plan_native_finalizer',
       client: 'opencode',

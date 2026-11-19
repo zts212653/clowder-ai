@@ -209,3 +209,80 @@ describe('OpenCode raw events sent to the package', () => {
     );
   });
 });
+
+describe('the generation is rechecked after the worker round trip', () => {
+  /**
+   * The worker call is a suspension point. A package replaced while the Host is
+   * awaiting the parse result must not keep describing the rest of the turn — the
+   * same reason the Kimi planner checks on both sides of its invoke.
+   */
+  test('a package replaced during parsing stops describing the turn', async () => {
+    let generation = 1;
+    const readCurrentAuthority = async () => authority({ lifecycleRevision: generation });
+    const plan = createAgentAccessOpenCodeLaunchPlanner(
+      { readCurrentAuthority },
+      {
+        invoke: async (_id, operation) => {
+          if (operation === 'parseNativeEvent') {
+            // The replacement lands while this call is in flight.
+            generation = 2;
+            return { kind: 'text', text: 'hi', timestamp: 1 };
+          }
+          return { args: ['run', '--format', 'json', '--', 'p'], managedArgvFlags: [] };
+        },
+      },
+    );
+
+    const planned = await plan({ prompt: 'p', readOnlyAgent: 'a' });
+
+    await assert.rejects(
+      () => planned.normalizeEvent({ type: 'text', part: { type: 'text', text: 'hi' } }),
+      /session_implementation_unavailable/,
+      'a replacement during the parse must invalidate the result',
+    );
+  });
+});
+
+describe('the recovery plan runs under the main run activation lease', () => {
+  /**
+   * The recovery run belongs to the same turn as the main run, so it must plan against
+   * the activation the main plan was built on. Re-reading "whatever is active now" would
+   * let a replacement that happened mid-turn serve the recovery with its own plan, even
+   * though the turn's main run is still pinned to the earlier package.
+   */
+  test('a replaced package is not asked to plan the recovery run', async () => {
+    let generation = 1;
+    const readCurrentAuthority = async () => authority({ lifecycleRevision: generation });
+    let finalizerInvocations = 0;
+    const { createAgentAccessOpenCodeFinalizerPlanner } = await import(
+      '../dist/domains/plugin/agent-access/opencode.js'
+    );
+    const planRecovery = createAgentAccessOpenCodeFinalizerPlanner(
+      { readCurrentAuthority },
+      {
+        invoke: async (_id, operation) => {
+          if (operation === 'planFinalizer') {
+            finalizerInvocations++;
+            return { args: ['run', '--format', 'json', '--', 'q'], managedArgvFlags: [] };
+          }
+          return { args: ['run', '--format', 'json', '--', 'p'], managedArgvFlags: [] };
+        },
+        exposesAction: async () => true,
+      },
+    );
+
+    // The main run pinned generation 1; a replacement moved the active one to 2.
+    const pinned = async () => {
+      if (generation !== 1) throw new Error('session_implementation_unavailable');
+    };
+    generation = 2;
+
+    await assert.rejects(
+      () =>
+        planRecovery({ prompt: 'q', model: 'm', finalizerAgent: 'f' }, { assertCurrent: pinned }),
+      /session_implementation_unavailable/,
+      'the recovery must not be planned by a package outside the main lease',
+    );
+    assert.equal(finalizerInvocations, 0, 'a package outside the lease must not even be invoked');
+  });
+});
