@@ -128,7 +128,7 @@ export function useServerComposerDraft(input: {
         if (!live) return;
         shown.current = threadId;
         // What the owner typed first is written at once, with the server's attachments it now carries.
-        if (JSON.stringify(merged) !== JSON.stringify(saved)) await writeDraft(threadId, merged, known.current, show);
+        if (JSON.stringify(merged) !== JSON.stringify(saved)) await saveDraft(threadId, merged, known.current, show);
       })
       // An unreachable draft leaves this tab's composer as it is; the next edit writes again.
       .catch(() => undefined);
@@ -157,7 +157,7 @@ export function useServerComposerDraft(input: {
   return {
     /** A send the server took: that conversation's saved draft is gone too. */
     clear: (sent: string) =>
-      void writeDraft(sent, { text: '', images: [], contexts: [] }, known.current, show).catch(() => undefined),
+      void saveDraft(sent, { text: '', images: [], contexts: [] }, known.current, show).catch(() => undefined),
   };
 }
 
@@ -169,7 +169,32 @@ function flush(
 ) {
   const waiting = pending.current;
   pending.current = null;
-  if (waiting) void writeDraft(waiting.threadId, waiting.draft, known, show, false, keepalive).catch(() => undefined);
+  if (waiting) void saveDraft(waiting.threadId, waiting.draft, known, show, keepalive).catch(() => undefined);
+}
+
+/** The write still going for each conversation: the next one waits for it (its conflict read and merge included),
+ *  so a later edit is written over the revision the earlier one left, never raced by it. */
+const writing = new Map<string, Promise<void>>();
+function saveDraft(threadId: string, draft: ComposerDraft, known: Known, show: Show, keepalive = false) {
+  // The draft was made over what the server held when it was queued; an earlier write may have moved that on (a
+  // merge from another tab): this draft's own changes go over the newer one.
+  const queuedOn = known.get(threadId)?.signature;
+  const run = () => {
+    const now = known.get(threadId)?.signature;
+    const rebased =
+      queuedOn && now && now !== queuedOn
+        ? mergeDraft(JSON.parse(queuedOn) as ComposerDraft, draft, JSON.parse(now) as ComposerDraft)
+        : draft;
+    if (rebased !== draft && JSON.stringify(rebased) !== JSON.stringify(draft)) show(threadId, rebased);
+    return writeDraft(threadId, rebased, known, show, false, keepalive);
+  };
+  const next = (writing.get(threadId) ?? Promise.resolve()).then(run, run);
+  const tail = next.catch(() => undefined);
+  writing.set(threadId, tail);
+  void tail.then(() => {
+    if (writing.get(threadId) === tail) writing.delete(threadId);
+  });
+  return next;
 }
 
 async function writeDraft(

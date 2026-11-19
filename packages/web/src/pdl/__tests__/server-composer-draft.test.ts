@@ -448,3 +448,35 @@ it('keeps saving a newer opening when the image read of an older opening of the 
     contentBlocks: [{ type: 'image', url: '/uploads/new.png' }],
   });
 });
+
+it('edits made while an earlier write is still resolving its conflict are written after it, over the revision it left', async () => {
+  let reads = 0;
+  vi.mocked(apiFetch).mockImplementation(async (_path, init) => {
+    if (!init?.method)
+      return reads++ === 0
+        ? Response.json({ draft: { text: 'base', contentBlocks: [fileA] }, revision: 4 })
+        : Response.json({ draft: { text: 'base', contentBlocks: [fileA, fileB] }, revision: 5 });
+    const body = JSON.parse(String(init.body)) as { expectedRevision: number };
+    if (body.expectedRevision === 4) {
+      await settle(1200);
+      return Response.json({ code: 'DRAFT_REVISION_MISMATCH', actualRevision: 5 }, { status: 409 });
+    }
+    return body.expectedRevision === 5
+      ? Response.json({ draft: { revision: 6 } })
+      : Response.json({ draft: { revision: body.expectedRevision + 1 } });
+  });
+  const { hook, state } = mount({ text: '', images: [], contexts: [] });
+  await waitFor(() => expect(state.draft.images).toEqual([fileA]));
+  state.draft = { ...state.draft, text: 'A' };
+  hook.rerender();
+  await flushed(700);
+  // B: more words, and file A removed, while A's write is still waiting on the server.
+  state.draft = { ...state.draft, text: 'B', images: [] };
+  hook.rerender();
+  await flushed(3000);
+  expect(writes().map(([, , body]) => JSON.parse(String(body)))).toEqual([
+    { expectedRevision: 4, text: 'A', contentBlocks: [fileA] },
+    { expectedRevision: 5, text: 'A', contentBlocks: [fileA, fileB] },
+    { expectedRevision: 6, text: 'B', contentBlocks: [fileB] },
+  ]);
+});
