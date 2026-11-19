@@ -2341,13 +2341,19 @@ async function initializeApi(
                     // ── Provider-specific CLI paths (non-ACP) ──
                     case 'anthropic': {
                       if (config.carrier === 'sdk') {
-                        service = new ClaudeSdkAgentService({ catId });
+                        service = new ClaudeSdkAgentService({
+                          catId,
+                          projectOutput: (...args) => agentAccessClaudeOutput(...args),
+                        });
                       } else {
                         const { createClaudeAgentServiceForCanary } = await import(
                           './domains/cats/services/agents/providers/claude-carrier-factory.js'
                         );
-                        service = createClaudeAgentServiceForCanary(catId, process.env, (...args) =>
-                          agentAccessClaudeOutput(...args),
+                        service = createClaudeAgentServiceForCanary(
+                          catId,
+                          process.env,
+                          (...args) => agentAccessClaudeOutput(...args),
+                          (...args) => agentAccessClaudeBatch(...args),
                         );
                       }
                       break;
@@ -6018,6 +6024,8 @@ async function initializeApi(
   const { registerAgentClientLibraryRoutes } = await import('./routes/agent-client-library-routes.js');
   const { createAgentAccessClaudeOutput } = await import('./domains/plugin/agent-access/claude.js');
   const agentAccessClaudeOutput = createAgentAccessClaudeOutput(pluginRuntime.inventoryStore, pluginRuntime.supervisor);
+  const { createAgentAccessClaudeBatch } = await import('./domains/plugin/agent-access/claude-batch.js');
+  const agentAccessClaudeBatch = createAgentAccessClaudeBatch(pluginRuntime.inventoryStore, pluginRuntime.supervisor);
   const { createAgentAccessAcpModelSelection } = await import('./domains/plugin/agent-access/acp.js');
   const { createAgentAccessAcpProcess } = await import('./domains/plugin/agent-access/acp-process.js');
   const { AgentAccessAcpRuntimeClient } = await import('./domains/plugin/agent-access/acp-runtime-client.js');

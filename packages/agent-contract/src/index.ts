@@ -33,6 +33,7 @@ export const OFFICIAL_AGENT_ACCESS_OPERATIONS = [
   'acpSession',
   'parseNativeEvent',
   'planCodexExec',
+  'projectClaudeBatch',
   'projectClaudeOutput',
   'selectAcpModel',
   'testDshConnection',

@@ -26,6 +26,7 @@ import { runA2ATurn } from './runtime/a2a-turn.js';
 import { checkDshConnectionInWorker } from './runtime/acp/dsh/connection-check.js';
 import { createAcpProcessActions } from './runtime/acp/process-connection.js';
 import { resolveSessionModelConfigOption } from './runtime/acp/session-configuration.js';
+import { projectClaudeBatch } from './runtime/claude/project-claude-batch.js';
 import { projectClaudeOutput } from './runtime/claude/project-claude-output.js';
 import { buildCodexExecLaunchArguments } from './runtime/codex-exec-launch-arguments.js';
 import { normalizeKimiEvent } from './runtime/kimi-event-parser.js';
@@ -75,6 +76,7 @@ export default {
               return resolveSessionModelConfigOption(request, request.model);
             },
             projectClaudeOutput,
+            projectClaudeBatch,
             testDshConnection({ input, launch }: { input: unknown; launch: () => Promise<AgentAccessAcpChildHandle> }) {
               return checkDshConnectionInWorker(agentAccessDshConnectionInputSchema.parse(input), launch);
             },

@@ -19,6 +19,7 @@ import { createAgentAccessA2ARunner } from '../dist/domains/plugin/agent-access/
 import { createAgentAccessAcpModelSelection } from '../dist/domains/plugin/agent-access/acp.js';
 import { createAgentAccessAcpProcess } from '../dist/domains/plugin/agent-access/acp-process.js';
 import { AgentAccessAcpRuntimeClient } from '../dist/domains/plugin/agent-access/acp-runtime-client.js';
+import { createAgentAccessClaudeBatch } from '../dist/domains/plugin/agent-access/claude-batch.js';
 import { createAgentAccessDshConnectionTest } from '../dist/domains/plugin/agent-access/dsh.js';
 import { createAgentAccessKimiLaunchPlanner } from '../dist/domains/plugin/agent-access/kimi.js';
 import {
@@ -382,6 +383,45 @@ test('Agent access discovery executes the same standalone entrypoint from a Mana
   assert.equal(readsAfterIdle, 0);
   assert.equal(sdkCloses, 1);
   assert.equal(sdkOutput[1].content, 'sdk projected');
+
+  const hookEvidencePath = '/isolated/receipt.txt';
+  const openClaudeBatch = createAgentAccessClaudeBatch(runtime.inventoryStore, {
+    nativeActions: runtime.supervisor.nativeActions,
+    async invoke(instanceId, method, input) {
+      assert.equal(method, 'projectClaudeBatch');
+      assert.equal(JSON.stringify(input).includes(hookEvidencePath), false);
+      return runtime.supervisor.invoke(instanceId, method, input);
+    },
+  });
+  const transcript = await openClaudeBatch('transcript', 'opus');
+  const transcriptFrame = await transcript.project([
+    { type: 'system', subtype: 'turn_duration' },
+    { type: 'assistant', message: { id: 'fixture-message', content: [{ type: 'text', text: 'background text' }] } },
+  ]);
+  assert.deepEqual(
+    transcriptFrame.messages.map(({ type, content }) => [type, content]),
+    [['text', 'background text']],
+  );
+  assert.equal(transcriptFrame.lastTextMessageId, 'fixture-message');
+  const hooks = await openClaudeBatch('hook', 'opus');
+  const hookFrame = await hooks.project([
+    { hook_event_name: 'PreToolUse', tool_name: 'Write' },
+    {
+      hook_event_name: 'PostToolUse',
+      tool_name: 'Write',
+      tool_input: {},
+      tool_use_id: 'fixture-tool',
+      tool_response: { filePath: hookEvidencePath },
+    },
+    { hook_event_name: 'Stop', last_assistant_message: 'interactive text' },
+  ]);
+  assert.deepEqual(
+    hookFrame.messages.map(({ type }) => type),
+    ['tool_use', 'text'],
+  );
+  assert.equal(hookFrame.messages[0].toolUseId, 'fixture-tool');
+  assert.equal(hookFrame.messages[0].fileResultEvidence.absolutePath, hookEvidencePath);
+  assert.equal(hookFrame.messages[1].content, 'interactive text');
 
   const acpCommands = [];
   const mcpSecret = 'fixture-host-held-mcp-value';
@@ -783,6 +823,8 @@ test('Agent access discovery executes the same standalone entrypoint from a Mana
   assert.equal(legacyScan.json().runtimes.find((candidate) => candidate.id === 'kimi')?.label, 'Kimi vNext');
   assert.equal((await manager.get(pluginId)).plugin.installedVersion, '1.0.1');
   await invoke('after replacement');
+  assert.equal(transcript.signal.aborted, true);
+  await assert.rejects(transcript.project([]));
 
   assert.deepEqual(
     await mutate({

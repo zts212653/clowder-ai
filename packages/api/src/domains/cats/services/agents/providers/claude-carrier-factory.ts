@@ -16,6 +16,7 @@
  * version — no pinned binary required (2.1.170 pin removed).
  */
 import { type CatId, catRegistry } from '@cat-cafe/shared';
+import type { AgentAccessClaudeBatch } from '../../../../plugin/agent-access/claude-batch.js';
 import type { AgentMessage, AgentService, AgentServiceOptions, ToolExecutionPolicy } from '../../types.js';
 import { ClaudeAgentService, type ClaudeAgentServiceOptions } from './ClaudeAgentService.js';
 import { ClaudeBgCarrierService } from './ClaudeBgCarrierService.js';
@@ -80,14 +81,15 @@ export function createCarrierByTier(
   tier: CarrierTier | string,
   catId: CatId,
   projectOutput?: ClaudeAgentServiceOptions['projectOutput'],
+  projectBatch?: AgentAccessClaudeBatch,
 ): AgentService {
   switch (tier) {
     case CARRIER_AGENT_SDK:
       return new ClaudeSdkAgentService({ catId, projectOutput });
     case CARRIER_BG_DAEMON:
-      return new ClaudeBgCarrierService({ catId });
+      return new ClaudeBgCarrierService({ catId, projectBatch });
     case CARRIER_INTERACTIVE_PTY:
-      return new ClaudeInteractivePtyCarrierService({ catId });
+      return new ClaudeInteractivePtyCarrierService({ catId, projectBatch });
     case CARRIER_PRINT_SDK:
     case CARRIER_API_KEY:
     default:
@@ -127,13 +129,15 @@ export function createClaudeAgentServiceForCanary(
   catId: CatId,
   env: Record<string, string | undefined> = process.env,
   projectOutput?: ClaudeAgentServiceOptions['projectOutput'],
+  projectBatch?: AgentAccessClaudeBatch,
 ): AgentService {
   // Explicit opt-in bypasses replaying fallbacks: an SDK query may already have tool effects.
-  if (env[CARRIER_ENV_KEY]?.trim() === CARRIER_AGENT_SDK) return new ClaudeSdkAgentService({ catId });
+  if (env[CARRIER_ENV_KEY]?.trim() === CARRIER_AGENT_SDK) return new ClaudeSdkAgentService({ catId, projectOutput });
   const store = getCarrierHealthStore();
   const targetTier = resolveTargetTier(env);
   const activeTier = selectFirstHealthyTier(targetTier, store) as CarrierTier;
-  const createCarrier = (tier: CarrierTier | string, id: CatId) => createCarrierByTier(tier, id, projectOutput);
+  const createCarrier = (tier: CarrierTier | string, id: CatId) =>
+    createCarrierByTier(tier, id, projectOutput, projectBatch);
   const carrier = createCarrier(activeTier, catId);
 
   return new FallbackCarrierWrapper(carrier, catId, activeTier, targetTier, store, createCarrier);

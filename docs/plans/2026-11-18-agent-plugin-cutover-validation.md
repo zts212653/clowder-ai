@@ -17,6 +17,7 @@ Windows 隔离实例使用对应提交打包出的 API、Web、Redis 和插件�
 | OpenCode 原生 CLI 基准 | 在隔离打包环境添加 OpenCode 角色，从对话调用真实 OpenCode 2.0.28 获得产品内流式回复。 | 打包提交 `56ba3f047`，脱敏记录为 `member-e2e-candidate-56ba-opencode-v2-preflight.json`，验证的是切换前的 OpenCode 行为。 |
 | OpenCode 活动接入包 | 添加角色返回 201，对话调用返回 202，真实 OpenCode 2.0.28 经活动包的原生计划获得流式回复。 | 打包提交 `593dae159`，记录为 `member-e2e-candidate-593da-native-clients-1.json`。独立评审提出启动权限、换代及诊断边界问题，修正后需重跑。 |
 | Claude 普通 CLI | 使用隔离账号配置创建 Claude 角色，返回 201，从正常对话发送返回 202，真实 Claude Code 2.1.327 向本机模型服务发出流式请求，回复在对话内可见。 | 打包提交 `eb58807de`，记录为 `member-e2e-candidate-eb588-claude-1.json`。SDK 的真实客户端调用及后台、PTY 另待验证。 |
+| Codex exec | 从打包界面创建角色返回 201，经对话发送返回 202，真实 Codex CLI 0.169.1 由活动包规划参数后请求隔离 Responses 服务，流式回复在对话内可见。 | 打包提交 `94b4b6794`，记录为 `member-e2e-candidate-94b4-codex-1.json`。同轮复验从空成员列表一键添加、重扫与原生 Kimi 对话。 |
 | F050 HTTP A2A | 将原有外部 A2A 角色配置到隔离 HTTP 对端。在打包对话页通过 `@` 发起调用，对端实际收到 `tasks/send`，回复显示于同一对话。 | 打包提交 `593dae159`，脱敏记录为 `member-e2e-candidate-593da-f050-4.json`。对端为本机验收实例，实际启用的 Collective 伙伴路线仍需验证。 |
 | 手动添加 | 从简洁主题成员列表打开添加，选择 Kimi CLI，填写角色与 `@` 名称。名称标签和保存条均可见，点击后收到 201 并进入新角色编辑页。 | 打包提交 `593dae159`。脱敏记录为 `member-e2e-candidate-593da-manual-declared-2.json`。 |
 | 编辑、改绑、默认角色及停用恢复 | 手动 Kimi 角色改绑至 `kimi acp`，保存返回 200。角色 ID 保留，配置版本与角色卡更新。在成员列表停用和恢复均返回 200，默认角色设置在刷新后保留。 | 打包提交 `593dae159`，记录为 `member-e2e-candidate-593da-manual-declared-8.json`。 |

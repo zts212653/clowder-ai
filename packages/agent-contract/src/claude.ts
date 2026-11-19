@@ -49,3 +49,14 @@ export const agentAccessClaudeProjectionSchema = z.object({
 });
 
 export type AgentAccessClaudeProjection = z.infer<typeof agentAccessClaudeProjectionSchema>;
+
+export const agentAccessClaudeBatchSchema = z.object({
+  catId: z.string().min(1),
+  mode: z.enum(['transcript', 'hook']),
+  entries: z.array(z.unknown()),
+  lastTextMessageId: z.string().optional(),
+});
+export const agentAccessClaudeBatchResultSchema = z.object({
+  frames: z.array(z.object({ index: z.number().int().nonnegative(), message: agentAccessClaudeMessageSchema })),
+  lastTextMessageId: z.string().optional(),
+});
