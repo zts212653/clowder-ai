@@ -58,13 +58,13 @@ export async function writeRole(
         return { status: 'invalid_dsh_profile' };
     }
     catId = creation.id;
-    next = planRoleCreation(catalog, creation.input);
+    next = planRoleCreation(() => catalog, creation.input);
   } else {
     catId = request.catId;
     if (roleConfigurationRevision(catalog, catId) !== request.expectedRevision) return { status: 'conflict' };
     next =
       request.kind === 'update'
-        ? planRoleUpdate(catalog, catId, request.patch).catalog
+        ? planRoleUpdate(() => catalog, catId, request.patch).catalog
         : planRoleDeletion(catalog, catId, await store.readTemplateTombstone(catId));
   }
   assertUniqueMentionAliases(next);

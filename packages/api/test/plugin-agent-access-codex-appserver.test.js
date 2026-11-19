@@ -3,7 +3,7 @@ import { describe, test } from 'node:test';
 import {
   createAgentAccessCodexAppServerThreadPlanner,
   createAgentAccessCodexAppServerTurnPlanner,
-} from '../src/domains/plugin/agent-access/codex-appserver.js';
+} from '../dist/domains/plugin/agent-access/codex-appserver.js';
 
 function authority(overrides = {}) {
   return {

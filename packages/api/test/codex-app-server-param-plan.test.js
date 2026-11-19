@@ -3,7 +3,7 @@ import { describe, test } from 'node:test';
 import {
   planCodexAppServerThread,
   planCodexAppServerTurn,
-} from '../src/domains/cats/services/agents/providers/codex-app-server-param-plan.js';
+} from '../dist/domains/cats/services/agents/providers/codex-app-server-param-plan.js';
 
 describe('Host validation for app-server params', () => {
   test('fills thread tokens only at their expected slots and keeps secrets Host-side', async () => {

@@ -481,8 +481,12 @@ test('Agent access discovery executes the same standalone entrypoint from a Mana
 
   const openAgyOutput = createAgentAccessAgyOutput(runtime.inventoryStore, runtime.supervisor);
   const agy = await openAgyOutput();
+  const nativeAgyCapture = process.env.AGENT_ACCESS_TEST_AGY_CAPTURE;
   const agyRecorded = (
-    await readFile(new URL('./fixtures/agy-stream-json/followup-default.ndjson', import.meta.url), 'utf8')
+    await readFile(
+      nativeAgyCapture ?? new URL('./fixtures/agy-stream-json/followup-default.ndjson', import.meta.url),
+      'utf8',
+    )
   )
     .trim()
     .split('\n')
@@ -505,8 +509,8 @@ test('Agent access discovery executes the same standalone entrypoint from a Mana
     agyTurns.map(({ outcome }) => outcome),
     ['ok', 'ok'],
   );
-  assert.match(agyTurns[0].finalText, /A_DONE NONE/);
-  assert.match(agyTurns[1].finalText, /A_DONE PAPAYA/);
+  assert.match(agyTurns[0].finalText, nativeAgyCapture ? /AGY_LOOPBACK_FIRST/ : /A_DONE NONE/);
+  assert.match(agyTurns[1].finalText, nativeAgyCapture ? /AGY_LOOPBACK_SECOND/ : /A_DONE PAPAYA/);
   assert.equal(agyTurns[1].toolCalls.length, 0);
   await assert.rejects(
     Array.fromAsync(

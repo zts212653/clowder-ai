@@ -130,9 +130,9 @@ function buildDefaultRuntimeRosterEntry(
   };
 }
 
-export function planRoleCreation(current: CatCafeConfig, input: RuntimeCatInput): CatCafeConfig {
+export function planRoleCreation(readCurrent: () => CatCafeConfig, input: RuntimeCatInput): CatCafeConfig {
   if (input.banner !== undefined) backgroundImageUrlSchema.parse(input.banner);
-  const catalog = editableCatalog(current);
+  const catalog = editableCatalog(readCurrent());
   if (findBreedVariant(catalog, input.catId)) {
     throw new Error(`Cat "${input.catId}" already exists in runtime catalog`);
   }
@@ -173,9 +173,9 @@ export function planRoleCreation(current: CatCafeConfig, input: RuntimeCatInput)
   return catalog as CatCafeConfig;
 }
 
-export function planRoleUpdate(current: CatCafeConfig, catId: string, patch: RuntimeCatUpdate) {
+export function planRoleUpdate(readCurrent: () => CatCafeConfig, catId: string, patch: RuntimeCatUpdate) {
   if (patch.banner != null) backgroundImageUrlSchema.parse(patch.banner);
-  const catalog = editableCatalog(current);
+  const catalog = editableCatalog(readCurrent());
   const previous = {
     cat: toAllCatConfigs(catalog as CatCafeConfig)[catId],
     available: catalog.version !== 2 || catalog.roster[catId]?.available !== false,

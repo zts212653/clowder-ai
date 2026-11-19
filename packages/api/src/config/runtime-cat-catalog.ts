@@ -240,13 +240,14 @@ function bindRuntimeLocalAccounts(
 }
 
 export function createRuntimeCat(projectRoot: string, input: RuntimeCatInput): CatCafeConfig {
-  const catalog = planRoleCreation(readOrBootstrapCatalog(projectRoot), input);
+  // The existing catalog reader may persist migrations. Validate the requested change first.
+  const catalog = planRoleCreation(() => readOrBootstrapCatalog(projectRoot), input);
   assertCodexMemberMutationReady(projectRoot, catalog, input.catId);
   return writeAndValidateCatalog(projectRoot, catalog);
 }
 
 export function updateRuntimeCat(projectRoot: string, catId: string, patch: RuntimeCatUpdate): CatCafeConfig {
-  const { catalog, previous } = planRoleUpdate(readOrBootstrapCatalog(projectRoot), catId, patch);
+  const { catalog, previous } = planRoleUpdate(() => readOrBootstrapCatalog(projectRoot), catId, patch);
   assertCodexMemberMutationReady(
     projectRoot,
     catalog,
