@@ -1308,7 +1308,7 @@ packages:
 
   '@clowder-ai/plugin-memory-contract@file:packages/api/vendor/clowder-ai-plugin-memory-contract-0.1.0-candidate.16.tgz':
     resolution: {integrity: sha512-vRzr2CgnPZP0jUsESr9DFJ2WQu6PCBtlxgQQ07hbnVCpxN/z50BgBytu/dZyRJMMXial+nohWqGUu13i2/hvKg==, tarball: file:packages/api/vendor/clowder-ai-plugin-memory-contract-0.1.0-candidate.16.tgz}
-    version: 0.1.0-candidate.14
+    version: 0.1.0-candidate.16
     engines: {node: '>=20.0.0'}
 
   '@clowder-ai/plugin-sdk@0.1.0-beta.23':
