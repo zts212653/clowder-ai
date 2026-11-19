@@ -16,6 +16,7 @@ import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { transformClaudeEvent } from '../../dist/domains/cats/services/agents/providers/claude-ndjson-parser.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -45,15 +46,11 @@ test('F153 Phase I: span-helpers.ts exports recordAgentLoop, sets agent_loop.cou
 });
 
 test('F153 Phase I: Claude parser emits agent_loop AgentMessage at message_stop', () => {
-  const src = readFileSync(
-    resolve(__dirname, '../../src/domains/cats/services/agents/providers/claude-ndjson-parser.ts'),
-    'utf8',
-  );
-  assert.ok(src.includes("s.type === 'message_stop'"), 'Should detect message_stop event');
-  assert.ok(
-    src.includes("type: 'agent_loop' as const"),
-    'Should return { type: agent_loop } AgentMessage (not null) at message_stop',
-  );
+  const result = transformClaudeEvent({ type: 'stream_event', event: { type: 'message_stop' } }, 'opus', {
+    partialTextMessageIds: new Set(),
+  });
+  assert.equal(result?.type, 'agent_loop');
+  assert.equal(result.catId, 'opus');
 });
 
 test('F153 Phase I: AgentMessageType union extends with agent_loop', () => {
