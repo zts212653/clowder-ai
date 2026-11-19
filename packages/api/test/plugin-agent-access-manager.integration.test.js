@@ -27,6 +27,7 @@ import { AgentAccessAcpRuntimeClient } from '../dist/domains/plugin/agent-access
 import { createAgentAccessAgyOutput } from '../dist/domains/plugin/agent-access/agy.js';
 import { createAgentAccessCatAgentOutput } from '../dist/domains/plugin/agent-access/catagent.js';
 import { createAgentAccessClaudeBatch } from '../dist/domains/plugin/agent-access/claude-batch.js';
+import { createAgentAccessCodexAppServerNotificationProjection } from '../dist/domains/plugin/agent-access/codex-appserver.js';
 import { createAgentAccessDshConnectionTest } from '../dist/domains/plugin/agent-access/dsh.js';
 import { createAgentAccessKimiLaunchPlanner } from '../dist/domains/plugin/agent-access/kimi.js';
 import {
@@ -149,7 +150,8 @@ test('Agent access discovery executes the same standalone entrypoint from a Mana
   const entrypoint = await readFile(new URL('../../agent-access-plugin/dist/plugin/entrypoint.mjs', import.meta.url));
   const nextModule = entrypoint
     .toString()
-    .replace(/(id:\s*["']kimi["'],\s*label:\s*)(["'])Kimi\2/g, '$1$2Kimi vNext$2');
+    .replace(/(id:\s*["']kimi["'],\s*label:\s*)(["'])Kimi\2/g, '$1$2Kimi vNext$2')
+    .replace('remoteControl/status/changed', 'transport/debug/ignored');
   assert.notEqual(nextModule, entrypoint.toString());
   async function archive(version, protocolVersion = 1, operations = OFFICIAL_AGENT_ACCESS_OPERATIONS) {
     const manifest = {
@@ -201,6 +203,12 @@ test('Agent access discovery executes the same standalone entrypoint from a Mana
     enabled: true,
     expectedRevision: (await manager.get(pluginId)).plugin.lifecycleRevision,
   });
+  const loadNotificationProjection = createAgentAccessCodexAppServerNotificationProjection(
+    runtime.inventoryStore,
+    runtime.supervisor,
+  );
+  const firstProjection = await loadNotificationProjection();
+  assert.ok(firstProjection?.ignoredMethods.has('remoteControl/status/changed'));
   const first = await scan();
   assert.equal(first.readiness.state, 'ready', JSON.stringify(first.readiness));
   assert.ok(first.candidates.some((candidate) => candidate.id === 'codex'));
@@ -1104,6 +1112,10 @@ test('Agent access discovery executes the same standalone entrypoint from a Mana
   const afterUpdate = await scan();
   assert.equal(afterUpdate.readiness.state, 'ready');
   assert.equal(afterUpdate.candidates.find((candidate) => candidate.id === 'kimi')?.label, 'Kimi vNext');
+  await assert.rejects(() => firstProjection.assertCurrent(), /session_implementation_unavailable/);
+  const updatedProjection = await loadNotificationProjection();
+  assert.ok(updatedProjection?.ignoredMethods.has('transport/debug/ignored'));
+  assert.equal(updatedProjection?.ignoredMethods.has('remoteControl/status/changed'), false);
   const legacyScan = await app.inject({
     method: 'GET',
     url: '/api/cats/native-runtimes?refresh=1',
@@ -1138,6 +1150,7 @@ test('Agent access discovery executes the same standalone entrypoint from a Mana
 
   await install(previous);
   assert.equal((await manager.get(pluginId)).plugin.installedVersion, '1.0.0');
+  assert.ok((await loadNotificationProjection())?.ignoredMethods.has('remoteControl/status/changed'));
   const afterRollback = await scan();
   assert.equal(afterRollback.readiness.state, 'ready');
   assert.equal(afterRollback.candidates.find((candidate) => candidate.id === 'kimi')?.label, 'Kimi');
