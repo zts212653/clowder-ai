@@ -9,7 +9,9 @@ import {
   invocationPluginMcpIssues,
   withInvocationPluginMcpView,
 } from '../config/capabilities/invocation-plugin-mcp-view.js';
+import type { AcpClientConfig } from '../domains/cats/services/agents/providers/acp/AcpClient.js';
 import { RedisDshMemberConnectionCheckStore } from '../domains/cats/services/stores/redis/RedisDshMemberConnectionCheckStore.js';
+import type { AgentAccessAcpRuntimeClient } from '../domains/plugin/agent-access/acp-runtime-client.js';
 import { resolveActiveProjectRoot } from '../utils/active-project-root.js';
 import { isDirectLoopbackRequest } from '../utils/loopback-request.js';
 import { requirePrivilegedRouteOwner } from '../utils/privileged-route-guard.js';
@@ -21,6 +23,14 @@ interface DshConnectionTarget {
   toolIssues?: DshConnectionCheckFact['toolIssues'];
   run: () => Promise<{ outcome: 'passed' | 'partial' | 'failed' | 'unknown'; reasonCode?: string }>;
 }
+export type CreateDshMemberConnectionClient = (
+  config: AcpClientConfig,
+) => Pick<
+  AgentAccessAcpRuntimeClient,
+  'initialize' | 'newSession' | 'setSessionConfigOption' | 'promptStream' | 'close'
+>;
+export type ResolveDshMemberConnectionClient = () => Promise<CreateDshMemberConnectionClient | undefined>;
+
 const digest = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 
 export function dshConnectionFailureReason(error: unknown) {
@@ -30,10 +40,18 @@ export function dshConnectionFailureReason(error: unknown) {
   if (/Invalid schema for function|is not a \\?"regex\\?"/i.test(diagnostic)) return 'tool_schema_rejected';
   if (/dsh_desktop_auth_read_only|Credential store modify failed/.test(diagnostic))
     return 'dsh_setup_auth_refresh_required';
+  if (message === 'session_implementation_unavailable') return 'dsh_setup_unavailable';
   return /^dsh_[a-z_]+$/.test(message) ? message : 'check_result_unknown';
 }
 
-async function resolveDshConnectionTarget(catId: string, root: string, owner: string): Promise<DshConnectionTarget> {
+async function resolveDshConnectionTarget(
+  catId: string,
+  root: string,
+  owner: string,
+  resolveClient: ResolveDshMemberConnectionClient | undefined,
+): Promise<DshConnectionTarget> {
+  const createClient = await resolveClient?.();
+  if (!createClient) throw Error('dsh_setup_unavailable');
   const [
     { getResolvedCats },
     { getRegisteredAcpConfig },
@@ -88,15 +106,13 @@ async function resolveDshConnectionTarget(catId: string, root: string, owner: st
     toolManifestHash: toolIssues.length ? digest([manifest.hash, toolIssues]) : manifest.hash,
     ...(toolIssues.length ? { toolIssues } : {}),
     run: async () => {
-      const [{ AcpClient }, { applySessionConfiguration }, { prepareDshSecretPatch }, { dshSetupBootstrap }] =
-        await Promise.all([
-          import('../domains/cats/services/agents/providers/acp/AcpClient.js'),
-          import('../domains/cats/services/agents/providers/acp/session-configuration.js'),
-          import('../domains/cats/services/agents/providers/dsh-secret-patch.js'),
-          import('./dsh-setup-launch.js'),
-        ]);
+      const [{ applySessionConfiguration }, { prepareDshSecretPatch }, { dshSetupBootstrap }] = await Promise.all([
+        import('../domains/cats/services/agents/providers/acp/session-configuration.js'),
+        import('../domains/cats/services/agents/providers/dsh-secret-patch.js'),
+        import('./dsh-setup-launch.js'),
+      ]);
       const isolated = createDshCheckLaunch(binding);
-      let client: InstanceType<typeof AcpClient> | undefined;
+      let client: ReturnType<CreateDshMemberConnectionClient> | undefined;
       let timedOut = false;
       const deadline = setTimeout(() => {
         timedOut = true;
@@ -110,7 +126,7 @@ async function resolveDshConnectionTarget(catId: string, root: string, owner: st
           model,
         );
         const launch = dshSetupBootstrap({ ...isolated.launch, args });
-        client = new AcpClient({
+        client = createClient({
           command: launch.command,
           args: launch.args,
           cwd: launch.verifyCwd(),
@@ -125,23 +141,25 @@ async function resolveDshConnectionTarget(catId: string, root: string, owner: st
         } catch {
           return { outcome: 'failed', reasonCode: 'session_configuration_unavailable' };
         }
-        const result = await client.promptCollect(
+        const stream = client.promptStream(
           session.sessionId,
           'Connection check. Reply DSH_CONNECTION_OK as text without calling tools.',
           { timeoutMs: 60_000 },
         );
-        const text = result.events
-          .flatMap(({ update }) => {
-            const content = update.content;
-            return update.sessionUpdate === 'agent_message_chunk' &&
+        let hasReply = false;
+        let frame = await stream.next();
+        while (!frame.done) {
+          const { sessionUpdate, content } = frame.value.update;
+          hasReply ||= Boolean(
+            sessionUpdate === 'agent_message_chunk' &&
               content &&
               !Array.isArray(content) &&
-              content.type === 'text'
-              ? [content.text]
-              : [];
-          })
-          .join('');
-        return result.stopReason === 'end_turn' && text.trim()
+              content.type === 'text' &&
+              content.text.trim(),
+          );
+          frame = await stream.next();
+        }
+        return frame.value === 'end_turn' && hasReply
           ? { outcome: 'passed' }
           : { outcome: 'partial', reasonCode: 'model_reply_unconfirmed' };
       } catch (error) {
@@ -163,6 +181,7 @@ export function registerDshMemberConnectionChecks(
     redis?: RedisClient;
     store?: RedisDshMemberConnectionCheckStore;
     resolvePluginMcpView?: () => Promise<InvocationPluginMcpView | undefined>;
+    resolveClient?: ResolveDshMemberConnectionClient | undefined;
     resolveTarget?: (catId: string, root: string, owner: string) => Promise<DshConnectionTarget>;
   } = {},
 ) {
@@ -170,7 +189,10 @@ export function registerDshMemberConnectionChecks(
   const resolveTarget = async (catId: string, root: string, owner: string) => {
     const view = await options.resolvePluginMcpView?.();
     const target = await withInvocationPluginMcpView(
-      () => (options.resolveTarget ?? resolveDshConnectionTarget)(catId, root, owner),
+      () =>
+        options.resolveTarget
+          ? options.resolveTarget(catId, root, owner)
+          : resolveDshConnectionTarget(catId, root, owner, options.resolveClient),
       view,
       { kind: 'member', projectRoot: root, memberCatId: catId },
     );

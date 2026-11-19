@@ -389,13 +389,27 @@ export class AgentAccessAcpRuntimeClient {
     );
   }
   async setSessionConfigOption(sessionId: string, configId: string, value: string) {
-    await this.#command(
-      { operation: 'setConfig', sessionId, configId, value },
-      {
-        method: ACP_METHODS.sessionSetConfigOption,
-        params: { sessionId, configId: configId.trim(), value },
-      },
-    );
+    let forgetReceipt: (() => void) | undefined;
+    let result: unknown;
+    try {
+      await this.#command(
+        { operation: 'setConfig', sessionId, configId, value },
+        {
+          method: ACP_METHODS.sessionSetConfigOption,
+          params: { sessionId, configId: configId.trim(), value },
+          onAccepted: (id) => {
+            if (id === undefined) throw new Error('ACP session configuration requires a native response ID');
+            // Compatible packages acknowledge setConfig without returning the native response.
+            forgetReceipt = this.#requests?.observeReceipt(id, (receipt) => {
+              result = receipt;
+            });
+          },
+        },
+      );
+      return result;
+    } finally {
+      forgetReceipt?.();
+    }
   }
   setSessionPermissionHandler(
     ...args: Parameters<ReturnType<typeof createNativeAcpRequests>['setSessionPermissionHandler']>

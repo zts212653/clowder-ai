@@ -3711,6 +3711,13 @@ async function initializeApi(
       modelCatalogGeneration: () => agentAccessCodexModelCatalogGeneration(),
       discoverModelCatalog: (target) => agentAccessCodexModelCatalog(target),
     },
+    async resolveDshMemberConnectionClient() {
+      const { AGENT_ACCESS_PLUGIN_ID } = await import('@clowder-ai/agent-contract');
+      const instance = (await pluginRuntime.inventoryStore.readCurrentAuthority(AGENT_ACCESS_PLUGIN_ID))?.instance;
+      if (instance?.activationState === 'enabled' && instance.runtimeState === 'healthy') {
+        return (config) => new AgentAccessAcpRuntimeClient(config, agentAccessAcpProcess);
+      }
+    },
     addressedPlugins: () => router.addressedPlugins,
     resolveContextCapacitySnapshot: (catId) => router.contextCapacitySnapshot(catId),
     resolveCarrierCapability: (catId) => router.freshnessCarrierCapability(catId),

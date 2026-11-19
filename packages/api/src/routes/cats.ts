@@ -12,10 +12,10 @@ import {
 import { registerDshSetupRoutes } from './dsh-setup-route.js';
 import type { RunDshConnection } from './dsh-setup-service.js';
 import { registerMemberCanonResponse } from './member-canon-response.js';
-import { registerDshMemberConnectionChecks } from './member-connection-check.js';
+import { type ResolveDshMemberConnectionClient, registerDshMemberConnectionChecks } from './member-connection-check.js';
 import { dshLauncherProfileState, InvalidDshProfile } from './native-dsh-profile.js';
 import { discoverNativeRuntimesWithReadiness } from './native-runtimes.js';
-import { registerRuntimeCatalogRoute, type RuntimeCatalogRouteOptions } from './runtime-catalog-route.js';
+import { type RuntimeCatalogRouteOptions, registerRuntimeCatalogRoute } from './runtime-catalog-route.js';
 /**
  * Cats API Routes
  * GET /api/cats - 获取所有猫猫信息
@@ -952,6 +952,7 @@ interface CatsRoutesOptions {
   agentRoleRead?: AgentRoleRead;
   agentRoleWrite?: AgentRoleWrite;
   runDshConnection?: RunDshConnection;
+  resolveDshMemberConnectionClient?: ResolveDshMemberConnectionClient;
   nativeRuntimeDiscovery?: ReturnType<typeof registerAgentAccessRoutes>['readLegacyNativeRuntimes'];
   agentAccessDetection?: ReturnType<typeof registerAgentAccessRoutes>['readDetection'];
   resolveCarrierCapability?: (catId: CatId) => FreshnessCarrierCapability | undefined;
@@ -978,6 +979,7 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opt
   registerDshMemberConnectionChecks(app, {
     redis: opts.connectionCheckRedis,
     resolvePluginMcpView: opts.resolvePluginMcpView,
+    resolveClient: opts.resolveDshMemberConnectionClient,
   });
   app.get('/api/cats/native-runtimes', async (request, reply) => {
     const operator = resolveHeaderUserId(request);
