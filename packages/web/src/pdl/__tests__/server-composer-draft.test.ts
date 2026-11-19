@@ -144,13 +144,25 @@ it('deletes the saved draft of a conversation whose send the server took', async
   );
 });
 
-it('puts back the images of a saved draft, writes nothing while they are read, and keeps them in later writes', async () => {
+it('puts back the images and files of a saved draft, writes nothing while they are read, and keeps them with their details in later writes', async () => {
   let readBack: (files: unknown) => void = () => {};
   vi.mocked(apiFetch).mockImplementation(async (_path, init) =>
     init?.method === 'PUT'
       ? Response.json({ draft: { revision: 8 } })
       : Response.json({
-          draft: { text: 'see this', contentBlocks: [{ type: 'image', url: '/uploads/a.png' }] },
+          draft: {
+            text: 'see this',
+            contentBlocks: [
+              { type: 'image', url: '/uploads/a.png' },
+              {
+                type: 'file',
+                url: '/uploads/notes.pdf',
+                fileName: 'notes.pdf',
+                mimeType: 'application/pdf',
+                fileSize: 12,
+              },
+            ],
+          },
           revision: 7,
         }),
   );
@@ -172,7 +184,14 @@ it('puts back the images of a saved draft, writes nothing while they are read, a
   host.rerender = hook.rerender;
   await waitFor(() =>
     expect(restore).toHaveBeenCalledWith(
-      { text: 'see this', images: ['/uploads/a.png'], contexts: [] },
+      {
+        text: 'see this',
+        images: [
+          { type: 'image', url: '/uploads/a.png' },
+          { type: 'file', url: '/uploads/notes.pdf', fileName: 'notes.pdf', mimeType: 'application/pdf', fileSize: 12 },
+        ],
+        contexts: [],
+      },
       expect.any(Function),
     ),
   );
@@ -191,7 +210,10 @@ it('puts back the images of a saved draft, writes nothing while they are read, a
       JSON.stringify({
         expectedRevision: 7,
         text: 'see this one',
-        contentBlocks: [{ type: 'image', url: '/uploads/a.png' }],
+        contentBlocks: [
+          { type: 'image', url: '/uploads/a.png' },
+          { type: 'file', url: '/uploads/notes.pdf', fileName: 'notes.pdf', mimeType: 'application/pdf', fileSize: 12 },
+        ],
       }),
     ],
   ]);
@@ -327,7 +349,7 @@ it('keeps saving a newer opening when the image read of an older opening of the 
     state.draft = { ...saved, images: [] };
     host.rerender?.();
     if (!saved.images.length) return undefined;
-    if (saved.images[0] === '/uploads/old.png')
+    if (saved.images[0].url === '/uploads/old.png')
       return new Promise<void>((_, reject) => {
         failOld = () => reject(new Error('503'));
       });

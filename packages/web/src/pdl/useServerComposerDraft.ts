@@ -1,13 +1,15 @@
-import type { ContextAttachment } from '@cat-cafe/shared';
+import type { ContextAttachment, FileContent, ImageContent } from '@cat-cafe/shared';
 import { useEffect, useRef } from 'react';
 import { apiFetch } from '@/utils/api-client';
 
-/** images: the uploaded images in the input (their addresses); a picked image is uploaded only when it is sent. */
-export type ComposerDraft = { text: string; images: string[]; contexts: ContextAttachment[]; replyTo?: string };
+/** An uploaded attachment the draft keeps as the server stored it: an image, or a file with its name, type and size. */
+export type DraftFile = Pick<ImageContent, 'type' | 'url'> | FileContent;
+/** images: the uploaded attachments in the input; a picked file is uploaded only when it is sent. */
+export type ComposerDraft = { text: string; images: DraftFile[]; contexts: ContextAttachment[]; replyTo?: string };
 type SavedDraft = {
   text?: string;
   replyTo?: string;
-  contentBlocks?: { type: string; url?: string; attachment?: ContextAttachment }[];
+  contentBlocks?: ({ type: string; url?: string; attachment?: ContextAttachment } | FileContent)[];
 };
 
 const draftPath = (threadId: string) => `/api/threads/${encodeURIComponent(threadId)}/composer-draft`;
@@ -27,13 +29,13 @@ export function useServerComposerDraft(input: {
   threadId: string;
   enabled: boolean;
   draft: ComposerDraft;
-  /** Shows a saved draft in the input; what it returns settles once the input shows all of it (images are read back).
+  /** Shows a saved draft in the input; what it returns settles once the input shows all of it (attachments are read back).
    *  `current` says whether the input still belongs to that conversation: what arrives after a switch is dropped. */
   restore: (draft: ComposerDraft, current: () => boolean) => void | Promise<unknown>;
 }) {
   const known = useRef<Known>(new Map());
   const pending = useRef<{ threadId: string; draft: ComposerDraft } | null>(null);
-  // The conversation whose server draft the input shows in full (images read back). Until then nothing is written:
+  // The conversation whose server draft the input shows in full (attachments read back). Until then nothing is written:
   // the input is not yet what the owner left. Each opening starts unshown; a restore after a switch never counts.
   const shown = useRef<string | null>(null);
   const latest = useRef(input);
@@ -53,7 +55,13 @@ export function useServerComposerDraft(input: {
         const blocks = body.draft?.contentBlocks ?? [];
         const saved: ComposerDraft = {
           text: body.draft?.text ?? '',
-          images: blocks.flatMap((block) => (block.type === 'image' && block.url ? [block.url] : [])),
+          images: blocks.flatMap((block): DraftFile[] =>
+            block.type === 'file' && 'fileName' in block
+              ? [block]
+              : block.type === 'image' && block.url
+                ? [{ type: 'image', url: block.url }]
+                : [],
+          ),
           contexts: blocks.flatMap((block) =>
             block.type === 'context_attachment' && block.attachment ? [block.attachment] : [],
           ),
@@ -63,7 +71,7 @@ export function useServerComposerDraft(input: {
         const now = JSON.stringify(latest.current.draft);
         if (now !== opened) await writeDraft(threadId, latest.current.draft, known.current);
         else if (now !== JSON.stringify(saved)) {
-          // A draft whose images can't be read back is as unknown as an unreachable one: nothing overwrites it.
+          // A draft whose attachments can't be read back is as unknown as an unreachable one: nothing overwrites it.
           const ok = await Promise.resolve(latest.current.restore(saved, () => live)).then(
             () => true,
             () => false,
@@ -139,7 +147,7 @@ async function writeDraft(
             ...(draft.images.length || draft.contexts.length
               ? {
                   contentBlocks: [
-                    ...draft.images.map((url) => ({ type: 'image', url })),
+                    ...draft.images,
                     ...draft.contexts.map((attachment) => ({ type: 'context_attachment', attachment })),
                   ],
                 }
