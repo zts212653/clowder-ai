@@ -10,9 +10,10 @@ import { resolveDirectLocalAuthorizationUserId, resolveSessionUserId } from '../
 import { type BrakeSourceReaders, readBrakeSource } from './memory-brake-source.js';
 import { defaultMemoryLibraryTarget } from './memory-library-default.js';
 import { memoryLibraryFeed, visibleMemoryCollections } from './memory-library-read.js';
+import type { RecallEventReader } from './memory-recall-events.js';
 import { type RecallPageSourceReaders, readMemoryRecallPage } from './memory-recall-page.js';
-import { recallPageCursors, recallPageQuery } from './memory-recall-query.js';
-import { readMemoryRecallStats } from './memory-recall-stats.js';
+import { type RecallTimelineReader, recallPageCursors, recallPageQuery } from './memory-recall-query.js';
+import { type RecallStatsReader, readMemoryRecallStats } from './memory-recall-stats.js';
 import { registerMemorySearchRoutes } from './memory-search.js';
 import type { MemorySearchSources } from './memory-search-types.js';
 
@@ -26,6 +27,9 @@ export interface MemoryPageReadOptions {
   docsRoot?: string;
   brakeSources?: BrakeSourceReaders;
   recallSources?: RecallPageSourceReaders;
+  readRecallStats?: RecallStatsReader;
+  readRecallTimeline?: RecallTimelineReader;
+  readRecallEvent?: RecallEventReader;
   searchSources?: MemorySearchSources;
 }
 
@@ -57,6 +61,8 @@ export const memoryPageReadRoutes: FastifyPluginAsync<MemoryPageReadOptions> = a
         opts.recallSources,
         parsed.data,
         cursor,
+        opts.readRecallTimeline,
+        opts.readRecallEvent,
       );
       return { ...page, nextCursor: next ? cursors.encode(next, opts.ownerUserId, parsed.data) : null };
     } catch {
@@ -66,7 +72,7 @@ export const memoryPageReadRoutes: FastifyPluginAsync<MemoryPageReadOptions> = a
 
   app.get('/api/memory/recall/stats', async (request, reply) => {
     const parsed = recallPageQuery.pick({ days: true }).safeParse(request.query);
-    if (!parsed.success) return reply.code(400).send({ error: 'Invalid recall window' });
+    if (!parsed.success || parsed.data.days === '0') return reply.code(400).send({ error: 'Invalid recall window' });
     if (!opts.recallSources?.threadStore) return reply.code(503).send({ error: 'Recall reader unavailable' });
     try {
       return await readMemoryRecallStats(
@@ -74,6 +80,7 @@ export const memoryPageReadRoutes: FastifyPluginAsync<MemoryPageReadOptions> = a
         opts.ownerUserId,
         opts.recallSources.threadStore,
         Number(parsed.data.days),
+        opts.readRecallStats,
       );
     } catch {
       return reply.code(503).send({ error: 'Recall reader unavailable' });

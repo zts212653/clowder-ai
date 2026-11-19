@@ -1,0 +1,30 @@
+/* 边界：一个含义一个组件、不为接口定制、不按位置推导样式 */
+/* 外壳：应用的列、窄栏、二级栏 */
+/* ── Shell ─────────────────────────────── */
+/* 列的顺序和宽度来自布局数据（render 里算出 --app-cols） */
+.app { display: grid; grid-template-columns: var(--app-cols, var(--rail-w) var(--nav-w, var(--nav-w0)) minmax(0, 1fr)); height: 100%; overflow: clip; }
+.rail { background: var(--bg-rail); display: flex; flex-direction: column; align-items: center; gap: var(--sp-xs); padding-block: var(--sp-m); min-height: 0; }
+.rail-btn { width: var(--ctl-l); height: var(--ctl-l); border-radius: var(--r-m); display: grid; place-items: center; color: var(--fg-muted); border: 0; background: none; cursor: pointer; position: relative; --badge-in: var(--sp-xs); --badge-in-count: calc(var(--sp-xs) * -.5); }   /* 窄栏按钮只给徽标的摆放 token（徽标用自己的 corner 选项） */
+.rail-btn:hover { background: var(--bg-hover); color: var(--fg-strong); }
+.rail-btn[aria-current="page"] { background: var(--bg-group); color: var(--fg-strong); }
+.badge { --b-c: var(--accent); --b-on: var(--fg-on-accent); flex: none; }   /* 计数徽标：强调色（等你来看；计数不是严重度）；带严重度的才有 data-tone */
+.badge[data-tone] { --b-c: var(--tone-c); }
+.badge.corner { position: absolute; top: var(--badge-in, var(--sp-hair)); right: var(--badge-in, var(--sp-hair)); }
+.badge.count.corner { top: var(--badge-in-count, var(--badge-in, var(--sp-hair))); right: var(--badge-in-count, var(--badge-in, var(--sp-hair))); }   /* 计数胶囊比圆点大：宿主可以给它单独的内缩 token（窄栏：探出角外半格） */   /* 贴在宿主（图标按钮外的一层 relative）右上角：徽标自己的摆放选项，不是宿主写后代规则 */
+.badge.dot { display: inline-block; width: var(--dot); height: var(--dot); border-radius: var(--r-full); background: var(--b-c); }   /* 和状态点同一个大小：只是颜色通道不同（强调色 = 等你来看） */
+.badge.count { display: inline-grid; place-items: center; min-width: var(--ic-s); height: var(--ic-s); padding: 0 var(--sp-xs); border-radius: var(--r-full); background: var(--b-c); color: var(--b-on); font-size: var(--fs-xs); font-weight: 600; line-height: 1; }
+.rail-mark { width: var(--ctl-m); height: var(--ctl-m); border-radius: var(--r-m); padding: 0; background: none; display: grid; place-items: center; margin-bottom: var(--sp-s); border: 0; cursor: pointer; overflow: clip; }
+.rail-mark img { width: 100%; height: 100%; object-fit: contain; display: block; }
+.rail-mark:hover { background: var(--bg-hover); }   /* 品牌标志：只有一层通用的悬停，没有选中态（它是回主空间的入口，不是空间页签） */
+.nav { background: var(--bg-nav); display: flex; flex-direction: column; min-width: 0; min-height: 0; position: relative; z-index: var(--z-raised); --empty-pad-y: var(--sp-l); --empty-pad-x: var(--sp-s); --empty-fs: var(--fs-m); }   /* 区域 token：侧栏里的空状态小一号（空状态组件只有一个） */
+.nav-head { height: var(--row-h); display: flex; align-items: center; gap: var(--sp-xs); padding: 0 var(--sp-s) 0 var(--gutter-panel); flex-shrink: 0; }   /* 标题行的起始内边距：区域标题行共用 --gutter-panel */
+.nav-title { flex: 1; }
+.nav-scroll { padding: 0 var(--sp-s) var(--sp-xl); flex: 1; min-height: 0; }
+.nav-item { display: flex; align-items: center; gap: var(--sp-s); width: 100%; height: var(--ctl-m); padding: 0 var(--sp-s); border: 0; background: none; border-radius: var(--r-s); text-align: left; cursor: pointer; }
+.nav-item > span { min-width: 0; overflow: clip; text-overflow: ellipsis; white-space: nowrap; }   /* 导航名字一行：放不下就省略（全文在提示里），从不在词中间折行 */
+.nav-item:hover { background: var(--bg-hover); }
+.nav-item:is([aria-current="page"], [aria-current="true"]) { background: var(--bg-selected); color: var(--fg-strong); font-weight: 500; }
+.nav-item .ic { color: var(--fg-muted); }
+.nav-item .trail { margin-left: auto; }
+.main { min-width: 0; min-height: 0; position: relative; background: var(--bg-page); }
+.btn.nav-toggle { display: none; }

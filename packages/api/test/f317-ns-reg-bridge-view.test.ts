@@ -5,7 +5,6 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { test } from 'node:test';
-import { CONCIERGE_CONFIG_DEFAULTS } from '@cat-cafe/shared';
 import cookie from '@fastify/cookie';
 import Fastify from 'fastify';
 import { MessageStore } from '../src/domains/cats/services/stores/ports/MessageStore.js';
@@ -18,6 +17,7 @@ import { CompanionHostBridge } from '../src/domains/concierge/live/CompanionHost
 import { sessionAuthPlugin, sessionRoute } from '../src/infrastructure/session-auth.js';
 import { conciergeRoutes } from '../src/routes/concierge.js';
 import { requirePluginOwnerLocalAccess } from '../src/routes/plugin-access-guards.js';
+import { companionConfigurationFixture } from './helpers/companion-configuration-fixture.js';
 
 const OWNER = 'ns-reg-owner';
 const SDP = 'v=0\r\nm=audio 9 UDP/TLS/RTP/SAVPF 111\r\n';
@@ -36,10 +36,11 @@ async function fixture(history: unknown[] = [], hasMore = false, open: 'ok' | 'r
   await app.register(sessionAuthPlugin);
   await app.register(sessionRoute, { ownerUserId: OWNER });
   const config = new MemoryConciergeConfigStore();
-  await config.put(OWNER, { ...CONCIERGE_CONFIG_DEFAULTS, dutyCatProfileId: 'opus', displayName: 'ns-reg companion' });
-  const threads = new ConciergeThreadService({ threadStore: new ThreadStore(), conciergeConfigStore: config });
+  const companion = companionConfigurationFixture({ dutyCatProfileId: 'opus', displayName: 'ns-reg companion' });
+  const threads = new ConciergeThreadService({ threadStore: new ThreadStore(), companionSettings: companion.read });
   await app.register(conciergeRoutes, {
     conciergeConfigStore: config,
+    companionSettings: companion.read,
     conciergeThreadService: threads,
     conciergeRelayStore: new MemoryConciergeRelayStore(),
     conciergeConfirmationStore: new MemoryConciergeConfirmationStore(),

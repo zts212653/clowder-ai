@@ -149,11 +149,14 @@ export function isModernCompanionContract(contract: CompanionContract | undefine
   return companionContractHas(contract, 'modern');
 }
 
+/** Catalog archives run under their exact pinned contract; a locally admitted package runs under the current one. */
 export function resolveCompanionArchiveContract(
-  pkg: Pick<PluginPackageRecord, 'pluginId' | 'version' | 'packageDigest'>,
+  pkg: Pick<PluginPackageRecord, 'pluginId' | 'version' | 'packageDigest' | 'provenance'>,
   archives: readonly CompanionArchiveContract[] = COMPANION_ARCHIVE_CONTRACTS,
 ): CompanionArchiveContract['contract'] | undefined {
   if (pkg.pluginId !== 'official.companion') return undefined;
+  if (pkg.provenance?.kind === 'local-archive' || pkg.provenance?.kind === 'local-directory')
+    return archives.at(-1)?.contract;
   return archives.find((row) => row.version === pkg.version && row.packageDigest === pkg.packageDigest)?.contract;
 }
 

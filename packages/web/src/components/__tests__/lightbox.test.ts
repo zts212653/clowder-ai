@@ -77,7 +77,7 @@ it.each([
   expect(container.textContent).toBe(label);
   expect(container.querySelector('button')?.title).toBe(label);
   await act(async () => container.querySelector('button')?.click());
-  expect(copy.pixels).toHaveBeenCalledExactlyOnceWith(expect.any(HTMLImageElement), '/test-image.png');
+  expect(copy.pixels).toHaveBeenCalledExactlyOnceWith(expect.any(HTMLImageElement), '/test-image.png', undefined);
   expect(container.textContent).toBe(copied);
 });
 
@@ -99,7 +99,7 @@ it('translates a pending copy and its eventual result without remounting or repe
   expect(button.textContent).toBe('Image copied');
   await act(async () => writeShellLanguage('zh'));
   expect(button.textContent).toBe('已复制图片');
-  expect(copy.pixels).toHaveBeenCalledExactlyOnceWith(expect.any(HTMLImageElement), '/original.png');
+  expect(copy.pixels).toHaveBeenCalledExactlyOnceWith(expect.any(HTMLImageElement), '/original.png', undefined);
 });
 
 it('keeps clipboard failure distinct from a copied image', async () => {

@@ -1591,9 +1591,6 @@ describe('main process update-schedule lifecycle', () => {
       'update-manager.js',
       'update-install-flow.js',
       'update-prompt-controller.js',
-      '../packages/web/src/components/DesktopUpdatePrompt.tsx',
-      '../packages/web/src/components/DesktopUpdatePromptDialog.tsx',
-      '../packages/web/src/components/DesktopUpdatePromptContent.tsx',
     ];
     for (const file of files) {
       const lines = readFileSync(path.join(__dirname, file), 'utf8').trimEnd().split('\n').length;

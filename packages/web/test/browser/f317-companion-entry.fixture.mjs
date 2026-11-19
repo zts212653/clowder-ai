@@ -34,7 +34,6 @@ const message = (id, content, extra = {}) => ({
 const card = (id, title, actions) =>
   message(id, title, { rich: { v: 1, blocks: [{ id: `${id}-card`, kind: 'card', v: 1, title, actions }] } });
 export function createEntryFixture(mode = 'missing') {
-  const drafts = new Map();
   const config = {
     enabled: false,
     muted: true,
@@ -271,27 +270,7 @@ export function createEntryFixture(mode = 'missing') {
     else if (path === '/api/bootcamp/threads') body = { threads: [] };
     else if (path === '/api/labels') body = { labels: [] };
     else if (path === '/api/config/thread-attention') body = { groups: [] };
-    else if (path.endsWith('/composer-draft')) {
-      const threadId = path.split('/')[3],
-        current = drafts.get(threadId) ?? { draft: null, revision: 0 };
-      if (method === 'PUT' || method === 'DELETE') {
-        const input = JSON.parse(data);
-        if (input.expectedRevision !== current.revision) {
-          status = 409;
-          body = { actualRevision: current.revision };
-        } else {
-          const revision = current.revision + 1;
-          body = {
-            revision,
-            draft:
-              method === 'DELETE'
-                ? null
-                : { threadId, revision, text: input.text, contentBlocks: input.contentBlocks, replyTo: input.replyTo },
-          };
-          drafts.set(threadId, body);
-        }
-      } else body = current;
-    } else if (path.startsWith('/api/threads/')) body = thread(path.split('/')[3]);
+    else if (path.startsWith('/api/threads/')) body = thread(path.split('/')[3]);
     else if (path === '/api/guide-flows/synthetic-guide')
       body = {
         id: 'synthetic-guide',
@@ -308,7 +287,6 @@ export function createEntryFixture(mode = 'missing') {
     messages,
     confirmations,
     calls,
-    drafts,
     handle,
     setJobStatus: (state) => {
       jobStatus = state;

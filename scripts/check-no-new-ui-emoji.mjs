@@ -5,8 +5,10 @@
  *
  * Existing raw pictographs remain legacy debt, but a changed production UI line
  * may not introduce another one. Designed SVG icons are the canonical replacement.
- * Compatibility parsers must live in non-TSX modules; production JSX/TSX has no
- * parser escape because a diff line cannot prove that an expression is not rendered.
+ * Production UI is web JSX/TSX plus the theme YAML, copy JSON and component JS
+ * under packages/web/public/pdl/. Compatibility parsers must live in non-UI modules
+ * (plain .ts, packages/web/public/pdl-app/); production UI has no parser escape
+ * because a diff line cannot prove that an expression is not rendered.
  * Non-semantic paw copy has its own narrowly-scoped annotation.
  */
 
@@ -19,10 +21,11 @@ const SCRIPT_PATH = fileURLToPath(import.meta.url);
 const REPO_ROOT = resolve(dirname(SCRIPT_PATH), '..');
 const PICTOGRAPH_PATTERN = /[\p{Emoji_Presentation}\p{Extended_Pictographic}]/gu;
 const REASONED_PAW_EXPRESSION_ALLOW = /cafe-ui-paw-expression-allow:\s+\S.{8,}$/u;
+const PRODUCTION_UI_FILE = /^packages\/web\/(?:src\/.+\.(?:jsx|tsx)|public\/pdl\/.+\.(?:ya?ml|json|js))$/u;
 
 function isProductionUiPath(file) {
-  if (!file || !/^packages\/web\/src\/.+\.(?:jsx|tsx)$/u.test(file)) return false;
-  return !/(?:^|\/)(?:__tests__|__fixtures__)(?:\/|$)|\.(?:spec|test|stories)\.[jt]sx$/u.test(file);
+  if (!file || !PRODUCTION_UI_FILE.test(file)) return false;
+  return !/(?:^|\/)(?:__tests__|__fixtures__)(?:\/|$)|\.(?:spec|test|stories)\.[jt]sx?$/u.test(file);
 }
 
 function uniquePictographs(text) {
@@ -142,7 +145,7 @@ function main() {
     console.error(`  ${finding.file}:${finding.line} ${finding.pictographs.join(' ')}  ${finding.text}`);
   }
   console.error('  Replace semantic glyphs with project SVG icons.');
-  console.error('  Move compatibility parsing to a non-TSX module; expressive paw copy has its own narrow annotation.');
+  console.error('  Move compatibility parsing to a non-UI module; expressive paw copy has its own narrow annotation.');
   process.exitCode = 1;
 }
 

@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useSyncExternalStore } from 'react';
+import { useCallback, useEffect, useMemo, useSyncExternalStore } from 'react';
 import { useWorkspaceSurfaceVisibility } from '@/components/workbench/WorkspaceSurfaceVisibility';
 import { apiFetch } from '@/utils/api-client';
 import { type EvolutionProgramProjection, parseProgramProjection } from './evolution-program-projection';
@@ -139,7 +139,7 @@ function refresh(key: string) {
   return request;
 }
 
-export function useEvolutionPrograms(programId?: string) {
+export function useEvolutionPrograms(programId?: string, needed: boolean | number = true) {
   const key = programId ?? LIST;
   const surfaceVisible = useWorkspaceSurfaceVisibility();
   const state = useSyncExternalStore(
@@ -149,7 +149,7 @@ export function useEvolutionPrograms(programId?: string) {
   );
   const reload = useCallback(() => refresh(key), [key]);
   useEffect(() => {
-    if (!surfaceVisible) return;
+    if (!surfaceVisible || !needed) return;
     void reload();
     const visible = () => {
       if (document.visibilityState === 'visible') void reload();
@@ -162,9 +162,12 @@ export function useEvolutionPrograms(programId?: string) {
       window.removeEventListener('focus', visible);
       document.removeEventListener('visibilitychange', visible);
     };
-  }, [reload, surfaceVisible]);
+  }, [reload, surfaceVisible, needed]);
   return {
-    programs: state.ids.flatMap((id) => (state.listRecords[id] ? [state.listRecords[id]] : [])),
+    programs: useMemo(
+      () => state.ids.flatMap((id) => (state.listRecords[id] ? [state.listRecords[id]] : [])),
+      [state.ids, state.listRecords],
+    ),
     projection: programId ? (state.records[programId] ?? null) : null,
     loading: !state.ready[key],
     error: state.errors[key],

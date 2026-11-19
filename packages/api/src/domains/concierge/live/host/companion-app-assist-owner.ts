@@ -60,7 +60,7 @@ export class CompanionAppAssistOwner implements DesktopAppAssistOwner {
       await this.options.assertCurrent();
       return this.watching ? result : 'unavailable';
     }
-    const config = await (store.getSaved?.(ownerUserId) ?? store.get(ownerUserId));
+    const config = await store.get(ownerUserId);
     await this.options.assertCurrent();
     if (!this.watching) return { status: 'source_unavailable' };
     if (!appAssistAllowed(config)) return { status: 'off' };

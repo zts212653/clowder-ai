@@ -1,6 +1,95 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import { type RecallEventReader, readRecallPageEvent } from '../src/routes/memory-recall-events.js';
+import type { RecallTimelineReader } from '../src/routes/memory-recall-query.js';
+import type { RecallStatsReader } from '../src/routes/memory-recall-stats.js';
 import { recallFixture } from './memory-recall-fixture.js';
+
+test('recall stats passes only revalidated owner thread IDs to the plugin', async () => {
+  const queries: Parameters<RecallStatsReader>[0][] = [];
+  const stats = [{ source: 'pull', surface: 'search', presented: 4, inspected: 2, used: 1 }];
+  const f = await recallFixture(undefined, {
+    readRecallStats: async (input) => {
+      queries.push(input);
+      return stats;
+    },
+  });
+  try {
+    f.indexed.push('other', 'deleted', 'missing', 'system', 'own');
+    const url = '/api/memory/recall/stats?days=14';
+    assert.equal((await f.app.inject({ url, headers: { 'x-test-session': 'other-owner' } })).statusCode, 403);
+    assert.deepEqual(queries, []);
+    const res = await f.app.inject({ url, headers: { 'x-test-session': 'owner' } });
+    assert.equal(res.statusCode, 200, res.body);
+    const { from, to, rows } = res.json();
+    assert.deepEqual(rows, stats);
+    assert.equal(to - from, 14 * 86400000);
+    assert.deepEqual(queries, [{ from, to, threadIds: ['own', 'system'] }]);
+  } finally {
+    await f.close();
+  }
+});
+
+test('recall pagination delegates only the authorized thread and freezes the cursor window', async () => {
+  const queries: Parameters<RecallTimelineReader>[0][] = [];
+  const reads: Parameters<RecallEventReader>[0][] = [];
+  const f: Awaited<ReturnType<typeof recallFixture>> = await recallFixture(undefined, {
+    readRecallTimeline: async (input) => {
+      queries.push(input);
+      const ids = input.before ? ['older'] : ['newer', 'older'];
+      return ids.map((id, index) => ({
+        key: `recall:${id}`, at: input.to - (id === 'newer' ? 1 : 2) - index,
+        thread_id: 'own', invocation_id: `inv-${id}`, cue_id: null, recall_id: id,
+      }));
+    },
+    readRecallEvent: async (input) => {
+      reads.push(input);
+      return readRecallPageEvent(f.db, input.recallId, input.threadId) ?? null;
+    },
+  });
+  try {
+    f.indexed.push('other', 'deleted', 'system');
+    f.recall('newer');
+    f.recall('older', { timestamp: f.now - 2000 });
+    const first = (await f.get('?threadId=own&limit=1')).json();
+    assert.equal(first.records[0].event.id, 'newer');
+    const next = (await f.get(`?threadId=own&limit=1&cursor=${encodeURIComponent(first.nextCursor)}`)).json();
+    assert.equal(next.records[0].event.id, 'older');
+    assert.deepEqual(queries.map(({ threadIds, to, before }) => ({ threadIds, to, before })), [
+      { threadIds: ['own'], to: first.to, before: undefined },
+      { threadIds: ['own'], to: first.to, before: { at: first.to - 1, key: 'recall:newer' } },
+    ]);
+    assert.deepEqual(reads, [{ recallId: 'newer', threadId: 'own' }, { recallId: 'older', threadId: 'own' }]);
+  } finally {
+    await f.close();
+  }
+});
+
+test('recall document titles use the provider and thread labels retain owner checks', async () => {
+  const anchors: string[] = [];
+  const f = await recallFixture((readers) => {
+    readers.readDocumentCandidate = async (anchor) => {
+      anchors.push(anchor);
+      return anchor === 'F042' ? { title: 'Public feature from plugin', kind: 'feature' } : null;
+    };
+  });
+  try {
+    const candidates = ['F042', 'thread-own', 'thread-other', 'private-collection'].map((anchor) => ({ anchor }));
+    f.recall('docs', { candidates: JSON.stringify(candidates) });
+    const response = await f.get();
+    assert.equal(response.statusCode, 200, response.body);
+    const results = response.json().records[0].event.results;
+    assert.deepEqual(results.map(({ title, href }: { title: string; href: string | null }) => [title, href]), [
+      ['Public feature from plugin', '/memory/search?q=F042'],
+      ['真实对话', '/thread/own'],
+      ['', null],
+      ['', null],
+    ]);
+    assert.deepEqual(anchors, ['F042', 'private-collection']);
+  } finally {
+    await f.close();
+  }
+});
 
 test('selected window, source and cat use real ledger rows with both time bounds', async () => {
   const f = await recallFixture();
@@ -37,8 +126,42 @@ test('owner session is required and all malformed filters fail closed', async ()
       assert.equal((await f.app.inject({ url: path, headers: { 'x-cat-cafe-user': 'owner' } })).statusCode, 401);
       assert.equal((await f.app.inject({ url: path, headers: { 'x-test-session': 'other-owner' } })).statusCode, 403);
     }
-    for (const query of ['days=8', 'source=other', 'limit=0', 'limit=101', 'catId=', 'threadId=own', 'cursor=garbage'])
+    for (const query of ['days=8', 'source=other', 'limit=0', 'limit=101', 'catId=', 'threadId=', 'cursor=garbage'])
       assert.equal((await f.get(`?${query}`)).statusCode, 400, query);
+  } finally {
+    await f.close();
+  }
+});
+
+test('thread event pagination reads the complete time range and binds its cursor to the selected thread', async () => {
+  const f = await recallFixture();
+  try {
+    f.indexed.push('system', 'other', 'deleted');
+    f.recall('new');
+    for (const id of ['old-a', 'old-b']) f.recall(id, { timestamp: f.now - 100 * 86400000 });
+    f.recall('other-thread', { thread: 'system' });
+    f.recall('foreign', { thread: 'other' });
+    f.recall('deleted', { thread: 'deleted' });
+    const first = (await f.get('?days=0&threadId=own&limit=1')).json();
+    assert.equal(first.from, 0);
+    assert.equal(first.days, 0);
+    assert.equal(first.records[0].event.id, 'new');
+    const second = (await f.get(`?days=0&threadId=own&limit=1&cursor=${encodeURIComponent(first.nextCursor)}`)).json();
+    assert.equal(second.records[0].event.id, 'old-b');
+    const third = (await f.get(`?days=0&threadId=own&limit=1&cursor=${encodeURIComponent(second.nextCursor)}`)).json();
+    assert.equal(third.records[0].event.id, 'old-a');
+    assert.equal(third.nextCursor, null);
+    assert.equal(
+      (await f.get(`?days=0&threadId=system&limit=1&cursor=${encodeURIComponent(first.nextCursor)}`)).statusCode,
+      400,
+    );
+    assert.equal((await f.get('?days=0&threadId=other')).json().records.length, 0);
+    assert.equal((await f.get('?days=0&threadId=deleted')).json().records.length, 0);
+    assert.equal(
+      (await f.app.inject({ url: '/api/memory/recall/stats?days=0', headers: { 'x-test-session': 'owner' } }))
+        .statusCode,
+      400,
+    );
   } finally {
     await f.close();
   }

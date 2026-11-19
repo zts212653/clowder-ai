@@ -18,14 +18,23 @@ const PUBLISHED_MANIFESTS: Partial<
   '0.3.3-candidate.0': { validate: validateDeskManifest, bridgeVersion: '1.7.0' },
 };
 
-/** Keep the generic manifest ABI unchanged; admit only the delivered companion's
- * new bridge literal. Installation and runtime still authenticate its exact SRI.
+/** The package manifest as the contract reads it; a plugin's console is its console/pdl.yaml, not the manifest.
+ * Existing companion bridge admission and exact archive SRI verification stay unchanged.
  */
 export function validateHostPluginManifest(value: unknown): ReturnType<typeof validateManifest> {
+  return validateBaseManifest(value);
+}
+
+function validateBaseManifest(value: unknown): ReturnType<typeof validateManifest> {
   let legacy = validateManifest(value);
-  // A newer general schema must not widen the Host's pinned desktop bridge ABI.
+  const version = value && typeof value === 'object' && 'version' in value ? value.version : undefined;
+  // A newer general schema must not widen the Host's pinned desktop bridge ABI. A version without a
+  // pinned release is a local build: the current contract reads it, and the runtime decides whether it may run.
   if (legacy.valid) {
-    if (!legacy.manifest.contributions?.some((c) => c.type === 'desktop-window' && c.bridgeVersion === '1.7.0'))
+    if (
+      !legacy.manifest.contributions?.some((c) => c.type === 'desktop-window' && c.bridgeVersion === '1.7.0') ||
+      !COMPANION_ARCHIVE_CONTRACTS.some((row) => row.version === version)
+    )
       return legacy;
     legacy = {
       valid: false,
@@ -39,7 +48,6 @@ export function validateHostPluginManifest(value: unknown): ReturnType<typeof va
       ],
     };
   }
-  const version = value && typeof value === 'object' && 'version' in value ? value.version : undefined;
   const release = COMPANION_ARCHIVE_CONTRACTS.find(
     (row) => row.version === version && PUBLISHED_MANIFESTS[row.contract] !== undefined,
   );

@@ -72,13 +72,26 @@ export const useActiveExecutionStore = create<ActiveExecutionState>((set, get) =
     const current = get();
     if (current.anchorThreadId !== anchorThreadId || current.requestVersion !== requestVersion) return;
     const executionsByKey = Object.fromEntries(
-      response.executions.map((execution) => [activeExecutionKey(execution), execution]),
+      response.executions.map((execution) => {
+        const key = activeExecutionKey(execution),
+          previous = current.executionsByKey[key];
+        // A full HTTP receipt allocates rows again; compare only this execution's facts by id.
+        return [key, previous && JSON.stringify(previous) === JSON.stringify(execution) ? previous : execution];
+      }),
     );
+    const sameExecutions =
+      Object.keys(executionsByKey).length === Object.keys(current.executionsByKey).length &&
+      Object.keys(executionsByKey).every((key) => executionsByKey[key] === current.executionsByKey[key]);
+    const unavailable = response.scope === 'all' ? (response.unavailableProjectPaths ?? []) : [];
     set({
       projectPath: response.scope === 'all' ? current.projectPath : response.projectPath,
       scope: response.scope ?? 'project',
-      unavailableProjectPaths: response.scope === 'all' ? (response.unavailableProjectPaths ?? []) : [],
-      executionsByKey,
+      unavailableProjectPaths:
+        unavailable.length === current.unavailableProjectPaths.length &&
+        unavailable.every((path, i) => path === current.unavailableProjectPaths[i])
+          ? current.unavailableProjectPaths
+          : unavailable,
+      executionsByKey: sameExecutions ? current.executionsByKey : executionsByKey,
       waits: response.waits ?? [],
       cancelPendingByKey: Object.fromEntries(
         Object.keys(current.cancelPendingByKey)

@@ -525,6 +525,7 @@ export interface AgentRouterOptions {
   toolUsageCounter?: import('../../tool-usage/ToolUsageCounter.js').ToolUsageCounter;
   /** F188 Phase F AC-F10: Tool event log (append-only sequence) */
   toolEventLog?: import('../../tool-usage/ToolEventLog.js').ToolEventLog;
+  persistRecallEvents?: import('../../../../memory/recall-correlation-hook.js').PersistRecallEvents;
   /** F188 Phase F AC-F10 (AS-4): Skill load event log */
   skillLoadEventLog?: import('../../tool-usage/SkillLoadEventLog.js').SkillLoadEventLog;
   /** F155 B-4: Independent guide session store */
@@ -541,8 +542,8 @@ export interface AgentRouterOptions {
   turnCustodyProjectionService?: import('../../../../ball-custody/TurnCustodyProjectionService.js').TurnCustodyProjectionService;
   /** F222: Frustration auto-issue store */
   frustrationIssueStore?: import('../../stores/ports/FrustrationIssueStore.js').IFrustrationIssueStore;
-  /** F229: Concierge config store for duty-cat岗位 prompt injection */
-  conciergeConfigStore?: import('../../../../concierge/ConciergeConfigStore.js').IConciergeConfigStore;
+  /** F229: 猫猫球 settings for duty-cat岗位 prompt injection */
+  companionSettings?: import('../../../../concierge/companion-settings.js').ReadCompanionSettings;
   /** F229 Phase B: TriagePlan store for triage-plan marker → confirm/cancel card actions */
   conciergeTriagePlanStore?: import('../../../../concierge/ConciergeTriagePlanStore.js').IConciergeTriagePlanStore;
   /** F247 AC-B1c-3 PR-C: Cloud invoke bridge for @gpt-pro → ChatGPT dispatch */
@@ -565,7 +566,7 @@ export interface AgentRouterOptions {
   personMemoryProposalStatusContextResolver?: import('../../../../memory/people/PersonMemoryProposalStatusContextResolver.js').PersonMemoryProposalStatusContextResolver;
   /** F287: invocation-bound Cue Plane adapter. */
   memoryCuePromptService?: import('../../../../memory/cue/MemoryCueInvocationPromptService.js').MemoryCueInvocationPromptResolver;
-  matterMemoryService?: import('../invocation/invoke-single-cat.js').InvocationDeps['matterMemoryService'];
+  matterOpeningPrompt?: import('../invocation/invoke-single-cat.js').InvocationDeps['matterOpeningPrompt'];
   contextSourceAdmission?: import('../../../../memory/cue/ContextSourceAdmission.js').ContextSourceAdmission;
   profileCueOpportunitySource?: import('../../../../memory/cue/sources/ProfileMemoryCueSource.js').ProfileMemoryCueSource;
   threadOverviewOpportunitySource?: import('../../../../memory/cue/sources/ThreadOverviewMemoryCueSource.js').ThreadOverviewMemoryCueSource;
@@ -633,6 +634,7 @@ export class AgentRouter {
   private toolUsageCounter?: import('../../tool-usage/ToolUsageCounter.js').ToolUsageCounter;
   /** F188 Phase F AC-F10 */
   private toolEventLog?: import('../../tool-usage/ToolEventLog.js').ToolEventLog;
+  private persistRecallEvents?: import('../../../../memory/recall-correlation-hook.js').PersistRecallEvents;
   /** F188 Phase F AC-F10 AS-4 */
   private skillLoadEventLog?: import('../../tool-usage/SkillLoadEventLog.js').SkillLoadEventLog;
   /** F155 B-4 */
@@ -647,7 +649,7 @@ export class AgentRouter {
   /** F222 */
   private frustrationIssueStore?: import('../../stores/ports/FrustrationIssueStore.js').IFrustrationIssueStore;
   /** F229 */
-  private conciergeConfigStore?: import('../../../../concierge/ConciergeConfigStore.js').IConciergeConfigStore;
+  private companionSettings?: import('../../../../concierge/companion-settings.js').ReadCompanionSettings;
   /** F229 Phase B */
   private conciergeTriagePlanStore?: import('../../../../concierge/ConciergeTriagePlanStore.js').IConciergeTriagePlanStore;
   /** F247 AC-B1c-3 PR-C */
@@ -669,7 +671,7 @@ export class AgentRouter {
   private personMemoryProposalStatusContextResolver?: import('../../../../memory/people/PersonMemoryProposalStatusContextResolver.js').PersonMemoryProposalStatusContextResolver;
   /** F287 */
   private memoryCuePromptService?: import('../../../../memory/cue/MemoryCueInvocationPromptService.js').MemoryCueInvocationPromptResolver;
-  private matterMemoryService?: import('../invocation/invoke-single-cat.js').InvocationDeps['matterMemoryService'];
+  private matterOpeningPrompt?: import('../invocation/invoke-single-cat.js').InvocationDeps['matterOpeningPrompt'];
   private contextSourceAdmission?: import('../../../../memory/cue/ContextSourceAdmission.js').ContextSourceAdmission;
   private profileCueOpportunitySource?: import('../../../../memory/cue/sources/ProfileMemoryCueSource.js').ProfileMemoryCueSource;
   private threadOverviewOpportunitySource?: import('../../../../memory/cue/sources/ThreadOverviewMemoryCueSource.js').ThreadOverviewMemoryCueSource;
@@ -746,6 +748,7 @@ export class AgentRouter {
     this.humanDispositionFeedbackContextService = options.humanDispositionFeedbackContextService;
     this.toolUsageCounter = options.toolUsageCounter;
     this.toolEventLog = options.toolEventLog;
+    this.persistRecallEvents = options.persistRecallEvents;
     this.skillLoadEventLog = options.skillLoadEventLog;
     this.guideSessionStore = options.guideSessionStore;
     this.dismissTracker = options.dismissTracker;
@@ -754,7 +757,7 @@ export class AgentRouter {
     this.ballCustody = options.ballCustody;
     this.turnCustodyProjectionService = options.turnCustodyProjectionService;
     this.frustrationIssueStore = options.frustrationIssueStore;
-    this.conciergeConfigStore = options.conciergeConfigStore;
+    this.companionSettings = options.companionSettings;
     this.conciergeTriagePlanStore = options.conciergeTriagePlanStore;
     this.cloudInvokeBridge = options.cloudInvokeBridge;
     this.cloudReturnGrantStore = options.cloudReturnGrantStore;
@@ -766,7 +769,7 @@ export class AgentRouter {
     this.injectionTraceStore = options.injectionTraceStore;
     this.personMemoryProposalStatusContextResolver = options.personMemoryProposalStatusContextResolver;
     this.memoryCuePromptService = options.memoryCuePromptService;
-    this.matterMemoryService = options.matterMemoryService;
+    this.matterOpeningPrompt = options.matterOpeningPrompt;
     this.contextSourceAdmission = options.contextSourceAdmission;
     this.profileCueOpportunitySource = options.profileCueOpportunitySource;
     this.eventCueOpportunitySource = options.eventCueOpportunitySource;
@@ -1497,14 +1500,14 @@ export class AgentRouter {
         ...(this.agentPaneRegistry ? { agentPaneRegistry: this.agentPaneRegistry } : {}),
         ...(this.guideSessionStore ? { guideSessionStore: this.guideSessionStore } : {}),
         ...(this.dismissTracker ? { dismissTracker: this.dismissTracker } : {}),
-        ...(this.conciergeConfigStore ? { conciergeConfigStore: this.conciergeConfigStore } : {}),
+        ...(this.companionSettings ? { companionSettings: this.companionSettings } : {}),
         ...(this.conciergeTriagePlanStore ? { conciergeTriagePlanStore: this.conciergeTriagePlanStore } : {}),
         ...(this.cloudInvokeBridge ? { cloudInvokeBridge: this.cloudInvokeBridge } : {}),
         ...(this.cloudReturnGrantStore ? { cloudReturnGrantStore: this.cloudReturnGrantStore } : {}),
         ...(this.freshnessStateStore ? { freshnessStateStore: this.freshnessStateStore } : {}),
         ...(this.runtimeInteractionPort ? { runtimeInteractionPort: this.runtimeInteractionPort } : {}),
         ...(this.memoryCuePromptService ? { memoryCuePromptService: this.memoryCuePromptService } : {}),
-        ...(this.matterMemoryService ? { matterMemoryService: this.matterMemoryService } : {}),
+        ...(this.matterOpeningPrompt ? { matterOpeningPrompt: this.matterOpeningPrompt } : {}),
         ...(this.contextSourceAdmission ? { contextSourceAdmission: this.contextSourceAdmission } : {}),
         ...(this.profileCueOpportunitySource ? { profileCueOpportunitySource: this.profileCueOpportunitySource } : {}),
         ...(this.threadOverviewOpportunitySource
@@ -1530,6 +1533,7 @@ export class AgentRouter {
         : {}),
       ...(this.toolUsageCounter ? { toolUsageCounter: this.toolUsageCounter } : {}),
       ...(this.toolEventLog ? { toolEventLog: this.toolEventLog } : {}),
+      persistRecallEvents: this.persistRecallEvents,
       ...(this.skillLoadEventLog ? { skillLoadEventLog: this.skillLoadEventLog } : {}),
       ...(this.worldContextProvider ? { worldContextProvider: this.worldContextProvider } : {}),
       ...(this.worldStore ? { worldStore: this.worldStore } : {}),

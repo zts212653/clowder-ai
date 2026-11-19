@@ -1,0 +1,170 @@
+{
+  "threadSettings": {
+    "reveal": {
+      "title": "Reveal private messages"
+    }
+  },
+  "runtime": {
+    "hooks": {
+      "label": "Agent hooks",
+      "sync": "Sync Agent hooks",
+      "missing": "Missing",
+      "stale": "Changed"
+    },
+    "connectionFailed": "Connection failed",
+    "noConversationSource": "No cloud conversation source available",
+    "dshSetupError": {
+      "dsh_config_complex_patch": "Unable to read the Desktop configuration patch safely. Check its target and structure in DSH Desktop, then retry. The current configuration is preserved.",
+      "dsh_config_expression": "The Desktop model or authentication configuration contains an unsupported expression. Check it in DSH Desktop, then retry. The current configuration is preserved.",
+      "dsh_config_ambiguous": "The Desktop model or authentication configuration has duplicate definitions. Resolve the conflict in DSH Desktop, then retry. The current configuration is preserved.",
+      "dsh_config_manual": "Desktop uses an unsupported custom plugin configuration. Check it in DSH Desktop, then retry. The current configuration is preserved.",
+      "dsh_setup_changed": "Desktop configuration changed. Refresh it before saving again. Your draft is preserved.",
+      "dsh_setup_desktop_ambiguous": "Multiple DSH Desktop installations were found. Select an installation in model settings before saving.",
+      "dsh_setup_custom_startup": "No usable DSH Desktop installation was found. Install it and refresh. The current configuration is preserved.",
+      "dsh_setup_credential_missing": "The selected route has no authentication. Sign in or configure credentials in DSH Desktop, then retry.",
+      "dsh_setup_credential_invalid": "Unable to read Desktop credentials. Repair authentication in DSH Desktop, then retry.",
+      "dsh_setup_auth_refresh_required": "Desktop authentication needs renewal. Sign in again in DSH Desktop, then retry.",
+      "dsh_setup_model_unavailable": "The selected route or model is unavailable. Refresh model settings and select it again. Your draft is preserved.",
+      "dsh_setup_busy": "Another Desktop configuration is being read. Retry shortly. Your draft is preserved.",
+      "default": "Unable to prepare Desktop configuration. Check model and authentication settings in DSH Desktop, then retry. The current configuration is preserved."
+    },
+    "dshCheck": {
+      "unchecked": "Unchecked",
+      "checking": "Checking connection",
+      "passed": "Model connected",
+      "partial": "Model connected; some tools unavailable",
+      "failed": "Connection check failed",
+      "unknown": "Connection result unknown",
+      "stale": "Configuration or tools changed",
+      "refresh": "Refresh status",
+      "check": "Check connection",
+      "cost": "May incur model charges",
+      "tool_schema_rejected": "The model rejected the tool configuration",
+      "session_configuration_unavailable": "The client could not apply the selected model or reasoning effort",
+      "check_timed_out": "Connection check timed out",
+      "check_store_unavailable": "Check records are unavailable",
+      "model_reply_unconfirmed": "No normal text reply was confirmed",
+      "plugin_activation_unavailable": "Plugin activation unavailable",
+      "invalidTool": "Invalid tool definition"
+    }
+  },
+  "chat": {
+    "projectGit": {
+      "true": "Git not initialized",
+      "false": "Git unavailable"
+    },
+    "projectIndex": {
+      "missing": "Not prepared",
+      "building": "Preparing",
+      "failed": "Preparation failed"
+    }
+  },
+  "chatMessage": {
+    "watcher": {
+      "target": "→ {0}",
+      "original": "Original message",
+      "panel": "Watcher panel",
+      "panelLimit": "Watching at once",
+      "ownAccount": "Member's own account",
+      "who": "Who said it",
+      "roundMember": {"pending": "{0} (not started)", "running": "{0} (watching)", "spoke": "{0} (spoke)", "quiet": "{0} (quiet)", "failed": "{0} (failed)", "interrupted": "{0} (interrupted)"}
+    },
+    "routing": {
+      "mention": "@{0}",
+      "handoff": "The reply was not handed off to {0}. Quote it and mention them when needed.",
+      "disabled": "@{0} is disabled and was skipped. Alternatives: {1}",
+      "outside": "@{0} is not a participant in this conversation and was skipped.",
+      "ack": "{0} already has a terminal ACK; no new reply was triggered.",
+      "missing": "{0} does not exist and was skipped."
+    },
+    "executionUnavailable": "This execution can no longer be located"
+  },
+  "chatRich": {
+    "profile": {"full": "Full content", "before": "Current", "after": "Proposed"},
+    "saveFailed": "Submitted, but the selection could not be saved. Do not submit it again."
+  },
+  "memoryGroup": {
+    "unreadable": "The original record cannot be read",
+    "matter": "Matter",
+    "person": "Person memory",
+    "profile": "Profile",
+    "taste": "Taste",
+    "entity": "Entity",
+    "event": "Event correction",
+    "saved": "Saved",
+    "deferred": "Deferred",
+    "joined": "Joined",
+    "unavailable": "Unavailable",
+    "refused": "Not saved",
+    "completed": "Completed",
+    "forgotten": "Forgotten",
+    "sourceChanged": "Source changed",
+    "source": "View source",
+    "change": "Suggest changes",
+    "changePrompt": "Please revise and resubmit this memory proposal:",
+    "changeBlocked": "The original conversation draft is not ready. Please try again."
+  },
+  "chatCards": {
+    "originalQuotes": "Original text"
+  },
+  "memoryOwners": {
+    "deferred": {
+      "title": "Deferred person notes",
+      "error": "Deferred notes unavailable",
+      "empty": "No deferred person notes",
+      "awaiting": "Awaiting confirmation",
+      "deferred": "Deferred",
+      "claimed": "Being organized",
+      "withdrawn": "Withdrawn; content cleared",
+      "notActionable": "Not adopted; content cleared",
+      "proposed": "Converted to a person proposal",
+      "unknown": "Status unknown",
+      "pendingForget": "Permanent forgetting is incomplete",
+      "withdraw": "Withdraw",
+      "forget": "Forget permanently",
+      "proposal": "Open original proposal"
+    },
+    "personMaintenance": {
+      "unknown": "Result unconfirmed; retry continues the same operation.",
+      "retry": "Retry this operation",
+      "usageError": "Read usage unavailable",
+      "directRead": "Direct reads",
+      "cueDrill": "Memory cue opens",
+      "forgetItem": "Forget this content",
+      "confirmTitle": "Confirm person memory action",
+      "withdrawConfirm": "Stop processing and clear this deferred note. The original conversation is retained.",
+      "forgetConfirm": "Permanently forget this content. This cannot be undone. The original conversation is retained."
+    }
+  },
+  "work": {
+    "sourceState": {
+      "preview-fallback": "Read-only preview (annotations unavailable) · {0}",
+      "blocked": "{0}",
+      "ready": "{0}"
+    },
+    "sourceDenied": "Access to the original file is denied; cached preview hidden",
+    "sourceIdentityChanged": "The login identity changed; original access cannot be reused",
+    "sourceNotFound": "Original file or directory unavailable",
+    "sourceTooLarge": "Original file exceeds the collaboration size limit",
+    "sourceInventory": "Registered directories cannot be verified",
+    "sourceConnection": "Original directory is not connected",
+    "sourceChecking": "Verifying the original file location",
+    "sourceUnknown": "Original file location could not be verified"
+  },
+  "proposalRecovery": {
+    "uncertain": "Approval outcome is unconfirmed",
+    "retryable": "Confirmed pending; approval can be retried",
+    "placement": "Approved; read Group placement",
+    "writing": "Submitting",
+    "readback": "Read current status",
+    "blocked": "Read current status first"
+  },
+  "inboxRefresh": {
+    "retained": "Refresh unconfirmed; retained content is display-only"
+  },
+  "holdNotice": {
+    "open": "View in workbench",
+    "cancel": "Cancel hold",
+    "cancelTitle": "Cancel {0}'s hold?"
+  }
+}

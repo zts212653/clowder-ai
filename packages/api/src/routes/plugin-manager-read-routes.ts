@@ -13,6 +13,26 @@ import type { PluginManagerRouteOptions } from './plugin-manager-routes.js';
 
 export function registerPluginManagerReadRoutes(app: FastifyInstance, options: PluginManagerRouteOptions): void {
   const accessOptions = { allowVerifiedCallbackPrincipal: true } as const;
+  app.get('/api/plugin-manager/pdl', async (request, reply) => {
+    const access = requirePluginReadAccess(request, accessOptions);
+    if ('error' in access) return pluginAccessError(reply, access);
+    try {
+      return await options.manager.pdl();
+    } catch (error) {
+      return sendManagerError(reply, error);
+    }
+  });
+  app.get<{ Params: { pluginId: string } }>('/api/plugin-manager/pdl/:pluginId', async (request, reply) => {
+    const access = requirePluginReadAccess(request, accessOptions);
+    if ('error' in access) return pluginAccessError(reply, access);
+    const parsedId = pluginIdSchema.safeParse(request.params.pluginId);
+    if (!parsedId.success) return invalidRequest(reply);
+    try {
+      return await options.manager.pdlSubtree(parsedId.data);
+    } catch (error) {
+      return sendManagerError(reply, error);
+    }
+  });
   app.get('/api/plugin-manager/plugins', async (request, reply) => {
     const access = requirePluginReadAccess(request, accessOptions);
     if ('error' in access) return pluginAccessError(reply, access);

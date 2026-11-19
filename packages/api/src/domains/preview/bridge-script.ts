@@ -61,6 +61,13 @@ export const BRIDGE_SCRIPT = `
   window.addEventListener('message', function(e) {
     if (!e.data || e.data.source !== 'cat-cafe-preview' || e.source !== parent) return;
 
+    if (e.data.type === 'navigate') {
+      if (e.data.op === 'back') window.history.back();
+      else if (e.data.op === 'forward') window.history.forward();
+      else if (e.data.op === 'reload') window.location.reload();
+      return;
+    }
+
     if (e.data.type === 'visible-page-admission-request') {
       var admission = e.data.admission || {};
       var requiredDom = Array.isArray(admission.requiredDom) ? admission.requiredDom : [];

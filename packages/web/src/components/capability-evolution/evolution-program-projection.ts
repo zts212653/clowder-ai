@@ -5,8 +5,8 @@ import {
   evolutionProgramOriginV1Schema,
   evolutionProgramStateV1Schema,
 } from '@cat-cafe/shared';
-import type { EvolutionAttributionExplanation } from './EvolutionAttributionPanel';
-import type { EvolutionObservationView } from './EvolutionObservationPanel';
+import type { EvolutionAttributionExplanation } from '@/components/capability-evolution/evolution-attribution-validation';
+
 import { isAttribution } from './evolution-attribution-validation';
 import { type EvolutionProgramLineage, isLineage, isOwnerRef, type OwnerRef } from './evolution-lineage';
 import {
@@ -152,4 +152,33 @@ function isDrafts(value: unknown): value is NonNullable<EvolutionProgramProjecti
 export function isProjection(value: unknown): value is EvolutionProgramProjection {
   const parsed = parseProgramProjection(value);
   return parsed !== null && parsed.lineage !== undefined;
+}
+
+export interface EvolutionObservationView {
+  status: 'connected' | 'insufficient';
+  trajectory?: {
+    ref: OwnerRef;
+    invocationId: string;
+    threadId: string;
+  };
+  connectedEyes: Array<{
+    sourceKind: string;
+    ownerSurfaceRef: OwnerRef;
+    joinKey: string;
+    namedConsumerRef: OwnerRef;
+    instrumentationRef: OwnerRef;
+    ownerHref: string;
+  }>;
+  evidenceProofRefs?: Record<string, OwnerRef>;
+  trigger?: {
+    registrationRef: OwnerRef;
+    channels: readonly string[];
+  };
+  nextEvaluationAt?: string;
+  gaps: Array<{
+    code: string;
+    message: string;
+    ownerFeatureId: string;
+    ownerStateRef?: string;
+  }>;
 }

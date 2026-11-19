@@ -13,7 +13,7 @@ import {
   type MemorySearchQuery,
   type SearchExecution,
 } from './memory-search-types.js';
-import { projectTasteMemory, visibleTasteMemories } from './taste-browse-model.js';
+import { projectTasteMemory } from './taste-browse-model.js';
 
 const querySchema = z
   .object({
@@ -39,7 +39,8 @@ async function searchTaste(
   query: MemorySearchQuery,
   execution: SearchExecution,
 ): Promise<MemorySearchGroup> {
-  if (!opts.tasteRepository) throw new Error('Taste reader unavailable');
+  const { tasteBrowse } = opts;
+  if (!tasteBrowse) throw new Error('Taste reader unavailable');
   const terms = query.q.toLocaleLowerCase().split(/\s+/).filter(Boolean);
   const found = await KnowledgeResolver.discover(query.q, {
     limit: query.limit + 1,
@@ -48,7 +49,7 @@ async function searchTaste(
       {
         id: 'taste',
         read: async () => {
-          const memories = await visibleTasteMemories(opts.tasteRepository!, opts.ownerUserId, privateAccess);
+          const memories = await tasteBrowse.list(opts.ownerUserId, privateAccess);
           checkMemorySearchExecution(execution);
           return {
             candidates: memories.filter(({ payload }) =>

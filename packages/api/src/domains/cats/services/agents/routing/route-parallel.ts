@@ -466,7 +466,7 @@ async function* routeParallelPrepared(
   });
 
   // F229: Concierge interceptor — load duty-cat 岗位 context for concierge threads
-  const conciergeCtx = await prepareConciergeContext(routeThread, userId, deps.invocationDeps.conciergeConfigStore);
+  const conciergeCtx = await prepareConciergeContext(routeThread, deps.invocationDeps.companionSettings);
 
   // F229 KD-23: Pre-fetch search context → per-invocation handle table + prompt context
   let conciergeSearchContextString = '';
@@ -2745,9 +2745,11 @@ async function* routeParallelPrepared(
   // F200 AC-A1: fire-and-forget recall correlation after all cats complete.
   // TD 2026-08-12: bounded tail read — full-thread reads of large keys
   // (observed 221MB) froze the API event loop every round-end.
-  if (deps.toolEventLog && deps.evidenceStore && completedCatInvocationIds.length > 0) {
-    const evidenceDb = (deps.evidenceStore as { getDb?: () => import('better-sqlite3').Database }).getDb?.();
-    if (evidenceDb) {
+  if (deps.toolEventLog && completedCatInvocationIds.length > 0) {
+    const evidenceDb = deps.persistRecallEvents
+      ? undefined
+      : (deps.evidenceStore as { getDb?: () => import('better-sqlite3').Database } | undefined)?.getDb?.();
+    if (deps.persistRecallEvents || evidenceDb) {
       deps.toolEventLog
         .readRecentByThread(threadId, RECALL_CORRELATION_EVENT_WINDOW)
         .then((events) => {
@@ -2760,7 +2762,13 @@ async function* routeParallelPrepared(
               catId,
               threadId,
             );
-            triggerRecallCorrelation(evidenceDb, withPush, invId, catId).catch(() => {});
+            void triggerRecallCorrelation(
+              evidenceDb,
+              withPush,
+              invId,
+              catId,
+              deps.persistRecallEvents ? { userId, threadId, persist: deps.persistRecallEvents } : undefined,
+            ).catch(() => {});
           }
         })
         .catch(() => {});

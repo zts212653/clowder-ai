@@ -98,7 +98,7 @@ test('remember uses all eight original submit routes, original publication and n
     store: person,
     workspacePersonResolver: new EvidenceStoreWorkspacePersonResolver(evidence),
   });
-  registerCallbackMatterMemoryRoutes(app, matters);
+  registerCallbackMatterMemoryRoutes(app, () => matters);
   registerCallbackRecordProactiveMemoryAbstentionRoutes(app, { registry });
   registerCallbackDeferPersonMemoryRoutes(app, {
     ...common,

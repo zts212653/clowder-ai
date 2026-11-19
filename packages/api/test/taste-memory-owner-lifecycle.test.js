@@ -1,3 +1,4 @@
+import { createTasteBrowseFixture } from './helpers/taste-browse-fixture.js';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -95,8 +96,7 @@ describe('F321 Taste owner lifecycle', () => {
     await app.register(sessionRoute, { ownerUserId });
     await app.register(tasteBrowseRoutes, {
       ownerUserId,
-      tasteRepository: repository,
-      lifecycleStore: store,
+      browse: createTasteBrowseFixture(repository, store),
       lifecycleService: lifecycle,
       readObservatory: async () => ({
         entries: [],

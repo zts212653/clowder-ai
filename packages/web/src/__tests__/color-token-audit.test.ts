@@ -28,7 +28,7 @@ describe('color token audit', () => {
 
   it('no redundant dark: overrides on semantic token classes', () => {
     const output = execSync(
-      `grep -rn "dark:" --include="*.tsx" --include="*.ts" "${WEB_SRC}" | grep -v node_modules | grep -v "\\.test\\."`,
+      `grep -rn "dark:" --include="*.tsx" --include="*.ts" "${WEB_SRC}" | grep -v node_modules | grep -v "\\.test\\." || true`,
       { encoding: 'utf-8', maxBuffer: 1024 * 1024 },
     ).trim();
 
@@ -46,7 +46,7 @@ describe('color token audit', () => {
 
   it('remaining dark: utility lines are within the existing budget', () => {
     const output = execSync(
-      `grep -rn "dark:" --include="*.tsx" --include="*.ts" "${WEB_SRC}" | grep -v node_modules | grep -v "\\.test\\."`,
+      `grep -rn "dark:" --include="*.tsx" --include="*.ts" "${WEB_SRC}" | grep -v node_modules | grep -v "\\.test\\." || true`,
       { encoding: 'utf-8' },
     ).trim();
 

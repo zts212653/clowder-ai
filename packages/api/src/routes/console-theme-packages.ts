@@ -1,0 +1,92 @@
+import { readFile, rm } from 'node:fs/promises';
+import { extname, join } from 'node:path';
+import multipart from '@fastify/multipart';
+import type { FastifyInstance } from 'fastify';
+import {
+  assetMimes,
+  exportCustomTheme,
+  exportPackage,
+  installPackage,
+  isBuiltin,
+  listPackages,
+  packageDir,
+  readPackage,
+  themeId,
+  themeRoots,
+} from '../domains/console-themes/packages.js';
+import { resolveOwnerGate } from '../utils/owner-gate.js';
+import { resolveStrictUserId } from '../utils/request-identity.js';
+
+export async function consoleThemePackageRoutes(
+  app: FastifyInstance,
+  opts: { projectRoot: string; builtinRoot: string },
+): Promise<void> {
+  const roots = themeRoots(opts.projectRoot, opts.builtinRoot);
+  app.addHook('onRequest', async (request, reply) => {
+    const userId = resolveStrictUserId(request);
+    if (!userId) return reply.code(401).send({ error: 'Owner identity required' });
+    const denied = resolveOwnerGate(userId);
+    if (denied) return reply.code(denied.status).send({ error: 'Owner identity required' });
+  });
+  app.addHook('preValidation', async (request, reply) => {
+    const params = request.params as { id?: string; file?: string };
+    if (params.id !== undefined && !themeId.test(params.id)) return reply.code(400).send({ error: 'Invalid theme id' });
+    if (params.file !== undefined && !/^[^/\\\0]+\.(png|jpg|jpeg|webp|gif|svg|woff2|woff|ttf)$/.test(params.file)) {
+      return reply.code(400).send({ error: 'Invalid asset file' });
+    }
+  });
+  app.setErrorHandler((error, _request, reply) => {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT')
+      return reply.code(404).send({ error: 'Theme or asset not found' });
+    return reply.send(error);
+  });
+  // The package zip arrives like other console uploads: one multipart file.
+  await app.register(multipart, { limits: { fileSize: 32 * 1024 * 1024, files: 1 } });
+  const url = '/api/console-themes/packages';
+
+  app.post(url, async (request, reply) => {
+    const file = request.isMultipart() ? await request.file() : undefined;
+    if (!file) return reply.code(400).send({ error: 'Expected a zip file' });
+    const zip = await file.toBuffer();
+    try {
+      return await installPackage(roots, zip);
+    } catch (error) {
+      return reply.code(400).send({ error: (error as Error).message });
+    }
+  });
+  app.get(url, async () => ({ packages: await listPackages(roots) }));
+  app.get<{ Params: { id: string } }>(`${url}/:id`, async (request) => readPackage(roots, request.params.id));
+  app.get<{ Params: { id: string; file: string } }>(`${url}/:id/assets/:file`, async (request, reply) => {
+    const { id, file } = request.params;
+    return reply
+      .type(assetMimes[extname(file)])
+      .send(await readFile(join(await packageDir(roots, id), 'assets', file)));
+  });
+  app.delete<{ Params: { id: string } }>(`${url}/:id`, async (request, reply) => {
+    if (await isBuiltin(roots, request.params.id)) return reply.code(400).send({ error: 'Built-in theme' });
+    await rm(join(roots.custom, request.params.id), { recursive: true });
+    return reply.code(204).send();
+  });
+  app.get<{ Params: { id: string } }>(`${url}/:id/export`, async (request, reply) => {
+    const { id } = request.params;
+    return reply
+      .type('application/zip')
+      .header('content-disposition', `attachment; filename="${id}.theme.zip"`)
+      .send(await exportPackage(roots, id));
+  });
+  app.post<{ Body: { theme?: unknown } }>(
+    '/api/console-themes/export',
+    { bodyLimit: 8 * 1024 * 1024 },
+    async (request, reply) => {
+      try {
+        const { id, zip } = exportCustomTheme(request.body?.theme);
+        return reply
+          .type('application/zip')
+          .header('content-disposition', `attachment; filename="${id}.theme.zip"`)
+          .send(zip);
+      } catch (error) {
+        return reply.code(400).send({ error: (error as Error).message });
+      }
+    },
+  );
+}

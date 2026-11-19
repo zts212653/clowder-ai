@@ -1,3 +1,4 @@
+import { createTasteBrowseFixture } from './helpers/taste-browse-fixture.js';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -124,8 +125,7 @@ describe('F321 Taste source-bound correction proposal', () => {
     });
     await app.register(tasteBrowseRoutes, {
       ownerUserId,
-      tasteRepository: repository,
-      lifecycleStore,
+      browse: createTasteBrowseFixture(repository, lifecycleStore),
       lifecycleService: lifecycle,
       readObservatory: async () => ({ entries: [], constellations: [], coverage: { totalUnverified: 0 } }),
       proposalStore,

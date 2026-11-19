@@ -1290,7 +1290,6 @@ describe('incremental current-message fallback integration', () => {
     const { routeParallel } = await import('../dist/domains/cats/services/agents/routing/route-parallel.js');
     const { formatConciergeHandleBinding } = await import('../dist/domains/concierge/concierge-search-context.js');
     const { projectConciergeStoredContent } = await import('../dist/domains/concierge/concierge-reply-validator.js');
-    const { CONCIERGE_CONFIG_DEFAULTS } = await import('@cat-cafe/shared');
     const appendCalls = [];
     const targetEntry = {
       label: 'R1',
@@ -1372,11 +1371,11 @@ describe('incremental current-message fallback integration', () => {
       },
       async updateParticipantActivity() {},
     });
-    deps.invocationDeps.conciergeConfigStore = {
-      async get() {
-        return { ...CONCIERGE_CONFIG_DEFAULTS, dutyCatProfileId: 'opus' };
-      },
-    };
+    deps.invocationDeps.companionSettings = async () => ({
+      displayName: '猫猫球',
+      personaTone: '温暖',
+      dutyCatProfileId: 'opus',
+    });
     deps.evidenceStore = {
       async search() {
         assert.fail('foreground message mode must not use legacy thread aggregation');
@@ -1565,7 +1564,6 @@ describe('incremental current-message fallback integration', () => {
   it('concierge routes turn one verified thread-context lookup into a teleport action', async () => {
     const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
     const { routeParallel } = await import('../dist/domains/cats/services/agents/routing/route-parallel.js');
-    const { CONCIERGE_CONFIG_DEFAULTS } = await import('@cat-cafe/shared');
     const appendCalls = [];
     const targetThreadId = 'thread_mrf6uzhogk1y3p30';
     const targetMessageId = '0001784218043549-000203-0e050c94';
@@ -1631,11 +1629,11 @@ describe('incremental current-message fallback integration', () => {
       },
       async updateParticipantActivity() {},
     });
-    deps.invocationDeps.conciergeConfigStore = {
-      async get() {
-        return { ...CONCIERGE_CONFIG_DEFAULTS, dutyCatProfileId: 'opus' };
-      },
-    };
+    deps.invocationDeps.companionSettings = async () => ({
+      displayName: '猫猫球',
+      personaTone: '温暖',
+      dutyCatProfileId: 'opus',
+    });
     deps.evidenceStore = {
       async search() {
         assert.fail('ordinary prefetch must not use legacy thread aggregation');

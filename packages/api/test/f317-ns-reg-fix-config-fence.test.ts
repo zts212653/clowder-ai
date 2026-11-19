@@ -25,9 +25,9 @@ import { conciergeRoutes } from '../src/routes/concierge.js';
 const OWNER = 'ns-reg-config-owner';
 
 class SlowConfigStore extends MemoryConciergeConfigStore {
-  override async put(userId: string, config: Parameters<MemoryConciergeConfigStore['put']>[1]) {
+  override async patch(userId: string, patch: Parameters<MemoryConciergeConfigStore['patch']>[1]) {
     await new Promise((resolve) => setTimeout(resolve, 60));
-    return super.put(userId, config);
+    return super.patch(userId, patch);
   }
 }
 
@@ -39,17 +39,11 @@ async function fixture() {
   await app.register(sessionAuthPlugin);
   await app.register(sessionRoute, { ownerUserId: OWNER });
   const config = new SlowConfigStore();
-  await MemoryConciergeConfigStore.prototype.put.call(config, OWNER, {
-    ...CONCIERGE_CONFIG_DEFAULTS,
-    dutyCatProfileId: 'opus',
-  });
+  await MemoryConciergeConfigStore.prototype.put.call(config, OWNER, { ...CONCIERGE_CONFIG_DEFAULTS });
   const sessions = new LiveCompanionSessions();
   await app.register(conciergeRoutes, {
     conciergeConfigStore: config,
-    conciergeThreadService: new ConciergeThreadService({
-      threadStore: new ThreadStore(),
-      conciergeConfigStore: config,
-    }),
+    conciergeThreadService: new ConciergeThreadService({ threadStore: new ThreadStore() }),
     conciergeRelayStore: new MemoryConciergeRelayStore(),
     conciergeConfirmationStore: new MemoryConciergeConfirmationStore(),
     messageStore: new MessageStore(),
@@ -75,26 +69,28 @@ async function fixture() {
 test('sequential presentation-only writes all succeed and persist', async (t) => {
   const f = await fixture();
   t.after(f.cleanup);
-  assert.equal((await f.put({ muted: true })).statusCode, 200);
-  assert.equal((await f.put({ ballSize: 96 })).statusCode, 200);
+  assert.equal((await f.put({ ballPosition: { x: 1, y: 2 } })).statusCode, 200);
+  assert.equal((await f.put({ appAssistEnabled: true })).statusCode, 200);
   const final = (await f.config.get(OWNER)) as unknown as Record<string, unknown>;
-  assert.equal(final.muted, true);
-  assert.equal(final.ballSize, 96);
+  assert.deepEqual(final.ballPosition, { x: 1, y: 2 });
+  assert.equal(final.appAssistEnabled, true);
 });
 
 test('every 200 answer to an overlapping write is really applied (no false success)', async (t) => {
   const f = await fixture();
   t.after(f.cleanup);
-  const [a, b] = await Promise.all([f.put({ muted: true }), f.put({ ballSize: 96 })]);
+  const [a, b] = await Promise.all([f.put({ ballPosition: { x: 1, y: 2 } }), f.put({ appAssistEnabled: true })]);
   const final = (await f.config.get(OWNER)) as unknown as Record<string, unknown>;
-  if (a.statusCode === 200) assert.equal(final.muted, true, 'the muted write answered 200 but is missing');
-  if (b.statusCode === 200) assert.equal(final.ballSize, 96, 'the size write answered 200 but is missing');
+  if (a.statusCode === 200)
+    assert.deepEqual(final.ballPosition, { x: 1, y: 2 }, 'the position write answered 200 but is missing');
+  if (b.statusCode === 200)
+    assert.equal(final.appAssistEnabled, true, 'the app-assist write answered 200 but is missing');
 });
 
 test('an overlapping presentation-only write reports its admission conflict without claiming media failure', async (t) => {
   const f = await fixture();
   t.after(f.cleanup);
-  const responses = await Promise.all([f.put({ muted: true }), f.put({ ballSize: 96 })]);
+  const responses = await Promise.all([f.put({ ballPosition: { x: 1, y: 2 } }), f.put({ appAssistEnabled: true })]);
   assert.deepEqual(responses.map((response) => response.statusCode).sort(), [200, 409]);
   for (const r of responses) {
     if (r.statusCode !== 200) {

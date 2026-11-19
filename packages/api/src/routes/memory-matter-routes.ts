@@ -3,6 +3,8 @@ import type { FastifyInstance, FastifyPluginAsync, FastifyReply } from 'fastify'
 import { z } from 'zod';
 import type { MatterMemoryService } from '../domains/memory/matters/MatterMemoryService.js';
 import { type MatterActor, MatterMemoryError } from '../domains/memory/matters/matter-source.js';
+import type { PluginCallContext } from '../domains/plugin/carrier/plugin-call-context.js';
+import { MemoryProviderCallError } from '../domains/plugin/host-surface/memory-plugin-host.js';
 import { resolveSessionUserId } from '../utils/request-identity.js';
 import { requireCallbackAuth } from './callback-auth-prehandler.js';
 import { authorizeOwnerBrowserAction } from './owner-memory-browser-auth.js';
@@ -22,6 +24,9 @@ const readQuery = catalogQuery.omit({ query: true }).extend({
     .transform((value) => value === 'true'),
 });
 function failure(reply: FastifyReply, error: unknown) {
+  if (error instanceof MemoryProviderCallError) {
+    return reply.status(503).send({ error: 'matter_memory_unavailable', effect: error.effect });
+  }
   if (error instanceof z.ZodError) return reply.status(400).send({ error: 'invalid_input', details: error.issues });
   if (error instanceof MatterMemoryError) {
     const status =
@@ -48,14 +53,28 @@ function failure(reply: FastifyReply, error: unknown) {
   }
   throw error;
 }
-interface MatterRouteOptions {
-  service?: MatterMemoryService;
+export type MatterRouteProvider = (
+  caller: PluginCallContext,
+) => Pick<MatterMemoryService, 'catalog' | 'read' | 'readForInvocation' | 'selectSource' | 'write' | 'writeSnapshot'>;
+
+function callbackMatterCaller(record: NonNullable<ReturnType<typeof requireCallbackAuth>>, reply: FastifyReply) {
+  return {
+    userId: record.userId,
+    catId: record.catId,
+    threadId: record.threadId,
+    invocationId: record.invocationId,
+    originTriggerMessageId: record.originTriggerMessageId ?? record.a2aTriggerMessageId,
+    assertCurrent: async () => {
+      if (reply.raw.destroyed) throw new Error('memory_request_closed');
+    },
+  } satisfies PluginCallContext;
 }
 
-export function registerCallbackMatterMemoryRoutes(app: FastifyInstance, service?: MatterMemoryService) {
+export function registerCallbackMatterMemoryRoutes(app: FastifyInstance, provider?: MatterRouteProvider) {
   app.get('/api/callbacks/memory-matters', async (request, reply) => {
     const record = requireCallbackAuth(request, reply);
     if (!record) return;
+    const service = provider?.(callbackMatterCaller(record, reply));
     if (!service) return reply.status(503).send({ error: 'matter_memory_unavailable' });
     try {
       return await service.catalog(
@@ -69,6 +88,7 @@ export function registerCallbackMatterMemoryRoutes(app: FastifyInstance, service
   app.get<{ Params: { matterId: string } }>('/api/callbacks/memory-matters/:matterId', async (request, reply) => {
     const record = requireCallbackAuth(request, reply);
     if (!record) return;
+    const service = provider?.(callbackMatterCaller(record, reply));
     if (!service) return reply.status(503).send({ error: 'matter_memory_unavailable' });
     try {
       return await service.readForInvocation(
@@ -84,6 +104,7 @@ export function registerCallbackMatterMemoryRoutes(app: FastifyInstance, service
   app.post('/api/callbacks/memory-matters/write', async (request, reply) => {
     const record = requireCallbackAuth(request, reply);
     if (!record) return;
+    const service = provider?.(callbackMatterCaller(record, reply));
     if (!service) return reply.status(503).send({ error: 'matter_memory_unavailable' });
     try {
       const input = matterWriteInputSchema.parse(request.body);
@@ -106,7 +127,7 @@ export function registerCallbackMatterMemoryRoutes(app: FastifyInstance, service
   });
 }
 
-export const memoryMatterRoutes: FastifyPluginAsync<MatterRouteOptions> = async (app, { service }) => {
+export const memoryMatterRoutes: FastifyPluginAsync<{ provider?: MatterRouteProvider }> = async (app, { provider }) => {
   const actor = (request: Parameters<typeof resolveSessionUserId>[0], reply: FastifyReply): MatterActor | null => {
     const userId = resolveSessionUserId(request);
     if (!userId) {
@@ -115,9 +136,20 @@ export const memoryMatterRoutes: FastifyPluginAsync<MatterRouteOptions> = async 
     }
     return { userId, viewer: { type: 'user' } };
   };
+  const forOwner = (owner: MatterActor, requestId: string, reply: FastifyReply) =>
+    provider?.({
+      userId: owner.userId,
+      catId: 'user',
+      threadId: 'default',
+      invocationId: requestId,
+      assertCurrent: async () => {
+        if (reply.raw.destroyed) throw new Error('memory_request_closed');
+      },
+    });
   app.post('/api/memory/matters/source', async (request, reply) => {
     const owner = actor(request, reply);
     if (!owner) return;
+    const service = forOwner(owner, request.id, reply);
     if (!service) return reply.status(503).send({ error: 'matter_memory_unavailable' });
     try {
       const input = z
@@ -136,6 +168,7 @@ export const memoryMatterRoutes: FastifyPluginAsync<MatterRouteOptions> = async 
   app.get('/api/memory/matters', async (request, reply) => {
     const owner = actor(request, reply);
     if (!owner) return;
+    const service = forOwner(owner, request.id, reply);
     if (!service) return reply.status(503).send({ error: 'matter_memory_unavailable' });
     try {
       return await service.catalog(owner, { ...catalogQuery.parse(request.query), management: true });
@@ -146,6 +179,7 @@ export const memoryMatterRoutes: FastifyPluginAsync<MatterRouteOptions> = async 
   app.get<{ Params: { matterId: string } }>('/api/memory/matters/:matterId', async (request, reply) => {
     const owner = actor(request, reply);
     if (!owner) return;
+    const service = forOwner(owner, request.id, reply);
     if (!service) return reply.status(503).send({ error: 'matter_memory_unavailable' });
     try {
       return await service.read(owner, request.params.matterId, readQuery.parse(request.query));
@@ -156,6 +190,7 @@ export const memoryMatterRoutes: FastifyPluginAsync<MatterRouteOptions> = async 
   app.get<{ Params: { matterId: string } }>('/api/memory/matters/:matterId/write-receipt', async (request, reply) => {
     const owner = actor(request, reply);
     if (!owner) return;
+    const service = forOwner(owner, request.id, reply);
     if (!service) return reply.status(503).send({ error: 'matter_memory_unavailable' });
     try {
       const ref = z
@@ -171,6 +206,7 @@ export const memoryMatterRoutes: FastifyPluginAsync<MatterRouteOptions> = async 
     if (!authorizeOwnerBrowserAction(request)) return reply.status(403).send({ error: 'invalid_action' });
     const owner = actor(request, reply);
     if (!owner) return;
+    const service = forOwner(owner, request.id, reply);
     if (!service) return reply.status(503).send({ error: 'matter_memory_unavailable' });
     try {
       return await service.write(owner, matterWriteInputSchema.parse(request.body));

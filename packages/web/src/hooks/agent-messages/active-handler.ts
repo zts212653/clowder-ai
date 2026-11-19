@@ -118,6 +118,7 @@ function handleActiveToolResult(msg: AgentMsg, threadId: string, ctx: ActiveCont
     toolUseId: msg.toolUseId,
     catId: msg.catId,
     content: msg.content,
+    toolResultStatus: msg.toolResultStatus,
     toolInput: msg.toolInput,
     timestamp: Date.now(),
   });

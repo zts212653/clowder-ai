@@ -1,0 +1,33 @@
+/* 边界：一个含义一个组件、不为接口定制、不按位置推导样式 */
+/* 组件库的杂项：要点、作者行、左右两侧 */
+/* ── Library ───────────────────────────── */
+.spec { display: grid; grid-template-columns: repeat(auto-fill, minmax(var(--span-2), 1fr)); gap: var(--sp-s); }
+.swatch { border-radius: var(--r-l); overflow: hidden; background: var(--bg-group); font-size: var(--fs-s); }
+.swatch i { display: block; height: var(--row-h-1); }
+.swatch div { padding: var(--sp-s) var(--sp-s); display: flex; flex-direction: column; gap: var(--sp-hair); }
+.swatch code { font-family: var(--font-mono); color: var(--fg-strong); font-size: var(--fs-s); }
+.demo { background: var(--bg-group); border-radius: var(--r-l); padding: var(--sp-l); display: flex; flex-wrap: wrap; gap: var(--sp-m); align-items: center; }
+.demo.col { flex-direction: column; align-items: stretch; }
+/* 一列要点（组件库只有这一个：卡片里的要点、提示里的列表、结构页的规则、目录的规则）：文字是所在的文字角色（卡片里是 prose，别处是 compact） */
+.card-ul, .cafe-ul, .rules, .cat-rules { margin: 0; padding-left: var(--sp-l); display: flex; flex-direction: column; gap: var(--sp-xs); }
+:is(.card-ul, .cafe-ul, .rules, .cat-rules) li::marker { color: var(--fg-faint); }
+.rules { max-width: 70ch; }
+.type-row { display: grid; grid-template-columns: var(--span-2) minmax(0, 1fr); gap: var(--sp-l); align-items: baseline; padding: var(--sp-s) var(--sp-m); }
+.type-row code { font-family: var(--font-mono); font-size: var(--fs-s); color: var(--fg-muted); }
+.tag { font-size: var(--fs-s); color: var(--fg-muted); white-space: nowrap; }
+.tag.bad { color: var(--warn); }
+/* 作者行永远一行：有什么就按阅读顺序接在这一行里（头像、名字、标签、时间、接收胶囊、引用）；放不下时里面省略，不换行 */
+.msg > .author-row { display: flex; flex-wrap: nowrap; align-items: center; gap: var(--sp-s); min-height: var(--ctl-l); margin-bottom: var(--sp-s); min-width: 0; white-space: nowrap; }
+.msg > .author-row .msg-head { flex-wrap: nowrap; min-width: 0; overflow: hidden; }
+.msg > .author-row .cafe-tagt { min-width: 0; max-width: var(--col-label); overflow: clip; text-overflow: ellipsis; }
+.msg .msg-head { grid-column: auto; flex: none; min-width: 0; flex-wrap: nowrap; align-items: center; }   /* 名字 · 句柄 · 时间是这一行的最小跨度，从不被裁；行窄时让出宽度的是后面的引用、胶囊（它们自己省略） */
+.msg .msg-name { color: var(--c, var(--identity-fallback)); font-weight: 600; font-size: var(--fs-xl); white-space: nowrap; }
+
+.cat-bubble .msg-body { grid-column: auto; }
+.cat-bubble .msg-body pre code { background: none; padding: 0; }
+.cat-bubble .msg-body pre { background: var(--bg-group); }
+.msg.cat > .letter { grid-column: auto; }
+.user-msg { --supp-indent: 0; display: flex; flex-direction: column; gap: var(--sp-xs); max-width: calc(100% - var(--g-mod)); margin-left: auto; width: fit-content; align-items: stretch; }
+/* 右侧（你的消息）：容器按这一侧对齐（贴右边），里面的顺序不变、从左往右读；引用胶囊靠左，左边和气泡左边对齐 */
+.msg.user-msg > .author-row { justify-content: flex-end; margin-bottom: var(--sp-xs); min-height: var(--ctl-xs); }
+.user-msg .bubble { max-width: none; align-self: stretch; background: oklch(from var(--bg-bubble) l calc(var(--me-c, c / var(--bubble-cmul)) * var(--bubble-cmul)) var(--me-h, h)); }
