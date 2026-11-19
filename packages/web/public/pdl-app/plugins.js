@@ -37,11 +37,20 @@ function bindPluginSpaces() {
   function opOf(plugin) {
     return ops[plugin.pluginId] || plugin.operation;
   }
+  // Only installed plugins are known senders: a plugin that isn't installed has no identity anywhere outside the
+  // plugin page, so its messages fall back to their source name / id like any unknown sender.
   pdlReads('who').plugins = function () {
     return Object.fromEntries(
-      pluginRows().map(function (plugin) {
-        return [plugin.pluginId, { name: plugin.displayName, icon: plugin.icon, instanceId: plugin.pluginInstanceId }];
-      }),
+      pluginRows()
+        .filter(function (plugin) {
+          return plugin.artifact === 'installed';
+        })
+        .map(function (plugin) {
+          return [
+            plugin.pluginId,
+            { name: plugin.displayName, icon: plugin.icon, instanceId: plugin.pluginInstanceId },
+          ];
+        }),
     );
   };
   // A detail that can't be read is just missing; its place says so (detailLoad) instead of loading forever.

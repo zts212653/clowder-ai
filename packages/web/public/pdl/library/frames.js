@@ -2,7 +2,7 @@
 /* 插件框：iframe 的消息、生命周期、尺寸 */
 'use strict';
 /* 插件框：谁提供的在框的提示里，不写成框里的一句话 */
-function frame(plugin, what, tall) { const d = WHO_DATA.plugins()[plugin]; return '<div class="frame' + (tall ? ' tall' : '') + '" data-tip="' + h(tc('frame.embeddedBy', d.name)) + '">' + icon(d.icon, 28) + '<b>' + h(what) + ('</b><span class="mono faint">plugin://') + plugin + '/' + (tall ? 'app' : 'settings') + '</span></div>'; }
+function frame(plugin, what, tall) { const d = WHO_DATA.plugins()[plugin] || { name: plugin, icon: 'robot' };   /* 没装的插件不在身份里：名字回退到 id */ return '<div class="frame' + (tall ? ' tall' : '') + '" data-tip="' + h(tc('frame.embeddedBy', d.name)) + '">' + icon(d.icon, 28) + '<b>' + h(what) + ('</b><span class="mono faint">plugin://') + plugin + '/' + (tall ? 'app' : 'settings') + '</span></div>'; }
 
 /* 一次性发送：应用经引擎的既有登记点找指定的框；不保存消息，不在进树、重画或加载后重放。 */
 ENGINE_PARTS.framePost = function (key, data) {
