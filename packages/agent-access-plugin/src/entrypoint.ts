@@ -29,6 +29,7 @@ import { runA2ATurn } from './runtime/a2a-turn.js';
 import { checkDshConnectionInWorker } from './runtime/acp/dsh/connection-check.js';
 import { createAcpProcessActions } from './runtime/acp/process-connection.js';
 import { resolveSessionModelConfigOption } from './runtime/acp/session-configuration.js';
+import { projectAgyOutput, summarizeAgyTurn } from './runtime/agy/agy-output.js';
 import { projectCatAgentOutput } from './runtime/catagent-events.js';
 import { projectClaudeBatch } from './runtime/claude/project-claude-batch.js';
 import { projectClaudeOutput } from './runtime/claude/project-claude-output.js';
@@ -54,6 +55,8 @@ export default {
             [AGENT_ACCESS_ACP_PROCESS_ACTION]: acpProcesses.acpProcess,
             [AGENT_ACCESS_ACP_SESSION_ACTION]: acpProcesses.acpSession,
             projectCatAgentOutput,
+            projectAgyOutput,
+            summarizeAgyTurn,
             configure(input: unknown) {
               if (input && typeof input === 'object' && 'operation' in input) {
                 const request = agentAccessNativeLaunchRequestSchema.parse(input);

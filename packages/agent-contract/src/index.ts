@@ -35,6 +35,8 @@ export const OFFICIAL_AGENT_ACCESS_OPERATIONS = [
   AGENT_ACCESS_ACP_PROCESS_ACTION,
   AGENT_ACCESS_ACP_SESSION_ACTION,
   'parseNativeEvent',
+  'projectAgyOutput',
+  'summarizeAgyTurn',
   'planCodexExec',
   'planCodexLogin',
   'projectCatAgentOutput',

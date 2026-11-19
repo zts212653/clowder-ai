@@ -1,4 +1,3 @@
-import { classifyCliError } from '../../../../../utils/cli-diagnostics.js';
 import type { AgyStepState } from './agy-stream-json-parser.js';
 
 interface ReplyStep {
@@ -16,6 +15,7 @@ export function agyReplyEvidence(input: {
   deltaText: string;
   upstreamStatus: string | null;
   upstreamError: string | null;
+  terminalPolicyRejected: boolean;
   hasDeniedActions: boolean;
 }) {
   const { lastStepIndex, finalText } = input;
@@ -62,12 +62,10 @@ export function agyReplyEvidence(input: {
   // Natural boot62 source197: the CLI retained an earlier attempt's EOF alongside
   // a completed reply and an unidentified DONE. This only permits delivery with
   // explicit uncertainty; neither tool identity nor auth/replay authority follows.
-  const errorClass = classifyCliError(input.upstreamError ?? '');
   const retainedAttemptEOF =
     input.upstreamStatus === 'ERROR' &&
     /^API error \(attempt [1-9]\d*\): [^\r\n]+: EOF$/.test(input.upstreamError ?? '') &&
-    errorClass !== 'auth_failed' &&
-    errorClass !== 'upstream_policy_reject' &&
+    !input.terminalPolicyRejected &&
     !input.hasDeniedActions &&
     errorSteps.length > 0 &&
     errorsPrecedeCompletion;

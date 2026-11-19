@@ -2373,7 +2373,7 @@ async function initializeApi(
                     }
                     case 'google':
                       try {
-                        service = createGoogleAgentService(catId, config.agyProfile);
+                        service = createGoogleAgentService(catId, config.agyProfile, agentAccessAgyOutput);
                       } catch (error) {
                         if (!(error instanceof AgentServiceUnavailableError)) throw error;
                         agentRegistry.markUnavailable(id, error.reason);
@@ -6034,6 +6034,8 @@ async function initializeApi(
   const { createAgentAccessClaudeBatch } = await import('./domains/plugin/agent-access/claude-batch.js');
   const agentAccessClaudeBatch = createAgentAccessClaudeBatch(pluginRuntime.inventoryStore, pluginRuntime.supervisor);
   const { createAgentAccessCatAgentOutput } = await import('./domains/plugin/agent-access/catagent.js');
+  const { createAgentAccessAgyOutput } = await import('./domains/plugin/agent-access/agy.js');
+  const agentAccessAgyOutput = createAgentAccessAgyOutput(pluginRuntime.inventoryStore, pluginRuntime.supervisor);
   const agentAccessCatAgentOutput = createAgentAccessCatAgentOutput(
     pluginRuntime.inventoryStore,
     pluginRuntime.supervisor,

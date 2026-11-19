@@ -14,6 +14,10 @@
       "types": "./dist/acp.d.ts",
       "import": "./dist/acp.js"
     },
+    "./agy": {
+      "types": "./dist/agy.d.ts",
+      "import": "./dist/agy.js"
+    },
     "./catagent": {
       "types": "./dist/catagent.d.ts",
       "import": "./dist/catagent.js"

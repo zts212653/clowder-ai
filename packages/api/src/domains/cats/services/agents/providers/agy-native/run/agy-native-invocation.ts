@@ -1,6 +1,8 @@
+import { configuredCredentialValues } from '@cat-cafe/mcp-server/dist/secret-runtime.js';
 import type { CatId } from '@cat-cafe/shared';
 import { createModuleLogger } from '../../../../../../../infrastructure/logger.js';
 import type { spawnCli } from '../../../../../../../utils/cli-spawn.js';
+import type { AgentAccessAgyOutput } from '../../../../../../plugin/agent-access/agy.js';
 import type { AgentMessage, AgentServiceOptions, MessageMetadata } from '../../../../types.js';
 import { type RawArchiveSink, sanitizeRawEvent } from '../../codex-audit-hooks.js';
 import type { createAgyNativeContinuityInput } from '../agy-native-continuity.js';
@@ -48,6 +50,7 @@ export async function* runAgyNativeInvocation(input: {
   continuityInput?: ReturnType<typeof createAgyNativeContinuityInput>;
   compactionRequested: boolean;
   rawArchivePath?: string;
+  adapter?: AgentAccessAgyOutput;
 }): AsyncGenerator<AgentMessage> {
   const {
     catId,
@@ -61,6 +64,7 @@ export async function* runAgyNativeInvocation(input: {
     continuityInput,
     compactionRequested,
     rawArchivePath,
+    adapter,
   } = input;
   const inputLifetime = new AbortController();
   const processLifetime = new AbortController();
@@ -86,6 +90,11 @@ export async function* runAgyNativeInvocation(input: {
     );
   try {
     const { stdinInput, ...deferredLaunchOptions } = launch.cliOptions;
+    const signal = AbortSignal.any([
+      processLifetime.signal,
+      ...(options?.signal ? [options.signal] : []),
+      ...(adapter ? [adapter.lifetime] : []),
+    ]);
     const cliOptions = {
       ...deferredLaunchOptions,
       ...(runInput
@@ -99,7 +108,13 @@ export async function* runAgyNativeInvocation(input: {
         : continuityInput
           ? { onStdinReady: continuityInput.onStdinReady }
           : { stdinInput }),
-      signal: options?.signal ? AbortSignal.any([options.signal, processLifetime.signal]) : processLifetime.signal,
+      signal,
+      assertLaunchCurrent: adapter
+        ? async () => {
+            await deferredLaunchOptions.assertLaunchCurrent?.();
+            adapter.lifetime.throwIfAborted();
+          }
+        : deferredLaunchOptions.assertLaunchCurrent,
       stdinCloseSignal: inputLifetime.signal,
       rawArchivePath,
     };
@@ -147,6 +162,8 @@ export async function* runAgyNativeInvocation(input: {
       },
       options?.signal,
       multiTurn,
+      adapter,
+      adapter ? configuredCredentialValues({ ...process.env, ...launch.cliOptions.env }) : [],
     )) {
       if (observation.kind === 'init') {
         await launch.bindSession(observation.sessionId);
