@@ -10,8 +10,9 @@ import { resolveDirectLocalAuthorizationUserId, resolveSessionUserId } from '../
 import { type BrakeSourceReaders, readBrakeSource } from './memory-brake-source.js';
 import { defaultMemoryLibraryTarget } from './memory-library-default.js';
 import { memoryLibraryFeed, visibleMemoryCollections } from './memory-library-read.js';
+import type { RecallEventReader } from './memory-recall-events.js';
 import { type RecallPageSourceReaders, readMemoryRecallPage } from './memory-recall-page.js';
-import { recallPageCursors, recallPageQuery } from './memory-recall-query.js';
+import { type RecallTimelineReader, recallPageCursors, recallPageQuery } from './memory-recall-query.js';
 import { type RecallStatsReader, readMemoryRecallStats } from './memory-recall-stats.js';
 import { registerMemorySearchRoutes } from './memory-search.js';
 import type { MemorySearchSources } from './memory-search-types.js';
@@ -27,6 +28,8 @@ export interface MemoryPageReadOptions {
   brakeSources?: BrakeSourceReaders;
   recallSources?: RecallPageSourceReaders;
   readRecallStats?: RecallStatsReader;
+  readRecallTimeline?: RecallTimelineReader;
+  readRecallEvent?: RecallEventReader;
   searchSources?: MemorySearchSources;
 }
 
@@ -58,6 +61,8 @@ export const memoryPageReadRoutes: FastifyPluginAsync<MemoryPageReadOptions> = a
         opts.recallSources,
         parsed.data,
         cursor,
+        opts.readRecallTimeline,
+        opts.readRecallEvent,
       );
       return { ...page, nextCursor: next ? cursors.encode(next, opts.ownerUserId, parsed.data) : null };
     } catch {

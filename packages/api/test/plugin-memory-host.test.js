@@ -27,6 +27,23 @@ const admission = {
   },
 };
 
+test('recall timeline rejects a row outside the threads authorized for that read', async () => {
+  const provider = new MemoryPluginHost();
+  await provider.admit(admission, {
+    exposes: async () => true,
+    async attempt(_id, method) {
+      if (method === 'memory.describe') return { status: 'returned', value: supportedDescriptor() };
+      return { status: 'returned', value: [{
+        key: 'recall:r1', at: 20, thread_id: 'foreign', invocation_id: 'i1', cue_id: null, recall_id: 'r1',
+      }] };
+    },
+  });
+  provider.markReady(pluginInstanceId);
+  await assert.rejects(() => provider.readRecallTimeline({
+    threadIds: ['authorized'], from: 10, to: 30, source: 'all', limit: 3,
+  }, 'owner'), { message: 'memory_unavailable', effect: 'unknown' });
+});
+
 test('project index writes run as the owner that authorized the Host operation', async () => {
   const provider = new MemoryPluginHost();
   const state = createProjectIndexProvider(provider);

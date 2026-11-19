@@ -10,7 +10,14 @@ import {
 } from '@clowder-ai/plugin-memory-contract/maintenance';
 import { type MatterDispatchInput, matterOutputSchemas } from '@clowder-ai/plugin-memory-contract/matter';
 import { type ProfileDispatchInput, profileOutputSchemas } from '@clowder-ai/plugin-memory-contract/profile';
-import { type MemoryRecallStatsRequest, memoryRecallStatsResult } from '@clowder-ai/plugin-memory-contract/recall';
+import {
+  type MemoryRecallEventRequest,
+  type MemoryRecallStatsRequest,
+  type MemoryRecallTimelineRequest,
+  memoryRecallEventResult,
+  memoryRecallStatsResult,
+  memoryRecallTimelineResult,
+} from '@clowder-ai/plugin-memory-contract/recall';
 import { type TasteBrowseDispatchInput, tasteBrowseOutputSchemas } from '@clowder-ai/plugin-memory-contract/taste';
 import type { z } from 'zod';
 import {
@@ -53,7 +60,9 @@ type MemoryDispatch =
   | MemoryProjectIndexRequest
   | MatterDispatchInput
   | ProfileDispatchInput
+  | MemoryRecallEventRequest
   | MemoryRecallStatsRequest
+  | MemoryRecallTimelineRequest
   | TasteBrowseDispatchInput;
 
 export async function callMemoryOwner<T>(
@@ -152,6 +161,17 @@ export class MemoryPluginHost {
 
   readRecallStats(input: MemoryRecallStatsRequest['input'], userId: string) {
     return callMemoryOwner(this, { operation: 'recall.stats', input }, memoryRecallStatsResult, userId);
+  }
+
+  async readRecallTimeline(input: MemoryRecallTimelineRequest['input'], userId: string) {
+    const rows = await callMemoryOwner(this, { operation: 'recall.timeline', input }, memoryRecallTimelineResult, userId);
+    const visible = new Set(input.threadIds);
+    if (rows.some((row) => !visible.has(row.thread_id))) throw new MemoryProviderCallError('unknown');
+    return rows;
+  }
+
+  readRecallEvent(input: MemoryRecallEventRequest['input'], userId: string) {
+    return callMemoryOwner(this, { operation: 'recall.event', input }, memoryRecallEventResult, userId);
   }
 
   attempt(
