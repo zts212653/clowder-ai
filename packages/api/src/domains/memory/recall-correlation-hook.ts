@@ -118,9 +118,11 @@ export async function triggerRecallCorrelation(
       // V33 migration may not have been applied yet in tests or migrations-in-progress.
     }
 
-    const metricsComputer = new RecallMetricsComputer(db);
-    metricsComputer.refreshAnchorMetrics();
-    metricsComputer.refreshGlobalCtrBaseline();
+    if (!writer) {
+      const metricsComputer = new RecallMetricsComputer(db);
+      metricsComputer.refreshAnchorMetrics();
+      metricsComputer.refreshGlobalCtrBaseline();
+    }
 
     if (threadId && !hasPrivateHits) {
       const aggregator = new TrajectoryAggregator(db);

@@ -17,12 +17,14 @@ import { type MatterDispatchInput, matterOutputSchemas } from '@clowder-ai/plugi
 import { type ProfileDispatchInput, profileOutputSchemas } from '@clowder-ai/plugin-memory-contract/profile';
 import {
   type MemoryCueInvocationRequest,
+  type MemoryRecallAnchorRequest,
   type MemoryRecallCandidateRequest,
   type MemoryRecallEventRequest,
   type MemoryRecallPersistRequest,
   type MemoryRecallStatsRequest,
   type MemoryRecallTimelineRequest,
   memoryCueInvocationResult,
+  memoryRecallAnchorResult,
   memoryRecallCandidateResult,
   memoryRecallEventResult,
   memoryRecallStatsResult,
@@ -72,6 +74,7 @@ type MemoryDispatch =
   | MatterDispatchInput
   | ProfileDispatchInput
   | MemoryCueInvocationRequest
+  | MemoryRecallAnchorRequest
   | MemoryRecallCandidateRequest
   | MemoryRecallEventRequest
   | MemoryRecallPersistRequest
@@ -218,6 +221,17 @@ export class MemoryPluginHost {
     const visible = new Set(input.threadIds);
     if (rows.some((row) => !visible.has(row.thread_id))) throw new MemoryProviderCallError('unknown');
     return rows;
+  }
+
+  readRecallAnchors(
+    input: Extract<MemoryRecallAnchorRequest, { operation: 'recall.anchors' }>['input'],
+    userId: string,
+  ) {
+    return callMemoryOwner(this, { operation: 'recall.anchors', input }, memoryRecallAnchorResult, userId);
+  }
+
+  async refreshRecallAnchors(userId: string) {
+    await callMemoryOwner(this, { operation: 'recall.anchors.refresh', input: {} }, z.null(), userId);
   }
 
   async persistRecallEvents(scope: Parameters<PersistRecallEvents>[0], events: Parameters<PersistRecallEvents>[1]) {

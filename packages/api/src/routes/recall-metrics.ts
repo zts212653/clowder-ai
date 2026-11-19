@@ -1,4 +1,5 @@
 import { isRecallResultStatus } from '@cat-cafe/shared';
+import type { MemoryRecallAnchorRequest, MemoryRecallAnchorRow } from '@clowder-ai/plugin-memory-contract/recall';
 import type Database from 'better-sqlite3';
 import type { FastifyPluginAsync } from 'fastify';
 import type { IThreadStore } from '../domains/cats/services/stores/ports/ThreadStore.js';
@@ -24,6 +25,11 @@ import {
 
 export interface RecallMetricsRoutesOptions {
   evidenceDb: Database.Database;
+  readAnchors?: (
+    input: Extract<MemoryRecallAnchorRequest, { operation: 'recall.anchors' }>['input'],
+    userId: string,
+  ) => Promise<MemoryRecallAnchorRow[]>;
+  refreshAnchors?: (userId: string) => Promise<void>;
   /** Optional: pass messageStore + taskStore to enable AC-D2.1/D2.2/D2.3 auto-detection. */
   messageStore?: SignalMessageStore & RecallReplyMessageStore;
   personMemoryStore?: RecallSourceReaders['personMemoryStore'];
@@ -83,11 +89,22 @@ export const recallMetricsRoutes: FastifyPluginAsync<RecallMetricsRoutesOptions>
     const userId = resolveHeaderUserId(request);
     if (!userId) return reply.status(401).send({ error: 'Missing X-Cat-Cafe-User header' });
 
-    const forceRefresh = request.query.refresh === '1';
-    if (forceRefresh) computer.refreshAnchorMetrics();
-
+    const refresh = request.query.refresh === '1';
     const limit = Math.min(Math.max(1, parseInt(request.query.limit ?? '20', 10) || 20), 100);
     const threshold = parseInt(request.query.dormancyThreshold ?? '0', 10);
+    if (opts.readAnchors) {
+      try {
+        return {
+          anchors: await opts.readAnchors(
+            { limit, refresh, ...(threshold > 0 ? { dormancyThreshold: threshold } : {}) },
+            userId,
+          ),
+        };
+      } catch {
+        return reply.status(503).send({ error: 'Recall anchors unavailable' });
+      }
+    }
+    if (refresh) computer.refreshAnchorMetrics();
 
     if (threshold > 0) {
       return { anchors: computer.getDormantAnchors(threshold, limit) };
@@ -105,8 +122,13 @@ export const recallMetricsRoutes: FastifyPluginAsync<RecallMetricsRoutesOptions>
     const userId = resolveHeaderUserId(request);
     if (!userId) return reply.status(401).send({ error: 'Missing X-Cat-Cafe-User header' });
 
-    computer.refreshAnchorMetrics();
-    return { status: 'ok' };
+    try {
+      if (opts.refreshAnchors) await opts.refreshAnchors(userId);
+      else computer.refreshAnchorMetrics();
+      return { status: 'ok' };
+    } catch {
+      return reply.status(503).send({ error: 'Recall anchors unavailable' });
+    }
   });
 
   app.get<{

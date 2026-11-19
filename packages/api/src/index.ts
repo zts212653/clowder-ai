@@ -3759,6 +3759,8 @@ async function initializeApi(
   };
   await app.register(recallMetricsRoutes, {
     evidenceDb: memoryServices.store.getDb(),
+    readAnchors: memoryProvider.readRecallAnchors.bind(memoryProvider),
+    refreshAnchors: memoryProvider.refreshRecallAnchors.bind(memoryProvider),
     messageStore,
     threadStore,
     ...(personMemoryStore ? { personMemoryStore } : {}),
