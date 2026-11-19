@@ -23,12 +23,13 @@ export class WorkspacePreviewService {
       if (!manifest) return [];
       return staticContentProviderContributions(manifest).flatMap((contribution) => {
         if (contribution.type !== 'content-preview-provider') return [];
-        return contribution.formats.some((format) => format.extension === extension)
-          ? [{ instanceId: instance.pluginInstanceId, contributionId: contribution.id }]
-          : [];
+        return contribution.formats
+          .filter((format) => format.extension === extension)
+          .map(() => ({ instanceId: instance.pluginInstanceId, contributionId: contribution.id }));
       });
     });
-    if (candidates.length > 1) throw new WorkspacePreviewSelectionError('More than one preview provider is enabled');
+    if (candidates.length > 1)
+      throw new WorkspacePreviewSelectionError('More than one preview format is enabled for this extension');
     const selected = candidates[0];
     if (!selected) return null;
     const bytes = await this.options.readSource(worktreeId, path);

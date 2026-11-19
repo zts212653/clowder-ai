@@ -129,4 +129,9 @@ test('dispatches a plugin-declared extension to a single read-only snapshot', as
     bytesBase64: Buffer.from('snapshot').toString('base64'),
   });
   assert.deepEqual(reads, ['project:presentations/sample.DECK']);
+  generic.formats.push({ extension: 'deck', mediaType: 'application/x-ambiguous-deck' });
+  await assert.rejects(service.open({ worktreeId: 'project', path: 'presentations/sample.DECK' }), {
+    message: 'More than one preview format is enabled for this extension',
+  });
+  assert.equal(reads.length, 1);
 });
