@@ -202,6 +202,36 @@ async function boot(
   return { dom, w, data, voiceState, get, post, action, errors, port };
 }
 
+it('shows a recoverable status when the connections page fails to render on entry', async () => {
+  const { dom, w, get } = await boot();
+  const previous = get.getMockImplementation()!;
+  get.mockImplementation((name, params) =>
+    name === '/api/marketplace/search' ? Promise.resolve({ results: [], sources: [] }) : previous(name, params),
+  );
+  try {
+    const pages = w.eval('PAGES');
+    const drawMarket = pages.market;
+    w.eval(`
+      PAGES.market = function () { throw new Error('market render failed'); };
+      go('market', { exit: ['x'] });
+    `);
+    await w.__settled();
+    expect(w.document.body.textContent).toContain(w.eval("tc('common.viewError')"));
+    const back = w.document.querySelector('[data-act="back"][data-exit="x"]');
+    expect(back).not.toBeNull();
+    back.click();
+    await w.__settled();
+    expect(w.document.body.textContent).not.toContain(w.eval("tc('common.viewError')"));
+    pages.market = drawMarket;
+    w.eval("go('market')");
+    await w.__settled();
+    expect(w.document.querySelector('[data-view="page.market"]')).not.toBeNull();
+    expect(w.document.body.textContent).not.toContain(w.eval("tc('common.viewError')"));
+  } finally {
+    dom.window.close();
+  }
+});
+
 it.each([
   { artifact: 'installed', install: false, availableVersion: '1.0.0', update: false },
   { artifact: 'installed', install: true, availableVersion: '1.1.0', update: true },

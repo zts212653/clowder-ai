@@ -690,13 +690,13 @@ function ctLeaf(k, sig, draw) {
   READ_SCOPES.push(reads); READ_OWN = own; CT_UP.push(k);
   let x;
   try { PROJ_FOCUS = false; x = draw(); delete LEAF_ERR[k]; }
-  catch (err) {   /* 这一块画的时候出错（插件这类外部声明和数据）：留着上一次画好的，第一次就出错则空着；同一个错只报一次；别的块照常画。
+  catch (err) {   /* 这一块画的时候出错（插件这类外部声明和数据）：留着上一次画好的，第一次出错的视图显示失败；同一个错只报一次；别的块照常画。
                      记下的那一块不算画好：下次一定重画，错没了就回来 */
     if (LEAF_ERR[k] !== err.message) { LEAF_ERR[k] = err.message; console.error(err); }
     CT_UP.forEach(function (u) { LEAF_DIRTY.add(u); });
     READ_SCOPES.pop(); READ_OWN = own0; CT_UP.pop(); PROJ_FOCUS = focus0;
     reads.forEach(function (r) { for (let i = 0; i < READ_SCOPES.length; i++) READ_SCOPES[i].add(r); });
-    if (!was) return '';
+    if (!was) return k.indexOf('view:') === 0 ? PV_DRAW.state('error', { text: tc('common.viewError') }) : '';
     was.sig = null;
     return typeof was.piece === 'string' ? was.piece : Object.assign({}, was.piece);
   }
@@ -805,13 +805,30 @@ function projSlots(ls) { return ls.filter(function (l) { return LAYER_DOM[l.id];
 function projCover(c, l) {
   const fr = navNodeOf(l);
   if (fr && fr.focus) PROJ_FOCUS = true;
-  const html = navWith(c, l, function () { const bk = navBackOf(c); return backIn(bk ? bk.role : 'page', bk, function () { return ENGINE_PARTS.layerExit(c, l) + projFrame(l); }); });
+  const html = navWith(c, l, function () { const bk = navBackOf(c); return backIn(bk ? bk.role : 'page', bk, function () { return ENGINE_PARTS.layerExit(c, l) + projFrame(c, l); }); });
   /* 覆盖层的面就是主窗口的面：同一张全局图 + 页面容器的不透明度（--bg-veil），不是另一种不透明的底。
      面（底色 + 背景图）画在容器上，滚动层在它里面：滚动的边缘渐隐透出的是容器自己的面，不是后面外壳的背景图 */
   return { key: 'cover:' + c, html: '<section class="cover' + (fr && fr.focus ? ' occ' : '') + '" data-bg-owner="' + h(ctPages()) + '" data-layer="' + l.id + '" data-lc="' + h(c) + '"' + (fr ? ' data-occ="' + h(l.f.slice(5)) + '"' : '') + '><div class="scroll cover-in"' + ctGridAttr(c) + '>' + html + '</div></section>', col: 'minmax(0, 1fr)' };
 }
 /* 一层的内容：页面（路由）或插件界面框（它声明的路由） */
-function projFrame(l) { const nd = navNodeOf(l); if (nd && nd.type !== 'frame') return pdlView(l.f.slice(5)); const r = navRouteOf(l); return r && PAGES[r] ? PAGES[r]() : ''; }   /* 帧声明了视图就画视图，否则是路由对应的页面 */
+const FRAME_ERR = new Map();
+function projFrame(c, l) {
+  try {
+    const nd = navNodeOf(l);
+    const html = nd && nd.type !== 'frame' ? pdlView(l.f.slice(5)) : PAGES[navRouteOf(l)]?.() ?? '';
+    FRAME_ERR.delete(c);
+    return html;
+  } catch (err) {
+    const message = String((err && err.message) || err);
+    if (FRAME_ERR.get(c) !== message) {
+      FRAME_ERR.set(c, message);
+      console.error(err);
+    }
+    CT_UP.forEach(function (k) { LEAF_DIRTY.add(k); });
+    const back = navBackOf(c);
+    return (back ? backHead(back) : '') + PV_DRAW.state('error', { text: tc('common.viewError') });
+  }
+}
 /* 画之前：记下 DOM 里每一层（缓存）；这一次要被盖住的层记下滚动位置（它的滚动区和它所在的滚动容器）。返回新出现的层 */
 function navVisible() {
   const out = {};

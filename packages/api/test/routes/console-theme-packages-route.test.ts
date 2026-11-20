@@ -150,6 +150,24 @@ describe('owner console theme packages', () => {
     assert.deepEqual((await get('/night')).json(), original);
   });
 
+  it('uses the current built-in manifest after a successful read or a parse failure', async () => {
+    const base = join(builtinRoot, 'base');
+    const file = join(base, 'theme.yaml');
+    await mkdir(base, { recursive: true });
+    const initial = { ...theme, id: 'base', uses: [] };
+    await writeFile(file, manifest(initial));
+    assert.equal((await get()).json().packages[0].version, '1');
+    assert.deepEqual((await get('/base')).json().pdl, initial.pdl);
+
+    await writeFile(file, 'pdl: [');
+    assert.equal((await get('/base')).statusCode, 500);
+
+    const replacement = { ...initial, version: '2', pdl: { palette: { ink: '#ffffff' } } };
+    await writeFile(file, manifest(replacement));
+    assert.equal((await get()).json().packages[0].version, '2');
+    assert.deepEqual((await get('/base')).json().pdl, replacement.pdl);
+  });
+
   it('reads built-in packages with the same rule, lists them as builtin and never imports over or deletes them', async () => {
     const base = join(builtinRoot, 'base');
     await mkdir(join(base, 'assets'), { recursive: true });
