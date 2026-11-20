@@ -191,10 +191,9 @@ export class MemoryConciergeConfigStore implements IConciergeConfigStore {
   }
 
   async patch(userId: string, patch: Partial<ConciergeConfig>): Promise<void> {
-    const { enabled, muted, ...kept }: SavedConciergeConfig = this.store.get(userId) ?? CONCIERGE_CONFIG_DEFAULTS;
-    // Same as the Redis write: turning app assistance on ends an older record's off / hidden state.
-    const legacy = patch.appAssistEnabled === true ? {} : { enabled, muted };
-    await this.keep(userId, { ...kept, ...legacy, ...patch });
+    // Same as the Redis write: turning app assistance on overrides an older record's off / hidden state.
+    const optIn = patch.appAssistEnabled === true ? { appAssistOverridesLegacy: true } : {};
+    await this.keep(userId, { ...(this.store.get(userId) ?? CONCIERGE_CONFIG_DEFAULTS), ...patch, ...optIn });
   }
 
   private async keep(userId: string, config: SavedConciergeConfig): Promise<void> {
