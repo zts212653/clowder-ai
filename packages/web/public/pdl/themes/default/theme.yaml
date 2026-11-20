@@ -32799,8 +32799,6 @@ pdl:
             variant: row
             value: "@selected"
             label: "@title"
-            act: "@act"
-            args: "@args"
           when: "@selectable"
       title:
         - parts: "@title"

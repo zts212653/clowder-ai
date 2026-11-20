@@ -16,8 +16,6 @@ pdl:
             props:
               value: "@selected"
               label: "@title"
-              act: "@act"
-              args: "@args"
               role: row
           when: "@selectable"
       title:
