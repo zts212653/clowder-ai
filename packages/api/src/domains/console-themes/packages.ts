@@ -194,9 +194,12 @@ export function parseThemeManifest(source: string): Theme {
   return parse(source);
 }
 
-function readManifest(roots: ThemeRoots, dir: string, id: string, source: string): Promise<Theme> {
-  const cache = dir === join(roots.builtin, id) ? roots.builtinManifests : undefined;
-  const cached = cache?.get(id);
+async function readManifest(roots: ThemeRoots, dir: string, id: string, source: string): Promise<Theme> {
+  // Imported packages retain the existing accepted size range. The shared worker has a smaller heap.
+  if (dir !== join(roots.builtin, id)) return parse(source);
+
+  const cache = roots.builtinManifests;
+  const cached = cache.get(id);
   if (cached?.source === source) return cached.parsed;
 
   const parsed = runModuleWorker<Theme>({
@@ -204,13 +207,11 @@ function readManifest(roots: ThemeRoots, dir: string, id: string, source: string
     exportName: 'parseThemeManifest',
     input: source,
   });
-  if (cache) {
-    const entry = { source, parsed };
-    cache.set(id, entry);
-    void parsed.catch(() => {
-      if (cache.get(id) === entry) cache.delete(id);
-    });
-  }
+  const entry = { source, parsed };
+  cache.set(id, entry);
+  void parsed.catch(() => {
+    if (cache.get(id) === entry) cache.delete(id);
+  });
   return parsed;
 }
 
