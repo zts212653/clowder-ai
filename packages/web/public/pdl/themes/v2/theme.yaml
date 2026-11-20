@@ -16912,6 +16912,18 @@ pdl:
                 when: $.home
             field:
               - type: component
+                use: v2Chip
+                props:
+                  icon: reply
+                  label:
+                    of: $.input.draft.reply.text
+                    slice: [0, 80]
+                  x:
+                    act: close
+                    args: {path: cs.reply}
+                    label: t:composer.cancelQuote
+                when: $.input.draft.reply
+              - type: component
                 use: v2Box
                 props:
                   role: inline
