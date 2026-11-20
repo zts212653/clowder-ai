@@ -497,7 +497,7 @@ export function useReviewBindings(
           : null;
         // A message file that is not a registered work: the thread's published artifact for this message and file.
         const published =
-          !reference && args.mid && args.url
+          !args.i && args.mid && args.url
             ? (
                 await request<{ artifacts: ThreadArtifactDTO[] }>(
                   `/api/threads/${encodeURIComponent(threadId)}/artifacts`,

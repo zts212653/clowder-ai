@@ -16746,6 +16746,8 @@ pdl:
                                       act: workOpen
                                       args:
                                         i: "@work"
+                                        mid: "@mid"
+                                        url: "@url"
                         when: "@rich"
                       - type: component
                         use: v2StatusText
