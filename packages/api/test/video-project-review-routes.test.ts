@@ -6,6 +6,44 @@ import { projectMessageImportOperation } from '../src/domains/collaborative-cont
 import { importStoredProjectMessage } from '../src/routes/messages-project-review.js';
 import { projectReviewHttpFixture } from './helpers/video-project-review-http.js';
 
+test('sync status counts missing import receipts across pages without importing or advancing the cursor', async (t) => {
+  const f = await projectReviewHttpFixture();
+  t.after(f.cleanup);
+  for (let i = 0; i < 101; i++) f.append({ contentBlocks: [], content: `unrelated-${i}` });
+  const first = f.append();
+  f.append();
+  f.append({ deletedAt: Date.now() });
+  const path = `${f.url}/sync-status?threadId=${f.thread.id}`;
+  const before = f.store.ledgers.projectMessageImports.get(f.principal.userId, f.request.contentRef, f.thread.id);
+  const status = await f.app.inject(path);
+  assert.equal(status.statusCode, 200);
+  assert.deepEqual(status.json(), { pending: 2 });
+  assert.equal(f.store.ledgers.getByContent(f.principal.userId, f.request.contentRef), null);
+  assert.equal(
+    f.store.ledgers.projectMessageImports.get(f.principal.userId, f.request.contentRef, f.thread.id),
+    before,
+  );
+  await f.deliver(first);
+  assert.deepEqual((await f.app.inject(path)).json(), { pending: 1 });
+  const imported = await f.app.inject({
+    method: 'POST',
+    url: `${f.url}/synchronize`,
+    payload: { threadId: f.thread.id },
+  });
+  assert.equal(imported.json().hasMore, true);
+  await f.app.inject({ method: 'POST', url: `${f.url}/synchronize`, payload: { threadId: f.thread.id } });
+  assert.deepEqual((await f.app.inject(path)).json(), { pending: 0 });
+});
+
+test('sync status uses the existing human and thread authority before disclosing pending source work', async (t) => {
+  const f = await projectReviewHttpFixture();
+  t.after(f.cleanup);
+  const foreign = f.threads.create('another-owner', 'Unreadable source');
+  assert.equal((await f.app.inject(`${f.url}/sync-status?threadId=${foreign.id}`)).statusCode, 403);
+  f.setSession(null);
+  assert.equal((await f.app.inject(`${f.url}/sync-status?threadId=${f.thread.id}`)).statusCode, 401);
+});
+
 test('real stored Human message reaches the canonical ledger, stays frozen at its input and replays without duplicate notifications', async (t) => {
   const f = await projectReviewHttpFixture();
   t.after(f.cleanup);
@@ -119,7 +157,7 @@ test('HTTP synchronization enforces 100-row durable pages and does not skip a fa
   for (let i = 0; i < 99; i++)
     f.messages.append({
       userId: f.principal.userId,
-      catId: null,
+      from: { kind: 'user', userId: f.principal.userId },
       threadId: f.thread.id,
       timestamp: Date.now(),
       content: `unrelated-${i}`,

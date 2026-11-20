@@ -138,27 +138,22 @@ async function harness({ packageManifest = manifest() } = {}) {
   };
 }
 
-test('⑥ a stop that fails during uninstall is retried by the next uninstall, not forgotten', async () => {
+test('⑥ a stop that fails during uninstall is logged and the uninstall still removes the plugin', async () => {
   const h = await harness();
   const enabled = await h.enable();
   await h.failNextStop();
 
-  await assert.rejects(h.lifecycle.uninstall('pi_h2', enabled.lifecycleRevision), lifecycleError('STOP_FAILED'));
-  const failed = (await h.store.snapshot()).instances[0];
-  assert.equal(failed.activationState, 'error');
-  assert.equal(h.released.length, 1, 'the cleanup steps that succeeded are not repeated');
-
-  const retired = await h.lifecycle.uninstall('pi_h2', failed.lifecycleRevision);
+  // A module that cannot stop (it may no longer load) must not make the plugin impossible to remove.
+  const retired = await h.lifecycle.uninstall('pi_h2', enabled.lifecycleRevision);
 
   assert.deepEqual(
     h
       .log()
       .filter((entry) => entry.call === 'stop')
       .map((entry) => entry.reason),
-    ['owner_uninstalled', 'owner_uninstalled'],
-    'the retry must stop the module again',
+    ['owner_uninstalled'],
   );
-  assert.equal(h.released.length, 2);
+  assert.equal(h.released.length, 1, 'the cleanup steps still run once');
   assert.equal(retired.lifecycleState, 'retired');
 });
 

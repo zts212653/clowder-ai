@@ -1,3 +1,4 @@
+import type { InvocationPromptInputProjection, InvocationTrajectorySummary } from '@cat-cafe/shared';
 import {
   isProviderSemanticEvent,
   type OutputMessageChannel,
@@ -343,4 +344,12 @@ export function buildInvocationTimelineRows(
     totalEffectiveRows: state.rows.length,
     hiddenRowCount,
   };
+}
+
+export interface InvocationDetailResponse {
+  invocationId: string;
+  events: RawTranscriptEvent[];
+  total: number;
+  summary?: InvocationTrajectorySummary;
+  promptInput?: InvocationPromptInputProjection;
 }

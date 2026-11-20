@@ -17,7 +17,7 @@ async function loadBrakePage(offset: number, since: number | null): Promise<Even
     throw new Error('Invalid page cursor');
   return page;
 }
-export function useBrakes(days: number) {
+export function useBrakes(days: number, needed: boolean | number = true) {
   const [events, setEvents] = useState<StoredEventMemory[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
@@ -44,6 +44,7 @@ export function useBrakes(days: number) {
   );
   // biome-ignore lint/correctness/useExhaustiveDependencies: attempt restarts an initial failed read
   useEffect(() => {
+    if (!needed) return;
     const version = ++generation.current;
     setEvents([]);
     setNext(null);
@@ -51,7 +52,7 @@ export function useBrakes(days: number) {
     return () => {
       ++generation.current;
     };
-  }, [request, attempt]);
+  }, [needed, request, attempt]);
   return {
     events,
     loading,

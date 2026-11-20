@@ -2,7 +2,7 @@
  * F096: InteractiveBlock — buildSelectionMessage pure function tests
  */
 import { describe, expect, it } from 'vitest';
-import { buildSelectionMessage } from '@/components/rich/InteractiveBlock';
+import { buildSelectionMessage } from '@/components/rich/interactive-message';
 
 describe('F096: buildSelectionMessage', () => {
   it('select — default template (no title)', () => {

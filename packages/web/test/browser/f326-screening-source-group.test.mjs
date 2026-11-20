@@ -76,7 +76,7 @@ test(
       const drafts = () =>
         page.evaluate(
           (threadId) =>
-            new Map(JSON.parse(sessionStorage.getItem('cat-cafe:thread-context-attachment-drafts') ?? '[]')).get(
+            new Map(JSON.parse(localStorage.getItem('cat-cafe:thread-context-attachment-drafts') ?? '[]')).get(
               threadId,
             ) ?? [],
           manifest.threadId,
@@ -87,7 +87,7 @@ test(
       await picker.locator('[data-testid^="context-thread-"]').first().click();
       await page.waitForFunction(
         (threadId) =>
-          new Map(JSON.parse(sessionStorage.getItem('cat-cafe:thread-context-attachment-drafts') ?? '[]'))
+          new Map(JSON.parse(localStorage.getItem('cat-cafe:thread-context-attachment-drafts') ?? '[]'))
             .get(threadId)
             ?.some((item) => item.kind === 'thread'),
         manifest.threadId,

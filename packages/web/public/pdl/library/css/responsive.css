@@ -1,0 +1,40 @@
+/* 边界：一个含义一个组件、不为接口定制、不按位置推导样式 */
+/* 窄屏、减少动态效果、浮条 */
+/* ── Responsive ────────────────────────── */
+@media (max-width: 960px) {
+  .app { grid-template-columns: var(--app-cols-n, var(--rail-w) minmax(0, 1fr)); }   /* 侧栏收成抽屉（脱离排版）：同一个网格去掉侧栏那一列，不然主区会被排进侧栏的窄列 */
+  .nav { position: fixed; left: var(--rail-w); top: 0; bottom: 0; width: min(calc(70 * var(--unit)), calc(100vw - calc(18 * var(--unit)))); z-index: var(--z-drawer); transform: translateX(calc(-100% - 80px)); transition: transform var(--dur-med); box-shadow: var(--shadow-raised); padding-top: env(safe-area-inset-top, 0); }
+  .nav-open .nav { transform: none; }
+  .btn.nav-toggle { display: inline-flex; }
+  .split.has-panel { grid-template-columns: minmax(0, 1fr); }
+  .split.has-panel .panel { position: fixed; top: 0; right: 0; bottom: 0; width: min(var(--span-7), calc(100vw - var(--rail-w))); z-index: var(--z-drawer-top); box-shadow: var(--shadow-raised); padding-top: env(safe-area-inset-top, 0); }
+  .split.wide .panel { width: calc(100vw - var(--rail-w)); }
+  .notes-on .main { margin-right: 0; }
+  .notes { width: var(--span-5); }
+  .proto { right: 34px; }
+  .tweaks { right: 16px; top: auto; bottom: 16px; transform: none; }
+}
+@media (max-width: 640px) {
+  .app, .app.no-nav { grid-template-columns: var(--g-mod) minmax(0, 1fr); }
+  .nav { left: var(--g-mod); width: min(calc(70 * var(--unit)), calc(100vw - var(--g-mod) - var(--sp-l))); }
+  .split.has-panel .panel, .split.wide .panel { width: calc(100vw - var(--g-mod)); }
+  .page { padding: var(--sp-l) var(--g-pad) calc(30 * var(--unit)); }
+  .kvg { grid-template-columns: minmax(0, 1fr); row-gap: 0; } .kvg dd + dt { margin-top: var(--sp-s); }   /* 键值：同一个网格，窄屏换成标签在上、值在下 */
+  .stream-inner { padding: var(--sp-m) var(--gutter-main) var(--sp-xl); }
+  .chat:has(> .cafe-mini, > .vw-view > .cafe-mini) > .stream { --g-edge: 0px; }   /* 窄屏没有消息导航 */
+  .composer-wrap { padding: 0 var(--gutter-main) var(--sp-m); }
+  .hide-sm { display: none; }
+  .plugin-float { left: 56px; }
+  .greet { --fs-hero: var(--fs-title); }
+  .type-row { grid-template-columns: 1fr; gap: var(--sp-hair); }
+}
+/* 减少动态效果（主题 › 动态效果：跟随系统 / 减少 / 正常，见 theme.js）：只去掉过渡动画——时长 token 归零，所有用它们的过渡、FLIP、到达、展开收起、遮罩淡入、平滑滚动都瞬间完成。
+   状态信号（光圈和状态点的颜色 + 节奏、执行中的节拍脉动、打字和流式输出）保留：它们是信息，不是装饰 */
+:root[data-motion="reduce"] { --dur-fast: 0s; --dur-med: 0s; --dur-slow: 0s; }   /* --dur-emph 不归零：跳转落点的强调是信息 */
+/* 作品页：工具条在分类行上面，和骨架一致 */
+/* 能力推荐：输入框上沿居中的一条轻提示（示意级），不压输入框边框 */
+/* 浮条（toolbar 角色 float）：浮在内容上面的一条药丸。摆在哪是所在容器的构成：输入区把它放在上沿之上，对话页把它放在标题行下面 */
+.composer > .vw-float { position: absolute; left: 50%; bottom: calc(100% + 8px); translate: -50% 0; z-index: var(--z-sticky); }
+.chat > .vw-float { position: absolute; top: 56px; left: 50%; translate: -50% 0; z-index: var(--z-sticky); max-width: calc(100% - 2 * var(--sp-l)); }
+.vw-float { display: inline-flex; align-items: center; gap: var(--sp-xs); height: var(--ctl-s); padding: 0 var(--sp-xs) 0 var(--sp-xs); border-radius: var(--r-full); background: var(--bg-raised); box-shadow: var(--shadow-raised); font-size: var(--fs-m); color: var(--fg-strong); white-space: nowrap; animation: arrive var(--dur-med) ease-out both; }
+.composer { width: 100%; max-width: var(--g-w); margin: 0 auto; padding: 0 var(--sp-s) var(--sp-s); background: var(--surf-anchor); border-radius: var(--r-xl); box-shadow: var(--shadow-low); position: relative; }

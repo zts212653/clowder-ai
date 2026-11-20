@@ -1,0 +1,86 @@
+/* 边界：一个含义一个组件、不为接口定制、不按位置推导样式 */
+/* 页面骨架：容器网格、页头、分隔线、表格 */
+/* ── Page skeleton ─────────────────────── */
+/* 容器网格：容器在结构里声明列数 --g-n、列间距 --g-gap、边距 --g-pad，引擎写在容器的盒子 [data-grid] 上；列宽是一个模数 --g-mod（token）。
+   容器里的内容只按“占几列”取宽：--g-w = 占满（组件的默认），--span-N = 占 N 列。放不下的列直接掉（窄的容器列数自然变少），所以 --span-N 最多就是 --g-w。
+   --g-aside = 1：内容两边的空白放得下一个 2 列宽的旁注（小节目录挂在左边）；--g-free = 1：两边各空出一整列（工作台菜单条）。这几项在容器的直接子元素上按容器的宽度（100cqi）算一次，往下继承 */
+@property --g-w { syntax: '<length>'; inherits: true; initial-value: 0px; }
+@property --g-aside { syntax: '<integer>'; inherits: true; initial-value: 0; }
+@property --g-panes { syntax: '<integer>'; inherits: true; initial-value: 0; }
+@property --g-free { syntax: '<integer>'; inherits: true; initial-value: 0; }   /* 内容旁边空出至少一整列（列宽 + 列间距）：浮在旁边的件（工作台菜单条）才放得下，不压住正文 */
+@property --back-float { syntax: '<integer>'; inherits: true; initial-value: 0; }
+@property --g-back { syntax: '<integer>'; inherits: true; initial-value: 0; }
+[data-grid] { container-type: inline-size; anchor-name: --ct-box, attr(data-aname type(<custom-ident>), --ct-box); anchor-scope: --ct-box; }   /* 容器盒子：网格的查询容器；也是结构锚点的作用域（不随内容滚动），浮在里面的件（引擎的返回）锚在自己所在的容器上 */
+body, [data-grid] > *, .chat > .stream { --g-w: min(100cqi - var(--g-pad) - max(var(--g-pad), var(--g-edge, 0px)), var(--g-n) * var(--g-mod) + (var(--g-n) - 1) * var(--g-gap)); --span-1: min(var(--g-w), 1 * var(--g-mod) + 0 * var(--g-gap)); --span-2: min(var(--g-w), 2 * var(--g-mod) + 1 * var(--g-gap)); --span-3: min(var(--g-w), 3 * var(--g-mod) + 2 * var(--g-gap)); --span-4: min(var(--g-w), 4 * var(--g-mod) + 3 * var(--g-gap)); --span-5: min(var(--g-w), 5 * var(--g-mod) + 4 * var(--g-gap)); --span-6: min(var(--g-w), 6 * var(--g-mod) + 5 * var(--g-gap)); --span-7: min(var(--g-w), 7 * var(--g-mod) + 6 * var(--g-gap)); --span-8: min(var(--g-w), 8 * var(--g-mod) + 7 * var(--g-gap)); --span-9: min(var(--g-w), 9 * var(--g-mod) + 8 * var(--g-gap)); --span-10: min(var(--g-w), 10 * var(--g-mod) + 9 * var(--g-gap)); --span-11: min(var(--g-w), 11 * var(--g-mod) + 10 * var(--g-gap)); --span-12: min(var(--g-w), 12 * var(--g-mod) + 11 * var(--g-gap)); --g-panes: clamp(0, sign(var(--g-w) - 8 * var(--g-mod) - 7 * var(--g-gap)), 1); --g-aside: clamp(0, sign((100cqi - var(--g-w)) / 2 - 2 * var(--g-mod) - 2 * var(--g-gap)), 1); --g-free: clamp(0, sign((100cqi - var(--g-w)) / 2 - 2 * var(--g-mod) - var(--g-gap)), 1); --g-back: clamp(0, sign((100cqi - var(--g-w)) / 2 - var(--g-pad) - var(--ctl-s) - var(--sp-s)), 1); }
+.page { --back-float: clamp(0, sign((100cqi - var(--g-w)) / 2 - var(--g-pad) - var(--span-2)), 1); inline-size: 100%; max-inline-size: calc(var(--g-w) + 2 * var(--g-pad)); margin: 0 auto; padding: var(--page-gap) var(--g-pad) calc(30 * var(--unit)); display: flex; flex-direction: column; gap: var(--page-gap); }   /* 页面：占满容器网格（内容宽 = --g-w），左右是容器的边距；宽度写明 100%（在纵向 flex 的容器里，比如工作台面板，没内容的页不会缩成内容宽）；返回按这一页的实际内容宽度判断两列旁注区是否放得下。 */
+.page-head { display: flex; align-items: flex-start; gap: var(--sp-l); flex-wrap: wrap; }
+.page-head .grow { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: var(--sp-xs); }
+.page-id { display: flex; align-items: center; gap: var(--sp-m); margin-top: var(--sp-xs); }   /* 页头前导头像（成员详情） */
+.page-title { font-family: var(--font-display); line-height: 1.3; margin: 0; letter-spacing: -.2px; text-wrap: balance; overflow-wrap: anywhere; }   /* 标题是一段长路径（文件的封面）时在字符间折行，不伸出页面 */
+.page-actions { display: flex; gap: var(--sp-s); align-items: center; }
+.back { gap: var(--sp-xs); flex: none; align-self: flex-start; margin-left: calc(-1 * var(--sp-xs)); }   /* 返回（引擎的，唯一一个）就是一个图标按钮（.btn-icon，样子在按钮里）：这里只管它在头里的位置；主题声明了名字时图标后面跟着去处 */
+.btn.back.btn-icon { width: max-content; min-width: var(--ctl-s); padding: 0 var(--sp-xs); }
+.back-l { white-space: nowrap; min-width: 0; max-width: 16em; overflow: clip; text-overflow: ellipsis; font-weight: 600; color: var(--fg-strong); }   /* 去处的名字：加粗、强调色，一眼看出能回到哪 */
+.layer-exit { position: absolute; z-index: var(--z-raised); top: var(--page-gap); right: var(--gutter-panel); }
+.layer-exit ~ * .page-head { padding-right: calc(var(--ctl-m) + var(--sp-l)); }   /* 带 ✕ 的层：页头右边留出 ✕ 的位置，页头自己的操作不和它叠在一起 */
+.back-head { display: flex; align-items: center; }   /* 没有标题行的容器：引擎在顶上画一行只放返回的头 */
+/* 返回与小节目录共用两列旁注区及同一个中心。文字只改变按钮宽度，不改变定位。
+   旁注区放不下时，两者都回到内容内的布局；不再另算一个只够放箭头的窄留白区。 */
+@container style(--back-float: 1) { .page:not(.vw-page-split, :has(> .vw-split), :has(> .frame.tall), :has(> .vw-widget[src].tall)) :is(.page-head, .ws-dhead, .back-head) > .back { position: fixed; z-index: var(--z-raised); position-anchor: --ct-box; top: calc(anchor(top) + var(--page-gap)); left: calc(anchor(center) - var(--g-w) / 2 - var(--g-gap) - var(--span-2) / 2); translate: -50% 0; margin-left: 0; max-width: min(var(--span-2) + var(--g-gap), anchor-size(inline) - var(--g-w) - 2 * var(--g-pad) - 2 * var(--g-gap) - var(--span-2)); } }
+.page:has(:is(.page-head, .ws-dhead, .back-head) > .back) { --gutter-top: calc(var(--page-gap) + var(--ctl-s)); }   /* 先在共同父容器留出返回那一行，目录再按自己的布局停靠；样式查询不能查询元素自己。 */
+.section { display: flex; flex-direction: column; gap: var(--sp-s); }
+.section-head { display: flex; flex-wrap: wrap; align-items: flex-end; gap: var(--sp-m); padding-inline: 0; min-height: var(--ctl-s); }   /* 小节标题行一个控件高；窄容器里操作自然换行。 */
+.section-head .grow { flex: 1 1 auto; min-width: 0; }
+.section-title { margin: 0; }
+/* 头的统一排法：标题和它的行内状态在一行，状态紧跟标题、垂直居中；操作控件在头的最后 */
+.head-line { display: flex; align-items: center; gap: var(--sp-s); min-width: 0; flex-wrap: wrap; }
+.head-line > :is(h1, h2) { min-width: 0; }
+.head-status { display: inline-flex; align-items: center; gap: var(--sp-s); flex: none; }
+.row { display: flex; align-items: center; gap: var(--sp-m); min-height: var(--row-h); padding: var(--row-pad); border-radius: var(--r-m); }
+.row.click { cursor: pointer; }
+.row.click:hover { background: var(--bg-hover); }
+.row-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: var(--sp-hairline); }
+.row-title { display: flex; align-items: center; gap: var(--sp-s); min-width: 0; overflow-wrap: anywhere; }
+.row-sub { overflow: clip; white-space: nowrap; text-overflow: ellipsis; }
+.row-sub.wrap { white-space: normal; }
+.row-trail { display: flex; align-items: center; gap: var(--sp-m); flex-shrink: 0; }
+.row.setting .row-main { min-width: calc(20 * var(--unit)); }
+.row.setting .row-trail { flex-shrink: 1; min-width: 0; overflow-wrap: anywhere; max-width: var(--trail-max); flex-wrap: wrap; justify-content: flex-end; row-gap: var(--sp-xs); }   /* 设置行的尾部（控件）：可以换行、最多占这么宽（区域 token），不是各页自己补 */
+.row.off .row-title, .row.off .row-sub { color: var(--fg-faint); }
+/* 分组内的分隔线：在底色里面、两端缩进，只帮眼睛横向对齐一行 */
+/* 分隔线：全站只有一种画法——后一项顶边的 ::before 发丝线（不占位）。位置只由变量给：--hl-in 两端缩进、--hl-c 颜色档（--line，声明处用 --line-strong）。
+   横线：分组里相邻两项、排了线的列表、表格相邻两行、正文里的分隔（.divider）、补充消息块、对话框里的手风琴项、组件目录的条目、胶囊里成员的各次运行；
+   竖线：.divider.v（页签之间）和左右对照差异的右栏。别处不再用边框 / 内阴影 / hr 画线 */
+:is(.group > * + *, .lr-list.lined > * + *, .lr-tree.lined .lr-kids > *, tbody tr + tr > td, :is(.msg-body, .md) tbody tr:first-child > td, .divider, .cafe-supps, .cat-entry + .cat-entry, .cap-rows > * + *, .wc-sl:nth-child(even)) { position: relative; }
+:is(.group > * + *, .lr-list.lined > * + *, .lr-tree.lined .lr-kids > *, tbody tr + tr > td, :is(.msg-body, .md) tbody tr:first-child > td, .divider, .cafe-supps, .cat-entry + .cat-entry, .cap-rows > * + *)::before { content: ""; position: absolute; left: var(--hl-in, 0); right: var(--hl-in, 0); top: 0; height: 1px; background: var(--hl-c, var(--line)); pointer-events: none; }
+:is(.divider.v, .wc-sl:nth-child(even))::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: var(--sp-hairline); background: var(--hl-c, var(--line)); pointer-events: none; }
+.group > * + *, .lr-tree.lined .lr-kids > * { --hl-in: 12px; }
+.divider { display: block; height: 1px; margin: var(--sp-xs) 0; }
+.divider.v { display: inline-block; width: var(--sp-hairline); height: var(--ic-s); margin: 0 var(--sp-xs); --hl-c: var(--line-strong); }
+:is(.msg-body, .md) tbody tr:first-child > td { --hl-c: var(--line-strong); }
+:is(.msg-body, .md) .divider { margin: var(--sp-l) 0; }
+.glyph { width: var(--ctl-m); height: var(--ctl-m); border-radius: var(--r-m); background: var(--bg-field); color: var(--fg-muted); display: grid; place-items: center; flex-shrink: 0; }
+.glyph > img { width: 100%; height: 100%; object-fit: cover; border-radius: inherit; display: block; }
+.glyph:has(> img:not([data-loaded])) { animation: mo-skel var(--loop) ease-in-out infinite backwards; }   /* 图片还没读到：骨架的节拍 */
+.glyph > img:not([data-loaded]) { visibility: hidden; }
+.glyph.glyph-xl { width: var(--av-xl); height: var(--av-xl); border-radius: var(--r-l); }   /* 页头的大图标（插件详情），和成员详情的 xl 头像同一个尺寸 */
+.glyph.glyph-xl svg { width: 50%; height: 50%; }
+.field { display: flex; flex-wrap: wrap; gap: var(--field-gap); padding: var(--sp-s) var(--sp-m); align-items: start; }   /* 字段：名字一列 + 控件；放不下时控件自己换到下一行（按字段自己的宽度，不看在对话框还是工作台里） */
+.field > :last-child { flex: 1 1 16em; min-width: 0; overflow-wrap: anywhere; }   /* 值的一列从不溢出：长的值（命令、路径、文件名）在列里换行 */
+.field > label, .field > .label { flex: 0 0 var(--span-3); max-width: 100%; padding-top: var(--sp-xs); }
+.field-foot { margin-top: var(--sp-xs); display: flex; align-items: baseline; gap: var(--sp-xs) var(--sp-s); flex-wrap: wrap; }
+.field .value { padding-top: var(--sp-xs); overflow-wrap: anywhere; }
+.req { margin-left: var(--sp-hair); }
+/* Table：没有外框和横线，靠对齐、行高和悬停底色 */
+.table-wrap { background: var(--bg-group); border-radius: var(--r-l); padding: var(--sp-xs); }
+table { font-size: inherit; color: inherit; width: 100%; border-collapse: separate; border-spacing: 0; min-width: var(--span-9); }
+th { text-align: left; padding: var(--sp-s) var(--sp-m); white-space: nowrap; }
+td { padding: 0 var(--sp-m); height: var(--row-h); vertical-align: middle; }
+tbody tr { cursor: pointer; }
+tbody tr td:first-child { border-radius: var(--r-m) 0 0 var(--r-m); }
+tbody tr td:last-child { border-radius: 0 var(--r-m) var(--r-m) 0; }
+tbody tr:hover td { background: var(--bg-hover); }
+tr.off td { color: var(--fg-faint); }
+.who { display: flex; align-items: center; gap: var(--sp-s); min-width: 0; }
+.who b { font-weight: 500; color: var(--fg-strong); }
+tr.off .who b { color: var(--fg-faint); }

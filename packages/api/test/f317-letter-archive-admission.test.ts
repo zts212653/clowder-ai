@@ -9,7 +9,10 @@ import {
   validateHostCompanionReply,
 } from '../src/domains/plugin/desktop-window-runtime/companion-private-wire.js';
 import { validateHostPluginManifest } from '../src/domains/plugin/desktop-window-runtime/presentation-manifest.js';
-import { resolveCompanionArchiveContract } from '../src/domains/plugin/desktop-window-runtime/published-companion-v2.js';
+import {
+  COMPANION_ARCHIVE_CONTRACTS,
+  resolveCompanionArchiveContract,
+} from '../src/domains/plugin/desktop-window-runtime/published-companion-v2.js';
 import { desktopWindowManifest } from './f317-window.fixture.js';
 
 const archive = {
@@ -25,6 +28,16 @@ test('registry alpha.25 is admitted only by its exact identity and package bytes
     { ...archive, packageDigest: archive.packageDigest.replace('nAQ', 'xAQ') },
   ])
     assert.equal(resolveCompanionArchiveContract(bad), undefined);
+});
+
+test('a locally admitted companion runs under the current companion contract', () => {
+  const local = { ...archive, version: '0.1.0-alpha.99', packageDigest: 'sha512-local' };
+  assert.equal(resolveCompanionArchiveContract(local), undefined);
+  for (const kind of ['local-archive', 'local-directory'] as const)
+    assert.equal(
+      resolveCompanionArchiveContract({ ...local, provenance: { kind } }),
+      COMPANION_ARCHIVE_CONTRACTS.at(-1)?.contract,
+    );
 });
 
 test('letter commands and replies use beta.28 while old archives keep strict v1 fences', () => {

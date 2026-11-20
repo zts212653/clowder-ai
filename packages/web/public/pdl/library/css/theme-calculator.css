@@ -1,0 +1,18 @@
+/* 边界：一个含义一个组件、不为接口定制、不按位置推导样式 */
+/* 主题计算器的外壳 */
+/* ── 主题计算器（浮窗，可拖动） ── */
+/* 主题计算器是普通弹窗（PDL_POPUPS.calc，at: corner）：外壳摆位置；面、标题行、正文滚动都是通用对话框（.dialog），这里只有计算器正文里的部件 */
+.pop-corner { display: grid; justify-items: end; align-content: start; padding: calc(var(--page-gap) * 3) var(--page-gap) var(--page-gap); }
+.calc-sec { background: var(--bg-group); border-radius: var(--r-l); padding: var(--sp-s) var(--sp-s); }
+.calc-sec-h { display: flex; align-items: center; gap: var(--sp-xs); width: 100%; border: 0; background: none; padding: var(--sp-hair) 0 var(--sp-xs); font: 600 var(--fs-m) var(--font-text); color: var(--fg-strong); cursor: pointer; text-align: left; }
+.calc-sws { margin-left: auto; display: inline-flex; gap: var(--sp-hair); }
+.calc-sws i { width: var(--ic-s); height: var(--ic-s); border-radius: var(--r-xs); box-shadow: inset 0 0 0 1px var(--line); }
+.calc-help { margin: 0 0 var(--sp-xs); }
+.calc-row { display: grid; grid-template-columns: calc(26 * var(--unit)) minmax(0, 1fr) var(--g-mod); align-items: center; gap: var(--sp-s); font-size: var(--fs-s); color: var(--fg-strong); padding: var(--sp-hair) 0; }
+.calc-row input { width: 100%; accent-color: var(--accent); }
+.calc-row output { text-align: right; }
+.calc-pair { display: flex; align-items: center; gap: var(--sp-s); font-size: var(--fs-s); padding: var(--sp-hair) 0; color: var(--fg-strong); }
+.calc-pair .grow { flex: 1; }
+.calc-sw { width: var(--ctl-xs); height: var(--av-s); border-radius: var(--r-xs); display: grid; place-items: center; font-size: var(--fs-xs); font-weight: 600; box-shadow: inset 0 0 0 1px var(--line); }
+.calc-mark { min-width: var(--ctl-l); text-align: right; }
+.calc-bad { color: var(--danger); font-weight: 600; }

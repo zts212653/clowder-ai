@@ -12,7 +12,7 @@ import {
 import { SqlitePluginInventoryStore } from '../dist/domains/plugin/state-worker/stores.js';
 import { catalogEntry, packageArchive } from './plugin-official-package-installer.fixture.js';
 
-async function desktopManager(t, { preparationFails = false, projectRoot: restartedRoot } = {}) {
+async function desktopManager(t, { preparationFails = false, projectRoot: restartedRoot, configuration } = {}) {
   const projectRoot = restartedRoot ?? (await mkdtemp(join(tmpdir(), 'f202-desktop-integration-')));
   const html = '<!doctype html><html><body>Installed companion</body></html>';
   const manifest = {
@@ -21,6 +21,7 @@ async function desktopManager(t, { preparationFails = false, projectRoot: restar
     contractVersion: '0.1.0',
     name: 'Window',
     runtime: { transport: 'builtin' },
+    ...(configuration ? { configuration } : {}),
     features: [
       {
         id: 'body',
@@ -337,4 +338,22 @@ test('Manager repairs a current failed desktop activation without changing its p
     code: 'ACTION_NOT_ALLOWED',
   });
   assert.equal(observed.opens, 1);
+});
+
+test('a configuration save on a running desktop window restarts it under the new revision', async (t) => {
+  const configuration = [{ key: 'displayName', label: 'Name', kind: 'string', required: false, default: 'Ball' }];
+  const { entry, observed, runtime, composition } = await desktopManager(t, { configuration });
+  const installed = await composition.officialRouteInstaller.install(entry.catalogId, entry);
+  const prepared = await runtime.lifecycle.prepare(installed.pluginInstanceId, 1);
+  await composition.manager.setEnabled(entry.pluginId, { enabled: true, expectedRevision: prepared.lifecycleRevision });
+  for (const value of ['One', 'Two']) {
+    const current = (await composition.manager.get(entry.pluginId)).plugin;
+    await composition.manager.configure(entry.pluginId, {
+      expectedRevision: current.lifecycleRevision,
+      updates: [{ key: 'displayName', value }],
+    });
+    assert.equal((await composition.manager.get(entry.pluginId)).plugin.live, 'running');
+    assert.equal((await runtime.desktopWindows.presence()).pluginInstanceId, installed.pluginInstanceId);
+  }
+  assert.equal(observed.opens, 3, 'each save closes the window and opens it again');
 });

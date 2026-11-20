@@ -96,10 +96,6 @@ function isIntent(value: unknown): value is PendingNewConversationIntent {
     (candidate.pinned === undefined || typeof candidate.pinned === 'boolean') &&
     (candidate.createdThreadId === undefined || typeof candidate.createdThreadId === 'string') &&
     (candidate.messageAccepted === undefined || typeof candidate.messageAccepted === 'boolean') &&
-    (candidate.composerDraftAdmission === undefined ||
-      (candidate.composerDraftAdmission.threadId === 'default' &&
-        Number.isSafeInteger(candidate.composerDraftAdmission.expectedRevision) &&
-        candidate.composerDraftAdmission.expectedRevision >= 0)) &&
     (!candidate.messageAccepted || typeof candidate.createdThreadId === 'string')
   );
 }

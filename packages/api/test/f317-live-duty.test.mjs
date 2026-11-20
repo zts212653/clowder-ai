@@ -14,7 +14,8 @@ const conciergeConfig = {
   personaTone: '简短',
   dutyCatProfileId: 'opus',
   proactivePolicy: 'quiet-badge',
-  muted: false,
+  behaviorEnabled: true,
+  ballSize: 72,
 };
 const context = {
   catId: 'codex',
@@ -112,7 +113,7 @@ test('the actual serial route projects only its Host-owned Live port into duty c
       },
       sessionManager: { get: async () => null, getOrCreate: async () => ({}), resolveWorkingDirectory: () => '/tmp' },
       threadStore,
-      conciergeConfigStore: { get: async () => ({ ...conciergeConfig, dutyCatProfileId: 'codex' }) },
+      companionSettings: async () => ({ ...conciergeConfig, dutyCatProfileId: 'codex' }),
       apiUrl: 'http://127.0.0.1:1',
     },
     messageStore: {

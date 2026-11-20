@@ -1,0 +1,51 @@
+{
+  "accounts": {
+    "googleCloud": "Google Cloud (Vertex AI · {0})",
+    "form": {
+      "codexLoginHelp": "Creating the account runs official codex login and opens the browser. Complete authorization yourself; if the browser did not open, use Open login terminal on the account row."
+    },
+    "awaitBrowser": "Waiting for browser authorization. If it did not open, choose Open login terminal.",
+    "preparingLogin": "Preparing official login",
+    "reviewLogin": "Confirm the identity from this login",
+    "openLoginTerminal": "Open login terminal",
+    "quotaIdentityChanged": "The login identity changed. Accounts were reloaded; check quota again.",
+    "agy": {
+      "title": "AGY · Google OAuth",
+      "ready": "Login file ready",
+      "notReady": "Login file not ready",
+      "unreadable": "Login file unreadable",
+      "command": "Official login command",
+      "noCommand": "Install the official agy CLI first",
+      "refresh": "Refresh login status",
+      "unavailable": "Requires AGY Native and a ready login file"
+    },
+    "quotaFailure": {
+      "owner_unknown": "Sign-in unverified",
+      "stale": "Last reading"
+    },
+    "quotaItem": "{0} {1}% left",
+    "quotaWindow": {
+      "five_hour": "5 hours",
+      "seven_day": "Week (all models)",
+      "fable": "Week (Fable)"
+    },
+    "quotaResets": "Resets {0}", "quotaRefreshAll": "Refresh all usage"
+  },
+  "pluginFrameClose": {
+    "title": "Close plugin panel",
+    "saving": "Saving draft…",
+    "failed": "Draft was not saved",
+    "stillClose": "Close anyway",
+    "discardTitle": "Discard unsaved changes?",
+    "discardText": "The plugin has not finished saving. The latest unsaved changes in this window may be lost when it closes.",
+    "discard": "Discard and close",
+    "wait": "Keep waiting"
+  },
+  "settingsUi": {
+    "account": {
+      "normal": {
+        "cliManaged": "CLI-managed sign-in"
+      }
+    }
+  }
+}

@@ -1,0 +1,28 @@
+/* 边界：一个含义一个组件、不为接口定制、不按位置推导样式 */
+/* 角色变体（PDL_ROLES） */
+/* ───────── 角色变体（PDL_ROLES）：每个角色一个样子；没写角色的就是组件的默认 ───────── */
+.vw-box { display: flex; flex-direction: column; gap: var(--sp-s); min-width: 0; }   /* 容器的默认：子块竖着排 */
+[data-fill] { flex: 1 1 auto; min-height: 0; }
+[data-fill] > .scroll { flex-basis: 0; }
+.panel-body:has([data-fill]) { padding-bottom: var(--sp-xs); overflow: hidden; }
+.vw-log { flex: 1 1 auto; min-height: 0; max-height: var(--log-max); border-radius: var(--r-l); min-width: 0; }   /* 跟随最新的滚动区：贴底（stick-end） */
+.vw-log[data-open="false"] { display: none; }
+.vw-scrollbox { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; gap: var(--sp-xs); padding: var(--sp-xs); }
+.vw-expand { display: flex; flex-direction: column; gap: var(--sp-s); padding: var(--sp-xs) var(--sp-m) var(--sp-m) var(--sp-xl); }   /* 展开出来的详情：缩进在主人下面 */
+.vw-expand p { margin: 0; }
+.vw-dock { position: fixed; z-index: var(--z-float-top); anchor-name: --dock; position-anchor: --ct-box; bottom: calc(anchor(bottom) + var(--sp-m)); left: anchor(left); right: anchor(right); width: min(100% - 2 * var(--sp-xl), var(--span-10) - 2 * var(--sp-xl)); margin-inline: auto; }   /* 停靠在内容盒底部的一块（落地页的输入框在预览打开时沉到底部，和对话页一样） */
+.vw-hero { max-width: var(--span-10); width: 100%; margin: 0 auto; padding: 12vh var(--sp-xl) var(--sp-xl); display: flex; flex-direction: column; gap: var(--sp-xl); }   /* 落地区：问候 + 开始方式，内容列居中 */
+.vw-selection { background: var(--bg-selected); border-radius: var(--r-m); padding: var(--sp-xs) var(--sp-xs) var(--sp-xs) var(--sp-s); }   /* 对选中项的批量操作 */
+.vw-embed { grid-column: 2; display: flex; align-items: center; gap: var(--sp-s); flex-wrap: wrap; min-width: 0; padding: var(--sp-s) var(--sp-m); border-radius: var(--r-m); background: var(--bg-group); font-size: var(--fs-m); color: var(--fg-strong); }   /* 嵌在正文里的一件东西 */
+.vw-marker { display: flex; align-items: center; justify-content: center; gap: var(--sp-xs); min-height: var(--ctl-s); text-align: center; }   /* 流里居中的一条标记；高度 = 一个控件高，里面换成文字（读取中、没有更多）时下面的消息不跳 */
+.input-lead { flex: 1; min-width: 0; display: flex; align-items: center; gap: var(--sp-s); height: var(--field-h); padding: 0 var(--sp-s); border-radius: var(--r-m); background: var(--bg-field); }   /* 框里最前面带一个状态的输入（地址栏） */
+.input-lead > .input { height: auto; padding: 0; background: none; border: 0; }
+.input-lead:focus-within { box-shadow: 0 0 0 2px var(--accent-ring); }
+.input-title { flex: 1; min-width: 0; font-weight: 500; }   /* 就地改名的标题 */
+.cat-roles { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: var(--sp-hair) var(--sp-m); margin: var(--sp-s) 0 0; }
+.cat-roles dt { color: var(--fg-strong); }
+.cat-roles dd { margin: 0; }
+
+/* 独立浮层的公共渲染出口；不参与布局或形成新的层叠上下文。 */
+.overlay-host { display: contents; }
+.row.setting:has(> .row-trail > textarea) { align-items: start; }   /* 多行输入的行：标题贴着输入框的顶，不在中间 */

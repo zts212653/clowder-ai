@@ -1035,7 +1035,6 @@ export interface ChatState {
     deliveredAt: number,
     messages?: Array<{
       id: string;
-      clientMessageId?: string;
       visibility?: ChatMessage['visibility'];
       whisperTo?: string[];
       from?: import('@cat-cafe/shared').MessageFrom;
@@ -1333,7 +1332,6 @@ export const chatStoreCreator: StateCreator<ChatState> = (set, get) => ({
             ...(serverMessage
               ? {
                   content: serverMessage.content,
-                  ...(serverMessage.clientMessageId ? { clientMessageId: serverMessage.clientMessageId } : {}),
                   ...(serverMessage.visibility ? { visibility: serverMessage.visibility } : {}),
                   ...(serverMessage.whisperTo ? { whisperTo: serverMessage.whisperTo } : {}),
                   ...(serverMessage.from ? { from: serverMessage.from } : {}),
@@ -1372,7 +1370,6 @@ export const chatStoreCreator: StateCreator<ChatState> = (set, get) => ({
             if (existingIds.has(sm.id)) continue;
             const incoming: ChatMessage = {
               id: sm.id,
-              ...(sm.clientMessageId ? { clientMessageId: sm.clientMessageId } : {}),
               ...(sm.visibility ? { visibility: sm.visibility } : {}),
               ...(sm.whisperTo ? { whisperTo: sm.whisperTo } : {}),
               // One shared rule, so a connector notice delivered through the Queue keeps the same

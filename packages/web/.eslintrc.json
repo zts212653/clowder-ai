@@ -3,8 +3,7 @@
   "extends": ["next/core-web-vitals", "next/typescript"],
   "plugins": ["cafe"],
   "rules": {
-    "cafe/no-hardcoded-colors": "warn",
-    "cafe/no-raw-console-borders": "error"
+    "cafe/no-hardcoded-colors": "warn"
   },
   "settings": {
     "cafe": {

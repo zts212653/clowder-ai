@@ -21,6 +21,7 @@ function loadBridge({ readyResult = null, argv = [], rendererWindow } = {}) {
     }
     if (channel === 'desktop-update:settings:get') return { autoCheck: true };
     if (channel === 'desktop-update:settings:set-auto-check') return { autoCheck: payload };
+    if (channel === 'desktop-update:check') return;
     throw new Error(`Unexpected invoke channel: ${channel}`);
   };
   const contextBridge = {
@@ -107,6 +108,11 @@ describe('desktop default shell preference', () => {
 });
 
 describe('desktop preload update bridge', () => {
+  test('requests a manual update check through the fixed owner IPC channel', async () => {
+    const { bridge, invoked } = loadBridge();
+    await bridge.checkForUpdates();
+    assert.deepEqual(invoked, [['desktop-update:check', undefined]]);
+  });
   test('exposes only the startup API origin from the actual Electron process argv', () => {
     const { bridge } = loadBridge({ argv: ['app.exe', '--cat-cafe-api-origin=http://localhost:3158'] });
     assert.equal(bridge.apiOrigin, 'http://localhost:3158');

@@ -9,7 +9,6 @@ const { apiFetch, confirm, addMessage } = vi.hoisted(() => ({
   addMessage: vi.fn(),
 }));
 vi.mock('@/utils/api-client', () => ({ apiFetch }));
-vi.mock('@/components/useConfirm', () => ({ useOptionalConfirm: () => confirm }));
 vi.mock('@/hooks/useChatCommands', () => ({ useChatCommands: () => ({ processCommand: async () => false }) }));
 vi.mock('@/hooks/queue-reconciliation', () => ({ reconcileThreadWithServer: vi.fn() }));
 vi.mock('@/stores/chatStore', () => {
@@ -32,7 +31,7 @@ let send: ReturnType<typeof useSendMessage>['handleSend'];
 let root: ReturnType<typeof createRoot>;
 let host: HTMLDivElement;
 function Probe() {
-  send = useSendMessage('thread').handleSend;
+  send = useSendMessage('thread', confirm).handleSend;
   return null;
 }
 
@@ -70,9 +69,7 @@ it('waits for approval of the server-proposed recipient, then freezes it with th
     pending = send('@dsh 你怎么没有回复');
   });
   expect(apiFetch).toHaveBeenCalledTimes(1);
-  expect(confirm).toHaveBeenCalledWith(
-    expect.objectContaining({ message: expect.stringMatching(/小鲸鱼[\s\S]*梵花猫/) }),
-  );
+  expect(confirm).toHaveBeenCalledWith(redirect);
   await act(async () => {
     approve(true);
     expect(await pending).toBe(true);

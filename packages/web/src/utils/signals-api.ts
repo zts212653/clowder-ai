@@ -3,6 +3,7 @@ import { apiFetch } from '@/utils/api-client';
 
 export interface SignalArticleDetail extends SignalArticle {
   readonly content: string;
+  readonly enriched?: boolean;
 }
 
 export interface SignalArticleStats {

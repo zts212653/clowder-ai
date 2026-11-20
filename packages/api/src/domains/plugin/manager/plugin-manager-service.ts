@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import type {
   PluginManagerCatalogProjection,
   PluginManagerConfigField,
@@ -7,10 +8,13 @@ import type {
   PluginManagerInstallRequest,
   PluginManagerListItem,
   PluginManagerListResponse,
+  PluginManagerOperation,
   PluginManagerSetEnabledRequest,
   PluginManagerUninstallRequest,
+  PluginPdlFragment,
+  PluginPdlResponse,
 } from '@cat-cafe/shared';
-import { pluginDescriptionVariants } from '@cat-cafe/shared';
+import { type PluginPdlSubtree, pluginDescriptionVariants, pluginPdlSplit } from '@cat-cafe/shared';
 import {
   isPluginDeliveryReceipt,
   type PluginDeliveryReceipt,
@@ -91,6 +95,10 @@ export interface PluginManagerConfigurationPort {
 
 export interface PluginManagerServiceOptions {
   readonly addressedTargets?: PluginAddressedTargets;
+  /** An installed package's console files (app.js, i18n) beside its manifest's pdl section. */
+  readonly consoleFiles?: (
+    pluginId: string,
+  ) => Promise<{ pdl?: PluginPdlFragment } & Pick<PluginPdlFragment, 'components' | 'i18n'>>;
   readonly delivery?: { deliver(instanceId: string, input: PluginMessageDelivery): Promise<PluginDeliveryReceipt> };
   readonly catalog: PluginManagerCatalogPort;
   readonly inventory: Pick<PluginInventoryStore, 'snapshot'>;
@@ -100,6 +108,8 @@ export interface PluginManagerServiceOptions {
   readonly lifecycle?: PluginManagerLifecyclePort;
   readonly quarantine?: PluginManagerQuarantinePort;
   readonly configuration?: PluginManagerConfigurationPort;
+  /** Told when a plugin's running operation starts or ends. */
+  readonly operationChanged?: (pluginId: string) => void;
 }
 
 export type PluginManagerServiceErrorCode =
@@ -262,6 +272,8 @@ function quarantineAppliesTo(current: PluginManagerListItem | undefined, quarant
 }
 
 export class PluginManagerService {
+  private readonly operations = new Map<string, PluginManagerOperation>();
+
   constructor(private readonly options: PluginManagerServiceOptions) {}
 
   /** Ordinary Queue calls this boundary with the immutable instance recipient. */
@@ -275,8 +287,51 @@ export class PluginManagerService {
     return receipt;
   }
 
+  private async running<T>(pluginId: string, operation: PluginManagerOperation, run: () => Promise<T>): Promise<T> {
+    if (this.operations.has(pluginId)) return run();
+    this.operations.set(pluginId, operation);
+    this.options.operationChanged?.(pluginId);
+    try {
+      return await run();
+    } finally {
+      this.operations.delete(pluginId);
+      this.options.operationChanged?.(pluginId);
+    }
+  }
+
   async list(): Promise<PluginManagerListResponse> {
     return (await this.project()).response;
+  }
+
+  /** Installed plugins' indexes; each names the revision of its subtree, which is read on first projection. */
+  async pdl(): Promise<PluginPdlResponse> {
+    const fragments: PluginPdlResponse['fragments'] = {};
+    for (const [pluginId, fragment] of await this.installedFragments()) {
+      const { index, subtree } = pluginPdlSplit(fragment);
+      fragments[pluginId] = { ...index, subtree: createHash('sha256').update(JSON.stringify(subtree)).digest('hex') };
+    }
+    return { fragments };
+  }
+
+  async pdlSubtree(pluginId: string): Promise<PluginPdlSubtree> {
+    const fragment = (await this.installedFragments(pluginId)).get(pluginId);
+    if (!fragment) throw new PluginManagerServiceError('PLUGIN_NOT_FOUND', `Unknown plugin ${pluginId}`);
+    return pluginPdlSplit(fragment).subtree;
+  }
+
+  private async installedFragments(pluginId?: string): Promise<Map<string, PluginPdlFragment>> {
+    const inventory = await this.options.inventory.snapshot(pluginId === undefined ? undefined : { pluginId });
+    const out = new Map<string, PluginPdlFragment>();
+    for (const instance of inventory.instances) {
+      if (instance.lifecycleState !== 'installed' || (pluginId !== undefined && instance.pluginId !== pluginId))
+        continue;
+      const pkg = inventory.packages.find((item) => item.packageDigest === instance.packageDigest);
+      if (!pkg || pkg.packageState !== 'installed' || !pkg.manifest) continue;
+      const { pdl, ...files } = (await this.options.consoleFiles?.(instance.pluginId)) ?? {};
+      if (!pdl) continue;
+      out.set(instance.pluginId, { ...pdl, ...files });
+    }
+    return out;
   }
 
   async listLocal(): Promise<PluginManagerListResponse> {
@@ -311,7 +366,9 @@ export class PluginManagerService {
   ): Promise<PluginManagerDetailResponse> {
     const projected = result.entries.find((candidate) => candidate.plugin.pluginId === pluginId);
     if (!projected) throw new PluginManagerServiceError('PLUGIN_NOT_FOUND', `Unknown plugin ${pluginId}`);
-    const detail = projected.detail ?? detailFromListItem(projected.plugin);
+    const listed = projected.detail ?? detailFromListItem(projected.plugin),
+      operation = this.operations.get(pluginId),
+      detail = operation ? { ...listed, operation } : listed;
     const target = (await this.options.addressedTargets?.known())?.find((t) => t.id === detail.pluginInstanceId);
     if (target)
       detail.address = {
@@ -405,12 +462,22 @@ export class PluginManagerService {
     if (!current.actions.install && !explicitReplacement) {
       throw new PluginManagerServiceError('ACTION_NOT_ALLOWED', 'Plugin cannot be installed from its current state');
     }
-    const installed = await this.options.installer.install({ request, candidate });
-    await this.reconcileInstalledConfiguration(installed);
-    return installed;
+    const installer = this.options.installer;
+    return this.running(candidate.pluginId, 'install', async () => {
+      const installed = await installer.install({ request, candidate });
+      await this.reconcileInstalledConfiguration(installed);
+      return installed;
+    });
   }
 
   async update(
+    pluginId: string,
+    request: { expectedVersion: string; expectedRevision: number },
+  ): Promise<PluginManagerMutationResult> {
+    return this.running(pluginId, 'update', () => this.updateCurrent(pluginId, request));
+  }
+
+  private async updateCurrent(
     pluginId: string,
     request: { expectedVersion: string; expectedRevision: number },
   ): Promise<PluginManagerMutationResult> {
@@ -506,7 +573,10 @@ export class PluginManagerService {
     if (!this.options.lifecycle) {
       throw new PluginManagerServiceError('LIFECYCLE_UNAVAILABLE', 'Plugin lifecycle control is unavailable');
     }
-    await this.options.lifecycle.uninstall(instance.pluginInstanceId, request.expectedRevision);
+    const lifecycle = this.options.lifecycle;
+    await this.running(pluginId, 'uninstall', () =>
+      lifecycle.uninstall(instance.pluginInstanceId, request.expectedRevision),
+    );
     return { pluginId, pluginInstanceId: instance.pluginInstanceId };
   }
 
@@ -625,7 +695,13 @@ export class PluginManagerService {
       .filter(({ plugin }) => normalizedQuery.length === 0 || searchableText(plugin).includes(normalizedQuery))
       .sort((left, right) => left.plugin.displayName.localeCompare(right.plugin.displayName));
     return {
-      response: { plugins: entries.map(({ plugin }) => plugin), catalog: catalogProjection(catalog) },
+      response: {
+        plugins: entries.map(({ plugin }) => {
+          const operation = this.operations.get(plugin.pluginId);
+          return operation ? { ...plugin, operation } : plugin;
+        }),
+        catalog: catalogProjection(catalog),
+      },
       entries,
     };
   }

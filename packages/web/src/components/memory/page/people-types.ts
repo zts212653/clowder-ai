@@ -6,8 +6,6 @@ import {
 } from '@cat-cafe/shared';
 import { hasValidOriginalProposals, isPersonProposal } from './original-proposal-read';
 
-export { personClaimText } from './person-claim-presentation';
-
 interface PersonIdentityRead {
   personId: string;
   displayName: string;

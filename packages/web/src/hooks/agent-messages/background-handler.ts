@@ -44,7 +44,7 @@ const BACKGROUND_STATUS_MAP: Record<string, CatStatusType> = {
 
 type Options = HandleBackgroundMessageOptions;
 
-function catName(options: Options, catId: string): string {
+function catName(options: Pick<Options, 'resolveCatName'>, catId: string): string {
   return options.resolveCatName?.(catId) ?? catId;
 }
 
@@ -255,6 +255,7 @@ function handleTool(msg: BackgroundAgentMessage, options: Options): void {
           toolUseId: msg.toolUseId,
           catId: msg.catId,
           content: msg.content,
+          toolResultStatus: msg.toolResultStatus,
           toolInput: msg.toolInput,
           timestamp: msg.timestamp,
         });
