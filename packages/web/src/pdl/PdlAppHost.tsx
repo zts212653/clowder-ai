@@ -1294,7 +1294,8 @@ function ChatBinding({
         if (connection.isReadonly) throw new Error('当前连接或页面版本不允许发送');
         const admission = admissionRef.current;
         if (threadId === 'default' && !admission?.ready) throw new Error('对话尚未就绪');
-        if (!input.trim() && !images.length && !contexts.length) return;
+        // A message needs words or a context attachment; attachments alone are not one (the server refuses them).
+        if (!input.trim() && !contexts.length) return;
         if (input.trim()) inputHistory.addEntry(input);
         const sentThread = threadId;
         await sendHeldDraft({

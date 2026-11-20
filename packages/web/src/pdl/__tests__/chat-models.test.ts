@@ -467,6 +467,19 @@ describe('chat contract projections', () => {
     ui.whisperTo = ['codex'];
     expect(chatModels(data, ui).chatComposer.send.disabled).toBe(false);
   });
+
+  it('does not send attachments alone: a message needs words or a context attachment', () => {
+    const data = fixtureData();
+    data.images = [new File(['x'], 'shot.png', { type: 'image/png' })];
+    expect(chatModels(data, fixtureUi()).chatComposer.send).toMatchObject({ disabled: true, stop: false });
+    data.executions = [{ threadId: data.threadId } as unknown as (typeof data.executions)[number]];
+    expect(chatModels(data, fixtureUi()).chatComposer.send).toMatchObject({ disabled: true, stop: false });
+    data.input = 'see this';
+    expect(chatModels(data, fixtureUi()).chatComposer.send).toMatchObject({ disabled: false, stop: false });
+    data.input = '';
+    data.images = [];
+    expect(chatModels(data, fixtureUi()).chatComposer.send).toMatchObject({ disabled: false, stop: true });
+  });
 });
 
 it('projects proven final text and ordered commentary/tools, and ignores it after recall or a body change', async () => {

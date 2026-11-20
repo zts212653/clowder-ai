@@ -1441,29 +1441,24 @@ export function chatModels(data: ChatData, ui: ChatUiState, input?: ChatProjecti
         },
         toolsCtx: { inputId: 'chat-input', rec: data.voice?.state === 'recording' },
         voiceAvailable: services() ? available('voice-input') : (data.voice?.available ?? false),
-        send: {
-          stop:
-            !data.input.trim() &&
-            !ctx().length &&
-            !attachments().length &&
-            data.executions.some((e) => e.threadId === data.threadId),
-          stopping: false,
-          disabled:
-            locked() ||
-            (ui.whisper && !ui.whisperTo.length) ||
-            (!data.input.trim() &&
-              !ctx().length &&
-              !attachments().length &&
-              !data.executions.some((e) => e.threadId === data.threadId)),
-          reason: data.readonly
-            ? 'readonly'
-            : data.preparingImages || data.uploadStatus === 'uploading'
-              ? 'uploading'
-              : ui.whisper && !ui.whisperTo.length
-                ? 'whisper'
-                : 'send',
-          home: data.threadId === 'default',
-        },
+        send: (() => {
+          const empty = !data.input.trim() && !ctx().length,
+            stop = empty && !attachments().length && data.executions.some((e) => e.threadId === data.threadId);
+          return {
+            stop,
+            stopping: false,
+            // A message needs words or a context attachment; attachments alone are not one (the server refuses them).
+            disabled: locked() || (ui.whisper && !ui.whisperTo.length) || (empty && !stop),
+            reason: data.readonly
+              ? 'readonly'
+              : data.preparingImages || data.uploadStatus === 'uploading'
+                ? 'uploading'
+                : ui.whisper && !ui.whisperTo.length
+                  ? 'whisper'
+                  : 'send',
+            home: data.threadId === 'default',
+          };
+        })(),
       };
     },
     get chatPop() {
