@@ -495,13 +495,26 @@ export function useReviewBindings(
                 }),
             )
           : null;
+        // A message file that is not a registered work: the thread's published artifact for this message and file.
+        const published =
+          !reference && args.mid && args.url
+            ? (
+                await request<{ artifacts: ThreadArtifactDTO[] }>(
+                  `/api/threads/${encodeURIComponent(threadId)}/artifacts`,
+                )
+              ).artifacts.find(
+                (a) => a.type !== 'pr' && a.type !== 'widget' && a.url === args.url && a.sourceMessageId === args.mid,
+              )
+            : undefined;
         const found = exact
           ? { ...exact.artifact, threadId: reference!.threadId }
-          : key
-            ? [...localWorks, ...globalWorks, ...recentOwners].find((w) =>
-                [workKey(w), w.ref, w.work?.contentRef].includes(key),
-              )
-            : catalogue[+args.i];
+          : published
+            ? { ...published, threadId }
+            : key
+              ? [...localWorks, ...globalWorks, ...recentOwners].find((w) =>
+                  [workKey(w), w.ref, w.work?.contentRef].includes(key),
+                )
+              : catalogue[+args.i];
         if (!found) throw new Error('作品已变化');
         if (found.type === 'widget') {
           ui.lb = null;

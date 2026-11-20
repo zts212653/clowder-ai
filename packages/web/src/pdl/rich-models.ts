@@ -23,10 +23,12 @@ export interface RichView {
       alt: string;
       work: string;
       title: string;
+      mid: string;
+      url: string;
     }[];
   };
   audio?: { id: string; kind: string; src: string; label: string };
-  file?: { name: string; size?: number; source: string; work: string };
+  file?: { name: string; size?: number; source: string; work: string; mid: string; url: string };
   widget?: { html: string };
   pick?: {
     mid: string;
@@ -129,6 +131,9 @@ function kindView(
             title: item.caption || item.alt || '',
             alt: item.alt ?? '',
             work: '',
+            // a file that is not a registered work opens as the thread's published artifact for this message and file
+            mid,
+            url: item.url,
           })),
         },
       };
@@ -148,7 +153,7 @@ function kindView(
       return {
         rk: block.kind,
         title: '',
-        file: { name: block.fileName, size: block.fileSize, source: file(block.url), work: '' },
+        file: { name: block.fileName, size: block.fileSize, source: file(block.url), work: '', mid, url: block.url },
       };
     case 'html_widget':
       return { rk: block.kind, title: block.title ?? '', widget: { html: block.html } };

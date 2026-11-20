@@ -5529,6 +5529,17 @@ pdl:
             - type: component
               use: v2Action
               props:
+                label: t:chatRich.openWork
+                act: workOpen
+                args:
+                  mid: "@rich.file.mid"
+                  url: "@rich.file.url"
+              when:
+                - "!@rich.file.work"
+                - "@rich.file.mid"
+            - type: component
+              use: v2Action
+              props:
                 iconOnly: true
                 icon: download
                 label: t:common.download
@@ -21485,7 +21496,11 @@ pdl:
                       act: workOpen
                       args:
                         i: "@work"
-                    _: null
+                    _:
+                      act: workOpen
+                      args:
+                        mid: "@mid"
+                        url: "@url"
             blocks:
               - type: component
                 use: v2Media
