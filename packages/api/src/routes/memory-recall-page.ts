@@ -153,7 +153,7 @@ export async function readMemoryRecallPage(
   if (!readers.threadStore) throw new Error('Thread store unavailable');
   const threads = await visibleRecallThreads(owner, readers.threadStore);
   const to = cursor?.to ?? Date.now();
-  const from = query.days === '0' ? 0 : to - Number(query.days) * 86400000;
+  const from = to - Number(query.days) * 86400000;
   const threadIds = [...threads.keys()];
   const rows = readTimeline
     ? await readTimeline({
