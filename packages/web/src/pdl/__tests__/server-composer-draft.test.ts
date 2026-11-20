@@ -85,29 +85,94 @@ it('keeps words typed before the server answered and writes them back', async ()
   expect(restore).not.toHaveBeenCalled();
 });
 
-it('writes edits back under the last revision and repeats once on the revision the server reports', async () => {
+const fileA = { type: 'file', url: '/uploads/a.txt', fileName: 'a.txt', mimeType: 'text/plain', fileSize: 1 } as const;
+const fileB = { type: 'file', url: '/uploads/b.txt', fileName: 'b.txt', mimeType: 'text/plain', fileSize: 2 } as const;
+
+/** A tab that read revision 4 (text + file A) while another tab saved revision 5 with file B added. */
+function conflicting(server5: { text: string; contentBlocks: unknown[] }) {
+  let reads = 0;
   vi.mocked(apiFetch).mockImplementation(async (_path, init) => {
-    if (!init?.method) return Response.json({ draft: null, revision: 0 });
+    if (!init?.method)
+      return reads++ === 0
+        ? Response.json({ draft: { text: 'base', contentBlocks: [fileA] }, revision: 4 })
+        : Response.json({ draft: server5, revision: 5 });
     const body = JSON.parse(String(init.body)) as { expectedRevision: number };
     return body.expectedRevision === 5
-      ? Response.json({ draft: { text: 'new', revision: 6 } })
+      ? Response.json({ draft: { revision: 6 } })
       : Response.json({ code: 'DRAFT_REVISION_MISMATCH', actualRevision: 5 }, { status: 409 });
   });
-  const { hook, state } = mount({ text: '', images: [], contexts: [] });
-  await waitFor(() => expect(apiFetch).toHaveBeenCalledTimes(1));
-  state.draft = { text: 'new', images: [], contexts: [quote] };
+}
+
+it('on a revision conflict reads the draft again, keeps what the other tab added and writes the edit of this tab over it', async () => {
+  conflicting({ text: 'base', contentBlocks: [fileA, fileB] });
+  const { hook, restore, state } = mount({ text: '', images: [], contexts: [] });
+  await waitFor(() => expect(state.draft).toEqual({ text: 'base', images: [fileA], contexts: [] }));
+  state.draft = { ...state.draft, text: 'base edited' };
   hook.rerender();
-  await waitFor(() => expect(apiFetch).toHaveBeenCalledTimes(3));
-  const body = (revision: number) =>
-    JSON.stringify({
-      expectedRevision: revision,
-      text: 'new',
-      contentBlocks: [{ type: 'context_attachment', attachment: quote }],
-    });
+  await waitFor(() => expect(writes()).toHaveLength(2));
   expect(writes()).toEqual([
-    ['PUT', '/api/threads/t1/composer-draft', body(0)],
-    ['PUT', '/api/threads/t1/composer-draft', body(5)],
+    [
+      'PUT',
+      '/api/threads/t1/composer-draft',
+      JSON.stringify({ expectedRevision: 4, text: 'base edited', contentBlocks: [fileA] }),
+    ],
+    [
+      'PUT',
+      '/api/threads/t1/composer-draft',
+      JSON.stringify({ expectedRevision: 5, text: 'base edited', contentBlocks: [fileA, fileB] }),
+    ],
   ]);
+  // The input shows the file the other tab added.
+  expect(restore).toHaveBeenLastCalledWith(
+    { text: 'base edited', images: [fileA, fileB], contexts: [] },
+    expect.any(Function),
+  );
+});
+
+it('on a revision conflict a file this tab removed stays removed', async () => {
+  conflicting({ text: 'base', contentBlocks: [fileA, fileB] });
+  const { hook, state } = mount({ text: '', images: [], contexts: [] });
+  await waitFor(() => expect(state.draft.images).toEqual([fileA]));
+  state.draft = { ...state.draft, images: [] };
+  hook.rerender();
+  await waitFor(() => expect(writes()).toHaveLength(2));
+  expect(writes()[1]).toEqual([
+    'PUT',
+    '/api/threads/t1/composer-draft',
+    JSON.stringify({ expectedRevision: 5, text: 'base', contentBlocks: [fileB] }),
+  ]);
+});
+
+it('words typed before the server answered keep the attachments the server holds, shown and written together', async () => {
+  let answer: (r: Response) => void = () => {};
+  vi.mocked(apiFetch).mockImplementation((_path, init) =>
+    init?.method
+      ? Promise.resolve(Response.json({ draft: { revision: 3 } }))
+      : new Promise<Response>((resolve) => {
+          answer = resolve;
+        }),
+  );
+  const { hook, restore, state } = mount({ text: '', images: [], contexts: [] });
+  state.draft = { text: 'typed first', images: [], contexts: [] };
+  hook.rerender();
+  await flushed();
+  answer(
+    Response.json({
+      draft: { text: 'older', contentBlocks: [{ type: 'image', url: '/uploads/i.png' }, fileA] },
+      revision: 2,
+    }),
+  );
+  const merged = { text: 'typed first', images: [{ type: 'image', url: '/uploads/i.png' }, fileA], contexts: [] };
+  await waitFor(() => expect(restore).toHaveBeenCalledWith(merged, expect.any(Function)));
+  await waitFor(() =>
+    expect(writes()).toEqual([
+      [
+        'PUT',
+        '/api/threads/t1/composer-draft',
+        JSON.stringify({ expectedRevision: 2, text: 'typed first', contentBlocks: merged.images }),
+      ],
+    ]),
+  );
 });
 
 it('writes an edit still waiting at once when the owner moves to another conversation', async () => {
@@ -144,13 +209,25 @@ it('deletes the saved draft of a conversation whose send the server took', async
   );
 });
 
-it('puts back the images of a saved draft, writes nothing while they are read, and keeps them in later writes', async () => {
+it('puts back the images and files of a saved draft, writes nothing while they are read, and keeps them with their details in later writes', async () => {
   let readBack: (files: unknown) => void = () => {};
   vi.mocked(apiFetch).mockImplementation(async (_path, init) =>
     init?.method === 'PUT'
       ? Response.json({ draft: { revision: 8 } })
       : Response.json({
-          draft: { text: 'see this', contentBlocks: [{ type: 'image', url: '/uploads/a.png' }] },
+          draft: {
+            text: 'see this',
+            contentBlocks: [
+              { type: 'image', url: '/uploads/a.png' },
+              {
+                type: 'file',
+                url: '/uploads/notes.pdf',
+                fileName: 'notes.pdf',
+                mimeType: 'application/pdf',
+                fileSize: 12,
+              },
+            ],
+          },
           revision: 7,
         }),
   );
@@ -172,7 +249,14 @@ it('puts back the images of a saved draft, writes nothing while they are read, a
   host.rerender = hook.rerender;
   await waitFor(() =>
     expect(restore).toHaveBeenCalledWith(
-      { text: 'see this', images: ['/uploads/a.png'], contexts: [] },
+      {
+        text: 'see this',
+        images: [
+          { type: 'image', url: '/uploads/a.png' },
+          { type: 'file', url: '/uploads/notes.pdf', fileName: 'notes.pdf', mimeType: 'application/pdf', fileSize: 12 },
+        ],
+        contexts: [],
+      },
       expect.any(Function),
     ),
   );
@@ -191,7 +275,10 @@ it('puts back the images of a saved draft, writes nothing while they are read, a
       JSON.stringify({
         expectedRevision: 7,
         text: 'see this one',
-        contentBlocks: [{ type: 'image', url: '/uploads/a.png' }],
+        contentBlocks: [
+          { type: 'image', url: '/uploads/a.png' },
+          { type: 'file', url: '/uploads/notes.pdf', fileName: 'notes.pdf', mimeType: 'application/pdf', fileSize: 12 },
+        ],
       }),
     ],
   ]);
@@ -327,7 +414,7 @@ it('keeps saving a newer opening when the image read of an older opening of the 
     state.draft = { ...saved, images: [] };
     host.rerender?.();
     if (!saved.images.length) return undefined;
-    if (saved.images[0] === '/uploads/old.png')
+    if (saved.images[0].url === '/uploads/old.png')
       return new Promise<void>((_, reject) => {
         failOld = () => reject(new Error('503'));
       });
@@ -360,4 +447,36 @@ it('keeps saving a newer opening when the image read of an older opening of the 
     text: 'A, continued',
     contentBlocks: [{ type: 'image', url: '/uploads/new.png' }],
   });
+});
+
+it('edits made while an earlier write is still resolving its conflict are written after it, over the revision it left', async () => {
+  let reads = 0;
+  vi.mocked(apiFetch).mockImplementation(async (_path, init) => {
+    if (!init?.method)
+      return reads++ === 0
+        ? Response.json({ draft: { text: 'base', contentBlocks: [fileA] }, revision: 4 })
+        : Response.json({ draft: { text: 'base', contentBlocks: [fileA, fileB] }, revision: 5 });
+    const body = JSON.parse(String(init.body)) as { expectedRevision: number };
+    if (body.expectedRevision === 4) {
+      await settle(1200);
+      return Response.json({ code: 'DRAFT_REVISION_MISMATCH', actualRevision: 5 }, { status: 409 });
+    }
+    return body.expectedRevision === 5
+      ? Response.json({ draft: { revision: 6 } })
+      : Response.json({ draft: { revision: body.expectedRevision + 1 } });
+  });
+  const { hook, state } = mount({ text: '', images: [], contexts: [] });
+  await waitFor(() => expect(state.draft.images).toEqual([fileA]));
+  state.draft = { ...state.draft, text: 'A' };
+  hook.rerender();
+  await flushed(700);
+  // B: more words, and file A removed, while A's write is still waiting on the server.
+  state.draft = { ...state.draft, text: 'B', images: [] };
+  hook.rerender();
+  await flushed(3000);
+  expect(writes().map(([, , body]) => JSON.parse(String(body)))).toEqual([
+    { expectedRevision: 4, text: 'A', contentBlocks: [fileA] },
+    { expectedRevision: 5, text: 'A', contentBlocks: [fileA, fileB] },
+    { expectedRevision: 6, text: 'B', contentBlocks: [fileB] },
+  ]);
 });

@@ -6802,6 +6802,11 @@ pdl:
       when: $.form.isNew
     v2.bind.fields.20:
       - $frag: v2.bind.v2Box.21
+      - type: typed
+        slot: chat.rich
+        of: "@card.publish.type"
+        data: "@card.publish"
+        when: "@card.publish"
     v2.bind.v2Box.21:
       type: component
       use: v2Box
@@ -16911,6 +16916,32 @@ pdl:
                   input: cafeHomeTitle
                 when: $.home
             field:
+              - type: component
+                use: v2Box
+                props:
+                  role: inline
+                  blocks:
+                    - type: component
+                      use: v2Each
+                      props:
+                        from: $.input.draft.att
+                        control:
+                          type: component
+                          use: v2Chip
+                          props:
+                            icon:
+                              of: "@kind"
+                              map: {image: image, _: file}
+                            label: "@name"
+                            act:
+                              of: "@kind"
+                              map: {image: draftAttachment, _: ""}
+                            args: "@preview"
+                            x:
+                              act: listOp
+                              args: {path: cs.att, op: del, i: "@index"}
+                              label: t:common.remove
+                when: $.input.draft.att
               - type: component
                 use: v2ComposeField
                 props:

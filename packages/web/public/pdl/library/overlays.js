@@ -90,7 +90,7 @@ function docBody(d) {
     (acts ? '<div class="sw-line">' + acts + '</div>' : '') + '</div>';
 }
 /* 浮动小窗：标题 + ×（弹窗框架的 popX，o.pop = 弹窗名）+ 内容（伴随对话这类） */
-function floatPanel(o) { return floatHtml({ cls: o.cls, label: o.title, head: '<span class="u-strong grow">' + h(o.title) + '</span>' + popX(o.pop), body: '<div class="u-p-foot">' + o.body + '</div>', bare: true }); }   /* 小窗的内容（插件界面框）自己滚动 */
+function floatPanel(o) { return floatHtml({ cls: o.cls, label: o.title, head: '<span class="u-strong grow">' + h(o.title) + '</span>' + popX(o.pop), body: '<div class="u-p-foot scroll">' + o.body + '</div>', bare: true }); }   /* 小窗的内容在小窗里滚动：插件界面框量的是内容的高度，比窗高时不越出窗外 */
 
 /* 模态窗（对话区的“整理、导入、开局……”）：标题（说明进 ?）+ 关闭、可滚动的内容、底部按钮；整窗是一个表单，可拖动 */
 function modalHtml(o) {

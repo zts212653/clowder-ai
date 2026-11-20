@@ -187,7 +187,7 @@ import type { ChatPort, ChatUiState, SidebarSnapshot } from './types';
 import { useConsoleCommandBindings } from './useConsoleCommandBindings';
 import { useBrakeBindings } from './useOpsBindings';
 import { useReplyBindings } from './useReplyBindings';
-import { useServerComposerDraft } from './useServerComposerDraft';
+import { type DraftFile, useServerComposerDraft } from './useServerComposerDraft';
 
 const confirmRouting: RoutingConfirmation = (request) => window.clowderChat.confirm('routingRedirect', request);
 
@@ -204,8 +204,8 @@ const browserLocation = () => window.location.pathname + window.location.search 
 const subscribeNever = () => () => {};
 type PendingThreadJump = { threadId: string; mid: string; catId?: string; block?: string };
 
-/** The upload address of an image the input got back from a saved draft: the draft keeps it by that address. */
-const draftImageUrl = new WeakMap<File, string>();
+/** The uploaded attachment a file in the input came from (a saved draft's image or file): the draft keeps it as is. */
+const draftFile = new WeakMap<File, DraftFile>();
 
 /** Message images as files again, for a retry or a recalled message going back into the input. */
 async function downloadImages(urls: readonly string[], blocks: readonly MessageContent[] = []): Promise<File[]> {
@@ -564,7 +564,7 @@ function ChatBinding({
     enabled: drafting && threadId !== 'default',
     draft: {
       text: input,
-      images: images.flatMap((file) => draftImageUrl.get(file) ?? []),
+      images: images.flatMap((file) => draftFile.get(file) ?? []),
       contexts,
       ...(reply ? { replyTo: reply.id } : {}),
     },
@@ -577,10 +577,14 @@ function ChatBinding({
           .getState()
           .setReplyTo({ id: message.id, content: message.content, senderCatId: message.catId ?? null, threadId });
       else useChatStore.getState().clearReplyTo();
-      return downloadImages(saved.images).then((files) => {
+      return downloadImages(
+        saved.images.map((block) => block.url),
+        saved.images.filter((block) => block.type === 'file'),
+      ).then((files) => {
         if (!current()) return;
-        files.forEach((file, i) => draftImageUrl.set(file, saved.images[i]));
-        setImages(files);
+        files.forEach((file, i) => draftFile.set(file, saved.images[i]));
+        // Files picked here and not yet uploaded are not in any saved draft: they stay beside it.
+        setImages((all) => [...files, ...all.filter((file) => !draftFile.has(file))].slice(0, 5));
       });
     },
   });

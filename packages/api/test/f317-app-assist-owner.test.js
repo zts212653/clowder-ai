@@ -243,3 +243,31 @@ test('subscription setup failure leaves app assistance unavailable without faili
   assert.deepEqual(await owner.request({ kind: 'read' }), { status: 'source_unavailable' });
   await dispose();
 });
+
+test('after an upgrade, an older record that turned the companion off or hid it reads off until app assistance is turned on', async (t) => {
+  const appKey = 'a'.repeat(64);
+  for (const [name, record, expected] of [
+    ['off', { enabled: false, muted: false, appAssistEnabled: true, ballPosition: null }, 'off'],
+    ['hidden', { enabled: true, muted: true, appAssistEnabled: true, ballPosition: null }, 'off'],
+    ['on', { enabled: true, muted: false, appAssistEnabled: true, ballPosition: null }, 'ready'],
+  ]) {
+    const store = new MemoryConciergeConfigStore();
+    await store.put('fixture-owner', record);
+    const owner = new CompanionAppAssistOwner({
+      store,
+      ownerUserId: 'fixture-owner',
+      timeZone: () => 'UTC',
+      assertCurrent: async () => {},
+    });
+    const changes = [];
+    const dispose = await owner.watch((allowed) => changes.push(allowed));
+    t.after(dispose);
+    assert.equal((await owner.request({ kind: 'read' })).status, expected, name);
+    assert.equal(await owner.request({ kind: 'claim', appKey }), expected === 'ready' ? 'claimed' : 'disabled', name);
+    if (expected === 'ready') continue;
+    await store.patch('fixture-owner', { appAssistEnabled: true });
+    assert.equal(changes.at(-1), true, name);
+    assert.equal((await owner.request({ kind: 'read' })).status, 'ready', name);
+    assert.equal(await owner.request({ kind: 'claim', appKey }), 'claimed', name);
+  }
+});

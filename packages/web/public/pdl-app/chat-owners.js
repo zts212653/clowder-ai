@@ -44,6 +44,26 @@ function chatOwnerMessageVM(x) {
           })
         : [],
       noticeText: (pending && data.proposalErrors[x.mid]) || (read && read.error) || '',
+      // A confirmed failure continues as a public report in the same card: the GitHub plugin's issue draft card
+      // (review, edit, create, publish, backlink) starts from the report the host cleaned.
+      publish:
+        frustration && r && r.report
+          ? {
+              type: 'card.community_issue_preview',
+              mid: x.mid,
+              threadId: S.thread,
+              title: r.report.title,
+              block: {
+                id: frustration.id,
+                kind: 'card',
+                meta: {
+                  kind: 'community_issue_preview',
+                  proposedTitle: r.report.title,
+                  proposedBody: r.report.bodyMarkdown,
+                },
+              },
+            }
+          : null,
       result:
         status && !pending
           ? {

@@ -15,6 +15,8 @@ interface ProposalOwner {
   offer?: CustodyOfferV1 | null;
   sourceMessageRevision?: string;
   issue?: FrustrationIssue;
+  /** A confirmed failure's public report, cleaned by the host; it seeds the GitHub plugin's issue draft card. */
+  report?: { title: string; bodyMarkdown: string };
 }
 interface QueueTargets {
   cats: {
@@ -100,6 +102,7 @@ export function useChatOwnerBindings(
           {
             mid: message.id,
             issueId: frustration?.type === 'frustration' ? frustration.issueId : null,
+            block: frustration?.type === 'frustration' ? frustration.block : null,
             revision: custody?.type === 'custody' ? custody.revision : undefined,
           },
         ]
@@ -116,6 +119,19 @@ export function useChatOwnerBindings(
           : `/api/messages/${encodeURIComponent(mid)}/custody-offer`,
         { signal },
       );
+      // A confirmed failure goes on to a public report: its local record is cleaned into the report the draft starts from.
+      const block = target.block;
+      // A report that can't be prepared is only missing: the card still shows the record and its status.
+      if (block && value.issue?.status === 'confirmed')
+        value.report = await request<{ title: string; bodyMarkdown: string }>('/api/feedback/report-preview', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            title: block.title,
+            bodyMarkdown: [block.bodyMarkdown, value.issue.userDescription].filter(Boolean).join('\n\n'),
+          }),
+          signal,
+        }).catch(() => undefined);
       result = { load: '', value };
     } catch (error) {
       if (signal?.aborted) return;
