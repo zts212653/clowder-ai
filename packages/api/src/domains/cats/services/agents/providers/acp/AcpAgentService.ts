@@ -2,6 +2,7 @@ import { deploymentDefaults } from '@cat-cafe/shared';
 import { buildCliDiagnosticContext } from '../../../../../../utils/cli-diagnostics.js';
 import { isInvocationBoundMcpLaunch } from '../session-credential-file.js';
 import { extractMissingCredential } from './dsh/credential-error.js';
+import { invokeDshWatcher } from './dsh/dsh-watcher-invocation.js';
 import { createAcpPermissionHandler } from './permissions/acp-permission-interaction.js';
 /**
  * AcpAgentService — Generic AgentService implementation backed by ACP protocol.
@@ -348,8 +349,15 @@ export class AcpAgentService implements AgentService {
   }
 
   supportsToolExecutionPolicy(policy: import('../../../types.js').ToolExecutionPolicy): boolean {
+    if (this.nativeDsh && policy.mode === 'watcher_panel') return true;
     if (this.nativeDsh || this.nativeKimi) return policy.mode === 'plugin_native' && Boolean(policy.memberSession);
     return Boolean(this.antigravity) && policy.mode === 'read_only';
+  }
+
+  watcherMemberCapability(): import('@cat-cafe/shared').WatcherMemberCapability {
+    return this.nativeDsh
+      ? { supported: true, context: 'ordinary', readOnly: 'tools' }
+      : { supported: false, reason: '此载体的守望读取尚未接通' };
   }
 
   assertScopedMemberAccount(account: import('@cat-cafe/shared').ExecutionAccountSnapshot): void {
@@ -517,6 +525,16 @@ export class AcpAgentService implements AgentService {
   }
 
   async *invoke(prompt: string, options?: AgentServiceOptions): AsyncIterable<AgentMessage> {
+    if (this.nativeDsh && options?.toolExecutionPolicy?.mode === 'watcher_panel') {
+      yield* invokeDshWatcher({
+        catId: this.catId,
+        modelSelection: this.sessionModel ?? this.modelName,
+        native: this.nativeDsh,
+        prompt,
+        options,
+      });
+      return;
+    }
     if (this.nativeKimi && (options?.pluginNativeLaunch || options?.toolExecutionPolicy?.mode === 'plugin_native')) {
       yield* invokeKimiMember({
         catId: this.catId,

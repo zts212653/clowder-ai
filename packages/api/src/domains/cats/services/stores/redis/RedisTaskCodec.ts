@@ -35,6 +35,7 @@ export function serializeTask(task: TaskItem): Record<string, string> {
     probe: task.probe ? JSON.stringify(task.probe) : '',
     resolveMode: task.resolveMode ?? '',
   };
+  if (task.ordinaryFinalReport) out.ordinaryFinalReport = JSON.stringify(task.ordinaryFinalReport);
   if (task.pluginWait) out.pluginWait = JSON.stringify(task.pluginWait);
   if (task.automationState) out.automationState = JSON.stringify(task.automationState);
   if (task.deploymentWait) out.deploymentWait = JSON.stringify(task.deploymentWait);
@@ -66,6 +67,7 @@ export function hydrateTask(data: Record<string, string>): TaskItem {
     ...(data.sourceSummaryId ? { sourceSummaryId: data.sourceSummaryId } : {}),
     resolveMode: data.resolveMode ? (data.resolveMode as TaskItem['resolveMode']) : undefined,
   };
+  hydrated = parseJsonField(hydrated, 'ordinaryFinalReport', data.ordinaryFinalReport);
   hydrated = parseJsonField(hydrated, 'pluginWait', data.pluginWait);
   // Invalid execution coordinates fail closed rather than making an occupied Task appear idle.
   if (data.executionRef) {

@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import hashlib
 import logging
 import math
 import os
@@ -13,20 +14,59 @@ import struct
 import sys
 import tempfile
 import wave
+from importlib.util import module_from_spec, spec_from_file_location
 from pathlib import Path
+from types import CodeType, ModuleType
 
 import uvicorn
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from dedicated_model_worker import DedicatedModelWorker
-from qwen_asr_backend import load_model as load_qwen_model
-from qwen_asr_backend import transcribe as transcribe_qwen
-
-MAX_FILE_BYTES = 25 * 1024 * 1024  # 25 MB (matches OpenAI limit)
-
 log = logging.getLogger("whisper-api")
+
+
+def _entrypoint_matches_source(executing_code: CodeType, source: bytes) -> bool:
+    try:
+        return executing_code == compile(source, executing_code.co_filename, "exec", dont_inherit=True)
+    except SyntaxError:
+        return False
+
+
+def _load_asr_sources(executing_code: CodeType) -> tuple[str | None, dict[str, ModuleType]]:
+    # Keep the ordered names and byte boundaries in sync with the API's source identity check.
+    entrypoint = Path(__file__).resolve()
+    paths = (entrypoint.with_name("dedicated_model_worker.py"), entrypoint.with_name("qwen_asr_backend.py"), entrypoint)
+    sources = {path: path.read_bytes() for path in paths}
+    digest = hashlib.sha256()
+    modules = {}
+    for path, source in sources.items():
+        digest.update(path.name.encode() + b"\0")
+        digest.update(source)
+        digest.update(b"\0")
+
+        if path == entrypoint:
+            continue
+        # Execute these exact bytes. Default imports can reuse timestamp .pyc files.
+        spec = spec_from_file_location(path.stem, path)
+        assert spec is not None
+        module = module_from_spec(spec)
+        sys.modules[spec.name] = module
+        exec(compile(source, str(path), "exec", dont_inherit=True), vars(module))
+        modules[spec.name] = module
+
+    # Source can change after Python has already started executing this file.
+    if not _entrypoint_matches_source(executing_code, sources[entrypoint]):
+        log.warning("ASR entrypoint changed during startup. Source fingerprint unavailable.")
+        return None, modules
+    return digest.hexdigest(), modules
+
+
+ASR_SOURCE_SHA256, _asr_modules = _load_asr_sources(sys._getframe().f_code)
+DedicatedModelWorker = _asr_modules["dedicated_model_worker"].DedicatedModelWorker
+load_qwen_model = _asr_modules["qwen_asr_backend"].load_model
+transcribe_qwen = _asr_modules["qwen_asr_backend"].transcribe
+MAX_FILE_BYTES = 25 * 1024 * 1024  # 25 MB (matches OpenAI limit)
 
 app = FastAPI(title="Clowder AI Whisper Server")
 
@@ -150,6 +190,7 @@ def _run_deep_health_probe() -> str:
 
 @app.post("/v1/audio/transcriptions")
 async def transcribe(
+    request: Request,
     file: UploadFile = File(...),
     language: str = Form("zh"),
     initial_prompt: str = Form(""),
@@ -174,6 +215,8 @@ async def transcribe(
 
     try:
         async with _transcribe_lock:
+            if await request.is_disconnected():
+                return JSONResponse(status_code=499, content={"detail": "Transcription client disconnected"})
             text = await _run_backend_operation(_transcribe_selected, tmp_path, lang, prompt)
         log.info("Transcribed %d bytes -> %d chars (lang=%s)", len(content), len(text), language)
         return {"text": text}
@@ -190,6 +233,7 @@ async def health():
         "status": "ok" if model_loaded else "loading",
         "model": model_path or "none",
         "backend": _backend,
+        "asr_source_sha256": ASR_SOURCE_SHA256,
     }
 
 

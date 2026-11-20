@@ -8,6 +8,7 @@ import type { Thread } from '../domains/cats/services/stores/ports/ThreadStore.j
 import { resolveStrictUserId, resolveUserId } from '../utils/request-identity.js';
 import { resolveApproveOverrides } from './proposal-approve-overrides.js';
 import { createReconcileApprovedInitialMessage } from './proposal-approve-reconcile.js';
+import { createApprovedTaskChild } from './proposal-approved-child.js';
 import { validateProposalGroup } from './proposal-group-placement.js';
 import { registerProposalRevisionRoutes } from './proposal-revision-routes.js';
 import type { ProposalRoutesOptions } from './proposal-route-options.js';
@@ -70,6 +71,8 @@ export const proposalRoutes: FastifyPluginAsync<ProposalRoutesOptions> = async (
     const reconcile = createReconcileApprovedInitialMessage({
       userId,
       ownerAuthProvenance,
+      proposalStore,
+      ordinaryTaskHandoffs: opts.ordinaryTaskHandoffs,
       messageStore,
       threadStore,
       socketManager,
@@ -86,6 +89,8 @@ export const proposalRoutes: FastifyPluginAsync<ProposalRoutesOptions> = async (
       reply.status(403);
       return { error: 'Proposal does not belong to the current user' };
     }
+    if (proposal.taskStartOwnerRevision !== undefined && ownerAuthProvenance !== 'strict')
+      return reply.code(403).send({ error: 'Task execution approval requires verified owner identity' });
     if (replyToProposalTerminalConflict(proposal, 'approve', reply)) return;
     if (proposal.status === 'pending' && proposal.supersedesProposalId) {
       const previous = await proposalStore.get(proposal.supersedesProposalId);
@@ -167,25 +172,30 @@ export const proposalRoutes: FastifyPluginAsync<ProposalRoutesOptions> = async (
     // because nothing user-visible has been committed yet.
     let thread: Thread;
     try {
-      thread = await threadStore.create(
-        userId,
-        finalTitle,
-        finalProjectPath,
-        finalParentThreadId,
-        {
-          createdFromProposalId: proposal.proposalId,
-          sourceThreadId: proposal.sourceThreadId,
-          sourceInvocationId: proposal.sourceInvocationId,
-          ...(proposal.sourceMessageId ? { sourceMessageId: proposal.sourceMessageId } : {}),
-          ...(finalDeclaredWorkMode ? { declaredWorkMode: finalDeclaredWorkMode } : {}),
-          approvedBy: userId,
-          approvedAt: Date.now(),
-        },
-        undefined,
-        { pinned: bodyParse.data.pinned },
-      );
+      if (claimed.taskStartOwnerRevision !== undefined) {
+        finalizeOverrides.approvedChildPinned = bodyParse.data.pinned ?? false;
+        thread = await createApprovedTaskChild(proposalStore, threadStore, claimed, finalizeOverrides);
+      } else
+        thread = await threadStore.create(
+          userId,
+          finalTitle,
+          finalProjectPath,
+          finalParentThreadId,
+          {
+            createdFromProposalId: proposal.proposalId,
+            sourceThreadId: proposal.sourceThreadId,
+            sourceInvocationId: proposal.sourceInvocationId,
+            ...(proposal.sourceMessageId ? { sourceMessageId: proposal.sourceMessageId } : {}),
+            ...(finalDeclaredWorkMode ? { declaredWorkMode: finalDeclaredWorkMode } : {}),
+            approvedBy: userId,
+            approvedAt: Date.now(),
+          },
+          undefined,
+          { pinned: bodyParse.data.pinned },
+        );
     } catch (err) {
-      await proposalStore.rollbackClaim(proposal.proposalId);
+      // A reserved Task child or a lost receipt stays recoverable under the same approval.
+      if (claimed.taskStartOwnerRevision === undefined) await proposalStore.rollbackClaim(proposal.proposalId);
       throw err;
     }
 
@@ -193,7 +203,8 @@ export const proposalRoutes: FastifyPluginAsync<ProposalRoutesOptions> = async (
     // between create and finalize, the next stale-claim recovery sees this field and re-finalizes
     // against the existing thread — preventing duplicate threads on retry.
     try {
-      await proposalStore.recordCreatedThread(proposal.proposalId, thread.id, finalizeOverrides);
+      if (claimed.taskStartOwnerRevision === undefined)
+        await proposalStore.recordCreatedThread(proposal.proposalId, thread.id, finalizeOverrides);
     } catch {
       // best-effort persist; failure here only weakens crash recovery, doesn't break the
       // happy path. Finalize below still writes createdThreadId atomically.

@@ -1,6 +1,11 @@
 import type Database from 'better-sqlite3';
 import { PASSAGE_FTS_TRIGGER_STATEMENTS, SCHEMA_V3_FTS } from './schema.js';
 
+// The shared FTS table also indexes non-message and unreadable passages. Bound
+// the term-bearing leaf pages we are willing to visit before inspecting any
+// vocabulary. The FTS5 segment index stores one small entry per such page.
+const MAX_CJK_VOCABULARY_PAGES = 16_384;
+
 const normalizeSql = (sql: string): string =>
   sql
     .replace(/\bIF NOT EXISTS\b/g, '')
@@ -28,19 +33,22 @@ function hasLargeMessageScope(db: Database.Database, filter: { sql: string; para
   );
 }
 
-/** Reuse the canonical, transactionally maintained index; never create a persistent projection. */
-function canReadVocabulary(db: Database.Database): boolean {
+/** Only compact, canonical indexes are a useful alternative to scanning the admitted range. */
+function canUseVocabulary(db: Database.Database): boolean {
   const rows = db
     .prepare(`SELECT name,sql FROM main.sqlite_master
-      WHERE name IN ('passage_fts','passage_fts_docsize','evidence_passages_ai','evidence_passages_ad','evidence_passages_au')`)
+      WHERE name IN ('passage_fts','passage_fts_docsize','passage_fts_idx',
+        'evidence_passages_ai','evidence_passages_ad','evidence_passages_au')`)
     .all() as Array<{ name: string; sql: string | null }>;
   const schema = new Map(rows.map((row) => [row.name, row.sql]));
   return (
     schema.has('passage_fts_docsize') &&
+    schema.has('passage_fts_idx') &&
     [...expected].every(([name, sql]) => {
       const actual = schema.get(name);
       return typeof actual === 'string' && normalizeSql(actual) === sql;
-    })
+    }) &&
+    !db.prepare('SELECT 1 FROM main.passage_fts_idx LIMIT 1 OFFSET ?').get(MAX_CJK_VOCABULARY_PAGES)
   );
 }
 
@@ -51,7 +59,7 @@ export function messageCjkPassageSource(
   needleCount: number,
   filter: { sql: string; params: readonly unknown[] },
 ): string {
-  if (needleCount < 1 || needleCount > 4 || !hasLargeMessageScope(db, filter) || !canReadVocabulary(db))
+  if (needleCount < 1 || needleCount > 4 || !hasLargeMessageScope(db, filter) || !canUseVocabulary(db))
     return 'evidence_passages p JOIN evidence_docs d ON d.anchor = p.doc_anchor';
   // TEMP virtual tables expose this connection's existing index, including
   // readonly workers. They neither copy bodies nor build an index in main.

@@ -1,5 +1,6 @@
 import { type PluginManifest, validateManifest } from '@clowder-ai/plugin-contract';
 import { validateManifest as validateDeskManifest } from '@clowder-ai/plugin-contract-033c0';
+import { validateManifest as validateLivingBodyManifest } from '@clowder-ai/plugin-contract-033c3';
 import { validateManifest as validatePresentationManifest } from '@clowder-ai/plugin-contract-beta27';
 import { validateManifest as validateLetterManifest } from '@clowder-ai/plugin-contract-beta28';
 import { validateManifest as validateAppAssistManifest } from '@clowder-ai/plugin-contract-beta29';
@@ -16,7 +17,10 @@ const PUBLISHED_MANIFESTS: Partial<
   '0.1.0-beta.28': { validate: validateLetterManifest, bridgeVersion: '1.5.0' },
   '0.1.0-beta.29': { validate: validateAppAssistManifest, bridgeVersion: '1.6.0' },
   '0.3.3-candidate.0': { validate: validateDeskManifest, bridgeVersion: '1.7.0' },
+  '0.3.3-candidate.3': { validate: validateLivingBodyManifest, bridgeVersion: '1.8.0' },
 };
+/** Bridge literals that only a pinned companion release may carry, never the generic manifest ABI. */
+const PINNED_BRIDGES = new Set(['1.7.0', '1.8.0']);
 
 /** Keep the generic manifest ABI unchanged; admit only the delivered companion's
  * new bridge literal. Installation and runtime still authenticate its exact SRI.
@@ -25,8 +29,10 @@ export function validateHostPluginManifest(value: unknown): ReturnType<typeof va
   let legacy = validateManifest(value);
   // A newer general schema must not widen the Host's pinned desktop bridge ABI.
   if (legacy.valid) {
-    if (!legacy.manifest.contributions?.some((c) => c.type === 'desktop-window' && c.bridgeVersion === '1.7.0'))
-      return legacy;
+    const pinned = legacy.manifest.contributions
+      ?.map((c) => (c.type === 'desktop-window' ? String(c.bridgeVersion) : undefined))
+      .find((bridge) => bridge !== undefined && PINNED_BRIDGES.has(bridge));
+    if (!pinned) return legacy;
     legacy = {
       valid: false,
       errors: [
@@ -34,7 +40,7 @@ export function validateHostPluginManifest(value: unknown): ReturnType<typeof va
           instancePath: '/contributions',
           schemaPath: '#/desktop-window/bridgeVersion',
           keyword: 'enum',
-          message: 'Bridge 1.7.0 requires a pinned companion release',
+          message: `Bridge ${pinned} requires a pinned companion release`,
         },
       ],
     };
@@ -54,9 +60,9 @@ export function validateHostPluginManifest(value: unknown): ReturnType<typeof va
     candidate.version !== release.version
   )
     return legacy;
-  // The Host's old structural type differs only at bridgeVersion here. Do not
-  // rewrite manifest bytes or infer archive authority from schema compatibility.
-  const body = desktopWindowContribution(candidate);
-  if (!body || String(body.bridgeVersion) !== reader.bridgeVersion) return legacy;
+  // The Host's old structural type differs only at bridgeVersion here (and, from 1.8.0, the optional
+  // living `body` entry). Do not rewrite manifest bytes or infer archive authority from schema compatibility.
+  const contribution = desktopWindowContribution(candidate);
+  if (!contribution || String(contribution.bridgeVersion) !== reader.bridgeVersion) return legacy;
   return { valid: true, manifest: candidate, errors: [] };
 }

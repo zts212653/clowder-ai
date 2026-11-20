@@ -1,6 +1,7 @@
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { MicrophoneIssue } from '@/hooks/microphone-errors';
 import { useActiveExecutionStore } from '@/stores/activeExecutionStore';
 import { useChatStore } from '@/stores/chatStore';
 import { ChatInput, threadContextAttachmentDrafts, threadReplyDrafts } from '../ChatInput';
@@ -12,6 +13,7 @@ const voice = vi.hoisted(() => ({
   transcript: '',
   partialTranscript: '',
   error: null,
+  microphoneIssue: null as MicrophoneIssue | null,
   duration: 0,
   startRecording: vi.fn(),
   stopRecording: vi.fn(),
@@ -44,6 +46,7 @@ beforeEach(() => {
   voice.state = 'idle';
   voice.transcript = '';
   voice.partialTranscript = '';
+  voice.microphoneIssue = null;
   useActiveExecutionStore.getState().reset();
   useChatStore.setState({
     hasActiveInvocation: false,
@@ -353,6 +356,34 @@ describe('v2 two-level composer', () => {
     expect(onSend).toHaveBeenCalledOnce();
   });
 
+  it.each<{ issue: MicrophoneIssue; warning: string }>([
+    { issue: { kind: 'no-signal', deviceLabel: 'BlackHole 2ch' }, warning: '没收到声音' },
+    { issue: { kind: 'device-unavailable' }, warning: '无法打开这个麦克风' },
+  ])('offers microphone recovery in classic after $warning', ({ issue, warning }) => {
+    voice.microphoneIssue = issue;
+    renderComposer('classic');
+    const draft = typeInto('保留这段草稿');
+    expect(button('Send message')?.disabled).toBe(false);
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain(warning);
+    expect(button('选择麦克风')?.disabled).toBe(false);
+    expect(draft.value).toBe('保留这段草稿');
+
+    act(() =>
+      root.render(
+        <ChatInputActionButton
+          hasActiveInvocation
+          hasText={false}
+          onTranscript={vi.fn()}
+          onSend={onSend}
+          onStop={vi.fn()}
+        />,
+      ),
+    );
+    expect(button('Stop generation')?.disabled).toBe(false);
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain(warning);
+    expect(button('选择麦克风')?.disabled).toBe(false);
+  });
+
   it('disables add and send while an attachment is uploading, without changing the draft', () => {
     renderComposer();
     const textarea = typeInto('with an attachment');
@@ -396,11 +427,13 @@ describe('v2 two-level composer', () => {
       ),
     );
     const controls = [...container.querySelectorAll('button')];
-    expect(controls.map((item) => item.getAttribute('aria-label'))).toEqual(zh);
+    const labels = () => controls.map((item) => item.getAttribute('aria-label'));
+    const expectedChinese = [zh[0], '选择麦克风', zh[1]];
+    expect(labels()).toEqual(expectedChinese);
     act(() => writeShellLanguage('en'));
     expect([...container.querySelectorAll('button')]).toEqual(controls);
-    expect(controls.map((item) => item.getAttribute('aria-label'))).toEqual(en);
+    expect(labels()).toEqual([en[0], 'Choose microphone', en[1]]);
     act(() => writeShellLanguage('zh'));
-    expect(controls.map((item) => item.getAttribute('aria-label'))).toEqual(zh);
+    expect(labels()).toEqual(expectedChinese);
   });
 });

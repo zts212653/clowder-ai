@@ -49,6 +49,13 @@ export function mergeTermEntries(customTerms: ReadonlyArray<{ from: string; to: 
 const termEntries: ReadonlyArray<TermEntry> = builtInEntries;
 
 // ── Refreshable speech mention aliases ──────────────────
+// These spellings can be ordinary words or people's names. Resolve them only
+// when the speaker explicitly says a mention and the cat alias is registered.
+const nicknameHomophones = {
+  宪宪: ['先先', '献献', '嫌嫌', '咸咸', '现现', '弦弦', '险险', '闲闲'],
+  砚砚: ['严严', '言言', '烟烟', '眼眼', '艳艳', '雁雁', '燕燕', '研研', '岩岩'],
+};
+
 function buildSpeechMentionPattern(aliases: string[]): RegExp {
   if (aliases.length === 0) return /(?!)/g; // never-match fallback
   return new RegExp(
@@ -58,14 +65,21 @@ function buildSpeechMentionPattern(aliases: string[]): RegExp {
 }
 
 // Starts empty; refreshSpeechAliases() populates after /api/cats fetch
-let _speechMentionPattern = buildSpeechMentionPattern([]);
+let speechMentionPattern = buildSpeechMentionPattern([]);
+const speechNicknameAliases = new Map<string, string>();
 
 /** Refresh speech mention aliases from dynamic cat data (called by useCatData) */
 export function refreshSpeechAliases(cats: Array<{ mentionPatterns: string[] }>): void {
-  const aliases = Array.from(new Set(cats.flatMap((cat) => cat.mentionPatterns.map((p) => p.replace(/^@/, ''))))).sort(
-    (a, b) => b.length - a.length,
-  );
-  _speechMentionPattern = buildSpeechMentionPattern(aliases);
+  const aliases = new Set(cats.flatMap((cat) => cat.mentionPatterns.map((p) => p.replace(/^@/, ''))));
+  speechNicknameAliases.clear();
+  for (const [nickname, homophones] of Object.entries(nicknameHomophones)) {
+    if (!aliases.has(nickname)) continue;
+    for (const homophone of homophones) {
+      if (!aliases.has(homophone)) speechNicknameAliases.set(homophone, nickname);
+    }
+  }
+  const spellings = [...aliases, ...speechNicknameAliases.keys()].sort((a, b) => b.length - a.length);
+  speechMentionPattern = buildSpeechMentionPattern(spellings);
 }
 
 /**
@@ -73,7 +87,10 @@ export function refreshSpeechAliases(cats: Array<{ mentionPatterns: string[] }>)
  * "at 砚砚" / "艾特 宪宪" → "@砚砚" / "@宪宪"
  */
 export function normalizeSpeechMentions(text: string): string {
-  return text.replace(_speechMentionPattern, (_match, prefix: string, alias: string) => `${prefix}@${alias}`);
+  return text.replace(
+    speechMentionPattern,
+    (_match, prefix: string, alias: string) => `${prefix}@${speechNicknameAliases.get(alias) ?? alias}`,
+  );
 }
 
 /**

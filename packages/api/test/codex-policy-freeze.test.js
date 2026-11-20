@@ -47,7 +47,7 @@ for (const { restricted, managed } of [
       .filter(([id]) => id !== 'codex')
       .forEach(([id, config]) => catRegistry.register(id, config));
     catRegistry.register('codex', member);
-    const binding = freezeExecutionAccountBinding({
+    const binding = await freezeExecutionAccountBinding({
       catId: 'codex',
       catConfig: member,
       workspace: { usesDefaultWorkspace: false },

@@ -29,7 +29,7 @@ for (const preferences of [
       catRegistry.reset();
       Object.entries(all).forEach(([id, config]) => catRegistry.register(id, config));
     });
-    const binding = freezeExecutionAccountBinding({
+    const binding = await freezeExecutionAccountBinding({
       catId: id,
       catConfig: member,
       workspace: { usesDefaultWorkspace: false },

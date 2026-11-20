@@ -7,7 +7,7 @@ import { applyMigrations } from '../dist/domains/memory/schema.js';
 import { DynamicTaskStore } from '../dist/infrastructure/scheduler/DynamicTaskStore.js';
 import { MANAGED_COMMAND_CANDIDATE_FILTER } from '../dist/infrastructure/scheduler/managed-command-candidate-schema.js';
 
-test('managed selector skips unrelated history but keeps retired running and completion evidence', () => {
+test('managed selector skips unrelated history but keeps retired running and completion evidence', async () => {
   const db = new Database(':memory:');
   applyMigrations(db);
   const store = new DynamicTaskStore(db);
@@ -61,9 +61,7 @@ test('managed selector skips unrelated history but keeps retired running and com
     ['admission-pending', 'live', 'retired-live', 'retired-terminal'],
   );
   assert.deepEqual(
-    listManagedCommandExecutions(store.listManagedCommandCandidates())
-      .map((item) => item.taskId)
-      .sort(),
+    (await listManagedCommandExecutions(store.listManagedCommandCandidates())).map((item) => item.taskId).sort(),
     ['hold-ball-live', 'hold-ball-retired-live'],
   );
   assert.equal(

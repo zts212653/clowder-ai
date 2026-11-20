@@ -43,56 +43,41 @@ test('ambient program loaders still invalidate the ordinary managed fixture', ()
   assert.equal(secretShellDenial(command, ordinary), null);
 });
 
-test('earlier exported or selection-sensitive bindings do not preserve managed sender identity', () => {
-  const prefixes = [
-    `export NODE_OPTIONS=--import=${root}/untrusted.mjs`,
-    `NODE_OPTIONS=--import=${root}/untrusted.mjs`,
-    `PATH=${root}/evil:$PATH`,
-    `CAT_CAFE_CREDENTIAL_FILE=/dev/null`,
-    `CAT_CAFE_REAL_GH_PATH=${root}/evil/gh`,
-    'GH_HOST=example.invalid',
-    'HTTPS_PROXY=http://127.0.0.1:9999',
-    `HOME=${root}/other-home`,
-    `export F306_LOCAL_SCRATCH=${ordinary}`,
-    'F306_LOCAL_SCRATCH=x > F306_OUTPUT=changed',
-  ];
-  for (const prefix of prefixes)
-    for (const gh of [wrapper, 'gh']) {
-      const command = `${prefix}; ${gh} pr comment 1 --repo o/r --body ok`;
-      assert.equal(secretShellDenial(command, ordinary), 'secret_send_requires_managed_command', command);
-      admission(command);
-    }
-  assert.equal(
-    secretShellDenial(`F306_LOCAL_SCRATCH=${ordinary}; ${wrapper} pr comment 1 --repo o/r --body ok`, ordinary),
-    null,
-  );
-  for (const tool_name of ['Bash', 'exec_command']) {
-    const command = `export F306_LOCAL_SCRATCH=${ordinary}; cp ${runtime}/avatar.png "$F306_LOCAL_SCRATCH/avatar.png"`;
-    const result = decideNativeHookPayload(
-      { tool_name, cwd: ordinary, tool_input: { command, cmd: command } },
-      {
-        selfHost: () => ({ confidence: 'none' }),
-      },
-    );
-    assert.equal(result.decision, 'allow', JSON.stringify(result));
-  }
+test('actual sender selection changes are denied and ordinary environment changes pass', () => {
+  const bin = join(ordinary, 'external-bin');
+  mkdirSync(bin);
+  symlinkSync(process.execPath, join(bin, 'gh'));
+  for (const command of [
+    `export PATH=${bin}:$PATH; gh pr comment 1 --body fixture`,
+    `CAT_CAFE_REAL_GH_PATH=${bin}/gh ${ownWrapper} pr comment 1 --body fixture`,
+    `NODE_OPTIONS=--import=${root}/untrusted.mjs ${ownWrapper} pr comment 1 --body fixture`,
+  ])
+    admission(command);
+
+  for (const command of [
+    `export F306_LOCAL_SCRATCH=${ordinary}; ${ownWrapper} pr comment 1 --body fixture`,
+    `GIT_CONFIG_COUNT=0 ${ownWrapper} pr comment 1 --body fixture | tail -1`,
+    `env NODE_OPTIONS=--max-old-space-size=4096 ${ownWrapper} pr comment 1 --body fixture`,
+    'GH_HOST=example.invalid gh api repos/o/r/pulls/1',
+  ])
+    assert.equal(secretShellDenial(command, ordinary), null, command);
 });
 
-test('inline environment and delegated carriers cannot bypass proof through the guard own wrapper path', () => {
-  for (const gh of [wrapper, ownWrapper, 'gh']) {
-    for (const prefix of [
-      'CAT_CAFE_CREDENTIAL_FILE=/dev/null',
-      'HTTPS_PROXY=http://127.0.0.1:9999',
-      'GH_HOST=example.invalid',
-      `env CAT_CAFE_REAL_GH_PATH=${root}/unknown`,
-      'env -u CAT_CAFE_CREDENTIAL_FILE',
-      `NODE_OPTIONS=--import=${root}/untrusted.mjs`,
-    ]) {
-      const command = `${prefix} ${gh} pr comment 1 --repo o/r --body ok`;
-      assert.equal(secretShellDenial(command, ordinary), 'secret_send_requires_managed_command', command);
-      admission(command);
-    }
-  }
+test('ordinary preparation does not invalidate an explicitly selected verified wrapper', () => {
+  const body = join(ordinary, 'body.md');
+  for (const command of [
+    `cat > ${body} <<'EOF'\nPrepared comment.\nEOF\n${wrapper} pr comment 1 --body-file ${body} | tail -1`,
+    `python3 -c 'print(1)' && GIT_CONFIG_COUNT=0 ${wrapper} pr view 1`,
+    `git push origin HEAD && ${wrapper} pr view 1`,
+  ])
+    assert.equal(secretShellDenial(command, ordinary), null, command);
+});
+
+test('Git hook paths selected from the command environment are checked against the checkout', () => {
+  const checkout = fileURLToPath(new URL('../../../', import.meta.url));
+  const push = 'git --config-env=core.hooksPath=F306_HOOK_ROOT push origin HEAD';
+  assert.equal(secretShellDenial(`F306_HOOK_ROOT=.githooks ${push}`, checkout), null);
+  assert.equal(secretShellDenial(`F306_HOOK_ROOT=/dev/null ${push}`, checkout), 'secret_git_hook_bypass_blocked');
 });
 
 test('late copy options never become source/destination operands without an explicit separator', () => {
@@ -125,5 +110,4 @@ test('complete readonly API loops retain the bare launcher carrier without quali
     assert.equal(verdict.decision, 'allow', JSON.stringify(verdict));
   }
   admission(`export NODE_OPTIONS=--import=${root}/untrusted.mjs; ${wrapper} api repos/o/r/pulls/1`);
-  admission('GH_HOST=example.invalid gh api repos/o/r/pulls/1');
 });

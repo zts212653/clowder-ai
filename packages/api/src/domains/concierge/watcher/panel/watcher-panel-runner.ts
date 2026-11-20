@@ -9,6 +9,7 @@ import type { StoredMessage } from '../../../cats/services/stores/ports/MessageS
 import type { ILabelStore } from '../../../cats/services/stores/ports/ThreadStore.js';
 import type { IConciergeConfigStore } from '../../ConciergeConfigStore.js';
 import { effectiveWatcherState, readWatcherPreferences } from '../watcher-controls.js';
+import { watcherRoundMembers, watcherUsesOrdinaryContext } from '../watcher-routing.js';
 import {
   shuffledWatcherPanelLabels,
   watcherPanelAlsoWorksHere,
@@ -42,6 +43,7 @@ export interface WatcherPanelRunnerDeps extends WatcherPanelMemberOwners {
   loadGuidance?(): WatcherPanelGuidance;
   memberDeadlineMs?: number;
   log?: WatcherPanelLogger;
+  family?(catId: string): string | undefined;
 }
 
 /** Turns that settled before a restart by more than this are history, not opportunities to speak now. */
@@ -103,7 +105,8 @@ export class WatcherPanelRunner {
         if (threadId && id !== threadId) continue;
         const thread = await this.deps.threads.get(id);
         if (
-          !preferences.config.panel?.enabled ||
+          !threadId ||
+          !watcherUsesOrdinaryContext(preferences.config) ||
           !thread ||
           thread.deletedAt ||
           !effectiveWatcherState(preferences.config, thread, preferences.quietLabels).enabled
@@ -175,26 +178,54 @@ export class WatcherPanelRunner {
     if (await deps.ledger.get(roundId)) return;
     const preferences = await readWatcherPreferences(deps.configs, deps.labels, deps.userId);
     const panel = preferences.config.panel;
-    if (!panel?.enabled) return;
-    this.capacity = panel.maxConcurrentRuns;
+    if (!watcherUsesOrdinaryContext(preferences.config)) return;
+    this.capacity =
+      preferences.config.routing?.maxConcurrentRuns ??
+      panel?.maxConcurrentRuns ??
+      WATCHER_PANEL_DEFAULTS.maxConcurrentRuns;
     const thread = await deps.threads.get(source.threadId);
     if (!thread || thread.deletedAt || (thread.watcher?.startedAfterSequence ?? 0) >= source.settledSequence!) return;
     const effective = effectiveWatcherState(preferences.config, thread, preferences.quietLabels, this.now());
     if (!effective.enabled) return;
     const cutoff = await watcherPanelCutoffMessage(deps.messages, source);
     if (!cutoff) return;
+    const selected = watcherRoundMembers(preferences.config, source.catId, deps.family);
+    const skip = (await wokenByWatcher(deps.messages, source)) ? 'woken_by_watcher' : selected.skipped;
+    if (skip) {
+      const now = this.now();
+      const skipped: WatcherPanelRound = {
+        v: 1,
+        roundId,
+        userId: source.userId,
+        threadId: source.threadId,
+        sourceInvocationId: source.invocationId,
+        sourceSettledSequence: source.settledSequence!,
+        configRevision: preferences.config.revision,
+        workerCatId: source.catId,
+        cutoffMessageId: cutoff.id,
+        cutoffAt: source.responseSettlement!.settledAt,
+        createdAt: now,
+        updatedAt: now,
+        status: 'completed',
+        quiet: skip,
+        guidanceDigest: '',
+        members: [],
+        delivery: { skipped: 'quiet' },
+      };
+      await deps.ledger.save(skipped);
+      this.log.skipped(skipped);
+      return;
+    }
     const quiet = effective.pausedUntil
       ? ('paused' as const)
       : effective.labelMuted
         ? ('label_muted' as const)
-        : (await wokenByWatcher(deps.messages, source))
-          ? ('woken_by_watcher' as const)
-          : undefined;
+        : undefined;
     const guidance = (deps.loadGuidance ?? loadWatcherPanelGuidance)();
-    const labels = shuffledWatcherPanelLabels(panel.members.length, deps.random);
+    const labels = shuffledWatcherPanelLabels(selected.members.length, deps.random);
     const cutoffAt = source.responseSettlement!.settledAt;
     const worksHere = await Promise.all(
-      panel.members.map((member) => watcherPanelAlsoWorksHere(deps.sessions, source, member.catId)),
+      selected.members.map((member) => watcherPanelAlsoWorksHere(deps.sessions, source, member.catId)),
     );
     const createdAt = this.now();
     const round: WatcherPanelRound = {
@@ -207,12 +238,13 @@ export class WatcherPanelRunner {
       workerCatId: source.catId,
       cutoffMessageId: cutoff.id,
       cutoffAt,
+      configRevision: preferences.config.revision,
       createdAt,
       updatedAt: createdAt,
       status: 'running',
       ...(quiet ? { quiet } : {}),
       guidanceDigest: guidance.digest,
-      members: panel.members.map((member, index) => ({
+      members: selected.members.map((member, index) => ({
         catId: member.catId,
         label: labels[index]!,
         status: 'pending' as const,
@@ -227,7 +259,7 @@ export class WatcherPanelRunner {
     const admitted: string[] = [];
     await Promise.all(
       round.members.map(async (entry, index) => {
-        const member = panel.members[index]!;
+        const member = selected.members[index]!;
         let release: (() => void) | undefined;
         try {
           release = await this.slots.acquire(signal);
@@ -311,7 +343,8 @@ export class WatcherPanelRunner {
       this.deps.threads.get(member.round.threadId),
     ]);
     return Boolean(
-      preferences.config.panel?.enabled &&
+      (member.round.configRevision === undefined || member.round.configRevision === preferences.config.revision) &&
+        watcherUsesOrdinaryContext(preferences.config) &&
         thread &&
         !thread.deletedAt &&
         effectiveWatcherState(preferences.config, thread, preferences.quietLabels, this.now()).maySpeak,

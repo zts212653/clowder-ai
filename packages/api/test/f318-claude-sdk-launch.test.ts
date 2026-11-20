@@ -45,8 +45,12 @@ test('SDK child strips API-owned credentials and owner capabilities from inherit
     CLI_EXECUTION_OWNER_BINDING_ENV,
     CLI_EXECUTION_ID_ENV,
   ];
-  const saved = keys.map((key) => [key, process.env[key]] as const);
+  const managedBindingKeys = ['CAT_CAFE_MCP_TRANSPORT', 'CAT_CAFE_CREDENTIAL_FILE'];
+  const saved = [...keys, ...managedBindingKeys].map((key) => [key, process.env[key]] as const);
   for (const key of keys) process.env[key] = 'inherited-sentinel';
+  // This fixture tests legacy env callbacks. Ambient managed credentials select
+  // file-only auth and intentionally remove the callback token from the child env.
+  for (const key of managedBindingKeys) delete process.env[key];
   t.after(() => {
     for (const [key, value] of saved) {
       if (value === undefined) delete process.env[key];

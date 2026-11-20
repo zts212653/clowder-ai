@@ -19,6 +19,32 @@ import { watcherWorld } from './helpers/watcher-world.js';
 const MEMBERS = ['gpt52', 'spark', 'codex-sol'];
 const OWNER = 'watcher-owner';
 
+test('changing the per-family rule fences an in-flight old choice before it can deliver', async () => {
+  const started = Promise.withResolvers(),
+    release = Promise.withResolvers();
+  const f = await panelWorld({
+    runMember: async () => {
+      started.resolve();
+      await release.promise;
+      return { sentence: 'old selection' };
+    },
+  });
+  const [source] = await f.work('before the setting changed');
+  f.runner.offer(source, 0);
+  await started.promise;
+  await f.configs.updateWatcherConfig(OWNER, 1, {
+    routing: { primary: { catId: 'gpt52' }, whenSameFamily: { mode: 'skip' }, maxConcurrentRuns: 6 },
+  });
+  f.runner.controlChanged();
+  await new Promise(setImmediate);
+  release.resolve();
+  await f.runner.idle();
+  const round = await f.ledger.get(watcherPanelRoundId(source.invocationId));
+  assert.deepEqual(round.delivery, { skipped: 'control_changed' });
+  assert.equal(f.published.length, 0);
+  assert.equal(f.queue.list(f.thread.id, OWNER).length, 0);
+});
+
 async function panelWorld({ maxConcurrentRuns = 6, enabled = true, runMember, loadGuidance } = {}) {
   const w = await watcherWorld();
   const configs = new MemoryConciergeConfigStore();
@@ -224,7 +250,7 @@ test('every member judges the same cutoff and the spoken sentences arrive once, 
   assert.equal(f.calls.length, 3, 'the same settled turn never opens a second round');
 });
 
-test('a turn woken by the panel is looked at but never answered with another delivery', async () => {
+test('a turn woken by the panel skips member runs and cannot cause another delivery', async () => {
   const f = await panelWorld({
     runMember: () => ({ sentence: '再说一句' }),
   });
@@ -238,8 +264,8 @@ test('a turn woken by the panel is looked at but never answered with another del
   await f.runner.idle();
   const round = await f.ledger.get(watcherPanelRoundId(woken.invocationId));
   assert.equal(round.quiet, 'woken_by_watcher');
-  assert.equal(f.calls.filter((call) => call.round.quiet === 'woken_by_watcher').length, 3, 'all three still look');
-  assert.equal(round.members.filter((member) => member.status === 'spoke').length, 3, 'what they would say is kept');
+  assert.equal(f.calls.filter((call) => call.round.quiet === 'woken_by_watcher').length, 0, 'no new model work');
+  assert.deepEqual(round.members, []);
   assert.deepEqual(round.delivery, { skipped: 'quiet' });
   assert.equal(f.queue.list(f.thread.id, OWNER).length, 1, 'no second wake');
 });

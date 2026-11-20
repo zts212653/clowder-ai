@@ -3,8 +3,7 @@
 import { spawnSync } from 'node:child_process';
 import { dirname, delimiter, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { prepareSecretSafeSend } from '../lib/secret-outbound-args.mjs';
-import { assertSecretFree } from '../lib/secret-payload-files.mjs';
+import { prepareSecretSafeSend, secretSendDiagnostic } from '../lib/secret-outbound-args.mjs';
 import { executeSecretSafeCommand } from '../lib/secret-command-execution.mjs';
 import { withIsolatedGhReadCache } from '../lib/gh-read-cache.mjs';
 
@@ -12,9 +11,9 @@ const args = process.argv.slice(2);
 const ownDir = dirname(fileURLToPath(import.meta.url));
 let prepared;
 try {
-  assertSecretFree(args.join('\n'));
-} catch {
-  process.stderr.write('secret_send_blocked: content was unsafe or could not be inspected; use explicit body/file input.\n');
+  prepared = await prepareSecretSafeSend('gh', args);
+} catch (error) {
+  process.stderr.write(`${secretSendDiagnostic(error)}\n`);
   process.exit(1);
 }
 process.on('exit', () => prepared?.dispose());
@@ -177,11 +176,6 @@ const delegatePath = (process.env.PATH ?? '')
   .filter((entry) => entry && resolve(entry) !== resolve(ownDir))
   .join(delimiter);
 const delegate = process.env.CAT_CAFE_REAL_GH_PATH ?? 'gh';
-try {
-  prepared = await prepareSecretSafeSend('gh', args);
-} catch {
-  fail('secret_send_blocked', 'content was unsafe or could not be inspected; use explicit body/file input.');
-}
 process.exit(
   await withIsolatedGhReadCache(commandArgs(), { ...process.env, PATH: delegatePath }, (env) =>
     executeSecretSafeCommand(delegate, prepared.args, env),

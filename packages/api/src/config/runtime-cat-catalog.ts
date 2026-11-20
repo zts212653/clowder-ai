@@ -1,5 +1,6 @@
 import { closeSync, mkdirSync, openSync, readFileSync, statSync, unlinkSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import { isDeepStrictEqual } from 'node:util';
 import type {
   AgyProfileConfig,
   CatBreed,
@@ -413,13 +414,18 @@ export function bindRuntimeAgyAccounts(
 ): CatCafeConfig {
   return bindRuntimeLocalAccounts(projectRoot, selection, previewToken, accountProjectRoot, 'google');
 }
-export function bindRuntimeClaudeAccounts(
+export async function bindRuntimeClaudeAccounts(
   projectRoot: string,
   selection: CodexBindingSelection,
   previewToken: string,
   accountProjectRoot = projectRoot,
-): CatCafeConfig {
-  return bindRuntimeLocalAccounts(projectRoot, selection, previewToken, accountProjectRoot, 'anthropic');
+): Promise<CatCafeConfig> {
+  const current = readRuntimeAccountMembers(projectRoot);
+  const plan = await planClaudeAccountBinding(accountProjectRoot, current, selection);
+  // A member edit may finish while Keychain is pending. Never write a stale catalog over it.
+  if (!isDeepStrictEqual(current, readRuntimeAccountMembers(projectRoot)))
+    throw new Error('Binding preview changed; please review it again');
+  return commitRuntimeLocalAccountBinding(projectRoot, current, selection, previewToken, 'anthropic', plan);
 }
 export function bindRuntimeCodexAccounts(
   projectRoot: string,
@@ -434,15 +440,24 @@ function bindRuntimeLocalAccounts(
   selection: CodexBindingSelection,
   previewToken: string,
   accountProjectRoot: string,
-  client: 'openai' | 'anthropic' | 'google',
+  client: 'openai' | 'google',
 ): CatCafeConfig {
   const current = readRuntimeAccountMembers(projectRoot);
   const plan =
     client === 'openai'
       ? planCodexAccountBinding(accountProjectRoot, current, selection)
-      : client === 'google'
-        ? planAgyAccountBinding(accountProjectRoot, current, selection)
-        : planClaudeAccountBinding(accountProjectRoot, current, selection);
+      : planAgyAccountBinding(accountProjectRoot, current, selection);
+  return commitRuntimeLocalAccountBinding(projectRoot, current, selection, previewToken, client, plan);
+}
+
+function commitRuntimeLocalAccountBinding(
+  projectRoot: string,
+  current: CatCafeConfig,
+  selection: CodexBindingSelection,
+  previewToken: string,
+  client: 'openai' | 'anthropic' | 'google',
+  plan: { previewToken: string; targets: readonly { catId: string }[] },
+): CatCafeConfig {
   if (plan.previewToken !== previewToken) throw new Error('Binding preview changed; please review it again');
   const targets = new Set(plan.targets.map((target) => target.catId));
   const previous = readLocalAccountSelection(current, client);

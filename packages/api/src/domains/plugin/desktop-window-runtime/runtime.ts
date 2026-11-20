@@ -1,5 +1,6 @@
 import { WIRE_VERSION } from '@clowder-ai/plugin-contract';
 import type { BundledPluginRuntime } from '../builtin-runtime/carriers/bundled-runtime-carrier.js';
+import { livingBodyEntry } from '../external-runtime/package-surface-assets.js';
 import { startStaticSurfaceServer } from '../external-runtime/static-surface-server.js';
 import type { VerifiedPluginPackage } from '../external-runtime/types.js';
 import type { BuiltinBrokerConnection } from '../host-broker/builtin-loopback.js';
@@ -9,7 +10,7 @@ import { desktopWindowContribution } from './admission.js';
 import { unexpectedDesktopLossId } from './desktop-loss.js';
 import { ObservationDiagnostics } from './observation-diagnostics.js';
 import { DesktopWindowObserver } from './observer.js';
-import { resolveCompanionArchiveContract } from './published-companion-v2.js';
+import { companionSupportsLivingBody, resolveCompanionArchiveContract } from './published-companion-v2.js';
 import type {
   ActiveWindow,
   DesktopWindowFailure,
@@ -111,6 +112,14 @@ export class DesktopWindowPluginRuntime implements BundledPluginRuntime {
       },
       'official.companion',
     );
+  }
+
+  /** F336: before the Host revokes this instance (disable, uninstall, shutdown) the living body's newest scene is
+   * written through the still-current bridge; bounded by the kernel (≤ 300 ms ask, ≤ 2 s ACK), never throws. */
+  async flushScene(id?: string): Promise<void> {
+    const run = this.active;
+    if (!run?.ready || run.closing || (id !== undefined && run.id !== id) || !run.window?.flushScene) return;
+    await run.window.flushScene().catch(() => undefined);
   }
 
   /** Revocation is cleanup, never an effect that can mint or renew authority. */
@@ -227,11 +236,15 @@ export class DesktopWindowPluginRuntime implements BundledPluginRuntime {
         },
       });
       controller.signal.throwIfAborted();
+      // F336: the living body opens only from the verified manifest's own body entry (its integrity was checked
+      // with the surface above), and only for an archive whose admitted line carries livingBody.
+      const body = companionSupportsLivingBody(companionContract) ? livingBodyEntry(contribution) : undefined;
       run.window = await this.options.executor.open({
         url: `${run.server.origin}${run.server.pathPrefix}${contribution.surface.entrypoint}`,
         presentation: contribution.presentation,
         ...(publicCompanionV2 ? { publicCompanionV2: true } : {}),
         ...(companionContract ? { companionContract } : {}),
+        ...(body ? { bodyUrl: `${run.server.origin}${run.server.pathPrefix}${body.entrypoint}` } : {}),
         signal: controller.signal,
         onClosed: (failure) =>
           this.lost(run, {

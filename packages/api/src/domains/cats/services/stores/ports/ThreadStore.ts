@@ -24,6 +24,7 @@ import { type OwnedThreadSeed, ownedThreadFromSeed, requireOwnedThread } from '.
 import type { StoreReadOptions } from './StoreReadOptions.js';
 import { throwIfStoreReadAborted } from './StoreReadOptions.js';
 import { mergeThreadRoadmap, type RoadmapMutation, type ThreadRoadmap, threadRoadmapSchema } from './ThreadRoadmap.js';
+import { noteThreadExecutionSettingsWrite } from './thread-execution-settings.js';
 
 /** Default thread ID for the lobby (backwards-compatible single-thread mode) */
 export const DEFAULT_THREAD_ID = 'default';
@@ -1327,7 +1328,9 @@ export class ThreadStore implements IThreadStore {
 
   updateProjectPath(threadId: string, projectPath: string): void {
     const thread = this.get(threadId);
-    if (thread) thread.projectPath = projectPath;
+    if (!thread) return;
+    thread.projectPath = projectPath;
+    noteThreadExecutionSettingsWrite(threadId, { projectPath });
   }
 
   updatePin(threadId: string, pinned: boolean): void {
@@ -1490,6 +1493,7 @@ export class ThreadStore implements IThreadStore {
   updateBootcampState(threadId: string, state: BootcampStateV1 | null): void {
     const thread = this.get(threadId);
     if (!thread) return;
+    noteThreadExecutionSettingsWrite(threadId, { hasBootcampState: state !== null });
     if (state === null) {
       delete thread.bootcampState;
     } else {
@@ -1667,6 +1671,7 @@ export class ThreadStore implements IThreadStore {
   updateMemberEffort(threadId: string, catId: CatId, effort: CliEffortPreset | null): void {
     const thread = this.get(threadId);
     if (!thread) return;
+    noteThreadExecutionSettingsWrite(threadId, { catId, effort });
     if (effort === null) {
       if (!thread.memberEffortOverrides) return;
       delete thread.memberEffortOverrides[catId];

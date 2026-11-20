@@ -28,6 +28,8 @@ export function namedAlphaFixture(t) {
     'scripts/lib/quickstart-freshness.sh',
     'scripts/lib/alpha-redis-identity.sh',
     'scripts/lib/redis-rdb-first.sh',
+    'scripts/lib/preview-redis-endpoint.mjs',
+    'scripts/lib/redis-test-leases.mjs',
     'scripts/lib/alpha-coordinates.mjs',
     'scripts/lib/alpha-launch-contract.mjs',
     'scripts/lib/alpha-named-launch.sh',
@@ -57,6 +59,7 @@ export function namedAlphaFixture(t) {
     'packages/shared/src/deployment-defaults.ts',
     'packages/shared/src/deployment-profiles.json',
     'packages/api/src/config/alpha-coordinates.ts',
+    'packages/api/scripts/redis-test-lease-cli.mjs',
   ]) {
     if (!existsSync(join(SOURCE_ROOT, entry))) continue;
     mkdirSync(dirname(join(mainRoot, entry)), { recursive: true });

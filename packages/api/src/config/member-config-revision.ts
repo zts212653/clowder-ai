@@ -19,19 +19,27 @@ export class MemberConfigurationRevisionRequired extends Error {
   }
 }
 
-/** A member-scoped validator read from disk, never from a stale registry cache. */
-export function memberConfigurationRevision(projectRoot: string, catId: string): string | undefined {
+/** All save revisions in a member list come from one fresh read of the authored catalog. */
+export function readMemberConfigurationRevisions(projectRoot: string): (catId: string) => string | undefined {
   const raw = readCatCatalogRaw(projectRoot, { persistMigrations: false });
-  if (!raw) return undefined;
+  if (!raw) return () => undefined;
   const config = JSON.parse(raw) as CatCafeConfig;
-  const cat = toAllCatConfigs(config)[catId];
-  if (!cat) return undefined;
-  // Public projection omits tombstones. The member's authored overrides must also invalidate an older editor.
-  const variant = config.breeds.flatMap((breed) =>
-    breed.variants.filter((entry) => (entry.catId ?? breed.catId) === catId),
-  )[0];
-  const roster = config.version === 2 ? config.roster[catId] : undefined;
-  return createHash('sha256').update(JSON.stringify({ cat, variant, roster })).digest('hex');
+  const cats = toAllCatConfigs(config);
+  return (catId) => {
+    const cat = cats[catId];
+    if (!cat) return undefined;
+    // Public projection omits tombstones. The authored overrides must also invalidate an older editor.
+    const variant = config.breeds.flatMap((breed) =>
+      breed.variants.filter((entry) => (entry.catId ?? breed.catId) === catId),
+    )[0];
+    const roster = config.version === 2 ? config.roster[catId] : undefined;
+    return createHash('sha256').update(JSON.stringify({ cat, variant, roster })).digest('hex');
+  };
+}
+
+/** A write validates the selected member against the disk while holding the mutation lock. */
+export function memberConfigurationRevision(projectRoot: string, catId: string): string | undefined {
+  return readMemberConfigurationRevisions(projectRoot)(catId);
 }
 
 /** The caller holds the existing catalog mutation lock through its complete mutation. */

@@ -5,10 +5,32 @@ export type ProfileAuthType = 'oauth' | 'api_key';
 export type ProfileKind = 'builtin' | 'api_key' | 'oauth';
 export type BuiltinAccountClient = 'anthropic' | 'openai' | 'google' | 'kimi' | 'opencode' | 'acp';
 
+export interface KimiAccountQuotaView {
+  readonly owner: {
+    readonly accountRef: string;
+    readonly credentialVersion: string;
+  };
+  readonly observedAt: number;
+  readonly items: AccountQuotaObservation['items'];
+}
+
+export interface AgyAccountQuotaView {
+  readonly owner: {
+    readonly accountRef: string;
+    readonly credentialVersion: string;
+  };
+  readonly observedAt: number;
+  readonly items: AccountQuotaObservation['items'];
+}
+
 export interface ProfileItem {
   agy?: { storage: 'cli_file'; credentialHome: string };
   agyLoginStatus?: 'ready' | 'refreshable' | 'not_logged_in' | 'unreadable';
   agyLoginCommand?: string;
+  agyQuotaReady?: boolean;
+  agyQuota?: AgyAccountQuotaView;
+  kimiLoginReady?: boolean;
+  kimiQuota?: KimiAccountQuotaView;
   id: string;
   quota?: AccountQuotaObservation;
   claudeQuota?: ClaudeQuotaView;

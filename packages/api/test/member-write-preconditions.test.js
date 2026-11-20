@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
-import { copyFileSync, mkdtempSync } from 'node:fs';
+import fs, { copyFileSync, mkdtempSync } from 'node:fs';
+import { syncBuiltinESMExports } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
@@ -19,26 +20,28 @@ import { catsRoutes } from '../dist/routes/cats.js';
 import { sessionStrategyConfigRoutes } from '../dist/routes/session-strategy-config.js';
 import { isolateAccountAuthEnvironment } from './helpers/account-auth-environment.js';
 
-function memberFixture() {
+function memberFixture(catIds = ['versioned-member']) {
   const root = mkdtempSync(join(tmpdir(), 'member-write-preconditions-'));
   const template = join(root, 'cat-template.json');
   copyFileSync(new URL('../../../cat-template.json', import.meta.url), template);
   bootstrapCatCatalog(root, template);
-  createRuntimeCat(root, {
-    catId: 'versioned-member',
-    name: 'Member',
-    displayName: 'Member',
-    avatar: '/avatars/default.png',
-    color: { primary: '#123456', secondary: '#abcdef' },
-    mentionPatterns: ['@versioned-member'],
-    roleDescription: 'review partner',
-    configurationSource: 'native_tool',
-    clientId: 'anthropic',
-    carrier: 'cli',
-    defaultModel: '',
-    mcpSupport: false,
-    cli: { command: 'claude', outputFormat: 'stream-json' },
-  });
+  for (const catId of catIds) {
+    createRuntimeCat(root, {
+      catId,
+      name: 'Member',
+      displayName: 'Member',
+      avatar: '/avatars/default.png',
+      color: { primary: '#123456', secondary: '#abcdef' },
+      mentionPatterns: [`@${catId}`],
+      roleDescription: 'review partner',
+      configurationSource: 'native_tool',
+      clientId: 'anthropic',
+      carrier: 'cli',
+      defaultModel: '',
+      mcpSupport: false,
+      cli: { command: 'claude', outputFormat: 'stream-json' },
+    });
+  }
   return root;
 }
 
@@ -86,8 +89,8 @@ test('the existing catalog lock retains ownership until an asynchronous mutation
   assert.deepEqual(events, ['first:start', 'first:end', 'second']);
 });
 
-async function appFixture(t) {
-  const root = memberFixture();
+async function appFixture(t, catIds) {
+  const root = memberFixture(catIds);
   const keys = [
     'CAT_TEMPLATE_PATH',
     'CAT_CAFE_GLOBAL_CONFIG_ROOT',
@@ -127,8 +130,41 @@ async function appFixture(t) {
   await app.register(catsRoutes);
   const read = async () => (await app.inject({ method: 'GET', url: '/api/cats' })).json().cats;
   const headers = { 'x-cat-cafe-user': 'member-version-test' };
-  return { app, read, headers };
+  return { app, read, headers, root };
 }
+
+test('the members list reads one fresh catalog for all save revisions', async (t) => {
+  const ids = ['versioned-member', 'versioned-sibling', 'versioned-third'];
+  const { root, read } = await appFixture(t, ids);
+  const revisions = () => Object.fromEntries(ids.map((id) => [id, memberConfigurationRevision(root, id)]));
+  const initial = revisions();
+  assert(Object.values(initial).every((revision) => /^[a-f0-9]{64}$/.test(revision)));
+  const readFile = fs.readFileSync;
+  let revisionReads = 0;
+  const monitor = t.mock.method(fs, 'readFileSync', (path, ...options) => {
+    if (String(path).endsWith('/cat-catalog.json') && new Error().stack?.includes('/config/member-config-revision.')) {
+      revisionReads += 1;
+    }
+    return readFile(path, ...options);
+  });
+  syncBuiltinESMExports();
+  const listRevisions = async () => {
+    revisionReads = 0;
+    const members = await read();
+    assert.equal(revisionReads, 1, 'one catalog read should supply the whole list of save revisions');
+    return Object.fromEntries(members.map((member) => [member.id, member.configurationRevision]));
+  };
+  try {
+    assert.deepEqual(await listRevisions(), initial);
+    await updateMemberWithRevision(root, ids[0], initial[ids[0]], { personality: 'edited after the first read' });
+    const latest = await listRevisions();
+    assert.notEqual(latest[ids[0]], initial[ids[0]]);
+    assert.equal(latest[ids[1]], initial[ids[1]]);
+  } finally {
+    monitor.mock.restore();
+    syncBuiltinESMExports();
+  }
+});
 
 test('formal PATCH and DELETE reject blind member writes without removing the strategy', async (t) => {
   const { app, read, headers } = await appFixture(t);

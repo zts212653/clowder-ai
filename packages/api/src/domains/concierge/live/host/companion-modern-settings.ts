@@ -1,5 +1,9 @@
 import { CONCIERGE_CONFIG_DEFAULTS, clampBallSize } from '@cat-cafe/shared';
 import { validateCompanionReply as validateDeskReply } from '@clowder-ai/plugin-contract-033c0';
+import {
+  type CompanionCommand as LivingBodyCommand,
+  validateCompanionReply as validateLivingBodyReply,
+} from '@clowder-ai/plugin-contract-033c3';
 import { type CompanionCommand, validateCompanionReply } from '@clowder-ai/plugin-contract-beta23';
 import { validateCompanionReply as validateWorkReply } from '@clowder-ai/plugin-contract-beta25';
 import { validateCompanionReply as validatePresentationReply } from '@clowder-ai/plugin-contract-beta27';
@@ -14,11 +18,12 @@ import {
   type CompanionArchiveContract,
   type CompanionContract,
   companionContractHas,
+  publishedCompanionSkin,
 } from '../../../plugin/desktop-window-runtime/published-companion-v2.js';
 import type { CompanionOwnerClient } from '../companion-owner-client.js';
 
 const unavailable = () => ({ kind: 'settings', status: 'unavailable', reason: 'temporarily_unavailable' }) as const;
-type Update = Extract<CompanionCommand | AppAssistCommand, { kind: 'settings.update' }>;
+type Update = Extract<CompanionCommand | AppAssistCommand | LivingBodyCommand, { kind: 'settings.update' }>;
 const settledCall = z.enum(['unchanged', 'stopped']);
 // Published beta.23/24 archives reject smaller replies. Keep the saved owner
 // preference intact, but project a value their public contract can consume.
@@ -30,6 +35,7 @@ const SETTINGS_REPLIES: Partial<Record<CompanionContract, (value: unknown) => va
   '0.1.0-beta.28': validateLetterReply,
   '0.1.0-beta.29': validateAppAssistReply,
   '0.3.3-candidate.0': validateDeskReply,
+  '0.3.3-candidate.3': validateLivingBodyReply,
 };
 
 function publishedBallSize(size: number | null | undefined, contract: CompanionArchiveContract['contract']) {
@@ -60,7 +66,8 @@ export async function readModernCompanionSettings(
     status: 'available',
     values: {
       dutyCatProfileId: config.dutyCatProfileId,
-      skin: config.skin,
+      // A line without livingBody reads the living cat as the cat it draws; the saved choice is kept.
+      skin: typeof config.skin === 'string' ? publishedCompanionSkin(config.skin, contract) : config.skin,
       ballSize: publishedBallSize(size, contract),
       behaviorEnabled: config.behaviorEnabled ?? true,
       proactivePolicy: config.proactivePolicy,

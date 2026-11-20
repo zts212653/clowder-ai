@@ -99,6 +99,7 @@ export class RedisProposalStore implements IProposalStore {
       ...(input.subjectTaskId ? { subjectTaskId: input.subjectTaskId } : {}),
       ...(input.subjectTaskTitle ? { subjectTaskTitle: input.subjectTaskTitle } : {}),
       ...(input.approvedDevelopmentScope ? { approvedDevelopmentScope: input.approvedDevelopmentScope } : {}),
+      ...(input.taskStartOwnerRevision !== undefined ? { taskStartOwnerRevision: input.taskStartOwnerRevision } : {}),
     };
 
     const key = ProposalKeys.detail(proposal.proposalId);

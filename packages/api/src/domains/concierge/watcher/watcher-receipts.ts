@@ -26,11 +26,12 @@ const undoRef = z
 
 /** The original suggestion owner stores the row and runs the person's undo. This adapter owns only watcher controls. */
 export function createWatcherReceipts(owners: Owners) {
-  for (const kind of ['watcher_pause', 'watcher_close', 'watcher_open'] as const) {
+  for (const operation of ['pause', 'close', 'open'] as const) {
+    const kind = `watcher-${operation}`;
     const handler: SuggestionActionHandler = {
       kind,
-      kindLabel: kind === 'watcher_pause' ? '暂停守望猫' : kind === 'watcher_open' ? '开启守望猫' : '关闭守望猫',
-      undoLabel: kind === 'watcher_pause' ? 'resume' : 'undo',
+      kindLabel: operation === 'pause' ? '暂停守望猫' : operation === 'open' ? '开启守望猫' : '关闭守望猫',
+      undoLabel: operation === 'pause' ? 'resume' : 'undo',
       prepare: async () => ({ ok: false, error: '请直接在对话里告诉守望猫' }),
       apply: async () => ({ ok: false, error: '此动作只承接已生效的对话指令' }),
       async undo(ctx, raw) {
@@ -52,7 +53,7 @@ export function createWatcherReceipts(owners: Owners) {
           },
           {
             undoOf: ctx.suggestionId,
-            ...(kind === 'watcher_close'
+            ...(operation === 'close'
               ? { startedAfterSequence: await owners.executions.settledHead(ctx.userId, ctx.threadId) }
               : {}),
           },
@@ -63,12 +64,13 @@ export function createWatcherReceipts(owners: Owners) {
       },
     };
     owners.registry.register(handler);
+    owners.registry.registerAlias(`watcher_${operation}`, kind);
   }
   return {
     async control(input: {
       userId: string;
       threadId: string;
-      catId: string;
+      catId?: string;
       messageId: string;
       previous: WatcherThreadControl;
       current: WatcherThreadControl;
@@ -83,11 +85,12 @@ export function createWatcherReceipts(owners: Owners) {
               input.current.pausedUntil,
             );
       return owners.service.recordReceipt({
-        actor: { userId: input.userId, threadId: input.threadId, catId: input.catId, byline: 'watcher' },
+        // A person can control the watcher role before selecting its member.
+        actor: { userId: input.userId, threadId: input.threadId, catId: input.catId || 'watcher', byline: 'watcher' },
         messageId: input.messageId,
         text: closed ? '已关闭' : opened ? '已开启' : `已暂停至 ${time}`,
         action: {
-          kind: closed ? 'watcher_close' : opened ? 'watcher_open' : 'watcher_pause',
+          kind: `watcher-${input.operation}`,
           appliedRef: {
             threadId: input.threadId,
             appliedRevision: input.current.revision,

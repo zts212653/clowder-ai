@@ -2,6 +2,7 @@
 import type {
   WatcherCapability,
   WatcherConfig,
+  WatcherMemberCapability,
   WatcherThreadControl,
   WatcherThreadControlPatch,
 } from '@cat-cafe/shared';
@@ -17,8 +18,9 @@ export interface WatcherSnapshot {
   pausedUntil?: number;
   rolloutEnabled: boolean;
   reviewing: boolean;
+  reviewingCatIds?: string[];
   memberName: string;
-  capability: WatcherCapability;
+  capability: WatcherMemberCapability | WatcherCapability;
 }
 export function useWatcher(threadId: string) {
   const [state, setState] = useState<WatcherSnapshot | null>(null);

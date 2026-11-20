@@ -35,6 +35,13 @@ test('real shared entry appends one local denial with parsed target; allow stays
   assert.ok(Number.isFinite(Date.parse(entry.at)));
   assert.equal(run('printf ordinary').stdout, '');
   assert.equal(readFileSync(ledger, 'utf8'), before);
+  const unresolved = run('cp input.txt "$F306_UNKNOWN_COPY_TARGET" && printf complete');
+  assert.equal(unresolved.status, 0, unresolved.stderr);
+  assert.equal(unresolved.stdout, '');
+  assert.equal(readFileSync(ledger, 'utf8'), before);
+  const uncertainty = JSON.parse(readFileSync(join(home, '.cat-cafe/guard-denials/native-uncertain.jsonl'), 'utf8'));
+  assert.equal(uncertainty.decision, 'allow');
+  assert.equal(uncertainty.reasonCode, 'copy_target_unresolved');
 });
 
 test('audit redacts before truncation and an unavailable audit never changes policy', async (t) => {

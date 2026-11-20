@@ -17,6 +17,7 @@
  */
 import { type CatId, catRegistry } from '@cat-cafe/shared';
 import type { AgentMessage, AgentService, AgentServiceOptions, ToolExecutionPolicy } from '../../types.js';
+import { assertToolExecutionPolicySupported } from '../invocation/tool-execution-policy.js';
 import { ClaudeAgentService } from './ClaudeAgentService.js';
 import { ClaudeBgCarrierService } from './ClaudeBgCarrierService.js';
 import { ClaudeInteractivePtyCarrierService } from './ClaudeInteractivePtyCarrierService.js';
@@ -191,6 +192,10 @@ export class FallbackCarrierWrapper implements AgentService {
     return this.carrier.supportsToolExecutionPolicy?.(policy) ?? false;
   }
 
+  watcherMemberCapability(): import('@cat-cafe/shared').WatcherMemberCapability {
+    return this.carrier.watcherMemberCapability?.() ?? { supported: false, reason: '此载体的守望读取尚未接通' };
+  }
+
   freshnessCarrierCapability(): import('../../types.js').AgentFreshnessCarrierCapability {
     return (
       this.carrier.freshnessCarrierCapability?.() ?? {
@@ -235,6 +240,7 @@ export class FallbackCarrierWrapper implements AgentService {
   }
 
   private async *_invoke(prompt: string, options?: AgentServiceOptions): AsyncGenerator<AgentMessage> {
+    assertToolExecutionPolicySupported(this.carrier, options?.toolExecutionPolicy);
     // Account incompatibility is not carrier health. Reject even if bg is already degraded;
     // selecting a token must not silently change the explicitly requested carrier.
     if (options?.claudeTokenAccount && this.targetTier === 'bg_daemon')
@@ -292,7 +298,9 @@ export class FallbackCarrierWrapper implements AgentService {
         throw err;
       }
 
-      // D4: Yield visible carrier_fallback system_info (NOT suppressed).
+      const fallbackCarrier = this._carrierFactory(fallbackTier, this.catId);
+      assertToolExecutionPolicySupported(fallbackCarrier, options?.toolExecutionPolicy);
+      // D4: Yield visible carrier_fallback only after its tool policy is supported.
       yield {
         type: 'system_info',
         catId: this.catId,
@@ -310,7 +318,6 @@ export class FallbackCarrierWrapper implements AgentService {
       // P1-2 fix: wrap in try-catch to classify and record fallback tier failures.
       // Cloud P1 fix: monitor yielded errors (not just thrown) — carriers can surface
       // quota/structural failures as error messages instead of throwing.
-      const fallbackCarrier = this._carrierFactory(fallbackTier, this.catId);
       const fallbackOptions = options?.beforeProviderLaunch
         ? {
             ...options,

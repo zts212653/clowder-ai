@@ -11,7 +11,8 @@ export { getPlaybackManager } from '@/services/playbackRuntime';
 
 function matchesActiveSession(event: { threadId: string; catId: string }): boolean {
   if (useListenModeStore.getState().session) return false;
-  if (peekPlaybackManager()?.getSnapshot().source === 'listen') return false;
+  const source = peekPlaybackManager()?.getSnapshot().source;
+  if (source === 'listen' || source === 'read-aloud') return false;
   const { session } = useVoiceSessionStore.getState();
   if (!session?.voiceMode) return false;
   if (session.boundThreadId !== event.threadId) return false;

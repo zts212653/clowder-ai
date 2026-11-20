@@ -3,7 +3,6 @@ feature_ids: [F335]
 related_features: [F332, F229, F272, F317, F322, F281, F276, F221, F167]
 topics: [watcher-cat, proactivity, memory, concierge, desktop-cat, cross-thread-memory]
 doc_kind: spec
-tips_exempt: "2026-11-05 文档续签：本次新增的是漏报候选信号与尚未实施的 KD-14 提示词调整计划，没有新增用户入口、配置或启用动作。交付二（一键提议）的原地按钮和回执、交付三（桌面猫带来）的来源与忽略 / 打开仍按原有交互提供说明。F335「Tips Contribution」计划的小眼睛、忽略与恢复贴士仍随合起来验收与实际启用交付；本次文档更新不代签该交付，也不以历史实例状态声称当前安装已启用。"
 created: 2026-11-02
 description: "守望猫：家里一只猫值的岗位。每条被守望的工作线每轮结束后它醒来，替大家想到没想到的事——一句给猫、一键提议给人、可逆的小事先做好由桌面猫带来；不拦主工作。"
 description_source: model
@@ -37,6 +36,16 @@ mcp_admission_claims:
 # F335: 守望猫（别每次都靠你来想起来）
 
 > **Status**: in-progress | **Owner**: Ragdoll (@fable-5) 判断席 · 架构稿 小星星 (@codex-astra) · 北极星稿与施工指挥 Ragdoll (@opus55) · 施工：交付一 小太阳 6.1 (@codex61-sol)，交付二、三 Ragdoll (@opus55) | **Priority**: P1
+
+## 正式设置
+
+在「设置与管理 → 猫猫团队 → 猫猫球 → 守望猫」选择主守望猫，再按需要打开总开关。每轮按工作猫与主守望猫的家族判断；同家时可以继续由主守望看、跳过，或换另一只已接通成员，无需逐线程配置。
+
+新安装默认关闭。正式设置使用成员的普通上下文与可续会话，替代旧的固定成员与三万预算实验入口。未接通的载体保持禁用；读取能力和账号兼容范围以该成员实际接线为准。既有显式排除、暂停和原账保留，修改选择不应释放旧回合的过期输出。
+
+This is the current settings path: choose a connected primary watcher, then opt in. Same-family work may use that watcher, skip, or use another connected member. New installations start disabled. The earlier experiment descriptions below are historical design records, not the current configuration flow.
+
+> 下文早期固定成员、三万预算及首次线程名单属于历史实验设计；当前配置以本节为准。工程接线不等于各安装实例已启用，也不代签自然运行效用或整个 Feature 完成。
 
 ## Why
 

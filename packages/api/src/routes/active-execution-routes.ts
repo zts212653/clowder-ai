@@ -314,7 +314,7 @@ async function buildActiveExecutionList(
   // A store without the narrow selectors falls back to one full read per request, shared by both faces.
   let allTasks: DynamicTaskDef[] | undefined;
   const readAllTasks = () => (allTasks ??= deps.dynamicTaskStore?.getAll() ?? []);
-  const managed = listManagedCommandExecutions(
+  const managed = await listManagedCommandExecutions(
     deps.dynamicTaskStore?.listManagedCommandCandidates?.() ?? readAllTasks(),
   );
   const holds = listPendingHoldWaits(deps.dynamicTaskStore?.listHoldWaitCandidates?.() ?? readAllTasks());

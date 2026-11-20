@@ -1,4 +1,5 @@
-import type { CatId, DeclaredWorkMode, ReportingMode } from '@cat-cafe/shared';
+import { type CatId, createCatId, type DeclaredWorkMode, type ReportingMode } from '@cat-cafe/shared';
+import type { OrdinaryTaskHandoffRequest } from '../domains/ball-custody/OrdinaryTaskHandoffContract.js';
 import type { InvocationQueue } from '../domains/cats/services/agents/invocation/InvocationQueue.js';
 import type { OwnerAuthProvenance } from '../domains/cats/services/agents/invocation/owner-auth-provenance.js';
 import { parseIntent } from '../domains/cats/services/context/IntentParser.js';
@@ -99,6 +100,7 @@ export interface AppendApprovedInitialMessageInput extends ProposalInitialMessag
    * under the materialization-vs-wake-completion invariant.
    */
   existingSeed?: StoredMessage;
+  taskHandoff?: OrdinaryTaskHandoffRequest;
 }
 
 export interface AppendApprovedInitialMessageResult {
@@ -171,6 +173,7 @@ export async function appendApprovedInitialMessage({
   router,
   invocationQueue,
   existingSeed,
+  taskHandoff,
 }: AppendApprovedInitialMessageInput): Promise<AppendApprovedInitialMessageResult> {
   // F128 source envelope: seed content uses the envelope only when there is no
   // explicit user-typed initialMessage. Routing/intent must never see the
@@ -198,6 +201,7 @@ export async function appendApprovedInitialMessage({
   // original trigger message and read its full content / attachments regardless
   // of whether the user supplied an explicit initialMessage.
   const crossPostExtra = {
+    ...(taskHandoff ? { taskHandoff } : {}),
     crossPost: {
       sourceThreadId,
       ...(sourceInvocationId ? { sourceInvocationId } : {}),
@@ -254,7 +258,9 @@ export async function appendApprovedInitialMessage({
   const resolved = await router.resolveTargetsAndIntent(routingInput, threadId, { persist: false });
   const parsed = parseIntent(routingInput, preferredCats?.length ?? resolved.targetCats.length);
 
-  const { targetCats, intentName } = computeDispatchPlan(parsed, resolved.targetCats, preferredCats);
+  const { targetCats, intentName } = taskHandoff
+    ? { targetCats: [createCatId(taskHandoff.targetCatId)], intentName: 'execute' }
+    : computeDispatchPlan(parsed, resolved.targetCats, preferredCats);
   const parallelReporterHandle = computeParallelReporterHandle(parsed, resolved.targetCats, preferredCats);
 
   // Build the full enqueued+stored content: parent thread header + mode-aware
@@ -271,6 +277,7 @@ export async function appendApprovedInitialMessage({
     reportingMode,
     sourceCatHandle, // Phase AA (AC-AA6): routing credentials
     declaredWorkMode,
+    taskHandoff?.taskId,
   );
 
   if (targetCats.length === 0) {

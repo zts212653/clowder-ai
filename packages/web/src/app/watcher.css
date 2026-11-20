@@ -91,6 +91,7 @@
 }
 @media (max-width: 640px) {
   .watcher-config-fields > div {
-    grid-template-columns: 80px minmax(0, 1fr);
+    grid-template-columns: minmax(0, 1fr);
+    gap: 6px;
   }
 }

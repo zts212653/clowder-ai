@@ -1,5 +1,6 @@
 import type { CompanionErrorCode } from '@clowder-ai/plugin-contract-beta21';
 import type { FastifyInstance } from 'fastify';
+import type { CompanionScenePut, CompanionSceneRead, CompanionSceneWrite } from '../scene/companion-scene-store.js';
 
 export class CompanionBridgeError extends Error {
   constructor(readonly code: CompanionErrorCode) {
@@ -9,6 +10,15 @@ export class CompanionBridgeError extends Error {
 function record(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new CompanionBridgeError('unavailable');
   return value as Record<string, unknown>;
+}
+function sceneRoute(catId: string, sceneId: string): string {
+  return `/api/concierge/companion-scene?${new URLSearchParams({ catId, sceneId })}`;
+}
+function settledScene<T>(statusCode: number, body: Record<string, unknown>, settled: number[]): T {
+  // The canonical route's settled bodies are already the scene result types.
+  if (settled.includes(statusCode)) return body as T;
+  if (statusCode === 401 || statusCode === 403) throw new CompanionBridgeError('permission_required');
+  throw new CompanionBridgeError(statusCode === 400 ? 'invalid_request' : 'unavailable');
 }
 
 /** Calls the installing Fastify Host itself through its ordinary session/route
@@ -51,6 +61,18 @@ export class CompanionOwnerClient {
     await this.authenticate();
     await this.options.assertCurrent();
     return this.sendResponse(path, method, payload);
+  }
+
+  /** F336 scene archive. Settled answers come back as data (only `not_found` may seed a
+   * scene); auth, invalid input and anything unexpected throw, which callers treat as error. */
+  async readCompanionScene(catId: string, sceneId: string): Promise<CompanionSceneRead> {
+    const { statusCode, body } = await this.requestResponse(sceneRoute(catId, sceneId));
+    return settledScene<CompanionSceneRead>(statusCode, body, [200, 503]);
+  }
+
+  async writeCompanionScene(catId: string, sceneId: string, write: CompanionSceneWrite): Promise<CompanionScenePut> {
+    const { statusCode, body } = await this.requestResponse(sceneRoute(catId, sceneId), 'PUT', write);
+    return settledScene<CompanionScenePut>(statusCode, body, [200, 409, 503]);
   }
 
   /** Cleanup may outlive a feature lease, but can only delete the Host-issued call

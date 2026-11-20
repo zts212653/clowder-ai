@@ -3,6 +3,7 @@ import { ActionSuccessorKeys } from '../../../../ball-custody/action-successor-k
 import {
   type ApprovedTaskContinuationInput,
   type ApprovedTaskContinuationResult,
+  continuationUserId,
   decideApprovedTaskContinuation,
   implementationUsedProposal,
 } from '../../../../ball-custody/approved-task-continuation.js';
@@ -40,7 +41,7 @@ async function readWatchedImplementationHistory(
   const records = await readContinuationValue('implementation_history', ActionSuccessorKeys.ALL, () =>
     session.mget(...detailKeys),
   );
-  const target = { tenantScope: input.actor.userId, subjectRef: `subject:task:${input.taskId}` };
+  const target = { tenantScope: continuationUserId(input), subjectRef: `subject:task:${input.taskId}` };
   const leases = records.map((raw, index) => parseApprovedTaskImplementationHistory(raw, target, detailKeys[index]));
   // Only a decoded, unrelated identity is skipped, including original bytes retained by recovery.
   return leases.filter((lease): lease is ApprovedTaskImplementationHistory => lease !== null);
@@ -55,7 +56,7 @@ export async function continueRedisApprovedTask(
   return runWithExclusiveRedisWatchSession<ApprovedTaskContinuationResult>(redis, proposalKey, async (session) => {
     const taskKey = TaskKeys.detail(input.taskId);
     const identityKey = ActionSuccessorKeys.identity({
-      tenantScope: input.actor.userId,
+      tenantScope: continuationUserId(input),
       subjectRef: `subject:task:${input.taskId}`,
       actionFamily: 'implement',
       successorSlot: 'implementer',
@@ -85,6 +86,8 @@ export async function continueRedisApprovedTask(
         createdBy: rawChild.createdBy ?? '',
         parentThreadId: rawChild.parentThreadId,
         createdFromProposalId: rawChild.createdFromProposalId,
+        approvedBy: rawChild.approvedBy,
+        approvedAt: rawChild.approvedAt ? Number(rawChild.approvedAt) : undefined,
         projectPath: rawChild.projectPath ?? '',
         deletedAt: rawChild.deletedAt && rawChild.deletedAt !== '0' ? Number(rawChild.deletedAt) : null,
       },

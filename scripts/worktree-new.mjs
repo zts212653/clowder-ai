@@ -50,6 +50,14 @@ function worktreeConfigEnabled(dir) {
   return git(dir, ['config', '--bool', 'extensions.worktreeConfig']).out.trim() === 'true';
 }
 
+function clearCopiedNativeMonitor(dir) {
+  // Git copies config.worktree from the source. Its built-in monitor opt-in
+  // belongs to that checkout. Shared Git policy and custom hooks apply as before.
+  const setting = git(dir, ['config', '--worktree', '--bool', '--get', 'core.fsmonitor']);
+  if (setting.ok && setting.out.trim() === 'true')
+    mustGit(dir, ['config', '--worktree', '--unset-all', 'core.fsmonitor'], 'clear inherited native fsmonitor');
+}
+
 /** Write catcafe.lifecycle.* for an existing worktree or clone. */
 export function declareLifecycle(dir, { owner, policy, ttlDays, now = Date.now(), origin }) {
   validateDeclaration({ owner, policy, ttlDays });
@@ -96,7 +104,10 @@ export function createWorktree({
     base,
     full,
     checkoutOptions,
-    afterCheckout: () => declare(path, { owner, policy, ttlDays, now, origin }),
+    afterCheckout: () => {
+      clearCopiedNativeMonitor(path);
+      declare(path, { owner, policy, ttlDays, now, origin });
+    },
   });
 }
 

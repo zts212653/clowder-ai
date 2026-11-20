@@ -17,6 +17,8 @@ export interface TaskContractContinuationV1 {
   targetCatIds: string[];
   contractDigest: string;
   approvalContractKind: 'legacy' | 'frozen';
+  /** Present only for the approval ingress, which has no home callback invocation. */
+  approval?: { ownerRevision: number; previousHandoffMessageRef: string | null };
   clientRequestId: string;
   issuedAt: number;
 }

@@ -319,3 +319,33 @@ test('a connected server that never replies cannot hang the PING child', async (
   assert.equal(code, 1);
   assert.match(stderr, /PING command failed.*ETIMEDOUT/);
 });
+
+test('private socket startup retries its missing address and binds every RDB-first control command', (t) => {
+  const f = fixture(t);
+  f.seedRdb();
+  const socket = '/tmp/new-private-redis.sock';
+  const result = f.run(
+    '--unixsocket /tmp/new-private-redis.sock',
+    'return 0',
+    pingScenario(`
+    if [ "$attempt" -eq 1 ]; then
+      echo 'Could not connect to Redis at /tmp/new-private-redis.sock: No such file or directory' >&2; return 1
+    fi
+    echo PONG
+  `),
+  );
+  assert.equal(result.status, 0, result.stderr);
+  const protocol = f.calls().filter((line) => line.startsWith('protocol'));
+  assert.ok(protocol.some((line) => line.includes(' dbsize')));
+  assert.ok(protocol.some((line) => line.includes(' config set appendonly yes')));
+  for (const line of protocol) assert.ok(line.includes(`-s ${socket}`), line);
+});
+
+test('private socket suspicious RDB boot sends protective shutdown only to its fixed address', (t) => {
+  const f = fixture(t, { dbsize: '0' });
+  f.seedRdb();
+  const result = f.run('--unixsocket /tmp/new-private-redis.sock');
+  assert.equal(result.status, 1);
+  assert.ok(f.calls().some((line) => line === 'protocol -e -s /tmp/new-private-redis.sock shutdown nosave'));
+  assert.doesNotMatch(f.calls().join('\n'), /protocol .* -p /);
+});

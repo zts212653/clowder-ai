@@ -22,8 +22,10 @@ export function claudeTokenEnvironment(credential?: CredentialEntry): Record<str
     throw new Error('claude_token_missing_or_expired');
   return { CLAUDE_CODE_OAUTH_TOKEN: credential.accessToken };
 }
-export function claudeExecutionAccountSnapshot(account: ClaudeExecutionAccountInput): ExecutionAccountSnapshot {
-  const credentialVersion = claudeQuotaCredentialVersion(account);
+export async function claudeExecutionAccountSnapshot(
+  account: ClaudeExecutionAccountInput,
+): Promise<ExecutionAccountSnapshot> {
+  const credentialVersion = await claudeQuotaCredentialVersion(account);
   return Object.freeze({
     accountRef: account.id,
     displayName: account.displayName ?? account.id,

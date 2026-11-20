@@ -50,7 +50,7 @@ test(
   async () => {
     const w = await watcherWorld();
     const config = new MemoryConciergeConfigStore();
-    await config.updateWatcherConfig('watcher-owner', 0, { scope: 'all', memberCatId: 'codex' });
+    await config.updateWatcherConfig('watcher-owner', 0, { enabled: true, scope: 'all', memberCatId: 'codex' });
     let sawFailure;
     const failed = new Promise((resolve) => {
       sawFailure = resolve;

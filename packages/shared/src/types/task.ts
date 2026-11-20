@@ -232,6 +232,8 @@ export interface TaskItem {
   /** Assignment timestamp fences unbound legacy callbacks minted before an owner change. */
   readonly ownerChangedAt?: number;
   readonly lastAppliedHandoffMessageRef?: string;
+  /** Completed ordinary approval, pinned to its persisted result and native assignment. */
+  readonly ordinaryFinalReport?: { readonly messageId: string; readonly handoffMessageId: string };
   readonly executionRef?: TaskExecutionRef | null;
   /** Derived at read time from the existing action/ball owner facts; stores must not persist this field. */
   readonly recovery?: TaskRecoveryProjection;

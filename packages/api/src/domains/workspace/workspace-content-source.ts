@@ -146,11 +146,19 @@ export class WorkspaceContentSourceService {
     readonly locator: WorkspaceContentLocatorV1;
     readonly expectedRevision: string;
   }): Promise<WorkspaceContentDescriptionV1 & { readonly text: string }> {
-    const read = await this.readStable(input, true);
+    const { bytes: _bytes, ...result } = await this.readTextSnapshot(input);
+    return result;
+  }
+
+  /** Some owners persist the original bytes as well as validating the UTF-8 source. */
+  async readTextSnapshot(
+    input: Parameters<WorkspaceContentSourceService['readText']>[0] & { readonly maxBytes?: number },
+  ): Promise<WorkspaceContentDescriptionV1 & { readonly text: string; readonly bytes: Buffer }> {
+    const read = await this.readStable(input, true, input.maxBytes);
     const description = this.describeRead(read);
     if (description.revision !== input.expectedRevision) throw new WorkspaceContentSourceError('revision_changed');
     if (description.kind !== 'text') throw new WorkspaceContentSourceError('unsupported_text');
-    return { ...description, text: decodeWorkspaceText(read.bytes) };
+    return { ...description, text: decodeWorkspaceText(read.bytes), bytes: read.bytes };
   }
 
   async describeMedia(input: {
@@ -342,6 +350,7 @@ export class WorkspaceContentSourceService {
   private async readStable(
     input: { readonly principal: WorkspaceContentPrincipalV1; readonly locator: WorkspaceContentLocatorV1 },
     collectBytes: true,
+    maxBytes?: number,
   ): Promise<StableFileRead & { readonly bytes: Buffer }>;
   private async readStable(
     input: { readonly principal: WorkspaceContentPrincipalV1; readonly locator: WorkspaceContentLocatorV1 },
@@ -350,6 +359,7 @@ export class WorkspaceContentSourceService {
   private async readStable(
     input: { readonly principal: WorkspaceContentPrincipalV1; readonly locator: WorkspaceContentLocatorV1 },
     collectBytes: boolean,
+    maxBytes = Infinity,
   ): Promise<StableFileRead> {
     this.assertPrincipal(input.principal);
     const resolved = await this.resolveLocator(input.locator);
@@ -372,7 +382,10 @@ export class WorkspaceContentSourceService {
         throw new WorkspaceContentSourceError('revision_changed');
       }
       const video = !collectBytes && guessMime(resolved.locator.path) === 'video/mp4';
-      const maximum = this.options.maxBytes ?? (video ? MAX_WORKSPACE_VIDEO_BYTES : MAX_WORKSPACE_COLLABORATION_BYTES);
+      const maximum = Math.min(
+        maxBytes,
+        this.options.maxBytes ?? (video ? MAX_WORKSPACE_VIDEO_BYTES : MAX_WORKSPACE_COLLABORATION_BYTES),
+      );
       if (!before.isFile()) throw new WorkspaceContentSourceError('access_denied');
       if (before.size < 0 || before.size > maximum) throw new WorkspaceContentSourceError('too_large');
       const result = await digestWorkspaceFile(handle, before.size, collectBytes);

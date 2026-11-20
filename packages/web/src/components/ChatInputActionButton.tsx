@@ -3,11 +3,14 @@
 import { useEffect } from 'react';
 import { useVoiceInput } from '@/hooks/useVoiceInput';
 import { ChatComposerActions } from './ChatComposerActions';
+import { ComposerMicrophonePicker } from './ComposerMicrophonePicker';
 import { ExpandableProse } from './content-overflow';
 import { LoadingIcon } from './icons/LoadingIcon';
 import { MicIcon } from './icons/MicIcon';
 import { SendIcon } from './icons/SendIcon';
 import { StopRecordingIcon } from './icons/StopRecordingIcon';
+import { microphoneCopy } from './microphone.shell-copy';
+import { useShellCopy } from './shell/shell-copy';
 
 interface ChatInputActionButtonProps {
   onTranscript: (text: string) => void;
@@ -23,6 +26,37 @@ interface ChatInputActionButtonProps {
   hasText: boolean;
   /** Which shell draws this. Only the new shell (v2) changes where the stop button sits; classic is the default. */
   presentation?: 'classic' | 'v2';
+}
+
+function VoiceInputError({
+  error,
+  microphoneIssue,
+}: Pick<ReturnType<typeof useVoiceInput>, 'error' | 'microphoneIssue'>) {
+  const t = useShellCopy(microphoneCopy);
+  const messages = {
+    'no-signal': t.noSignal,
+    'no-transcript': t.noTranscript,
+    'permission-denied': t.permissionDenied,
+    'device-unavailable': t.unavailable,
+    unsupported: t.unsupported,
+  };
+  const message = microphoneIssue ? messages[microphoneIssue.kind] : error;
+  if (!message) return null;
+
+  return (
+    <div
+      role="alert"
+      className="absolute bottom-full left-4 z-10 mb-1 w-fit max-w-[calc(100%-2rem)] rounded-lg bg-conn-red-bg px-3 py-1.5 text-xs leading-5 text-conn-red-text [overflow-wrap:anywhere]"
+    >
+      <strong className="font-medium">{message}</strong>
+      {microphoneIssue && 'deviceLabel' in microphoneIssue && (
+        <span className="block">
+          {microphoneIssue.deviceLabel ? `${t.inputDevice} · ${microphoneIssue.deviceLabel}` : t.unnamedInput}{' '}
+          {t.switchInput}
+        </span>
+      )}
+    </div>
+  );
 }
 
 /** Renders the action button states:
@@ -123,13 +157,12 @@ export function ChatInputActionButton({
           </div>
         </div>
       )}
-      {voice.error && (
-        <div className="absolute top-0 left-4 -mt-6 px-3 py-1 bg-conn-red-bg text-conn-red-text text-xs rounded-lg">
-          {voice.error}
-        </div>
-      )}
+      <VoiceInputError error={voice.error} microphoneIssue={voice.microphoneIssue} />
 
       {!isV2 && sideStop}
+      {!isV2 && !disabled && (hasText || hasActiveInvocation) && (
+        <ComposerMicrophonePicker presentation="classic" standalone disabled={voice.state !== 'idle'} />
+      )}
 
       {/* Primary action button priority chain */}
       {isV2 ? (
@@ -198,15 +231,19 @@ export function ChatInputActionButton({
           <SendIcon className="w-5 h-5" />
         </button>
       ) : hasActiveInvocation ? null : (
-        <button
-          onClick={voice.startRecording}
-          disabled={disabled}
-          className="p-3 rounded-xl text-cafe-muted hover:text-cafe-accent hover:bg-cafe-surface disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-          aria-label="Start voice input (⌥V)"
-          title="语音输入 (⌥V)"
-        >
-          <MicIcon className="w-5 h-5" />
-        </button>
+        <div className="flex shrink-0 items-center">
+          <button
+            type="button"
+            onClick={voice.startRecording}
+            disabled={disabled}
+            className="p-3 rounded-xl text-cafe-muted hover:text-cafe-accent hover:bg-cafe-surface disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+            aria-label="Start voice input (⌥V)"
+            title="语音输入 (⌥V)"
+          >
+            <MicIcon className="w-5 h-5" />
+          </button>
+          <ComposerMicrophonePicker disabled={disabled} presentation="classic" />
+        </div>
       )}
     </>
   );

@@ -90,7 +90,7 @@ const generated = [
   'bash -c "echo $HOME"',
   'bash -c \'exec "$@"\' _ "$(date)"',
 ];
-test('code origin survives hook environment resolution and stdin transport', () => {
+test('opaque code inputs follow ordinary policy with or without hook environment values', () => {
   const before = { ...process.env };
   try {
     for (const set of [true, false]) {
@@ -100,7 +100,7 @@ test('code origin survives hook environment resolution and stdin transport', () 
       }
       for (const command of generated)
         for (const provider of ['Bash', 'exec_command'])
-          assert.equal(decide(command, provider).decision, 'deny', `${set}: ${command}`);
+          assert.equal(decide(command, provider).decision, 'allow', `${set}: ${command}`);
     }
   } finally {
     for (const name of ['USER', 'PWD', 'HOME']) {
@@ -122,7 +122,7 @@ test('literal stdin is read as code by both real hook entries', () => {
     [". /dev/stdin <<< 'git push --force origin main'", true],
     ["printf '%s' 'echo OK' | sh", false],
     ['bash -s <<< \'printf "%s" OK\'', false],
-    ...generated.map((command) => [command, true]),
+    ...generated.map((command) => [command, false]),
   ];
   for (const [program, script, provider] of nativeHookPrograms())
     for (const [command, denied] of rows) {

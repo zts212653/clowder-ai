@@ -9,13 +9,14 @@ export function buildAgyNativePolicy(input: {
   workspaceRoot: string;
   autoApprove?: boolean;
   readOnly?: boolean;
+  watcher?: boolean;
   pluginServerName?: string;
   allowWorkspaceWrites?: boolean;
   interactiveApproval?: boolean;
 }) {
   const root = realpathSync(input.workspaceRoot);
   if (!lstatSync(root).isDirectory()) throw new Error('AGY workspace root must be a directory');
-  const member = input.pluginServerName !== undefined;
+  const member = input.pluginServerName !== undefined || input.watcher === true;
   const autoApprove = input.autoApprove === true && !input.readOnly && !member;
   const permissionMode: AgyNativePermissionMode = autoApprove ? 'always-proceed' : 'request-review';
   const reviewAllowsWrite =

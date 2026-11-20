@@ -111,6 +111,8 @@ export function serializeProposal(proposal: ThreadProposal): string[] {
   if (proposal.approvedTaskContract) fields.push('approvedTaskContract', JSON.stringify(proposal.approvedTaskContract));
   if (proposal.taskContractContinuation)
     fields.push('taskContractContinuation', JSON.stringify(proposal.taskContractContinuation));
+  if (proposal.taskStartOwnerRevision !== undefined)
+    fields.push('taskStartOwnerRevision', String(proposal.taskStartOwnerRevision));
   if (proposal.subjectTaskId) fields.push('subjectTaskId', proposal.subjectTaskId);
   if (proposal.subjectTaskTitle) fields.push('subjectTaskTitle', proposal.subjectTaskTitle);
   if (proposal.approvedDevelopmentScope)
@@ -140,6 +142,8 @@ export function hydrateProposal(data: Record<string, string>): ThreadProposal {
   hydrateProposalRevision(proposal, data);
   if (data.reportingMode) proposal.reportingMode = data.reportingMode as ReportingMode;
   if (data.declaredWorkMode) proposal.declaredWorkMode = data.declaredWorkMode as DeclaredWorkMode;
+  if (data.approvedChildPinned === 'true' || data.approvedChildPinned === 'false')
+    proposal.approvedChildPinned = data.approvedChildPinned === 'true';
   if (data.approvedBy) proposal.approvedBy = data.approvedBy;
   if (data.approvedAt) proposal.approvedAt = parseInt(data.approvedAt, 10);
   if (data.createdThreadId) proposal.createdThreadId = data.createdThreadId;
@@ -157,6 +161,12 @@ export function hydrateProposal(data: Record<string, string>): ThreadProposal {
       proposal.approvalContractInvalid = true;
   } catch {
     proposal.approvalContractInvalid = true;
+  }
+  if (data.taskStartOwnerRevision !== undefined) {
+    const revision = Number(data.taskStartOwnerRevision);
+    if (/^\d+$/.test(data.taskStartOwnerRevision) && Number.isSafeInteger(revision))
+      proposal.taskStartOwnerRevision = revision;
+    else proposal.approvalContractInvalid = true;
   }
   if (data.subjectTaskId) proposal.subjectTaskId = data.subjectTaskId;
   if (data.subjectTaskTitle) proposal.subjectTaskTitle = data.subjectTaskTitle;

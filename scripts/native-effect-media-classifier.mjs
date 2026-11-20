@@ -35,12 +35,16 @@ export function explicitCopyRoles(raw, cwd) {
   const sources = parsed.sources.map((path) => copyPath(path, cwd));
   const source = sources[0],
     destination = copyPath(parsed.destination, cwd);
-  if (!sources.every(Boolean) || !destination) return null;
+  if (!destination) return { source, unresolved: true };
   const targets = [destination];
+  let unresolved = false;
   try {
     const directory = statSync(destination).isDirectory();
     if (sources.length > 1 && !directory) return null;
-    if (directory) targets.push(...sources.map((input) => join(destination, basename(input))));
+    if (directory) {
+      unresolved = sources.some((input) => !input);
+      targets.push(...sources.filter(Boolean).map((input) => join(destination, basename(input))));
+    }
   } catch (error) {
     if (sources.length > 1) return null;
     if (error.code !== 'ENOENT') return { source, destination, complete: false };
@@ -49,6 +53,7 @@ export function explicitCopyRoles(raw, cwd) {
   return {
     source,
     destination,
+    unresolved,
     recursive,
     complete:
       physical.every(Boolean) &&

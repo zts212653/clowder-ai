@@ -82,7 +82,7 @@ describe('F297 managed command projection ↔ cancel path parity', () => {
       ];
 
       for (const [label, task, expectedProjected] of cases) {
-        const projected = listManagedCommandExecutions([task]).length === 1;
+        const projected = (await listManagedCommandExecutions([task])).length === 1;
         assert.equal(projected, expectedProjected, `${branch}/projection: ${label}`);
         if (projected) {
           // 结构性不变量：投影出来的执行，取消路径必须认它。
@@ -107,7 +107,7 @@ describe('F297 managed command projection ↔ cancel path parity', () => {
     assert.equal(isPendingHoldBallTask(malformed), false, 'precondition: the cancel path refuses this task');
     assert.equal(isCancelableHoldBallTask(malformed), false);
     assert.equal(
-      listManagedCommandExecutions([malformed]).length,
+      (await listManagedCommandExecutions([malformed])).length,
       0,
       'the projection must not claim an execution the cancel path refuses',
     );
@@ -128,7 +128,7 @@ describe('F297 managed command projection ↔ cancel path parity', () => {
     assert.equal(isPendingHoldBallTask(task), false, 'a disabled carrier is not pending');
     assert.equal(isCancelableHoldBallTask(task), false);
     assert.equal(
-      listManagedCommandExecutions([task]).length,
+      (await listManagedCommandExecutions([task])).length,
       0,
       'the projection must not claim an execution the cancel path refuses',
     );
@@ -146,7 +146,7 @@ describe('F297 managed command projection ↔ cancel path parity', () => {
     const mine = activeTask();
 
     // 层 1：枚举器 principal-blind——谁调都返回，userId 如实携带（消费方判定的输入）。
-    const all = listManagedCommandExecutions([mine]);
+    const all = await listManagedCommandExecutions([mine]);
     assert.equal(all.length, 1);
     assert.equal(all[0].userId, 'alice');
 
@@ -156,9 +156,9 @@ describe('F297 managed command projection ↔ cancel path parity', () => {
       dynamicTaskStore: { getAll: () => [mine] },
       log: { info: () => {}, warn: () => {} },
     });
-    assert.equal(service.listManagedCommandExecutions('alice').length, 1);
+    assert.equal((await service.listManagedCommandExecutions('alice')).length, 1);
     assert.equal(
-      service.listManagedCommandExecutions('mallory').length,
+      (await service.listManagedCommandExecutions('mallory')).length,
       0,
       'cross-user managed commands must not leak into another user’s sidebar qualification',
     );

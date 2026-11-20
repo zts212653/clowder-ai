@@ -128,6 +128,22 @@ describe('ConciergeSettingsContent behavior controls', () => {
     expect(container.textContent).not.toContain('砚砚专属皮肤。（默认）');
   });
 
+  it('offers the living cat as a skin and saves it like any other', async () => {
+    await act(async () => {
+      root.render(<ConciergeSettingsContent />);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    const living = container.querySelector<HTMLInputElement>('input[name="skin"][value="xianxian-living"]');
+    expect(living).not.toBeNull();
+    expect(living?.checked).toBe(false);
+    await act(async () => {
+      living?.click();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    const put = mockApiFetch.mock.calls.find(([, init]) => (init as RequestInit | undefined)?.method === 'PUT');
+    expect(JSON.parse(String((put?.[1] as RequestInit).body))).toEqual({ skin: 'xianxian-living' });
+  });
+
   it('keeps the companion entry name fixed while leaving the partner and tone configurable', async () => {
     await act(async () => {
       root.render(<ConciergeSettingsContent />);

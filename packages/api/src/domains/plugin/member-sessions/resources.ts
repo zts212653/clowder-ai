@@ -36,16 +36,16 @@ function unavailable(ref: string, metadata: AccountConfig | undefined, reason: s
       }
     : undefined;
 }
-function accountOption(
+async function accountOption(
   deps: ResourceServices,
   frame: Discovery,
   ref: string,
   metadata: AccountConfig | undefined,
   nativeAccount?: RuntimeProviderProfile,
-): Account | undefined {
+): Promise<Account | undefined> {
   if (!frame.supported) return unavailable(ref, metadata, 'member_native_carrier_unavailable');
   try {
-    const binding = (deps.freezeAccount ?? freezeExecutionAccountBinding)({
+    const binding = await (deps.freezeAccount ?? freezeExecutionAccountBinding)({
       catId: frame.catId,
       catConfig: frame.config,
       model: frame.config.defaultModel,
@@ -90,7 +90,7 @@ async function accountOptions(deps: ResourceServices, frame: Discovery): Promise
     try {
       const native = await frame.service.resolveScopedNativeAccount?.({ workingDirectory: deps.projectRoot });
       if (!native) return [];
-      const option = accountOption(
+      const option = await accountOption(
         deps,
         { ...frame, defaultAccountRef: frame.defaultAccountRef ?? native.id },
         native.id,
@@ -121,7 +121,7 @@ async function accountOptions(deps: ResourceServices, frame: Discovery): Promise
               accountRef: ref,
             })
           : undefined;
-        const option = accountOption(deps, frame, ref, metadata, native ?? undefined);
+        const option = await accountOption(deps, frame, ref, metadata, native ?? undefined);
         return option ? [option] : [];
       } catch {
         const option = unavailable(ref, metadata, 'member_account_unavailable');

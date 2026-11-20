@@ -11,6 +11,21 @@ import { TtsRegistry } from '../dist/domains/cats/services/tts/TtsRegistry.js';
 import { securityHeadersPlugin } from '../dist/infrastructure/security-headers.js';
 import { ttsRoutes } from '../dist/routes/tts.js';
 
+function pcmWav(samples) {
+  const header = Buffer.from(
+    '524946462400000057415645666d74201000000001000100c05d000080bb0000020010006461746100000000',
+    'hex',
+  );
+  const audio = Buffer.alloc(header.length + samples.length * 2);
+  header.copy(audio);
+  audio.writeUInt32LE(audio.length - 8, 4);
+  audio.writeUInt32LE(samples.length * 2, 40);
+  samples.forEach((sample, index) => {
+    audio.writeInt16LE(sample, 44 + index * 2);
+  });
+  return audio;
+}
+
 describe('F279 TTS listen routes', () => {
   let app;
   let appAddress;
@@ -18,6 +33,8 @@ describe('F279 TTS listen routes', () => {
   let synthesisRequests;
   let streamRequests;
   let tempDir;
+  let readAloudTailGate;
+  let nativeTailGate;
 
   before(async () => {
     tempDir = await mkdtemp(path.join(tmpdir(), 'tts-listen-routes-'));
@@ -37,6 +54,16 @@ describe('F279 TTS listen routes', () => {
       },
       stream: async function* (request) {
         streamRequests.push(request);
+        if (request.text === '分块先响。' || request.text === '首块无声。') {
+          const first = new Array(2400).fill(request.text === '首块无声。' ? 0 : 8192);
+          const second = new Array(2400).fill(4096);
+          yield { type: 'chunk', audio: pcmWav(first), format: 'wav', isFinalChunk: false };
+          if (request.text === '分块先响。') await nativeTailGate;
+          yield { type: 'chunk', audio: pcmWav(second), format: 'wav', isFinalChunk: true };
+          yield { type: 'final', result: { audio: pcmWav([...first, ...second]), format: 'wav' } };
+          return;
+        }
+        if (request.text === '第二句仍在合成。') await readAloudTailGate;
         yield { type: 'chunk', audio: Buffer.from('chunk-audio'), format: 'wav', durationSec: 0.5, isFinalChunk: true };
         yield {
           type: 'final',
@@ -83,6 +110,60 @@ describe('F279 TTS listen routes', () => {
     );
   });
 
+  it('returns opted-in PCM chunks before the complete read-aloud asset', async () => {
+    const tail = Promise.withResolvers();
+    nativeTailGate = tail.promise;
+    let reader;
+    try {
+      const response = await fetch(`${appAddress}/api/tts/listen/stream`, {
+        method: 'POST',
+        headers: { 'x-cat-cafe-user': 'operator', 'content-type': 'application/json' },
+        body: JSON.stringify({ text: '分块先响。', purpose: 'read-aloud', streamPcm: true }),
+        signal: AbortSignal.timeout(1500),
+      });
+      assert.equal(response.status, 200);
+      reader = response.body.getReader();
+      const first = new TextDecoder().decode((await reader.read()).value);
+      const chunk = JSON.parse(first.split('\n\n')[0].slice(6));
+      assert.equal(chunk.type, 'chunk');
+      assert.equal(chunk.chunkIndex, 0);
+      tail.resolve();
+      let rest = '';
+      const decoder = new TextDecoder();
+      for (;;) {
+        const item = await reader.read();
+        rest += decoder.decode(item.value, { stream: !item.done });
+        if (item.done) break;
+      }
+      assert.match(rest, /"chunkIndex":1/);
+      assert.match(rest, /"pcmChunkCount":2/);
+    } finally {
+      tail.resolve();
+      await reader?.cancel();
+      nativeTailGate = undefined;
+    }
+  });
+
+  it('uses the trimmed complete waveform when the read-aloud prefix contains no speech', async () => {
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/tts/listen/stream',
+      headers: { 'x-cat-cafe-user': 'operator', 'content-type': 'application/json' },
+      payload: { text: '首块无声。', purpose: 'read-aloud', streamPcm: true },
+    });
+    const events = response.body
+      .trim()
+      .split('\n\n')
+      .map((event) => JSON.parse(event.slice(6)));
+    assert.equal(response.statusCode, 200);
+    assert.deepEqual(
+      events.map((event) => event.type),
+      ['asset'],
+    );
+    assert.equal(events[0].pcmChunkCount, undefined);
+    assert.equal(events[0].durationSec, 0.12);
+  });
+
   it('accepts listen-purpose synthesis without putting playback rate into the asset fingerprint', async () => {
     const response = await app.inject({
       method: 'POST',
@@ -96,6 +177,51 @@ describe('F279 TTS listen routes', () => {
     assert.equal(response.json().durationSec, 1);
     assert.equal(typeof response.json().synthesisMs, 'number');
     assert.equal(streamRequests.at(-1).speed, 1);
+  });
+
+  it('makes the first complete read-aloud sentence available while the rest is still synthesizing', async () => {
+    const before = streamRequests.length;
+    const { promise, resolve } = Promise.withResolvers();
+    readAloudTailGate = promise;
+    let reader;
+    try {
+      const response = await fetch(`${appAddress}/api/tts/listen/stream`, {
+        method: 'POST',
+        headers: { 'x-cat-cafe-user': 'operator', 'content-type': 'application/json' },
+        body: JSON.stringify({ text: '第一句可以播放。第二句仍在合成。', catId: 'opus', purpose: 'read-aloud' }),
+        signal: AbortSignal.timeout(5000),
+      });
+      assert.equal(response.status, 200);
+      reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffered = '';
+      while (!buffered.includes('\n\n')) {
+        const { done, value } = await reader.read();
+        assert.equal(done, false);
+        buffered += decoder.decode(value, { stream: true });
+      }
+      const event = JSON.parse(buffered.split('\n\n')[0].slice(6));
+      assert.equal(event.type, 'asset');
+      assert.match(event.audioUrl, /^\/api\/tts\/audio\//);
+      assert.equal(streamRequests[before].text, '第一句可以播放。');
+      assert.equal(
+        (await fetch(`${appAddress}${event.audioUrl}`, { headers: { 'x-cat-cafe-user': 'operator' } })).ok,
+        true,
+      );
+      resolve();
+      let tail = buffered.slice(buffered.indexOf('\n\n') + 2);
+      for (;;) {
+        const { done, value } = await reader.read();
+        tail += decoder.decode(value, { stream: !done });
+        if (done) break;
+      }
+      assert.match(tail, /"type":"asset"/);
+      assert.equal(streamRequests[before + 1].text, '第二句仍在合成。');
+    } finally {
+      resolve();
+      readAloudTailGate = undefined;
+      await reader?.cancel();
+    }
   });
 
   it('streams a cold listen sentence immediately, persists the complete asset, then serves the cache', async () => {

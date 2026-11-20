@@ -48,7 +48,7 @@ export function createMemberRuntime(deps: {
       await scope.assertCurrent();
       if (!workspace.workingDirectory) throw new Error('member_thread_workspace_unavailable');
       const stored = 'schema' in input && input.schema === 'host.member-session.v1' ? input.runtime : undefined;
-      const binding = freezeExecutionAccountBinding({
+      const binding = await freezeExecutionAccountBinding({
         catId: input.catId,
         catConfig: config,
         model: config.defaultModel,

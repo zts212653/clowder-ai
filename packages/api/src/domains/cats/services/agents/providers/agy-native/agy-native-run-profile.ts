@@ -20,6 +20,7 @@ function directory(path: string): void {
 export function createAgyNativeRunProfile(
   profileHome: string,
   credentialHome?: string,
+  isolateAppData = false,
 ): {
   readonly home: string;
   readonly geminiDir: string;
@@ -47,7 +48,10 @@ export function createAgyNativeRunProfile(
   return {
     home,
     geminiDir,
-    appDataDir: relative(geminiDir, credentialHome ? prepareAgyAccountDataView(account, credentialHome) : data),
+    appDataDir: relative(
+      geminiDir,
+      credentialHome || isolateAppData ? prepareAgyAccountDataView(account, credentialHome) : data,
+    ),
     dispose: () => rmSync(home, { recursive: true, force: true }),
   };
 }

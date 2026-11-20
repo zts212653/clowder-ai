@@ -100,6 +100,16 @@ test('raw main survives stderr disconnection before its first stage and preserve
   assert.equal((await f.terminal()).destroyed, true);
 });
 
+test('raw main flushes the scene on request before the API stops it, then keeps serving', async (t) => {
+  const f = await start(t);
+  await f.boot();
+  await f.open();
+  assert.equal((await f.request('flush-scene')).ok, true);
+  assert.equal((await f.request('poll')).value, 'visible');
+  assert.equal((await f.request('close')).ok, true);
+  assert.equal((await f.terminal()).destroyed, true);
+});
+
 test('raw main finishes an unexpected window close after the diagnostic reader disappears', async (t) => {
   const f = await start(t);
   await f.boot();

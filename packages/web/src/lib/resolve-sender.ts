@@ -43,6 +43,8 @@ export interface SenderMeta {
   initial?: string;
   icon?: ConnectorIconSpec;
   fallbackIcon?: string;
+  /** Owner-only avatar lookup by immutable round, never by today's watcher configuration. */
+  watcherRoundId?: string;
 }
 
 export interface MessageSenderIdentity {
@@ -95,6 +97,12 @@ export function resolveMessageSender(
         ? undefined
         : (definition?.icon ?? (source?.icon ? undefined : { type: 'svg', iconId: 'robot' })),
     ...(!externalActorName && source?.icon ? { fallbackIcon: source.icon } : {}),
+    ...(from?.kind === 'system' &&
+    from.service === 'watcher-panel' &&
+    source?.connector === 'watcher-panel' &&
+    typeof source.meta?.roundId === 'string'
+      ? { watcherRoundId: source.meta.roundId }
+      : {}),
   };
 }
 

@@ -10,6 +10,7 @@ import { RedisSessionChainStore } from '../dist/domains/cats/services/stores/red
 import { RedisThreadStore } from '../dist/domains/cats/services/stores/redis/RedisThreadStore.js';
 import { RedisTurnExecutionStore } from '../dist/domains/cats/services/stores/redis/RedisTurnExecutionStore.js';
 import { RedisConciergeConfigStore } from '../dist/domains/concierge/ConciergeConfigStore.js';
+import { RedisWatcherPanelLedger } from '../dist/domains/concierge/watcher/panel/watcher-panel-ledger.js';
 import { readWatcherOutputFence } from '../dist/domains/concierge/watcher/watcher-output-fence.js';
 import { createSuggestionIntegration } from '../dist/domains/suggestions/composition.js';
 import { clearAuthTestNamespace, createAuthTestNamespace } from './helpers/redis-auth-namespace.js';
@@ -30,6 +31,69 @@ after(async () => {
 });
 const options = { skip: redisIsolationSkipReason(process.env.REDIS_URL) };
 
+test('formal routing and skipped opportunities survive a new store instance without expiry', options, async () => {
+  const userId = 'formal-routing-owner';
+  const configs = new RedisConciergeConfigStore(redis);
+  const routing = {
+    primary: { catId: 'codex', accountRef: 'owned-account' },
+    whenSameFamily: { mode: 'member', member: { catId: 'opus' } },
+    maxConcurrentRuns: 4,
+  };
+  const saved = await configs.updateWatcherConfig(userId, 0, { enabled: true, routing }, 37);
+  const reopened = new RedisConciergeConfigStore(redis);
+  assert.deepEqual((await reopened.readWatcherConfig(userId)).routing, routing);
+  assert.equal(saved.startedAfterSequence, 37);
+  assert.equal(saved.memberCatId, 'codex');
+  assert.equal(saved.scope, 'all');
+  assert.equal(await reopened.updateWatcherConfig(userId, 0, { routing }), null);
+  const threads = new RedisThreadStore(redis),
+    messages = new RedisMessageStore(redis);
+  const thread = await threads.create(userId);
+  const fence = await readWatcherOutputFence(
+    { configs, threads, labels: { list: async () => [] } },
+    userId,
+    thread.id,
+    'opus',
+  );
+  assert.ok(fence);
+  await reopened.updateWatcherConfig(userId, 1, { routing: { ...routing, whenSameFamily: { mode: 'skip' } } });
+  await assert.rejects(
+    messages.append({
+      userId,
+      threadId: thread.id,
+      from: { kind: 'system', service: 'watcher-panel' },
+      content: 'outdated choice',
+      mentions: [],
+      timestamp: Date.now(),
+      watcherOutputFence: fence,
+    }),
+    /watcher_output_control_changed/,
+  );
+  assert.deepEqual(await messages.getByThread(thread.id), []);
+  const round = {
+    v: 1,
+    roundId: 'wpr:formal-skip',
+    userId,
+    threadId: thread.id,
+    sourceInvocationId: 'formal-source',
+    sourceSettledSequence: 38,
+    configRevision: 2,
+    workerCatId: 'codex',
+    cutoffMessageId: 'cutoff',
+    createdAt: 100,
+    updatedAt: 100,
+    status: 'completed',
+    quiet: 'same_family',
+    guidanceDigest: '',
+    members: [],
+    delivery: { skipped: 'quiet' },
+  };
+  await new RedisWatcherPanelLedger(redis).save(round);
+  assert.deepEqual(await new RedisWatcherPanelLedger(redis).get(round.roundId), round);
+  for (const key of await redis.keys(`${namespace}*`))
+    assert.equal(await redis.ttl(key.slice(namespace.length)), -1, key);
+});
+
 test(
   'selected scope and per-thread choices persist, and scope changes fence already prepared output',
   options,
@@ -40,9 +104,9 @@ test(
     const userId = 'selected-scope-owner',
       thread = await threads.create(userId);
     const owners = { configs, threads, labels: { list: async () => [] } };
-    assert.equal((await configs.readWatcherConfig(userId)).scope, 'selected');
+    assert.equal((await configs.readWatcherConfig(userId)).scope, 'all');
     assert.equal(await readWatcherOutputFence(owners, userId, thread.id, 'codex61-sol'), null);
-    await configs.updateWatcherConfig(userId, 0, { scope: 'all', memberCatId: 'codex' });
+    await configs.updateWatcherConfig(userId, 0, { enabled: true, scope: 'all', memberCatId: 'codex' });
     const old = await readWatcherOutputFence(owners, userId, thread.id, 'codex');
     assert.ok(old);
     await configs.updateWatcherConfig(userId, 1, { scope: 'selected' });

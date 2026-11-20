@@ -12,6 +12,7 @@ import { createReadStream } from 'node:fs';
 import { stat as fsStat, mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import type { ITtsProvider, TtsStreamEvent, TtsSynthesizeRequest } from '@cat-cafe/shared';
+import { parsePcm16Wav } from '@cat-cafe/shared';
 import type { FastifyInstance, FastifyPluginOptions, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { getCatVoiceOptions } from '../config/cat-voice-options.js';
@@ -26,16 +27,18 @@ import {
 import { DocumentCacheRunManager } from '../domains/cats/services/tts/DocumentCacheRunManager.js';
 import type { DocumentListenRepository } from '../domains/cats/services/tts/DocumentListenRepository.js';
 import {
+  type IndexedListenChunk,
   type ListenAsset,
   ListenAssetService,
-  type ListenSynthesisOptions,
+  type PreparedListenSynthesis,
 } from '../domains/cats/services/tts/ListenAssetService.js';
+import { pcm16WavDurationSec, trimAudiblePcm16Prefix } from '../domains/cats/services/tts/listen-audio-postprocess.js';
 import {
   independentAudioHash,
   referenceAudioCacheIdentity,
 } from '../domains/cats/services/tts/reference-audio-cache.js';
 import { ttsUnavailableResponse } from '../domains/cats/services/tts/TtsCacheIdentityError.js';
-import { chunkText } from '../domains/cats/services/tts/TtsChunker.js';
+import { chunkStaticTtsText, chunkText } from '../domains/cats/services/tts/TtsChunker.js';
 import type { TtsRegistry } from '../domains/cats/services/tts/TtsRegistry.js';
 import { canReuseVoiceAsset, writeAssetVoiceReceipt } from '../domains/cats/services/tts/tts-asset-provenance.js';
 import { getVoiceBlockSynthesizer } from '../domains/cats/services/tts/VoiceBlockSynthesizer.js';
@@ -51,6 +54,20 @@ const synthesizeSchema = z.object({
   speed: z.number().min(0.5).max(2.0).optional(),
   purpose: z.literal('listen').optional(),
 });
+
+const listenStreamSchema = synthesizeSchema.extend({
+  purpose: z.enum(['listen', 'read-aloud']).optional(),
+  streamPcm: z.literal(true).optional(),
+});
+
+const sentenceSegmenter = new Intl.Segmenter(['zh', 'en'], { granularity: 'sentence' });
+
+function readAloudSegments(text: string): string[] {
+  const trimmed = text.trim();
+  const first = sentenceSegmenter.segment(trimmed).containing(0)?.segment ?? trimmed;
+  // Start with a complete sentence, then reuse the existing bounded TTS packing.
+  return [...chunkStaticTtsText(first), ...chunkStaticTtsText(trimmed.slice(first.length))];
+}
 
 /** Strict validation for audio download filename: {64-hex}.{wav|mp3} */
 const AUDIO_FILENAME_RE = /^[0-9a-f]{64}\.(wav|mp3)$/;
@@ -117,8 +134,72 @@ function isOpenTtsStream(reply: FastifyReply): boolean {
   return !reply.raw.destroyed && !reply.raw.writableEnded;
 }
 
-function sendListenAsset(reply: FastifyReply, asset: ListenAsset): void {
-  if (isOpenTtsStream(reply)) sendListenEvent(reply, { type: 'asset', ...asset });
+function sendListenAsset(reply: FastifyReply, asset: ListenAsset, pcmChunkCount = 0): void {
+  if (isOpenTtsStream(reply))
+    sendListenEvent(reply, { type: 'asset', ...asset, ...(pcmChunkCount ? { pcmChunkCount } : {}) });
+}
+
+function sendWorkspaceListenChunk(reply: FastifyReply, chunk: IndexedListenChunk): void {
+  if (!isOpenTtsStream(reply)) return;
+  sendListenEvent(reply, {
+    type: 'chunk',
+    audioBase64: Buffer.from(chunk.audio).toString('base64'),
+    format: chunk.format,
+    durationSec: chunk.durationSec,
+    isFinalChunk: chunk.isFinalChunk,
+    voiceSelection: chunk.voiceSelection,
+  });
+}
+
+function readablePcmSampleRate(event: IndexedListenChunk): number | undefined {
+  const format = event.format === 'wav' ? parsePcm16Wav(event.audio) : null;
+  if (format?.channels === 1 && format.blockAlign === 2 && format.dataSize > 0) return format.sampleRate;
+}
+
+function readAloudPcmChunks(reply: FastifyReply, voice: VoiceSelectionSequence, needsReference: boolean) {
+  let count = 0;
+  let sampleRate: number | undefined;
+  let forwarding = true;
+  let failure: unknown;
+  return {
+    onChunk(event: IndexedListenChunk) {
+      if (!forwarding || !isOpenTtsStream(reply)) return;
+      const rate = readablePcmSampleRate(event);
+      const verifiedVoice = !needsReference || event.voiceSelection?.referenceStatus === 'sent';
+      // A late subscriber in a shared flight is missing the audio prefix.
+      if (!rate || (sampleRate !== undefined && rate !== sampleRate) || !verifiedVoice || event.chunkIndex !== count) {
+        forwarding = false;
+        if (count) failure = new Error('Read-aloud PCM became unavailable mid-sentence');
+        return;
+      }
+      const audio = count === 0 ? trimAudiblePcm16Prefix(event.audio) : event.audio;
+      if (!audio) {
+        forwarding = false;
+        return;
+      }
+      try {
+        if (event.voiceSelection) voice.observe(event.voiceSelection);
+      } catch (error) {
+        forwarding = false;
+        failure = error;
+        return;
+      }
+      sampleRate = rate;
+      count++;
+      sendListenEvent(reply, {
+        type: 'chunk',
+        audioBase64: Buffer.from(audio).toString('base64'),
+        format: event.format,
+        durationSec: pcm16WavDurationSec(audio),
+        isFinalChunk: event.isFinalChunk,
+        chunkIndex: event.chunkIndex,
+      });
+    },
+    finish() {
+      if (failure) throw failure;
+      return count;
+    },
+  };
 }
 
 function logListenAsset(request: FastifyRequest, asset: ListenAsset): void {
@@ -156,34 +237,36 @@ function reportListenStreamFailure(
   }
 }
 
-async function streamListenAsset(options: {
+async function streamListenAssets(options: {
   request: FastifyRequest;
   reply: FastifyReply;
   assets: ListenAssetService;
-  text: string;
-  synthesis: ListenSynthesisOptions;
+  segments: string[];
+  preparedSynthesis: PreparedListenSynthesis;
+  readAloud: boolean;
+  streamPcm: boolean;
 }): Promise<void> {
   const controller = new AbortController();
   const abortOnClose = () => controller.abort(new Error('Listen client disconnected'));
   options.reply.raw.once('close', abortOnClose);
+  const voiceSequence = new VoiceSelectionSequence();
   try {
-    const asset = await options.assets.getOrCreate(options.text, {
-      synthesis: options.synthesis,
-      signal: controller.signal,
-      onChunk: (event) => {
-        if (!isOpenTtsStream(options.reply)) return;
-        sendListenEvent(options.reply, {
-          type: 'chunk',
-          audioBase64: Buffer.from(event.audio).toString('base64'),
-          format: event.format,
-          durationSec: event.durationSec,
-          isFinalChunk: event.isFinalChunk,
-          voiceSelection: event.voiceSelection,
-        });
-      },
-    });
-    sendListenAsset(options.reply, asset);
-    logListenAsset(options.request, asset);
+    for (const text of options.segments) {
+      if (!isOpenTtsStream(options.reply)) break;
+      const chunks = options.streamPcm
+        ? readAloudPcmChunks(options.reply, voiceSequence, !!options.preparedSynthesis.request.refAudio)
+        : undefined;
+      const asset = await options.assets.getOrCreate(text, {
+        preparedSynthesis: options.preparedSynthesis,
+        signal: controller.signal,
+        onChunk: options.readAloud ? undefined : (event) => sendWorkspaceListenChunk(options.reply, event),
+        onEarlyChunk: chunks?.onChunk,
+      });
+      const pcmChunkCount = chunks?.finish() ?? 0;
+      if (options.readAloud && asset.voiceSelection) voiceSequence.observe(asset.voiceSelection);
+      sendListenAsset(options.reply, asset, pcmChunkCount);
+      logListenAsset(options.request, asset);
+    }
   } catch (error) {
     reportListenStreamFailure(options.request, options.reply, controller, error);
   } finally {
@@ -201,24 +284,40 @@ async function handleListenStream(
     await reply.status(401).send({ error: 'Identity required' });
     return;
   }
-  const parsed = synthesizeSchema.safeParse(request.body);
+  const parsed = listenStreamSchema.safeParse(request.body);
   if (!parsed.success) {
     await reply.status(400).send({ error: 'Invalid request', details: parsed.error.issues });
     return;
   }
 
-  const { text, ...synthesis } = parsed.data;
+  const { text, purpose, streamPcm, ...synthesis } = parsed.data;
+  const readAloud = purpose === 'read-aloud';
+  const segments = readAloud ? readAloudSegments(text) : [text];
+  if (segments.length === 0) {
+    await reply.status(400).send({ error: 'No text to synthesize' });
+    return;
+  }
+  let preparedSynthesis: PreparedListenSynthesis;
   try {
     // Resolve before sending SSE headers so an unavailable provider remains a
     // regular API failure instead of a late stream error.
-    await options.assets.getSynthesisFingerprint(synthesis);
+    preparedSynthesis = await options.assets.prepareSynthesis(synthesis);
   } catch (error) {
     await reply.status(503).send(ttsUnavailableResponse(error));
     return;
   }
 
   startTtsEventStream(reply);
-  await streamListenAsset({ request, reply, assets: options.assets, text, synthesis });
+  if (readAloud && streamPcm) reply.raw.flushHeaders();
+  await streamListenAssets({
+    request,
+    reply,
+    assets: options.assets,
+    segments,
+    preparedSynthesis,
+    readAloud,
+    streamPcm: readAloud && streamPcm === true,
+  });
 }
 
 export interface TtsRouteOptions extends FastifyPluginOptions {

@@ -17,6 +17,7 @@ import { ApprovalIngress } from '../domains/approval-hub/ApprovalIngress.js';
 import type { InvocationRegistry } from '../domains/cats/services/agents/invocation/InvocationRegistry.js';
 import type { IMessageStore } from '../domains/cats/services/stores/ports/MessageStore.js';
 import type { IProposalStore } from '../domains/cats/services/stores/ports/ProposalStore.js';
+import { isOrdinaryImplementTask } from '../domains/cats/services/stores/ports/TaskStoreContract.js';
 import type { IThreadStore } from '../domains/cats/services/stores/ports/ThreadStore.js';
 import type { SocketManager } from '../infrastructure/websocket/index.js';
 import { migrateStoredProjectPath, validateNewProjectPath } from '../utils/persistent-project-path.js';
@@ -280,6 +281,20 @@ export function registerCallbackProposeThreadRoutes(app: FastifyInstance, deps: 
       proposalId = generateProposalId();
     }
 
+    const task = explicitTask.task;
+    const taskStartOwnerRevision =
+      task &&
+      !revisedProposal &&
+      finalWorkMode === 'subtask' &&
+      finalReportingMode === 'final-only' &&
+      task.ownerCatId === record.catId &&
+      task.userId === record.userId &&
+      task.threadId === record.threadId &&
+      resolvedParentThreadId === task.threadId &&
+      task.status !== 'done' &&
+      isOrdinaryImplementTask(task)
+        ? (task.ownerRevision ?? 0)
+        : undefined;
     let proposal: ThreadProposal;
     try {
       proposal = await proposalStore.create({
@@ -306,6 +321,7 @@ export function registerCallbackProposeThreadRoutes(app: FastifyInstance, deps: 
         reportingMode: finalReportingMode,
         ...(finalWorkMode ? { declaredWorkMode: finalWorkMode } : {}),
         ...taskBinding,
+        ...(taskStartOwnerRevision !== undefined ? { taskStartOwnerRevision } : {}),
       });
     } catch (err) {
       // Critical: if we reserved a dedup key but failed to create the proposal it points at,

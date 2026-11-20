@@ -1,65 +1,10 @@
+import { parsePcm16Wav } from '@cat-cafe/shared';
+
 export const LISTEN_AUDIO_CACHE_VERSION = 'listen-continuity-v1';
 
 const DEFAULT_THRESHOLD_DB = -40;
 const DEFAULT_WINDOW_MS = 10;
 const DEFAULT_PREROLL_MS = 20;
-
-interface Pcm16WavLayout {
-  blockAlign: number;
-  channels: number;
-  dataOffset: number;
-  dataSize: number;
-  dataSizeOffset: number;
-  sampleRate: number;
-}
-
-function ascii(bytes: Uint8Array, offset: number, length: number): string {
-  return String.fromCharCode(...bytes.subarray(offset, offset + length));
-}
-
-function parsePcm16Wav(audio: Uint8Array): Pcm16WavLayout | null {
-  if (audio.byteLength < 44 || ascii(audio, 0, 4) !== 'RIFF' || ascii(audio, 8, 4) !== 'WAVE') return null;
-  const view = new DataView(audio.buffer, audio.byteOffset, audio.byteLength);
-  let channels: number | undefined;
-  let sampleRate: number | undefined;
-  let blockAlign: number | undefined;
-  let pcm16 = false;
-
-  for (let offset = 12; offset + 8 <= audio.byteLength; ) {
-    const chunkId = ascii(audio, offset, 4);
-    const chunkSize = view.getUint32(offset + 4, true);
-    const chunkDataOffset = offset + 8;
-    const chunkEnd = chunkDataOffset + chunkSize;
-    if (chunkEnd > audio.byteLength) return null;
-
-    if (chunkId === 'fmt ' && chunkSize >= 16) {
-      pcm16 = view.getUint16(chunkDataOffset, true) === 1 && view.getUint16(chunkDataOffset + 14, true) === 16;
-      channels = view.getUint16(chunkDataOffset + 2, true);
-      sampleRate = view.getUint32(chunkDataOffset + 4, true);
-      blockAlign = view.getUint16(chunkDataOffset + 12, true);
-    } else if (
-      chunkId === 'data' &&
-      pcm16 &&
-      channels &&
-      sampleRate &&
-      blockAlign &&
-      blockAlign >= channels * 2 &&
-      chunkSize % blockAlign === 0
-    ) {
-      return {
-        blockAlign,
-        channels,
-        dataOffset: chunkDataOffset,
-        dataSize: chunkSize,
-        dataSizeOffset: offset + 4,
-        sampleRate,
-      };
-    }
-
-    offset = chunkEnd + (chunkSize % 2);
-  }
-  return null;
-}
 
 export function pcm16WavDurationSec(audio: Uint8Array): number | undefined {
   const layout = parsePcm16Wav(audio);
@@ -68,15 +13,25 @@ export function pcm16WavDurationSec(audio: Uint8Array): number | undefined {
 }
 
 export function trimLeadingPcm16Wav(audio: Uint8Array): Uint8Array {
+  return trimPcm16Silence(audio, false) ?? audio;
+}
+
+/** A complete window at speech onset makes trimming the prefix equivalent to trimming the full WAV. */
+export function trimAudiblePcm16Prefix(audio: Uint8Array): Uint8Array | null {
+  return trimPcm16Silence(audio, true);
+}
+
+function trimPcm16Silence(audio: Uint8Array, completeWindowsOnly: boolean): Uint8Array | null {
   const layout = parsePcm16Wav(audio);
-  if (!layout) return audio;
+  if (!layout) return null;
   const view = new DataView(audio.buffer, audio.byteOffset, audio.byteLength);
   const frameCount = Math.floor(layout.dataSize / layout.blockAlign);
   const windowFrames = Math.max(1, Math.round((layout.sampleRate * DEFAULT_WINDOW_MS) / 1000));
   const threshold = 32_767 * 10 ** (DEFAULT_THRESHOLD_DB / 20);
   let signalFrame = -1;
 
-  for (let startFrame = 0; startFrame < frameCount; startFrame += windowFrames) {
+  const scanFrames = completeWindowsOnly ? frameCount - (frameCount % windowFrames) : frameCount;
+  for (let startFrame = 0; startFrame < scanFrames; startFrame += windowFrames) {
     const endFrame = Math.min(frameCount, startFrame + windowFrames);
     let squaredTotal = 0;
     let sampleCount = 0;
@@ -94,7 +49,7 @@ export function trimLeadingPcm16Wav(audio: Uint8Array): Uint8Array {
     }
   }
 
-  if (signalFrame < 0) return audio;
+  if (signalFrame < 0) return null;
   const prerollFrames = Math.round((layout.sampleRate * DEFAULT_PREROLL_MS) / 1000);
   const trimFrames = Math.max(0, signalFrame - prerollFrames);
   const trimBytes = trimFrames * layout.blockAlign;

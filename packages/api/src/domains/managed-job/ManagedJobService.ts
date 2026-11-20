@@ -11,6 +11,10 @@ import {
   DEFAULT_DURABLE_GATE_RECOVERY,
 } from '../ball-custody/durable-managed-gate-consumer.js';
 import {
+  type ManagedJobActiveExecution,
+  readManagedJobActiveExecutionsOffLoop,
+} from './active-reader/active-ledger-reader.js';
+import {
   cancelDurableManagedGateJob,
   type DurableManagedGateJob,
   initializeDurableManagedGateJob,
@@ -329,8 +333,16 @@ export class ManagedJobService {
     return readManagedJobDueDescriptors(this.dataRoot, this.locator(`managed-job-${'0'.repeat(40)}`), now);
   }
 
-  activeExecutions() {
+  /** Keep ledger scans and SQLite lock waits off the API loop, as for status/reconciliation. */
+  async activeExecutions(): Promise<ManagedJobActiveExecution[]> {
     if (!existsSync(join(this.dataRoot, 'managed-jobs', 'supervisor.sqlite'))) return [];
+    if (isMainThread)
+      return readManagedJobActiveExecutionsOffLoop({
+        dataRoot: this.dataRoot,
+        maxConcurrent: this.maxConcurrent,
+        operatorUserId: this.operatorUserId,
+        supervisorEpoch: this.supervisorEpoch,
+      });
     return listManagedJobLedger(this.locator(`managed-job-${'0'.repeat(40)}`), true).flatMap((record) => {
       const job = record.descriptor as DurableManagedGateJob;
       if (!isManagedJobAdmitted(job, record) || !job.definition || typeof record.createdAt !== 'number') return [];

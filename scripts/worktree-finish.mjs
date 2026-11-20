@@ -274,6 +274,7 @@ function releaseOwnedWorktree(initial, opts) {
     actor: opts.actor ?? opts.owner,
     authorizationRef: opts.authorizationRef ?? opts.sourceRef,
     root: current.root,
+    coldSocketPath: opts.ipcAdmission.coldSocketPath,
     entry: {
       ...current,
       reason: 'owner-finished',

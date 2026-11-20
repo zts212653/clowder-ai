@@ -31,6 +31,9 @@ export interface CallbackAuthStartupReconcileResult {
  * startup reconciliation repair the deliberately tolerated crash window.
  */
 export class CallbackAuthTurnExecutionLifecycle implements ITurnExecutionStore {
+  get cacheFacts() {
+    return this.store.cacheFacts;
+  }
   recordWatcherModelAttempt(...args: Parameters<ITurnExecutionStore['recordWatcherModelAttempt']>) {
     return this.store.recordWatcherModelAttempt(...args);
   }

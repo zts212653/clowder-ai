@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { once } from 'node:events';
-import { existsSync, lstatSync, readdirSync, unlinkSync } from 'node:fs';
+import { existsSync, linkSync, lstatSync, readdirSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, it } from 'node:test';
 import { scheduledFinish } from './lib/worktree-finish-ipc-fixture.mjs';
@@ -147,7 +147,8 @@ describe('native fsmonitor admission and lifetime', { skip: process.platform !==
         0,
       );
       const inode = lstatSync(f.socket).ino;
-      assert.throws(() => f.fx.finish(f.path, { cwdProbe: undefined }), /unbound IPC lifetime unknown/);
+      linkSync(f.socket, join(f.fx.root, 'replacement-alias.ipc'));
+      assert.throws(() => f.fx.finish(f.path, { cwdProbe: undefined }), /cold IPC inode or links changed/);
       assert.equal(lstatSync(f.socket).ino, inode);
       assert.equal(existsSync(f.path), true);
     }));

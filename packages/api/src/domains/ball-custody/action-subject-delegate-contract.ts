@@ -71,6 +71,7 @@ export interface TaskApprovedDelegateProvider {
     /** F167 R5: current task scope for drift detection. Absent → only an exact generic continuation can authorize delegation. */
     currentDevelopmentScope?: DevelopmentScopeSnapshot,
     currentTaskTitle?: string,
+    currentOwnerRevision?: number,
   ): Promise<ReadonlyArray<ApprovedDelegate>>;
 }
 

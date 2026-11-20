@@ -746,6 +746,14 @@ export const createTaskInputSchema = {
 
 export const updateTaskInputSchema = {
   taskId: z.string().min(1).describe('The ID of the task to update'),
+  resultMessageId: z
+    .string()
+    .min(1)
+    .max(200)
+    .optional()
+    .describe(
+      'When completing a new final-only ordinary approval, pass the persisted result message ID from this exact execution. Retry the same result if delivery is pending.',
+    ),
   expectedOwnerRevision: z.number().int().nonnegative().optional(),
   status: z
     .enum(['todo', 'doing', 'blocked', 'done'])
@@ -1502,6 +1510,7 @@ function formatFeatIndexResponse(raw: string): string {
 
 export async function handleUpdateTask(input: {
   taskId: string;
+  resultMessageId?: string | undefined;
   expectedOwnerRevision?: number;
   status?: string | undefined;
   why?: string | undefined;
@@ -1522,6 +1531,7 @@ export async function handleUpdateTask(input: {
         '/api/callbacks/update-task',
         {
           taskId: input.taskId,
+          ...(input.resultMessageId ? { resultMessageId: input.resultMessageId } : {}),
           ...(input.expectedOwnerRevision !== undefined ? { expectedOwnerRevision: input.expectedOwnerRevision } : {}),
           ...(input.status ? { status: input.status } : {}),
           ...(input.why ? { why: input.why } : {}),
@@ -3914,6 +3924,7 @@ export const callbackTools = [
     name: 'cat_cafe_update_task',
     description:
       'Update a task you own, or pick up an unassigned ordinary Task in your home thread by marking it doing; also resolve a missing dispatch gate. ' +
+      'Completing a new final-only ordinary approval with resultMessageId sends its saved result to the original owner once. ' +
       'Entrusted work cannot be marked done through this generic tool; use its typed, evidence-backed closure action. ' +
       'Output: the canonical Task update is returned; picking up an unassigned Task assigns its owner and binds the current authenticated execution atomically. Ordinary completion never waits for a lease mirror. GOTCHA: assigned ordinary work requires the current owner or exact admitted delegate execution; include expectedOwnerRevision from the Task read. Stale assignment, source withdrawal or a different live writer is rejected. A later owner invocation recovers a stranded binding only with exact positive provider-stop evidence. Entrusted/typed closure and namespaced producers retain their own contracts. ' +
       'TIP: why replaces the prior note, max 1000 UTF-16 code units (JavaScript string.length); omitted or empty keeps it. Include a note when blocked. ' +

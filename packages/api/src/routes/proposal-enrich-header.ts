@@ -216,6 +216,7 @@ export function enrichWithParentThreadHeader(
   sourceCatHandle?: string | null,
   /** F277: immutable placement truth selected at approval. */
   declaredWorkMode?: DeclaredWorkMode,
+  taskId?: string,
 ): string {
   let isParallelMode = false;
   if (rawInitialMessage) {
@@ -247,12 +248,19 @@ export function enrichWithParentThreadHeader(
   // Phase AA: routing credentials (sourceThreadId + sourceCatHandle) injected into
   // all modes so cats know exactly where and whom to cross-post to (AC-AA6/AA7).
   headerLines.push(
-    ...buildReportingProtocol(reportingMode, isParallelMode, reporterHandle, sourceThreadId, sourceCatHandle ?? null),
+    ...(taskId
+      ? [
+          '**回报模式：final-only**。全部验收后，执行猫先用 cat_cafe_post_message 在本线程发布最终结果。',
+          `然后用 cat_cafe_update_task 提交 Task \`${taskId}\`，传入 status=done 和该结果的 resultMessageId。系统向原负责人送达一次。投递失败时沿用同一个结果消息。`,
+        ]
+      : buildReportingProtocol(reportingMode, isParallelMode, reporterHandle, sourceThreadId, sourceCatHandle ?? null)),
   );
 
   // Chain protocol section: wake dimension, serial only (C-Y5 tail handled inside).
   if (!isParallelMode && preferredCats && preferredCats.length > 0) {
-    headerLines.push(...buildChainProtocol(preferredCats, reportingMode, resolveHandle, sourceCatHandle ?? null));
+    headerLines.push(
+      ...buildChainProtocol(preferredCats, taskId ? 'none' : reportingMode, resolveHandle, sourceCatHandle ?? null),
+    );
   }
 
   return `${content}\n\n${headerLines.join('\n')}`;

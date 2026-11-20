@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import type { ApprovedTaskContractV1, TaskContractContinuationV1, ThreadProposal } from '@cat-cafe/shared';
 import { z } from 'zod';
+import { parseIntent } from '../cats/services/context/IntentParser.js';
 
 const digest = z.string().regex(/^[a-f0-9]{64}$/);
 export const approvedTaskContractSchema = z.object({ v: z.literal(1), digest }).strict();
@@ -18,6 +19,13 @@ export const taskContractContinuationSchema = z
     targetCatIds: z.array(z.string().min(1)).min(1),
     contractDigest: digest,
     approvalContractKind: z.enum(['legacy', 'frozen']),
+    approval: z
+      .object({
+        ownerRevision: z.number().int().nonnegative(),
+        previousHandoffMessageRef: z.string().min(1).nullable(),
+      })
+      .strict()
+      .optional(),
     clientRequestId: z.string().min(1).max(200),
     issuedAt: z.number().int().nonnegative(),
   })
@@ -63,6 +71,7 @@ export type CompleteProposalContract = Omit<
     | 'cardMessageId'
     | 'approvedDevelopmentScope'
     | 'approvalContractInvalid'
+    | 'taskStartOwnerRevision'
   >,
   'sourceCatId' | 'preferredCats'
 > & {
@@ -110,8 +119,24 @@ export function deriveApprovedTaskContract(proposal: Partial<CompleteProposalCon
     approvedAt: proposal.approvedAt,
     publication: proposal.publication,
     cardMessageId: proposal.cardMessageId,
+    // Omit the new field entirely from pre-existing digests.
+    ...(proposal.taskStartOwnerRevision !== undefined
+      ? { taskStartOwnerRevision: proposal.taskStartOwnerRevision }
+      : {}),
   };
   return { v: 1, digest: createHash('sha256').update(canonicalJson(fields)).digest('hex') };
+}
+
+/** A new owner-proposed, single-writer execution card. Legacy and investigation cards keep their original carrier. */
+export function autoStartsApprovedTask(proposal: Partial<CompleteProposalContract>): boolean {
+  return (
+    proposal.taskStartOwnerRevision !== undefined &&
+    proposal.declaredWorkMode === 'subtask' &&
+    proposal.reportingMode === 'final-only' &&
+    proposal.sourceThreadId === proposal.parentThreadId &&
+    !proposal.approvedDevelopmentScope &&
+    parseIntent(proposal.initialMessage ?? '', 1).intent !== 'ideate'
+  );
 }
 
 /** Called only while finalizing a new approval, after approval-time overrides. */

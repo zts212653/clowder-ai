@@ -24,7 +24,18 @@ export const USER = 'approval-contract-user';
 export const OWNER = 'codex';
 export const TARGET = 'codex-sol';
 
-export async function approvedTaskFixture(t, { legacy = true, governed = false, projectPath } = {}) {
+export async function approvedTaskFixture(
+  t,
+  {
+    legacy = true,
+    governed = false,
+    projectPath,
+    autoStart = false,
+    beforeApprove,
+    preferredCats = [TARGET],
+    approvalBody = {},
+  } = {},
+) {
   assertRedisIsolationOrThrow(process.env.REDIS_URL, 'approved Task contract journey');
   const redis = new Redis(process.env.REDIS_URL, { keyPrefix: `approved-task-${randomUUID()}:` });
   const proposals = new RedisProposalStore(redis);
@@ -47,7 +58,7 @@ export async function approvedTaskFixture(t, { legacy = true, governed = false, 
     delegates,
   );
   const admission = new ActionSuccessorAdmissionService(leases, resolver);
-  const handoffs = new OrdinaryTaskHandoffService({ tasks, messages, threads, turns, delegates });
+  const handoffs = new OrdinaryTaskHandoffService({ tasks, messages, threads, turns, delegates, proposals });
   const sockets = { emitToUser() {}, broadcastToRoom() {}, broadcastAgentMessage() {} };
   const app = Fastify();
   t.after(async () => {
@@ -82,6 +93,17 @@ export async function approvedTaskFixture(t, { legacy = true, governed = false, 
     threadStore: threads,
     messageStore: messages,
     socketManager: sockets,
+    ...(autoStart
+      ? {
+          ordinaryTaskHandoffs: handoffs,
+          invocationQueue: queue,
+          router: {
+            async resolveTargetsAndIntent() {
+              return { targetCats: [TARGET], intent: { intent: 'execute' }, hasMentions: false };
+            },
+          },
+        }
+      : {}),
   });
   const source = await threads.create(USER, 'Original Task owner', process.cwd());
   const task = await tasks.create({
@@ -121,32 +143,37 @@ export async function approvedTaskFixture(t, { legacy = true, governed = false, 
       title: 'Approved implementation',
       reason: 'Complete the original A/B/C task',
       subjectTaskId: task.id,
-      preferredCats: [TARGET],
+      preferredCats,
       initialMessage: 'Implement A/B/C and return tested code. Preserve the original Task.',
       reportingMode: 'final-only',
-      declaredWorkMode: 'parallel',
+      declaredWorkMode: autoStart ? 'subtask' : 'parallel',
       ...(projectPath ? { projectPath } : {}),
     },
   });
   assert.equal(proposed.statusCode, 200, proposed.body);
   const proposalId = proposed.json().proposalId;
-  const approved = await app.inject({
-    method: 'POST',
-    url: `/api/proposals/${proposalId}/approve`,
-    headers: { 'x-cat-cafe-user': USER },
-    payload: {},
-  });
+  const approve = (payload = approvalBody) =>
+    app.inject({
+      method: 'POST',
+      url: `/api/proposals/${proposalId}/approve`,
+      headers: { 'x-cat-cafe-user': USER },
+      payload,
+    });
+  const approved = beforeApprove
+    ? await beforeApprove({ approve, task, tasks, threads, auth, turns, queue, redis, proposalId, source, origin })
+    : await approve();
   assert.equal(approved.statusCode, 200, approved.body);
   const childId = approved.json().threadId;
   if (legacy) await redis.hdel(`proposal:${proposalId}`, 'approvedTaskContract');
-  await messages.append({
-    userId: USER,
-    from: { kind: 'agent', catId: TARGET },
-    threadId: childId,
-    content: 'READY. Read-only investigation completed; no implementation lease yet.',
-    mentions: [],
-    timestamp: Date.now(),
-  });
+  if (!autoStart)
+    await messages.append({
+      userId: USER,
+      from: { kind: 'agent', catId: TARGET },
+      threadId: childId,
+      content: 'READY. Read-only investigation completed; no implementation lease yet.',
+      mentions: [],
+      timestamp: Date.now(),
+    });
   const input = { proposalId, taskId: task.id, clientRequestId: 'original-approved-contract' };
   const continueTask = (overrides = {}, authHeaders = headers) =>
     app.inject({
@@ -195,6 +222,8 @@ export async function approvedTaskFixture(t, { legacy = true, governed = false, 
     source,
     task,
     proposalId,
+    approve,
+    origin,
     childId,
     input,
     headers,

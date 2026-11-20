@@ -1,29 +1,22 @@
-import {
-  CURL_FILE_VALUES,
-  CURL_FLAGS,
-  CURL_FORMS,
-  CURL_REFERENCES,
-  CURL_VALUES,
-  sendArguments,
-} from './secret-send-options.mjs';
+import { CURL_FILE_VALUES, CURL_FLAGS, CURL_FORMS, CURL_REFERENCES, curlArguments } from './secret-send-options.mjs';
 
-export async function prepareCurlArgs(args, freeze) {
+export async function prepareCurlArgs(args, freeze, strict = false) {
   const output = ['-q']; // curl only disables implicit .curlrc when this is the first argument.
-  for (const argument of sendArguments(args, CURL_VALUES, CURL_FLAGS)) {
+  for (const argument of curlArguments(args, strict)) {
+    if (argument.name) checkOption(argument, strict);
     if (argument.kind === 'value') {
       output.push(argument.name, await curlValue(argument.name, argument.value, freeze));
     } else {
-      if (argument.kind === 'flag') checkFlag(argument.name);
       output.push(argument.word);
     }
   }
   return output;
 }
 
-function checkFlag(name) {
-  if (name === '--config' || /^-K/.test(name) || name.startsWith('--netrc'))
+function checkOption({ kind, name }, strict) {
+  if (/^-K/.test(name) || ['--config', '-n', '--netrc', '--netrc-file', '--netrc-optional'].includes(name))
     throw new Error('secret_send_config_unsupported');
-  if (!CURL_FLAGS.has(name)) throw new Error('secret_send_option_unsupported');
+  if (strict && kind === 'flag' && !CURL_FLAGS.has(name)) throw new Error('secret_send_option_unsupported');
 }
 
 async function curlValue(name, value, freeze) {

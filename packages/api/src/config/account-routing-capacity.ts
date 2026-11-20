@@ -113,12 +113,12 @@ export interface RoutingExecutionBindingProof {
 }
 
 /** One physical account-store snapshot per catalog read; no F293 writer or extra ledger. */
-export function readAccountRoutingCapacity(input: {
+export async function readAccountRoutingCapacity(input: {
   projectRoot: string;
   configs: Record<string, CatConfig>;
   observedAt: number;
   executionBindings?: readonly RoutingExecutionBindingProof[];
-}): Map<string, Pick<RoutingCandidateBindingV1, 'provenQuotaPools' | 'capacityFacts'>> {
+}): Promise<Map<string, Pick<RoutingCandidateBindingV1, 'provenQuotaPools' | 'capacityFacts'>>> {
   const store = readAccountStoreSnapshot(input.projectRoot);
   const accounts = new Map<
     string,
@@ -126,7 +126,7 @@ export function readAccountRoutingCapacity(input: {
       clientId?: string;
       principalPinned?: boolean;
       capacity: RoutingAccountCapacityV1;
-      claude?: ReturnType<typeof readClaudeRoutingAccount>;
+      claude?: Awaited<ReturnType<typeof readClaudeRoutingAccount>>;
     }
   >();
   const claudeRefs = Object.entries(input.configs).flatMap(([catId, config]) =>
@@ -144,7 +144,7 @@ export function readAccountRoutingCapacity(input: {
           ? resolveByAccountRef(input.projectRoot, ref)
           : undefined;
       if (claudeProfile?.client === 'anthropic' && claudeProfile.authType === 'oauth' && !claudeProfile.baseUrl) {
-        const claude = readClaudeRoutingAccount(claudeProfile, input.projectRoot, input.observedAt);
+        const claude = await readClaudeRoutingAccount(claudeProfile, input.projectRoot, input.observedAt);
         accounts.set(ref, {
           clientId: 'anthropic',
           principalPinned: !!claude.owner.credentialVersion,

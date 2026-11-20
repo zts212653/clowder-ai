@@ -27,6 +27,7 @@ export interface DevelopmentTaskAuthoritySnapshot {
   readonly ownerCatId?: string | null;
   readonly userId?: string;
   readonly developmentScope?: DevelopmentScopeSnapshot;
+  readonly ownerRevision?: number;
 }
 
 /** One exact, current Task relation through either its legacy source or approved parent thread. */

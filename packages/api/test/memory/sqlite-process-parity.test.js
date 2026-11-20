@@ -225,6 +225,9 @@ test('semantic and hybrid embedding bridge preserves query vectors and passage r
         assert.equal(error.memoryProcess.readWindow.active, true);
         assert.equal(error.memoryProcess.readWindow.cleanup, null);
         assert.equal(error.memoryProcess.readWindow.preload, null);
+        assert.equal(error.memoryProcess.timings.scopeEndObservation, null);
+        assert.ok(error.memoryProcess.timings.cancelRequestedMs !== null);
+        assert.equal(error.memoryProcess.timings.resultReceivedMs, null);
         return true;
       },
     );

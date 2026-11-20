@@ -2,6 +2,15 @@ import type { EnvDefinition } from '../env-registry.js';
 
 export const ENV_DEFINITIONS_8: readonly EnvDefinition[] = [
   {
+    name: 'CAT_CAFE_ALLOWED_TOOL_NAMES',
+    defaultValue: '(未设置)',
+    description: 'Host 为当前成员回合生成的 MCP 工具名 JSON 白名单；不套用旧守望的六次调用限制。',
+    category: 'cli',
+    sensitive: false,
+    hubVisible: false,
+    runtimeEditable: false,
+  },
+  {
     name: 'CAT_CAFE_CPU_CAPTURE_ONCE',
     defaultValue: '0',
     description:

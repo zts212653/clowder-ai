@@ -46,7 +46,7 @@ test('approved Alpha schedule uses an explicit consumer and source, with no inve
   assert.equal(restored.get(principal, job.jobId).admissionMessageId, undefined);
   assert.deepEqual(restored.get(principal, job.jobId).scheduleAdmission, { scheduleId: consumer.subscriptionId });
   assert.equal(restored.get(principal, job.jobId).actionKind, 'alpha_revision');
-  assert.equal(restored.activeExecutions().length, 1);
+  assert.equal((await restored.activeExecutions()).length, 1);
   let started = 0;
   restored.start(principal, job.jobId, {
     start(command, options) {

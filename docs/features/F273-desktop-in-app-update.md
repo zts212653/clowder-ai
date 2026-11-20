@@ -4,7 +4,7 @@ related_features: [F179, F180]
 topics: [desktop, electron, auto-update, inno-setup, dmg, github-releases, installer, opensource-ops]
 doc_kind: spec
 created: 2026-07-07
-updated: 2026-09-03
+updated: 2026-11-19
 description: "Desktop in-app update system: fresh GitHub release discovery, resumable verified download, Windows installer upgrade, and guided macOS DMG replacement."
 description_source: model
 description_author: codex-sol
@@ -12,6 +12,7 @@ description_generated_by: codex-sol@gpt-5.6-sol
 description_generated_at: 2026-07-26T03:59:46Z
 description_confirmed_by: codex-sol
 description_updated_at: 2026-07-26T03:59:46Z
+tips_exempt: "Renewed 2026-11-19: daily doc guard records PR #6734 (intake clowder-ai#1888 owned desktop service loss reporting and bounded outage notices) and PR #7076 (intake clowder-ai#1989 restoring Windows user PATH for desktop child processes). These desktop service lifecycle and environment repairs add no new user-facing capability or UI entry requiring a tip."
 ---
 
 # F273: Desktop In-App Update — 应用内检查更新 + 原地升级（无签名约束版）
@@ -325,3 +326,5 @@ README / README.zh-CN 加 **Upgrading** 章节：数据存放位置 + 覆盖升�
 - 2026-08-08: clowder-ai PR #1227 合入（`c643961b8`）；Windows RC `.14`（source `69e02c55e`）的检测、下载、安装主路径由 operator/吴浪现场确认。Clowder AI intake issue #3462 / PR #3463 合入（`cca11e79a`），吸收 renderer/update recovery；完整 Phase E stable validation 不因单一路径成功而提前关闭。
 - 2026-09-02: 后继 stable `v0.13.0` 发布（target `01c58feb40`），4/4 桌面资产完整并带 SHA-256；`v0.12.0 → v0.13.0` 成为可执行的真实应用内升级旅程
 - 2026-09-03: Phase E re-entered；closure owner 绑定 @codex-sol，Windows/macOS 现场步骤、证据包与 invalidator 已明确，不再以“等待首个 stable release”为 next action
+- 2026-11-06: 家内回流 [clowder-ai#1888](https://github.com/zts212653/clowder-ai/pull/1888)（PR [#6734](https://github.com/zts212653/clowder-ai/pull/6734)，merge `f7167e98e8`，source merge `132dfa8d37`）：桌面端托管子服务异常退出上报与前端断连提示有界化（`desktop/main.js`、`desktop/service-failure-handler.js`、`desktop/service-manager.js`、`packages/web/src/utils/api-client.ts`、`toastStore.ts`），使当前托管服务丢失可见、持续断连不重建已关闭提示，且恢复后保留用户正在阅读的内容，同时保持家内桌面产品名、启动所有权及更新/退出行为不变
+- 2026-11-14: 家内回流 [clowder-ai#1989](https://github.com/zts212653/clowder-ai/pull/1989)（PR [#7076](https://github.com/zts212653/clowder-ai/pull/7076)，merge `993b5255ab`，source merge `1ac5dfe475`）：修复安装器启动的 Windows 桌面进程继承陈旧 `PATH` 导致找不到当前用户 CLI 工具的问题（`desktop/windows-user-path.js`、`desktop/service-manager.js`），为 API 与 Web 子进程恢复当前令牌下的常规 Windows 用户环境，并保留既有命令优先级、隔离 home 与 fail-open 启动

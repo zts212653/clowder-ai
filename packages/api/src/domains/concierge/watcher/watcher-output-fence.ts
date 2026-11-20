@@ -2,6 +2,7 @@ import { parseWatcherThreadControl } from '@cat-cafe/shared';
 import type { ILabelStore, IThreadStore } from '../../cats/services/stores/ports/ThreadStore.js';
 import type { IConciergeConfigStore } from '../ConciergeConfigStore.js';
 import { effectiveWatcherState, readWatcherPreferences } from './watcher-controls.js';
+import { configuredWatcherMembers } from './watcher-routing.js';
 
 /** Host-only expected control values, checked again in the output owner's atomic Redis commit. */
 export interface WatcherOutputFence {
@@ -22,10 +23,7 @@ export async function readWatcherOutputFence(
     owners.threads.get(threadId),
   ]);
   // The single watcher speaks as memberCatId; with the F335 panel on, every panel member is a watcher.
-  const watcher =
-    preferences.config.memberCatId === catId ||
-    (preferences.config.panel?.enabled === true &&
-      preferences.config.panel.members.some((member) => member.catId === catId));
+  const watcher = configuredWatcherMembers(preferences.config).some((member) => member.catId === catId);
   if (
     !thread ||
     thread.deletedAt ||

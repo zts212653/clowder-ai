@@ -73,4 +73,10 @@ export interface ExternalPluginLifecycleServiceOptions {
    * error itself. Defaults to the Host's `plugin/lifecycle` error log.
    */
   readonly onStartFailure?: PluginStartFailureObserver;
+  /**
+   * F336: runs before an owner disable or uninstall revokes the instance's authority, while its runtime
+   * can still use it (the companion writes its last scene). Must settle on its own; a failure never
+   * blocks the stop.
+   */
+  readonly beforeStop?: (instanceId: string) => Promise<void>;
 }

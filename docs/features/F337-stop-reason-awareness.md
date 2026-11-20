@@ -4,7 +4,7 @@ related_features: [F048, F293, F300, F317, F334]
 topics: [stop-reason, host-sleep, restart-recovery, routing-context, cancellation, self-sensing]
 doc_kind: spec
 created: 2026-11-13
-tips_exempt: "Renewed 2026-11-17: this cut records observed sleep/restart continuation acceptance for the existing automatic recovery path. It adds no command or setting and preserves the open manual-cancellation and provider-before-shutdown real-sample limits; it does not claim rollout or whole-feature completion."
+tips_exempt: "Renewed 2026-11-20: this cut records additional real samples of the existing automatic sleep/restart continuation, including provider interruption before API shutdown. It adds no user command or setting. The manual-cancellation journey remains awaiting a real sample; these observations do not claim whole-feature completion or authorize a rollout."
 description: "猫知道队友是怎么停的：合盖睡眠打断能被认出并在开盖后接着干，派活前看得见对方最近怎么停的，不再把已经停了的猫喊醒。"
 description_source: model
 description_author: opus55
@@ -15,7 +15,7 @@ description_updated_at: 2026-11-13T14:30:00Z
 
 > **Status**: in-progress | **Owner**: Ragdoll (@opus55) | **Priority**: P1
 >
-> **现状（2026-11-17 13:55 PST）**：Phase A 三个 PR 都已合入，#7202（`c5cc617e9b`）自 boot 94 起运行。真实验收：重启打断记账与「🔁 重启接续」在 boot 93 → 94 走通，睡眠接续的进程内投递在 11-17 凌晨走通，AC-A2 已勾。还差 AC-A5②：You 手动取消一只猫后，跟别的猫说「别找它了」，后者不再把它喊醒；另外，「provider 先死、API 后收 SIGTERM」这条只有 #7202 能兜住的路径还没有真实样本。
+> **现状（2026-11-18 03:50 PST）**：Phase A 三个 PR 都已合入并运行，重启和睡眠两条接续都有了真实样本：boot 94 → 95 停服时 7 轮全部记成 `restart_shutdown` 并在新实例被叫回，其中有 provider 先于 API 断流、只有 #7202 读停服记录能兜住的轮；睡眠接续的进程内投递在 11-17 凌晨走通。AC-A1 至 A4 已勾；只差 AC-A5②：You 手动取消一只猫后跟别的猫说「别找它了」，后者不再把它喊醒。
 
 ## Why
 
@@ -78,7 +78,7 @@ You 2026-11-13 在 `[thread-id]` 消息 `private-source-id`：
 - [x] AC-A2: 被睡眠打断的猫，在电脑真正醒来后，在原线程收到接续消息并接着干；暗唤醒期间不发；同一只猫连续两次被打断，第二次不再自动叫回。（#7038：等开盖、欠账持久化与重启找回、更新的一轮优先、读不到不销账。真实样本：11-14 boot 89 从欠账找回后开盖投递、猫接着跑完测试；11-17 03:17–03:43 PST 不重启的进程内样本，两次暗唤醒不投递，开盖 3 秒后在原线程投递「💤 睡眠接续」，猫接上。「同一只猫连续两次被打断不再叫回」只有测试覆盖，没有真实样本）
 - [x] AC-A3: 猫准备喊人时，派活提示里能看到本线程每个最近停下的队友是怎么停的、什么时候停的；猫可用时也显示。（#7038：导航「最近停下的成员」，读满一页时写明没核对完；已合入，未加载）
 - [x] AC-A4: 派活回执和失败叫醒带上停止原因：`canceled` 标明是 You 手动取消；睡眠打断的失败标明「被电脑睡眠打断，开盖后会自动接着」，派活的猫不再换人重做。（#7038：回执行 `reason=…（说明）`、失败回复正文补说明、睡眠打断不计入派活健康度；已合入，未加载）
-- [ ] AC-A5: 真实验收：① 有猫在跑时 You 合盖、过几分钟开盖，那只猫自己接着干；② You 手动取消一只猫后，跟另一只猫说别找它了，后者不再把它喊醒。You 只做合盖和点取消，不需要别的操作。
+- [ ] AC-A5: 真实验收：① 有猫在跑时 You 合盖、过几分钟开盖，那只猫自己接着干；② You 手动取消一只猫后，跟另一只猫说别找它了，后者不再把它喊醒。You 只做合盖和点取消，不需要别的操作。（① 已有真实样本：11-14 boot 89 与 11-17 03:17–03:43 PST，见 AC-A2；② 待样本）
 
 ## Tips Contribution（F244）
 

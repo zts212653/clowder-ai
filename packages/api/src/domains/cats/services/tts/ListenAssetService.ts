@@ -36,12 +36,17 @@ export interface ListenAsset {
   reusable?: boolean;
 }
 
+type ListenChunk = Extract<TtsSynthesizeStreamEvent, { type: 'chunk' }>;
+export type IndexedListenChunk = ListenChunk & { chunkIndex: number };
+type ChunkListener = (event: IndexedListenChunk) => void;
+
 export interface GetOrCreateListenAssetOptions {
   /** Internal document jobs keep one prepared model/endpoint for every sentence. */
   preparedSynthesis?: PreparedListenSynthesis;
   synthesis?: ListenSynthesisOptions;
   signal?: AbortSignal;
-  onChunk?: (event: Extract<TtsSynthesizeStreamEvent, { type: 'chunk' }>) => void;
+  onChunk?: ChunkListener;
+  onEarlyChunk?: ChunkListener;
 }
 
 export interface PreparedListenSynthesis {
@@ -56,7 +61,8 @@ export interface PreparedListenSynthesis {
 interface InFlightAsset {
   controller: AbortController;
   consumers: number;
-  listeners: Set<NonNullable<GetOrCreateListenAssetOptions['onChunk']>>;
+  listeners: Set<ChunkListener>;
+  earlyListeners: Set<ChunkListener>;
   promise: Promise<ListenAsset>;
 }
 
@@ -159,24 +165,19 @@ export class ListenAssetService {
       flight = this.createFlight(hash, synthesis, request);
       this.inFlight.set(hash, flight);
     }
-    if (options.onChunk) flight.listeners.add(options.onChunk);
-    try {
-      // A shared audio flight can serve different members; provenance belongs to this caller.
-      const asset = await this.waitForFlight(flight, options.signal);
-      const actual = asset.voiceSelection;
-      const receipt: TtsSynthesizeResult['referenceAudio'] =
-        actual?.referenceStatus === 'unavailable'
-          ? { status: 'unavailable' }
-          : actual?.referenceSha256
-            ? { status: 'used', sha256: actual.referenceSha256 }
-            : { status: 'unverified' };
-      return {
-        ...asset,
-        voiceSelection: completeVoiceSelection(synthesis.voiceSelection, receipt, synthesis.provider),
-      };
-    } finally {
-      if (options.onChunk) flight.listeners.delete(options.onChunk);
-    }
+    // A shared audio flight can serve different members; provenance belongs to this caller.
+    const asset = await this.consumeFlight(flight, options);
+    const actual = asset.voiceSelection;
+    const receipt: TtsSynthesizeResult['referenceAudio'] =
+      actual?.referenceStatus === 'unavailable'
+        ? { status: 'unavailable' }
+        : actual?.referenceSha256
+          ? { status: 'used', sha256: actual.referenceSha256 }
+          : { status: 'unverified' };
+    return {
+      ...asset,
+      voiceSelection: completeVoiceSelection(synthesis.voiceSelection, receipt, synthesis.provider),
+    };
   }
 
   async close(): Promise<void> {
@@ -222,11 +223,14 @@ export class ListenAssetService {
       controller,
       consumers: 0,
       listeners: new Set(),
+      earlyListeners: new Set(),
       promise: Promise.resolve({} as ListenAsset),
     };
-    flight.promise = this.synthesize(hash, synthesis, request, flight).finally(() => {
-      if (this.inFlight.get(hash) === flight) this.inFlight.delete(hash);
-    });
+    flight.promise = Promise.resolve()
+      .then(() => this.synthesize(hash, synthesis, request, flight))
+      .finally(() => {
+        if (this.inFlight.get(hash) === flight) this.inFlight.delete(hash);
+      });
     // A pre-consumer disconnect can reject the producer before waitForFlight
     // attaches its usual observer. Keep the shared producer rejection observed
     // even when no caller remains to await it.
@@ -277,23 +281,32 @@ export class ListenAssetService {
   ): Promise<TtsSynthesizeResult> {
     if (!synthesis.provider.stream) return synthesis.provider.synthesize(request);
     let result: TtsSynthesizeResult | undefined;
-    for await (const event of synthesis.provider.stream(request, { signal: flight.controller.signal })) {
-      if (event.type === 'chunk')
-        this.notifyChunkListeners(flight, {
-          ...event,
-          voiceSelection: completeVoiceSelection(synthesis.voiceSelection, event.referenceAudio, synthesis.provider),
-        });
-      else result = event.result;
+    let chunkIndex = 0;
+    let earlyChunkIndex = 0;
+    const withVoice = (event: ListenChunk, index: number): IndexedListenChunk => ({
+      ...event,
+      chunkIndex: index,
+      voiceSelection: completeVoiceSelection(synthesis.voiceSelection, event.referenceAudio, synthesis.provider),
+    });
+    for await (const event of synthesis.provider.stream(request, {
+      signal: flight.controller.signal,
+      onEarlyChunk: (chunk) => {
+        const index = earlyChunkIndex++;
+        if (flight.earlyListeners.size) this.notifyChunkListeners(flight.earlyListeners, withVoice(chunk, index));
+      },
+    })) {
+      if (event.type === 'chunk') {
+        const chunk = withVoice(event, chunkIndex++);
+        this.notifyChunkListeners(flight.listeners, chunk);
+        if (earlyChunkIndex === 0) this.notifyChunkListeners(flight.earlyListeners, chunk);
+      } else result = event.result;
     }
     if (!result) throw new Error('TTS stream completed without a final cache asset');
     return result;
   }
 
-  private notifyChunkListeners(
-    flight: InFlightAsset,
-    event: Extract<TtsSynthesizeStreamEvent, { type: 'chunk' }>,
-  ): void {
-    for (const listener of flight.listeners) {
+  private notifyChunkListeners(listeners: Set<ChunkListener>, event: IndexedListenChunk): void {
+    for (const listener of listeners) {
       try {
         listener(event);
       } catch {
@@ -337,6 +350,18 @@ export class ListenAssetService {
       return await publication;
     } finally {
       this.pendingPublications.delete(publication);
+    }
+  }
+
+  private async consumeFlight(flight: InFlightAsset, options: GetOrCreateListenAssetOptions): Promise<ListenAsset> {
+    const { onChunk, onEarlyChunk, signal } = options;
+    if (onChunk) flight.listeners.add(onChunk);
+    if (onEarlyChunk) flight.earlyListeners.add(onEarlyChunk);
+    try {
+      return await this.waitForFlight(flight, signal);
+    } finally {
+      if (onChunk) flight.listeners.delete(onChunk);
+      if (onEarlyChunk) flight.earlyListeners.delete(onEarlyChunk);
     }
   }
 

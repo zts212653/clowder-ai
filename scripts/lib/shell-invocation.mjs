@@ -206,7 +206,10 @@ function parseStage(stage, depth, outerCwd, stdin, frame, bindings, builtinConte
   if (result.invocation) {
     if (result.invocation.name === undefined) {
       result.invocation.generatedCode = true;
-      result.invocation.codeEvidence = parameterEvidence(stage, undefined, frame);
+      result.invocation.codeEvidence = [
+        ...(result.invocation.codeEvidence ?? []),
+        ...parameterEvidence(stage, undefined, frame),
+      ];
     }
     const linked = parameterEvidence(stage, bindings, frame);
     result.invocation.parameterScope = depth;

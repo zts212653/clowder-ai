@@ -192,7 +192,7 @@ async function ownerApp(register) {
 }
 const ownerHeaders = { host: 'localhost', origin: 'http://localhost:3171' };
 
-test('settings accept only local Codex members and restart from now when the panel switches', async () => {
+test('legacy panel settings follow concrete capability and restart from now when the panel switches', async () => {
   const turns = new InMemoryTurnExecutionStore();
   const configStore = new MemoryConciergeConfigStore();
   const app = await ownerApp((app) =>
@@ -201,7 +201,10 @@ test('settings accept only local Codex members and restart from now when the pan
       threadStore: new ThreadStore(),
       configStore,
       labelStore: { list: async () => [] },
-      capability: () => ({ supported: false, reason: 'no model in test' }),
+      capability: (id) =>
+        ['gpt52', 'spark'].includes(id)
+          ? { supported: true, context: 'ordinary', readOnly: 'tools' }
+          : { supported: false, reason: 'no model in test' },
     }),
   );
   try {

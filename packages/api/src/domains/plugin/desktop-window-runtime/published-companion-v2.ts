@@ -32,6 +32,7 @@ export const COMPANION_CONTRACT_LINES = [
   '0.1.0-beta.28',
   '0.1.0-beta.29',
   '0.3.3-candidate.0',
+  '0.3.3-candidate.3',
 ] as const;
 export type CompanionContract = (typeof COMPANION_CONTRACT_LINES)[number];
 
@@ -51,6 +52,9 @@ export const COMPANION_CAPABILITY_SINCE = {
   appAssist: '0.1.0-beta.29',
   /** F335 交付三：`state.desk`, `desk.settle`, desk thumbnails and avatars. */
   desk: '0.3.3-candidate.0',
+  /** F336 Phase C：the living cat as a second, Host-created body window (bridge 1.8.0 `body` entry),
+   * `body.*` / `scene.*` from that window, the `xianxian-living` skin and the body / view-open events. */
+  livingBody: '0.3.3-candidate.3',
 } as const satisfies Record<string, CompanionContract>;
 export type CompanionCapability = keyof typeof COMPANION_CAPABILITY_SINCE;
 
@@ -143,6 +147,12 @@ export const COMPANION_ARCHIVE_CONTRACTS: readonly CompanionArchiveContract[] = 
     packageDigest: 'sha512-xfxNnyl0Zg8qxCXInQdN5UJBn+uaKZF0exdDItNBCAputlke1Btfvk8GqdTCiYo0/2g/tmqAYegzOJhyZrRq/g==',
     contract: '0.3.3-candidate.0',
   },
+  // F336 Phase C：clowder-ai-plugins #240 (28f2b77b); the same SRI as catalog/candidate.json.
+  {
+    version: '0.1.0-alpha.38',
+    packageDigest: 'sha512-Rfi8xNXa1eRvqCkeOiNmQHJAKIxTCAfnml5ggPu03h010w+M1QxsJ1hLutIxIMTYdhQLJWYiYfmYtH6yI0wh8w==',
+    contract: '0.3.3-candidate.3',
+  },
 ];
 
 export function isModernCompanionContract(contract: CompanionContract | undefined): boolean {
@@ -166,4 +176,15 @@ export function hasPublishedCompanionV2(
 /** F335 交付三：the archive's state carries `desk` and its renderer settles it. */
 export function companionSupportsDesk(contract: CompanionContract | undefined): boolean {
   return companionContractHas(contract, 'desk');
+}
+
+/** F336 Phase C：the archive may open a living body, and its renderer reads the `xianxian-living` skin. */
+export function companionSupportsLivingBody(contract: CompanionContract | undefined): boolean {
+  return companionContractHas(contract, 'livingBody');
+}
+
+/** The living cat's skin, readable only on a livingBody line. An older line reads the cat it already
+ * draws; the saved choice itself is never rewritten. */
+export function publishedCompanionSkin<T extends string>(skin: T, contract: CompanionContract | undefined) {
+  return skin === 'xianxian-living' && !companionSupportsLivingBody(contract) ? 'xianxian-codex' : skin;
 }

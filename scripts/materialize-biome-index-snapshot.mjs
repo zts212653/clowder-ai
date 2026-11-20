@@ -1,9 +1,9 @@
 import { execFileSync } from 'node:child_process';
 import { lstatSync, readdirSync, readFileSync } from 'node:fs';
 import { resolve, sep } from 'node:path';
+import { biomeConfigPathPattern, isLocalBiomeConfig, uniqueRootConfigPath } from './biome-nested-config-scope.mjs';
 
-const metadataPattern = /(^|\/)(\.?biome\.jsonc?|\.gitignore|\.editorconfig|package\.json|pnpm-lock\.yaml)$/;
-const configPattern = /(^|\/)\.?biome\.jsonc?$/;
+const metadataPattern = /(^|\/)(\.gitignore|\.editorconfig|package\.json|pnpm-lock\.yaml)$/;
 // Audited against `biome explain` from the pinned 2.4.1 binary. Nursery,
 // explicit domains and other versions retain the complete index below.
 const crossFileRules = new Set([
@@ -29,9 +29,15 @@ function rulesNeedCompleteIndex(rules) {
   );
 }
 
-function needsCompleteIndex(value) {
+function isMetadataPath(path) {
+  return biomeConfigPathPattern.test(path) || metadataPattern.test(path);
+}
+
+function needsCompleteIndex(value, localInheritance = false) {
   if (!value || typeof value !== 'object') return false;
   return Object.entries(value).some(([key, child]) => {
+    // The caller proved these top-level fields refer only to captured configs.
+    if (localInheritance && (key === 'root' || key === 'extends')) return false;
     if (['extends', 'plugins', 'domains', 'nursery'].includes(key) || crossFileRules.has(key)) return true;
     if (key === 'root' && child !== true) return true;
     if (key === 'rules' && rulesNeedCompleteIndex(child)) return true;
@@ -41,28 +47,32 @@ function needsCompleteIndex(value) {
   });
 }
 
-function configurationReason(path) {
+function configurationReason(path, rootPath) {
   let config;
   try {
     config = JSON.parse(git(['show', `:${path}`]));
   } catch {
     return `configuration requires Biome parsing: ${path}`;
   }
-  return needsCompleteIndex(config) ? `configuration may require other index files: ${path}` : undefined;
+  const localInheritance = path !== rootPath && isLocalBiomeConfig(path, config, rootPath);
+  return needsCompleteIndex(config, localInheritance)
+    ? `configuration may require other index files: ${path}`
+    : undefined;
 }
 
 function completeIndexReason(entries, staged) {
   const installed = JSON.parse(readFileSync('node_modules/@biomejs/biome/package.json', 'utf8'));
   if (installed.version !== '2.4.1') return 'Biome version outside the audited file-local configuration';
+  const rootPath = uniqueRootConfigPath(entries);
   for (const { path, mode } of entries) {
     if (mode === '120000' && staged.has(path)) return `staged symlink may require another index file: ${path}`;
     // Turborepo rules can be enabled by package discovery, without an explicit
     // rule/domain in biome.json, and may follow turbo configuration inheritance.
     if (/(^|\/)turbo\.jsonc?$/.test(path)) return `Turborepo configuration: ${path}`;
-    if (!metadataPattern.test(path)) continue;
+    if (!isMetadataPath(path)) continue;
     if (mode === '120000') return `configuration metadata symlink: ${path}`;
-    if (!configPattern.test(path)) continue;
-    const reason = configurationReason(path);
+    if (!biomeConfigPathPattern.test(path)) continue;
+    const reason = configurationReason(path, rootPath);
     if (reason) return reason;
   }
   return undefined;
@@ -91,6 +101,6 @@ if (reason) {
   console.error(`Biome index snapshot: using complete index (${reason})`);
   git([...checkout, '--all']);
 } else {
-  const selected = entries.filter(({ path }) => staged.has(path) || metadataPattern.test(path));
+  const selected = entries.filter(({ path }) => staged.has(path) || isMetadataPath(path));
   git([...checkout, '--stdin', '-z'], selected.map(({ path }) => `${path}\0`).join(''));
 }

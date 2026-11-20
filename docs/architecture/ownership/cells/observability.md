@@ -22,6 +22,9 @@ code_anchors:
   - packages/api/src/infrastructure/telemetry/tool-span-tracker.ts
   - packages/api/src/infrastructure/telemetry/metrics-snapshot-store.ts
   - packages/api/src/infrastructure/telemetry/cpu/event-loop-tripwire.ts
+  - packages/api/src/infrastructure/telemetry/cpu/event-loop-profiler-session.ts
+  - packages/api/src/infrastructure/telemetry/cpu/process-witness.ts
+  - packages/api/src/infrastructure/telemetry/cpu/event-loop-resource-observer.ts
   - packages/api/src/infrastructure/logger.ts
   - packages/api/src/routes/telemetry.ts
   - packages/api/src/routes/invocation-trajectory-routes.ts
@@ -82,6 +85,13 @@ an observer worker writes code-only daily records independently of the blocked
 main loop, in the existing API log directory. PID, boot and episode join the
 independent record with the later Pino summary. This is not invocation ownership,
 business data, an Eval result or a new transcript surface.
+One five-minute sampling window spans repeated stalls; independent onset/recovery
+notifications are prompt, while timed code attribution follows at the window
+boundary. The narrow API synchronous-process-call guard is a mechanical admission
+check, not a semantic CPU classifier or an Eval consumer.
+The profiler Session owns protocol timing and confirmed release; its failure
+retires automatic sampling while the independent heartbeat/resource observer
+continues. An unconfirmed release never grants the foreground profiler lease.
 
 ## Use This When
 

@@ -34,11 +34,11 @@ export function readClaudeQuota(root: string, accountRef: string, credentialVers
 }
 
 /** Missing/expired optional credentials must not hide the account row used to repair them. */
-export function readClaudeQuotaView(root: string, accountRef: string) {
+export async function readClaudeQuotaView(root: string, accountRef: string) {
   try {
     const profile = resolveByAccountRef(root, accountRef);
     if (!profile || profile.client !== 'anthropic') return undefined;
-    const owner = claudeExecutionAccountSnapshot(profile);
+    const owner = await claudeExecutionAccountSnapshot(profile);
     const quota = readClaudeQuota(root, accountRef, owner.credentialVersion);
     return quota ? { samples: quota.samples } : undefined;
   } catch {
@@ -47,13 +47,13 @@ export function readClaudeQuotaView(root: string, accountRef: string) {
 }
 
 /** Per-model atomic writes also preserve observations from another runtime/Alpha process. */
-export function recordClaudeQuota(input: {
+export async function recordClaudeQuota(input: {
   root: string;
   account: ExecutionAccountSnapshot;
   model: string;
   windows: unknown;
   observedAt: number;
-}): boolean {
+}): Promise<boolean> {
   const windows = parseClaudeQuotaWindows(input.windows);
   if (
     !input.account.credentialVersion ||
@@ -66,7 +66,7 @@ export function recordClaudeQuota(input: {
     return false;
   const current = resolveByAccountRef(input.root, input.account.accountRef);
   if (!current || current.client !== 'anthropic') return false;
-  const owner = claudeExecutionAccountSnapshot(current);
+  const owner = await claudeExecutionAccountSnapshot(current);
   if (
     !owner.credentialVersion ||
     owner.credentialVersion !== input.account.credentialVersion ||
@@ -101,20 +101,20 @@ export function recordClaudeQuota(input: {
 }
 
 /** Both official CLI and SDK use the same normalized event, with the frozen launch owner. */
-export function observeClaudeQuotaMessage(
+export async function observeClaudeQuotaMessage(
   root: string,
   account: ExecutionAccountSnapshot | undefined,
   model: string,
   message: { type: string; content?: string; timestamp: number },
   sourceKnown?: () => boolean,
-): void {
+): Promise<void> {
   if (!account?.credentialVersion || message.type !== 'system_info' || !message.content) return;
   try {
     const data: unknown = JSON.parse(message.content);
     if (!data || typeof data !== 'object' || !('type' in data) || data.type !== 'rate_limit' || !('windows' in data))
       return;
     if (sourceKnown && !sourceKnown()) return;
-    recordClaudeQuota({ root, account, model, windows: data.windows, observedAt: message.timestamp });
+    await recordClaudeQuota({ root, account, model, windows: data.windows, observedAt: message.timestamp });
   } catch {
     // Optional observations must not fail a model invocation or leak credential resolver errors.
   }

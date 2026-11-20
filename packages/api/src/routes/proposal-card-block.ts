@@ -12,6 +12,8 @@ import type { DeclaredWorkMode, ReportingMode, RichCardBlock, ThreadProposal } f
 
 // F128: user-facing label for each reporting mode. Phase AA makes `final-only`
 // the default; Phase AC lets the approver override this before creation.
+import { autoStartsApprovedTask } from '../domains/ball-custody/approved-task-contract.js';
+
 const REPORTING_MODE_LABEL: Record<ReportingMode, string> = {
   none: 'autonomous（下游自治，无强制回报）',
   'final-only': 'final-only（默认 · 自治推进，任务闭环后回报一次）',
@@ -66,6 +68,8 @@ export function buildProposalCardBlock(proposal: ThreadProposal): RichCardBlock 
       fields.push({ label: '执行范围', value: '本提案完整合同（标题、原因、首条消息、关联任务、执行成员与回报约定）' });
     }
   }
+  if (autoStartsApprovedTask(proposal))
+    fields.push({ label: '批准后', value: '首位执行成员直接承接原任务，完成后回报一次' });
   if (proposal.initialMessage) fields.push({ label: '首条消息', value: proposal.initialMessage });
   return {
     id: `proposal-${proposal.proposalId}`,

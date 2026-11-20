@@ -1,11 +1,12 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import { suggestionViewSchema, WATCHER_CONFIG_DEFAULTS } from '@cat-cafe/shared';
 import { applyDirectWatcherControl } from '../dist/domains/concierge/watcher/watcher-controls.js';
 import { createWatcherReceipts } from '../dist/domains/concierge/watcher/watcher-receipts.js';
 import { createSuggestionIntegration } from '../dist/domains/suggestions/composition.js';
 import { watcherWorld } from './helpers/watcher-world.js';
 
-async function setup(content = '这两小时别烦我') {
+async function setup(content = '这两小时别烦我', catId = 'codex') {
   const w = await watcherWorld();
   const message = await w.messages.append({
     userId: 'watcher-owner',
@@ -25,7 +26,7 @@ async function setup(content = '这两小时别烦我') {
   const row = await receipts.control({
     userId: 'watcher-owner',
     threadId: w.thread.id,
-    catId: 'codex',
+    catId,
     messageId: message.id,
     ...changed,
   });
@@ -33,8 +34,19 @@ async function setup(content = '这两小时别烦我') {
   return { ...w, suggestions, receipts, message, row: row.value };
 }
 
+for (const command of ['守望这条', '这条别守望了', '这两小时别烦我']) {
+  test(`an unconfigured installation persists a valid anonymous control receipt for ${command}`, async () => {
+    const f = await setup(command, WATCHER_CONFIG_DEFAULTS.memberCatId);
+    assert.doesNotThrow(() => suggestionViewSchema.parse(f.row));
+    assert.equal(f.row.catId, 'watcher');
+    assert.equal(f.row.byline, 'watcher');
+    assert.equal(f.row.messageId, f.message.id);
+  });
+}
+
 test('a direct pause is effective before its shared receipt, with one watcher row and the original resume action', async () => {
   const f = await setup();
+  assert.doesNotThrow(() => suggestionViewSchema.parse(f.row));
   assert.equal((await f.threads.get(f.thread.id)).watcher.pausedUntil, 7_200_100);
   assert.equal(f.row.messageId, f.message.id);
   assert.equal(f.row.byline, 'watcher');

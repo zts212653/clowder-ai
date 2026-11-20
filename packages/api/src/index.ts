@@ -49,6 +49,7 @@ import {
   deploymentDefaults,
   type EventMemoryRecord,
   type ILimbNode,
+  watcherPrimaryCatId,
 } from '@cat-cafe/shared';
 import type { RedisClient } from '@cat-cafe/shared/utils';
 import { createRedisClient, SessionStore } from '@cat-cafe/shared/utils';
@@ -888,6 +889,18 @@ async function initializeApi(
   const redis = redisUrl ? createRedisClient({ url: redisUrl }) : undefined;
   redisClient = redis ?? null;
 
+  const { CacheRetentionSettingsStore } = await import(
+    './domains/cats/services/session/cache/CacheRetentionSettingsStore.js'
+  );
+  const { CacheRetentionStateStore } = await import(
+    './domains/cats/services/session/cache/CacheRetentionStateStore.js'
+  );
+  const cacheRetentionSettingsStore = redis ? new CacheRetentionSettingsStore(redis) : undefined;
+  const cacheRetentionStateStore = redis ? new CacheRetentionStateStore(redis) : undefined;
+  let cacheRetentionCoordinator:
+    | import('./domains/cats/services/session/cache/CacheRetentionCoordinator.js').CacheRetentionCoordinator
+    | undefined;
+
   let apiInstanceLease: ApiInstanceLease | undefined;
   let shutdownForLeaseLoss: ((signal: string) => Promise<void>) | null = null;
   let forcedLeaseLossExitTimer: ReturnType<typeof setTimeout> | null = null;
@@ -1186,6 +1199,14 @@ async function initializeApi(
     resolveTargets: (requested, threadId, content, exact) =>
       router.resolveSendTargets(requested, threadId, content, exact),
     onAdmitted: async ({ threadId, message, entries }) => {
+      if (message && entries.some((entry) => entry.sourceCategory !== 'a2a_failure')) {
+        await cacheRetentionCoordinator
+          ?.observeDispatch(
+            message,
+            entries.flatMap((entry) => entry.targets),
+          )
+          .catch((err) => app.log.warn({ err }, '[F338] dispatch observation unavailable'));
+      }
       if (message && entries.some((entry) => entry.sourceCategory !== 'a2a_failure'))
         queueProcessor.registerCallerDispatchInitialTargets(
           message,
@@ -1208,7 +1229,7 @@ async function initializeApi(
                 watcherReceipts?.control({
                   userId: message.userId,
                   threadId,
-                  catId: config.memberCatId,
+                  catId: watcherPrimaryCatId(config),
                   messageId: message.id,
                   ...changed,
                 }),
@@ -2020,6 +2041,7 @@ async function initializeApi(
     sessionChainStore,
     100,
     (catId) => catRegistry.getAllConfigs()[catId],
+    cacheRetentionStateStore ? (record) => cacheRetentionStateStore.proof(record) : undefined,
   );
   const routingContextRuntime = redisClient
     ? createRoutingContextRuntime({
@@ -2928,6 +2950,7 @@ async function initializeApi(
     threads: threadStore,
     turns: turnExecutionStore,
     delegates: taskApprovedDelegateProvider,
+    proposals: proposalStore,
     tracker: invocationTracker,
     dispatchAuthority: taskHandoffDispatchAuthority(dispatchProposalStore, app.log),
     legacy: legacyTaskExecutions,
@@ -3031,6 +3054,7 @@ async function initializeApi(
     sessionChainStore,
     contextEpochOwner,
     hookAuthenticationReady: sessionHookAuthenticationReady,
+    sessionCacheObservationListener: async (record) => cacheRetentionCoordinator?.observeSource(record),
     claudeCompactionHooks,
     presentationLedger,
     runtimeSessionStore,
@@ -4700,12 +4724,23 @@ async function initializeApi(
     }),
     isLiveConfigChangePending: (userId) => liveCompanionSessions.isChangingPreferences(userId),
   });
+  // F336 Phase C: living-cat scene archive (CAS, TTL=0, no clearing route).
+  const { RedisCompanionSceneStore, MemoryCompanionSceneStore } = await import(
+    './domains/concierge/scene/companion-scene-store.js'
+  );
+  (await import('./routes/concierge-companion-scene.js')).registerConciergeCompanionSceneRoutes(app, {
+    store: redis ? new RedisCompanionSceneStore(redis) : new MemoryCompanionSceneStore(),
+  });
   await app.register((await import('./routes/watcher.js')).watcherRoutes, {
     configStore: conciergeConfigStoreShared,
     threadStore,
     labelStore,
     turnExecutionStore,
-    capability: (catId) => router.boundedWatcherSessionCapability(catId),
+    capability: (catId) =>
+      router.getStrategyDeps().services[catId]?.watcherMemberCapability?.() ?? {
+        supported: false,
+        reason: '此成员的守望读取尚未接通',
+      },
     runtimeReady: () => watcherSupervisor?.isReady() ?? false,
     controlChanged: (threadId) => watcherSupervisor?.controlChanged(threadId),
   });
@@ -5409,6 +5444,7 @@ async function initializeApi(
   };
 
   await app.register(proposalRoutes, {
+    ordinaryTaskHandoffs,
     projectRoot: resolveActiveProjectRoot(),
     proposalStore,
     threadStore,
@@ -7476,6 +7512,7 @@ async function initializeApi(
 
   // Session chain (F24)
   await app.register(sessionChainRoutes, {
+    readRetentionProof: cacheRetentionStateStore ? (record) => cacheRetentionStateStore.proof(record) : undefined,
     inspectLocalSession,
     resolveImportExecutionBoundary: async (input) => {
       const { captureImportedSessionBoundary } = await import(
@@ -7501,6 +7538,95 @@ async function initializeApi(
       activeExecutionService.resolveWorkingPresence(threadId, ownerUserId),
   });
   const { nativeSessionControlRoutes } = await import('./routes/native-session-control-routes.js');
+  const { cacheRetentionProbeRoutes } = await import('./routes/cache-retention-probe.js');
+  const { CacheRetentionProbeService } = await import(
+    './domains/cats/services/session/cache/CacheRetentionProbeService.js'
+  );
+  const { prepareInvocationExecutionBinding } = await import(
+    './domains/cats/services/agents/invocation/invoke-single-cat.js'
+  );
+  const cacheRetentionProbe = new CacheRetentionProbeService({
+    apiUrl: router.getStrategyDeps().invocationDeps.apiUrl,
+    sessions: sessionChainStore,
+    executions: turnExecutionStore,
+    registry,
+    reader: transcriptReader,
+    writer: transcriptWriter,
+    getService: (catId) => agentRegistry.get(catId),
+    isBusy: (threadId, catId, userId) =>
+      (invocationTracker.has(threadId, catId) && invocationTracker.getUserId(threadId, catId) === userId) ||
+      queueProcessor.hasPendingForCat(threadId, userId, catId),
+    prepareBinding: (input) =>
+      prepareInvocationExecutionBinding(router.getStrategyDeps().invocationDeps, {
+        ...input,
+        ownerAuthProvenance: 'strict',
+        toolExecutionPolicy: { mode: 'callback_allowlist', allowedCallbackRoutes: [] },
+      }),
+  });
+  const retentionSupported = (catId: string): boolean => {
+    // Phase A starts with the two explicitly approved directors. Opt-in never follows a model alias.
+    if (
+      !['fable-5', 'opus55'].includes(catId) ||
+      catRegistry.tryGet(catId)?.config.clientId !== 'anthropic' ||
+      !isCatAvailable(catId)
+    )
+      return false;
+    try {
+      return ['claude_agent_sdk', 'claude_print_sdk'].includes(
+        agentRegistry.get(createCatId(catId)).freshnessCarrierCapability?.().carrier ?? '',
+      );
+    } catch {
+      return false;
+    }
+  };
+  let retentionSettings: import('./routes/cache-retention-settings.js').CacheRetentionSettingsPort;
+  if (cacheRetentionSettingsStore && cacheRetentionStateStore) {
+    const { CacheRetentionCoordinator } = await import(
+      './domains/cats/services/session/cache/CacheRetentionCoordinator.js'
+    );
+    const { CacheRetentionSettingsService } = await import(
+      './domains/cats/services/session/cache/CacheRetentionSettingsService.js'
+    );
+    const { cacheRetentionTask } = await import('./domains/cats/services/session/cache/cache-retention-task.js');
+    const coordinator = new CacheRetentionCoordinator({
+      settings: cacheRetentionSettingsStore,
+      cacheFacts: turnExecutionStore.cacheFacts,
+      store: cacheRetentionStateStore,
+      messages: messageStore,
+      sessions: sessionChainStore,
+      probe: cacheRetentionProbe,
+      isSupported: retentionSupported,
+      isBusy: (threadId, catId, userId) =>
+        invocationTracker.has(threadId, createCatId(catId)) ||
+        queueProcessor.hasPendingForCat(threadId, userId, createCatId(catId)),
+      onError: (err) => app.log.warn({ err }, '[F338] cache retention stopped or unavailable'),
+    });
+    cacheRetentionCoordinator = coordinator;
+    retentionSettings = new CacheRetentionSettingsService({
+      store: cacheRetentionSettingsStore,
+      isSupported: retentionSupported,
+      readSessions: (userId, catId) => coordinator.sessions(userId, catId),
+      preferenceChanged: (userId, catId) => coordinator.preferenceChanged(userId, catId),
+    });
+    taskRunnerV2.register(cacheRetentionTask(coordinator));
+    app.addHook('preClose', async () => coordinator.close());
+  } else {
+    retentionSettings = {
+      async get(_userId, catId) {
+        return { catId, supported: false, enabled: false, reason: 'durable_store_unavailable', sessions: [] };
+      },
+      async set() {
+        throw new Error('cache_retention_durable_store_unavailable');
+      },
+    };
+  }
+  await app.register(cacheRetentionProbeRoutes, {
+    enabled: process.env.CAT_CAFE_DEPLOYMENT_ID === 'development',
+    threads: threadStore,
+    service: cacheRetentionProbe,
+    settings: retentionSettings,
+  });
+  app.addHook('preClose', async () => cacheRetentionProbe.close());
   await app.register(nativeSessionControlRoutes, {
     enabled: process.env.CAT_CAFE_DEPLOYMENT_ID === 'alpha',
     sessionChainStore,

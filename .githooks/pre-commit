@@ -332,6 +332,14 @@ else
   fi
 fi
 
+# Task229: inspect API index bytes before a commit can add a known blocking process call.
+if printf '%s\n' "$STAGED_FILES" | grep -qE '^packages/api/src/.*\.[cm]?[jt]sx?$|^scripts/(check-api-sync-calls|lib/api-sync-)'; then
+  if ! (cd "$REPO_ROOT" && node scripts/check-api-sync-calls.mjs --staged); then
+    echo "API event-loop guard failed; fix the staged synchronous call or isolate it in a reviewed child entry." >&2
+    exit 1
+  fi
+fi
+
 # ── Brand Guard: detect brand-protected staged files ──
 # F238 Phase C: dictionary-driven detection for brand-sensitive AND manual-port paths.
 # Runs on ALL branches including main — brand contamination must be caught everywhere.

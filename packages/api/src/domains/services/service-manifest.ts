@@ -600,6 +600,7 @@ export function serviceHealthIdentityMatches(
   service: ServiceManifest,
   config: ServiceConfig | undefined,
   health: ServiceHealthResult,
+  expectedAsrSource?: string,
 ): { matches: boolean; reason?: string } {
   if (!service.healthIdentity) return { matches: true };
   if (service.healthIdentity === 'tts-stream-route-v1') {
@@ -619,6 +620,15 @@ export function serviceHealthIdentityMatches(
       reason:
         `desired model=${logSafeIdentity(desiredModel)} backend=${logSafeIdentity(desiredBackend)}; ` +
         `live model=${logSafeIdentity(liveModel)} backend=${logSafeIdentity(liveBackend)}`,
+    };
+  }
+  const liveAsrSource = health.details?.asr_source_sha256;
+  if (expectedAsrSource && liveAsrSource !== expectedAsrSource) {
+    return {
+      matches: false,
+      reason: liveAsrSource
+        ? 'ASR code fingerprint differs from this checkout'
+        : 'ASR did not report a code fingerprint for this checkout',
     };
   }
   return { matches: true };

@@ -3,6 +3,7 @@
 import { VoiceInputButton } from '@cat-cafe/ui';
 import type { useVoiceInput } from '@/hooks/useVoiceInput';
 import { AppTooltip } from './AppTooltip';
+import { ComposerMicrophonePicker } from './ComposerMicrophonePicker';
 import { chatComposerCopy } from './chat-composer.shell-copy';
 import { useShellCopy } from './shell/shell-copy';
 import { useShellLanguage } from './shell/shell-language';
@@ -29,16 +30,19 @@ function ComposerVoiceControl({ voice, disabled }: Pick<ChatComposerActionsProps
   const label = recording ? t.stopRecording : transcribing ? t.transcribing : t.voice;
   const language = useShellLanguage();
   return (
-    <AppTooltip label={label} side="top" shortcut={recording || transcribing ? undefined : '⌥V'}>
-      <VoiceInputButton
-        language={language}
-        state={voice.state}
-        disabled={disabled}
-        onStart={voice.startRecording}
-        onStop={voice.stopRecording}
-        className={control}
-      />
-    </AppTooltip>
+    <div className="flex shrink-0 items-center">
+      <AppTooltip label={label} side="top" shortcut={recording || transcribing ? undefined : '⌥V'}>
+        <VoiceInputButton
+          language={language}
+          state={voice.state}
+          disabled={disabled}
+          onStart={voice.startRecording}
+          onStop={voice.stopRecording}
+          className={control}
+        />
+      </AppTooltip>
+      <ComposerMicrophonePicker disabled={disabled || recording || transcribing} />
+    </div>
   );
 }
 

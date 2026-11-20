@@ -11,6 +11,7 @@ import { assertApprovalEnvelopeIdentity, commitApprovalEnvelope, generateProposa
 import {
   type ApprovedTaskContinuationInput,
   type ApprovedTaskContinuationResult,
+  continuationUserId,
   decideApprovedTaskContinuation,
   implementationUsedProposal,
   type MemoryContinuationAuthority,
@@ -85,7 +86,7 @@ export class InMemoryProposalStore implements IProposalStore {
       proposal?.createdThreadId ? authority.child(proposal.createdThreadId) : null,
       proposal
         ? (authority
-            .implementations(input.taskId, input.actor.userId)
+            .implementations(input.taskId, continuationUserId(input))
             .find((lease) => implementationUsedProposal(lease, proposal)) ?? null)
         : null,
     );
@@ -120,6 +121,7 @@ export class InMemoryProposalStore implements IProposalStore {
       ...(input.subjectTaskId ? { subjectTaskId: input.subjectTaskId } : {}),
       ...(input.subjectTaskTitle ? { subjectTaskTitle: input.subjectTaskTitle } : {}),
       ...(input.approvedDevelopmentScope ? { approvedDevelopmentScope: { ...input.approvedDevelopmentScope } } : {}),
+      ...(input.taskStartOwnerRevision !== undefined ? { taskStartOwnerRevision: input.taskStartOwnerRevision } : {}),
     };
     this.proposals.set(proposal.proposalId, proposal);
     return this.indexedSnapshot(proposal);

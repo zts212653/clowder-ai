@@ -59,7 +59,12 @@ export const RECENT_STOP_WINDOW_MS = 30 * 60_000;
 export function selectRecentStops(records: readonly TurnExecutionRecord[], now: number): ThreadRecentStop[] {
   const latest = new Map<string, TurnExecutionRecord>();
   for (const record of records) {
-    if (record.executionKind === 'watcher' || record.endedAt === undefined) continue;
+    if (
+      record.executionKind === 'watcher' ||
+      record.executionKind === 'cache_retention' ||
+      record.endedAt === undefined
+    )
+      continue;
     const seen = latest.get(record.catId);
     if (!seen || (seen.endedAt ?? 0) < record.endedAt) latest.set(record.catId, record);
   }

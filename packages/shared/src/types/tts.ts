@@ -110,6 +110,8 @@ export type TtsSynthesizeStreamEvent =
 export interface TtsSynthesizeStreamOptions {
   /** Cancels work that no longer has a playback consumer. */
   readonly signal?: AbortSignal;
+  /** Observe native audio before the provider normalizes the final-chunk marker. */
+  readonly onEarlyChunk?: (chunk: Extract<TtsSynthesizeStreamEvent, { type: 'chunk' }>) => void;
 }
 
 /** Interface that all TTS providers must implement */

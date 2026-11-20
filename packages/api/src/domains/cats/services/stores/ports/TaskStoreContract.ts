@@ -325,6 +325,7 @@ export interface ReplaceAutomationStateIfGenerationInput {
 }
 
 export interface ReplaceDeploymentWaitIfGenerationInput {
+  readonly expectedTaskAssignment?: import('./OrdinaryTaskMutation.js').OrdinaryTaskExpectation;
   /** Producer-owned proof installed atomically with a new await generation; never public Task state. */
   readonly waitRegistration?: TypedWaitRegistration;
   readonly expectedGeneration: number | null;

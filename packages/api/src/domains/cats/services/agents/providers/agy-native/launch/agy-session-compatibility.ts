@@ -17,9 +17,13 @@ export function containsDirectoryPath(parent: string, child: string): boolean {
   return rel === '' || (rel !== '..' && !rel.startsWith(`..${sep}`) && !isAbsolute(rel));
 }
 
-export function hostAgyNativeAgentName(catId: string, mode: 'normal' | 'readonly' | 'member' = 'normal'): string {
+export function hostAgyNativeAgentName(
+  catId: string,
+  mode: 'normal' | 'readonly' | 'member' | 'watcher' = 'normal',
+): string {
   if (!/^[a-z][a-z0-9-]*$/.test(catId)) throw new Error('Unsafe AGY native cat ID');
   if (mode === 'readonly') return `cat-cafe-host-${catId}-readonly`;
+  if (mode === 'watcher') return `cat-cafe-host-${catId}-watcher`;
   if (mode === 'member') return `cat-cafe-host-${catId}-member`;
   return `cat-cafe-host-${catId}`;
 }
@@ -27,7 +31,8 @@ export function hostAgyNativeAgentName(catId: string, mode: 'normal' | 'readonly
 export function matchesCatAgyAgentName(
   agentName: string,
   catId: string,
-): { readonly matches: boolean; readonly bornReadOnly: boolean } {
+): { readonly matches: boolean; readonly bornReadOnly: boolean; readonly watcher?: boolean } {
+  if (agentName === `cat-cafe-host-${catId}-watcher`) return { matches: true, bornReadOnly: false, watcher: true };
   if (agentName === `cat-cafe-host-${catId}` || agentName === `cat-cafe-${catId}`) {
     return { matches: true, bornReadOnly: false };
   }

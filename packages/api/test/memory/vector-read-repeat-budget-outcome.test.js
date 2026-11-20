@@ -20,7 +20,8 @@ for (const finalRead of ['succeeds', 'worker-exits', 'caller-cancels', 'deadline
     t.after(() => release());
     const { lifecycle } = f.boot(async (texts) => {
       if (!enabled || !texts.some((text) => text.includes('sonata'))) return;
-      if (++queryEncodes === 1) await sleep(1100);
+      // The outer vector budget must expire before the repeat's own window.
+      if (++queryEncodes === 1) await sleep(2100);
       else await stalled;
     });
     assert.equal((await lifecycle.activate('on', { rebuildLegacyModel: model.modelId })).ok, true);

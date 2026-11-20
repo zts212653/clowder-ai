@@ -44,7 +44,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleAckMentions",
-      "protectedImplementationDigest": "sha256:8a7d7a91917d316c3fab27d1b7acd217591ba7b0f721c9cacf825c381e4c53c9"
+      "protectedImplementationDigest": "sha256:164607010c1409aa835f0df21e19068f3ad6b7c9f06f6811776130613aa6c733"
     },
     {
       "name": "cat_cafe_act_artifact_review",
@@ -1318,7 +1318,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleAdmitEntrustedWork",
-      "protectedImplementationDigest": "sha256:8a7d7a91917d316c3fab27d1b7acd217591ba7b0f721c9cacf825c381e4c53c9"
+      "protectedImplementationDigest": "sha256:164607010c1409aa835f0df21e19068f3ad6b7c9f06f6811776130613aa6c733"
     },
     {
       "name": "cat_cafe_advance_evolution_program_change",
@@ -2186,7 +2186,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleBootcampEnvCheck",
-      "protectedImplementationDigest": "sha256:8a7d7a91917d316c3fab27d1b7acd217591ba7b0f721c9cacf825c381e4c53c9"
+      "protectedImplementationDigest": "sha256:164607010c1409aa835f0df21e19068f3ad6b7c9f06f6811776130613aa6c733"
     },
     {
       "name": "cat_cafe_bring_to_desk",
@@ -2937,7 +2937,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleCloseEntrustedWork",
-      "protectedImplementationDigest": "sha256:8a7d7a91917d316c3fab27d1b7acd217591ba7b0f721c9cacf825c381e4c53c9"
+      "protectedImplementationDigest": "sha256:164607010c1409aa835f0df21e19068f3ad6b7c9f06f6811776130613aa6c733"
     },
     {
       "name": "cat_cafe_constitute_evolution_program",
@@ -3155,7 +3155,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleContinueApprovedTask",
-      "protectedImplementationDigest": "sha256:8a7d7a91917d316c3fab27d1b7acd217591ba7b0f721c9cacf825c381e4c53c9"
+      "protectedImplementationDigest": "sha256:164607010c1409aa835f0df21e19068f3ad6b7c9f06f6811776130613aa6c733"
     },
     {
       "name": "cat_cafe_create_rich_block",
@@ -3285,7 +3285,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleCreateRichBlock",
-      "protectedImplementationDigest": "sha256:8a7d7a91917d316c3fab27d1b7acd217591ba7b0f721c9cacf825c381e4c53c9"
+      "protectedImplementationDigest": "sha256:164607010c1409aa835f0df21e19068f3ad6b7c9f06f6811776130613aa6c733"
     },
     {
       "name": "cat_cafe_create_task",
@@ -3379,7 +3379,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleCreateTask",
-      "protectedImplementationDigest": "sha256:8a7d7a91917d316c3fab27d1b7acd217591ba7b0f721c9cacf825c381e4c53c9"
+      "protectedImplementationDigest": "sha256:164607010c1409aa835f0df21e19068f3ad6b7c9f06f6811776130613aa6c733"
     },
     {
       "name": "cat_cafe_cross_post_message",
@@ -3715,7 +3715,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleCrossPostMessage",
-      "protectedImplementationDigest": "sha256:8a7d7a91917d316c3fab27d1b7acd217591ba7b0f721c9cacf825c381e4c53c9"
+      "protectedImplementationDigest": "sha256:164607010c1409aa835f0df21e19068f3ad6b7c9f06f6811776130613aa6c733"
     },
     {
       "name": "cat_cafe_development_return",
@@ -4386,7 +4386,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleDisposeDeferredPersonMemory",
-      "protectedImplementationDigest": "sha256:8a7d7a91917d316c3fab27d1b7acd217591ba7b0f721c9cacf825c381e4c53c9"
+      "protectedImplementationDigest": "sha256:164607010c1409aa835f0df21e19068f3ad6b7c9f06f6811776130613aa6c733"
     },
     {
       "name": "cat_cafe_drill_person_memory",
@@ -4483,7 +4483,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleDrillPersonMemory",
-      "protectedImplementationDigest": "sha256:8a7d7a91917d316c3fab27d1b7acd217591ba7b0f721c9cacf825c381e4c53c9"
+      "protectedImplementationDigest": "sha256:164607010c1409aa835f0df21e19068f3ad6b7c9f06f6811776130613aa6c733"
     },
     {
       "name": "cat_cafe_edit_office_document",
@@ -4673,7 +4673,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleFeatIndex",
-      "protectedImplementationDigest": "sha256:8a7d7a91917d316c3fab27d1b7acd217591ba7b0f721c9cacf825c381e4c53c9"
+      "protectedImplementationDigest": "sha256:164607010c1409aa835f0df21e19068f3ad6b7c9f06f6811776130613aa6c733"
     },
     {
       "name": "cat_cafe_finance_query",
@@ -4830,7 +4830,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleGenerateDocument",
-      "protectedImplementationDigest": "sha256:8a7d7a91917d316c3fab27d1b7acd217591ba7b0f721c9cacf825c381e4c53c9"
+      "protectedImplementationDigest": "sha256:164607010c1409aa835f0df21e19068f3ad6b7c9f06f6811776130613aa6c733"
     },
     {
       "name": "cat_cafe_get_available_guides",
@@ -4866,7 +4866,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleGetAvailableGuides",
-      "protectedImplementationDigest": "sha256:8a7d7a91917d316c3fab27d1b7acd217591ba7b0f721c9cacf825c381e4c53c9"
+      "protectedImplementationDigest": "sha256:164607010c1409aa835f0df21e19068f3ad6b7c9f06f6811776130613aa6c733"
     },
     {
       "name": "cat_cafe_get_custody_events",
@@ -4917,7 +4917,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleGetCustodyEvents",
-      "protectedImplementationDigest": "sha256:8a7d7a91917d316c3fab27d1b7acd217591ba7b0f721c9cacf825c381e4c53c9"
+      "protectedImplementationDigest": "sha256:164607010c1409aa835f0df21e19068f3ad6b7c9f06f6811776130613aa6c733"
     },
     {
       "name": "cat_cafe_get_evolution_program",
@@ -5056,7 +5056,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleGetHoldStatus",
-      "protectedImplementationDigest": "sha256:8a7d7a91917d316c3fab27d1b7acd217591ba7b0f721c9cacf825c381e4c53c9"
+      "protectedImplementationDigest": "sha256:164607010c1409aa835f0df21e19068f3ad6b7c9f06f6811776130613aa6c733"
     },
     {
       "name": "cat_cafe_get_message",
@@ -5122,7 +5122,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleGetMessage",
-      "protectedImplementationDigest": "sha256:8a7d7a91917d316c3fab27d1b7acd217591ba7b0f721c9cacf825c381e4c53c9"
+      "protectedImplementationDigest": "sha256:164607010c1409aa835f0df21e19068f3ad6b7c9f06f6811776130613aa6c733"
     },
     {
       "name": "cat_cafe_get_pending_decisions",
@@ -5171,7 +5171,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleGetPendingDecisions",
-      "protectedImplementationDigest": "sha256:8a7d7a91917d316c3fab27d1b7acd217591ba7b0f721c9cacf825c381e4c53c9"
+      "protectedImplementationDigest": "sha256:164607010c1409aa835f0df21e19068f3ad6b7c9f06f6811776130613aa6c733"
     },
     {
       "name": "cat_cafe_get_pending_mentions",
@@ -5218,7 +5218,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleGetPendingMentions",
-      "protectedImplementationDigest": "sha256:8a7d7a91917d316c3fab27d1b7acd217591ba7b0f721c9cacf825c381e4c53c9"
+      "protectedImplementationDigest": "sha256:164607010c1409aa835f0df21e19068f3ad6b7c9f06f6811776130613aa6c733"
     },
     {
       "name": "cat_cafe_get_person_memory_proposal_status",
@@ -5269,7 +5269,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleGetPersonMemoryProposalStatus",
-      "protectedImplementationDigest": "sha256:8a7d7a91917d316c3fab27d1b7acd217591ba7b0f721c9cacf825c381e4c53c9"
+      "protectedImplementationDigest": "sha256:164607010c1409aa835f0df21e19068f3ad6b7c9f06f6811776130613aa6c733"
     },
     {
       "name": "cat_cafe_get_recall_metrics",
@@ -5395,7 +5395,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleGetRunningWork",
-      "protectedImplementationDigest": "sha256:8a7d7a91917d316c3fab27d1b7acd217591ba7b0f721c9cacf825c381e4c53c9"
+      "protectedImplementationDigest": "sha256:164607010c1409aa835f0df21e19068f3ad6b7c9f06f6811776130613aa6c733"
     },
     {
       "name": "cat_cafe_get_thread_cats",
@@ -5452,7 +5452,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleGetThreadCats",
-      "protectedImplementationDigest": "sha256:8a7d7a91917d316c3fab27d1b7acd217591ba7b0f721c9cacf825c381e4c53c9"
+      "protectedImplementationDigest": "sha256:164607010c1409aa835f0df21e19068f3ad6b7c9f06f6811776130613aa6c733"
     },
     {
       "name": "cat_cafe_get_thread_context",
@@ -5558,7 +5558,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleGetThreadContext",
-      "protectedImplementationDigest": "sha256:8a7d7a91917d316c3fab27d1b7acd217591ba7b0f721c9cacf825c381e4c53c9"
+      "protectedImplementationDigest": "sha256:164607010c1409aa835f0df21e19068f3ad6b7c9f06f6811776130613aa6c733"
     },
     {
       "name": "cat_cafe_get_thread_metadata",
@@ -5592,7 +5592,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleGetThreadMetadata",
-      "protectedImplementationDigest": "sha256:8a7d7a91917d316c3fab27d1b7acd217591ba7b0f721c9cacf825c381e4c53c9"
+      "protectedImplementationDigest": "sha256:164607010c1409aa835f0df21e19068f3ad6b7c9f06f6811776130613aa6c733"
     },
     {
       "name": "cat_cafe_get_workflow_sop",
@@ -5641,7 +5641,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleGetWorkflowSop",
-      "protectedImplementationDigest": "sha256:8a7d7a91917d316c3fab27d1b7acd217591ba7b0f721c9cacf825c381e4c53c9"
+      "protectedImplementationDigest": "sha256:164607010c1409aa835f0df21e19068f3ad6b7c9f06f6811776130613aa6c733"
     },
     {
       "name": "cat_cafe_guide_control",
@@ -5689,7 +5689,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleGuideControl",
-      "protectedImplementationDigest": "sha256:8a7d7a91917d316c3fab27d1b7acd217591ba7b0f721c9cacf825c381e4c53c9"
+      "protectedImplementationDigest": "sha256:164607010c1409aa835f0df21e19068f3ad6b7c9f06f6811776130613aa6c733"
     },
     {
       "name": "cat_cafe_hold_ball",
@@ -5837,7 +5837,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleHoldBall",
-      "protectedImplementationDigest": "sha256:8a7d7a91917d316c3fab27d1b7acd217591ba7b0f721c9cacf825c381e4c53c9"
+      "protectedImplementationDigest": "sha256:164607010c1409aa835f0df21e19068f3ad6b7c9f06f6811776130613aa6c733"
     },
     {
       "name": "cat_cafe_home_action",
@@ -6748,7 +6748,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleListLabels",
-      "protectedImplementationDigest": "sha256:8a7d7a91917d316c3fab27d1b7acd217591ba7b0f721c9cacf825c381e4c53c9"
+      "protectedImplementationDigest": "sha256:164607010c1409aa835f0df21e19068f3ad6b7c9f06f6811776130613aa6c733"
     },
     {
       "name": "cat_cafe_list_paw_feel_inbox",
@@ -7031,7 +7031,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleListTasks",
-      "protectedImplementationDigest": "sha256:8a7d7a91917d316c3fab27d1b7acd217591ba7b0f721c9cacf825c381e4c53c9"
+      "protectedImplementationDigest": "sha256:164607010c1409aa835f0df21e19068f3ad6b7c9f06f6811776130613aa6c733"
     },
     {
       "name": "cat_cafe_list_threads",
@@ -7109,7 +7109,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleListThreads",
-      "protectedImplementationDigest": "sha256:8a7d7a91917d316c3fab27d1b7acd217591ba7b0f721c9cacf825c381e4c53c9"
+      "protectedImplementationDigest": "sha256:164607010c1409aa835f0df21e19068f3ad6b7c9f06f6811776130613aa6c733"
     },
     {
       "name": "cat_cafe_manage_conversation_decision",
@@ -7668,7 +7668,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleMultiMention",
-      "protectedImplementationDigest": "sha256:8a7d7a91917d316c3fab27d1b7acd217591ba7b0f721c9cacf825c381e4c53c9"
+      "protectedImplementationDigest": "sha256:164607010c1409aa835f0df21e19068f3ad6b7c9f06f6811776130613aa6c733"
     },
     {
       "name": "cat_cafe_offer_custody",
@@ -7728,7 +7728,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleOfferCustody",
-      "protectedImplementationDigest": "sha256:8a7d7a91917d316c3fab27d1b7acd217591ba7b0f721c9cacf825c381e4c53c9"
+      "protectedImplementationDigest": "sha256:164607010c1409aa835f0df21e19068f3ad6b7c9f06f6811776130613aa6c733"
     },
     {
       "name": "cat_cafe_offer_suggestion",
@@ -9887,7 +9887,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handlePostMessage",
-      "protectedImplementationDigest": "sha256:8a7d7a91917d316c3fab27d1b7acd217591ba7b0f721c9cacf825c381e4c53c9"
+      "protectedImplementationDigest": "sha256:164607010c1409aa835f0df21e19068f3ad6b7c9f06f6811776130613aa6c733"
     },
     {
       "name": "cat_cafe_prepare_artifact_review",
@@ -10023,7 +10023,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handlePrepareMemoryContext",
-      "protectedImplementationDigest": "sha256:8a7d7a91917d316c3fab27d1b7acd217591ba7b0f721c9cacf825c381e4c53c9"
+      "protectedImplementationDigest": "sha256:164607010c1409aa835f0df21e19068f3ad6b7c9f06f6811776130613aa6c733"
     },
     {
       "name": "cat_cafe_prepare_request_review_consumption",
@@ -10642,7 +10642,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleProposeSessionHandoff",
-      "protectedImplementationDigest": "sha256:8a7d7a91917d316c3fab27d1b7acd217591ba7b0f721c9cacf825c381e4c53c9"
+      "protectedImplementationDigest": "sha256:164607010c1409aa835f0df21e19068f3ad6b7c9f06f6811776130613aa6c733"
     },
     {
       "name": "cat_cafe_propose_thread",
@@ -10768,7 +10768,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleProposeThread",
-      "protectedImplementationDigest": "sha256:8a7d7a91917d316c3fab27d1b7acd217591ba7b0f721c9cacf825c381e4c53c9"
+      "protectedImplementationDigest": "sha256:164607010c1409aa835f0df21e19068f3ad6b7c9f06f6811776130613aa6c733"
     },
     {
       "name": "cat_cafe_publish_harness_history",
@@ -12363,7 +12363,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/file-tools.js#handleReadFileSlice",
-      "protectedImplementationDigest": "sha256:85e5c0f1bde40414b4c8f3d6a867c41c75b40b436d6d2ece0979f976309d3862"
+      "protectedImplementationDigest": "sha256:d54a8fac69dd0dc0e5498264a56fd5110b68c64565bde9a5f783fb8415268100"
     },
     {
       "name": "cat_cafe_read_invocation_detail",
@@ -13095,7 +13095,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleRecallPersonRelationship",
-      "protectedImplementationDigest": "sha256:8a7d7a91917d316c3fab27d1b7acd217591ba7b0f721c9cacf825c381e4c53c9"
+      "protectedImplementationDigest": "sha256:164607010c1409aa835f0df21e19068f3ad6b7c9f06f6811776130613aa6c733"
     },
     {
       "name": "cat_cafe_record_eval_lifecycle",
@@ -13619,7 +13619,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleRecordMemoryCueOutcome",
-      "protectedImplementationDigest": "sha256:8a7d7a91917d316c3fab27d1b7acd217591ba7b0f721c9cacf825c381e4c53c9"
+      "protectedImplementationDigest": "sha256:164607010c1409aa835f0df21e19068f3ad6b7c9f06f6811776130613aa6c733"
     },
     {
       "name": "cat_cafe_record_request_review_consumption",
@@ -14115,7 +14115,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleRegisterDeploymentWait",
-      "protectedImplementationDigest": "sha256:8a7d7a91917d316c3fab27d1b7acd217591ba7b0f721c9cacf825c381e4c53c9"
+      "protectedImplementationDigest": "sha256:164607010c1409aa835f0df21e19068f3ad6b7c9f06f6811776130613aa6c733"
     },
     {
       "name": "cat_cafe_register_external_runtime_session",
@@ -17173,7 +17173,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleRetryCustodyAdmission",
-      "protectedImplementationDigest": "sha256:8a7d7a91917d316c3fab27d1b7acd217591ba7b0f721c9cacf825c381e4c53c9"
+      "protectedImplementationDigest": "sha256:164607010c1409aa835f0df21e19068f3ad6b7c9f06f6811776130613aa6c733"
     },
     {
       "name": "cat_cafe_revise_person_memory",
@@ -17476,7 +17476,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleRevisePersonMemory",
-      "protectedImplementationDigest": "sha256:8a7d7a91917d316c3fab27d1b7acd217591ba7b0f721c9cacf825c381e4c53c9"
+      "protectedImplementationDigest": "sha256:164607010c1409aa835f0df21e19068f3ad6b7c9f06f6811776130613aa6c733"
     },
     {
       "name": "cat_cafe_run_perspective",
@@ -17840,7 +17840,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleSetReadMode",
-      "protectedImplementationDigest": "sha256:8a7d7a91917d316c3fab27d1b7acd217591ba7b0f721c9cacf825c381e4c53c9"
+      "protectedImplementationDigest": "sha256:164607010c1409aa835f0df21e19068f3ad6b7c9f06f6811776130613aa6c733"
     },
     {
       "name": "cat_cafe_set_thread_metadata",
@@ -18085,7 +18085,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleSetThreadMetadata",
-      "protectedImplementationDigest": "sha256:8a7d7a91917d316c3fab27d1b7acd217591ba7b0f721c9cacf825c381e4c53c9"
+      "protectedImplementationDigest": "sha256:164607010c1409aa835f0df21e19068f3ad6b7c9f06f6811776130613aa6c733"
     },
     {
       "name": "cat_cafe_settle_present_loop",
@@ -18787,7 +18787,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleStartGuide",
-      "protectedImplementationDigest": "sha256:8a7d7a91917d316c3fab27d1b7acd217591ba7b0f721c9cacf825c381e4c53c9"
+      "protectedImplementationDigest": "sha256:164607010c1409aa835f0df21e19068f3ad6b7c9f06f6811776130613aa6c733"
     },
     {
       "name": "cat_cafe_start_vote",
@@ -18865,7 +18865,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleStartVote",
-      "protectedImplementationDigest": "sha256:8a7d7a91917d316c3fab27d1b7acd217591ba7b0f721c9cacf825c381e4c53c9"
+      "protectedImplementationDigest": "sha256:164607010c1409aa835f0df21e19068f3ad6b7c9f06f6811776130613aa6c733"
     },
     {
       "name": "cat_cafe_submit_evolution_preparation",
@@ -20603,7 +20603,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleUpdateBootcampState",
-      "protectedImplementationDigest": "sha256:8a7d7a91917d316c3fab27d1b7acd217591ba7b0f721c9cacf825c381e4c53c9"
+      "protectedImplementationDigest": "sha256:164607010c1409aa835f0df21e19068f3ad6b7c9f06f6811776130613aa6c733"
     },
     {
       "name": "cat_cafe_update_entrusted_work",
@@ -20788,7 +20788,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleUpdateEntrustedWork",
-      "protectedImplementationDigest": "sha256:8a7d7a91917d316c3fab27d1b7acd217591ba7b0f721c9cacf825c381e4c53c9"
+      "protectedImplementationDigest": "sha256:164607010c1409aa835f0df21e19068f3ad6b7c9f06f6811776130613aa6c733"
     },
     {
       "name": "cat_cafe_update_evolution_program",
@@ -21135,7 +21135,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleUpdateGuideState",
-      "protectedImplementationDigest": "sha256:8a7d7a91917d316c3fab27d1b7acd217591ba7b0f721c9cacf825c381e4c53c9"
+      "protectedImplementationDigest": "sha256:164607010c1409aa835f0df21e19068f3ad6b7c9f06f6811776130613aa6c733"
     },
     {
       "name": "cat_cafe_update_scheduled_task_params",
@@ -21205,10 +21205,10 @@
         "update"
       ],
       "activeState": "canonical",
-      "description": "Update a task you own, or pick up an unassigned ordinary Task in your home thread by marking it doing; also resolve a missing dispatch gate. Entrusted work cannot be marked done through this generic tool; use its typed, evidence-backed closure action. Output: the canonical Task update is returned; picking up an unassigned Task assigns its owner and binds the current authenticated execution atomically. Ordinary completion never waits for a lease mirror. GOTCHA: assigned ordinary work requires the current owner or exact admitted delegate execution; include expectedOwnerRevision from the Task read. Stale assignment, source withdrawal or a different live writer is rejected. A later owner invocation recovers a stranded binding only with exact positive provider-stop evidence. Entrusted/typed closure and namespaced producers retain their own contracts. TIP: why replaces the prior note, max 1000 UTF-16 code units (JavaScript string.length); omitted or empty keeps it. Include a note when blocked. F193-E1: Pass dispatchGate to resolve a \"missing\" dispatch gate (e.g. after cross_posting to the owning thread).",
-      "descriptionDigest": "sha256:8cb78b9742c8e6b48adff55dbdc7010fded4ce7b50cbe8c6f1decf2b383967ed",
-      "descriptionCharacters": 1115,
-      "descriptionTokensCl100kBase": 221,
+      "description": "Update a task you own, or pick up an unassigned ordinary Task in your home thread by marking it doing; also resolve a missing dispatch gate. Completing a new final-only ordinary approval with resultMessageId sends its saved result to the original owner once. Entrusted work cannot be marked done through this generic tool; use its typed, evidence-backed closure action. Output: the canonical Task update is returned; picking up an unassigned Task assigns its owner and binds the current authenticated execution atomically. Ordinary completion never waits for a lease mirror. GOTCHA: assigned ordinary work requires the current owner or exact admitted delegate execution; include expectedOwnerRevision from the Task read. Stale assignment, source withdrawal or a different live writer is rejected. A later owner invocation recovers a stranded binding only with exact positive provider-stop evidence. Entrusted/typed closure and namespaced producers retain their own contracts. TIP: why replaces the prior note, max 1000 UTF-16 code units (JavaScript string.length); omitted or empty keeps it. Include a note when blocked. F193-E1: Pass dispatchGate to resolve a \"missing\" dispatch gate (e.g. after cross_posting to the owning thread).",
+      "descriptionDigest": "sha256:506f7106bdad142269c6d16d1c4628824fe030174be216b60b48af0296c985f2",
+      "descriptionCharacters": 1233,
+      "descriptionTokensCl100kBase": 243,
       "inputSchema": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "additionalProperties": false,
@@ -21247,6 +21247,12 @@
             "minimum": 0,
             "type": "integer"
           },
+          "resultMessageId": {
+            "description": "When completing a new final-only ordinary approval, pass the persisted result message ID from this exact execution. Retry the same result if delivery is pending.",
+            "maxLength": 200,
+            "minLength": 1,
+            "type": "string"
+          },
           "status": {
             "description": "New task status. Entrusted work rejects status=done here; its Task owner requires an evidence-backed typed closure action.",
             "enum": [
@@ -21273,7 +21279,7 @@
         ],
         "type": "object"
       },
-      "inputSchemaDigest": "sha256:77989aea695d67e0a6e609da2d2faedfe0c1650bd4c37d60e82a938d0442bbeb",
+      "inputSchemaDigest": "sha256:e7a31f1f43dc06a40385170855d40174e4ab1cac2ec0b5f6bd32acf7e1a13b1a",
       "annotations": {
         "destructiveHint": false,
         "openWorldHint": false,
@@ -21288,7 +21294,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleUpdateTask",
-      "protectedImplementationDigest": "sha256:8a7d7a91917d316c3fab27d1b7acd217591ba7b0f721c9cacf825c381e4c53c9"
+      "protectedImplementationDigest": "sha256:164607010c1409aa835f0df21e19068f3ad6b7c9f06f6811776130613aa6c733"
     },
     {
       "name": "cat_cafe_update_workflow",
@@ -21438,7 +21444,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleUpdateWorkflow",
-      "protectedImplementationDigest": "sha256:8a7d7a91917d316c3fab27d1b7acd217591ba7b0f721c9cacf825c381e4c53c9"
+      "protectedImplementationDigest": "sha256:164607010c1409aa835f0df21e19068f3ad6b7c9f06f6811776130613aa6c733"
     },
     {
       "name": "cat_cafe_video_project_command",
@@ -22159,7 +22165,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleWithdrawThreadProposal",
-      "protectedImplementationDigest": "sha256:8a7d7a91917d316c3fab27d1b7acd217591ba7b0f721c9cacf825c381e4c53c9"
+      "protectedImplementationDigest": "sha256:164607010c1409aa835f0df21e19068f3ad6b7c9f06f6811776130613aa6c733"
     },
     {
       "name": "cat_cafe_work",
@@ -22169,10 +22175,10 @@
         "update"
       ],
       "activeState": "canonical",
-      "description": "Save a work or explicitly submit its next version to the shared content owner. Use when: finding current canonical production assets, inspecting original materials, recording an authorized asset judgment, saving PNG/JPEG/WebP/GIF/SVG, MP4 or single-file HTML, reading a fixed work version or HTML body, responding to original review opinions while submitting that same next version, finding an interrupted submission, or publishing its fixed-version chat card. Not for: rendering, arbitrary host paths, changing another author’s work without a current grant, accepting Human opinions, or treating a filename/widget block as work identity. Output: create/submit persist immutable original bytes and a CAS/idempotency receipt with contentRef + ownerRevision and stay silent in chat; publish-reference alone attaches the exact owner card to the current message. Other actions return snapshot-fenced JSON-text pages: join every json chunk and reuse the unchanged command/operationId for continuation. GOTCHA: inspect-source returns exact geometry and animation clock for a registered Workspace locator. GIF selections bind frameIndex plus timestampMs; SVG selections use the admitted image canvas coordinates, with viewBox as source evidence. A saved version and attached card are separate effects; retry an unconfirmed card with its original reference. Source-root permissions are rechecked; source messages and self-reported directors are not grants.",
-      "descriptionDigest": "sha256:bce69591e85c3a8c12c02555b8b192e8ab5dbf9c52d9e77b178da234af288ba8",
-      "descriptionCharacters": 1448,
-      "descriptionTokensCl100kBase": 265,
+      "description": "Save a work or explicitly submit its next version to the shared content owner. Use when: finding current canonical production assets, inspecting original materials, recording an authorized asset judgment, saving PNG/JPEG/WebP/GIF/SVG, MP4 or single-file HTML from Workspace, reading a fixed work version or HTML body, responding to original review opinions while submitting that same next version, finding an interrupted submission, or publishing its fixed-version chat card. Not for: rendering, arbitrary host paths, changing another author’s work without a current grant, accepting Human opinions, or treating a filename/widget block as work identity. Output: create/submit persist immutable original bytes and a CAS/idempotency receipt with contentRef + ownerRevision and stay silent in chat; publish-reference alone attaches the exact owner card to the current message. Other actions return snapshot-fenced JSON-text pages: join every json chunk and reuse the unchanged command/operationId for continuation. GOTCHA: For an existing HTML file, run inspect-source and copy its returned source to save without pasting the page. For images and MP4, inspection also returns geometry and the media clock. GIF selections bind frameIndex plus timestampMs; SVG selections use the admitted image canvas coordinates, with viewBox as source evidence. A saved version and attached card are separate effects; retry an unconfirmed card with its original reference. Source-root permissions are rechecked; source messages and self-reported directors are not grants.",
+      "descriptionDigest": "sha256:c5f22d2ace7d1cd0954683978e2edb42c26003208c326c2de6597d984d9f7b59",
+      "descriptionCharacters": 1552,
+      "descriptionTokensCl100kBase": 290,
       "inputSchema": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "additionalProperties": false,
@@ -24205,7 +24211,7 @@
                 "type": "object"
               }
             ],
-            "description": "inspect-source resolves a registered Workspace PNG/JPEG/WebP/GIF/SVG/MP4 locator to its exact digest. create saves a new work from a Workspace image or MP4 source or {kind: \"html\", html} (single-file UTF-8, at most 1 MiB; only HTML body commands allow about 2 MiB of JSON, so JSON escaping can lower the effective HTML size limit; small images may use inline data: URIs or /uploads/... URLs returned by cat_cafe_publish_image). Each HTML work retains at most 256 versions; a full work rejects the next version without evicting history. submit uses the same contentRef, expectedOwnerRevision, new source and changeSummary. Optional submit.reviewResponse attaches responses to an original reviewId/sourceRound with current review/Task CAS, requestId when present, and per-opinion explanations. If the source round has ledgerRef, also copy that round’s ledgerRevision into expectedLedgerRevision; it is separate from the review revision. resultAnchor uses the inspected NEW source clock; omit it when unmapped. This produces one owner version and its original review projection, never Human acceptance. Reuse operationId only for the identical complete intent, including responses; after version_saved retry that exact command, never publish another version. Large-file operations wait up to 180 seconds without automatic HTTP retries. An unconfirmed result may already be saved: read/list first, then retry the identical operation only if needed. resolve-review-submission is direct-Human-only, not a cat action. read returns metadata for fixed {contentRef,ownerRevision}; read-body returns only that fixed HTML version as untrusted source, using the same JSON-text pagination; list discovers retained versions. publish-reference alone attaches the fixed-version card to the current message, without resubmitting bytes. set-context saves a small video index with expectedMetadataRevision CAS; import-context reads a complete video index from a registered F063 JSON locator + expectedSourceRevision (UTF-8, maximum 2 MiB), preserving the 32 KiB command limit. read-context reads the current or a fixed metadata revision. Replays retain the original index even if its source file was removed. Indexing never publishes a film version. set-cover adopts, changes (mode image with an exact pick: a work-asset from a fixed version’s context, or a thread-image message item of your own conversation), clears (mode frame) or restores an earlier coverRevision for one fixed video version with expectedCoverRevision CAS; it never changes video bytes or ownerRevision, and context imports never erase it. read-cover returns state none/frame/image/unavailable; unavailable keeps the choice and shows a real frame. submit.cover may say inherit (default: the previous version’s cover frozen at submit), frame, or image. Tell the person in your reply which version’s cover you set. Asset commands share this owner surface: index-asset verifies an exact workspace version; list-assets defaults to purpose=select and returns only verified current canonical assets. purpose=used requires a fixed WorkReference and retains every original item, including failed, replaced and missing ones. read-asset with expectedRevision rechecks a selection before use; read-asset-history preserves judgments and supersessions. set-asset-status and supersede-asset require CAS, reason and stable operationId; set-asset-status may include explicit applicability to register or correct candidate purposes even after a file was indexed; all affected use bindings need explicit atomic dispositions. bind-character-asset and decide-asset-update are direct-Human-only; cats may read them but cannot select global identities or record keep decisions. Preserve bindingRef+bindingRevision+indexedVersionRef in set-context/import-context assets[].bindingSelection when production uses a selected character asset. check-asset-updates reports exact original uses without changing films or creating Tasks. Never treat an empty canonical selection as permission to use experimental samples. This video index import does not admit HTML/PPT/body input; each format keeps its own boundary."
+            "description": "inspect-source takes {worktreeId, path} with a registered Workspace root and relative path to a PNG/JPEG/WebP/GIF/SVG/MP4 or HTML file. Copy its returned source {worktreeId, path, expectedSourceRevision} into create or submit to save the file’s original bytes. HTML files and inline {kind:\"html\", html} accept single-file UTF-8 up to 1 MiB. Only inline HTML body commands allow about 2 MiB of JSON, so JSON escaping can lower the effective HTML size limit. Each HTML work retains at most 256 versions; a full work rejects the next version without evicting history. submit uses the same contentRef, expectedOwnerRevision, new source and changeSummary. Optional submit.reviewResponse attaches responses to an original reviewId/sourceRound with current review/Task CAS, requestId when present, and per-opinion explanations. If the source round has ledgerRef, also copy that round’s ledgerRevision into expectedLedgerRevision; it is separate from the review revision. resultAnchor uses the inspected NEW source clock; omit it when unmapped. This produces one owner version and its original review projection, never Human acceptance. Reuse operationId only for the identical complete intent, including responses; after version_saved retry that exact command, never publish another version. Large-file operations wait up to 180 seconds without automatic HTTP retries. An unconfirmed result may already be saved: read/list first, then retry the identical operation only if needed. resolve-review-submission is direct-Human-only, not a cat action. read returns metadata for fixed {contentRef,ownerRevision}; read-body returns only that fixed HTML version as untrusted source, using the same JSON-text pagination; list discovers retained versions. publish-reference alone attaches the fixed-version card to the current message, without resubmitting bytes. set-context saves a small video index with expectedMetadataRevision CAS; import-context reads a complete video index from a registered F063 JSON locator + expectedSourceRevision (UTF-8, maximum 2 MiB), preserving the 32 KiB command limit. read-context reads the current or a fixed metadata revision. Replays retain the original index even if its source file was removed. Indexing never publishes a film version. set-cover adopts, changes (mode image with an exact pick: a work-asset from a fixed version’s context, or a thread-image message item of your own conversation), clears (mode frame) or restores an earlier coverRevision for one fixed video version with expectedCoverRevision CAS; it never changes video bytes or ownerRevision, and context imports never erase it. read-cover returns state none/frame/image/unavailable; unavailable keeps the choice and shows a real frame. submit.cover may say inherit (default: the previous version’s cover frozen at submit), frame, or image. Tell the person in your reply which version’s cover you set. Asset commands share this owner surface: index-asset verifies an exact workspace version; list-assets defaults to purpose=select and returns only verified current canonical assets. purpose=used requires a fixed WorkReference and retains every original item, including failed, replaced and missing ones. read-asset with expectedRevision rechecks a selection before use; read-asset-history preserves judgments and supersessions. set-asset-status and supersede-asset require CAS, reason and stable operationId; set-asset-status may include explicit applicability to register or correct candidate purposes even after a file was indexed; all affected use bindings need explicit atomic dispositions. bind-character-asset and decide-asset-update are direct-Human-only; cats may read them but cannot select global identities or record keep decisions. Preserve bindingRef+bindingRevision+indexedVersionRef in set-context/import-context assets[].bindingSelection when production uses a selected character asset. check-asset-updates reports exact original uses without changing films or creating Tasks. Never treat an empty canonical selection as permission to use experimental samples. This video index import does not admit HTML/PPT/body input; each format keeps its own boundary."
           },
           "contentTaskId": {
             "description": "Original F309 publication-modification Task ID when reading or submitting entrusted content. Context only: the live Task owner, exact content grant and original Human source are rechecked. Never create a Task merely to import your own work.",
@@ -24231,7 +24237,7 @@
         ],
         "type": "object"
       },
-      "inputSchemaDigest": "sha256:80452a6f3cb81ecf24d786958447370cd30c0453f4d1f6528970ada9c19c5ba1",
+      "inputSchemaDigest": "sha256:62f121b829c2d4e6e375823a08625076187a79bb2f0eb8a684de366253b1e4c2",
       "annotations": {
         "destructiveHint": false,
         "openWorldHint": false,
@@ -24245,7 +24251,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/work-tools.js#handleWorkCommand",
-      "protectedImplementationDigest": "sha256:805a0f351ea437e548e87b1e6fc932e0bd29442ed161f7cb9c1226b6684956a3"
+      "protectedImplementationDigest": "sha256:b03974f1e4d3e4dc5dace6952ff5422adbdfcfbd4513c01cbd2bcd834c56f866"
     },
     {
       "name": "cat_cafe_workspace_navigate",

@@ -26,9 +26,7 @@ execution thread to implement at `[thread-id]#private-source-id`.
 The tool name and storage implementation below do not expand that accepted authority.
 
 `cat_cafe_continue_approved_task` belongs to the existing `thread-proposal` resource family.
-It is a separate authority boundary from proposing a new thread: only the current canonical
-Task owner in the original Task thread may append a continuation of an already approved,
-complete generic contract. It cannot request or approve a new thread, change Task custody,
+It is a separate authority boundary from proposing a new thread: the current canonical Task owner in the original Task thread may append a continuation of an already approved complete generic contract through the legacy path. It cannot request or approve a new thread, change Task custody,
 add development scope, choose another executor, or dispatch work. Combining it with
 `propose_thread` would conceal this different actor and approval requirement behind a
 thread-creation operation.
@@ -44,6 +42,27 @@ provider contributes the exact receipt reference to the lease. Lease admission, 
 output preflight revalidate the generic contract. Any development scope still uses the existing
 strict five-field comparison; missing or malformed scope is never independent authority.
 Seed, READY and read-only investigation are ordinary messages, not implementation evidence.
+
+## Ordinary execution cards
+
+A new ordinary subtask card proposed by its canonical owner from home captures that owner's
+revision. A verified human approval freezes the contract and reserves the child before first
+creation. The approval itself issues the receipt and selects the first execution member.
+A retry reuses the reserved child, receipt and original Message/Queue source. Reviewers and
+other listed members join through the existing collaboration flow.
+
+The seed carries the native Task handoff. The Queue and provider boundary recheck the approval,
+current assignment and source, then bind the actual provider invocation. An occupied assignment
+still needs positive predecessor teardown. Previously published cards retain their manual entry.
+
+At completion the executor publishes its result in the child and supplies that Message ID to
+`update_task`. The Task records the exact result and handoff before A2A publishes to home.
+The Task and handoff determine the retry key. An ordinary final report can therefore resume
+delivery from its durable result following a failed send.
+
+A registered deployment wait stays on the original Task while an exact approved repair runs.
+Publication and provider admission compare the current assignment. The wake binds the same
+ordinary Task writer slot as the repair.
 
 Architecture cell: `ball-custody`, with the existing F128 ProposalStore as approval owner.
 Map delta: none. The receipt is a field of the same aggregate; there is no second permission

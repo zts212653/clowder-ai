@@ -58,6 +58,13 @@ import { sanitizeRawEvent } from '../providers/codex-audit-hooks.js';
 import { appendLocalImagePathHints, collectImageAccessDirectories } from '../providers/image-cli-bridge.js';
 import { extractTrustedImagePaths } from '../providers/image-paths.js';
 import { findGitBashPath } from './claude-agent-win.js';
+import {
+  boundClaudeCacheRetentionArgs,
+  freezeClaudeCacheRetentionMemory,
+  validateClaudeCacheRetentionReplay,
+  withClaudeCacheRetentionToolDenial,
+  writeClaudeCacheRetentionL0,
+} from './claude-cache-retention-replay.js';
 import { composeManagedSettingsDocument } from './claude-compaction-launch-plan.js';
 import { captureClaudeMcpConfig, resolveClaudeMcpConfig } from './claude-mcp-config.js';
 import { extractClaudeUsage, isResultErrorEvent, transformClaudeEvent } from './claude-ndjson-parser.js';
@@ -75,6 +82,7 @@ import {
   resolveMcpSchemaDeliveryForProviderLaunch,
 } from './mcp-schema-delivery-capability.js';
 import { writeInvocationMcpConfigFile } from './session-credential-file.js';
+import { captureWatcherOptions } from './watcher-invocation-options.js';
 
 const log = createModuleLogger('claude-agent');
 
@@ -427,7 +435,15 @@ export class ClaudeAgentService implements AgentService {
   }
 
   supportsToolExecutionPolicy(policy: ToolExecutionPolicy): boolean {
-    return policy.mode === 'read_only' || (policy.mode === 'plugin_native' && Boolean(policy.memberSession));
+    return (
+      policy.mode === 'read_only' ||
+      policy.mode === 'watcher_panel' ||
+      (policy.mode === 'plugin_native' && Boolean(policy.memberSession))
+    );
+  }
+
+  watcherMemberCapability(): import('@cat-cafe/shared').WatcherMemberCapability {
+    return { supported: true, context: 'ordinary', readOnly: 'tools' };
   }
 
   freshnessCarrierCapability(): AgentFreshnessCarrierCapability {
@@ -477,9 +493,13 @@ export class ClaudeAgentService implements AgentService {
   }
 
   async *invoke(prompt: string, options?: AgentServiceOptions): AsyncIterable<AgentMessage> {
+    const retentionReplay = validateClaudeCacheRetentionReplay(options);
     const member = captureClaudeMemberOptions(options);
-    options = member ?? options;
+    const observer = captureWatcherOptions(options);
+    options = member ?? observer ?? options;
     const scoped = Boolean(member);
+    const watcher = Boolean(observer);
+    const isolated = scoped || watcher;
     await member?.pluginNativeLaunch?.assertCurrent();
     const readOnly = options?.toolExecutionPolicy?.mode === 'read_only';
     let effectivePrompt = prompt;
@@ -535,20 +555,22 @@ export class ClaudeAgentService implements AgentService {
       ...modelArgs,
       ...(effortLevel ? ['--effort', effortLevel] : []),
       '--permission-mode',
-      scoped ? 'default' : readOnly ? 'plan' : PERMISSION_MODE,
+      isolated ? 'default' : readOnly ? 'plan' : PERMISSION_MODE,
       // api_key mode: skip user-level ~/.claude/settings.json to prevent config pollution.
       // subscription mode: include user-level so CLI reads auth from ~/.claude/settings.json.
       '--setting-sources',
-      scoped ? '' : isApiKeyMode ? 'project,local' : 'project,local,user',
+      isolated ? '' : isApiKeyMode ? 'project,local' : 'project,local,user',
       // Enable Chrome MCP integration (built-in, requires Chrome + extension running)
       ...(scoped
         ? ['--no-chrome', '--disable-slash-commands', '--no-session-persistence']
-        : readOnly
-          ? []
-          : ['--chrome']),
+        : watcher
+          ? ['--no-chrome', '--disable-slash-commands', '--permission-prompts', 'none']
+          : readOnly
+            ? []
+            : ['--chrome']),
     ];
 
-    if (readOnly || scoped) {
+    if (readOnly || isolated) {
       args.push('--tools', '', '--strict-mcp-config');
     }
     let declaredMcpServerNames: readonly string[] | undefined = readOnly
@@ -596,6 +618,7 @@ export class ClaudeAgentService implements AgentService {
         callbackEnv: options?.callbackEnv,
         workingDirectory: options?.workingDirectory,
         mcpServerPath: this.mcpServerPath,
+        toolExecutionPolicy: options?.toolExecutionPolicy,
       });
       if (mcpResolution) {
         const mcpServers = mcpResolution.servers;
@@ -613,6 +636,7 @@ export class ClaudeAgentService implements AgentService {
         args.push('--mcp-config', writeInvocationMcpConfigFile({ mcpServers }, options?.callbackEnv));
         args.push('--strict-mcp-config');
         declaredMcpServerNames = Object.keys(mcpServers).sort();
+        if (watcher) args.push('--allowedTools', ...declaredMcpServerNames.map(claudeMemberToolPattern));
       }
     }
 
@@ -629,11 +653,13 @@ export class ClaudeAgentService implements AgentService {
     let preCompactSettingsPath: string | undefined;
     let claudeCommand: string | undefined;
     try {
-      l0Path = await this.compileL0ToTempFile(
-        options?.callbackEnv?.CAT_CAFE_USER_ID,
-        options?.frozenL0Input,
-        scoped ? effectiveModel : undefined,
-      );
+      l0Path = retentionReplay
+        ? writeClaudeCacheRetentionL0(retentionReplay)
+        : await this.compileL0ToTempFile(
+            options?.callbackEnv?.CAT_CAFE_USER_ID,
+            options?.frozenL0Input,
+            scoped ? effectiveModel : undefined,
+          );
       args.push('--system-prompt-file', l0Path);
       // Per-invocation L0 must reach resumed sessions; the CLI otherwise records
       // the first prompt and resends it on every resume.
@@ -642,8 +668,9 @@ export class ClaudeAgentService implements AgentService {
       // Keep it as an append layer, but never use it as the carrier's L0 source.
       // #840: route through file carrier (not inline argv) to avoid ENAMETOOLONG
       // when A2A briefings push the command line past Windows' 32,767-char cap.
-      if (options?.systemPrompt) {
-        appendPromptPath = writeAppendPromptToTempFile(options.systemPrompt);
+      const appendSystemPrompt = retentionReplay ? retentionReplay.appendSystemPrompt : options?.systemPrompt;
+      if (appendSystemPrompt) {
+        appendPromptPath = writeAppendPromptToTempFile(appendSystemPrompt);
         args.push('--append-system-prompt-file', appendPromptPath);
       }
 
@@ -651,7 +678,7 @@ export class ClaudeAgentService implements AgentService {
       // User flags win when they overlap with ordinary system-injected flags,
       // but native L0 flags are reserved: user overrides would silently remove
       // the compression-immune identity/governance layer.
-      const cliConfigArgs = readOnly || scoped ? undefined : options?.cliConfigArgs;
+      const cliConfigArgs = readOnly || isolated ? undefined : options?.cliConfigArgs;
       const userParts = stripReservedSystemPromptArgs(
         cliConfigArgs ? cliConfigArgs.flatMap((arg) => arg.trim().split(/\s+/)) : [],
         this.catId as string,
@@ -695,6 +722,7 @@ export class ClaudeAgentService implements AgentService {
         args.length = 0;
         args.push(...deduped, ...cleanedUserParts);
       }
+      if (retentionReplay) boundClaudeCacheRetentionArgs(args, options!.sessionId!);
 
       // #1542: inject the managed PreCompact/SessionStart carrier as the single
       // final `--settings` file, derived from the same launch plan that drives
@@ -707,7 +735,7 @@ export class ClaudeAgentService implements AgentService {
       const effectiveUserSettings =
         !scoped && options?.claudeTokenAccount
           ? await composeClaudeTokenSettingsDocument(
-              userSettingsValue,
+              watcher ? CLAUDE_MEMBER_SETTINGS : userSettingsValue,
               options?.workingDirectory,
               claudeSettingSources(args),
             )
@@ -715,8 +743,13 @@ export class ClaudeAgentService implements AgentService {
       const composedSettings = compactionPlan?.ready
         ? composeManagedSettingsDocument(compactionPlan, effectiveUserSettings, options?.workingDirectory)
         : effectiveUserSettings;
+      const managedSettings = scoped
+        ? CLAUDE_MEMBER_SETTINGS
+        : watcher
+          ? (composedSettings ?? CLAUDE_MEMBER_SETTINGS)
+          : withClaudeSecretHooks(composedSettings, options?.workingDirectory);
       preCompactSettingsPath = writePreCompactSettingsToTempFile(
-        scoped ? CLAUDE_MEMBER_SETTINGS : withClaudeSecretHooks(composedSettings, options?.workingDirectory),
+        retentionReplay ? withClaudeCacheRetentionToolDenial(managedSettings) : managedSettings,
       );
       args.push('--settings', preCompactSettingsPath);
 
@@ -750,7 +783,7 @@ export class ClaudeAgentService implements AgentService {
         for (const key of SUBSCRIPTION_MODE_DENY_KEYS) envOverrides[key] = null;
       }
       if (readOnly) envOverrides.CAT_CAFE_READONLY = 'true';
-      if (scoped) applyClaudeMemberEnvironment(envOverrides);
+      if (isolated) applyClaudeMemberEnvironment(envOverrides);
 
       // Debug: log full invocation details (env values redacted by pino redact paths)
       const safeEnvSummary: Record<string, string> = {};
@@ -783,15 +816,16 @@ export class ClaudeAgentService implements AgentService {
         if (summary.stderrExcerpt) successfulExitStderr.stderrExcerpt = summary.stderrExcerpt;
       };
 
+      if (retentionReplay) freezeClaudeCacheRetentionMemory(envOverrides);
       const nativeInstructions: PreparedProviderRequestV1['nativeInstructions'] = [
         {
           body: readFileSync(l0Path, 'utf8'),
           injectionDecision: 'native_l0_compiled',
         },
-        ...(options?.systemPrompt
+        ...(appendSystemPrompt
           ? [
               {
-                body: options.systemPrompt,
+                body: appendSystemPrompt,
                 injectionDecision: 'route_append_system_prompt',
               },
             ]

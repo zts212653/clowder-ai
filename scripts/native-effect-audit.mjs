@@ -22,7 +22,7 @@ function appendLocalRecord(homeDir, entry) {
   const directory = join(homeDir, '.cat-cafe', 'guard-denials');
   mkdirSync(directory, { recursive: true, mode: 0o700 });
   const descriptor = openSync(
-    join(directory, 'native.jsonl'),
+    join(directory, entry.decision === 'allow' ? 'native-uncertain.jsonl' : 'native.jsonl'),
     constants.O_WRONLY | constants.O_APPEND | constants.O_CREAT | constants.O_NOFOLLOW,
     0o600,
   );
@@ -39,7 +39,7 @@ export function appendNativeDenial(
   verdict,
   { homeDir = homedir(), append = appendLocalRecord, warn = (message) => process.stderr.write(message) } = {},
 ) {
-  if (verdict.decision !== 'deny') return;
+  if (verdict.decision !== 'deny' && verdict.reasonCode !== 'copy_target_unresolved') return;
   const input = payload?.tool_input ?? {};
   const command = input.command ?? input.cmd ?? input.patch ?? input.file_path ?? payload?.tool_name;
   try {
@@ -47,6 +47,7 @@ export function appendNativeDenial(
     const clause = boundedSummary(verdict.offendingClause ?? command, 4096, true);
     append(homeDir, {
       at: new Date().toISOString(),
+      decision: verdict.decision,
       catId: process.env.CAT_CAFE_CAT_ID ?? 'unknown',
       origin: process.env.NODE_TEST_CONTEXT ? 'test_process' : 'native_hook',
       provider: ['codex', 'claude', 'agy'].includes(verdict.source?.provider)

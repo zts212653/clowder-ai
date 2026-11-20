@@ -41,10 +41,19 @@ test('ordinary topology-preserving predecessors do not invalidate an exact copy 
     parity(`${predecessor} ${separator} cp -- ${source} ${destination}`, 'allow');
 });
 
+test('ordinary preparation and an unresolved copy source leave the physical destination authoritative', () => {
+  const destination = join(output, 'backup.txt');
+  const command = ["python3 - <<'PY'", 'print("prepared")', 'PY', `cp "$UNRESOLVED_SOURCE" ${destination}`].join('\n');
+  parity(command, 'allow');
+  const hardlink = join(output, 'linked.txt');
+  linkSync(join(runtime, 'file.txt'), hardlink);
+  parity(command.replace(destination, hardlink), 'deny');
+});
+
 test('alias-creating predecessors and substitutions invalidate later copy observations', () => {
   const alias = join(output, 'substitution-alias');
   const source = join(runtime, 'copy-source.txt');
-  const prepare = `node -e 'require("node:fs").symlinkSync("${runtime}","${alias}")'`;
+  const prepare = `ln -s ${runtime} ${alias}`;
   const copy = `cp -- ${source} ${join(alias, 'copied.txt')}`;
   for (const command of [
     `${prepare}; echo "$(${copy})"`,
@@ -52,7 +61,7 @@ test('alias-creating predecessors and substitutions invalidate later copy observ
     `echo "$(${prepare})"; ${copy}`,
     `echo \`${prepare}\`; ${copy}`,
     `echo "$(${prepare})" "$(${copy})"`,
-    `ln -s ${runtime} ${alias}; ${copy}`,
+    `${prepare}; ${copy}`,
   ])
     parity(command, 'deny');
 
@@ -64,7 +73,7 @@ test('alias-creating predecessors and substitutions invalidate later copy observ
 test('concurrent execution invalidates copy observations independent of text order', () => {
   const alias = join(output, 'background-alias');
   const source = join(runtime, 'copy-source.txt');
-  const prepare = `node -e 'require("node:fs").symlinkSync("${runtime}","${alias}")'`;
+  const prepare = `ln -s ${runtime} ${alias}`;
   const delayedCopy = `sleep 1 && cp -- ${source} ${join(alias, 'copied.txt')}`;
   for (const command of [
     `${delayedCopy} & ${prepare}; wait`,

@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type { SqliteReadDiagnostic } from '../../infrastructure/sqlite-read-diagnostics.js';
 import type { FileVectorReadWindowSnapshot } from './file-vector-read-window.js';
 import type { ChildMessage } from './memory-process-protocol.js';
+import { MemoryReadTimings } from './memory-read-timings.js';
 import { type MessageCandidateAuditSnapshot, safeCandidateAudit } from './message-candidate-audit-wire.js';
 import type { CjkReadSnapshot } from './message-cjk-read-diagnostics.js';
 import type { VectorSearchDegradeRecord } from './vector-search-degrade-report.js';
@@ -10,6 +11,8 @@ export type MemoryReadDiagnostic =
   | { phase: 'database-initialization' }
   | { phase: 'cjk-read'; cjk: CjkReadSnapshot }
   | { phase: 'candidate-audit'; candidateAudit: MessageCandidateAuditSnapshot }
+  | { phase: 'read-window-finished'; readWindow: FileVectorReadWindowSnapshot; workerElapsedMs: number }
+  | { phase: 'result-ready'; workerElapsedMs: number }
   /** Published by the process pool on receipt; never part of a request's progress. */
   | { phase: 'vector-degrade'; degrade: VectorSearchDegradeRecord }
   | {
@@ -26,6 +29,7 @@ export class MemoryReadExecution {
   private readWindow?: FileVectorReadWindowSnapshot;
   private candidateAudit?: MessageCandidateAuditSnapshot;
   private readonly submitted = performance.now();
+  private readonly timings = new MemoryReadTimings(this.submitted);
   private phase = 'queue';
   private pid?: number;
   private queueMs?: number;
@@ -46,18 +50,22 @@ export class MemoryReadExecution {
   constructor(private readonly kind: 'search' | 'message-search') {}
 
   onMessage(message: ChildMessage, jobId: number): boolean {
+    if (this.timings.closed) return false;
+    if (message.type !== 'embedding' && message.id !== jobId) return message.type === 'read-diagnostic';
     switch (message.type) {
+      case 'message-vectors-started':
+        this.timings.point('vectorsStarted', message.workerElapsedMs);
+        return false;
       case 'read-diagnostic':
-        if (message.id === jobId) this.observe(message.diagnostic);
+        this.observe(message.diagnostic);
         return true;
       case 'started':
-        if (message.id === jobId) {
-          if (message.readWindow) this.readWindow = message.readWindow;
-          this.ready();
-        }
+        if (message.readWindow) this.readWindow = message.readWindow;
+        this.ready();
         return false;
       case 'result':
-        if (message.id === jobId && message.readWindow) this.readWindow = message.readWindow;
+        if (message.readWindow) this.readWindow = message.readWindow;
+        this.timings.mark('resultReceivedMs');
         return false;
       case 'embedding':
         this.embeddingStarted(message.id, message.method);
@@ -78,7 +86,15 @@ export class MemoryReadExecution {
   }
 
   observe(event: MemoryReadDiagnostic) {
+    if (this.timings.closed) return;
     if ('readWindow' in event && event.readWindow) this.readWindow = event.readWindow;
+    if (event.phase === 'read-window-finished' || event.phase === 'result-ready') {
+      this.timings.point(
+        event.phase === 'read-window-finished' ? 'scopeEndObservation' : 'resultPrepared',
+        event.workerElapsedMs,
+      );
+      return;
+    }
     if (event.phase === 'candidate-audit') {
       this.candidateAudit = safeCandidateAudit(event.candidateAudit);
       return;
@@ -89,29 +105,44 @@ export class MemoryReadExecution {
     }
     this.phase =
       event.phase === 'sql-start' ? 'sql-read' : event.phase === 'sql-finish' ? 'worker-processing' : event.phase;
-    if ('sql' in event) {
-      if (event.phase === 'sql-start') this.sqlObservations++;
-      if (event.phase === 'sql-finish') this.observedSqlMs += event.sql.elapsedMs;
-      this.lastObservedSql = { ...event.sql, event: event.phase, observedAt: Date.now() };
-      if (event.sql.native)
-        this.nativeVectorRead = {
-          sqlFingerprint: event.sql.sqlFingerprint,
-          startedAt: event.sql.startedAt,
-          observedAt: Date.now(),
-          event: event.phase,
-          ...(event.phase === 'sql-finish' ? { elapsedMs: event.sql.elapsedMs } : {}),
-          native: event.sql.native,
-        };
-    }
+    if ('sql' in event) this.observeSql(event);
+  }
+
+  private observeSql(event: Extract<MemoryReadDiagnostic, { sql: unknown }>) {
+    if (event.phase === 'sql-start' && event.sql.native) this.timings.beginScope();
+    if (event.phase === 'sql-start') this.sqlObservations++;
+    if (event.phase === 'sql-finish') this.observedSqlMs += event.sql.elapsedMs;
+    this.lastObservedSql = { ...event.sql, event: event.phase, observedAt: Date.now() };
+    if (event.sql.native)
+      this.nativeVectorRead = {
+        sqlFingerprint: event.sql.sqlFingerprint,
+        startedAt: event.sql.startedAt,
+        observedAt: Date.now(),
+        event: event.phase,
+        ...(event.phase === 'sql-finish' ? { elapsedMs: event.sql.elapsedMs } : {}),
+        native: event.sql.native,
+      };
   }
 
   embeddingStarted(id: number, method: string) {
+    if (this.timings.closed) return;
+    this.timings.embeddingStarted(id, method);
     this.embeddingId = id;
     this.phase = `embedding-${method}`;
   }
 
-  embeddingFinished(id: number) {
+  embeddingFinished(id: number, outcome: 'fulfilled' | 'rejected') {
+    if (this.timings.closed) return;
+    this.timings.embeddingFinished(id, outcome);
     if (this.embeddingId === id && this.phase.startsWith('embedding-')) this.ready();
+  }
+
+  cancelled() {
+    this.timings.mark('cancelRequestedMs');
+  }
+
+  settled() {
+    this.timings.mark('settledMs');
   }
 
   snapshot(outcome: 'pending' | 'fulfilled' | 'rejected') {
@@ -130,6 +161,7 @@ export class MemoryReadExecution {
       lastObservedSql: this.lastObservedSql,
       nativeVectorRead: this.nativeVectorRead ?? null,
       cjk: this.cjk ? { ...this.cjk } : null,
+      timings: this.timings.snapshot(),
       ...(this.readWindow ? { readWindow: { ...this.readWindow } } : {}),
       ...(outcome === 'fulfilled' && this.candidateAudit ? { candidateAudit: this.candidateAudit } : {}),
     };

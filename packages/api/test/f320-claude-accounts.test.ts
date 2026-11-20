@@ -86,7 +86,9 @@ test('malformed secret never appears in validation errors or creates an account'
 test('local Claude binding is atomic, fences stale previews and updates only enabled local members', async () => {
   const { writeFileSync, mkdirSync } = await import('node:fs');
   const { toAllCatConfigs } = await import('../src/config/cat-config-loader.js');
-  const { readRuntimeAccountMembers, updateRuntimeCat } = await import('../src/config/runtime-cat-catalog.js');
+  const { bindRuntimeClaudeAccounts, readRuntimeAccountMembers, updateRuntimeCat } = await import(
+    '../src/config/runtime-cat-catalog.js'
+  );
   process.env.CAT_CAFE_CONFIG_ROOT = root;
   process.env.CAT_CAFE_RUNTIME_ROOT = root;
   process.env.CAT_CAFE_WORKSPACE_ROOT = root;
@@ -185,6 +187,19 @@ test('local Claude binding is atomic, fences stale previews and updates only ena
       payload: { projectPath: root },
     });
     assert.equal(removed.statusCode, 409);
+
+    process.env.CLAUDE_CODE_OAUTH_TOKEN = tokenA;
+    const includeOverrides = false;
+    const native = await send('claude', 'preview', { includeOverrides });
+    assert.equal(native.statusCode, 200, native.body);
+    const binding = bindRuntimeClaudeAccounts(
+      root,
+      { accountRef: 'claude', scope: 'local', includeOverrides },
+      native.json().previewToken,
+    );
+    updateRuntimeCat(root, 'opus', { nickname: 'new nickname during credential read' });
+    await assert.rejects(binding, /Binding preview changed/);
+    assert.equal(toAllCatConfigs(readRuntimeAccountMembers(root)).opus.nickname, 'new nickname during credential read');
   } finally {
     await app.close();
   }

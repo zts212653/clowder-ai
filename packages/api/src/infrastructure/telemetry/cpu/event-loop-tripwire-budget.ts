@@ -1,5 +1,9 @@
 /** One bounded diagnostic stream per process; time is monotonic so sleep/wall changes cannot reset it. */
 export class TripwireLogBudget {
+  constructor(
+    private readonly maxRecords = 30,
+    private readonly maxBytes = 16384,
+  ) {}
   private since: number | undefined;
   private records = 0;
   private bytes = 0;
@@ -9,7 +13,7 @@ export class TripwireLogBudget {
   take(bytes: number, now: number) {
     const summary = this.since !== undefined && now - this.since >= 60000 ? this.drain(now) : undefined;
     this.since ??= now;
-    const allowed = this.records < 30 && this.bytes + bytes <= 16384;
+    const allowed = this.records < this.maxRecords && this.bytes + bytes <= this.maxBytes;
     if (allowed) {
       this.records++;
       this.bytes += bytes;

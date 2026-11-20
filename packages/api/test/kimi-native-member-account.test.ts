@@ -154,13 +154,13 @@ test('scoped native discovery preserves hooks installed by another Host checkout
 test('native config changes invalidate the saved choice while the ordinary account is preserved', async (t) => {
   const f = await fixture(t),
     options = { catId: f.config.id, catConfig: f.config, workspace: f.workspace };
-  const ordinary = freezeExecutionAccountBinding(options);
+  const ordinary = await freezeExecutionAccountBinding(options);
   const account = await readKimiNativeAccount(f.native, f.config.defaultModel);
-  const bound = freezeExecutionAccountBinding({ ...options, nativeAccount: account.profile });
+  const bound = await freezeExecutionAccountBinding({ ...options, nativeAccount: account.profile });
   assert.ok(bound.executionAccount);
   writeFileSync(f.configPath, readFileSync(f.configPath, 'utf8') + '\n# changed native configuration\n');
   const changed = await readKimiNativeAccount(f.native, f.config.defaultModel);
-  assert.throws(
+  await assert.rejects(
     () =>
       freezeExecutionAccountBinding({
         ...options,
@@ -173,7 +173,7 @@ test('native config changes invalidate the saved choice while the ordinary accou
       }),
     /revision changed/,
   );
-  assert.deepEqual(freezeExecutionAccountBinding(options).executionAccount, ordinary.executionAccount);
+  assert.deepEqual((await freezeExecutionAccountBinding(options)).executionAccount, ordinary.executionAccount);
   assert.equal(f.spawns(), 0);
 });
 
@@ -226,8 +226,8 @@ test('a saved native choice stays pinned when the outside cat chooses another de
   const saved = await f.runtime.snapshot(session, base.scope());
   assert.deepEqual(saved.account, session.runtime.account);
   assert.equal(
-    freezeExecutionAccountBinding({ catId: f.config.id, catConfig: f.config, workspace: f.workspace }).executionAccount
-      ?.accountRef,
+    (await freezeExecutionAccountBinding({ catId: f.config.id, catConfig: f.config, workspace: f.workspace }))
+      .executionAccount?.accountRef,
     'gateway',
   );
   assert.equal(f.spawns(), 0);

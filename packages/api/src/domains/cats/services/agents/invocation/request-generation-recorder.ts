@@ -107,7 +107,7 @@ function uniqueSourceRefs(sourceRefs: readonly RequestGenerationSourceRef[]): Re
   });
 }
 
-async function persistedToolSurface(
+export async function persistedToolSurface(
   prepared: PreparedProviderRequestV1['tools'],
   digest: (value: string) => Promise<string>,
 ): Promise<RequestGenerationEnvelopeV1['tools']> {

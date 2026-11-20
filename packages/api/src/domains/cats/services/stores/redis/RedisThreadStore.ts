@@ -53,6 +53,7 @@ import {
   parseThreadMetadataJson,
   validateMergedTotals,
 } from '../ports/ThreadStore.js';
+import { noteThreadExecutionSettingsWrite } from '../ports/thread-execution-settings.js';
 import { MessageKeys } from '../redis-keys/message-keys.js';
 import { ThreadKeys } from '../redis-keys/thread-keys.js';
 import { createOwnedThreadAtomically } from './owned-thread-create.js';
@@ -807,7 +808,10 @@ export class RedisThreadStore implements IThreadStore {
 
   async updateProjectPath(threadId: string, projectPath: string): Promise<void> {
     const key = ThreadKeys.detail(threadId);
+    noteThreadExecutionSettingsWrite(threadId, { projectPath });
     await moveThreadProject(this.redis, threadId, projectPath);
+    // The index move can overlap a new admission between its Redis read and write.
+    noteThreadExecutionSettingsWrite(threadId, { projectPath });
     await this.applyKeyRetention([key]);
   }
 
@@ -978,6 +982,7 @@ export class RedisThreadStore implements IThreadStore {
 
   async updateBootcampState(threadId: string, state: BootcampStateV1 | null): Promise<void> {
     const key = ThreadKeys.detail(threadId);
+    noteThreadExecutionSettingsWrite(threadId, { hasBootcampState: state !== null });
     if (state === null) {
       await this.deleteDetailFields(key, 'bootcampState');
     } else {
@@ -1935,6 +1940,7 @@ export class RedisThreadStore implements IThreadStore {
   async updateMemberEffort(threadId: string, catId: CatId, effort: CliEffortPreset | null): Promise<void> {
     const key = ThreadKeys.detail(threadId);
     const field = `memberEffort:${catId}`;
+    noteThreadExecutionSettingsWrite(threadId, { catId, effort });
     if (effort === null) {
       await this.deleteDetailFields(key, field);
     } else {

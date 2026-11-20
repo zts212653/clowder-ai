@@ -4649,6 +4649,11 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     assert.equal(cache.retentionMs, 3600000);
     assert.equal(cache.retentionSource, 'usage_ttl');
     assert.equal(cache.timeSource, 'invocation_start_lower_bound');
+    assert.match(
+      cache.executionBoundaryRef,
+      /^host-boundary:v1:[a-f0-9]{64}$/,
+      'successful usage must capture the actual Host source for later maintenance; imported-session fields are insufficient',
+    );
     assert.ok(cache.requestStartedAt <= cache.observedAt);
     assert.equal(
       cache.runtime,

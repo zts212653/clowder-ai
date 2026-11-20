@@ -11,6 +11,7 @@ import {
   deliverConnectorMessage,
 } from '../../infrastructure/email/deliver-connector-message.js';
 import type { TypedWaitAuthorization } from '../ball-custody/TypedWaitRegistration.js';
+import { ordinaryTaskExpectation } from '../cats/services/stores/ports/OrdinaryTaskMutation.js';
 import { receiptOwnsOutcome } from './DeploymentWaitAuthority.js';
 import { resolveDeploymentWaitAuthorization } from './DeploymentWaitAuthorization.js';
 import { DeploymentWaitCurrentTurnClaim } from './DeploymentWaitCurrentTurnClaim.js';
@@ -94,6 +95,9 @@ export class DeploymentWaitPublisher {
         icon: 'refresh-cw',
         meta: {
           waitContinuationCarrier: createWaitContinuationCarrier(task.id, outcome),
+          ...(wakeOwner && state.transportAttempt?.taskHandoffRef
+            ? { taskHandoffRef: state.transportAttempt.taskHandoffRef }
+            : {}),
           ...(currentReceipt
             ? {
                 currentExecutionClaim: {
@@ -112,6 +116,9 @@ export class DeploymentWaitPublisher {
       timestamp: outcome.at,
       ...(extra ? { extra } : {}),
     };
+    const current = await this.authorized(task.id, outcome, currentInvocationId);
+    if (!current || !isDeepStrictEqual(ordinaryTaskExpectation(allocated), ordinaryTaskExpectation(current)))
+      return { kind: 'state_only', reason: 'authority_stale' };
     const messageId = publication.current ? await this.publishHistory(input) : await this.publishQueue(input);
     if (!messageId) return { kind: 'state_only', reason: 'publication_not_admitted' };
     return this.acknowledge(task.id, outcome, publication, messageId, input.content, currentInvocationId);
@@ -134,6 +141,7 @@ export class DeploymentWaitPublisher {
       expectedGeneration: outcome.generation,
       expectedDeploymentWait: state,
       expectedUpdatedAt: snapshot.task.updatedAt,
+      expectedTaskAssignment: ordinaryTaskExpectation(snapshot.task),
       deploymentWait: state,
       waitRegistration: { ...snapshot.receipt, authorization: proof.authorization },
     });
@@ -188,6 +196,7 @@ export class DeploymentWaitPublisher {
         expectedGeneration: outcome.generation,
         expectedDeploymentWait: current.deploymentWait,
         expectedUpdatedAt: current.updatedAt,
+        expectedTaskAssignment: ordinaryTaskExpectation(current),
         deploymentWait: ack.state,
         status: 'blocked',
       });
@@ -209,7 +218,16 @@ export class DeploymentWaitPublisher {
     )
       return null;
     const claim = snapshot.task.deploymentWait?.currentExecutionClaim;
-    return claim && claim.invocationId !== currentInvocationId ? null : snapshot.task;
+    const execution = snapshot.task.executionRef;
+    if (
+      (claim && claim.invocationId !== currentInvocationId) ||
+      (execution &&
+        (execution.invocationId !== currentInvocationId ||
+          execution.threadId !== snapshot.task.threadId ||
+          execution.catId !== snapshot.task.ownerCatId))
+    )
+      return null;
+    return snapshot.task;
   }
 
   private async nextIdentity(
@@ -221,10 +239,28 @@ export class DeploymentWaitPublisher {
   ): Promise<DeploymentWaitStateV1 | null> {
     if (wakeOwner) {
       if (state.currentExecutionClaim) return null;
-      if (state.transportAttempt) return state.transportAttempt.outcomeId === outcome.outcomeId ? state : null;
+      const handoffRef = task.lastAppliedHandoffMessageRef ?? undefined;
+      if (handoffRef) {
+        const id = handoffRef.slice('message:'.length);
+        const handoff = await this.opts.messageStore?.getById(id);
+        if (!handoff || handoff.deletedAt || handoff.recall || handoff._tombstone) return null;
+        if (
+          handoff.extra?.taskHandoff &&
+          handoff.deliveryStatus !== 'canceled' &&
+          !handoff.lifecycle?.dispatchRefs?.some(
+            (dispatch) => dispatch.targetId === handoff.extra?.taskHandoff?.targetCatId && dispatch.phase === 'settled',
+          )
+        )
+          return null;
+      }
+      if (state.transportAttempt)
+        return state.transportAttempt.outcomeId === outcome.outcomeId &&
+          state.transportAttempt.taskHandoffRef === handoffRef
+          ? state
+          : null;
       return {
         ...state,
-        transportAttempt: deploymentTransportAttempt(task.id, outcome.outcomeId, state.recoverySource),
+        transportAttempt: deploymentTransportAttempt(task.id, outcome.outcomeId, state.recoverySource, handoffRef),
       };
     }
     const claim = state.currentExecutionClaim;
@@ -262,6 +298,7 @@ export class DeploymentWaitPublisher {
         expectedGeneration: outcome.generation,
         expectedDeploymentWait: task.deploymentWait,
         expectedUpdatedAt: task.updatedAt,
+        expectedTaskAssignment: ordinaryTaskExpectation(task),
         deploymentWait: next,
       });
       if (installed) return installed;

@@ -1,17 +1,21 @@
 import './helpers/setup-cat-registry.js';
 import assert from 'node:assert/strict';
-import { mkdtempSync } from 'node:fs';
+import childProcess from 'node:child_process';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { syncBuiltinESMExports } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { catRegistry, createCatId } from '@cat-cafe/shared';
 import { prepareInvocationExecutionBinding } from '../dist/domains/cats/services/agents/invocation/invoke-single-cat.js';
 import { compileL0ViaSubprocess } from '../dist/domains/cats/services/agents/providers/l0-compiler.js';
+import { ThreadStore } from '../dist/domains/cats/services/stores/ports/ThreadStore.js';
 
-function fixture(t) {
+function fixture(t, overrides = {}) {
   const all = catRegistry.getAllConfigs();
   const previous = process.env.CAT_CAFE_DATA_DIR;
-  process.env.CAT_CAFE_DATA_DIR = mkdtempSync(join(tmpdir(), 'invocation-frozen-l0-'));
+  const dataDir = mkdtempSync(join(tmpdir(), 'invocation-frozen-l0-'));
+  process.env.CAT_CAFE_DATA_DIR = dataDir;
   const catId = createCatId('frozen-l0-member');
   const member = {
     ...all.codex,
@@ -22,6 +26,7 @@ function fixture(t) {
     defaultModel: 'fixture-model',
     roleDescription: 'captured role',
     identitySources: undefined,
+    ...overrides,
   };
   catRegistry.register(catId, member);
   t.after(() => {
@@ -29,6 +34,7 @@ function fixture(t) {
     Object.entries(all).forEach(([id, config]) => catRegistry.register(id, config));
     if (previous === undefined) delete process.env.CAT_CAFE_DATA_DIR;
     else process.env.CAT_CAFE_DATA_DIR = previous;
+    rmSync(dataDir, { recursive: true, force: true });
   });
   return { all, catId, member };
 }
@@ -158,3 +164,85 @@ test('admission fences a member change while the concrete provider captures MCP 
   release();
   await assert.rejects(pending, /configuration changed.*admission/i);
 });
+
+test('Claude admission rejects a login change during the final thread read', async (t) => {
+  const { all, catId, member } = fixture(t);
+  const priorToken = process.env.CLAUDE_CODE_OAUTH_TOKEN;
+  t.after(() => {
+    if (priorToken === undefined) delete process.env.CLAUDE_CODE_OAUTH_TOKEN;
+    else process.env.CLAUDE_CODE_OAUTH_TOKEN = priorToken;
+  });
+  process.env.CLAUDE_CODE_OAUTH_TOKEN = 'fixture-before-final-thread-read';
+  catRegistry.reset();
+  Object.entries(all).forEach(([id, config]) => catRegistry.register(id, config));
+  catRegistry.register(catId, {
+    ...member,
+    clientId: 'anthropic',
+    accountRef: 'claude',
+    defaultModel: 'claude-fable-5',
+  });
+  let threadReads = 0;
+  const pending = prepareInvocationExecutionBinding(
+    {
+      apiUrl: 'http://127.0.0.1:13004',
+      threadStore: {
+        get: async () => ({ id: 'frozen-thread', projectPath: 'default' }),
+        getMemberEffort: async () => {
+          if (++threadReads === 2) process.env.CLAUDE_CODE_OAUTH_TOKEN = 'fixture-after-final-thread-read';
+        },
+      },
+    },
+    { catId, userId: 'isolated-owner', threadId: 'frozen-thread', service, toolExecutionPolicy: { mode: 'read_only' } },
+  );
+  await assert.rejects(pending, /Execution configuration changed during execution admission/);
+});
+
+test(
+  'Claude admission rejects an effort edit during the final Keychain read',
+  { skip: process.platform !== 'darwin' },
+  async (t) => {
+    const env = { ...process.env };
+    const { catId } = fixture(t, {
+      clientId: 'anthropic',
+      accountRef: 'claude',
+      defaultModel: 'claude-fable-5',
+    });
+    t.after(() => {
+      process.env = env;
+    });
+    delete process.env.CLAUDE_CODE_OAUTH_TOKEN;
+    delete process.env.CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR;
+    delete process.env.CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST;
+    const userId = 'isolated-owner';
+    const store = new ThreadStore();
+    const thread = store.create(userId, 'Change effort during admission');
+    store.updateMemberEffort(thread.id, catId, 'low');
+
+    let keychainReads = 0;
+    const execFile = childProcess.execFile;
+    const keychain = t.mock.method(childProcess, 'execFile', (file, args, options, callback) => {
+      if (file !== '/usr/bin/security') return execFile(file, args, options, callback);
+      const read = ++keychainReads;
+      setImmediate(() => {
+        if (read === 2) store.updateMemberEffort(thread.id, catId, 'high');
+        callback(null, JSON.stringify({ claudeAiOauth: { accessToken: 'fixture' } }), '');
+      });
+      return {};
+    });
+    syncBuiltinESMExports();
+    t.after(() => {
+      keychain.mock.restore();
+      syncBuiltinESMExports();
+    });
+
+    await assert.rejects(
+      prepareInvocationExecutionBinding(
+        { apiUrl: 'http://127.0.0.1:13004', threadStore: store },
+        { catId, userId, threadId: thread.id, service, toolExecutionPolicy: { mode: 'read_only' } },
+      ),
+      /Thread execution configuration changed during admission/,
+    );
+    assert.equal(keychainReads, 2);
+    assert.equal(store.getMemberEffort(thread.id, catId, userId), 'high');
+  },
+);

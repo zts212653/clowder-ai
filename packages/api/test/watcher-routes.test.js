@@ -26,8 +26,8 @@ async function fixture() {
     labelStore: { list: async () => [{ id: 'private', name: '私人', color: '#888' }] },
     capability: (catId) =>
       catId === 'codex' || catId === 'codex61-sol'
-        ? { supported: true, mechanism: 'native_revert', maxWorkingContextTokens: 30000, toolPolicy: 'watcher' }
-        : { supported: false, reason: 'fixture carrier has no bounded resume' },
+        ? { supported: true, context: 'ordinary', readOnly: 'tools' }
+        : { supported: false, reason: 'fixture carrier is not connected' },
     rolloutEnabled: true,
     runtimeReady: () => true,
   });
@@ -64,7 +64,7 @@ test('watcher settings require the owner session, a local write origin, and real
       401,
     );
     const start = await f.app.inject({ url: '/api/watcher/config', headers });
-    assert.equal(start.json().config.enabled, true);
+    assert.equal(start.json().config.enabled, false);
     assert.deepEqual(start.json().quietLabels, ['private']);
     const write = (payload) => f.app.inject({ method: 'PUT', url: '/api/watcher/config', headers, payload });
     assert.equal((await write({ expectedRevision: 0, memberCatId: 'opus' })).statusCode, 422);
@@ -103,6 +103,7 @@ test('watcher settings require the owner session, a local write origin, and real
 
 test('thread controls enforce scope and revision, and a global reopen does not replay an offline interval', async () => {
   const f = await fixture();
+  await f.configs.patch(USER, { watcher: { enabled: true, scope: 'all', memberCatId: 'codex', revision: 0 } });
   try {
     const url = `/api/threads/${f.thread.id}/watcher`;
     assert.equal((await f.app.inject({ url: `/api/threads/${f.foreign.id}/watcher`, headers })).statusCode, 404);

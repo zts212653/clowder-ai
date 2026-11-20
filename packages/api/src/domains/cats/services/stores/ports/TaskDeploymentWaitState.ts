@@ -20,6 +20,13 @@ export function deploymentWaitReplacementMatches(
 ): boolean {
   return (
     (input.expectedUpdatedAt === undefined || existing.updatedAt === input.expectedUpdatedAt) &&
+    (!input.expectedTaskAssignment ||
+      (existing.userId === input.expectedTaskAssignment.userId &&
+        existing.ownerCatId === input.expectedTaskAssignment.ownerCatId &&
+        existing.threadId === input.expectedTaskAssignment.threadId &&
+        (existing.ownerRevision ?? 0) === input.expectedTaskAssignment.ownerRevision &&
+        (existing.lastAppliedHandoffMessageRef ?? null) === input.expectedTaskAssignment.lastAppliedHandoffMessageRef &&
+        isDeepStrictEqual(existing.executionRef ?? null, input.expectedTaskAssignment.executionRef))) &&
     deploymentWaitGeneration(existing.deploymentWait) === input.expectedGeneration &&
     sameDeploymentWaitState(existing.deploymentWait, input.expectedDeploymentWait)
   );

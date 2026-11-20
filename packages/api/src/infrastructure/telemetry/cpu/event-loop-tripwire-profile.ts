@@ -1,5 +1,6 @@
 import type { Profiler } from 'node:inspector';
 import { projectMainThreadCpuProfile } from './main-thread-cpu-profile.js';
+import { selectTripwireNodes } from './tripwire-sampled-nodes.js';
 
 export interface TripwireProfileSegment {
   profile: Profiler.Profile;
@@ -60,9 +61,11 @@ export function projectTripwireSegment(segment: TripwireProfileSegment, fromMs: 
       deltas.push(delta);
     }
   }
-  const projection = projectMainThreadCpuProfile({ ...profile, samples, timeDeltas: deltas });
+  const selected = selectTripwireNodes(profile.nodes, samples);
+  const projection = projectMainThreadCpuProfile({ ...profile, nodes: selected.nodes, samples, timeDeltas: deltas });
   return {
     ...projection,
+    omittedNodes: selected.omittedNodes,
     sampleClockValid: clockValid,
     sampleClockUncertaintyMs: Math.round(uncertaintyMs * 1000) / 1000,
     uncoveredMs: clockValid ? Math.round(uncoveredMs * 1000) / 1000 : Math.max(0, toMs - fromMs),

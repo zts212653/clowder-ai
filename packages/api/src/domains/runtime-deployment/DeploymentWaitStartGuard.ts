@@ -81,7 +81,8 @@ export class DeploymentWaitStartGuard {
     const snapshot = await this.deps.taskStore.getWaitRegistration(carrier.waitId);
     const task = snapshot?.task;
     const outcome = task?.deploymentWait?.waitOutcome;
-    if (!task || !outcome || !this.authorized(input, task, outcome, snapshot.receipt, carrier)) {
+    const handoffRef = message.source.meta?.taskHandoffRef ?? null;
+    if (!task || !outcome || !this.authorized(input, task, outcome, snapshot.receipt, carrier, handoffRef)) {
       return { ok: false, reason: 'authority_stale' };
     }
     const deploymentId = outcome.subjectRef.split(':')[2];
@@ -100,7 +101,7 @@ export class DeploymentWaitStartGuard {
       if (
         !current ||
         !currentOutcome ||
-        !this.authorized(input, current.task, currentOutcome, current.receipt, carrier)
+        !this.authorized(input, current.task, currentOutcome, current.receipt, carrier, handoffRef)
       ) {
         return { ok: false, reason: 'authority_stale' };
       }
@@ -124,7 +125,14 @@ export class DeploymentWaitStartGuard {
     }
     const current = await this.deps.taskStore.getWaitRegistration(carrier.waitId);
     return !!current?.task.deploymentWait?.waitOutcome &&
-      this.authorized(input, current.task, current.task.deploymentWait.waitOutcome, current.receipt, carrier)
+      this.authorized(
+        input,
+        current.task,
+        current.task.deploymentWait.waitOutcome,
+        current.receipt,
+        carrier,
+        handoffRef,
+      )
       ? { ok: true }
       : { ok: false, reason: 'authority_stale' };
   }
@@ -135,12 +143,16 @@ export class DeploymentWaitStartGuard {
     outcome: DeploymentWaitOutcomeV1,
     receipt: TypedWaitRegistration | null,
     carrier: WaitContinuationCarrierV1,
+    handoffRef: unknown,
   ): boolean {
     return (
       task.threadId === input.threadId &&
       task.userId === input.userId &&
       task.ownerCatId === input.catId &&
       !task.deploymentWait?.currentExecutionClaim &&
+      !task.executionRef &&
+      (task.lastAppliedHandoffMessageRef ?? null) === handoffRef &&
+      (task.deploymentWait?.transportAttempt?.taskHandoffRef ?? null) === handoffRef &&
       carrier.outcomeId === outcome.outcomeId &&
       carrier.ownerFence.generation === outcome.generation &&
       receiptOwnsOutcome(task, outcome, receipt, true)

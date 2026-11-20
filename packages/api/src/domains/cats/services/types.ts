@@ -1040,6 +1040,8 @@ export type ToolExecutionPolicy =
       /** F335 panel watcher: ordinary reads and memory proposals by route template; nothing that speaks or acts. */
       readonly mode: 'watcher_panel';
       readonly allowedCallbackRoutes: readonly string[];
+      /** Exact MCP names; old stored route-only policies advertise no tools. */
+      readonly allowedToolNames?: readonly string[];
     }
   | {
       readonly mode: 'plugin_native';
@@ -1126,6 +1128,8 @@ export interface AgentServiceOptions {
   executionPreferences?: import('./agents/providers/member-execution-preferences.js').MemberExecutionPreferences;
   /** Admission-owned identity/rules; the L0 child never reloads mutable configuration. */
   frozenL0Input?: import('@cat-cafe/shared/l0-input').FrozenL0Input;
+  /** Host-only replay from canonical request-generation evidence; never supplied by a model or user. */
+  cacheRetentionReplay?: import('./agents/providers/claude-cache-retention-replay.js').ClaudeCacheRetentionReplay;
   /** Host logical SessionRecord identity; sessionId remains the native resume id. */
   hostSessionId?: string;
   /** Binding restored from the canonical SessionRecord, including across API restarts. */
@@ -1312,6 +1316,8 @@ export interface ProviderRequestGenerationCommitV1 {
 export interface AgentService {
   prepareWatcherSession?(): Promise<void>;
   boundedWatcherSessionCapability?(): import('@cat-cafe/shared').WatcherCapability;
+  /** Ordinary-context observer with an enforced read-only launch and usable household read tools. */
+  watcherMemberCapability?(): import('@cat-cafe/shared').WatcherMemberCapability;
   /** The adapter handles AbortSignal and owns teardown; Host must drain it before terminalizing. */
   readonly cancellationMode?: 'drain';
   /**

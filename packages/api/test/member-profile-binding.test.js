@@ -22,9 +22,9 @@ const member = {
 };
 
 describe('member identity and execution projections at admission', () => {
-  it('separates role identity from client and model without changing the stored member', () => {
+  it('separates role identity from client and model without changing the stored member', async () => {
     const original = structuredClone(member);
-    const binding = freezeExecutionAccountBinding({
+    const binding = await freezeExecutionAccountBinding({
       catId: member.id,
       catConfig: member,
       workspace: { usesDefaultWorkspace: false },
@@ -45,9 +45,9 @@ describe('member identity and execution projections at admission', () => {
     assert.deepEqual(member, original);
   });
 
-  it('pins the projected role and execution values against later input edits', () => {
+  it('pins the projected role and execution values against later input edits', async () => {
     const mutable = structuredClone(member);
-    const binding = freezeExecutionAccountBinding({
+    const binding = await freezeExecutionAccountBinding({
       catId: mutable.id,
       catConfig: mutable,
       workspace: { usesDefaultWorkspace: false },
@@ -61,13 +61,13 @@ describe('member identity and execution projections at admission', () => {
     assert.ok(Object.isFrozen(binding.executionProfile));
   });
 
-  it('keeps presentation-only edits out of the pure persona digest', () => {
-    const first = freezeExecutionAccountBinding({
+  it('keeps presentation-only edits out of the pure persona digest', async () => {
+    const first = await freezeExecutionAccountBinding({
       catId: member.id,
       catConfig: member,
       workspace: { usesDefaultWorkspace: false },
     });
-    const second = freezeExecutionAccountBinding({
+    const second = await freezeExecutionAccountBinding({
       catId: member.id,
       catConfig: { ...member, avatar: '/new.png', color: { primary: '#fff', secondary: '#000' } },
       workspace: { usesDefaultWorkspace: false },

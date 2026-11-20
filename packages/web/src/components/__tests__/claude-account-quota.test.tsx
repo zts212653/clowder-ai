@@ -39,7 +39,7 @@ afterEach(async () => {
 
 it('shows shared and Fable limits, retains unknown keys, and labels each sampling time', async () => {
   await act(async () =>
-    root.render(<ClaudeQuotaControl accountRef="a" observation={reading} reload={async () => {}} />),
+    root.render(<ClaudeQuotaControl account={{ id: 'a', claudeQuota: reading }} reload={async () => {}} />),
   );
   expect(host.textContent).toContain('本周（全部模型）');
   expect(host.textContent).toContain('剩 11%');
@@ -56,7 +56,7 @@ it('shows shared and Fable limits, retains unknown keys, and labels each samplin
 it('crossing reset marks the historical reading rather than fabricating a full balance', async () => {
   vi.setSystemTime(weeklyReset * 1000 - 500);
   await act(async () =>
-    root.render(<ClaudeQuotaControl accountRef="a" observation={reading} reload={async () => {}} />),
+    root.render(<ClaudeQuotaControl account={{ id: 'a', claudeQuota: reading }} reload={async () => {}} />),
   );
   await act(async () => {
     vi.advanceTimersByTime(501);
@@ -71,13 +71,66 @@ it('crossing reset marks the historical reading rather than fabricating a full b
 it('explicit reads target the row account and credential-change errors remove unverified history after reload', async () => {
   vi.mocked(apiFetch).mockResolvedValue(Response.json({ error: 'claude_quota_credential_changed' }, { status: 409 }));
   const reload = vi.fn(async () => {
-    root.render(<ClaudeQuotaControl accountRef="b" reload={reload} />);
+    root.render(<ClaudeQuotaControl account={{ id: 'b' }} reload={reload} />);
   });
-  await act(async () => root.render(<ClaudeQuotaControl accountRef="b" observation={reading} reload={reload} />));
+  await act(async () =>
+    root.render(<ClaudeQuotaControl account={{ id: 'b', claudeQuota: reading }} reload={reload} />),
+  );
   await act(async () => host.querySelector<HTMLButtonElement>('button')?.click());
   expect(vi.mocked(apiFetch).mock.calls[0][0]).toBe('/api/accounts/b/claude/quota');
   expect(reload).toHaveBeenCalledTimes(1);
   expect(host.textContent).toContain('此号的登录已变化');
   expect(host.textContent).toContain('尚无可确认的读数');
   expect(host.textContent).not.toContain('剩 46%');
+});
+
+const newReading: ClaudeQuotaView = {
+  samples: {
+    'claude-haiku-5-5': { observedAt: now, windows: { seven_day: { utilization: 0.2, resetsAt: weeklyReset } } },
+  },
+};
+
+it.each([
+  { state: 'missing reading', currentQuota: undefined, remaining: null },
+  { state: 'new reading', currentQuota: newReading, remaining: '80' },
+])('keeps the directory $state when the previous login responds late', async ({ currentQuota, remaining }) => {
+  const oldResponse = Promise.withResolvers<Response>();
+  vi.mocked(apiFetch)
+    .mockReturnValueOnce(oldResponse.promise)
+    .mockResolvedValueOnce(Response.json({ claudeQuota: newReading }));
+  let currentObservation: ClaudeQuotaView | undefined = reading;
+  const reload = vi.fn(async (): Promise<void> => render());
+  const render = (): void =>
+    root.render(<ClaudeQuotaControl account={{ id: 'claude', claudeQuota: currentObservation }} reload={reload} />);
+  const visibleQuota = () => host.querySelector('[role="meter"]')?.getAttribute('aria-valuenow') ?? null;
+  await act(async () => render());
+  await act(async () => host.querySelector<HTMLButtonElement>('button')?.click());
+
+  currentObservation = currentQuota;
+  await act(async () => render());
+  expect(visibleQuota()).toBe(remaining);
+
+  await act(async () => oldResponse.resolve(Response.json({ claudeQuota: reading })));
+  expect(reload).toHaveBeenCalledTimes(1);
+  expect(visibleQuota()).toBe(remaining);
+
+  currentObservation = newReading;
+  await act(async () => host.querySelector<HTMLButtonElement>('button')?.click());
+  expect(reload).toHaveBeenCalledTimes(2);
+  expect(visibleQuota()).toBe('80');
+});
+
+it('ignores a late failure from a superseded directory read with no quota', async () => {
+  const oldResponse = Promise.withResolvers<Response>();
+  vi.mocked(apiFetch).mockReturnValueOnce(oldResponse.promise);
+  const reload = vi.fn(async () => {});
+  await act(async () => root.render(<ClaudeQuotaControl account={{ id: 'claude' }} reload={reload} />));
+  await act(async () => host.querySelector<HTMLButtonElement>('button')?.click());
+
+  await act(async () => root.render(<ClaudeQuotaControl account={{ id: 'claude' }} reload={reload} />));
+  await act(async () =>
+    oldResponse.resolve(Response.json({ error: 'claude_quota_credential_changed' }, { status: 409 })),
+  );
+  expect(host.querySelector('[role="alert"]')).toBeNull();
+  expect(host.textContent).toContain('尚无可确认的读数');
 });

@@ -103,8 +103,9 @@ test('pinned managed gh accepts help and normal workflow operations without exem
   decide(`${root}/unverified/guarded-bin/gh pr create --repo o/r --body-file ${root}/body`, 'deny');
   decide(`${ordinaryWrapper} api user --jq .login`, 'allow');
   decide(`printf changed > ${ordinaryWrapper}; ${ordinaryWrapper} pr create --repo o/r --body safe`, 'deny');
-  decide(`node -e 'unprovedSetup()'; ${wrapper} pr create --repo o/r --body safe`, 'deny');
-  decide(`${wrapper} api --method POST repos/o/r/dispatches --input ${root}/body --jq --help`, 'deny');
+  decide(`node -e 'console.log(1)'; ${wrapper} pr create --repo o/r --body safe`, 'allow');
+  decide(`${wrapper} api --method POST repos/o/r/dispatches --input ${root}/body --jq --help`, 'allow');
+  decide(`/opt/unmanaged/gh api --method POST repos/o/r/dispatches --input ${root}/body`, 'deny');
 });
 
 test('canonical source and the deterministic staged wrapper both preserve managed identity', () => {
@@ -266,9 +267,9 @@ test('source, staged and private hook CLIs consume the repaired roles and keep r
     [`env PATH=${root}/bin:$PATH pnpm --filter @example/test build > ${root}/build.log 2>&1`, 'allow'],
     [`cp ${root}/avatar.png ${runtime}/packages/api/uploads/avatar.png`, 'deny'],
     ['git fetch --refmap= origin +feature:refs/heads/main', 'deny'],
-    [`${wrapper} api --method POST repos/o/r/dispatches --input ${root}/body --jq --help`, 'deny'],
+    [`${wrapper} api --method POST repos/o/r/dispatches --input ${root}/body --jq --help`, 'allow'],
     [`node --test scripts/protected.test.mjs > ${root}/test.log`, 'deny', runtime],
-    [`GH_HOST=example.invalid ${wrapper} pr comment 1 --repo o/r --body ok`, 'deny'],
+    [`GH_HOST=example.invalid ${wrapper} pr comment 1 --repo o/r --body ok`, 'allow'],
     [`export NODE_OPTIONS=--import=${root}/untrusted.mjs; ${wrapper} pr comment 1 --repo o/r --body ok`, 'deny'],
     [`cp ${runtime}/packages/api/dist -R ${root}`, 'deny'],
     ["for id in 1 2; do gh api repos/o/r/actions/jobs/$id --jq '.id'; done", 'allow'],

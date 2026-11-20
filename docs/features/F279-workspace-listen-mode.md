@@ -4,12 +4,12 @@ related_features: [F063, F066, F091, F111, F112, F153, F284]
 topics: [workspace, markdown, listen-mode, tts, audio, cache, accessibility]
 doc_kind: spec
 created: 2026-07-28
-updated: 2026-11-17
+updated: 2026-11-19
 description: "让用户在 Workspace Markdown 中从任意句开始听读，并以可见、可复用、可清理的本地音频缓存持续续听。"
 description_source: human
 description_author: codex-sol
 description_updated_at: 2026-08-23T01:37:00-07:00
-tips_exempt: "Renewed 2026-11-14: PR #6701 enforces local TTS model selection consistency and per-document listen mutation ordering across existing speech and workspace listen routes without adding a new end-user capability surface."
+tips_exempt: "Renewed 2026-11-19: daily doc guard records PR #7277 (starting chat read-aloud from the first complete sentence through the workspace listen stream and suspending superseded document listen prefetch/progress tracking) and PR #7278 (reusing Breeze verified reference codec tokens across streaming sentences on the model-owning thread). Existing speech and workspace listen controls are unchanged."
 ---
 
 # F279: Workspace Listen Mode — 正文听读与可复用音频缓存
@@ -40,7 +40,9 @@ Why: Workspace 是用户入口；F066/F111 继续拥有 TTS 合成与内容寻�
 
 家里已经分别拥有 Markdown 渲染、TTS 合成、流式分句和播放队列，却还没有把这些能力接成一个用户能直接使用的“听正文”旅程。F279 的目标不是再造 TTS，而是让operator在 Workspace 打开一篇 Markdown 后，**从任意句开始、按自己舒服的速度听下去；听过的内容可以立即重播，缓存何时清理一眼可见。**
 
-## Current State（updated 2026-11-17）
+## Current State（updated 2026-11-19）
+
+- 聊天消息「朗读」已支持通过工作区听读流从首个完整句起播（[#7277](https://github.com/zts212653/clowder-ai/pull/7277)，merge `7d7cb9ad1a`），整次请求复用同一准备好的 provider 与声线，在播放首句的同时继续合成剩余文本；停止或被新共享播放源接管时立即取消请求、停止文档预取并解除进度跟踪。Breeze 原生流式适配器在模型所属线程按已核实的参考音频字节与解码器格式复用单个已物化的参考 codec 张量（[#7278](https://github.com/zts212653/clowder-ai/pull/7278)，merge `2b8821a9e3`），并在流结束或异常时恢复钩子，避免同一克隆参考声线的连续句子在首块生成前重复编码。聊天消息「朗读」的块级播放亦已合入 main（[#7280](https://github.com/zts212653/clowder-ai/pull/7280)）。声线已核、首块可播且开头供给达到起播条件时，连续 PCM 块在同一个 Web Audio 时钟上排期。开头供给偏慢或首块不可用时，播放器等完整句。工作区文档收听以完整句资产为播放单位。聊天端的正式加载和到版验收由 Task1143 承接。
 
 - #7199 / #7222 已合入声线来源与既有听读契约的兼容修复：当前可核参考与实际生成回执一致时保留确定性缓存/全文预制；旧录音、跨协议续播、进度与保留期继续可用。实时逐句听读和四条服务端多段入口共用参考序列检查，在下一段挂载/播放前阻断已观察到的换声。仅旧服务或当前参考无法核实时，保留明确的未知提示与独立资产，不把历史录音冒充当前已核生成。
 - 上述是原 Task484 的兼容收口，不把本文件剩余 Phase / UAT AC 宣称完成。main 合入、官方 Alpha 与正式采用的证据分开保留；本次两句样本没有覆盖 AC-B4b 的重启后跨 checkout 缓存验证，也未代签其余音频 UAT。
@@ -58,7 +60,7 @@ Why: Workspace 是用户入口；F066/F111 继续拥有 TTS 合成与内容寻�
 - 现有 cleaner 每 6 小时清理超过 7 天的文件，并在缓存超过 500MB 时按 LRU 压回 400MB。
 - 音频 cache 已脱离 runtime cwd：显式 `TTS_CACHE_DIR` 优先，否则落到 `${CAT_CAFE_DATA_DIR}/assets/tts`，未配置用户数据根时使用 `~/.cat-cafe/assets/tts`；`~` 会展开为用户主目录。PR #3589 已把 API 写入、cleaner 与 connector media 回读统一到同一 resolver。文档 manifest、续听位置、缓存状态与用户可见清理入口仍由 F279 的独立状态链管理。
 - F284 已把 Workspace 重构为 contextual shell；Files 和文件详情仍是持久 Workspace 内的正式层级，且访问后的 Workspace 在折叠/切换 sibling host 时保持挂载。F279 的入口继续属于 rendered Markdown 文件详情；2026-08-12 operator 实测后把完整 player 移入 Workspace 顶部的正常布局流，避免遮挡聊天输入框。播放会话仍由 AppShell 级 PlaybackManager 持有；Workspace 不可见时，AppShell 只呈现位于输入框上方的紧凑暂停/返回入口，返回正文继续调用 F284 的 canonical Files/detail store transition。
-- 生产实现已接入 F284：rendered Markdown 工具栏/inline sentence span、Workspace 内嵌播放器、逐句预取、句内位置节流持久化、语音自动播放抑制、缓存状态/清理 UI 均已落代码。Python 原生模型流 → Node provider NDJSON → API SSE 继续提供合成进度和最终完整资产，但浏览器不再逐块播放独立 WAV。
+- 生产实现已接入 F284：rendered Markdown 工具栏/inline sentence span、Workspace 内嵌播放器、逐句预取、句内位置节流持久化、语音自动播放抑制、缓存状态/清理 UI 均已落代码。Python 原生模型流 → Node provider NDJSON → API SSE 为工作区文档收听提供合成进度和最终完整资产，播放器按完整句入队。
 - 2026-08-14 的真实运行时证据推翻了“原生 chunk 可直接连续播放”的假设：每个约 `0.5s` chunk 都触发一次 `HTMLAudioElement.src` 重载，Chromium 实测单次空档约 `55ms`；真实完整句资产另带 `302–594ms` 的模型启动静音。当前修复让播放器只入队完整句资产，并在听读专用、独立版本的 cache 写入前把句首静音裁到约 `14–25ms`。原生 chunk 仍可留在 SSE 作为进度信号，不再成为可听播放单元。
 - TTS SSE 使用 raw Node response 时必须保留 Fastify hook 已批准的 CORS 与安全响应头；浏览器跨源失败显示真实 `session.error`，不能用当前句正文遮蔽。
 - 当前客户端预取窗口只有 4 句，窗口只在播放 item 结束后向前推进；pause 不会直接 abort 正在生成的一句，但会阻断后续窗口推进。缓存和播放仍由同一个 `DocumentListenController` 编排，也没有开播前可达的“只缓存全文”动作。2026-08-12 operator 的真实使用反馈据此追加 Phase D：文档级后台缓存推进必须与播放器状态解耦。
@@ -135,7 +137,7 @@ Why: Workspace 是用户入口；F066/F111 继续拥有 TTS 合成与内容寻�
 - pause/resume/skip/interrupt 的原有语义保持一致；F279 只增加 sentence seek 和 playback rate。
 - 播放倍速只由浏览器 `playbackRate` 控制，不进入听读音频指纹、不触发重新合成；同一声线/正文的完整 WAV 可跨五档倍速复用。
 - 一个句子只以处理后的完整 WAV 进入 PlaybackManager，作为一个逻辑 item；独立 WAV chunk 不得按多个 `HTMLAudioElement.src` 顺序播放。句子结束才推进位置，seek 使用句内时间。
-- sidecar 的原生 chunk 只用于合成进度与最终资产生产；API 的 raw SSE 响应必须继承 Fastify 已批准的 CORS/安全头，完整资产到达前不得向播放器暴露不连续的可听片段。
+- 工作区文档收听以 sidecar 的原生 chunk 报告合成进度，并在完整资产到达后排入播放队列。API 的 raw SSE 响应必须继承 Fastify 已批准的 CORS 和安全头。
 - 切换文档或关闭 Workspace 时，不自动丢弃持久续听位置。
 
 ### 5. 文档级全文缓存收敛

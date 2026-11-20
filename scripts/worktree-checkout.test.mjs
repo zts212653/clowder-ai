@@ -171,6 +171,18 @@ test('inherited sparse exclusions become visible only in the new checkout; execu
   assert.ok(statSync(join(f.path, 'bin/tool.sh')).mode & 0o111);
 });
 
+test('worktree birth does not copy another checkout’s built-in fsmonitor opt-in', (t) => {
+  const f = setup(t);
+  git(f.repo, 'config', '--worktree', 'core.fsmonitor', 'true');
+  f.create();
+  assert.doesNotMatch(git(f.path, 'config', '--worktree', '--list'), /^core\.fsmonitor=/m);
+  assert.equal(git(f.repo, 'config', '--worktree', '--get', 'core.fsmonitor').trim(), 'true');
+  assert.equal(git(f.path, 'status', '--porcelain'), '');
+  const gitDir = git(f.path, 'rev-parse', '--absolute-git-dir').trim();
+  assert.equal(existsSync(join(gitDir, 'fsmonitor--daemon.ipc')), false);
+  assert.equal(f.finish(f.path, { cwdProbe: undefined }).storageDisposition, 'removed');
+});
+
 test('core.autocrlf conversions are performed by Git even without gitattributes', (t) => {
   const f = setup(t);
   git(f.repo, 'config', 'core.autocrlf', 'true');

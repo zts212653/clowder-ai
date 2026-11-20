@@ -164,7 +164,7 @@ test('original cancelled no-start can be stopped without deleting its retained r
     f.db.prepare('SELECT managed_resource_json FROM dynamic_task_defs WHERE id=?').get(taskId),
     f.originalResource,
   );
-  assert.deepEqual(listManagedCommandExecutions([task]), []);
+  assert.deepEqual(await listManagedCommandExecutions([task]), []);
   assert.equal((await cancel(app)).statusCode, 200, 'stale UI retry is idempotent');
   assert.equal(f.messages.length, 1, 'retry does not duplicate cancellation visibility');
   assert.deepEqual(f.cancels, [], 'never touch the newer runner in the same thread');
@@ -182,7 +182,7 @@ test('startup settles the proven cancelled no-start without sending a completion
   await sweep.runOnce();
   assert.equal(f.store.getById(taskId).params.holdLifecycle.managedCommand.state, 'not_started');
   assert.deepEqual(
-    listManagedCommandExecutions(f.store.getAll()).map((x) => [x.taskId, x.startedAt]),
+    (await listManagedCommandExecutions(f.store.getAll())).map((x) => [x.taskId, x.startedAt]),
     [['hold-ball-new-live', 999]],
   );
   assert.deepEqual(f.messages, []);
@@ -232,7 +232,7 @@ for (const [name, alter] of [
     assert.equal(response.json().cancelled, false);
     await new ManagedCommandWakeRecoverySweep(f.deps).runOnce();
     assert.equal(f.store.getById(taskId).params.holdLifecycle.managedCommand.state, 'command_running');
-    assert.equal(listManagedCommandExecutions(f.store.getAll()).length, 1);
+    assert.equal((await listManagedCommandExecutions(f.store.getAll())).length, 1);
     assert.deepEqual(
       f.db.prepare('SELECT managed_resource_json FROM dynamic_task_defs WHERE id=?').get(taskId),
       f.originalResource,

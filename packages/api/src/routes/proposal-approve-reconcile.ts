@@ -1,12 +1,16 @@
 import type { ThreadProposal } from '@cat-cafe/shared';
+import { autoStartsApprovedTask } from '../domains/ball-custody/approved-task-contract.js';
 import type { OwnerAuthProvenance } from '../domains/cats/services/agents/invocation/owner-auth-provenance.js';
 import type { IMessageStore, StoredMessage } from '../domains/cats/services/stores/ports/MessageStore.js';
 import { appendApprovedInitialMessage } from './proposal-approve-dispatch.js';
+import { resolveApprovedTaskSeed } from './proposal-approved-task-seed.js';
 import { placeApprovedProposalGroup } from './proposal-group-placement.js';
 import type { ProposalRoutesOptions } from './proposal-route-options.js';
 
+type ApprovedTaskSeedDeps = Partial<Pick<ProposalRoutesOptions, 'proposalStore' | 'ordinaryTaskHandoffs'>>;
 export interface ReconcileApprovedSeedDeps
-  extends Pick<ProposalRoutesOptions, 'messageStore' | 'threadStore' | 'socketManager' | 'router' | 'invocationQueue'> {
+  extends Pick<ProposalRoutesOptions, 'messageStore' | 'threadStore' | 'socketManager' | 'router' | 'invocationQueue'>,
+    ApprovedTaskSeedDeps {
   proposal: ThreadProposal;
   userId: string;
   ownerAuthProvenance: OwnerAuthProvenance;
@@ -24,7 +28,8 @@ export interface ReconcileApprovedInitialMessageResult {
 }
 
 export interface ReconcileFactoryDeps
-  extends Pick<ProposalRoutesOptions, 'messageStore' | 'threadStore' | 'socketManager' | 'router' | 'invocationQueue'> {
+  extends Pick<ProposalRoutesOptions, 'messageStore' | 'threadStore' | 'socketManager' | 'router' | 'invocationQueue'>,
+    ApprovedTaskSeedDeps {
   userId: string;
   ownerAuthProvenance: OwnerAuthProvenance;
 }
@@ -37,6 +42,8 @@ export function createReconcileApprovedInitialMessage({
   socketManager,
   router,
   invocationQueue,
+  proposalStore,
+  ordinaryTaskHandoffs,
 }: ReconcileFactoryDeps) {
   return async (proposal: ThreadProposal) => {
     const groupWarnings: string[] = [];
@@ -54,6 +61,8 @@ export function createReconcileApprovedInitialMessage({
       socketManager,
       router,
       invocationQueue,
+      proposalStore,
+      ordinaryTaskHandoffs,
     });
     return { ...result, warnings: [...groupWarnings, ...result.warnings] };
   };
@@ -128,6 +137,7 @@ async function dispatchApprovedInitialMessage(
   router: ReconcileApprovedSeedDeps['router'],
   invocationQueue: ReconcileApprovedSeedDeps['invocationQueue'],
   existingSeed?: StoredMessage,
+  approvedTask: ApprovedTaskSeedDeps = {},
 ): Promise<{ warnings: string[] }> {
   // Best-effort source-thread title: a transient store failure here must not
   // drop dispatch after the proposal has already been finalized.
@@ -140,7 +150,19 @@ async function dispatchApprovedInitialMessage(
 
   const warnings: string[] = [];
   try {
+    if (autoStartsApprovedTask(proposal) && (!approvedTask.proposalStore || !router || !invocationQueue))
+      return { warnings: ['Approved Task dispatch unavailable; retry this approval'] };
+    const taskHandoff = approvedTask.proposalStore
+      ? await resolveApprovedTaskSeed(
+          { proposalStore: approvedTask.proposalStore, ordinaryTaskHandoffs: approvedTask.ordinaryTaskHandoffs },
+          proposal,
+          userId,
+          ownerAuthProvenance,
+          existingSeed,
+        )
+      : undefined;
     const result = await appendApprovedInitialMessage({
+      ...(taskHandoff ? { taskHandoff } : {}),
       proposalId: proposal.proposalId,
       userId,
       ownerAuthProvenance,
@@ -186,8 +208,11 @@ export async function reconcileApprovedInitialMessage({
   socketManager,
   router,
   invocationQueue,
+  ...approvedTask
 }: ReconcileApprovedSeedDeps): Promise<ReconcileApprovedInitialMessageResult> {
   const threadId = proposal.createdThreadId!;
+  if (proposal.subjectTaskId && proposal.approvalContractInvalid)
+    return { warnings: ['Approved Task contract could not be verified'], wasPresent: false };
 
   // All pre-append reads are best-effort. If we cannot establish whether a seed
   // already exists, we must NOT append — that would duplicate the seed and can
@@ -215,6 +240,7 @@ export async function reconcileApprovedInitialMessage({
         router,
         invocationQueue,
         idempotentSeed,
+        approvedTask,
       );
       return { warnings, wasPresent: true, redispatched: true };
     }
@@ -237,6 +263,7 @@ export async function reconcileApprovedInitialMessage({
         router,
         invocationQueue,
         legacySeed,
+        approvedTask,
       );
       return { warnings, wasPresent: true, legacy: true, redispatched: true };
     }
@@ -256,6 +283,8 @@ export async function reconcileApprovedInitialMessage({
     socketManager,
     router,
     invocationQueue,
+    undefined,
+    approvedTask,
   );
   return { warnings, wasPresent: false };
 }

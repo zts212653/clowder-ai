@@ -12,6 +12,11 @@ import {
   resolveClaudeModelSelection,
   SUBSCRIPTION_MODE_DENY_KEYS,
 } from './ClaudeAgentService.js';
+import {
+  freezeClaudeCacheRetentionMemory,
+  validateClaudeCacheRetentionReplay,
+  withClaudeCacheRetentionToolDenial,
+} from './claude-cache-retention-replay.js';
 import { composeManagedSettingsDocument } from './claude-compaction-launch-plan.js';
 import { resolveClaudeMcpConfig } from './claude-mcp-config.js';
 import {
@@ -26,6 +31,7 @@ import { appendLocalImagePathHints, collectImageAccessDirectories } from './imag
 import { extractTrustedImagePaths } from './image-paths.js';
 import { compileL0ViaSubprocess } from './l0-compiler.js';
 import { writeInvocationMcpConfigFile } from './session-credential-file.js';
+import { captureWatcherOptions, claudeWatcherToolAllowed } from './watcher-invocation-options.js';
 
 function effortValue(effort: string): EffortLevel | undefined {
   if (!effort) return undefined;
@@ -96,7 +102,11 @@ export async function prepareClaudeSdkLaunch(input: {
 }): Promise<{ prompt: string; model: string; sdkOptions: Options }> {
   const { catId } = input;
   const member = captureClaudeMemberOptions(input.options);
-  const options = member ?? input.options;
+  const observer = captureWatcherOptions(input.options);
+  const options = member ?? observer ?? input.options;
+  const retentionReplay = validateClaudeCacheRetentionReplay(options);
+  const watcher = Boolean(observer);
+  const isolated = Boolean(member) || watcher;
   const launch = member?.pluginNativeLaunch;
   await launch?.assertCurrent();
   if (options?.signal?.aborted) throw options.signal.reason ?? new Error('Invocation cancelled');
@@ -117,16 +127,19 @@ export async function prepareClaudeSdkLaunch(input: {
   const effort = effortValue(
     resolveClaudeEffortLevel(catId, effectiveModel, options?.reasoningEffortOverride, options?.executionPreferences),
   );
-  const l0 = await input.l0CompilerFn({
-    frozenInput: options?.frozenL0Input,
-    requireFrozenInput: true,
-    catId,
-    userId: options?.callbackEnv?.CAT_CAFE_USER_ID ?? options?.auditContext?.userId,
-    ...(member ? { projection: 'scoped-member' as const, runtimeModel: effectiveModel } : {}),
-  });
+  const l0 =
+    retentionReplay?.nativeSystemPrompt ??
+    (await input.l0CompilerFn({
+      frozenInput: options?.frozenL0Input,
+      requireFrozenInput: true,
+      catId,
+      userId: options?.callbackEnv?.CAT_CAFE_USER_ID ?? options?.auditContext?.userId,
+      ...(member ? { projection: 'scoped-member' as const, runtimeModel: effectiveModel } : {}),
+    }));
+  const appendSystemPrompt = retentionReplay ? retentionReplay.appendSystemPrompt : options?.systemPrompt;
   const nativeInstructions = [
     { body: l0, injectionDecision: 'native_l0_compiled' },
-    ...(options?.systemPrompt ? [{ body: options.systemPrompt, injectionDecision: 'route_append_system_prompt' }] : []),
+    ...(appendSystemPrompt ? [{ body: appendSystemPrompt, injectionDecision: 'route_append_system_prompt' }] : []),
   ];
   const mcpResolution =
     !readOnly && !member && options?.callbackEnv && input.mcpServerPath
@@ -135,6 +148,7 @@ export async function prepareClaudeSdkLaunch(input: {
           callbackEnv: options.callbackEnv,
           workingDirectory: options.workingDirectory,
           mcpServerPath: input.mcpServerPath,
+          toolExecutionPolicy: options.toolExecutionPolicy,
         })
       : undefined;
   const mcpServers = launch
@@ -148,29 +162,36 @@ export async function prepareClaudeSdkLaunch(input: {
         },
       }
     : (mcpResolution?.servers ?? {});
-  const operator = sdkOperatorArgs(readOnly || member ? [] : (options?.cliConfigArgs ?? []));
+  const operator = sdkOperatorArgs(readOnly || isolated ? [] : (options?.cliConfigArgs ?? []));
   const additionalDirectories = [
     ...new Set([...(operator.additionalDirectories ?? []), ...collectImageAccessDirectories(imagePaths)]),
   ];
   const plan = options?.compactionLaunchPlan;
   const settingSources: NonNullable<Options['settingSources']> =
-    readOnly || member
+    readOnly || isolated
       ? []
       : options?.callbackEnv?.[ANTHROPIC_PROFILE_MODE_KEY] === 'api_key'
         ? ['project', 'local']
         : ['user', 'project', 'local'];
   const accountSettings =
     !member && options?.claudeTokenAccount
-      ? await composeClaudeTokenSettingsDocument(operator.settings, options?.workingDirectory, settingSources)
+      ? await composeClaudeTokenSettingsDocument(
+          watcher ? CLAUDE_MEMBER_SETTINGS : operator.settings,
+          options?.workingDirectory,
+          settingSources,
+        )
       : operator.settings;
   const composedSettings = plan?.ready
     ? composeManagedSettingsDocument(plan, accountSettings, options?.workingDirectory)
     : accountSettings;
-  const settings = member
+  const ordinarySettings = member
     ? CLAUDE_MEMBER_SETTINGS
-    : readOnly
-      ? composedSettings
-      : withClaudeSecretHooks(composedSettings, options?.workingDirectory);
+    : watcher
+      ? (composedSettings ?? CLAUDE_MEMBER_SETTINGS)
+      : readOnly
+        ? composedSettings
+        : withClaudeSecretHooks(composedSettings, options?.workingDirectory);
+  const settings = retentionReplay ? withClaudeCacheRetentionToolDenial(ordinarySettings ?? '{}') : ordinarySettings;
   const overrides = {
     ...buildClaudeEnvOverrides(options?.callbackEnv, {
       contextNativeWindowTokens: options?.contextNativeWindowTokens,
@@ -180,7 +201,8 @@ export async function prepareClaudeSdkLaunch(input: {
   if (options?.callbackEnv?.[ANTHROPIC_PROFILE_MODE_KEY] === 'subscription')
     for (const key of SUBSCRIPTION_MODE_DENY_KEYS) overrides[key] = null;
   applyClaudeTokenAccountEnv(overrides, options?.claudeTokenAccount);
-  if (member) applyClaudeMemberEnvironment(overrides);
+  if (isolated) applyClaudeMemberEnvironment(overrides);
+  if (retentionReplay) freezeClaudeCacheRetentionMemory(overrides);
   const env = buildChildEnv(overrides, { workingDirectory: options?.workingDirectory });
   // Opt in after account/env assembly so inherited SDK labels cannot overwrite the app label.
   // The native CLI also branches on this label; it is not a telemetry-only setting.
@@ -235,13 +257,22 @@ export async function prepareClaudeSdkLaunch(input: {
         snapshot: false,
       },
       includePartialMessages: true,
-      permissionMode: member ? 'default' : readOnly ? 'plan' : 'bypassPermissions',
-      ...(readOnly || member ? { tools: [] } : { allowDangerouslySkipPermissions: true }),
+      permissionMode: isolated ? 'default' : readOnly ? 'plan' : 'bypassPermissions',
+      ...(readOnly || isolated ? { tools: [] } : { allowDangerouslySkipPermissions: true }),
       ...(launch ? { allowedTools: [claudeMemberToolPattern(launch.server.name)], persistSession: false } : {}),
+      ...(watcher
+        ? {
+            canUseTool: async (name: string, toolInput: Record<string, unknown>) =>
+              claudeWatcherToolAllowed(name, options!.toolExecutionPolicy!)
+                ? { behavior: 'allow' as const, updatedInput: toolInput }
+                : { behavior: 'deny' as const, message: 'watcher_tool_not_allowed' },
+          }
+        : {}),
       strictMcpConfig: true,
       mcpServers: {},
       settingSources,
       ...(options?.sessionId ? { resume: options.sessionId } : {}),
+      ...(retentionReplay ? { forkSession: true, maxTurns: 1, maxBudgetUsd: 2 } : {}),
       ...(additionalDirectories.length ? { additionalDirectories } : {}),
       ...(settings
         ? {
@@ -256,7 +287,7 @@ export async function prepareClaudeSdkLaunch(input: {
         ? {
             extraArgs: {
               ...operator.extraArgs,
-              ...(member ? { 'no-chrome': null, 'disable-slash-commands': null } : readOnly ? {} : { chrome: null }),
+              ...(isolated ? { 'no-chrome': null, 'disable-slash-commands': null } : readOnly ? {} : { chrome: null }),
               ...(mcpResolution || launch
                 ? { 'mcp-config': writeInvocationMcpConfigFile({ mcpServers }, options?.callbackEnv) }
                 : {}),

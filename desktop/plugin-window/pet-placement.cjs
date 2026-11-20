@@ -151,4 +151,48 @@ function placePetPanel({ area, pet: anchor, panel: requested, pointer, ballSize 
     bounds: { x: Math.round(x), y: Math.round(y), width: Math.ceil(right - x), height: Math.ceil(bottom - y) },
   };
 }
-module.exports = { petMetrics, placePetPanel, validBallSize };
+
+/** F336 living body: `bodyRect` is the cat's real visible rect in screen coordinates (lying,
+ * jumping, at an edge). Only the panel and the call bubble are clamped into the work area; the
+ * cat is never moved or resized. The returned bounds are the native panel window only, since
+ * the cat lives in his own body window. The ball keeps placePetPanel, which rebuilds 120x130. */
+/** With no panel the window only has to show the badges the page draws on its anchor box (pending decisions
+ * at the top right, stop sharing at the bottom right): put that box at the cat's bottom right, inside the work
+ * area, and make it the window. Without an anchor size the window is the cat rect. */
+function restingAnchorBox(bodyRect, area, anchorSize) {
+  const width = anchorSize.width;
+  const height = anchorSize.height;
+  const x = Math.min(Math.max(bodyRect.x + bodyRect.width - width, area.x), area.x + area.width - width);
+  const y = Math.min(Math.max(bodyRect.y + bodyRect.height - height, area.y), area.y + area.height - height);
+  return { x: Math.round(x), y: Math.round(y), width: Math.ceil(width), height: Math.ceil(height) };
+}
+function placePanelForBody(bodyRect, requested, area, pointer, anchorSize) {
+  const padding = 8;
+  const pet = { x: bodyRect.x, y: bodyRect.y, width: bodyRect.width, height: bodyRect.height };
+  if (!requested) {
+    if (anchorSize) {
+      const box = restingAnchorBox(bodyRect, area, anchorSize);
+      return { pet: box, panel: null, bounds: { ...box } };
+    }
+    const x = Math.round(pet.x);
+    const y = Math.round(pet.y);
+    const bounds = { x, y, width: Math.ceil(pet.x + pet.width - x), height: Math.ceil(pet.y + pet.height - y) };
+    return { pet, panel: null, bounds };
+  }
+  const placed = placeRequestedPanel({ area, pet, occupiedPet: pet, requested, pointer, padding });
+  const panel = placed.panel;
+  const bubble = placeCallBubble({ area, pet, occupiedPet: pet, panel, requested: placed.call?.bubble, padding });
+  const parts = bubble ? [panel, bubble] : [panel];
+  const x = Math.min(...parts.map((part) => part.x)) - padding;
+  const y = Math.min(...parts.map((part) => part.y)) - padding;
+  const right = Math.max(...parts.map((part) => part.x + part.width)) + padding;
+  const bottom = Math.max(...parts.map((part) => part.y + part.height)) + padding;
+  const bounds = { x: Math.round(x), y: Math.round(y), width: Math.ceil(right - x), height: Math.ceil(bottom - y) };
+  return { pet, panel, ...(bubble ? { bubble } : {}), bounds };
+}
+/** Until the living body reports its rect, its panel opens where the ball would rest. */
+function restingBodyRect(area, ballSize) {
+  const size = petMetrics(ballSize).pet;
+  return { x: area.x + area.width - size.width - 24, y: area.y + area.height - size.height - 24, ...size };
+}
+module.exports = { petMetrics, placePetPanel, placePanelForBody, restingBodyRect, validBallSize };

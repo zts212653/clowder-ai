@@ -14,6 +14,7 @@ import type {
 } from '../../../types.js';
 import type { RawArchiveSink } from '../codex-audit-hooks.js';
 import { compileL0ViaSubprocess } from '../l0-compiler.js';
+import { captureWatcherOptions } from '../watcher-invocation-options.js';
 import { createAgyNativeContinuityInput } from './agy-native-continuity.js';
 import { AgyNativeResumeMismatchError, AgyNativeStartupError } from './agy-native-errors.js';
 import { assertAgyMemberAccount, captureAgyMemberOptions } from './agy-native-member.js';
@@ -44,6 +45,7 @@ function hasUnsupportedNativeOverrides(
     Boolean(options?.cliConfigArgs?.length) ||
     (options?.toolExecutionPolicy !== undefined &&
       options.toolExecutionPolicy.mode !== 'read_only' &&
+      options.toolExecutionPolicy.mode !== 'watcher_panel' &&
       !(options.toolExecutionPolicy.mode === 'plugin_native' && options.pluginNativeLaunch))
   );
 }
@@ -73,7 +75,15 @@ export class AgyNativeAgentService implements AgentService {
   }
 
   supportsToolExecutionPolicy(policy: ToolExecutionPolicy): boolean {
-    return policy.mode === 'read_only' || (policy.mode === 'plugin_native' && Boolean(policy.memberSession));
+    return (
+      policy.mode === 'watcher_panel' ||
+      policy.mode === 'read_only' ||
+      (policy.mode === 'plugin_native' && Boolean(policy.memberSession))
+    );
+  }
+
+  watcherMemberCapability(): import('@cat-cafe/shared').WatcherMemberCapability {
+    return { supported: true, context: 'ordinary', readOnly: 'tools' };
   }
 
   assertScopedMemberAccount = assertAgyMemberAccount;
@@ -186,7 +196,7 @@ export class AgyNativeAgentService implements AgentService {
     let disposeCredentials: (() => void | Promise<void>) | undefined;
     try {
       const member = captureAgyMemberOptions(options);
-      options = member ?? options;
+      options = member ?? captureWatcherOptions(options) ?? options;
       await member?.pluginNativeLaunch?.assertCurrent();
       if (hasUnsupportedNativeOverrides(this.model, this.profile, options)) {
         throw new Error('AGY native requires an explicit profile/model and refuses CLI overrides');
@@ -194,11 +204,14 @@ export class AgyNativeAgentService implements AgentService {
       assertSafeAgyAccountEnv(options?.accountEnv);
       if (!options?.workingDirectory) throw new Error('AGY native requires an explicit workingDirectory');
       const workspace = resolve(options.workingDirectory);
-      const expectedAgentMode = member
-        ? 'member'
-        : options.toolExecutionPolicy?.mode === 'read_only'
-          ? 'readonly'
-          : 'normal';
+      const expectedAgentMode =
+        options?.toolExecutionPolicy?.mode === 'watcher_panel'
+          ? 'watcher'
+          : member
+            ? 'member'
+            : options.toolExecutionPolicy?.mode === 'read_only'
+              ? 'readonly'
+              : 'normal';
       const workspacePreflight = preflightAgyNativeWorkspace(workspace, {
         hostAgentName: hostAgyNativeAgentName(this.catId, expectedAgentMode),
         allowWorkspaceExecutableConfig:

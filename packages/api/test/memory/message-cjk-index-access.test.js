@@ -164,25 +164,39 @@ test('a live readonly connection follows canonical inserts, updates and deletion
   assert.deepEqual(ids(read(reader.getDb())), []);
 });
 
-test('a small admitted source range does not scan the global token vocabulary', async (t) => {
-  const { db, put } = await fixture(t, false, 512);
-  put('msg-small', `前${needle}后`);
-  const original = db.prepare;
-  let bodyPlan;
-  db.prepare = function (sql) {
-    const statement = original.call(this, sql);
-    if (!sql.includes('message_cjk_match')) return statement;
-    const all = statement.all;
-    statement.all = (...bindings) => {
-      bodyPlan = original.call(db, `EXPLAIN QUERY PLAN ${sql}`).all(...bindings);
-      return all.call(statement, ...bindings);
+for (const [caseName, admittedRows] of [
+  ['a small admitted source range', 512],
+  ['a large admitted source range with a broad out-of-scope vocabulary', 8193],
+]) {
+  test(`${caseName} avoids scanning the global token vocabulary`, async (t) => {
+    const { db, put } = await fixture(t, false, admittedRows);
+    if (admittedRows > 8192) {
+      // Small FTS pages exercise a wide segment index without building a production-size database.
+      db.exec("INSERT INTO passage_fts(passage_fts, rank) VALUES('pgsz', 64)");
+      const unrelated = Array.from(
+        { length: 20_000 },
+        (_, index) => `${index.toString(36).padStart(4, '0')}${'unrelated'.repeat(5)}`,
+      );
+      put('msg-denied', `${needle} ${unrelated.join(' ')}`, 'thread-denied');
+    }
+    put('msg-eligible', `前${needle}后`);
+    const original = db.prepare;
+    let bodyPlan;
+    db.prepare = function (sql) {
+      const statement = original.call(this, sql);
+      if (!sql.includes('message_cjk_match')) return statement;
+      const all = statement.all;
+      statement.all = (...bindings) => {
+        bodyPlan = original.call(db, `EXPLAIN QUERY PLAN ${sql}`).all(...bindings);
+        return all.call(statement, ...bindings);
+      };
+      return statement;
     };
-    return statement;
-  };
-  try {
-    assert.deepEqual(ids(read(db)), ['msg-small']);
-  } finally {
-    db.prepare = original;
-  }
-  assert.ok(!bodyPlan.some((r) => /VIRTUAL TABLE/.test(r.detail)), JSON.stringify(bodyPlan));
-});
+    try {
+      assert.deepEqual(ids(read(db)), ['msg-eligible']);
+    } finally {
+      db.prepare = original;
+    }
+    assert.ok(!bodyPlan.some((r) => /VIRTUAL TABLE/.test(r.detail)), JSON.stringify(bodyPlan));
+  });
+}

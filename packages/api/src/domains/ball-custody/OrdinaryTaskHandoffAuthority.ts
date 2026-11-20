@@ -1,25 +1,80 @@
 import type { TaskItem } from '@cat-cafe/shared';
 import type { IMessageStore, StoredMessage } from '../cats/services/stores/ports/MessageStore.js';
-import type { IThreadStore } from '../cats/services/stores/ports/ThreadStore.js';
+import type { IProposalStore } from '../cats/services/stores/ports/ProposalStore.js';
+import type { ITaskStore } from '../cats/services/stores/ports/TaskStore.js';
+import type { IThreadStore, Thread } from '../cats/services/stores/ports/ThreadStore.js';
 import type { TaskApprovedDelegateProvider } from './action-subject-delegate-contract.js';
+import { approvedGenericTaskContinuation } from './approved-generic-task-proposal.js';
+import { matchesContinuationChild } from './approved-task-continuation.js';
 import { OrdinaryTaskHandoffError, type OrdinaryTaskHandoffRequest } from './OrdinaryTaskHandoffContract.js';
+import { hasOutstandingDeploymentWait, retainedDeploymentWaitAllowsHandoff } from './ordinary-task-deployment-wait.js';
 
 type AuthorityDeps = {
+  tasks: Pick<ITaskStore, 'getWaitRegistration'>;
   messages: Pick<IMessageStore, 'getById'>;
   threads: Pick<IThreadStore, 'get'>;
   delegates?: TaskApprovedDelegateProvider;
+  proposals?: Pick<IProposalStore, 'get'>;
 };
 
 export async function currentTaskDelegates(task: TaskItem, provider?: TaskApprovedDelegateProvider) {
   return task.ownerCatId && task.userId && provider
-    ? provider.getForTask(task.id, task.threadId, task.ownerCatId, task.userId, undefined, task.title)
+    ? provider.getForTask(
+        task.id,
+        task.threadId,
+        task.ownerCatId,
+        task.userId,
+        undefined,
+        task.title,
+        task.ownerRevision ?? 0,
+      )
     : [];
+}
+
+async function assertApprovedIssuerCurrent(
+  deps: AuthorityDeps,
+  task: TaskItem,
+  request: OrdinaryTaskHandoffRequest,
+  target: Thread,
+  carrier?: StoredMessage,
+) {
+  if (!('approval' in request.issuer)) return;
+  const approval = request.issuer.approval;
+  const proposal = await deps.proposals?.get(approval.proposalId);
+  const receipt =
+    proposal && approvedGenericTaskContinuation(proposal, { ...task, ownerRevision: task.ownerRevision ?? 0 });
+  const origin = proposal?.sourceMessageId ? await deps.messages.getById(proposal.sourceMessageId) : null;
+  if (
+    !proposal ||
+    !receipt ||
+    receipt.receiptId !== approval.receiptId ||
+    receipt.approval?.ownerRevision !== request.expected.ownerRevision ||
+    receipt.approval.previousHandoffMessageRef !== request.expected.lastAppliedHandoffMessageRef ||
+    request.issuer.catId !== task.ownerCatId ||
+    request.issuer.threadId !== task.threadId ||
+    request.stopPrevious ||
+    proposal.preferredCats[0] !== request.targetCatId ||
+    !matchesContinuationChild(proposal, target) ||
+    target.approvedBy !== receipt.userId ||
+    !Number.isFinite(target.approvedAt) ||
+    (carrier &&
+      (carrier.extra?.crossPost?.sourceMessageId !== proposal.sourceMessageId ||
+        carrier.extra?.crossPost?.sourceInvocationId !== proposal.sourceInvocationId)) ||
+    !origin ||
+    origin.userId !== task.userId ||
+    origin.threadId !== task.threadId ||
+    origin.deletedAt ||
+    origin.recall ||
+    origin._tombstone
+  )
+    throw new OrdinaryTaskHandoffError('task_approval_authority_mismatch');
 }
 
 export async function authorizeTaskHandoff(
   deps: AuthorityDeps,
   task: TaskItem,
   request: OrdinaryTaskHandoffRequest,
+  carrier?: StoredMessage,
 ): Promise<void> {
   if (task.userId !== request.issuer.userId) throw new OrdinaryTaskHandoffError('foreign_task');
   const [home, source, target] = await Promise.all([
@@ -40,6 +95,7 @@ export async function authorizeTaskHandoff(
   )
     throw new OrdinaryTaskHandoffError('task_thread_authority_mismatch');
 
+  await assertApprovedIssuerCurrent(deps, task, request, target, carrier);
   // Keep the predecessor stable after application, including replay/provider admission.
   const previousId = request.expected.lastAppliedHandoffMessageRef?.slice('message:'.length);
   const previous = previousId ? await deps.messages.getById(previousId) : null;
@@ -64,7 +120,7 @@ export async function authorizeTaskHandoff(
       originalSource.userId !== task.userId)
   )
     throw new OrdinaryTaskHandoffError('task_authorization_source_unavailable');
-  if (task.pluginWait?.await || task.deploymentWait?.await) throw new OrdinaryTaskHandoffError('task_wait_active');
+  if (task.pluginWait?.await) throw new OrdinaryTaskHandoffError('task_wait_active');
   const collaborator =
     request.issuer.threadId === task.threadId &&
     !originalSource?.deletedAt &&
@@ -93,6 +149,17 @@ export async function authorizeTaskHandoff(
     (target.projectPath !== home.projectPath && !isCurrentApprovedChild(request.approvedAnchor, target.id))
   )
     throw new OrdinaryTaskHandoffError('task_thread_authority_mismatch');
+  const ownsQueuedDeploymentOutcome =
+    task.deploymentWait?.waitOutcome?.delivery === 'delivered' && task.deploymentWait.transportAttempt !== undefined;
+  if (
+    (hasOutstandingDeploymentWait(task) || ownsQueuedDeploymentOutcome) &&
+    (request.targetThreadId === task.threadId ||
+      request.ownerCatId !== task.ownerCatId ||
+      request.approvedAnchor?.catId !== request.targetCatId ||
+      !isCurrentApprovedChild(request.approvedAnchor, request.targetThreadId) ||
+      !(await retainedDeploymentWaitAllowsHandoff(task, deps.tasks, deps.messages)))
+  )
+    throw new OrdinaryTaskHandoffError('task_wait_active');
   if (request.targetThreadId === task.threadId) {
     if (request.ownerCatId !== request.targetCatId) throw new OrdinaryTaskHandoffError('task_target_mismatch');
     return;
@@ -129,7 +196,9 @@ export function assertTaskHandoffSource(message: StoredMessage, request: Ordinar
     message.from.catId !== request.issuer.catId ||
     message.mentions.length !== 1 ||
     message.mentions[0] !== request.targetCatId ||
-    message.origin !== 'callback'
+    ('approval' in request.issuer
+      ? message.extra?.crossPost?.sourceThreadId !== request.issuer.threadId
+      : message.origin !== 'callback')
   )
     throw new OrdinaryTaskHandoffError('task_handoff_source_mismatch');
 }

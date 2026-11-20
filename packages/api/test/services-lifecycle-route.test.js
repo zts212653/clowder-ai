@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, it } from 'node:test';
 import Fastify from 'fastify';
+import { readWhisperSourceDigest } from '../dist/domains/services/asr-source-identity.js';
 import {
   findPidsByPort,
   isPrimaryServiceProcess,
@@ -1761,6 +1762,74 @@ describe('service lifecycle write routes', () => {
       await app.close();
       restoreOwner(previousOwner);
     }
+  });
+
+  async function assertStartupAsrSource(liveDigest, expectedReadyReason) {
+    const previousOwner = process.env.DEFAULT_OWNER_USER_ID;
+    process.env.DEFAULT_OWNER_USER_ID = 'you';
+    const port = 19746;
+    const model = 'mlx-community/Qwen3-ASR-1.7B-8bit';
+    const oldPid = 58123;
+    const oldScript = resolveServiceScriptPath('scripts/services/whisper-api.py');
+    const config = { installed: true, enabled: true, selectedModel: model, port };
+    const stopped = [];
+    const ready = Promise.withResolvers();
+    let listening = true;
+    let starts = 0;
+    const app = await buildApp({
+      env: { CAT_CAFE_PROFILE: 'test' },
+      fetchHealth: async () => ({
+        ok: true,
+        status: 200,
+        details: { model, backend: 'mlx-audio', ...(liveDigest ? { asr_source_sha256: liveDigest } : {}) },
+      }),
+      lifecycle: {
+        autoStartEnabled: true,
+        startupReadinessTimeoutMs: 1000,
+        serviceConfig: {
+          get: (id) => (id === 'whisper-stt' ? config : { enabled: false }),
+          set: (_id, patch) => Object.assign(config, patch),
+        },
+        listProcesses: async () => [],
+        findPidsByPort: async (candidatePort) => (candidatePort === port && listening ? [oldPid] : []),
+        readProcessCommand: async (pid) => (pid === oldPid ? `python3 ${oldScript} --port ${port}` : null),
+        isProcessAlive: async (pid) => pid === oldPid && listening,
+        killPid: (pid, signal) => {
+          stopped.push({ pid, signal });
+          if (pid === oldPid) listening = false;
+        },
+        runScript: async (input) => {
+          assert.equal(input.serviceId, 'whisper-stt');
+          assert.equal(input.env.WHISPER_MODEL, model);
+          assert.equal(input.env.WHISPER_PORT, String(port));
+          starts++;
+          return { code: null, pid: 59834, output: '' };
+        },
+        onServiceReady: ({ reason }) => ready.resolve(reason),
+      },
+    });
+    try {
+      await waitForSignal(ready.promise, 2500, 'ASR startup reconciler did not settle');
+      const replaced = expectedReadyReason === 'readiness';
+      assert.equal(await ready.promise, expectedReadyReason);
+      assert.deepEqual(stopped, replaced ? [{ pid: oldPid, signal: 'SIGTERM' }] : []);
+      assert.equal(starts, replaced ? 1 : 0);
+    } finally {
+      await app.close();
+      restoreOwner(previousOwner);
+    }
+  }
+
+  it('replaces an owned ASR from an older API boot even when the model and backend still match', async () => {
+    await assertStartupAsrSource(undefined, 'readiness');
+  });
+
+  it('replaces an owned ASR whose previous checkout fingerprint differs', async () => {
+    await assertStartupAsrSource('0'.repeat(64), 'readiness');
+  });
+
+  it('reuses an owned ASR whose code fingerprint matches this checkout', async () => {
+    await assertStartupAsrSource(await readWhisperSourceDigest(), 'already-running');
   });
 
   it('auto-starts enabled installed services on API startup through the lifecycle runner', async () => {

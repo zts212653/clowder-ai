@@ -108,14 +108,18 @@ function validateEvolutionOrigin(
 function validateWorkOrigin(scope: WorkPublicationScopeV1, publication: ContentSourcePublicationV1, mediaType: string) {
   requirePublicationIdentity(scope.creationOperationId, 256);
   validateActor(scope.createdBy);
+  const validSource =
+    mediaType === 'text/html'
+      ? (publication.sourceRef === 'inline-html' && publication.artifactRef === 'inline-html') ||
+        (/^workspace:[^:]+:[^:]+$/.test(publication.sourceRef) &&
+          /^workspace-content:[a-f0-9]{64}$/.test(publication.artifactRef))
+      : reviewedMediaTypeSchema.safeParse(mediaType).success && publication.sourceRef.startsWith('workspace:');
   if (
     Object.keys(scope).some(
       (key) => !['kind', 'ownerUserId', 'threadId', 'creationOperationId', 'createdBy'].includes(key),
     ) ||
     publication.threadId !== scope.threadId ||
-    !(mediaType === 'text/html'
-      ? publication.sourceRef === 'inline-html' && publication.artifactRef === 'inline-html'
-      : reviewedMediaTypeSchema.safeParse(mediaType).success && publication.sourceRef.startsWith('workspace:')) ||
+    !validSource ||
     !/^sha256:[a-f0-9]{64}$/.test(publication.revision)
   )
     throw new TypeError('Invalid work publication');

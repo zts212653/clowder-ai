@@ -10,6 +10,8 @@ const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const source = readFileSync(join(root, 'scripts/start-dev.sh'), 'utf8');
 const captureFunction = source.match(/^named_alpha_capture_redis_identity\(\) \{\n[\s\S]*?^\}/m)?.[0];
 assert.ok(captureFunction, 'exercise the actual launcher ownership-publication function');
+const prepareEndpoint = source.match(/^prepare_preview_redis_endpoint\(\) \{\n[\s\S]*?^\}/m)?.[0];
+assert.ok(prepareEndpoint);
 
 test('launcher ownership refusal exposes the native cause without sending a protocol command', () => {
   const ownership = source.match(/^named_alpha_redis_is_owned\(\) \{\n[\s\S]*?^\}/m)?.[0];
@@ -39,6 +41,8 @@ test('named startup consumes the guarded readiness result instead of a second on
     encoding: 'utf8',
     input: `
 USE_REDIS=true
+PREVIEW_REDIS_DIRECTORY_CHECK=false
+PREVIEW_REDIS_ENDPOINT_MODE=
 CAT_CAFE_ALPHA_COORDINATES=coordinates
 NAMED_ALPHA_REDIS_IDENTITY=proof
 SCRIPT_DIR=/fixture/scripts
@@ -60,6 +64,7 @@ print_redis_runtime_info() { :; }
 sleep() { echo BLIND_SLEEP; }
 node() { echo "READINESS $2"; [ "$2" = ping-ready ]; }
 ${readiness}
+${prepareEndpoint}
 ${setup}
 setup_storage
 `,
@@ -94,6 +99,8 @@ test('unnamed startup cannot erase a failed daemon readiness with a later livene
     encoding: 'utf8',
     input: `
 USE_REDIS=true
+PREVIEW_REDIS_DIRECTORY_CHECK=false
+PREVIEW_REDIS_ENDPOINT_MODE=
 CAT_CAFE_ALPHA_COORDINATES=
 REDIS_PORT=15397
 REDIS_DATA_DIR=/fixture/redis
@@ -110,6 +117,7 @@ cat_cafe_redis_start_daemon() { echo READINESS_REFUSED >&2; return 1; }
 redis_startup_ping() { echo UNSAFE_LATER_CHECK; return 0; }
 assert_alpha_redis_runtime_dir() { :; }
 print_redis_runtime_info() { :; }
+${prepareEndpoint}
 ${setup}
 setup_storage
 echo APPLICATION_WOULD_START

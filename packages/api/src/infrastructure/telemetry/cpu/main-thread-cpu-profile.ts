@@ -1,8 +1,8 @@
 import type { Profiler } from 'node:inspector';
 import { type CodeCoordinate, codeCoordinate } from './cpu-code-coordinate.js';
 
-const MAX_NODES = 4096;
-const MAX_SAMPLES = 10000;
+export const MAX_PROFILE_NODES = 4096;
+export const MAX_PROFILE_SAMPLES = 10000;
 type CallFrame = Profiler.ProfileNode['callFrame'];
 type Category = 'api' | 'node' | 'external' | 'idle' | 'gc' | 'native';
 export interface SampledCoordinate extends CodeCoordinate {
@@ -12,11 +12,11 @@ export interface SampledCoordinate extends CodeCoordinate {
 
 /** Retain code coordinates and numeric counts only, never raw inspector frames or URLs. */
 export function projectMainThreadCpuProfile(profile: Profiler.Profile) {
-  const nodes = new Map(profile.nodes.slice(0, MAX_NODES).map((node) => [node.id, node]));
+  const nodes = new Map(profile.nodes.slice(0, MAX_PROFILE_NODES).map((node) => [node.id, node]));
   const callers = nativeApiCallers(nodes);
   const categories = { api: 0, node: 0, external: 0, idle: 0, gc: 0, native: 0 };
   const frames = new Map<string, SampledCoordinate>();
-  const samples = (profile.samples ?? []).slice(0, MAX_SAMPLES);
+  const samples = (profile.samples ?? []).slice(0, MAX_PROFILE_SAMPLES);
   let nativeSamplesWithApiCaller = 0;
   let nativeSamplesWithoutApiCaller = 0;
   for (const id of samples) {
@@ -38,8 +38,8 @@ export function projectMainThreadCpuProfile(profile: Profiler.Profile) {
     profileElapsedMs: Math.max(0, (profile.endTime - profile.startTime) / 1000),
     sampleCount: profile.samples?.length ?? 0,
     retainedSamples: samples.length,
-    omittedNodes: Math.max(0, profile.nodes.length - MAX_NODES),
-    omittedSamples: Math.max(0, (profile.samples?.length ?? 0) - MAX_SAMPLES),
+    omittedNodes: Math.max(0, profile.nodes.length - MAX_PROFILE_NODES),
+    omittedSamples: Math.max(0, (profile.samples?.length ?? 0) - MAX_PROFILE_SAMPLES),
     omittedParentEdges: callers.omittedParentEdges,
     nativeSamplesWithApiCaller,
     nativeSamplesWithoutApiCaller,
@@ -68,7 +68,7 @@ function nativeApiCallers(nodes: Map<number, Profiler.ProfileNode>) {
   let omittedParentEdges = 0;
   for (const node of nodes.values()) {
     const children = node.children ?? [];
-    const retained = Math.min(children.length, MAX_NODES - indexedEdges);
+    const retained = Math.min(children.length, MAX_PROFILE_NODES - indexedEdges);
     omittedParentEdges += children.length - retained;
     for (let i = 0; i < retained; i++) {
       const child = children[i];

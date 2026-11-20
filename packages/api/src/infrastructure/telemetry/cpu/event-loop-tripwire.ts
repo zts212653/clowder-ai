@@ -3,6 +3,7 @@ import { resolve } from 'node:path';
 import { Worker } from 'node:worker_threads';
 import type { FastifyBaseLogger } from 'fastify';
 import { registerBackgroundCpuProfiler } from './cpu-profiler-lease.js';
+import { mainThreadIdentity } from './process-witness.js';
 
 type Options = {
   logger: Pick<FastifyBaseLogger, 'info'>;
@@ -11,6 +12,7 @@ type Options = {
   /** Internal test tuning; production always uses the defaults below. */
   thresholdMs?: number;
   windowMs?: number;
+  profileStartBudgetMs?: number;
 };
 type Handle = { ready: Promise<boolean>; close(): Promise<void>; setBootId(value: string): void };
 const HEARTBEAT_MS = 25;
@@ -33,6 +35,7 @@ function install({
   logDir = resolve('data/logs/api'),
   thresholdMs = THRESHOLD_MS,
   windowMs = WINDOW_MS,
+  profileStartBudgetMs = 1500,
 }: Options): Handle {
   const emit = (fields: object) => {
     try {
@@ -62,6 +65,9 @@ function install({
   let closed = false;
   let closing: Promise<void> | undefined;
   let requestId = 0;
+  // No start dispatched yet. The worker revokes this before calling Inspector;
+  // Node delivers those worker messages before its exit event.
+  let profilerReleased = true;
   const waiting = new Map<number, { resolve(): void; reject(): void; timer: NodeJS.Timeout }>();
   let registration: ReturnType<typeof registerBackgroundCpuProfiler>;
   const resume = () => {
@@ -105,6 +111,8 @@ function install({
         samplingIntervalUs: 10000,
         logDir,
         bootId,
+        mainThreadId: mainThreadIdentity(),
+        profileStartBudgetMs,
       },
     });
   } catch {
@@ -172,30 +180,48 @@ function install({
     })();
     return closing;
   }
+  function acknowledgePause(id: number, safe: boolean | undefined) {
+    const pending = waiting.get(id);
+    if (!pending) return;
+    clearTimeout(pending.timer);
+    waiting.delete(id);
+    if (safe === true) pending.resolve();
+    else pending.reject();
+  }
+  function acknowledgeReady() {
+    if (closed) return;
+    beat();
+    clearTimeout(readyTimeout);
+    resolveReady(true);
+    emit({
+      status: 'ready',
+      thresholdMs,
+      heartbeatMs: HEARTBEAT_MS,
+      samplingIntervalUs: 10000,
+      windowMs,
+      coverageStartsAfter: 'module_graph_and_logger',
+    });
+  }
   worker.on(
     'message',
-    (message: { type: string; id?: number; report?: object; status?: string; reason?: string; armedAt?: number }) => {
+    (message: {
+      type: string;
+      id?: number;
+      report?: object;
+      status?: string;
+      reason?: string;
+      armedAt?: number;
+      safe?: boolean;
+    }) => {
+      if (message.type === 'profiler_state') {
+        profilerReleased = message.safe === true;
+        return;
+      }
       if (message.type === 'beat' && !closed) beat();
       if (message.type === 'paused' && message.id !== undefined) {
-        const pending = waiting.get(message.id);
-        if (pending) {
-          clearTimeout(pending.timer);
-          waiting.delete(message.id);
-          pending.resolve();
-        }
+        acknowledgePause(message.id, message.safe);
       } else if (message.type === 'ready') {
-        if (closed) return;
-        beat();
-        clearTimeout(readyTimeout);
-        resolveReady(true);
-        emit({
-          status: 'ready',
-          thresholdMs,
-          heartbeatMs: HEARTBEAT_MS,
-          samplingIntervalUs: 10000,
-          windowMs,
-          coverageStartsAfter: 'module_graph_and_logger',
-        });
+        acknowledgeReady();
       } else if (message.type === 'report') emit({ ...message.report });
       else if (message.type === 'status') {
         if (message.status === 'sampler_ready' && !closed) beat();
@@ -210,7 +236,10 @@ function install({
   worker.once('exit', (code) => {
     if (!closed) emit({ status: 'unavailable', reason: 'worker_exited', exitCode: code });
     cleanup();
-    registration.unregister(); // Actual exit, rather than a requested close, releases the profiler boundary.
+    if (profilerReleased) registration.unregister();
+    else emit({ status: 'unavailable', reason: 'profiler_release_unproven' });
+    // An unproven exit retains the closed controller, which explicitly rejects
+    // foreground acquisition. Neither disconnect nor exit is a stop acknowledgement.
     resolveExit();
   });
   return {

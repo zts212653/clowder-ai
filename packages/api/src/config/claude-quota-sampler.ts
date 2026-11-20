@@ -48,6 +48,15 @@ export async function sampleClaudeQuota(profile: RuntimeProviderProfile, request
       'LC_ALL',
       'CLAUDE_CONFIG_DIR',
       'CLAUDE_SECURESTORAGE_CONFIG_DIR',
+      // Use the host's network route while leaving provider and auth overrides out.
+      'HTTP_PROXY',
+      'http_proxy',
+      'HTTPS_PROXY',
+      'https_proxy',
+      'ALL_PROXY',
+      'all_proxy',
+      'NO_PROXY',
+      'no_proxy',
     ].flatMap((key) => (process.env[key] === undefined ? [] : [[key, process.env[key]]])),
   );
   const token = profile.claude ? profile.envVars?.CLAUDE_CODE_OAUTH_TOKEN : process.env.CLAUDE_CODE_OAUTH_TOKEN;

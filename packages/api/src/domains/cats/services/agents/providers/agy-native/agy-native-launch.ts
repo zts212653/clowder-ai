@@ -17,6 +17,7 @@ import { getDefaultUploadDir } from '../../../../../../utils/upload-paths.js';
 import type { AgentServiceOptions, PreparedProviderRequestV1 } from '../../../types.js';
 import { preflightAgyProfile, resolveAgyProfile, resolveAgySpawnCwd } from '../agy-profile-manager.js';
 import { encodeAgyStreamJsonUserMessage } from '../agy-stream-json-parser.js';
+import { watcherMcpToolMap } from '../watcher-mcp-input.js';
 import { materializeAgyNativeAgentFile } from './agy-native-agent-file.js';
 import { materializeAgyNativeEffectGuard } from './agy-native-effect-guard.js';
 import { AgyNativeResumeMismatchError, AgyNativeStartupError } from './agy-native-errors.js';
@@ -144,13 +145,17 @@ export function missingAgyNativeCliError(): AgyNativeStartupError {
 export async function prepareAgyNativeLaunch(input: AgyNativeLaunchInput): Promise<AgyNativeLaunchPlan> {
   const options = input.options;
   const member = options?.pluginNativeLaunch;
+  const watcherPolicy =
+    options?.toolExecutionPolicy?.mode === 'watcher_panel' ? options.toolExecutionPolicy : undefined;
+  const watcher = Boolean(watcherPolicy);
+  const mcpOnly = Boolean(member || watcher);
   const readOnly = options?.toolExecutionPolicy?.mode === 'read_only';
   const interactiveApproval =
     input.profileConfig.autoApprove !== true &&
     !readOnly &&
-    !member &&
+    !mcpOnly &&
     Boolean(options?.runtimeInteractionPort && options?.auditContext);
-  const allowWorkspaceWrites = input.profileConfig.allowWorkspaceWrites === true && !readOnly && !member;
+  const allowWorkspaceWrites = input.profileConfig.allowWorkspaceWrites === true && !readOnly && !mcpOnly;
   const { effectiveModel, effortArg } = resolveAgyEffectiveModelAndEffort(
     input.model,
     options?.reasoningEffortOverride,
@@ -159,6 +164,7 @@ export async function prepareAgyNativeLaunch(input: AgyNativeLaunchInput): Promi
     workspaceRoot: input.workspace,
     autoApprove: input.profileConfig.autoApprove,
     readOnly,
+    watcher,
     allowWorkspaceWrites,
     interactiveApproval,
     ...(member ? { pluginServerName: member.server.name } : {}),
@@ -227,7 +233,7 @@ export async function prepareAgyNativeLaunch(input: AgyNativeLaunchInput): Promi
     } else if (!options?.spawnCliOverride) await prepareAgyNativeKeychain({ profileHome: home });
     // Shared settings remain a conservative account baseline; per-turn --settings
     // in runProfile.home owns the exact current turn policy (fixing sandbox EPERM).
-    if (!member) {
+    if (!mcpOnly) {
       materializeAgyNativeSettings({
         profileHome: home,
         model: effectiveModel,
@@ -237,7 +243,7 @@ export async function prepareAgyNativeLaunch(input: AgyNativeLaunchInput): Promi
       });
       retireAgyNativeLegacySkillAlias(home);
     }
-    runProfile = createAgyNativeRunProfile(home, account?.credentialHome);
+    runProfile = createAgyNativeRunProfile(home, account?.credentialHome, watcher);
     await releaseProfile();
     const configHome = runProfile.home;
     mkdirSync(join(configHome, '.gemini/antigravity-cli'), { mode: 0o700 });
@@ -254,6 +260,7 @@ export async function prepareAgyNativeLaunch(input: AgyNativeLaunchInput): Promi
       autoApprove: policy.permissionMode === 'always-proceed',
       readOnly,
       scopedMember: Boolean(member),
+      watcher,
       tools: policy.agentTools,
     });
     if (interactiveApproval && options?.runtimeInteractionPort && options?.auditContext) {
@@ -274,6 +281,7 @@ export async function prepareAgyNativeLaunch(input: AgyNativeLaunchInput): Promi
       workspaceRoot: policy.workspaceRoot,
       readOnly,
       ...(member ? { pluginServerName: member.server.name } : {}),
+      ...(watcher ? { watcherTools: watcherMcpToolMap(watcherPolicy?.allowedToolNames ?? []) } : {}),
       ...(requireGuardApproval ? { requireApproval: true } : {}),
       ...(allowWorkspaceWrites ? { allowWorkspaceWrites: true } : {}),
       ...(approvalBridge ? { approvalBridgeFile: approvalBridge.bridgeFile } : {}),
@@ -298,6 +306,7 @@ export async function prepareAgyNativeLaunch(input: AgyNativeLaunchInput): Promi
       prior.cliSessionId === options?.sessionId &&
       prior.profileHome === home &&
       priorAgentMatch?.matches === true &&
+      Boolean(priorAgentMatch.watcher) === watcher &&
       !(priorAgentMatch.bornReadOnly && !readOnly) &&
       canResumeAgyWorkspaceScope({
         priorWorkspaceRoot: prior.workspaceRoot,
@@ -315,7 +324,7 @@ export async function prepareAgyNativeLaunch(input: AgyNativeLaunchInput): Promi
       throw new AgyNativeResumeMismatchError('Native exact resume requires a session ID');
     }
     const trajectoryBornReadOnly = resume && priorAgentMatch ? priorAgentMatch.bornReadOnly : readOnly;
-    const durableAgentName = member
+    const durableAgentName = mcpOnly
       ? agent.agentName
       : hostAgyNativeAgentName(input.catId, trajectoryBornReadOnly ? 'readonly' : 'normal');
 
@@ -336,8 +345,8 @@ export async function prepareAgyNativeLaunch(input: AgyNativeLaunchInput): Promi
       policy.workspaceRoot,
       options?.uploadDir,
     );
-    if (member) mkdirSync(join(configHome, '.gemini/config/skills'), { mode: 0o700 });
-    const skillDirectories = member
+    if (mcpOnly) mkdirSync(join(configHome, '.gemini/config/skills'), { mode: 0o700 });
+    const skillDirectories = mcpOnly
       ? []
       : await materializeAgyNativeSkills({
           profileHome: configHome,
@@ -346,7 +355,7 @@ export async function prepareAgyNativeLaunch(input: AgyNativeLaunchInput): Promi
           canonicalOnly: true,
         });
     let canonicalUploadDir: string | undefined;
-    if (!member) {
+    if (!mcpOnly) {
       try {
         const candidateUpload = getDefaultUploadDir(options?.uploadDir ?? process.env.UPLOAD_DIR);
         if (!existsSync(candidateUpload) && options?.activeRunDispatch)
@@ -370,7 +379,7 @@ export async function prepareAgyNativeLaunch(input: AgyNativeLaunchInput): Promi
         : []),
       ...skillDirectories.flatMap((directory) => ['--add-dir', directory]),
       ...policy.cliArgs,
-      ...(member ? ['--disable-slash-commands', '--new-project'] : []),
+      ...(member ? ['--disable-slash-commands', '--new-project'] : watcher ? ['--disable-slash-commands'] : []),
       '--settings',
       runSettingsPath,
       '--agent',
@@ -450,8 +459,8 @@ export async function prepareAgyNativeLaunch(input: AgyNativeLaunchInput): Promi
       permissionMode: policy.permissionMode,
       agentTools: [
         ...policy.agentTools,
-        ...(member ? ['call_mcp_tool'] : []),
-        ...(!member && !readOnly ? AGY_NATIVE_MCP_TOOLS : []),
+        ...(mcpOnly ? ['call_mcp_tool'] : []),
+        ...(!mcpOnly && !readOnly ? AGY_NATIVE_MCP_TOOLS : []),
       ],
       binding: {
         v: 1,

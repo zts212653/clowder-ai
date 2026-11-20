@@ -104,7 +104,7 @@ function withOutputFence(record: TurnExecutionRecord, raw: string | undefined): 
 export function hydrateTurnExecution(data: RedisTurnExecutionHash): TurnExecutionRecord | null {
   if (!hasTurnExecutionIdentityFields(data)) return null;
   try {
-    if (!['ordinary', 'routing_guard', 'watcher'].includes(data.executionKind)) return null;
+    if (!['ordinary', 'routing_guard', 'watcher', 'cache_retention'].includes(data.executionKind)) return null;
     if (!['running', 'succeeded', 'failed', 'canceled', 'interrupted'].includes(data.status)) return null;
     if (data.queueCompletionPolicy && data.queueCompletionPolicy !== 'explicit_source') return null;
     const legacyCausal = parseCausal(data.causal);

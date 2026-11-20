@@ -15,6 +15,7 @@ const COMPANION_CONTRACT_LINES = Object.freeze([
   '0.1.0-beta.28',
   '0.1.0-beta.29',
   '0.3.3-candidate.0',
+  '0.3.3-candidate.3',
 ]);
 
 const COMPANION_CAPABILITY_SINCE = Object.freeze({
@@ -25,6 +26,7 @@ const COMPANION_CAPABILITY_SINCE = Object.freeze({
   letter: '0.1.0-beta.28',
   appAssist: '0.1.0-beta.29',
   desk: '0.3.3-candidate.0',
+  livingBody: '0.3.3-candidate.3',
 });
 
 function isCompanionContract(value) {

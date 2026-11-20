@@ -16,6 +16,7 @@ import {
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { adoptOrdinaryTaskTenant } from '../domains/ball-custody/adopt-ordinary-task-tenant.js';
+import { OrdinaryTaskHandoffError } from '../domains/ball-custody/OrdinaryTaskHandoffContract.js';
 import type { OrdinaryTaskHandoffService } from '../domains/ball-custody/OrdinaryTaskHandoffService.js';
 import type { OwnedWaitStatusReader } from '../domains/ball-custody/OwnedWaitStatus.js';
 import { resolveCatTarget } from '../domains/cats/services/agents/routing/cat-target-resolver.js';
@@ -39,6 +40,11 @@ import { recordAnchorFullDrill, recordAnchorReturned } from './anchor-telemetry.
 import { anchorTaskWhy } from './callback-anchor-helpers.js';
 import { requireCallbackAuth } from './callback-auth-prehandler.js';
 import { registerCallbackDevelopmentWorkRoutes } from './callback-development-work-routes.js';
+import {
+  deliverOrdinaryTaskResult,
+  type OrdinaryTaskResultDeliveryDeps,
+  prepareOrdinaryTaskResult,
+} from './callback-ordinary-task-result.js';
 import { updateOrdinaryTaskFromCallback } from './callback-ordinary-task-update.js';
 import { deriveCallbackActor, getDeletedCallbackThreadGuard, resolveScopedThreadId } from './callback-scope-helpers.js';
 import { reconcileOwnedTaskWaits } from './callback-task-reconciliation.js';
@@ -77,6 +83,7 @@ const updateDispatchGateSchema = z
 export const updateTaskSchema = z.object({
   taskId: z.string().min(1),
   expectedOwnerRevision: z.number().int().nonnegative().optional(),
+  resultMessageId: z.string().min(1).max(200).optional(),
   status: z.enum(['todo', 'doing', 'blocked', 'done']).optional(),
   why: z.string().max(1000).optional(),
   // F193-E1 P1-4: allow patching dispatchGate
@@ -197,7 +204,10 @@ export function registerCallbackTaskRoutes(
     registry?: Pick<
       import('../domains/cats/services/agents/invocation/InvocationRegistry.js').InvocationRegistry,
       'verify'
-    >;
+    > &
+      Partial<
+        Pick<import('../domains/cats/services/agents/invocation/InvocationRegistry.js').InvocationRegistry, 'isLatest'>
+      >;
     ownedWaitStatusReader?: OwnedWaitStatusReader;
     messageStore: IMessageStore;
     socketManager: SocketManager;
@@ -205,6 +215,7 @@ export function registerCallbackTaskRoutes(
     developmentDocuments?: DevelopmentScopeDocuments;
     liveTaskAuthority?: LiveTaskAuthority;
     ordinaryTaskHandoffs?: OrdinaryTaskHandoffService;
+    ordinaryTaskResultDelivery?: OrdinaryTaskResultDeliveryDeps;
     taskRecovery?: Pick<
       import('../domains/ball-custody/TaskRecoveryReadModel.js').TaskRecoveryReadModel,
       'project' | 'projectMany'
@@ -243,7 +254,7 @@ export function registerCallbackTaskRoutes(
         return { error: 'Invalid request body', details: parsed.error.issues };
       }
 
-      const { taskId, status, why, dispatchGate } = parsed.data;
+      const { taskId, status, why, dispatchGate, resultMessageId } = parsed.data;
 
       let existing = await taskStore.get(taskId);
       if (!existing) {
@@ -289,21 +300,51 @@ export function registerCallbackTaskRoutes(
       if (dispatchGate) updateData.dispatchGate = dispatchGate;
 
       let updated: TaskItem | null;
+      let resultMessage: import('../domains/cats/services/stores/ports/MessageStore.js').StoredMessage | undefined;
       try {
         await assertCurrent();
-        if (ordinary) {
+        let finalReport: TaskItem['ordinaryFinalReport'];
+        let resultWatchKeys: readonly string[] = [];
+        if (resultMessageId) {
+          if (
+            status !== 'done' ||
+            !deps.ordinaryTaskHandoffs ||
+            !deps.ordinaryTaskResultDelivery ||
+            !(await deps.registry?.isLatest?.(record.invocationId))
+          )
+            return reply.code(409).send({ error: 'Task result requires a current final-only execution' });
+          const result = await prepareOrdinaryTaskResult(deps.ordinaryTaskHandoffs, existing, record, resultMessageId);
+          resultMessage = result.result;
+          resultWatchKeys = result.fence?.watchKeys ?? [];
+          finalReport = { messageId: result.messageId, handoffMessageId: result.handoffMessageId };
+        }
+        if (finalReport && existing.status === 'done') {
+          updated = existing; // Recovery can only republish the exact committed result.
+        } else if (ordinary) {
           const result = await updateOrdinaryTaskFromCallback({
             task: existing,
             record,
             data: updateData,
+            finalReport,
             expectedOwnerRevision: parsed.data.expectedOwnerRevision,
             tasks: taskStore,
             messages: messageStore,
             handoffs: deps.ordinaryTaskHandoffs,
             fence: {
+              ...(resultMessageId ? { watchKeys: [`msg:${resultMessageId}`, ...resultWatchKeys] } : {}),
               async assertCurrent() {
                 await assertCurrent();
-                if (deps.registry && !(await deps.registry.verify(record.invocationId, record.callbackToken)).ok)
+                if (resultMessageId && deps.ordinaryTaskHandoffs) {
+                  const current = await taskStore.get(taskId);
+                  if (!current || !(await deps.registry?.isLatest?.(record.invocationId)))
+                    throw new OrdinaryTaskHandoffError('task_result_assignment_changed');
+                  await prepareOrdinaryTaskResult(deps.ordinaryTaskHandoffs, current, record, resultMessageId);
+                }
+                if (
+                  deps.registry &&
+                  ((deps.registry.isLatest && !(await deps.registry.isLatest(record.invocationId))) ||
+                    !(await deps.registry.verify(record.invocationId, record.callbackToken)).ok)
+                )
                   throw new Error('TASK_CALLBACK_AUTHORITY_RETIRED');
               },
             },
@@ -316,6 +357,7 @@ export function registerCallbackTaskRoutes(
           updated = result.task;
         } else updated = await taskStore.update(taskId, updateData);
       } catch (error) {
+        if (error instanceof OrdinaryTaskHandoffError) return reply.code(409).send({ error: error.code });
         if (isEntrustedWorkTerminalActionRequiredError(error)) {
           reply.status(409);
           return {
@@ -332,9 +374,26 @@ export function registerCallbackTaskRoutes(
 
       const projected = await projectTask(updated);
       socketManager.broadcastToRoom(`thread:${projected.threadId}`, 'task_updated', projected);
+      let terminalReport: Awaited<ReturnType<typeof deliverOrdinaryTaskResult>> | undefined;
+      if (resultMessage && deps.ordinaryTaskResultDelivery) {
+        try {
+          terminalReport = await deliverOrdinaryTaskResult(
+            deps.ordinaryTaskResultDelivery,
+            updated,
+            record,
+            resultMessage,
+          );
+        } catch (error) {
+          return reply.code(503).send({
+            error: error instanceof OrdinaryTaskHandoffError ? error.code : 'task_result_delivery_pending',
+            task: projected,
+          });
+        }
+      }
       return {
         status: 'ok',
         task: projected,
+        ...(terminalReport ? { terminalReport } : {}),
         ...(await reconcileOwnedTaskWaits(taskStore, deps.ownedWaitStatusReader, actor)),
       };
     }),

@@ -1,6 +1,6 @@
 /** Quiesce only a proven native Git monitor belonging to an eligible owned checkout. */
 import { spawnSync } from 'node:child_process';
-import { lstatSync, unlinkSync } from 'node:fs';
+import { lstatSync, readFileSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import { gatedNativeStop } from './worktree-fsmonitor-admission.mjs';
 import {
@@ -19,7 +19,7 @@ import {
   optionalStat,
   recoverAdmission,
 } from './worktree-fsmonitor-lifetime.mjs';
-import { requireNoUnixConsumers } from './worktree-unix-consumers.mjs';
+import { requireNoDetachedUnixConsumers, requireNoUnixConsumers } from './worktree-unix-consumers.mjs';
 
 const IPC = 'fsmonitor--daemon.ipc';
 // Darwin unp_connect checks vnode->v_socket and protocol type before listen state.
@@ -29,14 +29,45 @@ const IPC = 'fsmonitor--daemon.ipc';
 const SOCKET_PROBE = `
 use Socket qw(AF_UNIX SOCK_DGRAM SOCK_STREAM sockaddr_un);
 use Errno qw(ECONNREFUSED EPROTOTYPE);
-my $binding = $ARGV[0] eq 'binding';
+sub attributes {
+  my ($path, $common, $volume) = @_;
+  # Darwin getattrlist with ATTR_CMN_RETURNED_ATTRS and FSOPT_NOFOLLOW.
+  my $attrs = pack('S S L5', 5, 0, $common, $volume, 0, 0, 0);
+  my $result = chr(0) x 64;
+  syscall(220, $path, $attrs, $result, length($result), 1) == 0 or exit 2;
+  my ($length, $returned_common, $returned_volume) = unpack('L3', $result);
+  exit 2 unless $length >= 24 && $length <= length($result)
+    && $returned_common == $common && $returned_volume == ($volume & 0x7fffffff);
+  return substr($result, 24, $length - 24);
+}
+sub placement_times {
+  use integer;
+  my ($path) = @_;
+  my $times = attributes($path, 0x90000200, 0); # Creation and Date Added.
+  exit 2 unless length($times) == 32;
+  my ($birth_sec, $birth_ns, $added_sec, $added_ns) = unpack('q4', $times);
+  exit 2 unless $birth_sec > 0 && $added_sec > 0;
+  return ($birth_sec * 1_000_000_000 + $birth_ns, $added_sec * 1_000_000_000 + $added_ns);
+}
+my $binding = $ARGV[0] ne 'peer';
 socket(my $s, AF_UNIX, $binding ? SOCK_DGRAM : SOCK_STREAM, 0) or exit 2;
 my $connected = connect($s, sockaddr_un('fsmonitor--daemon.ipc'));
 if ($binding) {
   exit 1 if $connected;
-  exit 0 if $! == ECONNREFUSED;
   exit 1 if $! == EPROTOTYPE;
-  exit 2;
+  exit 2 unless $! == ECONNREFUSED;
+  if ($ARGV[0] eq 'cold') {
+    my $fs = attributes('.', 0x80000000, 0x80100000); # File system type name.
+    exit 2 unless length($fs) >= 13;
+    my ($offset, $length) = unpack('l L', $fs);
+    exit 2 unless $offset >= 8 && $offset + $length <= length($fs) && substr($fs, $offset, $length) eq 'apfs'.chr(0);
+    my ($born, $added) = placement_times('fsmonitor--daemon.ipc');
+    my (undef, $parent_added) = placement_times('.');
+    # An absolute bind address outside this Git directory cannot be treated as independent
+    # if the socket or its containing directory moved here after the bind.
+    exit 3 if $born != $added || $parent_added > $born;
+  }
+  exit 0;
 }
 exit 2 unless $connected;
 # macOS sys/un.h: SOL_LOCAL=0, LOCAL_PEERPID=2. No application payload is sent.
@@ -70,9 +101,10 @@ function socketProbe(gitDir, mode) {
     timeout: 2000,
     stdio: ['ignore', 'pipe', 'pipe'],
   });
-  if (result.error || result.signal || ![0, 1].includes(result.status) || result.stderr?.trim())
-    fail('IPC binding observations unknown');
-  if (mode === 'binding') return result.status === 1;
+  if (result.error || result.signal || result.stderr?.trim()) fail('IPC binding observations unknown');
+  if (mode === 'cold' && result.status === 3) fail('cold IPC placement changed; preserve possible Unix IPC consumers');
+  if (![0, 1].includes(result.status)) fail('IPC binding observations unknown');
+  if (mode !== 'peer') return result.status === 1;
   if (result.status !== 0 || !/^[1-9]\d*$/.test(result.stdout)) fail('IPC peer identity unknown');
   return Number(result.stdout);
 }
@@ -97,6 +129,7 @@ function prepareScope(entry, refs, session) {
   const held = session.guards.get(gitDir);
   if (held) {
     assertAdmission(held);
+    if (held.base.coldSocket) return { ...held.scope, before, coldGuard: held };
     if (before) fail('IPC appeared while its native startup admission was closed');
     return null;
   }
@@ -106,6 +139,7 @@ function prepareScope(entry, refs, session) {
   let scope = { socket, gitDir, before, executable, common };
   const recovered = recoverAdmission(entry, scope, session);
   before = socketStat(socket);
+  if (recovered?.base.coldSocket) return { ...scope, before, coldGuard: recovered };
   if (!before) {
     acquireAdmission(entry, { ...scope, before: null }, null, session);
     if (socketStat(socket)) fail('IPC appeared while closing native startup admission');
@@ -116,22 +150,60 @@ function prepareScope(entry, refs, session) {
   return { ...scope, recovered };
 }
 
-function authorizeColdIpc(entry, scope, observe, session) {
-  // A negative binding alone cannot recover a vanished listener's lifetime. Only a journal
-  // produced by a sealed, consumer-free native lifecycle can authorize this exact inode.
-  const receipt =
-    scope.recovered?.provenIdleIdentity === identity(scope.before) ? scope.recovered.base : idleReceipt(entry, scope);
-  if (!receipt) fail('unbound IPC lifetime unknown; retain original for owner inspection');
-  acquireAdmission(entry, scope, receipt.monitorPid, session, receipt);
-  const refs = observe();
+function coldSocketStamp(st) {
+  return st?.isSocket() && st.nlink === 1n ? `${identity(st)}:${st.birthtimeNs}:${st.ctimeNs}:${st.mode}` : null;
+}
+
+function coldGitLink(entry, scope, socket) {
+  const link = join(entry.path, '.git');
+  const stat = optionalStat(link, true);
+  // Changing the Git directory's name requires rewriting this pointer, even
+  // when APFS preserves Date Added for that directory and its socket.
+  if (
+    !stat?.isFile() ||
+    stat.ctimeNs >= socket.birthtimeNs ||
+    readFileSync(link, 'utf8') !== `gitdir: ${scope.gitDir}\n`
+  )
+    fail('cold IPC placement changed or checkout link unknown; preserve possible Unix IPC consumers');
+  return `${identity(stat)}:${stat.ctimeNs}`;
+}
+
+function verifyColdIpc(entry, scope, refs, guard, session) {
   if (!refs || refs.openFilesComplete !== true) fail('cold IPC process observations unknown');
   requireIdle(entry.path, scope.gitDir, refs);
+  const socket = optionalStat(scope.socket, true);
+  if (!scope.before || coldSocketStamp(socket) !== guard.base.coldSocket) fail('cold IPC changed or is still bound');
+  const link = coldGitLink(entry, scope, socket);
+  if (socketProbe(scope.gitDir, 'cold')) fail('cold IPC changed or is still bound');
+  requireNoDetachedUnixConsumers(entry, { ...scope, before: socket }, refs);
+  assertAdmission(guard);
+  if (
+    coldSocketStamp(optionalStat(scope.socket, true)) !== guard.base.coldSocket ||
+    coldGitLink(entry, scope, socket) !== link
+  )
+    fail('cold IPC or checkout link changed during inspection');
+  session.coldSocketPath = scope.socket;
   return refs;
+}
+
+function authorizeColdIpc(entry, scope, observe, session) {
+  const receipt =
+    scope.recovered?.provenIdleIdentity === identity(scope.before) ? scope.recovered.base : idleReceipt(entry, scope);
+  if (receipt) {
+    acquireAdmission(entry, scope, receipt.monitorPid, session, receipt);
+    return removeIdleIpc(entry, observe(), scope);
+  }
+  const st = optionalStat(scope.socket, true);
+  const coldSocket = coldSocketStamp(st);
+  if (!coldSocket || identity(st) !== identity(scope.before)) fail('cold IPC inode or links changed');
+  // Keep the exact socket until Git removes its private metadata after a verified archive.
+  const guard = acquireAdmission(entry, { ...scope, before: null, coldSocket }, null, session);
+  return verifyColdIpc(entry, scope, observe(), guard, session);
 }
 
 function removeIdleIpc(entry, refs, scope) {
   const { socket, gitDir, before } = scope;
-  if (refs.openFilesComplete !== true) fail('socket holder observations unknown');
+  if (refs?.openFilesComplete !== true) fail('socket holder observations unknown');
   requireIdle(entry.path, gitDir, refs);
   const remaining = socketStat(socket);
   if (!remaining) return refs;
@@ -147,8 +219,8 @@ export function quiesceFsmonitor(entry, refs, observe, session) {
   if (refs === null) fail('process state unknown');
   const scope = prepareScope(entry, refs, session);
   if (!scope) return refs;
-  const fresh = socketProbe(scope.gitDir, 'binding')
-    ? stopNativeMonitor(entry, refs, observe, scope, session)
-    : authorizeColdIpc(entry, scope, observe, session);
-  return removeIdleIpc(entry, fresh, scope);
+  if (scope.coldGuard) return verifyColdIpc(entry, scope, refs, scope.coldGuard, session);
+  if (socketProbe(scope.gitDir, 'binding'))
+    return removeIdleIpc(entry, stopNativeMonitor(entry, refs, observe, scope, session), scope);
+  return authorizeColdIpc(entry, scope, observe, session);
 }

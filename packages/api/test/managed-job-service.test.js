@@ -254,12 +254,12 @@ test('consuming or force-resetting the wake carrier does not hide a live job or 
     },
   };
   assert.equal(isCancelableHoldBallTask(task), true);
-  const active = listManagedCommandExecutions([]);
+  const active = await listManagedCommandExecutions([]);
   assert.ok(active.some((entry) => entry.taskId === job.originTaskId));
   service.cancel(principal, job.jobId);
   assert.equal(isCancelableHoldBallTask(task), false);
   assert.equal(
-    listManagedCommandExecutions([]).some((entry) => entry.taskId === job.originTaskId),
+    (await listManagedCommandExecutions([])).some((entry) => entry.taskId === job.originTaskId),
     false,
   );
 });

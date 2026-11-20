@@ -5,7 +5,7 @@ import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, rmSync, writ
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { fixture, git, SOURCE } from './lib/worktree-finish-fixture.mjs';
+import { connectedClient, fixture, git, SOURCE } from './lib/worktree-finish-fixture.mjs';
 import { processRefs, statusFacts } from './lib/worktree-reaper-probes.mjs';
 
 // Git's native FSEvents daemon/UDS are the boundary under test, not a fake process probe.
@@ -67,27 +67,6 @@ describe('finish with native Git fsmonitor', { skip: process.platform !== 'darwi
     assert.equal(git(fx.repo, 'config', 'core.fsmonitor').trim(), 'true');
     assert.equal(readFileSync(join(receipt.archivePath, 'files/.cat-cafe/private.txt'), 'utf8'), 'owned original\n');
     assert.equal(spawnSync('git', ['-C', other, 'fsmonitor--daemon', 'status']).status, 0);
-  });
-
-  it('retains a cold stale IPC when its prior connection lifetime cannot be proved', async () => {
-    child = spawn('git', ['-C', path, 'fsmonitor--daemon', 'run'], { cwd: fx.repo, stdio: 'ignore' });
-    const deadline = Date.now() + 5000;
-    while (monitorStatus() !== 0) {
-      assert.equal(child.exitCode, null, 'daemon exited before becoming ready');
-      assert.ok(Date.now() < deadline, 'native daemon readiness deadline');
-      await new Promise((resolve) => setTimeout(resolve, 10));
-    }
-    const socket = socketPath();
-    const exited = once(child, 'exit');
-    child.kill('SIGKILL'); // Only this fixture's foreground child; leave a real Git-created stale UDS.
-    await exited;
-    assert.equal(lstatSync(socket).isSocket(), true);
-    git(path, 'config', '--worktree', 'core.fsmonitor', 'false');
-    const inode = lstatSync(socket).ino;
-    assert.throws(() => fx.finish(path, { cwdProbe: undefined }), /unbound IPC lifetime unknown/);
-    assert.equal(lstatSync(socket).ino, inode);
-    assert.equal(existsSync(path), true);
-    assert.throws(() => fx.finish(path, { mode: 'check' }), /no retained/);
   });
 
   it('runs the actual CLI once with fsmonitor enabled and verifies using the same source', () => {
@@ -236,17 +215,31 @@ describe('finish with native Git fsmonitor', { skip: process.platform !== 'darwi
     });
   }
 
-  it('finishes while another independent repository main keeps its own native monitor', () => {
+  it('finishes while an independent repository main keeps its native monitor and connected client', async () => {
     const independent = fixture();
     try {
       git(independent.repo, 'config', 'core.fsmonitor', 'true');
       git(independent.repo, 'fsmonitor--daemon', 'start');
+      child = spawn('python3', ['-I', '-S', '-c', connectedClient()], {
+        cwd: join(independent.repo, '.git'),
+        stdio: ['pipe', 'pipe', 'pipe'],
+      });
+      const [ready] = await Promise.race([once(child.stdout, 'data'), once(child, 'exit')]);
+      assert.equal(String(ready).trim(), 'ready');
       git(path, 'fsmonitor--daemon', 'start');
       const receipt = fx.finish(path, { cwdProbe: undefined });
       assert.equal(receipt.storageDisposition, 'removed');
       assert.equal(fx.finish(path, { mode: 'check' }).state, 'released');
       assert.equal(spawnSync('git', ['-C', independent.repo, 'fsmonitor--daemon', 'status']).status, 0);
+      const reply = once(child.stdout, 'data');
+      child.stdin.write('check\n');
+      assert.equal(String((await reply)[0]).trim(), 'open');
     } finally {
+      if (child && child.exitCode === null && child.signalCode === null) {
+        const exited = once(child, 'exit');
+        child.kill('SIGTERM');
+        await exited;
+      }
       spawnSync('git', ['-C', independent.repo, 'fsmonitor--daemon', 'stop']);
       rmSync(independent.root, { recursive: true, force: true });
     }

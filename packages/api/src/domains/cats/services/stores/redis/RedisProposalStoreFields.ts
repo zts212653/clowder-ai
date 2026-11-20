@@ -38,6 +38,8 @@ export function createdThreadCheckpointFields(
 ): string[] {
   const fields = ['createdThreadId', threadId];
   if (!overrides) return fields;
+  if (overrides.approvedChildPinned !== undefined)
+    fields.push('approvedChildPinned', String(overrides.approvedChildPinned));
   if (overrides.attentionGroupId !== undefined) fields.push('attentionGroupId', overrides.attentionGroupId ?? '');
   if (overrides.title !== undefined) fields.push('title', overrides.title);
   if (overrides.parentThreadId !== undefined) fields.push('parentThreadId', overrides.parentThreadId);

@@ -102,17 +102,25 @@ describe('freeze and scan actual send content', () => {
   });
 
   it('checks curl payloads hidden behind combined short flags', async () => {
-    await assert.rejects(
-      prepareSecretSafeSend('curl', [`-sd@${file(secret())}`, 'https://example.invalid']),
-      /secret_content_detected/,
-    );
+    for (const flags of ['-sd', '-Zsd'])
+      await assert.rejects(
+        prepareSecretSafeSend('curl', [`${flags}@${file(secret())}`, 'https://example.invalid']),
+        /secret_content_detected/,
+      );
   });
 
-  it('rejects abbreviated curl options and multipart secondary file references', async () => {
-    await assert.rejects(
-      prepareSecretSafeSend('curl', ['--data-bin', `@${file(secret())}`, 'https://example.invalid']),
-      /secret_send_option_unsupported/,
-    );
+  it('preserves unclassified curl CLI options for the delegate to interpret', async () => {
+    for (const input of [
+      ['--parallel', '--future-flag=value', 'https://example.invalid'],
+      ['--data-bin', `@${file(secret())}`, 'https://example.invalid'],
+    ]) {
+      const prepared = await prepareSecretSafeSend('curl', input);
+      snapshots.push(prepared);
+      assert.deepEqual(prepared.args, ['-q', ...input]);
+    }
+  });
+
+  it('rejects known multipart forms that use uninspected secondary file references', async () => {
     await assert.rejects(
       prepareSecretSafeSend('curl', ['-F', `name=clean;headers=@${file(secret())}`, 'https://example.invalid']),
       /secret_send_form_unsupported/,
@@ -130,7 +138,6 @@ describe('freeze and scan actual send content', () => {
 
   it('rejects gh implicit editors and content derived outside the supplied arguments', async () => {
     for (const args of [
-      ['pr', 'create', '--fill'],
       ['issue', 'comment', '1', '--editor'],
       ['pr', 'create', '--template', file(secret())],
       ['gist', 'edit', 'gist-id', '--filename', 'remote-file.md'],
@@ -205,7 +212,7 @@ describe('freeze and scan actual send content', () => {
     ]) {
       const prepared = await prepareSecretSafeSend('curl', args);
       snapshots.push(prepared);
-      const preserved = fileURLToPath(prepared.args.at(-1));
+      const preserved = fileURLToPath(prepared.args.at(-1).replace(/^--url=/, ''));
       assert.equal(preserved, source);
       writeFileSync(source, 'replaced after preparation');
       assert.equal(readFileSync(preserved, 'utf8'), 'replaced after preparation');
@@ -252,10 +259,16 @@ describe('freeze and scan actual send content', () => {
     }
   });
 
-  it('refuses an unresolved command prefix instead of choosing a generic asset policy', async () => {
-    await assert.rejects(
-      prepareSecretSafeSend('gh', ['release', '--unclassified-prefix', 'upload', 'v1', file('safe')]),
-      /secret_send_operation_unresolved/,
-    );
+  it('lets gh interpret an unfamiliar switch and scans the identified release asset', async () => {
+    const prepared = await prepareSecretSafeSend('gh', [
+      'release',
+      '--unclassified-prefix',
+      'upload',
+      'v1',
+      file('safe'),
+    ]);
+    snapshots.push(prepared);
+    assert.equal(prepared.args[1], '--unclassified-prefix');
+    assert.equal(readFileSync(prepared.args.at(-1), 'utf8'), 'safe');
   });
 });

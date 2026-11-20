@@ -1,4 +1,5 @@
 import { resolve } from 'node:path';
+import type { CacheRetentionWarmProof } from '../domains/cats/services/session/cache/cache-retention-proof.js';
 import { sessionCacheRuntimeKey } from '../domains/cats/services/session/cache/session-cache-runtime.js';
 import { projectSessionCacheWarmth } from '../domains/cats/services/session/cache/session-cache-warmth.js';
 import {
@@ -79,6 +80,7 @@ interface RestoreRouteResponse {
 }
 
 interface SessionChainRouteOptions extends FastifyPluginOptions, LocalSessionImportOptions {
+  readRetentionProof?: (record: SessionRecord) => Promise<CacheRetentionWarmProof | undefined>;
   resolveImportExecutionBoundary?: (input: {
     catId: CatId;
     threadId: string;
@@ -189,6 +191,7 @@ function formatRuntimeSessionSummary(metadata: RuntimeSessionMetadata): RuntimeS
 async function attachRuntimeSessionSummary<T extends SessionRecord>(
   session: T,
   runtimeSessionStore?: IRuntimeSessionStore,
+  readRetentionProof?: SessionChainRouteOptions['readRetentionProof'],
 ): Promise<
   Omit<T, 'hostExecutionBoundary'> & { cacheWarmth: SessionCacheWarmth; runtimeSession?: RuntimeSessionSummary }
 > {
@@ -201,6 +204,7 @@ async function attachRuntimeSessionSummary<T extends SessionRecord>(
         session,
         Date.now(),
         config ? { model: config.defaultModel, runtime: sessionCacheRuntimeKey(config) ?? '' } : undefined,
+        readRetentionProof ? await readRetentionProof(session).catch(() => undefined) : undefined,
       ),
       bindingSource: config ? ('catalog_default' as const) : ('observed_session' as const),
     },
@@ -217,10 +221,13 @@ async function attachRuntimeSessionSummary<T extends SessionRecord>(
 async function attachRuntimeSessionSummaries<T extends SessionRecord>(
   sessions: T[],
   runtimeSessionStore?: IRuntimeSessionStore,
+  readRetentionProof?: SessionChainRouteOptions['readRetentionProof'],
 ): Promise<
   Array<Omit<T, 'hostExecutionBoundary'> & { cacheWarmth: SessionCacheWarmth; runtimeSession?: RuntimeSessionSummary }>
 > {
-  return Promise.all(sessions.map((session) => attachRuntimeSessionSummary(session, runtimeSessionStore)));
+  return Promise.all(
+    sessions.map((session) => attachRuntimeSessionSummary(session, runtimeSessionStore, readRetentionProof)),
+  );
 }
 
 async function prepareRestore(
@@ -411,7 +418,11 @@ export async function sessionChainRoutes(app: FastifyInstance, opts: SessionChai
     const sendSessions = async (visibleSessions: SessionRecord[]) => {
       diagnostic.phase('runtime_metadata');
       if (limit === undefined && offset === undefined) {
-        const sessions = await attachRuntimeSessionSummaries(visibleSessions, runtimeSessionStore);
+        const sessions = await attachRuntimeSessionSummaries(
+          visibleSessions,
+          runtimeSessionStore,
+          opts.readRetentionProof,
+        );
         diagnostic.phase('response');
         return reply.send({ sessions });
       }
@@ -419,7 +430,7 @@ export async function sessionChainRoutes(app: FastifyInstance, opts: SessionChai
       const pageOffset = offset ?? 0;
       const selected = visibleSessions.slice(pageOffset, pageOffset + pageLimit);
       const hasMore = pageOffset + selected.length < visibleSessions.length;
-      const sessions = await attachRuntimeSessionSummaries(selected, runtimeSessionStore);
+      const sessions = await attachRuntimeSessionSummaries(selected, runtimeSessionStore, opts.readRetentionProof);
       diagnostic.phase('response');
       return reply.send({
         sessions,
@@ -486,7 +497,7 @@ export async function sessionChainRoutes(app: FastifyInstance, opts: SessionChai
     const callerCatId = request.headers['x-cat-id'] as string | undefined;
     if (callerCatId && isWatcherPanelSession(session)) return reply.status(404).send({ error: 'Session not found' });
 
-    return reply.send(await attachRuntimeSessionSummary(session, runtimeSessionStore));
+    return reply.send(await attachRuntimeSessionSummary(session, runtimeSessionStore, opts.readRetentionProof));
   });
 
   // POST /api/sessions/:sessionId/seal — manual, idle-only session rotation.
@@ -590,7 +601,7 @@ export async function sessionChainRoutes(app: FastifyInstance, opts: SessionChai
     }
     return reply.send({
       mode: 'sealed' as const,
-      session: await attachRuntimeSessionSummary(sealed, runtimeSessionStore),
+      session: await attachRuntimeSessionSummary(sealed, runtimeSessionStore, opts.readRetentionProof),
     });
   });
 

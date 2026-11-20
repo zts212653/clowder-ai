@@ -19,6 +19,7 @@ import { runWatcherInvocation } from './watcher-invocation.js';
 import type { WatcherInvocationOwners } from './watcher-invocation-contract.js';
 import { reconcileWatcherRecovery } from './watcher-recovery.js';
 import { reserveWatcherRecovery, watcherRecoveryFinalizationDue } from './watcher-retry.js';
+import { watcherUsesOrdinaryContext } from './watcher-routing.js';
 import { recordWatcherSourceFailure, watcherSourceFinished } from './watcher-source-result.js';
 
 interface Options extends WatcherInvocationOwners {
@@ -79,6 +80,7 @@ export class WatcherSupervisor {
         const thread = await this.deps.threads.get(id);
         if (
           !thread ||
+          watcherUsesOrdinaryContext(preferences.config) ||
           (current.catId !== undefined && current.catId !== preferences.config.memberCatId) ||
           !effectiveWatcherState(preferences.config, thread, preferences.quietLabels).enabled
         )
@@ -104,7 +106,7 @@ export class WatcherSupervisor {
           : undefined;
       for (const source of page.records) {
         if (source.executionKind !== 'ordinary') continue;
-        if (preferences?.config.panel?.enabled)
+        if (preferences && watcherUsesOrdinaryContext(preferences.config))
           this.deps.panel!.offer(source, Math.max(this.floor, preferences.config.startedAfterSequence ?? 0));
         else this.schedule(source.threadId);
       }
@@ -140,6 +142,7 @@ export class WatcherSupervisor {
               const retirement = watcherRetirementPending(session);
               const activation = `${preferences.config.activationRevision ?? 0}:${thread.watcher?.activationRevision ?? 0}`;
               const recoveryOnly =
+                watcherUsesOrdinaryContext(preferences.config) ||
                 retirement ||
                 watcherRecoveryFinalizationDue(state, this.deps.now?.() ?? Date.now()) ||
                 preferences.config.memberCatId !== session.catId ||
@@ -213,7 +216,7 @@ export class WatcherSupervisor {
     const read = <T>(value: T | Promise<T>) => awaitStoreRead(Promise.resolve(value), { signal });
     const preferences = await read(readWatcherPreferences(this.deps.configs, this.deps.labels, this.deps.userId));
     // The panel owns new turns while it is on; an in-flight single-watcher attempt still settles in reconcile().
-    if (this.deps.panel && preferences.config.panel?.enabled) return;
+    if (this.deps.panel && watcherUsesOrdinaryContext(preferences.config)) return;
     const catId = preferences.config.memberCatId;
     const active = this.active.get(threadId);
     if (active) active.catId = catId;
@@ -291,6 +294,7 @@ export class WatcherSupervisor {
       const thread = await read(this.deps.threads.get(threadId));
       if (!thread || thread.deletedAt) return;
       const current = await read(readWatcherPreferences(this.deps.configs, this.deps.labels, this.deps.userId));
+      if (watcherUsesOrdinaryContext(current.config)) return;
       if (current.config.memberCatId !== catId) return;
       const floor = Math.max(
         this.floor,

@@ -4,10 +4,12 @@ related_features: [F192, F233, F252, F153, F200, F237, F298, F300, F304]
 topics: [observability, trajectory, invocation, workspace, ux, drill-down]
 doc_kind: spec
 created: 2026-08-17
+updated: 2026-11-19
 description: "workspace 一等 invocation 轨迹：canonical transcript 直接投影，出事时三步确诊，猫与 eval 共享稳定证据锚点"
 description_source: human
 description_author: fable-5
 description_updated_at: 2026-08-18T13:05:00Z
+tips_exempt: "Renewed 2026-11-19: daily doc guard records PR #7135 (intake clowder-ai#2002 persisting done completion events before inline or deferred session sealing) and PR #7247 (reading native Claude credentials off the event loop and fencing thread settings during invocation admission). Existing trajectory inspector entrypoints and tips are unchanged."
 ---
 
 # F299: Workspace Invocation Trajectory — 猫这轮干了什么，亲眼可见

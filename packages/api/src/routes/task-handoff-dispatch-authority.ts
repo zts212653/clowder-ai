@@ -25,13 +25,18 @@ function taskAction(request: OrdinaryTaskHandoffRequest) {
 /** Same deny-only approval owner at submission, recovered application and actual provider admission. */
 export function taskHandoffDispatchAuthority(store: IDispatchProposalStore, log: FastifyBaseLogger) {
   return {
-    keys(request: OrdinaryTaskHandoffRequest): string[] {
+    keys(request: OrdinaryTaskHandoffRequest, proposalSourceInvocationId?: string): string[] {
       const a = request.issuer;
+      const origin = 'invocationId' in a ? a.invocationId : proposalSourceInvocationId;
       return [
         DispatchProposalKeys.canonicalAdmissionAction(computeDispatchCanonicalActionKey(a.userId, taskAction(request))),
-        DispatchProposalKeys.negativeAuthorization(
-          computeNegativeAuthorizationKey(a.userId, a.invocationId, request.targetThreadId, request.targetCatId),
-        ),
+        ...(origin
+          ? [
+              DispatchProposalKeys.negativeAuthorization(
+                computeNegativeAuthorizationKey(a.userId, origin, request.targetThreadId, request.targetCatId),
+              ),
+            ]
+          : []),
         DispatchProposalKeys.legacyNegativeAuthorization(
           computeLegacyNegativeAuthorizationKey(
             a.userId,
@@ -46,13 +51,15 @@ export function taskHandoffDispatchAuthority(store: IDispatchProposalStore, log:
     },
     async assertCurrent(source: StoredMessage, request: OrdinaryTaskHandoffRequest): Promise<void> {
       const actor = request.issuer;
+      const origin = 'invocationId' in actor ? actor.invocationId : source.extra?.crossPost?.sourceInvocationId;
+      if (!origin) throw new OrdinaryTaskHandoffError('task_dispatch_authorization_unavailable');
       const denied = await preflightNegativeAuthorizationFence({
         content: source.content,
         isCrossThread: actor.threadId !== request.targetThreadId,
         effectClass: 'coordinate',
         senderCatId: createCatId(actor.catId),
         sourceThreadId: actor.threadId,
-        sourceInvocationId: actor.invocationId,
+        sourceInvocationId: origin,
         sourceInvocationCreatedAt: request.issuerCreatedAt ?? source.timestamp,
         targetThreadId: request.targetThreadId,
         ownerUserId: actor.userId,

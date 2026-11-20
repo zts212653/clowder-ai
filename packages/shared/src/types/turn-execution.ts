@@ -1,6 +1,6 @@
 import type { CatId } from './ids.js';
 
-export type TurnExecutionKind = 'ordinary' | 'routing_guard' | 'watcher';
+export type TurnExecutionKind = 'ordinary' | 'routing_guard' | 'watcher' | 'cache_retention';
 export type TurnExecutionStatus = 'running' | 'succeeded' | 'failed' | 'canceled' | 'interrupted';
 export type TurnExecutionTerminalStatus = Exclude<TurnExecutionStatus, 'running'>;
 

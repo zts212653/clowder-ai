@@ -13,6 +13,8 @@ async function memberWorld(stream = () => []) {
   const cutoff = await w.messages.getById(source.responseSettlement.messageId);
   const invocations = [];
   const service = {
+    watcherMemberCapability: () => ({ supported: true, context: 'ordinary', readOnly: 'tools' }),
+    supportsToolExecutionPolicy: (policy) => policy.mode === 'watcher_panel',
     async *invoke(prompt, options) {
       invocations.push({ prompt, options });
       yield { type: 'session_init', catId: MEMBER, sessionId: 'native-1', timestamp: Date.now() };
@@ -44,8 +46,19 @@ async function memberWorld(stream = () => []) {
       signal: new AbortController().signal,
       ...extra,
     });
-  return { ...w, source, cutoff, invocations, run };
+  return { ...w, source, cutoff, invocations, run, service };
 }
+
+test('a declared capability cannot silently widen through a carrier without the policy', async () => {
+  const f = await memberWorld();
+  f.service.supportsToolExecutionPolicy = () => false;
+  const result = await f.run();
+  assert.equal(result.status, 'failed');
+  assert.match(result.failure, /cannot enforce/);
+  assert.equal(result.invocationId, undefined);
+  assert.equal(result.sessionId, undefined);
+  assert.equal(f.invocations.length, 0);
+});
 
 test('a member runs as an ordinary read-only Codex turn behind the panel fence', async () => {
   const f = await memberWorld();
@@ -64,10 +77,12 @@ test('a member runs as an ordinary read-only Codex turn behind the panel fence',
   assert.equal(options.codexLaunchPolicy.sandboxMode, 'read-only');
   assert.equal(options.codexLaunchPolicy.approvalPolicy, 'never');
   assert.ok(options.frozenL0Input, 'ordinary L0, frozen like any member turn');
-  assert.equal(options.toolExecutionPolicy, undefined, 'ordinary MCP; the fence lives on the callback auth');
+  assert.equal(options.toolExecutionPolicy.mode, 'watcher_panel', 'the actual carrier receives the same fence');
+  assert.equal(options.boundedWatcher, undefined, 'ordinary context never takes the 30k request-boundary path');
 
   const auth = await f.registry.peekRecord(result.invocationId);
   assert.equal(auth.toolExecutionPolicy.mode, 'watcher_panel');
+  assert.deepEqual(auth.toolExecutionPolicy, options.toolExecutionPolicy);
   assert.equal(auth.parentInvocationId, `watcher-panel:wpr:${f.source.invocationId}:${MEMBER}`);
   assert.equal(options.callbackEnv.CAT_CAFE_INVOCATION_ID, result.invocationId);
 
@@ -169,7 +184,7 @@ test('a cancellation racing the final transition wins over the drained-stream ou
   assert.equal(result.failure, 'user_cancel');
 });
 
-test('a member without a local Codex session is refused before anything launches', async () => {
+test('a member without a configured carrier is refused before anything launches', async () => {
   const f = await memberWorld();
   const result = await runWatcherPanelMember(
     { ...f, transcript: { appendDurableEvent: async () => {} }, apiUrl: 'x', service: () => undefined },
@@ -182,5 +197,5 @@ test('a member without a local Codex session is refused before anything launches
       signal: new AbortController().signal,
     },
   );
-  assert.deepEqual(result, { status: 'failed', failure: 'watcher_panel_member_unsupported' });
+  assert.deepEqual(result, { status: 'failed', failure: 'watcher_panel_member_service_unavailable' });
 });

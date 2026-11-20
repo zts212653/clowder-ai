@@ -47,10 +47,21 @@ test('classifies review short clusters and API typed fields before file inspecti
     await assert.rejects(prepareSecretSafeSend('gh', args), /secret_content_detected/);
 });
 
+test('merge mode leaves the following body file visible to the scanner', async () => {
+  const path = body(secret());
+  for (const tail of [['-m', '--body-file', path], ['-m', '-F', path], [`-mF${path}`]]) {
+    await assert.rejects(prepareSecretSafeSend('gh', ['pr', 'merge', ...tail, '7274']), /secret_content_detected/);
+  }
+  for (const args of [
+    ['pr', 'merge', '7274', '--subject', '--help', '-m', '-F', path],
+    ['pr', 'merge', '7274', '-m', '--body-file', path, '--', '--help'],
+  ])
+    await assert.rejects(prepareSecretSafeSend('gh', args), /secret_content_detected/);
+});
+
 test("does not inherit another action's short-option meanings for implicit content", async () => {
   for (const args of [
     ['pr', 'comment', '123', '-e', '--body', 'explicit body'],
-    ['pr', 'create', '-f', '--body', 'explicit body'],
     ['issue', 'create', '-w', '--body', 'explicit body'],
     ['pr', 'edit', '123'],
     ['pr', 'review', '123', '-c'],
@@ -58,20 +69,50 @@ test("does not inherit another action's short-option meanings for implicit conte
     await assert.rejects(prepareSecretSafeSend('gh', args), /secret_send_implicit_content_unsupported/);
 });
 
-test('refuses outgoing commands and flags with no verified payload grammar', async () => {
-  for (const args of [['ssh-key', 'add', body('opaque fixture content')], ['unclassified-extension']])
-    await assert.rejects(prepareSecretSafeSend('gh', args), /secret_send_operation_unsupported/);
-  await assert.rejects(
-    prepareSecretSafeSend('gh', ['pr', 'review', '123', '--unclassified', '-F', body('safe body')]),
-    /secret_send_option_unsupported/,
-  );
+test('passes through new command and option spellings and still checks known body files', async () => {
+  for (const args of [
+    ['gist', 'clone', 'abc', 'local destination'],
+    ['gist', 'delete', 'abc'],
+    ['unclassified-extension', '--new-option=value', '--', '--body-file'],
+  ]) {
+    const prepared = await prepareSecretSafeSend('gh', args);
+    leases.push(prepared);
+    assert.deepEqual(prepared.args, args);
+  }
+  const path = body('safe body');
+  const args = ['pr', 'review', '123', '--unclassified', '-F', path];
+  const prepared = await prepareSecretSafeSend('gh', args);
+  leases.push(prepared);
+  assert.equal(prepared.args[3], '--unclassified');
+  assert.equal(readFileSync(prepared.args.at(-1), 'utf8'), 'safe body');
+  writeFileSync(path, secret());
+  await assert.rejects(prepareSecretSafeSend('gh', args), /secret_content_detected/);
 });
 
-test('refuses a conflicting option arity before the action instead of guessing', async () => {
-  await assert.rejects(
-    prepareSecretSafeSend('gh', ['pr', '-a', 'review', '123', '-F', body('safe body')]),
-    /secret_send_operation_unresolved/,
-  );
+test('the previously closed SSH key command checks the actual uploaded file', async () => {
+  const path = body('ssh-ed25519 fixture public key');
+  const args = ['ssh-key', 'add', '--title', 'fixture', path];
+  const prepared = await prepareSecretSafeSend('gh', args);
+  leases.push(prepared);
+  assert.equal(readFileSync(prepared.args.at(-1), 'utf8'), 'ssh-ed25519 fixture public key');
+  writeFileSync(path, secret());
+  await assert.rejects(prepareSecretSafeSend('gh', args), /secret_content_detected/);
+});
+
+test('passes unresolved prefix arguments to gh without guessing their roles', async () => {
+  const args = ['pr', '-a', 'review', '123', '-F', body('safe body')];
+  const prepared = await prepareSecretSafeSend('gh', args);
+  leases.push(prepared);
+  assert.deepEqual(prepared.args, args);
+});
+
+test('checks the same autofill spellings even when other switches precede the command', async () => {
+  for (const flag of ['--fill', '--fill-first', '--fill-verbose', '-f']) {
+    await assert.rejects(
+      prepareSecretSafeSend('gh', ['pr', '-a', 'fixture-user', 'create', flag]),
+      /secret_send_generated_pr_body/,
+    );
+  }
 });
 
 test('preserves local auth display flag aliases without executing gh', async () => {
@@ -95,6 +136,8 @@ test('preserves ordinary reads, explicit approval and metadata edits', async () 
     ['pr', 'edit', '123', '--add-label', 'bug'],
     ['pr', 'create', '-a', 'fixture-user', '--body', 'explicit body'],
     ['pr', 'merge', '123', '--squash', '--match-head-commit', 'deadbeef'.repeat(5)],
+    ['pr', 'merge', '7274', '-m'],
+    ['gist', 'view', 'abc123', '-r'],
   ]) {
     const prepared = await prepareSecretSafeSend('gh', args);
     leases.push(prepared);

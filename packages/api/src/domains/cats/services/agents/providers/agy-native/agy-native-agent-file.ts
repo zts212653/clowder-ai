@@ -17,6 +17,7 @@ export interface AgyNativeAgentFileInput {
   readonly autoApprove?: boolean;
   readonly readOnly?: boolean;
   readonly scopedMember?: boolean;
+  readonly watcher?: boolean;
   readonly tools?: readonly string[];
 }
 
@@ -123,7 +124,7 @@ export function materializeAgyNativeAgentFile(input: AgyNativeAgentFileInput): {
   const autoApprove = input.autoApprove === true;
   const defaultTools = autoApprove ? AGY_NATIVE_TOOLS : AGY_NATIVE_READ_TOOLS;
   const tools = deduplicateAgyNativeFileTools(input.tools ?? defaultTools);
-  const mode = input.scopedMember ? 'member' : input.readOnly ? 'readonly' : 'normal';
+  const mode = input.watcher ? 'watcher' : input.scopedMember ? 'member' : input.readOnly ? 'readonly' : 'normal';
   const agentName = hostAgyNativeAgentName(input.catId, mode);
 
   let dir = home;

@@ -117,6 +117,7 @@ export function assertRecentSettledLimit(limit: number): void {
 }
 
 export interface ITurnExecutionStore {
+  readonly cacheFacts?: import('./TurnExecutionCacheFacts.js').TurnExecutionCacheFacts;
   recordWatcherModelAttempt(
     invocationId: string,
     turnId: string,
@@ -168,7 +169,7 @@ export interface ITurnExecutionStore {
   listSettled(query: SettledTurnQuery): SettledTurnPage | Promise<SettledTurnPage>;
   /** F337: the newest settled turns first (optionally of one thread); one bounded page, 1–200. */
   listRecentSettled(query: RecentSettledTurnQuery): TurnExecutionRecord[] | Promise<TurnExecutionRecord[]>;
-  /** F337: exact — did this member start any non-watcher turn in this thread after `startedAfter`? */
+  /** F337: did member work start after `startedAfter`? Observers and cache maintenance are not work. */
   hasMemberTurnStartedAfter(query: MemberTurnStartedAfterQuery): boolean | Promise<boolean>;
   /**
    * F337: turns whose continuation is still owed, recorded atomically at terminal — failed `host_sleep`
@@ -205,7 +206,7 @@ export function assertCoveredMessageIds(messageIds: readonly string[]): void {
   }
 }
 
-const EXECUTION_KINDS = new Set<TurnExecutionKind>(['ordinary', 'routing_guard', 'watcher']);
+const EXECUTION_KINDS = new Set<TurnExecutionKind>(['ordinary', 'routing_guard', 'watcher', 'cache_retention']);
 const OUTPUT_FENCES = new Set<string>(['open', 'gated', 'allowed', 'rejected']);
 const GATED_FENCE_RANK: Record<Exclude<TurnOutputFence, 'open'>, number> = { gated: 0, allowed: 1, rejected: 2 };
 

@@ -3,6 +3,10 @@ import {
   validateCompanionCommand as validateDeskCommand,
   validateCompanionReply as validateDeskReply,
 } from '@clowder-ai/plugin-contract-033c0';
+import {
+  validateCompanionCommand as validateLivingBodyCommand,
+  validateCompanionReply as validateLivingBodyReply,
+} from '@clowder-ai/plugin-contract-033c3';
 import { validateCompanionCommand as validateLegacyCommand } from '@clowder-ai/plugin-contract-beta21';
 import { validateCompanionCommand as validateModernCommand } from '@clowder-ai/plugin-contract-beta23';
 import { validateCompanionCommand as validateUnifiedCommand } from '@clowder-ai/plugin-contract-beta24';
@@ -32,12 +36,14 @@ const COMMAND_VALIDATORS: Record<CompanionContract, (value: unknown) => boolean>
   '0.1.0-beta.28': validateLetterCommand,
   '0.1.0-beta.29': validateAppAssistCommand,
   '0.3.3-candidate.0': validateDeskCommand,
+  '0.3.3-candidate.3': validateLivingBodyCommand,
 };
 
 /** The complete reply the desktop session assembles (base + `appAssist`, and `desk` from 0.3.3). */
 const FULL_REPLY_VALIDATORS: Partial<Record<CompanionContract, (value: unknown) => boolean>> = {
   '0.1.0-beta.29': validateAppAssistReply,
   '0.3.3-candidate.0': validateDeskReply,
+  '0.3.3-candidate.3': validateLivingBodyReply,
 };
 
 export function companionCommandValidator(contract: CompanionContract = '0.1.0-beta.21') {

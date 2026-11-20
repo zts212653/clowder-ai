@@ -3,6 +3,7 @@ import {
   type FileVectorReadWindowSnapshot,
   safeFileVectorReadWindowSnapshot,
 } from './file-vector-read-window-diagnostics.js';
+import { type MemoryReadTimingSnapshot, safeMemoryReadTimings } from './memory-read-timings.js';
 import type { CjkReadSnapshot } from './message-cjk-read-diagnostics.js';
 
 type SqlEvent = 'sql-start' | 'sql-finish';
@@ -40,6 +41,7 @@ export interface NativeMessageReadProgress {
   nativeVectorRead?: Omit<SqlProgress, 'rows'> & { native: NativeInput };
   cjk?: CjkReadSnapshot;
   readWindow?: FileVectorReadWindowSnapshot;
+  timings?: MemoryReadTimingSnapshot;
 }
 
 const phases = new Set([
@@ -179,6 +181,7 @@ export function safeNativeReadProgress(value: unknown): NativeMessageReadProgres
       nativeVectorRead = nativeProgress(v.nativeVectorRead),
       cjk = cjkProgress(v.cjk);
     const readWindow = safeFileVectorReadWindowSnapshot(v.readWindow);
+    const timings = safeMemoryReadTimings(v.timings);
     return {
       phase: phase as NativeMessageReadProgress['phase'],
       outcome: outcome as NativeMessageReadProgress['outcome'],
@@ -191,6 +194,7 @@ export function safeNativeReadProgress(value: unknown): NativeMessageReadProgres
       ...(nativeVectorRead ? { nativeVectorRead } : {}),
       ...(cjk ? { cjk } : {}),
       ...(readWindow ? { readWindow } : {}),
+      ...(timings ? { timings } : {}),
     };
   } catch {
     return;

@@ -17,8 +17,8 @@ mcp_admission_claims:
     boundaryKind: side-effect-boundary
     decision: accepted
 created: 2026-10-23
-updated: 2026-11-17
-tips_exempt: "Renewed 2026-11-13: daily doc guard records PR #6483 profile/capsule revision invalidation and source/usage refresh fix in Timeline; existing memory-page, capsule, and watcher controls and tips are unchanged."
+updated: 2026-11-19
+tips_exempt: "Renewed 2026-11-19: daily doc guard records PR #6940 (publishing ordinary document passages before writing current document vectors in IndexBuilder.ts so passage publication invalidation does not delete freshly written vectors), PR #6959 (isolating and coalescing Taste recall statistics scan in the bounded scan child with 1-second caching), PR #6962 (allowing bounded G0 recovery more existing two-source batches within the 15-second activation scope), PR #7182 (admitting a completed G0 vector cohort with its unembedded tail while rejecting overtaken coverage proofs), PR #7194 (incremental passage warmup watermark resumption with vector-drop-exceeding-deleted-passages check and a 10-minute full-walk backstop), PR #7262 (immediate private-IPC delivery of completed native read scope snapshots and bounded split timings before worker job result), and PR #7273 (extending cold message vector wait window from 2s to 4s within the 15s deadline and allowing lexical-bound message reads to borrow an idle scan slot). Existing memory-page, capsule, and watcher controls and tips are unchanged."
 description: 让共同经历在未见情境中帮助猫自主联想、核证与修正判断，并让人看见和纠正记忆。
 description_source: human
 description_author: codex-astra

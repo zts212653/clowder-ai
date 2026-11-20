@@ -7,6 +7,34 @@ import {
 } from '../src/domains/cats/services/session/cache/session-cache-warmth.js';
 
 const now = 10_000_000;
+
+test('return read counts are known only for one request with a matching context denominator', () => {
+  const record = session();
+  const input = {
+    record,
+    invocationId: 'next',
+    runtime: 'anthropic:cli',
+    model: 'sonnet-5-5',
+    requestStartedAt: now - 1000,
+    observedAt: now,
+    contextTokens: 200_000,
+  };
+  assert.equal(
+    observeSessionCache({ ...input, usage: { inputTokens: 200_000, numTurns: 1, cacheReadTokens: 190_000 } })
+      ?.cacheReadTokens,
+    190_000,
+  );
+  assert.equal(
+    observeSessionCache({ ...input, usage: { inputTokens: 400_000, numTurns: 2, cacheReadTokens: 390_000 } })
+      ?.cacheReadTokens,
+    undefined,
+  );
+  assert.equal(
+    observeSessionCache({ ...input, usage: { inputTokens: 200_000, numTurns: 1, cacheReadTokens: 200_001 } })
+      ?.cacheReadTokens,
+    undefined,
+  );
+});
 function session() {
   return {
     id: 'session-1',

@@ -4,7 +4,11 @@ import {
   type DevelopmentTaskAuthoritySnapshot,
   matchesApprovedTaskIdentity,
 } from './approved-development-proposal.js';
-import { deriveApprovedTaskContract, taskContractContinuationSchema } from './approved-task-contract.js';
+import {
+  autoStartsApprovedTask,
+  deriveApprovedTaskContract,
+  taskContractContinuationSchema,
+} from './approved-task-contract.js';
 
 /** Scope absence is not authority. Only the immutable continuation of this exact full contract is. */
 export function approvedGenericTaskContinuation(
@@ -26,6 +30,10 @@ export function approvedGenericTaskContinuation(
     return null;
   const r = receipt.data;
   if (
+    autoStartsApprovedTask(proposal) !== Boolean(r.approval) ||
+    (r.approval &&
+      (r.approval.ownerRevision !== proposal.taskStartOwnerRevision ||
+        r.approval.ownerRevision !== task.ownerRevision)) ||
     r.approvalContractKind !== (proposal.approvedTaskContract ? 'frozen' : 'legacy') ||
     r.proposalId !== proposal.proposalId ||
     r.taskId !== task.id ||

@@ -9,6 +9,7 @@ const update = vi.fn();
 let threadState: Record<string, unknown>;
 vi.mock('@/utils/api-client', () => ({ apiFetch: (...args: unknown[]) => fetcher(...args) }));
 vi.mock('@/hooks/useWatcher', () => ({ useWatcher: () => ({ state: threadState, saving: false, update }) }));
+vi.mock('@/hooks/useCatData', () => ({ useCatData: () => ({ getCatById: () => ({ nickname: '小太阳' }) }) }));
 
 import { WatcherChip, WatcherThreadCard } from '../../watcher/WatcherThreadControls';
 import { WatcherSettings } from '../WatcherSettings';
@@ -20,7 +21,7 @@ beforeEach(() => {
   document.body.appendChild(container);
   root = createRoot(container);
   threadState = {
-    config: { ...WATCHER_CONFIG_DEFAULTS, scope: 'selected' },
+    config: { ...WATCHER_CONFIG_DEFAULTS, memberCatId: 'codex61-sol', scope: 'selected' },
     control: { revision: 0 },
     enabled: false,
     rolloutEnabled: true,
@@ -54,47 +55,13 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-it('saves the visible scope choice through the existing configuration route', async () => {
+it('shows global routing instead of the retired per-thread scope selector without changing saved data', async () => {
   await act(async () => {
     root.render(<WatcherSettings />);
   });
-  const select = container.querySelector<HTMLSelectElement>('select[aria-label="守望哪些对话"]');
-  expect(select).not.toBeNull();
-  expect(select?.value).toBe('selected');
-  expect(Array.from(select!.options).map((option) => option.textContent)).toEqual(['全部', '只看我选的']);
-  await act(async () => {
-    select!.value = 'all';
-    select!.dispatchEvent(new Event('change', { bubbles: true }));
-  });
-  const call = fetcher.mock.calls.find(([, init]) => init?.method === 'PUT');
-  expect(call?.[0]).toBe('/api/watcher/config');
-  expect(JSON.parse(String(call?.[1].body))).toEqual({ expectedRevision: 0, scope: 'all' });
-  expect(select?.value).toBe('all');
-});
-
-it('keeps the saved choice and reports a rejected scope update', async () => {
-  fetcher.mockImplementationOnce(async () => ({
-    ok: true,
-    json: async () => ({
-      config: { ...WATCHER_CONFIG_DEFAULTS, scope: 'selected' },
-      quietLabels: [],
-      availableLabels: [],
-      members: [],
-      rolloutEnabled: true,
-    }),
-  }));
-  await act(async () => {
-    root.render(<WatcherSettings />);
-  });
-  fetcher.mockImplementation(async () => ({ ok: false, status: 409 }));
-  const select = container.querySelector<HTMLSelectElement>('select[aria-label="守望哪些对话"]');
-  expect(select).not.toBeNull();
-  await act(async () => {
-    select!.value = 'all';
-    select!.dispatchEvent(new Event('change', { bubbles: true }));
-  });
-  expect(container.querySelector('[role="alert"]')?.textContent).toContain('设置已改变');
-  expect(select?.value).toBe('selected');
+  expect(container.querySelector('[aria-label="守望哪些对话"]')).toBeNull();
+  expect(container.querySelector('[aria-label="主守望猫"]')).not.toBeNull();
+  expect(fetcher.mock.calls.some(([, init]) => init?.method === 'PUT')).toBe(false);
 });
 
 it('leaves an unselected thread switch off and omits its chip, then opts in explicitly', async () => {

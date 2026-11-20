@@ -3,19 +3,21 @@ import {
   formatCatDisplayName,
   parseWatcherThreadControl,
   WATCHER_PANEL_DEFAULTS,
-  type WatcherCapability,
+  type WatcherMemberCapability,
   type WatcherPanelConfig,
   watcherConfigPatchSchema,
+  watcherPrimaryCatId,
+  watcherRoutingPreference,
   watcherThreadControlPatchSchema,
 } from '@cat-cafe/shared';
 import type { FastifyPluginAsync, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
+import { resolveBuiltinClientForProvider } from '../config/account-resolver.js';
 import { readAccountCatalogSnapshot } from '../config/account-store-snapshot.js';
 import { resolveThreadAccess } from '../domains/cats/services/session/thread-access-policy.js';
 import type { ILabelStore, IThreadStore } from '../domains/cats/services/stores/ports/ThreadStore.js';
 import type { ITurnExecutionStore } from '../domains/cats/services/stores/ports/TurnExecutionStore.js';
 import type { IConciergeConfigStore } from '../domains/concierge/ConciergeConfigStore.js';
-import { watcherPanelMemberSupported } from '../domains/concierge/watcher/panel/watcher-panel-member.js';
 import { effectiveWatcherState, readWatcherPreferences } from '../domains/concierge/watcher/watcher-controls.js';
 import { watcherDailyRows } from '../domains/concierge/watcher/watcher-daily.js';
 import { resolveActiveProjectRoot } from '../utils/active-project-root.js';
@@ -26,7 +28,7 @@ interface WatcherRouteOptions {
   threadStore: IThreadStore;
   labelStore: ILabelStore;
   turnExecutionStore: ITurnExecutionStore;
-  capability(catId: string): WatcherCapability | Promise<WatcherCapability>;
+  capability(catId: string): WatcherMemberCapability | Promise<WatcherMemberCapability>;
   controlChanged?(threadId?: string): void;
   runtimeReady?(): boolean;
 }
@@ -49,23 +51,40 @@ export function watcherOwner(request: FastifyRequest, reply: FastifyReply, write
   return access.operator;
 }
 
-/** Panel accounts are execution-local choices; only accounts a Codex member can launch with are offered. */
-function panelAccounts(): Array<{ id: string; label: string }> {
+/** Execution-local overrides stay within the selected member’s account client. Native ACP keeps its own account. */
+function panelAccounts(catId?: string): Array<{ id: string; label: string }> {
   try {
+    const config = catId ? catRegistry.tryGet(catId)?.config : undefined;
+    const client = config ? resolveBuiltinClientForProvider(config.clientId) : catId ? null : 'openai';
+    if (!client) return [];
     return Object.entries(readAccountCatalogSnapshot(resolveActiveProjectRoot(process.cwd())))
-      .filter(([, account]) => account.codex !== undefined || account.clientId === 'openai')
+      .filter(
+        ([, account]) =>
+          !account.googleCloud &&
+          (account.codex ? 'openai' : account.claude ? 'anthropic' : account.agy ? 'google' : account.clientId) ===
+            client,
+      )
+      .filter(
+        ([, account]) =>
+          config?.agyProfile?.carrier !== 'native' ||
+          config.carrier === 'acp' ||
+          (account.authType === 'oauth' && !account.baseUrl && Object.keys(account.envVars ?? {}).length === 0),
+      )
       .map(([id, account]) => ({ id, label: account.displayName ?? id }));
   } catch {
     return [];
   }
 }
 
-function panelProblem(panel: WatcherPanelConfig): string | null {
-  const accounts = new Set(panelAccounts().map((account) => account.id));
+async function panelProblem(
+  panel: WatcherPanelConfig,
+  capability: WatcherRouteOptions['capability'],
+): Promise<string | null> {
   for (const member of panel.members) {
-    if (!catRegistry.tryGet(member.catId) || !watcherPanelMemberSupported(member.catId))
-      return `${member.catId} 不能担任多只守望（目前只支持 Codex 成员）`;
-    if (member.accountRef && !accounts.has(member.accountRef)) return `账号 ${member.accountRef} 不可用`;
+    if (!catRegistry.tryGet(member.catId) || !(await capability(member.catId)).supported)
+      return `${member.catId} 的守望读取尚未接通`;
+    if (member.accountRef && !panelAccounts(member.catId).some((account) => account.id === member.accountRef))
+      return `账号 ${member.accountRef} 不可用`;
   }
   return null;
 }
@@ -137,16 +156,18 @@ export const watcherRoutes: FastifyPluginAsync<WatcherRouteOptions> = async (app
       members: await Promise.all(
         catRegistry.getAllIds().map(async (catId) => {
           const config = catRegistry.tryGet(catId)?.config;
+          const capability = await deps.capability(catId);
           return {
             catId,
             displayName: config
               ? formatCatDisplayName({
-                  displayName: catId === 'codex61-sol' ? '小太阳' : (config.nickname ?? config.displayName),
+                  displayName: config.nickname ?? config.displayName,
                   variantLabel: config.variantLabel ?? config.defaultModel,
                 })
               : catId,
-            capability: await deps.capability(catId),
-            panelSupported: watcherPanelMemberSupported(catId),
+            capability,
+            accounts: panelAccounts(catId),
+            panelSupported: capability.supported,
           };
         }),
       ),
@@ -164,21 +185,52 @@ export const watcherRoutes: FastifyPluginAsync<WatcherRouteOptions> = async (app
     if (!parsed.success)
       return reply.code(400).send({ error: 'Invalid watcher settings', details: parsed.error.issues });
     const { expectedRevision, ...patch } = parsed.data;
+    const current = (await readWatcherPreferences(deps.configStore, deps.labelStore, userId)).config;
+    if (current.revision !== expectedRevision) return reply.code(409).send({ error: '设置已改变，请刷新后重试' });
+    // Older clients may still send memberCatId; that choice must not start the retired 30k lane.
+    if (
+      !patch.routing &&
+      (patch.memberCatId ||
+        (patch.enabled === true && !current.routing && !current.panel?.enabled && !patch.panel?.enabled))
+    ) {
+      const catId = patch.memberCatId ?? current.memberCatId;
+      if (!catId) return reply.code(422).send({ code: 'WATCHER_PRIMARY_REQUIRED', error: '请先选择主守望猫' });
+      patch.routing = {
+        ...watcherRoutingPreference(current),
+        primary: { catId },
+      };
+    }
     if (patch.memberCatId && !(await deps.capability(patch.memberCatId)).supported)
       return reply.code(422).send({ code: 'WATCHER_SESSION_UNSUPPORTED', error: '此成员暂不支持守望会话' });
-    const problem = patch.panel ? panelProblem(patch.panel) : null;
+    const problem = patch.panel ? await panelProblem(patch.panel, deps.capability) : null;
     if (problem) return reply.code(422).send({ code: 'WATCHER_PANEL_INVALID', error: problem });
+    if (patch.routing) {
+      const members = [
+        patch.routing.primary,
+        ...(patch.routing.whenSameFamily.mode === 'member' ? [patch.routing.whenSameFamily.member] : []),
+      ];
+      for (const member of members) {
+        const capability = await deps.capability(member.catId);
+        if (!catRegistry.tryGet(member.catId) || !capability.supported)
+          return reply.code(422).send({
+            code: 'WATCHER_MEMBER_UNAVAILABLE',
+            error: capability.supported ? '成员不存在' : capability.reason,
+          });
+        if (member.accountRef && !panelAccounts(member.catId).some((account) => account.id === member.accountRef))
+          return reply.code(422).send({ code: 'WATCHER_ACCOUNT_UNAVAILABLE', error: '所选账号不可用' });
+      }
+    }
     if (patch.doNotDisturbLabelIds) {
       const allowed = new Set((await deps.labelStore.list(userId)).map((label) => label.id));
       if (patch.doNotDisturbLabelIds.some((id) => !allowed.has(id)))
         return reply.code(400).send({ error: 'Unknown conversation label' });
     }
     if (!deps.configStore.updateWatcherConfig) return reply.code(503).send({ error: 'Watcher settings unavailable' });
-    const current = (await readWatcherPreferences(deps.configStore, deps.labelStore, userId)).config;
     const restarting =
       (!current.enabled && patch.enabled === true) ||
       (patch.scope !== undefined && patch.scope !== current.scope) ||
       (patch.memberCatId !== undefined && patch.memberCatId !== current.memberCatId) ||
+      (patch.routing !== undefined && JSON.stringify(patch.routing) !== JSON.stringify(current.routing)) ||
       // Either watcher mode starts from now; neither replays turns that settled under the other.
       (patch.panel !== undefined && patch.panel.enabled !== (current.panel?.enabled ?? false));
     const floor = restarting ? await deps.turnExecutionStore.settledHead(userId) : undefined;
@@ -207,6 +259,8 @@ export const watcherRoutes: FastifyPluginAsync<WatcherRouteOptions> = async (app
   async function snapshot(row: NonNullable<Awaited<ReturnType<IThreadStore['get']>>>, userId: string) {
     const preferences = await readWatcherPreferences(deps.configStore, deps.labelStore, userId);
     const running = await deps.turnExecutionStore.listRunningByUser(userId);
+    const primaryCatId = watcherPrimaryCatId(preferences.config);
+    const member = primaryCatId ? catRegistry.tryGet(primaryCatId)?.config : undefined;
     return {
       control: parseWatcherThreadControl(row.watcher),
       config: preferences.config,
@@ -214,13 +268,17 @@ export const watcherRoutes: FastifyPluginAsync<WatcherRouteOptions> = async (app
       // The settings switch is the only on/off control; this field only reports whether the watcher runtime is ready.
       rolloutEnabled: deps.runtimeReady?.() ?? true,
       reviewing: running.some((record) => record.threadId === row.id && record.executionKind === 'watcher'),
-      memberName:
-        preferences.config.memberCatId === 'codex61-sol'
-          ? '小太阳'
-          : (catRegistry.tryGet(preferences.config.memberCatId)?.config.nickname ??
-            catRegistry.tryGet(preferences.config.memberCatId)?.config.displayName ??
-            preferences.config.memberCatId),
-      capability: await deps.capability(preferences.config.memberCatId),
+      reviewingCatIds: [
+        ...new Set(
+          running
+            .filter((record) => record.threadId === row.id && record.executionKind === 'watcher')
+            .map((record) => record.catId),
+        ),
+      ],
+      memberName: primaryCatId ? (member?.nickname ?? member?.displayName ?? primaryCatId) : '选择主守望猫',
+      capability: primaryCatId
+        ? await deps.capability(primaryCatId)
+        : { supported: false as const, reason: '请先选择主守望猫' },
     };
   }
   app.get('/api/threads/:threadId/watcher', async (request, reply) => {

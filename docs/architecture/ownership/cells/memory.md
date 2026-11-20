@@ -56,6 +56,7 @@ code_anchors:
   - packages/api/src/domains/memory/SqliteEvidenceStore.ts
   - packages/api/src/domains/memory/EntityRegistry.ts
   - packages/api/src/domains/memory/MemoryProcess.ts
+  - packages/api/src/domains/memory/open-evidence-database.ts
   - packages/api/src/domains/memory/checkpoint-memory-database.ts
   - packages/api/src/domains/memory/projection-checkpoints.ts
   - packages/api/src/domains/memory/publish-entity-mentions.ts
@@ -187,6 +188,15 @@ cited_by:
 ---
 
 # Memory / Evidence
+
+File-backed `SqliteEvidenceStore.initialize()` delegates schema preparation to the
+existing `MemoryProcess` native writer queue before opening its parent connection.
+`openEvidenceDatabase` shares the original migration and connection policy;
+`:memory:` stays local, read children stay read-only, and entity projection
+recovery/publication remains on the Store's original path. Cancellation waits for
+the owned schema child to close, preventing a late parent open after Store close.
+This moves blocking preparation, not memory authority, schema ownership or the
+entity writer. Task229's private lock/state/retry checks cover this boundary.
 
 ## F321 owner lifecycle consumers
 

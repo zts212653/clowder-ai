@@ -2,6 +2,7 @@ import { createCatId, type TaskItem } from '@cat-cafe/shared';
 import type { InvocationTracker } from '../cats/services/agents/invocation/InvocationTracker.js';
 import type { IMessageStore, StoredMessage } from '../cats/services/stores/ports/MessageStore.js';
 import { ordinaryTaskExpectation, type TaskMutationActor } from '../cats/services/stores/ports/OrdinaryTaskMutation.js';
+import type { IProposalStore } from '../cats/services/stores/ports/ProposalStore.js';
 import type { ITaskStore } from '../cats/services/stores/ports/TaskStore.js';
 import { isOrdinaryImplementTask } from '../cats/services/stores/ports/TaskStoreContract.js';
 import type { IThreadStore } from '../cats/services/stores/ports/ThreadStore.js';
@@ -19,16 +20,18 @@ import {
   type OrdinaryTaskHandoffRequest,
   type OrdinaryTaskHandoffResult,
 } from './OrdinaryTaskHandoffContract.js';
+import { bindOrdinaryDeploymentWake } from './ordinary-task-deployment-wait.js';
 
 export interface OrdinaryTaskHandoffDeps {
   tasks: ITaskStore;
   messages: Pick<IMessageStore, 'getById'>;
   threads: Pick<IThreadStore, 'get'>;
   delegates?: TaskApprovedDelegateProvider;
+  proposals?: Pick<IProposalStore, 'get'>;
   turns: Pick<ITurnExecutionStore, 'get'> &
     Partial<Pick<ITurnExecutionStore, 'recordProviderTeardown' | 'transitionTerminal'>>;
   dispatchAuthority?: {
-    keys(request: OrdinaryTaskHandoffRequest): string[];
+    keys(request: OrdinaryTaskHandoffRequest, proposalSourceInvocationId?: string): string[];
     assertCurrent(source: StoredMessage, request: OrdinaryTaskHandoffRequest): Promise<void>;
   };
   legacy?: Pick<LegacyTaskExecutionResolver, 'resolve'>;
@@ -68,7 +71,9 @@ export class OrdinaryTaskHandoffService {
         userId: input.actor.userId,
         catId: input.actor.catId,
         threadId: input.actor.threadId,
-        invocationId: input.actor.invocationId,
+        ...('approval' in input.actor
+          ? { approval: input.actor.approval }
+          : { invocationId: input.actor.invocationId }),
       },
       targetCatId: input.targetCatId,
       targetThreadId: input.targetThreadId,
@@ -76,6 +81,12 @@ export class OrdinaryTaskHandoffService {
       stopPrevious: input.stopPrevious === true,
       ...(await this.anchor(task, input.targetCatId, input.targetThreadId)),
     };
+    if (!('approval' in request.issuer) && request.approvedAnchor) {
+      const id = /^proposal:([^:]+):/.exec(request.approvedAnchor.evidenceRef)?.[1];
+      const approved = id && (await this.deps.proposals?.get(id));
+      if (approved && approved.taskContractContinuation?.approval)
+        throw new OrdinaryTaskHandoffError('task_approval_already_dispatches');
+    }
     await authorizeTaskHandoff(this.deps, task, request);
     return request;
   }
@@ -166,7 +177,7 @@ export class OrdinaryTaskHandoffService {
       : { kind: 'refused', reason: result.kind === 'refused' ? result.reason : 'ordinary_task_unavailable' };
   }
 
-  private async authorityFence(source: string, task: TaskItem, request: OrdinaryTaskHandoffRequest) {
+  async authorityFence(source: string, task: TaskItem, request: OrdinaryTaskHandoffRequest) {
     const previousId = request.expected.lastAppliedHandoffMessageRef?.slice('message:'.length);
     const previous = previousId ? await this.deps.messages.getById(previousId) : null;
     const predecessor = previous?.extra?.taskHandoff;
@@ -175,8 +186,17 @@ export class OrdinaryTaskHandoffService {
       const id = /^proposal:([^:]+):/.exec(anchor?.evidenceRef ?? '')?.[1];
       return id ? [ProposalKeys.detail(id)] : [];
     });
+    const approval =
+      'approval' in request.issuer ? await this.deps.proposals?.get(request.issuer.approval.proposalId) : null;
+    const wait = task.deploymentWait ? await this.deps.tasks.getWaitRegistration(task.id) : null;
+    const waitSourceId = wait?.receipt?.source.sourceMessageId;
     const watchKeys = [
-      ...(this.deps.dispatchAuthority?.keys(request) ?? []),
+      ...(waitSourceId ? [MessageKeys.detail(waitSourceId)] : []),
+      ...(wait?.task.deploymentWait?.transportAttempt?.messageId
+        ? [MessageKeys.detail(wait.task.deploymentWait.transportAttempt.messageId)]
+        : []),
+      ...(this.deps.dispatchAuthority?.keys(request, approval?.sourceInvocationId) ?? []),
+      ...(approval?.sourceMessageId ? [MessageKeys.detail(approval.sourceMessageId)] : []),
       MessageKeys.detail(source),
       ThreadKeys.detail(task.threadId),
       ThreadKeys.detail(request.issuer.threadId),
@@ -204,7 +224,7 @@ export class OrdinaryTaskHandoffService {
     const currentTask = await this.deps.tasks.get(request.taskId);
     if (!currentTask || !isOrdinaryImplementTask(currentTask) || currentTask.status === 'done')
       throw new OrdinaryTaskHandoffError('ordinary_task_unavailable');
-    await authorizeTaskHandoff(this.deps, currentTask, request);
+    await authorizeTaskHandoff(this.deps, currentTask, request, source);
     await this.deps.dispatchAuthority?.assertCurrent(source, request);
   }
 
@@ -279,7 +299,7 @@ export class OrdinaryTaskHandoffService {
     const source = await this.deps.messages.getById(sourceMessageId);
     if (source?.extra?.taskHandoffInvalid) throw new OrdinaryTaskHandoffError('task_handoff_source_invalid');
     const request = source?.extra?.taskHandoff;
-    if (!request) return undefined;
+    if (!request) return source ? bindOrdinaryDeploymentWake(this.deps, source, actor, parentInvocationId) : undefined;
     if (
       actor.userId !== request.issuer.userId ||
       actor.catId !== request.targetCatId ||
@@ -313,7 +333,14 @@ export class OrdinaryTaskHandoffService {
   async finish(taskId: string, invocationId: string): Promise<void> {
     const task = await this.deps.tasks.get(taskId);
     if (task?.executionRef?.invocationId !== invocationId) return;
-    if (await this.releaseStoppedExecution(task)) await this.deps.onExecutionReleased?.(task.threadId);
+    if (!(await this.releaseStoppedExecution(task)) || !this.deps.onExecutionReleased) return;
+    await this.deps.onExecutionReleased(task.threadId);
+    // A repair can be parked in its approved child while its predecessor is
+    // running in home or another child. Re-drive those exact Queue sources.
+    const delegates = await currentTaskDelegates(task, this.deps.delegates);
+    const children = new Set(delegates.map((delegate) => delegate.threadId));
+    children.delete(task.threadId);
+    await Promise.all([...children].map((child) => this.deps.onExecutionReleased?.(child)));
   }
 
   async finishInvocation(actor: TaskMutationActor): Promise<void> {

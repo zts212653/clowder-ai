@@ -1,6 +1,10 @@
 import { scanShellText } from './lib/shell-lexical.mjs';
 
 /** `/dev/null` and fd duplication are sinks, not mutations of the command's cwd. */
+export function isFileOutputRedirection({ operator }) {
+  return /^(?:\d*|&)(?:>|>>|>\||<>)$/.test(operator);
+}
+
 export function stripHarmlessRedirections(raw) {
   return raw.replace(/(?:^|\s)(?:\d*>{1,2}\s*\/dev\/null|\d*>\s*&\s*\d+)(?=\s|$)/g, ' ');
 }
