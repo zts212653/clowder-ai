@@ -22,6 +22,7 @@ import {
   appAssistAllowed,
   claimMemoryAppAssistDay,
   claimRedisAppAssistDay,
+  type SavedConciergeConfig,
   validateAppAssistClaim,
   watchRedisAppAssistPolicy,
   writeConciergeConfig,
@@ -29,12 +30,14 @@ import {
 import { ConciergeKeys } from './concierge-keys.js';
 import { assertWatcherConfigRevision, updateRedisWatcherConfig } from './watcher/watcher-config-store.js';
 
-/** The owner record holds runtime state only; fields an older record still carries are not read. */
-const RUNTIME_KEYS = ['watcher', 'ballPosition', 'appAssistEnabled', 'householdReadsAllowed'] as const;
-function runtimeConfig(saved: Partial<ConciergeConfig> = {}): ConciergeConfig {
+/** The owner record holds runtime state only. Of the fields an older record still carries, only an off / hidden
+ * choice is read: it reads as app assistance off (see appAssistAllowed). */
+const RUNTIME_KEYS = ['watcher', 'ballPosition', 'householdReadsAllowed'] as const;
+function runtimeConfig(saved: SavedConciergeConfig = {}): ConciergeConfig {
   return {
     ...CONCIERGE_CONFIG_DEFAULTS,
     ...Object.fromEntries(RUNTIME_KEYS.filter((key) => saved[key] !== undefined).map((key) => [key, saved[key]])),
+    appAssistEnabled: appAssistAllowed(saved),
   };
 }
 
@@ -151,7 +154,7 @@ export class MemoryConciergeConfigStore implements IConciergeConfigStore {
     });
     return sequence;
   }
-  private readonly store = new Map<string, ConciergeConfig>();
+  private readonly store = new Map<string, SavedConciergeConfig>();
   private readonly days = new Map<string, AppAssistDay>();
   private readonly listeners = new Map<string, Set<AppAssistPolicyListener>>();
 
@@ -188,10 +191,13 @@ export class MemoryConciergeConfigStore implements IConciergeConfigStore {
   }
 
   async patch(userId: string, patch: Partial<ConciergeConfig>): Promise<void> {
-    await this.keep(userId, { ...(this.store.get(userId) ?? CONCIERGE_CONFIG_DEFAULTS), ...patch });
+    const { enabled, muted, ...kept }: SavedConciergeConfig = this.store.get(userId) ?? CONCIERGE_CONFIG_DEFAULTS;
+    // Same as the Redis write: turning app assistance on ends an older record's off / hidden state.
+    const legacy = patch.appAssistEnabled === true ? {} : { enabled, muted };
+    await this.keep(userId, { ...kept, ...legacy, ...patch });
   }
 
-  private async keep(userId: string, config: ConciergeConfig): Promise<void> {
+  private async keep(userId: string, config: SavedConciergeConfig): Promise<void> {
     this.store.set(userId, config);
     await Promise.all([...(this.listeners.get(userId) ?? [])].map((listener) => listener(appAssistAllowed(config))));
   }

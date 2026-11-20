@@ -84,3 +84,31 @@ test('two real Redis adapters propagate opt-out and subscription loss without wa
   await update;
   assert.equal(changes.at(-1), null);
 });
+
+for (const adapter of ['memory', 'redis']) {
+  test(`${adapter}: an older record turned off or hidden keeps app assistance off until the owner turns it on`, async () => {
+    const client = adapter === 'redis' ? fixture.client('legacy:') : null;
+    const store = client ? new RedisConciergeConfigStore(client) : new MemoryConciergeConfigStore();
+    const saved = {
+      off: { enabled: false, muted: false, appAssistEnabled: true, ballPosition: null },
+      hidden: { enabled: true, muted: true, appAssistEnabled: true, ballPosition: null },
+      on: { enabled: true, muted: false, appAssistEnabled: true, ballPosition: null },
+    };
+    for (const [owner, record] of Object.entries(saved)) {
+      if (client) await client.set(ConciergeKeys.config(owner), JSON.stringify(record));
+      else await store.put(owner, record);
+    }
+    for (const owner of ['off', 'hidden']) {
+      assert.equal((await store.get(owner)).appAssistEnabled, false, owner);
+      assert.equal(await store.claimAppAssistDay(owner, key(1), '2030-01-02'), 'disabled', owner);
+      // another runtime change keeps the older choice
+      await store.patch(owner, { householdReadsAllowed: false });
+      assert.equal(await store.claimAppAssistDay(owner, key(1), '2030-01-02'), 'disabled', owner);
+      await store.patch(owner, { appAssistEnabled: true });
+      assert.equal((await store.get(owner)).appAssistEnabled, true, owner);
+      assert.equal(await store.claimAppAssistDay(owner, key(1), '2030-01-02'), 'claimed', owner);
+    }
+    assert.equal((await store.get('on')).appAssistEnabled, true);
+    assert.equal(await store.claimAppAssistDay('on', key(1), '2030-01-02'), 'claimed');
+  });
+}
