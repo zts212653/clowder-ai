@@ -1,0 +1,129 @@
+{
+  "date": "2026-11-03",
+  "status": "draft-with-explicit-validation-gaps",
+  "baseSha": "1016aa7a316566893cacef84d49792a8ced0f0c8",
+  "buildSourceSha": "f4f32afdb73d3eda98f37705eab66db019ff13fb",
+  "lockSha256": "d7f094037413ecdbe2045458befc39c193f71e2ef6834ba3bdeb116fa69e2eab",
+  "platform": "win32-x64",
+  "tools": {
+    "electron": "35.7.5",
+    "pnpm": "9.15.4",
+    "zlib": "1.3.1-e00f703",
+    "inno": "7.1.0",
+    "node": "v24.16.0"
+  },
+  "baseline": {
+    "bytes": 624557030,
+    "sha256": "219d0b5db9f0a42869b154a65a1ba0b2247008149e08dff2eff96cdcda1646a6"
+  },
+  "candidate": {
+    "bytes": 572228119,
+    "sha256": "058bfea68edc71a32cb0ee9b01820695c055ecc08f6539c676c006cdecc9ff1e"
+  },
+  "savedDownloadBytes": 52328911,
+  "savedDownloadPercent": 8.3785640840517,
+  "retainedRegularFiles": 67625,
+  "removedRegularFiles": 14,
+  "removedLogicalBytes": 16438428,
+  "foreignNodePtyBytes": 12289688,
+  "compilerCacheBytes": 4148740,
+  "retainedInventory": {
+    "unexpectedRemovals": 0,
+    "additions": 0,
+    "changes": 0,
+    "typesAndModesAndLinkTargetsCompared": true,
+    "status": true
+  },
+  "sdkPolicy": "Existing next #1762 native exclusion and archive rejection preserved in both packages; no SDK savings attributed to this slice; wrapper import only tested",
+  "baselineHelper": "Exact1016 gzip1 helper with only import URL rebased; archive-helper-provenance.json",
+  "method": "Actual candidate installer compared with actual gzip1 baseline compiled from the identical new application/resource build. Baseline restores only omitted foreign node-pty prebuilds and the two compiler caches from this same isolated frozen workspace/Web build. No installation is performed.",
+  "archives": [
+    {
+      "archive": "deploy-api.tar.gz",
+      "baselineBytes": 38653978,
+      "candidateBytes": 31337415,
+      "baselineSha256": "a2cf5e6e2498db76aa7863e193a6cfcb65c1c602052a05843b710d0371df25dc",
+      "candidateSha256": "7f0581c09601a1f7f63a2c28899af2919d8d0c0be5196cb28a51adbd3266c8ba",
+      "baselineElapsedMs": 4059,
+      "candidateElapsedMs": 10263
+    },
+    {
+      "archive": "deploy-dependencies.tar.gz",
+      "baselineBytes": 169731612,
+      "candidateBytes": 142524974,
+      "baselineSha256": "5cdcbe1550da980777460c4b1149d371cefa7342c99f7441e787d95119e02de2",
+      "candidateSha256": "2258079e6efccac1927669efed895e2bf59145614682fa4272bf8ec1d8fad709",
+      "baselineElapsedMs": 55285,
+      "candidateElapsedMs": 84597
+    },
+    {
+      "archive": "deploy-mcp-server.tar.gz",
+      "baselineBytes": 2442793,
+      "candidateBytes": 1937646,
+      "baselineSha256": "2bc44ab636da3113952e4dc9878802c29952f303b7bd0452eba8eda952348e68",
+      "candidateSha256": "90f1951e80ef3e56b2236c03f04d42de82b8b753cab33395c52f35c1f983af77",
+      "baselineElapsedMs": 543,
+      "candidateElapsedMs": 1244
+    },
+    {
+      "archive": "deploy-web.tar.gz",
+      "baselineBytes": 165139031,
+      "candidateBytes": 158838209,
+      "baselineSha256": "d2db87f1c707682c715f439a28e8b03961f0168e77db1702943e11d2dcd7adb3",
+      "candidateSha256": "40e9af474d4aa70a44c8a7ab8a0561b831e12959de3e3ca50494a4732883d61e",
+      "baselineElapsedMs": 4718,
+      "candidateElapsedMs": 8565
+    },
+    {
+      "archive": "electron.tar.gz",
+      "baselineBytes": 138911307,
+      "candidateBytes": 127911549,
+      "baselineSha256": "dd49a4e1efbd6a58c60ff5e2ccdb6c6985a2ac64c68b85a13de5ce7ec9464b5e",
+      "candidateSha256": "40da34a64a8e6ae53a8d0650048a25bef9569df7ea3e7c77187b2e2e37bfc2dd",
+      "baselineElapsedMs": 4408,
+      "candidateElapsedMs": 11469
+    },
+    {
+      "archive": "node.tar.gz",
+      "baselineBytes": 37544941,
+      "candidateBytes": 37544941,
+      "baselineSha256": "88efa78ff17a0e40245cd802042856980e1b3e1db716231363ca8ee3492d7467",
+      "candidateSha256": "88efa78ff17a0e40245cd802042856980e1b3e1db716231363ca8ee3492d7467",
+      "baselineElapsedMs": null,
+      "candidateElapsedMs": null
+    }
+  ],
+  "timing": {
+    "controlledPerformanceConclusion": false,
+    "baselineArchiveMs": 69013,
+    "candidateFullBuildSeconds": 712.9292941,
+    "candidateArchiveMs": 116138,
+    "componentReadyMs": 46545
+  },
+  "validation": {
+    "native": "SQLite/sharp/twoConPTY rounds/SDK wrapper import passed; no models",
+    "targetedTests": 67,
+    "biome": "0 errors;4warnings6infos",
+    "memoryFallback": false,
+    "ownedServicesStopped": true,
+    "offlineFirstInstall": "not tested",
+    "ci": "Build-source f4 terminal:18success1failure1skip, none pending. Windows failed in unchanged restricted-fixture setup (status=null near30s); packaging checks passed; not declared flaky.",
+    "pwaProductionTests": 2,
+    "supportedUpgrade": "not tested",
+    "publicBinaryDownload": "missing",
+    "failureRecovery": "not tested",
+    "fullElectronUIAndMic": "not tested",
+    "runtimeChecks": 40,
+    "lint": "failed:7 unchanged CJS no-require-imports errors"
+  },
+  "oldRound": {
+    "reviewedHead": "e1db9ad24b1095085a82938a601d1fc18f7ae98d",
+    "currentSavingsInherited": false,
+    "baseSha": "917120d55bb5bf618a3cc49c0749d5f5172ace46",
+    "supersededSavingsBytes": 60469174
+  },
+  "localEvidence": "G:\\AIwork\\clowder-ai\\artifacts\\issue-1703-next-20261103\\latest-next-1016aa7a",
+  "originalAuthor": "whutzefengxie-ops",
+  "originalImplementation": "c482cbef6dcb82eae032bbb6fd5ad1b8e96ecc69",
+  "installationOrUserHistoryTouched": false
+}
