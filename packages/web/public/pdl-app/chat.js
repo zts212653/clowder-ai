@@ -870,6 +870,7 @@ window.clowderChat = {
       'cafeTypedPick',
       'cloudRecoveryRead',
       'bindRetry',
+      'reply',
     ].forEach(function (name) {
       A[name] = function (d, el) {
         if (name === 'send') {
@@ -1140,9 +1141,6 @@ window.clowderChat = {
     };
     A.streamOlder = function () {
       return STREAM_OLDER.load(function () {});
-    };
-    A.reply = function (d) {
-      return chatAction('reply', d);
     };
     SET_AFTER['cs.reply'] = function () {
       chatAction('reply', { mid: CS.reply || '' });

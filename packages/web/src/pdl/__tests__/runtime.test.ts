@@ -1866,6 +1866,18 @@ describe('unmodified runtime and project chat bindings', () => {
       dom.window.close();
     }
   });
+  it('the message toolbar quote names the message it quotes', async () => {
+    const { dom, w, action } = await boot();
+    try {
+      const button = w.document.querySelector('[data-act="reply"][data-i]') as HTMLElement;
+      const mid = w.eval(`chatRead('chatStream').items[${button.dataset.i}].mid`);
+      button.click();
+      await w.__settled();
+      expect(action).toHaveBeenCalledWith('reply', expect.objectContaining({ mid }), expect.anything());
+    } finally {
+      dom.window.close();
+    }
+  });
   it('confirms before revealing whispers and sends candidate undo to its original writer', async () => {
     const { dom, w, action } = await boot(undefined, undefined, undefined, { memoryState: { lib: 'done' } });
     try {
