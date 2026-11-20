@@ -2687,7 +2687,11 @@ async function initializeApi(
     catalogLog: app.log,
     async reconcileCats() {
       app.log.info('[api] F136: Cat catalog changed, syncing agent registry...');
-      await syncAgentRegistry(reconcileCatRegistry(resolveActiveProjectRoot(), new Set()));
+      await syncAgentRegistry(reconcileCatRegistry(resolveActiveProjectRoot(), new Set()), false);
+    },
+    async warmCats() {
+      const registeredCatIds = Object.keys(catRegistry.getAllConfigs()).filter((id) => agentRegistry.has(id));
+      await warmL0Cache(registeredCatIds, app.log);
     },
     cats: catRegistry,
     ingestService: new CloudAssistantReturnIngestService({
