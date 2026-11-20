@@ -3564,7 +3564,11 @@ describe('unmodified runtime and project chat bindings', () => {
       sidebarOwner: {
         classification: { phase: 'idle', suggestions: [], newLabels: [], error: '' },
         preferences: {
-          groups: [{ id: 'attention_owner', name: 'Owner group', threadIds: ['pdl-test', 'other'] }],
+          groups: [
+            { id: 'attention_owner', name: 'Owner group', threadIds: ['pdl-test', 'other'] },
+            // a group this change does not touch is not part of the snapshot the owner compares
+            { id: 'attention_unrelated', name: 'Unrelated group', threadIds: ['third', 'fourth'] },
+          ],
           aliases: {},
           open: {},
         },
@@ -3576,6 +3580,8 @@ describe('unmodified runtime and project chat bindings', () => {
       undefined,
       (data) => {
         data.threads.push({ ...data.threads[0], id: 'other', title: 'Other owner thread' });
+        data.threads.push({ ...data.threads[0], id: 'third', title: 'Third thread' });
+        data.threads.push({ ...data.threads[0], id: 'fourth', title: 'Fourth thread' });
       },
       undefined,
       project,

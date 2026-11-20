@@ -102,21 +102,27 @@ function sidebarMatch(t, query) {
   );
 }
 function sidebarSubmit(m) {
+  const ids = Object.keys(m.sel).filter(function (id) {
+    return m.sel[id];
+  });
   return Promise.resolve(
     chatPort.action('sidebarGroupWrite', {
       value: JSON.stringify({
         action: 'organize',
-        threadIds: Object.keys(m.sel).filter(function (id) {
-          return m.sel[id];
+        threadIds: ids,
+        // The groups this change touches, as seen when the dialog opened: the destination and the groups of the chosen.
+        expectedGroups: m.groups.filter(function (g) {
+          return (
+            g.id === CS.f['org-to'] ||
+            g.threadIds.some(function (id) {
+              return m.sel[id];
+            })
+          );
         }),
-        expectedGroups: m.groups,
         ...(CS.f['org-to'] === 'new' ? { name: m.newName } : { groupId: CS.f['org-to'] }),
       }),
     }),
   ).then(function () {
-    const ids = Object.keys(m.sel).filter(function (id) {
-      return m.sel[id];
-    });
     const group = sidebarOwner().preferences.groups.find(function (g) {
       return ids.every(function (id) {
         return g.threadIds.includes(id);
