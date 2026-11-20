@@ -30,7 +30,7 @@ test('recall stats passes only revalidated owner thread IDs to the plugin', asyn
   }
 });
 
-test('recall pagination delegates only the authorized thread and freezes the cursor window', async () => {
+test('recall pagination delegates only authorized threads and freezes the cursor window', async () => {
   const queries: Parameters<RecallTimelineReader>[0][] = [];
   const reads: Parameters<RecallEventReader>[0][] = [];
   const f: Awaited<ReturnType<typeof recallFixture>> = await recallFixture(undefined, {
@@ -51,13 +51,15 @@ test('recall pagination delegates only the authorized thread and freezes the cur
     f.indexed.push('other', 'deleted', 'system');
     f.recall('newer');
     f.recall('older', { timestamp: f.now - 2000 });
-    const first = (await f.get('?threadId=own&limit=1')).json();
+    const firstResponse = await f.get('?limit=1');
+    assert.equal(firstResponse.statusCode, 200, firstResponse.body);
+    const first = firstResponse.json();
     assert.equal(first.records[0].event.id, 'newer');
-    const next = (await f.get(`?threadId=own&limit=1&cursor=${encodeURIComponent(first.nextCursor)}`)).json();
+    const next = (await f.get(`?limit=1&cursor=${encodeURIComponent(first.nextCursor)}`)).json();
     assert.equal(next.records[0].event.id, 'older');
     assert.deepEqual(queries.map(({ threadIds, to, before }) => ({ threadIds, to, before })), [
-      { threadIds: ['own'], to: first.to, before: undefined },
-      { threadIds: ['own'], to: first.to, before: { at: first.to - 1, key: 'recall:newer' } },
+      { threadIds: ['own', 'system'], to: first.to, before: undefined },
+      { threadIds: ['own', 'system'], to: first.to, before: { at: first.to - 1, key: 'recall:newer' } },
     ]);
     assert.deepEqual(reads, [{ recallId: 'newer', threadId: 'own' }, { recallId: 'older', threadId: 'own' }]);
   } finally {
