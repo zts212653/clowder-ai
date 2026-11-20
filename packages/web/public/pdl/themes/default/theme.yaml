@@ -783,6 +783,8 @@ pdl:
           icon: reply
           open:
             action: reply
+            args:
+              mid: "@mid"
           scope: page
           move: chat.message.actions
         - id: msg.speak
