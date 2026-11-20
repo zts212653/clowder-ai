@@ -22763,7 +22763,7 @@ pdl:
                   control:
                     type: button
                     iconOnly: true
-                    icon: down
+                    icon: chevboth
                     label: t:chat.sidebar.expandProjects
                     act: set
                     args:
@@ -22775,7 +22775,7 @@ pdl:
                   control:
                     type: button
                     iconOnly: true
-                    icon: right
+                    icon: chevin
                     label: t:chat.sidebar.collapseProjects
                     act: set
                     args:

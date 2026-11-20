@@ -284,7 +284,7 @@ function bindSidebar() {
               (path === 'default' ? '' : /^[a-z]:[\\/]+$/i.test(path) ? path : parts[parts.length - 1] || path);
           return {
             key: 'proj:' + path,
-            collapsed: !open[path],
+            override: open[path],
             rows: list.map(row),
             head: {
               kind: 'proj',

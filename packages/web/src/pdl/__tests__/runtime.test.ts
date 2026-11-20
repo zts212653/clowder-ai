@@ -4483,14 +4483,18 @@ describe('unmodified runtime and project chat bindings', () => {
       toggle.click();
       await w.__settled();
       expect(ui.projOpen?.[alpha]).toBe(false);
-      expect(sections()[0].collapsed).toBe(true);
+      const drawn = () =>
+        [...w.document.querySelectorAll('section.gsec[data-sec^="proj:"]')].map((s) =>
+          s.hasAttribute('data-collapsed'),
+        );
+      expect(drawn()).toEqual([true, false]);
       expect(Object.keys(ui.projOpen!)).toEqual([alpha, beta]);
       w.document.querySelector('[data-path="cs.projAll"][data-v="1"]').click();
       await w.__settled();
-      expect(sections().every((s: { collapsed: boolean }) => !s.collapsed)).toBe(true);
+      expect(drawn()).toEqual([false, false]);
       w.document.querySelector('[data-path="cs.projAll"][data-v="0"]').click();
       await w.__settled();
-      expect(sections().every((s: { collapsed: boolean }) => s.collapsed)).toBe(true);
+      expect(drawn()).toEqual([true, true]);
       w.eval("A.set({path:'cs.tag',v:'selected'})");
       await w.__settled();
       expect(sections()).toHaveLength(1);
