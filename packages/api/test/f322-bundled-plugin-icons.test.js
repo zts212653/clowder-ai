@@ -57,7 +57,7 @@ for (const pluginId of ['official.chatgpt-dot']) {
     const discovery = await new OfficialPluginManagerCatalogAdapter(provider, OFFICIAL_BUNDLED_MANIFESTS).snapshot();
     assert.deepEqual(
       discovery.candidates.map((candidate) => candidate.pluginId).sort(),
-      ['official.chatgpt-dot'],
+      OFFICIAL_BUNDLED_MANIFESTS.map((candidate) => candidate.pluginId).sort(),
       'the production Host bundle list discovers all registered candidates even while registry is offline',
     );
     assert.deepEqual(discovery.candidates.find((candidate) => candidate.pluginId === pluginId).icon, manifest.icon);

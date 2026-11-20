@@ -52,6 +52,12 @@ import {
   closeCodexAppServerTransport,
 } from './codex-app-server-client-helpers.js';
 import {
+  type CodexAppServerThreadPlanner,
+  type CodexAppServerTurnPlanner,
+  planCodexAppServerThread,
+  planCodexAppServerTurn,
+} from './codex-app-server-param-plan.js';
+import {
   CodexAppServerRequestError,
   CodexAppServerRpcError,
   CodexAppServerTurnStartTimeoutError,
@@ -171,6 +177,11 @@ export interface CodexAppServerRunInput {
 
 export interface CodexAppServerClientDeps {
   wire: AgentCarrierSession;
+  /** Active Agent Access package plans thread/turn params; absent keeps the Host builder. */
+  planThreadParams?: CodexAppServerThreadPlanner;
+  planTurnParams?: CodexAppServerTurnPlanner;
+  /** Static method table loaded once per activation; absent keeps the Host default mapping. */
+  notificationProjection?: import('./codex-app-server-notification-projection.js').CodexAppServerNotificationProjection;
   onEnvelope?: (direction: 'inbound' | 'outbound', envelope: JsonObject) => void | Promise<void>;
   onUnsupportedNotification?: (observation: { method: string }) => void | Promise<void>;
   onLifecycle?: (snapshot: CodexAppServerLifecycleSnapshot) => void;
@@ -248,6 +259,7 @@ export class CodexAppServerClient {
 
   async *run(input: CodexAppServerRunInput): AsyncGenerator<unknown> {
     if (this.deps.wire.hostAcquisitionMode) input.live?.observeHostAcquisition?.(this.deps.wire.hostAcquisitionMode);
+    const notificationProjection = input.boundedWatcher ? undefined : this.deps.notificationProjection;
     const runtimeInteraction = createCodexRuntimeInteractionRunState(input.runtimeInteraction, input.approvalsReviewer);
     this.pumpPromise = this.pump(runtimeInteraction, input.boundedWatcher);
     // Pending requests / notifications propagate the same failure; attach immediately
@@ -422,13 +434,39 @@ export class CodexAppServerClient {
       }
 
       if (input.thread.kind === 'resume') this.completeTurnBaselines.delete(input.thread.threadId);
+      const plannedThread = input.boundedWatcher
+        ? undefined
+        : await planCodexAppServerThread(
+            {
+              kind: input.thread.kind,
+              ...(input.thread.kind === 'resume' ? { threadId: input.thread.threadId } : {}),
+              ...(input.model ? { model: input.model } : {}),
+              ...(input.cwd ? { cwd: input.cwd } : {}),
+              ...(input.sandbox ? { sandbox: input.sandbox } : {}),
+              ...(input.approvalPolicy ? { approvalPolicy: input.approvalPolicy } : {}),
+              ...(input.developerInstructions ? { developerInstructions: input.developerInstructions } : {}),
+              ...(input.config ? { config: input.config } : {}),
+              ...(Object.hasOwn(input, 'serviceTier') ? { serviceTier: input.serviceTier ?? null } : {}),
+              ...(input.approvalsReviewer ? { approvalsReviewer: input.approvalsReviewer } : {}),
+            },
+            this.deps.planThreadParams,
+          );
+      const assertThreadPlanCurrent = async () => {
+        await notificationProjection?.assertCurrent?.();
+        await plannedThread?.assertCurrent?.();
+      };
       const verdict = await resolveCodexAppServerThread({
         thread: input.thread,
-        params: buildCodexAppServerThreadParams(
-          input,
-          input.thread.kind === 'resume' ? { threadId: input.thread.threadId, excludeTurns: true } : undefined,
-        ),
-        startParams: buildCodexAppServerThreadParams(input),
+        params:
+          plannedThread?.params ??
+          buildCodexAppServerThreadParams(
+            input,
+            input.thread.kind === 'resume' ? { threadId: input.thread.threadId, excludeTurns: true } : undefined,
+          ),
+        startParams: plannedThread?.startParams ?? buildCodexAppServerThreadParams(input),
+        ...(notificationProjection?.assertCurrent || plannedThread?.assertCurrent
+          ? { assertCurrent: assertThreadPlanCurrent }
+          : {}),
         requireExactResume: input.requireExactResume || Boolean(recoveryInstruction),
         ...(input.resumeReplacement ? { resumeReplacement: input.resumeReplacement } : {}),
         // A reused affinity host reaches this point only after its local lease
@@ -551,32 +589,52 @@ export class CodexAppServerClient {
         resolveInitialInputRead = resolve;
       });
       const initialClientId = input.activeRunDispatch && !isRecoveryTurn ? randomUUID() : undefined;
+      const plannedTurn = input.boundedWatcher
+        ? undefined
+        : await planCodexAppServerTurn(
+            {
+              threadId,
+              ...(initialClientId ? { clientUserMessageId: initialClientId } : {}),
+              ...(!isRecoveryTurn ? { prompt: submittedPrompt } : {}),
+              ...(!isRecoveryTurn && input.imagePaths && input.imagePaths.length > 0
+                ? { imagePaths: input.imagePaths }
+                : {}),
+              ...(isRecoveryTurn && recoveryInstruction ? { recoveryContext: recoveryInstruction } : {}),
+              ...(input.outputSchema ? { outputSchema: input.outputSchema } : {}),
+              ...(input.collaborationMode ? { collaborationMode: input.collaborationMode } : {}),
+            },
+            this.deps.planTurnParams,
+          );
       await this.deps.onBeforeTurnStart?.({ threadId });
+      // The package may have been replaced while Host hooks ran. Recheck the
+      // thread plan too: a turn must never be planned by a different active
+      // generation than the thread that this invocation started/resumed.
+      await assertThreadPlanCurrent();
+      await plannedTurn?.assertCurrent?.();
       this.lifecycle.patch({ turnStartSent: true });
-      const turnResult = asCodexAppServerRecord(
-        await this.request('turn/start', {
-          threadId,
-          ...(initialClientId ? { clientUserMessageId: initialClientId } : {}),
-          input: isRecoveryTurn
-            ? []
-            : [
-                { type: 'text', text: submittedPrompt },
-                ...(input.imagePaths ?? []).map((path) => ({ type: 'localImage', path })),
-              ],
-          ...(isRecoveryTurn && recoveryInstruction
-            ? {
-                additionalContext: {
-                  'cat-cafe.capacity-recovery': {
-                    kind: 'application',
-                    value: recoveryInstruction,
-                  },
+      const turnParams = plannedTurn?.params ?? {
+        threadId,
+        ...(initialClientId ? { clientUserMessageId: initialClientId } : {}),
+        input: isRecoveryTurn
+          ? []
+          : [
+              { type: 'text', text: submittedPrompt },
+              ...(input.imagePaths ?? []).map((path) => ({ type: 'localImage', path })),
+            ],
+        ...(isRecoveryTurn && recoveryInstruction
+          ? {
+              additionalContext: {
+                'cat-cafe.capacity-recovery': {
+                  kind: 'application',
+                  value: recoveryInstruction,
                 },
-              }
-            : {}),
-          ...(input.outputSchema ? { outputSchema: input.outputSchema } : {}),
-          ...(input.collaborationMode ? { collaborationMode: input.collaborationMode } : {}),
-        }),
-      );
+              },
+            }
+          : {}),
+        ...(input.outputSchema ? { outputSchema: input.outputSchema } : {}),
+        ...(input.collaborationMode ? { collaborationMode: input.collaborationMode } : {}),
+      };
+      const turnResult = asCodexAppServerRecord(await this.request('turn/start', turnParams));
       const turn = asCodexAppServerRecord(turnResult?.turn);
       if (typeof turn?.id !== 'string') throw new Error('Codex app-server did not return a turn id');
       activeTurnId = turn.id;
@@ -859,11 +917,41 @@ export class CodexAppServerClient {
           }
         }
 
-        const mapped = mapCodexAppServerNotification(envelope);
-        await this.observeUnsupportedNotification(envelope);
+        const method = record?.method;
+        const nativeCompletion =
+          !!activeTurnId && isExactCodexRootTurnCompletion(envelope, { threadId, turnId: activeTurnId });
+        const matchesActiveRoot = codexAppServerNotificationMatchesActiveRoot(record, threadId, activeTurnId);
+        const aliasMethod =
+          notificationProjection &&
+          typeof method === 'string' &&
+          activeTurnId &&
+          params?.threadId === threadId &&
+          params?.turnId === activeTurnId
+            ? notificationProjection.aliases.get(method)
+            : undefined;
+        const projected =
+          matchesActiveRoot &&
+          notificationProjection &&
+          typeof method === 'string' &&
+          (notificationProjection.methods.has(method) || aliasMethod !== undefined);
+        const ignored =
+          notificationProjection && typeof method === 'string' && notificationProjection.ignoredMethods.has(method);
+        const nativeState =
+          nativeCompletion ||
+          (matchesActiveRoot &&
+            (method === 'turn/started' ||
+              method === 'thread/goal/updated' ||
+              method === 'thread/goal/cleared' ||
+              method === 'error'));
+        const mapped = nativeState
+          ? mapCodexAppServerNotification(envelope)
+          : !matchesActiveRoot || (notificationProjection && (!projected || method === 'turn/completed'))
+            ? null
+            : mapCodexAppServerNotification(aliasMethod ? { ...record, method: aliasMethod } : envelope);
+        if (!ignored && !projected) await this.observeUnsupportedNotification(envelope);
         if (mapped?.type === 'turn.completed' && latestUsage) mapped.usage = latestUsage;
         if (mapped && !(input.live && isLiveDraftEvent(mapped))) yield mapped;
-        if (activeTurnId && isExactCodexRootTurnCompletion(envelope, { threadId, turnId: activeTurnId })) {
+        if (activeTurnId && nativeCompletion) {
           if (input.boundedWatcher) {
             const completed = asCodexAppServerRecord(params?.turn);
             if (completed?.status !== 'completed')
@@ -1190,6 +1278,24 @@ export class CodexAppServerClient {
     for (const pending of this.pending.values()) pending.reject(error);
     this.pending.clear();
   }
+}
+
+/**
+ * A root notification is projected only when its real envelope belongs to the
+ * bound thread (and, when present, the accepted turn). Child/foreign
+ * notifications are handled by the subexecution tracker or dropped.
+ */
+function codexAppServerNotificationMatchesActiveRoot(
+  record: JsonObject | null,
+  threadId: string,
+  activeTurnId: string | null,
+): boolean {
+  const params = asCodexAppServerRecord(record?.params);
+  if (typeof params?.threadId === 'string' && params.threadId !== threadId) return false;
+  const turn = asCodexAppServerRecord(params?.turn);
+  const turnId = typeof turn?.id === 'string' ? turn.id : params?.turnId;
+  if (typeof turnId === 'string' && activeTurnId && turnId !== activeTurnId) return false;
+  return true;
 }
 
 import {

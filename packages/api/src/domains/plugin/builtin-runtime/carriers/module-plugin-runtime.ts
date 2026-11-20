@@ -1,4 +1,10 @@
 import {
+  AGENT_ACCESS_PLUGIN_ID,
+  type AgentAccessDiscoveryHost,
+  type AgentAccessRoleStore,
+  OFFICIAL_AGENT_ACCESS_OPERATIONS,
+} from '@clowder-ai/agent-contract';
+import {
   isPluginDeliveryInput,
   isPluginDeliveryReceipt,
   type PluginDeliveryInput,
@@ -11,6 +17,8 @@ import type { IThreadStore } from '../../../cats/services/stores/ports/ThreadSto
 import type { EntrustedWorkChangeReason } from '../../../growing/EntrustedWorkLifecycleService.js';
 import type { MessagingService } from '../../../messaging/messaging-service.js';
 import type { SubscriptionDelivery } from '../../../messaging/subscription-delivery.js';
+import { createAgentAccessDiscoveryHost } from '../../agent-access/discovery-host.js';
+import { createAgentAccessRoleStore, type DeclaredAgentProviderAvailability } from '../../agent-access/role-store.js';
 import { type PluginInvocationOutcome, settlePluginInvocation } from '../../carrier/host-invocation.js';
 import type { SharedMcpFactory } from '../../declared/shared-mcp-factory.js';
 import { type ModuleExecutionLease, ModuleExecutionWorker } from '../../execution-worker/client.js';
@@ -88,6 +96,8 @@ export interface PluginModuleEntrypointShape {
 export type ModulePluginLogLevel = 'debug' | 'info' | 'warn' | 'error';
 
 export interface ModulePluginHostShape {
+  readonly agentAccess?: AgentAccessDiscoveryHost;
+  readonly agentRoleStore?: AgentAccessRoleStore;
   /** Installation identity for attribution; Host operations retain their own identity and lifecycle checks. */
   readonly pluginInstanceId: string;
   readonly config: { get(key: string): Promise<unknown> };
@@ -132,6 +142,7 @@ export interface PluginModuleDefinitionShape extends ModulePluginSettingsFactory
 }
 
 export interface ModulePluginRuntimeOptions {
+  readonly isDeclaredAgentProviderAvailable?: DeclaredAgentProviderAvailability;
   readonly taskArtifactReader?: import('../../../growing/ports/PreparedArtifactReader.js').PreparedArtifactReader;
   readonly onTaskDataChanged?: (task: import('@cat-cafe/shared').TaskItem, reason?: EntrustedWorkChangeReason) => void;
   readonly packages: VerifiedPluginPackageLocator;
@@ -400,7 +411,16 @@ export class ModulePluginRuntime implements BundledPluginRuntime {
         assertActivation,
       );
       assertActivation();
+      const agentAccess = createAgentAccessDiscoveryHost(packageRecord.pluginId, pluginInstanceId, assertActivation);
+      const agentRoleStore = createAgentAccessRoleStore(
+        packageRecord.pluginId,
+        pluginInstanceId,
+        assertActivation,
+        this.options.isDeclaredAgentProviderAvailable,
+      );
       const host: ModulePluginHostShape = {
+        ...(agentRoleStore ? { agentRoleStore } : {}),
+        ...(agentAccess ? { agentAccess } : {}),
         ...neutral,
         pluginInstanceId,
         config: settingsHost.config,
@@ -451,6 +471,7 @@ export class ModulePluginRuntime implements BundledPluginRuntime {
           `${packageRecord.pluginId} start() must return an actions table and stop()`,
         );
       }
+      activation = candidate;
       if (packageRecord.manifest.call !== undefined && typeof deliver !== 'function') {
         throw new ExternalPluginRuntimeError(
           'INVALID_ENTRYPOINT',
@@ -472,7 +493,17 @@ export class ModulePluginRuntime implements BundledPluginRuntime {
           `${packageRecord.pluginId} exposes webhook without a fixed webhook declaration`,
         );
       }
-      activation = candidate;
+      if (
+        packageRecord.pluginId === AGENT_ACCESS_PLUGIN_ID &&
+        OFFICIAL_AGENT_ACCESS_OPERATIONS.some(
+          (operation) => !Object.hasOwn(actions, operation) || typeof actions[operation] !== 'function',
+        )
+      ) {
+        throw new ExternalPluginRuntimeError(
+          'INVALID_ENTRYPOINT',
+          'Agent access package lacks a required protocol operation',
+        );
+      }
       assertActivation();
       this.#loaded.set(pluginInstanceId, {
         packageRecord,

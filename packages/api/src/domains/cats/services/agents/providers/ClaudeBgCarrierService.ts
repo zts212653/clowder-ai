@@ -44,6 +44,7 @@ import { CLI_PROCESS_OWNER_ENV } from '../../../../../utils/cli-process-ownershi
 import { resolveCliCommandOrBare } from '../../../../../utils/cli-resolve.js';
 import { buildChildEnv } from '../../../../../utils/cli-spawn.js';
 import { excerptSanitizedStderr } from '../../../../../utils/sanitize-cli-stderr.js';
+import type { AgentAccessClaudeBatch } from '../../../../plugin/agent-access/claude-batch.js';
 import type {
   AgentMessage,
   AgentService,
@@ -109,6 +110,7 @@ export class CarrierError extends Error {
 
 export interface ClaudeBgCarrierServiceOptions {
   catId?: CatId;
+  projectBatch?: AgentAccessClaudeBatch;
   model?: string;
   /** Test seam — replaces the real spawn call. */
   spawnFn?: typeof spawn;
@@ -168,6 +170,7 @@ export class ClaudeBgCarrierService implements AgentService {
   private readonly ownerDataDir: string | undefined;
   private readonly ownerKillGraceMs: number;
   private readonly jobOwnershipEnabled: boolean;
+  private readonly projectBatch?: AgentAccessClaudeBatch;
   /** Windows: cached MCP config file path (created once per instance,
    *  reused across invocations to avoid temp file spam). */
   /** F203 Phase C: compiles per-cat L0 → file for --system-prompt-file. */
@@ -175,6 +178,7 @@ export class ClaudeBgCarrierService implements AgentService {
 
   constructor(options?: ClaudeBgCarrierServiceOptions) {
     this.catId = options?.catId ?? createCatId('opus');
+    this.projectBatch = options?.projectBatch;
     this.model = options?.model ?? getCatModel(this.catId as string);
     this.spawnFn = options?.spawnFn ?? spawn;
     this.l0CompilerFn = options?.l0CompilerFn ?? compileL0ViaSubprocess;
@@ -520,6 +524,7 @@ export class ClaudeBgCarrierService implements AgentService {
           providerNativeVisibility: 'unknown' as const,
         });
         await options?.beforeProviderLaunch?.(preparedRequest);
+        options?.signal?.throwIfAborted();
         if (!('body' in preparedRequest.message)) throw new Error('claude_bg_prepared_message_not_exact');
 
         let child: ReturnType<typeof spawn>;
@@ -630,11 +635,48 @@ export class ClaudeBgCarrierService implements AgentService {
    */
   async *invoke(prompt: string, options?: AgentServiceOptions): AsyncIterable<AgentMessage> {
     const startedAt = Date.now();
+    const batch = await this.projectBatch?.('transcript', this.catId, {
+      ...options?.callbackEnv,
+      ...options?.accountEnv,
+    });
+    if (batch) {
+      options = {
+        ...options,
+        signal: options?.signal ? AbortSignal.any([options.signal, batch.signal]) : batch.signal,
+      };
+    }
     // codex round-8 P2: receive effective model from startJob so metadata
     // reflects what was actually spawned (not this.model fallback when
     // callbackEnv MODEL_OVERRIDE_KEY or api_key env routing changes the run).
-    const { shortId, consumer, effectiveModel, owner } = await this.startJob(prompt, options);
+    const job = await this.startJob(prompt, options);
+    let stopped = false;
+    const stop = () => {
+      if (stopped) return;
+      stopped = true;
+      this.bestEffortStop(job.shortId, job.owner);
+    };
+    let finished = false;
+    batch?.signal.addEventListener('abort', stop, { once: true });
+    if (batch?.signal.aborted) stop();
+    try {
+      for await (const message of this.observeJob(job, startedAt, options, batch, stop)) {
+        batch?.signal.throwIfAborted();
+        if (message.type === 'done') finished = true;
+        yield message;
+      }
+    } finally {
+      batch?.signal.removeEventListener('abort', stop);
+      if (batch && !finished) stop();
+    }
+  }
 
+  private async *observeJob(
+    { shortId, consumer, effectiveModel, owner }: StartJobResult,
+    startedAt: number,
+    options: AgentServiceOptions | undefined,
+    batch: Awaited<ReturnType<AgentAccessClaudeBatch>> | undefined,
+    stop: () => void,
+  ): AsyncGenerator<AgentMessage> {
     yield {
       type: 'session_init',
       catId: this.catId,
@@ -673,8 +715,12 @@ export class ClaudeBgCarrierService implements AgentService {
     // (multi-text-block last turns where output.result is the concatenation)
     // get a duplicate text rather than silent loss — acceptable tradeoff.
     let lastAssistantText = '';
-    const textBoundaryState = {};
-    const yieldFromTranscript = function* (this: ClaudeBgCarrierService, entries: unknown[]): Generator<AgentMessage> {
+    const textBoundaryState: { lastTextMessageId?: string } = {};
+    const yieldFromTranscript = async function* (
+      this: ClaudeBgCarrierService,
+      entries: unknown[],
+      sessionId?: string,
+    ): AsyncGenerator<AgentMessage> {
       for (const raw of entries) {
         if (typeof raw === 'object' && raw !== null) {
           const entry = raw as Record<string, unknown>;
@@ -698,14 +744,21 @@ export class ClaudeBgCarrierService implements AgentService {
           }
         }
       }
-      for (const msg of transcriptEntriesToAgentMessages(entries, { catId: this.catId, textBoundaryState })) {
-        yield msg;
+      if (batch) {
+        const projected = await batch.project(entries, textBoundaryState.lastTextMessageId).catch((error: unknown) => {
+          stop();
+          throw error;
+        });
+        textBoundaryState.lastTextMessageId = projected.lastTextMessageId;
+        for (const message of projected.messages) yield sessionId ? { ...message, sessionId } : message;
+      } else {
+        yield* transcriptEntriesToAgentMessages(entries, { catId: this.catId, textBoundaryState });
       }
     }.bind(this);
 
     while (true) {
       if (options?.signal?.aborted) {
-        this.bestEffortStop(shortId, owner);
+        stop();
         throw new Error(`ClaudeBgCarrierService.invoke: aborted for ${shortId}`);
       }
 
@@ -760,7 +813,7 @@ export class ClaudeBgCarrierService implements AgentService {
             tailer = undefined;
           } else {
             // Incomplete turn — consumer can't recover, prevent quota leak.
-            this.bestEffortStop(shortId, owner);
+            stop();
             throw new Error(
               `ClaudeBgCarrierService.invoke: transcript read failed for ${shortId}: ${(err as Error).message}`,
             );
@@ -818,13 +871,14 @@ export class ClaudeBgCarrierService implements AgentService {
         if (state?.state === 'done' && typeof resultText === 'string' && resultText.trim().length > 0) {
           const transcriptCoversResult = lastAssistantText.trim() === resultText.trim();
           if (!transcriptCoversResult) {
-            yield {
-              type: 'text',
-              catId: this.catId,
-              sessionId: shortId,
-              content: resultText,
-              timestamp: Date.now(),
-            };
+            if (batch) {
+              yield* yieldFromTranscript(
+                [{ type: 'assistant', message: { content: [{ type: 'text', text: resultText }] } }],
+                shortId,
+              );
+            } else {
+              yield { type: 'text', catId: this.catId, sessionId: shortId, content: resultText, timestamp: Date.now() };
+            }
           }
         }
 

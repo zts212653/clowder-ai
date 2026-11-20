@@ -1,0 +1,287 @@
+import assert from 'node:assert/strict';
+import { describe, test } from 'node:test';
+import {
+  createAgentAccessOpenCodeFinalizerPlanner,
+  createAgentAccessOpenCodeLaunchPlanner,
+} from '../dist/domains/plugin/agent-access/opencode.js';
+
+/**
+ * The Host no longer builds OpenCode argv itself: the active package planes it, and
+ * this planner is the seam the native role-construction path calls. Two properties
+ * matter beyond "it returns args":
+ *
+ *  - it refuses to plan when no healthy package is active, because planning against
+ *    a stale or missing package is how a turn silently runs a different CLI surface;
+ *  - it re-checks the same instance digest/revision before each step it hands back,
+ *    so a package replaced mid-turn cannot keep serving that turn.
+ */
+function authority(overrides = {}) {
+  return {
+    instance: {
+      pluginInstanceId: 'inst-1',
+      packageDigest: 'digest-1',
+      lifecycleRevision: 3,
+      activationState: 'enabled',
+      runtimeState: 'healthy',
+      ...overrides,
+    },
+  };
+}
+
+function harness(options = {}) {
+  const readCurrentAuthority = async () => ('authority' in options ? options.authority : authority());
+  const invoke = async (_instanceId, _operation, payload) => {
+    options.onPlan?.(payload);
+    return options.invokeResult ?? { args: ['run', '--', 'p'], managedArgvFlags: [] };
+  };
+  return createAgentAccessOpenCodeLaunchPlanner({ readCurrentAuthority }, { invoke });
+}
+
+describe('OpenCode launch planner over the public protocol', () => {
+  test('plans through the active package and exposes a current-authority check', async () => {
+    let seen;
+    const plan = harness({ onPlan: (payload) => (seen = payload) });
+
+    const result = await plan({ prompt: 'p', readOnlyAgent: 'cat-cafe-read-only' });
+
+    assert.deepEqual(result.args, ['run', '--', 'p']);
+    assert.equal(typeof result.assertCurrent, 'function');
+    assert.deepEqual(seen, {
+      operation: 'plan_native_launch',
+      client: 'opencode',
+      launch: { prompt: 'p', readOnlyAgent: 'cat-cafe-read-only' },
+    });
+  });
+
+  test('refuses to plan when no package instance is active', async () => {
+    const plan = harness({ authority: undefined });
+
+    await assert.rejects(
+      () => plan({ prompt: 'p', readOnlyAgent: 'a' }),
+      /session_implementation_unavailable/,
+      'planning with no active package must fail loudly, not fall back to Host argv',
+    );
+  });
+
+  test('refuses to plan against a package that is not enabled and healthy', async () => {
+    const plan = harness({ authority: authority({ runtimeState: 'failed' }) });
+
+    await assert.rejects(() => plan({ prompt: 'p', readOnlyAgent: 'a' }), /session_implementation_unavailable/);
+  });
+
+  test('a later step fails once the package instance was replaced', async () => {
+    let current = authority();
+    const plan = createAgentAccessOpenCodeLaunchPlanner(
+      { readCurrentAuthority: async () => current },
+      { invoke: async () => ({ args: [], managedArgvFlags: [] }) },
+    );
+
+    const result = await plan({ prompt: 'p', readOnlyAgent: 'a' });
+    current = authority({ lifecycleRevision: 4 });
+
+    await assert.rejects(() => result.assertCurrent(), /session_implementation_unavailable/);
+  });
+
+  test('a later step passes while the same instance is still current', async () => {
+    const plan = harness({});
+    const result = await plan({ prompt: 'p', readOnlyAgent: 'a' });
+
+    await assert.doesNotReject(() => result.assertCurrent());
+  });
+
+  test('normalises the package answer through the shared argv contract', async () => {
+    const plan = harness({ invokeResult: { args: [1, 2], managedArgvFlags: 'nope' } });
+
+    await assert.rejects(
+      () => plan({ prompt: 'p', readOnlyAgent: 'a' }),
+      'a malformed package answer must not reach the CLI',
+    );
+  });
+});
+
+/**
+ * Old-generation packages were installed before `planFinalizer` existed. They pass
+ * admission (the declaration was complete for their era) and report healthy, so the
+ * only way to know is to ask the package what it exposes. Planning a finalizer
+ * against one must say so — never invoke an action that is not there, and never let
+ * the Host quietly build its own argv instead.
+ */
+describe('OpenCode finalizer planner against an older package', () => {
+  const finalizerInput = { prompt: 'p', model: 'm', finalizerAgent: 'a' };
+
+  function finalizerHarness(options = {}) {
+    const readCurrentAuthority = async () => ('authority' in options ? options.authority : authority());
+    const exposesAction = async () => options.exposes ?? true;
+    const invoke = async (_instanceId, _operation, payload) => {
+      options.onInvoke?.(payload);
+      return options.invokeResult ?? { args: ['run', '--pure', '--agent', 'a', '--', 'p'], managedArgvFlags: [] };
+    };
+    return createAgentAccessOpenCodeFinalizerPlanner({ readCurrentAuthority }, { invoke, exposesAction });
+  }
+
+  test('asks the package whether it exposes the finalizer action', async () => {
+    let asked;
+    const readCurrentAuthority = async () => authority();
+    const plan = createAgentAccessOpenCodeFinalizerPlanner(
+      { readCurrentAuthority },
+      {
+        invoke: async () => ({ args: [], managedArgvFlags: [] }),
+        exposesAction: async (_instanceId, method) => {
+          asked = method;
+          return true;
+        },
+      },
+    );
+
+    await plan(finalizerInput);
+
+    assert.equal(asked, 'planFinalizer', 'the decision must come from the package, not an assumption');
+  });
+
+  test('refuses to plan against a package that does not expose the finalizer action', async () => {
+    let invoked = false;
+    const plan = finalizerHarness({
+      exposes: false,
+      onInvoke: () => {
+        invoked = true;
+      },
+    });
+
+    await assert.rejects(
+      () => plan(finalizerInput),
+      /session_implementation_unavailable/,
+      'an older package must be reported as unavailable, not invoked blind',
+    );
+    assert.equal(invoked, false, 'no invocation may be attempted for an action the package lacks');
+  });
+
+  test('still plans normally when the package does expose the action', async () => {
+    const plan = finalizerHarness({ exposes: true });
+
+    const result = await plan(finalizerInput);
+
+    assert.deepEqual(result.args.slice(0, 3), ['run', '--pure', '--agent']);
+  });
+
+  test('a router without exposesAction is treated as not exposing it', async () => {
+    const readCurrentAuthority = async () => authority();
+    const plan = createAgentAccessOpenCodeFinalizerPlanner(
+      { readCurrentAuthority },
+      { invoke: async () => ({ args: [], managedArgvFlags: [] }) },
+    );
+
+    await assert.rejects(() => plan(finalizerInput), /session_implementation_unavailable/);
+  });
+});
+
+describe('OpenCode raw events sent to the package', () => {
+  /**
+   * The package runs in a Worker owned by a third-party archive. Anything the Host
+   * ships into it leaves the Host's trust boundary, so a credential that arrived
+   * nested inside a provider error must be redacted before the call — the same rule
+   * the Kimi planner already applies at its parseNativeEvent seam.
+   */
+  test('a credential nested in a raw error never reaches the worker', async () => {
+    let workerPayload;
+    const plan = createAgentAccessOpenCodeLaunchPlanner(
+      { readCurrentAuthority: async () => authority() },
+      {
+        invoke: async (_id, operation, payload) => {
+          if (operation === 'parseNativeEvent') {
+            workerPayload = payload;
+            return { kind: 'error', message: 'boom', timestamp: 1 };
+          }
+          return { args: ['run', '--format', 'json', '--', 'p'], managedArgvFlags: [] };
+        },
+      },
+    );
+
+    const planned = await plan({ prompt: 'p', readOnlyAgent: 'a' });
+    await planned.normalizeEvent({
+      type: 'error',
+      error: { data: { message: 'boom', apiKey: 'sk-live-should-not-cross' } },
+    });
+
+    assert.ok(workerPayload, 'the fixture must actually call the worker');
+    assert.ok(
+      !JSON.stringify(workerPayload).includes('sk-live-should-not-cross'),
+      'a credential inside a raw error must not cross into the package worker',
+    );
+  });
+});
+
+describe('the generation is rechecked after the worker round trip', () => {
+  /**
+   * The worker call is a suspension point. A package replaced while the Host is
+   * awaiting the parse result must not keep describing the rest of the turn — the
+   * same reason the Kimi planner checks on both sides of its invoke.
+   */
+  test('a package replaced during parsing stops describing the turn', async () => {
+    let generation = 1;
+    const readCurrentAuthority = async () => authority({ lifecycleRevision: generation });
+    const plan = createAgentAccessOpenCodeLaunchPlanner(
+      { readCurrentAuthority },
+      {
+        invoke: async (_id, operation) => {
+          if (operation === 'parseNativeEvent') {
+            // The replacement lands while this call is in flight.
+            generation = 2;
+            return { kind: 'text', text: 'hi', timestamp: 1 };
+          }
+          return { args: ['run', '--format', 'json', '--', 'p'], managedArgvFlags: [] };
+        },
+      },
+    );
+
+    const planned = await plan({ prompt: 'p', readOnlyAgent: 'a' });
+
+    await assert.rejects(
+      () => planned.normalizeEvent({ type: 'text', part: { type: 'text', text: 'hi' } }),
+      /session_implementation_unavailable/,
+      'a replacement during the parse must invalidate the result',
+    );
+  });
+});
+
+describe('the recovery plan runs under the main run activation lease', () => {
+  /**
+   * The recovery run belongs to the same turn as the main run, so it must plan against
+   * the activation the main plan was built on. Re-reading "whatever is active now" would
+   * let a replacement that happened mid-turn serve the recovery with its own plan, even
+   * though the turn's main run is still pinned to the earlier package.
+   */
+  test('a replaced package is not asked to plan the recovery run', async () => {
+    let generation = 1;
+    const readCurrentAuthority = async () => authority({ lifecycleRevision: generation });
+    let finalizerInvocations = 0;
+    const { createAgentAccessOpenCodeFinalizerPlanner } = await import(
+      '../dist/domains/plugin/agent-access/opencode.js'
+    );
+    const planRecovery = createAgentAccessOpenCodeFinalizerPlanner(
+      { readCurrentAuthority },
+      {
+        invoke: async (_id, operation) => {
+          if (operation === 'planFinalizer') {
+            finalizerInvocations++;
+            return { args: ['run', '--format', 'json', '--', 'q'], managedArgvFlags: [] };
+          }
+          return { args: ['run', '--format', 'json', '--', 'p'], managedArgvFlags: [] };
+        },
+        exposesAction: async () => true,
+      },
+    );
+
+    // The main run pinned generation 1; a replacement moved the active one to 2.
+    const pinned = async () => {
+      if (generation !== 1) throw new Error('session_implementation_unavailable');
+    };
+    generation = 2;
+
+    await assert.rejects(
+      () => planRecovery({ prompt: 'q', model: 'm', finalizerAgent: 'f' }, { assertCurrent: pinned }),
+      /session_implementation_unavailable/,
+      'the recovery must not be planned by a package outside the main lease',
+    );
+    assert.equal(finalizerInvocations, 0, 'a package outside the lease must not even be invoked');
+  });
+});

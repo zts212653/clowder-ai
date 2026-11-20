@@ -1,4 +1,5 @@
 {
+  "archiveReplacement": {"title": "Replace installed plugin", "version": "{0}: {1} → {2}. ", "retention": "Plugin settings and data are kept.", "confirm": "Replace plugin"},
   "v2": {
     "settings": "Settings & management",
     "team": "Cat team",
@@ -3100,6 +3101,8 @@
   "memberForm": {
     "fields": {
       "client": "Clients",
+    "pluginClient": "Plugin client",
+    "pluginClientNone": "No plugin client",
       "unsavedChanges": "{0} unsaved changes",
       "nickname": "Nickname",
       "roleDescription": "Role",
@@ -5298,6 +5301,23 @@
     "ready": "Available",
     "dshAuto": "Installed · Configured automatically when added",
     "conflict": "A member with this name already exists",
+    "loginRequired": "Sign-in required",
+    "copyLogin": "Copy sign-in command",
+    "unsupported": "Unsupported",
+    "needsConfig": "Configuration required",
+    "partialFailure": "Detection failed",
+    "partialFailureCount": "{0} candidates failed detection",
+    "readiness": {
+      "missing": "The agent-access plugin is not installed",
+      "disabled": "The agent-access plugin is disabled",
+      "starting": "The agent-access plugin is starting",
+      "failed": "The agent-access plugin failed to load",
+      "incompatible": "The agent-access plugin version is incompatible",
+      "install": "Install",
+      "enable": "Enable",
+      "retry": "Retry",
+      "repair": "Repair"
+    },
     "adjust": "Adjust",
     "createFailed": "Could not create {0} ({1}):"
   },

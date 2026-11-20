@@ -27,9 +27,12 @@ const { preflightPluginArchive } = await import(
     ? '../src/domains/plugin/external-runtime/archive-preflight.ts'
     : '../dist/domains/plugin/external-runtime/archive-preflight.js'
 );
+const builtArchives = new Map([
+  ['agent-access', new URL('../../agent-access-plugin/dist/plugin/package.tgz', import.meta.url)],
+]);
 for (const { catalogId, manifest, agentProvider, prebuilt } of definitions) {
   assert.equal(validateManifest(manifest).valid, true, `invalid ${catalogId} manifest`);
-  if (prebuilt) continue;
+  if (prebuilt || builtArchives.has(catalogId)) continue; // checked when the verified archive is installed
   const packageRoot = fileURLToPath(
     new URL(`../src/domains/plugin/bundled-packages/${catalogId}/${manifest.version}/`, import.meta.url),
   );
@@ -51,6 +54,7 @@ await generateBundledPluginArtifacts(new URL('../dist/domains/plugin/', import.m
   sourceRoot: new URL('../src/domains/plugin/', import.meta.url),
   check: process.argv.includes('--check'),
   validatePrebuiltArchive: preflightPluginArchive,
+  builtArchives,
   formatManifest: (source) =>
     formatWithBiome(source, 'packages/api/src/domains/plugin/bundled-packages/plugin/manifest.json'),
 });

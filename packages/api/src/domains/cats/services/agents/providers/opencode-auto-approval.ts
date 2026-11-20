@@ -25,6 +25,13 @@ const OPENCODE_AUTO_APPROVE_PROBE_FAILED_MESSAGE =
 export type OpenCodeAutoApproveProbeResult = {
   approvalFlag?: string;
   standalone?: boolean;
+  /**
+   * Whether this CLI advertises `--pure`. OpenCode v2.0.28 does not, and passing it
+   * makes the CLI print help and exit before sending a request, so callers must not
+   * inject it unless this is true. The no-tool guarantee itself comes from the
+   * config channels (`OPENCODE_CONFIG_CONTENT` / `OPENCODE_PERMISSION`), not the flag.
+   */
+  pure?: boolean;
   warning?: string;
   cacheable?: boolean;
 };
@@ -59,7 +66,10 @@ function hasStandaloneBooleanValue(flag: string, value = ''): boolean {
 
 /** Transport alone may cross the read-only/finalizer argument boundary. */
 export function getOpenCodeTransportArgs(cliConfigArgs?: readonly string[]): string[] {
-  const userParts = parseOpenCodeCliConfigArgs(cliConfigArgs);
+  return getOpenCodeTransportArgv(parseOpenCodeCliConfigArgs(cliConfigArgs));
+}
+
+export function getOpenCodeTransportArgv(userParts: readonly string[]): string[] {
   const transport: string[] = [];
   for (let i = 0; i < userParts.length && userParts[i] !== '--'; i++) {
     const name = getCliFlagName(userParts[i]);
@@ -140,15 +150,16 @@ export async function probeOpenCodeAutoApproveSupport(
   }
 
   const standalone = /(?:^|\s)--standalone(?=\s|[=,]|$)/m.test(visibleHelp.helpText);
+  const pure = /(?:^|\s)--pure(?=\s|[=,]|$)/m.test(visibleHelp.helpText);
 
   for (const flag of OPENCODE_DEFAULT_AUTO_APPROVE_FLAGS) {
-    if (visibleHelp.helpText.includes(flag)) return { approvalFlag: flag, standalone };
+    if (visibleHelp.helpText.includes(flag)) return { approvalFlag: flag, standalone, pure };
   }
 
   // Do not probe unadvertised aliases with `run <flag> --help`. Some yargs
   // versions process `--help` before validating unknown flags, so that command
   // exits 0 even when the candidate would make a real invocation exit 1.
-  return { warning: OPENCODE_AUTO_APPROVE_UNAVAILABLE_MESSAGE, cacheable: true, standalone };
+  return { warning: OPENCODE_AUTO_APPROVE_UNAVAILABLE_MESSAGE, cacheable: true, standalone, pure };
 }
 
 function isOpenCodeAutoApproveProbeCacheable(result: OpenCodeAutoApproveProbeResult): boolean {

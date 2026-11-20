@@ -105,6 +105,7 @@ export class DshTurnInput {
           inspectInput: async (deliveryId) => {
             if (this.closed) return 'unknown';
             const result = await this.client.inspectTurnInput(this.sessionId, deliveryId);
+            if (result.nativeTurnId !== undefined && result.nativeTurnId !== nativeTurnId) return 'unknown';
             return result.state === 'read' ? 'accepted' : result.state;
           },
         }) ?? undefined;

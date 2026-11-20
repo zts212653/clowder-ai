@@ -1,8 +1,9 @@
-import { createHash } from 'node:crypto';
 import type { CatCafeConfig } from '@cat-cafe/shared';
+import { roleConfigurationRevision } from '@clowder-ai/agent-access/roles/write-role';
 import { saveSpan } from '../utils/member-save-diagnostics.js';
-import { readCatCatalogRaw } from './cat-catalog-store.js';
-import { toAllCatConfigs } from './cat-config-loader.js';
+import { readRoleCatalogSnapshot } from './cat-catalog-store.js';
+import { resolveProjectTemplatePath } from './project-template-path.js';
+
 import { type RuntimeCatUpdate, updateRuntimeCat, withRuntimeCatMutationLock } from './runtime-cat-catalog.js';
 
 export class MemberConfigurationConflict extends Error {
@@ -21,17 +22,8 @@ export class MemberConfigurationRevisionRequired extends Error {
 
 /** A member-scoped validator read from disk, never from a stale registry cache. */
 export function memberConfigurationRevision(projectRoot: string, catId: string): string | undefined {
-  const raw = readCatCatalogRaw(projectRoot, { persistMigrations: false });
-  if (!raw) return undefined;
-  const config = JSON.parse(raw) as CatCafeConfig;
-  const cat = toAllCatConfigs(config)[catId];
-  if (!cat) return undefined;
-  // Public projection omits tombstones. The member's authored overrides must also invalidate an older editor.
-  const variant = config.breeds.flatMap((breed) =>
-    breed.variants.filter((entry) => (entry.catId ?? breed.catId) === catId),
-  )[0];
-  const roster = config.version === 2 ? config.roster[catId] : undefined;
-  return createHash('sha256').update(JSON.stringify({ cat, variant, roster })).digest('hex');
+  const { source } = readRoleCatalogSnapshot(projectRoot, resolveProjectTemplatePath(projectRoot), 'write');
+  return roleConfigurationRevision(JSON.parse(source) as CatCafeConfig, catId);
 }
 
 /** The caller holds the existing catalog mutation lock through its complete mutation. */

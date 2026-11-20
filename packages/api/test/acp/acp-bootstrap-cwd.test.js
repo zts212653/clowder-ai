@@ -341,7 +341,7 @@ describe('acp bootstrap cwd', () => {
 
   it('REGRESSION: AcpClient must filter MCP servers by client mcpCapabilities', () => {
     const source = readFileSync(
-      new URL('../../src/domains/cats/services/agents/providers/acp/AcpClient.ts', import.meta.url),
+      new URL('../../../agent-access-plugin/src/runtime/acp/AcpClient.ts', import.meta.url),
       'utf-8',
     );
     // Sending stdio MCP servers to clients that only support http/sse (e.g. OpenCode)

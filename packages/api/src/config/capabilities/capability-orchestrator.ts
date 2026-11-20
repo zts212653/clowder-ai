@@ -742,6 +742,7 @@ export function inheritFullyBlockedMcpCapabilitiesForNewCatsSync(
   projectRoot: string,
   newCatIds: readonly string[],
   existingCatIds: ReadonlySet<string>,
+  mode: 'commit' | 'preview' = 'commit',
 ): boolean {
   if (newCatIds.length === 0) return false;
 
@@ -764,7 +765,7 @@ export function inheritFullyBlockedMcpCapabilitiesForNewCatsSync(
     inheritedIds.add(newCatId);
   }
 
-  if (changed) writeCapabilitiesConfigSync(projectRoot, config);
+  if (changed && mode === 'commit') writeCapabilitiesConfigSync(projectRoot, config);
   return changed;
 }
 

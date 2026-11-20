@@ -61,13 +61,12 @@ import { resolveInvokeCapabilityRoot } from './config/capabilities/invoke-capabi
 import { migrateStartupCodexMcpConfig, regenerateStartupCliConfigs } from './config/capabilities/startup-cli-config.js';
 import { usesNativeToolConfiguration } from './config/cat-account-binding.js';
 import {
-  bootstrapDefaultCatCatalog,
   getCoCreatorConfig,
   getConfigSessionStrategy,
   getDefaultCatId,
   getRegisteredAcpConfig,
   isCatAvailable,
-  loadResolvedCatConfig,
+  loadRuntimeCatConfig,
   resolveRuntimeCatTemplatePath,
   toAllCatConfigs,
 } from './config/cat-config-loader.js';
@@ -2001,12 +2000,8 @@ async function initializeApi(
   // so registry population must precede auto-dream bootstrap as well as AgentRouter construction.
   try {
     const templatePath = resolveRuntimeCatTemplatePath();
-    const catConfig = bootstrapDefaultCatCatalog(templatePath);
-    registerCatalogSnapshot(
-      toAllCatConfigs(catConfig),
-      () => loadResolvedCatConfig(templatePath, { persistMigrations: false }),
-      templatePath,
-    );
+    const catConfig = loadRuntimeCatConfig(templatePath);
+    registerCatalogSnapshot(toAllCatConfigs(catConfig), () => loadRuntimeCatConfig(templatePath), templatePath);
     app.log.info(`[api] CatRegistry initialized: ${catRegistry.getAllIds().join(', ')}`);
   } catch (err) {
     app.log.error(`[api] Failed to load cat catalog — .cat-cafe/cat-catalog.json is required: ${String(err)}`);
@@ -2233,6 +2228,7 @@ async function initializeApi(
 
   // ── F149 Phase C: ACP process pool registry (variantId → AcpProcessPool) ──
   const acpPoolRegistry: AcpPoolRegistry = new Map();
+  const declaredAcpPools = new Set<AcpPoolRegistry>();
   const sessionContractSettings = readSessionContractSettings(process.env);
   for (const warning of sessionContractSettings.warnings) app.log.warn(warning);
   const sessionImplementations = new SessionImplementationRegistry();
@@ -2319,6 +2315,9 @@ async function initializeApi(
                       effectiveModel: getCatModel(id),
                       acpConfig,
                       resolveCurrentAcpConfig: () => getRegisteredAcpConfig(id, projectRoot),
+                      selectSessionModel: (session, model) => agentAccessAcpModelSelection(session, model),
+                      createClient: (config, transport) =>
+                        new AgentAccessAcpRuntimeClient(config, agentAccessAcpProcess, transport),
                       poolRegistry: acpPoolRegistry,
                       log: app.log,
                       onUnavailable: (reason) => agentRegistry.markUnavailable(id, reason),
@@ -2338,12 +2337,20 @@ async function initializeApi(
                     // ── Provider-specific CLI paths (non-ACP) ──
                     case 'anthropic': {
                       if (config.carrier === 'sdk') {
-                        service = new ClaudeSdkAgentService({ catId });
+                        service = new ClaudeSdkAgentService({
+                          catId,
+                          projectOutput: (...args) => agentAccessClaudeOutput(...args),
+                        });
                       } else {
                         const { createClaudeAgentServiceForCanary } = await import(
                           './domains/cats/services/agents/providers/claude-carrier-factory.js'
                         );
-                        service = createClaudeAgentServiceForCanary(catId);
+                        service = createClaudeAgentServiceForCanary(
+                          catId,
+                          process.env,
+                          (...args) => agentAccessClaudeOutput(...args),
+                          (...args) => agentAccessClaudeBatch(...args),
+                        );
                       }
                       break;
                     }
@@ -2355,12 +2362,16 @@ async function initializeApi(
                         appServerHostPool,
                         carrierMode: config.carrier === 'app_server' ? 'app_server' : 'exec_json',
                         nativeRealtimeCompanionEnabled,
+                        planLaunch: (input) => agentAccessCodexExecLaunch(input),
+                        planAppServerThread: (input) => agentAccessCodexAppServerThread(input),
+                        planAppServerTurn: (input) => agentAccessCodexAppServerTurn(input),
+                        loadNotificationProjection: () => agentAccessCodexAppServerNotifications(),
                       });
                       break;
                     }
                     case 'google':
                       try {
-                        service = createGoogleAgentService(catId, config.agyProfile);
+                        service = createGoogleAgentService(catId, config.agyProfile, agentAccessAgyOutput);
                       } catch (error) {
                         if (!(error instanceof AgentServiceUnavailableError)) throw error;
                         agentRegistry.markUnavailable(id, error.reason);
@@ -2368,7 +2379,7 @@ async function initializeApi(
                       }
                       break;
                     case 'kimi':
-                      service = new KimiAgentService({ catId });
+                      service = new KimiAgentService({ catId, planLaunch: (input) => agentAccessKimiLaunch(input) });
                       break;
                     case 'antigravity':
                       agentRegistry.markUnavailable(id, {
@@ -2378,13 +2389,24 @@ async function initializeApi(
                       });
                       return;
                     case 'opencode':
-                      service = new OpenCodeAgentService({ catId });
+                      // Deferred lambdas: the planners are created later in startup than
+                      // this registry sync runs, exactly like the Kimi case above.
+                      service = new OpenCodeAgentService({
+                        catId,
+                        planLaunch: (input) => agentAccessOpenCodeLaunch(input),
+                        planFinalizer: (input) => agentAccessOpenCodeFinalizer(input),
+                      });
                       break;
                     case 'catagent': {
                       const { CatAgentService } = await import(
                         './domains/cats/services/agents/providers/catagent/CatAgentService.js'
                       );
-                      service = new CatAgentService({ catId, projectRoot: findMonorepoRoot(), catConfig: config });
+                      service = new CatAgentService({
+                        catId,
+                        projectRoot: findMonorepoRoot(),
+                        catConfig: config,
+                        projectOutput: (...args) => agentAccessCatAgentOutput(...args),
+                      });
                       break;
                     }
                     case 'a2a': {
@@ -2397,7 +2419,11 @@ async function initializeApi(
                         app.log.warn(`[api] A2A cat "${id}" missing ${envKey} env var. It will not be routable.`);
                         return;
                       }
-                      service = new A2AAgentService({ catId, config: { url: a2aUrl } });
+                      service = new A2AAgentService({
+                        catId,
+                        config: { url: a2aUrl },
+                        runTurn: (input, submit) => agentAccessA2ARunner(input, submit),
+                      });
                       break;
                     }
                     default:
@@ -3671,6 +3697,22 @@ async function initializeApi(
     ...(redis ? { connectionCheckRedis: redis } : {}),
     resolvePluginMcpView: () => pluginRuntime.supervisor.resolveMemberMcpView(),
     memberAssets: () => memberCanonService,
+    agentRoleRead: (...args) => agentRoleRead(...args),
+    agentRoleWrite: (...args) => agentRoleWrite(...args),
+    nativeRuntimeDiscovery: (...args) => readLegacyNativeRuntimes(...args),
+    agentAccessDetection: (...args) => readAgentAccessDetection(...args),
+    runDshConnection: (config, cwd, preferences) => agentAccessDshConnection(config, cwd, preferences),
+    runtimeCatalog: {
+      modelCatalogGeneration: () => agentAccessModelCatalogGeneration(),
+      discoverModelCatalog: (target) => agentAccessModelCatalog(target),
+    },
+    async resolveDshMemberConnectionClient() {
+      const { AGENT_ACCESS_PLUGIN_ID } = await import('@clowder-ai/agent-contract');
+      const instance = (await pluginRuntime.inventoryStore.readCurrentAuthority(AGENT_ACCESS_PLUGIN_ID))?.instance;
+      if (instance?.activationState === 'enabled' && instance.runtimeState === 'healthy') {
+        return (config) => new AgentAccessAcpRuntimeClient(config, agentAccessAcpProcess);
+      }
+    },
     addressedPlugins: () => router.addressedPlugins,
     resolveContextCapacitySnapshot: (catId) => router.contextCapacitySnapshot(catId),
     resolveCarrierCapability: (catId) => router.freshnessCarrierCapability(catId),
@@ -3691,10 +3733,10 @@ async function initializeApi(
       return reply.code(403).send({ error: 'Diagnostics disabled' });
     }
     const pools: Record<string, unknown> = {};
-    for (const [variantId, pool] of acpPoolRegistry) {
-      pools[variantId] = pool.getMetrics();
+    for (const registry of [acpPoolRegistry, ...declaredAcpPools]) {
+      for (const [variantId, pool] of registry) pools[variantId] = pool.getMetrics();
     }
-    return { pools, poolCount: acpPoolRegistry.size };
+    return { pools, poolCount: Object.keys(pools).length };
   });
 
   await app.register(quotaRoutes, {
@@ -5534,6 +5576,7 @@ async function initializeApi(
   const collectiveArtifactOwnerHolder: import('./domains/plugin/host-surface/collective-artifact-owner.js').CollectiveArtifactOwnerHolder =
     {};
   const pluginRuntime = cloudConversations.createRuntime({
+    isDeclaredAgentProviderAvailable: (reference) => sessionImplementations.has(reference),
     agentSessionProviders: (packages, configuration) =>
       declaredAgentSessionProviders({
         configuration,
@@ -5542,10 +5585,11 @@ async function initializeApi(
         packages,
         registry: sessionImplementations,
         services: registeredSessionServices,
-        createProvider: (declaration, { catId }) =>
+        poolDiagnostics: declaredAcpPools,
+        createProvider: (declaration, { catId, poolRegistry }) =>
           createRefreshingAcpSessionProvider({
             catId,
-            scope: acpPoolRegistry,
+            scope: poolRegistry,
             revision: () => sessionConfigurationRevision,
             createService: () => {
               const config = catRegistry.getAllConfigs()[catId];
@@ -5556,7 +5600,10 @@ async function initializeApi(
                 config,
                 effectiveModel: getCatModel(catId),
                 acpConfig: declaration.acp,
-                poolRegistry: acpPoolRegistry,
+                selectSessionModel: (session, model) => agentAccessAcpModelSelection(session, model),
+                createClient: (config, transport) =>
+                  new AgentAccessAcpRuntimeClient(config, agentAccessAcpProcess, transport),
+                poolRegistry,
                 log: app.log,
               });
             },
@@ -5801,7 +5848,9 @@ async function initializeApi(
     const failures = results.filter((result) => result.status === 'rejected').map((result) => result.reason);
     if (failures.length) throw new AggregateError(failures, 'Initial plugin shutdown failed');
   });
-  const { OFFICIAL_BUNDLED_MANIFESTS } = await import('./domains/plugin/official-catalog.js');
+  const { OFFICIAL_BUNDLED_CATALOG_ENTRIES, OFFICIAL_BUNDLED_MANIFESTS } = await import(
+    './domains/plugin/official-catalog.js'
+  );
   const { createHostOfficialPluginCatalog } = await import('./domains/plugin/manager/host-official-catalog.js');
   const { GitMarketplaceRepository } = await import(
     './domains/plugin/manager/marketplace/git-marketplace-repository.js'
@@ -5977,6 +6026,7 @@ async function initializeApi(
     runtime: pluginRuntime,
     managerRuntime: pluginManagerRuntime,
     catalog: pluginManagerCatalog,
+    bundledDefaults: OFFICIAL_BUNDLED_CATALOG_ENTRIES.filter((entry) => entry.catalogId === 'agent-access'),
     onFailure: (pluginId, error) => app.log.warn({ pluginId, err: error }, '[api] Initial plugin setup pending'),
   })
     .then((prepared) => prepared.activate())
@@ -5988,11 +6038,93 @@ async function initializeApi(
   const { pluginManagerUploadRoutes, registerPluginManagerRoutes } = await import('./routes/plugin-manager-routes.js');
   const { registerPluginMarketplaceRoutes } = await import('./routes/plugin-marketplace-routes.js');
   const { registerAgentClientLibraryRoutes } = await import('./routes/agent-client-library-routes.js');
+  const { createAgentAccessClaudeOutput } = await import('./domains/plugin/agent-access/claude.js');
+  const agentAccessClaudeOutput = createAgentAccessClaudeOutput(pluginRuntime.inventoryStore, pluginRuntime.supervisor);
+  const { createAgentAccessClaudeBatch } = await import('./domains/plugin/agent-access/claude-batch.js');
+  const agentAccessClaudeBatch = createAgentAccessClaudeBatch(pluginRuntime.inventoryStore, pluginRuntime.supervisor);
+  const { createAgentAccessCatAgentOutput } = await import('./domains/plugin/agent-access/catagent.js');
+  const { createAgentAccessAgyOutput } = await import('./domains/plugin/agent-access/agy.js');
+  const agentAccessAgyOutput = createAgentAccessAgyOutput(pluginRuntime.inventoryStore, pluginRuntime.supervisor);
+  const agentAccessCatAgentOutput = createAgentAccessCatAgentOutput(
+    pluginRuntime.inventoryStore,
+    pluginRuntime.supervisor,
+  );
+  const { createAgentAccessAcpModelSelection } = await import('./domains/plugin/agent-access/acp.js');
+  const { createAgentAccessAcpProcess } = await import('./domains/plugin/agent-access/acp-process.js');
+  const { AgentAccessAcpRuntimeClient } = await import('./domains/plugin/agent-access/acp-runtime-client.js');
+  const agentAccessAcpProcess = createAgentAccessAcpProcess(pluginRuntime.inventoryStore, pluginRuntime.supervisor);
+  const agentAccessAcpModelSelection = createAgentAccessAcpModelSelection(
+    pluginRuntime.inventoryStore,
+    pluginRuntime.supervisor,
+  );
+  const { createAgentAccessKimiLaunchPlanner } = await import('./domains/plugin/agent-access/kimi.js');
+  const agentAccessKimiLaunch = createAgentAccessKimiLaunchPlanner(
+    pluginRuntime.inventoryStore,
+    pluginRuntime.supervisor,
+  );
+  const { createAgentAccessOpenCodeLaunchPlanner, createAgentAccessOpenCodeFinalizerPlanner } = await import(
+    './domains/plugin/agent-access/opencode.js'
+  );
+  const agentAccessOpenCodeLaunch = createAgentAccessOpenCodeLaunchPlanner(
+    pluginRuntime.inventoryStore,
+    pluginRuntime.supervisor,
+  );
+  const agentAccessOpenCodeFinalizer = createAgentAccessOpenCodeFinalizerPlanner(
+    pluginRuntime.inventoryStore,
+    pluginRuntime.supervisor,
+  );
+  const { createAgentAccessCodexExecLaunchPlanner } = await import('./domains/plugin/agent-access/codex.js');
+  const agentAccessCodexExecLaunch = createAgentAccessCodexExecLaunchPlanner(
+    pluginRuntime.inventoryStore,
+    pluginRuntime.supervisor,
+  );
+  const {
+    createAgentAccessCodexAppServerNotificationProjection,
+    createAgentAccessCodexAppServerThreadPlanner,
+    createAgentAccessCodexAppServerTurnPlanner,
+  } = await import('./domains/plugin/agent-access/codex-appserver.js');
+  const agentAccessCodexAppServerThread = createAgentAccessCodexAppServerThreadPlanner(
+    pluginRuntime.inventoryStore,
+    pluginRuntime.supervisor,
+  );
+  const agentAccessCodexAppServerTurn = createAgentAccessCodexAppServerTurnPlanner(
+    pluginRuntime.inventoryStore,
+    pluginRuntime.supervisor,
+  );
+  const agentAccessCodexAppServerNotifications = createAgentAccessCodexAppServerNotificationProjection(
+    pluginRuntime.inventoryStore,
+    pluginRuntime.supervisor,
+  );
+  const { createAgentAccessModelCatalogDiscovery, createAgentAccessModelCatalogGeneration } = await import(
+    './domains/plugin/agent-access/model-catalog.js'
+  );
+  const agentAccessModelCatalogGeneration = createAgentAccessModelCatalogGeneration(pluginRuntime.inventoryStore);
+  const agentAccessModelCatalog = createAgentAccessModelCatalogDiscovery(
+    pluginRuntime.inventoryStore,
+    pluginRuntime.supervisor,
+  );
+  const { createAgentAccessA2ARunner } = await import('./domains/plugin/agent-access/a2a.js');
+  const agentAccessA2ARunner = createAgentAccessA2ARunner(pluginRuntime.inventoryStore, pluginRuntime.supervisor);
+  const { createAgentAccessDshConnectionTest } = await import('./domains/plugin/agent-access/dsh.js');
+  const agentAccessDshConnection = createAgentAccessDshConnectionTest(
+    pluginRuntime.inventoryStore,
+    pluginRuntime.supervisor,
+  );
+  const { createAgentRoleRead, createAgentRoleWrite, registerAgentAccessRoutes } = await import(
+    './routes/agent-access-routes.js'
+  );
+  const agentRoleRead = createAgentRoleRead(pluginRuntime.inventoryStore, pluginRuntime.supervisor);
+  const agentRoleWrite = createAgentRoleWrite(pluginRuntime.inventoryStore, pluginRuntime.supervisor);
+  const { readLegacyNativeRuntimes, readDetection: readAgentAccessDetection } = registerAgentAccessRoutes(app, {
+    inventory: pluginRuntime.inventoryStore,
+    runtime: pluginRuntime.supervisor,
+  });
   registerAgentClientLibraryRoutes(app, {
     inventory: pluginRuntime.inventoryStore,
     packages: pluginRuntime.packages,
     registry: sessionImplementations,
     configuration: pluginRuntime.configuration,
+    runtime: pluginRuntime.supervisor,
   });
   registerPluginMarketplaceRoutes(app, marketplaceSources);
   const { PluginManagerBindings } = await import('./domains/plugin/manager/plugin-manager-bindings.js');
@@ -7132,7 +7264,7 @@ async function initializeApi(
   const { buildCatIdentityAliases } = await import('./domains/story/content-sanitizer.js');
   const exportStore = new StoryExportStore(annotationDataDir); // shares data/stories/ root
   // Build identity alias map from breeds config for Class D redaction coverage
-  const exportCatConfig = bootstrapDefaultCatCatalog();
+  const exportCatConfig = loadRuntimeCatConfig();
   const catIdentityAliases = buildCatIdentityAliases(
     exportCatConfig.breeds.map((b) => ({
       catId: b.catId,
@@ -7304,7 +7436,11 @@ async function initializeApi(
     },
   });
   await app.register(featureDocDetailRoutes);
-  await app.register(accountsRoutes);
+  const { createAgentAccessCodexLoginDriver } = await import('./domains/plugin/agent-access/codex-login.js');
+  await app.register(accountsRoutes, {
+    agentRoleWrite,
+    loginDriver: createAgentAccessCodexLoginDriver(pluginRuntime.inventoryStore, pluginRuntime.supervisor),
+  });
   await app.register(claudeRescueRoutes);
   await app.register(auditRoutes, { threadStore });
   await app.register(capabilitiesRoutes, {

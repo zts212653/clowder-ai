@@ -1,3 +1,4 @@
+import { AGENT_ACCESS_DECLARATION_FILE } from '@clowder-ai/agent-contract';
 import type { PluginManifest } from '@clowder-ai/plugin-contract';
 import { AGENT_PROVIDER_DECLARATION_FILE } from '../cats/services/agents/session-contract/plugin-agent-provider.js';
 import { resolvePackageFile } from './declared/declared-resource-paths.js';
@@ -9,14 +10,19 @@ export async function readPackageCapabilityRejection(
   manifest: PluginManifest,
   root: string,
 ): Promise<string | undefined> {
-  let declaration: unknown;
-  try {
-    declaration = await readDeclaration(
-      await resolvePackageFile(root, AGENT_PROVIDER_DECLARATION_FILE, 'Agent provider declaration'),
-    );
-  } catch (error) {
-    if (error instanceof AgentProviderDeclarationReadError) return error.message;
-    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
-  }
-  return packageCapabilityRejection(manifest, declaration, root);
+  const [provider, access] = await Promise.all(
+    [
+      [AGENT_PROVIDER_DECLARATION_FILE, 'Agent provider declaration'],
+      [AGENT_ACCESS_DECLARATION_FILE, 'Agent access declaration'],
+    ].map(async ([filename, label]) => {
+      try {
+        return { value: await readDeclaration(await resolvePackageFile(root, filename, label), label) };
+      } catch (error) {
+        if (error instanceof AgentProviderDeclarationReadError) return { error: error.message };
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT') return {};
+        throw error;
+      }
+    }),
+  );
+  return provider.error ?? access.error ?? packageCapabilityRejection(manifest, provider.value, root, access.value);
 }

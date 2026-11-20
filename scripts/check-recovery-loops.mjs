@@ -1,5 +1,5 @@
 import { readdirSync, readFileSync } from 'node:fs';
-import { join, relative, resolve } from 'node:path';
+import { join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { inspectRecoveryLoops } from './lib/recovery-loop-contract.mjs';
 
@@ -8,11 +8,15 @@ function readSources(directory) {
   return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
     const path = join(directory, entry.name);
     if (entry.isDirectory()) return readSources(path);
-    return entry.name.endsWith('.ts') ? [[relative(root, path), readFileSync(path, 'utf8')]] : [];
+    return entry.name.endsWith('.ts') ? [[relative(root, path).replaceAll(sep, '/'), readFileSync(path, 'utf8')]] : [];
   });
 }
 const registry = JSON.parse(readFileSync(join(root, 'packages/api/src/infrastructure/recovery/registry.json'), 'utf8'));
-const result = inspectRecoveryLoops(new Map(readSources(join(root, 'packages/api/src'))), registry.loops);
+const sourceRoots = ['packages/api/src', 'packages/agent-access-plugin/src'];
+const result = inspectRecoveryLoops(
+  new Map(sourceRoots.flatMap((directory) => readSources(join(root, directory)))),
+  registry.loops,
+);
 if (result.pending.length) result.findings.push({ code: 'unfinished-migration', ids: result.pending });
 for (const finding of result.findings) console.error(JSON.stringify(finding));
 console.log(

@@ -14,7 +14,8 @@ export const configOnboardingRoutes: FastifyPluginAsync<{ projectRoot: string }>
   const autoEligible = () => {
     try {
       const raw = readCatCatalogRaw(projectRoot, { persistMigrations: false });
-      const catalog: unknown = raw ? JSON.parse(raw) : null;
+      if (raw === null) return true;
+      const catalog: unknown = JSON.parse(raw);
       return (
         isUserSelectedCatalog(catalog) &&
         catalog !== null &&

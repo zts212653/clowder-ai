@@ -1,21 +1,15 @@
 import type { SDKUserMessage, query as sdkQuery } from '@anthropic-ai/claude-agent-sdk';
+import { discoverModelCatalog } from '@clowder-ai/agent-access/runtime/discover-model-catalog';
+import type { AgentAccessClaudeCatalogSnapshot } from '@clowder-ai/agent-contract';
 import { applySessionConfiguration } from '../domains/cats/services/agents/providers/acp/session-configuration.js';
 import {
   captureClaudeSdkRuntime,
   claudeSdkRuntimeOptions,
 } from '../domains/cats/services/agents/providers/claude-sdk-runtime.js';
 import { buildChildEnv } from '../utils/cli-spawn.js';
-import { claudeConfiguredDefaults } from './native-claude-defaults.js';
 import { catalogRpc } from './runtime-catalog-rpc.js';
 import { probeCodexCatalog } from './runtime-codex-discovery.js';
-import {
-  acpChoices,
-  acpOption,
-  parseAcpCatalog,
-  parseClaudeModels,
-  type RuntimeModelCatalog,
-  record,
-} from './runtime-model-catalog.js';
+import { acpOption, type RuntimeModelCatalog, record } from './runtime-model-catalog.js';
 
 export interface CatalogTarget {
   kind: 'codex' | 'claude' | 'acp';
@@ -24,49 +18,70 @@ export interface CatalogTarget {
   cwd: string;
   model?: string;
   env?: Record<string, string>;
+  generation?: string;
 }
+
+/** Fixture entry point for the native ACP parcel, without constructing a plugin inventory. */
 export async function probeRuntimeCatalog(target: CatalogTarget): Promise<RuntimeModelCatalog> {
-  if (target.kind === 'claude') return probeClaude(target);
   if (target.kind === 'codex') return probeCodexCatalog(target.command, target.args, target.cwd);
-  const rpc = catalogRpc(target.command, target.args, target.cwd, undefined, target.env);
+  const probe = prepareAcpModelCatalogProbe(target);
   try {
-    await rpc.request('initialize', {
-      protocolVersion: 1,
-      clientCapabilities: {},
-      clientInfo: { name: 'clowder-model-picker', version: '1.0.0' },
+    return await discoverModelCatalog({
+      input: { operation: 'discover_model_catalog', client: target.kind, input: { model: target.model } },
+      launch: async () => {
+        throw new Error('catalog_unavailable');
+      },
+      readClaude: () => readClaudeModelCatalog(target),
+      describeAcp: probe.describe,
+      selectAcpModel: probe.select,
     });
-    const session = record(await rpc.request('session/new', { cwd: target.cwd, mcpServers: [] }));
-    let selected: unknown = session;
-    if (target.model) {
-      const descriptor = acpOption(session, 'model');
-      if (!descriptor || !acpChoices(descriptor.options).some((item) => item.value === target.model)) {
-        // Keep custom / legacy aliases without applying an unadvertised value to the probe session.
-        return {
-          ...parseAcpCatalog(session, session),
-          effortOptions: undefined,
-          message: 'custom_model',
-        };
-      }
-      if (descriptor && target.model !== descriptor.currentValue) {
-        // Query dependent options only in this disposable discovery session.
-        if (typeof session.sessionId !== 'string') throw new Error('ACP 模型探测缺少会话标识');
-        selected = await applySessionConfiguration(
-          {
-            setSessionConfigOption: (sessionId, configId, value) =>
-              rpc.request('session/set_config_option', { sessionId, configId, value }),
-          },
-          { sessionId: session.sessionId, configOptions: session.configOptions },
-          { model: target.model },
-        );
-      }
-    }
-    return parseAcpCatalog(selected, session, target.model);
   } finally {
-    await rpc.close();
+    await probe.close();
   }
 }
 
-async function probeClaude(target: CatalogTarget): Promise<RuntimeModelCatalog> {
+/** One disposable ACP session; only model/effort metadata leaves the Host. */
+export function prepareAcpModelCatalogProbe(target: CatalogTarget) {
+  let rpc: ReturnType<typeof catalogRpc> | undefined;
+  let session: { sessionId: string; configOptions?: unknown } | undefined;
+  const configuration = (value: unknown) => ({
+    configOptions: [acpOption(value, 'model'), acpOption(value, 'thought_level')].filter(Boolean),
+  });
+  return {
+    async describe() {
+      if (rpc) throw new Error('catalog_request_not_approved');
+      rpc = catalogRpc(target.command, target.args, target.cwd, undefined, target.env);
+      await rpc.request('initialize', {
+        protocolVersion: 1,
+        clientCapabilities: {},
+        clientInfo: { name: 'clowder-model-picker', version: '1.0.0' },
+      });
+      const result = record(await rpc.request('session/new', { cwd: target.cwd, mcpServers: [] }));
+      if (typeof result.sessionId !== 'string') throw new Error('ACP 模型探测缺少会话标识');
+      session = { ...configuration(result), sessionId: result.sessionId };
+      return configuration(result);
+    },
+    async select(model: string) {
+      const connection = rpc;
+      if (!connection || !session || model !== target.model) throw new Error('catalog_request_not_approved');
+      return configuration(
+        await applySessionConfiguration(
+          {
+            setSessionConfigOption: (sessionId, configId, value) =>
+              connection.request('session/set_config_option', { sessionId, configId, value }),
+          },
+          session,
+          { model },
+        ),
+      );
+    },
+    async close() {
+      await rpc?.close();
+    },
+  };
+}
+
+export async function readClaudeModelCatalog(target: CatalogTarget): Promise<AgentAccessClaudeCatalogSnapshot> {
   const controller = new AbortController();
   const deadline = setTimeout(() => controller.abort(), 20_000);
   async function* noPrompts(): AsyncGenerator<SDKUserMessage> {
@@ -109,15 +124,34 @@ async function probeClaude(target: CatalogTarget): Promise<RuntimeModelCatalog> 
             permissionMode: 'plan',
           },
         });
-        return parseClaudeModels(await session.supportedModels());
+        return session.supportedModels();
       })
       .catch(() => []);
-    const settings = await settingsRead;
+    const settings = (await settingsRead)?.effective;
     return {
-      status: models.length ? 'live' : 'unavailable',
       models,
-      ...(!models.length ? { message: 'discovery_failed' } : {}),
-      ...(settings ? claudeConfiguredDefaults(settings.effective, models, target.model) : {}),
+      env: {
+        ANTHROPIC_MODEL: process.env.ANTHROPIC_MODEL,
+        CLAUDE_CODE_EFFORT_LEVEL: process.env.CLAUDE_CODE_EFFORT_LEVEL,
+      },
+      ...(settings
+        ? {
+            settings: {
+              ...(settings.model ? { model: settings.model } : {}),
+              ...(settings.effortLevel ? { effortLevel: settings.effortLevel } : {}),
+              env: {
+                ANTHROPIC_MODEL: settings.env?.ANTHROPIC_MODEL,
+                CLAUDE_CODE_EFFORT_LEVEL: settings.env?.CLAUDE_CODE_EFFORT_LEVEL,
+              },
+              modelSettings: Object.fromEntries(
+                Object.entries(settings.modelSettings ?? {}).map(([id, value]) => [
+                  id,
+                  { effortLevel: value.effortLevel },
+                ]),
+              ),
+            },
+          }
+        : {}),
     };
   } finally {
     clearTimeout(deadline);

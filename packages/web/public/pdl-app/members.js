@@ -622,7 +622,22 @@ function bindMembers() {
       cloud = !!(current && current.identityProtection && current.identityProtection.kind === 'builtin-cloud'),
       catalogState = runtimeCatalogState(),
       runtime = selectedRuntime(f),
-      shared = clientSettingsState();
+      shared = clientSettingsState(),
+      pluginRuntimes = meta.runtimes
+        .filter(function (row) {
+          return row.acp && row.acp.agentProvider && row.installed;
+        })
+        .map(function (row) {
+          return { id: row.id, label: row.label };
+        });
+    if (
+      f.acpAgentProvider &&
+      !pluginRuntimes.some(function (row) {
+        return row.id === f.acpAgentProvider;
+      })
+    )
+      pluginRuntimes.unshift({ id: f.acpAgentProvider, label: f.acpAgentProvider });
+    pluginRuntimes.unshift({ id: '', label: tc('memberForm.fields.pluginClientNone') });
     const d = Object.fromEntries(
       Object.keys(memberFields).map(function (key) {
         return [key, f[memberFields[key]]];
@@ -692,6 +707,9 @@ function bindMembers() {
       clients: meta.clients.map(function (c) {
         return { value: c.id, name: c.label, type: c.plugin ? 'plugin' : 'name', pluginName: c.plugin, why: '' };
       }),
+      pluginRuntimes: pluginRuntimes,
+      hasPluginRuntimes: pluginRuntimes.length > 1,
+      runtimeChoice: f.acpAgentProvider || '',
       via: (client ? client.carriers : []).map(function (c) {
         return { value: c[0], name: c[0], type: 'name', why: '' };
       }),
@@ -863,7 +881,14 @@ function bindMembers() {
       runtime = meta.runtimes.find(function (row) {
         return row.id === e.target.value;
       });
-    if (!runtime) return;
+    if (!runtime) {
+      if (!e.target.value) {
+        state.form.acpAgentProvider = null;
+        if (state.form.acpCommand === 'plugin-agent') state.form.acpCommand = '';
+      }
+      render(true);
+      return;
+    }
     Object.assign(state.form, pdlClone(runtime.form));
     commitModel(state.form);
     render(true);
@@ -1387,9 +1412,20 @@ function bindMembers() {
     d = S.dialog;
   };
   S.nativeSetup = null;
+  // The member-page entry and the first-run guide share one popup. Only the guide path owns the one-way
+  // onboarding receipt; closing or finishing from the member page must leave it untouched.
+  S.nativeSetupFrom = null;
   beforeRender(function () {
-    if (S.popOn.nativeSetup && !S.nativeSetup) A.nativeDetect({ refresh: false });
-    if (!S.popOn.nativeSetup) S.nativeSetup = null;
+    if (S.popOn.nativeSetup && !S.nativeSetup) {
+      if (!S.nativeSetupFrom) S.nativeSetupFrom = S.route === 'members' ? 'members' : 'guide';
+      A.nativeDetect({ refresh: false });
+    }
+    if (!S.popOn.nativeSetup && S.nativeSetup) {
+      const from = S.nativeSetupFrom;
+      S.nativeSetup = null;
+      S.nativeSetupFrom = null;
+      if (from === 'guide') settleHold(chatAction('guideEntryDismiss'));
+    }
   });
   A.nativeDetect = function (data) {
     const previous = S.nativeSetup;
@@ -1397,6 +1433,8 @@ function bindMembers() {
     const setup = (S.nativeSetup = {
       journeyId: previous ? previous.journeyId : PLATFORM.uuid(),
       partners: [],
+      readiness: null,
+      partialFailures: [],
       busy: true,
       submitError: '',
       failedPartner: null,
@@ -1404,8 +1442,11 @@ function bindMembers() {
     return settleHold(
       act('nativeDetect', { journeyId: setup.journeyId, refresh: String(data.refresh !== false) })
         .then(
-          function (partners) {
-            if (S.nativeSetup === setup) setup.partners = partners;
+          function (result) {
+            if (S.nativeSetup !== setup) return;
+            setup.partners = Array.isArray(result) ? result : (result && (result.candidates || result.partners)) || [];
+            setup.readiness = Array.isArray(result) ? null : (result && result.readiness) || null;
+            setup.partialFailures = Array.isArray(result) ? [] : (result && result.partialFailures) || [];
           },
           function (error) {
             if (S.nativeSetup === setup) setup.submitError = error.message;
@@ -1436,6 +1477,8 @@ function bindMembers() {
             effort: 'probe-' + p.id + '-effort',
           },
           adjusting: !!p.adjusting,
+          loginCommand:
+            p.runtime.readiness && p.runtime.readiness.status !== 'configured' && p.runtime.readiness.loginCommand,
           get preferences() {
             return memberPreferences(p.form, runtimeCatalogState(p.form, '', p.runtime), p.runtime.acpMaxDefault);
           },
@@ -1443,11 +1486,19 @@ function bindMembers() {
             ? 'created'
             : p.identityConflict
               ? 'conflict'
-              : p.selectable
-                ? p.runtime.dshDesktop
-                  ? 'dshAuto'
-                  : 'ready'
-                : 'unavailable',
+              : p.state === 'failed'
+                ? 'partialFailure'
+                : p.runtime && p.runtime.readiness && p.runtime.readiness.status === 'login_required'
+                  ? 'loginRequired'
+                  : p.runtime && p.runtime.discoveryStatus === 'adapter_missing'
+                    ? 'unsupported'
+                    : p.runtime && p.runtime.installed === false
+                      ? 'unavailable'
+                      : p.selectable
+                        ? p.runtime.dshDesktop
+                          ? 'dshAuto'
+                          : 'ready'
+                        : 'needsConfig',
         };
       }),
       createDisabled:
@@ -1458,7 +1509,32 @@ function bindMembers() {
       hasMembers: cats().length > 0,
       submitError: g.submitError,
       failedPartner: g.failedPartner,
+      readiness:
+        g.readiness && g.readiness.state !== 'ready'
+          ? Object.assign({}, g.readiness, {
+              isMissing: g.readiness.state === 'missing',
+              isDisabled: g.readiness.state === 'disabled',
+              isStarting: g.readiness.state === 'starting',
+              isFailed: g.readiness.state === 'failed',
+              isIncompatible: g.readiness.state === 'incompatible',
+              canInstall: g.readiness.action === 'install' || (!g.readiness.action && g.readiness.state === 'missing'),
+              canEnable: g.readiness.action === 'enable' || (!g.readiness.action && g.readiness.state === 'disabled'),
+              canRetry:
+                g.readiness.action === 'retry' ||
+                (!g.readiness.action && (g.readiness.state === 'failed' || g.readiness.state === 'starting')),
+              canRepair:
+                g.readiness.action === 'repair' || (!g.readiness.action && g.readiness.state === 'incompatible'),
+            })
+          : null,
+      partialFailureCount: (g.partialFailures || []).length,
     };
+  };
+  A.nativeCopyLogin = function (data) {
+    const partner = S.nativeSetup.partners.find(function (row) {
+      return row.id === data.id;
+    });
+    const command = partner && partner.runtime.readiness && partner.runtime.readiness.loginCommand;
+    if (command) return copyText(command);
   };
   A.nativeSelect = function (data) {
     const setup = S.nativeSetup;
@@ -1518,6 +1594,40 @@ function bindMembers() {
       setup.busy = false;
       render(true);
     }
+  };
+  A.nativeReadinessAction = function (data) {
+    if (data && data.action === 'retry') return A.nativeDetect({ refresh: true });
+    S.popOn.nativeSetup = false;
+    S.nativeSetup = null;
+    S.nativeSetupFrom = null;
+    go('ext');
+    render(true);
+  };
+  A.nativeSetupDone = async function () {
+    const from = S.nativeSetupFrom,
+      setup = S.nativeSetup;
+    S.nativeSetup = null;
+    S.nativeSetupFrom = null;
+    S.popOn.nativeSetup = false;
+    if (from === 'guide') {
+      try {
+        await chatAction('guideEntryComplete');
+      } catch (error) {
+        toast(error.message, null, 'danger');
+      }
+    } else if (
+      setup &&
+      setup.partners.some(function (p) {
+        return p.existingId;
+      })
+    ) {
+      try {
+        await read();
+      } catch (error) {
+        toast(error.message, null, 'danger');
+      }
+    }
+    render(true);
   };
   A.memberCloudRestore = async function () {
     const state = draft();

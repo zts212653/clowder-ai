@@ -1,0 +1,46 @@
+{
+  "name": "@clowder-ai/agent-contract",
+  "version": "1.0.0",
+  "type": "module",
+  "files": [
+    "dist"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./acp": {
+      "types": "./dist/acp.d.ts",
+      "import": "./dist/acp.js"
+    },
+    "./agy": {
+      "types": "./dist/agy.d.ts",
+      "import": "./dist/agy.js"
+    },
+    "./catagent": {
+      "types": "./dist/catagent.d.ts",
+      "import": "./dist/catagent.js"
+    },
+    "./claude": {
+      "types": "./dist/claude.d.ts",
+      "import": "./dist/claude.js"
+    },
+    "./dsh-turn": {
+      "types": "./dist/dsh-turn.d.ts",
+      "import": "./dist/dsh-turn.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+
+    "lint": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@cat-cafe/shared": "workspace:*",
+    "zod": "^3.22.4"
+  },
+  "devDependencies": {
+    "typescript": "^5.3.3"
+  }
+}

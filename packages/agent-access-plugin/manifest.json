@@ -1,0 +1,24 @@
+{
+  "pluginId": "official.agent-access",
+  "version": "1.1.0",
+  "contractVersion": "0.4.0-candidate.0",
+  "name": "Agent Access",
+  "description": {
+    "default": "检测本机 Agent 客户端并管理成员角色与连接。",
+    "translations": {
+      "en": "Discover Agent clients, manage members, and connect remote agents."
+    }
+  },
+  "features": [
+    {
+      "id": "agent-access",
+      "name": "Agent access",
+      "capabilities": [],
+      "resources": []
+    }
+  ],
+  "runtime": {
+    "transport": "builtin",
+    "entrypoint": "entrypoint.mjs"
+  }
+}

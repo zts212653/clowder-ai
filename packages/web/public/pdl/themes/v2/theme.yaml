@@ -7594,6 +7594,22 @@ pdl:
                       v: key
                   - scope: t:accounts.create.localLoginHelp
       - kind: field
+        label: t:memberForm.fields.pluginClient
+        id: f-runtime
+        control:
+          type: component
+          use: v2Select
+          props:
+            id: f-runtime
+            value: $.form.runtimeChoice
+            change: memberRuntime
+            options:
+              - from: $.form.pluginRuntimes
+                item:
+                  v: "@id"
+                  label: "@label"
+        when: $.form.hasPluginRuntimes
+      - kind: field
         label: t:common.source
         control:
           type: component
@@ -22248,6 +22264,8 @@ pdl:
                         args:
                           page: memberNew
                         role: member
+                    - type: component
+                      use: v2MemberActions
                   defaults:
                     - type: component
                       use: v2MemberDefaultCat
@@ -23316,6 +23334,16 @@ pdl:
           foot: $.error
           footTone: err
       ok: t:guide.next
+    dlg.pluginArchiveReplace:
+      title: t:archiveReplacement.title
+      text:
+        - t: archiveReplacement.version
+          args:
+            - $.displayName
+            - $.currentVersion
+            - $.candidateVersion
+        - t: archiveReplacement.retention
+      ok: t:archiveReplacement.confirm
     dlg.pluginFileInspect:
       bare: true
       title:
@@ -30490,10 +30518,75 @@ pdl:
               - type: component
                 use: v2Action
                 props:
+                  label: t:nativeSetup.readiness.install
+                  act: nativeReadinessAction
+                  args:
+                    action: install
+                when: $.readiness.canInstall
+              - type: component
+                use: v2Action
+                props:
+                  label: t:nativeSetup.readiness.enable
+                  act: nativeReadinessAction
+                  args:
+                    action: enable
+                when: $.readiness.canEnable
+              - type: component
+                use: v2Action
+                props:
+                  label: t:nativeSetup.readiness.retry
+                  act: nativeReadinessAction
+                  args:
+                    action: retry
+                when: $.readiness.canRetry
+              - type: component
+                use: v2Action
+                props:
+                  label: t:nativeSetup.readiness.repair
+                  act: nativeReadinessAction
+                  args:
+                    action: repair
+                when: $.readiness.canRepair
+              - type: component
+                use: v2Action
+                props:
                   label: t:common.done
-                  act: guideEntryComplete
+                  act: nativeSetupDone
                 when: $.hasMembers
             blocks:
+              - type: component
+                use: v2Notice
+                props:
+                  tone: warn
+                  parts:
+                    - text:
+                        of: $.readiness.state
+                        map:
+                          missing: t:nativeSetup.readiness.missing
+                          disabled: t:nativeSetup.readiness.disabled
+                          starting: t:nativeSetup.readiness.starting
+                          failed: t:nativeSetup.readiness.failed
+                          incompatible: t:nativeSetup.readiness.incompatible
+                when: $.readiness
+              - type: component
+                use: v2Notice
+                props:
+                  tone: danger
+                  parts:
+                    - text:
+                        t: nativeSetup.partialFailureCount
+                        args:
+                          - $.partialFailureCount
+                when: $.partialFailureCount
+              - type: component
+                use: v2Notice
+                props:
+                  tone: danger
+                  parts:
+                    - text: $.readiness.reason
+                when:
+                  - $.readiness
+                  - $.readiness.reason
               - type: component
                 use: v2List
                 props:
@@ -30526,8 +30619,22 @@ pdl:
                               dshAuto: t:nativeSetup.dshAuto
                               unavailable: t:common.status.notInstalled
                               conflict: t:nativeSetup.conflict
+                              loginRequired: t:nativeSetup.loginRequired
+                              unsupported: t:nativeSetup.unsupported
+                              needsConfig: t:nativeSetup.needsConfig
+                              partialFailure: t:nativeSetup.partialFailure
                               _: "@state"
                         w: auto
+                      - w: ctl
+                        control:
+                          type: component
+                          use: v2Action
+                          props:
+                            label: t:nativeSetup.copyLogin
+                            act: nativeCopyLogin
+                            args:
+                              id: "@id"
+                          when: "@loginCommand"
                       - w: ctl
                         control:
                           type: component

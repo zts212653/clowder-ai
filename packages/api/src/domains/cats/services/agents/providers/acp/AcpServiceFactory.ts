@@ -29,7 +29,7 @@ import { prepareDshSecretPatch, verifyDshSecretPatch } from '../dsh-secret-patch
 import { ensureKimiSecretHooks } from '../kimi-secret-hooks.js';
 import { prepareOpenCodeAcpSpawnConfig } from '../opencode-acp-spawn-config.js';
 import { piBridgeStorageArgs } from '../pi/pi-bridge-launch.js';
-import { AcpAgentService } from './AcpAgentService.js';
+import { AcpAgentService, type AcpAgentServiceConfig, type CreateAcpMemberClient } from './AcpAgentService.js';
 import { AcpClient, type AcpClientConfig } from './AcpClient.js';
 import { AcpHttpStreamClient } from './AcpHttpStreamClient.js';
 import { AcpProcessPool, DEFAULT_ACP_IDLE_TTL_MS } from './AcpProcessPool.js';
@@ -73,6 +73,8 @@ export interface CreateAcpServiceForConfigInput {
   acpConfig: AcpVariantConfig;
   /** Catalog construction uses its existing accessor; plugin sources retain their registration fence. */
   resolveCurrentAcpConfig?(): AcpVariantConfig | undefined;
+  selectSessionModel?: AcpAgentServiceConfig['selectSessionModel'];
+  createClient?: CreateAcpMemberClient;
   poolRegistry: AcpPoolRegistry;
   log: Pick<FastifyBaseLogger, 'info' | 'warn'>;
   /** Tests supply an owned throwaway root; production uses the platform default. */
@@ -262,7 +264,7 @@ async function ensureAcpPool(
     cwd: bootstrap.cwd,
     bootstrapIsolation: bootstrap.isolation,
     environmentFingerprint: createHmac('sha256', environmentFingerprintKey)
-      .update(acpConstructionJson(construction))
+      .update(acpConstructionJson(input.createClient ? { construction, driver: 'agent-access' } : construction))
       .digest('hex'),
     openCodeRuntimeConfig: spawn.openCodeRuntimeConfig,
     contextPolicy: spawn.contextPolicy,
@@ -313,7 +315,10 @@ async function ensureAcpPool(
           ? { inheritParentEnv: false, permissionHandler: denyAgyAcpPermission, antigravityDiagnostics: true }
           : {}),
       };
-      return acpConfig.transport === 'httpstream' ? new AcpHttpStreamClient(clientCfg) : new AcpClient(clientCfg);
+      return (
+        input.createClient?.(clientCfg, acpConfig.transport) ??
+        (acpConfig.transport === 'httpstream' ? new AcpHttpStreamClient(clientCfg) : new AcpClient(clientCfg))
+      );
     },
     spawnSignature,
     pendingAcpPoolRetirement(poolRegistry, profileId),
@@ -532,6 +537,7 @@ export async function createAcpServiceForConfig(
   // #712 P1-1: pass whitelist — MCP resolution happens at invoke time in
   // AcpAgentService so capability toggles take effect without registry rebuild.
   const service = new AcpAgentService({
+    createStdioClient: input.createClient,
     ...(turnPatch ? { dshTurnInput: true } : {}),
     ...(nativeDsh ? { nativeDsh } : {}),
     ...(nativeKimi ? { nativeKimi } : {}),
@@ -548,6 +554,7 @@ export async function createAcpServiceForConfig(
     // configuration id), distinct from defaultModel (display/audit model name).
     // The factory rejects iCode members without it, so this is always defined.
     sessionModel: acpConfig.protocolAdapter === 'icode' ? icodeModelProfileId : spawn.sessionModel,
+    selectSessionModel: input.selectSessionModel,
     protocolAdapter: acpConfig.protocolAdapter,
     executionApproval:
       spawn.antigravity && spawn.antigravity.profile.autoApprove !== true

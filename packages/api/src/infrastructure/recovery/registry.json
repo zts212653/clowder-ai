@@ -109,12 +109,12 @@
       ]
     },
     {
-      "id": "exempt:domains/cats/services/agents/providers/acp/AcpClient.ts",
-      "owner": "packages/api/src/domains/cats/services/agents/providers/acp/AcpClient.ts",
+      "id": "exempt:agent-access/runtime/acp/AcpClient.ts",
+      "owner": "packages/agent-access-plugin/src/runtime/acp/AcpClient.ts",
       "state": "exempt",
       "reason": "Per-prompt idle watchdog resets one live request deadline, not historical work.",
       "sites": [
-        "packages/api/src/domains/cats/services/agents/providers/acp/AcpClient.ts#AcpClient.promptStream.scheduleIdleCheck.idleTimer"
+        "packages/agent-access-plugin/src/runtime/acp/AcpClient.ts#AcpClient.promptStream.scheduleIdleCheck.idleTimer"
       ]
     },
     {

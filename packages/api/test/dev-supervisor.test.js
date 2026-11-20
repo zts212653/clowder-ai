@@ -123,8 +123,9 @@ test('dev supervisor direct execution follows a directory alias', () => {
 
 test('dev supervisor package entry points at the Node supervisor', async () => {
   const packageJson = JSON.parse(await readFile(join(packageRoot, 'package.json'), 'utf8'));
-  assert.match(
-    packageJson.scripts.dev,
-    /^(?:node --import tsx \.\/scripts\/copy-bundled-plugin-packages\.mjs --source && )?node scripts\/dev-supervisor\.mjs$/,
-  );
+  assert.deepEqual(packageJson.scripts.dev.split(' && '), [
+    'pnpm --filter @clowder-ai/agent-access... build',
+    'node --import tsx ./scripts/copy-bundled-plugin-packages.mjs --source',
+    'node scripts/dev-supervisor.mjs',
+  ]);
 });

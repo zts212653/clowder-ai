@@ -15,7 +15,8 @@ beforeEach(() => {
   vi.resetAllMocks();
   useMemberModelCatalogs.setState({ runtimes: [{ ...runtime, label: 'DSH Desktop', clientId: 'acp', models: [] }] });
   vi.mocked(apiFetch).mockImplementation(async (url) => {
-    if (url.endsWith('/native-runtimes')) return Response.json({ runtimes: [runtime] });
+    if (url.endsWith('/agent-access/v1/detect'))
+      return Response.json({ readiness: { state: 'ready' }, candidates: [runtime] });
     if (url.endsWith('/inspect'))
       return Response.json({
         revision: 'revision',
@@ -154,8 +155,11 @@ it('does not prepare a Desktop route for effort or pool edits and retains its HO
     ),
   ).toBe(false);
   vi.mocked(apiFetch).mockImplementation(async (url) => {
-    if (url.endsWith('/native-runtimes'))
-      return Response.json({ runtimes: [{ ...runtime, acp: { ...runtime.acp, command: cat.acp.command } }] });
+    if (url.endsWith('/agent-access/v1/detect'))
+      return Response.json({
+        readiness: { state: 'ready' },
+        candidates: [{ ...runtime, acp: { ...runtime.acp, command: cat.acp.command } }],
+      });
     if (url.endsWith('/inspect'))
       return Response.json({
         revision: 'revision',

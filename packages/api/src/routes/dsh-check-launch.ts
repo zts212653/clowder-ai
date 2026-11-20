@@ -97,7 +97,7 @@ export function createDshCheckLaunch(binding: ReturnType<typeof readDshCheckBind
   return {
     directory,
     launch: { ...launch, args, cwd, env: { ...launch.env, DSH_HOME: home } },
-    // directory is the exact absolute mkdtemp result owned by this check.
-    close: () => rmSync(directory, { recursive: true, force: true }),
+    // Windows can retain a file handle briefly after the disposable child exits.
+    close: () => rmSync(directory, { recursive: true, force: true, maxRetries: 4, retryDelay: 100 }),
   };
 }

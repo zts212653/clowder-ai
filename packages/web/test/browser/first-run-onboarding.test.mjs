@@ -119,7 +119,8 @@ function mockApi(route, runtimes, writes, catalog) {
         recent24h: { totalFailures: 0, byReason: {}, byTool: {}, byCat: {} },
       },
     });
-  if (url.pathname === '/api/cats/native-runtimes') return route.fulfill({ json: { runtimes } });
+  if (url.pathname === '/api/agent-access/v1/detect')
+    return route.fulfill({ json: { readiness: { state: 'ready' }, candidates: runtimes } });
   if (url.pathname === '/api/cats/runtime-models')
     return route.fulfill({
       json: catalog ?? {

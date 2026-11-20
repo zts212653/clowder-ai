@@ -46,13 +46,20 @@ import { agentServiceGeneration } from '../../registry/AgentRegistry.js';
 import {
   type AcpCapacitySignal,
   type AcpClient,
+  type AcpClientConfig,
   type AcpPermissionHandler,
   AcpProtocolError,
   AcpSessionCancelledError,
   AcpStreamIdleError,
   AcpTimeoutError,
 } from './AcpClient.js';
-import { type AcpLease, type AcpProcessPool, DEFAULT_ACP_IDLE_TTL_MS, type PoolKey } from './AcpProcessPool.js';
+import {
+  type AcpLease,
+  type AcpPoolClient,
+  type AcpProcessPool,
+  DEFAULT_ACP_IDLE_TTL_MS,
+  type PoolKey,
+} from './AcpProcessPool.js';
 import {
   bindSessionCredentialFile,
   type PreparedCredentialEnv,
@@ -87,7 +94,11 @@ import {
   resolveKimiShareDir,
 } from './kimi/kimi-turn-outcome.js';
 import { captureNativeDefaults, defaultsForNativeResume } from './native-session-defaults.js';
-import { applySessionConfiguration, reportedSessionModel } from './session-configuration.js';
+import {
+  applySessionConfiguration,
+  reportedSessionModel,
+  resolveSessionModelConfigOption,
+} from './session-configuration.js';
 import type {
   AcpInitializeResult,
   AcpMcpServer,
@@ -160,6 +171,14 @@ type PromptPhase =
    */
   | 'busy_backoff';
 
+export type CreateAcpMemberClient = (
+  config: AcpClientConfig,
+  transport?: 'stdio' | 'httpstream',
+) => AcpPoolClient &
+  Pick<AcpClient, 'newSession' | 'promptStream' | 'setSessionModel'> & {
+    cancelSession(sessionId: string): void;
+  };
+
 export interface AcpAgentServiceConfig {
   /** Factory admitted the reviewed Desktop turn bridge for this pooled carrier. */
   dshTurnInput?: boolean;
@@ -167,6 +186,7 @@ export interface AcpAgentServiceConfig {
   defaultPermissionDecision?: 'allow' | 'reject';
   /** Factory-verified installed native DSH, separate from ordinary pooled sessions. */
   nativeDsh?: DshNativeLaunch;
+  createStdioClient?: CreateAcpMemberClient;
   nativeKimi?: KimiNativeLaunch;
   antigravity?: AgyAcpConfig;
   catId: CatId;
@@ -190,6 +210,10 @@ export interface AcpAgentServiceConfig {
   modelName?: string;
   /** ACP session model override sent via session/set_config_option when the agent exposes model selection. */
   sessionModel?: string;
+  selectSessionModel?: (
+    session: { configOptions?: unknown },
+    model: string,
+  ) => { configId: string } | null | Promise<{ configId: string } | null>;
   /**
    * Protocol adapter selection. 'icode' switches the service onto iCode's ACP
    * dialect: model selection via standard session/set_model (fail-loud), no
@@ -230,6 +254,7 @@ export class AcpAgentService implements AgentService {
    */
   readonly windowsProviderHosts = false;
   private readonly nativeDsh?: DshNativeLaunch;
+  private readonly createStdioClient?: CreateAcpMemberClient;
   private readonly dshTurnInput: boolean;
   private readonly nativeKimi?: KimiNativeLaunch;
   private readonly antigravity?: AgyAcpConfig;
@@ -251,6 +276,7 @@ export class AcpAgentService implements AgentService {
    */
   private modelName: string;
   private readonly sessionModel?: string;
+  private readonly selectSessionModel: NonNullable<AcpAgentServiceConfig['selectSessionModel']>;
   readonly protocolAdapter: 'icode' | undefined;
   private readonly executionApproval: 'auto' | 'ask_user';
   private readonly defaultPermissionDecision?: 'allow' | 'reject';
@@ -274,6 +300,7 @@ export class AcpAgentService implements AgentService {
   constructor(config: AcpAgentServiceConfig) {
     this.dshTurnInput = config.dshTurnInput === true;
     this.nativeDsh = config.nativeDsh;
+    this.createStdioClient = config.createStdioClient;
     this.nativeKimi = config.nativeKimi;
     this.antigravity = config.antigravity;
     this.catId = config.catId;
@@ -286,6 +313,7 @@ export class AcpAgentService implements AgentService {
     this.providerName = config.providerName ?? 'acp';
     this.modelName = config.modelName ?? config.sessionModel ?? 'acp';
     this.sessionModel = config.sessionModel?.trim() || undefined;
+    this.selectSessionModel = config.selectSessionModel ?? resolveSessionModelConfigOption;
     this.protocolAdapter = config.protocolAdapter;
     this.executionApproval = config.executionApproval ?? 'auto';
     this.defaultPermissionDecision = config.defaultPermissionDecision;
@@ -434,6 +462,7 @@ export class AcpAgentService implements AgentService {
     for (let attempt = 0; ; attempt++) {
       let yieldedEvents = 0;
       await hooks?.beforeAttempt?.(attempt);
+      signal?.throwIfAborted();
       hooks?.onAttemptStart?.();
       try {
         const stream = client.promptStream(sessionId, prompt, opts);
@@ -522,6 +551,7 @@ export class AcpAgentService implements AgentService {
         catId: this.catId,
         modelSelection: this.sessionModel ?? this.modelName,
         native: this.nativeKimi,
+        createClient: this.createStdioClient,
         prompt,
         options,
       });
@@ -532,6 +562,7 @@ export class AcpAgentService implements AgentService {
         catId: this.catId,
         modelSelection: this.sessionModel ?? this.modelName,
         native: this.nativeDsh,
+        createClient: this.createStdioClient,
         prompt,
         options,
       });
@@ -670,6 +701,8 @@ export class AcpAgentService implements AgentService {
       close?(): Promise<void>;
       /** True when the latest prompt received a final RPC response, including a provider error. */
       hasPromptFinalResponse?(sessionId: string): boolean;
+      /** Agent Access Host-side evidence of a prompt that can still reach the native client. */
+      hasUnconfirmedPrompt?(sessionId: string): boolean;
       readonly promptCapabilities?: AcpPromptCapabilities;
     };
     const cwd = options?.workingDirectory ?? this.projectRoot;
@@ -716,14 +749,16 @@ export class AcpAgentService implements AgentService {
     const requiresProviderShutdown = () => promptPhase === 'locally_terminated_unacknowledged';
 
     const sealActivePromptSession = (activeSessionId: string): boolean => {
-      if (promptPhase !== 'active_unacknowledged') return false;
+      if (promptPhase !== 'active_unacknowledged' || client.hasUnconfirmedPrompt?.(activeSessionId) === false)
+        return false;
       promptPhase = 'locally_terminated_unacknowledged';
       const sessionIds = new Set([activeSessionId, options?.sessionId].filter((id): id is string => Boolean(id)));
       for (const id of sessionIds) this.pool.sealSession?.(this.poolKey, id);
       return true;
     };
     const cancelActivePromptSession = (activeSessionId: string): boolean => {
-      if (!sealActivePromptSession(activeSessionId)) return false;
+      if (promptPhase !== 'active_unacknowledged') return false;
+      sealActivePromptSession(activeSessionId);
       client.cancelSession(activeSessionId);
       return true;
     };
@@ -735,7 +770,8 @@ export class AcpAgentService implements AgentService {
     // notification; lease release and iterator return are not stop receipts), so the Host must
     // keep the physical stop unknown. A prompt that never left the Host owns no writer.
     const promptStopUnconfirmed = () =>
-      promptPhase === 'active_unacknowledged' || promptPhase === 'locally_terminated_unacknowledged';
+      promptPhase === 'locally_terminated_unacknowledged' ||
+      (promptPhase === 'active_unacknowledged' && !!sessionId && client.hasUnconfirmedPrompt?.(sessionId) !== false);
 
     // Per-invoke capacity listener — covers the entire invoke lifecycle (newSession + prompt + grace).
     // This is intentionally invoke-level, not prompt-level: capacity is a provider-level property
@@ -996,8 +1032,9 @@ export class AcpAgentService implements AgentService {
             return;
           }
         } else {
-          const modelConfig = !agy && sessionModel ? resolveSessionModelConfigOption(session, sessionModel) : null;
-          if (!nativeTool && modelConfig && sessionModel) {
+          const modelConfig =
+            !agy && !nativeTool && sessionModel ? await this.selectSessionModel(session, sessionModel) : null;
+          if (modelConfig && sessionModel && !options?.signal?.aborted) {
             try {
               await client.setSessionConfigOption(sessionId, modelConfig.configId, sessionModel);
               log.info({ ...ctx, sessionId, model: this.sessionModel }, 'ACP session model selected');
@@ -1187,7 +1224,6 @@ export class AcpAgentService implements AgentService {
         if (bridgeSteerAvailable && options?.activeRunDispatch)
           dshTurn = new DshTurnInput(dshClient, sessionId, options);
       }
-      promptPhase = 'active_unacknowledged';
       for await (const event of this.promptStreamWithBusyRetry(
         client,
         sessionId,
@@ -1374,8 +1410,9 @@ export class AcpAgentService implements AgentService {
               return;
             }
           } else {
-            const modelConfig = sessionModel ? resolveSessionModelConfigOption(freshSession, sessionModel) : null;
-            if (!nativeTool && modelConfig && sessionModel) {
+            const modelConfig =
+              !nativeTool && sessionModel ? await this.selectSessionModel(freshSession, sessionModel) : null;
+            if (modelConfig && sessionModel && !options?.signal?.aborted) {
               try {
                 await client.setSessionConfigOption(freshSessionId, modelConfig.configId, sessionModel);
               } catch {
@@ -1692,32 +1729,6 @@ export class AcpAgentService implements AgentService {
 export const GeminiAcpAdapter = AcpAgentService;
 /** @deprecated Use AcpAgentServiceConfig. */
 export type { AcpAgentServiceConfig as GeminiAcpAdapterConfig_Deprecated };
-
-function resolveSessionModelConfigOption(
-  session: { configOptions?: unknown },
-  modelId: string,
-): { configId: string } | null {
-  const configOptions = session.configOptions;
-  if (!Array.isArray(configOptions)) return null;
-  const modelOption = configOptions.find(
-    (option) => isRecord(option) && (option.id === 'model' || option.category === 'model'),
-  );
-  if (!isRecord(modelOption)) return null;
-  const configId = typeof modelOption.id === 'string' ? modelOption.id.trim() : '';
-  if (!configId) return null;
-  if (modelOption.currentValue === modelId) return null;
-  const optionValues = Array.isArray(modelOption.options)
-    ? modelOption.options
-        .map((option) => (isRecord(option) && typeof option.value === 'string' ? option.value.trim() : ''))
-        .filter(Boolean)
-    : [];
-  if (optionValues.length > 0 && !optionValues.includes(modelId)) return null;
-  return { configId };
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null;
-}
 
 /** F149: Build a provider_signal warning for realtime capacity display. */
 function makeCapacityWarning(

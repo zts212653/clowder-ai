@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { setTimeout as delay } from 'node:timers/promises';
+import {
+  buildCodexAppServerThreadParams,
+  buildCodexAppServerTurnParams,
+} from '../../agent-access-plugin/src/runtime/codex-appserver-params.ts';
 import { CodexAppServerClient } from '../dist/domains/cats/services/agents/providers/CodexAppServerClient.js';
 import { runCodexAppServerWithRecovery } from '../dist/domains/cats/services/agents/providers/CodexAppServerRunner.js';
 import { CodexAppServerRpcError } from '../dist/domains/cats/services/agents/providers/codex-app-server-rpc-error.js';
@@ -185,6 +189,408 @@ class ProtocolWire {
     this.inbox.close();
   }
 }
+
+test('plans app-server thread/turn params through the active package without leaking values', async () => {
+  const wire = new ProtocolWire();
+  const write = wire.write.bind(wire);
+  wire.write = async (message) => {
+    await write(message);
+    if (message.method === 'turn/start') {
+      wire.inbox.push({
+        method: 'turn/completed',
+        params: { threadId: 'thread-1', turn: { id: 'turn-1', status: 'completed' } },
+      });
+    }
+  };
+  let threadRequest;
+  let turnRequest;
+  let currentChecks = 0;
+  let beforeTurnStart = false;
+  let turnAssertSawBefore = false;
+  const client = new CodexAppServerClient({
+    wire,
+    onBeforeTurnStart: async () => {
+      beforeTurnStart = true;
+    },
+    planThreadParams: async (request) => {
+      threadRequest = request;
+      return {
+        ...buildCodexAppServerThreadParams(request),
+        assertCurrent: async () => {
+          currentChecks++;
+        },
+      };
+    },
+    planTurnParams: async (request) => {
+      turnRequest = request;
+      return {
+        ...buildCodexAppServerTurnParams(request),
+        assertCurrent: async () => {
+          currentChecks++;
+          turnAssertSawBefore = beforeTurnStart;
+        },
+      };
+    },
+  });
+
+  await collect(
+    client.run({
+      prompt: frozenPrompt('secret prompt'),
+      thread: { kind: 'start' },
+      model: 'secret-model',
+      cwd: '/secret/workspace',
+      sandbox: 'read-only',
+      approvalPolicy: 'never',
+      developerInstructions: 'L0 SECRET',
+      config: { mcp_servers: { secret: { command: '/secret/mcp' } } },
+      approvalsReviewer: 'auto_review',
+    }),
+  );
+
+  const threadWrite = wire.writes.find((message) => message.method === 'thread/start');
+  const turnWrite = wire.writes.find((message) => message.method === 'turn/start');
+  assert.equal(threadWrite.params.model, 'secret-model');
+  assert.equal(threadWrite.params.cwd, '/secret/workspace');
+  assert.equal(threadWrite.params.developerInstructions, 'L0 SECRET');
+  assert.deepEqual(threadWrite.params.config, { mcp_servers: { secret: { command: '/secret/mcp' } } });
+  assert.deepEqual(turnWrite.params.input, [{ type: 'text', text: 'secret prompt' }]);
+  assert.ok(currentChecks >= 2, 'thread and turn plans both recheck generation');
+  assert.equal(turnAssertSawBefore, true, 'turn recheck happens after onBeforeTurnStart');
+  assert.ok(!JSON.stringify(threadRequest).includes('secret-model'));
+  assert.ok(!JSON.stringify(threadRequest).includes('L0 SECRET'));
+  assert.ok(!JSON.stringify(turnRequest).includes('secret prompt'));
+});
+
+test('resume uses the package thread plan and keeps startParams thread-free', async () => {
+  const wire = new ProtocolWire();
+  const write = wire.write.bind(wire);
+  wire.write = async (message) => {
+    await write(message);
+    if (message.method === 'turn/start') {
+      wire.inbox.push({
+        method: 'turn/completed',
+        params: { threadId: 'thread-1', turn: { id: 'turn-1', status: 'completed' } },
+      });
+    }
+  };
+  let threadRequest;
+  const client = new CodexAppServerClient({
+    wire,
+    planThreadParams: async (request) => {
+      threadRequest = request;
+      return buildCodexAppServerThreadParams(request);
+    },
+    planTurnParams: async (request) => buildCodexAppServerTurnParams(request),
+  });
+
+  await collect(
+    client.run({
+      prompt: frozenPrompt('resume prompt'),
+      thread: { kind: 'resume', threadId: 'thread-1' },
+      model: 'gpt-test',
+      sandbox: 'workspace-write',
+    }),
+  );
+
+  const resume = wire.writes.find((message) => message.method === 'thread/resume');
+  assert.equal(resume.params.threadId, 'thread-1');
+  assert.equal(resume.params.excludeTurns, true);
+  assert.equal(resume.params.model, 'gpt-test');
+  assert.equal(threadRequest.kind, 'resume');
+});
+
+test('a package replacement between thread and turn exits before turn/start', async () => {
+  let current = 'A';
+  const wire = new ProtocolWire();
+  const write = wire.write.bind(wire);
+  wire.write = async (message) => {
+    await write(message);
+    if (message.method === 'thread/start') current = 'B';
+  };
+  const client = new CodexAppServerClient({
+    wire,
+    planThreadParams: async (request) => ({
+      ...buildCodexAppServerThreadParams(request),
+      assertCurrent: async () => {
+        if (current !== 'A') throw new Error('stale_generation');
+      },
+    }),
+    planTurnParams: async (request) => ({
+      ...buildCodexAppServerTurnParams(request),
+      assertCurrent: async () => {
+        if (current !== 'B') throw new Error('unexpected_generation');
+      },
+    }),
+  });
+
+  await assert.rejects(
+    collect(client.run({ prompt: frozenPrompt('generation'), thread: { kind: 'start' } })),
+    /stale_generation/,
+  );
+  assert.equal(wire.writes.filter((message) => message.method === 'turn/start').length, 0);
+});
+
+test('resume fallback rechecks generation at the actual thread/start send point', async () => {
+  let current = 'A';
+  const wire = new ProtocolWire();
+  const write = wire.write.bind(wire);
+  wire.write = async (message) => {
+    if (message.method === 'thread/resume') {
+      wire.writes.push(message);
+      current = 'B';
+      wire.inbox.push({ id: message.id, error: { code: -32600, message: 'no rollout found for thread id thread-1' } });
+      return;
+    }
+    await write(message);
+  };
+  const client = new CodexAppServerClient({
+    wire,
+    planThreadParams: async (request) => ({
+      ...buildCodexAppServerThreadParams(request),
+      assertCurrent: async () => {
+        if (current !== 'A') throw new Error('stale_generation');
+      },
+    }),
+  });
+
+  await assert.rejects(
+    collect(client.run({ prompt: frozenPrompt('fallback'), thread: { kind: 'resume', threadId: 'thread-1' } })),
+    /stale_generation/,
+  );
+  assert.equal(wire.writes.filter((message) => message.method === 'thread/start').length, 0);
+});
+
+test('boundedWatcher keeps the Host-only path and still starts its production turn', async () => {
+  const wire = new ProtocolWire();
+  const write = wire.write.bind(wire);
+  wire.write = async (message) => {
+    if (message.method === 'config/read') {
+      wire.writes.push(message);
+      wire.inbox.push({ id: message.id, result: { config: {} } });
+      return;
+    }
+    if (message.method === 'account/read') {
+      wire.writes.push(message);
+      wire.inbox.push({ id: message.id, result: { account: {} } });
+      return;
+    }
+    await write(message);
+    if (message.method === 'turn/start') {
+      wire.inbox.push({
+        method: 'turn/completed',
+        params: { threadId: 'thread-1', turn: { id: 'turn-1', status: 'completed' } },
+      });
+    }
+  };
+  let plannerCalls = 0;
+  const client = new CodexAppServerClient({
+    wire,
+    planThreadParams: async () => {
+      plannerCalls++;
+      throw new Error('watcher must not use the package thread planner');
+    },
+    planTurnParams: async () => {
+      plannerCalls++;
+      throw new Error('watcher must not use the package turn planner');
+    },
+  });
+
+  await collect(
+    client.run({
+      prompt: frozenPrompt(''),
+      thread: { kind: 'start' },
+      boundedWatcher: {
+        instructions: 'read-only watcher',
+        tools: [],
+        async configureProvider() {
+          return {};
+        },
+        async beforeTurn() {
+          return true;
+        },
+        async accepted() {},
+        async completed() {},
+        async callTool() {
+          throw new Error('fixture does not call tools');
+        },
+      },
+    }),
+  );
+
+  const threadStart = wire.writes.find((message) => message.method === 'thread/start');
+  assert.equal(plannerCalls, 0);
+  assert.equal(wire.writes.filter((message) => message.method === 'thread/start').length, 1);
+  assert.equal(wire.writes.filter((message) => message.method === 'turn/start').length, 1);
+  assert.equal(threadStart.params.baseInstructions, 'read-only watcher');
+  assert.equal(threadStart.params.developerInstructions, '');
+  assert.deepEqual(threadStart.params.dynamicTools, []);
+});
+
+for (const projectionCase of [
+  { name: 'omits turn/completed', ignored: [] },
+  { name: 'ignores turn/completed', ignored: ['turn/completed'] },
+]) {
+  test(`native turn/completed keeps Host terminal and usage when the package table ${projectionCase.name}`, async () => {
+    const wire = new ProtocolWire();
+    const write = wire.write.bind(wire);
+    wire.write = async (message) => {
+      await write(message);
+      if (message.method !== 'turn/start') return;
+      wire.inbox.push({
+        method: 'thread/tokenUsage/updated',
+        params: {
+          threadId: 'thread-1',
+          turnId: 'turn-1',
+          tokenUsage: { last: { inputTokens: 7, outputTokens: 3 } },
+        },
+      });
+      wire.inbox.push({
+        method: 'turn/completed',
+        params: { threadId: 'thread-1', turn: { id: 'turn-1', status: 'completed' } },
+      });
+    };
+    const client = new CodexAppServerClient({
+      wire,
+      notificationProjection: {
+        methods: new Set(['turn/started']),
+        ignoredMethods: new Set(projectionCase.ignored),
+        aliases: new Map(),
+      },
+    });
+
+    const messages = await collect(client.run({ prompt: frozenPrompt('terminal'), thread: { kind: 'start' } }));
+    const terminal = messages.find((message) => message.type === 'turn.completed' && message.usage);
+    assert.ok(terminal, 'Host must emit a terminal with usage despite the package table');
+    assert.equal(terminal.usage.input_tokens, 7);
+    assert.equal(terminal.usage.output_tokens, 3);
+  });
+}
+
+test('the native failed terminal is shown even if the package omits it', async () => {
+  const wire = new ProtocolWire();
+  const write = wire.write.bind(wire);
+  wire.write = async (message) => {
+    await write(message);
+    if (message.method === 'turn/start')
+      wire.inbox.push({
+        method: 'turn/completed',
+        params: {
+          threadId: 'thread-1',
+          turn: { id: 'turn-1', status: 'failed', error: { message: 'native failure' } },
+        },
+      });
+  };
+  const client = new CodexAppServerClient({
+    wire,
+    notificationProjection: { methods: new Set(), ignoredMethods: new Set(), aliases: new Map() },
+  });
+  const messages = [];
+  await assert.rejects(async () => {
+    for await (const message of client.run({ prompt: frozenPrompt('terminal'), thread: { kind: 'start' } }))
+      messages.push(message);
+  }, /native failure/);
+  assert.ok(messages.some((message) => message.type === 'turn.failed' && message.turn_id === 'turn-1'));
+});
+
+test('a retired notification table cannot start a thread under a new activation', async () => {
+  const wire = new ProtocolWire();
+  const write = wire.write.bind(wire);
+  wire.write = async (message) => {
+    await write(message);
+    if (message.method === 'turn/start')
+      wire.inbox.push({
+        method: 'turn/completed',
+        params: { threadId: 'thread-1', turn: { id: 'turn-1', status: 'completed' } },
+      });
+  };
+  const client = new CodexAppServerClient({
+    wire,
+    notificationProjection: {
+      methods: new Set(['turn/completed']),
+      ignoredMethods: new Set(),
+      aliases: new Map(),
+      assertCurrent: async () => {
+        throw new Error('session_implementation_unavailable');
+      },
+    },
+  });
+  await assert.rejects(
+    () => collect(client.run({ prompt: frozenPrompt('new generation'), thread: { kind: 'start' } })),
+    /session_implementation_unavailable/,
+  );
+  assert.equal(
+    wire.writes.some((message) => ['thread/start', 'turn/start'].includes(message.method)),
+    false,
+  );
+});
+
+test('display alias maps to an existing kind without becoming terminal evidence', async () => {
+  const wire = new ProtocolWire();
+  const write = wire.write.bind(wire);
+  wire.write = async (message) => {
+    await write(message);
+    if (message.method !== 'turn/start') return;
+    wire.inbox.push({
+      method: 'fixture/agent_message_delta',
+      params: { threadId: 'thread-1', itemId: 'item-unbound', delta: 'unbound alias' },
+    });
+    wire.inbox.push({
+      method: 'fixture/agent_message_delta',
+      params: { threadId: 'thread-1', turnId: 'turn-1', itemId: 'item-1', delta: 'aliased' },
+    });
+    wire.inbox.push({
+      method: 'turn/completed',
+      params: { threadId: 'thread-1', turn: { id: 'turn-1', status: 'completed' } },
+    });
+  };
+  const client = new CodexAppServerClient({
+    wire,
+    notificationProjection: {
+      methods: new Set(['item/agentMessage/delta', 'turn/completed']),
+      ignoredMethods: new Set(),
+      aliases: new Map([['fixture/agent_message_delta', 'item/agentMessage/delta']]),
+    },
+  });
+
+  const messages = await collect(client.run({ prompt: frozenPrompt('alias'), thread: { kind: 'start' } }));
+  const aliases = messages.filter((message) => message.type === 'item.agent_message.delta');
+  assert.equal(aliases.length, 1);
+  const [alias] = aliases;
+  assert.equal(alias.delta, 'aliased');
+  assert.equal(alias.item_id, 'item-1');
+});
+
+test('foreign thread turn/completed is not projected as a terminal', async () => {
+  const wire = new ProtocolWire();
+  const write = wire.write.bind(wire);
+  wire.write = async (message) => {
+    await write(message);
+    if (message.method !== 'turn/start') return;
+    wire.inbox.push({
+      method: 'turn/completed',
+      params: { threadId: 'other-thread', turn: { id: 'turn-1', status: 'completed' } },
+    });
+    wire.inbox.push({
+      method: 'turn/completed',
+      params: { threadId: 'thread-1', turn: { id: 'turn-1', status: 'completed' } },
+    });
+  };
+  const client = new CodexAppServerClient({
+    wire,
+    notificationProjection: {
+      methods: new Set(['turn/completed']),
+      ignoredMethods: new Set(),
+      aliases: new Map(),
+    },
+  });
+
+  const messages = await collect(client.run({ prompt: frozenPrompt('foreign'), thread: { kind: 'start' } }));
+  assert.equal(
+    messages.some((message) => message.type === 'turn.completed' && message.thread_id === 'other-thread'),
+    false,
+  );
+  assert.ok(messages.some((message) => message.type === 'turn.completed' && message.thread_id === 'thread-1'));
+});
 
 test('app-server rejects unpaired surrogates before sending any malformed request', async () => {
   for (const overrides of [

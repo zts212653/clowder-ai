@@ -1,10 +1,10 @@
 /**
  * An existing runtime catalog keeps the voice config it was seeded with; template fixes do not
  * reach it. The siamese Bennett clip was seeded with a transcript the clip does not say, so
- * catalog bootstrap repairs exactly that known pair and leaves any other text alone.
+ * the catalog projection repairs exactly that known pair and leaves any other text alone.
  *
  * The first two tests follow what a runtime restart does: the API startup entry
- * bootstrapDefaultCatCatalog() (src/index.ts) runs catalog bootstrap, then voices are read
+ * loadRuntimeCatConfig() (src/index.ts) projects the catalog, then voices are read
  * through the normal path getCatVoice -> loadCatConfig (template merged with the catalog).
  */
 
@@ -18,7 +18,7 @@ const { bootstrapCatCatalog, resolveCatCatalogPath, writeCatCatalog } = await im
   '../dist/config/cat-catalog-store.js'
 );
 const { clearVoiceCache, getCatVoice } = await import('../dist/config/cat-voices.js');
-const { bootstrapDefaultCatCatalog } = await import('../dist/config/cat-config-loader.js');
+const { loadRuntimeCatConfig } = await import('../dist/config/cat-config-loader.js');
 
 const REPO_TEMPLATE = new URL('../../../cat-template.json', import.meta.url);
 const CLIP = 'genshin/班尼特/vo_bennett_dialog_greetingNight.wav';
@@ -70,19 +70,19 @@ describe('runtime catalog repair of the known Bennett transcript mismatch', () =
     const { templatePath, catalogPath } = makeProjectWithCatalogText(WRONG);
     process.env.CAT_TEMPLATE_PATH = templatePath;
     clearVoiceCache();
-    assert.equal(getCatVoice('gemini').refText, WRONG, 'before restart the stale catalog is what gets read');
+    const before = readFileSync(catalogPath, 'utf8');
 
-    bootstrapDefaultCatCatalog();
+    loadRuntimeCatConfig();
     clearVoiceCache();
     assert.equal(getCatVoice('gemini').refText, RIGHT);
-    assert.equal(findClipVoice(JSON.parse(readFileSync(catalogPath, 'utf8'))).refText, RIGHT);
+    assert.equal(readFileSync(catalogPath, 'utf8'), before);
   });
 
   it('leaves a user-customized transcript for the same clip untouched', () => {
     const custom = '这是我自己重新录的一句话';
     const { templatePath, catalogPath } = makeProjectWithCatalogText(custom);
     process.env.CAT_TEMPLATE_PATH = templatePath;
-    bootstrapDefaultCatCatalog();
+    loadRuntimeCatConfig();
     clearVoiceCache();
 
     assert.equal(getCatVoice('gemini').refText, custom);

@@ -5,12 +5,12 @@ import { primeCoCreatorConfigCache } from '@/hooks/useCoCreatorConfig';
 import { apiFetch } from '@/utils/api-client';
 import {
   createNativeMember,
+  detectNativeMembers,
   type MemberSaveUpdate,
   pickMemberTemplate,
   readMemberClientSettings,
   readMemberRuntimeModels,
   readMemberSettings,
-  readNativeMembers,
   removeMember,
   runMemberProviderSetup,
   saveMember,
@@ -81,6 +81,15 @@ beforeEach(() => {
   rejectWrite = false;
   vi.mocked(apiFetch).mockImplementation(async (path, init) => {
     const url = String(path);
+    if (url === '/api/agent-access/v1/detect') return Response.json({ readiness: { state: 'ready' }, candidates: [] });
+    if (url === '/api/agent-access/v1/clients')
+      return Response.json({
+        clients: [
+          { id: 'openai', label: 'Codex' },
+          { id: 'google', label: 'Google / AGY Native' },
+          { id: 'acp', label: 'ACP Client' },
+        ],
+      });
     if (init?.method && init.method !== 'GET') {
       const body = JSON.parse(String(init.body));
       writes.push({ path: url, body });
@@ -94,7 +103,6 @@ beforeEach(() => {
     if (url === '/api/cats') return Response.json({ cats });
     if (url === '/api/cat-templates') return Response.json({ templates: [template] });
     if (url === '/api/config/session-strategy') return Response.json({ cats: [] });
-    if (url === '/api/cats/native-runtimes') return Response.json({ runtimes: [] });
     if (url === '/api/agent-providers') return Response.json({ libraries: [] });
     if (url === '/api/config')
       return Response.json({
@@ -152,9 +160,10 @@ it('projects actual strategy capability and native launch choices without turnin
           },
         ],
       });
-    if (path === '/api/cats/native-runtimes')
+    if (path === '/api/agent-access/v1/detect')
       return Response.json({
-        runtimes: [
+        readiness: { state: 'ready' },
+        candidates: [
           {
             id: 'dsh',
             label: 'DSH',
@@ -287,19 +296,20 @@ it('uses native readiness and preserves the original create body and idempotency
   ];
   let attempts = 0;
   vi.mocked(apiFetch).mockImplementation(async (path, init) => {
+    if (path === '/api/agent-access/v1/detect')
+      return Response.json({ readiness: { state: 'ready' }, candidates: runtimes });
     if (init?.method === 'POST') {
       attempts++;
       return attempts === 1
         ? Response.json({ error: 'reply uncertain' }, { status: 503 })
         : Response.json({ cat: { ...cats[0], id: 'native-codex' } });
     }
-    if (String(path).startsWith('/api/cats/native-runtimes')) return Response.json({ runtimes });
     if (path === '/api/accounts') return Response.json({ providers: profiles, projectPath: '/test/project' });
     if (path === '/api/cat-templates') return Response.json({ templates: [template] });
     if (path === '/api/cats') return Response.json({ cats: [] });
     throw new Error(String(path));
   });
-  const partners = await readNativeMembers('journey-member-settings', true);
+  const partners = (await detectNativeMembers('journey-member-settings', true)).candidates;
   expect(partners.find((partner) => partner.runtime.id === 'claude')).toMatchObject({
     selected: false,
     selectable: false,
@@ -309,8 +319,11 @@ it('uses native readiness and preserves the original create body and idempotency
   expect(partner.form.accountRef).toBe('');
   await expect(createNativeMember(partner, 'journey-member-settings')).rejects.toThrow('reply uncertain');
   expect(await createNativeMember(partner, 'journey-member-settings')).toMatchObject({ id: 'native-codex' });
-  const calls = vi.mocked(apiFetch).mock.calls.filter(([, init]) => init?.method === 'POST');
+  const calls = vi
+    .mocked(apiFetch)
+    .mock.calls.filter(([path, init]) => path === '/api/cats' && init?.method === 'POST');
   expect(calls[1]).toEqual(calls[0]);
+  expect(calls[1][2]).toEqual({ mutationTimeoutMs: 90_000 });
   expect(calls[1][1]?.headers).toMatchObject({
     'Idempotency-Key': `onboarding:journey-member-settings:cat:${partner.creationRequestKey}`,
   });
@@ -321,6 +334,37 @@ it('uses native readiness and preserves the original create body and idempotency
   });
   expect(JSON.parse(String(calls[1][1]?.body)).accountRef).toBeUndefined();
   expect(refreshCatsNow).toHaveBeenCalledOnce();
+});
+
+it('reads agent-access readiness and reports an unavailable detection route', async () => {
+  const readiness = { state: 'disabled' as const, action: 'enable' as const };
+  vi.mocked(apiFetch).mockImplementation(async (path, init) => {
+    if (path === '/api/agent-access/v1/detect' && init?.method === 'POST')
+      return Response.json({ readiness, candidates: [] });
+    throw new Error(String(path));
+  });
+  expect(await detectNativeMembers('journey', true)).toEqual({ readiness, candidates: [], partialFailures: [] });
+  expect(vi.mocked(apiFetch).mock.calls[0][0]).toBe('/api/agent-access/v1/detect');
+  expect(JSON.parse(String(vi.mocked(apiFetch).mock.calls[0][1]?.body))).toEqual({ refresh: true });
+
+  vi.mocked(apiFetch).mockImplementation(async (path) => {
+    if (path === '/api/agent-access/v1/detect') return Response.json({ error: 'missing' }, { status: 404 });
+    throw new Error(String(path));
+  });
+  expect(await detectNativeMembers('journey', false)).toEqual({
+    readiness: { state: 'failed', action: 'retry', reason: 'HTTP 404' },
+    candidates: [],
+    partialFailures: [],
+  });
+
+  vi.mocked(apiFetch).mockImplementation(async (path) => {
+    if (path === '/api/agent-access/v1/detect') return Response.json({ error: 'boom' }, { status: 500 });
+    throw new Error(String(path));
+  });
+  expect(await detectNativeMembers('journey', true)).toMatchObject({
+    readiness: { state: 'failed' },
+    candidates: [],
+  });
 });
 
 it('reads and saves only the library configuration key with the actual plugin lifecycle revision', async () => {
@@ -402,9 +446,10 @@ it('derives account options from real account families and exposes only actual c
 it('creates the probed AGY member with its chosen model and effort and the current project as a restricted workspace', async () => {
   const read = vi.mocked(apiFetch).getMockImplementation()!;
   vi.mocked(apiFetch).mockImplementation(async (path, init) =>
-    path === '/api/cats/native-runtimes'
+    path === '/api/agent-access/v1/detect'
       ? Response.json({
-          runtimes: [
+          readiness: { state: 'ready' },
+          candidates: [
             {
               id: 'agy-native',
               label: 'AGY Native',
@@ -420,7 +465,7 @@ it('creates the probed AGY member with its chosen model and effort and the curre
         ? Response.json({ cats: [] })
         : read(path, init),
   );
-  const partners = await readNativeMembers('journey', false),
+  const partners = (await detectNativeMembers('journey', false)).candidates,
     partner = partners[0];
   expect(partner.selectable).toBe(true);
   expect(partner.form.defaultModel).toBe('');
@@ -450,6 +495,46 @@ it('writes member changes with revision and account-derived service tier, withou
   writes = [];
   await expect(saveMember(form, cat, 'old')).rejects.toThrow('runtime.readError');
   expect(writes).toEqual([]);
+});
+
+it('preserves a declared ACP agentProvider in the member write payload', async () => {
+  const form = {
+    ...initialState(cats[0]),
+    catId: 'plugin-acp-member',
+    clientId: 'acp' as const,
+    carrier: 'acp' as const,
+    configurationSource: 'native_tool' as const,
+    acpAgentProvider: 'plugin:acme/agent',
+    acpCommand: 'plugin-agent',
+    acpStartupArgs: '',
+  };
+  await saveMember(form, null, undefined);
+  expect(writes.at(-1)?.body).toMatchObject({
+    catId: 'plugin-acp-member',
+    clientId: 'acp',
+    carrier: 'acp',
+    agentProvider: 'plugin:acme/agent',
+    acp: { command: 'plugin-agent', startupArgs: [] },
+  });
+});
+
+it('reads an old declared ACP binding and rebinds it to a new agentProvider', async () => {
+  const cat = {
+    ...cats[0],
+    clientId: 'acp' as const,
+    carrier: 'acp' as const,
+    agentProvider: 'plugin:old/agent',
+    acp: { agentProvider: 'plugin:old/agent', command: 'plugin-agent', startupArgs: [] },
+    configurationRevision: 'rev-old',
+  };
+  const form = initialState(cat);
+  expect(form.acpAgentProvider).toBe('plugin:old/agent');
+  form.acpAgentProvider = 'plugin:new/agent';
+  await saveMember(form, cat, 'rev-old');
+  expect(writes.at(-1)?.body).toMatchObject({
+    agentProvider: 'plugin:new/agent',
+    expectedRevision: 'rev-old',
+  });
 });
 
 it('does not advance the member revision when client settings fail, and does not rewrite the member for client-only changes', async () => {

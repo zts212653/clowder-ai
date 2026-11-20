@@ -4,6 +4,7 @@ import {
   normalizeThreadGoalObjective,
   readOutputMessageIdentity,
 } from '@cat-cafe/shared';
+import type { AgentAccessCodexExecOutput } from '@clowder-ai/agent-contract';
 import { isCodexSessionReplacementProvenance } from '../../runtime-session/CodexSessionReplacementProvenance.js';
 import type { AgentMessage } from '../../types.js';
 
@@ -245,6 +246,7 @@ function stripOwnTrailingTurnSignature(
 
 export interface CodexEventTransformOptions {
   approvalSurface?: CodexApprovalSurface;
+  execOutput?: AgentAccessCodexExecOutput;
 }
 
 /**
@@ -541,7 +543,8 @@ export function transformCodexEvent(
   }
 
   if (e.type === 'item.agent_message.delta') {
-    if (typeof e.item_id !== 'string' || typeof e.delta !== 'string' || e.delta.length === 0) return null;
+    const delta = e[options?.execOutput?.delta ?? 'delta'];
+    if (typeof e.item_id !== 'string' || typeof delta !== 'string' || delta.length === 0) return null;
     const firstChunk = !state?.streamedAgentMessageItemIds?.has(e.item_id);
     const hadPriorTextTurn = state?.hadPriorTextTurn === true;
     if (state) {
@@ -549,14 +552,14 @@ export function transformCodexEvent(
       state.agentMessageItemOrder ??= [];
       state.agentMessageTextByItemId ??= new Map();
       if (!state.agentMessageTextByItemId.has(e.item_id)) state.agentMessageItemOrder.push(e.item_id);
-      state.agentMessageTextByItemId.set(e.item_id, `${state.agentMessageTextByItemId.get(e.item_id) ?? ''}${e.delta}`);
+      state.agentMessageTextByItemId.set(e.item_id, `${state.agentMessageTextByItemId.get(e.item_id) ?? ''}${delta}`);
       state.streamedAgentMessageItemIds.add(e.item_id);
       state.hadPriorTextTurn = true;
     }
     return {
       type: 'text',
       catId,
-      content: `${firstChunk && hadPriorTextTurn ? '\n\n' : ''}${e.delta}`,
+      content: `${firstChunk && hadPriorTextTurn ? '\n\n' : ''}${delta}`,
       textMode: 'append',
       outputMessage: {
         ...codexOutputMessage(e, { id: e.item_id }, firstChunk && hadPriorTextTurn),
@@ -573,8 +576,12 @@ export function transformCodexEvent(
 
   if (item?.type === 'reasoning') {
     const occurredAt = Date.now();
-    const rawSummary = Array.isArray(item.summary)
-      ? item.summary
+    const parts = item[options?.execOutput?.reasoningParts ?? 'summary'];
+    const [primaryKey, secondaryKey] = options?.execOutput?.reasoningText ?? ['text', 'content'];
+    const primary = item[primaryKey];
+    const secondary = item[secondaryKey];
+    const rawSummary = Array.isArray(parts)
+      ? parts
           .map((part) =>
             typeof part === 'string'
               ? part
@@ -584,10 +591,10 @@ export function transformCodexEvent(
           )
           .filter(Boolean)
           .join('\n')
-      : typeof item.text === 'string'
-        ? item.text
-        : typeof item.content === 'string'
-          ? item.content
+      : typeof primary === 'string'
+        ? primary
+        : typeof secondary === 'string'
+          ? secondary
           : '';
     if (!rawSummary.trim()) return null;
     return {
@@ -600,11 +607,12 @@ export function transformCodexEvent(
 
   if (item?.type === 'agent_message') {
     const asyncQuestionMessages = buildCodexAsyncQuestionMessages(item, catId);
-    if (typeof item.text !== 'string' || item.text.trim().length === 0) {
+    const text = item[options?.execOutput?.message ?? 'text'];
+    if (typeof text !== 'string' || text.trim().length === 0) {
       return asyncQuestionMessages.length > 0 ? asyncQuestionMessages : null;
     }
     const stripped = stripOwnTrailingTurnSignature(
-      item.text,
+      text,
       state?.signatureIdentity,
       state?.signatureIdentityAliases,
       state?.canonicalSignature,
@@ -630,7 +638,7 @@ export function transformCodexEvent(
             timestamp: Date.now(),
           };
           const finalized = stripped.signature
-            ? withNativeSignatureRemoval(completion, item.text.slice(stripped.content.length))
+            ? withNativeSignatureRemoval(completion, text.slice(stripped.content.length))
             : completion;
           return asyncQuestionMessages.length > 0 ? [finalized, ...asyncQuestionMessages] : finalized;
         }

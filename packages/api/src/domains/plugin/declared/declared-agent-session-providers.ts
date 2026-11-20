@@ -1,5 +1,6 @@
 import { isDeepStrictEqual } from 'node:util';
 import type { CatId } from '@cat-cafe/shared';
+import type { AcpPoolRegistry } from '../../cats/services/agents/providers/acp/AcpServiceFactory.js';
 import { type SessionImplementationRegistry } from '../../cats/services/agents/session-contract/implementation-registry.js';
 import {
   AGENT_PROVIDER_DECLARATION_FILE,
@@ -48,7 +49,11 @@ export function declaredAgentSessionProviders(input: {
   services: ReadonlyMap<string, RegisteredSessionAgentService>;
   configuration?: Pick<PluginRuntimeConfigurationPort, 'readConfig'>;
   log?: { info(...args: unknown[]): void; warn(...args: unknown[]): void };
-  createProvider(declaration: AgentProviderDeclaration, ctx: { catId: CatId }): AgentSessionProvider;
+  poolDiagnostics?: Set<AcpPoolRegistry>;
+  createProvider(
+    declaration: AgentProviderDeclaration,
+    ctx: { catId: CatId; poolRegistry: AcpPoolRegistry },
+  ): AgentSessionProvider;
 }): AgentSessionProviderLifecycle {
   return {
     async activate(admission) {
@@ -96,6 +101,7 @@ export function declaredAgentSessionProviders(input: {
           packageRoot: located.rootDir,
           configuration: input.configuration ?? { readConfig: async () => undefined },
         });
+        const poolRegistry: AcpPoolRegistry = new Map();
         const registrations: ReturnType<typeof registerPluginAgentProvider>[] = [];
         const boundServices = () =>
           [...input.services.values()].filter((service) =>
@@ -109,7 +115,7 @@ export function declaredAgentSessionProviders(input: {
                 pluginId: admission.packageRecord.pluginId,
                 packageDigest: admission.packageRecord.packageDigest,
                 declaration,
-                createProvider: input.createProvider,
+                createProvider: (decl, ctx) => input.createProvider(decl, { ...ctx, poolRegistry }),
               }),
             );
           preparingServices = boundServices();
@@ -125,11 +131,16 @@ export function declaredAgentSessionProviders(input: {
           }
           throw error;
         }
+        input.poolDiagnostics?.add(poolRegistry);
         log('registered');
         return async () => {
           for (const registration of registrations) registration.unregister();
           log('unregistered');
-          await retireRegistrations(registrations, boundServices(), 'implementation_unregistered');
+          try {
+            await retireRegistrations(registrations, boundServices(), 'implementation_unregistered');
+          } finally {
+            input.poolDiagnostics?.delete(poolRegistry);
+          }
         };
       } catch (error) {
         log('rejected', String(error));

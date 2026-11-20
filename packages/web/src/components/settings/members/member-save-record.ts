@@ -7,6 +7,9 @@ import { type MemberDraft, rebaseMemberDraft } from './member-editor-state';
 import { readMemberResponse } from './member-save-extras';
 import { prepareNativeMember } from './prepare-native-member';
 
+// Member writes also reconcile routing and compile the member context.
+export const MEMBER_WRITE_TIMEOUT_MS = 90_000;
+
 /** Reconcile an uncertain S1 before another write; the create ID never changes implicitly. */
 export async function saveMemberRecord(input: {
   snapshot: MemberDraft;
@@ -77,11 +80,15 @@ export async function saveMemberRecord(input: {
   commit({ ...snapshot, form: finalForm, pendingWrite });
   let rejected = false;
   return trace.phase('member.write', () =>
-    apiFetch(baseline ? `/api/cats/${baseline.id}` : '/api/cats', {
-      method: baseline ? 'PATCH' : 'POST',
-      headers: { 'Content-Type': 'application/json', ...trace.headers() },
-      body: JSON.stringify(payload),
-    })
+    apiFetch(
+      baseline ? `/api/cats/${baseline.id}` : '/api/cats',
+      {
+        method: baseline ? 'PATCH' : 'POST',
+        headers: { 'Content-Type': 'application/json', ...trace.headers() },
+        body: JSON.stringify(payload),
+      },
+      { mutationTimeoutMs: MEMBER_WRITE_TIMEOUT_MS },
+    )
       .then((response) => {
         rejected = response.status >= 400 && response.status < 500 && response.status !== 408;
         if (response.status === 409 || response.status === 428) input.conflict();

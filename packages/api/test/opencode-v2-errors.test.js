@@ -148,7 +148,10 @@ for (const version of ['v1', 'v2']) {
         }),
       ]);
       assert.ok(child && (child.exitCode !== null || child.signalCode !== null));
-      assert.ok(invokedArgs.includes('--pure'), 'no-tool permission boundary must stay intact');
+      // The no-tool boundary is the permission channel, not `--pure`: this call passes
+      // no probe result, so `--pure` support is unknown and correctly omitted, while
+      // the deny-all permission env just below is what actually holds the boundary.
+      assert.equal(invokedArgs.includes('--pure'), false);
       assert.equal(invokedArgs[invokedArgs.indexOf('-m') + 1], 'fixture/unchanged');
       assert.equal(JSON.parse(invokedEnv.OPENCODE_PERMISSION)['*'], 'deny');
       assert.equal(messages.at(-1)?.textMode, 'replace');

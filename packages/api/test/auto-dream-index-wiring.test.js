@@ -60,7 +60,7 @@ describe('F255 production bootstrap wiring', () => {
 
   it('populates CatRegistry before F255 restores persisted cat-life projections', () => {
     const templateResolution = source.indexOf('const templatePath = resolveRuntimeCatTemplatePath();');
-    const catalogBootstrap = source.indexOf('const catConfig = bootstrapDefaultCatCatalog(templatePath);');
+    const catalogBootstrap = source.indexOf('const catConfig = loadRuntimeCatConfig(templatePath);');
     const registryPopulation = source.indexOf('registerCatalogSnapshot(');
     const autoDreamBootstrap = source.indexOf('await bootstrapAutoDream({');
 

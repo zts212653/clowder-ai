@@ -48,7 +48,7 @@ test('the exact frozen Dot delivery archive passes admission and installs offlin
       encoding: 'utf8',
       env: { ...process.env, npm_config_cache: cache },
       maxBuffer: 16 * 1024 * 1024,
-      timeout: 60_000,
+      timeout: process.platform === 'win32' ? 120_000 : 60_000,
       killSignal: 'SIGKILL',
     },
   );
