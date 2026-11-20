@@ -77,6 +77,13 @@
 .skel.prev { aspect-ratio: 16 / 9; }
 .skel.line { height: 10px; border-radius: var(--r-xs); margin: var(--sp-xs) 0; }
 .skel.short { width: 60%; }
+/* 数据读取中（三点轮流起伏）：读取的是数据而不是容器骨架；共用 --loop 节拍，减少动态效果时只停位移 */
+.load-dots { display: inline-flex; align-items: center; justify-content: center; gap: var(--sp-xs); min-height: var(--ctl-xs); color: var(--fg-faint); }
+.load-dots > i { width: var(--dot); height: var(--dot); border-radius: 50%; background: currentColor; animation: mo-dot var(--loop) ease-in-out infinite backwards; }
+.load-dots > i:nth-child(2) { animation-delay: calc(var(--loop) * -.4); }
+.load-dots > i:nth-child(3) { animation-delay: calc(var(--loop) * -.3); }
+:root[data-motion="reduce"] .load-dots { --dot-lift: 0px; }
+.units-held { display: flex; justify-content: center; padding: var(--sp-s) 0; }
 /* 背景铺满窗口：图在 .app 上；窄栏、列表半透明；主区盖一层页面底色，透明度由设置决定 */
 /* 有背景图时（玻璃面盖在图上）：次要、弱、禁用三级文字换成对比更高的一档，消息里的内嵌面换成更实一点的玻璃，
    保证最坏的图区上次要文字 ≥ 4.5、弱文字 ≥ 3 */

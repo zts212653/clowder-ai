@@ -169,7 +169,8 @@ PDL_COMPONENTS.v2InlineAction = function (p, sc, root) { return '<button class="
 PDL_COMPONENTS.v2DotSeparator = function () { return '<span class="flex-none" style="opacity:.6">·</span>'; };
 /* 一条消息带卡片（搜索答案、提议、摘要……）时用它自己的节点模板画卡片；其余消息走统一的消息模板 */
 PDL_COMPONENTS.v2Stream = function (p, sc, root) {
-  return '<div data-stream="chat" data-own="stream">' + unitsHtml('stream:chat', pvList(p.from, sc, root), streamUnitKey, function (it, r) { const t=pdlTyped(p.slot||'chat.node',it.kind);if(p.item&&!(it.card&&t))return PDL_COMPONENTS.v2Message(p.item,it,r);return t?v2Node(t,it,r):''; }, root) + '</div>';
+  const id = p.id || 'chat';
+  return '<div data-stream="' + h(id) + '" data-own="stream">' + unitsHtml('stream:' + id, pvList(p.from, sc, root), streamUnitKey, function (it, r) { const t=pdlTyped(p.slot||'chat.node',it.kind);if(p.item&&!(it.card&&t))return PDL_COMPONENTS.v2Message(p.item,it,r);return t?v2Node(t,it,r):''; }, root) + '</div>';
 };
 PDL_COMPONENTS.v2Progress = function (p, sc, root) {
   const xs = pvList(p.from, sc, root);

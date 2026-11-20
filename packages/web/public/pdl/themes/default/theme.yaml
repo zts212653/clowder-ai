@@ -21295,31 +21295,33 @@ pdl:
           blocks:
             - type: text
               variant: meta
-              text:
-                t: mediaReview.lightbox.sub
-                args:
-                  - $.author
-                  - $.version
-                  - of: $.at
-                    fmt: at
-                  - of: $.many
-                    map:
-                      "true":
-                        of:
-                          - 0
-                          - 1
-                          - 2
-                          - 3
-                        item:
-                          of: "@"
-                          map:
-                            "0": " · "
-                            "1": $.index
-                            "2": " / "
-                            "3": $.total
-                        sep: ""
-                      "false": ""
-                      _: $.many
+              parts:
+                sep: " · "
+                parts:
+                  - text: $.author
+                    when: $.author
+                  - text:
+                      t: films.version
+                      args:
+                        - $.version
+                    when: $.version
+                  - text:
+                      of: $.at
+                      fmt: at
+                    when: $.at
+                  - text:
+                      of:
+                        - 0
+                        - 1
+                        - 2
+                      item:
+                        of: "@"
+                        map:
+                          "0": $.index
+                          "1": " / "
+                          "2": $.total
+                      sep: ""
+                    when: $.many
               when:
                 of: $.target.kind
                 map:
